@@ -1,4 +1,7 @@
 // US-007 acceptance tests (AT-US-007-01..05) against the real createApp with stub routers; no database needed.
+import type { AddressInfo } from 'node:net';
+import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
+
 import { describe, expect, it } from '@jest/globals';
 import { AppError } from '@platform/shared';
 import express, { type Express } from 'express';
@@ -26,12 +29,15 @@ interface Harness {
   readonly logged: LoggedError[];
   /** Per request: whether the audit-capture seam would record the response as a mutation. */
   readonly auditable: boolean[];
+  /** Bodies the echo handler received (proves a refused request never reached it). */
+  readonly echoed: unknown[];
   setThrown(value: unknown): void;
 }
 
 function harness(): Harness {
   const logged: LoggedError[] = [];
   const auditable: boolean[] = [];
+  const echoed: unknown[] = [];
   let thrown: unknown;
   const logger: AppLogger = {
     info: () => undefined,
@@ -56,12 +62,21 @@ function harness(): Harness {
     res.json({ id: req.params['id'] });
   });
   widgets.post('/echo', (req, res) => {
+    echoed.push(req.body);
     res.status(201).json({ body: req.body as unknown, correlationId: currentRequestContext()?.correlationId });
   });
   widgets.get('/boom', () => {
     throw new Error('boom at /srv/app/dist/modules/widgets/service.js');
   });
   widgets.get('/throws', () => rejectWith(thrown));
+  widgets.get('/download', (_req, res) => {
+    res.set({ ETag: '"v1"', 'Last-Modified': 'Wed, 11 Nov 2026 10:00:00 GMT', 'Cache-Control': 'public, max-age=3600' });
+    res.set({ 'Content-Disposition': 'attachment; filename="label.pdf"', 'Content-Language': 'en' });
+    throw new AppError('NOT_FOUND');
+  });
+  widgets.get('/unserialisable', () => {
+    throw new AppError('VALIDATION_ERROR', { errors: [{ pointer: '/body/a', code: 'X', message: 10n as unknown as string }] });
+  });
   widgets.get('/private', () => {
     throw new AppError('AUTH_REQUIRED');
   });
@@ -71,6 +86,7 @@ function harness(): Harness {
     app,
     logged,
     auditable,
+    echoed,
     setThrown: (value) => {
       thrown = value;
     },
@@ -91,6 +107,8 @@ function expectProblem(res: TestResponse, status: number, code: string): Record<
   expect(body).toMatchObject({ status, code, type: `https://docs.platform.invalid/problems/${code}` });
   expect(body['correlation_id']).toMatch(CORRELATION_ID_PATTERN);
   expect(res.headers['x-correlation-id']).toBe(body['correlation_id']);
+  // PR-0009 m4: a problem document is never stored by a cache.
+  expect(res.headers['cache-control']).toBe('no-store');
   return body;
 }
 
@@ -275,5 +293,115 @@ describe('AT-US-007-05: error response is not audited as a mutation', () => {
     expect((await request(app).post('/api/v1/echo').send({ a: 1 })).status).toBe(201);
     expectProblem(await request(app).post('/api/v1/unknown').send({ a: 1 }), 404, 'NOT_FOUND');
     expect(auditable).toEqual([true, false]);
+  });
+});
+
+describe('[PR-0009 m4, PR9-SEC-07] problem responses are not cacheable and never fall back to HTML', () => {
+  it('drops representation headers a handler set before throwing and sends Cache-Control: no-store', async () => {
+    const { app } = harness();
+    const res = await request(app).get('/api/v1/download');
+    expectProblem(res, 404, 'NOT_FOUND');
+    for (const header of ['last-modified', 'content-disposition', 'content-language']) expect(res.headers[header]).toBeUndefined();
+    // Express may add its own weak ETag of the problem body; the handler's representation ETag is gone.
+    expect(res.headers['etag']).not.toBe('"v1"');
+  });
+
+  it('a failure while building the problem (unserialisable errors entry) still answers a generic 500 problem+json', async () => {
+    const { app } = harness();
+    const res = await request(app).get('/api/v1/unserialisable');
+    const body = expectProblem(res, 500, 'INTERNAL_ERROR');
+    expect(body['detail']).toBe(GENERIC_SERVER_DETAIL);
+    expect(body['instance']).toBe('/api/v1/unserialisable');
+    expect(res.text).not.toMatch(/<html|BigInt|TypeError| at /u);
+  });
+});
+
+describe('[PR-0009 m1] corrupt compressed bodies are client errors', () => {
+  /** Sends raw bytes over a real listener (superagent would JSON-serialise a Buffer sent as application/json). */
+  async function postRaw(app: Express, headers: Record<string, string>, body: Buffer) {
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const response = await fetch(`http://127.0.0.1:${String(port)}/api/v1/echo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body,
+        signal: AbortSignal.timeout(5_000),
+      });
+      const text = await response.text();
+      return { status: response.status, headers: Object.fromEntries(response.headers), text, body: JSON.parse(text) as unknown };
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  const json = Buffer.from('{"a":1}');
+
+  it.each([
+    ['gzip', gzipSync],
+    ['deflate', deflateSync],
+    ['br', brotliCompressSync],
+  ] as const)('a corrupt %s body answers 400 MALFORMED_REQUEST, nothing is logged and no handler runs', async (encoding, compress) => {
+    const { app, echoed, logged } = harness();
+    const valid = compress(json);
+    const corrupt = Buffer.concat([valid.subarray(0, 4), Buffer.from('corrupted stream bytes'), valid.subarray(4)]);
+    const res = await postRaw(app, { 'Content-Encoding': encoding }, corrupt);
+    expectProblem(res as unknown as TestResponse, 400, 'MALFORMED_REQUEST');
+    expect(echoed).toEqual([]);
+    expect(logged).toEqual([]);
+  });
+
+  it.each([
+    ['gzip', gzipSync],
+    ['deflate', deflateSync],
+    ['br', brotliCompressSync],
+  ] as const)('a valid %s body is parsed', async (encoding, compress) => {
+    const { app } = harness();
+    const res = await postRaw(app, { 'Content-Encoding': encoding }, compress(json));
+    expect(res.status).toBe(201);
+    expect((res.body as { body: unknown }).body).toEqual({ a: 1 });
+  });
+});
+
+describe('[PR9-SEC-01] JSON bodies are UTF-8 only', () => {
+  // Raw UTF-7 bytes contain neither "role" nor "<script"; decoded they add both (security review probe).
+  const utf7 = '{"a":"x+ACI-,+ACI-role+ACI-:+ACI-admin+ACI-,+ACI-n+ACI-:+ACI-+ADw-script+AD4-"}';
+
+  it('a UTF-7 body that smuggles keys and markup answers 415 and the handler never runs', async () => {
+    const { app, echoed } = harness();
+    const res = await request(app).post('/api/v1/echo').set('Content-Type', 'application/json; charset=utf-7').send(utf7);
+    expectProblem(res, 415, 'UNSUPPORTED_MEDIA_TYPE');
+    expect(echoed).toEqual([]);
+  });
+
+  it.each([
+    'application/json; charset=utf-16le',
+    'application/json; charset=UTF-16',
+    'application/json; charset=utf-32',
+    'application/json; charset="utf-7"',
+    'application/json; charset=utf-8; charset=utf-7',
+    'application/json; charset',
+    'application/json; charset=utf-8;;=x',
+    'application/json; charset="utf-8',
+  ])('refuses Content-Type %s with 415 before reading', async (contentType) => {
+    const { app, echoed } = harness();
+    const res = await request(app).post('/api/v1/echo').set('Content-Type', contentType).send('{"a":1}');
+    expectProblem(res, 415, 'UNSUPPORTED_MEDIA_TYPE');
+    expect(echoed).toEqual([]);
+  });
+
+  it.each([
+    'application/json',
+    'application/json; charset=utf-8',
+    'application/json;charset=UTF-8',
+    'application/json; charset="utf-8"',
+    'application/merge-patch+json; charset=utf-8',
+    'application/json; foo=bar',
+  ])('accepts Content-Type %s', async (contentType) => {
+    const { app, echoed } = harness();
+    const res = await request(app).post('/api/v1/echo').set('Content-Type', contentType).send('{"a":1}');
+    expect(res.status).toBe(201);
+    expect(echoed).toEqual([{ a: 1 }]);
   });
 });

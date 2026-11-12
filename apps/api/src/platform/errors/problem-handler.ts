@@ -10,7 +10,7 @@ import type { ErrorRequestHandler, NextFunction, Request, Response } from 'expre
 import { requestContextOf } from '../context/request-context.js';
 import { classifyThrown, thrownClassName, type Classified } from './classify.js';
 import { markErrorResponse } from './error-response.js';
-import { buildProblem, PROBLEM_CONTENT_TYPE } from './problem.js';
+import { buildProblem, DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanceOf, PROBLEM_CONTENT_TYPE } from './problem.js';
 
 /** Scalar log fields chosen by code (CLAUDE.md §9); structurally compatible with platform/runtime RuntimeLog. */
 export type ErrorLogFields = Readonly<Record<string, string | number | boolean>>;
@@ -42,42 +42,84 @@ function codeOf(classified: Classified): ErrorCode {
   }
 }
 
+/**
+ * Representation headers a handler may have set before it threw; they describe the intended response, not the
+ * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`.
+ */
+export const DROPPED_ON_PROBLEM = ['ETag', 'Last-Modified', 'Content-Disposition', 'Content-Language'] as const;
+
+/** Pre-built 500 body for when building the problem itself failed (PR9-SEC-07): never HTML, never a stack. */
+function fallbackProblemBody(correlationId: string, url: string): string {
+  return JSON.stringify({
+    type: `${DEFAULT_PROBLEM_TYPE_BASE}INTERNAL_ERROR`,
+    title: 'Internal server error',
+    status: 500,
+    detail: GENERIC_SERVER_DETAIL,
+    instance: instanceOf(url),
+    code: 'INTERNAL_ERROR',
+    correlation_id: correlationId,
+  });
+}
+
+function sendProblem(res: Response, status: number, body: string): void {
+  for (const header of DROPPED_ON_PROBLEM) res.removeHeader(header);
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(status).type(PROBLEM_CONTENT_TYPE).send(body);
+}
+
 export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHandler {
   return (thrown: unknown, req: Request, res: Response, next: NextFunction): void => {
     const correlationId = requestContextOf(res)?.correlationId ?? (options.fallbackCorrelationId ?? randomUUID)();
-    const classified = classifyThrown(thrown);
-    const code = codeOf(classified);
-    const appError = classified.kind === 'app' ? classified.error : undefined;
-    const problem = buildProblem({
-      code,
-      correlationId,
-      url: req.originalUrl,
-      ...(appError === undefined ? {} : { detail: appError.detail, errors: appError.errors }),
-      ...(options.typeBase === undefined ? {} : { typeBase: options.typeBase }),
-    });
+    try {
+      const classified = classifyThrown(thrown);
+      const code = codeOf(classified);
+      const appError = classified.kind === 'app' ? classified.error : undefined;
+      const problem = buildProblem({
+        code,
+        correlationId,
+        url: req.originalUrl,
+        ...(appError === undefined ? {} : { detail: appError.detail, errors: appError.errors }),
+        ...(options.typeBase === undefined ? {} : { typeBase: options.typeBase }),
+      });
 
-    if (problem.status >= 500 || res.headersSent) {
-      options.logger.error(
-        'http.request_failed',
-        {
-          correlation_id: correlationId,
-          code,
-          status: problem.status,
-          method: req.method,
-          error_class: thrownClassName(thrown),
-          headers_sent: res.headersSent,
-        },
-        thrown,
-      );
-    }
-    if (res.headersSent) {
-      // A partial response cannot become a problem document: Express's final handler aborts the connection. It gets
-      // a code-only AppError, never the thrown value, so its own stderr line cannot carry the original message.
-      next(appError ?? new AppError('INTERNAL_ERROR'));
-      return;
-    }
+      if (problem.status >= 500 || res.headersSent) {
+        options.logger.error(
+          'http.request_failed',
+          {
+            correlation_id: correlationId,
+            code,
+            status: problem.status,
+            method: req.method,
+            error_class: thrownClassName(thrown),
+            headers_sent: res.headersSent,
+          },
+          thrown,
+        );
+      }
+      if (res.headersSent) {
+        // A partial response cannot become a problem document: Express's final handler aborts the connection. It gets
+        // a code-only AppError, never the thrown value, so its own stderr line cannot carry the original message.
+        next(appError ?? new AppError('INTERNAL_ERROR'));
+        return;
+      }
 
-    markErrorResponse(res, { code, status: problem.status });
-    res.status(problem.status).type(PROBLEM_CONTENT_TYPE).send(JSON.stringify(problem));
+      const body = JSON.stringify(problem);
+      markErrorResponse(res, { code, status: problem.status });
+      sendProblem(res, problem.status, body);
+    } catch {
+      // PR9-SEC-07: a failure inside the handler (an unserialisable `errors` entry, a hostile value) must not reach
+      // Express's final handler, which answers HTML with a stack outside NODE_ENV=production.
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      markErrorResponse(res, { code: 'INTERNAL_ERROR', status: 500 });
+      try {
+        options.logger.error('http.problem_handler_failed', { correlation_id: correlationId, method: req.method });
+      } catch {
+        // The response below is what matters; a failing logger must not prevent it.
+      }
+      sendProblem(res, 500, fallbackProblemBody(correlationId, req.originalUrl));
+    }
   };
 }
