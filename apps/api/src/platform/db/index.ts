@@ -2,7 +2,9 @@
  * Public surface of the data platform (ADR-0005 amendment 10 items 1, 2, 6, 15; TASK-016).
  *
  * Repositories and services import from here. The root client factory (`./client.ts`) is deliberately not re-exported:
- * only the composition root builds the client and hands it to `createWithTenantTx`, which keeps it private.
+ * the database composition (`./runtime.ts`, imported by `platform/runtime/**`) is its only runtime importer; it builds
+ * the pool and the client and hands the client to `createWithTenantTx`, which keeps it private (D-ORCH-014 (d),
+ * PR11-SEC-09 item 1; no `db-root-client` boundary carve-out).
  */
 export { type AffectedRows, expectAffected } from './expect-affected.js';
 export {

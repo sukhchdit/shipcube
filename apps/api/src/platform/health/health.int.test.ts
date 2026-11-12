@@ -1,20 +1,26 @@
 /**
  * US-012 readiness against real dependencies (Testcontainers: PostgreSQL 18 and Valkey 8). The unit suites prove the
- * evaluation rules with stubs; this suite proves that the production checks (`SELECT 1` through the runtime pool,
- * `PING` through the ioredis client built from explicit options) report a healthy stack as `ok` and an outage as
- * `unavailable` within the 2.5 s bound. Object storage and the audit components are still pending checks
- * (TASK-019, TASK-021), so their rows are covered by the unit suite only.
+ * evaluation rules with stubs; this suite proves that the production checks report a healthy stack as `ok` and an
+ * outage as `unavailable` within the 2.5 s bound. The database component is the one the processes run: the
+ * composition of platform/db/runtime.ts (`SELECT 1` through the runtime pool plus the session-integrity guard, which
+ * needs the bootstrap role settings, so the suite connects as a `platform_app` role created with them; D-ORCH-014
+ * (d): no import of platform/db/client.ts here). `PING` goes through the ioredis client built from explicit options.
+ * Object storage and the audit components are still pending checks (TASK-019, TASK-021), so their rows are covered by
+ * the unit suite only.
  */
+import { randomBytes } from 'node:crypto';
+
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import express from 'express';
 import type { Redis } from 'ioredis';
-import type pg from 'pg';
+import pg from 'pg';
 import request from 'supertest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
-import { createDatabasePool } from '../db/client.js';
-import { createDatabaseCheck } from '../db/health-check.js';
+import { createDatabaseRuntime } from '../db/runtime.js';
+import { EXPECTED_ROLE_SETTINGS } from '../db/session-integrity.js';
+import { createRuntimeLog } from '../runtime/log.js';
 import { createReadinessProbe, pendingCheck, type ReadinessBody } from '../runtime/readiness.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import { createHealthRouter } from './router.js';
@@ -25,10 +31,30 @@ const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873
 const POSTGRES_IMAGE = 'postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42';
 const STARTUP_TIMEOUT_MS = 180_000;
 
+/** Creates `platform_app` with the bootstrap role settings and returns its connection URL. */
+async function createAppRole(adminUrl: string): Promise<string> {
+  const password = randomBytes(24).toString('hex');
+  const admin = new pg.Client({ connectionString: adminUrl });
+  await admin.connect();
+  try {
+    await admin.query(`CREATE ROLE platform_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '${password}'`);
+    for (const setting of EXPECTED_ROLE_SETTINGS) {
+      const [name, value] = setting.split('=') as [string, string];
+      await admin.query(`ALTER ROLE platform_app SET ${name} = ${name === 'search_path' ? value : `'${value}'`}`);
+    }
+  } finally {
+    await admin.end();
+  }
+  const url = new URL(adminUrl);
+  url.username = 'platform_app';
+  url.password = password;
+  return url.toString();
+}
+
 describe('US-012 readiness with real PostgreSQL 18 and Valkey 8 (api)', () => {
   let postgres: StartedPostgreSqlContainer;
   let valkeyContainer: StartedTestContainer;
-  let pool: pg.Pool;
+  let database: ReturnType<typeof createDatabaseRuntime>;
   let valkey: Redis;
   let app: express.Express;
 
@@ -40,15 +66,19 @@ describe('US-012 readiness with real PostgreSQL 18 and Valkey 8 (api)', () => {
         .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
         .start(),
     ]);
-    pool = createDatabasePool({ connectionString: postgres.getConnectionUri(), poolMax: 2, applicationName: 'api-health-it' });
-    pool.on('error', () => undefined);
+    database = createDatabaseRuntime({
+      database: { connectionString: await createAppRole(postgres.getConnectionUri()), poolMax: 2, applicationName: 'api-health-it' },
+      tx: { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 5_000 },
+      log: createRuntimeLog('api', { write: () => true }),
+    });
+    await database.startup();
     valkey = createValkeyClient({
       url: `redis://${valkeyContainer.getHost()}:${String(valkeyContainer.getMappedPort(6379))}`,
       connectionName: 'api-health-it',
     });
     const probe = createReadinessProbe(
       [
-        createDatabaseCheck(pool),
+        database.readinessCheck,
         createValkeyCheck(valkey),
         pendingCheck('object_storage'),
         pendingCheck('audit_partitions'),
@@ -63,7 +93,7 @@ describe('US-012 readiness with real PostgreSQL 18 and Valkey 8 (api)', () => {
 
   afterAll(async () => {
     valkey.disconnect();
-    await pool.end().catch(() => undefined);
+    for (const resource of database.resources) await resource.close().catch(() => undefined);
     await Promise.allSettled([valkeyContainer.stop(), postgres.stop()]);
   }, STARTUP_TIMEOUT_MS);
 

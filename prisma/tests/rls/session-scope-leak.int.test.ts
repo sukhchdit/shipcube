@@ -15,6 +15,7 @@ import pg from 'pg';
 
 import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.js';
 import { DbError, type DbSecurityEvent } from '../../../apps/api/src/platform/db/map-db-error.js';
+import { createDatabaseRuntime } from '../../../apps/api/src/platform/db/runtime.js';
 import { createWithTenantTx, type SecurityEventDetail, type TenantContext } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
 import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
@@ -199,5 +200,56 @@ describe('ADR-0005 am.10 items 4 and 16: session-scope leak (negative control) a
     expect(reset.rows).toEqual([]);
     expect(reset.org === '' || reset.org === null).toBe(true);
     expect((await runner().withTenantTx(tenant(ORG_B), probe)).rows).toEqual([ORG_B]);
+  });
+});
+
+describe('PR11-SEC-09 items 1-4: the composition root (platform/db/runtime.ts) wires the runner, the sinks and the latch', () => {
+  it('fresh probe first at start-up; a session leak through TenantDb raises the security event, counts, and LATCHES the database not ready (no flap)', async () => {
+    const { PrismaClient } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+    const logged: Array<{ level: string; event: string; fields: Record<string, unknown> }> = [];
+    const sink =
+      (level: string) =>
+      (event: string, fields: Record<string, unknown> = {}): void => {
+        logged.push({ level, event, fields });
+      };
+    const runtime = createDatabaseRuntime<Prisma.TransactionClient, PrismaClient>({
+      database: { connectionString: db.appUrl(database), poolMax: 1, applicationName: 'rls-leak-runtime' },
+      tx: { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 5_000 },
+      log: { info: sink('info'), warn: sink('warn'), error: sink('error') },
+      Client: PrismaClient,
+    });
+    const signal = () => new AbortController().signal;
+    try {
+      const tenantTx = runtime.tenantTx;
+      if (tenantTx === undefined) throw new Error('the runner is built when the generated client is supplied');
+      await runtime.startup();
+      // item 3: the fresh-connection probe ran first, before the dedicated-connection integrity check
+      expect(logged.map(({ event }) => event).slice(0, 2)).toEqual(['db.fresh_connection_ok', 'db.session_integrity_ok']);
+      await expect(runtime.readinessCheck.check(signal())).resolves.toBeUndefined();
+      expect((await tenantTx.withTenantTx(tenant(ORG_A), probe)).rows).toEqual([ORG_A, ORG_A]);
+
+      // A callback that bypasses the lint plants a session-level value on the one pooled backend (F-04 hazard).
+      await tenantTx.withTenantTx(tenant(ORG_A), async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.org_id', ${ORG_A}, false)`;
+      });
+      const error = await rejection(tenantTx.withTenantTx({ ...tenant(ORG_B), correlationId: 'rls-leak-runtime' }, probe));
+      expect(error).toMatchObject({ reason: 'DB_SESSION_CONTEXT_LEAK', securityEvent: 'db_session_context_leak' });
+      // item 4 sinks: one security event with the correlation id only, the counter, the latch (logged once)
+      expect(logged.filter(({ event }) => event.startsWith('security.'))).toEqual([
+        { level: 'warn', event: 'security.db_session_context_leak', fields: { component: 'database', correlationId: 'rls-leak-runtime' } },
+      ]);
+      expect(runtime.sessionContextLeaks()).toBe(1);
+      expect(logged.filter(({ event }) => event === 'db.not_ready_latched')).toEqual([
+        { level: 'error', event: 'db.not_ready_latched', fields: { component: 'database', reason: 'db_session_context_leak' } },
+      ]);
+      expect(JSON.stringify(logged)).not.toContain(ORG_A);
+      // latched: every later poll is not ready, although SELECT 1 and the role settings are fine
+      for (let i = 0; i < 3; i += 1) {
+        await expect(runtime.readinessCheck.check(signal())).rejects.toThrow('database not ready: db_session_context_leak');
+      }
+    } finally {
+      // Ending the pool ends the leaked backend with it.
+      for (const resource of runtime.resources) await resource.close();
+    }
   });
 });

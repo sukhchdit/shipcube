@@ -264,6 +264,17 @@ export function tenantTxOptionsFromConfig(
 }
 
 /**
+ * Refuses `PGOPTIONS` (item 4, PR9-SEC-03): libpq-style session options (`-c lock_timeout=0`, a preset `app.` key)
+ * would apply to every pooled connection and bypass the per-transaction context. The composition root
+ * (`./runtime.ts`) calls this with `process.env` before it builds a pool; `createWithTenantTx` calls it again.
+ */
+export function assertNoSessionOptions(env: Readonly<Record<string, string | undefined>>): void {
+  if (env['PGOPTIONS'] !== undefined) {
+    throw new TenantTxConfigError('PGOPTIONS must not be set: session options would bypass the per-transaction context');
+  }
+}
+
+/**
  * Builds the tenant-transaction runner over the root client. The root client stays inside this closure: it is never
  * returned, and the callback receives only the `TenantDb` guard (item 2).
  */
@@ -272,10 +283,7 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
   options: WithTenantTxOptions,
   deps: WithTenantTxDeps,
 ): TenantTxRunner<TTx> {
-  const env = deps.env ?? process.env;
-  if (env['PGOPTIONS'] !== undefined) {
-    throw new TenantTxConfigError('PGOPTIONS must not be set: session options would bypass the per-transaction context');
-  }
+  assertNoSessionOptions(deps.env ?? process.env);
   const transactionOptions = Object.freeze(resolveTransactionOptions(options));
   const timeouts = {
     statementTimeoutMs: options.statementTimeoutMs,
