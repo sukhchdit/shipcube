@@ -6,7 +6,7 @@ Tasks: **22** (S 3 / M 19; opus 8 / sonnet 14; demo-critical 20) in **6** batche
 
 **Exit check:** All 74 M0 DC stories merged; PRD §6.1 steps executable manually in compose; lane B `wave` evidence; lane C `wave-end` run #2 green.
 
-**Stories completed in this wave (28):** US-003 (DC), US-032 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
+**Stories completed in this wave (29):** US-003 (DC), US-032 (DC), US-049 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
 
 ## Batches
 
@@ -73,6 +73,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-138 and US-139 scenarios (fast-check properties)
+- PR #2 code review m10 (routed here): when the branded Minor type lands in packages/shared/src/money/**, tools/eslint-rules/money-arith.mjs gains a type-aware branch (parserServices -> checker: an operand type carrying the Minor brand is reported) with the name heuristic kept as fallback and a typed negative fixture
 - AT-US-138-01 … AT-US-138-06: all 6 scenarios of US-138, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-139-01 … AT-US-139-06: all 6 scenarios of US-139, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -436,13 +437,13 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-050 **DC** (M0 Must) Seed demo organisations, users and Mock configuration<br>US-003 **DC** (M0 Must) One-command local environment |
-| REQs | REQ-DATA-003, REQ-PLAT-005 |
+| Stories (completes) | US-050 **DC** (M0 Must) Seed demo organisations, users and Mock configuration<br>US-003 **DC** (M0 Must) One-command local environment<br>US-049 **DC** (M0 Must) Idempotent reference and demo seed framework |
+| REQs | REQ-DATA-003, REQ-PLAT-005, REQ-DATA-001, REQ-DATA-002 |
 | NFRs | NFR-OPS-001 |
-| Spikes / security / decisions | D-022, SEC-P3-14 |
+| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013 |
+| Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013, TASK-014 |
 | Batch · locks | 2.4 · prisma-seed |
 | Branch | `feat/TASK-089-seed-demo-organisations-users-per` |
 | Priority | Must · demo-critical |
@@ -454,8 +455,10 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-050 scenarios
 - US-003 completion: first `docker compose up` ends healthy and seeded within the NFR-OPS-001 budget
+- AT-US-049-05, -09, -10-1, -10-2 (D-061 item 2; this task COMPLETES US-049 — TASK-023 framework, TASK-014 AT-02; dependency on TASK-014 added): the real DemoUserProvisioner replaces the TASK-023 DEFERRED_PROVISIONER (D-TASK023-01 (04), temporary per D-ORCH-016 (2)); local/test create the demo users with the seeded passwords and send no link; staging creates staff without a password and sends one SET_PASSWORD link per staff user through the reset flow, visible in Mailpit, having read no SEED_* variable; the summary reports deferred = 0; no password or token value in stdout or logs (the TASK-023 fast-check secrecy properties are extended to the real provider; PR #13 n4: the planned SEED_* values and the decoded URL password are pushed into the redaction secrets set; PR13-SEC-08: planSecrets covers seeded-password plans only — set-password tokens never enter an error message, or the provisioner adds them to the redaction list); the TASK-023 test asserting created: 0, deferred: 14 is replaced; PR13-SEC-02 GATE: the assertNotLocalOnEcs refusal test (APP_ENV local|test with a non-empty ECS_CONTAINER_METADATA_URI / _V4 -> SEED_ENVIRONMENT_INVALID, exit 1 before connecting) exists on main before DEFERRED_PROVISIONER is replaced (met in PR #13 fix cycle 1; re-assert); PR #13 n3: the provisioner wiring passes a pg.Client, never a pg.Pool (BEGIN, the advisory lock and COMMIT must share one connection); the "demo data are present" clause of AT-US-049-02 and US-003 AT-01 close here
 - AT-US-050-01 … AT-US-050-07: all 7 scenarios of US-050, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-003-01 … AT-US-003-04: all 4 scenarios of US-003, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-049-01 … AT-US-049-10: all 10 scenarios of US-049, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
