@@ -1,0 +1,23 @@
+// Platform module (data-model.md §3.5). SYSTEM tables: no org_id, no RLS. `platform_app` holds SELECT, INSERT and UPDATE.
+//
+// Not expressible in Prisma and kept in the migration SQL: CHECK constraints (`ck_reference_dataset_versions__version`,
+// `ck_reference_dataset_versions__content_sha256` = 32 bytes, `ck_reference_dataset_versions__row_count` >= 0).
+
+/// Seed idempotency (REQ-DATA-001, REQ-COMP-008): one row per seeded dataset with the SHA-256 of its canonical content.
+/// The row-level `version` is the standard optimistic-lock column; the dataset's own version label is `datasetVersion`.
+model ReferenceDatasetVersion {
+  id             String   @id(map: "pk_reference_dataset_versions") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy      String   @map("created_by") @db.Uuid
+  updatedBy      String   @map("updated_by") @db.Uuid
+  version        Int      @default(1)
+  dataset        String
+  datasetVersion String   @map("dataset_version")
+  contentSha256  Bytes    @map("content_sha256")
+  appliedAt      DateTime @map("applied_at") @db.Timestamptz(6)
+  rowCount       Int      @map("row_count")
+
+  @@unique([dataset], map: "ux_reference_dataset_versions__dataset")
+  @@map("reference_dataset_versions")
+}
