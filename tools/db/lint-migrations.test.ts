@@ -97,6 +97,11 @@ describe('expand -> migrate -> contract (rules 2, 10 and contract reversibility)
     ]);
   });
 
+  it('rejects an upsert (INSERT … ON CONFLICT … DO UPDATE) without "data-changing: yes"; ON CONFLICT DO NOTHING stays clean (PR8-SEC-03)', () => {
+    const findings = lintCase('upsert');
+    expect(findings.map((finding) => [finding.file.split(/[\\/]/)[1], finding.rule])).toEqual([['20261112000000_upsert_do_update', '10']]);
+  });
+
   it('does not flag a plain WITH ... SELECT, row locks (FOR [NO KEY] UPDATE) or keywords inside strings (CR m3 control)', () => {
     expect(lintCase('cte-select')).toEqual([]);
   });

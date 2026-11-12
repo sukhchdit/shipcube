@@ -1,0 +1,63 @@
+// Authz module (data-model.md §3.3; ADR-0008 §2; REQ-RBAC-001/002/013). GLOBAL tables: no org_id, no RLS, read-only
+// at runtime (platform_app holds SELECT only). Rows come from the versioned seed migration generated from the
+// packages/authz catalogue (`npm run authz:generate`); never written by application code.
+//
+// Not expressible in Prisma and kept in the migration SQL: CHECK constraints (`ck_permissions__key_format`,
+// `ck_roles__scope`, `ck_*__version`) and the covering `INCLUDE ("permission_id")` of `ix_role_permissions__role_id`.
+
+model Permission {
+  id           String   @id(map: "pk_permissions") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy    String   @map("created_by") @db.Uuid
+  updatedBy    String   @map("updated_by") @db.Uuid
+  version      Int      @default(1)
+  key          String
+  description  String
+  category     String
+  operatorOnly Boolean  @default(false) @map("operator_only")
+
+  roles RolePermission[]
+
+  @@unique([key], map: "ux_permissions__key")
+  @@map("permissions")
+}
+
+model Role {
+  id          String   @id(map: "pk_roles") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedBy   String   @map("updated_by") @db.Uuid
+  version     Int      @default(1)
+  key         String
+  nameKey     String   @map("name_key")
+  /// role_scope: OPERATOR | CUSTOMER | PARTNER (CHECK ck_roles__scope).
+  scope       String
+  isSystem    Boolean  @default(true) @map("is_system")
+  description String
+
+  permissions RolePermission[]
+
+  @@unique([key], map: "ux_roles__key")
+  @@index([scope], map: "ix_roles__scope")
+  @@map("roles")
+}
+
+model RolePermission {
+  id           String   @id(map: "pk_role_permissions") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy    String   @map("created_by") @db.Uuid
+  updatedBy    String   @map("updated_by") @db.Uuid
+  version      Int      @default(1)
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_role_permissions__role_id")
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_role_permissions__permission_id")
+
+  @@unique([roleId, permissionId], map: "ux_role_permissions__role_permission")
+  @@index([roleId], map: "ix_role_permissions__role_id")
+  @@map("role_permissions")
+}
