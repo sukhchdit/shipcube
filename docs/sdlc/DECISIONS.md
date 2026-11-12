@@ -855,3 +855,8 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Also:** CLAUDE.md §2 build line now reads `npm ci --ignore-scripts` → `npm run deps:rebuild` → `npm run build` (SEC-P3-33 item 2, D-ARCH-034). The traceability Task column was merged from task-map.csv: 434/434 REQs Planned.
 - **Open non-blocking UX items** (docs/02-ux/README.md §5 #12–15, defaults applied): the checkout re-auth fallback scope, recovery codes on re-auth, lockout codes on `createReauthProof`, and `{days}` in S-E01. They're resolved inside the owning tasks (US-291/US-217/US-016) by the implementing developer + api contract update.
 - **Reversibility:** High.
+
+### D-ORCH-004 · 2026-11-12 · sdlc-orchestrator · Wave 0 bootstrap merge rule
+- **Decision:** Until TASK-007 (lane A workflow) is merged, "passing CI" for a task means the task's local commands (install with `--ignore-scripts` + `deps:rebuild`, lint, format:check, typecheck, unit tests, and whatever integration tests exist) run green by senior-developer, with output summarised in the PR body. Until TASK-011 (lane B tooling) is merged, heavy-suite evidence is the PR-body summary instead of `docs/05-quality/**/runs/`. From the merge of each tool onward, the full per-task flow (PLAN.md §7) applies. code-reviewer APPROVED and security-analyst (no Critical/High) are required from the very first task, without exception.
+- **Why:** The lanes are themselves Wave 0 deliverables (chicken-and-egg).
+- **Reversibility:** n/a (temporary; expires when TASK-007/011 merge).

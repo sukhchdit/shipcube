@@ -26,6 +26,7 @@
 ## Build Board
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation | backend-developer (opus) | feat/TASK-001-* | ▶ | | | | | 0 | |
 
 ## Escalations in progress
 _none_
