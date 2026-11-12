@@ -22,8 +22,15 @@ const rangesOf = (name: string) => [
 describe('toolchain baseline (ADR-0001, R-ARCH-01)', () => {
   it('pins Node 24 LTS in .node-version and engines, and runs on it', () => {
     expect(readFileSync(join(repoRoot, '.node-version'), 'utf8').trim()).toBe('24');
-    expect(manifests[0]?.manifest.engines?.['node']).toBe('>=24 <25');
+    expect(manifests[0]?.manifest.engines?.['node']).toBe('>=24.2 <25');
     expect(process.versions.node.split('.')[0]).toBe('24');
+  });
+
+  it('keeps the lockfile root engines in step with the root manifest (no manifest/lock drift)', () => {
+    const lock = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8')) as {
+      packages: Record<string, { engines?: Record<string, string> }>;
+    };
+    expect(lock.packages['']?.engines).toEqual(manifests[0]?.manifest.engines);
   });
 
   it.each([

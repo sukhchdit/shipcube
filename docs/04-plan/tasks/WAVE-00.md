@@ -16,7 +16,7 @@ Tasks: **37** (S 7 / M 30; opus 22 / sonnet 15; demo-critical 18) in **10** batc
 | 0.2 | TASK-002 Lint, format and layering rules with negative fixtures<br>TASK-003 Prisma 7 + PostgreSQL 18 baseline<br>TASK-004 Web and admin app scaffolds<br>TASK-005 Typed, validated configuration and key/secret register | lint<br>prisma-core<br>web-core, admin-core, e2e-core<br>pkg-config |
 | 0.3 | TASK-006 API and worker runtime skeleton<br>TASK-007 CI lane A fast-lane workflow and supply-chain install hardening<br>TASK-008 SPK-03 spike<br>TASK-009 SPK-02 spike | api-platform-core, worker-platform-core<br>ci-workflows<br>spike-03<br>carriers-docs |
 | 0.4 | TASK-010 Structured, redacted logging with correlation IDs<br>TASK-011 Lane B local heavy lane and evidence integrity<br>TASK-012 SPK-08 spike<br>TASK-013 Typed permission catalogue, seeded roles via versioned migration, role-permission matrix document, privilege-escalation guard | logging<br>quality-tools<br>spike-08<br>pkg-authz |
-| 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls<br>api-openapi, shared-api-types |
+| 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls, prisma-core<br>api-openapi, shared-api-types |
 | 0.6 | TASK-018 SPK-04 spike<br>TASK-019 SPK-05 spike<br>TASK-020 Mandatory route metadata<br>TASK-021 Audit store SQL | spike-04<br>api-storage<br>api-routing<br>prisma-bootstrap-audit |
 | 0.7 | TASK-022 SPK-06 spike<br>TASK-023 Idempotent reference and demo seed framework<br>TASK-024 Generated cross-tenant isolation test suite<br>TASK-025 Audit writer core | web-build-csp<br>prisma-seed<br>tests-gen-rls<br>pkg-audit-core |
 | 0.8 | TASK-026 Walking-skeleton slice<br>TASK-027 RBAC matrix test generator<br>TASK-028 Audit redaction and field classification registry<br>TASK-029 Automatic audit capture driven by route descriptors | mod-admin-settings-reference, web-core<br>tests-gen-rbac<br>pkg-audit-redaction<br>api-audit-mw |
@@ -132,9 +132,9 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - prisma.config.ts (schema folder, migrations, shadow DB, tables.external)
 - prisma/schema/_base.prisma (generator prisma-client, output prisma/generated)
-- prisma/bootstrap/0001_roles_schemas.sql (platform_migrator, platform_app, platform_definer, platform_audit_owner, platform_schema_owner per data-model §4.4 and D-ARCH-033; schema platform; search_path rules)
+- prisma/bootstrap/{00-roles.sql, 01-schemas.sql} (platform_migrator, platform_app, platform_definer, platform_audit_owner, platform_schema_owner per data-model §4.4 and D-ARCH-033; the migrator does not own the database, D-ARCH-045; schema platform; trusted extensions; global default privileges, D-ARCH-046; search_path rules; names per data-model §8.1, D-ARCH-048)
 - tools/db/bootstrap.ts + ledger public.bootstrap_migrations
-- tools/db/lint-migrations.ts (header block, rule 12 no audit DDL)
+- tools/db/lint-migrations.ts (header block, rule 2, rule 10, rule 12 no audit DDL, rule 13, contract-declared-reversible; rules 3-9, 11 and 14 are TASK-016, D-ARCH-049)
 - tools/db/up-down-up.ts
 - prisma/tests/harness/** (PG 18 Testcontainers, template-DB cloning, runtime role)
 - apps/api/src/platform/db/client.ts (adapter-pg factory, pool sizing)
@@ -550,12 +550,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 |---|---|
 | Stories (completes) | US-074 **DC** (M0 Must) RLS enabled and forced on every tenant-owned table, separate DB roles<br>US-075 **DC** (M0 Must) Per-transaction tenant context with SET LOCAL and fail-closed default |
 | REQs | REQ-RLS-001, REQ-RLS-002, REQ-RLS-005, REQ-RLS-003, REQ-RLS-004 |
-| NFRs | NFR-DATA-003, NFR-TENANT-001 |
-| Spikes / security / decisions | SPK-03, SEC-P3-12 |
+| NFRs | NFR-AVAIL-003, NFR-DATA-003, NFR-DATA-004, NFR-TENANT-001 |
+| Spikes / security / decisions | SPK-03, SEC-P3-12, SEC-P3-34, D-ARCH-045, D-ARCH-046, D-ARCH-049 |
 | Specialist · model | database-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-008, TASK-003 |
-| Batch · locks | 0.5 · prisma-rls |
+| Batch · locks | 0.5 · prisma-rls, prisma-core |
 | Branch | `feat/TASK-016-row-level-security-foundations-table` |
 | Priority | Must · demo-critical |
 
@@ -564,12 +564,16 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - prisma/sql/{policy-templates/*.sql, grants.manifest}
 - prisma/migrations/<ts>_platform_rls_helpers/
 - apps/api/src/platform/db/with-tenant-tx.ts (set_config ... true, fail-closed)
-- prisma/tests/catalog/c01-c12.int.test.ts
+- prisma/tests/catalog/c01-c12.int.test.ts (also C13/C14 as amended: pg_default_acl, pg_database.datdba, pg_db_role_setting)
+- tools/db/lint-migrations.ts + tools/db/fixtures/lint/** (rules 3-9, 11 and 14 of data-model §8.3 with one negative fixture per rule; D-ARCH-049)
 
 **Acceptance tests to write**
 - All US-074 and US-075 scenarios
 - Catalog tests C1-C12 green on the migrated schema (every tenant table ENABLE + FORCE RLS; no BYPASSRLS on runtime roles)
 - Unset context -> 0 rows; context never leaks across pooled connections (from SPK-03)
+- C5/C11/C13 as amended 2026-11-12 (batch 0.2, D-ARCH-045/046): exactly three global `pg_default_acl` function rows (migrator, definer, audit owner) and no table/sequence/type/schema default-privilege row; a migrator-created probe function in `platform` and in `public` is not EXECUTE-able by PUBLIC or platform_app; `pg_database.datdba` is not the migrator and the migrator has no CREATE on the database; `pg_db_role_setting` has no database-wide row and the bootstrap role's `search_path=pg_catalog, pg_temp` row
+- [SEC-TC-33] migration-lint rules 7, 8, 9, 12 and 14 (data-model §8.3): `DROP TRIGGER`, `DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL SECURITY`, `DISABLE TRIGGER`, `BYPASSRLS` / `SUPERUSER` / ownership to platform_app, `DELETE` grant outside the allow-list, any privilege on a partition, `DROP POLICY` without re-creation in the same file, a new table without its RLS block / allow-list entry (cross-checked with C1), and `CREATE SCHEMA` / `CREATE EXTENSION` / `ALTER DATABASE` / role DDL in prisma/migrations each fail the linter; one negative fixture per statement class; the `migration-lint` required suite (required-suites.json) activates with US-074
+- [NT-AVAIL-003-a] migration-lint rules 3, 4, 5, 6 and 11: `RENAME`, `ADD COLUMN ... NOT NULL` without a constant default, `ALTER COLUMN ... TYPE`, `SET NOT NULL` without a preceding validated CHECK, `CREATE INDEX` without `CONCURRENTLY` on a table created by an earlier migration, `CREATE INDEX CONCURRENTLY` in a multi-statement file, FK/CHECK on an existing table without `NOT VALID`, and a migration altering an existing table without `SET lock_timeout` each fail; negative fixtures per rule. Rule 5 prerequisite: a one-statement `CREATE INDEX CONCURRENTLY` migration is run through `migrate deploy` in the Testcontainers harness to record how Prisma 7.10 submits it (data-model §8.3 rule 5 "verify in P5 spike"); the result is written into the fixture and prisma/README.md
 - AT-US-074-01 … AT-US-074-05: all 5 scenarios of US-074, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-075-01 … AT-US-075-04: all 4 scenarios of US-075, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -577,6 +581,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
 - Security-critical path (prisma/**, apps/api/src/platform/**): security-integration job
+- Linter rules 3-9, 11 and 14 are the TASK-016 half of the migration-lint suite (D-ARCH-049); rules 1, 2, 10, 12, 13 and the contract-reversibility check came with TASK-003 and stay green
 - Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 

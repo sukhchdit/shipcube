@@ -22,6 +22,11 @@ The P3 review lives in `docs/05-quality/security/P3-architecture-security-review
 - **SEC-P3-36 (LOW).** The per-organisation quota share multiplies across the up-to-11 orgs one user can hold. Add a per-user share before TASK-190.
 - **SEC-P3-37 (INFO).** Drift items. Includes `ALTER DEFAULT PRIVILEGES … IN SCHEMA platform` placed in `00-roles.sql` before the schema exists (TASK-003), and partition-name squatting (TASK-021).
 
+**Progress at PR #5 (TASK-003, `d8ba197`, PR-0005):**
+- **SEC-P3-34, TASK-003 part, RESOLVED.** Items 1, 2 (runner and harness), 3 (local assertion) and 5 (the migrator doesn't own the DB; extensions installed by bootstrap). Remaining: TASK-016 (C13, catalog harness `options`), TASK-034 (rehearsal) and the item 4 runbook.
+- **SEC-P3-37 item 1 RESOLVED.** It uses the global `FOR ROLE` form, because `IN SCHEMA … REVOKE` is a PG no-op. data-model §4.4 correction goes to principal-architect.
+- See [[project-p5-wave0-db-baseline]].
+
 **SEC-TC changes:**
 - SEC-TC-61 amended to cover DROP FUNCTION guard CASCADE and DROP SCHEMA platform CASCADE. Both must be denied by privilege, not by the guard.
 - Proposed to qa-lead: SEC-TC-65 (harness path probe), an SEC-TC-62 multi-org extension, and SEC-TC-53 text alignment.

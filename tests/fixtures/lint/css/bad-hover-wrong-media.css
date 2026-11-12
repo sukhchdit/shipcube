@@ -1,0 +1,5 @@
+@media (hover: none) {
+  .button:hover {
+    background: blue;
+  }
+}

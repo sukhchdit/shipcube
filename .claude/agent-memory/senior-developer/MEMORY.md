@@ -1,2 +1,3 @@
 - [Plan generation workflow](feedback_plan_generation.md) — P4 plan via generator/plan-data.mjs; Bash quoting, node -e backslash and String.replace $ pitfalls
 - [P5 worktrees](feedback_p5_worktrees.md) — implement tasks in ../Shipqube-TASK-xxx worktrees; main checkout is shared with other agents
+- [P5 dispatch realities](feedback_p5_dispatch.md) — 80-turn stops leave uncommitted work; salvage; memory-reaped verify; .env.example read denied
