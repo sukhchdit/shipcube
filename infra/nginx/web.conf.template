@@ -1,0 +1,103 @@
+# Nginx server for apps/web (platform.md §3.3, ADR-0026 §1 and amendment 4). TASK-004 scaffold.
+#
+# Template for the nginx image's envsubst step (/etc/nginx/templates/*.template -> /etc/nginx/conf.d/*.conf). The
+# only placeholder is ${NGINX_PORT} (8080 in nginx-unprivileged). The image substitutes defined environment variables
+# only, so the nginx runtime variables below ($uri, $lng, $cookie_lng, ...) pass through unchanged. No secrets.
+#
+# The document root holds `apps/web/build/client/`:
+#   /en/index.html, /es/index.html, /fr/index.html  pre-rendered public pages
+#   /index.html                                     SPA fallback (root HydrateFallback only, no page content)
+#   /assets/*                                       content-hashed JS and CSS
+# `/` is deliberately not pre-rendered (ADR-0026 am. 4): it is answered below with a 302 to /{lng}/, which works without
+# JavaScript. React Router therefore writes the SPA fallback to index.html (not __spa-fallback.html), and every client
+# route that is not a pre-rendered file receives it with status 200 through try_files.
+#
+# Security headers and CSP: the hash-based CSP (`csp.conf`, generated from the built HTML) and the REQ-SEC-001/002/003
+# header set (HSTS toggle, Permissions-Policy, X-Robots-Tag on /{lng}/track) are added by TASK-022 after SPK-06; the
+# image Dockerfile and the header/response test suite belong to that task too. The static headers below are the subset
+# that needs no build input. All add_header directives live at server level: a location-level add_header would drop
+# every inherited one.
+
+# DR-A18 locale for `/`: cookie `lng` (en|es|fr), else the first supported language in Accept-Language order, else en.
+# The regex finds the leftmost en/es/fr language subtag (regional variants such as fr-CA map to fr); q-values are not
+# weighed, matching "first supported language in Accept-Language order" (platform.md §3.3).
+map $http_accept_language $web_accept_language_raw {
+    default                                                         "";
+    "~*(?:^|,)\s*(?<web_al>en|es|fr)(?:-[a-z0-9]+)*\s*(?:;|,|$)"    $web_al;
+}
+
+map $web_accept_language_raw $web_accept_language {
+    default   en;
+    "~*^es$"  es;
+    "~*^fr$"  fr;
+}
+
+map $cookie_lng $web_lng {
+    default   $web_accept_language;
+    en        en;
+    es        es;
+    fr        fr;
+}
+
+# Cache policy by path (NFR-WEB-005): hashed assets are immutable, the per-user `/` redirect is never stored, and every
+# HTML response (pre-rendered pages and the SPA fallback) is revalidated so a release is picked up on the next load.
+# Keyed on the status too, so a 404 for a missing asset is not cached as immutable.
+map "$status:$uri" $web_cache_control {
+    default              "no-cache";
+    "302:/"              "no-store";
+    "~^200:/assets/"     "public, max-age=31536000, immutable";
+}
+
+map $uri $web_vary {
+    default   "";
+    "/"       "Cookie, Accept-Language";
+}
+
+server {
+    listen ${NGINX_PORT};
+    server_name _;
+    server_tokens off;
+    root /usr/share/nginx/html;
+
+    # Location headers stay relative (`/en/`), so the redirect is correct behind the edge proxy and CloudFront.
+    absolute_redirect off;
+    client_max_body_size 1k;
+    gzip_static on;
+    charset utf-8;
+
+    add_header Cache-Control $web_cache_control always;
+    add_header Vary $web_vary always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+
+    # Static site: only GET and HEAD (platform.md §3.3).
+    if ($request_method !~ ^(?:GET|HEAD)$) {
+        return 405;
+    }
+
+    location = /healthz {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # ADR-0026 amendment 4 / D-UX-005: no page lives at `/`.
+    location = / {
+        return 302 /$web_lng/;
+    }
+
+    # Dotfiles are never served.
+    location ~ /\. {
+        deny all;
+    }
+
+    # A missing hashed asset is a real 404, never the HTML fallback.
+    location /assets/ {
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/index.html /index.html;
+    }
+}
