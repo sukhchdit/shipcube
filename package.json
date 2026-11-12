@@ -24,6 +24,8 @@
     "db:lint-migrations": "tsx tools/db/lint-migrations.ts",
     "authz:generate": "tsx --conditions=@platform/source tools/authz/generate.ts",
     "gen:modules": "tsx tools/api/gen-module-registry.ts",
+    "openapi:lint": "node tools/openapi/lint.mjs",
+    "openapi:types": "tsx tools/openapi/types.ts",
     "lint": "eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 --allow-empty-input && node tools/lint/check-suppressions.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

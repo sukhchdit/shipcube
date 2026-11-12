@@ -323,6 +323,10 @@ export default defineConfig([
     'tests/fixtures/semgrep/**',
     'tools/deps/fixtures/**',
   ]),
+  // One generated TypeScript FILE, kept out of the folder matrix above (which .stylelintignore mirrors, R2-n8):
+  // openapi-typescript output (~11.5k lines, its naming not ours), never hand-edited, Prettier-formatted by its
+  // generator and kept fresh by `npm run openapi:types -- --check` (TASK-017, REQ-API-019). Importers stay linted.
+  globalIgnores(['packages/shared/src/api/types.gen.ts']),
 
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
 
@@ -418,6 +422,26 @@ export default defineConfig([
     files: ['tools/repo/jest-esm.test.ts'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
+    },
+  },
+  {
+    // The OpenAPI drift test (TASK-017, api/README.md §15) builds fixture Express 5 routers to prove the route walker
+    // against the real router stack; `express` is a dependency of apps/api, not of the root manifest. Narrow
+    // allowance for this one file, like the jest-esm one above.
+    files: ['tools/openapi/drift.test.ts'],
+    rules: {
+      'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
+    },
+  },
+  {
+    // Contract-validated API tests (TASK-017, US-034, api/README.md §16) run the real createApp and health router with
+    // stub Express routers. Neither createApp nor `express` is reachable through a package entry point (`express` is
+    // an apps/api dependency), so relative imports into apps/api are the only way in, as for prisma/tests below.
+    // Scoped to the *.api.test.ts files under tests/api; the tests/api helpers stay free of apps/api imports.
+    files: ['tests/api/**/*.api.test.ts'],
+    rules: {
+      'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
+      'import-x/no-relative-packages': 'off',
     },
   },
   {

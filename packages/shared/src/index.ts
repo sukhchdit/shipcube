@@ -9,6 +9,8 @@ export {
   type ValidationIssue,
 } from './errors/app-error.js';
 export type { CatalogueEntry, ModuleCatalogue, ProblemStatus } from './errors/catalogue-entry.js';
+// Generated from openapi.yaml (REQ-API-019, TASK-017): `npm run openapi:types`; the typed client (api/README.md §17) builds on these.
+export type { components, operations, paths } from './api/types.gen.js';
 export {
   CATALOGUE_MODULES,
   ERROR_CATALOGUE,
