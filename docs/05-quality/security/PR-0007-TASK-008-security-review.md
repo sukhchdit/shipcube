@@ -436,3 +436,205 @@ Other owners:
 V4.1.1 and V4.1.3 (access control enforced at a trusted layer, least privilege): RLS fail-closed is proven. V4.1.5 (fail securely): PR7-SEC-01 and -02. V5.3.4 (parameterised queries): verified. V7.4.1 (generic error messages): PR7-SEC-03. V14.1.x (configuration hardening): PR7-SEC-06.
 
 Sources consulted: PostgreSQL `REL_18_STABLE` source (`guc_funcs.c`, `guc.c`, `pg_proc.dat`, `user.c`, `rowsecurity.c`); [AWS RDS Proxy: Avoiding pinning](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html); locked `node_modules` (`@prisma/client` / `@prisma/adapter-pg` 7.10.1, `pg` 8.23.1).
+
+## Round 2 (head 065aa3e)
+
+| Field | Value |
+|---|---|
+| Head | `065aa3e`, a merge of `origin/main` @ `151add9`. **Code delta reviewed:** `c21485d..518d281`, one commit, 2 files, +314 / −115. The other two commits change no PR file: `985a552..c21485d` is a merge of main, and `518d281..065aa3e` is a docs-only merge (`4b02c9b`, `151add9`) across which both PR files are byte-identical |
+| Inputs | <ul><li>Fix comment `#issuecomment-6829046302`.</li><li>`git show 518d281:` of both PR files.</li><li>On `main` @ `cb69b04`: ADR-0005 am. 10, `rulings/wave-0-batch-3-rulings.md` item 2, data-model §4.3/§4.5, the WAVE-00 sheets, `eslint.config.mjs` and `prisma/bootstrap/00-roles.sql`.</li><li>`@prisma/adapter-pg` / `@prisma/client` 7.10.1 in the main checkout's `node_modules`.</li></ul> |
+| Method | Read-only, by SHA. No install, build, Docker or test run (constraint). I did not execute the tests. I rely on the fix comment's gate on `518d281`: lint, format, typecheck, unit 753/753, build, `npm audit --audit-level=high` 0, and integration 6 suites with 47 passed + 1 skipped |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open, so the merge rule is met. <ul><li>The F-findings now state PR7-SEC-01/02/03/05/07 accurately.</li><li>The new negative control is sound.</li><li>The delta adds no product code, dependency or secret.</li><li>ADR-0005 am. 10 now carries all four §4a gaps from round 1, plus new items 11–14.</li></ul> New this round: **PR7-SEC-11 (LOW)** and **PR7-SEC-12..14 (INFO)**. All four concern ADR/data-model text or TASK-016, not this PR's code |
+
+### R2.1 Delta hygiene
+
+- **Scope.** Only `prisma/tests/spikes/spk03-rls-tx.int.test.ts` and `docs/04-plan/spikes/SPK-03.md` change. Against `main`, the spike test is the PR's only non-doc file. There is no dependency, lockfile, migration, configuration or product-code change.
+- **Secrets.** I grepped the added lines for credential shapes and got 0 hits. The positive control (`set_config|rawPgError`) got 40 hits. gitleaks was not run because Docker was off-limits; lane A covers the merge.
+- **SQL.** Every new statement is a tagged template or a `pg` query with `$n` parameters.
+  - `CONTEXT_SQL` is a constant, interpolated into `EXPLAIN (ANALYZE, FORMAT JSON) …` with no input.
+  - The only session-level write is the deliberate `set_config('app.org_id', A, false)` in the negative control, and it is cleaned up (R2.3).
+- **`SPK03_REPORT`.** Am. 10 W-1 makes this file a CI artifact. It holds:
+  - `version()`, timings and pids;
+  - `describeError` output: `name`, `code`, `meta`, the SQLSTATE and the last three message lines.
+
+  The data is synthetic UUIDs and `spk03_*` table names only, with no URL or credential, so it is acceptable as an artifact.
+
+### R2.2 Round-1 findings: status on this PR
+
+| ID | Where it now lives | Accurate? | Status |
+|---|---|---|---|
+| PR7-SEC-01 | **F-02:** fail mode per table class; nested `withTenantTx`; pool starvation. Binding runtime controls: the `NESTED_TENANT_TX` guard, and a `ROOT_CLIENT_IN_TENANT_TX` hook on any reachable client while `withTenantTx` runs on a separate, unguarded, private client (my round-1 m3 note). SYSTEM writers are typed on `TenantDb`. The false "existing lint rule" claim is removed. <br>**F-03:** `P2028` → 503. <br>**W-2** | Yes. The SYSTEM-table row is correctly marked "not exercised". One imprecision about RLS UPDATE/DELETE (PR7-SEC-13) | Folded. Binding on TASK-016 |
+| PR7-SEC-02 | **F-07:** a NULL value means RESET, a NULL `is_local` means session scope; `PGOPTIONS`, startup and role/database defaults. <br>**F-04:** the leak hazard. <br>The new negative control | Yes | Folded. Binding on TASK-016 |
+| PR7-SEC-03 | **F-06:** P2039; `originalCode`; mapped kinds without `code`; `errorFormat`; never echo; 42501 is overloaded. <br>**F-09:** 40001. <br>The `rawPgError` doc comment | Yes | Folded. TASK-016, TASK-006, TASK-010 (see R2.6) |
+| PR7-SEC-04 | Not in SPK-03 (routed). Now in am. 10 item 11 and data-model §4.3 (`GUEST_DECLAIM_FORBIDDEN`) | See PR7-SEC-12 (d) | Open on TASK-051 |
+| PR7-SEC-05 | **F-01:** `Omit` plus a run-time Proxy (`FORBIDDEN_DB_METHOD`), with the reason. <br>**F-04:** the ban list, with exact-file test exemptions | Yes | Folded. Binding on TASK-016 |
+| PR7-SEC-06 | Not in SPK-03. Now in am. 10 item 12 | See PR7-SEC-12 (c) | Open on TASK-016 / TASK-006 |
+| PR7-SEC-07 | **F-07:** the predicate allow-list, the C3 token scan and the C12 guest probes | Yes | Folded. TASK-016 / TASK-024 |
+| PR7-SEC-08 | SPK-03 §6 item 3; am. 10 item 14 | Yes | Open (M5, platform-architect) |
+| PR7-SEC-09 | **F-10:** `SET ROLE platform_definer` is preferred, and `CREATE OR REPLACE` needs ownership. The SQL comment now says "expected to fail (not exercised)" | Yes | Folded. Linter rule 15 is mandatory (am. 10 item 9) |
+| PR7-SEC-10 | The (d) benchmark is opt-in behind `SPK03_BENCH=1`, and the client-observed `:618` assertion is deleted. SPK-03 §6 item 1 sets the lifecycle: <ol><li>TASK-016 ports (a)–(c), (e), the negative control and the pinned error shapes;</li><li>it records C-1 before G3;</li><li>it then deletes the file.</li></ol> | Yes | The C-1 text conflict is resolved. The file stays until TASK-016, as accepted by D-ARCH-058 and D-ORCH-011. Any lint exemption for it must still name the exact file |
+
+New claims in this round, checked against the source:
+- **F-04, "adapter-pg releases connections without a reset".** In `@prisma/adapter-pg@7.10.1` `dist/index.mjs:676-684`, `commit()` and `rollback()` call only `cleanup?.()` and `client.release()`. Nothing resets session state.
+- **F-03, "the checkout stays queued after `maxWait`".** The 7.10.1 transaction manager races `driverAdapter.startTransaction()` against an abort signal. On abort it keeps the pending start (`this.#o(a)`) and closes it when it resolves. The claim is consistent with the code, and it overstates the hazard rather than understating it.
+
+### R2.3 The new negative control (`518d281` T:429-452)
+
+**The test is sound:**
+- **Same backend.** The client is `poolMax 1`, and every probe asserts `pid === sessionLevel.pid`. If the pool replaced the connection, the test would fail. It cannot pass falsely.
+- **It measures data exposure, not just the GUC.** The leaked context returns org A's 3 rows under RLS.
+- **Positive baseline first.** `withTenantTx(A)` followed by a plain transaction reads `''` and 0 rows.
+- **Cleanup.**
+  - `RESET app.org_id` runs in `finally` on the same single-connection pool. A final assertion then shows the backend is clean.
+  - If the session-level transaction itself fails, PostgreSQL discards a `SET` made in an aborted transaction, so nothing leaks.
+  - Clients are created per test file, so no other suite can inherit the state.
+- **The `set_config(…, false)` call is test-only.** It documents why the ban exists. When the test is ported, the token ban needs an exact-file exemption for it (am. 10 item 1).
+
+**What the test adds to the threat picture.** `withTenantTx(B)` masks a leaked session value only for its own transaction; afterwards the backend reads A again. Two consequences follow:
+- The transaction-local design does not heal a leak.
+- The am. 10 item 4 probe runs only on fresh connections, so it cannot see a leak that happens later in a connection's life.
+
+The binding controls for a mid-life leak are the token ban and the private client (am. 10 items 1–2). PR7-SEC-14 proposes a detector that costs no extra round trip.
+
+**Not executed, which is acceptable for a spike:** a NULL `is_local` and a NULL value. TASK-016's capturing-fake unit test (PR7-SEC-02 verification) proves that the template never binds them.
+
+### R2.4 ADR-0005 am. 10 (on `main`) against the round-1 §4a deltas
+
+| §4a row | Am. 10 now | Result |
+|---|---|---|
+| Item 2 (lint only) | <ul><li>A run-time `AsyncLocalStorage` guard, `NESTED_TENANT_TX`.</li><li>AT-US-075-04 is a run-time throw.</li><li>No client is exported.</li><li>SYSTEM writers are typed on `TenantDb`.</li></ul> | **Applied.** Leftover wording: "(existing lint rule)", see PR7-SEC-12 (a) |
+| Item 1 (`Omit` is compile-time only) | <ul><li>A run-time Proxy.</li><li>A `set_config`/`app.*` token ban outside `with-tenant-tx.ts`, with exact-file test exemptions.</li><li>A `prosrc` scan.</li></ul> | **Applied**, but the scan is limited to "non-platform functions" (**PR7-SEC-11**) |
+| Item 4 (silent on NULL / `is_local`) | <ul><li>Literal `true`.</li><li>Validated strings only; never NULL, `undefined` or `Prisma.Sql`.</li><li>The factory refuses `PGOPTIONS`.</li><li>A fresh-connection probe.</li></ul> | **Applied.** The sentence about the negative control is inverted, see PR7-SEC-12 (b) |
+| Item 6 (P2010 + `cause.code`) | <ul><li>Keyed on `cause.originalCode` for P2010 and P2039.</li><li>The event name comes from the message prefix.</li><li>Retryable: `P2028`, `55P03`, `40001`, `40P01`, `57014`.</li><li>`errorFormat: 'minimal'` in every environment.</li><li>Messages are never echoed.</li></ul> | **Applied** |
+| Item 7 (no allow-list, no session-default precondition) | <ul><li>A template allow-list.</li><li>C3 rejects `DISTINCT FROM`, `coalesce`, `<>`, `NOT` and raw `current_setting(`.</li><li>C13 checks the `app.%` rows.</li></ul> | **Applied.** `NULLIF` is not listed, which is negligible given the allow-list |
+| Item 9 (linter rule optional) | `SET ROLE platform_definer` preferred; rule 15 mandatory | **Applied.** However, the data-model §4.5 `job_context` block was not reordered, see PR7-SEC-12 (e) |
+| C-1 paragraph vs the `:618` assertion | Item 13 and W-1: the permanent suite asserts only the server-side cost | **Resolved**: the spike assertion is deleted. Leftover wording, see PR7-SEC-12 (f) |
+| New rows: de-claim, role-setting drift | Item 11 (with data-model §4.3) and item 12 | **Applied.** Precision notes in PR7-SEC-12 (c) and (d) |
+
+**All four gaps that round 1 flagged in the earlier draft are now closed:**
+1. item 2, the lint-only remedy;
+2. item 4, NULL / `is_local`;
+3. item 6, the key used for error mapping;
+4. the C-1 text conflict.
+
+Items 8 and 14 also match this review.
+
+### R2.5 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR7-SEC-11 | Am. 10 item 1 limits the `pg_proc.prosrc` scan to "non-platform functions". The `platform` schema, which holds every `SECURITY DEFINER` function, is excluded. A function there that writes `app.*` would pass: a transaction-local write switches tenant in mid-transaction (T-35), and a session-scope write leaks to the next checkout | LOW | CWE-488, CWE-665 | A04 | ADR-0005 `:108` (am. 10 item 1) | principal-architect (text); TASK-016 (catalog test) | Open |
+| PR7-SEC-12 | Text defects in am. 10 and data-model that a TASK-016 or TASK-051 implementer would follow (items a–f below) | INFO | CWE-1059 | A04 | ADR-0005 `:105`, `:109`, `:111`, `:118-120`; data-model `:2472`, `:2840-2842` | principal-architect / data-architect | Open |
+| PR7-SEC-13 | F-02 (and my round-1 table) says writes to RLS tables outside the context get 42501. That holds only for INSERTs and for UPDATEs whose new row fails `WITH CHECK`. An UPDATE or DELETE without context touches **0 rows silently**: test (b) T:516-522 shows the mechanism. A state transition issued that way is lost while the business transaction commits | INFO | CWE-252, CWE-636 | A04 | `SPK-03.md` F-02; round-1 §3 PR7-SEC-01 table | TASK-016 (port text; repository convention) | Open |
+| PR7-SEC-14 | Optional hardening: detect a leaked session-level `app.*` inside the context statement, at no extra round-trip cost | INFO | CWE-488 | A04 | data-model §4.1 context statement | TASK-016 (optional) | Open (recommendation) |
+
+#### PR7-SEC-11 (LOW): the `prosrc` scan excludes the `platform` schema
+
+**Description.** Am. 10 item 1 bans the tokens `set_config`, `app.org_id`, `app.actor_id`, `app.actor_scope` and `app.guest_token_hash` in TypeScript. It then says "a catalog test scans `pg_proc.prosrc` of non-platform functions for them". The exclusion is presumably there because the §4.2 helpers legitimately read `current_setting('app.org_id', true)`. But it also exempts the writes, and `platform` is where every definer function lives (`app_is_operator`, `job_context`, `auth_lookup_user_by_email`, `ensure_audit_partitions`, the §4.5 list). A platform function body containing `set_config('app.org_id', …, true)` can switch tenant for the rest of the caller's transaction. With `false`, or a plain `SET app.*`, the value instead survives on the pooled backend. RDS Proxy does not detect such changes made inside functions (PR7-SEC-08 ii). Rule 15 checks ownership, not function bodies.
+
+**Exploitability / impact.** Exploitation needs a migration author to write such a function, and review to miss it. The impact is a cross-tenant context for the rest of the transaction. Likelihood L × Impact M (after review) → **LOW**. This matches the rating of the TypeScript form of the same defect (PR7-SEC-05).
+
+**Remediation (am. 10 item 1 text; TASK-016 C-series).** Scope the scan by **form**, not by schema. Across every non-system namespace (`public`, `platform` and any later schema):
+1. No `prosrc` contains a write form:
+   - `set_config(`,
+   - `SET ` or `SET SESSION`/`SET LOCAL` followed by `app.`,
+   - `RESET`,
+   - `DISCARD`.
+2. A read of the four security keys (`current_setting('app.org_id'`, `'app.actor_id'`, `'app.actor_scope'`, `'app.guest_token_hash'`) appears only in the §4.2 helper allow-list, matched by `regprocedure`. Reads of `app.correlation_id`, which triggers use in messages, stay allowed.
+3. The migration linter applies the same rule to `prisma/migrations/**`.
+
+**Verification.** Three negative fixtures:
+- a `platform` function calling `set_config('app.org_id', …, true)`;
+- a `public` function calling `SET app.org_id = …`;
+- a non-helper reading `current_setting('app.org_id', true)`.
+
+Each must fail C-series and the linter. The current catalog must pass.
+
+#### PR7-SEC-12 (INFO): text defects in ADR-0005 am. 10 and data-model
+
+**(a) Am. 10 item 2 (`:109`): "(existing lint rule)".**
+- On `main`, `eslint.config.mjs` confines Prisma imports to the `repository`, `db-platform`, `prisma`, `tools-db` and `test` categories.
+- Every repository, and the two `PLANNED_PRISMA_FILES` (the audit store and the outbox writer), may still import `apps/api/src/platform/db/client.ts`.
+- SPK-03 F-02 states this correctly.
+
+*Text:* "the lint rule that TASK-016 adds".
+
+**(b) Am. 10 item 4 (`:111`): the negative control is described backwards.** The ADR says the control "proves a session-level `app.*` cannot be set by `platform_app`". The spike's new test proves the **opposite**: `platform_app` can set one with `set_config(…, false)`, and it leaks to the next checkout. What `platform_app` cannot do is persist an `app.*` default: `ALTER ROLE … SET app.*` needs superuser or `SET` on the parameter, and C13 covers that. An implementer who follows the ADR text would find the test failing and might drop the leak control that F-04 says to keep.
+
+*Text:* "a session-scope negative control proves that a session-level `set_config('app.*', …, false)` by `platform_app` leaks to the next checkout on the same backend (adapter-pg does not reset on release), which is why items 1 and 4 ban it; C13 proves `platform_app` cannot persist an `app.*` default".
+
+**(c) Am. 10 item 12 (`:119`) lists `statement_timeout` among the `platform_app` role defaults. There is no such default.**
+- `00-roles.sql:55-57` sets only `search_path`, `idle_in_transaction_session_timeout` and `lock_timeout`.
+- The spike's new statement_timeout test reads a baseline of `0`.
+- So a statement outside `withTenantTx` has **no** statement timeout. Examples are the readiness probe and any system path that skips the context statement (T-83).
+
+*Fix:* either
+- add a role-level backstop, `ALTER ROLE platform_app SET statement_timeout = '30s'`, in the bootstrap, with a C13 row. Per-transaction values still win, and item 12's point that role defaults are not a security boundary still stands; or
+- correct the text and require every system variant to run the context statement.
+
+**(d) Am. 10 item 11 and data-model §4.3 (`:2472`): the trigger conditions are narrower than PR7-SEC-04.**
+- The trigger blocks org → NULL and NULL → hash.
+- It does not block org A → org B, or hash H1 → H2.
+- Today RLS blocks both under any single context: the `USING` and `WITH CHECK` of each policy read the same setting. So this is defence in depth only, for example against a future definer or operator write path.
+
+*Fix:* encode the stated invariant ("`org_id` transitions only NULL → value; a hash is set only at insert") exactly:
+- `OLD.org_id IS NOT NULL AND NEW.org_id IS DISTINCT FROM OLD.org_id`;
+- `NEW.guest_token_hash IS NOT NULL AND NEW.guest_token_hash IS DISTINCT FROM OLD.guest_token_hash`.
+
+TASK-051 should also test both transitions as a superuser, so that RLS is bypassed and the trigger alone is proven to hold.
+
+**(e) data-model §4.5 `platform.job_context` (`:2840-2842`).** The block still runs `OWNER TO platform_definer` **before** `REVOKE`/`GRANT`. Am. 10 item 9 and F-10 say this order fails for the migrator (`INHERIT FALSE`), and the ADR says §4.5 was reordered. The `auth_lookup_user_by_email` example was reordered (`:2773-2778`), but this block was not. It fails closed (a deploy error, which rule 15 would flag), but it is a copy-paste trap.
+
+*Fix:* wrap the block in `SET ROLE platform_definer; … RESET ROLE;`.
+
+**(f) Am. 10 item 13 and W-1 (`:105`, `:120`) are not a security issue (a NIT for principal-architect).** They say the spike's client-observed assertion is "behind `SPK03_BENCH=1`". At `518d281` that assertion is **deleted**, and the whole (d) block is opt-in, server-side assertion included. Until TASK-016 ports it, the default suite asserts no cost figure at all.
+
+#### PR7-SEC-13 (INFO): out-of-context UPDATE/DELETE fail silently
+
+The confidentiality conclusion is unchanged. This is an integrity point. A root-client or nested call that issues `UPDATE … SET status = …` for a row it cannot see returns `count 0`, raises no error, and the outer transaction commits. Examples are a label void or a refund marker.
+
+The am. 10 item 2 guard and the no-exported-client rule already make the main path loud, so this is defence in depth:
+- **TASK-016:** when F-02 is ported into the permanent suite, correct the text: "INSERT: 42501; UPDATE/DELETE: 0 rows".
+- **Repository convention:** a state-transition UPDATE or DELETE asserts the affected-row count (`=== 1`, otherwise `NotFound`/`CONFLICT`). This is the same check optimistic concurrency needs.
+
+*Verification:* a unit test on one state-transition repository shows that 0 affected rows → error.
+
+#### PR7-SEC-14 (INFO, optional): an in-statement leak detector
+
+The context statement can read the prior values in the same round trip, before overwriting them:
+
+```sql
+WITH prev AS MATERIALIZED (
+  SELECT current_setting('app.org_id', true) AS org_id, current_setting('app.actor_id', true) AS actor_id,
+         current_setting('app.actor_scope', true) AS actor_scope, current_setting('app.guest_token_hash', true) AS guest_token_hash)
+SELECT prev.*, set_config('app.org_id', $1, true), … FROM prev
+```
+
+**Why this works.** `MATERIALIZED` makes the CTE scan produce its row before the outer target list calls `set_config`.
+
+**What to do with the result.** Any non-empty prior value means a session-level leak on this backend. In that case, throw before `fn` runs, and emit `db_session_context_leak`.
+
+**Cost and coverage.** The check needs `$queryRaw` instead of `$executeRaw`, and no extra round trip. It catches exactly the mid-life leak that R2.3 shows the fresh-connection probe cannot see.
+
+*Verification:* the ported negative control asserts the detector fires after `set_config('app.org_id', A, false)`.
+
+### R2.6 Routing notes (not findings on PR #7)
+
+- **TASK-006** was dispatched (`0f5caa1`) before D-ORCH-011. Its WAVE-00 sheet does not carry these routed items:
+  - PR7-SEC-03 item 2: never echo `message`, `originalMessage`, `detail`, `hint` or `meta`;
+  - PR7-SEC-03 item 4: `errorFormat: 'minimal'` (am. 10 item 6 names TASK-006);
+  - PR7-SEC-06 item 3: the readiness drift check on `pg_db_role_setting` (am. 10 item 12).
+
+  The orchestrator should forward them to the in-flight TASK-006 brief. I will check them at TASK-006's security review.
+- **TASK-010 sheet:** it has no Prisma-error serializer (`{ name, code, originalCode, kind }`, PR7-SEC-03 item 3).
+- **TASK-024 sheet:** it has no C12 guest-row probes (PR7-SEC-07 item 3).
+- **TASK-016 sheet** (WAVE-00 `:590`): it carries the binding list. Add PR7-SEC-11 (scan by form) and PR7-SEC-13/14 when the plan is next regenerated.
+
+### R2.7 Round-2 verdict
+
+**PASS_WITH_FOLLOW-UPS** on `065aa3e`. Severity counts after this round:
+- **MEDIUM:** 1 (PR7-SEC-01).
+- **LOW:** 8 (PR7-SEC-02 to -08, and -11).
+- **INFO:** 5 (PR7-SEC-09, -10, -12, -13, -14).
+
+None is Critical or High, and every one is routed to TASK-016, TASK-051, TASK-024, TASK-006/010, principal-architect, data-architect or the M5 checklist. **Nothing is required on PR #7's code before merge.** The GO verdict stands, still conditional on TASK-016 implementing §5 together with PR7-SEC-11.

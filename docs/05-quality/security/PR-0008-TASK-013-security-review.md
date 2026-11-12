@@ -362,3 +362,141 @@ Classes: I agree with the PR's suggestion. Every column is INT, except `permissi
 | grep of `prisma/bootstrap/0[01]-*.sql` for default privileges | function `REVOKE … FROM PUBLIC` rows only; no default table grants |
 | Secret-pattern grep over the added diff | 0 hits |
 | Not run (host constraint) | `npm ci`, build, unit/integration suites, gitleaks. Evidence for those is the PR body (senior-developer, D-ORCH-004): unit 346/346, targeted integration 7/7, lint/typecheck/format/build/audit green. The full `test:integration` and `test:coverage` are still to re-run (lane B) |
+
+## Round 2 (head 498e3a5)
+
+| Field | Value |
+|---|---|
+| Head | `498e3a5`. It is a merge of `origin/main` @ `151add9` into `6e70275`, the fix commit. `5891c0a` is an earlier merge of `main`, bringing in D-058 |
+| Code delta | `6e70275`: 27 files, +991 / −235 (`packages/authz/src/**`, `tools/authz/generate{,.test}.ts`, `tools/db/lint-migrations{,.test}.ts`, 2 linter fixtures, seed v1 `migration.sql`/`down.sql`, `prisma/tests/authz/authz-seed.int.test.ts`, matrix doc) |
+| Merge integrity | `git diff 6e70275 498e3a5` on code paths is empty. `package-lock.json` is byte-equal to `main`. Root `package.json` differs from `main` only by the R1 `authz:generate` script. No new dependency |
+| Main drift | `origin/main` is now `cb69b04`. `b0741da`, `e1c3d42` and `cb69b04` are docs only (D-059, fix-cycle decisions). D-059 changes no authz grant; its item 6 confirms that DR-A07 is unchanged. No security need to re-merge |
+| Inputs | Fix comment (issuecomment-6829047310); DECISIONS D-058, D-SEC-PR8-01, D-ARCH-059/060, D-ORCH-011, D-TASK013-02 |
+| Method | Read-only. Nothing was run in the TASK-013 worktree. No install, build, Docker or suite run. Steps: `git archive 498e3a5` into scratch; type-strip with Node 24.22.3; probe in-process. R1's probes were re-run against the new head: the 7 escalation edits C1–C7 and the 3 gap cases G1–G3 (G0–G3 in R1's numbering). New probes: self-service (S), canAssignRole (A), pin bypass (P) and linter variants (L). Scripts are in `…/scratchpad/review/PR-8-sec-r2/scripts/` |
+| Reviewer / date | security-analyst, 2026-11-12 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS. No Critical or High is open, so merge is allowed on security grounds.** Closed: PR8-SEC-01 (the in-PR part), -02, -03, -04, -06 (the table; consumer conditions go to TASK-231/235), -08 (b) and (c). New: PR8-SEC-13 (LOW) and PR8-SEC-14 (INFO). Still routed: 05, 07, 08 (a), 09–12 |
+
+### R2.1 Closure of round-1 findings
+
+| ID | R2 status | Evidence (head `498e3a5`) |
+|---|---|---|
+| PR8-SEC-01 | **CLOSED (in-PR part).** The generic backstop is now PR8-SEC-13 | `SEED_MIGRATIONS[1].sha256` = `dbe3e807…290a` / `096b273a…2764`. I checked the pins against the **git blob bytes**: they match, and the blobs contain no CR, so `* text=auto eol=lf` makes them platform-stable. `checkMessages(archive) = []`. An in-place edit that revokes a grant or widens one: `--check` = 1, write = 1, nothing written, message "catalogue changed … Bump CATALOGUE_VERSION" (P1). `artefacts()` throws for version > 1. The pin is a tripwire against regeneration, not a lock: see PR8-SEC-13 |
+| PR8-SEC-02 | **CLOSED** | Gap case G0/G1 (shipment:any_org:read, org:any_org): `PERMISSION_FORMAT` + `PERMISSION_OPERATOR_ONLY_MISMATCH`. `audit_trail:read` (category audit): `PERMISSION_CATEGORY_MISMATCH`. With the flag set to the rule, Viewer/Shipper holding the any_org keys give `OPERATOR_ONLY_ESCALATION` (G1b). The scope swap (G2) gives `ROLE_SCOPE_MISMATCH` ×2. signatureOnly on `payment:create` (G3) gives `SIGNATURE_FLAG_MISMATCH`, and so do the flag dropped from `webhook:stripe:receive` (G3b) and a `webhook:*` key filed under payment (G3c). `isOperatorOnlyKey` is true for `any_org` in segments 1, 2 and 3 (O1). The cross-tenant synonym `shipment:read:all_orgs` is rejected by the n5 verb/qualifier rule (O2) |
+| PR8-SEC-03 | **CLOSED** | The `DATA_CHANGING` list has the pattern `^insert into … on conflict … do update`. Its scope: 11 upsert forms give `["10"]` (L): R1's two cases, multi-line lower-case, `ON CONSTRAINT`, alias + `WHERE`, block comment, line comment, CTE and `DEFAULT VALUES`, plus the controls `UPDATE` and `INSERT … SELECT`. Clean (`[]`): with `data-changing: yes`; for `DO NOTHING` with or without a target; for the phrase inside a string literal or a trailing comment. The PR's fixtures give `["10"]` / `[]`, and both real migrations give `[]` |
+| PR8-SEC-04 | **CLOSED** (conditions 1–5) | See R2.2 |
+| PR8-SEC-05 | OPEN, routed | TASK-020 merge condition (D-ORCH-011). Not in the TASK-020 task file yet, see R2.5 |
+| PR8-SEC-06 | **CLOSED (rank table).** Consumer conditions are in R2.3 | `ASSIGNABLE_BY` and `canAssignRole` are in `packages/authz/src/assign.ts`. Single-role matrix (A1): Owner → {Owner, Admin, Shipper, Finance, Viewer}; Admin → {Admin, Shipper, Finance, Viewer}; nobody else assigns anything. Admin → Owner is false, also for Admin+Viewer (A2). Super Admin → nothing (fail closed). Prototype, empty, whitespace and lower-case keys are false on both sides (A4) |
+| PR8-SEC-07 | OPEN, routed | TASK-060 (D-ORCH-011). `effectivePermissions` now requires `roles`; omitting them throws (R1) |
+| PR8-SEC-08 | **(b), (c) CLOSED.** (a) and (d) are unchanged and optional | (b): all 3 statements render `ON CONFLICT ("id") DO NOTHING`. `id` is the primary key, and `ux_permissions__key`, `ux_roles__key` and `ux_role_permissions__role_permission` are separate unique indexes. A natural-key collision under a foreign ID therefore raises `23505` instead of being kept. (c): the integration test asserts that no `scope <> 'OPERATOR'` role links an `operator_only` permission and that no role links `webhook:%`. For hardening, see PR8-SEC-14 |
+| PR8-SEC-09 | OPEN, routed | TASK-221 (WAVE-08.md:112 carries it) |
+| PR8-SEC-10 | OPEN, routed | TASK-016/028 |
+| PR8-SEC-11 | OPEN, routed | TASK-007 (CODEOWNERS), TASK-219. CODEOWNERS is still in no task's acceptance list (PR5-SEC-04), see R2.5 |
+| PR8-SEC-12 | OPEN, routed | D-ARCH-059 item 3 confirms the design: the export is RLS-bound to the active org and `app_actor_id()`. The test is owed by the REQ-ACCT-016 task |
+
+### R2.2 PR8-SEC-04 conditions (D-058 carve-out)
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | The flag is bound to the constant | **Met.** `SELF_SERVICE_PERMISSIONS` = `['session:manage', 'notification_pref:manage', 'notification:read']`, `as const satisfies readonly Permission[]`, and the test pins it literally. `selfService?: true` sits on exactly those 3 entries (S0): categories session/notification, none operator-only, reserved or signature-only. `checkCatalogue` gives `SELF_SERVICE_FLAG_MISMATCH` in both directions (S1c, S1d) and when the key is missing from the catalogue. It gives `SELF_SERVICE_INVALID` for operator-only, reserved or signature-only entries and for a category outside `{session, notification}` (S1e–S1h). `checkRoleInvariants` now runs `checkCatalogue`, so a role check can no longer trust a forged flag |
+| 2 | The carve-out is by flag only | **Met.** `readOnlyViolations` exempts only `definition.selfService === true`. A truthy non-`true` flag gives no exemption: `selfService: 1` on `address_book:manage` + Viewer → `VIEWER_NOT_READ_ONLY`, and `"true"` on `privacy:export` + Auditor → `AUDITOR_NOT_READ_ONLY` (S2, S2b). The verb rule stays literal. `VIEWER_EXFILTRATION` is never exempt: `selfService` on `document:download` gives all three codes, FLAG_MISMATCH, INVALID and EXFILTRATION (S1) |
+| 3 | `VIEWER_FORBIDDEN` includes `privacy:delete` | **Met.** It is `[document:download, document:email, privacy:export, privacy:delete]`, typed `readonly Permission[]`. Each entry on the Viewer gives `VIEWER_EXFILTRATION` + `VIEWER_NOT_READ_ONLY` (S3c). Test row `[AT-US-066-05-4]` covers it |
+| 4 | Positive invariant on every role | **Met.** Removing each permission of the set from each role, 17 × 3 = 51 cases, gives `SELF_SERVICE_MISSING`; every message names both the role and the permission (S4). The seeded roles all hold the set (S4b) |
+| 5 | Regenerate before pinning | **Met.** The pinned v1 is the post-D-058 render (E9 below) |
+
+**Re-check of the D-058 Viewer and Compliance Auditor rows (as D-058 asked).** I diffed the database view of the committed seed SQL against R1 (E9). It adds **exactly 7 links and removes 0**:
+- Viewer: + `session:manage`, + `notification_pref:manage` (11).
+- Compliance Auditor: + `session:manage`, + `notification_pref:manage` (5).
+- Finance: + `order:read`, + `notification_pref:manage` (8).
+- Admin: + `privacy:delete` (30, equal to Owner).
+
+No permission row changed. Four role rows changed, in `description` only. The new set has 182 + 7 = 189 links, and every other cell is unchanged.
+
+The Viewer holds 8 reads plus the self-service set, with no `payment:read`, download, e-mail, export or delete. The Compliance Auditor holds `audit:read`, `carrier:status:read` and the self-service set.
+
+**Accepted from the security side.** The one remaining precondition is PR8-SEC-05 (a): self-service permissions may guard only `user`-tenancy routes. That is a TASK-020 merge condition.
+
+Note: Viewer + `payment:read` passes the guard (S6b). That is by design: it is a product decision gated on telemetry (A-104), not a REQ-RBAC-004 invariant. The seed test asserts its absence, and the pin blocks an in-place grant.
+
+### R2.3 Focus-item rulings
+
+| Focus item | Ruling |
+|---|---|
+| selfService bound to exactly 3 permissions | **Yes**: constant + flag equality + category, flag and literal-set tests (R2.2 #1) |
+| Viewer/Auditor carve-out by flag only | **Yes**: strict `=== true` and no exemption from `VIEWER_EXFILTRATION` (R2.2 #2) |
+| `VIEWER_FORBIDDEN` includes `privacy:delete` | **Yes** (R2.2 #3) |
+| Every role holds the self-service set | **Yes**: guarded by `SELF_SERVICE_MISSING`, all 51 removals caught, plus a fast-check property in the PR (R2.2 #4) |
+| Operator-only detection on any key segment | **Yes.** `isOperatorOnlyKey` = `any_org` in any segment, or `audit:*` by resource segment (`isAuditPermission`), or the 2 named keys. A scope qualifier outside segment 3 is `PERMISSION_FORMAT`. `category` is never an authorisation input: `PERMISSION_CATEGORY_MISMATCH` forces category = resource, with only the two exceptions `payment_method → payment` and `notification_pref → notification`. **Residual, by design:** a brand-new resource name, such as `shipment_all:read` with a new category, is not operator-only by rule. The route layer closes it: the PR8-SEC-05 (b) TASK-020 binding requires an operator-only permission on every `operator-cross-tenant` route. Likewise, a hypothetical non-reserved `payment:read:on_behalf` held by the Viewer passes (R1 gap key, still `[]`). `on_behalf` is the M3 partner seam and is not operator-only under DR-A07, and no on-behalf route tenancy exists in this run. Optional hardening: a catalogue rule "`on_behalf` ⇒ `reserved`" until M3. Today's only such key, `shipment:create:on_behalf`, is already reserved |
+| Role scope swap and signatureOnly mismatch | **Both caught** (G2, G3, G3b, G3c). A swap that also **renames** the keys so that the prefixes agree passes the pure guard (G2b `[]`). Accepted: it needs a `ROLE_KEYS`/`RoleKey` edit, an `ASSIGNABLE_BY` edit (a Record over `RoleKey`, so it fails type-check otherwise) and a seed change, which the pin blocks. It produces new role rows, not a re-scope of existing memberships |
+| Seed pinning; bypass by editing the pin and the seed together | **The bypass works.** I put the hashes of a widened render (Viewer + `payment:read`) into a copy of `generate.ts`. Then: write = 0, `--check` = 0, `checkMessages` = `[]`, and the analogue of the "v1 is released" test passes. Every check the PR ships passes (P2). This is the deliberate-change path; the accidental path is closed. → **PR8-SEC-13** |
+| Linter rule 10 upsert | **Closed** (PR8-SEC-03 row) |
+| `ON CONFLICT ("id")` | **Correct** (PR8-SEC-08 (b) row). Re-run idempotency is unchanged, because the IDs are deterministic |
+| canAssignRole correctness | **Correct for REQ-ORG-010/012 and AC-05** ("Owner only by an Owner"; "Admin cannot modify an Owner"). Fail closed on unknown keys. `ASSIGNABLE_BY` keys = `ROLE_KEYS` (A6). **Binding conditions on the consumer (TASK-231/235):**<br>(i) A modify, suspend or remove must pass `canAssignRole` for **every** role the target member currently holds **and** every role in the requested set. Otherwise an Admin could act on an Owner+Viewer member through the Viewer role.<br>(ii) `assignerRoleKeys` come from the actor's `ACTIVE` membership **in the target organisation**, loaded from the database.<br>(iii) It is a rank check in addition to `org:member:invite`/`org:member:manage` and the 12 h step-up, never instead of them.<br>(iv) Self role change (REQ-ACCT-015) and `LAST_OWNER` (REQ-ORG-013) stay separate checks.<br>`ASSIGNABLE_BY` is not frozen at runtime (A5). That is acceptable, because `Readonly` types forbid mutation under strict TypeScript |
+| Database-side escalation backstop | **Present and correct as specified in R1.** Hardening is PR8-SEC-14 |
+
+### R2.4 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Owner |
+|---|---|---|---|---|---|
+| PR8-SEC-13 | The seed pin can be bypassed by editing the pin constant together with the seed; the generic migration-immutability check is in no task | LOW (MEDIUM once a persistent database exists, M5) | CWE-693 | A08 | orchestrator → TASK-007 (preferred) or TASK-016 |
+| PR8-SEC-14 | The database backstop test keys on the `operator_only` column and has no planted-row control | INFO | CWE-693 | A04 | TASK-016 (C-series port) or optional in this PR |
+
+**PR8-SEC-13. Where:** `tools/authz/generate.ts:42-50` (`SEED_MIGRATIONS`), `generate.test.ts` ("catalogue v1 is released", which compares the committed file with the in-code pin).
+
+**Description.** All three checks, the pin, the rendered output and the committed file, read their reference from one editable constant. A PR that changes `roles.ts`, regenerates, and puts the new SHA-256 values into `SEED_MIGRATIONS[1]` passes `--check`, the write mode and every unit test (P2). `prisma migrate deploy` then never applies the edited v1 to an existing database (R1 fact). Fresh databases get the new grants; existing ones keep the old grants. That is a silent privilege retention for a revocation.
+
+R1 routed the generic backstop ("a migration directory present on the merge base stays byte-identical") to TASK-016/TASK-007. As of `origin/main` `cb69b04` it is in neither task file, nor in D-ORCH-011. CODEOWNERS (PR5-SEC-04) is also still absent from TASK-007's acceptance list.
+
+**Exploitability and impact.**
+- **Preconditions.** A deliberate edit of a hash constant together with an `M` (not `A`) entry under `prisma/migrations/` in the same diff, and a review that misses it.
+- **Severity.** Before M5 only ephemeral databases exist: M × L = **LOW**. With a persistent database it is H × L = **MEDIUM**.
+
+**Remediation.** Add a lane A check that runs from the base ref, like the SEC-TC-64 tooling, for example `tools/ci/check-migration-immutability.mjs`:
+
+```js
+// fails on any M/D/R/C/T entry for a file that exists under prisma/migrations/ on the merge base
+const out = execFileSync('git', ['diff', '--name-status', '--no-renames', `${base}...HEAD`, '--', 'prisma/migrations'], { encoding: 'utf8' });
+const bad = out.split('\n').filter(Boolean).filter((line) => !line.startsWith('A\t'));
+if (bad.length) { console.error(`applied migrations are immutable (D-SEC-PR8-01):\n${bad.join('\n')}`); process.exit(1); }
+```
+
+`migration_lock.toml` may need an allow-list entry.
+
+**Verification.** A negative fixture branch that modifies an existing `migration.sql` fails lane A, and one that only adds a directory passes. For this PR, the check reports only `A` entries (P3).
+
+**PR8-SEC-14.** The query `(r.scope <> 'OPERATOR' AND p.operator_only) OR p.key LIKE 'webhook:%'` relies on the `operator_only` column. That column is correct today (E4b: the column equals the key rule on all 40 rows), but the backstop is not independent of it. The test also asserts `[]` with no control that proves the query can return a row.
+
+**Fix:**
+1. Use the key rule instead of the flag: `p.key ~ '(^|:)any_org(:|$)' OR p.key LIKE 'audit:%' OR p.key IN ('featureflag:manage', 'carrier:status:read')`.
+2. Add a control. Inside `BEGIN … ROLLBACK` as the migrator, insert the link `CUSTOMER_VIEWER|audit:read` and expect 1 row.
+
+### R2.5 Follow-ups (updated)
+
+| Item | Owner | Due |
+|---|---|---|
+| PR8-SEC-13 base-ref migration-immutability check, plus CODEOWNERS for `packages/authz`, `tools/authz` and `prisma/migrations` (PR5-SEC-04) | orchestrator to add to TASK-007's acceptance (in flight), otherwise TASK-016 | before the first catalogue v2 change, and in any case before M5 |
+| PR8-SEC-06 consumer conditions (i)–(iv) | TASK-231 / TASK-235 | their merge |
+| PR8-SEC-05 (a)–(d) route-binding check | TASK-020 (**merge condition**). It is recorded only in D-ORCH-011; the orchestrator should copy it into the TASK-020 acceptance list | TASK-020 merge |
+| PR8-SEC-07, -10, -08 (a) | TASK-060; TASK-016/028; data-architect. These are also only in D-ORCH-011 or the R1 report, not in the task files | their merge |
+| PR8-SEC-14 | TASK-016 when it ports the backstop to the C-series, or this PR (optional) | TASK-016 merge |
+| When the delta renderer arrives (first `CATALOGUE_VERSION` bump) | security-analyst re-review. A revocation renders as `DELETE` with `data-changing: yes` (D-SEC-PR8-01), and `down.sql` reverts only the delta | that PR |
+
+### R2.6 Evidence (head `498e3a5`, 2026-11-12)
+
+| Probe | Result |
+|---|---|
+| `git diff --stat 6e70275 498e3a5 -- packages/authz tools/authz tools/db prisma package.json` | empty |
+| `git diff --stat origin/main 498e3a5 -- package-lock.json package.json` | `package.json` +1 (the `authz:generate` script) only |
+| Secret-pattern grep over the added lines of `6e70275` | 0 hits |
+| `probe-guard.mjs` P0 | catalogue `[]`, roles `[]`; 40 / 17 / 189; per-role 38/6/4/3/4/3/5/3 · 30/30/25/8/11 · 7/4/4/4 |
+| C1–C7 (R1 escalation edits) | unchanged from R1, all caught (same codes) |
+| G0–G3 (R1 gaps) | now caught: `PERMISSION_FORMAT`, `PERMISSION_OPERATOR_ONLY_MISMATCH`, `PERMISSION_CATEGORY_MISMATCH`, `ROLE_SCOPE_MISMATCH`×2, `SIGNATURE_FLAG_MISMATCH`; G1b `OPERATOR_ONLY_ESCALATION` on Viewer and Shipper; G2b rename+swap `[]` (accepted, R2.3) |
+| O1–O3 | any-segment `any_org` → operator-only; `shipment:read:all_orgs` → `PERMISSION_FORMAT`; `shipment_all:read` (category shipment) → `PERMISSION_CATEGORY_MISMATCH` |
+| S0–S6 | R2.2; 51/51 `SELF_SERVICE_MISSING`; Viewer 11, Auditor 5 as listed |
+| A1–A6 | R2.3 canAssignRole row |
+| R1–R4 | `effectivePermissions` without `roles` throws; prototype keys → `UnknownRoleError`; `authorise` denies unknown, marker and empty; route check flags `PUBLIC`, `toString`, `"shipment:read "` |
+| `probe-seed.mjs` E0 | pin up/down = SHA-256 of the git blobs (MATCH); no CR bytes; `checkMessages` = `[]` |
+| E1–E8 | matrix doc, `migration.sql`, `down.sql` EQUAL to the generator; 3 INSERTs with `ON CONFLICT ("id") DO NOTHING`; header `data-changing: no`; 40/17/189; IDs = `seedId`; guard over the database-shaped catalogue and grants `[]`; `operator_only` = key rule on all rows; 0 dangling links; 0 non-operator → operator-only links (key rule); 0 webhook links; prefix = scope; `down.sql` IDs and keys = up |
+| E9 (vs `efe23df`) | +7 links (listed in R2.2), −0; permission rows unchanged; 4 role rows changed in `description` only |
+| `probe-pin.mjs` P0–P3 | control `[]`; in-place revoke/widen → `--check` 1, write 1; bypass by editing the pin constant → write 0, `--check` 0, `[]`; `git diff --name-status origin/main...498e3a5 -- prisma/migrations` → 4 × `A` |
+| `probe-lint.mjs` L | R2.1 PR8-SEC-03 row |
+| Not run (constraint) | install, build, Docker suites, gitleaks. The PR comment reports, on `6e70275`: lint, format, typecheck, build, `authz:generate --check` and `npm audit --audit-level=high` all exit 0; unit 859/859; **full** `test:integration` 33/33; **full** `test:coverage` 892/892 with `packages/authz` at 100 % lines and 100 % branches; porcelain empty. On `498e3a5`, lint, format and unit were re-run green |
