@@ -118,6 +118,8 @@ export type SeedPasswordVariable = (typeof SEED_PASSWORD_VARIABLES)[number];
 /**
  * How the demo seed provisions credentials (REQ-DATA-002, D-043, D-052, SEC-P3-14), decided before any write:
  * - `skip`: APP_ENV=production; the demo seed writes nothing (AT-US-049-03).
+ * In staging and production any SEED_* password variable that is present is refused (SEED_DEFAULT_PASSWORD_REFUSED for a
+ * `local-only-*` default, SEED_PASSWORD_FORBIDDEN otherwise), naming the variable only.
  * - `seeded-passwords`: APP_ENV ∈ {local, test}; every SEED_* variable is required; `local-only-*` defaults are
  *   accepted only in `local` (AT-US-049-04/-05/-06/-10).
  * - `set-password-link`: any other non-production APP_ENV (staging); no SEED_* password is read; staff users get no
@@ -131,7 +133,8 @@ export type DemoCredentialPlan =
 export type SeedRefusalCode =
   | 'SEED_DEFAULT_PASSWORD_REFUSED'
   | 'SEED_VARIABLE_MISSING'
-  | 'SEED_DEMO_REFUSED_IN_PRODUCTION'
+  | 'SEED_PASSWORD_FORBIDDEN'
+  | 'SEED_ENVIRONMENT_INVALID'
   | 'SEED_INSERT_ONLY_CHANGED'
   | 'SEED_AUTHZ_DRIFT'
   | 'SEED_INVALID_DATASET';
@@ -164,8 +167,11 @@ export type DemoCredential = { readonly kind: 'password'; readonly password: Sec
  * Port to the identity service (TASK-037/TASK-089): creates the user, memberships, roles, audit entries and outbox
  * events exactly as production does, or finds it by email and changes nothing.
  */
+/** `deferred`: no identity-backed provisioner is wired yet (TASK-089); nothing was written. */
+export type DemoUserOutcome = 'created' | 'unchanged' | 'deferred';
+
 export interface DemoUserProvisioner {
-  ensureUser(spec: DemoUserSpec, credential: DemoCredential): Promise<'created' | 'unchanged'>;
+  ensureUser(spec: DemoUserSpec, credential: DemoCredential): Promise<DemoUserOutcome>;
 }
 
 export interface DemoSeedOptions {
