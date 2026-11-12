@@ -1014,3 +1014,8 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 ### D-TASK005-01 · 2026-11-12 · backend-developer / senior-developer (logged by orchestrator) · TASK-005 implementation decisions (PR #3)
 - **Decision:** Key register = 25 rows (ratified D-ARCH-051); secret providers env, file and aws-secrets-manager with a 2 s budget (enforcement fixed in fix cycle 1, PR #3 M1); errors name keys never values; `zod` declared in packages/config for the web subset only (backend Joi per D-ORCH-006 item 4).
 - **Reversibility:** High.
+
+### D-TASK002-02 · 2026-11-12 · senior-developer (logged by orchestrator) · TASK-002 fix cycle 1 decisions (PR #2 @6ba7649)
+- **Decision:** (1) bcrypt confinement uses two controls: an eslint-plugin-boundaries policy (catches `import()`, `require`/.cjs, `module.require`, `createRequire(...)(...)`, family `bcrypt*`/`@*/bcrypt*`, re-exports from the hasher) plus `no-restricted-imports` kept as the static-import net (double report on static imports accepted); the hasher re-declares the shared pattern list minus bcrypt instead of turning the rule off; aliased `createRequire` is left to the TASK-007 Semgrep backstop. (2) `SERVER_SOURCES` = `packages/*` minus browser packages (default-covered). (3) Prisma allowed at exact planned paths only (`packages/audit/src/store/prisma-store.ts`, `apps/api/src/platform/outbox/writer.ts`). (4) `@platform/*` web/admin confinement proven by in-repo `lintText` probes (fixture roots cannot classify locally resolved imports).
+- **Why:** Close PR #2 M1/m1/m3/m9(a) and PR2-SEC-02 with fixture-proven policies; narrow allowances over globs.
+- **Reversibility:** High.
