@@ -184,7 +184,11 @@ PR #12 (TASK-012, SPK-08) r1 at 2e0aa32 was CHANGES_REQUESTED (2026-11-13). Revi
 - M2: the guard's `sql_drop` refusal branch is never exercised (R-ARCH-18 "schema-owner DROP TABLE"). Test as `SET ROLE platform_schema_owner`.
 - M3: lifecycle. Both spike suites break when TASK-021 adds the real `prisma/bootstrap/10-audit.sql`, so TASK-021's PR must port and delete them. The anchor files have no owner.
 - m1: F-01's premise sits behind an `if`; the shadow contents are unasserted. m4: F-04 is already in data-model §7.3 A17; the real gap is that the by-name tolerance cannot see a lost INCLUDE.
-- r2: re-check the new `sql_drop` test, the per-file lifecycle table and the m1 assertions. When the TASK-021 PR lands, verify the spike files were ported and deleted.
+- r2 at 0dc3ae9: APPROVED_WITH_NITS (2026-11-13). M1–M3, m1–m5 and n1–n7 are closed.
+  - R2-m1 MINOR: the F-11 TASK-016 rule ("no DROP of a WHERE index unless re-created") passes a re-create WITHOUT `WHERE`. The case is preview on + plain `@@index`. Check the TASK-016 rule wording.
+  - Lifecycle (SPK-08 §8.1):
+    - The TASK-021 PR must delete the audit-owner test, `spk08/{10,90}-*.sql` and `spk08/prisma.config.ts` in the porting commit, and port the sql_drop, planted-name and F-02 cases.
+    - The TASK-116 PR (the anchor writer and verifier, not TASK-033) must delete the anchor test and `anchor-prototype.ts`, and pin the golden vectors in a packages/audit unit test.
 
 PR #13 (TASK-023 seed framework) r1 at e92cd6f was CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0013-TASK-023-code-review.md`.
 - M1 (docs only): US-049 is planned as "completes", but AT-02/-05/-09/-10 are unmet and TASK-089 and TASK-014 do not own them. Needs a re-scope decision, sheet ATs and a PR-body relabel.

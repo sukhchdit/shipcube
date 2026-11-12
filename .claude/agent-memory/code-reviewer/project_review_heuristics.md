@@ -107,8 +107,9 @@ Round 2 of a spike PR (PR #6 r2):
 **DB spike PRs (PR #12 SPK-08, 2026-11-13):**
 - **Spike exit lists live in several places.** The sheet's acceptance is a subset. Also grep `risks.md` R-ARCH-xx (the full exit list), `rulings/*.md` ("routed → TASK-xxx") and the data-model "verify in P5 spike" notes. Routed questions get dropped silently.
 - **Refusal-branch coverage per event type.** When privilege stops every tamper statement first, the guard's second-layer branches (e.g. `sql_drop`) are never exercised. Ask for a test as a role that HAS the privilege: the schema owner via superuser `SET ROLE`, or the superuser itself.
-- **Spike suites vs the real files.** The harness applies the whole `prisma/bootstrap` dir. A spike that re-creates objects the real bootstrap will own breaks the day the real files land. The lifecycle deadline is the PR that adds the real files, not the later "porting" task.
+- **Spike suites vs the real files.** The harness applies the whole `prisma/bootstrap` dir. A spike that re-creates objects the real bootstrap will own breaks the day the real files land. The lifecycle deadline is the PR that adds the real files, not the later "porting" task. PR #12 r2 accepted an alternative: the suite bootstraps a filtered temp copy (`0N-*.sql` only), so it survives until the porting task.
 - **"Evidence" in an optional JSON report is not an assertion.** Look for `if (status !== 0)` branches and negative regexes over possibly-empty output. Recompute published golden vectors yourself; it takes about a minute in Node.
+- **"Re-created in the same file" lint rules** (PR #12 r2): check that the re-create must carry the lost feature (`WHERE`, `INCLUDE`). Otherwise the rule passes the exact silent-downgrade it targets. Accepted fix for vacuous negatives: a positive `toContain` next to each one, plus a probe-touched proof such as a catalog read.
 - **"Verbatim from spec" claims:** extract the spec's code fences with awk, normalise whitespace and comments, and `diff`.
 
 **CLI / tooling DB clients (PR #13, 2026-11-13):**
