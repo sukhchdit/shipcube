@@ -64,7 +64,6 @@ reset it; for `next_value` that means duplicate order numbers.
 | (b) Nullable natural keys (`NULLS NOT DISTINCT`) are refused; the insert-only changed-count joins with `=` | `holidays.region_code`, `notification_templates.variant` | `IS NOT DISTINCT FROM` joins; lift the null-key refusal for NND indexes | holidays (US-054), templates (US-056) seed tasks |
 | (c) Partial-index arbiters: `ON CONFLICT (cols)` cannot infer `UNIQUE … WHERE …` | `prohibited_items` (`WHERE scope = 'COUNTRY'`) | optional `arbiterWhere` | compliance-pack seed task |
 | (d) Insert-only columns: every column is restored on drift | `number_sequences.next_value`, `reviewed_at` / `reviewed_by` | `insertOnlyColumns` (written on insert, never compared or restored) | number-sequences (US-056) seed task |
-- Tests: unit beside the code, `tests/seed/seed.int.test.ts` (PostgreSQL 18, real migrations, test-only probe tables, CLI).
 
 ## Findings for SPK-03/SPK-08
 
