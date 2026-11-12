@@ -9,10 +9,14 @@ export const platformCatalogue = {
   VALIDATION_ERROR: { status: 400, title: 'Validation failed' },
   /** No (valid) principal on a route that needs one. */
   AUTH_REQUIRED: { status: 401, title: 'Authentication required' },
+  /** Authenticated caller lacks the permission or the row-level scope for the action (incl. an RLS write rejection). */
+  AUTHZ_DENIED: { status: 403, title: 'Permission denied' },
   /** Unknown route, or a resource the caller may not see (same response either way). */
   NOT_FOUND: { status: 404, title: 'Not found' },
   /** Known path, unsupported method; the response carries `Allow`. */
   METHOD_NOT_ALLOWED: { status: 405, title: 'Method not allowed' },
+  /** The request conflicts with the current state of the resource (e.g. a unique constraint). */
+  CONFLICT: { status: 409, title: 'Conflict' },
   /** Body larger than the route limit (1 MB default). */
   PAYLOAD_TOO_LARGE: { status: 413, title: 'Payload too large' },
   /** Content-Type outside the route allow-list. */

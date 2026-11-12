@@ -9,7 +9,8 @@
 - [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 R1 + R2 @d2e867b PASS_W_F-U; 10/11 LOW new; PR #17 owned overlap (merge order); TASK-014/015/022/111 checks
 - [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_W_F-U; record contract; main-merge voids records on owned overlap; PR10-SEC-21; TASK-015 checks
 - [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
-- [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R3 @37a2109 content authorised (PASS_W_F-U); supersede round owed (D-ORCH-018); 16 E-string LOW, 17 forge INFO; TASK-020/024/021/010 checks
+- [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R3 @37a2109 content authorised (PASS_W_F-U); supersede done as PR-0018; 16 E-string LOW, 17 forge INFO; TASK-020/024/021/010 checks
+- [P5 PR-0018 supersede round](project_p5_pr18_supersede.md) — TASK-016 @0f9ff27 PASS_W_F-U, no new finding; three-way tree-compare + clone --shared record-check method; PR #4 must keep TENANT_DB cases
 - [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
 - [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; supersede-round checks (D-ORCH-017); 09 TLS values→TASK-014; 11 literal on main

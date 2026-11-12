@@ -38,3 +38,10 @@ Exception: during parallel batches the orchestrator may forbid installs, builds,
 - The lock delta `git diff --text origin/main HEAD -- package-lock.json` must equal the branch's delta vs MB.
 - Also run `gh pr view N --json statusCheckRollup`. An empty rollup means CI has not run on the head, which is a merge condition.
 - Quickest proof (PR #9 r4): `git merge-tree --write-tree P1 P2`, then `git diff --stat <tree> M`. If the only output is conflict markers in the conflicted files, everything else is byte-identical to a clean re-merge, and `git show --cc M` shows the hand resolution.
+
+**Supersede check (PR #18 r1, replaces PR #11).** Partition proof by SHA, no build:
+- MB=`git merge-base origin/main OLD`. Old PR files = `diff --name-only MB OLD`; main delta = `diff --name-only MB origin/main`; overlap via `comm -12`.
+- Old-only files: `git diff --name-only OLD NEW -- <files>` empty. Main-only files: `git diff --name-only origin/main NEW -- <files>` empty. File sets of `MB..OLD` and `origin/main..NEW` equal.
+- Overlap file: `git merge-file -p main base old` and diff against NEW to isolate the hand resolution; extract case tables with awk and `cmp` them.
+- Ancestry: loop `git merge-base --is-ancestor` over `git rev-list MB..OLD`; `git rev-list --merges origin/main..NEW` empty.
+- CI: `gh run view <id> --log | grep "No-weakening run:\|rule new to the base"` gives the base-ref extras count.

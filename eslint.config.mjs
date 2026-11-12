@@ -63,11 +63,17 @@ const FORMAT_HELPERS = ['packages/shared/src/intl/**', 'packages/shared/src/form
 const SANITISING_COMPONENT = ['packages/ui/src/sanitised-html/**'];
 /** The SSRF-safe outbound client module (ADR-0016 §13, TASK-113). */
 const OUTBOUND_CLIENT = ['apps/api/src/platform/egress/**'];
-/** Importers of the audit writer: the audit package and its allow-listed callers (REQ-AUDIT-001, ADR-0007). */
+/**
+ * Importers of the audit writer: the audit package and its allow-listed callers (REQ-AUDIT-001, ADR-0007). Narrowed by
+ * TASK-016 (TASK-002 code review n5): the request-pipeline folders that write entries, not all of platform/**, and
+ * the worker's job processors, not all of apps/worker/src.
+ */
 const AUDIT_WRITER_ALLOW_LIST = [
   'packages/audit/**',
-  'apps/api/src/platform/**', // request pipeline: audit middleware, withTenantTx
-  'apps/worker/src/**', // system jobs
+  'apps/api/src/platform/audit/**', // audit middleware (route audit descriptor)
+  'apps/api/src/platform/authz/**', // permission denials (PERMISSION_DENIED entries)
+  'apps/api/src/platform/db/**', // withTenantTx (system writers joined to the business transaction)
+  'apps/worker/src/processors/**', // system jobs (BullMQ processors)
   'apps/api/src/modules/identity/**', // auth events
   'apps/api/src/modules/compliance/**', // config changes
   'apps/api/src/modules/admin-settings/**', // config changes (reference data, feature flags)
@@ -78,6 +84,51 @@ const AUDIT_WRITER_ALLOW_LIST = [
  * transactional outbox writer (TASK-043). Anything else beside them still goes through a repository.
  */
 const PLANNED_PRISMA_FILES = ['packages/audit/src/store/prisma-store.ts', 'apps/api/src/platform/outbox/writer.ts'];
+/** The database platform: the only home of the root Prisma client and of withTenantTx (ADR-0005 am. 10 item 2). */
+const DB_PLATFORM = 'apps/*/src/platform/db/**';
+/** Repository layer files (folder or single file), for the raw-SQL and expectAffected rules. */
+const REPOSITORY_FILES = ['apps/api/src/modules/*/repository/**', 'apps/api/src/modules/*/repository.{ts,tsx}'];
+/**
+ * `platform/tenant-context-sql` exemptions (ADR-0005 am. 10 items 1 and 4; TASK-016 lead decision 6; PR11-SEC-08).
+ * Exact files only (no folder globs: a new file in an exempted folder must not inherit the exemption), each with the
+ * forms it may contain: `setter` (the context setter function name), `keys` (the four security keys, e.g. a
+ * readiness read), `session-set` (`SET [SESSION] app.…` / `RESET app.…`), `session-set-config` (the setter with
+ * is_local = false). Every other file gets the rule with no exemption.
+ */
+const ALL_CONTEXT_FORMS = ['setter', 'keys', 'session-set', 'session-set-config'];
+const TENANT_CONTEXT_EXEMPTIONS = [
+  // The one runtime writer of the context: transaction-local setter only (session forms stay errors).
+  { files: ['apps/api/src/platform/db/with-tenant-tx.ts'], allow: ['setter', 'keys'] },
+  // TASK-006 readiness probe: READS the app.* settings of a fresh connection; never a second writer.
+  { files: ['apps/api/src/platform/db/session-integrity.ts', 'apps/api/src/platform/db/session-integrity.test.ts'], allow: ['keys'] },
+  // TASK-006 session-integrity integration suite (D-ORCH-014 (e)): plants what the guard must detect, i.e. a
+  // transaction-local setter on the pool (the '' reset value) and role-level defaults of a key (`ALTER ROLE … SET`,
+  // the session-set form), and reads the keys. Never a runtime writer; no is_local = false form.
+  { files: ['apps/api/src/platform/db/session-integrity.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
+  // Integration suite of withTenantTx: asserts the context statement and its fail-closed behaviour.
+  { files: ['prisma/tests/rls/with-tenant-tx.int.test.ts'], allow: ['setter', 'keys'] },
+  // The session-scope negative control: the ONLY runtime-lane file allowed the is_local = false form (it proves the leak).
+  { files: ['prisma/tests/rls/session-scope-leak.int.test.ts'], allow: ALL_CONTEXT_FORMS },
+  // SPK-03 spike, kept until the C-1 artifact is recorded (lead decision 3): ran every form, including the leak control.
+  // Remove this entry in the commit that deletes the spike file (a stale entry would exempt any future file there).
+  { files: ['prisma/tests/spikes/spk03-rls-tx.int.test.ts'], allow: ALL_CONTEXT_FORMS },
+  // SPK-08 spike (PR #12, merged): one migrate-diff probe policy reads a key directly. Remove this entry in the commit
+  // that ports and deletes the spike file (TASK-021, D-TASK012-02 (1)).
+  { files: ['prisma/tests/spikes/spk08-audit-owner.int.test.ts'], allow: ['keys'] },
+  // Catalog C-series: the prosrc scan's negative fixtures create functions that run a session SET of a context key
+  // (transaction-local setter fixtures only: no is_local = false).
+  { files: ['prisma/tests/catalog/c01-c12.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
+  // The catalog scan helpers name the keys (the renderer's deparsed operator-scope atom).
+  { files: ['prisma/tests/catalog/scans.ts'], allow: ['keys'] },
+  // The RLS renderer emits the §4.3 policies over the §4.2 helpers.
+  { files: ['tools/db/render-rls.ts', 'tools/db/render-rls.test.ts'], allow: ['keys'] },
+  // Migration-linter rule 16 names the forms it rejects; its tests and the shared form list's tests name every
+  // evasion form, session forms included (PR11-SEC-02).
+  { files: ['tools/db/lint-migrations.ts'], allow: ['setter', 'keys'] },
+  { files: ['tools/db/lint-migrations.test.ts', 'tools/db/tenant-key-forms.test.ts'], allow: ALL_CONTEXT_FORMS },
+  // pg_dump's own preamble `set_config('search_path', '', false)`, asserted verbatim (no tenant key; not a session form).
+  { files: ['tools/db/up-down-up.test.ts'], allow: ['setter'] },
+];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];
 
@@ -117,8 +168,14 @@ const BOUNDARIES_FILES = [
   { pattern: `${MODULE}/**`, category: 'api-module', capture: ['module'] },
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
-  { pattern: 'apps/*/src/platform/db/**', category: 'db-platform' },
+  { pattern: DB_PLATFORM, category: 'db-platform' },
+  // The folder itself (without the planned Prisma files below): the only importers of the root client.
+  { pattern: DB_PLATFORM, category: 'db-platform-core' },
+  { pattern: 'apps/*/src/platform/db/client.ts', category: 'db-root-client' },
   { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
+  { pattern: 'prisma/tests/**', category: 'prisma-tests' },
+  { pattern: 'tools/test-support/**', category: 'test-support' },
+  { pattern: 'tools/authz/**', category: 'tools-authz' },
   { pattern: PASSWORD_HASHER_MODULE, category: 'password-hasher' },
   { pattern: 'prisma/generated/**', category: 'prisma-generated' },
   { pattern: 'prisma/**', category: 'prisma' },
@@ -139,8 +196,13 @@ const PRISMA_TARGETS = [
   { file: { categories: 'prisma-generated' } },
 ];
 const SQL_DRIVER_TARGETS = [toPackage('pg', 'pg-pool')];
-/** Code that may touch Prisma and the SQL driver: repositories, the database platform, the prisma workspace, tools and tests. */
+/** Code that may touch Prisma: repositories, the database platform (planned files included), prisma/, tools/db and tests. */
 const DATABASE_CODE = { file: { categories: { anyOf: ['repository', 'db-platform', 'prisma', 'tools-db', 'test'] } } };
+/**
+ * Code that may import the SQL driver (`pg`, `pg-pool`): the database platform core only (not the planned Prisma
+ * files, not repositories), prisma/, tools/db and tests (PR2-SEC-05 addendum, PR11-SEC-05).
+ */
+const SQL_DRIVER_CODE = { file: { categories: { anyOf: ['db-platform-core', 'prisma', 'tools-db', 'test'] } } };
 const EXPRESS_PACKAGES = ['express', 'express-serve-static-core', '@types/express', '@types/express-serve-static-core'];
 const NOT_SAME_MODULE = '!{{ from.file.captured.module }}';
 const NOT_SAME_APP = '!{{ from.file.captured.app }}';
@@ -200,9 +262,34 @@ const BOUNDARIES_POLICIES = [
   { from: DATABASE_CODE, allow: PRISMA_TARGETS.map((to) => ({ to })) },
   {
     disallow: SQL_DRIVER_TARGETS.map((to) => ({ to })),
-    message: 'only repositories import the PostgreSQL driver and run raw SQL (ADR-0003).',
+    message:
+      'only the database platform core (apps/*/src/platform/db), prisma/, tools/db and tests import the PostgreSQL driver: a second pool runs without the tenant context and outside the business transaction; repositories and SYSTEM writers use the TenantDb (ADR-0005 am. 10 item 2, PR2-SEC-05, PR11-SEC-05).',
   },
-  { from: DATABASE_CODE, allow: SQL_DRIVER_TARGETS.map((to) => ({ to })) },
+  { from: SQL_DRIVER_CODE, allow: SQL_DRIVER_TARGETS.map((to) => ({ to })) },
+
+  // --- The root Prisma client is private to the database platform (ADR-0005 am. 10 item 2, PR2-SEC-05, F-02):
+  //     repositories, services and system writers get a TenantDb from withTenantTx. The DB test lane (prisma/tests)
+  //     builds runtime clients through the factory on purpose (harness, RLS and catalog suites).
+  {
+    disallow: { to: toLayer('db-root-client') },
+    message:
+      'the root database client (platform/db/client.ts) is private to apps/*/src/platform/db: use withTenantTx / TenantDb (ADR-0005 am. 10 item 2).',
+  },
+  { from: { file: { categories: { anyOf: ['db-platform-core', 'prisma-tests'] } } }, allow: { to: toLayer('db-root-client') } },
+
+  // --- prisma/tests imports only what it exercises (TASK-016, PR #5 code review R3-n1): tools/db, tools/test-support,
+  //     the authz seed generator (tools/authz, authz-seed suite), the database platform, the generated client and
+  //     its own files (harness included). Packages, apps outside platform/db and other tools stay out.
+  {
+    from: { file: { categories: 'prisma-tests' } },
+    disallow: { to: toLayer('package', 'app', 'tools', 'tests-workspace', 'prisma') },
+    message:
+      'prisma/tests may import only tools/db, tools/test-support, tools/authz, apps/*/src/platform/db, prisma/generated and its own files (PR #5 R3-n1).',
+  },
+  {
+    from: { file: { categories: 'prisma-tests' } },
+    allow: { to: toLayer('tools-db', 'test-support', 'tools-authz', 'db-platform-core', 'prisma-generated', 'prisma-tests') },
+  },
 
   // --- The bcrypt family is confined to the PasswordHasher implementation (D-ARCH-042, ADR-0006 am. 16): import,
   //     export-from, import(), require, module.require and createRequire(...)(...) (see the additional dependency
@@ -454,10 +541,17 @@ export default defineConfig([
   },
   {
     // The cross-cutting DB test lane (D-TASK003-01: type-checked through tools/tsconfig.json) exercises the root
-    // tooling it tests (tools/db, tools/test-support) and the runtime client factory (apps/api/src/platform/db), none
-    // of which is a package entry point. Relative imports are the only way in; scoped to prisma/tests (TASK-003).
+    // tooling it tests (tools/db, tools/test-support, tools/authz) and the database platform (apps/*/src/platform/db),
+    // none of which is a package entry point, so relative imports are the only way in. The rule stays ON and ignores
+    // exactly those relative targets (TASK-016, PR #5 R3-n1: the former tree-wide 'off' is removed); the boundaries
+    // policy for the `prisma-tests` category enforces the same target list on the resolved files.
     files: ['prisma/tests/**'],
-    rules: { 'import-x/no-relative-packages': 'off' },
+    rules: {
+      'import-x/no-relative-packages': [
+        'error',
+        { ignore: ['^(?:\\.\\./)+(?:tools/(?:db|test-support|authz)|apps/[^/]+/src/platform/db)/[^/]+$'] },
+      ],
+    },
   },
 
   // --- Layering (eslint-plugin-boundaries) ----------------------------------------------------------------------
@@ -528,6 +622,46 @@ export default defineConfig([
   { files: SANITISING_COMPONENT, rules: { 'platform/no-innerhtml': 'off' } },
   { files: OUTBOUND_CLIENT, rules: { 'platform/outbound-http-via-client': 'off' } },
   { files: AUDIT_WRITER_ALLOW_LIST, rules: { 'platform/audit-writer-allowlist': 'off' } },
+
+  // --- Tenant context and the database platform (ADR-0005 am. 10 items 1, 2, 4, 12, 15; PR2-SEC-05; TASK-016) ------
+  {
+    // Everywhere (tests and tooling included); the exact-file exemptions follow.
+    files: [`**/*.${LINTED}`],
+    plugins: { platform },
+    rules: { 'platform/tenant-context-sql': 'error' },
+  },
+  ...TENANT_CONTEXT_EXEMPTIONS.map(({ files, allow }) => ({ files, rules: { 'platform/tenant-context-sql': ['error', { allow }] } })),
+  {
+    // A Prisma client is constructed only by the database platform, the prisma workspace, tools/db and tests.
+    files: [`**/*.${LINTED}`],
+    ignores: [DB_PLATFORM, 'prisma/**', 'tools/db/**', ...TEST_FILES],
+    plugins: { platform },
+    rules: { 'platform/prisma-client-construction': 'error' },
+  },
+  {
+    // Parameterised raw SQL only, and no `$parent` escape, in all application code (services hold a TenantDb too) and
+    // the planned non-repository Prisma files (PR11-SEC-05). Tests are excluded: they assert that TenantDb's Proxy
+    // refuses these shapes.
+    files: [`apps/*/src/**/*.${LINTED}`, ...PLANNED_PRISMA_FILES],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/db-raw-sql': 'error' },
+  },
+  {
+    // Role defaults belong to the bootstrap lane (item 12 d). Tests are excluded (drift probes may name the statement).
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/no-alter-role-sql': 'error' },
+  },
+  {
+    // Item 15 asks for warning level until the first state-transition module lands. NOTE: `npm run lint` runs with
+    // --max-warnings 0, so this warning already blocks the lint gate; raise to 'error' with TASK-051 (first claim).
+    files: REPOSITORY_FILES,
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/expect-affected': 'warn' },
+  },
   {
     // The hasher keeps every other restricted pattern (re-declared from the shared list, never 'off').
     files: [PASSWORD_HASHER_MODULE],

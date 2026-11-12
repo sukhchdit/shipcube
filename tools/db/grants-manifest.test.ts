@@ -1,0 +1,80 @@
+import { describe, expect, it } from '@jest/globals';
+
+import { GrantsManifestError, grantTuples, loadGrantsManifest, parseGrantsManifest, validateGrants } from './grants-manifest.js';
+import { loadTableClasses, type TableClassEntry } from './table-classes.js';
+
+const entry = (name: string, extra: Partial<TableClassEntry> = {}): TableClassEntry => ({ module: 'm', name, class: 'TENANT', ...extra });
+
+describe('grant manifest (data-model §4.4, C5)', () => {
+  it('PR8-SEC-10: the committed manifest grants SELECT only on the authz catalogue and agrees with the table classes', () => {
+    const grants = loadGrantsManifest();
+    expect(grantTuples(grants)).toEqual([
+      'platform_app SELECT public.permissions *',
+      'platform_app SELECT public.role_permissions *',
+      'platform_app SELECT public.roles *',
+    ]);
+    expect(validateGrants(grants, loadTableClasses())).toEqual([]);
+  });
+
+  it('parses table and column grants, ignores comments and blank lines, and sorts the columns', () => {
+    const grants = parseGrantsManifest(
+      '# comment\n\nplatform_app   SELECT public.quotes   # trailing\nplatform_app UPDATE public.quotes (version, org_id)\n',
+    );
+    expect(grants).toEqual([
+      { grantee: 'platform_app', privilege: 'SELECT', schema: 'public', table: 'quotes' },
+      { grantee: 'platform_app', privilege: 'UPDATE', schema: 'public', table: 'quotes', columns: ['org_id', 'version'] },
+    ]);
+    expect(grantTuples(grants)).toEqual([
+      'platform_app SELECT public.quotes *',
+      'platform_app UPDATE public.quotes org_id',
+      'platform_app UPDATE public.quotes version',
+    ]);
+  });
+
+  it.each([
+    ['a malformed line', 'platform_app SELECT', /expected "<grantee>/],
+    ['an unknown grantee', 'platform_migrator SELECT public.t', /grantee must be one of/],
+    ['TRUNCATE', 'platform_app TRUNCATE public.t', /privilege must be one of/],
+    ['another schema', 'platform_app SELECT other.t', /schema must be public or platform/],
+    ['an invalid column', 'platform_app UPDATE public.t (Bad)', /invalid column list/],
+    ['a duplicate column', 'platform_app UPDATE public.t (a, a)', /duplicate column/],
+    ['a DELETE column grant', 'platform_app DELETE public.t (a)', /DELETE cannot be a column grant/],
+    ['a duplicate grant', 'platform_app SELECT public.t\nplatform_app SELECT public.t', /duplicate grant platform_app SELECT public\.t \*/],
+    [
+      'a table grant shadowing a column grant',
+      'platform_app UPDATE public.t\nplatform_app UPDATE public.t (a)',
+      /both a table and a column grant/,
+    ],
+  ])('refuses %s', (_label, text, error) => {
+    expect(() => parseGrantsManifest(text)).toThrow(GrantsManifestError);
+    expect(() => parseGrantsManifest(text)).toThrow(error);
+  });
+
+  it('cross-checks DELETE and definer grants with the table-class flags', () => {
+    const entries = [
+      entry('tokens', { class: 'USER_OWNED', definerRead: true, definerPurge: true }),
+      entry('outbox_events', { class: 'SYSTEM', hardDelete: true }),
+      entry('shipments'),
+    ];
+    const grants = parseGrantsManifest(
+      [
+        'platform_app DELETE public.outbox_events',
+        'platform_app DELETE public.shipments',
+        'platform_definer SELECT public.tokens',
+        'platform_definer SELECT public.shipments',
+        'platform_definer DELETE public.shipments',
+        'platform_definer INSERT public.tokens',
+        'platform_app SELECT public.unknown_table',
+        'platform_app SELECT platform.not_checked',
+      ].join('\n'),
+    );
+    expect(validateGrants(grants, entries)).toEqual([
+      'platform_app DELETE public.shipments: DELETE outside the hard-delete allow-list',
+      'platform_definer SELECT public.shipments: table has no definerRead flag',
+      'platform_definer DELETE public.shipments: table has no definerPurge flag',
+      'platform_definer INSERT public.tokens: platform_definer holds SELECT/DELETE only',
+      'platform_app SELECT public.unknown_table: table is in no table-class manifest',
+      'platform_definer DELETE public.tokens: definerPurge table without its manifest line',
+    ]);
+  });
+});
