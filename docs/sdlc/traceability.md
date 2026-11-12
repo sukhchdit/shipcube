@@ -44,9 +44,9 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 ## Requirement → Story
 | REQ | MS | MoSCoW | Story | Design (ADR/Spec) | Task(s) | Test(s) | Status |
 |---|---|---|---|---|---|---|---|
-| REQ-PLAT-001 | M0 | Must | US-001 | platform · ADR-0002 §Workspaces (monorepo layout); ARCHITECTURE §11 blueprint | TASK-001, TASK-002 | – | Planned |
-| REQ-PLAT-002 | M0 | Must | US-001 | platform · ADR-0003 §Layering (routes → controller → service → repository, `eslint-plugin-boundaries`); ADR-0002 §5 | TASK-001, TASK-002 | – | Planned |
-| REQ-PLAT-003 | M0 | Must | US-001 | platform · ADR-0001 (TypeScript 6 strict); ADR-0002 §Scripts (`tsc -b`, root scripts) | TASK-001, TASK-002 | – | Planned |
+| REQ-PLAT-001 | M0 | Must | US-001 | platform · ADR-0002 §Workspaces (monorepo layout); ARCHITECTURE §11 blueprint | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-PLAT-002 | M0 | Must | US-001 | platform · ADR-0003 §Layering (routes → controller → service → repository, `eslint-plugin-boundaries`); ADR-0002 §5 | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-PLAT-003 | M0 | Must | US-001 | platform · ADR-0001 (TypeScript 6 strict); ADR-0002 §Scripts (`tsc -b`, root scripts) | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-004 | M0 | Must | US-002 | packages/config · ADR-0018 §Typed configuration (Joi schema, fail-fast, `.env.example` parity) | TASK-005 | – | Planned |
 | REQ-PLAT-005 | M0 | Must | US-003 | infra/ (compose) · platform.md §2 Compose stack (`--wait` ≤ 180 s); ADR-0021 (RustFS); ADR-0001 (Valkey 8) | TASK-014, TASK-026, TASK-089 | – | Planned |
 | REQ-PLAT-006 | M0 | Must | US-004 | infra/ (Dockerfiles) · platform.md §3 hardened images; ADR-0022; ADR-0023 am. F (`npm ci --ignore-scripts`) | TASK-014 | – | Planned |
@@ -145,11 +145,11 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-AUDIT-023 | M0 | Must | US-097 | audit module · ADR-0007 §Viewer (`audit:read` only); ADR-0005 operator cross-tenant branch | TASK-073, TASK-081 | – | Planned |
 | REQ-AUDIT-024 | M0 | Must | US-096 | packages/audit · ADR-0007 §Consequences (audit test generator over route metadata); ADR-0024 | TASK-033 | – | Planned |
 | REQ-AUDIT-025 | M0 | Should | US-100 | platform · ADR-0003 §Route metadata (`reasonRequired` → 422 `REASON_REQUIRED`); ADR-0007 §Viewer | TASK-222 | – | Planned |
-| REQ-RLS-001 | M0 | Must | US-074 | prisma/ · ADR-0005 §Tenant tables (`org_id`, composite indexes, global-table list); data-model §4.1, C-tests | TASK-003, TASK-016 | – | Planned |
-| REQ-RLS-002 | M0 | Must | US-074 | prisma/ · ADR-0005 §Policies (`ENABLE` + `FORCE` RLS, policy templates); data-model §4.3 | TASK-003, TASK-016 | – | Planned |
+| REQ-RLS-001 | M0 | Must | US-074 | prisma/ · ADR-0005 §Tenant tables (`org_id`, composite indexes, global-table list); data-model §4.1, C-tests | TASK-003, TASK-016 | – | In progress (merged: TASK-003) |
+| REQ-RLS-002 | M0 | Must | US-074 | prisma/ · ADR-0005 §Policies (`ENABLE` + `FORCE` RLS, policy templates); data-model §4.3 | TASK-003, TASK-016 | – | In progress (merged: TASK-003) |
 | REQ-RLS-003 | M0 | Must | US-075 | platform · ADR-0005 §Context (`withTenantTx`, `set_config` first statement); ADR-0003 | TASK-016 | – | Planned |
 | REQ-RLS-004 | M0 | Must | US-075 | prisma/ · ADR-0005 §Policies (unset context → zero rows, writes rejected); data-model §4.3 | TASK-016 | – | Planned |
-| REQ-RLS-005 | M0 | Must | US-074 | prisma/ · ADR-0005 §Roles (`platform_app` NOSUPERUSER NOBYPASSRLS); data-model §4.4 | TASK-003, TASK-016 | – | Planned |
+| REQ-RLS-005 | M0 | Must | US-074 | prisma/ · ADR-0005 §Roles (`platform_app` NOSUPERUSER NOBYPASSRLS); data-model §4.4 | TASK-003, TASK-016 | – | In progress (merged: TASK-003) |
 | REQ-RLS-006 | M0 | Must | US-076 | prisma/ · ADR-0005 §Operator branch (read-only cross-tenant policy); data-model §4.3 | TASK-060 | – | Planned |
 | REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Planned |
 | REQ-RLS-008 | M0 | Must | US-078 | platform (worker) · ADR-0013 am. 1–5 (`platform.job_context`, payload v2); ADR-0005; data-model §4.5 | TASK-047 | – | Planned |

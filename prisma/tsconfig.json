@@ -1,11 +1,12 @@
 {
   "extends": "../tsconfig.base.json",
+  "//": "prisma/tests (Testcontainers harness and integration suites) is type-checked by tools/tsconfig.json, because it imports tools/db, tools/test-support, apps/api/src/platform/db and the generated client, and a composite project may only compile its own files (TS6307).",
   "compilerOptions": {
     "noEmit": true,
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo"
   },
   "files": [],
-  "include": ["seed", "tests", "*.ts"],
+  "include": ["seed", "*.ts"],
   "references": [
     {
       "path": "../packages/shared"

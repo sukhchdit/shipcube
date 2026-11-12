@@ -1,0 +1,4 @@
+{
+  "$comment": "Security-analyst identities that may approve audit DDL in prisma/bootstrap (data-model.md §8.3 rule 12). Empty until TASK-021 adds the first audit file: until then any audit DDL in the bootstrap lane fails the linter. Changes need security-analyst review (CODEOWNERS).",
+  "reviewers": []
+}

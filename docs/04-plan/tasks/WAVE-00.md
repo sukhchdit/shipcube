@@ -260,7 +260,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-005 (M0 Must) CI pipeline skeleton<br>US-048 (M0 Must) Secrets hygiene and CI security scanning |
 | REQs | REQ-PLAT-007, REQ-SEC-011, REQ-SEC-013 |
 | NFRs | NFR-OPS-003, NFR-SEC-002, NFR-SEC-012 |
-| Spikes / security / decisions | SPK-01, SEC-COND-04, SEC-P3-04, SEC-P3-22, SEC-P3-31, SEC-P3-08, D-ARCH-010, D-ARCH-020, R-ARCH-12 |
+| Spikes / security / decisions | SPK-01, SEC-COND-04, SEC-P3-04, SEC-P3-22, SEC-P3-31, SEC-P3-08, D-ARCH-010, D-ARCH-020, R-ARCH-12, D-ARCH-040, D-ARCH-041, D-ARCH-044, PR1-SEC-12, PR1-SEC-13 |
 | Specialist · model | devops-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-001, TASK-002, TASK-005 |
@@ -283,6 +283,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-51 (workflow part): CARRIER_*/STRIPE_* secrets only in jobs with environment carrier-sandbox; no pull_request/push job references it
 - SEC-TC-64 (part): gate tooling runs from the base ref; `npx --no-install` only
 - SPK-01 exit (ubuntu half): typecheck + unit + build green on ubuntu-latest
+- ADR-0023 am. J item 1 (D-ARCH-040): `check-install-flags` asserts the exact `@platform:registry=https://registry.invalid/` line in the root `.npmrc` and in every `tools/isolated/*/.npmrc`; a Dockerfile `npm ci`/`npm install` in a stage that has not copied `package-lock.json` and `.npmrc` fails
+- `check-lockfile` `@platform/*` rules (am. J item 1 b, PR1-SEC-13, R2-n4): every key under `node_modules/@platform/` is `link: true` whose `resolved` is a workspace directory and carries no `integrity` (npm lockfile v3 link entries always carry `resolved`); any non-link entry whose `name` starts with `@platform/`, whose key path contains `node_modules/@platform/` or whose `resolved` contains `/@platform/` fails. Negative fixtures: (i) a non-link `node_modules/@platform/shared` entry with an npmjs `resolved` URL, (ii) an alias `node_modules/x` with `name: "@platform/shared"`. Lane A writes a lockfile delta summary (new name@version tuples, integrity changes, moves into the production closure) to the job summary
+- PR1-SEC-12 (round-2 review R2.6): signature verification runs as `npm audit signatures --@platform:registry=https://registry.npmjs.org/`. `check-workflow-policy` allows `--@platform:registry=` only on `npm audit signatures`, and rejects it and any `npm_config_@platform:registry` environment entry on `ci`, `install`, `exec`, `outdated`, `update` and `view` (negative fixtures: `npm ci --@platform:registry=…` and `npm audit signatures || true`). The freshness/age gate is lockfile-driven, skips `link: true` entries and never shells out to `npm outdated`. `.github/dependabot.yml` ignores `@platform/*`; the first run is checked for `private_source_not_reachable`
+- am. J item 2 (e) (D-ARCH-041): `check-workflow-policy` rejects the engine-redirecting variables listed by TASK-003 (at least `PRISMA_ENGINES_MIRROR`, `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING`, `PRISMA_SCHEMA_ENGINE_BINARY`, `PRISMA_QUERY_ENGINE_LIBRARY`, `PRISMA_QUERY_ENGINE_BINARY`, `PRISMA_FMT_BINARY`, `BINARY_DOWNLOAD_VERSION`, `PRISMA_CLI_BINARY_TARGETS`) and `npm_config_ignore_scripts=false`. `check-no-raw-prisma` (inside `check-install-flags`) rejects a bare `prisma` in package.json scripts, workflows, Dockerfiles and compose files. Engine caches are keyed by `enginesVersion` + runner OS and re-verified on restore
+- am. J items 3–4 (D-ARCH-003 rev 4, D-ARCH-042, D-ARCH-043): `licence-check` uses named exceptions in `tools/ci/licence-exceptions.json` (only `elkjs@0.11.1` EPL-2.0 via prisma → @prisma/studio-core, dev closure; another EPL-2.0 package fails, negative fixture). `tools/ci/maintenance-exceptions.json` holds `bcrypt@6.0.0` (direct-stale, expires 2027-05-11) and `node-abort-controller@3.1.1` (deprecated-transitive via bullmq). The freshness gate fails an expired entry and goes live only with the register
+- am. J item 5 (D-ARCH-044): every workflow sets `NPM_CONFIG_IGNORE_SCRIPTS: "true"`, `CHECKPOINT_DISABLE: "1"` and `SCARF_ANALYTICS: "false"` at workflow level (`check-workflow-policy` requires them). After `npm run build`, the job requires empty `git status --porcelain`, proven by a negative fixture whose build script touches `package.json`
 - AT-US-005-01 … AT-US-005-06: all 6 scenarios of US-005, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-048-01 … AT-US-048-07: all 7 scenarios of US-048, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -481,7 +487,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (partial; completed by TASK-089) | US-003 **DC** (M0 Must) One-command local environment |
 | REQs | REQ-PLAT-006, REQ-PLAT-005 |
 | NFRs | NFR-OPS-001, NFR-OPS-002, NFR-SEC-007 |
-| Spikes / security / decisions | SEC-P3-20, SEC-P3-21, SEC-P3-23, SEC-P3-08, SEC-P3-04 |
+| Spikes / security / decisions | SEC-P3-20, SEC-P3-21, SEC-P3-23, SEC-P3-08, SEC-P3-04, D-ARCH-040, D-ARCH-041, D-ARCH-044 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-004, TASK-006, TASK-010, TASK-003 |
@@ -503,6 +509,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-34 (extended): edge bound to 127.0.0.1 by default
 - SEC-TC-45 (Dockerfile part): marker absent after image install
 - Valkey default user off; api/worker/healthcheck ACL users only
+- ADR-0023 am. J item 2 (e) and ADR-0022 am. 14 b (D-ARCH-041): the `migrate` image fetches and verifies the schema engine in its build stage through `deps:rebuild`. It sets `ENV PRISMA_SCHEMA_ENGINE_BINARY=/app/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x CHECKPOINT_DISABLE=1`, and its entrypoint runs `node tools/deps/prisma-cli.mjs` in `--verify-only` mode before `migrate deploy`. SEC-TC-64 (vi): `docker run --network none <migrate> prisma --version` exits 0, and `api`/`worker` hold no `node_modules/@prisma/engines` and no `schema-engine*`
+- am. J items 1 (c), 5 and 6 and ADR-0022 am. 14 a, c–f (D-ARCH-040, D-ARCH-044): image installs run from the repository root with the root `package-lock.json` and `.npmrc` (`--workspace=apps/<app>`). `web`/`admin` build stages run with `NPM_CONFIG_OFFLINE=true` and compare the SHA-256 of `package.json` and `package-lock.json` before and after the build. Images set `ENV CHECKPOINT_DISABLE=1 SCARF_ANALYTICS=false`. No `npm rebuild` appears in any Dockerfile: a bcrypt prebuild that fails to load is a build failure
 - AT-US-004-01 … AT-US-004-04: all 4 scenarios of US-004, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-003-01 … AT-US-003-04 that belong to its layer; US-003 closes in TASK-089
 

@@ -1,12 +1,19 @@
 {
   "extends": "../tsconfig.base.json",
+  "//": "Repository tooling plus the cross-cutting Prisma test code (prisma/tests: harness, bootstrap and migration suites), which imports tools/db, the generated client and the runtime client factory (TASK-003).",
   "compilerOptions": {
     "noEmit": true,
     "allowJs": true,
     "checkJs": true,
     "tsBuildInfoFile": "../node_modules/.cache/tools.tsbuildinfo"
   },
-  "files": ["../jest.config.ts"],
-  "include": ["**/*.ts", "**/*.mjs"],
-  "exclude": ["**/fixtures/**"]
+  "files": [
+    "../jest.config.ts",
+    "../prisma.config.ts",
+    "../prisma/tests/fixtures/updown/prisma.config.ts",
+    "../prisma/tests/fixtures/updown-broken/prisma.config.ts",
+    "../apps/api/src/platform/db/client.ts"
+  ],
+  "include": ["**/*.ts", "**/*.mjs", "../prisma/tests/**/*.ts", "../prisma/generated/**/*.ts"],
+  "exclude": ["**/fixtures/**", "../prisma/tests/fixtures/**"]
 }

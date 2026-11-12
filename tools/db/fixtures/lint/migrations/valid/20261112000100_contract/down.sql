@@ -1,0 +1,1 @@
+-- contract: restore-based rollback only (data-model.md §8.2)
