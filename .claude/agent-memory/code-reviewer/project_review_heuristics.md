@@ -130,4 +130,9 @@ Round 2 of a spike PR (PR #6 r2):
   - columns that are insert-only or runtime-mutated (counter resets).
 
 **Drift = edit OR delete (PR #13 r2, 2026-11-13).** When a fix adds "report/log drift restoration", check that BOTH counters trigger it: an upsert reports a hand-DELETED row as `inserted`, not `updated`. With an unchanged version/hash any insert is a restoration. Probe `runDataset` with a fake returning `[{inserted:true}]` and the matching version row.
+**Subset / "no-weakening" checks (PR #17, 2026-11-13).**
+- Ask which *extras* are themselves weakening evidence. ESLint `reportUnusedDisableDirectives` turns "rule X stopped firing" into a `ruleId: null` extra; probe by turning off a rule that a fixture only *disables* (`no-explicit-any`).
+- Positive assertions hide inside "weakening" tests (`toBe('off')`, `toEqual` on ignore maps, `not.toContain`); a strengthening PR fails them.
+- Jest filter deny-lists: Jest accepts kebab-case (`--test-name-pattern`), attached `-tX`, `--listTests` (exit 0, runs nothing), and `onlyChanged`/`lastCommit` (exit 0 with no tests). The head `jest.config.ts` `testNamePattern` skips everything with exit 0. Ask for an allow-list of the exact invocation.
+
 **Client-side timeouts on pg CLIs:** `statement_timeout` is server-side; a blackholed network needs pg `query_timeout` + `keepAlive`.

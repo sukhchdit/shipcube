@@ -67,6 +67,7 @@ PR #10 review: `docs/05-quality/security/PR-0010-TASK-007-security-review.md`.
     - `SAFE_EXPRESSION` without `env.*`, outputs or `matrix.*`;
     - `issues` added to the forbidden triggers.
   - PR10-SEC-18: `package-manager-cache: false` in `scans`.
+  - PR17-SEC-01 (unowned `.swcrc`) and PR17-SEC-03 (base-ref fixture gate deny-list); see [[project-p5-pr17-fixture-subset]].
   - PR10-SEC-13: container-digest freshness.
   - PR4-SEC-08: Playwright confinement.
 - **TASK-014:** PR10-SEC-06 (licence and closure from the installed manifests); consider Dockerfiles under CODEOWNERS.

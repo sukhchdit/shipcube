@@ -206,3 +206,8 @@ PR #13 (TASK-023 seed framework) r1 at e92cd6f was CHANGES_REQUESTED (2026-11-13
 - r2 at e42e368 (2026-11-13): APPROVED_WITH_NITS. Closed m1/m2/m3/m5(edits)/n1-n6/n8; probes pass (exit 2 JSON; 0/280 URL overrides; 7/7 mutations killed).
   - Open: R2-m1 deletion drift (`else if (updated > 0)` misses re-inserted rows) → fix in superseding branch or route TASK-025. R2-n1 README dup line; R2-n2 3rd copy of URL-param predicate; R2-n3 no client query_timeout/keepAlive (→ TASK-014).
   - Superseding PR (D-ORCH-017): check tree == e42e368 + reconcile only; m6 boundaries still owed after PR #11; M1 sheet fold (WAVE-00 TASK-023 still says completes US-049; TASK-014/089 lack AT IDs) owed by architect batch.
+
+PR #17 (TASK-007 follow-up, base-ref lint fixtures no-weakening) r1 at ea78d38: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0017-TASK-007-code-review.md`.
+- M1: null-ruleId extras ("Unused eslint-disable directive") pass; `no-explicit-any` off repo-wide → new base run green, old failed. Fix: fail null-ruleId extras (+ relaxed check on ok-*), E9.
+- m1 gate deny-list misses `--test-name-pattern`, `-tX`, `--listTests`, `-o`; m2 head jest.config.ts `testNamePattern` → 97 skipped exit 0; m3 positive halves in lint-wiring tests + `noWeakening` hard-codes 'error'.
+- r2: re-run M-a (must fail), PR #11 overlay (2 extras, pass), probe-gate. PR #11 supersede: opened after #17 merges; diff conflicts at negative-fixtures.test.ts:253; its WARNINGS / `allowed (TASK-016)` cases need the mode split.
