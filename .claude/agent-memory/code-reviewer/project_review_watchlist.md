@@ -143,6 +143,16 @@ PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Revie
   - PR #1: R2-n4 (in code).
   - TASK-015 m7 (any-justification TASK-ID) is partly closed.
 - After merge, PR #9 is the first PR under the enforced security-record gate.
+- r2 at 26fc08d was APPROVED_WITH_NITS (2026-11-13).
+  - Closed: M1 and M2 (verified with npm 11.19.1 and git); M3 procedurally (D-ORCH-012/013); m1, m2, m4–m7.
+  - m3 is partly closed.
+  - Open MINORs, in-PR or TASK-015:
+    - R2-m1: npm reify commands (`update`, `dedupe`, `uninstall`, `link`, `audit fix`) and `--ignore-scripts $VAR` give 0 findings.
+    - R2-m2: required-gates, gitleaks-hardening and scans-isolation are tripwires (`|| true`, `--mount`, `$PWD`, `--exit-code 0`, `node tools/ci/x.mjs` all pass).
+    - R2-m3: Semgrep ≥1.117 honours nested `.semgrepignore` files.
+    - R2-m4: `${{ env.X }}` in `run:` passes untrusted-expression.
+  - NITs: R2-n1..n8. n8 is one line: `pull_request.branches: [main]`.
+  - When TASK-015 lands, check R2-m2/m3/n7 before any new workflow or gitleaks mount.
 
 PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0011-TASK-016-code-review.md`.
 - M1: the TenantDb Proxy is shallow. `db.$parent` returns the unguarded itx client (with `*Unsafe` and `$transaction`), `db.$parent._originalClient` is the ROOT client, and the same holds via `db.<model>.$parent` and the Prisma private `Symbol()` key. Fix: deny-by-default top level plus child proxies on delegates; tests on the real `_createItxClient` shape.

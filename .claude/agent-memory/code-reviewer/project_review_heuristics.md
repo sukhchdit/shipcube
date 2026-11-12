@@ -74,6 +74,23 @@ Round 2 of a spike PR (PR #6 r2):
 - **A "record names reviewed SHA, nothing changed since" check** breaks on merge-main. Intersect with the PR's own net owned paths.
 - **Verify process premises against repo settings** (`gh api repos/<r>`): squash title (`COMMIT_OR_PR_TITLE` uses the commit subject for single-commit PRs), allowed merge methods. Branch protection returns 403 on private free-plan repos, so "required check" claims are not enforceable.
 
+**Round-2 patterns from PR #10 (2026-11-13):**
+- **"Every install" means every reify.** `update`, `dedupe`, `uninstall`, `link` and `audit fix` call Arborist `reify()` and run the install scripts of added nodes.
+  - Check guard scope against the commands in `lib/commands/*.js` that call `reify(`, not just the install aliases.
+  - A bare-flag value can be a shell expansion (`--ignore-scripts $X`).
+- **Ground-truth npm flag parsing:** `NPM_CONFIG_IGNORE_SCRIPTS=true npm config get ignore-scripts <form>`. Put the key positional FIRST, because extra positionals print `X=undefined`.
+- **Self-policing workflow rules** (required steps, mount rules, job isolation) are tripwires. Mutate the repo's own ci.yml in memory and run `checkWorkflow`:
+  - `|| true`;
+  - redirecting `GATE_*` to the head;
+  - `--mount`/`$PWD` mounts;
+  - `--exit-code 0`;
+  - relative `node x.mjs`.
+  Ask for anchored patterns, and for the claims to be worded as tripwires.
+- **Expression-injection allow-lists:** `env.*` (and `steps`/`needs` outputs) launder untrusted input, because `${{ env.T }}` is expanded into the script text.
+- **Semgrep ≥ 1.117 (Semgrepignore v2) honours nested `.semgrepignore` files.** Bind-mounting the base root file does not fix scope narrowing. Check the tool's CHANGELOG at the pinned tag (`gh api …/contents/CHANGELOG.md?ref=vX -H "Accept: application/vnd.github.raw"`).
+- **`.gitattributes -diff` hides content from `git log -p`** (and so from gitleaks) when the worktree is mounted. With only `.git` mounted, attributes are not read (verified with git 2.52). Local git reproduces it in seconds, no Docker needed.
+- **Record-format contracts** ("last Verdict table row wins") silently ignore a later FAIL written as prose. Tell the security-analyst to always append a header table.
+
 **DB-guard patterns (PR #11, 2026-11-12):**
 - **Prisma client Proxy guards.** Prisma 7 clients and delegates carry the public `$parent` property (the extension context), the internal `_originalClient` and a private `Symbol()` key holding the unapplied client. A top-level deny-list misses all three. Probe on the real shape without a DB: `new PrismaClient({adapter: new PrismaPg({connectionString:'postgresql://x@127.0.0.1:1/x'})})._createItxClient({id:'t'},0,{})`.
 - **Regex "literal exemption" scans** (for example "set_config allowed when the first arg is a non-app literal") are beaten by `'' || 'app.x'`. Require a complete literal followed by `,`. Also check quoted-identifier forms (`"app"."x"`).

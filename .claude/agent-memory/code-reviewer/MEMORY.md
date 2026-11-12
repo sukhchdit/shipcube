@@ -1,5 +1,5 @@
 - [Review conventions](project_review_conventions.md) — review file path/name in main repo, worktree layout, Node 24 PATH prefix, re-run gates yourself
-- [Review watchlist](project_review_watchlist.md) — open deferred items from PR #1–#11 by owner task; PR #9 r2 CHANGES_REQUESTED (ReDoS); #10, #11 r1 CR
+- [Review watchlist](project_review_watchlist.md) — open deferred items from PR #1–#11 by owner task; PR #9 r2 CR (ReDoS); #10 r2 AWN (R2-m1..m4 open); #11 r1 CR
 - [Scratch-copy technique](reference_scratch_copy_technique.md) — mutation-test via git archive + junction; junction pitfalls; junction-free typed lint probe
 - [Lint probe technique](reference_lint_probe_technique.md) — predict a PR's lint errors under another open PR's ESLint config without installing
-- [Review heuristics](project_review_heuristics.md) — recurring defects (timeouts, flag guards, Joi/Zod, authz keys, fresh-conn, CI bypasses, Prisma $parent, ACL PUBLIC, ReDoS)
+- [Review heuristics](project_review_heuristics.md) — recurring defects (timeouts, flags, Joi/Zod, authz, CI bypasses+tripwires, npm reify, Prisma $parent, ACL, ReDoS)
