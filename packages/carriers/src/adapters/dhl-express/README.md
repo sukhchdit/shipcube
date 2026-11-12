@@ -7,6 +7,7 @@ Documentation capture for TASK-009 (SPK-02). Nothing here was produced by callin
 | Docs URL | https://developer.dhl.com/api-reference/dhl-express-mydhl-api (portal, blocked to automation; read by a person at implementation time) |
 | API version | MyDHL API REST, spec line **3.3.x**. The SDK pins `x-version: 3.3.1` ("dated June 2026" per its README); ADR-0010 records reference-data guides 3.3.0 and 3.3.2. A search snippet of the portal shows "2.13.3" for an older listing. The current value of the `x-version` header is **unverified against DHL** |
 | Date checked | 2026-11-12 |
+| Spec diff | Diffed against official spec by a person: no (ADR-0010 am. 11 item 4; listed under COND-SANDBOX-DEMO until a person with portal access diffs it) |
 | Verdict | **FALLBACK for operation semantics and field names** (paths confirmed from a secondary source; official spec unreadable). Fixtures are built from the secondary evidence and must be checked against the official YAML by a person with portal access (see section 7) |
 | Sandbox quirks | See [Sandbox quirks](#4-sandbox-quirks) |
 

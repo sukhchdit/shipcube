@@ -7,6 +7,7 @@ Documentation capture for TASK-009 (SPK-02). Nothing here was produced by callin
 | Docs URL | https://developer.ups.com (portal, returns HTTP 403 to automated fetches) and the official OpenAPI repository https://github.com/UPS-API/api-documentation (read in full for the APIs below) |
 | API version | **v2409** for Rating, Shipping (ship and void), Pickup; **v1** Tracking, Landed Cost (default), **v2** Address Validation and Paperless Document, **v3** Locator, **v1** Label Recovery (default), OAuth `v1`. `info.version` is an empty string in every spec, so the version lives only in the URL path |
 | Date checked | 2026-11-12 |
+| Spec diff | Diffed against official spec by a person: no (ADR-0010 am. 11 item 4; listed under COND-SANDBOX-DEMO until a person with portal access diffs it) |
 | Verdict | **GO** (all required operations confirmed from the official specs) |
 | Sandbox quirks | See [Sandbox quirks](#4-sandbox-quirks) |
 
@@ -204,7 +205,7 @@ All GitHub sources are pinned to commit `fd57ca9fde3c26c4ec5c2c4f4831715a223daa8
 
 ## 7. Open questions
 
-1. How does the Platform get a PDF label (REQ-DOC-002) for UPS? `PDF` is not documented for Ship (GIF, ZPL, EPL, SPL only) but is documented for Label Recovery (section 3.4). The options (Label Recovery with `PDF`, GIF decode in the `documents` module, or GIF/ZPL only with a product-manager decision) are listed neutrally in SPK-02 §4 item 3; principal-architect decides in the ADR-0010 amendment before TASK-140 starts. The adapter does not render PDFs.
+1. How does the Platform get a PDF label (REQ-DOC-002) for UPS? `PDF` is not documented for Ship (GIF, ZPL, EPL, SPL only) but is documented for Label Recovery (section 3.4). The options were listed neutrally in SPK-02 §4 item 3. **Decided** in ADR-0010 am. 11 item 3 (D-ARCH-057, D-ARCH-062): Label Recovery with `PDF` through a new optional, idempotent `recoverLabel` operation; the adapter ships with `GIF`/`ZPL`, declares `labelFormats = [PDF_4X6, ZPL]`, and the saga's document step calls `recoverLabel` for each offered format missing from the create result. The adapter does not render PDFs. Unverified in CIE (fixtures `synthesised`).
 2. Numeric rate limits and daily quota per app (not in specs).
 3. CIE test tracking numbers and canned scenarios.
 4. Whether an unknown tracking number is a 404 or a 200 with a warning.

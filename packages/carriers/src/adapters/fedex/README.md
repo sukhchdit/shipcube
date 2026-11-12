@@ -7,6 +7,7 @@ Documentation capture for TASK-009 (SPK-02). Nothing here was produced by callin
 | Docs URL | https://developer.fedex.com/api/en-us/catalog.html (per-API pages `catalog/<api>/v1/docs.html`) |
 | API version | Catalog entries are `v1` for Authorization, Rate, Ship, Pickup, Track, Address Validation and Ground End of Day Close (page URLs `…/catalog/rate/v1/…`, `…/ship/v1/…`, `…/pickup/v1/…`, `…/track/v1/…`, `…/address-validation/v1/…`, `…/close/v1/…`). A portal search snippet labels Rates and Transit Times "1.0.0" (last updated 2020-07-27 on the catalog card, F11a). The API exposes **no version header**; the version is the path segment |
 | Date checked | 2026-11-12 |
+| Spec diff | Diffed against official spec by a person: no (ADR-0010 am. 11 item 4; listed under COND-SANDBOX-DEMO until a person with portal access diffs it) |
 | Verdict | **FALLBACK for paths and field names** of Rate, Ship, Cancel, Pickup, Address Validation and Locations (portal specs unreadable); **GO** for OAuth, rate limits, error handling, the virtualized sandbox and the ETD upload flow. Operations stay "unverified" and live sandbox stays opt-in (PLAN.md SPK-02 fallback) |
 | Sandbox quirks | See [Sandbox quirks](#4-sandbox-quirks) |
 
