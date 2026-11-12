@@ -1,3 +1,3 @@
 - [P3 security conditions](project_p3_security_conditions.md) — G2-C3 closed 2026-11-12 (§16); new LOW SEC-P3-34..36 with task IDs; P5/G3/G4-prod re-checks
 - [Security review conventions](project_security_review_conventions.md) — OWASP 2021 codes, severity matrix, routing, npm registry recipe, dependency-auditor turn limit
-- [P5 Wave 0 supply chain](project_p5_wave0_supply_chain.md) — PR-0001 PASS_WITH_FOLLOW-UPS; @platform scope, Prisma engine download, bcrypt 18-mo; checks for TASK-003/004/007/014/049/214
+- [P5 Wave 0 supply chain](project_p5_wave0_supply_chain.md) — PR-0001 R1+R2 PASS_WITH_FOLLOW-UPS; @platform pin side effects (audit signatures), Prisma engine, bcrypt; task checks

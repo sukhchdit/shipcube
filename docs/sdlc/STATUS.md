@@ -26,7 +26,7 @@
 ## Build Board
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | feat/TASK-001-spk-01-toolchain-spike-workspace @4ec1bc4 | ✅ | r1 CHANGES_REQUESTED → r2 ▶ | r1 PASS_WITH_FOLLOW-UPS → r2 ▶ | ✅ 77/77 unit; audit --omit=dev 0 | | 1 (fixing) | |
+| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | merged 8bf373c | ✅ | ✅ APPROVED r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ 77/77 unit, lint, typecheck, build on main (orchestrator) | ✅ | 1 | – |
 
 ## Escalations in progress
 _none_
@@ -55,6 +55,7 @@ _none_
 | SEC-FU-QA | SEC-TC-65 adopt, SEC-TC-62 multi-org, SEC-TC-53 text | before Wave 4 | qa-lead | OPEN |
 | SEC-FU-PR1 | security-analyst confirms D-ARCH-003 rev 4 (licence/deprecation registers) and D-ARCH-041 (Prisma engine pin) in the TASK-003/TASK-007 reviews; senior-developer folds ADR-0023 am. J into the TASK-003/004/007/014/049/214 sheets + corrects SPK-01 §1 | batch 0.2/0.3 | security-analyst, senior-developer | OPEN |
 | BCRYPT-EXC | bcrypt 6.0.0 maintenance exception expires 2027-05-11 (D-ARCH-042); monthly review | 2027-05-11 | principal-architect, performance-engineer | OPEN |
+| FU-TASK001 | Tracked follow-ups from PR #1: m4/n1/n2/n3/n5/R2-n1 → TASK-002; m6 + PR1-SEC-02 + R2-n5 → TASK-003; m8 + PR1-SEC-03 → TASK-004; PR1-SEC-12/13 + R2-n4 + PR1-SEC-05/06 → TASK-007; m9 + PR1-SEC-04 → TASK-014; R2-m1/R2-n2 + per-path 95% → TASK-015; m5 → ADR-0003 wording | per task | senior-developer | OPEN |
 | COND-SANDBOX-DEMO | Real sandbox label from DHL, FedEx and UPS booked and paid end to end (M1 exit demo); needs creds outside the repo | Post-release, when creds supplied | qa-lead | OPEN (blocked on external creds, by design) |
 
 ## Top Risks

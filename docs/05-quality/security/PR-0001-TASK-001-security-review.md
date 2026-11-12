@@ -333,3 +333,168 @@ Additional supply-chain results:
 | `npm view bcrypt time` | `6.0.0` 2025-05-11T18:06:24Z, no later version |
 | gitleaks (container, `--redact`) `git --log-opts=main..HEAD` / full-tree `dir` | no leaks / 17 pre-existing hits outside the diff |
 | `node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects unit` | 38/38; `ignore-scripts` suite 8/8 |
+
+## Round 2 (head 4ec1bc4)
+
+| Field | Value |
+|---|---|
+| Head / range | `4ec1bc4` (fix cycle 1: `36d2310`, `d5f707c`, `4ec1bc4`) against round 1 `76b69c0`. 12 files, +292 / −40, plus `package-lock.json` |
+| Reviewer / date | security-analyst, 2026-11-12. Read-only on the worktree. Commands ran under the CLAUDE.md §2 PATH prefix: Node 24.22.3, npm 11.19.1 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open for this change. **PR1-SEC-01 and PR1-SEC-07 are resolved in this PR.** The regenerated lockfile adds **0** new name@version tuples and 0 integrity changes; this was verified independently. Two new items, both routed to TASK-007 and neither blocking: PR1-SEC-12 (LOW) and PR1-SEC-13 (INFO). PR1-SEC-02, -03 and -04 (MEDIUM, latent) keep their round 1 routing. |
+
+### R2.1 Status of round 1 findings
+
+| ID | Round 2 status | Evidence at `4ec1bc4` |
+|---|---|---|
+| PR1-SEC-01 | **Resolved in this PR.** | `.npmrc:13-16` sets `@platform:registry=https://registry.invalid/`. New tests: `[SEC-TC-45] .npmrc pins the @platform scope…` and `[SEC-TC-45] lockfile entries for @platform/* are workspace links only…` (`tools/deps/ignore-scripts.test.ts:71-85`). Lockfile: 15 `node_modules/@platform/*` entries, all `link: true` to workspace folders. Fresh resolution of `@platform/shared` in a scratch project fails with `ENOTFOUND registry.invalid`; without the pin it is `E404` from `registry.npmjs.org`. **Scope correction to round 1:** the pin covers registry *resolution* only. It does not cover a lockfile `resolved` URL (PR1-SEC-13), and it breaks `npm audit signatures` and `npm outdated` (PR1-SEC-12). |
+| PR1-SEC-02 / -03 / -04 | Open (latent), routing unchanged | Not touched by this cycle. They stay binding on TASK-003, TASK-004, TASK-007 and TASK-014 per §6. |
+| PR1-SEC-05 / -06 / -10 / -11 | Open, routing unchanged | `elkjs` 0.11.1 (devOptional) and `bcrypt` 6.0.0 are unchanged in the lockfile. This review does not assess architect rulings. |
+| PR1-SEC-07 | **Resolved in this PR** (GCP chain and advisories). The `node-abort-controller` sub-item stays with principal-architect and TASK-007. | `@opentelemetry/auto-instrumentations-node` was removed from `apps/api/package.json`. 69 name@version tuples (75 lockfile keys) left the tree, including `gcp-metadata`, `gaxios`, `rimraf` 5.0.10, `node-fetch` 3, `node-domexception` and every `resource-detector-*`. `npm audit --omit=dev` reports **0** vulnerabilities, and `npm ls gcp-metadata --all` is `(empty)`. In the production closure the only deprecated package left is `node-abort-controller` 3.1.1 (BullMQ). The remaining `glob` 10.5.0 and `minimatch` 9.0.9 copies (×2 each, under `archiver-utils` and `test-exclude`) are dev-only. |
+| PR1-SEC-08 | Open, routing unchanged | `@scarf/scarf` 1.4.0 is still in the production closure, with its script suppressed. |
+| PR1-SEC-09 | Item 1 unchanged (accepted); items 2–4 open (optional) | `npm_execpath` handling moved verbatim into `tools/deps/npm-cli.mjs`. The fixture test still does not isolate the global npm config (item 3). |
+
+### R2.2 Lockfile verification (`76b69c0` → `4ec1bc4`)
+
+`package-lock.json` has `-diff` in `.gitattributes` (pre-existing, from `main` `a1cd33d`), so `git diff` shows it as binary. Both versions were extracted with `git show` and compared structurally with a Node script (scratchpad `r2/scripts/lockdiff.mjs`).
+
+| Check | Result |
+|---|---|
+| Entries (including root) | 1,634 → 1,559. The developer's figures are confirmed. |
+| Distinct name@version | 1,320 → 1,251 |
+| **New name@version tuples** | **0** |
+| Retained tuples with a changed `integrity` or `resolved` | **0** |
+| New lockfile keys (placements) | 0. 75 keys removed. |
+| Same-key flag changes | 27, every one toward `dev`/`devOptional`. Examples: `cross-spawn`, `which`, `isexe`, `foreground-child`, `agent-base`, `https-proxy-agent`, the `@isaacs/cliui` family. These left the production closure with the GCP chain. **No entry moved into production.** |
+| Workspace manifest deltas recorded in the lockfile | `apps/api` drops `@opentelemetry/auto-instrumentations-node`; the root adds devDependency `jest-util` 30.5.1. |
+| Provenance | 1,522 registry entries, all `https://registry.npmjs.org/` with `sha512` integrity. 15 links, 15 workspace folders, 6 `inBundle`, 0 exceptions. 0 `node_modules` entries aliased to an `@platform/*` name; 0 `resolved` URLs containing `/@platform/`. |
+| Cooldown | Respected. The tuple set is a strict subset of the round 1 set, which the sweep cleared (0 entries younger than 7 days at `2026-11-12T10:28:08Z`), and ages only increase. |
+| `jest-util` 30.5.1 | Already in the lockfile at `node_modules/jest-util` as a Jest transitive: no new key, no flag change. Now a direct devDependency. MIT, published 2026-09-01T07:58Z (72 days), `latest` dist-tag. Licence, maintenance and cooldown all pass. |
+| Licence | No new tuples, so nothing new to scan. The three round 1 exceptions are unchanged: `elkjs`, `png-js`, `caniuse-lite`. |
+| Install scripts | The same 12 packages as round 1, all suppressed. |
+| Installed tree vs lockfile | `node_modules/.package-lock.json` matches the committed lockfile: 0 missing, 0 extra, 0 version mismatches. `npm ls --all` exits 0. |
+
+### R2.3 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR1-SEC-12 | The `@platform` pin makes `npm audit signatures` and `npm outdated` fail with `ENOTFOUND registry.invalid` | LOW | CWE-693 | A08 | `.npmrc:16`; npm 11.19.1 `lib/utils/verify-signatures.js:157-179, 181-221, 273` | TASK-007 (lane A `static`, freshness gate, Dependabot); principal-architect (platform.md §7.2 `static` command text) | Open (latent; nothing in this PR runs either command) |
+| PR1-SEC-13 | The pin does not apply to lockfile-pinned `resolved` URLs, and the link-only test is keyed on install paths, so it would miss an npm alias | INFO | CWE-427, CWE-1357 | A08 | `tools/deps/ignore-scripts.test.ts:75-85`; arborist `replace-registry-host` behaviour | TASK-007 (`check-lockfile`) | Open (no exposure: 0 aliases, 0 `/@platform/` URLs) |
+
+#### PR1-SEC-12: `@platform` pin breaks `npm audit signatures` and `npm outdated` (LOW)
+
+**Description.** `npm audit signatures` in the worktree exits 1:
+
+```text
+npm warn Fetching verification keys using TUF failed.  Fetching directly from https://registry.invalid/.
+npm error network request to https://registry.invalid/-/npm/v1/keys failed, reason: getaddrinfo ENOTFOUND registry.invalid
+```
+
+There are three steps to the cause, all in npm 11.19.1:
+1. `getEdgesOut()` (`verify-signatures.js:157-179`) collects `pickRegistry(spec)` for **every** dependency edge, including the workspace edges `"@platform/shared": "0.0.0"`.
+2. The registry set therefore contains `https://registry.invalid/`. `setKeys()` (`:181-221`) tolerates only `E404` and `E400` from the keys endpoint and rethrows `ENOTFOUND`.
+3. Workspace nodes would have been skipped later (`:273`, `node.isWorkspace`), but the key prefetch already aborted the command.
+
+`npm outdated --all` fails the same way. It requests `https://registry.invalid/@platform%2fshared`.
+
+Without the pin, `npm outdated` asks the public registry for our workspace names, and it would offer anything the third-party scope owner publishes as an "update". Failing closed there is the right behaviour.
+
+Round 1 verified the pin against `npm ci`, `npm ls` and `npm audit` but not `npm audit signatures`. This gap is round 1's.
+
+**Exploitability and impact.** There is no exposure: both commands fail closed. The risk is to the control. SEC-P3-04 item 3 makes `npm audit signatures` a lane A gate (platform.md §7.2 `static`, TASK-007), and that gate will fail on its first run. The obvious workarounds weaken supply-chain controls:
+- deleting the pin re-opens PR1-SEC-01;
+- `|| true` silently disables signature verification.
+
+Impact M × likelihood L = **LOW**.
+
+**Remediation (TASK-007, code level).**
+1. Lane A runs signature verification with a scope override on that read-only command only:
+   ```sh
+   npm audit signatures --@platform:registry=https://registry.npmjs.org/
+   ```
+   It is safe for three reasons:
+   - `audit signatures` installs nothing;
+   - workspace nodes are skipped (`:273`);
+   - the override removes `registry.invalid` from the key prefetch set.
+
+   Verified in the worktree at `--loglevel=http`: exit 0, **1,421 packages with verified registry signatures, 560 with verified attestations, 0 invalid, 0 missing**, and **0 requests for any `@platform/*` URL**. The drop from round 1's 1,496 / 611 equals the 75 removed packages.
+2. `check-workflow-policy` allows `--@platform:registry=` only on an `npm audit signatures` invocation. It rejects the override, and any `npm_config_@platform:registry` environment entry, on `ci`, `install`, `exec`, `outdated`, `update` and `view`.
+3. The freshness/age gate is lockfile-driven and skips `link: true` entries, as the round 1 sweep did. It never shells out to `npm outdated`.
+4. Dependabot (`.github/dependabot.yml`, npm ecosystem) sets `ignore: [{ dependency-name: "@platform/*" }]`. The first run is checked for a `private_source_not_reachable` error on `registry.invalid`.
+5. principal-architect records the exact `static` step command line in platform.md §7.2 / ADR-0023 am. I item 1. This is routing only; this review does not rule on the in-flight ADR text.
+
+**Verification test (TASK-007).**
+- The lane A `static` job passes on the repository with the pin present. This is the positive control.
+- A `check-workflow-policy` negative fixture fails: a workflow step running `npm ci --@platform:registry=https://registry.npmjs.org/`.
+- A second negative fixture also fails: a step running `npm audit signatures || true`.
+
+#### PR1-SEC-13: pin scope and the link-only test (INFO)
+
+**Description.** Scratch fixture: a project depending on `@platform/shared@0.0.0`, with the committed `.npmrc` (pin present) and a lockfile entry `resolved: https://registry.npmjs.org/@platform/shared/-/shared-0.0.0.tgz`. `npm ci --ignore-scripts` fetched **`https://registry.npmjs.org/…`** (E404 today), not `registry.invalid`. Arborist's `replace-registry-host` rewrites a `resolved` host against the default `registry` only, never against a scoped registry.
+
+So a poisoned lockfile bypasses the pin. The SEC-TC-45 link-only test added in this cycle is therefore **load-bearing, not defence in depth**.
+
+That test selects entries by key (`/(^|\/)node_modules\/@platform\//`). An npm alias, such as `"x": "npm:@platform/shared@…"`, is keyed `node_modules/x` with `name: "@platform/shared"`, and the test would not see it.
+
+Lockfile diffs are also invisible to `git diff` (`-diff`) and collapsed on GitHub (`linguist-generated`). So the automated check is the reviewer's only view of a lockfile change.
+
+**Exploitability and impact.** An attacker needs a merged lockfile change that adds an aliased or non-link `@platform/*` entry, plus a malicious publish in the third-party scope. At `4ec1bc4` there are 0 such entries. TASK-007's `check-lockfile` (`resolved` must be on the registry, `sha512` integrity) does not catch it either, because a third-party publish is on `registry.npmjs.org`. **INFO**: there is no exposure today.
+
+**Remediation (TASK-007 `check-lockfile`; optional now in this test).**
+- Reject any non-link entry whose `name` starts with `@platform/`.
+- Reject any non-link entry whose key path contains `node_modules/@platform/`.
+- Reject any non-link entry whose `resolved` path contains `/@platform/`.
+- Lane A writes a lockfile delta summary to the job summary: new name@version tuples, integrity changes, and flag moves into production. The `lockdiff.mjs` logic used for R2.2 is a template.
+
+**Verification test.** `check-lockfile` negative fixtures fail for two cases:
+- (i) a non-link `node_modules/@platform/shared` entry with an npmjs `resolved` URL;
+- (ii) an alias entry `node_modules/x` with `name: "@platform/shared"`.
+
+### R2.4 Change review of the fix cycle
+
+| Change | Security assessment |
+|---|---|
+| `tools/deps/npm-cli.mjs` (extracted) | Behaviour is identical to round 1: `node:` builtins only, no shell, and the caller spawns `process.execPath` with an argument array. PR1-SEC-09 item 1 still applies (accepted). |
+| `tools/deps/rebuild.mjs` entry guard → `import.meta.main` | **Positive.** The old `argv[1]` comparison could skip `main()` and **exit 0 with no output** when the script was started through a junction or symlink. That was a fail-open on the install path. The new guard throws when `import.meta.main` is unavailable, so it fails closed. Covered by a new junction test and an end-to-end `main()` test that strips `DEPS_REBUILD_PLAYWRIGHT`. |
+| `tools/test-support/process.ts` | Re-uses `npmCli()`. No new sink. |
+| `tools/repo/jest-esm.test.ts` | The HS256 key is random per run (`webcrypto.getRandomValues`). Nothing secret-shaped is committed. |
+| `jest.config.ts`, `tools/repo/coverage-scope.test.ts`, `tools/repo/root-scripts.test.ts` | No security sink. Coverage now also measures `apps/*/app` and `prisma/seed`, which supports the 95 % authz/audit targets. |
+| Secrets | gitleaks (container, `--redact`) on `76b69c0..4ec1bc4`: 3 commits scanned, **no leaks**. |
+| SAST | Semgrep is not installed. The changed executable code (about 120 lines) was reviewed manually: no `shell: true`, no string-built commands, no untrusted input reaching a sink. |
+
+### R2.5 Requirements re-checked
+
+| Requirement | Result at `4ec1bc4` |
+|---|---|
+| SEC-P3-04 items 1–3 (local part) | **Met.** The `.npmrc` keys are unchanged, plus the pin. Cooldown and provenance are clean (R2.2). Running `npm audit signatures` needs the PR1-SEC-12 command form. |
+| SEC-TC-45 (local part) | **Green.** `ignore-scripts` suite 12/12: the round 1 eight, two PR1-SEC-01 tests and two `deps:rebuild` run tests. |
+| SEC-P3-31 item 2 (`npm exec --no`) | **Met** (unchanged). |
+
+### R2.6 Binding requirements: changes to §6
+
+- **TASK-001 (this PR):** both recommended items are done. Nothing further is required to merge from a security standpoint.
+- **TASK-007:** add the PR1-SEC-12 items:
+  - the `npm audit signatures --@platform:registry=https://registry.npmjs.org/` command form;
+  - the `check-workflow-policy` override rule;
+  - a lockfile-driven freshness gate with no `npm outdated`;
+  - Dependabot `ignore` for `@platform/*`.
+
+  Add the PR1-SEC-13 items: `check-lockfile` `name`/`resolved` rules for `@platform/*` and the lockfile delta summary. The PR1-SEC-07 item in §6 shrinks to the `node-abort-controller` ruling.
+- **TASK-214:** unchanged. Add the specific instrumentations (http, undici, pg, ioredis, pino, express or the chosen framework) and the AWS/container detectors through the cooldown, licence and age gates. Never re-add `auto-instrumentations-node` or the GCP/Azure/Alibaba detectors.
+
+### R2.7 Evidence (commands, head `4ec1bc4`)
+
+| Command | Result |
+|---|---|
+| `git show 76b69c0:package-lock.json` / `4ec1bc4:…` + `lockdiff.mjs` | 0 new tuples, 0 integrity changes, 0 new keys, 75 keys removed, 27 flag moves toward dev; 1,522 registry entries with 0 provenance exceptions |
+| `npm audit --json` | `{critical:0, high:0, moderate:34, low:1}` across 1,558. Advisories unchanged and dev-only: GHSA-3g3m-2fjr-6pw4, GHSA-g3hv-75wg-m249, GHSA-gcqx-w48m-w2h4 |
+| `npm audit --omit=dev --json` | `{total:0}` |
+| `npm audit signatures` | exit 1, `ENOTFOUND registry.invalid` (PR1-SEC-12) |
+| `npm audit signatures --@platform:registry=https://registry.npmjs.org/ --loglevel=http` | exit 0; 1,421 verified signatures; 560 verified attestations; 0 `@platform` requests |
+| `npm outdated --all --json` | exit 1, `ENOTFOUND https://registry.invalid/@platform%2fshared` (PR1-SEC-12) |
+| `npm sbom --sbom-format cyclonedx` | exit 0; 1,144 components |
+| `npm ls --all` / `npm ls gcp-metadata --all` | exit 0 / `(empty)` |
+| Scratch: fresh `npm install --package-lock-only` of `@platform/shared@0.0.0` | pinned: `ENOTFOUND registry.invalid` ×3 retries, exit 1. Unpinned: `E404 registry.npmjs.org/@platform%2fshared` |
+| Scratch: `npm ci` with a lockfile `resolved` at registry.npmjs.org | pinned **and** unpinned: `GET 404 https://registry.npmjs.org/@platform/shared/-/shared-0.0.0.tgz` (PR1-SEC-13) |
+| `npm view jest-util@30.5.1 license time` | MIT; 2026-09-01T07:58:44Z; `latest` = 30.5.1 |
+| `node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects unit` | 6 suites, 77/77; `ignore-scripts` suite 12/12; `git status --porcelain` empty afterwards |
+| gitleaks container `git --log-opts=76b69c0..4ec1bc4 --redact` | 3 commits, no leaks |

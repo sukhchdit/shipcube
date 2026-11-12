@@ -113,3 +113,107 @@ Answers to the focus questions:
 ## 6. To reach APPROVED
 
 Fix M1 and M2. The reviewer recommends also fixing m1 and m2 in the same cycle (both small, both on the install path). m3–m9 and the NITs can be fixed now or turned into tracked conditions on their owner tasks (TASK-002, 003, 004, 014, 015, principal-architect), recorded in STATUS.md.
+
+## Round 2 (head 4ec1bc4)
+
+| Field | Value |
+|---|---|
+| Head | `4ec1bc4` (3 commits over `76b69c0`: `36d2310` deps/.npmrc, `d5f707c` rebuild entry guard + tests, `4ec1bc4` coverage/typecheck guards) |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+| Scope | `git diff 76b69c0..4ec1bc4` (12 files) plus the code it touches: `rebuild.mjs` and `jest.config.ts` in full, `workspaces.ts`, every workspace `tsconfig.json`, the `@jest/transform` and `jest-util` matcher source, and the lockfile |
+
+```
+VERDICT: APPROVED
+SUMMARY: Both MAJORs are fixed, and their guard tests fail on the original defects (reproduced by mutation).
+         m1, m2, m3, n4 and n6 are fixed and verified. m7 has landed on main (D-ARCH-035..039), and the other
+         deferrals have named owners in the PR body. One new MINOR (a blind spot in the coverage-scope guard)
+         and five NITs remain. None blocks the merge; they are routed below.
+```
+
+### R2.1 Verification performed by the reviewer
+
+All commands ran in the worktree under `export PATH="$APPDATA/fnm/aliases/default:$PATH"`: Node v24.22.3, npm 11.19.1. Mutation experiments ran in a scratch copy of `4ec1bc4` (`git archive` plus a junctioned `node_modules`). The copy was removed afterwards. The worktree's `node_modules` was intact (693 entries) and `git status --porcelain` was clean.
+
+| Check | Result |
+|---|---|
+| `npm run lint` / `format:check` | exit 0 / exit 0 |
+| `npm run typecheck` and `tsc -b --force` | exit 0 / exit 0 |
+| `npm run test:unit` | 6 suites, **77/77 passed** (matches the PR) |
+| `npm run test:coverage` | exit 0, 77/77; summary 0/0 (no product source yet, as the PR states) |
+| `npm run build` | exit 0 |
+| `npm run deps:rebuild` (real run) | bcrypt skip, prisma skip, playwright skip; exit 0 |
+| `npm ls --all` | exit 0; `jest-util` is a single deduped copy (30.5.1) shared with Jest |
+| `npm audit` / `--omit=dev` | 0 critical, 0 high, 34 moderate, 1 low / **0 vulnerabilities** (matches the PR) |
+| Lockfile vs `76b69c0` | 1,559 entries. **0 new** `resolved`+`integrity` tuples. Apart from links and `inBundle` entries, every entry resolves from `registry.npmjs.org` with sha512. No `gcp-metadata`, `gaxios` or `auto-instrumentations` entries. All 15 `@platform/*` entries are `{resolved: <workspace dir>, link: true}`. |
+| `npm config get @platform:registry` | `https://registry.invalid/` |
+| **M1 mutation:** old `src`-only glob restored | coverage-scope: **3 failed** (`apps/admin/app`, `apps/web/app`, `prisma/seed`) |
+| **M1 live check:** untested `apps/web/app/routes/home.ts`, `prisma/seed/run.ts` and `apps/api/src/modules/quotes/tests/builder.ts` added | `jest --coverage` lists `home.ts` and `run.ts` at 0 %, excludes the `tests/` builder and fails the 85/75 threshold: **exit 1** |
+| **M2 mutation:** `{ "path": "apps/web" }` removed / duplicated in the root `tsconfig.json` | root-scripts: **1 failed** in each case |
+| **M2 mutation:** new workspace `packages/newpkg` (include `lib`) with no reference | root-scripts + coverage-scope: **2 failed** (missing reference; `packages/newpkg/lib` not measured) |
+| **m1 mutation:** old `resolve(argv[1]) === fileURLToPath(...)` guard restored | ignore-scripts: **1 failed** (the junction test) |
+| **m1 fail-closed:** `rebuild.mjs` under system Node v20.20.2 (no `import.meta.main`) | exit 1 with `Error: deps:rebuild needs Node >= 24.2 (import.meta.main)`. No silent no-op. |
+| **m3 mutation:** jest-esm suite run without `--experimental-vm-modules` | the suite fails: `Must use import to load ES Module … jose` |
+| **n6:** `--listTests` per project with `a.int.test.tsx`, `b.api.test.tsx`, `c.test.tsx`, `d.int.test.ts` | unit: `c` only; integration: `a`, `d`; api: `b` |
+| `@jest/transform` source check | `shouldInstrument` applies `globsToMatcher(collectCoverageFrom)` to the rootDir-relative, `/`-separated path. coverage-scope.test.ts calls it the same way. |
+
+### R2.2 Status of round-1 findings
+
+| ID | Sev | Status | Evidence / note |
+|---|---|---|---|
+| M1 | MAJOR | **Fixed** | `jest.config.ts:37-49` covers `{apps,packages}/*/{src,app}` and `prisma/seed`, and excludes `tests`, `fixtures`, `.react-router` and `prisma/generated`. `coverage-scope.test.ts` derives the roots from each tsconfig `include` and checks them with Jest's own matcher. The mutation and live checks above confirm it. One blind spot remains: R2-m1. |
+| M2 | MAJOR | **Fixed** | `root-scripts.test.ts:93-134` checks that (a) every workspace has a tsconfig, (b) the references are exactly the workspaces plus `tools`, with no duplicates, (c) the root compiles nothing itself, and (d) no referenced project is empty. All three mutations above fail as intended. |
+| m1 | MINOR | **Fixed** | `rebuild.mjs:128-133` uses `import.meta.main` and throws when it is missing. The junction test fails against the old guard. Fail-closed confirmed on a real Node 20. See R2-n1 for the `engines` floor. |
+| m2 | MINOR | **Fixed** | `ignore-scripts.test.ts:167-178` runs the script for real, with `DEPS_REBUILD_PLAYWRIGHT` stripped, and asserts exit 0 plus the ordered `id: action` lines. This exercises `main()`, the step loop and the final bcrypt check. The failing-probe (`return 1`) path is still untested; round 1 marked it optional. |
+| m3 | MINOR | **Fixed** | `tools/repo/jest-esm.test.ts` asserts the script flag, generates a `uuid` v7 and round-trips a `jose` HS256 token with a random per-run key (no committed secret material). Mutation confirmed. |
+| m4 | MINOR | Tracked | PR Follow-ups: TASK-002 (lint rule) / TASK-015 (coverage gates). |
+| m5 | MINOR | Tracked | principal-architect (ADR-0003 amendment, in flight), then the structure-checker rule for the `tests` folder. |
+| m6 | MINOR | Tracked | TASK-003 + security-analyst, merged with PR1-SEC-02. Includes `prisma migrate deploy` with no unverified download. |
+| m7 | MINOR | **Resolved on main** | `e74399a` (D-ARCH-035..039) marks ADR-0002 §2/§6 as superseded by `tsc -b`, npm ≥ 11.10 and `npm exec --no`. The ADR-0003 file-or-folder wording is still pending under m5. |
+| m8 | MINOR | Tracked | TASK-004. |
+| m9 | MINOR | Tracked | TASK-014. D-ARCH-038 also requires stripping `**/*.test.*` from the runtime `dist/`. |
+| n1, n2, n3, n5 | NIT | Tracked | TASK-002. n5 is also covered by principal-architect A-2, ratified in D-ARCH-036. |
+| n4 | NIT | **Fixed** | `tools/deps/npm-cli.mjs` (loader-free, `node:` builtins only) is shared by `rebuild.mjs` and `test-support/process.ts`. The duplicate is gone. |
+| n6 | NIT | **Fixed** | `jest.config.ts:62,67,72`; see the `--listTests` check above. |
+
+The changes outside the round-1 findings (the `.npmrc` `@platform` pin and the OTel meta-package removal) implement security-analyst's PR1-SEC-01/-07 recommendations (the TASK-001 row of the security review), so they are not scope creep. `git grep` finds no importer of the removed package in code, and TASK-214 owns the explicit instrumentations.
+
+### R2.3 Judgements requested by the orchestrator
+
+- **`jest-util` 30.5.1 as a direct devDependency:** acceptable. It is MIT-licensed, part of the Jest monorepo and already in the tree (deduped, 0 new lockfile tuples, past the 7-day cooldown). The PR body justifies it per CLAUDE.md §9. It is the right choice over `path.matchesGlob`: `@jest/transform` calls this exact function with the same path shape, so the guard can't disagree with Jest on `{a,b}` braces, `dot: true` or negation. The remaining risk is that the exact pin is not tied to Jest's version (R2-n2).
+- **`import.meta.main` fail-closed:** correct, and better than `realpathSync(argv[1])`. Node resolves the entry module through its real path, so `import.meta.main` holds for junction, symlink, 8.3 and drive-letter-case invocations. Importing the module for `plan()` does not run `main()`. A Node without the property throws at load time with an actionable message and exit 1 (verified on v20.20.2), so the install path can no longer report a silent green. `engine-strict` with `engines.node >=24` already stops Node 20/22 at install. The only gap left is Node 24.0–24.1 (R2-n1), where the script fails loudly, which is the safe direction.
+
+### R2.4 New findings (round 2)
+
+| ID | Severity | file:line | Issue | Required fix / owner |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `tools/repo/coverage-scope.test.ts:43-50, 56-60` | The guard drops every `include` entry that contains glob characters. A workspace whose `include` holds only globs (e.g. `["lib/**/*.ts"]`) yields **zero** source roots and falls out of the drift check. Reproduced: a new `packages/newpkg` with `include: ["lib/**/*.ts"]` keeps coverage-scope green at 28/28 while `packages/newpkg/lib/**` sits outside `collectCoverageFrom`. With `include: ["lib"]` the guard catches it. The hard-coded `arrayContaining` list names only 6 of the 11 non-test workspaces and leaves out the 95 % paths `packages/audit` and `packages/authz`. Every include today is a plain directory, so nothing is unmeasured now. | Assert that every non-test workspace yields at least one source root, or derive the static prefix of a glob include (`lib/**/*.ts` → `lib`) instead of dropping it. About 3 lines. Fix in this PR if convenient; otherwise a tracked condition on **TASK-015** (coverage gates). |
+| R2-n1 | NIT | `package.json:9` | `engines.node` `>=24 <25` admits 24.0–24.1, where `deps:rebuild` now throws. `engine-strict` could reject those versions at install instead. | Use `>=24.2 <25`, or record the floor in ADR-0001's pin note. Owner: TASK-002 or the next toolchain change. |
+| R2-n2 | NIT | `package.json:57` | `jest-util` is pinned exactly at 30.5.1, separately from `jest` 30.5.2. If a Jest bump moves its internal `jest-util` and the root pin stays behind, npm installs two copies, and the scope guard then uses a different matcher from Jest's. | Add a `toolchain.test.ts` assertion that the root `jest-util` version equals the one resolved from `@jest/transform` (`createRequire(require.resolve('@jest/transform'))`). Owner: TASK-015. |
+| R2-n3 | NIT | PR #1 body, "Acceptance" table | The counts are stale: AT-US-001-04 says "12 pass" (now 16) and SEC-TC-45 says "8 pass" (now 12). `coverage-scope` and `jest-esm` are not listed. The squash-merge message is taken from this body. | Refresh the table before the squash merge. Owner: senior-developer. |
+| R2-n4 | NIT (outside this PR) | `docs/sdlc/DECISIONS.md:918` (PR1-SEC pin decision, item 2) | The decision says `check-lockfile` accepts `@platform/*` link entries "without `resolved`/`integrity`". In npm lockfile v3, link entries always carry `resolved: "<workspace dir>"` (all 15 here do), so a TASK-007 check written from this text would reject every one of them. The PR's own test (`link: true` and `resolved` is a workspace directory) is the correct rule. | Reword to "`link: true` whose `resolved` is a workspace directory, no `integrity`". Owner: principal-architect / TASK-007. |
+| R2-n5 | NIT | `tools/deps/ignore-scripts.test.ts:167-178` | Once TASK-003 adds `prisma.config.ts` or `prisma/schema`, the real-run test makes the unit suite run `prisma generate` (slow, and it writes `prisma/generated`). On a platform without a bcrypt prebuild it would run `npm rebuild bcrypt` inside a unit test. Both behaviours are correct but heavy for a unit lane. | TASK-003: keep the real run but confirm its duration fits the lane A budget, or move it to `quality:heavy`. Watchlist item. |
+
+### R2.5 GOOD (round 2)
+
+- Every fix has a guard test, and the PR body names the mutation that proves each one. The reviewer reproduced all of them. Use this as the template for later fix cycles.
+- coverage-scope.test.ts reuses Jest's own `globsToMatcher` rather than a similar glob engine, and it checks both directions: unmeasured roots and stale include globs.
+- `npm-cli.mjs` gives the install-time script and the tests one shared helper, with no dependency on a TS loader at install time.
+- The lockfile was regenerated under the committed `.npmrc` cooldown with 0 new tuples, and provenance and audit evidence back it.
+
+### R2.6 SECURITY-FLAGS (for security-analyst, round 2)
+
+1. The `.npmrc` line `@platform:registry=https://registry.invalid/` is present and asserted. The out-of-graph negative fixture from item 4 of the PR1-SEC decision (`@platform/shared@0.0.0` → `ENOTFOUND`) is **not** in this PR. Confirm whether it belongs here or in TASK-007.
+2. R2-n4: the `check-lockfile` wording for link entries needs correcting before TASK-007 implements it.
+3. m1 is closed: `deps:rebuild` can no longer be bypassed with exit 0 through a link path, and it fails closed on an old Node.
+
+### R2.7 DoD checklist delta
+
+| Item | Round 2 status |
+|---|---|
+| Linked AC satisfied and demonstrated by tests | **Pass** for TASK-001's share. AT-US-001-04 is now tied to the real solution file (M2). The local part of SEC-TC-45 covers the real `deps:rebuild` run (m2). AT-US-001-03/05 belong to TASK-002. |
+| Lint, format, type checks; no new warnings | Pass (re-run) |
+| Unit tests for new logic; coverage not reduced | Pass. The coverage gate now spans every current source root (M1). |
+| code-reviewer APPROVED | **Yes**: APPROVED at `4ec1bc4` (0 BLOCKER, 0 MAJOR open). |
+| security-analyst: no Critical/High | Pending security-analyst round 2 |
+| Public interfaces / ADRs | Pass. The SPK-01 amendments are ratified on main (D-ARCH-035..039). The ADR-0003 wording is pending (m5, tracked). |
+| traceability.md / STATUS.md | Orchestrator: record the tracked items (m4–m6, m8, m9, n1–n3, n5, R2-m1, R2-n1..n5) against their owner tasks. |

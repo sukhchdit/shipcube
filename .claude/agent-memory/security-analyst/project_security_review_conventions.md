@@ -14,7 +14,7 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 **dependency-auditor hits its 30-turn limit.** A 4-task dispatch on 2026-11-12 (age sweep, provenance, maintenance, gitleaks) stopped before it reported. Its scratchpad outputs (`sweep-stdout.json`, `packuments-condensed.json`, `gitleaks-out/`) were still usable.
 - Give it at most 2 tasks per dispatch.
 - Or run the licence, audit and maintenance checks yourself with Node scripts; this is fast.
-- gitleaks works via the Docker image with `--redact`.
+- gitleaks works via the Docker image with `--redact`. In Git Bash, prefix it with `MSYS_NO_PATHCONV=1`, otherwise `/repo` is rewritten to `C:/Program Files/Git/repo`. For worktree commits, mount the main repo, which holds the shared object store, and use `--log-opts=<base>..<head>`.
 - Semgrep is not installed on the host.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
