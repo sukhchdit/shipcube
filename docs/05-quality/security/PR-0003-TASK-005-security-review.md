@@ -638,3 +638,147 @@ Then add a `constructor` throwable to the property test.
 | `envdiff-out.txt` | `.env.example`: tooling credentials are `CHANGE_ME`, `_FILE` keys are empty, the DB timeouts are literals. `compose.env`: tooling credentials contain `local-only-`, and all are refused in staging |
 | `shapescan` | 11 hits, all placeholders, templates or test alphabets; the positive control fired |
 | Not run (constraints) | `npm ci`, build, unit suites, gitleaks, Semgrep. PR gate accepted: 430/430; coverage 99.91 % / 97.56 %; `npm audit --audit-level=high` exit 0 |
+
+## Round 3 (head 0e48a2a)
+
+| Field | Value |
+|---|---|
+| Delta | `c277ea6..0e48a2a`, 1 commit (`0e48a2a fix(config): review fix cycle 2 for TASK-005 (PR #3 round 2, D-ORCH-007)`), 16 files, all under `packages/config/src`, +558 / −100. No lockfile, env-file or dependency change. `gh pr view 3`: head `0e48a2a5`, OPEN |
+| Fix comment | https://github.com/sukhchdit/shipcube/pull/3#issuecomment-6826964394 |
+| Decisions | D-ORCH-007 (fix-cycle scope; PR3-SEC-03 option (b)), D-TASK005-03 (behaviours) |
+| Reviewer / date | security-analyst, 2026-11-12. Review by SHA only: the `Shipqube-TASK-005` worktree was not touched, because a merge-main pass runs there. Node 24.22.3 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS. No Critical or High finding is open, so merge is allowed.** **Closed:** PR3-SEC-12 (MEDIUM), covering every round-2 vector plus the optional pg allow-list. A 5,000-run generated differential per driver found no guard-accepted URL that pg or ioredis would use without verified TLS. Also closed: PR3-SEC-15 (INFO), and PR3-SEC-03 (LOW) within this PR's scope (the ECS second signal); round-1 remediation items 2 and 3 stay binding on later tasks. **New:** PR3-SEC-16 (INFO): a thrown value whose `code` getter or Proxy trap throws escapes the value-free classification. **Open and unchanged:** PR3-SEC-05, -06, -08, -13 and -14 (LOW or latent, all routed), and PR3-SEC-09 and -11 (INFO). The verdict covers `0e48a2a`. A later merge-main commit needs a delta check only if it changes `packages/config/src` beyond the merge itself |
+
+### R3.1 Method
+
+- **Code read.** Every changed non-test source at `0e48a2a` was read in full, from `git archive 0e48a2a packages/config` in the scratchpad. Tests were read for each claimed vector: `[PR3-SEC-12]`, `[PR3-SEC-03]` and `[PR3-SEC-15]` in `load-config.test.ts`, `guards.test.ts` and `secret-refs.test.ts`, and `[R2-n3]`.
+- **Probes ran against the PR's own code.**
+  - Setup: the 22 non-test sources were transpiled with `module.stripTypeScriptTypes` into `scratchpad/review/PR-3-sec-r3/build`. A temporary `node_modules` junction pointed to the main checkout, which has the same locked versions: joi 18.3.2, zod 4.6.7, pg 8.23.1, pg-connection-string 2.14.1, ioredis 6.0.0 and fast-check 4.10.2. The delta changes no lock entry. The junction was removed afterwards (`rmdir`, link only).
+  - The round-2 scripts were no longer in the scratchpad, so they were re-created in `review/PR-3-sec-r3/probes/`:
+    - `transport.mjs`: 40 `DATABASE_URL` and 31 `REDIS_URL` forms through `loadConfig` (staging, service `api`). Each verdict is printed next to the driver's own reading: `pg/lib/connection-parameters`, and `new Redis(url, { lazyConnect: true }).options`. Also covers the HTTPS keys.
+    - `redis-wire.mjs`: a loopback listener captures the first bytes ioredis sends, for 10 forms.
+    - `fuzz.mjs`: a fast-check generated differential, 5,000 runs per driver, seed 20261112. Invariant: if the guard accepts in staging, the driver uses verified TLS over TCP. It includes positive controls.
+    - `misc.mjs`: the ECS guard matrix; the `describeFailureCause` channels; code-running throwables; permanent errors through the real file provider on a temp root (junction outside, directory, 70 KiB file); brand and web URL credentials through the predicate, Joi and Zod.
+    - `shapescan.mjs`: secret shapes in the added lines, with a positive control.
+  - Passwords, tokens and endpoints are runtime-random. Outputs are verdicts, booleans and redacted templates (`{p}`), and each probe asserts that its own output contains none of these values.
+- **Not run, per the constraints:** `npm ci`, the build, the unit suites, gitleaks (Docker) and Semgrep (not installed). I accept the PR gate evidence: lint, format, typecheck and build all exit 0; 635/635 unit tests pass; `packages/config` coverage is 100 % lines and 97.46 % branches; `npm audit --audit-level=high` exits 0.
+
+### R3.2 Findings: status at `0e48a2a`
+
+| ID | Previous | Status | Verification |
+|---|---|---|---|
+| PR3-SEC-12 | MEDIUM | **Closed** | **Valkey** (`guards.ts:83-84`). The guard requires the raw value to start with `rediss://`, a non-empty host, and no `?` or `#` anywhere in the raw value. The prefix test is exactly the one ioredis uses (`Redis.js:707`, case-sensitive), so the guard and the driver now decide TLS from the same bytes. **Refused by the guard:** the opaque `rediss:user:pw@host` (with and without `/0`), `rediss:%2F%2F…`, `rediss:/…`, `#x`, `/0?`, `?tls=`, `?family=4`, `?path=` (Unix socket), port 99999 (fails closed) and `rediss:///0`. **Refused earlier by Joi:** `REDISS://`, `Rediss://`, a leading space, tab and newline forms, backslashes, protocol-relative values and Unix paths. **Accepted:** `rediss://` with or without `/0`, IPv6, `%3F` or `%23` inside the path, the whole userinfo in the username, and `/0;tls=false`. ioredis gives `tls: true` for every accepted form. **On the wire:** every accepted form sends `0x16` (TLS ClientHello) first, and the password is not in clear. Every refused plaintext form sends `*` with the password in clear: the opaque form, `%2F%2F`, `?tls=`, and the `redis://` positive control. **Generated:** 5,000 runs, 88 accepted, 0 accepted without TLS. **Fail closed** (`guards.ts:93-104`). A value WHATWG cannot parse is now `insecure-transport`: `DATABASE_URL …:99999…?sslmode=disable`, `REDIS_URL …:99999` and `STORAGE_ENDPOINT https://…:99999`. The new `key in values` skip applies only to a key the schema already rejected, and any schema issue throws, so it opens no path: `configObjectSchema` strips none of `CONFIG_KEY_NAMES`. **PostgreSQL allow-list** (`guards.ts:54-75`). Refused: `host=` (socket or TCP), `ho%73t=`, `options=`, `user=`, `password=`, `replication=`, `sslcert`/`sslkey`, `ssl=0`, an empty key, `ssl+mode`, `SSLMODE`, a `;`-joined parameter, a bare `sslmode`, duplicate and encoded-duplicate `sslmode`, `%2F` and `%2f` socket hosts, the opaque `postgresql:host` and `postgresql:/host` forms (pg would fall back to `localhost`), and a fragment-only `#?sslmode=disable`. Accepted: `verify-full` alone; with `sslrootcert` (the file is read and `ca` is set); with `uselibpqcompat=true`, `sslnegotiation=direct`, `connect_timeout` or `application_name`; IPv6; `localhost`; `#&sslmode=disable` (pg ignores the fragment too); and `verify%2Dfull` (both sides decode it). For every accepted form, pg yields `ssl: {}` with no `rejectUnauthorized: false`, no `checkServerIdentity` override, a TCP host and no `options`. **Generated:** 5,000 runs, 34 accepted, 0 downgraded. 4 accepted forms make pg throw at parse time: a malformed `%` in the password combined with an IPv6 host, because pg's `encodeURI` pre-pass encodes the brackets. The client then fails to construct, which fails closed. The runtime pool factory on `main` (`apps/api/src/platform/db/client.ts`, TASK-003) passes the string to pg unchanged, so this is the reading the probe used |
+| PR3-SEC-15 | INFO | **Closed**; successor PR3-SEC-16 (INFO) | `errorClassName` (`secret-refs.ts:152-158`) reads the prototype's own `constructor` data descriptor, then that function's own `name` data descriptor. It accepts only `^[A-Z][A-Za-z]{0,48}(?:Error\|Exception)$`. **Probe → `Error`:** an own `constructor` (object or function), a non-function prototype constructor, an accessor constructor, an accessor `name`, names with `_` or without the suffix, an own `name` property, the message, and a token-shaped `code`. **Kept:** `VaultTimeoutException`, `DOMException` and `SecretFileError/SECRET_FILE_TOO_LARGE`. The round-2 channel (`leaks: true`) is gone. **Residual, by design:** a letters-only class name declared in code (`<letters>Error`) and an upper-case letters `code` (`SECRET_<LETTERS>`) still pass. A provider would have to name a class, or set an errno-shaped code, from data, and no code-defined adapter does that. "Getter-free" holds for the class-name read only; see PR3-SEC-16 |
+| PR3-SEC-03 | LOW | **Closed in this PR's scope** (option (b)); items 2 and 3 stay binding | The guard is `localAppEnvOnEcsGuard` (`guards.ts:180-181`); the variable names are `ECS_METADATA_KEYS` (`environment.ts:26`); presence is read through `pickConfigured` (`load-config.ts:45`). **Matrix.** `local` or `test` with V3 or V4 set → `APP_ENV forbidden-in-environment (appEnv.ecsTask)`. This includes a single-space value, and V4 empty with V3 set. `staging` and `production` are unaffected. The endpoint value is absent from every error surface. **Edge.** `loadConfigOrExit` passes the whole `process.env`, not a pre-filtered record, so the names reach the guard: `local` with V4 set → exit 78. **Effect.** The round-1 scenario is now refused on the target platform (ECS on EC2, brief §3.3): a deployed ECS task that declares itself `local` and accepts the committed `local-only-*` markers. **Not covered, by design:** lower-case names (Linux environments are case-sensitive, and the agent injects upper case), `AWS_EXECUTION_ENV` on its own, and non-ECS hosts. For "empty = unset", see R3.4 item 3. **Still binding:** (2) the first key-provider task asserts `isLocalAppEnv` before it uses `localOnly` material; (3) the IaC task validates `app_env`. **Doc:** ADR-0018 §3 still says "`NODE_ENV=production` and the Mock carrier/gateway". principal-architect aligns it with `APP_ENV=production` (round-1 item 1) |
+| PR3-SEC-05 | LOW (latent) | Open; unchanged | Binding on TASK-006 |
+| PR3-SEC-06 | LOW (latent) | Open; unchanged | TASK-014 (per-service env) |
+| PR3-SEC-07 | LOW | Closed in round 2; the residual INFO stays routed | The file provider is unchanged in this delta; only its test changed (abort timing) |
+| PR3-SEC-08 | LOW (latent) | Open; unchanged | TASK-022 |
+| PR3-SEC-09 | INFO | Open; unchanged | — |
+| PR3-SEC-11 | INFO | Open; one note added (`PGOPTIONS`, R3.4 item 2) | — |
+| PR3-SEC-13 | LOW | Open; routed by D-ORCH-007 item 2 | TASK-014 entrypoint preflight; IaC Checkov rule |
+| PR3-SEC-14 | LOW (latent) | Open; routed by D-ORCH-007 item 2 | Helper in `packages/config` by TASK-014; callers in TASK-014 and TASK-016 |
+
+### R3.3 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR3-SEC-16 | A thrown value whose `code` getter or Proxy trap throws escapes the value-free classification. The secondary exception leaves `resolveSecretRefs` unclassified, message included | INFO | CWE-209, CWE-755 | A09 | `packages/config/src/secret-refs.ts:160-163`, `:169-184`, `:208-209` | senior-developer (optional, this PR) or TASK-006 (which composes `resolveSecretRefs` into start-up) | Open |
+
+#### PR3-SEC-16 (INFO): code-running throwables escape classification
+
+**Description.** `classifyFailure` runs inside the `catch` of `attemptResolve`. `describeFailureCause` and `errorCode` still run code that belongs to the thrown value:
+- `error instanceof Error` walks the prototype chain, so a Proxy `getPrototypeOf` trap runs;
+- `errorCode` reads `.code` with an ordinary `[[Get]]`, so a getter runs.
+
+If that code throws, the new exception propagates out of `attemptResolve`, then `resolveOne`, then `Promise.all`. `resolveSecretRefs` then rejects with that exception instead of a `ConfigValidationError`.
+
+- **Probe.** One provider throws an `Error` whose `code` getter throws `new Error(<secret>)`. Another throws a Proxy whose `getPrototypeOf` trap does the same. Both give `ESCAPED Error`, with the secret present in the message and stack (`leak=true`), after one provider call each.
+- **Control.** A getter that *returns* `EACCES` is handled: `Error/EACCES`, no leak.
+- **Origin.** This predates round 3: round 2 read `error.constructor.name` and `.code` the same way. The PR3-SEC-15 fix made the class-name read getter-free, but not the `code` read.
+
+**Exploitability and impact.**
+- The provider must throw an object with a throwing accessor, or a Proxy, that carries data.
+- Node system errors, `ERR_*` errors and `SecretFileError` define `code` as an own data property (verified on Node 24.22.3), and AWS SDK v3 errors are plain class instances.
+- So this is not reachable with the code-defined adapters. If it were triggered, the start-up caller (TASK-006) would print an unexpected exception. **INFO.**
+
+**Remediation (code level, `secret-refs.ts`).**
+```ts
+const ownData = (target: object, key: string): unknown => Object.getOwnPropertyDescriptor(target, key)?.value;
+
+/** errno, ERR_* and SecretFileError codes are own data properties; an accessor is never invoked. */
+const errorCode = (error: Error): string | undefined => {
+  const code = ownData(error, 'code');
+  return typeof code === 'string' && ERRNO_CODE.test(code) ? code : undefined;
+};
+
+export function describeFailureCause(error: unknown): string {
+  try {
+    if (!(error instanceof Error)) return `non-error:${typeName(error)}`;
+    const code = errorCode(error);
+    const name = errorClassName(error);
+    return code === undefined ? name : `${name}/${code}`;
+  } catch {
+    // A Proxy trap threw: the thrown value's own code never decides the outcome.
+    return 'Error';
+  }
+}
+```
+In `classifyFailure`, take `permanent` from the same guarded code: compute it once, inside a `try`, together with the cause.
+
+**Verification test (`secret-refs.test.ts`).**
+- Case (a): a provider throws an `Error` with `get code() { throw new Error(token) }`.
+- Case (b): a provider throws `new Proxy(new Error('x'), { getPrototypeOf() { throw new Error(token) } })`.
+- For each case, `resolveSecretRefs` rejects with a `ConfigValidationError` whose issue is `{ rule: 'ref.providerError', cause: 'Error' }`. `token` is absent from `message`, `formatConfigError`, `stack` and `inspect`.
+- Add both throwables as channels in the value-free property.
+
+### R3.4 Reviewer focus: answers
+
+1. **Valkey forms.** `rediss:` without `//`, the encoded forms, `#`, `?` and unparsable URLs are all refused. Every accepted form is TLS on the wire (R3.2).
+2. **PostgreSQL forms.**
+   - `host=`, `options=`, socket hosts and `%2F` are all refused. So are lower-case `%2f`, the encoded key `ho%73t` and the opaque `postgresql:` forms.
+   - Every allow-listed parameter keeps verified TLS.
+   - **Note (outside the URL guard's scope).** pg also reads `PGOPTIONS` from the process environment when the URL has no `options`. Verified: a guard-accepted URL plus `PGOPTIONS='-c row_security=off'` gives `options` set. `PGSSLMODE` and `PGHOST` do not override the URL. TASK-003's `toPoolConfig` refuses `options` only in the URL. Routed to TASK-014 (R3.5).
+3. **ECS guard: presence only, and an empty value counts as unset. This is safe for its purpose.**
+   - The ECS agent always injects a non-empty endpoint URL into each container. An empty value can only come from explicit configuration (the task definition or an entrypoint). Whoever writes that also controls `APP_ENV` and every other variable, which is outside this accident net's threat model.
+   - It matches the package-wide rule that Compose's `${VAR:-}` empty string means "not configured" (`pickConfigured`).
+   - A single space counts as present, and is refused.
+   - **Optional hardening, at no local cost:** treat a *defined* ECS name as present even when empty (`key in env`), and add `AWS_EXECUTION_ENV` starting with `AWS_ECS_` as a third signal. Not required for merge.
+4. **Error class-name hardening.** Closed against the round-2 channel. The residual (code-defined letters-only names, upper-case codes) is by design. Code-running throwables are PR3-SEC-16 (INFO).
+5. **Permanent errors.**
+   - Each of these gives exactly one provider call, no sleep, and a `cause` of class and code only: `SECRET_FILE_OUTSIDE_ROOT` (a junction pointing outside the root), `SECRET_FILE_NOT_REGULAR` (a directory), `SECRET_FILE_TOO_LARGE` (70 KiB), `EACCES` and `EPERM`.
+   - No path, root or secret appears in any error surface, even when the provider's message carries the path.
+   - The `EIO` control is still retried (2 calls, 1 sleep).
+   - When the deadline passes during the sleep, the first diagnosis is kept. This changes no information.
+6. **Brand URL credentials.**
+   - **Refused identically** by `isBrandUrl`, by Joi (`BRAND_LOGO_URL`) and by Zod (`BRAND_LOGO_URL` and `VITE_API_BASE_URL`), each with rule `brand.url` and no value in any error surface: `user:pw@`, `user@`, `:pw@`, `user%3Apw@`, host-looking userinfo, a double `@`, `http:`, an upper-case scheme, protocol-relative values, and the backslash and tab forms.
+   - **Accepted:** `https://@host`, and `@` inside the path. Neither carries credentials, because WHATWG and browsers drop the empty userinfo.
+   - **No ReDoS.** The `ABSOLUTE_BRAND_URL` regex runs in linear time, because `%` is not in its character class, so the two alternatives cannot overlap. The length check also runs first.
+7. **Secrets in the delta.** The shape scan of added lines has 1 hit: a 2-character dictionary-word password in a test vector that is expected to be refused (`brand-rules.test.ts:95`). The positive control fired.
+
+### R3.5 Follow-ups added or changed by round 3 (binding unless marked optional)
+
+| Task | Requirement | From |
+|---|---|---|
+| senior-developer (optional, this PR) or TASK-006 | A guarded `describeFailureCause` (try/catch, and an own-data read of `code`), plus the two throwables in the value-free property | PR3-SEC-16 |
+| TASK-014 | The entrypoint preflight also refuses `PG*` variables (at least `PGOPTIONS`) when `APP_ENV` is staging or production, next to the NODE_OPTIONS allow-list | PR3-SEC-11 note (R3.4 item 2) |
+| principal-architect | ADR-0018 §3: change "`NODE_ENV=production` and the Mock carrier/gateway" to "`APP_ENV=production` …". Record the ECS second signal (D-ORCH-007) in §4 | PR3-SEC-03 |
+| First key-provider task (TASK-040/045/048/052) | Unchanged: assert `isLocalAppEnv` before using `localOnly` material | PR3-SEC-03 item 2 |
+| IaC task (M5) | Unchanged: `app_env` validation; a Checkov check on `NODE_OPTIONS`; security groups never open 9229 | PR3-SEC-03 item 3, PR3-SEC-13 |
+| TASK-006 | Unchanged: ioredis built with an explicit `tls: { servername }`; `resolveSecretRefs` plus `checkResolvedSecrets` at start-up; the `O_NOFOLLOW` file read | PR3-SEC-02, -05, -07 |
+| Optional (any task touching the guard) | ECS signal: treat a defined-but-empty name as present; add `AWS_EXECUTION_ENV=AWS_ECS_*` | PR3-SEC-03 (R3.4 item 3) |
+
+The R2.5 row "This PR (recommended) or TASK-006" for PR3-SEC-12 is discharged. The R2.5 row for PR3-SEC-15 is discharged, and PR3-SEC-16 succeeds it.
+
+### R3.6 Evidence (head `0e48a2a`)
+
+Files are in `scratchpad/review/PR-3-sec-r3/out/`.
+
+| Check | Result |
+|---|---|
+| `transport-out.txt` | **DATABASE_URL, staging.** 40 forms. Every form for which pg would use a socket, `ssl: false`, an `options` GUC or another host is refused. Accepted forms all yield `ssl: {}` (verify-full defaults) over TCP. Port 99999 → `insecure-transport` (fail closed). **REDIS_URL, staging.** 31 forms. Every form with `tls=undefined` (plain) in ioredis is refused. Accepted forms all have `tls: true`. **HTTPS keys.** `https:/host`, `https:host`, `https://` and upper case are rejected by Joi. `http://` and port 99999 → `insecure-transport`. **Local control:** opaque `rediss:` is accepted in `local`, as designed. Password present in the output: false |
+| `redis-wire-out.txt` | Loopback. 6 accepted forms → first byte `0x16`, password not in clear. 4 refused forms (opaque, `%2F%2F`, `?tls=`, and `redis://` as the positive control) → first byte `*`, password in clear |
+| `fuzz-out.txt` | **Redis:** 5,000 runs, 88 accepted, 0 without TLS. **pg:** 5,000 runs, 34 accepted, 0 downgraded; 4 make pg throw at parse time (fail closed). Both positive controls flagged as insecure |
+| `misc-out.txt` | **ECS matrix:** 32 cells plus the edge (exit 78); no endpoint leak. **Class-name channels:** 17 cases; only the code-defined letters-only name and the upper-case `SECRET_` code pass, by design. **Code-running throwables:** 2 escape (PR3-SEC-16); the returning getter is handled. **Permanent errors:** 5 with 1 call each, `EIO` with 2; no path or secret leak. **Brand credentials:** 11 refused identically on all three validators, 2 credential-free forms accepted, controls accepted |
+| `shapescan-out.txt` | 1 hit, a test vector (see R3.4 item 7); the control fired |
+| Not run (constraints) | `npm ci`, the build, the unit suites, gitleaks, Semgrep. PR gate accepted: 635/635; coverage 100 % / 97.46 %; `npm audit --audit-level=high` exit 0 |

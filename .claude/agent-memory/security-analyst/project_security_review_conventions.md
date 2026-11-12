@@ -24,6 +24,9 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.
   - Run them with plain `node` (Node 24 strips types).
   - For URL guards, diff the guard's result against `new pg.Client({connectionString})`'s `host`/`port`/`database`, which needs no connection.
+- **Type-stripping PR sources (PR-0008).**
+  - Use `stripTypeScriptTypes(code, { mode: 'transform' })`. The default strip mode rejects constructor parameter properties (`constructor(readonly x: string)`), which the authz package uses.
+  - In probe scripts, build file URLs with `pathToFileURL`. Hand-built `replaceAll('\\', '/')` broke again in a Bash heredoc.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
