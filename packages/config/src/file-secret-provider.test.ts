@@ -127,17 +127,23 @@ describe('file secret provider (PR3-SEC-07, m4)', () => {
     await expect(provider.resolve('/run/secrets/slow', AbortSignal.abort(reason))).rejects.toBe(reason);
 
     let received: AbortSignal | undefined;
+    // R2-n4: abort once the read has started (not after a fixed sleep, which races realpath/stat on a loaded host).
+    let readStarted: () => void = () => undefined;
+    const reading = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
     const fs: SecretFileSystem = {
       realpath,
       stat,
       readFile: (_path, { signal }) => {
         received = signal;
+        readStarted();
         return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('read aborted'))));
       },
     };
     const controller = new AbortController();
     const pending = createFileSecretProvider({ root, fs }).resolve('/run/secrets/slow', controller.signal);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await reading;
     controller.abort(reason);
     await expect(pending).rejects.toBe(reason);
     expect(received).toBe(controller.signal);

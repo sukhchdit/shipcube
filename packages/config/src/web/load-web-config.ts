@@ -3,11 +3,19 @@
  * environment (`loadEnv(...)` in vite.config.ts or `process.env`). Failures throw the same
  * `ConfigValidationError` as the API and worker, naming keys only.
  */
+import type { z } from 'zod';
+
 import { deepFreeze, type EnvInput, pickConfigured } from '../env-input.js';
 import { type ConfigIssue, ConfigValidationError } from '../errors.js';
 import { WEB_CONFIG_KEYS, type WebBuildConfig, webConfigSchema } from './web-schema.js';
 
 const STRIPE_LIVE_PUBLISHABLE_KEY = /^pk_live_/;
+
+/** Zod's issue code, or for a shared `brand-rules.ts` predicate the same rule id the backend Joi schema reports. */
+const ruleOf = (issue: z.core.$ZodIssue): string => {
+  const rule: unknown = issue.code === 'custom' ? issue.params?.rule : undefined;
+  return typeof rule === 'string' ? rule : issue.code;
+};
 
 export function loadWebBuildConfig(env: EnvInput): Readonly<WebBuildConfig> {
   const raw = pickConfigured(env, WEB_CONFIG_KEYS);
@@ -21,7 +29,7 @@ export function loadWebBuildConfig(env: EnvInput): Readonly<WebBuildConfig> {
   if (!result.success) {
     for (const issue of result.error.issues) {
       const key = String(issue.path[0] ?? '(root)');
-      if (!flagged.has(key)) issues.push({ key, code: key in raw ? 'invalid' : 'missing', rule: issue.code });
+      if (!flagged.has(key)) issues.push({ key, code: key in raw ? 'invalid' : 'missing', rule: ruleOf(issue) });
     }
   }
   if (issues.length > 0 || !result.success) throw new ConfigValidationError(issues);

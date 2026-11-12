@@ -10,14 +10,7 @@
  */
 import Joi from 'joi';
 
-import {
-  BRAND_NAME_MAX_LENGTH,
-  BRAND_NAME_MIN_LENGTH,
-  BRAND_URL_MAX_LENGTH,
-  BRAND_URL_PROTOCOLS,
-  LOCALES,
-  ROOT_PATH_PATTERN,
-} from './brand-rules.js';
+import { isBrandName, isBrandUrl, LOCALES } from './brand-rules.js';
 import { parseDurationSeconds } from './durations.js';
 import { APP_ENVS, type AppEnv, isLocalAppEnv, NODE_ENVS, type Service, SERVICES } from './environment.js';
 import {
@@ -94,6 +87,12 @@ const parsed = <T>(parse: (raw: string) => ParseResult<T>): Typed<T> =>
     }),
   );
 
+/** A `brand-rules.ts` predicate as a Joi `.custom` rule; a failure reports `any.invalid` with `rule` (no value). */
+const sharedPredicate =
+  (accepts: (value: string) => boolean, rule: string): Joi.CustomValidator<string> =>
+  (value, helpers) =>
+    accepts(value) ? value : helpers.error('any.invalid', { rule });
+
 const t = {
   string: (pattern?: RegExp, max = 256): Typed<string> =>
     typed(pattern === undefined ? Joi.string().max(max) : Joi.string().max(max).pattern(pattern)),
@@ -134,18 +133,17 @@ const t = {
   key: (variable: string): Typed<KeyVersion> => parsed((raw) => parseKeyVersion(registerEntryFor(variable), raw)),
   keySet: (variable: string): Typed<readonly KeyVersion[]> => parsed((raw) => parseKeySet(registerEntryFor(variable), raw)),
   publicKeySet: (purpose: string): Typed<readonly PublicKeyVersion[]> => parsed((raw) => parsePublicKeySet(purpose, raw)),
-  /** `BRAND_NAME`: trimmed, 1..40 characters (rules shared with the web Zod schema, `brand-rules.ts`). */
-  brandName: (): Typed<string> => typed(Joi.string().trim().min(BRAND_NAME_MIN_LENGTH).max(BRAND_NAME_MAX_LENGTH)),
-  /** Absolute http(s) URL or root-relative path (rules shared with the web Zod schema, `brand-rules.ts`). */
-  urlOrRootPath: (): Typed<string> =>
+  /** `BRAND_NAME`: trimmed, 1..40 code points; the predicate is shared with the web Zod schema (`brand-rules.ts`). */
+  brandName: (): Typed<string> =>
     typed(
-      Joi.alternatives().try(
-        Joi.string()
-          .max(BRAND_URL_MAX_LENGTH)
-          .uri({ scheme: [...BRAND_URL_PROTOCOLS] }),
-        Joi.string().max(BRAND_URL_MAX_LENGTH).pattern(ROOT_PATH_PATTERN),
-      ),
+      Joi.string().custom((value: string, helpers) => {
+        // Trimmed inside the rule (as Zod `.trim()` does), so a whitespace-only name fails `brand.name` on both sides.
+        const trimmed = value.trim();
+        return isBrandName(trimmed) ? trimmed : helpers.error('any.invalid', { rule: 'brand.name' });
+      }),
     ),
+  /** Absolute http(s) URL or root-relative path; the predicate is shared with the web Zod schema (`brand-rules.ts`). */
+  urlOrRootPath: (): Typed<string> => typed(Joi.string().custom(sharedPredicate(isBrandUrl, 'brand.url'))),
 };
 
 /** Lowest accepted bcrypt cost (REQ-AUTH-003, NFR-SEC-003, ADR-0006). */

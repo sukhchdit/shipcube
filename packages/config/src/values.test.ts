@@ -210,7 +210,7 @@ describe('schema metadata', () => {
   });
 
   it('guards are pure: no APP_ENV means no environment-dependent refusal', () => {
-    expect(GUARDS.length).toBe(9);
+    expect(GUARDS.length).toBe(10);
     expect(
       runGuards({
         raw: { NODE_DEBUG: 'x', DATABASE_URL: 'postgresql://h/db', BRAND_NAME: '<x>' },

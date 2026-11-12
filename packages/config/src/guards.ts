@@ -18,6 +18,8 @@ export interface GuardInput {
   readonly appEnv: AppEnv | undefined;
   /** Names of tooling-only keys (`tooling-keys.ts`) configured in the process environment; never their values. */
   readonly toolingKeys?: readonly string[];
+  /** Names of ECS task-metadata variables (`ECS_METADATA_KEYS`) present in the process environment; never values. */
+  readonly ecsMetadataKeys?: readonly string[];
 }
 
 export type Guard = (input: GuardInput) => readonly ConfigIssue[];
@@ -32,8 +34,7 @@ export const placeholderGuard: Guard = ({ raw, appEnv }) =>
 
 const HTTPS_KEYS = ['WEB_APP_ORIGIN', 'ADMIN_APP_ORIGIN', 'STORAGE_ENDPOINT', 'STORAGE_PUBLIC_ENDPOINT'] as const;
 
-const parseUrl = (value: string | undefined): URL | undefined => {
-  if (value === undefined) return undefined;
+const parseUrl = (value: string): URL | undefined => {
   try {
     return new URL(value);
   } catch {
@@ -47,39 +48,69 @@ const hasDuplicateParam = (url: URL): boolean => {
 };
 
 /**
- * PostgreSQL URL as node-postgres reads it (pg-connection-string 2.14.1 copies every query entry onto the config,
- * so the LAST `sslmode` wins, and `ssl=0` sets `ssl: false`): no repeated query parameter, exactly one
- * `sslmode=verify-full`, and no `ssl` override (TLS is selected by `sslmode` alone).
+ * Query parameters a hardened `DATABASE_URL` may carry (PR3-SEC-12, optional item). Everything else is refused:
+ * `host=` overrides the authority (another host or a Unix socket, so no TLS) and `options=` sets server GUCs.
  */
-const isVerifiedPostgresUrl = (url: URL): boolean =>
-  !hasDuplicateParam(url) && url.searchParams.get('sslmode') === 'verify-full' && !url.searchParams.has('ssl');
+const POSTGRES_URL_PARAMS: ReadonlySet<string> = new Set([
+  'sslmode',
+  'sslrootcert',
+  'sslnegotiation',
+  'uselibpqcompat',
+  'application_name',
+  'connect_timeout',
+]);
 
 /**
- * Valkey URL as ioredis 6.0.0 reads it: `parseURL` merges every query parameter into the options before `rediss://`
- * applies `tls: true` through lodash `defaults`, so `?tls=` (an empty, falsy value) silently selects plain TCP.
- * Outside local/test the URL is `rediss://` with no query string; TLS and auth come from the scheme and userinfo.
+ * PostgreSQL URL as node-postgres reads it (pg-connection-string 2.14.1 copies every query entry onto the config,
+ * so the LAST `sslmode` wins, and `ssl=0` sets `ssl: false`): a TCP host name, no repeated or unlisted query
+ * parameter, exactly one `sslmode=verify-full`, and no `ssl` override (TLS is selected by `sslmode` alone).
  */
-const isTlsRedisUrl = (url: URL): boolean => url.protocol === 'rediss:' && url.search === '';
+const isVerifiedPostgresUrl = (_raw: string, url: URL): boolean =>
+  // pg decodes the host, so a percent-encoded `/` makes a Unix-socket path: refused like an empty host.
+  url.hostname !== '' &&
+  !url.hostname.includes('%') &&
+  !hasDuplicateParam(url) &&
+  [...url.searchParams.keys()].every((name) => POSTGRES_URL_PARAMS.has(name)) &&
+  url.searchParams.get('sslmode') === 'verify-full';
 
-/** NFR-SEC-007, platform.md §9.4: TLS to PostgreSQL, Valkey and HTTP endpoints outside `APP_ENV ∈ {local, test}`. */
-export const transportGuard: Guard = ({ raw, appEnv }) => {
+/**
+ * Valkey URL as ioredis 6.0.0 reads it. TLS is on only when the RAW string starts with `rediss://`
+ * (`built/Redis.js:707`); an opaque `rediss:user:pw@host` parses as protocol `rediss:` in WHATWG but is re-read by
+ * ioredis as `redis://rediss:…` over plain TCP (PR3-SEC-12). `parseURL` also merges query parameters into the
+ * options before `tls: true` applies, so `?tls=` selects plain TCP (PR3-SEC-02). Outside local/test: the raw
+ * `rediss://` prefix, a non-empty host, and no query string or fragment at all.
+ */
+const isTlsRedisUrl = (raw: string, url: URL): boolean =>
+  raw.startsWith('rediss://') && url.hostname !== '' && !raw.includes('?') && !raw.includes('#');
+
+const isHttpsUrl = (_raw: string, url: URL): boolean => url.protocol === 'https:' && url.hostname !== '';
+
+/**
+ * NFR-SEC-007, platform.md §9.4: TLS to PostgreSQL, Valkey and HTTP endpoints outside `APP_ENV ∈ {local, test}`.
+ * Fails closed (PR3-SEC-12): a value the WHATWG parser cannot read is insecure, whatever the driver would do with
+ * it. A key the schema already rejected is reported there and not twice.
+ */
+export const transportGuard: Guard = ({ raw, values, appEnv }) => {
   if (appEnv === undefined || isLocalAppEnv(appEnv)) return [];
   const issues: ConfigIssue[] = [];
-  const insecure = (key: string, secure: (url: URL) => boolean): void => {
-    const url = parseUrl(raw[key]);
-    if (url !== undefined && !secure(url)) issues.push({ key, code: 'insecure-transport' });
+  const insecure = (key: string, secure: (raw: string, url: URL) => boolean): void => {
+    const value = raw[key];
+    if (value === undefined || !(key in values)) return;
+    const url = parseUrl(value);
+    if (url === undefined || !secure(value, url)) issues.push({ key, code: 'insecure-transport' });
   };
   insecure('DATABASE_URL', isVerifiedPostgresUrl);
   insecure('REDIS_URL', isTlsRedisUrl);
-  HTTPS_KEYS.forEach((key) => insecure(key, (url) => url.protocol === 'https:'));
+  HTTPS_KEYS.forEach((key) => insecure(key, isHttpsUrl));
   return issues;
 };
 
 const isSpace = (char: string): boolean => /\s/.test(char);
 
 /**
- * Splits NODE_OPTIONS the way Node's parser does: whitespace separates tokens, a double-quoted section belongs to
- * the current token with the quotes removed, and `\` escapes the next character inside quotes.
+ * Splits NODE_OPTIONS like Node's parser for quotes: a double-quoted section belongs to the current token with the
+ * quotes removed, and `\` escapes the next character inside quotes. It splits on ANY whitespace, which is stricter
+ * than Node (U+0020 only); over-splitting can only add refusals (R2-n2).
  */
 export function nodeOptionTokens(value: string): readonly string[] {
   const tokens: string[] = [];
@@ -140,6 +171,14 @@ export const nodeEnvGuard: Guard = ({ raw, appEnv }) =>
   isHardenedAppEnv(appEnv) && raw.NODE_ENV !== 'production'
     ? [{ key: 'NODE_ENV', code: 'forbidden-in-environment', rule: 'nodeEnv.production' }]
     : [];
+
+/**
+ * PR3-SEC-03 option (b) (D-ORCH-007): the ECS agent injects its task-metadata endpoint into every container, so a
+ * process that sees one runs on AWS and must not run with `APP_ENV=local|test` (Mock adapters, plain transport,
+ * `local-only-*` keys). Presence of the variable only; the endpoint is never called.
+ */
+export const localAppEnvOnEcsGuard: Guard = ({ ecsMetadataKeys = [], appEnv }) =>
+  isLocalAppEnv(appEnv) && ecsMetadataKeys.length > 0 ? [{ key: 'APP_ENV', code: 'forbidden-in-environment', rule: 'appEnv.ecsTask' }] : [];
 
 /** PR-0003 §4, PR-0005 §4: the API and the worker never hold tooling credentials outside local/test. */
 export const toolingKeyGuard: Guard = ({ toolingKeys = [], appEnv }) =>
@@ -221,6 +260,7 @@ export const GUARDS: readonly Guard[] = Object.freeze([
   transportGuard,
   debugGuard,
   nodeEnvGuard,
+  localAppEnvOnEcsGuard,
   toolingKeyGuard,
   productionGuard,
   companionGuard,

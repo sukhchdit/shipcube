@@ -1,6 +1,21 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { isInspectorOption, nodeOptionTokens, toolingKeyGuard } from './guards.js';
+import { isInspectorOption, localAppEnvOnEcsGuard, nodeOptionTokens, toolingKeyGuard } from './guards.js';
+
+describe('APP_ENV=local|test on ECS (PR3-SEC-03 option (b), D-ORCH-007)', () => {
+  it.each(['local', 'test'] as const)('refuses APP_ENV=%s when an ECS task-metadata variable is present', (appEnv) => {
+    expect(localAppEnvOnEcsGuard({ raw: {}, values: {}, appEnv, ecsMetadataKeys: ['ECS_CONTAINER_METADATA_URI_V4'] })).toEqual([
+      { key: 'APP_ENV', code: 'forbidden-in-environment', rule: 'appEnv.ecsTask' },
+    ]);
+  });
+
+  it('accepts local without the signal, and hardened or unknown environments with it', () => {
+    expect(localAppEnvOnEcsGuard({ raw: {}, values: {}, appEnv: 'local' })).toEqual([]);
+    for (const appEnv of ['staging', 'production', undefined] as const) {
+      expect(localAppEnvOnEcsGuard({ raw: {}, values: {}, appEnv, ecsMetadataKeys: ['ECS_CONTAINER_METADATA_URI'] })).toEqual([]);
+    }
+  });
+});
 
 describe('NODE_OPTIONS tokenizer (PR3-SEC-01, m2)', () => {
   it.each([

@@ -9,7 +9,7 @@
 import type Joi from 'joi';
 
 import { deepFreeze, type EnvInput, pickConfigured } from './env-input.js';
-import type { AppEnv, Service } from './environment.js';
+import { type AppEnv, ECS_METADATA_KEYS, type Service } from './environment.js';
 import { type ConfigIssue, ConfigValidationError } from './errors.js';
 import { runGuards } from './guards.js';
 import { type Config, CONFIG_KEY_NAMES, CONFIG_SCHEMA, type ConfigKey, configObjectSchema } from './schema.js';
@@ -41,7 +41,9 @@ export function loadConfig(env: EnvInput, options: LoadConfigOptions): Config {
   const appEnv = values.APP_ENV as AppEnv | undefined;
   // Tooling keys are never mapped into the config; only their names reach the guards (toolingKeyGuard).
   const toolingKeys = Object.keys(pickConfigured(env, TOOLING_KEY_NAMES));
-  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv, toolingKeys })];
+  // ECS task-metadata variables: presence only (localAppEnvOnEcsGuard, PR3-SEC-03).
+  const ecsMetadataKeys = Object.keys(pickConfigured(env, ECS_METADATA_KEYS));
+  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv, toolingKeys, ecsMetadataKeys })];
   if (issues.length > 0) throw new ConfigValidationError(issues);
   return deepFreeze(converted) as Config;
 }

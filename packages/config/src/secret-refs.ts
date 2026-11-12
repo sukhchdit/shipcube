@@ -118,12 +118,25 @@ export interface ResolveSecretRefsOptions {
 
 type Outcome =
   | { readonly ok: true; readonly value: Secret<string> }
-  | { readonly ok: false; readonly rule: SecretResolveFailure; readonly cause?: string };
+  | { readonly ok: false; readonly rule: SecretResolveFailure; readonly cause?: string; readonly permanent?: true };
 
 const failure = (rule: SecretResolveFailure, cause?: string): Outcome =>
   cause === undefined ? { ok: false, rule } : { ok: false, rule, cause };
 
-const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
+/**
+ * Provider error codes that a retry cannot change (R2-n3): the file provider's refusals and permission errors.
+ * Matched by code, so this module does not import the file adapter.
+ */
+const PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'SECRET_FILE_OUTSIDE_ROOT',
+  'SECRET_FILE_NOT_REGULAR',
+  'SECRET_FILE_TOO_LARGE',
+  'EACCES',
+  'EPERM',
+]);
+
+/** A code-defined Error or Exception class name (`TypeError`, `SecretFileError`, `DOMException`), never data. */
+const ERROR_CLASS_NAME = /^[A-Z][A-Za-z]{0,48}(?:Error|Exception)$/;
 /**
  * errno (`EACCES`), Node (`ERR_INVALID_ARG_TYPE`) and provider (`SECRET_FILE_TOO_LARGE`) codes only, letters and
  * underscores, so a token-shaped value cannot pass.
@@ -132,21 +145,42 @@ const ERRNO_CODE = /^(?:E[A-Z]{2,15}|ERR_[A-Z_]{1,40}|SECRET_[A-Z_]{1,40})$/;
 const typeName = (value: unknown): string => (value === null ? 'null' : typeof value);
 
 /**
- * Value-free description of a thrown value: the constructor name (defined by code, never by data) plus an
- * errno-style `code` when present. Messages are never read, because providers may echo locators or values.
+ * Name of the class that created `error`, read from its prototype's own `constructor` DATA property (PR3-SEC-15):
+ * an own `constructor` property on the thrown object, or a getter, cannot inject data. Only Error/Exception-shaped
+ * names pass; anything else is reported as `Error`.
+ */
+function errorClassName(error: Error): string {
+  const proto: unknown = Object.getPrototypeOf(error);
+  const ctor: unknown =
+    typeof proto === 'object' && proto !== null ? Object.getOwnPropertyDescriptor(proto, 'constructor')?.value : undefined;
+  const name: unknown = typeof ctor === 'function' ? Object.getOwnPropertyDescriptor(ctor, 'name')?.value : undefined;
+  return typeof name === 'string' && ERROR_CLASS_NAME.test(name) ? name : 'Error';
+}
+
+const errorCode = (error: unknown): string | undefined => {
+  const code: unknown = error instanceof Error ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && ERRNO_CODE.test(code) ? code : undefined;
+};
+
+/**
+ * Value-free description of a thrown value: the class name (defined by code, never by data) plus an errno-style
+ * `code` when present. Messages are never read, because providers may echo locators or values.
  */
 export function describeFailureCause(error: unknown): string {
   if (!(error instanceof Error)) return `non-error:${typeName(error)}`;
-  const className: unknown = error.constructor.name;
-  const name = typeof className === 'string' && IDENTIFIER.test(className) ? className : 'Error';
-  const code: unknown = (error as { code?: unknown }).code;
-  return typeof code === 'string' && ERRNO_CODE.test(code) ? `${name}/${code}` : name;
+  const code = errorCode(error);
+  const name = errorClassName(error);
+  return code === undefined ? name : `${name}/${code}`;
 }
 
 function classifyFailure(error: unknown, signal: AbortSignal): Outcome {
   if (signal.aborted) return failure('ref.timeout');
   if (error instanceof SecretNotFoundError) return failure('ref.notFound');
-  return failure('ref.providerError', describeFailureCause(error));
+  const cause = describeFailureCause(error);
+  const code = errorCode(error);
+  return code !== undefined && PERMANENT_ERROR_CODES.has(code)
+    ? { ok: false, rule: 'ref.providerError', cause, permanent: true }
+    : failure('ref.providerError', cause);
 }
 
 function classifyValue(value: unknown): Outcome {
@@ -191,11 +225,13 @@ interface ResolvePlan {
 async function resolveOne(ref: SecretRef, provider: SecretProvider | undefined, plan: ResolvePlan): Promise<Outcome> {
   if (provider === undefined) return failure('ref.noProvider');
   const first = await attemptResolve(provider, ref.locator, plan.timeoutMs, plan.deadline);
-  if (first.ok || !RETRYABLE.has(first.rule)) return first;
+  if (first.ok || first.permanent === true || !RETRYABLE.has(first.rule)) return first;
   const { min, max } = SECRET_RESOLVE_RETRY_DELAY_MS;
   const delayMs = Math.round(min + plan.random() * (max - min));
   if (plan.deadlineAt - performance.now() < delayMs + plan.timeoutMs) return first;
   await plan.sleep(delayMs);
+  // R2-n3: a deadline that elapsed during the sleep keeps the first attempt's diagnosis.
+  if (plan.deadline.aborted) return first;
   return attemptResolve(provider, ref.locator, plan.timeoutMs, plan.deadline);
 }
 

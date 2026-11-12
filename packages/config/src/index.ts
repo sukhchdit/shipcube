@@ -1,7 +1,16 @@
 // Public entry point of @platform/config: typed, Joi-validated configuration and the key/secret register
 // (ADR-0018). Re-exports only (D-ARCH-036). Build-time web config: `@platform/config/web`; test environments:
 // `@platform/config/testing`.
-export { APP_ENVS, HARDENED_APP_ENVS, isHardenedAppEnv, isLocalAppEnv, LOCAL_APP_ENVS, NODE_ENVS, SERVICES } from './environment.js';
+export {
+  APP_ENVS,
+  ECS_METADATA_KEYS,
+  HARDENED_APP_ENVS,
+  isHardenedAppEnv,
+  isLocalAppEnv,
+  LOCAL_APP_ENVS,
+  NODE_ENVS,
+  SERVICES,
+} from './environment.js';
 export type { AppEnv, NodeEnv, Service } from './environment.js';
 export { ConfigValidationError, formatConfigError } from './errors.js';
 export type { ConfigIssue, ConfigIssueCode } from './errors.js';

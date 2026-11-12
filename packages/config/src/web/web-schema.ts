@@ -3,34 +3,26 @@
  * Vite's `define`). Only public keys live here: `VITE_*` and `BRAND_*`. Secrets can never be part of a frontend
  * bundle; the web-config test asserts that no key of this schema is a secret in the backend schema.
  *
- * The `BRAND_*` validators are Zod (frontend); the backend builds its Joi validators from the same limits and
- * patterns in `../brand-rules.ts`, and `brand-rules.test.ts` asserts that both give the same verdicts
- * (brief §3.3, AT-US-002-04).
+ * The `BRAND_*` validators are Zod (frontend); the backend Joi validators call the same predicates from
+ * `../brand-rules.ts`, and `brand-rules.test.ts` asserts that both give the same verdicts (brief §3.3,
+ * AT-US-002-04).
  */
 import { z } from 'zod';
 
-import {
-  BRAND_NAME_MAX_LENGTH,
-  BRAND_NAME_MIN_LENGTH,
-  BRAND_URL_MAX_LENGTH,
-  BRAND_URL_PROTOCOL_PATTERN,
-  LOCALES,
-  ROOT_PATH_PATTERN,
-} from '../brand-rules.js';
+import { isBrandName, isBrandUrl, LOCALES } from '../brand-rules.js';
 
 export { LOCALES } from '../brand-rules.js';
 export type { Locale } from '../brand-rules.js';
 
-const httpUrl = z.url({ protocol: BRAND_URL_PROTOCOL_PATTERN });
-const rootPath = z.string().regex(ROOT_PATH_PATTERN);
-const urlOrRootPath = z
-  .string()
-  .max(BRAND_URL_MAX_LENGTH)
-  .pipe(z.union([httpUrl, rootPath]));
+/** Same predicate as the backend Joi rule (`schema.ts`), so the verdicts cannot differ (code-review R2-m1). */
+const urlOrRootPath = z.string().refine(isBrandUrl, { params: { rule: 'brand.url' } });
 
-/** `BRAND_*` value schemas (tokens.md §11), built from the rules shared with the backend Joi schema. */
+/** `BRAND_*` value schemas (tokens.md §11): Zod wrappers around the predicates shared with the backend. */
 export const BRAND_VALUE_SCHEMAS = {
-  BRAND_NAME: z.string().trim().min(BRAND_NAME_MIN_LENGTH).max(BRAND_NAME_MAX_LENGTH),
+  BRAND_NAME: z
+    .string()
+    .trim()
+    .refine(isBrandName, { params: { rule: 'brand.name' } }),
   BRAND_LOGO_URL: urlOrRootPath,
   BRAND_LOGO_DARK_URL: urlOrRootPath,
   BRAND_FAVICON_URL: urlOrRootPath,

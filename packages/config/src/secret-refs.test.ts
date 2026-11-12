@@ -81,6 +81,8 @@ const rejectWith = (reason: unknown): Promise<never> =>
   });
 const never = (): Promise<string> => new Promise<string>(() => undefined);
 const instant = { sleep: (): Promise<void> => Promise.resolve(), random: (): number => 0 } as const;
+/** R2-n4: slack on wall-clock upper bounds (Windows timer granularity ~15.6 ms, loaded CI runners). */
+const SLACK_MS = 500;
 
 /** Provider whose behaviour per attempt is scripted by locator; counts the calls per locator. */
 function scripted(script: Record<string, readonly (() => Promise<string>)[]>): SecretProvider & { readonly calls: Map<string, number> } {
@@ -127,18 +129,18 @@ describe('secret resolution (port + orchestrator)', () => {
     const elapsed = performance.now() - started;
     expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.timeout' }]);
     expect(elapsed).toBeGreaterThanOrEqual(40);
-    expect(elapsed).toBeLessThan(50 + 100);
+    expect(elapsed).toBeLessThan(50 + SLACK_MS);
     expect(provider.calls.get('hung')).toBe(1);
   });
 
   it('[M1][PR3-SEC-04] a provider that settles late is cut off at the timeout', async () => {
-    const late = (): Promise<string> => new Promise((resolve) => setTimeout(() => resolve(token()), 500));
+    const late = (): Promise<string> => new Promise((resolve) => setTimeout(() => resolve(token()), 5_000).unref());
     const started = performance.now();
     const error = await rejection(
       resolveSecretRefs(refs({ A_REF: aws('late') }), [scripted({ late: [late] })], { timeoutMs: 50, deadlineMs: 120, ...instant }),
     );
     expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.timeout' }]);
-    expect(performance.now() - started).toBeLessThan(150);
+    expect(performance.now() - started).toBeLessThan(50 + SLACK_MS);
   });
 
   it('[M1] one overall deadline bounds the call even when the per-attempt timeout is larger', async () => {
@@ -147,7 +149,7 @@ describe('secret resolution (port + orchestrator)', () => {
     const error = await rejection(
       resolveSecretRefs(refs({ A_REF: aws('a'), B_REF: aws('b') }), [provider], { timeoutMs: 5_000, deadlineMs: 60, ...instant }),
     );
-    expect(performance.now() - started).toBeLessThan(60 + 100);
+    expect(performance.now() - started).toBeLessThan(60 + SLACK_MS);
     expect(error.issues.map((issue) => issue.rule)).toEqual(['ref.timeout', 'ref.timeout']);
     expect([provider.calls.get('a'), provider.calls.get('b')]).toEqual([1, 1]);
   });
@@ -217,8 +219,9 @@ describe('secret resolution (port + orchestrator)', () => {
     ]);
     expect(formatConfigError(error)).toContain('  - B_REF: unresolvable: ref.providerError (Error/EACCES)');
     expect(error.message).not.toMatch(/boom|permission|AKIA|thrown string|synchronous|UNSET_VARIABLE|run\/secrets/);
-    for (const locator of ['typeError', 'errno', 'string', 'undefinedValue', 'syncThrow']) expect(provider.calls.get(locator)).toBe(2);
-    for (const locator of ['empty', 'notFound']) expect(provider.calls.get(locator)).toBe(1);
+    for (const locator of ['typeError', 'string', 'undefinedValue', 'syncThrow']) expect(provider.calls.get(locator)).toBe(2);
+    // R2-n3: EACCES is permanent, so it is not retried.
+    for (const locator of ['errno', 'empty', 'notFound']) expect(provider.calls.get(locator)).toBe(1);
   });
 
   it('[m1] retries a provider error once after 100–300 ms of jitter, then succeeds', async () => {
@@ -245,7 +248,7 @@ describe('secret resolution (port + orchestrator)', () => {
     const elapsed = performance.now() - started;
     expect(resolved.get('A_REF')?.reveal()).toBe(value);
     expect(elapsed).toBeGreaterThanOrEqual(30 + SECRET_RESOLVE_RETRY_DELAY_MS.min - 10);
-    expect(elapsed).toBeLessThan(30 + SECRET_RESOLVE_RETRY_DELAY_MS.max + 150);
+    expect(elapsed).toBeLessThan(30 + SECRET_RESOLVE_RETRY_DELAY_MS.max + SLACK_MS);
   });
 
   it('[m1] skips the retry when a full attempt no longer fits the deadline', async () => {
@@ -267,7 +270,7 @@ describe('secret resolution (port + orchestrator)', () => {
     expect(provider.calls.get('broken')).toBe(1);
   });
 
-  it('[m1] a retry that would start after the deadline is reported as a timeout without calling the provider', async () => {
+  it('[R2-n3] a retry that would start after the deadline keeps the first diagnosis without calling the provider', async () => {
     const provider = scripted({ flaky: [() => Promise.reject(new Error('down')), () => Promise.resolve(token())] });
     const error = await rejection(
       resolveSecretRefs(refs({ A_REF: aws('flaky') }), [provider], {
@@ -277,8 +280,39 @@ describe('secret resolution (port + orchestrator)', () => {
         sleep: () => new Promise((resolve) => setTimeout(resolve, 260)),
       }),
     );
-    expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.timeout' }]);
+    expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.providerError', cause: 'Error' }]);
     expect(provider.calls.get('flaky')).toBe(1);
+  });
+
+  it.each(['SECRET_FILE_OUTSIDE_ROOT', 'SECRET_FILE_NOT_REGULAR', 'SECRET_FILE_TOO_LARGE', 'EACCES', 'EPERM'])(
+    '[R2-n3] a permanent provider failure (%s) is not retried and keeps its cause',
+    async (code) => {
+      class SecretFileError extends Error {
+        readonly code = code;
+      }
+      let slept = false;
+      const provider = scripted({ denied: [() => Promise.reject(new SecretFileError('refused')), () => Promise.resolve(token())] });
+      const error = await rejection(
+        resolveSecretRefs(refs({ A_REF: aws('denied') }), [provider], {
+          sleep: () => {
+            slept = true;
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.providerError', cause: `SecretFileError/${code}` }]);
+      expect([slept, provider.calls.get('denied')]).toEqual([false, 1]);
+    },
+  );
+
+  it('[R2-n3] a transient errno failure (EIO) is still retried once', async () => {
+    const value = token();
+    const provider = scripted({
+      io: [() => Promise.reject(Object.assign(new Error('io'), { code: 'EIO' })), () => Promise.resolve(value)],
+    });
+    const resolved = await resolveSecretRefs(refs({ A_REF: aws('io') }), [provider], instant);
+    expect(resolved.get('A_REF')?.reveal()).toBe(value);
+    expect(provider.calls.get('io')).toBe(2);
   });
 
   it.each([0, -1, 1.5, Number.NaN])('rejects a non-positive or fractional budget (%p)', async (budget) => {
@@ -296,12 +330,38 @@ describe('secret resolution (port + orchestrator)', () => {
     expect(describeFailureCause(undefined)).toBe('non-error:undefined');
   });
 
+  it('[PR3-SEC-15] reads the class name from the prototype chain and accepts Error/Exception-shaped names only', () => {
+    const leak = `sk_test_${token()}`;
+    // An own `constructor` on the thrown value is ignored.
+    expect(describeFailureCause(Object.assign(new TypeError('x'), { constructor: { name: leak } }))).toBe('TypeError');
+    expect(describeFailureCause(Object.assign(new Error('x'), { constructor: { name: 'FakeError' } }))).toBe('Error');
+    // A prototype whose `constructor` is not a function, or is a getter, is ignored.
+    const fakeProto = Object.create(Error.prototype, { constructor: { value: { name: 'LeakError' } } }) as object;
+    expect(describeFailureCause(Object.setPrototypeOf(new Error('x'), fakeProto))).toBe('Error');
+    const getterProto = Object.create(Error.prototype, { constructor: { get: () => ({ name: 'GetterError' }) } }) as object;
+    expect(describeFailureCause(Object.setPrototypeOf(new Error('x'), getterProto))).toBe('Error');
+    // A class whose name is data-shaped rather than Error-shaped.
+    class ProviderFault extends Error {}
+    const dataNamed = class extends Error {};
+    Object.defineProperty(dataNamed, 'name', { value: leak });
+    expect([describeFailureCause(new ProviderFault('x')), describeFailureCause(new dataNamed('x'))]).toEqual(['Error', 'Error']);
+    class VaultTimeoutException extends Error {}
+    expect(describeFailureCause(new VaultTimeoutException('x'))).toBe('VaultTimeoutException');
+  });
+
   it('property: no value thrown, returned or echoed by a provider appears in any issue, message, inspect or stack', async () => {
     const throwables: Readonly<Record<string, (value: string) => unknown>> = {
       message: (value) => new Error(value),
       code: (value) => Object.assign(new Error('failed'), { code: value.toUpperCase() }),
       name: (value) => Object.assign(new Error('failed'), { name: value }),
       raw: (value) => value,
+      // PR3-SEC-15: an own `constructor` property, and a dynamically named class, on the thrown value.
+      ownConstructor: (value) => Object.assign(new Error('failed'), { constructor: { name: `Leak${value}Error` } }),
+      namedClass: (value) => {
+        const leaky = class extends Error {};
+        Object.defineProperty(leaky, 'name', { value: `L${value}Error` });
+        return new leaky('failed');
+      },
     };
     await fc.assert(
       fc.asyncProperty(
@@ -324,7 +384,7 @@ describe('secret resolution (port + orchestrator)', () => {
           }
         },
       ),
-      { numRuns: 25 },
+      { numRuns: 50 },
     );
   });
 });

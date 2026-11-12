@@ -205,17 +205,25 @@ describe('typed configuration (US-002, REQ-PLAT-004, NFR-OPS-005)', () => {
     it.each([
       ['41 characters', 'x'.repeat(41)],
       ['whitespace only', '   '],
+      ['41 emoji', '😀'.repeat(41)],
     ])('[AT-US-002-04] an invalid BRAND_NAME (%s) is rejected identically by both schemas', (_label, brandName) => {
       const env = { ...createTestEnv(), VITE_API_BASE_URL: '/api', BRAND_NAME: brandName };
-      // Same key, same reason code and the same limit (brand-rules.ts). The `rule` field carries the validator's own
-      // rule id, which is library-specific by design (Joi `string.max` vs Zod `too_big`); both name a length bound.
-      const strip = (issues: readonly { key: string; code: string }[]) => issues.map(({ key, code }) => ({ key, code }));
+      // Same key, same reason code and the same rule id: both validators call the brand-rules.ts predicate (R2-m1).
       const backend = rejection(() => loadConfig(env, { service: 'api' })).issues;
       const web = rejection(() => loadWebBuildConfig(env)).issues;
-      expect(strip(backend)).toEqual([{ key: 'BRAND_NAME', code: 'invalid' }]);
-      expect(strip(web)).toEqual(strip(backend));
-      expect(backend[0]?.rule).toMatch(/^string\.(?:max|min|empty)$/);
-      expect(web[0]?.rule).toMatch(/^too_(?:big|small)$/);
+      expect(backend).toEqual([{ key: 'BRAND_NAME', code: 'invalid', rule: 'brand.name' }]);
+      expect(web).toEqual(backend);
+    });
+
+    it.each([
+      ['an upper-case scheme', 'HTTPS://cdn.example.org/logo.svg'],
+      ['a trailing space', 'https://cdn.example.org/logo.svg '],
+      ['a port out of range', 'https://cdn.example.org:99999/logo.svg'],
+    ])('[AT-US-002-04] a BRAND_LOGO_URL with %s is rejected identically by both schemas', (_label, url) => {
+      const env = { ...createTestEnv(), VITE_API_BASE_URL: '/api', BRAND_LOGO_URL: url };
+      const backend = rejection(() => loadConfig(env, { service: 'api' })).issues;
+      expect(backend).toEqual([{ key: 'BRAND_LOGO_URL', code: 'invalid', rule: 'brand.url' }]);
+      expect(rejection(() => loadWebBuildConfig(env)).issues).toEqual(backend);
     });
 
     it('[AT-US-002-04] a worker without its worker-only keys fails; the API does not need them', () => {
@@ -422,6 +430,87 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
   it('[NT-SEC-007-a] REDIS_URL rediss:// with a database path and no query is accepted in staging', () => {
     const env = { ...createTestEnv({ appEnv: 'staging' }), REDIS_URL: `rediss://worker:${randomSecret()}@cache:6380/0` };
     expect(loadConfig(env, { service: 'worker' }).REDIS_URL.reveal()).toContain('rediss://');
+  });
+
+  // PR3-SEC-12: ioredis 6.0.0 enables TLS only when the RAW string starts with `rediss://` (Redis.js:707); an opaque
+  // `rediss:` URL parses as protocol `rediss:` in WHATWG but is re-read by ioredis as `redis://rediss:…` over plain
+  // TCP with the password in clear.
+  it.each([
+    ['opaque rediss: (no //)', 'rediss:api:{p}@cache:6379'],
+    ['opaque rediss: with a database', 'rediss:api:{p}@cache:6380/0'],
+    ['percent-encoded //', 'rediss:%2F%2Fapi:{p}@cache:6380'],
+    ['a fragment', 'rediss://api:{p}@cache:6380#x'],
+    ['an empty query', 'rediss://api:{p}@cache:6380/0?'],
+  ])('[PR3-SEC-12] REDIS_URL with %s is refused in staging @security', (_label, template) => {
+    const secret = randomSecret();
+    const env = { ...createTestEnv({ appEnv: 'staging' }), REDIS_URL: template.replace('{p}', secret) };
+    const error = rejection(() => loadConfig(env, { service: 'worker' }));
+    expect(error.issues).toEqual([{ key: 'REDIS_URL', code: 'insecure-transport' }]);
+    expect(rendered(error)).not.toContain(secret);
+  });
+
+  it('[PR3-SEC-12] a REDIS_URL with an empty host is refused (by the schema already) @security', () => {
+    const env = { ...createTestEnv({ appEnv: 'staging' }), REDIS_URL: `rediss://:${randomSecret()}@/0` };
+    expect(rejection(() => loadConfig(env, { service: 'worker' })).keys).toEqual(['REDIS_URL']);
+  });
+
+  it('[PR3-SEC-12] a DATABASE_URL the WHATWG parser cannot read is refused (fail closed), not skipped @security', () => {
+    const env = {
+      ...createTestEnv({ appEnv: 'staging' }),
+      DATABASE_URL: `postgresql://platform_app:${randomSecret()}@db:99999/platform?sslmode=disable`,
+    };
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
+  });
+
+  // PR3-SEC-12 (optional item): pg-connection-string copies every query entry onto the client config, so `host=`
+  // redirects the connection (another host or a Unix socket, no TLS) and `options=` sets server GUCs.
+  it.each([
+    ['a host= override (Unix socket)', 'sslmode=verify-full&host=/var/run/postgresql'],
+    ['a host= override (other host)', 'sslmode=verify-full&host=db.elsewhere.test'],
+    ['options= (server GUCs)', 'sslmode=verify-full&options=-c%20row_security%3Doff'],
+    ['an unlisted parameter', 'sslmode=verify-full&sslcompat=1'],
+  ])('[PR3-SEC-12] DATABASE_URL with %s is refused in staging @security', (_label, query) => {
+    const env = { ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) };
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
+  });
+
+  it('[PR3-SEC-12] a percent-encoded Unix-socket host in DATABASE_URL is refused in staging @security', () => {
+    const env = {
+      ...createTestEnv({ appEnv: 'staging' }),
+      DATABASE_URL: `postgresql://platform_app:${randomSecret()}@%2Fvar%2Frun%2Fpostgresql/platform?sslmode=verify-full`,
+    };
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
+  });
+
+  it.each(['sslmode=verify-full&connect_timeout=5&sslnegotiation=direct', 'sslrootcert=/etc/ssl/rds.pem&sslmode=verify-full'])(
+    '[PR3-SEC-12] DATABASE_URL with the allow-listed parameters %s is accepted in staging',
+    (query) => {
+      expect(loadConfig({ ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) }, { service: 'api' }).APP_ENV).toBe(
+        'staging',
+      );
+    },
+  );
+
+  // PR3-SEC-03 option (b), D-ORCH-007: the ECS agent injects its task-metadata endpoint into every container.
+  it.each(
+    (['local', 'test'] as const).flatMap((appEnv) =>
+      ['ECS_CONTAINER_METADATA_URI', 'ECS_CONTAINER_METADATA_URI_V4'].map((variable) => [appEnv, variable] as const),
+    ),
+  )('[PR3-SEC-03] APP_ENV=%s is refused when %s is present (running on ECS) @security', (appEnv, variable) => {
+    const endpoint = `http://169.254.170.2/v4/${randomSecret()}`;
+    const error = rejection(() => loadConfig({ ...createTestEnv({ appEnv }), [variable]: endpoint }, { service: 'api' }));
+    expect(error.issues).toEqual([{ key: 'APP_ENV', code: 'forbidden-in-environment', rule: 'appEnv.ecsTask' }]);
+    expect(rendered(error)).not.toContain(endpoint);
+  });
+
+  it('[PR3-SEC-03] the ECS signal does not affect hardened environments, and an empty value counts as absent', () => {
+    const endpoint = 'http://169.254.170.2/v4/task';
+    expect(
+      loadConfig({ ...createTestEnv({ appEnv: 'staging' }), ECS_CONTAINER_METADATA_URI_V4: endpoint }, { service: 'worker' }).APP_ENV,
+    ).toBe('staging');
+    expect(loadConfig({ ...createTestEnv({ appEnv: 'local' }), ECS_CONTAINER_METADATA_URI_V4: '' }, { service: 'worker' }).APP_ENV).toBe(
+      'local',
+    );
   });
 
   it.each(['staging', 'production'] as const)('[PR3-SEC-03] APP_ENV=%s requires the raw NODE_ENV=production @security', (appEnv) => {

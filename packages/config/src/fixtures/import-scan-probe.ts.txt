@@ -1,0 +1,12 @@
+// Probe for the runtime import scanner in brand-rules.test.ts (R2-n1). Not compiled; read as text only.
+import type { ZodType } from 'zod';
+import { z } from 'zod';
+export * from 'zod/mini';
+export type { infer } from 'zod';
+import zodRequire = require('zod');
+const lazy = await import('zod');
+const cjs = require('zod');
+const dynamic = await import(name);
+// import { fake } from 'zod-in-a-comment';
+const text = "import x from 'not-an-import'";
+export { y } from './x.js';
