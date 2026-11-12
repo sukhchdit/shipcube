@@ -1,0 +1,13 @@
+{
+  "$comment": "Pinned Prisma schema engine (ADR-0023 am. J item 2, D-ARCH-041). Hashes are of the gunzipped binary, recorded with `node tools/deps/prisma-engines.mjs --record` on the Windows host and in a clean node:24-bookworm-slim container (byte-identical, 2026-11-12, TASK-003). Change enginesVersion and every hash together; security-analyst review required.",
+  "enginesVersion": "d1b3f377ca835d73fd50954a5e22128b9ebdd6b8",
+  "source": "https://binaries.prisma.sh/all_commits/",
+  "schemaEngine": {
+    "debian-openssl-3.0.x": {
+      "sha256": "7116e00278a793ee13db6f0a732c1aaec10f795a37bc02e3a7df3b06b2f1311f"
+    },
+    "windows": {
+      "sha256": "e6c4bb89d31f39f7ac601e264c998c0382c069df8485fb8810d0ba8fa806ea4a"
+    }
+  }
+}

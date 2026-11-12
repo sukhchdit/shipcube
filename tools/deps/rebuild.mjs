@@ -6,9 +6,18 @@
  *
  *   1. bcrypt   – checks that bcrypt loads (its N-API prebuild for this platform ships in the
  *                 package). Only when it does not load: `npm rebuild bcrypt --ignore-scripts=false`.
- *   2. prisma   – `npm exec --no -- prisma generate`, once a Prisma schema or prisma.config.ts exists.
- *   3. playwright – browsers, opt-in only: `--playwright=chromium[,firefox,webkit]` or
+ *   2. prisma-engines – the pinned Prisma schema engine (ADR-0023 am. J item 2, D-ARCH-041;
+ *                 tools/deps/prisma-engines.mjs): refuses engine-redirecting variables, checks the
+ *                 manifest against the installed engines version, uses the existing file when its
+ *                 SHA-256 equals tools/deps/prisma-engines.json, otherwise fetches and verifies it.
+ *   3. prisma   – `npm exec --no -- prisma generate` with PRISMA_SCHEMA_ENGINE_BINARY=<verified engine>
+ *                 and CHECKPOINT_DISABLE=1, once a Prisma schema or prisma.config.ts exists.
+ *   4. playwright – browsers, opt-in only: `--playwright=chromium[,firefox,webkit]` or
  *                 DEPS_REBUILD_PLAYWRIGHT=… (local e2e and lane C; never in images).
+ *
+ * Network: the single origin this script itself may contact is https://binaries.prisma.sh/all_commits/
+ * (`ENGINE_ORIGIN`, step 2, only when no verified engine is present). Prisma's own downloader and the
+ * per-user Prisma cache are never used. Steps 1 and 4 run npm/Playwright, which use their registries.
  *
  * Nothing else is ever executed. `--dry-run` prints the plan as JSON and changes nothing.
  * `npm exec --no` (not `npx`) refuses to download a missing binary (SEC-P3-31).
@@ -19,13 +28,22 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { npmCli } from './npm-cli.mjs';
+import { ensureEngine, forbiddenEnv, prismaChildEnv, reverifyEngine } from './prisma-engines.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLAYWRIGHT_BROWSERS = new Set(['chromium', 'firefox', 'webkit']);
 /** Workspace whose dependency graph owns bcrypt; resolution runs from here. */
 const BCRYPT_OWNER = join(ROOT, 'apps', 'api');
 
-/** @typedef {{ id: 'bcrypt' | 'prisma' | 'playwright', action: 'run' | 'skip', reason: string, command?: string[] }} Step */
+/**
+ * @typedef {{
+ *   id: 'bcrypt' | 'prisma-engines' | 'prisma' | 'playwright',
+ *   action: 'run' | 'skip',
+ *   reason: string,
+ *   command?: string[],
+ *   env?: string[],
+ * }} Step
+ */
 
 /**
  * Runs a short CommonJS probe in a child Node process (cwd = the owning workspace) so that the
@@ -75,11 +93,19 @@ export function plan(argv) {
   }
 
   const hasSchema = existsSync(join(ROOT, 'prisma.config.ts')) || existsSync(join(ROOT, 'prisma', 'schema'));
-  steps.push(
-    hasSchema
-      ? { id: 'prisma', action: 'run', reason: 'Prisma schema present', command: ['exec', '--no', '--', 'prisma', 'generate'] }
-      : { id: 'prisma', action: 'skip', reason: 'no prisma.config.ts or prisma/schema yet' },
-  );
+  if (hasSchema) {
+    steps.push({ id: 'prisma-engines', action: 'run', reason: 'pin and verify the schema engine (tools/deps/prisma-engines.json)' });
+    steps.push({
+      id: 'prisma',
+      action: 'run',
+      reason: 'Prisma schema present',
+      command: ['exec', '--no', '--', 'prisma', 'generate'],
+      env: ['PRISMA_SCHEMA_ENGINE_BINARY', 'CHECKPOINT_DISABLE'],
+    });
+  } else {
+    steps.push({ id: 'prisma-engines', action: 'skip', reason: 'no prisma.config.ts or prisma/schema yet' });
+    steps.push({ id: 'prisma', action: 'skip', reason: 'no prisma.config.ts or prisma/schema yet' });
+  }
 
   const browsers = parsePlaywright(argv);
   steps.push(
@@ -96,17 +122,51 @@ export function plan(argv) {
 }
 
 /** @param {string[]} argv */
-function main(argv) {
+async function main(argv) {
   const steps = plan(argv);
   if (argv.includes('--dry-run')) {
     process.stdout.write(`${JSON.stringify(steps, null, 2)}\n`);
     return 0;
   }
+  // ADR-0023 am. J item 2 (c): refuse before any step runs, and so before any network call.
+  const inherited = forbiddenEnv(process.env);
+  if (inherited.length > 0) {
+    process.stderr.write(
+      `[deps:rebuild] refusing to run: engine-redirecting variable(s) set in the environment: ${inherited.join(', ')}\n`,
+    );
+    return 1;
+  }
   const cli = npmCli();
+  /** @type {Awaited<ReturnType<typeof ensureEngine>> | undefined} */
+  let engine;
   for (const step of steps) {
     process.stdout.write(`[deps:rebuild] ${step.id}: ${step.action} (${step.reason})\n`);
-    if (step.action !== 'run' || !step.command) continue;
-    const r = spawnSync(process.execPath, [cli, ...step.command], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+    if (step.action !== 'run') continue;
+    if (step.id === 'prisma-engines') {
+      try {
+        engine = await ensureEngine({ log: (line) => process.stdout.write(`${line}\n`) });
+        process.stdout.write(`[deps:rebuild] prisma-engines: ${engine.path} verified (${engine.mode})\n`);
+      } catch (error) {
+        process.stderr.write(`[deps:rebuild] prisma-engines failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        return 1;
+      }
+      continue;
+    }
+    if (!step.command) continue;
+    if (step.id === 'prisma' && engine === undefined) {
+      process.stderr.write('[deps:rebuild] prisma: no verified schema engine\n');
+      return 1;
+    }
+    const env = step.id === 'prisma' && engine !== undefined ? prismaChildEnv(process.env, engine.path) : process.env;
+    const r = spawnSync(process.execPath, [cli, ...step.command], { cwd: ROOT, stdio: 'inherit', windowsHide: true, env });
+    if (step.id === 'prisma' && engine !== undefined) {
+      try {
+        reverifyEngine(engine.path, engine.sha256);
+      } catch (error) {
+        process.stderr.write(`[deps:rebuild] ${error instanceof Error ? error.message : String(error)}\n`);
+        return 1;
+      }
+    }
     if (r.status !== 0) {
       process.stderr.write(`[deps:rebuild] ${step.id} failed with exit code ${r.status}\n`);
       return 1;
@@ -129,5 +189,7 @@ if (typeof import.meta.main !== 'boolean') {
   throw new Error('deps:rebuild needs Node >= 24.2 (import.meta.main); see .node-version');
 }
 if (import.meta.main) {
-  process.exitCode = main(process.argv.slice(2));
+  void main(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
 }
