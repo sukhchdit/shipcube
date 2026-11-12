@@ -48,6 +48,8 @@
 # Test, type-check and commit-message configuration (review m4): each can drop or weaken a gate.
 /jest.config.ts                         @sukhchdit
 /tools/test-support/                    @sukhchdit
+# The unit-dom Jest environment, setup file and CSS stub (PR #4 R3-M1, PR4-SEC-11): they run before every component test.
+/tools/test-dom/                        @sukhchdit
 # SWC compile options (PR17-SEC-01): jest.config.ts passes them inline with swcrc: false and the workflow policy
 # rejects any .swcrc, so a new one is both a policy finding and a record-requiring change.
 /.swcrc                                 @sukhchdit
