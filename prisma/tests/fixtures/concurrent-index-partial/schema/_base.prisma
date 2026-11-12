@@ -1,0 +1,4 @@
+// Fixture schema for the rule-5 probe. No generator and no model: `migrate deploy` only replays the SQL files.
+datasource db {
+  provider = "postgresql"
+}

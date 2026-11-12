@@ -15,6 +15,7 @@ import {
   CONFIG_SCHEMA,
   type ConfigKey,
   DB_POOL_MAX_LIMIT,
+  DB_TX_TIMEOUT_BOUNDS,
   requiredKeysFor,
   SECRET_KEY_NAMES,
 } from './schema.js';
@@ -702,6 +703,38 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
       DB_IDLE_TIMEOUT_MS: 3_600_000,
       DB_CONNECTION_TIMEOUT_MS: 1,
     });
+  });
+
+  it('ADR-0005 am.10 item 12: the per-transaction DB_TX_* timeouts default to 5000/2000/15000 ms for both services', () => {
+    for (const service of SERVICES) {
+      expect(loadConfig(createTestEnv(), { service })).toMatchObject({
+        DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
+        DB_TX_LOCK_TIMEOUT_MS: 2_000,
+        DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+      });
+    }
+  });
+
+  it.each(
+    Object.entries(DB_TX_TIMEOUT_BOUNDS).flatMap(([key, { min, max }]) => [
+      [key, String(min - 1), 'number.min'],
+      [key, String(max + 1), 'number.max'],
+      [key, '2500.5', 'number.integer'],
+      [key, '2s', 'number.base'],
+    ]),
+  )('ADR-0005 am.10 item 12: %s=%s is rejected (%s)', (key, value, rule) => {
+    expect(rejection(() => loadConfig({ ...createTestEnv(), [key]: value }, { service: 'api' })).issues).toEqual([
+      { key, code: 'invalid', rule },
+    ]);
+  });
+
+  it('ADR-0005 am.10 item 12: DB_TX_* values at the bounds are accepted as integers', () => {
+    const atMin = Object.fromEntries(Object.entries(DB_TX_TIMEOUT_BOUNDS).map(([key, { min }]) => [key, String(min)]));
+    const atMax = Object.fromEntries(Object.entries(DB_TX_TIMEOUT_BOUNDS).map(([key, { max }]) => [key, String(max)]));
+    for (const bound of [atMin, atMax]) {
+      const config = loadConfig({ ...createTestEnv(), ...bound }, { service: 'worker' });
+      for (const [key, value] of Object.entries(bound)) expect(config[key as ConfigKey]).toBe(Number(value));
+    }
   });
 
   it('debug flags are allowed in local; harmless NODE_OPTIONS everywhere', () => {

@@ -1,0 +1,8 @@
+{
+  "$comment": "Platform bookkeeping tables in public: the Prisma migration history and the bootstrap-lane ledger (data-model §8.1). SYSTEM: no RLS, no grant to any platform role.",
+  "module": "platform",
+  "tables": [
+    { "name": "_prisma_migrations", "class": "SYSTEM" },
+    { "name": "bootstrap_migrations", "class": "SYSTEM" }
+  ]
+}
