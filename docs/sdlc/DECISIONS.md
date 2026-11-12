@@ -1077,3 +1077,12 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Why:** Keeps MAX_PARALLEL_DEVELOPERS utilisation without breaking the DAG or batch locks; batches are a scheduling aid, dependencies and locks are the constraint.
 - **Alternatives:** Wait for batch 0.2 to close (rejected: ~6 h idle until the cooldown clears).
 - **Reversibility:** High.
+
+### D-TASK005-03 · 2026-11-12 · senior-developer (logged by orchestrator) · TASK-005 fix cycle 2 behaviours (PR #3 @0e48a2a)
+- **Decision:** (1) Brand URLs: non-ASCII hosts must be punycode (`xn--…`); credentials in brand URLs refused (would land in the public bundle); non-RFC 3986 characters refused on both Joi and Zod sides via shared predicates `isBrandName`/`isBrandUrl`/`brandNameLength` (code points); same validator for `VITE_API_BASE_URL` and `VITE_FEATURE_FLAGS_ENDPOINT`. (2) Postgres URL query parameters in staging/production are allow-listed: `sslmode`, `sslrootcert`, `sslnegotiation`, `uselibpqcompat`, `application_name`, `connect_timeout`; host must be non-empty without `%`. (3) Valkey URL must start with raw `rediss://`, non-empty host, no `?`/`#`; unparsable URLs refused. (4) Transport guard skips keys already rejected by the schema (no double report; startup still fails). (5) Permanent provider errors (`SECRET_FILE_OUTSIDE_ROOT`, `_NOT_REGULAR`, `_TOO_LARGE`, `EACCES`, `EPERM`) are not retried; if the deadline passes during the retry sleep, the first diagnosis is kept. (6) `APP_ENV=local|test` refused when ECS task-metadata variables are set (D-ORCH-007).
+- **Reversibility:** High.
+
+### D-ORCH-009 · 2026-11-12 · sdlc-orchestrator · Batch 0.2 merge order change: PR #3 (TASK-005) before PR #4 (TASK-004)
+- **Decision:** PR #3 merges as soon as its round-3 reviews and a merge-main gate pass, ahead of PR #4, which cannot complete before its Playwright harness lands after 2026-11-12T20:18Z. Supersedes D-ORCH-006 item 5's row order for #4/#3; TASK-005 still performs the TASK-003 key reconciliation (already present since fix cycle 1) at its merge-main.
+- **Why:** TASK-004 and TASK-005 are independent; TASK-006 and TASK-007 (batch 0.3, critical path) depend on TASK-005, not TASK-004.
+- **Reversibility:** High.
