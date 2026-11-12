@@ -135,3 +135,161 @@ PR #3 head `be468bc` defines `DATABASE_URL` (required), `DATABASE_MIGRATOR_URL` 
    - Rules 3–9 and 11 need a named owner before TASK-013/016.
    - The NITs are optional.
 6. **Lock `prisma-core`:** no conflict expected with PR #3 (`packages/config`) beyond the §4 key alignment. PR #3 does not touch `package.json` scripts or `tools/tsconfig.json`; it does touch `package-lock.json`, so the second PR to merge rebases its lockfile.
+
+## Round 2 (head 4574a14)
+
+| Field | Value |
+|---|---|
+| Delta | `d8ba197..4574a14` (1 commit, `fix(db): review fix cycle 1`; 42 files, +733/−94) |
+| Fix comment | https://github.com/sukhchdit/shipcube/pull/5#issuecomment-6825445288; decision D-TASK003-02 |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every round-1 MINOR in scope (m1–m6) is closed. The SCRAM-SHA-256 verifier is correct: I reproduced the RFC 7677 §3
+         ServerSignature independently, and the format matches PostgreSQL's. The db:reset guard now checks the host pg
+         actually uses. Zero BLOCKER, zero MAJOR. Two new MINORs, both in classes that already existed before this fix
+         (rule 13 accepts a second SET search_path; rule 10 cannot see data changes inside DO bodies), route to TASK-016.
+```
+
+### R2.1 Verification performed by the reviewer
+
+**Constraint.** A merge-main pass was running in `Shipqube-TASK-003`, and the brief forbade commands in that worktree, `npm ci`, builds and Docker. I reviewed by SHA (`git diff`/`git show`). I did **not** re-run lint, format, typecheck, the unit, integration or coverage lanes, the build or `npm audit`. For those I rely on senior-developer's gate table on `4574a14` in the fix comment: lint/format/typecheck/build exit 0; unit 194/194; integration 28/28, including the new `session-safety.int.test.ts`; coverage 222/222; audit has 0 high and 0 critical; `git status` clean. The merge-main pass must repeat that gate on the merge commit.
+
+| Check | Result |
+|---|---|
+| Read-only probe: `git archive 4574a14 tools/db prisma/bootstrap` into the scratchpad, `node_modules` junctioned to the **main** checkout, `tsx` script importing `lintBootstrap`, `lintMigrations`, `scramSha256Keys/Verifier`, `resetTarget`, `effectiveEndpoint` | 22 cases; results below |
+| Independent SCRAM known-answer: HMAC(ServerKey from `scramSha256Keys('pencil', RFC salt)`, RFC 7677 AuthMessage) | `6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=`, which equals RFC 7677 `v=` |
+| `pg-connection-string` 2.14.1 `index.js` read in full (the parser `pg` uses) | `?host=` takes precedence over the URL host; `?port=` takes precedence over the URL port; `?database=` is **overwritten** by the path (so it is harmless); `socket:` is refused by the protocol check |
+| Lockfile at `4574a14` | `pg` 8.23.1, `pg-connection-string` 2.14.1, `@types/pg` 8.23.1. Each is a single hoisted copy, MIT, and the same version that `prisma`/`apps/api` already resolve (`^8.23.1`). No new package was resolved (n3 closed) |
+| `00-roles.sql`, `01-schemas.sql`, `prisma-engines.json` | absent from the delta's name list (byte-unchanged; ledger and manifest hashes hold) |
+
+Probe results (rules fired; `[]` = silent):
+
+| Probe | Result | Assessment |
+|---|---|---|
+| bootstrap `ALTER ROLE platform_audit_owner NOLOGIN NOINHERIT` | `[]` | tightening form exempt (correct) |
+| bootstrap: the `00-roles.sql` creation DO block, copied | `[]` | the SHA pin works; the block only creates missing roles `NOLOGIN`, so a copy is harmless |
+| bootstrap `ALTER DEFAULT PRIVILEGES FOR ROLE platform_audit_owner IN SCHEMA audit REVOKE …` | `[]` | correct |
+| bootstrap/migrations `GRANT U&"platform\005Faudit_owner" TO …` | `[]` / `[]` | **R2-n1** |
+| bootstrap `DO … EXECUTE 'GRANT platform_audit' \|\| '_owner TO …'` | `[]` | R2-n1: a static analysis limit, backstopped by C13 |
+| migration `… SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET search_path = public` | `[]` | **R2-m1** |
+| migration `DO $$ BEGIN UPDATE public.t SET a = 1; END $$;` with `data-changing: no` | `[]` | **R2-m2** (unchanged from `d8ba197`) |
+| migration `EXPLAIN ANALYZE UPDATE …` | `[]` | part of R2-m2 (exotic) |
+| migration `ALTER TABLE t DROP CONSTRAINT IF EXISTS c` | `['2']` | correct |
+| migration `WITH x AS (SELECT 1) INSERT INTO t VALUES (1)` / `WITH x AS (SELECT "update" …) SELECT …` | `['10']` / `['10']` | false positives that fail closed (R2-n2) |
+| migration `WITH … FOR SHARE` | `[]` | correct |
+| `scramSha256Verifier('a b'.repeat(10))` | `a role password must consist of printable ASCII characters only` | no echo (correct) |
+| `scramSha256Verifier('a'.repeat(24))` | accepted | the floor counts length, not entropy (R2-n5) |
+| `resetTarget(…?Host=/tmp)`, `…?ho%73t=evil.example` | refused | key check is case-insensitive and on decoded keys; pg's re-encode path never decodes more than WHATWG `URL` |
+| `resetTarget('…@localhost/platform', …, '…@localhost/platform')` (both portless) | accepted, compared as `5432` | **R2-n3** (PGPORT) |
+| `effectiveEndpoint('…@127.1/p')` → `resetTarget` | refused by `LOOPBACK_V4` (4 octets required) | conservative (correct) |
+
+### R2.2 Focus areas
+
+**SCRAM verifier (m5 / PR5-SEC-01): correct.**
+- **Derivation.** PBKDF2-HMAC-SHA-256 = `Hi()`, with a 32-byte output. Then ClientKey = HMAC(salted, "Client Key"), StoredKey = SHA-256(ClientKey), ServerKey = HMAC(salted, "Server Key"). This is exactly RFC 5802 §3.
+- **Parameters.** 4096 iterations is PostgreSQL's `scram_iterations` default and the RFC 7677 minimum; a lower value is refused. The salt is a fresh 16-byte `randomBytes` per call, which is PostgreSQL's `SCRAM_DEFAULT_SALT_LEN`.
+- **Format.** `SCRAM-SHA-256$4096:<b64 salt>$<b64 StoredKey>:<b64 ServerKey>`, matching `scram_build_secret`. The two `$` are separated by `:`, so no dollar-quote tag can form inside a substituted literal, and base64 has no quote or backslash (tested).
+- **Server side.** The integration test checks that `pg_authid.rolpassword` starts with `SCRAM-SHA-256$4096:` and that both roles log in with the plaintext. That proves the server parsed the literal as a verifier and did not hash the verifier text as a password.
+- **SASLprep.** Restricting to `\x21-\x7e` makes SASLprep the identity, so the client-side verifier equals what the server derives at login. Excluding space is stricter than needed but harmless.
+- **No plaintext anywhere.**
+  - Reserved `*_password`/`db_name` caller variables are refused before connecting.
+  - `ScramPasswordError` and `BootstrapError` messages carry the role key, never the value.
+  - `describe()` returns only `message` and `SQLSTATE`.
+  - The `log_statement=ddl` and error-path integration test asserts the absence of both passwords, with positive controls showing that the verifier DDL and the `STATEMENT:` line are present.
+  - `readSecret` strips one trailing newline, so `*_FILE` secrets pass the control-character check.
+
+**Rule 12 deny-by-default (m1 / PR5-SEC-02): closed.**
+- **Allow-list.** It is anchored on the whole normalised statement (`^…$` for `ALTER ROLE` and `GRANT`). `WITH GRANT OPTION`, multi-grantee lists, `IN DATABASE … SET` and `RENAME` all fall through to "marker required"; there are 12 fixtures, and my probes agree.
+- **What happens when `00-roles.sql` legitimately changes?**
+  1. **After it has been applied anywhere,** it cannot change: the runner fails on a changed SHA-256, so the change must go in a new file. A new role-creation block in a new file names the audit owner, differs from the pinned hash, and therefore needs the `@audit-ddl` marker with a listed reviewer. That is the intended approval path, not a maintenance trap.
+  2. **Before first apply,** any edit to the creation block fails two things at once: the linter (generic rule-12 message) and the unit test "exempts only the tightening forms of the real 00-roles.sql …". The editor then either adds the marker or updates `AUDIT_OWNER_CREATION_BLOCK` in `tools/db/lint-migrations.ts`, which is a reviewable change on a security-owned path (CODEOWNERS via PR5-SEC-04 → TASK-007).
+  3. **Edits that do not touch the block** (comments outside it, other statements) do not affect the pin, because it hashes the collapsed statement, not the file.
+
+  The only weakness is that the generic message does not name the pin (R2-n7).
+
+**Rule 13 (m2): closed.** Code-only text (strings, dollar bodies and comments blanked) catches `SECURITY DEFINER`/`SET` after the body and ignores body text, with three fixtures. The string form `SET search_path = 'pg_catalog, pg_temp'` is now rejected; that is correct, because it would name one schema called `pg_catalog, pg_temp`. The residual is R2-m1.
+
+**Rules 10/2 (m3): closed.**
+- **Detection.** `^with\b.*(delete from|insert into|merge into|update)` catches data-modifying statements both inside and after the CTE.
+- **Row locks.** The `(?<!\bfor |\bkey )` lookbehind is safe because `codeOnly` collapses whitespace and comments to one space.
+- **Identifiers.** `\bupdate\b` does not match `update_count` (`_` is a word character).
+- **Destructive forms.** `DROP [COLUMN] IF EXISTS` is added to rule 2, and `DROP CONSTRAINT IF EXISTS` was already covered.
+- **Controls.** The false-positive control covers keywords inside strings, `FOR UPDATE`, `FOR NO KEY UPDATE OF`, and a plain CTE `SELECT`.
+
+**Reset guard (m4 / PR5-SEC-03): closed.**
+- **Effective host.** The host is the one `pg-connection-string` (and so `pg`) resolves. `host`/`hostaddr` query keys are refused case-insensitively on WHATWG-decoded keys before parsing. An empty host is refused, and only postgres schemes are accepted.
+- **Loopback.** `localhost`, `::1`, `127.0.0.0/8` (four octets) or a socket path.
+- **Migrator URL.** `DATABASE_MIGRATOR_URL` must resolve to the same host, port and database; there are cases for `?port=` and for unset.
+- **Maintenance URL.** It is the validated URL with only its path changed. `?database=` cannot redirect it, because pg-connection-string overwrites `database` from the path.
+- **Messages** never echo URLs.
+
+**Timeouts (m6): closed.**
+- **Connections.** `connectionTimeoutMillis` 10 s is the default; a caller may override it.
+- **Lock wait.** `SET lock_timeout = <validated positive integer>` comes before `pg_advisory_lock`. lock_timeout applies to advisory-lock waits, and the 55P03 integration test proves it in under 20 s with no ledger created. The value persists, so DDL lock waits inside the files are bounded too.
+- **Statements.** `SET LOCAL statement_timeout = '5min'` applies per file transaction; the reset admin session gets `60s`.
+- **Deploy.** The `migrate deploy` spawn has a 10-minute timeout. `inFileTransaction` keeps the ledger INSERT inside the file's transaction, and ROLLBACK on failure is preserved.
+
+**PR5-SEC-06: closed.** `gunzipSync(..., { maxOutputLength: 256 MiB })`. The seam is a function parameter only (SEC-TC-64 holds). There is a negative test and an at-the-cap positive control. The cap is twice the `.gz` cap and well above the engine's size.
+
+### R2.3 Findings (round 2)
+
+No BLOCKER and no MAJOR findings.
+
+| ID | Sev | File:line (@4574a14) | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR (route TASK-016; fixing in this PR is optional) | `tools/db/lint-migrations.ts:115, 174-184` | **Rule 13 accepts a second `SET search_path` clause.** `FIXED_PATH` only needs to match *somewhere*. `CREATE FUNCTION … SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET search_path = public` lints clean (probe). PostgreSQL keeps the **last** value (`update_proconfig_value` → `GUCArrayAdd` replaces by name), so `proconfig` = `search_path=public`, the exact hijack rule 13 exists for. The same hole existed in the header form at `d8ba197`; m2 widened the scanned text to the whole statement. Backstop: C11/C14 `proconfig` equality (TASK-016). | In the code-only text, require exactly one `\bset search_path\b` occurrence, and require that it matches `FIXED_PATH`. Do this for CREATE and for ALTER FUNCTION/PROCEDURE. Add a fixture. |
+| R2-m2 | MINOR (route TASK-016; not a regression) | `tools/db/lint-migrations.ts:124-132, 207-212` | **Rule 10 is blind to data changes inside `DO` bodies.** `DO $$ BEGIN UPDATE public.t SET a = 1; END $$;` in an `expand` migration with `data-changing: no` gives 0 findings, and so does `EXPLAIN ANALYZE UPDATE …`. Hand-written backfills in Prisma migrations are usually `DO` blocks, and rule 10 is what triggers the CLAUDE.md §5 backup/restore guardrail. It was equally blind at `d8ba197` (the `^update` anchor never matched `do …`). | For `DO` statements, split the dollar body with the existing lexer and apply `DATA_CHANGING` to each inner statement. Alternatively, treat any `DO`/`CALL`/`EXPLAIN ANALYZE` as data-changing unless `data-changing: yes`. Add fixtures. |
+| R2-n1 | NIT (security-flag; route TASK-016) | `tools/db/lint-migrations.ts:63-64` | `U&"platform\005Faudit_owner"` (a Unicode-escape identifier) evades `AUDIT_OWNER_PATTERN` and `AUDIT_OBJECT_PATTERN` in **both** lanes (probe: `[]`, `[]`). String concatenation in dynamic SQL evades too, which is inherent to static linting. The security boundary remains C13 plus the exact `pg_auth_members`/`pg_default_acl` assertions. | Reject `u&"` and `u&'` in the code-only text of both lanes (no legitimate use in this repo). Record that dynamic-SQL construction is the accepted residual. |
+| R2-n2 | NIT | `tools/db/lint-migrations.ts:131` | Rule 10 false positives (they fail closed): a quoted `"update"` identifier inside a CTE, and `WITH … INSERT INTO … VALUES`. A plain `INSERT … VALUES` is not flagged, so the CTE form is stricter than the plain one. | Accept, or align with `^insert into .* select`. Document either way in the rule comment. |
+| R2-n3 | NIT | `tools/db/reset.ts:52, 72-77` | Portless URLs are compared as `5432`. However, `pg` falls back to `PGPORT` when the URL port is empty, while Prisma's engine uses 5432. With `PGPORT` set, drop/create/bootstrap and `migrate deploy` could hit different **local** clusters. Both are loopback, so the impact is low. | Require an explicit port in both URLs, or refuse when `PGPORT` is set and a URL has no port. |
+| R2-n4 | NIT | `tools/db/reset.ts:98-105` | When the deploy times out, spawnSync kills the child and the tool returns 1 silently. | Write `deploy.error?.message` / `deploy.signal` to stderr. |
+| R2-n5 | NIT | `tools/db/scram.ts:17, 51`; `prisma/README.md` | The 24-character floor counts length, not entropy (`'a'.repeat(24)` is accepted). It is not documented outside the code, although PR #3's `compose.env` is compliant (37/32 characters). | Document the floor and the printable-ASCII rule next to the tooling keys (round-1 m8 item 4). An entropy check is optional, since values come from the secret manager. |
+| R2-n6 | NIT | `package.json` (root `pg-connection-string` 2.14.1) | The guard's correctness depends on parsing with **the same copy `pg` uses**. A later `pg` bump that needs a newer `pg-connection-string` would nest a second copy, and the guard would then silently diverge. | Add a unit assertion that `createRequire(require.resolve('pg'))('pg-connection-string')` resolves to the root copy, or resolve the parser through `pg`. |
+| R2-n7 | NIT | `tools/db/lint-migrations.ts:89, 266` | When the creation block diverges from `AUDIT_OWNER_CREATION_BLOCK`, the developer sees only the generic "audit DDL needs the header" message. | Mention in the message (or the constant's comment) that both paths, marker or pin update, need security-analyst approval. |
+
+### R2.4 Round-1 closure
+
+| Item | Status @4574a14 | Evidence |
+|---|---|---|
+| m1 rule 12 bypasses | **Closed** | Deny-by-default allow-list plus the SHA-pinned creation block; the 12 `audit-owner-*` fixtures each fire with and without reviewers; the real lane lints `[]`; reviewer probes agree. Residual R2-n1 |
+| m2 rule 13 after body | **Closed** | `codeOnly`; `definer-after-body` fixtures (positive, negative and body-only). Residual R2-m1 |
+| m3 CTE / `DROP IF EXISTS` | **Closed** | `cte-and-drop-if-exists` (10, 10, 2, 2) and the `cte-select` control `[]`. Residual R2-m2 (pre-existing) |
+| m4 reset guard | **Closed** | `effectiveEndpoint` and the migrator match; 4 + 1 refusal URLs, 5 mismatch cases, 3 accepted forms. Residual R2-n3 |
+| m5 / PR5-SEC-01 password in server log | **Closed** | `scram.ts` (independently verified against RFC 7677), reserved variables, PG 18 `log_statement=ddl` integration test with controls |
+| m6 timeouts | **Closed** | connect, lock, statement and spawn bounds; 55P03 integration test |
+| m7 runtime `statement_timeout` | Routed → TASK-006 (fix comment) | Still open with its owner |
+| m8 config keys | **Closed on the PR #5 side.** PR #3 owns the reconciliation (D-ORCH-006 item 5, D-TASK005-02) | The `_FILE` convention is retained by D-TASK005-02 instead of `_REF`. ADR-0018's key register still does not record that exception (architect NIT) |
+| m9 data-model amendments | **Partly closed** | D-ARCH-045..049 recorded. Still open: data-model §8.3 rule 13 still says "header (the text up to the body's opening `AS`)" (:3823), and the rule-12 bootstrap wording in D-ARCH-049 ("own role attributes … need none") is now **superseded by the stricter code**, which allows NO* attributes only. principal-architect amends both at merge. No fix cycle needed |
+| PR5-SEC-02/03/06 | **Closed** (code) | security-analyst to confirm in its R2 delta |
+| n1 plan sheet | **Closed** on main (D-ARCH-048; WAVE-00.md:135) | |
+| n3 root `pg` deps | **Closed** | lockfile versions match; nothing newly resolved |
+| n2, n4–n9 | Open, optional | unchanged by the delta (`reset.ts`/`bootstrap.ts` still use a bare `if (import.meta.main)`: n4) |
+| Rules 3–9, 11, 14 owner | **Closed**: TASK-016 (D-ARCH-049); header comment updated | |
+
+### R2.5 GOOD
+
+- Plaintext passwords are removed by construction rather than by redaction. The `passwords` option is typed separately from `vars`, and `*_password` variables are refused outright, so a future caller cannot reintroduce plaintext by accident.
+- The SCRAM known-answer test checks **behaviour**: the RFC ServerSignature, and the client proof recovered and checked against StoredKey. It does not just check the format.
+- The log-safety integration test uses a sentinel to flush the server log and asserts **positive controls** (verifier DDL present, `STATEMENT:` present) before asserting absence. Without the controls, the absence assertion could pass vacuously.
+- The fixtures follow a pattern worth keeping: each fix has a minimal fixture, a false-positive control and a real-lane `[]` control.
+- The reset guard uses the driver's own parser, which removes the class of parse-differential bugs instead of patching one URL form.
+
+### R2.6 SECURITY-FLAGS (for security-analyst)
+
+1. **The verifier is now in the DDL log.** `log_statement=ddl` (or pgaudit ROLE) now records the SCRAM verifier, which is equivalent to the contents of `pg_authid`. It enables offline guessing, and with StoredKey plus one observed exchange, client impersonation without TLS. With ≥ 24-character secret-manager passwords and TLS, the risk is INFO. Confirm that DB logs are classed as sensitive, or that production `log_statement` stays `none`.
+2. R2-n1: `U&` identifier evasion of rule 12 in both lanes. Low; C13 is the boundary.
+3. R2-m1: duplicate `SET search_path` passes rule 13. C11/C14 is the boundary.
+4. PR5-SEC-06 cap and seam: verified as a function parameter only.
+
+### R2.7 Merge conditions
+
+1. **Re-run the gate on the merge commit.** The merge-main pass re-runs lint, format, typecheck, unit, integration, build, `npm audit` and `git status` on its merge commit and posts the results. I could not re-run anything this round.
+2. **security-analyst R2 delta.** No Critical/High open; it covers the SCRAM path, the rule-12 allow-list and the engine gunzip cap.
+3. **principal-architect, at merge.** Amend data-model §8.3 rule 13 (code-only, anywhere, exactly one SET) and the rule-12 bootstrap wording (deny-by-default; supersede D-ARCH-049's "precision" sentence). Record the `_FILE` exception in the ADR-0018 key register.
+4. **Routing.**
+   - R2-m1, R2-m2, R2-n1 and R2-n2 → TASK-016, due before its first migration and in the same batch as rules 3–9/11/14.
+   - R2-n3 and R2-n4 → TASK-014 (bootstrap one-shot) or optional.
+   - R2-n5 → the PR #3 reconciliation docs.
+   - R2-n6 and R2-n7 are optional.

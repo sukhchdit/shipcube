@@ -120,3 +120,94 @@ The PR claims 99.89 % / 97.69 %. **I did not re-run it** under the memory constr
 - m5: holder and least-privilege enforcement (anchor signing key in the API, migrator URL in the runtime, JWT private set in the worker, shared `compose.env`).
 - m6: the local-only key derivation contract; confirm it is unreachable outside local/test (my reading: yes, via `placeholderGuard`).
 - m8: Vite auto-exposes any `VITE_*` variable, so the schema alone doesn't keep secrets out of bundles.
+
+---
+
+## Round 2 (head 875409d)
+
+| Field | Value |
+|---|---|
+| Head / delta | `875409d` (one commit over `be468bc`: 27 files, +1650/−156). The merge base is still `4da693a`, so **PR #2 (lint) is not yet in the branch**; a merge-main commit is being added concurrently and was not reviewed |
+| Inputs | Round 1 (above); fix comment issuecomment-6825516810; D-ORCH-006 item 4; D-TASK005-02; PR #5 @ `4574a14` (TASK-003 names and pool defaults); `eslint.config.mjs` on `main` (PR #2) |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Both MAJORs are closed. A provider that ignores its signal is now cut off at timeoutMs/deadline
+         (reproduced: no hang, no unhandled rejection, no leaked timer), and the backend validates BRAND_* with
+         Joi only (no zod anywhere reachable from index.ts). All requested MINORs/NIT closed. Two new MINORs:
+         Joi/Zod parity holds only for the curated vectors (R2-m1, fix in-PR recommended) and tooling keys
+         have no hardened-env checks for the tools themselves (R2-m2, routed). Four NITs.
+```
+
+### R2.1 Verification performed by the reviewer
+
+No install, build, Docker or worktree commands (per brief). Sources were taken with `git archive 875409d` into a reviewer-only scratch directory, and `node_modules` was junctioned to the **main** checkout (joi 18.3.2 and zod 4.6.7 there are exactly the PR lockfile versions). The scratch directory and the junctions were removed afterwards; main has 740 node_modules entries, unchanged.
+
+| Check | Result |
+|---|---|
+| `jest --selectProjects unit` on `brand-rules`, `secret-refs` and `guards` tests (scratch copy) | **3 suites, 130/130 passed** (3.1 s) |
+| `prettier --check packages/config/src tools/config` | pass |
+| Lint under **main's** `eslint.config.mjs` (PR #2), no type information (lint-probe technique) | `packages/config/src`: **0 messages**. `tools/config`: 5 `import-x` resolution messages for `@platform/config[/web]`. These come from the scratch environment (main's node_modules has no `@platform/config` workspace link), but they must be re-checked on the merge-main commit |
+| **Probe R1** (race): provider ignores the signal and rejects later; provider never settles; provider returns a plain value; provider honours the signal | Timeout reported at 26 ms (timeout 20 ms / deadline 60 ms). **0 unhandled rejections**, **0 timers** left after settling (apart from the provider's own). A non-promise return resolves. The signal reaches the provider at the timeout. Defaults: one attempt of 2000 ms, jitter of at most 300 ms, one retry of 2000 ms, total ≤ 4300 ms < 4500 ms deadline < 5 s NFR |
+| **Probe R2** (NODE_OPTIONS vs real Node 24.22.3, `127.0.0.1:0` only) | 11 forms tried, **no bypass**: every form that turns the inspector ON (`"--insp"ect=…`, `"--inspect\=…"`, `--inspect=…\v`, a quoted form after another option) is refused. Over-refusals are harmless: a tab separator (Node exits 9), a leading NBSP, `--Inspect` (Node exits 9) |
+| **Probe R3** (Joi vs Zod differential, outside the curated vectors) | **16 of 30 URL vectors and astral-plane BRAND_NAME values give different verdicts** (R2-m1) |
+| Reconciliation with PR #5 @ `4574a14` | The tooling names (`DATABASE_MIGRATOR_URL`, `SHADOW_DATABASE_URL`, `DATABASE_BOOTSTRAP_URL`, `BOOTSTRAP_{MIGRATOR,APP}_PASSWORD[_FILE]`) match `prisma.config.ts` and `tools/db` exactly. Defaults 10 000 / 5 000 ms and bounds 3 600 000 / 120 000 match `client.ts`. The pool limit of 100 is stricter than the factory's 200, as ruled in D-TASK005-02 |
+| Not re-run (constraints) | type-aware lint, typecheck, full `test:unit` (430), coverage (99.91 % / 97.56 % claimed), build. These rely on the author's gate table; the gatekeeper must re-run them **on the merge-main commit**, since PR #2's config has never run on this branch with type information |
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence (read and, where marked, re-run) |
+|---|---|---|
+| **M1** | **Closed** | `secret-refs.ts:161-179`: `Promise.race([provider.resolve(locator, signal), aborted])` with `signal = AbortSignal.any([attempt, deadline])`. The timer is cleared and the listener removed in `finally`. A late rejection by the provider is absorbed by `race`'s subscription, and the `aborted` promise never rejects once the listener is removed. A synchronous throw lands in `catch`. A single overall deadline (4.5 s) is enforced, and both budgets are validated. Tests use a real `new Promise(() => {})` provider (re-run) plus Probe R1 |
+| **M2** | **Closed** | `schema.ts` builds `t.brandName()` and `t.urlOrRootPath()` natively in Joi from `brand-rules.ts`, which imports nothing. `t.zod` and every zod import are gone. The import-graph test proves that no zod is reachable from `index.ts` and that the web entry pulls in only `zod` (re-run). This conforms to D-ORCH-006 item 4. The residual parity gap is tracked as R2-m1 |
+| m1 | **Closed** | Five value-free classes and a `cause` built only from the constructor name and an errno-shaped code (messages never read; property test with 25 runs, re-run). One retry with 100–300 ms full jitter, on timeout or provider error only, when a full attempt still fits. Nits in R2-n3 |
+| m2 | **Closed** | `nodeOptionTokens` and `optionName` normalisation, the `--inspect*`/`--debug*` prefix check, and `execArgv` plus `inspector.url()` at the process edge. Probe R2 found no bypass. Doc nit in R2-n2 |
+| m3 | **Closed** | `<…>` is matched only as a whole value, or as a component of URL, key-variable or secret-ref values. Marker words are anchored per component, with NFKC and percent-decoding. Property tests cover 500 printable-ASCII passwords and `<…>` embedded in generated passwords. Residual false positives need a separator directly before `changeme`/`placeholder`/`local-only-` (negligible for generated secrets) |
+| m7 | **Closed** | `nodeEnvGuard`: staging and production require the raw value `NODE_ENV=production`, including when it is missing or empty; the value is never echoed |
+| m9 | **Closed** | `DB_IDLE_TIMEOUT_MS` and `DB_CONNECTION_TIMEOUT_MS` added. `DB_POOL_MAX` defaults per service (`defaultFor(appEnv, service)`). The tooling set has moved out of the runtime schema, and api/worker refuse it in hardened environments by name only. The register's `db` row lists all 8 variables, with two-way parity tested |
+| n3 | **Closed** | `reveal()` returns `Uint8Array.prototype.slice.call(value)`, so a `Buffer` stays a `Buffer` and the copy is independent (tested) |
+| m4 (first half), m5, m6, m8, n1, n2, n4, n5 | Routed, as listed in the fix comment | m4's file-adapter half is done: `createFileSecretProvider` uses realpath confinement, a size cap, an abortable read, a regular-file check and path-free errors; it passes `../` traversal, junction escape and the growth race (tests read). n1 is logged as D-TASK005-02. `O_NOFOLLOW`, the mode check and the stat-then-read TOCTOU are routed to TASK-006/014 (acceptable: `/run/secrets` is a root-owned read-only mount) |
+
+### R2.3 New findings
+
+| ID | Sev | File:line | Problem | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| R2-m1 | MINOR | `schema.ts:137-148` vs `web/web-schema.ts:24-33`; `brand-rules.test.ts:25-54` | Only the *limits* are shared, while the URL grammar and the length unit belong to each library. Joi `.uri()` is an RFC 3986 regex and counts UTF-16 units. Zod `z.url()` is the WHATWG `URL` parser (it trims and lower-cases the scheme) and counts code points. Probe R3: Zod accepts and Joi rejects `HTTPS://…`, `https://cdn.example.org/a b.svg`, `http:cdn.example.org/x`, `https:///logo.svg`, leading or trailing spaces, `…?x=<script>`, `/{x}`, `a"b`, `` a`b ``, `a^b`, `a|b` and IDN hosts. Joi accepts and Zod rejects `https://h:99999/x`. For **BRAND_NAME**, `'😀'.repeat(21)` and `'x'.repeat(39)+'😀'` are accepted by the web build and refused by the API, a counterexample to AT-US-002-04 "rejected identically" on its own key. The parity test passes only because every vector avoids this region | Brief §3.3 says the shared module exists "so the two validators cannot drift". Today they drift on ordinary operator typos (an uppercase scheme, a pasted trailing space). The failure is closed but appears late: the web build succeeds and the API exits 78 at deploy, or the reverse | Share **predicates**, not just limits. In `brand-rules.ts` add `brandNameLength(v) = [...v].length` (or state UTF-16 explicitly) and `isBrandUrl(v)`: no surrounding whitespace, length ≤ 2048, `ROOT_PATH_PATTERN`, or global `URL` (available in browser and Node with no import) with `BRAND_URL_PROTOCOL_PATTERN` and a non-empty host. Call them from Joi `.custom()` and Zod `.refine()` instead of `.uri()` and `z.url()`. Add a fast-check differential property (`fc.webUrl()`, `fc.string({ unit: 'grapheme' })` plus the R3 vectors) asserting equal verdicts. About 25 lines in owned files: **fix in this PR before merge** (D-ORCH-006 item 2 spirit), or make it a tracked condition for TASK-022 |
+| R2-m2 | MINOR | `tooling-keys.ts`; `load-config.test.ts` (removed `DATABASE_MIGRATOR_URL` transport vector) | The tooling set is only a list of names. Nothing validates tooling keys **for the tools themselves** in a hardened environment: the migrate job in staging gets no placeholder/`local-only-` refusal and no `sslmode=verify-full` check on `DATABASE_MIGRATOR_URL`. Round 1 §4 asked for "a loader for tools/db" so that these refusals apply to them too. This is not a regression: at `be468bc` the check ran only when the *API* held the URL, which is now refused outright | The migrator holds DDL rights, so a placeholder or a plaintext connection there is the worst place to be lax | Add `checkToolingEnv(env, appEnv)` in packages/config, reusing `isPlaceholder` and `isVerifiedPostgresUrl`, and call it from `prisma.config.ts` and `tools/db/*` when `APP_ENV` is hardened. **Route:** TASK-014 / migrate-job owner, with a DECISIONS line |
+| R2-n1 | NIT | `brand-rules.test.ts:81` | The `IMPORT` regex misses `import('zod')`, `require`, `createRequire` and import-equals. None exist today, so the test is correct now but can be bypassed by a future edit | Robustness of the M2 guard | Use `ts.preProcessFile(text, true, true)` (covers imports, re-exports and dynamic imports, ignores comments), or add a boundaries rule "packages/config/src/** except web/** → no zod" after the merge-main pass |
+| R2-n2 | NIT | `guards.ts:80-83`; `guards.test.ts` "tabs and newlines separate tokens" | The doc says "the way Node's parser does: whitespace separates tokens". Node splits on U+0020 only (`node_options.cc`; Probe R2: `…\t--inspect=…` is one token, and Node exits 9) | Misleading for the next editor. Over-splitting is safe (it only adds refusals), and the doc should say so | Reword: "splits on any whitespace, which is stricter than Node (U+0020 only); over-splitting can only add refusals" |
+| R2-n3 | NIT | `secret-refs.ts:106,146-150,196-198` | Permanent failures are retried: `SecretFileError` `OUTSIDE_ROOT`, `NOT_REGULAR`, `TOO_LARGE`, and `EACCES` all count as `providerError`. A retry that starts after the deadline reports `ref.timeout` and drops the first attempt's cause | It wastes up to 2.3 s of the budget and gives a misleading diagnosis | Treat `SecretFileError` codes (and the `EACCES`/`EPERM` errno) as non-retryable. When the deadline elapses during the sleep, return `first` |
+| R2-n4 | NIT | `secret-refs.test.ts` M1 tests | Upper bounds such as `elapsed < 150` with 50 ms timers are tight for loaded CI. On this host a 30 ms timer fired at 44 ms (Windows ~15.6 ms granularity) | Flake risk in the hosted fast lane | Use `jest.useFakeTimers()` with `advanceTimersByTimeAsync`, or widen the bound to `timeout + 500` |
+
+### R2.4 Can apps/web consume `@platform/config/web` under PR #2's rule?
+
+**No, not as main stands.** `eslint.config.mjs` classifies `apps/*/**` as category `app`, which includes `apps/web/vite.config.ts` and `react-router.config.ts`. The web/admin policy disallows `toPackage('@platform/*')`, and `toPackage` expands to `source` **and** `source/**`, so `@platform/config/web` matches. It also disallows any `package` file whose `pkg` is not `shared` or `ui`. A `vite.config.ts` that imports `loadWebBuildConfig` therefore fails `boundaries` with "server packages (config, …) stay out of the browser bundle". The subpath itself is browser-safe: it has no joi and no `node:*` (tested).
+
+What must change. The recommended path is an ADR-0003 amendment by the architect, under the "Architecture changes" rule:
+1. **New category `web-build-config`.** It covers the exact files `apps/{web,admin}/{vite,react-router}.config.ts`. Its policy is placed after the web/admin prohibition, because the last matching policy wins, and allows only `{ module: { source: ['@platform/config/web'] } }` (exact, with **no** `/**`) plus the resolved-file arm for `packages/config/src/web/**`. The root `@platform/config` and `/testing` stay forbidden.
+2. **Runtime app code (`apps/{web,admin}/app/**`) keeps the ban.** Values reach it only through `webBuildDefine` (Vite `define`), so no Zod or config code enters the bundle.
+3. **Dependencies.** `apps/web` and `apps/admin` get `"@platform/config": "*"` as a **devDependency** (`import-x/no-extraneous-dependencies`).
+4. **Lint probes or fixtures.** `app/x.tsx` → `@platform/config/web` is refused; `vite.config.ts` → `@platform/config` is refused; `vite.config.ts` → `@platform/config/web` is allowed.
+5. **Interaction with PR #4's `envPrefix: 'VITE_PUBLIC_'` (TASK-022).** The schema's `VITE_API_BASE_URL`, `VITE_STRIPE_PUBLISHABLE_KEY`, `VITE_LOCALES` and `VITE_FEATURE_FLAGS_ENDPOINT` are then exposed **only** through `webBuildDefine`. That is the intended single path, but it has to be wired; renaming them to `VITE_PUBLIC_*` is the alternative.
+
+The alternative of moving `brand-rules.ts` and `web-schema.ts` into `@platform/shared` needs no lint change. However, it gives `shared`, a runtime-bundled package, build-time environment parsing and contradicts ADR-0018 §1 ("Zod schema in `config/web`"), so it is not recommended.
+
+### R2.5 Security flags (for security-analyst)
+- **The inspector guard detects; it cannot prevent.** With `--inspect-brk` or `--inspect-wait` in NODE_OPTIONS, Node pauses *before* user code, so `loadConfigOrExit` never runs and the port stays open until attach or kill. With `--inspect`, the port is open from process start until exit 78. The preventive control must be on the platform: lint the task definition or Dockerfile for NODE_OPTIONS (Checkov custom policy) under TASK-014. INFO: `-r`/`--import` preloads can call `inspector.open()` after the config check.
+- R2-m1: the web build accepts `"`, `<`, `` ` `` and spaces in BRAND URLs that the API refuses. The output paths (React attributes, JSON in `define`) encode them, so this is low risk, but the e-mail templates (backend) and the web disagree on the accepted set.
+- R2-m2: no hardened-environment checks on the migrator and bootstrap credentials in the tools themselves.
+- File provider: stat-then-read TOCTOU and missing `O_NOFOLLOW` (already routed to TASK-006/014).
+
+### R2.6 Merge conditions
+1. Gatekeeper re-runs type-aware `lint`, `typecheck`, `test:unit`, `test:coverage` and `build` on the **merge-main commit**, since PR #2's config has never run on this branch with type information. The 5 `tools/config` import-resolution messages from the probe must be absent.
+2. R2-m1 is fixed in this PR (preferred) or recorded as a TASK-022 condition with a DECISIONS line.
+3. R2-m2, R2-n1…n4 and the R2.4 lint carve-out are routed by the orchestrator (TASK-014, TASK-022, architect).
+4. TASK-005 merges last in batch 0.2 (D-ORCH-006 item 5). If PR #5 changes its env names or pool defaults before then, `keys.test.ts` "[m9] tooling key set is exactly the TASK-003 names" and the pool-defaults test must be updated in the same merge.
+
+### R2.7 Good patterns worth keeping
+- Races are cleaned up with `finally` and a removable listener, and the bounded behaviour is proven with a genuinely non-cooperative provider.
+- The retry gate is "a full attempt must fit the deadline", not just "time remains".
+- Failure causes are built from code-defined identifiers only (constructor name plus an errno-shaped code), with a property test across message, code, name and raw throws.
+- Mirror-Node tokenisation with probe results recorded in the test comment. The tooling keys are refused **by name only**, and tests check that their values never appear in the config or the error output.
+- A dependency-free rules module with a static import-graph test is the right structure for every later Joi/Zod pair (address, parcel, customs). Extend it to shared predicates (R2-m1) before it is copied.

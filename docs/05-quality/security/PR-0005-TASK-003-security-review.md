@@ -385,3 +385,264 @@ The LOOPBACK set should hold `::1` (the parser strips brackets).
     - `npm ls elkjs --omit=dev --omit=optional` still prints the optional-peer path (note in §5).
 11. `git diff 4da693a..d8ba197 | grep -E <secret patterns>`: only `client.test.ts:13` `placeholder`. `git check-ignore -v prisma/generated/prisma/client.ts`: ignored (`.gitignore:94`).
 12. PostgreSQL 18 `ALTER DEFAULT PRIVILEGES` documentation (https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html), quoted in §4 item 2.
+
+## Round 2 (head 4574a14)
+
+| Field | Value |
+|---|---|
+| Delta | `d8ba197..4574a14`: 1 commit, `fix(db): review fix cycle 1 for TASK-003 (PR #5 round 1)`. 42 files, +733 / −94. Fix comment: https://github.com/sukhchdit/shipcube/pull/5#issuecomment-6825445288 |
+| Re-review triggers | The password path changed (`tools/db/bootstrap.ts` and the new `tools/db/scram.ts`), and `tools/deps/prisma-engines.mjs` gained the gunzip cap. Also reviewed: `tools/db/reset.ts`, `tools/db/lint-migrations.ts` (rules 2, 10, 12 and 13), the Testcontainers harness, the new `session-safety.int.test.ts`, and the root `devDependencies` |
+| Reviewer / date | security-analyst, 2026-11-12. I reviewed by SHA only (`git show`/`git diff` from the main checkout) and did not touch the `Shipqube-TASK-003` worktree, where a merge-main pass was running. I ran no install, build, Docker or test suite. To run the probes, I extracted the head sources into scratch and executed them under Node 24.22.3 type stripping, using the main checkout's `pg` 8.23.1 and `pg-connection-string` 2.14.1 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open. **Closed:** PR5-SEC-01 (MEDIUM), PR5-SEC-02 and PR5-SEC-03 (LOW), and PR5-SEC-06 (INFO). **New this round:** PR5-SEC-11 (LOW): rule 13 misses `ALTER ROUTINE` and repeated `SET search_path` clauses. The gap was already present at `d8ba197`, so it is not a regression of the fix cycle. Also new: PR5-SEC-12 and PR5-SEC-13 (INFO). The merge rule "no Critical/High open" is met |
+
+### R2.1 Byte-unchanged claim: CONFIRMED
+
+`git rev-parse <sha>:<path>` returns the same blob at `d8ba197` and at `4574a14` for each file below. The bootstrap ledger hashes and the engine manifest therefore still hold.
+
+| Path | Blob (both SHAs) |
+|---|---|
+| `prisma/bootstrap/00-roles.sql` | `f6766a46…` |
+| `prisma/bootstrap/01-schemas.sql` | `65d22c5d…` |
+| `tools/deps/prisma-engines.json` | `84774dd0…` |
+| `.npmrc` | `51567959…` |
+| `tools/db/sql-text.ts` | `59742561…` |
+| `apps/api/src/platform/db/client.ts` | `9c0b953c…` |
+| `tools/db/audit-ddl-reviewers.json` | `132c0e30…` (still empty, so rule 12 stays fail-closed) |
+
+### R2.2 PR5-SEC-01 (MEDIUM): CLOSED
+
+**Verifier construction (`tools/db/scram.ts`).**
+- **Algorithm.** The construction is RFC 5802 / RFC 7677, in PostgreSQL's `scram_build_secret` format:
+  - salted = PBKDF2-HMAC-SHA-256(password, salt, 4096, 32);
+  - StoredKey = SHA-256(HMAC(salted, "Client Key"));
+  - ServerKey = HMAC(salted, "Server Key");
+  - the result is `SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>`.
+- **Encoding.** Standard padded base64, giving 24, 44 and 44 characters. This is what `parse_scram_secret` decodes.
+- **Known-answer check.** I recomputed the RFC 7677 §3 vector independently. Both `v=` (`6rri…5G4=`) and `p=` (`dHzb…dVQ=`) match. The module's StoredKey and ServerKey equal my own derivation.
+- **Salt.** `randomBytes(16)` from the Node CSPRNG, fresh on every call. The probe produced two different salts, each 16 bytes after decoding. The `salt` parameter is a test seam only: the one production caller, `bootstrapVariables`, always uses the default.
+- **Iterations.** The constant is 4096, which equals PostgreSQL's `scram_iterations` default (PG 16+). `scramSha256Keys` refuses anything below 4096 (the probe confirmed 4095 is refused).
+- **Password floor.** At least 24 characters, all printable ASCII `0x21-0x7E`. SASLprep is the identity on that range, so libpq, node-postgres and the schema engine all derive the same keys.
+  - The probe refused 23 characters, a space, a tab, DEL, non-ASCII and a lone surrogate.
+  - No error message echoes the password.
+
+**Reserved variables.**
+- `bootstrapVariables` refuses `db_name` and any caller key matching `/_password$/i` before it connects. It writes the verifiers last, so they win over anything else.
+- **Callers.** Every caller now uses `passwords`: `main`, `reset.ts`, the harness's `bootstrap` and clone, and the tests. No other path sends `00-roles.sql`: `git grep` finds no `psql -v` and no `initdb.d` use.
+- **Unit proof.** The substituted `00-roles.sql` contains exactly two `PASSWORD 'SCRAM-SHA-256$4096:…'` literals and neither plaintext password.
+
+**Ruling on a verifier in the server log: ACCEPTABLE. This is PostgreSQL's own practice.**
+- **A literal is unavoidable.** `ALTER ROLE` is a utility statement and takes no bind parameters, so no "parameterised" path exists.
+- **PostgreSQL's own tools do the same.** libpq's `PQencryptPasswordConn` / `PQchangePassword` (used by psql `\password` and `createuser`) send exactly `ALTER USER … PASSWORD 'SCRAM-SHA-256$…'`. The `CREATE ROLE` documentation recommends those tools because the cleartext then never reaches the server or its log. A pre-hashed verifier is stored as is, whatever `password_encryption` says.
+- **What a log reader gains.** A logged verifier is worth the same as read access to `pg_authid` (RFC 5802 §9, RFC 7677 §4):
+  - **(a) Offline guessing at 4096 PBKDF2 iterations.** Infeasible for machine-generated secrets. The harness uses 256 bits, and 24 uniform characters from 94 symbols give about 157 bits.
+  - **(b) Server impersonation**, using ServerKey.
+  - **(c) Client impersonation**, but only after also observing one SCRAM exchange (StoredKey plus the proof yields ClientKey).
+  - (b) and (c) need a network position on an unverified connection. `sslmode=verify-full` (PR-0003 / TASK-005) and RDS `rds.force_ssl` close that at M5.
+- **Conditions of this ruling (no new finding):**
+  - role passwords stay machine-generated (secret manager or `randomBytes`), never human-chosen;
+  - server logs keep `pg_authid`-level access control (CloudWatch at M5);
+  - connections use TLS with server verification at M5.
+- **Not recommended:** suppressing DDL logging for the bootstrap session (`SET log_statement = none`). pgaudit ROLE logging is an M5 audit requirement, and a verifier is safe to keep there.
+- **Residual (INFO, no ID).** The floor checks length and character set, not entropy: 24 × `a` is accepted. The strength comes from generation. The TASK-014 / M5 secret generation should use `GenerateRandomPassword` with length ≥ 32 and space excluded.
+
+**Integration test design (`prisma/tests/bootstrap/session-safety.int.test.ts`): it proves absence.**
+- **Sensitivity.**
+  - `-c log_statement=ddl` logs the entire simple-query text of every apply, because `ALTER ROLE` is DDL. `log_min_error_statement=error` (the PG default) logs it again as `STATEMENT:` when the appended `SELECT 1/0;` fails.
+  - The two positive controls assert that both lines are present: the logged `ALTER ROLE platform_migrator … PASSWORD 'SCRAM-SHA-256$4096:` and the `STATEMENT:` line.
+  - A regression to plaintext would therefore put `PASSWORD '<base64url password>'` verbatim into the captured text, with no quote doubling, and `not.toContain` would fail.
+- **Completeness.**
+  - The log is read up to a sentinel error raised after the run, so no late flush is missed.
+  - The `pg_authid` prefix check, together with both roles logging in with the plaintext, proves the verifier is correct and not just present.
+  - `log_statement=all`, `log_min_duration_statement` and pgaudit ROLE all log the same query text. The unit proof (no plaintext ever in the SQL text) plus this test therefore covers them too.
+- **Optional test hardening (INFO; for whoever next touches the file):**
+  - **Anchor the `STATEMENT:` control.** It uses a lazy `[\s\S]*?` starting from the first `STATEMENT:`. That is correct today, because the forced error is the first error in the container. An earlier unrelated error followed by the `LOG: statement:` line would also satisfy it. Anchor it, for example `/ERROR:\s+division by zero\n[^\n]*STATEMENT:\s+SET search_path[\s\S]*?SELECT 1\/0;/`.
+  - **Prove "stored as is".** The `SCRAM-SHA-256$4096:` prefix would also appear if the server hashed the password itself (its default is 4096). Assert instead that the stored `rolpassword` equals one of the verifiers in the `LOG: statement:` text.
+- **Not executed by me** (Docker was off-limits). I rely on the developer's run on `4574a14`: 5 integration suites, 28/28, including this file.
+
+### R2.3 PR5-SEC-02 (LOW): CLOSED
+
+**Implementation.** The bootstrap lane is now deny-by-default, as recommended in round 1.
+- There are three tightening patterns. Each is anchored on the whole normalised statement: `NO*`-only `ALTER ROLE`, `GRANT USAGE|CREATE ON SCHEMA … TO` the owner, and `ALTER DEFAULT PRIVILEGES FOR ROLE` the owner `… REVOKE`.
+- The creation `DO` block is pinned by the SHA-256 of its whitespace-collapsed text. The pin cannot drift, because `00-roles.sql` is immutable through the ledger. A copy of that exact block elsewhere would only create the same `NOLOGIN` roles.
+
+**Probe results (`rule12-probe.mjs`: 38 statements, plus the real lane and the PR's fixtures):**
+- **All 8 round-1 bypass forms are now flagged.**
+- **20 further weakening forms are flagged:**
+  - `ALTER USER` and `ALTER GROUP … ADD USER`;
+  - `ALTER ROLE … SET` and `ALTER ROLE … IN DATABASE … SET`;
+  - `VALID UNTIL` and `CONNECTION LIMIT`;
+  - a `NOLOGIN SUPERUSER` mixed list;
+  - schema grants with `WITH GRANT OPTION`, with `GRANTED BY`, and with an extra grantee;
+  - a `FOR ROLE` list;
+  - membership in either direction, including the quoted name;
+  - `SET ROLE`, `OWNER TO` and `CREATE ROLE`;
+  - a dynamic-SQL literal;
+  - a creation block with an extra role;
+  - `COMMENT ON ROLE` (over-strict, which is acceptable).
+- **The 6 tightening forms are not flagged.**
+- **Real lane and fixtures.** The real `prisma/bootstrap` gives `[]`. All 13 `audit-owner-*` bypass fixtures give `["12"]`, and `audit-owner-setup` gives `[]`.
+
+**Residuals (INFO, no ID). These are lexical limits; the boundary is C13, C5 and C11 in TASK-016.**
+- A role name built at run time in dynamic SQL (`'platform_' || 'audit_owner'`) and `U&"…\005f…"` escaped identifiers are not seen.
+- `:"var"` placeholders are not seen either, but they fail closed at run time: no production caller passes `vars`, so any new variable fails with "needs variable(s)".
+- Some audit weakening names neither the owner nor an audit object, for example `GRANT pg_write_all_data TO platform_app`. Predefined-role privileges do not appear in object ACLs, so the C5 grant manifest cannot see them. **This is added to PR5-SEC-09:** the post-bootstrap membership assertion must cover every `pg_auth_members` row whose `member` is a `platform_%` role, predefined `pg_*` roles included.
+- **Optional hardening for TASK-016.** In the bootstrap lane, require the marker for any `DO` or `EXECUTE` outside the pinned creation block, and refuse `U&"` identifiers.
+
+### R2.4 PR5-SEC-03 (LOW): CLOSED
+
+**Implementation (`effectiveEndpoint` / `resetTarget`):**
+- Only `postgres:` and `postgresql:` schemes are accepted.
+- `host` and `hostaddr` query parameters are refused case-insensitively, after `URLSearchParams` has decoded the keys.
+- The URL is parsed with `pg-connection-string`, the parser `pg` itself uses, and an empty host is refused.
+- **Loopback** means `localhost`, `::1`, a `127.x.x.x` dotted quad, or a Unix-socket path.
+- `DATABASE_MIGRATOR_URL` must resolve to the same host, port and database.
+- Messages echo at most the host, never the URL.
+
+**Differential probe (`reset-probe.mjs`, 23 URLs).** For every URL the guard accepts, `new pg.Client({ connectionString })` resolves the same host, port and database, and that host is loopback or a socket.
+
+| Result | URLs |
+|---|---|
+| Refused | `?host=`, `?%68ost=`, `?HOST=`, `?hostaddr=`, `localhost@db.example.com`, `127.0.0.1.nip.io`, `127.1`, `localhost%2fdb…`, a comma multi-host, `[::ffff:127.0.0.1]`, `0.0.0.0`, an empty host |
+| Accepted, guard and `pg` agree | `?port=6543` (both 6543); `?database=other` (both ignore it, the pathname wins); `%6cocalhost`; `[::1]`; a socket path; a fragment; `pg-connection-string`'s `encodeURI` pre-processing path (a space plus `%2568ost` is not `host` for either) |
+
+**Residuals (INFO, no ID; this is an accident-prevention guard):**
+- If neither URL names a port, `PGPORT` applies to both. They then still resolve identically, to the same loopback host.
+- A Unix-socket path is trusted as local.
+- The resolution of `localhost` is trusted.
+
+### R2.5 PR5-SEC-06 (INFO): CLOSED
+
+- **The cap.** `gunzipSync(gz, { maxOutputLength: MAX_BINARY_BYTES })`, with 256 MiB.
+- **Overflow throws; it does not truncate.** On Node 24.22.3 I inflated an 8 KB gzip of 8 MiB of zeros:
+  - with a 1 MiB cap it throws `RangeError ERR_BUFFER_TOO_LARGE`;
+  - exactly at the cap it succeeds.
+
+  The error maps to `cannot gunzip`, and the existing cleanup removes the file.
+- **The seam is reachable only through function parameters.** `rebuild.mjs` and `prisma-cli.mjs` do not pass `maxBinaryBytes`, and the module CLI `run(argv, seams)` receives seams only from tests. No environment or configuration value can set it.
+- **Memory bound.** At most 128 MiB of gzip input plus 256 MiB of output.
+- **Test.** The new test includes a positive control at exactly the cap.
+
+### R2.6 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location (head) | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR5-SEC-11 | Rule 13 misses `ALTER ROUTINE`, and it accepts a SECURITY DEFINER routine whose fixed `SET search_path` is followed by a second `SET search_path`, where the last one wins | LOW | CWE-184, CWE-426 | A08 | `tools/db/lint-migrations.ts:175-187` (`definerWithoutFixedPath`) | TASK-016 (owner of the linter batch and C11); optional in this PR | Open |
+| PR5-SEC-12 | The bootstrap secret-variable protection is name-based (`*_password`). A future `:'password'`, `:'x_secret'` or literal `PASSWORD '…'` would bypass the verifier path | INFO | CWE-312 | A04 | `tools/db/bootstrap.ts` `bootstrapVariables`; `tools/db/lint-migrations.ts` `lintBootstrap` | TASK-016 (linter) | Open (note) |
+| PR5-SEC-13 | `db:reset` spawns `migrate deploy` with the full environment, so the Prisma CLI and the schema engine receive the cluster-admin `DATABASE_BOOTSTRAP_URL` and the role passwords | INFO | CWE-526 | A05 | `tools/db/reset.ts:98-104` | TASK-034 (db tooling), or the next touch of `reset.ts` | Open (note) |
+
+#### PR5-SEC-11: rule 13 misses `ALTER ROUTINE` and repeated `SET search_path` (LOW)
+
+**Description.**
+- **`ALTER ROUTINE` is not checked.** `definerWithoutFixedPath` matches `^alter (function|procedure)` only. PostgreSQL 11+ `ALTER ROUTINE` accepts the same actions, so these three statements all pass:
+  - `ALTER ROUTINE platform.f() SECURITY DEFINER`;
+  - `ALTER ROUTINE … SET search_path = public`;
+  - `ALTER ROUTINE … RESET ALL`.
+- **Only the first `SET search_path` is checked.** `FIXED_PATH` needs one matching clause anywhere, but PostgreSQL applies the SET items left to right. The PG 18 `functioncmds.c` comment on `compute_function_attributes` reads: "We don't try to detect duplicate SET parameters though --- if you're redundant, the last one wins". `update_proconfig_value` then calls `GUCArrayAdd`, which replaces the earlier entry.
+  - So `… SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET search_path = public AS …` creates a definer function with `proconfig = {search_path=public}`, and it passes rule 13.
+  - The same applies to `SET search_path FROM CURRENT` as the second clause, and to `ALTER FUNCTION` with two SET clauses.
+- **Probe.** `rule13-probe.mjs` found 6 misses; all 7 controls behaved correctly.
+- **Not a regression.** The round-1 header-split code had the same logic, so these gaps pre-date the fix cycle. My round-1 review missed them.
+
+**Exploitability and impact.**
+- **The risk.** A definer function that resolves names through the migrator-writable `public` is the CVE-2018-1058 class (CWE-426): code planted by the migrator runs with the definer's (or the audit owner's) rights.
+- **The boundary.** C11's `proconfig` assertion (exactly one `search_path` entry, equal to `pg_catalog, pg_temp`) catches both forms. It arrives in TASK-016.
+- **Exposure today.** No definer function exists yet.
+- **Severity.** Impact M (an early-warning layer is degraded) × likelihood L = **LOW**, the same rating as PR5-SEC-02.
+
+**Remediation (code level).**
+
+```ts
+function definerWithoutFixedPath(statement: string): boolean {
+  const text = codeOnly(statement);
+  const pathSets = text.match(/\bset search_path\b/g)?.length ?? 0;
+  const fixedOnly = pathSets === 1 && FIXED_PATH.test(`${text};`); // exactly one SET, and it is the fixed one
+  if (/^create (or replace )?(function|procedure)\b/.test(text)) {
+    return /\bsecurity definer\b/.test(text) && !fixedOnly;
+  }
+  if (/^alter (function|procedure|routine)\b/.test(text)) {
+    if (/\bsecurity definer\b/.test(text)) return true;
+    if (/\b(reset search_path|reset all)\b/.test(text)) return true;
+    return pathSets > 0 && !fixedOnly;
+  }
+  return false;
+}
+```
+
+**Verification.**
+- Add fixtures `migrations/definer-duplicate-set`, `definer-set-from-current`, `alter-routine-definer`, `alter-routine-set` and `alter-function-duplicate-set`. Each must report rule `13`.
+- `definer-after-body` and the valid fixtures keep `[]`.
+
+#### PR5-SEC-12: name-based secret variables (INFO)
+
+**Description.**
+- `bootstrapVariables` refuses only `db_name` and `*_password`.
+- A future bootstrap file could use `:'password'` or `:'readonly_secret'`, or hard-code `PASSWORD '…'`. It would bypass the SCRAM path, and the plaintext would reach the server log again.
+
+**Exposure.** None today. No production caller passes `vars`, so any new variable fails with "needs variable(s)".
+
+**Remediation.** Add two checks to `lintBootstrap`:
+1. The lane may reference only `db_name`, `migrator_password` and `app_password`. Check this with `referencedVariables`.
+2. Every `PASSWORD` keyword in code (use `codeOnly`) must be followed by `:'migrator_password'`, `:'app_password'` or `NULL`.
+
+Add one fixture per check.
+
+#### PR5-SEC-13: the reset child inherits the cluster-admin credential (INFO)
+
+**Description.**
+- `main` passes `env` unchanged to `prisma-cli.mjs migrate deploy`.
+- `prisma.config.ts` reads only `DATABASE_MIGRATOR_URL`, so the bootstrap credential is not misused today. It is still available to the Prisma CLI, to the schema engine, and to any future config change.
+
+**Remediation.** Filter the child environment to least privilege (CLAUDE.md §9):
+
+```ts
+env: Object.fromEntries(Object.entries(env).filter(([k]) => !/^(DATABASE_BOOTSTRAP_URL|BOOTSTRAP_(MIGRATOR|APP)_PASSWORD(_FILE)?)$/.test(k)))
+```
+
+**Verification.** A unit test through a spawn seam asserts that the child environment holds none of those names.
+
+### R2.7 Other delta items
+
+- **CR m6 timeouts.**
+  - `SET lock_timeout = ${lockTimeoutMs}` interpolates a value already validated as a positive integer.
+  - `statement_timeout` and `'60s'` are constants.
+  - `connectionTimeoutMillis` can be overridden only by the caller's own `connection`.
+  - No injection surface.
+- **Rules 2 and 10 now match code only.** Quoted identifiers stay visible, because they are not blanked. A data change inside a `DO` body was not seen before either: `^do` never matched. No regression.
+- **Rule 13 code-only matching.** `SECURITY DEFINER` and `SET` after the body are now checked, and body text no longer counts. Over-strictness is fail-safe: `SET search_path = 'pg_catalog, pg_temp'` as a string is flagged. The remaining gaps are in PR5-SEC-11.
+- **Supply chain.**
+  - **Lockfile.** A deep JSON diff of the base and head `package-lock.json` found exactly 3 differing paths, all under `packages[""].devDependencies` (`@types/pg`, `pg`, `pg-connection-string`). The positive control was detected. Both sides have 1,559 entries, and no `resolved`/`integrity` value changed. The three packages were already locked (`pg` and `pg-connection-string` as production entries, through `apps/api`). All three are MIT and come from registry tarballs.
+  - **Registry dates.** `pg` 8.23.1 was published 2026-09-30, `pg-connection-string` 2.14.1 on 2026-09-30, and `@types/pg` 8.23.1 on 2026-08-17. All are past `min-release-age`, maintained, and on the LICENSE_ALLOWLIST.
+  - **Audit.** I did not re-run `npm audit`. The resolved set is identical to round 1 (0 High/Critical; `--omit=dev` 0). The developer's run on `4574a14` exits 0 at `--audit-level=high`.
+- **Secrets.** A grep of the delta found only per-run random values (`randomBytes(32).toString('base64url')`) and test-only literals: the `scram.test.ts` `strong` constant, and the fixture `'x'` and placeholders. None is a real credential. gitleaks was not run (Docker was off-limits); TASK-007 lane A covers it.
+
+### R2.8 Finding status after round 2
+
+| ID | Severity | Status | Owner / due |
+|---|---|---|---|
+| PR5-SEC-01 | MEDIUM | **Closed** (R2.2) | n/a |
+| PR5-SEC-02 | LOW | **Closed** (R2.3); lexical residuals are notes | TASK-016 (optional hardening) |
+| PR5-SEC-03 | LOW | **Closed** (R2.4) | n/a |
+| PR5-SEC-04 | LOW | Open | TASK-007 (CODEOWNERS and `check-security-owned-paths`) |
+| PR5-SEC-05 | INFO | Open (note) | principal-architect; COND-G4-PROD |
+| PR5-SEC-06 | INFO | **Closed** (R2.5) | n/a |
+| PR5-SEC-07 | INFO | Open (note) | The fix comment routes it to TASK-006. Keep the workflow-policy half on **TASK-007**. The `prismaChildEnv` `NODE_OPTIONS` hardening goes with the next task that touches `tools/deps` |
+| PR5-SEC-08 | INFO | Open (note) | TASK-006 (`toPoolConfig` allow-list) |
+| PR5-SEC-09 | INFO | Open (note); **extended**: the membership assertion includes predefined `pg_*` roles (R2.3) | TASK-016, TASK-034, SPK-08 |
+| PR5-SEC-10 | INFO | Open (note) | qa-lead (SEC-FU-QA) |
+| PR5-SEC-11 | LOW | **New**, Open | TASK-016 (before the first `SECURITY DEFINER` migration); optional now |
+| PR5-SEC-12 | INFO | **New**, Open (note) | TASK-016 |
+| PR5-SEC-13 | INFO | **New**, Open (note) | TASK-034, or the next touch of `reset.ts` |
+
+### R2.9 Evidence (head `4574a14`)
+
+Scratch directory: `…/scratchpad/review/PR-5-sec-r2/`.
+1. `git fetch -q origin`. Then `git log --oneline d8ba197..4574a14` (1 commit) and `git diff --stat d8ba197..4574a14`.
+2. `git rev-parse d8ba197:<path>` and `git rev-parse 4574a14:<path>` for the 7 paths in R2.1: all identical.
+3. Sources extracted with `git show 4574a14:<file>`, and the lane and fixtures with `git archive 4574a14 prisma/bootstrap tools/db/fixtures/lint/bootstrap`. `prep.mjs` rewrote the relative `.js` imports to `.ts` and pointed `pg` / `pg-connection-string` at the main checkout's `node_modules` by file URL.
+4. `node rule12-probe.mjs`: 38/38 as expected. Real lane `[]`. 13 bypass fixtures `["12"]`; `audit-owner-setup` `[]`.
+5. `node rule13-probe.mjs`: 7 controls OK and 6 misses (PR5-SEC-11). The PostgreSQL REL_18_STABLE `src/backend/commands/functioncmds.c` source (`compute_common_attribute`, `update_proconfig_value`, `AlterFunction`) confirms that the last SET wins.
+6. `node reset-probe.mjs`: 23 URLs. No URL was accepted with an inconsistent or non-loopback endpoint.
+7. `node scram-probe.mjs`: RFC 7677 `v=` and `p=` match; the module equals the independent derivation; format, fresh 16-byte salt and floor and charset boundaries hold; no error echoes the password; 4095 iterations refused.
+8. `node -e` zlib check: `maxOutputLength` overflow throws `RangeError ERR_BUFFER_TOO_LARGE`, and exactly at the cap succeeds.
+9. `node lockdiff.mjs lock-base.json lock-head.json`: 3 paths, all root `devDependencies`; control detected. Then `npm view pg@8.23.1 license time.modified` and `npm view {pg,pg-connection-string,@types/pg} time`.
+10. `git diff d8ba197..4574a14 | grep` for secret-shaped additions: random per-run values and test-only literals only. `git grep "initdb\.d|psql .*-v|00-roles\.sql"`: no other consumer of `00-roles.sql`.

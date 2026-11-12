@@ -5,11 +5,10 @@ metadata:
   type: project
 ---
 
-The PR #5 review (TASK-003, head `d8ba197`) is in `docs/05-quality/security/PR-0005-TASK-003-security-review.md`. IDs are PR5-SEC-01..10.
-- Verdict: PASS_WITH_FOLLOW-UPS.
-- 1 MEDIUM: 01, plaintext role passwords in the bootstrap SQL reach the PG server log. The fix is SCRAM verifiers built in the runner, so `00-roles.sql` stays unchanged and its hash is unaffected.
-- 3 LOW: 02 rule-12 allow-by-default, 03 `db:reset` `?host=`, 04 CODEOWNERS unowned.
-- 6 INFO.
+The PR #5 review (TASK-003) is in `docs/05-quality/security/PR-0005-TASK-003-security-review.md`. IDs are PR5-SEC-01..13.
+- R1 (head `d8ba197`): PASS_WITH_FOLLOW-UPS. 01 MEDIUM (plaintext role passwords in the PG log), 02/03/04 LOW, 05-10 INFO.
+- R2 (head `4574a14`, 2026-11-12): PASS_WITH_FOLLOW-UPS. **Closed 01, 02, 03, 06** (SCRAM verifiers in `tools/db/scram.ts`; rule-12 deny-by-default; `effectiveEndpoint` reset guard; gunzip cap). New: **11 LOW** (rule 13 misses `ALTER ROUTINE` and a repeated `SET search_path`, where PG's last SET wins), 12 INFO (secret vars name-based), 13 INFO (reset child env carries the bootstrap URL).
+- **Ruling recorded:** a SCRAM verifier in the PG log is acceptable, because it equals `pg_authid` exposure, the same as psql `\password`. It rests on machine-generated passwords, log ACLs and TLS verify-full at M5.
 - **SEC-FU-PR1.** D-ARCH-041 is CONFIRMED. D-ARCH-003 rev 4 is confirmed as policy only: `tools/ci/` registers don't exist yet, so the TASK-007 half stays open.
 
 **Facts verified 2026-11-12 (Prisma 7.10.1, pg 8.23 / pg-connection-string 2.14.1, PG 18). Re-verify after upgrades.**
@@ -27,14 +26,18 @@ The PR #5 review (TASK-003, head `d8ba197`) is in `docs/05-quality/security/PR-0
 **Why:** the follow-ups are spread over later tasks, and they close only if each later review checks them.
 
 **How to apply.** In these reviews, check:
-- **TASK-003 fix cycle, or TASK-014 at the latest:** PR5-SEC-01 SCRAM verifiers, and a log test with `log_statement=ddl`.
-- **TASK-021 (and TASK-016 if the linter is batched there):** PR5-SEC-02 deny-by-default for audit-owner mentions in the bootstrap lane, plus fixtures for `REASSIGN OWNED`, `DROP OWNED`, `ALTER ROLE … LOGIN`, `GRANT a, platform_audit_owner TO`, and `ALTER DEFAULT PRIVILEGES … GRANT`. The audit-ddl reviewer identity.
+- **TASK-014 / M5:** role secrets generated with ≥ 32 chars and no spaces (the scram floor checks length and charset only, not entropy).
+- **TASK-016:**
+  - PR5-SEC-11: rule 13 counts `set search_path` occurrences, which must be exactly 1, and covers `alter routine`. Add fixtures.
+  - PR5-SEC-12: the bootstrap lane allows only the variables `db_name`, `migrator_password` and `app_password`, and `PASSWORD` must take a reserved variable or NULL.
+  - The PR5-SEC-09 membership assertion includes predefined `pg_*` roles. `GRANT pg_write_all_data` is invisible to rule 12 and to C5.
+- **TASK-021:** the audit-ddl reviewer identity. Rule 12's lexical residuals (concatenated dynamic SQL, `U&` identifiers) remain.
 - **TASK-007:**
   - CODEOWNERS plus a record-based `check-security-owned-paths`;
   - the registers per D-ARCH-003 rev 4, with the elkjs `via` chain from `prisma` down;
   - `NODE_OPTIONS` preload refusal and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **TASK-016:** C13 runs post-bootstrap in every lane; the catalog harness uses `options`; C5/C11 assert the `pg_default_acl` `ns=0` rows; owner of linter rules 3–9 and 11 (SEC-TC-33).
-- **TASK-034:** the rehearsal uses `options`; the `db:reset` host check if it was not fixed in TASK-003.
+- **TASK-034:** the rehearsal uses `options`. PR5-SEC-13: filter the `migrate deploy` child env. (The `db:reset` host check was fixed in TASK-003 R2.)
 - **TASK-006:** the query-param allow-list in `toPoolConfig`.
 
 Related: [[project-p5-wave0-supply-chain]], [[project-p3-security-conditions]], [[project-p5-wave0-config-review]], [[project-security-review-conventions]]
