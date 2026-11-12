@@ -490,3 +490,219 @@ Requirements for principal-architect's choice:
 OWASP 2021 categories as in §3.
 
 Sources: `@prisma/client` 7.10.1 `runtime/client.js` (`Zn`, `Yt`, `_createItxClient`, `$parent`/`Xn` layers) and `@prisma/driver-adapter-utils` in the worktree's `node_modules`; PostgreSQL 18 documentation (*SET*: `SET LOCAL` outside a transaction block; *ALTER DEFAULT PRIVILEGES*; §5.9 *Row Security Policies*: `TRUNCATE` and `REFERENCES` are not subject to row security); `gram.y` `var_name`; PR #11 `prisma/README.md` "Rule 5".
+
+## Round 2 (head a3e8edd)
+
+| Field | Value |
+|---|---|
+| Scope | Delta `557aada..a3e8edd`: fix cycle 1, 5 commits (`5ed304a`, `a15e3d7`, `af518f2`, `7037db8`, `a3e8edd`), 92 files, +1,751 / −225. **No dependency change.** Unchanged in the delta: `with-tenant-tx.ts`, `map-db-error.ts`, the helpers migration, `02-role-backstops.sql`, `bootstrap.ts` |
+| Head | `a3e8edde8ecc1b9ea94da2ef19c7a53c18433605` (`feat/TASK-016-row-level-security-foundations-table`) |
+| Inputs | Fix comment https://github.com/sukhchdit/shipcube/pull/11#issuecomment-6833014750; `docs/03-architecture/rulings/wave-0-task-016-rulings.md`; DECISIONS D-ARCH-071..074; round 1 above |
+| Reviewer / date | security-analyst, 2026-11-13. **No command run in the worktree** (no git, no cwd there): sources came from `git archive a3e8edd` in the main checkout, and the worktree's `node_modules` and git-ignored generated client were read through scratch junctions, which were removed afterwards. No install, build, Docker or suite run |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open, so the merge rule (D-ORCH-004) is met for the security dimension. **Closed:** PR11-SEC-01, -02, -03 (PR scope), -04, -05 (items 1–3), -06, -07 (finding items) and -08. **New:** 3 LOW (PR11-SEC-12, -13, -14) and 1 INFO (-15). **This is not a merge authorisation for `a3e8edd`.** The architecture's required items 1 (second half), 2 (b), 5, 6 and 8 are still open (§R2.5). They change security-owned paths, so the reconciliation head needs a Round 3 delta review, and lane A must be green on that exact head |
+
+### R2.1 Summary
+
+The fix cycle closes every round-1 route that was in scope, and probes confirm the closures against the real Prisma 7.10.1 runtime:
+
+- `$parent` (top level and delegates), `constructor`, `_*` and Prisma's private symbol are refused. `then` reads `undefined`. Kept references throw `TENANT_TX_CLOSED`. `JSON.stringify(db)` throws.
+- Every R1 rule-16 / C-series evasion is now flagged by both scanners, from one shared list.
+- Rendered TENANT, GUEST_CAPABLE and USER_OWNED blocks lint clean. A tautology, an edited predicate, policy DDL in a DO block and a policy on a GLOBAL table each fail rule 9.
+- C5 sees `PUBLIC`. The C11 converse exists. `SET LOCAL lock_timeout`, grants before `OWNER TO` and an unreset role all fail.
+- The `pg` driver is confined to the platform core. Exemptions are exact files with the setter/keys split.
+
+Three LOW completeness gaps remain. None is exploitable without a developer or migration-author defect that also passes review.
+
+- **12: the deep guard stops at return values.** Every allowed member returns a `PrismaPromise`, and its `requestTransaction(null)` re-runs the query on a **non-transaction pooled connection** without context. This includes model operations, works **after commit** too, and proves false the PR's "no route to the root client" claim.
+- **13: `Sql` objects splice raw SQL.** An `Sql` object interpolated **into** a tagged `$queryRaw` is spliced as raw SQL. `new Prisma.Sql`, a non-tagged `Prisma.sql([...])`, `Prisma.join(…, sep)`, an aliased `P.raw` and a runtime `Sql` import all lint clean and pass the tagged-only run-time check.
+- **14: obfuscated forms evade the shared form list.** Unicode-escape identifiers (`U&"\0061pp"`), keyword-split dynamic SQL and fully computed `EXECUTE` get past rule 16 and the C-series. The C-series is the same lexical list, so it has no catalogue backstop for tenant-context writes.
+
+### R2.2 Method
+
+| Probe (scratch `review/PR-11-sec-r2/`, session-scoped) | What it did | Result |
+|---|---|---|
+| **P-A2** `tenantdb-escape-r2.mjs` | `git archive a3e8edd` sources, type-stripped (Node 24.22.3, transform mode). Run against the worktree's generated client and `node_modules` through a scratch junction: the real `@prisma/client` 7.10.1 runtime with a recording fake adapter (`TXn` vs `ROOT-conn`). Re-ran the R1 escapes, then new candidates inside `withTenantTx` and after commit | **R1 escapes refused** (`$parent`, `permission.$parent`, `constructor`, `_originalClient` → `TenantDbAccessError`; 0 symbols; `ownKeys` = 3 delegates + 3 raw members; `then` undefined; `JSON.stringify` throws; kept `db.permission` → `TENANT_TX_CLOSED`; kept lazy promise → "Transaction already closed"). **New:** `findMany().requestTransaction(null)` → `ROOT-conn`; `` $executeRaw`…`.requestTransaction(null) `` → `ROOT-conn`; `requestTransaction({kind:'batch'})` → `ROOT-conn`; kept promise `.requestTransaction(null)` **after commit** → `ROOT-conn`. Tagged `$queryRaw` with `${new Prisma.Sql([s],[])}`, `${Prisma.sql([s])}`, `${Prisma.join([1], ',', s)}` or `${Prisma.raw(s)}` → `s` spliced into the statement text on `TX1`. `$queryRawTyped` → refused by Prisma (typedSql preview off) |
+| **P-B2** `rule16-r2.mjs` | 26 plpgsql bodies through `scanFunctionBodies` and `lintMigrationDir` | **All 12 R1 forms + control flagged by both.** Named-argument, `E'…'`-key and `ALTER FUNCTION … SET app.` forms are flagged. **Missed by both:** `SET LOCAL U&"\0061pp".org_id`, `U&"\0073et_config"('ap' \|\| 'p.org_id', …)`, `EXECUTE U&'SET LOCAL \0061pp.org_id = '…`, `EXECUTE 'SET' \|\| ' LOCAL ' \|\| 'app.' \|\| 'org_id' …`, `EXECUTE format('%s %s = %L', 'SET LOCAL', 'app.' \|\| 'org_id', p)`, `EXECUTE chr(83) \|\| …`, `EXECUTE r` (statement read from a table), and a read through `pg_show_all_settings()` with a split key. Benign `set_config('search_path')` and `app.correlation_id` are clean |
+| **P-C2** `policy-grant-role-r2.mjs` | 29 migration fixtures through `lintMigrationDir` with the real manifests + 3 probe entries; `scanPolicies` rows | Rendered blocks clean (A1–A3). Rule 9: `OR true` edit, DO-block policy and policy on `permissions` fail; grant before ENABLE/FORCE fails (top level, incl. `ALL TABLES IN SCHEMA`). Rule 8: `TO PUBLIC` (also `"public"`, sequences), `TRUNCATE` to app fail. Rule 11: `SET LOCAL` fails. Rule 15: grants-before-`OWNER TO`, unreset role (also `SET role = …`) and `SET LOCAL ROLE` fail. **Clean (residuals):** grant inside DO (before FORCE, to PUBLIC, dynamic), `SET ROLE` inside DO, `set_config('role', …)`, `ALTER FUNCTION/VIEW … OWNER TO platform_definer`, `GRANT CREATE ON SCHEMA public TO PUBLIC`, `GRANT MAINTAIN`, `CREATE RULE`, `SET lock_timeout = '30s'` without `RESET`. C3 flags `org_id = org_id`, but **passes** `(platform.app_org_id() IS NULL) AND (org_id IS NULL)` and `platform.app_org_id() = platform.app_org_id()` |
+| **P-D2** `eslint-probe-r2.mjs` | `ESLint#lintText` on the head's own `eslint.config.mjs` (full tree via `git archive`, `docs/` excluded; junctioned `node_modules`; `disableTypeChecked`, `projectService: false`) | R1 P1–P5/P8 now fire (`boundaries/dependencies`, `platform/db-raw-sql`, `platform/tenant-context-sql`); key read in `session-integrity.ts` is clean as intended; dynamic `import('pg')`, `pg` in a service and `@prisma/adapter-pg` in a repository fire. **Clean (residuals):** `new Prisma.Sql`, `Prisma.sql([…])`, `Prisma.join(ids, sep)`, `P.raw` (aliased), `const { raw } = Prisma`, `import { Sql } from '@prisma/client/runtime/client'`, `const { $queryRawUnsafe } = db`, ``db[`$parent`]``, `.requestTransaction(null)`, and `` $executeRaw`SET "app".org_id = …` `` / `SET app . org_id` in app code. A tagged bound-value control is clean |
+| `lint-committed.mjs` | `lintMigrations` over the head's `prisma/migrations` | 0 findings |
+| Secrets | Added lines (`.env*` excluded) grepped for credential shapes | 0 hits. Positive control `set_config`: 25 hits. The `secret`/`token` mentions are key names and tokenizer code |
+
+**Not executed:** the PostgreSQL integration and catalog suites. I rely on the fix comment's serial gate on `a3e8edd` (unit 1184, integration 112 passed / 1 skipped, coverage 99.2 % lines, `db:lint-migrations` clean, audit clean).
+
+The validity of the `U&` forms in PR11-SEC-14 follows from `scan.l` (`xuistart`) and `parser.c` (`UIDENT` → `IDENT`) and was not run here. The fix should add them as executed C-series fixtures, as was done for the R1 forms.
+
+### R2.3 Closure of PR11-SEC-01..08
+
+| ID | R2 status | Evidence / residual |
+|---|---|---|
+| PR11-SEC-01 | **Closed** (the R1 routes) | Deny-by-default deep guard (`tenant-db.ts:121-229`): only delegates + 3 raw members. A null-prototype target keeps the Proxy invariants. Delegates are child-guarded, and `revoke()` covers method references. P-A2 and the PR's real-client test show 0 `ROOT` statements for those routes. **Residual:** the returned promise (PR11-SEC-12) |
+| PR11-SEC-02 | **Closed** for the R1 table | `tools/db/tenant-key-forms.ts` is shared by rule 16 and `scans.ts`, with 16 forms executed on PostgreSQL in the C-series. P-B2: all R1 rows flagged by both. **Residual class:** PR11-SEC-14 |
+| PR11-SEC-03 | **Closed for PR scope** | Rule 16 b: exact operator atom, only in `CREATE POLICY`. Rule 9 a: `canonicalPolicy` equality with `renderRls(entry)`, keeping literals (U+E000 marker). C3: keyed-atom presence. **Remaining:** C3 presence does not check shape (P-C2 keyed tautologies pass C3; rule 9 a catches them in migrations). The derived expected set is TASK-024 (D-ARCH-072) |
+| PR11-SEC-04 | **Closed** | `TABLE_ACL_SQL` includes `grantee = 0` → `PUBLIC` (table + column) and a planted rolled-back control. Rule 8 covers `TO PUBLIC` (tables, sequences, `ALL TABLES`) and `TRUNCATE/TRIGGER/REFERENCES/ALL` to app. **Residual:** grants inside DO blocks (PR11-SEC-15 a); C5 catches the catalogue result |
+| PR11-SEC-05 | **Items 1–3 closed; 4 routed; 5 owned** | (1) `Prisma.raw` / named `raw` import / non-tagged call reported, plus the run-time tagged-only check; **residual class** in PR11-SEC-13. (2) `SQL_DRIVER_CODE` = platform core, `prisma/`, `tools/db`, tests (P-D2 R1-P1/P2, N13, N15). (3) `db-raw-sql` on all of `apps/*/src` + planned files. (4) Test-folder hole → PR2-SEC-09 owners TASK-004/007 (unchanged). (5) T-83 → TASK-020 (D-ARCH-074) |
+| PR11-SEC-06 | **Closed** | `DEFINER_OWNED_SQL` (proc/rel/type/schema) asserted on the committed catalogue, with planted view + invoker-function controls. Done here instead of TASK-024 |
+| PR11-SEC-07 | **Closed** (finding items 1–3) | Rule 11 accepts session form only. Rule 15 has the `SET ROLE` block only (`handedOver` removed); an unreset role at end of file fails; `SET LOCAL ROLE` does not count. Rule 9 b requires ENABLE+FORCE before the grant (earlier files tracked in `history.rlsProtected`). `prisma/README.md` describes the consequences. **Ruling extras still open:** §R2.5 items 1 and 2 |
+| PR11-SEC-08 | **Closed** | Exact files only; `tokens` → `setter` + `keys`; `session-integrity.*` = `keys` (P-D2 R1-P8 fails, R1-P8b clean); spike entry carries the delete-together note (TASK-015 sheet per D-ARCH-074) |
+| PR11-SEC-09 | Open | Reconciliation pass (D-ORCH-014; merge condition per D-ARCH-074) |
+| PR11-SEC-10 | **Closed at design level** | D-ARCH-072 adopts requirements 1, 3, 4 and 5 (2 not needed). Sign-off at TASK-037/049 |
+| PR11-SEC-11 | b closed; a, h open (required, §R2.5); c–g as routed | C13 `lower(…)` + `proconfig ILIKE 'app.%'` |
+
+### R2.4 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR11-SEC-12 | `PrismaPromise.requestTransaction` returned by every allowed `TenantDb` member re-runs the query outside the transaction (root pool), also after commit | LOW | CWE-693 | A01 | `apps/api/src/platform/db/tenant-db.ts:167-176` (`bindMember` returns `fn.apply(raw, args)` unwrapped) | TASK-016 reconciliation pass (recommended); else TASK-020 | Open |
+| PR11-SEC-13 | `Sql`-object values inside a tagged `$queryRaw`/`$executeRaw` splice raw SQL; constructor, non-tagged `sql`, `join` separators, aliased/destructured `raw` and runtime imports are lint-clean | LOW | CWE-89 (precursor), CWE-184 | A03 | `tools/eslint-rules/db-raw-sql.mjs:67-83`; `tenant-db.ts:195-199` | TASK-016 reconciliation pass (recommended); else TASK-020 | Open |
+| PR11-SEC-14 | Obfuscated tenant-context writes evade the shared form list and therefore both rule 16 and the C-series: `U&` escapes, keyword-split or fully computed dynamic SQL | LOW | CWE-184 | A04 | `tools/db/tenant-key-forms.ts:28-61`; `lint-migrations.ts:336-346` (rule 10 DO bodies) | `U&` ban: TASK-016 reconciliation pass; dynamic-SQL allow-list: TASK-024; rule 10: TASK-021 | Open |
+| PR11-SEC-15 | Residual linter/catalog gaps with catalogue backstops (DO-block grants/roles, `OWNER TO platform_definer`, schema ACL, `CREATE RULE`, TS quoted GUC names, `$queryRawTyped`, C3 shape) | INFO | CWE-184, CWE-732 | A05 | see list | as listed | Open |
+
+#### PR11-SEC-12 (LOW): the deep guard stops at the returned promise
+
+**Description.** Every exposed function is wrapped by `bindMember`, which returns `fn.apply(raw, args)` unchanged. For model operations and the raw members, that value is Prisma's `PrismaPromise`, whose `requestTransaction(t)` re-invokes the query callback with a caller-supplied transaction. In `runtime/client.js`, `ji(...)`:
+
+- `requestTransaction(s){ let a = o(s); … }`;
+- `o(s)` caches only for `undefined`/`itx` and otherwise calls `r(s)`;
+- `Tm(null)` gives no transaction.
+
+So `null`, or any `{kind:'batch'}` object, routes the query to the adapter itself, not to the interactive transaction. P-A2 showed this, logging each statement with the connection that ran it:
+
+```
+db.permission.findMany({…}).requestTransaction(null)         -> ROOT-conn queryRaw SELECT "public"."permissions"…
+db.$executeRaw`SELECT 301`.requestTransaction(null)           -> ROOT-conn executeRaw SELECT 301
+db.$executeRaw`SELECT 302`.requestTransaction({kind:'batch'}) -> ROOT-conn executeRaw SELECT 302
+<promise kept from a committed withTenantTx>.requestTransaction(null) -> ROOT-conn executeRaw SELECT 501
+```
+
+The PR's real-client test asserts 0 `ROOT` statements only for the routes it exercises. The commit title's "no route to the root client" therefore does not hold.
+
+**Exploitability / impact.** `requestTransaction` is not on the public `PrismaPromise<T>` type (`runtime/client.d.ts:2181`), so it needs a cast, the same precondition as round 1's `$parent`. No lint rule reports it (P-D2 N9).
+
+The impact is the PR7-SEC-01 set:
+- SYSTEM-table writes (audit, outbox, idempotency) commit outside the business transaction;
+- reads of RLS tables run on a connection with no context and return 0 rows, so absence-based checks pass wrongly;
+- a kept promise keeps working after the transaction settled, which defeats `revoke()`.
+
+Likelihood L × Impact M → **LOW**, consistent with PR11-SEC-01.
+
+**Remediation (code, `tenant-db.ts`).** Wrap what an exposed function returns. Hide `requestTransaction`, and wrap function-valued members (fluent relation accessors) recursively. Laziness is kept, because nothing runs until `then`/`catch`/`finally`.
+
+```ts
+/** A PrismaPromise without `requestTransaction` (it re-runs the query with a caller-chosen transaction; null = root pool). */
+function guardResult(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || typeof Reflect.get(value, 'then') !== 'function') return value;
+  return new Proxy(value, {
+    get(target, key) {
+      if (key === 'requestTransaction') return undefined;
+      const member: unknown = Reflect.get(target, key, target);
+      return typeof member === 'function'
+        ? (...args: unknown[]) => guardResult((member as AnyFunction).apply(target, args))
+        : member;
+    },
+    has: (target, key) => key !== 'requestTransaction' && Reflect.has(target, key),
+  });
+}
+// bindMember: return guardResult(fn.apply(raw, args));
+```
+
+Also drop `$queryRawTyped` from `TENANT_DB_RAW_MEMBERS` until typedSql is adopted (PR11-SEC-15 f).
+
+**Verification.** Extend `prisma/tests/rls/tenant-db.real-client.test.ts`:
+- For a model operation, a fluent accessor, `$queryRaw` and `$executeRaw`, `(p as any).requestTransaction` is `undefined`.
+- Calling it through a retained raw reference is impossible.
+- The `ROOT` log stays empty, including for a promise kept past commit.
+
+#### PR11-SEC-13 (LOW): `Sql` values in a tagged template splice raw SQL
+
+**Description.** The fix checks that the **first** argument of `$queryRaw`/`$executeRaw` is a `TemplateStringsArray`, and the lint reports `Prisma.raw(…)` and a named `raw` import. But `sql-template-tag` (`@prisma/client-runtime-utils` `Sql` constructor) flattens any interpolated `Sql` instance into the statement text. `raw(v)`, `new Sql([v], [])`, a non-tagged `sql([v])` and `join(values, separator, prefix, suffix)` all produce such instances from arbitrary strings. The generated namespace exports `sql`, `join`, `raw` and `Sql` (`internal/prismaNamespace.ts:50-55`), and repositories may import `@prisma/client/runtime/client`, which exports `Sql`, `sqltag`, `join`, `raw` and `makeTypedQueryFactory`.
+
+P-A2: `` db.$queryRaw`SELECT ${new Prisma.Sql([s], [])}` `` ran `SELECT 1; SELECT set_config('app.org_id', 'victim', true)` on `TX1`. The same happened for `Prisma.sql([s])`, `Prisma.join([1], ',', s)` and `Prisma.raw(s)`. P-D2: N1–N6 lint clean. The fix comment's "`Prisma.sql` objects … are refused" holds only for the first argument.
+
+**Exploitability / impact.** It needs a developer to build a fragment from input; dynamic `ORDER BY` / column lists are the classic case. It also needs review to miss it. With `Prisma.raw` now banned, the constructor or `join` separator is the obvious lint-driven workaround. Impact: SQL injection as `platform_app` inside the tenant transaction, including `set_config('app.org_id', …)` (T-35). Likelihood L × Impact M → **LOW**, consistent with R1's PR11-SEC-05.
+
+**Remediation (code, `tools/eslint-rules/db-raw-sql.mjs`).** Track local bindings imported from `PRISMA_SOURCES` (the namespace `Prisma` under any alias, and the named helpers), then report:
+
+```js
+// on an identifier bound to an import from PRISMA_SOURCES (namespace member or named import):
+//  - any use of `raw` or `Sql` (call, `new`, member access, re-export, destructuring `const { raw, Sql } = Prisma`)
+//  - `sql` / `sqltag` used as a CALL (only the TaggedTemplateExpression form binds values)
+//  - `join(values, …)` with a 2nd-4th argument that is not a string Literal (separator/prefix/suffix are raw text)
+//  - a named import of `makeTypedQueryFactory` / `TypedSql` outside the generated client
+//  - any `new <x>.Sql(` / `new Sql(` regardless of binding (cheap belt and braces)
+```
+
+The run-time guard cannot tell a legitimate `` Prisma.sql`…` `` fragment from `raw(input)`, so lint is the control. Keep `Prisma.join(ids)` with the default separator and tagged `` Prisma.sql`…` `` fragments legal.
+
+**Verification.** Add negative fixtures for N1–N6 (repository) and a service variant. A `Prisma.join(ids)` + tagged-fragment control lints clean.
+
+#### PR11-SEC-14 (LOW): obfuscated forms evade the shared tenant-context form list
+
+**Description.** `tenant-key-forms.ts` is lexical, and the C-series uses the **same** list on `prosrc`, so there is no independent catalogue check for tenant-context writes inside function bodies. P-B2 shows three PostgreSQL-valid classes that neither scanner sees:
+
+1. **Unicode escapes.**
+   - `U&"\0061pp"` is a quoted identifier, so `SET LOCAL U&"\0061pp".org_id = …` and `U&"\0073et_config"(…)` evade the forms.
+   - `U&'…'` strings evade them in dynamic SQL.
+   - No migration in this repository needs `U&`.
+2. **Keyword-split dynamic SQL.** Examples: `'SET' || ' LOCAL ' || 'app.' || 'org_id'`, or `format('%s %s = %L', 'SET LOCAL', 'app.' || 'org_id', p)`. The dynamic-SET form needs whitespace after `SET` and then `%` or `'`, and the key-mention form needs the key unsplit.
+3. **Fully computed statements.** Examples: `EXECUTE r` from a table, or `chr()` building. Rule 10 has the same blind spot for data changes in DO blocks, as the fix comment notes.
+
+A trigger function of class 1–3 fires inside `platform_app`'s `withTenantTx` transaction, and trigger execution does not check `EXECUTE` at fire time. It switches tenant for the rest of that transaction (T-35).
+
+**Exploitability / impact.** Unlike R1's PR11-SEC-02 forms, none of these is idiomatic: each needs deliberate obfuscation by a migration author plus a CODEOWNERS review miss. Impact: a cross-tenant read/write within the transaction. Likelihood L × Impact M → **LOW**.
+
+**Remediation.**
+- (a) **This PR (`tenant-key-forms.ts`, one entry + fixtures).** Add a write form `['Unicode-escape string or identifier', /\bu&["']/i]`. It applies to every function body and migration statement, the helpers included.
+- (b) **TASK-024 (catalog family).** Add a dynamic-SQL allow-list. The C-series reports every plpgsql function whose `prosrc` matches `/\bexecute\b/i` and that is not on a reviewed `regprocedure` list; today that is `platform.ensure_audit_partitions(integer)`. Rule 16 reports `EXECUTE` in a `CREATE FUNCTION` body unless the function is listed. That turns "computed" into "reviewed".
+- (c) **TASK-021 (rule 10 DO-body carry-overs, D-ARCH-074).** A DO block whose `EXECUTE` operand is not a single literal (or `format()` with a literal template) needs `data-changing: yes`.
+
+**Verification.**
+- Add C-series fixtures (executed on PostgreSQL) and linter fixtures for N1, N2 and N7 (must fail after (a)), and for N3–N6 (must fail after (b)).
+- The committed catalogue stays clean, with `ensure_audit_partitions` on the list.
+
+#### PR11-SEC-15 (INFO): residuals with catalogue backstops
+
+| # | Residual (P-C2 / P-D2) | Backstop today | Owner |
+|---|---|---|---|
+| a | Rules 8, 9 b and 15 do not read DO bodies: `GRANT … TO PUBLIC`/app, a grant before FORCE, and a persisting `SET ROLE platform_definer` inside `DO $$…$$` lint clean. Apply the rule-10 body expansion (`sqlText(…, true)`) to these three rules, or forbid GRANT/REVOKE/SET ROLE inside DO | C5 (grants incl. PUBLIC), C11 converse (definer-owned objects), C1 (ENABLE/FORCE) | TASK-021 (with the rule-10 DO-body carry-overs) |
+| b | `SELECT set_config('role', 'platform_definer', false)` changes the role without rule 15 seeing it; the setter exemption admits non-`app.` literals. Treat a `role`/`session_authorization` key as a rule-15 `SET ROLE` | C11 converse | TASK-024 |
+| c | `ALTER FUNCTION/VIEW … OWNER TO platform_definer` lints clean (rulings item 2 (b), see §R2.5) | C11 converse | Reconciliation pass |
+| d | `GRANT CREATE ON SCHEMA public` (or `platform`) `TO PUBLIC` (or `platform_app`) has no lint rule and no catalog assertion (`01-schemas.sql` sets the intended ACL). Add rule 14 (`grant … on schema` bootstrap-only) and a C13 assertion that `has_schema_privilege('platform_app', n.oid, 'CREATE')` is false for every non-system schema | None | TASK-024 |
+| e | `CREATE RULE … DO ALSO …` on a table runs its action with the table owner's (migrator's) privileges; there is no lint rule and no catalog check. Assert `pg_rewrite` holds only `_RETURN` rules of views | None (CODEOWNERS review) | TASK-024 |
+| f | `$queryRawTyped` is exposed. It is inert while the typedSql preview is off (P-A2). If typedSql is enabled, `makeTypedQueryFactory` (importable by repositories) builds a `TypedSql` from any string. Drop it from the guard until adopted (PR11-SEC-12) and ban the factory import (PR11-SEC-13) | Prisma preview flag | Reconciliation pass / TASK-020 |
+| g | TS `platform/tenant-context-sql` misses quoted or spaced GUC names (`` $executeRaw`SET "app".org_id = '…'` ``, `SET app . org_id`); `db-raw-sql` misses `$parent`/`*Unsafe` reached by destructuring or a template-literal key. Port the shared namespace pattern into the `.mjs` rule; report `ObjectPattern` keys and template-literal computed keys | Run-time guard refuses `$parent`/`*Unsafe`; the leak detector catches a session `SET` at the next checkout (not the in-transaction switch) | TASK-020 (`lint` lock) |
+| h | C3 keyed-atom presence passes keyed tautologies (`app_org_id() = app_org_id()`, `app_org_id() IS NULL AND org_id IS NULL`) | Rule 9 a in migrations | TASK-024 (C3 derived set, D-ARCH-072) |
+| i | `MAINTAIN` (PG 17+) is not in rule 8's RLS-independent list (`LOCK TABLE` is an availability concern only) | C5 equality | TASK-024 |
+
+### R2.5 Architecture "Required in PR #11 before merge" (rulings §"Required code changes") at `a3e8edd`
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 1 | Rule 11 session-only; `RESET lock_timeout` at end of file when the value exceeds `3s` | **Partial**: session-only done; **RESET requirement not implemented** | P-C2 D1 fails; D3 (`SET lock_timeout = '30s'`, no RESET) lints clean |
+| 2 | Rule 15: `handedOver` removed; outside-block definer fails; `ALTER … OWNER TO platform_definer` fails; end-of-file role fails; fixtures | **Partial**: (a), (c) and the fixtures done; **(b) `OWNER TO platform_definer` ban not implemented** | P-C2 E2/E3/E9 fail; E7/E8 clean (C11 converse is the backstop) |
+| 3 | Rule 9 b grant order | **Done** (top-level statements; DO-body residual PR11-SEC-15 a) | P-C2 B1/B2 |
+| 4 | Rule 16 b operator atom; rendered blocks lint clean | **Done** | P-C2 A1–A3 |
+| 5 | Qualified helper bodies in `20261112020000_platform_rls_helpers` (unmerged) | **Not done** | Bodies unchanged at `a3e8edd` (unqualified `current_setting`, `~*`, `decode`) |
+| 6 | `02-role-backstops.sql` `lc_messages = 'C'`; C13 five rows; `EXPECTED_ROLE_SETTINGS` row | **Not done** | File unchanged (one `ALTER ROLE`) |
+| 7 | C13 case folding + `proconfig ILIKE 'app.%'` | **Done** | C13 (d) |
+| 8 | D-ORCH-014 (a)–(f) and PR11-SEC-09 items 1–6 | **Not done** (declared for the merge-main pass) | Fix comment "Still open" |
+
+Items 5 and 6 edit an unmerged migration and an unmerged bootstrap file. After merge, both become immutable-file follow-ups (D-ARCH-073), so they belong in the reconciliation pass.
+
+### R2.6 Routing (additions to §6)
+
+| Owner | Item | Due |
+|---|---|---|
+| TASK-016 reconciliation pass | §R2.5 items 1 (RESET), 2 (b), 5, 6, 8. Recommended: PR11-SEC-12 (`guardResult`), PR11-SEC-13 (lint), PR11-SEC-14 (a) (`U&` form), PR11-SEC-15 c and f | Before merge (items 1, 2, 5, 6, 8 per rulings); recommended items else as below |
+| TASK-020 | PR11-SEC-12 / -13 if not taken in PR #11; PR11-SEC-15 g; verify PR11-SEC-09 at the `tx` slot (unchanged) | Wave 0.6 |
+| TASK-024 | PR11-SEC-14 (b) dynamic-SQL allow-list; PR11-SEC-15 b, d, e, h, i (with the C3 derived set, C11, C1 scope it already owns) | Before TASK-037 |
+| TASK-021 | PR11-SEC-14 (c) and PR11-SEC-15 a (DO-body reading for rules 8/9 b/10/15) | With its rule-10 carry-overs |
+
+### R2.7 What Round 3 checks on the reconciliation head
+
+1. The delta to the reconciliation head, including the `main` merge.
+2. §R2.5 items 1, 2 (b), 5, 6 and 8:
+   - the helper bodies equal data-model §4.2, and the C-series and F-07 stay green;
+   - the C13 rows equal the five-row set;
+   - the composition function satisfies PR11-SEC-09 items 1–6, including the `DbError` problem body.
+3. Whichever of PR11-SEC-12, -13, -14 (a) and -15 c/f were taken; re-run P-A2 / P-B2 / P-D2.
+4. The record names the final head, and lane A is green on it.

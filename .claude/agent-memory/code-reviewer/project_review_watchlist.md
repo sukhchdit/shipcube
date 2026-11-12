@@ -123,6 +123,10 @@ PR #9 (TASK-006 runtime skeleton) r1 at 374166d was CHANGES_REQUESTED (2026-11-1
   - R2-m2: single-source the DATABASE_URL param allow-list in @platform/config (the runtime set wins; drop `uselibpqcompat`). Merges with n6.
   - R2-n1: the fallback problem ignores `typeBase`.
   - r3: re-run the ReDoS probe (`';  '`×20+`'!'`) on the fix. Still open: n5 (FIFO `O_NONBLOCK`).
+- r3 at 6331aeb: APPROVED_WITH_NITS (2026-11-13). R2-B1, R2-m1, R2-m2 (names) and R2-n1 closed.
+  - R3-m1 MINOR: DATABASE_URL *values* still differ between config and runtime (`sslrootcert=system`/relative passes staging config, then exit 1). Fix at merge-main or route to TASK-014 with n5 (n5 now also covers the sslrootcert stat→read TOCTOU).
+  - NITs: the order "bounded check before req.is" is not pinned by a test; client.test has an orphaned JSDoc.
+  - r4: review the merge-main delta only (pure-union proof, coverage, CI rollup); security-analyst confirms PR9-SEC-14.
 
 PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0010-TASK-007-code-review.md`.
 - M1: `--ignore-scripts false` and the npm install aliases bypass check-install-flags and check-workflow-policy.
@@ -165,6 +169,14 @@ PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-1
   - m6: PR #5 R2-m2 (DO bodies, rule 10) still open.
 - Closed by PR #11 (verified): PR #2 n5; PR #5 R3-n1 plus PR #8's tools/authz edge; PR #5 R2-m1 / PR5-SEC-11. PR #5 R2-n1 (`U&`) is still open.
 - r2: re-probe M1 with the real itx shape and m1 with the 9 bodies. Check §7 when PR #9 or PR #11 merges second.
+- r2 at a3e8edd: CHANGES_REQUESTED (2026-11-13). M1, m1, m2, m4, m6, n1 and n4 are closed.
+  - R2-M1 (MAJOR): `PrismaPromise.requestTransaction(null)` on guarded results runs on ROOT. Fix: a lazy then/catch/finally wrapper.
+  - MINORs:
+    - R2-m1: `Prisma.raw` alias forms are not linted, and a nested raw value interpolates.
+    - R2-m2: the ESLint tenant-context twin misses `SET "app"."org_id"`.
+    - R2-m3: architect item 1 (no `RESET lock_timeout` check above 3s) and item 2 (bare `OWNER TO platform_definer` not flagged).
+  - Reconciliation pass still owes: (a)–(f), PR11-SEC-09 items 1–6, architect items 5, 6 and 8.
+  - r3: re-run the recording-adapter probe (`requestTransaction`, late await), the alias lint probe and the rule-11/15 probes.
 
 PR #12 (TASK-012, SPK-08) r1 at 2e0aa32 was CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0012-TASK-012-code-review.md`.
 - M1: "`migrate dev` vs raw-SQL partial indexes" was routed to TASK-012 only by batch-3 rulings :43 and is orphaned. Answer it or re-route it with an owner.

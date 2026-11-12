@@ -240,3 +240,142 @@ Constraints: no commands in the TASK-006 worktree; no `npm ci`, builds, Docker o
 - The fix comment maps every finding to the exact proof, including the reviewer's own scenario replayed at the same interval fractions.
 - Real-tool proofs with positive controls (npm `node-options`), and integration tests that assert the precondition before the claim.
 - TLS is decided in one place from allow-listed selectors, and the driver never sees the selectors. That pattern should be reused for every future driver URL.
+
+## Round 3 (head 6331aeb)
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Fix cycle 2 closes R2-B1. The media-type grammar is now linear (probe: 150 kB adversarial headers in < 5 ms,
+         uncapped), the 256-character cap is checked before any regex, and the grammar accepts exactly the same set
+         as round 2 (0 differences over 2.3 M headers). R2-m1, R2-m2 and R2-n1 are closed. One MINOR remains: config and
+         runtime still disagree on DATABASE_URL query *values* (exit 1 instead of 78). It is fail-closed, so it does not block.
+```
+
+| Field | Value |
+|---|---|
+| Delta | `05855b1..6331aeb` (1 commit, 13 files, +373/−96); `main` not merged yet (D-ORCH-014) |
+| Inputs | fix comment #issuecomment-6833101331; D-TASK006-03; round 2 above |
+| PR head | `6331aeb23940d6fd759c24e238eea9690ef3d11e`, confirmed on `origin` and in `gh pr view 9` |
+| Hosted CI | `statusCheckRollup` empty on `6331aeb` |
+| Reviewer | code-reviewer, 2026-11-13 |
+
+### R3.1 Verification performed by the reviewer
+
+I reviewed by SHA only and ran no commands in the TASK-006 worktree. A merge-main pass was running there and its `node_modules` was mid-install (259 entries).
+
+Setup:
+- I extracted a `git archive 6331aeb` copy into the scratchpad.
+- Its `node_modules` was junctioned to the **main** checkout's `node_modules`.
+- I added `apps/node_modules/@platform/*` and `packages/node_modules/@platform/*` junctions pointing at the copy's own packages. Without them, `@platform/config` would have resolved to main, which lacks `RUNTIME_DATABASE_URL_PARAMS`.
+
+Clean-up: every junction was removed before the copy was deleted. Main's `node_modules` is unchanged (740), there is no stray link at `C:\`, `git status` on main is clean, and no stray node processes remain.
+
+| Check | Result |
+|---|---|
+| unit `platform/http/json-body.test` (new) | **33 passed** |
+| unit `platform/runtime/services.test` | **7 passed** |
+| unit `platform/db/client.test` | **50 passed** |
+| api `platform/errors/problem-handler.api.test` | **43 passed** |
+| unit `packages/config` `load-config.test` / `process-env.test` / `values.test` | **140 / 12 / 59 passed** |
+| `prettier --check` on all 13 changed files | clean |
+| **ReDoS probe: my round-2 shapes against the new grammar, uncapped** (`isWellFormedMediaType`) | `';  '`, `' ;'`, `';\t \t'`, `'; '`, `' ; '`, `';'`, `'\t;\t'`, `'; a=b ;'`, `';a="'`, `' a=b;'`, `'; a="\\"'`, `'="'`, each ×20 / 100 / 1 000 / 10 000 / 50 000 followed by `!`, `"`, `\`, `' !'`: **every run ≤ 4.94 ms** (the maximum was `'; a=b ;'`×50 000, about 350 kB). Round-2 killer `';  '`×20+`'!'` (77 B): **0.16 ms**, was 101.6 s. Unterminated quoted values (`\"`, `\\`, `;`, blank ×50 000): ≤ 0.44 ms. Blank runs up to 100 000 in each position: ≤ 0.52 ms, so no quadratic term |
+| `PARAMETER` regex, raw and uncapped | worst shape `'; a="x'`×20 000 → 4.4 ms; `';'+50 blanks`×20 000 → 3.9 ms. It only runs on headers that pass the cap and the grammar, so it is bounded twice |
+| **Equivalence with the round-2 grammar** | 300 000 random headers (bases `application/json`, ` application/json`, `a/b`, `a`, `''`, …; pieces `` \t;a="\!/b, `` plus `x"y`, `charset`, `utf-8`, `é`, `\r`): **0 differences** (28 274 accepted). **Exhaustive** over `a/b` + every string of length ≤ 8 on `` ;a="\ `` (2 015 539 strings): **0 differences** |
+| Cap | 256-character `…; charset=utf-8` + blanks → accepted; 257 → refused; the 5 000× adversary refused in 0.03 ms |
+| **Mutation: revert `MEDIA_TYPE` to the round-2 grammar** | `json-body.test` and `problem-handler.api.test` both **hang** and are killed at 45 s. The regression is caught, but as a stalled job rather than a failed assertion (R3-n2) |
+| Mutation: drop the length cap | unit fails 1 (the 257-character row); api still passes (expected: the grammar alone refuses) |
+| Mutation: swap the order back to `req.is` first | **all 76 tests pass**: the order is not pinned by any test (R3-n1) |
+| **R2-m1 mutation, `services.test`** | (a) add `apps/api/src/platform/storage/s3-object-storage.ts` naming `@aws-sdk/client-s3` while `pendingCheck('object_storage')` is still wired → **1 failed**; (b) then replace the stub with a real check object → **7 passed**; (c) add `export const audit = 1` to `packages/audit/src/index.ts` while the audit stubs are wired → **1 failed** |
+| **Config vs runtime acceptance probe** (`loadConfig` × `toPoolConfig`, 22 queries × local/staging) | Parameter **names** agree in every APP_ENV, including repeats, `%6D`-encoded duplicates, `SSLMODE`, a bare `sslmode` and `a+b`. Parameter **values** do not (R3-m1): local accepts `sslmode=bogus\|no-verify\|VERIFY-FULL`, `sslnegotiation=fast`, `sslnegotiation=direct&sslmode=disable`; local **and staging** accept `sslrootcert=system`, a relative path, an empty value, a directory or a missing file. `toPoolConfig` refuses all of them. Every runtime message is value-free |
+
+**Not re-run by me:** lint, typecheck, the full unit suite (1093), integration (59), build, `npm audit`, porcelain, coverage. For these I rely on the developer's gate table on `6331aeb` in the fix comment. Coverage is still owed on the merge-main head.
+
+### R3.2 Findings
+
+| ID | Sev | Location | Issue | Required fix |
+|---|---|---|---|---|
+| R3-m1 | MINOR | `packages/config/src/guards.ts:62-82` vs `apps/api/src/platform/db/client.ts:91-146`; `apps/api/src/main.ts:15`, `apps/worker/src/main.ts:12` | **Remainder of R2-m2 / r1 n6 (operability, fail-closed).** One allow-list now governs parameter names, but values are still decided only at runtime. PR9-SEC-16 adds a new **hardened-env** case: `sslmode=verify-full&sslrootcert=system` (or a relative path, or an empty value) passes configuration in staging and production, then `createRuntimeServices` throws `DatabaseConfigError` at module top level. The result is exit 1 with a stack instead of exit 78 naming `DATABASE_URL`. Local accepts unsupported `sslmode`/`sslnegotiation` values the same way. The messages are value-free (probe), so nothing leaks and nothing is weakened. | Choose one: (a) export a value predicate from `@platform/config` and use it in both places. It should check `sslmode` ∈ {disable, allow, prefer, require, verify-ca, verify-full}, `sslnegotiation` ∈ {postgres, direct}, `direct` ⇒ TLS, and `sslrootcert` absolute and ≠ `system`. Have `databaseUrlParamsGuard` emit `databaseUrl.queryParameter` from it. (b) Additionally or alternatively, catch `DatabaseConfigError` around `createRuntimeServices` in both `main.ts` files and exit 78 with the class name. File-system state (missing, directory, > 1 MiB) can only be checked at runtime, so (b) is needed for full n6 closure anyway. Fix at the merge-main pass or route to **TASK-014** with n5. |
+| R3-n1 | NIT | `apps/api/src/platform/http/json-body.ts:102-103` | The "bounded check before `req.is`" order (PR9-SEC-14 item 3) is not pinned: swapping it back passes all 76 tests. It is defence in depth only: the same suite shows `type-is`/`content-type` refuse the 5 000× header quickly. | Optional unit row: call `jsonBodyParser()` with a fake `req` whose `is` records calls, send an over-long header, and assert `is` was never called. |
+| R3-n2 | NIT | `apps/api/src/platform/http/json-body.test.ts:59-103`, `problem-handler.api.test.ts:422-438` | The adversarial rows run the regex synchronously, so Jest's per-test timeout cannot interrupt them. A grammar regression shows up as a hung job (killed at the CI step timeout) rather than a failed assertion naming the row. | Optional: evaluate the ×5000 rows through `vm.runInNewContext('re.test(h)', {re, h}, { timeout: 1000 })`, which interrupts a running V8 regex, and assert no timeout error. Or accept as-is and note it in the test header. |
+| R3-n3 | NIT | `apps/api/src/platform/db/client.test.ts:24-25` | The `DUMMY_CA` doc comment is now orphaned above `oversized()`, so two JSDoc blocks are stacked and the second describes the wrong declaration. | Move the PEM comment back above `DUMMY_CA` (line 32). |
+
+### R3.3 Rulings on the reviewer focus items
+
+1. **ReDoS probe, re-run: closed.**
+   - Every shape from round 2, and 9 more, runs in linear time without the cap: ≤ 5 ms at 150–350 kB. The 77-byte killer runs in 0.16 ms.
+   - Why it is now linear:
+     - blanks after a `;` can be consumed only by the parameter's own leading OWS (which must then be followed by a token) or by the next `;`'s leading OWS (or the trailing OWS), and the next non-blank character decides which;
+     - `QUOTED`'s alternatives `[^"\\]` and `\\.` are disjoint on their first character;
+     - `TOKEN` excludes blank, `;`, `=`, `"` and `/`, so every boundary is deterministic.
+   - The author's comment at `json-body.ts:30-39` states this correctly.
+2. **Cap at 256 before any regex: closed.**
+   - `isUtf8JsonContentType` checks `undefined`, then length, then the grammar, then `PARAMETER`.
+   - `length` counts UTF-16 units of a latin1 header string, so 1 unit = 1 byte.
+   - The boundary is tested at 256 (accepted) and 257 (refused), and the mutation is caught.
+3. **Order before `req.is`: closed** (code is correct; see R3-n1 for the missing pin).
+   - `body-parser`'s own `typeis` and `contentType.parse` run inside `parse(...)`, which is reached only after the bounded check.
+4. **Equivalence of the accepted set: closed.**
+   - My random and exhaustive differentials (2.3 M headers, 0 differences) agree with the author's 20 000-run fast-check differential.
+   - The reference grammar is kept in the test file and evaluated only on short strings. That is the right way to pin "same language".
+5. **`PARAMETER` regex safety: accepted.**
+   - Unanchored with the `g` flag, so each `;` is a start position. Each attempt is bounded by the blank run plus one token or quoted value.
+   - Measured ≤ 4.4 ms on 120 kB raw. In practice it is bounded by the 256 cap.
+   - The behaviour from round 2 (a quoted value hides an inner `; charset=…`) is unchanged and still tested (`foo="a; charset=utf-7"` accepted).
+6. **R2-m1 tripwire logic: closed.**
+   - The brand is a module-private `WeakSet` holding exactly the frozen objects `pendingCheck` returns. A spread copy is not branded, which the positive control proves.
+   - The assertions are now implications (`usesS3 ⇒ object_storage ∉ stubs`, `audit exports ⇒ no audit_* stub`), and all three mutation outcomes above are as intended.
+   - Residual by design: a hand-rolled, unbranded always-failing check would not trip the test. That is outside the tripwire's purpose and acceptable.
+7. **R2-m2 single allow-list, per-env guards, exit 78, no value leaks: closed** (residual R3-m1 on values).
+   - `RUNTIME_DATABASE_URL_PARAMS` is the only list. `client.ts` imports it through the package entry (the app → package edge allowed by ADR-0003), and the local `RUNTIME_URL_PARAMS` is gone.
+   - `databaseUrlParamsGuard` runs in every APP_ENV. It uses the same WHATWG `URLSearchParams` decoding as the runtime, which my name probe confirms, including `+` and `%`-encoded names.
+   - `transportGuard` keeps "exactly one `sslmode=verify-full`" and the host rules for hardened environments only.
+   - `uselibpqcompat`, `application_name` and `connect_timeout` are dropped from both sides, and the tests are rewritten to name the expected issue set.
+   - `process-env.test` proves exit 78, `DATABASE_URL: invalid: databaseUrl.queryParameter`, and that neither the secret nor the parameter name appears.
+   - The `GUARDS.length` 11 → 12 update matches.
+   - The fix comment records compose.env URLs carrying only `sslmode`. I did not diff compose.env (its diff is outside this delta).
+8. **R2-n1 fallback: closed.**
+   - `fallbackProblemBody` takes `options.typeBase ?? DEFAULT_PROBLEM_TYPE_BASE`, and its title now comes from `ERROR_CATALOGUE.INTERNAL_ERROR.title`. That also fixes a title mismatch I missed in round 2 ("Internal server error" vs "Internal error").
+   - The new api row compares `type`, `title`, `code` and the key set of the fallback against a regular 500 under a custom base.
+9. **PR9-SEC-16 `sslrootcert` checks: accepted.**
+   - Order: `system` refused, then absolute path required, then `statSync` must show a regular file of at most 1 MiB, then read.
+   - `DatabaseConfigError` is rethrown as-is, and fs errors are mapped to a path-free message. The tests assert that the path is not in the message.
+   - `statSync` follows symlinks, which is correct (the target is what gets read).
+   - Residuals, not new findings:
+     - a stat→read TOCTOU swap to a FIFO needs write access to the CA path and only affects start-up. It belongs with r1 n5 (open with `O_NONBLOCK`, `fstat` the fd, read from the fd) → TASK-014;
+     - the config/runtime value gap is R3-m1.
+
+### R3.4 Closure table
+
+| ID | Status at 6331aeb |
+|---|---|
+| **R2-B1 / PR9-SEC-14** | **Closed** (§R3.3 items 1–5; probe and mutation evidence in §R3.1). Security-analyst to confirm PR9-SEC-14 |
+| R2-m1 | **Closed** (mutation-proven) |
+| R2-m2 | **Closed** for names, environment scope, exit 78 and leak-freedom; the value-level remainder is R3-m1 |
+| R2-n1 | **Closed** |
+| R2-n2 | Routed → TASK-016 (unchanged) |
+| r1 n6 | Parameter-name part **closed**; value and filesystem part → R3-m1 |
+| r1 n5 | Open → TASK-014 (now also covers the `sslrootcert` stat→read TOCTOU) |
+| r1 M1, m1, m3, m4, n1, n3, n7 | Closed in round 2 (no regression in this delta: `client.test`, `services.test` and `problem-handler.api.test` re-run green) |
+| r1 m2, m5, n2, n4, n8, n9, n10 | Routed as recorded in R2.4 (unchanged) |
+| PR9-SEC-16 | **Accepted** (§R3.3 item 9) |
+| PR9-SEC-15 | Routed → TASK-007 / tools-deps follow-up (unchanged) |
+
+### R3.5 Security flags for security-analyst
+
+- PR9-SEC-14: please confirm closure. My evidence is the linear timings at ≤ 350 kB uncapped, the cap before any regex and before `type-is`, 0 differences from the round-2 language, and the round-2 grammar re-inserted by mutation hangs both suites.
+- R3-m1 is not a security defect: both sides fail closed and the messages are value-free. It is listed so that the `sslrootcert=system` refusal (PR9-SEC-16) is known to surface at runtime, not at configuration.
+- Repeated from R2.5 (optional, TASK-007 owner): a repo-wide super-linear-regex lint rule.
+
+### R3.6 Merge conditions
+
+1. **Merge-main pass** (running) with full gates: lint incl. Semgrep, format, typecheck, unit, api, integration, build, porcelain, **coverage**. Then a round-4 code review **of the merge delta only**, by SHA, with the pure-union proof from `project-review-conventions`.
+2. Hosted lane A green on the merge head (`statusCheckRollup` is empty on `6331aeb`), or the D-ORCH-004 local-gate record.
+3. Security-analyst confirms PR9-SEC-14 closed and no Critical/High open.
+4. R3-m1: fix at the merge-main pass (option (b) is a small change to both `main.ts` files), or route it explicitly to TASK-014 together with n5. NITs R3-n1..n3 are optional.
+5. Unchanged: PR #11 reconciliation per D-ORCH-014 (a)–(f) if PR #11 merges second; squash-merge.
+
+### R3.7 Worth keeping
+
+- The reference-grammar differential in `json-body.test.ts` pins "same language" at the same time as "linear time". Use this pattern for every future regex fix.
+- The tripwires are branded by object identity (a `WeakSet`), not by name, and assert an implication. This pattern makes "stub must not outlive its replacement" checks non-vacuous.
+- The config issues name the rule (`databaseUrl.queryParameter`) and never the offending parameter, and a process-level test proves it.
