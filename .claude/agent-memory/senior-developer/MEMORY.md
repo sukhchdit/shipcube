@@ -5,3 +5,4 @@
 - [Merge-main pass](feedback_merge_main_pass.md) — read new main reviews/D-ORCH first; ts-eslint rule conflicts; lock delta proof; reaped gates
 - [Lane A PR hygiene](feedback_lane_a_pr_hygiene.md) — gitleaks scans whole PR range (literal test pw = permanent); merge-main voids security record
 - [Batch 0.4/0.7 lessons](feedback_batch_04_07_lessons.md) — lead-written contract + split specialists; reset-after-fetch, commitlint case, jest realm pitfalls
+- [Lane A merge pitfalls](feedback_lane_a_merge_pitfalls.md) — gitleaks on merge first-parent diff, base-ref fixtures vs new rules, PR title length
