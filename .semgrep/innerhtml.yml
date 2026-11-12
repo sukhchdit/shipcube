@@ -1,0 +1,48 @@
+# HTML-injection sinks only in the sanitising component (REQ-SEC-016, PR2-SEC-04, DOM XSS CWE-79). Semgrep half of the
+# control: the same sink list as tools/eslint-rules/no-innerhtml.mjs plus the PR2-SEC-04 extensions (srcdoc/srcDoc,
+# createContextualFragment, DOMParser#parseFromString, setHTMLUnsafe/parseHTMLUnsafe, Object.assign with innerHTML,
+# window.document.write). Same scope as the ESLint rule. Runs with --disable-nosem from the base ref.
+# Fixtures: tests/fixtures/semgrep/innerhtml.tsx (semgrep --test).
+rules:
+  - id: platform.innerhtml.html-sink
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [REQ-SEC-016 / PR2-SEC-04] HTML-injection sink outside the sanitising component (packages/ui/src/sanitised-html);
+      React encodes output by default.
+    paths:
+      include:
+        - /apps/*/src/
+        - /apps/*/app/
+        - /packages/*/src/
+        - /prisma/seed/
+      exclude:
+        - /packages/ui/src/sanitised-html/
+        - '*.test.ts'
+        - '*.test.tsx'
+        - test/
+        - tests/
+        - __tests__/
+    pattern-either:
+      - pattern: $E.innerHTML = $V
+      - pattern: $E.outerHTML = $V
+      - pattern: $E.innerHTML += $V
+      - pattern: $E.outerHTML += $V
+      - pattern: $E["innerHTML"] = $V
+      - pattern: $E["outerHTML"] = $V
+      - pattern: $E.srcdoc = $V
+      - pattern: $E.insertAdjacentHTML(...)
+      - pattern: $E.setHTMLUnsafe(...)
+      - pattern: $D.parseHTMLUnsafe(...)
+      - pattern: $R.createContextualFragment(...)
+      - pattern: $P.parseFromString(...)
+      - pattern: document.write(...)
+      - pattern: document.writeln(...)
+      - pattern: $W.document.write(...)
+      - pattern: $W.document.writeln(...)
+      - pattern: 'Object.assign($E, {..., innerHTML: $V, ...})'
+      - pattern: 'Object.assign($E, {..., outerHTML: $V, ...})'
+      - pattern: '{..., dangerouslySetInnerHTML: $V, ...}'
+      - pattern: <$EL dangerouslySetInnerHTML={$V} />
+      - pattern: <$EL srcDoc={$V} />
+      - pattern: <$EL srcDoc="..." />

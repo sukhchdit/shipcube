@@ -12,3 +12,6 @@ package-lock.json
 docs/
 .claude/
 *.md
+
+# Suppression-policy fixtures keep their exact quoting (the lexer under test distinguishes quote styles)
+tests/fixtures/lint/suppressions/
