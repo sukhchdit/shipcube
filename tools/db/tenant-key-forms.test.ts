@@ -24,6 +24,18 @@ const WRITES: readonly string[] = [
   "EXECUTE 'SET LOCAL ' || k || ' = ' || quote_literal(p)",
   'RESET ALL',
   'UPDATE pg_catalog.pg_settings SET setting = p WHERE name = k',
+  // PR11-SEC-14 (a): Unicode escapes spell any form without its text (identifier and string, any case).
+  String.raw`SET LOCAL U&"\0061pp".org_id = 1`,
+  String.raw`PERFORM U&"\0073et_config"(U&'\0061pp.org_id', p, true)`,
+  String.raw`EXECUTE U&'SET LOCAL \0061pp.org_id = ''x'''`,
+  String.raw`SHOW u&"\0061pp".actor_scope`,
+];
+
+/** PR11-SEC-14 (a): without the Unicode-escape form these match nothing, so it must be the only label. */
+const UNICODE_ONLY: readonly string[] = [
+  String.raw`SET LOCAL U&"\0061pp".org_id = 1`,
+  String.raw`PERFORM U&"\0073et_config"(U&'\0061pp.org_id', p, true)`,
+  String.raw`EXECUTE U&'SET LOCAL \0061pp.org_id = ''x'''`,
 ];
 
 const READS: readonly string[] = [
@@ -45,6 +57,8 @@ const CLEAN: readonly string[] = [
   'SELECT platform.app_org_id(), platform.app_actor_id(), platform.app_guest_token_hash(), platform.app_is_operator()',
   'ALTER TABLE t SET (fillfactor = 90)',
   "RAISE EXCEPTION 'discard nothing'",
+  // `menu&'1'` is the `&` operator after an identifier, not a U& escape.
+  "SELECT menu&'1'::int, flags & '3'::int FROM t",
 ];
 
 describe('tenant-context SQL forms shared by rule 16 and the C-series scan (PR11-SEC-02)', () => {
@@ -59,6 +73,10 @@ describe('tenant-context SQL forms shared by rule 16 and the C-series scan (PR11
   it.each(CLEAN)('clean: %s', (sql) => {
     expect(contextWrites(sql)).toEqual([]);
     expect(contextReads(sql)).toEqual([]);
+  });
+
+  it.each(UNICODE_ONLY)('Unicode escape is a write form on its own (PR11-SEC-14 a): %s', (sql) => {
+    expect(contextWrites(sql)).toEqual(['Unicode-escape string or identifier']);
   });
 
   it('DISCARD forms reset the session; the word in prose does not match', () => {

@@ -10,6 +10,18 @@
  *
  * The patterns are regular-expression literals and the labels avoid the banned text, so this module needs no
  * `platform/tenant-context-sql` exemption.
+ *
+ * Stated limits (PR11-SEC-14, PR11-SEC-15, PR #11 review R2-n2; data-model §8.3 "Limits"). The list is lexical: it
+ * names forms, it does not evaluate SQL. It cannot see
+ *  - a setter whose function name and key are both built in `format()` or by concatenation;
+ *  - keyword-split dynamic SQL (`'SET' || ' LOCAL ' || 'app.' || 'org_id'`, `format('%s %s = %L', 'SET LOCAL', …)`);
+ *  - `EXECUTE` of a computed statement (a statement read from a table, `chr()`-built text, a variable);
+ *  - a read through `pg_show_all_settings()`.
+ * `U&` Unicode escapes are refused outright (write form below), so escaped identifiers and strings cannot hide a key.
+ * The outcome controls for the rest are the C11 converse (platform_definer owns only allow-listed objects) and the
+ * withTenantTx leak check at checkout (ADR-0005 am. 10 item 16). Follow-ups: a reviewed dynamic-SQL allow-list for
+ * `EXECUTE` in function bodies (C-series and rule 16) is TASK-024; rule 10 over DO bodies whose `EXECUTE` operand is
+ * not a literal is TASK-021.
  */
 
 /** A labelled pattern: the label names the form in a finding. */
@@ -23,7 +35,10 @@ export type ContextForm = readonly [label: string, pattern: RegExp];
  *  - `SET [SESSION|LOCAL] app.…` / `RESET app.…` in every quoting and spacing;
  *  - a dynamic `SET`/`RESET` whose name is built at run time (`format('SET LOCAL %I …')`, `'SET LOCAL ' || k`);
  *  - `RESET ALL`;
- *  - `pg_settings` (an `UPDATE pg_catalog.pg_settings` is the setter in another form).
+ *  - `pg_settings` (an `UPDATE pg_catalog.pg_settings` is the setter in another form);
+ *  - any `U&'…'` string or `U&"…"` identifier (PR11-SEC-14 a): `U&"\0061pp".org_id` and `U&'SET LOCAL \0061pp.…'`
+ *    spell every form above without its text. No migration needs Unicode escapes, so the escape itself is refused.
+ *    (`u &'…'`, with a space, is the `&` operator, not an escape, and is not matched.)
  */
 export const CONTEXT_WRITE_FORMS: readonly ContextForm[] = [
   ['context setter with an app. or computed key', /\bset_config"?\s*\(\s*(?!'(?!app\.)[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?'\s*,)/i],
@@ -31,6 +46,7 @@ export const CONTEXT_WRITE_FORMS: readonly ContextForm[] = [
   ['dynamic SET/RESET (name built at run time)', /\b(?:set|reset)\s+(?:(?:session|local)\s+)?(?:%|')/i],
   ['RESET ALL', /\breset\s+all\b/i],
   ['pg_settings', /\bpg_settings\b/i],
+  ['Unicode-escape string or identifier', /\bu&["']/i],
 ];
 
 /**

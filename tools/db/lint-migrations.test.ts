@@ -15,6 +15,7 @@ import {
   lintBootstrap,
   lintMigrations,
   lintRepository,
+  lockTimeoutMs,
   main,
   parseHeader,
   readReviewers,
@@ -279,6 +280,31 @@ describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
     expect(byMigration(findings)).toEqual([['20261112000000_set_local', '11']]);
     expect(findings[0]?.message).toContain('files are not atomic; SET LOCAL outside a transaction block has no effect');
   });
+
+  it('rule 11 (D-ARCH-071): a file that leaves lock_timeout above the 3s migrator default without RESET fails; RESET, DEFAULT and values within 3s pass', () => {
+    const findings = lintCase('lock-timeout-raised');
+    expect(byMigration(findings)).toEqual([
+      ['20261112000000_raised_no_reset', '11'],
+      ['20261112000200_minutes_no_reset', '11'],
+      ['20261112000300_zero_no_reset', '11'],
+    ]);
+    expect(findings[0]?.message).toContain('end it with "RESET lock_timeout"');
+  });
+
+  it.each([
+    ["'2s'", 2_000],
+    ['3000', 3_000],
+    ["'10 s'", 10_000],
+    ["'1min'", 60_000],
+    ["'1.5h'", 5_400_000],
+    ["'500us'", 0.5],
+    ['default', undefined],
+    ['0', Number.POSITIVE_INFINITY],
+    ["'soon'", Number.POSITIVE_INFINITY],
+    ["'10 fortnights'", Number.POSITIVE_INFINITY],
+  ])('rule 11 parses lock_timeout %s as %s ms (unparsed and 0 fail closed)', (value, expected) => {
+    expect(lockTimeoutMs(value)).toBe(expected);
+  });
 });
 
 describe('RLS, triggers, grants and privilege-bound statements (rules 7, 8, 9, 14; SEC-TC-33)', () => {
@@ -414,6 +440,7 @@ describe('definer ownership order (rule 15; ADR-0005 am. 10 item 9)', () => {
     // The CREATE outside the SET ROLE block fails too since PR11-SEC-07 (no "OWNER TO later" alternative).
     expect(lintCase('definer-grant-after-owner-to').map((finding) => finding.message.slice(0, 40))).toEqual([
       'SECURITY DEFINER function created outsid',
+      'OWNER TO platform_definer: create the fu',
       'REVOKE after OWNER TO platform_definer f',
       'GRANT after OWNER TO platform_definer fa',
     ]);
@@ -427,8 +454,18 @@ describe('definer ownership order (rule 15; ADR-0005 am. 10 item 9)', () => {
     expect(lintCase('definer-set-role-block')).toEqual([]);
   });
 
+  it('rule 15 (D-ARCH-071 (2) b): a bare ALTER FUNCTION / ROUTINE … OWNER TO platform_definer fails, quoted role included', () => {
+    const findings = lintCase('definer-owner-to');
+    expect(byMigration(findings)).toEqual([
+      ['20261112000000_function_owner_to', '15'],
+      ['20261112000100_routine_owner_to_quoted', '15'],
+    ]);
+    expect(findings.every((finding) => finding.message.startsWith('OWNER TO platform_definer'))).toBe(true);
+  });
+
   it('rule 15: "grants before OWNER TO" is no longer accepted; the SET ROLE block is the only form (PR11-SEC-07)', () => {
-    expect(rules(lintCase('definer-grants-before-owner-to'))).toEqual(['15']);
+    // The CREATE outside the block and the bare OWNER TO (D-ARCH-071 (2) b) both fail.
+    expect(rules(lintCase('definer-grants-before-owner-to'))).toEqual(['15', '15']);
   });
 
   it('rule 15: a file ending inside SET ROLE fails; SET LOCAL ROLE does not open the definer block (PR11-SEC-07)', () => {
@@ -470,6 +507,16 @@ describe('tenant context in SQL (rule 16; ADR-0005 am. 10 item 1)', () => {
       ['20261112001000_read_dynamic_key', '16'],
       ['20261112001100_show_format', '16'],
     ]);
+  });
+
+  it('rule 16 refuses a U& Unicode escape (identifier, setter name, dynamic string) in a function body (PR11-SEC-14 a)', () => {
+    const findings = lintCase('context-unicode');
+    expect(byMigration(findings)).toEqual([
+      ['20261112000000_unicode_ident', '16'],
+      ['20261112000100_unicode_setter', '16'],
+      ['20261112000200_unicode_string', '16'],
+    ]);
+    for (const finding of findings) expect(finding.message).toContain('Unicode-escape string or identifier');
   });
 });
 

@@ -4,6 +4,7 @@
  * rows the suite selects from pg_policy / pg_proc / pg_constraint and return one finding per violation, so a failing
  * assertion names the object.
  */
+import { sqlText } from '../../../tools/db/sql-text.js';
 import { CONTEXT_DISCARD, contextReads, contextWrites } from '../../../tools/db/tenant-key-forms.js';
 
 /** A row of the C3 policy query (`pg_get_expr` output under search_path pg_catalog, pg_temp). */
@@ -82,17 +83,32 @@ export const CONTEXT_HELPERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The scan text of a function body, built by the SAME function as linter rule 16 (`sqlText(…, true)` in
+ * tools/db/sql-text.ts; PR #11 review R2-n1): every comment becomes one space, so `SET app/**\/.org_id` and
+ * `set_config/**\/(…)` read as the forms they are; string literals are KEPT (dynamic SQL counts); nested
+ * dollar-quoted bodies are expanded recursively. A body that does not lex is scanned verbatim (fail closed).
+ */
+export function bodyText(source: string): string {
+  try {
+    return sqlText(source, true);
+  } catch {
+    return source;
+  }
+}
+
+/**
  * C-series prosrc scan: by form, in every non-system namespace (ADR-0005 am. 10 item 1, D-ARCH-065), with the one form
  * list shared with migration-linter rule 16 (tools/db/tenant-key-forms.ts; PR11-SEC-02, review m1). Write forms and
  * DISCARD apply to every body, the §4.2 helpers included; read forms to every function except the helpers, matched by
- * regprocedure. The whole body is scanned, string literals included, so dynamic SQL counts.
+ * regprocedure. The comment-stripped body is scanned (bodyText), string literals included, so dynamic SQL counts.
  */
 export function scanFunctionBodies(rows: readonly FunctionRow[]): string[] {
   const findings: string[] = [];
   for (const row of rows) {
-    const forms = contextWrites(row.prosrc);
-    if (CONTEXT_DISCARD.test(row.prosrc)) forms.push('DISCARD');
-    if (!CONTEXT_HELPERS.has(row.fn)) forms.push(...contextReads(row.prosrc));
+    const text = bodyText(row.prosrc);
+    const forms = contextWrites(text);
+    if (CONTEXT_DISCARD.test(text)) forms.push('DISCARD');
+    if (!CONTEXT_HELPERS.has(row.fn)) forms.push(...contextReads(text));
     findings.push(...forms.map((form) => `${row.fn}: ${form}`));
   }
   return findings;
