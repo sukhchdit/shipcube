@@ -17,19 +17,19 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-232 | Pickup date and window rules | M1 | Must | M | EPIC-06, EPIC-17 | REQ-PICK-002, REQ-PICK-003, REQ-PICK-004 |
-| US-233 | Pickup record and instructions | M1 | Must | S | US-232 | REQ-PICK-001, REQ-PICK-012 |
-| US-234 | Step 3 pickup date and window picker | M1 | Must | M | US-232, US-233, EPIC-09 | REQ-PICK-001, REQ-PICK-002, REQ-PICK-004 |
-| US-235 | Schedule pickup in the booking saga | M1 | Must | M | US-233, EPIC-10, EPIC-11 | REQ-PICK-005, REQ-PICK-006 |
-| US-236 | Schedule a pickup after the booking | M1 | Must | S | US-235 | REQ-PICK-007 |
-| US-237 | Cancel pickup when a shipment is cancelled | M1 | Must | S | US-235, EPIC-09 | REQ-PICK-008 |
-| US-238 | Reschedule an active pickup | M1 | Should | S | US-236 | REQ-PICK-009 |
-| US-239 | Drop-off service points and drop-off confirmation | M1 | Must | M | US-233, EPIC-09 | REQ-PICK-010, REQ-PICK-013 |
-| US-240 | Service point map and combined pickups | M1 | Could | S | US-239, US-235 | REQ-PICK-011, REQ-PICK-014 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-232 | Pickup date and window rules | M1 | Must | M | EPIC-06, EPIC-17 | REQ-PICK-002, REQ-PICK-003, REQ-PICK-004 | DC |
+| US-233 | Pickup record and instructions | M1 | Must | S | US-232 | REQ-PICK-001, REQ-PICK-012 | DC |
+| US-234 | Step 3 pickup date and window picker | M1 | Must | M | US-232, US-233, EPIC-09 | REQ-PICK-001, REQ-PICK-002, REQ-PICK-004 | DC |
+| US-235 | Schedule pickup in the booking saga | M1 | Must | M | US-233, EPIC-10, EPIC-11 | REQ-PICK-005, REQ-PICK-006 | DC |
+| US-236 | Schedule a pickup after the booking | M1 | Must | S | US-235 | REQ-PICK-007 |  |
+| US-237 | Cancel pickup when a shipment is cancelled | M1 | Must | S | US-235, EPIC-09 | REQ-PICK-008 |  |
+| US-238 | Reschedule an active pickup | M1 | Should | S | US-236 | REQ-PICK-009 |  |
+| US-239 | Drop-off service points and drop-off confirmation | M1 | Should | M | US-233, EPIC-09 | REQ-PICK-010, REQ-PICK-013 |  |
+| US-240 | Service point map and combined pickups | M1 | Could | S | US-239, US-235 | REQ-PICK-011, REQ-PICK-014 |  |
 
-Counts: 9 stories. Must 7 (US-232..US-237, US-239), Should 1 (US-238), Could 1 (US-240).
+Counts: 9 stories. Must 6 (US-232..US-237), Should 2 (US-238, US-239), Could 1 (US-240). US-239 retagged Must → Should with REQ-PICK-013 (D-036).
 
 ## Stories
 
@@ -305,10 +305,10 @@ Feature: Reschedule pickup
 ```
 
 ### US-239 — Drop-off service points and drop-off confirmation
-- **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-233, EPIC-09
+- **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-233, EPIC-09
 - **Linked REQs:** REQ-PICK-010, REQ-PICK-013
 - **As a** customer **I want** to find a nearby drop-off point and know what to bring **so that** I can hand over my parcel without waiting for a courier.
-- **Notes:** The list (REQ-PICK-010) is Should; the confirmation behaviour (REQ-PICK-013) is Must, so the story is Must. Event mapping DR-B18.
+- **Notes:** Both linked REQs are Should (D-014 drop-off list; REQ-PICK-013 retagged Must → Should by D-036 because it is unreachable without the list and the PRD §6.2 demo uses pickup), so the story is Should. Event mapping DR-B18.
 
 #### Acceptance criteria
 ```gherkin

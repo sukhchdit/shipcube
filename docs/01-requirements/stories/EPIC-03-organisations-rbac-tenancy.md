@@ -8,33 +8,33 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-061 | Organisation types and the single operator organisation | M0 | Must | S | EPIC-01 | REQ-ORG-001 |
-| US-062 | Personal organisation and memberships with type-checked roles | M0 | Must | M | US-061, US-066, EPIC-02 | REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
-| US-063 | Active organisation context and `GET /api/v1/me` | M0 | Must | M | US-062, EPIC-02 | REQ-ORG-005 |
-| US-064 | Server-controlled standard columns, UTC time and the on-behalf seam | M0 | Must | M | EPIC-01, EPIC-16 | REQ-RLS-009, REQ-RLS-012, REQ-ORG-007 |
-| US-065 | Typed permission catalogue | M0 | Must | S | EPIC-01 | REQ-RBAC-001, REQ-RBAC-014 |
-| US-066 | Seeded roles, role-permission matrix document and privilege-escalation guard test | M0 | Must | M | US-065, EPIC-17 | REQ-RBAC-002, REQ-RBAC-003, REQ-RBAC-004 |
-| US-067 | Mandatory route metadata with build-time route test | M0 | Must | M | US-065, EPIC-04, EPIC-16 | REQ-RBAC-005 |
-| US-068 | Request pipeline order, 401/403 outcomes and live permission resolution | M0 | Must | M | US-063, US-066, US-067 | REQ-RBAC-006, REQ-RBAC-008 |
-| US-069 | Permission-denied audit and cross-tenant 404 | M0 | Must | S | US-068, US-075, EPIC-04 | REQ-RBAC-007 |
-| US-070 | Permission-aware UI helper and frontend route guard | M0 | Must | M | US-063, EPIC-05 | REQ-RBAC-009, REQ-RBAC-010 |
-| US-071 | RBAC matrix test generator | M0 | Must | M | US-066, US-067, US-077 | REQ-RBAC-011 |
-| US-072 | Download and export routes with their own permission | M1 | Must | S | US-068, EPIC-04 | REQ-RBAC-012 |
-| US-073 | Role definitions change only via versioned migration | M0 | Should | S | US-066, EPIC-04 | REQ-RBAC-013 |
-| US-074 | RLS enabled and forced on every tenant-owned table, separate DB roles | M0 | Must | M | EPIC-01 | REQ-RLS-001, REQ-RLS-002, REQ-RLS-005 |
-| US-075 | Per-transaction tenant context with SET LOCAL and fail-closed default | M0 | Must | S | US-074 | REQ-RLS-003, REQ-RLS-004 |
-| US-076 | Operator cross-tenant scope | M0 | Must | S | US-075, US-066 | REQ-RLS-006 |
-| US-077 | Generated cross-tenant isolation tests | M0 | Must | M | US-074, US-075, US-067 | REQ-RLS-007 |
-| US-078 | Tenant context in worker jobs | M0 | Must | S | US-075, EPIC-01 | REQ-RLS-008 |
-| US-079 | Soft delete and optimistic locking | M0 | Must | M | US-064, EPIC-16 | REQ-RLS-010, REQ-RLS-011 |
-| US-080 | Guest-capable tables and atomic claim | M0 | Must | S | US-074 | REQ-RLS-013 |
-| US-081 | Switch active organisation | M1 | Should | S | US-063 | REQ-ORG-006 |
-| US-082 | Organisation profile and creating a business organisation | M1 | Should | M | US-062, US-079 | REQ-ORG-008, REQ-ORG-009 |
-| US-083 | Invite members into a business organisation | M1 | Should | M | US-062, EPIC-15 | REQ-ORG-010 |
-| US-084 | Accept an invitation | M1 | Should | S | US-083, EPIC-02 | REQ-ORG-011 |
-| US-085 | Manage members, last-Owner and individual-organisation safeguards | M1 | Should | M | US-062, US-068 | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-061 | Organisation types and the single operator organisation | M0 | Must | S | EPIC-01 | REQ-ORG-001 | DC |
+| US-062 | Personal organisation and memberships with type-checked roles | M0 | Must | M | US-061, US-066, EPIC-02 | REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 | DC |
+| US-063 | Active organisation context and `GET /api/v1/me` | M0 | Must | M | US-062, EPIC-02 | REQ-ORG-005 | DC |
+| US-064 | Server-controlled standard columns, UTC time and the on-behalf seam | M0 | Must | M | EPIC-01, EPIC-16 | REQ-RLS-009, REQ-RLS-012, REQ-ORG-007 |  |
+| US-065 | Typed permission catalogue | M0 | Must | S | EPIC-01 | REQ-RBAC-001, REQ-RBAC-014 | DC |
+| US-066 | Seeded roles, role-permission matrix document and privilege-escalation guard test | M0 | Must | M | US-065, EPIC-17 | REQ-RBAC-002, REQ-RBAC-003, REQ-RBAC-004 | DC |
+| US-067 | Mandatory route metadata with build-time route test | M0 | Must | M | US-065, EPIC-04, EPIC-16 | REQ-RBAC-005 | DC |
+| US-068 | Request pipeline order, 401/403 outcomes and live permission resolution | M0 | Must | M | US-063, US-066, US-067 | REQ-RBAC-006, REQ-RBAC-008 | DC |
+| US-069 | Permission-denied audit and cross-tenant 404 | M0 | Must | S | US-068, US-075, EPIC-04 | REQ-RBAC-007 |  |
+| US-070 | Permission-aware UI helper and frontend route guard | M0 | Must | M | US-063, EPIC-05 | REQ-RBAC-009, REQ-RBAC-010 |  |
+| US-071 | RBAC matrix test generator | M0 | Must | M | US-066, US-067, US-077 | REQ-RBAC-011 | DC |
+| US-072 | Download and export routes with their own permission | M1 | Must | S | US-068, EPIC-04 | REQ-RBAC-012 |  |
+| US-073 | Role definitions change only via versioned migration | M0 | Should | S | US-066, EPIC-04 | REQ-RBAC-013 |  |
+| US-074 | RLS enabled and forced on every tenant-owned table, separate DB roles | M0 | Must | M | EPIC-01 | REQ-RLS-001, REQ-RLS-002, REQ-RLS-005 | DC |
+| US-075 | Per-transaction tenant context with SET LOCAL and fail-closed default | M0 | Must | S | US-074 | REQ-RLS-003, REQ-RLS-004 | DC |
+| US-076 | Operator cross-tenant scope | M0 | Must | S | US-075, US-066 | REQ-RLS-006 | DC |
+| US-077 | Generated cross-tenant isolation tests | M0 | Must | M | US-074, US-075, US-067 | REQ-RLS-007 |  |
+| US-078 | Tenant context in worker jobs | M0 | Must | S | US-075, EPIC-01 | REQ-RLS-008 | DC |
+| US-079 | Soft delete and optimistic locking | M0 | Must | M | US-064, EPIC-16 | REQ-RLS-010, REQ-RLS-011 |  |
+| US-080 | Guest-capable tables and atomic claim | M0 | Must | S | US-074 | REQ-RLS-013 | DC |
+| US-081 | Switch active organisation | M1 | Should | S | US-063 | REQ-ORG-006 |  |
+| US-082 | Organisation profile and creating a business organisation | M1 | Should | M | US-062, US-079 | REQ-ORG-008, REQ-ORG-009 |  |
+| US-083 | Invite members into a business organisation | M1 | Should | M | US-062, EPIC-15 | REQ-ORG-010 |  |
+| US-084 | Accept an invitation | M1 | Should | S | US-083, EPIC-02 | REQ-ORG-011 |  |
+| US-085 | Manage members, last-Owner and individual-organisation safeguards | M1 | Should | M | US-062, US-068 | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014 |  |
 
 ## Stories
 

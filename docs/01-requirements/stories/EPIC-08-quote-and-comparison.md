@@ -11,25 +11,25 @@ Conventions. Permissions: `quote:create` (anonymous principal and all roles), `q
 UI standard (referred to below as "the UI standard"). Every UI story passes these checks, expressed as a scenario outline in each story: locales en, es, fr (no hard-coded strings, no layout overflow at 360 px with the longest locale); viewports 360 px (single column, touch targets at least 44 px) and 1280 px; six screen states where applicable (loading/skeleton, empty, error, partial results with a carrier-unavailable notice, permission-denied, offline); full keyboard operability with visible focus; axe-core reports zero violations at WCAG 2.2 AA.
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-154 | Quote entity with 24 h expiry | M0 | Must | M | EPIC-01, EPIC-04, US-140 | REQ-QUOTE-001 |
-| US-155 | Guest quoting with access token and rate limits | M0 | Must | M | US-154, EPIC-16 | REQ-QUOTE-002 |
-| US-156 | Quote input validation and package limits | M0 | Must | M | US-154, EPIC-17, EPIC-06 | REQ-QUOTE-003, REQ-QUOTE-004 |
-| US-157 | Quote widget units toggle and live billable weight | M1 | Must | M | US-139, US-158, EPIC-05 | REQ-QUOTE-005, REQ-QUOTE-006 |
-| US-158 | Pre-rendered home page with quote widget | M1 | Must | M | US-156, EPIC-05 | REQ-QUOTE-023 |
-| US-159 | Result option card and price breakdown | M1 | Must | M | US-135, US-149, EPIC-05 | REQ-QUOTE-007, REQ-QUOTE-012 |
-| US-160 | Progressive results with skeletons and partial notice | M1 | Must | M | US-135, US-158 | REQ-QUOTE-008 |
-| US-161 | Sort by cheapest, fastest and best value with badges | M1 | Must | M | US-160 | REQ-QUOTE-009, REQ-QUOTE-011 |
-| US-162 | Filter results with URL state | M1 | Should | S | US-160 | REQ-QUOTE-010 |
-| US-163 | Compare up to three options | M1 | Should | S | US-159, US-161 | REQ-QUOTE-013 |
-| US-164 | Save a quote and reopen it | M1 | Should | M | US-166, EPIC-03 | REQ-QUOTE-014 |
-| US-165 | Share a quote by link | M1 | Should | M | US-154, EPIC-03 | REQ-QUOTE-015 |
-| US-166 | Claim a quote when booking starts | M1 | Must | S | US-154, EPIC-03, EPIC-09 | REQ-QUOTE-016 |
-| US-167 | Expired quote and one-action re-quote | M1 | Must | M | US-166, US-160, EPIC-09 | REQ-QUOTE-017 |
-| US-168 | Rate-relevant change creates a new quote | M1 | Must | S | US-154, EPIC-09 | REQ-QUOTE-018 |
-| US-169 | Display currency switcher and indicative converter | M1 | Should | M | US-148, EPIC-14 | REQ-QUOTE-019, REQ-QUOTE-022 |
-| US-170 | Public prohibited-items lookup and volumetric calculator | M1 | Should | M | EPIC-10, EPIC-17, US-139 | REQ-QUOTE-020, REQ-QUOTE-021 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-154 | Quote entity with 24 h expiry | M0 | Must | M | EPIC-01, EPIC-04, US-140 | REQ-QUOTE-001 | DC |
+| US-155 | Guest quoting with access token and rate limits | M0 | Must | M | US-154, EPIC-16 | REQ-QUOTE-002 | DC |
+| US-156 | Quote input validation and package limits | M0 | Must | M | US-154, EPIC-17, EPIC-06 | REQ-QUOTE-003, REQ-QUOTE-004 | DC |
+| US-157 | Quote widget units toggle and live billable weight | M1 | Must | M | US-139, US-158, EPIC-05 | REQ-QUOTE-005, REQ-QUOTE-006 |  |
+| US-158 | Pre-rendered home page with quote widget | M1 | Must | M | US-156, EPIC-05 | REQ-QUOTE-023 | DC |
+| US-159 | Result option card and price breakdown | M1 | Must | M | US-135, US-149, EPIC-05 | REQ-QUOTE-007, REQ-QUOTE-012 | DC |
+| US-160 | Progressive results with skeletons and partial notice | M1 | Must | M | US-135, US-158 | REQ-QUOTE-008 | DC |
+| US-161 | Sort by cheapest, fastest and best value with badges | M1 | Must | M | US-160 | REQ-QUOTE-009, REQ-QUOTE-011 | DC |
+| US-162 | Filter results with URL state | M1 | Should | S | US-160 | REQ-QUOTE-010 |  |
+| US-163 | Compare up to three options | M1 | Should | S | US-159, US-161 | REQ-QUOTE-013 |  |
+| US-164 | Save a quote and reopen it | M1 | Should | M | US-166, EPIC-03 | REQ-QUOTE-014 |  |
+| US-165 | Share a quote by link | M1 | Should | M | US-154, EPIC-03 | REQ-QUOTE-015 |  |
+| US-166 | Claim a quote when booking starts | M1 | Must | S | US-154, EPIC-03, EPIC-09 | REQ-QUOTE-016 | DC |
+| US-167 | Expired quote and one-action re-quote | M1 | Must | M | US-166, US-160, EPIC-09 | REQ-QUOTE-017 |  |
+| US-168 | Rate-relevant change creates a new quote | M1 | Must | S | US-154, EPIC-09 | REQ-QUOTE-018 |  |
+| US-169 | Display currency switcher and indicative converter | M1 | Should | M | US-148, EPIC-14 | REQ-QUOTE-019, REQ-QUOTE-022 |  |
+| US-170 | Public prohibited-items lookup and volumetric calculator | M1 | Should | M | EPIC-10, EPIC-17, US-139 | REQ-QUOTE-020, REQ-QUOTE-021 |  |
 
 ## Stories
 
@@ -88,7 +88,7 @@ Feature: Quote entity
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-154, EPIC-16
 - **Linked REQs:** REQ-QUOTE-002
 - **As a** guest shipper **I want** to get and re-open a quote with no account **so that** I see prices before any sign-up (D-009).
-- **Notes:** Permission `public`. Access token at least 128 bits, unguessable, returned to the creating client. Limits 20 requests per minute and 100 per hour per IP (configuration, ASSUMED). 429 `RATE_LIMITED` with `Retry-After`. Wrong token returns 404 (GAP-B-27).
+- **Notes:** Permission `public`. Access token at least 128 bits, unguessable, returned to the creating client. Limits 20 requests per minute and 100 per hour per IP (configuration, ASSUMED, A-035; identical in NFR-SEC-005 per D-035). 429 `RATE_LIMITED` with `Retry-After`. Wrong or missing token returns 404 (GAP-B-27, A-078).
 
 #### Acceptance criteria
 ```gherkin
@@ -138,6 +138,7 @@ Feature: Guest quoting
 - **Notes:** Input validation (REQ-QUOTE-003) is M0; limit-based service exclusion (REQ-QUOTE-004) is M1. 1 to 20 packages; weight 0.1 kg to 1000 kg (or lb equivalent); each dimension 1 cm to 300 cm (or inch equivalent) (ASSUMED, GAP-B-20). Domestic quotes allowed.
 
 #### Acceptance criteria
+Permission path: not applicable — validation of a `public` route; anonymous may create and there is no deny path for `quote:create` (the scenario of that name documents this). Token-based read access is covered by US-155.
 ```gherkin
 Feature: Quote input validation
   Scenario: Valid parcel input

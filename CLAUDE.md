@@ -2,9 +2,9 @@
 
 ## 1. Project Context
 <!-- product-manager fills §1 after G1; principal-architect fills §2 after G2. -->
-- **Product:** _TBD_
-- **Problem / Users:** _TBD_
-- **Primary success metrics:** _TBD_
+- **Product:** Multi-carrier shipping platform ("the Platform"; brand is `BRAND_*` configuration). Instant quotes and side-by-side comparison of DHL Express, FedEx and UPS, booking, payment, labels and customs documents, pickup scheduling and tracking for guests and customers, on an audit-ready, multi-tenant, compliance-as-data core. Run 1 delivers M0 Foundation + M1 Customer MVP (D-001); M2–M5 are backlog. PRD: `docs/01-requirements/PRD.md`.
+- **Problem / Users:** Cross-border shippers (primary lane US → India) face opaque carrier pricing, three separate carrier portals and confusing customs paperwork; the legacy .NET system has no audit trail, no tenant model and cannot meet per-country compliance (GDPR, India DPDP, US state privacy). Users this run: guest shipper, registered individual, business customer (Owner/Admin/Shipper/Finance/Viewer), operator Super Admin and Compliance Auditor (minimal admin slice, D-008), and system actors (worker jobs).
+- **Primary success metrics:** North-star: paid bookings per week; leading indicator quote → paid conversion ≥ 8%. Run outcomes judged at G3/G4: O1 both exit demos (PRD §6.1/§6.2) green on Chromium, Firefox and WebKit at 360 px and 1280 px on Mock + fixtures; O2 first quote result ≤ 1.5 s, complete ≤ 5 s; O3 zero cross-tenant access and 100% route permission/audit/validation metadata coverage; O4 100% audit completeness with immutability proven for every DB role; O5 coverage ≥ 85% line / 75% branch (≥ 95% pricing, audit, authz), 0 serious/critical axe violations, 0 open Critical/High security findings. Guardrails held at 0: captured payments without a booked shipment, duplicate labels, personal data on public tracking beyond city level, secrets/PII in logs.
 
 ## 2. Tech Stack & Conventions
 - **Languages / frameworks:** _TBD (set by principal-architect, ADR-0001)_

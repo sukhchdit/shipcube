@@ -7,21 +7,21 @@
 - **Depends on epics:** EPIC-06 (CARR: `track` operation, Mock scenarios REQ-CARR-005, circuit breaker), EPIC-09 (BOOK: state machine DR-B01, history), EPIC-01 (PLAT: worker, outbox, clock), EPIC-03 (ORG/RBAC/RLS), EPIC-04 (AUDIT), EPIC-05 (UI/I18N), EPIC-16 (API/SEC: rate limiter, problem+json), EPIC-15 (NOTIF: milestone emails)
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-241 | Map carrier tracking events to the canonical taxonomy | M1 | Must | M | EPIC-06 | REQ-TRACK-001 |
-| US-242 | Store events once, order them, and drive shipment state forward | M1 | Must | M | US-241, EPIC-09 | REQ-TRACK-002, REQ-TRACK-005 |
-| US-243 | Poll carrier tracking with adaptive intervals and stale flag | M1 | Must | M | US-242, EPIC-01 | REQ-TRACK-003 |
-| US-244 | Batch track calls per carrier account with backoff and pending handling | M1 | Must | M | US-243, EPIC-06 | REQ-TRACK-004 |
-| US-245 | Mock carrier tracking scenarios on an injected clock | M1 | Must | S | EPIC-06 | REQ-TRACK-014 |
-| US-246 | Emit milestone notification events once per shipment and status | M1 | Should | S | US-242, EPIC-01 | REQ-TRACK-007 |
-| US-247 | Public tracking lookup by tracking or order number | M1 | Must | M | US-242, EPIC-16 | REQ-TRACK-008, REQ-TRACK-012 |
-| US-248 | Public tracking page exposes city-level data only | M1 | Must | M | US-247, EPIC-05 | REQ-TRACK-011 |
-| US-249 | Rate-limit public tracking lookups | M1 | Must | S | US-247, EPIC-16 | REQ-TRACK-010 |
-| US-250 | Public tracking by customer reference plus receiver postcode | M1 | Should | S | US-247 | REQ-TRACK-009 |
-| US-251 | Authenticated full tracking timeline | M1 | Must | M | US-242, EPIC-03, EPIC-05 | REQ-TRACK-013 |
-| US-252 | Accept signed carrier push notifications | M1 | Should | M | US-242 | REQ-TRACK-006 |
-| US-253 | Manual tracking refresh limited to once per 5 minutes | M1 | Could | S | US-243 | REQ-TRACK-015 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-241 | Map carrier tracking events to the canonical taxonomy | M1 | Must | M | EPIC-06 | REQ-TRACK-001 | DC |
+| US-242 | Store events once, order them, and drive shipment state forward | M1 | Must | M | US-241, EPIC-09 | REQ-TRACK-002, REQ-TRACK-005 | DC |
+| US-243 | Poll carrier tracking with adaptive intervals and stale flag | M1 | Must | M | US-242, EPIC-01 | REQ-TRACK-003 |  |
+| US-244 | Batch track calls per carrier account with backoff and pending handling | M1 | Must | M | US-243, EPIC-06 | REQ-TRACK-004 |  |
+| US-245 | Mock carrier tracking scenarios on an injected clock | M1 | Must | S | EPIC-06 | REQ-TRACK-014 |  |
+| US-246 | Emit milestone notification events once per shipment and status | M1 | Should | S | US-242, EPIC-01 | REQ-TRACK-007 |  |
+| US-247 | Public tracking lookup by tracking or order number | M1 | Must | M | US-242, EPIC-16 | REQ-TRACK-008, REQ-TRACK-012 | DC |
+| US-248 | Public tracking page exposes city-level data only | M1 | Must | M | US-247, EPIC-05 | REQ-TRACK-011 | DC |
+| US-249 | Rate-limit public tracking lookups | M1 | Must | S | US-247, EPIC-16 | REQ-TRACK-010 |  |
+| US-250 | Public tracking by customer reference plus receiver postcode | M1 | Should | S | US-247 | REQ-TRACK-009 |  |
+| US-251 | Authenticated full tracking timeline | M1 | Must | M | US-242, EPIC-03, EPIC-05 | REQ-TRACK-013 | DC |
+| US-252 | Accept signed carrier push notifications | M1 | Should | M | US-242 | REQ-TRACK-006 |  |
+| US-253 | Manual tracking refresh limited to once per 5 minutes | M1 | Could | S | US-243 | REQ-TRACK-015 |  |
 
 ## Stories
 
@@ -221,6 +221,7 @@ Feature: Adaptive tracking polling
 - **Notes:** Default batch cap 30 tracking numbers, overridable by adapter capability. Concurrency 2 per account. Backoff doubles up to 4 h. Honors circuit breaker (REQ-CARR-017). EC-B23.
 
 #### Acceptance criteria
+Permission path: not applicable — worker job with the system actor and no HTTP surface; the scenario "Shipments of different tenants share a batch without cross-assignment" covers the equivalent tenant-isolation check.
 ```gherkin
 Feature: Batched tracking calls
   Scenario: Due shipments are grouped per account up to the adapter maximum
@@ -272,6 +273,7 @@ Feature: Batched tracking calls
 - **Notes:** Directives from REQ-CARR-005 / DR-B29: `track=happy_path|customs_hold|exception|return_to_sender|delayed|unknown_number`. Step size `MOCK_TRACK_STEP_SECONDS` default 60. Ignored in production (REQ-CARR-006, EPIC-06). Permission path: not applicable — test-support behaviour inside the Mock adapter, no principal.
 
 #### Acceptance criteria
+Permission path: not applicable — test-support behaviour inside the Mock adapter; the invalid-directive and production-mode scenarios above serve as the second negative paths.
 ```gherkin
 Feature: Mock tracking scenarios
   Scenario: Happy path sequence by elapsed time
@@ -309,7 +311,6 @@ Feature: Mock tracking scenarios
     When a request carries "X-Mock-Scenario: track=exception"
     Then the Mock carrier is not registered and no Mock tracking result appears
 ```
-Permission path: not applicable — test-support behaviour inside the Mock adapter; the invalid-directive and production-mode scenarios above serve as the second negative paths.
 
 ### US-246 — Emit milestone notification events once per shipment and status
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-242, EPIC-01
@@ -318,6 +319,7 @@ Permission path: not applicable — test-support behaviour inside the Mock adapt
 - **Notes:** Events `tracking.picked_up`, `tracking.in_transit` (first occurrence only), `tracking.out_for_delivery`, `tracking.delivered`, `tracking.exception` (DR-B28). Written to the outbox in the same transaction as the stored event. Email rendering is EPIC-15 (US-287). Flagged: PRD demo relies on milestone emails but REQ-TRACK-007 is Should.
 
 #### Acceptance criteria
+Permission path: not applicable — system job from the worker; no principal exists. The rollback scenario is the second negative path.
 ```gherkin
 Feature: Milestone notification events
   Scenario Outline: First occurrence of a milestone emits one outbox event
@@ -356,7 +358,6 @@ Feature: Milestone notification events
     When a late PICKED_UP event is ingested
     Then no notification event is emitted
 ```
-Permission path: not applicable — system job from the worker; no principal exists. The rollback scenario is the second negative path.
 
 ### US-247 — Public tracking lookup by tracking or order number
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-242, EPIC-16
@@ -476,6 +477,7 @@ Feature: Public tracking page content
 - **Notes:** 30 requests per minute and 300 per hour per IP; unsuccessful lookups 10 per minute per IP. Redis-backed, configurable (ASSUMED). Returns 429 `RATE_LIMITED` with `Retry-After` and `RateLimit-*` headers (REQ-API-014, EPIC-16). EC-B08.
 
 #### Acceptance criteria
+Permission path: not applicable — anonymous `public` route; the limit itself is the access control exercised above.
 ```gherkin
 Feature: Public tracking rate limits
   Scenario: Requests within limits succeed with limit headers
@@ -516,7 +518,6 @@ Feature: Public tracking rate limits
     When a request is limited
     Then a security log entry with the IP and limit class exists and no number is logged in clear text
 ```
-Permission path: not applicable — anonymous `public` route; the limit itself is the access control exercised above.
 
 ### US-250 — Public tracking by customer reference plus receiver postcode
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-247
@@ -525,6 +526,7 @@ Permission path: not applicable — anonymous `public` route; the limit itself i
 - **Notes:** Customer references are not unique across organisations (GAP-B-15). The postcode is used only as a matcher and is never echoed. EC-B39.
 
 #### Acceptance criteria
+Permission path: not applicable — anonymous `public` route; cross-organisation and wrong-postcode scenarios above prove non-disclosure.
 ```gherkin
 Feature: Public lookup by customer reference and postcode
   Scenario: Exactly one match returns the tracking result
@@ -556,7 +558,6 @@ Feature: Public lookup by customer reference and postcode
   Scenario: Audit records the hash only
     Then the anonymous VIEW entry stores a hash of the reference and not the reference or postcode
 ```
-Permission path: not applicable — anonymous `public` route; cross-organisation and wrong-postcode scenarios above prove non-disclosure.
 
 ### US-251 — Authenticated full tracking timeline
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-242, EPIC-03, EPIC-05

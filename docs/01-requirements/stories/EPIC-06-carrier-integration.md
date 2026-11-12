@@ -9,25 +9,25 @@
 Conventions used below. Carrier call, cache and stream scenarios run against the Mock carrier and `nock` fixtures (D-003). Errors are `application/problem+json` with the stated `code` (DR-A26 plus Part B codes). SSE framing follows REQ-API-017 (`text/event-stream`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`, monotonically increasing `id`, 15 s comment heartbeat). Event names follow REQ-CARR-009 (`carrier_result`, `carrier_error`, `complete`); see the conflict note in the handoff.
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-121 | CarrierAdapter contract, CarrierContext and capability guard | M0 | Must | M | EPIC-01 | REQ-CARR-001, REQ-CARR-002, REQ-CARR-003 |
-| US-122 | Deterministic Mock carrier | M0 | Must | M | US-121 | REQ-CARR-004 |
-| US-123 | Mock scenario directives and production exclusion | M0 | Must | M | US-122, EPIC-16 | REQ-CARR-005, REQ-CARR-006 |
-| US-124 | Normalisation to canonical codes | M0 | Must | S | US-121 | REQ-CARR-007 |
-| US-125 | Shared adapter contract test suite | M0 | Must | M | US-122, US-124 | REQ-CARR-011 |
-| US-126 | Rate-shopping fan-out with deadlines and partial results | M0 | Must | M | US-122, US-124, EPIC-03 | REQ-CARR-008 |
-| US-127 | Carrier service reference data | M1 | Must | S | US-121, EPIC-17 | REQ-CARR-021 |
-| US-128 | Platform carrier accounts and credential handling | M1 | Must | S | US-121, EPIC-01 | REQ-CARR-015 |
-| US-129 | OAuth token caching | M1 | Must | S | US-128 | REQ-CARR-016 |
-| US-130 | Resilience: timeouts, retries, breaker, bulkhead | M1 | Must | M | US-121 | REQ-CARR-017 |
-| US-131 | DHL Express (MyDHL) adapter | M1 | Must | M | US-125, US-127, US-128, US-130 | REQ-CARR-012 |
-| US-132 | FedEx REST adapter | M1 | Must | M | US-125, US-127, US-129, US-130 | REQ-CARR-013 |
-| US-133 | UPS REST adapter | M1 | Must | M | US-125, US-127, US-129, US-130 | REQ-CARR-014 |
-| US-134 | Rate response cache | M1 | Must | S | US-126, EPIC-01 | REQ-CARR-010 |
-| US-135 | Streaming rate results (SSE) with fallback GET | M1 | Must | M | US-126, US-134, EPIC-16 | REQ-CARR-009 |
-| US-136 | Redacted raw payload retention | M1 | Must | S | US-131, EPIC-01 | REQ-CARR-018 |
-| US-137 | Fixture hygiene, adapter README docs-check and live-sandbox opt-in | M1 | Must | S | US-125, US-131, US-132, US-133 | REQ-CARR-019, REQ-CARR-020 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-121 | CarrierAdapter contract, CarrierContext and capability guard | M0 | Must | M | EPIC-01 | REQ-CARR-001, REQ-CARR-002, REQ-CARR-003 | DC |
+| US-122 | Deterministic Mock carrier | M0 | Must | M | US-121 | REQ-CARR-004 | DC |
+| US-123 | Mock scenario directives and production exclusion | M0 | Must | M | US-122, EPIC-16 | REQ-CARR-005, REQ-CARR-006 |  |
+| US-124 | Normalisation to canonical codes | M0 | Must | S | US-121 | REQ-CARR-007 | DC |
+| US-125 | Shared adapter contract test suite | M0 | Must | M | US-122, US-124 | REQ-CARR-011 |  |
+| US-126 | Rate-shopping fan-out with deadlines and partial results | M0 | Must | M | US-122, US-124, EPIC-03 | REQ-CARR-008 | DC |
+| US-127 | Carrier service reference data | M1 | Must | S | US-121, EPIC-17 | REQ-CARR-021 | DC |
+| US-128 | Platform carrier accounts and credential handling | M1 | Must | S | US-121, EPIC-01 | REQ-CARR-015 | DC |
+| US-129 | OAuth token caching | M1 | Must | S | US-128 | REQ-CARR-016 |  |
+| US-130 | Resilience: timeouts, retries, circuit breaker and bulkhead | M1 | Must | M | US-121 | REQ-CARR-017 |  |
+| US-131 | DHL Express (MyDHL) adapter | M1 | Must | M | US-125, US-127, US-128, US-130 | REQ-CARR-012 | DC |
+| US-132 | FedEx REST adapter | M1 | Must | M | US-125, US-127, US-129, US-130 | REQ-CARR-013 | DC |
+| US-133 | UPS REST adapter | M1 | Must | M | US-125, US-127, US-129, US-130 | REQ-CARR-014 | DC |
+| US-134 | Rate response cache | M1 | Must | S | US-126, EPIC-01 | REQ-CARR-010 |  |
+| US-135 | Streaming rate results (SSE) with fallback GET | M1 | Must | M | US-126, US-134, EPIC-16 | REQ-CARR-009 | DC |
+| US-136 | Redacted raw payload retention | M1 | Must | S | US-131, EPIC-01 | REQ-CARR-018 |  |
+| US-137 | Fixture hygiene, adapter README docs-check and live-sandbox opt-in | M1 | Must | S | US-125, US-131, US-132, US-133 | REQ-CARR-019, REQ-CARR-020 |  |
 
 ## Stories
 
@@ -259,6 +259,7 @@ Feature: Adapter contract suite
 - **Notes:** Per-carrier deadline 4000 ms, overall 5000 ms (configuration). Status per carrier: `OK`, `NO_SERVICE`, `TIMEOUT`, `ERROR`. Runs under `quote:create` (granted to anonymous and all roles). Late responses discarded and never cached (DR-B16, EC-B01). First result p95 at most 1.5 s, complete at most 5 s with the Mock latency profile.
 
 #### Acceptance criteria
+Permission path: not applicable — internal fan-out service; `quote:create` is granted to the anonymous principal and every role, so there is no deny path, and the quote routes that invoke it carry their own permission scenarios (US-155).
 ```gherkin
 Feature: Rate-shopping fan-out
   Scenario: Parallel fan-out returns all carriers' results

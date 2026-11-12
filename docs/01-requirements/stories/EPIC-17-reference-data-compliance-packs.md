@@ -7,20 +7,20 @@
 - **Depends on epics:** EPIC-01 (compose and config), EPIC-03 (organisations, roles, users), EPIC-04 (CONFIG_CHANGE audit), EPIC-06/EPIC-07 (Mock carrier services and sample pricing configuration), EPIC-05 (privacy page, "unreviewed" badge rendering), EPIC-16 (ETag, rate limits)
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-049 | Idempotent reference and demo seed framework | M0 | Must | M | EPIC-01 | REQ-DATA-001, REQ-DATA-002 |
-| US-050 | Seed demo organisations, users and Mock configuration | M0 | Must | M | US-049, EPIC-03, EPIC-06, EPIC-07 | REQ-DATA-003 |
-| US-051 | Seed countries, regions and launch-country enablement | M0 | Must | M | US-049 | REQ-DATA-004, REQ-DATA-005, REQ-DATA-007 |
-| US-052 | Seed currencies and FX snapshots | M0 | Must | S | US-049 | REQ-DATA-006, REQ-DATA-014 |
-| US-053 | Public read-only reference endpoints | M0 | Must | M | US-051, US-052, EPIC-16 | REQ-DATA-016 |
-| US-054 | Seed sample datasets: holidays, transit days, HS list, reasons for export, Incoterms | M1 | Must | M | US-049, US-053 | REQ-DATA-008, REQ-DATA-009, REQ-DATA-010, REQ-DATA-012, REQ-DATA-013 |
-| US-055 | Prohibited and restricted items with public lookup | M1 | Must | M | US-049, US-057 | REQ-DATA-011 |
-| US-056 | Order-number sequences and zone table seam | M1 | Must | M | EPIC-01 | REQ-DATA-015, REQ-DATA-017 |
-| US-057 | Compliance pack store, immutability and resolution | M1 | Must | M | US-049 | REQ-COMP-001, REQ-COMP-002 |
-| US-058 | Seed compliance packs with audited loading | M1 | Must | M | US-057, EPIC-04 | REQ-COMP-003, REQ-COMP-008 |
-| US-059 | Pack-derived data: unreviewed flag, tax rule and de-minimis | M1 | Must | M | US-057, US-058 | REQ-COMP-004, REQ-COMP-005, REQ-COMP-006 |
-| US-060 | Privacy notice and consent rule endpoint | M1 | Should | S | US-058, EPIC-05 | REQ-COMP-007 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-049 | Idempotent reference and demo seed framework | M0 | Must | M | EPIC-01 | REQ-DATA-001, REQ-DATA-002 | DC |
+| US-050 | Seed demo organisations, users and Mock configuration | M0 | Must | M | US-049, EPIC-03, EPIC-06, EPIC-07 | REQ-DATA-003 | DC |
+| US-051 | Seed countries, regions and launch-country enablement | M0 | Must | M | US-049 | REQ-DATA-004, REQ-DATA-005, REQ-DATA-007 | DC |
+| US-052 | Seed currencies and FX snapshots | M0 | Must | S | US-049 | REQ-DATA-006, REQ-DATA-014 | DC |
+| US-053 | Public read-only reference endpoints | M0 | Must | M | US-051, US-052, EPIC-16 | REQ-DATA-016 | DC |
+| US-054 | Seed sample datasets: holidays, transit days, HS list, reasons for export, Incoterms | M1 | Must | M | US-049, US-053 | REQ-DATA-008, REQ-DATA-009, REQ-DATA-010, REQ-DATA-012, REQ-DATA-013 | DC |
+| US-055 | Prohibited and restricted items with public lookup | M1 | Must | M | US-049, US-057 | REQ-DATA-011 |  |
+| US-056 | Order-number sequences and zone table seam | M1 | Must | M | EPIC-01 | REQ-DATA-015, REQ-DATA-017 | DC |
+| US-057 | Compliance pack store, immutability and resolution | M1 | Must | M | US-049 | REQ-COMP-001, REQ-COMP-002 |  |
+| US-058 | Seed compliance packs with audited loading | M1 | Must | M | US-057, EPIC-04 | REQ-COMP-003, REQ-COMP-008 |  |
+| US-059 | Pack-derived data: unreviewed flag, tax rule and de-minimis | M1 | Must | M | US-057, US-058 | REQ-COMP-004, REQ-COMP-005, REQ-COMP-006 |  |
+| US-060 | Privacy notice and consent rule endpoint | M1 | Should | S | US-058, EPIC-05 | REQ-COMP-007 |  |
 
 ## Stories
 
@@ -114,6 +114,7 @@ Feature: Seed demo organisations, users and Mock configuration
 - **Notes:** All ISO 3166-1 countries with alpha-2/3, numeric, names en/es/fr, ISO 4217 currency, unit system (US IMPERIAL: lb/in; others METRIC: kg/cm), postcode format (regex plus example) and location type (`POSTCODE_REQUIRED`, `POSTCODE_OPTIONAL`, `CITY_ONLY`). `shipping_enabled`: US, IN, GB, CA, AU, AE and EU member states (GAP-A-14). Regions: US 50 states + DC + territories, CA 10 provinces + 3 territories, IN 28 states + 8 union territories with ISO 3166-2 code; region required for US, CA, IN. Missing es/fr names fall back to English and are flagged for linguistic review.
 
 #### Acceptance criteria
+Permission path: not applicable — seed data loaded by migration/seed with no principal; the public read endpoints and their `public` permission are US-053. A second negative scenario is included.
 ```gherkin
 Feature: Seed countries, regions and launch-country enablement
   Scenario: Countries are complete

@@ -18,31 +18,31 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-197 | Shipment state machine core | M0 | Must | M | EPIC-01 | REQ-BOOK-018 |
-| US-198 | Transition history and same-transaction audit | M0 | Must | S | US-197, EPIC-04 | REQ-BOOK-019 |
-| US-199 | Payment gateway interface and deterministic Mock gateway | M0 | Must | M | EPIC-01 | REQ-PAY-001, REQ-PAY-002 |
-| US-200 | Payment record with status history | M0 | Must | S | US-199 | REQ-PAY-003 |
-| US-201 | Order number allocation | M0 | Must | S | EPIC-17 | REQ-BOOK-026 |
-| US-202 | Mock booking saga end to end (API, queue, worker) | M0 | Must | M | US-197, US-198, US-199, US-200, US-201, EPIC-06 | REQ-BOOK-020 |
-| US-203 | Saga idempotent replay and one carrier shipment | M0 | Must | M | US-202 | REQ-BOOK-021 |
-| US-204 | Saga compensation on permanent failure | M0 | Must | M | US-202 | REQ-BOOK-022 |
-| US-205 | createShipment retry, definitive rejection and ambiguous outcome | M0 | Must | S | US-204 | REQ-BOOK-023 |
-| US-206 | Partial capture for multi-shipment orders | M1 | Must | S | US-204 | REQ-BOOK-024 |
-| US-207 | Booking progress status and event stream | M1 | Must | S | US-202 | REQ-BOOK-025 |
-| US-208 | Checkout gate: verified email, unexpired quotes, complete steps | M1 | Must | M | US-201, EPIC-02, EPIC-09 | REQ-BOOK-016, REQ-PAY-007 |
-| US-209 | Server-computed amount and authorise-then-capture | M1 | Must | M | US-199, US-200, US-208 | REQ-PAY-006, REQ-PAY-008 |
-| US-210 | Stripe adapter: test keys only, fixture-backed | M1 | Must | M | US-199 | REQ-PAY-004, REQ-PAY-017 |
-| US-211 | No card data on the Platform API, card-only methods | M1 | Must | S | US-209 | REQ-PAY-005, REQ-PAY-019 |
-| US-212 | 3-D Secure, declines and attempt limit | M1 | Must | M | US-209, US-210 | REQ-PAY-009, REQ-PAY-010 |
-| US-213 | Webhook verification, deduplication and replay | M1 | Must | M | US-210 | REQ-PAY-011, REQ-PAY-012 |
-| US-214 | Checkout screen (step 6) with test-mode indicator | M1 | Must | M | US-209, US-211, US-212 | REQ-PAY-016, REQ-PAY-017 |
-| US-215 | EXCEPTION handling and automatic void retry | M1 | Should | M | US-204 | REQ-BOOK-030 |
-| US-216 | Automatic full refund after cancellation | M1 | Should | M | US-215, EPIC-09 | REQ-PAY-013 |
-| US-217 | Saved payment methods | M1 | Should | M | US-210 | REQ-PAY-014 |
-| US-218 | Payment receipt | M1 | Should | S | US-209, EPIC-15 | REQ-PAY-015 |
-| US-219 | Authorisation and capture sweeper | M1 | Should | S | US-204 | REQ-PAY-018 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-197 | Shipment state machine core | M0 | Must | M | EPIC-01 | REQ-BOOK-018 | DC |
+| US-198 | Transition history and same-transaction audit | M0 | Must | S | US-197, EPIC-04 | REQ-BOOK-019 | DC |
+| US-199 | Payment gateway interface and deterministic Mock gateway | M0 | Must | M | EPIC-01 | REQ-PAY-001, REQ-PAY-002 | DC |
+| US-200 | Payment record with status history | M0 | Must | S | US-199 | REQ-PAY-003 | DC |
+| US-201 | Order number allocation | M0 | Must | S | EPIC-17 | REQ-BOOK-026 | DC |
+| US-202 | Mock booking saga end to end (API, queue, worker) | M0 | Must | M | US-197, US-198, US-199, US-200, US-201, EPIC-06 | REQ-BOOK-020 | DC |
+| US-203 | Saga idempotent replay and one carrier shipment | M0 | Must | M | US-202 | REQ-BOOK-021 | DC |
+| US-204 | Saga compensation on permanent failure | M0 | Must | M | US-202 | REQ-BOOK-022 |  |
+| US-205 | createShipment retry, definitive rejection and ambiguous outcome | M0 | Must | S | US-204 | REQ-BOOK-023 |  |
+| US-206 | Partial capture for multi-shipment orders | M1 | Must | S | US-204 | REQ-BOOK-024 |  |
+| US-207 | Booking progress status and event stream | M1 | Must | S | US-202 | REQ-BOOK-025 | DC |
+| US-208 | Checkout gate: verified email, unexpired quotes, complete steps | M1 | Must | M | US-201, EPIC-02, EPIC-09 | REQ-BOOK-016, REQ-PAY-007 | DC |
+| US-209 | Server-computed amount and authorise-then-capture | M1 | Must | M | US-199, US-200, US-208 | REQ-PAY-006, REQ-PAY-008 | DC |
+| US-210 | Stripe adapter: test keys only, fixture-backed | M1 | Must | M | US-199 | REQ-PAY-004, REQ-PAY-017 | DC |
+| US-211 | No card data on the Platform API, card-only methods | M1 | Must | S | US-209 | REQ-PAY-005, REQ-PAY-019 |  |
+| US-212 | 3-D Secure, declines and attempt limit | M1 | Must | M | US-209, US-210 | REQ-PAY-009, REQ-PAY-010 | DC |
+| US-213 | Webhook verification, deduplication and replay | M1 | Must | M | US-210 | REQ-PAY-011, REQ-PAY-012 | DC |
+| US-214 | Checkout screen (step 6) with test-mode indicator | M1 | Must | M | US-209, US-211, US-212 | REQ-PAY-016, REQ-PAY-017 | DC |
+| US-215 | EXCEPTION handling and automatic void retry | M1 | Should | M | US-204 | REQ-BOOK-030 |  |
+| US-216 | Automatic full refund after cancellation | M1 | Should | M | US-215, EPIC-09 | REQ-PAY-013 |  |
+| US-217 | Saved payment methods | M1 | Should | M | US-210 | REQ-PAY-014 |  |
+| US-218 | Payment receipt | M1 | Should | S | US-209, EPIC-15 | REQ-PAY-015 |  |
+| US-219 | Authorisation and capture sweeper | M1 | Should | S | US-204 | REQ-PAY-018 |  |
 
 Counts: 23 stories. Must 18 (US-197..US-214), Should 5 (US-215..US-219), Could 0.
 
@@ -142,9 +142,8 @@ Feature: Transition history and audit
 - **Linked REQs:** REQ-PAY-001, REQ-PAY-002
 - **As a** developer **I want** a gateway interface and a Mock gateway **so that** the M0 saga and all payment failure paths run without Stripe.
 
-Permission path: not applicable — library and in-process adapter exercised by the system actor and contract tests; end-user permission scenarios are in US-209 and US-211. A second negative scenario is included.
-
 #### Acceptance criteria
+Permission path: not applicable — library and in-process adapter exercised by the system actor and contract tests; end-user permission scenarios are in US-209 and US-211. A second negative scenario is included.
 ```gherkin
 Feature: Gateway interface and Mock gateway
   Scenario: Mock is the default without a Stripe key
@@ -554,9 +553,8 @@ Feature: Amount and authorise-then-capture
 - **As the** operator **I want** a Stripe adapter that can never touch live money **so that** development and demos are safe (CLAUDE.md section 5).
 - **Notes:** The live Stripe test run including 3DS test cards is COND-SANDBOX-DEMO, covered by the tagged scenario in US-214.
 
-Permission path: not applicable — start-up validation and adapter behaviour run as the system; there is no end-user principal. A second negative scenario is included.
-
 #### Acceptance criteria
+Permission path: not applicable — start-up validation and adapter behaviour run as the system; there is no end-user principal. A second negative scenario is included.
 ```gherkin
 Feature: Stripe adapter
   Scenario: Test key accepted
@@ -886,9 +884,8 @@ Feature: Receipt
 - **Linked REQs:** REQ-PAY-018
 - **As the** operator **I want** a safety net for crashes between saga steps **so that** guarantee G1 holds even after infrastructure failures.
 
-Permission path: not applicable — scheduled system job with no end-user principal. A second negative scenario is included.
-
 #### Acceptance criteria
+Permission path: not applicable — scheduled system job with no end-user principal. A second negative scenario is included.
 ```gherkin
 Feature: Sweeper
   Scenario: Stale authorisation cancelled

@@ -9,25 +9,25 @@
 Event names follow DR-B28 (for example `auth.email_verification`, `auth.password_reset`, `auth.security_event`, `order.booked`, `payment.captured`, `tracking.delivered`, `org.invitation_created`). Template IDs are the DR-B28 names (EMAIL_VERIFICATION, PASSWORD_RESET, SECURITY_NOTICE variants, BOOKING_CONFIRMATION, and so on). Email sends are system jobs; permission scenarios therefore concern the log view, preferences and absence of HTTP surfaces.
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-274 | Notification provider interface with channel enumeration | M1 | Must | S | EPIC-01 | REQ-NOTIF-001 |
-| US-275 | SES adapter verified against recorded fixtures | M1 | Should | S | US-274 | REQ-NOTIF-002 |
-| US-276 | Local mail catcher only in non-production | M1 | Must | S | US-274, EPIC-01 | REQ-NOTIF-003 |
-| US-277 | Map every domain event to exactly one template | M1 | Must | M | US-279 | REQ-NOTIF-004 |
-| US-278 | Create notification jobs only from outbox events, idempotently | M1 | Must | M | US-274, EPIC-01 | REQ-NOTIF-014 |
-| US-279 | Versioned templates with escaped, locale-aware rendering | M1 | Must | M | US-274 | REQ-NOTIF-005 |
-| US-280 | Resolve recipient locale with fallback to en | M1 | Must | S | US-279 | REQ-NOTIF-006 |
-| US-281 | CI gate for template and variable parity across locales | M1 | Must | S | US-279 | REQ-NOTIF-017 |
-| US-282 | Verification, reset and security mails always sent | M1 | Must | M | US-277, US-278, EPIC-02 | REQ-NOTIF-007 |
-| US-283 | Booking confirmation email with documents | M1 | Must | M | US-277, US-278, EPIC-11 | REQ-NOTIF-008 |
-| US-284 | BullMQ send job with retries and dead-letter queue | M1 | Must | M | US-274, US-278 | REQ-NOTIF-013 |
-| US-285 | Address only booking-organisation users | M1 | Must | S | US-277 | REQ-NOTIF-015 |
-| US-286 | Transactional lifecycle emails | M1 | Should | M | US-277, EPIC-10, EPIC-12 | REQ-NOTIF-009 |
-| US-287 | Tracking milestone emails | M1 | Should | S | US-277, EPIC-13 | REQ-NOTIF-010 |
-| US-288 | Suppress tracking emails by preference at send time | M1 | Should | S | US-287, EPIC-14 | REQ-NOTIF-011 |
-| US-289 | Per-user notification log with PII minimisation | M1 | Should | M | US-284 | REQ-NOTIF-012 |
-| US-290 | SMS and WhatsApp channel seam | M1 | Could | S | US-274 | REQ-NOTIF-016 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-274 | Notification provider interface with channel enumeration | M1 | Must | S | EPIC-01 | REQ-NOTIF-001 | DC |
+| US-275 | SES adapter verified against recorded fixtures | M1 | Should | S | US-274 | REQ-NOTIF-002 |  |
+| US-276 | Local mail catcher only in non-production | M1 | Must | S | US-274, EPIC-01 | REQ-NOTIF-003 | DC |
+| US-277 | Map every domain event to exactly one template | M1 | Must | M | US-279 | REQ-NOTIF-004 | DC |
+| US-278 | Create notification jobs only from outbox events, idempotently | M1 | Must | M | US-274, EPIC-01 | REQ-NOTIF-014 | DC |
+| US-279 | Versioned templates with escaped, locale-aware rendering | M1 | Must | M | US-274 | REQ-NOTIF-005 | DC |
+| US-280 | Resolve recipient locale with fallback to en | M1 | Must | S | US-279 | REQ-NOTIF-006 | DC |
+| US-281 | CI gate for template and variable parity across locales | M1 | Must | S | US-279 | REQ-NOTIF-017 |  |
+| US-282 | Verification, reset and security mails always sent | M1 | Must | M | US-277, US-278, EPIC-02 | REQ-NOTIF-007 | DC |
+| US-283 | Booking confirmation email with documents | M1 | Must | M | US-277, US-278, EPIC-11 | REQ-NOTIF-008 | DC |
+| US-284 | BullMQ send job with retries and dead-letter queue | M1 | Must | M | US-274, US-278 | REQ-NOTIF-013 | DC |
+| US-285 | Address only booking-organisation users | M1 | Must | S | US-277 | REQ-NOTIF-015 |  |
+| US-286 | Transactional lifecycle emails | M1 | Should | M | US-277, EPIC-10, EPIC-12 | REQ-NOTIF-009 |  |
+| US-287 | Tracking milestone emails | M1 | Should | S | US-277, EPIC-13 | REQ-NOTIF-010 |  |
+| US-288 | Suppress tracking emails by preference at send time | M1 | Should | S | US-287, EPIC-14 | REQ-NOTIF-011 |  |
+| US-289 | Per-user notification log with PII minimisation | M1 | Should | M | US-284 | REQ-NOTIF-012 |  |
+| US-290 | SMS and WhatsApp channel seam | M1 | Could | S | US-274 | REQ-NOTIF-016 |  |
 
 ## Stories
 
@@ -37,9 +37,8 @@ Event names follow DR-B28 (for example `auth.email_verification`, `auth.password
 - **As a** platform developer **I want** a provider interface for sending notifications **so that** the delivery channel can be swapped without changing business code.
 - **Notes:** `send` takes channel, recipient address, template ID, template version, locale, variables and idempotency key; returns accepted, rejected-permanently or failed-temporarily. Channels EMAIL, SMS, WHATSAPP; only EMAIL implemented (US-290 for the seam). Provider contract test suite shared by adapters.
 
-Permission path: not applicable — library interface with no principal; a second negative scenario is included instead.
-
 #### Acceptance criteria
+Permission path: not applicable — library interface with no principal; a second negative scenario is included instead.
 ```gherkin
 Feature: Notification provider interface
   Scenario: Accepted send
@@ -74,9 +73,8 @@ Feature: Notification provider interface
 - **As an** operator **I want** an SES adapter ready for production **so that** the platform can send real mail when a production environment exists.
 - **Notes:** Unit-tested against recorded SES API fixtures only; never exercised against AWS in this run (D-018). Enabled only when provider is `ses` with credentials referenced by secret manager. Start-up refuses `ses` in non-production (US-276).
 
-Permission path: not applicable — adapter library, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — adapter library, no principal.
 ```gherkin
 Feature: SES adapter
   Scenario: Fixture success maps to accepted
@@ -114,9 +112,8 @@ Feature: SES adapter
 - **As a** compliance owner **I want** all non-production mail to go to the local catcher **so that** no email reaches a real recipient during development, CI or this run.
 - **Notes:** Error code `NOTIFICATION_PROVIDER_FORBIDDEN`. Mail catcher is a Compose service (REQ-PLAT-005). Guardrail "no emails to third parties" (CLAUDE.md §5).
 
-Permission path: not applicable — start-up configuration validation, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — start-up configuration validation, no principal.
 ```gherkin
 Feature: Mail catcher guard
   Scenario: Non-production delivers to the catcher
@@ -151,9 +148,8 @@ Feature: Mail catcher guard
 - **As a** platform developer **I want** a single table mapping domain events to templates **so that** every event produces the right email and none is forgotten.
 - **Notes:** DR-B28: auth.email_verification, auth.password_reset, auth.security_event (new-device sign-in, password changed, MFA enabled/disabled, account locked), order.booked, payment.captured, pickup.scheduled, pickup.cancelled, pickup.failed, shipment.booking_failed, tracking.* (5), shipment.cancelled, payment.refunded, payment.refund_failed, org.invitation_created.
 
-Permission path: not applicable — mapping table and worker consumer, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — mapping table and worker consumer, no principal.
 ```gherkin
 Feature: Event to template mapping
   Scenario Outline: Each event maps to exactly one template
@@ -211,9 +207,8 @@ Feature: Event to template mapping
 - **As an** operator **I want** emails created only from outbox events with an idempotency key **so that** redelivery never sends duplicates and requests never block on mail.
 - **Notes:** Idempotency key = event ID + template ID + recipient. Notification creation never occurs inside the request that caused the change. EC-B44.
 
-Permission path: not applicable — worker-side pipeline, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — worker-side pipeline, no principal.
 ```gherkin
 Feature: Outbox-driven notification creation
   Scenario: Event creates one job
@@ -253,9 +248,8 @@ Feature: Outbox-driven notification creation
 - **As a** customer **I want** well-formed, correctly formatted emails **so that** I can read and trust them.
 - **Notes:** Templates are versioned code plus seed, identified by template ID and integer version, each with en, es and fr subject, HTML and plain-text bodies. Variables HTML-escaped. Locale-aware dates, numbers, currencies and units. Sentence parts live in the template; no string concatenation. Template version recorded on every sent message. Links built from the configured base URL only.
 
-Permission path: not applicable — rendering library, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — rendering library, no principal.
 ```gherkin
 Feature: Template rendering
   Scenario: Render all parts for a locale
@@ -301,9 +295,8 @@ Feature: Template rendering
 - **As a** customer **I want** emails in my language **so that** I understand them.
 - **Notes:** Resolution order: stored user locale, then the locale given at registration or invitation, then en. Invitee locale is the inviter's selection on the invite form. A missing part is a CI failure (US-281), not a runtime fallback within a template.
 
-Permission path: not applicable — resolution function, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — resolution function, no principal.
 ```gherkin
 Feature: Email locale resolution
   Scenario: Stored locale wins
@@ -344,9 +337,8 @@ Note: the last-resort runtime fallback in the "missing locale part" scenario rec
 - **As a** release manager **I want** the build to fail when any template locale part is missing **so that** broken emails never ship.
 - **Notes:** Same mechanism as i18n key parity (REQ-I18N, EPIC-05). Checks subject, HTML and plain-text in en, es and fr and that variables referenced in one locale exist in the others.
 
-Permission path: not applicable — build tooling, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — build tooling, no principal.
 ```gherkin
 Feature: Template parity gate
   Scenario: Complete templates pass
@@ -501,9 +493,8 @@ Feature: Booking confirmation email
 - **As an** operator **I want** email sends retried with backoff and failed ones dead-lettered with an alert **so that** transient provider issues do not lose mail and permanent ones are visible.
 - **Notes:** 5 attempts, exponential backoff 30 s base factor 2 (30 s, 60 s, 120 s, 240 s), no retry on permanent rejection (for example invalid recipient), dead-letter queue with alert metric after final failure. Job ID is the idempotency key. Log shows DEAD_LETTERED.
 
-Permission path: not applicable — worker job, no principal; the permanent-rejection and exhausted-retry scenarios are negative paths.
-
 #### Acceptance criteria
+Permission path: not applicable — worker job, no principal; the permanent-rejection and exhausted-retry scenarios are negative paths.
 ```gherkin
 Feature: Send job retries and dead-letter
   Scenario: Success on first attempt
@@ -546,9 +537,8 @@ Feature: Send job retries and dead-letter
 - **As a** compliance owner **I want** emails only to users of the booking organisation or the invited address **so that** no unsolicited mail goes to third parties.
 - **Notes:** Receiver and sender contacts never receive email in M1 (GAP-B-21). Recipient is the booking user, except invitations (invited address) and authentication events (the account).
 
-Permission path: not applicable — recipient policy in the worker; the third-party scenarios are the negatives.
-
 #### Acceptance criteria
+Permission path: not applicable — recipient policy in the worker; the third-party scenarios are the negatives.
 ```gherkin
 Feature: Recipient policy
   Scenario: Shipment events go to the booking user
@@ -587,6 +577,7 @@ Feature: Recipient policy
 - **Notes:** Templates PAYMENT_RECEIPT, PICKUP_SCHEDULED, PICKUP_CANCELLED, PICKUP_FAILED, BOOKING_FAILED, SHIPMENT_CANCELLED, REFUND_ISSUED, REFUND_FAILED. BOOKING_FAILED states the canonical reason and next action (REQ-BOOK-023). EC-B02, EC-B17, EC-B32. These are transactional: not suppressed by preferences.
 
 #### Acceptance criteria
+Permission path: not applicable — system-triggered; cross-tenant and recipient scenarios apply.
 ```gherkin
 Feature: Transactional lifecycle emails
   Background:
@@ -635,7 +626,6 @@ Feature: Transactional lifecycle emails
   Scenario: Payment data minimisation
     Then no email contains card numbers; only brand and last four digits may appear
 ```
-Permission path: not applicable — system-triggered; cross-tenant and recipient scenarios apply.
 
 ### US-287 — Tracking milestone emails
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-277, EPIC-13
@@ -644,6 +634,7 @@ Permission path: not applicable — system-triggered; cross-tenant and recipient
 - **Notes:** Sent to the booking user for events from REQ-TRACK-007 (US-246). Content: order number, tracking number, carrier, canonical status and city-level location; no names or street addresses. Demo-relevant: Mock scenarios drive each milestone. Flagged: PRD demo implies Must but REQ is Should.
 
 #### Acceptance criteria
+Permission path: not applicable — system-triggered; recipient restriction scenario covers third-party denial.
 ```gherkin
 Feature: Tracking milestone emails
   Background:
@@ -687,7 +678,6 @@ Feature: Tracking milestone emails
   Scenario: Tracking link uses the configured base URL
     Then the link in the email points to the public tracking page of the configured base URL with the tracking number
 ```
-Permission path: not applicable — system-triggered; recipient restriction scenario covers third-party denial.
 
 ### US-288 — Suppress tracking emails by preference at send time
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-287, EPIC-14
@@ -696,6 +686,7 @@ Permission path: not applicable — system-triggered; recipient restriction scen
 - **Notes:** Preference is read at send time, not event time. Suppressed messages are logged with status SUPPRESSED_BY_PREFERENCE. Never applies to verification, reset and security notices. EC-B44. Demo: notification preferences for tracking updates.
 
 #### Acceptance criteria
+Permission path: not applicable — system job; user preference changes are covered with permission scenarios in US-266.
 ```gherkin
 Feature: Preference suppression
   Background:
@@ -741,7 +732,6 @@ Feature: Preference suppression
     When Ana turns the preference off
     Then an audit entry "UPDATE" on entity "notification_pref" exists (see US-266)
 ```
-Permission path: not applicable — system job; user preference changes are covered with permission scenarios in US-266.
 
 ### US-289 — Per-user notification log with PII minimisation
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-284
@@ -820,9 +810,8 @@ Feature: Notification log
 - **As a** platform developer **I want** SMS and WhatsApp reserved in the interface with no implementation **so that** later channels need no interface change.
 - **Notes:** Seam only. No user-facing preference for these channels. Error `CHANNEL_NOT_AVAILABLE`.
 
-Permission path: not applicable — interface seam, no principal.
-
 #### Acceptance criteria
+Permission path: not applicable — interface seam, no principal.
 ```gherkin
 Feature: SMS and WhatsApp seam
   Scenario Outline: Send on an unimplemented channel

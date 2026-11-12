@@ -8,23 +8,23 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-086 | Automatic audit capture driven by route descriptors | M0 | Must | M | US-067, EPIC-03 | REQ-AUDIT-001, REQ-AUDIT-006 |
-| US-087 | Action types, actor types and complete entry fields | M0 | Must | M | US-086 | REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 |
-| US-088 | Same-transaction writes and outcome semantics | M0 | Must | M | US-086 | REQ-AUDIT-004, REQ-AUDIT-010 |
-| US-089 | Fail-closed sensitive reads and downloads | M0 | Must | S | US-086, US-088 | REQ-AUDIT-005 |
-| US-090 | Field-level diffs and no-op updates | M0 | Must | S | US-086 | REQ-AUDIT-007 |
-| US-091 | Redaction and field classification | M0 | Must | M | US-086 | REQ-AUDIT-008, REQ-AUDIT-009 |
-| US-092 | Per-stream hash chain | M0 | Must | M | US-087, US-091 | REQ-AUDIT-012 |
-| US-093 | Chain verification job and health degradation | M0 | Must | S | US-092, EPIC-01 | REQ-AUDIT-013 |
-| US-094 | Database-enforced immutability and its tests | M0 | Must | M | US-087, US-074 | REQ-AUDIT-014, REQ-AUDIT-015 |
-| US-095 | Monthly partitions, indexes and partition-creation job | M0 | Must | M | US-087, EPIC-01 | REQ-AUDIT-016, REQ-AUDIT-017 |
-| US-096 | Audit test generator | M0 | Must | M | US-067, US-071, US-092 | REQ-AUDIT-024 |
-| US-097 | Audit viewer: filterable list | M0 | Must | M | US-095, US-076, US-110 | REQ-AUDIT-019, REQ-AUDIT-023 |
-| US-098 | Audit viewer: entry detail with diff, and audited viewing | M0 | Must | M | US-097 | REQ-AUDIT-020, REQ-AUDIT-022 |
-| US-099 | Entity history view and panel | M1 | Should | S | US-098 | REQ-AUDIT-021 |
-| US-100 | Reason-required mechanism and archiver seam | M0 | Should | S | US-086, US-095 | REQ-AUDIT-025, REQ-AUDIT-018 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-086 | Automatic audit capture driven by route descriptors | M0 | Must | M | US-067, EPIC-03 | REQ-AUDIT-001, REQ-AUDIT-006 | DC |
+| US-087 | Action types, actor types and complete entry fields | M0 | Must | M | US-086 | REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 | DC |
+| US-088 | Same-transaction writes and outcome semantics | M0 | Must | M | US-086 | REQ-AUDIT-004, REQ-AUDIT-010 | DC |
+| US-089 | Fail-closed sensitive reads and downloads | M0 | Must | S | US-086, US-088 | REQ-AUDIT-005 |  |
+| US-090 | Field-level diffs and no-op updates | M0 | Must | S | US-086 | REQ-AUDIT-007 |  |
+| US-091 | Redaction and field classification | M0 | Must | M | US-086 | REQ-AUDIT-008, REQ-AUDIT-009 |  |
+| US-092 | Per-stream hash chain | M0 | Must | M | US-087, US-091 | REQ-AUDIT-012 | DC |
+| US-093 | Chain verification job and health degradation | M0 | Must | S | US-092, EPIC-01 | REQ-AUDIT-013 |  |
+| US-094 | Database-enforced immutability and its tests | M0 | Must | M | US-087, US-074 | REQ-AUDIT-014, REQ-AUDIT-015 | DC |
+| US-095 | Monthly partitions, indexes and partition-creation job | M0 | Must | M | US-087, EPIC-01 | REQ-AUDIT-016, REQ-AUDIT-017 | DC |
+| US-096 | Audit test generator | M0 | Must | M | US-067, US-071, US-092 | REQ-AUDIT-024 | DC |
+| US-097 | Audit viewer: filterable list | M0 | Must | M | US-095, US-076, US-110 | REQ-AUDIT-019, REQ-AUDIT-023 | DC |
+| US-098 | Audit viewer: entry detail with diff, and audited viewing | M0 | Must | M | US-097 | REQ-AUDIT-020, REQ-AUDIT-022 | DC |
+| US-099 | Entity history view and panel | M1 | Should | S | US-098 | REQ-AUDIT-021 |  |
+| US-100 | Reason-required mechanism and archiver seam | M0 | Should | S | US-086, US-095 | REQ-AUDIT-025, REQ-AUDIT-018 |  |
 
 ## Stories
 

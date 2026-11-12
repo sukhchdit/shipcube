@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0 (P1 Requirements, run scope M0 + M1) |
+| Version | 1.1 (P1 Requirements, run scope M0 + M1; G1-C1/C2/C5 closure: counts in §7 regenerated, §7.1 demo-critical subset and re-scope ladder added per D-035..D-037) |
 | Date | 2026-11-12 |
 | Owner | product-manager |
-| Source of truth | `docs/sdlc/BRIEF.md` (brief §1–§14, Appendices A–D), `docs/sdlc/DECISIONS.md` D-001..D-029, `CLAUDE.md` |
+| Source of truth | `docs/sdlc/BRIEF.md` (brief §1–§14, Appendices A–D), `docs/sdlc/DECISIONS.md` D-001..D-037, `CLAUDE.md` |
 | Companion documents | `REQUIREMENTS.md` (functional), `NFR.md` (non-functional), `stories/EPIC-*.md`, `BACKLOG.md`, `ASSUMPTIONS.md`, `docs/sdlc/traceability.md` |
 
 ---
@@ -195,7 +195,27 @@ Feature: M1 Customer MVP exit demonstration
 
 Prioritisation uses WSJF-lite (D-029): Must = exit-demo critical path + non-negotiable cross-cutting obligations; Should = brief-listed M0/M1 functionality off the demo path; Could = conveniences or items whose full version arrives in M2–M5. Story files carry the per-story tag.
 
-**Volume (P1 baseline):** 430 requirements (318 Must / 93 Should / 19 Could; 207 M0 / 223 M1) in `REQUIREMENTS.md`; 90 NFRs in `NFR.md` (74 fully verifiable this run, 10 partial, 6 deferred to M5); 290 stories in 17 epics (215 Must / 67 Should / 8 Could; 119 M0 / 171 M1). R0 delivers the 119 M0 stories (112 Must); R1 the 171 M1 stories (103 Must). The Must share is high because RBAC, audit, RLS, i18n and accessibility are per-feature obligations of the brief, not optional polish.
+**Volume (P1 baseline, v1.1 after D-036):** 430 requirements (317 Must / 94 Should / 19 Could; 204 M0 / 226 M1) in `REQUIREMENTS.md`; 90 NFRs in `NFR.md` (74 fully verifiable this run, 10 partial, 6 deferred to M5); 290 stories in 17 epics (214 Must / 68 Should / 8 Could; 119 M0 / 171 M1). R0 delivers the 119 M0 stories (112 Must, of which 74 demo-critical); R1 the 171 M1 stories (102 Must, of which 60 demo-critical). The Must share is high because RBAC, audit, RLS, i18n and accessibility are per-feature obligations of the brief, not optional polish; §7.1 defines the smaller demo-critical core inside Must.
+
+### 7.1 Demo-critical subset and re-scope ladder (D-037, closes G1-C5)
+
+**Demo-critical (DC) stories.** A Must story is tagged `DC` when a step or assertion of the §6.1 or §6.2 demo script cannot execute without it. The tag is recorded in the **DC** column of every epic's story-summary table (`stories/EPIC-*.md`) and of `docs/sdlc/traceability.md` ("Story → Requirement"). Must stories without the tag are the brief's cross-cutting obligations and negative controls that the gate verifies (G3) but the demo scripts do not exercise: hardening, redaction, lockout, compensation paths, generators' non-demo coverage, non-demo screens.
+
+| Slice | Must stories | of which DC | DC share |
+|---|---|---|---|
+| R0 — M0 (`v0.1.0-m0`) | 112 | 74 | 66% |
+| R1 — M1 (`v0.1.0`) | 102 | 60 | 59% |
+| **Total** | **214** | **134** | **63%** |
+
+Per epic (DC / Must): EPIC-01 8/12 · EPIC-02 11/14 · EPIC-03 13/19 · EPIC-04 9/13 · EPIC-05 9/17 · EPIC-06 10/17 · EPIC-07 4/13 · EPIC-08 8/11 · EPIC-09 13/18 · EPIC-10 14/18 · EPIC-11 5/7 · EPIC-12 4/6 · EPIC-13 5/9 · EPIC-14 2/4 · EPIC-15 9/11 · EPIC-16 3/14 · EPIC-17 7/11.
+
+**How P4 uses it.** senior-developer waves DC stories first within each milestone (the critical path of the demo), then the remaining Must, then Should, then Could. qa-lead's e2e demo journeys are built from the DC set.
+
+**Re-scope ladder** (applied by product-manager at CLAUDE.md §7 step 3, in this order, one rung at a time, each step logged in `DECISIONS.md`):
+1. **Defer Could stories** of the affected epic (no gate impact).
+2. **Defer Should stories** of the affected epic; each becomes a tracked backlog item with its REQs.
+3. **Defer a non-DC Must story**: it becomes a Should in the backlog, and the gate condition it weakens (e.g. a G3 coverage or hardening assertion) is recorded as a named condition on the release so quality-gatekeeper can judge it explicitly. The cross-cutting obligation is never silently dropped (brief §13 rule 5).
+4. **Split a DC Must story** into the smallest DC Must that still satisfies the demo step plus a Should carrying the rest. A DC story is never deferred outright: deferring it means the release cannot demonstrate its milestone, which is a scope change for sdlc-orchestrator, not a re-scope.
 
 ## 8. Dependencies
 

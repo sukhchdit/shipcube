@@ -7,23 +7,23 @@
 - **Depends on epics:** EPIC-01 (error handler, config, logging, CI), EPIC-02 (authentication, CSRF-protected endpoints), EPIC-03 (route metadata and permissions), EPIC-04 (audit of denied/failed outcomes), EPIC-08 (rate-stream endpoint consuming US-042)
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-034 | Contract-first OpenAPI 3.1 with CI cross-check and response validation | M0 | Must | M | EPIC-01, EPIC-03 | REQ-API-001, REQ-API-002, REQ-API-004 |
-| US-035 | API docs UI, generated client, deprecation headers and ApiMode seam | M0 | Should | M | US-034 | REQ-API-003, REQ-API-015, REQ-API-019, REQ-API-020 |
-| US-036 | Error catalogue and validation error format | M0 | Must | M | US-034, US-007 | REQ-API-005, REQ-API-006 |
-| US-037 | Cursor pagination, filtering and sorting | M0 | Must | M | US-036 | REQ-API-007, REQ-API-008 |
-| US-038 | Idempotency keys | M0 | Must | M | US-036, EPIC-03 | REQ-API-009, REQ-API-010, REQ-API-011 |
-| US-039 | ETags and optimistic concurrency | M0 | Must | M | US-036 | REQ-API-012, REQ-API-013 |
-| US-040 | Redis-backed rate limiting and headers | M0 | Must | M | US-036 | REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
-| US-041 | Data representation rules | M0 | Must | S | US-034 | REQ-API-016 |
-| US-042 | Server-sent events convention | M0 | Must | M | US-036 | REQ-API-017, REQ-API-018 |
-| US-043 | Security headers, HSTS and Content-Security-Policy | M0 | Must | M | EPIC-01 | REQ-SEC-001, REQ-SEC-002, REQ-SEC-003 |
-| US-044 | CSRF protection and CORS allow-list | M0 | Must | M | US-036, EPIC-02 | REQ-SEC-004, REQ-SEC-014 |
-| US-045 | Input hardening: unknown fields, body size, content types, timeouts | M0 | Must | M | US-036 | REQ-SEC-007, REQ-SEC-015 |
-| US-046 | Static safeguards: parameterised SQL, HTML-injection lint and Joi/Zod parity | M0 | Must | M | EPIC-01 | REQ-SEC-008, REQ-SEC-009, REQ-SEC-016 |
-| US-047 | SSRF-safe outbound client and security events | M0 | Must | M | US-008, EPIC-04 | REQ-SEC-010, REQ-SEC-012 |
-| US-048 | Secrets hygiene and CI security scanning | M0 | Must | M | EPIC-01 | REQ-SEC-011, REQ-SEC-013 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-034 | Contract-first OpenAPI 3.1 with CI cross-check and response validation | M0 | Must | M | EPIC-01, EPIC-03 | REQ-API-001, REQ-API-002, REQ-API-004 | DC |
+| US-035 | API docs UI, generated client, deprecation headers and ApiMode seam | M0 | Should | M | US-034 | REQ-API-003, REQ-API-015, REQ-API-019, REQ-API-020 |  |
+| US-036 | Error catalogue and validation error format | M0 | Must | M | US-034, US-007 | REQ-API-005, REQ-API-006 |  |
+| US-037 | Cursor pagination, filtering and sorting | M0 | Must | M | US-036 | REQ-API-007, REQ-API-008 |  |
+| US-038 | Idempotency keys | M0 | Must | M | US-036, EPIC-03 | REQ-API-009, REQ-API-010, REQ-API-011 | DC |
+| US-039 | ETags and optimistic concurrency | M0 | Must | M | US-036 | REQ-API-012, REQ-API-013 |  |
+| US-040 | Redis-backed rate limiting and headers | M0 | Must | M | US-036 | REQ-API-014, REQ-SEC-005, REQ-SEC-006 |  |
+| US-041 | Data representation rules | M0 | Must | S | US-034 | REQ-API-016 |  |
+| US-042 | Server-sent events convention | M0 | Must | M | US-036 | REQ-API-017, REQ-API-018 | DC |
+| US-043 | Security headers, HSTS and Content-Security-Policy | M0 | Must | M | EPIC-01 | REQ-SEC-001, REQ-SEC-002, REQ-SEC-003 |  |
+| US-044 | CSRF protection and CORS allow-list | M0 | Must | M | US-036, EPIC-02 | REQ-SEC-004, REQ-SEC-014 |  |
+| US-045 | Input hardening: unknown fields, body size, content types, timeouts | M0 | Must | M | US-036 | REQ-SEC-007, REQ-SEC-015 |  |
+| US-046 | Static safeguards: parameterised SQL, HTML-injection lint and Joi/Zod parity | M0 | Must | M | EPIC-01 | REQ-SEC-008, REQ-SEC-009, REQ-SEC-016 |  |
+| US-047 | SSRF-safe outbound client and security events | M0 | Must | M | US-008, EPIC-04 | REQ-SEC-010, REQ-SEC-012 |  |
+| US-048 | Secrets hygiene and CI security scanning | M0 | Must | M | EPIC-01 | REQ-SEC-011, REQ-SEC-013 |  |
 
 ## Stories
 
@@ -149,6 +149,7 @@ Feature: Error catalogue and validation error format
 - **Notes:** `limit` default 25, max 100 (audit viewer 50/200 per DR-A21); `next_cursor`, `has_more`; stable order with row ID tie-breaker; totals only when `include_total=true`. Filters `filter[field]=value`; sort `sort=field,-field`; allow-listed indexed fields only; multiple filters AND.
 
 #### Acceptance criteria
+Permission path: not applicable — shared list convention with no route of its own; the scenario "Cursor cannot cross tenants" covers the equivalent isolation check and route-level permissions are tested per list endpoint.
 ```gherkin
 Feature: Cursor pagination, filtering and sorting
   Scenario: First page and next page
@@ -203,7 +204,7 @@ Feature: Cursor pagination, filtering and sorting
 - **Notes:** Header 1-255 printable ASCII; stored 24 h with SHA-256 request fingerprint, scoped by org, actor, method, path. Required on operations that create orders, payments or bookings. Authentication endpoints not-applicable. 5xx and 429 are not stored. Keys are server-side records, outside the audit chain (DR-A-IETF draft, GAP-A-18).
 
 #### Acceptance criteria
-Permission path: covered by scenario "Keys are scoped to the caller".
+Permission path: not applicable — cross-cutting middleware with no route of its own; the scenario "Keys are scoped to the caller" covers the equivalent check (another caller's key is never replayed) and route-level permissions are tested on the operations that require the key.
 ```gherkin
 Feature: Idempotency keys
   Scenario: Replay returns the stored response with no new effect

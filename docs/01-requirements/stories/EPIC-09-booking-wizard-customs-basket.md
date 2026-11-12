@@ -16,34 +16,34 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-171 | Guest sign-in gate and quote claim at wizard start | M1 | Must | M | EPIC-02, EPIC-08 | REQ-BOOK-001 |
-| US-172 | Server-side draft shipment, resume and optimistic concurrency | M1 | Must | M | US-171, EPIC-16 | REQ-BOOK-002 |
-| US-173 | Shipment direction, content type and package type | M0 | Must | S | EPIC-17 | REQ-BOOK-027, REQ-BOOK-028 |
-| US-174 | Responsive wizard shell and step navigation | M1 | Must | M | US-172, EPIC-05 | REQ-BOOK-003 |
-| US-175 | Step 1: sender and receiver details with address book | M1 | Must | M | US-172, US-174, EPIC-14 | REQ-BOOK-005 |
-| US-176 | Step 1: address validation against country rules | M1 | Must | S | US-175, EPIC-17 | REQ-BOOK-006 |
-| US-177 | Step 1: required tax and identity references | M1 | Must | S | US-175, EPIC-17 | REQ-BOOK-008 |
-| US-178 | Step 1: carrier address suggestions | M1 | Should | S | US-176, EPIC-06 | REQ-BOOK-007 |
-| US-179 | Autosave and offline edit queue | M1 | Should | M | US-172 | REQ-BOOK-004 |
-| US-180 | Step 2: contents, customs applicability and document declaration | M1 | Must | M | US-173, US-174, EPIC-17 | REQ-BOOK-009, REQ-CUST-001, REQ-CUST-002 |
-| US-181 | Step 2: customs lines and reason for export | M1 | Must | M | US-180 | REQ-CUST-003, REQ-CUST-004 |
-| US-182 | Step 2: commodity code search and format validation | M1 | Must | S | US-181, EPIC-17 | REQ-CUST-006, REQ-CUST-007 |
-| US-183 | Step 2: prohibited and restricted item check | M1 | Must | M | US-180, EPIC-17 | REQ-CUST-009 |
-| US-184 | Dangerous-goods attestation and explicit screening status | M1 | Must | S | US-180 | REQ-CUST-010, REQ-CUST-011 |
-| US-185 | Incoterm choice and de-minimis hint | M1 | Should | S | US-181, EPIC-06 | REQ-CUST-005, REQ-CUST-008 |
-| US-186 | Commercial and pro-forma invoice content and carrier customs documents | M1 | Must | M | US-181, EPIC-11 | REQ-CUST-012, REQ-CUST-013 |
-| US-187 | Carrier customs field mapping inside adapters | M1 | Must | S | US-181, EPIC-06 | REQ-CUST-015 |
-| US-188 | Paperless customs upload with printed-copy fallback | M1 | Should | S | US-186, EPIC-06 | REQ-CUST-014 |
-| US-189 | Step 3: collection mode choice | M1 | Must | S | US-174, EPIC-12 | REQ-BOOK-010 |
-| US-190 | Step 4: extras, cover and references | M1 | Should | M | US-174, EPIC-07 | REQ-BOOK-011 |
-| US-191 | Step 5: review with itemised price and edit-back | M1 | Must | M | US-175, US-181, US-189 | REQ-BOOK-012 |
-| US-192 | Order basket model: 1-10 shipments, one currency | M1 | Must | S | US-172 | REQ-BOOK-013 |
-| US-193 | Add and remove shipments in the open order | M1 | Should | S | US-192 | REQ-BOOK-014 |
-| US-194 | Coupon entry on the review step | M1 | Should | S | US-191, EPIC-07 | REQ-BOOK-015 |
-| US-195 | Step 7: confirmation page | M1 | Must | M | US-191, EPIC-10, EPIC-11, EPIC-12 | REQ-BOOK-017 |
-| US-196 | Self-service shipment cancellation | M1 | Should | M | EPIC-10, EPIC-11, EPIC-12 | REQ-BOOK-029 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-171 | Guest sign-in gate and quote claim at wizard start | M1 | Must | M | EPIC-02, EPIC-08 | REQ-BOOK-001 | DC |
+| US-172 | Server-side draft shipment, resume and optimistic concurrency | M1 | Must | M | US-171, EPIC-16 | REQ-BOOK-002 | DC |
+| US-173 | Shipment direction, content type and package type | M0 | Must | S | EPIC-17 | REQ-BOOK-027, REQ-BOOK-028 | DC |
+| US-174 | Responsive wizard shell and step navigation | M1 | Must | M | US-172, EPIC-05 | REQ-BOOK-003 | DC |
+| US-175 | Step 1: sender and receiver details with address book | M1 | Must | M | US-172, US-174, EPIC-14 | REQ-BOOK-005 | DC |
+| US-176 | Step 1: address validation against country rules | M1 | Must | S | US-175, EPIC-17 | REQ-BOOK-006 |  |
+| US-177 | Step 1: required tax and identity references | M1 | Must | S | US-175, EPIC-17 | REQ-BOOK-008 |  |
+| US-178 | Step 1: carrier address suggestions | M1 | Should | S | US-176, EPIC-06 | REQ-BOOK-007 |  |
+| US-179 | Autosave and offline edit queue | M1 | Should | M | US-172 | REQ-BOOK-004 |  |
+| US-180 | Step 2: contents, customs applicability and document declaration | M1 | Must | M | US-173, US-174, EPIC-17 | REQ-BOOK-009, REQ-CUST-001, REQ-CUST-002 | DC |
+| US-181 | Step 2: customs lines and reason for export | M1 | Must | M | US-180 | REQ-CUST-003, REQ-CUST-004 | DC |
+| US-182 | Step 2: commodity code search and format validation | M1 | Must | S | US-181, EPIC-17 | REQ-CUST-006, REQ-CUST-007 | DC |
+| US-183 | Step 2: prohibited and restricted item check | M1 | Must | M | US-180, EPIC-17 | REQ-CUST-009 |  |
+| US-184 | Dangerous-goods attestation and explicit screening status | M1 | Must | S | US-180 | REQ-CUST-010, REQ-CUST-011 |  |
+| US-185 | Incoterm choice and de-minimis hint | M1 | Should | S | US-181, EPIC-06 | REQ-CUST-005, REQ-CUST-008 |  |
+| US-186 | Commercial and pro-forma invoice content and carrier customs documents | M1 | Must | M | US-181, EPIC-11 | REQ-CUST-012, REQ-CUST-013 | DC |
+| US-187 | Carrier customs field mapping inside adapters | M1 | Must | S | US-181, EPIC-06 | REQ-CUST-015 |  |
+| US-188 | Paperless customs upload with printed-copy fallback | M1 | Should | S | US-186, EPIC-06 | REQ-CUST-014 |  |
+| US-189 | Step 3: collection mode choice | M1 | Must | S | US-174, EPIC-12 | REQ-BOOK-010 | DC |
+| US-190 | Step 4: extras, cover and references | M1 | Should | M | US-174, EPIC-07 | REQ-BOOK-011 |  |
+| US-191 | Step 5: review with itemised price and edit-back | M1 | Must | M | US-175, US-181, US-189 | REQ-BOOK-012 | DC |
+| US-192 | Order basket model: 1-10 shipments, one currency | M1 | Must | S | US-172 | REQ-BOOK-013 | DC |
+| US-193 | Add and remove shipments in the open order | M1 | Should | S | US-192 | REQ-BOOK-014 |  |
+| US-194 | Coupon entry on the review step | M1 | Should | S | US-191, EPIC-07 | REQ-BOOK-015 |  |
+| US-195 | Step 7: confirmation page | M1 | Must | M | US-191, EPIC-10, EPIC-11, EPIC-12 | REQ-BOOK-017 | DC |
+| US-196 | Self-service shipment cancellation | M1 | Should | M | EPIC-10, EPIC-11, EPIC-12 | REQ-BOOK-029 |  |
 
 Counts: 26 stories. Must 18 (US-171..177, 180..184, 186, 187, 189, 191, 192, 195), Should 8 (US-178, 179, 185, 188, 190, 193, 194, 196), Could 0.
 
@@ -690,9 +690,8 @@ Feature: Invoice content and carrier customs documents
 - **Linked REQs:** REQ-CUST-015
 - **As a** developer **I want** customs data mapped to each carrier's fields inside the adapter **so that** booking works per carrier while the Platform record stays complete.
 
-Permission path: not applicable — adapter-internal mapping run by the system actor; there is no end-user principal. A second negative scenario is included instead.
-
 #### Acceptance criteria
+Permission path: not applicable — adapter-internal mapping run by the system actor; there is no end-user principal. A second negative scenario is included instead.
 ```gherkin
 Feature: Carrier customs field mapping
   Scenario: Mapping passes the contract suite

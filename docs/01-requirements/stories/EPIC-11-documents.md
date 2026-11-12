@@ -17,20 +17,20 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-220 | Document model and private encrypted storage | M1 | Must | M | EPIC-01 | REQ-DOC-001, REQ-DOC-005, REQ-DOC-006 |
-| US-221 | Document versioning | M1 | Must | S | US-220 | REQ-DOC-004 |
-| US-222 | Carrier label stored in every offered format | M1 | Must | M | US-220, EPIC-06 | REQ-DOC-002 |
-| US-223 | Asynchronous document generation job | M1 | Must | M | US-220, US-221, EPIC-10 | REQ-DOC-012 |
-| US-224 | Document list and re-download from shipment detail | M1 | Must | M | US-220, US-225 | REQ-DOC-011 |
-| US-225 | Pre-signed download URL after permission and tenant check | M1 | Must | M | US-220 | REQ-DOC-007 |
-| US-226 | Fail-closed download audit | M1 | Must | S | US-225, EPIC-04 | REQ-DOC-008 |
-| US-227 | Integrity check before download | M1 | Should | S | US-225 | REQ-DOC-009 |
-| US-228 | Email documents to the account address | M1 | Should | M | US-225, EPIC-15 | REQ-DOC-010 |
-| US-229 | Void label on cancellation and refuse voided downloads | M1 | Should | M | US-225, EPIC-09 | REQ-DOC-013, REQ-DOC-014 |
-| US-230 | Pickup confirmation document | M1 | Should | S | US-221, EPIC-12 | REQ-DOC-003 |
-| US-231 | ZPL label output | M1 | Could | S | US-222 | REQ-DOC-015 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-220 | Document model and private encrypted storage | M1 | Must | M | EPIC-01 | REQ-DOC-001, REQ-DOC-005, REQ-DOC-006 | DC |
+| US-221 | Document versioning | M1 | Must | S | US-220 | REQ-DOC-004 |  |
+| US-222 | Carrier label stored in every offered format | M1 | Must | M | US-220, EPIC-06 | REQ-DOC-002 | DC |
+| US-223 | Asynchronous document generation job | M1 | Must | M | US-220, US-221, EPIC-10 | REQ-DOC-012 | DC |
+| US-224 | Document list and re-download from shipment detail | M1 | Must | M | US-220, US-225 | REQ-DOC-011 | DC |
+| US-225 | Pre-signed download URL after permission and tenant check | M1 | Must | M | US-220 | REQ-DOC-007 | DC |
+| US-226 | Fail-closed download audit | M1 | Must | S | US-225, EPIC-04 | REQ-DOC-008 |  |
+| US-227 | Integrity check before download | M1 | Should | S | US-225 | REQ-DOC-009 |  |
+| US-228 | Email documents to the account address | M1 | Should | M | US-225, EPIC-15 | REQ-DOC-010 |  |
+| US-229 | Void label on cancellation and refuse voided downloads | M1 | Should | M | US-225, EPIC-09 | REQ-DOC-013, REQ-DOC-014 |  |
+| US-230 | Pickup confirmation document | M1 | Should | S | US-221, EPIC-12 | REQ-DOC-003 |  |
+| US-231 | ZPL label output | M1 | Could | S | US-222 | REQ-DOC-015 |  |
 
 Counts: 12 stories. Must 7 (US-220..US-226), Should 4 (US-227..US-230), Could 1 (US-231).
 

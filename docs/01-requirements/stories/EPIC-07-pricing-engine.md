@@ -9,24 +9,24 @@
 Conventions. Pricing is a pure library in `packages/pricing`; there is no pricing endpoint in M1, so library stories carry `Permission path: not applicable — pure library` plus a second negative scenario. Evaluation order follows DR-B07; rounding follows DR-B11 (half away from zero, at line level, totals never re-rounded). Amounts are written as integer minor units (USD 1000 = 10.00 USD).
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-138 | Pure pricing engine with integer money and rounding | M0 | Must | M | EPIC-01 | REQ-PRICE-001, REQ-PRICE-002 |
-| US-139 | Billable weight calculation | M0 | Must | S | US-138 | REQ-PRICE-004 |
-| US-140 | Default margin pricing as itemised lines | M0 | Must | S | US-138, EPIC-06 | REQ-PRICE-003 |
-| US-141 | Margin rule selection and precedence | M1 | Must | S | US-140 | REQ-PRICE-005 |
-| US-142 | Fuel surcharge and carrier surcharge pass-through | M1 | Must | M | US-140 | REQ-PRICE-006, REQ-PRICE-007 |
-| US-143 | Included liability cover line | M1 | Must | S | US-140, EPIC-06 | REQ-PRICE-008 |
-| US-144 | Optional protection cover and price floor | M1 | Should | M | US-142, US-143 | REQ-PRICE-009, REQ-PRICE-018 |
-| US-145 | Customer discounts and coupons | M1 | Should | M | US-146 | REQ-PRICE-010, REQ-PRICE-011 |
-| US-146 | Discount stacking rule | M1 | Must | S | US-141 | REQ-PRICE-013 |
-| US-147 | Tax per origin-country compliance pack | M1 | Must | M | US-142, EPIC-17 | REQ-PRICE-014 |
-| US-148 | FX conversion with snapshot | M1 | Must | S | US-138, EPIC-17 | REQ-PRICE-015 |
-| US-149 | Immutable charge lines and explanation | M1 | Must | M | US-142, US-147, US-148 | REQ-PRICE-016 |
-| US-150 | Immutable price snapshot on booked shipment | M1 | Must | M | US-149, EPIC-09, EPIC-04 | REQ-PRICE-017 |
-| US-151 | Property-based tests and coverage gate | M1 | Must | M | US-149 | REQ-PRICE-019 |
-| US-152 | Versioned seed-based pricing configuration | M1 | Must | M | US-141, US-142 | REQ-PRICE-020 |
-| US-153 | Volume-tier discount and M2 seam variants | M1 | Could | S | US-146, US-152 | REQ-PRICE-012, REQ-PRICE-021 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-138 | Pure pricing engine with integer money and rounding | M0 | Must | M | EPIC-01 | REQ-PRICE-001, REQ-PRICE-002 | DC |
+| US-139 | Billable weight calculation | M0 | Must | S | US-138 | REQ-PRICE-004 | DC |
+| US-140 | Default margin pricing as itemised lines | M0 | Must | S | US-138, EPIC-06 | REQ-PRICE-003 | DC |
+| US-141 | Margin rule selection and precedence | M1 | Must | S | US-140 | REQ-PRICE-005 |  |
+| US-142 | Fuel surcharge and carrier surcharge pass-through | M1 | Must | M | US-140 | REQ-PRICE-006, REQ-PRICE-007 |  |
+| US-143 | Included liability cover line | M1 | Must | S | US-140, EPIC-06 | REQ-PRICE-008 |  |
+| US-144 | Optional protection cover and price floor | M1 | Should | M | US-142, US-143 | REQ-PRICE-009, REQ-PRICE-018 |  |
+| US-145 | Customer discounts and coupons | M1 | Should | M | US-146 | REQ-PRICE-010, REQ-PRICE-011 |  |
+| US-146 | Discount stacking rule | M1 | Must | S | US-141 | REQ-PRICE-013 |  |
+| US-147 | Tax per origin-country compliance pack | M1 | Must | M | US-142, EPIC-17 | REQ-PRICE-014 |  |
+| US-148 | FX conversion with snapshot | M1 | Must | S | US-138, EPIC-17 | REQ-PRICE-015 |  |
+| US-149 | Immutable charge lines and explanation | M1 | Must | M | US-142, US-147, US-148 | REQ-PRICE-016 |  |
+| US-150 | Immutable price snapshot on booked shipment | M1 | Must | M | US-149, EPIC-09, EPIC-04 | REQ-PRICE-017 | DC |
+| US-151 | Property-based tests and coverage gate | M1 | Must | M | US-149 | REQ-PRICE-019 |  |
+| US-152 | Versioned seed-based pricing configuration | M1 | Must | M | US-141, US-142 | REQ-PRICE-020 |  |
+| US-153 | Volume-tier discount and M2 seam variants | M1 | Could | S | US-146, US-152 | REQ-PRICE-012, REQ-PRICE-021 |  |
 
 ## Stories
 

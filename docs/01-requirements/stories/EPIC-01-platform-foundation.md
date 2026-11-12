@@ -7,22 +7,22 @@
 - **Depends on epics:** EPIC-04 (audit entries for job and flag assertions), EPIC-16 (CI security scans, problem+json catalogue), EPIC-17 (seed content run by compose), EPIC-03 (tenant context in job payloads)
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-001 | Monorepo layout, layering lint, strict TypeScript and root scripts | M0 | Must | M | — | REQ-PLAT-001, REQ-PLAT-002, REQ-PLAT-003 |
-| US-002 | Typed, validated configuration | M0 | Must | S | US-001 | REQ-PLAT-004 |
-| US-003 | One-command local environment | M0 | Must | M | US-001, US-002, EPIC-17 | REQ-PLAT-005 |
-| US-004 | Hardened multi-stage container images | M0 | Must | M | US-003 | REQ-PLAT-006 |
-| US-005 | CI pipeline skeleton | M0 | Must | M | US-001, US-048 | REQ-PLAT-007 |
-| US-006 | Coverage gate | M0 | Must | S | US-005 | REQ-PLAT-008 |
-| US-007 | Central error handler and framework error mapping | M0 | Must | M | US-001 | REQ-PLAT-009, REQ-PLAT-010 |
-| US-008 | Correlation ID and structured, redacted logging | M0 | Must | M | US-002 | REQ-PLAT-011, REQ-PLAT-012 |
-| US-009 | Named queues with retries and dead-letter queue | M0 | Must | M | US-002, US-008 | REQ-PLAT-013 |
-| US-010 | Idempotent job processing and scheduled jobs | M0 | Must | M | US-009 | REQ-PLAT-014, REQ-PLAT-015 |
-| US-011 | Transactional outbox and at-least-once relay | M0 | Must | M | US-009, EPIC-03 | REQ-PLAT-016, REQ-PLAT-017 |
-| US-012 | Liveness and readiness endpoints | M0 | Must | S | US-003 | REQ-PLAT-018 |
-| US-013 | Telemetry seam and graceful shutdown | M0 | Should | S | US-008, US-009 | REQ-PLAT-019, REQ-PLAT-022 |
-| US-014 | Feature-flag evaluation and audited changes | M0 | Should | M | EPIC-03, EPIC-04 | REQ-PLAT-020, REQ-PLAT-021 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-001 | Monorepo layout, layering lint, strict TypeScript and root scripts | M0 | Must | M | — | REQ-PLAT-001, REQ-PLAT-002, REQ-PLAT-003 | DC |
+| US-002 | Typed, validated configuration | M0 | Must | S | US-001 | REQ-PLAT-004 | DC |
+| US-003 | One-command local environment | M0 | Must | M | US-001, US-002, EPIC-17 | REQ-PLAT-005 | DC |
+| US-004 | Hardened multi-stage container images | M0 | Must | M | US-003 | REQ-PLAT-006 | DC |
+| US-005 | CI pipeline skeleton | M0 | Must | M | US-001, US-048 | REQ-PLAT-007 |  |
+| US-006 | Coverage gate | M0 | Must | S | US-005 | REQ-PLAT-008 |  |
+| US-007 | Central error handler and framework error mapping | M0 | Must | M | US-001 | REQ-PLAT-009, REQ-PLAT-010 |  |
+| US-008 | Correlation ID and structured, redacted logging | M0 | Must | M | US-002 | REQ-PLAT-011, REQ-PLAT-012 |  |
+| US-009 | Named queues with retries and dead-letter queue | M0 | Must | M | US-002, US-008 | REQ-PLAT-013 | DC |
+| US-010 | Idempotent job processing and scheduled jobs | M0 | Must | M | US-009 | REQ-PLAT-014, REQ-PLAT-015 | DC |
+| US-011 | Transactional outbox and at-least-once relay | M0 | Must | M | US-009, EPIC-03 | REQ-PLAT-016, REQ-PLAT-017 | DC |
+| US-012 | Liveness and readiness endpoints | M0 | Must | S | US-003 | REQ-PLAT-018 | DC |
+| US-013 | Telemetry seam and graceful shutdown | M0 | Should | S | US-008, US-009 | REQ-PLAT-019, REQ-PLAT-022 |  |
+| US-014 | Feature-flag evaluation and audited changes | M0 | Should | M | EPIC-03, EPIC-04 | REQ-PLAT-020, REQ-PLAT-021 |  |
 
 ## Stories
 
@@ -106,7 +106,7 @@ Feature: Typed, validated configuration
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-001, US-002, EPIC-17
 - **Linked REQs:** REQ-PLAT-005
 - **As a** developer **I want** `docker compose up` to start the whole stack, migrate and seed **so that** I can demonstrate and test the product from a clean machine.
-- **Notes:** Services: PostgreSQL, Redis, API, worker, web, admin, mail catcher, S3-compatible storage. Healthy within 180 s on a warm image cache (ASSUMED).
+- **Notes:** Services: PostgreSQL, Redis, API, worker, web, admin, mail catcher, S3-compatible storage. Healthy within 180 s on a warm image cache (ASSUMED, A-039; the same value is the NFR-OPS-001 target, D-035).
 
 #### Acceptance criteria
 Permission path: not applicable — local tooling with no principal; a second negative scenario is included.

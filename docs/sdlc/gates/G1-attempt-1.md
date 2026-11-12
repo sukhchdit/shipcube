@@ -47,3 +47,10 @@
 
 ## Required actions (if FAIL)
 Not applicable.
+
+## Condition closure (product-manager)
+- **G1-C1 — closed (D-035).** One value per parameter: (a) guest quotes 20/min + 100/h per IP; (b) resend/reset 3/h per account + 10/h per IP; (c) compose all-healthy ≤ 180 s; (d) public-page initial JS ≤ 170 kB; (e) 5/min/account auth limit kept and added to NFR-SEC-005. Also aligned NFR-RES-001..003 to REQ-CARR-017 (found during reconciliation). Changed: `NFR.md` NFR-SEC-005, NFR-OPS-001, NFR-WEB-004, NFR-RES-001..003; `REQUIREMENTS.md` REQ-PLAT-005, REQ-AUTH-004/005/011, REQ-UI-018, REQ-SEC-005, REQ-CARR-017, REQ-QUOTE-002, DR-A22; stories US-003, US-016, US-021, US-111, US-155 notes; `ASSUMPTIONS.md` A-033, A-035, A-037, A-039; `DECISIONS.md` D-035.
+- **G1-C2 — closed (D-036).** REQ-UI-014, REQ-UI-018, REQ-AUTH-020 retagged M0 → M1; REQ-PICK-013 retagged Must → Should and US-239 follows (story MoSCoW rule holds). Early delivery of REQ-DATA-014/SEC-008/QUOTE-004 (and REQ-AUDIT-018 ← US-100, found by the re-run) noted under `traceability.md` Summary. Statistics regenerated: `REQUIREMENTS.md` table (317/94/19; 204/226), `PRD.md` §7 volume, `traceability.md` Summary + epic table + the four REQ rows and the US-239 row, `EPIC-12` summary and Counts line.
+- **G1-C3 — closed.** A-078 added for GAP-B-27; the 13 ASSUMED-without-GAP rows now reference A-033/035/037/039/042/046/047/071/075 or the new A-078..A-082; A-027, A-047, A-051, A-056, A-063, A-068 have a validation method or "Decision, no validation"; `Permission path: not applicable — …` marker added to US-037, US-038, US-051, US-126, US-156, US-244; NFR-MAINT-002 code span rewritten without pipes.
+- **G1-C5 (tag) — closed (D-037).** `DC` column added to every epic story-summary table and to `traceability.md` "Story → Requirement"; 134 demo-critical stories (M0 74, M1 60) of 214 Must. Re-scope ladder written in `PRD.md` §7.1 (Could → Should → non-DC Must → split DC Must; DC never deferred). Wave plan use is for senior-developer/qa-lead in P4.
+- **G1-C4** remains with principal-architect; `traceability.md` now links to `docs/03-architecture/nfr-traceability.md` under "## NFR traceability".

@@ -8,28 +8,28 @@
 
 ## Story summary
 
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-101 | Design tokens and token lint | M0 | Must | S | EPIC-01 | REQ-UI-001 |
-| US-102 | Light and dark themes with contrast verification | M0 | Must | M | US-101 | REQ-UI-002 |
-| US-103 | Control sizing, interaction states and reduced motion | M0 | Must | M | US-101 | REQ-UI-003, REQ-UI-004, REQ-UI-005 |
-| US-104 | Six screen states through shared components | M0 | Must | M | US-103, US-115 | REQ-UI-006, REQ-UI-007 |
-| US-105 | Offline handling and outcome toasts | M0 | Must | M | US-104 | REQ-UI-008, REQ-UI-009 |
-| US-106 | Inline form validation and semantic markup | M0 | Must | M | US-103, US-115 | REQ-UI-010, REQ-UI-022 |
-| US-107 | Responsive layout, no horizontal scroll, table-to-card | M0 | Must | M | US-103 | REQ-UI-011, REQ-UI-012 |
-| US-108 | Customer web shell | M0 | Must | M | US-107, US-117 | REQ-UI-013 |
-| US-109 | Home quote hero and sticky mobile action bar | M1 | Must | M | US-108, EPIC-07 | REQ-UI-014, REQ-UI-015 |
-| US-110 | Admin shell | M0 | Must | M | US-107, US-117, US-070 | REQ-UI-016 |
-| US-111 | Table density and route-level code splitting | M1 | Should | S | US-110, US-107 | REQ-UI-017, REQ-UI-018 |
-| US-112 | Pre-rendered public pages per locale | M1 | Must | M | US-108, US-117 | REQ-UI-019 |
-| US-113 | Accessibility gate: axe scans and keyboard operability | M0 | Must | M | US-104, US-106 | REQ-UI-020, REQ-UI-021 |
-| US-114 | Cookie consent banner | M1 | Should | M | US-112, EPIC-17 | REQ-UI-023 |
-| US-115 | Localisable strings, en/es/fr parity and ICU messages | M0 | Must | M | EPIC-01 | REQ-I18N-001, REQ-I18N-002, REQ-I18N-003, REQ-I18N-013 |
-| US-116 | Locale-aware formatting, time zones and collation | M0 | Must | M | US-115 | REQ-I18N-004, REQ-I18N-011, REQ-I18N-014 |
-| US-117 | Locale resolution, persistence and system-message locale | M0 | Must | M | US-115, EPIC-02, EPIC-15 | REQ-I18N-006, REQ-I18N-007, REQ-I18N-008 |
-| US-118 | Display currency switcher | M1 | Should | S | US-108, EPIC-17 | REQ-I18N-012 |
-| US-119 | Country-driven address layout | M1 | Must | M | US-116, EPIC-17 | REQ-I18N-005 |
-| US-120 | Pseudo-locale overflow tests and logical CSS | M0 | Must | M | US-115, US-107 | REQ-I18N-009, REQ-I18N-010 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-101 | Design tokens and token lint | M0 | Must | S | EPIC-01 | REQ-UI-001 | DC |
+| US-102 | Light and dark themes with contrast verification | M0 | Must | M | US-101 | REQ-UI-002 |  |
+| US-103 | Control sizing, interaction states and reduced motion | M0 | Must | M | US-101 | REQ-UI-003, REQ-UI-004, REQ-UI-005 |  |
+| US-104 | Six screen states through shared components | M0 | Must | M | US-103, US-115 | REQ-UI-006, REQ-UI-007 |  |
+| US-105 | Offline handling and outcome toasts | M0 | Must | M | US-104 | REQ-UI-008, REQ-UI-009 |  |
+| US-106 | Inline form validation and semantic markup | M0 | Must | M | US-103, US-115 | REQ-UI-010, REQ-UI-022 |  |
+| US-107 | Responsive layout, no horizontal scroll, table-to-card | M0 | Must | M | US-103 | REQ-UI-011, REQ-UI-012 | DC |
+| US-108 | Customer web shell | M0 | Must | M | US-107, US-117 | REQ-UI-013 | DC |
+| US-109 | Home quote hero and sticky mobile action bar | M1 | Must | M | US-108, EPIC-07 | REQ-UI-014, REQ-UI-015 | DC |
+| US-110 | Admin shell | M0 | Must | M | US-107, US-117, US-070 | REQ-UI-016 | DC |
+| US-111 | Table density and route-level code splitting | M1 | Should | S | US-110, US-107 | REQ-UI-017, REQ-UI-018 |  |
+| US-112 | Pre-rendered public pages per locale | M1 | Must | M | US-108, US-117 | REQ-UI-019 |  |
+| US-113 | Accessibility gate: axe scans and keyboard operability | M0 | Must | M | US-104, US-106 | REQ-UI-020, REQ-UI-021 |  |
+| US-114 | Cookie consent banner | M1 | Should | M | US-112, EPIC-17 | REQ-UI-023 |  |
+| US-115 | Localisable strings, en/es/fr parity and ICU messages | M0 | Must | M | EPIC-01 | REQ-I18N-001, REQ-I18N-002, REQ-I18N-003, REQ-I18N-013 | DC |
+| US-116 | Locale-aware formatting, time zones and collation | M0 | Must | M | US-115 | REQ-I18N-004, REQ-I18N-011, REQ-I18N-014 | DC |
+| US-117 | Locale resolution, persistence and system-message locale | M0 | Must | M | US-115, EPIC-02, EPIC-15 | REQ-I18N-006, REQ-I18N-007, REQ-I18N-008 | DC |
+| US-118 | Display currency switcher | M1 | Should | S | US-108, EPIC-17 | REQ-I18N-012 |  |
+| US-119 | Country-driven address layout | M1 | Must | M | US-116, EPIC-17 | REQ-I18N-005 | DC |
+| US-120 | Pseudo-locale overflow tests and logical CSS | M0 | Must | M | US-115, US-107 | REQ-I18N-009, REQ-I18N-010 |  |
 
 ## Stories
 
@@ -354,7 +354,7 @@ Feature: Admin shell
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-110, US-107
 - **Linked REQs:** REQ-UI-017, REQ-UI-018
 - **As a** staff user **I want** a compact table density option **so that** I can see more rows; and as a visitor I want fast first load.
-- **Notes:** Density is Could (comfortable 48 px, compact 36 px rows); bundle budget is Should: initial JavaScript of the pre-rendered home page at most 170 KB gzipped (ASSUMED).
+- **Notes:** Density is Could (comfortable 48 px, compact 36 px rows); bundle budget is Should: initial JavaScript of the pre-rendered home page (and every public page, NFR-WEB-004) at most 170 KB gzipped (ASSUMED, A-033, D-035).
 
 #### Acceptance criteria
 ```gherkin

@@ -9,28 +9,28 @@
 All UI stories below share these standing acceptance lines, restated as scenarios where the story is a screen: en/es/fr strings with locale date, number and currency formats; the six screen states (loading, empty, error, partial, permission-denied, offline); 360 px and 1280 px layouts (tables collapse to cards below 768 px); keyboard operability with visible focus; axe-core clean.
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-254 | Shipments list with search, filters and cursor pagination | M1 | Must | M | EPIC-09, EPIC-17 | REQ-ACCT-002 |
-| US-255 | Shipment detail with timeline, charges, documents and tracking | M1 | Must | M | US-254, EPIC-13, EPIC-11 | REQ-ACCT-003 |
-| US-256 | Drafts list, resume, delete and 30-day expiry | M1 | Must | M | EPIC-09 | REQ-ACCT-004 |
-| US-257 | Tenant isolation on every account route | M1 | Must | S | EPIC-03 | REQ-ACCT-020 |
-| US-258 | Dashboard with recent shipments, actions needed and monthly spend | M1 | Should | M | US-254, EPIC-10 | REQ-ACCT-001 |
-| US-259 | Saved quotes list | M1 | Should | S | EPIC-08 | REQ-ACCT-005 |
-| US-260 | Repeat a past shipment | M1 | Should | S | US-255, EPIC-09 | REQ-ACCT-006 |
-| US-261 | Cancel shipment entry point on the detail screen | M1 | Should | S | US-255, EPIC-09 | REQ-ACCT-007 |
-| US-262 | Address book create, edit, delete and search | M1 | Should | M | EPIC-09, EPIC-17 | REQ-ACCT-008 |
-| US-263 | Default sender address | M1 | Should | S | US-262 | REQ-ACCT-009 |
-| US-264 | Address book CSV import parsed in the browser | M1 | Could | M | US-262 | REQ-ACCT-010 |
-| US-265 | Payment methods screen | M1 | Should | S | EPIC-10 | REQ-ACCT-011 |
-| US-266 | Notification preferences with consent records | M1 | Should | S | EPIC-15 | REQ-ACCT-012 |
-| US-267 | Security settings screen | M1 | Should | S | EPIC-02 | REQ-ACCT-013 |
-| US-268 | Organisation profile and team invitations | M1 | Should | M | EPIC-02, EPIC-03, EPIC-15 | REQ-ACCT-014 |
-| US-269 | Protect the last Owner and block self role change | M1 | Should | S | US-268 | REQ-ACCT-015 |
-| US-270 | Privacy data export | M1 | Could | S | EPIC-02 | REQ-ACCT-016 |
-| US-271 | Privacy account deletion request | M1 | Could | S | US-270, EPIC-02 | REQ-ACCT-017 |
-| US-272 | Locale, display currency and unit preferences | M1 | Should | S | EPIC-05 | REQ-ACCT-018 |
-| US-273 | No navigation or routes for out-of-scope account areas | M1 | Should | S | EPIC-05 | REQ-ACCT-019 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-254 | Shipments list with search, filters and cursor pagination | M1 | Must | M | EPIC-09, EPIC-17 | REQ-ACCT-002 | DC |
+| US-255 | Shipment detail with timeline, charges, documents and tracking | M1 | Must | M | US-254, EPIC-13, EPIC-11 | REQ-ACCT-003 | DC |
+| US-256 | Drafts list, resume, delete and 30-day expiry | M1 | Must | M | EPIC-09 | REQ-ACCT-004 |  |
+| US-257 | Tenant isolation on every account route | M1 | Must | S | EPIC-03 | REQ-ACCT-020 |  |
+| US-258 | Dashboard with recent shipments, actions needed and monthly spend | M1 | Should | M | US-254, EPIC-10 | REQ-ACCT-001 |  |
+| US-259 | Saved quotes list | M1 | Should | S | EPIC-08 | REQ-ACCT-005 |  |
+| US-260 | Repeat a past shipment | M1 | Should | S | US-255, EPIC-09 | REQ-ACCT-006 |  |
+| US-261 | Cancel shipment entry point on the detail screen | M1 | Should | S | US-255, EPIC-09 | REQ-ACCT-007 |  |
+| US-262 | Address book create, edit, delete and search | M1 | Should | M | EPIC-09, EPIC-17 | REQ-ACCT-008 |  |
+| US-263 | Default sender address | M1 | Should | S | US-262 | REQ-ACCT-009 |  |
+| US-264 | Address book CSV import parsed in the browser | M1 | Could | M | US-262 | REQ-ACCT-010 |  |
+| US-265 | Payment methods screen | M1 | Should | S | EPIC-10 | REQ-ACCT-011 |  |
+| US-266 | Notification preferences with consent records | M1 | Should | S | EPIC-15 | REQ-ACCT-012 |  |
+| US-267 | Security settings screen | M1 | Should | S | EPIC-02 | REQ-ACCT-013 |  |
+| US-268 | Organisation profile and team invitations | M1 | Should | M | EPIC-02, EPIC-03, EPIC-15 | REQ-ACCT-014 |  |
+| US-269 | Protect the last Owner and block self role change | M1 | Should | S | US-268 | REQ-ACCT-015 |  |
+| US-270 | Privacy data export | M1 | Could | S | EPIC-02 | REQ-ACCT-016 |  |
+| US-271 | Privacy account deletion request | M1 | Could | S | US-270, EPIC-02 | REQ-ACCT-017 |  |
+| US-272 | Locale, display currency and unit preferences | M1 | Should | S | EPIC-05 | REQ-ACCT-018 |  |
+| US-273 | No navigation or routes for out-of-scope account areas | M1 | Should | S | EPIC-05 | REQ-ACCT-019 |  |
 
 ## Stories
 

@@ -1,6 +1,6 @@
 # Stories — conventions
 
-Owner: product-manager · Version 1.0 · 2026-11-12. One file per epic: `EPIC-NN-<slug>.md`. Story IDs `US-NNN` are unique across all epics. Requirements live in `../REQUIREMENTS.md`; NFRs in `../NFR.md`; decisions in `../../sdlc/DECISIONS.md`.
+Owner: product-manager · Version 1.1 (DC column added, D-037) · 2026-11-12. One file per epic: `EPIC-NN-<slug>.md`. Story IDs `US-NNN` are unique across all epics. Requirements live in `../REQUIREMENTS.md`; NFRs in `../NFR.md`; decisions in `../../sdlc/DECISIONS.md`.
 
 ## Epic file layout
 
@@ -14,8 +14,8 @@ Owner: product-manager · Version 1.0 · 2026-11-12. One file per epic: `EPIC-NN
 - **Depends on epics:** EPIC-xx (cross-epic dependencies are expressed at epic level)
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
 
 ## Stories
 ### US-NNN — <Title>
@@ -48,3 +48,4 @@ Feature: <story title>
 6. **Locales, states, responsive.** UI stories include scenarios or explicit AC lines for the three locales (en/es/fr), the six screen states (loading, empty, error, partial, permission-denied, offline) where they apply, and mobile (360 px) + desktop (1280 px).
 7. **Traceability.** Every REQ in the epic's areas appears in at least one story's "Linked REQs" line; every story links at least one REQ. Could REQs may be grouped into Could stories.
 8. **No design.** Stories state behaviour and outcomes; libraries, schemas and component structure are for P2/P3.
+9. **Demo-critical tag (D-037, v1.1).** The last summary-table column `DC` holds `DC` for a Must story that a step or assertion of the PRD §6.1 or §6.2 demo script cannot execute without, and is empty otherwise. Only Must stories may carry it. P4 waves DC stories first; the re-scope ladder in PRD §7.1 never defers a DC story (it splits it). Moving the tag is a product decision logged in `DECISIONS.md`.

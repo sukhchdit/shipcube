@@ -7,27 +7,27 @@
 - **Depends on epics:** EPIC-03 (organisations, membership, RBAC permissions, RLS), EPIC-04 (audit writer and viewer), EPIC-05 (app shell, i18n, six states), EPIC-15 (email transport for verification, reset, security notices), EPIC-16 (problem+json, rate limits, CSRF), EPIC-17 (seeded users)
 
 ## Story summary
-| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs |
-|---|---|---|---|---|---|---|
-| US-015 | Register an account with a compliant password | M0 | Must | M | EPIC-03, EPIC-15, US-036 | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003 |
-| US-016 | Verify email address | M0 | Must | S | US-015, EPIC-15 | REQ-AUTH-004 |
-| US-017 | Sign in with email and password | M0 | Must | M | US-015 | REQ-AUTH-005 |
-| US-018 | Refresh cookie, rotation and reuse detection | M0 | Must | M | US-017, US-044 | REQ-AUTH-006, REQ-AUTH-007, REQ-AUTH-008 |
-| US-019 | Logout and immediate revocation | M0 | Must | M | US-018 | REQ-AUTH-009 |
-| US-020 | Client-side token handling with single-flight refresh | M0 | Must | M | US-018, EPIC-05 | REQ-AUTH-010 |
-| US-021 | Password reset | M0 | Must | M | US-015, EPIC-15 | REQ-AUTH-011, REQ-AUTH-012 |
-| US-022 | Progressive delay and account lockout | M0 | Must | M | US-017, US-040 | REQ-AUTH-013, REQ-AUTH-014 |
-| US-023 | TOTP enrolment and recovery codes | M0 | Must | M | US-017 | REQ-AUTH-015, REQ-AUTH-016 |
-| US-024 | MFA challenge at sign-in | M0 | Must | M | US-023 | REQ-AUTH-017 |
-| US-025 | Mandatory TOTP enrolment for operator members | M0 | Must | S | US-023, EPIC-03 | REQ-AUTH-018 |
-| US-026 | Customer TOTP settings, re-authentication and staff recovery-code regeneration | M1 | Should | M | US-023, US-024 | REQ-AUTH-019, REQ-AUTH-020, REQ-ADMIN-008 |
-| US-027 | Sessions list and remote sign-out (API and My sessions page) | M1 | Should | M | US-019, EPIC-05 | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |
-| US-028 | Change password | M1 | Should | S | US-026 | REQ-AUTH-023 |
-| US-029 | Refuse sign-in for suspended and deactivated users | M0 | Should | S | US-017, US-019 | REQ-AUTH-024 |
-| US-030 | Admin app route guard and staff-only admission | M0 | Must | S | US-017, US-020 | REQ-ADMIN-001, REQ-ADMIN-003 |
-| US-031 | Staff sign-in, MFA challenge and enrolment screens | M0 | Must | M | US-030, US-023, US-024, EPIC-05 | REQ-ADMIN-002 |
-| US-032 | Admin landing page, permission-aware navigation and audit-viewer routes | M0 | Must | M | US-031, EPIC-03, EPIC-04, EPIC-05 | REQ-ADMIN-005, REQ-ADMIN-006, REQ-ADMIN-009 |
-| US-033 | Admin session lifetime and crawler exclusion | M0 | Should | S | US-018, US-030 | REQ-ADMIN-004, REQ-ADMIN-010 |
+| ID | Title | MS | MoSCoW | Size | Depends on | Linked REQs | DC |
+|---|---|---|---|---|---|---|---|
+| US-015 | Register an account with a compliant password | M0 | Must | M | EPIC-03, EPIC-15, US-036 | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003 | DC |
+| US-016 | Verify email address | M0 | Must | S | US-015, EPIC-15 | REQ-AUTH-004 | DC |
+| US-017 | Sign in with email and password | M0 | Must | M | US-015 | REQ-AUTH-005 | DC |
+| US-018 | Refresh cookie, rotation and reuse detection | M0 | Must | M | US-017, US-044 | REQ-AUTH-006, REQ-AUTH-007, REQ-AUTH-008 | DC |
+| US-019 | Logout and immediate revocation | M0 | Must | M | US-018 | REQ-AUTH-009 |  |
+| US-020 | Client-side token handling with single-flight refresh | M0 | Must | M | US-018, EPIC-05 | REQ-AUTH-010 | DC |
+| US-021 | Password reset | M0 | Must | M | US-015, EPIC-15 | REQ-AUTH-011, REQ-AUTH-012 |  |
+| US-022 | Progressive delay and account lockout | M0 | Must | M | US-017, US-040 | REQ-AUTH-013, REQ-AUTH-014 |  |
+| US-023 | TOTP enrolment and recovery codes | M0 | Must | M | US-017 | REQ-AUTH-015, REQ-AUTH-016 | DC |
+| US-024 | MFA challenge at sign-in | M0 | Must | M | US-023 | REQ-AUTH-017 | DC |
+| US-025 | Mandatory TOTP enrolment for operator members | M0 | Must | S | US-023, EPIC-03 | REQ-AUTH-018 | DC |
+| US-026 | Customer TOTP settings, re-authentication and staff recovery-code regeneration | M1 | Should | M | US-023, US-024 | REQ-AUTH-019, REQ-AUTH-020, REQ-ADMIN-008 |  |
+| US-027 | Sessions list and remote sign-out (API and My sessions page) | M1 | Should | M | US-019, EPIC-05 | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |  |
+| US-028 | Change password | M1 | Should | S | US-026 | REQ-AUTH-023 |  |
+| US-029 | Refuse sign-in for suspended and deactivated users | M0 | Should | S | US-017, US-019 | REQ-AUTH-024 |  |
+| US-030 | Admin app route guard and staff-only admission | M0 | Must | S | US-017, US-020 | REQ-ADMIN-001, REQ-ADMIN-003 | DC |
+| US-031 | Staff sign-in, MFA challenge and enrolment screens | M0 | Must | M | US-030, US-023, US-024, EPIC-05 | REQ-ADMIN-002 | DC |
+| US-032 | Admin landing page, permission-aware navigation and audit-viewer routes | M0 | Must | M | US-031, EPIC-03, EPIC-04, EPIC-05 | REQ-ADMIN-005, REQ-ADMIN-006, REQ-ADMIN-009 | DC |
+| US-033 | Admin session lifetime and crawler exclusion | M0 | Should | S | US-018, US-030 | REQ-ADMIN-004, REQ-ADMIN-010 |  |
 
 ## Stories
 
@@ -90,7 +90,7 @@ Feature: Register an account with a compliant password
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-015, EPIC-15
 - **Linked REQs:** REQ-AUTH-004
 - **As a** registered individual **I want** to confirm my email through a link **so that** I can use features that require a verified address.
-- **Notes:** 256-bit single-use token stored hashed, valid 24 h. Resend limited to 3 per hour per account. Unverified users can sign in; payment gating is in EPIC-11.
+- **Notes:** 256-bit single-use token stored hashed, valid 24 h. Resend limited to 3 per hour per account and 10 per hour per IP (DR-A22, NFR-SEC-005, D-035). Unverified users can sign in; payment gating is in EPIC-10 (US-208).
 
 #### Acceptance criteria
 ```gherkin
@@ -300,7 +300,7 @@ Feature: Client-side token handling with single-flight refresh
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-015, EPIC-15
 - **Linked REQs:** REQ-AUTH-011, REQ-AUTH-012
 - **As a** customer who forgot my password **I want** to reset it by email **so that** I regain access safely.
-- **Notes:** Token 256-bit, stored hashed, valid 60 minutes, supersedes earlier tokens. 3 requests per hour per account, 10 per hour per IP. EC-A10.
+- **Notes:** Token 256-bit, stored hashed, valid 60 minutes, supersedes earlier tokens. 3 requests per hour per account, 10 per hour per IP (DR-A22, NFR-SEC-005, D-035). EC-A10.
 
 #### Acceptance criteria
 Permission path: not applicable — pre-authentication token flow; invalid/expired/reused token scenarios are the negative paths
