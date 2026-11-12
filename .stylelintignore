@@ -1,0 +1,21 @@
+node_modules/
+
+# Build and coverage output, anchored to the output folders (root and workspace roots): a source folder named
+# build, dist or coverage is still linted (PR2-SEC-03).
+/dist/
+/build/
+/coverage/
+/apps/*/build/
+/apps/*/dist/
+/apps/*/coverage/
+/packages/*/dist/
+/packages/*/coverage/
+/apps/*/.react-router/
+/prisma/generated/
+
+# Documentation and agent configuration
+/docs/
+/.claude/
+
+# Seeded negative fixtures violate the rules on purpose (tools/lint/negative-fixtures.test.ts lints them explicitly)
+/tests/fixtures/lint/

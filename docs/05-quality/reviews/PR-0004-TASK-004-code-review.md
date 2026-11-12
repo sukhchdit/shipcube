@@ -1,0 +1,129 @@
+# Code review: PR #4, TASK-004 (web and admin app scaffolds), round 1
+
+| Field | Value |
+|---|---|
+| PR | https://github.com/sukhchdit/shipcube/pull/4 |
+| Branch / head | `feat/TASK-004-web-admin-app-scaffolds` @ `519bb89` (5 commits over merge-base `4da693a`) |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+| Inputs | WAVE-00.md §TASK-004; ADR-0026 §1, §2, §10 and amendments 4, 5, 10, 12; platform.md §3.3; NFR-WEB-004/005, NFR-COMPAT-001/002; tokens.json; accessibility.md §2; PR body; drafted harness ([PR comment 6823848131](https://github.com/sukhchdit/shipcube/pull/4#issuecomment-6823848131)); PR-0001 review item m8 |
+| Host constraint | Memory-constrained host with 8 reviewers in parallel. I did not run `npm ci`, a build, Docker or a full suite. I ran one targeted test file, a Prettier check, a lint probe with the TASK-002 config, and inspected the existing `build/` output in the worktree (read-only). |
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: The scaffold is clean, well-documented code. The prerender, the 302 redirect, the custom entry without isbot,
+         the jsdom project, the token theme and the no-literal-string lookup all do what ADR-0026 asks.
+         The only MAJOR is the open acceptance criterion: the Playwright + axe smoke on 3 engines x 2 widths is not
+         committed (cooldown). The PR has to wait for that commit, or the orchestrator has to split the AC formally.
+         Eight MINORs, chiefly: not-found pages are titled "Loading"/"Operator console"; SPA-fallback routes in es/fr
+         are not hydration-safe; Nginx has no compression; about 25 lint errors are predicted against TASK-002's rules.
+```
+
+## 1. Verification performed by the reviewer
+
+All Node commands ran under `export PATH="$APPDATA/fnm/aliases/default:$PATH"` (Node 24).
+
+| Check | Result |
+|---|---|
+| `jest --selectProjects unit-dom --testPathPatterns apps/web/app/routes/locale-layout` | 1 suite, **3/3 passed**. The jsdom environment, the `@platform/source` + `browser` conditions, the CSS stub and jest-dom setup all work. |
+| `prettier --check` on every changed file (excluding the lockfile) | Clean. The two `.conf.template` files have no Prettier parser; `format:check .` skips them. |
+| **Lint probe with the TASK-002 rules** (PR #2 @ `9bc9c04`): its React, i18next, jsx-a11y-x and no-console blocks, without type information, applied to this tree from a scratch config | **24 errors**, listed in §4. jsx-a11y-x reports nothing. |
+| Built output in the worktree (`apps/web/build`, `apps/admin/build`; read-only) | `es/index.html` has `<html lang="es">`, a localised `<title>`, the description, the canonical link, 4 `hreflang` alternates with x-default → `/en/`, the raw `<h1>` and `"isSpaMode":false`. The SPA fallback `index.html` has `lang="en"`, `<title>Loading</title>`, `"isSpaMode":true` and no canonical. The admin fallback is titled `Operator console`. |
+| Built CSS | The skip-link utilities are emitted in a working order (`focus:not-sr-only` comes before `focus:fixed` and `focus:px-4`/`py-2`). `--z-skip-link:70` is kept. `inset-bs-4` maps to `inset-block-start`, and `start-4` to `inset-inline-start`. |
+| Lockfile delta | Adds `size-limit`, `@size-limit/file`, `lilconfig` and `nanospinner`, all MIT. Nothing else changes. |
+| React Router 8.5.1 source | Verified two behaviours. Meta inheritance (`components.js`: a leaf route with no `meta` inherits its parent's). SPA-mode hydration (`routes.js` `shouldHydrateRouteLoader`: in SPA mode non-root routes hydrate, so the root `HydrateFallback` is rendered during hydration). |
+| `git status --porcelain` afterwards | Clean. |
+
+These were **not re-run** (host constraint), so I relied on the PR evidence: `npm ci`, full `lint`/`typecheck`/`test:unit` (157/157), `test:integration` (5/5), `build` + size, `npm audit`, and post-build `git status`. **No `test:coverage` evidence was given** (see m8).
+
+## 2. Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| M1 | **MAJOR** | `tests/e2e/*` (absent) | The TASK-004 acceptance criterion "Playwright smoke passes on Chromium, Firefox, WebKit at 360 and 1280 px with 0 serious/critical axe violations" is **not met at this head**. The DoD also asks for "axe 0 serious/critical in every state", and CLAUDE.md §8 requires the AC to be demonstrated by tests before merge. The PR states this openly; the cause is the 7-day cooldown, not the code. | Land the harness commit after 2026-11-12T18:30Z and meet every condition in §3. Round 2 reviews that commit only. |
+| m1 | MINOR | `apps/web/app/routes/not-found.tsx:4`, `apps/web/app/root.tsx:33-38`, `apps/admin/app/routes/not-found.tsx:4`, `apps/admin/app/root.tsx:33-39` | **Not-found pages carry the wrong `<title>`.** The `*` routes export no `meta`, so React Router uses the root's meta. The `error` there is `null`, because the route renders a component rather than throwing. Result: the web 404 at `/es/x` is titled "Cargando" ("Loading"), and the admin 404 is titled "Operator console". This fails WCAG 2.4.2 Page Titled, and axe does not catch it (`document-title` only checks presence). The 404 branch of `root.meta` is reached only by a thrown 404, which no route throws. | Export `meta` from both `not-found.tsx` routes, returning `notFound.meta.title` in the URL locale (web) or the browser locale (admin). Add a unit test, and an e2e assertion on `/es/no-such-page` (§3 item 4). |
+| m2 | MINOR | `apps/web/app/root.tsx:12-13, 45-55`, `apps/web/app/i18n/use-locale.ts:11-13` | **SPA-fallback routes in es/fr are not hydration-safe.** `index.html` is rendered at `/`, so it carries `lang="en"`, "Loading" and `<title>Loading</title>`. Nginx serves it for every non-prerendered URL. In SPA mode the client hydrates the root `HydrateFallback` with the **real** URL, so `/es/x` renders `lang="es"` and "Cargando". React reports a hydration mismatch: the attribute is not patched, and the text mismatch forces a client re-render of the whole document. Today this affects only the 404. ADR-0026 §2, though, keeps the prefix on every authenticated route, so every `/es/account/...` page will inherit the problem, and TASK-042 will copy this Layout. The admin app avoids it for `lang` (defers to an effect), but its `meta()` reads the cookie at render time (`browserLocale()`). That is inconsistent with the stated "first client render matches the build-time HTML". React 19 probably patches hoisted `<title>` text without error, so this is lower risk. | During **SPA-mode** hydration, render with `DEFAULT_LOCALE` and switch after hydration. For example, use `useSyncExternalStore(noop, () => urlLocale, () => (isSpaMode ? DEFAULT_LOCALE : urlLocale))`, where `isSpaMode` comes from `window.__reactRouterContext`. Prerendered pages already match. Alternatively, write the TASK-042 design note now and gate it with the e2e console-error check (§3 item 5). Either way, prove it with an e2e case on `/es/no-such-page` and on the admin with `lng=fr`. |
+| m3 | MINOR | `infra/nginx/web.conf.template:65`, `infra/nginx/admin.conf.template:134` | **No compression is active.** `gzip_static on` serves only pre-built `*.gz` files, and the build emits none. `gzip on` is missing. This misses platform.md §3.3 ("`gzip_static on` plus dynamic `gzip` for small text") and NFR-WEB-005 ("Brotli or gzip is on"). | Add `gzip on; gzip_vary on; gzip_types text/css application/javascript text/javascript application/json image/svg+xml text/plain;` at server level in both templates. Assert it in `nginx-templates.test.ts`. Track the pre-compression build step (`*.gz`) to TASK-022. |
+| m4 | MINOR | Lint coordination with PR #2 (TASK-002) | My probe predicts **24 errors** (§4) once TASK-002's config applies, plus one type-aware `@typescript-eslint/require-await` (m4-e). The PR says it was "re-checked against TASK-002's rules on rebase", but the current head has not been. The probe shows: <br>• 2 × `no-console` in `entry.server.tsx`.<br>• 1 × `react-hooks/set-state-in-effect` in `apps/admin/app/i18n/locale-context.tsx:14`.<br>• 21 × `i18next/no-literal-string`: 13 in test files, and 8 on non-copy props (`kind`, `targetId`, `aria-current`, the ternary `'not-found' : 'error'`). | Whichever PR merges second fixes it: <br>(a) **TASK-002 config:** exclude `TEST_FILES` from `i18next/no-literal-string`, since tests need literal fixtures; consider adding `kind`, `targetId` and `aria-current` to `jsx-attributes.exclude`.<br>(b) **This PR:** replace the `useEffect`/`setState` in `useDetectedLocale` with `useSyncExternalStore(noop, browserLocale, () => DEFAULT_LOCALE)`, which also fixes m2's admin half. In `entry.server.tsx`, use a justified `// eslint-disable-next-line no-console -- build-time prerender diagnostics (ADR-0026 am. 10)` or a config exemption for `apps/*/app/entry.server.tsx`. Re-run `npm run lint` after the rebase and attach the output. |
+| m5 | MINOR | `apps/web/app/seo/public-origin.ts:2, 21-24` | `VITE_PUBLIC_ORIGIN` silently defaults to `http://localhost:8080` in **every** build, release images included. A production build without the variable bakes localhost canonical and `hreflang` URLs into the pre-rendered HTML. This is a fail-open on an SEO-critical NFR-WEB-005 output. The variable is also not in any key register or `.env.example`. | Register `VITE_PUBLIC_ORIGIN` (build-time, public, not a secret) in TASK-005's key register. Make the TASK-022 Dockerfile pass it as a required build arg. Make the header/response suite assert that the canonical origin equals the configured origin. A fail-fast option: throw when `import.meta.env.PROD && process.env.CI && !VITE_PUBLIC_ORIGIN` at prerender. |
+| m6 | MINOR | `.size-limit.json:3-24` | **The budgets don't match the shape of NFR-WEB-004.** `web assets/*.js ≤ 170 kB` sums **every** web chunk. It fails closed today (119.8 kB), but it breaks falsely once the web app gains authenticated lazy routes, since NFR-WEB-004 gives those 350 kB. Also missing: "each lazy route chunk ≤ 150 kB" and "admin code absent from the web bundle and vice versa". | Track to the first task that adds lazy routes (TASK-038/042 or the wizard). Split the checks into public initial (entry + root + locale-layout + home chunks), authenticated initial, and a per-file `≤ 150 kB` lazy check. Add the manifest test that NFR-WEB-004 names. No change is needed for this PR beyond a comment in `.size-limit.json` or the PR naming the follow-up. |
+| m7 | MINOR | `apps/web/tests/prerender.int.test.ts:238-251` | NFR-WEB-005 asks for "main content in the raw HTML: title, **meta description**, canonical, hreflang, and **visible primary heading**". The test asserts the title, lang, canonical and hreflang, but not the description or `<h1>`. The built HTML has both, so this is a missing guard rather than a defect. | Add `expect(html).toContain('<meta name="description" content="…localised…"/>')` and an `<h1[^>]*>{home.hero.title}</h1>` assertion per locale. |
+| m8 | MINOR | `jest.config.ts:39-49`; evidence table | There is no `npm run test:coverage` evidence. Both `app/entry.server.tsx` files (about 50 lines) fall inside `collectCoverageFrom` but run only at build time, so v8 reports them at 0%. DoD: "coverage not reduced". | Attach the `test:coverage` summary for this head. If entry.server drags the total down, exclude `apps/*/app/entry.server.tsx` with a comment: it is build-time only and exercised by `prerender.int.test.ts`. |
+| n1 | NIT | `infra/nginx/web.conf.template:26`, drafted `static-server.ts`, `tools/repo/nginx-templates.test.ts:197` | The DR-A18 Accept-Language regex exists in three copies (Nginx, e2e static server, test extractor). The test reads it from the template; the static server hard-codes it. | Have `static-server.ts` extract the regex from the template the same way the test does. |
+| n2 | NIT | `packages/ui/src/theme.css:10-46, 67-104` | `--text-*`, `--shadow-*`, `--font-weight-*`, `--leading-*` and `--ease-*` are not reset, so off-token utilities (`text-5xl`, `shadow-xl`) exist, and the default `text-3xl` line-height (2.25rem) differs from token `font.lineHeight.3xl` (2.375rem). The dark palette is duplicated verbatim. | TASK-038 (compiled theme and token lint) owns this. Note it on that task. |
+| n3 | NIT | `apps/web/app/routes/root-redirect.test.tsx:9` | `async` test without `await`. Type-aware `require-await` (TASK-002 `recommendedTypeChecked`) flags it. | Drop `async`. |
+| n4 | NIT | `tools/test-support/jsdom-environment.mjs:10-20` | Two risks. Node's real `fetch` is exposed in jsdom, so a component test can reach the network. Node's `AbortSignal` replaces jsdom's, which can break jsdom's `addEventListener(..., { signal })` validation in later component tests (Radix, TanStack). | Leave a comment naming both. Consider a setup that fails on unmocked `fetch` (nock is already a root devDependency). |
+| n5 | NIT | `apps/web/app/components/locale-switcher.tsx:7-10` | The language switch drops `?query` and `#hash`. That is harmless now, but it will lose `/{lng}/track?number=…` later. | Carry over `search` and `hash` from `useLocation()`. |
+| n6 | NIT | `infra/nginx/web.conf.template:91`, `admin.conf.template:161` | `location ~ /\.` also denies `/.well-known/`, which `security.txt` may need later. `/es` and `/es/` both return 200 (the canonical covers it). | Note for TASK-022: `location ^~ /.well-known/` before the dotfile rule, and optionally `301 /es → /es/`. |
+| n7 | NIT | `apps/web/tests/prerender.int.test.ts:256-257` | The test asserts on the React Router CLI log text (`Prerender (html): SPA Fallback -> …`), which can change across 8.x minors. The file assertions below it are the real guard. | Keep the file assertions and treat the log match as secondary. |
+| n8 | NIT | PR body ("no-store for HTML") | The template correctly uses `no-cache` for HTML (NFR-WEB-005) and `no-store` only for the `/` 302. The body wording is wrong. | Fix the PR text. |
+
+**Focus items from the dispatch**
+
+1. **`typecheck` = `npm run typegen && tsc -b`.** Acceptable. Route `+types` cannot resolve without typegen. Typegen writes only to the git-ignored `.react-router/`. The `isbot`/`npm install` path is closed by guard 10(a). `npm run <script>` still runs under `ignore-scripts=true` (only pre/post hooks are skipped). Conditions: principal-architect ratifies it in an ADR-0002 amendment and CLAUDE.md §2 is reworded ("typegen, then `tsc -b`"). Lane A must call `npm run typecheck`, not a bare `tsc -b`. `root-scripts.test.ts` now takes the segment after the last `&&`, which is fine.
+2. **Stopgap i18n.** Good. I found no literal user-facing JSX strings; the i18next hits in the probe are props and test fixtures. en/es/fr parity holds at compile time (`Record<Locale, Messages>`) and at test time (leaf-key equality, no empty values) for both apps. The files and key paths match what TASK-042 keeps. The missing-key fallback goes to `en`, then to the key itself.
+3. **Prerender.** Correct. The pages are `/en`, `/es` and `/fr`, with `lang`, title, description, canonical, en/es/fr hreflang plus x-default → en, and the raw `<h1>`. `/` is not prerendered, so `index.html` is the content-free fallback. Nginx sends a 302 with cookie → Accept-Language → `en`, `no-store` and `Vary: Cookie, Accept-Language`, with relative `Location` (`absolute_redirect off`). The `$status:$uri` map keeps a 404 from being cached as immutable. See m1, m2, m3, m5 and m7.
+4. **size-limit.** The configuration fails the build (the real-CLI negative test is good). The numbers match NFR-WEB-004 (170 / 50 / 350 / 50 kB gzip); see m6 for the semantics. Dependencies: 4 packages, all MIT, maintained. `preset-app` was rightly rejected.
+5. **entry.server.tsx.** Correct and minimal. There is no `isbot`, and it awaits `allReady` (static generation). An `onError` sets 500, which makes React Router's prerender fail the build: fail closed. The guard test covers both conditions with negative fixtures (missing entry; `isbot` in each of the 3 dependency fields). Only `no-console` remains (m4).
+6. **jsdom project.** m8 from PR-0001 is **resolved**: `customExportConditions: ['@platform/source','browser']`, `*.test.tsx` only, CSS stubbed, jest-dom on `@jest/globals`, Fetch globals for react-router. I verified it by running the project. See n4.
+7. **Tokens into Tailwind 4.** The semantic values match `tokens.json` (light and dark; focus ring blue-600/blue-400; `zIndex.skipLink` 70; breakpoints; container 1280/720; radius; system font stack, D-UX-001). Utility names follow the tokens.md mapping (`--color-bg-surface` → `bg-surface`), and the palette and breakpoint resets prevent `bg-red-500`. The focus ring and reduced-motion base styles are present. See n2.
+8. **Shell accessibility.** Good. The skip link is the first focusable element and targets `main#main` (`tabIndex=-1`). Web has banner, a localised `nav` "Language", one `main`, contentinfo, a single `h1`, `lang` on language names, `aria-current="page"`, and targets of 36 px (44 px with a coarse pointer). The loading state has `role="status"`. Admin has banner, main and a single `h1`; its "Admin" nav comes in a later task. Defects: m1 (title) and m2 (lang on SPA fallback).
+9. **Lint after TASK-002.** See m4 and §4.
+
+## 3. Playwright + axe follow-up: what must be true for the next commit (closes M1)
+
+I reviewed the drafted harness as a preview. The design is sound: 6 projects, axe on every load with serious/critical blocking, a static server that mirrors the Nginx routing with a traversal guard, and ports below the Windows dynamic range. The next commit must meet all of these:
+
+1. **Supply chain.** Install exactly `@playwright/test@1.65.0` and `@axe-core/playwright@4.14.0` **after** 2026-11-12T18:30Z, with `--ignore-scripts` and no cooldown override. The lockfile delta may contain only these two plus their transitive set (`playwright`, `playwright-core`, `axe-core`), with licences Apache-2.0/MPL-2.0. `npm audit --audit-level=high` must exit 0. Browsers are installed via `npm exec --no -w tests/e2e -- playwright install chromium firefox webkit`, never `npx`.
+2. **Evidence.** A green run of **all 6 projects** (`chromium|firefox|webkit` × `360|1280`) from the root `npm run test:e2e` against a fresh `npm run build`, with 0 retries locally. Paste the list-reporter totals. Afterwards `git status --porcelain` is empty, and `npm run typecheck` passes with the new `tests/e2e` sources.
+3. **Deterministic axe.** The `page.on('load')` scans race the test's own interactions (Tab, Enter, focus assertions), so results depend on timing. Scan at defined points instead: after each `goto` has settled, after state changes via `scanA11y()`, and at teardown. If the event hook stays, await pending scans before the next action. Keep the navigation-race swallow narrow.
+4. **States covered** (DoD "axe 0 serious/critical in every state"). Add these cases:
+   - web **not-found** `/es/no-such-page`: `html[lang=es]`, Spanish `h1` and **title**, which verifies m1 and m2;
+   - web `/es` without the trailing slash;
+   - admin with cookie `lng=fr`: `html[lang=fr]`, French `h1` and title;
+   - the loading state, if it can be observed.
+   The error state is optional; a unit test covers it already.
+5. **Console guard.** The fixture fails on `pageerror` and on `console.error` messages, which include React hydration errors. This is the executable check for m2, and the base for the CSP `securitypolicyviolation` listener that TASK-022 adds (NFR-SEC-006).
+6. **Mobile width.** The 360 px projects use `Desktop *` descriptors with only the viewport overridden, so `isMobile`/`hasTouch` are off and the `pointer-coarse:` 44 px targets are never exercised. For chromium-360 and webkit-360, use a mobile descriptor (e.g. `devices['Pixel 7']` / `devices['iPhone 15']`) with the width set to 360. Firefox has no `isMobile`, so it keeps the viewport only. Alternatively, document the deviation against NFR-COMPAT-001/002.
+7. **Robustness of the static server.** Wrap `decodeURIComponent` (a malformed `%` must return 400, not crash the server). Derive the Accept-Language regex from `infra/nginx/web.conf.template` (n1).
+8. **tsconfig.** Node type-stripping executes `static-server.ts`, so add `erasableSyntaxOnly: true` to `tests/e2e/tsconfig.json`. That way `tsc` rejects any syntax Node cannot strip.
+9. **Lint.** The new files pass `npm run lint` under whichever ESLint config is on `main` at merge time (TASK-002's, if it merged first).
+
+## 4. Lint probe output (TASK-002 rules applied to this head, no type information)
+
+| Rule | Count | Locations |
+|---|---|---|
+| `no-console` | 2 | `apps/web/app/entry.server.tsx:21`, `apps/admin/app/entry.server.tsx:21` |
+| `react-hooks/set-state-in-effect` | 1 | `apps/admin/app/i18n/locale-context.tsx:14` |
+| `i18next/no-literal-string`, source | 8 | `apps/{web,admin}/app/root.tsx:58-59` (ternary `'not-found' : 'error'`, 2 each); `apps/{web,admin}/app/routes/not-found.tsx:5` (`kind="not-found"`); `apps/web/app/routes/locale-layout.tsx:13` and `apps/admin/app/routes/shell.tsx:15` (`targetId="main"`); `apps/web/app/components/locale-switcher.tsx:31` (`'page'`) |
+| `i18next/no-literal-string`, tests | 13 | `apps/admin/app/i18n/locale-context.test.tsx:36`; `apps/admin/app/root.test.tsx:20,35,52`; `apps/web/app/root.test.tsx:23`; `apps/web/app/routes/root-redirect.test.tsx:22,34`; `packages/ui/src/skip-link.test.tsx:12 (×2),13,24 (×2)` |
+| Type-aware (predicted, not run) | 1 | `@typescript-eslint/require-await` at `apps/web/app/routes/root-redirect.test.tsx:9` (n3) |
+
+## 5. Merge notes
+
+- **Can it merge before the Playwright commit? No, not as TASK-004 "Done".** The Playwright smoke is a listed acceptance test of TASK-004. CLAUDE.md §5 (Git) and §8 require the DoD, including "AC demonstrated by tests", before merging to `main`. The cooldown clears at 2026-11-12T18:30Z, a matter of hours, so waiting costs little. **Recommendation: hold the merge.** Land the harness commit plus the m1/m3/m4(b)/m7 fixes, then run round 2. Round 2 verifies only §3, the listed MINOR fixes, and a rebase on the then-current `main`.
+- **Exception, if the orchestrator needs the web-core/admin-core locks released earlier for batch 0.3:** merge only after a formal AC split, i.e. a DECISIONS.md entry plus a new tracked task (e.g. "TASK-004a Playwright + axe harness", e2e-core lock, due before the Wave 0 exit gate) in `task-map.csv`/traceability. M1 then moves to that task, and this PR becomes APPROVED_WITH_NITS once m1, m3 and m4(b) are fixed. Without the split, the merge would breach the DoD guardrail.
+- **Merge order with PR #2 (TASK-002).** Whichever merges second rebases and fixes §4. The cleaner split: TASK-002 excludes test files from `i18next/no-literal-string`, and TASK-004 fixes the source hits (m4b).
+- **Typecheck deviation.** principal-architect records it in an ADR-0002 amendment and the CLAUDE.md §2 wording (focus item 1).
+- **Tracked to other tasks (not blocking this PR):**
+  - TASK-022: m5 build arg, the `*.gz` part of m3, n6.
+  - TASK-038: n2.
+  - TASK-042: the m2 pattern.
+  - Lazy-route task: m6.
+  - TASK-005: register `VITE_PUBLIC_ORIGIN` (m5).
+
+## 6. What is good (keep these patterns)
+
+- Every guard has a negative case. The `isbot` and entry guards use fixtures; the size-limit CLI is exercised for real on a fixture; the Nginx Accept-Language regex is extracted from the template and run against the cases.
+- The prerender acceptance test builds into a temp dir via `APP_BUILD_DIR`. It never skips, and never touches `build/`.
+- The cache map is keyed on `$status:$uri`, so a missing asset is never cached as immutable. Every `add_header` is at server level, and a test enforces that.
+- Locale routing is derived from one `LOCALES` constant (routes, prerender list, hreflang). Unknown prefixes fall through to the not-found route instead of a param route.
+- Comments explain *why*, citing ADR, NFR and decision IDs, without narrating the code.
+
+## 7. Security flags for security-analyst
+
+- The CSP, HSTS toggle and Permissions-Policy are absent until TASK-022/SPK-06, as the ADR accepts. Confirm this is tracked.
+- `VITE_PUBLIC_ORIGIN` is inlined into the client bundle (the `VITE_` prefix), so it must never carry a secret. It fails open to localhost (m5).
+- The `lng` cookie is set client-side without `Secure` on http by design (ADR-0026 am. 4). Confirm `Secure` on https: `serializeLocaleCookie(…, protocol === 'https:')` does this.
+- Drafted e2e static server: the path-traversal guard (`normalize` + `startsWith(root + sep)`) is correct. A malformed URI crashes the process (test-only; §3 item 7).
+- The jsdom test environment exposes the real Node `fetch` (test-only network egress; n4).
+- `entry.server.tsx` logs render errors with `console.error` at build time only. There is no request data, so no PII path exists.

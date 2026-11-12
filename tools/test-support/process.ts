@@ -30,9 +30,14 @@ export function findRepoRoot(start: string = process.cwd()): string {
   }
 }
 
-export function runNode(args: readonly string[], options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): RunResult {
+/** `input` is written to the child's stdin (then closed). */
+export function runNode(
+  args: readonly string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; input?: string },
+): RunResult {
   const result = spawnSync(process.execPath, [...args], {
     cwd: options.cwd,
+    ...(options.input === undefined ? {} : { input: options.input }),
     env: options.env ?? process.env,
     encoding: 'utf8',
     timeout: options.timeoutMs ?? 120_000,

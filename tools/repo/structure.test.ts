@@ -62,7 +62,9 @@ describe('repository structure (US-001, REQ-PLAT-001)', () => {
     let withoutAuthz: string;
     beforeAll(() => {
       complete = fixture();
+      // Gherkin: "the folder packages/authz is renamed": the renamed folder exists, the original does not.
       withoutAuthz = fixture(['packages/authz']);
+      mkdirSync(join(withoutAuthz, 'packages', 'authz-old'));
     });
 
     it('[AT-US-001-02] exits non-zero and names "packages/authz" when it is renamed', () => {
@@ -73,8 +75,8 @@ describe('repository structure (US-001, REQ-PLAT-001)', () => {
 
     it('[AT-US-001-01] exits zero on a complete tree', () => {
       const result = runNode([tsxCli, checkCli, complete], { cwd: repoRoot });
-      expect(result.stderr).toBe('');
       expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Repository structure complete.');
     });
   });
 });
