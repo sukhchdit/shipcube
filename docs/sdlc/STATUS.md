@@ -31,6 +31,9 @@
 | 0.2 | TASK-003 Prisma 7 + PG 18 baseline + engine pin D-ARCH-041 (PR #5) | senior-developer → database-engineer (opus) | merged 5964ccc | ✅ | ✅ APPROVED_WITH_NITS r3 | ✅ PASS_WITH_FOLLOW-UPS r3 | ✅ main 5964ccc post-merge (orchestrator): ci, deps:rebuild, lint, fmt, tc, unit 289/289, integration 28/28, build, audit, plan gen no drift, clean tree | ✅ | 1 | – |
 | 0.2 | TASK-004 web + admin scaffolds (PR #4; Playwright+axe after cooldown 20:18Z) | senior-developer → frontend-developer (opus cont.) | feat/TASK-004-… @50b4831 (main merged) | 🟡 harness pending | r2 CHANGES_REQUESTED (only M1 harness; R2-m1/m2 lint) | PASS_WITH_FOLLOW-UPS r1 (R2 on harness) | 🟡 merge-main: lint (clean typegen), tc, unit 229 ✅; unit-dom/int/build/cov re-run pending (host reaped) | | 1 | harness ≥20:18Z + full re-gate → r3 |
 | 0.2 | TASK-005 packages/config + key register (PR #3) | senior-developer → backend-developer (sr-dev completed) | feat/TASK-005-… @c277ea6 (main merged) | ✅ | ✅ APPROVED_WITH_NITS r2 (875409d; R2-m1 Joi/Zod predicate parity → fc2) | ✅ PASS_WITH_FOLLOW-UPS r2 (PR3-SEC-12 MEDIUM → fc2) | ✅ merge-main: lint, fmt, tc, unit 525, build, audit, clean (sr-dev); coverage in fc2 | | 2 | fix cycle 2 ▶ (D-ORCH-007) |
+| 0.3 | TASK-008 SPK-03 RLS + Prisma 7 interactive tx (pulled fwd, D-ORCH-008) | senior-developer → database-engineer (opus) | feat/TASK-008-* | ▶ | | | | | 0 | |
+| 0.3 | TASK-009 SPK-02 carrier API docs capture (pulled fwd) | senior-developer → backend-developer (sonnet) | feat/TASK-009-* | ▶ | | | | | 0 | |
+| 0.4 | TASK-013 permission catalogue + seeded roles (pulled fwd) | senior-developer → backend-developer (opus) | feat/TASK-013-* | ▶ | | | | | 0 | |
 
 ## Escalations in progress
 _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuation / sr-dev completion — not fix cycles)
