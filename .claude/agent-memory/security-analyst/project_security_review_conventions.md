@@ -27,6 +27,13 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **Type-stripping PR sources (PR-0008).**
   - Use `stripTypeScriptTypes(code, { mode: 'transform' })`. The default strip mode rejects constructor parameter properties (`constructor(readonly x: string)`), which the authz package uses.
   - In probe scripts, build file URLs with `pathToFileURL`. Hand-built `replaceAll('\\', '/')` broke again in a Bash heredoc.
+- **Probing Prisma runtime behaviour without a database (PR-0011).**
+  - Strip the PR's sources and the worktree's `prisma/generated/prisma` into scratch.
+  - Build `new PrismaClient({ adapter: fakeFactory })`. `fakeFactory` is `{provider:'postgres', adapterName, connect()}`, and the adapter returns `{queryRaw, executeRaw, executeScript, startTransaction, dispose}`. The transaction has `options:{usePhantomQuery:false}` and savepoint methods.
+  - Log each SQL with a `ROOT`/`TXn` tag. Result sets are `{columnNames, columnTypes (7 = Text), rows}`.
+  - Throw `new DriverAdapterError({kind:'postgres', originalCode, originalMessage, …})` from `@prisma/driver-adapter-utils` to drive P2010/P2039.
+  - This proves transaction-binding and escapes cheaply.
+  - The scratch `node_modules` junction vanished once mid-session, so re-check it before re-running.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
