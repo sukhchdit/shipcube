@@ -8,6 +8,7 @@ metadata:
 The PR #5 review (TASK-003) is in `docs/05-quality/security/PR-0005-TASK-003-security-review.md`. IDs are PR5-SEC-01..13.
 - R1 (head `d8ba197`): PASS_WITH_FOLLOW-UPS. 01 MEDIUM (plaintext role passwords in the PG log), 02/03/04 LOW, 05-10 INFO.
 - R2 (head `4574a14`, 2026-11-12): PASS_WITH_FOLLOW-UPS. **Closed 01, 02, 03, 06** (SCRAM verifiers in `tools/db/scram.ts`; rule-12 deny-by-default; `effectiveEndpoint` reset guard; gunzip cap). New: **11 LOW** (rule 13 misses `ALTER ROUTINE` and a repeated `SET search_path`, where PG's last SET wins), 12 INFO (secret vars name-based), 13 INFO (reset child env carries the bootstrap URL).
+- R3 (head `614eb96`, merge-main delta, 2026-11-12): verdict unchanged. Bootstrap SQL and the engine pin are byte-identical. The lockfile differs from main only in the root devDeps. The ESLint relaxations are import-hygiene only (`prisma/tests/**` is already in TEST_FILES). New: **14 INFO**, the reset guard is not carried in the type, because `@types/pg` `connectionString?: string | undefined` accepts undefined and `pg` then falls back to the libpq env.
 - **Ruling recorded:** a SCRAM verifier in the PG log is acceptable, because it equals `pg_authid` exposure, the same as psql `\password`. It rests on machine-generated passwords, log ACLs and TLS verify-full at M5.
 - **SEC-FU-PR1.** D-ARCH-041 is CONFIRMED. D-ARCH-003 rev 4 is confirmed as policy only: `tools/ci/` registers don't exist yet, so the TASK-007 half stays open.
 
@@ -37,7 +38,7 @@ The PR #5 review (TASK-003) is in `docs/05-quality/security/PR-0005-TASK-003-sec
   - the registers per D-ARCH-003 rev 4, with the elkjs `via` chain from `prisma` down;
   - `NODE_OPTIONS` preload refusal and no `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **TASK-016:** C13 runs post-bootstrap in every lane; the catalog harness uses `options`; C5/C11 assert the `pg_default_acl` `ns=0` rows; owner of linter rules 3–9 and 11 (SEC-TC-33).
-- **TASK-034:** the rehearsal uses `options`. PR5-SEC-13: filter the `migrate deploy` child env. (The `db:reset` host check was fixed in TASK-003 R2.)
+- **TASK-034:** the rehearsal uses `options`. PR5-SEC-13: filter the `migrate deploy` child env. PR5-SEC-14: `resetTarget` returns the validated `bootstrapUrl: string`. (The `db:reset` host check was fixed in TASK-003 R2.)
 - **TASK-006:** the query-param allow-list in `toPoolConfig`.
 
 Related: [[project-p5-wave0-supply-chain]], [[project-p3-security-conditions]], [[project-p5-wave0-config-review]], [[project-security-review-conventions]]

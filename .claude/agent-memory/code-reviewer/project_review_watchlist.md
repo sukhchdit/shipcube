@@ -43,13 +43,14 @@ Routed:
 - TASK-022/TASK-111: `gzip_proxied`/`gzip_http_version` behind the edge or CloudFront.
 - TASK-014: IPv6 `listen` with `default_server`.
 
-PR #5 (TASK-003) r2 at 4574a14 was APPROVED_WITH_NITS (2026-11-12). The PR #1 TASK-003 items (m6, R2-n5) are closed. Routed:
+PR #5 (TASK-003) r2 at 4574a14 was APPROVED_WITH_NITS (2026-11-12). r3 merge-main delta at 614eb96 was also APPROVED_WITH_NITS. The PR #1 TASK-003 items (m6, R2-n5) are closed. Routed:
 - TASK-016 (owns `tools/db/lint-migrations.ts` rules 3–9/11/14):
+  - R3-n1: `prisma/tests/**` has `import-x/no-relative-packages: 'off'` (eslint.config.mjs ~:417). Restrict its targets with a boundaries policy: tools-db, tools/test-support, db-platform, prisma-generated.
   - R2-m1, rule 13: `FIXED_PATH` matches anywhere, so a second `SET search_path = public` wins in PostgreSQL (last value kept); require exactly one SET.
   - R2-m2, rule 10: blind to UPDATE/DELETE inside `DO` bodies.
   - R2-n1: `U&"…"` identifiers evade rule 12 in both lanes.
 - TASK-006: runtime pool `statement_timeout` (m7).
-- TASK-014: reset portless URL with `PGPORT` set (R2-n3); silent deploy-timeout exit (R2-n4).
+- TASK-014: reset portless URL with `PGPORT` set (R2-n3); silent deploy-timeout exit (R2-n4); `reset.ts` passes `string|undefined` bootstrapUrl, guarded only in `resetTarget` (R3-n2).
 - Architect:
   - data-model §8.3 rule 13 still says "header up to AS".
   - D-ARCH-049's rule-12 "precision" sentence is superseded by deny-by-default.
