@@ -28,4 +28,5 @@ node_modules/
 
 # Seeded negative fixtures violate the rules on purpose (tools/lint/negative-fixtures.test.ts lints them explicitly)
 /tests/fixtures/lint/
+/tests/fixtures/semgrep/
 /tools/deps/fixtures/
