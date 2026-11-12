@@ -106,10 +106,10 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-ORG-012 | M1 | Should | US-085 | organisations · ADR-0008 §Roles; ADR-0006 am. 12 step-up; data-model §3.2 memberships (suspend/remove) | TASK-231 | – | Planned |
 | REQ-ORG-013 | M1 | Should | US-085 | organisations · ADR-0016 am. 5(f) (`LAST_OWNER` 422); data-model §3.2 owner invariant | TASK-231 | – | Planned |
 | REQ-ORG-014 | M1 | Should | US-085 | organisations · data-model §3.2 (INDIVIDUAL single-membership constraint) | TASK-231 | – | Planned |
-| REQ-RBAC-001 | M0 | Must | US-065 | packages/authz · ADR-0008 §Permission catalogue (`PERMISSIONS` typed constants) | TASK-013 | – | Planned |
-| REQ-RBAC-002 | M0 | Must | US-066 | packages/authz + prisma/ · ADR-0008 §Role seed (operator roles); data-model §9 seed plan | TASK-013 | – | Planned |
-| REQ-RBAC-003 | M0 | Should | US-066 | packages/authz · ADR-0008 §Role seed (partner roles); ADR-0011 partner seam | TASK-013 | – | Planned |
-| REQ-RBAC-004 | M0 | Must | US-066 | packages/authz · ADR-0008 §Build-time tests (Super Admin holds all; Viewer exclusions, D-051) | TASK-013 | – | Planned |
+| REQ-RBAC-001 | M0 | Must | US-065 | packages/authz · ADR-0008 §Permission catalogue (`PERMISSIONS` typed constants) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-RBAC-002 | M0 | Must | US-066 | packages/authz + prisma/ · ADR-0008 §Role seed (operator roles); data-model §9 seed plan | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-RBAC-003 | M0 | Should | US-066 | packages/authz · ADR-0008 §Role seed (partner roles); ADR-0011 partner seam | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-RBAC-004 | M0 | Must | US-066 | packages/authz · ADR-0008 §Build-time tests (Super Admin holds all; Viewer exclusions, D-051) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RBAC-005 | M0 | Must | US-067 | platform · ADR-0003 §Route metadata (`defineRoute` refuses routes without permission); ADR-0008 | TASK-020 | – | Planned |
 | REQ-RBAC-006 | M0 | Must | US-068 | platform · ADR-0003 §Request pipeline (authenticate → authorise → validate → execute → audit) | TASK-060 | – | Planned |
 | REQ-RBAC-007 | M0 | Must | US-069 | packages/authz + packages/audit · ADR-0008; ADR-0007 §Capture (`PERMISSION_DENIED` entry, `permission_denied` event) | TASK-104 | – | Planned |
@@ -119,7 +119,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RBAC-011 | M0 | Must | US-071 | packages/authz · ADR-0008 §Matrix generator (route × role, 401, cross-tenant 404); ADR-0024 | TASK-027 | – | Planned |
 | REQ-RBAC-012 | M1 | Must | US-072 | packages/authz · ADR-0008 (`*:download`/`*:export` permissions); ADR-0021 (presign only after permission) | TASK-162 | – | Planned |
 | REQ-RBAC-013 | M0 | Should | US-073 | packages/authz + prisma/ · ADR-0008 §Versioned seeds/migrations only; data-model §8 | TASK-221 | – | Planned |
-| REQ-RBAC-014 | M0 | Must | US-065 | packages/authz · ADR-0008 §Catalogue completeness test (every referenced string declared) | TASK-013 | – | Planned |
+| REQ-RBAC-014 | M0 | Must | US-065 | packages/authz · ADR-0008 §Catalogue completeness test (every referenced string declared) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-001 | M0 | Must | US-086 | packages/audit · ADR-0007 §Capture (metadata-driven middleware, allow-listed direct callers); ADR-0003 | TASK-029 | – | Planned |
 | REQ-AUDIT-002 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (action types incl. `STATE_TRANSITION`, `CONFIG_CHANGE`) | TASK-025 | – | Planned |
 | REQ-AUDIT-003 | M0 | Must | US-087 | packages/audit · ADR-0007 §Storage columns; data-model §3.4 `audit_entries` | TASK-025 | – | Planned |
