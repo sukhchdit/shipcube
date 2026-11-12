@@ -1,3 +1,7 @@
 - [P3 security conditions](project_p3_security_conditions.md) — G2-C3 closed 2026-11-12 (§16); new LOW SEC-P3-34..36 with task IDs; P5/G3/G4-prod re-checks
 - [Security review conventions](project_security_review_conventions.md) — OWASP 2021 codes, severity matrix, routing, npm registry recipe, dependency-auditor turn limit
 - [P5 Wave 0 supply chain](project_p5_wave0_supply_chain.md) — PR-0001 R1+R2 PASS_WITH_FOLLOW-UPS; @platform pin side effects (audit signatures), Prisma engine, bcrypt; task checks
+- [P5 PR-0002 lint controls](project_p5_pr2_lint_controls.md) — PR2-SEC-01..08: inline-disable gap (MEDIUM), bcrypt bypasses, .jsx/build ignores, Prisma lint unowned; task checks
+- [P5 config review](project_p5_wave0_config_review.md) — PR-0003 TASK-005 PASS_WITH_FOLLOW-UPS; NODE_OPTIONS/pg sslmode/ioredis ?tls= bypass facts; TASK-004/006/014/040+ checks
+- [P5 Wave 0 DB baseline](project_p5_wave0_db_baseline.md) — PR-0005 TASK-003 PASS_WITH_FOLLOW-UPS; engine env precedence, pg ?host=, PG logs full query; TASK-007/014/016/021 checks
+- [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 PASS_WITH_FOLLOW-UPS; harness R2 owed; Vite env inlining, nginx default.conf, RR meta; TASK-014/022/111 checks

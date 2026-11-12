@@ -1,13 +1,31 @@
 ---
 name: project-review-conventions
-description: Where P5 code reviews are written, how PR worktrees are laid out, and how to run Node in this repo during review
+description: Where P5 code reviews are written, how PR worktrees are laid out, how to run Node in this repo during review, and what to do when the orchestrator restricts gate runs
 metadata:
   type: project
 ---
 
-P5 code reviews go to the MAIN repo at `docs/05-quality/reviews/PR-<nnnn>-TASK-<xxx>-code-review.md`, using the name the orchestrator dispatches. It is not the agent default `REVIEW-TASK-xxx-r<round>.md`. Contents: verdict, findings table (ID, severity, file:line, issue, required fix) and the DoD checklist. Return a Handoff Report (`docs/sdlc/templates/HANDOFF.md`).
+P5 code reviews go to the MAIN repo at `docs/05-quality/reviews/PR-<nnnn>-TASK-<xxx>-code-review.md`, using the name the orchestrator dispatches. It is not the agent default `REVIEW-TASK-xxx-r<round>.md`. The file is not committed by the reviewer.
+
+Contents:
+- verdict block
+- the verification I performed myself
+- findings table (ID, severity, file:line, issue, required fix)
+- deviation rulings
+- follow-up closure
+- merge conditions
+
+Return a Handoff Report (`docs/sdlc/templates/HANDOFF.md`).
 
 PR branches are checked out as sibling worktrees `..\Shipqube-TASK-xxx` with node_modules installed. Every node/npm/npx call needs `export PATH="$APPDATA/fnm/aliases/default:$PATH";`, because the system Node 20 fails on engine-strict.
 
-**Why:** the orchestrator's dispatch brief (PR #1, 2026-11-12) set these. Lane A/B CI did not exist yet (D-ORCH-004 bootstrap), so the reviewer must re-run the gates locally.
-**How to apply:** for every PR review, re-run lint, format:check, typecheck, test:unit, build and coverage yourself. Don't modify the worktree. See [[review-watchlist]] and [[scratch-copy-technique]].
+Default: re-run lint, format:check, typecheck, test:unit, build and coverage yourself.
+
+Exception: during parallel batches the orchestrator may forbid installs, builds, Docker and full suites because host memory is low (PR #5, 2026-11-12: "at most one targeted unit test file"). Then:
+- run prettier on the changed files and the one most relevant unit test file;
+- run cheap read-only probes, such as `tsx` scripts in the scratchpad that import the PR's functions;
+- state in §1 of the review exactly what was not re-run and whose evidence you relied on.
+
+**Why:** the orchestrator's dispatch briefs set these rules. Lane A/B CI did not exist yet (D-ORCH-004 bootstrap), so the reviewer is the independent gate.
+
+**How to apply:** check the dispatch CONSTRAINTS before running anything heavy. See [[review-watchlist]] and [[scratch-copy-technique]].
