@@ -311,6 +311,105 @@ const TENANT_DB: readonly Violation[] = [
     ['platform/db-raw-sql', 'platform/db-raw-sql'],
     'ADR-0005 am. 10 item',
   ],
+  // R2-m1 / PR11-SEC-13: the helpers are resolved through scope analysis, whatever the local name.
+  [
+    'platform/db-raw-sql: `import { Prisma as P }` + P.raw(s) in a repository (R2-m1, PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-aliased-import.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: `const { raw } = Prisma` in a repository (R2-m1, PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-destructured.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: `const r = Prisma.raw` in a repository (R2-m1, PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-const-alias.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: `new Prisma.Sql([s], [])` in a repository (PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-new-sql.ts`,
+    'platform/db-raw-sql',
+    "Prisma's Sql class",
+  ],
+  [
+    'platform/db-raw-sql: a non-tagged `Prisma.sql([s])` call in a repository (PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-sql-call.ts`,
+    'platform/db-raw-sql',
+    'only as a template tag',
+  ],
+  [
+    'platform/db-raw-sql: `Prisma.join(ids, separator)` with a variable separator (PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-join-separator.ts`,
+    'platform/db-raw-sql',
+    'are SQL text',
+  ],
+  [
+    "platform/db-raw-sql: `import { Sql } from '@prisma/client/runtime/client'` (PR11-SEC-13)",
+    `rules/db-raw-sql/${API}/orders/repository/bad-runtime-sql-import.ts`,
+    'platform/db-raw-sql',
+    "Prisma's Sql class",
+  ],
+  [
+    'platform/db-raw-sql: a named import of makeTypedQueryFactory (PR11-SEC-15 f)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-typed-query-factory.ts`,
+    'platform/db-raw-sql',
+    'builds a TypedSql query',
+  ],
+  [
+    "platform/db-raw-sql: `export { raw } from '@prisma/client/runtime/client'` (PR11-SEC-13)",
+    `rules/db-raw-sql/${API}/orders/repository/bad-reexport-raw.ts`,
+    'platform/db-raw-sql',
+    'Re-exporting',
+  ],
+  [
+    'platform/db-raw-sql: the service-layer variant `const { raw: fragment } = P` (also outside the Prisma layering)',
+    `rules/db-raw-sql/${API}/orders/service/bad-raw-aliased.service.ts`,
+    [BOUNDARIES, 'platform/db-raw-sql'],
+    'ADR-000',
+  ],
+  // R2-M1 / PR11-SEC-12 / PR11-SEC-15 g: the escapes from the tenant transaction, by member, pattern or template key.
+  [
+    'platform/db-raw-sql: `.requestTransaction(null)` on a PrismaPromise (R2-M1, PR11-SEC-12)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-request-transaction.ts`,
+    'platform/db-raw-sql',
+    'caller-chosen transaction',
+  ],
+  [
+    'platform/db-raw-sql: `db._originalClient` (R2-M1)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-original-client.ts`,
+    'platform/db-raw-sql',
+    'is the root client',
+  ],
+  [
+    'platform/db-raw-sql: `const { $queryRawUnsafe } = db` (PR11-SEC-15 g)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-destructured-unsafe.ts`,
+    'platform/db-raw-sql',
+    'interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: db[`$parent`] (a template-literal computed key, PR11-SEC-15 g)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-template-key-parent.ts`,
+    'platform/db-raw-sql',
+    'reaches an unguarded client',
+  ],
+  // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
+  [
+    'platform/tenant-context-sql: SET of a double-quoted namespace and key in a repository (R2-m2)',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-session-set-quoted.ts`,
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'platform/tenant-context-sql: SET of a namespace and key spaced around the dot in a repository (R2-m2)',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-session-set-spaced.ts`,
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
   [
     'a repository imports the pg driver and builds a Pool (PR2-SEC-05 addendum, PR11-SEC-05)',
     `layering/sql-driver/${API}/orders/repository/bad-pg-pool.ts`,
@@ -473,6 +572,10 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ['tenant-context-sql: the session-scope negative control', 'rules/tenant-context-sql/prisma/tests/rls/session-scope-leak.int.test.ts'],
     ['db-raw-sql: tests may probe the unsafe members (TenantDb Proxy)', 'rules/db-raw-sql/apps/api/src/platform/db/tenant-db.test.ts'],
     ['db-raw-sql: a tagged $queryRaw template in a repository', `rules/db-raw-sql/${API}/orders/repository/ok-tagged.ts`],
+    [
+      'db-raw-sql: tagged Prisma.sql fragments, Prisma.join(ids) and a literal separator, tagged $queryRaw (PR11-SEC-13 control)',
+      `rules/db-raw-sql/${API}/orders/repository/ok-prisma-fragments.ts`,
+    ],
     [
       'tenant-context-sql: session-integrity.* may read a security key (keys only, PR11-SEC-08)',
       'rules/tenant-context-sql/apps/api/src/platform/db/session-integrity.test.ts',
