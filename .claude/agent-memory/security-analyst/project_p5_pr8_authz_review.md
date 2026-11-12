@@ -24,7 +24,7 @@ The PR #8 review (TASK-013) is in `docs/05-quality/security/PR-0008-TASK-013-sec
 **Why:** TASK-013's guard is the T-107/AC-04 control. Its route-level, runtime and immutability halves land in later tasks and close only if those reviews check them.
 
 **How to apply.** In these reviews, check:
-- **TASK-007 or TASK-016 (PR8-SEC-13):** the base-ref migration-immutability check and CODEOWNERS for `packages/authz`, `tools/authz` and `prisma/migrations`. Due before the first catalogue v2 change or M5.
+- **TASK-007 or TASK-016 (PR8-SEC-13):** the base-ref migration-immutability check and CODEOWNERS for `packages/authz`, `tools/authz` and `prisma/migrations`. **Met at PR #10 `28442b6`** (A-only check runs before any head code). INFO residuals are the symlink mode and base-tip directories (PR10-SEC-10, before M5).
 - **TASK-020 (merge condition, PR8-SEC-05):**
   - selfService ⇒ `user` tenancy;
   - `operator-cross-tenant` ⇔ operator-only permission;
