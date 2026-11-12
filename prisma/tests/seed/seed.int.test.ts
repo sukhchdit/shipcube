@@ -19,6 +19,8 @@ import {
 } from '../../seed/framework/contracts.js';
 import { runReferenceSeed, type ReferenceSeedResult } from '../../seed/framework/runner.js';
 import { REFERENCE_STEPS } from '../../seed/reference/index.js';
+import { DEMO_USERS } from '../../seed/demo/index.js';
+import { main } from '../../seed/index.js';
 import { findRepoRoot, runNode } from '../../../tools/test-support/process.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -377,6 +379,23 @@ describe('seed CLI (US-049)', () => {
     const output = result.stdout + result.stderr;
     for (const secret of [superadmin, customer, db.passwords.migrator]) expect(output).not.toContain(secret);
     expect(events(result.stdout)).toContainEqual(expect.objectContaining({ event: 'seed.demo.done', skipped: false }));
+  }, 120_000);
+
+  it('[AT-US-049-05] in-process main: a local demo run with local-only defaults reaches every demo user (deferred until TASK-089)', async () => {
+    const database = await freshDatabase();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const env = {
+      APP_ENV: 'local',
+      DATABASE_MIGRATOR_URL: db.migratorUrl(database),
+      SEED_SUPERADMIN_PASSWORD: localDefault(),
+      SEED_CUSTOMER_PASSWORD: localDefault(),
+    };
+    const status = await main(['demo'], env, { out: (line) => lines.push(line), err: (line) => errors.push(line) });
+    expect({ status, errors }).toEqual({ status: 0, errors: [] });
+    expect(events(lines.join('\n'))).toContainEqual(
+      expect.objectContaining({ event: 'seed.demo.done', skipped: false, created: 0, deferred: DEMO_USERS.length }),
+    );
   }, 120_000);
 
   it('the reference command runs the seed once and again with the same outcome (db:seed twice, exit 0)', async () => {
