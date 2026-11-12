@@ -84,6 +84,19 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
     expect(result.stdout).toBe('');
     expect(result.status).toBe(0);
   });
+
+  it('lint generates the React Router route types first, so type-aware rules never see unresolved ./+types (PR #4 R2-m2)', () => {
+    // npm pre-hooks are skipped under ignore-scripts, so the order must be explicit in the script itself.
+    const steps = (rootPkg.scripts['lint'] ?? '').split('&&').map((step) => step.trim());
+    expect(steps[0]).toBe('npm run typegen');
+    expect(steps.findIndex((step) => step.startsWith('eslint '))).toBeGreaterThan(0);
+  });
+
+  it('lint fails when Stylelint matches no CSS file, so "linted nothing" never reads as clean (PR2-SEC-03)', () => {
+    const stylelint = (rootPkg.scripts['lint'] ?? '').split('&&').map((step) => step.trim()).find((step) => step.startsWith('stylelint '));
+    expect(stylelint).toBeDefined();
+    expect(stylelint).not.toContain('--allow-empty-input');
+  });
 });
 
 /**

@@ -298,6 +298,9 @@ export default defineConfig([
     'prisma/{dist,build,coverage}/**',
     '{apps,packages}/*/.react-router/**',
     'prisma/generated/**',
+    // Playwright output (git-ignored; the HTML report bundles third-party viewer JS/CSS) (PR #2 R2-n9).
+    '**/playwright-report/**',
+    '**/test-results/**',
     'docs/**',
     '.claude/**',
     // Seeded negative fixtures violate rules on purpose; tools/lint/negative-fixtures.test.ts lints them explicitly.

@@ -13,6 +13,10 @@ node_modules/
 /apps/*/.react-router/
 /prisma/generated/
 
+# Playwright output (git-ignored; the HTML report bundles third-party viewer CSS) (PR #2 R2-n9)
+playwright-report/
+test-results/
+
 # Documentation and agent configuration
 /docs/
 /.claude/
