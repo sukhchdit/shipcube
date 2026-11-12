@@ -40,6 +40,7 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **ReDoS-probe every regex that a fix adds over request input.** The PR-0009 HIGH (PR9-SEC-14) came from a charset fix.
   - Measure in a child-process server; same-process timings hide event-loop blocking.
   - Fuzz the proposed grammar for language equivalence.
+- **Git attribute experiments: confirm them in a Linux container, not with host git** (PR-0010 R2, 2026-11-13). With an empty work tree, Git for Windows 2.52's `git log -p` still treated `package-lock.json` as binary. The attribute source is unexplained, and `-c attr.tree=<empty tree>` cleared it. Treat host results as hints only.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]

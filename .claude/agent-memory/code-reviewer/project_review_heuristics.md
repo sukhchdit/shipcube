@@ -96,3 +96,20 @@ Round 2 of a spike PR (PR #6 r2):
 - **Regex "literal exemption" scans** (for example "set_config allowed when the first arg is a non-app literal") are beaten by `'' || 'app.x'`. Require a complete literal followed by `,`. Also check quoted-identifier forms (`"app"."x"`).
 - **Catalog ACL equality via `aclexplode`.** Check whether PUBLIC (`grantee = 0`) and inherited privileges are excluded. Effective privilege is what matters.
 - **New lint boundaries in one PR vs another open PR.** Run `git merge-tree` and grep the other PR's files for imports and string tokens the new rules ban. Semantic lint conflicts are not textual conflicts.
+
+**DB spike PRs (PR #12 SPK-08, 2026-11-13):**
+- **Spike exit lists live in several places.** The sheet's acceptance is a subset. Also grep `risks.md` R-ARCH-xx (the full exit list), `rulings/*.md` ("routed → TASK-xxx") and the data-model "verify in P5 spike" notes. Routed questions get dropped silently.
+- **Refusal-branch coverage per event type.** When privilege stops every tamper statement first, the guard's second-layer branches (e.g. `sql_drop`) are never exercised. Ask for a test as a role that HAS the privilege: the schema owner via superuser `SET ROLE`, or the superuser itself.
+- **Spike suites vs the real files.** The harness applies the whole `prisma/bootstrap` dir. A spike that re-creates objects the real bootstrap will own breaks the day the real files land. The lifecycle deadline is the PR that adds the real files, not the later "porting" task.
+- **"Evidence" in an optional JSON report is not an assertion.** Look for `if (status !== 0)` branches and negative regexes over possibly-empty output. Recompute published golden vectors yourself; it takes about a minute in Node.
+- **"Verbatim from spec" claims:** extract the spec's code fences with awk, normalise whitespace and comments, and `diff`.
+
+**CLI / tooling DB clients (PR #13, 2026-11-13):**
+- **pg `Client` with no `'error'` listener.** On connection loss pg emits `'error'` even while a query is pending (`_handleErrorEvent`). With no listener the process crashes with exit 1 and a raw stack, which breaks any exit-code contract.
+  - Probe: a `net.createServer` fake. Write `R 00000008 00000000` + `Z 00000005 I` after the startup packet, then `socket.destroy()` on the first `Q` byte (0x51).
+- **pg merges `parse(connectionString)` OVER the config object.** `?options=…&statement_timeout=0` in the URL beats `options:`/`statement_timeout:` set in code. Check every "pinned session" claim for an `options=` refusal plus a post-connect `SHOW`.
+- **Framework PRs with an empty registry** (datasets added "by later tasks"): test the contract against every consumer row of the spec table. Look for:
+  - FK ids when `id` is reserved;
+  - `NULLS NOT DISTINCT` keys;
+  - partial unique arbiters;
+  - columns that are insert-only or runtime-mutated (counter resets).
