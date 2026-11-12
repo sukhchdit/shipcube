@@ -10,9 +10,17 @@
       "@platform/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./logging": {
+      "@platform/source": "./src/logging/index.ts",
+      "types": "./dist/logging/index.d.ts",
+      "default": "./dist/logging/index.js"
     }
   },
   "scripts": {
     "build": "tsc -b"
+  },
+  "dependencies": {
+    "pino": "^10.4.0"
   }
 }
