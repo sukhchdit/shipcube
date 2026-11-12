@@ -3,7 +3,7 @@
  * Install-time code never runs on `npm ci`; the allow-listed `deps:rebuild` still yields a working
  * bcrypt. The CI, Dockerfile and quality:heavy halves of SEC-TC-45 land with TASK-007/011/014.
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,6 +66,22 @@ describe('install scripts are disabled (SEC-TC-45, ADR-0023 am. F)', () => {
         'min-release-age': '7',
       }),
     );
+  });
+
+  it('[SEC-TC-45] .npmrc pins the @platform scope to an unresolvable registry (PR1-SEC-01)', () => {
+    expect(readNpmrc().get('@platform:registry')).toBe('https://registry.invalid/');
+  });
+
+  it('[SEC-TC-45] lockfile entries for @platform/* are workspace links only, never registry downloads (PR1-SEC-01)', () => {
+    type LockEntry = { link?: boolean; resolved?: string; version?: string };
+    const lock = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8')) as { packages: Record<string, LockEntry> };
+    const workspaceDirs = new Set(listManifests(repoRoot).map(({ dir }) => dir));
+    const platformEntries = Object.entries(lock.packages).filter(([key]) => /(^|\/)node_modules\/@platform\//.test(key));
+    expect(platformEntries.length).toBeGreaterThan(0);
+    const offenders = platformEntries
+      .filter(([, entry]) => entry.link !== true || entry.resolved === undefined || !workspaceDirs.has(entry.resolved))
+      .map(([key, entry]) => `${key} -> ${entry.resolved ?? '(no resolved)'}`);
+    expect(offenders).toEqual([]);
   });
 
   it('[SEC-TC-45] the lifecycle-hook detector flags hooks and ignores ordinary names (control)', () => {
@@ -143,6 +159,40 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     return { ...result, steps: result.status === 0 ? (JSON.parse(result.stdout) as Step[]) : [] };
   };
 
+  /** Environment without an inherited Playwright opt-in, so the real run only does what the tree needs. */
+  const rebuildEnv = (): NodeJS.ProcessEnv =>
+    Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'DEPS_REBUILD_PLAYWRIGHT'));
+  const hasPrismaSchema = () => existsSync(join(repoRoot, 'prisma.config.ts')) || existsSync(join(repoRoot, 'prisma', 'schema'));
+
+  it('[SEC-TC-45] deps:rebuild runs end to end: every allow-listed step reports, then exits 0', () => {
+    // Positive control for main(): the step loop, the exit-code propagation and the final bcrypt check.
+    // On this tree it builds nothing (bcrypt's N-API prebuild loads; Playwright is opt-in).
+    const result = runNode([rebuildScript], { cwd: repoRoot, env: rebuildEnv() });
+    expect(result.status).toBe(0);
+    const reported = result.stdout.split(/\r?\n/).filter((line) => line.startsWith('[deps:rebuild] '));
+    expect(reported.map((line) => /^\[deps:rebuild\] (\w+): (run|skip) /.exec(line)?.slice(1, 3))).toEqual([
+      ['bcrypt', 'skip'],
+      ['prisma', hasPrismaSchema() ? 'run' : 'skip'],
+      ['playwright', 'skip'],
+    ]);
+  }, 120_000);
+
+  it('[SEC-TC-45] deps:rebuild still runs when started through a directory junction or symlink (m1)', () => {
+    // The old entry guard compared process.argv[1] with the real module path, so a linked path made
+    // the script skip main() and exit 0 with no output: a false green on the install path.
+    const linkRoot = mkdtempSync(join(tmpdir(), 'deps-rebuild-link-'));
+    try {
+      const linkedDir = join(linkRoot, 'deps');
+      symlinkSync(join(repoRoot, 'tools', 'deps'), linkedDir, 'junction');
+      const result = runNode([join(linkedDir, 'rebuild.mjs'), '--dry-run'], { cwd: repoRoot, env: rebuildEnv() });
+      expect(result.status).toBe(0);
+      const steps = JSON.parse(result.stdout) as Step[];
+      expect(steps.map((s) => s.id)).toEqual(['bcrypt', 'prisma', 'playwright']);
+    } finally {
+      rmSync(linkRoot, { recursive: true, force: true });
+    }
+  });
+
   it('[SEC-TC-45] bcrypt works in the installed tree after deps:rebuild', () => {
     const requireFromApi = createRequire(join(repoRoot, 'apps', 'api', 'package.json'));
     const bcrypt = requireFromApi('bcrypt') as {
@@ -162,8 +212,7 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     expect(steps.find((s) => s.id === 'bcrypt')?.action).toBe('skip');
     expect(steps.find((s) => s.id === 'playwright')?.action).toBe('skip');
     const prisma = steps.find((s) => s.id === 'prisma');
-    const hasSchema = existsSync(join(repoRoot, 'prisma.config.ts')) || existsSync(join(repoRoot, 'prisma', 'schema'));
-    expect(prisma?.action).toBe(hasSchema ? 'run' : 'skip');
+    expect(prisma?.action).toBe(hasPrismaSchema() ? 'run' : 'skip');
     if (prisma?.command) expect(prisma.command.slice(0, 3)).toEqual(['exec', '--no', '--']);
   });
 

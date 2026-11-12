@@ -18,25 +18,14 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { npmCli } from './npm-cli.mjs';
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLAYWRIGHT_BROWSERS = new Set(['chromium', 'firefox', 'webkit']);
 /** Workspace whose dependency graph owns bcrypt; resolution runs from here. */
 const BCRYPT_OWNER = join(ROOT, 'apps', 'api');
 
 /** @typedef {{ id: 'bcrypt' | 'prisma' | 'playwright', action: 'run' | 'skip', reason: string, command?: string[] }} Step */
-
-function npmCli() {
-  const fromEnv = process.env['npm_execpath'];
-  if (fromEnv && /npm-cli\.js$/.test(fromEnv) && existsSync(fromEnv)) return fromEnv;
-  const nodeDir = dirname(process.execPath);
-  const candidates = [
-    join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ];
-  const found = candidates.find((c) => existsSync(c));
-  if (!found) throw new Error(`npm CLI not found next to ${process.execPath}`);
-  return found;
-}
 
 /**
  * Runs a short CommonJS probe in a child Node process (cwd = the owning workspace) so that the
@@ -133,6 +122,12 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// `import.meta.main` is Node's own "this file is the entry point" test (Node >= 24.2). It holds when the
+// script is started through a symlink or junction, where comparing `process.argv[1]` with this module's
+// real path would silently skip `main()` and exit 0 (PR #1 review m1). Fail closed on a Node without it.
+if (typeof import.meta.main !== 'boolean') {
+  throw new Error('deps:rebuild needs Node >= 24.2 (import.meta.main); see .node-version');
+}
+if (import.meta.main) {
   process.exitCode = main(process.argv.slice(2));
 }

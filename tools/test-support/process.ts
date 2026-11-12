@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
+import { npmCli } from '../deps/npm-cli.mjs';
+
 export interface RunResult {
   status: number | null;
   stdout: string;
@@ -28,20 +30,6 @@ export function findRepoRoot(start: string = process.cwd()): string {
   }
 }
 
-/** Absolute path of the npm CLI entry that belongs to the running Node installation. */
-export function npmCliPath(): string {
-  const fromEnv = process.env['npm_execpath'];
-  if (fromEnv !== undefined && /npm-cli\.js$/.test(fromEnv) && existsSync(fromEnv)) return fromEnv;
-  const nodeDir = dirname(process.execPath);
-  const candidates = [
-    join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'), // Windows layout
-    join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'), // POSIX layout
-  ];
-  const found = candidates.find((candidate) => existsSync(candidate));
-  if (found === undefined) throw new Error(`npm CLI not found next to ${process.execPath}`);
-  return found;
-}
-
 export function runNode(args: readonly string[], options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): RunResult {
   const result = spawnSync(process.execPath, [...args], {
     cwd: options.cwd,
@@ -55,5 +43,5 @@ export function runNode(args: readonly string[], options: { cwd: string; env?: N
 }
 
 export function runNpm(args: readonly string[], options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): RunResult {
-  return runNode([npmCliPath(), ...args], options);
+  return runNode([npmCli(), ...args], options);
 }
