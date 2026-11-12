@@ -1,0 +1,12 @@
+---
+name: d061-us049-delivery-split
+description: P5 Wave 0 ruling D-061 — how a DC Must story (US-049) was split across tasks without changing priority after PR #13 code review M1; the pattern for "framework task claims completes but ATs need later tasks"; traceability v1.5; plan-data block keys for seed/compose tasks
+metadata:
+  type: project
+---
+
+D-061 (2026-11-13): US-049 (seed framework, Must, DC) is NOT completed by TASK-023. Ownership of its 10 ATs: TASK-023 → AT-01/03/04/06/07/08 (framework, probe tables accepted); TASK-014 (`compose` block) → AT-02 (Compose seed one-shot runs `db:seed` + `db:seed:demo`, `NODE_ENV=development` + `APP_ENV=local`); TASK-089 (`seeddemo` block) → AT-05/09/10 (real `DemoUserProvisioner`, staging set-password link in Mailpit, `deferred = 0`). Story priority, milestone, DC tag unchanged; traceability v1.5 (REQ-DATA-001/002 Task(s) = TASK-023, TASK-014, TASK-089; counts unchanged 434/91/293/134). plan-data.mjs NOT edited by PM — architect batch folds sheet lines (`seedfw` us→part, `compose` part += US-049, `seeddemo` us += US-049).
+
+**Why:** A plan sheet saying "completes US-049" would have let traceability mark a DC story done while 4 scenarios (users exist, Compose runs seed) had no owner — the §6.1 sign-in steps would have had no seeded users behind them. Ladder rung 4 (split into Must + Should) was wrong because nothing left R0; this is an ownership re-route, not a scope change. TASK-014 over TASK-026 for AT-02 because the seed job/env/image are TASK-014's artefacts, TASK-014 was not yet dispatched, and review n7 already sat there; TASK-026 only consumes the chain.
+
+**How to apply:** When a code review says "story planned as completes but ATs X/Y not met", the PM move is: (1) D-0xx entry naming each AT's owning task (no priority change unless scope actually leaves the release); (2) story Notes get a "Delivery split (D-0xx)" line; (3) traceability REQ rows get "Planned (partial: … completes with …)" and a version note; (4) report exact `plan-data.mjs` lines for the architect — never edit plan-data.mjs or the generated WAVE-*.md/task-map.csv yourself. Check STATUS.md dispatch state before picking an owner: an undispatched task can absorb a line, a merged one cannot. Precedent: US-003 is split the same way (TASK-014 partial → TASK-089 closes). Confirm demo coverage by checking the owning task's batch precedes TASK-121 (M0 exit-demo journeys, 3.7) / the M1 journey task. Related: [[d059-batch3-alignment]], [[g1-closure-dc-tag]].

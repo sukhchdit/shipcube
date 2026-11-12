@@ -37,3 +37,4 @@ Exception: during parallel batches the orchestrator may forbid installs, builds,
 - `comm -23` on `git diff --name-only P2 M` minus the branch-changed files must be empty.
 - The lock delta `git diff --text origin/main HEAD -- package-lock.json` must equal the branch's delta vs MB.
 - Also run `gh pr view N --json statusCheckRollup`. An empty rollup means CI has not run on the head, which is a merge condition.
+- Quickest proof (PR #9 r4): `git merge-tree --write-tree P1 P2`, then `git diff --stat <tree> M`. If the only output is conflict markers in the conflicted files, everything else is byte-identical to a clean re-merge, and `git show --cc M` shows the hand resolution.

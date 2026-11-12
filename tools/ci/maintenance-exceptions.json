@@ -1,0 +1,32 @@
+{
+  "$comment": "D-ARCH-003 rev 4 item 4 / ADR-0023 am. J item 4. Read by tools/ci/check-dep-age.mjs (freshness gate) and tools/ci/check-audit.mjs (a High/Critical advisory on a listed package fails regardless of any waiver). Entry: { name, version, kind: direct-stale | deprecated-transitive, via: [parent chain], reason, decision: DECISIONS.md ID, review_by, expires: YYYY-MM-DD, exit_criteria }. An unexpired entry passes; an expired entry fails (a new decision is required, never a silent extension). New entries need a principal-architect decision and security-analyst review (CODEOWNERS).",
+  "exceptions": [
+    {
+      "name": "bcrypt",
+      "version": "6.0.0",
+      "kind": "direct-stale",
+      "via": ["@platform/api"],
+      "reason": "Fixed-stack password hashing library (brief section 3); 6.0.0 published 2025-05-11T18:06Z is the latest release and crossed 18 months on 2026-11-11; no advisory; N-API prebuilds load on Node 24 under --ignore-scripts.",
+      "decision": "D-ARCH-042",
+      "review_by": "monthly from 2026-12-12 (freshness report)",
+      "expires": "2027-05-11",
+      "exit_criteria": [
+        "an advisory of severity >= Medium against bcrypt or its prebuild loader",
+        "upstream archived or declared unmaintained",
+        "an ADR-0001 Node major on which the 6.0.0 prebuild fails the SEC-TC-45 bcrypt case",
+        "2027-05-11 reached with no release; exit = bcryptjs 3.x behind the PasswordHasher port"
+      ]
+    },
+    {
+      "name": "node-abort-controller",
+      "version": "3.1.1",
+      "kind": "deprecated-transitive",
+      "via": ["bullmq"],
+      "reason": "Deprecated polyfill pinned exactly by bullmq 6.7.x; on Node 24 bullmq prefers globalThis.AbortController, so the module loads and is never instantiated; MIT, zero dependencies, no install script, no advisory.",
+      "decision": "D-ARCH-043",
+      "review_by": "2027-05-12 and at every BullMQ minor bump",
+      "expires": "2027-05-12",
+      "exit_criteria": "BullMQ drops the dependency (remove the entry); an advisory triggers security-analyst reachability re-evaluation and a principal-architect ruling within the wave"
+    }
+  ]
+}

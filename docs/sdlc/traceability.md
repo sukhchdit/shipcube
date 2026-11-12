@@ -1,5 +1,6 @@
 # Traceability Matrix
-Version 1.4 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+Version 1.5 · 2026-11-13 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+v1.5 (D-061, US-049 delivery split after PR #13 code review M1): REQ-DATA-001 and REQ-DATA-002 Task(s) now read `TASK-023, TASK-014, TASK-089` with a "Planned (partial …)" status naming which AT-US-049 scenarios each task owns; US-049 becomes Implemented only when all three tasks are merged. No REQ or story IDs, links, priorities, milestones or DC tags changed; every count below is unchanged.
 Status values: Specified → Designed → Planned → Implemented → Verified.
 v1.4 (G2-C2 closure, principal-architect): the Design (ADR/Spec) column is populated for all 434 REQ rows as "owning module · ADR or spec section" (generated from `ARCHITECTURE.md` §6 and the ADR amendment index with an explicit per-REQ mapping, then reviewed row by row; no REQ carries only an area default) and every REQ status moved Specified → Designed. Task(s) stays "–" until senior-developer/orchestrator fill it in P4 (→ Planned); Test(s) is qa-lead's. No REQ or story IDs, links, priorities, milestones or DC tags changed; counts below are unchanged.
 v1.3 (P3 security remediation, D-046..D-052, see PRD §11): REQ-AUTH-020/021/022 Should → Must; new REQ-AUTH-025 (M1 Must), REQ-AUTH-026 (M0 Must), REQ-CARR-022 and REQ-CARR-023 (M1 Must); new Must stories US-291 (EPIC-02, M1), US-292 (EPIC-02, M0), US-293 (EPIC-06, M1); US-027 Should → Must. None of the new or promoted stories is demo-critical (DC set unchanged at 134). Tables below regenerated from the files on 2026-11-12.
@@ -50,10 +51,10 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-004 | M0 | Must | US-002 | packages/config · ADR-0018 §Typed configuration (Joi schema, fail-fast, `.env.example` parity) | TASK-005 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-005 | M0 | Must | US-003 | infra/ (compose) · platform.md §2 Compose stack (`--wait` ≤ 180 s); ADR-0021 (RustFS); ADR-0001 (Valkey 8) | TASK-014, TASK-026, TASK-089 | – | Planned |
 | REQ-PLAT-006 | M0 | Must | US-004 | infra/ (Dockerfiles) · platform.md §3 hardened images; ADR-0022; ADR-0023 am. F (`npm ci --ignore-scripts`) | TASK-014 | – | Planned |
-| REQ-PLAT-007 | M0 | Must | US-005 | .github/ · ADR-0023 §1 + am. A–D lane model (D-ORCH-001); platform.md §7 | TASK-007 | – | Planned |
+| REQ-PLAT-007 | M0 | Must | US-005 | .github/ · ADR-0023 §1 + am. A–D lane model (D-ORCH-001); platform.md §7 | TASK-007 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-008 | M0 | Must | US-006 | .github/ · ADR-0024 (Jest thresholds 85/75, 95 on pricing/audit/authz); ADR-0023 am. A diff-coverage gate | TASK-015 | – | Planned |
-| REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Planned |
-| REQ-PLAT-010 | M0 | Must | US-007 | platform · ADR-0016 §3 framework-failure codes; api/README §11 error catalogue | TASK-006 | – | Planned |
+| REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-PLAT-010 | M0 | Must | US-007 | platform · ADR-0016 §3 framework-failure codes; api/README §11 error catalogue | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-011 | M0 | Must | US-008 | platform · ADR-0017 §1–2 correlation ID (validate, generate, echo) | TASK-010 | – | Planned |
 | REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Planned |
 | REQ-PLAT-013 | M0 | Must | US-009 | platform (worker) · ADR-0013 §Queues (attempts 5, exponential backoff + jitter, DLQ per queue) | TASK-035 | – | Planned |
@@ -61,7 +62,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-015 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Repeatable jobs (idempotent registration) | TASK-039 | – | Planned |
 | REQ-PLAT-016 | M0 | Must | US-011 | platform · ADR-0004 §Outbox write (same transaction); data-model §6.1 | TASK-043 | – | Planned |
 | REQ-PLAT-017 | M0 | Must | US-011 | platform (worker) · ADR-0004 §Relay (at-least-once, per-aggregate order, 500 ms); data-model §6.1 | TASK-043 | – | Planned |
-| REQ-PLAT-018 | M0 | Must | US-012 | platform · ADR-0013 §7 / ADR-0017 §5 `/health/live`, `/health/ready` (≤ 2 s per dependency) | TASK-006 | – | Planned |
+| REQ-PLAT-018 | M0 | Must | US-012 | platform · ADR-0013 §7 / ADR-0017 §5 `/health/live`, `/health/ready` (≤ 2 s per dependency) | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-019 | M0 | Should | US-013 | platform · ADR-0017 §4 OpenTelemetry seam (`OTEL_*` config, BullMQ spans) | TASK-214 | – | Planned |
 | REQ-PLAT-020 | M0 | Should | US-014 | admin-settings · ADR-0027 §Feature flags (DB-backed, 30 s cache); data-model §3.5 | TASK-219 | – | Planned |
 | REQ-PLAT-021 | M0 | Should | US-014 | admin-settings · ADR-0027 (`CONFIG_CHANGE` audit on every flag change); ADR-0007 §Capture | TASK-219 | – | Planned |
@@ -158,8 +159,8 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-011 | M0 | Must | US-079 | platform · ADR-0009 §Optimistic locking (`version`, conditional UPDATE → 409/412); ADR-0016 §6 | TASK-100 | – | Planned |
 | REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Planned |
 | REQ-RLS-013 | M0 | Must | US-080 | prisma/ · ADR-0005 §Guest-capable tables (null `org_id`, `ck_<t>__owner`, guest claim policy); data-model §3.10 | TASK-051 | – | Planned |
-| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023 | – | Planned |
-| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023 | – | Planned |
+| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | Planned |
+| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | Planned |
 | REQ-DATA-003 | M0 | Must | US-050 | prisma/ (seed) · data-model §9 (operator org with 8 role users, demo organisations) | TASK-089 | – | Planned |
 | REQ-DATA-004 | M0 | Must | US-051 | admin-settings + prisma/ · data-model §3.6 countries (ISO 3166-1, names en/es/fr); §9 | TASK-026 | – | Planned |
 | REQ-DATA-005 | M0 | Must | US-051 | admin-settings · data-model §3.6 countries (`shipping_enabled` launch set, D-007) | TASK-026 | – | Planned |
@@ -250,9 +251,9 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-SEC-008 | M1 | Must | US-046 | packages/shared · ADR-0016 §4 Joi/Zod parity (shared constants, parity fixtures); ADR-0026 §4 | TASK-112 | – | Planned |
 | REQ-SEC-009 | M0 | Must | US-046 | platform · ADR-0003 (Prisma parameterised queries only); ADR-0023 §1 Semgrep rule for raw SQL | TASK-112 | – | Planned |
 | REQ-SEC-010 | M0 | Must | US-047 | platform · ADR-0016 §13 `OutboundHttpClient` (https, allow-list, private-IP and redirect checks); am. 10 SDK exceptions | TASK-113 | – | Planned |
-| REQ-SEC-011 | M0 | Must | US-048 | packages/config · ADR-0018 §Secret references + am. 1–4 key register; `.env.example` placeholders only | TASK-007 | – | Planned |
+| REQ-SEC-011 | M0 | Must | US-048 | packages/config · ADR-0018 §Secret references + am. 1–4 key register; `.env.example` placeholders only | TASK-007 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-SEC-012 | M0 | Must | US-047 | platform · ADR-0017 §1 security events (`event_type=security`); api/README §13 catalogue (SEC-P3-30); ADR-0007 §Capture | TASK-113 | – | Planned |
-| REQ-SEC-013 | M0 | Must | US-048 | .github/ · ADR-0023 §1 security job + am. F (cooldown, lockfile provenance, `--ignore-scripts`); ADR-0024 | TASK-007 | – | Planned |
+| REQ-SEC-013 | M0 | Must | US-048 | .github/ · ADR-0023 §1 security job + am. F (cooldown, lockfile provenance, `--ignore-scripts`); ADR-0024 | TASK-007 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-SEC-014 | M0 | Must | US-044 | platform · ADR-0016 §11 exact-origin CORS with credentials (600 s preflight) | TASK-048 | – | Planned |
 | REQ-SEC-015 | M0 | Should | US-045 | platform · ADR-0016 §3 body limits (1 MB default, per-route override) and content-type checks | TASK-108 | – | Planned |
 | REQ-SEC-016 | M0 | Should | US-046 | apps · ADR-0026 §9 (no `innerHTML`/`dangerouslySetInnerHTML` outside one reviewed helper; Trusted Types spike SPK-06); ADR-0002 §5 lint | TASK-112 | – | Planned |

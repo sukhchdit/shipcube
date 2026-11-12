@@ -20,3 +20,8 @@ Nothing was lost only because every change was already committed. Recovery was `
 - Expect a specialist's work to land in the agent worktree rather than the brief's worktree when the notification shows `worktreePath`. Port the work with `git -C <agent> diff` plus a copy of untracked files. Use `git apply --exclude` for files that conflict.
 
 Related: [[p5-dispatch]], [[p5-worktrees]]
+
+**Probe builds with a junctioned node_modules (PR #9 fix cycle 2, 2026-11-13).** To re-run reviewers' probe scripts against before/after builds in scratch (`git archive` plus type-strip), you need a `node_modules` junction. From Git Bash, `cmd //c mklink /J …` fails with "Invalid switch". What works:
+- **Create:** `powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '<win path>' -Target '<win path>'"`.
+- **Remove without following:** `powershell.exe -NoProfile -Command "[System.IO.Directory]::Delete('<win path>', \$false)"`.
+- **Verify afterwards:** the worktree's `node_modules` entry count is unchanged (740).

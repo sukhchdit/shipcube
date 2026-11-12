@@ -117,7 +117,7 @@ describe('US-065 permission catalogue (REQ-RBAC-001, REQ-RBAC-014)', () => {
   });
 
   it('[AT-US-065-03] an unknown permission string fails the TypeScript compile (tsc -b type-checks this file)', () => {
-    // @ts-expect-error -- "shipment:fly" is not in the catalogue; tsc -b fails if this assignment ever type-checks.
+    // @ts-expect-error -- TASK-013 "shipment:fly" is not in the catalogue; tsc -b fails if this assignment ever type-checks.
     const unknownPermission: Permission = 'shipment:fly';
     const known: Permission = 'shipment:create';
     expect(isPermission(unknownPermission)).toBe(false);

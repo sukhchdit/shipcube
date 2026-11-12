@@ -9,6 +9,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@platform/api": "0.0.0",
     "@platform/shared": "0.0.0",
     "@platform/config": "0.0.0",
     "@platform/authz": "0.0.0",

@@ -1,0 +1,35 @@
+# Dependabot (TASK-007; ADR-0023 am. F item 2, PR1-SEC-12 item 4, D-ARCH-010 item 6).
+# - 7-day cooldown on every ecosystem (the same release age the lane A cooldown gate and .npmrc min-release-age use).
+# - Monthly, grouped and few open PRs: each Dependabot PR costs a lane A run against the hosted-minutes budget.
+# - @platform/* are our private workspace packages; the scope on npmjs.com belongs to a third party and .npmrc pins it
+#   to registry.invalid, so Dependabot must never look them up (check the first run for private_source_not_reachable).
+# - docker and terraform ecosystems are added with the first Dockerfile/infra code (TASK-014, TASK-017).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: '@platform/*'
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    groups:
+      github-actions:
+        patterns: ['*']
+    commit-message:
+      prefix: 'ci(deps)'

@@ -1,12 +1,38 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { chmod, mkdir, mkdtemp, open, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
-import { createFileSecretProvider, SECRET_FILE_MAX_BYTES, SecretFileError, type SecretFileSystem } from './file-secret-provider.js';
+import {
+  createFileSecretProvider,
+  SECRET_FILE_MAX_BYTES,
+  SECRET_FILE_OPEN_FLAGS,
+  SecretFileError,
+  type SecretFileHandle,
+  type SecretFileSystem,
+} from './file-secret-provider.js';
 import { resolveSecretRefs, SecretNotFoundError } from './secret-refs.js';
+
+/** O_NOFOLLOW and POSIX modes do not exist on Windows (see file-secret-provider.ts); those cases run on Linux/macOS. */
+const POSIX = process.platform !== 'win32';
+const itOnPosix = POSIX ? it : it.skip;
+
+/** A handle over in-memory content whose fstat reports `reportedSize`; records every read length. */
+function fakeHandle(content: Uint8Array, reportedSize: number, reads: number[]): SecretFileHandle {
+  return {
+    stat: () => Promise.resolve({ isFile: () => true, size: reportedSize, mode: 0o100600 }),
+    read: (buffer, offset, length, position) => {
+      reads.push(length);
+      const chunk = content.subarray(position, position + Math.min(length, 4));
+      buffer.set(chunk, offset);
+      return Promise.resolve({ bytesRead: chunk.byteLength });
+    },
+    close: () => Promise.resolve(),
+  };
+}
 
 const token = (): string => randomBytes(16).toString('hex');
 const live = (): AbortSignal => new AbortController().signal;
@@ -112,12 +138,64 @@ describe('file secret provider (PR3-SEC-07, m4)', () => {
     });
   });
 
-  it('refuses a file that grew past the cap between stat and read', async () => {
-    await writeFile(join(root, 'growing'), 'ab');
-    const fs: SecretFileSystem = { realpath, stat, readFile: () => Promise.resolve(new Uint8Array(16)) };
+  it('bounds the read when the file grew after fstat: at most maxBytes + 1 bytes are read', async () => {
+    const reads: number[] = [];
+    const fs: SecretFileSystem = {
+      realpath: (path) => Promise.resolve(path),
+      open: () => Promise.resolve(fakeHandle(new Uint8Array(1024), 2, reads)),
+    };
     await expect(createFileSecretProvider({ root, maxBytes: 8, fs }).resolve('/run/secrets/growing', live())).rejects.toMatchObject({
       code: 'SECRET_FILE_TOO_LARGE',
     });
+    expect(reads.reduce((sum, length) => sum + Math.min(length, 4), 0)).toBeLessThanOrEqual(9);
+    expect(Math.max(...reads)).toBeLessThanOrEqual(9);
+  });
+
+  it('opens the confined path once with O_RDONLY | O_NOFOLLOW (O_NOFOLLOW on POSIX only) and closes the handle', async () => {
+    const opened: [string, number][] = [];
+    let closed = 0;
+    const value = token();
+    const fs: SecretFileSystem = {
+      realpath: (path) => Promise.resolve(path),
+      open: (path, flags) => {
+        opened.push([path, flags]);
+        const handle = fakeHandle(Buffer.from(value), value.length, []);
+        return Promise.resolve({ ...handle, close: () => Promise.resolve(void closed++) });
+      },
+    };
+    await expect(createFileSecretProvider({ root, fs }).resolve('/run/secrets/once', live())).resolves.toBe(value);
+    expect(opened).toEqual([[join(root, 'once'), SECRET_FILE_OPEN_FLAGS]]);
+    expect(closed).toBe(1);
+    expect(SECRET_FILE_OPEN_FLAGS & constants.O_NOFOLLOW).toBe(POSIX ? constants.O_NOFOLLOW : 0);
+  });
+
+  itOnPosix('refuses a final component swapped for a symlink after realpath (O_NOFOLLOW -> ELOOP)', async () => {
+    const value = token();
+    await writeFile(join(root, 'real_target'), value, { mode: 0o600 });
+    await symlink(join(root, 'real_target'), join(root, 'swapped'));
+    // realpath saw a regular file; the swap to a symlink happens before the open.
+    const fs: SecretFileSystem = { realpath: (path) => Promise.resolve(path), open };
+    const rejected = await createFileSecretProvider({ root, fs })
+      .resolve('/run/secrets/swapped', live())
+      .catch((caught: unknown) => caught);
+    expect(rejected).toBeInstanceOf(SecretFileError);
+    expect(rejected).toMatchObject({ code: 'ELOOP' });
+    expect(String((rejected as Error).stack)).not.toContain(value);
+  });
+
+  itOnPosix('refuses a group- or world-writable secret file (mode & 0o022)', async () => {
+    const provider = createFileSecretProvider({ root });
+    for (const [name, mode] of [
+      ['group_writable', 0o620],
+      ['world_writable', 0o602],
+    ] as const) {
+      await writeFile(join(root, name), token());
+      await chmod(join(root, name), mode);
+      await expect(provider.resolve(`/run/secrets/${name}`, live())).rejects.toMatchObject({ code: 'SECRET_FILE_INSECURE_MODE' });
+    }
+    await writeFile(join(root, 'owner_only'), 'ok');
+    await chmod(join(root, 'owner_only'), 0o600);
+    await expect(provider.resolve('/run/secrets/owner_only', live())).resolves.toBe('ok');
   });
 
   it('honours the abort signal: before the read and during it', async () => {
@@ -126,27 +204,30 @@ describe('file secret provider (PR3-SEC-07, m4)', () => {
     const reason = new Error('stop');
     await expect(provider.resolve('/run/secrets/slow', AbortSignal.abort(reason))).rejects.toBe(reason);
 
-    let received: AbortSignal | undefined;
-    // R2-n4: abort once the read has started (not after a fixed sleep, which races realpath/stat on a loaded host).
+    // R2-n4: abort once the read has started (not after a fixed sleep, which races realpath/open on a loaded host).
     let readStarted: () => void = () => undefined;
     const reading = new Promise<void>((resolve) => {
       readStarted = resolve;
     });
+    let closed = false;
     const fs: SecretFileSystem = {
       realpath,
-      stat,
-      readFile: (_path, { signal }) => {
-        received = signal;
-        readStarted();
-        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('read aborted'))));
-      },
+      open: () =>
+        Promise.resolve({
+          stat: () => Promise.resolve({ isFile: () => true, size: 4, mode: 0o100600 }),
+          read: () => {
+            readStarted();
+            return new Promise<never>(() => undefined);
+          },
+          close: () => Promise.resolve(void (closed = true)),
+        }),
     };
     const controller = new AbortController();
     const pending = createFileSecretProvider({ root, fs }).resolve('/run/secrets/slow', controller.signal);
     await reading;
     controller.abort(reason);
     await expect(pending).rejects.toBe(reason);
-    expect(received).toBe(controller.signal);
+    expect(closed).toBe(true);
     const nonError = new AbortController();
     nonError.abort('not an error');
     await expect(provider.resolve('/run/secrets/slow', nonError.signal)).rejects.toMatchObject({ code: 'SECRET_FILE_IO' });
@@ -155,8 +236,7 @@ describe('file secret provider (PR3-SEC-07, m4)', () => {
   it('maps other file-system errors to a path-free SecretFileError with the errno code only', async () => {
     const failing = (error: unknown): SecretFileSystem => ({
       realpath: () => rejectWith(error),
-      stat,
-      readFile: () => rejectWith(error),
+      open: () => rejectWith(error),
     });
     const eacces = Object.assign(new Error(`EACCES: permission denied, open '${root}'`), { code: 'EACCES' });
     const cases: readonly [unknown, string][] = [
@@ -182,8 +262,7 @@ describe('file secret provider (PR3-SEC-07, m4)', () => {
         seen.push(path);
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
       },
-      stat,
-      readFile: () => Promise.resolve(new Uint8Array()),
+      open: () => rejectWith(new Error('unreachable')),
     };
     await expect(createFileSecretProvider({ fs }).resolve('/run/secrets/x', live())).rejects.toBeInstanceOf(SecretNotFoundError);
     expect(seen[0]?.replaceAll('\\', '/')).toBe('/run/secrets');

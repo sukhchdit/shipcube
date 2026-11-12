@@ -159,6 +159,15 @@ export const DB_POOL_MAX_DEFAULTS: Readonly<Record<Service, number>> = Object.fr
 export const DB_IDLE_TIMEOUT_MS_DEFAULT = 10_000;
 export const DB_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
 /**
+ * Pool-level `statement_timeout` backstop (PR-0005 code review m7), default 25 000 ms (below the 30 s request cap of
+ * REQ-SEC-015); the role backstop (TASK-016, 30 s) applies only to sessions outside the pool, because this startup
+ * parameter overrides a role default on every pooled connection. Request transactions set a tighter 5 s with
+ * `set_config` (data-model §4.1, T5).
+ */
+export const DB_STATEMENT_TIMEOUT_MS_DEFAULT = 25_000;
+/** Upper bound of `DB_STATEMENT_TIMEOUT_MS`: long worker jobs batch their work instead (data-model §7). */
+export const DB_STATEMENT_TIMEOUT_MS_LIMIT = 300_000;
+/**
  * Per-transaction timeouts set by `withTenantTx`'s context statement (data-model §4.1 settings 6-8; ADR-0005 am. 10
  * item 12, TASK-016). They win over the `platform_app` role defaults, which the role itself can rewrite.
  */
@@ -256,6 +265,9 @@ export const CONFIG_SCHEMA = {
   }),
   DB_CONNECTION_TIMEOUT_MS: withDefault(t.int(1, 120_000), DB_CONNECTION_TIMEOUT_MS_DEFAULT, {
     description: 'Milliseconds to wait for a new PostgreSQL connection before failing.',
+  }),
+  DB_STATEMENT_TIMEOUT_MS: withDefault(t.int(100, DB_STATEMENT_TIMEOUT_MS_LIMIT), DB_STATEMENT_TIMEOUT_MS_DEFAULT, {
+    description: 'pg statement_timeout of pooled connections in milliseconds (backstop; requests set 5 s per transaction).',
   }),
   // Per-transaction timeouts of the withTenantTx context statement (data-model §4.1; ADR-0005 am. 10 item 12).
   DB_TX_STATEMENT_TIMEOUT_MS: withDefault(txTimeout('DB_TX_STATEMENT_TIMEOUT_MS'), DB_TX_STATEMENT_TIMEOUT_MS_DEFAULT, {

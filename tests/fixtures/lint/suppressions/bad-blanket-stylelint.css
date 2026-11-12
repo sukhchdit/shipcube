@@ -1,0 +1,4 @@
+/* stylelint-disable -- TASK-123 vendor stylesheet */
+.legacy {
+  margin-left: 0;
+}

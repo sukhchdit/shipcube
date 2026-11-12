@@ -23,7 +23,8 @@
     "db:reset": "tsx tools/db/reset.ts",
     "db:lint-migrations": "tsx tools/db/lint-migrations.ts",
     "authz:generate": "tsx --conditions=@platform/source tools/authz/generate.ts",
-    "lint": "eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 --allow-empty-input",
+    "gen:modules": "tsx tools/api/gen-module-registry.ts",
+    "lint": "eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 --allow-empty-input && node tools/lint/check-suppressions.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -b",
@@ -32,7 +33,8 @@
     "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects integration",
     "test:api": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects api --passWithNoTests",
     "test:coverage": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --coverage",
-    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "hooks:install": "git config core.hooksPath tools/hooks"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",

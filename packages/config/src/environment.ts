@@ -24,3 +24,10 @@ export const isHardenedAppEnv = (appEnv: AppEnv | undefined): boolean => appEnv 
  * presence marks a process running on AWS; only the names are read (PR3-SEC-03 option (b), D-ORCH-007).
  */
 export const ECS_METADATA_KEYS: readonly string[] = Object.freeze(['ECS_CONTAINER_METADATA_URI', 'ECS_CONTAINER_METADATA_URI_V4']);
+
+/**
+ * Node's process-wide switch for TLS certificate verification: `0` disables it for every client that leaves
+ * `rejectUnauthorized` unset (PR9-SEC-04). Not a schema key; `loadConfig` reads it only to derive a value-free flag
+ * for `tlsVerificationGuard`.
+ */
+export const TLS_REJECT_UNAUTHORIZED_KEY = 'NODE_TLS_REJECT_UNAUTHORIZED';

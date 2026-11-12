@@ -1,0 +1,30 @@
+{
+  "schema": "shipqube.registry-times/1",
+  "fetchedAt": "2026-11-12T11:00:00.000Z",
+  "versions": {
+    "bcrypt@6.0.0": { "published": "2025-05-11T18:06:24.247Z" },
+    "bullmq@6.7.0": { "published": "2026-11-04T18:32:04.326Z" },
+    "node-abort-controller@3.1.1": {
+      "published": "2023-01-26T15:10:43.536Z",
+      "deprecated": "This package is no longer needed on supported Node.js versions."
+    },
+    "fresh-lib@1.0.0": { "published": "2026-10-01T09:00:00.000Z" },
+    "old-polyfill@1.0.0": { "published": "2025-09-01T09:00:00.000Z" },
+    "size-limit@11.0.0": { "published": "2026-10-22T09:00:00.000Z" },
+    "nanospinner@1.2.2": { "published": "2024-12-09T10:00:00.000Z" },
+    "whatwg-encoding@3.1.1": {
+      "published": "2023-11-12T10:00:00.000Z",
+      "deprecated": "Use @exodus/bytes instead for a more spec-conformant and faster implementation"
+    }
+  },
+  "packages": {
+    "bcrypt": { "latest": "6.0.0", "latestPublished": "2025-05-11T18:06:24.247Z" },
+    "bullmq": { "latest": "6.7.5", "latestPublished": "2026-11-11T21:25:29.750Z" },
+    "node-abort-controller": { "latest": "3.1.1", "latestPublished": "2023-01-26T15:10:43.536Z" },
+    "fresh-lib": { "latest": "1.0.0", "latestPublished": "2026-10-01T09:00:00.000Z" },
+    "old-polyfill": { "latest": "1.0.0", "latestPublished": "2025-09-01T09:00:00.000Z" },
+    "size-limit": { "latest": "11.0.0", "latestPublished": "2026-10-22T09:00:00.000Z" },
+    "nanospinner": { "latest": "1.2.2", "latestPublished": "2024-12-09T10:00:00.000Z" },
+    "whatwg-encoding": { "latest": "3.1.1", "latestPublished": "2023-11-12T10:00:00.000Z" }
+  }
+}

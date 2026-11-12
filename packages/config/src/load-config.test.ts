@@ -392,31 +392,33 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
   });
 
   const dbUrl = (query: string): string => `postgresql://platform_app:${randomSecret()}@db.staging.test:5432/platform?${query}`;
+  /** Transport (outside local/test: exactly one sslmode=verify-full) and query-parameter (every APP_ENV) issues. */
+  const TRANSPORT = { key: 'DATABASE_URL', code: 'insecure-transport' } as const;
+  const QUERY_PARAMETER = { key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.queryParameter' } as const;
 
   // PR3-SEC-02: node-postgres (pg-connection-string 2.14.1) copies every query entry onto its config, so the LAST
-  // sslmode wins and `ssl=0` turns TLS off; the guard must not read a different value than the driver.
+  // sslmode wins and `ssl=0` turns TLS off; the guards must not read a different value than the driver.
   it.each([
-    ['a later sslmode=disable', 'sslmode=verify-full&sslmode=disable'],
-    ['a later sslmode=no-verify', 'sslmode=verify-full&sslmode=no-verify'],
-    ['an earlier weaker sslmode', 'sslmode=require&sslmode=verify-full'],
-    ['sslmode=no-verify', 'sslmode=no-verify'],
-    ['an ssl=false override', 'sslmode=verify-full&ssl=false'],
-    ['an ssl=0 override', 'ssl=0&sslmode=verify-full'],
-    ['a duplicated unrelated parameter', 'sslmode=verify-full&application_name=a&application_name=b'],
-    ['no sslmode', 'application_name=api'],
-  ])('[NT-SEC-007-a] DATABASE_URL with %s is refused in staging @security', (_label, query) => {
+    ['a later sslmode=disable', 'sslmode=verify-full&sslmode=disable', [TRANSPORT, QUERY_PARAMETER]],
+    ['a later sslmode=no-verify', 'sslmode=verify-full&sslmode=no-verify', [TRANSPORT, QUERY_PARAMETER]],
+    ['an earlier weaker sslmode', 'sslmode=require&sslmode=verify-full', [TRANSPORT, QUERY_PARAMETER]],
+    ['sslmode=no-verify', 'sslmode=no-verify', [TRANSPORT]],
+    ['an ssl=false override', 'sslmode=verify-full&ssl=false', [QUERY_PARAMETER]],
+    ['an ssl=0 override', 'ssl=0&sslmode=verify-full', [QUERY_PARAMETER]],
+    ['a duplicated sslrootcert', 'sslmode=verify-full&sslrootcert=/a.pem&sslrootcert=/b.pem', [QUERY_PARAMETER]],
+    ['no sslmode', 'sslnegotiation=direct', [TRANSPORT]],
+    // PR-0009 R2-m2: the runtime refuses these, so configuration does too (one list, RUNTIME_DATABASE_URL_PARAMS).
+    ['application_name', 'sslmode=verify-full&application_name=api', [QUERY_PARAMETER]],
+    ['connect_timeout', 'sslmode=verify-full&connect_timeout=5', [QUERY_PARAMETER]],
+    ['uselibpqcompat', 'uselibpqcompat=true&sslmode=verify-full', [QUERY_PARAMETER]],
+  ])('[NT-SEC-007-a] DATABASE_URL with %s is refused in staging @security', (_label, query, issues) => {
     const env = { ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) };
-    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual(issues);
   });
 
-  it.each(['sslmode=verify-full', 'sslmode=verify-full&application_name=api', 'uselibpqcompat=true&sslmode=verify-full'])(
-    '[NT-SEC-007-a] DATABASE_URL with %s is accepted in staging',
-    (query) => {
-      expect(loadConfig({ ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) }, { service: 'api' }).APP_ENV).toBe(
-        'staging',
-      );
-    },
-  );
+  it.each(['sslmode=verify-full'])('[NT-SEC-007-a] DATABASE_URL with %s is accepted in staging', (query) => {
+    expect(loadConfig({ ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) }, { service: 'api' }).APP_ENV).toBe('staging');
+  });
 
   // PR3-SEC-02: ioredis 6.0.0 merges URL query parameters into its options before `rediss://` applies `tls: true`
   // through lodash `defaults`, so `?tls=` (empty, falsy) or `?tls=false` would connect over plain TCP.
@@ -472,8 +474,39 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     ['an unlisted parameter', 'sslmode=verify-full&sslcompat=1'],
   ])('[PR3-SEC-12] DATABASE_URL with %s is refused in staging @security', (_label, query) => {
     const env = { ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) };
-    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([QUERY_PARAMETER]);
   });
+
+  // PR-0009 R2-m2 (r1 n6): the query-parameter rule holds in every APP_ENV, so local fails at configuration (exit 78,
+  // the key name) instead of in the pool factory with a stack; plain transport stays allowed there.
+  it.each(
+    (['local', 'test'] as const).flatMap((appEnv) =>
+      [
+        'sslmode=disable&application_name=api',
+        'connect_timeout=5',
+        'uselibpqcompat=true',
+        'options=-c%20x%3Dy',
+        'sslmode=disable&sslmode=disable',
+      ].map((query) => [appEnv, query] as const),
+    ),
+  )('[PR-0009 R2-m2] APP_ENV=%s refuses DATABASE_URL with %s, naming the key only @security', (appEnv, query) => {
+    const secret = randomSecret();
+    const env = { ...createTestEnv({ appEnv }), DATABASE_URL: `postgresql://platform_app:${secret}@db:5432/platform?${query}` };
+    const error = rejection(() => loadConfig(env, { service: 'api' }));
+    expect(error.issues).toEqual([QUERY_PARAMETER]);
+    expect(rendered(error)).not.toContain(secret);
+  });
+
+  it.each(['', '?sslmode=disable', '?sslmode=require&sslnegotiation=direct&sslrootcert=/etc/ssl/rds.pem'])(
+    '[PR-0009 R2-m2] APP_ENV=local accepts the allow-listed DATABASE_URL query %j',
+    (query) => {
+      const env = {
+        ...createTestEnv({ appEnv: 'local' }),
+        DATABASE_URL: `postgresql://platform_app:${randomSecret()}@db:5432/platform${query}`,
+      };
+      expect(loadConfig(env, { service: 'api' }).APP_ENV).toBe('local');
+    },
+  );
 
   it('[PR3-SEC-12] a percent-encoded Unix-socket host in DATABASE_URL is refused in staging @security', () => {
     const env = {
@@ -483,7 +516,7 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
   });
 
-  it.each(['sslmode=verify-full&connect_timeout=5&sslnegotiation=direct', 'sslrootcert=/etc/ssl/rds.pem&sslmode=verify-full'])(
+  it.each(['sslmode=verify-full&sslnegotiation=direct', 'sslrootcert=/etc/ssl/rds.pem&sslmode=verify-full'])(
     '[PR3-SEC-12] DATABASE_URL with the allow-listed parameters %s is accepted in staging',
     (query) => {
       expect(loadConfig({ ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) }, { service: 'api' }).APP_ENV).toBe(
@@ -512,6 +545,29 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     expect(loadConfig({ ...createTestEnv({ appEnv: 'local' }), ECS_CONTAINER_METADATA_URI_V4: '' }, { service: 'worker' }).APP_ENV).toBe(
       'local',
     );
+  });
+
+  it.each([
+    ['staging', '0'],
+    ['production', '0'],
+    ['staging', 'false'],
+  ] as const)('[PR9-SEC-04] APP_ENV=%s refuses NODE_TLS_REJECT_UNAUTHORIZED=%s by name only @security', (appEnv, value) => {
+    const error = rejection(() => loadConfig({ ...createTestEnv({ appEnv }), NODE_TLS_REJECT_UNAUTHORIZED: value }, { service: 'api' }));
+    expect(error.issues).toEqual([
+      { key: 'NODE_TLS_REJECT_UNAUTHORIZED', code: 'forbidden-in-environment', rule: 'tls.rejectUnauthorized' },
+    ]);
+    expect(rendered(error)).not.toContain(`=${value}`);
+  });
+
+  it.each([
+    ['production', undefined],
+    ['production', ''],
+    ['production', '1'],
+    ['staging', '1'],
+    ['local', '0'],
+    ['test', '0'],
+  ] as const)('[PR9-SEC-04] APP_ENV=%s accepts NODE_TLS_REJECT_UNAUTHORIZED=%s', (appEnv, value) => {
+    expect(loadConfig({ ...createTestEnv({ appEnv }), NODE_TLS_REJECT_UNAUTHORIZED: value }, { service: 'worker' }).APP_ENV).toBe(appEnv);
   });
 
   it.each(['staging', 'production'] as const)('[PR3-SEC-03] APP_ENV=%s requires the raw NODE_ENV=production @security', (appEnv) => {

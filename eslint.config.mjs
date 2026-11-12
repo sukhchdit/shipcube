@@ -156,6 +156,8 @@ const BOUNDARIES_FILES = [
   { pattern: layerGlobs('policies'), category: 'policies' },
   { pattern: layerGlobs('events'), category: 'events' },
   { pattern: `${MODULE}/index.{ts,tsx}`, category: 'module-entry' },
+  // The worker's only entry into apps/api platform code: `@platform/api/runtime` (PR #2 m8, D-TASK006-01).
+  { pattern: 'apps/api/src/platform/runtime/index.ts', category: 'api-runtime-entry' },
   { pattern: `${MODULE}/**`, category: 'api-module', capture: ['module'] },
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
@@ -303,6 +305,14 @@ const BOUNDARIES_POLICIES = [
     from: IMPORTER_MODULE,
     allow: { to: { file: { categories: 'module-entry', captured: { module: NOT_SAME_MODULE } } } },
   },
+  // Routes receive everything through their own composition root, so they import no module entry at all (R2-n7). This
+  // sits after the cross-module allow above because the last matching policy decides.
+  {
+    from: inLayer('routes'),
+    disallow: { to: toLayer('module-entry') },
+    message:
+      'routes map HTTP paths to controllers only: a route must not import a module index.ts (its own or another module); the module index.ts wires the layers (ADR-0003).',
+  },
 
   // --- Apps (ADR-0003): web and admin import shared and ui only; api imports no other app; the worker imports
   //     module services through their public index.ts, never controllers or routes.
@@ -338,13 +348,20 @@ const BOUNDARIES_POLICIES = [
     ],
     message: 'apps/worker imports no frontend app (ADR-0003).',
   },
+  // Broad rule first: boundaries reports the LAST matching policy, so module internals keep their specific message.
+  {
+    from: IMPORTER_APP('worker'),
+    disallow: { to: { file: { categories: 'app', captured: { app: 'api' } } } },
+    message:
+      'apps/worker imports apps/api only through @platform/api/runtime and the module entries @platform/api/modules/<module> (ADR-0003, D-TASK006-01).',
+  },
   {
     from: IMPORTER_APP('worker'),
     disallow: { to: toLayer('api-module') },
     message:
       'apps/worker imports module services through the module public index.ts, never controllers, routes or other internals (ADR-0003).',
   },
-  { from: IMPORTER_APP('worker'), allow: { to: toLayer('module-entry') } },
+  { from: IMPORTER_APP('worker'), allow: { to: toLayer('module-entry', 'api-runtime-entry') } },
 
   // --- Packages (ADR-0003): never import apps; pricing is pure.
   {
@@ -382,6 +399,8 @@ export default defineConfig([
     '.claude/**',
     // Seeded negative fixtures violate rules on purpose; tools/lint/negative-fixtures.test.ts lints them explicitly.
     'tests/fixtures/lint/**',
+    // Semgrep rule fixtures (`// ruleid:` lines) violate the patterns on purpose; tools/ci/run-semgrep.mjs --test runs them.
+    'tests/fixtures/semgrep/**',
     'tools/deps/fixtures/**',
   ]),
 

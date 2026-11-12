@@ -18,6 +18,8 @@ export type ConfigIssueCode =
   | 'debug-flag'
   /** The key or value is not allowed in this environment (Mock carrier or gateway in production). */
   | 'forbidden-in-environment'
+  /** A key the register's `holders` column does not give to the loading service (PR3-SEC-06, least privilege). */
+  | 'forbidden-for-service'
   /** Values that contradict each other (TTL ordering, rotation key ids). */
   | 'inconsistent'
   /** A live-mode payment key (PAYMENT_LIVE_KEY_FORBIDDEN, ADR-0018 §3). */

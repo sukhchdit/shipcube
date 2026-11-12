@@ -1,0 +1,32 @@
+# Gitleaks configuration (US-048, REQ-SEC-013; TASK-007). Lane A scans only the PR commit range with this file, read
+# from the BASE ref when the base has it (a PR cannot widen its own allowlist). Default rules stay on.
+#
+# Allowlists are narrow by construction: every entry is scoped to named paths AND a line pattern (condition = "AND"),
+# so a real secret pasted elsewhere in the same file, or anywhere else, still fails. Checked by
+# tools/ci/sec-static.test.ts (AT-US-048-04).
+title = "shipqube gitleaks"
+
+[extend]
+useDefault = true
+
+# PR1-SEC-11: example values in the OpenAPI contract: fake JWT/opaque tokens under keys ending in `token` or `proof`,
+# the share-link example `share_path: /q#<token>` and the Stripe-shaped `client_secret: pi_...` payment example.
+# Preferred long-term fix (api-designer): obviously fake `EXAMPLE_...` values, after which these entries are removed.
+[[allowlists]]
+description = "PR1-SEC-11 OpenAPI example token values"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^docs/03-architecture/api/openapi\.yaml$''']
+regexes = [
+  '''^\s+[a-z_]*(?:token|proof):\s+[A-Za-z0-9_.=-]+\s*$''',
+  '''^\s+share_path:\s+/q#[a-z]+=[A-Za-z0-9_-]+\s*$''',
+  '''^\s+client_secret:\s+pi_[A-Za-z0-9_]+\s*$''',
+]
+
+# PR1-SEC-11: agent documentation describing password hashing ("Argon2id/bcrypt for passwords"), not a credential.
+[[allowlists]]
+description = "PR1-SEC-11 agent docs prose"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^\.claude/agents/security-analyst\.md$''', '''^claude-code-sdlc-agent-team\.md$''']
+regexes = ['''Argon2id/bcrypt for passwords''']

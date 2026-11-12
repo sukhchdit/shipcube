@@ -32,7 +32,7 @@ PR #1 (TASK-001) review: `docs/05-quality/security/PR-0001-TASK-001-security-rev
 **How to apply:** in P5 reviews, check these items:
 - TASK-003: an engine-pin step in deps:rebuild, refusal of PRISMA_ENGINES_* variables, CHECKPOINT_DISABLE. **Met at PR #5 `d8ba197`** (D-ARCH-041 confirmed); see [[project-p5-wave0-db-baseline]].
 - TASK-004: a custom `app/entry.server.tsx` and no `isbot`. **Met at PR #4 `519bb89`**; see [[project-p5-wave0-web-scaffolds]].
-- TASK-007:
+- TASK-007: **met at PR #10 `28442b6`**, except the caniuse-lite `THIRD_PARTY_NOTICES.md` (PR10-SEC-15) and the after-merge Dependabot check; see [[project-p5-pr10-ci-lane]]. Original list:
   - the `npm audit signatures` override form, allowed on that command only;
   - a lockfile-driven freshness gate, no `npm outdated`;
   - Dependabot `ignore` for `@platform/*`;
