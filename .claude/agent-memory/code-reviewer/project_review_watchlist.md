@@ -104,3 +104,34 @@ Routed:
 - TASK-023 must not seed `permissions`, `roles` or `role_permissions`.
 - TASK-016's R3-n1 allow-list gains the `prisma/tests → tools/authz` edge.
 - Any CATALOGUE_VERSION bump needs the delta renderer first (`artefacts()` throws above v1).
+
+PR #9 (TASK-006 runtime skeleton) r1 at 374166d was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0009-TASK-006-code-review.md`.
+- M1: the session-integrity start-up check equates "first readiness probe" with "fresh connection". A '' left by a tx-local set_config becomes `db_session_default_tampered`, and the 5-min cache makes the 503 sticky. Fix: an eager boot check on a dedicated `pg.Client`, and no caching of failing results.
+- m1: a corrupt gzip body returns 500 (body-parser `status:400`, no `type`). m3: public `/health/ready` has no single-flight. m4: problem responses lack `Cache-Control: no-store`.
+- Routed:
+  - m2 (orchestrator): no sheet owns replacing `pendingCheck` for object_storage, audit_partitions and audit_chain.
+  - m5 (TASK-010): prove AT-US-007-03 "full error in logs".
+  - n2 (TASK-214): add a pre-close delay.
+  - n4 and n8 (TASK-016): the pin test must parse every bootstrap/*.sql; add a not-ready latch.
+  - n10 (first BullMQ task): BullMQ needs `maxRetriesPerRequest: null`.
+- Closed by PR #9 (r2 to verify): PR #2 m8 and R2-n7; PR #5 m7; PR3 m4, m5, SEC-05, SEC-06, SEC-07 and SEC-16; PR5-SEC-07 and SEC-08; PR7-SEC-03 items 2 and 4.
+
+PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0010-TASK-007-code-review.md`.
+- M1: `--ignore-scripts false` and the npm install aliases bypass check-install-flags and check-workflow-policy.
+- M2: gitleaks can be suppressed by the head (`.gitleaksignore` auto-load; `gitleaks:allow` without `--ignore-gitleaks-allow`).
+- M3: repo settings allow merge commits and rebase merges, and the squash title is COMMIT_OR_PR_TITLE, so PR-title commitlint is bypassable. The settings change alone closes it.
+- MINORs:
+  - m1: the YAML parser must reject CR, NEL, LS and PS.
+  - m2: security-owned check needs `--no-renames`, and the merge-main invalidation must be intersected with the PR's owned paths.
+  - m3: the base-ref suite still runs the head harness; `.semgrepignore` comes from the head.
+  - m4: CODEOWNERS gaps (`.gitleaksignore`, jest.config.ts, tsconfig, commitlint config).
+  - m5: minutes (drop the `changes` job); cancel-in-progress on main; push paths filter.
+  - m6: no branch protection on this plan.
+  - m7: no cap on waiver horizon.
+- r2: re-check each fix has negative fixtures.
+- Closed by PR #10 (verified):
+  - PR #2: R2-m1 gitignore anchoring, R2-n8, Semgrep `createRequire`.
+  - PR #8: R2-n3 (migration immutability).
+  - PR #1: R2-n4 (in code).
+  - TASK-015 m7 (any-justification TASK-ID) is partly closed.
+- After merge, PR #9 is the first PR under the enforced security-record gate.

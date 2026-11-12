@@ -52,7 +52,7 @@ The PR #2 (TASK-002) review is `docs/05-quality/security/PR-0002-TASK-002-securi
 **Why:** these gaps close only if the later task reviews check them, and the lint rules are cited as mitigations in ADR-0016 §13, ADR-0005, ADR-0007, REQ-SEC-016 and D-ARCH-042.
 
 **How to apply.** In P5 reviews, check:
-- **TASK-007:**
+- **TASK-007:** **met at PR #10 `28442b6`**. Residual: the counter is blind to `gitleaks:allow` outside code file types (PR10-SEC-01); see [[project-p5-pr10-ci-lane]]. Original list:
   - the check-suppressions step and `TASK-\d{3}` in suppression justifications;
   - Semgrep `password-hashing.yml` covering the residual forms, with `--disable-nosem` and run from the base ref;
   - CODEOWNERS;

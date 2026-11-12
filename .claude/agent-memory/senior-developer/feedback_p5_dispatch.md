@@ -37,3 +37,23 @@ Related: [[p5-worktrees]], [[plan-generation-workflow]]
 - The architect published rulings that touched these PRs while the cycle ran. Re-fetch before pushing. If main's delta is docs-only, the evidence is: a normal merge, `git diff <gated> HEAD -- . ':!docs' ':!.claude'` is empty, and a re-run of lint, format and unit only.
 - A specialist's sandbox may refuse the one-line `bash -c` lock loop. A scratchpad script that runs the same protocol works.
 - To pin a generated file by SHA: drop the pin, run the generator, hash the output, then add the pin back.
+
+**Batch 0.3, TASK-006/007 (2026-11-12): 3 of the 5 opus specialists stopped at the turn limit (6A, 6B, 7C)**, even with split ownership and the shared `wave0/brief-common.md`. The two that finished (7A, 7B) each had a single, narrower area. What worked:
+- Running 3 agents at a time (the D-ORCH-010 cap) and launching the next as soon as one finished.
+- Finishing the leftover routed items myself (about 6 small items).
+- Writing contract files that named file ownership.
+
+Watch out for these:
+- One specialist was silently pinned to `.claude/worktrees/agent-*` instead of the briefed worktree. See [[agent-worktree-junctions]].
+- Review routings land on main mid-task (D-ORCH-011 added PR7/PR8 items). Grep new security reviews for the task ID before opening the PR.
+- Run commitlint per commit BEFORE the first push. A pushed bad header can't be rewritten; the only remedy is a conforming PR title for the squash merge.
+- Run actionlint locally after every ci.yml edit: shellcheck SC2016 rejects `$` or a backtick inside single quotes.
+- Lane A on its own PR took about 7 job-min (fast-lane 4 min). Runs 1–2 failed on a base-ref fixture design issue and on SC2016.
+
+**Large-task three-way split (TASK-016, 2026-11-12): all three opus specialists reported (86, 86 and 100 tool uses), and the full gate passed on the first run.** What made it work:
+- Before dispatching, the lead wrote and committed the shared contract itself (the table-class manifest loader that two specialists needed).
+- A common brief fixed every cross-specialist file name up front, so the lint exemptions could name exact paths.
+- Ownership was split by layer: SQL/catalog, runtime, linters.
+- Commit each specialist's files as soon as it reports.
+- The leftovers were small. Shared `tools/tsconfig.json` `files` entries can conflict, and new fixture `prisma.config.ts` files must be added to `tools/tsconfig.json` `files` or the lint project service fails on them.
+- Check that the hosted CI jobs a sheet assumes actually exist (`security-integration` did not), and record the deferral instead of improvising a workflow.
