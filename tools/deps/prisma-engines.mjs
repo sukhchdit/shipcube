@@ -435,11 +435,24 @@ export function reverifyEngine(path, expected) {
 }
 
 /**
- * Environment for every Prisma child: the verified engine path and no checkpoint telemetry.
+ * Variables never passed to a Prisma child besides the engine redirects (PR5-SEC-07): `NODE_OPTIONS` can preload
+ * code (`--require`, `--import`, `--env-file`) that sets an engine variable INSIDE the child, after this filter ran
+ * and while the verified file stays untouched, so `reverifyEngine` would still pass. Prisma needs no Node options.
+ */
+const DROPPED_CHILD_ENV = ['NODE_OPTIONS'];
+
+/**
+ * Environment for every Prisma child: the verified engine path, no checkpoint telemetry, no engine redirect and no
+ * `NODE_OPTIONS` (PR5-SEC-07). Keys compare case-insensitively (Windows environments are case-insensitive).
  * @param {Record<string, string | undefined>} env @param {string} enginePath
  */
 export function prismaChildEnv(env, enginePath) {
-  const child = Object.fromEntries(Object.entries(env).filter(([key]) => !FORBIDDEN_ENGINE_ENV.includes(key.toUpperCase())));
+  const child = Object.fromEntries(
+    Object.entries(env).filter(([key]) => {
+      const upper = key.toUpperCase();
+      return !FORBIDDEN_ENGINE_ENV.includes(upper) && !DROPPED_CHILD_ENV.includes(upper);
+    }),
+  );
   return { ...child, PRISMA_SCHEMA_ENGINE_BINARY: enginePath, CHECKPOINT_DISABLE: '1' };
 }
 

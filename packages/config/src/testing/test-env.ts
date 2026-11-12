@@ -5,7 +5,8 @@
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
-import type { AppEnv } from '../environment.js';
+import type { AppEnv, Service } from '../environment.js';
+import { keysNotHeldBy } from '../holders.js';
 import { KEY_REGISTER, type KeyRegisterEntry, MIN_SYMMETRIC_KEY_BYTES } from '../keys.js';
 
 const randomToken = (bytes = 18): string => randomBytes(bytes).toString('hex');
@@ -41,6 +42,8 @@ export function keyValueFor(entry: KeyRegisterEntry, version = 1): string {
 
 export interface TestEnvOptions {
   readonly appEnv?: AppEnv;
+  /** Drop the register keys this service does not hold (PR3-SEC-06), as a per-service deployment would. */
+  readonly service?: Service;
 }
 
 /**
@@ -76,5 +79,6 @@ export function createTestEnv(options: TestEnvOptions = {}): Record<string, stri
     env.STRIPE_SECRET_KEY_REF = 'aws-secrets-manager:stripe/restricted-key';
     env.STRIPE_WEBHOOK_SECRET_REF = 'aws-secrets-manager:stripe/webhook/api';
   }
+  if (options.service !== undefined) for (const name of keysNotHeldBy(env, options.service)) delete env[name];
   return env;
 }

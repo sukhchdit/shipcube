@@ -351,6 +351,26 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
     expect(env).toEqual({ PATH: '/bin', PRISMA_SCHEMA_ENGINE_BINARY: '/verified/engine', CHECKPOINT_DISABLE: '1' });
   });
 
+  it('[PR5-SEC-07] Prisma children never inherit NODE_OPTIONS (no preload can set an engine variable inside the child)', () => {
+    for (const key of ['NODE_OPTIONS', 'node_options', 'Node_Options']) {
+      const env = prismaChildEnv({ PATH: '/bin', [key]: '--require ./redirect-engine.cjs --env-file=.env' }, '/verified/engine');
+      expect(env).toEqual({ PATH: '/bin', PRISMA_SCHEMA_ENGINE_BINARY: '/verified/engine', CHECKPOINT_DISABLE: '1' });
+    }
+  });
+
+  it('[PR5-SEC-07] prisma.config.ts files load no dotenv and call no loadEnvFile', () => {
+    const repo = findRepoRoot();
+    const configs = [
+      join(repo, 'prisma.config.ts'),
+      ...readdirSync(join(repo, 'prisma', 'tests', 'fixtures'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(repo, 'prisma', 'tests', 'fixtures', entry.name, 'prisma.config.ts'))
+        .filter((path) => existsSync(path)),
+    ];
+    expect(configs.length).toBeGreaterThan(1);
+    for (const path of configs) expect(readFileSync(path, 'utf8')).not.toMatch(/dotenv|loadEnvFile|--env-file/);
+  });
+
   it('[SEC-TC-64] a change of the engine while Prisma ran is detected and the file removed', () => {
     const box = sandbox();
     const path = join(box.enginesDir, engineFileName(TARGET));

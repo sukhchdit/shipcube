@@ -43,7 +43,7 @@ export function loadConfig(env: EnvInput, options: LoadConfigOptions): Config {
   const toolingKeys = Object.keys(pickConfigured(env, TOOLING_KEY_NAMES));
   // ECS task-metadata variables: presence only (localAppEnvOnEcsGuard, PR3-SEC-03).
   const ecsMetadataKeys = Object.keys(pickConfigured(env, ECS_METADATA_KEYS));
-  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv, toolingKeys, ecsMetadataKeys })];
+  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv, toolingKeys, ecsMetadataKeys, service: options.service })];
   if (issues.length > 0) throw new ConfigValidationError(issues);
   return deepFreeze(converted) as Config;
 }

@@ -3,9 +3,9 @@
  * ADR-0010 am. 9). Each guard is a pure function over the raw configured strings and the values that passed the
  * schema; it returns issues that name keys only.
  */
-import { type AppEnv, isHardenedAppEnv, isLocalAppEnv } from './environment.js';
+import { type AppEnv, isHardenedAppEnv, isLocalAppEnv, type Service } from './environment.js';
 import type { ConfigIssue } from './errors.js';
-import { findDuplicateKeyMaterial, type KeyVersion, PREVIOUS_SUFFIX } from './keys.js';
+import { findDuplicateKeyMaterial, KEY_REGISTER, type KeyVersion, PREVIOUS_SUFFIX } from './keys.js';
 import { isPlaceholder } from './placeholders.js';
 import { Secret } from './secret.js';
 
@@ -20,7 +20,13 @@ export interface GuardInput {
   readonly toolingKeys?: readonly string[];
   /** Names of ECS task-metadata variables (`ECS_METADATA_KEYS`) present in the process environment; never values. */
   readonly ecsMetadataKeys?: readonly string[];
+  /** The loading service; companion keys it does not hold (register `holders`, PR3-SEC-06) are not required. */
+  readonly service?: Service;
 }
+
+/** `true` unless `key` is a register variable whose holders exclude `service`. */
+const heldBy = (key: string, service: Service | undefined): boolean =>
+  service === undefined || (KEY_REGISTER.find((entry) => entry.variables.includes(key))?.holders.includes(service) ?? true);
 
 export type Guard = (input: GuardInput) => readonly ConfigIssue[];
 
@@ -198,14 +204,14 @@ export const productionGuard: Guard = ({ values, appEnv }) => {
 const CARRIER_CODES = ['DHL', 'FEDEX', 'UPS'] as const;
 
 /** Keys that become required because of another key's value. A present-but-invalid key is already reported. */
-export const companionGuard: Guard = ({ raw, values, appEnv }) => {
+export const companionGuard: Guard = ({ raw, values, appEnv, service }) => {
   const required: string[] = [];
   if (values.PAYMENT_PROVIDER === 'stripe') required.push('STRIPE_SECRET_KEY_REF', 'STRIPE_WEBHOOK_SECRET_REF');
   if (values.PAYMENT_PROVIDER === 'mock' && appEnv !== undefined && appEnv !== 'production') required.push('MOCK_GATEWAY_WEBHOOK_SECRET');
   for (const code of CARRIER_CODES) if (values[`CARRIER_${code}_ENABLED`] === true) required.push(`CARRIER_${code}_SECRET_REF`);
   if (values.MAIL_PROVIDER === 'smtp') required.push('MAIL_HOST');
   if (values.OTEL_ENABLED === true) required.push('OTEL_EXPORTER_OTLP_ENDPOINT');
-  return required.filter((key) => raw[key] === undefined).map((key) => ({ key, code: 'missing' }));
+  return required.filter((key) => raw[key] === undefined && heldBy(key, service)).map((key) => ({ key, code: 'missing' }));
 };
 
 const exceeds = (values: GuardInput['values'], key: string, limitKey: string): boolean => {

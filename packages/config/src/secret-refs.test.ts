@@ -330,6 +330,34 @@ describe('secret resolution (port + orchestrator)', () => {
     expect(describeFailureCause(undefined)).toBe('non-error:undefined');
   });
 
+  it('[PR3-SEC-16] a throwing code getter or Proxy trap yields a value-free cause and never escapes', async () => {
+    const leak = `sk_test_${token()}`;
+    const getterCode = new Error('x');
+    Object.defineProperty(getterCode, 'code', {
+      get: () => {
+        throw new Error(leak);
+      },
+    });
+    const trap = (): never => {
+      throw new Error(leak);
+    };
+    const proxied = new Proxy(new Error('x'), { getPrototypeOf: trap, getOwnPropertyDescriptor: trap, get: trap });
+    const proxiedDescriptor = new Proxy(new Error('x'), { getOwnPropertyDescriptor: trap });
+    expect(describeFailureCause(getterCode)).toBe('Error');
+    expect(describeFailureCause(proxied)).toBe('non-error:object');
+    expect(describeFailureCause(proxiedDescriptor)).toBe('Error');
+    const provider = scripted({
+      getter: [() => rejectWith(getterCode)],
+      proxy: [() => rejectWith(proxied)],
+      desc: [() => rejectWith(proxiedDescriptor)],
+    });
+    const error = await rejection(
+      resolveSecretRefs(refs({ A_REF: aws('getter'), B_REF: aws('proxy'), C_REF: aws('desc') }), [provider], instant),
+    );
+    expect(formatConfigError(error)).not.toContain(leak);
+    expect(inspect(error, { depth: 5 })).not.toContain(leak);
+  });
+
   it('[PR3-SEC-15] reads the class name from the prototype chain and accepts Error/Exception-shaped names only', () => {
     const leak = `sk_test_${token()}`;
     // An own `constructor` on the thrown value is ignored.
