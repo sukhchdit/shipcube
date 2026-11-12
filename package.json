@@ -22,6 +22,7 @@
     "db:migrate:deploy": "node tools/deps/prisma-cli.mjs migrate deploy",
     "db:reset": "tsx tools/db/reset.ts",
     "db:lint-migrations": "tsx tools/db/lint-migrations.ts",
+    "gen:modules": "tsx tools/api/gen-module-registry.ts",
     "lint": "eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 --allow-empty-input",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
