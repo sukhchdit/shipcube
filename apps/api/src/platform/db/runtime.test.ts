@@ -5,12 +5,15 @@
  * prisma/tests/rls/session-scope-leak.int.test.ts.
  */
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import type { Config } from '@platform/config';
 
 import { createRuntimeLog } from '../runtime/log.js';
 import type { ReadinessCheck } from '../runtime/readiness.js';
 import { SessionIntegrityError } from './session-integrity.js';
 import {
   createDatabaseRuntime,
+  databaseOptionsFrom,
+  databaseRuntimeFromConfig,
   createNotReadyLatch,
   DatabaseNotReadyError,
   gatedDatabaseCheck,
@@ -160,6 +163,31 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
     expect(runtime.sessionContextLeaks()).toBe(0);
     expect(runtime.resources.map((resource) => resource.name)).toEqual(['session-integrity-monitor', 'database']);
     expect(Object.keys(runtime).sort()).toEqual(['readinessCheck', 'resources', 'sessionContextLeaks', 'startup', 'tenantTx']);
+    for (const resource of runtime.resources) await resource.close();
+  });
+
+  it('maps the validated configuration onto the pool and transaction options (worker and API share it)', async () => {
+    delete process.env['PGOPTIONS'];
+    const config = {
+      DATABASE_URL: { reveal: () => 'postgres://platform_app@db.invalid:5432/platform' },
+      DB_POOL_MAX: 5,
+      DB_IDLE_TIMEOUT_MS: 10_000,
+      DB_CONNECTION_TIMEOUT_MS: 5_000,
+      DB_STATEMENT_TIMEOUT_MS: 25_000,
+      DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
+      DB_TX_LOCK_TIMEOUT_MS: 2_000,
+      DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+    } as unknown as Config;
+    expect(databaseOptionsFrom(config, 'worker')).toEqual({
+      connectionString: 'postgres://platform_app@db.invalid:5432/platform',
+      poolMax: 5,
+      applicationName: 'worker',
+      idleTimeoutMs: 10_000,
+      connectionTimeoutMs: 5_000,
+      statementTimeoutMs: 25_000,
+    });
+    const runtime = databaseRuntimeFromConfig(config, 'worker', capture().log);
+    expect(runtime.tenantTx).toBeUndefined();
     for (const resource of runtime.resources) await resource.close();
   });
 });
