@@ -22,3 +22,18 @@ Developer specialists stop at an 80-turn limit, and an M-size task with several 
 Related: [[p5-worktrees]], [[plan-generation-workflow]]
 
 **Small fix cycles: do them solo (PR #3 cycle 2, 2026-11-12).** Four findings plus four NITs, all in one package, took about 60 tool calls including the serial background gate, with no dispatch. That was faster than briefing a specialist. Write scratch scripts that contain backslashes (regex, Windows paths) with the Write tool: a quoted Bash heredoc lost a `\` in `/\/g`.
+
+**Batch 0.3/0.4 pull-forward (TASK-008/009/013, 2026-11-12):** all 3 specialists finished and reported (59, 67, 107 tool uses). What worked:
+- A host-wide Docker lock (`mkdir <scratch>/wave0/docker.lock` = atomic, `rmdir` after). Specialists and my gate script (`until mkdir …; do sleep 15; done`) used it. Remove it yourself if a reaped run leaves it behind.
+- Specialists do not get `npm ci` themselves. I ran one serial background install for all worktrees, and briefs said "wait for `== NNN exit 0` in <bg output file>".
+- Docs or web-research tasks go to `general-purpose`. `backend-developer` has no WebFetch/WebSearch.
+- Specialist sandboxes are pinned to `.claude/worktrees/agent-<id>`, which blocks Bash heredoc writes and compound `cd X && git …`. Tell them to use the Write tool and `git -C <worktree>`.
+- `jest --selectProjects integration <path>` treats the path as a project name and runs every integration suite. Put the path first: `jest <path> --selectProjects integration`.
+- The full gate run was reaped again during `test:integration`. Once free memory recovered (check with `Get-CimInstance Win32_OperatingSystem`), I ran only the affected integration files serially (`-i`) in the foreground and reported that honestly in the PR.
+
+**Batch 0.3/0.4 fix cycle 1 (PRs #6-#8, 2026-11-12): about 75 of my own tool calls, all three specialists reported (61-82 tool uses each).** Setup: general-purpose for the docs PR (it needs WebFetch to pin source SHAs), opus database-engineer for the spike test, and opus backend-developer for authz Part A, while I did Part B in the same worktree with disjoint file ownership. What worked:
+- Merge `origin/main` into every worktree before dispatching, so specialists edit the final base.
+- One background gate script per PR, run serially, with the Docker steps behind `docker.lock`. Full integration plus coverage finished this time, in about 4.5 min for PR #8.
+- The architect published rulings that touched these PRs while the cycle ran. Re-fetch before pushing. If main's delta is docs-only, the evidence is: a normal merge, `git diff <gated> HEAD -- . ':!docs' ':!.claude'` is empty, and a re-run of lint, format and unit only.
+- A specialist's sandbox may refuse the one-line `bash -c` lock loop. A scratchpad script that runs the same protocol works.
+- To pin a generated file by SHA: drop the pin, run the generator, hash the output, then add the pin back.

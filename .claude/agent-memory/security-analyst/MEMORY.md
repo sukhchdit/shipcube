@@ -4,4 +4,7 @@
 - [P5 PR-0002 lint controls](project_p5_pr2_lint_controls.md) — R1+R2 PASS_WITH_FOLLOW-UPS; PR2-SEC-01..12: inline disables, bcrypt residual, test-folder hole, Prisma/ui; task checks
 - [P5 config review](project_p5_wave0_config_review.md) — PR-0003 R1-R3 PASS_WITH_FOLLOW-UPS (12/15/03 closed, 16 INFO new); NODE_OPTIONS/pg/PGOPTIONS/ioredis facts; strip-types+fuzz probes; TASK-006/014/040+ checks
 - [P5 Wave 0 DB baseline](project_p5_wave0_db_baseline.md) — PR-0005 R1-R3 PASS_WITH_FOLLOW-UPS; SCRAM verifier-in-log ruling; rule-13 ALTER ROUTINE gap; TASK-014/016/021/034 checks
+- [P5 Wave 0 carrier docs](project_p5_wave0_carrier_docs.md) — PR-0006 R1+R2 PASS_WITH_FOLLOW-UPS; DHL shared origin, FedEx IP penalty, UPS 403=Blocked Merchant; TASK-113/131/135/188 checks
+- [P5 Wave 0 RLS spike](project_p5_wave0_rls_spike.md) — PR-0007 R1+R2 PASS_WITH_FOLLOW-UPS; am. 10 text defects (11/12); set_config leak facts; TASK-016/051/006/010/024 checks
 - [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 PASS_WITH_FOLLOW-UPS; harness R2 owed; Vite env inlining, nginx default.conf, RR meta; TASK-014/022/111 checks
+- [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks

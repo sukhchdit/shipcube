@@ -1014,7 +1014,7 @@ Feature: Confirmation page
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** EPIC-10, EPIC-11, EPIC-12
 - **Linked REQs:** REQ-BOOK-029
 - **As a** customer **I want** to cancel a booked shipment before collection and get my money back **so that** a mistake costs nothing (D-017).
-- **Notes:** DR-B20, DR-B21, EC-B19, EC-B27. Void-failure handling is US-215; refund is US-216; label void is US-229; pickup cancel is US-237.
+- **Notes:** DR-B20, DR-B21, EC-B19, EC-B27. Void-failure handling is US-215; refund is US-216; label void is US-229; pickup cancel is US-237. Carrier cannot void (D-ARCH-057): when the adapter declares `operations.cancelShipment=false` (DHL Express), no carrier call is made, the pickup is still cancelled, `carrier_void = UNSUPPORTED` is recorded (terminal, no retry, never EXCEPTION), the label is VOIDED Platform-side at once and the refund proceeds; the customer sees the same outcome as a confirmed void (A-105).
 
 #### Acceptance criteria
 ```gherkin
@@ -1033,6 +1033,16 @@ Feature: Self-service cancellation
     Given a shipment in DRAFT, QUOTED or PENDING_PAYMENT
     When it is cancelled
     Then it becomes CANCELLED with no carrier call and no refund
+
+  Scenario: Carrier cannot void the shipment
+    Given a PICKUP_SCHEDULED shipment on an adapter whose capabilities() declares operations.cancelShipment=false
+    And network access is monitored
+    When a user with "shipment:cancel" cancels with reason "WRONG_ADDRESS"
+    Then the pickup is cancelled through cancelPickup
+    And no cancelShipment request reaches the carrier
+    And the shipment records carrier_void "UNSUPPORTED" and goes CANCELLED then VOIDED without entering EXCEPTION
+    And the label is VOIDED at once and the full amount is refunded, ending in REFUNDED
+    And the customer-facing outcome is identical to a carrier-confirmed void
 
   Scenario: Reason code required
     When no reason is sent or the reason is "BORED"

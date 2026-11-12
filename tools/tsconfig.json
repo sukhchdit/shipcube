@@ -15,5 +15,6 @@
     "../apps/api/src/platform/db/client.ts"
   ],
   "include": ["**/*.ts", "**/*.mjs", "../prisma/tests/**/*.ts", "../prisma/generated/**/*.ts"],
-  "exclude": ["**/fixtures/**", "../prisma/tests/fixtures/**"]
+  "exclude": ["**/fixtures/**", "../prisma/tests/fixtures/**"],
+  "references": [{ "path": "../packages/authz" }]
 }
