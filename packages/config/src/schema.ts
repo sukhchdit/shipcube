@@ -9,8 +9,15 @@
  * Cross-key policies (placeholders, transport, debug flags, Mock gating, key reuse) live in `guards.ts`.
  */
 import Joi from 'joi';
-import type { z } from 'zod';
 
+import {
+  BRAND_NAME_MAX_LENGTH,
+  BRAND_NAME_MIN_LENGTH,
+  BRAND_URL_MAX_LENGTH,
+  BRAND_URL_PROTOCOLS,
+  LOCALES,
+  ROOT_PATH_PATTERN,
+} from './brand-rules.js';
 import { parseDurationSeconds } from './durations.js';
 import { APP_ENVS, type AppEnv, isLocalAppEnv, NODE_ENVS, type Service, SERVICES } from './environment.js';
 import {
@@ -24,7 +31,6 @@ import {
 } from './keys.js';
 import { parseSecretRef, type SecretRef } from './secret-refs.js';
 import { Secret } from './secret.js';
-import { BRAND_VALUE_SCHEMAS, LOCALES } from './web/web-schema.js';
 
 /** `secret` values are wrapped in `Secret` and redacted; `secret-ref` values are references to secrets. */
 export type Sensitivity = 'secret' | 'secret-ref' | 'public' | 'internal';
@@ -43,9 +49,12 @@ export interface KeySpec<T = unknown, Optional extends boolean = boolean> {
   readonly requiredFor: readonly Service[];
   /** `true` when the loaded value may be `undefined`. */
   readonly optional: Optional;
-  readonly defaultFor?: (appEnv: AppEnv | undefined) => T;
+  readonly defaultFor?: DefaultFor<T>;
   readonly __type?: T;
 }
+
+/** A default that may depend on `APP_ENV` (ADR-0010 am. 9) and on the loading service (pool sizes). */
+export type DefaultFor<T> = (appEnv: AppEnv | undefined, service: Service) => T;
 
 interface Meta {
   readonly description: string;
@@ -70,10 +79,10 @@ const requiredFor = <T>(services: readonly Service[], t: Typed<T>, meta: Meta): 
 
 const optional = <T>(t: Typed<T>, meta: Meta): KeySpec<T, true> => spec(t, meta, [], true);
 
-/** Optional key with a default; the default may depend on `APP_ENV` (ADR-0010 am. 9). */
-const withDefault = <T>(t: Typed<T>, fallback: T | ((appEnv: AppEnv | undefined) => T), meta: Meta): KeySpec<T, false> => ({
+/** Optional key with a default; the default may depend on `APP_ENV` (ADR-0010 am. 9) and on the service. */
+const withDefault = <T>(t: Typed<T>, fallback: T | DefaultFor<T>, meta: Meta): KeySpec<T, false> => ({
   ...spec(t, meta, [], false),
-  defaultFor: typeof fallback === 'function' ? (fallback as (appEnv: AppEnv | undefined) => T) : () => fallback,
+  defaultFor: typeof fallback === 'function' ? (fallback as DefaultFor<T>) : () => fallback,
 });
 
 /** Wraps a parser as a Joi string rule; a failure reports `any.invalid` with the parser's rule id (no value). */
@@ -125,13 +134,17 @@ const t = {
   key: (variable: string): Typed<KeyVersion> => parsed((raw) => parseKeyVersion(registerEntryFor(variable), raw)),
   keySet: (variable: string): Typed<readonly KeyVersion[]> => parsed((raw) => parseKeySet(registerEntryFor(variable), raw)),
   publicKeySet: (purpose: string): Typed<readonly PublicKeyVersion[]> => parsed((raw) => parsePublicKeySet(purpose, raw)),
-  /** Delegates to a Zod value schema shared with the web build (one definition per key). */
-  zod: <S extends z.ZodType>(schema: S): Typed<z.output<S>> =>
+  /** `BRAND_NAME`: trimmed, 1..40 characters (rules shared with the web Zod schema, `brand-rules.ts`). */
+  brandName: (): Typed<string> => typed(Joi.string().trim().min(BRAND_NAME_MIN_LENGTH).max(BRAND_NAME_MAX_LENGTH)),
+  /** Absolute http(s) URL or root-relative path (rules shared with the web Zod schema, `brand-rules.ts`). */
+  urlOrRootPath: (): Typed<string> =>
     typed(
-      Joi.any().custom((value: unknown, helpers) => {
-        const result = schema.safeParse(value);
-        return result.success ? result.data : helpers.error('any.invalid', { rule: 'zod' });
-      }),
+      Joi.alternatives().try(
+        Joi.string()
+          .max(BRAND_URL_MAX_LENGTH)
+          .uri({ scheme: [...BRAND_URL_PROTOCOLS] }),
+        Joi.string().max(BRAND_URL_MAX_LENGTH).pattern(ROOT_PATH_PATTERN),
+      ),
     ),
 };
 
@@ -139,6 +152,14 @@ const t = {
 export const BCRYPT_COST_FLOOR = 12;
 /** bcrypt's own upper bound for the cost factor. */
 export const BCRYPT_COST_MAX = 31;
+
+/** Upper bound of `DB_POOL_MAX` (the TASK-003 pool factory allows 200; config is deliberately stricter). */
+export const DB_POOL_MAX_LIMIT = 100;
+/** Per-process pool size by service (data-model §7.1, platform.md §5). */
+export const DB_POOL_MAX_DEFAULTS: Readonly<Record<Service, number>> = Object.freeze({ api: 10, worker: 5 });
+/** Defaults equal to the TASK-003 pool factory defaults (apps/api/src/platform/db/client.ts). */
+export const DB_IDLE_TIMEOUT_MS_DEFAULT = 10_000;
+export const DB_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
 
 const MINUTE = 60;
 const HOUR = 3_600;
@@ -194,31 +215,35 @@ export const CONFIG_SCHEMA = {
   NODE_OPTIONS: optional(t.string(undefined, 1024), { description: 'Node options; --inspect* is refused outside local.' }),
 
   // Brand (BRAND_*), shared with the web build
-  BRAND_NAME: required(t.zod(BRAND_VALUE_SCHEMAS.BRAND_NAME), {
+  BRAND_NAME: required(t.brandName(), {
     description: 'Product name shown in UI and e-mails (≤ 40 chars).',
     sensitivity: 'public',
   }),
-  BRAND_LOGO_URL: optional(t.zod(BRAND_VALUE_SCHEMAS.BRAND_LOGO_URL), {
+  BRAND_LOGO_URL: optional(t.urlOrRootPath(), {
     description: 'Logo URL or root-relative path.',
     sensitivity: 'public',
   }),
-  BRAND_LOGO_DARK_URL: optional(t.zod(BRAND_VALUE_SCHEMAS.BRAND_LOGO_DARK_URL), { description: 'Dark-theme logo.', sensitivity: 'public' }),
-  BRAND_FAVICON_URL: optional(t.zod(BRAND_VALUE_SCHEMAS.BRAND_FAVICON_URL), { description: 'Favicon URL.', sensitivity: 'public' }),
+  BRAND_LOGO_DARK_URL: optional(t.urlOrRootPath(), { description: 'Dark-theme logo.', sensitivity: 'public' }),
+  BRAND_FAVICON_URL: optional(t.urlOrRootPath(), { description: 'Favicon URL.', sensitivity: 'public' }),
 
   // Database (DB_*; URLs per data-model §7.1)
   DATABASE_URL: required(t.secretUrl(POSTGRES), {
     description: 'PostgreSQL URL of platform_app; sslmode=verify-full outside local/test.',
     sensitivity: 'secret',
   }),
-  DATABASE_MIGRATOR_URL: optional(t.secretUrl(POSTGRES), {
-    description: 'PostgreSQL URL of platform_migrator (migrate job only).',
-    sensitivity: 'secret',
+  // DATABASE_MIGRATOR_URL, SHADOW_DATABASE_URL and the bootstrap credentials are tooling keys (`tooling-keys.ts`),
+  // never part of the API/worker configuration.
+  // The TASK-003 pool factory (apps/api/src/platform/db/client.ts) accepts up to 200 connections; the config
+  // bound of 100 is deliberately stricter (data-model §7.1 sizes api 10, worker 5 per process).
+  DB_POOL_MAX: withDefault(t.int(1, DB_POOL_MAX_LIMIT), (_appEnv, service) => DB_POOL_MAX_DEFAULTS[service], {
+    description: 'pg pool size per process (data-model §7.1: api 10, worker 5).',
   }),
-  SHADOW_DATABASE_URL: optional(t.secretUrl(POSTGRES), {
-    description: 'Prisma shadow database (development tooling only).',
-    sensitivity: 'secret',
+  DB_IDLE_TIMEOUT_MS: withDefault(t.int(1, 3_600_000), DB_IDLE_TIMEOUT_MS_DEFAULT, {
+    description: 'Milliseconds an idle pooled connection is kept before it is closed.',
   }),
-  DB_POOL_MAX: withDefault(t.int(1, 100), 10, { description: 'pg pool size per process (data-model §7.1).' }),
+  DB_CONNECTION_TIMEOUT_MS: withDefault(t.int(1, 120_000), DB_CONNECTION_TIMEOUT_MS_DEFAULT, {
+    description: 'Milliseconds to wait for a new PostgreSQL connection before failing.',
+  }),
 
   // Valkey (REDIS_*)
   REDIS_URL: required(t.secretUrl(['redis', 'rediss']), {
@@ -417,7 +442,7 @@ const appEnvOf = (parent: Record<string, unknown>): AppEnv | undefined => {
 
 const joiFor = (keySpec: KeySpec, service: Service): Joi.Schema => {
   const { defaultFor } = keySpec;
-  if (defaultFor !== undefined) return keySpec.joi.default((parent: Record<string, unknown>) => defaultFor(appEnvOf(parent)));
+  if (defaultFor !== undefined) return keySpec.joi.default((parent: Record<string, unknown>) => defaultFor(appEnvOf(parent), service));
   return keySpec.requiredFor.includes(service) ? keySpec.joi.required() : keySpec.joi.optional();
 };
 

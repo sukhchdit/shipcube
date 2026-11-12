@@ -14,6 +14,7 @@ import { type ConfigIssue, ConfigValidationError } from './errors.js';
 import { runGuards } from './guards.js';
 import { type Config, CONFIG_KEY_NAMES, CONFIG_SCHEMA, type ConfigKey, configObjectSchema } from './schema.js';
 import type { SecretRef } from './secret-refs.js';
+import { TOOLING_KEY_NAMES } from './tooling-keys.js';
 
 export interface LoadConfigOptions {
   readonly service: Service;
@@ -37,7 +38,9 @@ export function loadConfig(env: EnvInput, options: LoadConfigOptions): Config {
   const converted = (value ?? {}) as Record<string, unknown>;
   const values = Object.fromEntries(Object.entries(converted).filter(([key]) => !rejected.has(key)));
   const appEnv = values.APP_ENV as AppEnv | undefined;
-  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv })];
+  // Tooling keys are never mapped into the config; only their names reach the guards (toolingKeyGuard).
+  const toolingKeys = Object.keys(pickConfigured(env, TOOLING_KEY_NAMES));
+  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv, toolingKeys })];
   if (issues.length > 0) throw new ConfigValidationError(issues);
   return deepFreeze(converted) as Config;
 }

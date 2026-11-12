@@ -2,7 +2,15 @@
  * `.env`-style file checks for `.env.example` and `compose.env` (NFR-OPS-005, REQ-SEC-011, platform.md §1).
  * Findings name keys only; no value is ever copied into a result.
  */
-import { CONFIG_KEY_NAMES, CONFIG_SCHEMA, type ConfigKey, isPlaceholder, SECRET_KEY_NAMES } from '@platform/config';
+import {
+  CONFIG_KEY_NAMES,
+  CONFIG_SCHEMA,
+  type ConfigKey,
+  isPlaceholder,
+  SECRET_KEY_NAMES,
+  TOOLING_CONFIG_KEYS,
+  TOOLING_KEY_NAMES,
+} from '@platform/config';
 import { WEB_CONFIG_KEYS } from '@platform/config/web';
 
 export interface EnvFile {
@@ -34,10 +42,17 @@ export function parseEnvFile(text: string): EnvFile {
   return { entries, duplicates: [...duplicates].sort(), malformedLines };
 }
 
-/** Every key a process or a frontend build reads: the API/worker schema plus the web build schema. */
-export const ALL_CONFIG_KEYS: readonly string[] = Object.freeze([...new Set<string>([...CONFIG_KEY_NAMES, ...WEB_CONFIG_KEYS])].sort());
+/** Every key a process, a frontend build or a database tool reads: API/worker schema, web build schema, tooling set. */
+export const ALL_CONFIG_KEYS: readonly string[] = Object.freeze(
+  [...new Set<string>([...CONFIG_KEY_NAMES, ...WEB_CONFIG_KEYS, ...TOOLING_KEY_NAMES])].sort(),
+);
 
-const SECRET_KEYS = new Set<string>(SECRET_KEY_NAMES);
+/** Tooling keys whose value is a credential (the `_FILE` variants hold a path). */
+export const TOOLING_SECRET_KEYS: readonly string[] = Object.freeze(
+  TOOLING_CONFIG_KEYS.filter((key) => key.sensitivity === 'secret').map((key) => key.name),
+);
+
+const SECRET_KEYS = new Set<string>([...SECRET_KEY_NAMES, ...TOOLING_CONFIG_KEYS.map((key) => key.name)]);
 
 /** Value shapes that are real credentials, whatever key they sit under. */
 const SECRET_SHAPES: readonly RegExp[] = [

@@ -15,6 +15,7 @@ import {
 } from './keys.js';
 import { CONFIG_SCHEMA, type ConfigKey } from './schema.js';
 import { Secret } from './secret.js';
+import { TOOLING_CONFIG_KEYS, TOOLING_KEY_NAMES } from './tooling-keys.js';
 import { keyValueFor, p256PrivateKeyValue, p256PublicKeyValue, randomKeyValue } from './testing/test-env.js';
 
 const schemaKeys = new Set<string>(Object.keys(CONFIG_SCHEMA));
@@ -34,12 +35,17 @@ describe('key and secret register (ADR-0018 amendment item 1, SEC-P3-08) @securi
     }
   });
 
-  it('[SEC-TC-49] every register variable is a secret key of the schema, and every key variable is registered', () => {
+  it('[SEC-TC-49] every register variable is a secret key of the runtime schema or the tooling set, and vice versa', () => {
     const registered = KEY_REGISTER.flatMap((row) => row.variables);
     expect(new Set(registered).size).toBe(registered.length);
     for (const variable of registered) {
-      expect(schemaKeys.has(variable)).toBe(true);
-      expect(['secret', 'secret-ref']).toContain(CONFIG_SCHEMA[variable as ConfigKey].sensitivity);
+      const tooling = TOOLING_CONFIG_KEYS.find((key) => key.name === variable);
+      expect({ variable, known: schemaKeys.has(variable) !== (tooling !== undefined) }).toEqual({ variable, known: true });
+      expect(['secret', 'secret-ref']).toContain(tooling?.sensitivity ?? CONFIG_SCHEMA[variable as ConfigKey].sensitivity);
+    }
+    for (const key of TOOLING_CONFIG_KEYS) {
+      expect(registered).toContain(key.name);
+      expect(registerEntryFor(key.name).holders).toEqual(expect.arrayContaining([...key.holders]));
     }
     const secretKeys = (Object.keys(CONFIG_SCHEMA) as ConfigKey[]).filter(
       (name) => CONFIG_SCHEMA[name].sensitivity !== 'public' && CONFIG_SCHEMA[name].sensitivity !== 'internal',
@@ -54,6 +60,25 @@ describe('key and secret register (ADR-0018 amendment item 1, SEC-P3-08) @securi
     for (const row of KEY_REGISTER) {
       for (const variable of row.variables) expect(schemaKeys.has(`${variable}${PREVIOUS_SUFFIX}`)).toBe(row.dualRead);
     }
+  });
+
+  it('[m9] the tooling key set is exactly the TASK-003 names and stays out of the runtime schema', () => {
+    expect(TOOLING_KEY_NAMES).toEqual([
+      'DATABASE_MIGRATOR_URL',
+      'SHADOW_DATABASE_URL',
+      'DATABASE_BOOTSTRAP_URL',
+      'BOOTSTRAP_MIGRATOR_PASSWORD',
+      'BOOTSTRAP_MIGRATOR_PASSWORD_FILE',
+      'BOOTSTRAP_APP_PASSWORD',
+      'BOOTSTRAP_APP_PASSWORD_FILE',
+    ]);
+    expect(TOOLING_KEY_NAMES.filter((name) => schemaKeys.has(name))).toEqual([]);
+    for (const key of TOOLING_CONFIG_KEYS) {
+      expect(key.sensitivity).toBe(key.name.endsWith('_FILE') ? 'secret-ref' : 'secret');
+      expect(key.holders.every((holder) => holder === 'migrate' || holder === 'bootstrap')).toBe(true);
+      expect(Object.isFrozen(key)).toBe(true);
+    }
+    expect(registerEntryFor('DATABASE_URL').requiredFor).toEqual(['api', 'worker']);
   });
 
   it('rejects a lookup of a variable outside the register', () => {

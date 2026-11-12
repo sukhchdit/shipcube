@@ -14,10 +14,12 @@ import {
   type Config,
   CONFIG_SCHEMA,
   type ConfigKey,
+  DB_POOL_MAX_LIMIT,
   requiredKeysFor,
   SECRET_KEY_NAMES,
 } from './schema.js';
 import { Secret } from './secret.js';
+import { TOOLING_KEY_NAMES } from './tooling-keys.js';
 import { createTestEnv, keyValueFor, randomKeyValue } from './testing/test-env.js';
 import { loadWebBuildConfig } from './web/load-web-config.js';
 
@@ -200,10 +202,20 @@ describe('typed configuration (US-002, REQ-PLAT-004, NFR-OPS-005)', () => {
       expect(formatConfigError(web)).toContain('BRAND_NAME');
     });
 
-    it('[AT-US-002-04] an invalid BRAND_NAME is rejected identically by both schemas', () => {
-      const env = { ...createTestEnv(), VITE_API_BASE_URL: '/api', BRAND_NAME: 'x'.repeat(41) };
-      expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'BRAND_NAME', code: 'invalid', rule: 'zod' }]);
-      expect(rejection(() => loadWebBuildConfig(env)).issues).toEqual([{ key: 'BRAND_NAME', code: 'invalid', rule: 'too_big' }]);
+    it.each([
+      ['41 characters', 'x'.repeat(41)],
+      ['whitespace only', '   '],
+    ])('[AT-US-002-04] an invalid BRAND_NAME (%s) is rejected identically by both schemas', (_label, brandName) => {
+      const env = { ...createTestEnv(), VITE_API_BASE_URL: '/api', BRAND_NAME: brandName };
+      // Same key, same reason code and the same limit (brand-rules.ts). The `rule` field carries the validator's own
+      // rule id, which is library-specific by design (Joi `string.max` vs Zod `too_big`); both name a length bound.
+      const strip = (issues: readonly { key: string; code: string }[]) => issues.map(({ key, code }) => ({ key, code }));
+      const backend = rejection(() => loadConfig(env, { service: 'api' })).issues;
+      const web = rejection(() => loadWebBuildConfig(env)).issues;
+      expect(strip(backend)).toEqual([{ key: 'BRAND_NAME', code: 'invalid' }]);
+      expect(strip(web)).toEqual(strip(backend));
+      expect(backend[0]?.rule).toMatch(/^string\.(?:max|min|empty)$/);
+      expect(web[0]?.rule).toMatch(/^too_(?:big|small)$/);
     });
 
     it('[AT-US-002-04] a worker without its worker-only keys fails; the API does not need them', () => {
@@ -357,18 +369,75 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     const env = {
       ...createTestEnv({ appEnv: 'staging' }),
       DATABASE_URL: `postgresql://platform_app:${randomSecret()}@db:5432/platform?sslmode=require`,
-      DATABASE_MIGRATOR_URL: `postgresql://platform_migrator:${randomSecret()}@db:5432/platform`,
       REDIS_URL: `redis://api:${randomSecret()}@cache:6379`,
       WEB_APP_ORIGIN: 'http://web.example.org',
       STORAGE_ENDPOINT: 'http://s3.example.org',
     };
     const error = rejection(() => loadConfig(env, { service: 'api' }));
     expect(error.issues).toEqual(
-      ['DATABASE_MIGRATOR_URL', 'DATABASE_URL', 'REDIS_URL', 'STORAGE_ENDPOINT', 'WEB_APP_ORIGIN'].map((key) => ({
+      ['DATABASE_URL', 'REDIS_URL', 'STORAGE_ENDPOINT', 'WEB_APP_ORIGIN'].map((key) => ({
         key,
         code: 'insecure-transport',
       })),
     );
+  });
+
+  const dbUrl = (query: string): string => `postgresql://platform_app:${randomSecret()}@db.staging.test:5432/platform?${query}`;
+
+  // PR3-SEC-02: node-postgres (pg-connection-string 2.14.1) copies every query entry onto its config, so the LAST
+  // sslmode wins and `ssl=0` turns TLS off; the guard must not read a different value than the driver.
+  it.each([
+    ['a later sslmode=disable', 'sslmode=verify-full&sslmode=disable'],
+    ['a later sslmode=no-verify', 'sslmode=verify-full&sslmode=no-verify'],
+    ['an earlier weaker sslmode', 'sslmode=require&sslmode=verify-full'],
+    ['sslmode=no-verify', 'sslmode=no-verify'],
+    ['an ssl=false override', 'sslmode=verify-full&ssl=false'],
+    ['an ssl=0 override', 'ssl=0&sslmode=verify-full'],
+    ['a duplicated unrelated parameter', 'sslmode=verify-full&application_name=a&application_name=b'],
+    ['no sslmode', 'application_name=api'],
+  ])('[NT-SEC-007-a] DATABASE_URL with %s is refused in staging @security', (_label, query) => {
+    const env = { ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) };
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'DATABASE_URL', code: 'insecure-transport' }]);
+  });
+
+  it.each(['sslmode=verify-full', 'sslmode=verify-full&application_name=api', 'uselibpqcompat=true&sslmode=verify-full'])(
+    '[NT-SEC-007-a] DATABASE_URL with %s is accepted in staging',
+    (query) => {
+      expect(loadConfig({ ...createTestEnv({ appEnv: 'staging' }), DATABASE_URL: dbUrl(query) }, { service: 'api' }).APP_ENV).toBe(
+        'staging',
+      );
+    },
+  );
+
+  // PR3-SEC-02: ioredis 6.0.0 merges URL query parameters into its options before `rediss://` applies `tls: true`
+  // through lodash `defaults`, so `?tls=` (empty, falsy) or `?tls=false` would connect over plain TCP.
+  it.each(['rediss://api:{p}@cache:6380?tls=', 'rediss://api:{p}@cache?tls=false', 'rediss://api:{p}@cache:6380/0?family=4'])(
+    '[NT-SEC-007-a] REDIS_URL %s (any query override) is refused in staging @security',
+    (template) => {
+      const env = { ...createTestEnv({ appEnv: 'staging' }), REDIS_URL: template.replace('{p}', randomSecret()) };
+      expect(rejection(() => loadConfig(env, { service: 'worker' })).issues).toEqual([{ key: 'REDIS_URL', code: 'insecure-transport' }]);
+    },
+  );
+
+  it('[NT-SEC-007-a] REDIS_URL rediss:// with a database path and no query is accepted in staging', () => {
+    const env = { ...createTestEnv({ appEnv: 'staging' }), REDIS_URL: `rediss://worker:${randomSecret()}@cache:6380/0` };
+    expect(loadConfig(env, { service: 'worker' }).REDIS_URL.reveal()).toContain('rediss://');
+  });
+
+  it.each(['staging', 'production'] as const)('[PR3-SEC-03] APP_ENV=%s requires the raw NODE_ENV=production @security', (appEnv) => {
+    const expected = [{ key: 'NODE_ENV', code: 'forbidden-in-environment', rule: 'nodeEnv.production' }];
+    for (const nodeEnv of [undefined, '', 'development', 'test']) {
+      const env = { ...createTestEnv({ appEnv }), NODE_ENV: nodeEnv };
+      const error = rejection(() => loadConfig(env, { service: 'api' }));
+      expect(error.issues).toEqual(expected);
+      if (nodeEnv) expect(error.message).not.toContain(nodeEnv);
+    }
+    expect(loadConfig({ ...createTestEnv({ appEnv }), NODE_ENV: 'production' }, { service: 'api' }).NODE_ENV).toBe('production');
+  });
+
+  it.each(['local', 'test'] as const)('[PR3-SEC-03] APP_ENV=%s accepts any NODE_ENV and defaults it to development', (appEnv) => {
+    expect(loadConfig({ ...createTestEnv({ appEnv }), NODE_ENV: undefined }, { service: 'api' }).NODE_ENV).toBe('development');
+    expect(loadConfig({ ...createTestEnv({ appEnv }), NODE_ENV: 'production' }, { service: 'api' }).NODE_ENV).toBe('production');
   });
 
   it('[NT-SEC-007-a] plain local transport is accepted in local and test', () => {
@@ -389,6 +458,105 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
       { key: 'NODE_DEBUG', code: 'debug-flag' },
       { key: 'NODE_OPTIONS', code: 'debug-flag' },
     ]);
+  });
+
+  // PR3-SEC-01 / m2. Probe with Node v24.22.3 (`NODE_OPTIONS=<form> node -e "…inspector.url()"`, 127.0.0.1:0 only,
+  // 3 s timeout), inspector ON for: `--inspect=…`, `"--inspect=…"` (Node un-quotes double quotes), `--inspect_brk=…`,
+  // `--inspect_wait=…`, `--inspect-brk=…` (both pause for attach) and `--max-old-space-size=512 "--inspect=…"`.
+  // Inspector OFF but configured for a later SIGUSR1: `--inspect-port=0`, `--inspect_port=0`, `--debug-port=0`,
+  // `--inspect-publish-uid=http`. Not started: `'--inspect=…'` (single quotes are literal; refused anyway) and
+  // `--INSPECT=…` (Node exits 9: "not allowed in NODE_OPTIONS"). All of these are refused outside local.
+  it.each([
+    '--inspect',
+    '"--inspect=0"',
+    '"--inspect=0.0.0.0:9229"',
+    "'--inspect-brk'",
+    '--inspect_brk=0',
+    '--inspect_wait',
+    '--inspect_wait=127.0.0.1:0',
+    '--inspect-port=9229',
+    '--inspect_port=9229',
+    '--debug-port=9229',
+    '--inspect-publish-uid=http',
+    '--max-old-space-size=512 "--inspect"',
+    '--enable-source-maps\t--inspect-brk',
+    '--inspect"_brk=0"',
+  ])('[PR3-SEC-01] NODE_OPTIONS %s is refused in staging @security', (nodeOptions) => {
+    const env = { ...createTestEnv({ appEnv: 'staging' }), NODE_OPTIONS: nodeOptions };
+    expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([{ key: 'NODE_OPTIONS', code: 'debug-flag' }]);
+  });
+
+  it.each(['--max-old-space-size=512', '--enable-source-maps', '--max-semi-space-size=64 --enable-source-maps', '"--enable-source-maps"'])(
+    '[PR3-SEC-01] NODE_OPTIONS %s is accepted in staging',
+    (nodeOptions) => {
+      expect(loadConfig({ ...createTestEnv({ appEnv: 'staging' }), NODE_OPTIONS: nodeOptions }, { service: 'api' }).NODE_OPTIONS).toBe(
+        nodeOptions,
+      );
+    },
+  );
+
+  const toolingEnv = (): Record<string, string> => ({
+    DATABASE_MIGRATOR_URL: `postgresql://platform_migrator:${randomSecret()}@db:5432/platform?sslmode=verify-full`,
+    SHADOW_DATABASE_URL: `postgresql://platform_migrator:${randomSecret()}@db:5432/shadow?sslmode=verify-full`,
+    DATABASE_BOOTSTRAP_URL: `postgresql://postgres:${randomSecret()}@db:5432/postgres?sslmode=verify-full`,
+    BOOTSTRAP_MIGRATOR_PASSWORD: randomSecret(),
+    BOOTSTRAP_MIGRATOR_PASSWORD_FILE: '/run/secrets/bootstrap_migrator_password',
+    BOOTSTRAP_APP_PASSWORD: randomSecret(),
+    BOOTSTRAP_APP_PASSWORD_FILE: '/run/secrets/bootstrap_app_password',
+  });
+
+  it.each(SERVICES)('[m9] tooling keys never reach the %s configuration object', (service) => {
+    const tooling = toolingEnv();
+    const config = loadConfig({ ...createTestEnv({ appEnv: 'local' }), ...tooling }, { service });
+    expect(TOOLING_KEY_NAMES.filter((key) => key in config)).toEqual([]);
+    const dump = JSON.stringify(Object.entries(config).map(([key, value]) => [key, value instanceof Secret ? value.reveal() : value]));
+    for (const value of Object.values(tooling)) expect(dump).not.toContain(value);
+  });
+
+  it.each(['staging', 'production'] as const)('[m9] api and worker refuse tooling keys with APP_ENV=%s @security', (appEnv) => {
+    const tooling = toolingEnv();
+    for (const service of SERVICES) {
+      const error = rejection(() => loadConfig({ ...createTestEnv({ appEnv }), ...tooling }, { service }));
+      expect(error.issues).toEqual(
+        [...TOOLING_KEY_NAMES].sort().map((key) => ({ key, code: 'forbidden-in-environment', rule: 'toolingKey' })),
+      );
+      for (const value of Object.values(tooling)) expect(error.message).not.toContain(value);
+    }
+  });
+
+  it('[m9] pool defaults are service-aware and equal the TASK-003 pool factory defaults', () => {
+    // Expected values hard-coded from apps/api/src/platform/db/client.ts on PR #5 (TASK-003, head d8ba197), which is
+    // not on this branch: idleTimeoutMs 10_000, connectionTimeoutMs 5_000; data-model §7.1: pool api 10, worker 5.
+    const api = loadConfig(createTestEnv(), { service: 'api' });
+    const worker = loadConfig(createTestEnv(), { service: 'worker' });
+    expect([api.DB_POOL_MAX, worker.DB_POOL_MAX]).toEqual([10, 5]);
+    for (const config of [api, worker]) {
+      expect(config.DB_IDLE_TIMEOUT_MS).toBe(10_000);
+      expect(config.DB_CONNECTION_TIMEOUT_MS).toBe(5_000);
+    }
+    expect(DB_POOL_MAX_LIMIT).toBe(100);
+  });
+
+  it.each([
+    ['DB_POOL_MAX', '0', 'number.min'],
+    ['DB_POOL_MAX', '101', 'number.max'],
+    ['DB_IDLE_TIMEOUT_MS', '0', 'number.min'],
+    ['DB_IDLE_TIMEOUT_MS', '3600001', 'number.max'],
+    ['DB_CONNECTION_TIMEOUT_MS', '120001', 'number.max'],
+    ['DB_CONNECTION_TIMEOUT_MS', '1.5', 'number.integer'],
+  ])('[m9] %s=%s is rejected (%s)', (key, value, rule) => {
+    expect(rejection(() => loadConfig({ ...createTestEnv(), [key]: value }, { service: 'worker' })).issues).toEqual([
+      { key, code: 'invalid', rule },
+    ]);
+  });
+
+  it('[m9] explicit pool settings at the bounds are accepted', () => {
+    const env = { ...createTestEnv(), DB_POOL_MAX: '100', DB_IDLE_TIMEOUT_MS: '3600000', DB_CONNECTION_TIMEOUT_MS: '1' };
+    expect(loadConfig(env, { service: 'worker' })).toMatchObject({
+      DB_POOL_MAX: 100,
+      DB_IDLE_TIMEOUT_MS: 3_600_000,
+      DB_CONNECTION_TIMEOUT_MS: 1,
+    });
   });
 
   it('debug flags are allowed in local; harmless NODE_OPTIONS everywhere', () => {

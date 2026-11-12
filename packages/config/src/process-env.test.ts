@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { CONFIG_KEY_NAMES, SECRET_KEY_NAMES } from './schema.js';
-import { CONFIG_EXIT_CODE, loadConfigOrExit, LOCAL_ENV_FILE, readStartupEnv, type StartupIo } from './process-env.js';
+import { CONFIG_EXIT_CODE, loadConfigOrExit, LOCAL_ENV_FILE, readStartupEnv, type RuntimeProbe, type StartupIo } from './process-env.js';
 import { createTestEnv } from './testing/index.js';
 
 // Jest runs from the repository root (rootDir of jest.config.ts).
@@ -83,6 +83,35 @@ describe('process start-up edge (US-002, NFR-OPS-005)', () => {
     expect(stderr).not.toContain('abc');
   });
 
+  const runtime = (execArgv: readonly string[], inspectorActive = false): RuntimeProbe => ({
+    execArgv,
+    inspectorActive: () => inspectorActive,
+  });
+
+  it.each([
+    ['an --inspect CLI flag', ['--inspect=127.0.0.1:0'], false],
+    ['an --inspect_brk CLI flag', ['--enable-source-maps', '--inspect_brk'], false],
+    ['an active inspector (SIGUSR1 or inspector.open)', [], true],
+  ])('[PR3-SEC-01] refuses %s outside local, naming NODE_OPTIONS @security', (_label, execArgv, active) => {
+    const io = captureIo();
+    const env = createTestEnv({ appEnv: 'staging' });
+    expect(() => loadConfigOrExit('api', { env, cwd: tempDir(), io, runtime: runtime(execArgv, active) })).toThrow(
+      new ExitCalled(CONFIG_EXIT_CODE),
+    );
+    expect(io.written.join('')).toContain('NODE_OPTIONS: debug-flag: runtime.inspector');
+  });
+
+  it('[PR3-SEC-01] the inspector is allowed with APP_ENV=local; harmless CLI flags everywhere', () => {
+    const io = captureIo();
+    const local = createTestEnv({ appEnv: 'local' });
+    expect(loadConfigOrExit('api', { env: local, cwd: tempDir(), io, runtime: runtime(['--inspect'], true) }).APP_ENV).toBe('local');
+    const staging = createTestEnv({ appEnv: 'staging' });
+    expect(loadConfigOrExit('worker', { env: staging, cwd: tempDir(), io, runtime: runtime(['--enable-source-maps']) }).APP_ENV).toBe(
+      'staging',
+    );
+    expect(io.written).toEqual([]);
+  });
+
   it('rethrows errors that are not configuration errors', () => {
     const io = captureIo();
     const env = new Proxy(
@@ -124,6 +153,13 @@ describe('process start-up edge (US-002, NFR-OPS-005)', () => {
       const output = result.stdout + result.stderr;
       for (const value of [secret, ...SECRET_KEY_NAMES.map((name) => config[name])])
         if (value !== undefined) expect(output).not.toContain(value);
+    });
+
+    it('[PR3-SEC-01] a staging process with a double-quoted --inspect in NODE_OPTIONS exits 78 before ready @security', () => {
+      const result = runService('api', childEnv({ ...createTestEnv({ appEnv: 'staging' }), NODE_OPTIONS: '"--inspect=127.0.0.1:0"' }));
+      expect(result.status).toBe(CONFIG_EXIT_CODE);
+      expect(result.stdout).not.toContain('ready');
+      expect(result.stderr).toContain('NODE_OPTIONS: debug-flag');
     });
 
     it('[AT-US-002-04] the worker process fails listing the missing key; a valid worker reaches ready', () => {

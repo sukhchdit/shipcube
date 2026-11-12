@@ -7,10 +7,17 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { ConfigValidationError, isPlaceholder, KEY_REGISTER, loadConfig } from '@platform/config';
+import { ConfigValidationError, isPlaceholder, KEY_REGISTER, loadConfig, TOOLING_KEY_NAMES } from '@platform/config';
 
 import { findRepoRoot } from '../test-support/process.js';
-import { ALL_CONFIG_KEYS, checkEnvExampleParity, looksLikeSecret, parseEnvFile, requiredSecretsLeftEmpty } from './env-file.js';
+import {
+  ALL_CONFIG_KEYS,
+  checkEnvExampleParity,
+  looksLikeSecret,
+  parseEnvFile,
+  requiredSecretsLeftEmpty,
+  TOOLING_SECRET_KEYS,
+} from './env-file.js';
 
 const exampleText = readFileSync(join(findRepoRoot(), '.env.example'), 'utf8');
 const clean = { missing: [], unknown: [], duplicates: [], malformedLines: [], secretsWithoutPlaceholder: [], secretLookingValues: [] };
@@ -45,8 +52,29 @@ describe('.env.example parity (NFR-OPS-005)', () => {
     } catch (error) {
       if (error instanceof ConfigValidationError) refused = error;
     }
-    const placeholders = refused?.issues.filter((issue) => issue.code === 'placeholder').map((issue) => issue.key) ?? [];
-    for (const [key, value] of entries) if (value !== '' && isPlaceholder(value)) expect(placeholders).toContain(key);
+    const keysWith = (code: string): readonly string[] =>
+      refused?.issues.filter((issue) => issue.code === code).map((issue) => issue.key) ?? [];
+    const placeholders = keysWith('placeholder');
+    // Tooling keys never load into the API config; outside local/test their mere presence is refused.
+    const forbidden = keysWith('forbidden-in-environment');
+    for (const [key, value] of entries) {
+      if (TOOLING_KEY_NAMES.includes(key)) {
+        if (value !== '') expect(forbidden).toContain(key);
+      } else if (value !== '' && isPlaceholder(value)) {
+        expect(placeholders).toContain(key);
+      }
+    }
+  });
+
+  it('[m9] documents the tooling keys (TASK-003 names) with placeholders or empty values only', () => {
+    const { entries } = parseEnvFile(exampleText);
+    for (const key of TOOLING_KEY_NAMES) expect(entries.has(key)).toBe(true);
+    for (const key of TOOLING_SECRET_KEYS) {
+      const value = entries.get(key) ?? '';
+      expect({ key, placeholderOrEmpty: value === '' || isPlaceholder(value) }).toEqual({ key, placeholderOrEmpty: true });
+    }
+    expect(entries.get('DB_IDLE_TIMEOUT_MS')).toBe('10000');
+    expect(entries.get('DB_CONNECTION_TIMEOUT_MS')).toBe('5000');
   });
 
   it('[NT-OPS-005-a] non-secret example values never look like credentials', () => {

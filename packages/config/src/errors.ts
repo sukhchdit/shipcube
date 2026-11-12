@@ -28,14 +28,22 @@ export type ConfigIssueCode =
 export interface ConfigIssue {
   readonly key: string;
   readonly code: ConfigIssueCode;
-  /** Validator rule identifier (no value), when the schema produced the issue. */
+  /** Validator rule identifier (no value): a schema rule, or the failure class of a secret reference (`ref.timeout`). */
   readonly rule?: string;
+  /**
+   * Value-free cause of a secret provider failure: the error class name and, when present, an errno-style code
+   * (`TypeError`, `SecretFileError/EACCES`, `non-error:string`). Never a message, locator or value.
+   */
+  readonly cause?: string;
 }
 
 const compareIssues = (a: ConfigIssue, b: ConfigIssue): number =>
-  a.key.localeCompare(b.key) || a.code.localeCompare(b.code) || (a.rule ?? '').localeCompare(b.rule ?? '');
+  a.key.localeCompare(b.key) ||
+  a.code.localeCompare(b.code) ||
+  (a.rule ?? '').localeCompare(b.rule ?? '') ||
+  (a.cause ?? '').localeCompare(b.cause ?? '');
 
-const issueId = (issue: ConfigIssue): string => `${issue.key}\u0000${issue.code}\u0000${issue.rule ?? ''}`;
+const issueId = (issue: ConfigIssue): string => `${issue.key}\u0000${issue.code}\u0000${issue.rule ?? ''}\u0000${issue.cause ?? ''}`;
 
 /** Sorted, de-duplicated copy of `issues`. */
 export function normaliseIssues(issues: readonly ConfigIssue[]): readonly ConfigIssue[] {
@@ -44,7 +52,10 @@ export function normaliseIssues(issues: readonly ConfigIssue[]): readonly Config
   return Object.freeze([...unique.values()].sort(compareIssues));
 }
 
-const describe = (issue: ConfigIssue): string => (issue.rule === undefined ? issue.code : `${issue.code}: ${issue.rule}`);
+const describe = (issue: ConfigIssue): string => {
+  const rule = issue.rule === undefined ? issue.code : `${issue.code}: ${issue.rule}`;
+  return issue.cause === undefined ? rule : `${rule} (${issue.cause})`;
+};
 
 /**
  * Thrown when configuration is rejected. `keys` lists every offending key name once; `issues` gives the reason

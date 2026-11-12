@@ -41,16 +41,65 @@ describe('placeholders (SEC-TC-51)', () => {
     '***',
     'TODO',
     'password',
+    'change me',
+    '<password>',
+    '<your brand name>',
+    'postgresql://user:<password>@host/db',
+    'postgresql://platform_app:CHANGE_ME@db:5432/platform',
+    `redis://:${LOCAL_ONLY_PREFIX}valkey@valkey:6379`,
+    'csrf-v1:CHANGE_ME',
+    'mfa-enrol-v1:<db-password>',
+    'aws-secrets-manager:<secret-name>',
+    '{"clientId":"CHANGE_ME","secret":"x"}',
+    'CHANGE_ME_TOO',
+    'CHANGE%5FME',
+    'ＣＨＡＮＧＥ＿ＭＥ',
+    'placeholder-value',
   ])('detects %p', (value) => {
     expect(isPlaceholder(value)).toBe(true);
   });
 
-  it.each(['Test Brand', 'no-reply@shipping.test', 'postgresql://platform_app@db:5432/platform', 'staging', 'Shipqube'])(
-    'accepts %p',
-    (value) => {
-      expect(isPlaceholder(value)).toBe(false);
-    },
-  );
+  it.each([
+    'Test Brand',
+    'no-reply@shipping.test',
+    'postgresql://platform_app@db:5432/platform',
+    'staging',
+    'Shipqube',
+    'Xk9<q!Tz>2wP',
+    'p<a>ss',
+    'exchangemerchant',
+    'Changemerchant-42',
+    'my-placeholders',
+    'example.com',
+    'abc<def',
+    'Qz:<word>:9f!kD2m',
+  ])('[m3][PR3-SEC-10] accepts %p', (value) => {
+    expect(isPlaceholder(value)).toBe(false);
+  });
+
+  const PRINTABLE = Array.from({ length: 0x7e - 0x20 + 1 }, (_unused, index) => String.fromCharCode(0x20 + index));
+  const PASSWORD_INNER = [...'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!$%^*()+~|-_.'];
+
+  it('[m3] property: random punctuated passwords (printable ASCII, length ≥ 16) are not placeholders', () => {
+    fc.assert(
+      fc.property(
+        fc.string({ unit: fc.constantFrom(...PRINTABLE), minLength: 16, maxLength: 64 }).filter((value) => new Set(value).size >= 4),
+        (password) => {
+          expect(isPlaceholder(password)).toBe(false);
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+  it('[m3] property: a generated password with <…> inside it is not a placeholder', () => {
+    const run = fc.string({ unit: fc.constantFrom(...PASSWORD_INNER), minLength: 3, maxLength: 12 });
+    fc.assert(
+      fc.property(run, run, run, (head, inner, tail) => {
+        expect(isPlaceholder(`${head}<${inner}>${tail}`)).toBe(false);
+      }),
+    );
+  });
 
   it('property: random base64 key material is not mistaken for a placeholder', () => {
     fc.assert(
@@ -86,7 +135,21 @@ describe('environment helpers', () => {
     const value = deepFreeze({ list: [{ n: 1 }], secret: new Secret(bytes), bytes });
     expect(Object.isFrozen(value.list[0])).toBe(true);
     expect(Object.isFrozen(value.bytes)).toBe(false);
-    expect(value.secret.reveal()).toBe(bytes);
+    expect(value.secret.reveal()).toEqual(bytes);
+  });
+
+  it('[n3] reveal() returns a copy of byte material, so no consumer can alter the key bytes @security', () => {
+    const bytes = new Uint8Array([1, 2]);
+    const secret = new Secret(bytes);
+    const revealed = secret.reveal();
+    revealed[0] = 9;
+    expect(secret.reveal()).toEqual(new Uint8Array([1, 2]));
+    const buffer = Buffer.from([3, 4]);
+    const copy = new Secret(buffer).reveal();
+    expect(Buffer.isBuffer(copy)).toBe(true);
+    copy[0] = 0;
+    expect(buffer[0]).toBe(3);
+    expect(new Secret('text').reveal()).toBe('text');
   });
 });
 
@@ -147,9 +210,14 @@ describe('schema metadata', () => {
   });
 
   it('guards are pure: no APP_ENV means no environment-dependent refusal', () => {
-    expect(GUARDS.length).toBe(7);
+    expect(GUARDS.length).toBe(9);
     expect(
-      runGuards({ raw: { NODE_DEBUG: 'x', DATABASE_URL: 'postgresql://h/db', BRAND_NAME: '<x>' }, values: {}, appEnv: undefined }),
+      runGuards({
+        raw: { NODE_DEBUG: 'x', DATABASE_URL: 'postgresql://h/db', BRAND_NAME: '<x>' },
+        values: {},
+        appEnv: undefined,
+        toolingKeys: ['DATABASE_BOOTSTRAP_URL'],
+      }),
     ).toEqual([]);
   });
 });

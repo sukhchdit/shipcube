@@ -2,13 +2,16 @@ import { randomBytes } from 'node:crypto';
 import { inspect } from 'node:util';
 
 import { describe, expect, it } from '@jest/globals';
+import fc from 'fast-check';
 
-import { ConfigValidationError } from './errors.js';
+import { ConfigValidationError, formatConfigError } from './errors.js';
 import {
   checkResolvedSecrets,
   createEnvSecretProvider,
+  describeFailureCause,
   parseSecretRef,
   resolveSecretRefs,
+  SECRET_RESOLVE_RETRY_DELAY_MS,
   type SecretProvider,
   type SecretRef,
   SecretNotFoundError,
@@ -35,6 +38,7 @@ describe('secret references (ADR-0018 §3)', () => {
     ['STRIPE_SECRET_KEY', { provider: 'env', locator: 'STRIPE_SECRET_KEY' }],
     ['env:CARRIER_DHL_CREDENTIALS', { provider: 'env', locator: 'CARRIER_DHL_CREDENTIALS' }],
     ['file:/run/secrets/stripe_key', { provider: 'file', locator: '/run/secrets/stripe_key' }],
+    ['file:/run/secrets/carriers/dhl.json', { provider: 'file', locator: '/run/secrets/carriers/dhl.json' }],
     ['aws-secrets-manager:stripe/restricted-key', { provider: 'aws-secrets-manager', locator: 'stripe/restricted-key' }],
     [
       'aws-secrets-manager:arn:aws:secretsmanager:eu-west-1:123456789012:secret:stripe/key-AbCdEf',
@@ -51,15 +55,54 @@ describe('secret references (ADR-0018 §3)', () => {
     ['env with lower-case name', 'env:stripe', 'ref.envName'],
     ['relative file', 'file:run/secrets/x', 'ref.filePath'],
     ['file traversal', 'file:/run/secrets/../../etc/shadow', 'ref.filePath'],
+    ['[PR3-SEC-07] file outside /run/secrets (environ)', 'file:/proc/self/environ', 'ref.filePath'],
+    ['[PR3-SEC-07] file outside /run/secrets (shadow)', 'file:/etc/shadow', 'ref.filePath'],
+    ['[PR3-SEC-07] prefix look-alike', 'file:/run/secretsX/x', 'ref.filePath'],
+    ['[PR3-SEC-07] dot segment', 'file:/run/secrets/./x', 'ref.filePath'],
+    ['[PR3-SEC-07] hidden file', 'file:/run/secrets/.x', 'ref.filePath'],
+    ['[PR3-SEC-07] double slash', 'file:/run/secrets//x', 'ref.filePath'],
+    ['[PR3-SEC-07] backslash', 'file:/run/secrets/a\\..\\x', 'ref.filePath'],
+    ['[PR3-SEC-07] NUL byte', 'file:/run/secrets/x\u0000', 'ref.filePath'],
+    ['[PR3-SEC-07] the root itself', 'file:/run/secrets', 'ref.filePath'],
+    ['[PR3-SEC-07] trailing slash', 'file:/run/secrets/x/', 'ref.filePath'],
     ['aws id with spaces', 'aws-secrets-manager:my secret', 'ref.awsSecretId'],
   ])('rejects %s', (_label, raw, rule) => {
     expect(parseSecretRef(raw)).toEqual({ ok: false, rule });
   });
 });
 
-describe('secret resolution (port + orchestrator)', () => {
-  const refs = (entries: Record<string, SecretRef>): ReadonlyMap<string, SecretRef> => new Map(Object.entries(entries));
+const refs = (entries: Record<string, SecretRef>): ReadonlyMap<string, SecretRef> => new Map(Object.entries(entries));
+const aws = (locator: string): SecretRef => ({ provider: 'aws-secrets-manager', locator });
+const never = (): Promise<string> => new Promise<string>(() => undefined);
+const instant = { sleep: (): Promise<void> => Promise.resolve(), random: (): number => 0 } as const;
 
+/** Provider whose behaviour per attempt is scripted by locator; counts the calls per locator. */
+function scripted(script: Record<string, readonly (() => Promise<string>)[]>): SecretProvider & { readonly calls: Map<string, number> } {
+  const calls = new Map<string, number>();
+  return {
+    kind: 'aws-secrets-manager',
+    calls,
+    resolve(locator) {
+      const attempt = calls.get(locator) ?? 0;
+      calls.set(locator, attempt + 1);
+      const steps = script[locator] ?? [];
+      const step = steps[Math.min(attempt, steps.length - 1)];
+      if (step === undefined) throw new Error('unscripted locator');
+      return step();
+    },
+  };
+}
+
+const rejection = async (promise: Promise<unknown>): Promise<ConfigValidationError> => {
+  const caught = await promise.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(caught).toBeInstanceOf(ConfigValidationError);
+  return caught as ConfigValidationError;
+};
+
+describe('secret resolution (port + orchestrator)', () => {
   it('resolves env references through the env provider', async () => {
     const value = token();
     const provider = createEnvSecretProvider({ STRIPE_SECRET_KEY: value });
@@ -69,40 +112,228 @@ describe('secret resolution (port + orchestrator)', () => {
     expect(resolved.get('STRIPE_SECRET_KEY_REF')?.reveal()).toBe(value);
   });
 
-  it('names every key that is unset, empty, unsupported or timed out; never the locator or value', async () => {
-    const hanging: SecretProvider = {
-      kind: 'aws-secrets-manager',
-      resolve: (_locator, signal) =>
-        new Promise((_resolve, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('aborted')));
-        }),
-    };
-    const emptyFile: SecretProvider = { kind: 'file', resolve: () => Promise.resolve('') };
-    const error = await resolveSecretRefs(
-      refs({
-        A_REF: { provider: 'env', locator: 'UNSET_VARIABLE' },
-        B_REF: { provider: 'env', locator: 'EMPTY_VARIABLE' },
-        C_REF: { provider: 'aws-secrets-manager', locator: 'stripe/key' },
-        D_REF: { provider: 'file', locator: '/run/secrets/empty' },
-      }),
-      [createEnvSecretProvider({ EMPTY_VARIABLE: '' }), hanging, emptyFile],
-      { timeoutMs: 20 },
-    ).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(ConfigValidationError);
-    const rejected = error as ConfigValidationError;
-    expect(rejected.issues).toEqual(['A_REF', 'B_REF', 'C_REF', 'D_REF'].map((key) => ({ key, code: 'unresolvable' })));
-    expect(rejected.message).not.toMatch(/UNSET_VARIABLE|stripe\/key|run\/secrets/);
+  it('[M1][PR3-SEC-04] a provider that ignores the signal and never settles fails within timeoutMs + ε', async () => {
+    const provider = scripted({ hung: [never] });
+    const started = performance.now();
+    const error = await rejection(
+      resolveSecretRefs(refs({ A_REF: aws('hung') }), [provider], { timeoutMs: 50, deadlineMs: 120, ...instant }),
+    );
+    const elapsed = performance.now() - started;
+    expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.timeout' }]);
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(elapsed).toBeLessThan(50 + 100);
+    expect(provider.calls.get('hung')).toBe(1);
   });
 
-  it('reports a missing provider as unresolvable', async () => {
-    const error = await resolveSecretRefs(refs({ X_REF: { provider: 'file', locator: '/run/secrets/x' } }), []).catch(
-      (caught: unknown) => caught,
+  it('[M1][PR3-SEC-04] a provider that settles late is cut off at the timeout', async () => {
+    const late = (): Promise<string> => new Promise((resolve) => setTimeout(() => resolve(token()), 500));
+    const started = performance.now();
+    const error = await rejection(
+      resolveSecretRefs(refs({ A_REF: aws('late') }), [scripted({ late: [late] })], { timeoutMs: 50, deadlineMs: 120, ...instant }),
     );
-    expect((error as ConfigValidationError).keys).toEqual(['X_REF']);
+    expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.timeout' }]);
+    expect(performance.now() - started).toBeLessThan(150);
+  });
+
+  it('[M1] one overall deadline bounds the call even when the per-attempt timeout is larger', async () => {
+    const provider = scripted({ a: [never], b: [never] });
+    const started = performance.now();
+    const error = await rejection(
+      resolveSecretRefs(refs({ A_REF: aws('a'), B_REF: aws('b') }), [provider], { timeoutMs: 5_000, deadlineMs: 60, ...instant }),
+    );
+    expect(performance.now() - started).toBeLessThan(60 + 100);
+    expect(error.issues.map((issue) => issue.rule)).toEqual(['ref.timeout', 'ref.timeout']);
+    expect([provider.calls.get('a'), provider.calls.get('b')]).toEqual([1, 1]);
+  });
+
+  it('[m1] classifies every failure into a value-free rule and cause', async () => {
+    class OddlyNamed extends Error {}
+    Object.defineProperty(OddlyNamed, 'name', { value: 'not an identifier!' });
+    const errno = (code: string): Error => Object.assign(new Error('EACCES: permission denied'), { code });
+    const provider = scripted({
+      typeError: [() => Promise.reject(new TypeError('boom'))],
+      errno: [() => Promise.reject(errno('EACCES'))],
+      nodeCode: [() => Promise.reject(errno('ERR_INVALID_ARG_TYPE'))],
+      tokenCode: [() => Promise.reject(errno('AKIA1234567890ABCD'))],
+      oddName: [() => Promise.reject(new OddlyNamed('x'))],
+      string: [() => Promise.reject('a thrown string' as unknown as Error)],
+      nullThrow: [() => Promise.reject(null as unknown as Error)],
+      undefinedValue: [() => Promise.resolve(undefined as unknown as string)],
+      nullValue: [() => Promise.resolve(null as unknown as string)],
+      syncThrow: [
+        () => {
+          throw new RangeError('synchronous');
+        },
+      ],
+      empty: [() => Promise.resolve('')],
+      notFound: [() => Promise.reject(new SecretNotFoundError())],
+    });
+    const error = await rejection(
+      resolveSecretRefs(
+        refs({
+          A_REF: aws('typeError'),
+          B_REF: aws('errno'),
+          C_REF: aws('nodeCode'),
+          D_REF: aws('tokenCode'),
+          E_REF: aws('oddName'),
+          F_REF: aws('string'),
+          G_REF: aws('nullThrow'),
+          H_REF: aws('undefinedValue'),
+          I_REF: aws('nullValue'),
+          J_REF: aws('syncThrow'),
+          K_REF: aws('empty'),
+          L_REF: aws('notFound'),
+          M_REF: { provider: 'file', locator: '/run/secrets/x' },
+          N_REF: { provider: 'env', locator: 'UNSET_VARIABLE' },
+          O_REF: { provider: 'env', locator: 'EMPTY_VARIABLE' },
+        }),
+        [provider, createEnvSecretProvider({ EMPTY_VARIABLE: '' })],
+        instant,
+      ),
+    );
+    const providerError = (key: string, cause: string): object => ({ key, code: 'unresolvable', rule: 'ref.providerError', cause });
+    expect(error.issues).toEqual([
+      providerError('A_REF', 'TypeError'),
+      providerError('B_REF', 'Error/EACCES'),
+      providerError('C_REF', 'Error/ERR_INVALID_ARG_TYPE'),
+      providerError('D_REF', 'Error'),
+      providerError('E_REF', 'Error'),
+      providerError('F_REF', 'non-error:string'),
+      providerError('G_REF', 'non-error:null'),
+      providerError('H_REF', 'non-string:undefined'),
+      providerError('I_REF', 'non-string:null'),
+      providerError('J_REF', 'RangeError'),
+      { key: 'K_REF', code: 'unresolvable', rule: 'ref.empty' },
+      { key: 'L_REF', code: 'unresolvable', rule: 'ref.notFound' },
+      { key: 'M_REF', code: 'unresolvable', rule: 'ref.noProvider' },
+      { key: 'N_REF', code: 'unresolvable', rule: 'ref.notFound' },
+      { key: 'O_REF', code: 'unresolvable', rule: 'ref.notFound' },
+    ]);
+    expect(formatConfigError(error)).toContain('  - B_REF: unresolvable: ref.providerError (Error/EACCES)');
+    expect(error.message).not.toMatch(/boom|permission|AKIA|thrown string|synchronous|UNSET_VARIABLE|run\/secrets/);
+    for (const locator of ['typeError', 'errno', 'string', 'undefinedValue', 'syncThrow']) expect(provider.calls.get(locator)).toBe(2);
+    for (const locator of ['empty', 'notFound']) expect(provider.calls.get(locator)).toBe(1);
+  });
+
+  it('[m1] retries a provider error once after 100–300 ms of jitter, then succeeds', async () => {
+    const value = token();
+    const provider = scripted({ flaky: [() => Promise.reject(new Error('throttled')), () => Promise.resolve(value)] });
+    const delays: number[] = [];
+    const resolved = await resolveSecretRefs(refs({ A_REF: aws('flaky') }), [provider], {
+      random: () => 0.5,
+      sleep: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(resolved.get('A_REF')?.reveal()).toBe(value);
+    expect(delays).toEqual([(SECRET_RESOLVE_RETRY_DELAY_MS.min + SECRET_RESOLVE_RETRY_DELAY_MS.max) / 2]);
+    expect(provider.calls.get('flaky')).toBe(2);
+  });
+
+  it('[m1] retries a timeout once, then succeeds; the default sleep and jitter are bounded', async () => {
+    const value = token();
+    const provider = scripted({ slow: [never, () => Promise.resolve(value)] });
+    const started = performance.now();
+    const resolved = await resolveSecretRefs(refs({ A_REF: aws('slow') }), [provider], { timeoutMs: 30 });
+    const elapsed = performance.now() - started;
+    expect(resolved.get('A_REF')?.reveal()).toBe(value);
+    expect(elapsed).toBeGreaterThanOrEqual(30 + SECRET_RESOLVE_RETRY_DELAY_MS.min - 10);
+    expect(elapsed).toBeLessThan(30 + SECRET_RESOLVE_RETRY_DELAY_MS.max + 150);
+  });
+
+  it('[m1] skips the retry when a full attempt no longer fits the deadline', async () => {
+    let slept = false;
+    const provider = scripted({ broken: [() => Promise.reject(new Error('down'))] });
+    const error = await rejection(
+      resolveSecretRefs(refs({ A_REF: aws('broken') }), [provider], {
+        timeoutMs: 50,
+        deadlineMs: 100,
+        random: () => 0,
+        sleep: () => {
+          slept = true;
+          return Promise.resolve();
+        },
+      }),
+    );
+    expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.providerError', cause: 'Error' }]);
+    expect(slept).toBe(false);
+    expect(provider.calls.get('broken')).toBe(1);
+  });
+
+  it('[m1] a retry that would start after the deadline is reported as a timeout without calling the provider', async () => {
+    const provider = scripted({ flaky: [() => Promise.reject(new Error('down')), () => Promise.resolve(token())] });
+    const error = await rejection(
+      resolveSecretRefs(refs({ A_REF: aws('flaky') }), [provider], {
+        timeoutMs: 20,
+        deadlineMs: 200,
+        random: () => 0,
+        sleep: () => new Promise((resolve) => setTimeout(resolve, 260)),
+      }),
+    );
+    expect(error.issues).toEqual([{ key: 'A_REF', code: 'unresolvable', rule: 'ref.timeout' }]);
+    expect(provider.calls.get('flaky')).toBe(1);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('rejects a non-positive or fractional budget (%p)', async (budget) => {
+    await expect(resolveSecretRefs(refs({}), [], { timeoutMs: budget })).rejects.toBeInstanceOf(RangeError);
+    await expect(resolveSecretRefs(refs({}), [], { deadlineMs: budget })).rejects.toBeInstanceOf(RangeError);
   });
 
   it('the env provider rejects with a value-free error', async () => {
     await expect(createEnvSecretProvider({}).resolve('MISSING', AbortSignal.timeout(100))).rejects.toBeInstanceOf(SecretNotFoundError);
+  });
+
+  it('describes causes from the class and errno code only', () => {
+    expect(describeFailureCause(new SecretNotFoundError())).toBe('SecretNotFoundError');
+    expect(describeFailureCause(Object.assign(new Error('x'), { code: 42 }))).toBe('Error');
+    expect(describeFailureCause(undefined)).toBe('non-error:undefined');
+  });
+
+  it('property: no value thrown, returned or echoed by a provider appears in any issue, message, inspect or stack', async () => {
+    const throwables: Readonly<Record<string, (value: string) => unknown>> = {
+      message: (value) => new Error(value),
+      code: (value) => Object.assign(new Error('failed'), { code: value.toUpperCase() }),
+      name: (value) => Object.assign(new Error('failed'), { name: value }),
+      raw: (value) => value,
+    };
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uint8Array({ minLength: 12, maxLength: 32 }).map((bytes) => Buffer.from(bytes).toString('hex')),
+        fc.constantFrom(...Object.values(throwables)),
+        async (value, makeThrowable) => {
+          const thrown = makeThrowable(value);
+          const provider = scripted({ leak: [() => Promise.reject(thrown as Error)] });
+          const error = await rejection(resolveSecretRefs(refs({ A_REF: aws('leak') }), [provider], instant));
+          const surfaces = [
+            error.message,
+            formatConfigError(error),
+            inspect(error, { depth: 5 }),
+            String(error.stack),
+            JSON.stringify(error.issues),
+          ];
+          for (const surface of surfaces) {
+            expect(surface).not.toContain(value);
+            expect(surface.toLowerCase()).not.toContain(value.toLowerCase());
+          }
+        },
+      ),
+      { numRuns: 25 },
+    );
+  });
+});
+
+describe('issue causes', () => {
+  it('sort and de-duplicate by cause after key, code and rule', () => {
+    const error = new ConfigValidationError([
+      { key: 'A_REF', code: 'unresolvable', rule: 'ref.providerError', cause: 'TypeError' },
+      { key: 'A_REF', code: 'unresolvable', rule: 'ref.providerError', cause: 'Error' },
+      { key: 'A_REF', code: 'unresolvable', rule: 'ref.providerError', cause: 'TypeError' },
+    ]);
+    expect(error.issues.map((issue) => issue.cause)).toEqual(['Error', 'TypeError']);
+    expect(error.message).toBe(
+      'Configuration rejected for 1 key(s): A_REF (unresolvable: ref.providerError (Error)), A_REF (unresolvable: ref.providerError (TypeError))',
+    );
   });
 });
 
@@ -119,6 +350,11 @@ describe('resolved secret checks (ADR-0018 §3, SEC-P3-08 items 4–5) @security
       ]);
     }
     expect(checkResolvedSecrets(secrets, { appEnv: 'local', allowFullStripeTestKey: false })).toEqual([]);
+  });
+
+  it('[m3] accepts a rotated password that merely contains <…> or a placeholder word', () => {
+    const secrets = resolved({ CARRIER_UPS_SECRET_REF: 'Xk9<q!Tz>2wP', SMTP_PASSWORD_REF: 'exchangemerchant-7Qp!' });
+    expect(checkResolvedSecrets(secrets, { appEnv: 'production', allowFullStripeTestKey: false })).toEqual([]);
   });
 
   it('refuses live Stripe keys (PAYMENT_LIVE_KEY_FORBIDDEN)', () => {

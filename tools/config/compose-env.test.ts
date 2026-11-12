@@ -8,11 +8,19 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { ConfigValidationError, LOCAL_ONLY_PREFIX, loadConfig, parseSecretRef, SECRET_KEY_NAMES, SERVICES } from '@platform/config';
+import {
+  ConfigValidationError,
+  LOCAL_ONLY_PREFIX,
+  loadConfig,
+  parseSecretRef,
+  SECRET_KEY_NAMES,
+  SERVICES,
+  TOOLING_KEY_NAMES,
+} from '@platform/config';
 import { loadWebBuildConfig } from '@platform/config/web';
 
 import { findRepoRoot } from '../test-support/process.js';
-import { ALL_CONFIG_KEYS, parseEnvFile } from './env-file.js';
+import { ALL_CONFIG_KEYS, parseEnvFile, TOOLING_SECRET_KEYS } from './env-file.js';
 
 const compose = parseEnvFile(readFileSync(join(findRepoRoot(), 'compose.env'), 'utf8'));
 const env = Object.fromEntries(compose.entries);
@@ -32,10 +40,24 @@ describe('compose.env (local-only defaults)', () => {
   });
 
   it('[SEC-TC-51] every secret value is visibly marked local-only', () => {
-    const secrets = [...SECRET_KEY_NAMES.filter((key) => !key.endsWith('_REF')), ...envRefTargets];
+    const secrets = [...SECRET_KEY_NAMES.filter((key) => !key.endsWith('_REF')), ...TOOLING_SECRET_KEYS, ...envRefTargets];
     for (const key of secrets) {
       const value = compose.entries.get(key);
       if (value !== undefined) expect({ key, marked: value.includes(LOCAL_ONLY_PREFIX) }).toEqual({ key, marked: true });
+    }
+  });
+
+  it('[m9] the bootstrap passwords match the role passwords in the runtime and migrator URLs (PR-0005 §4 item 5)', () => {
+    const passwordOf = (key: string): string => decodeURIComponent(new URL(compose.entries.get(key) ?? 'x://h').password);
+    expect(compose.entries.get('BOOTSTRAP_APP_PASSWORD')).toBe(passwordOf('DATABASE_URL'));
+    expect(compose.entries.get('BOOTSTRAP_MIGRATOR_PASSWORD')).toBe(passwordOf('DATABASE_MIGRATOR_URL'));
+  });
+
+  it('[m9] api and worker start without the tooling keys and never expose them', () => {
+    for (const service of SERVICES) {
+      const config = loadConfig(env, { service });
+      expect(TOOLING_KEY_NAMES.filter((key) => key in config)).toEqual([]);
+      expect(config.DB_POOL_MAX).toBe(service === 'api' ? 10 : 5);
     }
   });
 

@@ -16,6 +16,8 @@ export interface GuardInput {
   readonly values: Readonly<Record<string, unknown>>;
   /** `APP_ENV` when it is valid. */
   readonly appEnv: AppEnv | undefined;
+  /** Names of tooling-only keys (`tooling-keys.ts`) configured in the process environment; never their values. */
+  readonly toolingKeys?: readonly string[];
 }
 
 export type Guard = (input: GuardInput) => readonly ConfigIssue[];
@@ -28,7 +30,6 @@ export const placeholderGuard: Guard = ({ raw, appEnv }) =>
         .map(([key]) => ({ key, code: 'placeholder' }))
     : [];
 
-const DATABASE_URL_KEYS = ['DATABASE_URL', 'DATABASE_MIGRATOR_URL', 'SHADOW_DATABASE_URL'] as const;
 const HTTPS_KEYS = ['WEB_APP_ORIGIN', 'ADMIN_APP_ORIGIN', 'STORAGE_ENDPOINT', 'STORAGE_PUBLIC_ENDPOINT'] as const;
 
 const parseUrl = (value: string | undefined): URL | undefined => {
@@ -40,6 +41,26 @@ const parseUrl = (value: string | undefined): URL | undefined => {
   }
 };
 
+const hasDuplicateParam = (url: URL): boolean => {
+  const names = [...url.searchParams.keys()];
+  return new Set(names).size !== names.length;
+};
+
+/**
+ * PostgreSQL URL as node-postgres reads it (pg-connection-string 2.14.1 copies every query entry onto the config,
+ * so the LAST `sslmode` wins, and `ssl=0` sets `ssl: false`): no repeated query parameter, exactly one
+ * `sslmode=verify-full`, and no `ssl` override (TLS is selected by `sslmode` alone).
+ */
+const isVerifiedPostgresUrl = (url: URL): boolean =>
+  !hasDuplicateParam(url) && url.searchParams.get('sslmode') === 'verify-full' && !url.searchParams.has('ssl');
+
+/**
+ * Valkey URL as ioredis 6.0.0 reads it: `parseURL` merges every query parameter into the options before `rediss://`
+ * applies `tls: true` through lodash `defaults`, so `?tls=` (an empty, falsy value) silently selects plain TCP.
+ * Outside local/test the URL is `rediss://` with no query string; TLS and auth come from the scheme and userinfo.
+ */
+const isTlsRedisUrl = (url: URL): boolean => url.protocol === 'rediss:' && url.search === '';
+
 /** NFR-SEC-007, platform.md §9.4: TLS to PostgreSQL, Valkey and HTTP endpoints outside `APP_ENV ∈ {local, test}`. */
 export const transportGuard: Guard = ({ raw, appEnv }) => {
   if (appEnv === undefined || isLocalAppEnv(appEnv)) return [];
@@ -48,13 +69,56 @@ export const transportGuard: Guard = ({ raw, appEnv }) => {
     const url = parseUrl(raw[key]);
     if (url !== undefined && !secure(url)) issues.push({ key, code: 'insecure-transport' });
   };
-  DATABASE_URL_KEYS.forEach((key) => insecure(key, (url) => url.searchParams.get('sslmode') === 'verify-full'));
-  insecure('REDIS_URL', (url) => url.protocol === 'rediss:');
+  insecure('DATABASE_URL', isVerifiedPostgresUrl);
+  insecure('REDIS_URL', isTlsRedisUrl);
   HTTPS_KEYS.forEach((key) => insecure(key, (url) => url.protocol === 'https:'));
   return issues;
 };
 
-const INSPECT_FLAG = /(?:^|\s)--inspect(?:-brk|-wait|-port)?(?:=|\s|$)/;
+const isSpace = (char: string): boolean => /\s/.test(char);
+
+/**
+ * Splits NODE_OPTIONS the way Node's parser does: whitespace separates tokens, a double-quoted section belongs to
+ * the current token with the quotes removed, and `\` escapes the next character inside quotes.
+ */
+export function nodeOptionTokens(value: string): readonly string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let started = false;
+  let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value.charAt(index);
+    if (quoted && char === '\\') {
+      index += 1;
+      current += value.charAt(index);
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (!quoted && isSpace(char)) {
+      if (started) tokens.push(current);
+      current = '';
+      started = false;
+      continue;
+    } else {
+      current += char;
+    }
+    started = true;
+  }
+  if (started) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * Option name of a token, normalised: single quotes dropped (Node keeps them, but they mark an intent to pass
+ * the flag), the `=value` part removed, `_` read as `-` (Node accepts `--inspect_brk` for `--inspect-brk`), and
+ * lower-cased.
+ */
+const optionName = (token: string): string => (token.replace(/'/g, '').split('=', 1)[0] ?? '').replace(/_/g, '-').toLowerCase();
+
+/** Every `--inspect*` option and the `--debug*` aliases (`--debug-port`) configure or start the inspector. */
+export const isInspectorOption = (token: string): boolean => {
+  const name = optionName(token);
+  return name.startsWith('--inspect') || name.startsWith('--debug');
+};
 
 /** SEC-P3-08 item 6, R-22: no debug sections or inspector outside `APP_ENV=local`. */
 export const debugGuard: Guard = ({ raw, appEnv }) => {
@@ -62,9 +126,24 @@ export const debugGuard: Guard = ({ raw, appEnv }) => {
   const issues: ConfigIssue[] = [];
   if (raw.NODE_DEBUG !== undefined) issues.push({ key: 'NODE_DEBUG', code: 'debug-flag' });
   if (raw.DEBUG !== undefined) issues.push({ key: 'DEBUG', code: 'debug-flag' });
-  if (raw.NODE_OPTIONS !== undefined && INSPECT_FLAG.test(raw.NODE_OPTIONS)) issues.push({ key: 'NODE_OPTIONS', code: 'debug-flag' });
+  if (raw.NODE_OPTIONS !== undefined && nodeOptionTokens(raw.NODE_OPTIONS).some(isInspectorOption)) {
+    issues.push({ key: 'NODE_OPTIONS', code: 'debug-flag' });
+  }
   return issues;
 };
+
+/**
+ * PR3-SEC-03, m7: a hardened `APP_ENV` requires the raw `NODE_ENV=production`; libraries read `process.env.NODE_ENV`
+ * directly (Express defaults, cookie relaxation, the demo-seed gate), not the schema default.
+ */
+export const nodeEnvGuard: Guard = ({ raw, appEnv }) =>
+  isHardenedAppEnv(appEnv) && raw.NODE_ENV !== 'production'
+    ? [{ key: 'NODE_ENV', code: 'forbidden-in-environment', rule: 'nodeEnv.production' }]
+    : [];
+
+/** PR-0003 §4, PR-0005 §4: the API and the worker never hold tooling credentials outside local/test. */
+export const toolingKeyGuard: Guard = ({ toolingKeys = [], appEnv }) =>
+  isHardenedAppEnv(appEnv) ? toolingKeys.map((key) => ({ key, code: 'forbidden-in-environment', rule: 'toolingKey' })) : [];
 
 /** ADR-0010 am. 9, ADR-0012, SEC-TC-24: no Mock carrier, Mock gateway or Mock webhook secret in production. */
 export const productionGuard: Guard = ({ values, appEnv }) => {
@@ -141,6 +220,8 @@ export const GUARDS: readonly Guard[] = Object.freeze([
   placeholderGuard,
   transportGuard,
   debugGuard,
+  nodeEnvGuard,
+  toolingKeyGuard,
   productionGuard,
   companionGuard,
   sessionGuard,

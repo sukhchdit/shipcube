@@ -5,8 +5,15 @@ export { APP_ENVS, HARDENED_APP_ENVS, isHardenedAppEnv, isLocalAppEnv, LOCAL_APP
 export type { AppEnv, NodeEnv, Service } from './environment.js';
 export { ConfigValidationError, formatConfigError } from './errors.js';
 export type { ConfigIssue, ConfigIssueCode } from './errors.js';
-export { GUARDS, runGuards } from './guards.js';
+export { GUARDS, isInspectorOption, nodeOptionTokens, runGuards } from './guards.js';
 export type { Guard, GuardInput } from './guards.js';
+export {
+  createFileSecretProvider,
+  SECRET_FILE_MAX_BYTES,
+  SecretFileError,
+  type FileSecretProviderOptions,
+  type SecretFileSystem,
+} from './file-secret-provider.js';
 export {
   findDuplicateKeyMaterial,
   KEY_REGISTER,
@@ -23,11 +30,15 @@ export { loadConfig, secretRefsOf } from './load-config.js';
 export type { LoadConfigOptions } from './load-config.js';
 export { ENV_EXAMPLE_PLACEHOLDER, isPlaceholder, LOCAL_ONLY_PREFIX, PLACEHOLDER_PATTERNS } from './placeholders.js';
 export { CONFIG_EXIT_CODE, loadConfigOrExit, LOCAL_ENV_FILE, readStartupEnv } from './process-env.js';
-export type { LoadConfigOrExitOptions, StartupIo } from './process-env.js';
+export type { LoadConfigOrExitOptions, RuntimeProbe, StartupIo } from './process-env.js';
 export {
   BCRYPT_COST_FLOOR,
   BCRYPT_COST_MAX,
   CONFIG_KEY_NAMES,
+  DB_CONNECTION_TIMEOUT_MS_DEFAULT,
+  DB_IDLE_TIMEOUT_MS_DEFAULT,
+  DB_POOL_MAX_DEFAULTS,
+  DB_POOL_MAX_LIMIT,
   CONFIG_SCHEMA,
   configObjectSchema,
   describeConfigKeys,
@@ -46,3 +57,5 @@ export {
 } from './secret-refs.js';
 export type { ResolvedSecretContext, ResolveSecretRefsOptions, SecretProvider, SecretProviderKind, SecretRef } from './secret-refs.js';
 export { REDACTED, Secret } from './secret.js';
+export { TOOLING_CONFIG_KEYS, TOOLING_KEY_NAMES } from './tooling-keys.js';
+export type { ToolingKeySpec } from './tooling-keys.js';

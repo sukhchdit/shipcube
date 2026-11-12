@@ -7,10 +7,13 @@
  *   file:/run/secrets/<name>             Compose secret file (absolute container path)
  *   aws-secrets-manager:<arn|name>       Secrets Manager (M5; adapter supplied by the consuming task)
  *
- * Resolution is an edge concern: this module defines the port, the parser, an orchestrator with a timeout per
- * call, the pure `env` adapter and the post-resolution checks. Resolved values stay inside `Secret` wrappers and
+ * Resolution is an edge concern: this module defines the port, the parser, an orchestrator that enforces a
+ * per-attempt timeout, an overall deadline and one jittered retry, the pure `env` adapter and the post-resolution
+ * checks. The `file` adapter is `file-secret-provider.ts`. Resolved values stay inside `Secret` wrappers and
  * every error names the configuration key only.
  */
+import { setTimeout as delay } from 'node:timers/promises';
+
 import { type AppEnv, isHardenedAppEnv } from './environment.js';
 import { type ConfigIssue, ConfigValidationError } from './errors.js';
 import type { ParseResult } from './keys.js';
@@ -26,7 +29,14 @@ export interface SecretRef {
 }
 
 const ENV_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
-const FILE_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
+/** Directory every `file:` reference must live under (Compose/ECS secret mounts). */
+export const SECRET_FILE_ROOT = '/run/secrets';
+/**
+ * `file:` locators are absolute POSIX paths of 1–4 segments under `/run/secrets`. A segment never starts with a
+ * dot, so `.`, `..` and hidden names cannot appear; `//`, backslashes, NUL and other characters cannot match.
+ * The path is therefore already lexically normal. The file provider also confines the real path (symlinks).
+ */
+const FILE_PATH = /^\/run\/secrets(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}){1,4}$/;
 const AWS_SECRET_ID = /^(?:arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+|[A-Za-z0-9/_+=.@-]{1,512})$/;
 
 const fail = (rule: string): ParseResult<SecretRef> => ({ ok: false, rule });
@@ -46,7 +56,7 @@ export function parseSecretRef(raw: string): ParseResult<SecretRef> {
     case 'env':
       return ENV_NAME.test(locator) ? ref('env', locator) : fail('ref.envName');
     case 'file':
-      return FILE_PATH.test(locator) && !locator.split('/').includes('..') ? ref('file', locator) : fail('ref.filePath');
+      return FILE_PATH.test(locator) ? ref('file', locator) : fail('ref.filePath');
     case 'aws-secrets-manager':
       return AWS_SECRET_ID.test(locator) ? ref('aws-secrets-manager', locator) : fail('ref.awsSecretId');
     default:
@@ -79,52 +89,169 @@ export function createEnvSecretProvider(env: Readonly<Record<string, string | un
   });
 }
 
-/** Default budget per secret lookup; start-up must fail within 5 s (NFR-OPS-005). */
+/** Default budget per secret lookup attempt. */
 export const SECRET_RESOLVE_TIMEOUT_MS = 2_000;
 
+/** Default budget for one `resolveSecretRefs` call, retries included: start-up must fail within 5 s (NFR-OPS-005). */
+export const SECRET_RESOLVE_DEADLINE_MS = 4_500;
+
+/** Bounds of the delay before the single retry (uniform jitter). A secret read is idempotent (CLAUDE.md §9). */
+export const SECRET_RESOLVE_RETRY_DELAY_MS = Object.freeze({ min: 100, max: 300 });
+
+/** Value-free failure classes, reported as `ConfigIssue.rule` on an `unresolvable` issue. */
+export const SECRET_RESOLVE_FAILURES = ['ref.noProvider', 'ref.timeout', 'ref.notFound', 'ref.empty', 'ref.providerError'] as const;
+export type SecretResolveFailure = (typeof SECRET_RESOLVE_FAILURES)[number];
+
+/** Transient failures get one more attempt; a missing or empty secret does not appear by retrying. */
+const RETRYABLE: ReadonlySet<SecretResolveFailure> = new Set(['ref.timeout', 'ref.providerError']);
+
 export interface ResolveSecretRefsOptions {
+  /** Budget per attempt; defaults to `SECRET_RESOLVE_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
+  /** Budget for the whole call, retries included; defaults to `SECRET_RESOLVE_DEADLINE_MS`. */
+  readonly deadlineMs?: number;
+  /** Uniform random number in [0, 1) for the retry jitter (test seam); defaults to `Math.random`. */
+  readonly random?: () => number;
+  /** Waits before the retry (test seam); defaults to `timers/promises#setTimeout`. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
-async function resolveOne(ref: SecretRef, provider: SecretProvider | undefined, timeoutMs: number): Promise<Secret<string> | undefined> {
-  if (provider === undefined) return undefined;
-  try {
-    const value = await provider.resolve(ref.locator, AbortSignal.timeout(timeoutMs));
-    return value === '' ? undefined : new Secret(value);
-  } catch {
-    return undefined;
-  }
+type Outcome =
+  | { readonly ok: true; readonly value: Secret<string> }
+  | { readonly ok: false; readonly rule: SecretResolveFailure; readonly cause?: string };
+
+const failure = (rule: SecretResolveFailure, cause?: string): Outcome =>
+  cause === undefined ? { ok: false, rule } : { ok: false, rule, cause };
+
+const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
+/**
+ * errno (`EACCES`), Node (`ERR_INVALID_ARG_TYPE`) and provider (`SECRET_FILE_TOO_LARGE`) codes only, letters and
+ * underscores, so a token-shaped value cannot pass.
+ */
+const ERRNO_CODE = /^(?:E[A-Z]{2,15}|ERR_[A-Z_]{1,40}|SECRET_[A-Z_]{1,40})$/;
+const typeName = (value: unknown): string => (value === null ? 'null' : typeof value);
+
+/**
+ * Value-free description of a thrown value: the constructor name (defined by code, never by data) plus an
+ * errno-style `code` when present. Messages are never read, because providers may echo locators or values.
+ */
+export function describeFailureCause(error: unknown): string {
+  if (!(error instanceof Error)) return `non-error:${typeName(error)}`;
+  const className: unknown = error.constructor.name;
+  const name = typeof className === 'string' && IDENTIFIER.test(className) ? className : 'Error';
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === 'string' && ERRNO_CODE.test(code) ? `${name}/${code}` : name;
+}
+
+function classifyFailure(error: unknown, signal: AbortSignal): Outcome {
+  if (signal.aborted) return failure('ref.timeout');
+  if (error instanceof SecretNotFoundError) return failure('ref.notFound');
+  return failure('ref.providerError', describeFailureCause(error));
+}
+
+function classifyValue(value: unknown): Outcome {
+  if (typeof value !== 'string') return failure('ref.providerError', `non-string:${typeName(value)}`);
+  return value === '' ? failure('ref.empty') : { ok: true, value: new Secret(value) };
 }
 
 /**
- * Resolves every reference concurrently, each bounded by `timeoutMs`. Throws `ConfigValidationError` naming
- * every key whose reference has no provider, times out, fails or resolves to an empty value.
+ * One bounded attempt. The provider receives an abort signal, and the orchestrator also races the provider
+ * against that signal, so a provider that ignores it cannot hold start-up past `timeoutMs` or the deadline.
+ */
+async function attemptResolve(provider: SecretProvider, locator: string, timeoutMs: number, deadline: AbortSignal): Promise<Outcome> {
+  if (deadline.aborted) return failure('ref.timeout');
+  const attempt = new AbortController();
+  const timer = setTimeout(() => attempt.abort(new DOMException('Secret resolution timed out', 'TimeoutError')), timeoutMs);
+  const signal = AbortSignal.any([attempt.signal, deadline]);
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return classifyValue(await Promise.race([provider.resolve(locator, signal), aborted]));
+  } catch (error) {
+    return classifyFailure(error, signal);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+interface ResolvePlan {
+  readonly timeoutMs: number;
+  readonly deadlineAt: number;
+  readonly deadline: AbortSignal;
+  readonly random: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
+}
+
+/** One attempt, then at most one jittered retry of a transient failure when a full attempt still fits the deadline. */
+async function resolveOne(ref: SecretRef, provider: SecretProvider | undefined, plan: ResolvePlan): Promise<Outcome> {
+  if (provider === undefined) return failure('ref.noProvider');
+  const first = await attemptResolve(provider, ref.locator, plan.timeoutMs, plan.deadline);
+  if (first.ok || !RETRYABLE.has(first.rule)) return first;
+  const { min, max } = SECRET_RESOLVE_RETRY_DELAY_MS;
+  const delayMs = Math.round(min + plan.random() * (max - min));
+  if (plan.deadlineAt - performance.now() < delayMs + plan.timeoutMs) return first;
+  await plan.sleep(delayMs);
+  return attemptResolve(provider, ref.locator, plan.timeoutMs, plan.deadline);
+}
+
+function positiveBudget(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError(`${name} must be a positive integer number of milliseconds`);
+  return value;
+}
+
+const issueFor = (key: string, outcome: Extract<Outcome, { ok: false }>): ConfigIssue =>
+  outcome.cause === undefined
+    ? { key, code: 'unresolvable', rule: outcome.rule }
+    : { key, code: 'unresolvable', rule: outcome.rule, cause: outcome.cause };
+
+/**
+ * Resolves every reference concurrently. Each attempt is bounded by `timeoutMs` and the whole call by
+ * `deadlineMs`, whether or not a provider honours its abort signal. A timeout or provider error is retried once
+ * after 100–300 ms of jitter when a full attempt still fits the deadline. Throws `ConfigValidationError` with
+ * one `unresolvable` issue per failed key; its rule is the failure class (`ref.noProvider`, `ref.timeout`,
+ * `ref.notFound`, `ref.empty`, `ref.providerError` with a value-free `cause`). No locator or value is reported.
  */
 export async function resolveSecretRefs(
   refs: ReadonlyMap<string, SecretRef>,
   providers: readonly SecretProvider[],
   options: ResolveSecretRefsOptions = {},
 ): Promise<ReadonlyMap<string, Secret<string>>> {
-  const timeoutMs = options.timeoutMs ?? SECRET_RESOLVE_TIMEOUT_MS;
-  const entries = [...refs];
-  const values = await Promise.all(
-    entries.map(([, ref]) =>
-      resolveOne(
-        ref,
-        providers.find((provider) => provider.kind === ref.provider),
-        timeoutMs,
-      ),
-    ),
+  const timeoutMs = positiveBudget('timeoutMs', options.timeoutMs ?? SECRET_RESOLVE_TIMEOUT_MS);
+  const deadlineMs = positiveBudget('deadlineMs', options.deadlineMs ?? SECRET_RESOLVE_DEADLINE_MS);
+  const deadline = new AbortController();
+  const deadlineTimer = setTimeout(
+    () => deadline.abort(new DOMException('Secret resolution deadline exceeded', 'TimeoutError')),
+    deadlineMs,
   );
-  const issues: ConfigIssue[] = [];
-  const resolved = new Map<string, Secret<string>>();
-  entries.forEach(([key], index) => {
-    const value = values[index];
-    if (value === undefined) issues.push({ key, code: 'unresolvable' });
-    else resolved.set(key, value);
-  });
-  if (issues.length > 0) throw new ConfigValidationError(issues);
-  return resolved;
+  const plan: ResolvePlan = {
+    timeoutMs,
+    deadlineAt: performance.now() + deadlineMs,
+    deadline: deadline.signal,
+    random: options.random ?? Math.random,
+    sleep: options.sleep ?? ((ms) => delay(ms)),
+  };
+  try {
+    const outcomes = await Promise.all(
+      [...refs].map(async ([key, ref]) => {
+        const provider = providers.find((candidate) => candidate.kind === ref.provider);
+        return [key, await resolveOne(ref, provider, plan)] as const;
+      }),
+    );
+    const issues: ConfigIssue[] = [];
+    const resolved = new Map<string, Secret<string>>();
+    for (const [key, outcome] of outcomes) {
+      if (outcome.ok) resolved.set(key, outcome.value);
+      else issues.push(issueFor(key, outcome));
+    }
+    if (issues.length > 0) throw new ConfigValidationError(issues);
+    return resolved;
+  } finally {
+    clearTimeout(deadlineTimer);
+  }
 }
 
 export interface ResolvedSecretContext {

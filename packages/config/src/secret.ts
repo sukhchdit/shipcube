@@ -16,9 +16,13 @@ export class Secret<T> {
     Object.freeze(this);
   }
 
-  /** Returns the secret value. Callers must not log, persist or echo it. */
+  /**
+   * Returns the secret value. Callers must not log, persist or echo it. Byte material is returned as a fresh copy
+   * (typed arrays cannot be frozen), so no consumer can alter the key bytes another consumer reads.
+   */
   reveal(): T {
-    return this.#value;
+    const value = this.#value;
+    return value instanceof Uint8Array ? (Uint8Array.prototype.slice.call(value) as T) : value;
   }
 
   toString(): string {

@@ -338,10 +338,20 @@ export const KEY_REGISTER: readonly KeyRegisterEntry[] = Object.freeze(
       },
       {
         keyId: 'db',
-        // ADR-0018 names DB_URL/DB_MIGRATOR_URL; data-model §7.1 and US-002 use the Prisma names below.
-        variables: ['DATABASE_URL', 'DATABASE_MIGRATOR_URL', 'SHADOW_DATABASE_URL'],
+        // ADR-0018 names DB_URL/DB_MIGRATOR_URL; data-model §7.1 and US-002 use the Prisma names below. Only
+        // DATABASE_URL is runtime configuration; the others are tooling keys (tooling-keys.ts, TASK-003 names).
+        variables: [
+          'DATABASE_URL',
+          'DATABASE_MIGRATOR_URL',
+          'SHADOW_DATABASE_URL',
+          'DATABASE_BOOTSTRAP_URL',
+          'BOOTSTRAP_MIGRATOR_PASSWORD',
+          'BOOTSTRAP_MIGRATOR_PASSWORD_FILE',
+          'BOOTSTRAP_APP_PASSWORD',
+          'BOOTSTRAP_APP_PASSWORD_FILE',
+        ],
         material: 'credential',
-        algorithm: 'PostgreSQL logins platform_app, platform_migrator, cluster admin (bootstrap only, outside this schema)',
+        algorithm: 'PostgreSQL logins platform_app, platform_migrator, cluster admin (bootstrap tooling only, never api/worker)',
         purpose: 'database access',
         holders: ['api', 'worker', 'migrate', 'bootstrap'],
         requiredFor: BOTH,
