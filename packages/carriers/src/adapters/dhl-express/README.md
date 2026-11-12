@@ -135,7 +135,7 @@ All paths are relative to the base URL in section 1. "Confirmed (secondary)" = p
 
 ## 7. Open questions
 
-1. Official OpenAPI YAML (portal Downloads section): a person with portal access must diff the paths, headers and schemas in this README against it before TASK-139 is closed.
+1. Official OpenAPI YAML (portal Downloads section): a person with portal access must diff the paths, headers and schemas in this README against it before TASK-135 is closed.
 2. Does MyDHL have a cancel/delete shipment operation? If not, `cancelShipment` is unsupported for DHL.
 3. Error model fields and a catalogue of error codes for `400`, `401`, `404`, `422`, `429`, `5xx`.
 4. Surcharge itemisation in rate responses and how to map it to canonical surcharges.
@@ -154,7 +154,7 @@ All paths are relative to the base URL in section 1. "Confirmed (secondary)" = p
 
 ## 9. Fixture plan per operation
 
-Names only. All fixtures are **synthesised** (labelled `"_fixture": "synthesised"`), contain placeholders such as `<WAYBILL_NUMBER>` and `<DISPATCH_CONFIRMATION_NUMBER>`, and no real names, addresses, phone numbers or credentials. Layout and file names are decided by TASK-139.
+Names only. All fixtures are **synthesised** (labelled `"_fixture": "synthesised"`), contain placeholders such as `<WAYBILL_NUMBER>` and `<DISPATCH_CONFIRMATION_NUMBER>`, and no real names, addresses, phone numbers or credentials. Layout and file names are decided by TASK-135.
 
 | Operation | Success | Typical errors | Edge cases |
 |---|---|---|---|
