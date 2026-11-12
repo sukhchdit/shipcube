@@ -339,7 +339,7 @@ export function gitleaksFindings(script) {
   const out = [];
   const add = (/** @type {string} */ message) => out.push({ rule: 'gitleaks-hardening', message });
   if (!/(?:^|\s)--ignore-gitleaks-allow\b/.test(script))
-    add('gitleaks must run with --ignore-gitleaks-allow (inline gitleaks:allow is inert)');
+    add('gitleaks must run with --ignore-gitleaks-allow (inline allow markers become inert)');
   if (!/--diff-merges=first-parent\b/.test(script))
     add('gitleaks --log-opts must include --diff-merges=first-parent (merge commits are scanned)');
   if (!/(?:^|\s)--network(?:\s+|=)none\b/.test(script)) add('the gitleaks container must run with --network none');

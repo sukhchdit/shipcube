@@ -327,7 +327,7 @@ function parseSeq(s, indent, path) {
  * comment line from this parser while GitHub's parser reads it as a new line (code review m1), so they fail closed.
  * TAB is allowed (it is rejected separately in indentation); CR only as part of CRLF, which the splitter consumes.
  */
-// eslint-disable-next-line no-control-regex -- the control characters are what this pattern detects
+// eslint-disable-next-line no-control-regex -- TASK-007 the control characters are what this pattern detects
 const FORBIDDEN_CHAR = /[\u0000-\u0008\u000B-\u001F\u0085\u2028\u2029\uFEFF]/;
 
 const FORBIDDEN_NAMES = new Map([

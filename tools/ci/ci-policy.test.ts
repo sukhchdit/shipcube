@@ -93,7 +93,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(checkWorkflow(ciText, 'ci.yml')).toEqual([]);
   });
 
-  it('PR10-SEC-01 / review M2: gitleaks mounts only .git, ignores inline gitleaks:allow, diffs merges against the first parent and has no network', () => {
+  it('PR10-SEC-01 / review M2: gitleaks mounts only .git, ignores inline allow markers, diffs merges against the first parent and has no network', () => {
     const run = str(scanSteps[scanIndexOf(/GITLEAKS_IMAGE/)]?.run);
     expect(run).toContain('-v "$GITHUB_WORKSPACE/.git:/repo/.git:ro"');
     expect(run).not.toMatch(/-v "\$GITHUB_WORKSPACE:/);
