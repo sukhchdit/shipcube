@@ -27,9 +27,13 @@
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | merged 8bf373c | ✅ | ✅ APPROVED r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ 77/77 unit, lint, typecheck, build on main (orchestrator) | ✅ | 1 | – |
+| 0.2 | TASK-002 lint/format/layering (PR #2) | senior-developer → specialist (sonnet→opus cont.) | merged 76164c3 | ✅ | ✅ APPROVED_WITH_NITS r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ main a8a1d90 post-merge: ci, deps:rebuild, lint, fmt, tc, unit 172/172, build, clean tree (orchestrator) | ✅ | 1 | – |
+| 0.2 | TASK-003 Prisma 7 + PG 18 baseline + engine pin D-ARCH-041 (PR #5) | senior-developer → database-engineer (opus) | feat/TASK-003-… @4574a14 (fc1) | ✅ | APPROVED_WITH_NITS r1 (9 MINOR) | PASS_WITH_FOLLOW-UPS r1 (1 MEDIUM: PR5-SEC-01) | ✅ fc1: unit 194, integration 28/28, cov 100%, build, audit (sr-dev) | | 1 | r2 reviews ▶; merge-main pass ▶ |
+| 0.2 | TASK-004 web + admin scaffolds (PR #4; Playwright+axe after cooldown 20:18Z) | senior-developer → frontend-developer (opus cont.) | feat/TASK-004-… @9f5ea5e (fc1) | 🟡 harness pending | CHANGES_REQUESTED r1 (harness MAJOR) | PASS_WITH_FOLLOW-UPS r1 (R2 on harness) | ✅ fc1: unit 175, integration 10/10, cov 94.9/98.0, build+size (sr-dev) | | 1 | r2 code review ▶; merge-main ▶; harness ≥20:18Z |
+| 0.2 | TASK-005 packages/config + key register (PR #3) | senior-developer → backend-developer (sr-dev completed) | feat/TASK-005-… @875409d (fc1) | ✅ | CHANGES_REQUESTED r1 (2 MAJOR) | PASS_WITH_FOLLOW-UPS r1 (2 MEDIUM) | ✅ fc1: unit 430, cov 99.9/97.6, build, audit (sr-dev) | | 1 | r2 reviews ▶; merge-main pass ▶ |
 
 ## Escalations in progress
-_none_
+_none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuation / sr-dev completion — not fix cycles)
 
 ## Defaults applied / optional questions outstanding
 - Q-006 Node 24 via fnm (installed v24.22.3; per-command PATH prefix since the profile change was blocked by the safety classifier) — D-ORCH-002.
@@ -53,9 +57,10 @@ _none_
 | COND-G4-PROD | Locked audit-anchor sink, RDS master break-glass only, pgaudit (SEC-COND-03 item 7); SPK-08 RDS C13(b) parity; SEC-P3-34 master search_path pin + break-glass runbook; KMS envelope, TLS, WAF (RR-03) | G4 for any production release (not this run) | platform-architect, release-manager | OPEN (n/a this run: no prod target) |
 | SEC-FU-36 | Per-user carrier quota share (SEC-P3-36) | before TASK-190 | principal-architect, product-manager | OPEN |
 | SEC-FU-QA | SEC-TC-65 adopt, SEC-TC-62 multi-org, SEC-TC-53 text | before Wave 4 | qa-lead | OPEN |
-| SEC-FU-PR1 | security-analyst confirms D-ARCH-003 rev 4 (licence/deprecation registers) and D-ARCH-041 (Prisma engine pin) in the TASK-003/TASK-007 reviews; senior-developer folds ADR-0023 am. J into the TASK-003/004/007/014/049/214 sheets + corrects SPK-01 §1 | batch 0.2/0.3 | security-analyst, senior-developer | OPEN |
+| SEC-FU-PR1 | security-analyst confirms D-ARCH-003 rev 4 (licence/deprecation registers) and D-ARCH-041 (Prisma engine pin) in the TASK-003/TASK-007 reviews; senior-developer folds ADR-0023 am. J into the TASK-003/004/007/014/049/214 sheets + corrects SPK-01 §1 | batch 0.2/0.3 | security-analyst, senior-developer | TASK-003 part DONE (PR-0005: D-ARCH-041 CONFIRMED; D-ARCH-003 rev 4 policy CONFIRMED); TASK-007 implementation part OPEN |
 | BCRYPT-EXC | bcrypt 6.0.0 maintenance exception expires 2027-05-11 (D-ARCH-042); monthly review | 2027-05-11 | principal-architect, performance-engineer | OPEN |
-| FU-TASK001 | Tracked follow-ups from PR #1: m4/n1/n2/n3/n5/R2-n1 → TASK-002; m6 + PR1-SEC-02 + R2-n5 → TASK-003; m8 + PR1-SEC-03 → TASK-004; PR1-SEC-12/13 + R2-n4 + PR1-SEC-05/06 → TASK-007; m9 + PR1-SEC-04 → TASK-014; R2-m1/R2-n2 + per-path 95% → TASK-015; m5 → ADR-0003 wording | per task | senior-developer | OPEN |
+| FU-TASK001 | Tracked follow-ups from PR #1: m4/n1/n2/n3/n5/R2-n1 → TASK-002; m6 + PR1-SEC-02 + R2-n5 → TASK-003; m8 + PR1-SEC-03 → TASK-004; PR1-SEC-12/13 + R2-n4 + PR1-SEC-05/06 → TASK-007; m9 + PR1-SEC-04 → TASK-014; R2-m1/R2-n2 + per-path 95% → TASK-015; m5 → ADR-0003 wording | per task | senior-developer | OPEN (TASK-002 part in fix cycle 1; TASK-003 m6/PR1-SEC-02/R2-n5 CLOSED in PR #5; m4 SPK-01 §2.5 recorded D-ARCH-051) |
+| ROUTED-0.2 | Batch 0.2 review items routed to later task sheets (fold into plan-data.mjs at Wave 0 batch end): TASK-002 m7→TASK-015, m8→TASK-006, m9(b)→carriers adapter task, m10→TASK-076, n5→TASK-016; PR2-SEC-01 (suppression counter, Semgrep bcrypt/createRequire, CODEOWNERS)+PR5-SEC-04+gitignore anchoring→TASK-007; PR2-SEC-03 TS-only block/`--allow-empty-input` removal→TASK-004; PR2-SEC-04→TASK-112/113; PR2-SEC-05→TASK-016; password-hasher-only→TASK-049; PR4 m2→TASK-042, m5→TASK-022, m6→first lazy-route task; PR4-SEC-02→TASK-014/111; PR3 m5/PR3-SEC-06→TASK-006/014, m6→crypto consumer tasks; PR5-SEC-07/08→TASK-006, PR5-SEC-09→TASK-016, PR5-SEC-10→qa-lead; ADR-0002 §6 stylelint wording (n4)→architect; packages/shared Axios question→architect | Wave 0 exit | senior-developer, principal-architect | OPEN |
 | COND-SANDBOX-DEMO | Real sandbox label from DHL, FedEx and UPS booked and paid end to end (M1 exit demo); needs creds outside the repo | Post-release, when creds supplied | qa-lead | OPEN (blocked on external creds, by design) |
 
 ## Top Risks

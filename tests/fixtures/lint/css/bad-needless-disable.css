@@ -1,0 +1,4 @@
+/* stylelint-disable-next-line csstools/use-logical -- nothing to disable on the next line */
+.card {
+  margin-inline-start: 0;
+}

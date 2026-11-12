@@ -1,3 +1,4 @@
 - [Review conventions](project_review_conventions.md) — review file path/name in main repo, worktree layout, Node 24 PATH prefix, re-run gates yourself
-- [Review watchlist](project_review_watchlist.md) — open deferred items from PR #1 r1-r2 by owner task (TASK-002/003/004/007/014/015)
+- [Review watchlist](project_review_watchlist.md) — open deferred items from PR #1/#2/#4 by owner task (TASK-003/004/006/007/014/015/016/025/043/076)
 - [Scratch-copy technique](reference_scratch_copy_technique.md) — mutation-test a PR via git archive + junction; scratchpad shared across agents, use unique dir
+- [Lint probe technique](reference_lint_probe_technique.md) — predict a PR's lint errors under another open PR's ESLint config without installing

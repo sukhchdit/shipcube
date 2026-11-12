@@ -1,0 +1,4 @@
+.card {
+  /* stylelint-disable-next-line color-no-invalid-hex -- not a configured rule */
+  color: #fff;
+}
