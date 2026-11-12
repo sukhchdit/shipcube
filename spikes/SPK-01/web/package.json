@@ -1,8 +1,0 @@
-{
-  "name": "spk01-web",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "isbot": "^5"
-  }
-}
