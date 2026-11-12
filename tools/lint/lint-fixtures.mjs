@@ -147,6 +147,13 @@ const EFFECTIVE_MATRIX = [
   'apps/web/app/routes/a.test.tsx',
   'packages/ui/src/session/client.ts',
   'packages/shared/src/a.ts',
+  // TASK-016: the narrowed audit-writer allow-list (n5) and the scope of the tenant-database rules.
+  'apps/api/src/platform/http/a.ts',
+  'apps/api/src/platform/audit/a.ts',
+  'apps/worker/src/platform/a.ts',
+  'apps/worker/src/processors/a.ts',
+  'apps/api/src/modules/orders/repository/a.ts',
+  'prisma/tests/rls/a.int.test.ts',
 ];
 const EFFECTIVE_RULES = [
   'no-restricted-imports',
@@ -155,6 +162,12 @@ const EFFECTIVE_RULES = [
   'platform/no-innerhtml',
   'i18next/no-literal-string',
   'jsx-a11y-x/alt-text',
+  'platform/audit-writer-allowlist',
+  'platform/tenant-context-sql',
+  'platform/prisma-client-construction',
+  'platform/db-raw-sql',
+  'platform/expect-affected',
+  'import-x/no-relative-packages',
 ];
 
 /**

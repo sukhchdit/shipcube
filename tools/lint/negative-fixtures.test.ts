@@ -247,7 +247,94 @@ const CSS: readonly Violation[] = [
   ],
 ];
 
-const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMENT, ...RULES, ...REACT, ...RESOLUTION];
+const TENANT_CONTEXT = 'platform/tenant-context-sql';
+const CLIENT_CONSTRUCTION = 'platform/prisma-client-construction';
+/** Tenant context, the private root client and raw SQL (ADR-0005 am. 10 items 1, 2, 4, 12; PR2-SEC-05; TASK-016). */
+const TENANT_DB: readonly Violation[] = [
+  [
+    'AT-US-075-03: source containing a session-level SET of a tenant-context key fails lint',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-session-set.ts`,
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'platform/tenant-context-sql: a security key outside withTenantTx',
+    `rules/tenant-context-sql/${API}/orders/service/bad-context-key.ts`,
+    TENANT_CONTEXT,
+    'outside withTenantTx',
+  ],
+  [
+    'platform/tenant-context-sql: the context setter in a template literal outside withTenantTx',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-context-template.ts`,
+    TENANT_CONTEXT,
+    'outside withTenantTx',
+  ],
+  [
+    'platform/tenant-context-sql: the session-scoped setter in a file exempted for tokens only',
+    'rules/tenant-context-sql/prisma/tests/rls/with-tenant-tx.int.test.ts',
+    TENANT_CONTEXT,
+    'is_local = false',
+  ],
+  [
+    'platform/db-raw-sql: an unsafe raw-SQL member in platform/db',
+    'rules/db-raw-sql/apps/api/src/platform/db/bad-unsafe.ts',
+    'platform/db-raw-sql',
+    'interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: SET LOCAL text in a repository',
+    `rules/db-raw-sql/${API}/orders/repository/bad-set-local.ts`,
+    'platform/db-raw-sql',
+    'SET LOCAL',
+  ],
+  [
+    'platform/no-alter-role-sql: ALTER ROLE in apps/*/src',
+    'rules/no-alter-role-sql/apps/api/src/platform/health/bad-alter-role.ts',
+    'platform/no-alter-role-sql',
+    '',
+  ],
+  [
+    'platform/no-alter-role-sql: ALTER USER in packages/*/src',
+    'rules/no-alter-role-sql/packages/shared/src/bad-alter-user.ts',
+    'platform/no-alter-role-sql',
+    '',
+  ],
+  [
+    'platform/prisma-client-construction: a repository imports PrismaClient and constructs it (PR2-SEC-05)',
+    `rules/prisma-client-construction/${API}/orders/repository/bad-new-client.ts`,
+    [CLIENT_CONSTRUCTION, CLIENT_CONSTRUCTION],
+    'PR2-SEC-05',
+  ],
+  [
+    'platform/prisma-client-construction: a repository imports the pg adapter (PR2-SEC-05)',
+    `rules/prisma-client-construction/${API}/orders/repository/bad-adapter.ts`,
+    CLIENT_CONSTRUCTION,
+    'PR2-SEC-05',
+  ],
+  [
+    'a repository imports the root database client (ADR-0005 am. 10 item 2, PR2-SEC-05)',
+    `layering/root-client-privacy/${API}/orders/repository/bad-root-client.ts`,
+    BOUNDARIES,
+    'the root database client (platform/db/client.ts) is private',
+  ],
+  [
+    'prisma/tests imports packages/*/src (PR #5 R3-n1)',
+    'layering/prisma-tests-imports/prisma/tests/rls/bad-package-import.int.test.ts',
+    BOUNDARIES,
+    'prisma/tests may import only',
+  ],
+];
+
+/** Warning-level rules ([title, file, rule]); `npm run lint` runs with --max-warnings 0, so each still blocks. */
+const WARNINGS: readonly (readonly [title: string, file: string, ruleId: string])[] = [
+  [
+    'platform/expect-affected: an updateMany result not passed to expectAffected (ADR-0005 am. 10 item 15)',
+    `rules/expect-affected/${API}/orders/repository/bad-unchecked.ts`,
+    'platform/expect-affected',
+  ],
+];
+
+const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMENT, ...RULES, ...TENANT_DB, ...REACT, ...RESOLUTION];
 
 const repoRoot = findRepoRoot();
 let report: FixtureReport;
@@ -281,8 +368,13 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     expectOnly(findingsOf(report.eslint, file), ruleId, message);
   });
 
+  it.each(WARNINGS)('%s (warning level)', (_title, file, ruleId) => {
+    const findings = findingsOf(report.eslint, file);
+    expect(findings.map((finding) => [finding.ruleId, finding.severity])).toEqual([[ruleId, 'warning']]);
+  });
+
   it('every other fixture (ok-*, allow-listed paths, supporting modules) lints clean', () => {
-    const expected = new Set(ESLINT_VIOLATIONS.map(([, file]) => file));
+    const expected = new Set([...ESLINT_VIOLATIONS, ...WARNINGS].map(([, file]) => file));
     const dirty = Object.entries(report.eslint).filter(([file, findings]) => !expected.has(file) && findings.length > 0);
     expect(dirty).toEqual([]);
   });
@@ -325,14 +417,39 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     expect(findingsOf(report.eslint, file)).toEqual([]);
   });
 
+  it.each([
+    [
+      'tenant-context-sql: withTenantTx sets the context transaction-local',
+      'rules/tenant-context-sql/apps/api/src/platform/db/with-tenant-tx.ts',
+    ],
+    ['tenant-context-sql: the session-scope negative control', 'rules/tenant-context-sql/prisma/tests/rls/session-scope-leak.int.test.ts'],
+    ['db-raw-sql: tests may probe the unsafe members (TenantDb Proxy)', 'rules/db-raw-sql/apps/api/src/platform/db/tenant-db.test.ts'],
+    [
+      'prisma-client-construction: type-only import in a repository',
+      `rules/prisma-client-construction/${API}/orders/repository/ok-type-only.ts`,
+    ],
+    [
+      'prisma-client-construction: the database platform builds the client',
+      'rules/prisma-client-construction/apps/api/src/platform/db/client.ts',
+    ],
+    ['expect-affected: results passed to expectAffected', `rules/expect-affected/${API}/orders/repository/ok-checked.ts`],
+    ['withTenantTx imports the root client', 'layering/root-client-privacy/apps/api/src/platform/db/with-tenant-tx.ts'],
+    [
+      'prisma/tests imports tools/db, tools/test-support, platform/db and its harness',
+      'layering/prisma-tests-imports/prisma/tests/rls/ok-imports.int.test.ts',
+    ],
+  ])('allowed (TASK-016): %s', (_title, file) => {
+    expect(findingsOf(report.eslint, file)).toEqual([]);
+  });
+
   it('every bad-* fixture is listed in the case table (no untested fixture)', () => {
-    const listed = new Set(ESLINT_VIOLATIONS.map(([, file]) => file));
+    const listed = new Set([...ESLINT_VIOLATIONS, ...WARNINGS].map(([, file]) => file));
     const unlisted = Object.keys(report.eslint).filter((file) => /\/bad-[^/]+$/u.test(file) && !listed.has(file));
     expect(unlisted).toEqual([]);
   });
 
   it('every local platform/* rule has at least one negative fixture', () => {
-    const covered = ruleIdsOf(ESLINT_VIOLATIONS);
+    const covered = new Set([...ruleIdsOf(ESLINT_VIOLATIONS), ...WARNINGS.map(([, , ruleId]) => ruleId)]);
     expect(report.localRules.length).toBeGreaterThan(0);
     expect(report.localRules.map((rule) => `platform/${rule}`).filter((rule) => !covered.has(rule))).toEqual([]);
   });
@@ -425,6 +542,27 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
       'platform/no-innerhtml': 'error',
     });
     expect(report.effective['apps/api/src/platform/a.cjs']).toMatchObject({ 'platform/outbound-http-via-client': 'error' });
+  });
+
+  it('the audit-writer allow-list is narrowed to platform/{audit,authz,db} and the worker processors (TASK-002 n5)', () => {
+    expect(report.effective['apps/api/src/platform/http/a.ts']?.['platform/audit-writer-allowlist']).toBe('error');
+    expect(report.effective['apps/worker/src/platform/a.ts']?.['platform/audit-writer-allowlist']).toBe('error');
+    expect(report.effective['apps/api/src/platform/audit/a.ts']?.['platform/audit-writer-allowlist']).toBe('off');
+    expect(report.effective['apps/worker/src/processors/a.ts']?.['platform/audit-writer-allowlist']).toBe('off');
+  });
+
+  it('tenant-database rules: repositories get raw-SQL, client and expectAffected checks; prisma/tests keeps no-relative-packages on (TASK-016)', () => {
+    expect(report.effective['apps/api/src/modules/orders/repository/a.ts']).toMatchObject({
+      'platform/tenant-context-sql': 'error',
+      'platform/prisma-client-construction': 'error',
+      'platform/db-raw-sql': 'error',
+      'platform/expect-affected': 'warn',
+    });
+    expect(report.effective['prisma/tests/rls/a.int.test.ts']).toMatchObject({
+      'platform/tenant-context-sql': 'error',
+      'platform/prisma-client-construction': 'off',
+      'import-x/no-relative-packages': 'error',
+    });
   });
 
   it('server-only rules skip the browser package; string externalisation skips test files', () => {

@@ -1,3 +1,3 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
-export const createClient = (): PrismaClient => new PrismaClient({} as never);
+export const empty = Prisma.empty;
