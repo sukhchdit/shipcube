@@ -53,7 +53,7 @@ Recorded by TASK-003 on 2026-11-12 against the locked `prisma` / `@prisma/client
 | `sql/function-templates/app-is-operator.sql` | `platform.app_is_operator()` under `SET ROLE platform_definer` — shipped by TASK-037 with `memberships`/`organisations` (its body needs them; `check_function_bodies` stays on). |
 | `sql/grants.manifest` | Every table/column privilege of `platform_app`, `platform_definer`, `platform_erasure`, one line per grant (parser `tools/db/grants-manifest.ts`); catalog test C5 compares it with the live ACLs. A migration that grants adds its line. |
 | `tests/catalog/` | Suite `catalog-c1-c14` (C1–C14, prosrc scan, PR8-SEC-14 backstop); `policies.snapshot.json` is the C3 snapshot — a migration that adds policies updates it. |
-| `bootstrap/02-role-backstops.sql` | `platform_app` role-level `statement_timeout = 30s` backstop (ADR-0005 am. 10 item 12). |
+| `bootstrap/02-role-backstops.sql` | `platform_app` role-level `statement_timeout = 30s` backstop (ADR-0005 am. 10 item 12) and `lc_messages = 'C'` (untranslated messages, which `mapDbError` relies on to tell an RLS WITH CHECK rejection from a privilege error; D-ARCH-073 b). `lc_messages` is superuser-only, so only the bootstrap lane sets it. |
 
 ## Rule 5: `CREATE INDEX CONCURRENTLY` through `migrate deploy`
 

@@ -362,12 +362,14 @@ describe('roles, ownership and grants after bootstrap (data-model §4.4)', () =>
     expect(rows).toEqual([
       {
         role: 'platform_app',
-        // 02-role-backstops.sql adds the statement_timeout backstop (ADR-0005 am. 10 item 12, D-ARCH-064).
+        // 02-role-backstops.sql adds the statement_timeout backstop (ADR-0005 am. 10 item 12, D-ARCH-064) and
+        // lc_messages = C (untranslated messages for mapDbError; D-ARCH-073 b).
         setconfig: [
           'search_path=pg_catalog, public',
           'idle_in_transaction_session_timeout=15s',
           'lock_timeout=2s',
           'statement_timeout=30s',
+          'lc_messages=C',
         ],
       },
       { role: 'platform_migrator', setconfig: ['lock_timeout=3s'] },

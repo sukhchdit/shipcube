@@ -547,7 +547,7 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
     expect(rowsDb).toEqual([{ owner: MASTER_ROLE === '' ? SUPERUSER : MASTER_ROLE, migrator_create: false, migrator_connect: true }]);
   }, 60_000);
 
-  it('C13 (d): no database-wide setting; the bootstrap role pins search_path; platform_app role settings are exactly the four rows incl. statement_timeout=30s; no app.% default anywhere', async () => {
+  it('C13 (d): no database-wide setting; the bootstrap role pins search_path; platform_app role settings are exactly the five rows incl. statement_timeout=30s and lc_messages=C; no app.% default anywhere', async () => {
     const inDatabase = await query(
       `SELECT CASE s.setrole WHEN 0 THEN '<database-wide>' ELSE s.setrole::regrole::text END AS setrole, s.setconfig
          FROM pg_catalog.pg_db_role_setting s
@@ -562,6 +562,7 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
     expect(app[0]?.setdatabase).toBe(0);
     expect([...(app[0]?.setconfig ?? [])].sort()).toEqual([
       'idle_in_transaction_session_timeout=15s',
+      'lc_messages=C',
       'lock_timeout=2s',
       'search_path=pg_catalog, public',
       'statement_timeout=30s',
@@ -573,9 +574,17 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
               (SELECT count(*)::int FROM pg_catalog.pg_proc p, pg_catalog.unnest(p.proconfig) c WHERE c ILIKE 'app.%') AS proc_config`,
     );
     expect(appKeys).toEqual([{ role_settings: 0, parameter_acl: 0, proc_config: 0 }]);
-    // The backstop is what a platform_app session outside withTenantTx actually runs with (ADR-0005 am. 10 item 12).
-    const session = await withClient(db.appConnection(database), async (client) => rows(client, 'SHOW statement_timeout'));
-    expect(session).toEqual([{ statement_timeout: '30s' }]);
+    // The backstops are what a platform_app session outside withTenantTx actually runs with (ADR-0005 am. 10 item 12;
+    // D-ARCH-073 b: untranslated messages for mapDbError), and the role cannot change lc_messages itself (SUSET).
+    const session = await withClient(db.appConnection(database), async (client) => ({
+      statement: await rows(client, 'SHOW statement_timeout'),
+      messages: await rows(client, 'SHOW lc_messages'),
+      setMessages: await client.query("SET lc_messages = 'C'").then(
+        () => 'none',
+        (error: unknown) => String((error as { code?: unknown }).code),
+      ),
+    }));
+    expect(session).toEqual({ statement: [{ statement_timeout: '30s' }], messages: [{ lc_messages: 'C' }], setMessages: '42501' });
   }, 60_000);
 
   it('C13/C14: audit objects (TASK-021) are owned by platform_audit_owner and the DDL guard is enabled, as far as they exist', async () => {
@@ -792,6 +801,7 @@ describe('catalog-c1-c14: tenant context in SQL (prosrc scan, F-07; US-075)', ()
   const DYNAMIC = 'dynamic SET/RESET (name built at run time)';
   const MENTION = 'mentions a tenant security key';
   const COMPUTED = 'settings read with a computed key';
+  const UNICODE = 'Unicode-escape string or identifier';
   const NIL = `'00000000-0000-0000-0000-000000000000'`;
 
   // Every form is EXECUTED as CREATE FUNCTION (plpgsql validates the body at CREATE time), which proves it is valid
@@ -843,6 +853,30 @@ describe('catalog-c1-c14: tenant context in SQL (prosrc scan, F-07; US-075)', ()
     ['EXECUTE format(SHOW %s, app.org_id)', 'public.c_scan_show', `EXECUTE format('SHOW %s', 'app.org_id') INTO r;`, [MENTION]],
     ['current_setting(k, true) (dynamic key)', 'public.c_scan_read_dynamic', `PERFORM current_setting(k, true);`, [COMPUTED]],
     ['EXECUTE DISCARD ALL', 'public.c_scan_discard', `EXECUTE 'DISCARD ALL';`, ['DISCARD']],
+    // PR11-SEC-14 (a): Unicode escapes (standard_conforming_strings is on in PostgreSQL 18). Each body is valid
+    // PL/pgSQL and spells the context write without its text; only the U& form names it.
+    ['SET LOCAL U&"\\0061pp".org_id', 'public.c_scan_unicode_ident', String.raw`SET LOCAL U&"\0061pp".org_id = ${NIL};`, [UNICODE]],
+    [
+      'U&"\\0073et_config"(app.org_id, p, true)',
+      'public.c_scan_unicode_setter',
+      String.raw`PERFORM U&"\0073et_config"('app.org_id', p, true);`,
+      [UNICODE, MENTION],
+    ],
+    [
+      "EXECUTE U&'SET LOCAL \\0061pp.org_id = …'",
+      'public.c_scan_unicode_string',
+      String.raw`EXECUTE U&'SET LOCAL \0061pp.org_id = ''00000000-0000-0000-0000-000000000000''';`,
+      [UNICODE],
+    ],
+    // PR #11 review R2-n1: the scan reads the comment-stripped body, as linter rule 16 does.
+    ['SET app/**/.org_id (comment inside the name)', 'public.c_scan_comment_name', `SET app/**/.org_id = ${NIL};`, [SET_RESET, MENTION]],
+    [
+      'set_config/**/(app.org_id, …) (comment before the call)',
+      'public.c_scan_comment_call',
+      `PERFORM set_config/**/('app.org_id', p, true);`,
+      [SETTER, MENTION],
+    ],
+    ['SET/**/app.org_id (comment after SET)', 'public.c_scan_comment_set', `SET/**/app.org_id = ${NIL};`, [SET_RESET, MENTION]],
   ])(
     'rule 16 negative fixture: %s fails the scan',
     async (_label, fn, body, forms) => {
@@ -885,6 +919,42 @@ describe('catalog-c1-c14: tenant context in SQL (prosrc scan, F-07; US-075)', ()
     expect(result.after).toEqual([{ raw: '', org: null, actor: null, guest: null }]);
     expect(result.malformed).toEqual([{ raw: 'not-a-uuid', org: null, actor: null, guest: null }]);
     expect(result.guestHex).toBe('ab'.repeat(32));
+  }, 60_000);
+
+  it('§4.2 (D-ARCH-073 a): the qualified helpers ignore a caller search_path that shadows the built-ins and stay inlined (org_id = app_org_id() is an index condition)', async () => {
+    const result = await rolledBack(db.migratorConnection(database), async (client) => {
+      // A caller path that resolves unqualified current_setting( to a planted function (and pg_catalog last).
+      await client.query(`CREATE FUNCTION public.current_setting(text, boolean) RETURNS text LANGUAGE sql IMMUTABLE
+                            AS $$ SELECT '00000000-0000-0000-0000-000000000000'::pg_catalog.text $$`);
+      await client.query(`CREATE TABLE public.c_plan_probe (id pg_catalog.int8 PRIMARY KEY, org_id pg_catalog.uuid NOT NULL)`);
+      await client.query('CREATE INDEX ix_c_plan_probe__org_id ON public.c_plan_probe (org_id)');
+      await client.query(
+        `INSERT INTO public.c_plan_probe SELECT g, CASE WHEN g % 100 = 0 THEN $1::pg_catalog.uuid ELSE $2::pg_catalog.uuid END
+           FROM pg_catalog.generate_series(1, 5000) g`,
+        [ORG_A, ORG_B],
+      );
+      await client.query('ANALYZE public.c_plan_probe');
+      await client.query('SET LOCAL search_path = public, pg_catalog');
+      await client.query(`SELECT pg_catalog.set_config('app.org_id', $1, true)`, [ORG_A]);
+      const shadowed = await rows<{ raw: string; org: string | null }>(
+        client,
+        'SELECT current_setting($1, true) AS raw, platform.app_org_id() AS org',
+        ['app.org_id'],
+      );
+      const plan = await rows<{ 'QUERY PLAN': unknown }>(
+        client,
+        'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, FORMAT JSON) SELECT id FROM public.c_plan_probe WHERE org_id = platform.app_org_id()',
+      );
+      return { shadowed, plan: JSON.stringify(plan[0]?.['QUERY PLAN']) };
+    });
+    // The planted function answers the unqualified call; the helper still reads the real setting.
+    expect(result.shadowed).toEqual([{ raw: '00000000-0000-0000-0000-000000000000', org: ORG_A }]);
+    // Inlined: the helper call is folded into an index condition and 50 of 5,000 rows are read.
+    expect(result.plan).toMatch(/"Node Type":"(?:Index|Index Only|Bitmap Index) Scan"/);
+    expect(result.plan).toMatch(/"Index Name":"ix_c_plan_probe__org_id"/);
+    expect(result.plan).toMatch(/"Index Cond":"\(org_id = CASE WHEN /);
+    expect(result.plan).not.toMatch(/app_org_id/);
+    expect(result.plan).toMatch(/"Actual Rows":50[,}]/);
   }, 60_000);
 });
 
