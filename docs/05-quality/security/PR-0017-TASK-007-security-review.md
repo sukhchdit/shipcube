@@ -284,3 +284,225 @@ The parser's view of this file:
 - `recordVerdict` is `PASS_WITH_FOLLOW-UPS`;
 - `recordHeadShas` is `["ea78d38b8d52b45dd1356c5f3c75034d967b8b56"]`;
 - there is exactly one `Verdict` table row.
+
+## Round 2 (head 8dd1d24)
+
+| Field | Value |
+|---|---|
+| Delta | `ea78d38..8dd1d24`: 1 commit, `ci(lint): fail ruleless findings and pin the base-ref fixture gate`, 13 files (+827 / −201). Merge base still `eccdca1`. `git ls-remote` confirms `8dd1d24` is the pushed head of `fix/ci-base-fixture-subset` and `refs/pull/17/head` |
+| Head | 8dd1d24dc525954c2fd443496482901340bf69a6 |
+| Scope | The fix-cycle-1 delta: `jest.config.ts` (inline `SWC_JEST_OPTIONS`), `.swcrc` (deleted), `.github/CODEOWNERS`, `tools/lint/jest.base-fixtures.config.json` (new), `.github/workflows/ci.yml` (base-ref step), `tools/ci/check-workflow-policy.mjs` (pinned step, gate step/env/defaults bans, `swcrc` rule, `findFilesNamed`), `tools/lint/fixture-expectations.mjs`, `tools/lint/negative-fixtures.test.ts`, the four test files, `tests/fixtures/lint/README.md`. Decision in scope: D-TASK007-04 |
+| Lane A evidence | Run [43316597810](https://github.com/sukhchdit/shipcube/actions/runs/43316597810) on `8dd1d24`. fast-lane `success`: 63 suites and 1680 tests, including `PASS unit tools/ci/jest-transform.test.ts`. The base-ref step printed `PASS base-lint-fixtures tools/lint/negative-fixtures.test.ts`, 97/97, under the head copy of the new config (bootstrap: main has no config yet). scans failed only on "Security-owned paths need a review record"; ci-gate red as a consequence |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only: no `npm ci`, no build, no Docker, no project test suite. Probes ran from session scratch against `git archive 8dd1d24` copies with main's installed `node_modules`. They included one Jest run of a single synthetic test in a scratch directory (P-7) and bash runs of extracted step scripts with stubbed `git`/`node` in an empty scratch sandbox (P-3). No command was run in the PR worktree |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding; merge rule met for `8dd1d24`. **Closed:** PR17-SEC-01, -03, -04, -05, -06. **Open:** PR17-SEC-02 (LOW, routed to TASK-015 in the fix comment) and four new LOW findings, none a merge blocker. PR17-SEC-07 (a folded-scalar parser differential) and PR17-SEC-08 (job/workflow-level `BASH_ENV`/`PATH`) defeat the new pin, but only through owned `ci.yml` edits. PR17-SEC-09 is a pre-existing Jest mechanism of the PR17-SEC-01 class (unowned `__mocks__`). PR17-SEC-10 is the residual of -04 |
+
+### R2.1 Closure of the round-1 findings
+
+| ID | R1 severity | Status | Evidence |
+|---|---|---|---|
+| PR17-SEC-01 | LOW | **Closed** | The inline options carry `swcrc: false` in `jest.config.ts:21-31` and in the base JSON config, and the two are equal. Against a planted root `.swcrc` and `tools/.swcrc` that map `@jest/globals` to a shim, both compile to `require("@jest/globals")`. Positive controls without the `swcrc` key, or with no options, compile to the shim (P-4). The root `.swcrc` is deleted. `/.swcrc` and `**/.swcrc` are in CODEOWNERS and `REQUIRED_CODEOWNED_PATHS`. The repository rule `swcrc` flags a root and a nested file and skips `node_modules` (P-5). `jest-transform.test.ts` passed in lane A |
+| PR17-SEC-02 | LOW | Open (not in this cycle) | Unchanged: substitution plus an extra same-rule finding still passes (P-6 W8). Routed to TASK-015 |
+| PR17-SEC-03 | LOW | **Closed** | Every R1 vector now fails the head checker (P-1): K1-K8 give `lint-fixture-mode` + `required-gates`, K9/K12 `required-gates`, K10 `node-options-preload` + `required-gates`, K11 `lint-fixture-mode`. The run is an exact allow-list with `--runTestsByPath` and an `exit "$status"` tail. Step `shell:`/`working-directory:`, extra step env and workflow/job `defaults.run` fail (N6-N8). Trailing whitespace after a continuation passes the pin but fails closed in bash (N4 → exit 1, P-3). Residuals of the same class: PR17-SEC-07, PR17-SEC-08 |
+| PR17-SEC-04 | LOW | **Closed** | The wiring check now runs in the base run. In no-weakening mode the base steps must appear as an ordered subsequence: a removed or reordered counter fails (P-6 S1, S2). Residual (matcher-shaped neutering): PR17-SEC-10 |
+| PR17-SEC-05 | INFO | **Closed** | The fence is one backtick longer than the longest run in the text, so a planted fence stays inside the block. The list is capped at 200 lines plus a "more" line. `logText` splits leading `::` (also indented) (P-6 M1, M3, L1). Residual note, no new ID: `logText` splits on `\n` only, while the runner reads lines with `ReadLine` (CR also ends a line), so `x\r::error::y` still yields a workflow command (L2). The sources are owned rules and locked plugins, and Jest's own failure diff is not escaped either; fold it into the PR17-SEC-02 harness change |
+| PR17-SEC-06 | INFO | **Closed** | The `ci.yml` comment, the module JSDoc and D-TASK007-04 now state the residual: accident guard, head code earlier in fast-lane, job-level env, and owned configuration named. Supplementary wording for PR17-SEC-07/08 is in R2.5 |
+
+Other delta changes, checked for weakening:
+- Null-rule findings now fail in no-weakening mode (P-6 W2, W4).
+- The severity floor works: a warning fails an `error` case, and an error satisfies a `warning` case (W5-W7).
+- Clean fixtures now run in both modes.
+- These assertions moved to `exactOnly`: the ignore map's `true` half, the hasher's bcrypt exemption, and the `off` entries for `packages/ui` and `i18next` in tests. Each is an exception or exemption, so tightening it is strengthening. The weakening halves stay unskipped (source paths still linted; `error` levels; the bcrypt pattern elsewhere).
+- `cache: false` in the base config means the base run no longer reads the transform cache that the head `test:unit` run wrote earlier in the job. That closes one PR10-SEC-02-class lever.
+
+**Nested-checkout skip in `findFilesNamed` (orchestrator question).** A PR cannot exploit it.
+- Git rejects any `.git` path component, case-insensitively, in the index (`Invalid path 'sub/.git'`, also for `.GIT`).
+- On checkout, a hand-crafted tree with a `.git` entry gives `error: invalid path 'sub/.git'`, and `fsck` reports `hasDotgit` (P-5).
+- The Workflow policy step runs right after checkout, setup-node and the classifier, before any head code. So nothing can plant a `.git` at run time.
+- Gitlinks are checked out as empty directories, because `submodules` is not set.
+- Symlinked directories are never walked (`Dirent.isDirectory()` is false), and with `swcrc: false` a `.swcrc` behind one is inert anyway.
+
+**`swcrc` rule completeness.** swc reads only `.swcrc` (exact name, case-sensitive on the runner). Since `swcrc: false` makes every `.swcrc` inert, the rule and the CODEOWNERS lines are defence in depth (P-5 P3).
+
+**Base-sourced Jest config.** `tools/lint/jest.base-fixtures.config.json` comes from the base on every PR after this one. This PR's own run used the head copy (bootstrap), which is the reviewed content.
+- The config has no `setupFiles`, filters or `passWithNoTests`, and `ci-policy.test.ts` pins its key set.
+- Its `roots` is `tools/lint` (owned), so a manual mock planted there needs a record. The same mechanism outside owned paths is PR17-SEC-09.
+- A head deletion of the config fails the step at the closing `git checkout HEAD -- … "$config"` (fail-closed).
+
+### R2.2 Probes (scratchpad `review/PR-17-sec-r2/scripts/`)
+
+- **P-1 `policy-reach-r2.mjs`, `extra-env.mjs`**: the head `checkWorkflow(ci.yml, { requiredGates: true })` on mutated copies of the head `ci.yml`.
+
+  | Case | Findings |
+  |---|---|
+  | C0 unmodified | `[]` |
+  | K1-K8, N1 (`exit 0`), N3 (comment ending in `\`, then `exit 0`), N5 (blank after continuation) | `lint-fixture-mode`, `required-gates` |
+  | K9, K12, N6 (step `BASH_ENV`), N7 (workflow `defaults.run`), N8 (job `defaults.run`) | `required-gates` |
+  | K11 split-string `$GITHUB_ENV` write | `lint-fixture-mode` |
+  | N9 lone CR, N10 NEL in a comment line | `yaml-subset` |
+  | N2 comment-only line (inert) | `[]` (intended) |
+  | N4 trailing spaces after `jest.js \` | `[]`; fails closed in bash (P-3) |
+  | N11 run rewritten as `run: >` | `[]` (see P-2) |
+  | R1 job env `BASH_ENV`, R2 workflow env `BASH_ENV`, R3 job env `PATH`, R4 job env `BASH_FUNC_node%%`, R5 earlier step writes `BASH_ENV` to `$GITHUB_ENV`, R6 earlier step appends to `$GITHUB_PATH`, R7 job `RANGE_BASE` = head SHA, R8 `BASH_ENV` on the unit-test gate step | `[]` each (PR17-SEC-08) |
+  | R9 positive control, workflow env `LINT_FIXTURE_MODE` | `lint-fixture-mode` |
+
+- **P-2 `folded-diff.mjs`**: the base-ref step's run rewritten as a folded scalar, parsed by `yaml-subset.mjs` and by a spec-compliant parser (eemeli/yaml 2.9.1 from main's `node_modules`, standing in for GitHub's YamlDotNet and actionlint's yaml.v3).
+
+  | Variant | `checkWorkflow` | yaml-subset `commandLines` equal to the pin | Spec-parser script |
+  |---|---|---|---|
+  | F0 folded, nothing injected | `[]` | yes | blank lines after the two continuations (fails closed, P-3) |
+  | F1 a comment line, then a more-indented `exit 0` after `set -euo pipefail` | `[]` | yes | line 3 is `  exit 0` |
+  | F2 the same with `[ -n "${GITHUB_ACTIONS:-}" ] && exit 0` (reachable code after it, so no shellcheck SC2317) | `[]` | yes | line 3 is the conditional exit |
+
+  On the YAML 1.2 Example 8.10 shape, the spec parser gives `"folded line\nnext line\n  * bullet\n\n  * list\nlast\n"` and yaml-subset gives `"folded line\nnext line  * bullet\n  * list last\n"`.
+- **P-3 `bash-exec.sh`** (`bash --noprofile --norc -eo pipefail`, stub `node` exits 1 to model a weakened config):
+
+  | Script | Exit | Jest invoked |
+  |---|---|---|
+  | control (literal step) | 1 | yes, with `--config … --runTestsByPath …` |
+  | F0 | 1 | yes, without arguments (broken continuation) |
+  | F1 | **0** | no |
+  | F2 (`GITHUB_ACTIONS=true`) | **0** | no |
+  | N4 | 1 | yes, with a single-space argument |
+  | control + `BASH_ENV` defining `node()` | **0** | the function, not Jest |
+
+- **P-4 `swcrc-r2.cjs`**: @swc/jest 0.2.39 `createTransformer(options).process` with a planted root and nested `.swcrc`. Inline and base-JSON options give `["@jest/globals"]`. Controls give `["../shim"]` without the `swcrc` key and `["../../shim"]` with no options (`<cwd>/.swcrc` read).
+- **P-5 `swcrc-rule.mjs`** plus git path checks.
+  - The `swcrc` rule reports `.swcrc` and `apps/web/app/.swcrc`. It skips `node_modules/x/.swcrc` and `tools/nested/.swcrc` (the `tools/nested` directory has a `.git` file), and ignores `.SWCRC` and `swcrc.json`.
+  - Git refuses the paths `sub/.git`, `sub/.GIT`, `sub/.git/config` and `.git/hooks/x`. A crafted tree is flagged `hasDotgit`, and its checkout is refused.
+- **P-6 `expectations-r2.mjs`**: the head `noWeakening`, `missingSteps`, `summaryMarkdown` and `logText` (cases quoted in R2.1 and PR17-SEC-10).
+- **P-7 Jest manual mocks** (main's Jest 30.5.2, scratch project, `roots: ["<rootDir>/src"]`, one test):
+  - `src/unowned-app/__mocks__/jose.js` and `__mocks__/@platform/authz.js` replace `require('jose')` and `require('@platform/authz')` in an unrelated suite with no `jest.mock` call (`MOCK jose`, `MOCK @platform/authz`).
+  - With `modulePathIgnorePatterns: ["/__mocks__/"]`, the real modules are resolved.
+  - Source: `jest-runtime/build/index.js:296-303`. For a bare specifier that is not a haste module, a manual mock found anywhere in `roots` is used.
+
+### R2.3 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location (head `8dd1d24`) | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR17-SEC-07 | yaml-subset folds more-indented lines differently from GitHub, so a `run: >` rewrite with a comment carrier hides commands from the pinned-step comparison | LOW | CWE-436, CWE-693 | A08 | `tools/ci/yaml-subset.mjs:222-230` (`foldLines`), `:189-219`; `tools/ci/check-workflow-policy.mjs:166-185` (comment lines dropped) | devops-engineer (TASK-015, with PR10-SEC-17/19) | Open |
+| PR17-SEC-08 | Workflow/job-level `BASH_ENV`, `PATH`, `BASH_FUNC_*` and earlier-step `$GITHUB_ENV`/`$GITHUB_PATH` writes reach every gate step; the exact-env rule covers the step env of gates that declare one | LOW | CWE-184, CWE-693 | A08 | `check-workflow-policy.mjs:75` (`FORBIDDEN_ENV`), `:296-318`, `:784-803`; `ci.yml:61-65` | devops-engineer (TASK-015, with PR10-SEC-17) | Open |
+| PR17-SEC-09 | Jest uses any `__mocks__/<pkg>` file under `roots` as the module for a bare `require('<pkg>')` in every suite, without `jest.mock`; `**/__mocks__/` is unowned and unchecked | LOW | CWE-427, CWE-693 | A08 | `jest.config.ts:38, 46`; `.github/CODEOWNERS` (no entry); jest-runtime 30.5.2 `build/index.js:296-303` | devops-engineer | Open |
+| PR17-SEC-10 | Lint-script step matchers are prefix regexes: `\|\| true`, `; true` or extra flags inside a matched step pass both modes, and in no-weakening mode an inserted `cd …` or `export NODE_OPTIONS=…` step before the base steps also passes | LOW | CWE-1023, CWE-693 | A04 | `tools/lint/negative-fixtures.test.ts:267-271, 481-486`; `tools/lint/fixture-expectations.mjs:98-108` | devops-engineer (with PR17-SEC-02) | Open |
+
+#### PR17-SEC-07: folded-scalar differential defeats the pinned step (LOW)
+
+**Description.**
+- `foldLines` appends a whitespace-leading ("more-indented") line to the previous line with no separator. It also folds a single empty line to one newline even next to more-indented lines.
+- YAML 1.2 §6.5 and §8.1.3, which GitHub's parser, actionlint's parser and eemeli/yaml all follow, keep the line breaks around more-indented lines.
+- So in a `run: >` block, the text `# note` followed by `  exit 0` is one comment line for yaml-subset. `commandLines` drops it, and the comparison with `BASE_LINT_FIXTURES_SCRIPT` still passes (P-2 F1, F2). GitHub hands bash `# note\n  exit 0`, and the step exits 0 before Jest (P-3).
+- The blank lines that make yaml-subset produce one command per line break the two continuations in the spec view (F0). That does not matter once the injected exit has run.
+- Correction: my PR-0010 statement that "folded scalars are understood (probe)" did not cover more-indented lines.
+
+**Exploitability and impact.**
+- The edit is to `ci.yml`, which is owned, so the record requirement applies. The rewrite is conspicuous in the diff: every command line is followed by a blank line under `run: >`.
+- actionlint runs on the spec view. F2 avoids unreachable-code warnings, and comment lines, including shellcheck directives, are free under the pin. Whether shellcheck would flag the broken continuations was not verified (no Docker).
+- Impact: the base-ref no-weakening gate is silently skipped (M × L = LOW).
+- The same differential affects every yaml-subset consumer that relies on line structure. `check-install-flags` reads raw text and is not affected.
+
+**Remediation (code level).**
+1. In `yaml-subset.mjs`, fail closed: inside a `>` block scalar, throw `YamlSubsetError('folded scalar with a more-indented or empty line is not supported')` when any content line starts with whitespace or is empty. The repository uses `>`/`>-` only for single-level `if:` expressions.
+   - Alternatively, port libyaml's `leading_break`/`trailing_breaks`/`leading_blank` folding exactly.
+2. In `requiredGateFindings`, require the pinned step's raw `run:` line to end in `|` (from the parser's `lines` map).
+3. Optional: reject comment-only lines in the pinned run, and move the documentation comments above the step.
+
+**Verification test.** In `yaml-subset.test.ts`, the Example 8.10 shape either throws or equals the spec string. In `check-workflow-policy.test.ts`, the F1 and F2 mutations of `ci.yml` yield `yaml-subset` or `required-gates`, and F0 yields `required-gates`.
+
+#### PR17-SEC-08: environment that reaches every gate step (LOW)
+
+**Description.**
+- `BASH_ENV` is sourced by GitHub's `bash --noprofile --norc -eo pipefail`. Set at workflow or job level, it can define `node()`, `npm()` or `git()` functions that replace the gate commands. P-3 shows the pinned step exiting 0 with the stub "weakened" `node` shadowed.
+- `PATH` and exported functions (`BASH_FUNC_name%%`) do the same.
+- So does an earlier `ci.yml` step that writes `BASH_ENV=` to `$GITHUB_ENV` or a directory to `$GITHUB_PATH`. The runner refuses only `NODE_OPTIONS` from `$GITHUB_ENV`.
+- The fix comment names `BASH_ENV` and `PATH` as the reason for the exact step env, but only the step level is checked, and only for gates with an `env` entry (R8).
+- The job `RANGE_BASE` expression (R7) is the input-sourcing part of PR10-SEC-17.
+- D-TASK007-04 lists "job-level env" as residual. This finding makes the residual concrete.
+
+**Exploitability and impact.** It needs an owned `ci.yml` edit (record required), or head code in an earlier step (accepted PR10-SEC-02 class). It affects all 21 required gates, not only this step (M × L = LOW).
+
+**Remediation (code level).**
+1. Add `BASH_ENV`, `ENV`, `PATH`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS` and the pattern `^BASH_FUNC_` to `FORBIDDEN_ENV`. `envEntryFindings` already runs on workflow, job, step and container `env`.
+2. In `scriptFindings`, flag any write to `$GITHUB_PATH`, and any `$GITHUB_ENV` write whose name is not on an allow-list (`CODE`, `LINT_CONTROLS`, `GATE_*`, `RECORD_MODE`, `GATES_DIR`), or whose name is computed.
+3. Pin the `fast-lane` and `scans` job `env` values of `RANGE_BASE`/`RANGE_HEAD`.
+4. Apply the exact step-env rule to every gate, with an empty allow-list when `gate.env` is undefined.
+
+**Verification test.** Each of P-1 R1-R8 yields a finding, and the unmodified `ci.yml` stays `[]`.
+
+#### PR17-SEC-09: unowned Jest manual mocks (LOW)
+
+**Description.**
+- In jest-runtime 30.5.2, `requireModule` uses a manual mock for any bare specifier that is not a haste module, without a `jest.mock` call. The haste map registers every `__mocks__/<name>` file under `roots` (P-7). This is Jest's documented "node module mocks adjacent to node_modules are automatic" behaviour, but it applies to every `__mocks__` folder in `roots`.
+- The unit, integration and api projects use `roots` `apps`, `packages`, `prisma`, `tests` and `tools`.
+- So an unowned `apps/web/app/__mocks__/@platform/authz.ts` or `…/__mocks__/pg.ts` would replace `@platform/authz` or `pg` in every suite that imports them by name. That includes the Wave-1 RBAC-matrix, audit and RLS suites, and the security-owned-paths record does not trigger.
+- The base-ref run is not exposed: its only root is `tools/lint` (owned).
+- There are no `__mocks__` folders on main or in the head, so a ban costs nothing today.
+
+**Exploitability and impact.** This is the PR17-SEC-01 class: a deliberate, conspicuous, unowned file that neuters test gates but not runtime code (M × L = LOW).
+
+**Remediation (code level).**
+1. In `jest.config.ts` `common`, set `modulePathIgnorePatterns: ['<rootDir>/.*/dist/', '<rootDir>/.*/build/', '/__mocks__/']`. Suites use `jest.mock(name, factory)` instead.
+2. Add the same entry to `tools/lint/jest.base-fixtures.config.json`, and update the key allow-list in `ci-policy.test.ts`.
+3. Add `**/__mocks__/` to CODEOWNERS and `REQUIRED_CODEOWNED_PATHS`, plus a repository rule `jest-manual-mocks` that rejects any `__mocks__` directory.
+4. While touching the rule, also reject tracked paths with a `node_modules/` segment. Nearest-`node_modules` resolution is the sibling lever; it was not probed.
+
+**Verification test.** A transformer-style test that plants `<tmp>/apps/x/__mocks__/<pkg>.js` and runs `jest.config.ts`'s module resolution, or the P-7 shape, gets the real module. A policy fixture with a `__mocks__` directory yields `jest-manual-mocks`.
+
+#### PR17-SEC-10: lint-script step matchers are prefix regexes (LOW)
+
+**Description.**
+- `LINT_STEPS` matches `^eslint \. .*--max-warnings 0` and `^stylelint .*--max-warnings 0` with no end anchor, and the exact mode reuses the same regexes.
+- So `eslint . --max-warnings 0 || true`, `… --rule x; true` and `eslint . --no-config-lookup --max-warnings 0` pass both modes (P-6 S4, S5, S8).
+- The no-weakening subsequence also accepts a prefix step that changes shell state for the later ones, for example `cd tests/fixtures/empty && …` or `export NODE_OPTIONS=--require=… && …` (S6, S7: subset passes, exact fails).
+- The exact mode in the head run is head-controlled, so the base run decides.
+
+**Exploitability and impact.** Root `package.json` is owned (record required). The counter is the PR2-SEC-01 control (M × L = LOW).
+
+**Remediation (code level).**
+1. Anchor full-step matchers: `^eslint \. --max-warnings 0$`, `^stylelint "\*\*/\*\.css" --max-warnings 0 --allow-empty-input$` and `^node tools\/lint\/check-suppressions\.mjs$`.
+2. Reject `;`, `|`, `&`, `$(`, backticks, `<` and `>` in any step.
+3. In no-weakening mode, allow extra steps only after the last base step.
+
+**Verification test.** S4-S8 fail in both modes; S3 (appended step) passes in no-weakening mode and fails in exact mode.
+
+### R2.4 Head-controlled inputs of the base-ref run (changes from §4)
+
+| Input | R2 status |
+|---|---|
+| `jest.config.ts` | No longer loaded by the base run. Jest runs `--config tools/lint/jest.base-fixtures.config.json`, a base copy (head copy only in this PR's bootstrap run) |
+| `.swcrc` (any depth) | Inert (`swcrc: false`), owned, rejected by the `swcrc` rule |
+| Jest transform cache written by the head `test:unit` run | Not read (`cache: false`) |
+| Manual mocks under `roots` (`tools/lint/**/__mocks__`) | Owned (`/tools/lint/`). Outside `tools/lint`: PR17-SEC-09 (head runs only) |
+| Step text, `if:`, step env, `shell`, `working-directory`, `defaults.run` | Pinned or banned. Folded-scalar bypass: PR17-SEC-07 |
+| Workflow/job env, earlier-step `$GITHUB_ENV`/`$GITHUB_PATH` writes, `RANGE_BASE`, the classifier | PR17-SEC-08 / PR10-SEC-17 |
+| `tools/deps/npm-cli.mjs`, lint configs and rules, `tools/lint/resolver.mjs`, lockfile and `node_modules`, runner state from earlier head-code steps | Unchanged (owned, or PR10-SEC-02 accepted) |
+
+### R2.5 Routing
+
+| Item | Owner | Due |
+|---|---|---|
+| PR17-SEC-07: fail-closed folded scalars in yaml-subset; literal `run: \|` for pinned steps; F0-F2 fixtures | devops-engineer (TASK-015, with PR10-SEC-17/19) | Before any further gate is pinned, and at the latest with TASK-015 |
+| PR17-SEC-08: forbidden shell-environment names at every env level; `$GITHUB_ENV`/`$GITHUB_PATH` write allow-list; `RANGE_*` pin; exact env on every gate | devops-engineer (TASK-015, with PR10-SEC-17) | With TASK-015 |
+| PR17-SEC-09: ignore `/__mocks__/` in both Jest configs; CODEOWNERS and repository rule; test | devops-engineer | Before the first Wave-1 feature merge (the due date PR17-SEC-01 carried) |
+| PR17-SEC-10, PR17-SEC-02 and the PR17-SEC-05 CR note | devops-engineer (TASK-015) | With the next fixture-harness change, at the latest before G3 |
+| Supplementary D-TASK007-04 residual text (security-analyst does not edit decisions): "…; until PR17-SEC-07/08 are fixed, owned `ci.yml` edits can still bypass the pin: a folded `run: >` rewrite (yaml-subset folds more-indented lines differently from GitHub) and workflow/job-level `BASH_ENV`/`PATH`/`BASH_FUNC_*` or an earlier step's `$GITHUB_ENV`/`$GITHUB_PATH` write" | sdlc-orchestrator | Next DECISIONS update |
+| Merge hygiene: `main` (`9bbcb77`, checked 2026-11-13) changed no security-owned path since `eccdca1` (only `docs/**` and `.claude/agent-memory/**`), so the owned-path overlap with the PR is empty and a merge of `main` does not void this record. Re-check if owned paths land on `main` first | sdlc-orchestrator | Before merge |
+
+### R2.6 Record-check simulation
+
+The check was run with main's `tools/ci/check-security-owned-paths.mjs` (`git archive origin/main tools/ci`, main at `9bbcb77`) through its CLI with `--root <clone> --json`.
+- The scratch clone was `git clone --shared --no-checkout` of the main checkout.
+- A branch was made at `8dd1d24`, this record (R1 + R2) was committed on top as a scratch commit, and the clone was removed afterwards.
+- Script: `scratchpad/review/PR-17-sec-r2/scripts/record-sim.sh`.
+
+| Run | Status | Exit |
+|---|---|---|
+| Control A: no record in the PR tree (head `8dd1d24`), `--base 9bbcb77 --pr 17` | `missing`: "no record named …/PR-0017-*.md for PR #17" | 1 |
+| Record committed on top of `8dd1d24`, `--base 9bbcb77 --pr 17` | `pass`: 15 owned paths, satisfied by this record naming `8dd1d24dc525954c2fd443496482901340bf69a6`. Note: the R1 head row `ea78d38` is followed by owned changes | 0 |
+| Same, `--base eccdca1` (merge base) `--pr 17` | `pass`: same binding and note | 0 |
+| Control B: same tree, `--pr 18` | `missing` | 1 |
+| Control C: main's R1-only record on top of `8dd1d24`, `--pr 17` | `missing`: R1 names only `ea78d38`, and owned paths changed after it | 1 |
+
+The parser's view of this file:
+- `recordVerdict` is `PASS_WITH_FOLLOW-UPS`;
+- `recordHeadShas` is `["ea78d38…", "8dd1d24…"]` (both rounds, PR10-SEC-21);
+- there are two `Verdict` rows, and the R2 row is the last;
+- the only rows whose first cell starts with `Head` are the two real head rows.

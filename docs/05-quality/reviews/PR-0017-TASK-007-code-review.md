@@ -81,3 +81,106 @@ The dispatch forbade installs, builds, Docker and full suites (memory-constraine
 - **M1:** the no-weakening control no longer catches a repo-wide `no-explicit-any` disable (AT-US-001-05). Weigh it under PR2-SEC-08.
 - **m1 / m2:** the integrity of the required gate depends on `/.github/` and `jest.config.ts` record review. Confirm that the D-TASK007-03 LOW residual also covers Jest config `testNamePattern` / `passWithNoTests` / `moduleNameMapper` and the Jest flag spellings.
 - **n1:** markdown injection from head rule messages into the job summary (INFO/LOW).
+
+## Round 2 (head 8dd1d24)
+
+- **Head:** `8dd1d24` (one commit on `ea78d38`, "ci(lint): fail ruleless findings and pin the base-ref fixture gate"), 13 files, +827/−201
+- **Inputs:** `git diff ea78d38 8dd1d24` (read in full), fix comment #6837295158, D-TASK007-03/04, lane A run 43316597810
+- **Reviewer:** code-reviewer · 2026-11-13
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: M1 is closed. Ruleless findings now fail in no-weakening mode, and clean fixtures run in both modes. E9 reproduced: with
+         no-explicit-any off the real ci.yml step script exits 1 with 6 real failures. m1/m2 are closed by an exact command pin and
+         a base-sourced Jest config (M-b: head filters change nothing). m3 is closed, n1–n4/n6 are closed, and the PR #11 overlay passes with 4 extras (ruled §R2.4).
+         One pre-existing MINOR: no check proves that no-explicit-any is on, so turning it off and also turning off unused-directive reports passes.
+FINDINGS: 0 BLOCKER · 0 MAJOR · 1 MINOR · 3 NIT (table R2.3)
+SECURITY-FLAGS: R2.6
+```
+
+### R2.1 Verification I performed myself
+
+The setup follows the dispatch constraints:
+- I ran nothing in the worktree and ran no install, build, Docker or full suite.
+- I made a `git archive 8dd1d24` scratch copy and junctioned its `node_modules` to the main checkout's (the lockfile is identical to main).
+- To run the **real ci.yml step script** end to end, I turned the copy into a throwaway git repo and committed the `8dd1d24` tree as the "base" commit. That commit is what main looks like after the merge. Head mutations went into the working tree. `extract-step.mjs` parses `.github/workflows/ci.yml` with `yaml` and writes the step's `run:` to a file. I ran it with `bash`, `RANGE_BASE=<base commit>` and `LINT_FIXTURE_MODE=no-weakening`.
+
+After every run, `git status` in the copy was clean, so the step's restore worked. Afterwards I removed the junction first and then the copy. No link is left at `C:\` (only the system `Documents and Settings`), the main `node_modules` still holds 740 entries, and the main checkout and the PR worktree are clean.
+
+Three failures appear in **every** copy run, including the unmutated baseline. They are copy artefacts, known from round 1: `@platform/*` links resolve into the main checkout, which affects the resolver path test and the two `@platform/config` / `@platform/pricing` probes. Below, "real failures" excludes these three.
+
+| Check | Result |
+|---|---|
+| `jest --selectProjects unit` on `fixture-expectations`, `check-workflow-policy`, `ci-policy`, `jest-transform` (copy) | 4 suites, **141 / 141 pass** |
+| **Baseline**: step script, no mutation | 101 tests: **91 pass / 7 skipped** / 3 artefacts; 0 extras. The skip set shrank from 26 (r1) to 7, because clean fixtures, the lint-script check and the weakening halves now run in the base run. |
+| **M-a / E9**: `eslint.config.mjs:362` `@typescript-eslint/no-explicit-any: 'off'` | **exit 1, 6 real failures**: 4 × `[AT-US-001-05] … (bad-*)`, `allowed: … suppression with a justification` (`ok-justified.ts`) and the "every other fixture" sweep. All are `a finding without a rule id is reported … Unused eslint-disable directive (…no-explicit-any)`. **M1 closed.** |
+| **M-b**: head `jest.config.ts` gets `testNamePattern: 'nomatch'`, `passWithNoTests: true` and a `testPathIgnorePatterns` `'negative'` entry, plus M-a | **exit 1, the same 6 real failures, 101 tests run.** The head Jest config no longer reaches the base run. **m2 closed.** In round 1 this gave 97 skipped, exit 0. |
+| **M-a2** (new): M-a plus `linterOptions.reportUnusedDisableDirectives: 'off'` (`:327`) | 91 pass, 0 real failures, 0 extras. The step would pass (R2-m1). Before this PR the step also passed this mutation, and so does the head exact suite. This is pre-existing, not a regression. |
+| **PR #11 overlay**: `37a2109`'s `eslint.config.mjs` and `tools/eslint-rules/` (main has no drift on those paths since `63accea`) as the head, with the new suite, fixtures, harness and config as the base | **0 missing, 0 ruleless, 0 real failures.** 4 extras, all `platform/prisma-client-construction` `[rule new to the base]`: 2 on `bad-orders.service.ts` and 2 on `ok-orders.repository.ts`. The job summary renders in one ```` ```text ```` block. Ruling in R2.4. |
+| `probe-gate2.mjs`: the PR's `checkWorkflow(…, { requiredGates: true })` on 28 in-memory ci.yml mutations | **Flagged** (`required-gates` + `lint-fixture-mode`): `--test-name-pattern`, `-tnomatch`, `--listTests`, `-o --lastCommit`, `--pass-with-no-tests`, `--shard=2/2`, `--config jest.config.ts`, `exit 0`, an extra line after `exit "$status"`, the base checkout replaced by `true`, a head checkout of `fixture-expectations.mjs` before Jest, a split-name export, a comment *after* a continuation, an indentation change, folded `run: >`. `shell:` and an extra step env `BASH_ENV` → `required-gates`; a duplicate `run:` key → `yaml-subset`; `continue-on-error` → `continue-on-error`. **0 findings, all harmless:** inserted comment or blank lines, `run: \|+`, CRLF, step `timeout-minutes: 0` (a timeout fails the step). **0 findings, not inert:** a trailing space or tab after a continuation backslash (R2-n1; fails closed, see below). Job-level `BASH_ENV` and job-level `RANGE_BASE` (D-TASK007-04 residual; R2.6). |
+| Bash ground truth for R2-n1 | `printf … first \␠` followed by `  --config x \|\| status=$?` prints `[first][ ]`, then `--config: command not found`, `status=127`, exit 127. A trailing-whitespace edit to the pinned Jest or restore line therefore makes the step fail. It cannot pass. |
+| `@swc/jest` 0.2.39 `buildSwcTransformOpts` | Inline options with at least one key skip `getOptionsFromSwrc()`, the `<cwd>/.swcrc` read. `swcrc: false` stops `@swc/core`'s nearest-file lookup, and `jest-transform.test.ts` proves it with a positive control. PR17-SEC-01's claim holds. |
+| `prettier --check` on the 12 changed non-CODEOWNERS files; `node tools/ci/check-workflow-policy.mjs --root .` (copy, repository mode, including the new `swcrc` walk) | clean; exit 0 |
+| CI run 43316597810 (head `8dd1d24`) | fast-lane **success**: unit **1680 passed**. The base-ref step passed **97 / 97**: main's old suite under the head copy of the config, the bootstrap case. scans fails only on "Security-owned paths need a review record", and ci-gate fails as a consequence. |
+| Not re-run by me | full `lint`, `typecheck`, `test:unit`, `build`, actionlint, commitlint. I relied on run 43316597810. |
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 (MAJOR) ruleless extras pass | **Closed** | `noWeakening` (`fixture-expectations.mjs:62-89`) fails every unmatched `ruleId === null` finding. `expectClean` and the "every other fixture" sweep run in both modes, so ok-* / `allowed:` fixtures get the relaxed check I asked for. The unit case that allowed a ruleless directive is flipped. Directive, parse-error, ignored-file and clean-fixture cases were added. E9 was reproduced through the real step script (R2.1). The optional `no-explicit-any` in `EFFECTIVE_RULES` was not done; see R2-m1. |
+| m1 (MINOR) deny-list misses spellings | **Closed** | Allow-list `BASE_LINT_FIXTURES_SCRIPT` with exact line comparison (`check-workflow-policy.mjs:133-185`). It adds `shell:` / `working-directory:` / exact step `env` / `defaults.run` checks and 15 flag mutations in the test. My 28 probes give the expected results, except R2-n1, which fails closed. |
+| m2 (MINOR) head `jest.config.ts` steers the base run | **Closed** | The step uses `--config tools/lint/jest.base-fixtures.config.json --runTestsByPath "$suite"`, and the config is taken from the base. It is data-only JSON, `cache: false`, with an inline transform and `swcrc: false`. `ci-policy.test.ts` pins its key set. Mutation M-b proves it. The residual is reworded in D-TASK007-04 (job-level env, earlier head code, owned configuration). |
+| m3 (MINOR) positive halves / severity API | **Closed (a) + API**; (b) belongs to PR #11 | Ignore maps are split into "source paths still linted" (always) and the exact map (`exactOnly`). The hasher's `not.toContain('bcrypt')` and the two `'off'` checks are `exactOnly`, and their weakening halves stay. `noWeakening(…, { minSeverity })` exists, and `expectFindings(…, severity)` routes it. The `npm run lint` check became an ordered subset (`missingSteps`) instead of being skipped (PR17-SEC-04), which is better than r1 asked. |
+| n1 fence / cap | **Closed** | `summaryMarkdown` uses a fence of longest backtick run + 1 and caps at 200 lines; `logText` neutralises a leading `::` (workflow-command injection in the log). Both have unit tests. |
+| n2 null label | **Closed** | `[no rule id]` |
+| n3 literal-mention wording | **Closed** | JSDoc and ci.yml comment say "tripwire". `mentionsOf` also strips quotes and line continuations, and the split-name probe is now flagged. |
+| n4 bootstrap sentence | **Closed** | PR body "Bootstrap notes" |
+| n5 lock-only classifier | Routed | TASK-015 (unchanged; fix comment) |
+| n6 summary without a report | **Closed** | `afterAll` returns when `report` is undefined |
+
+**Scope additions** (security round 1: PR17-SEC-01/03/04/05):
+- `.swcrc` is deleted, the options are inlined in `jest.config.ts`, a new `swcrc` repository rule rejects any `.swcrc`, and CODEOWNERS adds `/.swcrc` and `**/.swcrc` (tested in `REQUIRED_CODEOWNED_PATHS`).
+- The policy tree walks skip nested checkouts.
+
+These are coherent and tested, and I accept them. Under `.claude/worktrees/` the skip is necessary: this repo's own worktrees would otherwise be walked.
+
+### R2.3 Findings (round 2)
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR (pre-existing, not a regression) | `tools/lint/lint-fixtures.mjs:151-158` (`EFFECTIVE_RULES`); `tests/fixtures/lint/rules/any-justification/` | **Nothing positively proves that `@typescript-eslint/no-explicit-any` is on.** The AT-US-001-05 fixtures only *suppress* it: they expect `platform/any-justification`, and `ok-justified.ts` is clean. So the only signal that the rule is on is the unused-directive report, which depends on `linterOptions.reportUnusedDisableDirectives: 'error'` from the head config. M-a2 turns both off, and the base step passes. So does the head's own exact suite. The step behaved the same way before this PR. | Add a weakening-half check that does not depend on directives. Either (a) add a `bad-raw-any.ts` fixture under `rules/any-justification/packages/pricing/src/` that expects `@typescript-eslint/no-explicit-any`, or (b) add `@typescript-eslint/no-explicit-any` to `EFFECTIVE_RULES` and assert it is `'error'` in `report.effective` (not `exactOnly`). Also assert in the harness that the effective `linterOptions.reportUnusedDisableDirectives` is `2` (ESLint's `calculateConfigForFile(...).linterOptions`), so that M1's signal cannot be switched off quietly. In-PR is preferred, because it touches the same files. Otherwise route it to TASK-015 / the TASK-007 follow-up. **Not a merge blocker.** |
+| R2-n1 | NIT | `tools/ci/check-workflow-policy.mjs` `commandLines` (`line = raw.trimEnd()`) | `trimEnd` makes the pin accept `jest.js \␠` and `\<TAB>`, but bash treats backslash + space as an escaped space, not a line continuation. The probe gives 0 findings. Ground truth: the following line then runs as the command `--config`, and the step exits 127, so it fails closed. The pin says "exactly these commands", and this is the one place where its normalisation and bash disagree. | Strip only `\r` and reject trailing whitespace on non-blank lines, or at least do not `trimEnd` a line whose trimmed form ends in `\`. Add the case to the "any other spelling" test. |
+| R2-n2 | NIT | `docs/04-plan/tasks/WAVE-00.md:56`, `docs/04-plan/generator/plan-data.mjs:8`, `docs/03-architecture/adr/ADR-0023-ci-cd-and-release.md:52` | These still list `.swcrc` as a TASK-001 deliverable or a full-trigger path. After PR17-SEC-01 any `.swcrc` is a policy finding. | Update the WAVE-00 / plan-data deliverable text (or annotate "removed by PR17-SEC-01"). The ADR-0023 trigger path is harmless; drop it when ADR-0023 is next amended. |
+| R2-n3 | NIT | `check-workflow-policy.mjs:785` comment; ci.yml step comment | The step-env comment names `RANGE_BASE`, `BASH_ENV` and `PATH` as redirect levers that the exact-env check closes. The same variables at **job** level (`fast-lane.env`) give 0 findings (probe). D-TASK007-04 lists job-level env as residual, so this is not a defect, but the comment reads as if those levers are closed. | Add "(step level; job-level env is the D-TASK007-04 residual)". |
+
+### R2.4 Ruling: PR #11 overlay gives 4 extras, not 2
+
+**Accepted.** Round 1's "exactly 2 extras" assumed the base run skipped clean fixtures. M1's required fix said to apply the relaxed check to ok-* / `allowed:` fixtures instead of skipping them, so the clean `ok-orders.repository.ts` is now linted in the base run. The 2 extra findings there are genuine strengthening:
+- The base (main) fixture constructs `new PrismaClient(...)` in a repository. PR #11's new `platform/prisma-client-construction` rule bans that outside `apps/*/src/platform/db`.
+- `37a2109` changes that fixture to `Prisma.empty` (`git diff 37a2109 8dd1d24 -- tests/fixtures/lint/layering/service-imports-prisma`), so its own exact suite stays clean.
+
+All 4 extras carry a rule id and are tagged `[rule new to the base]`, and the file-keyed `extras` map avoids double-listing from the sweep and the `allowed:` case. Merge condition 4 from round 1 now reads: the PR #11 overlay must give **0 failures and exactly 4 `platform/prisma-client-construction` extras** (2 × `bad-orders.service.ts`, 2 × `ok-orders.repository.ts`).
+
+### R2.5 Merge conditions
+
+1. A security-analyst record naming `8dd1d24` (or a later head) for the CODEOWNED `/.github/`, `/tools/ci/`, `/tools/lint/`, `/jest.config.ts` and `/.swcrc` changes. Lane A must be green on the final head (scans is red only on the record).
+2. R2-m1 is in-PR or routed to TASK-015 with an owner. R2-n1 to R2-n3 are optional.
+3. **Order (D-ORCH-020):** #17 first.
+   - The PR #11 superseding branch must resolve its `negative-fixtures.test.ts` conflict under the mode split (round 1, condition 3):
+     - `WARNINGS` go through `expectFindings(…, 'warning')`.
+     - `allowed (TASK-016)` cases go through `expectClean`, not `exactOnly`.
+   - Re-run the overlay (R2.4).
+   - **PR #4's merge-main** must change its `unit-dom` project's transform from `'@swc/jest'` (string, `d2e867b` `jest.config.ts:28`) to `['@swc/jest', SWC_JEST_OPTIONS]`. Otherwise `tools/ci/jest-transform.test.ts` fails (every project must use the inline options), and the deleted root `.swcrc` would leave the jsdom project on @swc/jest defaults. It must not re-add a `.swcrc`, which the `swcrc` rule rejects.
+4. **Future edits of the step are a two-step change:** first update `BASE_LINT_FIXTURES_SCRIPT` on main, then the step. This is documented in the JSDoc and D-TASK007-04. Any PR touching that step before then will fail `required-gates` by design.
+
+### R2.6 Security flags (for security-analyst)
+
+- **R2-m1:** the AT-US-001-05 control has no direct signal that the rule is on. Turning off `no-explicit-any` together with `reportUnusedDisableDirectives` passes both the head suite and the base step. This is pre-existing. Weigh it under PR2-SEC-08.
+- **Job-level `RANGE_BASE` (pre-existing, PR #10 architecture, broader than this PR):** `fast-lane.env.RANGE_BASE` and `scans.env.RANGE_BASE` come from the head's ci.yml and are not pinned (probe: 0 findings). Setting them to the head SHA makes every "from the base ref" step take its inputs from the head:
+  - gate tooling, including `check-workflow-policy.mjs` itself;
+  - this step's suite;
+  - the security-owned-paths record gate's diff range, which becomes empty.
+  
+  A pin in the base checker cannot close this, because the checker would then be fetched from the head. Only a default-branch-controlled mechanism can, for example a repository ruleset that requires a workflow from `main`, or a `pull_request_target` checker that reads `base.sha` from the event. D-TASK007-04 names "job-level env" as residual. Please confirm that the PR10-SEC-02 rating covers this collapse of the record gate, or raise it under TASK-015.
+- **R2-n1:** the pin's normalisation differs from bash on `\␠`. It fails closed (exit 127). INFO.

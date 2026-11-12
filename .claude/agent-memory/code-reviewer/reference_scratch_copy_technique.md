@@ -48,3 +48,12 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 - Jest in a partial archive needs empty `prisma/` and `tests/` dirs (the `roots` validation).
 
 **PR #11 pitfall (2026-11-12):** the copy's node_modules junction vanished mid-review, after the tools/db unit run. Cause unknown; the worktree was intact. Run `ls copy/node_modules` before each run and recreate the junction if needed. Copy git-ignored `prisma/generated` into the copy when probes import the generated client.
+
+**Running a real ci.yml step script end to end (PR #17 r2):**
+1. In the archive copy (with the node_modules junction), run `git init`, add `node_modules` to `.git/info/exclude` and commit the tree as "base". Head mutations go into the working tree.
+2. Extract the step `run:` with the repo `yaml` package. `createRequire` needs the copy path from `pwd -W`, not a relative path.
+3. Run it under `bash` with `RANGE_BASE=$(git rev-parse HEAD)`, `GITHUB_STEP_SUMMARY=<file>` and the step env.
+
+The step restores itself with `git checkout HEAD --`, so `git status` stays clean between runs. Each run takes about 60 s.
+
+Write memory or markdown edits as a .cjs file with the Write tool. An inline `node -e` breaks on apostrophes in the text.
