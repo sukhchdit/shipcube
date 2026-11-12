@@ -1,0 +1,27 @@
+{
+  "$comment": "Read by tools/ci/check-audit.mjs. watch: advisories reported as \"watched\" (never a waiver; a re-rating to High/Critical fails the gate): { id, package, reason, review_by: YYYY-MM-DD, source }. waivers: the only way to pass a High/Critical finding (US-048 Waiver scenario, AT-US-048-07), and the tracking record with a due date for one without an upstream fix: { id, package, reason, decision: DECISIONS.md ID, expires: YYYY-MM-DD }; an expired waiver fails the finding again. A package in maintenance-exceptions.json cannot be waived. New entries need security-analyst review (CODEOWNERS).",
+  "watch": [
+    {
+      "id": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "reason": "Dev-only (ESLint, Jest, test-exclude); needs an attacker-supplied glob pattern, ours come from committed config only. Bump when the tools depend on minimatch >= 11.0.1; no overrides (major jump inside gate tooling).",
+      "review_by": "2027-02-12",
+      "source": "PR2-SEC-06"
+    },
+    {
+      "id": "GHSA-3g3m-2fjr-6pw4",
+      "package": "glob",
+      "reason": "Dev-only (Jest, test-exclude, archiver walk our own repository); no AbortSignal-bounded walk over untrusted input. Bump when the tools depend on glob >= 14.0.2.",
+      "review_by": "2027-02-12",
+      "source": "PR2-SEC-06"
+    },
+    {
+      "id": "GHSA-gcqx-w48m-w2h4",
+      "package": "deepmerge",
+      "reason": "Dev-only (jest-config merges our own Jest config); no upstream fix.",
+      "review_by": "2027-02-12",
+      "source": "PR2-SEC-06"
+    }
+  ],
+  "waivers": []
+}

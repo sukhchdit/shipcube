@@ -1,0 +1,23 @@
+{
+  "$comment": "Read by tools/ci/licence-check.mjs. exceptions: named licence exceptions (D-ARCH-003 rev 4 item 2, ADR-0023 am. J item 3): { name, version, licence (exact SPDX as declared), via: parent chain from the sanctioned tool downwards, closure: \"dev\", decision, reason }; never a licence-wide allowance, never the production closure. metadataOverrides: packages whose published metadata declares no licence (ADR-0023 am. I item 7, PR1-SEC-10): { name, version, licence, evidence (the shipped LICENSE file), decision }; applied only while the metadata stays empty. New entries need a DECISIONS.md ID and security-analyst review (CODEOWNERS).",
+  "exceptions": [
+    {
+      "name": "elkjs",
+      "version": "0.11.1",
+      "licence": "EPL-2.0",
+      "via": ["prisma", "@prisma/studio-core"],
+      "closure": "dev",
+      "decision": "D-ARCH-003 rev 4",
+      "reason": "Unmodified transitive of the sanctioned Prisma CLI (Studio); EPL-2.0 exactly for the locked 0.11.1 (LICENSE.md Exhibit A unfilled); never a direct dependency, never in an image (PR1-SEC-05)."
+    }
+  ],
+  "metadataOverrides": [
+    {
+      "name": "png-js",
+      "version": "2.0.0",
+      "licence": "MIT",
+      "evidence": "node_modules/png-js/LICENSE (MIT text); package.json declares neither license nor licenses",
+      "decision": "ADR-0023 am. I item 7 (PR1-SEC-10)"
+    }
+  ]
+}

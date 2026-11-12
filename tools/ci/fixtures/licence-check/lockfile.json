@@ -1,0 +1,49 @@
+{
+  "name": "@platform/root",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@platform/root",
+      "version": "0.0.0",
+      "license": "UNLICENSED",
+      "workspaces": ["apps/*"],
+      "devDependencies": { "prisma": "7.10.1", "stylelint": "17.16.0", "browserslist": "4.0.0" }
+    },
+    "apps/api": {
+      "name": "@platform/api",
+      "version": "0.0.0",
+      "license": "UNLICENSED",
+      "dependencies": { "@prisma/client": "7.10.1", "png-js": "2.0.0", "@visx/vendor": "3.12.0", "dual": "1.0.0", "argparse": "2.0.1" }
+    },
+    "node_modules/@platform/api": { "resolved": "apps/api", "link": true },
+    "node_modules/@prisma/client": {
+      "version": "7.10.1",
+      "license": "Apache-2.0",
+      "peerDependencies": { "prisma": "*" },
+      "peerDependenciesMeta": { "prisma": { "optional": true } }
+    },
+    "node_modules/prisma": {
+      "version": "7.10.1",
+      "devOptional": true,
+      "license": "Apache-2.0",
+      "dependencies": { "@prisma/studio-core": "0.0.1" }
+    },
+    "node_modules/@prisma/studio-core": {
+      "version": "0.0.1",
+      "devOptional": true,
+      "license": "Apache-2.0",
+      "dependencies": { "elkjs": "0.11.1" }
+    },
+    "node_modules/elkjs": { "version": "0.11.1", "devOptional": true, "license": "EPL-2.0" },
+    "node_modules/png-js": { "version": "2.0.0" },
+    "node_modules/@visx/vendor": { "version": "3.12.0", "license": "MIT and ISC" },
+    "node_modules/dual": { "version": "1.0.0", "license": "(MIT OR CC0-1.0)" },
+    "node_modules/argparse": { "version": "2.0.1", "license": "Python-2.0" },
+    "node_modules/stylelint": { "version": "17.16.0", "dev": true, "license": "MIT", "dependencies": { "svg-tags": "1.0.0" } },
+    "node_modules/svg-tags": { "version": "1.0.0", "dev": true },
+    "node_modules/browserslist": { "version": "4.0.0", "dev": true, "license": "MIT", "dependencies": { "caniuse-lite": "1.0.0" } },
+    "node_modules/caniuse-lite": { "version": "1.0.0", "dev": true, "license": "CC-BY-4.0" }
+  }
+}
