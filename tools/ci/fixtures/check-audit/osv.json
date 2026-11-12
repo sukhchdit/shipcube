@@ -1,0 +1,51 @@
+{
+  "results": [
+    {
+      "source": { "path": "/src/package-lock.json", "type": "lockfile" },
+      "packages": [
+        {
+          "package": { "name": "minimatch", "version": "9.0.9", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "modified": "2026-10-02T10:00:00Z",
+              "published": "2026-09-30T10:00:00Z",
+              "schema_version": "1.7.3",
+              "id": "GHSA-g3hv-75wg-m249",
+              "aliases": ["CVE-2026-40001"],
+              "summary": "minimatch ReDoS via repeated wildcards with a non-matching literal",
+              "affected": [
+                {
+                  "package": { "ecosystem": "npm", "name": "minimatch", "purl": "pkg:npm/minimatch" },
+                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "7.0.0" }, { "fixed": "11.0.1" }] }]
+                }
+              ],
+              "database_specific": { "severity": "MODERATE", "cwe_ids": ["CWE-405"], "github_reviewed": true }
+            }
+          ],
+          "groups": [{ "ids": ["GHSA-g3hv-75wg-m249"], "aliases": ["CVE-2026-40001", "GHSA-g3hv-75wg-m249"], "max_severity": "6.9" }]
+        },
+        {
+          "package": { "name": "bcrypt", "version": "6.0.0", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "modified": "2026-11-01T10:00:00Z",
+              "published": "2026-11-01T10:00:00Z",
+              "schema_version": "1.7.3",
+              "id": "GHSA-hjrf-2m68-5959",
+              "aliases": ["CVE-2026-40002"],
+              "summary": "bcrypt prebuild loader path confusion",
+              "affected": [
+                {
+                  "package": { "ecosystem": "npm", "name": "bcrypt", "purl": "pkg:npm/bcrypt" },
+                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }] }]
+                }
+              ],
+              "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H" }]
+            }
+          ],
+          "groups": [{ "ids": ["GHSA-hjrf-2m68-5959"], "aliases": ["CVE-2026-40002", "GHSA-hjrf-2m68-5959"], "max_severity": "7.8" }]
+        }
+      ]
+    }
+  ]
+}

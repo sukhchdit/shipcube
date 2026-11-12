@@ -1,0 +1,14 @@
+{
+  "$comment": "Negative fixture (code review m7, PR10-SEC-12): a waiver spanning 91 days, one more than the cap. check-audit must exit 2.",
+  "watch": [],
+  "waivers": [
+    {
+      "id": "GHSA-f5x3-32g6-xq36",
+      "package": "tar-legacy",
+      "reason": "synthetic fixture",
+      "decision": "D-TEST-003",
+      "granted": "2026-11-01",
+      "expires": "2027-01-31"
+    }
+  ]
+}

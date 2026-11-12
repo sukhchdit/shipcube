@@ -1,0 +1,45 @@
+# Compliance as data (REQ-COMP-005 "No `if country === 'IN'` branches in code (lint/semgrep rule)", ADR-0024 Semgrep
+# rule set). Country-specific behaviour is resolved from rule packs and reference data (packages/config rules), never
+# from code that branches on an ISO 3166-1 alpha-2 literal. Runs with --disable-nosem from the base ref.
+# Fixtures: tests/fixtures/semgrep/country-branches.ts (semgrep --test).
+rules:
+  - id: platform.country-branches.hard-coded-country
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [REQ-COMP-005] Code branches on the country code '$CC'; country-specific behaviour is data (rule packs in
+      packages/config rules, reference data), resolved by the compliance/pricing engines.
+    paths:
+      include:
+        - /apps/*/src/
+        - /apps/*/app/
+        - /packages/*/src/
+      exclude:
+        - /packages/config/src/rules/
+        - /packages/config/rules/
+        - '*.test.ts'
+        - '*.test.tsx'
+        - test/
+        - tests/
+        - __tests__/
+    patterns:
+      - pattern-either:
+          - pattern: $C === "$CC"
+          - pattern: '"$CC" === $C'
+          - pattern: $C == "$CC"
+          - pattern: '"$CC" == $C'
+          - pattern: $C !== "$CC"
+          - pattern: '"$CC" !== $C'
+          - pattern: $C != "$CC"
+          - pattern: |
+              switch ($C) {
+                case "$CC": ...
+              }
+          - pattern: '[..., "$CC", ...].includes($C)'
+          - pattern: 'new Set([..., "$CC", ...]).has($C)'
+      - metavariable-regex:
+          metavariable: $CC
+          regex: ^['"`]?[A-Z]{2}['"`]?$
+      - metavariable-regex:
+          metavariable: $C
+          regex: (?i)^.*(country|countries|iso2|jurisdiction|destination|origin)

@@ -128,7 +128,7 @@ const LAYERING: readonly Violation[] = [
   ],
 ];
 
-const ANY_SUPPRESSION: readonly Violation[] = ['bad-next-line', 'bad-block', 'bad-blanket'].map((name): Violation => [
+const ANY_SUPPRESSION: readonly Violation[] = ['bad-next-line', 'bad-block', 'bad-blanket', 'bad-no-task-id'].map((name): Violation => [
   `[AT-US-001-05] Unjustified any suppression is rejected (${name})`,
   `rules/any-justification/packages/pricing/src/${name}.ts`,
   'platform/any-justification',
@@ -393,12 +393,13 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.resolver['@platform/shared']).toBe('packages/shared/src/index.ts');
   });
 
-  it('`npm run lint` runs ESLint and Stylelint with --max-warnings 0', () => {
+  it('`npm run lint` runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01)', () => {
     const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     const steps = (scripts['lint'] ?? '').split('&&').map((step) => step.trim());
     expect(steps).toEqual([
       expect.stringMatching(/^eslint \. .*--max-warnings 0/u),
       expect.stringMatching(/^stylelint .*--max-warnings 0/u),
+      'node tools/lint/check-suppressions.mjs',
     ]);
   });
 

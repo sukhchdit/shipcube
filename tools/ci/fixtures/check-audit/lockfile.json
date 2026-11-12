@@ -1,0 +1,28 @@
+{
+  "name": "@platform/root",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@platform/root",
+      "version": "0.0.0",
+      "workspaces": [],
+      "dependencies": { "path-to-regexp": "8.2.0", "bcrypt": "6.0.0", "qs": "6.14.0" },
+      "devDependencies": { "jest-config": "30.5.2", "tar-legacy": "1.0.0" }
+    },
+    "node_modules/path-to-regexp": { "version": "8.2.0", "license": "MIT" },
+    "node_modules/bcrypt": { "version": "6.0.0", "license": "MIT" },
+    "node_modules/qs": { "version": "6.14.0", "license": "BSD-3-Clause" },
+    "node_modules/jest-config": {
+      "version": "30.5.2",
+      "dev": true,
+      "license": "MIT",
+      "dependencies": { "deepmerge": "4.3.1", "glob": "10.5.0" }
+    },
+    "node_modules/deepmerge": { "version": "4.3.1", "dev": true, "license": "MIT" },
+    "node_modules/glob": { "version": "10.5.0", "dev": true, "license": "ISC", "dependencies": { "minimatch": "9.0.9" } },
+    "node_modules/minimatch": { "version": "9.0.9", "dev": true, "license": "ISC" },
+    "node_modules/tar-legacy": { "version": "1.0.0", "dev": true, "license": "ISC" }
+  }
+}

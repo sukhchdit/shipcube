@@ -1,11 +1,12 @@
 /**
  * `platform/any-justification` (NFR-MAINT-002, US-001 "Unjustified any suppression is rejected"): an
  * `eslint-disable` directive that suppresses `@typescript-eslint/no-explicit-any` (named, or a blanket disable with no
- * rule list) must carry an ESLint directive description, `// eslint-disable-next-line <rule> -- <reason>`. The reason
- * should link the task that removes the suppression (CLAUDE.md §9 / NFR-MAINT-002).
+ * rule list) must carry an ESLint directive description that links a task, `// eslint-disable-next-line <rule> -- TASK-xxx
+ * <reason>`: the task that removes the suppression (CLAUDE.md §9 / NFR-MAINT-002 "linked task ID"; PR2-SEC-01 item 2).
  */
 
 const ANY_RULE = '@typescript-eslint/no-explicit-any';
+const TASK_ID = /\bTASK-\d{3}\b/u;
 const DIRECTIVE = /^\s*(eslint-disable(?:-next-line|-line)?)(?:\s+([^]*))?$/u;
 
 /**
@@ -30,10 +31,10 @@ function splitDirective(rest) {
 export default {
   meta: {
     type: 'problem',
-    docs: { description: 'Require a "-- reason" description on eslint-disable directives that suppress no-explicit-any.' },
+    docs: { description: 'Require a "-- TASK-xxx reason" description on eslint-disable directives that suppress no-explicit-any.' },
     schema: [],
     messages: {
-      unjustified: "Suppressing '{{rule}}' needs a justification: '{{directive}} {{rule}} -- <reason, linked TASK-xxx>'.",
+      unjustified: "Suppressing '{{rule}}' needs a justification that links a task: '{{directive}} {{rule}} -- TASK-xxx <reason>'.",
     },
   },
   create(context) {
@@ -45,7 +46,7 @@ export default {
           if (!directive) continue;
           const { rules, description } = splitDirective(rest);
           const suppressesAny = rules.length === 0 || rules.includes(ANY_RULE);
-          if (suppressesAny && description === '' && comment.loc) {
+          if (suppressesAny && !TASK_ID.test(description) && comment.loc) {
             context.report({ loc: comment.loc, messageId: 'unjustified', data: { rule: ANY_RULE, directive } });
           }
         }

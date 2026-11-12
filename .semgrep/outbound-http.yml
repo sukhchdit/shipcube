@@ -1,0 +1,110 @@
+# Outbound HTTP only through OutboundHttpClient (ADR-0016 §13, PR2-SEC-04, SSRF CWE-918). Semgrep half of the control:
+# the same sink list as tools/eslint-rules/outbound-http-via-client.mjs plus the PR2-SEC-04 extensions (http2/net/tls,
+# WebSocket/EventSource, any read of the global fetch, dynamic node:https). Same scope as the ESLint rule: server code,
+# except the browser package and the egress client itself. Runs with --disable-nosem from the base ref.
+# Fixtures: tests/fixtures/semgrep/outbound-http.ts (semgrep --test).
+rules:
+  - id: platform.outbound-http.client-library
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [ADR-0016 §13 / PR2-SEC-04] '$M' is an HTTP client library; make outbound HTTP calls through OutboundHttpClient
+      (apps/api/src/platform/egress).
+    paths: &server-scope
+      include:
+        - /apps/api/src/
+        - /apps/worker/src/
+        - /packages/*/src/
+      exclude:
+        - /packages/ui/
+        - /apps/api/src/platform/egress/
+        - '*.test.ts'
+        - '*.test.tsx'
+        - test/
+        - tests/
+        - __tests__/
+    patterns:
+      - pattern-either:
+          - pattern: import $X from "$M"
+          - pattern: import * as $X from "$M"
+          - pattern: import { $...X } from "$M"
+          - pattern: import "$M"
+          - pattern: require("$M")
+          - pattern: import("$M")
+      # Type-only imports carry no runtime code (the ESLint rule skips them too).
+      - pattern-not-regex: import\s+type\s[^;]*;
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^['"`]?(axios|node-fetch|cross-fetch|got|ky|undici|superagent|request|needle)(/.*)?['"`]?$
+
+  - id: platform.outbound-http.node-network-call
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [ADR-0016 §13 / PR2-SEC-04] Direct network call through node '$M'; make outbound HTTP calls through
+      OutboundHttpClient (apps/api/src/platform/egress).
+    paths: *server-scope
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      import $NS from "$M";
+                      ...
+                  - pattern-inside: |
+                      import * as $NS from "$M";
+                      ...
+                  - pattern-inside: |
+                      $NS = require("$M");
+                      ...
+                  - pattern-inside: |
+                      $NS = await import("$M");
+                      ...
+              - pattern-either:
+                  - pattern: $NS.request(...)
+                  - pattern: $NS.get(...)
+                  - pattern: $NS.connect(...)
+                  - pattern: $NS.createConnection(...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      import { $FN } from "$M";
+                      ...
+                  - pattern-inside: |
+                      import { $IMPORTED as $FN } from "$M";
+                      ...
+              - pattern: $FN(...)
+              - metavariable-regex:
+                  metavariable: $FN
+                  regex: ^(request|get|connect|createConnection)$
+          - patterns:
+              - pattern-inside: |
+                  import { $IMPORTED as $FN } from "$M";
+                  ...
+              - pattern: $FN(...)
+              - metavariable-regex:
+                  metavariable: $IMPORTED
+                  regex: ^(request|get|connect|createConnection)$
+          - pattern: import("$M")
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^['"`]?(node:)?(http|https|http2|net|tls)['"`]?$
+
+  - id: platform.outbound-http.global-fetch-or-socket
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [ADR-0016 §13 / PR2-SEC-04] Global fetch/WebSocket/EventSource bypasses the SSRF-safe OutboundHttpClient
+      (apps/api/src/platform/egress); inject the client instead.
+    paths: *server-scope
+    pattern-either:
+      - pattern: fetch
+      - pattern: globalThis.fetch
+      - pattern: window.fetch
+      - pattern: self.fetch
+      - pattern: $G["fetch"]
+      - pattern: Reflect.apply(fetch, ...)
+      - pattern: new WebSocket(...)
+      - pattern: new EventSource(...)
+      - pattern: new globalThis.WebSocket(...)
+      - pattern: new globalThis.EventSource(...)

@@ -1,0 +1,60 @@
+{
+  "$comment": "Lockfile fragments merged over lockfile.json `packages` by licence-check.test.ts; each case must fail with exactly the listed rules.",
+  "AT-US-048-06 GPL-3.0 licence in the production closure": {
+    "rules": ["licence/not-allowed"],
+    "packages": { "node_modules/dual": { "version": "1.0.0", "license": "GPL-3.0-only" } }
+  },
+  "D-ARCH-003 rev 2 item 4 GPL in the dev closure": {
+    "rules": ["licence/not-allowed"],
+    "packages": {
+      "node_modules/stylelint": {
+        "version": "17.16.0",
+        "dev": true,
+        "license": "GPL-2.0-or-later",
+        "dependencies": { "svg-tags": "1.0.0" }
+      }
+    }
+  },
+  "PR1-SEC-05 another EPL-2.0 package fails": {
+    "rules": ["licence/not-allowed"],
+    "packages": { "node_modules/eclipse-thing": { "version": "1.0.0", "dev": true, "license": "EPL-2.0" } }
+  },
+  "PR1-SEC-05 a different elkjs version is not excepted": {
+    "rules": ["licence/not-allowed"],
+    "packages": { "node_modules/elkjs": { "version": "0.11.2", "devOptional": true, "license": "EPL-2.0" } }
+  },
+  "am. J item 3 elkjs in the production closure": {
+    "rules": ["licence/exception-in-production"],
+    "packages": { "node_modules/elkjs": { "version": "0.11.1", "license": "EPL-2.0" } }
+  },
+  "am. J item 3 elkjs reached outside the recorded chain": {
+    "rules": ["licence/exception-chain"],
+    "packages": {
+      "node_modules/graph-tool": { "version": "1.0.0", "dev": true, "license": "MIT", "dependencies": { "elkjs": "0.11.1" } }
+    }
+  },
+  "D-ARCH-003 rev 2 item 2 CC-BY-4.0 data in the production closure": {
+    "rules": ["licence/not-allowed"],
+    "packages": { "node_modules/caniuse-lite": { "version": "1.0.0", "license": "CC-BY-4.0" } }
+  },
+  "D-ARCH-003 rev 2 item 3 AND needs every branch": {
+    "rules": ["licence/not-allowed"],
+    "packages": { "node_modules/dual": { "version": "1.0.0", "license": "MIT AND GPL-2.0-only" } }
+  },
+  "D-ARCH-003 rev 2 item 3 UNLICENSED third-party package": {
+    "rules": ["licence/not-allowed"],
+    "packages": { "node_modules/dual": { "version": "1.0.0", "license": "UNLICENSED" } }
+  },
+  "D-ARCH-003 rev 2 item 3 missing licence without an override": {
+    "rules": ["licence/missing"],
+    "packages": { "node_modules/no-meta": { "version": "1.0.0" } }
+  },
+  "PR1-SEC-10 the png-js override is version-bound": {
+    "rules": ["licence/missing"],
+    "packages": { "node_modules/png-js": { "version": "2.0.1" } }
+  },
+  "malformed SPDX expression": {
+    "rules": ["licence/unparseable"],
+    "packages": { "node_modules/dual": { "version": "1.0.0", "license": "(MIT OR" } }
+  }
+}

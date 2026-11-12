@@ -1,0 +1,89 @@
+{
+  "$comment": "Negative lockfile fragments merged over good.lockfile.json `packages` by check-lockfile.test.ts; each case must fail with the listed rule.",
+  "PR1-SEC-13 (i) non-link @platform/shared from npmjs": {
+    "rules": ["platform/non-link", "platform/resolved"],
+    "packages": {
+      "node_modules/@platform/shared": {
+        "version": "0.0.0",
+        "resolved": "https://registry.npmjs.org/@platform/shared/-/shared-0.0.0.tgz",
+        "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg=="
+      }
+    }
+  },
+  "PR1-SEC-13 (ii) alias node_modules/x named @platform/shared": {
+    "rules": ["platform/alias", "platform/resolved"],
+    "packages": {
+      "node_modules/x": {
+        "name": "@platform/shared",
+        "version": "0.0.0",
+        "resolved": "https://registry.npmjs.org/@platform/shared/-/shared-0.0.0.tgz",
+        "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg=="
+      }
+    }
+  },
+  "R2-n4 @platform link to a non-workspace directory": {
+    "rules": ["platform/link-target"],
+    "packages": { "node_modules/@platform/shared": { "resolved": "vendor/shared", "link": true } }
+  },
+  "am. J item 1 (b) @platform link carrying an integrity": {
+    "rules": ["platform/link-integrity"],
+    "packages": {
+      "node_modules/@platform/shared": {
+        "resolved": "packages/shared",
+        "link": true,
+        "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg=="
+      }
+    }
+  },
+  "SEC-TC-45 git source": {
+    "rules": ["lockfile/non-registry"],
+    "packages": {
+      "node_modules/is-number": {
+        "version": "7.0.0",
+        "resolved": "git+ssh://git@github.com/jonschlinkert/is-number.git#98e8ff1da1a89f93d1397a24d7413ed15421c139",
+        "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==",
+        "license": "MIT"
+      }
+    }
+  },
+  "SEC-TC-45 https tarball outside the registry": {
+    "rules": ["lockfile/non-registry"],
+    "packages": {
+      "node_modules/is-number": {
+        "version": "7.0.0",
+        "resolved": "https://evil.example/is-number-7.0.0.tgz",
+        "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==",
+        "license": "MIT"
+      }
+    }
+  },
+  "SEC-TC-45 file: directory dependency": {
+    "rules": ["lockfile/non-registry"],
+    "packages": {
+      "vendor/local": { "name": "local", "version": "1.0.0" },
+      "node_modules/local": { "resolved": "vendor/local", "link": true }
+    }
+  },
+  "am. F item 3 sha1 integrity": {
+    "rules": ["lockfile/integrity"],
+    "packages": {
+      "node_modules/is-number": {
+        "version": "7.0.0",
+        "resolved": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+        "integrity": "sha1-dTU0W4lnNNX4DE0GxQlVUnoU8Ss=",
+        "license": "MIT"
+      }
+    }
+  },
+  "am. F item 3 resolved tarball of another package": {
+    "rules": ["lockfile/resolved-mismatch"],
+    "packages": {
+      "node_modules/is-number": {
+        "version": "7.0.0",
+        "resolved": "https://registry.npmjs.org/evil-number/-/evil-number-7.0.0.tgz",
+        "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==",
+        "license": "MIT"
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+name: fixture
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - run: docker push ghcr.io/example/api:sha-1
