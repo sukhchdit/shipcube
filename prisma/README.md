@@ -23,10 +23,10 @@ required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects
 
 - `DATABASE_MIGRATOR_URL` is a direct value (ADR-0018 am. 6). A `_FILE` variant of any variable the seed reads
   (`DATABASE_MIGRATOR_URL_FILE`, `SEED_*_FILE`, `APP_ENV_FILE`, `NODE_ENV_FILE`) is refused, naming the variable only.
-- The URL must pass the platform's single PostgreSQL URL allow-list (`isAllowListedPostgresUrl` in `@platform/config`):
-  a TCP host and only `sslmode`, `sslrootcert`, `sslnegotiation`, `uselibpqcompat`, `application_name`,
-  `connect_timeout`. `options`, `statement_timeout`, `host`, `hostaddr` and every other parameter are refused, because
-  node-postgres lets them override the pinned session. After connecting, the seed reads `search_path`
+- The URL must name a TCP host and carry only parameters of the platform's single `DATABASE_URL` allow-list
+  (`RUNTIME_DATABASE_URL_PARAMS` in `@platform/config`: `sslmode`, `sslrootcert`, `sslnegotiation`, each at most once).
+  `options`, `statement_timeout`, `host`, `hostaddr`, `application_name`, `connect_timeout` and every other parameter
+  are refused, because node-postgres lets them override the pinned session. After connecting, the seed reads `search_path`
   (`pg_catalog, pg_temp`), `statement_timeout` and `idle_in_transaction_session_timeout` back and refuses an unpinned
   session. Requiring `sslmode=verify-full` outside local/test is TASK-014's `checkToolingEnv` (PR3-SEC-14).
 - `APP_ENV=local` or `test` is refused on an ECS task (`ECS_CONTAINER_METADATA_URI` or `_V4` set), the second signal of

@@ -234,7 +234,8 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     expect(prisma?.action).toBe(hasPrismaSchema() ? 'run' : 'skip');
     expect(steps.find((s) => s.id === 'prisma-engines')?.action).toBe(prisma?.action);
     if (prisma?.command) {
-      expect(prisma.command).toEqual(['exec', '--no', '--', 'prisma', 'generate']);
+      // PR9-SEC-02: `--node-options=` keeps npm from re-creating NODE_OPTIONS from its env/.npmrc setting.
+      expect(prisma.command).toEqual(['exec', '--node-options=', '--no', '--', 'prisma', 'generate']);
       expect(prisma.env).toEqual(['PRISMA_SCHEMA_ENGINE_BINARY', 'CHECKPOINT_DISABLE']);
     }
   });

@@ -9,7 +9,7 @@
 import type Joi from 'joi';
 
 import { deepFreeze, type EnvInput, pickConfigured } from './env-input.js';
-import { type AppEnv, ECS_METADATA_KEYS, type Service } from './environment.js';
+import { type AppEnv, ECS_METADATA_KEYS, type Service, TLS_REJECT_UNAUTHORIZED_KEY } from './environment.js';
 import { type ConfigIssue, ConfigValidationError } from './errors.js';
 import { runGuards } from './guards.js';
 import { type Config, CONFIG_KEY_NAMES, CONFIG_SCHEMA, type ConfigKey, configObjectSchema } from './schema.js';
@@ -43,7 +43,13 @@ export function loadConfig(env: EnvInput, options: LoadConfigOptions): Config {
   const toolingKeys = Object.keys(pickConfigured(env, TOOLING_KEY_NAMES));
   // ECS task-metadata variables: presence only (localAppEnvOnEcsGuard, PR3-SEC-03).
   const ecsMetadataKeys = Object.keys(pickConfigured(env, ECS_METADATA_KEYS));
-  const issues = [...fromSchema, ...runGuards({ raw, values, appEnv, toolingKeys, ecsMetadataKeys })];
+  // NODE_TLS_REJECT_UNAUTHORIZED: only "configured to something other than 1" reaches the guards (PR9-SEC-04).
+  const tlsRejectUnauthorized = pickConfigured(env, [TLS_REJECT_UNAUTHORIZED_KEY])[TLS_REJECT_UNAUTHORIZED_KEY];
+  const tlsVerificationOverridden = tlsRejectUnauthorized !== undefined && tlsRejectUnauthorized !== '1';
+  const issues = [
+    ...fromSchema,
+    ...runGuards({ raw, values, appEnv, toolingKeys, ecsMetadataKeys, tlsVerificationOverridden, service: options.service }),
+  ];
   if (issues.length > 0) throw new ConfigValidationError(issues);
   return deepFreeze(converted) as Config;
 }

@@ -61,7 +61,7 @@ describe('readMigratorUrl (PR13-SEC-03, code review m2)', () => {
   it('returns the URL with its raw and decoded password as redaction secrets', () => {
     const [head, tail] = [randomHex(), randomHex()];
     const raw = `${head}%40${tail}%2F`;
-    const url = `postgresql://platform_migrator:${raw}@db.internal:5432/platform?sslmode=verify-full&application_name=seed`;
+    const url = `postgresql://platform_migrator:${raw}@db.internal:5432/platform?sslmode=verify-full&sslnegotiation=direct`;
     expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url })).toEqual({ url, secrets: [url, raw, `${head}@${tail}/`] });
   });
 
@@ -85,6 +85,8 @@ describe('readMigratorUrl (PR13-SEC-03, code review m2)', () => {
     ['hostaddr', `${BASE}?hostaddr=10.0.0.9`],
     ['search_path', `${BASE}?search_path=public`],
     ['ssl override', `${BASE}?ssl=0`],
+    ['application_name (pg_stat_activity attribution)', `${BASE}?application_name=x`],
+    ['connect_timeout', `${BASE}?connect_timeout=0`],
     ['a repeated parameter', `${BASE}?sslmode=verify-full&sslmode=disable`],
     ['a percent-encoded socket host', `postgresql://platform_migrator:${PASSWORD}@%2Ftmp/platform`],
     ['a non-postgres scheme', `mysql://platform_migrator:${PASSWORD}@db.internal/platform`],

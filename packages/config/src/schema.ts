@@ -158,6 +158,15 @@ export const DB_POOL_MAX_DEFAULTS: Readonly<Record<Service, number>> = Object.fr
 /** Defaults equal to the TASK-003 pool factory defaults (apps/api/src/platform/db/client.ts). */
 export const DB_IDLE_TIMEOUT_MS_DEFAULT = 10_000;
 export const DB_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
+/**
+ * Pool-level `statement_timeout` backstop (PR-0005 code review m7), default 25 000 ms (below the 30 s request cap of
+ * REQ-SEC-015); the role backstop (TASK-016, 30 s) applies only to sessions outside the pool, because this startup
+ * parameter overrides a role default on every pooled connection. Request transactions set a tighter 5 s with
+ * `set_config` (data-model §4.1, T5).
+ */
+export const DB_STATEMENT_TIMEOUT_MS_DEFAULT = 25_000;
+/** Upper bound of `DB_STATEMENT_TIMEOUT_MS`: long worker jobs batch their work instead (data-model §7). */
+export const DB_STATEMENT_TIMEOUT_MS_LIMIT = 300_000;
 
 const MINUTE = 60;
 const HOUR = 3_600;
@@ -241,6 +250,9 @@ export const CONFIG_SCHEMA = {
   }),
   DB_CONNECTION_TIMEOUT_MS: withDefault(t.int(1, 120_000), DB_CONNECTION_TIMEOUT_MS_DEFAULT, {
     description: 'Milliseconds to wait for a new PostgreSQL connection before failing.',
+  }),
+  DB_STATEMENT_TIMEOUT_MS: withDefault(t.int(100, DB_STATEMENT_TIMEOUT_MS_LIMIT), DB_STATEMENT_TIMEOUT_MS_DEFAULT, {
+    description: 'pg statement_timeout of pooled connections in milliseconds (backstop; requests set 5 s per transaction).',
   }),
 
   // Valkey (REDIS_*)

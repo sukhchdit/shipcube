@@ -216,6 +216,13 @@ const REPO_PROBES = {
     "import * as config from '@platform/config';\n\nexport const probe = (): unknown => config;\n",
   'apps/admin/app/routes/lint-probe-bad-pricing.ts':
     "import * as pricing from '@platform/pricing';\n\nexport const probe = (): unknown => pricing;\n",
+  // PR #2 m8 / D-TASK006-01: the worker reaches apps/api through the package exports only.
+  'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts':
+    "import { createRuntimeLog } from '@platform/api/runtime';\n\nexport const probe = (): unknown => createRuntimeLog;\n",
+  'apps/worker/src/jobs/lint-probe-bad-api-subpath.ts':
+    "import { problemHandler } from '@platform/api/src/platform/errors/problem-handler.js';\n\nexport const probe = (): unknown => problemHandler;\n",
+  'apps/worker/src/jobs/lint-probe-bad-api-relative.ts':
+    "import { problemHandler } from '../../../api/src/platform/errors/problem-handler.js';\n\nexport const probe = (): unknown => problemHandler;\n",
   'apps/web/app/routes/lint-probe-ok-shared-ui.ts':
     "import * as shared from '@platform/shared';\nimport * as ui from '@platform/ui';\n\nexport const probe = (): unknown => [shared, ui];\n",
 };

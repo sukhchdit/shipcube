@@ -10,8 +10,9 @@
  *                 tools/deps/prisma-engines.mjs): refuses engine-redirecting variables, checks the
  *                 manifest against the installed engines version, uses the existing file when its
  *                 SHA-256 equals tools/deps/prisma-engines.json, otherwise fetches and verifies it.
- *   3. prisma   – `npm exec --no -- prisma generate` with PRISMA_SCHEMA_ENGINE_BINARY=<verified engine>
- *                 and CHECKPOINT_DISABLE=1, once a Prisma schema or prisma.config.ts exists.
+ *   3. prisma   – `npm exec --node-options= --no -- prisma generate` with PRISMA_SCHEMA_ENGINE_BINARY=<verified
+ *                 engine>, CHECKPOINT_DISABLE=1 and no NODE_OPTIONS, once a Prisma schema or prisma.config.ts
+ *                 exists. `--node-options=` stops npm re-creating NODE_OPTIONS from its env/.npmrc (PR9-SEC-02).
  *   4. playwright – browsers, opt-in only: `--playwright=chromium[,firefox,webkit]` or
  *                 DEPS_REBUILD_PLAYWRIGHT=… (local e2e and lane C; never in images).
  *
@@ -28,7 +29,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { npmCli } from './npm-cli.mjs';
-import { ensureEngine, forbiddenEnv, prismaChildEnv, reverifyEngine } from './prisma-engines.mjs';
+import { ensureEngine, forbiddenEnv, prismaChildEnv, prismaExecArgs, reverifyEngine } from './prisma-engines.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLAYWRIGHT_BROWSERS = new Set(['chromium', 'firefox', 'webkit']);
@@ -99,7 +100,7 @@ export function plan(argv) {
       id: 'prisma',
       action: 'run',
       reason: 'Prisma schema present',
-      command: ['exec', '--no', '--', 'prisma', 'generate'],
+      command: prismaExecArgs(['generate']),
       env: ['PRISMA_SCHEMA_ENGINE_BINARY', 'CHECKPOINT_DISABLE'],
     });
   } else {

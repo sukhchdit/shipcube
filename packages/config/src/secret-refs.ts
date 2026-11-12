@@ -157,8 +157,31 @@ function errorClassName(error: Error): string {
   return typeof name === 'string' && ERROR_CLASS_NAME.test(name) ? name : 'Error';
 }
 
+/**
+ * `instanceof` that cannot throw (PR3-SEC-16): a Proxy whose `getPrototypeOf` trap throws counts as "not an
+ * instance", so the caller falls back to the value-free `non-error` description instead of propagating the trap's
+ * exception (and its message) out of secret resolution.
+ */
+function isInstance<T>(value: unknown, type: abstract new (...args: never[]) => T): value is T {
+  try {
+    return value instanceof type;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * errno-style `code` read from an OWN DATA property only (PR3-SEC-16): a `code` getter is never invoked, and a
+ * Proxy whose `getOwnPropertyDescriptor` trap throws yields no code.
+ */
 const errorCode = (error: unknown): string | undefined => {
-  const code: unknown = error instanceof Error ? (error as { code?: unknown }).code : undefined;
+  if (!isInstance(error, Error)) return undefined;
+  let code: unknown;
+  try {
+    code = Object.getOwnPropertyDescriptor(error, 'code')?.value;
+  } catch {
+    return undefined;
+  }
   return typeof code === 'string' && ERRNO_CODE.test(code) ? code : undefined;
 };
 
@@ -167,15 +190,21 @@ const errorCode = (error: unknown): string | undefined => {
  * `code` when present. Messages are never read, because providers may echo locators or values.
  */
 export function describeFailureCause(error: unknown): string {
-  if (!(error instanceof Error)) return `non-error:${typeName(error)}`;
+  if (!isInstance(error, Error)) return `non-error:${typeName(error)}`;
   const code = errorCode(error);
-  const name = errorClassName(error);
+  let name: string;
+  try {
+    name = errorClassName(error);
+  } catch {
+    // A Proxy trap threw while the prototype chain was read (PR3-SEC-16): report the base class, never the exception.
+    name = 'Error';
+  }
   return code === undefined ? name : `${name}/${code}`;
 }
 
 function classifyFailure(error: unknown, signal: AbortSignal): Outcome {
   if (signal.aborted) return failure('ref.timeout');
-  if (error instanceof SecretNotFoundError) return failure('ref.notFound');
+  if (isInstance(error, SecretNotFoundError)) return failure('ref.notFound');
   const cause = describeFailureCause(error);
   const code = errorCode(error);
   return code !== undefined && PERMANENT_ERROR_CODES.has(code)

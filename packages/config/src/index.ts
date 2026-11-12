@@ -10,11 +10,12 @@ export {
   LOCAL_APP_ENVS,
   NODE_ENVS,
   SERVICES,
+  TLS_REJECT_UNAUTHORIZED_KEY,
 } from './environment.js';
 export type { AppEnv, NodeEnv, Service } from './environment.js';
 export { ConfigValidationError, formatConfigError } from './errors.js';
 export type { ConfigIssue, ConfigIssueCode } from './errors.js';
-export { GUARDS, isAllowListedPostgresUrl, isInspectorOption, nodeOptionTokens, runGuards } from './guards.js';
+export { GUARDS, isInspectorOption, nodeOptionTokens, runGuards, RUNTIME_DATABASE_URL_PARAMS } from './guards.js';
 export type { Guard, GuardInput } from './guards.js';
 export {
   createFileSecretProvider,
@@ -38,8 +39,9 @@ export type { KeyHolder, KeyMaterialKind, KeyRegisterEntry, KeyVersion, ParseRes
 export { loadConfig, secretRefsOf } from './load-config.js';
 export type { LoadConfigOptions } from './load-config.js';
 export { ENV_EXAMPLE_PLACEHOLDER, isPlaceholder, LOCAL_ONLY_PREFIX, PLACEHOLDER_PATTERNS } from './placeholders.js';
-export { CONFIG_EXIT_CODE, loadConfigOrExit, LOCAL_ENV_FILE, readStartupEnv } from './process-env.js';
-export type { LoadConfigOrExitOptions, RuntimeProbe, StartupIo } from './process-env.js';
+export { holderIssues, keysNotHeldBy } from './holders.js';
+export { CONFIG_EXIT_CODE, loadConfigOrExit, loadRuntimeConfigOrExit, LOCAL_ENV_FILE, readStartupEnv } from './process-env.js';
+export type { LoadConfigOrExitOptions, LoadRuntimeConfigOptions, RuntimeConfig, RuntimeProbe, StartupIo } from './process-env.js';
 export {
   BCRYPT_COST_FLOOR,
   BCRYPT_COST_MAX,
@@ -48,6 +50,8 @@ export {
   DB_IDLE_TIMEOUT_MS_DEFAULT,
   DB_POOL_MAX_DEFAULTS,
   DB_POOL_MAX_LIMIT,
+  DB_STATEMENT_TIMEOUT_MS_DEFAULT,
+  DB_STATEMENT_TIMEOUT_MS_LIMIT,
   CONFIG_SCHEMA,
   configObjectSchema,
   describeConfigKeys,

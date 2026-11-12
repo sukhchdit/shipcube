@@ -11,5 +11,5 @@
 - [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
 - [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R1+R2 @a3e8edd PASS_W_F-U; requestTransaction/Sql-splice/U& escapes; arch items 1/2b/5/6/8 open → R3; TASK-020/021/024 checks
 - [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
-- [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3b merge @6742bec; readFileSync/pg facts; TASK-014..111 checks
+- [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
 - [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 PASS_W_F-U @e92cd6f; ECS-signal gap gates TASK-089; R2 reconciliation + TASK-221/014/025 checks

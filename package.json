@@ -25,6 +25,7 @@
     "db:seed:demo": "tsx --conditions=@platform/source prisma/seed/index.ts demo",
     "db:lint-migrations": "tsx tools/db/lint-migrations.ts",
     "authz:generate": "tsx --conditions=@platform/source tools/authz/generate.ts",
+    "gen:modules": "tsx tools/api/gen-module-registry.ts",
     "lint": "eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 --allow-empty-input && node tools/lint/check-suppressions.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

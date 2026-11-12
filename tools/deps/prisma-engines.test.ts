@@ -25,6 +25,7 @@ import {
   FETCH_RETRIES,
   FORBIDDEN_ENGINE_ENV,
   MAX_BINARY_BYTES,
+  PRISMA_NPM_EXEC_OPTIONS,
   ensureEngine,
   engineFileName,
   engineUrl,
@@ -32,6 +33,7 @@ import {
   forbiddenEnv,
   locateInstall,
   prismaChildEnv,
+  prismaExecArgs,
   readManifest,
   recordHashes,
   reverifyEngine,
@@ -349,6 +351,50 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
       '/verified/engine',
     );
     expect(env).toEqual({ PATH: '/bin', PRISMA_SCHEMA_ENGINE_BINARY: '/verified/engine', CHECKPOINT_DISABLE: '1' });
+  });
+
+  it('[PR5-SEC-07] Prisma children never inherit NODE_OPTIONS (no preload can set an engine variable inside the child)', () => {
+    for (const key of ['NODE_OPTIONS', 'node_options', 'Node_Options']) {
+      const env = prismaChildEnv({ PATH: '/bin', [key]: '--require ./redirect-engine.cjs --env-file=.env' }, '/verified/engine');
+      expect(env).toEqual({ PATH: '/bin', PRISMA_SCHEMA_ENGINE_BINARY: '/verified/engine', CHECKPOINT_DISABLE: '1' });
+    }
+  });
+
+  it("[PR9-SEC-02] Prisma children never inherit npm's node-options env setting (npm would turn it into NODE_OPTIONS)", () => {
+    for (const key of ['npm_config_node_options', 'NPM_CONFIG_NODE_OPTIONS', 'Npm_Config_Node_Options']) {
+      const env = prismaChildEnv({ PATH: '/bin', [key]: '--require ./redirect-engine.cjs' }, '/verified/engine');
+      expect(env).toEqual({ PATH: '/bin', PRISMA_SCHEMA_ENGINE_BINARY: '/verified/engine', CHECKPOINT_DISABLE: '1' });
+    }
+    // Neighbouring npm settings are not swept up by the filter.
+    expect(prismaChildEnv({ npm_config_cache: '/c' }, '/e')).toMatchObject({ npm_config_cache: '/c' });
+  });
+
+  it('[PR9-SEC-02] the npm argv for Prisma empties npm node-options on the command line, before `--`, and keeps `--no`', () => {
+    const argv = prismaExecArgs(['migrate', 'deploy']);
+    expect(argv).toEqual(['exec', '--node-options=', '--no', '--', 'prisma', 'migrate', 'deploy']);
+    const separator = argv.indexOf('--');
+    expect(argv.indexOf('--node-options=')).toBeGreaterThan(0);
+    expect(argv.indexOf('--node-options=')).toBeLessThan(separator);
+    expect(argv.indexOf('--no')).toBeLessThan(separator);
+    expect(argv.slice(separator + 1, separator + 2)).toEqual(['prisma']);
+    // A Prisma argument that looks like an npm option stays after `--`, so npm never parses it.
+    const hostile = prismaExecArgs(['--node-options=--require x']);
+    expect(hostile.indexOf('--node-options=--require x')).toBeGreaterThan(hostile.indexOf('--'));
+    expect(PRISMA_NPM_EXEC_OPTIONS).toEqual(['--node-options=', '--no']);
+    expect(Object.isFrozen(PRISMA_NPM_EXEC_OPTIONS)).toBe(true);
+  });
+
+  it('[PR5-SEC-07] prisma.config.ts files load no dotenv and call no loadEnvFile', () => {
+    const repo = findRepoRoot();
+    const configs = [
+      join(repo, 'prisma.config.ts'),
+      ...readdirSync(join(repo, 'prisma', 'tests', 'fixtures'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(repo, 'prisma', 'tests', 'fixtures', entry.name, 'prisma.config.ts'))
+        .filter((path) => existsSync(path)),
+    ];
+    expect(configs.length).toBeGreaterThan(1);
+    for (const path of configs) expect(readFileSync(path, 'utf8')).not.toMatch(/dotenv|loadEnvFile|--env-file/);
   });
 
   it('[SEC-TC-64] a change of the engine while Prisma ran is detected and the file removed', () => {

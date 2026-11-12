@@ -2,14 +2,15 @@
  * The seed CLI's privileged `platform_migrator` connection (TASK-023; SEC-P3-34 item 2, PR13-SEC-01/-03, code review
  * PR #13 m1-m3). Everything here runs before the first seed statement:
  * - the URL comes from `DATABASE_MIGRATOR_URL` only (a direct value, ADR-0018 am. 6); `*_FILE` variants are refused;
- * - the URL must pass the platform's single PostgreSQL URL allow-list (`isAllowListedPostgresUrl`), because
- *   node-postgres lets URL query parameters (`options=`, `statement_timeout=`, `host=`) override the pinned session;
+ * - the URL's query parameters must come from the platform's single `DATABASE_URL` allow-list
+ *   (`RUNTIME_DATABASE_URL_PARAMS`), because node-postgres lets URL query parameters (`options=`, `statement_timeout=`,
+ *   `host=`) override the pinned session;
  * - after connecting, the session's `search_path` and timeouts are read back and must equal the pin;
  * - a connection lost mid-run surfaces as the failing query's rejection (exit 2), never as an unhandled `'error'`
  *   event that would crash the process with exit 1 (the refusal code).
  * Errors and refusals name variables only, never a value or a file path.
  */
-import { isAllowListedPostgresUrl } from '@platform/config';
+import { RUNTIME_DATABASE_URL_PARAMS } from '@platform/config';
 import pg from 'pg';
 
 import { SEED_PASSWORD_VARIABLES, SeedRefusedError, type SeedSql } from './framework/contracts.js';
@@ -48,6 +49,22 @@ export function refuseFileVariants(env: Readonly<Record<string, string | undefin
 
 const POSTGRES_PROTOCOLS: readonly string[] = ['postgres:', 'postgresql:'];
 
+/**
+ * A TCP host and only the TLS selectors of `RUNTIME_DATABASE_URL_PARAMS` (`sslmode`, `sslrootcert`,
+ * `sslnegotiation`), each at most once: the same rule the runtime pool and `databaseUrlParamsGuard` apply to
+ * `DATABASE_URL`. pg decodes the host, so a percent-encoded `/` would make a Unix-socket path: refused like an empty
+ * host.
+ */
+function isAllowListedMigratorUrl(url: URL): boolean {
+  const names = [...url.searchParams.keys()];
+  return (
+    url.hostname !== '' &&
+    !url.hostname.includes('%') &&
+    new Set(names).size === names.length &&
+    names.every((name) => RUNTIME_DATABASE_URL_PARAMS.has(name))
+  );
+}
+
 function refuseUrl(problem: string): SeedRefusedError {
   return new SeedRefusedError('SEED_ENVIRONMENT_INVALID', [MIGRATOR_URL_VARIABLE], `Seed refused: ${MIGRATOR_URL_VARIABLE} ${problem}.`);
 }
@@ -55,7 +72,7 @@ function refuseUrl(problem: string): SeedRefusedError {
 /**
  * Reads and checks `DATABASE_MIGRATOR_URL`: present, a `postgres[ql]://` URL with a TCP host, and only allow-listed
  * query parameters (no `options`, `statement_timeout`, `idle_in_transaction_session_timeout`, `host`, `hostaddr`,
- * `search_path`, `ssl`, …). Returns the URL and the values the CLI must redact from any driver error.
+ * `search_path`, `ssl`, `application_name`, `connect_timeout`, …). Returns the URL and the values the CLI must redact from any driver error.
  */
 export function readMigratorUrl(env: Readonly<Record<string, string | undefined>>): {
   readonly url: string;
@@ -66,7 +83,7 @@ export function readMigratorUrl(env: Readonly<Record<string, string | undefined>
     throw new SeedRefusedError('SEED_VARIABLE_MISSING', [MIGRATOR_URL_VARIABLE], `Seed refused: ${MIGRATOR_URL_VARIABLE} is not set.`);
   const parsed = URL.parse(url);
   if (parsed === null || !POSTGRES_PROTOCOLS.includes(parsed.protocol)) throw refuseUrl('must be a postgresql:// URL');
-  if (!isAllowListedPostgresUrl(parsed)) {
+  if (!isAllowListedMigratorUrl(parsed)) {
     throw refuseUrl('must name a TCP host and carry no session-overriding or repeated query parameter');
   }
   return { url, secrets: [url, ...passwordForms(parsed.password)] };

@@ -5,8 +5,20 @@
   "license": "UNLICENSED",
   "type": "module",
   "description": "HTTP API process of the modular monolith (ADR-0003).",
+  "exports": {
+    "./runtime": {
+      "@platform/source": "./src/platform/runtime/index.ts",
+      "types": "./dist/platform/runtime/index.d.ts",
+      "default": "./dist/platform/runtime/index.js"
+    },
+    "./modules/*": {
+      "@platform/source": "./src/modules/*/index.ts",
+      "types": "./dist/modules/*/index.d.ts",
+      "default": "./dist/modules/*/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsx ../../tools/api/gen-module-registry.ts && tsc -b"
   },
   "dependencies": {
     "@platform/shared": "0.0.0",

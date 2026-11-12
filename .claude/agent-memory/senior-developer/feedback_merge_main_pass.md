@@ -20,3 +20,11 @@ When a PR has to absorb `main`, read the newest review files and the newest D-OR
 Related: [[p5-dispatch]], [[p5-worktrees]]
 
 **PR #3 post-TASK-003 pass (2026-11-12): about 35 tool calls, clean.** `test:coverage` runs every Jest project, including integration, so it needs Docker just like `test:integration`. Before each Docker gate, run `docker ps | grep postgres:18` to see whether another instance's Testcontainers are running; if they are, run the non-Docker gates first. A wait loop of the form `timeout 590 bash -c "until grep -q '<step> exit' summary; do sleep 10; done"` is allowed, so you can wait on background gates. Any `git diff`/`grep` command line that names `.env.example` is denied, even with `--stat`. To inspect compose.env secrets, print only key names and lengths with a `node -e` one-liner.
+
+**PR #9 post-TASK-007 pass (2026-11-13): about 45 calls, no code changes needed, lane A fast-lane green on the first push.** Lessons:
+- Main moved docs-only twice while I gated, and a round-3 review with a merge-condition item landed. Since the merge was still unpushed, I ran `git reset --hard <branch head SHA>` and re-merged the new main. That kept ONE merge commit. Evidence: `git diff <gated> HEAD -- . ':!docs' ':!.claude'` is empty, plus a lint/format/unit re-run.
+- Pure-union proof script: take the branch-only files and the main-only files (from `comm` over the two name lists), diff each set against its side (expect 0 lines), then for each overlapping file check that HEAD-vs-branch equals main's delta.
+- `package-lock.json` is binary in `git diff` (gitattributes), so use `--text` to compare deltas.
+- Main's lane-A checkers run locally without CI env: `node tools/ci/<checker> --root . [--base <main> --head <HEAD>]`. `check-dep-age` needs `--fetch --out` first. `run-semgrep.mjs` uses Docker, so take docker.lock (~4 min).
+- The expected first-run failure is `scans / Security-owned paths need a review record`, which makes ci-gate red. That is the orchestrator's record, not mine.
+- When a review offers "fix at the merge-main pass, or route to TASK-xxx" and the brief is scoped to the merge, report it as an open merge condition. Don't widen the merge delta.
