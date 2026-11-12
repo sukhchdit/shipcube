@@ -1,0 +1,3 @@
+-- PR5-SEC-02 / CR m1 bypass form without the @audit-ddl marker: rule 12 must fire.
+SET search_path = pg_catalog, pg_temp;
+ALTER ROLE platform_audit_owner RENAME TO platform_audit_owner_old;

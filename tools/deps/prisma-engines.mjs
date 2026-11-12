@@ -74,6 +74,8 @@ export const FETCH_TIMEOUT_MS = 60_000;
 export const FETCH_RETRIES = 3;
 const MAX_REDIRECTS = 5;
 const MAX_GZ_BYTES = 128 * 1024 * 1024;
+/** Inflation cap for the gunzipped engine (PR5-SEC-06): a small hostile gzip cannot exhaust memory before the hash check. */
+export const MAX_BINARY_BYTES = 256 * 1024 * 1024;
 const MAX_SHA_BYTES = 1024;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const COMMIT_HEX = /^[0-9a-f]{40}$/;
@@ -308,9 +310,11 @@ export async function fetchFromOrigin(url, { transport = httpsGet, sleep = defau
  * Fetches one target's engine, checks the transport hash and returns the gunzipped bytes and their hashes.
  * @param {string} enginesVersion
  * @param {string} target
- * @param {Parameters<typeof fetchFromOrigin>[1]} fetchOptions
+ * @param {Parameters<typeof fetchFromOrigin>[1] & { maxBinaryBytes?: number }} options `maxBinaryBytes` (default
+ *   MAX_BINARY_BYTES) is a test seam, a function parameter only.
  */
-export async function fetchEngine(enginesVersion, target, fetchOptions) {
+export async function fetchEngine(enginesVersion, target, options) {
+  const { maxBinaryBytes = MAX_BINARY_BYTES, ...fetchOptions } = options;
   const url = engineUrl(enginesVersion, target);
   const [gz, shaFile] = await Promise.all([
     fetchFromOrigin(url, { ...fetchOptions, maxBytes: MAX_GZ_BYTES }),
@@ -325,7 +329,7 @@ export async function fetchEngine(enginesVersion, target, fetchOptions) {
   }
   let binary;
   try {
-    binary = gunzipSync(gz);
+    binary = gunzipSync(gz, { maxOutputLength: maxBinaryBytes });
   } catch (error) {
     throw new EngineError(`cannot gunzip ${url}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -343,12 +347,13 @@ export async function fetchEngine(enginesVersion, target, fetchOptions) {
  *   log?: (line: string) => void,
  *   install?: { enginesDir: string, enginesVersion: string, getPlatformEntry: string },
  *   target?: string,
+ *   maxBinaryBytes?: number,
  * }} EnsureOptions
  */
 
 /**
  * Ensures a verified schema engine for this host and returns its absolute path. Production callers pass no options
- * except `verifyOnly`; `transport`, `install` and `target` are test seams (function parameters only, never read from
+ * except `verifyOnly`; `transport`, `install`, `target` and `maxBinaryBytes` are test seams (function parameters only, never read from
  * the environment or configuration), used by the SEC-TC-64 tests to work in temporary directories and to make the
  * origin unreachable without changing the origin itself.
  * @param {EnsureOptions} [options]
@@ -398,6 +403,7 @@ export async function ensureEngine(options = {}) {
     const fetched = await fetchEngine(manifest.enginesVersion, target, {
       ...(options.transport ? { transport: options.transport } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),
+      ...(options.maxBinaryBytes ? { maxBinaryBytes: options.maxBinaryBytes } : {}),
       log,
       maxBytes: MAX_GZ_BYTES,
     });

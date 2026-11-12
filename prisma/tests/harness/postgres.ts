@@ -49,15 +49,13 @@ export class PlatformPostgres {
     private readonly superuserPassword: string,
   ) {}
 
-  /** Starts a fresh PostgreSQL 18 container. */
-  static async start(): Promise<PlatformPostgres> {
+  /** Starts a fresh PostgreSQL 18 container; `serverSettings` become `postgres -c name=value` arguments. */
+  static async start(serverSettings: Readonly<Record<string, string>> = {}): Promise<PlatformPostgres> {
     const password = randomSecret();
-    const container = await new PostgreSqlContainer(POSTGRES_IMAGE)
-      .withUsername(SUPERUSER)
-      .withPassword(password)
-      .withDatabase('postgres')
-      .start();
-    return new PlatformPostgres(container, password);
+    const settings = Object.entries(serverSettings).flatMap(([name, value]) => ['-c', `${name}=${value}`]);
+    let container = new PostgreSqlContainer(POSTGRES_IMAGE).withUsername(SUPERUSER).withPassword(password).withDatabase('postgres');
+    if (settings.length > 0) container = container.withCommand(['postgres', ...settings]);
+    return new PlatformPostgres(await container.start(), password);
   }
 
   get host(): string {
@@ -97,10 +95,6 @@ export class PlatformPostgres {
     return `postgresql://${MIGRATOR}:${this.passwords.migrator}@${this.host}:${this.port}/${database}`;
   }
 
-  bootstrapVars(): Record<string, string> {
-    return { migrator_password: this.passwords.migrator, app_password: this.passwords.app };
-  }
-
   async createDatabase(name: string, template?: string): Promise<void> {
     const admin = await this.superuser('postgres');
     try {
@@ -111,7 +105,7 @@ export class PlatformPostgres {
   }
 
   async bootstrap(database: string, dir?: string): Promise<BootstrapResult> {
-    return runBootstrap({ connection: this.bootstrapConnection(database), vars: this.bootstrapVars(), ...(dir ? { dir } : {}) });
+    return runBootstrap({ connection: this.bootstrapConnection(database), passwords: this.passwords, ...(dir ? { dir } : {}) });
   }
 
   /** Runs the Prisma CLI through the pinned-engine wrapper against `database` as the migrator. */
@@ -172,7 +166,7 @@ export class PlatformPostgres {
     this.sequence += 1;
     const name = `t_${String(this.sequence).padStart(3, '0')}_${randomBytes(3).toString('hex')}`;
     await this.createDatabase(name, template);
-    await reapplyDatabaseLevel({ connection: this.bootstrapConnection(name), vars: this.bootstrapVars() });
+    await reapplyDatabaseLevel({ connection: this.bootstrapConnection(name), passwords: this.passwords });
     return name;
   }
 

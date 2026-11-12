@@ -24,6 +24,7 @@ import {
   EngineError,
   FETCH_RETRIES,
   FORBIDDEN_ENGINE_ENV,
+  MAX_BINARY_BYTES,
   ensureEngine,
   engineFileName,
   engineUrl,
@@ -174,6 +175,20 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
       /cannot gunzip/,
     );
     expect(engineFiles(box.enginesDir)).toEqual([]);
+  });
+
+  it('[SEC-TC-64] a gzip that inflates beyond the cap fails closed with nothing left behind (PR5-SEC-06)', async () => {
+    expect(MAX_BINARY_BYTES).toBe(256 * 1024 * 1024);
+    const box = sandbox();
+    writeFileSync(join(box.enginesDir, engineFileName(TARGET)), 'stale engine');
+    const bomb = gzipSync(Buffer.alloc(64 * 1024));
+    await expect(
+      ensureEngine({ ...box, target: TARGET, transport: origin({ gz: bomb }).transport, env: {}, maxBinaryBytes: 4096 }),
+    ).rejects.toThrow(/cannot gunzip/);
+    expect(engineFiles(box.enginesDir)).toEqual([]);
+    // Control: an engine exactly at the cap is accepted.
+    const ok = await ensureEngine({ ...box, target: TARGET, transport: origin().transport, env: {}, maxBinaryBytes: binary.length });
+    expect(ok.mode).toBe('fetched');
   });
 
   it.each(FORBIDDEN_ENGINE_ENV.map((name) => [name]))(

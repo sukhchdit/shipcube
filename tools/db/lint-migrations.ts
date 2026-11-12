@@ -4,18 +4,22 @@
  *
  * Rules implemented here (rule numbers of §8.3):
  *   1   header block (`migration-kind`, `data-changing`, `reversible`) before the first statement, and a `down.sql`
- *   2   DROP TABLE/COLUMN/INDEX/CONSTRAINT/... or ALTER ... DROP DEFAULT outside a `contract` migration
+ *   2   DROP TABLE/COLUMN/INDEX/CONSTRAINT/... (also `DROP [COLUMN] IF EXISTS`) or ALTER ... DROP DEFAULT outside a
+ *       `contract` migration
  *   C   a `contract` migration is never declared `reversible: yes` (§8.2: restore-based rollback only)
- *   10  UPDATE/DELETE/TRUNCATE/INSERT ... SELECT without `data-changing: yes` (backup guardrail, §8.6)
- *   12  audit objects in prisma/migrations (unconditional); in prisma/bootstrap only with an approved
- *       `-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>` header (reviewer listed, date not in the future)
- *   13  SECURITY DEFINER without exactly `SET search_path = pg_catalog, pg_temp`; ALTER FUNCTION ... SECURITY DEFINER;
- *       a bootstrap file whose first statement is not `SET search_path = pg_catalog, pg_temp`
- * Rules 3-9 and 11 are not implemented yet (see the TASK-003 report).
+ *   10  UPDATE/DELETE/TRUNCATE/INSERT ... SELECT/MERGE, also inside a `WITH ...` statement, without
+ *       `data-changing: yes` (backup guardrail, §8.6)
+ *   12  audit objects and any mention of platform_audit_owner in prisma/migrations (unconditional); in prisma/bootstrap
+ *       only with an approved `-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>` header (reviewer listed, date
+ *       not in the future), except the role's own tightening statements (deny-by-default, AUDIT_OWNER_TIGHTENING)
+ *   13  SECURITY DEFINER (anywhere outside the body) without exactly `SET search_path = pg_catalog, pg_temp`;
+ *       ALTER FUNCTION ... SECURITY DEFINER; a bootstrap file whose first statement is not that SET
+ * Rules 3-9, 11 and 14 are owned by TASK-016 (D-ARCH-049; data-model §8.3 batch 0.2 amendment).
  *
  * CLI (`npm run db:lint-migrations`): lints prisma/migrations and prisma/bootstrap, then runs `prisma validate`
  * through tools/deps/prisma-cli.mjs (`--no-validate` skips it). Exit 0 = clean, 1 = findings or failure.
  */
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -58,21 +62,53 @@ export const AUDIT_OBJECTS = [
 export const AUDIT_OWNER = 'platform_audit_owner';
 const AUDIT_OBJECT_PATTERN = new RegExp(`(^|[^a-z0-9_])"?(${AUDIT_OBJECTS.join('|')})(_[a-z0-9_]*)?"?($|[^a-z0-9_])`, 'i');
 const AUDIT_OWNER_PATTERN = new RegExp(`(^|[^a-z0-9_])"?${AUDIT_OWNER}"?($|[^a-z0-9_])`, 'i');
-/** Statements that act as the audit owner or hand it out: SET ROLE, OWNER TO, membership grants. */
-const AUDIT_OWNER_ACTION = [
-  new RegExp(`\\bset\\s+(local\\s+|session\\s+)?role\\s+"?${AUDIT_OWNER}\\b`, 'i'),
-  new RegExp(`\\bowner\\s+to\\s+"?${AUDIT_OWNER}\\b`, 'i'),
-  new RegExp(`\\bgrant\\s+"?${AUDIT_OWNER}"?\\s+to\\b`, 'i'),
+const NAME = '"?[a-z_][a-z0-9_]*"?';
+const NAME_LIST = `${NAME}(, ?${NAME})*`;
+const OWNER = `"?${AUDIT_OWNER}"?`;
+/**
+ * Rule 12, bootstrap lane: the only statements that may mention the audit owner without the approval marker
+ * (deny-by-default, PR5-SEC-02 / CR m1). Each one sets the role up or tightens it, as 00-roles.sql and 01-schemas.sql
+ * do (data-model §4.4), and is matched against the whole whitespace-normalised statement:
+ * - `ALTER ROLE platform_audit_owner` with NO* attributes only (no LOGIN, PASSWORD, RENAME, SET, VALID UNTIL, ...);
+ * - `GRANT USAGE|CREATE ON SCHEMA <schemas> TO platform_audit_owner` (schema privileges for the no-member owner);
+ * - `ALTER DEFAULT PRIVILEGES FOR ROLE platform_audit_owner [IN SCHEMA <schemas>] REVOKE ...`.
+ * Everything else that names the role (membership grants in any position, SET ROLE, OWNER TO, REASSIGN/DROP OWNED,
+ * ALTER ROLE ... LOGIN/PASSWORD/BYPASSRLS/RENAME, DROP ROLE, ALTER GROUP, default-privilege GRANTs, dynamic SQL in a
+ * body) needs the marker.
+ */
+const AUDIT_OWNER_TIGHTENING = [
+  new RegExp(`^alter role ${OWNER}( (nologin|nosuperuser|nocreatedb|nocreaterole|noreplication|nobypassrls|noinherit))+$`),
+  new RegExp(`^grant (usage|create)(, ?(usage|create))? on schema ${NAME_LIST} to ${OWNER}$`),
+  new RegExp(`^alter default privileges for role ${OWNER} (in schema ${NAME_LIST} )?revoke `),
 ];
 /**
- * Rule 12, migrations lane: any audit object and any mention of the audit owner fails, unconditionally.
- * Bootstrap lane: audit objects and statements acting as or handing out the audit owner need the approval marker.
- * The role's own definition in 00-roles.sql and its schema grants and default privileges in 01-schemas.sql (data-model
- * §4.4) mention it without touching an audit object and need no marker (interpretation recorded in the TASK-003 report).
+ * SHA-256 of the role-creation DO block of 00-roles.sql (whitespace collapsed), which names the audit owner inside an
+ * array literal of its body. 00-roles.sql is immutable through the bootstrap ledger, so this exemption cannot drift; any
+ * other body that names the role needs the marker.
  */
-const isAuditDdl = (statement: string, lane: 'migrations' | 'bootstrap'): boolean =>
-  AUDIT_OBJECT_PATTERN.test(statement) ||
-  (lane === 'migrations' ? AUDIT_OWNER_PATTERN.test(statement) : AUDIT_OWNER_ACTION.some((pattern) => pattern.test(statement)));
+const AUDIT_OWNER_CREATION_BLOCK = '736c8905e08ef1110bda2f8ab3e66b5bcf2dd521c2f364762fe884c7d89a04bc';
+const collapse = (statement: string): string => statement.replace(/\s+/g, ' ').trim();
+/**
+ * Rule 12. Migrations lane: any audit object and any mention of the audit owner fails, unconditionally.
+ * Bootstrap lane: audit objects and every mention of the audit owner need the approval marker, except the
+ * AUDIT_OWNER_TIGHTENING forms and the creation block.
+ */
+const isAuditDdl = (statement: string, lane: 'migrations' | 'bootstrap'): boolean => {
+  if (AUDIT_OBJECT_PATTERN.test(statement)) return true;
+  if (!AUDIT_OWNER_PATTERN.test(statement)) return false;
+  if (lane === 'migrations') return true;
+  if (AUDIT_OWNER_TIGHTENING.some((pattern) => pattern.test(normalise(statement)))) return false;
+  return createHash('sha256').update(collapse(statement)).digest('hex') !== AUDIT_OWNER_CREATION_BLOCK;
+};
+
+/** The normalised statement with string literals, dollar-quoted bodies and comments blanked out. */
+function codeOnly(statement: string): string {
+  return normalise(
+    tokenize(statement)
+      .map((token) => (token.kind === 'string' || token.kind === 'dollar' || token.kind === 'comment' ? ' ' : token.text))
+      .join(''),
+  );
+}
 
 const HEADER_LINE = /^--\s*(migration-kind|data-changing|reversible)\s*:\s*(\S+)\s*$/i;
 const AUDIT_MARKER = /^-- @audit-ddl security-approved: ([a-z0-9._-]+) (\d{4}-\d{2}-\d{2})$/;
@@ -83,8 +119,17 @@ const DESTRUCTIVE = [
   /^alter\s+table\b.*\bdrop\s+(column|constraint)\b/,
   /^alter\s+table\b.*\bdrop\s+default\b/,
   /^alter\s+table\b.*\bdrop\s+(?!column\b|constraint\b|default\b|not\b|identity\b|expression\b)"?[a-z_][a-z0-9_]*"?\s*(,|cascade|restrict|$)/,
+  /^alter\s+table\b.*\bdrop\s+(column\s+)?if\s+exists\b/,
 ];
-const DATA_CHANGING = [/^update\b/, /^delete\b/, /^truncate\b/, /^insert\s+into\b.*\bselect\b/, /^merge\b/];
+/** Rule 10's list, matched against the statement's code (strings and bodies blanked); a CTE may wrap the change. */
+const DATA_CHANGING = [
+  /^update\b/,
+  /^delete\b/,
+  /^truncate\b/,
+  /^insert\s+into\b.*\bselect\b/,
+  /^merge\b/,
+  /^with\b.*(\bdelete\s+from\b|\binsert\s+into\b|\bmerge\s+into\b|(?<!\bfor |\bkey )\bupdate\b)/,
+];
 
 /** Leading comment lines up to the first statement. */
 function leadingComments(sql: string): string[] {
@@ -128,11 +173,10 @@ export function parseHeader(sql: string): MigrationHeader {
 
 /** True when `statement` declares or alters a SECURITY DEFINER routine without the fixed search path. */
 function definerWithoutFixedPath(statement: string): boolean {
-  const text = normalise(statement);
-  const isRoutine = /^create (or replace )?(function|procedure)\b/.test(text);
-  if (isRoutine) {
-    const header = text.split(/\bas\s+(\$|')/)[0] ?? text;
-    return /\bsecurity definer\b/.test(header) && !FIXED_PATH.test(`${header};`);
+  // Code only: SECURITY DEFINER and SET may follow the body (CR m2), and a body's text must not count either way.
+  const text = codeOnly(statement);
+  if (/^create (or replace )?(function|procedure)\b/.test(text)) {
+    return /\bsecurity definer\b/.test(text) && !FIXED_PATH.test(`${text};`);
   }
   if (/^alter (function|procedure)\b/.test(text)) {
     if (/\bsecurity definer\b/.test(text)) return true;
@@ -160,11 +204,12 @@ export function lintMigrationDir(dir: string, label: string = dir): LintFinding[
   }
   for (const statement of splitStatements(sql)) {
     const text = normalise(statement);
+    const code = codeOnly(statement);
     const preview = text.slice(0, 80);
-    if (header.kind !== 'contract' && DESTRUCTIVE.some((pattern) => pattern.test(text))) {
+    if (header.kind !== 'contract' && DESTRUCTIVE.some((pattern) => pattern.test(code))) {
       add('2', `destructive statement outside a contract migration: "${preview}"`);
     }
-    if (header.dataChanging !== true && DATA_CHANGING.some((pattern) => pattern.test(text))) {
+    if (header.dataChanging !== true && DATA_CHANGING.some((pattern) => pattern.test(code))) {
       add('10', `data-changing statement without "data-changing: yes": "${preview}"`);
     }
     if (isAuditDdl(statement, 'migrations')) {

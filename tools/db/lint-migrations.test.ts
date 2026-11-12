@@ -86,6 +86,20 @@ describe('expand -> migrate -> contract (rules 2, 10 and contract reversibility)
   it('rejects UPDATE and DELETE without "data-changing: yes" (backup guardrail)', () => {
     expect(rules(lintCase('undeclared-data-change'))).toEqual(['10', '10']);
   });
+
+  it('rejects data changes wrapped in a CTE and DROP [COLUMN] IF EXISTS outside a contract migration (CR m3)', () => {
+    const findings = lintCase('cte-and-drop-if-exists');
+    expect(findings.map((finding) => [finding.file.split(/[\\/]/)[1], finding.rule])).toEqual([
+      ['20261112000000_cte_update', '10'],
+      ['20261112000100_cte_delete', '10'],
+      ['20261112000200_drop_if_exists', '2'],
+      ['20261112000300_drop_column_if_exists', '2'],
+    ]);
+  });
+
+  it('does not flag a plain WITH ... SELECT, row locks (FOR [NO KEY] UPDATE) or keywords inside strings (CR m3 control)', () => {
+    expect(lintCase('cte-select')).toEqual([]);
+  });
 });
 
 describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
@@ -106,6 +120,13 @@ describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
     expect(rules(lintCase('definer-path'))).toEqual(['13', '13', '13', '13']);
   });
 
+  it('finds SECURITY DEFINER and the SET clause after the body, and ignores both inside the body (CR m2)', () => {
+    expect(lintCase('definer-after-body').map((finding) => [finding.file.split(/[\\/]/)[1], finding.rule])).toEqual([
+      ['20261112000000_definer_after_body', '13'],
+      ['20261112000200_definer_path_in_body_only', '13'],
+    ]);
+  });
+
   it('requires an approved marker with a listed reviewer and a past date for audit DDL in the bootstrap lane (rule 12)', () => {
     expect(bootstrapCase('audit-approved')).toEqual([]);
     expect(bootstrapCase('audit-unapproved').map((finding) => finding.message)).toEqual([
@@ -123,6 +144,28 @@ describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
   it('treats handing out the audit owner role as audit DDL in the bootstrap lane, but not its definition and schema grants (rule 12)', () => {
     expect(bootstrapCase('audit-owner-setup')).toEqual([]);
     expect(rules(bootstrapCase('audit-owner-membership'))).toEqual(['12']);
+  });
+
+  it.each([
+    ['audit-owner-grant-list'],
+    ['audit-owner-reassign'],
+    ['audit-owner-drop-owned'],
+    ['audit-owner-login'],
+    ['audit-owner-bypassrls'],
+    ['audit-owner-rename'],
+    ['audit-owner-drop-role'],
+    ['audit-owner-default-grant'],
+    ['audit-owner-alter-group'],
+    ['audit-owner-set-role'],
+    ['audit-owner-schema-grant-option'],
+    ['audit-owner-dynamic'],
+  ])('bootstrap lane is deny-by-default for the audit owner: %s needs the marker (rule 12; PR5-SEC-02, CR m1)', (name) => {
+    expect(rules(bootstrapCase(name))).toEqual(['12']);
+    expect(rules(bootstrapCase(name, []))).toEqual(['12']);
+  });
+
+  it('exempts only the tightening forms of the real 00-roles.sql and 01-schemas.sql, creation block included (rule 12 control)', () => {
+    expect(lintBootstrap(join(repoRoot, 'prisma', 'bootstrap'), { reviewers: [], today: '2026-11-12' })).toEqual([]);
   });
 
   it('requires "SET search_path = pg_catalog, pg_temp" as the first statement of every bootstrap file', () => {

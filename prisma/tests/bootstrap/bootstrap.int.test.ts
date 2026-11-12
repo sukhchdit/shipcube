@@ -141,13 +141,18 @@ describe('bootstrap runner (data-model §8.1)', () => {
     expect(schemas[0]?.n).toBe('0');
   }, 120_000);
 
-  it('refuses before applying anything when a variable is missing or the reserved db_name is supplied', async () => {
+  it('refuses before applying anything when a variable is missing or a reserved variable (db_name, *_password) is supplied', async () => {
     await db.createDatabase('vars_db');
     const connection = db.bootstrapConnection('vars_db');
-    await expect(runBootstrap({ connection, vars: { migrator_password: 'x' } })).rejects.toThrow(
-      /00-roles\.sql needs variable\(s\) app_password/,
+    const lane = laneCopy();
+    writeFileSync(join(lane, '02-extra.sql'), "SET search_path = pg_catalog, pg_temp;\nSELECT :'extra_value';\n");
+    await expect(runBootstrap({ connection, passwords: db.passwords, dir: lane })).rejects.toThrow(
+      /02-extra\.sql needs variable\(s\) extra_value/,
     );
-    await expect(runBootstrap({ connection, vars: { ...db.bootstrapVars(), db_name: 'other' } })).rejects.toThrow(BootstrapError);
+    await expect(runBootstrap({ connection, passwords: db.passwords, vars: { db_name: 'other' } })).rejects.toThrow(BootstrapError);
+    await expect(runBootstrap({ connection, passwords: db.passwords, vars: { migrator_password: db.passwords.migrator } })).rejects.toThrow(
+      /variable migrator_password is reserved/,
+    );
     const ledger = await query<{ t: string | null }>('vars_db', "SELECT pg_catalog.to_regclass('public.bootstrap_migrations')::text AS t");
     expect(ledger[0]?.t).toBeNull();
   }, 120_000);
