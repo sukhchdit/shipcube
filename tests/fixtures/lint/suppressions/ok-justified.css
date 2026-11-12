@@ -1,0 +1,5 @@
+.vendor-override {
+  /* stylelint-disable-next-line declaration-no-important -- TASK-123 remove with the vendor widget */
+  color: red !important;
+  content: '/* stylelint-disable */';
+}

@@ -379,3 +379,300 @@ Closure was checked against the head code, fixtures and lane A run. "Residual" p
 - **What this record names.** It reviews head `28442b6`, after which no security-owned path has changed.
 - **Under the bootstrap rule** (D-ORCH-004) the record check runs `--report-only` on this PR.
 - **If a fix cycle changes owned paths** (PR10-SEC-01 touches `.github/` and `tools/ci/`), a round-2 section must name the new head. Once merged, the check is enforcing for every later PR.
+
+## Round 2 (head 26fc08d)
+
+| Field | Value |
+|---|---|
+| Head | `26fc08da753ceb9dd8b9638cb4c70e19580a3c47` on `feat/TASK-007-ci-lane-fast-lane-workflow`. It merges `main`, which brings in docs only, on top of the last code commit `a88aaea`; `git diff a88aaea 26fc08d -- . ':!docs' ':!.claude'` is empty |
+| Delta reviewed | `git diff 28442b6..a88aaea`, which is `1cff9ac` (the fix) plus `a88aaea` (suppression-counter wording). In scope: `.github/workflows/ci.yml`, `.github/CODEOWNERS` and `tools/ci/**`. That covers `check-workflow-policy`, `check-security-owned-paths`, `check-audit`, `check-install-flags`, the new `npm-command`, `run-semgrep`, `yaml-subset`, and their tests and fixtures |
+| Inputs | Fix comment [6832420637](https://github.com/sukhchdit/shipcube/pull/10#issuecomment-6832420637); D-TASK007-02; D-ORCH-012/013; the round-1 sections above |
+| Lane A evidence | Run [43279941688](https://github.com/sukhchdit/shipcube/actions/runs/43279941688): `pull_request` on head `26fc08d`, merge ref `f0a8d9c`, base `c29f89b`. `fast-lane`, `scans` and `ci-gate` all concluded `success`. In `scans`, gitleaks scanned **15 commits** (4 of them merges) with the hardened flags and found no leaks. Semgrep reported 0 findings in 91 files, with the scope taken from the base. The record check ran report-only (bootstrap) and correctly reported the round-1 record as stale |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only: no `npm ci`, no build, no test suite. **One** Docker run (the gitleaks probe in R2.2); every other probe is a Node script over a `git archive 26fc08d` copy in scratch |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open, so the merge rule is met for `26fc08d`. PR10-SEC-01, the only MEDIUM, is **closed**, and the probe proves it. Of the round-1 items, 01, 02, 04, 07 and 11 are closed; 03 and 12 are partly closed; 05, 06, 08, 09, 10, 13, 14 and 15 stay open as routed. Round 2 adds **2 LOW** (PR10-SEC-16, -17) and **3 INFO** (PR10-SEC-18..20). None of them blocks this merge |
+
+### R2.1 Summary
+
+The fix cycle does what round 1 asked, and its core claims hold under test.
+- **Gitleaks can no longer be switched off by the PR.** Only `.git` is mounted, inline markers are inert, merges are diffed against their first parent, and the container has no network. I re-ran my round-1 probe with the CI flags, and all 5 cases are now reported. A `.gitattributes` committed by the PR (`-diff` / `binary`) cannot hide a file either (R2.2).
+- **`scans` is isolated.** It runs on its own runner, with no npm and no workspace script. Its Node scripts import only `node:` built-ins. Its git calls are read-only plumbing with no head-controlled configuration, hooks or drivers. Head content reaches it only as data (gitleaks, Semgrep, records).
+- **The record check is bound to the PR number.** The verdict is allow-listed, SHAs come from head rows only, renames count, and merges of `main` are handled. The parser behaves as documented, and this record parses under it (R2.6).
+- **Waivers are capped** at 90 days and need a decision ID.
+- **Install-flag detection held.** It flagged every lifecycle-script override form I tried.
+
+The new findings concern how far the new guards reach, not the controls themselves.
+- **16 (LOW): nested Semgrep scope files.** Semgrep 1.183 uses Semgrepignore v2, which honours `.semgrepignore` and `.gitignore` files in **any** folder. `--ignore-from` overlays only the root copies, and the nested ones are unowned.
+- **17 (LOW): pattern-narrow policy rules.** Each of the following passes:
+  - a relative `node tools/ci/x.mjs` in `scans`;
+  - a gitleaks bind written with `--mount`;
+  - `--exit-code 0` or `\|\| true` on the gitleaks step;
+  - an edited base-ref extraction step.
+
+  `untrusted-expression` also admits `env.*`, step outputs and `matrix.*`, which allows second-order injection. That allow-list was my own round-1 proposal.
+- **18–20 (INFO):**
+  - setup-node's automatic package-manager cache;
+  - record-parser residuals;
+  - `REQUIRED_CODEOWNED_PATHS` and CODEOWNERS gaps.
+
+### R2.2 Method and probes
+
+**Gitleaks probe** (`…/scratchpad/review/PR-10-sec-r2/scripts/gitleaks-probe-r2.sh`):
+- **Setup.** The pinned image `sha256:c00b6bd0…` with the PR's `.gitleaks.toml`, invoked exactly as `ci.yml:362-367` does:
+  - `-v <repo>/.git:/repo/.git:ro`;
+  - `--log-opts="--diff-merges=first-parent <A>..<M>"`;
+  - `--ignore-gitleaks-allow`;
+  - `--network none`.
+- **The synthetic repository** is the round-1 one plus three attribute cases. Its base carries the repository's real `package-lock.json linguist-generated=true -diff` line. All values are random strings in provider formats.
+
+  | Case | Content | Round 1 | Round 2 |
+  |---|---|---|---|
+  | Control | `ctl.json`: an AWS-format key and a GitHub-PAT-format token | Reported (2) | **Reported (2)** |
+  | (a) | `allow.md`: key + `<!-- gitleaks:allow -->` | Not reported | **Reported** |
+  | (b) | `ign.txt`: PAT fingerprinted in a `.gitleaksignore` committed by the PR | Not reported | **Reported** |
+  | (c) | `evil.txt`: key only in the merge commit | Not reported (3 of 4 commits scanned) | **Reported** (4 of 4) |
+  | (d) new | `attr.txt`: key; the PR adds `attr.txt -diff` to the root `.gitattributes` | n/a | **Reported** |
+  | (e) new | `sub/x.txt`: key; the PR adds `sub/.gitattributes` with `* binary` | n/a | **Reported** |
+  | (f) new | `package-lock.json`: PAT under an extra key | n/a | Not reported, by design (see below) |
+
+- **Result: 7 findings.** These are the 5 that round 1 expected, plus (d) and (e).
+- **Why (d) and (e) are reported.** `git log -p` takes attributes from the work tree. A host experiment showed git applies a committed `-diff` only when the work tree holds the file, and the container has no work tree. So the `.git`-only mount neutralises attribute-based hiding as well.
+- **Why (f) is not reported.** Gitleaks' default global allowlist skips `package-lock.json`, `node_modules/` and other lockfiles, and `useDefault = true` inherits it. That is accepted:
+  - `check-lockfile` pins every `resolved` to the exact npmjs tarball URL, so a credential-bearing URL fails there;
+  - `package-lock.json` is code-owned.
+- **No other ignore file is loaded.** Gitleaks' `--gitleaks-ignore-path` defaults to `.`, which is `/` in the image (WorkingDir `/`), and there is no ignore file there.
+
+**Policy probe** (`policy-probe-r2.mjs`). It runs `checkWorkflow` / `checkWorkflowPolicy` from `git archive 26fc08d`.
+- **Controls that flag:**
+  - an untrusted title in `run:`;
+  - the upper-case form `GITHUB.EVENT…`;
+  - `$GITHUB_WORKSPACE/…mjs` in `scans`;
+  - a full-workspace gitleaks `-v`;
+  - a removed gitleaks step.
+- **The real `ci.yml` passes.**
+- **Gaps:** listed in PR10-SEC-17.
+
+**Install-flag spot probe** (`npm-probe-r2.mjs`, against `scriptFindings`).
+- **Flagged:**
+  - `--ignore-scripts=false`, `=FALSE` and `=0`;
+  - the flag placed before the command;
+  - the `isntall` alias;
+  - `NPM_CONFIG_IGNORE_SCRIPTS=false` and the empty-value prefix;
+  - `npm config delete ignore-scripts`;
+  - `echo ignore-scripts=false >> .npmrc`.
+- **Not flagged:** `env -u` and `unset` of the variable. They are harmless, because the code-owned `.npmrc` still sets `ignore-scripts=true` and `check-install-flags` requires that line.
+
+**Isolation review of `scans`** (`ci.yml:288-382`).
+- **Module resolution.** `check-security-owned-paths.mjs` and `run-semgrep.mjs` import only `node:` modules and sit under `$RUNNER_TEMP`. Module resolution therefore never walks into `$GITHUB_WORKSPACE`.
+- **Git calls.** They are `diff --name-only`, `show <rev>:<path>`, `rev-list`, `cat-file` and `archive <base>`. None of them runs an attribute-driven driver. `.git/config` is written by `actions/checkout`, not the PR.
+- **Node 24** loads no project configuration unless a flag asks for it.
+- **setup-node:** see PR10-SEC-18.
+
+**Repository settings**, re-read on 2026-11-13, are unchanged:
+- `allowed_actions: all` and `sha_pinning_required: false`;
+- all three merge methods enabled;
+- branch protection returns 403.
+
+### R2.3 Closure of round-1 findings
+
+| ID | Round-1 severity | Status at `26fc08d` | Evidence / residual |
+|---|---|---|---|
+| PR10-SEC-01 | MEDIUM | **Closed** | Gitleaks step `ci.yml:357-367`: `.git`-only mount, `--ignore-gitleaks-allow`, `--diff-merges=first-parent`, `--network none`, base config. The probe reports 5 of 5 cases plus the attribute cases. CI scanned 15 commits, including 4 merges. Added: rule `gitleaks-hardening` with 4 failing fixtures and 1 passing; repository rule `gitleaksignore`; `/.gitleaksignore` in CODEOWNERS:27 and in `REQUIRED_CODEOWNED_PATHS`. Guard reach: PR10-SEC-17 |
+| PR10-SEC-02 | LOW | **Closed** | A separate `scans` job (`ci.yml:288-382`) runs no npm and no workspace script. Licences, signatures and audit now run before `deps:rebuild` (`ci.yml:160-203`). Added: rule `scans-isolation` with 3 fixtures; `ci-gate needs [fast-lane, scans]`. Fast-lane steps that still run after head code (porcelain, commitlint, actionlint, base-ref lint fixtures, Semgrep self-test) are accident guards whose subject is the head itself. Guard reach: PR10-SEC-17 |
+| PR10-SEC-03 | LOW | **Partly closed** | The root `.semgrepignore` and `.gitignore` come from the base and are bind-mounted read-only (`run-semgrep.mjs:108-118`, `ci.yml:370`), proven by `run-semgrep.int.test.ts`. The lint-fixture harness and `tools/test-support/` also come from the base (`ci.yml:250-260`). Nested scope files: **PR10-SEC-16** |
+| PR10-SEC-04 | LOW | **Closed (implementation)** | In `check-security-owned-paths.mjs` (`:149-212, 249-283, 343`): `--pr` binding, an allow-list for the last Verdict row, SHAs from head rows only, `--no-renames`, merge-of-main handling, and a push skip. CODEOWNERS:59-61 covers the agent control plane, plus `.node-version` and `.gitleaksignore`. The classifier treats `.claude/settings.json` as code (`ci.yml:94`). Parser residuals: PR10-SEC-19. **Still open:** item 3, the ADR-0023 wording (principal-architect) |
+| PR10-SEC-05 | LOW | **Open (procedural mitigation)** | The settings change was denied (D-ORCH-012). The merge procedure is `--squash --match-head-commit`, only after a `success` ci-gate on that SHA (D-ORCH-013 and the `ci.yml:9-12` header). Draft PRs now get a red ci-gate. The repository-owner action stays listed |
+| PR10-SEC-06 | LOW | Open | Routed: due before TASK-014 |
+| PR10-SEC-07 | LOW | **Closed (as specified)** | `untrusted-expression`, the extended `forbidden-trigger` and `required-gates` (`check-workflow-policy.mjs:93-136, 317-330, 598-629`), with fixtures. Reach of the new rules: **PR10-SEC-17** |
+| PR10-SEC-08 | LOW | Open | Routed to api-designer |
+| PR10-SEC-09 | INFO | Open | There is still no `.npmrc` key allow-list. D-TASK006-02 item 5 routed its own `.npmrc` residual (`script-shell` and similar keys) to this item, so it now has a second consumer |
+| PR10-SEC-10 | INFO | Open | Due before M5 |
+| PR10-SEC-11 | INFO | **Closed** | Fast-lane classifies with `git diff --no-renames base...head`: no API call, no file cap. `.claude/settings.json` counts as code. Push skips the record check. ci-gate fails when a lane was skipped (`ci.yml:384-403`) |
+| PR10-SEC-12 | INFO | **Partly closed** | Waivers now need a `granted` date that is not in the future, a span of at most 90 days and a decision ID, otherwise exit 2 (`check-audit.mjs:50-96`; 90- and 91-day fixtures). A same-tuple integrity change is still reported, not failed (`check-lockfile.mjs` is unchanged); `npm ci` EINTEGRITY remains the backstop |
+| PR10-SEC-13 | INFO | Open | TASK-015 |
+| PR10-SEC-14 | INFO | Open | `.semgrep/password-hashing.yml` and `.semgrepignore` are unchanged. The anchoring done in this cycle is `check-install-flags` `SKIP_ROOTED` (code-review n2) |
+| PR10-SEC-15 | INFO | Open | Due by P7 |
+
+### R2.4 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR10-SEC-16 | Nested `.semgrepignore`/`.gitignore` files (Semgrepignore v2) can still narrow the Semgrep scope | LOW | CWE-693 | A08 | `run-semgrep.mjs:99, 108-118`; `ci.yml:370`; CODEOWNERS:23-24 | devops-engineer | Open |
+| PR10-SEC-17 | The new policy rules are pattern-narrow: `scans-isolation`, `gitleaks-hardening`, `required-gates` (gate inputs not pinned) and `untrusted-expression` (`env.*`, outputs, `matrix.*`) | LOW | CWE-693, CWE-78 | A08 / A03 | `check-workflow-policy.mjs:108-109, 115-139, 337-353, 578-592` | devops-engineer | Open |
+| PR10-SEC-18 | setup-node's automatic package-manager cache is not disabled in `scans` | INFO | CWE-829 | A08 | `ci.yml:309-312`; `check-workflow-policy.mjs:589-590` | devops-engineer | Open |
+| PR10-SEC-19 | Record-parser residuals: any one record passes, rows inside HTML comments count, `Head\b` is broad, records can be planted for another PR | INFO | CWE-345 | A04 | `check-security-owned-paths.mjs:116-141, 161-164, 185-210` | devops-engineer; orchestrator | Open |
+| PR10-SEC-20 | Ownership residuals: `REQUIRED_CODEOWNED_PATHS` is a subset of CODEOWNERS; `.gitattributes`, nested scope files and reviewer instruction files are unowned | INFO | CWE-284 | A04 | `check-workflow-policy.mjs:656-682`; `.github/CODEOWNERS` | devops-engineer; orchestrator | Open |
+
+#### PR10-SEC-16: nested Semgrep scope files (LOW)
+
+**Description.** The pinned Semgrep 1.183.0 selects targets with **Semgrepignore v2**, the default since 1.117.0. Its reference says that, in a git project, it consults "all the `.semgrepignore` files in the project" and "all the `.gitignore` files in the project", in gitignore order and with negation. `--ignore-from` (`run-semgrep.mjs:108-118`) overlays only `/src/.semgrepignore` and `/src/.gitignore`.
+
+A PR can therefore remove a folder from the base-ref scan in two ways:
+- add `apps/api/src/feature/.semgrepignore` containing `*`;
+- add a nested `.gitignore` that matches tracked source.
+
+CODEOWNERS owns only `/.gitignore` and `/.semgrepignore` (lines 23-24), so neither change requires a record. The scanned-file count is printed (91 today) but compared only with zero.
+
+**Exploitability and impact.**
+- **Deliberate case.** A malicious agent hides code from the password-hashing, outbound-HTTP, raw-SQL and innerHTML packs. ESLint duplicates part of this, which limits the impact.
+- **Accidental case.** A nested `.gitignore` for generated code that is tracked.
+
+Evidence: Semgrep's v2 reference. Not executed here, because of the one-Docker-run budget. Impact Medium × Likelihood Low = **LOW**, the PR10-SEC-03 class.
+
+**Remediation.**
+1. In `scans`, Semgrep scans a clean export instead of the checkout:
+   ```bash
+   src="$RUNNER_TEMP/scan-src"; mkdir -p "$src"
+   git archive "$GITHUB_SHA" | tar -x -C "$src"   # merge-ref tree, no .git
+   find "$src" -mindepth 2 \( -name .semgrepignore -o -name .gitignore \) -delete
+   node "$GATE_RUN_SEMGREP" --root "$src" --rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR" --summary "$GITHUB_STEP_SUMMARY"
+   ```
+   Without `.git`, the project root is the scan root, and the overlaid base copy is the only scope file left. Alternative: keep the checkout, and have `run-semgrep --ignore-from` exit 2 when the scanned tree contains any non-root `.semgrepignore` or `.gitignore`.
+2. Add a repository-mode policy rule `nested-scope-file` that fails on any non-root `.semgrepignore`. Add `**/.semgrepignore` and `**/.gitignore` to CODEOWNERS and `REQUIRED_CODEOWNED_PATHS` (PR10-SEC-20).
+3. Print the scanned-file count next to the count for the base scope.
+
+**Verification.**
+- Extend `run-semgrep.int.test.ts` with a seeded `apps/api/src/x.ts` that calls `fetch(…)`, plus `apps/api/src/.semgrepignore` containing `*`. With the fix, the call is reported. Without the fix, it is not (negative control).
+- Add a policy fixture with a nested `.semgrepignore`; it must fail.
+
+#### PR10-SEC-17: the new policy rules are pattern-narrow (LOW)
+
+**Description.** Probe results from `policy-probe-r2.mjs`. Each control was flagged; every case below passed without a finding.
+
+| Rule | Cases that pass the policy |
+|---|---|
+| `scans-isolation` (`:584-590`) | `node tools/ci/run-semgrep.mjs …` (relative; the `scans` cwd is the head checkout, and this is fast-lane's self-test line copied over); `node "$GITHUB_WORKSPACE"/tools/ci/x.mjs`; `node "$PWD/…"`; `bash ./tools/ci/x.sh`; `make scan`; `docker run -v "$GITHUB_WORKSPACE:/src:ro" "$NODE_IMAGE" node /src/…` |
+| `gitleaks-hardening` (`:337-353`) | `--mount type=bind,source=$GITHUB_WORKSPACE,target=/repo` (the style `run-semgrep` uses); `-v "$PWD:/repo:ro"`; `--exit-code 0`; a trailing `\|\| true` |
+| `required-gates` (`:115-136, 598-629`) | an edited `scans` extraction step that always takes `tools/ci`, `.gitleaks.toml` and `.semgrep` from the head (`if false; then` in place of the base branch); the same edit in fast-lane, which also turns `check-workflow-policy` into the head copy; `GITLEAKS_IMAGE` swapped for any other digest-pinned image |
+| `untrusted-expression` (`:108-109`) | `${{ env.T }}` with `T: ${{ github.event.pull_request.title }}`; `${{ steps.<id>.outputs.<x> }}`; `${{ matrix.<x> }}`; `on: issues`; a docker action's `with.args: ${{ github.event.pull_request.title }}` |
+
+Forcing `RECORD_MODE=report-only` also passes the policy. That edit defends itself: at runtime the base checker refuses `--report-only` (exit 2).
+
+**Exploitability and impact.**
+- **Every case needs an edit to `.github/workflows/ci.yml`.** That path is owned, so the edit needs a security record. Under `pull_request` the head workflow always runs, so these rules are accident guards.
+- **The realistic case is a TASK-015 refactor.** Either of these would silently restore head-code execution in `scans`, or the `.gitleaksignore` path:
+  - a relative `node tools/ci/…` line copied into `scans`;
+  - a gitleaks step rewritten in the `--mount` style.
+- **`env.*` and outputs reintroduce script injection.** GitHub substitutes `${{ }}` into the script text before the shell runs. That allow-list was my round-1 proposal, and it was too broad.
+- **No impact today.** `ci.yml` has no `${{ }}` inside any `run:`, and no workflow holds secrets or write scopes.
+
+**LOW**, consistent with round-1 PR10-SEC-07.
+
+**Remediation** (`check-workflow-policy.mjs`).
+1. **`scans-isolation` becomes an allow-list.** In job `scans`:
+   - every `node` segment must be `node "$GATE_<NAME>"`;
+   - reject `bash`, `sh`, `make`, `python`, `./`, relative `tools/`, `$PWD`, `$(pwd)` and the quoted `"$GITHUB_WORKSPACE"/` form;
+   - allow `docker run` only for `"$GITLEAKS_IMAGE"`;
+   - optionally start every `scans` script with `cd "$RUNNER_TEMP"`, so a relative path cannot resolve into the checkout.
+2. **`gitleaks-hardening`:**
+   - parse `--mount … source=` as well as `-v` and `--volume`;
+   - allow exactly two sources, `"$GITHUB_WORKSPACE/.git"` and `"$GATES_DIR/.gitleaks.toml"`;
+   - reject any `--exit-code` other than `1`, and reject `--baseline-path`, `--gitleaks-ignore-path` and `--max-target-megabytes`;
+   - reject `set +e` in the step and a gitleaks segment followed by `\|\|` (`shellSegments` already records the following operator).
+3. **`required-gates`:**
+   - pin both extraction steps: the `git archive "$RANGE_BASE" "$path"` branch with its exact condition, and `GATE_*`/`GATES_DIR` values only under `$RUNNER_TEMP`;
+   - pin `GITLEAKS_IMAGE` to `ghcr.io/gitleaks/gitleaks:`.
+
+   Changing them then follows the two-step procedure the `ci.yml` header already describes.
+4. **`untrusted-expression`:**
+   - drop `env\.` from `SAFE_EXPRESSION` and reference `"$VAR"` in the shell instead;
+   - drop `steps.*.outputs`, `needs.*.outputs` and `matrix.*`, or allow only outputs named in a list;
+   - also check `with.args` and `with.entrypoint` of `docker://` steps;
+   - add `issues` to `FORBIDDEN_TRIGGERS`, because issue titles and bodies become attacker text if the repository is ever public.
+
+**Verification.**
+- One failing fixture for each row of the table above.
+- `ci.yml` and `gitleaks-hardened.yml` still pass.
+- A `ci-policy.test.ts` case that rewrites the extraction condition fails.
+
+#### PR10-SEC-18 to PR10-SEC-20 (INFO)
+
+- **PR10-SEC-18: setup-node's automatic cache in `scans`.**
+  - **The behaviour.** setup-node v7.1.0 (`949feb2`) has the input `package-manager-cache`, default `true`: "caching is enabled when either `devEngines.packageManager` or the top-level `packageManager` field in package.json specifies npm". The root `package.json` has neither field today.
+  - **The risk.** A later, harmless-looking `"packageManager": "npm@11.x"` would make setup-node in `scans` run npm in the head checkout (`npm config get cache`, which reads the head `.npmrc`) and restore and save `~/.npm`. The "no npm in `scans`" invariant would then break silently. `scans-isolation` checks only `cache` and `node-version-file`, so it would not catch this.
+  - **Fix:**
+    - set `package-manager-cache: false` on the `scans` setup-node step;
+    - make `scansStepViolations` require it;
+    - add a failing fixture `ci-scans-setup-node-auto-cache.yml`.
+- **PR10-SEC-19: record-parser residuals.**
+  - **(a) Any one record passes.** `evaluate` (`:187-210`) passes as soon as any `PR-<n>-*.md` binds. A second record with an allow-listed verdict therefore overrides a record whose last verdict is FAIL.
+  - **(b) Hidden rows count.** `tableRows` skips fenced and indented code, but not `<!-- … -->` blocks. An invisible `| Verdict | PASS |` inside a comment wins over a visible FAIL.
+  - **(c) Head rows match too broadly.** `^(?:Branch / head|Head)\b` also matches rows such as `Head-of-line …`.
+  - **(d) Records can be planted for another PR.** This is the unchanged forgery residual (D-ORCH-013). `docs/05-quality/security/` is unowned, so a docs-only PR can add `PR-<other>-*.md` for another open PR. Records also arrive through direct docs pushes to `main`.
+
+  **Fix:**
+  - fail when any record of the PR has a last verdict outside the allow-list;
+  - skip HTML comment blocks the same way fences are skipped;
+  - match head rows exactly: `/^(?:Branch \/ head|Head(?: \/ range)?)$/i`;
+  - fail a PR whose diff adds or changes a record named for a different PR number.
+
+  Add one test per item.
+- **PR10-SEC-20: ownership residuals.**
+  - **(a) `REQUIRED_CODEOWNED_PATHS` (`:656-682`) is a strict subset of the security-owned CODEOWNERS lines.** It requires only `.github/workflows/`, not `/.github/` itself, and it lacks all of these:
+    - `.npmrc`, `package.json`, `package-lock.json`;
+    - `tools/deps/`, `tools/hooks/`, `tools/isolated/`;
+    - `stylelint.config.mjs`, `.stylelintignore`, `tools/stylelint-rules/`, `tools/lint/`;
+    - `tests/fixtures/{lint,semgrep}/`;
+    - `tools/db/audit-ddl-reviewers.json`, `packages/audit/`, `packages/config/src/keys.ts`;
+    - `**/tsconfig*.json`.
+
+    Once one reviewed PR drops such a line, later PRs change that path with no record and no policy finding. **Fix:** a test that asserts the two lists are equal.
+  - **(b) Unowned paths that steer the gates or the reviewers:**
+    - **`.gitattributes`:**
+      - `-diff` and `binary` make a local `git diff` review print "Binary files … differ" for chosen source files (verified on the host);
+      - `linguist-generated` collapses diffs on GitHub;
+      - `export-ignore` changes what the bootstrap `git archive "$RANGE_HEAD"` extracts.
+    - **Nested `.semgrepignore` and `.gitignore`** (PR10-SEC-16).
+    - **`.claude/commands/`:** the orchestrator's prompts.
+    - **`.claude/agent-memory/{security-analyst,code-reviewer}/`:** loaded into the reviewers' context every time, so a PR could plant "accepted" notes.
+
+    **Fix:**
+    - add `/.gitattributes`, `**/.gitattributes`, `**/.semgrepignore`, `**/.gitignore` and `/.claude/commands/` to CODEOWNERS and `REQUIRED_CODEOWNED_PATHS`;
+    - the orchestrator rejects any PR diff that touches another agent's memory directory, since memory is committed through the orchestrator's own docs pushes, not through PRs.
+
+### R2.5 Reviewer-focus answers
+
+1. **Are the gitleaks flags effective in CI?** Yes.
+   - The run log shows the exact flags and "15 commits scanned", including 4 merges.
+   - The probe proves the behaviour of each flag.
+   - The `.git`-only mount defeats both `.gitleaksignore` and `.gitattributes` committed by the PR.
+2. **Is `scans` truly isolated?** Yes, in the steady state: nothing from the PR executes there.
+   - **Bootstrap runs head code.** Reading head git objects with `git archive` still executes head code once `node` runs the extracted script. It is no safer than the working tree, because the bytes are the same.
+   - **Why that is acceptable.** It applies only while the base lacks the script, which means this PR, or a later PR that introduces a new `scans` gate script. Both also change `ci.yml`, which is owned and needs a record, and the job summary labels the bootstrap.
+   - **What it meant for PR #10.** `scans` ran the head copies of `run-semgrep.mjs`, `check-security-owned-paths.mjs`, `.gitleaks.toml`, `.semgrep/`, `.semgrepignore` and `.gitignore`. `.gitleaks.toml` has not changed since round 1, where I reviewed it.
+3. **Can the PR swap the base-ref sourcing?** Not without editing `ci.yml`.
+   - `RANGE_BASE`, `RANGE_HEAD` and `PR_NUMBER` come from the event.
+   - The base copy wins whenever the base has the path.
+   - A deletion in the head does not affect the base extraction.
+
+   Editing `ci.yml` can swap it. That is inherent to `pull_request`, only the owned-path record catches it, and it is the guard gap in PR10-SEC-17 item 3.
+4. **Can a PR forge or reuse a record?** It can forge one, but it cannot reuse one.
+   - **No reuse.** A record is bound to the PR number, to a head-row commit inside `base..head`, and to the PR's owned paths not changing after that commit. A merge of `main` does not void the record; an evil merge that changes an owned path does.
+   - **Forgery.** Anyone who can push can commit a record. This is the documented residual (D-ORCH-013); PR10-SEC-19 lists cheap tightenings.
+   - **Verdict row.** "Last row wins" is the right rule for multi-round records, and it is tested.
+5. **Is CODEOWNERS complete?** The round-1 control-plane gaps are closed. The remaining gaps are in PR10-SEC-20.
+6. **How far does the untrusted-expression rule reach?**
+   - **Flagged in `run:` and `with.script`:** event fields, `head_ref`, `inputs` and `secrets`. Case does not matter, because anything not on the allow-list is rejected.
+   - **Not flagged:** second-order contexts (PR10-SEC-17 item 4).
+   - **Triggers:** the forbidden list now includes the comment and review family. `issues` is missing (same item).
+7. **Waiver cap.** Closed as specified. The `--now` override can be set only from `ci.yml`, which is owned.
+
+**Wording note for the orchestrator.** D-TASK007-02 item (10) can be read as saying that `scans` runs "licences, signatures and audit before `deps:rebuild`". Those three run in **fast-lane**, before `deps:rebuild`; `scans` runs gitleaks, Semgrep and the record check.
+
+### R2.6 Actions and merge statement
+
+| Action | Finding | Owner | Due |
+|---|---|---|---|
+| Scan a clean export, or fail on nested scope files; policy rule; CODEOWNERS for `**/.semgrepignore` and `**/.gitignore` | PR10-SEC-16 | devops-engineer | Before the first Wave-1 feature merge (with PR10-SEC-17) |
+| Turn `scans-isolation` into an allow-list; check `--mount` and the exit path in `gitleaks-hardening`; pin the extraction steps and the gitleaks image in `required-gates`; narrow `SAFE_EXPRESSION`; forbid `issues` | PR10-SEC-17 | devops-engineer | Before TASK-015 adds or refactors workflows |
+| `package-manager-cache: false` in `scans`, plus the rule | PR10-SEC-18 | devops-engineer | With PR10-SEC-17 |
+| Tighten the parser; add the cross-PR record rule | PR10-SEC-19 | devops-engineer; orchestrator (procedure) | Opportunistic, before Wave 1 |
+| Make `REQUIRED_CODEOWNED_PATHS` equal CODEOWNERS; own `.gitattributes`, the scope files and `.claude/commands/`; add the reviewer-memory rule | PR10-SEC-20 | devops-engineer; orchestrator | Opportunistic, before Wave 1 |
+| ADR-0023 residual wording (the check detects omission, not forgery) | PR10-SEC-04 item 3 | principal-architect | Open since round 1 |
+| Round-1 items still open: 05, 06, 08, 09, 10, the integrity half of 12, 13, 14, 15 | as routed | as in §6 | as in §6 |
+| After merge: check the first Dependabot run for `private_source_not_reachable`; dependency-auditor baseline, including a one-off full-history gitleaks scan with the round-2 flags | PR1-SEC-12, PR2-SEC-06, PR10-SEC-01 | security-analyst | First Dependabot run / R-ARCH-12 |
+
+**Merge statement.**
+- **Merge rule.** No Critical or High finding is open, so PR #10 may merge at `26fc08d` (CLAUDE.md §8).
+- **What this round names.** It names `26fc08d`, after which no security-owned path has changed. Later commits that only merge `main` or touch docs keep the record valid. Any change to an owned path needs round 3.
+- **After merge.** The record check enforces on every later PR: the record must be named `PR-<nnnn>-*.md` for that PR, and its last Verdict row must be on the allow-list.
+- **Validation.** This record was checked with the PR's own parser before hand-off (`recordVerdict`, `recordHeadShas` and `checkSecurityOwnedPaths` against `26fc08d`).

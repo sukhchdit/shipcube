@@ -143,6 +143,16 @@ PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Revie
   - PR #1: R2-n4 (in code).
   - TASK-015 m7 (any-justification TASK-ID) is partly closed.
 - After merge, PR #9 is the first PR under the enforced security-record gate.
+- r2 at 26fc08d was APPROVED_WITH_NITS (2026-11-13).
+  - Closed: M1 and M2 (verified with npm 11.19.1 and git); M3 procedurally (D-ORCH-012/013); m1, m2, m4–m7.
+  - m3 is partly closed.
+  - Open MINORs, in-PR or TASK-015:
+    - R2-m1: npm reify commands (`update`, `dedupe`, `uninstall`, `link`, `audit fix`) and `--ignore-scripts $VAR` give 0 findings.
+    - R2-m2: required-gates, gitleaks-hardening and scans-isolation are tripwires (`|| true`, `--mount`, `$PWD`, `--exit-code 0`, `node tools/ci/x.mjs` all pass).
+    - R2-m3: Semgrep ≥1.117 honours nested `.semgrepignore` files.
+    - R2-m4: `${{ env.X }}` in `run:` passes untrusted-expression.
+  - NITs: R2-n1..n8. n8 is one line: `pull_request.branches: [main]`.
+  - When TASK-015 lands, check R2-m2/m3/n7 before any new workflow or gitleaks mount.
 
 PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0011-TASK-016-code-review.md`.
 - M1: the TenantDb Proxy is shallow. `db.$parent` returns the unguarded itx client (with `*Unsafe` and `$transaction`), `db.$parent._originalClient` is the ROOT client, and the same holds via `db.<model>.$parent` and the Prisma private `Symbol()` key. Fix: deny-by-default top level plus child proxies on delegates; tests on the real `_createItxClient` shape.
@@ -155,3 +165,21 @@ PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-1
   - m6: PR #5 R2-m2 (DO bodies, rule 10) still open.
 - Closed by PR #11 (verified): PR #2 n5; PR #5 R3-n1 plus PR #8's tools/authz edge; PR #5 R2-m1 / PR5-SEC-11. PR #5 R2-n1 (`U&`) is still open.
 - r2: re-probe M1 with the real itx shape and m1 with the 9 bodies. Check §7 when PR #9 or PR #11 merges second.
+
+PR #12 (TASK-012, SPK-08) r1 at 2e0aa32 was CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0012-TASK-012-code-review.md`.
+- M1: "`migrate dev` vs raw-SQL partial indexes" was routed to TASK-012 only by batch-3 rulings :43 and is orphaned. Answer it or re-route it with an owner.
+- M2: the guard's `sql_drop` refusal branch is never exercised (R-ARCH-18 "schema-owner DROP TABLE"). Test as `SET ROLE platform_schema_owner`.
+- M3: lifecycle. Both spike suites break when TASK-021 adds the real `prisma/bootstrap/10-audit.sql`, so TASK-021's PR must port and delete them. The anchor files have no owner.
+- m1: F-01's premise sits behind an `if`; the shadow contents are unasserted. m4: F-04 is already in data-model §7.3 A17; the real gap is that the by-name tolerance cannot see a lost INCLUDE.
+- r2: re-check the new `sql_drop` test, the per-file lifecycle table and the m1 assertions. When the TASK-021 PR lands, verify the spike files were ported and deleted.
+
+PR #13 (TASK-023 seed framework) r1 at e92cd6f was CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0013-TASK-023-code-review.md`.
+- M1 (docs only): US-049 is planned as "completes", but AT-02/-05/-09/-10 are unmet and TASK-089 and TASK-014 do not own them. Needs a re-scope decision, sheet ATs and a PR-body relabel.
+- MINORs:
+  - m1: CLI crash on a dropped connection (no pg `'error'` listener; exit 1, non-JSON). bootstrap.ts has the same gap (TASK-014).
+  - m2: URL `options=`/`statement_timeout=` override the pinned session.
+  - m3: readSecret copy; `DATABASE_MIGRATOR_URL_FILE` unregistered.
+  - m4: Dataset contract cannot do uuid-FK children (`id` reserved), NND null keys, partial arbiters, or insert-only columns. `number_sequences.next_value` would reset on every deploy, so check every later dataset PR for this.
+  - m5: drift restore of an audited dataset is not audited.
+  - m6: PR #11 merge-second gives 5 `boundaries` errors in seed.int.test.ts:19-23; add a `prisma-seed` category.
+- r2: re-run the fake-server probe (exit 2 + JSON), the URL-override probe, and the merge-tree lint after the PR #11 reconcile.

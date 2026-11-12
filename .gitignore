@@ -7,10 +7,27 @@ node_modules/
 !.yarn/releases
 !.yarn/versions
 
+# Output and scratch folders are anchored to the repository root and the workspace roots (apps/*, packages/*,
+# tests/*, prisma), the same matrix as the ESLint and Stylelint ignores (PR2-SEC-11, PR #2 R2-m1): a SOURCE folder
+# named dist, build, coverage, logs, tmp, ... (e.g. packages/shared/src/coverage/) stays tracked.
+# tools/repo/gitignore.test.ts proves both directions with `git check-ignore --no-index`.
+
 # Build output
-dist/
-build/
-out/
+/dist/
+/apps/*/dist/
+/packages/*/dist/
+/tests/*/dist/
+/prisma/dist/
+/build/
+/apps/*/build/
+/packages/*/build/
+/tests/*/build/
+/prisma/build/
+/out/
+/apps/*/out/
+/packages/*/out/
+/tests/*/out/
+/prisma/out/
 .next/
 .vite/
 *.tsbuildinfo
@@ -25,7 +42,11 @@ out/
 *.pfx
 
 # Logs
-logs/
+/logs/
+/apps/*/logs/
+/packages/*/logs/
+/tests/*/logs/
+/prisma/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -33,21 +54,49 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Testing and coverage
-coverage/
+/coverage/
+/apps/*/coverage/
+/packages/*/coverage/
+/tests/*/coverage/
+/prisma/coverage/
+/test-results/
+/apps/*/test-results/
+/packages/*/test-results/
+/tests/*/test-results/
+/prisma/test-results/
+/playwright-report/
+/apps/*/playwright-report/
+/packages/*/playwright-report/
+/tests/*/playwright-report/
+/prisma/playwright-report/
+/k6-results/
+/apps/*/k6-results/
+/packages/*/k6-results/
+/tests/*/k6-results/
+/prisma/k6-results/
 .nyc_output/
 junit.xml
-test-results/
-playwright-report/
-k6-results/
 
 # Prisma
 prisma/*.db
 prisma/*.db-journal
 
 # Local uploads, generated exports and temp files
-uploads/
-tmp/
-temp/
+/uploads/
+/apps/*/uploads/
+/packages/*/uploads/
+/tests/*/uploads/
+/prisma/uploads/
+/tmp/
+/apps/*/tmp/
+/packages/*/tmp/
+/tests/*/tmp/
+/prisma/tmp/
+/temp/
+/apps/*/temp/
+/packages/*/temp/
+/tests/*/temp/
+/prisma/temp/
 *.tmp
 
 # Docker

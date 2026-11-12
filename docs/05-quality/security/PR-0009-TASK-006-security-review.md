@@ -303,3 +303,207 @@ void integrity.assertIntact().catch(() => undefined); // eager start-up probe on
 ## 8. Verdict
 
 **PASS_WITH_FOLLOW-UPS.** 0 Critical, 0 High, 0 Medium, 6 LOW, 7 INFO. The PR may merge under D-ORCH-004 once the code review is satisfied. In a fix cycle on this PR, the recommended order is PR9-SEC-01, PR9-SEC-04 item 1 and PR9-SEC-02 item 1 (one or two lines each), then PR9-SEC-05. The rest is routed as listed.
+
+## Round 2 (head 05855b1)
+
+| Field | Value |
+|---|---|
+| PR | #9, fix cycle 1 (https://github.com/sukhchdit/shipcube/pull/9#issuecomment-6831965273); D-TASK006-02 |
+| Branch / head | `feat/TASK-006-api-worker-runtime-skeleton-express` @ `05855b1`; delta `374166d..05855b1`, 5 commits (`3cf1526` dedicated start-up check + monitor, `1ed09e7` readiness coalescing + degraded stubs, `056cd46` UTF-8-only JSON + 400 for corrupt encodings + uncacheable problems, `6af84ef` TLS pinning, `05855b1` npm `node-options`); 35 files, +1,371 / −135; `main` not merged |
+| Scope | `apps/api/src/platform/{http/json-body.ts, errors/problem-handler.ts, db/{client,dedicated-connection,session-integrity}.ts, runtime/{readiness,services}.ts, valkey/options.ts}`, `apps/{api,worker}/src/main.ts`, `packages/config/src/{environment,guards,load-config,schema}.ts`, `tools/deps/{prisma-engines,prisma-cli,rebuild}.mjs` and the tests in the delta |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. No install, build, Docker or suite run. The head's sources were extracted with `git archive 05855b1`, type-stripped with Node 24.22.3 and probed against the worktree's `node_modules` through a scratch junction (removed afterwards). One read-only `git status --porcelain` was run in the TASK-006 worktree by mistake (clean, no output); nothing else ran there |
+| **Verdict** | **FAIL.** Head `05855b1`: 1 HIGH open (PR9-SEC-14, a ReDoS that the PR9-SEC-01 fix introduced), plus 1 LOW and 1 INFO new. Merge is blocked under D-ORCH-004 until PR9-SEC-14 is fixed. Every other fix in this cycle holds |
+
+### R2.1 Summary
+
+The fix cycle closes PR9-SEC-01 (as a smuggling control), PR9-SEC-02 items 1–2, PR9-SEC-04 items 1, 2 and 4, PR9-SEC-05, PR9-SEC-07, PR9-SEC-08 and PR9-SEC-11. Independent probes confirm each one (§R2.5).
+
+The new charset check, though, validates the header with a regular expression that backtracks exponentially:
+- **The attack.** One unauthenticated request stalls the API process for seconds to days, depending on how many `"; "` pairs the attacker puts in the `Content-Type` header (65 bytes stall it for 5.5 s; 97 bytes for about 4 days).
+- **Why nothing stops it.** `req.is` does not stop it: type-is 2.1.0 parses the media type with `parameters: false`. The global body parser runs before any route or limiter.
+- **The fix.** A one-line grammar change makes the regex linear without changing the language it accepts (proven below).
+
+### R2.2 Method
+
+- **Diff review.** `git diff 374166d..05855b1` for every file; the fix comment; D-TASK006-02. Sinks re-traced: `Content-Type` → `isUtf8JsonContentType` → body-parser; `DATABASE_URL` → `toPoolConfig` → `pg` → `tls.connect`; `REDIS_URL` → ioredis `tls`; environment → `loadConfig` guards; environment and npmrc → `npm exec` → Prisma bin.
+- **Probes.** Scratch `…/scratchpad/review/PR-9-sec-r2/scripts/`. Every probe has a positive control.
+  - `probe-charset-r2.mjs`: 27 request cases over a real listener, corrupt and valid gzip, a 20,000-run differential against content-type 2.1.0 (what body-parser's `getCharset` reads), and in-process timing of `isUtf8JsonContentType`.
+  - `redos-client.mjs` + `redos-server.mjs`: the app in a child process; one crafted POST, with `/health/live` measured while the POST is in flight.
+  - `probe-redos.mjs`: the proposed grammar's timing, and language equivalence against the shipped grammar (50,000 runs).
+  - `probe-tls-r2.mjs`: 22 URL cases with `NODE_TLS_REJECT_UNAUTHORIZED=0` and `PGSSLMODE=no-verify` set.
+    - The options `pg` hands to the real `tls.connect` for an IP host, a DNS host, and through `dedicatedConnector`. The fake server answers `S`, then breaks the handshake.
+    - A 20,000-run differential: the bare URL gives `pg` the same host, port, user, password and database as the original string, no query key, and `ssl` either `false` or `rejectUnauthorized: true`.
+    - ioredis `tls` for 4 URLs.
+  - `probe-dedicated.mjs`: `dedicatedConnector` and `runStartupIntegrityCheck` against 5 realistic database failures.
+  - `probe-integrity.mjs`: guard semantics and the monitor timer.
+  - `probe-config-r2.mjs`: `loadRuntimeConfigOrExit` with 9 values of `NODE_TLS_REJECT_UNAUTHORIZED`, in staging, production and local.
+  - `probe-npm-r2.mjs`: real npm 11.19.1 run with the head's `prismaExecArgs` + `prismaChildEnv` against 7 `node-options` sources, each with a positive control, plus the `script-shell` residual.
+  - `probe-http.mjs` (R1): re-run for regressions.
+- **Library facts read** (worktree `node_modules`):
+  - type-is 2.1.0 `index.js:237`: `contentType.parse(value, { parameters: false })`.
+  - content-type 2.1.0 `dist/index.js` `parse`: the lenient parser, which never throws and keeps the first value of a repeated key.
+  - body-parser 2.4.0 `lib/read.js:263`: `getCharset`.
+  - pg 8.23.1 `lib/connection.js:96-134`: `upgradeToSSL` sets `host`, merges `ssl`, sets `servername` only for DNS names; `lib/stream.js:26-28`: `require('tls').connect`.
+- **Secrets.** Added lines grepped for Stripe, PEM, AWS, GitHub, Slack and credential-URL patterns. One hit, `DUMMY_CA` in `client.test.ts`: its body is base64 for `dummy-test-ca`, not key material. gitleaks was not run (memory constraint).
+- **Supply chain.** No dependency or lockfile change in the delta.
+
+### R2.3 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Owner |
+|---|---|---|---|---|---|
+| PR9-SEC-14 | `MEDIA_TYPE` charset-check regex backtracks exponentially; one unauthenticated request blocks the API event loop | **HIGH** | CWE-1333, CWE-400 | A04 | senior-developer (this PR, merge blocker) |
+| PR9-SEC-15 | npm configuration other than `node-options` (`script-shell`, and `npm_execpath` for the CLI itself) still chooses code in the Prisma child chain | LOW | CWE-15, CWE-426 | A08 | TASK-007 or a tools/deps follow-up (R1 PR9-SEC-02 item 3) |
+| PR9-SEC-16 | `sslrootcert` is read from any path, relative to the cwd, without a type or size check; libpq's `system` keyword is read as a file name | INFO | CWE-73 | A05 | optional here, or TASK-014 |
+
+#### PR9-SEC-14 (HIGH): the charset-check regex backtracks exponentially
+
+**Where.** `apps/api/src/platform/http/json-body.ts:31` (`MEDIA_TYPE`), called at `:86` for every request that declares a body, from the global `jsonBodyParser` (`app.ts:46`). type-is 2.1.0 `index.js:237` explains why `req.is` does not filter the input first.
+
+**Description.** In `(?:[ \t]*;[ \t]*(?:param)?)*[ \t]*$`, whitespace after a `;` with no parameter can be consumed by that iteration's trailing `[ \t]*` or by the next iteration's leading `[ \t]*`. With k empty `"; "` separators followed by a character that fails the match, V8's backtracking engine tries 2^k splits before it gives up.
+
+`req.is([...JSON_MEDIA_TYPES])` runs first, but it does not filter this input: type-is 2.1.0 parses the type with `parameters: false`, so `application/json; ; ; … !` reads as `application/json`. Measured:
+
+| Input | Result |
+|---|---|
+| In-process, `"; "` × n + `!`, n = 16 / 18 / 20 / 22 / 24 | 1.8 / 13.2 / 30.1 / 112 / 453 ms (×4 per +2); `req.is` = `application/json` in every case |
+| Listener in a child process, n = 20 (57-byte header), POST to a non-existent path, no credentials | 415 after 368 ms; `/health/live` sent meanwhile answered after 169 ms |
+| Same, n = 24 (65 bytes) | 415 after 5,497 ms; `/health/live` answered after 5,275 ms (the event loop was blocked) |
+| Same process, n = 26 (69 bytes), first request (regexp not yet tiered up) | 23,170 ms |
+| Extrapolated (×4 per +2) | n = 30 ≈ 6 min; n = 34 ≈ 1.5 h; n = 40 (97 bytes) ≈ 4 days |
+| Control: 2,000 well-formed `; a=b` parameters (10 KB) | 0.3 ms |
+
+**Exploitability / impact.**
+- **Reach.** Any method and any path work, with a 1-byte body and no credentials. The parser is global and runs before any route, authentication or limiter (PR9-SEC-06). CloudFront and the ALB pass a 100-byte `Content-Type`, and the managed WAF groups have no rule for it.
+- **Effect.** Each request pins one task's only thread. Liveness then fails, and ECS replaces the task. A handful of requests per minute keeps every API task down.
+- **Ease.** Crafting the request is trivial, and the pattern is a textbook ReDoS that public scanners find.
+- **Rating.** Impact H (API-wide availability; no confidentiality or integrity effect) × Likelihood H → **HIGH** (threat-model §1 matrix). The PR9-SEC-01 fix introduced it; R1's suggested `content-type` call had no regex.
+
+**Remediation.** Make the whitespace after `;` part of the optional parameter, so every split is unique (linear), and cap the header length before any pattern runs (belt):
+```ts
+// json-body.ts
+const MEDIA_TYPE = new RegExp(`^[ \\t]*${TOKEN}/${TOKEN}(?:[ \\t]*;(?:[ \\t]*${TOKEN}=(?:${TOKEN}|${QUOTED}))?)*[ \\t]*$`, 'u');
+/** Media types are short; a longer header is refused before any pattern runs (PR9-SEC-14). */
+export const MAX_CONTENT_TYPE_LENGTH = 256;
+
+export function isUtf8JsonContentType(header: string | undefined): boolean {
+  if (header === undefined || header.length > MAX_CONTENT_TYPE_LENGTH || !MEDIA_TYPE.test(header)) return false;
+  // … unchanged
+}
+```
+Proof for the grammar (`probe-redos.mjs`):
+- **Linear.** n = 8,000 empty separators takes 0.42 ms; 4,000 mixed `; \t;` groups take 0.26 ms.
+- **Same language.** Over 50,000 fast-check runs of short headers (8,617 accepted), the shipped grammar and the fixed one gave 0 differing results.
+
+The cap alone is not enough: about 40 separators fit in 256 characters. A hand-written linear scanner (in the style of content-type's) is an equally good alternative. `PARAMETER` (`:32`) runs only on headers that `MEDIA_TYPE` accepted, and stays linear on them.
+
+**Verification.**
+- Unit (`json-body.test.ts`): `isUtf8JsonContentType('application/json' + '; '.repeat(5_000) + '!')` and `'application/json' + ' ;\t'.repeat(5_000)` return `false` within 50 ms each. A fast-check property over strings built from `; \t=a"\\/` up to 300 characters stays under the same budget.
+- API (`problem-handler.api.test.ts`): POST with `Content-Type: application/json` + `'; '.repeat(40)` + `!` and a 1-byte body answers 415 within 1 s, and `/health/live` answers immediately afterwards.
+- Keep the existing 415/201 matrix, and the 27 cases of `probe-charset-r2.mjs`.
+
+#### PR9-SEC-15 (LOW): other npm settings still choose code in the Prisma child chain
+
+**Where.**
+- `tools/deps/prisma-cli.mjs:46` and `tools/deps/rebuild.mjs:162` both run `node <npm-cli> exec --node-options= --no -- prisma …`.
+- `tools/deps/npm-cli.mjs:15`: `npm_execpath` from the environment picks the npm CLI whenever it ends in `npm-cli.js` and exists. This predates the delta.
+
+**Description.** `--node-options=` closes the `node-options` vector (§R2.5). But `npm exec` still runs the bin through npm's `script-shell`, and that setting comes from the same layers: environment, and project, user or global npmrc. Probe with the head's `prismaExecArgs` and `prismaChildEnv`:
+
+| Source | What ran the bin |
+|---|---|
+| none (control) | `cmd` shim (`via: cmd`) |
+| project `.npmrc` `script-shell=<bash.exe>` | `via: sh` |
+| env `npm_config_script_shell=<bash.exe>` | `via: sh` |
+| project `.npmrc` `script-shell=<planted path>` | npm spawned the planted path (ENOENT here) |
+
+On Linux (images and CI), `script-shell` can name any executable. It runs with the child environment and can start `prisma` with `PRISMA_MIGRATION_ENGINE_BINARY` set, which is the PR5-SEC-07 attack again. `npm_execpath` likewise lets the environment substitute the "npm" that `prisma-cli.mjs` starts.
+
+**Exploitability / impact.** The precondition is the same as for PR9-SEC-02: control of the environment, or write access to an npmrc on the machine that runs `db:*`, `deps:rebuild` or the migrate entrypoint. The developer flagged this residual, and D-TASK006-02 routes it. Impact H × Likelihood L with a compound precondition → **LOW**.
+
+**Remediation** (R1 PR9-SEC-02 item 3). Take npm out of the chain:
+```js
+// prisma-cli.mjs and rebuild.mjs (shared helper in prisma-engines.mjs)
+import { createRequire } from 'node:module';
+const req = createRequire(join(REPO_ROOT, 'prisma', 'package.json'));
+const pkgPath = req.resolve('prisma/package.json');
+const { bin } = JSON.parse(readFileSync(pkgPath, 'utf8'));
+const entry = join(dirname(pkgPath), typeof bin === 'string' ? bin : bin.prisma);
+spawnSync(process.execPath, [entry, ...args], { cwd, env: prismaChildEnv(env, engine.path), stdio: 'inherit' });
+```
+In `npmCli()`, stop trusting `npm_execpath` (use only the Node-install-relative candidates), or require it to resolve inside `dirname(process.execPath)`.
+
+**Verification.**
+- Unit: the Prisma argv no longer contains `npm-cli.js`.
+- Integration: a scratch project `.npmrc` with `script-shell=<marker script>` and `node-options=--require <probe>` leaves no marker after `runPrisma(['--version'])`. The positive control is the same `.npmrc` under plain `npm exec`, which writes the marker.
+
+#### PR9-SEC-16 (INFO): `sslrootcert` handling
+
+**Where.** `apps/api/src/platform/db/client.ts:90-97` (`readRootCertificate`).
+
+**Description.**
+- **What the probe confirmed.** A missing file gives `connectionString sslrootcert could not be read`, with neither the path nor the fs error echoed. An empty value and `system` are refused, so they fail closed. A readable file goes into `ca`, which replaces Node's default trust store; that is the intended pinning.
+- **What is not checked.**
+  - The path is any string from the URL. A relative path resolves against the process cwd.
+  - libpq's `sslrootcert=system` keyword is read as a file named `system`.
+  - There is no `isFile` or size check, so a FIFO or `/dev/zero` would hang the process or exhaust its memory at start-up.
+
+The URL is operator-trusted configuration (a secret reference), and the file is read once at start-up, so this is a hardening note.
+
+**Fix (optional, or the TASK-014 preflight).**
+- Require an absolute path under an allow-listed CA directory.
+- Check that `statSync(path).isFile()` is true and the size is at most 1 MB before reading.
+- Refuse `system` explicitly, with a message that names the keyword.
+
+### R2.4 Focus areas from the dispatch
+
+| Focus | Result |
+|---|---|
+| Charset check: parameter parsing, quoted charset, case, multiple charset params | **Logic correct; implementation HIGH (PR9-SEC-14).** All 27 cases pass over a real listener: UTF-7 smuggle, `CHARSET=UTF-7`, quoted and escaped `utf-7`, UTF-16LE/UTF-32, duplicates in either order, spaces around `=`, a tab separator, a parameter without a value, an unterminated quote, garbage after a quote and a comma list all give 415, and the handler never runs. `UTF-8`, quoted and escaped `utf-8`, `+json`, and a `charset=utf-7` text inside another parameter's quoted value give 201. Differential against content-type 2.1.0 (body-parser's view): 20,000 runs, 5,176 accepted, **0** where body-parser would decode a non-UTF-8 charset |
+| Corrupt encodings | Corrupt gzip → 400 `MALFORMED_REQUEST`, `no-store`; valid gzip → 201 |
+| TLS: verify-full for every TLS mode | Holds. With `NODE_TLS_REJECT_UNAUTHORIZED=0` and `PGSSLMODE=no-verify` set, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`, `sslnegotiation=direct` and `sslrootcert`-only URLs all give `ssl: { rejectUnauthorized: true }`. The real `tls.connect` receives `rejectUnauthorized: true` for an IP host (no SNI; `host` is set, so the IP SAN is checked), for a DNS host (`servername` set), and through `dedicatedConnector`. No `checkServerIdentity` override |
+| `no-verify` refusal; URL cannot override | `no-verify` and `%73slmode=no-verify` are refused. `VERIFY-FULL` is refused as an unsupported value. `ssl=0`, `sslcert`, `options` and repeated `sslmode` are refused by the allow-list. `pg` receives the URL without its query (`cs-has-query=false` in every accepted case). Fuzz: 20,000 runs, 6,753 accepted, 0 violations (same target as the original string, no query keys, `ssl` false or pinned, `options` unset) |
+| `PGSSLMODE` / `NODE_TLS_REJECT_UNAUTHORIZED` | `PGSSLMODE` is never read, because `ssl` is always explicit (`false` without `sslmode`). The guard refuses every configured value except `1` in staging and production (exit 78: `0`, `false`, `no`, ` 1`, `1 `, `01` and a marker string), naming the key only, with no value leak in any case. Unset, empty and `1` pass; local allows any value. Valkey: `tls.rejectUnauthorized: true` for DNS, IPv4 and IPv6 hosts; `redis://` has no `tls` |
+| `sslrootcert` path confinement | Not confined; value-free errors (PR9-SEC-16, INFO) |
+| npm `--node-options=` and `NPM_CONFIG_NODE_OPTIONS` drop | **Closed.** Seven sources, each with a positive control that preloads: `npm_config_node_options`, `NPM_CONFIG_NODE_OPTIONS`, `Npm_Config_Node_Options`, project `.npmrc`, user npmrc via `npm_config_userconfig` and via `NPM_CONFIG_USERCONFIG`, and global npmrc via `npm_config_globalconfig`. With the head's argv and env filter, the bin sees `NODE_OPTIONS=""` and no preload. Every Prisma spawn at the head goes through `prismaExecArgs`: `prisma-cli.mjs`, `rebuild.mjs`, and `tools/db/{reset,lint-migrations}.ts` through `prisma-cli.mjs` |
+| Residual `.npmrc` `script-shell` class | Confirmed and rated **LOW** (PR9-SEC-15); route to TASK-007 or a tools/deps follow-up |
+| Dedicated start-up check vs tampering between boot and first pooled use | **No bypass of the start-up check:**<br>• A process-level session default (`PGOPTIONS`-style) is fixed at boot and seen on the dedicated connection.<br>• Durable role or database rows are compared exactly on any connection.<br>• A non-empty tenant context is caught on any probed connection.<br>• `''` on the dedicated connection is tampering.<br><br>Probe: a failure is never cached; the next check uses a new dedicated connection again; after a pass, pooled `''` is accepted; one event per transition. The monitor caught drift injected after recovery with no readiness call and stopped after `close()`. A database that is down at start-up fails closed and is retried.<br><br>Residual (already in PR9-SEC-03 item 2, TASK-016): an `ALTER ROLE platform_app SET … ; … RESET` between two checks (≤ 5 min) leaves pooled connections opened in that window with the tampered defaults. They are invisible to the catalog compare, and the context check sees them only if one happens to be probed. Effective-value assertions on every new physical connection close it |
+| Start-up liveness of the dedicated check | `dedicatedConnector` and `runStartupIntegrityCheck` settle for every realistic failure: no TLS (`N`), broken handshake, close after `S`, silent server (2,010 ms, the connect timeout), auth error. `startup()` resolves and logs `db.session_integrity_failed` with the error class only |
+| Degraded audit stubs not leaking information | Holds. `pendingCheck` rejects with `"<component> check pending"`, but `passes()` never reads rejection messages. The body holds enum statuses only, with `no-store`. The 1 s cached report is not mutated by the router. Draining bypasses the cache |
+
+### R2.5 Round-1 items: closure
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR9-SEC-01 | **Closed as a smuggling control**; implementation regression **PR9-SEC-14** | §R2.4 rows 1–2 |
+| PR9-SEC-02 items 1–2 | **Closed** | 7 sources × positive control (§R2.4) |
+| PR9-SEC-02 item 3 | Open → **PR9-SEC-15** | |
+| PR9-SEC-03 | Open, routed unchanged (TASK-016 factory and effective values; TASK-014 preflight) | Transient set/reset note in §R2.4 |
+| PR9-SEC-04 items 1, 2, 4 | **Closed** | §R2.4 TLS rows; config probe |
+| PR9-SEC-04 item 3 (`NODE_EXTRA_CA_CERTS` allow-list) | Open → TASK-014 | |
+| PR9-SEC-05 | **Closed** | `session-integrity.ts:189` unref'd timer; probe |
+| PR9-SEC-06 | Open, routed (TASK-108, TASK-020). Note: parsing after the step-0 limiter would also bound any future parser-cost defect of the PR9-SEC-14 kind | |
+| PR9-SEC-07 | **Closed** | Re-run of `probe-http.mjs`: the BigInt `errors` entry and the Proxy posing as `AppError` both give 500 `application/problem+json`, `no-store`, no HTML, no stack, no leak. Cosmetic: the fallback title is `Internal server error`, while the catalogue's is `Internal error` (code review). The headers-sent path is unchanged (stderr line `AppError: INTERNAL_ERROR`, code only) |
+| PR9-SEC-08 | **Closed** | Single-flight plus a 1 s report cache (`readiness.ts:61`); draining is uncached |
+| PR9-SEC-09 | **Partial**: problem documents now carry `Cache-Control: no-store` and drop `ETag`/`Last-Modified`/`Content-Disposition`/`Content-Language`. `nosniff`/CSP stay with TASK-111 | |
+| PR9-SEC-10, -12, -13 | Unchanged, routed as in R1 §7 | |
+| PR9-SEC-11 | **Closed** | `readiness.ts:205`; audit components read `degraded` (HTTP 200); tripwire tests in `services.test.ts` |
+
+### R2.6 Checks owed by later reviews (additions to R1 §7)
+
+- **This PR, round 3 (targeted).**
+  - PR9-SEC-14: the linear grammar and the length cap.
+  - The unit timing test and the API test listed under its Verification.
+  - Re-run `probe-charset-r2.mjs` and `redos-client.mjs` (n = 40 must answer 415 at once).
+- **TASK-007 / tools/deps follow-up.** PR9-SEC-15: spawn the Prisma bin with `process.execPath` and no npm, and stop trusting `npm_execpath`.
+- **TASK-014.**
+  - `NODE_EXTRA_CA_CERTS` allow-list (PR9-SEC-04 item 3).
+  - Optionally, `sslrootcert` confinement (PR9-SEC-16).
+  - Everything else listed in R1 §7.
+- **TASK-016.** Effective-value assertions on every new physical connection (PR9-SEC-03 item 2), which also covers the transient set/reset window.
+- **TASK-020 / TASK-108.** Body parsing after the step-0 limiter. For every parser of request headers or bodies: a linear grammar, a length cap, and a timing test.
+
+### R2.7 Verdict
+
+**FAIL** at head `05855b1`: 0 Critical, **1 HIGH (PR9-SEC-14)**, 0 Medium, 1 LOW new (PR9-SEC-15), 1 INFO new (PR9-SEC-16). Of the R1 items, 01, 02 (items 1–2), 04 (items 1, 2, 4), 05, 07, 08 and 11 are closed; the rest stay routed as listed.
+
+Once PR9-SEC-14 is fixed and verified, the expected verdict is PASS_WITH_FOLLOW-UPS. No other change is needed for this PR.

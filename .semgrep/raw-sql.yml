@@ -1,0 +1,54 @@
+# Parameterised queries only (REQ-SEC-009, CWE-89, ADR-0003/ADR-0005). Raw SQL lives in migrations and in reviewed,
+# parameterised repository functions (Prisma tagged templates, Prisma.sql, pg placeholders). Runs with --disable-nosem
+# from the base ref. Fixtures: tests/fixtures/semgrep/raw-sql.ts (semgrep --test).
+rules:
+  - id: platform.raw-sql.unsafe-api
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [REQ-SEC-009] Unsafe raw-query API; use the tagged template ($queryRaw`…${value}…`) or Prisma.sql, which bind
+      parameters.
+    paths:
+      include:
+        - /apps/
+        - /packages/
+        - /prisma/
+        - /tools/
+      exclude:
+        - '*.test.ts'
+        - '*.test.tsx'
+        - test/
+        - tests/
+        - __tests__/
+        - fixtures/
+    pattern-either:
+      - pattern: $C.$queryRawUnsafe(...)
+      - pattern: $C.$executeRawUnsafe(...)
+      - pattern: Prisma.raw(...)
+      - pattern: $X.Prisma.raw(...)
+
+  - id: platform.raw-sql.interpolated-query
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      [REQ-SEC-009] SQL text built by interpolation or concatenation is passed to a driver query; use placeholders
+      ($1, $2 …) with a values array, or Prisma's tagged templates. Only the database platform
+      (apps/*/src/platform/db) issues driver-level SQL.
+    paths:
+      include:
+        - /apps/
+        - /packages/
+      exclude:
+        - /apps/*/src/platform/db/
+        - '*.test.ts'
+        - '*.test.tsx'
+        - test/
+        - tests/
+        - __tests__/
+        - fixtures/
+    pattern-either:
+      - pattern: $C.query(`...${$E}...`, ...)
+      - pattern: '$C.query("..." + $E, ...)'
+      - pattern: '$C.query($E + "...", ...)'
+      - pattern: $C.$queryRaw(`...${$E}...`, ...)
+      - pattern: $C.$executeRaw(`...${$E}...`, ...)

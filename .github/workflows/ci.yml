@@ -1,0 +1,403 @@
+# Lane A: hosted PR fast lane (ADR-0023 amendments A, F, I, J; D-ARCH-010; TASK-007).
+#
+# - Runs on non-draft pull requests, and on pushes to main only when the repository variable CI_MAIN_FAST_LANE is
+#   'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac) is workflow_dispatch-only and
+#   belongs to TASK-015. Nothing here deploys, pushes images, publishes packages or runs terraform.
+# - Jobs: fast-lane (classify, base-ref gates, install, tests, build) and scans (gitleaks, Semgrep, security-review
+#   record) run in parallel on separate runners; ci-gate aggregates them. scans runs no npm and no head script, so code
+#   that fast-lane executes from the PR (deps:rebuild, lint, tests, build) cannot tamper with it (PR10-SEC-02).
+# - Gating is procedural (D-ORCH-012/013, review m6): this private repository's plan has no branch protection or
+#   rulesets, so no check can be "required". The orchestrator merges only with
+#   `gh pr merge <n> --squash --match-head-commit <sha> --subject "<linted subject>"` after ci-gate concluded `success`
+#   (not skipped) for that exact SHA and the security record names it. A draft PR gets a red ci-gate, never a skipped one.
+# - No secrets: GITHUB_TOKEN (read-only) is the only credential (ADR-0023 amendment H).
+# - Gate tooling (tools/ci, .semgrep, .gitleaks.toml, .semgrepignore, .gitignore, the lint fixture harness) runs from
+#   the BASE ref when the base has it (SEC-P3-31); a checker the base does not have yet is bootstrapped from the head and
+#   the job summary says so. A checker's CLI therefore changes in two steps: first accept the new argument, then use it.
+# - Every action is pinned by commit SHA and every container tool by image digest; tools/ci/check-workflow-policy.mjs
+#   enforces this file's rules for every workflow, and CI_REQUIRED_GATES keeps the gate steps below in place.
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+    # Mirrors the docs-only classifier below: a push of docs/agent notes alone does not start the lane.
+    paths-ignore:
+      - 'docs/**'
+      - '.claude/**'
+      - '**/*.md'
+
+permissions:
+  contents: read
+
+# Pull requests share one group per PR, so a newer push cancels the superseded run. Pushes to main get one group per
+# commit and are never cancelled: every pushed range must be gitleaks- and commitlint-scanned (review m5 (b)).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  # D-ARCH-044 / ADR-0023 am. J item 5: required at workflow level in every workflow.
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+  # Container tools, by digest (tag kept for readability; the digest wins).
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  ACTIONLINT_IMAGE: docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  OSV_SCANNER_IMAGE: ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
+
+jobs:
+  fast-lane:
+    name: fast-lane
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'push' && vars.CI_MAIN_FAST_LANE == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      # PR1-SEC-03 (c): job level as well, so an out-of-graph nested install inherits it.
+      NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+      RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout (full history for the base ref and the PR commit range)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # From the local clone (no API call, no file cap, no separate billed job; review m5 (a), PR10-SEC-11). Renames
+      # count as both paths. An unknown range (new branch, missing before-SHA) classifies as code and runs everything.
+      - name: Classify changed paths
+        run: |
+          set -euo pipefail
+          files="$RUNNER_TEMP/changed.txt"
+          if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then
+            git diff --name-only --no-renames "$RANGE_BASE...$RANGE_HEAD" > "$files"
+          else
+            : > "$files"
+          fi
+          count=$(wc -l < "$files")
+          # Docs-only (docs/, .claude/ notes, *.md) skips install-dependent gates except commitlint. .claude/settings.json
+          # holds hooks and permissions, so it is code (PR10-SEC-04).
+          if [ "$count" -gt 0 ] && ! grep -qvE '^(docs/|\.claude/)|\.md$' "$files" && ! grep -qxF '.claude/settings.json' "$files"; then
+            code=false
+          else
+            code=true
+          fi
+          if grep -qE '^(eslint\.config\.mjs|stylelint\.config\.mjs|\.stylelintignore|jest\.config\.ts|tools/(eslint-rules|stylelint-rules|lint|test-support)/|tests/fixtures/(lint|semgrep)/|\.semgrep/|package\.json$)' "$files"; then
+            lint_controls=true
+          else
+            lint_controls=false
+          fi
+          {
+            echo "CODE=$code"
+            echo "LINT_CONTROLS=$lint_controls"
+          } >> "$GITHUB_ENV"
+          echo "changed files: $count, code=$code, lint_controls=$lint_controls"
+
+      - name: Gate tooling from the base ref (SEC-P3-31)
+        run: |
+          set -euo pipefail
+          base_dir="$RUNNER_TEMP/base"
+          mkdir -p "$base_dir"
+          for path in tools/ci .github/CODEOWNERS; do
+            if git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then
+              git archive "$RANGE_BASE" "$path" | tar -x -C "$base_dir"
+            fi
+          done
+          {
+            echo "## Lane A (fast lane)"
+            echo
+            echo "Range \`${RANGE_BASE:0:7}..${RANGE_HEAD:0:7}\`, code changes: \`$CODE\`."
+            echo
+            echo "| Gate tool | Runs from |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for tool in check-workflow-policy check-install-flags check-migration-immutability check-lockfile check-dep-age licence-check check-audit check-porcelain; do
+            var="GATE_$(echo "$tool" | tr 'a-z-' 'A-Z_')"
+            if [ -f "$base_dir/tools/ci/$tool.mjs" ]; then
+              echo "$var=$base_dir/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
+              echo "| \`$tool\` | base ref |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$var=$GITHUB_WORKSPACE/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
+              echo "| \`$tool\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Workflow policy
+        run: node "$GATE_CHECK_WORKFLOW_POLICY" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Install flags (check-install-flags with check-no-npx and check-no-raw-prisma)
+        run: node "$GATE_CHECK_INSTALL_FLAGS" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Released migrations are immutable (PR8-SEC-01)
+        run: node "$GATE_CHECK_MIGRATION_IMMUTABILITY" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Lockfile provenance and delta
+        if: env.CODE == 'true'
+        run: node "$GATE_CHECK_LOCKFILE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Release cooldown and freshness
+        if: env.CODE == 'true'
+        run: |
+          set -euo pipefail
+          node "$GATE_CHECK_DEP_AGE" --fetch --out "$RUNNER_TEMP/registry-times.json" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE"
+          node "$GATE_CHECK_DEP_AGE" --times "$RUNNER_TEMP/registry-times.json" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --summary "$GITHUB_STEP_SUMMARY"
+
+      # Unconditional: docs-only PRs need commitlint too (their title becomes a main header).
+      - name: Install (npm ci --ignore-scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # Licences, signatures and advisories read node_modules and the lockfile only, so they run before any lifecycle or
+      # head code (deps:rebuild, lint, tests) can touch the runner (PR10-SEC-02 item 2).
+      - name: Licences
+        if: env.CODE == 'true'
+        run: node "$GATE_LICENCE_CHECK" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Registry signatures and provenance (PR1-SEC-12)
+        if: env.CODE == 'true'
+        run: npm audit signatures --@platform:registry=https://registry.npmjs.org/
+
+      - name: Vulnerability audit (npm audit + osv-scanner)
+        if: env.CODE == 'true'
+        run: |
+          # Both scanners exit non-zero when they report anything; check-audit is the gate and fails on missing or
+          # error JSON, so their exit codes are recorded rather than acted on here.
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          echo "npm audit exit $? (evaluated by check-audit)"
+          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" "$OSV_SCANNER_IMAGE" scan source --lockfile /src/package-lock.json --format json > "$RUNNER_TEMP/osv.json"
+          echo "osv-scanner exit $? (evaluated by check-audit)"
+          set -e
+          node "$GATE_CHECK_AUDIT" --root "$GITHUB_WORKSPACE" --npm-audit "$RUNNER_TEMP/npm-audit.json" --osv "$RUNNER_TEMP/osv.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Prisma engine cache key
+        if: env.CODE == 'true'
+        id: engines
+        run: |
+          set -euo pipefail
+          version=$(node -e "process.stdout.write(JSON.parse(require('node:fs').readFileSync('tools/deps/prisma-engines.json','utf8')).enginesVersion)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Prisma schema engine (re-verified by deps:rebuild)
+        if: env.CODE == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+          key: prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}
+
+      - name: Allow-listed install steps (deps:rebuild)
+        if: env.CODE == 'true'
+        run: npm run deps:rebuild
+
+      # The PR title is linted because merges are squash merges with an explicit, linted subject (D-TASK007-08,
+      # D-ORCH-012): the orchestrator re-lints the exact subject before `gh pr merge --squash --subject`, which also
+      # covers a title edited after this run (no `edited` trigger, to save minutes). Per-commit messages are checked at
+      # the source by the commit-msg hook (npm run hooks:install); linting every PR commit would make one pushed typo
+      # unfixable under the no-force-push rule. Pushes to main lint their pushed range.
+      - name: Commit messages (commitlint; PR title = squash subject, pushed range on main)
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            printf '%s\n' "$PR_TITLE" | npm exec --no -- commitlint --verbose
+          else
+            npm exec --no -- commitlint --from "$RANGE_BASE" --to "$RANGE_HEAD" --verbose
+          fi
+
+      - name: Lint (ESLint, Stylelint, suppressions)
+        if: env.CODE == 'true'
+        run: npm run lint
+
+      - name: Format check
+        if: env.CODE == 'true'
+        run: npm run format:check
+
+      - name: actionlint
+        run: docker run --rm --network none -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color
+
+      - name: Type-check
+        if: env.CODE == 'true'
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: env.CODE == 'true'
+        run: npm run test:unit
+
+      - name: Lint negative fixtures from the base ref against the head configs (PR2-SEC-08)
+        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'
+        run: |
+          set -euo pipefail
+          suite=tools/lint/negative-fixtures.test.ts
+          if ! git cat-file -e "$RANGE_BASE:$suite" 2>/dev/null; then
+            echo "Base ref has no $suite; the head copy already ran in the unit tests." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Exact base copies of the suite, its fixtures and its harness (review m3: the harness and the process helper
+          # come from the base too). Head-only files are removed first: a checkout alone would keep files the PR added.
+          base_paths=("$suite" tests/fixtures/lint)
+          rm -rf tests/fixtures/lint
+          for path in tools/lint/lint-fixtures.mjs tools/test-support; do
+            if git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then
+              rm -rf "$path"
+              base_paths+=("$path")
+            fi
+          done
+          git checkout "$RANGE_BASE" -- "${base_paths[@]}"
+          # The control is "no weakening": every base bad-* fixture must still be reported by the head configs.
+          # Positive assertions (ok-* fixtures lint clean, every bad-* listed, the exact lint-script steps) may change
+          # legitimately when a PR strengthens the rules, and the head suite already ran them in the unit tests.
+          status=0
+          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js "$suite" \
+            --selectProjects unit \
+            --testNamePattern '^(?!.*(allowed: |lints clean|is listed in the case table|npm run lint. runs))' || status=$?
+          rm -rf tests/fixtures/lint tools/test-support
+          git checkout HEAD -- "$suite" tests/fixtures/lint tools/test-support tools/lint/lint-fixtures.mjs
+          echo "Base-ref lint negative fixtures (no-weakening subset): exit $status" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Build
+        if: env.CODE == 'true'
+        run: npm run build
+
+      - name: Build must not mutate the tree (git status --porcelain)
+        if: env.CODE == 'true'
+        run: node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Semgrep rule self-test (when rules or their fixtures change)
+        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'
+        run: node tools/ci/run-semgrep.mjs --root "$GITHUB_WORKSPACE" --test --summary "$GITHUB_STEP_SUMMARY"
+
+  # Isolated scans (PR10-SEC-02): a fresh runner that never runs npm, node_modules or a workspace script, so nothing the
+  # PR controls executes before these gates. Gate scripts and their configuration come from the base ref; while the base
+  # lacks one (bootstrap) the head copy is extracted with `git archive` and the summary says so.
+  scans:
+    name: scans
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'push' && vars.CI_MAIN_FAST_LANE == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      EVENT: ${{ github.event_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout (full history for the base ref and the PR commit range)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node (literal version, no cache)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Gate tooling and scan configuration from the base ref (SEC-P3-31, PR10-SEC-03)
+        run: |
+          set -euo pipefail
+          gates="$RUNNER_TEMP/gates"
+          mkdir -p "$gates/base" "$gates/head"
+          base_ok=false
+          if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then base_ok=true; fi
+          {
+            echo "## Lane A (scans)"
+            echo
+            echo "| Gate input | From |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for path in tools/ci .semgrep .gitleaks.toml .semgrepignore .gitignore; do
+            if [ "$base_ok" = true ] && git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then
+              git archive "$RANGE_BASE" "$path" | tar -x -C "$gates/base"
+              echo "| \`$path\` | base ref |" >> "$GITHUB_STEP_SUMMARY"
+            elif git cat-file -e "$RANGE_HEAD:$path" 2>/dev/null; then
+              git archive "$RANGE_HEAD" "$path" | tar -x -C "$gates/base"
+              echo "| \`$path\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          if [ "$base_ok" = true ] && git cat-file -e "$RANGE_BASE:tools/ci/check-security-owned-paths.mjs" 2>/dev/null; then
+            echo "RECORD_MODE=enforce" >> "$GITHUB_ENV"
+          else
+            echo "RECORD_MODE=report-only" >> "$GITHUB_ENV"
+          fi
+          echo "GATES_DIR=$gates/base" >> "$GITHUB_ENV"
+          # A script the base tools/ci lacks runs from the head tree's git objects (bootstrap), never the working tree.
+          for tool in run-semgrep check-security-owned-paths; do
+            var="GATE_$(echo "$tool" | tr 'a-z-' 'A-Z_')"
+            if [ -f "$gates/base/tools/ci/$tool.mjs" ]; then
+              echo "$var=$gates/base/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
+            else
+              [ -d "$gates/head/tools/ci" ] || git archive "$RANGE_HEAD" tools/ci | tar -x -C "$gates/head"
+              echo "$var=$gates/head/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
+              echo "| \`tools/ci/$tool.mjs\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      # Only .git is mounted: gitleaks loads <source>/.gitleaksignore unconditionally, so no working-tree file may reach
+      # /repo. Inline allow markers are inert, merge commits are diffed against their first parent, no network
+      # (PR10-SEC-01, review M2). The config is the base ref's, so a PR cannot widen its own allowlist.
+      - name: Gitleaks (PR commit range)
+        run: |
+          set -euo pipefail
+          range="$RANGE_BASE..$RANGE_HEAD"
+          if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ]; then range="-1 $RANGE_HEAD"; fi
+          docker run --rm --network none \
+            -v "$GITHUB_WORKSPACE/.git:/repo/.git:ro" -v "$GATES_DIR/.gitleaks.toml:/config/gitleaks.toml:ro" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+            "$GITLEAKS_IMAGE" git /repo --config /config/gitleaks.toml \
+            --log-opts="--diff-merges=first-parent $range" --ignore-gitleaks-allow \
+            --redact --no-banner --exit-code 1
+
+      - name: Semgrep (rules, .semgrepignore and .gitignore from the base ref; --disable-nosem)
+        run: node "$GATE_RUN_SEMGREP" --root "$GITHUB_WORKSPACE" --rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)
+        run: |
+          set -euo pipefail
+          mode=()
+          if [ "$RECORD_MODE" = "report-only" ]; then mode=(--report-only); fi
+          if [ "$EVENT" = "pull_request" ]; then
+            node "$GATE_CHECK_SECURITY_OWNED_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --pr "$PR_NUMBER" "${mode[@]}" --summary "$GITHUB_STEP_SUMMARY"
+          else
+            # A pull-request control: records name branch commits, never the squash commit on main (PR10-SEC-04 item 4).
+            echo "Security-owned paths record: pull-request control, not evaluated on push." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  ci-gate:
+    name: ci-gate
+    # Runs unless the workflow was cancelled; a skipped lane (draft PR) is not green (PR10-SEC-11, review m5 (d)).
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}
+    needs: [fast-lane, scans]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Aggregate lane A
+        env:
+          FAST_LANE: ${{ needs.fast-lane.result }}
+          SCANS: ${{ needs.scans.result }}
+        run: |
+          echo "fast-lane=$FAST_LANE scans=$SCANS"
+          if [ "$FAST_LANE" != "success" ] || [ "$SCANS" != "success" ]; then
+            echo "Lane A is not green (a draft PR is not gated: mark it ready for review)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Lane A green." >> "$GITHUB_STEP_SUMMARY"
