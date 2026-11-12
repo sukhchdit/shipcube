@@ -1,0 +1,21 @@
+{
+  "skipToContent": "Aller au contenu",
+  "loading": "Chargement",
+  "shell": {
+    "name": "Espace du personnel"
+  },
+  "home": {
+    "title": "Console des opérateurs",
+    "lead": "La connexion et le journal d'audit arriveront dans une prochaine version."
+  },
+  "error": {
+    "title": "Un problème est survenu",
+    "description": "Rechargez la page pour réessayer. Si le problème persiste, revenez dans quelques minutes.",
+    "retry": "Réessayer"
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "L'adresse est peut-être incorrecte, ou la page a peut-être été déplacée."
+  },
+  "goHome": "Retour à l'accueil"
+}
