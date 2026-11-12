@@ -307,14 +307,18 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Files / modules**
 - packages/carriers/src/auth/token-cache.ts
+- packages/config/src/schema.ts (+ .env.example): CARRIER_TOKEN_REFRESH_SKEW_S (60), CARRIER_TOKEN_TTL_MAX_S (3600)
 
 **Acceptance tests to write**
 - All US-129 scenarios
 - SEC-TC-50: Redis SCAN after OAuth contract tests finds no plaintext token pattern
+- ADR-0010 am. 11 item 5 (D-ARCH-057): no hard-coded token lifetime — ttl = clamp(Number(expires_in) - CARRIER_TOKEN_REFRESH_SKEW_S, 0, CARRIER_TOKEN_TTL_MAX_S); `expires_in` accepted as a numeric string (UPS); a missing or non-numeric `expires_in` makes the token uncacheable (one-shot use, metric carrier_token_uncacheable_total{account}, one warning per account per hour); single in-flight refresh per account
+- ADR-0010 am. 11 item 5 token-endpoint failures (PR6-SEC-05, with TASK-132): negative cache `carrier:tokenfail:<account_id>` on 400/401 (CARRIER_TOKEN_FAIL_TTL_S = 60) → fail fast CARRIER_UNAVAILABLE, counts toward the account breaker; global token-request bucket per carrier and egress shared across replicas (FedEx 1/s burst 3; CARRIER_TOKEN_REQUESTS_PER_S per carrier); token-endpoint 403 → carrier-wide cool-down CARRIER_TOKEN_PENALTY_COOLDOWN_S = 600 for all accounts, no retries, security/ops event, never treated as "refresh"; SEC-TC-68 (nock + fake clock: ≤ 13 token requests in 10 s with one failing account across three; zero requests during the cool-down, one probe after)
 - AT-US-129-01 … AT-US-129-05: all 5 scenarios of US-129, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
+- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-132 — Carrier resilience: timeouts, idempotent-only retries, breaker, rates + transactional bulkheads
@@ -423,6 +427,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-131 scenarios; shared contract suite green; @live-sandbox variant tagged
+- ADR-0010 am. 11 (SPK-02, D-ARCH-057): `capabilities().operations.cancelShipment = false`; `cancelShipment` returns CAPABILITY_NOT_SUPPORTED with no network I/O (contract case `cancel-capability-not-supported-no-io`); EGRESS rules = exact origin https://express.api.dhl.com with prefix /mydhlapi/test/ (sandbox) vs /mydhlapi/ (production) and a unit test that a sandbox context never emits a request outside /mydhlapi/test/; both tracking forms (single with GMT offsets, batch <= 200); `operations.recoverLabel = false`; fixtures flagged `"_fixture": "synthesised"`; README keeps the "Diffed against official spec by a person" line (no until a human diffs) and gains the "PII and redaction" subsection (requestorName and /rates query parameters stripped from logged URLs); trackingUrl/cancelPickupUrl never dereferenced
+- ADR-0010 am. 11 item 9 (PR #6 code review n6): after an ambiguous createShipment (timeout/5xx) the shipment is EXCEPTION per DR-B04 G2 and a reconciliation lookup by shipper reference through tracking is the operator's resolution input; fixture `create-timeout-then-tracking-reconcile`
 - AT-US-131-01 … AT-US-131-09: all 9 scenarios of US-131, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -532,6 +538,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-132 scenarios; shared contract suite green
+- ADR-0010 am. 11 (SPK-02, D-ARCH-057): a 200 response with a non-empty `errors[]` is treated as an error; 429 honours Retry-After (else 10 s); EGRESS rules = exact origins https://apis-sandbox.fedex.com / https://apis.fedex.com (prefix /), and the ETD origins https://documentapitest.prod.fedex.com prefix /sandbox/ / https://documentapi.prod.fedex.com only while `uploadCustomsDocuments` is declared supported and verified on an official page (no suffix matching: the sandbox host contains "prod"); `labelResponseOptions = LABEL` (inline bytes), URL_ONLY kept as a negative fixture, `ship-pdf-label-url-only` withdrawn; `operations.recoverLabel = false`; `maxTrackingNumbersPerCall = 30`; a token-endpoint 403 stops refreshes carrier-wide (am. 11 item 5, TASK-131); fixtures flagged `"_fixture": "synthesised"`; README keeps the "Diffed against official spec by a person" line and gains the "PII and redaction" subsection; sources cite a commit SHA
 - AT-US-132-01 … AT-US-132-09: all 9 scenarios of US-132, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -559,6 +566,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-133 scenarios; shared contract suite green
+- ADR-0010 am. 11 item 3 (SPK-02, PR #6 code review M1, D-ARCH-057 rev 2, R-ARCH-25): createShipment requests GIF (ZPL for thermal services) and returns labels: [] for the PDF formats — the GIF survives only as a `$blob` in the raw payload and is never a document; `labelFormats = [PDF_4X6, ZPL]`; `capabilities().operations.recoverLabel = true` and `recoverLabel(ref, [PDF_4X6])` calls POST /labels/v1/recovery with LabelImageFormat.Code = PDF (official, Shipping.yaml@fd57ca9:13479-13496; unverified in CIE → fixtures synthesised, COND-SANDBOX-DEMO); no pdfkit, no raster decoding and no PDF rendering in packages/carriers
+- ADR-0010 am. 11 items 1, 5, 6 and 8: void = DELETE /shipments/v2409/void/cancel/{id}; token path /security/v1/oauth/token outside /api; `expires_in` parsed from a string and never defaulted; EGRESS rules = exact origin wwwcie.ups.com / onlinetools.ups.com with prefixes /api/ and /security/v1/oauth/token (unit test: a sandbox context never emits a production URL); `maxTrackingNumbersPerCall = 1`; LabelURL never dereferenced (inline GraphicImage only); README "PII and redaction" subsection; sources cite a commit SHA
 - AT-US-133-01 … AT-US-133-08: all 8 scenarios of US-133, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

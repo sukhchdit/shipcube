@@ -4,3 +4,5 @@
 - [P3 alignment decisions](project_p3_alignment_decisions.md) — D-038..D-045, A-083..A-092; wording-only REQ/NFR/story edits for G2; row pairs that move together; APP_ENV key
 - [P3 security remediation](project_p3_security_remediation.md) — D-046..D-052 (D-038 superseded), new REQ/US IDs, v1.3 count baselines 434/91/293, pairs that move together
 - [G2-C3 requirement closure](project_g2c3_requirement_closure.md) — D-053..D-057, A-099..A-102; quote-create class, org quota share, cvc_check, share 404, v1.4 (counts unchanged)
+- [D-058 self-service permissions](project_d058_self_service_permissions.md) — PR #8 matrix ruling; session/notification_pref/notification:read on all 17 roles; grant deltas; v1.5; check route tenancy before least-privilege
+- [D-059 batch-3 alignment](project_d059_batch3_alignment.md) — Platform-side void (DHL), recoverLabel, token-endpoint failure path, README diff field, no push scheme; A-105..A-107; v1.6/NFR 1.5; pairs that move together

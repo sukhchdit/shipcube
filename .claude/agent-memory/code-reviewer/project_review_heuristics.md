@@ -23,3 +23,29 @@ These patterns were confirmed in PR #3 (TASK-005, 2026-11-12) with small scratch
 
 **Why:** each of these passed the author's own tests, because the tests used cooperative fakes.
 **How to apply:** check every config, guard, secret or timeout diff against this list. See [[review-watchlist]] and [[scratch-copy-technique]].
+
+**Docs/spike PRs (PR #6, 2026-11-12).** Re-read the cited sources yourself (gh api for GitHub, curl for raw spec YAML into the scratchpad). Do three things:
+- Check whether a cited third-party source holds *more* evidence than the author used. PR #6 cited an SDK README, but the SDK source had the "unverified" paths.
+- Test every "use library X for Y" premise against the installed library's code (pdfkit image sniffing).
+- Check that recommended options are mapped to the REQ that consumes them, not only the capability REQ.
+Host allow-lists are host-based (REQ-SEC-010), so carriers sharing a host across sandbox and production need path/env binding.
+Round 2 of a spike PR (PR #6 r2):
+- Re-read the *decided* path's schema for self-contradictions. Example: the UPS Label Recovery `Code` has minLength 4, but `PDF` is 3 characters.
+- Path-prefix allow-list entries without a trailing `/` need segment-boundary matching.
+- npm `time.modified` is not a release date; use `time[dist-tags.latest]`.
+- Requirements (US AC) that land on main after the PR head can rename required README headings. Grep main for the literal strings a future docs-check will parse.
+
+**Timing assertions in required suites (PR #7, 2026-11-12).** Wall-clock p95 deltas asserted in `*.int.test.ts` run on every `test:integration`. Heavy suites run on the contended local host (D-ORCH-001). When headroom is only about 2× and the doc itself records run-to-run swings, require an opt-in env flag; the doc table is the record. Lower-bound timer checks (e.g. `>= 1900` for a 2000 ms maxWait) are fine.
+**Pool reset.** `@prisma/adapter-pg` `commit()`/`rollback()` only call `client.release()`, with no DISCARD/RESET. Any session-level `SET` leaks to the next checkout. Check every DB-context diff for session-level settings.
+
+**Authz guards (PR #8, 2026-11-12):**
+- Invariants keyed on a free-text field of the guarded data (such as `category`) are bypassable. Probe by re-categorising a write permission and granting it.
+- Generators that write a migration path keyed by an unchanged version number rewrite applied migrations in place. Ask for a content pin per released version.
+- Segment-position verb rules ("verb = last segment"): probe a NEW verb in the middle segment with a read qualifier (`res:purge:read`). A deny-list built from the catalogue's own verbs misses it (PR #8 r2, R2-m1); ask for a declared sub-resource allow-list.
+- Raw-byte content pins: check `git ls-files --eol` (needs the `eol=lf` attr) and prove a CRLF copy fails CLOSED. Note when the pin lives beside the thing it pins.
+- Check every "read-only role" rule against self-service routes (`/me/sessions`), because ASVS V3.3.4 needs session list and revoke for every user.
+
+**Opt-in gates and the docs downstream of them (PR #7 r2, 2026-11-12).**
+- When a fix moves a check behind an env flag, grep the plan sheet (WAVE-*.md / plan-data.mjs) and the ADR text that consume it. Plan lines written before the fix often say "runs in job X" without setting the flag. The job then silently skips the check and still reports success.
+- ADR controls must be enforceable by the engine. Placeholder `app.*` GUCs are USERSET: PostgreSQL cannot deny a role from setting them at session level, and `GRANT SET ON PARAMETER` does nothing for USERSET parameters. A "prove X cannot be set" control is therefore infeasible; the control is a lint/Semgrep token ban plus a negative control that proves the leak.
+- Fixed claims come back. A finding corrected in the spike doc (for example, "existing lint rule") can reappear in an ADR amendment that was drafted from the pre-fix SHA. Diff the claims in each amendment against the fixed doc.
