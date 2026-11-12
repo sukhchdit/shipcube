@@ -1,1 +1,2 @@
 - [Plan generation workflow](feedback_plan_generation.md) — P4 plan is generated from generator/plan-data.mjs (never hand-edit); late IDs; Bash quoting pitfall
+- [P5 worktrees](feedback_p5_worktrees.md) — implement tasks in ../Shipqube-TASK-xxx worktrees; main checkout is shared with other agents

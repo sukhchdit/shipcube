@@ -20,7 +20,7 @@ Version 1.0 · 2026-11-12 · owner principal-architect · Draft for G2. Source o
 |---|---|---|---|
 | SCALE-001 | Horizontal scaling only (replica count + config); no in-process state; Redis-shared counters/caches; outbox + idempotent consumers | ADR-0003, ADR-0004, ADR-0013 | Same images at 1× (1 api/1 worker) and 10× load with 2+ replicas; capacity note (PARTIAL) |
 | SCALE-002 | Sessions/revocation/rate limits/authz cache in Redis; BullMQ job IDs + `job_executions`/`processed_events` dedupe; deterministic saga keys; compose `edge` proxy for scale-out | ADR-0006, ADR-0013, ADR-0014, platform.md §2 | `docker compose --scale api=2 --scale worker=2` suite run; kill one api under load; duplicate-effect audit over 1 000 bookings |
-| SCALE-003 | prom-client gauges (CPU via process metrics, request count, queue depth per queue) → ADOT → CloudWatch; Terraform ECS service autoscaling policies (ALB RequestCountPerTarget, CPU, custom queue depth) | ADR-0017, ADR-0022, platform.md §5 | Metrics scrape test in CI; `terraform validate` + Checkov; observed scaling DEFERRED to M5 |
+| SCALE-003 | `@prometheus-io/client` gauges (replaces the deprecated `prom-client`, ADR-0017 am. 1; CPU via process metrics, request count, queue depth per queue) → ADOT → CloudWatch; Terraform ECS service autoscaling policies (ALB RequestCountPerTarget, CPU, custom queue depth) | ADR-0017, ADR-0022, platform.md §5 | Metrics scrape test in CI; `terraform validate` + Checkov; observed scaling DEFERRED to M5 |
 
 ## Availability and recovery (NFR-AVAIL, NFR-REC)
 
@@ -130,7 +130,7 @@ Version 1.0 · 2026-11-12 · owner principal-architect · Draft for G2. Source o
 | NFR | Mechanism | ADR / design | Verification approach |
 |---|---|---|---|
 | OBS-001 | Pino JSON with `correlation_id`, `org_id`/`none`, `actor_id`/`system`/`anonymous`, service, version; `X-Correlation-Id` echo | ADR-0017 §1–2 | JSON-Schema validation of all captured lines in e2e; header ↔ log match |
-| OBS-002 | prom-client RED per route template + queue metrics; cardinality guard | ADR-0017 §3 | `/metrics` scrape after exercising all routes vs route metadata; series-count test |
+| OBS-002 | `@prometheus-io/client` (ADR-0017 am. 1) RED per route template + queue metrics; cardinality guard | ADR-0017 §3 | `/metrics` scrape after exercising all routes vs route metadata; series-count test |
 | OBS-003 | OTel SDK with auto-instrumentations; manual spans for BullMQ with `trace_context` in payloads; compose `observability` profile | ADR-0017 §4, ADR-0004 §7 | In-memory exporter test asserting one trace ID across API → queue → worker → carrier for a Mock booking |
 | OBS-004 | Metric/log catalogue, SLI definitions, burn-rate alert rules and dashboards as code (Terraform CloudWatch module), runbook skeletons | ADR-0017 §6, platform.md §8/§12 | Documents reviewed; live dashboards/alerts DEFERRED |
 
@@ -150,7 +150,7 @@ Version 1.0 · 2026-11-12 · owner principal-architect · Draft for G2. Source o
 | NFR | Mechanism | ADR / design | Verification approach |
 |---|---|---|---|
 | OPS-001 | Compose with health checks and `depends_on` conditions; one-shot migrate+seed job; idempotent seeds; `down -v` clean | platform.md §2, ADR-0002 | CI `docker compose up -d --wait` from clean checkout + smoke sign-in/quote; timer |
-| OPS-002 | Multi-stage Dockerfiles, `node:24-trixie-slim` and `nginx-unprivileged` pinned by digest, non-root, HEALTHCHECK, `npm ci --omit=dev --ignore-scripts` followed by the allow-listed `npm run deps:rebuild` (ADR-0023 am. F, SEC-P3-04), no secrets in layers; separate migrate image | platform.md §3, ADR-0022 | Trivy + hadolint + Dockerfile assertions; `docker history` + Gitleaks; size checks |
+| OPS-002 | Multi-stage Dockerfiles, `node:24-trixie-slim` and `nginx-unprivileged` pinned by digest, non-root, HEALTHCHECK, `npm ci --omit=dev --omit=optional --ignore-scripts` followed by the allow-listed `npm run deps:rebuild` (ADR-0023 am. F/I, SEC-P3-04, SPK-01), `dist/preflight.js`, no secrets in layers; separate Studio-free migrate image (ADR-0022 am. 11–13) | platform.md §3, ADR-0022 | Trivy + hadolint + Dockerfile assertions; `docker history` + Gitleaks; size checks |
 | OPS-003 | Workflows `ci.yml` (hosted PR fast lane + `workflow_dispatch` full lane), `nightly.yml` (dispatch-only), `release.yml`, `cd.yml` with all §10 stages; heavy suites run locally with evidence under `docs/05-quality/` (ADR-0023 amendment, D-ORCH-001); deploy jobs no-op until targets exist; SBOM + GHCR publish | ADR-0023 (amendment A–D), ADR-0024 amendment, platform.md §7 | actionlint + stage-presence test (dispatch-only stages count as present); `quality:check-evidence` on every PR; fast-lane wall-clock ≤ 20 min measured; release dry-run on pre-release tag; pull-and-start from GHCR |
 | OPS-004 | Terraform modules + overlays; `fmt -check`, `validate -backend=false`, Checkov with reasoned suppressions; tagging standard | ADR-0022, platform.md §6 | CI IaC job (PARTIAL: plan/apply M5) |
 | OPS-005 | `packages/config` Joi schema; fail-fast with names only; `.env.example` parity script | ADR-0018 | Config unit tests; start-with-missing-var CI test; parity script |
@@ -160,7 +160,7 @@ Version 1.0 · 2026-11-12 · owner principal-architect · Draft for G2. Source o
 | NFR | Mechanism | ADR / design | Verification approach |
 |---|---|---|---|
 | MAINT-001 | `eslint-plugin-boundaries` + `import-x/no-cycle` rules for layering, package purity and app isolation; negative fixtures | ADR-0002 §5, ADR-0003 | Lint in CI + fixture rule tests |
-| MAINT-002 | TS strict family in `tsconfig.base.json`; `tsc -b --noEmit`; `--max-warnings 0`; `no-explicit-any` error; suppression-count script | ADR-0001, ADR-0002 | CI typecheck/lint; script counts |
+| MAINT-002 | TS strict family in `tsconfig.base.json`; `tsc -b` (emitting; TS 6 rejects `--noEmit` in build mode, ADR-0002 am. item 2); `--max-warnings 0`; `no-explicit-any` error; suppression-count script | ADR-0001, ADR-0002 | CI typecheck/lint; script counts |
 | MAINT-003 | Shared constants/regex/enums in `packages/shared`; parity test over ≥ 50 fixtures per schema (address, parcel, customs item); lint bans redefinition | ADR-0016 §4, ADR-0026 §4 | Parity test in `packages/shared` |
 | MAINT-004 | Contract-first OpenAPI; Redocly lint; drift test vs route registry; `oasdiff` vs previous tag; examples required | ADR-0016 §1, api/README.md | CI contract job |
 | DATA-001 | `Money` branded type, integer minor units, `BIGINT`+`CHAR(3)` columns, FX as `NUMERIC(18,6)`/strings; lint bans float ops on money | ADR-0009 | Lint; schema column-type test; pricing property tests |

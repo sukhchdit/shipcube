@@ -26,7 +26,7 @@
 ## Build Board
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation | backend-developer (opus) | feat/TASK-001-* | ▶ | | | | | 0 | |
+| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | feat/TASK-001-spk-01-toolchain-spike-workspace @76b69c0 | ✅ | CHANGES_REQUESTED r1 (2 MAJOR) | PASS_WITH_FOLLOW-UPS (0 C/H; 4 MED routed) | ✅ 38/38 unit, lint, typecheck (orchestrator re-run) | | 1 (fixing) | |
 
 ## Escalations in progress
 _none_

@@ -49,7 +49,7 @@ Rules that follow from the baseline:
 
 - Positive: one verified list for every agent; no EOL runtime; engine-free Prisma 7 keeps images small (NFR-OPS-002); PG 18 gives native UUIDv7 and skip-scan.
 - Negative: the developer host needs a Node upgrade; Prisma 7 driver-adapter wiring is newer than the training data of most agents and must follow the docs (data-model.md §7); React Router 8 / Vite 8 / Tailwind 4 are current majors, so sample code from older tutorials will not apply.
-- Verification: `engines` + `.node-version` enforced by `npm ci` (`engine-strict=true` in `.npmrc`); a repository test asserts the pinned majors; CI runs on `node-version-file: .node-version`.
+- Verification: `engines` + `.node-version` enforced by `npm ci` (`engine-strict=true` in `.npmrc`); a repository test asserts the pinned majors; CI runs on `node-version-file: .node-version`. *Added 2026-11-12 (SPK-01, D-ARCH-035):* `engines` also declares `"npm": ">=11.10"` (the npm bundled with Node 24.22+, first release with `min-release-age`); the toolchain conventions proven by the spike are in the "Amendment (2026-11-12, SPK-01)" sections of ADR-0002/0017/0022/0023/0024/0025/0026 — no baseline pin above changed.
 
 ## Reversibility
 

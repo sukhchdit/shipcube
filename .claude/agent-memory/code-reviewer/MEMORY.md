@@ -1,0 +1,3 @@
+- [Review conventions](project_review_conventions.md) — review file path/name in main repo, worktree layout, Node 24 PATH prefix, re-run gates yourself
+- [Review watchlist](project_review_watchlist.md) — open items from PR #1 round 1 (coverage scope, tsconfig refs guard, rebuild.mjs guard, prisma migrate engine)
+- [Scratch-copy technique](reference_scratch_copy_technique.md) — mutation-test a PR via git archive + junctioned node_modules; junction cleanup pitfalls
