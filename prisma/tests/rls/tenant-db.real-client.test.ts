@@ -98,6 +98,7 @@ const REFUSED: ReadonlyArray<readonly [string, (db: Db) => unknown]> = [
   ['$transaction', (db) => get(db, '$transaction')],
   ['$queryRawUnsafe', (db) => get(db, '$queryRawUnsafe')],
   ['$executeRawUnsafe', (db) => get(db, '$executeRawUnsafe')],
+  ['$queryRawTyped', (db) => get(db, '$queryRawTyped')],
   ['$extends', (db) => get(db, '$extends')],
   ['$connect', (db) => get(db, '$connect')],
   ['$disconnect', (db) => get(db, '$disconnect')],
@@ -181,7 +182,7 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
     expect(Object.fromEntries(seen.refused)).toEqual(Object.fromEntries(REFUSED.map(([name]) => [name, 'refused'])));
     expect(seen.symbols).toEqual(rawSymbols.map(() => 'undefined'));
     expect(seen.nonTagged).toEqual(['refused', 'refused', 'refused']);
-    const exposed = ['permission', 'role', 'rolePermission', '$queryRaw', '$executeRaw', '$queryRawTyped'];
+    const exposed = ['permission', 'role', 'rolePermission', '$queryRaw', '$executeRaw'];
     expect([...seen.surface.ownKeys].sort()).toEqual([...exposed].sort());
     expect(seen.surface).toMatchObject({ ownSymbols: 0, hasParent: false });
     expect([...seen.surface.spread].sort()).toEqual([...exposed].sort());
@@ -209,6 +210,133 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
     expect(() => kept?.findMany).toThrow(DbError);
     expect(() => kept?.findMany).toThrow('Database error: TENANT_TX_CLOSED');
     expect(() => keptFind?.()).toThrow('Database error: TENANT_TX_CLOSED');
+    await client.$disconnect();
+  });
+
+  it('R2-M1 / PR11-SEC-12: operation results are lazy, expose no requestTransaction, run on TXn, and a result kept past commit is dead', async () => {
+    const { log, client, runner } = setup();
+    let late: Record<string, PromiseLike<unknown>> = {};
+    const seen = await runner.withTenantTx(CTX, async (db) => {
+      const results: Record<string, PromiseLike<unknown>> = {
+        findMany: db.permission.findMany({ take: 1 }),
+        deleteMany: db.role.deleteMany({ where: { id: CTX.orgId } }),
+        queryRaw: db.$queryRaw<Array<{ n: number }>>`SELECT 1 AS n`,
+        executeRaw: db.$executeRaw`SELECT 2 AS executed`,
+      };
+      const lazyLog = log.map(({ sql }) => sql.slice(0, 12));
+      const shapes = Object.fromEntries(
+        Object.entries(results).map(([name, result]) => [
+          name,
+          {
+            requestTransaction: get(result, 'requestTransaction'),
+            inRequestTransaction: 'requestTransaction' in result,
+            spec: get(result, 'spec'),
+            keys: Reflect.ownKeys(result).map(String),
+            proto: Object.getPrototypeOf(result) as unknown,
+            tag: Object.prototype.toString.call(result),
+          },
+        ]),
+      );
+      const values = await Promise.all(Object.values(results));
+      // Created inside the callback, never awaited there, kept past commit.
+      late = {
+        findMany: db.permission.findMany(),
+        deleteMany: db.role.deleteMany({ where: { id: CTX.orgId } }),
+        queryRaw: db.$queryRaw`SELECT 3 AS late`,
+        executeRaw: db.$executeRaw`SELECT 4 AS late`,
+      };
+      return { lazyLog, shapes, values };
+    });
+
+    // Laziness: building four results sent nothing beyond BEGIN and the context statement.
+    expect(seen.lazyLog).toEqual(['BEGIN', CONTEXT_STATEMENT_SQL.slice(0, 12)]);
+    const keys = ['then', 'catch', 'finally', 'Symbol(Symbol.toStringTag)'];
+    for (const shape of Object.values(seen.shapes)) {
+      expect(shape).toEqual({
+        requestTransaction: undefined,
+        inRequestTransaction: false,
+        spec: undefined,
+        keys,
+        proto: null,
+        tag: '[object TenantDbResult]',
+      });
+    }
+    expect(seen.values).toEqual([[], { count: 0 }, [{ n: 1 }], 0]);
+    expect(log.map(({ conn }) => conn)).toEqual(log.map(() => 'TX1'));
+    expect(log.map(({ sql }) => sql.slice(0, 24))).toEqual([
+      'BEGIN',
+      CONTEXT_STATEMENT_SQL.slice(0, 24),
+      'SELECT "public"."permiss',
+      'DELETE FROM "public"."ro',
+      'SELECT 1 AS n',
+      'SELECT 2 AS executed',
+      'COMMIT',
+      'commit()',
+    ]);
+
+    // A late await: TENANT_TX_CLOSED, and no statement on any connection.
+    const committed = log.length;
+    const lateOutcomes = await Promise.all(
+      Object.values(late).map(async (result) => {
+        try {
+          await result;
+          return 'resolved';
+        } catch (error) {
+          return error instanceof DbError ? error.message : String(error);
+        }
+      }),
+    );
+    expect(lateOutcomes).toEqual(Object.values(late).map(() => 'Database error: TENANT_TX_CLOSED'));
+    expect(log.length).toBe(committed);
+    expect(log.filter(({ conn }) => conn === 'ROOT')).toEqual([]);
+    await client.$disconnect();
+  });
+
+  it('PR11-SEC-13, R2-n3, PR11-SEC-15 f: Sql-fragment values, a forged strings array and $queryRawTyped are refused before Prisma runs', async () => {
+    const { log, client, runner } = setup();
+    const injected = "1' OR '1' = '1' -- victim";
+    const seen = await runner.withTenantTx(CTX, async (db) => {
+      const P = generated.Prisma;
+      const fragments: Record<string, unknown> = {
+        'Prisma.raw(s)': P.raw(injected),
+        'Prisma.sql`…`': P.sql`SELECT ${1}`,
+        'Prisma.sql([s])': P.sql([injected]),
+        'Prisma.join([1], s)': P.join([1], injected),
+        'new Prisma.Sql([s], [])': new P.Sql([injected], []),
+      };
+      const asValue = Object.fromEntries(
+        Object.entries(fragments).flatMap(([name, fragment]) => [
+          [`$queryRaw ${name}`, outcome(() => db.$queryRaw`SELECT ${1}, ${fragment}`)],
+          [`$executeRaw ${name}`, outcome(() => db.$executeRaw`SELECT ${fragment}`)],
+        ]),
+      );
+      const query = get(db, '$queryRaw') as (...args: unknown[]) => unknown;
+      const forged = outcome(() => query(Object.freeze(Object.assign([injected], { raw: [injected] }))));
+      const typed = outcome(() => get(db, '$queryRawTyped'));
+      const typedIn = '$queryRawTyped' in db;
+      // Control: a list bound as an array is the supported shape.
+      const listed = await db.$queryRaw<Array<{ n: number }>>`SELECT 1 AS n WHERE 1 = ANY(${[1, 2]}::int[])`;
+      return { asValue, forged, typed, typedIn, listed };
+    });
+
+    expect(seen.asValue).toEqual(
+      Object.fromEntries(
+        ['Prisma.raw(s)', 'Prisma.sql`…`', 'Prisma.sql([s])', 'Prisma.join([1], s)', 'new Prisma.Sql([s], [])'].flatMap((name) => [
+          [`$queryRaw ${name}`, 'refused'],
+          [`$executeRaw ${name}`, 'refused'],
+        ]),
+      ),
+    );
+    expect(seen).toMatchObject({ forged: 'refused', typed: 'refused', typedIn: false, listed: [{ n: 1 }] });
+    expect(log.map(({ conn }) => conn)).toEqual(log.map(() => 'TX1'));
+    expect(log.map(({ sql }) => sql.slice(0, 24))).toEqual([
+      'BEGIN',
+      CONTEXT_STATEMENT_SQL.slice(0, 24),
+      'SELECT 1 AS n WHERE 1 = ',
+      'COMMIT',
+      'commit()',
+    ]);
+    expect(log.some(({ sql }) => sql.includes('victim'))).toBe(false);
     await client.$disconnect();
   });
 });
