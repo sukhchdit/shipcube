@@ -3,6 +3,8 @@
  * allow-list, session pin read-back and connection cleanup. A fake client stands in for `pg.Client`; the real driver
  * paths (fake server, dropped socket) are in cli.test.ts and prisma/tests/seed/seed.int.test.ts.
  */
+import { randomBytes } from 'node:crypto';
+
 import { describe, expect, it } from '@jest/globals';
 import type pg from 'pg';
 
@@ -16,7 +18,9 @@ import {
   type MigratorClient,
 } from './migrator-connection.js';
 
-const PASSWORD = 'pw-0123456789';
+/** Test secrets are generated at run time: no credential-shaped literal is committed (gitleaks, CLAUDE.md §5). */
+const randomHex = (): string => randomBytes(12).toString('hex');
+const PASSWORD = randomHex();
 const BASE = `postgresql://platform_migrator:${PASSWORD}@db.internal:5432/platform`;
 
 function refusal(run: () => unknown): SeedRefusedError {
@@ -55,13 +59,16 @@ describe('refuseFileVariants (PR13-SEC-01)', () => {
 
 describe('readMigratorUrl (PR13-SEC-03, code review m2)', () => {
   it('returns the URL with its raw and decoded password as redaction secrets', () => {
-    const url = 'postgresql://platform_migrator:p%40ss%2Fword-123@db.internal:5432/platform?sslmode=verify-full&application_name=seed';
-    expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url })).toEqual({ url, secrets: [url, 'p%40ss%2Fword-123', 'p@ss/word-123'] });
+    const [head, tail] = [randomHex(), randomHex()];
+    const raw = `${head}%40${tail}%2F`;
+    const url = `postgresql://platform_migrator:${raw}@db.internal:5432/platform?sslmode=verify-full&application_name=seed`;
+    expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url })).toEqual({ url, secrets: [url, raw, `${head}@${tail}/`] });
   });
 
   it('keeps only the raw password when it holds a malformed escape', () => {
-    const url = 'postgresql://platform_migrator:bad%zzpw@db.internal/platform';
-    expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url }).secrets).toEqual([url, 'bad%zzpw']);
+    const raw = `${randomHex()}%zz`;
+    const url = `postgresql://platform_migrator:${raw}@db.internal/platform`;
+    expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url }).secrets).toEqual([url, raw]);
   });
 
   it('refuses a missing or empty URL with SEED_VARIABLE_MISSING', () => {
