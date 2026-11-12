@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { render, screen } from '@testing-library/react';
 import { act } from 'react';
-import { hydrateRoot } from 'react-dom/client';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 
@@ -46,13 +46,18 @@ describe('web useLocale (ADR-0026 am. 4; PR #4 m2)', () => {
     container.innerHTML = renderToString(at('/'));
     document.body.append(container);
     const recoverable: unknown[] = [];
+    const roots: Root[] = [];
 
     await act(async () => {
-      hydrateRoot(container, at('/es/no-such-page'), { onRecoverableError: (error) => recoverable.push(error) });
+      roots.push(hydrateRoot(container, at('/es/no-such-page'), { onRecoverableError: (error) => recoverable.push(error) }));
       await Promise.resolve();
     });
 
     expect(recoverable).toEqual([]);
     expect(container).toHaveTextContent('es:Ir al inicio');
+    // RTL's cleanup does not know this root (PR #4 R3-n2).
+    act(() => {
+      for (const root of roots) root.unmount();
+    });
   });
 });
