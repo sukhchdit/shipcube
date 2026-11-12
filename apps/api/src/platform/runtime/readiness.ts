@@ -190,6 +190,9 @@ export function createReadinessProbe(checks: readonly ReadinessCheck[], options:
   };
 }
 
+/** Every object pendingCheck returned (a brand: a copy or a real check with the same name is not pending). */
+const PENDING_CHECKS = new WeakSet<ReadinessCheck>();
+
 /**
  * Placeholder for a component whose client does not exist yet. Each use names the task that replaces it, and
  * services.test.ts fails once the replacement exists while the stub is still wired.
@@ -199,9 +202,16 @@ export function createReadinessProbe(checks: readonly ReadinessCheck[], options:
  */
 export function pendingCheck(name: ReadinessComponent): ReadinessCheck {
   const critical = isCriticalComponent(name);
-  return Object.freeze({
+  const stub: ReadinessCheck = Object.freeze({
     name,
     critical,
     check: () => (critical ? Promise.resolve() : Promise.reject(new Error(`${name} check pending`))),
   });
+  PENDING_CHECKS.add(stub);
+  return stub;
+}
+
+/** True when `check` is a placeholder from pendingCheck (PR-0009 R2-m1: the stub tripwires test the object, not the name). */
+export function isPendingCheck(check: ReadinessCheck): boolean {
+  return PENDING_CHECKS.has(check);
 }

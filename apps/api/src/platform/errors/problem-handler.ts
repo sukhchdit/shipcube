@@ -4,7 +4,7 @@
 // so audit capture skips it. The body is built from catalogue data and AppError's client-safe fields only.
 import { randomUUID } from 'node:crypto';
 
-import { AppError, type ErrorCode } from '@platform/shared';
+import { AppError, ERROR_CATALOGUE, type ErrorCode } from '@platform/shared';
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
 import { requestContextOf } from '../context/request-context.js';
@@ -48,11 +48,14 @@ function codeOf(classified: Classified): ErrorCode {
  */
 export const DROPPED_ON_PROBLEM = ['ETag', 'Last-Modified', 'Content-Disposition', 'Content-Language'] as const;
 
-/** Pre-built 500 body for when building the problem itself failed (PR9-SEC-07): never HTML, never a stack. */
-function fallbackProblemBody(correlationId: string, url: string): string {
+/**
+ * 500 body for when building the problem itself failed (PR9-SEC-07): never HTML, never a stack. Plain strings only,
+ * so it cannot fail the way the problem did; `type` and `title` match what buildProblem gives (PR-0009 R2-n1).
+ */
+function fallbackProblemBody(correlationId: string, url: string, typeBase: string): string {
   return JSON.stringify({
-    type: `${DEFAULT_PROBLEM_TYPE_BASE}INTERNAL_ERROR`,
-    title: 'Internal server error',
+    type: `${typeBase}INTERNAL_ERROR`,
+    title: ERROR_CATALOGUE.INTERNAL_ERROR.title,
     status: 500,
     detail: GENERIC_SERVER_DETAIL,
     instance: instanceOf(url),
@@ -119,7 +122,7 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
       } catch {
         // The response below is what matters; a failing logger must not prevent it.
       }
-      sendProblem(res, 500, fallbackProblemBody(correlationId, req.originalUrl));
+      sendProblem(res, 500, fallbackProblemBody(correlationId, req.originalUrl, options.typeBase ?? DEFAULT_PROBLEM_TYPE_BASE));
     }
   };
 }

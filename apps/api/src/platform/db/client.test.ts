@@ -22,6 +22,13 @@ const options = {
 };
 
 /** PEM-shaped dummy text (not a certificate or a key): enough to prove the file is read into `ssl.ca`. */
+/** Writes a CA bundle just above the 1 MiB cap into `dir` and returns its path. */
+function oversized(dir: string): string {
+  const path = join(dir, 'huge.pem');
+  writeFileSync(path, Buffer.alloc(1_048_577, 0x41));
+  return path;
+}
+
 const DUMMY_CA = '-----BEGIN CERTIFICATE-----\nZHVtbXktdGVzdC1jYQ==\n-----END CERTIFICATE-----\n';
 
 describe('runtime database client factory (data-model §7.1)', () => {
@@ -76,7 +83,6 @@ describe('runtime database client factory (data-model §7.1)', () => {
     'sslmode=verify-full',
     'sslmode=verify-full&sslrootcert=/etc/ssl/rds.pem',
     'sslnegotiation=direct&sslmode=require',
-    'uselibpqcompat=true&sslmode=verify-full',
     'sslmode=disable',
   ])('[PR5-SEC-08] accepts the TLS query parameters %s @security', (query) => {
     const dir = mkdtempSync(join(tmpdir(), 'pg-ca-'));
@@ -127,18 +133,13 @@ describe('runtime database client factory (data-model §7.1)', () => {
       expect(pgSsl('postgresql://u@h/db?sslmode=disable')).toBe(false);
     });
 
-    it.each(['require', 'verify-ca', 'prefer', 'allow'])(
-      'treats sslmode=%s as verify-full, with or without uselibpqcompat=true @security',
-      (mode) => {
-        expect(pgSsl(`postgresql://u@h/db?sslmode=${mode}`)).toEqual({ rejectUnauthorized: true });
-        expect(pgSsl(`postgresql://u@h/db?uselibpqcompat=true&sslmode=${mode}`)).toEqual({ rejectUnauthorized: true });
-      },
-    );
+    it.each(['require', 'verify-ca', 'prefer', 'allow'])('treats sslmode=%s as verify-full @security', (mode) => {
+      expect(pgSsl(`postgresql://u@h/db?sslmode=${mode}`)).toEqual({ rejectUnauthorized: true });
+    });
 
     it.each([
       ['sslmode=no-verify', /must not disable certificate verification/],
       ['sslmode=no%2Dverify', /must not disable certificate verification/],
-      ['uselibpqcompat=true&sslmode=no-verify', /must not disable certificate verification/],
       ['sslmode=insecure', /sslmode is not a supported value/],
       ['sslnegotiation=fast', /sslnegotiation must be postgres or direct/],
       ['sslmode=disable&sslnegotiation=direct', /sslnegotiation=direct requires TLS/],
@@ -184,6 +185,20 @@ describe('runtime database client factory (data-model §7.1)', () => {
         expect(error).not.toHaveProperty('cause');
       }
     });
+
+    it.each([
+      ['the libpq system keyword', () => 'system', /sslrootcert must name a CA bundle file/],
+      ['a relative path', () => 'root.pem', /sslrootcert must be an absolute path/],
+      ['a directory', (base: string) => base, /sslrootcert must be a regular file of at most 1 MiB/],
+      ['a file above 1 MiB', (base: string) => oversized(base), /sslrootcert must be a regular file of at most 1 MiB/],
+    ])('[PR9-SEC-16] refuses %s as sslrootcert without naming it @security', (_label, pathIn, message) => {
+      const path = pathIn(dir);
+      const call = (): unknown =>
+        toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}` });
+      expect(call).toThrow(DatabaseConfigError);
+      expect(call).toThrow(message);
+      expect(call).not.toThrow(path);
+    });
   });
 
   it.each([
@@ -192,6 +207,7 @@ describe('runtime database client factory (data-model §7.1)', () => {
     ['application_name', 'application_name=other'],
     ['statement_timeout', 'statement_timeout=0'],
     ['connect_timeout', 'connect_timeout=600'],
+    ['uselibpqcompat (no effect since PR9-SEC-04, R2-m2)', 'uselibpqcompat=true&sslmode=verify-full'],
     ['options', 'options=-c%20search_path%3Dpublic'],
     ['percent-encoded options', '%6Fptions=-c%20search_path%3Dpublic'],
     ['percent-encoded lock_timeout', 'lock%5Ftimeout=0'],

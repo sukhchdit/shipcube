@@ -3,12 +3,12 @@ import type { AddressInfo } from 'node:net';
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 
 import { describe, expect, it } from '@jest/globals';
-import { AppError } from '@platform/shared';
+import { AppError, ERROR_CATALOGUE } from '@platform/shared';
 import express, { type Express } from 'express';
 import fc from 'fast-check';
 import request, { type Response as TestResponse } from 'supertest';
 
-import { createApp, type AppLogger } from '../../app.js';
+import { createApp, type AppDependencies, type AppLogger } from '../../app.js';
 import { CORRELATION_ID_PATTERN, currentRequestContext } from '../context/request-context.js';
 import { isAuditableMutationResponse } from './error-response.js';
 import { GENERIC_SERVER_DETAIL } from './problem.js';
@@ -34,7 +34,7 @@ interface Harness {
   setThrown(value: unknown): void;
 }
 
-function harness(): Harness {
+function harness(options: Pick<AppDependencies, 'problemTypeBase'> = {}): Harness {
   const logged: LoggedError[] = [];
   const auditable: boolean[] = [];
   const echoed: unknown[] = [];
@@ -81,7 +81,7 @@ function harness(): Harness {
     throw new AppError('AUTH_REQUIRED');
   });
 
-  const app = createApp({ healthRouter: health, modules: [{ name: 'widgets', router: widgets }], logger });
+  const app = createApp({ healthRouter: health, modules: [{ name: 'widgets', router: widgets }], logger, ...options });
   return {
     app,
     logged,
@@ -312,7 +312,20 @@ describe('[PR-0009 m4, PR9-SEC-07] problem responses are not cacheable and never
     const body = expectProblem(res, 500, 'INTERNAL_ERROR');
     expect(body['detail']).toBe(GENERIC_SERVER_DETAIL);
     expect(body['instance']).toBe('/api/v1/unserialisable');
+    expect(body['title']).toBe(ERROR_CATALOGUE.INTERNAL_ERROR.title);
     expect(res.text).not.toMatch(/<html|BigInt|TypeError| at /u);
+  });
+
+  it('[PR-0009 R2-n1] the fallback 500 uses the configured problem type base, like every other problem', async () => {
+    const typeBase = 'https://docs.example.test/problems/';
+    const { app } = harness({ problemTypeBase: typeBase });
+    const fallback = await request(app).get('/api/v1/unserialisable');
+    const regular = await request(app).get('/api/v1/boom');
+    for (const res of [fallback, regular]) {
+      expect(res.status).toBe(500);
+      expect(res.body).toMatchObject({ type: `${typeBase}INTERNAL_ERROR`, title: 'Internal error', code: 'INTERNAL_ERROR' });
+    }
+    expect(Object.keys(problemOf(fallback)).sort()).toEqual(Object.keys(problemOf(regular)).sort());
   });
 });
 
@@ -403,5 +416,24 @@ describe('[PR9-SEC-01] JSON bodies are UTF-8 only', () => {
     const res = await request(app).post('/api/v1/echo').set('Content-Type', contentType).send('{"a":1}');
     expect(res.status).toBe(201);
     expect(echoed).toEqual([{ a: 1 }]);
+  });
+});
+
+describe('[PR9-SEC-14] a crafted Content-Type cannot stall the process', () => {
+  it.each([
+    // 97 bytes, below the length bound: the grammar itself must be linear (the round-2 grammar needed about 4 days).
+    ['40 empty parameters', `application/json${'; '.repeat(40)}!`],
+    ['an over-long header', `application/json${'; '.repeat(5_000)}!`],
+  ])('%s on an unknown path, without credentials: 415 at once, and liveness answers right after', async (_label, contentType) => {
+    const { app, echoed } = harness();
+    const started = performance.now();
+    const res = await request(app).post('/api/v1/does-not-exist').set('Content-Type', contentType).send('x');
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expectProblem(res, 415, 'UNSUPPORTED_MEDIA_TYPE');
+    expect(echoed).toEqual([]);
+
+    const liveStarted = performance.now();
+    expect((await request(app).get('/health/live')).status).toBe(200);
+    expect(performance.now() - liveStarted).toBeLessThan(1_000);
   });
 });

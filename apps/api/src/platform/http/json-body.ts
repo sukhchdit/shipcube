@@ -27,17 +27,33 @@ export function declaresBody(req: Request): boolean {
 
 const TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
 const QUOTED = '"(?:[^"\\\\]|\\\\.)*"';
-/** RFC 9110 §8.3 media type: `type/subtype *( OWS ";" OWS [ parameter ] )`, parameter = token "=" ( token / quoted-string ). */
-const MEDIA_TYPE = new RegExp(`^[ \\t]*${TOKEN}/${TOKEN}(?:[ \\t]*;[ \\t]*(?:${TOKEN}=(?:${TOKEN}|${QUOTED}))?)*[ \\t]*$`, 'u');
+/**
+ * RFC 9110 §8.3 media type: `type/subtype *( OWS ";" OWS [ parameter ] )`, parameter = token "=" ( token / quoted-string ).
+ *
+ * PR9-SEC-14 (CWE-1333): the OWS after `;` is matched only together with a parameter. Matched on its own
+ * (`;[ \t]*(?:parameter)?`), a run of blanks between two `;` could be split between "after this `;`" and "before the
+ * next `;`" in many ways, and a failing match backtracked through every split (exponential in the number of empty
+ * parameters). Here every blank has exactly one place in a match, so a failing match is linear. The language is
+ * unchanged: blanks after a `;` with no parameter are the next `;`'s leading OWS, or the trailing OWS.
+ */
+const MEDIA_TYPE = new RegExp(`^[ \\t]*${TOKEN}/${TOKEN}(?:[ \\t]*;(?:[ \\t]*${TOKEN}=(?:${TOKEN}|${QUOTED}))?)*[ \\t]*$`, 'u');
 const PARAMETER = new RegExp(`;[ \\t]*(${TOKEN})=(${TOKEN}|${QUOTED})`, 'gu');
+
+/** A `Content-Type` longer than this is refused before any pattern runs (PR9-SEC-14, defence in depth). */
+export const MAX_CONTENT_TYPE_LENGTH = 256;
+
+/** True when `header` matches the media-type grammar above. No length bound and no charset rule: see below. */
+export function isWellFormedMediaType(header: string): boolean {
+  return MEDIA_TYPE.test(header);
+}
 
 /**
  * PR9-SEC-01: JSON exchanged between systems is UTF-8 (RFC 8259 §8.1). body-parser would decode any `utf-*` charset
  * (UTF-7 lets keys and markup pass byte-level inspection), so only an absent charset or `utf-8` is accepted. A
- * malformed header or a repeated charset is refused too.
+ * malformed header, a header longer than MAX_CONTENT_TYPE_LENGTH or a repeated charset is refused too.
  */
 export function isUtf8JsonContentType(header: string | undefined): boolean {
-  if (header === undefined || !MEDIA_TYPE.test(header)) return false;
+  if (header === undefined || header.length > MAX_CONTENT_TYPE_LENGTH || !isWellFormedMediaType(header)) return false;
   const charsets = [...header.matchAll(PARAMETER)]
     .filter(([, name]) => name?.toLowerCase() === 'charset')
     .map(([, , value = '']) => (value.startsWith('"') ? value.slice(1, -1).replace(/\\(.)/gu, '$1') : value).toLowerCase());
@@ -83,7 +99,8 @@ export function jsonBodyParser(options: JsonBodyOptions = {}): RequestHandler {
       next();
       return;
     }
-    if (typeof req.is([...JSON_MEDIA_TYPES]) !== 'string' || !isUtf8JsonContentType(req.headers['content-type'])) {
+    // The bounded, linear check runs first, so no other parser sees an over-long or malformed header (PR9-SEC-14).
+    if (!isUtf8JsonContentType(req.headers['content-type']) || typeof req.is([...JSON_MEDIA_TYPES]) !== 'string') {
       next(new AppError('UNSUPPORTED_MEDIA_TYPE'));
       return;
     }

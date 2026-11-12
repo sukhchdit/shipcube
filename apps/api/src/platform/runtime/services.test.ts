@@ -5,6 +5,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { SessionIntegrityError } from '../db/session-integrity.js';
 import { createRuntimeLog } from './log.js';
+import { isPendingCheck, pendingCheck } from './readiness.js';
 import { readinessChecks, runStartupIntegrityCheck } from './services.js';
 
 /** Repository root from this file (apps/api/src/platform/runtime). */
@@ -41,33 +42,39 @@ describe('start-up session-integrity check (PR-0009 M1)', () => {
   });
 });
 
-describe('pending readiness stubs cannot outlive their replacements (PR-0009 m2, PR9-SEC-11)', () => {
-  const pendingNames = (): string[] => {
-    const fake = { query: () => Promise.resolve({ rows: [] }), ping: () => Promise.resolve('PONG') };
-    const checks = readinessChecks(fake as never, fake as never);
-    return checks.filter((check) => check.name !== 'database' && check.name !== 'redis').map((check) => check.name);
-  };
+describe('pending readiness stubs cannot outlive their replacements (PR-0009 m2, R2-m1, PR9-SEC-11)', () => {
+  const fake = { query: () => Promise.resolve({ rows: [] }), ping: () => Promise.resolve('PONG') };
+  /** Names of the readiness checks that are pendingCheck stubs (the brand, not the name). */
+  const wiredStubs = (): string[] =>
+    readinessChecks(fake as never, fake as never)
+      .filter(isPendingCheck)
+      .map((check) => check.name);
 
   const sourceFiles = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true, recursive: true })
       .filter((entry) => entry.isFile() && /\.tsx?$/u.test(entry.name) && !/\.test\.tsx?$/u.test(entry.name))
       .map((entry) => join(entry.parentPath, entry.name));
 
-  it('object_storage stays pending only while no S3 client exists in apps/api (TASK-019)', () => {
+  it('the brand identifies stubs only: a copy and the real database/redis checks are not pending (positive control)', () => {
+    const stub = pendingCheck('audit_chain');
+    expect(isPendingCheck(stub)).toBe(true);
+    expect(isPendingCheck({ ...stub })).toBe(false);
+    expect(wiredStubs()).not.toContain('database');
+    expect(wiredStubs()).not.toContain('redis');
+  });
+
+  it('once an S3 client exists in apps/api, object_storage is no longer a stub (TASK-019)', () => {
     const usesS3 = sourceFiles(join(REPO_ROOT, 'apps', 'api', 'src')).some((file) =>
       readFileSync(file, 'utf8').includes('@aws-sdk/client-s3'),
     );
     // When this fails: wire a real HeadBucket check into readinessChecks instead of pendingCheck('object_storage').
-    expect({ usesS3, pending: pendingNames().includes('object_storage') }).toEqual({ usesS3: false, pending: true });
+    expect(usesS3 ? wiredStubs() : []).not.toContain('object_storage');
   });
 
-  it('the audit checks stay pending only while packages/audit exports nothing (TASK-021)', () => {
+  it('once packages/audit exports something, the audit checks are no longer stubs (TASK-021)', () => {
     const auditIndex = readFileSync(join(REPO_ROOT, 'packages', 'audit', 'src', 'index.ts'), 'utf8');
     const exportsSomething = /^export\s+(?!\{\s*\};)/mu.test(auditIndex);
     // When this fails: replace pendingCheck('audit_partitions' | 'audit_chain') with the audit store's real checks.
-    expect({ exportsSomething, pending: pendingNames() }).toEqual({
-      exportsSomething: false,
-      pending: ['object_storage', 'audit_partitions', 'audit_chain'],
-    });
+    expect((exportsSomething ? wiredStubs() : []).filter((name) => name.startsWith('audit_'))).toEqual([]);
   });
 });

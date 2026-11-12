@@ -14,8 +14,10 @@
  * `rejectUnauthorized` to Node's default, which `NODE_TLS_REJECT_UNAUTHORIZED=0` flips. `toPoolConfig` therefore hands
  * `pg` the URL without its query string plus an explicit `ssl` value with `rejectUnauthorized: true` pinned.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
+import { RUNTIME_DATABASE_URL_PARAMS } from '@platform/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg, { type PoolConfig } from 'pg';
 
@@ -57,21 +59,19 @@ const MAX_STATEMENT_TIMEOUT_MS = 300_000;
 export const QUERY_TIMEOUT_MARGIN_MS = 1_000;
 
 /**
- * Query parameters a runtime URL may carry (PR5-SEC-08): only the TLS selectors that the config transport guard
- * governs (`packages/config/src/guards.ts`). pg copies every query entry over the explicit pool settings, so any
- * other one (`options`, `lock_timeout`, `idle_in_transaction_session_timeout`, `application_name`,
- * `connect_timeout`, `host`, `ssl`, ...) would silently override the role settings or the values below. Names are
- * compared after percent-decoding, as pg reads them, so `%6Fptions` is `options`. Since PR9-SEC-04 pg never sees
- * the query string at all (`tlsConfig` translates the TLS selectors); the allow-list still fails fast on anything
- * else rather than silently dropping it.
+ * Query parameters a runtime URL may carry (PR5-SEC-08): only the TLS selectors, from the one list in
+ * @platform/config (`RUNTIME_DATABASE_URL_PARAMS`; configuration validation applies it in every APP_ENV, PR-0009
+ * R2-m2). pg copies every query entry over the explicit pool settings, so any other one (`options`, `lock_timeout`,
+ * `idle_in_transaction_session_timeout`, `application_name`, `connect_timeout`, `host`, `ssl`, ...) would silently
+ * override the role settings or the values below. Names are compared after percent-decoding, as pg reads them, so
+ * `%6Fptions` is `options`. Since PR9-SEC-04 pg never sees the query string at all (`tlsConfig` translates the TLS
+ * selectors); the allow-list still fails fast on anything else rather than silently dropping it.
  */
-export const RUNTIME_URL_PARAMS: ReadonlySet<string> = new Set(['sslmode', 'sslrootcert', 'sslnegotiation', 'uselibpqcompat']);
-
 function assertAllowedParams(params: URLSearchParams): void {
   const names = [...params.keys()];
   if (new Set(names).size !== names.length) throw new DatabaseConfigError('connectionString must not repeat a query parameter');
   // The offending name is not echoed: the URL is a secret-bearing value.
-  if (names.some((name) => !RUNTIME_URL_PARAMS.has(name))) {
+  if (names.some((name) => !RUNTIME_DATABASE_URL_PARAMS.has(name))) {
     throw new DatabaseConfigError('connectionString carries a query parameter outside the TLS allow-list');
   }
 }
@@ -87,10 +87,24 @@ function isSslNegotiation(value: string): value is SslNegotiation {
   return value === 'postgres' || value === 'direct';
 }
 
+/** A CA bundle is small (the RDS global bundle is about 160 kB); the cap keeps a wrong path from exhausting memory. */
+const MAX_ROOT_CERTIFICATE_BYTES = 1_048_576;
+
+/**
+ * PR9-SEC-16: an absolute path to a regular file of at most 1 MiB, checked before reading so that a FIFO or a device
+ * cannot block start-up. libpq's `system` keyword (the OS trust store) is refused: pinning means a named CA bundle.
+ */
 function readRootCertificate(path: string): string {
+  if (path === 'system') throw new DatabaseConfigError('connectionString sslrootcert must name a CA bundle file');
+  if (!isAbsolute(path)) throw new DatabaseConfigError('connectionString sslrootcert must be an absolute path');
   try {
+    const stats = statSync(path);
+    if (!stats.isFile() || stats.size > MAX_ROOT_CERTIFICATE_BYTES) {
+      throw new DatabaseConfigError('connectionString sslrootcert must be a regular file of at most 1 MiB');
+    }
     return readFileSync(path, 'utf8');
-  } catch {
+  } catch (error) {
+    if (error instanceof DatabaseConfigError) throw error;
     // Neither the path nor the fs error (which names the path) is echoed.
     throw new DatabaseConfigError('connectionString sslrootcert could not be read');
   }
@@ -106,8 +120,8 @@ function readRootCertificate(path: string): string {
  *   `sslnegotiation=direct`, which pg also reads as TLS) → `rejectUnauthorized: true` with Node's default host-name
  *   check, i.e. libpq `verify-full`; `sslrootcert` is read into `ca`; `sslnegotiation` is passed through.
  *
- * `uselibpqcompat` is accepted for compatibility but has no effect: its weaker libpq semantics for `prefer`,
- * `require` and `verify-ca` never apply, because pg no longer parses the TLS selectors itself.
+ * pg's `uselibpqcompat` (weaker libpq semantics for `prefer`, `require` and `verify-ca`) is not an allowed parameter:
+ * pg no longer parses the TLS selectors itself, so it could have no effect (PR-0009 R2-m2).
  */
 function tlsConfig(params: URLSearchParams): TlsPoolConfig {
   const sslmode = params.get('sslmode');

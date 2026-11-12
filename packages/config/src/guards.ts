@@ -50,36 +50,47 @@ const parseUrl = (value: string): URL | undefined => {
   }
 };
 
-const hasDuplicateParam = (url: URL): boolean => {
+/**
+ * The only query parameters `DATABASE_URL` may carry, in every APP_ENV: the TLS selectors. This is the one list;
+ * the runtime pool factory (`apps/api/src/platform/db/client.ts`) imports it (PR-0009 R2-m2).
+ *  - `host=` would override the authority (another host or a Unix socket, so no TLS); `options=` sets server GUCs;
+ *    `ssl=` would override the TLS choice (PR3-SEC-12).
+ *  - `application_name` would replace the per-service name used for `pg_stat_activity` attribution, and
+ *    `connect_timeout` the bounded `connectionTimeoutMillis` (R2-m2 ruling).
+ *  - `uselibpqcompat` is not accepted: the runtime decides TLS itself, so it would have no effect (D-TASK006-02).
+ */
+export const RUNTIME_DATABASE_URL_PARAMS: ReadonlySet<string> = new Set(['sslmode', 'sslrootcert', 'sslnegotiation']);
+
+/** Query parameter names, percent-decoded as pg reads them; false when one repeats or is not allow-listed. */
+const hasOnlyRuntimeDatabaseUrlParams = (url: URL): boolean => {
   const names = [...url.searchParams.keys()];
-  return new Set(names).size !== names.length;
+  return new Set(names).size === names.length && names.every((name) => RUNTIME_DATABASE_URL_PARAMS.has(name));
 };
 
 /**
- * Query parameters a hardened `DATABASE_URL` may carry (PR3-SEC-12, optional item). Everything else is refused:
- * `host=` overrides the authority (another host or a Unix socket, so no TLS) and `options=` sets server GUCs.
+ * PR-0009 R2-m2 (r1 n6): the query-parameter rule applies in every APP_ENV, so a local URL the runtime would refuse
+ * fails here with exit 78 and the key name, not later with a stack. A URL the WHATWG parser cannot read is left to
+ * the schema and, outside local/test, to the transport guard.
  */
-const POSTGRES_URL_PARAMS: ReadonlySet<string> = new Set([
-  'sslmode',
-  'sslrootcert',
-  'sslnegotiation',
-  'uselibpqcompat',
-  'application_name',
-  'connect_timeout',
-]);
+export const databaseUrlParamsGuard: Guard = ({ raw, values }) => {
+  const value = raw.DATABASE_URL;
+  if (value === undefined || !('DATABASE_URL' in values)) return [];
+  const url = parseUrl(value);
+  return url === undefined || hasOnlyRuntimeDatabaseUrlParams(url)
+    ? []
+    : [{ key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.queryParameter' }];
+};
 
 /**
- * PostgreSQL URL as node-postgres reads it (pg-connection-string 2.14.1 copies every query entry onto the config,
- * so the LAST `sslmode` wins, and `ssl=0` sets `ssl: false`): a TCP host name, no repeated or unlisted query
- * parameter, exactly one `sslmode=verify-full`, and no `ssl` override (TLS is selected by `sslmode` alone).
+ * PostgreSQL URL outside local/test: a TCP host name and exactly one `sslmode`, `verify-full`. Repeated, unlisted
+ * and `ssl=` parameters are refused in every APP_ENV by databaseUrlParamsGuard (together they are the PR3-SEC-02/12
+ * rule: pg-connection-string 2.14.1 lets the LAST `sslmode` win and `ssl=0` turn TLS off).
  */
-const isVerifiedPostgresUrl = (_raw: string, url: URL): boolean =>
+const isVerifiedPostgresUrl = (_raw: string, url: URL): boolean => {
+  const sslmodes = url.searchParams.getAll('sslmode');
   // pg decodes the host, so a percent-encoded `/` makes a Unix-socket path: refused like an empty host.
-  url.hostname !== '' &&
-  !url.hostname.includes('%') &&
-  !hasDuplicateParam(url) &&
-  [...url.searchParams.keys()].every((name) => POSTGRES_URL_PARAMS.has(name)) &&
-  url.searchParams.get('sslmode') === 'verify-full';
+  return url.hostname !== '' && !url.hostname.includes('%') && sslmodes.length === 1 && sslmodes[0] === 'verify-full';
+};
 
 /**
  * Valkey URL as ioredis 6.0.0 reads it. TLS is on only when the RAW string starts with `rediss://`
@@ -275,6 +286,7 @@ export const keyMaterialGuard: Guard = ({ values }) => {
 export const GUARDS: readonly Guard[] = Object.freeze([
   placeholderGuard,
   transportGuard,
+  databaseUrlParamsGuard,
   debugGuard,
   nodeEnvGuard,
   localAppEnvOnEcsGuard,
