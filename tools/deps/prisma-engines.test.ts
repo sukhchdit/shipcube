@@ -46,6 +46,11 @@ const realManifestPath = join(repoRoot, 'tools', 'deps', 'prisma-engines.json');
 const VERSION = 'd1b3f377ca835d73fd50954a5e22128b9ebdd6b8';
 const TARGET = 'debian-openssl-3.0.x';
 const sha256 = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
+/** Lifts a synchronous fake into the asynchronous Transport/sleep shape; a throw becomes a rejection. */
+const later =
+  <A extends unknown[], R>(fake: (...args: A) => R) =>
+  (...args: A): Promise<R> =>
+    new Promise<R>((resolve) => resolve(fake(...args)));
 
 const work = mkdtempSync(join(tmpdir(), 'sec-tc-64-'));
 afterAll(() => rmSync(work, { recursive: true, force: true }));
@@ -81,18 +86,18 @@ function sandbox(manifest: { enginesVersion?: string; source?: string; sha256?: 
 /** Records the URLs requested and serves the fake engine for the target URL. */
 function origin(overrides: { gz?: Buffer; shaText?: string } = {}) {
   const requested: string[] = [];
-  const transport: Transport = async (url) => {
+  const transport: Transport = later((url: string) => {
     requested.push(url);
     if (url === engineUrl(VERSION, TARGET)) return { status: 200, body: overrides.gz ?? gz };
     if (url === `${engineUrl(VERSION, TARGET)}.sha256`)
       return { status: 200, body: Buffer.from(overrides.shaText ?? `${sha256(overrides.gz ?? gz)}  schema-engine.gz\n`) };
     return { status: 404, body: Buffer.alloc(0) };
-  };
+  });
   return { transport, requested };
 }
 
 const engineFiles = (dir: string) => readdirSync(dir).filter((name) => name.startsWith('schema-engine'));
-const noSleep = async () => undefined;
+const noSleep = () => Promise.resolve(undefined);
 
 describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () => {
   it('[SEC-TC-64] the committed manifest pins the installed engines version, the fixed origin and both repository targets', () => {
@@ -232,10 +237,10 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
   it('[SEC-TC-64] (iii) an empty engine directory and an unreachable origin fail closed after 3 retries per file', async () => {
     const box = sandbox();
     const requested: string[] = [];
-    const unreachable: Transport = async (url) => {
+    const unreachable: Transport = later((url: string) => {
       requested.push(url);
       throw Object.assign(new Error(`connect ECONNREFUSED ${new URL(url).host}`), { code: 'ECONNREFUSED' });
-    };
+    });
     const errors: string[] = [];
     const code = await run(
       [],
@@ -280,8 +285,8 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
     const url = engineUrl(VERSION, TARGET);
     const hop =
       (location: string): Transport =>
-      async (requested) =>
-        requested === url ? { status: 302, location, body: Buffer.alloc(0) } : { status: 200, body: Buffer.from('ok') };
+      (requested) =>
+        Promise.resolve(requested === url ? { status: 302, location, body: Buffer.alloc(0) } : { status: 200, body: Buffer.from('ok') });
     await expect(fetchFromOrigin(url, { transport: hop('/all_commits/elsewhere'), maxBytes: 10, sleep: noSleep })).resolves.toEqual(
       Buffer.from('ok'),
     );
@@ -293,10 +298,10 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
     );
     await expect(fetchFromOrigin('https://evil.example/x', { maxBytes: 10 })).rejects.toThrow(/outside https:\/\/binaries\.prisma\.sh/);
     let calls = 0;
-    const notFound: Transport = async () => {
+    const notFound: Transport = later(() => {
       calls += 1;
       return { status: 404, body: Buffer.alloc(0) };
-    };
+    });
     await expect(fetchFromOrigin(url, { transport: notFound, maxBytes: 10, sleep: noSleep })).rejects.toThrow(/HTTP 404/);
     expect(calls).toBe(1);
   });
@@ -304,17 +309,17 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
   it('[SEC-TC-64] retries with exponential backoff and jitter before succeeding', async () => {
     const delays: number[] = [];
     let calls = 0;
-    const flaky: Transport = async () => {
+    const flaky: Transport = later(() => {
       calls += 1;
       return calls < 3 ? { status: 503, body: Buffer.alloc(0) } : { status: 200, body: Buffer.from('ok') };
-    };
+    });
     const body = await fetchFromOrigin(engineUrl(VERSION, TARGET), {
       transport: flaky,
       maxBytes: 10,
       random: () => 0.5,
-      sleep: async (ms) => {
+      sleep: later((ms: number) => {
         delays.push(ms);
-      },
+      }),
     });
     expect(body.toString()).toBe('ok');
     expect(delays).toEqual([750, 1500]);
@@ -334,7 +339,7 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
     const out: string[] = [];
     const quiet = { out: (text: string) => out.push(text), err: () => undefined };
     expect(await run(['--record', `--targets=${TARGET}`], { manifestPath: box.manifestPath, transport }, quiet)).toBe(0);
-    expect(JSON.parse(out.join('')).results[0].sha256).toBe(sha256(binary));
+    expect((JSON.parse(out.join('')) as { results: { sha256: string }[] }).results[0]?.sha256).toBe(sha256(binary));
     expect(await run(['--record'], { manifestPath: join(work, 'absent.json'), transport }, quiet)).toBe(1);
   });
 

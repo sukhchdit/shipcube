@@ -47,13 +47,16 @@ function fakeDatabase(dir: string, options: { leaky?: string; failDeploy?: boole
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    markRolledBack: async (name: string) => {
+    markRolledBack: (name: string) => {
       expect(name).toBe(pending);
       applied.delete(name);
       if (name === options.leaky) leftovers.push(`CREATE SEQUENCE ${name}_seq`);
+      return Promise.resolve();
     },
-    snapshot: async () =>
-      [...[...applied].map((name) => `CREATE TABLE ${name}`), ...leftovers.filter((left) => !applied.has(left))].sort().join(';\n'),
+    snapshot: () =>
+      Promise.resolve(
+        [...[...applied].map((name) => `CREATE TABLE ${name}`), ...leftovers.filter((left) => !applied.has(left))].sort().join(';\n'),
+      ),
   };
 }
 

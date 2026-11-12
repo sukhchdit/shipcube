@@ -401,6 +401,21 @@ export default defineConfig([
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
     },
   },
+  {
+    // The root Prisma CLI configuration imports `prisma/config` from the prisma workspace's pinned CLI (ADR-0023
+    // am. J; TASK-003). Narrow allowance for this one file, like the jest-esm one above.
+    files: ['prisma.config.ts'],
+    rules: {
+      'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'prisma')] }],
+    },
+  },
+  {
+    // The cross-cutting DB test lane (D-TASK003-01: type-checked through tools/tsconfig.json) exercises the root
+    // tooling it tests (tools/db, tools/test-support) and the runtime client factory (apps/api/src/platform/db), none
+    // of which is a package entry point. Relative imports are the only way in; scoped to prisma/tests (TASK-003).
+    files: ['prisma/tests/**'],
+    rules: { 'import-x/no-relative-packages': 'off' },
+  },
 
   // --- Layering (eslint-plugin-boundaries) ----------------------------------------------------------------------
   {

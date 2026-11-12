@@ -93,7 +93,7 @@ export async function main(argv: string[] = process.argv.slice(2), env: NodeJS.P
     } finally {
       await admin.end();
     }
-    const result = await runBootstrap({ connection: { connectionString: bootstrapUrl as string }, passwords });
+    const result = await runBootstrap({ connection: { connectionString: bootstrapUrl }, passwords });
     process.stdout.write(`[db:reset] ${database} recreated; bootstrap applied ${result.applied.join(', ')}\n`);
     const deploy = spawnSync(process.execPath, [join(REPO_ROOT, 'tools', 'deps', 'prisma-cli.mjs'), 'migrate', 'deploy'], {
       cwd: REPO_ROOT,

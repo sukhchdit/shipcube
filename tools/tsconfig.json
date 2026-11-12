@@ -7,7 +7,13 @@
     "checkJs": true,
     "tsBuildInfoFile": "../node_modules/.cache/tools.tsbuildinfo"
   },
-  "files": ["../jest.config.ts", "../prisma.config.ts", "../apps/api/src/platform/db/client.ts"],
+  "files": [
+    "../jest.config.ts",
+    "../prisma.config.ts",
+    "../prisma/tests/fixtures/updown/prisma.config.ts",
+    "../prisma/tests/fixtures/updown-broken/prisma.config.ts",
+    "../apps/api/src/platform/db/client.ts"
+  ],
   "include": ["**/*.ts", "**/*.mjs", "../prisma/tests/**/*.ts", "../prisma/generated/**/*.ts"],
   "exclude": ["**/fixtures/**", "../prisma/tests/fixtures/**"]
 }

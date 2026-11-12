@@ -28,7 +28,7 @@ beforeAll(async () => {
     connectionString: db.appUrl(database),
     poolMax: 2,
     applicationName: 'integration-test',
-  }) as unknown as RawClient;
+  });
 }, 300_000);
 
 afterAll(async () => {
