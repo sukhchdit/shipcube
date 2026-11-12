@@ -228,9 +228,21 @@ jobs:
         if: env.CODE == 'true'
         run: npm run format:check
 
-      - name: Commit messages (commitlint over the range)
+      # Pull requests are squash-merged with the PR title as the commit header, so the title is what lands on main;
+      # per-commit messages are checked at the source by the commit-msg hook (npm run hooks:install). Linting every
+      # commit in the PR range would make one pushed typo unfixable under the no-force-push rule (D-TASK007-08).
+      - name: Commit messages (commitlint; PR title = squash header, pushed range on main)
         if: env.CODE == 'true'
-        run: npm exec --no -- commitlint --from "$RANGE_BASE" --to "$RANGE_HEAD" --verbose
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            printf '%s\n' "$PR_TITLE" | npm exec --no -- commitlint --verbose
+          else
+            npm exec --no -- commitlint --from "$RANGE_BASE" --to "$RANGE_HEAD" --verbose
+          fi
 
       - name: actionlint
         run: docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color

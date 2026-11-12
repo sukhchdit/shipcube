@@ -162,6 +162,17 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
     expect(ciText).toContain('npm exec --no -- commitlint');
   });
 
+  it('D-TASK007-08: commitlint gates the PR title (the squash header) via env, never interpolated into the script; a commit-msg hook lints every local commit', () => {
+    const step = steps.find((candidate) => str(candidate.name).startsWith('Commit messages'));
+    const env = map(step?.env, 'commitlint env');
+    expect(env.PR_TITLE).toBe('${{ github.event.pull_request.title }}');
+    expect(str(step?.run)).toContain('"$PR_TITLE" | npm exec --no -- commitlint');
+    expect(str(step?.run)).not.toContain('${{');
+    expect(step?.['continue-on-error']).toBeUndefined();
+    const hook = readFileSync(join(repoRoot, 'tools', 'hooks', 'commit-msg'), 'utf8');
+    expect(hook).toContain('npm exec --no -- commitlint --edit "$1"');
+  });
+
   it('PR1-SEC-02 item 5 / D-ARCH-041 (e): the Prisma engine cache is keyed by enginesVersion and runner OS and restored before deps:rebuild re-verifies it', () => {
     const cache = steps.find((step) => str(step.uses).startsWith('actions/cache@'));
     expect(map(cache?.with, 'cache with').key).toBe('prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}');
