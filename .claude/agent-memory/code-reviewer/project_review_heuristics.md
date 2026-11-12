@@ -23,3 +23,17 @@ These patterns were confirmed in PR #3 (TASK-005, 2026-11-12) with small scratch
 
 **Why:** each of these passed the author's own tests, because the tests used cooperative fakes.
 **How to apply:** check every config, guard, secret or timeout diff against this list. See [[review-watchlist]] and [[scratch-copy-technique]].
+
+**Docs/spike PRs (PR #6, 2026-11-12).** Re-read the cited sources yourself (gh api for GitHub, curl for raw spec YAML into the scratchpad). Do three things:
+- Check whether a cited third-party source holds *more* evidence than the author used. PR #6 cited an SDK README, but the SDK source had the "unverified" paths.
+- Test every "use library X for Y" premise against the installed library's code (pdfkit image sniffing).
+- Check that recommended options are mapped to the REQ that consumes them, not only the capability REQ.
+Host allow-lists are host-based (REQ-SEC-010), so carriers sharing a host across sandbox and production need path/env binding.
+
+**Timing assertions in required suites (PR #7, 2026-11-12).** Wall-clock p95 deltas asserted in `*.int.test.ts` run on every `test:integration`. Heavy suites run on the contended local host (D-ORCH-001). When headroom is only about 2× and the doc itself records run-to-run swings, require an opt-in env flag; the doc table is the record. Lower-bound timer checks (e.g. `>= 1900` for a 2000 ms maxWait) are fine.
+**Pool reset.** `@prisma/adapter-pg` `commit()`/`rollback()` only call `client.release()`, with no DISCARD/RESET. Any session-level `SET` leaks to the next checkout. Check every DB-context diff for session-level settings.
+
+**Authz guards (PR #8, 2026-11-12):**
+- Invariants keyed on a free-text field of the guarded data (such as `category`) are bypassable. Probe by re-categorising a write permission and granting it.
+- Generators that write a migration path keyed by an unchanged version number rewrite applied migrations in place. Ask for a content pin per released version.
+- Check every "read-only role" rule against self-service routes (`/me/sessions`), because ASVS V3.3.4 needs session list and revoke for every user.
