@@ -1,0 +1,154 @@
+/*
+ * Tailwind 4 token theme (placeholder). Source of truth: docs/02-ux/design-system/tokens.json (tokens.md §2).
+ * This file holds the subset of semantic tokens the app scaffolds use; the full compiled theme with the contrast
+ * test and the token lint replaces it in TASK-038 (US-101). Feature code never writes raw values: it uses the
+ * utilities generated below (bg-canvas, text-muted, border-control, ...).
+ *
+ * Raw values live only here. Hex literals are the primitive palette steps referenced by the semantic tokens.
+ */
+
+@theme {
+  /* The default Tailwind palette and breakpoints are replaced, not extended (tokens.md §2): bg-red-500 must not exist. */
+  --color-*: initial;
+  --breakpoint-*: initial;
+  --breakpoint-xs: 360px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  /* 4/8 px grid: Tailwind multiplies this base, so p-2 is 8 px, p-4 is 16 px (tokens.md §5). */
+  --spacing: 0.25rem;
+
+  --radius-*: initial;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* System font stack, no web fonts (D-UX-001). */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* Layout widths: size.layout.containerMax (1280 px) and size.layout.reading (720 px). */
+  --container-*: initial;
+  --container-page: 80rem;
+  --container-reading: 45rem;
+
+  /* Display type, home hero only (tokens.md §4): 28/36 below 1024 px, 36/44 from 1024 px. */
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.25rem;
+  --text-display-lg: 2.25rem;
+  --text-display-lg--line-height: 2.75rem;
+
+  --z-header: 20;
+  --z-skip-link: 70;
+}
+
+/* Semantic tokens, light theme (default). */
+:root {
+  --color-bg-canvas: #f8fafc;
+  --color-bg-surface: #ffffff;
+  --color-bg-subtle: #f1f5f9;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #334155;
+  --color-text-muted: #475569;
+  --color-text-link: #1d4ed8;
+  --color-text-link-hover: #1e3a8a;
+  --color-border-subtle: #e2e8f0;
+  --color-border-control: #64748b;
+  --color-action-primary-bg: #2563eb;
+  --color-action-primary-fg: #ffffff;
+  --color-focus-ring: #2563eb;
+  --color-focus-offset: #ffffff;
+  color-scheme: light;
+}
+
+/* Dark theme: explicit data-theme="dark", or data-theme="system" (and no attribute) under prefers-color-scheme. */
+:root[data-theme='dark'] {
+  --color-bg-canvas: #020617;
+  --color-bg-surface: #0f172a;
+  --color-bg-subtle: #1e293b;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-link: #60a5fa;
+  --color-text-link-hover: #93c5fd;
+  --color-border-subtle: #1e293b;
+  --color-border-control: #64748b;
+  --color-action-primary-bg: #60a5fa;
+  --color-action-primary-fg: #020617;
+  --color-focus-ring: #60a5fa;
+  --color-focus-offset: #0f172a;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    --color-bg-canvas: #020617;
+    --color-bg-surface: #0f172a;
+    --color-bg-subtle: #1e293b;
+    --color-text-primary: #f8fafc;
+    --color-text-secondary: #cbd5e1;
+    --color-text-muted: #94a3b8;
+    --color-text-link: #60a5fa;
+    --color-text-link-hover: #93c5fd;
+    --color-border-subtle: #1e293b;
+    --color-border-control: #64748b;
+    --color-action-primary-bg: #60a5fa;
+    --color-action-primary-fg: #020617;
+    --color-focus-ring: #60a5fa;
+    --color-focus-offset: #0f172a;
+    color-scheme: dark;
+  }
+}
+
+/* Utility names follow tokens.md §2: --color-bg-surface -> bg-surface, --color-text-muted -> text-muted, ... */
+@theme inline {
+  --color-canvas: var(--color-bg-canvas);
+  --color-surface: var(--color-bg-surface);
+  --color-subtle: var(--color-bg-subtle);
+  --color-primary: var(--color-text-primary);
+  --color-secondary: var(--color-text-secondary);
+  --color-muted: var(--color-text-muted);
+  --color-link: var(--color-text-link);
+  --color-link-hover: var(--color-text-link-hover);
+  --color-hairline: var(--color-border-subtle);
+  --color-control: var(--color-border-control);
+  --color-action-primary: var(--color-action-primary-bg);
+  --color-on-action-primary: var(--color-action-primary-fg);
+  --color-focus: var(--color-focus-ring);
+}
+
+@layer base {
+  html {
+    /* The user's browser font size is respected; base UI text is 14 px at the default (tokens.md §1). */
+    font-size: 100%;
+    background-color: var(--color-bg-canvas);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+  }
+
+  body {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  /* Focus indicator: 2 px ring, 2 px offset, at least 3:1 in both themes, never suppressed (accessibility.md §3). */
+  :focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Every duration resolves to 0 ms under reduced motion (tokens.md §7). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
