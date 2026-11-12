@@ -121,12 +121,17 @@ const DESTRUCTIVE = [
   /^alter\s+table\b.*\bdrop\s+(?!column\b|constraint\b|default\b|not\b|identity\b|expression\b)"?[a-z_][a-z0-9_]*"?\s*(,|cascade|restrict|$)/,
   /^alter\s+table\b.*\bdrop\s+(column\s+)?if\s+exists\b/,
 ];
-/** Rule 10's list, matched against the statement's code (strings and bodies blanked); a CTE may wrap the change. */
+/**
+ * Rule 10's list, matched against the statement's code (strings and bodies blanked); a CTE may wrap the change. An
+ * upsert (`INSERT … ON CONFLICT … DO UPDATE`) rewrites existing rows and counts too; `ON CONFLICT … DO NOTHING` does
+ * not (D-SEC-PR8-01, PR8-SEC-03).
+ */
 const DATA_CHANGING = [
   /^update\b/,
   /^delete\b/,
   /^truncate\b/,
   /^insert\s+into\b.*\bselect\b/,
+  /^insert\s+into\b.*\bon\s+conflict\b.*\bdo\s+update\b/,
   /^merge\b/,
   /^with\b.*(\bdelete\s+from\b|\binsert\s+into\b|\bmerge\s+into\b|(?<!\bfor |\bkey )\bupdate\b)/,
 ];
