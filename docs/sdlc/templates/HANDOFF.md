@@ -1,0 +1,11 @@
+## Handoff Report
+- **Agent:** <name>  **Phase:** <P#>  **Task/Scope:** <ID or description>
+- **STATUS:** DONE | PARTIAL | BLOCKED | ROLLED_BACK
+- **Summary (≤5 lines):**
+- **Artifacts written/changed:** <paths; branch name if code>
+- **Evidence:** <commands run + results; test counts; coverage; verdicts>
+- **Decisions made (also in DECISIONS.md):** <decision — rationale — reversibility>
+- **Assumptions / defaults applied (also in ASSUMPTIONS.md):** <assumption — confidence — validation method>
+- **Optional questions (non-blocking):** <question — options — default ALREADY APPLIED — impact if wrong>
+- **Risks / follow-ups:** <item — severity — owning agent>
+- **Recommended next agent & action:** <agent — what>

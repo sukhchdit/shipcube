@@ -1,0 +1,41 @@
+{
+  "env": {
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"
+  },
+  "permissions": {
+    "allow": [
+      "Read", "Edit", "Write", "Glob", "Grep", "WebSearch", "WebFetch",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+      "Bash(git branch:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git add:*)",
+      "Bash(git commit:*)", "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git worktree:*)",
+      "Bash(git tag:*)", "Bash(git push:*)", "Bash(git pull:*)", "Bash(git fetch:*)", "Bash(git stash:*)",
+      "Bash(npm:*)", "Bash(npx:*)", "Bash(pnpm:*)", "Bash(yarn:*)", "Bash(node:*)",
+      "Bash(python:*)", "Bash(python3:*)", "Bash(pip:*)", "Bash(uv:*)", "Bash(pytest:*)", "Bash(ruff:*)", "Bash(mypy:*)",
+      "Bash(mvn:*)", "Bash(gradle:*)", "Bash(./gradlew:*)", "Bash(dotnet:*)", "Bash(go:*)", "Bash(cargo:*)",
+      "Bash(make:*)", "Bash(docker build:*)", "Bash(docker compose:*)", "Bash(docker run:*)",
+      "Bash(terraform fmt:*)", "Bash(terraform validate:*)", "Bash(terraform plan:*)", "Bash(terraform init:*)",
+      "Bash(helm lint:*)", "Bash(helm template:*)", "Bash(kubeconform:*)", "Bash(checkov:*)", "Bash(tfsec:*)",
+      "Bash(semgrep:*)", "Bash(gitleaks:*)", "Bash(trufflehog:*)", "Bash(osv-scanner:*)", "Bash(trivy:*)", "Bash(syft:*)",
+      "Bash(k6:*)", "Bash(gh workflow:*)", "Bash(gh run:*)", "Bash(gh pr:*)", "Bash(gh release:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(find:*)", "Bash(grep:*)",
+      "Bash(sed:*)", "Bash(jq:*)", "Bash(curl:*)", "Bash(chmod:*)", "Bash(touch:*)"
+    ],
+    "deny": [
+      "Read(./.env)", "Read(./.env.*)", "Read(./secrets/**)", "Read(**/*.pem)", "Read(**/*.key)",
+      "Bash(git push --force:*)", "Bash(git push -f:*)", "Bash(git push --force-with-lease:*)",
+      "Bash(git filter-branch:*)", "Bash(git filter-repo:*)",
+      "Bash(rm -rf /:*)", "Bash(rm -rf ~:*)", "Bash(sudo:*)",
+      "Bash(terraform apply:*)", "Bash(terraform destroy:*)",
+      "Bash(kubectl apply:*)", "Bash(kubectl delete:*)", "Bash(helm install:*)", "Bash(helm upgrade:*)", "Bash(helm uninstall:*)",
+      "Bash(npm publish:*)", "Bash(docker push:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "npm run -s format:changed >/dev/null 2>&1 || true" }]
+      }
+    ]
+  }
+}
