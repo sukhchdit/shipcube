@@ -135,3 +135,15 @@ PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Revie
   - PR #1: R2-n4 (in code).
   - TASK-015 m7 (any-justification TASK-ID) is partly closed.
 - After merge, PR #9 is the first PR under the enforced security-record gate.
+
+PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0011-TASK-016-code-review.md`.
+- M1: the TenantDb Proxy is shallow. `db.$parent` returns the unguarded itx client (with `*Unsafe` and `$transaction`), `db.$parent._originalClient` is the ROOT client, and the same holds via `db.<model>.$parent` and the Prisma private `Symbol()` key. Fix: deny-by-default top level plus child proxies on delegates; tests on the real `_createItxClient` shape.
+- MINORs:
+  - m1: rule-16 / C-series literal exemption beaten by `'' || 'app.org_id'`, `'app.' || 'org_id'` and `SET "app"."org_id"`.
+  - m2: the C5 ACL query drops PUBLIC (`grantee <> 0`).
+  - m3: the PR #9 second-merger list (§7 a–f) — composition root imports client.ts; the tenant-context ban hits PR #9 tests; config/.env textual conflicts.
+  - m4: C6–C10 absent.
+  - m5: `Prisma.raw` / non-tagged `$queryRaw`.
+  - m6: PR #5 R2-m2 (DO bodies, rule 10) still open.
+- Closed by PR #11 (verified): PR #2 n5; PR #5 R3-n1 plus PR #8's tools/authz edge; PR #5 R2-m1 / PR5-SEC-11. PR #5 R2-n1 (`U&`) is still open.
+- r2: re-probe M1 with the real itx shape and m1 with the 9 bodies. Check §7 when PR #9 or PR #11 merges second.

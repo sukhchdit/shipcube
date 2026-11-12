@@ -67,3 +67,9 @@ Round 2 of a spike PR (PR #6 r2):
 - **`git diff --name-only` reports only the new path of a rename.** Ownership or record checks need `--no-renames`.
 - **A "record names reviewed SHA, nothing changed since" check** breaks on merge-main. Intersect with the PR's own net owned paths.
 - **Verify process premises against repo settings** (`gh api repos/<r>`): squash title (`COMMIT_OR_PR_TITLE` uses the commit subject for single-commit PRs), allowed merge methods. Branch protection returns 403 on private free-plan repos, so "required check" claims are not enforceable.
+
+**DB-guard patterns (PR #11, 2026-11-12):**
+- **Prisma client Proxy guards.** Prisma 7 clients and delegates carry the public `$parent` property (the extension context), the internal `_originalClient` and a private `Symbol()` key holding the unapplied client. A top-level deny-list misses all three. Probe on the real shape without a DB: `new PrismaClient({adapter: new PrismaPg({connectionString:'postgresql://x@127.0.0.1:1/x'})})._createItxClient({id:'t'},0,{})`.
+- **Regex "literal exemption" scans** (for example "set_config allowed when the first arg is a non-app literal") are beaten by `'' || 'app.x'`. Require a complete literal followed by `,`. Also check quoted-identifier forms (`"app"."x"`).
+- **Catalog ACL equality via `aclexplode`.** Check whether PUBLIC (`grantee = 0`) and inherited privileges are excluded. Effective privilege is what matters.
+- **New lint boundaries in one PR vs another open PR.** Run `git merge-tree` and grep the other PR's files for imports and string tokens the new rules ban. Semantic lint conflicts are not textual conflicts.

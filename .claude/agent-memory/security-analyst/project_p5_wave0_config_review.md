@@ -48,11 +48,7 @@ The PR #3 review (TASK-005) is in `docs/05-quality/security/PR-0003-TASK-005-sec
 **Why:** the follow-ups are spread over later tasks. Each later review must check them, or they never close.
 
 **How to apply.** In these reviews, check:
-- **TASK-006:**
-  - start-up composes `resolveSecretRefs` + `checkResolvedSecrets`;
-  - ioredis is built with explicit `tls`;
-  - the `file` provider opens with `O_NOFOLLOW` and does `fstat` plus a bounded read on the same handle, with a mode check;
-  - PR3-SEC-16, if this PR did not fix it.
+- **TASK-006:** all four items (start-up composition, explicit ioredis `tls`, `O_NOFOLLOW` same-handle read, PR3-SEC-16) were verified CLOSED in PR #9 R1 on 2026-11-12. See [[project-p5-pr9-runtime-skeleton]].
 - **TASK-014:**
   - an entrypoint preflight with `env -u NODE_OPTIONS` and an allow-list, which also refuses `PG*`/`PGOPTIONS` in hardened envs;
   - `--disable-sigusr1`;
