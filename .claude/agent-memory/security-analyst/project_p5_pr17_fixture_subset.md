@@ -47,5 +47,7 @@ The PR #17 review is `docs/05-quality/security/PR-0017-TASK-007-security-review.
   - 05: a fence-safe summary.
 - **Before 01 is fixed:** in every PR, look for `.swcrc` files anywhere in the diff.
 - **Before merge:** owned-path overlap with main was nil on 2026-11-13. Re-check it if owned paths land on main first.
+  - PR #4 (`d2e867b`) changes the same owned `jest.config.ts` and `tools/lint/negative-fixtures.test.ts`, and the two PRs conflict in both files.
+  - Whichever of the two merges second needs a delta round on its merge commit; see [[project-p5-wave0-web-scaffolds]].
 
 Related: [[project-p5-pr10-ci-lane]], [[project-p5-pr2-lint-controls]], [[project-security-review-conventions]]

@@ -53,6 +53,8 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Use a `module.registerHooks` resolve hook (`probes/hooks.mjs`) mapping `@platform/<pkg>` → `<build>/packages/<pkg>/src/index.js`.
   - In Git Bash, pass `--import ./hooks.mjs` from the probes dir, or a `file:///$(cygpath -m …)` URL; a `/c/...` path fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME`.
   - Remove scratch junctions with `cmd //c "rmdir <dir>\\node_modules"`, never `rm -rf`, which would follow the junction.
+- **Raw-socket HTTP probes (PR-0004 R2).** Send the request with `socket.write`, never `socket.end`. On a half-close (FIN), Node's http server drops responses that are written asynchronously, such as piped file streams; only synchronous 4xx responses come back, so every 200 reads as "no response". Use `Connection: close` and wait for `close`.
+- **Signature and advisory spot checks without an installed tree.** `npm audit signatures` needs `node_modules`. Instead, verify each tuple's `dist.signatures` (ECDSA over `name@version:integrity`) against `-/npm/v1/keys` with `node:crypto`, add a tampered-integrity control, and POST to `-/npm/v1/security/advisories/bulk` with a known-vulnerable version as a positive control. Script: `scratchpad/review/PR-4-sec-r2/scripts/sigcheck.mjs` (session-scoped).
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
