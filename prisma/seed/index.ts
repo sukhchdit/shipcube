@@ -48,7 +48,7 @@ function createLogger(output: Output): SeedLogger {
  * Receives configuration changes inside the seed transaction. Until the audit writer (TASK-025) and the authz
  * reconciler (TASK-221) provide the `CONFIG_CHANGE` audit entry, a change is logged with dataset, versions and hash only.
  */
-const loggingConfigChangeSink = (logger: SeedLogger): ConfigChangeSink => ({
+export const loggingConfigChangeSink = (logger: SeedLogger): ConfigChangeSink => ({
   configChanged(_sql: SeedSql, change: ConfigChange): Promise<void> {
     if (change.kind === 'drift-restored') {
       logger.info('seed.config_change', {

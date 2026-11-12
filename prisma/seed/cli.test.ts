@@ -7,7 +7,33 @@ import { createServer, type AddressInfo, type Socket } from 'node:net';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { main, type Output } from './index.js';
+import type { SeedLogger, SeedSql } from './framework/contracts.js';
+import { loggingConfigChangeSink, main, type Output } from './index.js';
+
+describe('logging ConfigChangeSink (stand-in until TASK-025/TASK-221)', () => {
+  it('logs both change kinds with dataset, versions, hashes and counts only', async () => {
+    const events: [string, unknown][] = [];
+    const logger: SeedLogger = { info: (event, fields) => events.push([event, fields]), warn: () => undefined };
+    const sink = loggingConfigChangeSink(logger);
+    const sql: SeedSql = { query: () => Promise.reject(new Error('the logging sink must not query')) };
+    await sink.configChanged(sql, {
+      kind: 'version',
+      dataset: 'flags',
+      fromVersion: undefined,
+      toVersion: '1',
+      fromSha256: undefined,
+      toSha256: 'ab',
+    });
+    await sink.configChanged(sql, { kind: 'drift-restored', dataset: 'flags', version: '1', sha256: 'ab', restoredRows: 3 });
+    expect(events).toEqual([
+      [
+        'seed.config_change',
+        { kind: 'version', dataset: 'flags', fromVersion: 'none', toVersion: '1', fromSha256: 'none', toSha256: 'ab' },
+      ],
+      ['seed.config_change', { kind: 'drift-restored', dataset: 'flags', version: '1', sha256: 'ab', restoredRows: 3 }],
+    ]);
+  });
+});
 
 interface Captured extends Output {
   readonly lines: string[];
