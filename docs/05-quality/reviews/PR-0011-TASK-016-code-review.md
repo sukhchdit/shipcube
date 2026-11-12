@@ -256,3 +256,161 @@ Method:
 - n5 + R2-n2 `U&` → TASK-021.
 - C-1 → TASK-015.
 - R2-n2 limits text → principal-architect (data-model §8.3 "Limits").
+
+
+---
+
+## Round 3 (head 37a2109)
+
+- **Delta:** `a3e8edd..37a2109`, pushed once. Fix comment: PR #11 issuecomment-6835514581. Lane A comment: issuecomment-6835649182. Reviewed in three parts:
+  - (1) fix delta `a3e8edd..80bcda1` (`b00cd6e`, `91c90bf`, `41afe58`, `80bcda1`);
+  - (2) merge `d68898a` (parents `80bcda1` + `63accea`);
+  - (3) reconciliation `d68898a..37a2109` (`ddf27d6`, `a7df29f`, `198328a`, `9482f38`, `37a2109`).
+- **Reviewer:** code-reviewer · P5 Wave 0 · 2026-11-13
+- **Inputs:** rounds 1–2 above; `rulings/wave-0-task-016-rulings.md` items 1–8; D-ORCH-014, D-ORCH-018, D-TASK006-02/03, D-ARCH-073/074; security review PR11-SEC-09 items 1–6; WAVE-00 TASK-016 sheet lines (D-ORCH-014 reconciliation block).
+- **Supersede (D-ORCH-018):** this review grades the CONTENT, which is `git diff 63accea 37a2109` (377 files, none under `docs/` or `.claude/`). The superseding branch must carry exactly that tree delta; see R3 §6.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-M1 is closed. Every guarded operation result is a lazy, frozen, null-prototype thenable with only
+         then/catch/finally; requestTransaction, spec and _callback read undefined; the ROOT log stays empty; a late
+         await gives TENANT_TX_CLOSED with no statement sent. Re-probed on the real 7.10.1 runtime, and 4 mutations
+         were killed. R2-m1..m3, R2-n1..n4 and architect items 1, 2b, 5 and 6 are closed. The merge is a pure union.
+         D-ORCH-014 (a)–(f) and PR11-SEC-09 items 1–6 are met. Item 4's metric and the TASK-010 sink are deferred
+         without a recorded owner (R3-m1). PGOPTIONS exits 1, not 78 (R3-m2). Six NITs.
+FINDINGS: R3-m1, R3-m2 (MINOR); R3-n1..n6 (NIT). No BLOCKER/MAJOR. See R3 §3.
+GOOD: R3 §5
+SECURITY-FLAGS: none new above NIT; R3-n1/n2 are lint-twin residues behind run-time controls (R3 §6)
+```
+
+### R3 §1. Verification performed
+
+Constraints held: no `npm ci`, build, Docker or full suite, and no command in `Shipqube-TASK-016`.
+
+Method:
+- `git archive 37a2109` into `scratchpad/review/PR-11-cr-r3/copy`, with `node_modules` junctioned to the TASK-016 worktree (Prisma 7.10.1; the lock equals main's) and the git-ignored `prisma/generated` copied in.
+- Afterwards: the junction was removed with `rmdir` before `rm -rf`. The worktree still has 740 `node_modules` entries and `git status` shows 0 lines. The only junction at `C:\` is the system `Documents and Settings`.
+
+| Check | Result |
+|---|---|
+| Unit, 9 suites in one `--runInBand` run: `platform/db/{runtime,session-integrity,tenant-db,with-tenant-tx}.test`, `errors/classify.test`, `runtime/services.test`, `tools/lint/tenant-context-forms-drift.test`, `tools/db/{lint-migrations,tenant-key-forms}.test` | **332 passed** |
+| Unit/API: `packages/shared/src/errors/catalogue.test` + `platform/errors/problem-handler.api.test` | **58 passed** |
+| Unit: `prisma/tests/rls/tenant-db.real-client.test.ts` (real 7.10.1 runtime, recording adapter) | 3 passed |
+| Unit: `tools/lint/negative-fixtures.test.ts` | 154 passed, 3 failed. All 3 are the known copy-only false failures (`@platform/*` resolves into the worktree): the two ADR-0003 workspace probes and the `@platform/source` wiring case. Same set as round 2. |
+| **Probe A (R2-M1 re-run):** a Jest file next to the real-client test, inside `withTenantTx`, on results of `count`, `aggregate`, `groupBy`, `createMany`, `findFirst` and `upsert` | Own keys are exactly `then`, `catch`, `finally` and `Symbol(Symbol.toStringTag)`. `requestTransaction`, `spec`, `_callback`, `constructor` and `__proto__` read `undefined`, and `'requestTransaction' in r` is false. `then` is a plain arrow function (keys `length`, `name`), so there is no closure path to the PrismaPromise. `defineProperty` throws (frozen). `fields` gives FieldRef data only (`modelName`, `name`, `typeName`, `isList`, `isEnum`; no `$parent`). A result created inside and awaited after commit rejects `Database error: TENANT_TX_CLOSED`. **ROOT log `[]`; connections `['TX1']`.** |
+| **Mutations on `tenant-db.ts`** (restored and diffed after each) | (1) Return `fn.apply(raw, args)` unwrapped: real-client test **fails**. (2) Drop the `state.closed` check in `settle`: **2 fail**. (3) Drop the Sql-fragment value check: **2 fail**. (4) Drop `Object.isFrozen(raw)`: **3 fail**. 4/4 killed. |
+| **Probe D (R2-m1/m2 lint re-run):** `Linter` API with `@typescript-eslint/parser` on 24 `db-raw-sql` and 15 `tenant-context-sql` snippets | `db-raw-sql`: flagged, the three round-2 alias forms (`Prisma as P` + `P.raw`, `const { raw } = Prisma`, `const r = Prisma.raw`), plus a namespace import of the generated client, a named `raw` import, `await import()`, `require`, `.requestTransaction(null)`, destructured `requestTransaction` and optional-call non-tagged. Clean controls: tagged `Prisma.sql`, `Prisma.join(ids[, ', '])`, type-only import. **Not flagged (R3-n1):** the container passed as a function argument, put in an object or array, copied by spread or `Object.assign`, chosen by ternary or `||`, or read through `import().then(m => …)`; `Reflect.get(db, '$parent')`; a concatenated key; `$queryRaw.call`. `tenant-context-sql`: the quoted, spaced, quoted-whole, `LOCAL` quoted, `SESSION … TO` and `RESET "app".x` forms, newline-split, template-split and the setter forms are all flagged. **Not flagged (R3-n2):** `SET U&"\0061pp".org_id` and `SET app/**/.org_id`. |
+| **Probe C (rules 11/15):** `lintMigrations` on 10 hand-written migrations | Flagged: rule 15 on `ALTER TABLE … OWNER TO platform_definer` and on `OWNER /* c */ TO platform_definer`; rule 16 on `U&'…'`. Clean (correct): `SET lock_timeout = '1s'`; `'2min'` followed by `RESET`; `'10s'` followed by `TO DEFAULT`; `u &'x'` (the operator). **Clean (R3-n3):** `SELECT set_config('lock_timeout', '0', false)`. Also clean: a DO-body `EXECUTE 'SET lock_timeout = 0'` (stated limit) and `REASSIGN OWNED BY platform_migrator TO platform_definer` (rule 15 reads `ALTER` only; the engine probably refuses this for an `INHERIT FALSE` member, not verified). |
+| Helper bodies vs data-model §4.2 | The whitespace-normalised bodies of the three functions in `20261112020000_platform_rls_helpers` (header comments and the GRANT/REVOKE lines dropped) are **byte-identical** to data-model.md:2430-2441. `prisma/sql/policy-templates/operator.sql` and `render-rls.ts` are unchanged from `a3e8edd`. `OPERATOR_SCOPE_ATOM` (lint) and `OPERATOR_SCOPE_DEPARSED` (scans.ts) are unchanged. |
+| Bootstrap role settings vs the pin | Every `ALTER ROLE platform_app SET` line in `prisma/bootstrap/*.sql` (5 in total: 3 in `00-roles.sql`, 2 in `02-role-backstops.sql`) equals `EXPECTED_ROLE_SETTINGS`. The migrator's `lock_timeout = '3s'` (00-roles.sql:58) is the rule-11 bound. |
+| Merge `d68898a` | See R3 §2.2. |
+| `client.ts` importers at `37a2109` | Inside `platform/db`: `runtime.ts` and `dedicated-connection.ts` (type plus `toPoolConfig`). Elsewhere only `prisma/tests/**` (allowed by the `prisma-tests` policy) and two lint fixtures. `platform/runtime/**`, `platform/health/**` and both `main.ts` files do not import it. |
+| Lane A run 43303599938 on `37a2109` (`gh run view`) | Passed: commitlint (PR title), lint, format, actionlint, type-check, unit, licences, audit, install flags, migration immutability, lockfile. **Failed:** the base-ref negative fixtures (D-ORCH-018 (2)) and Gitleaks (merge commit `d68898a`, D-ORCH-018 (1)). Skipped: build, porcelain, semgrep. |
+| `git merge-tree --write-tree origin/main 37a2109` (origin/main `9687533`) | Clean. `63accea..origin/main` touches only `docs/` and `.claude/`. |
+
+**Not re-run:** full lint (type-aware), typecheck, the other unit files, integration (Docker), coverage, build and audit. For these I rely on:
+- hosted lane A on `37a2109`: lint, format, type-check and unit are green;
+- the developer's local gates on `9482f38`: unit 2057 + 2 skipped, api 49, integration 154 + 1 skipped, coverage 97.54 % lines / 97.08 % branches, `db:lint-migrations` 0, build 0, audit 0, porcelain clean. `37a2109` is test-only; its file (21) was re-run by the developer and by me.
+
+I did not read `.env.example` (permissions; brief). For it I relied on numstat (R3 §2.2) and the developer's parity suites (523 passed).
+
+### R3 §2. Closure
+
+#### 2.1 Fix delta `a3e8edd..80bcda1`
+
+| Item | Status | Evidence |
+|---|---|---|
+| **R2-M1** `requestTransaction` on guarded results (MAJOR) | **Closed** | `guardResult` (tenant-db.ts) wraps every thenable result in a frozen null-prototype object with only `then`, `catch`, `finally` and `Symbol.toStringTag`. Each one checks `closed` before calling Prisma's `then`, once, lazily (`started ??=`). Probe A and the real-client test both show: no `requestTransaction`, `spec` or `_callback`; ROOT log empty; late await gives `TENANT_TX_CLOSED` with 0 new statements. Mutation (1) kills the test. The `db-raw-sql` lint half reports `requestTransaction` and `_originalClient`, including destructuring and literal computed keys. |
+| R2-m1 aliased or nested `Prisma.raw` | **Closed** | Run time: `taggedOnly` refuses any `Sql` fragment as a VALUE (duck-typed `strings`/`values` arrays, or the `Sql`/`_Sql` constructor), for all 5 fragment builders × 2 raw members. The real-client test asserts no statement contains the injected text. Lint: binding-aware tracking resolves all three round-2 alias forms (Probe D). Remaining laundering forms are R3-n1 (NIT), behind the run-time refusal. |
+| R2-m2 ESLint twin misses quoted/spaced `SET` | **Closed** | `session-set` and `keys` are now the exact `.source` of `CONTEXT_WRITE_FORMS[1]` and `CONTEXT_READ_FORMS[0]`. `tenant-context-forms-drift.test.ts` (26 cases) pins the sources and runs one corpus through both. Probe D flags all 6 quoted/spaced variants. U& and comment forms are R3-n2 (NIT). |
+| R2-m3 (1) rule 11 `RESET lock_timeout` above 3 s (architect item 1) | **Closed** | `lockTimeoutMs`: units from `guc.c`; `DEFAULT` → role default; `0`, negative or unparsed → ∞ (fail closed). A file-end check applies. Fixture `lock-timeout-raised` has 3 failing and 3 passing migrations, plus 10 parser cases. Probe C is consistent. Residue R3-n3. |
+| R2-m3 (2) rule 15 bare `OWNER TO platform_definer` (architect item 2b) | **Closed** | Any `^alter … owner to "?platform_definer"?` fails, so tables and views are covered as well as functions (Probe C). Fixture `definer-owner-to` covers the function form and the quoted `ROUTINE` form. |
+| R2-n1 C-series scans raw `prosrc` | **Closed** | `sqlText` moved to `tools/db/sql-text.ts`. `scans.ts` `bodyText` uses the same function (comments → one space, strings kept, nested bodies expanded, fail closed on a lexing error). The three comment fixtures are executed on PG 18. |
+| R2-n2 by-form limits | **Closed (text)** | Stated limits with owners are in the linter header and the form-list header (TASK-024 dynamic-SQL allow-list, TASK-021 DO bodies). `U&` is now refused outright in both SQL lanes (PR11-SEC-14 a). The data-model §8.3 "Limits" text is still owed by the architect. |
+| R2-n3 forged strings array | **Closed** | `Object.isFrozen(raw)` is required. JSDoc states the deliberate-forge limit. Mutation (4) killed. |
+| R2-n4 `$queryRawTyped` | **Closed** | In `TENANT_DB_OMITTED` (type and run time). Refused and `in`-false on the real client. Lint reports `makeTypedQueryFactory`/`TypedSql`. |
+| Architect item 5: qualified helper bodies | **Closed** | Byte-identical to data-model §4.2 (R3 §1). New C-series test: a planted `public.current_setting` under `search_path = public, pg_catalog` does not change `platform.app_org_id()`, and the plan keeps the inlined `Index Cond` (50 of 5 000 rows). The migration is not on main (`check-migration-immutability` PASS on lane A). |
+| Architect item 6: `lc_messages = 'C'` | **Closed** | `02-role-backstops.sql:33`; C13 (d) expects five rows, `SHOW lc_messages` = `C`, and `SET lc_messages` as `platform_app` gives `42501` (SUSET, the role cannot undo it). The RDS question is recorded for SPK-08/M5. Closes round-1 n2. |
+| PR #5 R2-n1 (`U&` identifiers, rule 12) | **Closed for `prisma/migrations`** (rule 16 refuses any `U&` statement-wide) | Still open for the reviewed `prisma/bootstrap` lane → TASK-021 (unchanged routing). |
+
+#### 2.2 Merge `d68898a` (pure-union proof)
+
+- `git merge-tree --write-tree 80bcda1 63accea` → tree `d3ae340`, with content conflicts in `.env.example`, `packages/config/src/index.ts` and `packages/config/src/schema.ts`. Every other file auto-merged (`compose.env`, `eslint.config.mjs`, `load-config.test.ts`, `lint-fixtures.mjs`, `negative-fixtures.test.ts`).
+- `git diff --stat d3ae340 d68898a` excluding `.env.example` lists **only** `index.ts` and `schema.ts`. Every other path is byte-identical to a clean re-merge.
+- **`index.ts`:** the resolution keeps both export sets: main's `DB_STATEMENT_TIMEOUT_MS_DEFAULT` / `_LIMIT` and the branch's four `DB_TX_*`. Only the markers are removed.
+- **`schema.ts`:** both blocks are kept verbatim: main's pool `statement_timeout` backstop constants and the `DB_STATEMENT_TIMEOUT_MS` schema key, plus the branch's `DB_TX_*` bounds, `txTimeout` and the three `DB_TX_*` keys. Only ordering and markers changed.
+- **`.env.example`** (not read): `--numstat` gives `63accea → d68898a` = 5 added / 0 deleted, `80bcda1 → d68898a` = 4 / 1, and `63accea → 37a2109` = 5 / 0. So the final file is main's file plus 5 appended lines, and nothing from main was dropped. That matches the developer's "main's file plus the three `DB_TX_*` keys appended" and the parity suites (523 passed).
+- `package-lock.json` equals main's (`git diff --quiet 63accea 37a2109 -- package-lock.json`).
+- **Semantic interaction checked:** main's pool-level `statement_timeout` (25 s startup parameter) sits under the branch's 30 s role backstop (sessions outside the pool only) and the 5 s per-transaction value. The schema comment states the layering. No conflict.
+
+#### 2.3 Reconciliation `d68898a..37a2109`: D-ORCH-014 (a)–(f) and PR11-SEC-09 items 1–6
+
+| Item | Status | Evidence |
+|---|---|---|
+| (a) / SEC-09 5: five role settings; pin parses every bootstrap file | **Met** | `EXPECTED_ROLE_SETTINGS` has 5 rows. The pin test uses `readdirSync(…).filter(.sql)` with a case-insensitive regex that tolerates a quoted role, `IN DATABASE` and `=`/`TO`. It asserts both new rows. R3 §1 cross-check: 5/5. |
+| (b) / SEC-09 5: lock_timeout-RESET asserts readiness drift | **Met** | `with-tenant-tx.int.test.ts` item-12 test: the composed `createDatabaseRuntime` readiness check (`integrityIntervalMs: 0`) is ready, rejects with `db_role_setting_drift` after `RESET`, and gives exactly one `security.db_role_setting_drift` event. |
+| (c)+(d) / SEC-09 1: one composition function in `platform/db` | **Met** | `platform/db/runtime.ts` builds the pool, the session-integrity guard, the gated `database` check and, when `Client` is given, the client over the shared pool and the runner. It returns the runner, readiness check, startup, resources and leak count; the pool and client never leave it. `services.ts`, `runtime/index.ts` and `health.int.test.ts` import it. There is no `db-root-client` carve-out; the `index.ts` comment was updated. The worker reaches it through `createRuntimeServices`. **Dormant until TASK-020:** `Client` is optional because `apps/*` cannot import the generated client yet (data-model §7.2). Production builds no runner today, so the probe and latch are proven by `session-scope-leak.int.test.ts` with the real generated client. Routing in R3 §6. |
+| SEC-09 2: `deps.env` omitted; PGOPTIONS refused via the composition | **Met** (exit-code residue R3-m2) | `assertNoSessionOptions(process.env)` runs before the pool exists, and `createWithTenantTx` receives no `env`. `runtime.test.ts` "refuses PGOPTIONS from process.env…". |
+| SEC-09 3: `probeFreshConnection` first; not ready until it passes | **Met** | `startup()` awaits `freshProbe()` before the dedicated integrity check and the monitor. Both `main.ts` files await `startup()` before listen or processors. Until it passes, readiness re-runs it single-flight. The probe accepts NULL or `''`, so a re-run on a used pooled connection cannot false-positive (round-1 n3 / the PR #9 M1 lesson). The integration composition test asserts the event order. |
+| SEC-09 4: sinks, counter, latch | **Partly met (R3-m1)** | Security events → runtime log `security.<event>` with `{component, correlationId?, sqlState?}` only (the integration test asserts no org id in the log). The latch keeps the first reason, logs once and is never cleared: 3 later polls are not ready; the `[R2-n2]` unit test shows the probe and inner check are never re-run. A tampered default also latches. **Not met:** the counter is an in-process accessor nothing reads ("becomes a metric"), and the sink is the runtime log, not the TASK-010 security logger. Neither deferral has a recorded owner. |
+| SEC-09 6: `DbError` problem+json | **Met** | The `classify.ts` `db` branch carries only `code` and an optional `retryAfterSeconds`. Its own-data reads mean getters are never invoked. A code or status that does not match the catalogue fails safe to `INTERNAL_ERROR`. `Retry-After` is sent only when retryable, as an integer in 1..3600. The problem body is built from the catalogue entry with no `detail` override, so message, reason, sqlState, prismaCode and securityEvent cannot reach the body (`codeOf` and `buildProblem` read nothing else). Every `DbProblemCode` (403/404/409/500/503) is in the platform catalogue. Tested: 18 classify cases, including throwing getters and forged fields, and 6 problem-handler cases. |
+| (e) exemptions | **Met** | Exact files only. `session-integrity.int.test.ts` gets `setter`, `keys` and `session-set` (plants what the guard detects; no `session-set-config`). `session-integrity.test.ts` keeps `keys` (a title was reworded). `problem-handler.api.test.ts` has no exemption (the text was changed). The PR #12 spike `spk08-audit-owner.int.test.ts` gets `keys` only, for one probe policy reading a key at :609, with a "remove in the TASK-021 porting commit" note (D-TASK012-02 (1)). Minimal and justified. Stale-entry tripwire: R3-n5. |
+| (f) union merge plus parity | **Met** | R3 §2.2. |
+| Catalogue `AUTHZ_DENIED` / `CONFLICT` | **Accepted** | Both are in `platform.ts`, which TASK-036 owns. The titles match openapi (`Permission denied`; `Conflict`). A later module redeclaring them fails loudly at load (`mergeCatalogues`) and in `catalogue.test`; it is not silent. Routing in R3-n6. |
+
+### R3 §3. Findings
+
+| ID | Sev | File:line | Problem | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| R3-m1 | MINOR | `apps/api/src/platform/db/runtime.ts:194-207` (sinks); WAVE-00 TASK-016 reconciliation line (4) | PR11-SEC-09 item 4 is a sheet merge condition. Two of its parts are deferred in the PR comment only. (i) "the leak counter becomes a metric": `sessionContextLeaks()` exists but nothing reads or exports it. (ii) "`onSecurityEvent` goes to the TASK-010 security logger": it goes to the runtime log. In the same vein, the runner itself is dormant until TASK-020 passes `Client`. Neither TASK-010's sheet nor any metrics task names these hand-overs. | The detection is otherwise complete (log event plus latched readiness), so there is no exposure today. But "verified at TASK-020's `tx` slot" (D-ARCH-074) only covers the runner. The metric export and the security-logger sink have no owner and would silently stay "done" in traceability. Same failure mode as the round-1 C6–C10 omission. | Record the deferral with owners. In DECISIONS (or a D-TASK016 entry) plus the TASK-010 sheet: the `security.*` events move to the TASK-010 security logger. The metrics/observability task exports `db_session_context_leak_total` from `sessionContextLeaks()`. TASK-020 passes the generated `Client` in both the API and the worker and asserts `tenantTx !== undefined` at boot. Docs-only, so the orchestrator can do it. |
+| R3-m2 | MINOR | `runtime.ts:174` + `apps/{api,worker}/src/main.ts` (top-level `createRuntimeServices`) | With `PGOPTIONS` set, `assertNoSessionOptions` throws `TenantTxConfigError` out of `createRuntimeServices`. That is an unhandled top-level rejection: **exit 1 plus a raw stack** on stderr. `main.ts`'s own contract (and PR3-SEC-05) is "exit 78 on a rejected configuration". This is new behaviour: main did not refuse PGOPTIONS at all. | The refusal is correct and fails closed, and the message names only the variable. But orchestrators and runbooks key on 78 versus 1, and the output is not a structured log line. Same class as PR #9 R3-m1, which was routed to TASK-014. | Either check `PGOPTIONS` in `loadRuntimeConfigOrExit` (exit 78, structured), or catch `TenantTxConfigError` around `createRuntimeServices` in both entry points and exit 78. Add a `main`-level or config-loader test. Fix in the superseding branch (2 lines) or route to TASK-014 together with PR #9 R3-m1. |
+| R3-n1 | NIT | `tools/eslint-rules/db-raw-sql.mjs:12-14, 281-317` | Container tracking follows declarators, assignments and member reads only. The Prisma namespace passed as a function argument, held in an object or array, copied by spread or `Object.assign`, chosen by `?:` or `\|\|`, or reached via `import().then(m => …)` is untracked (Probe D). `Reflect.get(db, '$parent')` and concatenated keys are not seen. The JSDoc "every binding derived from one" overclaims. | Deliberate-only. The run-time guard now refuses every `Sql` value, every non-template first argument and every escape key, so a lint miss becomes a `TenantDbAccessError`, not interpolation. The lint is the early control. | Reword the JSDoc ("declarations, assignments and member reads; other flows are refused at run time"). Optionally report any other value use of a tracked container (`helperValue`-style) and `Reflect.get`/`Reflect.apply` on a literal escape key. |
+| R3-n2 | NIT | `tools/eslint-rules/tenant-context-sql.mjs:25-34`; `tenant-context-forms-drift.test.ts` | The TypeScript twin lacks two things both SQL lanes now have: the `U&` write form (`SET U&"\0061pp".org_id` is clean) and comment stripping (`SET app/**/.org_id` is clean) (Probe D). The drift test pins only `WRITE[1]` and `READ[0]`. | A session `SET` inside the transaction re-scopes the rest of it (round-2 R2-m2 impact). It is deliberate obfuscation only and needs a hard-coded org id. | Add `/\bu&["']/i` as a `session-set` (or new) form. Strip `/*…*/` and `--…` from the text before matching. Add both to the drift corpus, and pin `WRITE[5]` as well. |
+| R3-n3 | NIT | `tools/db/lint-migrations.ts:566-568` | Rule 11's tracker sees only `SET [SESSION] lock_timeout` and `RESET`. `SELECT set_config('lock_timeout', '0', false)` raises the session value with no finding, because rule 16 exempts non-`app.` literal keys (Probe C). | It is the same persistence hazard D-ARCH-071 targets, and it is a plausible copy-paste from application code. | Treat `set_config('lock_timeout', <v>, false)` as a SET in the tracker (or flag it under rule 11 outright). Add a fixture, or list it in the stated limits. |
+| R3-n4 | NIT | `tenant-db.ts:216-236` (`guardResult`) | The guarded result drops Prisma's fluent relation accessors. That is documented in the JSDoc, but the `TenantDb` type still declares them (`Prisma__XClient`), so `db.user.findUnique(…).posts()` type-checks and then fails at run time with a bare `TypeError`. | Developer experience: a type-correct call fails with an unhelpful error, normally caught by the first test. | Either map delegate return types to `PromiseLike<…>` in `TenantDb`, or make the result a Proxy that throws `TenantDbAccessError("fluent accessors are not exposed; use include/select")` for any other key (keeping `then` reads cheap). |
+| R3-n5 | NIT | `eslint.config.mjs:99-131` (`TENANT_CONTEXT_EXEMPTIONS`) | No test asserts that each exempted file exists. The spk03 and spk08 entries rely on a comment ("remove in the deleting commit"). If they are left behind, a future file created at that exact path inherits `ALL_CONTEXT_FORMS` (spk03) or `keys` (spk08). | Exemptions are only safe while minimal; stale entries are invisible. | Export the list (or parse it) and add a unit tripwire: every `files` entry exists in the tree. |
+| R3-n6 | NIT | `packages/shared/src/errors/catalogue/platform.ts:13,19`; `map-db-error.ts:11` | (i) `AUTHZ_DENIED` and `CONFLICT` now live in the platform catalogue. TASK-020 (authz denials) and TASK-036 (owner of `platform.ts`) must not redeclare them in a module file; that would fail loudly, not silently. (ii) `DbProblemCode` is a free string union, not tied to `ErrorCode`, so removing a catalogue entry is caught only at run time (fail-safe 500) and by the classify tests. | Coupling hygiene. | Note on the TASK-020/TASK-036 sheets. Define `DbProblemCode = Extract<ErrorCode, 'AUTHZ_DENIED' \| …>` (or a `satisfies` check) so a catalogue change is a compile error. |
+
+### R3 §4. Architect "Required in PR #11" items: status at 37a2109
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Rule 11 session form only; `SET LOCAL` fails; `RESET` when > 3 s | **Done** (R3 §2.1; residue R3-n3) |
+| 2 | Rule 15: `handedOver` removed; DEFINER outside the block fails; `OWNER TO platform_definer` fails; end-of-file role fails | **Done** |
+| 3 | Rule 9 b | Done (round 2) |
+| 4 | Rule 16 b operator atom | Done (round 2; atoms unchanged in round 3) |
+| 5 | Qualified helper bodies | **Done**, byte-identical to §4.2 |
+| 6 | `lc_messages = 'C'`, C13 five rows, `EXPECTED_ROLE_SETTINGS` | **Done** |
+| 7 | C13 case folding + `proconfig` | Done (round 2) |
+| 8 | Sheet lines D-ORCH-014 (a)–(f) and PR11-SEC-09 1–6 | **Done** except SEC-09 item 4 metric/sink deferral owners (R3-m1) |
+
+### R3 §5. Good (keep)
+
+- The lazy guarded-result design: a null-prototype frozen object, one shared `started` native promise, and a `closed` check before Prisma's `then` is ever called. It removes `requestTransaction` without eager execution, and late awaits fail with the domain error instead of P2028. The test asserts laziness (only BEGIN and the context statement before any await) as well as shape.
+- Refusing every `Sql` fragment as a value at run time ("one template per statement shape; bind lists as arrays"). The lint is no longer the only control against nested raw.
+- The drift test pins the ESLint twin's regex **sources** to the shared list, so drift is a test failure, not a review finding.
+- `runtime.ts` as the single composition point: the pool and root client never escape, `startup()` orders the probes, the readiness gate is single-flight, and the latch is never cleared. The integration composition test checks event order, that no org id is logged, a counter of 1, a single latch log and 3 non-ready polls.
+- The `classify.ts` `db` branch reads own-data only, checks code and status against the catalogue, and bounds `Retry-After`. Fail-safe tests cover forged, accessor and out-of-range fields.
+- The C-series qualification test: a planted `public.current_setting` plus a hostile `search_path`, with an EXPLAIN that proves inlining survives.
+- The merge resolution is a clean union with a short, honest description, and the developer flagged the lane A failures with root causes instead of pushing a workaround.
+
+### R3 §6. Security flags; merge conditions; routing
+
+**Security flags (for security-analyst):** nothing new above NIT. R3-n1/R3-n2 are lint-twin residues behind run-time controls (CWE-185, deliberate-only). Please confirm R2-M1 / PR11-SEC-12 closure and SEC-09 item 6 on the head named in your supersede round.
+
+**Merge conditions (on the superseding branch, D-ORCH-018):**
+1. The superseding branch's tree delta equals `git diff 63accea 37a2109`, plus any in-branch fixes for R3-m2 or the NITs. It contains no merge commit carrying `d68898a`'s first-parent content. A reviewer re-check is limited to "tree == 37a2109's tree rebased on main plus the listed fixes".
+2. The D-ORCH-018 (2) lane A base-ref subset-semantics fix is merged on main first; lane A (fast-lane, scans, ci-gate) is green on the superseding head; the security record names that head.
+3. R3-m1: the deferral owners are recorded (docs-only, orchestrator).
+4. R3-m2: fixed in-branch, or routed to TASK-014 with PR #9 R3-m1 by orchestrator ruling.
+5. The orchestrator (or lane B) re-runs integration (Docker) on the superseding head, because the run-time guard and the composition changed. Developer local evidence: 154 passed + 1 skipped on `9482f38`.
+
+**Routing:**
+- TASK-020: pass the generated `Client` into `databaseRuntimeFromConfig` (API and worker); the `tx` slot uses `tenantTx`; SEC-09 verification there; do not redeclare `AUTHZ_DENIED` (R3-n6).
+- TASK-010: the security-logger sink for `security.*` events (R3-m1).
+- Metrics/observability task: export the leak counter (R3-m1).
+- TASK-014: R3-m2, if not fixed in-branch.
+- TASK-021: delete the spk08 spike and its exemption in one commit; `U&` in the bootstrap lane (PR #5 R2-n1 remainder).
+- TASK-015: delete the spk03 spike and its exemption with C-1 (unchanged).
+- principal-architect: data-model §8.3 "Limits" text (R2-n2), still owed.
+- PR #13 superseding branch: the `prisma-seed` boundaries category is still owed once PR #11 lands (PR #13 m6).

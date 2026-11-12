@@ -104,6 +104,13 @@ Round 2 of a spike PR (PR #6 r2):
 - **Catalog ACL equality via `aclexplode`.** Check whether PUBLIC (`grantee = 0`) and inherited privileges are excluded. Effective privilege is what matters.
 - **New lint boundaries in one PR vs another open PR.** Run `git merge-tree` and grep the other PR's files for imports and string tokens the new rules ban. Semantic lint conflicts are not textual conflicts.
 
+**Guard round 3 (PR #11 r3, 2026-11-13):**
+- **Wrapped thenables:** check own keys (only then/catch/finally/toStringTag), null proto + frozen, laziness (no statement before await), a `closed` check BEFORE calling the inner `then`, and that `then` is a closure-free arrow. Mutate: unwrap, drop the closed check.
+- **Composition-time refusals** (`PGOPTIONS` etc.) thrown from top-level setup give exit 1 + stack, not the config exit 78. Probe where the throw lands.
+- **SET-based SQL rules** (rule 11 lock_timeout) miss `set_config('<guc>', v, false)` when the tenant rule exempts non-app literal keys.
+- **Lint twins:** after a drift test pins some forms, check the forms it does NOT pin (U&, comment stripping) against the SQL lanes.
+- **Scope-analysis lint:** probe container laundering (fn arg, object/array, spread, ternary, `import().then`); fine when a run-time guard backs it, but the JSDoc must not overclaim.
+
 **DB spike PRs (PR #12 SPK-08, 2026-11-13):**
 - **Spike exit lists live in several places.** The sheet's acceptance is a subset. Also grep `risks.md` R-ARCH-xx (the full exit list), `rulings/*.md` ("routed → TASK-xxx") and the data-model "verify in P5 spike" notes. Routed questions get dropped silently.
 - **Refusal-branch coverage per event type.** When privilege stops every tamper statement first, the guard's second-layer branches (e.g. `sql_drop`) are never exercised. Ask for a test as a role that HAS the privilege: the schema owner via superuser `SET ROLE`, or the superuser itself.

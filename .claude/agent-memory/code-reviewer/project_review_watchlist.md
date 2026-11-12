@@ -178,6 +178,10 @@ PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-1
     - R2-m3: architect item 1 (no `RESET lock_timeout` check above 3s) and item 2 (bare `OWNER TO platform_definer` not flagged).
   - Reconciliation pass still owes: (a)–(f), PR11-SEC-09 items 1–6, architect items 5, 6 and 8.
   - r3: re-run the recording-adapter probe (`requestTransaction`, late await), the alias lint probe and the rule-11/15 probes.
+- r3 at 37a2109 (fix + merge d68898a + reconciliation): APPROVED_WITH_NITS (2026-11-13). R2-M1 closed (4/4 mutations killed), merge pure union, D-ORCH-014 (a)–(f) and SEC-09 1–6 met.
+  - Open: R3-m1 (SEC-09 item 4 metric + TASK-010 sink deferrals have no owner; runner dormant until TASK-020 passes `Client`); R3-m2 (PGOPTIONS → exit 1, not 78; fix in-branch or TASK-014).
+  - NITs: n1 db-raw-sql container laundering; n2 ESLint twin lacks U& + comment strip; n3 rule 11 misses `set_config('lock_timeout',…,false)`; n4 fluent accessors typed but absent; n5 no exemption-file-exists tripwire; n6 DbProblemCode not tied to ErrorCode.
+  - Superseding branch (D-ORCH-018): check tree == `git diff 63accea 37a2109` + listed fixes only; lane A green after main's base-ref subset fix.
 
 PR #12 (TASK-012, SPK-08) r1 at 2e0aa32 was CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0012-TASK-012-code-review.md`.
 - M1: "`migrate dev` vs raw-SQL partial indexes" was routed to TASK-012 only by batch-3 rulings :43 and is orphaned. Answer it or re-route it with an owner.
