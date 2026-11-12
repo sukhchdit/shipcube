@@ -48,6 +48,10 @@
 # Test, type-check and commit-message configuration (review m4): each can drop or weaken a gate.
 /jest.config.ts                         @sukhchdit
 /tools/test-support/                    @sukhchdit
+# SWC compile options (PR17-SEC-01): jest.config.ts passes them inline with swcrc: false and the workflow policy
+# rejects any .swcrc, so a new one is both a policy finding and a record-requiring change.
+/.swcrc                                 @sukhchdit
+**/.swcrc                               @sukhchdit
 /tsconfig.json                          @sukhchdit
 /tsconfig.base.json                     @sukhchdit
 **/tsconfig*.json                       @sukhchdit
