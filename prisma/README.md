@@ -14,6 +14,24 @@ Every Prisma CLI call goes through `node tools/deps/prisma-cli.mjs` (pinned sche
 `npm run db:migrate` (`migrate dev`), `npm run db:migrate:deploy`, `npm run db:reset -- --yes` (local only: recreates the
 database, reruns the bootstrap lane, deploys), `npm run db:lint-migrations` (linter + `prisma validate`).
 
+## Seeding
+
+`npm run db:seed` (reference, every environment) and `npm run db:seed:demo` (reference, then demo users; skipped when
+`APP_ENV=production`) run `prisma/seed/index.ts` as `platform_migrator` (`DATABASE_MIGRATOR_URL` or `..._FILE`, `APP_ENV`
+required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects`, never a value), 2 unexpected error.
+
+- `seed/framework/`: dataset runner (upsert by natural key, one statement per chunk of at most 500 rows, writes a row only
+  when it is new or has drifted, so an unchanged database is not touched), canonical content hash, validation,
+  `reference_dataset_versions` store. The whole reference run is one transaction behind `pg_advisory_xact_lock`.
+- `seed/reference/`: `REFERENCE_DATASETS` (empty until TASK-026, TASK-066 and the other data-model §9.2 datasets add theirs)
+  and `REFERENCE_STEPS`. The authz step only verifies parity with `packages/authz` (`SEED_AUTHZ_DRIFT`); the generated
+  seed migration is the only writer of `permissions`, `roles` and `role_permissions` (D-ARCH-060).
+- `seed/demo/`: credential planning and the demo user seed. Passwords come from `SEED_*` variables, are decided before any
+  connection (`local-only-*` defaults only in `local`; none read in staging or production) and are never printed.
+- Adding a dataset: a `Dataset` file under `seed/reference/` with `source` on every row, appended to `REFERENCE_DATASETS`;
+  bump `version` when its content changes; `insertOnly` for published versions, `audited` for configuration.
+- Tests: unit beside the code, `tests/seed/seed.int.test.ts` (PostgreSQL 18, real migrations, test-only probe tables, CLI).
+
 ## Findings for SPK-03/SPK-08
 
 Recorded by TASK-003 on 2026-11-12 against the locked `prisma` / `@prisma/client` / `@prisma/adapter-pg` 7.10.1
