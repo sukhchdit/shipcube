@@ -114,3 +114,103 @@ The host is memory-constrained, so I ran no `npm ci`, build, Docker or full suit
 - **TASK-033:** F-05/F-07/F-10, the fail-closed guard test (§8 Q1), and the AF-series writer pitfalls (alias ORDER BY, µs timestamps, uuidv7 under the lock).
 - **TASK-116:** A-1 precedence, A-6/A-7, F-2 text timestamps, the (iii)(b) `EXPLAIN` at volume.
 - **Architect:** A-1..A-7; M1 if re-routed; close the §7.3 "verify in P5 spike" notes (n7).
+
+---
+
+## Round 2 (head 0dc3ae9)
+
+- **Head:** `0dc3ae96211a4304e5b7773e3467672e287129d1`. Fix delta = `7b8c3a4` (tests) + `0a246b3` (record). `b6d3631` and `0dc3ae9` are merges of main.
+- **Reviewer:** code-reviewer · P5 Wave 0 · 2026-11-13
+- **Inputs:** `git diff b6d3631 0a246b3`; fix comment #issuecomment-6834135420; round 1 (above); security review `docs/05-quality/security/PR-0012-TASK-012-security-review.md`; DECISIONS.md D-TASK012-02; STATUS.md (COND-G4-PROD, SHEET-FOLD-1); `task-map.csv`; WAVE-00/WAVE-03 sheets.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: M1–M3 and m1–m5, n1–n7 are closed. The sql_drop test is the right one: schema owner (privilege admits it), superuser,
+         and the migrator's audit-named index, with exact DETAIL assertions. The M1 probe is well controlled: 5 variants, the
+         flag's effect is proven by the a/b contrast, and the shadow replay is proven. The §8.1 lifecycle is per file and feasible
+         (both suites now bootstrap only 0N-*.sql). One MINOR: the F-11 linter rule routed to TASK-016 still passes a DROP +
+         CREATE that loses the predicate. Five NITs. Lane A is green on the head; both merges are pure unions; the head merges
+         cleanly onto current main.
+FINDINGS: R2-m1 (MINOR); R2-n1..R2-n5 (NIT). See §R2.3.
+GOOD: see §R2.5
+SECURITY-FLAGS: none new. The PR12-SEC-04/05/08 text matches the security review (§R2.4).
+```
+
+### R2.1 Verification performed (read-only, by SHA)
+
+Per the dispatch I ran no `npm ci`, build, Docker or suite, and no command in the worktree. Lint, format, typecheck, unit and build come from lane A on the head. The spike integration results (17/17 and 7/7) come from the developer's run on `0a246b3`.
+
+| Check | Result |
+|---|---|
+| `git diff --name-only 19ec4fa 0dc3ae9` (merge-base with main) | 7 files, all under `prisma/tests/spikes/**` plus `docs/04-plan/spikes/SPK-08.md`. No config, lint, bootstrap or migration change |
+| Merge purity: `git merge-tree --write-tree P1 P2` vs `b6d3631` and vs `0dc3ae9` | both `git diff --stat` empty, so both merges are pure unions |
+| Mergeability onto current `origin/main` (`9e6a1e7`, after the PR #9 merge `a4b4bb2`) | `merge-tree` clean. Main-side changes that touch spike dependencies: (1) `eslint.config.mjs`, which only adds apps/worker boundaries policies and none that match `prisma/tests/**`; (2) `prisma-cli.mjs`/`prisma-engines.mjs`, which drop only `NODE_OPTIONS`/`NPM_CONFIG_NODE_OPTIONS` from the child env. `SPK08_*` and `DATABASE_MIGRATOR_URL` still pass, so the fixture config is unaffected |
+| Lane A run 43292614021 (`gh run view`) | headSha `0dc3ae9`, success. fast-lane ran Lint, Format check, Type-check, Unit, Build and the build-mutation check. scans ran Gitleaks, Semgrep and security-owned-paths. ci-gate green |
+| M2 premise: does privilege admit the schema owner? | `00-roles.sql:43` has `ALTER SCHEMA public OWNER TO platform_schema_owner`. PostgreSQL lets a namespace owner drop any object in its schema, so only the guard can refuse. Guard `sql_drop` branch `90-audit-ddl-guard.sql:64-82`: `c_idx` includes `audit_entries_`, and DETAIL is `'DROP of %s %s by %s'` with `current_user`, which matches the asserted strings, including `by platform_schema_owner` under `SET LOCAL ROLE` |
+| M2 isolation | `attempt()` wraps each statement in BEGIN…ROLLBACK, and the multi-statement `SET LOCAL ROLE …; DROP …` runs over the simple-query protocol. The migrator squat runs inside an explicit BEGIN with `ROLLBACK` in `finally`, so nothing leaks |
+| M1 probe inputs | The `_base.prisma` anchor `provider = "prisma-client"\n` and the `authz.prisma:43` anchor `@@index([scope], map: "ix_roles__scope")` both exist. `schemaCopy` throws if either moves, so the probe fails loudly instead of testing an unmodified schema. The fixture config takes `schema` from `SPK08_SCHEMA` |
+| m1(a) premise: (a) uses the fixture config, so is it faithful? | Root `prisma.config.ts:25` is `tables: { external: ['public.bootstrap_migrations'] }`, the same as the (a) env |
+| m1 shadow extension assertion | `01-schemas.sql:22-24` creates exactly `pg_trgm`, `btree_gin`, `btree_gist` |
+| M3: does the `0N-*.sql` filter keep TASK-021's files out? | The only planned bootstrap names in docs/03-architecture and docs/04-plan are `00-roles`, `01-schemas`, `02-role-backstops`, `03-role-locale`, `10-audit` and `90-audit-ddl-guard`. The filter excludes exactly the audit pair. `PlatformPostgres.bootstrap(db, dir)` forwards `dir` to `runBootstrap`. The anchor suite's own template plus `clone()` (which re-applies `reapplyDatabaseLevel`) replaces `template({migrated:false})` |
+| TASK-116 vs TASK-033 correction | `task-map.csv:117` TASK-116 is "Chain verification job, hourly ECDSA-signed anchors" (batch 3.6). The WAVE-03 sheet `:634` owns `audit-maintenance/{verify.ts, anchor.ts}`. TASK-033 (`task-map.csv:34`) is the immutability and test-generator suite (SEC-TC-43/61), with no anchors. **The correction is right.** §9 keeps "before any TASK-033 test fixes a byte layout" as a secondary guard |
+| Golden vectors pinned | `spk08-anchor.int.test.ts` now `expect`s `0425126b…cafc6` and `3bf63296…a9b5`, the values I recomputed independently in round 1 |
+| PR12-SEC-04 residual text | Byte-compared SPK-08 §6.2 (lines 360–372) with security review §6 (lines 192–204), leading `>`/indent stripped: **identical** |
+| Orchestrator follow-through | D-TASK012-02 logged. COND-G4-PROD extended with §6.1 d/f/g/h, §6.4, §6.2 a–d and §6.3. The TASK-021/TASK-116 DoD lines are queued in SHEET-FOLD-1 ("before TASK-014/021/033/089/221 dispatch"), not yet folded into the sheets |
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 partial indexes | **CLOSED** | New test `SPK-08 exit 4 (M1) …`: a migration appended to a history copy adds `CREATE INDEX "ix_roles__key_system" … WHERE "is_system"`. Five schema variants are each used as config schema **and** `--to-schema` target. `shadowIndex` (from `pg_indexes`) proves every replay really created the partial index. Outcomes are asserted with `toEqual` on the full map. **Evidence quality:** the flag's effect is proven by contrast, since variants a and b differ only in `previewFeatures` (none vs `DROP INDEX`). Variant d proves that `where: raw()` is parsed and compared. Variant e proves the predicate is invisible with the preview off. The "dev writes what diff prints" bridge is asserted in the `migrate dev` test (statement lists equal). The "flag is read from the **config** schema, not the target" claim comes from the recorded `-t M1` re-runs and is not asserted. The probe is correct either way because it sets both (R2-n4). F-11 is routed with owners and due points, and the §7.3 notes are closed in §9. Residual: R2-m1 |
+| M2 `sql_drop` path | **CLOSED** | Exactly the requested cases, run as the schema owner (`SET LOCAL ROLE platform_schema_owner`): partition, parent and `ix_audit__stream_seq`. Plus the superuser's parent drop, and the migrator `CREATE INDEX audit_entries_2099_02` on its own table (allowed), then `DROP` (refused). Each asserts `code 42501`, `refusedBy: 'guard'` (exact message equality via `classify`) and the DETAIL, exact or anchored regex, including the acting `current_user`. F-08 is now observed. The test also reproduces PR12-SEC-02 (a)/(c) without changing the prototype, which correctly stays verbatim to the spec. Verdict text updated: "both halves of the identity guard are exercised" |
+| M3 lifecycle | **CLOSED** | §8.1 is a per-file table covering all 6 files, with the port target, the deleter ("in the same commit as the port") and the due point (TASK-021 merge, batch 0.6; TASK-116 merge, batch 3.6, "and in any case before G3"). Feasibility is fixed at the root: both suites bootstrap only `0N-*.sql` from a temp copy, so TASK-021's real files cannot turn them red. D-TASK012-02 records it, and the sheet DoD lines are queued in SHEET-FOLD-1 |
+| m1 non-vacuous assertions | **CLOSED** | (a) Both refused deploys (`ledgerOnly`, `parentsOnly`) assert `{status: 1, p3005: true}` unconditionally. (b) Shadow contents are asserted: extensions, `platform`, audit relations and a partition, Prisma tables. (c) Both negative regexes are now paired with a positive `toContain('ix_role_permissions__role_id')` and `created.length === 1`. The F-02 negative control exists and asserts `already exists` on the second run |
+| m2 numbering | **CLOSED** in the record (AF-1..AF-12). Residue in the PR body (R2-n1) |
+| m3 due points | **CLOSED** | §7 has a Due column, and §9 gives every bullet a due point. COND-G4-PROD was extended by the orchestrator |
+| m4 F-04 | **CLOSED** | Cites §7.3 A17 / D-T013-09. The covering-index linter rule or `indnkeyatts < indnatts` is routed to TASK-016 |
+| m5 residue | **CLOSED** | Hand-off line gone; `§5.4 A-1`; snippet caveat is impersonal |
+| n1 | **CLOSED** | `partitionName()` uses the clock; the 60-name window is derived from the clock; the `ensure(3)` count is derived from `before` |
+| n2 | **CLOSED** | Hijack cleanup is in `finally` with `IF EXISTS`. `deployAuditDb()` is idempotent and is re-run by exit 4. `afterAll` does `try { stop } finally { rmSync }` with a `workDir` guard. `cluster()`/`work()` throw a named error instead of a TypeError |
+| n3 | **CLOSED** | Both vectors pinned |
+| n4 | **CLOSED** | The marker reads "NOT security-approved (SPK-08 prototype) …" and no longer contains `@audit-ddl` |
+| n5 | **CLOSED** | `SPK08_REQUIRE_OPENSSL=1` fails the skip branch |
+| n6 | **CLOSED** | Fail-closed sentence is in §7 F-02 and §9 |
+| n7 | **CLOSED** | §9 lists the five closed "verify in P5 spike" notes |
+
+### R2.3 Findings (round 2)
+
+| ID | Sev | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `SPK-08.md` §7 F-11 (TASK-016 column); §4 M1 table | The linter rule routed to TASK-016 ("a generated migration must not `DROP INDEX` an index that an earlier migration created with `WHERE` **unless the same file re-creates it**") still passes the exact defect M1 asked about: a raw partial index silently becoming a **full** index. The likeliest path is a variant the probe does not cover: **preview on + a plain `@@index` of the same name**, i.e. variant e after someone enables the preview. By the differ's behaviour in d, Prisma will emit `DROP INDEX` + `CREATE INDEX … ("key")` **without** `WHERE`. That file re-creates the index, so the rule passes it. The architect rule ("not declared as plain `@@index`") is preventive only, and variant e shows nothing detects a violation while the preview is off | Reword the TASK-016 rule to mirror the F-04 INCLUDE rule: "…unless the same file re-creates it **with a `WHERE` clause**; a predicate change is flagged for review". Either add variant f (`partialIndexes` on, `declare()` without predicate; expected `drop` + `create … ("key")` with no `where`) or mark that outcome as inferred in F-11. Fix in-PR (record and one variant) or route the wording to principal-architect/TASK-016 with the F-11 follow-up |
+| R2-n1 | NIT | PR #12 body L49; DECISIONS.md D-TASK012-01 | The PR body still says "**Anchor F-1/F-2** → TASK-033/TASK-116". That is the old namespace, and TASK-033 is no longer the consumer. D-TASK012-01 still cites only "F-01..F-10" | Edit the PR body to "AF-1/AF-2 → TASK-116". The orchestrator can append "(anchor series AF-1..AF-12; F-11 added in fc1)" to D-TASK012-01/02 |
+| R2-n2 | NIT | `SPK-08.md:224`, `:10` vs `:222`/`:298` | §5 says "owner/guard series F-01..F-10 of §7", but §7 now runs to F-11. The anchor suite time is 10.7 s in the header and 13.1 s in §5/§5.5 (different runs, unlabelled) | Use "F-01..F-11". Label the two timings (r1 vs fc1) or keep one |
+| R2-n3 | NIT | `spk08-audit-owner.int.test.ts:5-6` | The file JSDoc still says the prototype is applied "after the real bootstrap lane (prisma/bootstrap/*.sql)". The paragraph added below says only `0N-*.sql` | Change to "after the pre-audit part of the real bootstrap lane (`prisma/bootstrap/0N-*.sql`)" |
+| R2-n4 | NIT | `spk08-audit-owner.int.test.ts:736` (`if (diffStatements.length > 0)`); SPK-08 §4 | The dev = diff equality, which bridges M1's `migrate diff` evidence to `migrate dev`, is skipped silently when the dev test runs alone (`-t "migrate dev"`). The claim "the preview flag follows the config schema, not the target" is recorded from re-runs but not asserted | Optional: compute the diff in the dev test itself (or `expect(diffStatements.length).toBeGreaterThan(0)` with a "run the whole describe" message). Add a variant with the preview only in the target, expected to equal `undeclared_preview_off`, to pin the config-schema claim |
+| R2-n5 | NIT | `STATUS.md` SHEET-FOLD-1 | The same row says both "A-2/A-3/A-4 before TASK-033" (older text) and "A-2/A-3/A-4 before TASK-116 (not TASK-033)" | Orchestrator: delete the stale clause at fold time |
+
+### R2.4 Security lens (no separate security round planned)
+
+| Item | Requested text (security review) | SPK-08 at `0dc3ae9` | Match |
+|---|---|---|---|
+| PR12-SEC-04 (a): §6.2 residual sentence replaced by the review's §6 statement | §6 lines 192–204 | §6.2 lines 360–372 | **Byte-identical** (blockquote prefix stripped). The earlier "detection (audit and event triggers)" sentence is gone and the replacement is stated |
+| PR12-SEC-04: M5 checks (g) `SET pgaudit.log='none'`, (h) upgrade drop/re-create with migrations frozen, then C14 | Remediation | §6.1 (g), (h) | **Match** |
+| PR12-SEC-04 item 3: `ENABLE ALWAYS` limits | Does not close `event_triggers = off`, `ALTER EVENT TRIGGER … DISABLE` or `SET ROLE`; per-partition TRUNCATE trigger `ALWAYS`; C6/C14 expect `'A'` | §6.1 "`ENABLE ALWAYS` is not a decided mitigation" plus §9 RDS bullet | **Match**. The §6 intro line still proposes `ENABLE ALWAYS` "for the `session_replication_role` bypass", which is accurately scoped |
+| PR12-SEC-05 (a): F-9/F-12 qualifier and `verifyAll` comment | "sound together with a full walk from seq 1 in the same run (nightly) … ≤ 24 h, §5.6" | AF-9 qualifier; AF-12 text; `verifyAll` JSDoc "nightly shape … within 24 h (PR12-SEC-05)" | **Match** (the AF-12 sentence carries the requested wording). AF-12 also forwards item (b) to TASK-116 |
+| PR12-SEC-08 items 2–3: do not port FORCE RLS or placeholder policies; marker records no approval; TASK-021 uses a real reviewer entry | §4 PR12-SEC-08 | §8 item 7 (plus `CREATE OR REPLACE` per PR12-SEC-03), test comment at the RLS assertion, both SQL headers now "NOT security-approved" | **Match** |
+| PR12-SEC-02 | Spec amendment before TASK-021 | §8 item 6 routes it. The prototype is deliberately unchanged, and the new test reproduces (a)/(c) | **Consistent** |
+
+No security-relevant regression in the delta. The new test widens nothing: it runs in rolled-back transactions on a throwaway container. `SPK08_SCHEMA` is a test-fixture env var. No path became security-owned (lane A `not-required`).
+
+### R2.5 Good (keep)
+
+- **Assert the whole outcome map** (`toEqual` over all five M1 variants, and over all four `sql_drop` outcomes). A changed Prisma or guard behaviour then shows as one readable diff instead of a chain of first-failure stops.
+- **Proof that the probe touched what it claims:** `shadowIndex` per variant, `schemaCopy` anchor checks that throw, a positive `toContain` beside every negative regex. This is the fix pattern for vacuous negatives; ask for it in TASK-021/033.
+- **Lifecycle collision solved at the root** (pre-audit `0N-*` filter) instead of an early deletion, and the anchor suite moved off the shared harness template.
+- **Honest record keeping:** the run log names the failed run 4 and why the probe changed (config-schema flag), PR12-SEC-02 is reproduced but deliberately not "fixed" in a verbatim prototype, and the TASK-033 → TASK-116 correction is stated, not silently swapped.
+
+### R2.6 Merge conditions
+
+1. R2-m1 fixed in-PR or explicitly routed (record wording plus owner). R2-n1..n5 optional.
+2. Main has moved past the head (PR #9 `a4b4bb2`, docs `d7d71c5`, `9e6a1e7`). `merge-tree` is clean and no main-side change affects the spike paths (§R2.1). The squash commit on main gets its lane A run on push. A re-merge is not required for this review.
+3. Unchanged from round 1: the `security-integration` deferral stays on record. Orchestrator folds the SHEET-FOLD-1 TASK-021/TASK-116 DoD lines before TASK-021 dispatch.
+4. Watchlist: when TASK-021's PR lands, verify that `spk08-audit-owner.int.test.ts`, `spk08/{10,90}-*.sql` and `spk08/prisma.config.ts` are deleted in the porting commit and that the `sql_drop`, planted-name and F-02 cases exist in its suite. When TASK-116 lands, do the same for the anchor files and golden vectors.
