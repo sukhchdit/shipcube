@@ -165,7 +165,8 @@ async function attemptResolve(provider: SecretProvider, locator: string, timeout
   const signal = AbortSignal.any([attempt.signal, deadline]);
   let onAbort: () => void = () => undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(signal.reason);
+    // classifyFailure keys on `signal.aborted`, not on this reason; a non-Error abort reason is normalised.
+    onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new DOMException('Secret resolution aborted', 'AbortError'));
     signal.addEventListener('abort', onAbort, { once: true });
   });
   try {

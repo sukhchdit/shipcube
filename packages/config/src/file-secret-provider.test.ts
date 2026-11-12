@@ -10,6 +10,11 @@ import { resolveSecretRefs, SecretNotFoundError } from './secret-refs.js';
 
 const token = (): string => randomBytes(16).toString('hex');
 const live = (): AbortSignal => new AbortController().signal;
+/** Rejects with any reason, Errors or not: the file system seam is fed non-Error rejections too. */
+const rejectWith = (reason: unknown): Promise<never> =>
+  new Promise<never>(() => {
+    throw reason;
+  });
 
 describe('file secret provider (PR3-SEC-07, m4)', () => {
   let base: string;
@@ -143,9 +148,9 @@ describe('file secret provider (PR3-SEC-07, m4)', () => {
 
   it('maps other file-system errors to a path-free SecretFileError with the errno code only', async () => {
     const failing = (error: unknown): SecretFileSystem => ({
-      realpath: () => Promise.reject(error),
+      realpath: () => rejectWith(error),
       stat,
-      readFile: () => Promise.reject(error),
+      readFile: () => rejectWith(error),
     });
     const eacces = Object.assign(new Error(`EACCES: permission denied, open '${root}'`), { code: 'EACCES' });
     const cases: readonly [unknown, string][] = [

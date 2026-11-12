@@ -15,7 +15,7 @@ describe('durations', () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 999_999_999 }),
-        fc.constantFrom('s', 'm', 'h', 'd') as fc.Arbitrary<keyof typeof SECONDS_PER_UNIT>,
+        fc.constantFrom<keyof typeof SECONDS_PER_UNIT>('s', 'm', 'h', 'd'),
         (n, unit) => {
           expect(parseDurationSeconds(`${n}${unit}`)).toBe(n * SECONDS_PER_UNIT[unit]);
         },

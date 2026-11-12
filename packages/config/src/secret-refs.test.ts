@@ -26,7 +26,8 @@ describe('Secret', () => {
     const secret = new Secret(value);
     expect(secret.reveal()).toBe(value);
     expect(String(secret)).toBe(REDACTED);
-    expect(`${secret}`).toBe(REDACTED);
+    // Template-literal interpolation is the leak path under test; the type system rightly forbids it.
+    expect(`${secret as unknown as string}`).toBe(REDACTED);
     expect(JSON.stringify({ secret })).toBe(`{"secret":"${REDACTED}"}`);
     expect(inspect({ secret })).not.toContain(value);
     expect(Object.isFrozen(secret)).toBe(true);
@@ -73,6 +74,11 @@ describe('secret references (ADR-0018 §3)', () => {
 
 const refs = (entries: Record<string, SecretRef>): ReadonlyMap<string, SecretRef> => new Map(Object.entries(entries));
 const aws = (locator: string): SecretRef => ({ provider: 'aws-secrets-manager', locator });
+/** Rejects with any reason, Errors or not: providers are untrusted, so the tests feed non-Error rejections too. */
+const rejectWith = (reason: unknown): Promise<never> =>
+  new Promise<never>(() => {
+    throw reason;
+  });
 const never = (): Promise<string> => new Promise<string>(() => undefined);
 const instant = { sleep: (): Promise<void> => Promise.resolve(), random: (): number => 0 } as const;
 
@@ -156,8 +162,8 @@ describe('secret resolution (port + orchestrator)', () => {
       nodeCode: [() => Promise.reject(errno('ERR_INVALID_ARG_TYPE'))],
       tokenCode: [() => Promise.reject(errno('AKIA1234567890ABCD'))],
       oddName: [() => Promise.reject(new OddlyNamed('x'))],
-      string: [() => Promise.reject('a thrown string' as unknown as Error)],
-      nullThrow: [() => Promise.reject(null as unknown as Error)],
+      string: [() => rejectWith('a thrown string')],
+      nullThrow: [() => rejectWith(null)],
       undefinedValue: [() => Promise.resolve(undefined as unknown as string)],
       nullValue: [() => Promise.resolve(null as unknown as string)],
       syncThrow: [
@@ -303,7 +309,7 @@ describe('secret resolution (port + orchestrator)', () => {
         fc.constantFrom(...Object.values(throwables)),
         async (value, makeThrowable) => {
           const thrown = makeThrowable(value);
-          const provider = scripted({ leak: [() => Promise.reject(thrown as Error)] });
+          const provider = scripted({ leak: [() => rejectWith(thrown)] });
           const error = await rejection(resolveSecretRefs(refs({ A_REF: aws('leak') }), [provider], instant));
           const surfaces = [
             error.message,

@@ -25,15 +25,16 @@ function schemaIssues(error: Joi.ValidationError | undefined): readonly ConfigIs
   return error.details.map((detail) => {
     const key = String(detail.path[0] ?? '(root)');
     if (detail.type === 'any.required') return { key, code: 'missing' };
-    const rule = detail.context?.rule;
+    const rule: unknown = detail.context?.rule;
     return { key, code: 'invalid', rule: typeof rule === 'string' ? rule : detail.type };
   });
 }
 
 export function loadConfig(env: EnvInput, options: LoadConfigOptions): Config {
   const raw = pickConfigured(env, CONFIG_KEY_NAMES);
-  const { value, error } = configObjectSchema(options.service).validate(raw);
-  const fromSchema = schemaIssues(error);
+  const validated = configObjectSchema(options.service).validate(raw);
+  const value: unknown = validated.value;
+  const fromSchema = schemaIssues(validated.error);
   const rejected = new Set(fromSchema.map((issue) => issue.key));
   const converted = (value ?? {}) as Record<string, unknown>;
   const values = Object.fromEntries(Object.entries(converted).filter(([key]) => !rejected.has(key)));
