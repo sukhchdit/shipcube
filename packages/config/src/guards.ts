@@ -61,17 +61,26 @@ const POSTGRES_URL_PARAMS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * PostgreSQL URL as node-postgres reads it (pg-connection-string 2.14.1 copies every query entry onto the config,
- * so the LAST `sslmode` wins, and `ssl=0` sets `ssl: false`): a TCP host name, no repeated or unlisted query
- * parameter, exactly one `sslmode=verify-full`, and no `ssl` override (TLS is selected by `sslmode` alone).
+ * The shape every PostgreSQL URL the platform reads must have, whatever the environment: a TCP host name and no
+ * repeated or unlisted query parameter. node-postgres (pg-connection-string 2.14.1) copies every query entry over
+ * the client config, so an unlisted `options=`, `statement_timeout=` or `host=` would silently replace a pinned
+ * session setting or the server. Single source for `DATABASE_URL` (below) and the seed CLI's
+ * `DATABASE_MIGRATOR_URL` (PR13-SEC-03).
  */
-const isVerifiedPostgresUrl = (_raw: string, url: URL): boolean =>
+export const isAllowListedPostgresUrl = (url: URL): boolean =>
   // pg decodes the host, so a percent-encoded `/` makes a Unix-socket path: refused like an empty host.
   url.hostname !== '' &&
   !url.hostname.includes('%') &&
   !hasDuplicateParam(url) &&
-  [...url.searchParams.keys()].every((name) => POSTGRES_URL_PARAMS.has(name)) &&
-  url.searchParams.get('sslmode') === 'verify-full';
+  [...url.searchParams.keys()].every((name) => POSTGRES_URL_PARAMS.has(name));
+
+/**
+ * PostgreSQL URL as node-postgres reads it (the LAST `sslmode` wins, and `ssl=0` sets `ssl: false`): an
+ * allow-listed URL ({@link isAllowListedPostgresUrl}) with exactly one `sslmode=verify-full` and no `ssl` override
+ * (TLS is selected by `sslmode` alone).
+ */
+const isVerifiedPostgresUrl = (_raw: string, url: URL): boolean =>
+  isAllowListedPostgresUrl(url) && url.searchParams.get('sslmode') === 'verify-full';
 
 /**
  * Valkey URL as ioredis 6.0.0 reads it. TLS is on only when the RAW string starts with `rediss://`

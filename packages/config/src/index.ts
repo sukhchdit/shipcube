@@ -14,7 +14,7 @@ export {
 export type { AppEnv, NodeEnv, Service } from './environment.js';
 export { ConfigValidationError, formatConfigError } from './errors.js';
 export type { ConfigIssue, ConfigIssueCode } from './errors.js';
-export { GUARDS, isInspectorOption, nodeOptionTokens, runGuards } from './guards.js';
+export { GUARDS, isAllowListedPostgresUrl, isInspectorOption, nodeOptionTokens, runGuards } from './guards.js';
 export type { Guard, GuardInput } from './guards.js';
 export {
   createFileSecretProvider,
