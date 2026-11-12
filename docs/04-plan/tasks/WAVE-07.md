@@ -804,7 +804,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047 |
@@ -821,6 +821,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-013 scenarios
 - One trace spans API -> queue -> worker -> Mock carrier (NFR-OBS-003); no high-cardinality labels (NFR-OBS-002)
+- ADR-0023 am. J item 4, ADR-0017 am. 2 and D-ARCH-043 (PR1-SEC-07): add only the explicit OpenTelemetry instrumentations (http, undici, pg, ioredis, pino, express) and the AWS/container resource detectors, each through the cooldown, licence and age gates. Never re-add `@opentelemetry/auto-instrumentations-node` or the GCP/Azure/Alibaba detectors. Afterwards `npm audit --omit=dev` reports 0 and `npm ls gcp-metadata` is empty
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

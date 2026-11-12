@@ -1,0 +1,13 @@
+// Fixture schema for the up -> down -> up driver tests. No generator: the fixture is never generated.
+datasource db {
+  provider = "postgresql"
+}
+
+model UpdownProbe {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([name], map: "ix_updown_probe__name")
+  @@map("updown_probe")
+}
