@@ -299,7 +299,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-222 scenarios (PDF + PNG where offered)
 - ADR-0010 am. 11 item 3 (D-ARCH-057 rev 2): the saga document step (ADR-0014 step 4) stores every format the service offers; for each offered format missing from createShipment's result it calls the carrier port's `recoverLabel` when `capabilities().operations.recoverLabel` is true (UPS PDF_4X6), with step-4 retry/exception semantics (shipment stays BOOKED, operator alert; never a second createShipment); raster carrier output is never stored as a document; the contingency raster -> PDF converter (R-ARCH-25), if ever needed, lives in this module (owner of pdfkit, ADR-0003/0019), not in packages/carriers
-- AT-US-222-01 … AT-US-222-08: all 8 scenarios of US-222, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-222-01 … AT-US-222-10: all 10 scenarios of US-222, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).

@@ -514,7 +514,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-080 **DC** (M0 Must) Guest-capable tables and atomic claim |
 | REQs | REQ-RLS-013 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | SPK-03 |
+| Spikes / security / decisions | SPK-03, PR7-SEC-04, PR7-SEC-13 |
 | Specialist · model | database-engineer · opus |
 | Complexity | S |
 | Depends on | TASK-016 |
@@ -526,9 +526,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - prisma/sql/policy-templates/guest-capable.sql
 - GUEST_CAPABLE class support in render-rls.ts and tools/db/table-classes/*.json
 - prisma/tests/rls/guest-claim.int.test.ts
+- platform.guest_capable_guard() BEFORE UPDATE trigger (migrator-owned, not SECURITY DEFINER, SET search_path = pg_catalog, pg_temp) rendered with the policies
 
 **Acceptance tests to write**
 - All US-080 scenarios
+- ADR-0005 am. 10 item 11 / data-model §4.3 as widened 2026-11-12 (PR7-SEC-04, PR7-SEC-12 d; D-ARCH-065): the trigger raises GUEST_DECLAIM_FORBIDDEN (23514) when OLD.org_id IS NOT NULL AND NEW.org_id IS DISTINCT FROM OLD.org_id, and when NEW.guest_token_hash IS NOT NULL AND NEW.guest_token_hash IS DISTINCT FROM OLD.guest_token_hash; the four forbidden transitions (org -> NULL, org A -> org B, NULL -> hash, hash H1 -> H2) are each tested AS THE SUPERUSER so RLS is bypassed and the trigger alone is proven; the legitimate claim (NULL -> org with hash -> NULL) succeeds under the claim context; app.guest_token_hash is non-empty only on routes declaring `tenancy: guest` and on the claim operation (every other route binds the empty string)
+- ADR-0005 am. 10 item 15 (PR7-SEC-13): the claim repository uses `expectAffected(result, 1)` for its state-transition UPDATE and the unit test shows that 0 affected rows raises (the service then re-reads -> 200 / 409 per ADR-0005 §Guest rows)
 - AT-US-080-01 … AT-US-080-07: all 7 scenarios of US-080, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -776,7 +779,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-068 **DC** (M0 Must) Request pipeline order, 401/403 outcomes and live permission resolution<br>US-076 **DC** (M0 Must) Operator cross-tenant scope |
 | REQs | REQ-RBAC-006, REQ-RBAC-008, REQ-RLS-006 |
 | NFRs | NFR-SEC-011, NFR-TENANT-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR8-SEC-07 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-056, TASK-020, TASK-013 |
@@ -785,10 +788,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Priority | Must · demo-critical |
 
 **Files / modules**
-- apps/api/src/platform/authz/{authorise-mw.ts, permission-cache.ts, operator-scope.ts}
+- apps/api/src/platform/authz/{authorise-mw.ts, permission-cache.ts, operator-scope.ts, effective-permissions.repository.ts}
 
 **Acceptance tests to write**
 - All US-068 and US-076 scenarios
+- PR8-SEC-07 (ADR-0008 am. 3 item 5, D-ARCH-069): the effective-permission query joins organisations.type and keeps only roles whose scope matches the organisation type, requires an ACTIVE membership in the token active organisation and revoked_at IS NULL (in addition to the REQ-ORG-004 trigger of TASK-037); where the pure `effectivePermissions(roleKeys, roles)` helper is used it receives `expectedScope` and throws RoleScopeMismatchError on a mixed-scope set; integration test: a membership row linking an OPERATOR role inside a BUSINESS_CUSTOMER organisation (inserted as the migrator with the trigger disabled in a rolled-back transaction) yields no audit:read for that actor
 - AT-US-068-01 … AT-US-068-06: all 6 scenarios of US-068, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-076-01 … AT-US-076-04: all 4 scenarios of US-076, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
