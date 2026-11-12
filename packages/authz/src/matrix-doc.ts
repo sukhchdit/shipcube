@@ -23,6 +23,7 @@ function flags(definition: PermissionDefinition): string {
   if (definition.operatorOnly) set.push('operator-only');
   if (definition.reserved === true) set.push('reserved');
   if (definition.signatureOnly === true) set.push('signature-only');
+  if (definition.selfService === true) set.push('self-service');
   return set.join(', ');
 }
 

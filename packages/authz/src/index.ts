@@ -1,6 +1,9 @@
 // Public entry point of @platform/authz: permission catalogue, role seed, build-time guards, the authorisation
 // decision and the generators of the role-permission matrix document and the seed migration (ADR-0008).
 export {
+  CATEGORY_EXCEPTIONS,
+  expectedCategory,
+  isAuditPermission,
   isOperatorOnlyKey,
   isPermission,
   isReadPermission,
@@ -14,6 +17,8 @@ export {
   READ_ONLY_VERBS,
   ROUTE_MARKERS,
   SCOPE_QUALIFIERS,
+  SELF_SERVICE_CATEGORIES,
+  SELF_SERVICE_PERMISSIONS,
   type Permission,
   type PermissionCategory,
   type PermissionDefinition,
@@ -24,6 +29,7 @@ export {
   CATALOGUE_VERSION,
   COMPLIANCE_AUDITOR_ROLE,
   CUSTOMER_VIEWER_ROLE,
+  isRoleKey,
   ROLE_KEYS,
   ROLE_SCOPES,
   ROLES,
@@ -41,6 +47,7 @@ export {
   type Violation,
   type ViolationCode,
 } from './guard.js';
+export { ASSIGNABLE_BY, canAssignRole } from './assign.js';
 export { authorise, effectivePermissions, UnknownRoleError, type AuthzDecision } from './authorise.js';
 export { assertRoutePermissions, findUnknownRoutePermissions, UnknownRoutePermissionError, type DeclaredRoute } from './routes.js';
 export { AUTHZ_GENERATE_COMMAND, MATRIX_DOC_PATH, renderRolePermissionMatrix } from './matrix-doc.js';

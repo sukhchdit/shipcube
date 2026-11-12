@@ -41,9 +41,9 @@ Catalogue version: **1**. Generated from the permission catalogue (`packages/aut
 | `org:read:any_org` | operator-only, reserved | Y |  |  |  |  |  |  |  |
 | `address_book:read` |  | Y |  |  |  |  |  |  |  |
 | `address_book:manage` |  | Y |  |  |  |  |  |  |  |
-| `session:manage` |  | Y | Y | Y | Y | Y | Y |  | Y |
-| `notification:read` |  | Y | Y | Y | Y | Y | Y | Y | Y |
-| `notification_pref:manage` |  | Y | Y | Y | Y | Y | Y |  | Y |
+| `session:manage` | self-service | Y | Y | Y | Y | Y | Y | Y | Y |
+| `notification:read` | self-service | Y | Y | Y | Y | Y | Y | Y | Y |
+| `notification_pref:manage` | self-service | Y | Y | Y | Y | Y | Y | Y | Y |
 | `privacy:export` |  | Y |  |  |  |  |  |  |  |
 | `privacy:delete` |  | Y |  |  |  |  |  |  |  |
 | `audit:read` | operator-only | Y |  |  |  |  |  | Y |  |
@@ -64,7 +64,7 @@ Catalogue version: **1**. Generated from the permission catalogue (`packages/aut
 | `shipment:cancel` |  | Y | Y | Y |  |  |
 | `shipment:create:on_behalf` | reserved |  |  |  |  |  |
 | `shipment:read:any_org` | operator-only, reserved |  |  |  |  |  |
-| `order:read` |  | Y | Y | Y |  | Y |
+| `order:read` |  | Y | Y | Y | Y | Y |
 | `customs:manage` |  | Y | Y | Y |  |  |
 | `pickup:read` |  | Y | Y | Y |  | Y |
 | `pickup:schedule` |  | Y | Y | Y |  |  |
@@ -86,11 +86,11 @@ Catalogue version: **1**. Generated from the permission catalogue (`packages/aut
 | `org:read:any_org` | operator-only, reserved |  |  |  |  |  |
 | `address_book:read` |  | Y | Y | Y |  | Y |
 | `address_book:manage` |  | Y | Y | Y |  |  |
-| `session:manage` |  | Y | Y | Y | Y |  |
-| `notification:read` |  | Y | Y | Y | Y | Y |
-| `notification_pref:manage` |  | Y | Y | Y |  |  |
+| `session:manage` | self-service | Y | Y | Y | Y | Y |
+| `notification:read` | self-service | Y | Y | Y | Y | Y |
+| `notification_pref:manage` | self-service | Y | Y | Y | Y | Y |
 | `privacy:export` |  | Y | Y | Y |  |  |
-| `privacy:delete` |  | Y |  | Y |  |  |
+| `privacy:delete` |  | Y | Y | Y |  |  |
 | `audit:read` | operator-only |  |  |  |  |  |
 | `audit:export` | operator-only, reserved |  |  |  |  |  |
 | `featureflag:manage` | operator-only |  |  |  |  |  |
@@ -131,9 +131,9 @@ Catalogue version: **1**. Generated from the permission catalogue (`packages/aut
 | `org:read:any_org` | operator-only, reserved |  |  |  |  |
 | `address_book:read` |  |  |  |  |  |
 | `address_book:manage` |  |  |  |  |  |
-| `session:manage` |  | Y | Y | Y | Y |
-| `notification:read` |  | Y | Y | Y | Y |
-| `notification_pref:manage` |  | Y | Y | Y | Y |
+| `session:manage` | self-service | Y | Y | Y | Y |
+| `notification:read` | self-service | Y | Y | Y | Y |
+| `notification_pref:manage` | self-service | Y | Y | Y | Y |
 | `privacy:export` |  |  |  |  |  |
 | `privacy:delete` |  |  |  |  |  |
 | `audit:read` | operator-only |  |  |  |  |
@@ -151,13 +151,13 @@ Catalogue version: **1**. Generated from the permission catalogue (`packages/aut
 | OPERATOR_FINANCE | OPERATOR | `roles.operator.finance` | 3 |
 | OPERATOR_SUPPORT | OPERATOR | `roles.operator.support` | 4 |
 | OPERATOR_SALES | OPERATOR | `roles.operator.sales` | 3 |
-| OPERATOR_COMPLIANCE_AUDITOR | OPERATOR | `roles.operator.compliance_auditor` | 3 |
+| OPERATOR_COMPLIANCE_AUDITOR | OPERATOR | `roles.operator.compliance_auditor` | 5 |
 | OPERATOR_CONTENT_MANAGER | OPERATOR | `roles.operator.content_manager` | 3 |
 | CUSTOMER_OWNER | CUSTOMER | `roles.customer.owner` | 30 |
-| CUSTOMER_ADMIN | CUSTOMER | `roles.customer.admin` | 29 |
+| CUSTOMER_ADMIN | CUSTOMER | `roles.customer.admin` | 30 |
 | CUSTOMER_SHIPPER | CUSTOMER | `roles.customer.shipper` | 25 |
-| CUSTOMER_FINANCE | CUSTOMER | `roles.customer.finance` | 6 |
-| CUSTOMER_VIEWER | CUSTOMER | `roles.customer.viewer` | 9 |
+| CUSTOMER_FINANCE | CUSTOMER | `roles.customer.finance` | 8 |
+| CUSTOMER_VIEWER | CUSTOMER | `roles.customer.viewer` | 11 |
 | PARTNER_OWNER | PARTNER | `roles.partner.owner` | 7 |
 | PARTNER_DEVELOPER | PARTNER | `roles.partner.developer` | 4 |
 | PARTNER_OPERATIONS | PARTNER | `roles.partner.operations` | 4 |

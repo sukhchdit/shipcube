@@ -2,7 +2,9 @@
  * Renders the versioned seed migration of the authz tables (REQ-RBAC-002/013, data-model §3.3, §9.2) from the
  * catalogue and the role seed, so the SQL is never hand-typed. Pure: deterministic row IDs come from an injected
  * factory (tools/authz/generate.ts derives them from a hash of the natural key). The statements are plain
- * `INSERT ... VALUES ... ON CONFLICT DO NOTHING` of new rows: re-running them adds nothing and widens no role.
+ * `INSERT ... VALUES ... ON CONFLICT ("id") DO NOTHING` of new rows (data-changing: no, D-SEC-PR8-01): re-running them
+ * adds nothing and widens no role, while a row that collides on its natural key under a different ID raises instead of
+ * being silently kept (PR8-SEC-08 (b)).
  */
 import type { PermissionDefinition } from './permissions/index.js';
 import type { RoleDefinition } from './roles.js';
@@ -27,7 +29,7 @@ export const linkKey = (roleKey: string, permissionKey: string): string => `${ro
 
 function insert(table: string, columns: readonly string[], rows: readonly string[][]): string {
   const header = `INSERT INTO "public"."${table}" (${columns.map((column) => `"${column}"`).join(', ')}) VALUES`;
-  return [header, rows.map((row) => `  (${row.join(', ')})`).join(',\n'), 'ON CONFLICT DO NOTHING;'].join('\n');
+  return [header, rows.map((row) => `  (${row.join(', ')})`).join(',\n'), 'ON CONFLICT ("id") DO NOTHING;'].join('\n');
 }
 
 const keyList = (keys: readonly string[]): string => keys.map(literal).join(',\n  ');
@@ -55,8 +57,9 @@ export function renderSeedMigration(
     generated,
     `-- Seeds ${String(catalogue.length)} permissions, ${String(roles.length)} roles and ${String(links.length)} role-permission links`,
     '-- (REQ-RBAC-002/003, data-model §3.3, §9.2) into the tables created by the previous migration. Plain INSERT of new',
-    '-- rows with deterministic IDs and ON CONFLICT DO NOTHING: a re-run adds nothing and widens no role (AT-US-066-01).',
-    '-- Applied migrations are immutable: a catalogue or grant change bumps the version and ships as a new migration.',
+    '-- rows with deterministic IDs and ON CONFLICT ("id") DO NOTHING: a re-run adds nothing and widens no role',
+    '-- (AT-US-066-01). Released seed versions are pinned by SHA-256 and immutable (D-SEC-PR8-01): a catalogue or grant',
+    '-- change bumps the version and ships as a new migration.',
     insert(
       'permissions',
       ['id', 'key', 'description', 'category', 'operator_only', 'created_by', 'updated_by'],

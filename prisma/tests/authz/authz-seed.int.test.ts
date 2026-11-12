@@ -16,7 +16,7 @@ import { PlatformPostgres } from '../harness/postgres.js';
 
 const { version: CATALOGUE_VERSION, permissions: PERMISSION_DEFINITIONS, roles: ROLES } = SEED_SOURCE;
 const TABLES = ['permissions', 'roles', 'role_permissions'] as const;
-const seedSql = readFileSync(join(findRepoRoot(), String(SEED_MIGRATIONS[CATALOGUE_VERSION]), 'migration.sql'), 'utf8');
+const seedSql = readFileSync(join(findRepoRoot(), String(SEED_MIGRATIONS[CATALOGUE_VERSION]?.dir), 'migration.sql'), 'utf8');
 
 let db: PlatformPostgres;
 let database: string;
@@ -40,18 +40,21 @@ async function withClient<T>(config: pg.ClientConfig, run: (client: pg.Client) =
   }
 }
 
+/** Every seeded column except the IDs and actor columns (deterministic by construction), so an attribute drift fails. */
 interface Snapshot {
-  permissions: Array<{ key: string; category: string; operator_only: boolean }>;
-  roles: Array<{ key: string; scope: string; name_key: string }>;
+  permissions: Array<{ key: string; description: string; category: string; operator_only: boolean }>;
+  roles: Array<{ key: string; scope: string; name_key: string; is_system: boolean; description: string }>;
   links: string[];
 }
 
 async function snapshot(client: pg.Client): Promise<Snapshot> {
   // COLLATE "C" = code-unit order, the order of the JavaScript comparison used for `expected`.
   const permissions = await client.query<Snapshot['permissions'][number]>(
-    'SELECT key, category, operator_only FROM permissions ORDER BY key COLLATE "C"',
+    'SELECT key, description, category, operator_only FROM permissions ORDER BY key COLLATE "C"',
   );
-  const roles = await client.query<Snapshot['roles'][number]>('SELECT key, scope, name_key FROM roles ORDER BY key COLLATE "C"');
+  const roles = await client.query<Snapshot['roles'][number]>(
+    'SELECT key, scope, name_key, is_system, description FROM roles ORDER BY key COLLATE "C"',
+  );
   const links = await client.query<{ link: string }>(
     `SELECT r.key || '|' || p.key AS link FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id ORDER BY (r.key || '|' || p.key) COLLATE "C"`,
   );
@@ -59,10 +62,15 @@ async function snapshot(client: pg.Client): Promise<Snapshot> {
 }
 
 const expected: Snapshot = {
-  permissions: PERMISSION_DEFINITIONS.map((p) => ({ key: p.key, category: p.category, operator_only: p.operatorOnly })).sort((a, b) =>
-    a.key < b.key ? -1 : 1,
+  permissions: PERMISSION_DEFINITIONS.map((p) => ({
+    key: p.key,
+    description: p.description,
+    category: p.category,
+    operator_only: p.operatorOnly,
+  })).sort((a, b) => (a.key < b.key ? -1 : 1)),
+  roles: ROLES.map((r) => ({ key: r.key, scope: r.scope, name_key: r.nameKey, is_system: true, description: r.description })).sort(
+    (a, b) => (a.key < b.key ? -1 : 1),
   ),
-  roles: ROLES.map((r) => ({ key: r.key, scope: r.scope, name_key: r.nameKey })).sort((a, b) => (a.key < b.key ? -1 : 1)),
   links: ROLES.flatMap((r) => r.permissions.map((p) => `${r.key}|${p}`)).sort((a, b) => (a < b ? -1 : 1)),
 };
 
@@ -86,6 +94,16 @@ describe('authz tables and role seed (REQ-RBAC-002, data-model §3.3)', () => {
         { scope: 'OPERATOR', roles: '8' },
         { scope: 'PARTNER', roles: '4' },
       ]);
+    });
+  });
+
+  it('database-side escalation backstop: no customer or partner role links an operator-only permission and no role links a webhook permission (DR-A07)', async () => {
+    await withClient(db.migratorConnection(database), async (client) => {
+      const escalations = await client.query<{ link: string }>(
+        `SELECT r.key || '|' || p.key AS link FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
+         WHERE (r.scope <> 'OPERATOR' AND p.operator_only) OR p.key LIKE 'webhook:%'`,
+      );
+      expect(escalations.rows).toEqual([]);
     });
   });
 

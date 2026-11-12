@@ -23,7 +23,11 @@ describe('role-permission matrix document (REQ-RBAC-002)', () => {
   it(`[AT-US-066-02] the committed ${MATRIX_DOC_PATH} matches the generator output exactly (drift fails CI)`, () => {
     const committed = readRepoFile(MATRIX_DOC_PATH);
     if (committed !== render())
-      throw new Error(`${MATRIX_DOC_PATH} is out of date: regenerate it with \`${AUTHZ_GENERATE_COMMAND}\` and commit it`);
+      throw new Error(
+        `${MATRIX_DOC_PATH} is out of date. If a grant or the catalogue changed, released catalogue versions are immutable: ` +
+          `bump CATALOGUE_VERSION and add a seed migration (D-SEC-PR8-01; \`${AUTHZ_GENERATE_COMMAND}\` refuses to rewrite a ` +
+          `released seed). Then regenerate with \`${AUTHZ_GENERATE_COMMAND}\` and commit the result.`,
+      );
     expect(committed).toBe(render());
   });
 
@@ -36,6 +40,7 @@ describe('role-permission matrix document (REQ-RBAC-002)', () => {
     expect(doc.match(/^\| `[a-z_:]+` \|/gm)).toHaveLength(PERMISSION_DEFINITIONS.length * 3);
     expect(doc).toContain('| `audit:export` | operator-only, reserved | Y |');
     expect(doc).toContain('| `webhook:stripe:receive` | signature-only |  |');
+    expect(doc).toContain('| `session:manage` | self-service | Y |');
     for (const role of ROLES)
       expect(doc).toContain(`| ${role.key} | ${role.scope} | \`${role.nameKey}\` | ${String(role.permissions.length)} |`);
   });
@@ -47,7 +52,8 @@ describe('seed migration renderer (REQ-RBAC-002/013, data-model §3.3)', () => {
 
   it('renders an expand, non-data-changing, reversible migration of plain idempotent INSERTs by the SYSTEM actor', () => {
     expect(seed.up.startsWith('-- migration-kind: expand\n-- data-changing: no\n-- reversible: yes\n')).toBe(true);
-    expect(seed.up.match(/ON CONFLICT DO NOTHING;/g)).toHaveLength(3);
+    expect(seed.up.match(/ON CONFLICT \("id"\) DO NOTHING;/g)).toHaveLength(3);
+    expect(seed.up).not.toMatch(/DO UPDATE/i);
     expect(seed.up).not.toMatch(/INSERT[^;]*SELECT/i);
     expect(seed.up.match(/^ {2}\(/gm)).toHaveLength(PERMISSION_DEFINITIONS.length + ROLES.length + links);
     expect(seed.up).toContain(`'${SYSTEM_ACTOR_ID}', '${SYSTEM_ACTOR_ID}')`);

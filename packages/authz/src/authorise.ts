@@ -4,7 +4,7 @@
  * API middleware (US-068); this module only answers allow or deny and unions role grants.
  */
 import type { Permission } from './permissions/index.js';
-import { type RoleDefinition, ROLES } from './roles.js';
+import type { RoleDefinition } from './roles.js';
 
 export type AuthzDecision =
   { readonly allowed: true } | { readonly allowed: false; readonly code: 'AUTHZ_DENIED'; readonly requiredPermission: Permission };
@@ -20,10 +20,14 @@ export class UnknownRoleError extends Error {
   }
 }
 
-/** Union of the grants of `roleKeys`; an unknown role key is a catalogue/database drift and fails fast. */
+/**
+ * Union of the grants of `roleKeys` resolved against `roles`; an unknown role key is a catalogue/database drift and
+ * fails fast. `roles` is required on purpose (PR #8 n2): the API passes the role grants loaded from the database for
+ * the active membership (REQ-RBAC-008), never the in-code seed `ROLES`, which only build-time tests use.
+ */
 export function effectivePermissions(
   roleKeys: readonly string[],
-  roles: readonly RoleDefinition<Permission, string>[] = ROLES,
+  roles: readonly RoleDefinition<Permission, string>[],
 ): ReadonlySet<Permission> {
   const byKey = new Map(roles.map((role) => [role.key, role]));
   const permissions = new Set<Permission>();

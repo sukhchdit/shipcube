@@ -9,9 +9,9 @@ import { ORGANISATION_PERMISSIONS } from './organisation.js';
 import { PAYMENTS_PERMISSIONS } from './payments.js';
 import { PLATFORM_PERMISSIONS } from './platform.js';
 import { QUOTING_PERMISSIONS } from './quoting.js';
-import type { PermissionDefinition } from './types.js';
+import { CATEGORY_EXCEPTIONS, type PermissionCategory, type PermissionDefinition } from './types.js';
 
-export { PERMISSION_CATEGORIES, type PermissionCategory, type PermissionDefinition } from './types.js';
+export { CATEGORY_EXCEPTIONS, PERMISSION_CATEGORIES, type PermissionCategory, type PermissionDefinition } from './types.js';
 
 export const PERMISSIONS = [
   ...QUOTING_PERMISSIONS,
@@ -49,12 +49,40 @@ export function isRouteMarker(value: string): value is RouteMarker {
 }
 
 /**
- * The operator-only rule of DR-A07 and ADR-0008 §1: any `:any_org` qualifier, `audit:*`, `featureflag:manage` and
- * `carrier:status:read`. Each catalogue entry's `operatorOnly` flag must equal this (catalogue guard).
+ * The D-058 self-service set: own sessions, own notification preferences and own notification log. Every role holds
+ * it, and it is the only carve-out of the Viewer and Compliance Auditor read-only invariants. The catalogue guard
+ * requires the entries flagged `selfService` to be exactly these keys; `satisfies` keeps each one catalogued.
+ */
+export const SELF_SERVICE_PERMISSIONS = [
+  'session:manage',
+  'notification_pref:manage',
+  'notification:read',
+] as const satisfies readonly Permission[];
+
+/** The only categories a self-service permission may carry (own sessions, own notifications). */
+export const SELF_SERVICE_CATEGORIES: ReadonlySet<PermissionCategory> = new Set<PermissionCategory>(['session', 'notification']);
+
+/**
+ * An `audit:*` permission, decided by the resource segment of the key, never by the free-text `category` (PR #8 M1).
+ * The single predicate behind both the operator-only rule and the Compliance Auditor invariant.
+ */
+export function isAuditPermission(key: string): boolean {
+  return key.split(':')[0] === 'audit';
+}
+
+/**
+ * The operator-only rule of DR-A07 and ADR-0008 §1: `any_org` in any segment, `audit:*`, `featureflag:manage` and
+ * `carrier:status:read`. Each catalogue entry's `operatorOnly` flag must equal this (catalogue guard), and the guard
+ * also rejects a scope qualifier outside the third segment, so no key placement escapes the rule (PR8-SEC-02).
  */
 export function isOperatorOnlyKey(key: string): boolean {
-  const [resource, , qualifier] = key.split(':');
-  return qualifier === 'any_org' || resource === 'audit' || key === 'featureflag:manage' || key === 'carrier:status:read';
+  return key.split(':').includes('any_org') || isAuditPermission(key) || key === 'featureflag:manage' || key === 'carrier:status:read';
+}
+
+/** The category the catalogue guard requires for a key: its resource segment, unless `CATEGORY_EXCEPTIONS` maps it. */
+export function expectedCategory(key: string): string {
+  const resource = String(key.split(':')[0]);
+  return CATEGORY_EXCEPTIONS.get(resource) ?? resource;
 }
 
 /**

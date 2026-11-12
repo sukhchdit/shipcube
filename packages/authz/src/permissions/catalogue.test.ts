@@ -10,6 +10,9 @@ import { checkCatalogue } from '../guard.js';
 import { assertRoutePermissions, findUnknownRoutePermissions, UnknownRoutePermissionError } from '../routes.js';
 import { readRepoFile } from '../tests/repo.js';
 import {
+  CATEGORY_EXCEPTIONS,
+  expectedCategory,
+  isAuditPermission,
   isOperatorOnlyKey,
   isPermission,
   isReadPermission,
@@ -22,9 +25,25 @@ import {
   PERMISSIONS,
   permissionVerb,
   ROUTE_MARKERS,
+  SELF_SERVICE_PERMISSIONS,
 } from './index.js';
 
 const keys = PERMISSIONS.map((permission) => permission.key);
+
+/** The shipped catalogue with one entry changed. */
+const replace = (key: string, change: Partial<PermissionDefinition>): PermissionDefinition[] =>
+  PERMISSION_DEFINITIONS.map((definition) => (definition.key === key ? { ...definition, ...change } : definition));
+/** The shipped catalogue with every optional flag (here: `selfService`) dropped from one entry. */
+const unflag = (key: string): PermissionDefinition[] =>
+  PERMISSION_DEFINITIONS.map((d) =>
+    d.key === key ? { key: d.key, description: d.description, category: d.category, operatorOnly: d.operatorOnly } : d,
+  );
+const entry = (key: string, category: PermissionDefinition['category']): PermissionDefinition => ({
+  key,
+  description: 'mutated',
+  category,
+  operatorOnly: false,
+});
 const openapi = readRepoFile('docs/03-architecture/api/openapi.yaml');
 const contractPermissions = [...new Set([...openapi.matchAll(/x-permission:\s*([a-z_:]+)/g)].map((match) => String(match[1])))].sort();
 
@@ -134,15 +153,61 @@ describe('operator-only rule and verbs (DR-A07, ADR-0008 §1)', () => {
     expect([...OPERATOR_ONLY_PERMISSIONS].sort()).toEqual(
       ['audit:export', 'audit:read', 'carrier:status:read', 'featureflag:manage', 'org:read:any_org', 'shipment:read:any_org'].sort(),
     );
-    const mismatch = { key: 'audit:read', description: 'x', category: 'audit' as const, operatorOnly: false };
-    expect(checkCatalogue([mismatch])).toEqual([
+    expect(checkCatalogue(replace('audit:read', { operatorOnly: false }))).toEqual([
       expect.objectContaining({ code: 'PERMISSION_OPERATOR_ONLY_MISMATCH', permission: 'audit:read' }),
     ]);
   });
 
   it('rejects a category outside PERMISSION_CATEGORIES', () => {
-    const stray = { key: 'quote:read', description: 'x', category: 'quotes', operatorOnly: false } as unknown as PermissionDefinition;
-    expect(checkCatalogue([stray])).toEqual([expect.objectContaining({ code: 'PERMISSION_CATEGORY_UNKNOWN', permission: 'quote:read' })]);
+    const stray = { category: 'quotes' } as unknown as Partial<PermissionDefinition>;
+    expect(checkCatalogue(replace('quote:read', stray))).toEqual([
+      expect.objectContaining({ code: 'PERMISSION_CATEGORY_UNKNOWN', permission: 'quote:read' }),
+    ]);
+  });
+
+  it('isAuditPermission and isOperatorOnlyKey decide by key segments, never by category (PR #8 M1, PR8-SEC-02)', () => {
+    expect(['audit:read', 'audit:export', 'audit_trail:read', 'retention:purge'].map(isAuditPermission)).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+    expect(['shipment:any_org:read', 'org:any_org', 'any_org:read', 'audit:anything'].every(isOperatorOnlyKey)).toBe(true);
+    expect(['audit_trail:read', 'org:read', 'featureflag:read'].some(isOperatorOnlyKey)).toBe(false);
+  });
+
+  it('the positive control: the shipped catalogue has no violation and only the documented category exceptions', () => {
+    expect(checkCatalogue(PERMISSION_DEFINITIONS)).toEqual([]);
+    expect([...CATEGORY_EXCEPTIONS]).toEqual([
+      ['payment_method', 'payment'],
+      ['notification_pref', 'notification'],
+    ]);
+    expect(
+      PERMISSION_DEFINITIONS.filter((definition) => definition.category !== expectedCategory(definition.key)).map((d) => d.key),
+    ).toEqual([]);
+  });
+
+  it.each<[string, PermissionDefinition, string[]]>([
+    [
+      'a scope qualifier in the action segment',
+      entry('shipment:any_org:read', 'shipment'),
+      ['PERMISSION_FORMAT', 'PERMISSION_OPERATOR_ONLY_MISMATCH'],
+    ],
+    ['a two-segment any_org key', entry('org:any_org', 'org'), ['PERMISSION_FORMAT', 'PERMISSION_OPERATOR_ONLY_MISMATCH']],
+    ['an audit-looking resource filed under audit', entry('audit_trail:read', 'audit'), ['PERMISSION_CATEGORY_MISMATCH']],
+    ['a non-audit resource filed under audit', entry('retention:purge', 'audit'), ['PERMISSION_CATEGORY_MISMATCH']],
+    ['a verb as action and a read qualifier (n5)', entry('document:download:read', 'document'), ['PERMISSION_FORMAT']],
+    ['a webhook key without the signature-only flag', entry('webhook:paypal:receive', 'webhook'), ['SIGNATURE_FLAG_MISMATCH']],
+  ])('PR8-SEC-02: %s fails the catalogue guard', (_label, added, expected) => {
+    const found = checkCatalogue([...PERMISSION_DEFINITIONS, added]);
+    expect(found.every((v) => v.permission === added.key)).toBe(true);
+    expect([...new Set(found.map((v) => v.code))].sort()).toEqual(expected);
+  });
+
+  it('PR8-SEC-02: signatureOnly on payment:create fails the catalogue guard', () => {
+    expect(checkCatalogue(replace('payment:create', { signatureOnly: true }))).toEqual([
+      expect.objectContaining({ code: 'SIGNATURE_FLAG_MISMATCH', permission: 'payment:create' }),
+    ]);
   });
 
   it.each([
@@ -155,5 +220,45 @@ describe('operator-only rule and verbs (DR-A07, ADR-0008 §1)', () => {
   ])('the verb of %s is %s (read-only: %s)', (key, verb, read) => {
     expect(permissionVerb(key)).toBe(verb);
     expect(isReadPermission(key)).toBe(read);
+  });
+});
+
+describe('D-058 self-service flag (PR8-SEC-04)', () => {
+  it('flags exactly SELF_SERVICE_PERMISSIONS, all non-operator, non-reserved, non-signature, session or notification', () => {
+    const flagged = PERMISSION_DEFINITIONS.filter((definition) => definition.selfService === true);
+    expect(flagged.map((definition) => definition.key).sort()).toEqual([...SELF_SERVICE_PERMISSIONS].sort());
+    expect(SELF_SERVICE_PERMISSIONS).toEqual(['session:manage', 'notification_pref:manage', 'notification:read']);
+    expect(
+      flagged.filter(
+        (d) => d.operatorOnly || d.reserved === true || d.signatureOnly === true || !['session', 'notification'].includes(d.category),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each<[string, PermissionDefinition[], string, string[]]>([
+    [
+      'selfService on document:download',
+      replace('document:download', { selfService: true }),
+      'document:download',
+      ['SELF_SERVICE_FLAG_MISMATCH', 'SELF_SERVICE_INVALID'],
+    ],
+    ['selfService dropped from session:manage', unflag('session:manage'), 'session:manage', ['SELF_SERVICE_FLAG_MISMATCH']],
+    [
+      'session:manage removed from the catalogue',
+      PERMISSION_DEFINITIONS.filter((d) => d.key !== 'session:manage'),
+      'session:manage',
+      ['SELF_SERVICE_FLAG_MISMATCH'],
+    ],
+    ['a reserved self-service entry', replace('notification:read', { reserved: true }), 'notification:read', ['SELF_SERVICE_INVALID']],
+    [
+      'an operator-only self-service entry',
+      replace('session:manage', { operatorOnly: true }),
+      'session:manage',
+      ['PERMISSION_OPERATOR_ONLY_MISMATCH', 'SELF_SERVICE_INVALID'],
+    ],
+  ])('%s fails the catalogue guard', (_label, catalogue, key, expected) => {
+    const found = checkCatalogue(catalogue);
+    expect(found.every((v) => v.permission === key)).toBe(true);
+    expect([...new Set(found.map((v) => v.code))].sort()).toEqual(expected);
   });
 });
