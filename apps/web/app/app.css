@@ -1,0 +1,5 @@
+@import 'tailwindcss';
+@import '@platform/ui/theme.css';
+
+/* Tailwind does not scan symlinked workspace packages, so the kit's class names are registered explicitly. */
+@source '../../../packages/ui/src';
