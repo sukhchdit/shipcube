@@ -41,9 +41,11 @@ type DatasetContext = Pick<SeedContext, 'sql' | 'logger' | 'versions' | 'configC
  * version label or the content hash changed.
  *
  * Rows are checked on every run, not only when the hash changed, so a row edited by hand in the database is restored
- * (AT-US-049-08); a run that finds nothing to do writes nothing at all (AT-US-049-01). A restoration is logged as
- * `warn seed.drift_restored` (tamper evidence) and, for an audited dataset whose version did not change, reported as a
- * `drift-restored` `ConfigChange`.
+ * (AT-US-049-08); a run that finds nothing to do writes nothing at all (AT-US-049-01). With the label and hash
+ * unchanged, every written row is a restoration: an updated row was edited by hand and an inserted row was deleted by
+ * hand (a new seeded row would have changed the hash). A restoration of either kind is logged as
+ * `warn seed.drift_restored` (tamper evidence) and, for an audited dataset, reported as a `drift-restored`
+ * `ConfigChange` (code review PR #13 R2-m1).
  */
 export async function runDataset(context: DatasetContext, dataset: Dataset): Promise<DatasetResult> {
   validateDataset(dataset);
@@ -86,15 +88,15 @@ export async function runDataset(context: DatasetContext, dataset: Dataset): Pro
         toSha256: contentSha256,
       });
     }
-  } else if (updated > 0) {
-    logger.warn('seed.drift_restored', { dataset: dataset.name, rows: updated });
+  } else if (inserted > 0 || updated > 0) {
+    logger.warn('seed.drift_restored', { dataset: dataset.name, rows: inserted + updated, reinserted: inserted, edited: updated });
     if (dataset.audited === true) {
       await configChanges.configChanged(sql, {
         kind: 'drift-restored',
         dataset: dataset.name,
         version: dataset.version,
         sha256: contentSha256,
-        restoredRows: updated,
+        restoredRows: inserted + updated,
       });
     }
   }

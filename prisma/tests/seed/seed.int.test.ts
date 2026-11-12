@@ -211,6 +211,19 @@ describe('reference seed framework (US-049)', () => {
 
     await seed(database, [audited], sink);
     expect(sink.changes).toHaveLength(2);
+
+    // R2-m1: a row deleted by hand is re-inserted by the next run and reported as a drift restore too.
+    await withClient(db.migratorConnection(database), async (client) => {
+      await client.query(`DELETE FROM public.seed_probe_countries WHERE code = 'P00004'`);
+    });
+    const reinserted = await seed(database, [audited], sink);
+    expect(reinserted.datasets).toMatchObject([{ status: 'applied', inserted: 1, updated: 0 }]);
+    expect(sink.changes).toHaveLength(3);
+    expect(sink.changes[2]).toMatchObject({ kind: 'drift-restored', dataset: 'probe_countries', version: '1', restoredRows: 1 });
+    expect(await withClient(db.migratorConnection(database), async (client) => (await versionRows(client)).rows)).toEqual(versionsBefore);
+    const restored = await withClient(db.migratorConnection(database), async (client) => (await stamp(client, 'seed_probe_countries')).rows);
+    expect(restored).toHaveLength(10);
+    expect(restored.find((row) => row.code === 'P00004')).toMatchObject({ name_en: 'Probe 4' });
   }, 120_000);
 
   it('two concurrent seeds queue on the advisory lock: one applies, the other finds nothing to do (n8)', async () => {

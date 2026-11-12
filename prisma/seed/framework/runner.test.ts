@@ -133,7 +133,7 @@ describe('runDataset', () => {
     const result = await runDataset({ sql, logger: recording, versions, configChanges }, d);
     expect(result).toMatchObject({ status: 'applied', inserted: 0, updated: 1 });
     expect(versions.recorded).toEqual([]);
-    expect(warnings).toEqual([['seed.drift_restored', { dataset: 'probe', rows: 1 }]]);
+    expect(warnings).toEqual([['seed.drift_restored', { dataset: 'probe', rows: 1, reinserted: 0, edited: 1 }]]);
     // Not audited: no configuration change.
     expect(configChanges.changes).toEqual([]);
   });
@@ -146,6 +146,41 @@ describe('runDataset', () => {
     expect(configChanges.changes).toEqual([
       { kind: 'drift-restored', dataset: 'probe', version: '4', sha256: hashDataset(d), restoredRows: 2 },
     ]);
+  });
+
+  it('re-inserting a row deleted by hand is a drift restore: warned and, for an audited dataset, reported (R2-m1)', async () => {
+    const d = dataset(makeRows(3), { audited: true, version: '4' });
+    const { sql } = fakeSql(() => ({ rows: [{ inserted: true }] }));
+    const versions = memoryVersions(versionOf(d));
+    const configChanges = sink();
+    const warnings: [string, unknown][] = [];
+    const recording: SeedLogger = { info: () => undefined, warn: (event, fields) => warnings.push([event, fields]) };
+    const result = await runDataset({ sql, logger: recording, versions, configChanges }, d);
+    expect(result).toMatchObject({ status: 'applied', inserted: 1, updated: 0 });
+    expect(versions.recorded).toEqual([]);
+    expect(warnings).toEqual([['seed.drift_restored', { dataset: 'probe', rows: 1, reinserted: 1, edited: 0 }]]);
+    expect(configChanges.changes).toEqual([
+      { kind: 'drift-restored', dataset: 'probe', version: '4', sha256: hashDataset(d), restoredRows: 1 },
+    ]);
+  });
+
+  it('a drift restore counts re-inserted and edited rows together in restoredRows (R2-m1)', async () => {
+    const d = dataset(makeRows(3), { audited: true, version: '4' });
+    const { sql } = fakeSql(() => ({ rows: [{ inserted: true }, { inserted: false }] }));
+    const configChanges = sink();
+    await runDataset({ sql, logger, versions: memoryVersions(versionOf(d)), configChanges }, d);
+    expect(configChanges.changes).toEqual([
+      { kind: 'drift-restored', dataset: 'probe', version: '4', sha256: hashDataset(d), restoredRows: 2 },
+    ]);
+  });
+
+  it('re-inserting a deleted published row of an insert-only dataset is a drift restore (R2-m1)', async () => {
+    const d = dataset(makeRows(2), { insertOnly: true, audited: true });
+    const { sql } = fakeSql((call) => (call.text.includes('count(*)') ? { rows: [{ changed: 0 }] } : { rows: [{ inserted: true }] }));
+    const configChanges = sink();
+    const result = await runDataset({ sql, logger, versions: memoryVersions(versionOf(d)), configChanges }, d);
+    expect(result).toMatchObject({ status: 'applied', inserted: 1, updated: 0 });
+    expect(configChanges.changes).toMatchObject([{ kind: 'drift-restored', restoredRows: 1 }]);
   });
 
   it('a version change that also restores rows reports the version change only', async () => {

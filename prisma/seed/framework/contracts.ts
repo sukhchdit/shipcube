@@ -100,8 +100,9 @@ export interface DatasetVersionStore {
  * A configuration change produced by a seed run (one `CONFIG_CHANGE` audit entry each; REQ-RBAC-013, REQ-COMP-008,
  * data-model §9.1):
  * - `version`: an audited dataset's version label or content hash changed (first seed included);
- * - `drift-restored`: the label and hash are unchanged, but `restoredRows` rows had been edited in the database and
- *   were restored to the seeded values (code review PR #13 m5, PR13-SEC-06). Never emitted for a no-op run.
+ * - `drift-restored`: the label and hash are unchanged, but `restoredRows` rows had been edited or deleted in the
+ *   database and were restored to the seeded values, by update or by re-insert (code review PR #13 m5 and R2-m1,
+ *   PR13-SEC-06). Never emitted for a no-op run.
  */
 export type ConfigChange =
   | {

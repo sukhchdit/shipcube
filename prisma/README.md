@@ -44,8 +44,9 @@ required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects
   counts as unset, as in local/test.
 - Adding a dataset: a `Dataset` file under `seed/reference/` with `source` on every row, appended to `REFERENCE_DATASETS`;
   bump `version` when its content changes; `insertOnly` for published versions, `audited` for configuration. A drift
-  restore of an audited dataset is reported as a `drift-restored` configuration change; every drift restore is logged as
-  `warn seed.drift_restored`. The dataset name `authz_matrix` is reserved for TASK-221's authz digest row.
+  restore (with the label and hash unchanged, a row edited by hand is updated back and a row deleted by hand is
+  re-inserted) of an audited dataset is reported as a `drift-restored` configuration change with `restoredRows` =
+  re-inserted + updated rows; every drift restore is logged as `warn seed.drift_restored`. The dataset name `authz_matrix` is reserved for TASK-221's authz digest row.
 - Tests: unit beside the code, `tests/seed/seed.int.test.ts` (PostgreSQL 18, real migrations, test-only probe tables, CLI).
 
 ### Dataset contract limits
