@@ -1,16 +1,18 @@
 ---
-name: g1-conditions-open-for-g2
-description: G1 attempt 1 (2026-11-12) was PASS_WITH_CONDITIONS; five conditions G1-C1..C5 must be verified closed at G2
+name: g2-conditions-open-for-g3
+description: G2 attempt 1 (2026-11-12) PASS_WITH_CONDITIONS; G1-C1..C5 verified closed (C4 Design at 90/91); five G2 conditions due P4 exit / P5 start must be re-verified at G3
 metadata:
   type: project
 ---
 
-G1 attempt 1 verdict on 2026-11-12: PASS_WITH_CONDITIONS (file `docs/sdlc/gates/G1-attempt-1.md`). Open conditions to re-verify at G2:
-- G1-C1 product-manager: reconcile REQ vs NFR default values (guest-quote rate limit 20/min vs 60/min; email-send limit 3/h vs 5/h; compose start 180 s vs 10 min; home JS 170 KB vs 200 kB; DR-A22 per-account auth limit).
-- G1-C2 product-manager: retag REQ-UI-014 / REQ-AUTH-020 / REQ-UI-018 (M0 REQs delivered only by M1 stories); REQ-PICK-013 vs D-014 drop-off Should.
-- G1-C3 product-manager: GAP-B-27 assumption row, 13 ASSUMED-without-GAP rows, 6 assumptions without validation, permission-N/A markers, NFR-MAINT-002 pipe escape.
-- G1-C4 principal-architect + qa-lead: NFR section in traceability.md (90 NFR IDs).
-- G1-C5 product-manager then senior-developer/qa-lead: "demo-critical" subset tag on Must stories for re-scoping order.
+G1-C1/C2/C3/C5 verified closed at G2 (D-035/036/037, A-078, DC=134). G1-C4 Design column closed except NFR-RES-007 (now G2-C1); Test column carried as G2-C5.
 
-**Why:** G4 checklist requires all earlier PASS_WITH_CONDITIONS items closed, and G2 checklist needs one value per NFR parameter.
-**How to apply:** At G2 attempt 1, check each item above against the current files before judging the architecture criteria; do not accept STATUS.md claims without opening the artefacts.
+G2 attempt 1 verdict 2026-11-12 (`docs/sdlc/gates/G2-attempt-1.md`, judged at commit f530ca1): PASS_WITH_CONDITIONS. Open conditions to re-verify at G3:
+- G2-C1 principal-architect: NFR-RES-007 row in nfr-traceability.md + nfr-strategy.md; totals 90 → 91.
+- G2-C2 principal-architect: traceability.md REQ Design column (was 0/434 filled); ARCHITECTURE.md §6 add REQ-AUTH-025/026, CARR-022/023, count 434; Redis 7 → Valkey 8 labels; R-ARCH-10 closed.
+- G2-C3 architect/data-architect/api-designer/PM/security-analyst: SEC-COND-05/06/07 (SEC-P3-27/28/29) design closed by P4 exit; SEC-P3-30/33 doc drift incl. REQ-AUTH-018 vs ADR-0006 am. 14; SEC-TC evidence at G3; SEC-COND-03 item 7 (locked audit-anchor sink) is a G4-production precondition.
+- G2-C4 ux-designer: UX README relabel S-C07/S-D08 Must (US-027), classify US-291/292/293, admin 28-min idle dialog, CVC note.
+- G2-C5 qa-lead: nfr-traceability.md Test column for 91 NFRs before P5 start.
+
+**Why:** G3 checklist needs every NFR to have a test and every Must AC a passing test; G4 requires all earlier PASS_WITH_CONDITIONS items closed.
+**How to apply:** At G3, open the files (not STATUS.md) for each item; also compare lane-B evidence `summary.json` SHAs with the gate SHA (R-ARCH-16).

@@ -1,2 +1,3 @@
-- [G1 conditions open for G2](project_g1_conditions.md) — G1 attempt 1 PASS_WITH_CONDITIONS 2026-11-12; verify G1-C1..C5 closed at G2
+- [G2 conditions open for G3](project_g1_conditions.md) — G1-C1..C5 closed at G2; G2 attempt 1 PASS_WITH_CONDITIONS 2026-11-12, G2-C1..C5 due P4 exit/P5 start
 - [ID regex must allow digits](feedback_id_parsing.md) — REQ-I18N/NFR-A11Y rows vanish with [A-Z]+; sanity-check totals vs stats table
+- [Verify "all N IDs" claims by set-diff](feedback_verify_count_claims.md) — late decisions add IDs that derived docs miss (NFR-RES-007 at G2)
