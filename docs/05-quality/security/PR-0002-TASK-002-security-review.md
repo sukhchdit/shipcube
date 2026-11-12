@@ -371,3 +371,280 @@ Six more lockfile entries are nested copies of versions already in the tree, als
 | Registry packuments (63) + `gh api repos/<slug>` (55) | Cooldown OK; 0 deprecated; 0 archived; 30 stale transitives (report-only) |
 | `node probe-lint.mjs <worktree>` (P1–P18 + coverage matrix), `probe-lint-2.mjs` (P19–P23) | As tabulated in PR2-SEC-01/02/03 |
 | Regex secret sweep over the added lines | 0 true positives |
+
+## Round 2 (head 6ba7649)
+
+| Field | Value |
+|---|---|
+| Delta | `9bc9c04..6ba7649`: 3 commits (`f392385`, `a50cde1`, `6ba7649`), fast-forward on the round-1 head (no history rewrite). 46 files, +675 / −118. No change to `package.json`, workspace manifests, `.npmrc`, `.gitattributes` or `.github/**` |
+| Inputs | Fix-cycle comment https://github.com/sukhchdit/shipcube/pull/2#issuecomment-6825077614. Code review `docs/05-quality/reviews/PR-0002-TASK-002-code-review.md` (item n5 was routed to security-analyst) |
+| Reviewer / date | security-analyst, 2026-11-12. Read-only on the worktree. Same host limits as round 1: no install, build, Docker or full suites. ESLint and Stylelint ran in-process against the head configs (`lintText`, `isPathIgnored`, `calculateConfigForFile`, `stylelint.lint({ code })`). Every probe set has a positive control |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open. The delta closes the in-PR parts of PR2-SEC-02 and PR2-SEC-03, plus item 3 of PR2-SEC-01, and introduces no regression. New in round 2: 1 LOW (PR2-SEC-09, a pre-existing gap of the PR2-SEC-03 class that round 1 missed) and 3 INFO (PR2-SEC-10..12). **Merge is allowed.** |
+
+### R2.1 Closure table
+
+| ID | Round-1 item due in this PR | Round-2 evidence | Status |
+|---|---|---|---|
+| PR2-SEC-01 (MEDIUM) | Item 3 only: the Stylelint `reportNeedlessDisables`, `reportInvalidScopeDisables` and `reportDescriptionlessDisables` options | `stylelint.config.mjs:15-17`. Probes: a needless disable fails with `--report-needless-disables`; a disable with no `-- description` fails with `--report-descriptionless-disables`; a disable that names an unconfigured rule fails with `--report-invalid-scope-disables`; a scoped disable with a description stays clean. Fixtures `tests/fixtures/lint/css/bad-*-disable.css` | **Item 3 closed.** Items 1, 2 and 4 stay **open** under TASK-007. A blanket `/* stylelint-disable -- legacy */` still passes, because any description is accepted; item 1(b) of the check-suppressions step covers it. Outside the three CSS fixtures, the delta adds no `eslint-disable`, inline `/* eslint … */`, `@ts-*`, `nosemgrep` or coverage-ignore comment |
+| PR2-SEC-02 (LOW) | ESLint items 1 and 2 were routed to TASK-049, or earlier if the TASK-002 fix cycle opened | R2.2 (1). Every form named in round 1 now fails (list below). The hasher's `export … from 'bcrypt'` fails in all 3 forms. The blanket `'off'` is gone: the hasher's effective `no-restricted-imports` is `[2, { patterns: [] }]`, re-declared from the shared `RESTRICTED_IMPORT_PATTERNS` | **In-PR scope closed.** The residual stays **open, LOW**: aliased forms, local-binding re-export from the hasher, policy ordering. Semgrep backstop in TASK-007 (mandatory); hardening in TASK-049 |
+| PR2-SEC-03 (LOW) | Item 2 (anchored ignores) could land in the fix cycle; the rest went to TASK-004 | R2.2 (2). `.jsx` is linted. `.js`/`.cjs` under `apps/api/src` now get `no-innerhtml` and `outbound-http-via-client`; round-1 probe P15 fired only `no-undef`, and both rules now fire. Both the ESLint and the Stylelint ignore lists are anchored | **In-PR scope closed.** Still **open, LOW**, in TASK-004: the TS-only block for app and package sources (a `.jsx` route is now linted but still not type-checked), and either removing `--allow-empty-input` or asserting that at least one CSS file is linted. Related new finding: PR2-SEC-09 |
+| PR2-SEC-04 | none in this PR | unchanged | Open: TASK-112 / TASK-113 / TASK-007 |
+| PR2-SEC-05 | none in this PR | The two new exact-path Prisma allowances get repository-equivalent rights, including `new PrismaClient()` (R2.2 (4)) | Open, TASK-016. **Addendum** in R2.3 |
+| PR2-SEC-06..08 | none in this PR | The package set is unchanged (R2.2 (3)), so PR2-SEC-06 and PR2-SEC-07 still hold as written | Unchanged |
+
+### R2.2 Answers to the review focus
+
+**(1) bcrypt confinement.** The new boundaries policy covers the bcrypt family `['bcrypt*', '@*/bcrypt*']`. It has no `from`, so it applies to every file in the boundaries block (`{apps,packages,prisma,tools,tests}/**`, all `LINTED` extensions). `additional-dependency-nodes` adds `createRequire(...)(...)` and `<x>.require(...)`. `no-restricted-imports` stays as the static net, with the family regex `^(?:@[^/]+/)?bcrypt[-.\w]*(?:/.*)?$`.
+
+All probes ran in `apps/api/src/modules/orders/service/` unless the probe names another location:
+
+| Probe | Form | Result |
+|---|---|---|
+| C1 (control) | `import bcrypt from 'bcrypt'` | `no-restricted-imports` + `boundaries/dependencies` |
+| B2 | `await import('bcrypt')` | `boundaries/dependencies` |
+| B3 | `createRequire(import.meta.url)('bcrypt')` | `boundaries/dependencies` |
+| B6 | `const require = createRequire(import.meta.url); require('bcrypt')`, the idiomatic form | `boundaries/dependencies` (the default `require` node) |
+| B4 / B8c | `.cjs` `require('bcrypt')`, `require('bcryptjs/umd')` | `boundaries/dependencies` |
+| B5 / B12 | `module.require('bcrypt')`, `process.mainModule.require('bcrypt')` | `boundaries/dependencies` |
+| B8a / B8b | `import('bcrypt-ts')`, `import('@node-rs/bcrypt')`, neither installed | `boundaries/dependencies` |
+| B24 | `.cts` `import b = require('bcrypt')` | both rules |
+| R4 | ``import(`bcrypt`)`` | `boundaries/dependencies` |
+| B20 / B21 / B23 / B26 / B27 | a test file, `apps/worker`, `tools/db/*.mjs`, a `.jsx` route in `apps/web`, `packages/shared` | caught by boundaries (static forms also by `no-restricted-imports`) |
+| R8 / R9 | root-level `scripts/*.mjs` and `infra/*.mjs` `import('bcrypt')`, outside the boundaries block | `import-x/no-extraneous-dependencies` only (no root workspace declares `bcrypt`) |
+| H1 / H7 | the hasher uses bcrypt (static and dynamic) | clean (intended) |
+| H2–H4 | the hasher: `export { compare } from`, `export * from`, `export * as b from 'bcrypt'` | `boundaries/dependencies` ("never re-exports it") |
+| **R1** | `const req = createRequire(import.meta.url); req('bcrypt')` | **clean** |
+| **R2** | `import { createRequire as cr } …; cr(import.meta.url)('bcrypt')` | **clean** |
+| **R3** | `module.createRequire(import.meta.url)('bcrypt')` | **clean** |
+| **R5** | `import(name)` with `const name = 'bcrypt'` | **clean** |
+| **R6 / R7** | `Module._load('bcrypt')`, `require.call(null, 'bcrypt')` | **clean** (also `module['require']('bcrypt')`, by inspection of the selector) |
+| **H5 / H6** | the hasher: `import * as b from 'bcrypt'; export { b }` and `import b from 'bcrypt'; export default b` | **clean** |
+
+**Is leaving aliased `createRequire` to Semgrep (TASK-007) acceptable? Yes**, for four reasons:
+- (a) The idiomatic form, `const require = createRequire(import.meta.url)`, is caught (B6).
+- (b) The remaining forms need a deliberate rename or an indirection. ESLint can follow those only with data-flow analysis; Semgrep does it natively.
+- (c) Only `apps/api` declares `bcrypt`. Elsewhere, `import-x/no-extraneous-dependencies` also fires on static imports, `import()` and `require` (R8, R9).
+- (d) Impact M × likelihood L stays **LOW**.
+
+This is accepted on conditions, which are listed under "Follow-ups by task".
+
+The hasher no longer has a blanket `no-restricted-imports: off`. This is confirmed by its effective config `[2, { patterns: [] }]`, while the service path keeps the bcrypt regex.
+
+Two structural points remain:
+- **Policy order.** In boundaries the last matching policy decides, and the bcrypt block sits in the middle of `BOUNDARIES_POLICIES` (`eslint.config.mjs:208-214`). No later `allow` matches the family today: `:216-284` was read, and B21, B26 and B27 confirm it. However, a future broad allow added after the block, such as `{ allow: { to: { module: { origin: 'external' } } } }` for one package, would re-allow bcrypt there.
+- **What the effective-config test checks.** It asserts the *severity* of `boundaries/dependencies`, not that the bcrypt policy is among its options on each path. A later file-scoped `boundaries/dependencies` block would therefore replace the policy list without anyone noticing. Round 1 found this clobbering class for `no-restricted-imports`; `RESTRICTED_IMPORT_PATTERNS` now fixes it for that rule, but not for boundaries.
+
+**(2) `.jsx`, anchored ignores, Stylelint.** The `LINTED` set (`{js,jsx,mjs,cjs,ts,tsx,mts,cts}`) is used by the baseline, import-x, boundaries and local-rule blocks. `.jsx` gets JSX parsing, the React/a11y/i18n blocks, and the source-rule globs.
+
+ESLint ignore matrix (`isPathIgnored`, then `calculateConfigForFile`):
+- **Ignored:** `dist/x.js`, `build/x.js`, `coverage/lcov-report/x.js`, `apps/web/build/client/x.js`, `apps/api/dist/x.js`, `packages/shared/dist/x.js`, `tests/e2e/dist/x.js`, `prisma/dist/x.js`, `apps/web/.react-router/types/x.ts`.
+- **Linted, with `no-restricted-imports`, `boundaries/dependencies`, `outbound-http-via-client` and `no-innerhtml` at error:** `packages/shared/src/coverage/a.ts`, `apps/api/src/modules/shipments/build/a.ts`, `packages/carriers/src/dist/a.ts`, `apps/api/src/dist/a.ts`.
+- **Linted, with `no-restricted-imports`, `boundaries/dependencies`, `no-innerhtml` and `i18next/no-literal-string` at error** (outbound-http is off by design in browser code): `apps/web/app/routes/a.jsx`, `apps/web/app/coverage/a.tsx`, `packages/ui/src/build/a.tsx`.
+- **Behaviour:** `console.log` in `packages/shared/src/coverage/s1.ts` fails with `no-console`. `.jsx` `innerHTML` in `apps/web` and a `.js` file in `apps/api/src/platform` (`innerHTML` + `fetch`) fail with `no-innerhtml` (both files) and `outbound-http-via-client` (the `.js` file).
+- **Fails closed.** Output folders outside the anchor list (`apps/web/out/`, `tools/dist/`) are linted. An unexpected output location therefore produces lint noise; it is never silently skipped.
+
+Stylelint ignore matrix:
+- **Ignored:** `dist/`, `build/`, `coverage/`, `apps/web/build/client/assets/`, `apps/web/dist/`, `packages/ui/dist/`, `apps/web/.react-router/`, `docs/`, `tests/fixtures/lint/css/`.
+- **Linted:** `apps/web/app/`, `apps/web/app/coverage/`, `packages/ui/src/build/`, `packages/ui/src/dist/`, `packages/ui/build/`.
+
+The three `report*Disables` options work (R2.1).
+
+**(3) Lockfile delta.** A deep JSON diff of `package-lock.json` at `9bc9c04` and at `6ba7649` finds exactly **one** differing path, with the positive control detected:
+- the path is `packages[""].engines.node`, which changes from `>=24 <25` to `>=24.2 <25`;
+- the new value equals the root `package.json`, which the delta does not touch (it already read `>=24.2 <25` at `9bc9c04`).
+
+No package entry, version, integrity, `resolved` URL or flag changed. The package set is identical, so the round-1 cooldown, licence, signature and advisory results carry over unchanged. The developer's `npm audit --audit-level=high` shows the same 36 dev-only findings (35 moderate, 1 low). A new `tools/repo/toolchain.test.ts` case keeps the lockfile and manifest `engines` equal.
+
+**(4) Weakenings introduced by the delta.**
+- **`packages/ui/**` excluded from `outbound-http-via-client`: accepted.** This is consistent with ADR-0016 §13:
+  - That control targets *server* egress; SSRF needs a server-side request.
+  - Browser requests are governed by CSP `connect-src` (NFR-SEC-006) and the same-origin policy.
+  - `apps/web` and `apps/admin` were never in scope.
+
+  The exclusion is narrow. Every other existing or future package stays in scope (probe O2: `fetch` in `packages/shared` fails). The residual (server code importing the browser package) is **PR2-SEC-10 (INFO)**.
+- **Prisma at exact paths: accepted.** `packages/audit/src/store/prisma-store.ts` (TASK-025) and `apps/api/src/platform/outbox/writer.ts` (TASK-043) are consistent with the ADRs:
+  - ADR-0007: the writer "inserts inside the business transaction (`withTenantTx`)".
+  - ADR-0003: its platform-plumbing list names the "outbox writer"; ADR-0004 covers the transactional outbox.
+  - Both are narrow: siblings beside them still fail (probes P3, P5).
+
+  ADR-0003's layering bullet literally says "Repositories: the only code importing the Prisma client". The two files are documented exceptions, which principal-architect may want to note in ADR-0003; the ADR wording is code-review's to route, and there is no security objection. The security residual: the `db-platform` category gives both files repository-equivalent rights. That includes `import pg from 'pg'` (P2, clean) and `new PrismaClient()` (P4, clean). See the **PR2-SEC-05 addendum** in R2.3.
+- **Other changes, no security effect, or a tightening:**
+  - `i18next/no-literal-string` is off for test files only; jsx-a11y stays on.
+  - `TEST_FILES` now also covers `.test.{js,jsx}`. The folder part of that glob is PR2-SEC-09.
+  - New routes/controller layering policies: a tightening.
+  - The web/admin allow-list (`@platform/shared` and `@platform/ui` only): a tightening, which also keeps server packages such as `@platform/config` out of the public bundle.
+  - `Intl.*` called without `new` is now reported: a tightening.
+  - The commitlint test now runs `spawnSync(process.execPath, …)` (no shell) with the message on stdin, in an `mkdtemp` scratch directory that is removed afterwards.
+  - The `lint-fixtures.mjs` repository probes are in-memory `lintText`, so nothing is written to the repository.
+- **Non-security note for code-review (NIT, not a finding).** The additional dependency-node selectors use `> Literal`. A non-string literal argument, such as `x.require('a', 1)`, prints `[boundaries][warning] Dependency node value is not a string` and is skipped, with no crash. `> Literal:first-child` would silence the warning.
+
+**(5) `.gitignore` folder names at any depth (developer-flagged).** This is **PR2-SEC-11: INFO, owner TASK-007** (rationale in R2.3).
+
+### R2.3 New findings and addendum
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR2-SEC-09 | Source folders named `test`/`tests` under `src/` are classified as test code. They lose the layering policies, the Prisma confinement and the SSRF, XSS, audit-writer and console rules, yet they compile into `dist` | LOW | CWE-693 | A05 Security Misconfiguration | `eslint.config.mjs:49` (`TEST_FILES`), used at `:106`, `:129`, `:141`, `:354`, `:363`, `:453`, `:464` | TASK-004 | Open (follow-up) |
+| PR2-SEC-10 | Server code can consume the browser package `packages/ui`, which is now outside `outbound-http-via-client` | INFO | CWE-918 (potential) | A10 SSRF | `eslint.config.mjs:52, 464`; no boundaries policy from `api`/`worker`/server packages to `ui` | TASK-113 | Open (follow-up) |
+| PR2-SEC-11 | `.gitignore` folder patterns match at any depth and silently untrack source folders | INFO | n/a | A05 | `.gitignore` (`dist/`, `build/`, `out/`, `coverage/`, `logs/`, `uploads/`, `tmp/`, `temp/`, `test-results/`, `playwright-report/`, `.react-router/`) | TASK-007 | Open (follow-up) |
+| PR2-SEC-12 | The audit-writer allow-list is broader than ADR-0007's list of direct callers (code-review n5) | INFO | CWE-693 | A09 Logging and Monitoring Failures | `eslint.config.mjs:67-75` | TASK-025 | Open (follow-up) |
+
+#### PR2-SEC-09: test-folder classification at any depth (LOW)
+
+**What.** `TEST_FILES` contains `'**/{test,tests,__tests__}/**'`. That glob is unchanged since round 1; the delta only added `.test.{js,jsx}`. Round 1 missed it.
+
+Take a *production* file such as `apps/api/src/modules/orders/tests/helper.ts`:
+- **Layering and Prisma.** It is in category `test`. Every layering policy uses `noneOf: ['test']`, so none applies. `DATABASE_CODE` includes `test`, so the file may import Prisma and `pg`.
+- **Rules.** It is outside `no-console`, `money-arith`, `no-tofixed-tolocalestring`, `no-innerhtml`, `audit-writer-allowlist`, `outbound-http-via-client` and `no-non-null-assertion`.
+- **Shipping.** Workspace `tsconfig.json` files have `include: ["src"]`, so the file compiles into `dist` and ships.
+
+**Evidence.** One snippet was linted at several paths. It contains `new PrismaClient()`, `el.innerHTML = s`, `console.log` and `fetch(u)`.
+
+| Path | Result |
+|---|---|
+| `apps/api/src/modules/orders/service/control.ts` (control) | `boundaries/dependencies`, `platform/no-innerhtml`, `no-console`, `platform/outbound-http-via-client` |
+| `apps/api/src/modules/orders/tests/helper.ts` | **clean** |
+| `apps/api/src/platform/test/helper.ts` | **clean** |
+| `packages/carriers/src/tests/helper.ts` | **clean** |
+
+The bcrypt confinement is unaffected, because its policy has no `from`.
+
+**Exploitability and impact.** The gap needs production code in a folder named `test`/`tests` under `src`. That is plausible for carrier "test mode" stubs or a domain folder. The impact is the same set of bypasses as PR2-SEC-03. Impact M × likelihood L = **LOW**.
+
+**Remediation (TASK-004, together with the PR2-SEC-03 remainder).** Anchor the folder forms to workspace roots, and keep the file-name and `__tests__` conventions:
+
+```js
+const TEST_FILES = [
+  '**/*.test.{ts,tsx,js,jsx}',
+  '**/__tests__/**',
+  '{apps,packages}/*/{test,tests}/**',
+  'prisma/{test,tests}/**',
+  'tests/**',
+];
+```
+
+**Verification test.**
+- Add a fixture `rules/test-folder/apps/api/src/modules/orders/tests/bad-fetch.ts`. It must fail with `platform/outbound-http-via-client`.
+- `packages/audit/test/a.ts` must stay in category `test`. TASK-025 puts its tests there.
+- `config-coverage.test.ts` asserts that `apps/api/src/modules/x/tests/a.ts` has `outbound-http-via-client` and `no-innerhtml` at error.
+
+#### PR2-SEC-10: server code may import the browser package (INFO)
+
+**What.** `BROWSER_PACKAGES = ['packages/ui/**']` is excluded from `outbound-http-via-client`, which is correct for browser code. However, no boundaries policy stops `apps/api`, `apps/worker` or a server package from importing `@platform/ui`; the existing app policies constrain only web and admin. Node 24 has a global `fetch`. A server-side call into a `packages/ui` helper that does `fetch(url)` or uses Axios would therefore issue a request outside `OutboundHttpClient`.
+
+**Evidence.**
+- Probe O1: `fetch` in `packages/ui/src/session` is clean, by design.
+- Probe O3: `apps/api` importing `@platform/ui` fails only with `import-x/no-extraneous-dependencies`; no boundaries finding.
+
+**Exploitability and impact.** Exploitation needs all of the following:
+- `@platform/ui` added to a server manifest, which is a visible change;
+- a UI helper called with a URL derived from the request;
+- the change passing review.
+
+The TASK-113 dispatcher does not protect a request that bypasses it. This is a defence-in-depth gap, not an exploitable path at this head. **INFO.**
+
+**Remediation (TASK-113, when it extends the outbound rule).** Add these policies:
+
+```js
+{
+  from: IMPORTER_APP('{api,worker}'),
+  disallow: [{ to: toPackage('@platform/ui') }, { to: { file: { categories: 'package', captured: { pkg: 'ui' } } } }],
+  message: 'packages/ui is browser code outside platform/outbound-http-via-client; server code never imports it (ADR-0003, ADR-0016 §13).',
+},
+{
+  from: IMPORTER_PACKAGE('!(ui)'),
+  disallow: [{ to: toPackage('@platform/ui') }, { to: { file: { categories: 'package', captured: { pkg: 'ui' } } } }],
+  message: 'packages/ui is browser code; other packages never import it (ADR-0003, ADR-0016 §13).',
+},
+```
+
+**Verification test.** Add `REPO_PROBES` in `tools/lint/lint-fixtures.mjs` for `apps/api/src/platform/lint-probe-bad-ui.ts` and `packages/carriers/src/lint-probe-bad-ui.ts`, each importing `@platform/ui`. Both must fail with `boundaries/dependencies`.
+
+#### PR2-SEC-11: `.gitignore` folder names match at any depth (INFO)
+
+**What.** Root `.gitignore` folder patterns with no leading or inner `/` match at any depth: `dist/`, `build/`, `out/`, `coverage/`, `logs/`, `uploads/`, `tmp/`, `temp/`, `test-results/`, `playwright-report/`, `.react-router/`. A source folder with one of these names is silently untracked. Examples: `packages/shared/src/coverage/` (declared-value coverage) and `apps/api/src/modules/uploads/` (document uploads). `git ls-files -i -c --exclude-standard` lists exactly the three force-added `rules/output-ignores/**` fixtures.
+
+**Assessment.** For the controls in scope, this fails closed:
+- An untracked file never reaches a commit, a PR diff, CI, an image or `main`, so nothing unreviewed or unlinted can ship by this path.
+- The effect is local/CI divergence or lost work: a module that works locally fails `tsc` or import resolution in CI. That is an S3 defect, not a vulnerability.
+- Once a file is force-added, git tracks it and the diff shows it. Since this round, ESLint and Stylelint also lint it.
+
+**INFO.** The developer proposed LOW; INFO is the security severity. The defect side is S3 for senior-developer.
+
+**Remediation (TASK-007).** Anchor the output and scratch patterns to the same matrix as the ESLint and Stylelint ignores:
+- Patterns: `/dist/`, `/build/`, `/coverage/`, `/apps/*/build/`, `/apps/*/dist/`, `/apps/*/coverage/`, `/packages/*/dist/`, `/packages/*/coverage/`, `/tests/*/dist/`, `/apps/*/.react-router/`, `/out/`, `/logs/`, `/uploads/`, `/tmp/`, `/temp/`, `/tests/*/test-results/`, `/tests/*/playwright-report/`.
+- Write one line per pattern, because `.gitignore` has no brace expansion.
+- Keep `node_modules/` and `*.tsbuildinfo` unanchored.
+
+**Verification test.** `tools/repo/gitignore.test.ts` runs `git check-ignore --no-index -v` over the ESLint ignore matrix plus `packages/shared/src/coverage/a.ts` and `apps/api/src/modules/uploads/a.ts`. It expects the ignore decisions to equal the ESLint decisions.
+
+#### PR2-SEC-12: audit-writer allow-list breadth (INFO; disposition of code-review n5)
+
+**What.** `AUDIT_WRITER_ALLOW_LIST` turns `platform/audit-writer-allowlist` off for:
+- all of `apps/api/src/platform/**`;
+- all of `apps/worker/src/**`;
+- `packages/audit/**`;
+- the whole identity module.
+
+ADR-0007 names a narrower set of direct callers: identity events, permission denials, config changes, system jobs and the state machine, plus the audit middleware and `withTenantTx` in the request pipeline.
+
+**Assessment.** A direct writer call from an unlisted place cannot escalate privilege:
+- the database still grants only INSERT;
+- the chain still links the entry;
+- the immutability triggers still apply.
+
+What the allow-list protects is *uniformity*. Actor, action and outcome are derived by the middleware from route metadata (REQ-AUDIT-001/002). A direct call from, for example, `platform/idempotency` or `platform/egress` can write an entry with fields its caller chooses. That puts the consistency of the trail at risk, and with it the O4 completeness evidence. It is a defence-in-depth scope issue with no exploit path. **INFO.**
+
+**Remediation (TASK-025, once the callers exist).** Narrow the allow-list to:
+- `packages/audit/**`;
+- `apps/api/src/platform/{audit,authz,db}/**` (middleware, permission denials, `withTenantTx`);
+- `apps/worker/src/processors/**` (system jobs);
+- `apps/api/src/modules/{identity,compliance,admin-settings,shipments}/service/**`.
+
+Any later addition is a code-owned config edit (PR2-SEC-08).
+
+**Verification test.**
+- Fixtures `bad-platform-idempotency-writes-audit.ts` and `bad-identity-controller-writes-audit.ts` must fail.
+- One `ok-*` fixture for each listed path must pass.
+
+#### PR2-SEC-05 addendum: rights of the planned Prisma files
+
+The `db-platform` category gives the two planned files the same rights as `apps/*/src/platform/db/**`:
+- Probe P4: `new PrismaClient()` in `apps/api/src/platform/outbox/writer.ts` lints **clean**.
+- Probe P2: `import pg from 'pg'` in `packages/audit/src/store/prisma-store.ts` lints **clean**.
+
+ADR-0007 requires the audit insert inside the business transaction, and ADR-0004 / US-011 require the outbox row in the same transaction. A separate client or `pg` pool in either file would do two things:
+- commit the entry or event independently of the business row, which violates REQ-AUDIT-004 and REQ-PLAT-016;
+- run without the tenant context.
+
+Additions to the PR2-SEC-05 remediation:
+- **TASK-016.** `platform/prisma-client-construction` must allow construction and `@prisma/adapter-pg` / `pg` / `pg-pool` value imports only under the explicit `apps/*/src/platform/db/**` path, not for the whole `db-platform` category. An equivalent alternative is to move the two files to their own category, `prisma-tx-consumer`, which gets `PRISMA_TARGETS` only (types, `Prisma.sql`) and no `SQL_DRIVER_TARGETS`.
+- **TASK-025 and TASK-043 reviews.** Check that `prisma-store.ts` and `writer.ts` take the `TenantDb` transaction handle as a parameter and never construct or import a client.
+
+### R2.4 Follow-ups by task (round-2 additions; the round-1 §7 table still stands except for the items closed in R2.1)
+
+| Task (owner) | Follow-up | Finding | Due |
+|---|---|---|---|
+| TASK-004 (frontend-developer) | TS-only block for `apps/*/{src,app}` and `packages/*/src`. Remove `--allow-empty-input` or assert that at least one CSS file is linted. Anchor `TEST_FILES` and add the config-coverage assertions | PR2-SEC-03 remainder, PR2-SEC-09 | In TASK-004's open fix cycle if PR #2 merges first; otherwise as a TASK-004 follow-up before the first Wave-1 feature merge |
+| TASK-007 (devops-engineer; senior-developer for scripts) | Suppression check, including blanket `stylelint-disable` with any description, and `TASK-\d{3}` in `any-justification` | PR2-SEC-01 items 1, 2, 4 | Batch 0.3, before the first Wave-1 feature merge |
+| TASK-007 | `.semgrep/password-hashing.yml` is **mandatory**. Run it from the base ref with `--disable-nosem` and one `tests/fixtures/semgrep/` pair per form. It must cover these residual forms:<br>- `$R = createRequire(...)` … `$R("$M")` (any binding name, including `import { createRequire as $C }`);<br>- `$X.createRequire(...)("$M")`;<br>- `$M._load("$P")`;<br>- `require.call(...)` / `require.apply(...)`;<br>- `$O["require"]("$P")`;<br>- a non-literal `import($E)` / `require($E)` in `apps/*/src`;<br>- in the hasher, `export { $X }` / `export default $X` / `module.exports = $X` where `$X` is bound to a bcrypt-family import (H5/H6) | PR2-SEC-02 residual | Batch 0.3 |
+| TASK-007 | `.gitignore` anchoring plus `tools/repo/gitignore.test.ts` | PR2-SEC-11 | Batch 0.3 |
+| TASK-049 (backend-developer) | Move the three bcrypt entries to the **end** of `BOUNDARIES_POLICIES`, so no later `allow` can override them. Make the coverage test behavioural: lint `import('bcrypt')` at every matrix path, and assert that the bcrypt policy is in the `boundaries/dependencies` options. A dedicated `platform/password-hasher-only` rule is needed only if it adds local-binding re-export detection (H5/H6); otherwise review checks that the hasher exports only the `PasswordHasher` port | PR2-SEC-02 residual | Before or with the hasher module |
+| TASK-016 (database-engineer) | `prisma-client-construction` keyed on the explicit `apps/*/src/platform/db/**` path (or the `prisma-tx-consumer` category) | PR2-SEC-05 + addendum | With TASK-016 |
+| TASK-025 (backend-developer) | Narrow the audit-writer allow-list. `prisma-store.ts` takes `TenantDb` | PR2-SEC-12, PR2-SEC-05 addendum | With TASK-025 |
+| TASK-043 (backend-developer) | `writer.ts` takes `TenantDb`; no client of its own | PR2-SEC-05 addendum | With TASK-043 |
+| TASK-113 (backend-developer) | Boundaries policies: server code never imports `@platform/ui` | PR2-SEC-10 | With TASK-113 |
+
+### R2.5 Evidence (round 2)
+
+| Command | Result |
+|---|---|
+| `git merge-base --is-ancestor 9bc9c04 6ba7649`; `git log 9bc9c04..6ba7649`; `git diff --name-status` on manifests, `.npmrc`, `.gitattributes`, `.github` | Fast-forward; 3 commits; no manifest, `.npmrc` or `.github` change |
+| `node lock-deepdiff.mjs base-lock.json head-lock.json` | 1 differing JSON path (`packages[""].engines.node`); positive control detected |
+| `node probe-r2.mjs <worktree>` | 45 `lintText` probes plus a 19-path ignore/effective-config matrix, as tabulated in R2.2 |
+| `node probe-stylelint.mjs <worktree>` | 7 disable probes plus a 14-path ignore matrix, as in R2.1 and R2.2 (2) |
+| `node probe-testdirs.mjs <worktree>` | PR2-SEC-09 table |
+| Grep of the added lines for suppression directives | Only the 3 CSS fixture directives (seeded on purpose) |
+| Regex secret and URL sweep over the added lines (excluding the lockfile) | 0 hits |
+| `git ls-files -i -c --exclude-standard` | Exactly the 3 force-added `rules/output-ignores/**` fixtures |
+| `npm audit` | Not re-run: the package set is identical (deep diff). The developer's `--audit-level=high` exit 0 with 36 (35 moderate, 1 low) matches round 1 |

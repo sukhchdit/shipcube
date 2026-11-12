@@ -1,37 +1,70 @@
 ---
 name: project-p5-pr2-lint-controls
-description: PR-0002/TASK-002 review (2026-11-12, head 9bc9c04) PASS_WITH_FOLLOW-UPS; lint-as-security-control gaps (inline disables, bcrypt bypasses, .jsx/build ignores) and what to re-check in TASK-004/007/016/049/112/113 reviews
+description: PR-0002/TASK-002 review, R1 (9bc9c04) and R2 (6ba7649), both PASS_WITH_FOLLOW-UPS. Lint-as-security-control gaps (inline disables, bcrypt residual forms, test-folder/ignore holes, planned Prisma files, ui outbound exclusion) and what to re-check in TASK-004/007/016/025/043/049/112/113 reviews
 metadata:
   type: project
 ---
 
-The PR #2 (TASK-002) review is `docs/05-quality/security/PR-0002-TASK-002-security-review.md`. IDs are PR2-SEC-01..08. Verdict: PASS_WITH_FOLLOW-UPS (1 MEDIUM, 4 LOW, 3 INFO).
+The PR #2 (TASK-002) review is `docs/05-quality/security/PR-0002-TASK-002-security-review.md`. IDs are PR2-SEC-01..12.
+- **R1** (head 9bc9c04): 1 MEDIUM, 4 LOW, 3 INFO.
+- **R2** (head 6ba7649): closed PR2-SEC-02 and -03 for their in-PR scope, plus PR2-SEC-01 item 3 (Stylelint `report*Disables`). Added PR2-SEC-09 (LOW) and PR2-SEC-10..12 (INFO).
 
-**Non-obvious facts.** Each was probed with the real `eslint.config.mjs` via `lintText`.
-- **PR2-SEC-01 (MEDIUM).** Inline `eslint-disable` and `/* eslint rule: off */` silently disable the security rules: bcrypt, no-innerhtml, outbound-http, audit-writer and boundaries.
-  - `any-justification` accepts any `-- text`, even on a blanket disable.
-  - The NFR-MAINT-002 "suppression-count script" has **no owning task**. Routed to TASK-007 as `tools/lint/check-suppressions.mjs`, which must be a non-ESLint step, because an ESLint rule can itself be disabled inline.
-- **PR2-SEC-02.** The bcrypt confinement is core `no-restricted-imports`. It misses `import('bcrypt')`, `createRequire()('bcrypt')`, `.cjs` require and `bcrypt-ts` / `@node-rs/bcrypt`.
-  - The hasher override turns the whole rule off, so the hasher module can re-export bcrypt.
-  - Flat config replaces options, so a future `no-restricted-imports` block clobbers the pattern.
-  - A Semgrep backstop is **mandated** in TASK-007, run with `--disable-nosem`.
-- **PR2-SEC-03.** Files that silently lose rules:
-  - `.jsx` has no matching config, so `eslint .` skips it;
-  - `globalIgnores` `**/build|coverage|dist/**` match at any depth ("coverage" is a shipping domain word);
-  - Stylelint lints 0 CSS files and `--allow-empty-input` hides it.
-- **PR2-SEC-05.** The ADR-0005 "root PrismaClient not exported outside platform/db (lint)" rule and the T-83 withTenantTx lint are unowned. Repositories can `new PrismaClient()`.
-- **No CODEOWNERS file exists** (PR2-SEC-08), although D-ARCH-003 rev 4 and platform.md assume one.
-- **`svg-tags@1.0.0`.** Its licence is only in the legacy `licenses` array. The lockfile has no `license` field, so a lockfile-only licence-check would fail it.
-- **Dev-only GHSAs on the watchlist:** minimatch g3hv (fixed 11.0.1), glob 3g3m (fixed 14.0.2), deepmerge gcqx (no fix). Prod closure = 0. Do not override them.
+**Non-obvious facts.** Each was probed with the real config via `lintText`.
 
-**Why:** these gaps close only if the later task reviews check them, and the lint rules are cited as mitigations in ADR-0016 §13, ADR-0005, REQ-SEC-016 and D-ARCH-042.
+- **PR2-SEC-01 (MEDIUM, open, TASK-007).**
+  - Inline `eslint-disable` and `/* eslint rule: off */` silently disable the security rules.
+  - `any-justification` accepts any `-- text`.
+  - A blanket `/* stylelint-disable -- x */` also passes.
+  - The fix must be a non-ESLint `tools/lint/check-suppressions.mjs`.
+
+- **PR2-SEC-02 (bcrypt).** It is now a boundaries policy over `bcrypt*` and `@*/bcrypt*`, plus `additional-dependency-nodes` for `createRequire(..)(..)` and `x.require(..)`.
+  - **Still clean (residual):**
+    - `const req = createRequire(); req('bcrypt')` with any name other than `require`;
+    - renamed `createRequire as cr`;
+    - `module.createRequire`;
+    - non-literal `import(x)`;
+    - `Module._load`, `require.call`;
+    - in the hasher, local-binding re-export (`import * as b; export { b }` / `export default b`).
+  - The Semgrep rule in TASK-007 is mandatory for these forms.
+  - **Boundaries: the last matching policy decides.** The bcrypt block sits mid-list, so a later broad `allow` would override it. TASK-049 must move it to the end.
+  - **Effective-config test gap.** The test checks only severity, not that the policy is present in the options.
+
+- **PR2-SEC-09 (LOW, TASK-004).** `TEST_FILES` contains `**/{test,tests,__tests__}/**`, so production code in `src/**/tests/` gets category `test`:
+  - no layering, and Prisma is allowed;
+  - no outbound, innerHTML, audit-writer or console rules;
+  - yet it compiles into `dist`, because workspace tsconfigs `include: ["src"]`.
+
+  Fix: anchor the folder globs to `{apps,packages}/*/{test,tests}/**`. Round 1 missed this.
+
+- **PR2-SEC-05 addendum.** `PLANNED_PRISMA_FILES` (audit `prisma-store.ts`, outbox `writer.ts`) are category `db-platform`, so `new PrismaClient()` and `pg` lint clean there. The TASK-016 construction rule must key on the explicit `apps/*/src/platform/db/**` path, not on the category.
+
+- **PR2-SEC-10 (INFO, TASK-113).** `packages/ui/**` is excluded from outbound-http. That is fine under ADR-0016 §13, but no boundaries policy stops api, worker or server packages from importing `@platform/ui`. Only `no-extraneous-dependencies` (the manifest) guards it.
+
+- **PR2-SEC-11 (INFO, TASK-007).** `.gitignore` matches `dist`, `build`, `coverage`, `out`, `logs`, `uploads`, `tmp` and `temp` at any depth. It fails closed (untracked code cannot ship), so it is INFO, not LOW.
+
+- **PR2-SEC-12 (INFO, TASK-025).** The audit-writer allow-list (whole `platform/**`, whole worker) is broader than ADR-0007. This is the disposition of code-review item n5.
+
+- **Other facts.**
+  - No CODEOWNERS exists (PR2-SEC-08).
+  - `svg-tags` has a legacy `licenses` array (PR2-SEC-07).
+  - Dev-only GHSA watchlist: minimatch g3hv, glob 3g3m, deepmerge gcqx. Do not override them.
+
+**Why:** these gaps close only if the later task reviews check them, and the lint rules are cited as mitigations in ADR-0016 §13, ADR-0005, ADR-0007, REQ-SEC-016 and D-ARCH-042.
 
 **How to apply.** In P5 reviews, check:
-- TASK-007: check-suppressions step, `any-justification` requires TASK-ID, `.semgrep/password-hashing.yml`, Semgrep sink lists matching PR2-SEC-04, CODEOWNERS, a base-ref fixture suite run against the head config, legacy-licences handling.
-- TASK-004: TS-only block for `apps/*/app`, anchored ignores, Stylelint actually linting CSS, stylelint `report*Disables`.
-- TASK-049: `platform/password-hasher-only` local rule plus `config-coverage.test.ts`.
-- TASK-016: `prisma-client-construction` rule and T-83.
-- TASK-112 / TASK-113: the extended innerHTML and outbound sinks.
-- Every PR before TASK-007 lands: grep the diff for new `eslint-disable` and `eslint ` inline comments.
+- **TASK-007:**
+  - the check-suppressions step and `TASK-\d{3}` in suppression justifications;
+  - Semgrep `password-hashing.yml` covering the residual forms, with `--disable-nosem` and run from the base ref;
+  - CODEOWNERS;
+  - a base-ref fixture suite;
+  - legacy licences;
+  - `.gitignore` anchoring with a `check-ignore` test.
+- **TASK-004:** the TS-only block, `--allow-empty-input`, and `TEST_FILES` anchoring.
+- **TASK-049:** the bcrypt block placed last, plus a behavioural coverage test.
+- **TASK-016:** construction rule keyed on the explicit path; T-83.
+- **TASK-025 / TASK-043:** both files take `TenantDb` and never construct a client; TASK-025 also narrows the allow-list.
+- **TASK-113:** the `ui` boundaries policy and the PR2-SEC-04 sinks.
+- **TASK-112:** the innerHTML sinks.
+- **Every PR before TASK-007 lands:** grep the diff for new disable comments.
 
 Related: [[project-p5-wave0-supply-chain]], [[project-security-review-conventions]]

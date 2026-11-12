@@ -1,6 +1,6 @@
 ---
 name: lint-probe-technique
-description: How to predict lint breakage of one PR under another open PR's ESLint config without installing anything (scratch flat config + basePath + createRequire)
+description: How to predict lint breakage of one PR under another open PR's ESLint config, or probe a PR's own config, without installing (scratch config + basePath + createRequire)
 metadata:
   type: reference
 ---
@@ -16,3 +16,11 @@ Used on PR #4 (2026-11-12): it found 24 errors that the PR's own "lint exit 0" (
 
 **Why:** parallel PRs each pass lint against the old main config, so the merge-second PR breaks.
 **How to apply:** use it for any PR in the same batch as a lint-config PR. Put scratch files under a reviewer-unique dir (see [[scratch-copy-technique]]).
+
+**Lighter variant for probing a PR's OWN config (PR #2 r2, 2026-11-12):**
+- No archive copy or junction is needed.
+- Put a probe root (a miniature repo: `apps/api/src/modules/...`) in the scratch dir.
+- Write a script that loads `eslint` and `typescript-eslint` via `createRequire('<worktree>/package.json')`.
+- Call `new ESLint({ cwd: probeRoot, overrideConfigFile: '<worktree>/eslint.config.mjs', overrideConfig: [disableTypeChecked, {projectService:false}, {rules: no-unresolved/no-extraneous off}, {settings:{'boundaries/root-path': probeRoot}}] })`.
+- Pass Windows paths (`pwd -W`). It takes about 10 s.
+- `@platform/*` imports do not resolve there, so they classify as external. That is useful for testing the external arm of a policy.
