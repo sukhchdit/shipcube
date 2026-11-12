@@ -47,7 +47,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-001 | M0 | Must | US-001 | platform · ADR-0002 §Workspaces (monorepo layout); ARCHITECTURE §11 blueprint | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-002 | M0 | Must | US-001 | platform · ADR-0003 §Layering (routes → controller → service → repository, `eslint-plugin-boundaries`); ADR-0002 §5 | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-003 | M0 | Must | US-001 | platform · ADR-0001 (TypeScript 6 strict); ADR-0002 §Scripts (`tsc -b`, root scripts) | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
-| REQ-PLAT-004 | M0 | Must | US-002 | packages/config · ADR-0018 §Typed configuration (Joi schema, fail-fast, `.env.example` parity) | TASK-005 | – | Planned |
+| REQ-PLAT-004 | M0 | Must | US-002 | packages/config · ADR-0018 §Typed configuration (Joi schema, fail-fast, `.env.example` parity) | TASK-005 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-005 | M0 | Must | US-003 | infra/ (compose) · platform.md §2 Compose stack (`--wait` ≤ 180 s); ADR-0021 (RustFS); ADR-0001 (Valkey 8) | TASK-014, TASK-026, TASK-089 | – | Planned |
 | REQ-PLAT-006 | M0 | Must | US-004 | infra/ (Dockerfiles) · platform.md §3 hardened images; ADR-0022; ADR-0023 am. F (`npm ci --ignore-scripts`) | TASK-014 | – | Planned |
 | REQ-PLAT-007 | M0 | Must | US-005 | .github/ · ADR-0023 §1 + am. A–D lane model (D-ORCH-001); platform.md §7 | TASK-007 | – | Planned |

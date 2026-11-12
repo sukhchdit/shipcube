@@ -1086,3 +1086,9 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Decision:** PR #3 merges as soon as its round-3 reviews and a merge-main gate pass, ahead of PR #4, which cannot complete before its Playwright harness lands after 2026-11-12T20:18Z. Supersedes D-ORCH-006 item 5's row order for #4/#3; TASK-005 still performs the TASK-003 key reconciliation (already present since fix cycle 1) at its merge-main.
 - **Why:** TASK-004 and TASK-005 are independent; TASK-006 and TASK-007 (batch 0.3, critical path) depend on TASK-005, not TASK-004.
 - **Reversibility:** High.
+
+### D-ORCH-010 · 2026-11-12 · sdlc-orchestrator · Host memory pressure: concurrency cap and post-merge verification by tree equality
+- **Decision:** (1) Until lane A/C run hosted (TASK-007/TASK-015), at most 3 build agents run concurrently and heavy commands (npm ci, builds, full suites, Docker) are serialized host-wide; new dispatches wait for a running batch to report if the host is under pressure. (2) When an orchestrator post-merge rerun on main is reaped by the host, post-merge verification is satisfied if `git diff <gated PR head> <main squash> -- . ':!docs' ':!.claude'` is empty and the PR head's full gate is recorded (applied to TASK-005: main b1597fd ≡ 3e390e0). The reaped run is not restarted automatically.
+- **Why:** Claude Code reaped three background gate runs for low memory; repeated restarts would compound the pressure. Squash merges of an up-to-date branch produce the same code tree that was gated.
+- **Alternatives:** Re-run full gates on main after every merge regardless (rejected while memory-constrained; resumes once hosted CI lanes exist).
+- **Reversibility:** High.
