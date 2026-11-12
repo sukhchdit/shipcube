@@ -18,7 +18,7 @@ export type LogFields = Readonly<Record<string, string | number | boolean>>;
 /** The narrow logging seam the runtime modules (services, readiness, shutdown) depend on. */
 export interface RuntimeLog {
   info(event: string, fields?: LogFields): void;
-  warn(event: string, fields?: LogFields): void;
+  warn(event: string, fields?: LogFields, thrown?: unknown): void;
   error(event: string, fields?: LogFields, thrown?: unknown): void;
 }
 

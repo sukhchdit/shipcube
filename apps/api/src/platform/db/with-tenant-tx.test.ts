@@ -291,6 +291,32 @@ describe('error mapping inside withTenantTx (ADR-0005 am.10 items 3 and 6)', () 
     expect(events).toEqual([]);
   });
 
+  it('[TASK-010 onDbError] the redacting hook receives the ORIGINAL error and its mapping; the caller gets only the DbError', async () => {
+    const seen: Array<[unknown, unknown]> = [];
+    const fake = fakeClient();
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(fake.client, OPTIONS, { ...deps, onDbError: (error, mapping) => void seen.push([error, mapping]) });
+    const error = await caught(runner.withTenantTx(ctx(), () => Promise.reject(rlsError)));
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).not.toHaveProperty('cause');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.[0]).toBe(rlsError);
+    expect(seen[0]?.[1]).toMatchObject({ status: 403, code: 'AUTHZ_DENIED', reason: 'RLS_WRITE_REJECTED' });
+  });
+
+  it('[TASK-010 onDbError] a throwing hook never masks the mapped error, and non-database errors never reach it', async () => {
+    const fake = fakeClient();
+    const { deps } = fakeDeps();
+    const hook = jest.fn<(error: unknown) => void>(() => {
+      throw new Error('logger down');
+    });
+    const runner = createWithTenantTx(fake.client, OPTIONS, { ...deps, onDbError: hook });
+    expect(await caught(runner.withTenantTx(ctx(), () => Promise.reject(rlsError)))).toMatchObject({ code: 'AUTHZ_DENIED' });
+    const domain = new Error('domain rule');
+    expect(await caught(runner.withTenantTx(ctx(), () => Promise.reject(domain)))).toBe(domain);
+    expect(hook).toHaveBeenCalledTimes(1);
+  });
+
   it('application errors and DbErrors from fn (e.g. expectAffected) pass through unchanged', async () => {
     const { runner } = setup();
     const domain = new Error('domain rule');

@@ -24,6 +24,7 @@
     "../apps/api/src/platform/db/session-integrity.ts",
     "../apps/api/src/platform/db/tenant-db.ts",
     "../apps/api/src/platform/db/with-tenant-tx.ts",
+    "../apps/api/src/platform/logging/security-events.ts",
     "../apps/api/src/platform/runtime/log.ts",
     "../apps/api/src/platform/runtime/readiness.ts",
     "../apps/api/src/platform/runtime/shutdown.ts"

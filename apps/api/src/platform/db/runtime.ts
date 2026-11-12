@@ -15,7 +15,9 @@
  *  - start-up runs `probeFreshConnection()` as the FIRST query on the pool, before the dedicated-connection integrity
  *    check and before the process listens or takes work (item 3); until a probe has passed, the readiness check
  *    re-runs it and reports the database not ready;
- *  - sinks (item 4): security events go to the runtime log as `security.<event>` with `correlationId`/`sqlState`
+ *  - sinks (item 4): security events go to the security-event sink (logging/security-events.ts, TASK-010) as
+ *    `security.<event>` with exactly `correlationId`/`sqlState`; the original database error goes to the
+ *    `onDbError` hook, whose log line serialises it as { name, code, originalCode, kind }
  *    only; the `db_session_context_leak` counter is kept here (`sessionContextLeaks()`) until the metrics pipeline
  *    exports it; `markNotReady` LATCHES: nothing but a restart clears it (a leaked backend stays in the process pool,
  *    and the 5-minute integrity re-check must not make readiness flap back to ready). A tampered tenant-context
@@ -27,6 +29,7 @@
  */
 import type { Config, Service } from '@platform/config';
 
+import { securityEventSinkFrom } from '../logging/security-events.js';
 import type { RuntimeLog } from '../runtime/log.js';
 import type { ReadinessCheck } from '../runtime/readiness.js';
 import type { Closeable } from '../runtime/shutdown.js';
@@ -170,6 +173,8 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
   input: DatabaseRuntimeInput<TTx, TClient>,
 ): DatabaseRuntime<TTx> {
   const { log } = input;
+  // Security events go to the security-event sink with exactly { correlationId, sqlState } (D-ARCH-079, R3-m1).
+  const security = securityEventSinkFrom(log);
   // PR11-SEC-09 item 2 / PR9-SEC-03: refused before any pool or client exists (pg reads PGOPTIONS as well).
   assertNoSessionOptions(process.env);
   const latch = createNotReadyLatch((reason) => log.error('db.not_ready_latched', { component: 'database', reason }));
@@ -181,7 +186,7 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
     connectDedicated: dedicatedConnector(input.database),
     ...(input.integrityIntervalMs === undefined ? {} : { intervalMs: input.integrityIntervalMs }),
     onDrift: (findings) => {
-      for (const finding of findings) log.warn(`security.${finding}`, { component: 'database' });
+      for (const finding of findings) security.emit(finding);
       if (findings.includes('db_session_default_tampered')) latch.mark('db_session_default_tampered');
     },
   });
@@ -194,11 +199,16 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
   if (client !== undefined) {
     tenantTx = createWithTenantTx<TTx>(client, input.tx, {
       onSecurityEvent: (event, detail) =>
-        log.warn(`security.${event}`, {
-          component: 'database',
+        security.emit(event, {
           ...(detail.correlationId === undefined ? {} : { correlationId: detail.correlationId }),
           ...(detail.sqlState === undefined ? {} : { sqlState: detail.sqlState }),
         }),
+      // The original error, serialised by the platform logger as { name, code, originalCode, kind } only (TASK-010).
+      onDbError: (error, mapping) => {
+        const fields = { component: 'database', reason: mapping.reason, status: mapping.status, retryable: mapping.retryable };
+        if (mapping.status >= 500) log.error('db.error_mapped', fields, error);
+        else log.warn('db.error_mapped', fields, error);
+      },
       countSessionContextLeak: () => {
         leaks += 1;
       },
