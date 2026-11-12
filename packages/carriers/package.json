@@ -1,0 +1,26 @@
+{
+  "name": "@platform/carriers",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Carrier adapter layer with resilience wrappers (ADR-0010).",
+  "exports": {
+    ".": {
+      "@platform/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@platform/shared": "0.0.0",
+    "opossum": "^10.0.0",
+    "p-limit": "^7.3.3"
+  },
+  "devDependencies": {
+    "@types/opossum": "^8.1.9"
+  }
+}

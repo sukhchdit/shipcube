@@ -1,0 +1,21 @@
+{
+  "name": "@platform/authz",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Permission catalogue, role seeds, policy checks and the RBAC matrix generator (ADR-0008).",
+  "exports": {
+    ".": {
+      "@platform/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@platform/shared": "0.0.0"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "@platform/root",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Multi-carrier shipping platform monorepo (npm workspaces; ADR-0002).",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11.10"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "prisma",
+    "tests/*"
+  ],
+  "scripts": {
+    "deps:rebuild": "node tools/deps/rebuild.mjs",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -b",
+    "build": "npm run build --workspaces --if-present",
+    "test:unit": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects unit",
+    "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects integration --passWithNoTests",
+    "test:api": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects api --passWithNoTests",
+    "test:coverage": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --coverage",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@eslint/js": "^10.0.1",
+    "@jest/globals": "30.5.2",
+    "@redocly/cli": "^2.75.0",
+    "@swc/core": "^1.16.21",
+    "@swc/jest": "^0.2.39",
+    "@testcontainers/postgresql": "^12.2.1",
+    "@testcontainers/redis": "^12.2.1",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/node": "^24.19.2",
+    "@types/supertest": "^7.2.1",
+    "ajv": "^8.20.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-boundaries": "^7.4.1",
+    "eslint-plugin-i18next": "^6.1.5",
+    "eslint-plugin-import-x": "^4.17.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "fast-check": "^4.10.2",
+    "jest": "30.5.2",
+    "jest-environment-jsdom": "30.5.2",
+    "nock": "^15.0.5",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.9.10",
+    "supertest": "^7.3.1",
+    "testcontainers": "^12.2.1",
+    "tsx": "^4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.72.1"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
+  }
+}

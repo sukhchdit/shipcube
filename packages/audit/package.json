@@ -1,0 +1,22 @@
+{
+  "name": "@platform/audit",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Audit writer, differ, redaction, classification registry and hash chain (ADR-0007).",
+  "exports": {
+    ".": {
+      "@platform/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@platform/shared": "0.0.0",
+    "canonicalize": "^5.1.0"
+  }
+}

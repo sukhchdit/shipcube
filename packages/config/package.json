@@ -1,0 +1,21 @@
+{
+  "name": "@platform/config",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Typed, Joi-validated configuration and the key/secret register (ADR-0018).",
+  "exports": {
+    ".": {
+      "@platform/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "joi": "^18.3.2"
+  }
+}

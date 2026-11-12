@@ -1,0 +1,22 @@
+{
+  "//": "Solution file: `npm run typecheck` (tsc -b) type-checks every workspace through these references (ADR-0002 §2).",
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/config" },
+    { "path": "packages/authz" },
+    { "path": "packages/audit" },
+    { "path": "packages/pricing" },
+    { "path": "packages/carriers" },
+    { "path": "packages/ui" },
+    { "path": "apps/api" },
+    { "path": "apps/worker" },
+    { "path": "apps/web" },
+    { "path": "apps/admin" },
+    { "path": "prisma" },
+    { "path": "tests/e2e" },
+    { "path": "tests/load" },
+    { "path": "tests/generated" },
+    { "path": "tools" }
+  ]
+}

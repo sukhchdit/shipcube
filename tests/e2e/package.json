@@ -1,0 +1,8 @@
+{
+  "name": "@platform/tests-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Playwright end-to-end suites (ADR-0024)."
+}

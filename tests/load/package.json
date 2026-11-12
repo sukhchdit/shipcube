@@ -1,0 +1,8 @@
+{
+  "name": "@platform/tests-load",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "k6 load scripts run through Docker (ADR-0024)."
+}
