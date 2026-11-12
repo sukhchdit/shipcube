@@ -93,3 +93,95 @@ SUMMARY: A strong spike. All four exit items have real evidence on PG 18.6. The 
 - **`$executeRawUnsafe` (F-04):** the only way to use `SET LOCAL` is string interpolation. Confirm the repo-wide ban outside `platform/db` and the tests.
 - **Operator branch:** `platform_app` can set `app.actor_scope = 'OPERATOR'` itself. The spike confirms membership is the real control (not-a-member → 0 rows). TASK-016's catalog test should keep the negative case.
 - Test-only interpolated SQL (`SETUP_SQL` UUIDs, e4 `$executeRawUnsafe`) is fine in a test. No secrets, and the report file is opt-in and local.
+
+## Round 2 (head 065aa3e)
+
+| Field | Value |
+|---|---|
+| Head | `065aa3e`. The code delta is `985a552..518d281` (one fix commit, `518d281`, 2 files, +314/−115). `c21485d` and `065aa3e` are normal merges of `origin/main` (`4b02c9b`, `151add9`) |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+| Inputs | Fix comment https://github.com/sukhchdit/shipcube/pull/7#issuecomment-6829046302; `git diff c21485d..518d281`; ADR-0005 am. 10 (D-ARCH-058, revised by D-ARCH-062); DECISIONS D-TASK008-02 and D-ORCH-011; WAVE-00.md TASK-016 sheet; data-model §4.1; `prisma/bootstrap/00-roles.sql`; `apps/api/src/platform/db/client.ts`; `@prisma/adapter-pg` 7.10.1 and `@prisma/client` 7.10.1 runtime sources |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: M1 is closed correctly. The (d) describe is opt-in via SPK03_BENCH=1 and reports as "skipped" by default. §0 shows both
+         commands, and C-1 has one owner (TASK-016) due before G3. m1–m6 are closed in-PR with deterministic tests, and m7 is closed in the doc.
+         Nothing is open in the PR. Two MINORs are routed: an ADR-0005 am. 10 clause the new negative control contradicts, and the TASK-016 C-1 line missing SPK03_BENCH=1.
+```
+
+### R2.1 Verification performed by the reviewer
+
+**Constraint (dispatch brief).** I ran no npm ci, build, Docker or suite, and ran no command in the `Shipqube-TASK-008` worktree. The test results are the developer's gate on `518d281`: lint, format:check, typecheck and build exit 0; unit 753/753; `test:integration -i` 6 suites, 47 passed + 1 skipped; audit clean. The developer re-ran lint, format and unit on `065aa3e`. I did not execute the spike tests myself. I checked everything below by SHA, by reading the code, and by reading the vendor sources.
+
+| Check | Result |
+|---|---|
+| Merge purity | `git diff --stat 151add9 065aa3e` touches only the 2 PR files. `git diff 518d281 065aa3e` on the PR files is empty. `c21485d` = `985a552` ∪ `4b02c9b`, and the diff against main again touches only the 2 PR files. Since `151add9`, `origin/main` has moved to `cb69b04` (docs/.claude only, so it does not overlap the PR files) |
+| Prettier `--check` (Node v24.22.3, repo `.prettierrc`) on copies of both files at `518d281` | clean |
+| M1 gating | `const benchmark = process.env['SPK03_BENCH'] === '1' ? describe : describe.skip` (T:679). The `pg.Pool` and all 2 700 timed iterations are inside the `it`, so a skipped run creates nothing. Jest reports the test as skipped, which matches the developer's "1 skipped". The client-observed `p95StatementVsSelect1` assertion is gone (recorded only, T:785-789). The server-side ≤ 1 ms check remains inside the opt-in. `SPK03_BENCH` is a test-only env read, like `SPK03_REPORT`, and is not a config-schema key |
+| m1 pins vs vendor source | `adapter-pg/dist/index.mjs:400-536`: `convertDriverError` spreads `{ originalCode, originalMessage }` and then `mapDriverError`. `42501`/`42601`/`55P03`/`57014` fall to `default` → `{ kind: 'postgres', code, … }`. `40001`/`40P01`/`23505`/`22P02` map to named kinds without `code`. So `rawPgError()` pins the right shape, and the F-06 "mapped kinds omit `code`" claim holds. The `errorFormat` default (`client.js`: `minimal` only when `NODE_ENV === 'production'`) is confirmed too |
+| m2 six settings | `setContext`, `CONTEXT_SQL` and the EXPLAIN variant all bind the same six data-model §4.1 settings (data-model.md:2386-2391 on main, still six). The new test reads `statement_timeout` and `app.correlation_id` through `sessionSettings` on `single`. The pid is equal at baseline, inside, after COMMIT and after the 57014 ROLLBACK, so the revert is proven on the same pooled backend. Baseline `'0'` is consistent with `00-roles.sql:55-57`, where `platform_app` has no `statement_timeout`. The trailing `pg_sleep(0.3)` proves the 200 ms limit did not survive |
+| m4 negative control: deterministic? | Yes. It uses `single` (`poolMax 1`), so there is one backend, and every step asserts `pid === sessionLevel.pid`. If the pool recycled the connection (`idleTimeoutMillis` 10 000 in `client.ts`, while the steps are milliseconds apart), the test would fail loudly on pid; it can never pass falsely. The leak is proven on both the next transaction and an autocommit statement. Bonus evidence: after `withTenantTx(B)` the session value A comes back (SET LOCAL reverts to the session value). `RESET app.org_id` runs in `finally` on the same single-connection pool, and the clean state is asserted afterwards, so `single`'s later users (e2–e4) start clean even if an assertion inside fails |
+| m5 55P03 test | The winner holds the row lock until `loserSettled`. The loser's wait ends at `lock_timeout` 2 s, before the default context `statement_timeout` of 5 000 ms and well within its 10 s transaction timeout. The loser always reaches the lock, because it starts after `firstUpdated` on the second pool connection. Waiter detection keeps the 1.5 s deadline (n7). The final owner is asserted. Deterministic |
+| m6 | `{ maxWait: 20_000, timeout: 20_000 }` on the 50-parallel test (T:468), with a comment explaining why |
+| Interaction of the new default `statement_timeout` 5 000 ms with existing tests | e3's `pg_sleep(2.6)` holder and the claim races stay below it. e3's 5.3 s expiry is a client-side `delay`, not a statement. No test changes meaning |
+| Docs vs ADR-0005 am. 10 | W-1, W-2, F-01..F-13 and C-1 ownership match. Three ADR-side discrepancies are listed below (R2-m1, R2-n1, R2-n2). SPK-03 is the accurate side in each case |
+| Plan | The WAVE-00.md TASK-016 sheet (:589) carries C-1 and port-then-delete. See R2-m2 |
+| CI | `gh pr view 7 --json statusCheckRollup` → `[]` (no checks on `065aa3e`; the D-ORCH-004 bootstrap rule applies) |
+
+### R2.2 Round-1 closure
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 | **Closed** | Opt-in describe (T:679-681). SPK-03 §0 shows the default and `SPK03_BENCH=1` commands with run 7 and run 6 results. §4 states that (d) is opt-in and is the record. §6 C-1 uses the flag |
+| m1 | **Closed** | `toMatchObject(rawPgError(…))` for 42501 (b, twice), 57014 (a), 55P03 (c), 42601 (e4). P2028 is pinned in e2, in e3-expired (`meta: { operation: 'query', timeout: 5000 }`) and in e3-maxWait. The e3 regex is tightened to "A query cannot be executed on an expired transaction" |
+| m2 | **Closed** | Six settings. The revert is asserted after COMMIT and after ROLLBACK. 57014 is proven. The (d) variants measure six (§4 run 6) |
+| m3 | **Closed (doc)** | F-02 says no lint rule exists today, says TASK-016 must add one, and adds the ALS `NESTED_TENANT_TX` + `ROOT_CLIENT_IN_TENANT_TX` runtime guard. W-2 is reworded |
+| m4 | **Closed** | F-04 now names the session-level hazard and the ban list. The negative-control test is in place (above) |
+| m5 | **Closed** | Test proven. F-09 is relabelled "Proven" |
+| m6 | **Closed** | As above |
+| m7 | **Closed in PR / one plan gap** | SPK-03 §6: owner TASK-016, due before G3, port (including the F-04 control and the pinned shapes), run (d) with the flag, record, delete. The orchestrator's sheet edit landed but omits the flag (R2-m2) |
+| n1 | Closed | 1.9–3.6 ms, "difference of two p95s", throughout. A residual wording drift is noted in R2-n3 |
+| n2 | Closed | §4 Interpretation, third bullet |
+| n3 | Closed | The SQL comment is softened. F-10 covers `CREATE OR REPLACE` and `SET ROLE platform_definer` |
+| n4 | Closed | F-03, second bullet |
+| n5 | Closed | Guest-shaped `spk03_quotes` INSERT → 42501 under `NO_CONTEXT` |
+| n6 | Closed | §0 "Helpers": simplified, amendment 2 status not exercised |
+| n7 | Closed | `waitForLockWaiter` uses a 1.5 s deadline, and its comment explains the coupling to `lock_timeout` |
+| n8 | Closed | `expect(afterCommit.org).toBe('')` |
+
+### R2.3 Findings
+
+| ID | Sev | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR (routed: principal-architect) | `docs/03-architecture/adr/ADR-0005-tenancy-row-level-security.md:111` (am. 10 item 4, on main) | **The ADR asks for a negative control that "proves a session-level `app.*` cannot be set by `platform_app`". This PR's negative control proves the opposite, and PostgreSQL cannot make it true.** Placeholder `app.*` GUCs are `USERSET`. `GRANT/REVOKE SET ON PARAMETER` has no effect on `USERSET` parameters, the `SET` statement cannot be revoked, and `set_config` must stay executable for the transaction-local form. The TASK-016 sheet (WAVE-00.md:590, "session-scope negative control") inherits the ambiguity. A TASK-016 developer would either write a test that cannot pass or weaken it until it passes vacuously. | Reword item 4 to: "a session-scope negative control proves that a session-level `app.*` set by `platform_app` **leaks** to the next checkout (SPK-03 F-04). The token ban (item 1), the fresh-connection probe and this control are the guard, because PostgreSQL cannot deny a `USERSET` placeholder to a role." Port the spike's control verbatim. Not a PR #7 change. |
+| R2-m2 | MINOR (routed: orchestrator / plan) | `docs/04-plan/tasks/WAVE-00.md:589` and `generator/plan-data.mjs` (TASK-016 acceptance, C-1) | **The C-1 line says the spike file "runs in the hosted `security-integration` job … with `SPK03_REPORT` uploaded", but does not set `SPK03_BENCH=1`.** After this fix, that run skips (d), and the uploaded report has no `d_overhead_ms`, so C-1 would be "done" with no measurement. ADR am. 10 item 13 says TASK-016's run sets the flag, but the acceptance line the developer works from does not. "Due before G3" (round 1 m7) is also only in SPK-03 §6. | Add "with `SPK03_BENCH=1`" and "due before G3" to the TASK-016 C-1 acceptance line, and regenerate. Also add: "the ported suite asserts the server-side `set_config` p95 ≤ 1 ms without the flag" (see R2-n2). |
+| R2-n1 | NIT (routed: principal-architect) | ADR-0005:109 (am. 10 item 2) | "The root client stays private to `apps/api/src/platform/db` (existing lint rule)" is the same claim round 1 m3 corrected in SPK-03 W-2. No such rule exists: `eslint.config.mjs:118,141,193-198` lets repositories import `@prisma/client`/the generated client, and nothing stops a service or repository from importing `platform/db/client.ts`. The TASK-016 sheet correctly requires "no repository imports the root client module" as new lint. | Change "(existing lint rule)" to "(lint rule added by TASK-016)". |
+| R2-n2 | NIT (routed: principal-architect) | ADR-0005:105 (W-1) and :119-120 (items 12, 13) | (i) "The spike's own client-observed assertion is behind `SPK03_BENCH=1`": the fix removed that assertion outright, so it is now recorded and never asserted. The server-side ≤ 1 ms check is also behind the flag, so the default suite asserts nothing for (d) until TASK-016 ports it. (ii) Item 12 lists `statement_timeout` among the `platform_app` role defaults, but `00-roles.sql:55-57` sets none, and the spike baseline is `'0'`. (iii) Item 12 adds `lock_timeout` and `idle_in_transaction_session_timeout` to the per-transaction context statement, but data-model §4.1 (:2386-2391) still lists six settings. | Reword (i). Correct (ii). Amend data-model §4.1 to the eight-setting statement, or state that item 12 overrides it. |
+| R2-n3 | NIT (optional in-PR, else none) | `prisma/tests/spikes/spk03-rls-tx.int.test.ts:787`; SPK-03.md:11 vs :138 | The round-trip p50 is quoted three ways: test comment "~1.4–1.7 ms", header "≈ 1.1–1.7 ms", §4 "~1.1–1.4 ms". The `SELECT 1` statement p50 is 1.408 in run 4 and 1.103 in run 6. The 1.7 figure is the `set_config` statement, not a bare round trip. | Use "~1.1–1.4 ms p50" in all three places. The file is deleted by TASK-016 anyway. |
+
+### R2.4 Deviation rulings (round 2)
+
+| Topic | Ruling |
+|---|---|
+| The client-observed `p95StatementVsSelect1` assertion was dropped, not merely gated | **Accepted.** It matches ADR am. 10 W-1 ("reported, never asserted"). An assertion with about 2× headroom is a poor C-1 instrument even on ubuntu-latest, and the server-side check carries the "statement is cheap" claim. |
+| The default context `statement_timeout` is 5 000 ms for every spike transaction | Accepted. It equals the interactive-transaction default timeout, matching F-03's `timeout ≥ statement_timeout`, and no existing test's meaning changes (R2.1). |
+| The F-02 runtime guard (`ROOT_CLIENT_IN_TENANT_TX` `$extends` hook) goes beyond ADR am. 10 item 2 (no exported client + `NESTED_TENANT_TX`) | Not a conflict. The ADR is the binding text, and the hook is a stronger recommendation TASK-016 may adopt. Each control closes a different path: the ADR's control stops an imported client, and the hook catches a client reached through DI. |
+
+### R2.5 Merge conditions
+
+1. None in the PR's code or docs.
+2. security-analyst round 2 on `065aa3e` (D-ORCH-004).
+3. Gatekeeper: no CI checks on `065aa3e` (`statusCheckRollup` empty), so the bootstrap rule applies. `origin/main` is now `cb69b04` (docs only, no overlap with the 2 PR files); a further merge-main is optional for code purposes.
+4. Orchestrator, before TASK-016 is dispatched: R2-m2 (sheet line). Route R2-m1, R2-n1 and R2-n2 to principal-architect, with R2-m1 before TASK-016 starts.
+
+### R2.6 What is good (round 2)
+
+- The negative control is the strongest addition. It pins the leak on the next transaction and on autocommit, and shows a wrapper does not cure an already-leaked session (`SET LOCAL` reverts to A). It keeps itself clean with `RESET` in `finally` and a post-condition assertion.
+- The `rawPgError()` single source of truth plus `toMatchObject` turns F-06 into a regression guard, and the comment correctly steers the mapper to `originalCode`.
+- `waitForLockWaiter` is factored out with a deadline and the `lock_timeout` coupling documented. It is reused by the new 55P03 test, which proves F-09 without sleeps.
+- The fix comment maps every finding to a change and a proof, and states the code-tree equality of the merge.
+
+### R2.7 SECURITY-FLAGS (round 2)
+
+- **R2-m1:** ADR am. 10 item 4 specifies a control PostgreSQL cannot provide. The real REQ-RLS-003 guard for session-level `app.*` is lint/Semgrep + the `prosrc` scan + the fresh-connection probe. The negative control documents the residual (CWE-668).
+- The new test-only session-level `set_config(…, false)` is confined to `single` and reset in `finally`. No secrets or PII; `SPK03_REPORT` is still opt-in and local.

@@ -80,25 +80,27 @@ PR #6 (TASK-009, SPK-02 carrier docs) r1 at 4e5d05f went CHANGES_REQUESTED (2026
 - M1: the UPS GIF→PDF recommendation assumes pdfkit reads GIF. pdfkit 0.20.2 reads JPEG/PNG only (`Unknown image format.`). UPS Label Recovery lists `PDF`. REQ-DOC-002 is PDF-only.
 - m1: the FedEx SDK F5 `index.js` confirms the ship, cancel (PUT) and address-resolve paths that the README marks unverified.
 - Also open: m2 pin source SHAs; m3 DHL sandbox/prod share a host, so bind base URL to env and never follow carrier-returned URLs; m4 PII in query strings (DHL `requestorName`) and data minimisation.
-- Round 2: verify these in the delta. When TASK-135/139/140 PRs land, check that m3 and m4 are implemented (HttpClient strips the query from logs, inline labels only).
+- r2 at f0387d4 was APPROVED_WITH_NITS (2026-11-12). M1, m1–m4 and n1–n7 are closed. The UPS PDF decision is ADR-0010 am. 11 item 3: Label Recovery plus an optional `recoverLabel`. CI was empty on the head.
+- R2 NITs, routed:
+  - TASK-191: README heading "Personal data and secrets" vs US-137's "PII and redaction"; the UPS Docs URL row lacks a SHA.
+  - TASK-140: Label Recovery `Code` has minLength 4, but "PDF" is 3 characters (`Shipping.yaml:13499`).
+  - TASK-113: prefix match must respect path-segment boundaries, because the `/security/v1/oauth/token` prefix has no trailing slash.
+  - TASK-135: DHL README §3.3/§8 are stale; add the `create-timeout-then-tracking-reconcile` fixture.
+  - Architect: am. 11 gives npm `time.modified` dates as release dates.
+- When TASK-113/135/139/140 PRs land, check that m3 and m4 are implemented: per-adapter EGRESS tests, query stripped from logs, inline labels only, DHL `requestorName` constant, token-endpoint 403 cool-down.
 
-PR #7 (TASK-008, SPK-03) r1 at 985a552 went CHANGES_REQUESTED (2026-11-12). The only MAJOR is M1: the (d) wall-clock benchmark asserts in the permanent integration suite; required fix is opt-in `SPK03_BENCH=1`. In round 2, check:
-- M1 is gated, and SPK-03 §0 and C-1 use the flag.
-- m1: P2010 `meta.driverAdapterError.cause.code` and P2028 are pinned with `toMatchObject`.
-- m2: `statement_timeout`/`correlation_id` are in `setContext`, with the reset asserted.
-- m6: maxWait raised in the 50-parallel test.
-Routed to TASK-016 if not fixed in-PR:
-- m3: ALS runtime guard against the root client inside `withTenantTx`. The W-2 "existing lint rule" does not exist.
-- m4: ban session-level `SET`/`set_config(…,false)`/`RESET`. adapter-pg releases without a reset.
-- m5: 55P03 claim-loser test.
-- m7: C-1 owned by TASK-016 before G3; port, then delete the spike file.
+PR #7 (TASK-008, SPK-03) r2 at 065aa3e was APPROVED_WITH_NITS (2026-11-12). M1 and m1–m7 are closed in-PR; (d) is opt-in via `SPK03_BENCH=1`. Routed, check when TASK-016 lands:
+- R2-m2 (orchestrator): the TASK-016 C-1 sheet line (WAVE-00.md ~:589) must set `SPK03_BENCH=1`, otherwise the hosted run skips (d) and the C-1 artifact is empty. The ported suite asserts server-side p95 ≤ 1 ms without the flag. Then the spike file is deleted.
+- R2-m1 (architect): ADR-0005 am. 10 item 4 asks for a negative control proving that session-level `app.*` "cannot be set by platform_app". That is infeasible (USERSET placeholder); the control must prove the leak instead.
+- R2-n1/n2 (architect): the "existing lint rule" claim is back in am. 10 item 2. Item 12 lists a statement_timeout role default that does not exist. data-model §4.1 still has 6 settings while item 12 adds lock/idle timeouts.
+- TASK-016 PR: check the ALS `NESTED_TENANT_TX` guard, the TenantDb Proxy, `mapDbError` on `originalCode`, the token ban, and the ported F-04 negative control.
 
-PR #8 (TASK-013 authz catalogue) r1 at efe23df was CHANGES_REQUESTED (2026-11-12). For round 2, check:
-- M1: the Compliance Auditor rule in `guard.ts` used free-text `category === 'audit'`. It must use the key's resource, and `checkCatalogue` must tie category to resource.
-- M2: the seed migration needs a sha256 pin per version. `--check` must refuse an in-place rewrite of v1, and versions above 1 need a delta down.
-- M3: `session:manage` and `notification_pref:manage` were withheld from Viewer and Auditor (REQ-AUTH-021 Must, ASVS V3.3.4). Closure is a fix or a logged PM + architect ruling.
-- m1–m6 are in the review file.
+PR #8 (TASK-013 authz catalogue) r2 at 498e3a5 was APPROVED_WITH_NITS (2026-11-12). M1–M3, m1–m6 and n1–n3 are closed. Still open:
+- R2-m1 (MINOR): a verb in the action segment with a `read` qualifier (`shipment:void:read`) classifies as read. Fix in-PR or route to TASK-020. When TASK-020 or the next authz PR lands, check for a `SUB_RESOURCES` middle-segment allow-list in `checkKeyShape`.
+- R2-n2: `ASSIGNABLE_BY` needs a target ⊆ assigner property test (TASK-231/235).
+- R2-n3: the v1 pin lives beside the generator; the TASK-016/007 migration-immutability check vs origin/main must exist.
+- R2-n1: Auditor `audit:*` breadth (architect).
 Routed:
 - TASK-023 must not seed `permissions`, `roles` or `role_permissions`.
 - TASK-016's R3-n1 allow-list gains the `prisma/tests → tools/authz` edge.
-- Invitation tasks (US-083/085) need `canAssignRole`: subset of the assigner's permissions, and Owner only by an Owner.
+- Any CATALOGUE_VERSION bump needs the delta renderer first (`artefacts()` throws above v1).

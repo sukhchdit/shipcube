@@ -336,3 +336,144 @@ If an adapter dereferences these URLs, response data chooses the request target 
 | `docker run --rm -v <repo>:/repo:ro zricethezav/gitleaks:latest git /repo --log-opts=84ac551..4e5d05f --redact` | v8.30.1; 4 commits scanned, ~78.15 KB, **no leaks found** |
 | `node sweep.mjs <scratch>/files` (identifier and secret-shape regexes, positive control first) | Control: 8 hits (all patterns live). PR files: only dates, URL paths, a public support-article ID (`000097963`), "Basic Integrated" (product name) and prose `password = client secret`. **0 true positives** |
 | Manual read of all 660 lines against ADR-0010, ADR-0016, ADR-0017, REQ-CARR-015..021, REQ-SEC-010, REQ-TRACK-006, data-model classification and the threat model | Findings above |
+
+## Round 2 (head f0387d4)
+
+| Field | Value |
+|---|---|
+| Head | `f0387d4` (equals `refs/pull/6/head`, checked with `git ls-remote`). Delta from round 1 (`4e5d05f`): two PR commits, `5a9a2a5` (fix cycle 1) and `f0387d4` (pointers to ADR-0010 am. 11), plus two merges of `main` (`d3238ad`, `eb3989c`). `git diff --stat origin/main...f0387d4` still shows only the same 4 Markdown files. The fix-cycle delta on them is +194 / −93 |
+| Scope | Egress rule table (SPK-02 §4 item 6), the "Personal data and secrets" inventories (UPS §3.11, FedEx §3.10, DHL §3.11), FedEx token-failure notes, carrier-returned URL rules, source pins. Consistency with ADR-0010 amendment 11 (D-ARCH-057, revised by D-ARCH-062) and `rulings/wave-0-batch-3-rulings.md` item 1 |
+| Reviewer / date | security-analyst, 2026-11-12. Read-only. The files were read with `git show f0387d4:<path>`; no worktree was touched |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open against this PR. PR6-SEC-01 (MEDIUM) is **closed at design level**: SPK-02 §4 item 6 and ADR-0010 am. 11 item 6 now specify exact origin + path prefix + tier. PR6-SEC-07 and PR6-SEC-09 are closed, and the other round-1 items are documented and stay with their downstream tasks. One new LOW (MEDIUM from M3), PR6-SEC-11, is raised against ADR-0010 am. 11 item 5(c), REQ-CARR-016 and TASK-131, not against these files. PR6-SEC-12 (INFO) lists wording differences, where the ADR governs. **Merge is not blocked.** This verdict covers `f0387d4` only |
+
+### R2.1 Status of round-1 findings
+
+| ID | Sev | Round-2 status | Evidence at `f0387d4` | Remaining owner |
+|---|---|---|---|---|
+| PR6-SEC-01 | MEDIUM | **Closed (design)** | SPK-02 §4 item 6 table (10 rows):<br>- Exact origins: DHL sandbox `/mydhlapi/test/`, production `/mydhlapi/`. UPS `/api/` plus the exact path `/security/v1/oauth/token`. FedEx `/`. FedEx ETD rows apply only once the operation is implemented and the hosts are verified on an official page.<br>- No wildcard, suffix or "looks like production" matching, with the ETD sandbox `prod` host as the reason.<br>- Redirect hops are checked.<br>- Production-tier rules are refused unless `APP_ENV=production`.<br>- A test proves a sandbox account never emits a production URL.<br>Same substance as ADR am. 11 item 6. The differences (R2.3) do not weaken the control | TASK-113 (rule shape, refusal of encoded separators); TASK-135/139/140 (per-adapter `EGRESS` and tests); `packages/config` (refuses a production account outside `APP_ENV=production`); SEC-TC-66 (provisional) |
+| PR6-SEC-02 | LOW | **README part done; open downstream** | All three README subsections exist. They cover secrets, account IDs, `SPER` tax IDs, URL-placed data and data-minimisation flags. Residual field gaps are in R2.4 | TASK-135/139/140 (`sensitive-fields` modules); TASK-188 |
+| PR6-SEC-03 | LOW | Documented; open downstream | Each README lists the identifiers and personal data in paths and queries. DHL `requestorName` is a fixed value derived from `BRAND_*`, `reason` comes from a fixed enum, and the fixture is `pickup-cancel-requestorname-not-personal`. Wording difference with ADR item 8: R2.3 (c) | TASK-113, TASK-214, TASK-135 |
+| PR6-SEC-04 | LOW | Adopted in ADR am. 11 item 8; open downstream | See R2.3 (d): `encodeURIComponent` alone does not neutralise `.` or `..` | TASK-135/139/140; SEC-TC-67 |
+| PR6-SEC-05 | LOW (MEDIUM from M3) | Documented; open downstream | FedEx README §1 is correct for FedEx and matches ADR item 5(a) and 5(c):<br>- The limit is per IP and shared by all accounts and replicas.<br>- A token `403` triggers a carrier-wide cool-down, opens the breaker, fails fast with `CARRIER_UNAVAILABLE` and raises an operations event. It is never retried and never treated as a 401-style refresh.<br>- 400/401 responses are negative-cached per account and count toward the breaker.<br>- Fixtures: `token-401-bad-credentials-negative-cache`, `token-403-ip-penalty-opens-breaker`.<br>The global token bucket is not restated (R2.3 (e)). The generic 403 rule has a UPS side effect: PR6-SEC-11 | TASK-131, TASK-132, TASK-139; SEC-TC-68 |
+| PR6-SEC-06 | LOW | Documented; open downstream | SPK-02 §4 item 6 and all three READMEs say carrier-returned URLs are never followed and never surfaced, and name the inline sources.<br>- UPS: `LabelLinksIndicator` must not be set. The pinned spec confirms that `LabelURL` comes back only with it (`Shipping.yaml` L4992 @ `fd57ca9`).<br>- FedEx: `ship-pdf-label-url-only` and `ship-label-url-expiry` are withdrawn.<br>- Negative fixtures with `https://169.254.169.254/` exist for all three carriers. Matches ADR item 6 | TASK-135/139/140; TASK-113 |
+| PR6-SEC-07 | INFO | **Closed (docs)** | `expires_in` is read per response, parsed strictly as an integer, reduced by 60 s and capped by configuration. It is uncacheable when missing, non-numeric or `≤ 60`; fixtures added for UPS and FedEx.<br>FedEx secrets travel in the form body. Token requests and responses are excluded from body logging and raw capture, with fixture `token-request-body-not-logged`.<br>The README's strict parse is stricter than the ADR's `Number(expires_in)`; implement the strict form | TASK-131 (implementation) |
+| PR6-SEC-08 | INFO | Unchanged; open | No change expected in this PR | TASK-261; product-manager (REQ-TRACK-006 note, D-ARCH-062 flag) |
+| PR6-SEC-09 | INFO | **Closed** | SPK-02 §6 now says "Gitleaks v8.30.1 run locally on the branch: no leaks; CI lane will re-run". This matches R2.5 | n/a |
+| PR6-SEC-10 | INFO | Unchanged; open | n/a | TASK-191; qa-lead |
+
+Round-1 non-security note (`transactionSrc` hard-coded): **resolved**. `transactionSrc` is now derived from `BRAND_*`. `transId` is the correlation UUID with its hyphens removed (32 hex digits), not a truncation.
+
+### R2.2 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR6-SEC-11 | A token-endpoint `403` triggers a carrier-wide cool-down for **every** carrier, but a UPS token-endpoint `403` means "Blocked Merchant", which is one account | LOW (MEDIUM from M3) | CWE-653 | A04 | ADR-0010 am. 11 item 5(c); REQ-CARR-016; `docs/04-plan/tasks/WAVE-04.md:316` (TASK-131); `ups/README.md:28,35,224` | principal-architect (ADR wording); product-manager (REQ-CARR-016); TASK-131, TASK-132, TASK-140 | Open |
+| PR6-SEC-12 | Wording differences between SPK-02 §4 and the READMEs on one side and ADR-0010 am. 11 on the other (the ADR governs; none weakens a control) | INFO | n/a | n/a | R2.3 | TASK-113, TASK-131, TASK-214; principal-architect (optional) | Open |
+
+#### PR6-SEC-11: carrier-wide `403` cool-down applied to UPS (LOW, MEDIUM from M3)
+
+**Description.**
+- ADR am. 11 item 5(c), REQ-CARR-016 and the TASK-131 plan line all say the same thing: "a token-endpoint 403 sets a carrier-wide cool-down (`CARRIER_TOKEN_PENALTY_COOLDOWN_S = 600`) for all accounts of that carrier, no retries".
+- The reason given is FedEx's **per-IP** penalty.
+- The rule is not scoped to FedEx. A UPS token-endpoint `403` is "Blocked Merchant" (`OAuthClientCredentials.yaml`; `ups/README.md:28`). The README itself says on line 35: "account blocked or not enabled for the product, not a missing token". That status is per account.
+
+**Exploitability and impact.**
+- Under the current rule, one blocked UPS account stops token requests for **all** UPS accounts for 600 s.
+- If the post-cool-down probe uses the same account, it gets `403` again and restarts the cool-down. UPS then stays unavailable for every tenant for as long as the blocked account is enabled.
+- M1 has platform-owned accounts only, one UPS account per environment, so "carrier-wide" equals "account-wide" and there is no amplification yet. Impact M (one carrier is lost for all users; the other carriers still quote) × likelihood L = **LOW**.
+- From M3, partner-owned accounts (ADR-0011) let one tenant's blocked account deny UPS to all tenants. Likelihood M, giving **MEDIUM**. This is the same profile as PR6-SEC-05.
+
+**Remediation.**
+1. **principal-architect, ADR am. 11 item 5(c); product-manager, REQ-CARR-016; TASK-131 and TASK-132.** Choose the cool-down scope by a static policy per adapter, not by the status code alone:
+   ```ts
+   // packages/carriers: static per-adapter declaration, next to EGRESS
+   export interface TokenEndpointPolicy {
+     /** FedEx: the token service penalises the shared public IP. UPS: 403 = Blocked Merchant (one account). */
+     readonly on403: 'carrier-cooldown' | 'account-negative-cache';
+   }
+   // FedEx { on403: 'carrier-cooldown' } · UPS { on403: 'account-negative-cache' } · DHL: no token endpoint
+   ```
+   - For UPS, a `403` sets the per-account negative cache with a longer TTL (for example a new key `CARRIER_TOKEN_BLOCKED_TTL_S`, default 600), opens that account's breaker and raises an operations event. Other UPS accounts are unaffected.
+   - FedEx keeps the carrier-wide cool-down.
+2. **M3 re-check.** At COND-SANDBOX-DEMO, record the body code FedEx returns for the IP penalty. A non-penalty `403` on a partner-owned FedEx account can then be classified per account.
+3. **This PR (optional, text only).** The UPS fixture `token-403-blocked-merchant` gains the note "per-account negative cache; other UPS accounts keep working; no carrier-wide cool-down".
+
+**Verification test.** Extend SEC-TC-68 (provisional):
+- The UPS token endpoint returns `403` for account A.
+- Accounts B and C still obtain tokens and rates inside the 600 s window.
+- A fails fast, and no carrier-wide cool-down key is written.
+- The FedEx case is unchanged.
+
+### R2.3 PR6-SEC-12: consistency with ADR-0010 am. 11 (INFO; the ADR governs)
+
+SPK-02 §4 now states that am. 11 decides every request and that §4 is kept as the request record. The differences below therefore do not change what gets built. Each is either stricter than the ADR or neutral.
+
+- **(a) Where rules come from.**
+  - SPK-02 says production rules "exist only in production configuration". It adds a start-up check that the DHL sandbox base path starts with `/mydhlapi/test/`. The DHL README says "configured base URL".
+  - ADR item 6 is stricter. Rules are static `EGRESS` per adapter, derived from the enabled accounts. No environment variable can add a rule, and URLs are built from `EGRESS[ctx.environment]`.
+  - Read "configured" as "from the adapter's `EGRESS`". The DHL base-path check becomes a unit test on the static `EGRESS`.
+- **(b) Binding rules to the calling tier.**
+  - SPK-02 says rules are "bound to `CarrierContext.environment`". The ADR builds a union over the enabled accounts.
+  - The two are equivalent in every non-production environment, because no production rule can exist there.
+  - The difference shows in an `APP_ENV=production` deployment with both a DHL sandbox and a DHL production account. There the union accepts both prefixes on the shared origin, whichever account makes the call.
+  - **Hardening for TASK-113, due before any G4 production release:** also require `rule.tier === ctx.environment`. The rule already carries `tier`.
+  - The SPK-02 production DHL row says "excluding `/mydhlapi/test/`". The `pathPrefixes` shape cannot express that. The ADR's per-adapter test, which checks that a production context never emits a sandbox-prefixed URL, covers it.
+- **(c) URLs in logs and spans.**
+  - SPK-02 §4 item 8 and the READMEs require a **route template** and never the full URL. ADR item 8 says `url.full` **with the query string stripped**.
+  - Under the ADR form, paths still carry INT identifiers: tracking numbers, dispatch numbers, UPS `DocumentId` and `ShipperNumber`. UPS reference tracking also puts `referenceNumber` in the path, which is customer free text.
+  - A route template satisfies both texts, so the round-1 binding note for TASK-113 and TASK-214 stands. If the ADR form is implemented instead, UPS reference tracking must not be used with user-entered references.
+- **(d) Path construction.**
+  - ADR item 8 relies on "`encodeURIComponent` on a fixed template". That function leaves `.` and `..` unchanged, because they are unreserved characters.
+  - Example: a tracking number `..` in `/shipments/${n}/tracking` normalises to `/mydhlapi/test/tracking`. That is still inside the prefix, so egress allows it, but it calls a different operation.
+  - Keep the round-1 per-carrier identifier allow-pattern (the PR6-SEC-04 `carrierPath`). SEC-TC-67 already includes `..`.
+- **(e) Global token bucket.** The ADR's global token bucket per carrier and egress (item 5(b)) is not restated in the FedEx README or SPK-02 item 5. TASK-131 implements it from the ADR and REQ-CARR-016.
+- **(f) UPS token path.** SPK-02 says "(exact path)", while the ADR lists the path among "prefixes". Implement an exact match: in the round-1 `egressAllowed`, a prefix without a trailing `/` matches exactly.
+- **(g) Error code.**
+  - REQ-CARR-016 has the negative cache fail fast with `AUTH_FAILED`. ADR item 5(a) and the FedEx README say `CARRIER_UNAVAILABLE`.
+  - This has no security effect. product-manager and principal-architect should align the two.
+- **(h) Section name.**
+  - The READMEs title the section "Personal data and secrets"; ADR items 4 and 8 call it "PII and redaction".
+  - If TASK-191's `readme-docs-check` ever checks the heading, align one side.
+
+### R2.4 Inventory completeness (residual of PR6-SEC-02; for TASK-135/139/140/188)
+
+I checked the inventories against the pinned sources:
+- **DHL** (D2 @ `50edb9b`):
+  - Missing: `contactInformation.mobilePhone` (`Contact.php` L70-72).
+  - Missing: **`shipmentNotification[].receiverId`**, which carries the receiver's **e-mail address** (`ShipmentRequest.php` L162-167). A generic leaf deny-list would never match this key.
+  - `customerReferences[].value` (L177-182) is free text and should be flagged the way the UPS README flags `CustomerContext`.
+- **UPS** (S4 `Shipping.yaml` @ `fd57ca9`):
+  - Not listed: `FaxNumber` (69 schema occurrences) and `PhoneNumber` (9).
+  - Not listed: the `InternationalForms.Contacts` parties (`ForwardAgent`, `UltimateConsignee`, `IntermediateConsignee`, `Producer`) and `AlternateDeliveryAddress`. These are covered only if leaf-key matching on `Name`, `AttentionName`, `AddressLine` and `Phone` is implemented (round-1 remediation 2).
+- **FedEx** (the shapes themselves are unverified):
+  - Add `child_id`, the name used in the prose, next to `child_key`.
+  - `contact.phoneExtension`, `contact.faxNumber` and notification `emailAddress` leaves are likely to exist.
+
+**Recommendation for TASK-188.** Redact whole party containers rather than leaf by leaf, and keep the completeness test against the README tables. The containers are:
+- DHL `contactInformation`, the address lines and `shipmentNotification`;
+- UPS `Phone` and `FaxNumber`;
+- FedEx `contact`.
+
+**This PR (optional).** Add the DHL and UPS fields above to the README tables.
+
+### R2.5 Secrets sweep and evidence
+
+| Command | Result |
+|---|---|
+| `git ls-remote origin refs/pull/6/head`; `git log --ancestry-path --no-merges 4e5d05f..f0387d4` | `f0387d40794e7b077e509f9514578adc78a8e76b`; PR commits `5a9a2a5`, `f0387d4` |
+| `docker run --rm -v <repo>:/repo:ro zricethezav/gitleaks:latest git /repo --log-opts="--ancestry-path --no-merges 4e5d05f..f0387d4" --redact` | v8.30.1; 2 commits, ~48.6 KB, **no leaks found** |
+| Same with `--log-opts="4e5d05f..f0387d4"` (includes the merged `main` commits) | 13 commits, ~727 KB, **no leaks found** |
+| `node sweep.mjs added-lines.txt` (12 identifier and secret-shape patterns, all live on the positive control) over the 194 added lines | Hits are URL paths, public commit SHAs (`fd57ca9…`, `50edb9b…`, `7134d2e…`, this repo's `762b006…`), the support-article ID `000097963`, the product name "Basic Integrated", and `169.254.169.254` (a deliberate SSRF negative-fixture target). **0 true positives** |
+| Spot-check of cited sources at their pins (public raw GitHub only; no carrier API host contacted) | UPS `Shipping.yaml` L11251-11268 (Ship: GIF/ZPL/EPL/SPL), L13479-13500 (Recovery including PDF), L4992 (`LabelURL` only with `LabelLinksIndicator`): **match**. FedEx `index.js` @ `7134d2e` L32, 35-38, 80-83, 118-123 (form-body `client_secret`), 168, 213-216, 258-261, 303-306: **match**. DHL `Client.php` L24-25 base URIs: **match**. `762b006` is the last commit touching `shipping-platform-brief.md`: **match** |
+| Manual read of the fix-cycle delta against ADR-0010 am. 11 items 1–9, the batch-3 rulings item 1, REQ-CARR-016 and the TASK-131 plan line | Findings above |
+
+### R2.6 Changes to the §5 binding notes
+
+| Task | Added in round 2 | From |
+|---|---|---|
+| principal-architect | Per-carrier token-endpoint `403` policy. Optional: ADR item 8 wording (route template; identifier allow-pattern, because `encodeURIComponent` does not stop `..`) and the item 6 tier match | 11, 12 |
+| product-manager | REQ-CARR-016 `403` sentence scoped per carrier; align `AUTH_FAILED` and `CARRIER_UNAVAILABLE` | 11, 12 |
+| TASK-113 | Per-request `rule.tier === ctx.environment` (before any G4 production release); exact match for prefixes without a trailing `/` | 12 |
+| TASK-131 / TASK-132 / TASK-140 | UPS `403` → per-account negative cache, not a carrier-wide cool-down; SEC-TC-68 UPS case | 11 |
+| TASK-135 / 139 / 140 / 188 | R2.4 field residuals; redact whole party containers | 02 |
+| this PR (optional, non-blocking) | R2.4 fields in the README tables; note on the UPS `token-403-blocked-merchant` fixture | 02, 11 |

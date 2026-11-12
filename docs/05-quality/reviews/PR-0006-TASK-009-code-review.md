@@ -80,3 +80,85 @@ I spot-checked the claims against their sources, reading only public documentati
 3. m3 and m4: amend SPK-02 §4 in this PR (preferred, as small additions to the amendment request), or route them explicitly to TASK-135/139/140 and security-analyst in DECISIONS.md.
 4. NITs are optional in this PR.
 5. CI must run on the final head (the status rollup was empty on `4e5d05f`). Re-review (round 2) is limited to the delta.
+
+## Round 2 (head f0387d4)
+
+| Field | Value |
+|---|---|
+| Head | `f0387d4` (`origin/feat/TASK-009-spk-02-spike-carrier-api`, equal to `gh pr view 6` `headRefOid`) |
+| Content delta reviewed | `4e5d05f..f0387d4 -- packages/carriers docs/04-plan/spikes/SPK-02.md`. The content comes from two commits: `5a9a2a5` (fix cycle 1) and `f0387d4` (alignment with ADR-0010 am. 11). The merges of main (`d3238ad`, `eb3989c`) are excluded. 4 files, +194/−93 |
+| Inputs | Fix comments #6828740606 and #6829045538; ADR-0010 am. 11 (main, items 1–9); `rulings/wave-0-batch-3-rulings.md` item 1 and the PR table; D-ARCH-057/062; risks.md R-ARCH-25; US-137 (EPIC-06, main `cb69b04`); WAVE-07 TASK-191 |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: All round-1 findings are closed: M1, m1–m4 and n1–n7. SPK-02 §4 item 3 is now a neutral, evidenced option set.
+         Its "Decided: option (a)" note and the UPS README match ADR-0010 am. 11 item 3. Every line citation I re-read at
+         the pinned SHAs is correct. The egress table and the PII subsections match am. 11 items 6 and 8. No BLOCKER or
+         MAJOR findings. Six new NITs, mostly alignment with rulings that landed after the head, routed to their owners.
+         No Critical or High security finding. CI has still not run on the head.
+```
+
+### R2.1 Verification performed by the reviewer
+
+This is a docs-only PR, so per the dispatch I ran no build, lint, typecheck or test suite. I ran `prettier --check` on the 4 changed files in the `Shipqube-TASK-009` worktree at `f0387d4`. Result: exit 0. I contacted no carrier API host. Spot-checks read only public GitHub raw files and the public npm registry metadata. New downloads are in the scratchpad `review/PR-6-cr-r2/`. I re-used the round-1 downloads of `UPS-API/api-documentation@fd57ca9` and `stores-com/fedex@7134d2e`.
+
+| Check | Result |
+|---|---|
+| UPS `Shipping.yaml` @ `fd57ca9`: lines cited in SPK-02 §2 item 4 and §4 item 3 and in UPS README §3.2, §3.4 and S4 | **All correct.**<br>- L2475-2596 is the `/labels/{version}/recovery` operation; L2597 starts the next path.<br>- L11251-11268 is `LabelSpecification_LabelImageFormat`, Ship: "GIF, ZPL, EPL and SPL".<br>- L13356-13380 is `LabelRecoveryRequest`, which declares `TrackingNumbers` and `ReferenceValues` as `required` and `TrackingNumber` as max 18. The README's spec-quirk statement is accurate.<br>- L13479-13500 is `LabelRecovery_LabelSpecification_LabelImageFormat` with "PDF -- label is in PDF format".<br>ADR-0010 am. 11 cites the narrower ranges `:11251-11263` and `:13479-13496`. Both sets of ranges are valid; SPK-02's ranges include the `Description` property. New observation: R2-n2 |
+| F5 `stores-com/fedex` `index.js` @ `7134d2e`, the 8 line citations (L32, 35-38, 80-83, 118, 168, 213-216, 258-261, 303-306) | **All 8 match exactly** (method and path). L32 sits inside `if (options.customer_transaction_id)`, which matters for R2-n5 |
+| DHL SDK @ `50edb9b`: `Client.php` L24-25 base URLs; `src/ValueObjects/{Contact,Address,RegistrationNumber}.php` field names used in the DHL PII subsection | Match: `/mydhlapi/` and `/mydhlapi/test/`; `fullName`, `companyName`, `phone`, `email`, `addressLine1..3`, `postalCode`, `cityName`; `typeCode`, `number`, `issuerCountryCode`. `PickupService::cancel` requires non-empty `requestorName` and `reason` in the query (L64-82) |
+| npm registry, the option (b) dependency facts (SPK-02 §4 item 3) | SPK-02 is **accurate**: `@jimp/js-gif` 1.6.1 (MIT, published 2026-04-07) → `omggif` ^1.0.10 (published 2019-07-16) and `gifwrap` ^0.10.1 (published 2022-03-17). The ADR's dates differ; see R2.4 |
+| ADR-0010 am. 11 consistency | See R2.2. SPK-02 §4 now opens with a status line: "decided in ADR-0010 amendment 11 … the text below is kept as the request record". That correctly makes the ADR, not the request text, authoritative |
+| Secrets and PII regex scan of the 4 files at `f0387d4` (1Z numbers, 9–22-digit runs, e-mail addresses, JWTs, 32+ base64 runs, `key/token/secret/password=`) | **Clean.** The only hits are commit SHAs, URL fragments, the prose "password = client secret" and the placeholder `<key:secret>` |
+| Merge safety | `git diff --name-only origin/main...f0387d4` lists exactly the 4 files. `origin/main` has since moved to `cb69b04` (docs-only D-059, no overlap with these paths), so a merge is a pure union. `gh pr view 6 --json statusCheckRollup` is **`[]`**: CI has not run on `f0387d4` |
+| Author's gates (fix comments) | They report lint, format, typecheck, unit 753/753, build and audit on `5a9a2a5`, and lint, format and unit on `f0387d4`. I did not re-run these; I accept them for a markdown-only delta. My prettier check agrees |
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence at `f0387d4` |
+|---|---|---|
+| **M1** UPS PDF | **Closed** | **Option set.** SPK-02 §4 item 3 (L64) quotes REQ-DOC-002 in full and lists three neutral options:<br>- **(a)** Ship GIF/ZPL, then Label Recovery with `PDF`. Cited at the SHA; marked not exercised in CIE; notes the extra transactional call and the request by tracking number only.<br>- **(b)** Decode the GIF in `documents`, not the adapter, as a named new dependency that is not added.<br>- **(c)** GIF/ZPL only, with an explicit product-manager decision against REQ-DOC-002.<br>The pdfkit premise is gone, and (b) states pdfkit's JPEG/PNG limit.<br>**Decision note.** "Decided: ADR-0010 am. 11 item 3 adopts option (a) … new optional `recoverLabel` operation, no PDF code in `packages/carriers`" is consistent with am. 11 item 3(a)–(c).<br>**Corrections.** §2 item 4 and UPS README §3.2 now say "not documented for Ship; documented for Label Recovery". README §3.4 lists the recovery formats.<br>**UPS README §7 Q1** is closed with the am. 11 design: `labelFormats = [PDF_4X6, ZPL]`; the saga's step 4 calls `recoverLabel`; the adapter renders no PDF. This matches am. 11 3(b)/(c) and R-ARCH-25. The fixture `label-recovery-pdf` is added |
+| **m1** FedEx secondary confirmations | **Closed** | Rate, Ship, Cancel (`PUT`), Track and Address-resolve paths and methods are upgraded to "confirmed (secondary)" with F5 line numbers in all of these places: SPK-02 header verdict, §1, §2 item 9; FedEx README §1, §3.1–3.4, §3.6, §6; and F5 row. `x-customer-transaction-id` is upgraded too. Pickup and Locations stay unverified, and the verdict stays FALLBACK. Wording nits: R2-n5, R2-n6 |
+| **m2** Source pinning | **Closed** | All GitHub rows carry the SHA read: UPS full SHA `fd57ca9f…`, with the raw URLs rewritten from `main` to the SHA; DHL `50edb9bb…`; FedEx `7134d2e3…`; F2 brief `762b0061…`. Web pages are labelled "not pinnable · retrieved 2026-11-12". F11 is split into F11a–F11e and D4 into D4a/D4b, one source and claim per row. Disclosure nit: R2-n5 |
+| **m3** Egress | **Closed** | SPK-02 §4 item 6 is now an exact-origin + path-prefix + tier table:<br>- DHL `/mydhlapi/test/` vs `/mydhlapi/`; the UPS token path outside `/api/`; FedEx ETD gated on implementation **and** official verification.<br>- Production rules are refused unless `APP_ENV=production`, with a sandbox-never-emits-production test.<br>- Redirect hops are re-checked. No wildcard or suffix matching (the ETD sandbox host contains `prod`).<br>- Carrier-returned URLs are never followed or surfaced, in SPK-02 and all three READMEs.<br>- `ship-pdf-label-url-only` is replaced by `ship-pdf-label-inline`, and the negative cases are `ship-label-url-only-not-followed` (FedEx), `ship-labelurl-not-followed` (UPS) and `shipment-carrier-urls-not-followed` (DHL), including `169.254.169.254`.<br>It agrees with am. 11 item 6's `EgressRule = { origin, pathPrefixes, tier }` and its environment binding. Where SPK-02 says "exist only in production configuration", the adopted ADR is stricter: static per-adapter `EGRESS`, no env-settable rule. The §4 status line makes the ADR authoritative, so there is no conflict. Implementation nit: R2-n3 |
+| **m4** PII inventory | **Closed** | Each README has a per-operation "Personal data and secrets" subsection (UPS §3.11, FedEx §3.10, DHL §3.11). Each lists:<br>- request-side personal, tax-ID and secret field names (field names spot-checked: DHL SDK value objects; UPS round-1 spec read);<br>- identifiers in paths and query strings, including DHL `requestorName` (fixed non-personal value from `BRAND_*`), DHL `/rates` city and postcode, and UPS `destZip`/`shipperNum`;<br>- binding data-minimisation flags.<br>FedEx paths are honestly marked conventional/unverified. SPK-02 §4 item 8 asks for route-template-only logging. This matches am. 11 item 8. Heading-name nit: R2-n1 |
+| n1 Gitleaks wording | Closed | SPK-02 §6: "Gitleaks v8.30.1 run locally …; CI lane will re-run" |
+| n2 Anchors | Closed | `#4-sandbox-quirks` in all three; the headings exist |
+| n3 `transId` / `transactionSrc` | Closed | 32 hex digits without hyphens; `transactionSrc` from `BRAND_*` |
+| n4 FedEx token | Closed | Read `expires_in` per response, strict parse, ≤ 60 → use once. The 403 is per IP, shared, causes a carrier-wide cool-down and opens the breaker, and is never handled as a refresh. 400/401 get a negative cache. Fixtures added. Consistent with am. 11 item 5 |
+| n5 Quota wording | Closed | SPK-02 §4 item 7 |
+| n6 Ambiguous DHL create | Closed | SPK-02 §4 item 2 and DHL README §3.3. Adopted as am. 11 item 9 |
+| n7 Empty source cells | Closed | The "Other headers" row cites F5 @ `7134d2e`; the Retry row is marked as a design note |
+| Focus: "Diffed against official spec by a person: no" | **Present** | A `Spec diff` row in all three READMEs (L10). It contains the exact string US-137 parses (`Diffed against official spec by a person: no`), with the am. 11 item 4 and COND-SANDBOX-DEMO pointer. `no` is honest for UPS too: an agent, not a person, read the YAML |
+
+### R2.3 New findings (round 2)
+
+| ID | Severity | File:line @ `f0387d4` | Issue | Required fix / owner |
+|---|---|---|---|---|
+| R2-n1 | NIT | `ups/README.md:143`, `fedex/README.md:120`, `dhl-express/README.md:109`; the Docs URL rows (L7) | US-137 (main `cb69b04`, after this head) and am. 11 items 4 and 8 name the subsection **"PII and redaction"** and require "docs URL **with a specification commit SHA**". The READMEs title it "Personal data and secrets", and the UPS Docs URL row carries no SHA (the SHA is in §5 only). TASK-191's `readme-docs-check` will fail all three if it matches the heading literally. | Optional in this PR: rename to "PII and redaction (personal data and secrets)" and add `@ fd57ca9` to the UPS Docs URL row. Otherwise TASK-191, which owns the parser, decides the match rule and TASK-135/139/140 align the READMEs. |
+| R2-n2 | NIT | `ups/README.md` §3.4 (L88) | A spec quirk on the **decided** path is not recorded. `LabelRecovery_LabelSpecification_LabelImageFormat.Code` declares `minLength: 4, maxLength: 4` (`Shipping.yaml:13499-13500` @ `fd57ca9`). That contradicts the 3-character `GIF`/`PDF`/`ZPL` values and the operation's own examples (`Code: ZPL` L2535, `Code: GIF` L2555). Ship's schema says 1..4. A validator generated from the published schema would reject `PDF`. | Add the quirk next to the `TrackingNumbers` one in §3.4. TASK-140: do not validate the recovery request's `Code` length against the published schema; settle it in CIE. principal-architect may add it to R-ARCH-25 |
+| R2-n3 | NIT (security INFO) | `SPK-02.md:75,77` (UPS token rows); ADR-0010 am. 11 item 6 | SPK-02 says the UPS token path is an **exact path**. ADR am. 11 lists `/security/v1/oauth/token` as a **prefix**. A naive `startsWith` admits `/security/v1/oauth/tokenX` and `/security/v1/oauth/token/…`. The `/api/` prefixes have trailing slashes; this one does not. | TASK-113: match prefixes at path-segment boundaries (prefix ends in `/` or the path equals the prefix) after WHATWG normalisation, and add a test with `/security/v1/oauth/tokenX`. principal-architect: say "exact path" for the token rule in am. 11's table |
+| R2-n4 | NIT | `SPK-02.md:99,101` (§5); `dhl-express/README.md:60` (§3.3 "Recommended"), `:174-178` (§8 "amendment request"), §9 shipments row | Decision state is stale after am. 11:<br>- SPK-02 §5 TASK-135 row still says "resolve the `cancelShipment` decision first" (decided by am. 11 item 2).<br>- The TASK-191 row omits the new mandatory line and the PII subsection.<br>- DHL README §3.3/§8 still say "Recommended" / "amendment request" without citing am. 11 items 2 and 9.<br>- The DHL fixture plan lacks `create-timeout-then-tracking-reconcile` (am. 11 item 9). | Optional in this PR. Otherwise TASK-135 updates the DHL README and fixture plan as part of its am. 11 work |
+| R2-n5 | NIT | `fedex/README.md:27`; `SPK-02.md:42` (§2 item 9); `fedex/README.md:166-170` (F11a-e); `SPK-02.md:64` | Accuracy and disclosure:<br>- F5 sends `x-customer-transaction-id` only when the caller passes `options.customer_transaction_id` (`index.js` L31-32). The README says "sends it on every API call". Say "supports it, optionally, on every API method".<br>- The F11a–e URLs were reconstructed by re-running the searches. The fix comment discloses this, but the Sources table does not.<br>- In the "Decided:" sentence, the quoted phrase is the §2 correction wording, not option (a)'s name. | Optional wording fixes in this PR |
+| R2-n6 | NIT | `fedex/README.md:11` (header Verdict row) | The header still lists Rate, Ship, Cancel and Address Validation as "FALLBACK for paths and field names". §6 and the SPK-02 header now say their paths and methods are confirmed (secondary), and that FALLBACK applies to Pickup/Locations paths and to all field names. The overall verdict (FALLBACK) is the same. | Mirror the SPK-02 header wording |
+
+### R2.4 Out-of-PR observation (for principal-architect, NIT)
+
+ADR-0010 am. 11 item 3 and ruling 1.3 support "no npm GIF decoder passes the 18-month rule" with npm `time.modified` dates: `omggif` 2022-06, `gifwrap` 2022-06, `gifuct-js` 2025-01. Those are metadata-modification dates, not release dates. The latest releases are `omggif` 1.0.10 on 2019-07-16, `gifwrap` 0.10.1 on 2022-03-17, `gifuct-js` 2.1.2 on 2021-11-04 and `@jimp/gif` 0.22.12 on 2024-02-23. The ADR also does not name `@jimp/js-gif` 1.6.1 (2026-04-07), which is itself inside the window but has transitive dependencies outside it. The conclusion holds and is in fact stronger. Correct the dates when the ADR is next touched. SPK-02's figures are the accurate ones.
+
+### R2.5 Security lens (short)
+
+| Check | Result |
+|---|---|
+| Secrets, credentials, account numbers, personal data | None. Regex scan is clean; placeholders only |
+| Sandbox-only | Production origins appear only as facts and as `APP_ENV=production`-gated egress rows. No instruction calls a production endpoint, and live runs stay `CARRIER_LIVE_SANDBOX=1` opt-in |
+| m3 (CWE-918) and m4 (CWE-532) from round 1 | Closed at design level. Implementation conditions are carried by am. 11 items 6 and 8 → TASK-113/135/139/140/188/214 |
+| New | R2-n3 (INFO): segment-boundary prefix matching for TASK-113 |
+| **High/Critical** | **None** |
+
+### R2.6 Merge conditions
+
+1. CI must run green on the final head. `statusCheckRollup` is empty on `f0387d4`.
+2. The NITs R2-n1..n6 are optional in this PR. Whatever is not fixed here goes to the named owners: R2-n1 → TASK-191/135/139/140; R2-n2 → TASK-140 and R-ARCH-25; R2-n3 → TASK-113 and the architect; R2-n4 → TASK-135; R2-n5/n6 → TASK-139. R2.4 goes to principal-architect. If the author pushes NIT fixes, a re-review only needs a delta diff check, limited to markdown.
+3. When TASK-113/135/139/140 land, the reviewer checks: the per-adapter `EGRESS` tests, including the DHL prefix; URLs logged with the query string stripped; the inline-label-only negative fixtures; the DHL `requestorName` constant; and the token-endpoint 403 cool-down.

@@ -133,3 +133,114 @@ What I did **not** re-run, and whose evidence I relied on:
 2. m1–m6 fixed in this PR, or explicitly routed in the fix report.
 3. Re-run on the fix head: lint (type-aware), typecheck, the full `test:unit`, `authz:generate -- --check`, the targeted `prisma/tests/authz` + `prisma/tests/migrations` run, and `test:coverage` for `packages/authz` (95/95). Also, since no CI checks exist on this head, the orchestrator's full `test:integration` re-run.
 4. security-analyst: no Critical/High open.
+
+
+## Round 2 (head 498e3a5)
+
+- **Head:** `498e3a5`. The code delta is `6e70275` (fix cycle 1). `5891c0a` and `498e3a5` are normal merges of `origin/main`, both docs-only. I confirmed by SHA that `git diff 6e70275 498e3a5 -- . ':!docs' ':!.claude'` is empty.
+- **Inputs read:**
+  - the fix comment (issuecomment-6829047310);
+  - D-058, D-SEC-PR8-01, D-ORCH-011, D-ARCH-059/060/062 and D-TASK013-02;
+  - REQ-RBAC-004 (1.5), REQ-ORG-010/013, REQ-ACCT-014/015;
+  - the US-066 Examples tables, including the D-058 outline and `privacy:delete` as row 4;
+  - gherkin-test-map AT-US-066-05..08.
+- **Reviewer:** code-reviewer · 2026-11-12
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: M1, M2 and M3 are closed. I re-proved each one on the head:
+         - M1: the Auditor rule is keyed on the key, and category is tied to the resource (P1/P1b now fail).
+         - M2: v1 is pinned by SHA-256 of raw LF bytes, and both write mode and --check refuse an in-place rewrite.
+           CRLF copies fail closed. v2 throws.
+         - M3: the D-058 grants are in place, with a flag-only, pinned selfService carve-out and a positive invariant.
+         m1–m6 and n1–n3 are closed. One MINOR is left (R2-m1, a residual of n5: a verb hidden in the action segment)
+         plus 4 NITs. None of them blocks merge.
+FINDINGS: 0 BLOCKER · 0 MAJOR · 1 MINOR · 4 NIT
+SECURITY-FLAGS: §R2.5
+```
+
+### R2.1 Verification I performed myself
+
+| Check | Result |
+|---|---|
+| Delta read | All 27 files of `git diff 5891c0a 6e70275` read in full, plus the regenerated matrix doc. Merge `498e3a5` code tree equals `6e70275`. `origin/main` has since moved to `cb69b04` (docs-only: D-059, STATUS). No file overlaps with the branch, and D-059 makes no change that affects PR #8 |
+| `jest --selectProjects unit --testPathPatterns 'packages/authz/src\|tools/authz\|tools/db/lint-migrations'` in a `git archive 498e3a5` scratch copy with `node_modules` junctioned from the TASK-013 worktree (Node 24.22.3) | **7 suites, 137/137 passed** |
+| Prettier `--check` on every changed `.ts`/`.md` file | clean |
+| Pin stability | `sha256sum` of the archived `migration.sql`/`down.sql` equals the pins `dbe3e807…`/`096b273a…`, and the archive was made on this host with `core.autocrlf=true`. `git ls-files --eol` gives `i/lf w/lf attr/text=auto eol=lf` for both files, because the repository `.gitattributes` has `* text=auto eol=lf`, which overrides `autocrlf`. The renderer has no `os.EOL`, `localeCompare` or `Intl` (checked with grep), and `writeFileSync` writes the LF string as is |
+| Reviewer probes (tsx, `--conditions=@platform/source`, importing the PR sources). Results P0–P11 below | |
+| `gh pr view 8 --json statusCheckRollup` | `[]`: no CI checks on `498e3a5` (bootstrap) |
+| Cleanup | Junction removed before the copy was deleted. There is no stray link at `C:\` (`dir C:\ /AL` shows only the system `Documents and Settings`). No commands were run in the TASK-013 worktree; I only read its HEAD with `rev-parse` |
+
+Probe results (each is 0 violations unless stated):
+
+| Probe | Mutation | Result |
+|---|---|---|
+| P0 | shipped catalogue + roles | `[]` |
+| P1 | `retention:purge` with `category: 'audit'`, granted to the Auditor | `PERMISSION_CATEGORY_MISMATCH` + `AUDITOR_NOT_READ_ONLY` (round 1: 0) |
+| P1b | `featureflag:manage` re-categorised as `audit`, granted to the Auditor | the same two codes (round 1: 0) |
+| P3 | new `shipment:void:read`, granted to the Viewer | **0 violations** → R2-m1 |
+| P3b | new `shipment:purge:read`, granted to the Auditor | **0 violations** → R2-m1 |
+| P3c | `document:download:read`, granted to the Viewer | `PERMISSION_FORMAT` (the n5 case is closed) |
+| P4 | `audit:purge` (operator-only), granted to the Auditor | 0 violations, as the spec words it → R2-n1 |
+| P5 | new `notification:send` flagged `selfService`, granted to the Viewer | `SELF_SERVICE_FLAG_MISMATCH` |
+| P6 | every allowed `ASSIGNABLE_BY` pair: target grants ⊆ assigner grants | holds today, with no violations → R2-n2 |
+| P6b | `canAssignRole` with Admin → Owner, Admin+Viewer → Owner, `__proto__` and `hasOwnProperty` | all `false` |
+| P7 | fresh root, then both seed files converted to CRLF | `pinnedDrift` 2, `--check` exit 1: **fails closed** |
+| P8 | write mode on that root with the catalogue unchanged | restores the pinned bytes; `--check` then exits 0 |
+| P9 | `version: 2` | throws "needs a delta seed renderer" |
+| P10 | in-place grant change (Viewer loses `address_book:read`), write mode | exit 1, pinned files untouched |
+| P11 | role description edit only | `--check` exit 1, because descriptions are seeded columns |
+
+What I did **not** re-run, and whose evidence I relied on: per D-ORCH-010 I did not re-run the full lint (type-aware), typecheck, the full `test:unit` (859), `test:integration` (33/33), `test:coverage` (authz 100/100) or `build`/`audit`. I relied on senior-developer's gate on `6e70275` and their lint/format/unit re-run on `498e3a5`.
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| **M1** | **Closed** | `isAuditPermission(key)` (resource segment) is the single predicate behind `isOperatorOnlyKey` and the Auditor rule (`guard.ts` `readOnlyViolations`). No authorisation rule reads `category` (grep: only grouping, `selfServiceProblem` and the `signatureOnly` tie remain, and both are themselves tied to the key). `checkCatalogue` raises `PERMISSION_CATEGORY_MISMATCH` unless `category === expectedCategory(key)`. The typed exception map has exactly 2 entries (`payment_method→payment`, `notification_pref→notification`), pinned by a test. `checkRoleInvariants` now runs `checkCatalogue` too, so a re-categorisation cannot be fed to the role guard unchecked. P1/P1b are tests (`roles.test` "Compliance Auditor rule is keyed on the permission key…") and I re-proved them. The AT-US-066-03 assertion uses the shared predicates |
+| **M2** | **Closed** | `SEED_MIGRATIONS[1] = { dir, sha256: { up, down } }` and `pinnedDrift()` hashes raw bytes. `releasedChanges()` makes both `--check` and write mode fail with "catalogue changed: … Bump CATALOGUE_VERSION and add a seed migration". The write mode writes nothing (P10). `--check` no longer tells the developer to regenerate a pinned file. `artefacts()` throws for `version > MAX_FULL_RENDER_VERSION (1)` and names the delta-renderer contract (up = additions + removed links; down = that delta only; data-changing when it deletes). The matrix-doc drift message is corrected. There are 4 generator tests, including a positive control on the same root. **Cross-platform:** the pin is stable because `.gitattributes` forces LF on every checkout (verified on this Windows host with `autocrlf=true`). Where the attribute is defeated (P7), the failure mode is a false failure, never a silent pass. Residual: R2-n3 |
+| **M3** | **Closed** (by D-058 grants, applied in-PR as D-SEC-PR8-01 item 3 allows) | Viewer 11 (+`session:manage`, +`notification_pref:manage`), Finance 8 (+`notification_pref:manage`, +`order:read`), Admin 30 (+`privacy:delete`), Auditor 5 (+`session:manage`, +`notification_pref:manage`), Super Admin 38. The total is 189, asserted per role and in the regenerated matrix and seed. The `selfService` flag must equal `SELF_SERVICE_PERMISSIONS` (`as const satisfies readonly Permission[]`, literal pinned by a test) in both directions. Flagged entries must be non-operator, non-reserved and non-signature, with category `session`/`notification`, and category is itself tied to the resource. So the carve-out cannot be widened by a flag edit alone (P5). `VIEWER_FORBIDDEN` gains `privacy:delete` and still applies to flagged keys. The positive `SELF_SERVICE_MISSING` invariant runs on all 17 roles (outline `it.each` = the 4 US-066 Examples rows + a fast-check property). `authorise` allows Viewer and Auditor the set |
+| m1 | Closed | The AT-US-066-07 scan derives `apps/*` and `packages/*` (minus authz) from disk, adds `prisma/seed` when present, prunes build and dependency folders, and asserts a non-empty list containing `apps/api`, `apps/web` and `packages/shared` |
+| m2 | Closed | Title "authz decision behind AT-US-066-06 …", no bracketed ID. TASK-027/033 own the scenario |
+| m3 | Closed | Comment fixed. `assign.ts` adds `ASSIGNABLE_BY: Readonly<Record<RoleKey, readonly RoleKey[]>>` (exhaustive by type) and `canAssignRole`. Only an Owner assigns or removes an Owner; Owner and Admin assign Admin/Shipper/Finance/Viewer; partner and operator roles are assignable by nobody; unknown and prototype keys fail closed (P6b). I accept the rank table over a pure subset rule because Owner = Admin grants (D-058). See R2-n2 |
+| m4 | Closed | `VIEWER_FORBIDDEN: readonly Permission[]`, `IMPLIED_GRANTS: readonly (readonly [Permission, Permission])[]` |
+| m5 | Closed | Settled by D-058 (Finance `notification_pref:manage`, Admin `privacy:delete`) |
+| m6 | Closed | The integration snapshot adds `permissions.description` and `roles.is_system`/`description`. The seed now uses `ON CONFLICT ("id") DO NOTHING`, so a natural-key collision raises (PR8-SEC-08 b). A database-side backstop query was added (PR8-SEC-08 c) |
+| n1 | Closed | `IMPLIED_GRANT_MISSING` |
+| n2 | Closed | `effectivePermissions(roleKeys, roles)`: `roles` is required, with the REQ-RBAC-008 doc note and a test |
+| n3 | Closed | `ROLE_SPECS: { [K in RoleKey]: … }` and `ROLES` in `ROLE_KEYS` order (asserted). `ROLE_SCOPE_MISMATCH` (key prefix vs scope) has the swap test |
+| n4 | Routed | data-architect (D-ARCH-060 tolerates the `INCLUDE` drift by name in TASK-016) |
+| n5 | **Partially closed** | `document:download:read` is now `PERMISSION_FORMAT`. An action segment that is *not* already a catalogue verb still passes → R2-m1 |
+| n6 | Routed | first UI task that renders role names |
+| n7 | Routed | TASK-014 |
+
+Also verified from the security deltas the fix claims:
+- **PR8-SEC-02** (`any_org` in any segment; a scope qualifier in segment 1 or 2 → `PERMISSION_FORMAT`; `signatureOnly` ⇔ `webhook:*` of category `webhook`);
+- **PR8-SEC-03** (rule 10 regex `^insert\s+into\b.*\bon\s+conflict\b.*\bdo\s+update\b`, with a `DO UPDATE` fixture flagged and a `DO NOTHING` fixture clean);
+- **PR8-SEC-04** (above);
+- **PR8-SEC-06** (`canAssignRole`, implemented here although D-ORCH-011 had routed it to TASK-231/235, so those tasks consume it);
+- **PR8-SEC-08 (b)(c)**.
+
+### R2.3 New findings
+
+| ID | Sev | Location | Problem | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| R2-m1 | MINOR | `packages/authz/src/guard.ts:78-89` (`checkKeyShape`), `packages/authz/src/permissions/index.ts:92-96` (`permissionVerb`) | The n5 fix rejects `<res>:<verb>:<qualifier>` only when the action segment is a verb that some catalogue key already uses. A new verb in the action segment with a `read` qualifier still classifies as read. **Proved:** P3 adds `shipment:void:read` (category `shipment`) and grants it to the Viewer → 0 violations. P3b adds `shipment:purge:read` and grants it to the Auditor → 0 violations. Today's legitimate middle segments are a closed set: `member`, `status`, and the webhook providers `stripe`/`mock_gateway`. | This is the same class as round-1 M1 (a seed edit makes a non-read permission look read-only to the Viewer/Auditor invariants), but narrower: it needs a new, oddly named key plus a route that declares it, and the key shows up in the generated matrix. | Declare the sub-resource middle segments (e.g. `SUB_RESOURCES = {member, status}` plus the `webhook:*` providers). In `checkKeyShape`, reject a 3-segment key whose qualifier is not a scope qualifier unless its middle segment is a declared sub-resource. Add P3/P3b as mutated-catalogue tests. Fix in this PR if another commit happens anyway; otherwise route to TASK-020 (PR8-SEC-05 route-binding owner) as a merge condition there. Do not leave it unowned |
+| R2-n1 | NIT | `guard.ts:162-178` `readOnlyViolations` (`isAuditPermission`) | The Auditor may hold any `audit:*`, including a future destructive verb (P4 `audit:purge` → 0). This matches REQ-RBAC-004 ("audit permissions") and ADR-0008 ("audit:*"), so it is not a code defect. Audit immutability for every DB role (O4) limits the impact. | Spec breadth, not code | Architect/security-analyst: consider "read ∪ {`audit:export`} ∪ selfService" in ADR-0008 §3 when the M2 audit permissions are designed |
+| R2-n2 | NIT | `packages/authz/src/assign.ts:12` | `ASSIGNABLE_BY` is not tied to the grants. It is correct today (P6: every allowed pair has target ⊆ assigner), but a future grant change (e.g. Admin loses a permission again) would let an Admin assign a role holding more than they do, without failing a test. | Keeps the round-1 m3 subset intent | Add a property test: for every allowed (assigner, target) pair, `target.permissions ⊆ assigner.permissions`. Optional here; otherwise TASK-231/235 |
+| R2-n3 | NIT | `tools/authz/generate.ts:42-50` | The pins live beside the generator, so a PR can rewrite v1 and update the pin in the same diff. Review is then the only control. | Residual of M2 | Already routed by D-ARCH-062 item 4 / D-ORCH-011: generic migration-immutability check (TASK-016/TASK-007: every migration directory present on `origin/main` must be byte-identical in the PR). Keep it on those sheets |
+| R2-n4 | NIT | `tools/authz/generate.ts:157-165` (`checkMessages`) | When the catalogue changed in place, `--check` prints "catalogue changed … bump CATALOGUE_VERSION" and **also** "role-permission-matrix.md is out of date; run `npm run authz:generate`", which then refuses (exit 1). The developer gets two contradictory instructions. | Developer experience | Suppress the stale matrix-doc message when `releasedChanges` is non-empty, or append "after bumping CATALOGUE_VERSION" to it |
+
+### R2.4 Merge conditions
+
+1. No BLOCKER or MAJOR is open. R2-m1 is fixed in-PR or explicitly routed to TASK-020 in the orchestrator's merge record. R2-n1..n4 are optional or already routed.
+2. security-analyst round 2: no Critical/High open for PR #8.
+3. `statusCheckRollup` is empty on `498e3a5`. The gatekeeper/orchestrator confirms the bootstrap merge rule (D-ORCH-004) or the hosted fast lane before merging. `origin/main` is at `cb69b04` (docs-only, no overlap), so if the branch is merged again, the code tree must stay equal to `6e70275`.
+4. After merge, the v1 pin is live. Any later grant change needs the delta renderer first (as `artefacts()` says). The TASK-023 reference seed must not write the authz tables (D-ARCH-060).
+
+### R2.5 Security flags (for security-analyst)
+
+1. R2-m1: verb-in-action-segment keys classify as read (CWE-269). It is narrower than M1 but the same invariant family.
+2. R2-n1: the Auditor's `audit:*` breadth (spec level).
+3. R2-n3: pin co-located with the generator; relies on the TASK-016/007 immutability check.
+4. Confirmed closed: M1 (category bypass), M2 (in-place seed rewrite; CRLF fails closed), M3/ASVS V3.3.4 (own sessions for Viewer and Auditor), PR8-SEC-02/03/04/06/08(b)(c).
