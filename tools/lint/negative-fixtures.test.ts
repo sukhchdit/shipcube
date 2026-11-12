@@ -371,13 +371,18 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.resolver['@platform/shared']).toBe('packages/shared/src/index.ts');
   });
 
-  it('`npm run lint` runs ESLint and Stylelint with --max-warnings 0', () => {
+  it('`npm run lint` generates route types, then runs ESLint and Stylelint with --max-warnings 0', () => {
     const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     const steps = (scripts['lint'] ?? '').split('&&').map((step) => step.trim());
+    // typegen first: type-aware rules must resolve the git-ignored ./+types on a clean checkout, and npm pre-hooks are
+    // skipped under ignore-scripts (PR #4 R2-m2).
     expect(steps).toEqual([
+      'npm run typegen',
       expect.stringMatching(/^eslint \. .*--max-warnings 0/u),
       expect.stringMatching(/^stylelint .*--max-warnings 0/u),
     ]);
+    // No --allow-empty-input: Stylelint matching no CSS file fails instead of reading as clean (PR2-SEC-03).
+    expect(steps[2]).not.toContain('--allow-empty-input');
   });
 
   it('ESLint ignores build/coverage output only at the root and the workspace roots', () => {
