@@ -685,13 +685,18 @@ Feature: Invitations
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-083, EPIC-02
 - **Linked REQs:** REQ-ORG-011
 - **As an** invited colleague **I want** to accept with my verified email **so that** I join the team with the invited role.
-- **Notes:** EC-A16. Account is created first if none exists.
+- **Notes:** EC-A16. Account is created first if none exists. Endpoint is `POST /api/v1/invitations/accept {token}` (ADR-0016 amendment 2, D-043): the invitation email link carries the token in the URL fragment (`#t=…`), the SPA reads it, posts it in the body and clears it with `replaceState` (D-UX-009); the token never appears in a path, query string, access log or Referer.
 
 #### Acceptance criteria
 ```gherkin
 Feature: Accept invitation
   Scenario: Accept
-    Given a signed-in user whose verified email matches Then the membership becomes ACTIVE with the invited role and created_by is the inviter
+    Given a signed-in user whose verified email matches When they POST /api/v1/invitations/accept with the token in the body Then the membership becomes ACTIVE with the invited role and created_by is the inviter
+
+  Scenario: Token never travels in a URL
+    When the invitation email link is opened
+    Then the token is only in the URL fragment, the request the browser sends to the server carries no token, and the access log and audit entry contain no token value
+    And a request to a path or query containing the token (for example /invitations/<token>/accept) returns 404 NOT_FOUND
 
   Scenario: Expired token
     Then 410 "TOKEN_EXPIRED" and membership unchanged

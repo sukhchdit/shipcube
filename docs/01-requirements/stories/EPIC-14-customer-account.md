@@ -785,7 +785,7 @@ Permission path: every authenticated user manages only own security; the unauthe
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** EPIC-02, EPIC-03, EPIC-15
 - **Linked REQs:** REQ-ACCT-014
 - **As an** account owner **I want** to view my organisation and invite, re-role and remove members **so that** colleagues can use the account with the right access.
-- **Notes:** Permissions `org:read`, `org:member:manage`. Roles Owner, Admin, Shipper, Finance, Viewer. Invitation token valid 7 days (ASSUMED), single-use, in inviter's locale selection. Not offered for INDIVIDUAL organisations. Removing a member revokes their sessions in this organisation (REQ-AUTH-009). Audit `UPDATE` on `membership` with old and new role. Invitation email: TEAM_INVITATION (event mapping in US-277, EPIC-15).
+- **Notes:** Permissions `org:read`, `org:member:manage`. Roles Owner, Admin, Shipper, Finance, Viewer. Invitation token valid 7 days (ASSUMED), single-use, in inviter's locale selection. Not offered for INDIVIDUAL organisations. Removing a member revokes their sessions in this organisation (REQ-AUTH-009). Audit `UPDATE` on `membership` with old and new role. Invitation email: TEAM_INVITATION (event mapping in US-277, EPIC-15); the link carries the token in the URL fragment and acceptance is `POST /invitations/accept {token}` (US-084, D-043).
 
 #### Acceptance criteria
 ```gherkin

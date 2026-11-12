@@ -523,7 +523,7 @@ Feature: Public tracking rate limits
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-247
 - **Linked REQs:** REQ-TRACK-009
 - **As a** receiver **I want** to look up a shipment by the sender's reference together with my postcode **so that** I can track without a tracking number.
-- **Notes:** Customer references are not unique across organisations (GAP-B-15). The postcode is used only as a matcher and is never echoed. EC-B39.
+- **Notes:** Endpoint `POST /api/v1/public/tracking/lookup {customer_reference, postcode}` (ADR-0016 amendment 2, D-043): the postcode is personal data, so it travels in a body, never in a URL; the server matches an HMAC of reference ‖ postcode in `tracking_index` and stores neither in clear (data-model.md §12). Tracking-number and order-number lookups stay `GET` (US-247). Customer references are not unique across organisations (GAP-B-15). The postcode is used only as a matcher and is never echoed. EC-B39.
 
 #### Acceptance criteria
 Permission path: not applicable — anonymous `public` route; cross-organisation and wrong-postcode scenarios above prove non-disclosure.
@@ -531,8 +531,12 @@ Permission path: not applicable — anonymous `public` route; cross-organisation
 Feature: Public lookup by customer reference and postcode
   Scenario: Exactly one match returns the tracking result
     Given exactly one shipment has customer reference "PO-7788" and receiver postcode "20095"
-    When a visitor submits reference "PO-7788" with postcode "20095"
+    When a visitor POSTs reference "PO-7788" with postcode "20095" to /api/v1/public/tracking/lookup
     Then the response is 200 with the public tracking view
+
+  Scenario: Postcode never travels in a URL
+    When a visitor sends the reference and postcode as query parameters on a GET
+    Then the response is 404 NOT_FOUND or 405 METHOD_NOT_ALLOWED and the access log contains no postcode
 
   Scenario: Reference without postcode is rejected
     When a visitor submits reference "PO-7788" only

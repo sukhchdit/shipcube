@@ -139,7 +139,7 @@ Feature: One-command local environment
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-003
 - **Linked REQs:** REQ-PLAT-006
 - **As an** operator **I want** every deployable built as a minimal, non-root, secret-free image **so that** the artefacts are safe to publish and run.
-- **Notes:** Image digests pinned. Frontends are static assets served from a hardened Nginx image. Secret-pattern scan of image history is a CI step (US-048).
+- **Notes:** Image digests pinned; base image `node:24-*-slim` by digest (Node 24 LTS, D-ARCH-001). Frontends are static assets served from a hardened Nginx image. Secret-pattern scan of image history and the Trivy image scan are heavy stages: they run in the full `ci.yml` on `main` and locally via test-runner with evidence under `docs/05-quality/` (D-ORCH-001, D-044); the Dockerfile lint runs in the PR fast lane (US-048).
 
 #### Acceptance criteria
 Permission path: not applicable — build artefacts with no principal; a second negative scenario is included.
@@ -157,7 +157,7 @@ Feature: Hardened multi-stage container images
     Then the job fails and names the layer, not the value
 
   Scenario: Unpinned base image is rejected
-    Given a Dockerfile with "FROM node:20" without a digest
+    Given a Dockerfile with "FROM node:24" without a digest
     When the Dockerfile lint runs
     Then it exits non-zero
 
@@ -171,16 +171,22 @@ Feature: Hardened multi-stage container images
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-001, US-048
 - **Linked REQs:** REQ-PLAT-007
 - **As a** developer **I want** a GitHub Actions pipeline with all quality stages in a fixed order **so that** no change reaches `main` without passing every check.
-- **Notes:** Order: install, lint and format check, type check, unit tests with coverage gate, integration tests with service containers, build, security scans, image build, SBOM, Terraform fmt/validate/Checkov. GHCR publish only from `main`/tag. No Terraform apply or AWS deploy; deploy and canary jobs exist disabled with a documented enabling condition.
+- **Notes:** Order in `ci.yml`: install, lint and format check, type check, unit tests with coverage gate, contract, integration tests with Testcontainers, build, security scans, image build, SBOM, Terraform fmt/validate/Checkov, e2e. Node 24 LTS from `.node-version` (D-ARCH-001). Evidence model (D-ORCH-001, D-044): on every PR only the hosted fast lane runs (install → lint/format → typecheck → unit + coverage → contract → build → security); the heavy stages (integration, images/Trivy, e2e) run in the full workflow on `main`/`workflow_dispatch` and locally via test-runner with evidence under `docs/05-quality/`. GHCR publish only from `main`/tag. `ci.yml` has no Terraform apply and no AWS deploy; `cd.yml` holds the gated plan/apply/deploy/canary jobs, no-op with a documented enabling condition and never run in this run (ADR-0023).
 
 #### Acceptance criteria
 Permission path: not applicable — CI workflow; a second negative scenario is included.
 ```gherkin
 Feature: CI pipeline skeleton
-  Scenario: Green pipeline runs the stages in order
+  Scenario: Green PR fast lane runs its stages in order
     Given a pull request with no defects
-    When the workflow runs
-    Then the stages execute in the documented order and the run succeeds
+    When ci.yml runs for the pull request
+    Then install, lint/format, typecheck, unit with coverage, contract, build and security execute in the documented order on a Node 24 runner and the run succeeds
+    And the integration, images and e2e jobs are not scheduled for the pull request (D-ORCH-001)
+
+  Scenario: Full workflow runs every stage on main
+    Given a push to main or a workflow_dispatch
+    When ci.yml runs
+    Then integration tests with Testcontainers, image build with Trivy and SBOM, Terraform fmt/validate/Checkov and e2e run after the fast-lane stages, in the documented order
 
   Scenario: Any failing stage fails the run
     Given a unit test is made to fail
@@ -194,13 +200,15 @@ Feature: CI pipeline skeleton
     Then no image is pushed to GHCR
     And on a push to main the images are pushed
 
-  Scenario: No AWS deploy is possible
-    When the workflow definition is linted
-    Then it contains no terraform apply step and the deploy and canary jobs are disabled with an enabling-condition comment
+  Scenario: No AWS deploy is possible from ci.yml
+    When the ci.yml workflow definition is linted
+    Then it contains no terraform apply step and no job that assumes an AWS role
+    And the deploy and canary jobs live only in cd.yml, are gated on DEPLOY_TARGET_* variables and the OIDC role, log "no deploy target configured" otherwise, and carry an enabling-condition comment
 
-  Scenario: Integration tests use service containers
-    When the integration stage runs
-    Then PostgreSQL and Redis service containers are started and the tests pass against them
+  Scenario: Integration tests use Testcontainers
+    When the integration stage runs (on main, by dispatch, or locally via test-runner)
+    Then PostgreSQL and the Redis-compatible store are started as Testcontainers and the tests pass against them
+    And a local run writes its JUnit summary under docs/05-quality/
 ```
 
 ### US-006 — Coverage gate

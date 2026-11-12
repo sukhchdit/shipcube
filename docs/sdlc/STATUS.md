@@ -9,7 +9,7 @@
 | P0 | Intake | orchestrator | ✅ DONE | BRIEF.md, operating params (D-002), Q-001..Q-004 answered |
 | P1 | Requirements → G1 | product-manager | ✅ G1 PASS_WITH_CONDITIONS | 430 REQs, 90 NFRs, 290 stories (215 Must), D-008..D-034, A-005..A-077 (commit 9cb3205) |
 | P2 | UX | ux-designer | ✅ DONE | 108/108 Must UI stories covered; F01–F10, W00–W17, tokens.json (validated), D-UX-001..029. 11 open items → P3 (README §5) |
-| P3 | Architecture → G2 | principal-architect | ▶ IN_PROGRESS | Stack fixed (ADR-0001 documents, does not re-select) |
+| P3 | Architecture → G2 | principal-architect | ▶ PRE-G2 FIXES | 27 ADRs, C4, data model (~90 tables), OpenAPI 3.1 (132 ops, lint 0 errors), threat model (119 threats), NFR strategy + G1-C4 design column. Pre-G2: ADR-0023 amend (D-ORCH-001), UX §5 items; PM applies D-ARCH-006 wording |
 | P4 | Planning | senior-developer + qa-lead | ⏳ | |
 | P5 | Build (waves, M0 → M1) | senior-developer | ⏳ | `v0.1.0-m0` pre-release after M0 waves (D-006) |
 | P6 | Verification → G3 | qa-lead + security-analyst + performance-engineer | ⏳ | |
@@ -31,6 +31,8 @@
 _none_
 
 ## Defaults applied / optional questions outstanding
+- Q-006 Node 24 via fnm (installed v24.22.3; per-command PATH prefix since the profile change was blocked by the safety classifier) — D-ORCH-002.
+- Q-007 CI = hosted fast lane + local heavy suites — D-ORCH-001.
 - Q-001..Q-004 answered by the human (all recommended defaults). See QUESTIONS.md.
 - Brief §14 defaults adopted (D-007).
 
@@ -40,7 +42,7 @@ _none_
 | G1-C1 | Reconcile 5 contradictory defaults REQUIREMENTS vs NFR (rate limits, compose 180 s, home JS budget, DR-A22) | before G2 | product-manager | CLOSED (D-035; verify at G2) |
 | G1-C2 | Milestone/MoSCoW tag fixes (REQ-UI-014, AUTH-020, UI-018, PICK-013/US-239), regen stats | before G2 | product-manager | CLOSED (D-036; verify at G2) |
 | G1-C3 | Assumption/GAP hygiene, permission markers, NFR-MAINT-002 table fix | before G2 | product-manager | CLOSED (verify at G2) |
-| G1-C4 | NFR traceability: Design column (architect) before G2; Test column (qa-lead) before P5 | G2 / P5 | principal-architect, qa-lead | IN_PROGRESS |
+| G1-C4 | NFR traceability: Design column (architect) before G2; Test column (qa-lead) before P5 | G2 / P5 | principal-architect, qa-lead | Design column DONE (nfr-traceability.md); Test column → qa-lead P4 |
 | G1-C5 | Demo-critical Must tagging per epic (PM) before G2; wave plan by it (P4) | G2 / P4 | product-manager, senior-developer | PM tag DONE (DC=134: M0 74, M1 60; ladder PRD §7.1, D-037); wave plan pending P4 |
 | COND-SANDBOX-DEMO | Real sandbox label from DHL, FedEx and UPS booked and paid end to end (M1 exit demo); needs creds outside the repo | Post-release, when creds supplied | qa-lead | OPEN (blocked on external creds, by design) |
 
@@ -51,6 +53,7 @@ _none_
 4. **Testcontainers on Docker Desktop.** Integration tests depend on Docker availability in CI and locally.
 
 ## Next Actions
-- product-manager: close G1-C1, C2, C3, C5-tag; fill CLAUDE.md §1.
-- ux-designer: P2 for Must UI stories.
-- principal-architect: P3 (ADR-0001 fixed stack, C4 L1–L3, ADRs, data model, OpenAPI, threat model via security-analyst, NFR strategy, G1-C4 Design column) → G2.
+- principal-architect: ADR-0023 amendment + UX §5 resolutions (running).
+- product-manager: D-ARCH-006 wording + assumptions (running).
+- Then quality-gatekeeper G2 attempt 1.
+- Then P4: senior-developer + qa-lead (Wave 0 = skeleton + generators + spikes SPK-01..06; waves by DC tag).

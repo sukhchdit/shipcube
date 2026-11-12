@@ -737,7 +737,7 @@ Feature: Preference suppression
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-284
 - **Linked REQs:** REQ-NOTIF-012
 - **As a** customer **I want** to see which emails the platform sent me **so that** I can check that confirmations were delivered.
-- **Notes:** Log fields: message ID, template ID and version, locale, channel, recipient address as at send time, status (QUEUED, SENT, FAILED, DEAD_LETTERED, SUPPRESSED_BY_PREFERENCE), attempt count, timestamps. Variables stored with PII redacted (order number kept; names, addresses, phone numbers, references dropped); rendered body not stored. Permission `notification:read`, own log only. Viewing writes `VIEW`. Staff view is M2.
+- **Notes:** Log fields: message ID, template ID and version, locale, channel, recipient user ID, recipient address in masked form (`a***@domain`, REQ-PLAT-012 rule) as at send time, status (QUEUED, SENT, FAILED, DEAD_LETTERED, SUPPRESSED_BY_PREFERENCE), attempt count, timestamps. Variables stored with PII redacted (order number, tracking number, carrier, canonical status and city kept; names, street addresses, phone numbers, references dropped); rendered subject and body not stored; no clear-text email address (D-040 reconciles REQ-NOTIF-012 with NFR-PRIV-004). Permission `notification:read`, own log only. Viewing writes `VIEW`. Staff view is M2.
 
 #### Acceptance criteria
 ```gherkin
@@ -753,9 +753,10 @@ Feature: Notification log
     Then stored variables keep "orderNumber" and drop receiver name, street, phone and references
     And the response contains no rendered subject or body
 
-  Scenario: Recipient address as at send time
+  Scenario: Recipient address as at send time, masked
     Given Ana later changes her email
-    Then old log rows still show the address used at send time
+    Then old log rows still show the masked form of the address used at send time (for example "a***@acme.test")
+    And no log row stores a clear-text email address
 
   Scenario Outline: Status values
     Then log rows can show the status "<status>"

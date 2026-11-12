@@ -1,0 +1,2 @@
+- [G1 conditions open for G2](project_g1_conditions.md) — G1 attempt 1 PASS_WITH_CONDITIONS 2026-11-12; verify G1-C1..C5 closed at G2
+- [ID regex must allow digits](feedback_id_parsing.md) — REQ-I18N/NFR-A11Y rows vanish with [A-Z]+; sanity-check totals vs stats table

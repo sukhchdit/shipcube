@@ -1,0 +1,1 @@
+- [P3 architecture context](project_p3_architecture_context.md) — why Node 24/TS 6/Valkey/RustFS/tokenised vault; CI = hosted fast lane + local heavy evidence (D-ORCH-001); fnm PATH prefix; open items

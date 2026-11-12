@@ -40,7 +40,7 @@ Counts: 12 stories. Must 7 (US-220..US-226), Should 4 (US-227..US-230), Could 1 
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** EPIC-01
 - **Linked REQs:** REQ-DOC-001, REQ-DOC-005, REQ-DOC-006
 - **As a** customer **I want** my documents kept private and tamper-evident **so that** nobody else can read them and I can trust their content.
-- **Notes:** MinIO in Compose (D-025). No end-user uploads in M1.
+- **Notes:** S3-compatible object storage through one `ObjectStorage` port: RustFS in Compose and Testcontainers, S3 in AWS (D-039 supersedes the local-store wording of D-025; ADR-0021; SeaweedFS is the fallback if spike SPK-05 fails, A-084). No end-user uploads in M1.
 
 #### Acceptance criteria
 ```gherkin

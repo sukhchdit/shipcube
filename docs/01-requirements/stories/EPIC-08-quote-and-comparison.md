@@ -588,7 +588,7 @@ Feature: Saved quotes
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-154, EPIC-03
 - **Linked REQs:** REQ-QUOTE-015
 - **As a** registered individual **I want** to share a read-only quote link **so that** a colleague or friend can see options and prices without my personal data.
-- **Notes:** Permission `quote:share`. Token at least 128 bits. Shared view shows countries and cities, packages, content type, options and prices; no postcode, name, address, email, reference or other personal data. Read-only, expires with the quote; after expiry shows "this quote has expired" with inputs prefilled for a new quote (EC-B29). Revoked or unknown token returns 404.
+- **Notes:** Permission `quote:share`. Token at least 128 bits, carried in the share link's URL fragment and resolved with `POST /api/v1/public/shared-quotes/resolve {token}` (ADR-0016 amendment 2, D-043); the token never appears in a path, query string, access log or Referer. Shared view shows countries and cities, packages, content type, options and prices; no postcode, name, address, email, reference or other personal data. Read-only, expires with the quote; after expiry shows "this quote has expired" with inputs prefilled for a new quote (EC-B29). Revoked or unknown token returns 404.
 
 #### Acceptance criteria
 ```gherkin
@@ -600,9 +600,14 @@ Feature: Share a quote
 
   Scenario: Anonymous view shows only permitted data
     When an anonymous visitor opens the link
-    Then origin/destination countries and cities, packages, content type, options and prices are shown
+    Then the page reads the token from the URL fragment and posts it to POST /api/v1/public/shared-quotes/resolve
+    And origin/destination countries and cities, packages, content type, options and prices are shown
     And the response contains no postcode, name, address, email or reference
     And an audit entry VIEW exists with actor type anonymous and the token ID but not the token
+
+  Scenario: Token never travels in a URL
+    When the share link is opened
+    Then the request the browser sends to the server carries no token in path or query, the access log holds no token, and a GET with the token in the path or query returns 404 NOT_FOUND
 
   Scenario: Revoke
     When the owner revokes the link

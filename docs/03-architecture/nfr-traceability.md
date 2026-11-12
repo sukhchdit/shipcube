@@ -1,0 +1,98 @@
+# NFR traceability — Design column (closes G1-C4 for principal-architect)
+
+Version 1.0 · 2026-11-12 · owner principal-architect (Design) · qa-lead fills **Test(s)** in P4 before P5 starts. Status values: Specified → **Designed** → Planned → Implemented → Verified. "Run" = NFR.md verification status in this run. Full mechanism text per row is in `nfr-strategy.md`; ADR files are in `adr/`.
+
+| NFR | Metric (short) | Mechanism (short) | Design (ADR / spec) | Verification approach | Run | Test(s) | Status |
+|---|---|---|---|---|---|---|---|
+| NFR-PERF-001 | API latency non-carrier p95/p99 @ 300 rps | Stateless API, one tx/request, indexes per access pattern, Redis caches, keyset pagination | ADR-0003, ADR-0005, ADR-0016, data-model.md | k6 steady; 100 rps gate in the local heavy lane on the developer host (ADR-0023 amendment E); hosted 2-vCPU smoke reported; 300 rps P6 report | PARTIAL | – | Designed |
+| NFR-PERF-002 | Rate shopping first result ≤ 1.5 s | Parallel fan-out + SSE per-carrier emission, pure pricing | ADR-0010, ADR-0015 | k6 SSE time_to_first_result | FULL | – | Designed |
+| NFR-PERF-003 | Rate shopping complete ≤ 5 s, partial results | Per-carrier 4 s / overall 5 s deadlines, `complete` event, Redis cost cache 300 s | ADR-0010 (DR-B15/B16) | k6 SSE profiles fast+hung, slow+flaky, all hung; cache check | FULL | – | Designed |
+| NFR-PERF-004 | Booking ack ≤ 300 ms; PAID→LABEL_READY ≤ 10 s | 202 after intent persist; outbox relay 500 ms; saga on `booking` queue | ADR-0004, ADR-0013, ADR-0014 | k6 booking 5/s; audit timestamps | FULL | – | Designed |
+| NFR-PERF-005 | Public tracking p95 ≤ 200 ms @ 50 rps | Read stored events only; Luhn pre-check; indexes | ADR-0009, ADR-0010, data-model.md | k6 steady with raised limit | FULL | – | Designed |
+| NFR-PERF-006 | Lists at volume; no Seq Scan; N+1 guard ≤ 12 queries | `org_id`-leading composite + partial indexes; query-plan registry; Prisma query counter | ADR-0016, data-model.md §3 | Integration EXPLAIN tests on 100k/1M rows; registry build test; k6 list | FULL | – | Designed |
+| NFR-PERF-007 | k6 ramp/steady/spike/soak | Same as PERF-001 + heap metrics, bulkheads | ADR-0017, platform.md | k6 scripts `tests/load`; soak in the local heavy lane `gate` profile (weekly), evidence `docs/05-quality/performance/` | PARTIAL | – | Designed |
+| NFR-SCALE-001 | 10× headroom by replicas only | No in-process state; Redis-shared state; idempotent consumers | ADR-0003, ADR-0004, ADR-0013 | 1× vs 10× same images; capacity note | PARTIAL | – | Designed |
+| NFR-SCALE-002 | 2+ api/worker replicas; 0 duplicate effects | Redis sessions/limits/caches; job IDs + `job_executions`; edge proxy | ADR-0006, ADR-0013, ADR-0014, platform.md §2 | compose `--scale`; kill replica; duplicate audit over 1 000 bookings | FULL | – | Designed |
+| NFR-SCALE-003 | Autoscaling signals + policy exist | prom-client gauges → ADOT/CloudWatch; Terraform ECS autoscaling | ADR-0017, ADR-0022, platform.md §5 | metrics scrape test; terraform validate + Checkov | DEFERRED | – | Designed |
+| NFR-AVAIL-001 | 99.9 % monthly | Multi-AZ, canary + alarm rollback, SLO/burn-rate rules as code | ADR-0022, ADR-0017 §6, platform.md §8 | SLO doc + rules reviewed | DEFERRED | – | Designed |
+| NFR-AVAIL-002 | Health/readiness/graceful shutdown | `/health/live`, `/health/ready` (≤ 2 s/dep, degraded audit), SIGTERM drain ≤ 30 s | ADR-0013 §7, ADR-0017 §5 | dependency stop/start; SIGTERM under k6; 100 slow jobs | FULL | – | Designed |
+| NFR-AVAIL-003 | Zero-downtime migrations | expand→migrate→contract; TS migration linter; previous image probe | data-model.md §8, ADR-0023 | CI probe job + linter | FULL | – | Designed |
+| NFR-REC-001 | RPO ≤ 5 min | RDS PITR + cross-region copy | platform.md §10 | compose rehearsal (informational) | DEFERRED | – | Designed |
+| NFR-REC-002 | RTO ≤ 60 min | Restore runbook (DB, buckets, DNS, app) | platform.md §10/§12 | compose restore ≤ 15 min | DEFERRED | – | Designed |
+| NFR-REC-003 | Backup/restore rehearsal with integrity checks | pg_dump/restore + bucket copy; verifier (counts, FKs, chain, SHA-256) weekly + pre-migration | ADR-0021, ADR-0007, platform.md §10 | CI job exit 0 + report | FULL | – | Designed |
+| NFR-WEB-001 | LCP ≤ 2.5 s public pages | Pre-rendered per-locale HTML, self-hosted fonts, optimised images, compression | ADR-0026, ADR-0002 | Lighthouse CI mobile slow-4G en/es/fr | FULL | – | Designed |
+| NFR-WEB-002 | INP ≤ 200 ms (lab TBT) | Code splitting, lazy widget logic, minimal motion | ADR-0026 | Playwright web-vitals + Lighthouse TBT | PARTIAL | – | Designed |
+| NFR-WEB-003 | CLS ≤ 0.1 incl. streaming results | Reserved dimensions, in-place skeleton replacement, font size-adjust | ADR-0026 §6 | Lighthouse CLS + PerformanceObserver | FULL | – | Designed |
+| NFR-WEB-004 | Bundle budgets; one chunk per route; no cross-app code | `size-limit`; separate apps; framework-mode splitting; lint | ADR-0002 §4, ADR-0026 §10 | size-limit CI; manifest test | FULL | – | Designed |
+| NFR-WEB-005 | Pre-render tags, caching headers, images, Lighthouse ≥ 90/95 | React Router `prerender`, immutable assets / no-cache HTML, brotli, image budget | ADR-0002, ADR-0026, platform.md §3 | curl tag assertions; header test; Lighthouse; image-size check | FULL | – | Designed |
+| NFR-A11Y-001 | WCAG 2.2 AA incl. 2.2 additions | Radix-based `packages/ui`, criteria mapped to components, `lang` per locale | ADR-0026 §3 | axe + manual checklist + screen-reader spot checks | PARTIAL | – | Designed |
+| NFR-A11Y-002 | 0 serious/critical axe across pages × states | Shared Playwright axe fixture; route inventory; `ScreenState` states | ADR-0024, ADR-0026 | axe in e2e | FULL | – | Designed |
+| NFR-A11Y-003 | Keyboard-only journeys; focus visible, not obscured | Keyboard-first components, skip link, focus ring token, scroll offsets | ADR-0026 | keyboard-only specs; Tab sweep | FULL | – | Designed |
+| NFR-A11Y-004 | Target size; reflow at 320 px/200 % | Token-driven control sizes; cards on small screens | ADR-0026 §3 | Playwright 360/390 touch; 320 sweep | FULL | – | Designed |
+| NFR-A11Y-005 | Contrast ≥ 4.5:1 / 3:1 both themes | Token pairs; contrast unit test | `packages/ui` tokens (ADR-0025 Tailwind) | unit contrast test; axe color-contrast | FULL | – | Designed |
+| NFR-A11Y-006 | Reduced motion; hover under `hover:hover` | Motion tokens → 0 ms; `useReducedMotion`; stylelint rule | ADR-0026, ADR-0002 §5 | Playwright reducedMotion; stylelint | FULL | – | Designed |
+| NFR-SEC-001 | ASVS 4.0.3 L2 assessed | Threat model with ASVS chapter map; controls in ADR-0005/6/7/16/18 | threat-model.md §9 | security-analyst checklist P6 | PARTIAL | – | Designed |
+| NFR-SEC-002 | 0 Critical/High across scanners; Gitleaks 0 | Semgrep, Gitleaks, npm audit, Trivy, ZAP in CI | ADR-0023, ADR-0024 | CI gates | FULL | – | Designed |
+| NFR-SEC-003 | bcrypt ≥ 12; no enumeration; timing ≤ 100 ms | Cost floor; dummy compare; identical bodies; offline list | ADR-0006 | hash prefix test; response/timing tests | FULL | – | Designed |
+| NFR-SEC-004 | Token lifetimes, lockout, staff MFA, recovery codes | Config defaults D-024/DR-A01/A02; family revocation; staff gate | ADR-0006 | fake-clock API tests; cookie assertions; matrix | FULL | – | Designed |
+| NFR-SEC-005 | Redis-shared rate limits per class; 429 + headers | express-rate-limit + rate-limit-redis; route classes; trusted proxy | ADR-0016 §8 | limit+1 tests on 2 replicas | FULL | – | Designed |
+| NFR-SEC-006 | CSP no unsafe-inline/eval; secure headers; HSTS | Helmet; hash-based CSP for static apps; exact Stripe hosts; report endpoint | ADR-0016 §11, ADR-0026 §9 | Playwright headers + violation listener; ZAP | FULL | – | Designed |
+| NFR-SEC-007 | TLS ≥ 1.2; TLS to DB/Redis outside local | Config guards; ACM policies; verify-full | ADR-0018 §3, platform.md §9 | config unit test; Checkov | PARTIAL | – | Designed |
+| NFR-SEC-008 | CSRF on cookie routes; strict CORS | Origin + X-CSRF-Token + SameSite=Strict; exact-origin CORS | ADR-0006, ADR-0016 §11 | cross-origin attempts; cookie-route enumeration | FULL | – | Designed |
+| NFR-SEC-009 | Strict validation; 413; no leakage; problem+json | Joi `allowUnknown:false`; 1 MB limit; single error handler | ADR-0016 §3/§4 | strict-schema build test; fuzz; leakage grep | FULL | – | Designed |
+| NFR-SEC-010 | SSRF-safe egress | Single `OutboundHttpClient` with allow-list, post-resolution checks, redirect validation; lint | ADR-0016 §13 | malicious-server + DNS-stub tests; lint fixture | FULL | – | Designed |
+| NFR-SEC-011 | 0 IDOR/mass-assignment/privilege escalation | RLS 404 + WITH CHECK; unknown-field rejection; catalogue + matrix; generated abuse suite | ADR-0005, ADR-0008, ADR-0016 | generated abuse suite + matrix; DENIED audit asserts | FULL | – | Designed |
+| NFR-SEC-012 | Dependency licence/age/vuln policy | Allow-list + 18-month + advisory checks; D-ARCH-003 | ADR-0001, ADR-0023 | CI scripts | FULL | – | Designed |
+| NFR-SEC-013 | No PAN; webhook signature/tolerance/replay; presigned ≤ 300 s audited; 128-bit tokens | Payment Element only; Stripe signature verify; `gateway_webhook_events`; presign after permission + audit | ADR-0012, ADR-0021, ADR-0005 | e2e PAN scanner; webhook tests; download tests | FULL | – | Designed |
+| NFR-PRIV-001 | 0 PII/secrets in logs | Pino redaction from classification registry; e-mail masking; no bodies | ADR-0017 §1 | sentinel unit tests; e2e log grep | FULL | – | Designed |
+| NFR-PRIV-002 | Audit values redacted/tagged | `[REDACTED]` before hash; PII tokenised to vault; class tags | ADR-0007 | sentinel audit tests; tag test | FULL | – | Designed |
+| NFR-PRIV-003 | 100 % PII columns classified | Classification registry ↔ Prisma schema; build-time test | ADR-0007, data-model.md | schema-introspection test | FULL | – | Designed |
+| NFR-PRIV-004 | Public pages/notification log minimal | Allow-list projections (DR-B31); log stores IDs/status only | ADR-0020 §5, api/openapi.yaml | contract/snapshot tests; log inspection | FULL | – | Designed |
+| NFR-PRIV-005 | Consent records; retention periods recorded | `consent_records`; pack retention sections | data-model.md compliance, ADR-0027 | consent API tests; seed test | PARTIAL | – | Designed |
+| NFR-AUDIT-001 | 100 % routes; same-tx; fail-closed sensitive reads | Metadata-driven middleware in `withTenantTx`; 503 on sensitive view failure | ADR-0007, ADR-0003 | audit generator; fault injection | FULL | – | Designed |
+| NFR-AUDIT-002 | Immutability for all roles; partitions current+3 | INSERT/SELECT grants; triggers; daily partition job; no default partition | ADR-0007, data-model.md §5 | role mutation attempts; privilege catalog; job test | FULL | – | Designed |
+| NFR-AUDIT-003 | Chain verifies; tamper detected; 1 M ≤ 5 min | Per-stream SHA-256 chain + advisory lock; checkpoint; hourly/nightly verify | ADR-0007 | canonicalisation unit; corruption test; timing run | FULL | – | Designed |
+| NFR-AUDIT-004 | 100 % route metadata; count = OpenAPI ops | `defineRoute` refusal; registry ↔ OpenAPI build test | ADR-0003 | build-time test | FULL | – | Designed |
+| NFR-AUDIT-005 | ≤ 15 ms p95 overhead | In-process diff/hash; per-stream lock; batched vault inserts | ADR-0007; risks.md SPK-04 | k6 A/B audit on/off | FULL | – | Designed |
+| NFR-AUDIT-006 | All §4.9 fields; security events recorded | Column set; allow-listed event emitters | ADR-0007, ADR-0006 | JSON-Schema per event; viewer filter tests | FULL | – | Designed |
+| NFR-AUDIT-007 | Closed partitions to S3 Object Lock | `AuditArchiver` + `archived_at`; manifest format; M5 bucket | ADR-0007, platform.md §4 | verifier vs RustFS | DEFERRED | – | Designed |
+| NFR-TENANT-001 | 0 cross-tenant reads/writes; RLS forced everywhere | `org_id` + forced RLS branches + WITH CHECK; `set_config`; no BYPASSRLS | ADR-0005, data-model.md §4 | catalog test; generated cross-tenant tests; unset-context test | FULL | – | Designed |
+| NFR-TENANT-002 | 100 % route × role matrix | Catalogue + role seed + metadata → generator | ADR-0008 | matrix generator in CI | FULL | – | Designed |
+| NFR-I18N-001 | 0 literal strings | i18next lint rule; pseudo-locale scan | ADR-0002 §5, ADR-0026 | lint; rendered scan | FULL | – | Designed |
+| NFR-I18N-002 | en/es/fr parity incl. templates | Parity script over resources + e-mail templates | ADR-0020 §3, ADR-0026 | CI parity script | FULL | – | Designed |
+| NFR-I18N-003 | +30 % tolerance; logical CSS | stylelint-use-logical; token layouts; overflow checks | ADR-0026, ADR-0002 §5 | Playwright overflow; stylelint | FULL | – | Designed |
+| NFR-I18N-004 | Intl helpers only | `packages/shared/format`; lint bans ad-hoc formatting | ADR-0009, ADR-0026 §2 | lint + helper unit tests | FULL | – | Designed |
+| NFR-COMPAT-001 | Browser matrix | browserslist; Playwright engines + devices | ADR-0026 §11 | browserslist check; projects | PARTIAL | – | Designed |
+| NFR-COMPAT-002 | Journeys on 3 engines × 2 viewports | Playwright projects | ADR-0024 | e2e matrix | FULL | – | Designed |
+| NFR-COMPAT-003 | No horizontal scroll at 5 breakpoints | Breakpoint tokens; tables → cards | ADR-0026 | viewport sweep | FULL | – | Designed |
+| NFR-RES-001 | Timeouts on all external calls | `AbortSignal.timeout` per op (DR-B32 values); lint on client factory | ADR-0010, ADR-0016 §13 | nock/Mock hung tests; lint fixture | FULL | – | Designed |
+| NFR-RES-002 | Retries idempotent only, bounded, jittered | Retry wrapper (max 2, 200 ms ×2, full jitter) | ADR-0010 | nock sequences, seeded RNG | FULL | – | Designed |
+| NFR-RES-003 | Breaker + bulkhead per account; isolation | opossum per account; `p-limit(10)`; fail-fast | ADR-0010 | Mock error/hung transitions; k6 hung-carrier comparison | FULL | – | Designed |
+| NFR-RES-004 | Job retry/DLQ; 0 lost; idempotent | BullMQ attempts 5 + backoff; DLQs; `job_executions`; AOF Redis | ADR-0013 | kill -9 / Redis restart; DLQ after 5 | FULL | – | Designed |
+| NFR-RES-005 | Idempotent replay; saga guarantees | Idempotency store; saga keys; client reference first; compensations; sweeper | ADR-0014 | concurrency tests; saga fault matrix | FULL | – | Designed |
+| NFR-RES-006 | Partial results + named notice; no charge on down carrier | `allSettled` statuses; UI notice; breaker → stable error | ADR-0010, ADR-0026 §6 | Playwright Mock error/hung en/es/fr; API status asserts | FULL | – | Designed |
+| NFR-OBS-001 | Structured JSON lines with IDs | Pino fields; correlation echo | ADR-0017 §1–2 | JSON-Schema log validation | FULL | – | Designed |
+| NFR-OBS-002 | RED per route; queue metrics; no high cardinality | prom-client; route templates; cardinality guard | ADR-0017 §3 | scrape vs metadata; series count | FULL | – | Designed |
+| NFR-OBS-003 | One trace API→queue→worker→carrier | OTel SDK + manual BullMQ spans + `trace_context` | ADR-0017 §4, ADR-0004 §7 | in-memory exporter test | FULL | – | Designed |
+| NFR-OBS-004 | Dashboards, SLO alerts, error budget | Catalogue, SLI/SLO defs, alert rules + dashboards as code | ADR-0017 §6, platform.md §8/§12 | document review | DEFERRED | – | Designed |
+| NFR-QUAL-001 | ≥ 85/75 coverage | Jest thresholds merged | ADR-0024 | CI gate | FULL | – | Designed |
+| NFR-QUAL-002 | ≥ 95 % critical packages | Per-path thresholds | ADR-0024 | CI gate | FULL | – | Designed |
+| NFR-QUAL-003 | Property tests ≥ 1 000; mutation ≥ 80 % | fast-check; Stryker | ADR-0015 §6, ADR-0024 | Stryker in the local heavy lane `gate` profile and P6; unit properties on every PR | FULL | – | Designed |
+| NFR-QUAL-004 | API test classes per route; contract-validated responses | Metadata test classes; Ajv OpenAPI validator helper | ADR-0016, ADR-0024 | build-time completeness; API suite | FULL | – | Designed |
+| NFR-QUAL-005 | Contract suite ×4 adapters; READMEs | Shared suite + nock fixtures; README fields test | ADR-0010 | Jest contract suite; docs check | FULL | – | Designed |
+| NFR-QUAL-006 | e2e green; flake < 1 % | Deterministic fixtures; Testcontainers; retries ≤ 1; flake report | ADR-0024 | report aggregation | FULL | – | Designed |
+| NFR-OPS-001 | `docker compose up` all healthy + seeded | Health checks, depends_on, one-shot migrate+seed, idempotent seeds | platform.md §2, ADR-0002 | CI compose up --wait + smoke | FULL | – | Designed |
+| NFR-OPS-002 | Hardened images; size budgets | Multi-stage, digest-pinned slim bases, non-root, HEALTHCHECK, separate migrate image | platform.md §3, ADR-0022 | Trivy, hadolint, history scan, size checks | FULL | – | Designed |
+| NFR-OPS-003 | All §10 stages; release artefacts | ci (hosted PR fast lane + dispatch full lane) / nightly (dispatch) / release / cd workflows; heavy suites local with evidence under `docs/05-quality/` (ADR-0023 amendment, D-ORCH-001); GHCR + SBOM + GH Release | ADR-0023, ADR-0024 amendment, platform.md §7 | actionlint + stage test; `quality:check-evidence` per PR; fast-lane ≤ 20 min measured; release dry-run | FULL | – | Designed |
+| NFR-OPS-004 | Terraform fmt/validate/Checkov clean | Modules + overlays; reasoned suppressions | ADR-0022, platform.md §6 | CI IaC job | PARTIAL | – | Designed |
+| NFR-OPS-005 | Typed config; fail-fast; `.env.example` parity | `packages/config` Joi schema; names-only errors; parity script | ADR-0018 | config tests; missing-var CI test; parity script | FULL | – | Designed |
+| NFR-MAINT-001 | 0 boundary violations | ESLint boundaries + import-x rules + negative fixtures | ADR-0002 §5, ADR-0003 | lint + fixture tests | FULL | – | Designed |
+| NFR-MAINT-002 | Strict TS; 0 warnings; no `any` in domain code | tsconfig.base strict family; `--max-warnings 0`; suppression script | ADR-0001, ADR-0002 | typecheck/lint; script | FULL | – | Designed |
+| NFR-MAINT-003 | Zod/Joi parity | Shared constants; parity fixtures ≥ 50/schema; lint | ADR-0016 §4, ADR-0026 §4 | parity test | FULL | – | Designed |
+| NFR-MAINT-004 | OpenAPI ↔ routes 0 drift; lint; breaking changes listed | Contract-first; drift test; Redocly; oasdiff | ADR-0016 §1, api/README.md | CI contract job | FULL | – | Designed |
+| NFR-DATA-001 | Integer minor-unit money everywhere | `Money` branded type; BIGINT + CHAR(3); lint | ADR-0009 | lint; schema test; properties | FULL | – | Designed |
+| NFR-DATA-002 | UUIDv7; timestamptz; local date + zone | app `v7()` + DB default; schema rules | ADR-0009, data-model.md | schema introspection; DST tests | FULL | – | Designed |
+| NFR-DATA-003 | Standard columns; soft delete; optimistic locking | Prisma extension stamping; partial unique indexes; no DELETE grant; conditional updates | ADR-0009, ADR-0005, data-model.md | schema test; DELETE scan; concurrent-update tests | FULL | – | Designed |
+| NFR-DATA-004 | Migrations up→down→up; linter; backup before data change | Prisma raw-SQL migrations; linter; restore rehearsal | data-model.md §8, ADR-0023 | Testcontainers job; linter; rehearsal | FULL | – | Designed |
+
+Totals: 90 NFRs, 90 with a mechanism and ADR/spec reference (100 %). Run status counts unchanged from NFR.md: 74 FULL / 10 PARTIAL / 6 DEFERRED.

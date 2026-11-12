@@ -32,7 +32,7 @@
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-067, EPIC-03
 - **Linked REQs:** REQ-AUDIT-001, REQ-AUDIT-006
 - **As a** developer **I want** middleware to write audit entries from each route's descriptor **so that** feature code never has to remember to audit.
-- **Notes:** Descriptor states action, entity name, entity-ID resolver, sensitivity (`SENSITIVE`/`NORMAL`) and reason-required. `NONE` only with written justification for public reference-data reads, health endpoints and static documents. List `GET` writes one `VIEW` per request with filter summary and result count (DR-A13); detail `GET` one `VIEW` per entity returned.
+- **Notes:** Descriptor states action, entity name, entity-ID resolver, sensitivity (`SENSITIVE`/`NORMAL`) and reason-required. `NONE` only with written justification and only for the closed list in REQ-AUDIT-006 (D-043): public reference-data reads, health endpoints, static documents, `GET /auth/csrf`, `POST /security/csp-report` and the pure calculators `GET /reference/volumetric` and `GET /reference/fx-rates/convert`. List `GET` writes one `VIEW` per request with filter summary and result count (DR-A13); detail `GET` one `VIEW` per entity returned.
 
 #### Acceptance criteria
 ```gherkin
@@ -56,14 +56,18 @@ Feature: Descriptor-driven capture
     Given a Viewer calls a mutating route Then no business entry exists and a "PERMISSION_DENIED" entry with outcome "DENIED" is written
 
   Scenario: NONE routes
-    When GET /health/live or a public reference-data route is called Then no audit entry is written
+    When GET /health/live, a public reference-data route, GET /auth/csrf, POST /security/csp-report or GET /reference/volumetric is called Then no audit entry is written
+
+  Scenario: NONE outside the closed list is rejected
+    Given a tenant route descriptor declares action NONE with a justification
+    When the router test runs Then it fails naming the route, because NONE is allowed only for the REQ-AUDIT-006 list
 ```
 
 ### US-087 — Action types, actor types and complete entry fields
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-086
 - **Linked REQs:** REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011
 - **As a** Compliance Auditor **I want** every entry to carry who, what, where, when and outcome **so that** events can be reconstructed.
-- **Notes:** Actions: `CREATE`, `UPDATE`, `DELETE`, `VIEW`, `DOWNLOAD`, `LOGIN`, `LOGOUT`, `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `TOKEN_REUSE_DETECTED`, `MFA_ENROLLED`, `MFA_FAILED`, `PERMISSION_DENIED`, `EXPORT`, `ON_BEHALF_ACTION`, `CONFIG_CHANGE`, `API_KEY_USE`, `STATE_TRANSITION` (enumeration in `packages/shared`; the last-but-two group emitted from M2/M3). Actor types `USER`, `API_KEY`, `SYSTEM_JOB`, `ANONYMOUS`. IP from trusted proxy chain only (EC-A12).
+- **Notes:** Actions: `CREATE`, `UPDATE`, `DELETE`, `VIEW`, `DOWNLOAD`, `LOGIN`, `LOGOUT`, `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `TOKEN_REUSE_DETECTED`, `MFA_ENROLLED`, `MFA_FAILED`, `MFA_RECOVERY_USED`, `SESSION_REVOKED`, `PERMISSION_DENIED`, `EXPORT`, `ON_BEHALF_ACTION`, `CONFIG_CHANGE`, `API_KEY_USE`, `STATE_TRANSITION` (enumeration in `packages/shared`; `EXPORT`, `ON_BEHALF_ACTION` and `API_KEY_USE` emitted from M2/M3; `MFA_RECOVERY_USED` and `SESSION_REVOKED` added by D-043 / ADR-0008 amendment). Actor types `USER`, `API_KEY`, `SYSTEM_JOB`, `ANONYMOUS`. IP from trusted proxy chain only (EC-A12).
 
 #### Acceptance criteria
 ```gherkin
@@ -85,6 +89,10 @@ Feature: Audit entry content
 
   Scenario: Failed login for unknown account
     Then a "LOGIN_FAILED" entry is written with actor type "ANONYMOUS", outcome "DENIED" and no user ID
+
+  Scenario: Recovery code and remote revocation have their own action types
+    When a user signs in with a recovery code Then an "MFA_RECOVERY_USED" entry exists for that user
+    When a user revokes another of their own sessions from the sessions screen Then a "SESSION_REVOKED" entry names the revoked session ID, and the user's own logout still writes "LOGOUT"
 
   Scenario: Permission path: audit entry fields are not readable without "audit:read"
     Given a Shipper requests entry fields via the viewer API Then 403 "AUTHZ_DENIED"

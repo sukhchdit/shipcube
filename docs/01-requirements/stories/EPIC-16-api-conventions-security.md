@@ -146,7 +146,7 @@ Feature: Error catalogue and validation error format
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-036
 - **Linked REQs:** REQ-API-007, REQ-API-008
 - **As a** frontend developer **I want** consistent cursor pagination, filters and sorts **so that** every list screen behaves the same and queries stay efficient.
-- **Notes:** `limit` default 25, max 100 (audit viewer 50/200 per DR-A21); `next_cursor`, `has_more`; stable order with row ID tie-breaker; totals only when `include_total=true`. Filters `filter[field]=value`; sort `sort=field,-field`; allow-listed indexed fields only; multiple filters AND.
+- **Notes:** `limit` default 25, max 100 (audit viewer 50/200 per DR-A21); bounded global reference lists (countries, subdivisions, currencies, Incoterms, export reasons, holidays) may declare `x-max-limit` ≤ 300 so the full set fits one cacheable page; tenant lists never may (D-041, ADR-0016 amendment 5(d)). `next_cursor`, `has_more`; stable order with row ID tie-breaker; totals only when `include_total=true`. Filters `filter[field]=value`; sort `sort=field,-field`; allow-listed indexed fields only; multiple filters AND.
 
 #### Acceptance criteria
 Permission path: not applicable — shared list convention with no route of its own; the scenario "Cursor cannot cross tenants" covers the equivalent isolation check and route-level permissions are tested per list endpoint.
@@ -186,6 +186,17 @@ Feature: Cursor pagination, filtering and sorting
 
   Scenario: Totals are opt-in
     Then the response has no total unless include_total=true is documented for the route
+
+  Scenario: Bounded reference list allows a larger page
+    Given GET /api/v1/reference/countries declares x-max-limit 300
+    When limit=300 is requested
+    Then the response is 200 with every enabled country in one page and has_more false
+    And limit=301 returns 400 VALIDATION_ERROR
+
+  Scenario: Tenant lists cannot raise the cap
+    Given a tenant list route declares x-max-limit
+    When the contract test runs
+    Then it fails naming the route
 
   Scenario: List route without pagination fails the contract test
     Given a list route lacking limit and cursor parameters
@@ -294,7 +305,7 @@ Feature: ETags and optimistic concurrency
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-036
 - **Linked REQs:** REQ-API-014, REQ-SEC-005, REQ-SEC-006
 - **As an** operator **I want** shared, per-route request limits with standard headers **so that** brute force and abuse are throttled consistently across instances.
-- **Notes:** DR-A22 defaults (configuration): unauthenticated 120/min/IP; authentication routes 10/min/IP and 5/min/account identifier; authenticated 600/min/user; public reference and lookup routes 120/min/IP; CSP report 20/min/IP. EC-A12: only configured trusted proxies' `X-Forwarded-For` hops are honoured. Redis outage: authentication routes use per-instance in-memory counters and log ERROR security event; others fail open (ASSUMED GAP-A-19).
+- **Notes:** DR-A22 defaults (configuration): unauthenticated 120/min/IP; authentication routes 10/min/IP and 5/min/account identifier; refresh, logout and CSRF-token routes are `public` class 120/min/IP (D-043); authenticated 600/min/user; public reference and lookup routes 120/min/IP; webhooks 600/min per source IP; CSP report 20/min/IP. Two stages (DR-A08, ADR-0016 amendment 1): the per-IP limit of the route's class runs before authentication so floods never reach bcrypt or JWT verification; the per-user limit runs after authorisation. IPv6 keyed by /64. EC-A12: only configured trusted proxies' `X-Forwarded-For` hops are honoured. Redis outage: authentication routes use per-instance in-memory counters and log ERROR security event; others fail open (ASSUMED GAP-A-19).
 
 #### Acceptance criteria
 ```gherkin
@@ -321,6 +332,15 @@ Feature: Redis-backed rate limiting and headers
     Given two API instances
     When 60 requests go to each from one IP
     Then the 121st request overall is rejected
+
+  Scenario: Per-IP limit is applied before authentication
+    Given one IP has exhausted the auth class limit
+    When an 11th login arrives with a syntactically valid body
+    Then the response is 429 RATE_LIMITED and no password hash comparison or token verification is performed (verified by the instrumented counter)
+
+  Scenario: Refresh, logout and CSRF are in the public class
+    When 11 refresh requests arrive from one IP within a minute
+    Then none is rejected for rate limiting, and the 121st request of the public class from that IP is
 
   Scenario: Spoofed X-Forwarded-For is ignored
     When a client sends "X-Forwarded-For: 1.2.3.4" from an untrusted hop

@@ -178,15 +178,22 @@ Feature: Sign in with email and password
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-017, US-044
 - **Linked REQs:** REQ-AUTH-006, REQ-AUTH-007, REQ-AUTH-008
 - **As a** customer **I want** my session renewed safely and a stolen cookie neutralised **so that** I stay signed in without exposing my account.
-- **Notes:** Cookie HttpOnly, Secure (relaxed only for NODE_ENV=development on localhost), SameSite=Strict, auth path scope, 30 days, distinct names for web and admin. Family states in DR-A03. Absolute age cap 90 days (ASSUMED GAP-A-01). Refresh requires CSRF token and allowed Origin (US-044).
+- **Notes:** Cookie HttpOnly, Secure (relaxed only for NODE_ENV=development on localhost), SameSite=Strict, `__Host-` prefix with `Path=/` and no `Domain`, read by the server only on the auth routes (refresh, logout, CSRF token) and ignored everywhere else (REQ-AUTH-006 as amended by D-043 / ADR-0006 amendment 1), 30 days (accepted ASVS V3.3.2 deviation, D-038), names `__Host-rt_web` and `__Host-rt_admin`. Family states in DR-A03. Absolute age cap 90 days (ASSUMED GAP-A-01). Refresh requires CSRF token and allowed Origin (US-044). Refresh, logout and CSRF routes are `public` rate class (D-043).
 
 #### Acceptance criteria
 ```gherkin
 Feature: Refresh cookie, rotation and reuse detection
   Scenario: Cookie attributes
     When a user signs in on the web app and on the admin app
-    Then each refresh cookie is HttpOnly, Secure, SameSite=Strict, scoped to the auth path, Max-Age 2592000 and the two cookie names differ
+    Then each refresh cookie is HttpOnly, Secure, SameSite=Strict, named with the __Host- prefix, has Path=/ and no Domain attribute, Max-Age 2592000, and the two cookie names differ
     And no refresh token appears in any response body
+
+  Scenario: Cookie is read only by the auth routes
+    Given a valid refresh cookie and no Authorization header
+    When GET /api/v1/me is called with the cookie
+    Then the response is 401 AUTH_REQUIRED and the cookie value is not read or logged
+    When POST /api/v1/auth/refresh is called with the same cookie, a valid Origin and X-CSRF-Token
+    Then the response is 200
 
   Scenario: Refresh rotates the token
     When POST /api/v1/auth/refresh is sent with the cookie, a valid Origin and X-CSRF-Token
@@ -434,7 +441,7 @@ Feature: TOTP enrolment and recovery codes
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-023
 - **Linked REQs:** REQ-AUTH-017
 - **As a** user with TOTP **I want** to complete a second step after my password **so that** a stolen password alone is useless.
-- **Notes:** Challenge token valid 5 minutes, single-use, bound to user and IP class (same /24 for IPv4); 5 wrong codes lock the challenge 15 min (ASSUMED GAP-A-03, DR-A02).
+- **Notes:** Challenge token valid 5 minutes, single-use, bound to user and IP class (same /24 for IPv4); 5 consecutive wrong codes lock MFA for the **user** for 15 min, counted across challenges and IPs (ASSUMED GAP-A-03, DR-A02 as amended by D-043 / ADR-0006 amendment 3). A consumed recovery code writes `MFA_RECOVERY_USED` (REQ-AUDIT-002).
 
 #### Acceptance criteria
 Permission path: not applicable — challenge-token flow before a session exists; the "Challenge token misuse" scenario is the equivalent
@@ -449,14 +456,19 @@ Feature: MFA challenge at sign-in
 
   Scenario: Recovery code works once
     When a valid recovery code is posted as the second factor
-    Then sign-in succeeds and the same code a second time returns 401 MFA_INVALID
+    Then sign-in succeeds, an MFA_RECOVERY_USED audit entry and a security-notice email are written, and the same code a second time returns 401 MFA_INVALID
 
   Scenario: Wrong code
     Then the response is 401 MFA_INVALID and a failure is audited with outcome DENIED and security-logged
 
-  Scenario: Lock after five wrong codes
+  Scenario: Lock after five wrong codes is per user
     When 5 consecutive wrong codes are submitted
     Then the next attempt returns 429 MFA_LOCKED with Retry-After about 900, even for a correct code
+
+  Scenario: A new challenge does not reset the lock counter
+    Given 3 wrong codes were submitted on one challenge
+    When the user re-enters the password, obtains a new challenge token from another IP and submits 2 more wrong codes
+    Then the response is 429 MFA_LOCKED and the lock applies to every challenge of that user for 15 minutes
 
   Scenario Outline: Challenge token misuse
     When the challenge token is "<misuse>"

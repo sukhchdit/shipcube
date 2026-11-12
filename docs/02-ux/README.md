@@ -275,6 +275,22 @@ Check: 108 UI + 106 non-UI = 214 Must stories (D-036 counts).
 | 10 | Carrier logos are trademarks. Only operator-supplied logo assets per carrier (configuration) are shown; the repository ships monograms. | principal-architect (config seam) | D-UX-018 |
 | 11 | Spanish number grouping: helpers use `useGrouping: 'always'` to match US-116's "1.234,50" expectation | qa-lead (test data), principal-architect | D-UX-028 |
 
+### Resolved by architecture (principal-architect, 2026-11-12; decisions D-ARCH-011..D-ARCH-016 in `docs/sdlc/DECISIONS.md`)
+
+| # | Resolution | Where |
+|---|---|---|
+| 1 | Link format fixed: `<app origin>/verify-email#token=…`, `/reset-password#token=…`, `/invitations/accept#token=…` (unprefixed app routes); the SPA posts `{token}` in a body and clears the fragment; no other link parameter. Share links (US-165, Should) follow the same rule as `/q#token=…`; ux-designer aligns the S-W02s route (`/q/{token}`) when US-165 is scheduled. | ADR-0006 amendment 8; ADR-0016 amendment 6a; `docs/03-architecture/api/README.md` §1 |
+| 2 | `localStorage` map `qt:<quoteId>` → `{token, expires_at}`; written once from `createQuote`, deleted on claim, expiry, sign-out or 404; survives reload, new tab and the register/sign-in detour; `X-Quote-Token` header unchanged; cookie and `sessionStorage` rejected with reasons. | ADR-0026 amendment 1; api/README §8 |
+| 3 | **Registration does not issue a session** (202 identical for new and existing e-mails, EC-A01). The F02 assumption holds client-side: the web app calls `loginUser` immediately with the in-memory credentials; on `INVALID_CREDENTIALS` it shows the sign-in panel with the same `returnUrl` (the F02 fallback). No UX change needed beyond keeping the fallback panel. | ADR-0006 amendment 10; api/README §8 |
+| 4 | Client-side QR: `uqr` (MIT, zero deps) renders the `provisioning_uri` as a React SVG in `packages/ui` (`<QrCode>`, `role="img"`, fixed dark-on-light, ≥ 200 px) next to the manual key; no server image endpoint; API contract unchanged. | ADR-0026 amendment 2; ADR-0025 (uqr); ADR-0006 amendment 11 |
+| 5 | `i18next-icu` 2.7 + `intl-messageformat` 12 approved (licences MIT / BSD-3-Clause, maintained). Values are pre-formatted by the shared Intl helpers and passed as strings; ICU runtime counted inside the 170 kB public budget, measured in Wave 0; fallback = native i18next suffix plurals for all strings. | ADR-0026 amendment 3; ADR-0025 |
+| 6 | Root `/`: Nginx in the `web` image answers 302 to `/{lng}/` from cookie `lng` → `Accept-Language` → `en`, `Cache-Control: no-store`, works without JavaScript; `/` is not pre-rendered (SPA fallback is `index.html`). `X-Robots-Tag: noindex` on `/{lng}/track` when `number` is present; admin app and API always `noindex`. Locale cookie is `lng` (`Path=/`, 1 year, `SameSite=Lax`, `Secure`). | ADR-0026 amendments 4–5; ADR-0016 amendment 6b; platform.md §3.3 |
+| 7 | Reset and verification links target `ADMIN_APP_ORIGIN` for users with an ACTIVE OPERATOR membership and `WEB_APP_ORIGIN` otherwise, regardless of which app made the request; same screens in both apps as specified. | ADR-0006 amendment 9 |
+| 8 | Owner security-analyst (unchanged; no architecture decision needed — the invoice PDF path is covered by ADR-0019 document access rules). | — |
+| 9 | Already resolved (D-036). | — |
+| 10 | `carriers.logo_asset_key` resolves to the same-origin path `/brand/carriers/<key>.svg` served from an operator-mounted directory (Compose volume / `web-assets` prefix `brand/`); reserved key `monogram` or a 404 → monogram chip; CSP `img-src 'self' data:` unchanged; repository ships no logos; M1 seed = `monogram`. | ADR-0026 amendment 6; platform.md §3.3 |
+| 11 | `Intl.NumberFormat(locale, { useGrouping: 'always' })` in `packages/shared/format` for web, admin and worker (e-mails, PDFs); shared unit test pins the US-116 examples; supported by Node 24 and the browser matrix. | ADR-0026 amendment 7 |
+
 ## 6. Decisions
 
-Logged in `docs/sdlc/DECISIONS.md` as D-UX-001..D-UX-029.
+Logged in `docs/sdlc/DECISIONS.md` as D-UX-001..D-UX-029. Architecture resolutions of §5: D-ARCH-011..D-ARCH-016.

@@ -28,7 +28,7 @@
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** EPIC-01
 - **Linked REQs:** REQ-DATA-001, REQ-DATA-002
 - **As a** developer **I want** a seed that upserts by natural key and separates reference data from demo data **so that** any environment can be seeded safely and repeatedly.
-- **Notes:** `reference` seed runs in all environments; `demo` seed never when `NODE_ENV=production`. Rows carry `source` (SEED, SAMPLE) and reviewed flags. Demo passwords come from `SEED_*` variables; defaults exist only in the Compose env file; passwords are never printed. DR-A27: updates in this run happen only by seed or migration.
+- **Notes:** `reference` seed runs in all environments; `demo` seed never when `APP_ENV=production`, and it refuses default `SEED_*` passwords whenever `APP_ENV` is not `local` (REQ-DATA-002 as amended by D-043 / ADR-0006 amendment 4; `APP_ENV` is the ADR-0018 environment key). Rows carry `source` (SEED, SAMPLE) and reviewed flags. Demo passwords come from `SEED_*` variables; defaults exist only in the Compose env file; passwords are never printed. DR-A27: updates in this run happen only by seed or migration.
 
 #### Acceptance criteria
 Permission path: not applicable — start-up tooling with no principal; a second negative scenario is included.
@@ -45,14 +45,24 @@ Feature: Idempotent reference and demo seed framework
     Then reference and demo data are present
 
   Scenario: Demo seed is skipped in production
-    Given NODE_ENV=production
+    Given APP_ENV=production
     When the seed runs
     Then only reference data is loaded and no demo users exist
 
-  Scenario: Production with a default seed password aborts
-    Given NODE_ENV=production and SEED_SUPERADMIN_PASSWORD equals its local-only default
+  Scenario Outline: Non-local environment with a default seed password aborts
+    Given APP_ENV=<env> and SEED_SUPERADMIN_PASSWORD equals its local-only default
     When the demo seed is requested
     Then it aborts with an error naming the variable (name only) and creates nothing
+    Examples:
+      | env        |
+      | test       |
+      | staging    |
+      | production |
+
+  Scenario: Local environment accepts the defaults
+    Given APP_ENV=local and every SEED_* variable equals its Compose default
+    When the demo seed runs
+    Then the demo users are created
 
   Scenario: Missing SEED variable
     Given SEED_CUSTOMER_PASSWORD is unset

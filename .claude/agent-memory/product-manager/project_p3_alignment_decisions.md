@@ -1,0 +1,14 @@
+---
+name: p3-alignment-decisions
+description: How requirements were aligned with the accepted P3 architecture before G2 (D-038..D-045, A-083..A-092): what changed, what was deliberately NOT changed, and which pairs of rows must move together on future change requests.
+metadata:
+  type: project
+---
+
+P3 alignment (2026-11-12, before G2): product-manager applied D-ARCH-006 (a)–(g) plus the ADR-0005/0006/0007/0008/0016 amendment asks as wording-only edits. REQUIREMENTS.md 1.2, NFR.md 1.2, traceability.md 1.2, PRD §11 change log created. No REQ/US IDs, priorities, milestones, links or DC tags changed; count baselines (430/317/94/19; 290/214/68/8; 134 DC) are unchanged.
+
+**Decisions:** D-038 ASVS V3.3.2 deviation accepted (30-day customer refresh kept; admin 12 h + 30 min idle); D-039 "MinIO" → "S3-compatible (RustFS locally, SeaweedFS fallback)" supersedes D-025 wording; D-040 notification log stores masked address + redacted identifiers (REQ-NOTIF-012 = NFR-PRIV-004 = data-model `notification_log`); D-041 `x-max-limit` ≤ 300 only on bounded global reference lists; D-042 `ACCOUNT_HAS_ACTIVE_SHIPMENTS` 409, `LAST_OWNER` 422 everywhere; D-043 security wording bundle (`__Host-` cookie read only by auth routes, MFA lock per user, seed defaults refused when `APP_ENV ≠ local`, pre-auth per-IP limiter first in DR-A08, token-free public paths, audit enum + NONE list, refresh/logout/csrf in `public` rate class, NFR-DATA-003 append-only exemption); D-044 Node 24 + D-ORCH-001 CI evidence model in REQ-PLAT-007/US-004/US-005/NFR-OPS-001/003/REC-003/QUAL-006, `terraform apply` ban scoped to `ci.yml`; D-045 client-side auto sign-in after the 202 register (keeps EC-A01 anti-enumeration), 90-day unclaimed-quote purge, es "tú"/fr "vous", en-US/es-ES/fr-FR fallbacks, full receiver ID on the customs invoice.
+
+**Why:** G2 checks REQ-vs-ADR contradictions; each item was a case where the architecture had (rightly) deviated from P1 wording. Where REQ and NFR disagreed (NOTIF-012 vs PRIV-004) I chose the form that matched the already-designed data model. Register-issues-session was rejected because the identical-202 anti-enumeration rule makes it impossible.
+
+**How to apply:** On any change touching these, move the pairs together: rate-limit values → DR-A22 + REQ-SEC-005 + NFR-SEC-005 + US-040 notes + A-035; auth lifetimes → REQ-AUTH-006/007 + NFR-SEC-004 + US-018 + A-023/A-086 + D-038; audit enum → REQ-AUDIT-002 + US-087 + ADR-0008; NONE list → REQ-AUDIT-006 + US-086 + A-044; error statuses → REQ row + EC row + story AC + DR-A26 + api/README catalogue. `APP_ENV` (not `NODE_ENV`) is the environment key in requirements from 1.2 on. Historical "MinIO" remains only in D-025 (never edit old decisions; supersede). Verification agent prompt in this run also greps for stale strings (`MinIO`, `node:20`, `scoped to the auth path`, `lock the challenge`, `409 LAST_OWNER`) — reuse that list.

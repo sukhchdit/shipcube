@@ -1,6 +1,7 @@
 # Traceability Matrix
-Version 1.1 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+Version 1.2 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
 Status values: Specified → Designed → Planned → Implemented → Verified.
+v1.2 (P3 alignment, D-038..D-045): wording-only amendments to REQUIREMENTS.md 1.2, NFR.md 1.2 and the stories (see PRD §11); no REQ or story IDs, links, priorities, milestones or DC tags changed, so every count below is unchanged and was re-verified against the files on 2026-11-12. The Design column is populated by principal-architect at G2.
 v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column added to "Story → Requirement" per D-037; early-delivery notes and NFR traceability link added.
 
 ## Summary
