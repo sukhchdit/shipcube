@@ -1,0 +1,492 @@
+# PR-0011 / TASK-016: change-scoped security review (row-level security foundations)
+
+| Field | Value |
+|---|---|
+| PR | #11 `feat(db): row-level security foundations — manifests, renderer, withTenantTx, catalog C1-C14, migration-lint 3-9/11/14-16 (TASK-016)`, https://github.com/sukhchdit/shipcube/pull/11 |
+| Branch / head | `feat/TASK-016-row-level-security-foundations-table` @ `557aada` (a merge of `origin/main` @ `de04877`; main's delta is docs only). Task commits `f658225`, `c444bbb`, `ccfe895`, `090bf84`, `b84325d`. 246 files, +6,326 / −73. **No dependency change** (`package.json` / `package-lock.json` untouched) |
+| Scope | `apps/api/src/platform/db/{with-tenant-tx,tenant-db,map-db-error,expect-affected,index}.ts`; `prisma/bootstrap/02-role-backstops.sql`; `prisma/migrations/20261112020000_platform_rls_helpers`; `prisma/sql/{policy-templates,function-templates}/*.sql`, `prisma/sql/grants.manifest`; `tools/db/{render-rls,table-classes,grants-manifest,lint-migrations,bootstrap}.ts`; `tools/eslint-rules/{tenant-context-sql,db-raw-sql,no-alter-role-sql,prisma-client-construction,expect-affected,string-literals}.mjs`; `eslint.config.mjs`; `packages/config` `DB_TX_*`; `prisma/tests/{catalog,rls,migrations}/**` |
+| Binding items checked | PR7-SEC-01/02/03/05/06/07/09/11/13/14 (PR-0007 §5 + R2), PR8-SEC-10/13/14, PR5-SEC-09/11/12, PR2-SEC-05 (+ addendum), PR9-SEC-03 (factory half), SEC-P3-34 (TASK-016 half), P3 §15 deviation 7 condition (D-ORCH-005 (7)), SPK-03 F-01..F-13, ADR-0005 am. 10 items 1–16, linter rules 3–9/11/14–16 (SEC-TC-33, NT-AVAIL-003-a), catalog C1–C14 (SEC-TC-05), D-ARCH-058/063..066/069, D-TASK016-01, merge rule D-ORCH-004 |
+| Reviewer / date | security-analyst, 2026-11-12. Read-only on the worktree (`git status` clean before and after). No install, build, Docker or suite run (memory-constrained host). |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding; the D-ORCH-004 merge rule ("no Critical/High open") is met. 7 LOW, 4 INFO. PR11-SEC-01, -02, -04 and -08 are small changes to this PR's own code and are **recommended in this PR's fix cycle**; if they are not taken here they become tracked follow-ups with the owners in §6. |
+
+## 1. Summary
+
+The core control is sound. Every check that the O3 property depends on holds up under independent probing against the real `@prisma/client` 7.10.1 runtime:
+
+- **Context statement.** The data-model §4.1 eight-setting statement runs as the first statement of the interactive transaction (probe log: `TX1 begin` → `WITH prev AS MATERIALIZED …` → callback SQL → `COMMIT`). `is_local` is the literal `true` eight times. Every bound value is a validated string; a non-string (`Prisma.Sql`, `String` object, `null`) is refused before checkout. The `MATERIALIZED` leak detector throws `DB_SESSION_CONTEXT_LEAK` before `fn` runs, and a missing row counts as a leak (fail closed).
+- **Re-entrance.** `NESTED_TENANT_TX` is a run-time `AsyncLocalStorage` throw shared by every runner instance (AT-US-075-04).
+- **Error mapping.** On the real Prisma runtime with a synthetic driver error, a `P2010` (raw) and a `P2039` (model) 42501 map to 403 `AUTHZ_DENIED` + `rls_write_rejected` for the RLS prefix and to 500 + `db_privilege_denied` otherwise. Neither the `DbError` nor its JSON carries the table name, `detail` or `hint`; `DbError` has no `cause`.
+- **Helpers and catalogue.** Helpers are fail-closed for NULL, `''` and malformed values (F-07 catalog test). C13 asserts the exact `platform_app` role rows including the new `statement_timeout=30s` backstop and no `app.%` row in `pg_db_role_setting`/`pg_parameter_acl`. PR5-SEC-09 now covers predefined `pg_*` roles. The authz catalogue is SELECT-only through C5 equality. The PR8-SEC-14 backstop keys on the key rule and has a planted-row control.
+- **Supply side.** The bootstrap file `02-role-backstops.sql` is clean: first statement `SET search_path`, no variables, idempotent, ledger-pinned. `readSecret` meets the D-ARCH-052 list. `prisma-client-construction` is keyed on the explicit `apps/*/src/platform/db/**` path, so the two planned SYSTEM-writer files are **not** exempt.
+
+The LOW findings are completeness gaps around these controls. None of them is exploitable without a developer or migration-author defect that also passes review:
+
+- **01:** the run-time `TenantDb` Proxy can be stepped around through Prisma's `$parent` back-reference, on the client and on every model delegate. Proven: `db.$parent._originalClient` runs SQL on a **non-transaction connection** without context.
+- **02:** the rule-16 linter and the C-series `prosrc` scan miss eight PostgreSQL-valid write forms (concatenated key, quoted function name, `format('%I')`, quoted or spaced GUC names) and are narrower than ADR-0005 am. 10 item 1 (i).
+- **03:** the predicate allow-list exists only in the renderer. A hand-written tautology policy passes rule 9, rule 16 and C3, and the renderer's own operator policy **fails** rule 16, so the first module migration will hit a false positive.
+- **04:** C5 ignores grants to `PUBLIC`, which reach `platform_app` (and `TRUNCATE` bypasses RLS).
+- **05:** the raw-SQL and driver lint perimeter has holes: `Prisma.raw`; `pg` in repositories, which is the open part of the PR2-SEC-05 addendum; services outside `db-raw-sql`; the test-folder hole; and an unowned T-83 rule.
+- **06:** the C11 "`platform_definer` owns exactly …" condition of P3 deviation 7 is not implemented.
+- **07:** the PR's own rule-5 probe shows that migration files are **not atomic**. That makes rule 11's acceptance of `SET LOCAL lock_timeout` ineffective and leaves rule 15's "grants before `OWNER TO`" alternative with durable partial states.
+
+## 2. Method
+
+| Probe (scratch, session-scoped) | What it did | Result |
+|---|---|---|
+| **P-A** `tenantdb-escape.mjs` | `git archive 557aada` sources plus the worktree's generated client, type-stripped with Node 24.22.3 (`stripTypeScriptTypes`, transform mode) and run against the worktree's `node_modules` through a scratch junction (removed afterwards). Real `@prisma/client` 7.10.1 runtime with a **recording fake driver adapter**: each statement is logged with the queryable that ran it (`TXn` or `ROOT-conn`). It ran `createWithTenantTx(...).withTenantTx(ctx, fn)`, the escape candidates inside `fn`, and raw/model 42501 errors through `mapDbError` | Controls hold (`$queryRawUnsafe`, `$transaction`, `_originalClient` throw). **Escapes succeed:** `db.$parent.$executeRawUnsafe` → `TX1` (unguarded); `db.$parent.$transaction` → `SAVEPOINT prisma_sp_0`; `db.$parent._originalClient.$executeRawUnsafe` and `db.permission.$parent._originalClient…` → **`ROOT-conn`**; a symbol-keyed property → `TX1` unguarded. Mapping: P2010/P2039 correct; leak regex over JSON + message + stack = false |
+| **P-B** `rule16.mjs` | 16 function bodies through `scanFunctionBodies` (C-series) and `lintMigrationDir` (rule 16), with positive controls | Controls flagged by both. 8 write forms and 2 read forms missed (table in PR11-SEC-02) |
+| **P-C** `rendered-lint.mjs` | The renderer's own TENANT block pasted into a migration; a tautology policy through the linter and `scanPolicies` | Rendered block → **rule 16 finding** on the operator policy. `USING (org_id = org_id)` → linter none, C3 none; `USING (org_id IS NULL)` → C3 none |
+| **P-D** `eslint-probe.mjs` | 9 cases through `ESLint#lintText` on the worktree's real `eslint.config.mjs` (`disableTypeChecked`, `projectService: false` overrides) | POS-CONTROL `new PrismaClient` in a repository → `platform/prisma-client-construction`. Clean (no security rule fires): `pg.Pool` in a repository; `Prisma.raw(input)` in a repository; `$parent.$queryRawUnsafe` in a service; a new file under `prisma/tests/catalog/` with `SET app.org_id`; a repository file under `tests/` with `$queryRawUnsafe` and an unchecked `updateMany`; a transaction-local `set_config('app.org_id', …)` in `session-integrity.ts`. The unlisted `prisma/tests/rls/helper.ts` control → `platform/tenant-context-sql` |
+| Source review | All SQL, the C-series queries, the bootstrap runner and linter, ESLint rules and config, the unit and integration tests | — |
+| Secrets | Added lines (excluding `.env.example`, which is off-limits to this agent) grepped for credential shapes: 0 hits. Positive control "password": 13 hits, all lint fixtures and patterns. gitleaks was not run (Docker off-limits); lane A covers the merge | Clean |
+
+**Not executed:** the PostgreSQL integration and catalog suites. I rely on the PR body's serial gate on `557aada` (integration 95 passed / 1 skipped, coverage 99.17 % lines, lint/typecheck/build/audit clean). The PostgreSQL validity of the quoted and spaced `SET`/`RESET` forms in PR11-SEC-02 follows from `gram.y` (`var_name: ColId | var_name '.' ColId`) and is not run here. The fix should add them as executed C-series fixtures, which proves validity and coverage together.
+
+## 3. Findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR11-SEC-01 | The `TenantDb` run-time guard is bypassable through Prisma's `$parent` (client and model delegates) and symbol keys; `$parent._originalClient` reaches the root client | LOW | CWE-693 | A01 | `apps/api/src/platform/db/tenant-db.ts:22-30, 40-42, 62-73` | TASK-016 (this PR) | Open |
+| PR11-SEC-02 | Rule 16 and the C-series `prosrc` scan miss PostgreSQL-valid write/read forms; both are narrower than am. 10 item 1 (i) | LOW | CWE-184, CWE-488 | A04 | `prisma/tests/catalog/scans.ts:73-81`; `tools/db/lint-migrations.ts:251-257, 575-584` | TASK-016 (this PR) | Open |
+| PR11-SEC-03 | The predicate allow-list is enforced only in the renderer: hand-written policies pass rule 9/16 and C3; the renderer's own operator policy fails rule 16 | LOW | CWE-184, CWE-863 | A01 | `tools/db/lint-migrations.ts:506-532, 581-583`; `prisma/tests/catalog/scans.ts:35-56` | TASK-016 or TASK-037 (before the first `CREATE POLICY` migration) | Open |
+| PR11-SEC-04 | C5 excludes `PUBLIC` grants; rule 8 ignores `TO PUBLIC` and `TRUNCATE`/`TRIGGER`/`REFERENCES` | LOW | CWE-732 | A01 | `prisma/tests/catalog/c01-c12.int.test.ts:163-172`; `tools/db/lint-migrations.ts:534-556` | TASK-016 (this PR) | Open |
+| PR11-SEC-05 | Raw-SQL and driver lint perimeter: `Prisma.raw` not banned; `pg`/`pg-pool` still allowed in repositories and planned SYSTEM writers (PR2-SEC-05 addendum); `db-raw-sql` scope; test-folder hole; T-83 rule unowned | LOW | CWE-89 (precursor), CWE-284 | A03, A01 | `tools/eslint-rules/db-raw-sql.mjs:12-44`; `eslint.config.mjs:181-183, 579-582` | TASK-016 / orchestrator (T-83) | Open |
+| PR11-SEC-06 | The C11 converse condition of P3 deviation 7 (`platform_definer` owns exactly the §4.5 functions + `app_is_operator`, no other function, relation or type) is not implemented | LOW | CWE-269 | A01 | `prisma/tests/catalog/c01-c12.int.test.ts:546-602` | TASK-016 (or TASK-037) | Open |
+| PR11-SEC-07 | Migration files are not atomic (decision 4): rule 11 accepts an ineffective `SET LOCAL lock_timeout`; rule 15's "grants before `OWNER TO`" form and grant-before-RLS ordering leave durable unsafe partial states; a file may end inside `SET ROLE platform_definer` | LOW | CWE-696 | A04 | `tools/db/lint-migrations.ts:245, 558-571`; ADR-0005 am. 10 item 9; data-model §8.3/§8.4 | TASK-016 (linter) + principal-architect (text) | Open |
+| PR11-SEC-08 | Exemption hygiene: the `prisma/tests/catalog/**` glob; `session-integrity.ts` pre-exempted for the setter; spike-exemption lifecycle | INFO | CWE-693 | A05 | `eslint.config.mjs:101, 107, 109` | TASK-016 (this PR); TASK-015 (spike) | Open |
+| PR11-SEC-09 | Composition-root wiring (D-TASK016-01 (a)–(c)) is recorded only in DECISIONS; until done, the leak sinks, the fresh-connection probe and the env passed to the `PGOPTIONS` check are unwired. The `DbError` → problem+json surface is unspecified | INFO | CWE-778, CWE-209 | A09 | `with-tenant-tx.ts:68-77, 275-279, 327-331`; `map-db-error.ts:113-138` | orchestrator → second of PR #9 / PR #11 | Open |
+| PR11-SEC-10 | Risk statement: the DR-A14 special policies lie outside the allow-list (decision 5); requirements for the TASK-037 resolution | INFO | CWE-863 | A01 | data-model §4.3 `:2521-2553` | principal-architect + TASK-037 | Open |
+| PR11-SEC-11 | Hardening list (a)–(h): helper name qualification, C13 case-folding and `proconfig`, trigger-raised 42501 events, `readSecret` open-once, C1/rule 9 schema scope, `$executeRaw` UPDATE in `expect-affected`, GLOBAL read-only flag, `lc_messages` | INFO | various | A05 | see item | as listed | Open |
+
+### PR11-SEC-01 (LOW): the `TenantDb` run-time guard is bypassable through `$parent`
+
+**Description.** Am. 10 item 1 makes the `Proxy` the run-time half of `TenantDb`, because "`Omit<…>` alone is compile-time only: `as any` or a structural cast bypasses it" (PR7-SEC-05). The Proxy blocks the three omitted members, the lifecycle members and top-level `_`-prefixed keys (`tenant-db.ts:22-42`). It does not block three things:
+
+- **`$parent`.** In `@prisma/client` 7.10.1, every client and every model delegate carries a `$parent` layer: `ae("$parent",()=>e._appliedParent)` in `runtime/client.js`, for `Zn` (model) and `Yt` (client). For an interactive-transaction client, `_createItxClient` sets `_appliedParent` to `this._appliedParent._createItxClient(...)`. So `db.$parent` is a **full, unguarded transaction client** of the same transaction. Its `_originalClient` is the **root `PrismaClient`**.
+- **Symbol keys.** `ae(Xn, () => e)` exposes the underlying client under a module-private symbol that `Object.getOwnPropertySymbols(db)` enumerates.
+- **Nested objects.** Model delegates are returned unwrapped, so `db.<model>.$parent` is open even if `db.$parent` were blocked.
+
+Probe P-A, inside `withTenantTx`, with statements recorded per connection:
+
+```
+db.$parent.$executeRawUnsafe('SELECT 101')                         -> TX1 executeRaw   (unguarded *Unsafe)
+db.$parent.$transaction(async sp => …)                             -> TX1 savepoint prisma_sp_0 (F-01 savepoint re-exposed)
+db.$parent._originalClient.$executeRawUnsafe('SELECT 103')         -> ROOT-conn        (outside the transaction, no context)
+db.permission.$parent._originalClient.$executeRawUnsafe('SELECT 104') -> ROOT-conn
+<symbol-keyed value>.$executeRawUnsafe('SELECT 105')               -> TX1
+```
+
+`db.constructor` is also returned, as a bound `PrismaClient` class (`new db.constructor({ adapter })`). That path needs an adapter, whose import is banned by lint, so it is minor.
+
+**Exploitability / impact.** It needs developer code that casts (`$parent` is typed only through `Prisma.getExtensionContext`; `TransactionClient` does not declare it). That is exactly the cast the Proxy exists to defeat. Reaching the root client recreates the PR7-SEC-01 hazards:
+- SYSTEM-table writes (audit, outbox, idempotency) commit outside the business transaction;
+- absence-based checks on RLS tables read 0 rows;
+- a nested savepoint can swallow a 42501.
+
+`*Unsafe` on `$parent` is an injection surface whose payload can `set_config('app.org_id', <victim>, true)` (T-35). Likelihood L × Impact M → **LOW**, consistent with PR7-SEC-05. The reviewer-focus question "any path back to the root client" is answered **yes**.
+
+**Remediation (code).** In `tenant-db.ts`:
+- block `$parent` and `constructor`;
+- return `undefined` for symbol keys;
+- hide blocked keys from `getOwnPropertyDescriptor`/`ownKeys`;
+- wrap object-valued members (the model delegates) in the same guard. The callback still receives only Prisma's normal surface.
+
+```ts
+const BLOCKED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
+  ...TENANT_DB_OMITTED, '$connect', '$disconnect', '$on', '$use', '$extends', '$runCommandRaw',
+  '$parent',     // extension back-reference: unguarded client of the same tx; its _originalClient is the root client
+  'constructor', // bound PrismaClient class
+]);
+const isBlocked = (key: PropertyKey): boolean => BLOCKED.has(key) || (typeof key === 'string' && key.startsWith('_'));
+
+function guard<T extends object>(target: T, state: { closed: boolean }): T {
+  const cache = new Map<PropertyKey, unknown>();
+  return new Proxy(target, {
+    get(t, key) {
+      if (state.closed) throw new DbError(dbErrorMapping(500, 'TENANT_TX_CLOSED'));
+      if (typeof key === 'symbol') return undefined;            // hides Prisma's private client symbol
+      if (isBlocked(key)) throw new TenantDbAccessError(key);
+      if (cache.has(key)) return cache.get(key);
+      const value: unknown = Reflect.get(t, key, t);
+      const out = typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(t)
+        : typeof value === 'object' && value !== null ? guard(value, state)   // model delegates get the same rules
+        : value;
+      cache.set(key, out);
+      return out;
+    },
+    getOwnPropertyDescriptor: (t, key) =>
+      typeof key === 'symbol' || isBlocked(key) ? undefined : Reflect.getOwnPropertyDescriptor(t, key),
+    ownKeys: (t) => Reflect.ownKeys(t).filter((k) => typeof k !== 'symbol' && !isBlocked(k)),
+    // has / set / defineProperty / deleteProperty / setPrototypeOf as today
+  });
+}
+```
+
+Respect the Proxy invariants: run the test below against the real runtime, not a `FakeTx`. Also add `$parent` to the `db-raw-sql` member list (PR11-SEC-05).
+
+**Verification.** Add a unit or integration test on the **real Prisma runtime** with a recording adapter; probe P-A is a ready pattern. Inside `withTenantTx`:
+- `(db as any).$parent`, `(db as any).<model>.$parent`, `db.constructor` and every `Object.getOwnPropertySymbols(db)` value throw or are `undefined`;
+- the adapter log shows **no** statement on a non-transaction connection between `begin` and `commit`.
+
+### PR11-SEC-02 (LOW): rule 16 and the `prosrc` scan miss PostgreSQL-valid forms
+
+**Description.** Am. 10 item 1 (i) rejects "any write form — `set_config(`, `SET`/`SET SESSION`/`SET LOCAL` followed by `app.`, `RESET`, `DISCARD`". The implementation narrows this.
+
+- **C-series** (`scans.ts:75`): `set_config(` passes when its first token is a quoted literal not starting with `app.`. That admits `'' || 'app.org_id'`. Reads are matched only for the literal-key form.
+- **Linter** (`lint-migrations.ts:251-257`): `set_config ?\( ?(?:'app\.|[^' ])` admits the same concatenation. `SET`/`RESET` match only an unquoted `app.` with no space. Dynamic `current_setting(k)` reads are not flagged at all, although the C-series flags them.
+
+Probe P-B (both scanners, positive controls flagged):
+
+| Form | C-series | Rule 16 |
+|---|---|---|
+| `set_config('' \|\| 'app.org_id', p, true)` | missed | missed |
+| `"set_config"('app.org_id', p, true)` / `pg_catalog."set_config"(…)` | missed | missed |
+| `EXECUTE format('SET LOCAL %I = %L', 'app.org_id', p)` (idiomatic plpgsql) | missed | missed |
+| `SET LOCAL "app".org_id = …` / `RESET "app".org_id` / `SET app . org_id = …` | missed | missed |
+| `EXECUTE 'SET LOCAL "app.org_id" = ' \|\| quote_literal(p)` | flagged | missed |
+| `current_setting('app.' \|\| 'org_id', true)` / `EXECUTE format('SHOW %s', 'app.org_id')` | missed | missed |
+| `current_setting(k, true)` (dynamic) | flagged | **missed** |
+
+GUC names are case-insensitive and `var_name` accepts quoted parts, so each form writes or reads `app.org_id`. A related lexical residual is in rule 13 (PR5-SEC-11): `SET "search_path" = public` after the fixed path is not counted. C11's `proconfig` query (`DEFINER_PATH_SQL`) still catches it in the catalogue.
+
+**Exploitability / impact.** It needs a migration author to write such a function (the `format('%I')` form is common plpgsql) and review to miss it. Impact: a transaction-local write switches tenant for the rest of the caller's transaction (T-35). A session-level write leaks to the next checkout (caught for `withTenantTx` users by the item 16 detector, but not for root-client users). Likelihood L × Impact M → **LOW**, the same rating as PR7-SEC-11.
+
+**Remediation (code; one list shared by `scans.ts` and rule 16).**
+
+```ts
+const KEY = String.raw`(?:(?:"app"|app)\s*\.\s*"?(?:org_id|actor_id|actor_scope|guest_token_hash)\b|"app\.(?:org_id|actor_id|actor_scope|guest_token_hash)")`;
+const WRITE_FORMS = [
+  ['set_config(', /(?:\bset_config|"set_config")\s*\(/i],                     // ANY call (am. 10 item 1 (i)); allow-list by regprocedure if ever needed
+  ['SET/RESET app.', /\b(?:set|reset)\s+(?:session\s+|local\s+)?(?:"app"\s*\.|app\s*\.|"app\.)/i],
+  ['RESET ALL', /\breset\s+all\b/i],
+  ['DISCARD', /\bdiscard\b/i],
+] as const;
+const KEY_MENTION = new RegExp(KEY, 'i');                                     // outside the §4.2 helpers: any mention (catches format/%I, SHOW)
+const DYNAMIC_READ = /\bcurrent_setting\s*\(\s*(?!'[^']*'\s*[,)])/i;          // outside the helpers: non-literal key
+```
+
+Apply `KEY_MENTION` and `DYNAMIC_READ` to every function except the §4.2 helpers (C-series by `regprocedure`; rule 16 by `HELPER_DEFINITION`), with string literals kept. Keep the `app.correlation_id` allowance; `KEY` does not match it. For rule 13, count `\bset\s+"?search_path"?\b`.
+
+**Verification.** Add every row of the table above as a fixture:
+- as C-series `it.each` cases executed on PostgreSQL (which also proves each form is valid SQL);
+- as rule-16 linter fixtures.
+
+The current catalogue and `20261112020000_platform_rls_helpers` must stay clean.
+
+### PR11-SEC-03 (LOW): the allow-list stops at the renderer
+
+**Description.** Am. 10 item 7 says the renderer emits policies **only** from the §4.3 templates. PR7-SEC-07 item 1 asked for the allow-list in the renderer **and the migration linter**. Today:
+
+1. Rule 9 checks `DROP`/`ALTER POLICY` and ENABLE + FORCE, but never compares a `CREATE POLICY` with the renderer output.
+2. C3 is a deny-list plus a snapshot that the same PR updates.
+
+Probe P-C:
+- `CREATE POLICY … USING (org_id = org_id) WITH CHECK (org_id = org_id)` → **no linter finding, no C3 finding**;
+- `USING (org_id IS NULL)` on a GUEST_CAPABLE table, which exposes every guest row to every session → **no C3 finding**.
+
+Conversely, the renderer's **own** TENANT block fails rule 16 (`reads a tenant security key outside the §4.2 helpers`). The operator template's `current_setting('app.actor_scope', true) = 'OPERATOR'` is not exempted in the linter, although C3 exempts its deparsed form (`scans.ts:19`). TASK-037's first RLS migration will therefore fail lint. The quick fix, loosening rule 16 for policies, would open a hole.
+
+**Exploitability / impact.** A fail-open policy needs a migration author and a reviewer miss. Impact: cross-tenant or all-guest reads. Likelihood L × Impact M (after review) → **LOW**, consistent with PR7-SEC-07.
+
+**Remediation (code).**
+1. **Rule 16.** Exempt exactly the rendered operator atom, and only inside `CREATE POLICY`:
+   ```ts
+   const OPERATOR_ATOM = "current_setting('app.actor_scope', true) = 'operator'"; // normalised
+   const readText = /^create policy\b/.test(texts[index] ?? '') ? withStrings.split(OPERATOR_ATOM).join(' ') : withStrings;
+   ```
+2. **Rule 9.** Every `CREATE POLICY` in `prisma/migrations/**` must equal, after `masked()` normalisation, a statement of `renderRls(entry)` for its table's manifest entry. The only alternative is an entry in a reviewed exemption file keyed by `table.policy` plus the exact normalised text (PR11-SEC-10). Otherwise rule 9 reports "policy not rendered from the templates".
+3. **C3.** Add a keyed-atom presence check to `scanPolicies`: every `TO platform_app` qual/with_check references `platform.app_org_id()`, `platform.app_actor_id()`, `platform.app_guest_token_hash()` or `platform.app_is_operator()`. That catches `org_id IS NULL`, `org_id = org_id` and `1 = 1`. Preferably also derive the expected policy set from the manifests and the renderer, rather than from a snapshot the author edits.
+
+**Verification.**
+- Linter fixtures `policy-tautology` and `policy-unkeyed` fail.
+- A fixture holding the rendered TENANT, GUEST_CAPABLE and USER_OWNED blocks lints **clean**.
+- C3 planted `p_bad_tautology` and `p_bad_unkeyed` are reported.
+
+### PR11-SEC-04 (LOW): C5 ignores `PUBLIC`; rule 8 ignores `TO PUBLIC` and RLS-bypassing privileges
+
+**Description.** data-model C5 states that "table and column privileges of `platform_app` equal the grant manifest". `TABLE_ACL_SQL` filters `a.grantee <> 0` (`c01-c12.int.test.ts:166, 171`), so a grant to `PUBLIC`, which `platform_app` holds implicitly, is invisible. Rule 8 tests the grantee with `PLATFORM_APP` only and checks only `delete|all`.
+
+So `GRANT TRUNCATE ON public.<tenant table> TO PUBLIC` (TRUNCATE is **not** subject to RLS), `GRANT INSERT ON public.role_permissions TO PUBLIC` (authz escalation), or `GRANT TRIGGER …` passes both the linter and C5. Function `EXECUTE` to `PUBLIC` is covered by C11. The PR5-SEC-09 membership assertion closes the role-membership path, which leaves `PUBLIC` as the only implicit path.
+
+**Exploitability / impact.** It needs a migration author to grant to `PUBLIC`, which is plausible for "everyone may read" reference tables, and a review miss. A write or `TRUNCATE` grant then gives `platform_app` RLS-independent power. Likelihood L × Impact M → **LOW**.
+
+**Remediation (code).**
+
+```sql
+-- TABLE_ACL_SQL, both halves: include PUBLIC, render it, and let the manifest (which cannot express PUBLIC) refuse it
+SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END || ' ' || a.privilege_type || ' ' || …
+ WHERE n.nspname IN ('public', 'platform')
+   AND (a.grantee = 0 OR a.grantee::regrole::text IN ('platform_app', 'platform_definer', 'platform_erasure'))
+```
+
+In `lint-migrations.ts` rule 8:
+- report a table/sequence `GRANT … TO PUBLIC`;
+- report `TRUNCATE`, `TRIGGER` and `REFERENCES` granted to `platform_app` (`/\b(?:truncate|trigger|references)\b/` on the privilege list).
+
+**Verification.**
+- A planted, rolled-back `GRANT TRUNCATE ON public.permissions TO PUBLIC` makes C5 fail.
+- Linter fixtures `grant-to-public` and `truncate-to-app` fail.
+
+### PR11-SEC-05 (LOW): raw-SQL and driver lint perimeter
+
+**Description.** Probe P-D found five gaps.
+
+1. **`Prisma.raw(input)` lints clean in a repository.** `$queryRaw(Prisma.raw(s))` is the injection equivalent of the banned `$queryRawUnsafe`, and PR7-SEC-05 item 3 listed `Prisma.raw(`. The binding text of am. 10 item 4 names only the two `*Unsafe` members, so this is residual hardening, not a missed binding item.
+2. **`import pg from 'pg'; new pg.Pool(…)` lints clean in a repository.** In `packages/audit/src/store/prisma-store.ts` the only finding is the incidental `import-x/no-extraneous-dependencies`. The PR2-SEC-05 addendum asked that `pg`/`pg-pool` value imports be allowed only under `apps/*/src/platform/db/**`; `DATABASE_CODE` (`eslint.config.mjs:183`) still includes `repository` and the planned files. A second pool runs without context, and SYSTEM writes leave the business transaction.
+3. **`db-raw-sql` covers `platform/db` and repositories only.** A service holding the `TenantDb` can call `$parent.$queryRawUnsafe` with no finding.
+4. **The new rules inherit the `**/{test,tests,__tests__}/**` hole.** A non-test file under `repository/tests/` escapes `db-raw-sql`, `expect-affected` and `prisma-client-construction` (PR-0002 test-folder hole).
+5. **T-83 is unowned.** The "no external calls inside `withTenantTx`" lint (PR2-SEC-05 T-83 half) has no owner in any sheet or decision. The per-transaction `statement_timeout`/`idle` settings and Prisma `timeout` now bound the impact, so the residual is LOW.
+
+**Exploitability / impact.** No vulnerable code exists, and each item needs a developer anti-pattern plus a review miss. Impact for item 1: SQL injection as `platform_app`, which can switch tenant inside the transaction. Likelihood L × Impact M (two review gates remain) → **LOW**.
+
+**Remediation (code).**
+
+```js
+// tools/eslint-rules/db-raw-sql.mjs
+const UNSAFE_MEMBERS = new Set(['$executeRawUnsafe', '$queryRawUnsafe', '$parent']);
+// + CallExpression: callee `Prisma.raw` (MemberExpression, object Identifier `Prisma`, property `raw`) and a named
+//   import of `raw` from '@prisma/client-runtime-utils' / '@prisma/client/runtime/*' → messageId 'prismaRaw'
+```
+
+```js
+// eslint.config.mjs
+{ files: [`apps/*/src/**/*.${LINTED}`, ...PLANNED_PRISMA_FILES], ignores: TEST_FILES, plugins: { platform },
+  rules: { 'platform/db-raw-sql': 'error' } },   // was: DB_PLATFORM + REPOSITORY_FILES
+// SQL driver only in the database platform core, prisma/, tools/db and tests (PR2-SEC-05 addendum):
+{ from: { file: { categories: { anyOf: ['db-platform-core', 'prisma', 'tools-db', 'test'] } } },
+  allow: SQL_DRIVER_TARGETS.map((to) => ({ to })) },
+```
+
+Anchor `TEST_FILES` (PR2-SEC-09 owners TASK-004/007). The orchestrator assigns T-83: either a rule reporting `fetch`/`OutboundHttpClient`/queue calls lexically inside a `withTenantTx(` callback, or a principal-architect amendment of the T-83 verification to "review + Semgrep".
+
+**Verification.** Negative fixtures for `prisma-raw` (repository), `pg-pool` (repository and `packages/audit/src/store/prisma-store.ts`), `parent-unsafe` (service) and `repository/tests/helper.ts`; each must fail.
+
+### PR11-SEC-06 (LOW): C11 does not assert `platform_definer`'s owned-object set
+
+**Description.** P3 review §15 accepted deviation 7 (`platform_definer` holds `CREATE` on `platform`) on the condition that "C11 adds the converse assertion: `platform_definer` owns exactly the §4.5 functions plus `app_is_operator`, and no other function, relation or type" (D-ORCH-005 (7)). C11 (`:546-602`) checks only `prosecdef` functions against the allow-list. A view, table, type or invoker function owned by `platform_definer` passes.
+
+A definer-owned **view** in `platform` reads the definer-read tables under their `USING (true)` policies, which is every tenant's rows. Only C5 equality, through a manifest line for a grant to `platform_app`, stands between that and cross-tenant reads.
+
+**Exploitability / impact.** It needs a migration that runs `SET ROLE platform_definer` and creates such an object, plus a manifest edit, plus a review miss. Likelihood L × Impact M → **LOW**. It is listed because the deviation's acceptance rests on it.
+
+**Remediation (code, C11).**
+
+```sql
+SELECT 'proc' AS kind, p.oid::regprocedure::text AS obj FROM pg_catalog.pg_proc p WHERE p.proowner = 'platform_definer'::regrole
+UNION ALL SELECT 'rel',    c.oid::regclass::text  FROM pg_catalog.pg_class c     WHERE c.relowner  = 'platform_definer'::regrole
+UNION ALL SELECT 'type',   t.oid::regtype::text   FROM pg_catalog.pg_type t      WHERE t.typowner  = 'platform_definer'::regrole
+UNION ALL SELECT 'schema', n.nspname              FROM pg_catalog.pg_namespace n WHERE n.nspowner  = 'platform_definer'::regrole
+-- expected: exactly the `allowed` procs with owner platform_definer (today: none committed); nothing else
+```
+
+**Verification.** A planted, rolled-back `SET ROLE platform_definer; CREATE VIEW platform.v AS SELECT 1;` and an invoker function are both reported.
+
+### PR11-SEC-07 (LOW): the consequences of non-atomic migration files
+
+**Description.** Decision 4 and `prisma/README.md` "Rule 5" establish that `migrate deploy` (Prisma 7.10.1 / PG 18.6) runs a file's statements one at a time, outside a transaction block, and that a failed file keeps the effects of its earlier statements. Three linter assumptions break.
+
+1. **Rule 11 accepts `SET LOCAL lock_timeout`** (`LOCK_TIMEOUT = /^set (?:local |session )?lock_timeout\b/`, `:245`). Outside a transaction block `SET LOCAL` "emits a warning and otherwise has no effect" (PostgreSQL *SET*). A file that complies with rule 11 that way runs its `ALTER TABLE` with **no** lock timeout. That is the deploy-time lock pile-up NFR-AVAIL-003 guards against.
+2. **Rule 15's accepted alternative, "grants before `OWNER TO`" (`handedOver`, `:563`), now has a real window and a durable failure state.** If `ALTER FUNCTION … OWNER TO platform_definer` fails after `GRANT EXECUTE … TO platform_app` succeeded, a **migrator-owned** `SECURITY DEFINER` function executable by `platform_app` stays in place. The migrator owns the SYSTEM/GLOBAL tables, which have no RLS (PR7-SEC-09). Similarly, a `GRANT … TO platform_app` placed before a table's `ENABLE`/`FORCE ROW LEVEL SECURITY` leaves a granted table without RLS if a later statement fails.
+3. **A file may end inside `SET ROLE platform_definer`** (no end-of-file check). The rest of the file, and later files if the deploy connection is reused, then create objects owned by `platform_definer`. This links to PR11-SEC-06.
+
+**Exploitability / impact.** It needs a partially failed deploy plus a further defect or injection to use the left-over object. Item 1 is an availability exposure on every deploy that uses `SET LOCAL`. Likelihood L × Impact M → **LOW**.
+
+**Remediation.**
+- **Rule 11:** `LOCK_TIMEOUT = /^set (?:session )?lock_timeout\b/`, with a fixture where `SET LOCAL lock_timeout` must fail.
+- **Rule 15:** report a file whose statements end with the definer role still set. principal-architect amends am. 10 item 9 so that the **`SET ROLE` form is the only accepted form**, and rule 15 drops the `handedOver` branch.
+- **Rule 9:** a `GRANT` to `platform_app` on an RLS-class table must come after that table's `ENABLE` + `FORCE` (and its policies) in the same file.
+- **data-model §8.3/§8.4** (principal-architect): "a migration file is not atomic; order statements so that every prefix of the file leaves the schema safe".
+
+**Verification.** Fixtures `set-local-lock-timeout` (rule 11), `definer-role-not-reset` (rule 15) and `grant-before-force` (rule 9) each fail.
+
+### PR11-SEC-08 (INFO): exemption hygiene
+
+- **`prisma/tests/catalog/**`** (`eslint.config.mjs:109`) is a folder glob with `tokens` + `session-set`. Am. 10 item 1 and PR7-SEC-10 require exact-file exemptions. Probe P-D: a new `prisma/tests/catalog/helper.ts` with `SET app.org_id` lints clean. Replace it with `prisma/tests/catalog/c01-c12.int.test.ts` (`tokens`, `session-set`) and `prisma/tests/catalog/scans.ts` (`tokens`).
+- **`session-integrity.ts`** (`:101`, a future TASK-006 file) is exempted with `tokens`, which also admits a **transaction-local `set_config('app.org_id', …, true)`** (probe P-D). That would make a second context writer lint-legal. Split the `tokens` form into `keys` (security-key text, which the readiness reads need) and `setter` (`set_config`). Give `session-integrity.*` only `keys`; `with-tenant-tx.ts` keeps both.
+- **The spike exemption** (`:107`) allows all three forms. Remove it **in the same commit** that deletes `prisma/tests/spikes/spk03-rls-tx.int.test.ts`; a stale entry would exempt any future file at that path.
+
+### PR11-SEC-09 (INFO): composition-root wiring and the `DbError` surface (acceptance list)
+
+D-TASK016-01 assigns (a)–(c) to "whichever of PR #9 / PR #11 merges second", and records this only in DECISIONS. Until they are done, no runtime path uses `withTenantTx`, so there is no exposure. When wired, the review checks:
+
+1. **One composition function inside `apps/*/src/platform/db/`**, the only importer of `client.ts`, builds the client and the runner and returns the runner only. The worker uses the same.
+2. **`deps.env` is omitted** (so `process.env` is checked) and is never `{}`. A test proves the `PGOPTIONS` refusal through the composition function. This closes PR9-SEC-03's factory half.
+3. **`probeFreshConnection()` is awaited at start-up** before readiness turns ready. A failure means not-ready / exit 78.
+4. **Sinks:**
+   - `onSecurityEvent` goes to the TASK-010 security logger with `{event, correlationId, sqlState}` only;
+   - the counter becomes a metric;
+   - `markNotReady('db_session_context_leak')` **latches**: PR #9's 5-minute re-check must not clear it.
+5. **`EXPECTED_ROLE_SETTINGS` gains `statement_timeout=30s`**, and the lock_timeout-RESET test asserts drift ((a), (b)).
+6. **problem+json for `DbError`** carries `status`, the catalogue `code`, `Retry-After` from `retryAfterSeconds` and generic text. It never carries `message` (`"Database error: RLS_WRITE_REJECTED"`), `reason`, `sqlState` or `prismaCode`; those are log-only.
+
+Owner: the orchestrator writes these into the follow-up task (TASK-006 follow-up or TASK-020).
+
+### PR11-SEC-10 (INFO): risk statement for the DR-A14 special policies (decision 5)
+
+- **Today.** There is no exposure, because the tables do not exist yet.
+- **As written, the policies are fail-closed.** Every context reference is `= platform.app_*()`. But they use shapes outside the renderer allow-list (`EXISTS`, `id =`) and a forbidden token (`<>`), so TASK-037 cannot ship them through the renderer or C3 as they stand.
+- **The risk is in the resolution.** An exemption "by policy name" would permanently remove those tables from C3 and from PR11-SEC-03's rule-9 check, and later edits to an exempted predicate would go unchecked.
+
+Requirements for principal-architect's choice:
+1. **Prefer named renderer templates** (`org-member-read`, `member-orgs-read`, `own-by-id`, `active-org-by-id`) with their own exact shapes. The renderer and C3 stay the only source.
+2. **If an exemption list is chosen**, key it by `table.policy` plus the exact normalised predicate (or its SHA-256), in one reviewed file read by both rule 9 and C3, under CODEOWNERS with security-analyst. Any drift fails.
+3. **Inside an `EXISTS`**, every context reference is `col = platform.app_*()`; no `coalesce`/`IS DISTINCT FROM`/`NOT` touches a context value.
+4. **Replace `m.status <> 'REMOVED'` with a positive list**, for example `m.status IN ('ACTIVE','INVITED','SUSPENDED')`. The deny-list form makes a user's row readable by fellow members for any **future** status value by default: fail-open on enum growth. `p_organisations__member_read` already uses a positive list.
+5. **Keep the "memberships policies reference no other RLS table" invariant** as a C-series assertion; otherwise policy recursion raises 42P17. The TASK-024 generator covers these policies.
+
+### PR11-SEC-11 (INFO): hardening list
+
+| # | Item | Owner |
+|---|---|---|
+| a | The §4.2 helper bodies resolve `current_setting`, `~*` and `decode` through the caller's `search_path` (inlined SQL). Qualify them as `pg_catalog.current_setting(…)`, `OPERATOR(pg_catalog.~*)` and `pg_catalog.decode(…)`. Inlining is unaffected (only `SET`, `SECURITY DEFINER` or a non-SQL language prevent it). The current text equals data-model §4.2, so the data-model changes first | data-architect → next helper migration |
+| b | C13 `c LIKE 'app.%'` / `parname LIKE 'app.%'` are case-sensitive, while GUC names are not. Use `lower(c) LIKE 'app.%'`. Also assert no `pg_proc.proconfig` entry `ILIKE 'app.%'`: function `SET` clauses on placeholders need superuser or `SET` privilege, so only the bootstrap lane could add one | TASK-016 / TASK-021 |
+| c | Trigger-raised 42501/23514 (`AUDIT_IMMUTABLE`, `GUEST_DECLAIM_FORBIDDEN`) map to `db_privilege_denied` / `DB_ERROR`. Am. 10 item 6 asks that the event name come from the message, so add distinct events when TASK-021/051 land | TASK-021, TASK-051 |
+| d | `readSecret` stats and reads by path (`statSync` then `readFileSync`), not on one handle with `O_NOFOLLOW` as the `file` provider does (PR3 bar). A swap between the two calls can force an unbounded read before the size re-check. Open once, `fstatSync(fd)`, bounded `readSync` | TASK-016 / TASK-034 |
+| e | C1 and rule 9 cover `public` only. A table in `platform` escapes the RLS assertions (C5 still covers its grants). Extend C1 to every non-system schema, or assert that `platform` holds no table | TASK-016 / TASK-037 |
+| f | `platform/expect-affected` covers `updateMany`/`deleteMany` only. A `$executeRaw` `UPDATE`/`DELETE` result is unchecked | TASK-051 (raise to `error`) |
+| g | The GLOBAL authz tables are SELECT-only by C5 equality alone. A `runtimeReadOnly` manifest flag, checked by `validateGrants`, would refuse a write line at parse time | TASK-016 / TASK-020 |
+| h | The RLS prefix check reads English server text. A non-English `lc_messages` maps an RLS rejection to 500 + `db_privilege_denied` (fail-safe). Pin `lc_messages = 'C'` for `platform_app` in the bootstrap lane, or note the dependency | TASK-014 / M5 |
+
+## 4. Closure of the binding items
+
+**A. PR-0007 §5 and round 2**
+
+| Item | Status | Evidence / residual |
+|---|---|---|
+| PR7-SEC-01 (MEDIUM): no exported client; `NESTED_TENANT_TX`; SYSTEM writers on `TenantDb`; P2028 → 503; AT-US-075-04 run-time | **Closed for TASK-016's scope**, residual PR11-SEC-01 | `index.ts` does not re-export `client.ts`; `db-root-client` boundaries policy + fixture; ALS guard shared across runners; P2028/P2034 → 503 (unit + integration). SYSTEM writers do not exist yet: check at TASK-025/043. The `$parent` path reaches the root client (PR11-SEC-01) |
+| PR7-SEC-02: literal `true`, validated strings; fresh probe; `PGOPTIONS`; C13 `app.%`; negative control | **Closed**, wiring per PR11-SEC-09 | `with-tenant-tx.ts:141-169, 187-205, 276-278, 327-331`; C13 (d); `session-scope-leak.int.test.ts` (pool 1, pid per step, RESET in `finally`) |
+| PR7-SEC-03 item 1 (`originalCode`) / item 4 (`errorFormat`) | **Closed** / closed in PR #9 (PR-0009) | P-A: real-runtime P2010 and P2039 map correctly with no text |
+| PR7-SEC-05: Proxy; token ban with exact-file exemptions; `prosrc` scan | **Partially closed** | Proxy: PR11-SEC-01. Exemptions: PR11-SEC-08 (catalog glob). Scan: PR11-SEC-02 |
+| PR7-SEC-06: per-transaction lock/idle/statement timeouts; C13 rows; `ALTER ROLE` lint | **Closed** (TASK-016 part) | Eight-setting statement; C13 (d) exact rows; `platform/no-alter-role-sql`. Readiness drift: PR #9 + PR11-SEC-09 item 5 |
+| PR7-SEC-07: renderer allow-list; C3 forbidden tokens; (linter allow-list) | **Partially closed** | Renderer ✓, C3 ✓ (8 planted policies). Linter half and C3 tautology/unkeyed: PR11-SEC-03. C12 guest probes: TASK-024 |
+| PR7-SEC-09 → rule 15 | **Closed**, with PR11-SEC-07 | 4 fixtures; template under `SET ROLE platform_definer` |
+| PR7-SEC-11: scan by form across all non-system schemas incl. `platform` | **Closed for scope** (namespaces), residual PR11-SEC-02 | `PROSRC_SQL` `USER_NAMESPACES`; 3 negative fixtures executed on PG |
+| PR7-SEC-13: F-02 text; `expectAffected`; lint | **Closed** | `expect-affected.ts`; integration title "INSERT: 42501; UPDATE/DELETE: 0 rows silently"; `platform/expect-affected` at `warn`, blocking under `--max-warnings 0` |
+| PR7-SEC-14 (binding per D-ARCH-066): `MATERIALIZED` detector | **Closed**, wiring per PR11-SEC-09 | Same round trip; throws before `fn`; event + counter + not-ready; negative control proves it fires and that NULL/`''` pass |
+
+**B. PR-0008**
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR8-SEC-10: GLOBAL authz tables in the C1 allow-list; SELECT-only grants in the manifest | **Closed** | `authz.json`; `grants.manifest:15-17`; C5 equality. Hardening: PR11-SEC-11 g |
+| PR8-SEC-13 fallback | **Not needed** | PR #10 (TASK-007) ships `tools/ci/check-migration-immutability.mjs` and `.github/CODEOWNERS`. If PR #11 merges first, its only migration change is an `A` entry |
+| PR8-SEC-14: key-rule predicate; planted-row control | **Closed** | `ESCALATION_SQL`; rolled-back CUSTOMER_VIEWER→`audit:read` yields exactly 1 row; `webhook:%` = 0 |
+
+**C. PR-0005, SEC-P3-34 and P3 deviation 7**
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR5-SEC-09: membership assertion incl. `pg_*` | **Closed** | C13 `pg_auth_members` exact set for every `platform_%` role on either side |
+| PR5-SEC-11: rule 13 counts `SET search_path` = 1; `ALTER ROUTINE` | **Closed**; quoted-name residual in PR11-SEC-02 (C11 `proconfig` catches it) | `definerWithoutFixedPath`; 5 fixtures |
+| PR5-SEC-12: bootstrap variables allow-list; `PASSWORD` operand | **Closed** | Rule S; 3 fixtures |
+| C13 post-bootstrap; harness `options`; `pg_default_acl` `ns=0` rows | **Closed** | C11 three global `'f'` rows; C5 no r/S/T/n rows; C13 (c)/(d) |
+| SEC-P3-34 (TASK-016 half): C13 bootstrap-role `search_path` row; no database-wide row | **Closed** | C13 (d) |
+| P3 §15 deviation 7: C11 converse ownership assertion | **Open** | PR11-SEC-06 |
+
+**D. PR-0002 and PR-0009**
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR2-SEC-05: `prisma-client-construction` on the explicit path | **Closed** | Rule ignores `DB_PLATFORM`, `prisma/**`, `tools/db/**` and tests only; P-D control fires in a repository |
+| PR2-SEC-05 addendum: `pg`/`pg-pool` only under `platform/db` | **Open** | PR11-SEC-05 item 2 |
+| PR2-SEC-05 T-83 lint | **Open, unowned** | PR11-SEC-05 item 5 |
+| PR #5 R3-n1: `prisma/tests` import policy | **Closed** | Narrow `no-relative-packages` ignore + `prisma-tests` boundaries policy + negative fixture |
+| PR9-SEC-03 (factory half): refuse `PGOPTIONS` | **Closed in the runner**, wiring per PR11-SEC-09 item 2 | `with-tenant-tx.ts:275-278` |
+
+**E. SPK-03 F-01..F-13**
+
+| F | Status | Note |
+|---|---|---|
+| F-01 | Closed, residual | Savepoints hidden on `TenantDb`, but re-exposed through `$parent.$transaction` (PR11-SEC-01) |
+| F-02 | Closed | Run-time guard; text ported |
+| F-03 | Closed | Explicit `{maxWait ≤ pool, timeout ≥ statement}`; per-transaction timeouts; P2028 → 503 |
+| F-04 | Closed | Token ban; literal `true`; `SET LOCAL` banned in `platform/db` and repositories |
+| F-05 | n/a here | TASK-032; the generic `TransactionCapableClient<TTx>` accepts the extended client |
+| F-06 | Closed | `originalCode` on P2010/P2039 (real runtime) |
+| F-07 | Closed | Helpers + catalog test; residual C3 allow-list (PR11-SEC-03) |
+| F-08 | Closed | `guestTokenHash` = lowercase hex SHA-256, server-side; `^[0-9a-f]{64}$` |
+| F-09 | Closed | 40001/40P01/55P03/57014 retryable |
+| F-10 | Closed | Rule 15 + template; PR11-SEC-07 |
+| F-11 / F-12 | n/a here | TASK-276 docs / dispatch template |
+| F-13 | Closed | Superuser observer; runtime asserted through `platform_app` |
+
+**F. ADR-0005 am. 10 items 1–16**
+
+| Item | Status | Item | Status |
+|---|---|---|---|
+| 1 | Partial (PR11-SEC-01, -02, -08) | 9 | Closed (rule 15, template); PR11-SEC-07 |
+| 2 | Closed (SYSTEM writers → TASK-025/043) | 10 | n/a (TASK-276) |
+| 3 | Closed | 11 | Template closed (both `IS DISTINCT FROM` conditions); trigger + superuser tests → TASK-051 |
+| 4 | Closed (wiring PR11-SEC-09) | 12 | Closed (02 file, statement, `DB_TX_*` keys, C13, lint); readiness → PR #9 + PR11-SEC-09 |
+| 5 | n/a (TASK-032) | 13 | **Deferred to TASK-015** (C-1), acceptable (§5 ruling 2) |
+| 6 | Closed | 14 | n/a (M5) |
+| 7 | Closed as written; residual PR11-SEC-03 | 15 | Closed |
+| 8 | Closed | 16 | Closed (wiring PR11-SEC-09) |
+
+**G. Linter rules (SEC-TC-33 / NT-AVAIL-003-a).** Rules 3, 4, 5, 6, 7, 8, 9, 11, 14, 15 and 16 are implemented, each with negative fixtures, plus PR5-SEC-11/12. Residuals:
+- rule 8: `PUBLIC`/`TRUNCATE` (PR11-SEC-04);
+- rule 9: predicates and grant order (PR11-SEC-03, -07);
+- rule 11: `SET LOCAL` (PR11-SEC-07);
+- rule 15: end-of-file role and the alternative form (PR11-SEC-07);
+- rule 16: forms (PR11-SEC-02).
+
+`required-suites.json` still marks `migration-lint` and `catalog-c1-c14` as `planned`. Per the sheet, they activate with US-074; that is a qa-lead change at merge (§6).
+
+**H. Catalog C1–C14 (SEC-TC-05 = C4, C11).**
+
+| C | Status |
+|---|---|
+| C1 | Closed (`public` only, PR11-SEC-11 e) |
+| C2 | Closed |
+| C3 | Deny-list + snapshot (PR11-SEC-03) |
+| C4 | Closed |
+| C5 | `PUBLIC` gap (PR11-SEC-04) |
+| C6, C7, C8, C9, C10 | **Not in this suite**, although the PR body says "C1-C12 green". C6/C7/C14 audit and immutability triggers belong to TASK-021/033 and C10 to TASK-028; C8/C9 need an owner. Routed in §6 |
+| C11 | Closed except the converse (PR11-SEC-06) |
+| C12 | Proven on a rendered probe; generator → TASK-024 |
+| C13 | Closed |
+| C14 | As far as the objects exist (TASK-021) |
+
+**I. Sheet items.**
+- **`readSecret` parity (D-ARCH-052):** closed (`bootstrap.ts`; tests cover outside root, `..`, junction escape, directory, > 64 KiB, missing, both set, empty, newline). Hardening in PR11-SEC-11 d.
+- **`DB_TX_*` keys:** closed; the bounds are 100–120,000 / 100–60,000 / 1,000–600,000 ms.
+- **AT-US-074-01..05 and AT-US-075-01..04:** present in the test titles; executed by senior-developer per the PR body.
+
+## 5. Rulings on the PR's open decisions
+
+1. **`GRANT EXECUTE ON FUNCTION platform.app_actor_id() TO platform_definer` (decision 3) is ACCEPTED.** The definer body calls the helper, `PUBLIC` holds no `EXECUTE` (global default privileges), and the function only reads a GUC. principal-architect adds it to data-model §4.4. When TASK-037 applies the template, C11's helper expectation for `app_actor_id` gains `platform_definer`.
+2. **The C-1 deferral to TASK-015 is ACCEPTABLE from a security standpoint.** C-1 is a performance record (W-1, item 13), not a control. Conditions:
+   - TASK-015's sheet carries C-1: today it is only in D-TASK016-01;
+   - the spike file's `TENANT_CONTEXT_EXEMPTIONS` entry is removed in the deleting commit (PR11-SEC-08);
+   - until then the spike runs only against throw-away test databases.
+3. **The guardrail note on `02-role-backstops.sql` is ACCEPTED.** It changes no data, is idempotent, is ledger-pinned and is asserted by C13. Role defaults are not a boundary; the per-transaction values win.
+4. **Decision 4 (non-atomic files)** has security consequences beyond rule 5: see PR11-SEC-07.
+5. **Decision 5 (DR-A14):** see the PR11-SEC-10 risk statement. Security-analyst sign-off is required on the chosen mechanism before TASK-037 merges.
+6. **Decision 7 (`TenantDb<TTx>` generic; P2034 → 503):** no objection.
+
+## 6. Routing
+
+| Owner | Item | Due |
+|---|---|---|
+| TASK-016 fix cycle (recommended) | PR11-SEC-01, -02, -04, -08 (all in this PR's code); optionally -06 and the rule 11/15 parts of -07 | Before merge if taken; otherwise before TASK-037 |
+| TASK-016 or TASK-037 | PR11-SEC-03 (rule 16 operator-atom exemption is **required before TASK-037's first RLS migration**), PR11-SEC-06, PR11-SEC-11 e | Before the first `CREATE POLICY` migration |
+| principal-architect | Am. 10 item 9 (`SET ROLE` form only), data-model §8.3/§8.4 non-atomicity wording (PR11-SEC-07); §4.4 grant (ruling 1); §4.2 qualification (PR11-SEC-11 a); DR-A14 mechanism (PR11-SEC-10); T-83 verification wording if no lint (PR11-SEC-05) | Before TASK-037 |
+| orchestrator | Write PR11-SEC-09 items 1–6 into the task that wires the composition root; put C-1 on TASK-015's sheet; assign T-83; assign C8/C9 owners | Before the first `withTenantTx` consumer |
+| qa-lead | Flip `migration-lint` and `catalog-c1-c14` to active in `required-suites.json` with US-074. The catalog suite runs only locally until TASK-015's `security-integration` job exists (D-ORCH-004 evidence) | At merge |
+| TASK-025 / TASK-043 | SYSTEM writers take `TenantDb`; no client or `pg` of their own (PR2-SEC-05 addendum, PR11-SEC-05) | With those tasks |
+| TASK-051 / TASK-021 | Trigger event names (PR11-SEC-11 c); `expect-affected` to `error` (f) | With those tasks |
+| TASK-024 | C12 generator incl. guest probes (PR7-SEC-07 item 3) and the DR-A14 policies | Wave 0 |
+
+## 7. ASVS / OWASP mapping
+
+| ASVS | Status | Findings |
+|---|---|---|
+| V4.1.1, V4.1.3 (access control enforced at a trusted service layer, least privilege) | Met by FORCE RLS, NOBYPASSRLS and the grant manifest | Residuals PR11-SEC-01, -04, -06 |
+| V4.1.5 (fail securely) | Met by the helpers, the fail-closed detector and the context validation | Residuals PR11-SEC-03, -07 |
+| V5.3.4 (parameterised queries) | Met | Residual PR11-SEC-05 |
+| V7.4.1 (generic errors) | Met for `mapDbError` | Surface PR11-SEC-09 item 6 |
+| V14.1.x (configuration hardening) | Met by the 02 backstop, C13 and the `ALTER ROLE` lint | — |
+
+OWASP 2021 categories as in §3.
+
+Sources: `@prisma/client` 7.10.1 `runtime/client.js` (`Zn`, `Yt`, `_createItxClient`, `$parent`/`Xn` layers) and `@prisma/driver-adapter-utils` in the worktree's `node_modules`; PostgreSQL 18 documentation (*SET*: `SET LOCAL` outside a transaction block; *ALTER DEFAULT PRIVILEGES*; §5.9 *Row Security Policies*: `TRUNCATE` and `REFERENCES` are not subject to row security); `gram.y` `var_name`; PR #11 `prisma/README.md` "Rule 5".
