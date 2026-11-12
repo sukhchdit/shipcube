@@ -36,6 +36,7 @@
 | 0.4 | TASK-013 permission catalogue + 17 seeded roles (PR #8) | senior-developer → backend-developer (opus) | merged 4dc7122 | ✅ | ✅ APPROVED_WITH_NITS r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ 6e70275: unit 859, integration 33, coverage 892 (authz 100/100), build, audit (sr-dev); main 4dc7122 code tree == gated head (D-ORCH-010) | ✅ | 1 | – |
 | 0.3 | TASK-006 API + worker runtime skeleton | senior-developer → backend-developer | feat/TASK-006-* | ▶ | | | | | 0 | |
 | 0.3 | TASK-007 CI lane A + supply-chain hardening | senior-developer → devops-engineer (opus) | feat/TASK-007-* | ▶ | | | | | 0 | |
+| 0.5 | TASK-016 RLS foundations (critical path; binding ADR-0005 am.10 items) | senior-developer → database-engineer (opus) | feat/TASK-016-* | ▶ | | | | | 0 | |
 
 ## Escalations in progress
 _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuation / sr-dev completion — not fix cycles)
