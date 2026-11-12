@@ -413,7 +413,7 @@ Feature: Platform carrier accounts
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-128
 - **Linked REQs:** REQ-CARR-016
 - **As a** developer **I want** OAuth access tokens cached and refreshed once per account **so that** carrier calls do not request a token each time and a burst never floods the token endpoint.
-- **Notes:** Cached in Redis until 60 s before stated expiry (`ttl = clamp(expires_in − CARRIER_TOKEN_REFRESH_SKEW_S, 0, CARRIER_TOKEN_TTL_MAX_S)`, defaults 60 / 3600; missing or non-numeric `expires_in` makes the token uncacheable, never a default lifetime); one in-flight refresh; on 401 discard and retry once. Token-endpoint failures (D-ARCH-062, PR6-SEC-05/07, SEC-TC-68): 400/401 from the token endpoint is negative-cached per account for `CARRIER_TOKEN_FAIL_TTL_S=60` (fail fast with `AUTH_FAILED`, counts toward the breaker); token requests per carrier go through a shared bucket `CARRIER_TOKEN_REQUESTS_PER_S` (FedEx 1/s, burst 3); a token-endpoint 403 starts a carrier-wide cool-down `CARRIER_TOKEN_PENALTY_COOLDOWN_S=600` (no token request, calls fail fast with `CARRIER_UNAVAILABLE`, security event) and is never treated as "refresh". Token value never logged.
+- **Notes:** Cached in Redis until 60 s before stated expiry (`ttl = clamp(expires_in − CARRIER_TOKEN_REFRESH_SKEW_S, 0, CARRIER_TOKEN_TTL_MAX_S)`, defaults 60 / 3600; missing or non-numeric `expires_in` makes the token uncacheable, never a default lifetime); one in-flight refresh; on 401 discard and retry once. Token-endpoint failures (D-ARCH-062, PR6-SEC-05/07, SEC-TC-68): 400/401 from the token endpoint is negative-cached per account for `CARRIER_TOKEN_FAIL_TTL_S=60` (fail fast with `AUTH_FAILED`, counts toward the breaker); token requests per carrier go through a shared bucket `CARRIER_TOKEN_REQUESTS_PER_S` (FedEx 1/s, burst 3); a token-endpoint 403 is handled by the adapter's static `TOKEN_ENDPOINT_POLICY` (D-ARCH-067, D-060, ADR-0010 am. 11 item 5(c)) — FedEx `carrier-cooldown`: carrier-wide `CARRIER_TOKEN_PENALTY_COOLDOWN_S=600` (no FedEx token request, every FedEx account fails fast with `CARRIER_UNAVAILABLE`, event `carrier_token_penalty`, one probe after), never treated as "refresh"; UPS `account-negative-cache`: 403 = "Blocked Merchant" for that account only, `CARRIER_TOKEN_BLOCKED_TTL_S=600`, fail fast `AUTH_FAILED`, its breaker opens, ops event, other UPS accounts unaffected and no carrier-wide key; DHL Express (HTTP Basic) has no token endpoint. `AUTH_FAILED` = "fix the credentials", `CARRIER_UNAVAILABLE` = "wait". Token value never logged.
 
 #### Acceptance criteria
 Permission path: not applicable — internal client concern with no principal; second negative scenario included.
@@ -447,12 +447,22 @@ Feature: OAuth token cache
     And every call fails fast with canonical error AUTH_FAILED
     And the failures count toward the breaker of acct-fedex
 
-  Scenario: Token endpoint 403 starts a carrier-wide cool-down
-    Given the token endpoint answers 403 for carrier FEDEX
+  Scenario: FedEx token endpoint 403 starts a carrier-wide cool-down (policy carrier-cooldown)
+    Given the FedEx token endpoint answers 403 for account acct-fedex-a
     When calls are made for any FedEx account during the next 600 s
-    Then no further token request is sent
+    Then no further FedEx token request is sent
     And the calls fail fast with canonical error CARRIER_UNAVAILABLE
-    And one security event names the carrier and the cool-down end time
+    And one security event "carrier_token_penalty" names the carrier and the cool-down end time
+    And exactly one probe token request is sent after the cool-down ends
+
+  Scenario: UPS token endpoint 403 on account A leaves accounts B and C working (policy account-negative-cache, SEC-TC-68 UPS case)
+    Given UPS accounts acct-ups-a, acct-ups-b and acct-ups-c with no cached token
+    And the UPS token endpoint answers 403 "Blocked Merchant" for acct-ups-a and 200 for the others
+    When calls are made for all three accounts during the next 600 s
+    Then calls for acct-ups-a fail fast with canonical error AUTH_FAILED after exactly one token request
+    And the circuit breaker of acct-ups-a opens and an operations event names acct-ups-a
+    And calls for acct-ups-b and acct-ups-c succeed with their own tokens
+    And no carrier-wide cool-down key exists for carrier UPS
 
   Scenario: Token requests are rate-limited per carrier
     Given 10 FedEx accounts with no cached token and a bucket of 1 request per second with burst 3
