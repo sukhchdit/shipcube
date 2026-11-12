@@ -9,7 +9,9 @@
  *               chomping), flow sequences of scalars (`[a, 'b']`), the empty flow mapping `{}`, `#` comments.
  *   rejected    anchors `&`, aliases `*`, merge keys `<<`, tags `!`, directives, `---`/`...` document markers, flow
  *               mappings other than `{}`, nested flow collections, multi-line plain or quoted scalars, tabs in
- *               indentation, duplicate keys, keys containing `: `.
+ *               indentation, duplicate keys, keys containing `: `, and (anywhere, comments included) a CR not followed
+ *               by LF, NEL U+0085, LS U+2028, PS U+2029, C0 controls other than TAB/LF/CRLF, and U+FEFF other than as
+ *               the first character (line-break differential, code review m1).
  *
  * A rejected construct is a finding for the caller (`yaml-subset`): a workflow the checker cannot read with certainty
  * must not pass the policy. Scalars stay strings (`true`, `1` and `on` are not converted).
@@ -320,7 +322,28 @@ function parseSeq(s, indent, path) {
 }
 
 /**
- * Parses `text` (one YAML document in the supported subset).
+ * Characters the line splitter (`\r?\n`) does not treat as line breaks but a YAML 1.1 parser may (lone CR, NEL, LS,
+ * PS), other C0 controls, and a byte-order mark after the first character. Any of them could hide the rest of a
+ * comment line from this parser while GitHub's parser reads it as a new line (code review m1), so they fail closed.
+ * TAB is allowed (it is rejected separately in indentation); CR only as part of CRLF, which the splitter consumes.
+ */
+// eslint-disable-next-line no-control-regex -- the control characters are what this pattern detects
+const FORBIDDEN_CHAR = /[\u0000-\u0008\u000B-\u001F\u0085\u2028\u2029\uFEFF]/;
+
+const FORBIDDEN_NAMES = new Map([
+  ['\r', 'a carriage return not followed by a line feed (U+000D)'],
+  ['\u0085', 'NEXT LINE (U+0085)'],
+  ['\u2028', 'LINE SEPARATOR (U+2028)'],
+  ['\u2029', 'PARAGRAPH SEPARATOR (U+2029)'],
+  ['\uFEFF', 'a byte-order mark (U+FEFF) after the first character'],
+]);
+
+/** @param {string} char */
+const describeForbidden = (char) =>
+  FORBIDDEN_NAMES.get(char) ?? `control character U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+
+/**
+ * Parses `text` (one YAML document in the supported subset). Fails closed on the characters in `FORBIDDEN_CHAR`.
  * @param {string} text
  * @returns {ParsedYaml}
  * @throws {YamlSubsetError}
@@ -328,6 +351,8 @@ function parseSeq(s, indent, path) {
 export function parseYamlSubset(text) {
   const raw = (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).split(/\r?\n/);
   for (const [index, line] of raw.entries()) {
+    const forbidden = FORBIDDEN_CHAR.exec(line);
+    if (forbidden !== null) throw new YamlSubsetError(`${describeForbidden(forbidden[0])} is not allowed`, index + 1);
     if (/^\s*\t/.test(line) && !isBlank(line)) throw new YamlSubsetError('tab in indentation', index + 1);
     if (/^(---|\.\.\.)(\s|$)/.test(line)) throw new YamlSubsetError('document markers are not supported', index + 1);
     if (/^%/.test(line)) throw new YamlSubsetError('directives are not supported', index + 1);

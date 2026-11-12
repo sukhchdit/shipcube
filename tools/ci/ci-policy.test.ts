@@ -41,14 +41,24 @@ const indexOf = (pattern: RegExp): number => {
   return index;
 };
 const triggers = map(ci.on, 'on');
+const scans = map(jobs.scans, 'scans');
+const scanSteps = (Array.isArray(scans.steps) ? scans.steps : []).map((step, index) => map(step, `scans step ${index}`));
+const scanIndexOf = (pattern: RegExp): number => {
+  const index = scanSteps.findIndex((step) => pattern.test(stepText(step)));
+  if (index < 0) throw new Error(`no scans step matches ${String(pattern)}`);
+  return index;
+};
+const scanOrder = [/GITLEAKS_IMAGE/, /GATE_RUN_SEMGREP/, /GATE_CHECK_SECURITY_OWNED_PATHS/].map(scanIndexOf);
 
 describe('ci-policy: US-005 CI pipeline skeleton', () => {
-  it('AT-US-005-01: the PR fast lane runs install, lint/format, typecheck, unit, build and security in the documented order on ubuntu-latest with Node from .node-version (coverage and contract-drift steps join in TASK-015)', () => {
+  it('AT-US-005-01: the PR fast lane runs install, lint/format, typecheck, unit and build in the documented order on ubuntu-24.04 with Node from .node-version; the security scans run in the parallel, isolated scans job that ci-gate needs (coverage and contract-drift steps join in TASK-015)', () => {
     expect(map(triggers.pull_request, 'pull_request').types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review']);
-    expect(fastLane['runs-on']).toBe('ubuntu-latest');
+    expect(fastLane['runs-on']).toBe('ubuntu-24.04');
+    expect(scans['runs-on']).toBe('ubuntu-24.04');
     const setupNode = steps.find((step) => str(step.uses).startsWith('actions/setup-node@'));
     expect(map(setupNode?.with, 'setup-node with')['node-version-file']).toBe('.node-version');
     const order = [
+      indexOf(/Classify changed paths/),
       indexOf(/npm ci --ignore-scripts/),
       indexOf(/npm run deps:rebuild/),
       indexOf(/npm run lint/),
@@ -57,12 +67,64 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       indexOf(/npm run test:unit$/m),
       indexOf(/npm run build/),
       indexOf(/GATE_CHECK_PORCELAIN/),
-      indexOf(/GITLEAKS_IMAGE/),
-      indexOf(/GATE_RUN_SEMGREP/),
-      indexOf(/GATE_CHECK_SECURITY_OWNED_PATHS/),
     ];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(Object.keys(jobs)).toEqual(['changes', 'fast-lane', 'ci-gate']);
+    expect(order[0]).toBe(2); // checkout, setup-node, then the in-lane classifier (review m5 (a): no separate job)
+    expect(scanOrder).toEqual([...scanOrder].sort((a, b) => a - b));
+    expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'ci-gate']);
+  });
+
+  it('AT-US-005-01 / PR10-SEC-02: licences, registry signatures and the advisory audit run right after the install, before deps:rebuild and any head code', () => {
+    const install = indexOf(/npm ci --ignore-scripts/);
+    const rebuild = indexOf(/npm run deps:rebuild/);
+    for (const gate of [/GATE_LICENCE_CHECK/, /npm audit signatures/, /GATE_CHECK_AUDIT/]) {
+      expect(indexOf(gate)).toBeGreaterThan(install);
+      expect(indexOf(gate)).toBeLessThan(rebuild);
+    }
+  });
+
+  it('PR10-SEC-02: the scans job runs no npm, nothing from node_modules or the workspace, and takes a literal Node version without cache', () => {
+    const text = scanSteps.map(stepText).join('\n');
+    expect(text).not.toMatch(/(?:^|[\s;&|(])(?:npm|npx)\s/m);
+    expect(text).not.toMatch(/node_modules/);
+    expect(text).not.toMatch(/\$GITHUB_WORKSPACE\/[^"\s]*\.m?[jt]s/);
+    const setupNode = map(scanSteps.find((step) => str(step.uses).startsWith('actions/setup-node@'))?.with, 'scans setup-node with');
+    expect(setupNode).toEqual({ 'node-version': '24' });
+    expect(checkWorkflow(ciText, 'ci.yml')).toEqual([]);
+  });
+
+  it('PR10-SEC-01 / review M2: gitleaks mounts only .git, ignores inline gitleaks:allow, diffs merges against the first parent and has no network', () => {
+    const run = str(scanSteps[scanIndexOf(/GITLEAKS_IMAGE/)]?.run);
+    expect(run).toContain('-v "$GITHUB_WORKSPACE/.git:/repo/.git:ro"');
+    expect(run).not.toMatch(/-v "\$GITHUB_WORKSPACE:/);
+    expect(run).toContain('--ignore-gitleaks-allow');
+    expect(run).toContain('--log-opts="--diff-merges=first-parent $range"');
+    expect(run).toContain('docker run --rm --network none');
+    expect(run).toContain('-v "$GATES_DIR/.gitleaks.toml:/config/gitleaks.toml:ro"');
+  });
+
+  it('PR10-SEC-03 / review m3: Semgrep takes its rules, .semgrepignore and .gitignore from the base ref', () => {
+    const extract = str(scanSteps[scanIndexOf(/Gate tooling and scan configuration from the base ref/)]?.run);
+    expect(extract).toContain('for path in tools/ci .semgrep .gitleaks.toml .semgrepignore .gitignore; do');
+    expect(str(scanSteps[scanIndexOf(/GATE_RUN_SEMGREP/)]?.run)).toContain('--rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR"');
+  });
+
+  it('PR10-SEC-04: the record check binds to the PR number on pull requests and is not evaluated on push', () => {
+    const run = str(scanSteps[scanIndexOf(/GATE_CHECK_SECURITY_OWNED_PATHS/)]?.run);
+    expect(run).toContain('--pr "$PR_NUMBER"');
+    expect(run).toMatch(/if \[ "\$EVENT" = "pull_request" \]; then/);
+    expect(run).toContain('not evaluated on push');
+  });
+
+  it('review m3: the base-ref lint fixture step also takes the harness (lint-fixtures.mjs, tools/test-support) from the base; the classifier treats jest.config.ts and tools/test-support as lint controls', () => {
+    const run = str(steps[indexOf(/Lint negative fixtures from the base ref/)]?.run);
+    expect(run).toContain('for path in tools/lint/lint-fixtures.mjs tools/test-support; do');
+    expect(run).toContain('git checkout HEAD -- "$suite" tests/fixtures/lint tools/test-support tools/lint/lint-fixtures.mjs');
+    const classify = str(steps[indexOf(/Classify changed paths/)]?.run);
+    expect(classify).toContain('jest\\.config\\.ts');
+    expect(classify).toContain('test-support');
+    expect(classify).toContain('git diff --name-only --no-renames "$RANGE_BASE...$RANGE_HEAD"');
+    expect(classify).toContain("grep -qxF '.claude/settings.json'");
   });
 
   it('AT-US-005-01: integration, images and e2e jobs are not scheduled for pull requests (D-ORCH-001)', () => {
@@ -70,24 +132,32 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(ciText).not.toMatch(/npm run test:(?:integration|e2e)/);
   });
 
-  it('AT-US-005-02 (lane A part): push to main re-runs only the fast lane behind CI_MAIN_FAST_LANE; ci.yml has no schedule; the full stages run in lane C on workflow_dispatch (TASK-015)', () => {
-    expect(map(triggers.push, 'push').branches).toEqual(['main']);
-    expect(str(map(jobs.changes, 'changes').if)).toContain("vars.CI_MAIN_FAST_LANE == 'true'");
+  it('AT-US-005-02 (lane A part): push to main re-runs only lane A behind CI_MAIN_FAST_LANE, skipping docs-only pushes; ci.yml has no schedule; the full stages run in lane C on workflow_dispatch (TASK-015)', () => {
+    const push = map(triggers.push, 'push');
+    expect(push.branches).toEqual(['main']);
+    expect(push['paths-ignore']).toEqual(['docs/**', '.claude/**', '**/*.md']);
+    for (const job of [fastLane, scans]) expect(str(job.if)).toContain("vars.CI_MAIN_FAST_LANE == 'true'");
     expect(Object.keys(triggers)).not.toContain('schedule');
     expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
   });
 
-  it('AT-US-005-03: any failing stage fails the run: one sequential job, no continue-on-error, no always()/failure() steps, so a failing unit test skips build and scans; ci-gate fails unless every needed job succeeded', () => {
+  it('review m5 (b): pull-request runs share a per-PR group and cancel superseded runs; every push to main gets its own group, so none is cancelled', () => {
+    const concurrency = map(ci.concurrency, 'concurrency');
+    expect(concurrency.group).toBe('ci-${{ github.event.pull_request.number || github.sha }}');
+    expect(concurrency['cancel-in-progress']).toBe('true');
+  });
+
+  it('AT-US-005-03: any failing stage fails the run: no continue-on-error, no always()/failure() steps, a failing unit test skips build; ci-gate runs unless cancelled and fails unless both lanes succeeded (a skipped lane is not green)', () => {
     expect(ciText).not.toMatch(/continue-on-error/);
-    for (const step of steps) expect(str(step.if)).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/);
+    for (const step of [...steps, ...scanSteps]) expect(str(step.if)).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/);
     const unit = indexOf(/npm run test:unit$/m);
     expect(indexOf(/npm run build/)).toBeGreaterThan(unit);
-    expect(indexOf(/GATE_RUN_SEMGREP/)).toBeGreaterThan(unit);
     const gate = map(jobs['ci-gate'], 'ci-gate');
-    expect(gate.needs).toEqual(['changes', 'fast-lane']);
-    expect(str(gate.if)).toContain('always()');
+    expect(gate.needs).toEqual(['fast-lane', 'scans']);
+    expect(str(gate.if)).toBe("${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}");
     const gateRun = str(map((gate.steps as YamlNode[])[0], 'ci-gate step').run);
     expect(gateRun).toMatch(/"\$FAST_LANE" != "success"/);
+    expect(gateRun).toMatch(/"\$SCANS" != "success"/);
     expect(gateRun).toMatch(/exit 1/);
   });
 
@@ -127,7 +197,7 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
   it('SEC-TC-32: read-only token, no pull_request_target, actions pinned by SHA, every install --ignore-scripts, npm audit signatures with the scope override', () => {
     expect(ci.permissions).toEqual({ contents: 'read' });
     expect(Object.keys(triggers)).not.toContain('pull_request_target');
-    const uses = steps.map((step) => str(step.uses)).filter((u) => u !== '');
+    const uses = [...steps, ...scanSteps].map((step) => str(step.uses)).filter((u) => u !== '');
     expect(uses.length).toBeGreaterThan(0);
     for (const u of uses) expect(u).toMatch(/@[0-9a-f]{40}$/);
     expect(ciText.match(/npm (?:ci|install)\b[^\n]*/g)?.every((line) => line.includes('--ignore-scripts'))).toBe(true);

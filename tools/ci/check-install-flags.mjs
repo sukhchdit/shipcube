@@ -7,8 +7,12 @@
  *   npmrc                 root `.npmrc` and every `tools/isolated/<tool>/.npmrc` hold `ignore-scripts=true`,
  *                         `engine-strict=true`, `min-release-age=7` (last value wins) and the exact line
  *                         `@platform:registry=https://registry.invalid/`; an isolated tool lockfile without its `.npmrc` fails.
- *   install-flags         every `npm ci` / `npm install` / `npm i` in workflows, Dockerfiles, compose files and
- *                         package.json scripts carries `--ignore-scripts`; nothing re-enables scripts.
+ *   install-flags         every npm install in workflows, Dockerfiles, compose files and package.json scripts, under
+ *                         any npm alias or abbreviation (`ci`, `clean-install`, `ic`, `cit`, `it`, `sit`, `ins`,
+ *                         `isnt`, `add`, camelCase forms; npm-command.mjs), carries a canonical `--ignore-scripts`;
+ *                         no npm invocation re-enables scripts (`--ignore-scripts false`, `=false`, `--no-ignore-scripts`,
+ *                         `--ig false`, `-ig false`, npm_config_ignore_scripts=…, `npm config set ignore-scripts …`) and
+ *                         no command writes ignore-scripts config other than true.
  *   docker-install-order  a Dockerfile `npm ci`/`npm install` runs only in a stage that has COPY-ed `package-lock.json`
  *                         and `.npmrc` (directly or through its base stage).
  *   docker-omit-optional  a Dockerfile install with `--omit=dev` also carries `--omit=optional`.
@@ -18,8 +22,8 @@
  *                         `node tools/deps/prisma-cli.mjs <args>`.
  *   prisma-migrations-write  no INSERT/UPDATE/DELETE/TRUNCATE on `_prisma_migrations` outside prisma/tests/** (n8).
  *
- * Scope: the repository tree without node_modules, build output, docs, agent files and `fixtures/` directories (the
- * seeded negative examples of these very rules).
+ * Scope: the repository tree without node_modules, build output, docs, agent files and the anchored fixture trees in
+ * SKIP_ROOTED (the seeded negative examples of these very rules).
  *
  * CLI: node tools/ci/check-install-flags.mjs [--root <dir>] [--summary <file>] [--json]
  * Exit 0 pass, 1 findings, 2 usage/internal error.
@@ -28,22 +32,29 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from 
 import { basename, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { npmInvocations, writesIgnoreScriptsConfig } from './npm-command.mjs';
+
 /** @typedef {{ rule: string, message: string, location: string }} Finding */
 
 export const REQUIRED_NPMRC = Object.freeze({ 'ignore-scripts': 'true', 'engine-strict': 'true', 'min-release-age': '7' });
 export const PLATFORM_PIN_LINE = '@platform:registry=https://registry.invalid/';
 
-const SKIP_DIRS = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  'coverage',
-  '.react-router',
-  'fixtures',
+/** Directory names skipped at any depth: dependencies, VCS data and build output. */
+const SKIP_ANY = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.react-router']);
+/**
+ * Repository-relative directories skipped exactly (review n2: anchored, so a `fixtures/` or `generated/` folder anywhere
+ * else is scanned): documentation, agent files, and the fixture trees that seed negative examples of these rules.
+ */
+const SKIP_ROOTED = new Set([
   'docs',
   '.claude',
-  'generated',
+  'tests/fixtures',
+  'tests/generated',
+  'tools/ci/fixtures',
+  'tools/db/fixtures',
+  'tools/deps/fixtures',
+  'prisma/tests/fixtures',
+  'packages/config/src/fixtures',
 ]);
 const SOURCE_EXT = /\.(?:[cm]?[jt]sx?|sql)$/;
 const MIGRATIONS_WRITE = /\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?)\s+(?:"?public"?\s*\.\s*)?"?_prisma_migrations\b/i;
@@ -112,7 +123,8 @@ export function commandSegments(text) {
   return out;
 }
 
-const INSTALL = /\bnpm\s+(?:ci|install|i|add|isntall|in)\b/;
+/** @param {string} segment */
+const installs = (segment) => npmInvocations(segment).some((invocation) => invocation.install);
 const RAW_PRISMA = [
   /(?:^|[\s"'(=`:])prisma\s+(?:generate|migrate|db|validate|format|version|init|studio|debug|introspect|-v\b|--version\b)/,
   /["']prisma["']\s*,/,
@@ -130,11 +142,18 @@ export function segmentFindings(segment) {
   /** @type {{ rule: string, message: string }[]} */
   const out = [];
   const short = segment.slice(0, 100);
-  if (INSTALL.test(segment) && !/(?:^|\s)--ignore-scripts(?:=true)?(?=[\s)"'`]|$)/.test(segment)) {
-    out.push({ rule: 'install-flags', message: `npm install/ci without --ignore-scripts: "${short}"` });
+  for (const npm of npmInvocations(segment)) {
+    if (npm.overrides.length > 0) {
+      out.push({
+        rule: 'install-flags',
+        message: `a command re-enables lifecycle scripts or spells ignore-scripts non-canonically (${npm.overrides.join(', ')}): "${short}"`,
+      });
+    } else if (npm.install && !npm.scriptsOff) {
+      out.push({ rule: 'install-flags', message: `npm install/ci (any alias) without --ignore-scripts: "${short}"` });
+    }
   }
-  if (/--ignore-scripts=(?:false|0|no)\b|--no-ignore-scripts\b/i.test(segment)) {
-    out.push({ rule: 'install-flags', message: `a command re-enables lifecycle scripts: "${short}"` });
+  if (writesIgnoreScriptsConfig(segment)) {
+    out.push({ rule: 'install-flags', message: `a command sets ignore-scripts to something other than true: "${short}"` });
   }
   if (/(?:^|[\s(`$"'])(?:npx|bunx)(?:\s|$|["'])|\b(?:pnpm|yarn)\s+dlx\b/.test(segment)) {
     out.push({ rule: 'npx', message: `use \`npm exec --no -- <bin>\` instead of npx: "${short}"` });
@@ -204,7 +223,7 @@ export function checkDockerfile(text, label) {
     } else if (instruction === 'RUN') {
       for (const segment of commandSegments(args)) {
         for (const f of segmentFindings(segment.text)) findings.push({ ...f, location: where });
-        if (INSTALL.test(segment.text)) {
+        if (installs(segment.text)) {
           if (!state.lock || !state.npmrc) {
             findings.push({
               rule: 'docker-install-order',
@@ -220,7 +239,7 @@ export function checkDockerfile(text, label) {
             });
           }
         }
-        if (/\bnpm\s+rebuild\b/.test(segment.text)) {
+        if (npmInvocations(segment.text).some((invocation) => invocation.rebuild)) {
           findings.push({
             rule: 'docker-npm-rebuild',
             message: 'npm rebuild is not allowed in Dockerfiles (ADR-0023 am. J item 6)',
@@ -295,7 +314,8 @@ function walk(root) {
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) visit(join(dir, entry.name));
+        const rel = relative(root, join(dir, entry.name)).replaceAll('\\', '/');
+        if (!SKIP_ANY.has(entry.name) && !SKIP_ROOTED.has(rel)) visit(join(dir, entry.name));
       } else if (entry.isFile()) out.push(relative(root, join(dir, entry.name)).replaceAll('\\', '/'));
     }
   };

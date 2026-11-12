@@ -1,22 +1,41 @@
 // @ts-check
 /**
- * Security-owned paths need a security review record (lane A; PR5-SEC-04, PR2-SEC-08; SEC-P3-31).
+ * Security-owned paths need a security review record (lane A; PR5-SEC-04, PR2-SEC-08; SEC-P3-31; PR10-SEC-04; code
+ * review PR #10 m2).
  *
- * When the PR range `<base>...<head>` changes a path owned by `.github/CODEOWNERS` (patterns read from the base AND the
- * head, so deleting a line does not exempt the PR that deletes it), a committed record
- * `docs/05-quality/security/PR-<nnnn>-*.md` must exist in the checked-out tree that
- *   (a) names a commit of this PR (a 7-40 hex token resolving to a commit in `<base>..<head>`), and
- *   (b) no security-owned path changed between that commit and `<head>` (the record commit itself and later docs-only
- *       commits are fine; a code change after the review invalidates it), and
- *   (c) its last `Verdict` is not FAIL.
+ * When the PR changes a path owned by `.github/CODEOWNERS` (patterns read from the base AND the head, so deleting a line
+ * does not exempt the PR that deletes it), a committed record must exist in the checked-out tree that
+ *   (a) is named for THIS pull request: `docs/05-quality/security/PR-<pr, zero-padded to 4>-*.md` (`--pr`). A record
+ *       of another PR does not count, even if it names a commit of this range (stacked branches);
+ *   (b) carries an allow-listed verdict: of the markdown table rows (outside fenced code blocks) whose first cell, with
+ *       `*` and whitespace stripped, is exactly `Verdict` (any case), the LAST one wins (later review rounds append a
+ *       new header table); its verdict is the leading `[A-Z_-]+` token of the second cell with `*` stripped
+ *       (`| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No …` gives PASS_WITH_FOLLOW-UPS). Only PASS, PASS_WITH_FOLLOW-UPS
+ *       and PASS_WITH_CONDITIONS count; FAIL, PENDING, TBD, BLOCKED, any other token or no Verdict row make the
+ *       record invalid. Prose (`Verdict: FAIL`) and fenced examples are ignored;
+ *   (c) names a reviewed commit of this PR: a 7-40 hex token in a table row whose first cell (stripped of `*`) starts
+ *       with `Branch / head` or `Head` (`Head`, `Head / range`) that resolves to a commit in `<base>..<head>`; and
+ *   (d) no owned path that this PR changes changed between that commit and `<head>`. The owned set is the PR's own net
+ *       change (`<base>...<head>`, i.e. against the merge base), so paths that only `main` changed, brought in by a
+ *       merge of `main` after the review, do not void the record; a PR change to an owned path after the review does.
+ *       The record commit itself and later docs-only commits are fine.
  * This is how PR5-SEC-04's "names the PR head SHA" survives the fact that committing the record moves the head.
+ * Every diff runs with `--no-renames`, so a rename out of an owned path reports the old (owned) path too.
+ *
+ * `--event push` skips the check (exit 0, status `skipped`): it is a pull-request control, and on a push to `main` the
+ * range is the squash commit, which no record can name (records name branch commits). `--pr` is required for
+ * `pull_request` (the default) and optional on `push`.
  *
  * `--report-only` reports instead of failing, and is accepted only while the base ref does not contain this script
  * (the PR that introduces the check); afterwards it is refused, so a later PR cannot switch the gate off from ci.yml.
  *
- * CLI: node tools/ci/check-security-owned-paths.mjs --base <ref> [--head <ref>] [--root <dir>] [--report-only]
- *      [--summary <file>] [--json]
- * Exit 0 pass / not required / report-only, 1 record missing or invalid, 2 usage/internal error.
+ * Residual (PR10-SEC-04, D-ORCH-013): records come from the PR's own tree, so whoever can push the branch can commit
+ * one. The check detects an OMITTED record, not a FORGED one; forgery is controlled procedurally (only the
+ * orchestrator commits records authored by security-analyst and verifies them before merging).
+ *
+ * CLI: node tools/ci/check-security-owned-paths.mjs --base <ref> --pr <number> [--head <ref>] [--root <dir>]
+ *      [--event pull_request|push] [--report-only] [--summary <file>] [--json]
+ * Exit 0 pass / not required / skipped / report-only, 1 record missing or invalid, 2 usage/internal error.
  */
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -27,15 +46,20 @@ import { pathToFileURL } from 'node:url';
 /** @typedef {{ path: string, text: string }} ReviewRecord */
 /**
  * @typedef {object} Evaluation
- * @property {'not-required' | 'pass' | 'missing'} status
+ * @property {'not-required' | 'pass' | 'missing' | 'skipped'} status
  * @property {string[]} owned security-owned paths changed by the PR
  * @property {{ record: string, commit: string } | null} satisfiedBy
  * @property {string[]} notes
  */
 
 export const RECORD_DIR = 'docs/05-quality/security';
-const RECORD_NAME = /^PR-\d{4}-.+\.md$/;
+const RECORD_NAME = /^PR-\d{4,}-.+\.md$/;
 const SELF = 'tools/ci/check-security-owned-paths.mjs';
+/** Verdicts that let a record satisfy the check (PR10-SEC-04). */
+export const ACCEPTED_VERDICTS = Object.freeze(['PASS', 'PASS_WITH_FOLLOW-UPS', 'PASS_WITH_CONDITIONS']);
+const PR_NUMBER = /^[1-9]\d{0,8}$/;
+const EVENTS = ['pull_request', 'push'];
+const PUSH_SKIP = 'record check is a pull-request control; skipped on push';
 
 /**
  * CODEOWNERS pattern to RegExp (gitignore-style subset: leading `/` anchors, trailing `/` is a directory, `*`, `**`).
@@ -78,21 +102,72 @@ export function candidateShas(text) {
   return [...new Set([...text.matchAll(/(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])/g)].map((m) => m[0]))];
 }
 
+/** @param {number} pr */
+export const recordPrefix = (pr) => `PR-${String(pr).padStart(4, '0')}-`;
+
+/** @param {string} cell */
+const stripCell = (cell) => cell.replaceAll('*', '').replace(/\s+/g, ' ').trim();
+
 /**
- * The last verdict token in a record (`| **Verdict** | **PASS_WITH_FOLLOW-UPS.** …` or `Verdict: FAIL`).
+ * Markdown table rows (cells split on unescaped `|`), skipping fenced code blocks and indented code (4+ spaces).
+ * @param {string} text
+ * @returns {string[][]}
+ */
+export function tableRows(text) {
+  /** @type {string[][]} */
+  const rows = [];
+  /** @type {{ char: string, length: number } | null} */
+  let fence = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (fence !== null) {
+      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line)?.[1];
+      if (close !== undefined && close.charAt(0) === fence.char && close.length >= fence.length) fence = null;
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (open !== undefined) {
+      fence = { char: open.charAt(0), length: open.length };
+      continue;
+    }
+    if (!/^ {0,3}\|/.test(line)) continue;
+    rows.push(
+      line
+        .trim()
+        .replace(/^\|/, '')
+        .split(/(?<!\\)\|/),
+    );
+  }
+  return rows;
+}
+
+/**
+ * The verdict of the LAST `| Verdict | … |` table row (first cell exactly `Verdict` once `*` and whitespace are
+ * stripped; case-insensitive), or null when there is none. A row without a leading upper-case token gives ''.
  * @param {string} text
  * @returns {string | null}
  */
 export function recordVerdict(text) {
-  const matches = [...text.matchAll(/\bVerdict\b\**\s*[|:]\s*\**\s*([A-Z][A-Z_-]*[A-Z])/g)];
-  const last = matches[matches.length - 1];
-  return last?.[1] ?? null;
+  const rows = tableRows(text).filter((cells) => stripCell(cells[0] ?? '').toLowerCase() === 'verdict');
+  const last = rows[rows.length - 1];
+  if (last === undefined) return null;
+  return /^[A-Z_-]+/.exec(stripCell(last[1] ?? ''))?.[0] ?? '';
+}
+
+/**
+ * Hex tokens from the `Branch / head`, `Head`, `Head / range` header rows only (PR10-SEC-04: free text elsewhere
+ * in a record cannot bind it to a commit).
+ * @param {string} text
+ */
+export function recordHeadShas(text) {
+  const rows = tableRows(text).filter((cells) => /^(?:Branch \/ head|Head)\b/i.test(stripCell(cells[0] ?? '')));
+  return candidateShas(rows.map((cells) => cells.slice(1).join('|')).join('\n'));
 }
 
 /**
  * Pure core.
  * @param {object} input
- * @param {readonly string[]} input.changed paths changed in the PR range
+ * @param {number} input.pr pull request number; only `PR-<pr padded to 4>-*.md` records count
+ * @param {readonly string[]} input.changed paths changed in the PR range (against the merge base, no rename detection)
  * @param {readonly OwnerPattern[]} input.patterns
  * @param {readonly ReviewRecord[]} input.records
  * @param {(tokens: string[]) => Map<string, string>} input.resolveCommits short/long token -> full commit SHA (only resolvable ones)
@@ -100,24 +175,38 @@ export function recordVerdict(text) {
  * @param {(commit: string) => string[]} input.changedSince paths changed between `commit` and the head
  * @returns {Evaluation}
  */
-export function evaluate({ changed, patterns, records, resolveCommits, prCommits, changedSince }) {
+export function evaluate({ pr, changed, patterns, records, resolveCommits, prCommits, changedSince }) {
   const owned = ownedPaths(changed, patterns);
+  const ownedSet = new Set(owned);
   /** @type {string[]} */
   const notes = [];
   if (owned.length === 0) return { status: 'not-required', owned, satisfiedBy: null, notes };
-  for (const record of records) {
+  const prefix = recordPrefix(pr);
+  const mine = records.filter((record) => (record.path.split('/').pop() ?? '').startsWith(prefix));
+  if (mine.length === 0) notes.push(`no record named ${RECORD_DIR}/${prefix}*.md for PR #${pr}`);
+  for (const record of mine) {
     const verdict = recordVerdict(record.text);
-    if (verdict === null || verdict.startsWith('FAIL')) {
-      notes.push(`${record.path}: verdict ${verdict ?? 'missing'}`);
+    if (verdict === null || !ACCEPTED_VERDICTS.includes(verdict)) {
+      notes.push(
+        `${record.path}: verdict ${verdict === null ? 'missing (no "| Verdict |" table row)' : verdict === '' ? 'unreadable' : verdict} is not one of ${ACCEPTED_VERDICTS.join(', ')}`,
+      );
       continue;
     }
-    const resolved = resolveCommits(candidateShas(record.text));
+    const shas = recordHeadShas(record.text);
+    if (shas.length === 0) {
+      notes.push(`${record.path}: no commit SHA in a "| Branch / head |" or "| Head |" table row`);
+      continue;
+    }
+    const resolved = resolveCommits(shas);
+    let named = false;
     for (const commit of new Set(resolved.values())) {
       if (!prCommits.has(commit)) continue;
-      const later = ownedPaths(changedSince(commit), patterns);
+      named = true;
+      const later = ownedPaths(changedSince(commit), patterns).filter((path) => ownedSet.has(path));
       if (later.length === 0) return { status: 'pass', owned, satisfiedBy: { record: record.path, commit }, notes };
       notes.push(`${record.path} names ${commit.slice(0, 7)}, but ${later.join(', ')} changed after it`);
     }
+    if (!named) notes.push(`${record.path}: its head row names no commit of this PR (${shas.join(', ')})`);
   }
   return { status: 'missing', owned, satisfiedBy: null, notes };
 }
@@ -155,10 +244,10 @@ const lines = (text) => text.split(/\r?\n/).filter((line) => line.trim() !== '')
 
 /**
  * Collects the inputs from git and the tree, then evaluates.
- * @param {{ root: string, base: string, head: string }} options
+ * @param {{ root: string, base: string, head: string, pr: number }} options
  */
-export function checkSecurityOwnedPaths({ root, base, head }) {
-  const changed = lines(gitOk(root, ['diff', '--name-only', `${base}...${head}`]));
+export function checkSecurityOwnedPaths({ root, base, head, pr }) {
+  const changed = lines(gitOk(root, ['diff', '--name-only', '--no-renames', `${base}...${head}`]));
   const baseOwners = git(root, ['show', `${base}:.github/CODEOWNERS`]);
   const headOwnersPath = join(root, '.github', 'CODEOWNERS');
   const patterns = [
@@ -189,17 +278,29 @@ export function checkSecurityOwnedPaths({ root, base, head }) {
     });
     return out;
   };
-  const changedSince = (/** @type {string} */ commit) => lines(gitOk(root, ['diff', '--name-only', commit, head]));
-  return evaluate({ changed, patterns, records, resolveCommits, prCommits, changedSince });
+  const changedSince = (/** @type {string} */ commit) => lines(gitOk(root, ['diff', '--name-only', '--no-renames', commit, head]));
+  return evaluate({ pr, changed, patterns, records, resolveCommits, prCommits, changedSince });
+}
+
+/**
+ * @param {{ summary?: string, json: boolean }} options
+ */
+function reportSkipped(options) {
+  /** @type {Evaluation} */
+  const result = { status: 'skipped', owned: [], satisfiedBy: null, notes: [PUSH_SKIP] };
+  if (options.json) console.log(JSON.stringify(result, null, 2));
+  else console.log(`check-security-owned-paths: skipped (${PUSH_SKIP})`);
+  if (options.summary) appendFileSync(options.summary, `\n### Security-owned paths: skipped (${PUSH_SKIP})\n`);
+  return 0;
 }
 
 /** @param {string[]} argv */
 export function main(argv) {
-  /** @type {{ root: string, base?: string, head: string, summary?: string, json: boolean, reportOnly: boolean }} */
-  const options = { root: process.cwd(), head: 'HEAD', json: false, reportOnly: false };
+  /** @type {{ root: string, base?: string, head: string, pr?: string, event: string, summary?: string, json: boolean, reportOnly: boolean }} */
+  const options = { root: process.cwd(), head: 'HEAD', event: 'pull_request', json: false, reportOnly: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i] ?? '';
-    if (['--root', '--base', '--head', '--summary'].includes(arg)) {
+    if (['--root', '--base', '--head', '--summary', '--pr', '--event'].includes(arg)) {
       const value = argv[i + 1];
       if (value === undefined || value === '') {
         console.error(`check-security-owned-paths: ${arg} needs a value`);
@@ -208,6 +309,8 @@ export function main(argv) {
       if (arg === '--root') options.root = resolve(value);
       else if (arg === '--base') options.base = value;
       else if (arg === '--head') options.head = value;
+      else if (arg === '--pr') options.pr = value;
+      else if (arg === '--event') options.event = value;
       else options.summary = value;
       i += 1;
     } else if (arg === '--json') options.json = true;
@@ -221,17 +324,32 @@ export function main(argv) {
     console.error('check-security-owned-paths: --base <ref> is required');
     return 2;
   }
+  if (!EVENTS.includes(options.event)) {
+    console.error(`check-security-owned-paths: --event must be one of ${EVENTS.join(', ')}, got ${JSON.stringify(options.event)}`);
+    return 2;
+  }
+  if (options.pr !== undefined && !PR_NUMBER.test(options.pr)) {
+    console.error(`check-security-owned-paths: --pr must be a positive integer, got ${JSON.stringify(options.pr)}`);
+    return 2;
+  }
+  if (options.event === 'pull_request' && options.pr === undefined) {
+    console.error('check-security-owned-paths: --pr <number> is required for pull_request events');
+    return 2;
+  }
   if (options.reportOnly && git(options.root, ['cat-file', '-e', `${options.base}:${SELF}`]).status === 0) {
     console.error('check-security-owned-paths: --report-only is refused because the base ref already contains this check');
     return 2;
   }
-  const result = checkSecurityOwnedPaths({ root: options.root, base: options.base, head: options.head });
+  if (options.event === 'push') return reportSkipped(options);
+  const pr = Number(options.pr);
+  const result = checkSecurityOwnedPaths({ root: options.root, base: options.base, head: options.head, pr });
   const failing = result.status === 'missing';
   if (options.json) console.log(JSON.stringify(result, null, 2));
   else if (failing) {
     console.log(
       `security-review-record: ${result.owned.length} security-owned path(s) changed (${result.owned.slice(0, 10).join(', ')}${result.owned.length > 10 ? ', …' : ''}); ` +
-        `no record under ${RECORD_DIR}/ names a commit of this PR after which no owned path changed, with a verdict other than FAIL (${RECORD_DIR})`,
+        `no record ${RECORD_DIR}/${recordPrefix(pr)}*.md has a last "| Verdict |" row of ${ACCEPTED_VERDICTS.join(' / ')} and a ` +
+        `"| Branch / head |" row naming a commit of this PR after which no owned path of the PR changed`,
     );
     for (const note of result.notes) console.log(`  note: ${note}`);
   } else

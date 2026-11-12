@@ -54,4 +54,33 @@ describe('run-semgrep (Docker)', () => {
     },
     TEN_MINUTES,
   );
+
+  it(
+    'PR10-SEC-03: a head .semgrepignore that drops apps/ hides the violation, and --ignore-from <base> restores the scope',
+    () => {
+      const tree = join(scratch, 'narrowed');
+      const base = join(scratch, 'base-scope');
+      mkdirSync(join(tree, 'apps', 'api', 'src'), { recursive: true });
+      mkdirSync(base, { recursive: true });
+      writeFileSync(join(tree, 'apps', 'api', 'src', 'egress.ts'), 'export const call = (u: string) => fetch(u);\n');
+      writeFileSync(join(tree, 'keep.ts'), 'export const keep = 1;\n');
+      writeFileSync(join(tree, '.semgrepignore'), 'apps/\n');
+      writeFileSync(join(base, '.semgrepignore'), 'node_modules/\n');
+      const scan = (extra: string[]) =>
+        runNode([script, '--root', tree, '--rules-from', join(repoRoot, '.semgrep'), ...extra, '--json'], {
+          cwd: repoRoot,
+          timeoutMs: TEN_MINUTES,
+        });
+      // Negative control: the head scope file alone hides the seeded file.
+      const narrowed = scan([]);
+      expect((JSON.parse(narrowed.stdout) as { findings: unknown[] }).findings).toEqual([]);
+      const restored = scan(['--ignore-from', base]);
+      const report = JSON.parse(restored.stdout) as { findings: Array<{ rule: string; location: string }> };
+      expect(report.findings.map(({ rule, location }) => `${rule} ${location}`)).toEqual([
+        'platform.outbound-http.global-fetch-or-socket apps/api/src/egress.ts:1',
+      ]);
+      expect(restored.status).toBe(1);
+    },
+    TEN_MINUTES,
+  );
 });

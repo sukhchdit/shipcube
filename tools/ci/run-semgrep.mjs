@@ -5,11 +5,16 @@
  *  - Scan (default): scans the working tree mounted read-only, with `--disable-nosem` (inline `nosemgrep` cannot
  *    suppress a finding), `--error` and `--metrics=off`, with no network. `--rules-from <dir>` takes the rule packs from
  *    another directory, so lane A passes the BASE ref's `.semgrep/` (checked out separately) and a PR can neither weaken
- *    nor delete the rules it is scanned with. Fixtures under tests/fixtures/ are excluded by `.semgrepignore`.
+ *    nor delete the rules it is scanned with. `--ignore-from <dir>` bind-mounts `<dir>/.semgrepignore` and
+ *    `<dir>/.gitignore` read-only over the scanned tree's copies (PR10-SEC-03, review m3), so the BASE ref also decides
+ *    the scan scope (`.semgrepignore` and its `:include .gitignore`); a PR cannot narrow it. Each file is mounted
+ *    only when `<dir>` has it; lane A copies the head file there while the base ref lacks it (bootstrap). Fixtures under
+ *    tests/fixtures/ are excluded by `.semgrepignore`.
  *  - `--test`: `semgrep --test` for every rule pack against its fixture tests/fixtures/semgrep/<stem>.{ts,tsx}
  *    (`// ruleid:` / `// ok:` annotations). Every rule pack must have a fixture.
  *
- * Usage: node tools/ci/run-semgrep.mjs [--root <dir>] [--rules-from <dir>] [--test] [--summary <file>] [--json]
+ * Usage: node tools/ci/run-semgrep.mjs [--root <dir>] [--rules-from <dir>] [--ignore-from <dir>] [--test]
+ *        [--summary <file>] [--json]
  * Exit 0 = clean, 1 = finding(s) or failing rule tests, 2 = usage, Docker or Semgrep error.
  */
 import { spawnSync } from 'node:child_process';
@@ -26,7 +31,7 @@ const SCAN_TIMEOUT_MS = 15 * 60_000;
 const TEST_TIMEOUT_MS = 5 * 60_000;
 
 /**
- * @typedef {{ root: string; rulesFrom: string | undefined; test: boolean; summaryFile: string | undefined; json: boolean }} Options
+ * @typedef {{ root: string; rulesFrom: string | undefined; ignoreFrom?: string | undefined; test: boolean; summaryFile: string | undefined; json: boolean }} Options
  * @typedef {{ rule: string; message: string; location: string }} Finding
  */
 
@@ -36,21 +41,23 @@ const TEST_TIMEOUT_MS = 5 * 60_000;
  */
 export function parseArgs(argv) {
   /** @type {Options} */
-  const options = { root: process.cwd(), rulesFrom: undefined, test: false, summaryFile: undefined, json: false };
+  const options = { root: process.cwd(), rulesFrom: undefined, ignoreFrom: undefined, test: false, summaryFile: undefined, json: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--test') options.test = true;
     else if (arg === '--json') options.json = true;
-    else if (arg === '--root' || arg === '--rules-from' || arg === '--summary') {
+    else if (arg === '--root' || arg === '--rules-from' || arg === '--ignore-from' || arg === '--summary') {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value`);
       if (arg === '--root') options.root = resolve(value);
       else if (arg === '--rules-from') options.rulesFrom = resolve(value);
+      else if (arg === '--ignore-from') options.ignoreFrom = resolve(value);
       else options.summaryFile = value;
       i += 1;
     } else throw new Error(`unknown argument '${String(arg)}'`);
   }
-  if (options.test && options.rulesFrom !== undefined) throw new Error('--test runs the head rules; drop --rules-from');
+  if (options.test && (options.rulesFrom !== undefined || options.ignoreFrom !== undefined))
+    throw new Error('--test runs the head rules; drop --rules-from/--ignore-from');
   return options;
 }
 
@@ -87,12 +94,25 @@ const dockerRun = (root, extraMounts) => [
 ];
 
 /**
- * Docker arguments for a scan of the tree at `root` with the rule packs at `rulesFrom` (default: `<root>/.semgrep`).
- * @param {{ root: string; rulesFrom?: string | undefined }} options
+ * The scope files `--ignore-from` overlays, in mount order.
+ */
+export const SCOPE_FILES = Object.freeze(['.semgrepignore', '.gitignore']);
+
+/**
+ * Docker arguments for a scan of the tree at `root` with the rule packs at `rulesFrom` (default: `<root>/.semgrep`)
+ * and the scope files present in `ignoreFrom` mounted over the tree's own copies.
+ * @param {{ root: string; rulesFrom?: string | undefined; ignoreFrom?: string | undefined; has?: (path: string) => boolean }} options
+ *   `has` decides whether a scope file exists (default: `existsSync`; injectable for tests)
  * @returns {string[]}
  */
-export function buildScanArgs({ root, rulesFrom }) {
+export function buildScanArgs({ root, rulesFrom, ignoreFrom, has = existsSync }) {
   const mounts = rulesFrom === undefined ? [] : bindMount(rulesFrom, '/rules');
+  if (ignoreFrom !== undefined) {
+    for (const name of SCOPE_FILES) {
+      const source = join(ignoreFrom, name);
+      if (has(source)) mounts.push(...bindMount(source, `/src/${name}`));
+    }
+  }
   const config = rulesFrom === undefined ? `/src/${RULES_DIR}` : '/rules';
   return [...dockerRun(root, mounts), 'semgrep', 'scan', '--config', config, '--disable-nosem', '--error', '--metrics=off', '--json', '.'];
 }
@@ -228,10 +248,10 @@ function runTests({ root, summaryFile }) {
  * @param {Options} options
  * @returns {number}
  */
-function runScan({ root, rulesFrom, summaryFile, json }) {
+function runScan({ root, rulesFrom, ignoreFrom, summaryFile, json }) {
   const rulesDir = rulesFrom ?? join(root, RULES_DIR);
   if (!existsSync(rulesDir) || !statSync(rulesDir).isDirectory()) throw new Error(`rules directory not found: ${rulesDir}`);
-  const result = docker(buildScanArgs({ root, rulesFrom }), SCAN_TIMEOUT_MS);
+  const result = docker(buildScanArgs({ root, rulesFrom, ignoreFrom }), SCAN_TIMEOUT_MS);
   if (result.status !== 0 && result.status !== 1) {
     console.error(result.stderr.trim());
     throw new Error(`semgrep exited with status ${String(result.status)}`);
@@ -243,11 +263,14 @@ function runScan({ root, rulesFrom, summaryFile, json }) {
     for (const error of errors) console.error(`semgrep/error: ${error}`);
     console.log(
       `run-semgrep: ${String(findings.length)} finding(s), ${String(errors.length)} error(s) in ${String(scanned)} file(s); ` +
-        `rules from ${rulesFrom ?? RULES_DIR}`,
+        `rules from ${rulesFrom ?? RULES_DIR}; scope from ${ignoreFrom ?? 'the scanned tree'}`,
     );
   }
   if (summaryFile !== undefined)
-    appendFileSync(summaryFile, `${toMarkdown(findings, `Semgrep (rules from ${rulesFrom === undefined ? 'head' : 'base ref'})`)}\n`);
+    appendFileSync(
+      summaryFile,
+      `${toMarkdown(findings, `Semgrep (rules from ${rulesFrom === undefined ? 'head' : 'base ref'}, scope from ${ignoreFrom === undefined ? 'head' : 'base ref'}; ${String(scanned)} files)`)}\n`,
+    );
   if (errors.length > 0) return 2;
   return findings.length > 0 ? 1 : 0;
 }
@@ -262,7 +285,9 @@ export function main(argv) {
     options = parseArgs(argv);
   } catch (error) {
     console.error(`run-semgrep: ${error instanceof Error ? error.message : String(error)}`);
-    console.error('usage: node tools/ci/run-semgrep.mjs [--root <dir>] [--rules-from <dir>] [--test] [--summary <file>] [--json]');
+    console.error(
+      'usage: node tools/ci/run-semgrep.mjs [--root <dir>] [--rules-from <dir>] [--ignore-from <dir>] [--test] [--summary <file>] [--json]',
+    );
     return 2;
   }
   try {

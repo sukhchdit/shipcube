@@ -1,9 +1,11 @@
 # Security-owned paths (PR5-SEC-04, PR2-SEC-08; ADR-0023 am. J item 2 (b), D-ARCH-003 rev 4, data-model §8.3 rule 12,
 # threat-model T-107/R-21). In this single-maintainer repository, "CODEOWNERS review" for these paths means the lane A
 # check tools/ci/check-security-owned-paths.mjs: a PR that changes any path below needs a committed security review
-# record docs/05-quality/security/PR-<nnnn>-*.md that names a commit of the PR after which no security-owned path
-# changed, with a verdict other than FAIL. The check runs from the base ref and reads this file from both the base
-# and the head, so removing a line here does not exempt the PR that removes it.
+# record docs/05-quality/security/PR-<this PR's number, 4 digits>-*.md whose header head row names a commit of the PR
+# after which the PR changed no security-owned path, and whose last header verdict is PASS, PASS_WITH_FOLLOW-UPS or
+# PASS_WITH_CONDITIONS. The check runs from the base ref and reads this file from both the base and the head, so
+# removing a line here does not exempt the PR that removes it. It detects an omitted record, not a forged one; only the
+# orchestrator commits records (D-ORCH-013).
 
 # CI, workflows, supply chain
 /.github/                               @sukhchdit
@@ -22,6 +24,8 @@
 /.semgrepignore                         @sukhchdit
 /.stylelintignore                       @sukhchdit
 /.gitleaks.toml                         @sukhchdit
+/.gitleaksignore                        @sukhchdit
+/.prettierignore                        @sukhchdit
 /.semgrep/                              @sukhchdit
 /tools/eslint-rules/                    @sukhchdit
 /tools/stylelint-rules/                 @sukhchdit
@@ -32,7 +36,7 @@
 # Database roles, audit DDL and migrations
 /prisma/bootstrap/                      @sukhchdit
 /prisma/migrations/                     @sukhchdit
-/tools/db/lint-migrations.ts              @sukhchdit
+/tools/db/lint-migrations.ts            @sukhchdit
 /tools/authz/                           @sukhchdit
 /tools/db/audit-ddl-reviewers.json      @sukhchdit
 
@@ -40,3 +44,18 @@
 /packages/authz/                        @sukhchdit
 /packages/audit/                        @sukhchdit
 /packages/config/src/keys.ts            @sukhchdit
+
+# Test, type-check and commit-message configuration (review m4): each can drop or weaken a gate.
+/jest.config.ts                         @sukhchdit
+/tools/test-support/                    @sukhchdit
+/tsconfig.json                          @sukhchdit
+/tsconfig.base.json                     @sukhchdit
+**/tsconfig*.json                       @sukhchdit
+/commitlint.config.mjs                  @sukhchdit
+/.node-version                          @sukhchdit
+
+# Agent control plane (PR10-SEC-04): hooks and permissions that execute on the maintainer host, the guardrails and
+# the agent definitions, including the reviewers' own.
+/CLAUDE.md                              @sukhchdit
+/.claude/settings.json                  @sukhchdit
+/.claude/agents/                        @sukhchdit

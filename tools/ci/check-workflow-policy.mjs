@@ -7,12 +7,17 @@
  * the subset is itself a finding) and enforces:
  *   pinned-action         `uses:` is `./local`, `docker://…@sha256:<64 hex>` or `owner/repo[/path]@<40 hex>` with a
  *                         trailing `# vX.Y.Z` comment.
- *   forbidden-trigger     no `pull_request_target`, no `workflow_run`.
+ *   forbidden-trigger     no `pull_request_target`, `workflow_run`, `issue_comment`, `pull_request_review`,
+ *                         `pull_request_review_comment`, `discussion`, `discussion_comment` (privileged or comment-driven
+ *                         triggers; PR10-SEC-07).
  *   permissions           top-level `permissions` present and read-only (`{}` or scopes set to read/none); job-level
  *                         `write` only for the (workflow, job, scope) triples in JOB_WRITE_ALLOWLIST.
  *   workflow-env          NPM_CONFIG_IGNORE_SCRIPTS="true", CHECKPOINT_DISABLE="1", SCARF_ANALYTICS="false" at workflow level.
  *   forbidden-env         Prisma engine redirects (FORBIDDEN_ENV) and PLAYWRIGHT_*DOWNLOAD_HOST in any env map or run script.
- *   ignore-scripts        npm_config_ignore_scripts (any case) set to anything but true; `--ignore-scripts=false`.
+ *   ignore-scripts        npm_config_ignore_scripts (any case) set to anything but true; any npm invocation that
+ *                         re-enables lifecycle scripts or spells ignore-scripts non-canonically (`--ignore-scripts false`,
+ *                         `=false`, `--no-ignore-scripts`, `--ig false`, `npm config set ignore-scripts …`), under every
+ *                         npm command alias (npm-command.mjs; review M1).
  *   node-options-preload  NODE_OPTIONS with --require/-r/--import/--loader/--experimental-loader/--env-file.
  *   tls-verify-disabled   NODE_TLS_REJECT_UNAUTHORIZED=0.
  *   platform-registry     `--@platform:registry=` anywhere but on `npm audit signatures`; any npm_config_@platform:registry env.
@@ -27,6 +32,19 @@
  *   job-timeout           every job (except reusable-workflow calls) sets `timeout-minutes`.
  *   ci-no-release         in ci.yml: no `npm publish`, no `terraform apply|destroy`, no AWS role or deploy, no
  *                         `id-token: write`; image pushes only in a job `images` gated on dispatch/main/tags.
+ *   untrusted-expression  `${{ … }}` inside `run:` or `with.script` only for SAFE_EXPRESSION contexts; everything else
+ *                         goes through `env:` (script injection; PR10-SEC-07).
+ *   gitleaks-hardening    a step running the gitleaks image passes `--ignore-gitleaks-allow`, `--diff-merges=first-parent`
+ *                         and `--network none`, and mounts no workspace path except `.git` (gitleaks auto-loads
+ *                         `<source>/.gitleaksignore`; PR10-SEC-01).
+ *   scans-isolation       ci.yml job `scans` runs no npm, nothing from node_modules or the workspace, no local action and
+ *                         no setup-node cache, so no head-controlled code shares its runner (PR10-SEC-02).
+ *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES in its job, unconditional or with its listed
+ *                         `if:`, and `ci-gate` needs `fast-lane` and `scans` (PR10-SEC-07).
+ * Repository mode (no explicit files) also checks:
+ *   codeowners-*          `.github/CODEOWNERS` exists and covers REQUIRED_CODEOWNED_PATHS.
+ *   gitleaksignore        no `.gitleaksignore` anywhere in the tree (gitleaks would load it from the scanned source;
+ *                         PR10-SEC-01). Findings are fixed, not fingerprinted.
  *
  * CLI: node tools/ci/check-workflow-policy.mjs [--root <dir>] [--summary <file>] [--json] [files...]
  * Exit 0 pass, 1 findings, 2 usage/internal error.
@@ -35,6 +53,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { npmInvocations, writesIgnoreScriptsConfig } from './npm-command.mjs';
 import { YamlSubsetError, deepStrings, isMap, parseYamlSubset } from './yaml-subset.mjs';
 
 /** @typedef {import('./yaml-subset.mjs').YamlNode} YamlNode */
@@ -69,6 +88,55 @@ export const REQUIRED_WORKFLOW_ENV = Object.freeze({
  * only ci.yml job holding `packages: write`. Owning tasks extend this list in a reviewed change (CODEOWNERS on tools/ci).
  */
 export const JOB_WRITE_ALLOWLIST = Object.freeze(['ci.yml:images:packages']);
+
+/** Triggers that run with a write token and secrets, or are driven by comments/reviews (PR10-SEC-07). */
+export const FORBIDDEN_TRIGGERS = Object.freeze([
+  'pull_request_target',
+  'workflow_run',
+  'issue_comment',
+  'pull_request_review',
+  'pull_request_review_comment',
+  'discussion',
+  'discussion_comment',
+]);
+
+/**
+ * `${{ … }}` contexts allowed inside `run:` / `with.script` (PR10-SEC-07): values no PR author, branch name, title,
+ * body or comment controls. Everything else (`github.event.*`, `github.head_ref`, `github.ref`/`ref_name` (branch
+ * names), `inputs.*`, `secrets.*`, functions, operators) must go through `env:`.
+ */
+export const SAFE_EXPRESSION =
+  /^(?:github\.(?:sha|repository|repository_id|repository_owner|run_id|run_number|run_attempt|workflow|event_name|job|action|server_url|api_url|workspace)|runner\.[A-Za-z_]+|steps\.[A-Za-z_][\w-]*\.(?:outputs\.[A-Za-z_][\w-]*|outcome|conclusion)|needs\.[A-Za-z_][\w-]*\.(?:outputs\.[A-Za-z_][\w-]*|result)|matrix\.[A-Za-z_][\w.-]*|env\.[A-Za-z_]\w*|vars\.[A-Za-z_]\w*)$/;
+
+/**
+ * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, and the only
+ * `if:` values allowed on that step (empty: unconditional). Adding a gate is a reviewed change to this list.
+ */
+export const CI_REQUIRED_GATES = Object.freeze([
+  { job: 'fast-lane', gate: 'workflow policy', run: /node "\$GATE_CHECK_WORKFLOW_POLICY"/, ifs: [] },
+  { job: 'fast-lane', gate: 'install flags', run: /node "\$GATE_CHECK_INSTALL_FLAGS"/, ifs: [] },
+  { job: 'fast-lane', gate: 'migration immutability', run: /node "\$GATE_CHECK_MIGRATION_IMMUTABILITY"/, ifs: [] },
+  { job: 'fast-lane', gate: 'lockfile', run: /node "\$GATE_CHECK_LOCKFILE"/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'dependency age', run: /node "\$GATE_CHECK_DEP_AGE"/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'install', run: /^npm ci --ignore-scripts\b/, ifs: [] },
+  { job: 'fast-lane', gate: 'licences', run: /node "\$GATE_LICENCE_CHECK"/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'registry signatures', run: /npm audit signatures\b/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'vulnerability audit', run: /node "\$GATE_CHECK_AUDIT"/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'lint', run: /^npm run lint$/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'format', run: /^npm run format:check$/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'commitlint', run: /npm exec --no -- commitlint\b/, ifs: [] },
+  { job: 'fast-lane', gate: 'actionlint', run: /"\$ACTIONLINT_IMAGE"/, ifs: [] },
+  { job: 'fast-lane', gate: 'type-check', run: /^npm run typecheck$/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'unit tests', run: /^npm run test:unit$/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
+  { job: 'fast-lane', gate: 'porcelain', run: /node "\$GATE_CHECK_PORCELAIN"/, ifs: ["env.CODE == 'true'"] },
+  { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [] },
+  { job: 'scans', gate: 'semgrep', run: /node "\$GATE_RUN_SEMGREP"/, ifs: [] },
+  { job: 'scans', gate: 'security-owned paths record', run: /node "\$GATE_CHECK_SECURITY_OWNED_PATHS"/, ifs: [] },
+]);
+
+const GITLEAKS_RUN = /\$\{?GITLEAKS_IMAGE\b|gitleaks\/gitleaks[:@]/;
+const VOLUME = /(?:^|\s)(?:-v|--volume)(?:\s+|=)["']?([^"'\s]+)/g;
 
 const SANDBOX_ENVIRONMENT = 'carrier-sandbox';
 const SANDBOX_SECRET = /secrets(?:\.|\[\s*['"])(?:CARRIER|STRIPE)_/;
@@ -183,9 +251,17 @@ export function scriptFindings(script, isCi) {
   if (ignore && (ignore[1] ?? '').toLowerCase() !== 'true') {
     out.push({ rule: 'ignore-scripts', message: 'npm_config_ignore_scripts is overridden in a run script' });
   }
-  if (/--ignore-scripts=(?:false|0|no)\b|--no-ignore-scripts\b/i.test(script)) {
-    out.push({ rule: 'ignore-scripts', message: 'a command re-enables lifecycle scripts' });
+  for (const segment of shellSegments(script)) {
+    const overrides = npmInvocations(segment.text).flatMap((invocation) => invocation.overrides);
+    if (overrides.length > 0 || writesIgnoreScriptsConfig(segment.text)) {
+      out.push({
+        rule: 'ignore-scripts',
+        message: `a command re-enables lifecycle scripts or spells ignore-scripts non-canonically${overrides.length > 0 ? ` (${overrides.join(', ')})` : ''}: "${segment.text.slice(0, 80)}"`,
+      });
+    }
   }
+  for (const f of untrustedExpressionFindings(script, 'run')) out.push(f);
+  if (GITLEAKS_RUN.test(script)) out.push(...gitleaksFindings(script));
   if (/\bnpm_config_@platform:registry\s*=/i.test(script)) {
     out.push({ rule: 'platform-registry', message: 'npm_config_@platform:registry is set in a run script (PR1-SEC-12)' });
   }
@@ -233,6 +309,50 @@ export function scriptFindings(script, isCi) {
 }
 
 /**
+ * `${{ … }}` expressions in a script whose context is not SAFE_EXPRESSION (PR10-SEC-07).
+ * @param {string} script
+ * @param {string} where `run` or `with.script`
+ * @returns {{ rule: string, message: string }[]}
+ */
+export function untrustedExpressionFindings(script, where) {
+  /** @type {{ rule: string, message: string }[]} */
+  const out = [];
+  for (const match of script.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+    const expression = (match[1] ?? '').trim();
+    if (!SAFE_EXPRESSION.test(expression)) {
+      out.push({
+        rule: 'untrusted-expression',
+        message: `\`${'$'}{{ ${expression.slice(0, 60)} }}\` in ${where}: pass it through env: and quote the variable (script injection)`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Hardening of a gitleaks invocation (PR10-SEC-01).
+ * @param {string} script
+ * @returns {{ rule: string, message: string }[]}
+ */
+export function gitleaksFindings(script) {
+  /** @type {{ rule: string, message: string }[]} */
+  const out = [];
+  const add = (/** @type {string} */ message) => out.push({ rule: 'gitleaks-hardening', message });
+  if (!/(?:^|\s)--ignore-gitleaks-allow\b/.test(script))
+    add('gitleaks must run with --ignore-gitleaks-allow (inline gitleaks:allow is inert)');
+  if (!/--diff-merges=first-parent\b/.test(script))
+    add('gitleaks --log-opts must include --diff-merges=first-parent (merge commits are scanned)');
+  if (!/(?:^|\s)--network(?:\s+|=)none\b/.test(script)) add('the gitleaks container must run with --network none');
+  for (const match of script.matchAll(VOLUME)) {
+    const source = (match[1] ?? '').split(':')[0] ?? '';
+    if (/GITHUB_WORKSPACE|github\.workspace/.test(source) && !/\/\.git\/?$/.test(source)) {
+      add(`gitleaks may mount only the workspace .git (it loads <source>/.gitleaksignore); found ${source}`);
+    }
+  }
+  return out;
+}
+
+/**
  * @param {YamlMap} job
  * @returns {boolean} true when the job's `if:` restricts it to dispatch, main or tags (lane C image publication).
  */
@@ -247,9 +367,11 @@ function imagePushGuarded(job) {
 /**
  * @param {string} text workflow file content
  * @param {string} fileName base name, e.g. `ci.yml` (ci.yml gets the AT-US-005-04/-05 rules)
+ * @param {{ requiredGates?: boolean }} [options] `requiredGates`: also apply CI_REQUIRED_GATES (the repository's own
+ *   `.github/workflows/ci.yml`; fixtures named ci-*.yml are checked without it)
  * @returns {Finding[]}
  */
-export function checkWorkflow(text, fileName) {
+export function checkWorkflow(text, fileName, options = {}) {
   /** @type {Finding[]} */
   const findings = [];
   /** @type {import('./yaml-subset.mjs').ParsedYaml} */
@@ -279,8 +401,9 @@ export function checkWorkflow(text, fileName) {
   const triggers = triggersOf(doc.on);
   const prTriggered = triggers.has('pull_request') || triggers.has('pull_request_target');
 
-  for (const event of ['pull_request_target', 'workflow_run']) {
-    if (triggers.has(event)) add('forbidden-trigger', `trigger "${event}" runs with elevated privileges and is not allowed`, ['on']);
+  for (const event of FORBIDDEN_TRIGGERS) {
+    if (triggers.has(event))
+      add('forbidden-trigger', `trigger "${event}" runs with elevated privileges or comment input and is not allowed`, ['on']);
   }
 
   // permissions
@@ -403,6 +526,13 @@ export function checkWorkflow(text, fileName) {
       }
       const uses = asString(step.uses) ?? '';
       const withMap = asMap(step.with) ?? {};
+      const script = asString(withMap.script);
+      if (script !== undefined) {
+        for (const f of untrustedExpressionFindings(script, 'with.script')) add(f.rule, f.message, [...stepPath, 'with', 'script']);
+      }
+      if (isCi && jobId === 'scans') {
+        for (const message of scansStepViolations(step)) add('scans-isolation', message, stepPath);
+      }
       if (isCi && /^aws-actions\/configure-aws-credentials@/.test(uses))
         add('ci-no-release', 'ci.yml must not assume an AWS role (AT-US-005-05)', [...stepPath, 'uses']);
       if (isCi && withMap['role-to-assume'] !== undefined)
@@ -436,7 +566,87 @@ export function checkWorkflow(text, fileName) {
         add('pinned-action', `${uses} needs a trailing "# vX.Y.Z" comment naming the pinned release`, path);
     }
   }
+  if (options.requiredGates === true) for (const f of requiredGateFindings(jobs)) add(f.rule, f.message, f.path);
   return findings;
+}
+
+/**
+ * Why a step of ci.yml job `scans` would run head-controlled code (PR10-SEC-02).
+ * @param {YamlMap} step
+ * @returns {string[]}
+ */
+function scansStepViolations(step) {
+  /** @type {string[]} */
+  const out = [];
+  const run = asString(step.run) ?? '';
+  const uses = asString(step.uses) ?? '';
+  const withMap = asMap(step.with) ?? {};
+  if (/(?:^|[\s;&|(`])(?:npm|npx|pnpm|yarn|bun)(?:\s|$)/m.test(run)) out.push('job scans must not run a package manager');
+  if (/node_modules/.test(run)) out.push('job scans must not run anything from node_modules');
+  if (/\$\{?GITHUB_WORKSPACE\}?\/[^"'\s]*\.(?:[cm]?[jt]s|sh)\b|github\.workspace/.test(run))
+    out.push('job scans must not run a script from the workspace (head-controlled)');
+  if (uses.startsWith('./')) out.push('job scans must not use a local action');
+  if (/^actions\/setup-node@/.test(uses) && (withMap.cache !== undefined || withMap['node-version-file'] !== undefined))
+    out.push('job scans: setup-node takes a literal node-version and no cache');
+  return out;
+}
+
+/**
+ * @param {YamlMap} jobs
+ * @returns {{ rule: string, message: string, path: string[] }[]}
+ */
+export function requiredGateFindings(jobs) {
+  /** @type {{ rule: string, message: string, path: string[] }[]} */
+  const out = [];
+  for (const gate of CI_REQUIRED_GATES) {
+    const job = asMap(jobs[gate.job]);
+    const steps = job !== undefined && Array.isArray(job.steps) ? job.steps : [];
+    const index = steps.findIndex((node) => gate.run.test((asString(asMap(node)?.run) ?? '').trim()));
+    if (index === -1) {
+      out.push({
+        rule: 'required-gates',
+        message: `ci.yml job ${gate.job} must keep the ${gate.gate} gate step`,
+        path: ['jobs', gate.job],
+      });
+      continue;
+    }
+    const condition = asString(asMap(steps[index])?.if);
+    if (condition !== undefined && !gate.ifs.includes(condition.trim())) {
+      out.push({
+        rule: 'required-gates',
+        message: `ci.yml ${gate.gate} gate step must be ${gate.ifs.length === 0 ? 'unconditional' : `guarded only by ${gate.ifs.join(' | ')}`} (found if: ${condition})`,
+        path: ['jobs', gate.job, 'steps', String(index), 'if'],
+      });
+    }
+  }
+  const needs = asMap(jobs['ci-gate'])?.needs;
+  const needList = Array.isArray(needs) ? needs : typeof needs === 'string' ? [needs] : [];
+  for (const job of ['fast-lane', 'scans']) {
+    if (!needList.includes(job))
+      out.push({ rule: 'required-gates', message: `ci.yml ci-gate must need ${job}`, path: ['jobs', 'ci-gate'] });
+  }
+  return out;
+}
+
+/**
+ * Every `.gitleaksignore` in the tree (PR10-SEC-01): gitleaks loads one from the scanned source unconditionally, so a
+ * committed file would let a PR fingerprint away its own findings.
+ * @param {string} root
+ * @returns {string[]} repository-relative paths
+ */
+export function findGitleaksIgnores(root) {
+  /** @type {string[]} */
+  const out = [];
+  /** @param {string} dir */
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && entry.name !== '.git') visit(join(dir, entry.name));
+      } else if (entry.name === '.gitleaksignore') out.push(relative(root, join(dir, entry.name)).replaceAll('\\', '/'));
+    }
+  };
+  visit(root);
+  return out.sort();
 }
 
 /**
@@ -455,6 +665,20 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'tools/db/lint-migrations.ts',
   '.github/workflows/',
   '.gitleaks.toml',
+  // PR #10 review M2/m4, PR10-SEC-01/-04: suppression files, gate configuration and the agent control plane.
+  '.gitleaksignore',
+  '.semgrepignore',
+  '.gitignore',
+  '.prettierignore',
+  'jest.config.ts',
+  'tsconfig.json',
+  'tsconfig.base.json',
+  'commitlint.config.mjs',
+  '.node-version',
+  'tools/test-support/',
+  'CLAUDE.md',
+  '.claude/settings.json',
+  '.claude/agents/',
 ]);
 
 /**
@@ -504,14 +728,30 @@ export function checkWorkflowPolicy(root, files) {
   const findings = [];
   for (const file of list) {
     const label = relative(root, file).replaceAll('\\', '/');
-    for (const f of checkWorkflow(readFileSync(file, 'utf8'), basename(file))) {
+    const requiredGates = label === '.github/workflows/ci.yml';
+    for (const f of checkWorkflow(readFileSync(file, 'utf8'), basename(file), { requiredGates })) {
       findings.push({ ...f, location: f.location.replace(basename(file), label) });
     }
   }
-  // Repository mode (no explicit files): CODEOWNERS must exist and cover the security-owned paths.
+  // Repository mode (no explicit files): ci.yml exists (required-gates), CODEOWNERS exists and covers the
+  // security-owned paths, and no .gitleaksignore is committed.
   if (!(files && files.length > 0)) {
+    if (!existsSync(join(dir, 'ci.yml'))) {
+      findings.push({
+        rule: 'required-gates',
+        message: '.github/workflows/ci.yml (lane A) must exist',
+        location: '.github/workflows/ci.yml',
+      });
+    }
     const owners = join(root, '.github', 'CODEOWNERS');
     findings.push(...checkCodeowners(existsSync(owners) ? readFileSync(owners, 'utf8') : undefined));
+    for (const path of findGitleaksIgnores(root)) {
+      findings.push({
+        rule: 'gitleaksignore',
+        message: 'a committed .gitleaksignore suppresses gitleaks findings from the PR itself; fix the finding instead (PR10-SEC-01)',
+        location: path,
+      });
+    }
   }
   return { findings, checked: list.map((file) => relative(root, file).replaceAll('\\', '/')) };
 }

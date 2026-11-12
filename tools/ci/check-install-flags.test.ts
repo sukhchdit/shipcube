@@ -113,6 +113,69 @@ describe('Dockerfiles (fixtures/install-flags/*.Dockerfile)', () => {
   it('D-ARCH-041 check-no-raw-prisma: a Dockerfile running the Prisma CLI directly fails', () => {
     expect(dockerRules('raw-prisma.Dockerfile')).toEqual(['raw-prisma']);
   });
+
+  it('review M1: `npm clean-install` (alias) in a stage that never copied .npmrc fails docker-install-order', () => {
+    expect(dockerRules('clean-install-without-npmrc.Dockerfile')).toEqual(['docker-install-order']);
+  });
+
+  it('review M1: `npm ic --ignore-scripts false` re-enables scripts in a Dockerfile and fails', () => {
+    expect(dockerRules('ignore-scripts-bare-false.Dockerfile')).toEqual(['install-flags']);
+  });
+
+  it('review M1: an aliased install with --omit=dev only fails docker-omit-optional; npm rb fails docker-npm-rebuild', () => {
+    const text = 'FROM node:24 AS deps\nCOPY package-lock.json .npmrc ./\nRUN npm cit --ignore-scripts --omit=dev\nRUN npm rb\n';
+    expect(rules(checkDockerfile(text, 'x.Dockerfile'))).toEqual(['docker-omit-optional', 'docker-npm-rebuild']);
+  });
+});
+
+describe('review M1: npm aliases and ignore-scripts overrides in every command-bearing file', () => {
+  it.each([
+    'npm clean-install',
+    'npm ic',
+    'npm cit',
+    'npm it',
+    'npm sit',
+    'npm ins',
+    'npm instal',
+    'npm isnt',
+    'npm isntall-clean',
+    'npm install-cl',
+    'npm cleanInstall',
+    'npm add left-pad',
+    'npm --prefix app ci',
+  ])('a package.json script "%s" without --ignore-scripts fails', (command) => {
+    expect(rules(checkPackageJson(JSON.stringify({ scripts: { setup: command } }), 'package.json'))).toEqual(['install-flags']);
+  });
+
+  it.each([
+    'npm ci --ignore-scripts false',
+    'npm ci --ignore-scripts=false',
+    'npm ci --ignore-scripts=0',
+    'npm ci --no-ignore-scripts',
+    'npm ci --ig false',
+    'npm ci -ig false',
+    'npm ci --ignore-scripts=true --ignore-scripts false',
+    'npm_config_ignore_scripts=false npm ci --ignore-scripts',
+    'npm rebuild --ignore-scripts false',
+    'npm config set ignore-scripts false',
+    'echo "ignore-scripts=false" >> .npmrc',
+    'export NPM_CONFIG_IGNORE_SCRIPTS=false',
+  ])('a workflow step "%s" fails', (command) => {
+    expect(rules(checkCommandText(`      - run: ${command}\n`, 'w.yml'))).toEqual(['install-flags']);
+  });
+
+  it('npm run ci and npm exec --no -- are not installs', () => {
+    expect(checkCommandText('      - run: npm run ci && npm exec --no -- commitlint\n', 'w.yml')).toEqual([]);
+  });
+
+  it('review n2: skipped fixture directories are anchored; a `fixtures/` folder elsewhere is scanned', () => {
+    const root = tempRepo({
+      '.npmrc': rootNpmrc,
+      'apps/api/fixtures/package.json': JSON.stringify({ scripts: { setup: 'npm ic' } }),
+      'tools/ci/fixtures/package.json': JSON.stringify({ scripts: { setup: 'npm ic' } }),
+    });
+    expect(checkInstallFlags(root).findings.map((f) => f.location)).toEqual(['apps/api/fixtures/package.json scripts.setup']);
+  });
 });
 
 describe('workflows, compose files and package.json scripts', () => {

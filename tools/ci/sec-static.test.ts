@@ -102,7 +102,11 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       for (const source of regexes) expect(new RegExp(source).test(`  ${leak}`)).toBe(false);
       for (const source of literals(block, 'paths')) expect(new RegExp(source).test('apps/api/src/config.ts')).toBe(false);
     }
-    expect(ciText).toMatch(/git \/repo --config \/config\/gitleaks\.toml --log-opts="\$range" --redact --no-banner --exit-code 1/);
+    // PR10-SEC-01: .git-only mount, inline markers inert, merge commits diffed against their first parent.
+    expect(ciText).toContain('-v "$GITHUB_WORKSPACE/.git:/repo/.git:ro"');
+    expect(ciText).toMatch(
+      /git \/repo --config \/config\/gitleaks\.toml \\\n\s+--log-opts="--diff-merges=first-parent \$range" --ignore-gitleaks-allow \\\n\s+--redact --no-banner --exit-code 1/,
+    );
   });
 
   it('AT-US-048-05: with APP_ENV=production and a placeholder JWT signing key, start-up fails naming JWT_SIGNING_KEYS only (the ES256 successor of JWT_SECRET)', () => {
@@ -131,6 +135,7 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       package: critical.package,
       reason: 'no fix upstream',
       decision: 'D-SEC-FIXTURE',
+      granted: '2026-11-01',
       expires: '2026-12-31',
     };
     const tracked = checkAudit([critical], { watch: [], waivers: [waiver], now: NOW });
@@ -152,6 +157,7 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       package: 'fixture-pkg',
       reason: 'temporary',
       decision: 'D-SEC-FIXTURE',
+      granted: '2026-10-01',
       expires: '2026-11-01',
     };
     expect(checkAudit([advisory({})], { watch: [], waivers: [waiver], now: NOW }).findings.map((f) => f.rule)).toContain(

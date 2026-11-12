@@ -5,7 +5,9 @@
  * Controls: US-048 / AT-US-048-06 (a High vulnerability fails the pipeline; Critical/High in any closure, prod or dev,
  * fail) and AT-US-048-07 (a finding is waived only through an entry in `tools/ci/advisory-watchlist.json` with an
  * expiry; once the expiry passes the finding fails again; a Critical/High without an upstream fix passes only while
- * tracked by such an entry, whose `expires` is the due date); PR2-SEC-06 (watchlist GHSA-g3hv-75wg-m249,
+ * tracked by such an entry, whose `expires` is the due date; code review m7 / PR10-SEC-12: a waiver also needs a
+ * `granted` date not in the future, `expires` at most 90 days after it and a DECISIONS.md ID, else the register is
+ * malformed and the gate exits 2); PR2-SEC-06 (watchlist GHSA-g3hv-75wg-m249,
  * GHSA-3g3m-2fjr-6pw4, GHSA-gcqx-w48m-w2h4 reported as "watched"); D-ARCH-003 rev 4 item 4 / ADR-0023 am. J item 4
  * (a package in `maintenance-exceptions.json` with a High/Critical advisory fails regardless of any waiver);
  * PR1-SEC-07 / D-ARCH-043 (`npm audit --omit=dev` stays 0: production-closure moderates are highlighted).
@@ -41,19 +43,56 @@ import { loadMaintenance } from './check-dep-age.mjs';
 /** @typedef {'info' | 'low' | 'moderate' | 'high' | 'critical'} Severity */
 /** @typedef {{ id: string, package: string, severity: Severity, title: string, fixAvailable: boolean, production: boolean, sources: string[] }} Advisory */
 /** @typedef {{ id: string, package: string, reason: string, review_by: string, source?: string }} WatchEntry */
-/** @typedef {{ id: string, package: string, reason: string, decision: string, expires: string }} Waiver */
+/** @typedef {{ id: string, package: string, reason: string, decision: string, granted: string, expires: string }} Waiver */
 
 const RANK = /** @type {const} */ ({ info: 0, low: 1, moderate: 2, high: 3, critical: 4 });
 const SEVERITIES = /** @type {Severity[]} */ (Object.keys(RANK));
 
-/** @param {unknown} data @returns {{ watch: WatchEntry[], waivers: Waiver[] }} */
-export function loadWatchlist(data) {
+/** Longest waiver horizon, `granted` to `expires` (code review m7, PR10-SEC-12). */
+export const MAX_WAIVER_DAYS = 90;
+/** A DECISIONS.md ID such as `D-ORCH-013` or `D-TASK007-01`. */
+export const DECISION_ID = /^D-[A-Z0-9]+-\d+$/;
+const DAY_MS = 86_400_000;
+
+/**
+ * Waiver dating rules: `granted` is a YYYY-MM-DD date, not in the future (when `now` is given), `expires` is after it and
+ * at most MAX_WAIVER_DAYS later, and `decision` is a DECISIONS.md ID. A violation is a malformed register (exit 2).
+ * @param {Waiver} waiver @param {number} index @param {Date | undefined} now
+ */
+function validateWaiver(waiver, index, now) {
+  const at = `waivers[${index}]`;
+  if (!DECISION_ID.test(String(waiver.decision)))
+    throw new RegisterError(`${at}.decision must be a DECISIONS.md ID (${String(DECISION_ID)}), got ${JSON.stringify(waiver.decision)}`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(waiver.granted)))
+    throw new RegisterError(`${at}.granted: expected YYYY-MM-DD, got ${JSON.stringify(waiver.granted)}`);
+  const granted = parseDate(waiver.granted, `${at}.granted`).getTime();
+  const expires = parseDate(waiver.expires, `${at}.expires`).getTime();
+  if (expires <= granted) throw new RegisterError(`${at}.expires (${waiver.expires}) must be after granted (${waiver.granted})`);
+  if (expires - granted > MAX_WAIVER_DAYS * DAY_MS)
+    throw new RegisterError(
+      `${at}: a waiver may span at most ${MAX_WAIVER_DAYS} days (granted ${waiver.granted}, expires ${waiver.expires}); renew it with a new decision`,
+    );
+  if (now !== undefined && granted > now.getTime())
+    throw new RegisterError(`${at}.granted (${waiver.granted}) is in the future; a waiver cannot be pre-dated to extend its horizon`);
+}
+
+/**
+ * @param {unknown} data
+ * @param {Date} [now] when given, a waiver granted after `now` is rejected (otherwise a future `granted` would move the
+ *   90-day horizon arbitrarily far out)
+ * @returns {{ watch: WatchEntry[], waivers: Waiver[] }}
+ */
+export function loadWatchlist(data, now) {
   const watch = validateRegister(data, 'watch', ['id', 'package', 'reason', 'review_by'], ['review_by']).map(
     (e) => /** @type {WatchEntry} */ (/** @type {unknown} */ (e)),
   );
-  const waivers = validateRegister(data, 'waivers', ['id', 'package', 'reason', 'decision', 'expires'], ['expires']).map(
-    (e) => /** @type {Waiver} */ (/** @type {unknown} */ (e)),
-  );
+  const waivers = validateRegister(
+    data,
+    'waivers',
+    ['id', 'package', 'reason', 'decision', 'granted', 'expires'],
+    ['granted', 'expires'],
+  ).map((e) => /** @type {Waiver} */ (/** @type {unknown} */ (e)));
+  waivers.forEach((waiver, index) => validateWaiver(waiver, index, now));
   return { watch, waivers };
 }
 
@@ -277,7 +316,7 @@ async function main(/** @type {string[]} */ argv) {
       const raw = fromNpmAudit(readJsonFile(flags['npm-audit']), lock);
       if (typeof flags.osv === 'string') raw.push(...fromOsv(readJsonFile(flags.osv), lock));
       const advisories = mergeAdvisories(raw);
-      const { watch, waivers } = loadWatchlist(readJsonFile(join(root, 'tools', 'ci', 'advisory-watchlist.json')));
+      const { watch, waivers } = loadWatchlist(readJsonFile(join(root, 'tools', 'ci', 'advisory-watchlist.json')), now);
       const maintenance = loadMaintenance(readJsonFile(join(root, 'tools', 'ci', 'maintenance-exceptions.json')));
       const result = checkAudit(advisories, { watch, waivers, maintenance, now });
       return { ...result, markdown: auditMarkdown(advisories, result), json: advisories };

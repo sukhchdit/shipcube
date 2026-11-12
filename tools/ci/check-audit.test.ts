@@ -29,7 +29,12 @@ const waiver = (id: string, pkg: string, expires: string) => ({
   package: pkg,
   reason: 'tracked upstream',
   decision: 'D-TEST-003',
+  granted: '2026-11-01',
   expires,
+});
+const register = (entry: Record<string, unknown>): unknown => ({
+  watch: [],
+  waivers: [{ id: 'GHSA-f5x3-32g6-xq36', package: 'tar-legacy', reason: 'r', decision: 'D-TASK007-01', ...entry }],
 });
 
 describe('advisory normalisation', () => {
@@ -127,6 +132,34 @@ describe('gating', () => {
   });
 });
 
+describe('waiver register rules (code review m7, PR10-SEC-12)', () => {
+  it('accepts a 90-day span (the cap) with a DECISIONS.md ID, including IDs with digits in the area', () => {
+    expect(loadWatchlist(readFixture('watchlist.waiver-90-days.json'), NOW).waivers.map((w) => [w.decision, w.granted, w.expires])).toEqual(
+      [['D-TASK007-01', '2026-11-01', '2027-01-30']],
+    );
+    expect(loadWatchlist(register({ decision: 'D-ORCH-013', granted: '2026-11-12', expires: '2026-11-13' }), NOW).waivers).toHaveLength(1);
+  });
+
+  it.each([
+    ['a 91-day span', { granted: '2026-11-01', expires: '2027-01-31' }, /at most 90 days/],
+    ['a 2099 expiry', { granted: '2026-11-01', expires: '2099-12-31' }, /at most 90 days/],
+    ['a missing granted date', { expires: '2026-12-31' }, /waivers\[0\]\.granted is required/],
+    ['a granted timestamp instead of a date', { granted: '2026-11-01T00:00:00Z', expires: '2026-12-31' }, /granted: expected YYYY-MM-DD/],
+    ['expires before granted', { granted: '2026-11-10', expires: '2026-11-01' }, /must be after granted/],
+    ['expires equal to granted', { granted: '2026-11-10', expires: '2026-11-10' }, /must be after granted/],
+    ['a granted date in the future (pre-dating to stretch the horizon)', { granted: '2027-06-01', expires: '2027-08-01' }, /in the future/],
+    [
+      'a bad decision ID',
+      { decision: 'see DECISIONS.md', granted: '2026-11-01', expires: '2026-12-31' },
+      /decision must be a DECISIONS\.md ID/,
+    ],
+    ['a decision ID with a suffix', { decision: 'D-TASK007-01 (02)', granted: '2026-11-01', expires: '2026-12-31' }, /decision must be/],
+    ['a decision ID without an area', { decision: 'D-058', granted: '2026-11-01', expires: '2026-12-31' }, /decision must be/],
+  ])('rejects %s as a malformed register', (_name, entry, message) => {
+    expect(() => loadWatchlist(register(entry), NOW)).toThrow(message);
+  });
+});
+
 describe('check-audit CLI', () => {
   const temp = mkdtempSync(join(tmpdir(), 'check-audit-'));
   afterAll(() => rmSync(temp, { recursive: true, force: true }));
@@ -168,5 +201,27 @@ describe('check-audit CLI', () => {
 
   it('exits 2 without --npm-audit', () => {
     expect(runNode([script, '--root', temp], { cwd: temp }).status).toBe(2);
+  });
+
+  it.each([
+    ['watchlist.waiver-91-days.json', 2, /^check-audit: error: waivers\[0\]: a waiver may span at most 90 days/m],
+    ['watchlist.waiver-90-days.json', 1, /^audit\/high: GHSA-rhx6-c78j-4q9w path-to-regexp/m],
+  ])('[m7] with %s as the register exits %i', (fixture, status, stderr) => {
+    const root = mkdtempSync(join(tmpdir(), 'check-audit-waiver-'));
+    try {
+      mkdirSync(join(root, 'tools', 'ci'), { recursive: true });
+      writeFileSync(join(root, 'package.json'), '{"name":"fixture","private":true}\n');
+      copyFileSync(join(fixtures, 'lockfile.json'), join(root, 'package-lock.json'));
+      copyFileSync(join(fixtures, fixture), join(root, 'tools', 'ci', 'advisory-watchlist.json'));
+      copyFileSync(join(repoRoot, 'tools', 'ci', 'maintenance-exceptions.json'), join(root, 'tools', 'ci', 'maintenance-exceptions.json'));
+      const result = runNode([script, '--root', root, '--npm-audit', join(fixtures, 'npm-audit.high.json'), '--now', '2026-11-12'], {
+        cwd: root,
+      });
+      expect(result.stderr).toMatch(stderr);
+      expect(result.status).toBe(status);
+      if (status === 1) expect(result.stdout).toContain('note audit/waived: GHSA-f5x3-32g6-xq36 tar-legacy');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

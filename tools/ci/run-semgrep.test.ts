@@ -44,6 +44,26 @@ describe('docker arguments', () => {
     expect(args).toContain('--disable-nosem');
   });
 
+  it('PR10-SEC-03: --ignore-from mounts the base .semgrepignore and .gitignore over the scanned copies, read-only', () => {
+    const base = join(repoRoot, 'base-ref');
+    const args = buildScanArgs({ root, ignoreFrom: base, has: () => true });
+    expect(args).toContain(`type=bind,source=${join(base, '.semgrepignore')},target=/src/.semgrepignore,readonly`);
+    expect(args).toContain(`type=bind,source=${join(base, '.gitignore')},target=/src/.gitignore,readonly`);
+    // The overlay mounts come after the /src mount, so they shadow the head files.
+    expect(args.indexOf(`type=bind,source=${root},target=/src,readonly`)).toBeLessThan(
+      args.indexOf(`type=bind,source=${join(base, '.semgrepignore')},target=/src/.semgrepignore,readonly`),
+    );
+  });
+
+  it('PR10-SEC-03: a scope file the --ignore-from directory lacks is not mounted (the scanned copy applies)', () => {
+    const base = join(repoRoot, 'base-ref');
+    const args = buildScanArgs({ root, ignoreFrom: base, has: (path) => path.endsWith('.semgrepignore') });
+    expect(args.filter((arg) => arg.includes('target=/src/'))).toEqual([
+      `type=bind,source=${join(base, '.semgrepignore')},target=/src/.semgrepignore,readonly`,
+    ]);
+    expect(buildScanArgs({ root }).filter((arg) => arg.includes('target=/src/'))).toEqual([]);
+  });
+
   it('test mode runs semgrep --test for one rule pack and its fixtures', () => {
     const args = buildTestArgs({ root, ruleFile: '.semgrep/raw-sql.yml', fixtures: ['tests/fixtures/semgrep/raw-sql.ts'] });
     expect(args.slice(args.indexOf(SEMGREP_IMAGE) + 1)).toEqual([
@@ -73,6 +93,8 @@ describe('CLI arguments', () => {
     expect(() => parseArgs(['--rules-from'])).toThrow(/needs a value/u);
     expect(() => parseArgs(['--nosem'])).toThrow(/unknown argument/u);
     expect(() => parseArgs(['--test', '--rules-from', 'x'])).toThrow(/--test/u);
+    expect(() => parseArgs(['--test', '--ignore-from', 'x'])).toThrow(/--test/u);
+    expect(parseArgs(['--ignore-from', 'base']).ignoreFrom).toMatch(/base$/u);
   });
 });
 
