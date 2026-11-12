@@ -49,6 +49,7 @@ describe('validateDataset', () => {
     ['columns without source', { columns: ['code', 'name_en'] }],
     ['a bad name', { name: 'Countries!' }],
     ['an empty version', { version: '' }],
+    ['the reserved authz digest name (n6)', { name: 'authz_matrix' }],
   ] as const)('refuses %s with SEED_INVALID_DATASET naming the dataset', (_label, override) => {
     const error = refusal({ ...valid, ...override });
     expect(error.code).toBe('SEED_INVALID_DATASET');
@@ -69,6 +70,12 @@ describe('validateDataset', () => {
     expect(refusal({ ...valid, rows: [{ ...rows[0], extra: 1 } as SeedRow] }).message).toContain('"extra"');
     expect(refusal({ ...valid, rows: [{ ...rows[0], source: 'LEGACY' } as unknown as SeedRow] }).message).toContain('invalid source');
     expect(refusal({ ...valid, rows: [{ ...rows[0], code: null } as unknown as SeedRow] }).message).toContain('null natural-key');
+  });
+
+  it.each(['__proto__', 'constructor'])('refuses a %s column that a row only inherits from the prototype chain (n1)', (column) => {
+    const row = { code: 'US', name_en: 'United States', source: 'ISO' } as SeedRow;
+    const error = refusal({ ...valid, columns: [...valid.columns, column], rows: [row] });
+    expect(error.message).toContain(`no value for column "${column}"`);
   });
 
   it('refuses a non-finite number in a row', () => {

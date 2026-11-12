@@ -17,8 +17,20 @@ database, reruns the bootstrap lane, deploys), `npm run db:lint-migrations` (lin
 ## Seeding
 
 `npm run db:seed` (reference, every environment) and `npm run db:seed:demo` (reference, then demo users; skipped when
-`APP_ENV=production`) run `prisma/seed/index.ts` as `platform_migrator` (`DATABASE_MIGRATOR_URL` or `..._FILE`, `APP_ENV`
-required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects`, never a value), 2 unexpected error.
+`APP_ENV=production`) run `prisma/seed/index.ts` as `platform_migrator` (`DATABASE_MIGRATOR_URL` and `APP_ENV`
+required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects`, never a value), 2 unexpected error
+(including a connection lost mid-run).
+
+- `DATABASE_MIGRATOR_URL` is a direct value (ADR-0018 am. 6). A `_FILE` variant of any variable the seed reads
+  (`DATABASE_MIGRATOR_URL_FILE`, `SEED_*_FILE`, `APP_ENV_FILE`, `NODE_ENV_FILE`) is refused, naming the variable only.
+- The URL must pass the platform's single PostgreSQL URL allow-list (`isAllowListedPostgresUrl` in `@platform/config`):
+  a TCP host and only `sslmode`, `sslrootcert`, `sslnegotiation`, `uselibpqcompat`, `application_name`,
+  `connect_timeout`. `options`, `statement_timeout`, `host`, `hostaddr` and every other parameter are refused, because
+  node-postgres lets them override the pinned session. After connecting, the seed reads `search_path`
+  (`pg_catalog, pg_temp`), `statement_timeout` and `idle_in_transaction_session_timeout` back and refuses an unpinned
+  session. Requiring `sslmode=verify-full` outside local/test is TASK-014's `checkToolingEnv` (PR3-SEC-14).
+- `APP_ENV=local` or `test` is refused on an ECS task (`ECS_CONTAINER_METADATA_URI` or `_V4` set), the second signal of
+  ADR-0018 am. 8, because those values unlock `local-only-*` demo passwords.
 
 - `seed/framework/`: dataset runner (upsert by natural key, one statement per chunk of at most 500 rows, writes a row only
   when it is new or has drifted, so an unchanged database is not touched), canonical content hash, validation,
@@ -27,9 +39,31 @@ required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects
   and `REFERENCE_STEPS`. The authz step only verifies parity with `packages/authz` (`SEED_AUTHZ_DRIFT`); the generated
   seed migration is the only writer of `permissions`, `roles` and `role_permissions` (D-ARCH-060).
 - `seed/demo/`: credential planning and the demo user seed. Passwords come from `SEED_*` variables, are decided before any
-  connection (`local-only-*` defaults only in `local`; none read in staging or production) and are never printed.
+  connection (`local-only-*` defaults only in `local`) and are never printed. In staging and production a `SEED_*` value
+  is never used: a present, non-empty value is refused (it is read only to choose the refusal code), and an empty value
+  counts as unset, as in local/test.
 - Adding a dataset: a `Dataset` file under `seed/reference/` with `source` on every row, appended to `REFERENCE_DATASETS`;
-  bump `version` when its content changes; `insertOnly` for published versions, `audited` for configuration.
+  bump `version` when its content changes; `insertOnly` for published versions, `audited` for configuration. A drift
+  restore of an audited dataset is reported as a `drift-restored` configuration change; every drift restore is logged as
+  `warn seed.drift_restored`. The dataset name `authz_matrix` is reserved for TASK-221's authz digest row.
+- Tests: unit beside the code, `tests/seed/seed.int.test.ts` (PostgreSQL 18, real migrations, test-only probe tables, CLI).
+
+### Dataset contract limits
+
+The `Dataset` contract covers flat tables keyed by non-null natural-key columns with a plain unique index. It cannot
+express the data-model §9.2 shapes below yet, so "add a `Dataset` file" is not enough for them. The extension, with unit
+and integration tests, lands under the `prisma-seed` lock in the first task that seeds such a table.
+
+**Hard rule:** never list a column that the runtime or a reviewer mutates (`number_sequences.next_value`, `reviewed_at`,
+`reviewed_by`, counters, statuses). Every listed column is restored on drift, so the next deploy's reference seed would
+reset it; for `next_value` that means duplicate order numbers.
+
+| Limit | Affected datasets | Extension | First consumer |
+|---|---|---|---|
+| (a) UUID foreign keys: `id` is runner-owned; no natural-key → id lookup, no deterministic `seedId` | `carrier_services`, `transit_days.carrier_service_id`, compliance-pack sections, pricing rules, `prohibited_items.compliance_pack_id` / `carrier_id` | `{ fk: { column, table, naturalKey } }` resolution, or deterministic `seedId` ids (data-model §9.3) | TASK-066 (FX) and the carriers / compliance-pack / pricing seed tasks |
+| (b) Nullable natural keys (`NULLS NOT DISTINCT`) are refused; the insert-only changed-count joins with `=` | `holidays.region_code`, `notification_templates.variant` | `IS NOT DISTINCT FROM` joins; lift the null-key refusal for NND indexes | holidays (US-054), templates (US-056) seed tasks |
+| (c) Partial-index arbiters: `ON CONFLICT (cols)` cannot infer `UNIQUE … WHERE …` | `prohibited_items` (`WHERE scope = 'COUNTRY'`) | optional `arbiterWhere` | compliance-pack seed task |
+| (d) Insert-only columns: every column is restored on drift | `number_sequences.next_value`, `reviewed_at` / `reviewed_by` | `insertOnlyColumns` (written on insert, never compared or restored) | number-sequences (US-056) seed task |
 - Tests: unit beside the code, `tests/seed/seed.int.test.ts` (PostgreSQL 18, real migrations, test-only probe tables, CLI).
 
 ## Findings for SPK-03/SPK-08

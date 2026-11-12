@@ -41,7 +41,9 @@ type DatasetContext = Pick<SeedContext, 'sql' | 'logger' | 'versions' | 'configC
  * version label or the content hash changed.
  *
  * Rows are checked on every run, not only when the hash changed, so a row edited by hand in the database is restored
- * (AT-US-049-08); a run that finds nothing to do writes nothing at all (AT-US-049-01).
+ * (AT-US-049-08); a run that finds nothing to do writes nothing at all (AT-US-049-01). A restoration is logged as
+ * `warn seed.drift_restored` (tamper evidence) and, for an audited dataset whose version did not change, reported as a
+ * `drift-restored` `ConfigChange`.
  */
 export async function runDataset(context: DatasetContext, dataset: Dataset): Promise<DatasetResult> {
   validateDataset(dataset);
@@ -76,11 +78,23 @@ export async function runDataset(context: DatasetContext, dataset: Dataset): Pro
     await versions.record(sql, { dataset: dataset.name, version: dataset.version, contentSha256, rowCount: dataset.rows.length });
     if (dataset.audited === true) {
       await configChanges.configChanged(sql, {
+        kind: 'version',
         dataset: dataset.name,
         fromVersion: existing?.version,
         toVersion: dataset.version,
         fromSha256: existing?.contentSha256,
         toSha256: contentSha256,
+      });
+    }
+  } else if (updated > 0) {
+    logger.warn('seed.drift_restored', { dataset: dataset.name, rows: updated });
+    if (dataset.audited === true) {
+      await configChanges.configChanged(sql, {
+        kind: 'drift-restored',
+        dataset: dataset.name,
+        version: dataset.version,
+        sha256: contentSha256,
+        restoredRows: updated,
       });
     }
   }
@@ -112,6 +126,10 @@ function insertOnlyChanged(dataset: Dataset): SeedRefusedError {
 export async function runReferenceSeed(options: ReferenceSeedOptions): Promise<ReferenceSeedResult> {
   const { sql, datasets, steps, logger, configChanges } = options;
   const versions = options.versions ?? referenceDatasetVersions;
+  if ('totalCount' in sql) {
+    // A pool would run BEGIN, the lock and COMMIT on different connections (code review n3).
+    throw new TypeError('runReferenceSeed needs one dedicated connection (a pg.Client), not a pool');
+  }
   validateDatasets(datasets);
 
   await sql.query('BEGIN');

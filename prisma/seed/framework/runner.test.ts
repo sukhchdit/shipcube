@@ -123,13 +123,37 @@ describe('runDataset', () => {
     expect(configChanges.changes).toEqual([]);
   });
 
-  it('restores drifted rows (reported as updated) without touching the version row', async () => {
+  it('restores drifted rows (reported as updated and logged as drift) without touching the version row', async () => {
     const d = dataset(makeRows(3));
     const { sql } = fakeSql(() => ({ rows: [{ inserted: false }] }));
     const versions = memoryVersions(versionOf(d));
-    const result = await runDataset({ sql, logger, versions, configChanges: sink() }, d);
+    const configChanges = sink();
+    const warnings: [string, unknown][] = [];
+    const recording: SeedLogger = { info: () => undefined, warn: (event, fields) => warnings.push([event, fields]) };
+    const result = await runDataset({ sql, logger: recording, versions, configChanges }, d);
     expect(result).toMatchObject({ status: 'applied', inserted: 0, updated: 1 });
     expect(versions.recorded).toEqual([]);
+    expect(warnings).toEqual([['seed.drift_restored', { dataset: 'probe', rows: 1 }]]);
+    // Not audited: no configuration change.
+    expect(configChanges.changes).toEqual([]);
+  });
+
+  it('a drift restore of an audited dataset reports one drift-restored change (code review m5)', async () => {
+    const d = dataset(makeRows(3), { audited: true, version: '4' });
+    const { sql } = fakeSql(() => ({ rows: [{ inserted: false }, { inserted: false }] }));
+    const configChanges = sink();
+    await runDataset({ sql, logger, versions: memoryVersions(versionOf(d)), configChanges }, d);
+    expect(configChanges.changes).toEqual([
+      { kind: 'drift-restored', dataset: 'probe', version: '4', sha256: hashDataset(d), restoredRows: 2 },
+    ]);
+  });
+
+  it('a version change that also restores rows reports the version change only', async () => {
+    const d = dataset(makeRows(3), { audited: true, version: '2' });
+    const { sql } = fakeSql(() => ({ rows: [{ inserted: false }] }));
+    const configChanges = sink();
+    await runDataset({ sql, logger, versions: memoryVersions(versionOf(dataset(makeRows(3)))), configChanges }, d);
+    expect(configChanges.changes.map((change) => change.kind)).toEqual(['version']);
   });
 
   it('a changed version or hash records the version row and reports an audited change once', async () => {
@@ -140,7 +164,7 @@ describe('runDataset', () => {
     await runDataset({ sql: fakeSql().sql, logger, versions, configChanges }, d);
     expect(versions.recorded).toHaveLength(1);
     expect(configChanges.changes).toEqual([
-      { dataset: 'probe', fromVersion: '1', toVersion: '2', fromSha256: previous.contentSha256, toSha256: hashDataset(d) },
+      { kind: 'version', dataset: 'probe', fromVersion: '1', toVersion: '2', fromSha256: previous.contentSha256, toSha256: hashDataset(d) },
     ]);
 
     const unaudited = sink();
@@ -240,6 +264,13 @@ describe('runReferenceSeed', () => {
       runReferenceSeed({ sql, datasets: [], steps: [step('x', () => Promise.reject(failure))], logger: local, configChanges: sink() }),
     ).rejects.toBe(failure);
     expect(local.events).toContain('seed.rollback_failed');
+  });
+
+  it('refuses a pool before any statement (code review n3)', async () => {
+    const { sql, calls } = fakeSql();
+    const pool = Object.assign(Object.create(sql) as object, { totalCount: 0, idleCount: 0 }) as unknown as SeedSql;
+    await expect(runReferenceSeed({ sql: pool, datasets: [], steps: [], logger, configChanges: sink() })).rejects.toThrow('not a pool');
+    expect(calls).toEqual([]);
   });
 
   it('refuses invalid datasets before opening the transaction', async () => {

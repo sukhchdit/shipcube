@@ -24,7 +24,17 @@ export type SeedRow = Readonly<Record<string, SeedValue>> & { readonly source: S
  * - `insertOnly` datasets (published versions: FX snapshots, packs, pricing versions, templates) never update an
  *   existing natural key; a content change for an existing key fails the seed (data-model §9.1).
  * - `audited` datasets (configuration: packs, pricing versions, templates, flags) report each version change to the
- *   {@link ConfigChangeSink}; an unchanged dataset never does (REQ-COMP-008 "none on a no-op re-run").
+ *   {@link ConfigChangeSink}, and so is every drift restoration of their rows; an unchanged dataset never does
+ *   (REQ-COMP-008 "none on a no-op re-run").
+ *
+ * Contract limits (code review PR #13 m4). A dataset that needs one of these cannot be expressed yet; the extension
+ * lands, with tests, in the first task that seeds such a table (see prisma/README.md "Dataset contract limits"):
+ * - no UUID foreign keys: `id` is runner-owned and there is no natural-key → id lookup or deterministic `seedId`;
+ * - no null natural-key value: `NULLS NOT DISTINCT` keys (e.g. `holidays.region_code`) are refused;
+ * - no partial-index arbiter: `ON CONFLICT (naturalKey)` cannot infer a `UNIQUE … WHERE …` index;
+ * - no insert-only columns: every listed column is restored on drift.
+ * HARD RULE: never list a column that the runtime or a reviewer mutates (`number_sequences.next_value`,
+ * `reviewed_at`, `reviewed_by`, counters, statuses): the next seed run would reset it.
  */
 export interface Dataset {
   readonly name: string;
@@ -60,12 +70,20 @@ export interface DatasetVersion {
   readonly appliedAt: Date;
 }
 
-/** Minimal SQL surface the seed needs; implemented by a `pg` client connected as `platform_migrator`. */
+/**
+ * Minimal SQL surface the seed needs; implemented by ONE dedicated `pg` client connected as `platform_migrator`.
+ * A `pg.Pool` is refused (by type here, and at run time by `runReferenceSeed`): with a pool, `BEGIN`, the advisory
+ * lock and `COMMIT` would run on different connections and a refused run would leave partial writes (code review n3).
+ */
 export interface SeedSql {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values?: readonly unknown[],
   ): Promise<{ readonly rows: R[]; readonly rowCount: number | null }>;
+  /** Present on `pg.Pool` only. */
+  readonly totalCount?: never;
+  /** Present on `pg.Pool` only. */
+  readonly idleCount?: never;
 }
 
 /**
@@ -78,14 +96,29 @@ export interface DatasetVersionStore {
   record(sql: SeedSql, version: Omit<DatasetVersion, 'appliedAt'>): Promise<void>;
 }
 
-/** A configuration change produced by a seed run (one `CONFIG_CHANGE` audit entry each; REQ-RBAC-013, REQ-COMP-008). */
-export interface ConfigChange {
-  readonly dataset: string;
-  readonly fromVersion: string | undefined;
-  readonly toVersion: string;
-  readonly fromSha256: string | undefined;
-  readonly toSha256: string;
-}
+/**
+ * A configuration change produced by a seed run (one `CONFIG_CHANGE` audit entry each; REQ-RBAC-013, REQ-COMP-008,
+ * data-model §9.1):
+ * - `version`: an audited dataset's version label or content hash changed (first seed included);
+ * - `drift-restored`: the label and hash are unchanged, but `restoredRows` rows had been edited in the database and
+ *   were restored to the seeded values (code review PR #13 m5, PR13-SEC-06). Never emitted for a no-op run.
+ */
+export type ConfigChange =
+  | {
+      readonly kind: 'version';
+      readonly dataset: string;
+      readonly fromVersion: string | undefined;
+      readonly toVersion: string;
+      readonly fromSha256: string | undefined;
+      readonly toSha256: string;
+    }
+  | {
+      readonly kind: 'drift-restored';
+      readonly dataset: string;
+      readonly version: string;
+      readonly sha256: string;
+      readonly restoredRows: number;
+    };
 
 /** Receives configuration changes inside the seed transaction. The audit writer (TASK-025) implements it. */
 export interface ConfigChangeSink {

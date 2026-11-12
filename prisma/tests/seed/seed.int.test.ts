@@ -193,6 +193,35 @@ describe('reference seed framework (US-049)', () => {
     expect(after.filter((row) => row.xmin !== before.find((b) => b.code === row.code)?.xmin).map((row) => row.code)).toEqual(['P00003']);
   }, 120_000);
 
+  it('a drift restore of an audited dataset reports one drift-restored change and leaves the version row alone (m5)', async () => {
+    const database = await freshDatabase();
+    const sink = recordingSink();
+    const audited = probe(10, { audited: true });
+    await seed(database, [audited], sink);
+    const versionsBefore = await withClient(db.migratorConnection(database), async (client) => {
+      await client.query(`UPDATE public.seed_probe_countries SET name_en = 'tampered' WHERE code IN ('P00001', 'P00007')`);
+      return (await versionRows(client)).rows;
+    });
+
+    const result = await seed(database, [audited], sink);
+    expect(result.datasets).toMatchObject([{ status: 'applied', inserted: 0, updated: 2 }]);
+    expect(sink.changes.map((change) => change.kind)).toEqual(['version', 'drift-restored']);
+    expect(sink.changes[1]).toMatchObject({ dataset: 'probe_countries', version: '1', restoredRows: 2 });
+    expect(await withClient(db.migratorConnection(database), async (client) => (await versionRows(client)).rows)).toEqual(versionsBefore);
+
+    await seed(database, [audited], sink);
+    expect(sink.changes).toHaveLength(2);
+  }, 120_000);
+
+  it('two concurrent seeds queue on the advisory lock: one applies, the other finds nothing to do (n8)', async () => {
+    const database = await freshDatabase();
+    const results = await Promise.all([seed(database, [probe(300)]), seed(database, [probe(300)])]);
+    expect(results.map((result) => result.datasets[0]?.status).sort()).toEqual(['applied', 'unchanged']);
+    expect(results.map((result) => result.datasets[0]?.inserted).sort()).toEqual([0, 300]);
+    const rows = await withClient(db.migratorConnection(database), async (client) => (await stamp(client, 'seed_probe_countries')).rows);
+    expect(rows).toHaveLength(300);
+  }, 120_000);
+
   it('a changed dataset version updates its rows, bumps the version row once and reports an audited change only then', async () => {
     const database = await freshDatabase();
     const sink = recordingSink();
@@ -201,7 +230,7 @@ describe('reference seed framework (US-049)', () => {
     await seed(database, [audited('1')], sink);
     expect(sink.changes).toHaveLength(1);
     await seed(database, [audited('2', 6)], sink);
-    expect(sink.changes.map((change) => [change.fromVersion, change.toVersion])).toEqual([
+    expect(sink.changes.map((change) => (change.kind === 'version' ? [change.fromVersion, change.toVersion] : change.kind))).toEqual([
       [undefined, '1'],
       ['1', '2'],
     ]);
@@ -396,6 +425,51 @@ describe('seed CLI (US-049)', () => {
     expect(events(lines.join('\n'))).toContainEqual(
       expect.objectContaining({ event: 'seed.demo.done', skipped: false, created: 0, deferred: DEMO_USERS.length }),
     );
+  }, 120_000);
+
+  it('the session stays pinned when the migrator role defaults to search_path=public (PR13-SEC-03)', async () => {
+    const database = await freshDatabase();
+    const admin = await db.superuser(database);
+    try {
+      // Database-scoped, so no other suite's sessions are affected.
+      await admin.query(`ALTER ROLE platform_migrator IN DATABASE "${database}" SET search_path = public`);
+    } finally {
+      await admin.end();
+    }
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const status = await main(
+      ['reference'],
+      { APP_ENV: 'local', DATABASE_MIGRATOR_URL: db.migratorUrl(database) },
+      {
+        out: (line) => lines.push(line),
+        err: (line) => errors.push(line),
+      },
+    );
+    expect({ status, errors }).toEqual({ status: 0, errors: [] });
+    expect(events(lines.join('\n'))).toContainEqual(expect.objectContaining({ event: 'seed.reference.done' }));
+  }, 120_000);
+
+  it('a URL that overrides the pinned session is refused before connecting (exit 1, value never printed; PR13-SEC-03)', async () => {
+    const database = await freshDatabase();
+    for (const query of ['?options=-c%20search_path%3Dpublic', '?statement_timeout=0', '?host=127.0.0.1']) {
+      const lines: string[] = [];
+      const errors: string[] = [];
+      const status = await main(
+        ['reference'],
+        { APP_ENV: 'local', DATABASE_MIGRATOR_URL: `${db.migratorUrl(database)}${query}` },
+        {
+          out: (line) => lines.push(line),
+          err: (line) => errors.push(line),
+        },
+      );
+      expect(status).toBe(1);
+      expect(stderrRefusal(errors.join('\n'))).toMatchObject({ code: 'SEED_ENVIRONMENT_INVALID', subjects: ['DATABASE_MIGRATOR_URL'] });
+      expect([...lines, ...errors].join('\n')).not.toContain(db.passwords.migrator);
+    }
+    await withClient(db.migratorConnection(database), async (client) => {
+      expect((await versionRows(client)).rows).toEqual([]);
+    });
   }, 120_000);
 
   it('the reference command runs the seed once and again with the same outcome (db:seed twice, exit 0)', async () => {

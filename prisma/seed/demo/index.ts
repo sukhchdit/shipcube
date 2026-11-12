@@ -1,4 +1,4 @@
-export { parseAppEnv } from './app-env.js';
+export { assertNotLocalOnEcs, parseAppEnv } from './app-env.js';
 export {
   planDemoCredentials,
   SEED_PASSWORD_MAX_LENGTH,

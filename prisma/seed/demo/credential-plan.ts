@@ -22,7 +22,7 @@ const list = (names: readonly string[]): string => names.join(', ');
  * Decides, before any write, how the demo seed provisions credentials (REQ-DATA-002, D-043, D-052, SEC-P3-14):
  * - production: the demo seed is skipped; a present `SEED_*` password variable is a misconfiguration and is refused.
  * - staging: no seeded password; staff and customers receive a set-password link. A present `SEED_*` variable is
- *   refused, and none is read when absent.
+ *   refused (its value is only classified, never used), and none is read when absent. An empty value counts as absent.
  * - local / test: every `SEED_*` variable is required and must be 12-128 characters and not a placeholder. The
  *   `local-only-*` defaults are accepted in `local` only.
  *
@@ -44,10 +44,11 @@ export function planDemoCredentials(input: DemoCredentialPlanInput): DemoCredent
 
 function planHardened(appEnv: 'production' | 'staging', env: DemoCredentialPlanInput['env']): DemoCredentialPlan {
   // Presence is tested without reading; a value is read only for a variable that is present, to classify the refusal.
+  // An empty value counts as absent, as in local/test: Compose renders an unset `${SEED_X:-}` as '' (code review n2).
   const present = SEED_PASSWORD_VARIABLES.flatMap((name) => {
     if (!Object.hasOwn(env, name)) return [];
     const value = env[name];
-    return value === undefined ? [] : [{ name, isDefault: isLocalOnlyDefault(value) }];
+    return value === undefined || value === '' ? [] : [{ name, isDefault: isLocalOnlyDefault(value) }];
   });
   if (present.length === 0) {
     return appEnv === 'production' ? { kind: 'skip', reason: 'production' } : { kind: 'set-password-link' };

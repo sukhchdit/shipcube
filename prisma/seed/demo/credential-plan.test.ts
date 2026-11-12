@@ -7,7 +7,7 @@ import fc from 'fast-check';
 
 import { SEED_PASSWORD_VARIABLES, SeedRefusedError } from '../framework/contracts.js';
 
-import { parseAppEnv } from './app-env.js';
+import { assertNotLocalOnEcs, parseAppEnv } from './app-env.js';
 import { planDemoCredentials } from './credential-plan.js';
 
 const randomSecret = (): string => randomBytes(16).toString('hex');
@@ -51,6 +51,33 @@ describe('parseAppEnv', () => {
   );
 });
 
+describe('assertNotLocalOnEcs (ADR-0018 am. 8 second signal, PR13-SEC-02)', () => {
+  const signalled: readonly Env[] = [
+    { ECS_CONTAINER_METADATA_URI: 'http://169.254.170.2/v3/x' },
+    { ECS_CONTAINER_METADATA_URI_V4: 'http://169.254.170.2/v4/x' },
+    { ECS_CONTAINER_METADATA_URI: 'http://169.254.170.2/v3/x', ECS_CONTAINER_METADATA_URI_V4: 'http://169.254.170.2/v4/x' },
+  ];
+
+  it.each((['local', 'test'] as const).flatMap((appEnv) => signalled.map((env) => [appEnv, env] as const)))(
+    'refuses APP_ENV=%s with %p, naming APP_ENV and the signal variables only',
+    (appEnv, env) => {
+      const error = refusal(() => assertNotLocalOnEcs(appEnv, env));
+      expect(error.code).toBe('SEED_ENVIRONMENT_INVALID');
+      expect(error.subjects).toEqual(['APP_ENV', ...Object.keys(env)]);
+      for (const value of Object.values(env)) for (const rendering of renderings(error)) expect(rendering).not.toContain(value);
+    },
+  );
+
+  it.each(['local', 'test'] as const)('accepts APP_ENV=%s when the signals are absent or empty', (appEnv) => {
+    expect(() => assertNotLocalOnEcs(appEnv, {})).not.toThrow();
+    expect(() => assertNotLocalOnEcs(appEnv, { ECS_CONTAINER_METADATA_URI: '', ECS_CONTAINER_METADATA_URI_V4: '' })).not.toThrow();
+  });
+
+  it.each(['staging', 'production'] as const)('leaves APP_ENV=%s on ECS alone', (appEnv) => {
+    for (const env of signalled) expect(() => assertNotLocalOnEcs(appEnv, env)).not.toThrow();
+  });
+});
+
 describe('planDemoCredentials: environment guard', () => {
   it.each(['local', 'test'] as const)('refuses NODE_ENV=production with APP_ENV=%s, naming both variables', (appEnv) => {
     const error = refusal(() => plan(appEnv, realEnv(), 'production'));
@@ -90,8 +117,14 @@ describe('planDemoCredentials: production', () => {
     for (const rendering of renderings(error)) expect(rendering).not.toContain(value);
   });
 
-  it('treats an empty string as present and forbidden', () => {
-    expect(refusal(() => plan('production', { SEED_CUSTOMER_PASSWORD: '' })).code).toBe('SEED_PASSWORD_FORBIDDEN');
+  it('treats an empty string as absent, like local/test do (code review n2: Compose renders ${SEED_X:-} as "")', () => {
+    expect(plan('production', { SEED_CUSTOMER_PASSWORD: '', SEED_SUPERADMIN_PASSWORD: '' })).toEqual({
+      kind: 'skip',
+      reason: 'production',
+    });
+    expect(plan('staging', { SEED_CUSTOMER_PASSWORD: '' })).toEqual({ kind: 'set-password-link' });
+    const error = refusal(() => plan('staging', { SEED_CUSTOMER_PASSWORD: '', SEED_SUPERADMIN_PASSWORD: randomSecret() }));
+    expect(error.subjects).toEqual(['SEED_SUPERADMIN_PASSWORD']);
   });
 });
 

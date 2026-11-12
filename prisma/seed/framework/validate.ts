@@ -9,6 +9,12 @@ const SOURCES: readonly unknown[] = ['ISO', 'SEED', 'SAMPLE'];
 /** Written by the runner itself (standard columns, data-model P2); a dataset may not carry them. */
 export const RESERVED_COLUMNS: readonly string[] = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'version'];
 
+/**
+ * `reference_dataset_versions.dataset` keys owned by another writer: `authz_matrix` is the authz digest row of TASK-221's
+ * reconciler (data-model §9.2, code review PR #13 n6), so no dataset may claim it.
+ */
+export const RESERVED_DATASET_NAMES: readonly string[] = ['authz_matrix'];
+
 function refuse(dataset: Dataset, problem: string): SeedRefusedError {
   const name = typeof dataset.name === 'string' ? dataset.name : '(unnamed)';
   return new SeedRefusedError('SEED_INVALID_DATASET', [name], `Dataset ${name} is invalid: ${problem}.`);
@@ -21,6 +27,7 @@ function refuse(dataset: Dataset, problem: string): SeedRefusedError {
  */
 export function validateDataset(dataset: Dataset): void {
   if (!DATASET_NAME.test(dataset.name)) throw refuse(dataset, 'name must match ^[a-z][a-z0-9_]*(:[A-Za-z0-9_.-]+)?$');
+  if (RESERVED_DATASET_NAMES.includes(dataset.name)) throw refuse(dataset, 'name is reserved for another writer');
   if (dataset.version === '') throw refuse(dataset, 'version must not be empty');
   if (!QUALIFIED_TABLE.test(dataset.table)) throw refuse(dataset, 'table must be schema-qualified (schema.table, lower-case identifiers)');
 
@@ -42,7 +49,8 @@ export function validateDataset(dataset: Dataset): void {
     const keys = Object.keys(row);
     const unexpected = keys.find((key) => !columns.has(key));
     if (unexpected !== undefined) throw refuse(dataset, `row ${String(index)} has column "${unexpected}" which is not in columns`);
-    const missing = dataset.columns.find((column) => !(column in row));
+    // Own properties only: `in` would find `__proto__` or `constructor` on the prototype chain (code review n1).
+    const missing = dataset.columns.find((column) => !Object.hasOwn(row, column));
     if (missing !== undefined) throw refuse(dataset, `row ${String(index)} has no value for column "${missing}"`);
     if (!SOURCES.includes(row.source)) throw refuse(dataset, `row ${String(index)} has an invalid source (ISO, SEED or SAMPLE expected)`);
     for (const column of dataset.columns) canonicalValue(row[column], dataset.name, `row ${String(index)} column ${column}`);

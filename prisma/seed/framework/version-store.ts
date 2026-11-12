@@ -37,7 +37,7 @@ export const referenceDatasetVersions: DatasetVersionStore = {
     await sql.query(
       `INSERT INTO public.reference_dataset_versions AS cur
          (dataset, dataset_version, content_sha256, row_count, applied_at, created_by, updated_by)
-       VALUES ($1, $2, decode($3, 'hex'), $4, pg_catalog.now(), $5::uuid, $5::uuid)
+       VALUES ($1, $2, pg_catalog.decode($3, 'hex'), $4, pg_catalog.now(), $5::pg_catalog.uuid, $5::pg_catalog.uuid)
        ON CONFLICT (dataset) DO UPDATE SET
          dataset_version = EXCLUDED.dataset_version,
          content_sha256 = EXCLUDED.content_sha256,
