@@ -64,7 +64,9 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
   });
 
   const typecheck = (source: string) => {
-    const [bin, ...args] = (rootPkg.scripts['typecheck'] ?? '').split(' ');
+    // `npm run typegen && tsc -b`: React Router route types are generated first (TASK-004); the fixture runs the tsc part.
+    const tscCommand = (rootPkg.scripts['typecheck'] ?? '').split('&&').at(-1)?.trim() ?? '';
+    const [bin, ...args] = tscCommand.split(' ');
     expect(bin).toBe('tsc');
     const dir = solutionFixture(source);
     fixtures.push(dir);

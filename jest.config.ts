@@ -1,6 +1,7 @@
 /**
- * Jest 30 configuration (ADR-0024). Three projects selected by the root scripts:
- *   unit        `*.test.ts(x)`      -> npm run test:unit
+ * Jest 30 configuration (ADR-0024). Four projects selected by the root scripts:
+ *   unit        `*.test.ts`         -> npm run test:unit (Node environment)
+ *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
  * Sources are transpiled by @swc/jest using the root `.swcrc` (CommonJS output, no type-check;
@@ -13,6 +14,9 @@ type ProjectConfig = Exclude<NonNullable<Config['projects']>[number], string>;
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
+// NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
+const JS_EXTENSION_MAPPER = { '^(\\.{1,2}/.*)\\.js$': '$1' };
+
 const common: ProjectConfig = {
   rootDir: '.',
   // Explicit roots: patterns like '<rootDir>/{a,b}/**' match nothing on Windows (SPK-01).
@@ -22,8 +26,7 @@ const common: ProjectConfig = {
     customExportConditions: ['@platform/source', 'node', 'node-addons'],
   },
   transform: { '^.+\\.(t|j)sx?$': '@swc/jest' },
-  // NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
-  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+  moduleNameMapper: JS_EXTENSION_MAPPER,
   modulePathIgnorePatterns: ['<rootDir>/.*/dist/', '<rootDir>/.*/build/'],
   testPathIgnorePatterns: IGNORED_PATHS,
 };
@@ -58,8 +61,20 @@ const config: Config = {
     {
       ...common,
       displayName: 'unit',
-      testMatch: ['**/*.test.{ts,tsx}'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx?$', '/tests/e2e/'],
+      testMatch: ['**/*.test.ts'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
+    },
+    {
+      ...common,
+      displayName: 'unit-dom',
+      // Component tests resolve browser builds: `browser` replaces the Node-side `node`/`node-addons` conditions of `common` (m8).
+      // jsdom plus the Fetch API globals react-router needs (tools/test-support/jsdom-environment.mjs).
+      testEnvironment: '<rootDir>/tools/test-support/jsdom-environment.mjs',
+      testEnvironmentOptions: { customExportConditions: ['@platform/source', 'browser'] },
+      testMatch: ['**/*.test.tsx'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
+      setupFilesAfterEnv: ['<rootDir>/tools/test-support/dom-setup.ts'],
+      moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-support/style-stub.ts' },
     },
     {
       ...common,
