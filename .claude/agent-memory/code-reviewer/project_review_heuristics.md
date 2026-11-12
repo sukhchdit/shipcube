@@ -135,4 +135,6 @@ Round 2 of a spike PR (PR #6 r2):
 - Positive assertions hide inside "weakening" tests (`toBe('off')`, `toEqual` on ignore maps, `not.toContain`); a strengthening PR fails them.
 - Jest filter deny-lists: Jest accepts kebab-case (`--test-name-pattern`), attached `-tX`, `--listTests` (exit 0, runs nothing), and `onlyChanged`/`lastCommit` (exit 0 with no tests). The head `jest.config.ts` `testNamePattern` skips everything with exit 0. Ask for an allow-list of the exact invocation.
 
+**Moving files to dodge a CI step can de-own them (PR #4 r3, 2026-11-13).** When a PR relocates files out of a CODEOWNERS-owned folder (e.g. out of `tools/test-support/` to escape lane A's base-ref replace step), check that the new location is owned too. Jest testEnvironment/setupFiles referenced from an owned jest.config.ts are NOT covered by owning the config. Fix: a CODEOWNERS line plus REQUIRED_CODEOWNED_PATHS and its test. Do NOT accept a "robust" config that skips a project when its file is missing; that is a silent gate weakening.
+
 **Client-side timeouts on pg CLIs:** `statement_timeout` is server-side; a blackholed network needs pg `query_timeout` + `keepAlive`.

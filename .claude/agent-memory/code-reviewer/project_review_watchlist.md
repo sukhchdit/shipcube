@@ -35,10 +35,7 @@ PR #4 (TASK-004) r1 at 519bb89 went CHANGES_REQUESTED (2026-11-12). The only MAJ
 - TASK-042: SPA-fallback locale hydration must be hydration-safe.
 - Lazy-route task: the size-limit globs sum all chunks; the per-chunk 150 kB check and the cross-app check are missing (NFR-WEB-004).
 
-PR #4 r2 at 9f5ea5e (non-harness delta) is still CHANGES_REQUESTED, with M1 only. Round 3 = harness commit + merge-main, checklist in review §R2.4. Check:
-- R2-m1: drop the `as UserConfig` cast in `apps/*/vite.config.test.ts`.
-- R2-m2: root `lint` must run `npm run typegen` first. Without `.react-router/`, the type-aware rules fail on `Route.*` params; verify with that dir deleted.
-- m2: an `/es/no-such-page` hydration error must not be allow-listed in the console guard.
+PR #4 r3 at d2e867b (harness + merge-main; 2026-11-13) is CHANGES_REQUESTED with ONE MAJOR, R3-M1: the move tools/test-support -> tools/test-dom de-owned the jsdom env/setup files. R2.4 items 1-10, R2-m1/m2 and m2 are closed (Firefox deferred as COND-E2E-FF, D-ORCH-019). Round 4 = delta check: `/tools/test-dom/` in CODEOWNERS + REQUIRED_CODEOWNED_PATHS (check-workflow-policy.mjs:656) + its test -> expect APPROVED_WITH_NITS. The security record must name a head at or after that fix. Routed from r3: R3-n1 (use-locale reads live html lang; capture once) -> TASK-042; R3-n3 (outputDir vs §7.8 tests/e2e/output) and R3-n4 (assert pointer:coarse/44px) -> T-QA-05; R3-n6 (WebKit-Windows close hang; CI globalTimeout) -> qa-lead/TASK-015; base-ref step minimal jest config -> TASK-007/PR #17.
 Routed:
 - TASK-022/TASK-111: `gzip_proxied`/`gzip_http_version` behind the edge or CloudFront.
 - TASK-014: IPv6 `listen` with `default_server`.
