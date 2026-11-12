@@ -799,7 +799,7 @@ Feature: Checkout screen
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-204
 - **Linked REQs:** REQ-BOOK-030
 - **As a** customer **I want** to be told when a cancellation could not be completed **so that** I do not assume I was refunded.
-- **Notes:** EC-B07, EC-B27. Staff retry is M2; M1 retries automatically every 4 hours for 24 hours (6 retries).
+- **Notes:** EC-B07, EC-B27. Staff retry is M2; M1 retries automatically every 4 hours for 24 hours (6 retries). `CAPABILITY_NOT_SUPPORTED` from `cancelShipment` (adapter declares `operations.cancelShipment=false`, DHL Express) is not a void failure and never enters this story: US-196 records `carrier_void = UNSUPPORTED` and voids Platform-side (D-ARCH-057).
 
 #### Acceptance criteria
 ```gherkin
@@ -846,6 +846,11 @@ Feature: Automatic refund
   Scenario: No refund before void confirmation
     Given the void is not confirmed
     Then no refund call is made
+
+  Scenario: Refund after a Platform-side void
+    Given a captured shipment amount of 4000 USD minor units on an adapter that declares operations.cancelShipment=false
+    And the cancellation recorded carrier_void "UNSUPPORTED" (D-ARCH-057)
+    Then the refund of 4000 proceeds exactly as after a confirmed carrier void and the shipment goes VOIDED then REFUNDED
 
   Scenario: Refund failure is retried
     Given token "mock_refund_fail"
