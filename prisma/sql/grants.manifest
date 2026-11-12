@@ -1,0 +1,17 @@
+# Grant manifest (data-model.md §4.4 grant matrix; catalog test C5; PR8-SEC-10, D-ARCH-069; TASK-016).
+#
+# Every table and column privilege held by a platform runtime role (platform_app, platform_definer, platform_erasure),
+# one line per grant. Catalog test C5 (prisma/tests/catalog/c01-c12.int.test.ts) compares the live ACLs of every
+# relation in public and platform with this file in both directions, so a grant in a migration or bootstrap file
+# without its line here (or a line without its grant) fails. Parser: tools/db/grants-manifest.ts.
+#
+# Line format:  <grantee> <privilege> <schema>.<table>
+#               <grantee> <privilege> <schema>.<table> (<column>, <column>, ...)    column grant
+# Privileges:   SELECT | INSERT | UPDATE | DELETE (TRUNCATE, REFERENCES and TRIGGER are never granted at runtime).
+# DELETE:       platform_app only on the SYSTEM hard-delete allow-list (table-class flag hardDelete); platform_definer
+#               only on definerPurge tables; SELECT for platform_definer only on definerRead tables.
+
+# authz catalogue (TASK-013, migration 20261112010000_authz_catalogue_tables): GLOBAL, read-only at runtime.
+platform_app SELECT public.permissions
+platform_app SELECT public.role_permissions
+platform_app SELECT public.roles

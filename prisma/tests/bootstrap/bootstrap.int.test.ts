@@ -72,7 +72,7 @@ describe('bootstrap runner (data-model §8.1)', () => {
     await db.createDatabase('order_db');
     const result = await db.bootstrap('order_db');
     expect(result.applied).toEqual(FILES);
-    expect(FILES).toEqual(['00-roles.sql', '01-schemas.sql']);
+    expect(FILES).toEqual(['00-roles.sql', '01-schemas.sql', '02-role-backstops.sql']);
     const rows = await query<{ file_name: string; sha256: Buffer; applied_by: string }>(
       'order_db',
       `SELECT file_name, sha256, applied_by FROM ${LEDGER_TABLE} ORDER BY applied_at, file_name`,
@@ -107,7 +107,7 @@ describe('bootstrap runner (data-model §8.1)', () => {
     await db.createDatabase('sha_db');
     await db.bootstrap('sha_db', lane);
     appendFileSync(join(lane, '01-schemas.sql'), '\n-- an edit after the file was applied\n');
-    writeFileSync(join(lane, '02-later.sql'), 'SET search_path = pg_catalog, pg_temp;\nCREATE SCHEMA never_created;\n');
+    writeFileSync(join(lane, '99-later.sql'), 'SET search_path = pg_catalog, pg_temp;\nCREATE SCHEMA never_created;\n');
     await expect(db.bootstrap('sha_db', lane)).rejects.toThrow(/01-schemas\.sql changed after it was applied/);
     const schemas = await query<{ n: string }>(
       'sha_db',
@@ -121,7 +121,9 @@ describe('bootstrap runner (data-model §8.1)', () => {
     await db.createDatabase('order2_db');
     await db.bootstrap('order2_db', lane);
     writeFileSync(join(lane, '00-zz-late.sql'), 'SET search_path = pg_catalog, pg_temp;\n');
-    await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(/sorts before the already applied 01-schemas\.sql/);
+    await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(
+      /00-zz-late\.sql sorts before the already applied (?:01|02)-[a-z-]+\.sql/,
+    );
     rmSync(join(lane, '00-zz-late.sql'));
     rmSync(join(lane, '01-schemas.sql'));
     await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(/missing from the lane: 01-schemas\.sql/);
@@ -129,9 +131,9 @@ describe('bootstrap runner (data-model §8.1)', () => {
 
   it('rolls a failing file back as a whole and records nothing for it', async () => {
     const lane = laneCopy();
-    writeFileSync(join(lane, '02-broken.sql'), 'SET search_path = pg_catalog, pg_temp;\nCREATE SCHEMA half_done;\nSELECT 1/0;\n');
+    writeFileSync(join(lane, '99-broken.sql'), 'SET search_path = pg_catalog, pg_temp;\nCREATE SCHEMA half_done;\nSELECT 1/0;\n');
     await db.createDatabase('broken_db');
-    await expect(db.bootstrap('broken_db', lane)).rejects.toThrow(/02-broken\.sql failed: division by zero \(SQLSTATE 22012\)/);
+    await expect(db.bootstrap('broken_db', lane)).rejects.toThrow(/99-broken\.sql failed: division by zero \(SQLSTATE 22012\)/);
     const rows = await query<{ file_name: string }>('broken_db', `SELECT file_name FROM ${LEDGER_TABLE} ORDER BY 1`);
     expect(rows.map((row) => row.file_name)).toEqual(FILES);
     const schemas = await query<{ n: string }>(
@@ -358,7 +360,16 @@ describe('roles, ownership and grants after bootstrap (data-model §4.4)', () =>
         WHERE setdatabase = 0 AND setrole IN ('platform_app'::regrole, 'platform_migrator'::regrole) ORDER BY 1`,
     );
     expect(rows).toEqual([
-      { role: 'platform_app', setconfig: ['search_path=pg_catalog, public', 'idle_in_transaction_session_timeout=15s', 'lock_timeout=2s'] },
+      {
+        role: 'platform_app',
+        // 02-role-backstops.sql adds the statement_timeout backstop (ADR-0005 am. 10 item 12, D-ARCH-064).
+        setconfig: [
+          'search_path=pg_catalog, public',
+          'idle_in_transaction_session_timeout=15s',
+          'lock_timeout=2s',
+          'statement_timeout=30s',
+        ],
+      },
       { role: 'platform_migrator', setconfig: ['lock_timeout=3s'] },
     ]);
   }, 60_000);
