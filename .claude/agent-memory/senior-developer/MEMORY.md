@@ -6,3 +6,4 @@
 - [Lane A PR hygiene](feedback_lane_a_pr_hygiene.md) — gitleaks scans whole PR range (literal test pw = permanent); merge-main voids security record
 - [Batch 0.4/0.7 lessons](feedback_batch_04_07_lessons.md) — lead-written contract + split specialists; reset-after-fetch, commitlint case, jest realm pitfalls
 - [Lane A merge pitfalls](feedback_lane_a_merge_pitfalls.md) — gitleaks on merge first-parent diff, base-ref fixtures vs new rules, PR title length
+- [Playwright harness](feedback_playwright_harness.md) — Firefox exe blocked on host, WebKit Tab, Accept-Language override, cooldown epoch, base-ref step vs tools/test-support

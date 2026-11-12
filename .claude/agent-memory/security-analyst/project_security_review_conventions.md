@@ -48,6 +48,11 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Measure in a child-process server; same-process timings hide event-loop blocking.
   - Fuzz the proposed grammar for language equivalence.
 - **Git attribute experiments: confirm them in a Linux container, not with host git** (PR-0010 R2, 2026-11-13). With an empty work tree, Git for Windows 2.52's `git log -p` still treated `package-lock.json` as binary. The attribute source is unexplained, and `-c attr.tree=<empty tree>` cleared it. Treat host results as hints only.
+- **Probing PR code that imports `@platform/*` workspace packages (PR-0011 R3).**
+  - The main checkout's `node_modules/@platform/*` resolve to main's TS sources (exports `default` → `dist`).
+  - Use a `module.registerHooks` resolve hook (`probes/hooks.mjs`) mapping `@platform/<pkg>` → `<build>/packages/<pkg>/src/index.js`.
+  - In Git Bash, pass `--import ./hooks.mjs` from the probes dir, or a `file:///$(cygpath -m …)` URL; a `/c/...` path fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME`.
+  - Remove scratch junctions with `cmd //c "rmdir <dir>\\node_modules"`, never `rm -rf`, which would follow the junction.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
