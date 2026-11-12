@@ -401,6 +401,14 @@ export default defineConfig([
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
     },
   },
+  {
+    // React Router framework-mode route configuration: read by the `@react-router/dev` Vite plugin at build time and
+    // never bundled, so its `@react-router/dev/routes` import is a dev dependency (TASK-004). Exact files only.
+    files: ['apps/web/app/routes.ts', 'apps/admin/app/routes.ts'],
+    rules: {
+      'import-x/no-extraneous-dependencies': ['error', { devDependencies: true }],
+    },
+  },
 
   // --- Layering (eslint-plugin-boundaries) ----------------------------------------------------------------------
   {

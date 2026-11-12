@@ -84,8 +84,11 @@ function titleOf(html: string): string | undefined {
 }
 
 function hreflangAlternates(html: string): Record<string, string> {
-  const links = html.matchAll(/<link rel="alternate" hrefLang="([^"]+)" href="([^"]+)"\/>/g);
-  return Object.fromEntries([...links].map(([, lang, href]) => [lang, href]));
+  const alternates: Record<string, string> = {};
+  for (const [, lang, href] of html.matchAll(/<link rel="alternate" hrefLang="([^"]+)" href="([^"]+)"\/>/g)) {
+    if (lang !== undefined && href !== undefined) alternates[lang] = href;
+  }
+  return alternates;
 }
 
 function metaDescriptionOf(html: string): string | undefined {

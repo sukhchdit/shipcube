@@ -9,7 +9,7 @@ jest.mock('@react-router/dev/vite', () => ({ __esModule: true, reactRouter: () =
 describe('apps/admin vite config (ADR-0018 item 1, PR4-SEC-01)', () => {
   let config: UserConfig;
   beforeAll(async () => {
-    config = (await import('./vite.config')).default as UserConfig;
+    config = (await import('./vite.config')).default;
   });
 
   it('exposes only VITE_PUBLIC_* variables to the client bundle', () => {
