@@ -1,6 +1,6 @@
 - [Plan generation workflow](feedback_plan_generation.md) — P4 plan via generator/plan-data.mjs; Bash quoting, node -e backslash and String.replace $ pitfalls
 - [P5 worktrees](feedback_p5_worktrees.md) — implement tasks in ../Shipqube-TASK-xxx worktrees; main checkout is shared with other agents
 - [P5 dispatch realities](feedback_p5_dispatch.md) — turn limits, salvage, reaped gates, docker.lock, agent sandbox quirks, jest path order
-- [Agent worktree junctions](feedback_agent_worktree_junctions.md) — never force-remove .claude/worktrees/agent-*: junctions wiped TASK-007
+- [Agent worktree junctions](feedback_agent_worktree_junctions.md) — never force-remove agent-* worktrees; PowerShell junction create/delete recipe
 - [Merge-main pass](feedback_merge_main_pass.md) — read new main reviews/D-ORCH first; ts-eslint rule conflicts; lock delta proof; reaped gates
 - [Batch 0.4/0.7 lessons](feedback_batch_04_07_lessons.md) — lead-written contract + split specialists; reset-after-fetch, commitlint case, jest realm pitfalls

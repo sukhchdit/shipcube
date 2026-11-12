@@ -122,3 +122,137 @@ The host is memory-constrained (D-ORCH-010). I ran no `npm ci`, build, Docker or
 | data-model §4.4 `app_actor_id` → `platform_definer` grant; §8.3/§8.4 non-atomic files; DR-A14 policy forms | principal-architect |
 | `onDbError` redacting hook for AT-US-007-03 | TASK-010 |
 | PR #5 R2-n1 (`U&` identifiers) if not fixed here | TASK-016 follow-up / TASK-021 |
+
+
+---
+
+## Round 2 (head a3e8edd)
+
+- **Delta:** `557aada..a3e8edd`, 5 commits (`5ed304a`, `a15e3d7`, `af518f2`, `7037db8`, `a3e8edd`), 92 files. Fix comment: PR #11 issuecomment-6833014750.
+- **Reviewer:** code-reviewer · P5 Wave 0 · 2026-11-13
+- **Inputs:** the round-1 review (above); `rulings/wave-0-task-016-rulings.md` "Required code changes in PR #11 before merge" items 1–8; D-ARCH-071..074; D-ORCH-014.
+- **Scope:** fix cycle 1 only. m3 / D-ORCH-014 (a)–(f), PR11-SEC-09 items 1–6 and architect items 5, 6 and 8 belong to the later merge-main reconciliation pass (D-ORCH-014). They are listed in R2 §6, not graded here.
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: A strong fix cycle. The guard is now deny-by-default and deep: $parent, _originalClient, Prisma's private
+         symbol, constructor and delegate.$parent are all refused on the real 7.10.1 runtime, and kept references
+         throw TENANT_TX_CLOSED. m1, m2, m4, m6, n1 and n4 are closed and re-probed.
+         One MAJOR remains (R2-M1, the M1 residual): any PrismaPromise the guard returns still has Prisma's internal
+         requestTransaction(), and requestTransaction(null) runs the statement on the ROOT client, outside the
+         transaction. Probed with a recording adapter: findMany, deleteMany and tagged $queryRaw all ran on ROOT.
+         Three MINORs: the Prisma.raw lint has alias gaps; the ESLint tenant-context twin misses quoted/spaced SET;
+         architect items 1 and 2 are only partly done.
+FINDINGS: R2-M1 (MAJOR); R2-m1..m3 (MINOR); R2-n1..n4 (NIT). See R2 §3.
+GOOD: R2 §5
+SECURITY-FLAGS: R2-M1, R2-m1, R2-m2 (R2 §6)
+```
+
+### R2 §1. Verification performed
+
+Constraints held: no `npm ci`, build, Docker or full suites. No command ran in `Shipqube-TASK-016`.
+
+Method:
+- `git archive a3e8edd` into the scratch directory, with `node_modules` junctioned to the TASK-016 worktree and `prisma/generated` copied in.
+- Afterwards: the junction was removed (`rmdir`) before the copy was deleted. The worktree `node_modules` still has 740 entries. The only junction at `C:\` is the system `Documents and Settings`.
+
+| Check | Result |
+|---|---|
+| Unit `tenant-db` (`apps/api/.../tenant-db.test.ts` + `prisma/tests/rls/tenant-db.real-client.test.ts`) | 2 suites, **27 passed** |
+| Unit `tools/db/lint-migrations.test.ts` | **84 passed** (includes the rendered TENANT/GUEST_CAPABLE/USER_OWNED blocks linting clean, item 4) |
+| Unit `tools/db/tenant-key-forms.test.ts` | **61 passed** |
+| Unit `platform/db/with-tenant-tx.test.ts` | **38 passed** |
+| Unit `tools/lint/negative-fixtures.test.ts` | 123 passed, 3 failed. All 3 are the known copy-only false failures: `@platform/*` resolves into the worktree, not the copy (the two ADR-0003 workspace-probe cases and the `@platform/source` wiring case). None of them touches a PR #11 fixture. |
+| **Probe A:** real Prisma 7.10.1 runtime with the PR's recording driver adapter, inside `withTenantTx` (a Jest file next to the real-client test) | **R2-M1**: `requestTransaction(null)` on `db.permission.findMany()`, `db.role.deleteMany()` and ``db.$queryRaw`…` `` logged on **`ROOT`**. A `{kind:'batch'}` argument also ran on `ROOT`. **R2-m1**: ``db.$queryRaw`… ${Prisma.raw("INJECTED' OR 1=1 --")}` `` spliced the text into the TX1 SQL. A forged frozen array passed the tagged check (R2-n3). `$queryRawTyped({sql, values})` throws today because the `typedSql` preview is off (R2-n4). `fields` exposes only FieldRef data. A PrismaPromise awaited after commit failed closed with Prisma P2028. |
+| **Probe B:** the 9 round-1 bodies plus 11 new ones, through `scanFunctionBodies` (C-series) and `lintMigrationDir` rule 16 | All 7 round-1 evasions are now **flagged in both lanes**, and both controls stay clean (m1 closed). New: comment-split forms are caught by the linter, but C-series flags only the read form (R2-n1). Missed by both lanes: `U&"\0061pp"`, a fully `format()`-built setter, and a `pg_show_all_settings()` read (R2-n2). |
+| **Probe C:** linter rules 11 and 15 (architect items 1 and 2) | `SET LOCAL lock_timeout` → 11 ✓. `SET ROLE platform_definer` with no reset → 15 ✓. `ALTER FUNCTION … SECURITY DEFINER` → 13 ✓. Block-form control clean ✓. **A bare `ALTER FUNCTION platform.f() OWNER TO platform_definer` is clean** and **`SET lock_timeout = '10s'` with no `RESET` is clean** (R2-m3). The role can also be left set through `set_config('role', …)` or a DO body (R2-n2). |
+| **Probe D:** ESLint `db-raw-sql` and `tenant-context-sql` through the `Linter` API | `Prisma.raw` is flagged. **Clean (missed):** `import { Prisma as P }` + `P.raw`, `const { raw } = Prisma`, `const r = Prisma.raw`, `.requestTransaction(null)`. For `tenant-context-sql`, **clean (missed):** ``SET "app"."org_id" = '…'`` and ``SET app . org_id = …``. Flagged: ``SET "app.org_id"`` (`keys`) and `SET LOCAL "app"…` (`db-raw-sql`). |
+| `git merge-tree --write-tree origin/main a3e8edd` (main at `66cb34b`) | clean, no conflicts |
+| `gh pr view 11 --json statusCheckRollup` | **empty**. Lane A is live on main since `8e62763`, but the branch has not merged main yet. |
+
+**Not re-run:** full lint (type-aware), typecheck, the other unit files, integration (Docker), coverage, build and audit. For these I rely on the developer's gate evidence on `a3e8edd`:
+- fmt, lint and tc all 0;
+- unit 1184;
+- integration 112 + 1 skipped;
+- coverage 99.2 % lines / 98.13 % branches;
+- `db:lint-migrations` clean;
+- build 0, audit 0;
+- clean tree.
+
+### R2 §2. Round-1 closure
+
+| R1 item | Status | Evidence |
+|---|---|---|
+| **M1** TenantDb Proxy shallow | **Closed for every route named in round 1; residual R2-M1.** | Top level and delegates are deny-by-default (null-prototype targets; `ownKeys`, `has` and descriptors report only exposed keys). On the real runtime, `$parent`, `$parent._originalClient`, `_originalClient`, `constructor`, `__proto__`, `$transaction`, `*Unsafe`, `$extends`, `$connect`, `$on`, `_createPrismaPromise`, `<model>.$parent`, `<model>.$parent._originalClient`, `<model>.constructor` and `findRaw` are all refused. Every Prisma symbol reads `undefined`. Delegate and method references kept past the transaction throw `TENANT_TX_CLOSED`. The guarded log is all `TX2`, with 0 statements on `ROOT`, for the exposed calls the test makes. The same keys are covered in `with-tenant-tx.int.test.ts` against PostgreSQL. **Not closed:** values *returned* by exposed methods (R2-M1). |
+| **m1** rule-16 / C-series evasions | **Closed** | A shared form list (`tools/db/tenant-key-forms.ts`) feeds both lanes. The exemption needs one complete plain literal followed by `,`. Quoted, spaced and case-folded namespaces are handled. Probe B: all 7 round-1 forms are flagged in both lanes, and the two controls are clean. New gaps are NITs (R2-n1, R2-n2). |
+| **m2** C5 blind to PUBLIC | **Closed** | `TABLE_ACL_SQL` maps `grantee = 0` to `PUBLIC` and expects no PUBLIC rows. Planted TRUNCATE, INSERT and column-UPDATE controls exist. Rule 8 flags `TO PUBLIC` on tables and sequences, and TRUNCATE/TRIGGER/REFERENCES (including through `ALL`) to `platform_app`. |
+| **m3** PR #9 second-merger list | **Open, by design** (D-ORCH-014 reconciliation pass) | See R2 §6. |
+| **m4** C6–C10 absent | **Closed** | C8 and C9 are implemented with planted controls. The suite header names the deferrals: C6/C7/C14 remainder → TASK-021, C10 → TASK-028, per-table C12 → TASK-024. This matches D-ARCH-074. |
+| **m5** `Prisma.raw` / non-tagged | **Partly closed; residual R2-m1** | The Proxy refuses a non-template first argument (`Prisma.raw`, `Prisma.sql`, strings). The lint reports `Prisma.raw(`, a named `raw` import, non-tagged calls and `$parent` across `apps/*/src`. The `pg` driver is now confined to the db-platform core. Aliased `raw` and a nested raw value are not covered. |
+| **m6** DO bodies (rule 10) | **Closed** | Rule 10 matches statement starts and string-literal starts inside DO bodies. The fixtures cover a static UPDATE, `EXECUTE 'DELETE…'`, a function-body control and a `FOR UPDATE` control. Fully computed `EXECUTE v_sql` is a documented limit. |
+| **n1** catalog glob exemption | **Closed** | Exact files only; `tokens` is split into `setter` and `keys`; a negative fixture proves a new `prisma/tests/catalog/helper.ts` fails. |
+| **n2** `lc_messages` dependency | Open → architect item 6 (reconciliation pass) | |
+| **n3** `probeFreshConnection` ordering | Open → D-ORCH-014 (c) | |
+| **n4** `ALTER DEFAULT PRIVILEGES` | **Closed** | `BOOTSTRAP_ONLY` includes it (rule 14); fixture present. |
+| **n5** `U&` identifiers | Open → TASK-021 (D-ARCH-074). It now also applies to rule 16 / C-series (R2-n2). | |
+
+### R2 §3. Findings
+
+| ID | Sev | File:line | Problem | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| **R2-M1** | **MAJOR** | `apps/api/src/platform/db/tenant-db.ts:167-175` (`bindMember` returns Prisma's result as is) | Every exposed operation returns Prisma's own `PrismaPromise`. Its keys are `spec`, `then`, `catch`, `finally` and **`requestTransaction`**. In 7.10.1 (`runtime/client.js`, the `createPrismaPromiseFactory` body), `requestTransaction(s)` calls the operation's callback with `s` as the transaction. With `null` (or a batch descriptor), the query runs **without the interactive-transaction id, on the root client**. Probe A inside `withTenantTx`: `db.permission.findMany().requestTransaction(null)`, `db.role.deleteMany(...).requestTransaction(null)` and ``db.$queryRaw`SELECT 1`.requestTransaction(null)`` were all logged on `ROOT` while TX1 was open. Neither lint rule sees it (Probe D). | This is the M1 property itself. The PR's acceptance (and its test's "0 statements on ROOT") is "no route back to an unguarded or root client". The effects are as in round 1: another pooled connection without the tenant context, writes outside the business transaction (SYSTEM tables such as outbox or audit once they have write grants), and self-deadlock on a pool of one. The runtime guard exists precisely for code that casts around the `TenantDb` type (the type already omits `$transaction`). `requestTransaction` is hidden by the public `PrismaPromise` type, so reaching it needs a cast: the same threat model as `$parent`. The fix is small. | In `bindMember`, wrap a thenable result in a guarded, lazy thenable. It is a null-prototype object exposing only `then`, `catch`, `finally` and `Symbol.toStringTag`, each delegating to the PrismaPromise and each checking `state.closed` first, so a late `await` also gets `TENANT_TX_CLOSED` instead of P2028. Do not use `Promise.resolve(result)`: it would execute eagerly. Add `requestTransaction` and `_originalClient` to the `db-raw-sql` member list. Extend `tenant-db.real-client.test.ts`: `requestTransaction` is `undefined`/refused on the results of a model operation and of `$queryRaw`; the ROOT log stays empty; a late await throws `TENANT_TX_CLOSED`. |
+| R2-m1 | MINOR | `tools/eslint-rules/db-raw-sql.mjs:76-93` | The runtime guard checks only the *first* argument, so a raw fragment passed as a *value* of a genuine tagged template is spliced into the SQL. Probe A: `INJECTED' OR 1=1 --` appeared verbatim in the TX1 statement. That makes the lint the only control, and it matches only `Prisma.raw(…)` with the literal identifier `Prisma` and a named `raw` import. `import { Prisma as P }` + `P.raw(s)`, `const { raw } = Prisma` and `const r = Prisma.raw` are all clean (Probe D). The fix comment's "Prisma.raw(...) … refused" holds only for the first argument. | ADR-0005 am. 10 item 4: only validated strings are bound. This is the F-04 injection surface (CWE-89, potential). | Use scope analysis. Resolve every import from `PRISMA_SOURCES` (any local name, namespace imports included) and report **any read** of a `raw` member on it, and any destructuring of `raw` from it, call or not. Add fixtures for the three alias forms. Correct the JSDoc in `tenant-db.ts:192-194` and the fix-comment wording: a nested raw value is lint-only. |
+| R2-m2 | MINOR | `tools/eslint-rules/tenant-context-sql.mjs:18-21` | The TypeScript-side twin does not use the shared form list. Its `session-set` pattern knows only `set [session] app.` and `reset app.`. `keys` matches only `app.<key>`. So ``SET "app"."org_id" = '<uuid>'`` and ``SET app . org_id = …`` in any `apps/*/src` file are clean (Probe D). | A session-level `SET` inside the transaction re-scopes the **rest of that transaction** to another org (cross-tenant reads and writes through the helpers). The item-16 leak check only notices at the next checkout. PR11-SEC-02's "one form list" goal stops at the SQL lanes. Exploiting it needs a hard-coded org id (a `SET` cannot take a bind), so it is deliberate-only. | Align `session-set` with `CONTEXT_WRITE_FORMS[1]`: `(?:"app"\s*\.\|app\s*\.\|"app\.)`, with `set\s+(?:(?:session\|local)\s+)?`. Align `keys` with the quoted/spaced read form. Add negative fixtures. Ideally generate both from `tenant-key-forms.ts` (for example a `.mjs` export of the pattern sources) so the twin cannot drift. |
+| R2-m3 | MINOR | `tools/db/lint-migrations.ts:255-260, 480-485, 695-716` | Architect "required before merge" items 1 and 2 are only partly done (Probe C). (1) The `RESET lock_timeout` at end of file when the value exceeds the `3s` role default is **not** checked: `SET lock_timeout = '10s'` + `ALTER TABLE` lints clean. (2) A bare `ALTER FUNCTION … OWNER TO platform_definer` is **not** flagged. Only a GRANT/REVOKE *after* it is flagged. | Item 1: the session value persists into later files on the deploy connection (D-ARCH-071). Item 2: an `OWNER TO platform_definer` outside the block form recreates the durable non-atomic window ADR-0005 am. 10 item 9 (amended) withdrew. Both are listed by the architect as required before merge. | (1) Parse the `SET [SESSION] lock_timeout` value (ms/s/min units). If it exceeds 3 s, require a final `RESET lock_timeout` (or `SET lock_timeout = <≤3s>`); add a fixture. (2) Flag any `ALTER (FUNCTION\|PROCEDURE\|ROUTINE) … OWNER TO platform_definer` in `prisma/migrations/**` unconditionally; add a fixture. Either now or in the reconciliation pass (R2 §6); merge condition either way. |
+| R2-n1 | NIT | `prisma/tests/catalog/scans.ts:90-97` | The C-series scans raw `prosrc`, comments included. `SET app/**/.org_id = 'x'` is **clean** in C-series. `set_config/**/('app.org_id', …)` and `SET/**/app.org_id` are caught only by the read-key form, and the four helpers are exempt from that form. The linter strips comments first and catches all of them. | The bootstrap lane is not rule-16 linted, so the C-series is its only by-form check. | Scan the comment-stripped text: reuse `tokenize` from `tools/db/sql-text.ts`, as `sqlText(…, true)` does. Add the three comment fixtures to the C-series `it.each`. |
+| R2-n2 | NIT | `tools/db/tenant-key-forms.ts`; `lint-migrations.ts` rule 15 | Limits of the by-form approach, in both lanes (Probes B and C): `SET U&"\0061pp".org_id` (extends the open PR #5 R2-n1); a setter whose name and key are both built in `format()`; a read via `pg_show_all_settings()`. Rule 15 (c) cannot see the role left set through `set_config('role','platform_definer',false)` or `DO $$ … EXECUTE 'SET ROLE …' $$`. | Text rules cannot be complete over dynamic SQL. The C11 converse (definer owns only allow-listed objects) and the item-16 leak check are the outcome controls. | Record these as stated limits in the linter header and data-model §8.3 "Limits". Optionally flag `pg_show_all_settings`, the `set_config('role'` literal, and any `EXECUTE` of a non-literal in DO and function bodies as review-required. Route the `U&` decode to TASK-021 with n5. |
+| R2-n3 | NIT | `tenant-db.ts:106-111` | `isTemplateStringsArray` accepts a forged `Object.freeze(Object.assign([sql], {raw: [...]}))`, which Prisma then interpolates (Probe A). | Deliberate only: no mistake produces this shape. | Document it as a limit in the JSDoc. Optionally also require `Object.isFrozen(value.raw)`. That is cheap, but it does not stop a deliberate forge. |
+| R2-n4 | NIT | `tenant-db.ts:38` (`$queryRawTyped` exposed unchecked) | Today it throws (the `typedSql` preview is off). Once enabled, Prisma's `$queryRawTyped` passes `arg.sql`/`arg.values` from any plain object straight to the query. It is an `$queryRawUnsafe` equivalent behind the guard's allow-list. Not linted (Probe D). | A latent F-04 surface that switches on with a one-line schema change. | Drop `$queryRawTyped` from `TENANT_DB_RAW_MEMBERS` until the preview is enabled (recommended). Or accept only Prisma's `TypedSql` instances (the `$$PrismaTypedSql` brand) and lint non-generated arguments. |
+
+### R2 §4. Architect "Required in PR #11" items: status at a3e8edd
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Rule 11 session form only; `SET LOCAL` fails; `RESET` when > 3 s | **Partly.** `LOCK_TIMEOUT = /^set (?:session )?lock_timeout\b/` and the `set-local-lock-timeout` fixture are present ✓. The **`RESET` requirement is missing** (R2-m3). |
+| 2 | Rule 15: `handedOver` removed; DEFINER outside the block fails; `OWNER TO platform_definer` fails; end-of-file role fails | **Partly.** `handedOver` is removed, CREATE … SECURITY DEFINER outside the block fails, and an end-of-file `SET ROLE` fails ✓. Fixtures `definer-grants-before-owner-to` (now failing) and `definer-role-not-reset` are present ✓. **A bare `ALTER … OWNER TO platform_definer` is not flagged** (R2-m3). |
+| 3 | Rule 9 b: grant after ENABLE + FORCE | **Present** ✓ (`enabledSoFar`/`forcedSoFar`, earlier-file `history.rlsProtected`, fixture `grant-before-force`). |
+| 4 | Rule 16 b: operator atom exempt only inside `CREATE POLICY` | **Present** ✓. The exact atom is removed only when the statement starts `create policy`. Rule 9 then requires renderer equality (`canonicalPolicy` keeps literals). The rendered blocks lint clean (unit). |
+| 5 | Qualified helper bodies in `20261112020000_platform_rls_helpers` | **Missing** (out of scope this round). The bodies still use unqualified `current_setting`, `~*`, `decode` and `::uuid`. |
+| 6 | `lc_messages = 'C'` in `02-role-backstops.sql`, C13 five rows, `EXPECTED_ROLE_SETTINGS` | **Missing** (out of scope this round). No `lc_messages` anywhere in the tree. |
+| 7 | C13 case folding plus `proconfig ILIKE 'app.%'` | **Present** ✓. `lower(c) LIKE 'app.%'` on `setconfig` and `parname`; `proconfig ILIKE 'app.%'`. |
+| 8 | Sheet lines D-ORCH-014 (a)–(f) and PR11-SEC-09 items 1–6 | **Missing** (reconciliation pass). |
+
+### R2 §5. Good (keep)
+
+- The guard design: a deny-by-default allow-list derived from the client's own `_runtimeDataModel` (fails closed to no models); null-prototype extensible targets, so the Proxy invariants allow accurate `ownKeys`; one shared `closed` state for the top level and every child; method wrappers that re-check `closed` at call time.
+- The real-runtime test with a **recording driver adapter**. It is the right harness: it proves the positive control (the escape routes exist on a raw tx) and asserts per-connection statement logs. R2-M1's fix needs only two more lines in it.
+- One shared form list for rule 16 and the C-series, with 61 unit cases. The C-series fixtures are **executed on PostgreSQL** to prove each form is accepted by the server.
+- C5 now compares effective PUBLIC grants with planted controls. C8 and C9 have planted controls. The deferrals are named in the suite header with owners.
+- Exact-file exemptions plus the `setter`/`keys` split, each with a negative fixture. The `pg`/`pg-pool` boundary is narrowed to the db-platform core.
+
+### R2 §6. Security flags; merge conditions; reconciliation list
+
+**Security flags (for security-analyst):**
+- **R2-M1:** root-client execution through `PrismaPromise.requestTransaction(null)` on any guarded result. CWE-693; OWASP A04:2021. Needs a cast inside a callback. Same impact class as PR11-SEC-01.
+- **R2-m1:** aliased or nested `Prisma.raw` reaches the SQL text (CWE-89, potential).
+- **R2-m2:** a TypeScript-side quoted/spaced session `SET` of `app.org_id` is not linted, so the transaction can be re-scoped to another org (CWE-185 / CWE-639).
+
+**Merge conditions:**
+1. R2-M1 fixed, with the real-client test extended (ROOT log empty; `requestTransaction` refused; late await → `TENANT_TX_CLOSED`).
+2. R2-m1 and R2-m2 fixed in this PR (cheap and security-relevant), or each given a recorded owner and a due gate.
+3. R2-m3 (architect items 1 and 2 residue) done before merge, here or in the reconciliation pass.
+4. After merging main: a **non-empty CI check rollup** on the final head (lane A is live on main since `8e62763`, so the D-ORCH-004 exception no longer applies). The orchestrator also re-runs the full gates including integration (Docker).
+
+**What the reconciliation pass (D-ORCH-014, after PR #9 lands) must still do:**
+- **(a)–(f)** from round-1 §7, unchanged. That covers (a) `EXPECTED_ROLE_SETTINGS` plus the all-files pin; (b) the readiness-drift assertion; (c) composition-root wiring including `probeFreshConnection` first and the not-ready latch (n3); (d) `platform/db/runtime.ts`; (e) the exemption list; (f) the union-merge of `.env.example` and config.
+  - Note for (e): exemptions now use `setter`/`keys`, not `tokens`. `session-integrity.int.test.ts` needs `keys` plus `session-set`. `problem-handler.api.test.ts:204` needs `setter` or a text change.
+- **PR11-SEC-09** items 1–6.
+- **Architect item 5:** qualified helper bodies. If `prisma/sql/policy-templates/operator.sql` is ever qualified too, change `OPERATOR_SCOPE_ATOM` (lint) and `OPERATOR_SCOPE_DEPARSED` (`scans.ts`) in the same commit.
+- **Architect item 6:** `lc_messages = 'C'`, five C13 rows, the `EXPECTED_ROLE_SETTINGS` row. This also closes n2.
+- **Architect item 8:** the sheet lines.
+- **R2-m3**, if it is not fixed in the next fix cycle.
+
+**Routing (unchanged unless noted):**
+- n5 + R2-n2 `U&` → TASK-021.
+- C-1 → TASK-015.
+- R2-n2 limits text → principal-architect (data-model §8.3 "Limits").

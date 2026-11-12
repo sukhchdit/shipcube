@@ -7,8 +7,9 @@
 - [P5 Wave 0 carrier docs](project_p5_wave0_carrier_docs.md) — PR-0006 R1+R2 PASS_WITH_FOLLOW-UPS; DHL shared origin, FedEx IP penalty, UPS 403=Blocked Merchant; TASK-113/131/135/188 checks
 - [P5 Wave 0 RLS spike](project_p5_wave0_rls_spike.md) — PR-0007 R1+R2 PASS_WITH_FOLLOW-UPS; am. 10 text defects (11/12); set_config leak facts; TASK-016/051/006/010/024 checks
 - [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 PASS_WITH_FOLLOW-UPS; harness R2 owed; Vite env inlining, nginx default.conf, RR meta; TASK-014/022/111 checks
-- [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_WITH_FOLLOW-UPS (01 closed; 16-20 new); Semgrepignore v2, record contract + validation recipe; TASK-015 checks
+- [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_W_F-U; record contract; main-merge voids records on owned overlap; PR10-SEC-21; TASK-015 checks
 - [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
-- [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R1 PASS_WITH_FOLLOW-UPS; Prisma $parent escape, non-atomic deploy, C5 PUBLIC gap; wiring/TASK-037/015/025 checks
-- [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R1 PASS_W_F-U; R2 FAIL @05855b1 (PR9-SEC-14 HIGH ReDoS); type-is/npm/pg facts; R3 + TASK-007..111 checks
+- [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R1+R2 @a3e8edd PASS_W_F-U; requestTransaction/Sql-splice/U& escapes; arch items 1/2b/5/6/8 open → R3; TASK-020/021/024 checks
+- [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
+- [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3b merge @6742bec; readFileSync/pg facts; TASK-014..111 checks
 - [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 PASS_W_F-U @e92cd6f; ECS-signal gap gates TASK-089; R2 reconciliation + TASK-221/014/025 checks

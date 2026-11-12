@@ -34,6 +34,8 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Throw `new DriverAdapterError({kind:'postgres', originalCode, originalMessage, …})` from `@prisma/driver-adapter-utils` to drive P2010/P2039.
   - This proves transaction-binding and escapes cheaply.
   - The scratch `node_modules` junction vanished once mid-session, so re-check it before re-running.
+- **Probing a capability guard (Proxy / wrapper).** Also probe what the allowed members RETURN, and use that value after the guard is revoked. In PR-0011 R2, a "deep, deny-by-default" `TenantDb` still returned Prisma's raw `PrismaPromise`, and its `requestTransaction(null)` reached the root pool. For a lint or run-time check on a tagged template, also probe the interpolated values (`Sql` objects splice raw text).
+- **Validating a record when the PR branch is not merged with main.** Use `checkSecurityOwnedPaths` with base `origin/main` and the PR head. Older head rows in the same record only produce notes, and the run still passes on the newest head (PR-0011 R2).
 - **"No commands in worktree X" includes read-only git.** On 2026-11-13 (PR-0009 R2) I slipped and ran `git status` there; disclose any such slip in the record.
   - Check the worktree's state from the main checkout instead (`git worktree list`, `git show <sha>:<path>`).
   - Junctions into its `node_modules` are fine.
