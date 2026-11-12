@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | `docs/05-quality/security/P3-architecture-security-review.md` (scope SEC-P3, architecture level) |
-| Version | 1.0 |
+| Version | 1.1 (§14 remediation verification appended 2026-11-12 against commit `d5cdfa2`) |
 | Date | 2026-11-12 |
 | Reviewer | security-analyst (Application Security Lead) |
 | Baseline | commit `b8f805f` (design documents only, no product code yet) |
@@ -733,3 +733,321 @@ Every change is a dated "Amendment (2026-11-12, SEC-P3-xx)" section in the affec
 | SEC-P3-22 (LOW) | D-ARCH-003 rev 2 logged with the §5 (e) text (closures, SPDX rules, tool register, image rule, 18-month rule, OFL) | `docs/sdlc/DECISIONS.md` D-ARCH-003 rev 2; `nfr-*` SEC-012; D-052 (f) |
 | Alignment with PM rewording (SEC-P3-05/06/09/15/21/25) | ADR text aligned so no REQ-vs-ADR contradiction remains: registration oracle corrected + `email-send`/`registration_probe`; verification revokes other sessions, reset verifies mailbox, 7-day unverified expiry, no auto-linking of future social/OTP logins; `invoice_print: FULL | MASKED`, SENSITIVE documents never attached, Viewer without `document:download`; `localStorage` token conditions incl. 7-day server grace and lazy Stripe.js; Mock flags, carrier pushes confirmed by `track()`, Stripe `livemode` rejection + event allow-list + SDK on the SSRF client, label byte validation; RateLimit `draft-6`; SDK egress register; definer-owner drift fixed | `adr/ADR-0006…` am. 15; `adr/ADR-0010…` am. 9; `adr/ADR-0012…` am. 3; `adr/ADR-0016…` am. 7, 10; `adr/ADR-0019-documents-and-pdf-generation.md` am. 1; `adr/ADR-0021…` am. 2–3; `adr/ADR-0025-sanctioned-additions.md` (draft-6); `adr/ADR-0026…` am. 9; `data-model.md` §4.3/§4.5 (SEC-P3-25); D-ARCH-028 |
 | Not yet applied (owner backlog, Wave 0) | `x-origin-check` on `loginUser`/`registerUser`/`resetPassword`/`verifyEmail` (SEC-P3-18); Nginx strip of `X-Mock-Scenario` outside local (SEC-P3-21 item 1); edge bound to 127.0.0.1 (SEC-P3-20); cookie/log redaction set (SEC-P3-23); SYSTEM shard key from a server id (SEC-P3-17); `revoke_sessions_for_user` (SEC-P3-19); `id-secret` recovery codes and peppered pre-hash (SEC-P3-16, `pepper_key_id` reserved); CSP refinements (SEC-P3-24); `auth_lookup_credential` call-site lint (SEC-P3-26) | api-designer, devops-engineer, platform-architect, principal-architect per §3 "Due" |
+
+## 14. Remediation verification (2026-11-12)
+
+Appended by security-analyst after the remediation recorded in §13. Baseline: commit `d5cdfa2` (clean tree). I checked every claim in §13 against the files, not against the summary. Line numbers refer to that commit.
+
+### 14.1 Method and evidence
+
+- **Contract greps (`docs/03-architecture/api/openapi.yaml`).**
+  - `x-reauth-scope` appears on 14 operations: the 4 that already had it (`changePassword`, `disableTotp`, `regenerateRecoveryCodes`, `requestAccountDeletion`) plus the 10 the review required:
+    - `requestPrivacyExport` :2483 and `downloadPrivacyExport` :2585 (`privacy.export`);
+    - `updateMember` :3312, `removeMember` :3407, `createInvitation` :3537 and `resendInvitation` :3840 (`org.member.manage`);
+    - `createPaymentMethod` :13271, `createPaymentMethodSetup` :13364, `updatePaymentMethod` :13490 and `deletePaymentMethod` :13581 (`payment_method.manage`).
+  - `x-reauth-max-age: 43200` appears exactly on the 4 member and invitation operations (:3313, :3408, :3538, :3841). Those 4 use `ReauthProofConditional` (`required: false`, :15629). The 6 always-re-auth operations use `ReauthProof` (`required: true`, :15620).
+  - Other SEC-P3-01 contract items: the `auth_time` claim is in `bearerAuth` (:15513); 401 `SESSION_EXPIRED` is on `refreshSession` (:546, :636); the `ReauthRequest.action_scope` enum holds all 7 scopes (:20689–20696).
+  - `createQuote` (:6328) and `createQuoteShare` (:7629) are both `x-idempotency: not-applicable` (:6486, :7693). Neither declares `IdempotencyKey` or `Idempotent-Replayed`, and `SHARE_EXISTS` appears nowhere.
+- **SQL (`docs/03-architecture/data-model.md`).**
+  - Bootstrap SQL (§4.4 :2569–2595) creates `platform_audit_owner` as `NOLOGIN NOINHERIT`. It contains no `GRANT platform_audit_owner TO …`, and C13 asserts that `pg_auth_members` is empty for that role.
+  - The guard `platform.audit_ddl_guard()` (§5.2 :2925–2980) calls `pg_event_trigger_ddl_commands()` (:2941) and `pg_event_trigger_dropped_objects()` (:2961). It is not `SECURITY DEFINER`, and the statement-text trigger is dropped (:2978).
+  - Anchors are hourly and signed with ECDSA P-256 (§5.5 :3105–3166). The sink is mandatory (:3122). The verifier checks `ANCHOR_MISSING`, `CHECKPOINT_SIGNATURE_INVALID` and `CHECKPOINT_HEAD_MISMATCH` (§5.6 :3209–3222).
+- **`platform.md`.** Every `npm ci` carries `--ignore-scripts` (:196, :222, :224, :250, :803, :824, :835, :836, :859). The only other mentions are descriptive (:1374, `npm audit signatures` needs an installed tree; :1385, `min-release-age`). **No unflagged `npm ci` in platform.md.** Unflagged mentions elsewhere are listed in SEC-P3-33.
+- **Documents read.**
+  - ADR amendment sections: 0005 am. 7; 0006 am. 12–15; 0007 am. 7; 0010 am. 1–9; 0012 am. 1–3; 0013 am. 1–5; 0014 am. 3–4; 0016 am. 7–10; 0018 am. 1–4; 0019 am. 1; 0021 am. 1–3; 0023 am. F–H; 0026 am. 8–9.
+  - `data-model.md` §3.1, §3.4, §3.10, §4.4–§4.6, §5.2–§5.7; `api/README.md` §5, §7, §8, §9, §13; `platform.md` §3.2, §7.1, §7.2; `risks.md` R-ARCH-18..20.
+  - `REQUIREMENTS.md`: REQ-AUTH-004/006/007/018/020–026, REQ-CARR-017/018/022/023, REQ-BOOK-023, REQ-PAY-014, REQ-ACCT-016, REQ-ORG-010/012, REQ-RBAC-004, REQ-DOC-010, REQ-NOTIF-008, REQ-COMP-001, REQ-QUOTE-002, REQ-SEC-012, DR-A01/A04/A22.
+  - `NFR.md`: NFR-SEC-004/005/012, NFR-RES-007.
+  - `DECISIONS.md`: D-046..D-052, D-ARCH-003 rev 2, D-ARCH-017..028.
+- **External facts checked (2026-11-12).**
+  - Stripe documents that a payment can succeed when the CVC check fails, and that the Radar "CVC verification fails" rule does not act when the check is unavailable ([Stripe: card verification checks](https://docs.stripe.com/disputes/prevention/verification), [Stripe support: charge succeeded despite CVC mismatch](https://support.stripe.com/questions/cvc-or-avs-failed-but-payment-succeeded), [Stripe: recollect CVC](https://support.stripe.com/questions/recollect-cvc-to-prevent-fraud)).
+  - AWS KMS has supported Ed25519 since 2025-11-07: key spec `ECC_NIST_EDWARDS25519`, algorithm `ED25519_SHA_512` ([AWS What's New](https://aws.amazon.com/about-aws/whats-new/2025/11/aws-kms-edwards-curve-digital-signature-algorithm), [KMS Sign API](https://docs.aws.amazon.com/kms/latest/APIReference/API_Sign.html)).
+
+### 14.2 Per-finding verdicts
+
+**RESOLVED** means the design change the review required is in the ADRs, contract, data model and requirements, consistently, and is testable. **PARTIAL** means part of the required effect is not achieved by the design as written. Implementation evidence (SEC-TC) is still owed for every row by G3.
+
+| Finding | Sev | Verdict | Evidence (design level) | Residual and follow-ups |
+|---|---|---|---|---|
+| SEC-P3-01 | HIGH | **RESOLVED** | C1: 30-day cap and `SESSION_EXPIRED` (ADR-0006 am. 12; REQ-AUTH-007; data-model §3.1 :1070, :1102). C2: `auth_time` and the step-up scopes on all 10 operations (§14.1). C3: REQ-AUTH-020/021/022 are Must (D-046, D-047). C4: D-038 superseded by D-046, NFR-SEC-004 updated. The 7-day fallback is recorded in the ADR, REQ, NFR and DECISIONS | Session residual LOW, as adjudicated in §5 (a). The saved-card path rests on ruling 1, which needs SEC-P3-28 (MEDIUM). |
+| SEC-P3-02 | HIGH | **RESOLVED** | ADR-0010 am. 1–6: two pools, anonymous share plus global bucket, quota guard, `LOCAL_REJECT`, subscribe-only streams, metrics. ADR-0014 am. 3 and ADR-0016 am. 9. REQ-CARR-017/022/023, REQ-BOOK-023, NFR-RES-007. Stream caps in the contract (:7063, :12776) and in README §7 and §9 | Paid bookings are decoupled from guest traffic, so the HIGH is closed. RR-03 stays (guests can still be denied). New SEC-P3-29 (MEDIUM): free or unverified accounts are outside the anonymous budget. Deadline-state drift is listed in SEC-P3-33. |
+| SEC-P3-03 | HIGH | **PARTIAL: HIGH closed, residual MEDIUM** | Items 2–6 are fully designed. Item 7 is recorded as a G4-production precondition (ADR-0007 am. 7; R-ARCH-18; D-ARCH-019). Item 1 is designed for direct DDL: the migrator gets "must be owner", and the `sql_drop` guard covers drop-by-schema-owner | Item 1's stated effect ("tampering needs the cluster superuser") is **not** achieved. `ensure_audit_partitions` is `SECURITY DEFINER`, owned by `platform_audit_owner`, with `search_path = pg_catalog, public`, and `public` is owned by `platform_migrator`. A function-overload hijack therefore runs migrator code as the audit owner, and the DDL guard admits it. The anchors still bound undetected rewriting to entries younger than the last anchor (≤ 1 h), so the HIGH becomes MEDIUM. The exact change is in **SEC-P3-27**, due at P4 exit. |
+| SEC-P3-04 | HIGH | **RESOLVED** | `.npmrc` `ignore-scripts=true`, and `--ignore-scripts` on every install in platform.md. Allow-listed `deps:rebuild`; lane A `check-install-flags`; a repository test against `pre*`/`post*` scripts. `DEP_MIN_AGE_DAYS=7` with an override register; Dependabot `cooldown`. `check-lockfile` (registry source, sha512) and `npm audit signatures`. Image-job isolation (ADR-0023 am. F; platform.md §3.2, §7.1; R-ARCH-20; D-ARCH-020) | Enforcement is due before the first `npm ci` in Wave 0. Unflagged `npm ci` text outside platform.md (SEC-P3-33) is not exploitable, because `.npmrc` is the backstop. Hardening: `npx --no-install` and gate tooling run from the base ref (SEC-P3-31, LOW). |
+| SEC-P3-05 | MEDIUM | **RESOLVED** | ADR-0006 am. 15 withdraws the wrong claim. `email-send` class plus `registration_probe` (DR-A22, NFR-SEC-005, REQ-SEC-012). RR-16 accepted in D-049 (PRD R-12). | The new event is missing from README §13 (SEC-P3-30). |
+| SEC-P3-06 | MEDIUM | **RESOLVED** | ADR-0006 am. 15. REQ-AUTH-004: verification revokes the other sessions. REQ-AUTH-012: a redeemed reset token verifies the mailbox. REQ-AUTH-026: 7-day expiry. DR-A04, the e-mail wording and the seam rule against automatic linking (D-050) | New residual **RR-19 (LOW)**: a victim tricked into redeeming the verification link of an account they did not create gives the password-holding attacker a *verified* account. The attacker's session dies, but they can sign in again until the owner resets the password. Mitigated by the e-mail wording, the "account already exists" reset path and the 7-day expiry. Optional for product-manager (non-blocking): an anonymous verification redemption requires sign-in first. |
+| SEC-P3-07 | MEDIUM | **RESOLVED** | ADR-0023 am. G items 1–6: recomputed verdict, manifest with `skipped = 0`, untracked and `SKIP_*` checks, narrowed exemption, a hosted `security-integration` job that degraded mode never waives, and a wave-end cross-check with revert. platform.md §7.2; R-ARCH-19; D-ARCH-021 | Gate scripts run from the PR head (SEC-P3-31, LOW). The manifest's "catalog C1–C12" must read C1–C14 (SEC-P3-33). |
+| SEC-P3-08 | MEDIUM | **RESOLVED** | ADR-0018 am. 1: a 24-entry key register with `key_id`, `_PREVIOUS` and AAD = table ‖ column ‖ row id/token ‖ key_id; duplicate and short keys are rejected. Encrypted carrier token cache (ADR-0010 am. 7); Valkey ACL users (ADR-0013 am. 4). `carrier-sandbox` environment secrets plus `check-workflow-policy` (ADR-0023 am. H). Restricted `rk_test_` key and one webhook secret per endpoint (ADR-0012 am. 2). Staging placeholder refusal, debug flags refused, developer-host hygiene. data-model §10.4 `*_key_id` siblings | D-ARCH-022 says the register has 20 entries; ADR-0018 has 24 (SEC-P3-33). |
+| SEC-P3-09 | MEDIUM | **RESOLVED** | ADR-0019 am. 1 (a)–(e): `invoice_print: FULL \| MASKED` with default `MASKED`; SENSITIVE documents never attached; Viewer lacks `document:download`, `document:email` and `privacy:export`; render-only decryption; SSE. REQ-COMP-001, REQ-DOC-010, REQ-NOTIF-008, REQ-RBAC-004; D-051. | Legal `reviewed_by` on the `FULL` list stays a precondition before M5 (A-097). |
+| SEC-P3-10 | MEDIUM | **RESOLVED** | Both routes `not-applicable`, with no key parameter or replay header (§14.1). README §5 scope rewritten. ADR-0014 am. 4 (list gains `activateTotp`). data-model §3.10 :1830 backstop index `ux_quote_shares__quote_active`. D-ARCH-023. | Ruling 3 conditions (SEC-P3-32, LOW). README §5 still calls `activateTotp` "proposed" (SEC-P3-33). |
+| SEC-P3-11 | MEDIUM | **RESOLVED** | Server: 30-minute sliding admin refresh, `LEAST(now + 30 min, absolute)` (ADR-0006 am. 13; data-model :1102; `refreshSession` :546). Client: the idle clock counts input only, with an `alertdialog` at 28 min and logout at 30 min (ADR-0026 am. 8). REQ-ADMIN-004 (D-052 a) | Usability note: share the last-input time across admin tabs, so an idle tab's logout does not end the session of an active tab (SEC-P3-33). |
+| SEC-P3-12 | MEDIUM | **RESOLVED** | Payload v2 carries IDs only (ADR-0013 am. 1). `platform.job_context(kind, id)`, owned by `platform_definer`, resolves the context before `withTenantTx` (data-model §4.5 :2675–2738; outbox :3322; saga :3419). Joi validation at dequeue; DLQ plus `job_context_mismatch`; ACL users; ADR-0005 am. 7; D-ARCH-025 | A forged job can only re-run work inside the named row's own tenant. Steps are idempotent and re-check state (ADR-0014 am. 2). Accepted. |
+| SEC-P3-13 | MEDIUM | **RESOLVED** | ADR-0010 am. 8: `$blob` descriptors, allow-list redaction of tracking and response payloads, property test with a sentinel PDF. REQ-CARR-018; data-model §3.8 :1701; D-ARCH-026. | None. |
+| SEC-P3-14 | MEDIUM | **RESOLVED** | ADR-0006 am. 14. `requestTotpEnrolmentCode` (:1249) and `enrolTotp.enrolment_code` with 403 `MFA_ENROLMENT_CODE_REQUIRED` (:1327). `mfa_enrolment_codes`, `first_signed_in_at` (:991) and the AP-ID-19 suspension job. Seeds without passwords; D-ARCH-027, D-052 (c) | REQ-AUTH-018 disagrees with the ADR on the deadline start, the wrong-code response and the re-enable path (SEC-P3-33). Align before identity stories. |
+
+Status of the LOW and INFO backlog (owner backlog, not gate conditions):
+
+- **Designed:**
+  - SEC-P3-15: ADR-0026 am. 9, REQ-QUOTE-002.
+  - SEC-P3-21: items 1 (flags), 2 and 3 (ADR-0012 am. 3), 4 (ADR-0010 am. 9) and 5 (ADR-0021 am. 2).
+  - SEC-P3-22: D-ARCH-003 rev 2, NFR-SEC-012.
+  - SEC-P3-25: items a, b, c and e.
+- **Still open, as listed in the last row of §13:**
+  - SEC-P3-16, 17, 18, 19, 20, 23, 24 and 26;
+  - SEC-P3-21 item 1, edge strip of `X-Mock-Scenario`;
+  - SEC-P3-25 item d: ADR-0023 §1 and the Consequences section still claim artifact attestations.
+
+### 14.3 Rulings on the three alternatives
+
+**(1) CVC recollection as the only saved-card step-up (no conditional re-auth header on `checkoutOrder`). Ruling: ACCEPTED as equivalent, conditional on SEC-P3-28.**
+
+- **Why it is equivalent.** On this path, the threat SEC-P3-01 addresses is a session hijacker spending with a card they do not hold. A re-auth proof asks for the account password; recollection asks for the card's CVC. The thief of a refresh cookie normally has neither, and the CVC binds the step-up to the asset at risk.
+- **What else it gets right.**
+  - It keeps PCI SAQ A, because the CVC stays in the Stripe iframe.
+  - It avoids a second UX path.
+  - Start-up refuses saved cards on any gateway without `capabilities().cvcRecollection`.
+- **Its weakness.** *Collection is not verification.* Whether a wrong CVC blocks the authorisation depends on the issuer and on Radar, and Radar's CVC rule does not act when the check is `unavailable`. The design never reads `cvc_check`.
+- **Condition.** With SEC-P3-28, the alternative is equivalent: authorisation counts only when `cvc_check = pass`; otherwise the authorisation is voided. It needs no header, because `createReauthProof` already advances `auth_time`, so "confirm it's you, then retry" is the fallback when an issuer returns `unavailable`.
+
+**(2) ECDSA P-256 instead of Ed25519 for audit anchors. Ruling: ACCEPTED (compliant; this was not a deviation).**
+
+- **Compliance.** SEC-P3-03 item 4 allowed "Ed25519 or ECDSA P-256".
+- **Why P-256 is sound.**
+  - It is FIPS 186-5 approved, offers a 128-bit security level and verifies with a stock `openssl dgst` command.
+  - Signing happens only through Node `crypto.sign` (OpenSSL) or KMS `Sign`, so nonce generation is not in our code.
+  - ECDSA signatures are malleable, but that is harmless here. Anchor identity and the `prev_anchor_hash` chain use `anchor_hash`, never the signature bytes, and the byte-identical table/sink comparison flags a malleated copy as `ANCHOR_MISSING`.
+- **The stated reason is outdated.** AWS KMS has signed with Ed25519 since 2025-11-07. That is not a reason to switch, but the rationale in ADR-0007 am. 7 item 4, data-model §5.5 :3113 and D-ARCH-019 must be corrected (SEC-P3-33).
+- **Verification conditions (SEC-TC-44 amended).**
+  - The verifier accepts only `algorithm = 'ECDSA_P256_SHA256'`, and only keys from `AUDIT_ANCHOR_PUBLIC_KEYS` selected by `key_id`, never a key or algorithm taken from the record.
+  - DER is parsed strictly.
+  - No in-house ECDSA code.
+  - Public-key fingerprints are published in the release dossier, so a third party can obtain an authentic key.
+
+**(3) `createQuoteShare` mint-and-revoke instead of 409 `SHARE_EXISTS`. Ruling: ACCEPTED (compliant; SEC-P3-10 item 3 offered both).**
+
+- **Why it is preferable.**
+  - It never needs the clear token.
+  - It lets a user rotate a leaked link.
+  - A partial unique index backs it.
+  - It stays out of the idempotency store.
+- **Side effect, accepted.** Any member holding `quote:share` can revoke another member's link to the same quote. This stays within the tenant and is audited.
+- **Conditions.** Auditing of the implicit revocation, a per-quote mint cap and an identical 404 on resolve (SEC-P3-32).
+
+### 14.4 New findings from the verification
+
+| ID | Title | Sev | CWE | OWASP | Location | Owner | Due |
+|---|---|---|---|---|---|---|---|
+| SEC-P3-27 | The audit owner's `SECURITY DEFINER` function searches the migrator-owned `public` schema, so a function-overload hijack escalates the migrator to `platform_audit_owner` (residual of SEC-P3-03) | MEDIUM | CWE-426 / CWE-427 | A08 | `data-model.md:3001-3006, 3018, 3023, 2539, 2559, 2936`; ADR-0007 am. 7 item 1 | data-architect + principal-architect | P4 exit |
+| SEC-P3-28 | CVC recollection is collected but its outcome (`cvc_check`) is never verified (condition of ruling 1) | MEDIUM | CWE-304 | A07 | ADR-0012 am. 1 (:38); ADR-0006 am. 12; `openapi.yaml:12294, 12917, 19613-19621, 19720` | principal-architect + api-designer | P4 exit (design); with the payments story (code) |
+| SEC-P3-29 | Free or unverified accounts are outside the carrier anonymous budget, so one account can push a carrier's daily quota to 90 % and stop rate shopping for everyone (residual of SEC-P3-02) | MEDIUM | CWE-770 | A04 (API4:2023) | ADR-0010 am. 2–3; REQ-CARR-022/023; `api/README.md:178`; REQ-AUTH-004 note | principal-architect + product-manager | P4 exit (design); US-293 (code) |
+| SEC-P3-30 | The security event catalogue (`api/README.md` §13) lacks the events introduced by the remediation | LOW | CWE-778 | A09 | `api/README.md:443-464`; REQUIREMENTS.md:359 | api-designer + product-manager | P4 exit |
+| SEC-P3-31 | Gate scripts run from the PR's own tree; tooling paths are not security-critical; `npx` may fetch outside the lockfile | LOW | CWE-345 / CWE-829 | A08 | ADR-0023 am. F, G; `platform.md:241-242, 803-808` | platform-architect + devops-engineer | Wave 0 CI tasks |
+| SEC-P3-32 | Share mint-and-revoke details: revocation audit, mint cap, uniform 404 | LOW | CWE-778 / CWE-770 | A09 / A04 | `openapi.yaml:7629-7693`; `data-model.md:1830` | api-designer + data-architect | Before US-165 (REQ-QUOTE-015) |
+| SEC-P3-33 | Documentation drift left by the remediation | INFO | n/a | n/a | see detail | principal-architect, product-manager, api-designer, sdlc-orchestrator (CLAUDE.md) | P4 exit |
+
+#### SEC-P3-27: The audit owner's definer function searches a migrator-owned schema (MEDIUM)
+
+- **CWE-426** Untrusted Search Path, CWE-427 · **OWASP A08:2021** · ASVS 7.3.3, 1.4.3 (least privilege). This is the CVE-2018-1058 class; see the PostgreSQL guidance "Writing SECURITY DEFINER Functions Safely" (CREATE FUNCTION).
+- **Location:**
+  - `data-model.md:3001-3006`: `platform.ensure_audit_partitions` is `SECURITY DEFINER` with `SET search_path = pg_catalog, public`, owned by `platform_audit_owner` (:3043).
+  - `:3018`: `pg_advisory_xact_lock(hashtext('audit:partitions'))`.
+  - `:3023`: `to_char(v_month, 'YYYY_MM')` with `v_month date`.
+  - `:2539, :2559`: `platform_migrator` owns schema `public`.
+  - `:2936`: the guard admits `current_user = 'platform_audit_owner'`.
+- **Description.**
+  1. **Overload resolution favours the better match.** PostgreSQL resolves an unqualified call over every schema on the path. Being first on the path wins only between functions with *identical* argument types; a better-matching overload in a later schema wins outright.
+  2. **The hijack.** `hashtext()` returns `integer`, and `pg_catalog.pg_advisory_xact_lock` takes `bigint` (or two integers). A `public.pg_advisory_xact_lock(integer)` created by the migrator, which owns `public`, is therefore an exact match and is called instead. `public.to_char(date, text)` likewise beats the `timestamp` variants.
+  3. **What the planted body can do.** The daily `audit-maintenance` job calls the function, and the lock runs on every call, even when no partition is due. The planted body executes with `current_user = platform_audit_owner`, so it can:
+     - `ALTER TABLE public.audit_entries DISABLE TRIGGER ALL`;
+     - rewrite rows;
+     - `GRANT UPDATE … TO platform_migrator` for persistence.
+
+     The identity-based guard admits all of it, by design.
+  4. **Secondary weaknesses in the same component:**
+     - The trigger functions `audit_forbid_mutation` and `audit_vault_guard` set no `search_path`. Their unqualified `format()` call runs as the invoker, which includes the superuser in the bootstrap lane.
+     - `audit_ddl_guard` sets `search_path = pg_catalog` without `pg_temp`, so `pg_temp` is searched first for relations. In the migrator's own session, a temporary `pg_index` or `pg_class` shadows the catalog in the index branch.
+     - The guard matches schemas by name. As owner of `public` (and with `CREATE` on the database), the migrator can `ALTER SCHEMA public RENAME TO x`. Audit writes then fail closed, and the guard blocks renaming it back. This is a denial of service that needs superuser repair, not an integrity breach.
+     - The bootstrap lane runs `SET ROLE platform_audit_owner` with the default `search_path` (`"$user", public`).
+- **Exploitability and impact.** Likelihood L: it needs the migrator credential (held by the migrate job, CI, developers and agents) plus this technique. Impact H, not C:
+  - the worker-held signing key and the external sink still detect any change to an anchored entry;
+  - so the attacker gets the ≤ 1 h window, plus persistent grants.
+
+  That is the same window as the accepted superuser residual (RR-04), but reachable with a far more widely held credential. H × L = MEDIUM.
+- **Required change (data-architect; principal-architect approves; P4 exit):**
+  1. Every function owned by `platform_audit_owner` (`ensure_audit_partitions`, `audit_forbid_mutation`, `audit_vault_guard`), and `audit_ddl_guard`, declares `SET search_path = pg_catalog, pg_temp`, with `pg_temp` explicitly last. Functions and operators are then resolved in `pg_catalog` only. Relations stay `public.`-qualified, as now.
+  2. As defence in depth, `ensure_audit_partitions` qualifies built-ins with explicit casts:
+     - `PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('audit:partitions')::bigint)`;
+     - `pg_catalog.to_char(v_month::timestamp, 'YYYY_MM')`;
+     - `pg_catalog.uuidv7()`;
+     - `pg_catalog.format(…)`.
+  3. `audit_ddl_guard` qualifies `pg_catalog.pg_index`, `pg_catalog.pg_class` and `pg_catalog.pg_namespace`. It matches the two schemas **by OID**, not by name, so `ALTER SCHEMA public|platform RENAME` raises. Either the bootstrap writes the OIDs into the function body, or the guard derives them from `relnamespace` of the relations owned by `platform_audit_owner`.
+  4. Every bootstrap-lane script starts with `SET search_path = pg_catalog, pg_temp;` before `SET ROLE platform_audit_owner`, and qualifies every object.
+  5. **C11** asserts that `proconfig` holds exactly `search_path=pg_catalog, pg_temp` for every `SECURITY DEFINER` function. This includes the §4.5 `platform_definer` functions: there is no escalation there, because the migrator already holds `platform_definer`, but one uniform rule is easy to test. **C14** asserts the same for the audit-owner functions and the guard.
+  6. *Recommended, not required:* transfer ownership of the `public` and `platform` schemas to a `NOLOGIN` role with no members, and grant `platform_migrator` `USAGE, CREATE`. This closes drop-by-schema-owner and schema renames by privilege without renaming any relation, and is cheaper than the dedicated `audit` schema that §4.4 defers to M5.
+  7. ADR-0007 am. 7 item 1 ("tampering needs the cluster superuser") cites this finding. The sentence is true only after items 1–4.
+- **Verification.** SEC-TC-61; C11 and C14 as amended.
+
+#### SEC-P3-28: CVC recollection outcome is not verified (MEDIUM; condition of ruling 1)
+
+- **CWE-304** Missing Critical Step in Authentication · **OWASP A07:2021** · ASVS 4.3.3
+- **Location:**
+  - ADR-0012 am. 1 (:38) and ADR-0006 am. 12 "Saved-card checkout";
+  - `openapi.yaml` `checkoutOrder` (:12294), `confirmPayment` (:12917) and `Payment.cvc_recollection_required` (:19720);
+  - `CheckoutRequest.test_token` (:19613–19621) has no Mock CVC outcome, although ADR-0012 names `mock_cvc_required`.
+- **Description.**
+  - `require_cvc_recollection` makes the Payment Element collect a CVC. The issuer decides what a wrong CVC means, and Stripe documents successful charges despite a failed CVC check. The Radar rule ignores `unavailable` checks.
+  - The design derives `AUTHORISED` from the retrieved PaymentIntent and never reads `payment_method_details.card.checks.cvc_check`.
+  - A hijacker of a session older than 12 h can therefore type any three digits. Where the issuer does not verify the CVC, the payment is authorised and the saga books.
+  - My original SEC-P3-01 text omitted this check as well. It is raised now as the condition for accepting ruling 1.
+- **Exploitability and impact.** Likelihood M: it needs a hijacked session more than 12 h past the victim's last authentication and an issuer that does not verify. Impact M: shipments are paid with the victim's saved card, bounded by 5 attempts per order per hour, with confirmation e-mails to the victim and a chargeback path. M × M = MEDIUM.
+- **Required change (principal-architect: ADR-0012 am. 1 and ADR-0006 am. 12; api-designer: contract; P4 exit):**
+  1. When `requireCvcRecollection` was set, the payment-state derivation treats the authorisation as `AUTHORISED` only if the retrieved charge has `payment_method_details.card.checks.cvc_check = 'pass'`. One function covers both `confirmPayment` and the webhook processor.
+  2. Any other value (`fail`, `unavailable`, `unchecked`, absent) leads to:
+     - `voidAuthorisation` (manual capture, so no money moves);
+     - payment `FAILED` with the existing `failure_code = AUTHENTICATION_FAILED`;
+     - an audited `UPDATE payment` and the security event `cvc_recollection_failed`;
+     - shipments back to `QUOTED`, with the attempt counted.
+  3. The client then offers "use another card" (hosted fields) or "confirm it's you" (`createReauthProof`, which advances `auth_time`, so the retried checkout needs no CVC). No new header or extension is needed, which keeps the single-mechanism decision.
+  4. ADR-0012 records the Radar rule "Block if CVC verification fails" as enabled on the test account, as defence in depth.
+  5. The contract exposes the Mock outcomes (CVC pass, fail and unavailable) through `test_token` or a documented Mock setting.
+- **Verification.** SEC-TC-37 as amended in §14.5.
+
+#### SEC-P3-29: Authenticated or unverified accounts can drain a carrier's daily quota (MEDIUM; residual of SEC-P3-02)
+
+- **CWE-770** · **OWASP A04:2021**, API4:2023 · ASVS 11.1.4
+- **Location:**
+  - ADR-0010 am. 2–3 and REQ-CARR-022/023: the anonymous bucket and the 60 % stop apply to guests only.
+  - `api/README.md:178`: an authenticated `createQuote` counts in the `authenticated` class, 600/min per user.
+  - REQ-AUTH-004 note: unverified users can sign in, so they can quote.
+- **Description.**
+  - Registration is free and needs no verification to quote. One account at 600 quotes/min fans out to every eligible carrier account.
+  - With the seeded DHL sandbox quota of 500 per day, the 90 % threshold is reached within about a minute. Authenticated rate shopping to that carrier then stops for every customer until 00:00 UTC.
+  - Paid bookings stay protected by the transactional reserve, and the carrier account is not suspended, so SEC-P3-02 stays closed. This is the remaining path to deny the booking funnel.
+- **Exploitability and impact.** Likelihood H: one account is enough. Impact M: one carrier's quotes are unavailable for up to a day, while other carriers and cached results still answer. → MEDIUM.
+- **Required change (principal-architect: ADR-0010 amendment; product-manager: values in REQ-CARR-022/023 and DR-A22):**
+  1. Users in `PENDING_VERIFICATION` count as **anonymous** for the carrier budget: the bucket, the 50 % share and the 60 % stop.
+  2. A **`quote-create` rate class** for authenticated callers replaces the 600/min class on `createQuote`. Proposed: 30/min and 300/h per user, 1,000/h per organisation; all configuration.
+  3. Each organisation gets a **share of each carrier account's daily quota** for rates-pool calls (`CARRIER_QUOTA_ORG_SHARE_PCT`, proposed 10 %). Beyond it, that organisation gets `CARRIER_BUSY` or cached results, and the event `carrier_quota_org_share_exhausted` fires (at most once a minute).
+- **Verification.** SEC-TC-62.
+
+#### SEC-P3-30: Security event catalogue not updated (LOW)
+
+- **Gap.** `api/README.md` §13 lists 14 events, and the new ones match 0 times there:
+  - `registration_probe`, `carrier_quota_pressure` and `carrier_anon_budget_exhausted`, although REQ-SEC-012 (REQUIREMENTS.md:359) lists them and says "names added here must appear there";
+  - `job_context_mismatch` (ADR-0013 am. 2), `webhook_livemode_rejected` (ADR-0012 am. 3) and `audit_anchor_missing` (data-model §5.6), which no requirement lists;
+  - `cvc_recollection_failed` (SEC-P3-28) and `carrier_quota_org_share_exhausted` (SEC-P3-29), which this verification adds.
+- **Why it matters.** Alerting and the `security_events_total` metric are built from the catalogue, so uncatalogued events would go unmonitored (A09).
+- **Required change.**
+  - api-designer adds the events to §13, with fields and the related audit action.
+  - product-manager adds the ADR-only events to REQ-SEC-012.
+  - A contract test asserts that the event names in `packages/shared` equal the §13 table.
+- **Verification.** SEC-TC-63.
+
+#### SEC-P3-31: Gate and install tooling hardening (LOW)
+
+1. **Gate scripts run from the PR head.** `quality:check-evidence`, `tools/quality/required-suites.json`, `check-install-flags`, `check-lockfile` and `check-workflow-policy` run from the PR's own checkout, so one PR can weaken a gate and pass it in the same change.
+   - Required: lane A runs these scripts and the manifest from the base commit (`github.event.pull_request.base.sha`, a second sparse checkout).
+   - Required: `tools/quality/**`, `tools/ci/**`, `.github/**` and `.npmrc` join the security-critical path list of ADR-0023 am. G item 5, and a change to them needs a security-analyst review in the DoD.
+2. **`npx` can fetch packages.** `npx prisma generate` and `npx playwright install` would download from the registry when the local binary is missing, outside the lockfile, cooldown and signature checks.
+   - Required: use `npm exec --no -- prisma generate` (or `npx --no-install`) in `deps:rebuild` and in the docs.
+
+Verification: SEC-TC-64.
+
+#### SEC-P3-32: Share mint-and-revoke details (LOW; conditions of ruling 3)
+
+1. The implicit revocation of the previous share writes its own audit entry in the same transaction: `UPDATE quote_share`, `revoked_at` from null to a value, actor. The contract's `x-audit` lists only `CREATE quote_share`.
+2. A per-quote mint cap, proposed at 10 per quote per hour (then 429). Without it, the 600/min `authenticated` class lets one user write about 36,000 revoked rows an hour.
+3. `resolveSharedQuote` answers the identical 404 for unknown, revoked and expired tokens, as the contract already states for revoked ones.
+
+Verification: SEC-TC-53 as amended.
+
+#### SEC-P3-33: Documentation drift left by the remediation (INFO)
+
+1. **ECDSA rationale.** "AWS KMS offers no Ed25519 signing" is outdated (supported since 2025-11-07). Correct ADR-0007 am. 7 item 4, data-model §5.5 :3113 and D-ARCH-019; the choice stands (ruling 2).
+2. **Unflagged `npm ci` text outside platform.md:**
+   - `CLAUDE.md:11` (owned by sdlc-orchestrator);
+   - `ADR-0023:11` and `:43`: amended by am. F, but with no inline "amended" marker as ADR-0006 uses;
+   - `nfr-strategy.md:152` (OPS-002 `npm ci --omit=dev`);
+   - `ADR-0002:39` (prose in the alternatives).
+
+   `.npmrc` makes them harmless, but agents follow `CLAUDE.md` literally.
+3. **REQ-AUTH-018 vs ADR-0006 am. 14 and the contract:**
+   - deadline start: membership creation vs `first_signed_in_at`;
+   - wrong code: 401 `MFA_INVALID` vs 403 `MFA_ENROLMENT_CODE_REQUIRED`;
+   - re-enable path: re-run the seed vs `ops:staff-reactivate`.
+4. **Saga deadline state.** REQ-BOOK-023 says DRAFT when the deadline passes under `CARRIER_BUSY`; ADR-0014 am. 3 says EXCEPTION. DRAFT is the accurate state, because no carrier call was made.
+5. `api/README.md` §5 still calls `activateTotp` "proposed" for the one-time-secret list; ADR-0014 am. 4 added it.
+6. D-ARCH-022 says the key register has "20" entries; ADR-0018 lists 24.
+7. ADR-0023 am. G and D-ARCH-021 name the security catalog suite "C1–C12"; it is C1–C14 (data-model §4.6 note).
+8. ADR-0023 §1 and the Consequences section still claim artifact attestations (SEC-P3-25 item d; platform.md:281 says they are unavailable).
+9. **Re-auth proof vs idempotent replay** on the four `payment_method.manage` routes (`x-idempotency: optional`, single-use proof). Specify in README §5 and §8 that a replay (same scope, actor, key and fingerprint) is served before the proof check, and that any new execution needs a fresh proof.
+10. **M5, for platform-architect.** On RDS the bootstrap master is not a superuser. In PostgreSQL 16+, a `CREATEROLE` role that creates `platform_audit_owner` receives ADMIN membership automatically, so C13's "no `pg_auth_members` row" will fail on RDS. At M5, allow exactly that row (ADMIN, no SET or INHERIT) and treat it as break-glass, like the RDS master.
+11. **Admin idle clock across tabs.** Share the last-input time across tabs (`BroadcastChannel`, as the single-flight refresh already does). Usability only.
+
+### 14.5 Security test case changes
+
+| ID | Change |
+|---|---|
+| SEC-TC-37 (amended) | Saved-card checkout with `auth_time` more than 12 h old produces a PaymentIntent with `require_cvc_recollection=true`. With the Mock CVC result `fail` or `unavailable`, the payment is `FAILED/AUTHENTICATION_FAILED`, the authorisation is voided, no saga starts and `cvc_recollection_failed` is emitted. With `pass`, it is `AUTHORISED`. After `createReauthProof`, the retried checkout has `cvc_recollection_required=false`. The same derivation applies on the webhook path |
+| SEC-TC-44 (amended) | An anchor record whose `algorithm` is anything other than `ECDSA_P256_SHA256`, or whose `key_id` is unknown, gives `CHECKPOINT_SIGNATURE_INVALID`. A malleated `(r, n−s)` signature written to the table only gives `ANCHOR_MISSING` (table and sink disagree) |
+| SEC-TC-53 (amended) | A second `createQuoteShare` writes `CREATE` plus `UPDATE quote_share` (revoked) audit entries. The 11th mint for one quote within an hour returns 429. Resolving an unknown, a revoked and an expired token gives three byte-identical 404 bodies |
+| SEC-TC-61 (new) | As `platform_migrator`, create `public.pg_advisory_xact_lock(integer)` and `public.to_char(date, text)`; their bodies insert a marker into a migrator-owned table and try `ALTER TABLE public.audit_entries DISABLE TRIGGER ALL`. Then, as `platform_app`, call `platform.ensure_audit_partitions(3)`: it succeeds, no marker row exists and every audit trigger is still enabled. `ALTER SCHEMA public RENAME TO x` and `ALTER SCHEMA platform RENAME TO y` as the migrator both raise. C11 and C14 `proconfig` assertions pass |
+| SEC-TC-62 (new) | With Mock and `CARRIER_DAILY_QUOTA=500`: an unverified account is throttled by the anonymous bucket. A verified account gets 429 from `quote-create` after 30 per minute. One organisation cannot push an account's daily usage past its 10 % share (`CARRIER_BUSY` or cached results, plus `carrier_quota_org_share_exhausted`), while another organisation's quotes still fan out |
+| SEC-TC-63 (new) | Contract test: the security-event names in `packages/shared` equal the README §13 table, including the eight names from SEC-P3-30 |
+| SEC-TC-64 (new) | A PR fixture that edits `tools/quality/check-evidence.mjs` to always pass still fails lane A on bad evidence, because the base-ref copy ran. `deps:rebuild`, with the local Prisma binary removed, fails instead of downloading |
+
+All seven are tagged `@security` and listed in the SEC-P3-07 required-suite manifest.
+
+### 14.6 ASVS 4.0.3 L2 checklist delta (design level; replaces the gap cells of §7 where stated)
+
+| Chapter | Status now | What changed |
+|---|---|---|
+| V1 | partial | 1.6.1/1.6.3 key register and rotation are designed (SEC-P3-08). Open: 1.4.3 least privilege for the definer search path (SEC-P3-27); TLS deferred to M5 |
+| V2 | partial | Enumeration accepted (RR-16); pre-hijack fixed; staff first enrolment bound to the mailbox. Open: 2.6.2 recovery codes (SEC-P3-16, backlog) |
+| V3 | **pass at design (documented deviation)** | 3.3.2 "L2 deviation, compensated; L1 met" (D-046); 3.3.4 Must (D-047); admin idle mechanism (SEC-P3-11). Open: 3.3.x cross-user revocation (SEC-P3-19, backlog) |
+| V4 | partial | 4.3.3 step-up designed. Open: the saved-card result check (SEC-P3-28). Worker context (SEC-P3-12) fixed |
+| V6 | **pass at design** | AAD, `key_id`, register (SEC-P3-08); KMS envelope deferred to M5 |
+| V7 | partial | 7.3.3: owner separation and signed hourly anchors. Open: SEC-P3-27; locked sink at M5; event catalogue (SEC-P3-30) |
+| V8 | partial | Customs invoice distribution and blob redaction fixed. Open: 8.3.2 export and erasure deferred (RR-05) |
+| V10 / V14.2.4 | **pass at design** | Install scripts, cooldown and lockfile source (SEC-P3-04). Hardening in SEC-P3-31 |
+| V11 | partial | 11.1.4 for guests fixed. Open: authenticated and unverified accounts (SEC-P3-29) |
+| V13 | **pass** | Idempotency contract drift fixed (SEC-P3-10) |
+
+### 14.7 Updated verdict
+
+**APPROVED_WITH_CONDITIONS** (unchanged class; the content changed).
+
+**Is any Critical or High design risk still open? No.**
+
+- **The four HIGHs.** SEC-P3-01, 02 and 04 are resolved at design level. SEC-P3-03 is PARTIAL: its HIGH is reduced to MEDIUM, because the anchors bound undetected rewriting to the last hour whoever the attacker is, and it closes fully when SEC-P3-27 lands.
+- **Highest open severity: MEDIUM.**
+  - Design changes due at P4 exit: SEC-P3-27, 28 and 29.
+  - Accepted residuals: RR-03, and RR-04, which SEC-P3-27 restores to the superuser-only actor.
+- **No Medium due at P4 exit remains open.** SEC-P3-05..14 are all RESOLVED at design level.
+- **Rulings.** All three alternatives are accepted; (1) depends on SEC-P3-28.
+- **What stays owed.** Implementation evidence for every condition (SEC-TC) is due by G3.
+
+G2 can treat the items below as conditions (PASS_WITH_CONDITIONS). None needs re-architecture: each is an SQL attribute, an ADR paragraph, a rate-limit class or a contract enum.
+
+### 14.8 Conditions that remain
+
+| Condition | Content | Owner | Due | Closure evidence |
+|---|---|---|---|---|
+| SEC-COND-01 | Design **closed**. Fallback `AUTH_REFRESH_TTL=7d` still applies if the step-up does not ship with the payments and organisation stories | product-manager, principal-architect, api-designer | G3 | SEC-TC-37 (amended) and SEC-TC-38 green |
+| SEC-COND-02 | Design **closed** | principal-architect | G3 | SEC-TC-26, 40, 41, 42 green |
+| SEC-COND-03 | Design **partial**: closes when SEC-COND-05 lands. Item 7 (locked sink, RDS master break-glass, `pgaudit`) stays a G4 precondition for any production release, plus SEC-P3-33 item 10 | principal-architect, data-architect; platform-architect (M5) | P4 exit (design); G3 (tests); G4-production (sink) | SEC-TC-17, 43, 44 (amended), 61 green |
+| SEC-COND-04 | Design **closed** | platform-architect, devops-engineer | Before the first `npm ci` in Wave 0 | SEC-TC-32 and 45 green in Wave 0 |
+| **SEC-COND-05** (new) | SEC-P3-27: `search_path = pg_catalog, pg_temp` on the audit-owner functions and the guard; qualified built-ins; OID-based schema match; bootstrap `search_path`; C11/C14 assertions | data-architect, principal-architect | **P4 exit** | data-model §4.4/§5.2/§5.3/§4.6 amended; SEC-TC-61 green by G3 |
+| **SEC-COND-06** (new) | SEC-P3-28: `cvc_check = pass` rule with void otherwise; Mock CVC outcomes in the contract; Radar rule noted | principal-architect, api-designer | **P4 exit** (design); with the payments story (code) | ADR-0012 am. 1 and contract amended; SEC-TC-37 (amended) green by G3 |
+| **SEC-COND-07** (new) | SEC-P3-29: unverified users count as anonymous; `quote-create` class; per-organisation quota share | principal-architect, product-manager | **P4 exit** (design); US-293 (code) | ADR-0010 amendment, REQ-CARR-022/023 and DR-A22 amended; SEC-TC-62 green by G3 |
+| Medium tasks | SEC-P3-05..14: design closed | as §3 | Before the affected story (P5) | SEC-TC-03 (ext.), 20, 39, 46–53, 56 green by G3 |
+| LOW / INFO, new | SEC-P3-30 (P4 exit), 31 (Wave 0 CI tasks), 32 (before US-165), 33 (P4 exit; item 10 at M5) | as §14.4 | as listed | SEC-TC-53 (amended), 63, 64; P5 change reviews |
+| LOW / INFO backlog (Wave 0 and before the affected story) | SEC-P3-16 (`id-secret` recovery codes, peppered pre-hash); 17 (SYSTEM shard key from a server-side id); 18 (`x-origin-check` on login, register, reset, verify); 19 (`revoke_sessions_for_user`); 20 (edge bound to 127.0.0.1); 21 item 1 (edge strip of `X-Mock-Scenario`); 23 (cookie and header log redaction); 24 (CSP refinements, Trusted Types spike SPK-06); 25 item d (attestation wording); 26 (`auth_lookup_credential` call-site lint) | as §3 | as §3 "Due" | SEC-TC-12, 14, 22, 24, 25, 31 (ext.), 34 (ext.), 55, 57, 58, 59, 60; P5 change reviews |
+| P6 / G3 | The SEC-P3-07 required-suite manifest lists every `@security` case (SEC-TC-01..64) with `skipped = 0`. security-analyst completes the ASVS L2 per-item checklist (NFR-SEC-001) against code. dependency-auditor runs the Wave 0 baseline (R-ARCH-12) | qa-lead, security-analyst | G3 | Verification report; SEC-P6 assessment |
+
+Residual-risk register updates (§11):
+
+| ID | Update |
+|---|---|
+| RR-03 | Extended: authenticated and unverified accounts as well as guests, until SEC-COND-07 lands |
+| RR-04 | Reachable with the migrator credential, not only by the superuser, until SEC-COND-05 lands. Afterwards it is unchanged (superuser, ≤ 1 h) |
+| RR-19 (new, LOW) | Tricked verification of a pre-registered account; product-manager to accept or apply the optional control in the SEC-P3-06 row of §14.2 |
