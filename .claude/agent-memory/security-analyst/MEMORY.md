@@ -10,5 +10,6 @@
 - [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_WITH_FOLLOW-UPS (01 closed; 16-20 new); Semgrepignore v2, record contract + validation recipe; TASK-015 checks
 - [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
 - [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R1 PASS_WITH_FOLLOW-UPS; Prisma $parent escape, non-atomic deploy, C5 PUBLIC gap; wiring/TASK-037/015/025 checks
+- [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R1 PASS_W_F-U; R2 FAIL @05855b1 (PR9-SEC-14 HIGH ReDoS); type-is/npm/pg facts; R3 + TASK-007..111 checks
 - [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 PASS_W_F-U @e92cd6f; ECS-signal gap gates TASK-089; R2 reconciliation + TASK-221/014/025 checks
