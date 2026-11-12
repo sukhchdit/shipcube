@@ -10,7 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
 
-import { createDatabasePool } from './client.js';
+import { createDatabasePool, type DatabaseClientOptions } from './client.js';
+import { dedicatedConnector } from './dedicated-connection.js';
 import { createDatabaseCheck } from './health-check.js';
 import { createSessionIntegrityGuard, EXPECTED_ROLE_SETTINGS, type SessionIntegrityFinding } from './session-integrity.js';
 
@@ -21,6 +22,7 @@ const STARTUP_TIMEOUT_MS = 180_000;
 describe('database session integrity with a real platform_app role (PR7-SEC-06 item 3)', () => {
   let container: StartedPostgreSqlContainer;
   let pool: pg.Pool;
+  let options: DatabaseClientOptions;
   const events: (readonly SessionIntegrityFinding[])[] = [];
 
   beforeAll(async () => {
@@ -37,7 +39,8 @@ describe('database session integrity with a real platform_app role (PR7-SEC-06 i
     const url = new URL(container.getConnectionUri());
     url.username = 'platform_app';
     url.password = password;
-    pool = createDatabasePool({ connectionString: url.toString(), poolMax: 2, applicationName: 'api-integrity-it' });
+    options = { connectionString: url.toString(), poolMax: 2, applicationName: 'api-integrity-it' };
+    pool = createDatabasePool(options);
     pool.on('error', () => undefined);
   }, STARTUP_TIMEOUT_MS);
 
@@ -46,8 +49,43 @@ describe('database session integrity with a real platform_app role (PR7-SEC-06 i
     await container.stop();
   }, STARTUP_TIMEOUT_MS);
 
+  it('[M1] a transaction-local set_config on the pool BEFORE the first probe leaves the database ready (dedicated start-up connection)', async () => {
+    const single = createDatabasePool({ ...options, poolMax: 1 });
+    try {
+      const client = await single.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SELECT set_config('app.org_id', '00000000-0000-0000-0000-000000000001', true)");
+        await client.query('COMMIT');
+        // The pooled backend now reports '' for app.org_id (ADR-0005 item 16, F-07).
+        const { rows } = await client.query<{ value: string | null }>("SELECT current_setting('app.org_id', true) AS value");
+        expect(rows[0]?.value).toBe('');
+      } finally {
+        client.release();
+      }
+      const local: (readonly SessionIntegrityFinding[])[] = [];
+      const guard = createSessionIntegrityGuard({
+        pool: single,
+        connectDedicated: dedicatedConnector(options),
+        onDrift: (f) => local.push(f),
+        intervalMs: 0,
+      });
+      await expect(guard.recheck()).resolves.toBeUndefined();
+      const check = createDatabaseCheck(single, guard);
+      for (let i = 0; i < 3; i += 1) await expect(check.check(new AbortController().signal)).resolves.toBeUndefined();
+      expect(local).toEqual([]);
+    } finally {
+      await single.end();
+    }
+  });
+
   it('intact role settings pass; the role resetting its own lock_timeout makes the database not ready', async () => {
-    const guard = createSessionIntegrityGuard({ pool, onDrift: (findings) => events.push(findings), intervalMs: 0 });
+    const guard = createSessionIntegrityGuard({
+      pool,
+      connectDedicated: dedicatedConnector(options),
+      onDrift: (findings) => events.push(findings),
+      intervalMs: 0,
+    });
     const check = createDatabaseCheck(pool, guard);
     await expect(check.check(new AbortController().signal)).resolves.toBeUndefined();
 
@@ -65,16 +103,27 @@ describe('database session integrity with a real platform_app role (PR7-SEC-06 i
     await admin.connect();
     await admin.query("ALTER ROLE platform_app SET app.org_id = '00000000-0000-0000-0000-000000000001'");
     await admin.end();
-    const fresh = createDatabasePool({
-      connectionString: (pool.options as { connectionString: string }).connectionString,
-      poolMax: 1,
-      applicationName: 'api-integrity-it',
+    // The start-up check opens its own connection; the pool is not used until it has passed.
+    const guard = createSessionIntegrityGuard({
+      pool,
+      connectDedicated: dedicatedConnector(options),
+      onDrift: () => undefined,
+      intervalMs: 0,
     });
-    try {
-      const guard = createSessionIntegrityGuard({ pool: fresh, onDrift: () => undefined, intervalMs: 0 });
-      await expect(guard.assertIntact()).rejects.toThrow(/db_role_setting_drift, db_session_default_tampered/u);
-    } finally {
-      await fresh.end();
-    }
+    await expect(guard.recheck()).rejects.toThrow(/db_role_setting_drift, db_session_default_tampered/u);
+  });
+
+  it('[M1] an empty-string tenant-context default is tampering on the dedicated start-up connection (NULL required there)', async () => {
+    const admin = new pg.Client({ connectionString: container.getConnectionUri() });
+    await admin.connect();
+    await admin.query("ALTER ROLE platform_app SET app.org_id = ''");
+    await admin.end();
+    const guard = createSessionIntegrityGuard({
+      pool,
+      connectDedicated: dedicatedConnector(options),
+      onDrift: () => undefined,
+      intervalMs: 0,
+    });
+    await expect(guard.recheck()).rejects.toThrow('db_session_default_tampered');
   });
 });

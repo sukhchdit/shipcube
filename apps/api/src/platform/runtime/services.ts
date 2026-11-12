@@ -6,8 +6,14 @@
 import type { Config, Service } from '@platform/config';
 
 import { createDatabasePool, type DatabaseClientOptions } from '../db/client.js';
+import { dedicatedConnector } from '../db/dedicated-connection.js';
 import { createDatabaseCheck } from '../db/health-check.js';
-import { createSessionIntegrityGuard, type SessionIntegrityGuard } from '../db/session-integrity.js';
+import {
+  createSessionIntegrityGuard,
+  type IntegrityMonitor,
+  type SessionIntegrityGuard,
+  startIntegrityMonitor,
+} from '../db/session-integrity.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
 import { createReadinessProbe, pendingCheck, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
@@ -49,6 +55,12 @@ export interface RuntimeServices {
   readonly probe: ReadinessProbe;
   /** Closed by graceful shutdown after the drain. */
   readonly resources: readonly Closeable[];
+  /**
+   * Start-up checks, awaited by both entry points before they listen or take work (PR-0009 M1, PR9-SEC-05): the
+   * session-integrity check on a dedicated new connection, then the interval monitor. Never rejects: a failure is
+   * logged (and drift is a security event); readiness keeps the database not ready and re-checks on every probe.
+   */
+  startup(): Promise<void>;
 }
 
 export function createRuntimeServices(config: Config, service: Service, log: RuntimeLog): RuntimeServices {
@@ -63,17 +75,37 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
   // PR7-SEC-06 item 3 / PR7-SEC-02 item 2: drift is a security event and makes the database not ready.
   const integrity = createSessionIntegrityGuard({
     pool,
+    connectDedicated: dedicatedConnector(databaseOptionsFrom(config, service)),
     onDrift: (findings) => {
       for (const finding of findings) log.warn(`security.${finding}`, { component: 'database' });
     },
   });
+  let monitor: IntegrityMonitor | undefined;
   return {
     pool,
     valkey,
     probe: createReadinessProbe(readinessChecks(pool, valkey, integrity)),
     resources: [
+      { name: 'session-integrity-monitor', close: () => monitor?.close() ?? Promise.resolve() },
       { name: 'database', close: () => pool.end() },
       { name: 'valkey', close: () => valkey.quit().then(() => undefined) },
     ],
+    startup: async () => {
+      monitor ??= startIntegrityMonitor(integrity);
+      await runStartupIntegrityCheck(integrity, log);
+    },
   };
+}
+
+/** The start-up session-integrity check (dedicated connection, NULL required). Logs and resolves; never rejects. */
+export async function runStartupIntegrityCheck(integrity: Pick<SessionIntegrityGuard, 'recheck'>, log: RuntimeLog): Promise<boolean> {
+  try {
+    await integrity.recheck();
+    log.info('db.session_integrity_ok', { component: 'database' });
+    return true;
+  } catch (error) {
+    // Drift was already reported as a security event; anything else (database unreachable) is retried by readiness.
+    log.warn('db.session_integrity_failed', { component: 'database', error: error instanceof Error ? error.name : 'non-error' });
+    return false;
+  }
 }

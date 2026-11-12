@@ -6,11 +6,19 @@
  *    which then apply to every API and worker task and survive restarts;
  *  - a session default for a tenant-context key (`app.org_id`, ...) would pre-set RLS context on fresh connections.
  * The guard compares the role and database-level settings that apply to `current_user` with the exact expected set
- * from `prisma/bootstrap/00-roles.sql`, and requires every tenant-context key to be unset. The start-up probe (the
- * first readiness check, on a fresh pool connection) requires NULL; later probes may meet a pooled connection where a
- * transaction-local `set_config` left '' behind, so they accept NULL or ''. It then re-checks at most once per
- * interval; drift makes the database component not ready and emits one security event per finding
- * (`security.db_role_setting_drift`, `security.db_session_default_tampered`; WAVE-00 TASK-006, ADR-0005 am. 10).
+ * from `prisma/bootstrap/00-roles.sql`, and requires every tenant-context key to be unset.
+ *
+ * Fresh versus pooled (PR-0009 code review M1): a pooled connection on which a transaction-local `set_config` ran
+ * reports '' for that key afterwards (ADR-0005 item 16, F-07), so only a connection opened for the check can prove
+ * "no session default". The start-up check therefore runs at boot on a DEDICATED new connection (never a pooled one)
+ * and requires NULL; until it has passed, every check uses a new dedicated connection. Afterwards checks run on the
+ * pool and accept NULL or '' (a non-empty leak or default is still caught: `SET LOCAL` reverts to the session value).
+ *
+ * Cadence: a passing result is reused for the interval (5 min); a failing one is never reused, so a fixed drift or a
+ * transient start-up failure recovers on the next check. A monitor timer re-checks on the interval independently of
+ * `/health/ready` polling (PR9-SEC-05). Drift makes the database component not ready and emits one security event
+ * per finding and transition (`security.db_role_setting_drift`, `security.db_session_default_tampered`; WAVE-00
+ * TASK-006, ADR-0005 am. 10).
  */
 
 /** `ALTER ROLE platform_app SET …` in prisma/bootstrap/00-roles.sql, as `pg_db_role_setting.setconfig` entries. */
@@ -65,8 +73,16 @@ export interface IntegrityQueryable {
   query(text: string): Promise<{ readonly rows: readonly unknown[] }>;
 }
 
+/** A connection opened for one check and closed afterwards (never taken from the pool). */
+export interface DedicatedConnection extends IntegrityQueryable {
+  end(): Promise<void>;
+}
+
 export interface SessionIntegrityGuardOptions {
+  /** The runtime pool; used once the dedicated start-up check has passed. */
   readonly pool: IntegrityQueryable;
+  /** Opens a NEW connection with the pool's settings (`pg.Client` from the same validated config), for start-up. */
+  readonly connectDedicated: () => Promise<DedicatedConnection>;
   /** Security event sink: called once per detection with the finding names only (each name is the event name). */
   readonly onDrift: (findings: readonly SessionIntegrityFinding[]) => void;
   readonly intervalMs?: number;
@@ -74,8 +90,13 @@ export interface SessionIntegrityGuardOptions {
 }
 
 export interface SessionIntegrityGuard {
-  /** Resolves when the last evaluation (refreshed when due) found no drift; rejects otherwise. */
+  /**
+   * Readiness: resolves when the last evaluation found no drift; re-evaluates when no evaluation passed yet, when the
+   * last one failed, or when the interval has elapsed. Rejects with `SessionIntegrityError` on drift.
+   */
   assertIntact(): Promise<void>;
+  /** Evaluates now, regardless of the interval (start-up and the monitor timer). Same result as `assertIntact`. */
+  recheck(): Promise<void>;
 }
 
 const isRow = (value: unknown): value is SessionIntegrityRow =>
@@ -91,27 +112,90 @@ export class SessionIntegrityError extends Error {
   }
 }
 
+async function probeRow(connection: IntegrityQueryable): Promise<SessionIntegrityRow> {
+  const result = await connection.query(SESSION_INTEGRITY_SQL);
+  const row = result.rows[0];
+  if (!isRow(row)) throw new Error('session integrity probe returned no row');
+  return row;
+}
+
+async function probeDedicated(connect: () => Promise<DedicatedConnection>): Promise<SessionIntegrityRow> {
+  const connection = await connect();
+  try {
+    return await probeRow(connection);
+  } finally {
+    await connection.end().catch(() => undefined);
+  }
+}
+
 export function createSessionIntegrityGuard(options: SessionIntegrityGuardOptions): SessionIntegrityGuard {
   const intervalMs = options.intervalMs ?? SESSION_INTEGRITY_INTERVAL_MS;
   const now = options.now ?? Date.now;
-  let checkedAt: number | undefined;
+  /** True once a dedicated-connection check found no tenant context (NULL); from then on the pool is used. */
+  let startupPassed = false;
+  /** Time of the last evaluation that found no drift; undefined after a failing or erroring one. */
+  let passedAt: number | undefined;
   let findings: readonly SessionIntegrityFinding[] = [];
+  let inflight: Promise<void> | undefined;
 
-  const refresh = async (): Promise<void> => {
-    const result = await options.pool.query(SESSION_INTEGRITY_SQL);
-    const row = result.rows[0];
-    if (!isRow(row)) throw new Error('session integrity probe returned no row');
-    const next = evaluateSessionIntegrity(row, { freshConnection: checkedAt === undefined });
+  const evaluate = async (): Promise<void> => {
+    const dedicated = !startupPassed;
+    passedAt = undefined;
+    const row = dedicated ? await probeDedicated(options.connectDedicated) : await probeRow(options.pool);
+    const next = evaluateSessionIntegrity(row, { freshConnection: dedicated });
     // One security event per transition into drift (or change of findings), not one per readiness poll.
     if (next.length > 0 && next.join() !== findings.join()) options.onDrift(next);
     findings = next;
-    checkedAt = now();
+    if (next.length > 0) return;
+    startupPassed = true;
+    passedAt = now();
+  };
+
+  // Concurrent callers (readiness, monitor) share one evaluation.
+  const refresh = (): Promise<void> => {
+    inflight ??= evaluate().finally(() => {
+      inflight = undefined;
+    });
+    return inflight;
+  };
+
+  const result = (): void => {
+    if (findings.length > 0) throw new SessionIntegrityError(findings);
   };
 
   return {
     async assertIntact(): Promise<void> {
-      if (checkedAt === undefined || now() - checkedAt >= intervalMs) await refresh();
-      if (findings.length > 0) throw new SessionIntegrityError(findings);
+      if (passedAt === undefined || now() - passedAt >= intervalMs) await refresh();
+      result();
+    },
+    async recheck(): Promise<void> {
+      await refresh();
+      result();
+    },
+  };
+}
+
+export interface IntegrityMonitor {
+  readonly name: 'session-integrity-monitor';
+  /** Stops the timer (graceful shutdown); in-flight checks finish on their own. */
+  close(): Promise<void>;
+}
+
+/**
+ * PR9-SEC-05: re-checks on a timer, independent of `/health/ready` polling (ECS polls liveness only), so durable
+ * tampering raises its security event within one interval. The timer is unref'd: it never keeps the process alive.
+ * Failures are already reported through `onDrift` or the next readiness check; nothing is thrown from the timer.
+ */
+export function startIntegrityMonitor(guard: SessionIntegrityGuard, intervalMs: number = SESSION_INTEGRITY_INTERVAL_MS): IntegrityMonitor {
+  const timer = setInterval(() => {
+    guard.recheck().catch(() => undefined);
+  }, intervalMs);
+  timer.unref();
+  return {
+    name: 'session-integrity-monitor',
+    close: () => {
+      clearInterval(timer);
+      return Promise.resolve();
     },
   };
 }

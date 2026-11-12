@@ -12,6 +12,10 @@ const log = createRuntimeLog('worker', process.stdout);
 const services = createRuntimeServices(config, 'worker', log);
 const server = createWorkerHealthServer(services.probe);
 
+// Session-integrity check on a dedicated connection before the health server opens and before any queue processor
+// takes a job (PR-0009 M1); never rejects. Queue processors register after this line.
+await services.startup();
+
 server.listen(config.APP_HEALTH_PORT, () => log.info('worker.health_listening', { port: config.APP_HEALTH_PORT }));
 server.on('error', (error: Error) => {
   log.error('worker.listen_failed', { error: error.name });

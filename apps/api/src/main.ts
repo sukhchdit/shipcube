@@ -15,7 +15,12 @@ const log = createRuntimeLog('api', process.stdout);
 const services = createRuntimeServices(config, 'api', log);
 const app = createApp({ healthRouter: createHealthRouter({ probe: services.probe }), modules: moduleRegistry });
 
-const server = app.listen(config.APP_PORT, () => log.info('api.listening', { port: config.APP_PORT }));
+// Session-integrity check on a dedicated connection before the listener opens (PR-0009 M1); never rejects.
+await services.startup();
+// Express 5 registers this callback as a once-'error' listener too: log 'listening' only on success (PR-0009 n1).
+const server = app.listen(config.APP_PORT, (error?: Error) => {
+  if (error === undefined) log.info('api.listening', { port: config.APP_PORT });
+});
 server.on('error', (error: Error) => {
   log.error('api.listen_failed', { error: error.name });
   process.exit(1);
