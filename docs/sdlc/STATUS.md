@@ -27,13 +27,13 @@
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | merged 8bf373c | ✅ | ✅ APPROVED r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ 77/77 unit, lint, typecheck, build on main (orchestrator) | ✅ | 1 | – |
-| 0.2 | TASK-002 lint/format/layering | senior-developer → specialist | feat/TASK-002-* | ▶ | | | | | 0 | |
-| 0.2 | TASK-003 Prisma 7 + PG 18 baseline (+ engine pin D-ARCH-041) | senior-developer → database-engineer | feat/TASK-003-* | ▶ | | | | | 0 | |
-| 0.2 | TASK-004 web + admin scaffolds (Playwright after cooldown 18:30Z) | senior-developer → frontend-developer | feat/TASK-004-* | ▶ | | | | | 0 | |
-| 0.2 | TASK-005 packages/config + key register | senior-developer → backend-developer | feat/TASK-005-* | ▶ | | | | | 0 | |
+| 0.2 | TASK-002 lint/format/layering (PR #2) | senior-developer → specialist (sonnet→opus cont.) | feat/TASK-002-lint-format-layering-rules-negative @9bc9c04 | ✅ | ▶ | ▶ | ✅ lint/fmt/tc, unit 133/133, build, audit (sr-dev) | | 0 | – |
+| 0.2 | TASK-003 Prisma 7 + PG 18 baseline + engine pin D-ARCH-041 (PR #5) | senior-developer → database-engineer (opus) | feat/TASK-003-prisma-7-postgresql-18-baseline @d8ba197 | ✅ | ▶ | ▶ | ✅ unit 159/159 (sr-dev); integration 26/26, build, audit, clean tree (orchestrator) | | 0 | – |
+| 0.2 | TASK-004 web + admin scaffolds (PR #4; Playwright+axe after cooldown 18:30Z) | senior-developer → frontend-developer (opus cont.) | feat/TASK-004-web-admin-app-scaffolds @519bb89 | 🟡 harness pending | ▶ | ▶ | ✅ unit 157/157, integration 5/5, build+size-limit, audit (sr-dev) | | 0 | – |
+| 0.2 | TASK-005 packages/config + key register (PR #3) | senior-developer → backend-developer (sr-dev completed) | feat/TASK-005-typed-validated-configuration-key-secret @be468bc | ✅ | ▶ | ▶ | ✅ unit 226/226, cov 99.9/97.7, build, audit (sr-dev) | | 0 | – |
 
 ## Escalations in progress
-_none_
+_none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuation / sr-dev completion — not fix cycles)
 
 ## Defaults applied / optional questions outstanding
 - Q-006 Node 24 via fnm (installed v24.22.3; per-command PATH prefix since the profile change was blocked by the safety classifier) — D-ORCH-002.
