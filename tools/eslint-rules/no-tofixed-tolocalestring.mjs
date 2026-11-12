@@ -19,6 +19,21 @@ function memberName(node) {
   return null;
 }
 
+/**
+ * @param {import('estree').Node} callee
+ * @returns {string | null} The forbidden `Intl.<name>` constructor named by the callee, called with or without `new`.
+ */
+function forbiddenIntl(callee) {
+  const name = memberName(callee);
+  return name !== null &&
+    FORBIDDEN_INTL.has(name) &&
+    callee.type === 'MemberExpression' &&
+    callee.object.type === 'Identifier' &&
+    callee.object.name === 'Intl'
+    ? name
+    : null;
+}
+
 /** @type {import('eslint').Rule.RuleModule} */
 export default {
   meta: {
@@ -50,19 +65,15 @@ export default {
           callee.object.name === 'Number'
         ) {
           context.report({ node: callee, messageId: 'forbiddenParseFloat' });
+        } else {
+          // `Intl.NumberFormat('en')` without `new` is valid JavaScript and returns a formatter too (n6).
+          const name = forbiddenIntl(callee);
+          if (name !== null) context.report({ node, messageId: 'forbiddenIntl', data: { name } });
         }
       },
       NewExpression(node) {
-        const name = memberName(node.callee);
-        if (
-          name !== null &&
-          FORBIDDEN_INTL.has(name) &&
-          node.callee.type === 'MemberExpression' &&
-          node.callee.object.type === 'Identifier' &&
-          node.callee.object.name === 'Intl'
-        ) {
-          context.report({ node, messageId: 'forbiddenIntl', data: { name } });
-        }
+        const name = forbiddenIntl(node.callee);
+        if (name !== null) context.report({ node, messageId: 'forbiddenIntl', data: { name } });
       },
     };
   },

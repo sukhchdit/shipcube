@@ -33,12 +33,27 @@ const RESOLVER_MODULE = join(ROOT, 'tools', 'lint', 'resolver.mjs');
 
 /** The one module allowed to import `bcrypt` / `bcryptjs`: the `PasswordHasher` implementation (D-ARCH-042, ADR-0006 am. 16). TASK-049 creates it. */
 const PASSWORD_HASHER_MODULE = 'apps/api/src/modules/identity/service/bcrypt-password-hasher.ts';
+/** The bcrypt family: `bcrypt`, `bcryptjs`, `bcrypt-ts`, `@node-rs/bcrypt` ... and their subpaths (picomatch, boundaries). */
+const BCRYPT_FAMILY = ['bcrypt*', '@*/bcrypt*'];
+const BCRYPT_MESSAGE = `only the PasswordHasher implementation (${PASSWORD_HASHER_MODULE}) imports the bcrypt family; everything else uses the PasswordHasher port (D-ARCH-042, ADR-0006 am. 16).`;
+/** Static-import net over every linted file (ADR-0002 PR1-SEC am. item 3); the boundaries policy below adds import(), require and createRequire. */
+const BCRYPT_IMPORT_PATTERN = { regex: '^(?:@[^/]+/)?bcrypt[-.\\w]*(?:/.*)?$', message: BCRYPT_MESSAGE };
+/**
+ * Every `no-restricted-imports` pattern of the repository. Flat config replaces (does not merge) rule options, so a
+ * file-scoped block re-declares the rule from this list minus its own exception, never `'off'`.
+ */
+const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN];
 
-const TEST_FILES = ['**/*.test.{ts,tsx}', '**/{test,tests,__tests__}/**'];
-const APP_AND_PACKAGE_SOURCES = ['apps/*/{src,app}/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}', 'prisma/seed/**/*.ts'];
-const SERVER_SOURCES = ['apps/api/src/**/*.ts', 'apps/worker/src/**/*.ts', 'packages/*/src/**/*.ts'];
-const REACT_SOURCES = ['apps/web/app/**/*.{ts,tsx}', 'apps/admin/app/**/*.{ts,tsx}', 'packages/ui/src/**/*.{ts,tsx}'];
-const REACT_TSX = ['apps/web/app/**/*.tsx', 'apps/admin/app/**/*.tsx', 'packages/ui/src/**/*.tsx'];
+/** Every file extension ESLint lints (PR2-SEC-03: `.jsx` included, so no source file is silently skipped). */
+const LINTED = '{js,jsx,mjs,cjs,ts,tsx,mts,cts}';
+const TEST_FILES = ['**/*.test.{ts,tsx,js,jsx}', '**/{test,tests,__tests__}/**'];
+const APP_AND_PACKAGE_SOURCES = [`apps/*/{src,app}/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`, 'prisma/seed/**/*.ts'];
+/** Browser packages: not server code (TASK-065 puts the Axios session client in packages/ui/src/session). */
+const BROWSER_PACKAGES = ['packages/ui/**'];
+/** Server code: the api, the worker and every package except the browser ones (new packages are covered by default). */
+const SERVER_SOURCES = [`apps/api/src/**/*.${LINTED}`, `apps/worker/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`];
+const REACT_SOURCES = ['apps/web/app/**/*.{ts,tsx,js,jsx}', 'apps/admin/app/**/*.{ts,tsx,js,jsx}', 'packages/ui/src/**/*.{ts,tsx,js,jsx}'];
+const REACT_TSX = ['apps/web/app/**/*.{tsx,jsx}', 'apps/admin/app/**/*.{tsx,jsx}', 'packages/ui/src/**/*.{tsx,jsx}'];
 
 /** Money helpers own the arithmetic on minor units (ADR-0009 §3). */
 const MONEY_HELPERS = ['packages/shared/src/money/**'];
@@ -58,6 +73,11 @@ const AUDIT_WRITER_ALLOW_LIST = [
   'apps/api/src/modules/admin-settings/**', // config changes (reference data, feature flags)
   'apps/api/src/modules/shipments/service/**', // the state machine writes STATE_TRANSITION entries
 ];
+/**
+ * Non-repository files planned to use Prisma, by exact path (narrow): the audit store (ADR-0007, TASK-025) and the
+ * transactional outbox writer (TASK-043). Anything else beside them still goes through a repository.
+ */
+const PLANNED_PRISMA_FILES = ['packages/audit/src/store/prisma-store.ts', 'apps/api/src/platform/outbox/writer.ts'];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];
 
@@ -96,6 +116,8 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
   { pattern: 'apps/*/src/platform/db/**', category: 'db-platform' },
+  { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
+  { pattern: PASSWORD_HASHER_MODULE, category: 'password-hasher' },
   { pattern: 'prisma/generated/**', category: 'prisma-generated' },
   { pattern: 'prisma/**', category: 'prisma' },
   { pattern: 'tools/db/**', category: 'tools-db' },
@@ -128,7 +150,20 @@ const IMPORTER_PACKAGE = (/** @type {string} */ pkg) => ({
 
 /** Policies. The last matching policy decides and `default` is allow, so each entry is a prohibition or its narrow exception. */
 const BOUNDARIES_POLICIES = [
-  // --- Layering inside a module: routes -> controller -> service -> repository (ADR-0003).
+  // --- Layering inside a module: routes -> controller -> service -> repository (ADR-0003). The module index.ts
+  //     (category module-entry, unconstrained) is the composition root that wires repository -> service -> controller
+  //     and hands the controller to the routes (D-ORCH-006); routes.ts is not a composition root.
+  {
+    from: inLayer('routes'),
+    disallow: { to: toLayer('service', 'repository') },
+    message:
+      'routes map HTTP paths to controllers only: a route must not import a service or a repository; the module index.ts wires the layers (ADR-0003).',
+  },
+  {
+    from: inLayer('controller'),
+    disallow: { to: toLayer('routes') },
+    message: 'controllers sit below routes: a controller must not import routes (ADR-0003).',
+  },
   {
     from: inLayer('controller'),
     disallow: { to: toLayer('repository') },
@@ -167,6 +202,17 @@ const BOUNDARIES_POLICIES = [
   },
   { from: DATABASE_CODE, allow: SQL_DRIVER_TARGETS.map((to) => ({ to })) },
 
+  // --- The bcrypt family is confined to the PasswordHasher implementation (D-ARCH-042, ADR-0006 am. 16): import,
+  //     export-from, import(), require, module.require and createRequire(...)(...) (see the additional dependency
+  //     nodes). The hasher may use bcrypt but never re-export it (that would defeat the port).
+  { disallow: { to: toPackage(...BCRYPT_FAMILY) }, message: BCRYPT_MESSAGE },
+  { from: { file: { categories: 'password-hasher' } }, allow: { to: toPackage(...BCRYPT_FAMILY) } },
+  {
+    from: { file: { categories: 'password-hasher' } },
+    disallow: { to: toPackage(...BCRYPT_FAMILY), dependency: { nodeKind: 'export' } },
+    message: 'the PasswordHasher implementation uses bcrypt but never re-exports it: callers go through the port (D-ARCH-042).',
+  },
+
   // --- Modules talk to each other only through the other module's public index.ts (ADR-0003).
   {
     from: IMPORTER_MODULE,
@@ -180,6 +226,13 @@ const BOUNDARIES_POLICIES = [
 
   // --- Apps (ADR-0003): web and admin import shared and ui only; api imports no other app; the worker imports
   //     module services through their public index.ts, never controllers or routes.
+  {
+    from: IMPORTER_APP('{web,admin}'),
+    disallow: [{ to: toPackage('@platform/*') }, { to: { file: { categories: 'package', captured: { pkg: '!(shared|ui)' } } } }],
+    message:
+      'apps/web and apps/admin import only @platform/shared and @platform/ui; server packages (config, audit, authz, carriers, pricing) stay out of the browser bundle (ADR-0003).',
+  },
+  { from: IMPORTER_APP('{web,admin}'), allow: { to: toPackage('@platform/shared', '@platform/ui') } },
   {
     from: IMPORTER_APP('{web,admin}'),
     disallow: [
@@ -238,10 +291,12 @@ const BOUNDARIES_POLICIES = [
 export default defineConfig([
   globalIgnores([
     '**/node_modules/**',
-    '**/dist/**',
-    '**/build/**',
-    '**/coverage/**',
-    '**/.react-router/**',
+    // Build and coverage output, anchored to the output folders (root and workspace roots) so a source folder named
+    // `build`, `dist` or `coverage` (declared-value coverage is a domain word) is still linted (PR2-SEC-03).
+    '{dist,build,coverage}/**',
+    '{apps,packages,tests}/*/{dist,build,coverage}/**',
+    'prisma/{dist,build,coverage}/**',
+    '{apps,packages}/*/.react-router/**',
     'prisma/generated/**',
     'docs/**',
     '.claude/**',
@@ -254,25 +309,18 @@ export default defineConfig([
 
   // --- Baselines ----------------------------------------------------------------------------------------------
   {
-    files: ['**/*.{js,mjs,cjs,ts,tsx,mts,cts}'],
+    files: [`**/*.${LINTED}`],
     extends: [js.configs.recommended],
     rules: {
       eqeqeq: ['error', 'always'],
       'no-var': 'error',
       'prefer-const': 'error',
-      'no-restricted-imports': [
-        'error',
-        {
-          // `bcrypt`, `bcryptjs` and their subpaths (`bcryptjs/umd` ...).
-          patterns: [
-            {
-              regex: '^bcrypt(?:js)?(?:/.*)?$',
-              message: `only the PasswordHasher implementation (${PASSWORD_HASHER_MODULE}) imports bcrypt/bcryptjs; everything else uses the PasswordHasher port (D-ARCH-042, ADR-0006 am. 16).`,
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', { patterns: RESTRICTED_IMPORT_PATTERNS }],
     },
+  },
+  {
+    files: ['**/*.jsx'],
+    languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
   },
   {
     files: ['**/*.{mjs,cjs}'],
@@ -298,7 +346,7 @@ export default defineConfig([
   },
   {
     // Plain JavaScript (config, tooling scripts) is outside the TypeScript project service: no type-aware rules.
-    files: ['**/*.{js,mjs,cjs}'],
+    files: ['**/*.{js,jsx,mjs,cjs}'],
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
@@ -318,7 +366,7 @@ export default defineConfig([
 
   // --- import-x: resolution, cycles, dependency declarations ----------------------------------------------------
   {
-    files: ['**/*.{js,mjs,cjs,ts,tsx,mts,cts}'],
+    files: [`**/*.${LINTED}`],
     plugins: { 'import-x': importX.importX },
     settings: {
       'import-x/extensions': resolverOptions.extensions,
@@ -356,11 +404,24 @@ export default defineConfig([
 
   // --- Layering (eslint-plugin-boundaries) ----------------------------------------------------------------------
   {
-    files: ['{apps,packages,prisma,tools,tests}/**/*.{ts,tsx,mts,cts,js,mjs}'],
+    files: [`{apps,packages,prisma,tools,tests}/**/*.${LINTED}`],
     plugins: { boundaries },
     settings: {
       'boundaries/root-path': ROOT,
       'boundaries/files': BOUNDARIES_FILES,
+      // Besides import/export/import()/require (defaults): `createRequire(import.meta.url)('x')` and `module.require('x')`.
+      'boundaries/additional-dependency-nodes': [
+        {
+          selector: 'CallExpression[callee.type="CallExpression"][callee.callee.name="createRequire"] > Literal',
+          kind: 'value',
+          name: 'require',
+        },
+        {
+          selector: 'CallExpression[callee.type="MemberExpression"][callee.property.name="require"] > Literal',
+          kind: 'value',
+          name: 'require',
+        },
+      ],
       // Same resolver (and `@platform/source` condition) as import-x, loaded by path (legacy interface v2).
       'import/resolver': { [RESOLVER_MODULE]: {} },
       'import/extensions': resolverOptions.extensions,
@@ -375,7 +436,7 @@ export default defineConfig([
 
   // --- Local rules (tools/eslint-rules) -------------------------------------------------------------------------
   {
-    files: ['**/*.{js,mjs,cjs,ts,tsx,mts,cts}'],
+    files: [`**/*.${LINTED}`],
     plugins: { platform },
     rules: {
       'platform/any-justification': 'error',
@@ -400,7 +461,7 @@ export default defineConfig([
   },
   {
     files: SERVER_SOURCES,
-    ignores: TEST_FILES,
+    ignores: [...TEST_FILES, ...BROWSER_PACKAGES],
     plugins: { platform },
     rules: { 'platform/outbound-http-via-client': 'error' },
   },
@@ -409,7 +470,13 @@ export default defineConfig([
   { files: SANITISING_COMPONENT, rules: { 'platform/no-innerhtml': 'off' } },
   { files: OUTBOUND_CLIENT, rules: { 'platform/outbound-http-via-client': 'off' } },
   { files: AUDIT_WRITER_ALLOW_LIST, rules: { 'platform/audit-writer-allowlist': 'off' } },
-  { files: [PASSWORD_HASHER_MODULE], rules: { 'no-restricted-imports': 'off' } },
+  {
+    // The hasher keeps every other restricted pattern (re-declared from the shared list, never 'off').
+    files: [PASSWORD_HASHER_MODULE],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: RESTRICTED_IMPORT_PATTERNS.filter((pattern) => pattern !== BCRYPT_IMPORT_PATTERN) }],
+    },
+  },
 
   // --- React: hooks, accessibility (NFR-A11Y-*), string externalisation (NFR-I18N-001) -----------------------------
   {
@@ -418,7 +485,13 @@ export default defineConfig([
   },
   {
     files: REACT_TSX,
-    extends: [jsxA11y.configs.recommended, i18next.configs['flat/recommended']],
+    extends: [jsxA11y.configs.recommended],
+  },
+  {
+    // String externalisation applies to shipped UI, not to test files (their literals are assertions and fixtures).
+    files: REACT_TSX,
+    ignores: TEST_FILES,
+    extends: [i18next.configs['flat/recommended']],
     rules: {
       'i18next/no-literal-string': [
         'error',
