@@ -20,3 +20,5 @@ Developer specialists stop at an 80-turn limit, and an M-size task with several 
 - Write long PR bodies with the Write tool. A Bash heredoc containing backticks and apostrophes failed with "unexpected EOF".
 
 Related: [[p5-worktrees]], [[plan-generation-workflow]]
+
+**Small fix cycles: do them solo (PR #3 cycle 2, 2026-11-12).** Four findings plus four NITs, all in one package, took about 60 tool calls including the serial background gate, with no dispatch. That was faster than briefing a specialist. Write scratch scripts that contain backslashes (regex, Windows paths) with the Write tool: a quoted Bash heredoc lost a `\` in `/\/g`.

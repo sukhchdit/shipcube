@@ -56,17 +56,18 @@ PR #5 (TASK-003) r2 at 4574a14 was APPROVED_WITH_NITS (2026-11-12). r3 merge-mai
   - D-ARCH-049's rule-12 "precision" sentence is superseded by deny-by-default.
   - ADR-0018 register lacks the `BOOTSTRAP_*_PASSWORD_FILE` exception.
 
-PR #3 (TASK-005) r2 at 875409d was APPROVED_WITH_NITS (2026-11-12). PR #2 was not in the branch, so type-aware lint must pass on the merge-main commit. Routed:
-- In-PR or TASK-022: R2-m1, Joi/Zod BRAND_* parity diverges outside the curated vectors; needs shared predicates.
+PR #3 (TASK-005) r3 at 0e48a2a was APPROVED_WITH_NITS (2026-11-12). R2-m1 and R2-n1..n4 are closed (shared predicates, AST scan, permanent errors, slack). Gatekeeper must re-run gates on the merge-main commit with TASK-003. New NITs, optional in-PR, else TASK-022:
+  - r4 merge-main delta at 3e390e0 (2026-11-12) was APPROVED_WITH_NITS. R4-n1: the compose-env SCRAM test loop does not name the failing key. gh showed no CI checks on that head; confirm CI before merge.
+  - R3-n1: the web `missing` issue carries `rule: invalid_type`; the backend has none.
+  - R3-n2: the differential `Verdict` lacks the rule id (mutant M8 survives the property).
+  - R3-n3: the backend import graph deny-lists zod and does not follow `@platform/config/web` self-reference; switch to an allow-list.
+  - R3-n4: BRAND_NAME accepts controls, bidi and lone surrogates (it reaches e-mail headers).
+Still open from r2:
 - TASK-014 / migrate-job owner:
   - R2-m2: tooling keys get no placeholder or verify-full check in the tools themselves.
   - The inspector guard only detects; a Checkov or task-def NODE_OPTIONS lint is needed.
 - TASK-006/014: file provider `O_NOFOLLOW` and TOCTOU; m4 `loadRuntimeConfigOrExit`; m5 holder enforcement.
 - Crypto tasks: m6 local key derivation.
-- Nits:
-  - R2-n1: import-graph regex misses dynamic `import()`.
-  - R2-n3: permanent `SecretFileError` failures are retried.
-  - R2-n4: tight timing bounds in tests.
 
 **Why:** these were deferred as tracked conditions, so they can slip silently into later PRs.
 
@@ -74,3 +75,30 @@ PR #3 (TASK-005) r2 at 875409d was APPROVED_WITH_NITS (2026-11-12). PR #2 was no
 - When a PR touches any of these, grep for the matching item: jest.config.ts, the tsconfigs, .npmrc, the lockfile checks, prisma, Dockerfiles, infra/nginx, theme.css, .size-limit.json, i18n, eslint.config.mjs, .gitignore.
 - Drop an entry once it is verified fixed.
 - Fix cycles that list the mutation or fixture proving each guard worked well (PR #1 r2, PR #2 r2). Ask for that again.
+
+PR #6 (TASK-009, SPK-02 carrier docs) r1 at 4e5d05f went CHANGES_REQUESTED (2026-11-12).
+- M1: the UPS GIF→PDF recommendation assumes pdfkit reads GIF. pdfkit 0.20.2 reads JPEG/PNG only (`Unknown image format.`). UPS Label Recovery lists `PDF`. REQ-DOC-002 is PDF-only.
+- m1: the FedEx SDK F5 `index.js` confirms the ship, cancel (PUT) and address-resolve paths that the README marks unverified.
+- Also open: m2 pin source SHAs; m3 DHL sandbox/prod share a host, so bind base URL to env and never follow carrier-returned URLs; m4 PII in query strings (DHL `requestorName`) and data minimisation.
+- Round 2: verify these in the delta. When TASK-135/139/140 PRs land, check that m3 and m4 are implemented (HttpClient strips the query from logs, inline labels only).
+
+PR #7 (TASK-008, SPK-03) r1 at 985a552 went CHANGES_REQUESTED (2026-11-12). The only MAJOR is M1: the (d) wall-clock benchmark asserts in the permanent integration suite; required fix is opt-in `SPK03_BENCH=1`. In round 2, check:
+- M1 is gated, and SPK-03 §0 and C-1 use the flag.
+- m1: P2010 `meta.driverAdapterError.cause.code` and P2028 are pinned with `toMatchObject`.
+- m2: `statement_timeout`/`correlation_id` are in `setContext`, with the reset asserted.
+- m6: maxWait raised in the 50-parallel test.
+Routed to TASK-016 if not fixed in-PR:
+- m3: ALS runtime guard against the root client inside `withTenantTx`. The W-2 "existing lint rule" does not exist.
+- m4: ban session-level `SET`/`set_config(…,false)`/`RESET`. adapter-pg releases without a reset.
+- m5: 55P03 claim-loser test.
+- m7: C-1 owned by TASK-016 before G3; port, then delete the spike file.
+
+PR #8 (TASK-013 authz catalogue) r1 at efe23df was CHANGES_REQUESTED (2026-11-12). For round 2, check:
+- M1: the Compliance Auditor rule in `guard.ts` used free-text `category === 'audit'`. It must use the key's resource, and `checkCatalogue` must tie category to resource.
+- M2: the seed migration needs a sha256 pin per version. `--check` must refuse an in-place rewrite of v1, and versions above 1 need a delta down.
+- M3: `session:manage` and `notification_pref:manage` were withheld from Viewer and Auditor (REQ-AUTH-021 Must, ASVS V3.3.4). Closure is a fix or a logged PM + architect ruling.
+- m1–m6 are in the review file.
+Routed:
+- TASK-023 must not seed `permissions`, `roles` or `role_permissions`.
+- TASK-016's R3-n1 allow-list gains the `prisma/tests → tools/authz` edge.
+- Invitation tasks (US-083/085) need `canAssignRole`: subset of the assigner's permissions, and Owner only by an Owner.
