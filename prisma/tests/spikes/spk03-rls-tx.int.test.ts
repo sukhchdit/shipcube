@@ -28,6 +28,10 @@ interface TenantContext {
   readonly actorId: string;
   readonly actorScope: 'TENANT' | 'OPERATOR';
   readonly guestTokenHash: string;
+  /** data-model §4.1 setting 5; defaults to {@link DEFAULT_CORRELATION_ID}. */
+  readonly correlationId?: string;
+  /** data-model §4.1 setting 6 (transaction-local `statement_timeout`, ms); defaults to {@link DEFAULT_STATEMENT_TIMEOUT_MS}. */
+  readonly statementTimeoutMs?: number;
 }
 
 interface TxOptions {
@@ -48,6 +52,9 @@ const USER_B = randomUUID();
 const OPERATOR_USER = randomUUID();
 const NOT_OPERATOR_USER = randomUUID();
 
+const DEFAULT_CORRELATION_ID = 'spk03';
+const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
+
 const NO_CONTEXT: TenantContext = { orgId: '', actorId: '', actorScope: 'TENANT', guestTokenHash: '' };
 const tenant = (orgId: string, actorId = USER_A, guestTokenHash = ''): TenantContext => ({
   orgId,
@@ -65,12 +72,32 @@ let database: string;
 let client: PrismaClient;
 let single: PrismaClient;
 
-/** The ADR-0005 context statement: one parameterised round trip, transaction-local settings. */
+/** Bind values of the data-model §4.1 context statement, in `$1..$6` order (all strings; `is_local` stays a literal). */
+function contextValues(ctx: TenantContext): [string, string, string, string, string, string] {
+  return [
+    ctx.orgId,
+    ctx.actorId,
+    ctx.actorScope,
+    ctx.guestTokenHash,
+    ctx.correlationId ?? DEFAULT_CORRELATION_ID,
+    String(ctx.statementTimeoutMs ?? DEFAULT_STATEMENT_TIMEOUT_MS),
+  ];
+}
+
+/** The same statement for raw `pg` (benchmark variants). */
+const CONTEXT_SQL = `SELECT set_config('app.org_id', $1, true), set_config('app.actor_id', $2, true),
+                            set_config('app.actor_scope', $3, true), set_config('app.guest_token_hash', $4, true),
+                            set_config('app.correlation_id', $5, true), set_config('statement_timeout', $6, true)`;
+
+/** The data-model §4.1 context statement: one parameterised round trip, six transaction-local settings. */
 async function setContext(tx: RawTx, ctx: TenantContext): Promise<void> {
-  await tx.$executeRaw`SELECT set_config('app.org_id', ${ctx.orgId}, true) AS org_id,
-                              set_config('app.actor_id', ${ctx.actorId}, true) AS actor_id,
-                              set_config('app.actor_scope', ${ctx.actorScope}, true) AS actor_scope,
-                              set_config('app.guest_token_hash', ${ctx.guestTokenHash}, true) AS guest_token_hash`;
+  const [orgId, actorId, actorScope, guestTokenHash, correlationId, statementTimeout] = contextValues(ctx);
+  await tx.$executeRaw`SELECT set_config('app.org_id', ${orgId}, true) AS org_id,
+                              set_config('app.actor_id', ${actorId}, true) AS actor_id,
+                              set_config('app.actor_scope', ${actorScope}, true) AS actor_scope,
+                              set_config('app.guest_token_hash', ${guestTokenHash}, true) AS guest_token_hash,
+                              set_config('app.correlation_id', ${correlationId}, true) AS correlation_id,
+                              set_config('statement_timeout', ${statementTimeout}, true) AS statement_timeout`;
 }
 
 /** Prototype of TASK-016's `withTenantTx`: a Prisma 7 interactive transaction whose first statement sets the context. */
@@ -153,7 +180,7 @@ function sqlState(error: unknown): string | undefined {
     return undefined;
   };
   const message = error instanceof Error ? error.message : '';
-  return visit(error) ?? /\b(42501|42601|40001|55P03|25P02)\b/.exec(message)?.[1];
+  return visit(error) ?? /\b(42501|42601|40001|55P03|57014|25P02)\b/.exec(message)?.[1];
 }
 
 function describeError(error: unknown): Record<string, unknown> {
@@ -165,6 +192,47 @@ function describeError(error: unknown): Record<string, unknown> {
     sqlState: sqlState(error),
     message: (error instanceof Error ? error.message : String(error)).split('\n').slice(-3).join(' | '),
   };
+}
+
+/**
+ * Pinned shape of a PostgreSQL error raised by a raw query (F-06 / m1): `P2010`, and the adapter's default (`postgres`)
+ * kind keeps the SQLSTATE in both `code` and `originalCode`. Mapped kinds (40001, 23505, …) carry `originalCode` only
+ * (PR7-SEC-03), so TASK-016's mapper keys on `originalCode`.
+ */
+const rawPgError = (sqlstate: string): Record<string, unknown> => ({
+  code: 'P2010',
+  meta: { driverAdapterError: { cause: { kind: 'postgres', code: sqlstate, originalCode: sqlstate } } },
+});
+
+interface SessionSettings {
+  pid: number;
+  timeout: string;
+  correlation: string | null;
+}
+
+async function sessionSettings(tx: Pick<Tx, '$queryRaw'>): Promise<SessionSettings> {
+  return one(
+    await tx.$queryRaw<SessionSettings[]>`SELECT pg_backend_pid() AS pid, current_setting('statement_timeout') AS timeout,
+                                                  current_setting('app.correlation_id', true) AS correlation`,
+  );
+}
+
+/**
+ * Polls `pg_stat_activity` until a `spk03` backend waits on a lock. Deadline 1.5 s on purpose: `platform_app` has
+ * `lock_timeout = 2s` (prisma/bootstrap/00-roles.sql), so the waiter must be seen before the loser's lock wait can
+ * expire with 55P03. Lengthening this deadline past 2 s would turn the 0-row race test into a 55P03 failure.
+ */
+async function waitForLockWaiter(observer: pg.Client): Promise<boolean> {
+  const deadline = performance.now() + 1_500;
+  while (performance.now() < deadline) {
+    const rows = await observer.query(
+      `SELECT 1 FROM pg_catalog.pg_stat_activity WHERE datname = $1 AND application_name = 'spk03' AND wait_event_type = 'Lock'`,
+      [database],
+    );
+    if ((rows.rowCount ?? 0) > 0) return true;
+    await delay(25);
+  }
+  return false;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -221,7 +289,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   SELECT pg_catalog.current_setting('app.actor_scope', true) = 'OPERATOR'
      AND EXISTS (SELECT 1 FROM public.spk03_operator_members m WHERE m.user_id = platform.spk03_app_actor_id())
 $$;
--- grant before the owner change: the migrator holds platform_definer WITH INHERIT FALSE and cannot grant afterwards
+-- grant before the owner change: the migrator holds platform_definer WITH INHERIT FALSE, so a grant after the owner change
+-- is expected to fail (not exercised; F-10)
 GRANT EXECUTE ON FUNCTION platform.spk03_app_is_operator() TO platform_app;
 ALTER FUNCTION platform.spk03_app_is_operator() OWNER TO platform_definer;
 ALTER TABLE public.spk03_operator_members ENABLE ROW LEVEL SECURITY;
@@ -326,7 +395,60 @@ describe('SPK-03 (a) context isolation across pooled connections', () => {
       expect(['', null]).toContain(seen.org);
       expect(seen.rows).toEqual([]);
     }
+    // F-07 pinned: on a reused backend the placeholder reads '' (not NULL) once a transaction has set it.
+    expect(afterCommit.org).toBe('');
     report['a_reset_value'] = { afterCommit: afterCommit.org, afterRollback: afterRollback.org, pid: committed.pid };
+  });
+
+  it('SPK-03 (a) the transaction-local statement_timeout and app.correlation_id are honoured inside the transaction and revert on the pooled connection', async () => {
+    const baseline = await sessionSettings(single);
+    expect(baseline.timeout).not.toBe('250ms');
+
+    const inside = await withTenantTx(single, { ...tenant(ORG_A), correlationId: 'spk03-m2', statementTimeoutMs: 250 }, sessionSettings);
+    expect(inside).toEqual({ pid: baseline.pid, timeout: '250ms', correlation: 'spk03-m2' });
+    const afterCommit = await sessionSettings(single);
+    expect(afterCommit).toEqual({ pid: baseline.pid, timeout: baseline.timeout, correlation: '' });
+
+    // honoured: a statement longer than the transaction-local timeout is cancelled (57014) and the transaction rolls back
+    const cancelled = await rejection(
+      withTenantTx(
+        single,
+        { ...tenant(ORG_A), correlationId: 'spk03-m2-cancel', statementTimeoutMs: 200 },
+        (tx) => tx.$executeRaw`SELECT pg_sleep(1)`,
+      ),
+    );
+    report['a_statement_timeout_error'] = describeError(cancelled);
+    expect(cancelled).toMatchObject(rawPgError('57014'));
+    const afterRollback = await sessionSettings(single);
+    expect(afterRollback).toEqual({ pid: baseline.pid, timeout: baseline.timeout, correlation: '' });
+    // reverted: the same backend now runs the same-length sleep without a context (role default, no 200 ms limit)
+    expect(await single.$executeRaw`SELECT pg_sleep(0.3)`).toBeGreaterThanOrEqual(0);
+    report['a_statement_timeout'] = { baseline: baseline.timeout, inside: inside.timeout, pid: baseline.pid };
+  });
+
+  it('SPK-03 (a) negative control: a session-level set_config(..., false) leaks into the next transaction on the same backend; the transaction-local form does not', async () => {
+    const local = await withTenantTx(single, tenant(ORG_A), probe);
+    const afterLocal = await single.$transaction(probe);
+    expect(afterLocal).toEqual({ pid: local.pid, org: '', rows: [] });
+
+    const sessionLevel = await single.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.org_id', ${ORG_A}, false)`; // the hazard (F-04): is_local = false
+      return probe(tx);
+    });
+    try {
+      const nextTx = await single.$transaction(probe);
+      const nextAutocommit = await probe(single);
+      // the leak: no withTenantTx at all, yet the reused backend still carries org A and RLS admits its rows
+      for (const seen of [nextTx, nextAutocommit]) {
+        expect(seen).toEqual({ pid: sessionLevel.pid, org: ORG_A, rows: [ORG_A, ORG_A, ORG_A] });
+      }
+      // withTenantTx overrides it for its own transaction, but SET LOCAL reverts to the session value, not to ''
+      expect((await withTenantTx(single, tenant(ORG_B, USER_B), probe)).rows).toEqual([ORG_B, ORG_B]);
+      expect(await single.$transaction(probe)).toEqual({ pid: sessionLevel.pid, org: ORG_A, rows: [ORG_A, ORG_A, ORG_A] });
+    } finally {
+      await single.$executeRaw`RESET app.org_id`; // clean the leaked session value so later tests start clean
+    }
+    expect(await single.$transaction(probe)).toEqual({ pid: sessionLevel.pid, org: '', rows: [] });
   });
 
   it('SPK-03 (a) 50 parallel transactions over a pool of two never leak context', async () => {
@@ -334,11 +456,17 @@ describe('SPK-03 (a) context isolation across pooled connections', () => {
     const runs = await Promise.all(
       Array.from({ length: 50 }, (_, i) => {
         const ctx = contexts[i % 3] ?? NO_CONTEXT;
-        return withTenantTx(client, ctx, async (tx) => {
-          const first = await probe(tx);
-          await tx.$executeRaw`SELECT pg_sleep(0.002)`; // $queryRaw cannot deserialize a void column
-          return { ctx, first, second: await probe(tx) };
-        });
+        // explicit maxWait: 50 transactions queue ~25 deep on 2 connections; the default 2000 ms is not what is tested
+        return withTenantTx(
+          client,
+          ctx,
+          async (tx) => {
+            const first = await probe(tx);
+            await tx.$executeRaw`SELECT pg_sleep(0.002)`; // $queryRaw cannot deserialize a void column
+            return { ctx, first, second: await probe(tx) };
+          },
+          { maxWait: 20_000, timeout: 20_000 },
+        );
       }),
     );
     const expected = (orgId: string): string[] => (orgId === ORG_A ? [ORG_A, ORG_A, ORG_A] : orgId === ORG_B ? [ORG_B, ORG_B] : []);
@@ -360,9 +488,19 @@ describe('SPK-03 (b) fail-closed without a valid context', () => {
     expect(await count(client, 'shipments')).toBe(0); // no wrapper at all: autocommit statement on the pool
     for (const orgId of [ORG_A, ORG_B]) {
       const error = await rejection(withTenantTx(client, NO_CONTEXT, (tx) => insertShipment(tx, orgId, 'x')));
-      expect(sqlState(error)).toBe('42501');
+      expect(error).toMatchObject(rawPgError('42501')); // F-06 shape pinned (m1)
       report['b_insert_error'] = describeError(error);
     }
+    // GUEST_CAPABLE: a guest-shaped quote (org_id NULL + a hash) fails the guest WITH CHECK without a guest context
+    const guestShaped = await rejection(
+      withTenantTx(
+        client,
+        NO_CONTEXT,
+        (tx) =>
+          tx.$executeRaw`INSERT INTO public.spk03_quotes (id, org_id, guest_token_hash, ref) VALUES (${randomUUID()}::uuid, NULL, decode(${tokenHash()}, 'hex'), 'x')`,
+      ),
+    );
+    expect(guestShaped).toMatchObject(rawPgError('42501'));
   });
 
   it('SPK-03 (b) a malformed app.org_id yields 0 rows without raising (ADR-0005 am. 6)', async () => {
@@ -454,16 +592,7 @@ describe('SPK-03 (c) guest claim under the guest and tenant policies', () => {
           async (tx) => {
             const updated = await claim(tx, id);
             firstUpdated.resolve();
-            let waiter = false;
-            for (let i = 0; i < 40 && !waiter; i += 1) {
-              await delay(25);
-              const rows = await observer.query(
-                `SELECT 1 FROM pg_catalog.pg_stat_activity WHERE datname = $1 AND application_name = 'spk03' AND wait_event_type = 'Lock'`,
-                [database],
-              );
-              waiter = (rows.rowCount ?? 0) > 0;
-            }
-            return { updated, waiter };
+            return { updated, waiter: await waitForLockWaiter(observer) }; // returns within 1.5 s < lock_timeout 2 s
           },
           { timeout: 10_000 },
         ),
@@ -486,6 +615,50 @@ describe('SPK-03 (c) guest claim under the guest and tenant policies', () => {
     expect(owners).toEqual([{ n: 1 }]);
   }, 30_000);
 
+  it('SPK-03 (c) a claim loser that waits longer than lock_timeout (2 s) fails with 55P03 instead of updating 0 rows', async () => {
+    const hash = tokenHash();
+    const id = await createGuestQuote(hash);
+    const firstUpdated = deferred();
+    const loserSettled = deferred();
+    const observer = await db.superuser(database);
+    try {
+      const [first, lost] = await Promise.all([
+        withTenantTx(
+          client,
+          tenant(ORG_A, USER_A, hash),
+          async (tx) => {
+            const updated = await claim(tx, id);
+            firstUpdated.resolve();
+            const waiter = await waitForLockWaiter(observer);
+            await loserSettled.promise; // hold the row lock until the loser's lock wait has expired
+            return { updated, waiter };
+          },
+          { timeout: 10_000 },
+        ),
+        (async () => {
+          await firstUpdated.promise;
+          try {
+            return await rejection(withTenantTx(client, tenant(ORG_B, USER_B, hash), (tx) => claim(tx, id), { timeout: 10_000 }));
+          } finally {
+            loserSettled.resolve();
+          }
+        })(),
+      ]);
+      report['c_claim_lock_timeout_error'] = describeError(lost);
+      expect(first).toEqual({ updated: 1, waiter: true });
+      expect(lost).toMatchObject(rawPgError('55P03'));
+    } finally {
+      await observer.end();
+    }
+    const claimed = await withTenantTx(
+      client,
+      tenant(ORG_A),
+      (tx) => tx.$queryRaw<Array<{ claimed_by: string }>>`
+      SELECT claimed_by_user_id::text AS claimed_by FROM public.spk03_quotes WHERE id = ${id}::uuid`,
+    );
+    expect(claimed).toEqual([{ claimed_by: USER_A }]);
+  }, 30_000);
+
   it('SPK-03 (c) the operator branch reads across tenants but cannot write', async () => {
     const operator: TenantContext = { orgId: '', actorId: OPERATOR_USER, actorScope: 'OPERATOR', guestTokenHash: '' };
     expect(await withTenantTx(client, operator, (tx) => count(tx, 'shipments'))).toBe(5);
@@ -499,8 +672,14 @@ describe('SPK-03 (c) guest claim under the guest and tenant policies', () => {
   });
 });
 
-describe('SPK-03 (d) set_config overhead', () => {
-  it('SPK-03 (d) set_config costs <= 1 ms p95 beyond one round trip (N=400 per variant, rotating order, after warm-up)', async () => {
+/**
+ * Exit (d) is a one-time measurement recorded in SPK-03.md §4, not a regression guard (code review M1): it is wall-clock
+ * sensitive and adds ~10 s, so it runs only with `SPK03_BENCH=1` (condition C-1 re-run, TASK-016).
+ */
+const benchmark = process.env['SPK03_BENCH'] === '1' ? describe : describe.skip;
+
+benchmark('SPK-03 (d) set_config overhead', () => {
+  it('SPK-03 (d) set_config server-side cost <= 1 ms p95; client-observed deltas recorded (N=400 per variant, rotating order, after warm-up)', async () => {
     const query = (tx: Pick<Tx, '$queryRaw'>): Promise<unknown> => tx.$queryRaw`SELECT count(*)::int AS n FROM public.spk03_shipments`;
     const statement: number[] = [];
     const withContext = (): Promise<unknown> =>
@@ -515,13 +694,7 @@ describe('SPK-03 (d) set_config overhead', () => {
       const conn = await pool.connect();
       try {
         await conn.query('BEGIN');
-        if (setCtx) {
-          await conn.query(
-            `SELECT set_config('app.org_id', $1, true), set_config('app.actor_id', $2, true),
-                    set_config('app.actor_scope', $3, true), set_config('app.guest_token_hash', $4, true)`,
-            [ORG_A, USER_A, 'TENANT', ''],
-          );
-        }
+        if (setCtx) await conn.query(CONTEXT_SQL, contextValues(tenant(ORG_A)));
         await conn.query('SELECT count(*)::int AS n FROM public.spk03_shipments');
         await conn.query('COMMIT');
       } finally {
@@ -540,11 +713,10 @@ describe('SPK-03 (d) set_config overhead', () => {
     const serverSide = async (): Promise<number> => {
       const conn = await pool.connect();
       try {
+        // autocommit: the implicit transaction ends with the statement, so the is_local settings do not persist
         const plan = await conn.query<{ 'QUERY PLAN': Array<{ 'Planning Time': number; 'Execution Time': number }> }>(
-          `EXPLAIN (ANALYZE, FORMAT JSON)
-           SELECT set_config('app.org_id', $1, true), set_config('app.actor_id', $2, true),
-                  set_config('app.actor_scope', $3, true), set_config('app.guest_token_hash', $4, true)`,
-          [ORG_A, USER_A, 'TENANT', ''],
+          `EXPLAIN (ANALYZE, FORMAT JSON) ${CONTEXT_SQL}`,
+          contextValues(tenant(ORG_A)),
         );
         const node = plan.rows[0]?.['QUERY PLAN'][0];
         if (node === undefined) throw new Error('EXPLAIN returned no plan');
@@ -610,12 +782,11 @@ describe('SPK-03 (d) set_config overhead', () => {
       p95DeltaRawPg: delta(samples.rawWith, samples.rawWithout, 95),
     };
     report['d_overhead_ms'] = result;
-    // Asserted: set_config's own cost, server-side (executor, no network) and client-observed beyond the round trip that
-    // any statement pays (same transaction, same connection). Recorded, not asserted: the per-transaction deltas, which
-    // are one extra round trip plus host jitter; on Docker Desktop for Windows one round trip alone is ~1.4-1.7 ms p50
-    // and the p95 of a difference of two jittery distributions moved between 1.3 and 3.6 ms across runs (SPK-03.md §4).
+    // Asserted: only set_config's server-side cost (executor, no network). Recorded, not asserted: every client-observed
+    // figure, including p95(set_config statement) - p95(SELECT 1 statement) and the per-transaction differences of p95s,
+    // which are one extra round trip plus host jitter. On Docker Desktop for Windows one round trip alone is ~1.4-1.7 ms
+    // p50, and p95(tx with) - p95(tx without) moved between 1.9 and 3.6 ms across runs (SPK-03.md §4).
     expect(result.serverSideSetConfig.p95).toBeLessThanOrEqual(1);
-    expect(result.p95StatementVsSelect1).toBeLessThanOrEqual(1);
   }, 300_000);
 });
 
@@ -653,6 +824,7 @@ describe('SPK-03 (e) findings for consumers', () => {
     );
     report['e2_root_tx_in_tx_pool1'] = { ...describeError(error), afterMs: Math.round(performance.now() - started) };
     expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ code: 'P2028' }); // F-03 shape pinned (m1)
     expect((error as Error).message).toMatch(/Unable to start a transaction in the given time/);
   }, 30_000);
 
@@ -664,7 +836,8 @@ describe('SPK-03 (e) findings for consumers', () => {
       }),
     );
     report['e3_timeout_error'] = describeError(expired);
-    expect((expired as Error).message).toMatch(/expired|closed|timeout/i);
+    expect(expired).toMatchObject({ code: 'P2028', meta: { operation: 'query', timeout: 5000 } }); // F-03 shape pinned (m1)
+    expect((expired as Error).message).toMatch(/A query cannot be executed on an expired transaction/);
     const after = await single.$transaction(probe);
     expect(after.rows).toEqual([]);
     expect(['', null]).toContain(after.org);
@@ -683,6 +856,7 @@ describe('SPK-03 (e) findings for consumers', () => {
     const waited = await rejection(single.$transaction(probe));
     const waitedMs = Math.round(performance.now() - started);
     report['e3_maxwait_error'] = { ...describeError(waited), afterMs: waitedMs };
+    expect(waited).toMatchObject({ code: 'P2028' }); // F-03 shape pinned (m1)
     expect((waited as Error).message).toMatch(/Unable to start a transaction in the given time/);
     expect(waitedMs).toBeGreaterThanOrEqual(1_900);
     expect((await holder).rows).toEqual([ORG_A, ORG_A, ORG_A]);
@@ -691,7 +865,7 @@ describe('SPK-03 (e) findings for consumers', () => {
   it('SPK-03 (e4) SET LOCAL cannot take a bind parameter through the adapter; set_config can', async () => {
     const bound = await rejection(single.$transaction((tx) => tx.$executeRaw`SET LOCAL app.org_id = ${ORG_A}`));
     report['e4_set_local_bound'] = describeError(bound);
-    expect(sqlState(bound)).toBe('42601');
+    expect(bound).toMatchObject(rawPgError('42601'));
     const literal = await single.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SET LOCAL app.org_id = '${ORG_A}'`);
       return probe(tx);
