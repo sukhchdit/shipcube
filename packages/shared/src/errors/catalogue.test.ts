@@ -68,6 +68,12 @@ describe('error catalogue discovery (PLAN.md §5 rule 2, ADR-0016 §3)', () => {
     expect(isErrorCode('toString')).toBe(false);
     expect(isErrorCode(42)).toBe(false);
   });
+
+  it('carries the data-layer codes a DbError answers with, at the openapi Forbidden/Conflict status and title (PR11-SEC-09)', () => {
+    expect(ERROR_CATALOGUE.AUTHZ_DENIED).toEqual({ status: 403, title: 'Permission denied' });
+    expect(ERROR_CATALOGUE.CONFLICT).toEqual({ status: 409, title: 'Conflict' });
+    for (const code of ['NOT_FOUND', 'SERVICE_UNAVAILABLE', 'INTERNAL_ERROR']) expect(isErrorCode(code)).toBe(true);
+  });
 });
 
 describe('AppError', () => {
