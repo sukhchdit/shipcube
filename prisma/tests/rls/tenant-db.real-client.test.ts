@@ -114,8 +114,9 @@ const REFUSED: ReadonlyArray<readonly [string, (db: Db) => unknown]> = [
 let generated: Generated;
 
 beforeAll(async () => {
+  // The tree lock may be held by the deps rebuild suites running in parallel (they regenerate the client).
   generated = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
-});
+}, 120_000);
 
 function setup(): { log: Statement[]; client: PrismaClient; runner: ReturnType<typeof createWithTenantTx<Prisma.TransactionClient>> } {
   const log: Statement[] = [];

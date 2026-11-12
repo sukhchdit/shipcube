@@ -99,8 +99,12 @@ const ALL_CONTEXT_FORMS = ['setter', 'keys', 'session-set', 'session-set-config'
 const TENANT_CONTEXT_EXEMPTIONS = [
   // The one runtime writer of the context: transaction-local setter only (session forms stay errors).
   { files: ['apps/api/src/platform/db/with-tenant-tx.ts'], allow: ['setter', 'keys'] },
-  // TASK-006 readiness probe (future files): READS the app.* settings of a fresh connection; never a second writer.
+  // TASK-006 readiness probe: READS the app.* settings of a fresh connection; never a second writer.
   { files: ['apps/api/src/platform/db/session-integrity.ts', 'apps/api/src/platform/db/session-integrity.test.ts'], allow: ['keys'] },
+  // TASK-006 session-integrity integration suite (D-ORCH-014 (e)): plants what the guard must detect, i.e. a
+  // transaction-local setter on the pool (the '' reset value) and role-level defaults of a key (`ALTER ROLE … SET`,
+  // the session-set form), and reads the keys. Never a runtime writer; no is_local = false form.
+  { files: ['apps/api/src/platform/db/session-integrity.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
   // Integration suite of withTenantTx: asserts the context statement and its fail-closed behaviour.
   { files: ['prisma/tests/rls/with-tenant-tx.int.test.ts'], allow: ['setter', 'keys'] },
   // The session-scope negative control: the ONLY runtime-lane file allowed the is_local = false form (it proves the leak).
@@ -108,6 +112,9 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   // SPK-03 spike, kept until the C-1 artifact is recorded (lead decision 3): ran every form, including the leak control.
   // Remove this entry in the commit that deletes the spike file (a stale entry would exempt any future file there).
   { files: ['prisma/tests/spikes/spk03-rls-tx.int.test.ts'], allow: ALL_CONTEXT_FORMS },
+  // SPK-08 spike (PR #12, merged): one migrate-diff probe policy reads a key directly. Remove this entry in the commit
+  // that ports and deletes the spike file (TASK-021, D-TASK012-02 (1)).
+  { files: ['prisma/tests/spikes/spk08-audit-owner.int.test.ts'], allow: ['keys'] },
   // Catalog C-series: the prosrc scan's negative fixtures create functions that run a session SET of a context key
   // (transaction-local setter fixtures only: no is_local = false).
   { files: ['prisma/tests/catalog/c01-c12.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
