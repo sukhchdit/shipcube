@@ -98,16 +98,18 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Spikes / security / decisions | — |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
-| Depends on | TASK-013, TASK-029 |
+| Depends on | TASK-013, TASK-029, TASK-023 |
 | Batch · locks | 8.1 · pkg-authz |
 | Branch | `feat/TASK-221-role-definitions-change-only-versioned` |
 | Priority | Should · cuttable |
 
 **Files / modules**
 - packages/authz/test/role-drift.int.test.ts
+- prisma/seed/reference/authz.ts (parity check + CONFIG_CHANGE per CATALOGUE_VERSION)
 
 **Acceptance tests to write**
 - All US-073 scenarios
+- data-model §9.2 / ADR-0008 am. 2 item 3 (D-ARCH-060, PR8-SEC-09): a post-migrate reconciler run as SYSTEM_JOB digests permissions/roles/role_permissions as read from the database, compares with the last audited digest in reference_dataset_versions(dataset = authz_matrix, version, content_sha256), writes one CONFIG_CHANGE audit entry per changed version (role, old -> new permission set; the first run back-fills the baseline empty -> current) and writes nothing when unchanged (AT-US-073-04); it also fails the seed on catalogue <-> database drift; no migration ever inserts into audit_entries; if this task is cut, the G3 report names the guard tests and CODEOWNERS as the residual controls
 - AT-US-073-01 … AT-US-073-04: all 4 scenarios of US-073, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
