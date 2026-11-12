@@ -9,7 +9,14 @@ import { describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
 import { FORBIDDEN_ENGINE_ENV } from '../deps/prisma-engines.mjs';
-import { FORBIDDEN_ENV, checkWorkflow, checkWorkflowPolicy, shellSegments } from './check-workflow-policy.mjs';
+import {
+  FORBIDDEN_ENV,
+  REQUIRED_CODEOWNED_PATHS,
+  checkCodeowners,
+  checkWorkflow,
+  checkWorkflowPolicy,
+  shellSegments,
+} from './check-workflow-policy.mjs';
 import { YamlSubsetError, parseYamlSubset } from './yaml-subset.mjs';
 
 const repoRoot = findRepoRoot();
@@ -100,6 +107,37 @@ describe('check-workflow-policy: repository', () => {
     const good = runNode([script, '--root', repoRoot, 'tools/ci/fixtures/workflow-policy/valid.yml'], { cwd: repoRoot });
     expect(good.status).toBe(0);
     expect(runNode([script, '--bogus'], { cwd: repoRoot }).status).toBe(2);
+  });
+});
+
+describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
+  it('[PR5-SEC-04] the repository CODEOWNERS covers every required path', () => {
+    expect(checkCodeowners(readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8'))).toEqual([]);
+  });
+
+  it('[PR5-SEC-04] a missing CODEOWNERS fails', () => {
+    expect(checkCodeowners(undefined).map((f) => f.rule)).toEqual(['codeowners-missing']);
+  });
+
+  it('[PR8-SEC-13] an uncovered path, a commented line or a line without an owner fails coverage', () => {
+    const text = REQUIRED_CODEOWNED_PATHS.filter((path) => path !== 'prisma/migrations/')
+      .map((path) => `/${path} @owner`)
+      .concat(['# /prisma/migrations/ @owner', '/prisma/migrations/'])
+      .join('\n');
+    expect(checkCodeowners(text).map((f) => f.message)).toEqual([expect.stringContaining('prisma/migrations/')]);
+  });
+
+  it('a parent folder or a /** pattern covers a nested required path', () => {
+    const text = [
+      '/.github/ @o',
+      '/tools/ @o',
+      '/packages/authz/** @o',
+      '/prisma/ @o',
+      '/eslint.config.mjs @o',
+      '/.semgrep/ @o',
+      '/.gitleaks.toml @o',
+    ].join('\n');
+    expect(checkCodeowners(text)).toEqual([]);
   });
 });
 

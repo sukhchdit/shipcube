@@ -440,6 +440,51 @@ export function checkWorkflow(text, fileName) {
 }
 
 /**
+ * Paths that `.github/CODEOWNERS` must cover (WAVE-00 TASK-007; PR5-SEC-04, PR2-SEC-01, PR8-SEC-11, PR8-SEC-13).
+ * A trailing `/` marks a folder.
+ */
+export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
+  'packages/authz/',
+  'tools/authz/',
+  'prisma/migrations/',
+  'prisma/bootstrap/',
+  'eslint.config.mjs',
+  'tools/eslint-rules/',
+  '.semgrep/',
+  'tools/ci/',
+  'tools/db/lint-migrations.ts',
+  '.github/workflows/',
+  '.gitleaks.toml',
+]);
+
+/**
+ * Findings for a CODEOWNERS text that is missing or leaves a required path without an owner. A line covers a path
+ * when its pattern (leading `/` optional, `/**` suffix allowed) equals it or is a folder prefix of it and the line names
+ * at least one owner. Only the anchored folder/file forms this repository uses are understood.
+ * @param {string | undefined} text
+ * @returns {Finding[]}
+ */
+export function checkCodeowners(text) {
+  if (text === undefined) {
+    return [{ rule: 'codeowners-missing', message: '.github/CODEOWNERS must exist (PR5-SEC-04)', location: '.github/CODEOWNERS' }];
+  }
+  const patterns = text
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'))
+    .map((line) => line.split(/\s+/u))
+    .filter((parts) => parts.slice(1).some((owner) => owner.startsWith('@')))
+    .map(([pattern]) => (pattern ?? '').replace(/^\//u, '').replace(/\/\*\*$/u, '/'));
+  return REQUIRED_CODEOWNED_PATHS.filter(
+    (path) => !patterns.some((pattern) => pattern === path || (pattern.endsWith('/') && path.startsWith(pattern))),
+  ).map((path) => ({
+    rule: 'codeowners-coverage',
+    message: `.github/CODEOWNERS must assign an owner to ${path} (PR5-SEC-04, PR8-SEC-11/13)`,
+    location: '.github/CODEOWNERS',
+  }));
+}
+
+/**
  * @param {string} root
  * @param {string[]} [files] explicit workflow files (default: every .github/workflows/*.yml|yaml)
  * @returns {{ findings: Finding[], checked: string[] }}
@@ -462,6 +507,11 @@ export function checkWorkflowPolicy(root, files) {
     for (const f of checkWorkflow(readFileSync(file, 'utf8'), basename(file))) {
       findings.push({ ...f, location: f.location.replace(basename(file), label) });
     }
+  }
+  // Repository mode (no explicit files): CODEOWNERS must exist and cover the security-owned paths.
+  if (!(files && files.length > 0)) {
+    const owners = join(root, '.github', 'CODEOWNERS');
+    findings.push(...checkCodeowners(existsSync(owners) ? readFileSync(owners, 'utf8') : undefined));
   }
   return { findings, checked: list.map((file) => relative(root, file).replaceAll('\\', '/')) };
 }

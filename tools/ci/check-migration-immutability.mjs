@@ -4,7 +4,7 @@
  * `migration.sql`/`down.sql` silently forks the schema (existing databases keep the old grants, fresh ones get the new).
  *
  * Rule: relative to the merge base, every change under `prisma/migrations/` is an ADDED file inside a migration
- * directory that did not exist on the base. `migration_lock.toml` may change only by being added. Anything else —
+ * directory that did not exist on the base; `migration_lock.toml` is allow-listed. Anything else —
  * modify, delete, rename, type change, or a file added to an existing directory — fails.
  *
  * Usage: node tools/ci/check-migration-immutability.mjs [--root <dir>] --base <git-ref> [--head <git-ref>]
@@ -16,6 +16,9 @@ import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export const MIGRATIONS_DIR = 'prisma/migrations';
+/** Prisma's provider lock may be rewritten by `migrate`; it carries no schema (allow-listed, WAVE-00 TASK-007). */
+export const LOCK_FILE = `${MIGRATIONS_DIR}/migration_lock.toml`;
+const IMMUTABLE = 'applied migrations are immutable (D-SEC-PR8-01/02)';
 
 /**
  * @typedef {{ status: string, path: string }} Change
@@ -32,19 +35,19 @@ export function checkMigrationChanges(changes, baseDirs) {
   /** @type {Finding[]} */
   const findings = [];
   for (const { status, path } of changes) {
-    if (!path.startsWith(`${MIGRATIONS_DIR}/`)) continue;
+    if (!path.startsWith(`${MIGRATIONS_DIR}/`) || path === LOCK_FILE) continue;
     const rest = path.slice(MIGRATIONS_DIR.length + 1);
     const dir = rest.includes('/') ? rest.slice(0, rest.indexOf('/')) : undefined;
     if (status !== 'A') {
       findings.push({
         rule: 'migrations/released-changed',
-        message: `a released migration file was ${status === 'D' ? 'deleted' : 'changed'} (status ${status}); ship a new migration instead`,
+        message: `${IMMUTABLE}: a released migration file was ${status === 'D' ? 'deleted' : 'changed'} (status ${status}); ship a new migration instead`,
         location: path,
       });
     } else if (dir !== undefined && baseDirs.has(dir)) {
       findings.push({
         rule: 'migrations/released-dir-extended',
-        message: 'a file was added to a migration directory that already exists on the base',
+        message: `${IMMUTABLE}: a file was added to a migration directory that already exists on the base`,
         location: path,
       });
     }

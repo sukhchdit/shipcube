@@ -32,6 +32,8 @@
 # Database roles, audit DDL and migrations
 /prisma/bootstrap/                      @sukhchdit
 /prisma/migrations/                     @sukhchdit
+/tools/db/lint-migrations.ts              @sukhchdit
+/tools/authz/                           @sukhchdit
 /tools/db/audit-ddl-reviewers.json      @sukhchdit
 
 # Authorisation, audit and the configuration key register

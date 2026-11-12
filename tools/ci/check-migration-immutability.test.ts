@@ -67,6 +67,16 @@ describe('released migrations are immutable (PR8-SEC-01 lane-A backstop)', () =>
     ).toEqual(['migrations/released-changed', 'migrations/released-dir-extended']);
   });
 
+  it('[PR8-SEC-13] the failure names the rule; migration_lock.toml is allow-listed', () => {
+    const { root, write, commit } = repo();
+    write('prisma/migrations/migration_lock.toml', 'provider = "postgresql"\n# rewritten by migrate\n');
+    commit();
+    expect(checkRepository({ root, base: 'main' }).findings).toEqual([]);
+    write('prisma/migrations/20261112000000_baseline/down.sql', 'DROP TABLE IF EXISTS a;\n');
+    commit();
+    expect(checkRepository({ root, base: 'main' }).findings[0]?.message).toContain('applied migrations are immutable (D-SEC-PR8-01/02)');
+  });
+
   it('a rename is reported as delete + add (--no-renames), so moving a released migration fails', () => {
     const { root, git, commit } = repo();
     git('mv', 'prisma/migrations/20261112000000_baseline', 'prisma/migrations/20261112000001_baseline');
