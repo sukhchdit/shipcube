@@ -111,6 +111,8 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   { files: ['tools/db/render-rls.ts', 'tools/db/render-rls.test.ts'], allow: ['tokens'] },
   // Migration-linter rule 16 and its tests name the forms they reject.
   { files: ['tools/db/lint-migrations.ts', 'tools/db/lint-migrations.test.ts'], allow: ['tokens'] },
+  // The shared rule-16 / C-series form list's tests name every evasion form, session forms included (PR11-SEC-02).
+  { files: ['tools/db/tenant-key-forms.test.ts'], allow: ['tokens', 'session-set', 'session-set-config'] },
   // pg_dump's own preamble `set_config('search_path', '', false)`, asserted verbatim (no tenant key; not a session form).
   { files: ['tools/db/up-down-up.test.ts'], allow: ['tokens'] },
 ];
