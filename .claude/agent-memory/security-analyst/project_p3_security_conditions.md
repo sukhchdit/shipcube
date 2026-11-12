@@ -1,33 +1,39 @@
 ---
 name: project-p3-security-conditions
-description: P3 security review state after remediation verification (2026-11-12): no Critical/High open; SEC-COND-01..04 design status, new SEC-COND-05..07 (MEDIUM, P4 exit), rulings on the 3 architect alternatives; what to re-check at P5 reviews and G3
+description: P3 security review state after G2-C3 closure (§16, 2026-11-12): no Crit/High/Medium open at design; G2-C3 closed; new LOW SEC-P3-34..36 + INFO 37 with task IDs; what to re-check at P5 reviews, G3 and G4-production
 metadata:
   type: project
 ---
 
-P3 review (`docs/05-quality/security/P3-architecture-security-review.md`) was APPROVED_WITH_CONDITIONS at b8f805f, then re-verified in §14 against d5cdfa2 (2026-11-12). The verdict is still APPROVED_WITH_CONDITIONS and **no Critical/High design risk is open**.
-- SEC-P3-01, 02 and 04 are RESOLVED.
-- SEC-P3-03 is PARTIAL: HIGH reduced to MEDIUM.
-- SEC-P3-05..14 are RESOLVED.
+The P3 review lives in `docs/05-quality/security/P3-architecture-security-review.md`.
+- **§14** (against d5cdfa2): remediation verification.
+- **§16** (2026-11-12, against 59f8340): G2-C3 closure verification.
 
-New findings from the verification:
-- **SEC-P3-27 (MEDIUM, SEC-COND-05).** `ensure_audit_partitions` is SECURITY DEFINER, owned by `platform_audit_owner`, with `search_path = pg_catalog, public`. The migrator owns `public`, so a function-overload hijack (CVE-2018-1058 class, e.g. `public.pg_advisory_xact_lock(integer)`) runs migrator code as the audit owner.
-- **SEC-P3-28 (MEDIUM, SEC-COND-06).** CVC recollection never checks `cvc_check = pass`.
-- **SEC-P3-29 (MEDIUM, SEC-COND-07).** Free or unverified accounts are outside the carrier anonymous budget and can drain a daily quota.
-- LOW: SEC-P3-30..32. INFO: SEC-P3-33 (documentation drift, including the outdated "KMS has no Ed25519" rationale; KMS has supported Ed25519 since 2025-11-07).
+**State after §16.** PASS at design level, class APPROVED_WITH_CONDITIONS.
+- **G2-C3 is closed at design level.** RESOLVED: SEC-COND-05/06/07, SEC-P3-30, SEC-P3-32, and SEC-P3-33 items 1–11.
+- **SEC-COND-03 is closed** except item 7 (locked anchor sink, RDS break-glass, pgaudit). That item is a G4-production precondition.
+- **All 8 architect deviations in §15 are accepted.** Conditions attached:
+  - TASK-033: the audit test generator binds each `x-audit.additional` entry to a named fixture.
+  - TASK-016: C11 adds the converse check that `platform_definer` owns only the §4.5 functions plus `app_is_operator`.
 
-Rulings on the architect's alternatives:
-- CVC-only saved-card step-up: accepted as equivalent, conditional on SEC-P3-28.
-- ECDSA P-256 anchors: accepted; the original requirement allowed either curve.
-- `createQuoteShare` mint-and-revoke: accepted, with SEC-P3-32.
+**New findings raised in §16:**
+- **SEC-P3-34 (LOW now; MEDIUM at M5).** Privileged sessions outside the bootstrap lane resolve names through `public`, which the migrator can write. The migrator also owns the DB, so it can run `ALTER DATABASE SET search_path` and `CREATE SCHEMA`. Fixes go in TASK-003, TASK-016 and TASK-034: a role-in-database `search_path` for the bootstrap/master role, the harness connecting with `options`, and a catalog assertion. The break-glass runbook item is G4-production.
+- **SEC-P3-35 (LOW).** `payments` has no persisted `cvc_recollection_required` column. Fix in TASK-085.
+- **SEC-P3-36 (LOW).** The per-organisation quota share multiplies across the up-to-11 orgs one user can hold. Add a per-user share before TASK-190.
+- **SEC-P3-37 (INFO).** Drift items. Includes `ALTER DEFAULT PRIVILEGES … IN SCHEMA platform` placed in `00-roles.sql` before the schema exists (TASK-003), and partition-name squatting (TASK-021).
 
-**Why:** G2 proceeds with these as tracked conditions. Each is a small design-text change, not re-architecture. Implementation evidence (SEC-TC-37..64) is owed by G3. The locked anchor sink, RDS master break-glass and pgaudit remain a G4-production precondition. On RDS, C13 must allow the auto-granted ADMIN row of the master user.
+**SEC-TC changes:**
+- SEC-TC-61 amended to cover DROP FUNCTION guard CASCADE and DROP SCHEMA platform CASCADE. Both must be denied by privilege, not by the guard.
+- Proposed to qa-lead: SEC-TC-65 (harness path probe), an SEC-TC-62 multi-org extension, and SEC-TC-53 text alignment.
 
-**How to apply:** In P5 change reviews and at G3, check first:
-- every SECURITY DEFINER and audit-owner function has `proconfig search_path=pg_catalog, pg_temp`;
-- `cvc_check` is enforced on both the `confirmPayment` and the webhook paths;
-- `quote-create` class and the per-org quota share exist;
-- `--ignore-scripts` is everywhere, and gate scripts run from the base ref;
-- `x-reauth-scope`/`x-reauth-max-age` sit on the 10 routes.
+**Why:** G3 needs SEC-TC evidence for every SEC-COND, and the new LOWs are scheduled into specific tasks. Any production release (M5) needs the G4-production checklist in §16.8 C.
+
+**How to apply.** In P5 change reviews of the named tasks, check first:
+- every SECURITY DEFINER and audit function has `proconfig` exactly `search_path=pg_catalog, pg_temp`;
+- bootstrap files start with the `SET`;
+- the migrator owns no schema;
+- `cvc_check` is enforced on both the confirm path and the webhook path, using a stored or gateway-derived flag;
+- the `quote-create` class and the org share exist, and the user share also exists;
+- `--ignore-scripts`, base-ref gate scripts and `npm exec --no` are in place (SEC-P3-31, TASK-007 and TASK-011).
 
 Related: [[project-security-review-conventions]]

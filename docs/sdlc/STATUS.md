@@ -47,10 +47,12 @@ _none_
 | G1-C5 | Demo-critical Must tagging per epic (PM) before G2; wave plan by it (P4) | G2 / P4 | product-manager, senior-developer | PM tag DONE; wave plan → P4 (senior-developer) |
 | G2-C1 | NFR-RES-007 row in nfr-traceability/nfr-strategy (91 NFRs) | P4 exit | principal-architect | CLOSED (91 NFRs) |
 | G2-C2 | traceability.md Design column for 434 REQs; ARCHITECTURE §6 adds AUTH-025/026, CARR-022/023; Valkey labels; close R-ARCH-10 | P4 exit | principal-architect | CLOSED (434/434 Design; Valkey labels; R-ARCH-10 closed) |
-| G2-C3 | SEC-COND-05 (audit fn search_path), 06 (cvc_check=pass), 07 (unverified=anonymous, quote-create class, org quota share); SEC-P3-30/33 drift; security-analyst records closure; SEC-COND-03 item 7 → G4-production checklist | P4 exit (design) · G3 (tests) | principal-architect, product-manager, security-analyst | Design CLOSED by architect + PM (D-ARCH-029..034, D-053..D-057, review §15); security-analyst verification running; SEC-TC evidence at G3 |
+| G2-C3 | SEC-COND-05 (audit fn search_path), 06 (cvc_check=pass), 07 (unverified=anonymous, quote-create class, org quota share); SEC-P3-30/33 drift; security-analyst records closure; SEC-COND-03 item 7 → G4-production checklist | P4 exit (design) · G3 (tests) | principal-architect, product-manager, security-analyst | CLOSED at design level (review §16, D-ORCH-005); SEC-TC evidence due G3; SEC-P3-34..37 routed to TASK-003/016/021/034/085/190 |
 | G2-C4 | UX README reconcile v1.3 (US-027 Must screens, US-291..293, 218 count, admin idle dialog, CVC note) | P4 exit | ux-designer | CLOSED (README v1.1: 218 Must = 110 UI + 108 non-UI, 100%; D-UX-030..036). Follow-ups: UX §5 #12–14 → architect/api-designer |
 | G2-C5 | NFR Test column (91) incl. SEC-TC-01..64 | before P5 | qa-lead | CLOSED (91/91 Test cells; TEST-STRATEGY.md, required-suites.json 65 suites, SEC-TC-01..64, e2e journeys, gherkin-test-map 1,599 Must scenarios) |
-| COND-G4-PROD | Locked audit-anchor sink, RDS master break-glass only, pgaudit (SEC-COND-03 item 7) | G4 for any production release (not this run) | platform-architect, release-manager | OPEN (n/a this run: no prod target) |
+| COND-G4-PROD | Locked audit-anchor sink, RDS master break-glass only, pgaudit (SEC-COND-03 item 7); SPK-08 RDS C13(b) parity; SEC-P3-34 master search_path pin + break-glass runbook; KMS envelope, TLS, WAF (RR-03) | G4 for any production release (not this run) | platform-architect, release-manager | OPEN (n/a this run: no prod target) |
+| SEC-FU-36 | Per-user carrier quota share (SEC-P3-36) | before TASK-190 | principal-architect, product-manager | OPEN |
+| SEC-FU-QA | SEC-TC-65 adopt, SEC-TC-62 multi-org, SEC-TC-53 text | before Wave 4 | qa-lead | OPEN |
 | COND-SANDBOX-DEMO | Real sandbox label from DHL, FedEx and UPS booked and paid end to end (M1 exit demo); needs creds outside the repo | Post-release, when creds supplied | qa-lead | OPEN (blocked on external creds, by design) |
 
 ## Top Risks

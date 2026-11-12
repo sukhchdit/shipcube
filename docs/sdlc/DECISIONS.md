@@ -860,3 +860,13 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Decision:** Until TASK-007 (lane A workflow) is merged, "passing CI" for a task means the task's local commands (install with `--ignore-scripts` + `deps:rebuild`, lint, format:check, typecheck, unit tests, and whatever integration tests exist) run green by senior-developer, with output summarised in the PR body. Until TASK-011 (lane B tooling) is merged, heavy-suite evidence is the PR-body summary instead of `docs/05-quality/**/runs/`. From the merge of each tool onward, the full per-task flow (PLAN.md §7) applies. code-reviewer APPROVED and security-analyst (no Critical/High) are required from the very first task, without exception.
 - **Why:** The lanes are themselves Wave 0 deliverables (chicken-and-egg).
 - **Reversibility:** n/a (temporary; expires when TASK-007/011 merge).
+
+### D-ORCH-005 · 2026-11-12 · sdlc-orchestrator (recording security-analyst rulings, review §16.3) · G2-C3 closed at design level
+- **Rulings recorded:** (1) `x-audit.additional[]` accepted; TASK-033's audit generator binds each entry to a named fixture. (2) The PostgreSQL-counted share mint cap is accepted. (3) The event throttle per account+org is accepted. (4) SEC-TC-53 stands per §14.5. (5) The SEC-TC-61 extension is applied (DROP FUNCTION/SCHEMA as the migrator → 42501). (6) RR-04 → superuser-only; interactive privileged sessions are covered by SEC-P3-34. (7) `platform_definer` CREATE on `platform` is accepted; TASK-016's C11 asserts its owned-object set. (8) SEC-P3-31 stays in Wave 0 (TASK-007/011, SEC-TC-64).
+- **New LOW/INFO findings routed to tasks** (the implementer must apply them; reviewers check):
+  - SEC-P3-34: pin search_path for the bootstrap/master role in the DB (`ALTER ROLE … IN DATABASE`); the harness connects with the path option; catalog assertion; prefer the migrator not owning the DB → TASK-003, TASK-016, TASK-034; runbook item on the G4-production checklist.
+  - SEC-P3-35: immutable `payments.cvc_recollection_required` column → TASK-085 (data-architect delta).
+  - SEC-P3-36: add a per-user share of the carrier quota on top of the per-org share → principal-architect + product-manager before TASK-190.
+  - SEC-P3-37 item 1: `ALTER DEFAULT PRIVILEGES … IN SCHEMA platform` must run after `01-schemas.sql` → TASK-003. Item 6: `ensure_audit_partitions` must fail (not skip) on a name collision → TASK-021. Item 5 → qa-lead.
+  - qa-lead: adopt SEC-TC-65, extend SEC-TC-62 for multi-org, and align the SEC-TC-53 text.
+- **Reversibility:** High.
