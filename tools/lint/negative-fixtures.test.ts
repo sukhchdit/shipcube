@@ -8,8 +8,9 @@
  *
  * Mode (tools/lint/fixture-expectations.mjs): `exact` by default; lane A runs the BASE ref's copy of this suite against
  * the head configs with LINT_FIXTURE_MODE=no-weakening (PR2-SEC-08, D-ORCH-018), where every expected finding must
- * still fire, extra findings from rules the head adds are listed instead of failed, and the head-only positive
- * assertions are skipped.
+ * still fire, extra findings with a rule id (rules the head adds) are listed instead of failed, findings without a rule
+ * id fail on every fixture (review M1), and only the positive halves (exact clean sets, case-table completeness,
+ * ignore and "off" decisions) are skipped. A test that mixes both kinds is split: its weakening half always runs.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,12 +18,13 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
-import { fixtureMode, formatExtras, noWeakening } from './fixture-expectations.mjs';
+import { fixtureMode, formatExtras, logText, missingSteps, noWeakening, summaryMarkdown } from './fixture-expectations.mjs';
+import type { Severity } from './fixture-expectations.mjs';
 
 interface Finding {
   ruleId: string | null;
   message: string;
-  severity: 'error' | 'warning';
+  severity: Severity;
 }
 type Report = Record<string, Finding[]>;
 interface FixtureReport {
@@ -261,9 +263,16 @@ const CSS: readonly Violation[] = [
 
 const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMENT, ...RULES, ...REACT, ...RESOLUTION];
 
+/** The steps of `npm run lint` (`&&`-separated), in order (PR2-SEC-01/02/03). */
+const LINT_STEPS: readonly RegExp[] = [
+  /^eslint \. .*--max-warnings 0/u,
+  /^stylelint .*--max-warnings 0/u,
+  /^node tools\/lint\/check-suppressions\.mjs$/u,
+];
+
 /** Throws on an unknown LINT_FIXTURE_MODE value, so the suite fails to load rather than run in a guessed mode. */
 const MODE = fixtureMode(process.env);
-/** Head-only assertions (clean fixtures, case-table completeness, script wiring): skipped by the base-ref run. */
+/** Positive-only assertions (case-table completeness, ignore and "off" decisions): skipped by the base-ref run. */
 const exactOnly = MODE === 'exact' ? it : it.skip;
 
 const repoRoot = findRepoRoot();
@@ -281,11 +290,11 @@ const findingsOf = (source: Report, file: string): Finding[] => {
   return findings;
 };
 
-const expectOnly = (findings: Finding[], ruleId: string | readonly string[], message: string) => {
+const expectOnly = (findings: Finding[], ruleId: string | readonly string[], message: string, severity: Severity) => {
   const expected = typeof ruleId === 'string' ? [ruleId] : [...ruleId];
   expect(findings.map((finding) => finding.ruleId).sort()).toEqual(expected.sort());
   for (const finding of findings) {
-    expect(finding.severity).toBe('error');
+    expect(finding.severity).toBe(severity);
     expect(finding.message).toContain(message);
   }
 };
@@ -293,28 +302,57 @@ const expectOnly = (findings: Finding[], ruleId: string | readonly string[], mes
 const ruleIdsOf = (violations: readonly Violation[]): Set<string> =>
   new Set(violations.flatMap(([, , ruleId]) => (typeof ruleId === 'string' ? [ruleId] : [...ruleId])));
 
-/** Findings the head reports beyond the expected ones (no-weakening mode only), listed after the run. */
-const extras: { file: string; finding: Finding }[] = [];
+/**
+ * Findings with a rule id the head reports beyond the expected ones (no-weakening mode only), per fixture, listed after
+ * the run. Keyed by file: a clean fixture is checked by its own case and by the "every other fixture" sweep.
+ */
+const extras = new Map<string, Finding[]>();
+const recordExtras = (file: string, found: Finding[]) => {
+  if (found.length > 0) extras.set(file, found);
+};
 
-/** `exact`: the fixture reports exactly `ruleId`. `no-weakening`: it still reports `ruleId`; anything more is listed. */
-const expectFindings = (source: Report, file: string, ruleId: string | readonly string[], message: string) => {
+/** No-weakening mode: collects the extras of `file`; any failure (weakened expectation, ruleless finding) fails the test. */
+const assertNoWeakening = (findings: Finding[], file: string, ruleId: string | readonly string[], message: string, severity: Severity) => {
+  const result = noWeakening(findings, ruleId, message, { minSeverity: severity });
+  recordExtras(file, result.extras);
+  expect(result.failures).toEqual([]);
+};
+
+/**
+ * `exact`: the fixture reports exactly `ruleId` at `severity`. `no-weakening`: it still reports `ruleId` at `severity` or
+ * higher (m3: a warning case accepts an error) and nothing without a rule id; other findings are listed.
+ */
+const expectFindings = (
+  source: Report,
+  file: string,
+  ruleId: string | readonly string[],
+  message: string,
+  severity: Severity = 'error',
+) => {
   const findings = findingsOf(source, file);
-  if (MODE === 'exact') {
-    expectOnly(findings, ruleId, message);
-    return;
-  }
-  const result = noWeakening(findings, ruleId, message);
-  extras.push(...result.extras.map((finding) => ({ file, finding })));
-  expect(result.missing).toEqual([]);
+  if (MODE === 'exact') expectOnly(findings, ruleId, message, severity);
+  else assertNoWeakening(findings, file, ruleId, message, severity);
+};
+
+/**
+ * `exact`: the fixture lints clean. `no-weakening` (review M1): it reports nothing without a rule id (an unused disable
+ * directive, a parse error, an ignored-file warning); findings with a rule id come from rules the head adds and are listed.
+ */
+const expectClean = (source: Report, file: string) => {
+  const findings = findingsOf(source, file);
+  if (MODE === 'exact') expect(findings).toEqual([]);
+  else assertNoWeakening(findings, file, [], '', 'error');
 };
 
 afterAll(() => {
-  if (MODE !== 'no-weakening') return;
-  const lines = formatExtras(extras, ruleIdsOf([...ESLINT_VIOLATIONS, ...CSS]));
-  const text = [`No-weakening run: ${String(lines.length)} extra finding(s) from the head configs (allowed).`, ...lines].join('\n');
-  console.log(text);
+  // review n6: no summary when the report never loaded (beforeAll failed, so every test already failed).
+  if (MODE !== 'no-weakening' || (report as FixtureReport | undefined) === undefined) return;
+  const listed = [...extras].flatMap(([file, found]) => found.map((finding) => ({ file, finding })));
+  const lines = formatExtras(listed, ruleIdsOf([...ESLINT_VIOLATIONS, ...CSS]));
+  const heading = `No-weakening run: ${String(lines.length)} extra finding(s) with a rule id from the head configs (allowed).`;
+  console.log(logText([heading, ...lines]));
   const summary = process.env['GITHUB_STEP_SUMMARY'];
-  if (summary !== undefined && summary !== '') appendFileSync(summary, ['', '```text', text, '```', ''].join('\n'));
+  if (summary !== undefined && summary !== '') appendFileSync(summary, summaryMarkdown(heading, lines));
 });
 
 describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
@@ -322,13 +360,25 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     expectFindings(report.eslint, file, ruleId, message);
   });
 
-  exactOnly('every other fixture (ok-*, allow-listed paths, supporting modules) lints clean', () => {
+  it('every other fixture (ok-*, allow-listed paths, supporting modules) lints clean (no-weakening: reports nothing without a rule id)', () => {
     const expected = new Set(ESLINT_VIOLATIONS.map(([, file]) => file));
-    const dirty = Object.entries(report.eslint).filter(([file, findings]) => !expected.has(file) && findings.length > 0);
-    expect(dirty).toEqual([]);
+    const others = Object.keys(report.eslint).filter((file) => !expected.has(file));
+    expect(others.length).toBeGreaterThan(0);
+    if (MODE === 'exact') {
+      expect(others.map((file) => [file, findingsOf(report.eslint, file)] as const).filter(([, findings]) => findings.length > 0)).toEqual(
+        [],
+      );
+      return;
+    }
+    const failures = others.flatMap((file) => {
+      const result = noWeakening(findingsOf(report.eslint, file), [], '');
+      recordExtras(file, result.extras);
+      return result.failures.map((failure) => `${file}: ${failure}`);
+    });
+    expect(failures).toEqual([]);
   });
 
-  exactOnly.each([
+  it.each([
     ['the module index.ts wires repository -> service -> controller -> routes', `layering/routes-layer/${API}/orders/index.ts`],
     ['routes import a controller (type) and a schema', `layering/routes-layer/${API}/orders/routes/ok-orders.routes.ts`],
     [
@@ -363,7 +413,7 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ['apps/worker imports a module through its index.ts', 'layering/worker-imports-controller/apps/worker/src/jobs/ok-sync.ts'],
     ['packages/pricing imports @platform/shared', 'layering/pricing-io/packages/pricing/src/ok-price.ts'],
   ])('allowed: %s', (_title, file) => {
-    expect(findingsOf(report.eslint, file)).toEqual([]);
+    expectClean(report.eslint, file);
   });
 
   exactOnly('every bad-* fixture is listed in the case table (no untested fixture)', () => {
@@ -387,8 +437,8 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     expectFindings(report.probes, path, BOUNDARIES, 'import only @platform/shared and @platform/ui');
   });
 
-  exactOnly('[PR #2 m8] allowed: apps/worker imports @platform/api/runtime (package exports, resolved)', () => {
-    expect(findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts')).toEqual([]);
+  it('[PR #2 m8] allowed: apps/worker imports @platform/api/runtime (package exports, resolved)', () => {
+    expectClean(report.probes, 'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts');
   });
 
   it('[PR #2 m8] apps/worker cannot reach a non-exported @platform/api subpath', () => {
@@ -403,8 +453,8 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     expect(layering.map((finding) => finding.message).join('\n')).toContain('only through @platform/api/runtime');
   });
 
-  exactOnly('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {
-    expect(findingsOf(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts')).toEqual([]);
+  it('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {
+    expectClean(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts');
   });
 });
 
@@ -413,8 +463,8 @@ describe('seeded negative fixtures: Stylelint (NFR-I18N-003, NFR-A11Y-006)', () 
     expectFindings(report.stylelint, file, ruleId, message);
   });
 
-  exactOnly('allowed: logical properties and :hover inside @media (hover: hover)', () => {
-    expect(findingsOf(report.stylelint, 'css/ok-logical-and-hover.css')).toEqual([]);
+  it('allowed: logical properties and :hover inside @media (hover: hover)', () => {
+    expectClean(report.stylelint, 'css/ok-logical-and-hover.css');
   });
 
   exactOnly('every CSS fixture is listed in the case table', () => {
@@ -428,52 +478,65 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.resolver['@platform/shared']).toBe('packages/shared/src/index.ts');
   });
 
-  exactOnly('`npm run lint` runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01)', () => {
+  it('`npm run lint` runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01; no-weakening: every step still runs, in order, PR17-SEC-04)', () => {
     const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     const steps = (scripts['lint'] ?? '').split('&&').map((step) => step.trim());
-    expect(steps).toEqual([
-      expect.stringMatching(/^eslint \. .*--max-warnings 0/u),
-      expect.stringMatching(/^stylelint .*--max-warnings 0/u),
-      'node tools/lint/check-suppressions.mjs',
-    ]);
+    if (MODE === 'exact') expect(steps).toEqual(LINT_STEPS.map((step) => expect.stringMatching(step)));
+    else expect(missingSteps(steps, LINT_STEPS)).toEqual([]);
   });
 
-  it('ESLint ignores build/coverage output only at the root and the workspace roots', () => {
-    expect(report.ignored.eslint).toEqual({
-      'dist/x.js': true,
-      'build/x.js': true,
-      'coverage/lcov-report/x.js': true,
-      'apps/web/build/client/x.js': true,
-      'apps/api/dist/server.js': true,
-      'packages/shared/dist/index.js': true,
-      'apps/api/coverage/x.js': true,
-      'apps/web/.react-router/types/x.ts': true,
-      'packages/shared/src/coverage/a.ts': false,
-      'packages/carriers/src/build/a.ts': false,
-      'packages/carriers/src/dist/a.ts': false,
-      'apps/api/src/modules/shipments/build/a.ts': false,
-      'apps/web/app/routes/a.jsx': false,
-    });
+  // Ignore decisions: a source path that becomes ignored is weakening (always checked); an output path that stops
+  // being ignored only lints more (positive half, exact mode only).
+  const ESLINT_IGNORED = {
+    'dist/x.js': true,
+    'build/x.js': true,
+    'coverage/lcov-report/x.js': true,
+    'apps/web/build/client/x.js': true,
+    'apps/api/dist/server.js': true,
+    'packages/shared/dist/index.js': true,
+    'apps/api/coverage/x.js': true,
+    'apps/web/.react-router/types/x.ts': true,
+    'packages/shared/src/coverage/a.ts': false,
+    'packages/carriers/src/build/a.ts': false,
+    'packages/carriers/src/dist/a.ts': false,
+    'apps/api/src/modules/shipments/build/a.ts': false,
+    'apps/web/app/routes/a.jsx': false,
+  };
+  const STYLELINT_IGNORED = {
+    'dist/x.css': true,
+    'apps/web/build/client/assets/x.css': true,
+    'packages/ui/dist/x.css': true,
+    'coverage/x.css': true,
+    'apps/web/app/coverage/x.css': false,
+    'packages/ui/src/build/x.css': false,
+  };
+  const linted = (expected: Record<string, boolean>) => Object.keys(expected).filter((path) => !expected[path]);
+
+  it.each([
+    ['ESLint', 'eslint', ESLINT_IGNORED],
+    ['Stylelint', 'stylelint', STYLELINT_IGNORED],
+  ] as const)('%s still lints source folders named build/coverage/dist (not ignored)', (_name, linter, expected) => {
+    const reported = report.ignored[linter];
+    expect(linted(expected).filter((path) => reported[path] !== false)).toEqual([]);
   });
 
-  it('Stylelint ignores build/coverage output only at the root and the workspace roots', () => {
-    expect(report.ignored.stylelint).toEqual({
-      'dist/x.css': true,
-      'apps/web/build/client/assets/x.css': true,
-      'packages/ui/dist/x.css': true,
-      'coverage/x.css': true,
-      'apps/web/app/coverage/x.css': false,
-      'packages/ui/src/build/x.css': false,
-    });
+  exactOnly.each([
+    ['ESLint', 'eslint', ESLINT_IGNORED],
+    ['Stylelint', 'stylelint', STYLELINT_IGNORED],
+  ] as const)('%s ignores build/coverage output only at the root and the workspace roots', (_name, linter, expected) => {
+    expect(report.ignored[linter]).toEqual(expected);
   });
 
-  it('the bcrypt confinement rules are on everywhere; the hasher re-declares no-restricted-imports without the bcrypt pattern', () => {
+  it('the bcrypt confinement rules are on everywhere; other modules keep the bcrypt pattern', () => {
     for (const [path, rules] of Object.entries(report.effective)) {
       expect([path, rules?.['no-restricted-imports'], rules?.['boundaries/dependencies']]).toEqual([path, 'error', 'error']);
     }
+    expect(report.effective['apps/api/src/modules/orders/service/a.ts']?.['no-restricted-imports:options']).toContain('bcrypt');
+  });
+
+  exactOnly('the hasher re-declares no-restricted-imports without the bcrypt pattern', () => {
     const hasher = report.effective['apps/api/src/modules/identity/service/bcrypt-password-hasher.ts'];
     expect(hasher?.['no-restricted-imports:options']).not.toContain('bcrypt');
-    expect(report.effective['apps/api/src/modules/orders/service/a.ts']?.['no-restricted-imports:options']).toContain('bcrypt');
   });
 
   it('.jsx and .cjs sources get the same rules as their TypeScript neighbours', () => {
@@ -485,12 +548,13 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.effective['apps/api/src/platform/a.cjs']).toMatchObject({ 'platform/outbound-http-via-client': 'error' });
   });
 
-  it('server-only rules skip the browser package; string externalisation skips test files', () => {
-    expect(report.effective['packages/ui/src/session/client.ts']?.['platform/outbound-http-via-client']).toBe('off');
+  it('server-only rules stay on in server packages; test files keep the a11y rules', () => {
     expect(report.effective['packages/shared/src/a.ts']?.['platform/outbound-http-via-client']).toBe('error');
-    expect(report.effective['apps/web/app/routes/a.test.tsx']).toMatchObject({
-      'i18next/no-literal-string': 'off',
-      'jsx-a11y-x/alt-text': 'error',
-    });
+    expect(report.effective['apps/web/app/routes/a.test.tsx']).toMatchObject({ 'jsx-a11y-x/alt-text': 'error' });
+  });
+
+  exactOnly('server-only rules skip the browser package; string externalisation skips test files', () => {
+    expect(report.effective['packages/ui/src/session/client.ts']?.['platform/outbound-http-via-client']).toBe('off');
+    expect(report.effective['apps/web/app/routes/a.test.tsx']).toMatchObject({ 'i18next/no-literal-string': 'off' });
   });
 });

@@ -238,13 +238,19 @@ jobs:
         if: env.CODE == 'true'
         run: npm run test:unit
 
-      # The control is "no weakening" (D-ORCH-018): every finding a base bad-* fixture expects must still be reported by
-      # the head configs, with the same rule id, severity and message. The mode variable below is read by the BASE copies
-      # of the suite and of tools/lint/fixture-expectations.mjs: extra findings from rules the head adds or widens are
-      # listed in the log and the job summary, not failed, and the head-only positive assertions (ok-* fixtures lint
-      # clean, case-table and platform/* rule completeness, the exact lint-script steps) are skipped; the head suite
-      # already ran them with exact semantics in the unit tests. The variable is set on this step only
-      # (check-workflow-policy rule lint-fixture-mode), and the step is a required gate.
+      # The control is "no weakening" (D-ORCH-018): every finding a base fixture expects must still be reported by the
+      # head configs, with the same rule id, at least the same severity and the same message, and no fixture may report
+      # a finding without a rule id (an unused disable directive, a parse error, an ignored file). The mode variable
+      # below is read by the BASE copies of the suite and of tools/lint/fixture-expectations.mjs: extra findings with a
+      # rule id (rules the head adds or widens) are listed in the log and the job summary, not failed, and only the
+      # positive halves (case-table and platform/* rule completeness, exact ignore and "off" decisions) are skipped; the
+      # head suite already ran them with exact semantics in the unit tests. Jest runs under the BASE copy of
+      # tools/lint/jest.base-fixtures.config.json, not the head jest.config.ts, so a PR cannot change what its own base
+      # run accepts through the suite, fixtures, harness, modes or Jest config. The step is still an accident guard
+      # (PR10-SEC-02): head code that runs earlier in the fast lane and owned configuration (tools/deps/npm-cli.mjs,
+      # lint configs and rules, the lockfile) can change its outcome. The variable is set on this step only
+      # (check-workflow-policy rule lint-fixture-mode flags literal mentions elsewhere), and the step is a required gate
+      # whose commands the base checker pins line by line (PR17-SEC-03).
       - name: Lint negative fixtures from the base ref against the head configs (PR2-SEC-08)
         if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'
         env:
@@ -252,16 +258,17 @@ jobs:
         run: |
           set -euo pipefail
           suite=tools/lint/negative-fixtures.test.ts
+          config=tools/lint/jest.base-fixtures.config.json
           if ! git cat-file -e "$RANGE_BASE:$suite" 2>/dev/null; then
             echo "Base ref has no $suite; the head copy already ran in the unit tests." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          # Exact base copies of the suite, its fixtures, its harness and its assertion modes (review m3: the harness and
-          # the process helper come from the base too). Head-only files are removed first: a checkout alone would keep
-          # files the PR added.
+          # Exact base copies of the suite, its fixtures, its harness, its assertion modes and its Jest config (review m3,
+          # m2). Head-only files are removed first: a checkout alone would keep files the PR added. A base without the
+          # config (before PR #17) keeps the head copy.
           base_paths=("$suite" tests/fixtures/lint)
           rm -rf tests/fixtures/lint
-          for path in tools/lint/lint-fixtures.mjs tools/lint/fixture-expectations.mjs tools/test-support; do
+          for path in tools/lint/lint-fixtures.mjs tools/lint/fixture-expectations.mjs "$config" tools/test-support; do
             if git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then
               rm -rf "$path"
               base_paths+=("$path")
@@ -269,11 +276,11 @@ jobs:
           done
           git checkout "$RANGE_BASE" -- "${base_paths[@]}"
           status=0
-          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js "$suite" \
-            --selectProjects unit || status=$?
+          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js \
+            --config "$config" --runTestsByPath "$suite" || status=$?
           rm -rf tests/fixtures/lint tools/test-support
           git checkout HEAD -- "$suite" tests/fixtures/lint tools/test-support tools/lint/lint-fixtures.mjs \
-            tools/lint/fixture-expectations.mjs
+            tools/lint/fixture-expectations.mjs "$config"
           echo "Base-ref lint negative fixtures (no-weakening subset): exit $status" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 

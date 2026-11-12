@@ -12,6 +12,7 @@ import { findRepoRoot, runNode } from '../test-support/process.js';
 import { FORBIDDEN_ENGINE_ENV } from '../deps/prisma-engines.mjs';
 import { LINT_FIXTURE_MODE_ENV as LINT_FIXTURE_MODE_SUITE_ENV } from '../lint/fixture-expectations.mjs';
 import {
+  BASE_LINT_FIXTURES_SCRIPT,
   CI_REQUIRED_GATES,
   FORBIDDEN_ENV,
   LINT_FIXTURE_MODE_ENV,
@@ -19,6 +20,8 @@ import {
   checkCodeowners,
   checkWorkflow,
   checkWorkflowPolicy,
+  commandLines,
+  findFilesNamed,
   mentionsOf,
   shellSegments,
 } from './check-workflow-policy.mjs';
@@ -172,38 +175,132 @@ describe('check-workflow-policy: repository', () => {
     }
   });
 
-  it('D-ORCH-018 required-gates: the base-ref lint fixture step keeps its no-weakening env, its guard and an unfiltered Jest run; the mode variable lives on that step only', () => {
+  describe('D-ORCH-018 / PR17-SEC-03: the base-ref lint fixture step is a pinned required gate; the mode variable lives on that step only', () => {
     const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
     const modeEntry = '        env:\n          LINT_FIXTURE_MODE: no-weakening\n';
+    const guard = "        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'\n" + modeEntry;
+    const jest = '          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js \\\n';
+    const jestArgs = '            --config "$config" --runTestsByPath "$suite" || status=$?\n';
     const mustSet = 'required-gates: ci.yml base-ref lint negative fixtures gate step must set env LINT_FIXTURE_MODE: no-weakening';
     const onlyHere = "lint-fixture-mode: LINT_FIXTURE_MODE may be set only in the env of ci.yml's base-ref lint fixture step";
-    expect(ci.split(modeEntry)).toHaveLength(2);
+    // A changed step is no longer the gate, so its env entry is a stray mention too.
+    const notTheGate = ['required-gates: ci.yml job fast-lane must keep the base-ref lint negative fixtures gate step', onlyHere].sort();
+    const replaceOnce = (text: string, from: string, to: string) => {
+      expect(text.split(from)).toHaveLength(2);
+      return text.replace(from, to);
+    };
 
-    expect(messages(ci.replace(modeEntry, ''))).toEqual([mustSet]);
-    expect(messages(ci.replace(modeEntry, modeEntry.replace('no-weakening', 'exact')))).toEqual([mustSet]);
-    for (const filter of [" --testNamePattern 'x'", " -t 'x'", ' --passWithNoTests', ' --testPathIgnorePatterns negative']) {
-      const filtered = ci.replace('--selectProjects unit || status=$?', `--selectProjects unit${filter} || status=$?`);
-      expect(filtered).not.toBe(ci);
-      // The step no longer counts as the gate, so its env entry is a stray mention too.
-      expect(messages(filtered)).toEqual(
-        ['required-gates: ci.yml job fast-lane must keep the base-ref lint negative fixtures gate step', onlyHere].sort(),
+    it('the committed step is the pinned script, and the pin ignores comment and blank lines only', () => {
+      expect(ci.split(modeEntry)).toHaveLength(2);
+      expect(ci.split(jest + jestArgs)).toHaveLength(2);
+      const run = ci.slice(ci.indexOf('          set -euo pipefail\n          suite=tools/lint/negative-fixtures.test.ts'));
+      expect(commandLines(run.slice(0, run.indexOf('\n\n'))).map((line) => line.replace(/^ {10}/u, ''))).toEqual([
+        ...BASE_LINT_FIXTURES_SCRIPT,
+      ]);
+      expect(messages(replaceOnce(ci, jest, `          # a reworded comment\n\n${jest}`))).toEqual([]);
+      // After a line continuation bash joins the next line to the command, so it is not skipped there.
+      expect(messages(replaceOnce(ci, jest + jestArgs, `${jest}          #\n${jestArgs}`))).toEqual(notTheGate);
+      expect(commandLines('a \\\n# x\nb\n\n# y\nc')).toEqual(['a \\', '# x', 'b', 'c']);
+    });
+
+    it('review m1 / PR17-SEC-03: any other Jest flag, spelling or tail is not the gate (allow-list, not a deny-list)', () => {
+      const mutations: [string, string][] = [
+        ['--testNamePattern', jestArgs.replace(' ||', " --testNamePattern 'x' ||")],
+        ['--test-name-pattern (kebab)', jestArgs.replace(' ||', ' --test-name-pattern x ||')],
+        ['-tx (attached)', jestArgs.replace(' ||', ' -tx ||')],
+        [
+          '--pass-with-no-tests --test-path-ignore-patterns',
+          jestArgs.replace(' ||', ' --pass-with-no-tests --test-path-ignore-patterns negative ||'),
+        ],
+        ['--listTests', jestArgs.replace(' ||', ' --listTests ||')],
+        ['--onlyChanged', jestArgs.replace(' ||', ' --onlyChanged ||')],
+        ['-o', jestArgs.replace(' ||', ' -o ||')],
+        ['--lastCommit', jestArgs.replace(' ||', ' --lastCommit ||')],
+        ['--showConfig', jestArgs.replace(' ||', ' --showConfig ||')],
+        ['--shard=2/2', jestArgs.replace(' ||', ' --shard=2/2 ||')],
+        ['inline JSON --config', jestArgs.replace('--config "$config"', `--config '{"passWithNoTests":true}'`)],
+        ['head jest.config.ts (no --config)', jestArgs.replace('--config "$config" ', '')],
+        ['positional suite instead of --runTestsByPath', jestArgs.replace('--runTestsByPath "$suite"', '"$suite"')],
+        ['--selectProjects unit', jestArgs.replace(' ||', ' --selectProjects unit ||')],
+        ['|| true', jestArgs.replace('|| status=$?', '|| true')],
+      ];
+      for (const [title, args] of mutations) {
+        expect([title, messages(replaceOnce(ci, jestArgs, args))]).toEqual([title, notTheGate]);
+      }
+      const tail = '          exit "$status"\n';
+      expect(messages(replaceOnce(ci, tail, '          exit 0\n'))).toEqual(notTheGate);
+      expect(messages(replaceOnce(ci, '          git checkout "$RANGE_BASE" -- "${base_paths[@]}"\n', '          true\n'))).toEqual(
+        notTheGate,
       );
-    }
-    const guard = "        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'\n" + modeEntry;
-    expect(messages(ci.replace(guard, guard.replace("LINT_CONTROLS == 'true'", "LINT_CONTROLS == 'never'")))).toEqual([
-      expect.stringContaining('base-ref lint negative fixtures gate step must be guarded only by'),
-    ]);
+      expect(messages(replaceOnce(ci, jest, `          git checkout HEAD -- tools/lint/fixture-expectations.mjs\n${jest}`))).toEqual(
+        notTheGate,
+      );
+    });
 
-    expect(messages(ci.replace('        run: npm run test:unit\n', `${modeEntry}        run: npm run test:unit\n`))).toEqual([onlyHere]);
-    expect(
-      messages(ci.replace('--selectProjects unit || status=$?', '--selectProjects unit || status=$?\n          echo "$LINT_FIXTURE_MODE"')),
-    ).toEqual([onlyHere]);
-    expect(mentionsOf({ a: ['x', { LINT_FIXTURE_MODE: 'y' }], b: 'LINT_FIXTURE_MODE=1' }, 'LINT_FIXTURE_MODE')).toEqual([
-      ['a', '1', 'LINT_FIXTURE_MODE'],
-      ['b'],
-    ]);
-    expect(LINT_FIXTURE_MODE_ENV).toBe(LINT_FIXTURE_MODE_SUITE_ENV);
+    it('PR17-SEC-03: shell:, working-directory:, defaults.run and any other step env fail; the env and guard are pinned', () => {
+      expect(messages(replaceOnce(ci, guard, `${guard}        shell: 'true {0}'\n`))).toEqual([
+        'required-gates: ci.yml base-ref lint negative fixtures gate step must not set shell',
+      ]);
+      expect(messages(replaceOnce(ci, guard, `${guard}        working-directory: apps\n`))).toEqual([
+        'required-gates: ci.yml base-ref lint negative fixtures gate step must not set working-directory',
+      ]);
+      expect(messages(replaceOnce(ci, guard, `${guard}          RANGE_BASE: HEAD\n`))).toEqual([
+        'required-gates: ci.yml base-ref lint negative fixtures gate step must set no env but LINT_FIXTURE_MODE (found RANGE_BASE)',
+      ]);
+      expect(messages(replaceOnce(ci, '  fast-lane:\n', "  fast-lane:\n    defaults:\n      run:\n        shell: 'true {0}'\n"))).toEqual([
+        'required-gates: ci.yml job fast-lane must not set defaults.run (it would change how its gate steps run)',
+      ]);
+      expect(messages(replaceOnce(ci, '\njobs:\n', '\ndefaults:\n  run:\n    working-directory: apps\njobs:\n'))).toEqual([
+        'required-gates: ci.yml must not set defaults.run (it would change how every gate step runs)',
+      ]);
+      expect(messages(ci.replace(modeEntry, ''))).toEqual([mustSet]);
+      expect(messages(ci.replace(modeEntry, modeEntry.replace('no-weakening', 'exact')))).toEqual([mustSet]);
+      expect(messages(ci.replace(guard, guard.replace("LINT_CONTROLS == 'true'", "LINT_CONTROLS == 'never'")))).toEqual([
+        expect.stringContaining('base-ref lint negative fixtures gate step must be guarded only by'),
+      ]);
+    });
+
+    it('lint-fixture-mode: the variable anywhere else fails, also split by quotes or a line continuation (review n3)', () => {
+      expect(messages(ci.replace('        run: npm run test:unit\n', `${modeEntry}        run: npm run test:unit\n`))).toEqual([onlyHere]);
+      const unitTests = '        run: npm run test:unit\n';
+      for (const write of [
+        'echo "LINT_FIXTURE_MODE=exact" >> "$GITHUB_ENV"',
+        'echo "LINT_FIX""TURE_MODE=exact" >> "$GITHUB_ENV"',
+        "export LINT_FIX'TURE_MODE'=exact",
+        'echo LINT_FIX\\\n            TURE_MODE=exact >> "$GITHUB_ENV"',
+      ]) {
+        const text = replaceOnce(ci, unitTests, `        run: |\n          ${write}\n          npm run test:unit\n`);
+        expect([write, messages(text)]).toEqual([
+          write,
+          [onlyHere, 'required-gates: ci.yml job fast-lane must keep the unit tests gate step'].sort(),
+        ]);
+      }
+      expect(
+        mentionsOf({ a: ['x', { LINT_FIXTURE_MODE: 'y' }], b: 'LINT_FIXTURE_MODE=1', c: 'LINT_FIX"TURE_MODE' }, 'LINT_FIXTURE_MODE'),
+      ).toEqual([['a', '1', 'LINT_FIXTURE_MODE'], ['b'], ['c']]);
+      expect(LINT_FIXTURE_MODE_ENV).toBe(LINT_FIXTURE_MODE_SUITE_ENV);
+    });
+  });
+
+  it('PR17-SEC-01: a committed .swcrc anywhere in the tree fails (repository mode); nested checkouts and node_modules are not walked', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workflow-policy-'));
+    try {
+      mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+      cpSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), join(root, '.github', 'workflows', 'ci.yml'));
+      cpSync(join(repoRoot, '.github', 'CODEOWNERS'), join(root, '.github', 'CODEOWNERS'));
+      for (const dir of ['tools', 'node_modules/pkg', '.claude/worktrees/other']) mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(join(root, '.claude', 'worktrees', 'other', '.git'), 'gitdir: elsewhere\n');
+      writeFileSync(join(root, '.claude', 'worktrees', 'other', '.swcrc'), '{}\n');
+      writeFileSync(join(root, 'node_modules', 'pkg', '.swcrc'), '{}\n');
+      expect(checkWorkflowPolicy(root).findings).toEqual([]);
+      writeFileSync(join(root, '.swcrc'), '{}\n');
+      writeFileSync(join(root, 'tools', '.swcrc'), '{"jsc":{"baseUrl":".","paths":{"@jest/globals":["./shim"]}}}\n');
+      expect(checkWorkflowPolicy(root).findings.map((f) => `${f.rule} ${f.location}`)).toEqual(['swcrc .swcrc', 'swcrc tools/.swcrc']);
+      expect(findFilesNamed(root, '.swcrc')).toEqual(['.swcrc', 'tools/.swcrc']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('D-ARCH-041: the forbidden list covers every engine variable deps:rebuild refuses', () => {
@@ -251,6 +348,8 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
       '/.gitignore @o',
       '/.prettierignore @o',
       '/jest.config.ts @o',
+      '/.swcrc @o',
+      '**/.swcrc @o',
       '/tsconfig.json @o',
       '/tsconfig.base.json @o',
       '/commitlint.config.mjs @o',
@@ -270,11 +369,20 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
         'commitlint.config.mjs',
         '.node-version',
         'tools/test-support/',
+        '.swcrc',
+        '**/.swcrc',
         'CLAUDE.md',
         '.claude/settings.json',
         '.claude/agents/',
       ]),
     );
+  });
+
+  it('PR17-SEC-01: the repository CODEOWNERS owns a root and a nested .swcrc', () => {
+    const text = readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+    expect(text).toMatch(/^\/\.swcrc\s+@\S+$/mu);
+    expect(text).toMatch(/^\*\*\/\.swcrc\s+@\S+$/mu);
+    expect(checkCodeowners(text.replace(/^\*\*\/\.swcrc .*$/mu, '')).map((f) => f.message)).toEqual([expect.stringContaining('**/.swcrc')]);
   });
 });
 
