@@ -1,5 +1,5 @@
 - [Review conventions](project_review_conventions.md) — review file path/name in main repo, worktree layout, Node 24 PATH prefix, re-run gates yourself
-- [Review watchlist](project_review_watchlist.md) — open deferred items from PR #1/#2/#3/#4/#5 by owner task; PR #4 round-3 checks
+- [Review watchlist](project_review_watchlist.md) — open deferred items from PR #1–#5 and #8 by owner task; PR #8 r2 checks (M1–M3)
 - [Scratch-copy technique](reference_scratch_copy_technique.md) — mutation-test via git archive + junction; junction pitfalls; junction-free typed lint probe
 - [Lint probe technique](reference_lint_probe_technique.md) — predict a PR's lint errors under another open PR's ESLint config without installing
-- [Review heuristics](project_review_heuristics.md) — recurring defect patterns (unenforced timeouts, flag guards, placeholders, Joi/Zod parity drift)
+- [Review heuristics](project_review_heuristics.md) — recurring defects (unenforced timeouts, flag guards, placeholders, Joi/Zod drift, authz guard keyed on free text, in-place seed regen)

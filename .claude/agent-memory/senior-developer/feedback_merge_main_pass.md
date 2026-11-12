@@ -18,3 +18,5 @@ When a PR has to absorb `main`, read the newest review files and the newest D-OR
 - Background gate runs can be reaped under memory pressure. Do not restart them. Run only targeted foreground checks, and list in the PR comment which gates still need a re-run.
 
 Related: [[p5-dispatch]], [[p5-worktrees]]
+
+**PR #3 post-TASK-003 pass (2026-11-12): about 35 tool calls, clean.** `test:coverage` runs every Jest project, including integration, so it needs Docker just like `test:integration`. Before each Docker gate, run `docker ps | grep postgres:18` to see whether another instance's Testcontainers are running; if they are, run the non-Docker gates first. A wait loop of the form `timeout 590 bash -c "until grep -q '<step> exit' summary; do sleep 10; done"` is allowed, so you can wait on background gates. Any `git diff`/`grep` command line that names `.env.example` is denied, even with `--stat`. To inspect compose.env secrets, print only key names and lengths with a `node -e` one-liner.
