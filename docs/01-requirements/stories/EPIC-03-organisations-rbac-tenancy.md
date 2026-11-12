@@ -195,7 +195,7 @@ Feature: Permission catalogue
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-065, EPIC-17
 - **Linked REQs:** REQ-RBAC-002, REQ-RBAC-003, REQ-RBAC-004
 - **As an** operator Super Admin **I want** the operator, customer and partner roles seeded idempotently with a generated matrix and guard test **so that** a seed edit can never silently escalate privileges.
-- **Notes:** Operator roles: Super Admin, Admin, Operations, Finance, Support, Sales, Compliance Auditor, Content Manager. Customer: Owner, Admin, Shipper, Finance, Viewer. Partner (Owner, Developer, Operations, Finance) is data only. Matrix doc `docs/` generated from the seed. DR-A07. Viewer explicitly lacks `document:download`, `document:email`, `privacy:export` and `privacy:delete` (D-051, SEC-P3-09; A-074 binding). **D-058 (P5 Wave 0 ruling on D-T013-05):** the self-service set `session:manage`, `notification_pref:manage`, `notification:read` (catalogue flag `selfService`; `user`-tenancy `/me/*` routes only, own rows) is held by every one of the 17 seeded roles, including customer Viewer and Finance and operator Compliance Auditor; the Viewer and Compliance Auditor invariants carve out exactly that set. Grants confirmed as seeded in PR #8: Viewer without `payment:read`; Shipper without `org:update`, `org:member:invite`, `org:member:manage`, `payment_method:manage`, `payment:read`; partner roles `org:*` + self-service only. Grants corrected: customer Finance + `order:read`; customer Admin + `privacy:delete`. Super Admin holds every role-assignable permission (`signature-only` webhook permissions belong to no role, D-T013-02).
+- **Notes:** Operator roles: Super Admin, Admin, Operations, Finance, Support, Sales, Compliance Auditor, Content Manager. Customer: Owner, Admin, Shipper, Finance, Viewer. Partner (Owner, Developer, Operations, Finance) is data only. Matrix doc `docs/` generated from the seed. DR-A07. Viewer explicitly lacks `document:download`, `document:email`, `privacy:export` and `privacy:delete` (D-051, SEC-P3-09; A-074 binding). **D-058 (P5 Wave 0 ruling on D-T013-05):** the self-service set `session:manage`, `notification_pref:manage`, `notification:read` (catalogue flag `selfService`; `user`-tenancy `/me/*` routes only, own rows) is held by every one of the 17 seeded roles, including customer Viewer and Finance and operator Compliance Auditor; the Viewer and Compliance Auditor invariants carve out exactly that set. Grants confirmed as seeded in PR #8: Viewer without `payment:read`; Shipper without `org:update`, `org:member:invite`, `org:member:manage`, `payment_method:manage`, `payment:read`; partner roles `org:*` + self-service only. Grants corrected: customer Finance + `order:read`; customer Admin + `privacy:delete`. Super Admin holds every role-assignable permission (`signature-only` webhook permissions belong to no role, D-T013-02). **D-ARCH-069 / D-060 (PR #8 round 2, ADR-0008 am. 3 item 1):** the Compliance Auditor invariant is narrowed from "read, audit and self-service" to `verb = read` ∪ {`audit:export`} ∪ selfService, because the old rule let a future destructive `audit:<verb>` (for example `audit:purge`) pass the guard; no seeded grant changes and no `CATALOGUE_VERSION` bump; the guard edit ships with TASK-020.
 
 #### Acceptance criteria
 ```gherkin
@@ -207,8 +207,22 @@ Feature: Seeded roles
     When the matrix generator runs Then docs contains a role-permission table matching the seed exactly, and CI fails if the committed document differs
 
   Scenario: Guard invariants hold
-    Then "Super Admin" holds every role-assignable catalogue permission (the signature-only webhook permissions are held by no role), "Compliance Auditor" holds only read, audit and self-service permissions, customer "Viewer" holds no create/update/delete/manage permission other than the self-service set
+    Then "Super Admin" holds every role-assignable catalogue permission (the signature-only webhook permissions are held by no role), "Compliance Auditor" holds only read permissions, "audit:export" and the self-service set, customer "Viewer" holds no create/update/delete/manage permission other than the self-service set
     And every one of the 17 seeded roles holds "session:manage", "notification_pref:manage" and "notification:read" (D-058)
+
+  Scenario Outline: Compliance Auditor may never hold a non-read audit permission other than audit:export (REQ-RBAC-004, D-ARCH-069)
+    Given a seed edit gives the operator role "Compliance Auditor" the permission "<permission>"
+    Then the build-time guard test fails CI naming role "Compliance Auditor" and the permission
+    Examples:
+      | permission    |
+      | audit:purge   |
+      | audit:anchor  |
+      | audit:manage  |
+
+  Scenario: Compliance Auditor keeps audit:export and audit:read
+    Given the seeded operator role "Compliance Auditor" holding "audit:read" and "audit:export"
+    When the build-time guard test runs
+    Then it passes for "Compliance Auditor"
 
   Scenario Outline: Self-service permission removed from a seeded role (REQ-RBAC-004, D-058)
     Given a seed edit removes "<permission>" from the role "<role>"
