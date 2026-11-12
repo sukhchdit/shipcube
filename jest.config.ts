@@ -71,13 +71,14 @@ const config: Config = {
       ...common,
       displayName: 'unit-dom',
       // Component tests resolve browser builds: `browser` replaces the Node-side `node`/`node-addons` conditions of `common` (m8).
-      // jsdom plus the Fetch API globals react-router needs (tools/test-support/jsdom-environment.mjs).
-      testEnvironment: '<rootDir>/tools/test-support/jsdom-environment.mjs',
+      // jsdom plus the Fetch API globals react-router needs (tools/test-dom/jsdom-environment.mjs). The DOM support files
+      // live outside tools/test-support, which lane A's base-ref lint-fixture step replaces with the base copy.
+      testEnvironment: '<rootDir>/tools/test-dom/jsdom-environment.mjs',
       testEnvironmentOptions: { customExportConditions: ['@platform/source', 'browser'] },
       testMatch: ['**/*.test.tsx'],
       testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
-      setupFilesAfterEnv: ['<rootDir>/tools/test-support/dom-setup.ts'],
-      moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-support/style-stub.ts' },
+      setupFilesAfterEnv: ['<rootDir>/tools/test-dom/dom-setup.ts'],
+      moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-dom/style-stub.ts' },
     },
     {
       ...common,
