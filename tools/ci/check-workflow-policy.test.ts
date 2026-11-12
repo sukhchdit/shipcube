@@ -10,13 +10,16 @@ import { describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
 import { FORBIDDEN_ENGINE_ENV } from '../deps/prisma-engines.mjs';
+import { LINT_FIXTURE_MODE_ENV as LINT_FIXTURE_MODE_SUITE_ENV } from '../lint/fixture-expectations.mjs';
 import {
   CI_REQUIRED_GATES,
   FORBIDDEN_ENV,
+  LINT_FIXTURE_MODE_ENV,
   REQUIRED_CODEOWNED_PATHS,
   checkCodeowners,
   checkWorkflow,
   checkWorkflowPolicy,
+  mentionsOf,
   shellSegments,
 } from './check-workflow-policy.mjs';
 import { YamlSubsetError, parseYamlSubset } from './yaml-subset.mjs';
@@ -96,6 +99,12 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['PR10-SEC-02: npm in ci.yml job scans fails', 'ci-scans-npm.yml', 'scans-isolation'],
     ['PR10-SEC-02: a workspace script in ci.yml job scans fails', 'ci-scans-workspace-script.yml', 'scans-isolation'],
     ['PR10-SEC-02: setup-node with cache/.node-version in ci.yml job scans fails', 'ci-scans-setup-node-cache.yml', 'scans-isolation'],
+    [
+      'D-ORCH-018: LINT_FIXTURE_MODE in a job env fails (the head unit-test run stays exact)',
+      'lint-fixture-mode-job-env.yml',
+      'lint-fixture-mode',
+    ],
+    ['D-ORCH-018: LINT_FIXTURE_MODE written to $GITHUB_ENV fails', 'ci-lint-fixture-mode-github-env.yml', 'lint-fixture-mode'],
   ])('%s', (_title, fixture, rule) => {
     expect(rulesFor(fixture)).toContain(rule);
   });
@@ -152,7 +161,7 @@ describe('check-workflow-policy: repository', () => {
     ]);
     const ungated = ci.replace('needs: [fast-lane, scans]', 'needs: [fast-lane]');
     expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual(['ci.yml ci-gate must need scans']);
-    expect(CI_REQUIRED_GATES.length).toBeGreaterThanOrEqual(20);
+    expect(CI_REQUIRED_GATES.length).toBeGreaterThanOrEqual(21);
     const root = mkdtempSync(join(tmpdir(), 'workflow-policy-'));
     try {
       mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
@@ -161,6 +170,40 @@ describe('check-workflow-policy: repository', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('D-ORCH-018 required-gates: the base-ref lint fixture step keeps its no-weakening env, its guard and an unfiltered Jest run; the mode variable lives on that step only', () => {
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
+    const modeEntry = '        env:\n          LINT_FIXTURE_MODE: no-weakening\n';
+    const mustSet = 'required-gates: ci.yml base-ref lint negative fixtures gate step must set env LINT_FIXTURE_MODE: no-weakening';
+    const onlyHere = "lint-fixture-mode: LINT_FIXTURE_MODE may be set only in the env of ci.yml's base-ref lint fixture step";
+    expect(ci.split(modeEntry)).toHaveLength(2);
+
+    expect(messages(ci.replace(modeEntry, ''))).toEqual([mustSet]);
+    expect(messages(ci.replace(modeEntry, modeEntry.replace('no-weakening', 'exact')))).toEqual([mustSet]);
+    for (const filter of [" --testNamePattern 'x'", " -t 'x'", ' --passWithNoTests', ' --testPathIgnorePatterns negative']) {
+      const filtered = ci.replace('--selectProjects unit || status=$?', `--selectProjects unit${filter} || status=$?`);
+      expect(filtered).not.toBe(ci);
+      // The step no longer counts as the gate, so its env entry is a stray mention too.
+      expect(messages(filtered)).toEqual(
+        ['required-gates: ci.yml job fast-lane must keep the base-ref lint negative fixtures gate step', onlyHere].sort(),
+      );
+    }
+    const guard = "        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'\n" + modeEntry;
+    expect(messages(ci.replace(guard, guard.replace("LINT_CONTROLS == 'true'", "LINT_CONTROLS == 'never'")))).toEqual([
+      expect.stringContaining('base-ref lint negative fixtures gate step must be guarded only by'),
+    ]);
+
+    expect(messages(ci.replace('        run: npm run test:unit\n', `${modeEntry}        run: npm run test:unit\n`))).toEqual([onlyHere]);
+    expect(
+      messages(ci.replace('--selectProjects unit || status=$?', '--selectProjects unit || status=$?\n          echo "$LINT_FIXTURE_MODE"')),
+    ).toEqual([onlyHere]);
+    expect(mentionsOf({ a: ['x', { LINT_FIXTURE_MODE: 'y' }], b: 'LINT_FIXTURE_MODE=1' }, 'LINT_FIXTURE_MODE')).toEqual([
+      ['a', '1', 'LINT_FIXTURE_MODE'],
+      ['b'],
+    ]);
+    expect(LINT_FIXTURE_MODE_ENV).toBe(LINT_FIXTURE_MODE_SUITE_ENV);
   });
 
   it('D-ARCH-041: the forbidden list covers every engine variable deps:rebuild refuses', () => {

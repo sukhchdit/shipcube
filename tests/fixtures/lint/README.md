@@ -12,3 +12,9 @@ fixture-relative paths) and asserts the exact rule that fires.
 
 The tree is excluded from `npm run lint` (ESLint and Stylelint ignores), `tsc` and Jest discovery. Prettier does
 format and check it, like any other source file.
+
+Lane A also runs the **base ref's** copy of the suite, these fixtures and the harness against the PR's configs
+(PR2-SEC-08) with `LINT_FIXTURE_MODE=no-weakening` (D-ORCH-018; `tools/lint/fixture-expectations.mjs`): every finding
+a base `bad-*` fixture expects must still be reported, extra findings from rules the PR adds are listed in the job
+summary instead of failing, and the positive assertions (clean `ok-*` files, case-table and rule completeness) are left
+to the PR's own copy, which runs in the default `exact` mode.

@@ -40,7 +40,10 @@
  *   scans-isolation       ci.yml job `scans` runs no npm, nothing from node_modules or the workspace, no local action and
  *                         no setup-node cache, so no head-controlled code shares its runner (PR10-SEC-02).
  *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES in its job, unconditional or with its listed
- *                         `if:`, and `ci-gate` needs `fast-lane` and `scans` (PR10-SEC-07).
+ *                         `if:` and `env:`, and `ci-gate` needs `fast-lane` and `scans` (PR10-SEC-07).
+ *   lint-fixture-mode     LINT_FIXTURE_MODE appears nowhere but in the `env:` of ci.yml's base-ref lint fixture step
+ *                         (no workflow/job/other-step env, no `run:`/`if:` mention, no $GITHUB_ENV write), so the head
+ *                         unit-test run keeps exact semantics (PR2-SEC-08, D-ORCH-018).
  * Repository mode (no explicit files) also checks:
  *   codeowners-*          `.github/CODEOWNERS` exists and covers REQUIRED_CODEOWNED_PATHS.
  *   gitleaksignore        no `.gitleaksignore` anywhere in the tree (gitleaks would load it from the scanned source;
@@ -108,9 +111,20 @@ export const FORBIDDEN_TRIGGERS = Object.freeze([
 export const SAFE_EXPRESSION =
   /^(?:github\.(?:sha|repository|repository_id|repository_owner|run_id|run_number|run_attempt|workflow|event_name|job|action|server_url|api_url|workspace)|runner\.[A-Za-z_]+|steps\.[A-Za-z_][\w-]*\.(?:outputs\.[A-Za-z_][\w-]*|outcome|conclusion)|needs\.[A-Za-z_][\w-]*\.(?:outputs\.[A-Za-z_][\w-]*|result)|matrix\.[A-Za-z_][\w.-]*|env\.[A-Za-z_]\w*|vars\.[A-Za-z_]\w*)$/;
 
+/** The variable that selects the lint fixture suite's mode (tools/lint/fixture-expectations.mjs; D-ORCH-018). */
+export const LINT_FIXTURE_MODE_ENV = 'LINT_FIXTURE_MODE';
+
 /**
- * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, and the only
- * `if:` values allowed on that step (empty: unconditional). Adding a gate is a reviewed change to this list.
+ * `run:` of the base-ref lint fixture step (PR2-SEC-08): the base suite under Jest with no test filter, so the base
+ * suite decides what its no-weakening mode skips, not the head's command line.
+ */
+const BASE_LINT_FIXTURES_RUN =
+  /^(?![\s\S]*(?:--testNamePattern|--testPathIgnorePatterns|--passWithNoTests|\s-t[\s=]))(?=[\s\S]*\nsuite=tools\/lint\/negative-fixtures\.test\.ts\n)[\s\S]*node_modules\/jest\/bin\/jest\.js "\$suite" (?:\\\s+)?--selectProjects unit\b/;
+
+/**
+ * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, the only
+ * `if:` values allowed on that step (empty: unconditional) and the `env:` entries it must set. Adding a gate is a
+ * reviewed change to this list.
  */
 export const CI_REQUIRED_GATES = Object.freeze([
   { job: 'fast-lane', gate: 'workflow policy', run: /node "\$GATE_CHECK_WORKFLOW_POLICY"/, ifs: [] },
@@ -128,6 +142,13 @@ export const CI_REQUIRED_GATES = Object.freeze([
   { job: 'fast-lane', gate: 'actionlint', run: /"\$ACTIONLINT_IMAGE"/, ifs: [] },
   { job: 'fast-lane', gate: 'type-check', run: /^npm run typecheck$/, ifs: ["env.CODE == 'true'"] },
   { job: 'fast-lane', gate: 'unit tests', run: /^npm run test:unit$/, ifs: ["env.CODE == 'true'"] },
+  {
+    job: 'fast-lane',
+    gate: 'base-ref lint negative fixtures',
+    run: BASE_LINT_FIXTURES_RUN,
+    ifs: ["env.CODE == 'true' && env.LINT_CONTROLS == 'true'"],
+    env: { [LINT_FIXTURE_MODE_ENV]: 'no-weakening' },
+  },
   { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
   { job: 'fast-lane', gate: 'porcelain', run: /node "\$GATE_CHECK_PORCELAIN"/, ifs: ["env.CODE == 'true'"] },
   { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [] },
@@ -566,6 +587,11 @@ export function checkWorkflow(text, fileName, options = {}) {
         add('pinned-action', `${uses} needs a trailing "# vX.Y.Z" comment naming the pinned release`, path);
     }
   }
+  for (const path of mentionsOf(doc, LINT_FIXTURE_MODE_ENV)) {
+    if (!(isCi && isBaseLintFixtureModeEntry(jobs, path))) {
+      add('lint-fixture-mode', `${LINT_FIXTURE_MODE_ENV} may be set only in the env of ci.yml's base-ref lint fixture step`, path);
+    }
+  }
   if (options.requiredGates === true) for (const f of requiredGateFindings(jobs)) add(f.rule, f.message, f.path);
   return findings;
 }
@@ -589,6 +615,40 @@ function scansStepViolations(step) {
   if (/^actions\/setup-node@/.test(uses) && (withMap.cache !== undefined || withMap['node-version-file'] !== undefined))
     out.push('job scans: setup-node takes a literal node-version and no cache');
   return out;
+}
+
+/**
+ * Paths of every map key equal to `name` and every string value that mentions it (`run:`, `if:`, `with:`, env values).
+ * @param {YamlNode | undefined} node
+ * @param {string} name
+ * @param {string[]} [path]
+ * @returns {string[][]}
+ */
+export function mentionsOf(node, name, path = []) {
+  if (typeof node === 'string') return node.includes(name) ? [path] : [];
+  if (Array.isArray(node)) return node.flatMap((child, index) => mentionsOf(child, name, [...path, String(index)]));
+  if (isMap(node)) {
+    return Object.entries(node).flatMap(([key, child]) => [
+      ...(key === name ? [[...path, key]] : []),
+      ...mentionsOf(child, name, [...path, key]),
+    ]);
+  }
+  return [];
+}
+
+/**
+ * True for the one allowed mention of LINT_FIXTURE_MODE: the `env:` key of ci.yml's base-ref lint fixture step
+ * (jobs.fast-lane.steps.<n>.env.LINT_FIXTURE_MODE, the step whose `run:` is BASE_LINT_FIXTURES_RUN).
+ * @param {YamlMap} jobs
+ * @param {string[]} path
+ */
+function isBaseLintFixtureModeEntry(jobs, path) {
+  const [root, job, steps, index, env, key] = path;
+  if (path.length !== 6 || root !== 'jobs' || job !== 'fast-lane' || steps !== 'steps' || env !== 'env') return false;
+  if (key !== LINT_FIXTURE_MODE_ENV) return false;
+  const list = asMap(jobs['fast-lane'])?.steps;
+  const step = Array.isArray(list) ? asMap(list[Number(index)]) : undefined;
+  return BASE_LINT_FIXTURES_RUN.test((asString(step?.run) ?? '').trim());
 }
 
 /**
@@ -617,6 +677,16 @@ export function requiredGateFindings(jobs) {
         message: `ci.yml ${gate.gate} gate step must be ${gate.ifs.length === 0 ? 'unconditional' : `guarded only by ${gate.ifs.join(' | ')}`} (found if: ${condition})`,
         path: ['jobs', gate.job, 'steps', String(index), 'if'],
       });
+    }
+    const env = asMap(asMap(steps[index])?.env) ?? {};
+    for (const [name, value] of Object.entries(gate.env ?? {})) {
+      if (env[name] !== value) {
+        out.push({
+          rule: 'required-gates',
+          message: `ci.yml ${gate.gate} gate step must set env ${name}: ${value}`,
+          path: ['jobs', gate.job, 'steps', String(index), 'env'],
+        });
+      }
     }
   }
   const needs = asMap(jobs['ci-gate'])?.needs;
