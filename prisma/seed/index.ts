@@ -7,6 +7,7 @@
  * database URL or any password.
  */
 import { readFileSync } from 'node:fs';
+import { types } from 'node:util';
 
 import pg from 'pg';
 
@@ -136,8 +137,10 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
       output.err(JSON.stringify({ level: 'error', event: 'seed.refused', code: error.code, subjects: error.subjects }));
       return 1;
     }
-    const name = error instanceof Error ? error.name : 'Error';
-    const message = error instanceof Error ? redact(error.message, secrets) : 'non-error value thrown';
+    // isNativeError, not instanceof: driver and socket errors may come from another realm (e.g. a test VM context).
+    const native = types.isNativeError(error);
+    const name = native ? error.name : 'Error';
+    const message = native ? redact(error.message, secrets) : 'non-error value thrown';
     output.err(JSON.stringify({ level: 'error', event: 'seed.failed', error: name, message }));
     return 2;
   }
