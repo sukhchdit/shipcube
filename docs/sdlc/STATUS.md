@@ -27,6 +27,10 @@
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | merged 8bf373c | ✅ | ✅ APPROVED r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ 77/77 unit, lint, typecheck, build on main (orchestrator) | ✅ | 1 | – |
+| 0.2 | TASK-002 lint/format/layering | senior-developer → specialist | feat/TASK-002-* | ▶ | | | | | 0 | |
+| 0.2 | TASK-003 Prisma 7 + PG 18 baseline (+ engine pin D-ARCH-041) | senior-developer → database-engineer | feat/TASK-003-* | ▶ | | | | | 0 | |
+| 0.2 | TASK-004 web + admin scaffolds (Playwright after cooldown 18:30Z) | senior-developer → frontend-developer | feat/TASK-004-* | ▶ | | | | | 0 | |
+| 0.2 | TASK-005 packages/config + key register | senior-developer → backend-developer | feat/TASK-005-* | ▶ | | | | | 0 | |
 
 ## Escalations in progress
 _none_
