@@ -158,6 +158,21 @@ export const DB_POOL_MAX_DEFAULTS: Readonly<Record<Service, number>> = Object.fr
 /** Defaults equal to the TASK-003 pool factory defaults (apps/api/src/platform/db/client.ts). */
 export const DB_IDLE_TIMEOUT_MS_DEFAULT = 10_000;
 export const DB_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
+/**
+ * Per-transaction timeouts set by `withTenantTx`'s context statement (data-model §4.1 settings 6-8; ADR-0005 am. 10
+ * item 12, TASK-016). They win over the `platform_app` role defaults, which the role itself can rewrite.
+ */
+export const DB_TX_STATEMENT_TIMEOUT_MS_DEFAULT = 5_000;
+export const DB_TX_LOCK_TIMEOUT_MS_DEFAULT = 2_000;
+export const DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS_DEFAULT = 15_000;
+/** Inclusive bounds of the three `DB_TX_*` keys, in milliseconds. */
+export const DB_TX_TIMEOUT_BOUNDS = Object.freeze({
+  DB_TX_STATEMENT_TIMEOUT_MS: Object.freeze({ min: 100, max: 120_000 }),
+  DB_TX_LOCK_TIMEOUT_MS: Object.freeze({ min: 100, max: 60_000 }),
+  DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: Object.freeze({ min: 1_000, max: 600_000 }),
+});
+const txTimeout = (key: keyof typeof DB_TX_TIMEOUT_BOUNDS): Typed<number> =>
+  t.int(DB_TX_TIMEOUT_BOUNDS[key].min, DB_TX_TIMEOUT_BOUNDS[key].max);
 
 const MINUTE = 60;
 const HOUR = 3_600;
@@ -242,6 +257,18 @@ export const CONFIG_SCHEMA = {
   DB_CONNECTION_TIMEOUT_MS: withDefault(t.int(1, 120_000), DB_CONNECTION_TIMEOUT_MS_DEFAULT, {
     description: 'Milliseconds to wait for a new PostgreSQL connection before failing.',
   }),
+  // Per-transaction timeouts of the withTenantTx context statement (data-model §4.1; ADR-0005 am. 10 item 12).
+  DB_TX_STATEMENT_TIMEOUT_MS: withDefault(txTimeout('DB_TX_STATEMENT_TIMEOUT_MS'), DB_TX_STATEMENT_TIMEOUT_MS_DEFAULT, {
+    description: 'Transaction-local statement_timeout (ms) set by withTenantTx; wins over the 30 s role backstop.',
+  }),
+  DB_TX_LOCK_TIMEOUT_MS: withDefault(txTimeout('DB_TX_LOCK_TIMEOUT_MS'), DB_TX_LOCK_TIMEOUT_MS_DEFAULT, {
+    description: 'Transaction-local lock_timeout (ms) set by withTenantTx; 55P03 maps to a retryable 503.',
+  }),
+  DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: withDefault(
+    txTimeout('DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS'),
+    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS_DEFAULT,
+    { description: 'Transaction-local idle_in_transaction_session_timeout (ms) set by withTenantTx.' },
+  ),
 
   // Valkey (REDIS_*)
   REDIS_URL: required(t.secretUrl(['redis', 'rediss']), {
