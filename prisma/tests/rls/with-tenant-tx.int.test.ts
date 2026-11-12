@@ -15,6 +15,7 @@ import pg from 'pg';
 
 import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.js';
 import { expectAffected } from '../../../apps/api/src/platform/db/expect-affected.js';
+import { createDatabaseRuntime } from '../../../apps/api/src/platform/db/runtime.js';
 import { DbError, type DbSecurityEvent } from '../../../apps/api/src/platform/db/map-db-error.js';
 import type { TenantDb } from '../../../apps/api/src/platform/db/tenant-db.js';
 import {
@@ -480,6 +481,17 @@ describe('ADR-0005 am.10 item 12: per-transaction timeouts', () => {
     const admin = await db.superuser(database);
     const before = await roleSettings(admin);
     expect(before).toContain('lock_timeout=2s');
+    // D-ORCH-014 (b): the `database` readiness check the processes run (platform/db/runtime.ts composition, with the
+    // session-integrity guard) is ready on the bootstrapped role settings and reports drift after the RESET.
+    const events: string[] = [];
+    const runtime = createDatabaseRuntime({
+      database: { connectionString: db.appUrl(database), poolMax: 1, applicationName: 'rls-drift-readiness' },
+      integrityIntervalMs: 0, // re-evaluate on every check, as the 5-minute monitor eventually does
+      tx: BASE_OPTIONS,
+      log: { info: () => undefined, warn: (event) => events.push(event), error: (event) => events.push(event) },
+    });
+    await runtime.startup();
+    await expect(runtime.readinessCheck.check(new AbortController().signal)).resolves.toBeUndefined();
     const app = new pg.Client(db.appConnection(database));
     await app.connect();
     let drifted: PrismaClient | undefined;
@@ -492,7 +504,11 @@ describe('ADR-0005 am.10 item 12: per-transaction timeouts', () => {
       expect(inside.lock).toBe('2s');
       expect(inside.statement).toBe('5s');
       expect(inside.idle).toBe('15s');
+      // ...and readiness reports the drift with one security event; not ready until the setting is restored.
+      await expect(runtime.readinessCheck.check(new AbortController().signal)).rejects.toThrow('db_role_setting_drift');
+      expect(events).toEqual(['security.db_role_setting_drift']);
     } finally {
+      for (const resource of runtime.resources) await resource.close();
       await drifted?.$disconnect();
       await app.end();
       await admin.query("ALTER ROLE platform_app SET lock_timeout = '2s'");

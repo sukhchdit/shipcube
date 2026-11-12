@@ -6,7 +6,7 @@
  *    which then apply to every API and worker task and survive restarts;
  *  - a session default for a tenant-context key (`app.org_id`, ...) would pre-set RLS context on fresh connections.
  * The guard compares the role and database-level settings that apply to `current_user` with the exact expected set
- * from `prisma/bootstrap/00-roles.sql`, and requires every tenant-context key to be unset.
+ * from the bootstrap lane (`prisma/bootstrap/*.sql`), and requires every tenant-context key to be unset.
  *
  * Fresh versus pooled (PR-0009 code review M1): a pooled connection on which a transaction-local `set_config` ran
  * reports '' for that key afterwards (ADR-0005 item 16, F-07), so only a connection opened for the check can prove
@@ -21,9 +21,20 @@
  * TASK-006, ADR-0005 am. 10).
  */
 
-/** `ALTER ROLE platform_app SET …` in prisma/bootstrap/00-roles.sql, as `pg_db_role_setting.setconfig` entries. */
+/**
+ * Every `ALTER ROLE platform_app SET …` of the bootstrap lane, as `pg_db_role_setting.setconfig` entries: 00-roles.sql
+ * (search_path, idle_in_transaction_session_timeout, lock_timeout) and 02-role-backstops.sql (statement_timeout 30 s
+ * backstop, lc_messages = C so `mapDbError` reads PostgreSQL's English RLS message; D-ARCH-064, D-ARCH-073). The unit
+ * test parses every bootstrap file, so a new role setting fails it until it is listed here (D-ORCH-014 (a)).
+ */
 export const EXPECTED_ROLE_SETTINGS: readonly string[] = Object.freeze(
-  ['idle_in_transaction_session_timeout=15s', 'lock_timeout=2s', 'search_path=pg_catalog, public'].sort(),
+  [
+    'idle_in_transaction_session_timeout=15s',
+    'lc_messages=C',
+    'lock_timeout=2s',
+    'search_path=pg_catalog, public',
+    'statement_timeout=30s',
+  ].sort(),
 );
 
 /** Tenant-context keys set per transaction by `withTenantTx` (ADR-0005); never a session or role default. */
