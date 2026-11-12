@@ -22,7 +22,8 @@
  *
  * The per-user Prisma cache (`%APPDATA%\Prisma`, `~/.cache/prisma`) is never read, written or trusted. Children of
  * Prisma get `PRISMA_SCHEMA_ENGINE_BINARY=<verified path>` and `CHECKPOINT_DISABLE=1` (`prismaChildEnv`), which makes
- * the CLI's `ensureNeededBinariesExist()` return before it looks at the cache or the network.
+ * the CLI's `ensureNeededBinariesExist()` return before it looks at the cache or the network, and no Node preload
+ * from `NODE_OPTIONS` or npm's `node-options` (`prismaChildEnv`, `prismaExecArgs`; PR5-SEC-07, PR9-SEC-02).
  *
  * Plain ESM with `node:` imports only: it runs from `deps:rebuild` right after `npm ci --ignore-scripts`.
  *
@@ -438,12 +439,33 @@ export function reverifyEngine(path, expected) {
  * Variables never passed to a Prisma child besides the engine redirects (PR5-SEC-07): `NODE_OPTIONS` can preload
  * code (`--require`, `--import`, `--env-file`) that sets an engine variable INSIDE the child, after this filter ran
  * and while the verified file stays untouched, so `reverifyEngine` would still pass. Prisma needs no Node options.
+ * `NPM_CONFIG_NODE_OPTIONS` (PR9-SEC-02): the direct child is npm, which copies its `node-options` setting into
+ * `NODE_OPTIONS` for the `prisma` bin. Dropping the env layer is the belt; `PRISMA_NPM_EXEC_OPTIONS` is the braces
+ * that also covers every `.npmrc` layer.
  */
-const DROPPED_CHILD_ENV = ['NODE_OPTIONS'];
+const DROPPED_CHILD_ENV = ['NODE_OPTIONS', 'NPM_CONFIG_NODE_OPTIONS'];
 
 /**
- * Environment for every Prisma child: the verified engine path, no checkpoint telemetry, no engine redirect and no
- * `NODE_OPTIONS` (PR5-SEC-07). Keys compare case-insensitively (Windows environments are case-insensitive).
+ * npm options of every `npm exec … prisma` (PR9-SEC-02, SEC-P3-31). `--node-options=` sets npm's `node-options` to
+ * empty on the command line, which outranks the env (`npm_config_node_options`, any case) and every `.npmrc` (project,
+ * user, global, or files named by `npm_config_userconfig` / `npm_config_globalconfig`), so npm writes no
+ * `NODE_OPTIONS` for the bin. `--no` refuses to download a missing binary.
+ */
+export const PRISMA_NPM_EXEC_OPTIONS = Object.freeze(['--node-options=', '--no']);
+
+/**
+ * npm arguments (after the `npm-cli.js` path) that run the Prisma CLI with `args`; every caller (prisma-cli.mjs,
+ * rebuild.mjs) builds its argv here, so the PR9-SEC-02 options cannot be left out.
+ * @param {readonly string[]} args @returns {string[]}
+ */
+export function prismaExecArgs(args) {
+  return ['exec', ...PRISMA_NPM_EXEC_OPTIONS, '--', 'prisma', ...args];
+}
+
+/**
+ * Environment for every Prisma child: the verified engine path, no checkpoint telemetry, no engine redirect, no
+ * `NODE_OPTIONS` (PR5-SEC-07) and no npm `node-options` (PR9-SEC-02). Keys compare case-insensitively (Windows
+ * environments are case-insensitive).
  * @param {Record<string, string | undefined>} env @param {string} enginePath
  */
 export function prismaChildEnv(env, enginePath) {
