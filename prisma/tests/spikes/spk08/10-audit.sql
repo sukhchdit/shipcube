@@ -5,7 +5,7 @@
 -- Source: data-model.md §4.4 amendment (SEC-P3-03, SEC-P3-27), §5.1 (verbatim), §5.2 (verbatim), §5.3 (verbatim).
 -- Spike simplifications (marked "SPK-08:"): only audit_entries and a minimal audit_partitions; a placeholder RLS policy.
 -- Run by the bootstrap superuser with the pinned search path, in one transaction.
--- @audit-ddl security-approved: spike-only (SPK-08) 2026-11-12
+-- NOT security-approved (SPK-08 prototype); the real bootstrap file needs the rule-12 audit-DDL marker with a reviewer entry.
 SET search_path = pg_catalog, pg_temp;
 SET ROLE platform_audit_owner;
 

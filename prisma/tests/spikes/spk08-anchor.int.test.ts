@@ -4,7 +4,9 @@
  * and the verifier's tamper detection, on PostgreSQL 18.
  *
  * Throwaway spike code. The reduced audit schema below is created inside the test (as `platform_audit_owner`, on a
- * clone of the bootstrapped template database) and is never a migration or a bootstrap-lane script. The writer and the
+ * clone of a template bootstrapped with the pre-audit files `0N-*.sql` only) and is never a migration or a
+ * bootstrap-lane script. Lifecycle (SPK-08 §8): TASK-116's PR ports this suite and `spk08/anchor-prototype.ts` into
+ * `packages/audit` and its verifier suite, then deletes both. The writer and the
  * verifier connect as `platform_app`; the tampering attacker is the cluster superuser with
  * `session_replication_role = replica` (which skips the append-only triggers).
  *
@@ -14,7 +16,19 @@
  */
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, randomUUID, webcrypto, type KeyObject } from 'node:crypto';
-import { closeSync, fsyncSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import {
+  closeSync,
+  cpSync,
+  fsyncSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -22,6 +36,7 @@ import { performance } from 'node:perf_hooks';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import pg from 'pg';
 
+import { findRepoRoot } from '../../../tools/test-support/process.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 import {
   ALGORITHM,
@@ -51,6 +66,8 @@ import {
 const ORG_A = randomUUID();
 const ORG_B = randomUUID();
 const KEY_ID = 'audit-anchor-v1';
+const BOOTSTRAP_DIR = join(findRepoRoot(), 'prisma', 'bootstrap');
+const ANCHOR_TEMPLATE = 'spk08_anchor_tpl';
 
 /** Reduced spike schema: the columns that matter for chaining and anchoring (data-model §3.4, §5.1, §5.2, §5.5). */
 const SPIKE_DDL = `
@@ -362,7 +379,11 @@ async function seededWorld(checkpoints: number): Promise<World> {
   return w;
 }
 
-/** The hourly verifier: chain walk of every stream, then steps (i)-(iii). Runs as platform_app. */
+/**
+ * The verifier in its nightly shape: a full chain walk of every stream from seq 1, then steps (i)-(iii). Runs as
+ * platform_app. The production hourly run walks incrementally (data-model §5.6); a rewrite behind an intact anchored
+ * head row is caught only by this full walk, within 24 h (PR12-SEC-05, SPK-08 AF-9/AF-12).
+ */
 async function verifyAll(w: World, keys: ReadonlyMap<string, string> = publicKeys, sinkRetryWindowOpen = false): Promise<Failure[]> {
   const failures: Failure[] = [];
   const streams = await w.app.query<{ stream_id: string }>(
@@ -454,7 +475,17 @@ beforeAll(async () => {
   publicKeys = new Map([[KEY_ID, publicKeyPem]]);
   const started = performance.now();
   pgContainer = await PlatformPostgres.start();
-  template = await pgContainer.template({ migrated: false });
+  // Only the pre-audit bootstrap files (`0N-*.sql`): SPIKE_DDL creates its own audit tables, so TASK-021's real
+  // `10-audit.sql` / `90-*.sql` must not be applied underneath it (SPK-08 §8 lifecycle).
+  const bootstrapDir = join(tempDir, 'bootstrap');
+  mkdirSync(bootstrapDir);
+  for (const name of readdirSync(BOOTSTRAP_DIR)) {
+    if (/^0\d-[a-z0-9-]+\.sql$/.test(name)) cpSync(join(BOOTSTRAP_DIR, name), join(bootstrapDir, name));
+  }
+  report['bootstrap_files'] = readdirSync(bootstrapDir).sort();
+  template = ANCHOR_TEMPLATE;
+  await pgContainer.createDatabase(ANCHOR_TEMPLATE);
+  await pgContainer.bootstrap(ANCHOR_TEMPLATE, bootstrapDir);
   report['container_and_template_ms'] = Math.round(performance.now() - started);
 }, 300_000);
 
@@ -489,6 +520,9 @@ describe('SPK-08 anchor (SEC-TC-44): signed, chained hourly checkpoint anchors o
     });
     report['vector_heads_digest'] = vectorHeads.toString('hex');
     report['vector_anchor_hash'] = vectorAnchor.toString('hex');
+    // pinned: SPK-08 §5.2 publishes these for TASK-116's unit tests (recomputed independently in the PR #12 review)
+    expect(vectorHeads.toString('hex')).toBe('0425126b6f48a8a14993da0de8d42d83f1625e62b687cd46d6d70bfc154cafc6');
+    expect(vectorAnchor.toString('hex')).toBe('3bf63296f767bb8bd33b648d2aa65a991fe99cce26aafa527c0ef73594a2a9b5');
 
     const signature = signAnchorHash(vectorAnchor, signer.privateKey);
     expect(signature[0]).toBe(0x30); // DER SEQUENCE
@@ -525,6 +559,11 @@ describe('SPK-08 anchor (SEC-TC-44): signed, chained hourly checkpoint anchors o
       expect(run.stdout.trim()).toBe('Verified OK');
       report['openssl'] = { version: probe.stdout.trim(), result: run.stdout.trim() };
     } else {
+      // SPK08_REQUIRE_OPENSSL=1 turns the silent skip into a failure (n5)
+      expect({ openssl: 'not available', required: process.env['SPK08_REQUIRE_OPENSSL'] === '1' }).toEqual({
+        openssl: 'not available',
+        required: false,
+      });
       report['openssl'] = 'NOT AVAILABLE on this host; Node and WebCrypto checks only';
     }
   });

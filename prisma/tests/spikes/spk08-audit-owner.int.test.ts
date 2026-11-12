@@ -10,8 +10,12 @@
  * Databases: `spk08_audit` (bootstrap + audit prototype + guard, then `migrate deploy`; exit checks 1, 2, 3a and the
  * `migrate dev` target of 4), `spk08_ddl` (bootstrap + prototype + guard; the Prisma-style DDL set of 3b) and
  * `spk08_shadow` (an empty database owned by the migrator; the shadow database of 4).
+ *
+ * Only the pre-audit part of the bootstrap lane (`0N-*.sql`) is applied, so TASK-021's real `10-audit.sql` / `90-*.sql`
+ * never meet the prototype in one database. Lifecycle (SPK-08 §8): TASK-021's PR ports these assertions and deletes this
+ * file together with `spk08/{10-audit.sql, 90-audit-ddl-guard.sql, prisma.config.ts}`.
  */
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,7 +33,8 @@ const prismaCli = join(repoRoot, 'tools', 'deps', 'prisma-cli.mjs');
 const FIXTURE_CONFIG = join(spikeDir, 'prisma.config.ts');
 const AUDIT_SQL = readFileSync(join(spikeDir, '10-audit.sql'), 'utf8');
 const GUARD_SQL = readFileSync(join(spikeDir, '90-audit-ddl-guard.sql'), 'utf8');
-const SCHEMAS_SQL = readFileSync(join(repoRoot, 'prisma', 'bootstrap', '01-schemas.sql'), 'utf8');
+const BOOTSTRAP_DIR = join(repoRoot, 'prisma', 'bootstrap');
+const SCHEMAS_SQL = readFileSync(join(BOOTSTRAP_DIR, '01-schemas.sql'), 'utf8');
 
 const AUDIT_DB = 'spk08_audit';
 const DDL_DB = 'spk08_ddl';
@@ -38,6 +43,7 @@ const GUARD_MESSAGE = 'audit objects are immutable (SEC-P3-03)';
 const PRIVILEGE_MESSAGE = /^(must be owner of |permission denied )/;
 const PINNED_PATH = 'search_path=pg_catalog, pg_temp';
 const EXTERNAL_TABLES = 'public.bootstrap_migrations,public.audit_entries,public.audit_partitions';
+const PARTIAL_INDEX = 'ix_roles__key_system';
 
 type Refusal = 'privilege' | 'guard' | 'other';
 
@@ -50,8 +56,30 @@ interface Outcome {
 }
 
 const report: Record<string, unknown> = {};
-let pgh: PlatformPostgres;
-let workDir: string;
+let pgh: PlatformPostgres | undefined;
+let workDir: string | undefined;
+
+const must = <T>(value: T | undefined, what: string): T => {
+  if (value === undefined) throw new Error(`missing ${what}`);
+  return value;
+};
+const cluster = (): PlatformPostgres => must(pgh, 'PostgreSQL container');
+const work = (): string => must(workDir, 'work directory');
+
+/** A copy of the bootstrap lane without the audit files: only `0N-*.sql` (the audit lane starts at `10-`). */
+function preAuditBootstrapDir(target: string): string {
+  mkdirSync(target);
+  for (const name of readdirSync(BOOTSTRAP_DIR)) {
+    if (/^0\d-[a-z0-9-]+\.sql$/.test(name)) cpSync(join(BOOTSTRAP_DIR, name), join(target, name));
+  }
+  return target;
+}
+
+/** `audit_entries_YYYY_MM` of the UTC month `offset` months from now. */
+function partitionName(offset: number, now = new Date()): string {
+  const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1));
+  return `audit_entries_${String(month.getUTCFullYear())}_${String(month.getUTCMonth() + 1).padStart(2, '0')}`;
+}
 
 const classify = (message: string): Refusal =>
   message === GUARD_MESSAGE ? 'guard' : PRIVILEGE_MESSAGE.test(message) ? 'privilege' : 'other';
@@ -108,9 +136,9 @@ async function withClient<T>(config: pg.ClientConfig | Promise<pg.Client>, fn: (
   }
 }
 
-const asSuperuser = <T>(db: string, fn: (client: pg.Client) => Promise<T>): Promise<T> => withClient(pgh.superuser(db), fn);
-const asMigrator = <T>(db: string, fn: (client: pg.Client) => Promise<T>): Promise<T> => withClient(pgh.migratorConnection(db), fn);
-const asApp = <T>(db: string, fn: (client: pg.Client) => Promise<T>): Promise<T> => withClient(pgh.appConnection(db), fn);
+const asSuperuser = <T>(db: string, fn: (client: pg.Client) => Promise<T>): Promise<T> => withClient(cluster().superuser(db), fn);
+const asMigrator = <T>(db: string, fn: (client: pg.Client) => Promise<T>): Promise<T> => withClient(cluster().migratorConnection(db), fn);
+const asApp = <T>(db: string, fn: (client: pg.Client) => Promise<T>): Promise<T> => withClient(cluster().appConnection(db), fn);
 
 async function applyAsSuperuser(db: string, sql: string): Promise<void> {
   await asSuperuser(db, async (client) => {
@@ -136,6 +164,9 @@ function prismaSpike(args: readonly string[], env: Readonly<Record<string, strin
 
 const tail = (result: RunResult): string => `${result.stdout}\n${result.stderr}`.trim().split('\n').slice(-30).join('\n');
 
+/** Top-level statements of a script, comments removed, whitespace collapsed and lower-cased. */
+const statementsOf = (sql: string): string[] => splitStatements(sql).map(normalise);
+
 /**
  * Migrator-runnable rendering of the bootstrap lane for `migrations.initShadowDb` (data-model §7.3 as amended by
  * SEC-P3-27 item 6 and batch 0.2): no roles, no SET ROLE, no OWNER TO / AUTHORIZATION, no event triggers; grants and
@@ -144,8 +175,12 @@ const tail = (result: RunResult): string => `${result.stdout}\n${result.stderr}`
  * not rendered at all. Prisma resets only the datasource schema (`public`) of the shadow database before each run, so
  * a schema the lane creates (`platform`) would keep the previous run's objects: each `CREATE SCHEMA IF NOT EXISTS x` is
  * therefore preceded by `DROP SCHEMA IF EXISTS x CASCADE` (the migrator owns both the shadow database and `x` there).
+ * `dropSchemas: false` renders without those DROP lines (the F-02 negative control).
  */
-function renderShadowInit(files: readonly string[]): { sql: string; kept: string[]; dropped: string[] } {
+function renderShadowInit(
+  files: readonly string[],
+  { dropSchemas = true }: { dropSchemas?: boolean } = {},
+): { sql: string; kept: string[]; dropped: string[] } {
   const kept: string[] = [];
   const dropped: string[] = [];
   const drop = /^(set role|reset role|alter default privileges|grant |revoke |create event trigger|drop event trigger)/;
@@ -156,7 +191,8 @@ function renderShadowInit(files: readonly string[]): { sql: string; kept: string
         dropped.push(text.slice(0, 80));
       } else if (text.startsWith('create schema if not exists ')) {
         const name = text.split(' ')[5] ?? '';
-        kept.push(`DROP SCHEMA IF EXISTS ${name} CASCADE`, statement.replace(/\s+AUTHORIZATION\s+\S+/i, ''));
+        if (dropSchemas) kept.push(`DROP SCHEMA IF EXISTS ${name} CASCADE`);
+        kept.push(statement.replace(/\s+AUTHORIZATION\s+\S+/i, ''));
       } else {
         kept.push(statement);
       }
@@ -166,13 +202,16 @@ function renderShadowInit(files: readonly string[]): { sql: string; kept: string
 }
 
 beforeAll(async () => {
-  pgh = await PlatformPostgres.start();
   workDir = mkdtempSync(join(tmpdir(), 'spk08-'));
-  for (const db of [AUDIT_DB, DDL_DB]) {
-    await pgh.createDatabase(db);
-    await pgh.bootstrap(db);
-    await applyAsSuperuser(db, AUDIT_SQL);
-    await applyAsSuperuser(db, GUARD_SQL);
+  const bootstrapDir = preAuditBootstrapDir(join(workDir, 'bootstrap'));
+  report['bootstrap_files'] = readdirSync(bootstrapDir).sort();
+  const started = await PlatformPostgres.start();
+  pgh = started;
+  for (const name of [AUDIT_DB, DDL_DB]) {
+    await started.createDatabase(name);
+    await started.bootstrap(name, bootstrapDir);
+    await applyAsSuperuser(name, AUDIT_SQL);
+    await applyAsSuperuser(name, GUARD_SQL);
   }
   await asSuperuser('postgres', async (admin) => {
     await admin.query(`CREATE DATABASE ${SHADOW_DB} OWNER ${MIGRATOR}`);
@@ -183,9 +222,12 @@ beforeAll(async () => {
 afterAll(async () => {
   const out = process.env['SPK08_REPORT'];
   if (out) writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`);
-  rmSync(workDir, { recursive: true, force: true });
-  await pgh?.stop();
-});
+  try {
+    await pgh?.stop();
+  } finally {
+    if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true });
+  }
+}, 120_000);
 
 async function currentPartition(db: string): Promise<string> {
   return asSuperuser(db, async (client) => {
@@ -230,6 +272,7 @@ describe('SPK-08 exit 1: SEC-TC-43 prototype (ownership separation and the ident
           ORDER BY relname`,
       );
       expect(rels.rows.every((r) => r.owner === 'platform_audit_owner')).toBe(true);
+      // prototype only: data-model §3 classifies audit_entries as SYSTEM (no RLS); TASK-021/033 must not port this (PR12-SEC-08)
       expect(rels.rows.find((r) => r.relname === 'audit_entries')).toMatchObject({ relkind: 'p', rls: true, force: true });
       expect(rels.rows.filter((r) => /^audit_entries_\d{4}_\d{2}$/.test(r.relname))).toHaveLength(1);
       const fns = await client.query<{ proname: string; owner: string; prosecdef: boolean; proconfig: string[] | null }>(
@@ -329,7 +372,62 @@ describe('SPK-08 exit 1: SEC-TC-43 prototype (ownership separation and the ident
     }
   });
 
+  it('SEC-TC-43 / R-ARCH-18 the sql_drop guard refuses a schema-owner and a superuser DROP of audit objects, and a migrator DROP of an audit-named index (F-08)', async () => {
+    const partition = await currentPartition(AUDIT_DB);
+    // platform_schema_owner owns `public`, so privilege admits its DROP of any relation there; only the guard stops it
+    const asSchemaOwner = (sql: string): string => `SET LOCAL ROLE platform_schema_owner; ${sql}`;
+    const owner = await asSuperuser(AUDIT_DB, async (client) => ({
+      schema_owner_drop_partition: await attempt(client, asSchemaOwner(`DROP TABLE public.${partition}`)),
+      schema_owner_drop_table: await attempt(client, asSchemaOwner('DROP TABLE public.audit_entries')),
+      schema_owner_drop_index: await attempt(client, asSchemaOwner('DROP INDEX public.ix_audit__stream_seq')),
+      superuser_drop_table: await attempt(client, 'DROP TABLE public.audit_entries'),
+    }));
+    // F-08 and PR12-SEC-02 (a)/(c): an index on the migrator's own table may take a partition name (the guard maps an
+    // index to its table at ddl_command_end), but dropping it again is refused by name at sql_drop
+    const squat = 'audit_entries_2099_02';
+    const migrator = await asMigrator(AUDIT_DB, async (client) => {
+      await client.query('BEGIN');
+      try {
+        const table = await execute(client, 'CREATE TABLE public.spk08_t (id integer)');
+        const create = await execute(client, `CREATE INDEX ${squat} ON public.spk08_t (id)`);
+        const drop = await execute(client, `DROP INDEX public.${squat}`);
+        return { table, create, drop };
+      } finally {
+        await client.query('ROLLBACK');
+      }
+    });
+    report['sql_drop_guard'] = { owner, migrator };
+    const guard = (detail: string | RegExp): unknown =>
+      expect.objectContaining({
+        code: '42501',
+        refusedBy: 'guard',
+        detail: typeof detail === 'string' ? detail : expect.stringMatching(detail),
+      });
+    expect(owner).toEqual({
+      schema_owner_drop_partition: guard(`DROP of table public.${partition} by platform_schema_owner`),
+      schema_owner_drop_table: guard(/^DROP of .+ by platform_schema_owner$/),
+      schema_owner_drop_index: guard('DROP of index public.ix_audit__stream_seq by platform_schema_owner'),
+      superuser_drop_table: guard(/^DROP of .+ by postgres$/),
+    });
+    expect(migrator).toEqual({
+      table: { ok: true },
+      create: { ok: true },
+      drop: guard(`DROP of index public.${squat} by platform_migrator`),
+    });
+  });
+
   it('SEC-TC-43 SELECT platform.ensure_audit_partitions(3) as platform_app succeeds; the new partitions belong to the audit owner and stay immutable', async () => {
+    const before = new Set(
+      await asSuperuser(AUDIT_DB, async (client) =>
+        (
+          await client.query<{ relname: string }>(
+            `SELECT c.relname FROM pg_catalog.pg_inherits i JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid
+              WHERE i.inhparent = 'public.audit_entries'::regclass`,
+          )
+        ).rows.map((r) => r.relname),
+      ),
+    );
+    const wanted = [0, 1, 2, 3].map((offset) => partitionName(offset));
     const created = await asApp(AUDIT_DB, async (client) => {
       const result = await client.query<{ n: number }>('SELECT platform.ensure_audit_partitions(3) AS n');
       await client.query(
@@ -340,7 +438,9 @@ describe('SPK-08 exit 1: SEC-TC-43 prototype (ownership separation and the ident
       );
       return result.rows[0]?.n;
     });
-    expect(created).toBe(3);
+    // derived from the clock, so a UTC month boundary between beforeAll and this test does not matter (n1)
+    expect(created).toBe(wanted.filter((name) => !before.has(name)).length);
+    expect(created).toBeGreaterThan(0);
     await asSuperuser(AUDIT_DB, async (client) => {
       const parts = await client.query<{ relname: string; owner: string; truncate_trigger: boolean }>(
         `SELECT c.relname, pg_catalog.pg_get_userbyid(c.relowner) AS owner,
@@ -348,15 +448,14 @@ describe('SPK-08 exit 1: SEC-TC-43 prototype (ownership separation and the ident
            FROM pg_catalog.pg_inherits i JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid
           WHERE i.inhparent = 'public.audit_entries'::regclass ORDER BY 1`,
       );
-      expect(parts.rows).toHaveLength(4);
+      const names = parts.rows.map((p) => p.relname);
+      expect(names).toEqual(expect.arrayContaining(wanted));
+      expect(names).toHaveLength(before.size + (created ?? 0));
       expect(parts.rows.every((p) => p.owner === 'platform_audit_owner' && p.truncate_trigger)).toBe(true);
-      // the row trigger fires even for the superuser, who bypasses privileges and RLS
+      // the row trigger fires even for the superuser, who bypasses privileges and RLS; it names the partition (F-07)
       const update = await attempt(client, `UPDATE public.audit_entries SET details = '{}'::jsonb`);
-      expect(update).toMatchObject({
-        ok: false,
-        code: '42501',
-        message: `AUDIT_IMMUTABLE: UPDATE on ${parts.rows[0]?.relname ?? '?'} is not permitted`,
-      });
+      expect(update).toMatchObject({ ok: false, code: '42501' });
+      expect(update.message).toMatch(/^AUDIT_IMMUTABLE: UPDATE on audit_entries_\d{4}_\d{2} is not permitted$/);
       report['sec_tc_43_ensure'] = { created, partitions: parts.rows, superuserUpdate: update };
     });
   });
@@ -401,77 +500,90 @@ describe('SPK-08 exit 2: SEC-TC-61 subset', () => {
   });
 
   it('SEC-TC-61 planted public.pg_advisory_xact_lock(integer) and public.to_char(date, text) are never called by ensure_audit_partitions', async () => {
-    await asMigrator(AUDIT_DB, async (client) => {
-      await client.query(`CREATE TABLE platform.spk08_hijack_marker (fn text NOT NULL, by_user text NOT NULL DEFAULT current_user)`);
-      await client.query('GRANT INSERT ON platform.spk08_hijack_marker TO PUBLIC');
-      await client.query(`CREATE FUNCTION public.pg_advisory_xact_lock(integer) RETURNS void LANGUAGE sql
-                            AS $f$ INSERT INTO platform.spk08_hijack_marker (fn) VALUES ('pg_advisory_xact_lock') $f$`);
-      await client.query(`CREATE FUNCTION public.to_char(date, text) RETURNS text LANGUAGE sql
-                            AS $f$ INSERT INTO platform.spk08_hijack_marker (fn) VALUES ('to_char'); SELECT 'hijacked'::text $f$`);
-      await client.query('GRANT EXECUTE ON FUNCTION public.pg_advisory_xact_lock(integer), public.to_char(date, text) TO PUBLIC');
-      // positive control: an unqualified call with an ordinary path resolves to the planted overloads
-      await client.query('BEGIN');
-      await client.query(`SELECT to_char(current_date, 'YYYY'), pg_advisory_xact_lock(1)`);
-      const control = await client.query<{ fn: string }>('SELECT fn FROM platform.spk08_hijack_marker ORDER BY fn');
-      await client.query('ROLLBACK');
-      report['sec_tc_61_hijack_control'] = control.rows;
-      expect(control.rows.map((r) => r.fn)).toEqual(['pg_advisory_xact_lock', 'to_char']);
-    });
-    const before = await asSuperuser(AUDIT_DB, async (client) =>
-      Number((await client.query<{ n: string }>('SELECT count(*) AS n FROM public.audit_partitions')).rows[0]?.n),
-    );
-    const created = await asApp(
-      AUDIT_DB,
-      async (client) => (await client.query<{ n: number }>('SELECT platform.ensure_audit_partitions(6) AS n')).rows[0]?.n,
-    );
-    expect(created).toBe(7 - before);
-    expect(created).toBeGreaterThan(0);
-    await asSuperuser(AUDIT_DB, async (client) => {
-      const markers = await client.query<{ n: string }>('SELECT count(*) AS n FROM platform.spk08_hijack_marker');
-      const disabled = await client.query<{ n: string }>(
-        `SELECT count(*) AS n FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
-          WHERE NOT t.tgisinternal AND c.relname LIKE 'audit\\_%' AND t.tgenabled <> 'O'`,
+    try {
+      await asMigrator(AUDIT_DB, async (client) => {
+        await client.query(`CREATE TABLE platform.spk08_hijack_marker (fn text NOT NULL, by_user text NOT NULL DEFAULT current_user)`);
+        await client.query('GRANT INSERT ON platform.spk08_hijack_marker TO PUBLIC');
+        await client.query(`CREATE FUNCTION public.pg_advisory_xact_lock(integer) RETURNS void LANGUAGE sql
+                              AS $f$ INSERT INTO platform.spk08_hijack_marker (fn) VALUES ('pg_advisory_xact_lock') $f$`);
+        await client.query(`CREATE FUNCTION public.to_char(date, text) RETURNS text LANGUAGE sql
+                              AS $f$ INSERT INTO platform.spk08_hijack_marker (fn) VALUES ('to_char'); SELECT 'hijacked'::text $f$`);
+        await client.query('GRANT EXECUTE ON FUNCTION public.pg_advisory_xact_lock(integer), public.to_char(date, text) TO PUBLIC');
+        // positive control: an unqualified call with an ordinary path resolves to the planted overloads
+        await client.query('BEGIN');
+        try {
+          await client.query(`SELECT to_char(current_date, 'YYYY'), pg_advisory_xact_lock(1)`);
+          const control = await client.query<{ fn: string }>('SELECT fn FROM platform.spk08_hijack_marker ORDER BY fn');
+          report['sec_tc_61_hijack_control'] = control.rows;
+          expect(control.rows.map((r) => r.fn)).toEqual(['pg_advisory_xact_lock', 'to_char']);
+        } finally {
+          await client.query('ROLLBACK');
+        }
+      });
+      const before = await asSuperuser(AUDIT_DB, async (client) =>
+        Number((await client.query<{ n: string }>('SELECT count(*) AS n FROM public.audit_partitions')).rows[0]?.n),
       );
-      const evt = await client.query<{ n: string }>(`SELECT count(*) AS n FROM pg_catalog.pg_event_trigger WHERE evtenabled = 'O'`);
-      report['sec_tc_61_hijack'] = { before, created, markers: markers.rows[0]?.n, disabledTriggers: disabled.rows[0]?.n };
-      expect(markers.rows[0]?.n).toBe('0');
-      expect(disabled.rows[0]?.n).toBe('0');
-      expect(evt.rows[0]?.n).toBe('2');
-    });
-    await asMigrator(AUDIT_DB, async (client) => {
-      await client.query('DROP FUNCTION public.pg_advisory_xact_lock(integer), public.to_char(date, text)');
-      await client.query('DROP TABLE platform.spk08_hijack_marker');
-    });
+      const created = await asApp(
+        AUDIT_DB,
+        async (client) => (await client.query<{ n: number }>('SELECT platform.ensure_audit_partitions(6) AS n')).rows[0]?.n,
+      );
+      expect(created).toBe(7 - before);
+      expect(created).toBeGreaterThan(0);
+      await asSuperuser(AUDIT_DB, async (client) => {
+        const markers = await client.query<{ n: string }>('SELECT count(*) AS n FROM platform.spk08_hijack_marker');
+        const disabled = await client.query<{ n: string }>(
+          `SELECT count(*) AS n FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+            WHERE NOT t.tgisinternal AND c.relname LIKE 'audit\\_%' AND t.tgenabled <> 'O'`,
+        );
+        const evt = await client.query<{ n: string }>(`SELECT count(*) AS n FROM pg_catalog.pg_event_trigger WHERE evtenabled = 'O'`);
+        report['sec_tc_61_hijack'] = { before, created, markers: markers.rows[0]?.n, disabledTriggers: disabled.rows[0]?.n };
+        expect(markers.rows[0]?.n).toBe('0');
+        expect(disabled.rows[0]?.n).toBe('0');
+        expect(evt.rows[0]?.n).toBe('2');
+      });
+    } finally {
+      // the plants must not survive into the exit-3/4 tests, whatever failed above (n2)
+      await asMigrator(AUDIT_DB, async (client) => {
+        await client.query('DROP FUNCTION IF EXISTS public.pg_advisory_xact_lock(integer), public.to_char(date, text)');
+        await client.query('DROP TABLE IF EXISTS platform.spk08_hijack_marker');
+      });
+    }
   });
 });
 
+/**
+ * `migrate deploy` of the repository migrations to `spk08_audit` with every existing partition declared external
+ * (variant c of exit 3). Idempotent, so exit 4 can call it too and does not depend on test order (n2).
+ */
+async function deployAuditDb(): Promise<RunResult> {
+  const partitions = await asSuperuser(AUDIT_DB, async (client) =>
+    (await client.query<{ name: string }>('SELECT partition_name AS name FROM public.audit_partitions ORDER BY 1')).rows.map(
+      (r) => `public.${r.name}`,
+    ),
+  );
+  return prismaSpike(['migrate', 'deploy'], {
+    DATABASE_MIGRATOR_URL: cluster().migratorUrl(AUDIT_DB),
+    SPK08_EXTERNAL_TABLES: [EXTERNAL_TABLES, ...partitions].join(','),
+  });
+}
+
 describe('SPK-08 exit 3: no Prisma-generated DDL is blocked by the guard', () => {
   it('SPK-08 exit 3 prisma migrate deploy of the repository migrations succeeds as platform_migrator with the guard installed', async () => {
-    // (a) the repository config, whose tables.external lists only the bootstrap ledger (TASK-021 adds the audit tables)
-    const rootConfig = await pgh.prisma(AUDIT_DB, ['migrate', 'deploy']);
-    report['exit3_deploy_root_config'] = { status: rootConfig.status, tail: tail(rootConfig) };
-    expect(rootConfig.status).toBe(1);
-    expect(rootConfig.stdout + rootConfig.stderr).toContain('P3005');
-    // (b) the audit parents declared external (data-model §7.3); the partitions are not listed
-    const migrator = { DATABASE_MIGRATOR_URL: pgh.migratorUrl(AUDIT_DB), SPK08_EXTERNAL_TABLES: EXTERNAL_TABLES };
-    const parentsOnly = await prismaSpike(['migrate', 'deploy'], migrator);
+    const migrator = { DATABASE_MIGRATOR_URL: cluster().migratorUrl(AUDIT_DB) };
+    // (a) tables.external = the bootstrap ledger only (the repository config before TASK-021)
+    const ledgerOnly = await prismaSpike(['migrate', 'deploy'], { ...migrator, SPK08_EXTERNAL_TABLES: 'public.bootstrap_migrations' });
+    report['exit3_deploy_ledger_only'] = { status: ledgerOnly.status, tail: tail(ledgerOnly) };
+    // (b) the audit parents declared external (data-model §7.3); the partitions are not listed (F-01 premise)
+    const parentsOnly = await prismaSpike(['migrate', 'deploy'], { ...migrator, SPK08_EXTERNAL_TABLES: EXTERNAL_TABLES });
     report['exit3_deploy_parents_external'] = { status: parentsOnly.status, tail: tail(parentsOnly) };
-    let deployed = parentsOnly;
-    if (parentsOnly.status !== 0) {
-      // (c) the partitions listed as well
-      const partitions = await asSuperuser(AUDIT_DB, async (client) =>
-        (await client.query<{ name: string }>('SELECT partition_name AS name FROM public.audit_partitions ORDER BY 1')).rows.map(
-          (r) => `public.${r.name}`,
-        ),
-      );
-      deployed = await prismaSpike(['migrate', 'deploy'], {
-        ...migrator,
-        SPK08_EXTERNAL_TABLES: [EXTERNAL_TABLES, ...partitions].join(','),
-      });
-      report['exit3_deploy_partitions_external'] = { status: deployed.status, tail: tail(deployed) };
-    }
-    const status = await prismaSpike(['migrate', 'status'], migrator);
+    // (c) the partitions listed as well
+    const deployed = await deployAuditDb();
+    report['exit3_deploy_partitions_external'] = { status: deployed.status, tail: tail(deployed) };
+    const status = await prismaSpike(['migrate', 'status'], { ...migrator, SPK08_EXTERNAL_TABLES: EXTERNAL_TABLES });
     report['exit3_status'] = { status: status.status, tail: tail(status) };
+    for (const refused of [ledgerOnly, parentsOnly]) {
+      expect({ status: refused.status, p3005: `${refused.stdout}${refused.stderr}`.includes('P3005') }).toEqual({ status: 1, p3005: true });
+    }
     expect({ status: deployed.status, tail: tail(deployed) }).toMatchObject({ status: 0 });
     expect({ status: status.status, tail: tail(status) }).toMatchObject({ status: 0 });
   }, 400_000);
@@ -519,11 +631,10 @@ describe('SPK-08 exit 3: no Prisma-generated DDL is blocked by the guard', () =>
   });
 
   it('SPK-08 exit 3 first migrate deploy succeeds when tables.external lists a generated range of partition names (most not existing)', async () => {
-    const names: string[] = [];
-    for (let year = 2026; year <= 2030; year += 1) {
-      for (let month = 1; month <= 12; month += 1) names.push(`public.audit_entries_${String(year)}_${String(month).padStart(2, '0')}`);
-    }
-    const env = { DATABASE_MIGRATOR_URL: pgh.migratorUrl(DDL_DB), SPK08_EXTERNAL_TABLES: [EXTERNAL_TABLES, ...names].join(',') };
+    // a pure function of the clock, as F-01 recommends for the real config: January of the current UTC year + 60 months
+    const now = new Date();
+    const names = Array.from({ length: 60 }, (_, i) => `public.${partitionName(i - now.getUTCMonth(), now)}`);
+    const env = { DATABASE_MIGRATOR_URL: cluster().migratorUrl(DDL_DB), SPK08_EXTERNAL_TABLES: [EXTERNAL_TABLES, ...names].join(',') };
     const deploy = await prismaSpike(['migrate', 'deploy'], env);
     const status = await prismaSpike(['migrate', 'status'], env);
     report['exit3_deploy_generated_range'] = { names: names.length, deploy: deploy.status, status: status.status, tail: tail(deploy) };
@@ -533,11 +644,12 @@ describe('SPK-08 exit 3: no Prisma-generated DDL is blocked by the guard', () =>
 });
 
 describe('SPK-08 exit 4: Prisma 7 migrations.initShadowDb with the rendered bootstrap lane', () => {
-  const initFile = (): string => join(workDir, 'shadow-init.sql');
-  const migrationsCopy = (): string => join(workDir, 'migrations');
+  const initFile = (): string => join(work(), 'shadow-init.sql');
+  const migrationsCopy = (): string => join(work(), 'migrations');
+  let diffStatements: string[] = [];
   const env = (init: string): Record<string, string> => ({
-    DATABASE_MIGRATOR_URL: pgh.migratorUrl(AUDIT_DB),
-    SPK08_SHADOW_DATABASE_URL: pgh.migratorUrl(SHADOW_DB),
+    DATABASE_MIGRATOR_URL: cluster().migratorUrl(AUDIT_DB),
+    SPK08_SHADOW_DATABASE_URL: cluster().migratorUrl(SHADOW_DB),
     SPK08_SHADOW_INIT_FILE: init,
     SPK08_EXTERNAL_TABLES: EXTERNAL_TABLES,
   });
@@ -558,7 +670,7 @@ describe('SPK-08 exit 4: Prisma 7 migrations.initShadowDb with the rendered boot
   });
 
   it('SPK-08 exit 4 negative control: a failing initShadowDb script fails migrate diff (the hook runs against the shadow database)', async () => {
-    const bad = join(workDir, 'shadow-init-bad.sql');
+    const bad = join(work(), 'shadow-init-bad.sql');
     writeFileSync(bad, 'SELECT pg_catalog.spk08_missing_function();\n');
     const result = await prismaSpike(
       ['migrate', 'diff', '--from-migrations', migrationsCopy(), '--to-schema', 'prisma/schema', '--exit-code'],
@@ -574,7 +686,7 @@ describe('SPK-08 exit 4: Prisma 7 migrations.initShadowDb with the rendered boot
       ['migrate', 'diff', '--from-migrations', migrationsCopy(), '--to-schema', 'prisma/schema', '--script'],
       env(initFile()),
     );
-    const shadow = await withClient(pgh.migratorConnection(SHADOW_DB), async (client) => ({
+    const shadow = await withClient(cluster().migratorConnection(SHADOW_DB), async (client) => ({
       extensions: (await client.query<{ extname: string }>('SELECT extname FROM pg_catalog.pg_extension ORDER BY 1')).rows.map(
         (r) => r.extname,
       ),
@@ -593,10 +705,21 @@ describe('SPK-08 exit 4: Prisma 7 migrations.initShadowDb with the rendered boot
     }));
     report['exit4_diff'] = { status: result.status, script: result.stdout, stderr: result.stderr, shadowAfter: shadow };
     expect({ status: result.status, tail: tail(result) }).toMatchObject({ status: 0 });
+    // the shadow database really received the bootstrap-lane objects (and Prisma left them there)
+    expect(shadow.extensions.filter((name) => name !== 'plpgsql')).toEqual(['btree_gin', 'btree_gist', 'pg_trgm']);
+    expect(shadow.platformSchema).toBe('1');
+    expect(shadow.auditRelations).toEqual(expect.arrayContaining(['audit_entries', 'audit_partitions']));
+    expect(shadow.auditRelations.some((name) => /^audit_entries_\d{4}_\d{2}$/.test(name))).toBe(true);
+    expect(shadow.prismaTables).toEqual(expect.arrayContaining(['permissions', 'role_permissions', 'roles']));
+    // non-vacuous: the script is not empty, it holds exactly the known F-04 drift, and nothing of the bootstrap lane
+    expect(result.stdout).toContain('ix_role_permissions__role_id');
     expect(result.stdout).not.toMatch(/audit|platform|extension|bootstrap_migrations|schema/i);
+    diffStatements = statementsOf(result.stdout);
   }, 240_000);
 
   it('SPK-08 exit 4 migrate dev --create-only against the bootstrapped, audit-prototyped, migrated database succeeds (no drift; no audit object in the new migration)', async () => {
+    const deployed = await deployAuditDb();
+    expect({ status: deployed.status, tail: tail(deployed) }).toMatchObject({ status: 0 });
     const before = new Set(readdirSync(migrationsCopy()));
     const result = await prismaSpike(['migrate', 'dev', '--create-only', '--name', 'spk08_probe'], {
       ...env(initFile()),
@@ -606,6 +729,92 @@ describe('SPK-08 exit 4: Prisma 7 migrations.initShadowDb with the rendered boot
     const sql = created.map((name) => readFileSync(join(migrationsCopy(), name, 'migration.sql'), 'utf8')).join('\n');
     report['exit4_dev'] = { status: result.status, tail: tail(result), created, sql };
     expect({ status: result.status, tail: tail(result) }).toMatchObject({ status: 0 });
+    expect(created).toHaveLength(1);
+    expect(sql).toContain('ix_role_permissions__role_id');
     expect(sql).not.toMatch(/audit|platform|extension|bootstrap_migrations|schema/i);
+    // `migrate dev` writes exactly what `migrate diff --from-migrations --to-schema` prints (the basis of the M1 probe)
+    if (diffStatements.length > 0) expect(statementsOf(sql)).toEqual(diffStatements);
+  }, 240_000);
+
+  it('SPK-08 exit 4 (M1) what the next generated migration does with a raw-SQL partial index, with and without the partialIndexes preview', async () => {
+    // A migration adds a raw-SQL partial index; `migrate diff --from-migrations --to-schema` prints what `migrate dev`
+    // would write (test above). The schema variants are used as both the config schema and the diff target.
+    const migrations = join(work(), 'migrations-m1');
+    cpSync(join(repoRoot, 'prisma', 'migrations'), migrations, { recursive: true });
+    mkdirSync(join(migrations, '20991231000000_spk08_partial_index'));
+    writeFileSync(
+      join(migrations, '20991231000000_spk08_partial_index', 'migration.sql'),
+      `CREATE INDEX "${PARTIAL_INDEX}" ON "public"."roles"("key") WHERE "is_system";\n`,
+    );
+    const schemaCopy = (name: string, preview: boolean, index: string | undefined): string => {
+      const dir = join(work(), `schema-m1-${name}`);
+      cpSync(join(repoRoot, 'prisma', 'schema'), dir, { recursive: true });
+      const base = join(dir, '_base.prisma');
+      const authz = join(dir, 'authz.prisma');
+      const baseSql = readFileSync(base, 'utf8');
+      const authzSql = readFileSync(authz, 'utf8');
+      const anchorLine = '  @@index([scope], map: "ix_roles__scope")\n';
+      if (!authzSql.includes(anchorLine) || !baseSql.includes('provider = "prisma-client"\n'))
+        throw new Error(`schema anchors moved (${name})`);
+      if (preview)
+        writeFileSync(
+          base,
+          baseSql.replace('provider = "prisma-client"\n', 'provider = "prisma-client"\n  previewFeatures = ["partialIndexes"]\n'),
+        );
+      if (index !== undefined) writeFileSync(authz, authzSql.replace(anchorLine, `${anchorLine}  ${index}\n`));
+      return dir;
+    };
+    const declare = (predicate?: string): string =>
+      `@@index([key], map: "${PARTIAL_INDEX}"${predicate === undefined ? '' : `, where: raw("${predicate}")`})`;
+    const schemas: Record<string, string> = {
+      undeclared_preview_off: schemaCopy('a', false, undefined),
+      undeclared_preview_on: schemaCopy('b', true, undefined),
+      declared_same_predicate_preview_on: schemaCopy('c', true, declare('is_system')),
+      declared_other_predicate_preview_on: schemaCopy('d', true, declare('NOT is_system')),
+      declared_without_predicate_preview_off: schemaCopy('e', false, declare()),
+    };
+    const outcomes: Record<string, { statements: string[]; shadowIndex: string | undefined }> = {};
+    for (const [variant, schema] of Object.entries(schemas)) {
+      const result = await prismaSpike(['migrate', 'diff', '--from-migrations', migrations, '--to-schema', schema, '--script'], {
+        ...env(initFile()),
+        SPK08_SCHEMA: schema,
+      });
+      expect({ variant, status: result.status, tail: tail(result) }).toMatchObject({ variant, status: 0 });
+      // the shadow database keeps the replayed history: proof that the partial index was really created there
+      const shadowIndex = await withClient(
+        cluster().migratorConnection(SHADOW_DB),
+        async (client) =>
+          (await client.query<{ def: string }>('SELECT indexdef AS def FROM pg_catalog.pg_indexes WHERE indexname = $1', [PARTIAL_INDEX]))
+            .rows[0]?.def,
+      );
+      outcomes[variant] = { statements: statementsOf(result.stdout).filter((s) => s.includes(PARTIAL_INDEX)), shadowIndex };
+    }
+    report['m1_partial_index'] = outcomes;
+    const created = `CREATE INDEX ${PARTIAL_INDEX} ON public.roles USING btree (key) WHERE is_system`;
+    expect(outcomes).toEqual({
+      // preview off (the repository today): Prisma preserves the raw partial index, and a plain @@index of the same name
+      // and columns compares equal (the predicate is invisible to the differ and to drift detection)
+      undeclared_preview_off: { statements: [], shadowIndex: created },
+      declared_without_predicate_preview_off: { statements: [], shadowIndex: created },
+      // preview on: an undeclared raw partial index is DROPPED by the next generated migration; a declared one is kept
+      // only when its predicate matches, otherwise it is dropped and re-created with the schema's predicate
+      undeclared_preview_on: { statements: [`drop index "${PARTIAL_INDEX}"`], shadowIndex: created },
+      declared_same_predicate_preview_on: { statements: [], shadowIndex: created },
+      declared_other_predicate_preview_on: {
+        statements: [`drop index "${PARTIAL_INDEX}"`, `create index "${PARTIAL_INDEX}" on "roles"("key") where (not is_system)`],
+        shadowIndex: created,
+      },
+    });
+  }, 400_000);
+
+  it('SPK-08 exit 4 (F-02) negative control: without the DROP SCHEMA line a repeated shadow run fails because platform keeps its objects', async () => {
+    const noDrop = join(work(), 'shadow-init-no-drop.sql');
+    writeFileSync(noDrop, renderShadowInit([SCHEMAS_SQL, AUDIT_SQL], { dropSchemas: false }).sql);
+    const args = ['migrate', 'diff', '--from-migrations', migrationsCopy(), '--to-schema', 'prisma/schema', '--script'];
+    const first = await prismaSpike(args, env(noDrop));
+    const second = await prismaSpike(args, env(noDrop));
+    report['f02_negative'] = { first: { status: first.status, tail: tail(first) }, second: { status: second.status, tail: tail(second) } };
+    expect(second.status).not.toBe(0);
+    expect(`${second.stdout}${second.stderr}`).toContain('already exists');
   }, 240_000);
 });

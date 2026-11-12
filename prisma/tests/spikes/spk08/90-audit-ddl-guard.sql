@@ -2,7 +2,7 @@
 -- prisma/tests/spikes/spk08-audit-owner.int.test.ts, NEVER part of prisma/bootstrap/** or prisma/migrations/**.
 -- Source: data-model.md §5.2 amendments (SEC-P3-03, SEC-P3-27), verbatim. Run by the bootstrap superuser after
 -- 10-audit.sql, with the pinned search path, in one transaction.
--- @audit-ddl security-approved: spike-only (SPK-08) 2026-11-12
+-- NOT security-approved (SPK-08 prototype); the real bootstrap file needs the rule-12 audit-DDL marker with a reviewer entry.
 SET search_path = pg_catalog, pg_temp;
 CREATE OR REPLACE FUNCTION platform.audit_ddl_guard() RETURNS event_trigger
 LANGUAGE plpgsql
