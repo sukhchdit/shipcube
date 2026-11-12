@@ -6,6 +6,8 @@
   "type": "module",
   "description": "Prisma 7 multi-file schema, migrations, bootstrap SQL and seeds (ADR-0005, data-model.md).",
   "dependencies": {
+    "@platform/authz": "0.0.0",
+    "@platform/config": "0.0.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "pg": "^8.23.1"
