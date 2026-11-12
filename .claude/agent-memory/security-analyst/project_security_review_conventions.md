@@ -34,6 +34,12 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Throw `new DriverAdapterError({kind:'postgres', originalCode, originalMessage, …})` from `@prisma/driver-adapter-utils` to drive P2010/P2039.
   - This proves transaction-binding and escapes cheaply.
   - The scratch `node_modules` junction vanished once mid-session, so re-check it before re-running.
+- **"No commands in worktree X" includes read-only git.** On 2026-11-13 (PR-0009 R2) I slipped and ran `git status` there; disclose any such slip in the record.
+  - Check the worktree's state from the main checkout instead (`git worktree list`, `git show <sha>:<path>`).
+  - Junctions into its `node_modules` are fine.
+- **ReDoS-probe every regex that a fix adds over request input.** The PR-0009 HIGH (PR9-SEC-14) came from a charset fix.
+  - Measure in a child-process server; same-process timings hide event-loop blocking.
+  - Fuzz the proposed grammar for language equivalence.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
