@@ -288,6 +288,54 @@ const TENANT_DB: readonly Violation[] = [
     'SET LOCAL',
   ],
   [
+    'platform/db-raw-sql: Prisma.raw in a repository (PR #11 m5, PR11-SEC-05)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-prisma-raw.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: a named import of raw from the Prisma runtime in a repository (PR11-SEC-05)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-import.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: a non-tagged $queryRaw call in a repository (PR #11 m5)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-non-tagged.ts`,
+    'platform/db-raw-sql',
+    'without a tagged template',
+  ],
+  [
+    'platform/db-raw-sql: $parent.$queryRawUnsafe in a service (PR11-SEC-01, PR11-SEC-05)',
+    `rules/db-raw-sql/${API}/orders/service/bad-parent-unsafe.ts`,
+    ['platform/db-raw-sql', 'platform/db-raw-sql'],
+    'ADR-0005 am. 10 item',
+  ],
+  [
+    'a repository imports the pg driver and builds a Pool (PR2-SEC-05 addendum, PR11-SEC-05)',
+    `layering/sql-driver/${API}/orders/repository/bad-pg-pool.ts`,
+    BOUNDARIES,
+    'only the database platform core',
+  ],
+  [
+    'the planned audit store imports the pg driver (PR11-SEC-05)',
+    'layering/sql-driver/packages/audit/src/store/prisma-store.ts',
+    BOUNDARIES,
+    'only the database platform core',
+  ],
+  [
+    'platform/tenant-context-sql: a new file under prisma/tests/catalog/ inherits no exemption (PR11-SEC-08)',
+    'rules/tenant-context-sql/prisma/tests/catalog/helper.ts',
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'platform/tenant-context-sql: a transaction-local setter in session-integrity.ts (keys only) fails (PR11-SEC-08)',
+    'rules/tenant-context-sql/apps/api/src/platform/db/session-integrity.ts',
+    TENANT_CONTEXT,
+    'Tenant-context setter outside withTenantTx',
+  ],
+  [
     'platform/no-alter-role-sql: ALTER ROLE in apps/*/src',
     'rules/no-alter-role-sql/apps/api/src/platform/health/bad-alter-role.ts',
     'platform/no-alter-role-sql',
@@ -424,6 +472,12 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ],
     ['tenant-context-sql: the session-scope negative control', 'rules/tenant-context-sql/prisma/tests/rls/session-scope-leak.int.test.ts'],
     ['db-raw-sql: tests may probe the unsafe members (TenantDb Proxy)', 'rules/db-raw-sql/apps/api/src/platform/db/tenant-db.test.ts'],
+    ['db-raw-sql: a tagged $queryRaw template in a repository', `rules/db-raw-sql/${API}/orders/repository/ok-tagged.ts`],
+    [
+      'tenant-context-sql: session-integrity.* may read a security key (keys only, PR11-SEC-08)',
+      'rules/tenant-context-sql/apps/api/src/platform/db/session-integrity.test.ts',
+    ],
+    ['the database platform core imports the pg driver', 'layering/sql-driver/apps/api/src/platform/db/ok-pool.ts'],
     [
       'prisma-client-construction: type-only import in a repository',
       `rules/prisma-client-construction/${API}/orders/repository/ok-type-only.ts`,
@@ -561,8 +615,17 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.effective['prisma/tests/rls/a.int.test.ts']).toMatchObject({
       'platform/tenant-context-sql': 'error',
       'platform/prisma-client-construction': 'off',
+      'platform/db-raw-sql': 'off',
       'import-x/no-relative-packages': 'error',
     });
+    // PR11-SEC-05: services (they hold a TenantDb), the rest of apps/*/src and the planned Prisma files get db-raw-sql.
+    for (const path of [
+      'apps/api/src/modules/orders/service/a.ts',
+      'apps/api/src/platform/http/a.ts',
+      'packages/audit/src/store/prisma-store.ts',
+    ]) {
+      expect([path, report.effective[path]?.['platform/db-raw-sql']]).toEqual([path, 'error']);
+    }
   });
 
   it('server-only rules skip the browser package; string externalisation skips test files', () => {

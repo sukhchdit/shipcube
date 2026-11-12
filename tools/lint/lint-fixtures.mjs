@@ -154,6 +154,8 @@ const EFFECTIVE_MATRIX = [
   'apps/worker/src/processors/a.ts',
   'apps/api/src/modules/orders/repository/a.ts',
   'prisma/tests/rls/a.int.test.ts',
+  // PR11-SEC-05: db-raw-sql covers the planned non-repository Prisma files.
+  'packages/audit/src/store/prisma-store.ts',
 ];
 const EFFECTIVE_RULES = [
   'no-restricted-imports',

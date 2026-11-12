@@ -89,32 +89,38 @@ const DB_PLATFORM = 'apps/*/src/platform/db/**';
 /** Repository layer files (folder or single file), for the raw-SQL and expectAffected rules. */
 const REPOSITORY_FILES = ['apps/api/src/modules/*/repository/**', 'apps/api/src/modules/*/repository.{ts,tsx}'];
 /**
- * `platform/tenant-context-sql` exemptions (ADR-0005 am. 10 items 1 and 4; TASK-016 lead decision 6). Exact files,
- * each with the forms it may contain: `tokens` (the context setter and the four security keys, transaction-local),
- * `session-set` (`SET [SESSION] app.…` / `RESET app.…`), `session-set-config` (the setter with is_local = false).
- * Every other file gets the rule with no exemption.
+ * `platform/tenant-context-sql` exemptions (ADR-0005 am. 10 items 1 and 4; TASK-016 lead decision 6; PR11-SEC-08).
+ * Exact files only (no folder globs: a new file in an exempted folder must not inherit the exemption), each with the
+ * forms it may contain: `setter` (the context setter function name), `keys` (the four security keys, e.g. a
+ * readiness read), `session-set` (`SET [SESSION] app.…` / `RESET app.…`), `session-set-config` (the setter with
+ * is_local = false). Every other file gets the rule with no exemption.
  */
+const ALL_CONTEXT_FORMS = ['setter', 'keys', 'session-set', 'session-set-config'];
 const TENANT_CONTEXT_EXEMPTIONS = [
   // The one runtime writer of the context: transaction-local setter only (session forms stay errors).
-  { files: ['apps/api/src/platform/db/with-tenant-tx.ts'], allow: ['tokens'] },
-  // TASK-006 readiness probe (future file): reads the app.* settings of a fresh connection.
-  { files: ['apps/api/src/platform/db/session-integrity.ts', 'apps/api/src/platform/db/session-integrity.test.ts'], allow: ['tokens'] },
+  { files: ['apps/api/src/platform/db/with-tenant-tx.ts'], allow: ['setter', 'keys'] },
+  // TASK-006 readiness probe (future files): READS the app.* settings of a fresh connection; never a second writer.
+  { files: ['apps/api/src/platform/db/session-integrity.ts', 'apps/api/src/platform/db/session-integrity.test.ts'], allow: ['keys'] },
   // Integration suite of withTenantTx: asserts the context statement and its fail-closed behaviour.
-  { files: ['prisma/tests/rls/with-tenant-tx.int.test.ts'], allow: ['tokens'] },
-  // The session-scope negative control: the ONLY file allowed the is_local = false form (it proves the leak).
-  { files: ['prisma/tests/rls/session-scope-leak.int.test.ts'], allow: ['tokens', 'session-set', 'session-set-config'] },
+  { files: ['prisma/tests/rls/with-tenant-tx.int.test.ts'], allow: ['setter', 'keys'] },
+  // The session-scope negative control: the ONLY runtime-lane file allowed the is_local = false form (it proves the leak).
+  { files: ['prisma/tests/rls/session-scope-leak.int.test.ts'], allow: ALL_CONTEXT_FORMS },
   // SPK-03 spike, kept until the C-1 artifact is recorded (lead decision 3): ran every form, including the leak control.
-  { files: ['prisma/tests/spikes/spk03-rls-tx.int.test.ts'], allow: ['tokens', 'session-set', 'session-set-config'] },
-  // Catalog C-series: the prosrc scan's negative fixtures create functions that run a session SET of a context key.
-  { files: ['prisma/tests/catalog/**'], allow: ['tokens', 'session-set'] },
+  // Remove this entry in the commit that deletes the spike file (a stale entry would exempt any future file there).
+  { files: ['prisma/tests/spikes/spk03-rls-tx.int.test.ts'], allow: ALL_CONTEXT_FORMS },
+  // Catalog C-series: the prosrc scan's negative fixtures create functions that run a session SET of a context key
+  // (transaction-local setter fixtures only: no is_local = false).
+  { files: ['prisma/tests/catalog/c01-c12.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
+  // The catalog scan helpers name the keys (the renderer's deparsed operator-scope atom).
+  { files: ['prisma/tests/catalog/scans.ts'], allow: ['keys'] },
   // The RLS renderer emits the §4.3 policies over the §4.2 helpers.
-  { files: ['tools/db/render-rls.ts', 'tools/db/render-rls.test.ts'], allow: ['tokens'] },
-  // Migration-linter rule 16 and its tests name the forms they reject.
-  { files: ['tools/db/lint-migrations.ts', 'tools/db/lint-migrations.test.ts'], allow: ['tokens'] },
-  // The shared rule-16 / C-series form list's tests name every evasion form, session forms included (PR11-SEC-02).
-  { files: ['tools/db/tenant-key-forms.test.ts'], allow: ['tokens', 'session-set', 'session-set-config'] },
+  { files: ['tools/db/render-rls.ts', 'tools/db/render-rls.test.ts'], allow: ['keys'] },
+  // Migration-linter rule 16 names the forms it rejects; its tests and the shared form list's tests name every
+  // evasion form, session forms included (PR11-SEC-02).
+  { files: ['tools/db/lint-migrations.ts'], allow: ['setter', 'keys'] },
+  { files: ['tools/db/lint-migrations.test.ts', 'tools/db/tenant-key-forms.test.ts'], allow: ALL_CONTEXT_FORMS },
   // pg_dump's own preamble `set_config('search_path', '', false)`, asserted verbatim (no tenant key; not a session form).
-  { files: ['tools/db/up-down-up.test.ts'], allow: ['tokens'] },
+  { files: ['tools/db/up-down-up.test.ts'], allow: ['setter'] },
 ];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];
@@ -181,8 +187,13 @@ const PRISMA_TARGETS = [
   { file: { categories: 'prisma-generated' } },
 ];
 const SQL_DRIVER_TARGETS = [toPackage('pg', 'pg-pool')];
-/** Code that may touch Prisma and the SQL driver: repositories, the database platform, the prisma workspace, tools and tests. */
+/** Code that may touch Prisma: repositories, the database platform (planned files included), prisma/, tools/db and tests. */
 const DATABASE_CODE = { file: { categories: { anyOf: ['repository', 'db-platform', 'prisma', 'tools-db', 'test'] } } };
+/**
+ * Code that may import the SQL driver (`pg`, `pg-pool`): the database platform core only (not the planned Prisma
+ * files, not repositories), prisma/, tools/db and tests (PR2-SEC-05 addendum, PR11-SEC-05).
+ */
+const SQL_DRIVER_CODE = { file: { categories: { anyOf: ['db-platform-core', 'prisma', 'tools-db', 'test'] } } };
 const EXPRESS_PACKAGES = ['express', 'express-serve-static-core', '@types/express', '@types/express-serve-static-core'];
 const NOT_SAME_MODULE = '!{{ from.file.captured.module }}';
 const NOT_SAME_APP = '!{{ from.file.captured.app }}';
@@ -242,9 +253,10 @@ const BOUNDARIES_POLICIES = [
   { from: DATABASE_CODE, allow: PRISMA_TARGETS.map((to) => ({ to })) },
   {
     disallow: SQL_DRIVER_TARGETS.map((to) => ({ to })),
-    message: 'only repositories import the PostgreSQL driver and run raw SQL (ADR-0003).',
+    message:
+      'only the database platform core (apps/*/src/platform/db), prisma/, tools/db and tests import the PostgreSQL driver: a second pool runs without the tenant context and outside the business transaction; repositories and SYSTEM writers use the TenantDb (ADR-0005 am. 10 item 2, PR2-SEC-05, PR11-SEC-05).',
   },
-  { from: DATABASE_CODE, allow: SQL_DRIVER_TARGETS.map((to) => ({ to })) },
+  { from: SQL_DRIVER_CODE, allow: SQL_DRIVER_TARGETS.map((to) => ({ to })) },
 
   // --- The root Prisma client is private to the database platform (ADR-0005 am. 10 item 2, PR2-SEC-05, F-02):
   //     repositories, services and system writers get a TenantDb from withTenantTx. The DB test lane (prisma/tests)
@@ -577,8 +589,10 @@ export default defineConfig([
     rules: { 'platform/prisma-client-construction': 'error' },
   },
   {
-    // Parameterised raw SQL only. Tests are excluded: they assert that TenantDb's Proxy refuses the unsafe members.
-    files: [DB_PLATFORM, ...REPOSITORY_FILES],
+    // Parameterised raw SQL only, and no `$parent` escape, in all application code (services hold a TenantDb too) and
+    // the planned non-repository Prisma files (PR11-SEC-05). Tests are excluded: they assert that TenantDb's Proxy
+    // refuses these shapes.
+    files: [`apps/*/src/**/*.${LINTED}`, ...PLANNED_PRISMA_FILES],
     ignores: TEST_FILES,
     plugins: { platform },
     rules: { 'platform/db-raw-sql': 'error' },
