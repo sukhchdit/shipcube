@@ -130,4 +130,14 @@ Round 2 of a spike PR (PR #6 r2):
   - columns that are insert-only or runtime-mutated (counter resets).
 
 **Drift = edit OR delete (PR #13 r2, 2026-11-13).** When a fix adds "report/log drift restoration", check that BOTH counters trigger it: an upsert reports a hand-DELETED row as `inserted`, not `updated`. With an unchanged version/hash any insert is a restoration. Probe `runDataset` with a fake returning `[{inserted:true}]` and the matching version row.
+**Subset / "no-weakening" checks (PR #17, 2026-11-13).**
+- Ask which *extras* are themselves weakening evidence. ESLint `reportUnusedDisableDirectives` turns "rule X stopped firing" into a `ruleId: null` extra; probe by turning off a rule that a fixture only *disables* (`no-explicit-any`).
+- Positive assertions hide inside "weakening" tests (`toBe('off')`, `toEqual` on ignore maps, `not.toContain`); a strengthening PR fails them.
+- Jest filter deny-lists: Jest accepts kebab-case (`--test-name-pattern`), attached `-tX`, `--listTests` (exit 0, runs nothing), and `onlyChanged`/`lastCommit` (exit 0 with no tests). The head `jest.config.ts` `testNamePattern` skips everything with exit 0. Ask for an allow-list of the exact invocation.
+- A "rule stopped firing" signal can depend on another config switch: unused-directive reports need `linterOptions.reportUnusedDisableDirectives`, and reportUnusedDisableDirectives can be turned off together with the rule. Probe both switches at once, and ask for a direct fixture or effective-config check (PR #17 r2, R2-m1).
+- Exact command pins that trimEnd lines differ from bash on backslash + space/tab (bash does not continue the line). Ask whether the divergence fails closed; check with a 3-line bash script.
+- In pull_request workflows, job-level env such as RANGE_BASE is head-controlled. Pointing it at the head makes every "from the base ref" input head-sourced: the gate tooling, the checker itself and the record-gate range. No base-side pin can close this. Flag it as architectural (PR10-SEC-02).
+
+**Moving files to dodge a CI step can de-own them (PR #4 r3, 2026-11-13).** When a PR relocates files out of a CODEOWNERS-owned folder (e.g. out of `tools/test-support/` to escape lane A's base-ref replace step), check that the new location is owned too. Jest testEnvironment/setupFiles referenced from an owned jest.config.ts are NOT covered by owning the config. Fix: a CODEOWNERS line plus REQUIRED_CODEOWNED_PATHS and its test. Do NOT accept a "robust" config that skips a project when its file is missing; that is a silent gate weakening.
+
 **Client-side timeouts on pg CLIs:** `statement_timeout` is server-side; a blackholed network needs pg `query_timeout` + `keepAlive`.

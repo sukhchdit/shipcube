@@ -116,10 +116,32 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(run).toContain('not evaluated on push');
   });
 
-  it('review m3: the base-ref lint fixture step also takes the harness (lint-fixtures.mjs, tools/test-support) from the base; the classifier treats jest.config.ts and tools/test-support as lint controls', () => {
-    const run = str(steps[indexOf(/Lint negative fixtures from the base ref/)]?.run);
-    expect(run).toContain('for path in tools/lint/lint-fixtures.mjs tools/test-support; do');
-    expect(run).toContain('git checkout HEAD -- "$suite" tests/fixtures/lint tools/test-support tools/lint/lint-fixtures.mjs');
+  it('review m3 / m2 / D-ORCH-018: the base-ref lint fixture step takes the suite, harness (lint-fixtures.mjs, fixture-expectations.mjs, tools/test-support) and Jest config from the base and runs exactly that suite under that config in no-weakening mode; the classifier treats jest.config.ts and tools/test-support as lint controls', () => {
+    const step = steps[indexOf(/Lint negative fixtures from the base ref/)];
+    const run = str(step?.run);
+    expect(run).toContain('config=tools/lint/jest.base-fixtures.config.json\n');
+    expect(run).toContain('for path in tools/lint/lint-fixtures.mjs tools/lint/fixture-expectations.mjs "$config" tools/test-support; do');
+    expect(run).toContain('jest.js \\\n  --config "$config" --runTestsByPath "$suite" || status=$?\n');
+    expect(run).toMatch(
+      /\ngit checkout HEAD -- "\$suite" tests\/fixtures\/lint tools\/test-support tools\/lint\/lint-fixtures\.mjs \\\n\s+tools\/lint\/fixture-expectations\.mjs "\$config"\n/,
+    );
+    expect(run.trimEnd().endsWith('\nexit "$status"')).toBe(true);
+    expect(map(step?.env, 'base-ref lint fixture step env')).toEqual({ LINT_FIXTURE_MODE: 'no-weakening' });
+    expect(run).not.toMatch(/--testNamePattern|--test-name-pattern|\s-t|--selectProjects/);
+    // The base config runs the one suite, with no filter, swcrc lookup or cache the head could steer (review m2).
+    const baseConfig = JSON.parse(readFileSync(join(repoRoot, 'tools', 'lint', 'jest.base-fixtures.config.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(baseConfig).sort()).toEqual(
+      ['cache', 'displayName', 'moduleNameMapper', 'rootDir', 'roots', 'testEnvironment', 'testMatch', 'transform'].sort(),
+    );
+    expect(baseConfig).toMatchObject({ rootDir: '../..', testMatch: ['**/tools/lint/negative-fixtures.test.ts'], cache: false });
+    // Only the base-ref step selects the mode: not the workflow, the job, another step, a script or the Jest config.
+    expect(ciCode.match(/LINT_FIXTURE_MODE/g)).toHaveLength(1);
+    for (const file of ['package.json', 'jest.config.ts']) {
+      expect(readFileSync(join(repoRoot, file), 'utf8')).not.toContain('LINT_FIXTURE_MODE');
+    }
     const classify = str(steps[indexOf(/Classify changed paths/)]?.run);
     expect(classify).toContain('jest\\.config\\.ts');
     expect(classify).toContain('test-support');

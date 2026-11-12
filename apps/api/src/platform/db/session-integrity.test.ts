@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
@@ -23,12 +23,20 @@ const unset = TENANT_CONTEXT_KEYS.map(() => null);
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..');
 
 describe('database session integrity (PR7-SEC-06 item 3, PR7-SEC-02 item 2)', () => {
-  it('expects exactly the platform_app settings of prisma/bootstrap/00-roles.sql', () => {
-    const sql = readFileSync(join(REPO_ROOT, 'prisma', 'bootstrap', '00-roles.sql'), 'utf8');
-    const fromBootstrap = [...sql.matchAll(/^ALTER ROLE platform_app SET (\w+) = (.+?);/gmu)]
-      .map(([, name, value]) => `${name ?? ''}=${(value ?? '').replace(/^'|'$/gu, '')}`)
+  it('[D-ORCH-014 (a)] expects exactly the platform_app settings of EVERY prisma/bootstrap/*.sql file', () => {
+    const dir = join(REPO_ROOT, 'prisma', 'bootstrap');
+    const files = readdirSync(dir).filter((name) => name.endsWith('.sql'));
+    expect(files).toEqual(expect.arrayContaining(['00-roles.sql', '02-role-backstops.sql']));
+    const fromBootstrap = files
+      .flatMap((name) => [
+        ...readFileSync(join(dir, name), 'utf8').matchAll(
+          /^ALTER ROLE "?platform_app"? (?:IN DATABASE \S+ )?SET (\w+) (?:=|TO) (.+?);/gimu,
+        ),
+      ])
+      .map(([, name, value]) => `${(name ?? '').toLowerCase()}=${(value ?? '').replace(/^'|'$/gu, '')}`)
       .sort();
     expect(fromBootstrap).toEqual([...EXPECTED_ROLE_SETTINGS]);
+    expect(EXPECTED_ROLE_SETTINGS).toEqual(expect.arrayContaining(['statement_timeout=30s', 'lc_messages=C']));
   });
 
   it('the probe reads catalogs and the four tenant-context keys only, with no bind parameter', () => {
@@ -38,7 +46,7 @@ describe('database session integrity (PR7-SEC-06 item 3, PR7-SEC-02 item 2)', ()
 
   it.each<[string, readonly string[], readonly (string | null)[], readonly SessionIntegrityFinding[]]>([
     ['intact', EXPECTED_ROLE_SETTINGS, unset, []],
-    ['intact after a transaction-local set_config (empty values)', EXPECTED_ROLE_SETTINGS, TENANT_CONTEXT_KEYS.map(() => ''), []],
+    ['intact after a transaction-local context write (empty values)', EXPECTED_ROLE_SETTINGS, TENANT_CONTEXT_KEYS.map(() => ''), []],
     ['a reset role setting', EXPECTED_ROLE_SETTINGS.slice(1), unset, ['db_role_setting_drift']],
     [
       'an added default_transaction_read_only',

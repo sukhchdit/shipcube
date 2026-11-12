@@ -268,6 +268,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-115 scenarios (missing key in es or fr fails CI; literal string in JSX fails lint)
+- PR #4 code review m2 + R3-n1 (routed to this task): during SPA-mode hydration the web root renders DEFAULT_LOCALE and switches after hydration (useSyncExternalStore pattern; isSpaMode from window.__reactRouterContext) so /es/no-such-page and every /es/account/... page hydrate without React #418; the served locale is captured ONCE before hydration (module-level SERVED_LANG = document.documentElement.lang) because later Suspense boundaries hydrate after the root has patched lang, and modules are isolated in the test; e2e cases on /es/no-such-page and admin lng=fr under the console-error guard (never allow-listed); the admin meta() cookie read at render stays
+- PR #4 code review m6 (first lazy-route task — applies here if this task adds the first lazy route, otherwise to TASK-038 / the wizard): .size-limit.json splits into public initial (entry + root + locale layout + home chunks), authenticated initial (NFR-WEB-004 350 kB) and a per-file <= 150 kB lazy-chunk check, plus the manifest test that admin code is absent from the web bundle and vice versa
 - AT-US-115-01 … AT-US-115-09: all 9 scenarios of US-115, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -481,6 +483,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-55 (pre-hash part): bcrypt input is base64(HMAC(pepper, pw)), 44 chars
 - ADR-0023 am. J item 4 and D-ARCH-042 (ADR-0006 am. 16, ADR-0025 PR1-SEC amendment): password hashing sits behind a `PasswordHasher` port (`hash`, `verify`, `needsRehash`; pre-hash, cost floor, dummy-hash constant-time compare). Its single implementation module is the only importer of `bcrypt`/`bcryptjs`, which the TASK-002 import-confinement lint rule enforces. `bcrypt@6.0.0` stays under its `tools/ci/maintenance-exceptions.json` entry (expires 2027-05-11; exit = `bcryptjs` in a `worker_threads` pool behind the same port)
 - DR-A14 `users` policy set (data-model §4.3 as amended 2026-11-13; D-ARCH-072) — unless TASK-037 created `users` first (its dod): `users` is USER_OWNED with `policySet: dr-a14-users` in `tools/db/table-classes/identity.json` (definerRead); the block is rendered by `tools/db/render-rls.ts` and pasted verbatim in prefix-safe order (CREATE TABLE → ENABLE + FORCE → `p_users__own` keyed on `id = platform.app_actor_id()`, `p_users__org_member_read` with the positive list `m.status IN ('INVITED','ACTIVE','SUSPENDED')`, `p_users__operator`, `p_users__definer_read` → GRANT); the `memberships.user_id` FK is in place after this migration (NOT VALID + VALIDATE if added here, rule 6); `down.sql` prefix-idempotent (rule 17); C3 derived set and C12 probes cover `users` (a member of org A reads the rows of fellow INVITED/ACTIVE/SUSPENDED members and never a REMOVED one or a stranger); MERGE CONDITION: security-analyst sign-off on the rendered policies (PR11-SEC-10)
+- PR2-SEC-02 residual (PR #2 security review R2.4; password-hasher confinement, before or with the hasher module): the three bcrypt boundaries entries move to the END of BOUNDARIES_POLICIES so no later allow can override them; the coverage test becomes behavioural (lint import(bcrypt) at every matrix path and assert the bcrypt policy is in the boundaries/dependencies options); the hasher module exports only the PasswordHasher port (review checks it; a dedicated platform/password-hasher-only rule only if it adds local-binding re-export detection); the TASK-007 Semgrep backstop stays
 - AT-US-015-01 … AT-US-015-12: all 12 scenarios of US-015, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -958,7 +961,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-052 **DC** (M0 Must) Seed currencies and FX snapshots |
 | REQs | REQ-DATA-006, REQ-DATA-014 |
 | NFRs | NFR-DATA-001 |
-| Spikes / security / decisions | D-019 |
+| Spikes / security / decisions | D-019, D-ARCH-079 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-023 |
@@ -972,6 +975,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-052 scenarios
+- PR #13 code review m4 (a) — first consumer of the Dataset contract extension for UUID foreign keys (prisma/README.md "Dataset contract limits"; prisma-seed lock): fx_snapshots rows reference parent ids generated per environment, so this task adds { fk: { column, table, naturalKey } } resolution (or deterministic seedId ids per data-model §9.3) to the seed framework with tests, honouring the HARD RULE never to list a column the runtime or a reviewer mutates
 - AT-US-052-01 … AT-US-052-07: all 7 scenarios of US-052, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

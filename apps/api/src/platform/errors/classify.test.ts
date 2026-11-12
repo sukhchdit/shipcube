@@ -2,12 +2,87 @@ import { describe, expect, it } from '@jest/globals';
 import { AppError } from '@platform/shared';
 
 import { CORRELATION_ID_PATTERN, resolveCorrelationId } from '../context/request-context.js';
+import { DbError, type DbErrorStatus } from '../db/index.js';
+import { dbErrorMapping } from '../db/map-db-error.js';
 import { classifyThrown, ownDataProperty, thrownClassName } from './classify.js';
 import { buildProblem, GENERIC_SERVER_DETAIL, instanceOf } from './problem.js';
 
 const throwing = (): never => {
   throw new Error('trap');
 };
+
+describe('classifyThrown: DbError (PR11-SEC-09 item 6)', () => {
+  it.each([
+    [403, 'AUTHZ_DENIED'],
+    [404, 'NOT_FOUND'],
+    [409, 'CONFLICT'],
+    [500, 'INTERNAL_ERROR'],
+  ] as const)('a %i DbError answers its catalogue code %s, without Retry-After', (status: DbErrorStatus, code) => {
+    expect(classifyThrown(new DbError(dbErrorMapping(status, 'DB_ERROR')))).toEqual({ kind: 'db', code });
+  });
+
+  it('a retryable 503 DbError keeps SERVICE_UNAVAILABLE and its Retry-After seconds, and nothing else', () => {
+    const error = new DbError({ ...dbErrorMapping(503, 'LOCK_TIMEOUT', { retryable: true }), sqlState: '55P03', prismaCode: 'P2010' });
+    expect(classifyThrown(error)).toEqual({ kind: 'db', code: 'SERVICE_UNAVAILABLE', retryAfterSeconds: 1 });
+  });
+
+  it('an RLS write rejection answers AUTHZ_DENIED; reason, SQLSTATE and security event are not classified', () => {
+    const error = new DbError({ ...dbErrorMapping(403, 'RLS_WRITE_REJECTED', { securityEvent: 'rls_write_rejected' }), sqlState: '42501' });
+    expect(classifyThrown(error)).toStrictEqual({ kind: 'db', code: 'AUTHZ_DENIED' });
+  });
+
+  it('fails safe to INTERNAL_ERROR for a code outside the catalogue or a status that differs from the catalogue', () => {
+    const forge = (fields: Record<string, unknown>) => Object.assign(new DbError(dbErrorMapping(403, 'DB_ERROR')), fields);
+    for (const value of [
+      forge({ code: 'NOT_A_CODE' }),
+      forge({ code: 'toString' }),
+      forge({ code: 42 }),
+      forge({ status: 200 }),
+      forge({ status: '403' }),
+      forge({ code: 'NOT_FOUND', status: 403 }),
+      forge({ code: 'CONFLICT', status: 500 }),
+      forge({ code: 'SERVICE_UNAVAILABLE', status: 500, retryable: true, retryAfterSeconds: 1 }),
+    ]) {
+      expect(classifyThrown(value)).toEqual({ kind: 'db', code: 'INTERNAL_ERROR' });
+    }
+  });
+
+  it('never invokes getters: accessor-backed code/status fail safe, an accessor-backed Retry-After is dropped', () => {
+    const base = () => new DbError(dbErrorMapping(503, 'LOCK_TIMEOUT', { retryable: true }));
+    const getterCode = Object.defineProperty(base(), 'code', { get: throwing });
+    const getterStatus = Object.defineProperty(base(), 'status', { get: () => 503 });
+    expect(classifyThrown(getterCode)).toEqual({ kind: 'db', code: 'INTERNAL_ERROR' });
+    expect(classifyThrown(getterStatus)).toEqual({ kind: 'db', code: 'INTERNAL_ERROR' });
+    for (const retry of [
+      Object.defineProperty(base(), 'retryAfterSeconds', { get: () => 1 }),
+      Object.defineProperty(base(), 'retryable', { get: throwing }),
+    ]) {
+      expect(classifyThrown(retry)).toEqual({ kind: 'db', code: 'SERVICE_UNAVAILABLE' });
+    }
+    expect(classifyThrown(new Proxy(base(), { getOwnPropertyDescriptor: throwing }))).toEqual({ kind: 'db', code: 'INTERNAL_ERROR' });
+    expect(classifyThrown(new Proxy(base(), { getPrototypeOf: throwing }))).toEqual({ kind: 'unexpected' });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 3601, '1'])('drops an out-of-range Retry-After %p', (seconds) => {
+    const error = Object.assign(new DbError(dbErrorMapping(503, 'LOCK_TIMEOUT', { retryable: true })), { retryAfterSeconds: seconds });
+    expect(classifyThrown(error)).toEqual({ kind: 'db', code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  it('sends no Retry-After for a DbError that is not retryable, whatever its retryAfterSeconds', () => {
+    const error = Object.assign(new DbError(dbErrorMapping(503, 'DB_ERROR')), { retryAfterSeconds: 1 });
+    expect(classifyThrown(error)).toEqual({ kind: 'db', code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  it('does not treat a DbError look-alike (plain object or Error with the same fields) as a DbError', () => {
+    const fields = { name: 'DbError', status: 403, code: 'AUTHZ_DENIED', reason: 'RLS_WRITE_REJECTED', retryable: false };
+    expect(classifyThrown(fields)).toEqual({ kind: 'unexpected' });
+    expect(classifyThrown(Object.assign(new Error('Database error: RLS_WRITE_REJECTED'), fields))).toEqual({ kind: 'unexpected' });
+  });
+
+  it('names the class DbError for the server log', () => {
+    expect(thrownClassName(new DbError(dbErrorMapping(500, 'DB_ERROR')))).toBe('DbError');
+  });
+});
 
 describe('classifyThrown', () => {
   it('keeps AppError and maps known body-parser and router failures', () => {

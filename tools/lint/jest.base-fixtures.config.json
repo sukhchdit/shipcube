@@ -1,0 +1,25 @@
+{
+  "displayName": "base-lint-fixtures",
+  "rootDir": "../..",
+  "roots": ["<rootDir>/tools/lint"],
+  "testEnvironment": "node",
+  "testMatch": ["**/tools/lint/negative-fixtures.test.ts"],
+  "transform": {
+    "^.+\\.(t|j)sx?$": [
+      "@swc/jest",
+      {
+        "swcrc": false,
+        "jsc": {
+          "parser": { "syntax": "typescript", "tsx": true },
+          "target": "es2023",
+          "keepClassNames": true,
+          "transform": { "react": { "runtime": "automatic" } }
+        },
+        "module": { "type": "commonjs" },
+        "sourceMaps": "inline"
+      }
+    ]
+  },
+  "moduleNameMapper": { "^(\\.{1,2}/.*)\\.js$": "$1" },
+  "cache": false
+}

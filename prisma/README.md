@@ -44,3 +44,45 @@ Recorded by TASK-003 on 2026-11-12 against the locked `prisma` / `@prisma/client
    statement creates no `pg_default_acl` row, and a function the role then creates is still executable by `PUBLIC`.
    `bootstrap/01-schemas.sql` uses the global form (`… FOR ROLE <role> REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`), which
    the catalog test checks both in `pg_default_acl` and behaviourally.
+
+## Row-level security (TASK-016)
+
+| Path | What |
+|---|---|
+| `sql/policy-templates/*.sql` | The data-model §4.3 blocks (`enable-force`, `tenant`, `operator`, `guest`, `user-owned`, `definer-read`, `definer-purge`, `guest-capable-guard-trigger`, and the once-only `guest-capable-guard-function`). `tools/db/render-rls.ts` renders a table's block from its class in `tools/db/table-classes/<module>.json` (`tsx tools/db/render-rls.ts <module>`) and refuses any template whose policy predicate leaves the ADR-0005 am. 10 item 7 allow-list. |
+| `sql/function-templates/app-is-operator.sql` | `platform.app_is_operator()` under `SET ROLE platform_definer` — shipped by TASK-037 with `memberships`/`organisations` (its body needs them; `check_function_bodies` stays on). |
+| `sql/grants.manifest` | Every table/column privilege of `platform_app`, `platform_definer`, `platform_erasure`, one line per grant (parser `tools/db/grants-manifest.ts`); catalog test C5 compares it with the live ACLs. A migration that grants adds its line. |
+| `tests/catalog/` | Suite `catalog-c1-c14` (C1–C14, prosrc scan, PR8-SEC-14 backstop); `policies.snapshot.json` is the C3 snapshot — a migration that adds policies updates it. |
+| `bootstrap/02-role-backstops.sql` | `platform_app` role-level `statement_timeout = 30s` backstop (ADR-0005 am. 10 item 12) and `lc_messages = 'C'` (untranslated messages, which `mapDbError` relies on to tell an RLS WITH CHECK rejection from a privilege error; D-ARCH-073 b). `lc_messages` is superuser-only, so only the bootstrap lane sets it. |
+
+## Rule 5: `CREATE INDEX CONCURRENTLY` through `migrate deploy`
+
+Recorded by TASK-016 on 2026-11-12, Prisma 7.10.1 / PostgreSQL 18.6, as `platform_migrator`
+(`tests/migrations/concurrent-index.int.test.ts`, fixtures `tests/fixtures/concurrent-index*`):
+
+1. A migration whose only statement is `CREATE INDEX CONCURRENTLY` on a table created by an earlier migration is
+   applied: exit 0, `_prisma_migrations.finished_at` set, the index `indisvalid`. Prisma does not wrap the file in a
+   transaction.
+2. **The same statement after `SET lock_timeout = '3s';` in the same file is applied as well.** PostgreSQL rejects
+   `CREATE INDEX CONCURRENTLY` in a multi-statement simple-query string (implicit transaction, `25001`), so
+   `migrate deploy` does not submit the file as one string either: it runs the statements one by one.
+3. **A migration file is not atomic.** A file whose second statement fails (`SELECT 1/0`) exits non-zero with
+   `22012`, the migration stays unfinished (`finished_at` NULL), and **the first statement's table remains**. A failed
+   migration therefore leaves partial state: fix forward, or apply the hand-written `down.sql` for what was created
+   before `migrate resolve`. Session-level `SET`s (such as `SET lock_timeout`) persist on the deploy connection for the
+   rest of the file.
+
+Consequence for linter rule 5: "one statement per file" is not needed to avoid a deploy error, but it keeps a
+concurrent build (which can leave an `INVALID` index when it fails) isolated in its own migration, so a failure is
+retried or reverted on its own — the rule stays as written, justified by atomicity rather than by `25001`.
+
+Consequences for rules 9, 11 and 15 (PR11-SEC-07): every prefix of a file must leave the schema safe, and each
+statement runs outside a transaction block, where `SET LOCAL` has no effect.
+
+- Rule 11 accepts only `SET [SESSION] lock_timeout` as the first statement; `SET LOCAL lock_timeout` fails.
+- Rule 15 accepts a `SECURITY DEFINER` function only inside `SET ROLE platform_definer; … RESET ROLE;` (`SET LOCAL
+  ROLE` does not count; "grants before `OWNER TO`" is no longer accepted), and a file must not end with a role still
+  set.
+- Rule 9 requires a `GRANT … TO platform_app` on an RLS-class table to follow that table's `ENABLE` and `FORCE ROW
+  LEVEL SECURITY` (in the same file or an earlier one), and every `CREATE POLICY` to equal, statement for statement,
+  the `tools/db/render-rls.ts` output for the table's manifest entry (PR11-SEC-03).

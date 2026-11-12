@@ -2,7 +2,7 @@
  * Pure parts of the bootstrap runner and the reset guard (the PostgreSQL 18 runs are prisma/tests/bootstrap).
  */
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 import {
   BootstrapError,
   DEFAULT_BOOTSTRAP_DIR,
+  SECRET_FILE_MAX_BYTES,
   bootstrapVariables,
   listBootstrapFiles,
   readSecret,
@@ -60,7 +61,7 @@ describe('bootstrap lane files (data-model §4.4, §8.1)', () => {
   const files = listBootstrapFiles(DEFAULT_BOOTSTRAP_DIR);
 
   it('lists the lane in file-name order with SHA-256 digests of the bytes', () => {
-    expect(files.map((file) => file.name)).toEqual(['00-roles.sql', '01-schemas.sql']);
+    expect(files.map((file) => file.name)).toEqual(['00-roles.sql', '01-schemas.sql', '02-role-backstops.sql']);
     expect(files.every((file) => file.sha256.length === 32)).toBe(true);
   });
 
@@ -91,13 +92,65 @@ describe('bootstrap lane files (data-model §4.4, §8.1)', () => {
   it('refuses the reserved db_name variable before connecting', async () => {
     await expect(runBootstrap({ connection: unused, passwords, vars: { db_name: 'x' } })).rejects.toThrow(/variable db_name is reserved/);
   });
+});
 
-  it('reads secrets from the variable or from the *_FILE path, and fails when neither is set', () => {
-    const file = join(work, 'secret');
-    writeFileSync(file, 'from-file\n');
-    expect(readSecret({ S: 'direct' }, 'S')).toBe('direct');
-    expect(readSecret({ S_FILE: file }, 'S')).toBe('from-file');
-    expect(() => readSecret({}, 'S')).toThrow(BootstrapError);
+describe('readSecret: *_FILE hardening parity with the file provider (ADR-0018 am. 6, D-ARCH-052)', () => {
+  const root = mkdtempSync(join(work, 'run-secrets-'));
+  const outside = mkdtempSync(join(work, 'outside-'));
+  const value = randomBytes(24).toString('base64url');
+  writeFileSync(join(root, 's'), `${value}\n`);
+  writeFileSync(join(root, 'empty'), '\n');
+  writeFileSync(join(root, 'big'), 'x'.repeat(SECRET_FILE_MAX_BYTES + 1));
+  mkdirSync(join(root, 'dir'));
+  writeFileSync(join(outside, 's'), value);
+  // A junction (Windows, no privilege needed) or a directory symlink (POSIX) that leaves the root.
+  symlinkSync(outside, join(root, 'escape'), 'junction');
+  const read = (env: NodeJS.ProcessEnv) => readSecret(env, 'S', { root });
+  /** The thrown message, asserted to carry neither the path nor the value. */
+  const refusal = (env: NodeJS.ProcessEnv): string => {
+    try {
+      read(env);
+    } catch (error) {
+      expect(error).toBeInstanceOf(BootstrapError);
+      const { message } = error as Error;
+      // The generic root name may appear; the configured path, the real paths and the value never do.
+      const leaks = [value, root, outside, env['S_FILE'] ?? ''].filter((leak) => leak !== '' && leak !== '/run/secrets');
+      for (const leak of leaks) expect(message).not.toContain(leak);
+      return message;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('reads the variable, or a regular file under /run/secrets with one trailing newline stripped', () => {
+    expect(read({ S: 'direct' })).toBe('direct');
+    expect(read({ S_FILE: '/run/secrets/s' })).toBe(value);
+  });
+
+  it('treats an empty variable or an empty file as unset', () => {
+    expect(refusal({})).toBe('S (or S_FILE) is not set');
+    expect(refusal({ S: '', S_FILE: '' })).toBe('S (or S_FILE) is not set');
+    expect(refusal({ S_FILE: '/run/secrets/empty' })).toBe('S (or S_FILE) is not set');
+  });
+
+  it('refuses both NAME and NAME_FILE set', () => {
+    expect(refusal({ S: 'direct', S_FILE: '/run/secrets/s' })).toBe('set S or S_FILE, not both');
+  });
+
+  it.each([[join(outside, 's')], ['/etc/passwd'], ['/run/secrets/../etc/passwd'], ['/run/secrets'], ['run/secrets/s']])(
+    'refuses a path that is not lexically under /run/secrets: %s',
+    (path) => {
+      expect(refusal({ S_FILE: path })).toBe('S_FILE: must name a file under /run/secrets');
+    },
+  );
+
+  it('refuses a link whose real path leaves the root', () => {
+    expect(refusal({ S_FILE: '/run/secrets/escape/s' })).toBe('S_FILE: resolves outside /run/secrets');
+  });
+
+  it('refuses a directory, a file over 64 KiB and a missing file', () => {
+    expect(refusal({ S_FILE: '/run/secrets/dir' })).toBe('S_FILE: is not a regular file');
+    expect(refusal({ S_FILE: '/run/secrets/big' })).toBe(`S_FILE: exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
+    expect(refusal({ S_FILE: '/run/secrets/missing' })).toBe('S_FILE: could not be read (ENOENT)');
   });
 });
 

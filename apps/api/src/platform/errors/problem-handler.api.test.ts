@@ -10,6 +10,8 @@ import request, { type Response as TestResponse } from 'supertest';
 
 import { createApp, type AppDependencies, type AppLogger } from '../../app.js';
 import { CORRELATION_ID_PATTERN, currentRequestContext } from '../context/request-context.js';
+import { DbError } from '../db/index.js';
+import { dbErrorMapping } from '../db/map-db-error.js';
 import { isAuditableMutationResponse } from './error-response.js';
 import { GENERIC_SERVER_DETAIL } from './problem.js';
 
@@ -219,7 +221,7 @@ describe('AT-US-007-03: 5xx never leaks internals', () => {
             originalMessage: `new row violates row-level security policy for table "users" (${SECRET})`,
             kind: 'postgres',
             detail: `Failing row contains (${SECRET})`,
-            hint: 'SELECT set_config(...)',
+            hint: 'SELECT relrowsecurity FROM pg_catalog.pg_class WHERE relname = $1',
           },
         },
       };
@@ -269,6 +271,94 @@ describe('AT-US-007-03: 5xx never leaks internals', () => {
       }),
       { numRuns: 60 },
     );
+  });
+});
+
+describe('[PR11-SEC-09 item 6] a DbError answers its catalogue problem; reason, SQLSTATE and Prisma code are log-only', () => {
+  /** Text a DbError holds that must never reach the client (its message, reason, SQLSTATE, Prisma code, event). */
+  const LOG_ONLY = [
+    'Database error',
+    'RLS_WRITE_REJECTED',
+    'rls_write_rejected',
+    'LOCK_TIMEOUT',
+    '42501',
+    '55P03',
+    '23505',
+    'P2010',
+    'P2002',
+  ];
+
+  function expectNoLogOnlyText(res: TestResponse): void {
+    for (const fragment of LOG_ONLY) expect(res.text).not.toContain(fragment);
+  }
+
+  it('an RLS write rejection answers 403 AUTHZ_DENIED with the generic catalogue text and is not logged', async () => {
+    const { app, logged, setThrown } = harness();
+    setThrown(
+      new DbError({
+        ...dbErrorMapping(403, 'RLS_WRITE_REJECTED', { securityEvent: 'rls_write_rejected' }),
+        sqlState: '42501',
+        prismaCode: 'P2010',
+      }),
+    );
+    const res = await request(app).get('/api/v1/throws');
+    const body = expectProblem(res, 403, 'AUTHZ_DENIED');
+    expect(body).toMatchObject({ title: 'Permission denied', detail: 'Permission denied.' });
+    expect(res.headers['retry-after']).toBeUndefined();
+    expectNoLogOnlyText(res);
+    expect(logged).toEqual([]);
+  });
+
+  it('a retryable lock timeout answers 503 SERVICE_UNAVAILABLE, Retry-After: 1 and the generic server detail', async () => {
+    const { app, logged, setThrown } = harness();
+    const thrown = new DbError({ ...dbErrorMapping(503, 'LOCK_TIMEOUT', { retryable: true }), sqlState: '55P03', prismaCode: 'P2010' });
+    setThrown(thrown);
+    const res = await request(app).get('/api/v1/throws');
+    const body = expectProblem(res, 503, 'SERVICE_UNAVAILABLE');
+    expect(body).toMatchObject({ title: 'Service unavailable', detail: GENERIC_SERVER_DETAIL });
+    expect(res.headers['retry-after']).toBe('1');
+    expectNoLogOnlyText(res);
+    expect(logged.at(-1)?.fields).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, error_class: 'DbError' });
+    expect(logged.at(-1)?.thrown).toBe(thrown);
+  });
+
+  it.each([
+    [409, 'CONFLICT', 'Conflict'],
+    [404, 'NOT_FOUND', 'Not found'],
+  ] as const)('a %i DbError answers %s with "<title>." and no Retry-After', async (status, code, title) => {
+    const { app, logged, setThrown } = harness();
+    setThrown(
+      new DbError({ ...dbErrorMapping(status, status === 409 ? 'CONFLICT' : 'NOT_FOUND'), sqlState: '23505', prismaCode: 'P2002' }),
+    );
+    const res = await request(app).get('/api/v1/throws');
+    expect(expectProblem(res, status, code)).toMatchObject({ title, detail: `${title}.` });
+    expect(res.headers['retry-after']).toBeUndefined();
+    expectNoLogOnlyText(res);
+    expect(logged).toEqual([]);
+  });
+
+  it('a 500 DbError answers the generic 500 and is logged with error_class DbError', async () => {
+    const { app, logged, setThrown } = harness();
+    setThrown(new DbError({ ...dbErrorMapping(500, 'DB_PRIVILEGE_DENIED', { securityEvent: 'db_privilege_denied' }), sqlState: '42501' }));
+    const res = await request(app).get('/api/v1/throws');
+    expect(expectProblem(res, 500, 'INTERNAL_ERROR')['detail']).toBe(GENERIC_SERVER_DETAIL);
+    expect(res.text).not.toMatch(/DB_PRIVILEGE_DENIED|db_privilege_denied|42501|Database error/u);
+    expect(logged.at(-1)?.fields).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      status: 500,
+      error_class: 'DbError',
+      correlation_id: res.headers['x-correlation-id'],
+    });
+  });
+
+  it('a DbError whose status disagrees with the catalogue fails safe to a generic 500 without Retry-After', async () => {
+    const { app, logged, setThrown } = harness();
+    const forged = Object.assign(new DbError(dbErrorMapping(503, 'LOCK_TIMEOUT', { retryable: true })), { status: 403 });
+    setThrown(forged);
+    const res = await request(app).get('/api/v1/throws');
+    expect(expectProblem(res, 500, 'INTERNAL_ERROR')['detail']).toBe(GENERIC_SERVER_DETAIL);
+    expect(res.headers['retry-after']).toBeUndefined();
+    expect(logged.at(-1)?.fields).toMatchObject({ code: 'INTERNAL_ERROR', error_class: 'DbError' });
   });
 });
 

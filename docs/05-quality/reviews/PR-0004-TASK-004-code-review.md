@@ -215,3 +215,106 @@ Round 3 reviews the harness commit plus the merge-main result. All of the follow
 
 - **Not mergeable yet:** M1 is open, and PR #4 holds for round 3 (D-ORCH-006 item 3). There are no other BLOCKER/MAJOR findings. Once R2.4 holds and R2-m1/R2-m2 are fixed, the expected round-3 outcome is APPROVED or APPROVED_WITH_NITS.
 - **New routings:** R2-n2 to TASK-022/TASK-111; R2-n3 to TASK-014; R2-m2's ADR sentence to principal-architect.
+
+## Round 3 (head d2e867b)
+
+| Field | Value |
+|---|---|
+| Delta | `50b4831..d2e867b`, 3 commits: `ba57e77` merge of `main` @`22eccb2`; `3349766` Playwright + axe harness plus the web SPA-hydration locale fix; `d2e867b` jsdom support files moved from `tools/test-support` to `tools/test-dom`. Branch-only source delta: `apps/web/app/i18n/use-locale{,.test}.ts(x)`, `tests/e2e/**`, `jest.config.ts`, `tools/test-dom/**`, lockfile. |
+| Reviewer | code-reviewer (independent), 2026-11-13 |
+| Inputs | Rounds 1–2 above (§3, R2.4); fix comment [6836992875](https://github.com/sukhchdit/shipcube/pull/4#issuecomment-6836992875); D-ORCH-019, D-TASK004-01, D-ARCH-050, D-TASK007-03; TEST-STRATEGY §7.8; `required-suites.json`; lane A run 43314173521 |
+| Main drift | `origin/main` is at `559fde7`. `git diff 22eccb2 origin/main -- . ':!docs' ':!.claude'` is empty: docs-only since the merge. |
+
+```
+VERDICT: CHANGES_REQUESTED  (one MAJOR, two-line fix; everything in the R2.4 checklist is closed or formally deferred)
+SUMMARY: The harness is good work: six projects named per TEST-STRATEGY §7.8, an error guard with no allow-list that caught
+         the m2 hydration mismatch, axe scans at settled points only, and a static server that fails closed on malformed
+         escapes and traversal. The m2 fix is correct and its test kills both mutants I tried. The merge is a pure union.
+         One MAJOR: d2e867b moves the jsdom environment and setup files out of the CODEOWNERS/security-owned set
+         (tools/test-support/), so future edits to them escape the security-record gate. Re-own tools/test-dom/ and it is approved.
+```
+
+### R3.1 Verification performed by the reviewer
+
+I ran nothing in the `Shipqube-TASK-004` worktree, and no `npm ci`, build, Docker or e2e. Everything ran on a `git archive d2e867b` extract in my scratch dir, with `node_modules` junctioned to the main checkout's (Node 24). The extract and junction were removed afterwards; main's `node_modules` count (740) and `git status` are unchanged.
+
+| Check | Result |
+|---|---|
+| Full read of `3349766` and `d2e867b`, and of `apps/web/app/root.tsx`, `i18n/locales.ts`, `infra/nginx/web.conf.template` maps, the lane A base-ref fixture step (`ci.yml`), `CODEOWNERS`, `check-security-owned-paths.mjs` and `check-workflow-policy.mjs` | See the findings below. |
+| `jest --selectProjects unit-dom --testPathPatterns apps/web/app/(i18n/use-locale\|root\|routes/not-found)` | **2 suites, 8/8 passed.** |
+| **Mutation 1:** server snapshot `() => renderedLocale(urlLocale)` replaced with `() => urlLocale` (the pre-fix behaviour) | **2 of 3 fail** (the `renderToString` case and the `hydrateRoot` case with `onRecoverableError`). This matches the developer's claim. |
+| **Mutation 2:** `renderedLocale` ignores `<html lang>` and always returns `en` | **1 of 3 fails** (the `lang="es"` server-snapshot case). The test pins the served-lang read, not just "default during hydration". |
+| **Static-server probe:** fake `apps/web/build/client` (root, `en/`, `es/`, `assets/a.js`, `.hidden/`, plus a sibling file outside the root); `node tests/e2e/support/static-server.ts web 4199`; 22 paths, 8 `Accept-Language` values, 2 cookies, a POST, then a liveness request | 400 for `/%E0%A4%A`, `/%`, `/..%2f..%2fpackage.json`, `/..%5c..%5cpackage.json` (Windows separator), `/..%2fsibling.txt` and `/a%2F..%2F..%2F..%2Fsibling.txt`. `/../sibling.txt` and `/%2e%2e/...` are normalised by the URL parser and get the SPA fallback; **nothing outside the root was ever served.** 403 for `/.hidden/x.txt` and `/%2ehidden/x.txt`; 404 for a missing asset; 405 for POST. `/es` (no slash) serves `es/index.html`. `/x%00.txt` gets the fallback rather than an error. The server answered after every malformed request. The `Accept-Language` regex parsed from the template gives `de-DE, fr-CA;q=0.9` → `/fr/`, `ES` → `/es/`, `zz-fr`/`enx`/`esperanto`/`*` → `/en/`, `fr;q=0.1, es;q=0.9` → `/fr/` (first-listed, by design per DR-A18). One divergence is noted in R3-n5. |
+| **Merge `ba57e77` is a pure union** | Merge base `44d6c2e`. Files changed on both sides: `.stylelintignore`, `eslint.config.mjs`, `package.json`, `tools/lint/negative-fixtures.test.ts`, `package-lock.json`. `git merge-tree --write-tree 50b4831 22eccb2` conflicts in exactly `eslint.config.mjs`, `package.json` and `negative-fixtures.test.ts`. `git diff --stat <merge-tree> ba57e77` touches only those 3 files plus `.stylelintignore`, so **every other path, including the lockfile, is byte-identical to a clean re-merge.** The hand resolutions (`git show --cc`): (a) `eslint.config.mjs`: both sides' blocks kept (the branch's `routes.ts` dev-dependency block; main's `prisma.config.ts` and `prisma/tests/**` blocks), nothing dropped. (b) `package.json`: main's db/authz/gen/hooks scripts and `pg` pins, plus the branch's `typegen`, `typecheck`, `build && size`, `unit unit-dom` and `size-limit`. `lint` = `npm run typegen && eslint … && stylelint … --max-warnings 0 && node tools/lint/check-suppressions.mjs`. Main's `--allow-empty-input` is dropped, which **batch-0.2 rulings item 12 / ADR-0002 §79 require at this rebase** (PR2-SEC-03 item 3). `test:integration` takes main's form (no `--passWithNoTests`). (c) `negative-fixtures.test.ts`: union of both expectations (typegen first, then the suppression check) plus a `not.toContain('--allow-empty-input')` guard. (d) `.stylelintignore` (auto-merged, then hand-edited): `playwright-report/` becomes `/**/playwright-report/` (and likewise `test-results/`) so main's ESLint/Stylelint ignore-symmetry test (R2-n8) holds. This is a justified, documented adjustment, not a semantic change. |
+| **Lockfile deltas** (parsed `packages` maps) | MB→`50b4831` and `22eccb2`→`ba57e77` are **identical**: + `size-limit` 14.3.0, `@size-limit/file` 14.3.0, `lilconfig` 3.1.4, `nanospinner` 1.2.2 (all MIT), and the root devDependency. `ba57e77`→`3349766`: + `@playwright/test`, `playwright`, `playwright-core` 1.65.0 (Apache-2.0), `@axe-core/playwright` 4.14.0 (MPL-2.0; `axe-core ~4.14.0` dedupes to the existing 4.14.0), and the `tests/e2e` devDependencies, exact-pinned. `3349766`→`d2e867b`: none. There are no install scripts and no `fsevents` nesting. |
+| `prettier --check` on `tests/e2e`, `apps/web/app/i18n`, `jest.config.ts`, `tools/test-dom`, and the merge-resolved files | Clean. (`.stylelintignore` has no Prettier parser, as expected.) |
+| `as UserConfig` in `apps/**` (R2-m1) | No matches. |
+| Lane A run 43314173521 @`d2e867b` (`gh run view`) | fast-lane: every step **success**, including Lint (a fresh checkout has no `.react-router/`, so this is the R2-m2 proof in CI), Type-check (including `tests/e2e` with `@playwright/test` installed), Unit tests, the base-ref lint fixtures, Lockfile, Cooldown, Licences, Signatures, Audit, Build and Build porcelain. scans: only "Security-owned paths need a review record" **fails** (record pending); ci-gate fails on that alone. |
+
+**Relied on the developer's evidence** (comment 6836992875): 4 of 6 e2e projects green (52/52, 0 retries) after a fresh build; `test:integration` 96, `test:api` 43, `test:coverage` 96.77 % / 96.64 %; size-limit numbers; `npm audit` high = 0; porcelain clean. Firefox is host-blocked (D-ORCH-019).
+
+### R3.2 Round-3 checklist (R2.4) closure
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Supply chain | **Closed** | Exact pins in `tests/e2e/package.json`. The lock delta is only the 4 packages above. The install time (20:17:42Z) is 1 s after the cooldown boundary. That is tight, but `.npmrc` `min-release-age=7` makes npm itself refuse anything earlier, and no override was used. Browsers come through `deps:rebuild --playwright=…`. |
+| 2 | Evidence on 6 projects | **Closed with condition** | 4/6 locally. Firefox is accepted under **COND-E2E-FF** (D-ORCH-019; STATUS.md conditions table; TASK-015/qa-lead, before G3). This is the "formal AC split" route from round-1 §5. The Firefox projects are defined and run the same specs, so only the evidence is deferred. |
+| 3 | Deterministic axe | **Closed** | No event-driven scans. `scanA11y()` runs after web-first assertions, the fixture scans the final state at teardown (`!page.isClosed()`), WCAG 2.0/2.1/2.2 A/AA tags apply, and serious/critical violations block. The loading-state case scans while JS is held, which is a real settled state. |
+| 4 | States | **Closed** | `/es/no-such-page` (lang, h1, **title**); `/es` without the slash; admin `lng=fr` (lang, h1, title); the loading state (`role=status` in the fallback's `en`, then a release and the final Spanish not-found); also the `/` redirect order and a French browser landing on `/fr/`. |
+| 5 | Console guard / m2 | **Closed** | `pageerror` and every `console.error` fail the test, with no allow-list. It caught React #418, and the fix is in `use-locale.ts`, not a filter. My mutations confirm the unit test guards it. See R3.4 for the semantics review and R3-n1 for a forward-looking caveat. |
+| 6 | Mobile width | **Closed** | `devices['Pixel 7']` and `devices['iPhone 15']` at 360 × 780 (isMobile, hasTouch); Firefox gets the viewport plus `hasTouch` (D-QA-005); desktop is 1280 × 800. This matches TEST-STRATEGY §7.8 exactly. See R3-n4: coarse-pointer sizing is configured but not asserted. |
+| 7 | Static server | **Closed** | `decodeURIComponent` is wrapped (400). Traversal returns 400 and was verified with `/`, `%2f`, `%5c` and `%2e` variants. The DR-A18 regex is parsed from the template and throws if the map is missing (n1 closed). Every handler error becomes a 500 rather than a crash. `reuseExistingServer: false`. |
+| 8 | `erasableSyntaxOnly` | **Closed** | `tests/e2e/tsconfig.json` sets it, along with `lib: [ES2023, DOM]`, `types: [node]`, and excludes for the output folders. |
+| 9 | Lint under main's config | **Closed** | `lint` runs typegen first, and the wiring test asserts it. Lane A lint on a fresh checkout is green (R2-m2 closed). R2-m1 is closed. ESLint ignores `**/playwright-report/**` and `**/test-results/**`; `.stylelintignore` uses the `/**/` form; `.gitignore` anchors both under `/tests/*/` (PR #2 R2-n9 closed). |
+| 10 | Merge main + full gate | **Closed** | The pure union is proven by SHA (R3.1). The developer's full gate and lane A fast-lane are green on `d2e867b`. `main` has moved only in docs since. |
+| R2-n1 | Commit refs | **Closed** | `3349766` carries `Refs: TASK-004, NFR-COMPAT-001, NFR-COMPAT-002, NFR-WEB-004, NFR-WEB-005`. |
+
+### R3.3 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-M1 | **MAJOR** | `jest.config.ts:76-81`; `tools/test-dom/*` (new); `.github/CODEOWNERS:49-50`; `tools/ci/check-workflow-policy.mjs:656-680` (`REQUIRED_CODEOWNED_PATHS`) | **The move takes the Jest environment and setup files out of the security-owned set.** `CODEOWNERS` owns `/jest.config.ts` and `/tools/test-support/` because "each can drop or weaken a gate" (PR #10 m4, PR10-SEC-04). `check-security-owned-paths.mjs` derives its owned set from CODEOWNERS, and `check-workflow-policy.mjs` makes `tools/test-support/` a required owned path. At r1/r2, `jsdom-environment.mjs` (a custom environment class that writes globals) and `dom-setup.ts` (`setupFilesAfterEnv`) were covered by that line. In `tools/test-dom/` they are owned by nobody. After merge, a PR can change the environment or setup that runs before **every** web/admin component test (stub `expect`, swallow `console.error`, replace globals) without triggering the security-record gate. Ownership covers the reference in `jest.config.ts` but not the code it loads. This PR only passes the gate now because it also touches `jest.config.ts`. | Add `/tools/test-dom/ @sukhchdit` to `.github/CODEOWNERS`, in the "Test, type-check and commit-message configuration" block. Add `'tools/test-dom/'` to `REQUIRED_CODEOWNED_PATHS` in `tools/ci/check-workflow-policy.mjs`, and extend its test (`check-workflow-policy.test.ts:~229`) so the line cannot be dropped silently. Both files are security-owned, and this PR already needs a security record. **Keep the move itself** (ruling in R3.4). |
+| R3-n1 | NIT | `apps/web/app/i18n/use-locale.ts:16-20, 30-36` | `getServerSnapshot` reads the live `document.documentElement.lang`, which React itself patches after hydration. That is correct today: the SPA fallback hydrates in one pass, and pre-rendered pages have lang = URL locale. Once TASK-042 or lazy routes add Suspense boundaries that hydrate **after** the root's post-hydration re-render has patched `lang` to `es`, those boundaries would read `es` against `en` server HTML and report a mismatch. The e2e guard would catch it, so this fails closed. | TASK-042: capture the served locale once, before hydration (module-level `const SERVED_LANG = typeof document === 'undefined' ? undefined : document.documentElement.lang`), and isolate modules in the test. Alternatively, read React Router's `isSpaMode`. |
+| R3-n2 | NIT | `apps/web/app/i18n/use-locale.test.tsx:47-56` | The `hydrateRoot` root is never unmounted, and RTL's cleanup does not know about it. The root stays mounted on a detached container for the rest of the file. | `const root = hydrateRoot(…)`, then `act(() => root.unmount())` at the end of the test. |
+| R3-n3 | NIT | `tests/e2e/playwright.config.ts:20-28` vs TEST-STRATEGY §7.8 last bullet | The strategy puts failure artefacts in the git-ignored `tests/e2e/output/`. The config uses Playwright's defaults (`test-results/`, `playwright-report/`). Both are ignored, so nothing leaks; the issue is drift between the document and the code. | Either set `outputDir: 'output/test-results'` and the html reporter's `outputFolder: 'output/report'` (and ignore `/tests/*/output/`), or have qa-lead amend §7.8. Route to T-QA-05. |
+| R3-n4 | NIT | `tests/e2e/playwright.config.ts:35-40`; `web.spec.ts` | The mobile descriptors are set so the `pointer-coarse:` 44 px targets apply, but no test proves that `(pointer: coarse)` matches on the `-mobile` projects. axe `target-size` (24 px) is the only size check. | T-QA-05 (the 390 px projects already own the target-size checks): assert `matchMedia('(pointer: coarse)').matches` and a ≥ 44 px box for the locale-switcher links on the `-mobile` projects. |
+| R3-n5 | NIT | `tests/e2e/support/static-server.ts:54-61` | `new URL(request.url, 'http://localhost')` parses a request-target that starts with `//` as an authority. `//evil.example/` therefore becomes pathname `/` and gets the 302, whereas Nginx (`merge_slashes on`) serves `/evil.example/` through the SPA fallback. This is test-only and harmless, since `Location` is always local. | `new URL(\`http://localhost${request.url ?? '/'}\`)`, or reject request-targets that do not start with a single `/`. |
+| R3-n6 | NIT | WebKit close hang on Windows (PR comment, open item 2) | Runner exit hangs in 2 of 5 local four-project runs after all tests have passed. CI lanes B/C are Linux, so they are unaffected. But heavy suites run locally (D-ORCH-001), so a local gate run can stall. | Acceptable as a known issue. Record it in TEST-STRATEGY §11 (flake/known-issues) and set `globalTimeout` for CI runs, so a hang fails the job with a clear message rather than running into the job timeout. No harness change is needed for this PR. |
+
+Other observations, not findings: the request-only redirect and robustness tests run once per project (6×) without needing a browser; restricting them to one project is optional. The WebKit `tabForward` selector does not filter hidden elements, which is fine while the skip link comes first in DOM order.
+
+### R3.4 Rulings requested by the dispatch
+
+1. **Project naming (`-mobile/-desktop` instead of `-360/-1280`): correct.** TEST-STRATEGY §7.8 and `required-suites.json` (`e2e-chromium`/`-firefox`/`-webkit` runners with `--project=<engine>-mobile --project=<engine>-desktop`) are the authoritative names. My R2.4 wording (`360|1280`) described widths, not names. The viewports (360 × 780, 1280 × 800) match §7.8 exactly. D-ORCH-019 item 2 stands.
+2. **WebKit `tabForward` deviation: accepted.**
+   - The fixture documents it honestly, and Chromium (and Firefox under COND-E2E-FF) still press a real Tab, so the "skip link is the first Tab stop" assertion is executed with a real key on at least one engine per run. On WebKit the test still proves three things: the skip link is first in tabbable DOM order, it becomes visible on focus, and Enter moves focus to `#main`.
+   - Condition: the US-113 keyboard sweep (`e2e-a11y`, J-KB-* on 3 engines desktop) uses the same documented technique or a real Option+Tab where the platform has it, and records the WebKit limitation once in TEST-STRATEGY, not per test.
+   - D-ORCH-019 item 3 stands.
+3. **`tools/test-support` → `tools/test-dom` move: the right fix; making `jest.config.ts` "robust" instead is not.**
+   - The base-ref step replaces `tools/test-support` wholesale (`rm -rf` before checkout) on purpose: head-only files must not shadow the base harness (PR #10 m3).
+   - Any head-only file there that `jest.config.ts` references therefore breaks Jest's config validation. That is a fail-closed outcome, which is the safe direction.
+   - A "robust" config would have to drop the `unit-dom` project, or fall back, when its environment file is missing. That is exactly the kind of silent gate-weakening the step exists to prevent. Reject it.
+   - Keeping the DOM support files outside the replaced directory is the clean separation, because they are not lint-fixture harness. The move must keep its ownership, though (R3-M1).
+   - Optional follow-up for the step owner (TASK-007, PR #17 is reworking this step per D-TASK007-03): run the base suite with a minimal step-owned Jest config, so unrelated head projects cannot break the step. Treat that as hardening, not a blocker.
+4. **WebKit close hang: acceptable** for merge (R3-n6). It does not affect results, CI lanes are Linux, and it needs only a known-issue note and a CI `globalTimeout`.
+5. **m2 fix semantics: correct.**
+   - `useSyncExternalStore(subscribeToNothing, () => urlLocale, () => renderedLocale(urlLocale))`: during hydration React uses the server snapshot, which is the served `<html lang>` (`en` in the SPA fallback; the URL locale in pre-rendered pages and at build time). After commit, the passive store-consistency check sees `getSnapshot() !== inst.value` and forces a sync re-render, which patches `lang` and the text.
+   - `subscribe` is module-level and stable. The snapshots are primitives, so there is no tearing loop. In a transition, the per-render `getSnapshot` closure keeps the consistency check stable.
+   - Components that mount after hydration (the not-found route) use `getSnapshot` directly. The admin hook uses the same pattern.
+   - Caveat: R3-n1.
+6. **Lockfile delta: clean** (R3.1).
+
+### R3.5 Merge notes (round 3)
+
+- **Not mergeable at `d2e867b`:** R3-M1 is the only MAJOR. Once `/tools/test-dom/` is owned in CODEOWNERS and in the workflow-policy required list (with its test), round 4 is a delta check of those 2–3 files. The expected verdict then is **APPROVED_WITH_NITS**.
+- **Security record:** lane A's scans job stays red until a PR-0004 security record names a head at or after the R3-M1 fix, since the fix touches owned paths and would void an earlier record under rule (d). The security-analyst should therefore review **after** the fix commit, or re-confirm on it.
+- **COND-E2E-FF** (Firefox on Linux before G3, TASK-015/qa-lead) must appear in `traceability.md` against TASK-004 at merge, not only in STATUS.md, because the DoD requires traceability to be updated.
+- **Routings:** R3-n1 → TASK-042; R3-n3 and R3-n4 → T-QA-05 / qa-lead; R3-n6 → qa-lead (TEST-STRATEGY §11) and TASK-015 (CI `globalTimeout`); R3.4 item 3's optional step hardening → TASK-007 / PR #17 owner. R3-n2 and R3-n5 can be fixed in the R3-M1 commit, or dropped.
+- Earlier routings (m3 `*.gz`, m5, m6, n2, n4–n7, R2-n2, R2-n3) are unchanged.
+
+### R3.6 Security flags for security-analyst
+
+- **R3-M1:** ownership regression for the Jest environment/setup files (CWE-693, A05 Security Misconfiguration). Please confirm the fix in the record.
+- Static server (test-only): traversal and malformed-escape handling verified (R3.1). The `//authority` parse divergence (R3-n5) cannot be used for an open redirect, because `Location` is always `/{lng}/`.
+- The `jsdom-environment.mjs` round-1 n4 note (real Node `fetch` in jsdom) still applies, unchanged by the move.
+- Supply chain: 4 new dev-only packages (Apache-2.0/MPL-2.0), exact pins, no install scripts, and the cooldown is enforced by `.npmrc`. Browsers come only via `deps:rebuild`.

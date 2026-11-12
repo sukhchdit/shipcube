@@ -360,3 +360,273 @@ PR1-SEC-03 is now **mitigated for the shipped apps** and stays open, MEDIUM late
 | Inspect `apps/{web,admin}/build/client` | No `*.map`, no `sourceMappingURL`, no `.vite/`, no host paths; env object `{BASE_URL,DEV,MODE,PROD,SSR}` in `home-*.js`; admin `index.html` carries robots meta; 4+1 inline scripts per web page |
 | `git status --porcelain`; `git check-ignore -v apps/web/.react-router apps/web/build` | Empty; both ignored (`.gitignore:95`, `:12`) |
 | Secret keyword/entropy grep over added diff lines and `build/client` | No hits (gitleaks not run, per the no-Docker constraint) |
+
+## Round 2 (head d2e867b)
+
+| Field | Value |
+|---|---|
+| PR | #4 `feat(web): web and admin app scaffolds (TASK-004)`; round-2 delta review owed by §7 (harness commit with a lockfile change) |
+| Head | d2e867b62ce9a13a712c83407ba2f6d8af3692cf |
+| Range reviewed | `519bb89..d2e867b`, first parent: `9f5ea5e` (fix cycle 1), `f6eab82` and `1b0d734` (main merges), `4bc09ff`, `f44039f`, `50b4831` (lint wiring), `ba57e77` (merge of main `22eccb2`), `3349766` (Playwright + axe harness, m2 locale fix), `d2e867b` (jsdom support files moved to `tools/test-dom`). The PR's own content delta was isolated by comparing the net change at R1 (`4da693a...519bb89`) with the net change now (`22eccb2...d2e867b`): 27 files changed, 22 added, 3 moved out of `tools/test-support`, plus the lockfile |
+| Scope | PR4-SEC-01, -03, -05, -07, -08 closure; the harness lockfile delta; the static test server; the m2 locale fix; the `tools/test-dom` move against lane A's base-ref fixture step; the merge commit's conflict resolutions; the Nginx template changes (`default_server`, gzip); anything new in the delta |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. No command ran in the TASK-004 worktree: PR files were read with `git show <sha>:<path>` from the main checkout, and the static server was probed as a copy in scratch. Node 24.22.3, npm 11.19.1 under the CLAUDE.md §2 PATH prefix. No install, build, test suite or e2e run |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open for this change, so merge is allowed. This round closes PR4-SEC-01, -03, -04, -05 and -07, and part of -08. The harness lockfile delta is exactly the 4 planned tuples. It adds 2 LOW and 1 INFO finding (PR4-SEC-10..12), each routed to a named owner. This verdict covers `d2e867b`, and stays valid across later merges of `main` as long as `main` changes none of the PR's security-owned paths. Overlap on 2026-11-13 is none; if PR #17 merges first, it will not be (R2.5 #6) |
+
+### R2.1 Summary
+
+**Round-1 findings.**
+- **PR4-SEC-01 is closed for this PR.** Both Vite configs set `envPrefix: 'VITE_PUBLIC_'`, so the whole-object `import.meta.env` read can no longer publish any other `VITE_*` variable. Two tests lock this in:
+  - a static test (`apps/{web,admin}/vite.config.test.ts`, unit lane) asserts the prefix and that no source map is built;
+  - `apps/web/tests/prerender.int.test.ts` builds both apps with a random non-public canary in the environment. It asserts the canary (value and name) is absent from every client file, and that no `*.map` or `sourceMappingURL` exists. A `VITE_PUBLIC_ORIGIN` positive control proves the build environment reaches the bundle.
+  - The test would have failed at `519bb89`, where the whole-object read inlined every `config.env` key.
+  - The ADR-0018 `config/web` module now has an owner: TASK-022 (D-ARCH-054; the WAVE-00 sheet lists `loadWebBuildConfig`, `webBuildDefine`, the static key read and the canary test).
+- **PR4-SEC-03 is closed.**
+  - The harness lockfile delta is exactly `@playwright/test`, `playwright` and `playwright-core` 1.65.0 plus `@axe-core/playwright` 4.14.0. `axe-core` 4.14.0 was already present and is deduplicated.
+  - All are dev-only, from `registry.npmjs.org` with `sha512` integrity equal to the registry's, and have no install script, SLSA v1 provenance, valid registry signatures and no advisories.
+  - The stated install time is 2026-11-12T20:17:42Z (epoch 1794514662, one second after the 20:17:41Z clearance). The commit's author time is 20:55:25Z, and `.npmrc` is unchanged in the PR.
+- **PR4-SEC-05 is closed.** The admin `Layout` renders a static `<meta name="robots" content="noindex, nofollow">` (`NoIndex`) in `<head>`, outside `<Meta />`, so hydration no longer drops it. An RTL test covers it.
+- **PR4-SEC-07 is closed.**
+  - The static server answers 400 to malformed escapes and to traversal, and keeps serving.
+  - A 37-request raw-socket probe of a scratch copy found no file served outside the build root and no dotfile served. The server process never exited.
+- **PR4-SEC-08 is partly closed.**
+  - Lane A (TASK-007, on `main`) rejects `PLAYWRIGHT_*DOWNLOAD_HOST` in workflows, with a fixture.
+  - Browsers come only from `deps:rebuild --playwright=…`: no script or workflow runs `playwright install`.
+  - Playwright 1.65.0 is past the TLS-verification fix (`<1.55.1` advisory).
+  - Residuals are in R2.3.
+
+**The `tools/test-dom` move does not weaken lane A's base-ref fixture step.**
+- `tools/test-support` on the head is again byte-identical to `main`, so the step still runs base copies of the suite, its fixtures, `lint-fixtures.mjs` and `tools/test-support`.
+- With `--selectProjects unit`, Jest only resolves the `unit-dom` environment and setup paths (`jest-resolve` `resolveTestEnvironment`, path resolution). It never loads them, so no head code from `tools/test-dom` runs in that step.
+- The move does take the jsdom environment and setup file out of the CODEOWNERS-owned `/tools/test-support/` path (PR4-SEC-11).
+
+**New in this round.**
+- **PR4-SEC-10 (LOW).** The new ESLint and Stylelint ignore globs for Playwright output match at any depth, while `.gitignore` is anchored. A tracked source folder named `test-results` or `playwright-report` is therefore compiled but never linted. This is the PR2-SEC-03/-09 class.
+- **PR4-SEC-11 (LOW).** `tools/test-dom/` is outside CODEOWNERS.
+- **PR4-SEC-12 (INFO).** The new `default_server` comment and test claim more than nginx does. `Host: localhost` and IPv6 still reach the stock `default.conf`, so the TASK-014 deletion remains binding.
+
+**Merge commit `ba57e77`.**
+- Its three conflicts were resolved in favour of `main`'s controls: the `check-suppressions` lint step is kept, and so is `main`'s stricter `test:integration` without `--passWithNoTests`. Both ESLint override blocks are kept.
+- The `.stylelintignore` lines were rewritten to the equivalent `/**/…/` form; R2.5 covers their scope.
+- The never-pushed first merge `2ff92da` is not an ancestor of `d2e867b` and is absent from the remote. `main`'s scrub commit `2e29004` is an ancestor of `ba57e77`, and lane A's gitleaks run on the range is green.
+
+### R2.2 Method
+
+- **Content delta.** I listed the blob changes between R1 and now for every path in the PR's net change and read every changed file (`git diff 519bb89 d2e867b` over `apps/web`, `apps/admin`, `infra`, `tools/repo`; `git diff 22eccb2 d2e867b` over the configuration files).
+  - The `tests/e2e` files were read in full.
+  - I compared them with the round-1 draft (comment 6823848131). Changes since the draft: `reuseExistingServer` went from `!CI` to `false`; there is a decode `try/catch` and an outer handler `try/catch`; traversal gets 400; the Accept-Language regex is now read from the template.
+- **Merge commit.** `git merge-tree --write-tree 50b4831 22eccb2` (3 conflicts) compared with `ba57e77^{tree}` (4 files differ; each resolution read).
+- **Lockfile.** A structural and generic deep JSON diff of `package-lock.json` across `22eccb2 → ba57e77 → 3349766 → d2e867b`.
+  - Results: +4 (size-limit set) / +4 (harness) / 0, with no removals and no integrity, `resolved` or flag changes on retained entries.
+  - Positive control: the leaf-diff counter reports 6 and 5 differing leaves.
+- **Registry.**
+  - Signatures: ECDSA verification of the `dist.signatures` of all 9 new tuples against `-/npm/v1/keys`, with a tampered-integrity negative control (fails as expected).
+  - Integrity: each lockfile integrity was compared with the registry's `dist.integrity`.
+  - Advisories: the bulk advisory endpoint, with a positive control (`playwright` 1.55.0 returns the known High).
+  - `npm view` for licence, dependencies, scripts, provenance and publish times.
+- **Static server.**
+  - `git show d2e867b:tests/e2e/support/static-server.ts` into a scratch tree, with a fake build root, decoy files outside the root and dotfiles.
+  - Started as a child process and probed with raw request targets over a TCP socket, so no client-side normalisation applied (Windows host).
+  - The probe also measured the Accept-Language regex with 7 kB and 1,500-element headers.
+- **Jest.** Read `jest-config` `normalize` and `jest-resolve` `resolveTestEnvironment` (main's `node_modules`) for what happens to an unselected project's environment.
+- **Ignore globs.** `minimatch` (`dot: true`) checks of the new ESLint globs against deep source paths, plus `git check-ignore --no-index`.
+- **Lane A.** Run 43314173521 on `d2e867b`: every fast-lane step succeeded, including the base-ref lint fixtures, lockfile, cooldown, licences, signatures, audit and build porcelain. `scans` ran Gitleaks and Semgrep successfully. Only the record step failed, which is what this record fixes.
+- **Not done.**
+  - No e2e or integration suite was run.
+  - I could not query the host's endpoint-protection history for the Firefox `EPERM`: the session's permission policy denied the query, and I did not work around it (R2.3, PR4-SEC-08).
+
+### R2.3 Round-1 findings at `d2e867b`
+
+| ID | R1 | Status at `d2e867b` | Evidence / residual |
+|---|---|---|---|
+| PR4-SEC-01 | LOW | **Closed (this PR)** | `envPrefix: 'VITE_PUBLIC_'` in `apps/web/vite.config.ts:13`, `apps/admin/vite.config.ts:13`. Static test in the unit lane; canary + no-source-map test in `prerender.int.test.ts` (integration lane, heavy suites run locally per D-ORCH-001). `public-origin.ts` keeps the whole-object read, now confined. The final ADR-0018 module (`envPrefix` set to an unused prefix, `define`, static key read) is TASK-022 |
+| PR4-SEC-02 | LOW (latent) | **Open (latent), TASK-014** | Item 2 done (`listen … default_server`). Item 3 done for the Dockerfile and test-suite pointers. Item 1 (delete `conf.d/default.conf`, clean the html root, copy `build/client/` only) stays **binding on TASK-014**. PR4-SEC-12 explains why `default_server` alone does not cover `Host: localhost` or IPv6 |
+| PR4-SEC-03 | LOW | **Closed** | R2.1 and R2.6. Exact pins (`tests/e2e/package.json`), no cooldown override in any committed file, the install after 20:17:41Z (stated; consistent with the commit time and lane A's cooldown step) |
+| PR4-SEC-04 | INFO | **Closed (backstop live)** | The optional guard hardening was not taken. The binding backstop, lane A's post-build `git status --porcelain` gate, is live on `main` and green for this head's build. The PR also adds a `typegen` script check with negative fixtures |
+| PR4-SEC-05 | INFO | **Closed** | `apps/admin/app/components/no-index.tsx`, rendered in `Layout` `<head>` (`root.tsx:21`); robots entry removed from `meta()`; `no-index.test.tsx` |
+| PR4-SEC-06 | INFO | **Tracked (TASK-022 / TASK-111)** | The Dockerfile (TASK-014) and suite (TASK-111) pointers are fixed and asserted. Residual: both templates still say TASK-022 adds HSTS and Permissions-Policy. Per WAVE-03, those REQ-SEC-001..003 headers are TASK-111; TASK-022 adds the CSP include. Whichever of TASK-022 or TASK-111 edits the templates first corrects the wording |
+| PR4-SEC-07 | INFO | **Closed** | `decodedPathname()` returns `undefined` → 400; outer `try/catch` → 500 without exit. Probe in R2.5 |
+| PR4-SEC-08 | INFO | **Partly closed** | Closed: workflow rejection of `PLAYWRIGHT_*DOWNLOAD_HOST` (TASK-007, `check-workflow-policy.mjs:77-78,248`, fixture `playwright-download-host.yml`); browsers only via `deps:rebuild`. **Residual:** (a) `deps:rebuild` refuses inherited Prisma redirect variables, but not `PLAYWRIGHT_*DOWNLOAD_HOST` in the local or lane-C environment (`rebuild.mjs:133` uses `forbiddenEnv`, which is Prisma-only). Owner: TASK-015. (b) Browser binaries remain unpinned (test-only). (c) `--with-deps` on Linux stays confined to lane C (TASK-015). (d) The host's endpoint protection blocked `firefox.exe` (D-ORCH-019). Before anyone adds an exclusion for `ms-playwright`, the orchestrator confirms in the protection history that this is a policy block or a false positive. Firefox evidence moves to lane C (COND-E2E-FF) |
+| PR4-SEC-09 | INFO | **Report-only** | Unchanged |
+
+**Related routed items not taken by this PR.** PR2-SEC-09 (LOW, routed to TASK-004/007) is still open at `d2e867b`: `TEST_FILES` keeps `**/{test,tests,__tests__}/**` (`eslint.config.mjs:49`). So is the PR2-SEC-03 residual: the TS-only block for app and package sources. Neither is a regression of this PR; both move with PR4-SEC-10 to TASK-022 (R2.8).
+
+### R2.4 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR4-SEC-10 | ESLint and Stylelint ignore Playwright output folder names at **any depth**, while `.gitignore` ignores them only at the root and workspace roots. A tracked source folder named `test-results` or `playwright-report` is compiled and shipped but never linted | LOW | CWE-693 | A05 | `eslint.config.mjs:319-320`; `.stylelintignore:26-27` | senior-developer, this PR if another fix cycle runs; otherwise **TASK-022** (binding; it edits `eslint.config.mjs`) | Open |
+| PR4-SEC-11 | The jsdom test environment and setup file moved from the CODEOWNERS-owned `/tools/test-support/` to the unowned `/tools/test-dom/`. Changes to them no longer require a security record | LOW | CWE-693 | A08 | `jest.config.ts:76,80,81`; `.github/CODEOWNERS` (no `/tools/test-dom/` line) | **TASK-015** (with the PR17-SEC-01 `.swcrc` lines), or this PR if another fix cycle runs | Open |
+| PR4-SEC-12 | The `default_server` comment and test claim the template "answers every request" despite a stock `default.conf`. `Host: localhost` (any port) and IPv6 connections still go to the stock server | INFO | CWE-1188 | A05 | `infra/nginx/web.conf.template:57-59`, `admin.conf.template:25-27`; `tools/repo/nginx-templates.test.ts:36` | TASK-014 (binding delete + `nginx -T` test); comment fix by whoever edits the templates next | Open |
+
+#### PR4-SEC-10: unanchored Playwright-output ignores (LOW)
+
+**Description.** `globalIgnores` gains `'**/playwright-report/**'` and `'**/test-results/**'`, and `.stylelintignore` gains `/**/playwright-report/` and `/**/test-results/`. Both match at any depth.
+
+`.gitignore`, by contrast, ignores those folders only at the root, under `apps/*`, `packages/*`, `tests/*` and `prisma/`. That anchoring is deliberate, from PR2-SEC-11 and R2-m1, and `tools/repo/gitignore.test.ts` asserts it.
+
+Checked with `minimatch`:
+- `apps/api/src/modules/quotes/test-results/handler.ts` and `packages/authz/src/playwright-report/guard.ts` are ESLint-ignored;
+- `git check-ignore --no-index` does **not** ignore them (only `tests/e2e/test-results/x.json` is ignored).
+
+Such a file is tracked, type-checked and built into `dist`, but none of these rules run on it:
+- `no-innerhtml`, `outbound-http-via-client`, `audit-writer-allowlist`, `money-arith`;
+- the boundaries layering, including the bcrypt confinement;
+- the i18n and a11y rules.
+
+`check-suppressions` does not notice, because nothing is suppressed. The comment right above these globs states the opposite principle ("anchored to the output folders … so a source folder named `build`, `dist` or `coverage` … is still linted").
+
+**Exploitability and impact.**
+- **Precondition:** code placed in a folder with one of these two names, by mistake or to evade the rules. Likelihood L, since the names are unusual for source folders.
+- **Mitigation that remains:** Semgrep still scans these files, because `.semgrepignore` and the anchored `.gitignore` do not exclude them.
+- **Impact:** M, because the lint rules are cited as mitigations in ADR-0016 §13, ADR-0005, ADR-0007 and REQ-SEC-016.
+- M×L = **LOW**.
+
+**Remediation (code level).** Anchor both lists the same way as the build-output globs. The R2-n8 symmetry test (`gitignore.test.ts`) maps these forms one-to-one.
+```js
+// eslint.config.mjs, globalIgnores
+'{playwright-report,test-results}/**',
+'{apps,packages,tests}/*/{playwright-report,test-results}/**',
+'prisma/{playwright-report,test-results}/**',
+```
+```text
+# .stylelintignore
+/playwright-report/
+/test-results/
+/apps/*/playwright-report/
+/apps/*/test-results/
+/packages/*/playwright-report/
+/packages/*/test-results/
+/tests/*/playwright-report/
+/tests/*/test-results/
+/prisma/playwright-report/
+/prisma/test-results/
+```
+
+**Verification test.** Extend the `report.ignored` probe paths in `tools/lint/lint-fixtures.mjs`. The expectations in `negative-fixtures.test.ts:411-438` become:
+- `tests/e2e/test-results/x.js`: true;
+- `playwright-report/x.js`: true;
+- `apps/api/src/modules/quotes/test-results/a.ts`: false;
+- `packages/authz/src/playwright-report/a.ts`: false;
+- the Stylelint equivalents with `.css`.
+
+Add the two deep paths to the "tracked" rows of `gitignore.test.ts`.
+
+#### PR4-SEC-11: `tools/test-dom` outside CODEOWNERS (LOW)
+
+**Description.** `.github/CODEOWNERS` owns `/tools/test-support/` and `/jest.config.ts`, because "each can drop or weaken a gate" (review m4). The `unit-dom` project's `testEnvironment` (`jsdom-environment.mjs`), `setupFilesAfterEnv` (`dom-setup.ts`) and CSS mapper target (`style-stub.ts`) now live in `/tools/test-dom/`, which no pattern owns.
+
+Those files run before every `*.test.tsx` file. A setup file can:
+- `jest.mock` any module for every component test;
+- replace jest-dom matchers;
+- or swap the DOM.
+
+So a change there can make the whole `unit-dom` project vacuous. Today that project holds the PR4-SEC-05 robots test and the a11y and i18n component tests; later it will hold the UI authorisation and token-page tests. Such a change would not trigger lane A's security-owned-paths check.
+
+The move itself is benign: the blobs are identical to the R1 files, and it does not weaken the base-ref step (R2.1).
+
+**Exploitability and impact.**
+- A deliberate or careless edit is still visible in code review; only the security-record trigger is lost. Likelihood L.
+- Impact M: a CI control is weakened.
+- **LOW.** This is the same class as PR17-SEC-01 (unowned `.swcrc`).
+
+**Remediation.**
+1. Add `/tools/test-dom/   @sukhchdit` to `.github/CODEOWNERS` under "Test, type-check and commit-message configuration". Because `.github/` is owned, doing this in this PR needs a round-3 record.
+2. Generalise with a repo test: every path that `jest.config.ts` references (`testEnvironment`, `setupFiles*`, `moduleNameMapper` targets, `transform` modules, `globalSetup`/`globalTeardown`) must fall under a CODEOWNERS pattern. Then a future move cannot silently drop ownership. TASK-015 owns the PR17-SEC-01 CODEOWNERS work and is the natural home.
+3. **Interim:** security-analyst checks every PR diff for `tools/test-dom/` changes until (1) lands.
+
+**Verification test.** The repo test from item 2 fails on a fixture `jest.config.ts` whose `testEnvironment` points to an unowned folder, and passes on the real config.
+
+#### PR4-SEC-12: `default_server` does not neutralise the stock server (INFO)
+
+nginx picks the server by listen socket first, then by `server_name`; `default_server` applies only when no name matches. The stock `nginx-unprivileged` `conf.d/default.conf` has `server_name localhost`, and nginx strips the port from `Host` before matching, so `Host: localhost:8080` still selects it. Its IPv6 `listen` (added by `10-listen-on-ipv6-by-default.sh`) also has no counterpart in our templates.
+
+The new comment ("this block answers every request even if the image still carries the stock conf.d/default.conf") and the test comment ("cannot take over the requests") therefore overstate the fix. For the local `localhost` case the shadowing from PR4-SEC-02 is unchanged.
+
+**Fix:**
+- TASK-014's `rm -f /etc/nginx/conf.d/default.conf` plus the `nginx -T` single-server test stay binding.
+- Reword the comment to: "answers requests whose Host matches no server_name; TASK-014 deletes the stock default.conf, which would still take Host: localhost and IPv6".
+
+### R2.5 Results by focus area
+
+| # | Focus | Result |
+|---|---|---|
+| 1 | PR4-SEC-01: `envPrefix` + canary | **Closed.** Both configs set the prefix, and the unit lane asserts it. The canary is random per run and is searched for as both name and value in every client file of both apps. A positive control (`VITE_PUBLIC_ORIGIN` → canonical and hreflang URLs equal `https://example.test/<lng>/`) proves the environment reaches the build. The no-source-map assertion is now locked. The canary test runs in the integration lane, which runs locally (D-ORCH-001); lane A runs the static test |
+| 2 | Harness supply chain (PR4-SEC-03/08) | **Pass.** See R2.6. Exact pins; `npm install --ignore-scripts … --save-exact` after the cooldown, with no override (`.npmrc` and `.node-version` unchanged; no `min-release-age` or `before` anywhere in the diff). Lane A's cooldown, licence, signature and audit steps are green. Browsers come only via `deps:rebuild --playwright=chromium,firefox,webkit`; Playwright ≥ 1.55.1 verifies TLS on the download. The `PLAYWRIGHT_*DOWNLOAD_HOST` workflow ban is live. Residual items are in R2.3, PR4-SEC-08 |
+| 3 | Static test server | **Pass.** Bound to `127.0.0.1`. `reuseExistingServer: false`, so a process already holding the port is never trusted. Raw-socket probe of a scratch copy (Windows), 37 requests: malformed escape → 400; `..%2f`, `..%5c`, `/assets/..%2f…`, deep traversal to a decoy outside the root, mixed `/en/..%5c…`, a case-variant root, and absolute-form `http://evil/..%2f…` → 400. `/%2e%2e/…` and `/../..` are normalised by WHATWG `URL` → SPA fallback. NUL bytes, drive letters (raw and encoded), `::$DATA`, `CON`, `nul.txt`, `//host/share`, `*` and an 8 kB path → SPA fallback, never a file outside the root (`isFile` false for devices and NUL). `.hidden`, `%2ehidden`, `.well-known/…` and `.git/config` → 403. POST, OPTIONS and TRACE → 405; HEAD → 200 with no body. A CRLF in the `lng` cookie → 302 to a constant `/en/` (the `Location` is drawn only from `en|es|fr`). Accept-Language regex: 2.1 ms for a 7 kB header and 2.2 ms for 1,500 elements (linear). Decoy content leaked: none. The server stayed up through the final control (200) |
+| 4 | m2 locale fix | **No security impact.** `useLocale` returns the URL locale (`localeFromPathname`, constrained to en/es/fr) on the client, and during hydration the `<html lang>` of the served file, validated by `isLocale` (unknown → `en`). The admin `useDetectedLocale` uses the same pattern with a constant build-time snapshot. No new sink, storage or network use. The `entry.server.tsx` `console.error` → `process.stderr.write` change is build-time only (no request data) |
+| 5 | `tools/test-dom` move vs the base-ref fixture step | **Does not weaken the step.** `tools/test-support` on the head equals `main` (`git diff 22eccb2 d2e867b -- tools/test-support` is empty), so the step's base-sourced set is unchanged. `--selectProjects unit` filters after `normalize`, and `normalize` only *resolves* the `unit-dom` environment and setup paths, without loading them. The renamed blobs are identical to the R1 files. The step still runs under the head `jest.config.ts`; that is a pre-existing residual (PR17-SEC-06). **Ownership is lost** (PR4-SEC-11) |
+| 6 | Merge `ba57e77` | **Clean for security.** It matches `git merge-tree` except for 3 conflict resolutions and 1 auto-merged file. `package.json` keeps `check-suppressions`, drops `--allow-empty-input` (a strengthening, PR2-SEC-03) and keeps `main`'s `test:integration` without `--passWithNoTests`. `eslint.config.mjs` keeps both override blocks. `negative-fixtures.test.ts` asserts the 4-step lint wiring. `.stylelintignore` was rewritten from `playwright-report/` to the equivalent `/**/playwright-report/` (scope: PR4-SEC-10). The unpushed `2ff92da` is not in the history. Owned-path overlap between `main` (`22eccb2..df09b0b`, docs and agent memory only) and the PR's net change: **none**. **Merge-order note.** Open PR #17 (`8dd1d24`, D-TASK007-04) also changes the owned `jest.config.ts` and `tools/lint/negative-fixtures.test.ts`, and `git merge-tree d2e867b 8dd1d24` conflicts in both. Whichever PR merges second needs a conflict resolution in owned paths. That voids its record for those paths and requires a security delta round naming its merge commit |
+| 7 | Nginx templates | `default_server` (PR4-SEC-02 item 2; limits in PR4-SEC-12). Dynamic `gzip` + `gzip_vary` at server level: BREACH needs a secret and attacker-reflected input in the same compressed response. Static pre-rendered files carry neither, so it does not apply. TASK-111 / API work must re-assess it before any HTML carries a token or nonce. `Vary: Accept-Encoding` keeps the immutable asset cache correct. No `$host`, `$http_host` or `$request_uri` was introduced; the redirect is unchanged |
+| 8 | Lint, type-check and test wiring | `lint` = `typegen` → ESLint → Stylelint (no `--allow-empty-input`) → `check-suppressions`, asserted by the wiring test. `typecheck` = `typegen` → `tsc -b`. `test:unit` selects `unit unit-dom`. The coverage exclusion is limited to `apps/*/app/{entry.server.tsx,routes.ts}` (build-time modules, outside the 95 % paths). The `routes.ts` `no-extraneous-dependencies` override lists exact files. `tests/e2e/tsconfig.json` adds `erasableSyntaxOnly` (stricter). There are no new `eslint-disable`, `stylelint-disable`, `nosem`, `gitleaks:allow` or `@ts-*` comments, no new `.swcrc` (PR17-SEC-01 watch) and no `.env*` files |
+| 9 | Secrets | Lane A gitleaks (PR range, first parent) is green. A keyword grep over the added lines of the PR's content delta found only a benign comment word. Nothing secret-shaped was added |
+
+### R2.6 Dependency delta (`22eccb2` → `d2e867b`)
+
+Via the merge, the delta matches round 1 exactly: `size-limit` and `@size-limit/file` 14.3.0, `lilconfig` 3.1.4 and `nanospinner` 1.2.2 (R1 §5.1). The harness commit `3349766` adds the following, with `tests/e2e` `devDependencies` as the only other change. `d2e867b` and `main`'s later commits have no lockfile change.
+
+| Package | Version | Direct? | Licence | Published | Age at `3349766` (author 2026-11-12T20:55:25Z) | Provenance | Signature | Install script | Advisories | Policy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `@playwright/test` | 1.65.0 | `tests/e2e` dev, exact | Apache-2.0 | 2026-11-05T18:30:18Z | 7 d 2 h | SLSA v1 | valid | no | none | Pass |
+| `playwright` | 1.65.0 | transitive (exact) | Apache-2.0 | 2026-11-05T18:28:14Z | 7 d 2 h | SLSA v1 | valid | no | none | Pass |
+| `playwright-core` | 1.65.0 | transitive (exact) | Apache-2.0 | 2026-11-05T20:17:40Z | 7 d 0 h 37 m | SLSA v1 | valid | no | none | Pass (the binding time; the install was stated at 20:17:42Z) |
+| `@axe-core/playwright` | 4.14.0 | `tests/e2e` dev, exact | MPL-2.0 | 2026-10-15T13:33:17Z | 28 d | SLSA v1 | valid | no (`prepare` only, which does not run for registry tarballs; `ignore-scripts`) | none | Pass. Peer `playwright-core >=1.0.0` satisfied |
+| `axe-core` | 4.14.0 | already present (dev), deduplicated | MPL-2.0 | 2026-10-05 | n/a | SLSA v1 | valid | no | none | Pass (unchanged entry) |
+
+All lockfile integrities equal the registry's `dist.integrity`, and every `resolved` host is `registry.npmjs.org`. The bulk advisory query for all 9 new tuples returned `{}`; its positive control returned the known High for `playwright` 1.55.0.
+
+### R2.7 PR1-SEC-03 status (observed at `d2e867b`)
+
+| Part | Status |
+|---|---|
+| (a) TASK-004 entry files, no `isbot` | Met (R1); unchanged |
+| (b) TASK-007 post-build porcelain gate | Met on `main` (lane A step "Build must not mutate the tree"), green for this head |
+| (c) TASK-007 `NPM_CONFIG_IGNORE_SCRIPTS` | Met on `main` (`ci.yml:43`, `:63`) |
+| (d) TASK-014 offline build + manifest checksum | Open (TASK-014) |
+
+### R2.8 Follow-ups routed
+
+| Owner | Item | Finding | Binding? |
+|---|---|---|---|
+| senior-developer, this PR (only if another fix cycle runs; otherwise TASK-022) | Anchor the Playwright-output ignores in ESLint and Stylelint; add the deep-path rows to the lint and gitignore tests | PR4-SEC-10 | Yes, by TASK-022 at the latest |
+| **TASK-022** | PR4-SEC-10 if not done here; PR2-SEC-09 `TEST_FILES` anchoring and the PR2-SEC-03 TS-only block (carried from TASK-004, not taken); the ADR-0018 `config/web` module (PR4-SEC-01 final) | PR4-SEC-10, PR2-SEC-09, PR2-SEC-03 | Yes |
+| **TASK-015** | `/tools/test-dom/` in CODEOWNERS plus the "every jest.config.ts reference is owned" test (with PR17-SEC-01); refuse inherited `PLAYWRIGHT_*DOWNLOAD_HOST` in `deps:rebuild`'s Playwright step; `--with-deps` confined to lane C; Firefox projects green on Linux (COND-E2E-FF) | PR4-SEC-11, -08 | Yes |
+| **TASK-014** | Delete `conf.d/default.conf`, clean the html root, copy `build/client/` only, `nginx -T` single-server test, `Host: localhost` and IPv6 checks; PR1-SEC-03 (d) | PR4-SEC-02, -12; PR1-SEC-03 | Yes |
+| TASK-022 / TASK-111 | Correct the template header-owner wording (HSTS and Permissions-Policy are TASK-111); re-assess `gzip` for any HTML that carries a token or nonce | PR4-SEC-06, R2.5 #7 | Yes (as planned) |
+| sdlc-orchestrator | Before any endpoint-protection exclusion for `ms-playwright`, confirm in the host's protection history that the `firefox.exe` block is a policy block or a false positive | PR4-SEC-08 (d) | Yes, before any exclusion |
+| security-analyst | Interim: check each PR diff for `tools/test-dom/` and deep `test-results`/`playwright-report` source folders until PR4-SEC-10/11 land | PR4-SEC-10, -11 | Yes |
+| sdlc-orchestrator | Merge order with PR #17. Owned paths overlap (`jest.config.ts` and `negative-fixtures.test.ts`, conflicting). The second PR to merge needs a security delta round on its merge commit. If PR #4 merges first, no further PR #4 round is needed | R2.5 #6 | Procedural |
+
+### R2.9 Evidence (commands; read-only, from the main checkout and scratch)
+
+| Command | Result |
+|---|---|
+| `git fetch -q origin`; `git ls-remote origin` | `refs/pull/4/head` = `refs/heads/feat/TASK-004-web-admin-app-scaffolds` = `d2e867b62ce9…`; `2ff92da` not on the remote |
+| `git log --first-parent 519bb89^..d2e867b` | 9 commits after `519bb89` (R2 range row) |
+| Blob comparison of net changes `4da693a...519bb89` vs `22eccb2...d2e867b` | 27 changed, 22 added, 3 moved (`tools/test-support/{dom-setup.ts,jsdom-environment.mjs,style-stub.ts}` → `tools/test-dom/`, identical blobs) |
+| `git merge-tree --write-tree --name-only 50b4831 22eccb2`; `git diff <tree> ba57e77` | Conflicts in `eslint.config.mjs`, `package.json`, `negative-fixtures.test.ts`; resolutions as in R2.5 #6 |
+| `git merge-base --is-ancestor` | `2ff92da` ∉ history of `d2e867b`; `2e29004` (scrub) ∈ history of `ba57e77` |
+| `git diff --name-only 22eccb2 origin/main` (`df09b0b`) ∩ PR net change | Empty (`main` changed only `docs/` and `.claude/agent-memory/`) |
+| PR #17 net change (`8dd1d24`) ∩ PR #4 net change; `git merge-tree --write-tree d2e867b 8dd1d24` | `jest.config.ts`, `tools/lint/negative-fixtures.test.ts` (both owned); both conflict |
+| `lockdiff.mjs` over `22eccb2`, `ba57e77`, `3349766`, `d2e867b`, `origin/main` | +4 (size-limit set), +4 (harness), 0, 0; no removals or retained-entry changes |
+| `sigcheck.mjs` (registry keys, `dist.signatures`, `dist.integrity`, advisories bulk) | 9/9 signatures valid; tampered control invalid; 9/9 integrity match; advisories `{}`; control returns the `playwright` <1.55.1 High |
+| `npm view <pkg>@<ver> license dependencies optionalDependencies peerDependencies scripts.* dist.attestations…` | As in R2.6; no `fsevents` optional dependency in `playwright` 1.65.0 |
+| `node probe-static.mjs` (scratch copy of `static-server.ts`, child process, raw sockets) | R2.5 #3; no decoy or dotfile content in any response; the server stayed up |
+| `minimatch` + `git check-ignore --no-index -v` | PR4-SEC-10 paths ESLint-ignored but git-tracked; only `tests/e2e/test-results/` is git-ignored |
+| Read `jest-config` `normalize` (`index.js:1691`), `jest-resolve` `resolveTestEnvironment` (`:1626`) | Path resolution only for unselected projects |
+| `gh run view 43314173521` | `fast-lane` success (all steps); `scans`: Gitleaks success, Semgrep success, record step failure; `ci-gate` failure (record only) |
+| `git grep` for `playwright install`, `PLAYWRIGHT_*` | Only the lane A policy rule, its test and its fixture |
+| Record check (main's `tools/ci/check-security-owned-paths.mjs`, scratch `git clone --shared`, this record committed on top of `d2e867b`) | See R2.10 |
+
+### R2.10 Record-check simulation
+
+Script `scratchpad/review/PR-4-sec-r2/scripts/record-sim.sh` (session scratch):
+- `main`'s `tools/ci` was extracted with `git archive origin/main`.
+- Each case ran in a fresh `git clone --shared --no-checkout` of the main checkout, detached at `d2e867b`, with the record committed on top.
+- The CLI was `--root <clone> --base <origin/main> --head HEAD --pr <n> --json`, with base `df09b0b`.
+- Each clone was removed afterwards; nothing was written to the main repository's `.git`.
+
+| Case | Expected | Result |
+|---|---|---|
+| This record (rounds 1 + 2), `--pr 4` | pass | **`pass`**, exit 0. `satisfiedBy` = this record @ `d2e867b62ce9a13a712c83407ba2f6d8af3692cf`. Owned set (10): `.stylelintignore`, `apps/{admin,web}/tsconfig.json`, `eslint.config.mjs`, `jest.config.ts`, `package-lock.json`, `package.json`, `packages/ui/tsconfig.json`, `tests/e2e/tsconfig.json`, `tools/lint/negative-fixtures.test.ts`. Notes only: the round-1 head rows (`519bb89`, `b67eb36`) are voided by later owned changes |
+| Control: round-1-only record (as on `d2e867b`), `--pr 4` | missing | `missing`, exit 1 (the same two notes) |
+| Control: this record, `--pr 5` | missing | `missing`, exit 1 (`PR-0005-TASK-003-security-review.md` names no commit of this PR) |

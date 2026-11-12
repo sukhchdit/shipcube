@@ -40,11 +40,22 @@
  *   scans-isolation       ci.yml job `scans` runs no npm, nothing from node_modules or the workspace, no local action and
  *                         no setup-node cache, so no head-controlled code shares its runner (PR10-SEC-02).
  *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES in its job, unconditional or with its listed
- *                         `if:`, and `ci-gate` needs `fast-lane` and `scans` (PR10-SEC-07).
+ *                         `if:` and exactly its listed `env:`, with no `shell:`/`working-directory:` on the step and no
+ *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane` and `scans`
+ *                         (PR10-SEC-07, PR17-SEC-03). The base-ref lint fixture step's commands are pinned line by line
+ *                         (BASE_LINT_FIXTURES_SCRIPT, an allow-list); the other gates are matched by pattern.
+ *   lint-fixture-mode     LINT_FIXTURE_MODE appears nowhere but in the `env:` of ci.yml's base-ref lint fixture step
+ *                         (no workflow/job/other-step env, no `run:`/`if:` mention, no $GITHUB_ENV write), so the head
+ *                         unit-test run keeps exact semantics (PR2-SEC-08, D-ORCH-018). A tripwire: it finds literal
+ *                         mentions, also split by quotes or a line continuation, not names built at run time.
  * Repository mode (no explicit files) also checks:
  *   codeowners-*          `.github/CODEOWNERS` exists and covers REQUIRED_CODEOWNED_PATHS.
  *   gitleaksignore        no `.gitleaksignore` anywhere in the tree (gitleaks would load it from the scanned source;
  *                         PR10-SEC-01). Findings are fixed, not fingerprinted.
+ *   swcrc                 no `.swcrc` anywhere in the tree: Jest compiles with the inline options in jest.config.ts
+ *                         (`swcrc: false`), so a `.swcrc` is unused at best and an unowned compile redirect at worst
+ *                         (PR17-SEC-01).
+ * Both tree walks skip node_modules, .git and nested checkouts (a directory with its own `.git`, e.g. a git worktree).
  *
  * CLI: node tools/ci/check-workflow-policy.mjs [--root <dir>] [--summary <file>] [--json] [files...]
  * Exit 0 pass, 1 findings, 2 usage/internal error.
@@ -108,9 +119,75 @@ export const FORBIDDEN_TRIGGERS = Object.freeze([
 export const SAFE_EXPRESSION =
   /^(?:github\.(?:sha|repository|repository_id|repository_owner|run_id|run_number|run_attempt|workflow|event_name|job|action|server_url|api_url|workspace)|runner\.[A-Za-z_]+|steps\.[A-Za-z_][\w-]*\.(?:outputs\.[A-Za-z_][\w-]*|outcome|conclusion)|needs\.[A-Za-z_][\w-]*\.(?:outputs\.[A-Za-z_][\w-]*|result)|matrix\.[A-Za-z_][\w.-]*|env\.[A-Za-z_]\w*|vars\.[A-Za-z_]\w*)$/;
 
+/** The variable that selects the lint fixture suite's mode (tools/lint/fixture-expectations.mjs; D-ORCH-018). */
+export const LINT_FIXTURE_MODE_ENV = 'LINT_FIXTURE_MODE';
+
 /**
- * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, and the only
- * `if:` values allowed on that step (empty: unconditional). Adding a gate is a reviewed change to this list.
+ * The commands of the base-ref lint fixture step (PR2-SEC-08, D-ORCH-018; PR17-SEC-03, review m1): an allow-list, not a
+ * deny-list of Jest flags. The step takes the suite, fixtures, harness, modes and Jest config from the base ref, runs
+ * exactly that suite (`--runTestsByPath`) under exactly that config, restores the head copies and exits with Jest's
+ * status. Any other command, flag or spelling (`--test-name-pattern`, `-tX`, `--listTests`, `|| true`, `exit 0`, a
+ * checkout of head files before Jest, …) means the step is no longer the gate. Changing the step is a two-step change:
+ * this list on main first, because the gate tooling runs from the base ref.
+ */
+export const BASE_LINT_FIXTURES_SCRIPT = Object.freeze([
+  'set -euo pipefail',
+  'suite=tools/lint/negative-fixtures.test.ts',
+  'config=tools/lint/jest.base-fixtures.config.json',
+  'if ! git cat-file -e "$RANGE_BASE:$suite" 2>/dev/null; then',
+  '  echo "Base ref has no $suite; the head copy already ran in the unit tests." >> "$GITHUB_STEP_SUMMARY"',
+  '  exit 0',
+  'fi',
+  'base_paths=("$suite" tests/fixtures/lint)',
+  'rm -rf tests/fixtures/lint',
+  'for path in tools/lint/lint-fixtures.mjs tools/lint/fixture-expectations.mjs "$config" tools/test-support; do',
+  '  if git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then',
+  '    rm -rf "$path"',
+  '    base_paths+=("$path")',
+  '  fi',
+  'done',
+  'git checkout "$RANGE_BASE" -- "${base_paths[@]}"',
+  'status=0',
+  'node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js \\',
+  '  --config "$config" --runTestsByPath "$suite" || status=$?',
+  'rm -rf tests/fixtures/lint tools/test-support',
+  'git checkout HEAD -- "$suite" tests/fixtures/lint tools/test-support tools/lint/lint-fixtures.mjs \\',
+  '  tools/lint/fixture-expectations.mjs "$config"',
+  'echo "Base-ref lint negative fixtures (no-weakening subset): exit $status" >> "$GITHUB_STEP_SUMMARY"',
+  'exit "$status"',
+]);
+
+/**
+ * The command lines of a `run:` script as the pinned comparison sees them: trailing whitespace trimmed, blank and
+ * comment-only lines dropped, except after a line continuation (where bash would join them to the command).
+ * @param {string} script
+ * @returns {string[]}
+ */
+export function commandLines(script) {
+  /** @type {string[]} */
+  const out = [];
+  for (const raw of script.split(/\r?\n/u)) {
+    const line = raw.trimEnd();
+    const continued = (out.at(-1) ?? '').endsWith('\\');
+    if (!continued && (line.trim() === '' || /^\s*#/u.test(line))) continue;
+    out.push(line);
+  }
+  return out;
+}
+
+/** Matches a `run:` whose command lines are exactly BASE_LINT_FIXTURES_SCRIPT. */
+const BASE_LINT_FIXTURES_RUN = Object.freeze({
+  /** @param {string} script */
+  test: (script) => {
+    const lines = commandLines(script);
+    return lines.length === BASE_LINT_FIXTURES_SCRIPT.length && lines.every((line, index) => line === BASE_LINT_FIXTURES_SCRIPT[index]);
+  },
+});
+
+/**
+ * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, the only
+ * `if:` values allowed on that step (empty: unconditional) and the `env:` entries it must set. Adding a gate is a
+ * reviewed change to this list.
  */
 export const CI_REQUIRED_GATES = Object.freeze([
   { job: 'fast-lane', gate: 'workflow policy', run: /node "\$GATE_CHECK_WORKFLOW_POLICY"/, ifs: [] },
@@ -128,6 +205,13 @@ export const CI_REQUIRED_GATES = Object.freeze([
   { job: 'fast-lane', gate: 'actionlint', run: /"\$ACTIONLINT_IMAGE"/, ifs: [] },
   { job: 'fast-lane', gate: 'type-check', run: /^npm run typecheck$/, ifs: ["env.CODE == 'true'"] },
   { job: 'fast-lane', gate: 'unit tests', run: /^npm run test:unit$/, ifs: ["env.CODE == 'true'"] },
+  {
+    job: 'fast-lane',
+    gate: 'base-ref lint negative fixtures',
+    run: BASE_LINT_FIXTURES_RUN,
+    ifs: ["env.CODE == 'true' && env.LINT_CONTROLS == 'true'"],
+    env: { [LINT_FIXTURE_MODE_ENV]: 'no-weakening' },
+  },
   { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
   { job: 'fast-lane', gate: 'porcelain', run: /node "\$GATE_CHECK_PORCELAIN"/, ifs: ["env.CODE == 'true'"] },
   { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [] },
@@ -566,7 +650,12 @@ export function checkWorkflow(text, fileName, options = {}) {
         add('pinned-action', `${uses} needs a trailing "# vX.Y.Z" comment naming the pinned release`, path);
     }
   }
-  if (options.requiredGates === true) for (const f of requiredGateFindings(jobs)) add(f.rule, f.message, f.path);
+  for (const path of mentionsOf(doc, LINT_FIXTURE_MODE_ENV)) {
+    if (!(isCi && isBaseLintFixtureModeEntry(jobs, path))) {
+      add('lint-fixture-mode', `${LINT_FIXTURE_MODE_ENV} may be set only in the env of ci.yml's base-ref lint fixture step`, path);
+    }
+  }
+  if (options.requiredGates === true) for (const f of requiredGateFindings(jobs, doc.defaults)) add(f.rule, f.message, f.path);
   return findings;
 }
 
@@ -592,12 +681,76 @@ function scansStepViolations(step) {
 }
 
 /**
+ * Paths of every map key equal to `name` and every string value that mentions it (`run:`, `if:`, `with:`, env values).
+ * Quotes and line continuations are removed first, so `"LINT_FIX""TURE_MODE"`, `LINT_FIX'TURE'_MODE` and a name split
+ * by `\` + newline still count (PR17-SEC-03, review n3). Names assembled at run time (variables, encodings) do not:
+ * the rule is a tripwire.
+ * @param {YamlNode | undefined} node
+ * @param {string} name
+ * @param {string[]} [path]
+ * @returns {string[][]}
+ */
+export function mentionsOf(node, name, path = []) {
+  if (typeof node === 'string')
+    return node
+      .replace(/\\\r?\n[ \t]*/gu, '')
+      .replace(/["'\\]/gu, '')
+      .includes(name)
+      ? [path]
+      : [];
+  if (Array.isArray(node)) return node.flatMap((child, index) => mentionsOf(child, name, [...path, String(index)]));
+  if (isMap(node)) {
+    return Object.entries(node).flatMap(([key, child]) => [
+      ...(key === name ? [[...path, key]] : []),
+      ...mentionsOf(child, name, [...path, key]),
+    ]);
+  }
+  return [];
+}
+
+/**
+ * True for the one allowed mention of LINT_FIXTURE_MODE: the `env:` key of ci.yml's base-ref lint fixture step
+ * (jobs.fast-lane.steps.<n>.env.LINT_FIXTURE_MODE, the step whose `run:` is BASE_LINT_FIXTURES_RUN).
  * @param {YamlMap} jobs
+ * @param {string[]} path
+ */
+function isBaseLintFixtureModeEntry(jobs, path) {
+  const [root, job, steps, index, env, key] = path;
+  if (path.length !== 6 || root !== 'jobs' || job !== 'fast-lane' || steps !== 'steps' || env !== 'env') return false;
+  if (key !== LINT_FIXTURE_MODE_ENV) return false;
+  const list = asMap(jobs['fast-lane'])?.steps;
+  const step = Array.isArray(list) ? asMap(list[Number(index)]) : undefined;
+  return BASE_LINT_FIXTURES_RUN.test(asString(step?.run) ?? '');
+}
+
+/** Step keys that change how a gate's `run:` executes (PR17-SEC-03): `shell: 'true {0}'` runs nothing. */
+const GATE_STEP_OVERRIDES = Object.freeze(['shell', 'working-directory']);
+
+/**
+ * @param {YamlMap} jobs
+ * @param {YamlNode} [workflowDefaults] the workflow-level `defaults:`
  * @returns {{ rule: string, message: string, path: string[] }[]}
  */
-export function requiredGateFindings(jobs) {
+export function requiredGateFindings(jobs, workflowDefaults) {
   /** @type {{ rule: string, message: string, path: string[] }[]} */
   const out = [];
+  // `defaults.run.shell` / `working-directory` would apply to every gate step below it.
+  if (asMap(workflowDefaults)?.run !== undefined) {
+    out.push({
+      rule: 'required-gates',
+      message: 'ci.yml must not set defaults.run (it would change how every gate step runs)',
+      path: ['defaults'],
+    });
+  }
+  for (const jobId of new Set(CI_REQUIRED_GATES.map((gate) => gate.job))) {
+    if (asMap(asMap(jobs[jobId])?.defaults)?.run !== undefined) {
+      out.push({
+        rule: 'required-gates',
+        message: `ci.yml job ${jobId} must not set defaults.run (it would change how its gate steps run)`,
+        path: ['jobs', jobId, 'defaults'],
+      });
+    }
+  }
   for (const gate of CI_REQUIRED_GATES) {
     const job = asMap(jobs[gate.job]);
     const steps = job !== undefined && Array.isArray(job.steps) ? job.steps : [];
@@ -618,6 +771,36 @@ export function requiredGateFindings(jobs) {
         path: ['jobs', gate.job, 'steps', String(index), 'if'],
       });
     }
+    const step = asMap(steps[index]) ?? {};
+    for (const key of GATE_STEP_OVERRIDES) {
+      if (step[key] !== undefined) {
+        out.push({
+          rule: 'required-gates',
+          message: `ci.yml ${gate.gate} gate step must not set ${key}`,
+          path: ['jobs', gate.job, 'steps', String(index), key],
+        });
+      }
+    }
+    if (gate.env !== undefined) {
+      // Exactly the listed entries: another step variable (RANGE_BASE, BASH_ENV, PATH, …) could redirect the run.
+      const env = asMap(step.env) ?? {};
+      for (const [name, value] of Object.entries(gate.env)) {
+        if (env[name] !== value) {
+          out.push({
+            rule: 'required-gates',
+            message: `ci.yml ${gate.gate} gate step must set env ${name}: ${value}`,
+            path: ['jobs', gate.job, 'steps', String(index), 'env'],
+          });
+        }
+      }
+      for (const name of Object.keys(env).filter((key) => !Object.hasOwn(gate.env, key))) {
+        out.push({
+          rule: 'required-gates',
+          message: `ci.yml ${gate.gate} gate step must set no env but ${Object.keys(gate.env).join(', ')} (found ${name})`,
+          path: ['jobs', gate.job, 'steps', String(index), 'env', name],
+        });
+      }
+    }
   }
   const needs = asMap(jobs['ci-gate'])?.needs;
   const needList = Array.isArray(needs) ? needs : typeof needs === 'string' ? [needs] : [];
@@ -635,14 +818,26 @@ export function requiredGateFindings(jobs) {
  * @returns {string[]} repository-relative paths
  */
 export function findGitleaksIgnores(root) {
+  return findFilesNamed(root, '.gitleaksignore');
+}
+
+/**
+ * Every file called `name` in the tree, skipping node_modules, .git and nested checkouts: a subdirectory with its own
+ * `.git` (a git worktree or clone, e.g. under .claude/worktrees) is another tree, and git cannot commit a `.git` path.
+ * @param {string} root
+ * @param {string} name
+ * @returns {string[]} repository-relative paths, sorted
+ */
+export function findFilesNamed(root, name) {
   /** @type {string[]} */
   const out = [];
   /** @param {string} dir */
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && entry.name !== '.git') visit(join(dir, entry.name));
-      } else if (entry.name === '.gitleaksignore') out.push(relative(root, join(dir, entry.name)).replaceAll('\\', '/'));
+        if (entry.name !== 'node_modules' && entry.name !== '.git' && !existsSync(join(path, '.git'))) visit(path);
+      } else if (entry.name === name) out.push(relative(root, path).replaceAll('\\', '/'));
     }
   };
   visit(root);
@@ -676,6 +871,9 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'commitlint.config.mjs',
   '.node-version',
   'tools/test-support/',
+  // PR17-SEC-01: a `.swcrc` at any depth could redirect how a suite compiles (the swcrc rule also rejects it).
+  '.swcrc',
+  '**/.swcrc',
   'CLAUDE.md',
   '.claude/settings.json',
   '.claude/agents/',
@@ -734,7 +932,7 @@ export function checkWorkflowPolicy(root, files) {
     }
   }
   // Repository mode (no explicit files): ci.yml exists (required-gates), CODEOWNERS exists and covers the
-  // security-owned paths, and no .gitleaksignore is committed.
+  // security-owned paths, and no .gitleaksignore or .swcrc is committed.
   if (!(files && files.length > 0)) {
     if (!existsSync(join(dir, 'ci.yml'))) {
       findings.push({
@@ -749,6 +947,14 @@ export function checkWorkflowPolicy(root, files) {
       findings.push({
         rule: 'gitleaksignore',
         message: 'a committed .gitleaksignore suppresses gitleaks findings from the PR itself; fix the finding instead (PR10-SEC-01)',
+        location: path,
+      });
+    }
+    for (const path of findFilesNamed(root, '.swcrc')) {
+      findings.push({
+        rule: 'swcrc',
+        message:
+          'Jest compiles with the inline @swc/jest options in jest.config.ts (swcrc: false); a .swcrc is unused or redirects how suites compile (PR17-SEC-01)',
         location: path,
       });
     }

@@ -5,18 +5,26 @@
  * eslint.config.mjs and stylelint.config.mjs by tools/lint/lint-fixtures.mjs in one child process (plain Node loads the
  * ESM-only linters; see that script for the hermetic overrides). The same report carries configuration evidence on
  * the repository itself: in-memory probes at repository paths, ignore decisions and effective rule severities.
+ *
+ * Mode (tools/lint/fixture-expectations.mjs): `exact` by default; lane A runs the BASE ref's copy of this suite against
+ * the head configs with LINT_FIXTURE_MODE=no-weakening (PR2-SEC-08, D-ORCH-018), where every expected finding must
+ * still fire, extra findings with a rule id (rules the head adds) are listed instead of failed, findings without a rule
+ * id fail on every fixture (review M1), and only the positive halves (exact clean sets, case-table completeness,
+ * ignore and "off" decisions) are skipped. A test that mixes both kinds is split: its weakening half always runs.
  */
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { beforeAll, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
+import { fixtureMode, formatExtras, logText, missingSteps, noWeakening, summaryMarkdown } from './fixture-expectations.mjs';
+import type { Severity } from './fixture-expectations.mjs';
 
 interface Finding {
   ruleId: string | null;
   message: string;
-  severity: 'error' | 'warning';
+  severity: Severity;
 }
 type Report = Record<string, Finding[]>;
 interface FixtureReport {
@@ -253,7 +261,256 @@ const CSS: readonly Violation[] = [
   ],
 ];
 
-const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMENT, ...RULES, ...REACT, ...RESOLUTION];
+const TENANT_CONTEXT = 'platform/tenant-context-sql';
+const CLIENT_CONSTRUCTION = 'platform/prisma-client-construction';
+/** Tenant context, the private root client and raw SQL (ADR-0005 am. 10 items 1, 2, 4, 12; PR2-SEC-05; TASK-016). */
+const TENANT_DB: readonly Violation[] = [
+  [
+    'AT-US-075-03: source containing a session-level SET of a tenant-context key fails lint',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-session-set.ts`,
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'platform/tenant-context-sql: a security key outside withTenantTx',
+    `rules/tenant-context-sql/${API}/orders/service/bad-context-key.ts`,
+    TENANT_CONTEXT,
+    'outside withTenantTx',
+  ],
+  [
+    'platform/tenant-context-sql: the context setter in a template literal outside withTenantTx',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-context-template.ts`,
+    TENANT_CONTEXT,
+    'outside withTenantTx',
+  ],
+  [
+    'platform/tenant-context-sql: the session-scoped setter in a file exempted for tokens only',
+    'rules/tenant-context-sql/prisma/tests/rls/with-tenant-tx.int.test.ts',
+    TENANT_CONTEXT,
+    'is_local = false',
+  ],
+  [
+    'platform/db-raw-sql: an unsafe raw-SQL member in platform/db',
+    'rules/db-raw-sql/apps/api/src/platform/db/bad-unsafe.ts',
+    'platform/db-raw-sql',
+    'interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: SET LOCAL text in a repository',
+    `rules/db-raw-sql/${API}/orders/repository/bad-set-local.ts`,
+    'platform/db-raw-sql',
+    'SET LOCAL',
+  ],
+  [
+    'platform/db-raw-sql: Prisma.raw in a repository (PR #11 m5, PR11-SEC-05)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-prisma-raw.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: a named import of raw from the Prisma runtime in a repository (PR11-SEC-05)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-import.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: a non-tagged $queryRaw call in a repository (PR #11 m5)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-non-tagged.ts`,
+    'platform/db-raw-sql',
+    'without a tagged template',
+  ],
+  [
+    'platform/db-raw-sql: $parent.$queryRawUnsafe in a service (PR11-SEC-01, PR11-SEC-05)',
+    `rules/db-raw-sql/${API}/orders/service/bad-parent-unsafe.ts`,
+    ['platform/db-raw-sql', 'platform/db-raw-sql'],
+    'ADR-0005 am. 10 item',
+  ],
+  // R2-m1 / PR11-SEC-13: the helpers are resolved through scope analysis, whatever the local name.
+  [
+    'platform/db-raw-sql: `import { Prisma as P }` + P.raw(s) in a repository (R2-m1, PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-aliased-import.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: `const { raw } = Prisma` in a repository (R2-m1, PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-destructured.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: `const r = Prisma.raw` in a repository (R2-m1, PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-const-alias.ts`,
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: `new Prisma.Sql([s], [])` in a repository (PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-new-sql.ts`,
+    'platform/db-raw-sql',
+    "Prisma's Sql class",
+  ],
+  [
+    'platform/db-raw-sql: a non-tagged `Prisma.sql([s])` call in a repository (PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-sql-call.ts`,
+    'platform/db-raw-sql',
+    'only as a template tag',
+  ],
+  [
+    'platform/db-raw-sql: `Prisma.join(ids, separator)` with a variable separator (PR11-SEC-13)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-join-separator.ts`,
+    'platform/db-raw-sql',
+    'are SQL text',
+  ],
+  [
+    "platform/db-raw-sql: `import { Sql } from '@prisma/client/runtime/client'` (PR11-SEC-13)",
+    `rules/db-raw-sql/${API}/orders/repository/bad-runtime-sql-import.ts`,
+    'platform/db-raw-sql',
+    "Prisma's Sql class",
+  ],
+  [
+    'platform/db-raw-sql: a named import of makeTypedQueryFactory (PR11-SEC-15 f)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-typed-query-factory.ts`,
+    'platform/db-raw-sql',
+    'builds a TypedSql query',
+  ],
+  [
+    "platform/db-raw-sql: `export { raw } from '@prisma/client/runtime/client'` (PR11-SEC-13)",
+    `rules/db-raw-sql/${API}/orders/repository/bad-reexport-raw.ts`,
+    'platform/db-raw-sql',
+    'Re-exporting',
+  ],
+  [
+    'platform/db-raw-sql: the service-layer variant `const { raw: fragment } = P` (also outside the Prisma layering)',
+    `rules/db-raw-sql/${API}/orders/service/bad-raw-aliased.service.ts`,
+    [BOUNDARIES, 'platform/db-raw-sql'],
+    'ADR-000',
+  ],
+  // R2-M1 / PR11-SEC-12 / PR11-SEC-15 g: the escapes from the tenant transaction, by member, pattern or template key.
+  [
+    'platform/db-raw-sql: `.requestTransaction(null)` on a PrismaPromise (R2-M1, PR11-SEC-12)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-request-transaction.ts`,
+    'platform/db-raw-sql',
+    'caller-chosen transaction',
+  ],
+  [
+    'platform/db-raw-sql: `db._originalClient` (R2-M1)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-original-client.ts`,
+    'platform/db-raw-sql',
+    'is the root client',
+  ],
+  [
+    'platform/db-raw-sql: `const { $queryRawUnsafe } = db` (PR11-SEC-15 g)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-destructured-unsafe.ts`,
+    'platform/db-raw-sql',
+    'interpolates SQL',
+  ],
+  [
+    'platform/db-raw-sql: db[`$parent`] (a template-literal computed key, PR11-SEC-15 g)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-template-key-parent.ts`,
+    'platform/db-raw-sql',
+    'reaches an unguarded client',
+  ],
+  // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
+  [
+    'platform/tenant-context-sql: SET of a double-quoted namespace and key in a repository (R2-m2)',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-session-set-quoted.ts`,
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'platform/tenant-context-sql: SET of a namespace and key spaced around the dot in a repository (R2-m2)',
+    `rules/tenant-context-sql/${API}/orders/repository/bad-session-set-spaced.ts`,
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'a repository imports the pg driver and builds a Pool (PR2-SEC-05 addendum, PR11-SEC-05)',
+    `layering/sql-driver/${API}/orders/repository/bad-pg-pool.ts`,
+    BOUNDARIES,
+    'only the database platform core',
+  ],
+  [
+    'the planned audit store imports the pg driver (PR11-SEC-05)',
+    'layering/sql-driver/packages/audit/src/store/prisma-store.ts',
+    BOUNDARIES,
+    'only the database platform core',
+  ],
+  [
+    'platform/tenant-context-sql: a new file under prisma/tests/catalog/ inherits no exemption (PR11-SEC-08)',
+    'rules/tenant-context-sql/prisma/tests/catalog/helper.ts',
+    TENANT_CONTEXT,
+    'Session-level SET/RESET',
+  ],
+  [
+    'platform/tenant-context-sql: a transaction-local setter in session-integrity.ts (keys only) fails (PR11-SEC-08)',
+    'rules/tenant-context-sql/apps/api/src/platform/db/session-integrity.ts',
+    TENANT_CONTEXT,
+    'Tenant-context setter outside withTenantTx',
+  ],
+  [
+    'platform/no-alter-role-sql: ALTER ROLE in apps/*/src',
+    'rules/no-alter-role-sql/apps/api/src/platform/health/bad-alter-role.ts',
+    'platform/no-alter-role-sql',
+    '',
+  ],
+  [
+    'platform/no-alter-role-sql: ALTER USER in packages/*/src',
+    'rules/no-alter-role-sql/packages/shared/src/bad-alter-user.ts',
+    'platform/no-alter-role-sql',
+    '',
+  ],
+  [
+    'platform/prisma-client-construction: a repository imports PrismaClient and constructs it (PR2-SEC-05)',
+    `rules/prisma-client-construction/${API}/orders/repository/bad-new-client.ts`,
+    [CLIENT_CONSTRUCTION, CLIENT_CONSTRUCTION],
+    'PR2-SEC-05',
+  ],
+  [
+    'platform/prisma-client-construction: a repository imports the pg adapter (PR2-SEC-05)',
+    `rules/prisma-client-construction/${API}/orders/repository/bad-adapter.ts`,
+    CLIENT_CONSTRUCTION,
+    'PR2-SEC-05',
+  ],
+  [
+    'a repository imports the root database client (ADR-0005 am. 10 item 2, PR2-SEC-05)',
+    `layering/root-client-privacy/${API}/orders/repository/bad-root-client.ts`,
+    BOUNDARIES,
+    'the root database client (platform/db/client.ts) is private',
+  ],
+  [
+    'prisma/tests imports packages/*/src (PR #5 R3-n1)',
+    'layering/prisma-tests-imports/prisma/tests/rls/bad-package-import.int.test.ts',
+    BOUNDARIES,
+    'prisma/tests may import only',
+  ],
+];
+
+/** Warning-level rules ([title, file, rule]); `npm run lint` runs with --max-warnings 0, so each still blocks. */
+const WARNINGS: readonly (readonly [title: string, file: string, ruleId: string])[] = [
+  [
+    'platform/expect-affected: an updateMany result not passed to expectAffected (ADR-0005 am. 10 item 15)',
+    `rules/expect-affected/${API}/orders/repository/bad-unchecked.ts`,
+    'platform/expect-affected',
+  ],
+];
+
+const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMENT, ...RULES, ...TENANT_DB, ...REACT, ...RESOLUTION];
+
+/** The steps of `npm run lint` (`&&`-separated), in order (PR2-SEC-01/02/03). */
+const LINT_STEPS: readonly RegExp[] = [
+  // typegen first: type-aware rules must resolve the git-ignored ./+types on a clean checkout, and npm pre-hooks are
+  // skipped under ignore-scripts (PR #4 R2-m2).
+  /^npm run typegen$/u,
+  /^eslint \. .*--max-warnings 0/u,
+  /^stylelint .*--max-warnings 0/u,
+  /^node tools\/lint\/check-suppressions\.mjs$/u,
+];
+
+/** Throws on an unknown LINT_FIXTURE_MODE value, so the suite fails to load rather than run in a guessed mode. */
+const MODE = fixtureMode(process.env);
+/** Positive-only assertions (case-table completeness, ignore and "off" decisions): skipped by the base-ref run. */
+const exactOnly = MODE === 'exact' ? it : it.skip;
 
 const repoRoot = findRepoRoot();
 let report: FixtureReport;
@@ -270,11 +527,11 @@ const findingsOf = (source: Report, file: string): Finding[] => {
   return findings;
 };
 
-const expectOnly = (findings: Finding[], ruleId: string | readonly string[], message: string) => {
+const expectOnly = (findings: Finding[], ruleId: string | readonly string[], message: string, severity: Severity) => {
   const expected = typeof ruleId === 'string' ? [ruleId] : [...ruleId];
   expect(findings.map((finding) => finding.ruleId).sort()).toEqual(expected.sort());
   for (const finding of findings) {
-    expect(finding.severity).toBe('error');
+    expect(finding.severity).toBe(severity);
     expect(finding.message).toContain(message);
   }
 };
@@ -282,15 +539,86 @@ const expectOnly = (findings: Finding[], ruleId: string | readonly string[], mes
 const ruleIdsOf = (violations: readonly Violation[]): Set<string> =>
   new Set(violations.flatMap(([, , ruleId]) => (typeof ruleId === 'string' ? [ruleId] : [...ruleId])));
 
+/**
+ * Findings with a rule id the head reports beyond the expected ones (no-weakening mode only), per fixture, listed after
+ * the run. Keyed by file: a clean fixture is checked by its own case and by the "every other fixture" sweep.
+ */
+const extras = new Map<string, Finding[]>();
+const recordExtras = (file: string, found: Finding[]) => {
+  if (found.length > 0) extras.set(file, found);
+};
+
+/** No-weakening mode: collects the extras of `file`; any failure (weakened expectation, ruleless finding) fails the test. */
+const assertNoWeakening = (findings: Finding[], file: string, ruleId: string | readonly string[], message: string, severity: Severity) => {
+  const result = noWeakening(findings, ruleId, message, { minSeverity: severity });
+  recordExtras(file, result.extras);
+  expect(result.failures).toEqual([]);
+};
+
+/**
+ * `exact`: the fixture reports exactly `ruleId` at `severity`. `no-weakening`: it still reports `ruleId` at `severity` or
+ * higher (m3: a warning case accepts an error) and nothing without a rule id; other findings are listed.
+ */
+const expectFindings = (
+  source: Report,
+  file: string,
+  ruleId: string | readonly string[],
+  message: string,
+  severity: Severity = 'error',
+) => {
+  const findings = findingsOf(source, file);
+  if (MODE === 'exact') expectOnly(findings, ruleId, message, severity);
+  else assertNoWeakening(findings, file, ruleId, message, severity);
+};
+
+/**
+ * `exact`: the fixture lints clean. `no-weakening` (review M1): it reports nothing without a rule id (an unused disable
+ * directive, a parse error, an ignored-file warning); findings with a rule id come from rules the head adds and are listed.
+ */
+const expectClean = (source: Report, file: string) => {
+  const findings = findingsOf(source, file);
+  if (MODE === 'exact') expect(findings).toEqual([]);
+  else assertNoWeakening(findings, file, [], '', 'error');
+};
+
+afterAll(() => {
+  // review n6: no summary when the report never loaded (beforeAll failed, so every test already failed).
+  if (MODE !== 'no-weakening' || (report as FixtureReport | undefined) === undefined) return;
+  const listed = [...extras].flatMap(([file, found]) => found.map((finding) => ({ file, finding })));
+  const known = new Set([...ruleIdsOf([...ESLINT_VIOLATIONS, ...CSS]), ...WARNINGS.map(([, , ruleId]) => ruleId)]);
+  const lines = formatExtras(listed, known);
+  const heading = `No-weakening run: ${String(lines.length)} extra finding(s) with a rule id from the head configs (allowed).`;
+  console.log(logText([heading, ...lines]));
+  const summary = process.env['GITHUB_STEP_SUMMARY'];
+  if (summary !== undefined && summary !== '') appendFileSync(summary, summaryMarkdown(heading, lines));
+});
+
 describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
   it.each(ESLINT_VIOLATIONS)('%s', (_title, file, ruleId, message) => {
-    expectOnly(findingsOf(report.eslint, file), ruleId, message);
+    expectFindings(report.eslint, file, ruleId, message);
   });
 
-  it('every other fixture (ok-*, allow-listed paths, supporting modules) lints clean', () => {
-    const expected = new Set(ESLINT_VIOLATIONS.map(([, file]) => file));
-    const dirty = Object.entries(report.eslint).filter(([file, findings]) => !expected.has(file) && findings.length > 0);
-    expect(dirty).toEqual([]);
+  // m3 b: a warning case still passes in the base run when the head raises the rule to error.
+  it.each(WARNINGS)('%s (warning level)', (_title, file, ruleId) => {
+    expectFindings(report.eslint, file, ruleId, '', 'warning');
+  });
+
+  it('every other fixture (ok-*, allow-listed paths, supporting modules) lints clean (no-weakening: reports nothing without a rule id)', () => {
+    const expected = new Set([...ESLINT_VIOLATIONS, ...WARNINGS].map(([, file]) => file));
+    const others = Object.keys(report.eslint).filter((file) => !expected.has(file));
+    expect(others.length).toBeGreaterThan(0);
+    if (MODE === 'exact') {
+      expect(others.map((file) => [file, findingsOf(report.eslint, file)] as const).filter(([, findings]) => findings.length > 0)).toEqual(
+        [],
+      );
+      return;
+    }
+    const failures = others.flatMap((file) => {
+      const result = noWeakening(findingsOf(report.eslint, file), [], '');
+      recordExtras(file, result.extras);
+      return result.failures.map((failure) => `${file}: ${failure}`);
+    });
+    expect(failures).toEqual([]);
   });
 
   it.each([
@@ -328,17 +656,52 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ['apps/worker imports a module through its index.ts', 'layering/worker-imports-controller/apps/worker/src/jobs/ok-sync.ts'],
     ['packages/pricing imports @platform/shared', 'layering/pricing-io/packages/pricing/src/ok-price.ts'],
   ])('allowed: %s', (_title, file) => {
-    expect(findingsOf(report.eslint, file)).toEqual([]);
+    expectClean(report.eslint, file);
   });
 
-  it('every bad-* fixture is listed in the case table (no untested fixture)', () => {
-    const listed = new Set(ESLINT_VIOLATIONS.map(([, file]) => file));
+  it.each([
+    [
+      'tenant-context-sql: withTenantTx sets the context transaction-local',
+      'rules/tenant-context-sql/apps/api/src/platform/db/with-tenant-tx.ts',
+    ],
+    ['tenant-context-sql: the session-scope negative control', 'rules/tenant-context-sql/prisma/tests/rls/session-scope-leak.int.test.ts'],
+    ['db-raw-sql: tests may probe the unsafe members (TenantDb Proxy)', 'rules/db-raw-sql/apps/api/src/platform/db/tenant-db.test.ts'],
+    ['db-raw-sql: a tagged $queryRaw template in a repository', `rules/db-raw-sql/${API}/orders/repository/ok-tagged.ts`],
+    [
+      'db-raw-sql: tagged Prisma.sql fragments, Prisma.join(ids) and a literal separator, tagged $queryRaw (PR11-SEC-13 control)',
+      `rules/db-raw-sql/${API}/orders/repository/ok-prisma-fragments.ts`,
+    ],
+    [
+      'tenant-context-sql: session-integrity.* may read a security key (keys only, PR11-SEC-08)',
+      'rules/tenant-context-sql/apps/api/src/platform/db/session-integrity.test.ts',
+    ],
+    ['the database platform core imports the pg driver', 'layering/sql-driver/apps/api/src/platform/db/ok-pool.ts'],
+    [
+      'prisma-client-construction: type-only import in a repository',
+      `rules/prisma-client-construction/${API}/orders/repository/ok-type-only.ts`,
+    ],
+    [
+      'prisma-client-construction: the database platform builds the client',
+      'rules/prisma-client-construction/apps/api/src/platform/db/client.ts',
+    ],
+    ['expect-affected: results passed to expectAffected', `rules/expect-affected/${API}/orders/repository/ok-checked.ts`],
+    ['withTenantTx imports the root client', 'layering/root-client-privacy/apps/api/src/platform/db/with-tenant-tx.ts'],
+    [
+      'prisma/tests imports tools/db, tools/test-support, platform/db and its harness',
+      'layering/prisma-tests-imports/prisma/tests/rls/ok-imports.int.test.ts',
+    ],
+  ])('allowed (TASK-016): %s', (_title, file) => {
+    expectClean(report.eslint, file);
+  });
+
+  exactOnly('every bad-* fixture is listed in the case table (no untested fixture)', () => {
+    const listed = new Set([...ESLINT_VIOLATIONS, ...WARNINGS].map(([, file]) => file));
     const unlisted = Object.keys(report.eslint).filter((file) => /\/bad-[^/]+$/u.test(file) && !listed.has(file));
     expect(unlisted).toEqual([]);
   });
 
-  it('every local platform/* rule has at least one negative fixture', () => {
-    const covered = ruleIdsOf(ESLINT_VIOLATIONS);
+  exactOnly('every local platform/* rule has at least one negative fixture', () => {
+    const covered = new Set([...ruleIdsOf(ESLINT_VIOLATIONS), ...WARNINGS.map(([, , ruleId]) => ruleId)]);
     expect(report.localRules.length).toBeGreaterThan(0);
     expect(report.localRules.map((rule) => `platform/${rule}`).filter((rule) => !covered.has(rule))).toEqual([]);
   });
@@ -349,11 +712,11 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     ['apps/web imports @platform/config', 'apps/web/app/routes/lint-probe-bad-config.ts'],
     ['apps/admin imports @platform/pricing', 'apps/admin/app/routes/lint-probe-bad-pricing.ts'],
   ])('%s -> "import only @platform/shared and @platform/ui"', (_title, path) => {
-    expectOnly(findingsOf(report.probes, path), BOUNDARIES, 'import only @platform/shared and @platform/ui');
+    expectFindings(report.probes, path, BOUNDARIES, 'import only @platform/shared and @platform/ui');
   });
 
   it('[PR #2 m8] allowed: apps/worker imports @platform/api/runtime (package exports, resolved)', () => {
-    expect(findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts')).toEqual([]);
+    expectClean(report.probes, 'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts');
   });
 
   it('[PR #2 m8] apps/worker cannot reach a non-exported @platform/api subpath', () => {
@@ -369,20 +732,20 @@ describe('repository probes: workspace imports resolved to repository files (ADR
   });
 
   it('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {
-    expect(findingsOf(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts')).toEqual([]);
+    expectClean(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts');
   });
 });
 
 describe('seeded negative fixtures: Stylelint (NFR-I18N-003, NFR-A11Y-006)', () => {
   it.each(CSS)('%s', (_title, file, ruleId, message) => {
-    expectOnly(findingsOf(report.stylelint, file), ruleId, message);
+    expectFindings(report.stylelint, file, ruleId, message);
   });
 
   it('allowed: logical properties and :hover inside @media (hover: hover)', () => {
-    expect(findingsOf(report.stylelint, 'css/ok-logical-and-hover.css')).toEqual([]);
+    expectClean(report.stylelint, 'css/ok-logical-and-hover.css');
   });
 
-  it('every CSS fixture is listed in the case table', () => {
+  exactOnly('every CSS fixture is listed in the case table', () => {
     const listed = new Set([...CSS.map(([, file]) => file), 'css/ok-logical-and-hover.css']);
     expect(Object.keys(report.stylelint).filter((file) => !listed.has(file))).toEqual([]);
   });
@@ -393,57 +756,67 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.resolver['@platform/shared']).toBe('packages/shared/src/index.ts');
   });
 
-  it('`npm run lint` generates route types, runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01)', () => {
+  it('`npm run lint` generates route types, runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01; no-weakening: every step still runs, in order, PR17-SEC-04)', () => {
     const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     const steps = (scripts['lint'] ?? '').split('&&').map((step) => step.trim());
-    // typegen first: type-aware rules must resolve the git-ignored ./+types on a clean checkout, and npm pre-hooks are
-    // skipped under ignore-scripts (PR #4 R2-m2).
-    expect(steps).toEqual([
-      'npm run typegen',
-      expect.stringMatching(/^eslint \. .*--max-warnings 0/u),
-      expect.stringMatching(/^stylelint .*--max-warnings 0/u),
-      'node tools/lint/check-suppressions.mjs',
-    ]);
+    if (MODE === 'exact') expect(steps).toEqual(LINT_STEPS.map((step) => expect.stringMatching(step)));
+    else expect(missingSteps(steps, LINT_STEPS)).toEqual([]);
     // No --allow-empty-input: Stylelint matching no CSS file fails instead of reading as clean (PR2-SEC-03).
-    expect(steps[2]).not.toContain('--allow-empty-input');
+    expect(steps.filter((step) => step.includes('--allow-empty-input'))).toEqual([]);
   });
 
-  it('ESLint ignores build/coverage output only at the root and the workspace roots', () => {
-    expect(report.ignored.eslint).toEqual({
-      'dist/x.js': true,
-      'build/x.js': true,
-      'coverage/lcov-report/x.js': true,
-      'apps/web/build/client/x.js': true,
-      'apps/api/dist/server.js': true,
-      'packages/shared/dist/index.js': true,
-      'apps/api/coverage/x.js': true,
-      'apps/web/.react-router/types/x.ts': true,
-      'packages/shared/src/coverage/a.ts': false,
-      'packages/carriers/src/build/a.ts': false,
-      'packages/carriers/src/dist/a.ts': false,
-      'apps/api/src/modules/shipments/build/a.ts': false,
-      'apps/web/app/routes/a.jsx': false,
-    });
+  // Ignore decisions: a source path that becomes ignored is weakening (always checked); an output path that stops
+  // being ignored only lints more (positive half, exact mode only).
+  const ESLINT_IGNORED = {
+    'dist/x.js': true,
+    'build/x.js': true,
+    'coverage/lcov-report/x.js': true,
+    'apps/web/build/client/x.js': true,
+    'apps/api/dist/server.js': true,
+    'packages/shared/dist/index.js': true,
+    'apps/api/coverage/x.js': true,
+    'apps/web/.react-router/types/x.ts': true,
+    'packages/shared/src/coverage/a.ts': false,
+    'packages/carriers/src/build/a.ts': false,
+    'packages/carriers/src/dist/a.ts': false,
+    'apps/api/src/modules/shipments/build/a.ts': false,
+    'apps/web/app/routes/a.jsx': false,
+  };
+  const STYLELINT_IGNORED = {
+    'dist/x.css': true,
+    'apps/web/build/client/assets/x.css': true,
+    'packages/ui/dist/x.css': true,
+    'coverage/x.css': true,
+    'apps/web/app/coverage/x.css': false,
+    'packages/ui/src/build/x.css': false,
+  };
+  const linted = (expected: Record<string, boolean>) => Object.keys(expected).filter((path) => !expected[path]);
+
+  it.each([
+    ['ESLint', 'eslint', ESLINT_IGNORED],
+    ['Stylelint', 'stylelint', STYLELINT_IGNORED],
+  ] as const)('%s still lints source folders named build/coverage/dist (not ignored)', (_name, linter, expected) => {
+    const reported = report.ignored[linter];
+    expect(linted(expected).filter((path) => reported[path] !== false)).toEqual([]);
   });
 
-  it('Stylelint ignores build/coverage output only at the root and the workspace roots', () => {
-    expect(report.ignored.stylelint).toEqual({
-      'dist/x.css': true,
-      'apps/web/build/client/assets/x.css': true,
-      'packages/ui/dist/x.css': true,
-      'coverage/x.css': true,
-      'apps/web/app/coverage/x.css': false,
-      'packages/ui/src/build/x.css': false,
-    });
+  exactOnly.each([
+    ['ESLint', 'eslint', ESLINT_IGNORED],
+    ['Stylelint', 'stylelint', STYLELINT_IGNORED],
+  ] as const)('%s ignores build/coverage output only at the root and the workspace roots', (_name, linter, expected) => {
+    expect(report.ignored[linter]).toEqual(expected);
   });
 
-  it('the bcrypt confinement rules are on everywhere; the hasher re-declares no-restricted-imports without the bcrypt pattern', () => {
+  it('the bcrypt confinement rules are on everywhere; other modules keep the bcrypt pattern', () => {
     for (const [path, rules] of Object.entries(report.effective)) {
       expect([path, rules?.['no-restricted-imports'], rules?.['boundaries/dependencies']]).toEqual([path, 'error', 'error']);
     }
+    expect(report.effective['apps/api/src/modules/orders/service/a.ts']?.['no-restricted-imports:options']).toContain('bcrypt');
+  });
+
+  exactOnly('the hasher re-declares no-restricted-imports without the bcrypt pattern', () => {
     const hasher = report.effective['apps/api/src/modules/identity/service/bcrypt-password-hasher.ts'];
     expect(hasher?.['no-restricted-imports:options']).not.toContain('bcrypt');
-    expect(report.effective['apps/api/src/modules/orders/service/a.ts']?.['no-restricted-imports:options']).toContain('bcrypt');
   });
 
   it('.jsx and .cjs sources get the same rules as their TypeScript neighbours', () => {
@@ -455,12 +828,56 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.effective['apps/api/src/platform/a.cjs']).toMatchObject({ 'platform/outbound-http-via-client': 'error' });
   });
 
-  it('server-only rules skip the browser package; string externalisation skips test files', () => {
-    expect(report.effective['packages/ui/src/session/client.ts']?.['platform/outbound-http-via-client']).toBe('off');
-    expect(report.effective['packages/shared/src/a.ts']?.['platform/outbound-http-via-client']).toBe('error');
-    expect(report.effective['apps/web/app/routes/a.test.tsx']).toMatchObject({
-      'i18next/no-literal-string': 'off',
-      'jsx-a11y-x/alt-text': 'error',
+  // Mixed wiring cases are split (review m3 a): "on" decisions always run; "off" decisions only lint less when they flip,
+  // so they are positive halves (exact mode only).
+  it('the audit-writer allow-list is on outside platform/{audit,authz,db} and the worker processors (TASK-002 n5)', () => {
+    expect(report.effective['apps/api/src/platform/http/a.ts']?.['platform/audit-writer-allowlist']).toBe('error');
+    expect(report.effective['apps/worker/src/platform/a.ts']?.['platform/audit-writer-allowlist']).toBe('error');
+  });
+
+  exactOnly('the audit-writer allow-list is narrowed to platform/{audit,authz,db} and the worker processors (TASK-002 n5)', () => {
+    expect(report.effective['apps/api/src/platform/audit/a.ts']?.['platform/audit-writer-allowlist']).toBe('off');
+    expect(report.effective['apps/worker/src/processors/a.ts']?.['platform/audit-writer-allowlist']).toBe('off');
+  });
+
+  it('tenant-database rules: repositories get raw-SQL, client and expectAffected checks; prisma/tests keeps no-relative-packages on (TASK-016)', () => {
+    const repository = report.effective['apps/api/src/modules/orders/repository/a.ts'];
+    expect(repository).toMatchObject({
+      'platform/tenant-context-sql': 'error',
+      'platform/prisma-client-construction': 'error',
+      'platform/db-raw-sql': 'error',
     });
+    // m3 b: expect-affected is a warning; the base run accepts it raised to error.
+    const affected = MODE === 'exact' ? ['warn'] : ['warn', 'error'];
+    expect(affected).toContain(repository?.['platform/expect-affected']);
+    expect(report.effective['prisma/tests/rls/a.int.test.ts']).toMatchObject({
+      'platform/tenant-context-sql': 'error',
+      'import-x/no-relative-packages': 'error',
+    });
+    // PR11-SEC-05: services (they hold a TenantDb), the rest of apps/*/src and the planned Prisma files get db-raw-sql.
+    for (const path of [
+      'apps/api/src/modules/orders/service/a.ts',
+      'apps/api/src/platform/http/a.ts',
+      'packages/audit/src/store/prisma-store.ts',
+    ]) {
+      expect([path, report.effective[path]?.['platform/db-raw-sql']]).toEqual([path, 'error']);
+    }
+  });
+
+  exactOnly('tenant-database rules: prisma/tests may construct the client and run raw SQL (TASK-016)', () => {
+    expect(report.effective['prisma/tests/rls/a.int.test.ts']).toMatchObject({
+      'platform/prisma-client-construction': 'off',
+      'platform/db-raw-sql': 'off',
+    });
+  });
+
+  it('server-only rules stay on in server packages; test files keep the a11y rules', () => {
+    expect(report.effective['packages/shared/src/a.ts']?.['platform/outbound-http-via-client']).toBe('error');
+    expect(report.effective['apps/web/app/routes/a.test.tsx']).toMatchObject({ 'jsx-a11y-x/alt-text': 'error' });
+  });
+
+  exactOnly('server-only rules skip the browser package; string externalisation skips test files', () => {
+    expect(report.effective['packages/ui/src/session/client.ts']?.['platform/outbound-http-via-client']).toBe('off');
+    expect(report.effective['apps/web/app/routes/a.test.tsx']).toMatchObject({ 'i18next/no-literal-string': 'off' });
   });
 });

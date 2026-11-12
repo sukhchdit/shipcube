@@ -35,10 +35,7 @@ PR #4 (TASK-004) r1 at 519bb89 went CHANGES_REQUESTED (2026-11-12). The only MAJ
 - TASK-042: SPA-fallback locale hydration must be hydration-safe.
 - Lazy-route task: the size-limit globs sum all chunks; the per-chunk 150 kB check and the cross-app check are missing (NFR-WEB-004).
 
-PR #4 r2 at 9f5ea5e (non-harness delta) is still CHANGES_REQUESTED, with M1 only. Round 3 = harness commit + merge-main, checklist in review §R2.4. Check:
-- R2-m1: drop the `as UserConfig` cast in `apps/*/vite.config.test.ts`.
-- R2-m2: root `lint` must run `npm run typegen` first. Without `.react-router/`, the type-aware rules fail on `Route.*` params; verify with that dir deleted.
-- m2: an `/es/no-such-page` hydration error must not be allow-listed in the console guard.
+PR #4 r3 at d2e867b (harness + merge-main; 2026-11-13) is CHANGES_REQUESTED with ONE MAJOR, R3-M1: the move tools/test-support -> tools/test-dom de-owned the jsdom env/setup files. R2.4 items 1-10, R2-m1/m2 and m2 are closed (Firefox deferred as COND-E2E-FF, D-ORCH-019). Round 4 = delta check: `/tools/test-dom/` in CODEOWNERS + REQUIRED_CODEOWNED_PATHS (check-workflow-policy.mjs:656) + its test -> expect APPROVED_WITH_NITS. The security record must name a head at or after that fix. Routed from r3: R3-n1 (use-locale reads live html lang; capture once) -> TASK-042; R3-n3 (outputDir vs §7.8 tests/e2e/output) and R3-n4 (assert pointer:coarse/44px) -> T-QA-05; R3-n6 (WebKit-Windows close hang; CI globalTimeout) -> qa-lead/TASK-015; base-ref step minimal jest config -> TASK-007/PR #17.
 Routed:
 - TASK-022/TASK-111: `gzip_proxied`/`gzip_http_version` behind the edge or CloudFront.
 - TASK-014: IPv6 `listen` with `default_server`.
@@ -182,6 +179,7 @@ PR #11 (TASK-016 RLS foundations) r1 at 557aada was CHANGES_REQUESTED (2026-11-1
   - Open: R3-m1 (SEC-09 item 4 metric + TASK-010 sink deferrals have no owner; runner dormant until TASK-020 passes `Client`); R3-m2 (PGOPTIONS → exit 1, not 78; fix in-branch or TASK-014).
   - NITs: n1 db-raw-sql container laundering; n2 ESLint twin lacks U& + comment strip; n3 rule 11 misses `set_config('lock_timeout',…,false)`; n4 fluent accessors typed but absent; n5 no exemption-file-exists tripwire; n6 DbProblemCode not tied to ErrorCode.
   - Superseding branch (D-ORCH-018): check tree == `git diff 63accea 37a2109` + listed fixes only; lane A green after main's base-ref subset fix.
+  - PR #18 supersede r1 at 0f9ff27 (2026-11-13): APPROVED_WITH_NITS. Tree == 37a2109 for 376 files, == main for 39; no ancestors/merges; negative-fixtures resolution keeps all exact assertions (m3 a/b split). R3-m1 owners in STATUS ROUTED; R3-m2 -> TASK-014. Conditions: security record on 0f9ff27, lane B integration, SQUASH (eac026a alone fails unit). Next: delta-only if head moves.
 
 PR #12 (TASK-012, SPK-08) r1 at 2e0aa32 was CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0012-TASK-012-code-review.md`.
 - M1: "`migrate dev` vs raw-SQL partial indexes" was routed to TASK-012 only by batch-3 rulings :43 and is orphaned. Answer it or re-route it with an owner.
@@ -206,3 +204,11 @@ PR #13 (TASK-023 seed framework) r1 at e92cd6f was CHANGES_REQUESTED (2026-11-13
 - r2 at e42e368 (2026-11-13): APPROVED_WITH_NITS. Closed m1/m2/m3/m5(edits)/n1-n6/n8; probes pass (exit 2 JSON; 0/280 URL overrides; 7/7 mutations killed).
   - Open: R2-m1 deletion drift (`else if (updated > 0)` misses re-inserted rows) → fix in superseding branch or route TASK-025. R2-n1 README dup line; R2-n2 3rd copy of URL-param predicate; R2-n3 no client query_timeout/keepAlive (→ TASK-014).
   - Superseding PR (D-ORCH-017): check tree == e42e368 + reconcile only; m6 boundaries still owed after PR #11; M1 sheet fold (WAVE-00 TASK-023 still says completes US-049; TASK-014/089 lack AT IDs) owed by architect batch.
+
+PR #17 (TASK-007 follow-up, base-ref lint fixtures no-weakening) r1 at ea78d38: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0017-TASK-007-code-review.md`.
+- M1: null-ruleId extras ("Unused eslint-disable directive") pass; `no-explicit-any` off repo-wide → new base run green, old failed. Fix: fail null-ruleId extras (+ relaxed check on ok-*), E9.
+- m1 gate deny-list misses `--test-name-pattern`, `-tX`, `--listTests`, `-o`; m2 head jest.config.ts `testNamePattern` → 97 skipped exit 0; m3 positive halves in lint-wiring tests + `noWeakening` hard-codes 'error'.
+- r2 at 8dd1d24 (2026-11-13): APPROVED_WITH_NITS. M1/m1/m2/m3(a)/n1-n4/n6 closed (M-a and M-b exit 1 via the real step script; exact command pin; base Jest config tools/lint/jest.base-fixtures.config.json). Merge needs the security record.
+  - Open: R2-m1 (pre-existing) no fixture/effective check that no-explicit-any is on; off + reportUnusedDisableDirectives off passes → in-PR or TASK-015. NITs: R2-n1 pin trimEnd vs bash backslash-space (fails closed 127); R2-n2 .swcrc in WAVE-00/plan-data/ADR-0023; R2-n3 job-level env comment.
+  - PR #11 overlay ruling: exactly 4 prisma-client-construction extras (2 bad-orders.service, 2 ok-orders.repository), 0 failures. PR #11 supersede: WARNINGS via expectFindings(…,"warning"), allowed (TASK-016) via expectClean.
+  - PR #4 merge-main: unit-dom transform must become [@swc/jest, SWC_JEST_OPTIONS] (jest-transform.test); no .swcrc.

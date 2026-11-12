@@ -706,3 +706,160 @@ Items 5 and 6 edit an unmerged migration and an unmerged bootstrap file. After m
    - the composition function satisfies PR11-SEC-09 items 1–6, including the `DbError` problem body.
 3. Whichever of PR11-SEC-12, -13, -14 (a) and -15 c/f were taken; re-run P-A2 / P-B2 / P-D2.
 4. The record names the final head, and lane A is green on it.
+
+## Round 3 (head 37a2109)
+
+| Field | Value |
+|---|---|
+| Scope | Net change `git diff 63accea 37a2109`: 377 files, +10,071 / −226. It touches no `docs/` or `.claude/` path, and neither `package-lock.json` nor `prisma/schema`. Reviewed in three parts: **fix delta** `a3e8edd..80bcda1` (`b00cd6e`, `91c90bf`, `41afe58`, `80bcda1`; 57 files, +1,469 / −125); **merge** `d68898a` (parents `80bcda1` + `63accea`); **reconciliation** `d68898a..37a2109` (`ddf27d6`, `a7df29f`, `198328a`, `9482f38`, `37a2109`; 21 files, +875 / −153) |
+| Head | `37a21099d8188d33aba3b155de559d1b17e82b2f` (`feat/TASK-016-row-level-security-foundations-table`) |
+| Inputs | Fix and reconciliation comment https://github.com/sukhchdit/shipcube/pull/11#issuecomment-6835514581; lane A comment https://github.com/sukhchdit/shipcube/pull/11#issuecomment-6835649182; `docs/03-architecture/rulings/wave-0-task-016-rulings.md`; DECISIONS D-ARCH-071..074, D-ORCH-014, D-ORCH-018; rounds 1–2 above |
+| Reviewer / date | security-analyst, 2026-11-13. **No command was run in the worktree.** Sources came from `git archive 37a2109` in the main checkout and were type-stripped into scratch. `node_modules` came through a scratch junction to the main checkout's install (the PR's `package-lock.json` equals main's). The generated client is the round-2 scratch copy (`prisma/schema` is unchanged since `a3e8edd`). Junctions were removed afterwards. No install, build, Docker, gitleaks or suite run |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open, so the merge rule (D-ORCH-004) is met for the security dimension. **Closed:** PR11-SEC-09 (items 1–6), -11 a and h, -12, -13, -14 (a), and -15 c, f and g. Every architecture item "Required in PR #11 before merge" is done: items 1, 2 (b), 5, 6 and 8 in this round, items 3, 4 and 7 in round 2. **New:** 1 LOW (PR11-SEC-16, `E'…'` escape strings in `EXECUTE` operands) and 1 INFO (PR11-SEC-17); neither blocks. **This round authorises the content of `37a2109` for merge.** `37a2109` itself is not merged: its merge commit `d68898a` carries main's since-scrubbed literal (lane A gitleaks is red). Per D-ORCH-018 the superseding branch merges instead, after (1) a supersede round in this record names its head (§R3.7) and (2) lane A is green on that head |
+
+### R3.1 Summary
+
+The fix delta and the reconciliation close every round-2 item that was in PR scope. The probes confirm this against the real Prisma 7.10.1 runtime and the head's own linters:
+
+- **`TenantDb` results are wrapped (PR11-SEC-12).**
+  - What an exposed member returns is a frozen, null-prototype, lazy thenable with only `then`, `catch`, `finally` and `Symbol.toStringTag`.
+  - `requestTransaction`, `spec` and the fluent accessors are gone.
+  - A result kept past commit rejects with `TENANT_TX_CLOSED` and sends nothing.
+  - The P-A3 SQL log has **0 `ROOT-conn` statements**.
+- **`Sql` fragments are refused at run time and reported by lint (PR11-SEC-13).**
+  - Every non-forged fragment shape is refused before Prisma is called.
+  - The lint now resolves bindings, and all six round-2 lint-clean shapes are reported.
+- **`U&` is refused by both scanners (PR11-SEC-14 a).** Comment-split forms read as written, and rule 16 and the C-series share `sqlText`.
+- **Linter rules 11 and 15.**
+  - Rule 11 requires `RESET lock_timeout` when a file leaves the value above 3 s. The value parser fails closed.
+  - Rule 15 fails any `ALTER … OWNER TO platform_definer`.
+- **Helpers and role backstops.**
+  - The helper bodies are byte-identical to data-model §4.2.
+  - `platform_app` runs with `lc_messages = 'C'` and cannot change it (42501).
+- **The composition function (`platform/db/runtime.ts`).**
+  - It refuses `PGOPTIONS` before it builds or validates anything.
+  - The fresh-connection probe is the first client query.
+  - A leak latches readiness to not ready until restart.
+  - Security events carry `component`, `correlationId` and `sqlState` only.
+  - The `DbError` problem body comes from catalogue data only, with a bounded `Retry-After`.
+
+Two residuals remain, neither blocking:
+
+- **16 (LOW):** `E'…'` escape strings decode `\x61` / `\141` / `a` in the lexer just as `U&` does, so a dynamic `EXECUTE E'SET LOCAL \x61pp.org_id = …'` evades both scanners.
+- **17 (INFO):** the limits of the new controls:
+  - a deliberate `Sql` forge passes the duck-typed check;
+  - the lint's binding analysis does not follow the namespace through arguments, literals or conditionals;
+  - rule 11 does not track `"lock_timeout"`, `set_config('lock_timeout', …)` or a `SET` inside a DO body.
+
+### R3.2 Method
+
+| Probe (scratch `review/PR-11-sec-r3/`, session-scoped) | What it did | Result |
+|---|---|---|
+| **P-A3** `tenantdb-escape-r3.mjs` | Real `@prisma/client` 7.10.1 runtime and generated client, with a recording fake adapter (`TXn` vs `ROOT-conn`) and `createWithTenantTx` from the stripped head | **Controls:** `$parent`, `permission.$parent`, `_originalClient`, `$queryRawTyped` and `$transaction` → `TenantDbAccessError`; `ownKeys(db)` = 3 delegates + `$queryRaw`, `$executeRaw`. **Result surface:** keys `then, catch, finally, Symbol(Symbol.toStringTag)`; prototype `null`; frozen; `requestTransaction`, `spec`, `constructor` and the fluent `.roles` are `undefined`; `"requestTransaction" in result` is false; assignment and `defineProperty` throw. It is lazy (0 statements until `then`), and `then` returns a native `Promise`. **After commit:** kept unstarted and started results, a kept `$queryRaw` reference and a kept delegate → `TENANT_TX_CLOSED` with no statement. A result returned from the callback (async or sync) runs on its own transaction before `revoke`. **`Sql` values refused:** `Prisma.raw`, `Prisma.sql([s])`, `Prisma.join([1], ',', s)`, `new Prisma.Sql`, `Prisma.empty`, a tagged fragment (by design), a subclass, `new (fragment.constructor)(…)`, a plain object re-parented to `Sql.prototype`, and a JSON `{strings, values}` value. An array of fragments is bound as `$1`. **Spliced (deliberate forges):** forge 1 (an intermediate prototype with its own `constructor` and array-like `strings`; `instanceof Sql` but `isSqlFragment` false) and a frozen array with a frozen `raw` (the documented limit). **`ROOT-conn` statements: 0** |
+| **P-B3** `rule16-r3.mjs` | 29 PL/pgSQL bodies through `scanFunctionBodies` and `lintMigrationDir` | **Both scanners flag:** the control; R1 rows W1, W2, W4, W5, W8 and R2; `U&` identifier, setter and string; lower-case `u&`; `U&'…' UESCAPE '!'`; `RESET U&"…"`; `set_config(E'app\x2eorg_id', …)`; `EXECUTE E'SELECT set_config(\x27…'`. **Missed by both (stated limits):** keyword-split, `format('%s %s')`, table-read `EXECUTE r`, `chr()`, hex-`decode` and `pg_show_all_settings`. **Missed by both (PR11-SEC-16):** `EXECUTE E'SET LOCAL \x61pp.org_id = '…`, octal `\141pp`, `app` and `app\x2eorg_id`. **Clean controls:** `set_config('search_path')`, `app.correlation_id`, `menu & 'x'`, `U&` inside a comment |
+| **P-C3** `policy-grant-role-r3.mjs` | 33 migration fixtures through `lintMigrationDir` with the real manifests | **Round-2 regression unchanged:** rendered TENANT block clean; `OR true` and grant-before-FORCE → 9; `SET LOCAL` → 11. **Rule 11:** `30s`, `3001`, `'0'`, `'0x7fffffff'`, `'1e4'`, `'1 min'`, a comment inside `SET /* c */ lock_timeout`, and a re-raise after `RESET` all fail. `RESET`, `TO DEFAULT`, `3s`, `SESSION … 2.5s` and `500us` are clean. Parser: `0`, hex and exponent → ∞. **Missed (PR11-SEC-17 c):** `SET "lock_timeout" = 0`, `set_config('lock_timeout', '0', false)`, `SET` inside DO. **Rule 15:** `ALTER FUNCTION`, `VIEW` (quoted role), `TABLE`, `ROUTINE /* c */`, `SEQUENCE` (upper case), `TYPE` and `MATERIALIZED VIEW … OWNER TO platform_definer` all fail. The `platform_definer_x` control is clean. `ALTER FUNCTION … SECURITY DEFINER` → 13. `CREATE SCHEMA … AUTHORIZATION platform_definer` → 14. **Clean:** `OWNER TO` inside DO `EXECUTE` (PR11-SEC-15 a). `REASSIGN OWNED BY platform_migrator TO platform_definer` is also clean but cannot run: PostgreSQL requires the privileges of both roles, and the migrator's membership is `INHERIT FALSE` (`00-roles.sql:40`). C11 converse |
+| **P-D3** `eslint-probe-r3.mjs` | `ESLint#lintText` on the head's own `eslint.config.mjs` (full tree from `git archive`, `docs/` excluded; `disableTypeChecked`, `projectService: false`) | **`platform/db-raw-sql` reports** all round-2 residual rows N1–N9, plus the factory import, `require`, `import()`, the default import, the generated-path import and `@prisma/client-runtime-utils`. **`platform/tenant-context-sql` reports** N10 and N11. **Clean (PR11-SEC-17 b):** the namespace passed as an argument, in an object or array literal, through `?:` or `??`; `new (Prisma.sql\`1\`.constructor)`; `const run = db.$queryRaw; run(s)`; `Reflect.apply(db.$queryRaw, …)`; `db[k]`. **Exemptions are exact files:** a sibling `session-integrity2.int.test.ts`, a new spike file, `is_local = false` in `session-integrity.int.test.ts`, and a setter in the `spk08` spike all fail. The tagged-fragment + `Prisma.join(ids, ', ')` control is clean |
+| **P-E3** `runtime-r3.mjs` | `createDatabaseRuntime` with an unreachable `127.0.0.1:1` URL (no credentials) and a fake client class whose fresh connection reports `app.org_id` | `PGOPTIONS` plus an invalid URL gives `TenantTxConfigError`, so the refusal comes before URL validation and before the pool. Client calls: constructor `{adapter, errorFormat: 'minimal'}`, then the `unnest(app.*)` probe as the first query. One `security.db_session_context_leak` with `{component}`; `sessionContextLeaks()` = 1; one `db.not_ready_latched`; 3 later readiness polls → `DatabaseNotReadyError(db_session_context_leak)`. No log field holds a UUID. Without a client, `tenantTx` is `undefined` and only the integrity check runs |
+| `lint-committed.mjs` | `lintMigrations` and `lintRepository` over the head's `prisma/` | 0 / 0 findings |
+| `estring-fp.mjs` | Candidate PR11-SEC-16 patterns over the head's 21 committed `.sql` files (`sqlText`, strings kept) | 0 hits for both candidates. Positive control flagged. Negative control: `/\be'/i` false-positives on `type = 'e'`, so the remediation is token-level |
+| Merge and text checks | `git show --remerge-diff d68898a`; the three helper blocks against data-model §4.2 on main; the net diff's added lines | **Merge:** conflicts only in `.env.example` and `packages/config/src/{index,schema}.ts`, each a pure union (main's `DB_STATEMENT_TIMEOUT_MS*` and the branch's `DB_TX_*`). **Helpers:** `diff` reports the blocks identical. **Added lines (`.env*` excluded):** 0 hits for private keys, cloud or VCS token prefixes, credentials in a URL, or the PR13-SEC-11 literal shape (the broad `secret`/`password`/`token` hits are key names). No `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `nosemgrep` or `gitleaks:allow`. No change to `.gitleaks.toml`, `.gitleaksignore`, `.github/` or `tools/ci/` |
+
+**Not executed:**
+- The PostgreSQL integration and catalog suites, and gitleaks (Docker is out of scope for this round). I rely on:
+  - the fix comment's local gate on `9482f38`: unit 2057 passed; integration 154 passed / 1 skipped; coverage 97.54 % lines / 97.08 % branches; `db:lint-migrations` 0; audit 0;
+  - `37a2109` being a test-only commit on top of that.
+- **Lane A on `37a2109` is red for reasons outside the content**, both handled under D-ORCH-018:
+  - gitleaks reports the merge-borne literal;
+  - the base-ref fixture step asserts an exact rule set.
+
+`pg` reads `PGOPTIONS` from the environment, and it is the only `pg` variable that injects session settings. `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` are read from config only. `PGCLIENT_ENCODING`, `PGREPLICATION`, `PGBINARY` and `PGSSLNEGOTIATION` can only break the connection (`ssl` is explicit). No finding.
+
+### R3.3 Closure of the round-2 open items
+
+| ID | R3 status | Evidence / residual |
+|---|---|---|
+| PR11-SEC-09 | **Closed** (items 1–6) | (1) `platform/db/runtime.ts` is the only runtime importer of `client.ts`; `dedicated-connection.ts` also imports its `toPoolConfig`. It returns `readinessCheck`, `tenantTx`, `startup`, `resources` and `sessionContextLeaks`, never the pool or the client. `platform/runtime/{services,index}.ts`, the worker and `health.int.test.ts` go through it, and the `db-root-client` policy is unchanged. (2) `assertNoSessionOptions(process.env)` is its first statement (P-E3), and `deps.env` is never passed. (3) The fresh probe is the first client query; readiness re-runs it until it passes. (4) Sinks: P-E3 above; `db_session_default_tampered` latches too; nothing clears the latch. (5) Five `EXPECTED_ROLE_SETTINGS` rows; the pin test parses every `prisma/bootstrap/*.sql`; the RESET-drift integration test. (6) `classifyDbError` reads own data properties only and needs a catalogue code whose status matches, else a generic 500. `Retry-After` is sent only for a retryable integer in 1..3600. The body is built from catalogue data. The API tests assert that no reason, SQLSTATE, Prisma code or "Database error" text is sent, and `DbError` carries no `cause`. **Activation:** a runner exists only when the generated client class is passed. The entry points do not pass it yet (data-model §7.2 alias), so items 3–4 take effect with TASK-020's `tx` slot (§R3.6) |
+| PR11-SEC-11 | a and h **closed**; d → TASK-034; c, e, f, g as routed | (a) Helper bodies are identical to §4.2. The PR's C-series test plants `public.current_setting` under `search_path = public, pg_catalog`; the helper still reads the real setting, and the plan keeps the inlined index condition. (h) `ALTER ROLE platform_app SET lc_messages = 'C'`; C13 has five rows; `SET lc_messages` by `platform_app` → 42501 (SUSET); RDS parity is recorded for SPK-08/M5 |
+| PR11-SEC-12 | **Closed** | P-A3 result surface and after-commit rows; 0 `ROOT-conn` statements. The real-client test in the PR mutation-checks the wrapper |
+| PR11-SEC-13 | **Closed** (residual PR11-SEC-17 a, b) | **Run time:** every non-forged fragment shape is refused before Prisma is called (P-A3); the first argument must be a template strings array whose `raw` is frozen. **Lint:** binding-aware, reporting `raw`/`Sql` uses, non-tagged `sql`/`sqltag`, a `join` text argument that is not a literal, typed-SQL factories, a computed namespace member and re-exports (P-D3). The controls stay clean |
+| PR11-SEC-14 | (a) **closed**; (b) TASK-024 and (c) TASK-021 unchanged; sibling gap PR11-SEC-16 | P-B3 `U&` rows are flagged by both scanners. The PR adds executed C-series fixtures for the three `U&` forms and the three comment-split forms. The stated limits are now written in the linter and form-list headers |
+| PR11-SEC-15 | c, f, g **closed**; a, b, d, e, h, i as routed | (c) P-C3 rule-15 rows. (f) `$queryRawTyped` is refused at run time and omitted from the type, and the factory import is reported. (g) P-D3 N7–N11 |
+
+### R3.4 Architecture "Required in PR #11 before merge" at `37a2109`
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 1 | Rule 11 session-only; `RESET lock_timeout` when the value exceeds `3s` | **Done** | P-C3 rule-11 rows. The parser fails closed. Residual PR11-SEC-17 c |
+| 2 | Rule 15 incl. (b) `OWNER TO platform_definer` ban | **Done** | (a) and (c) since round 2; (b) P-C3 rule-15 rows; fixture `definer-owner-to` |
+| 3, 4, 7 | Rule 9 b; rule 16 b; C13 case folding | **Done** (round 2) | P-C3 regression rows unchanged |
+| 5 | Qualified helper bodies | **Done** | Identical to data-model §4.2; shadowing test |
+| 6 | `lc_messages = 'C'`, C13 five rows, `EXPECTED_ROLE_SETTINGS` row | **Done** | `02-role-backstops.sql`, C13 (d), pin test |
+| 8 | D-ORCH-014 (a)–(f) and PR11-SEC-09 items 1–6 | **Done** | (a)–(d) and PR11-SEC-09: §R3.3. (e) Exact-file exemptions: `session-integrity.int.test.ts` gets `setter`, `keys` and `session-set` (no `is_local = false`); the `spk08-audit-owner.int.test.ts` spike gets `keys` with a delete-together note; P-D3 exemption rows; no inline disables. (f) Pure union (remerge-diff) |
+
+### R3.5 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR11-SEC-16 | `E'…'` escape-string literals hide a tenant-context write inside an `EXECUTE` operand from rule 16 and the C-series | LOW | CWE-184 | A04 | `tools/db/tenant-key-forms.ts:43-50` (write forms; the header at :20 claims escaped strings cannot hide a key); `tools/db/sql-text.ts:77` (the tokenizer already recognises the `E` prefix) | TASK-024 (with PR11-SEC-14 b) | Open |
+| PR11-SEC-17 | Residual limits of the new controls: deliberate `Sql` forge, lint binding flow, rule-11 tracking | INFO | CWE-184 | A03 / A05 | see list | as listed | Open |
+
+#### PR11-SEC-16 (LOW): `E'…'` escape strings in dynamic SQL
+
+**Description.** PostgreSQL's escape-string syntax decodes `\xHH`, octal `\ooo`, `\uXXXX` and `\UXXXXXXXX` in the lexer. That is the same capability that `U&` gives and that the PR now refuses. The shared form list does not cover it.
+
+P-B3 ran each of these PL/pgSQL bodies through both scanners, and both missed all four:
+- `EXECUTE E'SET LOCAL \x61pp.org_id = ' || quote_literal(p);`
+- the octal (`\141pp`) and `app` spellings of the same statement;
+- `app\x2eorg_id`.
+
+A setter call stays visible, because the function name is not escaped: `set_config(E'app\x2eorg_id', …)` and `EXECUTE E'SELECT set_config(\x27…'` are flagged. Identifiers cannot use `E` escapes, so only string operands of `EXECUTE` are affected.
+
+The new header sentence in `tenant-key-forms.ts` ("escaped identifiers and strings cannot hide a key") therefore overstates the control.
+
+**Exploitability / impact.** The precondition is the same as PR11-SEC-14: a function or trigger body written with deliberate obfuscation, plus a CODEOWNERS review miss. Such a body would run inside `platform_app`'s `withTenantTx` transaction and switch tenant for the rest of it (T-35). No committed migration uses an `E'…'` string. Likelihood L × Impact M → **LOW**.
+
+**Remediation.**
+- (a) **Refuse escape strings outright, as for `U&`.** No committed migration, bootstrap file or template uses one (a scan of 21 files found no hit, with a positive control). Make it a token-level check, not a regex over the text: the tokenizer in `sql-text.ts:77` already knows when a string token has an `E` prefix (`escaped`).
+  - Have `sqlText` mark such a token, for example by keeping the prefix as `E'` and emitting a sentinel, and let one write form match the sentinel in both scanners.
+  - Do not use a plain regex. `/\be'/i` also matches the closing quote of a string that ends in a lone `e` (`type = 'e'`, a probe false positive).
+  - In either case, fix the header sentence.
+- (b) TASK-024's dynamic-SQL allow-list (PR11-SEC-14 b) also covers this case once it lands.
+- (c) Principal-architect adds `E'…'` strings in `EXECUTE` operands to the data-model §8.3 "Limits" text, which is already pending from the fix comment.
+
+Per D-ORCH-018, the superseding branch carries PR #11's net change unchanged, so this goes to TASK-024.
+
+**Verification.**
+- A C-series fixture `EXECUTE E'SET LOCAL \x61pp.org_id = …'`, executed on PostgreSQL 18, fails the scan.
+- A linter fixture `context-escape-string` fails rule 16.
+- The committed catalogue and migrations stay clean.
+
+#### PR11-SEC-17 (INFO): residual limits of the new controls
+
+| # | Residual | Backstop today | Owner |
+|---|---|---|---|
+| a | **A deliberate `Sql` forge passes `isSqlFragment`.** An object whose prototype chain reaches `Sql.prototype` through an intermediate object with its own `constructor`, and whose `strings`/`values` are array-likes, is `instanceof Sql`, so Prisma splices it. `isSqlFragment` returns false for it (P-A3 forge 1: the injected text reached `TX1`). The forge is lint-clean when the prototype comes from `Object.getPrototypeOf(Prisma.sql\`…\`)`. **Hardening:** test `'strings' in v && 'values' in v` instead of `Array.isArray`, and walk the whole prototype chain for a `Sql`/`_Sql` constructor. Alternatively, test `instanceof` against the `Sql` class of `@prisma/client/runtime/client`, which is the class Prisma's own check uses. Then state the limit in the JSDoc, as was done for `isTemplateStringsArray` | Lint and review (the same deliberate-forge class as the documented frozen `raw` forge) | TASK-020 |
+| b | **The `db-raw-sql` binding analysis follows a tracked value only through member reads, declarators, `=` and calls.** These lint clean (P-D3): the namespace passed as an argument, held in an object or array literal, or chosen by `?:` / `??`; `new (Prisma.sql\`…\`.constructor)(…)`; an aliased or `Reflect.apply`'d `$queryRaw`; `db[k]`. **Optional:** report any other use of a tracked container (as `helperValue` already does for helpers), and any read of `$queryRaw`/`$executeRaw` that is not a template tag | The run-time guard refuses every non-forged value these produce (P-A3), and `db[k]` throws | TASK-020 (`lint` lock) |
+| c | **Rule 11 tracks only `SET [SESSION] lock_timeout`.** `SET "lock_timeout" = 0`, `SELECT set_config('lock_timeout', '0', false)` and a `SET` inside a DO body lint clean and leave the session value raised for later files. This affects availability only (NFR-AVAIL-003) and needs deliberate code. **Fix:** fold quoted names into `LOCK_TIMEOUT_VALUE`; treat a `set_config` of `lock_timeout` as a SET, together with PR11-SEC-15 b's `role`/`session_authorization` keys; handle DO bodies with PR11-SEC-15 a | A later file that alters a table must start with `SET lock_timeout` (rule 11), which replaces the value for that file | TASK-024 (setter keys), TASK-021 (DO bodies) |
+
+### R3.6 Routing (additions to §6 and §R2.6)
+
+| Owner | Item | Due |
+|---|---|---|
+| TASK-024 | PR11-SEC-16 (`E'…'` form, header sentence), with PR11-SEC-14 (b); PR11-SEC-17 c (setter keys, quoted name) | Before TASK-037 |
+| TASK-020 | **Runner activation:** pass the generated client class through `createRuntimeServices` → `databaseRuntimeFromConfig(…, Client)`, never through a second composition. Keep `startup()` awaited before listen and before the worker takes work. Then verify PR11-SEC-09 items 3–4 at the `tx` slot (already on the sheet). Also PR11-SEC-17 a and b | Wave 0.6 |
+| TASK-021 | PR11-SEC-17 c DO-body part (with PR11-SEC-15 a) | With its rule-10 carry-overs |
+| TASK-010 | Re-point the `security.*` runtime-log events to the security logger, keeping `{event, correlationId, sqlState}`. Export `sessionContextLeaks()` as the `db_session_context_leak` metric when the metrics pipeline exists | With TASK-010 / the metrics pipeline |
+| TASK-034 | PR11-SEC-11 d (`readSecret` open-once; not taken in PR #11) | Unchanged |
+| principal-architect | data-model §8.3 "Limits": add `E'…'` strings in `EXECUTE` operands (PR11-SEC-16 c) | With the pending "Limits" text |
+| sdlc-orchestrator | Supersede per D-ORCH-018 and dispatch the supersede round (§R3.7). The D-ORCH-018 (2) harness fix on main (base-ref subset semantics) changes a security-owned CI check, so it needs its own security review | Before merge |
+| qa-lead | Unchanged: activate `migration-lint` and `catalog-c1-c14` at merge | At merge |
+
+### R3.7 What the supersede round checks (D-ORCH-018)
+
+1. **No old ancestry.** `git merge-base --is-ancestor d68898a <new-head>` is false, and so is the same check for every other commit of the old branch.
+2. **Tree equality outside docs.** `git diff 37a2109 <new-head> -- . ':!docs' ':!.claude'` is empty, because main changed only `docs/` and `.claude/` after `63accea`. In addition, `git diff <branch-point> <new-head>` touches no `docs/` or `.claude/` path, and its stat equals `git diff --stat 63accea 37a2109`.
+3. **Configuration and checks.**
+   - `.gitleaks.toml` and `.gitleaksignore` are unchanged.
+   - No allowlist entry and no inline allow marker are added.
+   - Lane A is green on the new head, including gitleaks and the PR2-SEC-08 base-ref step (after the D-ORCH-018 (2) fix lands on main).
+4. **The record.** It gains "## Supersede round (head …)" with a `Head` row naming the full SHA and a final `Verdict` row.

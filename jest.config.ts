@@ -4,13 +4,32 @@
  *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
- * Sources are transpiled by @swc/jest using the root `.swcrc` (CommonJS output, no type-check;
- * `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript sources
- * through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
+ * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
+ * type-check; `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript
+ * sources through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
  */
 import type { Config } from 'jest';
 
 type ProjectConfig = Exclude<NonNullable<Config['projects']>[number], string>;
+
+/**
+ * @swc/jest options (PR17-SEC-01). Inline options stop @swc/jest from reading `<cwd>/.swcrc`, and `swcrc: false` stops
+ * @swc/core from applying the nearest `.swcrc` above each compiled file, so an unowned `.swcrc` (e.g. a `jsc.paths`
+ * redirect of `@jest/globals`) cannot change how any suite compiles. The transform lives only in this owned file and in
+ * the owned base-ref copy tools/lint/jest.base-fixtures.config.json (tools/ci/jest-transform.test.ts keeps them equal);
+ * check-workflow-policy rejects any committed `.swcrc`.
+ */
+export const SWC_JEST_OPTIONS = {
+  swcrc: false,
+  jsc: {
+    parser: { syntax: 'typescript', tsx: true },
+    target: 'es2023',
+    keepClassNames: true,
+    transform: { react: { runtime: 'automatic' } },
+  },
+  module: { type: 'commonjs' },
+  sourceMaps: 'inline',
+};
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
@@ -25,7 +44,7 @@ const common: ProjectConfig = {
   testEnvironmentOptions: {
     customExportConditions: ['@platform/source', 'node', 'node-addons'],
   },
-  transform: { '^.+\\.(t|j)sx?$': '@swc/jest' },
+  transform: { '^.+\\.(t|j)sx?$': ['@swc/jest', SWC_JEST_OPTIONS] },
   moduleNameMapper: JS_EXTENSION_MAPPER,
   modulePathIgnorePatterns: ['<rootDir>/.*/dist/', '<rootDir>/.*/build/'],
   testPathIgnorePatterns: IGNORED_PATHS,
