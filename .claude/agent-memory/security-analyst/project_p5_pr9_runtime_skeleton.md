@@ -1,6 +1,6 @@
 ---
 name: project-p5-pr9-runtime-skeleton
-description: PR #9 (TASK-006 api/worker runtime skeleton) R1 PASS_W_F-U @374166d, R2 FAIL @05855b1 (ReDoS), R3 PASS_W_F-U @6331aeb (PR9-SEC-14 closed), R3b merge-only @6742bec; type-is/pg/readFileSync facts; later-task checks
+description: PR #9 (TASK-006 api/worker runtime skeleton) R1 PASS_W_F-U @374166d, R2 FAIL @05855b1 (ReDoS), R3 PASS_W_F-U @6331aeb (PR9-SEC-14 closed), R3b @6742bec (never pushed), R3c merge-only @5e6119d; type-is/pg/readFileSync facts; later-task checks
 metadata:
   type: project
 ---
@@ -16,7 +16,9 @@ The PR #9 review (TASK-006) is in `docs/05-quality/security/PR-0009-TASK-006-sec
   - **PR9-SEC-16 closed.**
   - **New: PR9-SEC-17 INFO.** The 1 MiB bound is checked on `stat`, not on the read.
   - **New: PR10-SEC-21 LOW**, in the lane A tool (see [[project-p5-pr10-ci-lane]]).
-- **R3b** at `6742bec`, the merge of `main` @ `e760368`: merge-only PASS_WITH_FOLLOW-UPS.
+- **R3b** at `6742bec`, the merge of `main` @ `e760368`: merge-only PASS_WITH_FOLLOW-UPS. **`6742bec` was never pushed** (the developer reset to `6331aeb` and re-merged), so R3b binds nothing.
+- **R3c** at `5e6119d` (pushed head; parents `6331aeb` + `main` @ `c998d07`), 2026-11-13: merge-only PASS_WITH_FOLLOW-UPS. It equals `6742bec` outside `docs/`/`.claude/`. Simulation, base `e3290a4`: `pass`, satisfied by `5e6119d`. Without R3c the result is `missing`.
+- **Lesson:** before naming a merge commit in a head row, run `git ls-remote origin` and confirm that the commit is the PR's pushed head.
 
 **Facts verified 2026-11-12/13. Re-verify after upgrades.**
 - **type-is 2.1.0.** `normalizeType` uses `contentType.parse(v, {parameters:false})`, so `req.is` never validates parameters.

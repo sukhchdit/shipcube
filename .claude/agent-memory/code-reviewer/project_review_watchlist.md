@@ -127,6 +127,7 @@ PR #9 (TASK-006 runtime skeleton) r1 at 374166d was CHANGES_REQUESTED (2026-11-1
   - R3-m1 MINOR: DATABASE_URL *values* still differ between config and runtime (`sslrootcert=system`/relative passes staging config, then exit 1). Fix at merge-main or route to TASK-014 with n5 (n5 now also covers the sslrootcert stat→read TOCTOU).
   - NITs: the order "bounded check before req.is" is not pinned by a test; client.test has an orphaned JSDoc.
   - r4: review the merge-main delta only (pure-union proof, coverage, CI rollup); security-analyst confirms PR9-SEC-14.
+- r4 at 5e6119d (merge of 6331aeb + main c998d07): APPROVED_WITH_NITS (2026-11-13), pure union, no findings. R3-m1 routed to TASK-014 (orchestrator ruling). Remaining: scans red until the PR #9 security record is on the head; PR9-SEC-14 confirmation.
 
 PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0010-TASK-007-code-review.md`.
 - M1: `--ignore-scripts false` and the npm install aliases bypass check-install-flags and check-workflow-policy.

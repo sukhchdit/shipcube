@@ -33,7 +33,7 @@ PR #10 review: `docs/05-quality/security/PR-0010-TASK-007-security-review.md`.
   - **my own records:** append a `## Round N (head <sha>)` table with `| Head | <full sha> |` and the `| **Verdict** |` row, and put no later row whose first cell is Verdict.
   - **A merge of `main` can void a record** (proven with PR #9, 2026-11-13). Clause (d) is `git diff <named> <head>` ∩ the PR's owned net change. When `main` and the PR both changed an owned path, the merge brings in main's side and voids every pre-merge SHA. The orchestrator's belief that "merge-only commits are fine" holds only when no owned path overlaps.
     - **Before hand-off,** compute the overlap: `comm -12` of `diff mb..origin/main` and `diff mb..<head>`, filtered by CODEOWNERS.
-    - **If they overlap,** a merge-only round must name the merge commit. Verify it like this:
+    - **If they overlap,** a merge-only round must name the merge commit. First confirm with `git ls-remote origin` that the merge commit is the PR's pushed head: PR #9's `6742bec` was never pushed, and that cost an R3c. Then verify it like this:
       - the paths in `diff <main parent> <merge>` equal the PR's net-change paths;
       - every blob equals the reviewed head's, except the overlap paths;
       - each overlap path equals `git merge-tree --write-tree` (or the expected conflict resolution).

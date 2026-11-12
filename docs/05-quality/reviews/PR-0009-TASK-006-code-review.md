@@ -379,3 +379,40 @@ Clean-up: every junction was removed before the copy was deleted. Main's `node_m
 - The reference-grammar differential in `json-body.test.ts` pins "same language" at the same time as "linear time". Use this pattern for every future regex fix.
 - The tripwires are branded by object identity (a `WeakSet`), not by name, and assert an implication. This pattern makes "stub must not outlive its replacement" checks non-vacuous.
 - The config issues name the rule (`databaseUrl.queryParameter`) and never the offending parameter, and a process-level test proves it.
+
+## Round 4 — merge delta (head 5e6119d)
+
+**VERDICT: APPROVED_WITH_NITS** (no change since round 3. The merge adds no new findings. R3-n1..n3 are still optional, and R3-m1 is routed to TASK-014 by orchestrator ruling, so it is not re-raised.)
+
+**SUMMARY:** `5e6119d` is a plain two-parent merge (`6331aeb` + main `c998d07`, merge base `7712c7c`). Its tree is the exact union of both sides. The only textual conflict was in `package.json`, and it was resolved correctly as both edits. Lane A fast-lane is green on this head.
+
+### R4.1 Verification (read-only, by SHA; nothing run in the worktree)
+
+| Check | Result |
+|---|---|
+| Parents of `5e6119d` | `6331aeb23940…`, `c998d074dbb8…`. Merge base `7712c7c`. |
+| Files changed on each side since MB | branch 82, main 194. Changed on both sides: `package.json`, `eslint.config.mjs`, `tools/lint/negative-fixtures.test.ts`. That gives 79 branch-only and 191 main-only, which matches the developer's numbers. |
+| Branch-only files at M vs `6331aeb` | 0 differ |
+| Main-only files at M vs `c998d07` | 0 differ |
+| Files differing M vs `c998d07` that the branch did not touch, and M vs `6331aeb` that main did not touch | both empty, so nothing outside the two deltas was added |
+| Independent re-merge `git merge-tree --write-tree 6331aeb c998d07` vs M's tree | the only difference is in `package.json` (the 4 conflict-marker lines). `eslint.config.mjs` and `negative-fixtures.test.ts` auto-merge to exactly M's content. |
+| `package.json` resolution (`git show --cc`) | keeps the branch's `gen:modules` and main's `lint` (… `&& node tools/lint/check-suppressions.mjs`). M vs main differs only by the `+gen:modules` line, which is the branch's own delta. Nothing dropped, nothing invented. |
+| `eslint.config.mjs` | branch hunks (the `api-runtime-entry` category, the routes→module-entry disallow, the worker→apps/api broad disallow, and the widened worker allow) and main's hunk (the `tests/fixtures/semgrep/**` ignore) touch disjoint regions. Policy order is unchanged, so the last-match-wins comments still hold. |
+| `negative-fixtures.test.ts` | branch: the R2-n7 routes case and three `[PR #2 m8]` worker probes. Main: the `bad-no-task-id` suppression case and the 3-step `lint` assertion. The merged `package.json` `lint` script has exactly the 3 steps that assertion expects. |
+| `package-lock.json` | changed on the branch only. M vs main = `+"@platform/api": "0.0.0"` (one workspace link line), which is identical to the branch's delta vs MB. |
+| Semantic cross-check: main's new `check-suppressions.mjs` (TASK-007) against code the branch added | the branch adds no `eslint-disable*`, `@ts-*`, `istanbul`/`c8`/`v8` ignore, `nosem*`, `gitleaks:allow` or inline-config comments, so it is compatible. |
+| Lane A run 43289999705 on `5e6119d` | `fast-lane` success. `scans` failed only at "Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)", and `ci-gate` is red only because it aggregates that step. This is expected until the PR #9 security record lands. |
+
+**Not re-run by me (per dispatch constraints):** npm ci, build, the unit/api/integration suites, coverage and Docker. For those gates I relied on lane A fast-lane and the developer's merge-main gate record.
+
+### R4.2 Findings
+
+None.
+
+### R4.3 Merge conditions (updated from R3.6)
+
+1. ~~Merge-main pass + round-4 merge-delta review~~: **met** (this section).
+2. Hosted lane A on `5e6119d`: fast-lane green. `scans`/`ci-gate` turn green once the security-review record for the PR #9 security-owned paths is present on the head.
+3. Security-analyst confirms PR9-SEC-14 closed and no Critical/High open (unchanged).
+4. R3-m1 is routed to TASK-014 (orchestrator ruling). NITs R3-n1..n3 are optional.
+5. Unchanged: PR #11 reconciliation per D-ORCH-014 if PR #11 merges second; squash-merge.

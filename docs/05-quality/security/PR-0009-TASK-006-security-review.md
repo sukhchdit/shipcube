@@ -715,3 +715,39 @@ At head `6331aeb`: 0 Critical, 0 High, 0 Medium, 1 LOW open (PR9-SEC-15, routed)
   - Control, the same head with this Round 3b removed: `missing`, because `6331aeb` is voided by the three overlap paths.
   - Main's `recordVerdict` reads `PASS_WITH_FOLLOW-UPS` from this table's Verdict row, the last of 4 in the file. `recordHeadShas` ends with `6742becf3979b6c9fc2109dd6d10bb0c63e56495`.
 - **Later merges.** A later merge of `main` that changes an owned path of this PR needs the same check again, and a new head row.
+
+## Round 3c (head 5e6119d, merge of main)
+
+| Field | Value |
+|---|---|
+| PR | #9, the merge-main pass after fix cycle 2. It replaces the Round 3b merge, which was never pushed |
+| Head | 5e6119d16d491a2cbedf408fb0e5f130319d65b5 |
+| Delta | One merge commit since the round-3 head (`chore(merge): main into TASK-006 (post TASK-007)`), with parents `6331aeb` and `main` @ `c998d07`. The Round 3b merge `6742bec` (parents `6331aeb` and `e760368`) never reached `origin`: the branch was reset to `6331aeb` and `main` was merged again |
+| Scope | Merge only: does `5e6119d` carry any PR-side content that round 3 did not review, and does it equal `6742bec` outside `docs/` and `.claude/`? |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only, by SHA, from the main checkout after `git fetch` (`git diff`, `git rev-parse`, `git merge-tree`, `git ls-remote`). Lane A simulated in a scratch shared clone, removed afterwards. No command in the TASK-006 worktree |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** `5e6119d` adds no unreviewed PR-side content and equals the Round 3b merge outside `docs/` and `.claude/`, so the round-3 findings and routing (§R3.7, §R3.8) apply unchanged: 0 Critical, 0 High, 0 Medium open. This holds while no later commit changes a security-owned path; docs-only and record commits are fine |
+
+**Evidence.**
+- **Pushed head.** `git ls-remote origin` gives `5e6119d` for both `refs/heads/feat/TASK-006-api-worker-runtime-skeleton-express` and `refs/pull/9/head`. `6742bec` is not an ancestor of it, so the Round 3b head row binds nothing: lane A accepts only a commit in `<base>..<head>`.
+- **Equal to Round 3b outside the docs.** `git diff 6742bec 5e6119d -- . ':!docs' ':!.claude'` is empty. The full diff between the two merges is 19 paths, all under `docs/` or `.claude/agent-memory/`. It is exactly `git diff --name-only e760368 c998d07`, i.e. main's docs-only commits between the two main parents.
+- **Same set of paths.** `git diff --name-only c998d07 5e6119d` lists 82 paths, exactly the PR's net change at the round-3 head (`7712c7c..6331aeb`, 82 paths, none under `docs/` or `.claude/`). Both set differences are empty, so the merge drops nothing from `main`.
+- **Same content.** 79 of the 82 paths have the same blob as at `6331aeb`. The other 3 are the security-owned overlap paths, which are the whole intersection of `7712c7c..c998d07` with the PR's net change. `main` did not touch any of the three between `e760368` and `c998d07`, so §R3.6's expected resolutions carry over:
+  - `eslint.config.mjs` is `ce379e2a` and `tools/lint/negative-fixtures.test.ts` is `7a83afe1`. Both equal the tree of `git merge-tree --write-tree 6331aeb c998d07` (automatic merges) and the Round 3b blobs;
+  - `package.json` is `6595a2d4`, the only conflict, and equals the Round 3b blob. Its diff against `main` @ `c998d07` is the one PR line `"gen:modules": "tsx tools/api/gen-module-registry.ts"` after `authz:generate`, with LF endings (0 CR bytes).
+- **Later `main`.** `main` is at `e3290a4`, one docs-only commit after `c998d07` (this record's rounds 3 and 3b, `docs/sdlc/STATUS.md`, security-analyst memory). The merge base of `5e6119d` and `e3290a4` is `c998d07`.
+- **Lane A run 43289999705** (developer evidence, not re-run here). It was red only at the security-owned-paths record step. The branch carries main's `c998d07` copy of this record, whose last Verdict row is round 2's FAIL. The simulation below reproduces that result and shows that committing this file onto the branch clears it.
+
+**Simulation.** Main's `tools/ci` (from `e3290a4`, via `git archive`) ran against a scratch `git clone --shared --no-checkout` of the main checkout, with base `origin/main` (= `e3290a4`) and `--pr 9`. Each head is `5e6119d`, plus a docs-only commit of the stated record where one is listed:
+
+| Scenario | Result |
+|---|---|
+| `5e6119d` + this record | `pass`, satisfied by `5e6119d` |
+| Control: `5e6119d` as pushed (round-2 copy of the record) | `missing` ("verdict FAIL is not one of …"), the lane A result |
+| Control: `5e6119d` + main's `e3290a4` copy (ends at Round 3b) | `missing`. `6331aeb` is voided by the 3 overlap paths, and `6742bec` is not a commit of the range |
+| Control: `5e6119d` + this record, `--pr 10` | `missing`. Only `PR-0010-*` records count |
+
+Main's `recordVerdict` reads `PASS_WITH_FOLLOW-UPS` from this table's Verdict row, the last of 5 in the file. `recordHeadShas` ends with `5e6119d16d491a2cbedf408fb0e5f130319d65b5`.
+
+**Residuals.**
+- The Round 3b section stays as history. Its head `6742bec` exists only in local object stores and is not reachable from any pushed ref. Under PR10-SEC-21 (LOW, TASK-015) the tool still reads it as a candidate, which is harmless here.
+- A later merge of `main` that changes an owned path of this PR needs the same check again, and a new head row.
