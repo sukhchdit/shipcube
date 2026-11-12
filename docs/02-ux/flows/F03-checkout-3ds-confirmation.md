@@ -44,9 +44,36 @@ flowchart TD
   P4 -->|"409 QUOTE_EXPIRED"| P14["Back to review with the expired panel"]
 ```
 
+### 2a. Saved card with CVC re-collection (Should, US-217; W08 §5; SEC-P3-28)
+
+```mermaid
+flowchart TD
+  C0["Saved card selected"] --> C1{"now - auth_time > 12 h? (client prediction)"}
+  C1 -->|No| C2["No CVC field"]
+  C1 -->|Yes| C3["Hosted CVC field mounts under the card<br/>notice: For your security, enter the security code"]
+  C2 --> C4["Pay"]
+  C3 --> C4
+  C4 --> C5{"CVC field shown and empty or incomplete?"}
+  C5 -->|Yes| C6["No request. Inline error; focus into the hosted field"] --> C4
+  C5 -->|No| C7["checkoutOrder (saved_payment_method_id)"]
+  C7 --> C8{"cvc_recollection_required"}
+  C8 -->|"true, field not shown"| C9["Pay back to idle; field mounts; notice announced;<br/>focus into the field. Nothing charged"] --> C4
+  C8 -->|"false, field shown"| C10["Field unmounted; continue"]
+  C8 -->|"matches"| C11["Gateway confirm (CVC inside the iframe)"]
+  C10 --> C11
+  C11 --> C12{"Result"}
+  C12 -->|AUTHORISED| P5b["Confirmation (§3)"]
+  C12 -->|REQUIRES_ACTION| P6b["3-D Secure (§2)"]
+  C12 -->|"FAILED AUTHENTICATION_FAILED<br/>(cvc_check not pass: authorisation voided, shipments QUOTED, attempt counted)"| C13["Alert: We couldn't verify this card's security code.<br/>You haven't been charged."]
+  C13 -->|"Enter the code again"| C3
+  C13 -->|"Use a new card"| P1b["'Use a new card' selected; focus to hosted card fields"]
+  C13 -->|"Confirm it's you (when the contract has a scope, README §5 item 12)"| C14["ReauthDialog (F10 §4)"] --> C15["auth_time fresh: CVC field unmounted"] --> C4
+  C12 -->|"429 PAYMENT_ATTEMPTS_EXCEEDED"| P11b["Blocking alert: too many attempts; Pay and CVC field disabled with reason"]
+```
+
 Notes
 - Only card is rendered (US-211). PayPal, wallet, credit account and payment links never appear in M1.
-- Saved cards (Should, US-217) show as RadioCards above "Use a new card". A saved card that needs 3DS follows the same REQUIRES_ACTION branch.
+- Saved cards (Should, US-217) show as RadioCards above "Use a new card". A saved card that needs 3DS follows the same REQUIRES_ACTION branch. A saved card in a session verified more than 12 h ago follows §2a (CVC re-collection).
 - If the session expires during checkout, the gateway challenge result is preserved by the gateway. On return after sign-in, the page re-reads the payment status before offering "Pay" again, so the user is never charged twice (idempotency key per attempt).
 
 ## 3. Booking progress (US-207) → confirmation (US-195)

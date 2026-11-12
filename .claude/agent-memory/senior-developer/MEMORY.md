@@ -1,0 +1,1 @@
+- [Plan generation workflow](feedback_plan_generation.md) — P4 plan is generated from generator/plan-data.mjs (never hand-edit); late IDs; Bash quoting pitfall

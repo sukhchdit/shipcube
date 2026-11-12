@@ -1,6 +1,8 @@
 # UX specification — Multi-Carrier Shipping Platform (P2, run scope M0 + M1)
 
-Version 1.0 · 2026-11-12 · owner ux-designer · Inputs: `docs/sdlc/BRIEF.md` (§5, §6 for the D-008 admin slice, §8, Appendix D), `docs/01-requirements/PRD.md`, `NFR.md`, `stories/EPIC-*.md`, `docs/sdlc/DECISIONS.md` (D-001..D-034)
+Version 1.1 · 2026-11-12 · owner ux-designer · Inputs: `docs/sdlc/BRIEF.md` (§5, §6 for the D-008 admin slice, §8, Appendix D), `docs/01-requirements/PRD.md`, `NFR.md`, `stories/EPIC-*.md`, `docs/sdlc/DECISIONS.md` (D-001..D-057, D-ARCH-001..028)
+
+**v1.1 (G2-C4):** reconciled with requirements v1.3 (218 Must stories; US-027 promoted to Must by D-047; new US-291, US-292, US-293) and the P3 security amendments: ADR-0006 am. 12–15, ADR-0012 am. 1, ADR-0016 am. 6, ADR-0026 am. 8–9. New or changed specs: re-authentication dialog (W03 §8, F10 §4), sessions list as a Must (W13 §1, W16 §4, F05 §5), admin idle-timeout `alertdialog` (W00 §2.1, F06 §4), CVC re-collection for saved cards (W08 §5, F03 §2), staff enrolment e-mail code (W15 §3, F09 §1), shared-quote route `/q#token=` with the D-055 uniform "no longer available" state (W02 §6, F01 §5), `CARRIER_BUSY` per-carrier notice incl. D-053 unverified callers (W02 §4), D-051 invoice-as-link in the booking e-mail (W17). Decisions D-UX-030..D-UX-036.
 
 The product has two UIs:
 - the **customer web app**: pre-rendered public pages plus a client-rendered authenticated SPA;
@@ -17,12 +19,12 @@ Brand is a neutral placeholder taken from `BRAND_*` configuration. The Appendix 
 | [flows/F02-auth-gate-and-wizard.md](flows/F02-auth-gate-and-wizard.md) | "Book" sign-in gate and quote claim; customer sign-in; wizard navigation, resume and conflicts; rate-relevant change; steps 2, 3 and 5 |
 | [flows/F03-checkout-3ds-confirmation.md](flows/F03-checkout-3ds-confirmation.md) | Checkout gate; card payment with 3-D Secure and declines; booking progress; confirmation; schedule pickup; document download |
 | [flows/F04-public-tracking.md](flows/F04-public-tracking.md) | Public tracking lookup and states |
-| [flows/F05-account.md](flows/F05-account.md) | Shipments list and detail, drafts, cancellation notices, sign-out |
-| [flows/F06-staff-signin-totp-audit.md](flows/F06-staff-signin-totp-audit.md) | Staff sign-in with TOTP, landing, audit viewer, entry detail, entity history, session cap |
+| [flows/F05-account.md](flows/F05-account.md) | Shipments list and detail, drafts, cancellation notices, sign-out, sessions list and remote sign-out (US-027) |
+| [flows/F06-staff-signin-totp-audit.md](flows/F06-staff-signin-totp-audit.md) | Staff sign-in with TOTP, landing, audit viewer, entry detail, entity history, session cap, idle timeout |
 | [flows/F07-password-reset.md](flows/F07-password-reset.md) | Password reset |
 | [flows/F08-email-verification.md](flows/F08-email-verification.md) | Email verification and the checkout gate |
-| [flows/F09-mfa-enrolment.md](flows/F09-mfa-enrolment.md) | Mandatory staff TOTP enrolment and recovery codes; customer optional MFA (Should) |
-| [flows/F10-session-guards-and-errors.md](flows/F10-session-guards-and-errors.md) | Route guards, single-flight refresh, permission denial, error message resolution |
+| [flows/F09-mfa-enrolment.md](flows/F09-mfa-enrolment.md) | Mandatory staff TOTP enrolment (with the e-mailed enrolment code) and recovery codes; customer optional MFA (Should) |
+| [flows/F10-session-guards-and-errors.md](flows/F10-session-guards-and-errors.md) | Route guards, single-flight refresh, permission denial, error message resolution, re-authentication (US-291) |
 | [wireframes/](wireframes/) | W00–W17: one file per screen or screen group, each with 360 px and 1280 px layouts, all six states, interaction details, accessibility and i18n keys |
 | [design-system/tokens.md](design-system/tokens.md) + [tokens.json](design-system/tokens.json) | Colour (light and dark, contrast-checked), type scale, spacing, radius, elevation, motion, sizes, breakpoints, z-index, tenant theming seam. The JSON is in DTCG format and carries the contrast-pair list for the CI test. |
 | [design-system/components.md](design-system/components.md) | Component inventory on Tailwind + Radix + TanStack Table + RHF/Zod + react-i18next: variants, interaction state matrix, accessibility |
@@ -33,23 +35,23 @@ Wireframe files:
 
 | File | Screens |
 |---|---|
-| [W00](wireframes/W00-shells-and-shared-states.md) | Web shell, admin shell, admin welcome, the six shared states, not found, toasts |
+| [W00](wireframes/W00-shells-and-shared-states.md) | Web shell, admin shell, admin idle-timeout dialog (§2.1), admin welcome, the six shared states, not found, toasts |
 | [W01](wireframes/W01-home-quote-widget.md) | S-W01 Home with quote widget |
-| [W02](wireframes/W02-quote-results.md) | S-W02 Results, compare (Should), S-W02s shared quote (Should) |
-| [W03](wireframes/W03-customer-auth.md) | S-A01..S-A06 Sign in, two-step, register, verify, forgot, reset |
+| [W02](wireframes/W02-quote-results.md) | S-W02 Results, compare (Should), S-W02s shared quote (Should, `/q#token=`) |
+| [W03](wireframes/W03-customer-auth.md) | S-A01..S-A06 Sign in, two-step, register, verify, forgot, reset; §8 ReauthDialog "Confirm it's you" (US-291, shared by both apps) |
 | [W04](wireframes/W04-wizard-shell-and-addresses.md) | Wizard shell, S-B01 Addresses, S-B01a Choose service again |
 | [W05](wireframes/W05-wizard-contents-customs.md) | S-B02 Contents and customs |
 | [W06](wireframes/W06-wizard-collection.md) | S-B03 Collection (pickup, drop-off) |
 | [W07](wireframes/W07-wizard-extras-review-basket.md) | S-B04 Extras (Should), S-B05 Review and basket |
-| [W08](wireframes/W08-checkout.md) | S-B06 Checkout |
+| [W08](wireframes/W08-checkout.md) | S-B06 Checkout; §5 CVC re-collection for saved cards (Should, US-217) |
 | [W09](wireframes/W09-booking-progress-confirmation.md) | S-B07 Progress and confirmation, schedule-pickup dialog |
 | [W10](wireframes/W10-public-tracking.md) | S-W03 Public tracking |
 | [W11](wireframes/W11-account-shipments-and-drafts.md) | S-C01 Overview, S-C02 Shipments, S-C04 Drafts |
 | [W12](wireframes/W12-account-shipment-detail.md) | S-C03 Shipment detail |
-| [W13](wireframes/W13-account-settings-should.md) | S-C05..S-C10 Account settings (all Should or Could), S-D08 shared sessions component |
+| [W13](wireframes/W13-account-settings-should.md) | S-C07 Security: "Where you're signed in" (**Must**, US-027) plus the Should sections; S-C05, S-C06, S-C08..S-C10 (Should or Could); the shared `SessionList` component used by S-D08. The file name is kept for link stability. |
 | [W14](wireframes/W14-prohibited-items-legal.md) | S-W04 Prohibited items, S-W05 Legal and help |
-| [W15](wireframes/W15-admin-auth.md) | S-D01 Staff sign-in, S-D02 MFA challenge, S-D03 MFA enrolment |
-| [W16](wireframes/W16-admin-home-audit-sessions.md) | S-D04 Welcome, S-D05 Audit list, S-D06 Entry detail, S-D07 Entity history, S-D08 My sessions |
+| [W15](wireframes/W15-admin-auth.md) | S-D01 Staff sign-in (incl. the idle sign-out notice), S-D02 MFA challenge, S-D03 MFA enrolment (incl. the e-mailed enrolment code) |
+| [W16](wireframes/W16-admin-home-audit-sessions.md) | S-D04 Welcome, S-D05 Audit list, S-D06 Entry detail, S-D07 Entity history, S-D08 My sessions (**Must**, US-027) |
 | [W17](wireframes/W17-emails-and-documents.md) | S-E01..S-E04 Emails, S-E05 Commercial or pro-forma invoice PDF |
 
 ## 2. Screen inventory
@@ -59,10 +61,11 @@ Wireframe files:
 | Screen | Name | App | Route | MoSCoW | Wireframe | Flow | Must stories | Should / Could stories |
 |---|---|---|---|---|---|---|---|---|
 | — | Web shell, account layout | web | all | Must | W00 §1 | F10 | US-019, US-020, US-070, US-102, US-104, US-105, US-107, US-108, US-117, US-120 | US-114, US-118 |
-| — | Admin shell | admin | all | Must | W00 §2 | F10 | US-032, US-070, US-110 | US-111 |
+| — | Admin shell (incl. idle-timeout dialog, W00 §2.1) | admin | all | Must | W00 §2 | F10, F06 §4 | US-032, US-070, US-110 | US-111, US-033 (idle dialog and cap warning) |
+| — | ReauthDialog "Confirm it's you" (overlay, both apps) | web, admin | overlay on the calling screen | Must | W03 §8 | F10 §4 | US-291 | Consumers: US-026, US-028, US-083, US-085, US-217, US-270 (Should or Could) |
 | S-W01 | Home + quote widget | web | `/{lng}/` | Must | W01 | F01 §1 | US-109, US-112, US-139, US-155, US-156, US-157, US-158, US-173 | — |
-| S-W02 | Quote results | web | `/quote/{id}` | Must | W02 | F01 §2–4 | US-143, US-149, US-154, US-155, US-156, US-159, US-160, US-161, US-167 | US-162, US-163, US-164, US-165, US-169 |
-| S-W02s | Shared quote (read-only) | web | `/q/{token}` | Should | W02 §6 | F01 §5 | — | US-165 |
+| S-W02 | Quote results | web | `/quote/{id}` | Must | W02 | F01 §2–4 | US-143, US-149, US-154, US-155, US-156, US-159, US-160, US-161, US-167 (US-293 surfaces here as the `CARRIER_BUSY` per-carrier notice, W02 §4) | US-162, US-163, US-164, US-165, US-169 |
+| S-W02s | Shared quote (read-only) | web | `/q#token=…` (ADR-0016 am. 6a; the token stays in the fragment, D-UX-034) | Should | W02 §6 | F01 §5 | — | US-165 |
 | S-W03 | Public tracking | web | `/{lng}/track` | Must | W10 | F04 | US-040, US-112, US-243, US-247, US-248, US-249 | US-250 |
 | S-W04 | Prohibited items | web | `/{lng}/prohibited-items` | Must | W14 §1 | — | US-055, US-112 | US-170 |
 | S-W05 | Legal pages, help | web | `/{lng}/legal/*`, `/{lng}/help` | Must | W14 §2–3 | — | US-059, US-112 | US-060, US-114 |
@@ -79,7 +82,7 @@ Wireframe files:
 | S-B03 | Step 3 Collection | web | `/book/{id}/collection` | Must | W06 | F02 §5 | US-189, US-232, US-233, US-234 | US-239 (drop-off, Should per D-036), US-240 (not built) |
 | S-B04 | Step 4 Extras | web | `/book/{id}/extras` | Should | W07 §1 | — | — | US-190 |
 | S-B05 | Step 5 Review and basket | web | `/book/{id}/review` | Must | W07 §2 | F02 §6, F03 §1 | US-149, US-150, US-167, US-191, US-192, US-208 | US-193, US-194 |
-| S-B06 | Step 6 Checkout | web | `/checkout/{orderId}` | Must | W08 | F03 §1–2 | US-208, US-209, US-210, US-211, US-212, US-214 | US-217 |
+| S-B06 | Step 6 Checkout | web | `/checkout/{orderId}` | Must | W08 | F03 §1–2 | US-208, US-209, US-210, US-211, US-212, US-214 | US-217 (saved cards incl. CVC re-collection, W08 §5) |
 | S-B07 | Progress + confirmation (step 7) | web | `/orders/{orderId}/confirmation` | Must | W09 | F03 §3–5 | US-072, US-195, US-204, US-205, US-206, US-207, US-223, US-224, US-225, US-226, US-235, US-236 | US-188, US-228, US-239 |
 | S-C01 | Account overview | web | `/account` | Must (shell) | W11 §1 | F05 | US-070, US-108 | US-258 |
 | S-C02 | Shipments list | web | `/account/shipments` | Must | W11 §2 | F05 §1 | US-037, US-254, US-257 | — |
@@ -87,19 +90,19 @@ Wireframe files:
 | S-C04 | Drafts | web | `/account/drafts` | Must | W11 §3 | F05 §2 | US-256, US-257 | — |
 | S-C05 | Saved quotes | web | `/account/quotes` | Should | W13 §5 | — | — | US-164, US-259 |
 | S-C06 | Address book | web | `/account/addresses` | Should | W13 §4 | — | — | US-262, US-263, US-264 |
-| S-C07 | Security (password, MFA, sessions) | web | `/account/security` | Should | W13 §1 | F09 §2 | — | US-026, US-027, US-028, US-267 |
+| S-C07 | Security: "Where you're signed in" (Must section) + password and MFA (Should sections) | web | `/account/security` | Must (D-047, D-UX-030) | W13 §1 | F05 §5, F09 §2 | US-027 | US-026, US-028, US-267 |
 | S-C08 | Preferences and notifications | web | `/account/preferences` | Should | W13 §3 | — | — | US-266, US-272 |
 | S-C09 | Organisation and team | web | `/account/organisation` | Should | W13 §7 | — | — | US-081..US-085, US-268, US-269 |
 | S-C10 | Payment methods | web | `/account/payment-methods` | Should | W13 §6 | — | — | US-217, US-265 |
 | — | Privacy (export, delete) | web | `/account/privacy` | Could | not specified (Could, D-027) | — | — | US-270, US-271 |
 | S-D01 | Staff sign-in | admin | `/sign-in` | Must | W15 §1 | F06 §1 | US-017, US-022, US-030, US-031, US-040 | US-033 |
 | S-D02 | Staff MFA challenge | admin | `/sign-in/verify` | Must | W15 §2 | F06 §1 | US-024, US-031 | — |
-| S-D03 | Staff MFA enrolment + recovery codes | admin | `/mfa/enrol` | Must | W15 §3 | F09 §1 | US-023, US-025, US-031 | — |
+| S-D03 | Staff MFA enrolment (e-mailed enrolment code outside local/test) + recovery codes | admin | `/mfa/enrol` | Must | W15 §3 | F09 §1 | US-023, US-025, US-031 | — |
 | S-D04 | Admin welcome | admin | `/` | Must | W00 §2 | F06 §1 | US-032, US-110 | — |
 | S-D05 | Audit list | admin | `/audit` | Must | W16 §1 | F06 §2 | US-032, US-037, US-093, US-097 | US-111 |
 | S-D06 | Audit entry detail | admin | `/audit/entries/{id}` | Must | W16 §2 | F06 §2 | US-032, US-098 | — |
 | S-D07 | Entity history | admin | `/audit/entities/{e}/{id}` | Must (route) | W16 §3 | F06 §2 | US-032 | US-099 |
-| S-D08 | My sessions | admin | `/account/sessions` | Should (in D-008 slice) | W16 §4, W13 §1 | — | — | US-027 |
+| S-D08 | My sessions | admin | `/account/sessions` | Must (D-047; REQ-ADMIN-007 itself stays Should) | W16 §4, W13 §1 | F05 §5 | US-027 | US-026 (staff recovery-code regeneration, behind ReauthDialog) |
 | S-D09 | Not found (admin) | admin | `*` | Must | W00 §3.7 | F10 | US-032, US-110 | — |
 | S-E01 | Email: verification | email | — | Must | W17 §2 | F08 | US-016, US-279, US-280, US-282 | — |
 | S-E02 | Email: password reset | email | — | Must | W17 §2 | F07 | US-021, US-279, US-280, US-282 | — |
@@ -111,7 +114,16 @@ Design-system-only Must stories (no single screen; they are delivered by the des
 
 ## 3. Must-story coverage (UX trace)
 
-The P2 exit criterion requires flows, wireframes, states, tokens and accessibility notes for every Must story that has a UI. After D-036 (US-239 moved from Must to Should), there are **214 Must stories**. **108 have a UI or a user-visible state** (direct or surfaced). **106 are non-UI** (back end, tooling, data, adapters) and are listed in §3.2 with the reason. US-239 (drop-off) stays fully specified (W06, W09) as a Should.
+The P2 exit criterion requires flows, wireframes, states, tokens and accessibility notes for every Must story that has a UI. Requirements v1.3 (PRD §7: D-036 moved US-239 to Should; D-046 added US-291, D-047 promoted US-027, D-048 added US-293, D-050 added US-292) give **218 Must stories**. **110 have a UI or a user-visible state** (direct or surfaced). **108 are non-UI** (back end, tooling, data, adapters, system jobs) and are listed in §3.2 with the reason. US-239 (drop-off) stays fully specified (W06, W09) as a Should.
+
+v1.3 delta against v1.0 (214 = 108 UI + 106 non-UI):
+
+| Story | Change | Classification | Where specified |
+|---|---|---|---|
+| US-027 Sessions list and remote sign-out | Should → Must (D-047) | UI | S-C07 "Where you're signed in" (W13 §1), S-D08 (W16 §4), flow F05 §5; states W13 §1.3 and W16 §5; copy content §4.9 |
+| US-291 Re-authentication primitive, `auth_time`, age-based step-up | New Must (D-046) | UI: the ReauthDialog "Confirm it's you" overlay used by every scoped action in both apps | W03 §8, F10 §4, components `ReauthDialog`, content §4.10, accessibility §6 and §11 |
+| US-292 Unverified-account expiry and pre-hijack recovery | New Must (D-050) | Non-UI (system job). Visible effects are owned by other stories: sign-in for an expired account is the generic `INVALID_CREDENTIALS` (US-017, W03 §1); re-registration is the normal 202 panel (US-015, W03 §3); the verification e-mail states the 7-day limit (S-E01, W17 §2) | §3.2 |
+| US-293 Anonymous rate-shopping budget and daily carrier quota guard | New Must (D-048) | Non-UI (admission control in the carrier layer). Visible effect is owned by US-160: a `CARRIER_BUSY` carrier shows the per-carrier partial notice plus the "Some carriers didn't respond" banner (W02 §4, content §4.2) | §3.2 |
 
 ### 3.1 Must stories with UI → where specified
 
@@ -126,7 +138,8 @@ The P2 exit criterion requires flows, wireframes, states, tokens and accessibili
 | US-022 | Delay and lockout messages | S-A01, S-D01 | F02 §1a, F06 §1 | W03 §1 |
 | US-023 | TOTP enrolment, recovery codes | S-D03 | F09 §1 | W15 §3 |
 | US-024 | MFA challenge | S-A06, S-D02 | F02 §1a, F06 §1 | W15 §2 |
-| US-025 | Mandatory staff enrolment | S-D03 | F09 §1, F10 §1 | W15 §4 |
+| US-025 | Mandatory staff enrolment (incl. e-mailed enrolment code, ADR-0006 am. 14) | S-D03 | F09 §1, F10 §1 | W15 §3–4 |
+| US-027 | Sessions list and remote sign-out | S-C07 (sessions section), S-D08 | F05 §5 | W13 §1, W16 §4, components `SessionList` |
 | US-030 | Admin route guard, staff-only admission | S-D01 | F06 §1, F10 | IA §4.2 |
 | US-031 | Staff sign-in, MFA, enrolment screens | S-D01, S-D02, S-D03 | F06 §1, F09 | W15 |
 | US-032 | Admin landing, navigation, audit routes | S-D04..S-D07, S-D09, admin shell | F06 | IA §2.4 |
@@ -225,22 +238,23 @@ The P2 exit criterion requires flows, wireframes, states, tokens and accessibili
 | US-280 | Recipient locale | S-E01..S-E04 | — | W17 §1, content §5 |
 | US-282 | Verification, reset, security emails | S-E01, S-E02, S-E03 | F07, F08 | W17 §2 |
 | US-283 | Booking confirmation email | S-E04 | F03 | W17 §2 |
+| US-291 | Re-authentication dialog ("Confirm it's you"), age-based step-up prompt | ReauthDialog overlay (web and admin); consumers S-C07, S-C09, S-C10, S-D08 (all Should consumers) | F10 §4 | W03 §8, components `ReauthDialog` |
 
-**Must UI stories not covered: 0.**
+**Must UI stories not covered: 0** (110 of 110; 100 %).
 
-Six states: every Must screen in §2 has a states table covering loading, empty, error, partial, permission-denied and offline, or an explicit "n/a" with the reason (for example, auth screens have no partial state, US-031). Emails and the invoice PDF (S-E01..S-E05) are non-interactive outputs and are exempt from screen states.
+Six states: every Must screen in §2 has a states table covering loading, empty, error, partial, permission-denied and offline, or an explicit "n/a" with the reason (for example, auth screens have no partial state, US-031). Emails and the invoice PDF (S-E01..S-E05) are non-interactive outputs and are exempt from screen states. Overlays have their own state tables: ReauthDialog (W03 §8.4), admin idle-timeout dialog (W00 §2.1), `SessionList` (W13 §1.3, W16 §5).
 
-### 3.2 Must stories judged non-UI (106)
+### 3.2 Must stories judged non-UI (108)
 
 These have no screen and no user-visible state of their own. Where they influence a UI, the influence is handled by the UI story named in brackets.
 
 | Epic | Stories | Reason |
 |---|---|---|
 | EPIC-01 Platform foundation | US-001..US-012 (12) | Tooling, config, logging, queues, outbox, health endpoints |
-| EPIC-02 Identity | US-018 | Cookie rotation and reuse detection (its visible effect is US-020's signed-out redirect) |
+| EPIC-02 Identity | US-018, US-292 (2) | US-018: cookie rotation and reuse detection (its visible effect is US-020's signed-out redirect). US-292: `housekeeping` job that expires unverified accounts after 7 days (its visible effects are US-017's generic `INVALID_CREDENTIALS` and US-015's normal register panel; the 7-day limit is stated in the S-E01 e-mail) |
 | EPIC-03 Orgs, RBAC, RLS | US-061, US-062, US-063, US-064, US-065, US-066, US-067, US-068, US-071, US-074, US-075, US-076, US-077, US-078, US-079, US-080 (16) | Server-side model, catalogue, policies, tests (UI effect via US-069, US-070, US-072) |
 | EPIC-04 Audit | US-086, US-087, US-088, US-089, US-090, US-091, US-092, US-094, US-095, US-096 (10) | Capture, chain, immutability, partitions, test generator (fields displayed by US-098) |
-| EPIC-06 Carriers | US-121..US-137 (17) | Adapters, contract tests, resilience, SSE transport (rendered by US-160) |
+| EPIC-06 Carriers | US-121..US-137, US-293 (18) | Adapters, contract tests, resilience, SSE transport, anonymous budget and daily quota guard (rendered by US-160; `CARRIER_BUSY` uses the per-carrier partial notice, W02 §4) |
 | EPIC-07 Pricing | US-138, US-140, US-141, US-142, US-146, US-147, US-148, US-151, US-152 (9) | Pure engine and configuration (output rendered via US-149 and US-159) |
 | EPIC-09 Booking | US-187 | Adapter-internal customs mapping |
 | EPIC-10 Saga, payments | US-197, US-198, US-199, US-200, US-201, US-202, US-203, US-213 (8) | State machine, gateway abstraction, order numbers, saga, webhooks |
@@ -250,14 +264,16 @@ These have no screen and no user-visible state of their own. Where they influenc
 | EPIC-16 API conventions | US-034, US-038, US-041, US-042, US-043, US-044, US-045, US-046, US-047, US-048 (10) | OpenAPI, idempotency, data representation, SSE convention, headers, CSRF, hardening, scanning |
 | EPIC-17 Reference data | US-049, US-050, US-051, US-052, US-053, US-056, US-057, US-058 (8) | Seeds, endpoints, sequences, pack store |
 
-Check: 108 UI + 106 non-UI = 214 Must stories (D-036 counts).
+Check: 110 UI + 108 non-UI = 218 Must stories (PRD v1.3 §7: 218 Must; per-epic Must counts in the `stories/EPIC-*.md` summary tables sum to 218). Non-UI subtotal: 12 + 2 + 16 + 10 + 18 + 9 + 1 + 8 + 3 + 4 + 7 + 10 + 8 = 108.
+
+**Must UI coverage: 110 / 110 = 100 %.** Should-only UI specified in this version for completeness (no Must count effect): admin idle-timeout dialog (US-033, W00 §2.1), CVC re-collection (US-217, W08 §5).
 
 ## 4. Milestone staging of screens
 
 | Milestone | Screens delivered |
 |---|---|
 | M0 (R0 `v0.1.0-m0`) | Web shell, account overview shell (S-C01 minimal), S-A01..S-A06, S-W06; admin shell, S-D01..S-D07, S-D09; design system and shared states; S-E01..S-E03 rendering via the mail catcher. The M0 guest quote is demonstrated through the API (PRD §6.1 note), so no widget UI is needed in M0. |
-| M1 (R1 `v0.1.0`) | S-W01..S-W05, S-B01..S-B07, S-C02..S-C04, S-E04, S-E05; Should screens as scheduled |
+| M1 (R1 `v0.1.0`) | S-W01..S-W05, S-B01..S-B07, S-C02..S-C04, S-C07 (sessions section; the Should sections as scheduled), S-D08, ReauthDialog (both apps), S-E04, S-E05; Should screens as scheduled |
 
 ## 5. Open items for other agents (non-blocking; UX defaults already applied)
 
@@ -274,12 +290,16 @@ Check: 108 UI + 106 non-UI = 214 Must stories (D-036 counts).
 | 9 | US-239 retagged Should (D-036, G1-C2). UX still specifies the drop-off list and confirmation content, so it can be built if scheduled. | product-manager | Resolved; no UX change |
 | 10 | Carrier logos are trademarks. Only operator-supplied logo assets per carrier (configuration) are shown; the repository ships monograms. | principal-architect (config seam) | D-UX-018 |
 | 11 | Spanish number grouping: helpers use `useGrouping: 'always'` to match US-116's "1.234,50" expectation | qa-lead (test data), principal-architect | D-UX-028 |
+| 12 | The SEC-P3-28 fallback "confirm it's you, then retry" after a failed CVC check (product intent confirmed by D-054) needs a `createReauthProof` call, but `ReauthRequest.action_scope` at `cef043f` has no checkout scope (the enum lists 7 scopes, none for payment). Needs a scope (proposed `payment.checkout`) or a statement that the fallback uses an existing scope. Part of SEC-COND-06 / G2-C3. | principal-architect, api-designer | D-UX-033: the "Confirm it's you" action on the CVC failure alert renders only when the contract has a scope for it; until then the alert offers "Enter the code again" and "Use a new card" |
+| 13 | Re-authentication for MFA users accepts only a TOTP code (`ReauthRequest`: `password` or `totp_code`); recovery codes are not accepted. A user who has lost their authenticator cannot complete always-scope actions (for example `mfa.totp.disable`) without support. | principal-architect, product-manager | D-UX-031: no recovery-code path in the dialog; the dialog shows a Help link ("Can't use your authenticator app?") to S-W05 help content |
+| 14 | `createReauthProof` lists no `ACCOUNT_DELAYED` / `ACCOUNT_LOCKED` in `x-error-codes`, although US-291 says failed re-authentications count toward lockout (US-022). | api-designer | ReauthDialog handles both codes if returned (W03 §8.3) |
+| 15 | The S-E01 verification e-mail states the unverified-account limit from `AUTH_UNVERIFIED_TTL` (US-292). The template receives the value as a pre-formatted `{days}` variable from configuration, never a literal. | principal-architect (template variable), technical-writer | W17 §2 |
 
 ### Resolved by architecture (principal-architect, 2026-11-12; decisions D-ARCH-011..D-ARCH-016 in `docs/sdlc/DECISIONS.md`)
 
 | # | Resolution | Where |
 |---|---|---|
-| 1 | Link format fixed: `<app origin>/verify-email#token=…`, `/reset-password#token=…`, `/invitations/accept#token=…` (unprefixed app routes); the SPA posts `{token}` in a body and clears the fragment; no other link parameter. Share links (US-165, Should) follow the same rule as `/q#token=…`; ux-designer aligns the S-W02s route (`/q/{token}`) when US-165 is scheduled. | ADR-0006 amendment 8; ADR-0016 amendment 6a; `docs/03-architecture/api/README.md` §1 |
+| 1 | Link format fixed: `<app origin>/verify-email#token=…`, `/reset-password#token=…`, `/invitations/accept#token=…` (unprefixed app routes); the SPA posts `{token}` in a body and clears the fragment; no other link parameter. Share links (US-165, Should) follow the same rule as `/q#token=…`. **Aligned in v1.1:** S-W02s route is `/q#token=…` (IA §4.1, W02 §6); the page posts the token to `resolveSharedQuote` and, unlike single-use credentials, keeps the fragment so the link stays re-shareable (D-UX-034). | ADR-0006 amendment 8; ADR-0016 amendment 6a; `docs/03-architecture/api/README.md` §1 |
 | 2 | `localStorage` map `qt:<quoteId>` → `{token, expires_at}`; written once from `createQuote`, deleted on claim, expiry, sign-out or 404; survives reload, new tab and the register/sign-in detour; `X-Quote-Token` header unchanged; cookie and `sessionStorage` rejected with reasons. | ADR-0026 amendment 1; api/README §8 |
 | 3 | **Registration does not issue a session** (202 identical for new and existing e-mails, EC-A01). The F02 assumption holds client-side: the web app calls `loginUser` immediately with the in-memory credentials; on `INVALID_CREDENTIALS` it shows the sign-in panel with the same `returnUrl` (the F02 fallback). No UX change needed beyond keeping the fallback panel. | ADR-0006 amendment 10; api/README §8 |
 | 4 | Client-side QR: `uqr` (MIT, zero deps) renders the `provisioning_uri` as a React SVG in `packages/ui` (`<QrCode>`, `role="img"`, fixed dark-on-light, ≥ 200 px) next to the manual key; no server image endpoint; API contract unchanged. | ADR-0026 amendment 2; ADR-0025 (uqr); ADR-0006 amendment 11 |
@@ -293,4 +313,4 @@ Check: 108 UI + 106 non-UI = 214 Must stories (D-036 counts).
 
 ## 6. Decisions
 
-Logged in `docs/sdlc/DECISIONS.md` as D-UX-001..D-UX-029. Architecture resolutions of §5: D-ARCH-011..D-ARCH-016.
+Logged in `docs/sdlc/DECISIONS.md` as D-UX-001..D-UX-036 (D-UX-030..036 are the v1.1 reconciliation for G2-C4). Architecture resolutions of §5: D-ARCH-011..D-ARCH-016.

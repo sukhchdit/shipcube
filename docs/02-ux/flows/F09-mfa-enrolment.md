@@ -7,7 +7,15 @@ Stories: **US-023, US-025, US-031** (Must, staff) · US-026, US-267 (Should, cus
 ```mermaid
 flowchart TD
   M0["Staff signs in with password; account has no TOTP"] --> M1["Session restricted: every route except /mfa/enrol<br/>redirects there (403 MFA_ENROLMENT_REQUIRED)"]
-  M1 --> M2["Step 1 of 3 Set up your authenticator app:<br/>QR code + setup key (copy) + supported app guidance (no brand names)"]
+  M1 --> E0["enrolTotp"]
+  E0 -->|"OK (local/test, or re-enrolment)"| M2
+  E0 -->|"403 MFA_ENROLMENT_CODE_REQUIRED (first enrolment outside local/test)"| E1["Step 1 of 4 Confirm your email:<br/>requestTotpEnrolmentCode sent once (202); code field"]
+  E1 --> E2{"enrolTotp with enrolment_code"}
+  E2 -->|"403 MFA_ENROLMENT_CODE_REQUIRED"| E3["Inline: That code didn't work or has expired.<br/>Send a new code (60 s cooldown)"] --> E1
+  E2 -->|"429 MFA_LOCKED / RATE_LIMITED"| E4["Alert with time; field disabled"]
+  E2 -->|OK| M2
+  M0 -.->|"no TOTP 24 h after first sign-in (housekeeping)"| E5["Account SUSPENDED (MFA_ENROLMENT_OVERDUE); sessions revoked;<br/>sign-in shows the generic INVALID_CREDENTIALS; reactivation by ops CLI in M1"]
+  M2["Step 1 of 3 (or 2 of 4) Set up your authenticator app:<br/>QR code + setup key (copy) + supported app guidance (no brand names)"]
   M2 --> M3["Step 2 of 3 Enter the 6-digit code"]
   M3 --> M4{"Response"}
   M4 -->|"401 MFA_INVALID"| M5["Inline error: That code didn't match. Check the time on your phone and try the current code"]
@@ -25,8 +33,8 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  C0["Security: Two-step verification Off"] --> C1["Turn on"] --> C2["Re-authenticate: password"] --> C3["Same 3 steps as staff"] --> C4["Status On; recovery codes remaining: 10"]
-  C4 --> C5["Turn off"] --> C6["Re-authenticate: code"] --> C7["AlertDialog: Turn off two-step verification? Other sessions will be signed out"] --> C8["Status Off; toast"]
+  C0["Security: Two-step verification Off"] --> C1["Turn on"] --> C2["ReauthDialog: password (W03 §8)"] --> C3["Same 3 steps as staff (no e-mail code step for customers)"] --> C4["Status On; recovery codes remaining: 10"]
+  C4 --> C5["Turn off"] --> C7["AlertDialog: Turn off two-step verification? Other sessions will be signed out"] --> C6["ReauthDialog: code (scope mfa.totp.disable), opens after the confirmation, right before the request"] --> C8["Status Off; toast"]
   C4 -.2 or fewer codes left.-> C9["Warning: You have 2 recovery codes left. Generate new codes"]
 ```
 

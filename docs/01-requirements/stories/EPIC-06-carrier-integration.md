@@ -874,7 +874,7 @@ Feature: Fixtures, README and live-sandbox opt-in
 - **Linked REQs:** REQ-CARR-022, REQ-CARR-023
 - **Linked NFRs (optional):** NFR-RES-007
 - **As an** operator protecting paid bookings and the sandbox carrier accounts, and as a guest shipper, **I want** anonymous rate shopping bounded by a global per-account budget and a daily quota guard **so that** a distributed guest flood can neither starve paid bookings nor get a carrier account suspended, while guests still get cached results and the other carriers' prices.
-- **Notes:** Admission control inside the carrier layer; there is no principal-facing route. Defaults are configuration (A-094, D-048): `CARRIER_ANON_CALLS_PER_MIN=120` per account (Redis token bucket shared by all API replicas), anonymous callers hold at most 3 of the 6 `rates` slots, `CARRIER_DAILY_QUOTA` per account (`0` disables the guard, the Mock default; seed 500 for the DHL sandbox), `CARRIER_QUOTA_RESERVE_PCT=40`. A refusal is a local admission rejection (`CARRIER_BUSY`, no network call) with the REQ-BOOK-023 saga semantics (US-205). Security events `carrier_anon_budget_exhausted` and `carrier_quota_pressure` per REQ-SEC-012. Audit: not required (no entity mutation; the state is a Redis counter and metrics). Not demo-critical. Tests: SEC-TC-40 (k6 flood), SEC-TC-41 (day counter).
+- **Notes:** Admission control inside the carrier layer; there is no principal-facing route. Defaults are configuration (A-094, A-099, D-048, D-053): `CARRIER_ANON_CALLS_PER_MIN=120` per account (Redis token bucket shared by all API replicas), anonymous callers hold at most 3 of the 6 `rates` slots, `CARRIER_DAILY_QUOTA` per account (`0` disables the guard, the Mock default; seed 500 for the DHL sandbox), `CARRIER_QUOTA_RESERVE_PCT=40`, `CARRIER_QUOTA_ORG_SHARE_PCT=10`. An anonymous caller is a guest **or a signed-in user in `PENDING_VERIFICATION`** (SEC-P3-29, D-053); the class is decided per request from the user status. Each organisation's `rates`-pool calls to an account are capped at 10 % of that account's daily quota (off when the quota is `0`; never applies to transactional calls); beyond it the organisation gets `CARRIER_BUSY` or cached results and `carrier_quota_org_share_exhausted` fires at most once per organisation per account per minute. The `quote-create` rate class (30/min + 300/h per user, 1,000/h per organisation) on authenticated `POST /quotes` is enforced by the limiter of US-040, not here. A refusal is a local admission rejection (`LOCAL_REJECT`: `CARRIER_BUSY`, no network call) with the REQ-BOOK-023 saga semantics (US-205). Security events `carrier_anon_budget_exhausted`, `carrier_quota_pressure` and `carrier_quota_org_share_exhausted` per REQ-SEC-012. Audit: not required (no entity mutation; the state is a Redis counter and metrics). Not demo-critical. Tests: SEC-TC-40 (k6 flood), SEC-TC-41 (day counter), SEC-TC-62 (unverified-as-anonymous, `quote-create`, organisation share).
 
 #### Acceptance criteria
 Permission path: not applicable — admission control inside the carrier layer, no principal-facing route
@@ -911,11 +911,37 @@ Feature: Anonymous rate-shopping budget and daily carrier quota guard
     Then exactly one security event carrier_anon_budget_exhausted is logged for acct-mock in that minute
     And the reject counter labelled caller_class=anonymous increases by 500
 
-  Scenario: Authenticated quotes are unaffected by the anonymous budget
+  Scenario: Verified users' quotes are unaffected by the anonymous budget
     Given the anonymous bucket and the anonymous slots for acct-mock are exhausted
-    When an authenticated user requests a quote
+    When a signed-in user whose e-mail is verified requests a quote
     Then acct-mock is called and returns status OK
     And no CARRIER_BUSY is produced for that user
+
+  Scenario: An unverified signed-in user is an anonymous caller for the carrier budget
+    Given the anonymous bucket for acct-mock is exhausted
+    And a signed-in user whose status is PENDING_VERIFICATION
+    When that user requests a quote
+    Then acct-mock is answered with carrier_error {code: CARRIER_BUSY} or cached results without a carrier call, exactly like a guest
+    And the reject counter labelled caller_class=anonymous increases
+    When the user verifies their e-mail and requests a quote with the same session
+    Then the quote is counted as verified and acct-mock is called
+
+  Scenario: One organisation cannot use more than its share of an account's daily quota
+    Given CARRIER_DAILY_QUOTA=500 and CARRIER_QUOTA_ORG_SHARE_PCT=10 for acct-dhl
+    And verified users of organisation A have caused 50 rates calls to acct-dhl today while the account counter is 120 (24 percent)
+    When a user of organisation A requests a quote
+    Then acct-dhl is answered with carrier_error {code: CARRIER_BUSY} or cached results for organisation A without a carrier call
+    And one security event carrier_quota_org_share_exhausted for organisation A and acct-dhl is emitted, and at most one per minute however many further calls are refused
+    And a quote by a user of organisation B still calls acct-dhl and returns OK
+    And a createShipment, cancelShipment, schedulePickup and track by organisation A on acct-dhl are still admitted
+
+  Scenario: The organisation share resets with the day counter and is off when the guard is off
+    Given organisation A exhausted its share of acct-dhl at 23:59:59 UTC
+    When the fake clock passes 00:00:00 UTC
+    Then a quote by organisation A calls acct-dhl again
+    Given CARRIER_DAILY_QUOTA=0 for acct-mock
+    When organisation A causes 1000 rates calls to acct-mock in a day
+    Then no organisation-share refusal and no carrier_quota_org_share_exhausted event occurs
 
   Scenario: Anonymous fan-out stops at 60 percent of the daily quota
     Given a fake clock at 10:00 UTC, CARRIER_DAILY_QUOTA=500 and CARRIER_QUOTA_RESERVE_PCT=40

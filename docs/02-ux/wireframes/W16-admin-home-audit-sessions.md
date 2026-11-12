@@ -1,6 +1,6 @@
 # W16 — Admin welcome, audit viewer, entry detail, entity history, my sessions (S-D04..S-D08)
 
-Routes (admin) `/`, `/audit`, `/audit/entries/{id}`, `/audit/entities/{entity}/{id}`, `/account/sessions` · Permission `audit:read` (audit routes), staff session (others) · Stories: **US-032, US-097, US-098, US-093, US-110, US-070** · US-099, US-027, US-111 (Should) · Flow: [F06 §2](../flows/F06-staff-signin-totp-audit.md#2-audit-viewer) · D-008 (read-only; no export or regulator report in this run)
+Routes (admin) `/`, `/audit`, `/audit/entries/{id}`, `/audit/entities/{entity}/{id}`, `/account/sessions` · Permission `audit:read` (audit routes), staff session (others) · Stories: **US-032, US-097, US-098, US-093, US-110, US-070, US-027** (US-027 Must since D-047: S-D08) · US-099, US-111, US-033 (Should) · Flow: [F06 §2](../flows/F06-staff-signin-totp-audit.md#2-audit-viewer) · D-008 (read-only; no export or regulator report in this run)
 
 **Data needed (list):** a keyset page of entries (occurred-at, actor display name + actor type, role names at the time, organisation name, on-behalf organisation, action, entity name + ID, outcome, IP, source app); filter option lists (users: type-ahead; roles; organisations: operator scope; entity names; actions enum; outcomes enum); the latest chain-verification result (status OK/BROKEN/FAILED/none, verified-at, first broken entry ID). **Detail:** every stored field (REQ-AUDIT entry fields), old/new diff with redaction markers, reason (if any), previous hash and entry hash, user agent raw + parsed, correlation ID and session ID.
 
@@ -105,8 +105,21 @@ One column: Who, Where, Change (stacked: per field "line1 — Before: 12 Main St
 ```
 When US-099 is not built, the route still exists (US-032 deep link) and renders the list endpoint filtered by entity name and ID: the same table with the default newest-first order and the heading "Entries for shipment 0193…77". No placeholder.
 
-## 4. My sessions (S-D08)
-Uses the "Where you're signed in" component (W13 §1) inside the admin shell. Columns: Device, Location (coarse IP), Signed in, Last active, Action. The current session is labelled "This device". Actions: "Sign out" per row, "Sign out of all other devices" (AlertDialog).
+## 4. My sessions (S-D08, **Must** via US-027, D-047)
+Uses the shared `SessionList` component ("Where you're signed in", W13 §1) inside the admin shell, with the same columns, actions, states and copy. Columns: Device, IP address range, Signed in, Last active, Action. The current session is labelled "This device" and its action reads "Sign out" (signs out this device, US-019). Actions: "Sign out" per row, "Sign out of all other devices" (AlertDialog). Flow: [F05 §5](../flows/F05-account.md).
+
+```
+1280 (admin shell)
+| # My sessions                                                                           |
+| These are the devices signed in to your staff account. Sign out any you don't recognise. |
+| | Device              | IP address range | Signed in        | Last active | Action                  |
+| | Chrome on Windows   | 203.0.113.0/24   | 13 Nov, 08:02    | Now         | This device · [Sign out] |
+| | Firefox on Ubuntu   | 198.51.100.0/24  | 12 Nov, 17:40    | 15 h ago    | [Sign out]              |
+| [Sign out of all other devices]                                                           |
+360: CardList, one card per session (Device as the card title, then IP range, Signed in, Last active, action button full width).
+```
+- Staff sessions are capped at 12 h and idle out after 30 minutes (US-033), so the list is usually short. "Last active" is the session's last refresh, not the last click.
+- Recovery-code regeneration for staff (US-026, Should) appears here only if built, as a "Generate new recovery codes" button behind the ReauthDialog (W03 §8, TOTP variant, scope `mfa.recovery_codes.regenerate`).
 
 ## 5. States
 
@@ -114,11 +127,12 @@ Uses the "Where you're signed in" component (W13 §1) inside the admin shell. Co
 |---|---|---|---|---|
 | Loading | 10 skeleton rows / 3 skeleton cards; filter bar renders immediately | Section skeletons | Skeleton rows | Skeleton rows |
 | Empty | "No entries match these filters." + [Clear filters] (resets to the last 24 h) (US-097) | n/a | "No history for this record." | n/a (the current session always exists, US-027) |
-| Error | ErrorState + Try again + reference. `AUDIT_UNAVAILABLE`: "The audit log is temporarily unavailable. Try again shortly." (fail-closed) | same | same | same |
-| Partial | Filter option lists failed (for example organisations): those filters disabled with "Couldn't load options", the list still works. Chain status failed: chip "Verification status unavailable". | n/a | n/a | n/a |
-| Permission-denied | No `audit:read`: PermissionDeniedState inside the shell, **no request issued**, no sidebar entry (US-097, US-070) | same | same | n/a |
-| Not found | n/a | Unknown or cross-tenant ID: NotFoundState (US-098) | NotFoundState for an unknown entity name | n/a |
-| Offline | Banner; current page stays; Apply and paging disabled with reason | Banner | Banner | Banner |
+| Error | ErrorState + Try again + reference. `AUDIT_UNAVAILABLE`: "The audit log is temporarily unavailable. Try again shortly." (fail-closed) | same | same | List load: ErrorState + Try again + reference. Sign-out failure (5xx): error toast with reference, row kept. `AUDIT_WRITE_FAILED`: same toast (the sign-out did not happen). |
+| Partial | Filter option lists failed (for example organisations): those filters disabled with "Couldn't load options", the list still works. Chain status failed: chip "Verification status unavailable". | n/a | n/a | n/a (one list, one request) |
+| Permission-denied | No `audit:read`: PermissionDeniedState inside the shell, **no request issued**, no sidebar entry (US-097, US-070) | same | same | n/a: own sessions only, every staff session may list them. 401 `AUTH_REQUIRED` → sign-in redirect (F10). |
+| Not found | n/a | Unknown or cross-tenant ID: NotFoundState (US-098) | NotFoundState for an unknown entity name | Sign-out of a session that already ended or is not yours → 404: row removed, info toast "That session had already ended." |
+| Offline | Banner; current page stays; Apply and paging disabled with reason | Banner | Banner | Banner; Sign out buttons `aria-disabled` with "You're offline" |
+| Success | n/a | n/a | n/a | Row removed; toast "Signed out of Firefox on Ubuntu."; focus to the next row's action, else the table heading. Sign out of all others: toast "Signed out of 1 other device." and only "This device" remains. |
 | Validation | `RANGE_TOO_LARGE`: inline on the date range "Choose a range of 31 days or less". An invalid URL value (`from=not-a-date`): dropped, InlineAlert "We ignored an invalid filter in the link: From date" (US-032). `INVALID_CURSOR`: "This page link has expired. [Go to the newest entries]". | | | |
 
 ## 6. Accessibility
@@ -129,3 +143,8 @@ Uses the "Where you're signed in" component (W13 §1) inside the admin shell. Co
 - Diff table: `th scope="col"` Field/Before/After. Stacked view: each field is an `h3` with a `dl`.
 - Keyboard: Tab order is filter bar, results (each row has one link), pagination. The row quick actions are reachable via the row's "More" button. No keyboard shortcuts are added in this slice (D-UX-022).
 - Density (Should): a Select, persisted per user. Not shown under 768 px (cards).
+- My sessions: table caption "Devices signed in to your account"; the IP column header has the visible text "IP address range"; relative times carry the absolute time in the accessible name; each row's action has the accessible name "Sign out of Firefox on Ubuntu" (the current row: "Sign out of this device").
+
+## 7. Session timing in the admin app (US-033 Should, ADR-0026 am. 8)
+
+Every screen in this file runs inside the admin idle clock. After 28 minutes without pointer, keyboard, touch or wheel input, the idle-timeout `alertdialog` opens over the current screen (spec, copy, focus and live-region behaviour in [W00 §2.1](W00-shells-and-shared-states.md)); at 30 minutes the user is signed out to `/sign-in?reason=idle` with `returnUrl` set to the current path and query. Because filters, paging cursor and the open entry are all in the URL (US-032), signing in again restores the same audit view. Background refetches (chain-status chip, list refresh) are paused while the dialog is open and never count as activity.

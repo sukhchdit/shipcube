@@ -383,7 +383,7 @@ Feature: Saga compensation
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-204
 - **Linked REQs:** REQ-BOOK-023
 - **As a** customer **I want** transient carrier failures retried and unclear outcomes handled safely **so that** I am neither double-booked nor left charged.
-- **Notes:** `CARRIER_BUSY` (bulkhead overflow or quota-guard refusal, US-130, US-293) is a local admission rejection with no network call: retryable and non-ambiguous, outside the 5 transient retries (REQ-BOOK-023, DR-B03 step 2, EC-B48, D-048). A guest flood can delay a paid booking but never fail it before the 30-minute deadline.
+- **Notes:** `CARRIER_BUSY` (bulkhead overflow or quota-guard refusal, US-130, US-293) is a local admission rejection with no network call, outcome class `LOCAL_REJECT` (ADR-0010 am. 4, ADR-0014 am. 3): retryable and non-ambiguous, outside the 5 transient retries, the shipment stays in BOOKING and the step records its attempts (REQ-BOOK-023, DR-B03 step 2, EC-B48, D-048). A guest flood can delay a paid booking but never fail it before the 30-minute deadline; at the deadline the saga compensates to **DRAFT** (not EXCEPTION), because no carrier request was ever sent (SEC-P3-33 item 4, D-056). The local-rejection backoff values (2 s base, factor 2, full jitter, 60 s cap) are configuration shared with the transient schedule.
 
 #### Acceptance criteria
 ```gherkin
@@ -871,7 +871,7 @@ Feature: Automatic refund
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-210
 - **Linked REQs:** REQ-PAY-014
 - **As a** business customer **I want** to save and manage cards **so that** checkout is faster.
-- **Notes:** Step-up per D-046 and REQ-PAY-014: setup/add, update (set default) and remove require a valid re-authentication proof in `X-Reauth-Proof` (`x-reauth-scope: payment_method.manage`, no age exemption); listing needs none. A saved-card checkout by a session whose `auth_time` is older than 12 h sets CVC re-collection (Stripe `payment_method_options.card.require_cvc_recollection = true`; the Mock gateway exposes the same flag); a new-card checkout is unaffected. MoSCoW stays Should because REQ-PAY-014 is Should.
+- **Notes:** Step-up per D-046 and REQ-PAY-014: setup/add, update (set default) and remove require a valid re-authentication proof in `X-Reauth-Proof` (`x-reauth-scope: payment_method.manage`, no age exemption); listing needs none. A saved-card checkout by a session whose `auth_time` is older than 12 h sets CVC re-collection (Stripe `payment_method_options.card.require_cvc_recollection = true`; the Mock gateway exposes the same flag); a new-card checkout is unaffected. Collection is not verification (SEC-P3-28, D-054): when re-collection was required, the payment is `AUTHORISED` only if the retrieved charge reports `cvc_check = pass`; any other value (`fail`, `unavailable`, `unchecked`, absent) voids the authorisation, sets `FAILED` with `AUTHENTICATION_FAILED`, writes the audited UPDATE on `payment`, emits `cvc_recollection_failed`, returns the shipments to QUOTED and counts the attempt (REQ-PAY-010). One derivation serves the confirm call and the webhook processor. The client offers "use another card" or "confirm it's you" (US-291 proof, which advances `auth_time`). Mock CVC outcomes `pass` / `fail` / `unavailable` are selected through `test_token` (names in the contract). SEC-TC-37 (amended). MoSCoW stays Should because REQ-PAY-014 is Should.
 
 #### Acceptance criteria
 ```gherkin
@@ -925,6 +925,36 @@ Feature: Saved payment methods
     When checkout is started with a saved card (Stripe fixture and Mock gateway)
     Then the PaymentIntent carries payment_method_options.card.require_cvc_recollection true (Mock payment: require_cvc_recollection true)
     And the hosted fields collect the security code again before the payment is confirmed
+
+  Scenario: Re-collected CVC that passes authorises the payment
+    Given a user whose session auth_time is 13 hours old and a saved-card checkout with require_cvc_recollection true
+    When the charge is confirmed with the Mock CVC outcome "pass" (Stripe fixture: checks.cvc_check = pass)
+    Then the payment becomes AUTHORISED and the booking saga starts
+
+  Scenario Outline: Re-collected CVC that does not pass voids the authorisation
+    Given a user whose session auth_time is 13 hours old and a saved-card checkout with require_cvc_recollection true
+    When the charge comes back with cvc_check "<outcome>" on the "<path>"
+    Then the authorisation is voided at the gateway and no money is captured
+    And the payment is FAILED with failure_code AUTHENTICATION_FAILED and an audited UPDATE on "payment" is written
+    And a security event cvc_recollection_failed is emitted and counted
+    And the shipments return to QUOTED, the attempt counts toward 5 per order per hour and no saga step runs
+    And the client is offered "use another card" and "confirm it's you"
+    Examples:
+      | outcome     | path     |
+      | fail        | confirm  |
+      | unavailable | confirm  |
+      | unchecked   | webhook  |
+      | absent      | webhook  |
+
+  Scenario: Re-authentication removes the CVC requirement for the retry
+    Given a saved-card checkout that failed with AUTHENTICATION_FAILED after cvc_check "unavailable"
+    When the user completes re-authentication (US-291) and retries checkout with the same saved card
+    Then the payment carries require_cvc_recollection false and is AUTHORISED without a new CVC prompt
+
+  Scenario: Checkout without re-collection ignores cvc_check
+    Given a user whose session auth_time is 11 hours old and a saved-card checkout with require_cvc_recollection false
+    When the charge reports cvc_check "unavailable"
+    Then the payment is AUTHORISED (unchanged behaviour: the check applies only when re-collection was required)
 
   Scenario: Saved-card checkout with a fresh session does not require CVC re-collection
     Given a user whose session auth_time is 11 hours old

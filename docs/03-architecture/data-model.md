@@ -1829,6 +1829,32 @@ AP-QUO-07 anonymous read by token (inside `quote_share_resolve`): `ux_quote_shar
 
 Amendment (2026-11-12, SEC-P3-10). `createQuoteShare` **always mints a new token**. In the same transaction it sets `revoked_at`/`revoked_by` on the quote's previous active share (the previous link then resolves to 404) and inserts the new row. It never returns an existing token, which the server could not do anyway because it holds only `share_token_hash`. Backstop: `ux_quote_shares__quote_active ON (quote_id) WHERE revoked_at IS NULL` (at most one active share per quote). A concurrent second create fails this constraint and is retried once after re-reading. The route is `x-idempotency: not-applicable`, so the token never reaches `idempotency_keys`.
 
+#### Amendment (2026-11-12, SEC-P3-32): revocation audit, mint cap, uniform 404
+
+1. **The implicit revocation is audited.** When `createQuoteShare` revokes the previous active share, it writes its own audit entry in the same transaction as the `CREATE quote_share` entry: action `UPDATE`, entity `quote_share`, `entity_id` = the previous share's ID, `old_value` `{"revoked_at": null, "revoked_by": null}`, `new_value` `{"revoked_at": "<ts>", "revoked_by": "<actor>"}`, `revoked_by` = the calling actor, `details` `{"reason": "SUPERSEDED", "superseded_by": "<new share id>"}`. `share_token_hash` is SECRET and never appears in either entry (REQ-AUDIT-008). Both entries commit or roll back with the share rows, so a revocation without its audit entry cannot exist. The contract's `x-audit` for `createQuoteShare` lists both entries (api-designer).
+2. **Per-quote mint cap: 10 shares per quote per rolling hour, then 429 `RATE_LIMITED`.** Mechanism: a count in PostgreSQL inside the minting transaction, not a Redis route counter.
+
+   ```sql
+   -- AP-QUO-09 (new): shares minted for one quote in the last hour; the minting transaction runs it before the revocation UPDATE
+   SELECT count(*) AS minted, min(created_at) AS oldest
+     FROM public.quote_shares
+    WHERE quote_id = $1 AND created_at > now() - interval '1 hour';
+   -- minted >= QUOTE_SHARE_MINTS_PER_HOUR (default 10; REQ-QUOTE-015) → roll back, 429 RATE_LIMITED, Retry-After = ceil(oldest + 1 h − now)
+
+   CREATE INDEX ix_quote_shares__quote_created ON public.quote_shares (quote_id, created_at DESC);
+   ```
+
+   - **Why the database and not Redis.** The count is exact, transactional with the mint and the revocation, survives a Redis flush, and needs no second store on the path. Revoked rows count too, because the cap bounds rows written, not active links.
+   - **Concurrency.** Two concurrent mints for the same quote are serialised by `ux_quote_shares__quote_active`: the second inserter waits on the unique index, fails when the first commits, and its single retry re-runs the count. The cap therefore cannot be overshot by a race.
+   - **RLS.** The count runs in the caller's tenant or guest scope; every share of a quote has the quote's owner, so the caller sees all of them.
+   - **Cost.** The index adds one B-tree entry per mint on a low-volume table. The probe reads at most 10 index entries. Without the cap, the 600/min `authenticated` class would let one user write about 36,000 revoked rows an hour.
+3. **Resolve: unknown, revoked, superseded and expired tokens look identical (D-055; settled by principal-architect, D-ARCH-032).** `quote_share_resolve(p_share_token_hash)` returns `(quote_id uuid, public_snapshot jsonb, expires_at timestamptz)` and selects `WHERE share_token_hash = $1 AND revoked_at IS NULL AND expires_at > pg_catalog.now()`, replacing the `revoked boolean` column of §4.5.
+   - **Unknown, revoked (incl. superseded) and expired tokens** all return **no row**, so the API answers every miss with the same byte-identical 404 body, and every case runs the same single unique-index probe (no timing or shape difference between them).
+   - **Only an active share** returns its full `public_snapshot` (options included). There is no `EXPIRED` row and no `- 'options'` projection: the "expired quote with inputs prefilled" view of EC-B29 v1.3 was dropped by product-manager's D-055 (REQUIREMENTS.md v1.4, EC-B29/EC-B53), and the shared page shows a generic "this shared quote is no longer available" notice with a link to start a new quote (D-UX-034).
+   - **History.** An earlier revision of this amendment kept the v1.3 EC-B29 expired view (200 `EXPIRED`, snapshot minus options) as the principal-architect's reconciliation with SEC-TC-53; it was withdrawn the same day when D-055 aligned the requirement with the review's condition. SEC-TC-53 therefore stands as amended in the review (byte-identical 404s for every non-active token).
+
+     Whichever rule wins must be applied in REQUIREMENTS.md, `openapi.yaml`, SEC-TC-53 and this section together.
+
 ### 3.11 Shipments and customs module (TENANT)
 
 REQ-BOOK-001..030, REQ-CUST-001..015, REQ-ACCT-002..007, DR-B01/B02/B20/B23/B24, DR-A06.
@@ -2380,8 +2406,10 @@ Amendment (2026-11-12, SEC-P3-25; §12 OI-02, ADR-0005 amendment 6). The plain `
 
 Unset, empty or malformed settings evaluate to `NULL`, so every comparison is false and the query returns zero rows instead of raising (fail closed without errors, REQ-RLS-004). ADR-0005 sketches `app_org_id()` as `NULLIF(…,'')::uuid`; the regex guard below keeps its semantics and additionally turns a malformed value into "no rows" rather than a cast error. The SQL helpers are `STABLE`, have no `FROM` clause and are inlined by the planner, so `org_id = platform.app_org_id()` is an index condition.
 
+*Amended 2026-11-12 (SEC-P3-27): `app_is_operator()` moves to `SET search_path = pg_catalog, pg_temp` with `pg_catalog.`-qualified built-ins, like every `SECURITY DEFINER` function (§4.5 rule, C11). The schema `platform` is owned by `platform_schema_owner`, not `platform_migrator` (§4.4 amendment); the line below is shown for reference only and runs, in its amended form, in `prisma/bootstrap/01-schemas.sql`. The three plain SQL helpers keep no `SET` clause on purpose: a `SET` clause stops the planner from inlining them, which would cost the index condition described above. They are not definer functions, so they run with the caller's rights and path.*
+
 ```sql
-CREATE SCHEMA IF NOT EXISTS platform AUTHORIZATION platform_migrator;
+CREATE SCHEMA IF NOT EXISTS platform AUTHORIZATION platform_schema_owner;   -- amended 2026-11-12 (SEC-P3-27 item 6): was platform_migrator; bootstrap lane only
 
 CREATE FUNCTION platform.app_org_id() RETURNS uuid LANGUAGE sql STABLE PARALLEL SAFE AS $$
   SELECT CASE WHEN current_setting('app.org_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -2398,8 +2426,9 @@ $$;
 
 -- ADR-0005 amendment 2: the operator branch also verifies the membership in the database
 CREATE FUNCTION platform.app_is_operator() RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
-  SELECT current_setting('app.actor_scope', true) = 'OPERATOR'
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp AS $$                -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
+  SELECT pg_catalog.current_setting('app.actor_scope', true) = 'OPERATOR'
      AND EXISTS (SELECT 1
                    FROM public.memberships m
                    JOIN public.organisations o ON o.id = m.org_id
@@ -2528,19 +2557,24 @@ Amended 2026-11-12 (SEC-P3-25; §12 OI-02, ADR-0005 amendment 6): the definer po
 Bootstrap SQL (run once by the cluster administrator: the Compose init script `infra/compose/postgres/initdb/00-roles.sql` locally, a pipeline-run bootstrap job against RDS at M5). Passwords come from the secret manager / Compose secret files and are referenced as psql variables; the script never contains values (CLAUDE.md §5).
 
 ```sql
+SET search_path = pg_catalog, pg_temp;                            -- amended 2026-11-12 (SEC-P3-27 item 4): first statement of every bootstrap file
 CREATE ROLE platform_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'migrator_password';
 CREATE ROLE platform_app      LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT
                                CONNECTION LIMIT 200 PASSWORD :'app_password';
 CREATE ROLE platform_erasure  NOLOGIN NOSUPERUSER NOBYPASSRLS;   -- unused until the M4/M5 erasure job
+CREATE ROLE platform_schema_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;  -- added 2026-11-12 (SEC-P3-27 item 6); no members
 
+-- amended 2026-11-12 (SEC-P3-27 item 6): the schema owner changes BEFORE the database owner, so that on RDS the
+-- master still owns public through pg_database_owner when it transfers it
+ALTER SCHEMA public OWNER TO platform_schema_owner;               -- was platform_migrator
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO platform_app;
+GRANT USAGE, CREATE ON SCHEMA public TO platform_migrator;        -- tables, _prisma_migrations, trusted-extension objects
 ALTER DATABASE platform OWNER TO platform_migrator;               -- trusted extensions: pg_trgm, btree_gin, btree_gist
 REVOKE ALL ON DATABASE platform FROM PUBLIC;
 GRANT CONNECT ON DATABASE platform TO platform_app;
-ALTER SCHEMA public OWNER TO platform_migrator;
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
-GRANT USAGE ON SCHEMA public TO platform_app;
 
-ALTER ROLE platform_app SET search_path = pg_catalog, public;
+ALTER ROLE platform_app SET search_path = pg_catalog, public;     -- runtime role, not a definer context; it has no TEMPORARY privilege, so pg_temp stays empty
 ALTER ROLE platform_app SET idle_in_transaction_session_timeout = '15s';
 ALTER ROLE platform_app SET lock_timeout = '2s';
 ALTER ROLE platform_migrator SET lock_timeout = '3s';
@@ -2556,9 +2590,10 @@ The sentence "`platform_migrator` owns every table, partition, function and both
 
 | Role | Login | Owns | Member of / members |
 |---|---|---|---|
-| `platform_migrator` | LOGIN | both schemas, the database, every **non-audit** table, sequence and function, and the plain SQL helpers of §4.2 | holds `platform_definer` with `INHERIT FALSE, SET TRUE` (so it can assign function ownership; it inherits no policies). It is **not** a member of `platform_audit_owner` and owns no audit object |
-| `platform_definer` | NOLOGIN, NOINHERIT | `app_is_operator()` and every §4.5 function; no table, no DDL right | none |
-| `platform_audit_owner` | NOLOGIN, NOINHERIT | `audit_entries` and every partition, `audit_stream_heads`, `audit_checkpoint_heads`, `audit_chain_verifications`, `audit_partitions`, `audit_anchors`, `audit_pii_vault`, `data_subjects`; functions `platform.audit_forbid_mutation()`, `platform.audit_vault_guard()`, `platform.ensure_audit_partitions(integer)` | **no members**; only the cluster superuser can `SET ROLE` to it, and that happens only in the bootstrap lane |
+| `platform_migrator` | LOGIN | the database, every **non-audit** table, sequence and function, and the plain SQL helpers of §4.2; `USAGE, CREATE` on both schemas (*amended 2026-11-12, SEC-P3-27 item 6: no longer owns the schemas, see `platform_schema_owner`*) | holds `platform_definer` with `INHERIT FALSE, SET TRUE` (so it can assign function ownership; it inherits no policies). It is **not** a member of `platform_audit_owner` and owns no audit object |
+| `platform_definer` | NOLOGIN, NOINHERIT | `app_is_operator()` and every §4.5 function; no table, no DDL right (*amended 2026-11-12, SEC-P3-27: holds `CREATE` on schema `platform`, which PostgreSQL requires of the new owner in `ALTER FUNCTION … OWNER TO`; no definer function runs dynamic DDL, and the migrator already holds `CREATE` there, so this adds no capability*) | none |
+| `platform_audit_owner` | NOLOGIN, NOINHERIT | `audit_entries` and every partition, `audit_stream_heads`, `audit_checkpoint_heads`, `audit_chain_verifications`, `audit_partitions`, `audit_anchors`, `audit_pii_vault`, `data_subjects`; functions `platform.audit_forbid_mutation()`, `platform.audit_vault_guard()`, `platform.ensure_audit_partitions(integer)` | **no members**; only the cluster superuser can `SET ROLE` to it, and that happens only in the bootstrap lane (*amended 2026-11-12, SEC-P3-33 item 10: on RDS at M5 the master role keeps one ADMIN-only row, treated as break-glass; C13*) |
+| `platform_schema_owner` (*added 2026-11-12, SEC-P3-27 item 6*) | NOLOGIN, NOINHERIT | schemas `public` and `platform`; nothing else | **no members**, same rule and same RDS exception as `platform_audit_owner` (C13) |
 | `platform_app` | LOGIN | nothing | none |
 | `platform_erasure` | NOLOGIN | nothing; `SELECT, DELETE` on `audit_pii_vault`, `UPDATE (erased_at, …)` on `data_subjects` (unchanged) | none |
 
@@ -2569,12 +2604,16 @@ Bootstrap lane SQL (cluster-admin credential, one-shot `bootstrap` step; files u
 CREATE ROLE platform_definer     NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 CREATE ROLE platform_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 GRANT platform_definer TO platform_migrator WITH INHERIT FALSE, SET TRUE;   -- PostgreSQL 16+ grant options
--- (no GRANT platform_audit_owner TO anyone; catalog test C13 asserts pg_auth_members has no row for it)
+-- (no GRANT platform_audit_owner / platform_schema_owner TO anyone; catalog test C13 asserts the pg_auth_members rows:
+--  none locally, exactly one ADMIN-only row for the RDS master at M5; amended 2026-11-12, SEC-P3-33 item 10)
 
 -- prisma/bootstrap/01-schemas.sql (schema-scoped; carried by pg_dump, see §8.6)
-CREATE SCHEMA IF NOT EXISTS platform AUTHORIZATION platform_migrator;       -- moved here from §4.2
+SET search_path = pg_catalog, pg_temp;                                      -- amended 2026-11-12 (SEC-P3-27 item 4)
+CREATE SCHEMA IF NOT EXISTS platform AUTHORIZATION platform_schema_owner;   -- moved here from §4.2; amended 2026-11-12 (SEC-P3-27 item 6): was platform_migrator
 REVOKE ALL ON SCHEMA platform FROM PUBLIC;
-GRANT USAGE ON SCHEMA platform TO platform_app, platform_definer, platform_erasure;
+GRANT USAGE, CREATE ON SCHEMA platform TO platform_migrator;                -- added 2026-11-12 (SEC-P3-27 item 6): helpers and §4.5 functions
+GRANT USAGE ON SCHEMA platform TO platform_app, platform_erasure;
+GRANT USAGE, CREATE ON SCHEMA platform TO platform_definer;                 -- amended 2026-11-12 (SEC-P3-27): CREATE is required of the new owner by ALTER FUNCTION … OWNER TO
 GRANT USAGE, CREATE ON SCHEMA public, platform TO platform_audit_owner;     -- ensure_audit_partitions creates partitions in public
 GRANT USAGE ON SCHEMA public TO platform_definer, platform_erasure;
 ALTER DEFAULT PRIVILEGES FOR ROLE platform_audit_owner IN SCHEMA public   REVOKE ALL ON TABLES FROM PUBLIC;
@@ -2582,6 +2621,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE platform_audit_owner IN SCHEMA platform REVOKE
 ALTER DEFAULT PRIVILEGES FOR ROLE platform_definer     IN SCHEMA platform REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 -- prisma/bootstrap/10-audit.sql (every audit object; §5.1–§5.7)
+-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>
+SET search_path = pg_catalog, pg_temp;    -- amended 2026-11-12 (SEC-P3-27 item 4): BEFORE SET ROLE; never the default "$user", public
 SET ROLE platform_audit_owner;            -- objects are created owned by the audit owner; the DDL guard admits this role
 --   CREATE TABLE … (§5.1, §5.7, audit_anchors §5.5), triggers (§5.2), ensure_audit_partitions (§5.3)
 GRANT SELECT, INSERT ON public.audit_entries, public.audit_checkpoint_heads, public.audit_anchors,
@@ -2595,14 +2636,49 @@ SELECT platform.ensure_audit_partitions(3);
 RESET ROLE;
 
 -- prisma/bootstrap/90-audit-ddl-guard.sql (superuser; §5.2): event triggers platform_audit_ddl_guard_end / _drop
+--   (also starts with SET search_path = pg_catalog, pg_temp; amended 2026-11-12, SEC-P3-27 item 4)
 ```
 
 Consequences:
 - `ALTER TABLE audit_entries DISABLE TRIGGER …`, `NO FORCE ROW LEVEL SECURITY`, `DETACH PARTITION`, `DROP TRIGGER`, `GRANT`, and `CREATE OR REPLACE` of the audit functions all fail for `platform_migrator` with "must be owner" (SEC-TC-43).
-- PostgreSQL lets a **schema owner drop any table in its schema**. `platform_migrator` owns `public`, so `DROP TABLE public.audit_entries` and `DROP SCHEMA public CASCADE` would succeed on privileges alone. The identity-based `sql_drop` guard (§5.2) closes this path, and SEC-TC-43 includes both statements.
-- Moving the audit tables into a dedicated schema owned by `platform_audit_owner` would close the path by privilege as well. It was considered and not adopted in this amendment, because it renames every audit relation (`public.audit_*`) across the Prisma mapping, the ADRs and the tests. It is recorded as an option for M5.
+- PostgreSQL lets a **schema owner drop any table in its schema**. `platform_migrator` owns `public`, so `DROP TABLE public.audit_entries` and `DROP SCHEMA public CASCADE` would succeed on privileges alone. The identity-based `sql_drop` guard (§5.2) closes this path, and SEC-TC-43 includes both statements. *Amended 2026-11-12 (SEC-P3-27 item 6): the migrator no longer owns either schema, so both statements now fail by privilege ("must be owner"); the guard stays as the second layer.*
+- Moving the audit tables into a dedicated schema owned by `platform_audit_owner` would close the path by privilege as well. It was considered and not adopted in this amendment, because it renames every audit relation (`public.audit_*`) across the Prisma mapping, the ADRs and the tests. It is recorded as an option for M5. *Amended 2026-11-12 (SEC-P3-27 item 6): the cheaper no-member schema owner below closes the path by privilege now, without renaming any relation; the dedicated schema stays an M5 option.*
 - Holding `platform_definer` with `SET TRUE` lets the migrator read the definer-read tables. That adds no capability, because the migrator owns those tables and could change their RLS anyway. The separation protects against a defective definer function running as the schema owner, not against the migrator.
-- Revoking the audit owner's `CREATE` on `public` (which the schema owner can do) only stops partition creation. That fails closed and is detected by readiness (fewer than 2 future partitions, §5.3).
+- Revoking the audit owner's `CREATE` on `public` (which the schema owner can do) only stops partition creation. That fails closed and is detected by readiness (fewer than 2 future partitions, §5.3). *Amended 2026-11-12 (SEC-P3-27 item 6): the schema owner is now `platform_schema_owner`, which nobody can log in as or `SET ROLE` to outside the bootstrap lane, so this is no longer reachable with the migrator credential.*
+
+#### Amendment (2026-11-12, SEC-P3-27): fixed search path for every definer context, and a no-member schema owner
+
+Source: security review §14.4 SEC-P3-27 (CWE-426/427, MEDIUM). Before this amendment, `ensure_audit_partitions` ran as `platform_audit_owner` with `search_path = pg_catalog, public`. Because the migrator owned `public`, it could plant a better-matching overload there, such as `public.pg_advisory_xact_lock(integer)` or `public.to_char(date, text)`. The daily job would then run the planted body as the audit owner, and the identity-based guard admits that role. This amendment closes the path in four layers.
+
+1. **One search-path rule for every definer context (items 1, 5).** Every `SECURITY DEFINER` function declares exactly `SET search_path = pg_catalog, pg_temp`. That covers the §4.5 functions, `platform.app_is_operator`, `platform.job_context` and `platform.ensure_audit_partitions`. So do the non-definer audit functions `platform.audit_forbid_mutation`, `platform.audit_vault_guard` and `platform.audit_ddl_guard`, which run as the invoker; for the guard and the triggers, the invoker includes the bootstrap superuser.
+   - PostgreSQL never searches `pg_temp` for functions or operators, and listing it last stops it from shadowing catalog relations or types. Functions and operators therefore resolve in `pg_catalog` only.
+   - Every relation stays `public.`- or `platform.`-qualified.
+   - The audit functions also qualify their built-ins (`pg_catalog.format`, `pg_catalog.current_setting`, …).
+   - Catalog tests C11 and C14 assert the exact `proconfig` value (§4.6), and linter rule 13 is the text-level early warning (§8.3).
+2. **The bootstrap lane runs with a fixed path (item 4).** Each `prisma/bootstrap/*.sql` file starts with `SET search_path = pg_catalog, pg_temp;` as its first statement, after the header comments and before any `SET ROLE`. As a second layer, the runner `tools/db/bootstrap.ts` connects with `options=-c search_path=pg_catalog,pg_temp` and checks `SHOW search_path` before applying the first file.
+   - **Without it**, a later bootstrap file, run as the superuser after migrations have created objects in `public`, would resolve unqualified calls through the default `"$user", public`.
+   - **Qualification.** Inside the files, every relation is schema-qualified, and every function body and `EXECUTE` string qualifies its calls. Expressions in DDL (column defaults such as `uuidv7()`, CHECK constraints, index expressions) are bound to function and operator OIDs when the statement runs, under the file's fixed path. They therefore resolve to `pg_catalog` and need no textual qualification.
+3. **The DDL guard matches the protected schemas by OID (item 3)** and refuses `ALTER SCHEMA … RENAME`, `OWNER TO` and `DROP SCHEMA` on them. The method and the reasons are in §5.2.
+4. **The schemas are owned by a role nobody can use (item 6, recommended by the review; adopted).**
+   - **The change.** `public` and `platform` are owned by the new `NOLOGIN NOINHERIT` role **`platform_schema_owner`**, which has no members. `platform_migrator` receives `USAGE, CREATE` on both.
+   - **What the migrator can no longer do.** `DROP TABLE public.audit_*`, `DROP SCHEMA … CASCADE`, `ALTER SCHEMA … RENAME` and `ALTER SCHEMA … OWNER TO` now fail by privilege, before the guard runs. The same holds for the path the review did not list: as owner of `platform`, the migrator could have run `DROP FUNCTION platform.audit_ddl_guard() CASCADE` or `DROP SCHEMA platform CASCADE`. A schema owner may drop any object in its schema, and `CASCADE` removes the event triggers that depend on the guard function. PostgreSQL does not promise that a `sql_drop` trigger fires for the command that drops it, so the design no longer relies on that.
+   - **What it keeps.** The migrator can still create objects in `public`, which is why items 1 and 2 are needed as well.
+
+   **Evaluation against Prisma 7 Migrate and the bootstrap ordering:**
+
+   | Concern | Result |
+   |---|---|
+   | `prisma migrate deploy` | Needs `CREATE` on `public` (tables, indexes, `_prisma_migrations`) and ownership of the tables it alters. Both hold: the migrator owns every non-audit table. Migrate never alters or drops a schema in `deploy`. A `CREATE SCHEMA IF NOT EXISTS "public"` line, which some Prisma versions emit, is a no-op: the database owner passes the `CREATE`-on-database check, and the guard sees `objid = 0` and skips it |
+   | Trusted extensions (`pg_trgm`, `btree_gin`, `btree_gist`) | Installed by the migrator as database owner. Their objects need `CREATE` on `public`, which is granted |
+   | `migrate dev` and `migrate reset` against the dev database | A reset drops and recreates the schema, so it now fails by privilege. It already failed before this change, because the guard blocks `DROP SCHEMA public`. A local reset is done by recreating the Compose database volume and rerunning the bootstrap lane |
+   | Shadow database (§7.3) | It is a separate database, pre-created by the Compose bootstrap and owned by the migrator, because the migrator has `NOCREATEDB`. Its `public` schema is owned by `pg_database_owner`, which is the migrator, so Prisma's shadow reset still works there. Its init script was already a migrator-runnable rendering of the bootstrap lane: without roles, `SET ROLE`, `OWNER TO` and event triggers, because the migrator cannot run those. This change adds `AUTHORIZATION platform_schema_owner` to what the rendering strips. The shadow database is only a diff target, so ownership there carries no security meaning |
+   | Bootstrap ordering | `00-roles.sql` creates `platform_schema_owner` and transfers `public` **before** `ALTER DATABASE … OWNER TO platform_migrator`, so that on RDS the master still owns `public` through `pg_database_owner`. `01-schemas.sql` creates `platform` with that owner |
+   | Restore rehearsal (§8.6) | The rehearsal still runs only `00-roles.sql` before `pg_restore`. That file now also creates `platform_schema_owner`. The dump carries the schema owners and ACLs, and `pg_restore` runs as the superuser |
+   | RDS at M5 | Like `platform_audit_owner`, the RDS master needs `SET` on `platform_schema_owner` while the lane runs (`ALTER SCHEMA … OWNER TO` and `CREATE SCHEMA … AUTHORIZATION` require it in PostgreSQL 16+). It ends with the ADMIN-only row that C13 allows (SEC-P3-33 item 10). The exact statements on RDS, for example `SET createrole_self_grant = 'set'` during role creation followed by removal of the SET option, are verified in SPK-08 |
+
+   **Decision.** Item 6 is adopted, because it breaks nothing in Prisma Migrate and it closes the schema-owner paths by privilege. It is recorded in §12 (A13). The dedicated `audit` schema stays the M5 option.
+5. **Trust model unchanged.** The migrator stays trusted for tenant data: it owns the RLS helper functions and every non-audit table. The separation protects existing audit rows and the audit DDL path, nothing more.
+   - **App-side defence in depth.** `platform_app`'s own search path is `pg_catalog, public`, so the advisory-lock calls in the application's audit SQL (§5.4, §5.5) are qualified too. A planted overload in `public` would otherwise run as `platform_app` on every audit write.
 
 The grant-matrix rows below are unchanged except for the additions marked "2026-11-12".
 
@@ -2632,7 +2708,7 @@ Compared with the P3 brief's hard-delete allow-list (expired tokens, idempotency
 
 ### 4.5 Allow-listed SECURITY DEFINER functions (ADR-0005 amendment 1)
 
-Every path that must read rows before a tenant/actor context exists, or must discover work across tenants, uses one of these functions or a global index table (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`, §3.13/§3.16). Each function is owned by `platform_definer` (amended 2026-11-12, SEC-P3-25: was `platform_migrator`; §12 OI-02, ADR-0005 amendment 6), is `SECURITY DEFINER` with `SET search_path = pg_catalog, public`, takes a hashed or opaque key, returns a fixed minimal column set (IDs, statuses, timestamps; never personal data beyond what the caller supplied), has `EXECUTE` revoked from `PUBLIC` and granted to `platform_app`, and has a dedicated integration test (ADR-0005). After the lookup the service sets `app.actor_id`/`app.org_id` in the same transaction and continues under the normal policies.
+Every path that must read rows before a tenant/actor context exists, or must discover work across tenants, uses one of these functions or a global index table (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`, §3.13/§3.16). Each function is owned by `platform_definer` (amended 2026-11-12, SEC-P3-25: was `platform_migrator`; §12 OI-02, ADR-0005 amendment 6), is `SECURITY DEFINER` with `SET search_path = pg_catalog, pg_temp` (amended 2026-11-12, SEC-P3-27: was `pg_catalog, public`; every relation in the body is schema-qualified, `public.sessions` and so on, and built-ins resolve in `pg_catalog` only; C11 asserts the exact value), takes a hashed or opaque key, returns a fixed minimal column set (IDs, statuses, timestamps; never personal data beyond what the caller supplied), has `EXECUTE` revoked from `PUBLIC` and granted to `platform_app`, and has a dedicated integration test (ADR-0005). After the lookup the service sets `app.actor_id`/`app.org_id` in the same transaction and continues under the normal policies.
 
 | Function | Returns | Reads (definer-read policy) | Used by |
 |---|---|---|---|
@@ -2642,7 +2718,7 @@ Every path that must read rows before a tenant/actor context exists, or must dis
 | `auth_lookup_one_time_token(p_purpose text, p_token_hash bytea)` | `(token_id, user_id, expires_at, consumed_at, superseded_at)`; `p_purpose ∈ ('EMAIL_VERIFICATION','PASSWORD_RESET','SET_PASSWORD','MFA_CHALLENGE')` dispatches to the matching table (`PASSWORD_RESET` → `password_reset_tokens.purpose = 'RESET'`, `SET_PASSWORD` → `purpose = 'SET_PASSWORD'`; amended 2026-11-12, SEC-P3-14) | `email_verification_tokens`, `password_reset_tokens`, `mfa_challenges` | verify email, reset password, set first password of seeded staff, MFA challenge (REQ-AUTH-004/012/017) |
 | `invitation_lookup(p_token_hash bytea)` | `(invitation_id, org_id, email, role_id, status, expires_at)` | `invitations` | accept invitation (REQ-ORG-011) |
 | `payment_lookup_by_gateway_ref(p_gateway text, p_ref text)` | `(payment_id uuid, org_id uuid)` | `gateway_refs` (no RLS) | gateway webhooks when event metadata lacks the org (REQ-PAY-012) |
-| `quote_share_resolve(p_share_token_hash bytea)` | `(quote_id, public_snapshot jsonb, expires_at, revoked boolean)` | `quote_shares` | `POST /public/shared-quotes/resolve` (token in the body, never in the URL; REQ-QUOTE-015; amended 2026-11-12, SEC-P3-25: was `GET /public/shared-quotes/{shareToken}`) |
+| `quote_share_resolve(p_share_token_hash bytea)` | `(quote_id, public_snapshot jsonb, expires_at)`; no row for unknown, revoked, superseded **and expired** tokens (`revoked_at IS NULL AND expires_at > pg_catalog.now()`; D-055, D-ARCH-032; the interim `EXPIRED` row was withdrawn) (amended 2026-11-12, SEC-P3-32: was `(…, revoked boolean)`; §3.10 `quote_shares` amendment) | `quote_shares` | `POST /public/shared-quotes/resolve` (token in the body, never in the URL; REQ-QUOTE-015; amended 2026-11-12, SEC-P3-25: was `GET /public/shared-quotes/{shareToken}`) |
 | `quote_claim_state(p_quote_id uuid, p_token_hash bytea)` | `text` (`CLAIMED_ELSEWHERE` \| `UNKNOWN`) | `quotes` (`claimed_from_token_hash`) | claim conflict answer (EC-A44). ADR-0005 sketches `quote_claim_state(id)`; the token-hash argument is a tightening so that a caller learns about claim state only for a quote whose guest token it holds (OI-19) |
 | `payment_sweeper_candidates(p_authorised_before timestamptz, p_captured_before timestamptz, p_limit int)` | `(payment_id, org_id, status)` | `payments` | REQ-PAY-018 sweeper |
 | `saga_due_candidates(p_now timestamptz, p_limit int)` | `(saga_id, org_id)` | `saga_executions` | deadline enforcement and retry pickup (REQ-BOOK-023) |
@@ -2660,7 +2736,7 @@ Example (the others follow the same shape):
 CREATE FUNCTION platform.auth_lookup_user_by_email(p_email text)
 RETURNS TABLE (user_id uuid, status text, email_verified boolean)
 LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, pg_temp AS $$                 -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
   SELECT u.id, u.status, u.email_verified_at IS NOT NULL
     FROM public.users u
    WHERE u.email = p_email AND u.deleted_at IS NULL
@@ -2690,7 +2766,7 @@ A guest quote (`quotes.org_id IS NULL`) returns `org_id = NULL`. Every processor
 CREATE FUNCTION platform.job_context(p_kind text, p_id uuid)
 RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, public AS $$
+SET search_path = pg_catalog, pg_temp AS $$                 -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
 #variable_conflict use_column
 DECLARE
   c_system    constant uuid := '00000000-0000-7000-8000-000000000001';
@@ -2725,7 +2801,7 @@ BEGIN
                     WHERE t.id = p_id;
     ELSE
       RAISE EXCEPTION USING ERRCODE = '22023',               -- invalid_parameter_value
-                            MESSAGE = format('JOB_CONTEXT_UNKNOWN_KIND: %s', p_kind);
+                            MESSAGE = pg_catalog.format('JOB_CONTEXT_UNKNOWN_KIND: %s', p_kind);
   END CASE;
 END $$;
 ALTER FUNCTION platform.job_context(text, uuid) OWNER TO platform_definer;
@@ -2778,10 +2854,10 @@ These functions return data that grants or reveals more than an ID lookup. In ad
 | C8 | No `timestamp without time zone`; every `id` is `uuid` with default `uuidv7()`; every `*_minor` column is `bigint` with a sibling currency column carrying the `^[A-Z]{3}$` CHECK | `information_schema.columns`, `pg_constraint` (NFR-DATA-001/002) |
 | C9 | Each named enum CHECK equals its `packages/shared` enum | parse `pg_get_constraintdef` of `ck_*` constraints |
 | C10 | Every column has a classification registry entry; SYSTEM tables have no `PER`/`SPER` columns except the documented exceptions (`idempotency_keys.response_body`, the encrypted vault); every ciphertext/HMAC column listed in §10.4 has its `<col>_key_id` sibling | `information_schema.columns` vs registry (NFR-PRIV-003) |
-| C11 | `SECURITY DEFINER` functions are exactly the §4.5 list plus `app_is_operator` (owner `platform_definer`) and `ensure_audit_partitions` (owner `platform_audit_owner`), each with a fixed `search_path` and `EXECUTE` only for `platform_app`; the §4.5 functions have owner `platform_definer`; the sensitive-definer list of §4.5 matches its lint allow-list | `pg_proc.prosecdef`, `proconfig`, `proowner`, `has_function_privilege` |
+| C11 | `SECURITY DEFINER` functions (in every schema) are exactly the §4.5 list plus `app_is_operator` (owner `platform_definer`) and `ensure_audit_partitions` (owner `platform_audit_owner`), each with `EXECUTE` only for `platform_app`; the §4.5 functions have owner `platform_definer`; the sensitive-definer list of §4.5 matches its lint allow-list. *Amended 2026-11-12 (SEC-P3-27):* for every `SECURITY DEFINER` function, `proconfig` holds **exactly one** `search_path` entry and it equals **`search_path=pg_catalog, pg_temp`** (other entries, such as `TimeZone=UTC` and `lock_timeout=5s` on `ensure_audit_partitions`, are allowed) | `SELECT p.oid::regprocedure FROM pg_catalog.pg_proc p WHERE p.prosecdef AND (p.proconfig IS NULL OR NOT ('search_path=pg_catalog, pg_temp' = ANY (p.proconfig)) OR (SELECT count(*) FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%') <> 1)` → 0 rows; plus `proowner`, `has_function_privilege` |
 | C12 | With no settings, every RLS table returns 0 rows to `platform_app`; with org A set, crafted IDs of org B select/update/delete 0 rows and inserts with B's `org_id` fail; a customer member with `app.actor_scope = 'OPERATOR'` forced still sees nothing of B (`app_is_operator()` false) | generated per table (REQ-RLS-004/006/007, NFR-TENANT-001) |
-| C13 | (2026-11-12, SEC-P3-03) Every audit object (the eight tables of §4.4, every `audit_entries_%` partition, the three audit functions) has owner `platform_audit_owner`. `platform_audit_owner` has `rolcanlogin = false` and **no row in `pg_auth_members`**, neither as a role granted to others nor as a member. `platform_migrator` owns no audit object | `pg_class.relowner`, `pg_proc.proowner`, `pg_roles`, `pg_auth_members` |
-| C14 | (2026-11-12, SEC-P3-03) Event triggers `platform_audit_ddl_guard_end` (`ddl_command_end`) and `platform_audit_ddl_guard_drop` (`sql_drop`) exist with `evtenabled = 'O'` and call `platform.audit_ddl_guard()`, which is **not** `SECURITY DEFINER`. `audit_anchors` has the UPDATE/DELETE row trigger and the TRUNCATE trigger | `pg_event_trigger`, `pg_proc.prosecdef`, `pg_trigger` |
+| C13 | (2026-11-12, SEC-P3-03) Every audit object (the eight tables of §4.4, every `audit_entries_%` partition, the three audit functions) has owner `platform_audit_owner`. `platform_audit_owner` has `rolcanlogin = false` and **no row in `pg_auth_members`**, neither as a role granted to others nor as a member. `platform_migrator` owns no audit object. *Amended 2026-11-12 (SEC-P3-27 item 6, SEC-P3-33 item 10):* (a) schemas `public` and `platform` have owner `platform_schema_owner`, which has `rolcanlogin = false`; `platform_migrator` owns no schema. (b) The `pg_auth_members` rule for **both** `platform_audit_owner` and `platform_schema_owner` depends on who ran the bootstrap. **Locally** (superuser bootstrap): **no row**, neither as granted role nor as member. **On RDS (M5)**: the bootstrap master is not a superuser, and PostgreSQL 16+ automatically grants a role created by a `CREATEROLE` role to its creator with `admin_option = true`. So for each role there is **exactly one** row, with `roleid` = the role, `member` = the RDS master role, `admin_option = true`, `set_option = false`, `inherit_option = false`, and no other row in which the role is `roleid` or `member`. The master is passed to the test as `CATALOG_BOOTSTRAP_MASTER_ROLE`, empty locally. That row is break-glass, like the master credential itself (platform.md §4.3). SPK-08 verifies this RDS-parity assumption | `pg_class.relowner`, `pg_proc.proowner`, `pg_namespace.nspowner`, `pg_roles`, `pg_auth_members (roleid, member, admin_option, set_option, inherit_option)` |
+| C14 | (2026-11-12, SEC-P3-03) Event triggers `platform_audit_ddl_guard_end` (`ddl_command_end`) and `platform_audit_ddl_guard_drop` (`sql_drop`) exist with `evtenabled = 'O'` and call `platform.audit_ddl_guard()`, which is **not** `SECURITY DEFINER`. `audit_anchors` has the UPDATE/DELETE row trigger and the TRUNCATE trigger. *Amended 2026-11-12 (SEC-P3-27):* (a) `platform.audit_forbid_mutation()`, `platform.audit_vault_guard()` and `platform.audit_ddl_guard()` have `prosecdef = false`, and `proconfig` holds exactly one `search_path` entry equal to **`search_path=pg_catalog, pg_temp`**. (b) The guard matches the schemas by OID. In a transaction that is rolled back, the test superuser runs `ALTER SCHEMA public RENAME TO c14_x` and then `ALTER SCHEMA platform RENAME TO c14_y`, each in its own savepoint. Each raises SQLSTATE `42501` with the guard's message. Privilege does not stop a superuser, so this proves the guard itself. The migrator-side negative test is SEC-TC-61 | `pg_event_trigger`, `pg_proc.prosecdef`, `pg_proc.proconfig` (same query as C11 with `p.oid IN (…three functions…)` in place of `p.prosecdef`), `pg_trigger`, rename probe |
 
 Amended 2026-11-12 (SEC-P3-03, SEC-P3-25, SEC-P3-26):
 - **C3.** The row was changed from "`TO platform_migrator` policies exist only on the tables in §4.5" to the `platform_definer` wording above.
@@ -2790,6 +2866,15 @@ Amended 2026-11-12 (SEC-P3-03, SEC-P3-25, SEC-P3-26):
 - **C10.** Each column in the §10.4 key table has its `<col>_key_id` sibling (row changed in place).
 - **C11.** The row was changed from "owner `platform_migrator`" to the owners above. The §4.5 list now includes `job_context`, `sessions_for_user` and `mfa_enrolment_overdue_candidates`, and the sensitive-definer assertion was added.
 - **Wave-end and evidence checks.** SEC-P3-07 refers to the security catalog suite as "C1–C12"; C13 and C14 belong to it as well.
+
+Amended 2026-11-12 (SEC-P3-27, SEC-P3-33 item 10):
+- **C11.** "each with a fixed `search_path`" now names the exact value, `search_path=pg_catalog, pg_temp`, and the query covers every schema. A definer function planted in `public` therefore fails both the exact-list and the `proconfig` assertion.
+- **C13.** Adds the schema owner `platform_schema_owner` and the environment-dependent `pg_auth_members` rule (none locally; one ADMIN-only row for the RDS master).
+- **C14.** Adds the `proconfig` assertion for the three non-definer audit functions and the OID rename probe.
+- **SEC-TC-61** (security review §14.5) is the negative test as the migrator:
+  - It plants `public.pg_advisory_xact_lock(integer)` and `public.to_char(date, text)`, then calls `platform.ensure_audit_partitions(3)` as `platform_app`. The call succeeds, no marker row exists and every audit trigger is still enabled.
+  - `ALTER SCHEMA public RENAME TO x` and `ALTER SCHEMA platform RENAME TO y` both raise; since this amendment they are refused by privilege first and by the guard second.
+  - The amendment proposes adding `DROP FUNCTION platform.audit_ddl_guard() CASCADE` and `DROP SCHEMA platform CASCADE` to SEC-TC-61 (both must fail by privilege).
 
 ---
 
@@ -2871,11 +2956,13 @@ Amended 2026-11-12 (SEC-P3-08 item 1, SEC-P3-03): added `ip_hash_key_id` with it
 
 ```sql
 CREATE FUNCTION platform.audit_forbid_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp                    -- amended 2026-11-12 (SEC-P3-27): was unset (ran with the invoker's path)
+AS $$
 BEGIN
   RAISE EXCEPTION USING
     ERRCODE = '42501',                                   -- insufficient_privilege
-    MESSAGE = format('AUDIT_IMMUTABLE: %s on %s is not permitted', TG_OP, TG_TABLE_NAME);
+    MESSAGE = pg_catalog.format('AUDIT_IMMUTABLE: %s on %s is not permitted', TG_OP, TG_TABLE_NAME);
 END $$;
 
 CREATE TRIGGER trg_audit_entries__no_update_delete
@@ -2922,53 +3009,89 @@ The guard function therefore must **not** be `SECURITY DEFINER`, otherwise `curr
 ```sql
 -- prisma/bootstrap/90-audit-ddl-guard.sql — run by the bootstrap superuser AFTER 10-audit.sql (RESET ROLE first);
 -- event triggers require superuser, so the function and triggers are owned by the bootstrap superuser.
+-- amended 2026-11-12 (SEC-P3-27 items 1 and 3): search_path with pg_temp explicitly last; every catalog and built-in
+-- pg_catalog-qualified; the protected schemas are matched by OID, derived at call time (method and reasons below).
+SET search_path = pg_catalog, pg_temp;                                       -- SEC-P3-27 item 4: first statement of the file
 CREATE OR REPLACE FUNCTION platform.audit_ddl_guard() RETURNS event_trigger
 LANGUAGE plpgsql
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp                                        -- was: pg_catalog (pg_temp then searched FIRST for relations)
 AS $$
 DECLARE
-  r      record;
-  v_addr record;
-  c_tbl  constant text := '^(audit_[a-z0-9_]+|data_subjects)$';           -- audit tables and audit_entries_YYYY_MM partitions
-  c_idx  constant text := '^(ix_audit__|pk_audit_|ux_audit_|ux_data_subjects__|audit_entries_)';
-  c_fn   constant text[] := ARRAY['audit_forbid_mutation','audit_vault_guard','ensure_audit_partitions','audit_ddl_guard'];
+  r       record;
+  v_owner oid;
+  v_ns    oid[];                                                             -- protected schema OIDs
+  v_rel   oid;
+  v_hit   boolean;
+  c_tbl   constant text   := '^(audit_[a-z0-9_]+|data_subjects)$';          -- audit tables and audit_entries_YYYY_MM partitions
+  c_idx   constant text   := '^(ix_audit__|pk_audit_|ux_audit_|ux_data_subjects__|audit_entries_)';
+  c_fn    constant text[] := ARRAY['audit_forbid_mutation','audit_vault_guard','ensure_audit_partitions','audit_ddl_guard'];
+  c_nsnm  constant text[] := ARRAY['public','platform'];                     -- sql_drop fallback only; never used on ddl_command_end
 BEGIN
   IF current_user = 'platform_audit_owner' THEN
     RETURN;                                                                  -- ensure_audit_partitions / bootstrap lane only
   END IF;
 
+  -- Protected schemas BY OID: every schema holding a relation or function owned by platform_audit_owner
+  -- (public: the audit tables; platform: the audit functions). A rename keeps the OID.
+  v_owner := pg_catalog.to_regrole('platform_audit_owner')::oid;
+  SELECT pg_catalog.array_agg(s.ns) INTO v_ns
+    FROM (SELECT c.relnamespace AS ns FROM pg_catalog.pg_class c WHERE c.relowner = v_owner
+          UNION
+          SELECT p.pronamespace       FROM pg_catalog.pg_proc  p WHERE p.proowner = v_owner) s;
+  IF v_ns IS NULL THEN                                                       -- owner missing or owns nothing: fail closed
+    RAISE EXCEPTION USING ERRCODE = '42501',
+      MESSAGE = 'audit DDL guard cannot resolve the protected schemas (SEC-P3-27)';
+  END IF;
+
   IF TG_EVENT = 'ddl_command_end' THEN
-    FOR r IN SELECT * FROM pg_event_trigger_ddl_commands() LOOP
-      CONTINUE WHEN r.objid IS NULL OR r.objid = 0;                          -- e.g. GRANT rows; GRANT needs ownership anyway
-      SELECT * INTO v_addr FROM pg_identify_object_as_address(r.classid, r.objid, r.objsubid);
-      IF (r.object_type IN ('table','table column','trigger','policy','table constraint','rule')
-            AND v_addr.object_names[1] = 'public' AND v_addr.object_names[2] ~ c_tbl)
-         OR (r.object_type = 'index'
-            AND EXISTS (SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid
-                         JOIN pg_namespace n ON n.oid = t.relnamespace
-                        WHERE i.indexrelid = r.objid AND n.nspname = 'public' AND t.relname ~ c_tbl))
-         OR (r.object_type = 'function'
-            AND v_addr.object_names[1] = 'platform' AND v_addr.object_names[2] = ANY (c_fn))
-         OR (r.object_type = 'schema' AND v_addr.object_names[1] IN ('public','platform'))
-      THEN
+    FOR r IN SELECT * FROM pg_catalog.pg_event_trigger_ddl_commands() LOOP
+      CONTINUE WHEN r.objid IS NULL OR r.objid = 0;                          -- e.g. GRANT rows, no-op CREATE SCHEMA IF NOT EXISTS
+      v_hit := false;
+      IF r.object_type = 'schema' THEN
+        v_hit := r.objid = ANY (v_ns);                                       -- ALTER SCHEMA … RENAME / OWNER TO, COMMENT ON SCHEMA
+      ELSIF r.object_type = 'function' THEN
+        SELECT p.proowner = v_owner OR (p.pronamespace = ANY (v_ns) AND p.proname = ANY (c_fn))
+          INTO v_hit FROM pg_catalog.pg_proc p WHERE p.oid = r.objid;        -- also stops overloads planted under an audit name
+      ELSIF r.object_type IN ('table','table column','index','trigger','policy','table constraint','rule') THEN
+        v_rel := CASE r.object_type
+                   WHEN 'index'            THEN (SELECT i.indrelid FROM pg_catalog.pg_index      i WHERE i.indexrelid = r.objid)
+                   WHEN 'trigger'          THEN (SELECT t.tgrelid  FROM pg_catalog.pg_trigger    t WHERE t.oid = r.objid)
+                   WHEN 'policy'           THEN (SELECT p.polrelid FROM pg_catalog.pg_policy     p WHERE p.oid = r.objid)
+                   WHEN 'table constraint' THEN (SELECT k.conrelid FROM pg_catalog.pg_constraint k WHERE k.oid = r.objid)
+                   WHEN 'rule'             THEN (SELECT w.ev_class FROM pg_catalog.pg_rewrite    w WHERE w.oid = r.objid)
+                   ELSE r.objid                                              -- 'table', 'table column'
+                 END;
+        SELECT c.relowner = v_owner OR (c.relnamespace = ANY (v_ns) AND c.relname ~ c_tbl)
+          INTO v_hit FROM pg_catalog.pg_class c WHERE c.oid = v_rel;
+      END IF;
+      IF COALESCE(v_hit, false) THEN
         RAISE EXCEPTION USING ERRCODE = '42501',
           MESSAGE = 'audit objects are immutable (SEC-P3-03)',
-          DETAIL  = format('%s on %s %s by %s', r.command_tag, r.object_type, r.object_identity, current_user);
+          DETAIL  = pg_catalog.format('%s on %s %s by %s', r.command_tag, r.object_type, r.object_identity, current_user);
       END IF;
     END LOOP;
 
   ELSIF TG_EVENT = 'sql_drop' THEN
-    FOR r IN SELECT * FROM pg_event_trigger_dropped_objects() LOOP
-      IF (r.object_type IN ('table','table column','trigger','policy','table constraint','rule')
-            AND r.address_names[1] = 'public' AND r.address_names[2] ~ c_tbl)
-         OR (r.object_type = 'index' AND r.schema_name = 'public' AND r.object_name ~ c_idx)
-         OR (r.object_type = 'function' AND r.schema_name = 'platform'
-            AND r.address_names[2] = ANY (c_fn))
-         OR (r.object_type = 'schema' AND r.object_name IN ('public','platform'))
-      THEN
+    -- Dropped objects are already gone from the catalogue: schemas match by OID first, and by name only as the fallback
+    -- for a schema dropped together with every audit object it held (names are stable: renames are refused above).
+    FOR r IN SELECT * FROM pg_catalog.pg_event_trigger_dropped_objects() LOOP
+      IF r.object_type = 'schema' THEN
+        v_hit := r.objid = ANY (v_ns) OR r.object_name = ANY (c_nsnm);
+      ELSE
+        v_hit := (COALESCE(pg_catalog.to_regnamespace(pg_catalog.quote_ident(r.address_names[1]))::oid = ANY (v_ns), false)
+                  OR r.address_names[1] = ANY (c_nsnm))
+             AND CASE
+                   WHEN r.object_type IN ('table','table column','trigger','policy','table constraint','rule')
+                                                   THEN r.address_names[2] ~ c_tbl
+                   WHEN r.object_type = 'index'    THEN r.address_names[2] ~ c_idx
+                   WHEN r.object_type = 'function' THEN r.address_names[2] = ANY (c_fn)
+                   ELSE false
+                 END;
+      END IF;
+      IF COALESCE(v_hit, false) THEN
         RAISE EXCEPTION USING ERRCODE = '42501',
           MESSAGE = 'audit objects are immutable (SEC-P3-03)',
-          DETAIL  = format('DROP of %s %s by %s', r.object_type, r.object_identity, current_user);
+          DETAIL  = pg_catalog.format('DROP of %s %s by %s', r.object_type, r.object_identity, current_user);
       END IF;
     END LOOP;
   END IF;
@@ -2984,7 +3107,33 @@ What the guard covers:
 - **`ALTER TABLE` forms.** `ALTER TABLE … DISABLE TRIGGER`, `NO FORCE ROW LEVEL SECURITY`, `DISABLE ROW LEVEL SECURITY`, `DETACH PARTITION`, `ADD/DROP COLUMN`, `SET LOGGED/UNLOGGED`, `OWNER TO` and `RENAME` on an audit table or partition all surface in `ddl_command_end` with `object_type = 'table'` and the table's address.
 - **Drops.** `DROP TRIGGER`, `DROP POLICY` and `DROP TABLE` surface in `sql_drop` with the table in `address_names[2]`.
 - **Dropped indexes.** A dropped index is matched by name, because its table is gone from the catalogue at `sql_drop` time. That is why the naming prefixes of P9 matter. Partition child indexes start with the partition name.
-- **Schemas.** Altering or dropping the `public` and `platform` schemas is guarded too. They are created only by the bootstrap lane, and a migrator-owned `DROP SCHEMA public CASCADE` would otherwise remove the audit tables.
+- **Schemas.** Altering or dropping the `public` and `platform` schemas is guarded too. They are created only by the bootstrap lane, and a migrator-owned `DROP SCHEMA public CASCADE` would otherwise remove the audit tables. *Amended 2026-11-12 (SEC-P3-27): the schemas are matched by OID, so `ALTER SCHEMA public|platform RENAME`, `OWNER TO` and `DROP SCHEMA` all raise; since the §4.4 amendment the migrator no longer owns them, and privilege refuses these statements before the guard runs.*
+
+#### Amendment (2026-11-12, SEC-P3-27): fixed search path and OID-based schema matching
+
+The guard above, `audit_forbid_mutation` (above) and `audit_vault_guard` (§5.7) now declare `SET search_path = pg_catalog, pg_temp`. Every catalog and built-in they use is `pg_catalog.`-qualified: `pg_catalog.pg_class`, `pg_index`, `pg_proc`, `pg_trigger`, `pg_policy`, `pg_constraint`, `pg_rewrite`, `format`, `to_regrole`, `to_regnamespace`, `quote_ident`, `array_agg`, `pg_event_trigger_ddl_commands`, `pg_event_trigger_dropped_objects`. The fixes, against the weaknesses the review found:
+
+- **Temporary-table shadowing.** The guard's old `SET search_path = pg_catalog` left `pg_temp` implicitly **first** for relation names. In the migrator's own session, a temporary `pg_index` or `pg_class` could therefore shadow the catalog in the index branch. With `pg_temp` listed last, and every catalog qualified, that is no longer possible.
+- **Unpinned trigger functions.** The two trigger functions previously set no path. Their `format()` call ran with the invoker's path, and in the bootstrap lane the invoker is the superuser.
+- **Schema renames.** The old guard matched `object_names[1] = 'public'`. As owner of `public`, the migrator could `ALTER SCHEMA public RENAME TO x`. Audit writes would then fail closed, and the guard would block renaming it back, a denial of service that only the superuser could repair. Schemas are now matched by OID.
+
+**Method chosen for the OID match: derived at call time, not written into the body.** On every call the guard computes the protected schema OIDs. They are the namespaces of every relation (`pg_class.relnamespace`) and every function (`pg_proc.pronamespace`) owned by `platform_audit_owner`, whose OID comes from `to_regrole`; today that is `public` and `platform`. Reasons:
+1. **Restore.** OIDs written into the function body by the bootstrap would go stale after every `pg_dump`/`pg_restore`, including the §8.6 rehearsal and any RDS snapshot restored into a new instance. Restored objects get new OIDs, but the restored function body would keep the old ones. The guard would then silently protect nothing (fail open), or need a regeneration step that someone must remember. The derived set is right in every database without a per-database step.
+2. **Who controls the set.** It is anchored on ownership, which the migrator cannot change: it is not a member of `platform_audit_owner`, and it cannot `ALTER … OWNER` objects it does not own. It can only grow if the audit owner gains objects in another schema (for example the M5 `audit` schema), which makes the guard stricter, never weaker.
+3. **Cost.** Two scans of `pg_class` and `pg_proc` filtered by owner per DDL command. That is a few milliseconds, paid only on DDL.
+4. **Fail closed.** If the set is empty (the owner is missing or owns nothing), the guard raises on every DDL command instead of letting it through.
+
+**Relation and function objects** are matched in two ways:
+- by the identity of the object they belong to: the owning relation (`indrelid`, `tgrelid`, `polrelid`, `conrelid`, `ev_class`) or the function's owner is `platform_audit_owner`;
+- or by namespace OID plus the audit name pattern. This keeps catching an audit table after an owner change by the superuser, and a function planted under an audit name, for example an overload `platform.ensure_audit_partitions(bigint)`.
+
+**`sql_drop`.** Dropped objects are no longer in the catalogue when `sql_drop` fires, so the guard matches:
+- a dropped schema by OID first, with its name as the fallback for a schema dropped in the same command as every audit object it held;
+- a dropped table, index or function by the OID of its still-existing schema, with the schema name as the same fallback.
+
+The names are stable, because `ddl_command_end` refuses a rename of a protected schema by OID, and since §4.4 item 6 the migrator cannot rename or drop either schema at all.
+
+**Changing the guard later.** The guard protects itself (`audit_ddl_guard` is in `c_fn`), so a later bootstrap file that replaces it must first run `ALTER EVENT TRIGGER … DISABLE` for both triggers (superuser), then replace the function, then re-enable them, all in one transaction. The linter's `@audit-ddl` marker applies.
 
 What it does not cover:
 - **A cluster superuser.** The guard does not stop a superuser, who can `ALTER EVENT TRIGGER … DISABLE` or run with `session_replication_role = replica`, where event triggers do not fire. Tamper evidence against that actor is the hourly signed anchor (§5.5, §5.6) plus the M5 locked sink.
@@ -2994,6 +3143,7 @@ Tests (SEC-TC-43):
 - As `platform_migrator`, each of `ALTER TABLE audit_entries DISABLE TRIGGER ALL`, `NO FORCE ROW LEVEL SECURITY`, `DROP TRIGGER`, `DETACH PARTITION`, `DROP TABLE public.audit_entries` and `DROP SCHEMA public CASCADE` fails.
 - The same statements built through `DO $$ … EXECUTE 'ALTER TABLE audit_' || 'entries …' $$` fail too, with the guard's message wherever privilege did not already stop them.
 - `SELECT platform.ensure_audit_partitions(3)` as `platform_app` still succeeds.
+- *Added 2026-11-12 (SEC-P3-27):* SEC-TC-61 covers the search-path hijack (planted `public.pg_advisory_xact_lock(integer)` and `public.to_char(date, text)` are never called) and the schema renames. C14 (b) proves that the OID match holds even against a superuser.
 
 ### 5.3 Partition pre-creation
 
@@ -3001,7 +3151,7 @@ Tests (SEC-TC-43):
 CREATE FUNCTION platform.ensure_audit_partitions(p_months_ahead integer DEFAULT 3)
 RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, pg_temp                                  -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
 SET "TimeZone" = 'UTC'
 SET lock_timeout = '5s'
 AS $$
@@ -3015,24 +3165,25 @@ BEGIN
   IF p_months_ahead NOT BETWEEN 0 AND 12 THEN
     RAISE EXCEPTION 'months_ahead must be between 0 and 12';
   END IF;
-  PERFORM pg_advisory_xact_lock(hashtext('audit:partitions'));        -- one creator at a time
+  -- amended 2026-11-12 (SEC-P3-27 item 2): built-ins qualified, explicit casts so no better-matching overload can exist
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('audit:partitions')::bigint);   -- one creator at a time
   FOR i IN 0..p_months_ahead LOOP
-    v_month := (date_trunc('month', now()) + make_interval(months => i))::date;
-    v_from  := v_month::timestamp AT TIME ZONE 'UTC';
+    v_month := (pg_catalog.date_trunc('month', pg_catalog.now()) + pg_catalog.make_interval(months => i))::date;
+    v_from  := v_month::timestamp AT TIME ZONE 'UTC';                  -- AT TIME ZONE parses to pg_catalog.timezone()
     v_to    := (v_month + interval '1 month')::timestamp AT TIME ZONE 'UTC';
-    v_name  := 'audit_entries_' || to_char(v_month, 'YYYY_MM');
-    IF to_regclass('public.' || v_name) IS NULL THEN
+    v_name  := 'audit_entries_' || pg_catalog.to_char(v_month::timestamp, 'YYYY_MM');
+    IF pg_catalog.to_regclass('public.' || v_name) IS NULL THEN
       -- create detached, then ATTACH (SHARE UPDATE EXCLUSIVE on the parent instead of ACCESS EXCLUSIVE)
-      EXECUTE format('CREATE TABLE public.%I (LIKE public.audit_entries INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING GENERATED)', v_name);
-      EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I CHECK (occurred_at >= %L AND occurred_at < %L)',
+      EXECUTE pg_catalog.format('CREATE TABLE public.%I (LIKE public.audit_entries INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING GENERATED)', v_name);
+      EXECUTE pg_catalog.format('ALTER TABLE public.%I ADD CONSTRAINT %I CHECK (occurred_at >= %L AND occurred_at < %L)',
                      v_name, 'ck_' || v_name || '__range', v_from, v_to);
-      EXECUTE format('ALTER TABLE public.audit_entries ATTACH PARTITION public.%I FOR VALUES FROM (%L) TO (%L)',
+      EXECUTE pg_catalog.format('ALTER TABLE public.audit_entries ATTACH PARTITION public.%I FOR VALUES FROM (%L) TO (%L)',
                      v_name, v_from, v_to);                            -- parent indexes and row trigger are created/attached
-      EXECUTE format('CREATE TRIGGER %I BEFORE TRUNCATE ON public.%I FOR EACH STATEMENT EXECUTE FUNCTION platform.audit_forbid_mutation()',
+      EXECUTE pg_catalog.format('CREATE TRIGGER %I BEFORE TRUNCATE ON public.%I FOR EACH STATEMENT EXECUTE FUNCTION platform.audit_forbid_mutation()',
                      'trg_' || v_name || '__no_truncate', v_name);
-      EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC', v_name);
+      EXECUTE pg_catalog.format('REVOKE ALL ON public.%I FROM PUBLIC', v_name);
       INSERT INTO public.audit_partitions (id, partition_name, range_start, range_end, created_by, updated_by)
-      VALUES (uuidv7(), v_name, v_from, v_to,
+      VALUES (pg_catalog.uuidv7(), v_name, v_from, v_to,
               '00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-000000000001')
       ON CONFLICT (partition_name) DO NOTHING;
       v_created := v_created + 1;
@@ -3049,6 +3200,15 @@ Amended 2026-11-12 (SEC-P3-03):
 - **The only DDL path at runtime.** The function is owned by `platform_audit_owner` and is the only code path that runs DDL on audit objects outside the bootstrap lane. Inside it, `current_user = 'platform_audit_owner'`, so the `audit_ddl_guard` (§5.2) admits its `CREATE TABLE`, `ADD CONSTRAINT`, `ATTACH PARTITION`, `CREATE TRIGGER` and `REVOKE`, and the new partitions are owned by `platform_audit_owner`.
 - **Who calls it.** `platform_app` keeps `EXECUTE` so that the daily `audit-maintenance` worker job can call it. The function only creates future months and takes no free-form input (`p_months_ahead` is bounded to 0–12), so `EXECUTE` gives no way to alter existing audit objects.
 - **First call.** The first call moves from "the initial migration" to `prisma/bootstrap/10-audit.sql` (§4.4).
+
+Amended 2026-11-12 (SEC-P3-27 items 1, 2 and 7): **the call path resolves functions and operators in `pg_catalog` only.**
+- **Three layers.**
+  - The function declares `SET search_path = pg_catalog, pg_temp`, and PostgreSQL never searches `pg_temp` for functions or operators.
+  - Every built-in it calls is `pg_catalog.`-qualified, with casts that make the signature exact: `hashtext(…)::bigint` matches `pg_advisory_xact_lock(bigint)`, and `v_month::timestamp` matches `to_char(timestamp, text)`.
+  - The operators (`||`, `+`, `>=`, `<`, `BETWEEN`) and casts, including those inside the `EXECUTE` strings and the range CHECK they create, resolve through the fixed path, so in `pg_catalog` only. `AT TIME ZONE` is parsed directly into `pg_catalog.timezone()`.
+- **Effect.** A `public.pg_advisory_xact_lock(integer)` or `public.to_char(date, text)` planted by the migrator, which keeps `CREATE` on `public`, is **never called**, however well it matches.
+- **No other code in the call path.** The function calls no migrator-owned function. The only non-catalog routine in its path is the trigger function `platform.audit_forbid_mutation()`, which is owned by `platform_audit_owner` and pinned the same way.
+- **Consequence for ADR-0007.** With this, the §4.4 schema owner and the OID-matched guard (§5.2), the migrator credential can no longer reach code that runs as `platform_audit_owner`. That is what lets ADR-0007 amendment 7 item 1 state that "tampering needs the cluster superuser". SEC-TC-61 verifies it.
 
 The initial migration calls `SELECT platform.ensure_audit_partitions(3);` (current month + 3, REQ-AUDIT-017). The daily `audit-maintenance` job calls it idempotently; readiness reports the audit component degraded when fewer than 2 future partitions exist (`SELECT count(*) FROM audit_partitions WHERE range_start > now()`), and the job alerts on any failure. The ATTACH of an empty table with a matching CHECK skips the validation scan.
 
@@ -3068,7 +3228,7 @@ SELECT token FROM public.audit_pii_vault
  WHERE subject_id = $subject_id AND entity_name = $entity_name AND field = $field AND value_hmac = $value_hmac;
 
 -- 2. Serialise writers of this stream (ADR-0007); SYSTEM entries use shard hash(correlation_id) mod 16
-SELECT pg_advisory_xact_lock(hashtext('audit:' || $stream_id::text));
+SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('audit:' || $stream_id::text)::bigint);   -- qualified 2026-11-12 (SEC-P3-27, defence in depth; §4.4 amendment item 5)
 
 -- 3. Read (or create) the head and the database clock
 INSERT INTO public.audit_stream_heads (id, stream_id, entry_count, head_hash, last_verified_seq, last_verified_hash,
@@ -3110,7 +3270,7 @@ UPDATE public.audit_stream_heads
 - `audit_checkpoint_heads` stores deltas (§3.4);
 - the head snapshot is taken once and reused, so the digest and the stored rows always describe the same set (the first version re-read `audit_stream_heads` for the `INSERT`, and could store heads newer than the digest).
 
-Why ECDSA P-256 and not Ed25519: AWS KMS offers no Ed25519 signing, and one algorithm for local and M5 keeps a single verifier.
+Why ECDSA P-256 and not Ed25519: not KMS availability (AWS KMS has signed with `ECC_NIST_EDWARDS25519` since 2025-11-07). P-256/SHA-256 is FIPS 186-5 approved and is the one signature algorithm every target verifier already supports without new code or library versions: `openssl dgst -sha256 -verify` for regulators and auditors, WebCrypto `ECDSA` in every browser of the ADR-0026 §11 matrix for an in-browser verifier, Node 24 `crypto.verify`, and every KMS/HSM the platform may move to (Azure Key Vault has no Ed25519). KMS `ECDSA_SHA_256` with `MessageType = RAW` signs the same SHA-256 digest Node signs, so one verifier serves local and M5. ECDSA's signature malleability is harmless here because the verifier compares the sink record with the table record byte for byte (SEC-TC-44). The `algorithm` column is a CHECK-constrained enum so `ED25519` can be added later by extending the CHECK and the verifier (ADR-0007 amendment 8, D-ARCH-029). *Amended 2026-11-12 (SEC-P3-33 item 1): replaces the earlier sentence "AWS KMS offers no Ed25519 signing, and one algorithm for local and M5 keeps a single verifier", which was outdated; the choice stands (security review ruling 2).*
 
 **Keys and configuration (ADR-0018 register).**
 
@@ -3126,7 +3286,7 @@ Why ECDSA P-256 and not Ed25519: AWS KMS offers no Ed25519 signing, and one algo
 
 ```sql
 BEGIN;
-SELECT pg_advisory_xact_lock(hashtext('audit:anchors'));                 -- one anchor writer; held across the signing call
+SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('audit:anchors')::bigint);   -- one anchor writer; held across the signing call (qualified 2026-11-12, SEC-P3-27)
 SELECT anchor_seq, anchor_hash FROM public.audit_anchors ORDER BY anchor_seq DESC LIMIT 1;   -- none → seq 0, 32 zero bytes
 SELECT stream_id, entry_count, head_hash, head_occurred_at
   FROM public.audit_stream_heads ORDER BY stream_id;                     -- ONE snapshot (single statement), reused below
@@ -3252,13 +3412,15 @@ CREATE TABLE public.audit_pii_vault (
   CONSTRAINT ux_audit_pii_vault__subject_field_value UNIQUE (subject_id, entity_name, field, value_hmac)
 );
 
-CREATE FUNCTION platform.audit_vault_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION platform.audit_vault_guard() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp                         -- amended 2026-11-12 (SEC-P3-27): was unset (invoker's path)
+AS $$
 BEGIN
   IF TG_OP = 'DELETE' AND current_user = 'platform_erasure'
-     AND current_setting('app.erasure_request_id', true) ~* '^[0-9a-f-]{36}$' THEN
+     AND pg_catalog.current_setting('app.erasure_request_id', true) ~* '^[0-9a-f-]{36}$' THEN
     RETURN OLD;                                               -- M4/M5 erasure job only
   END IF;
-  RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = format('AUDIT_VAULT_IMMUTABLE: %s', TG_OP);
+  RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = pg_catalog.format('AUDIT_VAULT_IMMUTABLE: %s', TG_OP);
 END $$;
 CREATE TRIGGER trg_audit_pii_vault__guard BEFORE UPDATE OR DELETE ON public.audit_pii_vault
   FOR EACH ROW EXECUTE FUNCTION platform.audit_vault_guard();
@@ -3521,7 +3683,7 @@ The generated client is imported only by repository modules (`apps/api/src/modul
 
 Amendment (2026-11-12, SEC-P3-03):
 - **External tables.** The audit objects are created in the bootstrap lane, so `tables.external` in `prisma.config.ts` lists **all** of them: `public.audit_entries`, `public.audit_stream_heads`, `public.audit_checkpoint_heads`, `public.audit_chain_verifications`, `public.audit_partitions`, `public.audit_anchors`, `public.audit_pii_vault`, `public.data_subjects`. They stay modelled for typed reads and writes.
-- **Shadow database.** The shadow database used by `migrate dev` is initialised with the bootstrap-lane SQL (Prisma's shadow-database init hook for external tables). **Verify in P5 spike SPK-03** that the hook exists at 7.10 and that partitions created by `ensure_audit_partitions` are ignored by the differ. The fallback is unchanged: TypedSQL access in `packages/audit`.
+- **Shadow database.** The shadow database used by `migrate dev` is initialised with the bootstrap-lane SQL (Prisma's shadow-database init hook for external tables). **Verify in P5 spike SPK-03** that the hook exists at 7.10 and that partitions created by `ensure_audit_partitions` are ignored by the differ. The fallback is unchanged: TypedSQL access in `packages/audit`. *Amended 2026-11-12 (SEC-P3-27 item 6):* the shadow init script is a migrator-runnable rendering of the bootstrap lane: no roles, no `SET ROLE`, no `OWNER TO` or `AUTHORIZATION`, no event triggers. It runs in a shadow database owned by the migrator, so Prisma's shadow reset still works there. The rendering keeps the `SET search_path = pg_catalog, pg_temp` lines. The evaluation is in §4.4, "fixed search path … no-member schema owner".
 - **No audit DDL in Prisma migrations.** A Prisma migration never contains audit DDL (§8.3 rule 12).
 
 Workflow for a migration that needs raw SQL (REQ-SEC-009 allows raw SQL only in migrations and reviewed repository functions):
@@ -3624,6 +3786,15 @@ Fails the build when a migration file:
     - **Other checks.** The linter also rejects any `DO` block or function body in `prisma/migrations/**` that runs `EXECUTE` on a concatenated string, unless the statement carries `-- @dynamic-sql reviewed: <reviewer> <date>`.
     - **Limits.** The linter matches text and is an early warning, not the boundary. The boundary is ownership (§4.4) plus the identity-based `audit_ddl_guard` (§5.2), which also catches dynamic SQL at execution time. The bootstrap and `migrate` lanes run as separate CI and CD steps with separate credentials, and the `migrate` job never receives the cluster-admin credential.
 
+**Amendment (2026-11-12, SEC-P3-27): definer search path.** One rule is added. It applies to `prisma/migrations/**` and `prisma/bootstrap/**`.
+
+13. **`SECURITY DEFINER` without the fixed search path, or a bootstrap file without the path line.**
+    - **Definer functions.** Every `CREATE [OR REPLACE] FUNCTION` or `CREATE [OR REPLACE] PROCEDURE` whose header (the text up to the body's opening `AS`) contains `SECURITY DEFINER` must also contain `SET search_path = pg_catalog, pg_temp`. The match is case-insensitive and whitespace-normalised, with `pg_temp` last and nothing else in the list.
+    - **Statements that undo it.** The linter also rejects `ALTER FUNCTION … SECURITY DEFINER`, and any `ALTER FUNCTION … SET search_path`, `RESET search_path` or `RESET ALL` on a function, unless the statement sets exactly that value.
+    - **The audit functions.** `platform.audit_forbid_mutation`, `platform.audit_vault_guard` and `platform.audit_ddl_guard` need the same `SET` clause, although they are not definer functions.
+    - **Bootstrap files.** Every file in `prisma/bootstrap/**` must have `SET search_path = pg_catalog, pg_temp;` as its first statement, after the header comments and before any `SET ROLE`.
+    - **Limits.** This is a text early warning. The boundary is the `proconfig` assertion of catalog tests C11 and C14 (§4.6), which also catches functions created through dynamic SQL.
+
 ### 8.4 Reversibility test: up → down → up (NFR-DATA-004)
 
 Testcontainers job on (a) an empty database and (b) the seeded database:
@@ -3652,7 +3823,7 @@ Production (M5): RDS automated backups with PITR (RPO ≤ 5 min via continuous W
 6. Archive the report as a CI artifact; a failed rehearsal blocks the data-changing migration (CLAUDE.md §5).
 
 Amendment (2026-11-12, SEC-P3-03), applying to step 4 and step 5:
-- **Step 4, what the bootstrap runs.** The restore runs **only** `prisma/bootstrap/00-roles.sql` before `pg_restore`. That file holds the cluster- and database-level statements that `pg_dump` does not carry: `CREATE ROLE`, role memberships, `ALTER ROLE … SET`, `ALTER DATABASE … OWNER`. Everything schema-scoped comes from the dump: `01-schemas.sql` content, audit DDL and event triggers. Running `01-schemas.sql` first would make `pg_restore --exit-on-error` fail on `CREATE SCHEMA platform`. `pg_dump` emits event triggers at the very end of the archive, so they are created after every audit object has been restored with its owner.
+- **Step 4, what the bootstrap runs.** The restore runs **only** `prisma/bootstrap/00-roles.sql` before `pg_restore`. That file holds the cluster- and database-level statements that `pg_dump` does not carry: `CREATE ROLE`, role memberships, `ALTER ROLE … SET`, `ALTER DATABASE … OWNER`. Everything schema-scoped comes from the dump: `01-schemas.sql` content, audit DDL and event triggers. Running `01-schemas.sql` first would make `pg_restore --exit-on-error` fail on `CREATE SCHEMA platform`. `pg_dump` emits event triggers at the very end of the archive, so they are created after every audit object has been restored with its owner. *Amended 2026-11-12 (SEC-P3-27): `00-roles.sql` now also creates `platform_schema_owner` and transfers `public` to it, and the dump carries the owner and ACL of both schemas. The guard derives the protected schema OIDs at call time (§5.2), so it protects the restored database without any per-database step, although every OID changes in a restore.*
 - **Step 4, ordering is load-bearing.** Running `90-audit-ddl-guard.sql` before `pg_restore` would make the guard block the restore of the audit objects.
 - **Step 5, added checks.** The verification also runs C13/C14 and the anchor checks of §5.6: the anchor log is dense and chained, signatures verify, and the restored `audit_anchors` equals the local file sink, which the rehearsal copies alongside the dump.
 
@@ -3904,10 +4075,20 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A10 | SEC-P3-25 | Definer functions, `app_is_operator` and definer-read policies owned by / targeted at **`platform_definer`** (was `platform_migrator`); C3/C11 updated; `sessions_for_user` (OI-25) listed in §4.5; `quote_share_resolve` serves `POST /public/shared-quotes/resolve` | §4.2, §4.3, §4.4, §4.5, §4.6 |
 | A11 | SEC-P3-10 | `createQuoteShare` always mints a new token and revokes the previous active share; backstop `ux_quote_shares__quote_active` | §3.10 `quote_shares` |
 | A12 | SEC-P3-13 | Raw carrier payload JSON replaces document bytes with `{"$blob": {sha256, size, media_type, document_id?}}`; allow-list redaction of tracking/response payloads | §3.8 `carrier_raw_payloads` |
+| A13 | SEC-P3-27 (G2-C3) | **Search path.** Every `SECURITY DEFINER` function (the §4.5 list, `app_is_operator`, `job_context`, `ensure_audit_partitions`) and the non-definer audit functions `audit_forbid_mutation`, `audit_vault_guard` and `audit_ddl_guard` declare exactly `SET search_path = pg_catalog, pg_temp`. Relations are schema-qualified. The audit functions qualify built-ins: `pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(…)::bigint)`, `pg_catalog.to_char(v_month::timestamp, …)`, `pg_catalog.uuidv7()`, `pg_catalog.format`. The app-side audit advisory locks are qualified too. **Bootstrap.** Every bootstrap file starts with `SET search_path = pg_catalog, pg_temp;` before `SET ROLE`, and the runner sets the path at connection level. **Guard.** `audit_ddl_guard` qualifies the catalogs and matches the protected schemas **by OID, derived at call time** from the namespaces of objects owned by `platform_audit_owner` (not written into the body, because OIDs change in every restore). It refuses `ALTER SCHEMA … RENAME`, `OWNER TO` and `DROP SCHEMA` on them, and fails closed if the set is empty. **Schema owner (review item 6, recommended): adopted.** The new `NOLOGIN` no-member role `platform_schema_owner` owns `public` and `platform`, and the migrator gets `USAGE, CREATE`. This breaks nothing in Prisma Migrate: `deploy` needs only `CREATE`, the shadow database is migrator-owned, and `migrate reset` on the dev database was already blocked by the guard. It closes schema-owner drops and renames by privilege, including `DROP FUNCTION platform.audit_ddl_guard() CASCADE`. **Also:** `platform_definer` gets `CREATE` on `platform`, which PostgreSQL requires for `ALTER FUNCTION … OWNER TO`. C11 and C14 assert `proconfig` = `search_path=pg_catalog, pg_temp`, and C14 adds the OID rename probe. Linter rule 13. Negative test SEC-TC-61 | §4.2, §4.4, §4.5, §4.6 C11/C13/C14, §5.2, §5.3, §5.4, §5.5, §5.7, §7.3, §8.3, §8.6 |
+| A14 | SEC-P3-32 (data part) | **Revocation audit.** The implicit revocation of the previous share writes its own audit entry (`UPDATE quote_share`, `revoked_at` null → value, `revoked_by` = actor) in the same transaction as `CREATE quote_share`. **Mint cap.** 10 per quote per rolling hour, then 429 `RATE_LIMITED`. It is enforced by a transactional PostgreSQL count, not a Redis counter, backed by the new `ix_quote_shares__quote_created ON (quote_id, created_at DESC)` (AP-QUO-09); races are serialised by `ux_quote_shares__quote_active`. **Resolve.** `quote_share_resolve` returns `(quote_id, public_snapshot, expires_at)` and selects only active shares (`revoked_at IS NULL AND expires_at > now()`): no row for unknown, revoked, superseded and expired tokens, so the API answers one byte-identical 404 for all of them (D-055, REQUIREMENTS.md v1.4 EC-B29/EC-B53; D-ARCH-032). The interim EC-B29 v1.3 reconciliation (200 `EXPIRED` minus options) was withdrawn the same day | §3.10 `quote_shares`, §4.5 |
+| A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:
 - **ADR-0018 register gaps.** The register has no entry yet for four keys this model uses: the shipment-identifier encryption key, the vault dedupe HMAC key, the MFA-challenge IP-prefix HMAC key and the enrolment-code HMAC key (§10.4).
 - **New definer functions to ratify under ADR-0005 amendment 1.** `mfa_enrolment_overdue_candidates` was added for SEC-P3-14, and `sessions_for_user` is now listed in §4.5.
 - **Wave-0 spikes.** Confirm on PostgreSQL 18 and RDS that `rds_superuser` can create the event triggers, and that the shadow-database hook of Prisma 7.10 handles the bootstrap-lane objects (SPK-03).
-- **Option for M5.** Move the audit relations to a schema owned by `platform_audit_owner` (§4.4).
+- **Option for M5.** Move the audit relations to a schema owned by `platform_audit_owner` (§4.4). *Amended 2026-11-12 (A13): still open. The no-member `platform_schema_owner` adopted now closes the schema-owner paths by privilege, so the move would add separation, not close a gap.*
+- **SPK-08 additions (A13, A15; platform-architect with senior-developer).** On PostgreSQL 18 Testcontainers and, at M5, on RDS:
+  - the exact statements by which the RDS master gets `SET` on `platform_audit_owner` and `platform_schema_owner` for the duration of the lane and ends with the ADMIN-only row C13 allows (for example `SET createrole_self_grant = 'set'`, then removal of the SET option);
+  - that `prisma migrate deploy` and the shadow-database init run unchanged with the migrator holding only `USAGE, CREATE` on both schemas;
+  - SEC-TC-61 green.
+- **SEC-TC-53 and SEC-TC-61 wording (security-analyst).**
+  - SEC-TC-53: **settled (D-ARCH-032, D-055)** — it stays as the review wrote it: byte-identical 404s for unknown, revoked and expired tokens (and superseded ones, which are revoked rows); no `EXPIRED` view exists (§3.10 item 3, A14).
+  - SEC-TC-61: add `DROP FUNCTION platform.audit_ddl_guard() CASCADE` and `DROP SCHEMA platform CASCADE` as the migrator (both must fail by privilege).
 - **Notification log, invitee rows.** `notification_log` rows for invitees without an account (`recipient_user_id IS NULL`) are not visible under the current own-row policy, which predates this amendment. `job_context` returns the SYSTEM actor for them.

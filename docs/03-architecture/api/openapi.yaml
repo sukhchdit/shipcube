@@ -6332,7 +6332,9 @@ paths:
 
         Not idempotent-key capable: the response carries a one-time secret and is never stored (ADR-0014 amendment 1). An `Idempotency-Key` header is ignored; a client retry creates a new quote (SEC-P3-10).
 
-        **Requirements:** REQ-QUOTE-001, REQ-QUOTE-002, REQ-QUOTE-003, REQ-QUOTE-004, REQ-CARR-008, REQ-CARR-010, REQ-CARR-005. **Permission:** `public` (Guests quote without an account (REQ-QUOTE-002, D-009); quote:create is held by every seeded role.). **Audit:** CREATE `quote` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** public-quote (anonymous: 20/min and 100/h per IP (REQ-QUOTE-002); authenticated callers count against the authenticated class). **Tenancy:** guest.
+        Carrier quota protection (SEC-P3-29, ADR-0010 amendment 10). Users in `PENDING_VERIFICATION` are treated as anonymous: they are limited per IP by `public-quote` and count against the anonymous carrier budget (the anonymous bucket, its 50 % share and the 60 % stop of ADR-0010 amendments 2-3). Verified authenticated callers are limited by the `quote-create` class instead of `authenticated` (declared in `x-rate-limit-route`; ADR-0016 amendment 11). In addition, each organisation may use at most `CARRIER_QUOTA_ORG_SHARE_PCT` (default 10) % of a carrier account's daily quota for rates-pool calls; beyond it that organisation receives `carrier_error` with code `CARRIER_BUSY` (or cached results) for that carrier, other organisations still fan out, and the security event `carrier_quota_org_share_exhausted` fires (at most once a minute per carrier account and organisation). Transactional (booking) calls are never refused by the share. The quota share never produces an HTTP error: the quote is still created (201).
+
+        **Requirements:** REQ-QUOTE-001, REQ-QUOTE-002, REQ-QUOTE-003, REQ-QUOTE-004, REQ-CARR-008, REQ-CARR-010, REQ-CARR-005. **Permission:** `public` (Guests quote without an account (REQ-QUOTE-002, D-009); quote:create is held by every seeded role.). **Audit:** CREATE `quote` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** public-quote for anonymous callers and users in `PENDING_VERIFICATION` (20/min and 100/h per IP (REQ-QUOTE-002)); quote-create for verified authenticated callers (30/min and 300/h per user, and 1,000/h per organisation; SEC-P3-29). **Tenancy:** guest.
       security:
         - {}
         - bearerAuth: []
@@ -6485,7 +6487,7 @@ paths:
         justification: Actor ANONYMOUS for guests.
       x-idempotency: not-applicable
       x-rate-limit-class: public-quote
-      x-rate-limit-route: "anonymous: 20/min and 100/h per IP (REQ-QUOTE-002); authenticated callers count against the authenticated class"
+      x-rate-limit-route: "anonymous and PENDING_VERIFICATION callers: class public-quote, 20/min and 100/h per IP (REQ-QUOTE-002); verified authenticated callers: class quote-create, 30/min and 300/h per user and 1,000/h per organisation (SEC-P3-29, ADR-0016 amendment 11)"
       x-tenancy: guest
       x-error-codes:
         - MALFORMED_REQUEST
@@ -7633,7 +7635,9 @@ paths:
 
         Not idempotent-key capable: the response carries a one-time secret and is never stored (ADR-0014 amendment 1). An `Idempotency-Key` header is ignored; a client retry mints a new token and revokes the previous one.
 
-        **Requirements:** REQ-QUOTE-015. **Permission:** `quote:share`. **Audit:** CREATE `quote_share` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Mint-and-revoke details (SEC-P3-32). The implicit revocation of the previous active share writes its own audit entry in the same transaction: `UPDATE quote_share` with `revoked_at` from null to the revocation time and the acting user, in addition to `CREATE quote_share` for the new share. At most 10 mints per quote per rolling hour (configuration; ADR-0016 amendment 11); the 11th returns 429 `RATE_LIMITED` with `Retry-After`, and no share is minted or revoked.
+
+        **Requirements:** REQ-QUOTE-015. **Permission:** `quote:share`. **Audit:** CREATE `quote_share` NORMAL (plus UPDATE `quote_share` NORMAL for the revoked previous share). **Idempotency:** not-applicable. **Rate-limit class:** authenticated (10 mints per quote per rolling hour). **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
@@ -7690,8 +7694,14 @@ paths:
         entity: quote_share
         sensitivity: NORMAL
         reasonRequired: false
+        additional:
+          - action: UPDATE
+            entity: quote_share
+            sensitivity: NORMAL
+            when: "A previous active share exists: its revoked_at goes from null to the revocation time, same transaction, same actor (SEC-P3-32)."
       x-idempotency: not-applicable
       x-rate-limit-class: authenticated
+      x-rate-limit-route: 10 mints per quote per rolling hour (SEC-P3-32)
       x-tenancy: tenant
       x-error-codes:
         - VALIDATION_ERROR
@@ -7790,7 +7800,7 @@ paths:
       operationId: resolveSharedQuote
       summary: View a shared quote by token
       description: |-
-        The share link carries the token in the URL fragment; the page posts it here so it never reaches paths, query strings or access logs (ADR-0016 amendment 2). Safe: no state change. Read-only, no personal data (countries and cities, packages, options, prices). Expired: status EXPIRED with inputs and no options (EC-B29). Revoked or unknown token: 404.
+        The share link carries the token in the URL fragment; the page posts it here so it never reaches paths, query strings or access logs (ADR-0016 amendment 2). Safe: no state change. Read-only, no personal data (countries and cities, packages, options, prices). Unknown, revoked, superseded and expired tokens return one byte-identical 404 `NOT_FOUND` problem body (same `type`, `title`, `status`, `code`, `instance` and generic `detail`; `correlation_id` echoes the request's `X-Correlation-Id`, so two requests sent with the same inbound `X-Correlation-Id` get identical bytes), with no field or header that distinguishes the cases (SEC-P3-32; D-055, EC-B29/EC-B53): `quote_share_resolve` also requires `expires_at > now()`, so the former expired view with prefilled inputs no longer exists and the shared page shows a generic "this shared quote is no longer available" notice with a link to start a new quote (D-UX-034).
 
         **Requirements:** REQ-QUOTE-015. **Permission:** `public` (Anyone holding the share link.). **Audit:** VIEW `quote_share` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** public. **Tenancy:** public.
       security: []
@@ -12293,7 +12303,9 @@ paths:
       description: |-
         Gate (REQ-BOOK-016): verified email (403 EMAIL_NOT_VERIFIED, no order number consumed), every quote unexpired (409 QUOTE_EXPIRED), steps 1-5 complete, DG attestation and prohibited checks re-run (422). Then allocates the order number (DR-B22), computes the amount server-side from stored snapshots (client `expected_amount` mismatch: 409 AMOUNT_MISMATCH; below gateway minimum: 422 AMOUNT_BELOW_MINIMUM) and creates an authorise-only payment (Mock token or Stripe PaymentIntent with manual capture). On AUTHORISED the booking saga starts via the outbox (`order.checkout_started`, `payment.authorised`). Saved-card step-up (SEC-P3-01): when a saved payment method is used and the access token `auth_time` is older than 12 h, the response has `cvc_recollection_required: true`; the server then creates the PaymentIntent with `payment_method_options.card.require_cvc_recollection=true` and the Payment Element collects the CVC inside the Stripe iframe, so no PCI scope change. No `X-Reauth-Proof` is used on this route. At most 5 attempts per order per hour (429 PAYMENT_ATTEMPTS_EXCEEDED). Card fields are rejected (400 CARD_DATA_NOT_ACCEPTED); non-card methods 400 PAYMENT_METHOD_NOT_AVAILABLE.
 
-        **Requirements:** REQ-BOOK-016, REQ-BOOK-026, REQ-PAY-005, REQ-PAY-006, REQ-PAY-007, REQ-PAY-008, REQ-PAY-009, REQ-PAY-010, REQ-PAY-016, REQ-PAY-019, REQ-BOOK-020, REQ-CUST-009, REQ-CUST-010. **Permission:** `payment:create`. **Audit:** CREATE `payment` NORMAL. **Idempotency:** required. **Rate-limit class:** authenticated (5 payment attempts per order per hour (REQ-PAY-010)). **Tenancy:** tenant.
+        CVC recollection outcome (SEC-P3-28, ADR-0012 amendment 4). When `cvc_recollection_required` is true, the payment is `AUTHORISED` only if the retrieved charge has `payment_method_details.card.checks.cvc_check = 'pass'`. Any other value (`fail`, `unavailable`, `unchecked` or absent) voids the authorisation (manual capture, so no money moves) and the payment becomes `FAILED` with `failure_code: AUTHENTICATION_FAILED`: audited `UPDATE payment`, security event `cvc_recollection_failed`, shipments back to `QUOTED`, no saga start, and the attempt counts toward the 5-per-hour cap. One payment-state derivation function serves this route (Mock gateway, which authorises synchronously), `confirmPayment` and the Stripe and Mock webhook processors. The client then offers another card (hosted fields) or "confirm it's you" (`createReauthProof`, which advances `auth_time`, so the retried checkout returns `cvc_recollection_required: false`). Mock: `test_token` `mock_cvc_pass`, `mock_cvc_fail` or `mock_cvc_unavailable` simulates the check.
+
+        **Requirements:** REQ-BOOK-016, REQ-BOOK-026, REQ-PAY-005, REQ-PAY-006, REQ-PAY-007, REQ-PAY-008, REQ-PAY-009, REQ-PAY-010, REQ-PAY-016, REQ-PAY-019, REQ-BOOK-020, REQ-CUST-009, REQ-CUST-010. **Permission:** `payment:create`. **Audit:** CREATE `payment` NORMAL (plus UPDATE `payment` when a failed CVC check voids a synchronous Mock authorisation). **Idempotency:** required. **Rate-limit class:** authenticated (5 payment attempts per order per hour (REQ-PAY-010)). **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
@@ -12328,9 +12340,17 @@ paths:
                   test_token: mock_ok
                   expected_amount: null
                   return_url: null
+              mock_saved_card_cvc_fail:
+                summary: Mock saved card, CVC recollection required, simulated cvc_check fail (SEC-P3-28)
+                value:
+                  method: CARD
+                  saved_payment_method_id: 0193a5b2-7c1e-7d4a-9f3b-000000001701
+                  test_token: mock_cvc_fail
+                  expected_amount: null
+                  return_url: null
       responses:
         "201":
-          description: Payment created (CREATED/REQUIRES_ACTION awaits hosted confirmation; AUTHORISED starts the saga; FAILED carries failure_code).
+          description: Payment created (CREATED/REQUIRES_ACTION awaits hosted confirmation; AUTHORISED starts the saga; FAILED carries failure_code, including AUTHENTICATION_FAILED when a required CVC check did not pass).
           headers:
             X-Correlation-Id:
               $ref: "#/components/headers/XCorrelationId"
@@ -12437,6 +12457,11 @@ paths:
         sensitivity: NORMAL
         reasonRequired: false
         justification: No card data or gateway secrets in values.
+        additional:
+          - action: UPDATE
+            entity: payment
+            sensitivity: NORMAL
+            when: "A required CVC check did not pass on a synchronous (Mock) authorisation: the gateway authorisation is voided and the payment goes CREATED -> FAILED with failure_code AUTHENTICATION_FAILED (never recorded as AUTHORISED; SEC-P3-28)."
       x-idempotency: required
       x-rate-limit-class: authenticated
       x-rate-limit-route: 5 payment attempts per order per hour (REQ-PAY-010)
@@ -12919,6 +12944,8 @@ paths:
       description: |-
         Called after the hosted confirmation or 3DS return. The server retrieves the gateway object and derives state from it (never from the client result or event order); a webhook may already have applied it (EC-B11, no-op). AUTHORISED moves shipments to PAID and starts the saga; FAILED returns shipments to QUOTED with failure_code (CARD_DECLINED, INSUFFICIENT_FUNDS, AUTHENTICATION_FAILED, EXPIRED_CARD, GATEWAY_UNAVAILABLE).
 
+        CVC recollection outcome (SEC-P3-28, ADR-0012 amendment 4). When the payment has `cvc_recollection_required: true`, the derivation treats the authorisation as `AUTHORISED` only if the retrieved charge has `payment_method_details.card.checks.cvc_check = 'pass'`. Any other value (`fail`, `unavailable`, `unchecked` or absent) voids the authorisation (manual capture, so no money moves); the payment becomes `FAILED` with `failure_code: AUTHENTICATION_FAILED` and is returned as a normal 200 (no new status code): audited `UPDATE payment`, security event `cvc_recollection_failed`, shipments back to `QUOTED`, no saga start, and the attempt counts toward the 5-per-hour cap of `checkoutOrder`. The same derivation function runs on the webhook path (`receiveStripeWebhook`, `receiveMockGatewayWebhook`), so whichever arrives first applies the outcome and the other is a no-op. The client then offers another card or `createReauthProof` (which advances `auth_time`, so the retried checkout needs no CVC).
+
         **Requirements:** REQ-PAY-009, REQ-PAY-010, REQ-PAY-012, REQ-BOOK-020. **Permission:** `payment:create`. **Audit:** UPDATE `payment` NORMAL. **Idempotency:** required. **Rate-limit class:** authenticated. **Tenancy:** tenant.
       security:
         - bearerAuth: []
@@ -12990,6 +13017,46 @@ paths:
                         occurred_at: 2026-11-12T14:30:00Z
                       - from_status: CREATED
                         to_status: AUTHORISED
+                        occurred_at: 2026-11-12T14:35:12Z
+                    refunds: []
+                    created_at: 2026-11-12T14:30:00Z
+                    updated_at: 2026-11-12T14:35:12Z
+                cvc_check_failed:
+                  summary: Saved card, CVC recollection required, cvc_check not 'pass' (authorisation voided; SEC-P3-28)
+                  value:
+                    id: 0193a5b2-7c1e-7d4a-9f3b-000000001102
+                    version: 3
+                    order_id: 0193a5b2-7c1e-7d4a-9f3b-000000001001
+                    gateway: STRIPE
+                    livemode: false
+                    status: FAILED
+                    amount:
+                      amount: 3795
+                      currency: USD
+                    captured_amount:
+                      amount: 0
+                      currency: USD
+                    refunded_amount:
+                      amount: 0
+                      currency: USD
+                    client_secret: null
+                    next_action: null
+                    failure_code: AUTHENTICATION_FAILED
+                    attempts_remaining: 3
+                    cvc_recollection_required: true
+                    method:
+                      type: CARD
+                      brand: visa
+                      last4: "4242"
+                    status_history:
+                      - from_status: null
+                        to_status: CREATED
+                        occurred_at: 2026-11-12T14:30:00Z
+                      - from_status: CREATED
+                        to_status: REQUIRES_ACTION
+                        occurred_at: 2026-11-12T14:30:01Z
+                      - from_status: REQUIRES_ACTION
+                        to_status: FAILED
                         occurred_at: 2026-11-12T14:35:12Z
                     refunds: []
                     created_at: 2026-11-12T14:30:00Z
@@ -15094,6 +15161,8 @@ paths:
       description: |-
         Raw body verified against the endpoint secret (300 s tolerance) before parsing; failure: 400 WEBHOOK_SIGNATURE_INVALID without processing, audited DENIED with source IP, security event webhook_signature_invalid. Stored by gateway event ID before processing; duplicates answer 200 with `duplicate: true`; state is derived from the retrieved gateway object; unknown types stored and acknowledged. Replay by event ID is a worker command.
 
+        CVC recollection outcome (SEC-P3-28, ADR-0012 amendment 4): the processor uses the same payment-state derivation function as `confirmPayment`. When the payment has `cvc_recollection_required: true`, an authorisation counts as `AUTHORISED` only if the retrieved charge has `payment_method_details.card.checks.cvc_check = 'pass'`; any other value (`fail`, `unavailable`, `unchecked` or absent) voids the authorisation (manual capture, no money moves), sets the payment `FAILED` with `failure_code: AUTHENTICATION_FAILED` (audited `UPDATE payment`, actor SYSTEM), emits the security event `cvc_recollection_failed`, returns the shipments to `QUOTED` and counts the attempt toward the 5-per-hour cap. The webhook still answers 200.
+
         **Requirements:** REQ-PAY-011, REQ-PAY-012. **Permission:** `webhook:stripe:receive`. **Audit:** CREATE `webhook_event` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** webhook. **Tenancy:** public.
       security:
         - stripeSignature: []
@@ -15180,6 +15249,8 @@ paths:
       summary: Receive a Mock gateway webhook (non-production)
       description: |-
         Same pipeline as Stripe for the deterministic Mock gateway; route not mounted in production (REQ-PAY-002).
+
+        CVC recollection outcome (SEC-P3-28, ADR-0012 amendment 4): the same derivation function as `confirmPayment` and `receiveStripeWebhook` applies. With `cvc_recollection_required: true`, only the simulated `cvc_check = pass` (`test_token: mock_cvc_pass`) gives `AUTHORISED`; `mock_cvc_fail` and `mock_cvc_unavailable` void the authorisation and set `FAILED` with `failure_code: AUTHENTICATION_FAILED` (audited `UPDATE payment`, security event `cvc_recollection_failed`, shipments back to `QUOTED`, attempt counted). The webhook still answers 200.
 
         **Requirements:** REQ-PAY-002, REQ-PAY-012. **Permission:** `webhook:mock_gateway:receive`. **Audit:** CREATE `webhook_event` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** webhook. **Tenancy:** public.
       security:
@@ -18179,7 +18250,7 @@ components:
           type: string
           enum:
             - ACTIVE
-            - EXPIRED
+          description: Only active shares resolve; expired, revoked, superseded and unknown tokens are answered 404 (D-055, SEC-P3-32). `EXPIRED` was removed from this enum on 2026-11-12 with the v1.3 EC-B29 expired view.
         expires_at:
           $ref: "#/components/schemas/Timestamp"
         origin:
@@ -18249,8 +18320,8 @@ components:
                     type:
                       - integer
                       - "null"
-          description: Empty when EXPIRED (inputs only, EC-B29).
-      description: "Public shared view: no postcode, names, addresses, emails or references (REQ-QUOTE-015)."
+          description: Always populated while the share is active. Expired, revoked, superseded and unknown shares are answered 404 instead of a view (D-055, EC-B29; SEC-P3-32).
+      description: "Public shared view: no postcode, names, addresses, emails or references (REQ-QUOTE-015). Only active shares resolve (D-055)."
     SseCarrierResult:
       type: object
       additionalProperties: false
@@ -19618,8 +19689,11 @@ components:
             - mock_3ds_fail
             - mock_capture_fail
             - mock_refund_fail
+            - mock_cvc_pass
+            - mock_cvc_fail
+            - mock_cvc_unavailable
             - null
-          description: Mock gateway outcome token (REQ-PAY-002); rejected in production.
+          description: "Mock gateway outcome token (REQ-PAY-002); rejected in production. `mock_cvc_pass`, `mock_cvc_fail` and `mock_cvc_unavailable` set the simulated `payment_method_details.card.checks.cvc_check` (`pass`, `fail`, `unavailable`) when CVC recollection is required (`cvc_recollection_required: true`): `pass` gives AUTHORISED, the other two give FAILED with `failure_code: AUTHENTICATION_FAILED` and a voided authorisation (SEC-P3-28, ADR-0012 amendment 4). When CVC recollection is not required they behave as `mock_ok`. The token `mock_cvc_required` named in ADR-0012 amendment 1 was never implemented and is withdrawn."
         expected_amount:
           oneOf:
             - $ref: "#/components/schemas/Money"
@@ -19719,7 +19793,7 @@ components:
           maximum: 5
         cvc_recollection_required:
           type: boolean
-          description: True when the payment uses a saved payment method and the access token auth_time was older than 12 h at checkout. The PaymentIntent was then created with payment_method_options.card.require_cvc_recollection=true, so the Payment Element collects the CVC inside the Stripe iframe before confirmation (no PCI scope change). Always false for a new card entered in hosted fields (SEC-P3-01).
+          description: True when the payment uses a saved payment method and the access token auth_time was older than 12 h at checkout. The PaymentIntent was then created with payment_method_options.card.require_cvc_recollection=true, so the Payment Element collects the CVC inside the Stripe iframe before confirmation (no PCI scope change). Always false for a new card entered in hosted fields (SEC-P3-01). When true, the payment becomes AUTHORISED only if the retrieved charge has payment_method_details.card.checks.cvc_check = pass; any other value (fail, unavailable, unchecked, absent) voids the authorisation and fails the payment with failure_code AUTHENTICATION_FAILED (SEC-P3-28).
         method:
           oneOf:
             - type: object

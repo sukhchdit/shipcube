@@ -36,7 +36,7 @@ Brief §4.1 fixes the repository layout (`apps/{web,admin,api,worker}`, `package
 ## Alternatives considered
 
 - **pnpm / Turborepo / Nx.** pnpm would be faster, but CLAUDE.md §2 fixes npm; Turborepo/Nx add a task-graph layer that npm workspaces + `tsc -b` references cover adequately at this size (4 apps, 7 packages). Revisit if CI time exceeds the 20-minute budget (NFR-OPS-003).
-- **Bundling the API with esbuild.** Smaller image but complicates Prisma generated client loading and source maps; `tsc` output + `npm ci --omit=dev` keeps images under 300 MB (NFR-OPS-002) since Prisma 7 ships no engine.
+- **Bundling the API with esbuild.** Smaller image but complicates Prisma generated client loading and source maps; `tsc` output + `npm ci --omit=dev --ignore-scripts` (ADR-0023 amendment F) keeps images under 300 MB (NFR-OPS-002) since Prisma 7 ships no engine.
 - **Next.js / Remix for the public site.** Not in the fixed stack; React Router framework mode provides pre-rendering natively (verified reactrouter.com/how-to/pre-rendering, 2026-11-12).
 - **`ts-jest`.** Works with TS 6 but couples Jest to the compiler version; `@swc/jest` transpiles without type-checking (type-check is a separate CI step) and is 3–5× faster.
 

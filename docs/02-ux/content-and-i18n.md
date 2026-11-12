@@ -1,6 +1,6 @@
 # Content, microcopy and internationalisation
 
-Version 1.0 · 2026-11-12 · owner ux-designer · Stories **US-115, US-116, US-117, US-119, US-120, US-036, US-106** and every screen · NFR-I18N-001..004 · D-023
+Version 1.1 · 2026-11-12 · owner ux-designer · Stories **US-115, US-116, US-117, US-119, US-120, US-036, US-106** and every screen · NFR-I18N-001..004 · D-023 · v1.1 adds §4.9–§4.13 (sessions, re-authentication, admin idle timeout, CVC re-collection, e-mail additions), the `sessions` and `reauth` shared namespaces, and new `errors:` keys (G2-C4)
 
 The es and fr strings here are developer-quality drafts. They are tracked as "pending linguistic review" (D-023, US-115) and are not final legal or marketing copy.
 
@@ -48,7 +48,9 @@ Address forms: **es uses "tú"** (informal, matching the friendly English "you")
 | `tracking` | web | Public and authenticated tracking |
 | `account`, `shipments`, `documents` | web | Account area |
 | `legal`, `help` | web | Static page content |
-| `audit`, `sessions` | admin | Audit viewer, sessions |
+| `audit` | admin | Audit viewer |
+| `sessions` | ui (shared, v1.1) | `SessionList` ("Where you're signed in" / My sessions), used by web S-C07 and admin S-D08 (US-027) |
+| `reauth` | ui (shared, v1.1) | ReauthDialog "Confirm it's you" (US-291); one purpose key per `ReauthRequest.action_scope`, with dots in the scope written as underscores (`reauth:purpose.payment_method_manage`); a CI check enumerates the contract enum |
 | `email` | api/worker templates | `email:{TEMPLATE}.subject`, `.preheader`, `.heading`, `.intro`, `.cta`, `.footer.*` |
 
 ### 2.2 Key format
@@ -134,6 +136,11 @@ Required-field messages are **one complete key per field**, for example `address
 | `results:expired.action` | Get new prices | Obtener precios nuevos | Obtenir de nouveaux tarifs |
 | `results:requote.priceChanged` | Price changed: was {old}, now {new} ({diff}) | El precio ha cambiado: antes {old}, ahora {new} ({diff}) | Le prix a changé : {old} auparavant, {new} maintenant ({diff}) |
 | `results:empty.limits.title` | No services can carry this shipment | Ningún servicio puede transportar este envío | Aucun service ne peut transporter cet envoi |
+| `results:carrier.notice.timeout` | {carrier} didn't respond in time. | {carrier} no ha respondido a tiempo. | {carrier} n'a pas répondu à temps. |
+| `results:carrier.notice.error` | {carrier} couldn't give a price right now. | {carrier} no ha podido dar un precio ahora mismo. | {carrier} n'a pas pu fournir de tarif pour le moment. |
+| `results:shared.unavailable` | This shared quote is no longer available. Ask the sender for a new link, or get your own quote. | Este presupuesto compartido ya no está disponible. Pide un enlace nuevo a quien te lo envió u obtén tu propio presupuesto. | Ce devis partagé n'est plus disponible. Demandez un nouveau lien à l'expéditeur ou obtenez votre propre devis. |
+| `results:share.replacesPrevious` | Creating a new link turns off the previous link for this quote. | Al crear un enlace nuevo, el anterior de este presupuesto deja de funcionar. | La création d'un nouveau lien désactive le lien précédent de ce devis. |
+| `results:carrier.notice.CARRIER_BUSY` | {carrier} is busy right now. Try again in a few minutes. | {carrier} está ocupado ahora mismo. Vuelve a intentarlo dentro de unos minutos. | {carrier} est très sollicité en ce moment. Réessayez dans quelques minutes. |
 
 ### 4.3 Authentication
 
@@ -210,6 +217,9 @@ Required-field messages are **one complete key per field**, for example `address
 | `errors:GATEWAY_UNAVAILABLE` | We can't reach the payment service right now. You haven't been charged. | Ahora mismo no podemos conectar con el servicio de pago. No se te ha cobrado nada. | Le service de paiement est injoignable pour le moment. Aucun montant n'a été débité. |
 | `errors:PICKUP_DATE_INVALID` | This date isn't available for pickup. Choose another date. | Esta fecha no está disponible para la recogida. Elige otra fecha. | Cette date n'est pas disponible pour l'enlèvement. Choisissez une autre date. |
 | `errors:TRACKING_NOT_FOUND` | We couldn't find that number. Check it and try again. | No hemos encontrado ese número. Compruébalo y vuelve a intentarlo. | Nous n'avons pas trouvé ce numéro. Vérifiez-le et réessayez. |
+| `errors:REAUTH_REQUIRED` | Confirm it's you to continue. | Confirma que eres tú para continuar. | Confirmez votre identité pour continuer. |
+| `errors:SESSION_EXPIRED` | Your session has ended. Sign in again to continue. | Tu sesión ha finalizado. Vuelve a iniciar sesión para continuar. | Votre session a pris fin. Reconnectez-vous pour continuer. |
+| `errors:MFA_ENROLMENT_CODE_REQUIRED` | That code didn't work or has expired. Check the latest email, or send a new code. | Ese código no es válido o ha caducado. Revisa el correo más reciente o pide un código nuevo. | Ce code ne fonctionne pas ou a expiré. Consultez le dernier e-mail ou demandez un nouveau code. |
 | `validation:PASSWORD_POLICY` | Choose a stronger password: 12 to 128 characters and not a commonly used password. | Elige una contraseña más segura: de 12 a 128 caracteres y que no sea de uso común. | Choisissez un mot de passe plus sûr : 12 à 128 caractères, et pas un mot de passe courant. |
 | `errors:UNKNOWN` (fallback) | Something went wrong. Try again. | Algo ha fallado. Vuelve a intentarlo. | Un problème est survenu. Réessayez. |
 
@@ -258,6 +268,116 @@ The es and fr OUT_FOR_DELIVERY values match US-248's acceptance example.
 | two-step verification | two-step verification | verificación en dos pasos | validation en deux étapes |
 | recovery code | recovery code | código de recuperación | code de récupération |
 | audit log | audit log | registro de auditoría | journal d'audit |
+| session (signed-in device) | session; UI says "device" in lists | sesión; "dispositivo" | session ; « appareil » |
+| security code (card) | security code (CVC) | código de seguridad (CVC) | cryptogramme visuel (CVC) |
+| confirm it's you (re-authentication) | confirm it's you | confirmar que eres tú | confirmer votre identité |
+
+### 4.9 Sessions list (`sessions` namespace, US-027; W13 §1, W16 §4)
+
+| Key | en | es | fr |
+|---|---|---|---|
+| `sessions:title` | Where you're signed in | Dónde has iniciado sesión | Appareils connectés |
+| `sessions:adminTitle` | My sessions | Mis sesiones | Mes sessions |
+| `sessions:intro` | These are the devices signed in to your account. Sign out any you don't recognise. | Estos son los dispositivos con sesión iniciada en tu cuenta. Cierra la sesión en los que no reconozcas. | Voici les appareils connectés à votre compte. Fermez la session sur ceux que vous ne reconnaissez pas. |
+| `sessions:caption` | Devices signed in to your account | Dispositivos con sesión iniciada en tu cuenta | Appareils connectés à votre compte |
+| `sessions:col.device` | Device | Dispositivo | Appareil |
+| `sessions:col.ipRange` | IP address range | Rango de direcciones IP | Plage d'adresses IP |
+| `sessions:col.signedIn` | Signed in | Inicio de sesión | Connexion |
+| `sessions:col.lastActive` | Last active | Última actividad | Dernière activité |
+| `sessions:device` | {browser} on {os} | {browser} en {os} | {browser} sur {os} |
+| `sessions:unknownDevice` | Unknown device | Dispositivo desconocido | Appareil inconnu |
+| `sessions:thisDevice` | This device | Este dispositivo | Cet appareil |
+| `sessions:signOut.action` | Sign out | Cerrar sesión | Se déconnecter |
+| `sessions:signOut.aria` | Sign out of {device} | Cerrar sesión en {device} | Fermer la session sur {device} |
+| `sessions:signOut.ariaCurrent` | Sign out of this device | Cerrar sesión en este dispositivo | Fermer la session sur cet appareil |
+| `sessions:signOut.done` | Signed out of {device}. | Sesión cerrada en {device}. | Session fermée sur {device}. |
+| `sessions:signOut.alreadyEnded` | That session had already ended. | Esa sesión ya había finalizado. | Cette session avait déjà pris fin. |
+| `sessions:others.action` | Sign out of all other devices | Cerrar sesión en todos los demás dispositivos | Se déconnecter de tous les autres appareils |
+| `sessions:others.confirm.title` | Sign out of all other devices? | ¿Cerrar sesión en todos los demás dispositivos? | Se déconnecter de tous les autres appareils ? |
+| `sessions:others.confirm.body` | You'll stay signed in on this device. | Seguirás con la sesión iniciada en este dispositivo. | Votre session restera ouverte sur cet appareil. |
+| `sessions:others.confirm.action` | Sign out other devices | Cerrar sesión en los demás | Déconnecter les autres appareils |
+| `sessions:others.done` | {count, plural, one {Signed out of # other device.} other {Signed out of # other devices.}} | {count, plural, one {Sesión cerrada en # dispositivo más.} many {Sesión cerrada en # de dispositivos más.} other {Sesión cerrada en # dispositivos más.}} | {count, plural, one {Session fermée sur # autre appareil.} many {Session fermée sur # d'autres appareils.} other {Session fermée sur # autres appareils.}} |
+| `sessions:onlyDevice` | This is the only device signed in. | Este es el único dispositivo con la sesión iniciada. | Aucun autre appareil n'est connecté. |
+| `sessions:error.load` | We couldn't load your sessions. | No hemos podido cargar tus sesiones. | Impossible de charger vos sessions. |
+| `sessions:loading` (a11y) | Loading your sessions | Cargando tus sesiones | Chargement de vos sessions |
+
+`{browser}` and `{os}` are product names from the user-agent parser (not translated). `{device}` is the pre-formatted `sessions:device` string or `sessions:unknownDevice`.
+
+### 4.10 Re-authentication dialog (`reauth` namespace, US-291; W03 §8)
+
+| Key | en | es | fr |
+|---|---|---|---|
+| `reauth:title` | Confirm it's you | Confirma que eres tú | Confirmez votre identité |
+| `reauth:instruction.password` | Enter your password to continue. | Introduce tu contraseña para continuar. | Saisissez votre mot de passe pour continuer. |
+| `reauth:instruction.totp` | Enter the 6-digit code from your authenticator app to continue. | Introduce el código de 6 dígitos de tu aplicación de autenticación para continuar. | Saisissez le code à 6 chiffres de votre application d'authentification pour continuer. |
+| `reauth:stale` | {hours, plural, one {It's been more than # hour since you last confirmed it's you.} other {It's been more than # hours since you last confirmed it's you.}} | {hours, plural, one {Ha pasado más de # hora desde la última vez que confirmaste que eras tú.} many {Han pasado más de # de horas desde la última vez que confirmaste que eras tú.} other {Han pasado más de # horas desde la última vez que confirmaste que eras tú.}} | {hours, plural, one {Plus de # heure s'est écoulée depuis votre dernière confirmation d'identité.} many {Plus de # d'heures se sont écoulées depuis votre dernière confirmation d'identité.} other {Plus de # heures se sont écoulées depuis votre dernière confirmation d'identité.}} |
+| `reauth:purpose.auth_password_change` | You're changing your password. | Vas a cambiar tu contraseña. | Vous êtes sur le point de modifier votre mot de passe. |
+| `reauth:purpose.mfa_totp_disable` | You're turning off two-step verification. | Vas a desactivar la verificación en dos pasos. | Vous êtes sur le point de désactiver la validation en deux étapes. |
+| `reauth:purpose.mfa_recovery_codes_regenerate` | You're generating new recovery codes. Your old codes will stop working. | Vas a generar códigos de recuperación nuevos. Los anteriores dejarán de funcionar. | Vous êtes sur le point de générer de nouveaux codes de récupération. Les anciens codes ne fonctionneront plus. |
+| `reauth:purpose.privacy_delete` | You're deleting your account. | Vas a eliminar tu cuenta. | Vous êtes sur le point de supprimer votre compte. |
+| `reauth:purpose.privacy_export` | You're downloading a copy of your personal data. | Vas a descargar una copia de tus datos personales. | Vous êtes sur le point de télécharger une copie de vos données personnelles. |
+| `reauth:purpose.payment_method_manage` | You're changing your saved cards. | Vas a modificar tus tarjetas guardadas. | Vous êtes sur le point de modifier vos cartes enregistrées. |
+| `reauth:purpose.org_member_manage` | You're changing who has access to your organisation. | Vas a cambiar quién tiene acceso a tu organización. | Vous êtes sur le point de modifier les accès à votre organisation. |
+| `reauth:password.label` | Password | Contraseña | Mot de passe |
+| `reauth:code.label` | Code from your authenticator app | Código de tu aplicación de autenticación | Code de votre application d'authentification |
+| `reauth:passwordInvalid` | That password is incorrect. Try again. | Esa contraseña no es correcta. Vuelve a intentarlo. | Ce mot de passe est incorrect. Réessayez. |
+| `reauth:expired` | That took too long. Confirm it's you again. | Ha pasado demasiado tiempo. Vuelve a confirmar que eres tú. | Le délai est dépassé. Confirmez à nouveau votre identité. |
+| `reauth:error` | We couldn't check this right now. Try again. | Ahora mismo no podemos comprobarlo. Vuelve a intentarlo. | Vérification impossible pour le moment. Réessayez. |
+| `reauth:continue` | Continue | Continuar | Continuer |
+| `reauth:cantUseApp` | Can't use your authenticator app? | ¿No puedes usar tu aplicación de autenticación? | Vous ne pouvez pas utiliser votre application d'authentification ? |
+
+### 4.11 Admin idle timeout (`shell` namespace in `apps/admin`, US-033; W00 §2.1) and sign-in notices
+
+| Key | en | es | fr |
+|---|---|---|---|
+| `shell:idle.title` | Are you still there? | ¿Sigues ahí? | Êtes-vous toujours là ? |
+| `shell:idle.body` | You haven't used the admin app for a while. For security, we'll sign you out at {time}. | Hace un rato que no usas la aplicación de administración. Por seguridad, cerraremos tu sesión a las {time}. | Vous n'avez pas utilisé l'application d'administration depuis un moment. Pour votre sécurité, votre session sera fermée à {time}. |
+| `shell:idle.timeLeft` | Time left: {remaining} | Tiempo restante: {remaining} | Temps restant : {remaining} |
+| `shell:idle.extend` | Extend session | Ampliar sesión | Prolonger la session |
+| `shell:idle.signOut` | Sign out | Cerrar sesión | Se déconnecter |
+| `shell:idle.oneMinuteLeft` (a11y) | 1 minute left before you're signed out. | Queda 1 minuto para que se cierre tu sesión. | Il reste 1 minute avant la fermeture de votre session. |
+| `shell:idle.extended` (a11y) | Session extended. | Sesión ampliada. | Session prolongée. |
+| `shell:idle.extendFailed` | We couldn't extend your session. Check your connection and try again. | No hemos podido ampliar tu sesión. Comprueba tu conexión y vuelve a intentarlo. | Impossible de prolonger votre session. Vérifiez votre connexion et réessayez. |
+| `auth:signIn.signedOutIdle` | You were signed out for inactivity. Sign in again to continue. | Se ha cerrado tu sesión por inactividad. Vuelve a iniciar sesión para continuar. | Votre session a pris fin pour cause d'inactivité. Reconnectez-vous pour continuer. |
+| `auth:signIn.sessionEnded` (admin) | Your session ended. Sign in again. | Tu sesión ha finalizado. Vuelve a iniciar sesión. | Votre session a pris fin. Reconnectez-vous. |
+| `auth:signIn.signedOutSelf` (admin) | You signed out. | Has cerrado sesión. | Votre session est fermée. |
+| `auth:enrolCode.title` (admin) | Confirm your email | Confirma tu correo electrónico | Confirmez votre adresse e-mail |
+| `auth:enrolCode.body` (admin) | To keep staff accounts safe, we've sent a 6-digit code to {email}. Enter it to set up two-step verification. The code expires in 10 minutes. | Para proteger las cuentas del personal, hemos enviado un código de 6 dígitos a {email}. Introdúcelo para configurar la verificación en dos pasos. El código caduca en 10 minutos. | Pour protéger les comptes du personnel, nous avons envoyé un code à 6 chiffres à {email}. Saisissez-le pour configurer la validation en deux étapes. Le code expire dans 10 minutes. |
+| `auth:enrolCode.label` (admin) | Code from the email | Código del correo electrónico | Code reçu par e-mail |
+| `auth:enrolCode.resend` (admin) | Send a new code | Enviar un código nuevo | Envoyer un nouveau code |
+
+`{time}` is formatted by the shared time helper in the viewer's zone; `{remaining}` is a pre-formatted `m:ss` duration from the shared helper; `{email}` is the masked address from the server. The "Extend session" label follows the US-033 acceptance criterion (ADR-0026 am. 8 calls the action "Stay signed in"; D-UX-032).
+
+### 4.12 CVC re-collection (`checkout` namespace, US-217 Should; W08 §5)
+
+| Key | en | es | fr |
+|---|---|---|---|
+| `checkout:cvc.notice` | For your security, enter the security code for {card}. | Por tu seguridad, introduce el código de seguridad de {card}. | Pour votre sécurité, saisissez le cryptogramme visuel de la carte {card}. |
+| `checkout:cvc.label` | Security code (CVC) | Código de seguridad (CVC) | Cryptogramme visuel (CVC) |
+| `checkout:cvc.hint` | The 3 digits on the back of your card. | Los 3 dígitos del reverso de tu tarjeta. | Les 3 chiffres au dos de votre carte. |
+| `checkout:cvc.hintAmex` | The 4 digits on the front of your card. | Los 4 dígitos del anverso de tu tarjeta. | Les 4 chiffres au recto de votre carte. |
+| `checkout:cvc.required` | Enter the security code. | Introduce el código de seguridad. | Saisissez le cryptogramme visuel. |
+| `checkout:cvc.incomplete` | The security code is incomplete. Enter {digits} digits. | El código de seguridad está incompleto. Introduce {digits} dígitos. | Le cryptogramme visuel est incomplet. Saisissez {digits} chiffres. |
+| `checkout:cvc.loadFailed` | We couldn't load the security code field. Try again, or use a new card. | No hemos podido cargar el campo del código de seguridad. Vuelve a intentarlo o usa otra tarjeta. | Impossible de charger le champ du cryptogramme visuel. Réessayez ou utilisez une autre carte. |
+| `checkout:cvc.failed.title` | We couldn't verify this card's security code. | No hemos podido verificar el código de seguridad de esta tarjeta. | Nous n'avons pas pu vérifier le cryptogramme visuel de cette carte. |
+| `checkout:cvc.failed.body` | You haven't been charged. Check the code and try again, use a new card, or confirm it's you. | No se te ha cobrado nada. Revisa el código y vuelve a intentarlo, usa otra tarjeta o confirma que eres tú. | Aucun montant n'a été débité. Vérifiez le code et réessayez, utilisez une autre carte ou confirmez votre identité. |
+| `checkout:cvc.failed.bodyNoReauth` | You haven't been charged. Check the code and try again, or use a new card. | No se te ha cobrado nada. Revisa el código y vuelve a intentarlo, o usa otra tarjeta. | Aucun montant n'a été débité. Vérifiez le code et réessayez, ou utilisez une autre carte. |
+| `checkout:cvc.failed.retry` | Enter the code again | Volver a introducir el código | Saisir à nouveau le code |
+| `checkout:cvc.failed.newCard` | Use a new card | Usar otra tarjeta | Utiliser une autre carte |
+| `checkout:cvc.failed.reauth` | Confirm it's you | Confirmar que eres tú | Confirmer votre identité |
+| `a11y:cvcFrame` | Secure security code input frame | Marco seguro para introducir el código de seguridad | Cadre sécurisé de saisie du cryptogramme visuel |
+
+`{card}` is the pre-formatted brand and last four ("Visa •••• 4242"); `{digits}` is 3 or 4 (always the `other` plural form in all three locales, so no plural select is needed). `bodyNoReauth` is used while the "Confirm it's you" action is hidden (README §5 item 12).
+
+### 4.13 E-mail additions (v1.1)
+
+| Key | en | es | fr |
+|---|---|---|---|
+| `email:EMAIL_VERIFICATION.unverifiedExpiry` | {days, plural, one {If you don't confirm within # day, this account is removed and the address can be used to register again.} other {If you don't confirm within # days, this account is removed and the address can be used to register again.}} | {days, plural, one {Si no confirmas en # día, esta cuenta se eliminará y la dirección podrá volver a usarse para registrarse.} other {Si no confirmas en # días, esta cuenta se eliminará y la dirección podrá volver a usarse para registrarse.}} | {days, plural, one {Sans confirmation sous # jour, ce compte sera supprimé et l'adresse pourra servir à une nouvelle inscription.} other {Sans confirmation sous # jours, ce compte sera supprimé et l'adresse pourra servir à une nouvelle inscription.}} |
+| `email:SECURITY_NOTICE.cta` | Review where you're signed in | Revisa dónde has iniciado sesión | Vérifiez les appareils connectés |
+| `email:BOOKING_CONFIRMATION.invoiceLink` | Download your customs invoice from your shipment page. | Descarga tu factura de aduanas desde la página del envío. | Téléchargez votre facture douanière depuis la page de l'envoi. |
+
+`{days}` comes from `AUTH_UNVERIFIED_TTL` (never a literal); the configured value is small and bounded, so `many` is not needed.
 
 ## 5. Locale-aware formatting rules (US-116, NFR-I18N-004)
 

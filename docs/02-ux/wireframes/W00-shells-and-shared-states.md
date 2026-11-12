@@ -1,6 +1,6 @@
 # W00 — App shells and the six shared screen states
 
-Screens: web shell (all web routes), admin shell (all admin routes), S-W06 / S-D09 Not found, shared states · Stories: **US-019, US-020, US-070, US-102, US-103, US-104, US-105, US-107, US-108, US-110, US-113, US-117, US-120, US-273 (Should), US-032** · Flows: [F10](../flows/F10-session-guards-and-errors.md)
+Screens: web shell (all web routes), admin shell (all admin routes), S-W06 / S-D09 Not found, shared states · Stories: **US-019, US-020, US-070, US-102, US-103, US-104, US-105, US-107, US-108, US-110, US-113, US-117, US-120, US-273 (Should), US-032** · US-033 (Should: admin idle-timeout dialog §2.1) · Flows: [F10](../flows/F10-session-guards-and-errors.md), [F06 §4](../flows/F06-staff-signin-totp-audit.md)
 
 Wireframe conventions used in every W-file: `X` at the start of a message line marks an error alert, `!` a warning, `(i)` information, `✓` success; `[Button]` is a button, `[Field______]` is a text input, `[Select v]` is a select or combobox, `( )` / `(o)` are radio buttons, `[ ]` / `[x]` are checkboxes, `<link>` is a link, `{...}` is dynamic data, `#` marks a heading level (`#` h1, `##` h2). Widths are not to scale. **360** = mobile baseline, **1280** = desktop baseline.
 
@@ -62,7 +62,7 @@ Menu drawer (opened by `[=]`, `aria-expanded`, focus trapped, Escape closes and 
 | © 2026 {BRAND_NAME}                                                                             |
 +------------------------------------------------------------------------------------------------+
 ```
-Signed in, `[Sign in]` is replaced by an account menu button `[(AS) Ana v]`. The menu has: the organisation name (with "Switch organisation" when there are 2 or more memberships, Should US-081), Overview, Shipments, Drafts, (Should items), Theme submenu and Sign out. Items needing missing permissions are not rendered (US-070, US-108).
+Signed in, `[Sign in]` is replaced by an account menu button `[(AS) Ana v]`. The menu has: the organisation name (with "Switch organisation" when there are 2 or more memberships, Should US-081), Overview, Shipments, Drafts, Security (Must from M1 for the sessions list, US-027), (Should items), Theme submenu and Sign out. Items needing missing permissions are not rendered (US-070, US-108).
 
 ### Account area layout (signed in)
 ```
@@ -72,6 +72,7 @@ Signed in, `[Sign in]` is replaced by an account menu button `[(AS) Ana v]`. The
 |  > Overview      |                                                             |
 |    Shipments     |  content                                                    |
 |    Drafts        |                                                             |
+|    Security      |  (Must from M1: US-027 sessions, D-UX-030)                  |
 |    (Should ...)  |                                                             |
 +------------------+-------------------------------------------------------------+
 360:
@@ -110,6 +111,78 @@ The unverified-email banner (US-016, US-208) sits at the top of every account pa
 Drawer: same nav as the sidebar, plus language and theme, focus trapped, Escape closes.
 ```
 Breadcrumbs under 768 px collapse to "‹ Audit log" (a back link to the parent).
+
+### 2.1 Idle-timeout warning (US-033 Should; REQ-ADMIN-004; ADR-0026 am. 8, ADR-0006 am. 13; D-UX-025 extended by D-UX-032)
+
+Applies to every **authenticated** admin route (including `/mfa/enrol`). The web app has no idle timeout.
+
+**Idle clock.** One clock per browser for the admin origin, shared by all admin tabs: each tab writes the time of the last user input to `localStorage` key `admin:lastInput` (a timestamp only, no identifiers) and posts it on a same-origin `BroadcastChannel("admin-session")`. Only `pointerdown`, `keydown`, `touchstart` and `wheel` count (throttled to one write per 5 s). Focus, visibility changes, timers, silent refresh and TanStack Query background refetches never reset it. A tab that wakes from sleep recomputes idle time from the shared timestamp before rendering anything.
+
+| Idle time | What happens |
+|---|---|
+| 0 – 27:59 | Normal. Silent refresh runs as usual. |
+| 28:00 | The warning `alertdialog` opens in every open admin tab. Background refetches are paused. Silent refresh may still run until 30:00. |
+| 28:00 – 29:59 | The dialog shows the absolute sign-out time and a visual countdown. At 29:00 one polite announcement: "1 minute left before you're signed out." |
+| 30:00 | Silent refresh stops; `logoutSession` is called (best effort, `keepalive`); in-memory state and the query cache are cleared; the event is broadcast so every tab does the same; route to `/sign-in?reason=idle&returnUrl=<current path and query>` (validated same-origin, REQ-ADMIN-001). |
+| Wake from sleep at ≥ 30:00 | No dialog: the sign-out path runs immediately. The server has already expired the refresh token (30-minute sliding TTL), so the outcome is the same. |
+
+```
+360 (full-width minus 16 px gutters; buttons stacked, primary first)
++--------------------------------------+
+| (clock) # Are you still there?       |
+|                                      |
+| You haven't used the admin app for a |
+| while. For security, we'll sign you  |
+| out at 14:32.                        |
+| Time left: 1:47                      |   visual only (aria-hidden), updates every second
+|                                      |
+| [         Extend session          ]  |   primary, initial focus
+| [            Sign out             ]  |   secondary
++--------------------------------------+
+
+1280 (centred, max 440 px, shadow.e4, overlay bg.overlay)
++---------------------------------------------------+
+| (clock) # Are you still there?                    |
+| You haven't used the admin app for a while. For   |
+| security, we'll sign you out at 14:32.            |
+| Time left: 1:47                                   |
+|                       [Extend session] [Sign out] |
++---------------------------------------------------+
+```
+
+**Actions**
+
+| Action | Result |
+|---|---|
+| "Extend session" (button, or Escape) | Immediate `POST /auth/refresh`; button loading (`aria-busy`). OK: shared clock reset, dialog closes in every tab, background refetches resume, polite announcement "Session extended", focus returns to the element that had it before the dialog opened (else the page `h1`). |
+| Extend → 401 `SESSION_EXPIRED` / `SESSION_REVOKED` (absolute 12 h cap reached, or the server idle window already passed) | Run the 30:00 sign-out path; the sign-in page shows the matching notice (W15 §1). |
+| Extend → network failure or offline | Dialog stays open. InlineAlert in the dialog: "We couldn't extend your session. Check your connection and try again." Extend remains available; the countdown continues. At 30:00 the local sign-out path runs. |
+| "Sign out" | Standard sign-out (US-019): `logoutSession`, all tabs cleared, `/sign-in` with "You signed out." |
+| Click on the overlay | Ignored (the dialog stays open; it is not a dismissal). |
+| Any other key or pointer input while the dialog is open | Does **not** reset the clock. Only Extend does, so the extension is always a deliberate, announced action. |
+
+**Interplay with the 12 h absolute cap (US-033, D-UX-025).** The cap's non-modal banner (5 minutes before the cap) stays separate. If both are due, the idle dialog still opens; Extend then gets `SESSION_EXPIRED` from the server and the sign-in page explains it. No combined dialog is designed.
+
+**Data loss.** None by design: the admin slice is read-only, and audit filters and paging are in the URL, so `returnUrl` restores the exact view after sign-in. The recovery-codes step of S-D03 is the exception: an idle sign-out there skips the leave prompt; the codes are already active and staff regenerate them through US-026 when it is built.
+
+**Accessibility (WCAG 2.2.1 Timing Adjustable, "Extend" option)**
+- The user is warned 120 s before the limit (more than the 20 s minimum) and extends with one simple action. Extension is unlimited within the 12 h cap (more than the 10 extensions 2.2.1 requires). The cap itself is covered by D-UX-025.
+- Radix AlertDialog: `role="alertdialog"`, `aria-modal="true"`, `aria-labelledby` → title, `aria-describedby` → the sentence with the **absolute** time only (a stable string, so screen readers announce it correctly on open). The per-second "Time left" text is `aria-hidden="true"`; the only timed announcement is the one at 29:00 through the Announcer (polite). No per-tick announcements (accessibility §4).
+- Initial focus on "Extend session" (the least destructive action and the US-033 acceptance criterion). Focus is trapped. DOM, visual and focus order are the same at every width: Extend, then Sign out (stacked at 360, side by side at the inline end at 1280); no `row-reverse`.
+- Buttons ≥ 44 px on coarse pointers. No animation under `prefers-reduced-motion`; the default enter transition is opacity only, 120 ms.
+- The dialog renders in the active locale; `{time}` is formatted by the shared time helper in the viewer's zone (US-116).
+
+**States**
+
+| State | Rendering |
+|---|---|
+| Default | As drawn |
+| Loading | Extend in loading state; Sign out stays enabled |
+| Error | InlineAlert (danger) inside the dialog, above the buttons, `role="alert"`; focus stays on Extend |
+| Offline | Same as Error with the offline text; the OfflineBanner behind the overlay is unchanged |
+| Empty / Partial / Permission-denied | Not applicable (an overlay with no data) |
+
+**i18n keys:** `shell:idle.title`, `shell:idle.body` (`{time}`), `shell:idle.timeLeft` (`{remaining}`, pre-formatted `m:ss`), `shell:idle.extend`, `shell:idle.signOut`, `shell:idle.oneMinuteLeft`, `shell:idle.extended`, `shell:idle.extendFailed`; sign-in notice `auth:signIn.signedOutIdle` (content-and-i18n §4.11).
 
 ### Admin welcome (S-D04, US-032)
 ```
@@ -209,7 +282,7 @@ Network submit buttons get aria-disabled="true" + aria-describedby → "You're o
 Out-of-scope paths (`/account/wallet`, `/orders` in admin) render this state (US-273, US-032).
 
 ### 3.8 Signed-out notice (US-020)
-On the sign-in page after a revoked or expired session: a neutral InlineAlert "You were signed out. Sign in again to continue." in the active locale, above the form.
+On the sign-in page after a revoked or expired session (`SESSION_REVOKED`, `AUTH_REQUIRED`, or `SESSION_EXPIRED` when the 30-day web cap or the 12 h admin cap is reached, ADR-0006 am. 12): a neutral InlineAlert "You were signed out. Sign in again to continue." in the active locale, above the form. Admin idle sign-out (`?reason=idle`) uses its own text, "You were signed out for inactivity. Sign in again to continue." (§2.1, W15 §1).
 
 ## 4. Toasts (US-105)
 ```

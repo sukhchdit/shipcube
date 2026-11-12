@@ -305,7 +305,7 @@ Feature: ETags and optimistic concurrency
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-036
 - **Linked REQs:** REQ-API-014, REQ-SEC-005, REQ-SEC-006
 - **As an** operator **I want** shared, per-route request limits with standard headers **so that** brute force and abuse are throttled consistently across instances.
-- **Notes:** DR-A22 defaults (configuration): unauthenticated 120/min/IP; authentication routes 10/min/IP and 5/min/account identifier; refresh, logout and CSRF-token routes are `public` class 120/min/IP (D-043); authenticated 600/min/user; public reference and lookup routes 120/min/IP; webhooks 600/min per source IP; CSP report 20/min/IP; email-sending routes (verification resend, reset request and accepted registrations, D-049) 3/h per normalised address and 10/h per IP; registration allows at most 5 distinct addresses per IP per hour (`registration_probe` beyond); concurrent quote SSE streams 2 per IP (anonymous) and 5 per user (D-048). Headers are the three draft-06 names (REQ-API-014, D-052). Two stages (DR-A08, ADR-0016 amendment 1): the per-IP limit of the route's class runs before authentication so floods never reach bcrypt or JWT verification; the per-user limit runs after authorisation. IPv6 keyed by /64. EC-A12: only configured trusted proxies' `X-Forwarded-For` hops are honoured. Redis outage: authentication routes use per-instance in-memory counters and log ERROR security event; others fail open (ASSUMED GAP-A-19).
+- **Notes:** DR-A22 defaults (configuration): unauthenticated 120/min/IP; authentication routes 10/min/IP and 5/min/account identifier; refresh, logout and CSRF-token routes are `public` class 120/min/IP (D-043); authenticated 600/min/user; public reference and lookup routes 120/min/IP; webhooks 600/min per source IP; CSP report 20/min/IP; email-sending routes (verification resend, reset request and accepted registrations, D-049) 3/h per normalised address and 10/h per IP; registration allows at most 5 distinct addresses per IP per hour (`registration_probe` beyond); concurrent quote SSE streams 2 per IP (anonymous) and 5 per user (D-048); authenticated `POST /quotes` is the `quote-create` class at 30/min and 300/h per user and 1,000/h per organisation instead of the 600/min authenticated class (D-053, SEC-P3-29); `POST /quotes/{id}/share` is capped at 10 per quote per hour (D-055). Headers are the three draft-06 names (REQ-API-014, D-052). Two stages (DR-A08, ADR-0016 amendment 1): the per-IP limit of the route's class runs before authentication so floods never reach bcrypt or JWT verification; the per-user limit runs after authorisation. IPv6 keyed by /64. EC-A12: only configured trusted proxies' `X-Forwarded-For` hops are honoured. Redis outage: authentication routes use per-instance in-memory counters and log ERROR security event; others fail open (ASSUMED GAP-A-19).
 
 #### Acceptance criteria
 ```gherkin
@@ -327,6 +327,19 @@ Feature: Redis-backed rate limiting and headers
       | login per account identifier  | 6     |
       | authenticated per user        | 601   |
       | CSP report per IP             | 21    |
+      | quote-create per user         | 31    |
+
+  Scenario: Authenticated quote creation is the quote-create class, not the authenticated class
+    Given a verified signed-in user who created 30 quotes within the last minute
+    When they create a 31st quote
+    Then the response is 429 RATE_LIMITED with Retry-After although the user is far below 600 authenticated requests per minute
+    Given a user who created 300 quotes within the last hour spread under 30 per minute
+    When they create a 301st quote
+    Then the response is 429 RATE_LIMITED
+    Given the users of one organisation created 1000 quotes within the last hour, each user below their own limits
+    When any user of that organisation creates another quote
+    Then the response is 429 RATE_LIMITED and a user of a different organisation is not affected
+    And a guest POST /quotes is counted only against the guest per-IP class (20/min, 100/h)
 
   Scenario: Counters are shared across instances
     Given two API instances

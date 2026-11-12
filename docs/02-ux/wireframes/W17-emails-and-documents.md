@@ -37,10 +37,10 @@ Rules:
 
 | ID | Template | Trigger | Heading (en) | Primary action | Details block | Preference-immune |
 |---|---|---|---|---|---|---|
-| S-E01 | EMAIL_VERIFICATION | Register, resend | "Confirm your email address" | "Confirm email" → `/verify-email#token=…` | "This link expires in 24 hours. If you didn't create an account, ignore this email." | Yes (US-282) |
+| S-E01 | EMAIL_VERIFICATION | Register, resend | "Confirm your email address" | "Confirm email" → `/verify-email#token=…` | "This link expires in 24 hours. If you didn't create an account, ignore this email." plus (US-292, D-050) "If you don't confirm within {days} days, this account is removed and the address can be used to register again." (`{days}` from `AUTH_UNVERIFIED_TTL`, never a literal) | Yes (US-282) |
 | S-E02 | PASSWORD_RESET | Forgot password | "Reset your password" | "Choose a new password" → `/reset-password#token=…` | "This link expires in 60 minutes and works once. If you didn't ask for this, you can ignore it. Your password won't change." | Yes |
-| S-E03 | SECURITY_NOTICE (variants: new device sign-in, password changed, MFA on, MFA off, account locked, recovery code used) | Security events | Variant-specific, e.g. "Your password was changed" | "Review your security settings" → `/account/security` (Should screen) or `/sign-in` | Event time and zone, device ("Chrome on Windows"), coarse location (IP /24), "If this wasn't you, reset your password now." with link, and the event reference (correlation ID) | Yes |
-| S-E04 | BOOKING_CONFIRMATION | Saga notify step | "Your shipment is booked" (subject "Booked: order US-000000123") | "View your order" → `/orders/{id}/confirmation` | Per shipment: carrier, service, tracking number (with public tracking link), pickup date and window + reference, or the drop-off point + latest drop-off time; "What to do next" list; attachments note "Your label and invoice are attached" or, when over 10 MB, "Download your documents from your account" | n/a (transactional) |
+| S-E03 | SECURITY_NOTICE (variants: new device sign-in, password changed, MFA on, MFA off, account locked, recovery code used) | Security events | Variant-specific, e.g. "Your password was changed" | "Review where you're signed in" → `/account/security` (web; the sessions section is Must from M1, US-027) or `/account/sessions` (staff, admin origin); signed-out recipients pass through `/sign-in?returnUrl=` | Event time and zone, device ("Chrome on Windows"), coarse location (IP /24), "If this wasn't you, reset your password now." with link, and the event reference (correlation ID) | Yes |
+| S-E04 | BOOKING_CONFIRMATION | Saga notify step | "Your shipment is booked" (subject "Booked: order US-000000123") | "View your order" → `/orders/{id}/confirmation` | Per shipment: carrier, service, tracking number (with public tracking link), pickup date and window + reference, or the drop-off point + latest drop-off time; "What to do next" list; attachments note "Your label is attached." and, for the customs invoice, an attachment only when the document is not `SENSITIVE`; a `SENSITIVE` invoice (it carries a `FULL` identity reference, D-051) is never attached and the e-mail says "Download your customs invoice from your shipment page." with a link to `/account/shipments/{id}`. Over 10 MB: "Download your documents from your account" | n/a (transactional) |
 
 Should templates (when built): PAYMENT_RECEIPT (US-218), PICKUP_SCHEDULED/CANCELLED, TRACKING_MILESTONE (US-287, preference-controlled), CANCELLATION_REFUND, DOCUMENTS (US-228).
 
@@ -58,8 +58,10 @@ Should templates (when built): PAYMENT_RECEIPT (US-218), PICKUP_SCHEDULED/CANCEL
 | ---------------------------------------------    |
 | What to do next                                  |
 | 1. Print the attached label …                    |
-| Attachments: US-000000123-SHIPPING_LABEL-v1.pdf, |
-| US-000000123-COMMERCIAL_INVOICE-v1.pdf           |
+| Attachments: US-000000123-SHIPPING_LABEL-v1.pdf  |
+| Customs invoice: <Download it from your          |
+| shipment page>   (SENSITIVE: link only, D-051;   |
+| a non-SENSITIVE invoice is attached instead)     |
 ```
 
 ## 3. S-E05 Commercial or pro-forma invoice (PDF document, US-186)

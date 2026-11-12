@@ -1,6 +1,6 @@
 # F05 — Customer account: shipments, detail, drafts, sign-out
 
-Stories: **US-254, US-255, US-256, US-257, US-251, US-224, US-236, US-019, US-070** (Must) · US-258, US-261/US-196, US-260, US-267, US-027 (Should) · Screens S-C01..S-C04
+Stories: **US-254, US-255, US-256, US-257, US-251, US-224, US-236, US-019, US-070, US-027** (Must; US-027 since D-047) · US-258, US-261/US-196, US-260, US-267 (Should) · Screens S-C01..S-C04, S-C07 (sessions section), S-D08
 
 ## 1. Find and open a shipment
 
@@ -67,3 +67,30 @@ flowchart LR
   O2 -->|OK| O3["Home page; toast You've signed out"]
   O2 -->|"network error"| O4["Local session cleared anyway; message: You're signed out on this device"]
 ```
+
+## 5. Where you're signed in: list and remote sign-out (US-027 Must; web S-C07 and admin S-D08; W13 §1, W16 §4)
+
+```mermaid
+flowchart TD
+  S0["Account nav: Security (web) / sidebar: My sessions (admin)"] --> S1["GET own sessions (one VIEW audit entry)"]
+  S1 --> S2{"Response"}
+  S2 -->|"401 AUTH_REQUIRED"| S3["Sign-in redirect with returnUrl (F10)"]
+  S2 -->|"5xx / network"| S4["Section ErrorState: We couldn't load your sessions. Try again + reference"]
+  S2 -->|offline| S5["OfflineBanner; cached list if any; Sign out buttons aria-disabled"]
+  S2 -->|OK| S6["List: This device first, then by last active<br/>Device, IP address range, Signed in, Last active"]
+  S6 --> S7["Sign out (other row)"]
+  S7 --> S8{"Response"}
+  S8 -->|OK| S9["Row removed; toast Signed out of device;<br/>focus to next row action or section heading;<br/>that device's tokens fail within 5 s"]
+  S8 -->|"404 NOT_FOUND (already ended or not yours)"| S10["Row removed; info toast That session had already ended"]
+  S8 -->|"5xx / AUDIT_WRITE_FAILED"| S11["Error toast + reference; row kept"]
+  S6 --> S12["Sign out (This device)"] --> S13["Normal sign-out (§4)"]
+  S6 --> S14{"Other sessions exist?"}
+  S14 -->|No| S15["Text: This is the only device signed in (no button)"]
+  S14 -->|Yes| S16["Sign out of all other devices"] --> S17["AlertDialog: Sign out of all other devices?<br/>You'll stay signed in on this device. Cancel (focus) / Sign out other devices"]
+  S17 -->|confirm| S18{"Response"}
+  S18 -->|OK| S19["Only This device remains; toast Signed out of N other devices"]
+  S18 -->|error| S11
+  S17 -->|cancel| S6
+```
+
+No re-authentication is needed for listing or remote sign-out. A device that was signed out remotely sees the signed-out notice on its next request (F10 §1).

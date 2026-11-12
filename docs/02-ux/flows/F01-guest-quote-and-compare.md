@@ -128,9 +128,13 @@ flowchart LR
   S1 -->|No| S2["Save: sign-in prompt with returnUrl<br/>Share: hidden for guests"]
   S1 -->|Yes| S3{"Permission"}
   S3 -->|"quote:create for save"| S4["Saved toast and Saved state on button<br/>appears in /account/quotes"]
-  S3 -->|"quote:share for share"| S5["Share dialog: read-only link, Copy,<br/>notice: no personal data is shared, expires with quote"]
+  S3 -->|"quote:share for share"| S5["Share dialog: notice that a new link turns off the previous one;<br/>Create link -> /q#token=... read-only link, Copy;<br/>notice: no personal data is shared, expires with quote"]
+  S5 -->|"429 RATE_LIMITED (10 links per quote per hour)"| S8["Alert in dialog with retry time"]
   S3 -->|missing| S6["Action absent from the accessibility tree"]
   S4 -->|"409 QUOTE_ALREADY_CLAIMED"| S7["Inline error: this quote belongs to another account.<br/>Start a new quote"]
+  R0["Recipient opens /q#token=..."] --> R1["POST resolveSharedQuote with the token from the fragment"]
+  R1 -->|OK| R2["Read-only shared view (W02 §6)"]
+  R1 -->|"404 (unknown, revoked, superseded or expired)"| R3["This shared quote is no longer available. Get a quote"]
 ```
 
 ## 6. Error, empty, loading, offline and permission paths (summary)

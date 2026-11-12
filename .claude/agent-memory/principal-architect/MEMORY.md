@@ -1,1 +1,1 @@
-- [P3 architecture context](project_p3_architecture_context.md) — why Node 24/TS 6/Valkey/RustFS/tokenised vault; CI lanes (D-ORCH-001); fnm PATH prefix; SEC-P3 remediation choices (D-ARCH-017..028) and Wave-0 follow-ups
+- [P3 architecture context](project_p3_architecture_context.md) — why Node 24/TS 6/Valkey/RustFS/tokenised vault; CI lanes (D-ORCH-001); fnm PATH prefix; SEC-P3 remediation (D-ARCH-017..034); G2-condition closure outcomes (schema_owner role, ECDSA rationale, D-055 share 404s); DECISIONS.md append-only pitfalls

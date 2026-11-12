@@ -1,6 +1,6 @@
 # W15 — Admin sign-in, MFA challenge and enrolment (S-D01, S-D02, S-D03)
 
-Routes (admin app) `/sign-in`, `/sign-in/verify`, `/mfa/enrol` · Client-rendered only, `noindex` · Stories: **US-017, US-022, US-023, US-024, US-025, US-030, US-031** · US-033 (Should) · Flows: [F06 §1](../flows/F06-staff-signin-totp-audit.md), [F09](../flows/F09-mfa-enrolment.md)
+Routes (admin app) `/sign-in` (+ `?reason=idle`), `/sign-in/verify`, `/mfa/enrol` · Client-rendered only, `noindex` · Stories: **US-017, US-022, US-023, US-024, US-025, US-030, US-031** · US-033 (Should: idle sign-out notice) · Flows: [F06 §1](../flows/F06-staff-signin-totp-audit.md), [F09](../flows/F09-mfa-enrolment.md)
 
 The layout matches W03 (a centred 480 px card) inside a minimal admin header (brand + "Admin", language, theme). There is no sidebar before sign-in. A "Staff sign-in" label distinguishes it from the customer app.
 
@@ -23,8 +23,9 @@ The layout matches W03 (a centred 480 px card) inside a minimal admin header (br
 | <Forgot your password?>              |
 +--------------------------------------+
 ```
-- Errors exactly as W03 §1: `INVALID_CREDENTIALS` also covers customer accounts (US-030, NOT_STAFF internal), `ACCOUNT_DELAYED` (countdown), `ACCOUNT_LOCKED`, `RATE_LIMITED` (US-031: "the localised RATE_LIMITED message with the retry time").
+- Errors exactly as W03 §1: `INVALID_CREDENTIALS` also covers customer accounts (US-030, NOT_STAFF internal), staff suspended for an overdue enrolment (`MFA_ENROLMENT_OVERDUE`, ADR-0006 am. 14) and seeded staff without a password; `ACCOUNT_DELAYED` (countdown), `ACCOUNT_LOCKED`, `RATE_LIMITED` (US-031: "the localised RATE_LIMITED message with the retry time").
 - The return URL is kept (same-origin path only).
+- **Notices above the form (info InlineAlert, one at a time):** `?reason=idle` (US-033, W00 §2.1): "You were signed out for inactivity. Sign in again to continue." · `SESSION_EXPIRED` (12 h cap) or `SESSION_REVOKED`: "Your session ended. Sign in again." · after a voluntary sign-out: "You signed out." The `reason` value is read from an allow-list (`idle`, `expired`); any other value shows nothing.
 
 ## 2. MFA challenge (S-D02)
 
@@ -42,6 +43,28 @@ The layout matches W03 (a centred 480 px card) inside a minimal admin header (br
 - Drifting device clock (US-024): after 2 consecutive `MFA_INVALID`, the hint "Codes depend on your phone's clock. Make sure it's set automatically." is added, and the recovery code link is emphasised.
 
 ## 3. Mandatory enrolment (S-D03)
+
+Outside `APP_ENV ∈ {local, test}`, a staff user's **first** enrolment starts with an e-mailed enrolment code (ADR-0006 am. 14, D-052 (c), US-025). The client does not know `APP_ENV`: it calls `enrolTotp`; a 403 `MFA_ENROLMENT_CODE_REQUIRED` adds Step 0 below and turns the step labels into "Step 1 of 4" … "Step 4 of 4". In local and test the flow stays at 3 steps (D-UX-035).
+
+### Step 0 — Confirm your email (outside local/test only)
+```
+360 / 1280 (same card)
+| # Confirm your email                 |
+| Step 1 of 4                          |
+| To keep staff accounts safe, we've   |
+| sent a 6-digit code to s•••@op•••.   |   masked address
+| example. Enter it to set up two-step |
+| verification. The code expires in    |
+| 10 minutes.                          |
+| Code from the email                  |
+| [ ______ ]   single field, numeric,  |
+|              one-time-code           |
+| [Continue]                           |
+| Didn't get it? <Send a new code>     |   60 s cooldown, then enabled
+```
+- On entering the step the client calls `requestTotpEnrolmentCode` **once** (identical 202). "Send a new code" re-requests; it is `aria-disabled` for 60 s after each send with the visible text "You can send a new code in 0:45" (not announced per tick). 429 `RATE_LIMITED` (`email-send` class): alert with the retry time.
+- Continue calls `enrolTotp` with `enrolment_code`. OK → Step 1 (QR) with the provisioning data. 403 `MFA_ENROLMENT_CODE_REQUIRED` (wrong, expired or used) → inline "That code didn't work or has expired. Check the latest email, or send a new code."; field cleared; focus stays. Wrong attempts count against the MFA lock → 429 `MFA_LOCKED` alert with the time, field disabled.
+- Paste allowed; `autocomplete="one-time-code"`; no time pressure beyond the restartable 10-minute code (2.2.1 by restart).
 
 ### Step 1 — Set up
 ```

@@ -11,7 +11,7 @@
 
 ## 1. Scope and methodology
 
-**In scope (M0 + M1).** `apps/api`, `apps/worker`, `apps/web` (pre-rendered public pages plus SPA), `apps/admin`, the packages `shared`, `authz`, `audit`, `carriers`, `pricing`, `config`; PostgreSQL 18 with RLS; Redis 7 (rate limits, revocation, caches, BullMQ); S3-compatible object storage (RustFS locally); Mailpit; Stripe test mode; DHL, FedEx and UPS sandboxes plus the Mock carrier; GitHub Actions and GHCR; the local Docker Compose stack.
+**In scope (M0 + M1).** `apps/api`, `apps/worker`, `apps/web` (pre-rendered public pages plus SPA), `apps/admin`, the packages `shared`, `authz`, `audit`, `carriers`, `pricing`, `config`; PostgreSQL 18 with RLS; Valkey 8 (Redis 7.2-compatible; rate limits, revocation, caches, BullMQ); S3-compatible object storage (RustFS locally); Mailpit; Stripe test mode; DHL, FedEx and UPS sandboxes plus the Mock carrier; GitHub Actions and GHCR; the local Docker Compose stack.
 
 **Out of scope.** M2–M5 features (partner API keys, outbound webhooks, ledger, on-behalf actions, signed actions, audit export, KYC, sanctions screening) except where M1 builds a seam. **AWS infrastructure** threats are listed in §5.17 and marked **DEFERRED to M5**, because CLOUD_BUDGET_MONTHLY_USD = 0 and Terraform is never applied in this run.
 
@@ -143,7 +143,7 @@ flowchart LR
   subgraph Z3["TB4 Data tier - TB6 tenant boundary inside PostgreSQL"]
     pg[("PostgreSQL 18<br/>RLS tables, idempotency, outbox")]
     aud[("Audit store<br/>partitions, chain, PII vault")]
-    rds[("Redis 7<br/>limits, revocation, caches, BullMQ")]
+    rds[("Valkey 8 (Redis 7.2 API)<br/>limits, revocation, caches, BullMQ")]
     obj[("Object storage S3 API<br/>documents, raw payloads")]
   end
   subgraph Z4["TB5 Third parties"]

@@ -35,7 +35,7 @@ flowchart LR
   HOME --> HELP["/{lng}/help S-W05"]
   HOME --> TERMS["/{lng}/legal/terms S-W05"]
   HOME --> PRIV["/{lng}/legal/privacy S-W05"]
-  RESULTS -.Should.-> SHARE["/q/{shareToken} Shared quote (read-only)"]
+  RESULTS -.Should.-> SHARE["/q#token= Shared quote (read-only)"]
 ```
 
 ### 2.2 Customer web app: authentication
@@ -76,7 +76,7 @@ flowchart TB
     ACC -.Should.-> QUOTES["/account/quotes S-C05"]
     ACC -.Should.-> ADDR["/account/addresses S-C06"]
     ACC -.Should.-> PM["/account/payment-methods S-C10"]
-    ACC -.Should.-> SEC["/account/security S-C07"]
+    ACC --> SEC["/account/security S-C07 (sessions: Must)"]
     ACC -.Should.-> PREF["/account/preferences S-C08"]
     ACC -.Should.-> ORG["/account/organisation S-C09"]
   end
@@ -108,7 +108,7 @@ No navigation, route or placeholder exists for orders, customers, carriers, pric
 | Web header (≥ 768 px) | Primary nav | Get a quote (→ `/{lng}/#quote`), Track, Prohibited items, Help |
 | Web header | Utilities | Locale switcher, currency switcher (Should), environment chip (non-production), "Sign in" link or account menu |
 | Web header (< 768 px) | Menu drawer | Same primary nav entries, then the switchers, then the account section |
-| Account menu (signed in) | DropdownMenu | Overview, Shipments, Drafts, (Should: Saved quotes, Address book, Payment methods, Security, Preferences, Organisation), Theme, Sign out |
+| Account menu (signed in) | DropdownMenu | Overview, Shipments, Drafts, Security (Must from M1, US-027), (Should: Saved quotes, Address book, Payment methods, Preferences, Organisation), Theme, Sign out |
 | Account area | AccountNav (side ≥ 1024 / dropdown < 1024) | Same as the account menu minus Theme and Sign out |
 | Web footer | Footer nav | Help, Prohibited items, Terms, Privacy, Cookie settings (Should), Language, Theme |
 | Admin sidebar | Nav | Audit log (`audit:read`) · My sessions |
@@ -131,7 +131,7 @@ Legend: **Auth**: `public` = no session needed; `guest-token` = public with a qu
 | `/{lng}/legal/terms`, `/{lng}/legal/privacy` | S-W05 Legal pages | public | Yes | **US-059, US-112** | compliance-pack legal text per locale (build time), review status |
 | `/{lng}/help` | S-W05 Help placeholder | public | Yes | **US-112** | static i18n content |
 | `/quote/{quoteId}` | S-W02 Results | guest-token or `quote:read` | No | **US-155, US-159, US-160, US-161, US-166, US-167, US-168**, US-162, US-163, US-164, US-165, US-169 | quote (inputs, expiry, state), streamed options (carrier, service, price lines, totals, ETA, transit days, collection modes, cover, cut-off, printer hint, exclusion reasons), per-carrier stream status |
-| `/q/{shareToken}` (Should) | S-W02s Shared quote | public | No | US-165 | shared quote view (no personal data) |
+| `/q#token=…` (Should; ADR-0016 am. 6a, D-UX-034) | S-W02s Shared quote | public (token posted to `resolveSharedQuote`) | No | US-165 | shared quote view (no personal data) |
 | `/sign-in` | S-A01 Sign in | public | No | **US-017, US-020, US-022, US-171** | none (plus booking context when `returnUrl` is a booking route) |
 | `/sign-in/verify` | S-A06 Two-step verification | challenge (in memory) | No | **US-024** | challenge token (in memory, never in the URL) |
 | `/register` | S-A02 Register | public | No | **US-015, US-171** | current terms version, locale list |
@@ -154,7 +154,7 @@ Legend: **Auth**: `public` = no session needed; `guest-token` = public with a qu
 | `/account/quotes` (Should) | S-C05 Saved quotes | `quote:read` | No | US-259, US-164 | saved quotes |
 | `/account/addresses` (Should) | S-C06 Address book | `address_book:read`/`manage` | No | US-262, US-263, US-264 | address book |
 | `/account/payment-methods` (Should) | S-C10 Payment methods | per catalogue | No | US-265, US-217 | saved methods (gateway tokens, brand, last 4, expiry) |
-| `/account/security` (Should) | S-C07 Security | session (own) | No | US-267, US-026, US-027, US-028 | MFA status, recovery code count, sessions |
+| `/account/security` | S-C07 Security | session (own) | No | **US-027**, US-267, US-026, US-028 | own sessions (Must); MFA status, recovery code count (Should sections) |
 | `/account/preferences` (Should) | S-C08 Preferences | session (own) | No | US-272, US-266 | locale, display currency, units, notification preferences |
 | `/account/organisation` (Should) | S-C09 Organisation & team | per catalogue | No | US-268, US-269, US-082..085 | org profile, members, invitations |
 | `/invitations/accept#token=` (Should) | S-C09a Accept invitation | public then session | No | US-084 | invitation |
@@ -171,7 +171,8 @@ Legend: **Auth**: `public` = no session needed; `guest-token` = public with a qu
 | `/audit` | S-D05 Audit list | `audit:read` | Never | **US-097, US-093, US-032, US-110**, US-111 | audit entries page (keyset), filter option lists (users, roles, organisations, entities, actions, outcomes), latest chain-verification result |
 | `/audit/entries/{entryId}` | S-D06 Entry detail | `audit:read` | Never | **US-098, US-032** | full entry incl. diff, redaction markers, hashes |
 | `/audit/entities/{entity}/{entityId}` | S-D07 Entity history | `audit:read` | Never | **US-032** (route), US-099 | entity's entries (oldest first) |
-| `/account/sessions` | S-D08 My sessions | staff session (own) | Never | US-027 (Should; D-008 includes it) | own sessions |
+| `/account/sessions` | S-D08 My sessions | staff session (own) | Never | **US-027** (Must, D-047; D-008 includes the page), US-026 | own sessions |
+| `/sign-in?reason=idle` | S-D01 with the idle sign-out notice | public | Never | US-033 (Should) | none |
 | any other path | S-D09 Not found | staff session | Never | **US-032, US-110** | none |
 
 ## 5. Page titles (document `<title>`)

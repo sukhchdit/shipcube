@@ -88,7 +88,7 @@ Feature: Quote entity
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-154, EPIC-16
 - **Linked REQs:** REQ-QUOTE-002
 - **As a** guest shipper **I want** to get and re-open a quote with no account **so that** I see prices before any sign-up (D-009).
-- **Notes:** Permission `public`. Access token at least 128 bits, unguessable, returned to the creating client. Limits 20 requests per minute and 100 per hour per IP (configuration, ASSUMED, A-035; identical in NFR-SEC-005 per D-035). 429 `RATE_LIMITED` with `Retry-After`. Wrong or missing token returns 404 (GAP-B-27, A-078). The token stops being honoured 7 days after the quote's expiry (404 thereafter) although the row is retained for 90 days (D-045, A-085, D-052). The per-IP limits are the first line only; the global anonymous carrier budget and daily quota guard (US-293, REQ-CARR-022/023, D-048) bound total guest carrier load, and an exhausted budget shows as `CARRIER_BUSY` per carrier, never as 429.
+- **Notes:** Permission `public`. Access token at least 128 bits, unguessable, returned to the creating client. Limits 20 requests per minute and 100 per hour per IP (configuration, ASSUMED, A-035; identical in NFR-SEC-005 per D-035). 429 `RATE_LIMITED` with `Retry-After`. Wrong or missing token returns 404 (GAP-B-27, A-078). The token stops being honoured 7 days after the quote's expiry (404 thereafter) although the row is retained for 90 days (D-045, A-085, D-052). The per-IP limits are the first line only; the global anonymous carrier budget and daily quota guard (US-293, REQ-CARR-022/023, D-048) bound total guest carrier load, and an exhausted budget shows as `CARRIER_BUSY` per carrier, never as 429. A signed-in user calls `POST /quotes` under the `quote-create` class (30/min + 300/h per user, 1,000/h per organisation, US-040, D-053); a signed-in user still in `PENDING_VERIFICATION` is counted as an anonymous caller by the carrier budget (SEC-P3-29, US-293).
 
 #### Acceptance criteria
 Permission path: not applicable — `public` permission with a capability token; the "Wrong token" and "Missing token" → 404 scenarios are the access-control assertions (A-078).
@@ -605,7 +605,7 @@ Feature: Saved quotes
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-154, EPIC-03
 - **Linked REQs:** REQ-QUOTE-015
 - **As a** registered individual **I want** to share a read-only quote link **so that** a colleague or friend can see options and prices without my personal data.
-- **Notes:** Permission `quote:share`. Token at least 128 bits, carried in the share link's URL fragment and resolved with `POST /api/v1/public/shared-quotes/resolve {token}` (ADR-0016 amendment 2, D-043); the token never appears in a path, query string, access log or Referer. Shared view shows countries and cities, packages, content type, options and prices; no postcode, name, address, email, reference or other personal data. Read-only, expires with the quote; after expiry shows "this quote has expired" with inputs prefilled for a new quote (EC-B29). Revoked or unknown token returns 404.
+- **Notes:** Permission `quote:share`. Token at least 128 bits, carried in the share link's URL fragment and resolved with `POST /api/v1/public/shared-quotes/resolve {token}` (ADR-0016 amendment 2, D-043); the token never appears in a path, query string, access log or Referer. Shared view shows countries and cities, packages, content type, options and prices; no postcode, name, address, email, reference or other personal data. Read-only, expires with the quote. Mint-and-revoke (ADR-0014 amendment 4, SEC-P3-10; conditions per SEC-P3-32, D-055): every creation mints a new token and revokes the previous active share in the same transaction, writing CREATE plus an UPDATE (`revoked_at`, reason `SUPERSEDED`) on `quote_share`; an explicit revoke writes DELETE; at most 10 mints per quote per hour (`QUOTE_SHARE_MINTS_PER_HOUR=10`), then 429. Resolve returns one byte-identical 404 `NOT_FOUND` for an unknown, revoked, superseded or expired token (EC-B29); the shared page then shows "this shared quote is no longer available" with a link to start a new quote (no prefilled inputs; the earlier "expired with inputs prefilled" view is dropped). SEC-TC-53 (amended).
 
 #### Acceptance criteria
 ```gherkin
@@ -630,13 +630,33 @@ Feature: Share a quote
     When the owner revokes the link
     Then the link returns 404 NOT_FOUND and an audit entry DELETE on quote_share exists
 
-  Scenario: Unknown token
-    Then 404 NOT_FOUND
+  Scenario: Creating a second link mints a new token and revokes the previous one with its own audit entry
+    Given an active share link L1 for the quote
+    When the owner (or another member holding quote:share) creates a share link again
+    Then a new token L2 is returned with 201 and L1 resolves to 404 NOT_FOUND
+    And in the same transaction an audit entry CREATE on quote_share for L2 and an audit entry UPDATE on quote_share for L1 (revoked_at set, reason SUPERSEDED, the acting member as actor) exist
+    And an Idempotency-Key header on the request is ignored (no replay; a retry mints again)
 
-  Scenario: Expired quote
+  Scenario: Mint cap per quote
+    Given 10 share links were created for the same quote within the last hour
+    When an 11th is created
+    Then the response is 429 RATE_LIMITED with Retry-After and the 10th link still resolves
+
+  Scenario Outline: Unknown, revoked, superseded and expired tokens are indistinguishable
+    When POST /api/v1/public/shared-quotes/resolve is called with a token that is "<state>"
+    Then the response is 404 NOT_FOUND and its status, headers (except Date and request IDs) and body bytes are identical across all four states
+    And the response contains no quote inputs and no personal data
+    Examples:
+      | state       |
+      | unknown     |
+      | revoked     |
+      | superseded  |
+      | expired     |
+
+  Scenario: Expired quote on the shared page
     Given the quote has expired
     When the link is opened
-    Then "this quote has expired" is shown with no prices and the inputs prefilled in a new quote form
+    Then the page shows "this shared quote is no longer available" with a link to start a new quote and shows no prices and no prefilled inputs
 
   Scenario: Read-only
     Then no select, save or book action is offered on the shared view

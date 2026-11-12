@@ -59,6 +59,8 @@ One `Announcer` per app provides a polite and an assertive region (components.md
 | Offline / back online | `role="status"` | Banner text | n/a |
 | Copy actions | polite | "Copied" | n/a |
 | Countdown timers (cut-off, rate limit, lockout) | **none** | The text contains the absolute time; no per-tick announcements | — |
+| Admin idle warning (W00 §2.1) | alertdialog on open (role-based announcement); then polite | Open: title + "we'll sign you out at {time}"; at 1 minute left: "1 minute left before you're signed out."; after Extend: "Session extended" | 2 timed messages per warning |
+| CVC field appears after the server flag (W08 §5) | polite (`role="status"` notice) | "For your security, enter the security code for {card}." | once |
 | Track result (S-W03) | polite | "{status}. Estimated delivery {date}" | once per lookup |
 
 Never use `aria-live` on large containers that re-render. Announcements go through the Announcer only.
@@ -84,6 +86,9 @@ Never use `aria-live` on large containers that re-render. Announcements go throu
 - Show/hide password toggle (`aria-pressed`).
 - Email-link flows (verify, reset) need no transcription. The token is in the link.
 - Time limits: the MFA challenge (5 min) and enrolment (15 min) are restartable without losing anything (2.2.1 satisfied by a simple restart, the same as extending).
+- **Re-authentication (ReauthDialog, US-291, W03 §8):** the same rules apply: password with show/hide and a hidden `username` field for password managers, or the single TOTP field; paste allowed; no cognitive test. The 5-minute proof is requested at the last step and used at once; an expired proof re-prompts at no cost.
+- **Staff enrolment e-mail code (W15 §3 Step 0):** single `one-time-code` field, paste allowed; the code is in the e-mail, so no transcription test beyond copying (3.3.8 "object recognition / copy" alternative is satisfied by paste).
+- **CVC re-collection (W08 §5):** entering a card's security code is not a cognitive function test under 3.3.8 (it is a known value, like a password); the hosted field supports paste and browser card autofill where the gateway allows it.
 
 ## 7. Target size and pointer (2.5.5 AAA not claimed; 2.5.8 AA plus the brief's stricter rule)
 
@@ -154,7 +159,11 @@ Never use `aria-live` on large containers that re-render. Announcements go throu
 | S-D05 Audit list | ✓ | ✓ | ✓ | ✓ counts | ✓ range | ✓ | ✓ | n/a | ✓ table→cards | ✓ | ✓ outcome text | Apply model; sticky header; zone in header |
 | S-D06 Entry detail | ✓ | ✓ | ✓ | n/a | n/a | ✓ | ✓ | n/a | ✓ diff stacks | ✓ | ✓ redaction text | Diff table headers; CodeBlock scroll region focusable |
 | S-D07 Entity history | ✓ | ✓ | ✓ | n/a | n/a | ✓ | ✓ | n/a | ✓ | ✓ | ✓ | — |
-| S-D08 My sessions | ✓ | ✓ | ✓ | ✓ sign-out | n/a | ✓ | ✓ | n/a | ✓ | ✓ | ✓ | Current session labelled |
+| S-D08 My sessions (Must, US-027) | ✓ | ✓ | ✓ row-removal focus | ✓ sign-out toasts | n/a | ✓ | ✓ | n/a | ✓ table→cards | ✓ | ✓ "This device" text | Current session labelled; per-row unique button names; IP range header visible |
+| S-C07 Security, sessions section (Must, US-027) | ✓ | ✓ | ✓ row-removal focus | ✓ sign-out toasts | n/a | ✓ | ✓ | n/a | ✓ table→cards | ✓ | ✓ | Same as S-D08; AlertDialog default focus on Cancel; section-level error keeps the rest of the page |
+| ReauthDialog (both apps, US-291) | ✓ dialog title | ✓ trapped, Escape | ✓ field on open, trigger on close | ✓ alerts | ✓ inline | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Purpose + instruction as description; hidden `username` field; one automatic retry only |
+| Admin idle dialog (US-033 Should, W00 §2.1) | ✓ alertdialog | ✓ trapped | ✓ Extend on open, restore on close | ✓ open + 1-minute announcement only | n/a | ✓ | ✓ | n/a | ✓ | ✓ | ✓ | Absolute time in the description; per-second countdown `aria-hidden`; any key other than Escape/Enter on a button does not extend |
+| S-B06 CVC re-collection (Should, W08 §5) | ✓ | ✓ incl. CVC frame | ✓ field focus only on server flag | ✓ notice | ✓ summary + inline | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Label and hint outside the iframe; iframe titled; three named recovery actions |
 | S-E01..E04 Emails | n/a | n/a | n/a | n/a | n/a | ✓ 44 px button | n/a | n/a | ✓ fluid | n/a | ✓ | `lang`, plain-text part, underlined links |
 
 ## 11. Timing (2.2.1)
@@ -163,8 +172,12 @@ Never use `aria-live` on large containers that re-render. Announcements go throu
 |---|---|
 | Quote validity 24 h, booking cut-off | Real-time events (exception). Absolute times are always shown. Expiry offers a one-action re-quote. |
 | Access token 15 min | Silent refresh. No user-facing limit. |
-| Customer session 30 days | No limit during use |
+| Customer session: 30-day sliding refresh inside a 30-day absolute cap (D-046, ADR-0006 am. 12) | No limit during use. The cap ends a session that has existed for 30 days regardless of activity (security essential); the result is the signed-out notice and `returnUrl` (no data in the SPA is lost that the server has not saved). Exceeds the 20-hour exception of 2.2.1. |
+| Staff idle timeout 30 min of user input (Should US-033, REQ-ADMIN-004, W00 §2.1) | **Extend** option: `alertdialog` at 28 minutes (120 s notice, more than the 20 s minimum), one action "Extend session", unlimited extensions within the 12 h cap. Absolute sign-out time in the description; one announcement at 1 minute left. Read-only admin and URL state mean no data loss. |
 | Staff absolute session cap (12 h, Should US-033) | Security essential. Warning banner 5 min before with "Sign in again now" (preserving the URL state). Read-only work means no data loss. |
+| Re-authentication proof 5 min (US-291) | Requested at the last step and used immediately; if it lapses, the dialog re-prompts at no cost (restart = extend). The dialog itself has no timer. |
+| Staff enrolment e-mail code 10 min (ADR-0006 am. 14) | Restartable: "Send a new code" (60 s cooldown) |
 | MFA challenge 5 min, enrolment 15 min, reset link 60 min, verification 24 h | Restartable at no cost (equivalent to extending) |
+| Unverified account 7 days (US-292) | Not an interaction time limit: the account is removed and the address can register again; the limit is stated in the verification e-mail (W17 §2) |
 | Rate limits, lockouts | The retry time is shown. Not a time limit on content. |
 | Toasts 5 s | Paused on hover and focus. Errors persist. Content duplicated on the page (US-105). |

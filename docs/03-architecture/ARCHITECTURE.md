@@ -74,7 +74,7 @@ C4Container
     Container(api, "apps/api", "Node 24, Express 5, Prisma 7, Joi, Pino", "REST /api/v1, SSE rate stream, webhooks, health, metrics; stateless")
     Container(worker, "apps/worker", "Node 24, BullMQ 6", "Outbox relay, booking saga, payments, documents, pickups, tracking polls, notifications, audit maintenance, housekeeping")
     ContainerDb(pg, "PostgreSQL 18", "RLS forced, monthly-partitioned audit, outbox, idempotency", "System of record")
-    ContainerDb(redis, "Redis 7", "BullMQ queues, rate-limit counters, token revocation, authz cache, rate cache, OAuth token cache, flag cache")
+    ContainerDb(redis, "Valkey 8 (Redis 7.2-compatible)", "BullMQ queues, rate-limit counters, token revocation, authz cache, rate cache, OAuth token cache, flag cache")
     Container(objstore, "Object storage", "S3 API — RustFS local / S3 AWS", "documents, raw-carrier-payloads, exports, audit-archive (M5)")
     Container(mailcatcher, "Mailpit (local)", "SMTP + HTTP API", "Catches all e-mail in dev/CI")
   }
@@ -196,11 +196,11 @@ Shell (sidebar with implemented modules only, breadcrumb, locale switch), staff 
 
 | Module / package | REQ areas allocated (all M0/M1 Must REQs of the area unless noted) | Public interface (in-process) | Outbox events emitted | Consumes |
 |---|---|---|---|---|
-| `identity` | REQ-AUTH-001..024; REQ-ADMIN-002/003/004/007/008; REQ-SEC-003/004 (auth routes); REQ-SEC-012 (auth events) | `IdentityService`, `SessionService`, `MfaService`, `ReauthService` | `auth.email_verification`, `auth.password_reset`, `auth.security_event{variant}` | — |
+| `identity` | REQ-AUTH-001..026 (025 `auth_time` claim and step-up, ADR-0006 am. 12; 026 pre-hijack protection and unverified-account expiry, ADR-0006 am. 15 — both added by v1.3, D-046/D-050); REQ-ADMIN-002/003/004/007/008; REQ-SEC-003/004 (auth routes); REQ-SEC-012 (auth events) | `IdentityService`, `SessionService`, `MfaService`, `ReauthService` | `auth.email_verification`, `auth.password_reset`, `auth.security_event{variant}` | — |
 | `organisations` | REQ-ORG-001..014; REQ-ACCT-004/005/008 (address book); terms acceptance | `OrganisationService`, `MembershipQuery`, `AddressBookService` | `org.invitation_created` | — |
 | `quotes` | REQ-QUOTE-001..023; REQ-CARR-008/009/010 (fan-out, SSE, cache); REQ-API-017/018 | `QuoteService`, `RateShopper` | `quote.created`, `quote.claimed` | `pricing`, `carriers`, `compliance` |
 | `pricing` (module) + `packages/pricing` | REQ-PRICE-001..021; REQ-COMP-005; REQ-DATA-014 (FX access) | `PricingService.price()` | — | `compliance`, `admin-settings` (FX) |
-| `carriers` (module) + `packages/carriers` | REQ-CARR-001..007, 011..021 | `CarrierRegistry`, `CarrierGateway`, `CarrierServiceCatalogue`, `RawPayloadStore` | — (status via metrics) | `OutboundHttpClient`, `TokenCache`, `SecretResolver`, object storage |
+| `carriers` (module) + `packages/carriers` | REQ-CARR-001..007, 011..023 (022 anonymous budget and 023 daily quota guard, ADR-0010 am. 2–3 and 10, NFR-RES-007 — added by v1.3, D-048) | `CarrierRegistry`, `CarrierGateway`, `CarrierServiceCatalogue`, `RawPayloadStore` | — (status via metrics) | `OutboundHttpClient`, `TokenCache`, `SecretResolver`, object storage |
 | `shipments` | REQ-BOOK-001..012, 018..022, 029, 030 (state machine, parties, packages, cancellation); REQ-ACCT-001/002/006/007/009 (lists, detail, repeat, cancel) | `ShipmentService`, `ShipmentStateMachine` | `shipment.state_changed`, `shipment.booked`, `shipment.booking_failed`, `shipment.label_ready`, `shipment.cancelled`, `shipment.voided` | `customs`, `pricing` (snapshot copy) |
 | `orders` | REQ-BOOK-013..017, 023..028 (basket, coupon, order numbers, checkout, saga) | `OrderService`, `BookingSaga`, `CancellationSaga` | `order.checkout_started`, `order.booked` | `payments`, `shipments`, `carriers`, `admin-settings` (sequences) |
 | `payments` | REQ-PAY-001..019 | `PaymentService`, `PaymentGateway` (Mock, Stripe) | `payment.authorised`, `payment.authorisation_released`, `payment.captured`, `payment.capture_failed`, `payment.refunded`, `payment.refund_failed` | `OutboundHttpClient`, object storage |
@@ -220,7 +220,7 @@ Shell (sidebar with implemented modules only, breadcrumb, locale switch), staff 
 | `prisma/` | REQ-RLS-*, REQ-AUDIT-014..017 (SQL), REQ-DATA-001..003 (seed) | migrations, seeds | — | — |
 | `infra/`, `.github/` | REQ-PLAT-005..007; REQ-SEC-013; NFR-OPS-* | Compose, Dockerfiles, Terraform, workflows | — | — |
 
-Every REQ area of REQUIREMENTS.md (24 areas, 430 REQs) is allocated above; the per-REQ Design column in `docs/sdlc/traceability.md` references the owning module and ADR (filled from this table by the orchestrator/PM after their G1-C2 edits land, to avoid concurrent writes).
+Every REQ area of REQUIREMENTS.md v1.3 (24 areas, 434 REQs) is allocated above; the per-REQ Design column in `docs/sdlc/traceability.md` references the owning module and the ADR or spec section (generated from this table and the ADR amendment index by principal-architect on 2026-11-12 for G2-C2, then reviewed row by row; regenerate with the same rules when REQs are added).
 
 ## 7. Runtime views (key sequences, including failure paths)
 
@@ -398,7 +398,7 @@ flowchart LR
     worker["worker /health /metrics"]
     migrate["migrate+seed (one-shot, platform_migrator)"]
     pg[(postgres:18 :5432)]
-    redis[(redis:7 :6379)]
+    redis[(valkey/valkey:8 :6379)]
     rustfs[(rustfs S3 :9000)]
     mailpit["mailpit SMTP :1025 / UI :8025"]
     obs[profile observability: otel-collector, jaeger, prometheus, grafana]
@@ -414,7 +414,7 @@ Sequencing: `postgres`/`redis`/`rustfs` healthy → `migrate` (Prisma migrate de
 
 ### 8.2 AWS target (designed, not applied — ADR-0022, platform.md §4–§6)
 
-3-AZ VPC; CloudFront + WAF in front of S3-hosted web/admin assets; ALB + WAF → ECS on EC2 (capacity provider ASG, private subnets) running `api` (ALB target group, CodeDeploy canary 5/25/50/100 with alarm rollback) and `worker` (rolling, queue-depth autoscaling); RDS PostgreSQL 18 Multi-AZ with PITR; ElastiCache Redis 7 Multi-AZ; S3 buckets (documents, raw-carrier-payloads, exports, audit-archive Object Lock, inbound-mail, tf-state); SES; Lambda seams (inbound mail, upload scan); Secrets Manager + KMS; CloudWatch logs/metrics/alarms; AWS Backup with cross-region copy. Images from GHCR (mirror to ECR at M5).
+3-AZ VPC; CloudFront + WAF in front of S3-hosted web/admin assets; ALB + WAF → ECS on EC2 (capacity provider ASG, private subnets) running `api` (ALB target group, CodeDeploy canary 5/25/50/100 with alarm rollback) and `worker` (rolling, queue-depth autoscaling); RDS PostgreSQL 18 Multi-AZ with PITR; ElastiCache Valkey 8 (Redis 7.2-compatible engine, D-ARCH-005) Multi-AZ; S3 buckets (documents, raw-carrier-payloads, exports, audit-archive Object Lock, inbound-mail, tf-state); SES; Lambda seams (inbound mail, upload scan); Secrets Manager + KMS; CloudWatch logs/metrics/alarms; AWS Backup with cross-region copy. Images from GHCR (mirror to ECR at M5).
 
 ### 8.3 Multi-region notes (brief §10 — LATER)
 

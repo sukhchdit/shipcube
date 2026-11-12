@@ -1,6 +1,7 @@
 # Traceability Matrix
-Version 1.3 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+Version 1.4 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
 Status values: Specified → Designed → Planned → Implemented → Verified.
+v1.4 (G2-C2 closure, principal-architect): the Design (ADR/Spec) column is populated for all 434 REQ rows as "owning module · ADR or spec section" (generated from `ARCHITECTURE.md` §6 and the ADR amendment index with an explicit per-REQ mapping, then reviewed row by row; no REQ carries only an area default) and every REQ status moved Specified → Designed. Task(s) stays "–" until senior-developer/orchestrator fill it in P4 (→ Planned); Test(s) is qa-lead's. No REQ or story IDs, links, priorities, milestones or DC tags changed; counts below are unchanged.
 v1.3 (P3 security remediation, D-046..D-052, see PRD §11): REQ-AUTH-020/021/022 Should → Must; new REQ-AUTH-025 (M1 Must), REQ-AUTH-026 (M0 Must), REQ-CARR-022 and REQ-CARR-023 (M1 Must); new Must stories US-291 (EPIC-02, M1), US-292 (EPIC-02, M0), US-293 (EPIC-06, M1); US-027 Should → Must. None of the new or promoted stories is demo-critical (DC set unchanged at 134). Tables below regenerated from the files on 2026-11-12.
 v1.2 (P3 alignment, D-038..D-045): wording-only amendments to REQUIREMENTS.md 1.2, NFR.md 1.2 and the stories (see PRD §11); no REQ or story IDs, links, priorities, milestones or DC tags changed, so every count below is unchanged and was re-verified against the files on 2026-11-12. The Design column is populated by principal-architect at G2.
 v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column added to "Story → Requirement" per D-037; early-delivery notes and NFR traceability link added.
@@ -43,440 +44,440 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 ## Requirement → Story
 | REQ | MS | MoSCoW | Story | Design (ADR/Spec) | Task(s) | Test(s) | Status |
 |---|---|---|---|---|---|---|---|
-| REQ-PLAT-001 | M0 | Must | US-001 | – | – | – | Specified |
-| REQ-PLAT-002 | M0 | Must | US-001 | – | – | – | Specified |
-| REQ-PLAT-003 | M0 | Must | US-001 | – | – | – | Specified |
-| REQ-PLAT-004 | M0 | Must | US-002 | – | – | – | Specified |
-| REQ-PLAT-005 | M0 | Must | US-003 | – | – | – | Specified |
-| REQ-PLAT-006 | M0 | Must | US-004 | – | – | – | Specified |
-| REQ-PLAT-007 | M0 | Must | US-005 | – | – | – | Specified |
-| REQ-PLAT-008 | M0 | Must | US-006 | – | – | – | Specified |
-| REQ-PLAT-009 | M0 | Must | US-007 | – | – | – | Specified |
-| REQ-PLAT-010 | M0 | Must | US-007 | – | – | – | Specified |
-| REQ-PLAT-011 | M0 | Must | US-008 | – | – | – | Specified |
-| REQ-PLAT-012 | M0 | Must | US-008 | – | – | – | Specified |
-| REQ-PLAT-013 | M0 | Must | US-009 | – | – | – | Specified |
-| REQ-PLAT-014 | M0 | Must | US-010 | – | – | – | Specified |
-| REQ-PLAT-015 | M0 | Must | US-010 | – | – | – | Specified |
-| REQ-PLAT-016 | M0 | Must | US-011 | – | – | – | Specified |
-| REQ-PLAT-017 | M0 | Must | US-011 | – | – | – | Specified |
-| REQ-PLAT-018 | M0 | Must | US-012 | – | – | – | Specified |
-| REQ-PLAT-019 | M0 | Should | US-013 | – | – | – | Specified |
-| REQ-PLAT-020 | M0 | Should | US-014 | – | – | – | Specified |
-| REQ-PLAT-021 | M0 | Should | US-014 | – | – | – | Specified |
-| REQ-PLAT-022 | M0 | Could | US-013 | – | – | – | Specified |
-| REQ-AUTH-001 | M0 | Must | US-015 | – | – | – | Specified |
-| REQ-AUTH-002 | M0 | Must | US-015 | – | – | – | Specified |
-| REQ-AUTH-003 | M0 | Must | US-015 | – | – | – | Specified |
-| REQ-AUTH-004 | M0 | Must | US-016 | – | – | – | Specified |
-| REQ-AUTH-005 | M0 | Must | US-017 | – | – | – | Specified |
-| REQ-AUTH-006 | M0 | Must | US-018 | – | – | – | Specified |
-| REQ-AUTH-007 | M0 | Must | US-018 | – | – | – | Specified |
-| REQ-AUTH-008 | M0 | Must | US-018 | – | – | – | Specified |
-| REQ-AUTH-009 | M0 | Must | US-019 | – | – | – | Specified |
-| REQ-AUTH-010 | M0 | Must | US-020 | – | – | – | Specified |
-| REQ-AUTH-011 | M0 | Must | US-021 | – | – | – | Specified |
-| REQ-AUTH-012 | M0 | Must | US-021 | – | – | – | Specified |
-| REQ-AUTH-013 | M0 | Must | US-022 | – | – | – | Specified |
-| REQ-AUTH-014 | M0 | Must | US-022 | – | – | – | Specified |
-| REQ-AUTH-015 | M0 | Must | US-023 | – | – | – | Specified |
-| REQ-AUTH-016 | M0 | Must | US-023 | – | – | – | Specified |
-| REQ-AUTH-017 | M0 | Must | US-024 | – | – | – | Specified |
-| REQ-AUTH-018 | M0 | Must | US-025 | – | – | – | Specified |
-| REQ-AUTH-019 | M1 | Should | US-026 | – | – | – | Specified |
-| REQ-AUTH-020 | M1 | Must | US-026, US-291 | – | – | – | Specified |
-| REQ-AUTH-021 | M1 | Must | US-027 | – | – | – | Specified |
-| REQ-AUTH-022 | M1 | Must | US-027 | – | – | – | Specified |
-| REQ-AUTH-023 | M1 | Should | US-028 | – | – | – | Specified |
-| REQ-AUTH-024 | M0 | Should | US-029 | – | – | – | Specified |
-| REQ-AUTH-025 | M1 | Must | US-291 | – | – | – | Specified |
-| REQ-AUTH-026 | M0 | Must | US-292 | – | – | – | Specified |
-| REQ-ORG-001 | M0 | Must | US-061 | – | – | – | Specified |
-| REQ-ORG-002 | M0 | Must | US-062 | – | – | – | Specified |
-| REQ-ORG-003 | M0 | Must | US-062 | – | – | – | Specified |
-| REQ-ORG-004 | M0 | Must | US-062 | – | – | – | Specified |
-| REQ-ORG-005 | M0 | Must | US-063 | – | – | – | Specified |
-| REQ-ORG-006 | M1 | Should | US-081 | – | – | – | Specified |
-| REQ-ORG-007 | M0 | Must | US-064 | – | – | – | Specified |
-| REQ-ORG-008 | M1 | Should | US-082 | – | – | – | Specified |
-| REQ-ORG-009 | M1 | Should | US-082 | – | – | – | Specified |
-| REQ-ORG-010 | M1 | Should | US-083 | – | – | – | Specified |
-| REQ-ORG-011 | M1 | Should | US-084 | – | – | – | Specified |
-| REQ-ORG-012 | M1 | Should | US-085 | – | – | – | Specified |
-| REQ-ORG-013 | M1 | Should | US-085 | – | – | – | Specified |
-| REQ-ORG-014 | M1 | Should | US-085 | – | – | – | Specified |
-| REQ-RBAC-001 | M0 | Must | US-065 | – | – | – | Specified |
-| REQ-RBAC-002 | M0 | Must | US-066 | – | – | – | Specified |
-| REQ-RBAC-003 | M0 | Should | US-066 | – | – | – | Specified |
-| REQ-RBAC-004 | M0 | Must | US-066 | – | – | – | Specified |
-| REQ-RBAC-005 | M0 | Must | US-067 | – | – | – | Specified |
-| REQ-RBAC-006 | M0 | Must | US-068 | – | – | – | Specified |
-| REQ-RBAC-007 | M0 | Must | US-069 | – | – | – | Specified |
-| REQ-RBAC-008 | M0 | Must | US-068 | – | – | – | Specified |
-| REQ-RBAC-009 | M0 | Must | US-070 | – | – | – | Specified |
-| REQ-RBAC-010 | M0 | Must | US-070 | – | – | – | Specified |
-| REQ-RBAC-011 | M0 | Must | US-071 | – | – | – | Specified |
-| REQ-RBAC-012 | M1 | Must | US-072 | – | – | – | Specified |
-| REQ-RBAC-013 | M0 | Should | US-073 | – | – | – | Specified |
-| REQ-RBAC-014 | M0 | Must | US-065 | – | – | – | Specified |
-| REQ-AUDIT-001 | M0 | Must | US-086 | – | – | – | Specified |
-| REQ-AUDIT-002 | M0 | Must | US-087 | – | – | – | Specified |
-| REQ-AUDIT-003 | M0 | Must | US-087 | – | – | – | Specified |
-| REQ-AUDIT-004 | M0 | Must | US-088 | – | – | – | Specified |
-| REQ-AUDIT-005 | M0 | Must | US-089 | – | – | – | Specified |
-| REQ-AUDIT-006 | M0 | Must | US-086 | – | – | – | Specified |
-| REQ-AUDIT-007 | M0 | Must | US-090 | – | – | – | Specified |
-| REQ-AUDIT-008 | M0 | Must | US-091 | – | – | – | Specified |
-| REQ-AUDIT-009 | M0 | Must | US-091 | – | – | – | Specified |
-| REQ-AUDIT-010 | M0 | Must | US-088 | – | – | – | Specified |
-| REQ-AUDIT-011 | M0 | Must | US-087 | – | – | – | Specified |
-| REQ-AUDIT-012 | M0 | Must | US-092 | – | – | – | Specified |
-| REQ-AUDIT-013 | M0 | Must | US-093 | – | – | – | Specified |
-| REQ-AUDIT-014 | M0 | Must | US-094 | – | – | – | Specified |
-| REQ-AUDIT-015 | M0 | Must | US-094 | – | – | – | Specified |
-| REQ-AUDIT-016 | M0 | Must | US-095 | – | – | – | Specified |
-| REQ-AUDIT-017 | M0 | Must | US-095 | – | – | – | Specified |
-| REQ-AUDIT-018 | M1 | Could | US-100 | – | – | – | Specified |
-| REQ-AUDIT-019 | M0 | Must | US-097 | – | – | – | Specified |
-| REQ-AUDIT-020 | M0 | Must | US-098 | – | – | – | Specified |
-| REQ-AUDIT-021 | M1 | Should | US-099 | – | – | – | Specified |
-| REQ-AUDIT-022 | M0 | Must | US-098 | – | – | – | Specified |
-| REQ-AUDIT-023 | M0 | Must | US-097 | – | – | – | Specified |
-| REQ-AUDIT-024 | M0 | Must | US-096 | – | – | – | Specified |
-| REQ-AUDIT-025 | M0 | Should | US-100 | – | – | – | Specified |
-| REQ-RLS-001 | M0 | Must | US-074 | – | – | – | Specified |
-| REQ-RLS-002 | M0 | Must | US-074 | – | – | – | Specified |
-| REQ-RLS-003 | M0 | Must | US-075 | – | – | – | Specified |
-| REQ-RLS-004 | M0 | Must | US-075 | – | – | – | Specified |
-| REQ-RLS-005 | M0 | Must | US-074 | – | – | – | Specified |
-| REQ-RLS-006 | M0 | Must | US-076 | – | – | – | Specified |
-| REQ-RLS-007 | M0 | Must | US-077 | – | – | – | Specified |
-| REQ-RLS-008 | M0 | Must | US-078 | – | – | – | Specified |
-| REQ-RLS-009 | M0 | Must | US-064 | – | – | – | Specified |
-| REQ-RLS-010 | M0 | Must | US-079 | – | – | – | Specified |
-| REQ-RLS-011 | M0 | Must | US-079 | – | – | – | Specified |
-| REQ-RLS-012 | M0 | Must | US-064 | – | – | – | Specified |
-| REQ-RLS-013 | M0 | Must | US-080 | – | – | – | Specified |
-| REQ-DATA-001 | M0 | Must | US-049 | – | – | – | Specified |
-| REQ-DATA-002 | M0 | Must | US-049 | – | – | – | Specified |
-| REQ-DATA-003 | M0 | Must | US-050 | – | – | – | Specified |
-| REQ-DATA-004 | M0 | Must | US-051 | – | – | – | Specified |
-| REQ-DATA-005 | M0 | Must | US-051 | – | – | – | Specified |
-| REQ-DATA-006 | M0 | Must | US-052 | – | – | – | Specified |
-| REQ-DATA-007 | M0 | Must | US-051 | – | – | – | Specified |
-| REQ-DATA-008 | M1 | Must | US-054 | – | – | – | Specified |
-| REQ-DATA-009 | M1 | Must | US-054 | – | – | – | Specified |
-| REQ-DATA-010 | M1 | Must | US-054 | – | – | – | Specified |
-| REQ-DATA-011 | M1 | Must | US-055 | – | – | – | Specified |
-| REQ-DATA-012 | M1 | Must | US-054 | – | – | – | Specified |
-| REQ-DATA-013 | M1 | Must | US-054 | – | – | – | Specified |
-| REQ-DATA-014 | M1 | Must | US-052 | – | – | – | Specified |
-| REQ-DATA-015 | M1 | Must | US-056 | – | – | – | Specified |
-| REQ-DATA-016 | M0 | Must | US-053 | – | – | – | Specified |
-| REQ-DATA-017 | M1 | Could | US-056 | – | – | – | Specified |
-| REQ-COMP-001 | M1 | Must | US-057 | – | – | – | Specified |
-| REQ-COMP-002 | M1 | Must | US-057 | – | – | – | Specified |
-| REQ-COMP-003 | M1 | Must | US-058 | – | – | – | Specified |
-| REQ-COMP-004 | M1 | Must | US-059 | – | – | – | Specified |
-| REQ-COMP-005 | M1 | Must | US-059 | – | – | – | Specified |
-| REQ-COMP-006 | M1 | Must | US-059 | – | – | – | Specified |
-| REQ-COMP-007 | M1 | Should | US-060 | – | – | – | Specified |
-| REQ-COMP-008 | M1 | Should | US-058 | – | – | – | Specified |
-| REQ-UI-001 | M0 | Must | US-101 | – | – | – | Specified |
-| REQ-UI-002 | M0 | Must | US-102 | – | – | – | Specified |
-| REQ-UI-003 | M0 | Must | US-103 | – | – | – | Specified |
-| REQ-UI-004 | M0 | Must | US-103 | – | – | – | Specified |
-| REQ-UI-005 | M0 | Must | US-103 | – | – | – | Specified |
-| REQ-UI-006 | M0 | Must | US-104 | – | – | – | Specified |
-| REQ-UI-007 | M0 | Must | US-104 | – | – | – | Specified |
-| REQ-UI-008 | M0 | Must | US-105 | – | – | – | Specified |
-| REQ-UI-009 | M0 | Must | US-105 | – | – | – | Specified |
-| REQ-UI-010 | M0 | Must | US-106 | – | – | – | Specified |
-| REQ-UI-011 | M0 | Must | US-107 | – | – | – | Specified |
-| REQ-UI-012 | M0 | Must | US-107 | – | – | – | Specified |
-| REQ-UI-013 | M0 | Must | US-108 | – | – | – | Specified |
-| REQ-UI-014 | M1 | Must | US-109 | – | – | – | Specified |
-| REQ-UI-015 | M1 | Must | US-109 | – | – | – | Specified |
-| REQ-UI-016 | M0 | Must | US-110 | – | – | – | Specified |
-| REQ-UI-017 | M1 | Could | US-111 | – | – | – | Specified |
-| REQ-UI-018 | M1 | Should | US-111 | – | – | – | Specified |
-| REQ-UI-019 | M1 | Must | US-112 | – | – | – | Specified |
-| REQ-UI-020 | M0 | Must | US-113 | – | – | – | Specified |
-| REQ-UI-021 | M0 | Must | US-113 | – | – | – | Specified |
-| REQ-UI-022 | M0 | Must | US-106 | – | – | – | Specified |
-| REQ-UI-023 | M1 | Should | US-114 | – | – | – | Specified |
-| REQ-I18N-001 | M0 | Must | US-115 | – | – | – | Specified |
-| REQ-I18N-002 | M0 | Must | US-115 | – | – | – | Specified |
-| REQ-I18N-003 | M0 | Must | US-115 | – | – | – | Specified |
-| REQ-I18N-004 | M0 | Must | US-116 | – | – | – | Specified |
-| REQ-I18N-005 | M1 | Must | US-119 | – | – | – | Specified |
-| REQ-I18N-006 | M0 | Must | US-117 | – | – | – | Specified |
-| REQ-I18N-007 | M0 | Must | US-117 | – | – | – | Specified |
-| REQ-I18N-008 | M0 | Must | US-117 | – | – | – | Specified |
-| REQ-I18N-009 | M0 | Must | US-120 | – | – | – | Specified |
-| REQ-I18N-010 | M0 | Should | US-120 | – | – | – | Specified |
-| REQ-I18N-011 | M0 | Must | US-116 | – | – | – | Specified |
-| REQ-I18N-012 | M1 | Should | US-118 | – | – | – | Specified |
-| REQ-I18N-013 | M0 | Should | US-115 | – | – | – | Specified |
-| REQ-I18N-014 | M0 | Could | US-116 | – | – | – | Specified |
-| REQ-API-001 | M0 | Must | US-034 | – | – | – | Specified |
-| REQ-API-002 | M0 | Must | US-034 | – | – | – | Specified |
-| REQ-API-003 | M0 | Should | US-035 | – | – | – | Specified |
-| REQ-API-004 | M0 | Must | US-034 | – | – | – | Specified |
-| REQ-API-005 | M0 | Must | US-036 | – | – | – | Specified |
-| REQ-API-006 | M0 | Must | US-036 | – | – | – | Specified |
-| REQ-API-007 | M0 | Must | US-037 | – | – | – | Specified |
-| REQ-API-008 | M0 | Must | US-037 | – | – | – | Specified |
-| REQ-API-009 | M0 | Must | US-038 | – | – | – | Specified |
-| REQ-API-010 | M0 | Must | US-038 | – | – | – | Specified |
-| REQ-API-011 | M0 | Must | US-038 | – | – | – | Specified |
-| REQ-API-012 | M0 | Should | US-039 | – | – | – | Specified |
-| REQ-API-013 | M0 | Must | US-039 | – | – | – | Specified |
-| REQ-API-014 | M0 | Must | US-040 | – | – | – | Specified |
-| REQ-API-015 | M0 | Could | US-035 | – | – | – | Specified |
-| REQ-API-016 | M0 | Must | US-041 | – | – | – | Specified |
-| REQ-API-017 | M0 | Must | US-042 | – | – | – | Specified |
-| REQ-API-018 | M0 | Must | US-042 | – | – | – | Specified |
-| REQ-API-019 | M0 | Should | US-035 | – | – | – | Specified |
-| REQ-API-020 | M0 | Could | US-035 | – | – | – | Specified |
-| REQ-SEC-001 | M0 | Must | US-043 | – | – | – | Specified |
-| REQ-SEC-002 | M0 | Must | US-043 | – | – | – | Specified |
-| REQ-SEC-003 | M0 | Must | US-043 | – | – | – | Specified |
-| REQ-SEC-004 | M0 | Must | US-044 | – | – | – | Specified |
-| REQ-SEC-005 | M0 | Must | US-040 | – | – | – | Specified |
-| REQ-SEC-006 | M0 | Should | US-040 | – | – | – | Specified |
-| REQ-SEC-007 | M0 | Must | US-045 | – | – | – | Specified |
-| REQ-SEC-008 | M1 | Must | US-046 | – | – | – | Specified |
-| REQ-SEC-009 | M0 | Must | US-046 | – | – | – | Specified |
-| REQ-SEC-010 | M0 | Must | US-047 | – | – | – | Specified |
-| REQ-SEC-011 | M0 | Must | US-048 | – | – | – | Specified |
-| REQ-SEC-012 | M0 | Must | US-047 | – | – | – | Specified |
-| REQ-SEC-013 | M0 | Must | US-048 | – | – | – | Specified |
-| REQ-SEC-014 | M0 | Must | US-044 | – | – | – | Specified |
-| REQ-SEC-015 | M0 | Should | US-045 | – | – | – | Specified |
-| REQ-SEC-016 | M0 | Should | US-046 | – | – | – | Specified |
-| REQ-ADMIN-001 | M0 | Must | US-030 | – | – | – | Specified |
-| REQ-ADMIN-002 | M0 | Must | US-031 | – | – | – | Specified |
-| REQ-ADMIN-003 | M0 | Must | US-030 | – | – | – | Specified |
-| REQ-ADMIN-004 | M0 | Should | US-033 | – | – | – | Specified |
-| REQ-ADMIN-005 | M0 | Must | US-032 | – | – | – | Specified |
-| REQ-ADMIN-006 | M0 | Must | US-032 | – | – | – | Specified |
-| REQ-ADMIN-007 | M1 | Should | US-027 | – | – | – | Specified |
-| REQ-ADMIN-008 | M1 | Should | US-026 | – | – | – | Specified |
-| REQ-ADMIN-009 | M0 | Must | US-032 | – | – | – | Specified |
-| REQ-ADMIN-010 | M0 | Should | US-033 | – | – | – | Specified |
-| REQ-CARR-001 | M0 | Must | US-121 | – | – | – | Specified |
-| REQ-CARR-002 | M0 | Must | US-121 | – | – | – | Specified |
-| REQ-CARR-003 | M0 | Must | US-121 | – | – | – | Specified |
-| REQ-CARR-004 | M0 | Must | US-122 | – | – | – | Specified |
-| REQ-CARR-005 | M0 | Must | US-123 | – | – | – | Specified |
-| REQ-CARR-006 | M0 | Must | US-123 | – | – | – | Specified |
-| REQ-CARR-007 | M0 | Must | US-124 | – | – | – | Specified |
-| REQ-CARR-008 | M0 | Must | US-126 | – | – | – | Specified |
-| REQ-CARR-009 | M1 | Must | US-135 | – | – | – | Specified |
-| REQ-CARR-010 | M1 | Must | US-134 | – | – | – | Specified |
-| REQ-CARR-011 | M0 | Must | US-125 | – | – | – | Specified |
-| REQ-CARR-012 | M1 | Must | US-131 | – | – | – | Specified |
-| REQ-CARR-013 | M1 | Must | US-132 | – | – | – | Specified |
-| REQ-CARR-014 | M1 | Must | US-133 | – | – | – | Specified |
-| REQ-CARR-015 | M1 | Must | US-128 | – | – | – | Specified |
-| REQ-CARR-016 | M1 | Must | US-129 | – | – | – | Specified |
-| REQ-CARR-017 | M1 | Must | US-130 | – | – | – | Specified |
-| REQ-CARR-018 | M1 | Must | US-136 | – | – | – | Specified |
-| REQ-CARR-019 | M1 | Must | US-137 | – | – | – | Specified |
-| REQ-CARR-020 | M1 | Should | US-137 | – | – | – | Specified |
-| REQ-CARR-021 | M1 | Must | US-127 | – | – | – | Specified |
-| REQ-CARR-022 | M1 | Must | US-293 | – | – | – | Specified |
-| REQ-CARR-023 | M1 | Must | US-293 | – | – | – | Specified |
-| REQ-PRICE-001 | M0 | Must | US-138 | – | – | – | Specified |
-| REQ-PRICE-002 | M0 | Must | US-138 | – | – | – | Specified |
-| REQ-PRICE-003 | M0 | Must | US-140 | – | – | – | Specified |
-| REQ-PRICE-004 | M0 | Must | US-139 | – | – | – | Specified |
-| REQ-PRICE-005 | M1 | Must | US-141 | – | – | – | Specified |
-| REQ-PRICE-006 | M1 | Must | US-142 | – | – | – | Specified |
-| REQ-PRICE-007 | M1 | Must | US-142 | – | – | – | Specified |
-| REQ-PRICE-008 | M1 | Must | US-143 | – | – | – | Specified |
-| REQ-PRICE-009 | M1 | Should | US-144 | – | – | – | Specified |
-| REQ-PRICE-010 | M1 | Should | US-145 | – | – | – | Specified |
-| REQ-PRICE-011 | M1 | Should | US-145 | – | – | – | Specified |
-| REQ-PRICE-012 | M1 | Could | US-153 | – | – | – | Specified |
-| REQ-PRICE-013 | M1 | Must | US-146 | – | – | – | Specified |
-| REQ-PRICE-014 | M1 | Must | US-147 | – | – | – | Specified |
-| REQ-PRICE-015 | M1 | Must | US-148 | – | – | – | Specified |
-| REQ-PRICE-016 | M1 | Must | US-149 | – | – | – | Specified |
-| REQ-PRICE-017 | M1 | Must | US-150 | – | – | – | Specified |
-| REQ-PRICE-018 | M1 | Should | US-144 | – | – | – | Specified |
-| REQ-PRICE-019 | M1 | Must | US-151 | – | – | – | Specified |
-| REQ-PRICE-020 | M1 | Must | US-152 | – | – | – | Specified |
-| REQ-PRICE-021 | M1 | Could | US-153 | – | – | – | Specified |
-| REQ-QUOTE-001 | M0 | Must | US-154 | – | – | – | Specified |
-| REQ-QUOTE-002 | M0 | Must | US-155 | – | – | – | Specified |
-| REQ-QUOTE-003 | M0 | Must | US-156 | – | – | – | Specified |
-| REQ-QUOTE-004 | M1 | Must | US-156 | – | – | – | Specified |
-| REQ-QUOTE-005 | M1 | Must | US-157 | – | – | – | Specified |
-| REQ-QUOTE-006 | M1 | Must | US-157 | – | – | – | Specified |
-| REQ-QUOTE-007 | M1 | Must | US-159 | – | – | – | Specified |
-| REQ-QUOTE-008 | M1 | Must | US-160 | – | – | – | Specified |
-| REQ-QUOTE-009 | M1 | Must | US-161 | – | – | – | Specified |
-| REQ-QUOTE-010 | M1 | Should | US-162 | – | – | – | Specified |
-| REQ-QUOTE-011 | M1 | Should | US-161 | – | – | – | Specified |
-| REQ-QUOTE-012 | M1 | Must | US-159 | – | – | – | Specified |
-| REQ-QUOTE-013 | M1 | Should | US-163 | – | – | – | Specified |
-| REQ-QUOTE-014 | M1 | Should | US-164 | – | – | – | Specified |
-| REQ-QUOTE-015 | M1 | Should | US-165 | – | – | – | Specified |
-| REQ-QUOTE-016 | M1 | Must | US-166 | – | – | – | Specified |
-| REQ-QUOTE-017 | M1 | Must | US-167 | – | – | – | Specified |
-| REQ-QUOTE-018 | M1 | Must | US-168 | – | – | – | Specified |
-| REQ-QUOTE-019 | M1 | Should | US-169 | – | – | – | Specified |
-| REQ-QUOTE-020 | M1 | Should | US-170 | – | – | – | Specified |
-| REQ-QUOTE-021 | M1 | Could | US-170 | – | – | – | Specified |
-| REQ-QUOTE-022 | M1 | Could | US-169 | – | – | – | Specified |
-| REQ-QUOTE-023 | M1 | Must | US-158 | – | – | – | Specified |
-| REQ-BOOK-001 | M1 | Must | US-171 | – | – | – | Specified |
-| REQ-BOOK-002 | M1 | Must | US-172 | – | – | – | Specified |
-| REQ-BOOK-003 | M1 | Must | US-174 | – | – | – | Specified |
-| REQ-BOOK-004 | M1 | Should | US-179 | – | – | – | Specified |
-| REQ-BOOK-005 | M1 | Must | US-175 | – | – | – | Specified |
-| REQ-BOOK-006 | M1 | Must | US-176 | – | – | – | Specified |
-| REQ-BOOK-007 | M1 | Should | US-178 | – | – | – | Specified |
-| REQ-BOOK-008 | M1 | Must | US-177 | – | – | – | Specified |
-| REQ-BOOK-009 | M1 | Must | US-180 | – | – | – | Specified |
-| REQ-BOOK-010 | M1 | Must | US-189 | – | – | – | Specified |
-| REQ-BOOK-011 | M1 | Should | US-190 | – | – | – | Specified |
-| REQ-BOOK-012 | M1 | Must | US-191 | – | – | – | Specified |
-| REQ-BOOK-013 | M1 | Must | US-192 | – | – | – | Specified |
-| REQ-BOOK-014 | M1 | Should | US-193 | – | – | – | Specified |
-| REQ-BOOK-015 | M1 | Should | US-194 | – | – | – | Specified |
-| REQ-BOOK-016 | M1 | Must | US-208 | – | – | – | Specified |
-| REQ-BOOK-017 | M1 | Must | US-195 | – | – | – | Specified |
-| REQ-BOOK-018 | M0 | Must | US-197 | – | – | – | Specified |
-| REQ-BOOK-019 | M0 | Must | US-198 | – | – | – | Specified |
-| REQ-BOOK-020 | M0 | Must | US-202 | – | – | – | Specified |
-| REQ-BOOK-021 | M0 | Must | US-203 | – | – | – | Specified |
-| REQ-BOOK-022 | M0 | Must | US-204 | – | – | – | Specified |
-| REQ-BOOK-023 | M0 | Must | US-205 | – | – | – | Specified |
-| REQ-BOOK-024 | M1 | Must | US-206 | – | – | – | Specified |
-| REQ-BOOK-025 | M1 | Must | US-207 | – | – | – | Specified |
-| REQ-BOOK-026 | M0 | Must | US-201 | – | – | – | Specified |
-| REQ-BOOK-027 | M0 | Must | US-173 | – | – | – | Specified |
-| REQ-BOOK-028 | M0 | Must | US-173 | – | – | – | Specified |
-| REQ-BOOK-029 | M1 | Should | US-196 | – | – | – | Specified |
-| REQ-BOOK-030 | M1 | Should | US-215 | – | – | – | Specified |
-| REQ-CUST-001 | M1 | Must | US-180 | – | – | – | Specified |
-| REQ-CUST-002 | M1 | Must | US-180 | – | – | – | Specified |
-| REQ-CUST-003 | M1 | Must | US-181 | – | – | – | Specified |
-| REQ-CUST-004 | M1 | Must | US-181 | – | – | – | Specified |
-| REQ-CUST-005 | M1 | Should | US-185 | – | – | – | Specified |
-| REQ-CUST-006 | M1 | Must | US-182 | – | – | – | Specified |
-| REQ-CUST-007 | M1 | Must | US-182 | – | – | – | Specified |
-| REQ-CUST-008 | M1 | Should | US-185 | – | – | – | Specified |
-| REQ-CUST-009 | M1 | Must | US-183 | – | – | – | Specified |
-| REQ-CUST-010 | M1 | Must | US-184 | – | – | – | Specified |
-| REQ-CUST-011 | M1 | Must | US-184 | – | – | – | Specified |
-| REQ-CUST-012 | M1 | Must | US-186 | – | – | – | Specified |
-| REQ-CUST-013 | M1 | Must | US-186 | – | – | – | Specified |
-| REQ-CUST-014 | M1 | Should | US-188 | – | – | – | Specified |
-| REQ-CUST-015 | M1 | Must | US-187 | – | – | – | Specified |
-| REQ-PAY-001 | M0 | Must | US-199 | – | – | – | Specified |
-| REQ-PAY-002 | M0 | Must | US-199 | – | – | – | Specified |
-| REQ-PAY-003 | M0 | Must | US-200 | – | – | – | Specified |
-| REQ-PAY-004 | M1 | Must | US-210 | – | – | – | Specified |
-| REQ-PAY-005 | M1 | Must | US-211 | – | – | – | Specified |
-| REQ-PAY-006 | M1 | Must | US-209 | – | – | – | Specified |
-| REQ-PAY-007 | M1 | Must | US-208 | – | – | – | Specified |
-| REQ-PAY-008 | M1 | Must | US-209 | – | – | – | Specified |
-| REQ-PAY-009 | M1 | Must | US-212 | – | – | – | Specified |
-| REQ-PAY-010 | M1 | Must | US-212 | – | – | – | Specified |
-| REQ-PAY-011 | M1 | Must | US-213 | – | – | – | Specified |
-| REQ-PAY-012 | M1 | Must | US-213 | – | – | – | Specified |
-| REQ-PAY-013 | M1 | Should | US-216 | – | – | – | Specified |
-| REQ-PAY-014 | M1 | Should | US-217 | – | – | – | Specified |
-| REQ-PAY-015 | M1 | Should | US-218 | – | – | – | Specified |
-| REQ-PAY-016 | M1 | Must | US-214 | – | – | – | Specified |
-| REQ-PAY-017 | M1 | Must | US-210, US-214 | – | – | – | Specified |
-| REQ-PAY-018 | M1 | Should | US-219 | – | – | – | Specified |
-| REQ-PAY-019 | M1 | Should | US-211 | – | – | – | Specified |
-| REQ-DOC-001 | M1 | Must | US-220 | – | – | – | Specified |
-| REQ-DOC-002 | M1 | Must | US-222 | – | – | – | Specified |
-| REQ-DOC-003 | M1 | Should | US-230 | – | – | – | Specified |
-| REQ-DOC-004 | M1 | Must | US-221 | – | – | – | Specified |
-| REQ-DOC-005 | M1 | Must | US-220 | – | – | – | Specified |
-| REQ-DOC-006 | M1 | Must | US-220 | – | – | – | Specified |
-| REQ-DOC-007 | M1 | Must | US-225 | – | – | – | Specified |
-| REQ-DOC-008 | M1 | Must | US-226 | – | – | – | Specified |
-| REQ-DOC-009 | M1 | Should | US-227 | – | – | – | Specified |
-| REQ-DOC-010 | M1 | Should | US-228 | – | – | – | Specified |
-| REQ-DOC-011 | M1 | Must | US-224 | – | – | – | Specified |
-| REQ-DOC-012 | M1 | Must | US-223 | – | – | – | Specified |
-| REQ-DOC-013 | M1 | Should | US-229 | – | – | – | Specified |
-| REQ-DOC-014 | M1 | Should | US-229 | – | – | – | Specified |
-| REQ-DOC-015 | M1 | Could | US-231 | – | – | – | Specified |
-| REQ-PICK-001 | M1 | Must | US-233, US-234 | – | – | – | Specified |
-| REQ-PICK-002 | M1 | Must | US-232, US-234 | – | – | – | Specified |
-| REQ-PICK-003 | M1 | Must | US-232 | – | – | – | Specified |
-| REQ-PICK-004 | M1 | Must | US-232, US-234 | – | – | – | Specified |
-| REQ-PICK-005 | M1 | Must | US-235 | – | – | – | Specified |
-| REQ-PICK-006 | M1 | Must | US-235 | – | – | – | Specified |
-| REQ-PICK-007 | M1 | Must | US-236 | – | – | – | Specified |
-| REQ-PICK-008 | M1 | Must | US-237 | – | – | – | Specified |
-| REQ-PICK-009 | M1 | Should | US-238 | – | – | – | Specified |
-| REQ-PICK-010 | M1 | Should | US-239 | – | – | – | Specified |
-| REQ-PICK-011 | M1 | Could | US-240 | – | – | – | Specified |
-| REQ-PICK-012 | M1 | Must | US-233 | – | – | – | Specified |
-| REQ-PICK-013 | M1 | Should | US-239 | – | – | – | Specified |
-| REQ-PICK-014 | M1 | Could | US-240 | – | – | – | Specified |
-| REQ-TRACK-001 | M1 | Must | US-241 | – | – | – | Specified |
-| REQ-TRACK-002 | M1 | Must | US-242 | – | – | – | Specified |
-| REQ-TRACK-003 | M1 | Must | US-243 | – | – | – | Specified |
-| REQ-TRACK-004 | M1 | Must | US-244 | – | – | – | Specified |
-| REQ-TRACK-005 | M1 | Must | US-242 | – | – | – | Specified |
-| REQ-TRACK-006 | M1 | Should | US-252 | – | – | – | Specified |
-| REQ-TRACK-007 | M1 | Should | US-246 | – | – | – | Specified |
-| REQ-TRACK-008 | M1 | Must | US-247 | – | – | – | Specified |
-| REQ-TRACK-009 | M1 | Should | US-250 | – | – | – | Specified |
-| REQ-TRACK-010 | M1 | Must | US-249 | – | – | – | Specified |
-| REQ-TRACK-011 | M1 | Must | US-248 | – | – | – | Specified |
-| REQ-TRACK-012 | M1 | Must | US-247 | – | – | – | Specified |
-| REQ-TRACK-013 | M1 | Must | US-251 | – | – | – | Specified |
-| REQ-TRACK-014 | M1 | Must | US-245 | – | – | – | Specified |
-| REQ-TRACK-015 | M1 | Could | US-253 | – | – | – | Specified |
-| REQ-ACCT-001 | M1 | Should | US-258 | – | – | – | Specified |
-| REQ-ACCT-002 | M1 | Must | US-254 | – | – | – | Specified |
-| REQ-ACCT-003 | M1 | Must | US-255 | – | – | – | Specified |
-| REQ-ACCT-004 | M1 | Must | US-256 | – | – | – | Specified |
-| REQ-ACCT-005 | M1 | Should | US-259 | – | – | – | Specified |
-| REQ-ACCT-006 | M1 | Should | US-260 | – | – | – | Specified |
-| REQ-ACCT-007 | M1 | Should | US-261 | – | – | – | Specified |
-| REQ-ACCT-008 | M1 | Should | US-262 | – | – | – | Specified |
-| REQ-ACCT-009 | M1 | Should | US-263 | – | – | – | Specified |
-| REQ-ACCT-010 | M1 | Could | US-264 | – | – | – | Specified |
-| REQ-ACCT-011 | M1 | Should | US-265 | – | – | – | Specified |
-| REQ-ACCT-012 | M1 | Should | US-266 | – | – | – | Specified |
-| REQ-ACCT-013 | M1 | Should | US-267 | – | – | – | Specified |
-| REQ-ACCT-014 | M1 | Should | US-268 | – | – | – | Specified |
-| REQ-ACCT-015 | M1 | Should | US-269 | – | – | – | Specified |
-| REQ-ACCT-016 | M1 | Could | US-270 | – | – | – | Specified |
-| REQ-ACCT-017 | M1 | Could | US-271 | – | – | – | Specified |
-| REQ-ACCT-018 | M1 | Should | US-272 | – | – | – | Specified |
-| REQ-ACCT-019 | M1 | Should | US-273 | – | – | – | Specified |
-| REQ-ACCT-020 | M1 | Must | US-257 | – | – | – | Specified |
-| REQ-NOTIF-001 | M1 | Must | US-274 | – | – | – | Specified |
-| REQ-NOTIF-002 | M1 | Should | US-275 | – | – | – | Specified |
-| REQ-NOTIF-003 | M1 | Must | US-276 | – | – | – | Specified |
-| REQ-NOTIF-004 | M1 | Must | US-277 | – | – | – | Specified |
-| REQ-NOTIF-005 | M1 | Must | US-279 | – | – | – | Specified |
-| REQ-NOTIF-006 | M1 | Must | US-280 | – | – | – | Specified |
-| REQ-NOTIF-007 | M1 | Must | US-282 | – | – | – | Specified |
-| REQ-NOTIF-008 | M1 | Must | US-283 | – | – | – | Specified |
-| REQ-NOTIF-009 | M1 | Should | US-286 | – | – | – | Specified |
-| REQ-NOTIF-010 | M1 | Should | US-287 | – | – | – | Specified |
-| REQ-NOTIF-011 | M1 | Should | US-288 | – | – | – | Specified |
-| REQ-NOTIF-012 | M1 | Should | US-289 | – | – | – | Specified |
-| REQ-NOTIF-013 | M1 | Must | US-284 | – | – | – | Specified |
-| REQ-NOTIF-014 | M1 | Must | US-278 | – | – | – | Specified |
-| REQ-NOTIF-015 | M1 | Must | US-285 | – | – | – | Specified |
-| REQ-NOTIF-016 | M1 | Could | US-290 | – | – | – | Specified |
-| REQ-NOTIF-017 | M1 | Must | US-281 | – | – | – | Specified |
+| REQ-PLAT-001 | M0 | Must | US-001 | platform · ADR-0002 §Workspaces (monorepo layout); ARCHITECTURE §11 blueprint | TASK-001, TASK-002 | – | Planned |
+| REQ-PLAT-002 | M0 | Must | US-001 | platform · ADR-0003 §Layering (routes → controller → service → repository, `eslint-plugin-boundaries`); ADR-0002 §5 | TASK-001, TASK-002 | – | Planned |
+| REQ-PLAT-003 | M0 | Must | US-001 | platform · ADR-0001 (TypeScript 6 strict); ADR-0002 §Scripts (`tsc -b`, root scripts) | TASK-001, TASK-002 | – | Planned |
+| REQ-PLAT-004 | M0 | Must | US-002 | packages/config · ADR-0018 §Typed configuration (Joi schema, fail-fast, `.env.example` parity) | TASK-005 | – | Planned |
+| REQ-PLAT-005 | M0 | Must | US-003 | infra/ (compose) · platform.md §2 Compose stack (`--wait` ≤ 180 s); ADR-0021 (RustFS); ADR-0001 (Valkey 8) | TASK-014, TASK-026, TASK-089 | – | Planned |
+| REQ-PLAT-006 | M0 | Must | US-004 | infra/ (Dockerfiles) · platform.md §3 hardened images; ADR-0022; ADR-0023 am. F (`npm ci --ignore-scripts`) | TASK-014 | – | Planned |
+| REQ-PLAT-007 | M0 | Must | US-005 | .github/ · ADR-0023 §1 + am. A–D lane model (D-ORCH-001); platform.md §7 | TASK-007 | – | Planned |
+| REQ-PLAT-008 | M0 | Must | US-006 | .github/ · ADR-0024 (Jest thresholds 85/75, 95 on pricing/audit/authz); ADR-0023 am. A diff-coverage gate | TASK-015 | – | Planned |
+| REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Planned |
+| REQ-PLAT-010 | M0 | Must | US-007 | platform · ADR-0016 §3 framework-failure codes; api/README §11 error catalogue | TASK-006 | – | Planned |
+| REQ-PLAT-011 | M0 | Must | US-008 | platform · ADR-0017 §1–2 correlation ID (validate, generate, echo) | TASK-010 | – | Planned |
+| REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Planned |
+| REQ-PLAT-013 | M0 | Must | US-009 | platform (worker) · ADR-0013 §Queues (attempts 5, exponential backoff + jitter, DLQ per queue) | TASK-035 | – | Planned |
+| REQ-PLAT-014 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Idempotent processors (deterministic job IDs, `job_executions`); data-model §3.5 | TASK-039 | – | Planned |
+| REQ-PLAT-015 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Repeatable jobs (idempotent registration) | TASK-039 | – | Planned |
+| REQ-PLAT-016 | M0 | Must | US-011 | platform · ADR-0004 §Outbox write (same transaction); data-model §6.1 | TASK-043 | – | Planned |
+| REQ-PLAT-017 | M0 | Must | US-011 | platform (worker) · ADR-0004 §Relay (at-least-once, per-aggregate order, 500 ms); data-model §6.1 | TASK-043 | – | Planned |
+| REQ-PLAT-018 | M0 | Must | US-012 | platform · ADR-0013 §7 / ADR-0017 §5 `/health/live`, `/health/ready` (≤ 2 s per dependency) | TASK-006 | – | Planned |
+| REQ-PLAT-019 | M0 | Should | US-013 | platform · ADR-0017 §4 OpenTelemetry seam (`OTEL_*` config, BullMQ spans) | TASK-214 | – | Planned |
+| REQ-PLAT-020 | M0 | Should | US-014 | admin-settings · ADR-0027 §Feature flags (DB-backed, 30 s cache); data-model §3.5 | TASK-219 | – | Planned |
+| REQ-PLAT-021 | M0 | Should | US-014 | admin-settings · ADR-0027 (`CONFIG_CHANGE` audit on every flag change); ADR-0007 §Capture | TASK-219 | – | Planned |
+| REQ-PLAT-022 | M0 | Could | US-013 | platform · ADR-0013 §7 graceful shutdown (SIGTERM drain ≤ 30 s); ADR-0017 §5 | TASK-214 | – | Planned |
+| REQ-AUTH-001 | M0 | Must | US-015 | identity · ADR-0006 §Registration (one tx: user + INDIVIDUAL org + terms); am. 10/15 (identical 202, RR-16); data-model §3.1 | TASK-049, TASK-072 | – | Planned |
+| REQ-AUTH-002 | M0 | Must | US-015 | identity · ADR-0006 §Passwords (12–128 chars, offline breached list) | TASK-049, TASK-072 | – | Planned |
+| REQ-AUTH-003 | M0 | Must | US-015 | identity · ADR-0006 §Passwords (bcrypt cost ≥ 12, prefix test) | TASK-049, TASK-072 | – | Planned |
+| REQ-AUTH-004 | M0 | Must | US-016 | identity · ADR-0006 §Email verification (256-bit hashed token, 24 h); am. 15 (verification revokes other sessions, D-050) | TASK-059, TASK-072 | – | Planned |
+| REQ-AUTH-005 | M0 | Must | US-017 | identity · ADR-0006 §Tokens (15-min ES256 access JWT, refresh cookie) | TASK-052, TASK-072 | – | Planned |
+| REQ-AUTH-006 | M0 | Must | US-018 | identity · ADR-0006 §Tokens/§CSRF (`__Host-rt` HttpOnly Secure SameSite=Strict cookie, path scoped) | TASK-055 | – | Planned |
+| REQ-AUTH-007 | M0 | Must | US-018 | identity · ADR-0006 §Tokens rotation + am. 12 (30-day sliding inside 30-day absolute cap, `SESSION_EXPIRED`) | TASK-055 | – | Planned |
+| REQ-AUTH-008 | M0 | Must | US-018 | identity · ADR-0006 §Reuse detection (family revocation, `TOKEN_REUSE_DETECTED`); ARCHITECTURE §7.4 | TASK-055 | – | Planned |
+| REQ-AUTH-009 | M0 | Must | US-019 | identity · ADR-0006 §Logout (cookie cleared, family revoked); ADR-0007 (`LOGOUT` audit) | TASK-095 | – | Planned |
+| REQ-AUTH-010 | M0 | Must | US-020 | apps/web + apps/admin · ADR-0026 §5 auth in the browser (token in memory, single-flight silent refresh) | TASK-065 | – | Planned |
+| REQ-AUTH-011 | M0 | Must | US-021 | identity · ADR-0006 §Password reset (identical 202, `#token=` link per am. 9) | TASK-099, TASK-117 | – | Planned |
+| REQ-AUTH-012 | M0 | Must | US-021 | identity · ADR-0006 §Password reset (revoke sessions, notify); am. 15 (redeemed reset verifies the mailbox, D-050) | TASK-099, TASK-117 | – | Planned |
+| REQ-AUTH-013 | M0 | Must | US-022 | identity · ADR-0006 §Lockout (progressive delay after 5 failures) | TASK-103, TASK-117 | – | Planned |
+| REQ-AUTH-014 | M0 | Must | US-022 | identity · ADR-0006 §Lockout (15-min lock after 10 failures, `ACCOUNT_LOCKED` event) | TASK-103, TASK-117 | – | Planned |
+| REQ-AUTH-015 | M0 | Must | US-023 | identity · ADR-0006 §TOTP (`otplib`, RFC 6238); am. 11 (client-side QR with `uqr`, D-ARCH-013) | TASK-057 | – | Planned |
+| REQ-AUTH-016 | M0 | Must | US-023 | identity · ADR-0006 §Recovery codes (10 single-use, hashed) | TASK-057 | – | Planned |
+| REQ-AUTH-017 | M0 | Must | US-024 | identity · ADR-0006 §MFA challenge (401 `MFA_REQUIRED`, challenge token, per-user MFA lock) | TASK-061, TASK-072 | – | Planned |
+| REQ-AUTH-018 | M0 | Must | US-025 | identity · ADR-0006 §Staff gate + am. 14 (enrolment e-mail code, 24 h deadline via `housekeeping`, `ops:staff-reactivate`) | TASK-063 | – | Planned |
+| REQ-AUTH-019 | M1 | Should | US-026 | identity · ADR-0006 §TOTP (customer enable/disable behind re-auth scope `mfa.totp.disable`) | TASK-223, TASK-228 | – | Planned |
+| REQ-AUTH-020 | M1 | Must | US-026, US-291 | identity · ADR-0006 am. 12 step-up (`createReauthProof`, `X-Reauth-Proof`, scopes); ADR-0016 am. 8 | TASK-187, TASK-197, TASK-223, TASK-228 | – | Planned |
+| REQ-AUTH-021 | M1 | Must | US-027 | identity · ADR-0006 §Sessions (list with parsed UA, current marker); data-model §3.1 sessions; D-047 | TASK-186, TASK-193 | – | Planned |
+| REQ-AUTH-022 | M1 | Must | US-027 | identity · ADR-0006 §Sessions (remote sign-out, Redis revocation set ≤ 5 s) | TASK-186, TASK-193 | – | Planned |
+| REQ-AUTH-023 | M1 | Should | US-028 | identity · ADR-0006 §Password change (re-auth scope `auth.password.change`, other sessions revoked) | TASK-223, TASK-228 | – | Planned |
+| REQ-AUTH-024 | M0 | Should | US-029 | identity · ADR-0006 §Status checks (SUSPENDED/DEACTIVATED → generic `INVALID_CREDENTIALS`) | TASK-220 | – | Planned |
+| REQ-AUTH-025 | M1 | Must | US-291 | identity · ADR-0006 am. 12 (`auth_time` claim, `x-reauth-max-age`, `sessions.authenticated_at`); ADR-0016 am. 8 | TASK-187, TASK-197 | – | Planned |
+| REQ-AUTH-026 | M0 | Must | US-292 | identity · ADR-0006 am. 15 (`AUTH_UNVERIFIED_TTL=7d`, `housekeeping` deactivation, address freed); D-050 | TASK-107 | – | Planned |
+| REQ-ORG-001 | M0 | Must | US-061 | organisations · data-model §3.2 organisations (`type` enum); ADR-0005 §Tenant model | TASK-037 | – | Planned |
+| REQ-ORG-002 | M0 | Must | US-062 | organisations · ADR-0006 §Registration (personal INDIVIDUAL org, user = Owner); data-model §3.2 | TASK-037 | – | Planned |
+| REQ-ORG-003 | M0 | Must | US-062 | organisations · data-model §3.2 memberships (role set); ADR-0008 §Roles | TASK-037 | – | Planned |
+| REQ-ORG-004 | M0 | Must | US-062 | organisations · ADR-0008 §Roles per organisation type; data-model §3.3 authz | TASK-037 | – | Planned |
+| REQ-ORG-005 | M0 | Must | US-063 | organisations · ADR-0005 §Context (one active org per request, `app.org_id`); ADR-0006 §Tokens (org claim) | TASK-056 | – | Planned |
+| REQ-ORG-006 | M1 | Should | US-081 | organisations · ADR-0006 §Tokens (org switch re-issues tokens); ADR-0005 §Context | TASK-224 | – | Planned |
+| REQ-ORG-007 | M0 | Must | US-064 | platform · ADR-0009 §Standard columns (`created_by`/`updated_by` stamping extension); data-model P-rules | TASK-032 | – | Planned |
+| REQ-ORG-008 | M1 | Should | US-082 | organisations · data-model §3.2 organisations profile; api/openapi `updateOrganisation` (`org:update`) | TASK-224 | – | Planned |
+| REQ-ORG-009 | M1 | Should | US-082 | organisations · data-model §3.2; api/openapi `createOrganisation` (creator = Owner) | TASK-224 | – | Planned |
+| REQ-ORG-010 | M1 | Should | US-083 | organisations · data-model §3.2 invitations; ADR-0006 am. 12 (`org.member.manage`, `x-reauth-max-age: 43200`) | TASK-227 | – | Planned |
+| REQ-ORG-011 | M1 | Should | US-084 | organisations · data-model §3.2 invitations (verified e-mail match); ADR-0006 am. 9 (`#token=` links) | TASK-227 | – | Planned |
+| REQ-ORG-012 | M1 | Should | US-085 | organisations · ADR-0008 §Roles; ADR-0006 am. 12 step-up; data-model §3.2 memberships (suspend/remove) | TASK-231 | – | Planned |
+| REQ-ORG-013 | M1 | Should | US-085 | organisations · ADR-0016 am. 5(f) (`LAST_OWNER` 422); data-model §3.2 owner invariant | TASK-231 | – | Planned |
+| REQ-ORG-014 | M1 | Should | US-085 | organisations · data-model §3.2 (INDIVIDUAL single-membership constraint) | TASK-231 | – | Planned |
+| REQ-RBAC-001 | M0 | Must | US-065 | packages/authz · ADR-0008 §Permission catalogue (`PERMISSIONS` typed constants) | TASK-013 | – | Planned |
+| REQ-RBAC-002 | M0 | Must | US-066 | packages/authz + prisma/ · ADR-0008 §Role seed (operator roles); data-model §9 seed plan | TASK-013 | – | Planned |
+| REQ-RBAC-003 | M0 | Should | US-066 | packages/authz · ADR-0008 §Role seed (partner roles); ADR-0011 partner seam | TASK-013 | – | Planned |
+| REQ-RBAC-004 | M0 | Must | US-066 | packages/authz · ADR-0008 §Build-time tests (Super Admin holds all; Viewer exclusions, D-051) | TASK-013 | – | Planned |
+| REQ-RBAC-005 | M0 | Must | US-067 | platform · ADR-0003 §Route metadata (`defineRoute` refuses routes without permission); ADR-0008 | TASK-020 | – | Planned |
+| REQ-RBAC-006 | M0 | Must | US-068 | platform · ADR-0003 §Request pipeline (authenticate → authorise → validate → execute → audit) | TASK-060 | – | Planned |
+| REQ-RBAC-007 | M0 | Must | US-069 | packages/authz + packages/audit · ADR-0008; ADR-0007 §Capture (`PERMISSION_DENIED` entry, `permission_denied` event) | TASK-104 | – | Planned |
+| REQ-RBAC-008 | M0 | Must | US-068 | packages/authz · ADR-0008 §Resolution (server-side effective permissions, 5 s authz cache) | TASK-060 | – | Planned |
+| REQ-RBAC-009 | M0 | Must | US-070 | packages/ui + apps · ADR-0026 §5 `can()` helper; api/openapi `getMe` permissions | TASK-064 | – | Planned |
+| REQ-RBAC-010 | M0 | Must | US-070 | apps/web + apps/admin · ADR-0026 §5 route guards (permission-denied state without fetch) | TASK-064 | – | Planned |
+| REQ-RBAC-011 | M0 | Must | US-071 | packages/authz · ADR-0008 §Matrix generator (route × role, 401, cross-tenant 404); ADR-0024 | TASK-027 | – | Planned |
+| REQ-RBAC-012 | M1 | Must | US-072 | packages/authz · ADR-0008 (`*:download`/`*:export` permissions); ADR-0021 (presign only after permission) | TASK-162 | – | Planned |
+| REQ-RBAC-013 | M0 | Should | US-073 | packages/authz + prisma/ · ADR-0008 §Versioned seeds/migrations only; data-model §8 | TASK-221 | – | Planned |
+| REQ-RBAC-014 | M0 | Must | US-065 | packages/authz · ADR-0008 §Catalogue completeness test (every referenced string declared) | TASK-013 | – | Planned |
+| REQ-AUDIT-001 | M0 | Must | US-086 | packages/audit · ADR-0007 §Capture (metadata-driven middleware, allow-listed direct callers); ADR-0003 | TASK-029 | – | Planned |
+| REQ-AUDIT-002 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (action types incl. `STATE_TRANSITION`, `CONFIG_CHANGE`) | TASK-025 | – | Planned |
+| REQ-AUDIT-003 | M0 | Must | US-087 | packages/audit · ADR-0007 §Storage columns; data-model §3.4 `audit_entries` | TASK-025 | – | Planned |
+| REQ-AUDIT-004 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (same transaction, 500 `AUDIT_WRITE_FAILED`); ARCHITECTURE §7.3 | TASK-025 | – | Planned |
+| REQ-AUDIT-005 | M0 | Must | US-089 | packages/audit · ADR-0007 §Capture (fail-closed SENSITIVE views/downloads, 503 `AUDIT_UNAVAILABLE`) | TASK-114 | – | Planned |
+| REQ-AUDIT-006 | M0 | Must | US-086 | platform · ADR-0003 §Route metadata audit descriptor; ADR-0016 am. 5(c) (`NONE` justifications) | TASK-029 | – | Planned |
+| REQ-AUDIT-007 | M0 | Must | US-090 | packages/audit · ADR-0007 §Capture (RFC 8785 field-level diffs) | TASK-031 | – | Planned |
+| REQ-AUDIT-008 | M0 | Must | US-091 | packages/audit · ADR-0007 §Redaction (`[REDACTED]` before hashing) | TASK-028 | – | Planned |
+| REQ-AUDIT-009 | M0 | Must | US-091 | packages/audit · ADR-0007 §Redaction and classification (registry, build-time completeness test) | TASK-028 | – | Planned |
+| REQ-AUDIT-010 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (`DENIED`/`FAILED` outcomes in their own transaction) | TASK-025 | – | Planned |
+| REQ-AUDIT-011 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (actor types, sources from `X-Client-App`) | TASK-025 | – | Planned |
+| REQ-AUDIT-012 | M0 | Must | US-092 | packages/audit · ADR-0007 §Hash chain (per-stream SHA-256, advisory lock, sharded SYSTEM); data-model §5.4 | TASK-030 | – | Planned |
+| REQ-AUDIT-013 | M0 | Must | US-093 | audit (worker) · ADR-0007 §Hash chain verification + am. 7 (hourly ECDSA anchors); data-model §5.5/§5.6 | TASK-116 | – | Planned |
+| REQ-AUDIT-014 | M0 | Must | US-094 | prisma/ (bootstrap lane) · ADR-0007 §Storage immutability + am. 7–8 (`platform_audit_owner`, `search_path` hardening); data-model §4.4/§5.2 | TASK-021, TASK-033 | – | Planned |
+| REQ-AUDIT-015 | M0 | Must | US-094 | prisma/ + tests · ADR-0007 §Storage (UPDATE/DELETE/TRUNCATE per role); data-model §4.6 C13/C14; SEC-TC-43/61 | TASK-021, TASK-033 | – | Planned |
+| REQ-AUDIT-016 | M0 | Must | US-095 | prisma/ · ADR-0007 §Storage (monthly range partitions, prune test); data-model §5.1 | TASK-021, TASK-090 | – | Planned |
+| REQ-AUDIT-017 | M0 | Must | US-095 | audit (worker) · ADR-0007 §Storage (`ensure_audit_partitions`, daily `audit-maintenance`); data-model §5.3 | TASK-021, TASK-090 | – | Planned |
+| REQ-AUDIT-018 | M1 | Could | US-100 | audit · ADR-0007 §Archive seam (`AuditArchiver`, `archived_at`, manifest) | TASK-222 | – | Planned |
+| REQ-AUDIT-019 | M0 | Must | US-097 | audit module + apps/admin · ADR-0007 §Viewer (keyset list, filters, ≤ 31 d range); ADR-0026 §1 | TASK-073, TASK-081 | – | Planned |
+| REQ-AUDIT-020 | M0 | Must | US-098 | audit module + apps/admin · ADR-0007 §Viewer (detail: diff, hashes, vault tokens) | TASK-073, TASK-081 | – | Planned |
+| REQ-AUDIT-021 | M1 | Should | US-099 | audit module + apps/admin · ADR-0007 §Viewer (entity history) | TASK-225 | – | Planned |
+| REQ-AUDIT-022 | M0 | Must | US-098 | audit module · ADR-0007 §Viewer (one `VIEW` entry per viewer request, fail-closed) | TASK-073, TASK-081 | – | Planned |
+| REQ-AUDIT-023 | M0 | Must | US-097 | audit module · ADR-0007 §Viewer (`audit:read` only); ADR-0005 operator cross-tenant branch | TASK-073, TASK-081 | – | Planned |
+| REQ-AUDIT-024 | M0 | Must | US-096 | packages/audit · ADR-0007 §Consequences (audit test generator over route metadata); ADR-0024 | TASK-033 | – | Planned |
+| REQ-AUDIT-025 | M0 | Should | US-100 | platform · ADR-0003 §Route metadata (`reasonRequired` → 422 `REASON_REQUIRED`); ADR-0007 §Viewer | TASK-222 | – | Planned |
+| REQ-RLS-001 | M0 | Must | US-074 | prisma/ · ADR-0005 §Tenant tables (`org_id`, composite indexes, global-table list); data-model §4.1, C-tests | TASK-003, TASK-016 | – | Planned |
+| REQ-RLS-002 | M0 | Must | US-074 | prisma/ · ADR-0005 §Policies (`ENABLE` + `FORCE` RLS, policy templates); data-model §4.3 | TASK-003, TASK-016 | – | Planned |
+| REQ-RLS-003 | M0 | Must | US-075 | platform · ADR-0005 §Context (`withTenantTx`, `set_config` first statement); ADR-0003 | TASK-016 | – | Planned |
+| REQ-RLS-004 | M0 | Must | US-075 | prisma/ · ADR-0005 §Policies (unset context → zero rows, writes rejected); data-model §4.3 | TASK-016 | – | Planned |
+| REQ-RLS-005 | M0 | Must | US-074 | prisma/ · ADR-0005 §Roles (`platform_app` NOSUPERUSER NOBYPASSRLS); data-model §4.4 | TASK-003, TASK-016 | – | Planned |
+| REQ-RLS-006 | M0 | Must | US-076 | prisma/ · ADR-0005 §Operator branch (read-only cross-tenant policy); data-model §4.3 | TASK-060 | – | Planned |
+| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Planned |
+| REQ-RLS-008 | M0 | Must | US-078 | platform (worker) · ADR-0013 am. 1–5 (`platform.job_context`, payload v2); ADR-0005; data-model §4.5 | TASK-047 | – | Planned |
+| REQ-RLS-009 | M0 | Must | US-064 | prisma/ · ADR-0009 §Standard columns (UUIDv7, `timestamptz`, actor stamps); data-model P1/P2 | TASK-032 | – | Planned |
+| REQ-RLS-010 | M0 | Must | US-079 | prisma/ · ADR-0009 §Soft delete (partial unique indexes); ADR-0005 (no DELETE grant); data-model P3 | TASK-100 | – | Planned |
+| REQ-RLS-011 | M0 | Must | US-079 | platform · ADR-0009 §Optimistic locking (`version`, conditional UPDATE → 409/412); ADR-0016 §6 | TASK-100 | – | Planned |
+| REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Planned |
+| REQ-RLS-013 | M0 | Must | US-080 | prisma/ · ADR-0005 §Guest-capable tables (null `org_id`, `ck_<t>__owner`, guest claim policy); data-model §3.10 | TASK-051 | – | Planned |
+| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023 | – | Planned |
+| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023 | – | Planned |
+| REQ-DATA-003 | M0 | Must | US-050 | prisma/ (seed) · data-model §9 (operator org with 8 role users, demo organisations) | TASK-089 | – | Planned |
+| REQ-DATA-004 | M0 | Must | US-051 | admin-settings + prisma/ · data-model §3.6 countries (ISO 3166-1, names en/es/fr); §9 | TASK-026 | – | Planned |
+| REQ-DATA-005 | M0 | Must | US-051 | admin-settings · data-model §3.6 countries (`shipping_enabled` launch set, D-007) | TASK-026 | – | Planned |
+| REQ-DATA-006 | M0 | Must | US-052 | admin-settings · data-model §3.6 currencies; ADR-0009 §Money (ISO 4217 minor units) | TASK-066 | – | Planned |
+| REQ-DATA-007 | M0 | Must | US-051 | admin-settings · data-model §3.6 subdivisions (US/IN/CA; D-013) | TASK-026 | – | Planned |
+| REQ-DATA-008 | M1 | Must | US-054 | admin-settings · data-model §3.6 holidays 2026–2027; ADR-0009 §Time (local dates) | TASK-122 | – | Planned |
+| REQ-DATA-009 | M1 | Must | US-054 | admin-settings · data-model §3.8 carrier_services transit ranges | TASK-122 | – | Planned |
+| REQ-DATA-010 | M1 | Must | US-054 | customs · data-model §3.18 HS headings seed (≥ 200, keyword index) | TASK-122 | – | Planned |
+| REQ-DATA-011 | M1 | Must | US-055 | customs · data-model §3.18 prohibited/restricted items per country and carrier | TASK-196 | – | Planned |
+| REQ-DATA-012 | M1 | Must | US-054 | customs · data-model §3.18 export reasons | TASK-122 | – | Planned |
+| REQ-DATA-013 | M1 | Must | US-054 | customs · data-model §3.18 Incoterms 2020 | TASK-122 | – | Planned |
+| REQ-DATA-014 | M1 | Must | US-052 | pricing · data-model §3.9 `fx_rates` snapshot; ADR-0015 §FX; ADR-0009 §Money (NUMERIC(18,6)) | TASK-066 | – | Planned |
+| REQ-DATA-015 | M1 | Must | US-056 | admin-settings · ADR-0009 §Numbering (per-origin-country sequence); data-model §6.4 `number_sequences` | TASK-126 | – | Planned |
+| REQ-DATA-016 | M0 | Must | US-053 | admin-settings · api/README §4 bounded lists (`x-max-limit`, ADR-0016 am. 5(d)); data-model §3.6 | TASK-026, TASK-070 | – | Planned |
+| REQ-DATA-017 | M1 | Could | US-056 | admin-settings · data-model §3.9 zones seam (empty tables for M2 rate cards); ADR-0015 §Seams | TASK-126 | – | Planned |
+| REQ-COMP-001 | M1 | Must | US-057 | compliance · data-model §3.7 compliance packs (versioned per country); ARCHITECTURE §6 `CompliancePackResolver` | TASK-123 | – | Planned |
+| REQ-COMP-002 | M1 | Must | US-057 | compliance · data-model §3.7 (published versions immutable; new version on change) | TASK-123 | – | Planned |
+| REQ-COMP-003 | M1 | Must | US-058 | compliance · data-model §3.7 + §9 seed (US/IN/GB/CA packs, EU template) | TASK-127 | – | Planned |
+| REQ-COMP-004 | M1 | Must | US-059 | compliance · data-model §3.7 (`reviewed_at` null → `unreviewed: true`); api/openapi `CompliancePack` | TASK-130 | – | Planned |
+| REQ-COMP-005 | M1 | Must | US-059 | packages/pricing · ADR-0015 §Tax (pack-resolved rule, display mode, pack version in snapshot); data-model §3.7 | TASK-130 | – | Planned |
+| REQ-COMP-006 | M1 | Must | US-059 | compliance + customs · data-model §3.7 de-minimis threshold and document exemption; ADR-0015 §FX conversion | TASK-130 | – | Planned |
+| REQ-COMP-007 | M1 | Should | US-060 | compliance · data-model §3.7 privacy notices per country/locale; ADR-0026 §1 (pre-rendered legal pages) | TASK-229 | – | Planned |
+| REQ-COMP-008 | M1 | Should | US-058 | compliance · ADR-0007 §Capture (`CONFIG_CHANGE` on pack load/version); data-model §3.7 | TASK-127 | – | Planned |
+| REQ-UI-001 | M0 | Must | US-101 | packages/ui · ADR-0025 (Tailwind 4 + DTCG tokens); docs/02-ux tokens.json | TASK-038 | – | Planned |
+| REQ-UI-002 | M0 | Must | US-102 | packages/ui · ADR-0026 §3 themes (`prefers-color-scheme`, persisted preference) | TASK-098 | – | Planned |
+| REQ-UI-003 | M0 | Must | US-103 | packages/ui · ADR-0026 §3 control sizes (36 px pointer / 44 px coarse); ADR-0025 tokens | TASK-046 | – | Planned |
+| REQ-UI-004 | M0 | Must | US-103 | packages/ui · ADR-0026 §3 component states (default/hover/focus-visible/active/disabled); ADR-0025 | TASK-046 | – | Planned |
+| REQ-UI-005 | M0 | Must | US-103 | packages/ui · ADR-0026 §3 reduced motion (`--motion-duration: 0ms`, `useReducedMotion`); am. 7 (motion not adopted) | TASK-046 | – | Planned |
+| REQ-UI-006 | M0 | Must | US-104 | packages/ui + apps · ADR-0026 §6 `ScreenState` (loading/empty/error/offline/denied/success) | TASK-054 | – | Planned |
+| REQ-UI-007 | M0 | Must | US-104 | apps/web + apps/admin · ADR-0026 §5 permission-denied state; ADR-0008 | TASK-054 | – | Planned |
+| REQ-UI-008 | M0 | Must | US-105 | apps/web + apps/admin · ADR-0026 §6 offline detection and retry | TASK-102 | – | Planned |
+| REQ-UI-009 | M0 | Must | US-105 | packages/ui · ADR-0026 §3 toasts (live region, dismissible) | TASK-102 | – | Planned |
+| REQ-UI-010 | M0 | Must | US-106 | apps/web + apps/admin · ADR-0026 §4 Zod forms (shared constants with Joi, ADR-0016 §4) | TASK-058 | – | Planned |
+| REQ-UI-011 | M0 | Must | US-107 | packages/ui · ADR-0026 §3 breakpoints 360/768/1024/1280/1536; ADR-0025 tokens | TASK-053 | – | Planned |
+| REQ-UI-012 | M0 | Must | US-107 | packages/ui · ADR-0026 §3 `DataTable` (table ≥ 768 px, cards below) | TASK-053 | – | Planned |
+| REQ-UI-013 | M0 | Must | US-108 | apps/web · ADR-0026 §1 web shell; am. 5 (root `/` locale redirect by Nginx, D-ARCH-015) | TASK-068 | – | Planned |
+| REQ-UI-014 | M1 | Must | US-109 | apps/web · ADR-0026 §6 home layout (quote widget in first screen); UX W01 | TASK-137 | – | Planned |
+| REQ-UI-015 | M1 | Must | US-109 | apps/web · ADR-0026 §3 sticky action bar below 768 px (safe-area insets) | TASK-137 | – | Planned |
+| REQ-UI-016 | M0 | Must | US-110 | apps/admin · ADR-0026 §1 admin shell (collapsible sidebar); ARCHITECTURE §5.4 | TASK-069 | – | Planned |
+| REQ-UI-017 | M1 | Could | US-111 | apps/admin · ADR-0026 §3 table density setting | TASK-226 | – | Planned |
+| REQ-UI-018 | M1 | Should | US-111 | apps/web + apps/admin · ADR-0026 §10 route-level code splitting; ADR-0002 §4 `size-limit` budgets | TASK-226 | – | Planned |
+| REQ-UI-019 | M1 | Must | US-112 | apps/web · ADR-0026 §1 React Router `prerender` per locale (home, tracking, legal); D-ARCH-015 | TASK-189 | – | Planned |
+| REQ-UI-020 | M0 | Must | US-113 | tests · ADR-0024 (shared Playwright axe fixture, routes × states); ADR-0026 §3 | TASK-106 | – | Planned |
+| REQ-UI-021 | M0 | Must | US-113 | packages/ui · ADR-0026 §3 keyboard operability, skip link, focus ring token | TASK-106 | – | Planned |
+| REQ-UI-022 | M0 | Must | US-106 | packages/ui · ADR-0026 §3 labelled controls, `lang` per locale; §4 error association | TASK-058 | – | Planned |
+| REQ-UI-023 | M1 | Should | US-114 | compliance + apps/web · ADR-0026 §9 consent banner (lazy Stripe.js, am. 9); data-model §3.7 `consent_records` | TASK-229 | – | Planned |
+| REQ-I18N-001 | M0 | Must | US-115 | apps · ADR-0026 §2 i18next keys everywhere; ADR-0002 §5 `i18next/no-literal-string` lint | TASK-042 | – | Planned |
+| REQ-I18N-002 | M0 | Must | US-115 | apps + notifications · ADR-0026 §2 en/es/fr resources; ADR-0020 §3 template sets; CI parity script | TASK-042 | – | Planned |
+| REQ-I18N-003 | M0 | Must | US-115 | apps · ADR-0026 am. 3 ICU MessageFormat (`i18next-icu`, D-ARCH-014) | TASK-042 | – | Planned |
+| REQ-I18N-004 | M0 | Must | US-116 | packages/shared/format · ADR-0009 §Formatting (Intl helpers only); ADR-0026 am. 7 (`useGrouping: 'always'`) | TASK-050 | – | Planned |
+| REQ-I18N-005 | M1 | Must | US-119 | apps/web · ADR-0026 §4 country-aware address forms; data-model §3.6 country address rules | TASK-143 | – | Planned |
+| REQ-I18N-006 | M0 | Must | US-117 | apps + platform · ADR-0026 §2 locale resolution order; ADR-0016 (`Accept-Language` parameter) | TASK-062 | – | Planned |
+| REQ-I18N-007 | M0 | Must | US-117 | identity + apps · ADR-0026 §2 locale persistence; data-model §3.1 `users.locale` | TASK-062 | – | Planned |
+| REQ-I18N-008 | M0 | Must | US-117 | notifications · ADR-0020 §3 render in recipient locale (fallback chain) | TASK-062 | – | Planned |
+| REQ-I18N-009 | M0 | Must | US-120 | apps · ADR-0026 §2 pseudo-locale build (+30 % expansion); ADR-0002 §5 | TASK-110 | – | Planned |
+| REQ-I18N-010 | M0 | Should | US-120 | packages/ui · ADR-0026 §3 logical CSS properties (`stylelint-use-logical`) | TASK-110 | – | Planned |
+| REQ-I18N-011 | M0 | Must | US-116 | packages/shared/format · ADR-0009 §Time zones (viewer zone, offset label); ADR-0026 §2 | TASK-050 | – | Planned |
+| REQ-I18N-012 | M1 | Should | US-118 | apps/web + pricing · ADR-0026 §2 display-currency switcher; ADR-0015 §FX (display conversion only) | TASK-230 | – | Planned |
+| REQ-I18N-013 | M0 | Should | US-115 | apps · ADR-0026 §2 (pending-linguistic-review marker per namespace); D-023 | TASK-042 | – | Planned |
+| REQ-I18N-014 | M0 | Could | US-116 | packages/shared/format · ADR-0009 §Formatting (`Intl.Collator` for localised lists) | TASK-050 | – | Planned |
+| REQ-API-001 | M0 | Must | US-034 | platform · ADR-0016 §1 paths and versioning (`/api/v1`, 404 `NOT_FOUND`); api/README §1 | TASK-017 | – | Planned |
+| REQ-API-002 | M0 | Must | US-034 | api/ · ADR-0016 §1 contract-first OpenAPI 3.1; api/README §15 drift test, §18 change process | TASK-017 | – | Planned |
+| REQ-API-003 | M0 | Should | US-035 | platform · ADR-0016 §1 (Swagger UI at `/api/docs`, config-gated) | TASK-017 | – | Planned |
+| REQ-API-004 | M0 | Must | US-034 | tests · ADR-0024; api/README §16 Supertest response-validation helper (Ajv) | TASK-017 | – | Planned |
+| REQ-API-005 | M0 | Must | US-036 | packages/shared · ADR-0016 §3 RFC 9457 problem details, stable codes; api/README §3/§11 | TASK-036 | – | Planned |
+| REQ-API-006 | M0 | Must | US-036 | platform · ADR-0016 §3/§4 (400 `VALIDATION_ERROR` with `errors[]`); api/README §3 sub-codes | TASK-036 | – | Planned |
+| REQ-API-007 | M0 | Must | US-037 | platform · ADR-0016 §5 keyset pagination (opaque cursors, limit 25/100); api/README §4; am. 5(d) | TASK-045 | – | Planned |
+| REQ-API-008 | M0 | Must | US-037 | platform · ADR-0016 §5 `filter[field]` / `sort` grammar; api/README §4 | TASK-045 | – | Planned |
+| REQ-API-009 | M0 | Must | US-038 | platform · ADR-0016 §Idempotency; ADR-0014 am. 1/4 (scope, one-time-secret routes); api/README §5; data-model §6.2 | TASK-040 | – | Planned |
+| REQ-API-010 | M0 | Must | US-038 | platform · ADR-0014 am. 1 (fingerprint replay, encrypted stored bodies, `Idempotent-Replayed`); api/README §5 | TASK-040 | – | Planned |
+| REQ-API-011 | M0 | Must | US-038 | platform · ADR-0014 am. 1 (422 `IDEMPOTENCY_KEY_REUSED` on fingerprint mismatch); api/README §5 | TASK-040 | – | Planned |
+| REQ-API-012 | M0 | Should | US-039 | platform · ADR-0016 §6 strong `ETag` from id + `version`; api/README §6 | TASK-096 | – | Planned |
+| REQ-API-013 | M0 | Must | US-039 | platform · ADR-0016 §6 `If-Match` (412 `PRECONDITION_FAILED`, 428); api/README §6 | TASK-096 | – | Planned |
+| REQ-API-014 | M0 | Must | US-040 | platform · ADR-0016 §8 + am. 7 (`draft-6` RateLimit headers, `Retry-After`); api/README §7 | TASK-041 | – | Planned |
+| REQ-API-015 | M0 | Could | US-035 | platform · ADR-0016 §1 deprecation seam; api/README §1 Deprecation/Sunset/Link | TASK-017 | – | Planned |
+| REQ-API-016 | M0 | Must | US-041 | packages/shared · ADR-0009 (ISO 8601 `Z`, `YYYY-MM-DD` + zone, Money); api/README §2 | TASK-115 | – | Planned |
+| REQ-API-017 | M0 | Must | US-042 | platform · ADR-0016 §10 SSE (`text/event-stream`, heartbeat, `Last-Event-ID` am. 3); api/README §9 | TASK-044 | – | Planned |
+| REQ-API-018 | M0 | Must | US-042 | platform · ADR-0016 §10 SSE termination (`complete`/`error`, ≤ 30 s cap); am. 9 stream caps; api/README §9 | TASK-044 | – | Planned |
+| REQ-API-019 | M0 | Should | US-035 | apps · api/README §17 type generation from the contract; ADR-0016 §1 | TASK-017 | – | Planned |
+| REQ-API-020 | M0 | Could | US-035 | platform · ADR-0016 (`ApiMode` request context, `test` in this run); ADR-0012 §7 (`livemode: false`) | TASK-017 | – | Planned |
+| REQ-SEC-001 | M0 | Must | US-043 | platform + infra/ (edge) · ADR-0016 §11 Helmet headers; ADR-0026 §9 static-site headers | TASK-111 | – | Planned |
+| REQ-SEC-002 | M0 | Must | US-043 | apps + infra/ (edge) · ADR-0026 §9 hash-based CSP (exact Stripe hosts, report endpoint); ADR-0016 §11; SPK-06 | TASK-111 | – | Planned |
+| REQ-SEC-003 | M0 | Must | US-043 | infra/ (edge) · ADR-0016 §11 HSTS outside local; platform.md §2.2 edge / §4 CloudFront | TASK-111 | – | Planned |
+| REQ-SEC-004 | M0 | Must | US-044 | identity + platform · ADR-0006 §CSRF (Origin allow-list + `X-CSRF-Token` + SameSite=Strict); ADR-0016 §11 | TASK-048 | – | Planned |
+| REQ-SEC-005 | M0 | Must | US-040 | platform · ADR-0016 §8 + am. 11 rate classes (`auth`, `email-send`, `public-quote`, `quote-create`, …); api/README §7 | TASK-041 | – | Planned |
+| REQ-SEC-006 | M0 | Should | US-040 | platform · ADR-0016 §8 (in-memory auth-route fallback on Redis outage, ERROR security event) | TASK-041 | – | Planned |
+| REQ-SEC-007 | M0 | Must | US-045 | platform · ADR-0016 §3/§4 Joi `allowUnknown: false` from route metadata (body, query, params) | TASK-108 | – | Planned |
+| REQ-SEC-008 | M1 | Must | US-046 | packages/shared · ADR-0016 §4 Joi/Zod parity (shared constants, parity fixtures); ADR-0026 §4 | TASK-112 | – | Planned |
+| REQ-SEC-009 | M0 | Must | US-046 | platform · ADR-0003 (Prisma parameterised queries only); ADR-0023 §1 Semgrep rule for raw SQL | TASK-112 | – | Planned |
+| REQ-SEC-010 | M0 | Must | US-047 | platform · ADR-0016 §13 `OutboundHttpClient` (https, allow-list, private-IP and redirect checks); am. 10 SDK exceptions | TASK-113 | – | Planned |
+| REQ-SEC-011 | M0 | Must | US-048 | packages/config · ADR-0018 §Secret references + am. 1–4 key register; `.env.example` placeholders only | TASK-007 | – | Planned |
+| REQ-SEC-012 | M0 | Must | US-047 | platform · ADR-0017 §1 security events (`event_type=security`); api/README §13 catalogue (SEC-P3-30); ADR-0007 §Capture | TASK-113 | – | Planned |
+| REQ-SEC-013 | M0 | Must | US-048 | .github/ · ADR-0023 §1 security job + am. F (cooldown, lockfile provenance, `--ignore-scripts`); ADR-0024 | TASK-007 | – | Planned |
+| REQ-SEC-014 | M0 | Must | US-044 | platform · ADR-0016 §11 exact-origin CORS with credentials (600 s preflight) | TASK-048 | – | Planned |
+| REQ-SEC-015 | M0 | Should | US-045 | platform · ADR-0016 §3 body limits (1 MB default, per-route override) and content-type checks | TASK-108 | – | Planned |
+| REQ-SEC-016 | M0 | Should | US-046 | apps · ADR-0026 §9 (no `innerHTML`/`dangerouslySetInnerHTML` outside one reviewed helper; Trusted Types spike SPK-06); ADR-0002 §5 lint | TASK-112 | – | Planned |
+| REQ-ADMIN-001 | M0 | Must | US-030 | apps/admin · ADR-0026 §1 separately built static admin app; platform.md §2.2 edge routing (`/admin`) | TASK-067 | – | Planned |
+| REQ-ADMIN-002 | M0 | Must | US-031 | identity + apps/admin · ADR-0006 §Staff gate (password → TOTP/recovery); ARCHITECTURE §5.4 | TASK-071 | – | Planned |
+| REQ-ADMIN-003 | M0 | Must | US-030 | identity · ADR-0006 §Staff gate (no OPERATOR membership → generic failure, `login_failed`) | TASK-067 | – | Planned |
+| REQ-ADMIN-004 | M0 | Should | US-033 | identity · ADR-0006 am. 12–13 (`AUTH_ADMIN_SESSION_ABSOLUTE_TTL=12h`, 30-min sliding idle refresh); ADR-0026 am. 8 | TASK-220 | – | Planned |
+| REQ-ADMIN-005 | M0 | Must | US-032 | apps/admin · ADR-0026 §1 admin landing (`/audit` when `audit:read`); ARCHITECTURE §5.4 | TASK-077 | – | Planned |
+| REQ-ADMIN-006 | M0 | Must | US-032 | apps/admin · ADR-0007 §Viewer; ADR-0026 §1 (URL-held filter state); ARCHITECTURE §5.4 | TASK-077 | – | Planned |
+| REQ-ADMIN-007 | M1 | Should | US-027 | apps/admin + identity · ADR-0006 §Sessions; ARCHITECTURE §5.4 "My sessions" | TASK-186, TASK-193 | – | Planned |
+| REQ-ADMIN-008 | M1 | Should | US-026 | identity · ADR-0006 §Recovery codes (regenerate behind re-auth; staff cannot disable TOTP) | TASK-223, TASK-228 | – | Planned |
+| REQ-ADMIN-009 | M0 | Must | US-032 | apps/admin · ADR-0026 §1 (no placeholder routes or navigation for unimplemented modules); ARCHITECTURE §5.4 | TASK-077 | – | Planned |
+| REQ-ADMIN-010 | M0 | Should | US-033 | infra/ (edge) + apps/admin · ADR-0026 §9 (`X-Robots-Tag: noindex, nofollow`, `robots.txt`); D-ARCH-015 | TASK-220 | – | Planned |
+| REQ-CARR-001 | M0 | Must | US-121 | packages/carriers · ADR-0010 §Interface (`CarrierAdapter`, canonical types) | TASK-075 | – | Planned |
+| REQ-CARR-002 | M0 | Must | US-121 | packages/carriers · ADR-0010 §Interface `capabilities()` declaration | TASK-075 | – | Planned |
+| REQ-CARR-003 | M0 | Must | US-121 | packages/carriers · ADR-0010 §Interface (`CAPABILITY_NOT_SUPPORTED` without network I/O) | TASK-075 | – | Planned |
+| REQ-CARR-004 | M0 | Must | US-122 | packages/carriers · ADR-0010 §Mock carrier (deterministic prices, full contract) | TASK-079 | – | Planned |
+| REQ-CARR-005 | M0 | Must | US-123 | packages/carriers · ADR-0010 §Mock carrier scenario directives (DR-B29, `X-Mock-Scenario`) | TASK-097 | – | Planned |
+| REQ-CARR-006 | M0 | Must | US-123 | packages/carriers · ADR-0010 am. 9 (`MOCK_CARRIER_ENABLED` / `MOCK_SCENARIOS_ENABLED`, production refuses) | TASK-097 | – | Planned |
+| REQ-CARR-007 | M0 | Must | US-124 | packages/carriers · ADR-0010 §Interface canonical mapping (DR-B18 statuses, DR-B30 services, surcharges, errors) | TASK-075 | – | Planned |
+| REQ-CARR-008 | M0 | Must | US-126 | quotes · ADR-0010 §Rate shopping (`Promise.allSettled` fan-out, 4 s / 5 s deadlines); ARCHITECTURE §7.1 | TASK-083 | – | Planned |
+| REQ-CARR-009 | M1 | Must | US-135 | quotes · ADR-0010 §Rate shopping SSE + am. 5 (subscribe-only); ADR-0016 §10 / am. 9; api/README §9 | TASK-141 | – | Planned |
+| REQ-CARR-010 | M1 | Must | US-134 | quotes · ADR-0010 §Rate shopping cache (Redis 300 s, carrier costs only, normalised key) | TASK-136 | – | Planned |
+| REQ-CARR-011 | M0 | Must | US-125 | packages/carriers · ADR-0010 §Mock carrier (shared contract suite × 4 adapters); ADR-0024 | TASK-101 | – | Planned |
+| REQ-CARR-012 | M1 | Must | US-131 | packages/carriers · ADR-0010 §Real adapters (DHL MyDHL API 3.3.x, HTTP Basic); R-ARCH-02 / SPK-02 | TASK-135 | – | Planned |
+| REQ-CARR-013 | M1 | Must | US-132 | packages/carriers · ADR-0010 §Real adapters (FedEx REST, OAuth client credentials); SPK-02 | TASK-139 | – | Planned |
+| REQ-CARR-014 | M1 | Must | US-133 | packages/carriers · ADR-0010 §Real adapters (UPS REST v2409, OAuth); SPK-02 | TASK-140 | – | Planned |
+| REQ-CARR-015 | M1 | Must | US-128 | carriers · ADR-0010 §Carrier accounts (D-012, `credential_secret_ref`); ADR-0018; data-model §3.8 | TASK-128 | – | Planned |
+| REQ-CARR-016 | M1 | Must | US-129 | packages/carriers · ADR-0010 §Ports `TokenCache` (expiry − 60 s, single refresh) + am. 7 (AES-256-GCM encrypted cache) | TASK-131 | – | Planned |
+| REQ-CARR-017 | M1 | Must | US-130 | packages/carriers · ADR-0010 §Resilience wrapper (timeouts, retries, breaker) + am. 1 (two bulkheads); ADR-0014 am. 3 | TASK-132 | – | Planned |
+| REQ-CARR-018 | M1 | Must | US-136 | packages/carriers · ADR-0010 §Raw payload retention + am. 8 (`$blob` descriptors, allow-list redaction); ADR-0021 | TASK-188 | – | Planned |
+| REQ-CARR-019 | M1 | Must | US-137 | packages/carriers · ADR-0010 §Real adapters (fixtures, adapter READMEs with docs version/date); ADR-0024 nock | TASK-191 | – | Planned |
+| REQ-CARR-020 | M1 | Should | US-137 | tests · ADR-0010 §Real adapters (`CARRIER_LIVE_SANDBOX=1` opt-in); ADR-0023 am. H (environment secrets) | TASK-191 | – | Planned |
+| REQ-CARR-021 | M1 | Must | US-127 | carriers · data-model §3.8 `carrier_services` reference data; ARCHITECTURE §6 `CarrierServiceCatalogue` | TASK-124 | – | Planned |
+| REQ-CARR-022 | M1 | Must | US-293 | carriers · ADR-0010 am. 2 (anonymous share + global bucket) + am. 10 (unverified = anonymous); NFR-RES-007 | TASK-190 | – | Planned |
+| REQ-CARR-023 | M1 | Must | US-293 | carriers · ADR-0010 am. 3 (daily quota guard, 40 % reserve, 70/90 % alarms) + am. 10 (per-organisation share); NFR-RES-007 | TASK-190 | – | Planned |
+| REQ-PRICE-001 | M0 | Must | US-138 | packages/pricing · ADR-0015 §Pure function (no I/O, deterministic) | TASK-076 | – | Planned |
+| REQ-PRICE-002 | M0 | Must | US-138 | packages/shared · ADR-0009 §Money (integer minor units, `Money` branded type) | TASK-076 | – | Planned |
+| REQ-PRICE-003 | M0 | Must | US-140 | packages/pricing · ADR-0015 §Margin rules (seeded default rule) | TASK-080 | – | Planned |
+| REQ-PRICE-004 | M0 | Must | US-139 | packages/pricing · ADR-0015 §Billable weight (volumetric divisor per carrier/service) | TASK-076 | – | Planned |
+| REQ-PRICE-005 | M1 | Must | US-141 | packages/pricing · ADR-0015 §Margin rules (single most-specific match); data-model §3.9 | TASK-192 | – | Planned |
+| REQ-PRICE-006 | M1 | Must | US-142 | packages/pricing · ADR-0015 §Surcharges (fuel % of discounted base freight) | TASK-129 | – | Planned |
+| REQ-PRICE-007 | M1 | Must | US-142 | packages/pricing · ADR-0015 §Surcharges (carrier pass-through at converted cost) | TASK-129 | – | Planned |
+| REQ-PRICE-008 | M1 | Must | US-143 | packages/pricing · ADR-0015 §Cover (included liability as zero-priced line) | TASK-198 | – | Planned |
+| REQ-PRICE-009 | M1 | Should | US-144 | packages/pricing · ADR-0015 §Cover (additional protection: max(minimum, % of value)) | TASK-232 | – | Planned |
+| REQ-PRICE-010 | M1 | Should | US-145 | packages/pricing · ADR-0015 §Discounts (customer by domain/org); data-model §3.9 | TASK-236 | – | Planned |
+| REQ-PRICE-011 | M1 | Should | US-145 | packages/pricing · ADR-0015 §Discounts (coupon validity, usage); data-model §3.9 coupons | TASK-236 | – | Planned |
+| REQ-PRICE-012 | M1 | Could | US-153 | packages/pricing · ADR-0015 §Discounts (volume tier seam) | TASK-269 | – | Planned |
+| REQ-PRICE-013 | M1 | Must | US-146 | packages/pricing · ADR-0015 §Discounts (stackability flag, ordering) | TASK-192 | – | Planned |
+| REQ-PRICE-014 | M1 | Must | US-147 | packages/pricing · ADR-0015 §Tax (per charge line from the compliance pack); data-model §3.7 | TASK-134 | – | Planned |
+| REQ-PRICE-015 | M1 | Must | US-148 | packages/pricing · ADR-0015 §FX (snapshot rate, rounding); data-model §3.9 `fx_rates` | TASK-133 | – | Planned |
+| REQ-PRICE-016 | M1 | Must | US-149 | packages/pricing · ADR-0015 §Output (immutable ordered charge lines) | TASK-138 | – | Planned |
+| REQ-PRICE-017 | M1 | Must | US-150 | quotes + shipments · ADR-0015 §Snapshots (engine/config/pack versions); data-model §3.10 price snapshot | TASK-175 | – | Planned |
+| REQ-PRICE-018 | M1 | Should | US-144 | packages/pricing · ADR-0015 §Invariants (base freight never below converted cost) | TASK-232 | – | Planned |
+| REQ-PRICE-019 | M1 | Must | US-151 | packages/pricing · ADR-0015 §6 property tests (fast-check ≥ 1,000 cases); ADR-0024 Stryker | TASK-206 | – | Planned |
+| REQ-PRICE-020 | M1 | Must | US-152 | pricing · ADR-0015 §Configuration (versioned seeded rules); data-model §3.9 | TASK-202 | – | Planned |
+| REQ-PRICE-021 | M1 | Could | US-153 | packages/pricing · ADR-0015 §Seams (discriminated cost-source and surcharge inputs) | TASK-269 | – | Planned |
+| REQ-QUOTE-001 | M0 | Must | US-154 | quotes · data-model §3.10 quotes (separate from shipments, 24 h expiry); ADR-0010 §Rate shopping | TASK-087 | – | Planned |
+| REQ-QUOTE-002 | M0 | Must | US-155 | quotes · ADR-0005 §Guest-capable (guest token hash); ADR-0016 §8 `public-quote`; ADR-0026 am. 9 (`localStorage` TTL) | TASK-091 | – | Planned |
+| REQ-QUOTE-003 | M0 | Must | US-156 | quotes · api/openapi `QuoteRequest` (country-dependent postcode/city rules); data-model §3.6 | TASK-093 | – | Planned |
+| REQ-QUOTE-004 | M1 | Must | US-156 | quotes · api/openapi `QuoteRequest` package limits (DR-B34); packages/shared constants | TASK-093 | – | Planned |
+| REQ-QUOTE-005 | M1 | Must | US-157 | apps/web · ADR-0026 §2 unit-system default by origin; packages/shared/format | TASK-201 | – | Planned |
+| REQ-QUOTE-006 | M1 | Must | US-157 | apps/web · ADR-0026 (quote widget live volumetric weight); ADR-0015 §Billable weight (shared pure helper) | TASK-201 | – | Planned |
+| REQ-QUOTE-007 | M1 | Must | US-159 | apps/web · UX W02 results card; ADR-0026 am. 6 (carrier logo seam, D-ARCH-016) | TASK-144 | – | Planned |
+| REQ-QUOTE-008 | M1 | Must | US-160 | apps/web · ADR-0026 §6 streaming results (fixed-height skeletons, CLS ≤ 0.1); api/README §9 | TASK-142 | – | Planned |
+| REQ-QUOTE-009 | M1 | Must | US-161 | quotes + apps/web · api/openapi `QuoteOption` (gross price, transit days) sort keys; ADR-0015 §Output | TASK-145 | – | Planned |
+| REQ-QUOTE-010 | M1 | Should | US-162 | apps/web · UX W02 filters (carrier, speed, cover); api/openapi `QuoteOption` facets | TASK-233 | – | Planned |
+| REQ-QUOTE-011 | M1 | Should | US-161 | apps/web · UX W02 badges (Cheapest / Fastest tie rules) | TASK-145 | – | Planned |
+| REQ-QUOTE-012 | M1 | Must | US-159 | apps/web · ADR-0015 §Output charge lines rendered in UX W02 breakdown | TASK-144 | – | Planned |
+| REQ-QUOTE-013 | M1 | Should | US-163 | apps/web · UX W02 compare panel (≤ 3 options) | TASK-233 | – | Planned |
+| REQ-QUOTE-014 | M1 | Should | US-164 | quotes · data-model §3.10 saved quotes; api/openapi `saveQuote` / `listQuotes` (`quote:create`) | TASK-234 | – | Planned |
+| REQ-QUOTE-015 | M1 | Should | US-165 | quotes · ADR-0014 am. 4 + ADR-0016 am. 11 (mint-and-revoke, 10 mints/quote/h, identical 404); data-model §3.10 `quote_shares` | TASK-237 | – | Planned |
+| REQ-QUOTE-016 | M1 | Must | US-166 | quotes · data-model §3.10 claim (`claimQuote`, guest → org); ADR-0005 guest claim policy | TASK-146 | – | Planned |
+| REQ-QUOTE-017 | M1 | Must | US-167 | quotes · api/openapi `claimQuote` 409 `QUOTE_EXPIRED` + re-quote action; ADR-0010 §Rate shopping | TASK-194 | – | Planned |
+| REQ-QUOTE-018 | M1 | Must | US-168 | quotes · data-model §3.10 (quotes immutable; input change = new quote) | TASK-194 | – | Planned |
+| REQ-QUOTE-019 | M1 | Should | US-169 | apps/web · ADR-0026 §2 display-currency switcher; ADR-0015 §FX (display conversion) | TASK-230 | – | Planned |
+| REQ-QUOTE-020 | M1 | Should | US-170 | apps/web + customs · ADR-0026 §1 pre-rendered prohibited-items page; data-model §3.18 | TASK-238 | – | Planned |
+| REQ-QUOTE-021 | M1 | Could | US-170 | apps/web · ADR-0026 §1 public volumetric calculator (`GET /reference/volumetric`, ADR-0016 am. 5(c)) | TASK-238 | – | Planned |
+| REQ-QUOTE-022 | M1 | Could | US-169 | apps/web · ADR-0026 §1 public currency converter (`GET /reference/fx-rates/convert`) | TASK-230 | – | Planned |
+| REQ-QUOTE-023 | M1 | Must | US-158 | apps/web · ADR-0026 §1 React Router `prerender` home shell (quote widget hydrates); D-ARCH-015 | TASK-125 | – | Planned |
+| REQ-BOOK-001 | M1 | Must | US-171 | shipments + identity · ADR-0006 (sign-in before first draft save); ADR-0005 guest quote claim; UX F03 | TASK-146, TASK-152 | – | Planned |
+| REQ-BOOK-002 | M1 | Must | US-172 | shipments · data-model §3.11 shipments (`DRAFT` on first step-1 save, quote link) | TASK-149 | – | Planned |
+| REQ-BOOK-003 | M1 | Must | US-174 | apps/web · ADR-0026 §6 wizard (one step per screen < 768 px, sticky summary); UX W03–W07 | TASK-156 | – | Planned |
+| REQ-BOOK-004 | M1 | Should | US-179 | apps/web + shipments · ADR-0026 (debounced autosave); api/openapi `updateShipmentDraft` | TASK-240 | – | Planned |
+| REQ-BOOK-005 | M1 | Must | US-175 | shipments · data-model §3.11 shipment parties; api/openapi step-1 schemas | TASK-159 | – | Planned |
+| REQ-BOOK-006 | M1 | Must | US-176 | shipments · data-model §3.6 country address rules; ADR-0016 §4 validation (Joi/Zod parity) | TASK-195 | – | Planned |
+| REQ-BOOK-007 | M1 | Should | US-178 | shipments + carriers · ADR-0010 §Interface `validateAddress` (capability-gated suggestion) | TASK-239 | – | Planned |
+| REQ-BOOK-008 | M1 | Must | US-177 | shipments + compliance · data-model §3.7 pack reference rules; §3.11 party references | TASK-195 | – | Planned |
+| REQ-BOOK-009 | M1 | Must | US-180 | customs · data-model §3.11 customs lines and contents; UX W04 | TASK-154, TASK-160 | – | Planned |
+| REQ-BOOK-010 | M1 | Must | US-189 | pickups · data-model §3.15 pickups; ADR-0010 §Interface `schedulePickup`; UX W05 | TASK-163 | – | Planned |
+| REQ-BOOK-011 | M1 | Should | US-190 | shipments · ADR-0015 §Cover (additional protection); data-model §3.11 extras | TASK-242 | – | Planned |
+| REQ-BOOK-012 | M1 | Must | US-191 | apps/web · UX W07 review and basket; ADR-0015 §Output (price summary) | TASK-164 | – | Planned |
+| REQ-BOOK-013 | M1 | Must | US-192 | orders · data-model §3.12 orders (1–10 shipments, single currency) | TASK-153 | – | Planned |
+| REQ-BOOK-014 | M1 | Should | US-193 | orders · data-model §3.12; api/openapi `addShipmentToOrder` | TASK-243 | – | Planned |
+| REQ-BOOK-015 | M1 | Should | US-194 | orders + packages/pricing · ADR-0015 §Discounts (coupon); data-model §3.9 coupons | TASK-236 | – | Planned |
+| REQ-BOOK-016 | M1 | Must | US-208 | orders · ADR-0014 §Checkout preconditions; api/openapi `checkoutOrder` (409/412/428) | TASK-166 | – | Planned |
+| REQ-BOOK-017 | M1 | Must | US-195 | apps/web · UX W09 confirmation; ADR-0014 §Steps 4–6 (documents, pickup, notification) | TASK-182 | – | Planned |
+| REQ-BOOK-018 | M0 | Must | US-197 | shipments · ADR-0014 §State machine (DR-B01 enforced in `ShipmentStateMachine`); data-model §3.11 | TASK-084 | – | Planned |
+| REQ-BOOK-019 | M0 | Must | US-198 | shipments · data-model §3.11 `shipment_state_history`; ADR-0007 (`STATE_TRANSITION` entries) | TASK-084 | – | Planned |
+| REQ-BOOK-020 | M0 | Must | US-202 | orders (worker) · ADR-0014 §Saga steps 1–6 on the `booking` queue; ARCHITECTURE §7.2 | TASK-092 | – | Planned |
+| REQ-BOOK-021 | M0 | Must | US-203 | orders (worker) · ADR-0014 §Step keys (client reference persisted before the carrier call); data-model §6.3 | TASK-094 | – | Planned |
+| REQ-BOOK-022 | M0 | Must | US-204 | orders (worker) · ADR-0014 §Compensation (DR-B03: release, void, cancel); ARCHITECTURE §7.2 | TASK-105 | – | Planned |
+| REQ-BOOK-023 | M0 | Must | US-205 | orders (worker) · ADR-0014 §Step 2 failures + am. 3 (`LOCAL_REJECT` retry, DRAFT at deadline); ADR-0010 am. 4 | TASK-109 | – | Planned |
+| REQ-BOOK-024 | M1 | Must | US-206 | orders (worker) · ADR-0014 §Step 3 partial capture (`PARTIALLY_BOOKED`, `amount_to_capture`); ADR-0012 §2 | TASK-200 | – | Planned |
+| REQ-BOOK-025 | M1 | Must | US-207 | orders · api/openapi `getOrderBookingStatus` / `streamOrderBooking`; ADR-0016 §10 SSE | TASK-173 | – | Planned |
+| REQ-BOOK-026 | M0 | Must | US-201 | admin-settings · ADR-0009 §Numbering (allocate at checkout start); data-model §6.4 `number_sequences` | TASK-088 | – | Planned |
+| REQ-BOOK-027 | M0 | Must | US-173 | shipments · data-model §3.11 direction derivation (EXPORT/IMPORT/DOMESTIC); packages/shared | TASK-087 | – | Planned |
+| REQ-BOOK-028 | M0 | Must | US-173 | shipments · data-model §3.11 content type and package type enums | TASK-087 | – | Planned |
+| REQ-BOOK-029 | M1 | Should | US-196 | shipments (worker) · ADR-0014 §Cancellation saga (`cancelPickup` → `cancelShipment` → refund); data-model §3.11 | TASK-247 | – | Planned |
+| REQ-BOOK-030 | M1 | Should | US-215 | shipments (worker) · ADR-0014 §Cancellation (void failure or in-transit → `EXCEPTION`, no refund) | TASK-244 | – | Planned |
+| REQ-CUST-001 | M1 | Must | US-180 | customs · data-model §3.11 customs requirement rule (PARCEL × cross-border); packages/shared | TASK-154, TASK-160 | – | Planned |
+| REQ-CUST-002 | M1 | Must | US-180 | customs · data-model §3.11 (DOCUMENT shipments: attestation instead of lines) | TASK-154, TASK-160 | – | Planned |
+| REQ-CUST-003 | M1 | Must | US-181 | customs · data-model §3.11 `customs_lines`; api/openapi `CustomsLine` | TASK-154, TASK-160 | – | Planned |
+| REQ-CUST-004 | M1 | Must | US-181 | customs · data-model §3.18 export reasons; api/openapi `CustomsDeclaration.reason` | TASK-154, TASK-160 | – | Planned |
+| REQ-CUST-005 | M1 | Should | US-185 | customs · data-model §3.18 Incoterms; ADR-0010 `capabilities()` (DDP support) | TASK-239 | – | Planned |
+| REQ-CUST-006 | M1 | Must | US-182 | customs · data-model §3.18 HS search (prefix/keyword index); api/openapi `searchCommodityCodes` | TASK-157 | – | Planned |
+| REQ-CUST-007 | M1 | Must | US-182 | customs · packages/shared validators (HS code digits 6–10); ADR-0016 §4 | TASK-157 | – | Planned |
+| REQ-CUST-008 | M1 | Should | US-185 | customs + compliance · data-model §3.7 de-minimis comparison; ADR-0015 §FX conversion | TASK-239 | – | Planned |
+| REQ-CUST-009 | M1 | Must | US-183 | customs · ARCHITECTURE §6 `ProhibitedItemsChecker`; data-model §3.18 prohibited items | TASK-196 | – | Planned |
+| REQ-CUST-010 | M1 | Must | US-184 | customs · data-model §3.11 dangerous-goods attestation | TASK-199 | – | Planned |
+| REQ-CUST-011 | M1 | Must | US-184 | customs · data-model §3.11 `screening_status = NOT_SCREENED` | TASK-199 | – | Planned |
+| REQ-CUST-012 | M1 | Must | US-186 | documents · ADR-0019 §Commercial invoice + am. 1 (`invoice_print` FULL or MASKED per reference type, D-051) | TASK-161 | – | Planned |
+| REQ-CUST-013 | M1 | Must | US-186 | documents + carriers · ADR-0019 §Carrier-returned documents; ADR-0021 §Buckets | TASK-161 | – | Planned |
+| REQ-CUST-014 | M1 | Should | US-188 | carriers · ADR-0010 §Interface `uploadCustomsDocuments` (paperless, capability-gated) | TASK-241 | – | Planned |
+| REQ-CUST-015 | M1 | Must | US-187 | packages/carriers · ADR-0010 §Interface (customs and Incoterm mapping inside each adapter) | TASK-199 | – | Planned |
+| REQ-PAY-001 | M0 | Must | US-199 | payments · ADR-0012 §1 `PaymentGateway` interface (authorise/capture/void/refund/webhook) | TASK-085 | – | Planned |
+| REQ-PAY-002 | M0 | Must | US-199 | payments · ADR-0012 §4 Mock gateway (reserved tokens) + am. 4 (`mock_cvc_*` outcomes) | TASK-085 | – | Planned |
+| REQ-PAY-003 | M0 | Must | US-200 | payments · ADR-0012 §5 payment records and status history; data-model §3.13 | TASK-085 | – | Planned |
+| REQ-PAY-004 | M1 | Must | US-210 | payments · ADR-0012 §2 Stripe adapter + am. 2 (`rk_test_` default, `PAYMENT_LIVE_KEY_FORBIDDEN`) | TASK-167 | – | Planned |
+| REQ-PAY-005 | M1 | Must | US-211 | payments + apps/web · ADR-0012 §2 Payment Element only (SAQ A, `CARD_DATA_NOT_ACCEPTED`); NFR-SEC-013 | TASK-177 | – | Planned |
+| REQ-PAY-006 | M1 | Must | US-209 | payments · ADR-0012 §1 server-side amounts from price snapshots; ADR-0015 §Output | TASK-170 | – | Planned |
+| REQ-PAY-007 | M1 | Must | US-208 | payments · ADR-0012 (unverified e-mail → refusal); ADR-0006 am. 15 (verification state) | TASK-166 | – | Planned |
+| REQ-PAY-008 | M1 | Must | US-209 | payments · ADR-0012 §2/§6 manual capture and lifecycle guards; ADR-0014 §Steps 1 and 3 | TASK-170 | – | Planned |
+| REQ-PAY-009 | M1 | Must | US-212 | payments · ADR-0012 §2 3-D Secure (`REQUIRES_ACTION`, `client_secret`, `confirmPayment`) | TASK-174 | – | Planned |
+| REQ-PAY-010 | M1 | Must | US-212 | payments · ADR-0012 §5 decline mapping + am. 4 (`AUTHENTICATION_FAILED` when `cvc_check ≠ pass`) | TASK-174 | – | Planned |
+| REQ-PAY-011 | M1 | Must | US-213 | payments · ADR-0012 §3 webhook signature/tolerance + am. 3 (`livemode` rejection, type allow-list) | TASK-171 | – | Planned |
+| REQ-PAY-012 | M1 | Must | US-213 | payments · ADR-0012 §3 (`gateway_webhook_events` dedupe, retrieve-then-derive); data-model §3.13 | TASK-171 | – | Planned |
+| REQ-PAY-013 | M1 | Should | US-216 | payments · ADR-0012 §2 refunds (full captured amount after VOIDED); ADR-0014 §Cancellation | TASK-251 | – | Planned |
+| REQ-PAY-014 | M1 | Should | US-217 | payments · ADR-0012 §1 saved methods; ADR-0006 am. 12 (`payment_method.manage` step-up); api/README §5/§8 replay rule | TASK-249 | – | Planned |
+| REQ-PAY-015 | M1 | Should | US-218 | payments + notifications · ADR-0012 §5; ADR-0020 §4 receipt template | TASK-257 | – | Planned |
+| REQ-PAY-016 | M1 | Must | US-214 | apps/web · ADR-0012 §7 test-mode indicator (not colour-only); UX W08 | TASK-181 | – | Planned |
+| REQ-PAY-017 | M1 | Must | US-210, US-214 | payments · ADR-0012 §2 fixture-backed adapter (`STRIPE_TEST_LIVE=1` opt-in) | TASK-167, TASK-181 | – | Planned |
+| REQ-PAY-018 | M1 | Should | US-219 | payments (worker) · ADR-0012 §6 sweeper (5 min, 30-min authorisations, CAPTURED-without-BOOKED repair); data-model §6.3 | TASK-246 | – | Planned |
+| REQ-PAY-019 | M1 | Should | US-211 | payments · ADR-0012 §8 seams (`CARD` only; 400 `PAYMENT_METHOD_NOT_AVAILABLE`) | TASK-177 | – | Planned |
+| REQ-DOC-001 | M1 | Must | US-220 | documents · ADR-0019 §Document types; data-model §3.14 documents | TASK-147 | – | Planned |
+| REQ-DOC-002 | M1 | Must | US-222 | documents · ADR-0019 §Labels (formats per service); ADR-0021 am. 2 (label byte validation) | TASK-155 | – | Planned |
+| REQ-DOC-003 | M1 | Should | US-230 | documents · ADR-0019 §Pickup confirmation PDF (pdfkit) | TASK-256 | – | Planned |
+| REQ-DOC-004 | M1 | Must | US-221 | documents · ADR-0019 §Versioning (new version per regeneration); data-model §3.14 | TASK-150 | – | Planned |
+| REQ-DOC-005 | M1 | Must | US-220 | documents · ADR-0021 §Integrity (SHA-256 of stored bytes); data-model §3.14 `sha256` | TASK-147 | – | Planned |
+| REQ-DOC-006 | M1 | Must | US-220 | documents · ADR-0021 §Buckets (SSE, RustFS locally, D-039) + am. 3 (SENSITIVE document storage) | TASK-147 | – | Planned |
+| REQ-DOC-007 | M1 | Must | US-225 | documents · ADR-0021 §Pre-signed URLs (300 s, after permission); ADR-0008 (`document:download`) | TASK-162 | – | Planned |
+| REQ-DOC-008 | M1 | Must | US-226 | documents · ADR-0007 §Capture (`DOWNLOAD` entry before presign, fail-closed); ADR-0021 | TASK-205 | – | Planned |
+| REQ-DOC-009 | M1 | Should | US-227 | documents · ADR-0021 §Integrity (re-hash before download URL) | TASK-250 | – | Planned |
+| REQ-DOC-010 | M1 | Should | US-228 | documents + notifications · ADR-0019 am. 1 (SENSITIVE never attached, D-051); ADR-0020 §4; api/README §7 route limit | TASK-255 | – | Planned |
+| REQ-DOC-011 | M1 | Must | US-224 | documents · api/openapi `listShipmentDocuments`; data-model §3.14 | TASK-165 | – | Planned |
+| REQ-DOC-012 | M1 | Must | US-223 | documents (worker) · ADR-0019 §Generation jobs (deterministic IDs); ADR-0013 | TASK-158 | – | Planned |
+| REQ-DOC-013 | M1 | Should | US-229 | documents · ADR-0019 (label `VOIDED` on confirmed void); ADR-0014 §Cancellation | TASK-252 | – | Planned |
+| REQ-DOC-014 | M1 | Should | US-229 | documents · api/openapi `getDocumentDownloadUrl` 410 `DOCUMENT_VOIDED`; ADR-0007 (`DENIED` audit) | TASK-252 | – | Planned |
+| REQ-DOC-015 | M1 | Could | US-231 | documents · ADR-0019 §Labels (ZPL seam) | TASK-270 | – | Planned |
+| REQ-PICK-001 | M1 | Must | US-233, US-234 | pickups · data-model §3.15 pickups (local date + IANA zone + window); ADR-0009 §Time | TASK-151, TASK-163 | – | Planned |
+| REQ-PICK-002 | M1 | Must | US-232, US-234 | pickups · ARCHITECTURE §6 `PickupAvailability` (cut-off, holidays); data-model §3.6 holidays | TASK-148, TASK-163 | – | Planned |
+| REQ-PICK-003 | M1 | Must | US-232 | admin-settings · data-model §3.6 holidays (pickup-unavailable flag) | TASK-148 | – | Planned |
+| REQ-PICK-004 | M1 | Must | US-232, US-234 | pickups · data-model §3.15 windows; api/openapi `PickupWindow` (standard and custom) | TASK-148, TASK-163 | – | Planned |
+| REQ-PICK-005 | M1 | Must | US-235 | orders (worker) · ADR-0014 §Step 5 schedule pickup after documents; ADR-0010 | TASK-178 | – | Planned |
+| REQ-PICK-006 | M1 | Must | US-235 | orders (worker) · ADR-0014 §Step 5 failure (shipment stays `LABEL_READY`, `pickup.failed`, notification) | TASK-178 | – | Planned |
+| REQ-PICK-007 | M1 | Must | US-236 | pickups · api/openapi `schedulePickup`; ADR-0008 (`pickup:schedule`) | TASK-203 | – | Planned |
+| REQ-PICK-008 | M1 | Must | US-237 | shipments (worker) · ADR-0014 §Cancellation (`cancelPickup` before `cancelShipment`) | TASK-203 | – | Planned |
+| REQ-PICK-009 | M1 | Should | US-238 | pickups · api/openapi `reschedulePickup` (2 h cut-off); data-model §3.15 | TASK-248 | – | Planned |
+| REQ-PICK-010 | M1 | Should | US-239 | pickups + carriers · ADR-0010 §Interface `findServicePoints` (list only, D-ARCH-008) | TASK-245 | – | Planned |
+| REQ-PICK-011 | M1 | Could | US-240 | apps/web · D-ARCH-008 (map not built in M1; seam only) | TASK-271 | – | Planned |
+| REQ-PICK-012 | M1 | Must | US-233 | pickups · api/openapi `PickupRequest.instructions` (≤ 200 chars, control characters stripped); ADR-0016 §4 | TASK-151 | – | Planned |
+| REQ-PICK-013 | M1 | Should | US-239 | apps/web + pickups · UX W05 drop-off summary; data-model §3.15 service point reference | TASK-245 | – | Planned |
+| REQ-PICK-014 | M1 | Could | US-240 | pickups · ADR-0014 (pickup consolidation seam per order); data-model §3.15 | TASK-271 | – | Planned |
+| REQ-TRACK-001 | M1 | Must | US-241 | tracking · ADR-0010 §Interface canonical statuses (DR-B18); data-model §3.16 | TASK-168 | – | Planned |
+| REQ-TRACK-002 | M1 | Must | US-242 | tracking + shipments · ADR-0014 §State machine (forward-only); ADR-0010 am. 9 (pushes confirmed by `track()`) | TASK-172 | – | Planned |
+| REQ-TRACK-003 | M1 | Must | US-243 | tracking (worker) · ARCHITECTURE §7.5 adaptive poll intervals; data-model §3.16 `tracking_poll_schedule` | TASK-204 | – | Planned |
+| REQ-TRACK-004 | M1 | Must | US-244 | tracking (worker) · ARCHITECTURE §7.5 batching per account; ADR-0010 am. 1 (`transactional` pool) | TASK-207 | – | Planned |
+| REQ-TRACK-005 | M1 | Must | US-242 | tracking · data-model §3.16 `tracking_events` (dedupe by carrier event ID or hash) | TASK-172 | – | Planned |
+| REQ-TRACK-006 | M1 | Should | US-252 | tracking · ADR-0010 am. 9 (pushes as hints); ADR-0016 am. 5(b) (401 on bad signature); api/README §7 `webhook` class | TASK-261 | – | Planned |
+| REQ-TRACK-007 | M1 | Should | US-246 | tracking + notifications · ADR-0004 outbox events per milestone; ADR-0020 §4 (DR-B28) | TASK-259 | – | Planned |
+| REQ-TRACK-008 | M1 | Must | US-247 | tracking · ADR-0016 am. 2 (POST lookup, token-free URLs); api/openapi `lookupPublicTracking`; ADR-0026 §1 pre-rendered page | TASK-176 | – | Planned |
+| REQ-TRACK-009 | M1 | Should | US-250 | tracking · api/openapi `lookupPublicTracking` (reference + receiver postcode, D-043) | TASK-260 | – | Planned |
+| REQ-TRACK-010 | M1 | Must | US-249 | platform · ADR-0016 §8 `public-tracking` class (30/min, 300/h, 10/min failed); api/README §7 | TASK-210 | – | Planned |
+| REQ-TRACK-011 | M1 | Must | US-248 | tracking · ADR-0020 §5 / NFR-PRIV-004 allow-list projection `PublicTracking` | TASK-180 | – | Planned |
+| REQ-TRACK-012 | M1 | Must | US-247 | tracking · api/openapi identical 404 `TRACKING_NOT_FOUND`; ADR-0009 Luhn pre-check | TASK-176 | – | Planned |
+| REQ-TRACK-013 | M1 | Must | US-251 | tracking + apps/web · api/openapi `getShipmentTracking` (full timeline); UX W11 | TASK-184, TASK-185 | – | Planned |
+| REQ-TRACK-014 | M1 | Must | US-245 | packages/carriers · ADR-0010 §Mock carrier tracking scenarios (`track=…`) | TASK-208 | – | Planned |
+| REQ-TRACK-015 | M1 | Could | US-253 | tracking · api/README §7 route limit `refreshShipmentTracking` (1 per shipment per 5 min) | TASK-272 | – | Planned |
+| REQ-ACCT-001 | M1 | Should | US-258 | apps/web · UX W10 dashboard; api/openapi `getDashboard` | TASK-258 | – | Planned |
+| REQ-ACCT-002 | M1 | Must | US-254 | shipments · ADR-0016 §5 keyset pagination; data-model §3.11 indexes (AP-SHP-*) | TASK-183 | – | Planned |
+| REQ-ACCT-003 | M1 | Must | US-255 | shipments + apps/web · api/openapi `getShipment` (history, tracking, documents); UX W11 | TASK-185 | – | Planned |
+| REQ-ACCT-004 | M1 | Must | US-256 | shipments · data-model §3.11 drafts (step reached); api/openapi `listDrafts` | TASK-209 | – | Planned |
+| REQ-ACCT-005 | M1 | Should | US-259 | quotes · data-model §3.10 saved quotes; api/openapi `listQuotes` | TASK-234 | – | Planned |
+| REQ-ACCT-006 | M1 | Should | US-260 | shipments · api/openapi `repeatShipment` (new DRAFT prefilled) | TASK-262 | – | Planned |
+| REQ-ACCT-007 | M1 | Should | US-261 | apps/web · UX W11 cancel action; ADR-0014 §Cancellation (allowed states) | TASK-253 | – | Planned |
+| REQ-ACCT-008 | M1 | Should | US-262 | organisations · data-model §3.2 `address_book`; ADR-0008 (`address_book:manage`) | TASK-264 | – | Planned |
+| REQ-ACCT-009 | M1 | Should | US-263 | organisations · data-model §3.2 `address_book` default sender; UX W03 prefill | TASK-264 | – | Planned |
+| REQ-ACCT-010 | M1 | Could | US-264 | organisations · api/openapi `importAddressBook` (CSV ≤ 1 MB); ADR-0021 (upload seam) | TASK-273 | – | Planned |
+| REQ-ACCT-011 | M1 | Should | US-265 | apps/web + payments · ADR-0012 §1 saved methods; ADR-0006 am. 12 step-up; UX W13 | TASK-254 | – | Planned |
+| REQ-ACCT-012 | M1 | Should | US-266 | notifications · data-model §3.17 preferences; ADR-0020 §Preferences | TASK-263 | – | Planned |
+| REQ-ACCT-013 | M1 | Should | US-267 | apps/web + identity · UX W13 security screen; ADR-0006 §TOTP / §Sessions | TASK-228 | – | Planned |
+| REQ-ACCT-014 | M1 | Should | US-268 | organisations · api/openapi `getOrganisation`; ADR-0008 (`org:read`) | TASK-235 | – | Planned |
+| REQ-ACCT-015 | M1 | Should | US-269 | organisations · ADR-0016 am. 5(f) (`LAST_OWNER` 422); data-model §3.2 owner invariant | TASK-235 | – | Planned |
+| REQ-ACCT-016 | M1 | Could | US-270 | identity · ADR-0006 am. 12 (`privacy.export` scope); api/openapi `requestPrivacyExport` (1/min); ADR-0021 | TASK-274 | – | Planned |
+| REQ-ACCT-017 | M1 | Could | US-271 | identity · ADR-0006 am. 12 (`privacy.delete` scope); ADR-0007 §Erasure (vault delete, M4/M5 jobs) | TASK-274 | – | Planned |
+| REQ-ACCT-018 | M1 | Should | US-272 | identity · data-model §3.1 user preferences (locale, currency, units, zone); ADR-0026 §2 | TASK-268 | – | Planned |
+| REQ-ACCT-019 | M1 | Should | US-273 | apps/web · ADR-0026 §1 (no placeholder routes); ARCHITECTURE §10 backlog seams | TASK-265 | – | Planned |
+| REQ-ACCT-020 | M1 | Must | US-257 | platform · ADR-0005 §Policies (org-scoped lists; foreign IDs → 404) | TASK-211 | – | Planned |
+| REQ-NOTIF-001 | M1 | Must | US-274 | notifications · ADR-0020 §1 `NotificationProvider` interface (`send`) | TASK-074 | – | Planned |
+| REQ-NOTIF-002 | M1 | Should | US-275 | notifications · ADR-0020 §2 SES adapter (M5); ADR-0016 am. 10 (SDK egress exception) | TASK-266 | – | Planned |
+| REQ-NOTIF-003 | M1 | Must | US-276 | notifications · ADR-0020 §2 Mailpit locally (`MAIL_HOST`); platform.md §2.2 | TASK-074 | – | Planned |
+| REQ-NOTIF-004 | M1 | Must | US-277 | notifications · ADR-0020 §4 event → template map (DR-B28) | TASK-086, TASK-169 | – | Planned |
+| REQ-NOTIF-005 | M1 | Must | US-279 | notifications · ADR-0020 §3 versioned templates; data-model §3.17 | TASK-082 | – | Planned |
+| REQ-NOTIF-006 | M1 | Must | US-280 | notifications · ADR-0020 §3 locale rendering (fallback chain); ADR-0026 am. 3 ICU | TASK-082 | – | Planned |
+| REQ-NOTIF-007 | M1 | Must | US-282 | notifications · ADR-0020 §4 (verification, reset and security notices ignore preferences) | TASK-086 | – | Planned |
+| REQ-NOTIF-008 | M1 | Must | US-283 | notifications · ADR-0020 §4 booking confirmation; ADR-0019 am. 1 (SENSITIVE documents never attached, D-051) | TASK-179 | – | Planned |
+| REQ-NOTIF-009 | M1 | Should | US-286 | notifications · ADR-0020 §4 (receipt, pickup scheduled/cancelled/failed, booking failed templates) | TASK-257 | – | Planned |
+| REQ-NOTIF-010 | M1 | Should | US-287 | notifications · ADR-0020 §4 tracking milestone templates; REQ-TRACK-007 events | TASK-259 | – | Planned |
+| REQ-NOTIF-011 | M1 | Should | US-288 | notifications · ADR-0020 §Preferences (`tracking_updates` suppression) | TASK-263 | – | Planned |
+| REQ-NOTIF-012 | M1 | Should | US-289 | notifications · ADR-0020 §5 notification log (masked recipient, D-040); data-model §3.17 | TASK-267 | – | Planned |
+| REQ-NOTIF-013 | M1 | Must | US-284 | notifications (worker) · ADR-0020 §6 `notifications` queue (5 attempts, backoff); ADR-0013 | TASK-074 | – | Planned |
+| REQ-NOTIF-014 | M1 | Must | US-278 | notifications (worker) · ADR-0004 outbox → job idempotency key; ADR-0013 | TASK-078 | – | Planned |
+| REQ-NOTIF-015 | M1 | Must | US-285 | notifications · ADR-0020 §4 recipient rules (booking organisation only) | TASK-213 | – | Planned |
+| REQ-NOTIF-016 | M1 | Could | US-290 | notifications · ADR-0020 §1 channel seams (`SMS`, `WHATSAPP` not implemented) | TASK-275 | – | Planned |
+| REQ-NOTIF-017 | M1 | Must | US-281 | notifications · ADR-0020 §3 template completeness CI check (subject, HTML, text × en/es/fr) | TASK-212 | – | Planned |
 
 ## Story → Requirement
 | Story | Epic | MS | MoSCoW | Size | Linked REQs | DC |

@@ -559,7 +559,7 @@ Feature: MFA challenge at sign-in
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-023, EPIC-03
 - **Linked REQs:** REQ-AUTH-018
 - **As an** operator **I want** staff without TOTP restricted to enrolment **so that** no staff action happens without a second factor.
-- **Notes:** EC-A13. Seeded staff start in this state (REQ-DATA-003). Also applies to staff added to the operator org later. Outside `APP_ENV` local/test the first activation needs an e-mailed one-time code (6 digits, 10 minutes, single use, sent to the staff address; wrong or expired is `MFA_INVALID` and counts toward the per-user MFA lock) and a staff member not enrolled 24 h after the membership was created is set `SUSPENDED` by `housekeeping` (D-052, SEC-P3-14). The M0 demo runs `APP_ENV=local` and is unchanged. Re-enabling a suspended account is the M2 users screen; locally re-run the seed.
+- **Notes:** EC-A13. Seeded staff start in this state (REQ-DATA-003). Also applies to staff added to the operator org later. Outside `APP_ENV` local/test the first activation needs an e-mailed one-time code (6 digits, 10 minutes, single use, stored hashed, sent to the staff address through an `email-send`-class endpoint with an identical 202; missing, wrong, expired or used is 403 `MFA_ENROLMENT_CODE_REQUIRED`, counts toward the per-user MFA lock and is security-logged as `mfa_failed`) and a staff member not enrolled 24 h after their **first sign-in** (`first_signed_in_at`) is set `SUSPENDED` with `status_reason MFA_ENROLMENT_OVERDUE` by `housekeeping`, sessions revoked (D-052, D-056, SEC-P3-14; aligned with ADR-0006 amendment 14 per SEC-P3-33). A staff member who never signs in is never suspended. Re-enrolment after a first activation uses the re-authentication proof (US-291), not the e-mailed code. The M0 demo runs `APP_ENV=local` and is unchanged. Re-activation in M1 is the audited operator CLI `npm run ops:staff-reactivate -- <email>` (SYSTEM_JOB actor, UPDATE audit on `user`); the admin users screen is M2; locally a seed re-run also works.
 
 #### Acceptance criteria
 ```gherkin
@@ -590,21 +590,26 @@ Feature: Mandatory TOTP enrolment for operator members
 
   Scenario: Staging requires the e-mailed code for first activation
     Given APP_ENV=staging and a staff member without TOTP who has started enrolment
-    And a 6-digit code was e-mailed to the staff address and is visible in the mail catcher
+    And they requested the enrolment code (identical 202) and a 6-digit code is visible in the mail catcher
     When they submit a valid authenticator code without the e-mailed code
-    Then the response is 401 MFA_INVALID and MFA stays inactive
+    Then the response is 403 MFA_ENROLMENT_CODE_REQUIRED and MFA stays inactive
     When they submit a valid authenticator code with the e-mailed code within 10 minutes
     Then MFA becomes active and an UPDATE audit entry without secret or code values is written
 
   Scenario Outline: E-mailed code misuse
     Given APP_ENV=staging and a staff member starting first activation
     When the e-mailed code is "<state>"
-    Then the response is 401 MFA_INVALID and the failure counts toward the per-user MFA lock
+    Then the response is 403 MFA_ENROLMENT_CODE_REQUIRED, the failure counts toward the per-user MFA lock and a security event mfa_failed is emitted
     Examples:
       | state                  |
       | older than 10 minutes  |
       | already used           |
       | sent to another user   |
+
+  Scenario: Re-enrolment after a first activation uses the re-authentication proof
+    Given APP_ENV=staging and a staff member whose TOTP was active once and was reset
+    When they enrol again with a valid X-Reauth-Proof and no e-mailed code
+    Then MFA becomes active without an enrolment code being requested
 
   Scenario Outline: No e-mailed code in local and test
     Given APP_ENV=<env> and a seeded staff member without TOTP
@@ -616,15 +621,28 @@ Feature: Mandatory TOTP enrolment for operator members
       | test  |
 
   Scenario: Enrolment deadline suspends the staff member
-    Given APP_ENV=staging and a staff membership created 24 h and 1 s ago (fake clock) whose user has no active TOTP
+    Given APP_ENV=staging and a staff member whose first sign-in was 24 h and 1 s ago (fake clock) and who has no active TOTP
     When the housekeeping job runs
-    Then the user status becomes SUSPENDED, their sessions are revoked and an UPDATE audit entry by the system actor exists
+    Then the user status becomes SUSPENDED with status_reason MFA_ENROLMENT_OVERDUE, their sessions are revoked and an UPDATE audit entry by the system actor exists
     And signing in returns 401 INVALID_CREDENTIALS identical to a wrong password
 
   Scenario: Staff enrolled in time is not suspended
-    Given a staff membership created 23 h ago whose user activated TOTP
+    Given a staff member whose first sign-in was 23 h ago and who activated TOTP
     When the housekeeping job runs
     Then the user stays ACTIVE
+
+  Scenario: Deadline counts from first sign-in, not from membership creation
+    Given a staff membership created 5 days ago whose user has never signed in
+    When the housekeeping job runs
+    Then the user stays ACTIVE and no suspension is written
+    When that user signs in for the first time and 24 h and 1 s pass without TOTP activation
+    Then the next housekeeping run suspends them
+
+  Scenario: Operator re-activates a suspended staff member from the CLI
+    Given a staff member SUSPENDED with status_reason MFA_ENROLMENT_OVERDUE
+    When an operator runs "npm run ops:staff-reactivate -- <email>"
+    Then the user status becomes ACTIVE, an UPDATE audit entry with actor type SYSTEM_JOB and the command name exists
+    And their next session is again restricted to the enrolment endpoints until TOTP is active
 ```
 
 ### US-026 — Customer TOTP settings, re-authentication and staff recovery-code regeneration

@@ -1,0 +1,1 @@
+- [P4 concurrency and positional test IDs](project_p4_concurrency_and_positional_ids.md) — other agents edit shared docs mid-session; regenerate gherkin-test-map after story edits; one Edit per file per batch

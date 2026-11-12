@@ -230,7 +230,7 @@ These are the shared six-state components (US-104, US-105). Each route uses them
 | Component | Built on | Spec |
 |---|---|---|
 | `Dialog` | Radix Dialog | Centred, max 560 px, `radius.lg`, `shadow.e4`. Full-screen under 768 px for forms with more than 2 fields. Focus moves to the first field, or to the title when there is no field. Escape closes, focus returns to the trigger, and focus is trapped while open (US-113). The title is required and is the accessible name. |
-| `AlertDialog` | Radix AlertDialog | Destructive or irreversible actions (delete draft, sign out other sessions, leave recovery codes). Focus starts on the **least destructive** button. Escape and outside clicks are blocked only where a decision must be recorded (recovery codes). |
+| `AlertDialog` | Radix AlertDialog | Destructive or irreversible actions (delete draft, sign out other sessions, leave recovery codes) and the admin idle-timeout warning (`IdleTimeoutDialog`). Focus starts on the **least destructive** button. Escape and outside clicks are blocked only where a decision must be recorded (recovery codes). In `IdleTimeoutDialog`, Escape performs "Extend session" and outside clicks are ignored (W00 §2.1). |
 | `Drawer` | Radix Dialog (side) | Admin navigation under 1024 px and web mobile menu. It slides from the inline-start edge (inline-end for filters). 180 ms, 0 ms with reduced motion. |
 | `BottomSheet` | Radix Dialog (bottom) | Price details on mobile, filters on mobile. It has a visible close button; drag-to-dismiss is optional and never required (WCAG 2.5.7). Max height 85vh with internal scroll. |
 | `Popover` | Radix Popover | Inline help ("What is billable weight?"). Opened by a button; it does not open on hover. |
@@ -287,7 +287,7 @@ Read-only address formatted by country convention. It is used in the review step
 Monospace, `bg.subtle`, with a CopyButton. The only component allowed to scroll horizontally. It is focusable (`tabindex="0"`, `role="region"` with a label) so keyboard users can scroll it (WCAG 2.1.1).
 
 ### QRCodeImage
-Displays the TOTP provisioning QR. It is always paired with the manual key text and CopyButton. The alt text is "QR code for your authenticator app. If you can't scan it, use the setup key below." The QR rendering method (server-provided SVG or a client library) is an architecture decision (open item, see the README).
+Displays the TOTP provisioning QR. It is always paired with the manual key text and CopyButton. The alt text is "QR code for your authenticator app. If you can't scan it, use the setup key below." Rendered client-side by `<QrCode>` with `uqr` (ADR-0026 am. 2; README §5 resolved item 4).
 
 ### CarrierMark
 The carrier's name as text in a neutral chip with a 24 px monogram (first letters, `radius.full`, `bg.subtle`). A logo image is used only when an operator-supplied asset URL is configured per carrier. The repository ships no third-party logos (D-UX-018). The accessible name is always the carrier name text.
@@ -309,6 +309,10 @@ The carrier's name as text in a neutral chip with a 24 px monogram (first letter
 | `AuditFilterBar` | DateRangeField, Combobox (user, organisation), Select (role, entity, action, outcome), TextField (entity ID, IP), Apply/Clear | [W16](../wireframes/W16-admin-home-audit-sessions.md) |
 | `RecoveryCodesPanel` | CodeBlock grid (2 columns), CopyButton (all), "Download as .txt" (client-side Blob, no server call), "Print", CheckboxCard acknowledgement | [W15](../wireframes/W15-admin-auth.md) |
 | `TestModeBadge` | Badge warning + flask icon + "Test mode" text; tooltip "No real payment is taken" | W08, W09 |
+| `ReauthDialog` (US-291) | Dialog; purpose sentence (per scope) + instruction (per variant); variants **password** (PasswordField + hidden `username` input) and **totp** (OneTimeCodeField); optional stale line (`max_age`); InlineAlert; Continue (loading) + Cancel. States: default, loading, field error, dialog alert, offline. Exposed as `useReauth().run(scope, request)` from the API client so every caller gets the proactive/reactive behaviour and the single retry | [W03 §8](../wireframes/W03-customer-auth.md), F10 §4 |
+| `SessionList` (US-027) | DataTable (≥ 768) / CardList (< 768): Device, IP address range, Signed in, Last active (DateTimeValue relative), Action; "This device" Badge; per-row Sign out Button (loading); "Sign out of all other devices" + AlertDialog; Toasts. States: loading (2 skeleton rows), error (section-level), offline, sign-out errors. Shared by web S-C07 and admin S-D08 | [W13 §1](../wireframes/W13-account-settings-should.md), [W16 §4](../wireframes/W16-admin-home-audit-sessions.md) |
+| `IdleTimeoutDialog` (admin, US-033 Should) | AlertDialog; title, description with the absolute sign-out time, `aria-hidden` countdown, Extend session (primary, initial focus, loading) + Sign out; in-dialog InlineAlert for extend failures; shared idle clock (`localStorage` timestamp + `BroadcastChannel`) in an `IdleProvider` at the admin app root | [W00 §2.1](../wireframes/W00-shells-and-shared-states.md) |
+| `HostedCvcField` (US-217 Should) | Platform label + hint + InlineAlert notice around the gateway's CVC element (iframe, titled); error text outside the frame; reserved min-height; Mock gateway variant renders the simulated outcome control | [W08 §5](../wireframes/W08-checkout.md) |
 | `UnreviewedBadge` / `SampleDataNotice` | Badge warning "Unreviewed" / InlineAlert warning "Sample data — not legal advice" | W02, W05, [W14](../wireframes/W14-prohibited-items-legal.md) |
 
 ## 8. Icon set
