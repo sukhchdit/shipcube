@@ -1,0 +1,16 @@
+// SPK-01 throwaway: Prisma 7 engine-free client + @prisma/adapter-pg against PostgreSQL 18.
+generator client {
+  provider = "prisma-client"
+  output   = "./generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model SpikeHello {
+  id      String @id @default(uuid(7)) @db.Uuid
+  message String
+
+  @@map("spike_hello")
+}
