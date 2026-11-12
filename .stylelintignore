@@ -1,0 +1,14 @@
+# Generated or vendored output
+node_modules/
+dist/
+build/
+coverage/
+.react-router/
+prisma/generated/
+
+# Documentation and agent configuration
+docs/
+.claude/
+
+# Seeded negative fixtures violate the rules on purpose (tools/lint/negative-fixtures.test.ts lints them explicitly)
+tests/fixtures/lint/

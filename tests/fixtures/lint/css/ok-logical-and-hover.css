@@ -1,0 +1,11 @@
+.card {
+  margin-inline-start: 1rem;
+  padding-block: 0.5rem;
+  inset-inline-start: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .button:hover {
+    background: blue;
+  }
+}
