@@ -19,6 +19,7 @@ import {
 } from '@platform/config';
 import { loadWebBuildConfig } from '@platform/config/web';
 
+import { ROLE_PASSWORD_MIN_LENGTH, scramSha256Verifier } from '../db/scram.js';
 import { findRepoRoot } from '../test-support/process.js';
 import { ALL_CONFIG_KEYS, parseEnvFile, TOOLING_SECRET_KEYS } from './env-file.js';
 
@@ -51,6 +52,14 @@ describe('compose.env (local-only defaults)', () => {
     const passwordOf = (key: string): string => decodeURIComponent(new URL(compose.entries.get(key) ?? 'x://h').password);
     expect(compose.entries.get('BOOTSTRAP_APP_PASSWORD')).toBe(passwordOf('DATABASE_URL'));
     expect(compose.entries.get('BOOTSTRAP_MIGRATOR_PASSWORD')).toBe(passwordOf('DATABASE_MIGRATOR_URL'));
+  });
+
+  it('[TASK-003] the bootstrap passwords pass the SCRAM role-password rules that db:bootstrap enforces', () => {
+    for (const key of ['BOOTSTRAP_MIGRATOR_PASSWORD', 'BOOTSTRAP_APP_PASSWORD']) {
+      const password = compose.entries.get(key) ?? '';
+      expect({ key, long: password.length >= ROLE_PASSWORD_MIN_LENGTH }).toEqual({ key, long: true });
+      expect(() => scramSha256Verifier(password)).not.toThrow();
+    }
   });
 
   it('[m9] api and worker start without the tooling keys and never expose them', () => {
