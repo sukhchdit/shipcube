@@ -13,7 +13,15 @@ export {
 export { createDatabaseCheck, type QueryablePool } from '../db/health-check.js';
 export { createValkeyCheck, createValkeyClient, type PingableClient, type ValkeyClientOptions } from '../valkey/client.js';
 export { buildValkeyOptions, reconnectDelayMs, VALKEY_DEFAULTS, ValkeyConfigError, type ValkeyOptionsInput } from '../valkey/options.js';
-export { createRuntimeLog, type LogFields, type LogSink, type RuntimeLog } from './log.js';
+export {
+  createRuntimeLog,
+  readPackageVersion,
+  UNKNOWN_VERSION,
+  type LogFields,
+  type LogSink,
+  type RuntimeLog,
+  type RuntimeLogOptions,
+} from './log.js';
 export {
   assertReadinessChecks,
   createReadinessProbe,

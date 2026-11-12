@@ -6,14 +6,20 @@ import { loadRuntimeConfigOrExit } from '@platform/config';
 import { createApp } from './app.js';
 import { moduleRegistry } from './modules/index.generated.js';
 import { createHealthRouter } from './platform/health/router.js';
-import { createRuntimeLog } from './platform/runtime/log.js';
+import { requestLogContext } from './platform/logging/correlation.js';
+import { createRuntimeLog, readPackageVersion } from './platform/runtime/log.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
 
 const { config } = await loadRuntimeConfigOrExit('api');
-const log = createRuntimeLog('api', process.stdout);
+// Redacted Pino logger (TASK-010); every line carries the request context of the request being handled, if any.
+const log = createRuntimeLog('api', process.stdout, {
+  version: readPackageVersion(new URL('../package.json', import.meta.url)),
+  level: config.APP_LOG_LEVEL,
+  context: requestLogContext,
+});
 const services = createRuntimeServices(config, 'api', log);
-const app = createApp({ healthRouter: createHealthRouter({ probe: services.probe }), modules: moduleRegistry });
+const app = createApp({ healthRouter: createHealthRouter({ probe: services.probe }), modules: moduleRegistry, logger: log });
 
 // Session-integrity check on a dedicated connection before the listener opens (PR-0009 M1); never rejects.
 await services.startup();

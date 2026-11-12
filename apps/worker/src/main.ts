@@ -2,13 +2,19 @@
 // (exit 78 on a rejected configuration or secret, PR3-SEC-05), the runtime services shared with the API
 // (`@platform/api/runtime`), the health server on APP_HEALTH_PORT and graceful shutdown. Queue processors arrive
 // with the queue tasks; they register their drain here as an additional step.
-import { createRuntimeLog, createRuntimeServices, createShutdown } from '@platform/api/runtime';
+import { createRuntimeLog, createRuntimeServices, createShutdown, readPackageVersion } from '@platform/api/runtime';
 import { loadRuntimeConfigOrExit } from '@platform/config';
 
 import { createWorkerHealthServer } from './platform/health/server.js';
+import { jobLogContext } from './platform/logging/job-context.js';
 
 const { config } = await loadRuntimeConfigOrExit('worker');
-const log = createRuntimeLog('worker', process.stdout);
+// Redacted Pino logger (TASK-010); lines written while a job runs carry its correlation context (job-context.ts).
+const log = createRuntimeLog('worker', process.stdout, {
+  version: readPackageVersion(new URL('../package.json', import.meta.url)),
+  level: config.APP_LOG_LEVEL,
+  context: jobLogContext,
+});
 const services = createRuntimeServices(config, 'worker', log);
 const server = createWorkerHealthServer(services.probe);
 
