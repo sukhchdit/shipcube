@@ -26,6 +26,13 @@ describe('toolchain baseline (ADR-0001, R-ARCH-01)', () => {
     expect(process.versions.node.split('.')[0]).toBe('24');
   });
 
+  it('keeps the lockfile root engines in step with the root manifest (no manifest/lock drift)', () => {
+    const lock = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8')) as {
+      packages: Record<string, { engines?: Record<string, string> }>;
+    };
+    expect(lock.packages['']?.engines).toEqual(manifests[0]?.manifest.engines);
+  });
+
   it.each([
     ['typescript', /^6\.0\.\d+$/],
     ['jest', /^30\.\d+\.\d+$/],
