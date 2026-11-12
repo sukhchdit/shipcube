@@ -18,7 +18,9 @@ export default async function handleRequest(
     signal: request.signal,
     onError(error: unknown) {
       responseStatusCode = 500;
-      console.error(error);
+      // Build-time diagnostics only (ADR-0026 am. 10): this module never serves a request, so there is no request data
+      // or PII to leak, and the 500 above fails the pre-render. A direct stderr write, not a logger or `console`.
+      process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
     },
   });
   await body.allReady;

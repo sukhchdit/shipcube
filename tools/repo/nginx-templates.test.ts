@@ -33,7 +33,8 @@ describe('Nginx templates (TASK-004, platform.md §3.3)', () => {
     ['admin', admin],
   ])('%s: only ${NGINX_PORT} is substituted and the document root is the static build', (_app, template) => {
     expect(placeholders(template)).toEqual(['NGINX_PORT']);
-    expect(template).toContain('listen ${NGINX_PORT};');
+    // default_server: a stock conf.d/default.conf left in the image cannot take over the requests (PR4-SEC-02).
+    expect(template).toContain('listen ${NGINX_PORT} default_server;');
     expect(template).toContain('root /usr/share/nginx/html;');
     expect(template).toContain('server_tokens off;');
     expect(template).toMatch(/if \(\$request_method !~ \^\(\?:GET\|HEAD\)\$\) \{\s+return 405;/);
@@ -42,7 +43,24 @@ describe('Nginx templates (TASK-004, platform.md §3.3)', () => {
     expect(template).toMatch(/default\s+"no-cache";/);
     // Every add_header sits at server level (4-space indent): a location-level add_header drops the inherited ones.
     expect(template).not.toMatch(/^ {8,}add_header/m);
+    // Owner pointers (PR4-SEC-06): headers/CSP TASK-022, image TASK-014, header/response suite TASK-111.
     expect(template).toMatch(/TASK-022/);
+    expect(template).toMatch(/Dockerfile is TASK-014/);
+    expect(template).toMatch(/test suite is TASK-111/);
+  });
+
+  it.each([
+    ['web', web],
+    ['admin', admin],
+  ])('%s: dynamic gzip for text assets next to the pre-built *.gz files (NFR-WEB-005)', (_app, template) => {
+    // At server level (4-space indent), where every location inherits it.
+    expect(template).toMatch(/^ {4}gzip_static on;$/m);
+    expect(template).toMatch(/^ {4}gzip on;$/m);
+    expect(template).toMatch(/^ {4}gzip_vary on;$/m);
+    const types = /^ {4}gzip_types (.+);$/m.exec(template)?.[1]?.split(' ') ?? [];
+    expect(types).toEqual(
+      expect.arrayContaining(['text/css', 'application/javascript', 'text/javascript', 'application/json', 'image/svg+xml', 'text/plain']),
+    );
   });
 
   it('web: / redirects (302) to the DR-A18 locale and every other path falls back to index.html', () => {

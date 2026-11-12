@@ -14,9 +14,9 @@
 #
 # Security headers and CSP: the hash-based CSP (`csp.conf`, generated from the built HTML) and the REQ-SEC-001/002/003
 # header set (HSTS toggle, Permissions-Policy, X-Robots-Tag on /{lng}/track) are added by TASK-022 after SPK-06; the
-# image Dockerfile and the header/response test suite belong to that task too. The static headers below are the subset
-# that needs no build input. All add_header directives live at server level: a location-level add_header would drop
-# every inherited one.
+# image Dockerfile is TASK-014 and the header/response test suite is TASK-111 (US-043). The static headers below are
+# the subset that needs no build input. All add_header directives live at server level: a location-level add_header
+# would drop every inherited one.
 
 # DR-A18 locale for `/`: cookie `lng` (en|es|fr), else the first supported language in Accept-Language order, else en.
 # The regex finds the leftmost en/es/fr language subtag (regional variants such as fr-CA map to fr); q-values are not
@@ -54,7 +54,9 @@ map $uri $web_vary {
 }
 
 server {
-    listen ${NGINX_PORT};
+    # default_server: this block answers every request even if the image still carries the stock conf.d/default.conf
+    # (PR4-SEC-02); TASK-014 removes that file.
+    listen ${NGINX_PORT} default_server;
     server_name _;
     server_tokens off;
     root /usr/share/nginx/html;
@@ -62,7 +64,12 @@ server {
     # Location headers stay relative (`/en/`), so the redirect is correct behind the edge proxy and CloudFront.
     absolute_redirect off;
     client_max_body_size 1k;
+    # Pre-built *.gz files are served as is (gzip_static, produced by TASK-022); everything else compressible is
+    # compressed on the fly (NFR-WEB-005). text/html is always compressed by gzip_types' implicit default.
     gzip_static on;
+    gzip on;
+    gzip_vary on;
+    gzip_types text/css application/javascript text/javascript application/json image/svg+xml text/plain;
     charset utf-8;
 
     add_header Cache-Control $web_cache_control always;

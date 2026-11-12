@@ -6,7 +6,7 @@ import NotFound from './not-found';
 import RootRedirect, { clientLoader } from './root-redirect';
 
 describe('root redirect (ADR-0026 am. 4, DR-A18)', () => {
-  it('redirects "/" to the cookie locale, else a browser language, else /en/', async () => {
+  it('redirects "/" to the cookie locale, else a browser language, else /en/', () => {
     document.cookie = 'lng=fr; Path=/';
     const response = clientLoader();
     expect(response.status).toBe(302);

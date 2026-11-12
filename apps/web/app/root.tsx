@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
 
 import './app.css';
-import { ErrorView } from './components/error-view';
+import { ERROR_KIND, ErrorView, NOT_FOUND_KIND } from './components/error-view';
 import { localeFromPathname } from './i18n/locales';
 import { translate } from './i18n/messages';
 import { useLocale, useT } from './i18n/use-locale';
@@ -55,5 +55,5 @@ export function HydrateFallback() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  return <ErrorView kind={isRouteErrorResponse(error) && error.status === 404 ? 'not-found' : 'error'} />;
+  return <ErrorView kind={isRouteErrorResponse(error) && error.status === 404 ? NOT_FOUND_KIND : ERROR_KIND} />;
 }

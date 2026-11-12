@@ -23,6 +23,16 @@ function missingServerEntries(repoRoot: string): string[] {
     .map((dir) => `${dir}/app/entry.server.tsx`);
 }
 
+const TYPEGEN_SCRIPT = 'react-router typegen';
+
+/** Workspaces with a `react-router.config.ts` whose package.json lacks `"typegen": "react-router typegen"` (ADR-0026 am. 13). */
+function missingTypegenScripts(repoRoot: string): string[] {
+  return listManifests(repoRoot)
+    .filter(({ dir }) => existsSync(join(repoRoot, ...dir.split('/'), 'react-router.config.ts')))
+    .filter(({ manifest }) => manifest.scripts?.['typegen'] !== TYPEGEN_SCRIPT)
+    .map(({ dir }) => `${dir}/package.json`);
+}
+
 /** Manifests (root and workspaces) that declare `isbot` in any dependency field. */
 function manifestsDeclaringIsbot(repoRoot: string): string[] {
   return listManifests(repoRoot)
@@ -37,7 +47,11 @@ describe('React Router apps commit their server entry and never declare isbot (P
   afterAll(() => fixtures.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
   /** A minimal workspace root with one React Router app; `withEntry: false` omits `app/entry.server.tsx`. */
-  function appFixture(options: { withEntry: boolean; isbotIn?: 'dependencies' | 'devDependencies' | 'peerDependencies' }): string {
+  function appFixture(options: {
+    withEntry: boolean;
+    isbotIn?: 'dependencies' | 'devDependencies' | 'peerDependencies';
+    typegenScript?: string;
+  }): string {
     const root = mkdtempSync(join(tmpdir(), 'rr-entry-'));
     fixtures.push(root);
     const write = (rel: string, content: string) => {
@@ -48,6 +62,7 @@ describe('React Router apps commit their server entry and never declare isbot (P
     write('package.json', JSON.stringify({ name: 'fixture', private: true, workspaces: ['apps/*'] }));
     const manifest: Record<string, unknown> = { name: '@fixture/web', private: true };
     if (options.isbotIn !== undefined) manifest[options.isbotIn] = { isbot: '^5' };
+    if (options.typegenScript !== undefined) manifest['scripts'] = { typegen: options.typegenScript };
     write('apps/web/package.json', JSON.stringify(manifest));
     write('apps/web/react-router.config.ts', 'export default {};\n');
     if (options.withEntry) write('apps/web/app/entry.server.tsx', 'export default null;\n');
@@ -69,6 +84,16 @@ describe('React Router apps commit their server entry and never declare isbot (P
   it('[PR1-SEC-03] negative: the check fails when apps/web/app/entry.server.tsx is missing', () => {
     expect(missingServerEntries(appFixture({ withEntry: false }))).toEqual(['apps/web/app/entry.server.tsx']);
     expect(missingServerEntries(appFixture({ withEntry: true }))).toEqual([]);
+  });
+
+  it('[ADR-0026 am. 13] every workspace with a react-router.config.ts declares "typegen": "react-router typegen"', () => {
+    expect(missingTypegenScripts(repoRoot)).toEqual([]);
+  });
+
+  it('[ADR-0026 am. 13] negative: the check fails when the typegen script is absent or different', () => {
+    expect(missingTypegenScripts(appFixture({ withEntry: true }))).toEqual(['apps/web/package.json']);
+    expect(missingTypegenScripts(appFixture({ withEntry: true, typegenScript: 'react-router build' }))).toEqual(['apps/web/package.json']);
+    expect(missingTypegenScripts(appFixture({ withEntry: true, typegenScript: TYPEGEN_SCRIPT }))).toEqual([]);
   });
 
   it.each(['dependencies', 'devDependencies', 'peerDependencies'] as const)(

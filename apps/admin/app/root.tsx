@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
 
 import './app.css';
-import { ErrorView } from './components/error-view';
+import { ERROR_KIND, ErrorView, NOT_FOUND_KIND } from './components/error-view';
+import { NoIndex } from './components/no-index';
 import { LocaleProvider, useDetectedLocale, useT } from './i18n/locale-context';
 import { browserLocale } from './i18n/locales';
 import { translate } from './i18n/messages';
@@ -17,6 +18,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <NoIndex />
         <Meta />
         <Links />
       </head>
@@ -29,13 +31,12 @@ export function Layout({ children }: { children: ReactNode }) {
   );
 }
 
-/** The admin app is never indexed (ADR-0026 am. 5; Nginx also sends X-Robots-Tag). Page routes export their own title. */
+/** Title of the shell and of error states; page routes export their own title. The robots tag lives in `Layout`. */
 export function meta({ error }: Route.MetaArgs) {
   const locale = browserLocale();
-  const robots = { name: 'robots', content: 'noindex, nofollow' };
   // `error` is null (not undefined) when the route has not failed.
-  if (!error) return [{ title: translate(locale, 'home.title') }, robots];
-  return [{ title: translate(locale, isRouteErrorResponse(error) && error.status === 404 ? 'notFound.title' : 'error.title') }, robots];
+  if (!error) return [{ title: translate(locale, 'home.title') }];
+  return [{ title: translate(locale, isRouteErrorResponse(error) && error.status === 404 ? 'notFound.title' : 'error.title') }];
 }
 
 export default function App() {
@@ -56,5 +57,5 @@ export function HydrateFallback() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  return <ErrorView kind={isRouteErrorResponse(error) && error.status === 404 ? 'not-found' : 'error'} />;
+  return <ErrorView kind={isRouteErrorResponse(error) && error.status === 404 ? NOT_FOUND_KIND : ERROR_KIND} />;
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { render, screen } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 
 import { LocaleProvider, useDetectedLocale, useLocale, useT } from './locale-context';
 
@@ -40,9 +41,14 @@ describe('admin locale context', () => {
     expect(screen.getByText('es:Ir al inicio')).toBeInTheDocument();
   });
 
-  it('switches from the default to the cookie locale after mount', async () => {
+  it('detects the cookie locale on the client', async () => {
     document.cookie = 'lng=fr; Path=/';
     render(<Detecting />);
     expect(await screen.findByText("fr:Retour à l'accueil")).toBeInTheDocument();
+  });
+
+  it('renders the default locale in the build-time (server) snapshot, whatever the cookie says', () => {
+    document.cookie = 'lng=fr; Path=/';
+    expect(renderToString(<Detecting />)).toBe('<p>en<!-- -->:<!-- -->Go home</p>');
   });
 });

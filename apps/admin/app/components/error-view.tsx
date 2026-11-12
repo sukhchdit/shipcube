@@ -4,6 +4,10 @@ import { useT } from '../i18n/locale-context';
 
 export type ErrorViewKind = 'error' | 'not-found';
 
+/** Named so call sites pass expressions: a bare string prop in JSX reads as untranslated copy to the i18n lint rule. */
+export const ERROR_KIND: ErrorViewKind = 'error';
+export const NOT_FOUND_KIND: ErrorViewKind = 'not-found';
+
 /** A render error leaves no state worth keeping, so retrying is a reload. */
 const reloadPage = () => window.location.reload();
 

@@ -55,10 +55,9 @@ describe('admin root route', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('is never indexed and titles the shell and error states', () => {
-    const robots = { name: 'robots', content: 'noindex, nofollow' };
-    expect(metaFor()).toEqual([{ title: 'Operator console' }, robots]);
-    expect(metaFor(new Error('boom'))).toEqual([{ title: 'Something went wrong' }, robots]);
-    expect(metaFor(NOT_FOUND)).toEqual([{ title: 'Page not found' }, robots]);
+  it('titles the shell and error states', () => {
+    expect(metaFor()).toEqual([{ title: 'Operator console' }]);
+    expect(metaFor(new Error('boom'))).toEqual([{ title: 'Something went wrong' }]);
+    expect(metaFor(NOT_FOUND)).toEqual([{ title: 'Page not found' }]);
   });
 });

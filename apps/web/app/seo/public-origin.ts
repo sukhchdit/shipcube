@@ -16,7 +16,9 @@ export function resolvePublicOrigin(configured: string | undefined): string {
 
 /**
  * Public origin baked into canonical and hreflang URLs at build time (NFR-WEB-005): `VITE_PUBLIC_ORIGIN`, which Vite
- * inlines. Outside Vite (Jest) `import.meta.env` does not exist, hence the cast.
+ * inlines. Outside Vite (Jest) `import.meta.env` does not exist, hence the cast; a static `import.meta.env.KEY` read
+ * is not possible there. Vite inlines the whole env object, which `envPrefix: 'VITE_PUBLIC_'` in vite.config.ts
+ * restricts to public keys (PR4-SEC-01).
  */
 export function publicOrigin(): string {
   const env = (import.meta as { env?: { VITE_PUBLIC_ORIGIN?: string } }).env;

@@ -49,6 +49,9 @@ const config: Config = {
     '!prisma/generated/**',
     // Package entry points only re-export; the v8 provider would count them as uncovered lines.
     '!packages/*/src/index.ts',
+    // React Router build-time modules (ssr:false): the server entry and the route table run only inside
+    // `react-router build` (pre-render) and `typegen`; apps/web/tests/prerender.int.test.ts exercises them (PR #4 m8).
+    '!apps/*/app/{entry.server.tsx,routes.ts}',
   ],
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],
   // COVERAGE_TARGET (CLAUDE.md §3), global part: 85 % line / 75 % branch. The 95 % per-path thresholds for
