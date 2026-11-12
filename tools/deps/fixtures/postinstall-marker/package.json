@@ -1,0 +1,12 @@
+{
+  "name": "postinstall-marker-fixture",
+  "version": "1.0.0",
+  "description": "SEC-TC-45 fixture: a package whose postinstall writes a marker file into the installing project. Never published.",
+  "license": "MIT",
+  "files": [
+    "write-marker.cjs"
+  ],
+  "scripts": {
+    "postinstall": "node write-marker.cjs"
+  }
+}

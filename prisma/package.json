@@ -1,0 +1,17 @@
+{
+  "name": "@platform/prisma",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Prisma 7 multi-file schema, migrations, bootstrap SQL and seeds (ADR-0005, data-model.md).",
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "prisma": "7.10.1",
+    "@types/pg": "^8.23.1"
+  }
+}

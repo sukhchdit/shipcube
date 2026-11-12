@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "tsBuildInfoFile": "../node_modules/.cache/tools.tsbuildinfo"
+  },
+  "files": ["../jest.config.ts"],
+  "include": ["**/*.ts", "**/*.mjs"],
+  "exclude": ["**/fixtures/**"]
+}

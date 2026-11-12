@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo"
+  },
+  "files": [],
+  "include": ["seed", "tests", "*.ts"],
+  "references": [
+    {
+      "path": "../packages/shared"
+    }
+  ]
+}
