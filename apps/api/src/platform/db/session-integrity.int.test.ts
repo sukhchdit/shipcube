@@ -53,8 +53,8 @@ describe('database session integrity with a real platform_app role (PR7-SEC-06 i
 
     // The runtime role needs no privilege for this (AlterRoleSet allows roleid == GetUserId()).
     await pool.query('ALTER ROLE platform_app RESET lock_timeout');
-    await expect(check.check(new AbortController().signal)).rejects.toThrow('role_settings_drift');
-    expect(events).toEqual([['role_settings_drift']]);
+    await expect(check.check(new AbortController().signal)).rejects.toThrow('db_role_setting_drift');
+    expect(events).toEqual([['db_role_setting_drift']]);
   });
 
   it('a role-level tenant-context default (set by a privileged role) is detected as drift and as a preset context', async () => {
@@ -72,7 +72,7 @@ describe('database session integrity with a real platform_app role (PR7-SEC-06 i
     });
     try {
       const guard = createSessionIntegrityGuard({ pool: fresh, onDrift: () => undefined, intervalMs: 0 });
-      await expect(guard.assertIntact()).rejects.toThrow(/role_settings_drift, session_context_preset/u);
+      await expect(guard.assertIntact()).rejects.toThrow(/db_role_setting_drift, db_session_default_tampered/u);
     } finally {
       await fresh.end();
     }

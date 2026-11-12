@@ -6,9 +6,11 @@
  *    which then apply to every API and worker task and survive restarts;
  *  - a session default for a tenant-context key (`app.org_id`, ...) would pre-set RLS context on fresh connections.
  * The guard compares the role and database-level settings that apply to `current_user` with the exact expected set
- * from `prisma/bootstrap/00-roles.sql`, and requires every tenant-context key to be unset (NULL) or empty ('' after a
- * transaction-local `set_config`). It runs at the first readiness probe (start-up) and then at most once per
- * interval; drift makes the database component not ready and emits one security event per detection.
+ * from `prisma/bootstrap/00-roles.sql`, and requires every tenant-context key to be unset. The start-up probe (the
+ * first readiness check, on a fresh pool connection) requires NULL; later probes may meet a pooled connection where a
+ * transaction-local `set_config` left '' behind, so they accept NULL or ''. It then re-checks at most once per
+ * interval; drift makes the database component not ready and emits one security event per finding
+ * (`security.db_role_setting_drift`, `security.db_session_default_tampered`; WAVE-00 TASK-006, ADR-0005 am. 10).
  */
 
 /** `ALTER ROLE platform_app SET …` in prisma/bootstrap/00-roles.sql, as `pg_db_role_setting.setconfig` entries. */
@@ -38,7 +40,7 @@ export const SESSION_INTEGRITY_SQL = `SELECT
   ), '{}'::text[]) AS settings,
   ARRAY[${TENANT_CONTEXT_KEYS.map((key) => `current_setting('${key}', true)`).join(', ')}] AS context`;
 
-export type SessionIntegrityFinding = 'role_settings_drift' | 'session_context_preset';
+export type SessionIntegrityFinding = 'db_role_setting_drift' | 'db_session_default_tampered';
 
 export interface SessionIntegrityRow {
   readonly settings: readonly string[];
@@ -46,12 +48,16 @@ export interface SessionIntegrityRow {
 }
 
 /** Pure evaluation of one probe row: the findings, never the values (they could be attacker-chosen). */
-export function evaluateSessionIntegrity(row: SessionIntegrityRow): readonly SessionIntegrityFinding[] {
+export function evaluateSessionIntegrity(
+  row: SessionIntegrityRow,
+  options: { readonly freshConnection?: boolean } = {},
+): readonly SessionIntegrityFinding[] {
   const findings: SessionIntegrityFinding[] = [];
   const actual = [...row.settings].sort();
   const sameSettings = actual.length === EXPECTED_ROLE_SETTINGS.length && actual.every((entry, i) => entry === EXPECTED_ROLE_SETTINGS[i]);
-  if (!sameSettings) findings.push('role_settings_drift');
-  if (row.context.some((value) => value !== null && value !== '')) findings.push('session_context_preset');
+  if (!sameSettings) findings.push('db_role_setting_drift');
+  const unset = (value: string | null): boolean => value === null || (options.freshConnection !== true && value === '');
+  if (!row.context.every(unset)) findings.push('db_session_default_tampered');
   return findings;
 }
 
@@ -61,7 +67,7 @@ export interface IntegrityQueryable {
 
 export interface SessionIntegrityGuardOptions {
   readonly pool: IntegrityQueryable;
-  /** Security event sink: called once per detection with the finding names only. */
+  /** Security event sink: called once per detection with the finding names only (each name is the event name). */
   readonly onDrift: (findings: readonly SessionIntegrityFinding[]) => void;
   readonly intervalMs?: number;
   readonly now?: () => number;
@@ -95,7 +101,7 @@ export function createSessionIntegrityGuard(options: SessionIntegrityGuardOption
     const result = await options.pool.query(SESSION_INTEGRITY_SQL);
     const row = result.rows[0];
     if (!isRow(row)) throw new Error('session integrity probe returned no row');
-    const next = evaluateSessionIntegrity(row);
+    const next = evaluateSessionIntegrity(row, { freshConnection: checkedAt === undefined });
     // One security event per transition into drift (or change of findings), not one per readiness poll.
     if (next.length > 0 && next.join() !== findings.join()) options.onDrift(next);
     findings = next;

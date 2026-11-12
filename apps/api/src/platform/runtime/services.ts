@@ -63,7 +63,9 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
   // PR7-SEC-06 item 3 / PR7-SEC-02 item 2: drift is a security event and makes the database not ready.
   const integrity = createSessionIntegrityGuard({
     pool,
-    onDrift: (findings) => log.warn('security.db_session_integrity', { findings: findings.join(',') }),
+    onDrift: (findings) => {
+      for (const finding of findings) log.warn(`security.${finding}`, { component: 'database' });
+    },
   });
   return {
     pool,

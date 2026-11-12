@@ -35,27 +35,35 @@ describe('database session integrity (PR7-SEC-06 item 3, PR7-SEC-02 item 2)', ()
   it.each<[string, readonly string[], readonly (string | null)[], readonly SessionIntegrityFinding[]]>([
     ['intact', EXPECTED_ROLE_SETTINGS, unset, []],
     ['intact after a transaction-local set_config (empty values)', EXPECTED_ROLE_SETTINGS, TENANT_CONTEXT_KEYS.map(() => ''), []],
-    ['a reset role setting', EXPECTED_ROLE_SETTINGS.slice(1), unset, ['role_settings_drift']],
+    ['a reset role setting', EXPECTED_ROLE_SETTINGS.slice(1), unset, ['db_role_setting_drift']],
     [
       'an added default_transaction_read_only',
       [...EXPECTED_ROLE_SETTINGS, 'default_transaction_read_only=on'],
       unset,
-      ['role_settings_drift'],
+      ['db_role_setting_drift'],
     ],
     [
       'a changed lock_timeout',
       ['idle_in_transaction_session_timeout=15s', 'lock_timeout=0', 'search_path=pg_catalog, public'],
       unset,
-      ['role_settings_drift'],
+      ['db_role_setting_drift'],
     ],
     [
       'a preset tenant context',
       EXPECTED_ROLE_SETTINGS,
       ['00000000-0000-0000-0000-000000000001', null, null, null],
-      ['session_context_preset'],
+      ['db_session_default_tampered'],
     ],
   ])('%s', (_title, settings, context, expected) => {
     expect(evaluateSessionIntegrity({ settings, context })).toEqual(expected);
+  });
+
+  it('the start-up probe on a fresh connection requires NULL; an empty value there is tampering', () => {
+    const empty = TENANT_CONTEXT_KEYS.map(() => '');
+    expect(evaluateSessionIntegrity({ settings: EXPECTED_ROLE_SETTINGS, context: empty }, { freshConnection: true })).toEqual([
+      'db_session_default_tampered',
+    ]);
+    expect(evaluateSessionIntegrity({ settings: EXPECTED_ROLE_SETTINGS, context: unset }, { freshConnection: true })).toEqual([]);
   });
 
   it('checks at the first probe, then at most once per interval; one security event per detection, findings only', async () => {
@@ -77,8 +85,8 @@ describe('database session integrity (PR7-SEC-06 item 3, PR7-SEC-02 item 2)', ()
     clock = 1_000;
     await expect(guard.assertIntact()).rejects.toBeInstanceOf(SessionIntegrityError);
     clock = 2_000;
-    await expect(guard.assertIntact()).rejects.toThrow('role_settings_drift');
-    expect(events).toEqual([['role_settings_drift']]);
+    await expect(guard.assertIntact()).rejects.toThrow('db_role_setting_drift');
+    expect(events).toEqual([['db_role_setting_drift']]);
     expect(JSON.stringify(events)).not.toContain('statement_timeout');
 
     row = { settings: EXPECTED_ROLE_SETTINGS, context: unset };
