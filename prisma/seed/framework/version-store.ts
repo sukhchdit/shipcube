@@ -14,6 +14,8 @@ interface VersionRow extends Record<string, unknown> {
  * {@link DatasetVersionStore} over `public.reference_dataset_versions` (data-model §3.5). The table's own `version`
  * column is the row's optimistic-lock counter; the dataset's version label is stored in `dataset_version`.
  * `record` is an upsert by `dataset`, written as the SYSTEM actor, and stamps `applied_at` with the transaction time.
+ * Only the seed's `platform_migrator` connection (the owner) can write it: `platform_app` holds `SELECT` only
+ * (data-model §4.4, D-ARCH-075).
  */
 export const referenceDatasetVersions: DatasetVersionStore = {
   async get(sql: SeedSql, dataset: string): Promise<DatasetVersion | undefined> {

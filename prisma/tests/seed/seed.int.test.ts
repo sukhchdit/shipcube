@@ -221,7 +221,10 @@ describe('reference seed framework (US-049)', () => {
     expect(sink.changes).toHaveLength(3);
     expect(sink.changes[2]).toMatchObject({ kind: 'drift-restored', dataset: 'probe_countries', version: '1', restoredRows: 1 });
     expect(await withClient(db.migratorConnection(database), async (client) => (await versionRows(client)).rows)).toEqual(versionsBefore);
-    const restored = await withClient(db.migratorConnection(database), async (client) => (await stamp(client, 'seed_probe_countries')).rows);
+    const restored = await withClient(
+      db.migratorConnection(database),
+      async (client) => (await stamp(client, 'seed_probe_countries')).rows,
+    );
     expect(restored).toHaveLength(10);
     expect(restored.find((row) => row.code === 'P00004')).toMatchObject({ name_en: 'Probe 4' });
   }, 120_000);
@@ -313,15 +316,28 @@ describe('reference seed framework (US-049)', () => {
     });
   }, 120_000);
 
-  it('platform_app may read, insert and update reference_dataset_versions and may not delete from it (data-model §4.4)', async () => {
+  it('platform_app may only read reference_dataset_versions: INSERT, UPDATE, DELETE and TRUNCATE are refused (§4.4, D-ARCH-075)', async () => {
     const database = await freshDatabase();
     await seed(database, [probe(2)]);
+    const before = await withClient(db.migratorConnection(database), async (client) => (await versionRows(client)).rows);
     await withClient(db.appConnection(database), async (client) => {
       expect((await client.query('SELECT 1 FROM public.reference_dataset_versions')).rowCount).toBe(1);
-      await client.query(`UPDATE public.reference_dataset_versions SET row_count = row_count`);
+      await expect(
+        client.query(
+          `INSERT INTO public.reference_dataset_versions
+             (dataset, dataset_version, content_sha256, row_count, applied_at, created_by, updated_by)
+           VALUES ('probe_app_write', '1', pg_catalog.sha256(''::pg_catalog.bytea), 0, pg_catalog.now(),
+                   pg_catalog.gen_random_uuid(), pg_catalog.gen_random_uuid())`,
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      await expect(client.query(`UPDATE public.reference_dataset_versions SET row_count = row_count`)).rejects.toMatchObject({
+        code: '42501',
+      });
       await expect(client.query('DELETE FROM public.reference_dataset_versions')).rejects.toMatchObject({ code: '42501' });
       await expect(client.query('TRUNCATE public.reference_dataset_versions')).rejects.toMatchObject({ code: '42501' });
     });
+    // The seed (platform_migrator, the owner) stays the single writer; the refused probes changed nothing.
+    expect(await withClient(db.migratorConnection(database), async (client) => (await versionRows(client)).rows)).toEqual(before);
   }, 120_000);
 });
 

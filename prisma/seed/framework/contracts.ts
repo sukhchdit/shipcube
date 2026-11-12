@@ -87,8 +87,10 @@ export interface SeedSql {
 }
 
 /**
- * The `reference_dataset_versions` hook. TASK-221 (US-073) uses it for the authz digest
- * (`dataset = 'authz_matrix'`); the dataset runner uses it for the no-op check.
+ * The `reference_dataset_versions` hook: the dataset runner uses it for the no-op check. The seed, connected as
+ * `platform_migrator` (the table owner), is the table's single writer; `platform_app` holds `SELECT` only. TASK-221's
+ * reconciler (US-073) shares the table, not this object: it reads the rows and derives the last audited digest from
+ * `audit_entries` (data-model §3.5, D-ARCH-075).
  */
 export interface DatasetVersionStore {
   get(sql: SeedSql, dataset: string): Promise<DatasetVersion | undefined>;

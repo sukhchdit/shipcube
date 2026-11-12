@@ -46,7 +46,10 @@ required). Exit codes: 0 ok, 1 refusal (JSON on stderr with `code` and `subjects
   bump `version` when its content changes; `insertOnly` for published versions, `audited` for configuration. A drift
   restore (with the label and hash unchanged, a row edited by hand is updated back and a row deleted by hand is
   re-inserted) of an audited dataset is reported as a `drift-restored` configuration change with `restoredRows` =
-  re-inserted + updated rows; every drift restore is logged as `warn seed.drift_restored`. The dataset name `authz_matrix` is reserved for TASK-221's authz digest row.
+  re-inserted + updated rows; every drift restore is logged as `warn seed.drift_restored`. The dataset name
+  `authz_matrix` is reserved: TASK-221's reconciler keys its authz `CONFIG_CHANGE` entries on it.
+- `reference_dataset_versions` has a single writer, the seed as `platform_migrator` (the owner); `platform_app` holds
+  `SELECT` only (data-model §3.5 and §4.4, D-ARCH-075). Seed callers pass one `pg.Client`, never a `pg.Pool`.
 - Tests: unit beside the code, `tests/seed/seed.int.test.ts` (PostgreSQL 18, real migrations, test-only probe tables, CLI).
 
 ### Dataset contract limits

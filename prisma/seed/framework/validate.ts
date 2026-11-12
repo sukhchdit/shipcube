@@ -10,8 +10,8 @@ const SOURCES: readonly unknown[] = ['ISO', 'SEED', 'SAMPLE'];
 export const RESERVED_COLUMNS: readonly string[] = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'version'];
 
 /**
- * `reference_dataset_versions.dataset` keys owned by another writer: `authz_matrix` is the authz digest row of TASK-221's
- * reconciler (data-model §9.2, code review PR #13 n6), so no dataset may claim it.
+ * `reference_dataset_versions.dataset` keys no seed dataset may claim: TASK-221's reconciler keys its authz
+ * `CONFIG_CHANGE` entries on `authz_matrix` (data-model §3.5 and §9.2, code review PR #13 n6, D-ARCH-075).
  */
 export const RESERVED_DATASET_NAMES: readonly string[] = ['authz_matrix'];
 
