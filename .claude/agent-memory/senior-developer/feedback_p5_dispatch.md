@@ -57,3 +57,11 @@ Watch out for these:
 - Commit each specialist's files as soon as it reports.
 - The leftovers were small. Shared `tools/tsconfig.json` `files` entries can conflict, and new fixture `prisma.config.ts` files must be added to `tools/tsconfig.json` `files` or the lint project service fails on them.
 - Check that the hosted CI jobs a sheet assumes actually exist (`security-integration` did not), and record the deferral instead of improvising a workflow.
+
+**PR #9 fix cycle 1 (2026-11-12): hybrid split worked, about 75 of my own calls, full gate green on the first run (about 3 min).** Two opus backend-developers took the isolated, well-specified findings (tools/deps PR9-SEC-02, 43 tool uses; TLS pinning plus config guard PR9-SEC-04, 69 tool uses). I did the cross-cutting core (M1 plus readiness, http and errors) in the same worktree, with file ownership disjoint. The briefs quoted the review line ranges and said "do NOT commit". Afterwards I made one commit per finding group. Pitfall: editing TS through `node -e "…"` in bash corrupts template literals, because backticks inside double quotes get command-substituted. For anything that contains backticks, use Edit/Write or a scratch file.
+
+**PR #10 fix cycle 1 (TASK-007 CI lane, 2026-11-12): about 95 of my own tool calls plus one opus devops-engineer (71 tool uses).** I owned ci.yml and the policy/install-flags/semgrep modules; the specialist owned three independent checkers. That split worked, and lane A was green on the first push. Pitfalls:
+- The suppression counter (`tools/lint/check-suppressions.mjs`) flags the literal text `gitleaks:allow` in any code file, prose comments and test titles included. Write "inline allow markers" instead.
+- A worktree's `.git` is a pointer file. To run gitleaks or git in Docker against a worktree, mount `git rev-parse --git-common-dir` and use explicit SHAs.
+- Workflow-policy fixtures named `ci-*.yml` are checked as ci.yml. Apply repository-wide manifests (required-gates) only in repository mode, or the positive-control fixtures break.
+- The Bash tool eats backticks and `\` in heredocs and `node -e`, even quoted. For edits containing backticks or regex escapes, use Edit, or a Write-ten script with `s.replace(a, () => b)`.
