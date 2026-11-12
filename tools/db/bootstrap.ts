@@ -19,8 +19,8 @@
  * (or the `*_FILE` variants naming Compose secret files). Exit 0 = applied or up to date, 1 = failure.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import pg from 'pg';
@@ -257,13 +257,65 @@ export async function reapplyDatabaseLevel(options: BootstrapOptions & { file?: 
   }
 }
 
-/** Secret from `NAME` or from the file named by `NAME_FILE` (Compose secrets); never logged. */
-export function readSecret(env: NodeJS.ProcessEnv, name: string): string {
-  const direct = env[name];
-  if (direct !== undefined && direct !== '') return direct;
-  const file = env[`${name}_FILE`];
-  if (file !== undefined && file !== '') return readFileSync(file, 'utf8').replace(/\r?\n$/, '');
-  throw new BootstrapError(`${name} (or ${name}_FILE) is not set`);
+/** Compose/ECS secret mount; a `*_FILE` path must lie lexically under it (ADR-0018 am. 6, D-ARCH-052). */
+export const SECRET_FILE_ROOT = '/run/secrets';
+/** Largest secret file accepted (64 KiB), the `file` provider's bar (packages/config, PR3-SEC-07). */
+export const SECRET_FILE_MAX_BYTES = 64 * 1024;
+/**
+ * The `FILE_PATH` rule of packages/config/src/secret-refs.ts (restated, not imported: the bootstrap tool's import
+ * closure stays `pg` + `node:*`, D-ARCH-052): one to four plain segments under /run/secrets, no `.`/`..` segment.
+ */
+const SECRET_FILE_PATH = /^\/run\/secrets(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}){1,4}$/;
+
+export interface ReadSecretOptions {
+  /** Directory standing in for /run/secrets (tests); the `*_FILE` value is still checked against /run/secrets. */
+  readonly root?: string;
+}
+
+const isWithin = (root: string, target: string): boolean => {
+  const path = relative(root, target);
+  return path !== '' && !path.startsWith('..') && !isAbsolute(path);
+};
+
+/** Reads a confined secret file; every error names `variable` only, never the path or the content. */
+function readSecretFile(variable: string, locator: string, root: string): string {
+  const refuse = (reason: string): never => {
+    throw new BootstrapError(`${variable}: ${reason}`);
+  };
+  if (!SECRET_FILE_PATH.test(locator)) refuse(`must name a file under ${SECRET_FILE_ROOT}`);
+  let content: Buffer;
+  try {
+    const realRoot = realpathSync(root);
+    const realTarget = realpathSync(join(root, ...locator.slice(SECRET_FILE_ROOT.length + 1).split('/')));
+    if (!isWithin(realRoot, realTarget)) refuse(`resolves outside ${SECRET_FILE_ROOT}`);
+    const info = statSync(realTarget);
+    if (!info.isFile()) refuse('is not a regular file');
+    if (info.size > SECRET_FILE_MAX_BYTES) refuse(`exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
+    content = readFileSync(realTarget);
+  } catch (error) {
+    if (error instanceof BootstrapError) throw error;
+    const code = (error as { code?: unknown } | null)?.code;
+    return refuse(`could not be read (${typeof code === 'string' && /^E[A-Z]{2,15}$/.test(code) ? code : 'EIO'})`);
+  }
+  if (content.byteLength > SECRET_FILE_MAX_BYTES) refuse(`exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
+  return content.toString('utf8').replace(/\r?\n$/, '');
+}
+
+/**
+ * Secret from `NAME` or from the file named by `NAME_FILE` (Compose secrets); never logged. Hardened to the `file`
+ * provider's bar (ADR-0018 am. 6, D-ARCH-052): exactly one of the two may be set; the file lies lexically under
+ * /run/secrets and its real path stays there (a symlink leaving the root is refused); regular file, at most 64 KiB;
+ * one trailing newline stripped; an empty value or file counts as unset. Errors name the variable only.
+ */
+export function readSecret(env: NodeJS.ProcessEnv, name: string, options: ReadSecretOptions = {}): string {
+  const fileVariable = `${name}_FILE`;
+  const direct = env[name] ?? '';
+  const locator = env[fileVariable] ?? '';
+  if (direct !== '' && locator !== '') throw new BootstrapError(`set ${name} or ${fileVariable}, not both`);
+  if (direct !== '') return direct;
+  const fromFile = locator === '' ? '' : readSecretFile(fileVariable, locator, options.root ?? SECRET_FILE_ROOT);
+  if (fromFile === '') throw new BootstrapError(`${name} (or ${fileVariable}) is not set`);
+  return fromFile;
 }
 
 /** Role passwords from BOOTSTRAP_MIGRATOR_PASSWORD / BOOTSTRAP_APP_PASSWORD (or their `*_FILE` variants). */

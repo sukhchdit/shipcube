@@ -1,20 +1,32 @@
 /**
- * Migration linter with negative fixtures (data-model.md §8.3; NT-DATA-004-b; the DROP part of NT-AVAIL-003-a and
- * the audit-DDL clause of SEC-TC-33, whose other parts (rules 3-9, 11) are not implemented yet, so their IDs stay out
- * of the titles;
- * TASK-003). Fixtures: tools/db/fixtures/lint/{migrations,bootstrap}/<case>/.
+ * Migration linter with negative fixtures (data-model.md §8.3; NT-DATA-004-b; NT-AVAIL-003-a (rules 2-6, 11);
+ * SEC-TC-33 (rules 7-9, 12, 14); ADR-0005 am. 10 items 1 and 9 (rules 16 and 15); PR5-SEC-11/-12; TASK-003, TASK-016).
+ * Fixtures: tools/db/fixtures/lint/{migrations,bootstrap}/<case>/. The fixture tables are classified by
+ * FIXTURE_CLASSES below (the repository's own manifests stay the source for the repository run).
  */
 import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
 import { lintBootstrap, lintMigrations, lintRepository, main, parseHeader, readReviewers, type LintFinding } from './lint-migrations.js';
+import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { findRepoRoot } from '../test-support/process.js';
 
 const repoRoot = findRepoRoot();
 const fixtures = join(repoRoot, 'tools', 'db', 'fixtures', 'lint');
-const lintCase = (name: string) => lintMigrations(join(fixtures, 'migrations', name), name);
+/** Table classes of the fixture tables (rule 9 manifest lookup, rule 8 hardDelete allow-list). */
+const FIXTURE_CLASSES: readonly TableClassEntry[] = [
+  ...loadTableClasses(),
+  { module: 'fixture', name: 'fixture_items', class: 'GLOBAL' },
+  { module: 'fixture', name: 'fixture_owners', class: 'GLOBAL' },
+  { module: 'fixture', name: 'fixture_events', class: 'GLOBAL' },
+  { module: 'fixture', name: 'fixture_orders', class: 'TENANT' },
+  { module: 'fixture', name: 'fixture_sessions', class: 'SYSTEM', hardDelete: true },
+];
+const lintCase = (name: string) => lintMigrations(join(fixtures, 'migrations', name), name, { tableClasses: FIXTURE_CLASSES });
 const rules = (findings: LintFinding[]) => findings.map((finding) => finding.rule);
+/** `[migration directory, rule]` per finding, for multi-migration cases. */
+const byMigration = (findings: LintFinding[]) => findings.map((finding) => [finding.file.split(/[\\/]/)[1], finding.rule]);
 const bootstrapCase = (name: string, reviewers: string[] = ['security-analyst'], today = '2026-11-12') =>
   lintBootstrap(join(fixtures, 'bootstrap', name), { reviewers, today }, name);
 
@@ -108,21 +120,29 @@ describe('expand -> migrate -> contract (rules 2, 10 and contract reversibility)
 });
 
 describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
-  // SEC-TC-33's audit-DDL clause. The ID is not put in the titles: its other clauses (DROP TRIGGER, DISABLE ROW LEVEL
-  // SECURITY, BYPASSRLS, ALTER POLICY; rules 7-9) are not implemented yet, and a bracketed ID would count as coverage.
-  it('rejects audit DDL in prisma/migrations unconditionally, including dynamic SQL and the audit owner role (rule 12)', () => {
-    const findings = lintCase('audit-ddl');
-    expect(rules(findings)).toEqual(['12', '12', '12', '12']);
-    expect(findings.map((finding) => finding.file.split(/[\\/]/)[1])).toEqual([
-      '20261112000000_audit_trigger',
-      '20261112000100_audit_partition',
-      '20261112000200_audit_owner',
-      '20261112000300_audit_dynamic',
+  it('[SEC-TC-33] rejects audit DDL in prisma/migrations unconditionally, including dynamic SQL and the audit owner role (rule 12; DISABLE TRIGGER and DETACH PARTITION also fail rule 7)', () => {
+    expect(byMigration(lintCase('audit-ddl'))).toEqual([
+      ['20261112000000_audit_trigger', '12'],
+      ['20261112000000_audit_trigger', '7'],
+      ['20261112000100_audit_partition', '12'],
+      ['20261112000100_audit_partition', '7'],
+      ['20261112000200_audit_owner', '12'],
+      ['20261112000300_audit_dynamic', '12'],
     ]);
   });
 
   it('rejects SECURITY DEFINER without exactly "SET search_path = pg_catalog, pg_temp", and ALTER FUNCTION that weakens it', () => {
     expect(rules(lintCase('definer-path'))).toEqual(['13', '13', '13', '13']);
+  });
+
+  it.each([
+    ['definer-duplicate-set'],
+    ['definer-set-from-current'],
+    ['alter-routine-definer'],
+    ['alter-routine-set'],
+    ['alter-function-duplicate-set'],
+  ])('rule 13 counts every SET search_path (the last one wins) and covers ALTER ROUTINE: %s fails (PR5-SEC-11)', (name) => {
+    expect(rules(lintCase(name))).toEqual(['13']);
   });
 
   it('finds SECURITY DEFINER and the SET clause after the body, and ignores both inside the body (CR m2)', () => {
@@ -182,6 +202,147 @@ describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
         message: 'the first statement must be "SET search_path = pg_catalog, pg_temp;"',
       },
     ]);
+  });
+});
+
+describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
+  it('[NT-AVAIL-003-a] rejects RENAME of a table, a column and a constraint (rule 3)', () => {
+    expect(byMigration(lintCase('rename'))).toEqual([
+      ['20261112000000_rename_table', '3'],
+      ['20261112000100_rename_column', '3'],
+      ['20261112000200_rename_constraint', '3'],
+    ]);
+  });
+
+  it('[NT-AVAIL-003-a] rejects ADD COLUMN NOT NULL without a constant default, ALTER COLUMN TYPE and SET NOT NULL without a validated CHECK (rule 4)', () => {
+    expect(byMigration(lintCase('not-null-unsafe'))).toEqual([
+      ['20261112000000_add_not_null_no_default', '4'],
+      ['20261112000100_add_not_null_volatile_default', '4'],
+      ['20261112000200_alter_type', '4'],
+      ['20261112000300_set_not_null', '4'],
+    ]);
+  });
+
+  it('[NT-AVAIL-003-a] accepts constant defaults, NOT NULL on a new table, and SET NOT NULL after CHECK NOT VALID + VALIDATE (rule 4 control)', () => {
+    expect(lintCase('not-null-safe')).toEqual([]);
+  });
+
+  it('[NT-AVAIL-003-a] rejects CREATE INDEX without CONCURRENTLY on an existing table (rule 5)', () => {
+    expect(rules(lintCase('index-not-concurrent'))).toEqual(['5']);
+  });
+
+  it('[NT-AVAIL-003-a] rejects CREATE INDEX CONCURRENTLY in a multi-statement file (rule 5)', () => {
+    // Written per data-model §8.3; the Prisma 7.10 `migrate deploy` probe (prisma/tests/migrations) settles how a
+    // one-statement file is submitted.
+    const findings = lintCase('index-concurrent-multi');
+    expect(rules(findings)).toEqual(['5']);
+    expect(findings[0]?.message).toMatch(/must be the only statement/);
+  });
+
+  it('[NT-AVAIL-003-a] rejects FOREIGN KEY and CHECK on an existing table without NOT VALID (rule 6)', () => {
+    expect(byMigration(lintCase('fk-check-not-valid'))).toEqual([
+      ['20261112000000_fk_validated', '6'],
+      ['20261112000100_check_validated', '6'],
+    ]);
+  });
+
+  it('[NT-AVAIL-003-a] rejects altering an existing table without SET lock_timeout as the first statement (rule 11)', () => {
+    expect(byMigration(lintCase('lock-timeout'))).toEqual([
+      ['20261112000000_no_lock_timeout', '11'],
+      ['20261112000100_lock_timeout_late', '11'],
+    ]);
+  });
+});
+
+describe('RLS, triggers, grants and privilege-bound statements (rules 7, 8, 9, 14; SEC-TC-33)', () => {
+  it.each([
+    ['drop-trigger', ['7']],
+    ['disable-trigger', ['7']],
+    ['disable-rls', ['7', '7']],
+  ])('[SEC-TC-33] rule 7: %s fails', (name, expected) => {
+    expect(rules(lintCase(name))).toEqual(expected);
+  });
+
+  it('[SEC-TC-33] rule 7: UPDATE, DELETE, TRUNCATE, DROP and DETACH PARTITION on audit storage fail (with rule 12)', () => {
+    const findings = lintCase('audit-storage');
+    expect([...new Set(findings.map((finding) => finding.file.split(/[\\/]/)[1]))]).toHaveLength(5);
+    for (const migration of new Set(findings.map((finding) => finding.file))) {
+      expect(rules(findings.filter((finding) => finding.file === migration)).sort()).toEqual(['12', '7']);
+    }
+  });
+
+  it.each([
+    ['delete-grant', ['8']],
+    ['all-grant', ['8']],
+    ['app-bypassrls', ['14', '8']],
+    ['app-superuser', ['14', '8']],
+    ['app-owner', ['8']],
+    ['app-membership', ['8']],
+    ['partition-grant', ['8']],
+  ])('[SEC-TC-33] rule 8: %s fails', (name, expected) => {
+    expect(rules(lintCase(name))).toEqual(expected);
+  });
+
+  it.each([['drop-policy'], ['alter-policy'], ['create-table-unclassified'], ['create-table-rls-no-force']])(
+    '[SEC-TC-33] rule 9: %s fails',
+    (name) => {
+      expect(rules(lintCase(name))).toEqual(['9']);
+    },
+  );
+
+  it('[SEC-TC-33] rule 9 is cross-checked with the manifests: a TENANT table ships ENABLE + FORCE, a policy is re-created in the same file', () => {
+    expect(lintCase('task016-clean')).toEqual([]);
+    // Without its manifest entry the same file fails rule 9.
+    const unclassified = lintMigrations(join(fixtures, 'migrations', 'task016-clean'), 'task016-clean', { tableClasses: [] });
+    expect(rules(unclassified)).toContain('9');
+  });
+
+  it('[SEC-TC-33] rule 14: CREATE SCHEMA, CREATE EXTENSION, ALTER DATABASE, ALTER SCHEMA OWNER TO, ALTER/CREATE/DROP ROLE fail', () => {
+    expect(byMigration(lintCase('bootstrap-only'))).toEqual([
+      ['20261112000000_create_schema', '14'],
+      ['20261112000100_create_extension', '14'],
+      ['20261112000200_alter_database', '14'],
+      ['20261112000300_alter_schema_owner', '14'],
+      ['20261112000400_alter_role', '14'],
+      ['20261112000500_create_role', '14'],
+      ['20261112000600_drop_role', '14'],
+    ]);
+  });
+});
+
+describe('definer ownership order (rule 15; ADR-0005 am. 10 item 9)', () => {
+  it('rule 15 (ADR-0005 am. 10 item 9): GRANT/REVOKE after OWNER TO platform_definer fails (definer-grant-after-owner-to)', () => {
+    expect(rules(lintCase('definer-grant-after-owner-to'))).toEqual(['15', '15']);
+  });
+
+  it('rule 15 (ADR-0005 am. 10 item 9): SECURITY DEFINER created outside SET ROLE platform_definer is flagged (definer-outside-set-role)', () => {
+    expect(rules(lintCase('definer-outside-set-role'))).toEqual(['15']);
+  });
+
+  it.each([['definer-set-role-block'], ['definer-grants-before-owner-to']])('rule 15 (ADR-0005 am. 10 item 9): %s is clean', (name) => {
+    expect(lintCase(name)).toEqual([]);
+  });
+});
+
+describe('tenant context in SQL (rule 16; ADR-0005 am. 10 item 1)', () => {
+  it.each([
+    ['context-set-config-platform', 'a platform function calling set_config(app.org_id, …, true)'],
+    ['context-set-public', 'a public function running a session SET of the org key'],
+    ['context-read-non-helper', 'a non-helper reading current_setting(app.org_id, true)'],
+  ])('rule 16 (ADR-0005 am. 10 item 1): %s fails (%s)', (name) => {
+    expect(rules(lintCase(name))).toEqual(['16']);
+  });
+
+  it('rule 16 (ADR-0005 am. 10 item 1): a §4.2 helper definition, an app.correlation_id read and a non-app set_config are clean', () => {
+    expect(lintCase('context-helper')).toEqual([]);
+  });
+});
+
+describe('bootstrap secret variables (PR5-SEC-12)', () => {
+  it.each([['secret-variable'], ['password-literal'], ['password-other-variable']])('%s fails', (name) => {
+    const findings = bootstrapCase(name);
+    expect(rules(findings)).toEqual(['S']);
+    expect(findings[0]?.message).not.toMatch(/alter role|select/i); // never echoes the statement (it may hold a plaintext)
   });
 });
 
