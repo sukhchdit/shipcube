@@ -8,7 +8,7 @@ Documentation capture for TASK-009 (SPK-02). Nothing here was produced by callin
 | API version | MyDHL API REST, spec line **3.3.x**. The SDK pins `x-version: 3.3.1` ("dated June 2026" per its README); ADR-0010 records reference-data guides 3.3.0 and 3.3.2. A search snippet of the portal shows "2.13.3" for an older listing. The current value of the `x-version` header is **unverified against DHL** |
 | Date checked | 2026-11-12 |
 | Verdict | **FALLBACK for operation semantics and field names** (paths confirmed from a secondary source; official spec unreadable). Fixtures are built from the secondary evidence and must be checked against the official YAML by a person with portal access (see section 7) |
-| Sandbox quirks | See [Sandbox quirks](#sandbox-quirks) |
+| Sandbox quirks | See [Sandbox quirks](#4-sandbox-quirks) |
 
 ## 1. Environments and authentication
 
@@ -49,14 +49,14 @@ All paths are relative to the base URL in section 1. "Confirmed (secondary)" = p
 | Path | `POST /shipments`, confirmed (secondary) |
 | Request fields seen | `plannedShippingDateAndTime`, `productCode`, `accounts[]` (`typeCode`, `number`), `customerDetails` (`shipperDetails`, `receiverDetails`, each with `postalAddress`, `contactInformation`, optional `typeCode`), `content` (`packages[]` with `weight` and `dimensions` `length`/`width`/`height`, `isCustomsDeclarable`, `description` **1 to 70 characters, required on every shipment including domestic**, `incoterm` **required on every shipment**, `unitOfMeasurement`, `declaredValue`, `declaredValueCurrency`, `exportDeclaration`), `pickup` (`isRequested`, per the SDK doc comment), `getRateEstimates`, `outputImageProperties` (`printerDPI` 200 or 300, `encodingFormat`, `splitTransportAndWaybillDocLabels`, `allDocumentsInOneImage`, `imageOptions[]`) |
 | Label formats | `encodingFormat` ∈ `pdf`, `zpl`, `lp2`, `epl` (SDK allow-list), confirmed (secondary). Label is returned **inline, base64, only by this call**; `GET /shipments/{n}/get-image` does not return the transport label, so persist it immediately (idempotency/duplicate-label guardrail) |
-| Response fields seen | `shipmentTrackingNumber`, `packages[]` (per-piece tracking numbers), `documents[]` (`typeCode`, `imageFormat`, `content` base64), `trackingUrl`, `cancelPickupUrl`, `dispatchConfirmationNumber`, `shipmentCharges`, `warnings[]` |
+| Response fields seen | `shipmentTrackingNumber`, `packages[]` (per-piece tracking numbers), `documents[]` (`typeCode`, `imageFormat`, `content` base64), `trackingUrl`, `cancelPickupUrl`, `dispatchConfirmationNumber`, `shipmentCharges`, `warnings[]`. Label bytes come only from `documents[].content`. `trackingUrl` and `cancelPickupUrl` are **never followed** by the adapter and **never surfaced** to clients: customer tracking links come from a configured per-carrier template, and pickup cancel goes through the configured base URL plus section 3.6 |
 | Customs | Commercial invoice data inside `content.exportDeclaration` (and `content.isCustomsDeclarable`); paperless trade uses special service `WY` (see 3.9) |
 | Idempotency | No client-reference de-duplication confirmed. Declare `idempotent create = false` |
 | Retry | Never (ADR-0010) |
 
 ### 3.3 Cancel shipment (`cancelShipment`) - gap
 
-**No cancel/delete-shipment operation appears in the SDK, which wraps every MyDHL operation it knows (rates, products, shipments incl. add-piece/upload-image/upload-invoice-data, tracking, pickups incl. update and cancel, images, proof of delivery, address validate, service points, landed cost, identifiers, reference data, early shipment screening).** Whether MyDHL exposes shipment cancellation is therefore **unverified**; the SDK suggests it does not (cancelling a pickup is the available action). Recommended: declare `cancelShipment` as `CAPABILITY_NOT_SUPPORTED` for DHL until the official spec shows otherwise, and let the saga void the Platform shipment while the carrier shipment lapses, and cancel the pickup via 3.6. **This is the main FALLBACK item (section 8).**
+**No cancel/delete-shipment operation appears in the SDK, which wraps every MyDHL operation it knows (rates, products, shipments incl. add-piece/upload-image/upload-invoice-data, tracking, pickups incl. update and cancel, images, proof of delivery, address validate, service points, landed cost, identifiers, reference data, early shipment screening).** Whether MyDHL exposes shipment cancellation is therefore **unverified**; the SDK suggests it does not (cancelling a pickup is the available action). Recommended: declare `cancelShipment` as `CAPABILITY_NOT_SUPPORTED` for DHL until the official spec shows otherwise, and let the saga void the Platform shipment while the carrier shipment lapses, and cancel the pickup via 3.6. **This is the main FALLBACK item (section 8).** Because the label is returned only by `createShipment` (3.2) and there is neither a cancel nor a label recovery, an ambiguous create (timeout or 5xx) can leave a carrier shipment that exists without a stored label and cannot be cancelled; TASK-135 needs a reconciliation step for ambiguous creates (for example a tracking lookup by shipper reference, which is **unverified** for MyDHL) before the saga settles on `EXCEPTION`.
 
 ### 3.4 Track (`track`)
 
@@ -105,6 +105,27 @@ All paths are relative to the base URL in section 1. "Confirmed (secondary)" = p
 
 `POST /landed-cost`, confirmed (secondary): duties, taxes and fees for a lane with item lines; ADR-0010's `/landed-cost` path matches. Field names unverified.
 
+### 3.11 Personal data and secrets
+
+Input for the per-carrier redactor deny-list (ADR-0010 amendment 8, TASK-188), the SEC-TC-52/AC-45 sentinel tests and the TASK-113/TASK-214 URL handling. Field names are **confirmed (secondary)** from the D2 SDK value objects @ `50edb9b` (`src/ValueObjects/Contact.php`, `Address.php`, `RegistrationNumber.php`, `ShipmentRequest.php`) and stay **unverified** against DHL's spec until the person-diff (section 7 item 1). TASK-135 owns the final `sensitive-fields` module.
+
+| Operation | Request-side personal data, tax IDs and secrets (field names) |
+|---|---|
+| Every call | `Authorization: Basic` header (API key and **secret**) |
+| Rate (`POST`), Ship | `accounts[].number` (account ID); `customerDetails.shipperDetails` / `receiverDetails` (and other parties): `contactInformation.fullName`, `contactInformation.companyName`, `contactInformation.phone`, `contactInformation.email`, `postalAddress.addressLine1` to `addressLine3`, `postalAddress.postalCode`, `postalAddress.cityName`; `registrationNumbers[]` (`typeCode`, `number`, `issuerCountryCode`: PAN, GSTIN, IEC or VAT values, `SPER`, never logged); `content.exportDeclaration` (invoice parties and line items) |
+| Pickup create and update | `customerDetails.shipperDetails.contactInformation.*` and `postalAddress.*` as above; `accounts[].number`; `remark` (free text: must not carry personal data) |
+| Invoice data and upload-image | Invoice parties (`registrationNumbers[]`, contact and address fields) and document content |
+
+**Identifiers and personal data placed in URL paths or query strings** (these reach HttpClient logs, error text and OTel `url.full` and bypass body redaction; TASK-113 records a route template instead):
+
+- `GET /rates` and `GET /products`: `accountNumber`, `originPostalCode`, `originCityName`, `destinationPostalCode`, `destinationCityName` in the query.
+- `GET /shipments/{n}/tracking` and `GET /tracking?shipmentTrackingNumber=…`: waybill numbers in the path or query.
+- `GET /shipments/{n}/get-image`: `shipperAccountNumber` in the query.
+- `DELETE /pickups/{dispatchConfirmationNumber}`: `requestorName` (**required**, naturally a person's name) and `reason` in the query. The adapter sends a fixed, non-personal `requestorName` derived from `BRAND_*` configuration (or an operations role name), never a user's or shipper's name, and `reason` from a fixed enum.
+- `GET /address-validate`: address parts in the query.
+
+**Data minimisation flags (TASK-135, binding):** use `trackingView=all-checkpoints` (not `all-checkpoints-with-remarks`, not `shipment-details-only`); do not call `GET /shipments/{n}/proof-of-delivery` (in particular not `epod-detail-esig`, which returns a signature); never follow `trackingUrl` or `cancelPickupUrl` (section 3.2). Enabling any of these needs a story and an ADR-0019 document path.
+
 ## 4. Sandbox quirks
 
 - 500 calls per day per credential set (section 2). Use one or two calls per live run.
@@ -115,13 +136,16 @@ All paths are relative to the base URL in section 1. "Confirmed (secondary)" = p
 
 ## 5. Sources
 
-| ID | Source | Retrieved | Used for |
+Web pages and search snippets cannot be pinned to a commit; their retrieval date is the pin. The GitHub source is pinned to the commit read.
+
+| ID | Source | Pin / retrieved | Used for |
 |---|---|---|---|
-| D1 | https://developer.dhl.com/api-reference/dhl-express-mydhl-api | 2026-11-12 | **Not readable (WAF "Request Rejected")**; listed so the gap is explicit |
-| D2 | https://github.com/sonnenglas/mydhl-php-sdk (README, `src/Client.php`, `src/Services/*.php`, `src/ValueObjects/*.php`, `src/ResponseParsers/*.php`; third party, MIT, spec 3.3.1) | 2026-11-12 | Base URLs, headers, paths, parameters, limits, quirks |
-| D3 | https://www.dhl.de/int-static/downloads/ext/dhl/express/Developer_Portal_MyDHL_API_EN.pdf (official DHL PDF, 3 slides, created 2025-07-03; text streams unreadable, only link annotations read) | 2026-11-12 | Onboarding links only |
-| D4 | https://www.dhl.com/discover/en-gb/ship-with-dhl/shipping-solutions/shipping-tools/mydhl-api and https://www.dhl.de/en/geschaeftskunden/express/business-loesungen/mydhlapi.html (official DHL marketing pages, via search results) | 2026-11-12 | Existence of the REST API, test and production hosts, YAML in the portal Downloads section |
-| D5 | Search snippet of https://developer.dhl.com/express (Japanese locale) | 2026-11-12 | 500 calls per day sandbox quota (corroborates the SDK) |
+| D1 | https://developer.dhl.com/api-reference/dhl-express-mydhl-api | web page, not pinnable · retrieved 2026-11-12 | **Not readable (WAF "Request Rejected")**; listed so the gap is explicit |
+| D2 | https://github.com/sonnenglas/mydhl-php-sdk/tree/50edb9bb5108b39c440f27e680d80524477e9a59 (README, `src/Client.php`, `src/Services/*.php`, `src/ValueObjects/*.php`, `src/ResponseParsers/*.php`; third party, MIT, spec 3.3.1) | `50edb9b` (committed 2026-08-06; default-branch head on 2026-11-12) · 2026-11-12 | Base URLs (`src/Client.php` lines 24-25: `…/mydhlapi/` and `…/mydhlapi/test/`), headers, paths, parameters, limits, quirks, personal-data field names (section 3.11) |
+| D3 | https://www.dhl.de/int-static/downloads/ext/dhl/express/Developer_Portal_MyDHL_API_EN.pdf (official DHL PDF, 3 slides, created 2025-07-03; text streams unreadable, only link annotations read) | PDF, not pinnable · retrieved 2026-11-12 | Onboarding links only |
+| D4a | https://www.dhl.com/discover/en-gb/ship-with-dhl/shipping-solutions/shipping-tools/mydhl-api (official DHL marketing page, via search result) | search result, not pinnable · retrieved 2026-11-12 | Existence of the REST API, test and production hosts |
+| D4b | https://www.dhl.de/en/geschaeftskunden/express/business-loesungen/mydhlapi.html (official DHL marketing page, via search result) | search result, not pinnable · retrieved 2026-11-12 | YAML in the portal Downloads section |
+| D5 | Search snippet of https://developer.dhl.com/express (Japanese locale) | search result, not pinnable · retrieved 2026-11-12 | 500 calls per day sandbox quota (corroborates the SDK) |
 
 ## 6. ADR-0010 re-verify items: result
 
@@ -161,13 +185,13 @@ Names only. All fixtures are **synthesised** (labelled `"_fixture": "synthesised
 | `rates` (GET) | `rates-us-in-three-products`, `rates-customs-declarable`, `rates-customer-agreement` | `rates-400-invalid-postal-code`, `rates-401-bad-credentials`, `rates-404-no-product`, `rates-422-weight-limit`, `rates-429`, `rates-503` | `rates-warning-partial-products`, `rates-unmapped-product-code`, `rates-volumetric-over-provided-weight`, `rates-multiple-currencies`, `rates-timeout` |
 | `rates` (POST multi-piece) | `rates-multipiece-success` | `rates-multipiece-400-too-many-pieces` | `rates-multipiece-mixed-dimensions` |
 | `products` | `products-us-in` | `products-400-invalid-lane` | `products-warning-partial` |
-| `shipments` (create) | `shipment-pdf-label`, `shipment-zpl-label`, `shipment-international-with-invoice`, `shipment-pickup-requested` | `shipment-400-missing-description`, `shipment-400-missing-incoterm`, `shipment-401`, `shipment-422-invalid-product`, `shipment-429`, `shipment-500-ambiguous`, `shipment-timeout-ambiguous` | `shipment-multi-piece`, `shipment-warnings-array`, `shipment-label-missing-content`, `shipment-documents-order-variant` |
+| `shipments` (create) | `shipment-pdf-label`, `shipment-zpl-label`, `shipment-international-with-invoice`, `shipment-pickup-requested` | `shipment-400-missing-description`, `shipment-400-missing-incoterm`, `shipment-401`, `shipment-422-invalid-product`, `shipment-429`, `shipment-500-ambiguous`, `shipment-timeout-ambiguous` | `shipment-multi-piece`, `shipment-warnings-array`, `shipment-label-missing-content`, `shipment-documents-order-variant`, `shipment-carrier-urls-not-followed` (`trackingUrl` and `cancelPickupUrl` pointing to an off-list host or `https://169.254.169.254/` cause zero outbound requests and no carrier URL in the canonical result) |
 | `shipments/{n}/upload-image` | `upload-image-204-empty-body` | `upload-image-400-before-ten-minutes`, `upload-image-400-missing-wy-service` | `upload-image-replace-existing` |
 | `shipments/{n}/upload-invoice-data` and `invoices/upload-invoice-data` | `invoice-data-success` | `invoice-data-400-wrong-product-code` | `invoice-data-different-schema` |
 | `shipments/{n}/tracking` | `track-delivered`, `track-in-transit`, `track-out-for-delivery`, `track-label-created`, `track-exception`, `track-returned` | `track-404-unknown-waybill`, `track-401`, `track-429`, `track-503` | `track-signatory-redaction`, `track-event-with-gmt-offset`, `track-multi-piece` |
 | `tracking` (batch) | `track-batch-three-waybills` | `track-batch-400-over-200` | `track-batch-no-gmt-offset`, `track-batch-partial-not-found` |
 | `pickups` (create) | `pickup-create-success` | `pickup-create-400-past-date`, `pickup-create-400-over-10-days`, `pickup-create-422-no-service`, `pickup-create-500-ambiguous` | `pickup-create-existing-pickup-warning` |
-| `pickups/{n}` (cancel) | `pickup-cancel-success` | `pickup-cancel-404-unknown`, `pickup-cancel-400-missing-reason` | `pickup-cancel-already-collected` |
+| `pickups/{n}` (cancel) | `pickup-cancel-success` | `pickup-cancel-404-unknown`, `pickup-cancel-400-missing-reason` | `pickup-cancel-already-collected`, `pickup-cancel-requestorname-not-personal` (the query carries the configured constant, and its sentinel never appears in logs or spans) |
 | `address-validate` (optional) | `address-valid` | `address-400-unsupported-country` | `address-pickup-not-possible` |
 | `servicepoints` (optional) | `servicepoints-by-address` | `servicepoints-400-bad-coordinates` | `servicepoints-empty` |
 | `landed-cost` (optional) | `landed-cost-us-in` | `landed-cost-400-invalid-hs-code` | `landed-cost-partial-charges` |
