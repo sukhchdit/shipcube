@@ -118,10 +118,13 @@ export function createDatabaseAdapter(source: DatabaseClientOptions | pg.Pool): 
   return new PrismaPg(source instanceof pg.Pool ? source : toPoolConfig(source));
 }
 
-/** Constructor shape of a generated Prisma 7 client (`new PrismaClient({ adapter })`). */
-export type PrismaClientConstructor<TClient> = new (options: { adapter: PrismaPg }) => TClient;
+/**
+ * Constructor shape of a generated Prisma 7 client (`new PrismaClient({ adapter, errorFormat })`). `errorFormat` is
+ * always `minimal` (PR7-SEC-03 item 4): error messages then carry no query excerpt or input values.
+ */
+export type PrismaClientConstructor<TClient> = new (options: { adapter: PrismaPg; errorFormat: 'minimal' }) => TClient;
 
 /** Builds the runtime Prisma client: `createDatabaseClient(PrismaClient, config.db)`. */
 export function createDatabaseClient<TClient>(Client: PrismaClientConstructor<TClient>, options: DatabaseClientOptions): TClient {
-  return new Client({ adapter: createDatabaseAdapter(options) });
+  return new Client({ adapter: createDatabaseAdapter(options), errorFormat: 'minimal' });
 }

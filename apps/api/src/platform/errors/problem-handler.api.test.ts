@@ -188,6 +188,28 @@ describe('AT-US-007-03: 5xx never leaks internals', () => {
     expect(logged.map((entry) => entry.fields?.['error_class'])).toEqual(['DatabaseError', 'string']);
   });
 
+  it('[PR7-SEC-03 item 2] a Prisma driver-adapter error never contributes message, originalMessage, detail, hint or meta', async () => {
+    const { app, setThrown } = harness();
+    class PrismaClientKnownRequestError extends Error {
+      readonly code = 'P2039';
+      readonly clientVersion = '7.10.1';
+      readonly meta = {
+        modelName: 'users',
+        driverAdapterError: {
+          cause: {
+            originalCode: '42501',
+            originalMessage: `new row violates row-level security policy for table "users" (${SECRET})`,
+            kind: 'postgres',
+            detail: `Failing row contains (${SECRET})`,
+            hint: 'SELECT set_config(...)',
+          },
+        },
+      };
+    }
+    setThrown(new PrismaClientKnownRequestError(`Invalid \`prisma.users.create()\` invocation: ${SECRET}`));
+    expectGeneric500(await request(app).get('/api/v1/throws'));
+  });
+
   it('AT-US-007-03: a 5xx AppError carrying a secret detail still answers the generic detail', async () => {
     const { app, setThrown } = harness();
     setThrown(new AppError('SERVICE_UNAVAILABLE', { detail: `pool exhausted for ${SECRET}`, cause: new Error(SECRET) }));

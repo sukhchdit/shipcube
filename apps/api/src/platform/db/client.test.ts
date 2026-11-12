@@ -101,12 +101,13 @@ describe('runtime database client factory (data-model §7.1)', () => {
     expect(adapter.provider).toBe('postgres');
   });
 
-  it('constructs the injected Prisma client class with the adapter', () => {
+  it('[PR7-SEC-03 item 4] constructs the injected Prisma client class with the adapter and errorFormat minimal', () => {
     class FakeClient {
-      constructor(readonly init: { adapter: PrismaPg }) {}
+      constructor(readonly init: { adapter: PrismaPg; errorFormat: 'minimal' }) {}
     }
     const client = createDatabaseClient(FakeClient, options);
     expect(client).toBeInstanceOf(FakeClient);
     expect(client.init.adapter).toBeInstanceOf(PrismaPg);
+    expect(client.init.errorFormat).toBe('minimal');
   });
 });

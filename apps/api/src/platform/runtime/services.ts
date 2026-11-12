@@ -7,6 +7,7 @@ import type { Config, Service } from '@platform/config';
 
 import { createDatabasePool, type DatabaseClientOptions } from '../db/client.js';
 import { createDatabaseCheck } from '../db/health-check.js';
+import { createSessionIntegrityGuard, type SessionIntegrityGuard } from '../db/session-integrity.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
 import { createReadinessProbe, pendingCheck, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
@@ -32,9 +33,9 @@ export function databaseOptionsFrom(config: Config, service: Service): DatabaseC
  * pending until their clients exist: object storage with the S3 adapter (TASK-019), audit partitions and chain
  * verification with the audit store (TASK-021).
  */
-export function readinessChecks(pool: DatabasePool, valkey: ValkeyClient): readonly ReadinessCheck[] {
+export function readinessChecks(pool: DatabasePool, valkey: ValkeyClient, integrity?: SessionIntegrityGuard): readonly ReadinessCheck[] {
   return [
-    createDatabaseCheck(pool),
+    createDatabaseCheck(pool, integrity),
     createValkeyCheck(valkey),
     pendingCheck('object_storage'),
     pendingCheck('audit_partitions'),
@@ -59,10 +60,15 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
     connectionName: service,
     onError: (errorClass) => log.warn('valkey.error', { error: errorClass }),
   });
+  // PR7-SEC-06 item 3 / PR7-SEC-02 item 2: drift is a security event and makes the database not ready.
+  const integrity = createSessionIntegrityGuard({
+    pool,
+    onDrift: (findings) => log.warn('security.db_session_integrity', { findings: findings.join(',') }),
+  });
   return {
     pool,
     valkey,
-    probe: createReadinessProbe(readinessChecks(pool, valkey)),
+    probe: createReadinessProbe(readinessChecks(pool, valkey, integrity)),
     resources: [
       { name: 'database', close: () => pool.end() },
       { name: 'valkey', close: () => valkey.quit().then(() => undefined) },
