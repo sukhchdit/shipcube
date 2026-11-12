@@ -57,6 +57,12 @@ Round 2 of a spike PR (PR #6 r2):
 - **Express 5 `app.listen(port, cb)`:** cb is also the once-`error` listener.
 - **Problem handler:** check for `Cache-Control: no-store` and that headers set before the throw are stripped.
 - `git diff` covering `.env.example` is blocked by a permissions deny rule. Diff the other paths explicitly.
+- **Fix cycles add hand-written parsers. Time every new regex on adversarial input (PR #9 r2, R2-B1).**
+  - The killer shape is an optional group with the same quantified class on both sides of a separator: `(?:\s*;\s*(?:param)?)*\s*$`. Input `';  '`×20+`'!'` stalled for 100 s.
+  - Also check whether an earlier gate rejects the input. Here `type-is` accepted it.
+  - Prove it end to end over `app.listen(0)` with an event-loop gap sampler.
+  - Fix: put the OWS inside the optional group. Prove it with a random-string differential against the old regex.
+- **Two allow-lists for one value** (a config guard and a driver adapter) drift. Probe that every value the config accepts is also accepted at runtime, or the failure arrives as exit 1 with a stack, not exit 78.
 
 **CI gate / supply-chain checker patterns (PR #10, 2026-11-12).** Each was proven by a probe of under a minute.
 - **npm boolean flags take a bare `true`/`false` as their value.** `npm ci --ignore-scripts false` sets the flag to false, and the CLI value beats both env and `.npmrc`. Regex guards that only know `--flag=false` / `--no-flag` miss it. Probe: `npm config get ignore-scripts --ignore-scripts false`.

@@ -101,3 +101,142 @@ Constraints (D-ORCH-010): no `npm ci`, no builds, no Docker, no full suites. The
 - The `Allow` header is derived from the mounted routers, with a test pinning the Express internals, rather than a hand-kept table.
 - The generated module registry has a `--check` mode, and a test asserts the committed file is current.
 - Value-free errors are used throughout: class names, errno codes and key names, never messages or URLs.
+
+## Round 2 (head 05855b1)
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: Fix cycle 1 closes M1 correctly: a dedicated boot connection, NULL required, '' accepted on the pool afterwards,
+         only passes cached, single-flight, startup never rejects. m1, m3, m4, n1, n3, n7 and the security items are closed too.
+         But the new UTF-8 media-type check (PR9-SEC-01) adds an exponential-backtracking regex. One unauthenticated
+         request with a 77-byte Content-Type blocks the API event loop for about 100 s (probe-proven): BLOCKER R2-B1.
+```
+
+| Field | Value |
+|---|---|
+| Delta | `374166d..05855b1` (5 commits: 3cf1526, 1ed09e7, 056cd46, 6af84ef, 05855b1); `main` not merged (D-ORCH-014: after PR #10) |
+| Inputs | fix comment #issuecomment-6831965273; D-TASK006-02; D-ORCH-014; PR #9 security review (PR9-SEC-01..13) |
+| Hosted CI | `statusCheckRollup` empty on `05855b1` (lane A not on main yet) |
+| Reviewer | code-reviewer, 2026-11-12 |
+
+### R2.1 Verification performed by the reviewer
+
+Constraints: no commands in the TASK-006 worktree; no `npm ci`, builds, Docker or full suites. I ran everything below from a `git archive 05855b1` scratch copy, with `node_modules` junctioned to the worktree. The junction and the copy were removed afterwards. The worktree `node_modules` count is unchanged (740), there is no stray link at `C:\`, and the main checkout is clean apart from a pre-existing memory file.
+
+| Check | Result |
+|---|---|
+| unit `platform/db/session-integrity.test` | **17 passed** |
+| unit `platform/runtime/services.test` | **6 passed** |
+| unit `platform/health/router.test` | **18 passed** |
+| unit `platform/db/client.test` | **47 passed** |
+| unit `tools/deps/npm-node-options.test` (real npm, 4 sources, positive controls) | **5 passed** (8 s) |
+| api `problem-handler.api.test` | **40 passed** |
+| `prettier --check` on every changed file (excluding `.env.example`) | clean |
+| **ReDoS probe:** `isUtf8JsonContentType` directly; `type-is` accepts every input below as `application/json` | `application/json` + `';  '`×n + `'!'`: n=10 → 2 ms, n=14 → 153 ms, **n=18 (71 B) → 13.6 s, n=20 (77 B) → 101.6 s**. `' ;'`×22 → 100 ms. Long well-formed parameter lists stay linear (12 kB → 0.17 ms) |
+| **ReDoS over real HTTP** (`createApp` + `app.listen(0)`, `POST /unauthenticated-anything`, body `{}`) | 415 every time, but n=14 → 143 ms, n=15 → 310 ms, n=16 (65 B) → **960 ms with a 950 ms event-loop stall** (×3 per 3 bytes) |
+| Candidate fix (R2-B1): move the post-`;` OWS inside the optional parameter | adversarial inputs up to n=2000 run in < 5 ms; **0 differences** from the current regex over 200 000 random short headers (alphabet `` \t;a="\!/``) |
+| pg TLS probe (`new pg.Client(toPoolConfig(…)).connectionParameters`) | no sslmode + `PGSSLMODE=no-verify` or `require` → `ssl:false`. `disable` + `PGSSLMODE=require` → `false`. `prefer`, `require(+uselibpqcompat)`, `verify-full(+uselibpqcompat)`, `sslnegotiation=direct` alone, `%76erify-full` → `{rejectUnauthorized:true}`. The connection string reaches pg without a query string; host and db parse correctly |
+| Config-accepted params at the runtime | `?sslmode=verify-full&application_name=x` and `…&connect_timeout=5` → `DatabaseConfigError` (R2-m2) |
+| `toBodyError` | http-errors 400 (status on the prototype) → `MALFORMED_REQUEST`; 413 typed → unchanged; 500 → unchanged; own `status:400` → mapped; status 5 prototypes deep → not mapped (bounded walk, as designed) |
+
+**Not re-run by me:** lint, typecheck, the full unit suite (1041), integration (59; Testcontainers, including the new M1 `set_config`-before-first-probe test), build, `npm audit`, porcelain. For these I rely on the developer's gate table on `05855b1` in the fix comment. Coverage is owed on the merge-main head.
+
+### R2.2 Findings
+
+| ID | Sev | Location | Issue | Required fix |
+|---|---|---|---|---|
+| **R2-B1** | **BLOCKER** | `apps/api/src/platform/http/json-body.ts:31` (`MEDIA_TYPE`), reached from `:86` for every request with a body on every path, before routing and authentication | `(?:[ \t]*;[ \t]*(?:param)?)*[ \t]*$`: the parameter is optional, so a run of spaces between two `;` can be split between "after `;`" of one iteration and "before `;`" of the next in k+1 ways. A failing match therefore backtracks through (k+1)^m splits. `req.is()` runs first, but `type-is` accepts these headers as `application/json`, so nothing stops them. **One unauthenticated ~80-byte `Content-Type` freezes the whole API process:** ~100 s at 77 B, and hours a few bytes later. `/health/live` hangs too, so ECS restarts the task, and a trickle of requests keeps the service down. CWE-1333 / CWE-400. This was introduced by this fix cycle (PR9-SEC-01). | (1) Make the grammar unambiguous by moving the post-`;` OWS inside the optional parameter: ``new RegExp(`^[ \\t]*${TOKEN}/${TOKEN}(?:[ \\t]*;(?:[ \\t]*${TOKEN}=(?:${TOKEN}\|${QUOTED}))?)*[ \\t]*$`, 'u')``. My probe shows it is linear and accepts the same set. A small hand-written linear scanner is equally fine. (2) Defence in depth: refuse a `Content-Type` longer than a fixed bound (e.g. 256 B) with 415 before any regex. (3) Tests: unit rows for `';  '`×5000+`'!'`, `' ;'`×5000+`'!'` and `';\t \t'`×5000+`'!'`, each finishing within a small wall-clock budget (e.g. < 50 ms). A fast-check property: random strings over `` \t;a="\!/`` up to length 2000 each evaluate in < 50 ms. An api-test row with the adversarial header → 415. (4) Re-check `PARAMETER` and every other regex added in this delta against the same pattern (I found no other ambiguous one). |
+| R2-m1 | MINOR | `apps/api/src/platform/runtime/services.test.ts:45-49,61,68-70` | The tripwires' `pending` half is vacuous. `pendingNames()` returns the *names* of all non-database/redis checks, so it includes `object_storage`, `audit_partitions` and `audit_chain` whether or not those are stubs. When TASK-019 does the right thing (S3 client plus a real HeadBucket check), the test still fails with `{usesS3:true, pending:true}`. The developer must edit it, and the obvious edit (`usesS3: true`) silently re-accepts a stub forever. | Brand the stubs: `pendingCheck` registers its result in a module `WeakSet` and exports `isPendingCheck(check)`. Assert the implication: `!(usesS3 && isPendingCheck(objectStorage))`, and the same for the audit pair. Then the test passes once the stub is replaced and fails only while replacement exists and the stub is wired. |
+| R2-m2 | MINOR | `packages/config/src/guards.ts:62-69` vs `apps/api/src/platform/db/client.ts:68` | **Ruling on the allow-list inconsistency.** The config transport guard accepts `application_name` and `connect_timeout` on `DATABASE_URL`, but `toPoolConfig` refuses them (probe). The **runtime rule is correct**: `application_name` would override the per-service `applicationName` used for `pg_stat_activity` attribution, and `connect_timeout` would override the bounded `connectionTimeoutMillis`. Both sides fail closed, so this is not a security defect. But a URL that passes config validation in staging/production then dies in `createRuntimeServices` with exit 1 and a stack, instead of exit 78 naming the key (r1 n6). Two hand-kept allow-lists for one value will drift again. | Single-source the set in `@platform/config`, e.g. `RUNTIME_DATABASE_URL_PARAMS = ['sslmode','sslrootcert','sslnegotiation']`. The guard uses it, and `client.ts` imports it (an allowed edge). Apply the param-name and no-repeat part in **every** APP_ENV, not only hardened ones, so local fails with exit 78 too; the verify-full requirement stays hardened-only. Drop `uselibpqcompat` from both lists: it is now a no-op that suggests otherwise (D-TASK006-02 item 3). Fix in this PR or at the merge-main pass. If deferred, route to TASK-014 together with n6. |
+| R2-n1 | NIT | `apps/api/src/platform/errors/problem-handler.ts:52-61` | `fallbackProblemBody` hard-codes `DEFAULT_PROBLEM_TYPE_BASE` and ignores `options.typeBase`. In a deployment with a configured base, the PR9-SEC-07 fallback 500 is the only problem whose `type` points at the example domain. | Pass `options.typeBase ?? DEFAULT_PROBLEM_TYPE_BASE` into the fallback. Add a test row with a custom `typeBase`. |
+| R2-n2 | NIT | `apps/api/src/platform/db/session-integrity.ts:141-152` | After start-up, readiness checks a pooled connection that changes from call to call. A non-empty session-level leak on one connection (ADR-0005 item 16) therefore flaps the database component, and with "one event per transition" it emits an event on every flap. This is acceptable as a stop-gap, because the process-level latch is TASK-016 (r1 n8, D-ORCH-014 (c)). | TASK-016: once the leak latch exists, a pooled `context` finding should latch rather than flap. No change here. |
+
+### R2.3 Rulings on the reviewer focus items
+
+1. **M1 closure: closed.**
+   - `createSessionIntegrityGuard` uses `connectDedicated` until a dedicated check has passed, with `freshConnection: true`, so NULL is required. From then on it uses the pool and accepts NULL or `''`.
+   - `passedAt` is cleared at the start of every evaluation and set only on a pass. Drift and errors are therefore never reused.
+   - `findings` is left unchanged on an error, so per-transition de-duplication survives a transient failure.
+   - `inflight` coalesces readiness and the monitor.
+   - `probeDedicated` always `end()`s, including on a malformed row, and `dedicatedConnector` ends a client whose `connect` failed.
+   - The dedicated `pg.Client` uses the same `toPoolConfig`, so the same TLS pinning applies. It is bounded by `connectionTimeoutMillis`, `statement_timeout` and `query_timeout`, so a dead database delays boot by at most about 5 s.
+   - `services.startup()` cannot reject: `runStartupIntegrityCheck` catches and logs only the error class, and the test proves no `ECONNREFUSED`, host or value appears in the log.
+   - api: `await startup()` before `app.listen`. Worker: before `server.listen`, with a comment pinning processors after it.
+   - The unit test reproduces my r1 scenario (pooled `''` at 0 / 60 % / 99.9 % / 100 % / 250 %). The integration test proves the backend really reads `''` before asserting ready.
+   - D-TASK006-06 is superseded by D-TASK006-02; accepted.
+2. **PR9-SEC-05 monitor:** accepted. It is unref'd, swallows failures, is closed first among the resources, and has a fake-timer test plus a `hasRef()` check.
+3. **m3 readiness single-flight + TTL: closed.** One in-flight promise. `last` is set only on completion, timed at completion. Draining bypasses both the cache and I/O. The 50-way concurrency, 999/1000 ms boundary and default-TTL tests are good. `health.int.test` uses `cacheTtlMs: 0` with a reason.
+4. **m1 status read from the prototype: closed.**
+   - `statusOf` reads data properties only (no getter runs) and walks at most 4 levels, with a guarded `getPrototypeOf` (hostile Proxy).
+   - Mapping happens at the source, as asked, and only for errors the classifier would call `unexpected`.
+   - Corrupt gzip, deflate and br are proven over a real listener.
+5. **m4 headers: closed.** The four representation headers are removed, `Cache-Control: no-store` is set, and `expectProblem` now asserts this on every problem test. Express's own weak ETag of the problem body is harmless under `no-store`.
+6. **PR9-SEC-07 (INFO-07) fallback: accepted** (R2-n1 NIT).
+   - The handler body is wrapped. With headers already sent it calls `destroy()`; otherwise it sends a pre-built body.
+   - The logger call is guarded separately.
+   - `instanceOf` and `markErrorResponse` cannot throw on Express inputs, so the fallback cannot itself escape to finalhandler's HTML.
+   - The BigInt test proves no HTML and no stack.
+7. **Degraded audit stubs (PR9-SEC-11): accepted.**
+   - `HealthReady` allows `degraded` for the audit pair with HTTP 200.
+   - US-012 "Healthy stack" (EPIC-01 L456-459) only requires 200 and postgres/redis/object-storage up, so AT-US-012-01 still holds on a real stack.
+   - The test helpers now use explicit passing stubs, which is the right separation.
+   - Tripwire design: see R2-m1. The S3 tripwire scans `apps/api/src`, which matches the planned `apps/api/src/platform/storage/s3-object-storage.ts` (WAVE-00 L705). m2 (sheet lines and US-012 traceability) is still orchestrator-owned.
+8. **TLS pinning design (PR9-SEC-04): accepted.**
+   - Taking the query string away from pg and deriving an explicit `ssl` is the right control. The probe shows URL, `PGSSLMODE` and `uselibpqcompat` cannot weaken it.
+   - Treating `allow`/`prefer`/`require`/`verify-ca` as verify-full is a deliberate fail-closed deviation from libpq. It is documented in `client.ts` and D-TASK006-02.
+   - Hardened environments only ever reach `verify-full` (the config guard requires it). In local/test, compose uses `sslmode=disable` → `ssl:false`.
+   - `sslrootcert` → `ca` replaces Node's default roots, which is correct for the RDS bundle. libpq's `sslrootcert=system` fails closed (file not found) and the path is not echoed.
+   - Valkey: `rejectUnauthorized: true` in both branches, enforced by the type.
+   - `tlsVerificationGuard`: refusing any value other than `1` in staging/production is stricter than Node (only `'0'` disables), which is fine. The value is never printed (proven at exit 78).
+   - Residuals routed: `NODE_EXTRA_CA_CERTS` (item 3) → TASK-014.
+9. **Pre-existing inconsistency (config allows `application_name`/`connect_timeout`, `toPoolConfig` refuses them):** see R2-m2. The runtime rule wins; single-source it in `@platform/config`.
+10. **PR9-SEC-02 `prismaExecArgs`: accepted.**
+    - One builder is used by both callers, and the flag sits before `--`. A hostile Prisma argument stays after `--`.
+    - The real-npm proof covers env (both casings), a userconfig `.npmrc` and a project `.npmrc`, each with a **positive control** that must show the preload. That is exactly the evidence standard asked for.
+    - The `script-shell` residual and the `process.execPath`-on-the-CLI-entry design are rightly routed (TASK-007 / tools-deps follow-up).
+11. **Test quality:** strong overall.
+    - Fake clocks rather than sleeps, positive controls, and value-free assertions.
+    - Integration evidence asserts the precondition (`''` on the backend) before the claim.
+    - Two weak spots: the vacuous tripwire half (R2-m1), and no performance or adversarial test for the new parser (R2-B1).
+
+### R2.4 Closure of round-1 findings
+
+| ID | Status at 05855b1 |
+|---|---|
+| **M1** | **Closed** (§R2.3 item 1) |
+| m1 | **Closed** (corrupt gzip/deflate/br → 400 over real HTTP) |
+| m2 | Routed (orchestrator: TASK-019/TASK-021 sheet lines, US-012 traceability). Interim tripwires added; fix R2-m1 |
+| m3 | **Closed** |
+| m4 | **Closed** |
+| m5 | Routed → TASK-010 (unchanged) |
+| n1 | **Closed** (`app.listen` callback checks `error`) |
+| n2 | Comment reworded here; pre-close delay routed → TASK-214 |
+| n3 | **Closed** (both comments); platform.md:341 → architect |
+| n4 | Routed → TASK-016 (D-ORCH-014 (a)) |
+| n5 | **Open** (not in this cycle). `O_NONBLOCK` + parent-component note → TASK-014 or the next config touch |
+| n6 | **Open**; merges with R2-m2 |
+| n7 | **Closed** (PR body verified: `X-Correlation-Id`, `AUTH_REQUIRED`, per-finding events) |
+| n8 | Routed → TASK-016 (D-ORCH-014 (c)) |
+| n9 | Routed → TASK-017 |
+| n10 | Routed → first BullMQ task |
+| PR7-SEC-06 item 3 + PR7-SEC-02 item 2 | **Closed** with M1 |
+| PR9-SEC-01 | Intent met (UTF-8 only, 415 before reading). **Implementation reopened by R2-B1** |
+| PR9-SEC-02 items 1–2, -04 items 1/2/4, -05, -07, -08, -11 | **Closed** (§R2.3) |
+
+### R2.5 Security flags for security-analyst
+
+- **R2-B1 (new, introduced by the PR9-SEC-01 fix):** unauthenticated ReDoS on every request path. CWE-1333, OWASP A05/A04. Exploitability is trivial (one short header) and the impact is a full process stall. Please re-verify the replacement regex and the length bound.
+- R2-m2: single-source the runtime DB URL allow-list (fail closed both ways; operability).
+- Suggest a repo-wide control for this class (lane A owner, TASK-007): a Semgrep or ESLint super-linear-backtracking rule, which needs a dependency justification if it is `eslint-plugin-regexp`. Optional; not a merge condition.
+
+### R2.6 Merge conditions
+
+1. R2-B1 fixed with the tests listed, then a round-3 review of that delta. R2-m1 and R2-n1 are small and should land in the same cycle. R2-m2 should land here or at the merge-main pass; otherwise it is routed with n6 to TASK-014.
+2. Unchanged from r1 §6 items 2–4: merge-main after PR #10 with full gates (lint incl. Semgrep, format, typecheck, unit, api, integration incl. session integrity and health, build, porcelain, coverage) plus the pure-union proof. Hosted lane A green, or the D-ORCH-004 local-gate record. Squash-merge.
+3. PR #11 reconciliation per D-ORCH-014 (a)–(f) when it merges second. Note that (c) must keep the start-up order established here: dedicated check first, then the latch and `withTenantTx` wiring.
+
+### R2.7 Worth keeping
+
+- The fix comment maps every finding to the exact proof, including the reviewer's own scenario replayed at the same interval fractions.
+- Real-tool proofs with positive controls (npm `node-options`), and integration tests that assert the precondition before the claim.
+- TLS is decided in one place from allow-listed selectors, and the driver never sees the selectors. That pattern should be reused for every future driver URL.

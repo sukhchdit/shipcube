@@ -115,6 +115,14 @@ PR #9 (TASK-006 runtime skeleton) r1 at 374166d was CHANGES_REQUESTED (2026-11-1
   - n4 and n8 (TASK-016): the pin test must parse every bootstrap/*.sql; add a not-ready latch.
   - n10 (first BullMQ task): BullMQ needs `maxRetriesPerRequest: null`.
 - Closed by PR #9 (r2 to verify): PR #2 m8 and R2-n7; PR #5 m7; PR3 m4, m5, SEC-05, SEC-06, SEC-07 and SEC-16; PR5-SEC-07 and SEC-08; PR7-SEC-03 items 2 and 4.
+- r2 at 05855b1 is still CHANGES_REQUESTED (2026-11-12).
+  - Closed: M1, m1, m3, m4, n1, n3, n7.
+  - **R2-B1 BLOCKER:** the PR9-SEC-01 `MEDIA_TYPE` regex in json-body.ts has an optional param plus OWS on both sides of `;`. That is exponential ReDoS: about 80 bytes of Content-Type means about 100 s of event-loop stall, unauthenticated, on any path.
+  - Fix: move the post-`;` OWS inside the optional param, plus a length bound and timing tests.
+  - R2-m1: the tripwire `pending` half in services.test is vacuous; ask for a `isPendingCheck` brand.
+  - R2-m2: single-source the DATABASE_URL param allow-list in @platform/config (the runtime set wins; drop `uselibpqcompat`). Merges with n6.
+  - R2-n1: the fallback problem ignores `typeBase`.
+  - r3: re-run the ReDoS probe (`';  '`×20+`'!'`) on the fix. Still open: n5 (FIFO `O_NONBLOCK`).
 
 PR #10 (TASK-007 lane A) r1 at 28442b6 was CHANGES_REQUESTED (2026-11-12). Review: `docs/05-quality/reviews/PR-0010-TASK-007-code-review.md`.
 - M1: `--ignore-scripts false` and the npm install aliases bypass check-install-flags and check-workflow-policy.
