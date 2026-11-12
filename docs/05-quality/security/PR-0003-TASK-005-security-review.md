@@ -420,3 +420,221 @@ Suggested refinements:
 | Secret-shape scan of added lines | 0 key, token, PEM, AWS or Stripe shapes; URL-credential hits are only `CHANGE_ME`, `local-only-*` or a test fixture |
 | Lockfile | `packages/config` declares `zod ^4.6.7` (already locked, MIT); no package entry added or changed |
 | Not run (host constraints) | `npm ci`, build, unit suites, gitleaks (Docker), Semgrep (not installed). PR evidence accepted: 226/226 tests, coverage 99.89 % lines / 97.69 % branches |
+
+## Round 2 (head 875409d)
+
+| Field | Value |
+|---|---|
+| Delta | `be468bc..875409d`, 1 commit (`875409d fix(config): review fix cycle 1 for TASK-005 (PR #3 round 1)`), 27 files, +1,650 / −156. `gh pr view 3`: head `875409d4`, OPEN, MERGEABLE |
+| Fix comment | https://github.com/sukhchdit/shipcube/pull/3#issuecomment-6825516810 |
+| Reviewer / date | security-analyst, 2026-11-12. Review by SHA only: the `Shipqube-TASK-005` worktree was not touched, because a merge-main pass runs there. Node 24.22.3 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS. No Critical or High finding is open, so merge is allowed.** **Closed:** PR3-SEC-01, -02 (every round-1 vector), -04, -07 (adapter hardening residue routed as INFO), -10. **Open:** PR3-SEC-03 stays LOW (partly remediated). **New:** one MEDIUM, PR3-SEC-12: an opaque `rediss:` URL passes the Valkey guard, and ioredis then sends the password in clear. It is a ~5-line fix, so I recommend landing it in this PR; otherwise it is binding on TASK-006. Also new: PR3-SEC-13 LOW, PR3-SEC-14 LOW (latent) and PR3-SEC-15 INFO |
+
+### R2.1 Method
+
+- **Code read.** Every changed non-test source, in full, read from `git archive 875409d` into the scratchpad. Tests were read for every claimed PR3-SEC vector.
+- **Probes ran against the PR's own code.**
+  - Setup: the `875409d` sources were transpiled with Node 24's `module.stripTypeScriptTypes` into the session scratchpad (`review/PR-3-sec-r2/build`). That build resolves `node_modules` from the main checkout, which has the same locked versions: joi 18.3.2, pg 8.23.1, pg-connection-string 2.14.1, ioredis 6.0.0, zod 4.6.7, fast-check.
+  - Scripts and outputs sit in `review/PR-3-sec-r2/probes/`:
+    - `transport.mjs`, `redis-wire.mjs`: guard against driver;
+    - `node-options.mjs`, `belt.mjs`: guard against Node's own parser and the process edge;
+    - `misc.mjs`: NODE_ENV, tooling keys, placeholders, timeout, leakage, file provider;
+    - `envdiff.mjs`, `shapescan.mjs`: value-free checks of the env files and of secret shapes.
+  - Credentials are runtime-random. Output is booleans and issue codes; inspector URLs are redacted.
+- **Driver behaviour was observed, not inferred.**
+  - For pg: `pg/lib/connection-parameters` on each URL.
+  - For ioredis: `parseURL` plus the exact `startsWith("rediss://")` test from `ioredis/built/Redis.js:707`.
+  - A loopback TCP listener captured the first bytes ioredis sends for a guard-accepted URL.
+- **Env files.** The `.env.example` and `compose.env` changes were checked only with a classifier that prints each key with a shape class and the `isPlaceholder` verdict, never the value.
+- **Not run, per the constraints:** `npm ci`, the build, the unit suites, gitleaks and Semgrep. I accept the PR gate evidence: 430/430 tests; `packages/config` coverage 99.91 % lines and 97.56 % branches; `npm audit --audit-level=high` exit 0.
+
+### R2.2 Round-1 findings: status at `875409d`
+
+| ID | R1 severity | Status | Verification |
+|---|---|---|---|
+| PR3-SEC-01 | MEDIUM | **Closed** | `nodeOptionTokens` matches Node's `ParseNodeOptionsEnvVar`: double quotes group a token, and `\` escapes only inside quotes. It splits on any `\s`, while Node splits on space only, so the guard is stricter than Node. Option names are normalised (`'` dropped, cut at `=`, `_`→`-`, lower-cased), and the `--inspect*` / `--debug*` prefixes are refused. Differential probe over 17 forms: **no form for which Node 24.22.3 starts the inspector is accepted.** Details: the quoted, mid-token-quoted, escaped, `--inspect_port` and empty-quotes-prefix (`"" --inspect=…`) forms are refused, and the inspector is on in each. Tab, newline and NBSP separators and upper-case flags are refused by the guard, and Node will not start with them (exit 9). `--experimental-config-file` and `--experimental-default-config-file` (a `nodeOptions.inspect` route) exit 9 inside NODE_OPTIONS. The process-edge belt (`process-env.ts:71-76`) works: CLI `--inspect=127.0.0.1:0` → exit 78 with `NODE_OPTIONS: debug-flag: runtime.inspector`; quoted NODE_OPTIONS → exit 78; the control → exit 0 and ready. Residual risks: PR3-SEC-13 (new) and SIGUSR1 (TASK-014, unchanged) |
+| PR3-SEC-02 | MEDIUM | **Closed (all round-1 vectors)**; successor PR3-SEC-12 | **PostgreSQL** (`guards.ts:54-55`). Refused: a duplicate `sslmode`, including a percent-encoded key name (`ssl%6Dode=disable`), because `URLSearchParams` decodes keys exactly as pg-connection-string does; any `ssl=` parameter; a missing `sslmode`. With `verify-full`, pg yields `ssl:{}` and `rejectUnauthorized` keeps its default of true. `uselibpqcompat=true&sslmode=verify-full` keeps verification: the source has `case 'verify-full': break`, and the probe shows no `checkServerIdentity` override. Joi rejects the two forms where pg reads a URL differently from the guard: the empty-host `user:pw@/db?host=…` form (pg's `___DUMMY___` fallback would accept it as plaintext), and upper-case schemes. **Valkey:** `?tls=`, `?tls=false` and `?family=4` are refused. Plain `rediss://` gives a TLS ClientHello on the wire (`0x16`). **New vector:** PR3-SEC-12 |
+| PR3-SEC-03 | LOW | **Open (LOW), partly remediated** | `nodeEnvGuard` (`guards.ts:139-142`) adds the **converse** check: a hardened `APP_ENV` requires the raw `NODE_ENV=production`. With `APP_ENV=staging`, an unset, `development` or `" production"` NODE_ENV is refused, which fails closed. **The round-1 scenario is still accepted.** `APP_ENV=local` with `NODE_ENV=production` and a `local-only-*` `CSRF_KEY` → ACCEPTED, and `localOnly: true` reaches `Config`. The remaining remediation is unchanged: principal-architect picks round-1 option (a) or (b) (option (b) fits best because it has no local impact: refuse `APP_ENV ∈ {local, test}` when `ECS_CONTAINER_METADATA_URI_V4` or `AWS_EXECUTION_ENV` is set); the first key-provider task asserts `isLocalAppEnv` before using local-only material; the IaC task validates `app_env` |
+| PR3-SEC-04 | LOW | **Closed** | `attemptResolve` races the provider against `AbortSignal.any([per-attempt timer, overall deadline])` (`secret-refs.ts:161-179`). Probes: a provider that never settles, with a 50 ms budget → `ref.timeout` after 363 ms (two attempts plus 100–300 ms jitter); a provider that ignores the signal and settles at 600 ms → cut off at about 310 ms. With the defaults (2 s per attempt, 4.5 s deadline), the whole call stays at or under 4.5 s, inside NFR-OPS-005's 5 s. There is no unhandled-rejection path: `race` subscribes to the provider promise, the abort listener is removed in `finally`, and the deadline is checked synchronously before the subscription. Budgets must be positive safe integers |
+| PR3-SEC-05 | LOW | Open (latent); unchanged | Routed to TASK-006 (binding), as in round 1 |
+| PR3-SEC-06 | LOW | **Open (latent), partly remediated** | Tooling keys are now outside the runtime schema. The API and the worker refuse all 7 of them by name with `APP_ENV=staging` (probe 7/7); none reaches `Config` in local; an empty value counts as absent. Still open: `AUDIT_ANCHOR_SIGNING_KEY` in the API, the private `JWT_SIGNING_KEYS` in the worker, and per-service env. Note for TASK-014: the shared `compose.env` now also carries `DATABASE_BOOTSTRAP_URL` (cluster admin, local-only marker) for **every** Compose service, so per-service env now matters more |
+| PR3-SEC-07 | LOW | **Closed**; residual hardening is INFO and routed | **Parser** (`secret-refs.ts:39`): 1–4 segments under `/run/secrets`; no segment may start with a dot; 10 negative vectors are tested. **Adapter** (`file-secret-provider.ts`): `realpath` confinement holds. On this Windows host, a junction under the root that points outside → `SECRET_FILE_OUTSIDE_ROOT`. Also refused: `../` traversal, `/etc/shadow` and `/run/secretsX/…`. A directory → `NOT_REGULAR`; 70 KiB → `TOO_LARGE`; ENOENT → `SecretNotFoundError`. Error messages carry no path and have no `cause`. POSIX analysis: `relative(realRoot, realTarget)` that starts with `..` or is absolute, or the root itself, is refused. **Residual hardening (INFO; the PR also routes it to TASK-006/TASK-014):** (1) the file is opened by path after `realpath`, which leaves a TOCTOU window for anyone who can write to the secrets mount; (2) `readFile` is unbounded and the cap is applied only after the read (the seam probe materialised 32 MiB before refusing); (3) there is no `mode & 0o022` check. Fix: `const fh = await open(realTarget, O_RDONLY \| O_NOFOLLOW)`, then `fh.stat()`, then read at most `maxBytes + 1` from `fh`. Exploitation needs prior write access to a read-only tmpfs |
+| PR3-SEC-08 | LOW | Open (latent), narrowed | PR #4 at `9f5ea5e` sets `envPrefix: 'VITE_PUBLIC_'` for web and admin, with tests. A post-build bundle secret scan is still owed (TASK-022 / web config owner) |
+| PR3-SEC-09 | INFO | Open, narrowed | Mutable-buffer item closed: `reveal()` returns a copy of the `Uint8Array` (`secret.ts`). HMAC-equivalent keys and low-entropy keys remain open |
+| PR3-SEC-10 | INFO | **Closed** | Detected: `CHANGE_ME`, its full-width form, `CHANGE%5FME`, `%43HANGE_ME` in URL userinfo, `jwt-signing-v1:CHANGE_ME`, `<key_id>-v1:CHANGE_ME`, `<password>`, `user:<password>@`, `Change Me`. Not detected, as intended: `p<a>ss`, `exchangemerchant`. Property: across 300 runs, every value that the key parser accepts as a local-only marker in `local` is refused as `placeholder` in staging, with 0 escapes. Not caught, and not a bypass of the accident net, because none of them decodes to the placeholder in the driver: a zero-width-space prefix, a `%20` prefix, `%255F` double encoding, and a UTF-8 percent-encoded full-width letter. Every new `.env.example` secret is `CHANGE_ME` or a URL with `CHANGE_ME` userinfo, and is detected. Every new `compose.env` credential contains `local-only-` and is detected |
+| PR3-SEC-11 | INFO | Open; unchanged | — |
+
+### R2.3 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR3-SEC-12 | Valkey guard accepts an opaque `rediss:` URL (no `//`), which ioredis sends over plain TCP with the password in clear. The transport guard also fails open when WHATWG `URL` cannot parse a value | MEDIUM | CWE-319, CWE-436 | A02 | `packages/config/src/guards.ts:62`, `:68-71` | senior-developer **in this PR** (recommended); else binding on TASK-006, together with the explicit ioredis `tls` | Open |
+| PR3-SEC-13 | The debug guard detects but cannot prevent. Node applies NODE_OPTIONS before any JS runs, so `--inspect-brk` and `--inspect-wait` pause the process before `loadConfigOrExit` and the guard never runs. `--require` and `--import` preloads are accepted and run before the guard | LOW | CWE-489, CWE-696 | A05 | `guards.ts:124-133`; `process-env.ts:79-91`; runtime image (TASK-014) | TASK-014 (entrypoint preflight, `--disable-sigusr1`); IaC task (M5) | Open |
+| PR3-SEC-14 | Tooling credentials have no start-up validation. `DATABASE_MIGRATOR_URL` (whose role owns the DB) and `DATABASE_BOOTSTRAP_URL` are no longer checked for placeholders or TLS anywhere; `prisma.config.ts` reads them raw | LOW (latent) | CWE-319, CWE-693 | A05 | `tooling-keys.ts`; `prisma.config.ts:14` on `feat/TASK-003-…` @ `1f9c192` | senior-developer (`packages/config` helper: this PR or TASK-006); TASK-003 / TASK-014 (migrate one-shot calls it) | Open (latent until a deployed migrate job) |
+| PR3-SEC-15 | `describeFailureCause` trusts `error.constructor.name`, and a thrown object can override it with an own `constructor` property | INFO | CWE-209, CWE-532 | A09 | `secret-refs.ts:138-144` | senior-developer (optional) | Open |
+
+#### PR3-SEC-12: opaque `rediss:` URL passes the Valkey guard (MEDIUM)
+
+**Description.** The guard and ioredis disagree on what counts as a `rediss://` URL.
+
+- **What the guard sees.** `isTlsRedisUrl` checks `url.protocol === 'rediss:' && url.search === ''` on a WHATWG `URL`. WHATWG parses `rediss:api:<pw>@cache:6379` (no `//`) as an opaque URL with protocol `rediss:` and an empty search. Joi `uri()` also accepts it, as an RFC 3986 `path-rootless` URI. Probe at staging: **ACCEPTED**.
+- **What ioredis does.** ioredis 6.0.0 turns on TLS only when the **raw string** `startsWith("rediss://")` (`built/Redis.js:707`). Its `parseURL` sees no `//`, so it re-parses the value as `redis://rediss:api:<pw>@cache:6379`. The result: username `rediss`, password `api:<pw>`, host `cache`, port 6379, plain TCP.
+- **On the wire.** Loopback capture: the first byte is `*` (plaintext RESP), and the runtime-random password is present in the clear. The control `rediss://…` sends `0x16` (TLS ClientHello).
+- **Variants.** `rediss:%2F%2Fapi:<pw>@…` behaves the same way.
+- **Fail-open on parse failure.** `transportGuard` skips a key when `new URL()` throws (`url !== undefined && …`). A `DATABASE_URL` with port `99999` and `sslmode=disable` is ACCEPTED in staging. pg 8.23.1 throws on that value as well, so it is not exploitable today. Still, the guard should not depend on the driver failing.
+
+**Exploitability and impact.**
+- The configuration author has to write a malformed URL: a missing `//`, or templating that joins `${scheme}:${userinfo}@…`.
+- The attacker needs a passive position inside the VPC.
+- AUTH then fails, because the username is wrong, so no working session is opened. But the Valkey password crosses the network in clear on every reconnect, and ioredis and ECS both retry.
+- Impact is H: the Valkey ACL credential gives access to BullMQ queues, rate-limit state and cache. Likelihood is L. H×L = **MEDIUM**. This is the same rating as PR3-SEC-02.
+- TASK-006's binding requirement (build ioredis with an explicit `tls` when the URL is `rediss:`) would mitigate this at the consumer. The guard is the control under review, though.
+
+**Remediation (code level, `guards.ts`).**
+```ts
+/** Mirrors ioredis 6.0.0: TLS only when the raw value starts with `rediss://` (Redis.js:707). */
+const isTlsRedisUrl = (raw: string, url: URL): boolean =>
+  raw.startsWith('rediss://') && url.hostname !== '' && url.search === '' && url.hash === '';
+const isVerifiedPostgresUrl = (_raw: string, url: URL): boolean =>
+  url.hostname !== '' && !hasDuplicateParam(url) && url.searchParams.get('sslmode') === 'verify-full' && !url.searchParams.has('ssl');
+
+// transportGuard: outside local/test an unparseable URL is insecure (fail closed).
+const insecure = (key: string, secure: (raw: string, url: URL) => boolean): void => {
+  const value = raw[key];
+  if (value === undefined) return;
+  const url = parseUrl(value);
+  if (url === undefined || !secure(value, url)) issues.push({ key, code: 'insecure-transport' });
+};
+```
+Optional defence in depth for PostgreSQL: allow-list the query parameter names. Allow `sslmode`, `application_name`, `connect_timeout`, `sslrootcert`, `uselibpqcompat` and `sslnegotiation`, and refuse everything else. The probe shows these are accepted today:
+- `host=/var/run/postgresql`: a Unix socket, so no TLS;
+- `host=<other>`: overrides the authority;
+- `options=-c …`: server GUCs. These cannot weaken client TLS; for a role without BYPASSRLS, `row_security=off` makes RLS-protected queries fail rather than bypass the policies.
+
+**Verification test.**
+- With `APP_ENV=staging`, each of `rediss:api:{p}@cache:6380`, `rediss:%2F%2Fapi:{p}@cache:6380` and `rediss://api:{p}@cache:6380#x` → `[{ key: 'REDIS_URL', code: 'insecure-transport' }]`.
+- `DATABASE_URL=postgresql://platform_app:{p}@db:99999/platform?sslmode=disable` → `insecure-transport`.
+- Control: `rediss://api:{p}@cache:6380/0` is still accepted.
+
+#### PR3-SEC-13: the debug guard detects but cannot prevent (LOW)
+
+**Description.** Node parses NODE_OPTIONS and starts the inspector before the entry module runs. So:
+- with `--inspect`, the inspector listens from process start until `loadConfigOrExit` exits with 78;
+- with `--inspect-brk=…` or `--inspect-wait=…`, Node pauses **before** the entry module. The probe child hung for 4 s with no output for both forms, and the guard never ran. Whoever attaches first runs code before the guard does. On ECS the task fails its health checks and is restarted, which reopens the window each time;
+- `--require` and `--import` preloads are accepted (round 1's allow-list was not adopted), and they also run before the guard.
+
+**Exploitability and impact.** Impact is C: code execution with the task role. Two independent misconfigurations are needed (NODE_OPTIONS in the task definition, and a security group that opens 9229), plus a position inside the VPC. **LOW.**
+
+**Remediation.**
+1. **TASK-014.** Validate NODE_OPTIONS in an entrypoint preflight that runs with NODE_OPTIONS unset, then exec the service:
+   ```sh
+   #!/bin/sh
+   set -eu
+   env -u NODE_OPTIONS node /app/dist/preflight.js   # nodeOptionTokens + option-name allow-list when APP_ENV is staging/production; exit 78 otherwise
+   exec node --disable-sigusr1 /app/dist/main.js
+   ```
+   Allow-list: `--max-old-space-size`, `--max-semi-space-size`, `--enable-source-maps`, `--no-deprecation`, `--disable-sigusr1`.
+2. **IaC task (M5).**
+   - A Checkov custom check that refuses `NODE_OPTIONS` in ECS task definitions unless the value matches the allow-list.
+   - Security groups never open 9229.
+
+**Verification test (TASK-014 container test).** `docker run -e APP_ENV=staging -e NODE_OPTIONS=--inspect-wait=0.0.0.0:9229 <image>` exits 78 within 5 s, and nothing listens on 9229.
+
+#### PR3-SEC-14: tooling credentials are not validated at start-up (LOW, latent)
+
+**Description.** Moving `DATABASE_MIGRATOR_URL`, `SHADOW_DATABASE_URL` and the bootstrap credentials out of the runtime schema is right for least privilege, and it closes part of PR3-SEC-06. But no code path checks them any more:
+- `prisma.config.ts:14` on the TASK-003 branch (`1f9c192`) reads `process.env['DATABASE_MIGRATOR_URL']` directly;
+- `tools/db/reset.ts` only checks that the endpoints match.
+
+A staging migrate job with `sslmode=disable`, or with a `CHANGE_ME` URL, would not be refused. `platform_migrator` owns the database (O4).
+
+**Impact.** Credential and DDL traffic in clear, or a placeholder deployed. This is latent: no migrate job is deployed before M5 / TASK-014. **LOW**, consistent with PR3-SEC-05.
+
+**Remediation.** Export a pure helper from `packages/config`, and call it first thing in `prisma.config.ts` and `tools/db/*.ts`:
+```ts
+export function checkToolingEnv(env: EnvInput, options: { readonly tool: 'migrate' | 'bootstrap' }): void {
+  // APP_ENV required and closed-set (same schema rule as runtime); outside local/test:
+  //  - placeholder guard over every configured tooling key;
+  //  - DATABASE_MIGRATOR_URL / DATABASE_BOOTSTRAP_URL must pass isVerifiedPostgresUrl;
+  //  - SHADOW_DATABASE_URL and the BOOTSTRAP_* keys are forbidden-in-environment (role bootstrap is local/IaC only).
+  // Throws ConfigValidationError with key names only.
+}
+```
+
+**Verification test.** With `APP_ENV=staging`:
+- `DATABASE_MIGRATOR_URL=…sslmode=disable` → `insecure-transport`;
+- `…:CHANGE_ME@…` → `placeholder`;
+- `SHADOW_DATABASE_URL` set → `forbidden-in-environment`.
+
+#### PR3-SEC-15 (INFO): failure cause read from an overridable property
+
+**Description.** `describeFailureCause` reads `error.constructor.name` and accepts any identifier of up to 64 characters. In the probe, a provider that throws `Object.assign(new Error('x'), { constructor: { name: <value> } })` puts a 28-character `sk_test_…` value into `cause` (`leaks: true`).
+
+**Impact.** Exploitation needs a provider that copies data into an error's `constructor`, which code-defined adapters do not do. The PR's property test covers the message, code, name and raw channels, but not this one. **INFO.**
+
+**Fix.**
+```ts
+const proto: unknown = Object.getPrototypeOf(error);
+const ctor = typeof proto === 'object' && proto !== null && Object.hasOwn(proto, 'constructor') ? (proto as { constructor: { name?: unknown } }).constructor : undefined;
+const name = typeof ctor?.name === 'string' && /^[A-Z][A-Za-z]{0,48}(?:Error|Exception)$/.test(ctor.name) ? ctor.name : 'Error';
+```
+Then add a `constructor` throwable to the property test.
+
+### R2.4 Reviewer focus: answers
+
+1. **NODE_OPTIONS tokeniser against Node 24.22.3.**
+   - Quotes and escapes match Node exactly.
+   - Whitespace splitting is stricter than Node's.
+   - `_`/`-`, `=` and case are normalised.
+   - `execArgv` and `inspector.url()` are both checked at the edge.
+   - No accepted form starts the inspector. Remaining gaps: the guard cannot prevent, only detect (PR3-SEC-13), and SIGUSR1 (TASK-014).
+2. **pg URL guard.**
+   - Duplicates are refused, including encoded key names.
+   - `ssl`, `sslmode` and `uselibpqcompat` variants are correct.
+   - `sslrootcert` and `sslcert` are accepted. pg reads these files at parse time, and they do not weaken `verify-full`.
+   - `options=` and `host=` are accepted; an allow-list is optional (PR3-SEC-12).
+   - Joi blocks the empty-host dummy fallback.
+3. **Valkey.** `rediss://host` with no query gives TLS. The opaque form does not: PR3-SEC-12.
+4. **Placeholders.** NFKC and percent-decoding work as intended; there is no bypass of the accident net (PR3-SEC-10 closed).
+5. **File provider.** Confinement, size cap, regular-file check, abort and path-free errors all verified. Residual TOCTOU, unbounded read and mode check are INFO, routed (PR3-SEC-07).
+6. **NODE_ENV / APP_ENV.** The hardened direction fails closed. The local direction is still open (PR3-SEC-03).
+7. **Tooling keys.** Refused by the API and the worker in hardened environments (7/7). Their own validation is missing (PR3-SEC-14).
+8. **Error and log value-freedom.**
+   - Holds for the message, code, name and raw-throw channels, and for every file-provider error.
+   - The new `cause` field is value-free except for the constructor channel (PR3-SEC-15, INFO).
+   - The ConfigValidationError surfaces (`message`, `formatConfigError`, `issues`, `stack`, `inspect`) were checked with a sentinel value.
+9. **Joi-only backend.**
+   - The only non-test `zod` import in `packages/config` is `src/web/web-schema.ts`.
+   - No backend module imports `./web/*`: `schema.ts` now imports the dependency-free `brand-rules.ts`.
+   - `BRAND_*` parity between Joi and Zod is tested.
+   - `zod` stays a package dependency for the `./web` subpath only.
+10. **Secrets in the delta.**
+    - The secret-shape scan of added lines found 0 key, PEM, AWS, JWT or Stripe shapes.
+    - Its URL-credential hits are all `CHANGE_ME`, `local-only-*`, `<…>` or `{p}` templates, and its one base64-run hit is an alphabet string in a test.
+    - `.env.example` and `compose.env` additions are placeholders or markers (classifier above).
+
+### R2.5 Follow-ups added or changed by round 2 (binding)
+
+| Task | Requirement | From |
+|---|---|---|
+| **This PR (recommended)** or TASK-006 | Raw `rediss://` prefix, non-empty host, no query or fragment; fail closed on an unparseable URL; tests in PR3-SEC-12 (optional: pg query allow-list) | PR3-SEC-12 |
+| TASK-006 (unchanged, now also covers PR3-SEC-12) | ioredis built with an explicit `tls: { servername }` whenever the URL is `rediss:` | PR3-SEC-02, PR3-SEC-12 |
+| TASK-006 or TASK-014 (whichever wires the `file` provider) | Single `open(O_RDONLY \| O_NOFOLLOW)`, then `fstat` and a bounded read (`maxBytes + 1`) on the same handle, plus the `mode & 0o022` check | PR3-SEC-07 residual |
+| TASK-014 | Entrypoint preflight with `env -u NODE_OPTIONS`, using `nodeOptionTokens` and an allow-list; `exec node --disable-sigusr1`; container test for `--inspect-wait`. Per-service env, now including `DATABASE_BOOTSTRAP_URL` | PR3-SEC-13, PR3-SEC-06 |
+| senior-developer (this PR or TASK-006); TASK-003 / TASK-014 | `checkToolingEnv` in `packages/config`, called by `prisma.config.ts` and `tools/db/*` | PR3-SEC-14 |
+| principal-architect | Choose PR3-SEC-03 option (a) or (b) (option (b), the ECS-metadata signal, recommended) and record it in DECISIONS together with the converse `nodeEnvGuard` the PR added | PR3-SEC-03 |
+| IaC task (M5) | Checkov check on `NODE_OPTIONS` in task definitions; security groups never open 9229 (in addition to the `app_env` validation) | PR3-SEC-13, PR3-SEC-03 |
+| senior-developer (optional) | Prototype-based, error-class-shaped `describeFailureCause`, plus a property-test case | PR3-SEC-15 |
+
+### R2.6 Evidence (head `875409d`)
+
+| Check | Result |
+|---|---|
+| `transport-out.txt` | DATABASE_URL, staging. Refused: last-wins `sslmode`, `ssl%6Dode`, `ssl=`. Joi rejects: the empty-host `@/` forms and upper-case schemes. ACCEPTED: `verify-full` (pg `rejectUnauthorized` default true), `uselibpqcompat` with `verify-full`, `sslnegotiation=direct`, `options=`, `host=` override (Unix socket or another TCP host), and port 99999 (WHATWG throws, so the guard skips it; pg throws too). REDIS_URL, staging: `?tls=` refused; upper-case and leading-space forms rejected by Joi; **`rediss:api:…@cache:6379` ACCEPTED, and ioredis gives `tls=undefined`, which is plain TCP** |
+| `redis-wire-out.txt` | Loopback. `rediss://` → first byte `0x16`, secret not in clear. **Opaque `rediss:` → guard ACCEPTED, first byte `*`, secret in clear.** `redis://` (positive control) → refused by the guard; plaintext |
+| `node-options-out.txt` | 17 forms. Every form that turns the inspector on is refused; benign forms and `--no-inspect` are accepted. Tab, newline, NBSP, upper-case and config-file forms → Node exit 9 |
+| `belt-out.txt` | Control → exit 0, ready. CLI `--inspect` → 78 (`runtime.inspector`). `--inspect-port=0` → 78. Quoted NODE_OPTIONS → 78. **`--inspect-wait` / `--inspect-brk` → hang, and the guard never ran** |
+| `misc-out.txt` | NODE_ENV: hardened direction refused ×3; local + `production` + `local-only` key ACCEPTED. Tooling keys 7/7 refused in staging, absent from `Config` in local. Placeholders as listed in R2.2, with 300/300 marker-invariant runs. Timeout: 363 ms and 310 ms against 50 ms budgets. Leakage: message, code, raw and non-string → no leak; **own `constructor.name` → leak**. File provider on a Windows temp root: read with trim; missing, oversize, directory, junction-outside, traversal, `/etc/shadow` and prefix look-alike all refused path-free; seam: 32 MiB read before the size refusal |
+| `envdiff-out.txt` | `.env.example`: tooling credentials are `CHANGE_ME`, `_FILE` keys are empty, the DB timeouts are literals. `compose.env`: tooling credentials contain `local-only-`, and all are refused in staging |
+| `shapescan` | 11 hits, all placeholders, templates or test alphabets; the positive control fired |
+| Not run (constraints) | `npm ci`, build, unit suites, gitleaks, Semgrep. PR gate accepted: 430/430; coverage 99.91 % / 97.56 %; `npm audit --audit-level=high` exit 0 |

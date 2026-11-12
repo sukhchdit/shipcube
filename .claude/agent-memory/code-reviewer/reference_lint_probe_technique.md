@@ -17,6 +17,8 @@ Used on PR #4 (2026-11-12): it found 24 errors that the PR's own "lint exit 0" (
 **Why:** parallel PRs each pass lint against the old main config, so the merge-second PR breaks.
 **How to apply:** use it for any PR in the same batch as a lint-config PR. Put scratch files under a reviewer-unique dir (see [[scratch-copy-technique]]).
 
+**Untyped probes miss type-aware breakage (PR #4 r2).** Main's config applies `recommendedTypeChecked` to every `.ts`/`.tsx` file, tests included. Grep the delta for `as X` casts and for `./+types/` route imports. Lint without `.react-router/` sees `Route.*` as error types, which produces `no-unsafe-*` errors. Confirm suspects with the junction-free typed probe ([[scratch-copy-technique]]).
+
 **Lighter variant for probing a PR's OWN config (PR #2 r2, 2026-11-12):**
 - No archive copy or junction is needed.
 - Put a probe root (a miniature repo: `apps/api/src/modules/...`) in the scratch dir.

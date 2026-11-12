@@ -18,8 +18,8 @@ Tasks: **37** (S 7 / M 30; opus 22 / sonnet 15; demo-critical 18) in **10** batc
 | 0.4 | TASK-010 Structured, redacted logging with correlation IDs<br>TASK-011 Lane B local heavy lane and evidence integrity<br>TASK-012 SPK-08 spike<br>TASK-013 Typed permission catalogue, seeded roles via versioned migration, role-permission matrix document, privilege-escalation guard | logging<br>quality-tools<br>spike-08<br>pkg-authz |
 | 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls, prisma-core<br>api-openapi, shared-api-types |
 | 0.6 | TASK-018 SPK-04 spike<br>TASK-019 SPK-05 spike<br>TASK-020 Mandatory route metadata<br>TASK-021 Audit store SQL | spike-04<br>api-storage<br>api-routing<br>prisma-bootstrap-audit |
-| 0.7 | TASK-022 SPK-06 spike<br>TASK-023 Idempotent reference and demo seed framework<br>TASK-024 Generated cross-tenant isolation test suite<br>TASK-025 Audit writer core | web-build-csp<br>prisma-seed<br>tests-gen-rls<br>pkg-audit-core |
-| 0.8 | TASK-026 Walking-skeleton slice<br>TASK-027 RBAC matrix test generator<br>TASK-028 Audit redaction and field classification registry<br>TASK-029 Automatic audit capture driven by route descriptors | mod-admin-settings-reference, web-core<br>tests-gen-rbac<br>pkg-audit-redaction<br>api-audit-mw |
+| 0.7 | TASK-022 SPK-06 spike<br>TASK-023 Idempotent reference and demo seed framework<br>TASK-024 Generated cross-tenant isolation test suite<br>TASK-025 Audit writer core | web-build-csp, web-core, admin-core, pkg-config, lint<br>prisma-seed<br>tests-gen-rls<br>pkg-audit-core |
+| 0.8 | TASK-026 Walking-skeleton slice<br>TASK-027 RBAC matrix test generator<br>TASK-028 Audit redaction and field classification registry<br>TASK-029 Automatic audit capture driven by route descriptors | mod-admin-settings-reference, web-core, ui-api<br>tests-gen-rbac<br>pkg-audit-redaction<br>api-audit-mw |
 | 0.9 | TASK-030 Per-stream audit hash chain<br>TASK-031 Audit field-level diffs and no-op update suppression<br>TASK-032 Server-controlled standard columns, UTC time and on-behalf seam<br>TASK-276 Test harness | pkg-audit-chain<br>pkg-audit-diff<br>prisma-ext<br>tests-harness |
 | 0.10 | TASK-033 Audit test generator and immutability-per-role suite<br>TASK-034 Backup/restore rehearsal and zero-downtime migration probe tooling<br>TASK-277 Test-ID traceability tooling<br>TASK-278 Generated abuse suite | tests-gen-audit<br>db-tools-backup<br>quality-trace<br>tests-gen-abuse |
 
@@ -574,6 +574,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - apps/api/src/platform/db/with-tenant-tx.ts (set_config ... true, fail-closed)
 - prisma/tests/catalog/c01-c12.int.test.ts (also C13/C14 as amended: pg_default_acl, pg_database.datdba, pg_db_role_setting)
 - tools/db/lint-migrations.ts + tools/db/fixtures/lint/** (rules 3-9, 11 and 14 of data-model §8.3 with one negative fixture per rule; D-ARCH-049)
+- tools/db/bootstrap.ts readSecret hardening parity (ADR-0018 am. 6, D-ARCH-052): _FILE path lexically under /run/secrets (root injectable for tests), realpath confinement, regular file, <= 64 KiB, trailing newline stripped, empty = unset, exactly one of NAME / NAME_FILE set, errors name the variable only
 
 **Acceptance tests to write**
 - All US-074 and US-075 scenarios
@@ -582,6 +583,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - C5/C11/C13 as amended 2026-11-12 (batch 0.2, D-ARCH-045/046): exactly three global `pg_default_acl` function rows (migrator, definer, audit owner) and no table/sequence/type/schema default-privilege row; a migrator-created probe function in `platform` and in `public` is not EXECUTE-able by PUBLIC or platform_app; `pg_database.datdba` is not the migrator and the migrator has no CREATE on the database; `pg_db_role_setting` has no database-wide row and the bootstrap role's `search_path=pg_catalog, pg_temp` row
 - [SEC-TC-33] migration-lint rules 7, 8, 9, 12 and 14 (data-model §8.3): `DROP TRIGGER`, `DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL SECURITY`, `DISABLE TRIGGER`, `BYPASSRLS` / `SUPERUSER` / ownership to platform_app, `DELETE` grant outside the allow-list, any privilege on a partition, `DROP POLICY` without re-creation in the same file, a new table without its RLS block / allow-list entry (cross-checked with C1), and `CREATE SCHEMA` / `CREATE EXTENSION` / `ALTER DATABASE` / role DDL in prisma/migrations each fail the linter; one negative fixture per statement class; the `migration-lint` required suite (required-suites.json) activates with US-074
 - [NT-AVAIL-003-a] migration-lint rules 3, 4, 5, 6 and 11: `RENAME`, `ADD COLUMN ... NOT NULL` without a constant default, `ALTER COLUMN ... TYPE`, `SET NOT NULL` without a preceding validated CHECK, `CREATE INDEX` without `CONCURRENTLY` on a table created by an earlier migration, `CREATE INDEX CONCURRENTLY` in a multi-statement file, FK/CHECK on an existing table without `NOT VALID`, and a migration altering an existing table without `SET lock_timeout` each fail; negative fixtures per rule. Rule 5 prerequisite: a one-statement `CREATE INDEX CONCURRENTLY` migration is run through `migrate deploy` in the Testcontainers harness to record how Prisma 7.10 submits it (data-model §8.3 rule 5 "verify in P5 spike"); the result is written into the fixture and prisma/README.md
+- readSecret parity (D-ARCH-052): unit tests prove a _FILE path outside /run/secrets, a symlink leaving the root, a non-regular file, a file > 64 KiB and both NAME and NAME_FILE set are each refused with an error that names the variable and neither the path nor the value; a valid Compose secret file is read with its trailing newline stripped
 - AT-US-074-01 … AT-US-074-05: all 5 scenarios of US-074, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-075-01 … AT-US-075-04: all 4 scenarios of US-075, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -759,11 +761,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-SEC-006 |
-| Spikes / security / decisions | SPK-06, R-ARCH-06, SEC-P3-24 |
+| Spikes / security / decisions | SPK-06, R-ARCH-06, SEC-P3-24, D-ARCH-054 |
 | Specialist · model | frontend-developer · opus |
 | Complexity | S |
-| Depends on | TASK-014, TASK-004 |
-| Batch · locks | 0.7 · web-build-csp |
+| Depends on | TASK-014, TASK-004, TASK-005 |
+| Batch · locks | 0.7 · web-build-csp, web-core, admin-core, pkg-config, lint |
 | Branch | `feat/TASK-022-spk-06-spike-hash-based` |
 | Priority | Enabler |
 
@@ -772,13 +774,22 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - infra/nginx/web.conf.template (CSP header include)
 - tests/e2e/csp.spec.ts (securitypolicyviolation listener)
 - docs/04-plan/spikes/SPK-06.md
+- apps/{web,admin}/vite.config.ts (loadWebBuildConfig(loadEnv(mode, <repo root>, '')) + define: webBuildDefine(config); envPrefix set to a prefix no variable carries; ADR-0018 am. 7, D-ARCH-054)
+- apps/{web,admin}/app/env.d.ts (ImportMetaEnv augmentation; type-only import of WebBuildConfig from @platform/config/web)
+- packages/config/src/web/web-schema.ts (+ .env.example, compose.env): VITE_PUBLIC_ORIGIN required absolute http(s) origin; loadWebBuildConfig rejects unknown VITE_* keys; web-subset isolation test (no node:*, joi, backend schema)
+- apps/web/app/seo/public-origin.ts (static import.meta.env.VITE_PUBLIC_ORIGIN read, no localhost fail-open)
+- eslint.config.mjs + tests/fixtures/lint/** (lint spec L1-L5 of rulings/batch-0.2-rulings.md Part 2: categories app-build-config and config-web; @platform/config/web allowed as a value from vite/react-router config files and type-only from app/**; apps/api and apps/worker never import @platform/ui)
+- apps/web/tests/prerender.int.test.ts (canary VITE_CANARY / VITE_PUBLIC_CANARY absent from every asset, a defined key present, no *.map / sourceMappingURL)
 
 **Acceptance tests to write**
 - SPK-06 exit: 0 CSP violations on every public pre-rendered route on 3 engines; Trusted Types (require-trusted-types-for script) decision recorded
+- Web build config wired (ADR-0018 am. 7, D-ARCH-054): both apps build only with a valid webConfigSchema environment (a missing or non-http(s) VITE_PUBLIC_ORIGIN and an unknown VITE_* key each fail the build naming the key); canary variables never reach an emitted asset while a defined key does; no source maps are emitted; PR3-SEC-08 and PR4-SEC-01 closed
+- Lint spec L1-L5 encoded with probes/fixtures per arm: app/** value import, import() and export * of @platform/config/web reported, import type clean; vite.config.ts value import clean, root @platform/config and ./testing reported; apps/api importing @platform/ui reported; `npm run lint` green on the tree
 
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
 - All strings in en/es/fr (no literals; ICU), six screen states where applicable, 360 px and 1280 px layouts, tokens only, axe 0 serious/critical in every state, keyboard path and visible focus, Playwright spec (Chromium on `pr`; three engines at wave end), `can()` gating for permissioned actions.
+- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-023 — Idempotent reference and demo seed framework (db:seed, db:seed:demo, production refusal of defaults)
@@ -879,8 +890,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Spikes / security / decisions | — |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-023, TASK-020, TASK-014, TASK-017, TASK-004 |
-| Batch · locks | 0.8 · mod-admin-settings-reference, web-core |
+| Depends on | TASK-023, TASK-020, TASK-014, TASK-017, TASK-004, TASK-022 |
+| Batch · locks | 0.8 · mod-admin-settings-reference, web-core, ui-api |
 | Branch | `feat/TASK-026-walking-skeleton-slice-seed-countries` |
 | Priority | Must · demo-critical |
 
@@ -888,6 +899,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - prisma/schema/reference.prisma + migration (countries, regions, launch enablement)
 - prisma/seed/reference/countries.ts
 - apps/api/src/modules/admin-settings/reference/{routes,controller,service,repository,schemas}.ts
+- packages/ui/src/api/client.ts (thin typed Axios client over @platform/shared api types; base URL from import.meta.env.VITE_API_BASE_URL; problem+json mapping seam; ADR-0026 am. 14, D-ARCH-056) + tools/repo toolchain assertion that packages/shared declares no axios/undici/node-fetch/got/ky
 - apps/web/app/routes/$lang.dev-countries.tsx (removed once the quote widget lands; tracked by this task ID)
 - tests/e2e/skeleton.spec.ts
 
