@@ -17,27 +17,35 @@
  *   7   DROP TRIGGER, DISABLE TRIGGER, DISABLE ROW LEVEL SECURITY, NO FORCE ROW LEVEL SECURITY (any table); UPDATE,
  *       DELETE, TRUNCATE, DROP or DETACH PARTITION touching audit storage (REQ-AUDIT-015)
  *   8   DELETE (or ALL) granted to platform_app on a table without the manifest `hardDelete` flag (or on ALL TABLES);
- *       BYPASSRLS / SUPERUSER, ownership (OWNER TO) or role membership for platform_app; any GRANT on a partition
+ *       TRUNCATE, TRIGGER or REFERENCES (also via ALL) granted to platform_app on a table; any table or sequence
+ *       privilege granted to PUBLIC; BYPASSRLS / SUPERUSER, ownership (OWNER TO) or role membership for platform_app;
+ *       any GRANT on a partition
  *   9   DROP POLICY without a later CREATE POLICY of the same name on the same table in the file; ALTER POLICY (restate
- *       the policy as DROP + CREATE); CREATE TABLE in `public` whose table is in no table-class manifest, or whose
- *       class is an RLS class without ENABLE and FORCE ROW LEVEL SECURITY in the same file
- *   10  UPDATE/DELETE/TRUNCATE/INSERT ... SELECT/MERGE, also inside a `WITH ...` statement, without
- *       `data-changing: yes` (backup guardrail, §8.6)
+ *       the policy as DROP + CREATE); a CREATE POLICY that is not, after `canonicalPolicy` normalisation, one of the
+ *       policies `renderRls(entry)` emits for the table's manifest entry; policy DDL inside a body or dynamic SQL;
+ *       CREATE TABLE in `public` whose table is in no table-class manifest, or whose class is an RLS class without
+ *       ENABLE and FORCE ROW LEVEL SECURITY in the same file; a GRANT to platform_app on an RLS-class table before
+ *       that table's ENABLE + FORCE (in this file, or an earlier one)
+ *   10  UPDATE/DELETE/TRUNCATE/INSERT ... SELECT/MERGE, also inside a `WITH ...` statement or a DO block (dynamic SQL
+ *       in string literals included; CREATE FUNCTION bodies are not executed at migration time and are not scanned),
+ *       without `data-changing: yes` (backup guardrail, §8.6)
  *   11  ALTER TABLE, non-concurrent CREATE INDEX, CREATE TRIGGER or CREATE/ALTER/DROP POLICY on an existing table
- *       without `SET lock_timeout` as the first statement
+ *       without `SET [SESSION] lock_timeout` as the first statement (`SET LOCAL` has no effect: files are not atomic)
  *   12  audit objects and any mention of platform_audit_owner in prisma/migrations (unconditional); in prisma/bootstrap
  *       only with an approved `-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>` header (reviewer listed, date
  *       not in the future), except the role's own tightening statements (deny-by-default, AUDIT_OWNER_TIGHTENING)
  *   13  SECURITY DEFINER (anywhere outside the body) without exactly one `SET search_path`, equal to
  *       `pg_catalog, pg_temp`; ALTER FUNCTION | PROCEDURE | ROUTINE ... SECURITY DEFINER, RESET search_path, RESET ALL
  *       or any other SET search_path; a bootstrap file whose first statement is not that SET
- *   14  CREATE SCHEMA, CREATE EXTENSION, ALTER DATABASE, ALTER SCHEMA ... OWNER TO, ALTER/CREATE/DROP ROLE|USER
+ *   14  CREATE SCHEMA, CREATE EXTENSION, ALTER DATABASE, ALTER SCHEMA ... OWNER TO, ALTER/CREATE/DROP ROLE|USER,
+ *       ALTER DEFAULT PRIVILEGES
  *   15  GRANT/REVOKE on a function after its `OWNER TO platform_definer` in the same file; CREATE FUNCTION ...
- *       SECURITY DEFINER outside a `SET ROLE platform_definer; ... RESET ROLE;` block, unless the file hands it to
- *       platform_definer later (`OWNER TO platform_definer`, the accepted "grants before OWNER TO" form)
- *   16  tenant-context writes (bodies and dynamic SQL included): `set_config(` with an `app.` (or computed) key,
- *       SET [SESSION|LOCAL] app.…, RESET app.…, RESET ALL, DISCARD; reads of the four security keys outside the §4.2
- *       helper definitions (app.correlation_id reads stay allowed)
+ *       SECURITY DEFINER outside a `SET [SESSION] ROLE platform_definer; ... RESET ROLE;` block (the only accepted
+ *       form, PR11-SEC-07); a file that ends with a SET ROLE still in effect
+ *   16  tenant-context writes and reads from the shared list tools/db/tenant-key-forms.ts (bodies and dynamic SQL
+ *       included): every write form anywhere (DISCARD on text without string literals); every read form outside the
+ *       §4.2 helper definitions, except the renderer's operator-scope atom, exactly, inside a CREATE POLICY
+ *       (app.correlation_id reads stay allowed); one finding per statement
  *   S   bootstrap lane: only the variables db_name, migrator_password and app_password, and every PASSWORD keyword in
  *       code is followed by :'migrator_password', :'app_password' or NULL (PR5-SEC-12)
  * Rules 2-11 and 14-16 apply to prisma/migrations; 12, 13 and S also (or only) to prisma/bootstrap.
@@ -51,8 +59,10 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { RenderRlsError, renderRls } from './render-rls.js';
 import { normalise, referencedVariables, splitStatements, tokenize } from './sql-text.js';
 import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from './table-classes.js';
+import { CONTEXT_DISCARD, contextReads, contextWrites } from './tenant-key-forms.js';
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -242,21 +252,27 @@ const POLICY = new RegExp(`^(create|alter|drop) policy (?:if exists )?(${IDENT})
 const ROUTINE_NAME = new RegExp(`^(?:create (?:or replace )?|alter )(?:function|procedure|routine) (${QNAME}) ?\\(`);
 const ROUTINE_LIST_NAME = new RegExp(`(${QNAME}) ?\\(`, 'g');
 const GRANT_ON = /^(grant|revoke) (?:grant option for )?(.+?) on (.+?) (?:to|from) (.+)$/;
-const LOCK_TIMEOUT = /^set (?:local |session )?lock_timeout\b/;
+/**
+ * Rule 11. Only the session form counts: a migration file is not atomic (prisma/README.md "Rule 5" item 3), so each
+ * statement runs outside a transaction block, where `SET LOCAL` has no effect (PR11-SEC-07).
+ */
+const LOCK_TIMEOUT = /^set (?:session )?lock_timeout\b/;
+const LOCAL_LOCK_TIMEOUT = /^set local lock_timeout\b/;
 const PLATFORM_APP = /(^|[^a-z0-9_])"?platform_app"?($|[^a-z0-9_])/;
 const DEFINER_ROLE = '"?platform_definer"?';
+/** Rule 15: `SET [SESSION | LOCAL] ROLE <role>` (`none` resets). */
+const SET_ROLE = /^set (session |local )?role (.+)$/;
+/** Rule 8: privileges that act outside row level security (TRUNCATE, TRIGGER, REFERENCES; `ALL` includes them). */
+const RLS_INDEPENDENT_PRIVILEGES = /\b(?:truncate|trigger|references|all)\b/;
 /** §4.2 helpers: the only functions that may read the four security keys (rule 16). */
 const CONTEXT_HELPERS = ['app_org_id', 'app_actor_id', 'app_guest_token_hash', 'app_is_operator'];
 const HELPER_DEFINITION = new RegExp(`^create (?:or replace )?function platform ?\\. ?(?:${CONTEXT_HELPERS.join('|')}) ?\\(`);
-const SECURITY_KEY_READ = /\bcurrent_setting ?\( ?'app\.(?:org_id|actor_id|actor_scope|guest_token_hash)'/;
-/** Rule 16 write forms, matched against the body-expanded text with string literals kept (dynamic SQL counts). */
-const CONTEXT_WRITES = [
-  /\bset_config ?\( ?(?:'app\.|[^' ])/, // an `app.` key, or a computed key that may be one
-  /\bset (?:session |local )?app\./,
-  /\breset (?:app\.|all\b)/,
-];
-/** DISCARD is matched without string literals (the word is common prose in messages). */
-const CONTEXT_DISCARD = /\bdiscard (?:all|plans|sequences|temp|temporary)\b/;
+/**
+ * Rule 16: the renderer's operator-scope atom (prisma/sql/policy-templates/operator.sql), normalised. It is the one
+ * sanctioned read outside the §4.2 helpers, exempted exactly and only inside a CREATE POLICY statement; rule 9 then
+ * requires that statement to equal the renderer output (PR11-SEC-03).
+ */
+const OPERATOR_SCOPE_ATOM = "current_setting('app.actor_scope', true) = 'operator'";
 /** Rule 14: privilege-bound statements that belong to the bootstrap lane (§8.1, D-ARCH-033, D-ARCH-045). */
 const BOOTSTRAP_ONLY = [
   /^create schema\b/,
@@ -264,6 +280,7 @@ const BOOTSTRAP_ONLY = [
   /^alter database\b/,
   /^alter schema\b.*\bowner to\b/,
   /^(?:create|alter|drop) (?:role|user|group)\b/,
+  /^alter default privileges\b/,
 ];
 /** Role-membership targets that would hand platform_app another role's privileges (rule 8). */
 const MEMBERSHIP_GRANT = /^grant (?!.*\bon\b)(.+?) to (.+?)(?: with (?:admin|inherit|set) (?:option|true|false))*(?: granted by .+)?$/;
@@ -309,6 +326,78 @@ function sqlText(sql: string, keepStrings: boolean): string {
     .join('');
 }
 
+/**
+ * Rule 10 inside a DO block (PR #5 R2-m2, PR #11 review m6): a data-changing statement at a PL/pgSQL statement start
+ * (file start, `;`, BEGIN, THEN, ELSE, LOOP, EXECUTE) or at the start of a string literal (dynamic SQL, `EXECUTE '…'`,
+ * `format('…')`). Matched on the body-expanded text with string literals kept. A DO block runs at migration time; a
+ * CREATE FUNCTION body does not, so function definitions are not scanned. `FOR [NO KEY] UPDATE` and `GRANT UPDATE`
+ * do not start a statement and stay clean. A key built entirely at run time (`EXECUTE v_sql`) is not visible here.
+ */
+const DO_DATA_CHANGING = new RegExp(
+  `(?:^|[;']|\\b(?:begin|then|else|loop|execute)) ?(?:update (?:only )?${QNAME}|delete from\\b|truncate\\b|merge into\\b|` +
+    `insert into\\b[^;]*?\\b(?:select|on conflict\\b[^;]*?\\bdo update)\\b|` +
+    `with\\b[^;]*?\\b(?:delete from|insert into|merge into|update (?:only )?${QNAME}))`,
+);
+
+/** True when `statement` is a DO block whose body changes data (rule 10). */
+function doBlockChangesData(statement: string): boolean {
+  return /^do\b/.test(codeOnly(statement)) && DO_DATA_CHANGING.test(normalise(sqlText(statement, true)));
+}
+
+const LITERAL_MARK = '';
+/**
+ * Rule 9 comparison text of a policy statement: comments removed; string literals, dollar bodies and quoted identifiers
+ * other than plain lowercase names kept verbatim (case and spacing matter there); quoted plain lowercase names unquoted;
+ * code lowercased, whitespace collapsed and dropped next to `( ) , . =`. Stricter than `masked()`, which would make
+ * `'OPERATOR'` and any other literal compare equal (PR11-SEC-03).
+ */
+export function canonicalPolicy(statement: string): string {
+  const kept: string[] = [];
+  const keep = (text: string) => `${LITERAL_MARK}${String(kept.push(text) - 1)}${LITERAL_MARK}`;
+  const text = tokenize(statement)
+    .map((token) => {
+      if (token.kind === 'comment') return ' ';
+      if (token.kind === 'string' || token.kind === 'dollar') return keep(token.text);
+      if (token.kind === 'identifier') return /^"[a-z_][a-z0-9_$]*"$/.test(token.text) ? token.text.slice(1, -1) : keep(token.text);
+      return token.text.toLowerCase();
+    })
+    .join('');
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/ ?([(),.=]) ?/g, '$1')
+    .replace(new RegExp(`${LITERAL_MARK}(\\d+)${LITERAL_MARK}`, 'g'), (_, at: string) => kept[Number(at)] ?? '');
+}
+
+/** Rule 9: the canonical CREATE POLICY statements `renderRls(entry)` emits; empty when the entry has no RLS block. */
+const renderedPolicyCache = new WeakMap<TableClassEntry, ReadonlySet<string>>();
+function renderedPolicies(entry: TableClassEntry): ReadonlySet<string> {
+  let policies = renderedPolicyCache.get(entry);
+  if (policies === undefined) {
+    try {
+      policies = new Set(
+        splitStatements(renderRls(entry))
+          .map(canonicalPolicy)
+          .filter((statement) => statement.startsWith('create policy ')),
+      );
+    } catch (error) {
+      if (!(error instanceof RenderRlsError)) throw error;
+      policies = new Set();
+    }
+    renderedPolicyCache.set(entry, policies);
+  }
+  return policies;
+}
+
+/** Grantees of a GRANT (`a, group b, "c" with grant option granted by d`), unquoted. */
+function grantees(list: string): string[] {
+  return list
+    .replace(/ granted by .+$/, '')
+    .replace(/ with grant option$/, '')
+    .split(',')
+    .map((grantee) => unquote(grantee.trim().replace(/^group /, '')));
+}
+
 /** Splits the actions of an ALTER TABLE (`rest` after the table name) on top-level commas. */
 function splitActions(rest: string): string[] {
   const actions: string[] = [];
@@ -340,9 +429,16 @@ export interface MigrationHistory {
   readonly validatedNotNull: Set<string>;
   /** `<table>.<constraint>` -> column of a NOT VALID not-null CHECK awaiting VALIDATE CONSTRAINT. */
   readonly pendingNotNull: Map<string, string>;
+  /** Tables (qualified) with ENABLE and FORCE ROW LEVEL SECURITY in an earlier file. Rule 9: grants may follow. */
+  readonly rlsProtected: Set<string>;
 }
 
-export const emptyHistory = (): MigrationHistory => ({ partitions: new Set(), validatedNotNull: new Set(), pendingNotNull: new Map() });
+export const emptyHistory = (): MigrationHistory => ({
+  partitions: new Set(),
+  validatedNotNull: new Set(),
+  pendingNotNull: new Map(),
+  rlsProtected: new Set(),
+});
 
 export interface MigrationLintOptions {
   /** Table-class manifests (rules 8 and 9); default `loadTableClasses()` (tools/db/table-classes). */
@@ -423,13 +519,28 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
   const preview = (index: number) => `"${(texts[index] ?? '').slice(0, 80)}"`;
   const existing = (table: string) => !facts.created.has(table);
   const lockTimeoutFirst = LOCK_TIMEOUT.test(texts[0] ?? '');
+  const localLockTimeout = LOCAL_LOCK_TIMEOUT.test(texts[0] ?? '');
   const manifest = new Map(classes.map((entry) => [entry.name, entry]));
+  /** RLS-class entry of a qualified table name, if any. */
+  const rlsEntry = (table: string): TableClassEntry | undefined => {
+    const [schema, name] = table.split('.') as [string, string];
+    const entry = schema === 'public' ? manifest.get(name) : undefined;
+    return entry !== undefined && RLS_CLASSES.has(entry.class) ? entry : undefined;
+  };
   let lockReported = false;
   let definerRole = false;
+  let roleSet = false;
+  const enabledSoFar = new Set<string>();
+  const forcedSoFar = new Set<string>();
   const needsLockTimeout = (index: number) => {
     if (lockTimeoutFirst || lockReported) return;
     lockReported = true;
-    add('11', `alters an existing table without "SET lock_timeout = …" as the first statement: ${preview(index)}`);
+    add(
+      '11',
+      localLockTimeout
+        ? `"SET LOCAL lock_timeout" does not count: files are not atomic; SET LOCAL outside a transaction block has no effect (use "SET lock_timeout = …"): ${preview(index)}`
+        : `alters an existing table without "SET lock_timeout = …" as the first statement: ${preview(index)}`,
+    );
   };
 
   texts.forEach((text, index) => {
@@ -443,6 +554,8 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
     if (altered) {
       const table = qualify(altered[1] as string);
       const isExisting = existing(table);
+      if (/\benable row level security\b/.test(text)) enabledSoFar.add(table);
+      if (/(?<!\bno )\bforce row level security\b/.test(text)) forcedSoFar.add(table);
       if (/\brename\b/.test(text)) add('3', `RENAME breaks the running release; add + backfill + drop instead: ${preview(index)}`);
       if (/\bdisable trigger\b/.test(text)) add('7', `DISABLE TRIGGER: ${preview(index)}`);
       if (/\b(?:disable|no force) row level security\b/.test(text))
@@ -512,6 +625,13 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
       if (policy[1] === 'drop' && !recreated) add('9', `DROP POLICY without re-creating the policy in the same file: ${preview(index)}`);
       if (policy[1] === 'alter')
         add('9', `ALTER POLICY: restate the policy as DROP POLICY + CREATE POLICY in the same file: ${preview(index)}`);
+      // Am. 10 item 7 / PR11-SEC-03: a policy is the renderer's output for the table's manifest entry, verbatim.
+      const entry = rlsEntry(table);
+      if (policy[1] === 'create' && (entry === undefined || !renderedPolicies(entry).has(canonicalPolicy(statements[index] ?? '')))) {
+        add('9', `policy not rendered from the templates (paste the output of tools/db/render-rls.ts): ${preview(index)}`);
+      }
+    } else if (/\b(?:create|alter|drop) policy\b/.test(normalise(sqlText(statements[index] ?? '', true)))) {
+      add('9', `policy DDL in a body or dynamic SQL cannot be checked against the templates: ${preview(index)}`);
     }
 
     // --- Rule 9: every table has a class; RLS classes ship ENABLE + FORCE in the same file.
@@ -535,8 +655,27 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
     const grant = GRANT_ON.exec(text);
     if (grant?.[1] === 'grant') {
       const privileges = grant[2] as string;
-      const tables = grantedTables(grant[3] as string);
+      const target = grant[3] as string;
+      const tables = grantedTables(target);
       const toApp = PLATFORM_APP.test(grant[4] as string);
+      // PR11-SEC-04: platform_app inherits every PUBLIC grant; the manifest cannot express PUBLIC.
+      if ((tables || /^(?:sequence |all sequences in schema\b)/.test(target)) && grantees(grant[4] as string).includes('public')) {
+        add('8', `privilege granted to PUBLIC (platform_app inherits it; grant to the role instead): ${preview(index)}`);
+      }
+      if (tables && toApp && RLS_INDEPENDENT_PRIVILEGES.test(privileges)) {
+        add('8', `TRUNCATE, TRIGGER or REFERENCES to platform_app (they act outside row level security): ${preview(index)}`);
+      }
+      // PR11-SEC-07: a file is not atomic, so the grant must not exist while the table still lacks ENABLE + FORCE.
+      const unprotected = (tables?.includes('*') ? [...facts.created] : (tables ?? [])).filter(
+        (table) =>
+          toApp &&
+          rlsEntry(table) !== undefined &&
+          !history.rlsProtected.has(table) &&
+          !(enabledSoFar.has(table) && forcedSoFar.has(table)),
+      );
+      if (unprotected.length > 0) {
+        add('9', `GRANT to platform_app before ENABLE + FORCE ROW LEVEL SECURITY of ${unprotected.join(', ')}: ${preview(index)}`);
+      }
       if (tables && toApp && /\b(?:delete|all)\b/.test(privileges)) {
         const refused = tables.filter((table) => {
           const [schema, name] = table.split('.') as [string, string];
@@ -555,31 +694,53 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
       add('8', `BYPASSRLS / SUPERUSER for platform_app: ${preview(index)}`);
     }
 
-    // --- Rule 15: definer ownership order.
-    if (new RegExp(`^set (?:session |local )?role ${DEFINER_ROLE}$`).test(text)) definerRole = true;
-    else if (/^reset role$|^set (?:session |local )?role\b/.test(text)) definerRole = false;
+    // --- Rule 15: definer ownership. The SET ROLE block is the only accepted form (PR11-SEC-07): "grants before
+    // OWNER TO" leaves a migrator-owned definer function executable by platform_app when OWNER TO fails, because a
+    // file is not atomic. For the same reason SET LOCAL ROLE (no effect outside a transaction block) does not count.
+    const setRole = SET_ROLE.exec(text);
+    if (setRole) {
+      const effective = setRole[1] !== 'local ';
+      roleSet = effective && setRole[2] !== 'none';
+      definerRole = effective && new RegExp(`^${DEFINER_ROLE}$`).test(setRole[2] as string);
+    } else if (text === 'reset role') {
+      roleSet = false;
+      definerRole = false;
+    }
     const routine = ROUTINE_NAME.exec(text);
     if (routine && /^create\b/.test(text) && /\bsecurity definer\b/.test(text) && !definerRole) {
-      const handedOver = (facts.definerOwner.get(qualify(routine[1] as string)) ?? -1) > index;
-      if (!handedOver) {
-        add('15', `SECURITY DEFINER function created outside "SET ROLE platform_definer; … RESET ROLE;": ${preview(index)}`);
-      }
+      add('15', `SECURITY DEFINER function created outside "SET ROLE platform_definer; … RESET ROLE;": ${preview(index)}`);
     }
     const routines = grant ? grantedRoutines(grant[3] as string) : undefined;
     if (routines?.some((name) => [...facts.definerOwner].some(([owned, at]) => at < index && (name === '*' || name === owned)))) {
       add('15', `${(grant?.[1] ?? '').toUpperCase()} after OWNER TO platform_definer fails at deploy (42501): ${preview(index)}`);
     }
   });
+  if (roleSet) {
+    add(
+      '15',
+      'the file ends with a SET ROLE still in effect: close the block with RESET ROLE (the role persists on the deploy connection)',
+    );
+  }
+  for (const table of facts.rlsEnabled) if (facts.rlsForced.has(table)) history.rlsProtected.add(table);
 
-  // --- Rule 16: tenant-context writes and security-key reads (bodies and dynamic SQL included).
+  // --- Rule 16: tenant-context writes and security-key reads (bodies and dynamic SQL included), one finding per
+  // statement, from the shared form list (tools/db/tenant-key-forms.ts; PR11-SEC-02).
   statements.forEach((statement, index) => {
     const withStrings = normalise(sqlText(statement, true));
-    const code = normalise(sqlText(statement, false));
-    if (CONTEXT_WRITES.some((pattern) => pattern.test(withStrings)) || CONTEXT_DISCARD.test(code)) {
-      add('16', `writes the tenant request context in SQL (only withTenantTx sets it): ${preview(index)}`);
+    const writes = contextWrites(withStrings);
+    if (CONTEXT_DISCARD.test(normalise(sqlText(statement, false)))) writes.push('DISCARD');
+    if (writes.length > 0) {
+      add('16', `writes the tenant request context in SQL (${writes.join('; ')}); only withTenantTx sets it: ${preview(index)}`);
+      return;
     }
-    if (SECURITY_KEY_READ.test(withStrings) && !HELPER_DEFINITION.test((texts[index] ?? '').replace(/"/g, ''))) {
-      add('16', `reads a tenant security key outside the §4.2 helpers (use platform.app_org_id() etc.): ${preview(index)}`);
+    if (HELPER_DEFINITION.test((texts[index] ?? '').replace(/"/g, ''))) return;
+    const readText = /^create policy\b/.test(texts[index] ?? '') ? withStrings.split(OPERATOR_SCOPE_ATOM).join(' ') : withStrings;
+    const reads = contextReads(readText);
+    if (reads.length > 0) {
+      add(
+        '16',
+        `reads the tenant context outside the §4.2 helpers (${reads.join('; ')}); use platform.app_org_id() etc.: ${preview(index)}`,
+      );
     }
   });
 }
@@ -608,7 +769,7 @@ export function lintMigrationDir(dir: string, label: string = dir, options: Migr
     if (header.kind !== 'contract' && DESTRUCTIVE.some((pattern) => pattern.test(code))) {
       add('2', `destructive statement outside a contract migration: "${preview}"`);
     }
-    if (header.dataChanging !== true && DATA_CHANGING.some((pattern) => pattern.test(code))) {
+    if (header.dataChanging !== true && (DATA_CHANGING.some((pattern) => pattern.test(code)) || doBlockChangesData(statement))) {
       add('10', `data-changing statement without "data-changing: yes": "${preview}"`);
     }
     if (isAuditDdl(statement, 'migrations')) {

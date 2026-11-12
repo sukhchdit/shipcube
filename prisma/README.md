@@ -75,3 +75,14 @@ Recorded by TASK-016 on 2026-11-12, Prisma 7.10.1 / PostgreSQL 18.6, as `platfor
 Consequence for linter rule 5: "one statement per file" is not needed to avoid a deploy error, but it keeps a
 concurrent build (which can leave an `INVALID` index when it fails) isolated in its own migration, so a failure is
 retried or reverted on its own — the rule stays as written, justified by atomicity rather than by `25001`.
+
+Consequences for rules 9, 11 and 15 (PR11-SEC-07): every prefix of a file must leave the schema safe, and each
+statement runs outside a transaction block, where `SET LOCAL` has no effect.
+
+- Rule 11 accepts only `SET [SESSION] lock_timeout` as the first statement; `SET LOCAL lock_timeout` fails.
+- Rule 15 accepts a `SECURITY DEFINER` function only inside `SET ROLE platform_definer; … RESET ROLE;` (`SET LOCAL
+  ROLE` does not count; "grants before `OWNER TO`" is no longer accepted), and a file must not end with a role still
+  set.
+- Rule 9 requires a `GRANT … TO platform_app` on an RLS-class table to follow that table's `ENABLE` and `FORCE ROW
+  LEVEL SECURITY` (in the same file or an earlier one), and every `CREATE POLICY` to equal, statement for statement,
+  the `tools/db/render-rls.ts` output for the table's manifest entry (PR11-SEC-03).

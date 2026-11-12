@@ -4,11 +4,23 @@
  * Fixtures: tools/db/fixtures/lint/{migrations,bootstrap}/<case>/. The fixture tables are classified by
  * FIXTURE_CLASSES below (the repository's own manifests stay the source for the repository run).
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from '@jest/globals';
+import { afterAll, describe, expect, it } from '@jest/globals';
 
-import { lintBootstrap, lintMigrations, lintRepository, main, parseHeader, readReviewers, type LintFinding } from './lint-migrations.js';
+import {
+  canonicalPolicy,
+  lintBootstrap,
+  lintMigrations,
+  lintRepository,
+  main,
+  parseHeader,
+  readReviewers,
+  type LintFinding,
+} from './lint-migrations.js';
+import { renderRls } from './render-rls.js';
 import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { findRepoRoot } from '../test-support/process.js';
 
@@ -21,6 +33,8 @@ const FIXTURE_CLASSES: readonly TableClassEntry[] = [
   { module: 'fixture', name: 'fixture_owners', class: 'GLOBAL' },
   { module: 'fixture', name: 'fixture_events', class: 'GLOBAL' },
   { module: 'fixture', name: 'fixture_orders', class: 'TENANT' },
+  { module: 'fixture', name: 'fixture_quotes', class: 'GUEST_CAPABLE' },
+  { module: 'fixture', name: 'fixture_profiles', class: 'USER_OWNED', definerRead: true, definerPurge: true },
   { module: 'fixture', name: 'fixture_sessions', class: 'SYSTEM', hardDelete: true },
 ];
 const lintCase = (name: string) => lintMigrations(join(fixtures, 'migrations', name), name, { tableClasses: FIXTURE_CLASSES });
@@ -116,6 +130,13 @@ describe('expand -> migrate -> contract (rules 2, 10 and contract reversibility)
 
   it('does not flag a plain WITH ... SELECT, row locks (FOR [NO KEY] UPDATE) or keywords inside strings (CR m3 control)', () => {
     expect(lintCase('cte-select')).toEqual([]);
+  });
+
+  it('rejects data changes inside a DO block, static or dynamic, but not inside a CREATE FUNCTION body or a row lock (CR m6, PR #5 R2-m2)', () => {
+    expect(byMigration(lintCase('do-block-data-change'))).toEqual([
+      ['20261112000000_do_update', '10'],
+      ['20261112000100_do_dynamic_delete', '10'],
+    ]);
   });
 });
 
@@ -252,6 +273,12 @@ describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
       ['20261112000100_lock_timeout_late', '11'],
     ]);
   });
+
+  it('[NT-AVAIL-003-a] rule 11 refuses SET LOCAL lock_timeout (no effect outside a transaction block) and accepts SET SESSION (PR11-SEC-07)', () => {
+    const findings = lintCase('set-local-lock-timeout');
+    expect(byMigration(findings)).toEqual([['20261112000000_set_local', '11']]);
+    expect(findings[0]?.message).toContain('files are not atomic; SET LOCAL outside a transaction block has no effect');
+  });
 });
 
 describe('RLS, triggers, grants and privilege-bound statements (rules 7, 8, 9, 14; SEC-TC-33)', () => {
@@ -273,7 +300,8 @@ describe('RLS, triggers, grants and privilege-bound statements (rules 7, 8, 9, 1
 
   it.each([
     ['delete-grant', ['8']],
-    ['all-grant', ['8']],
+    // ALL includes TRUNCATE/TRIGGER/REFERENCES (PR11-SEC-04) and DELETE outside the allow-list.
+    ['all-grant', ['8', '8']],
     ['app-bypassrls', ['14', '8']],
     ['app-superuser', ['14', '8']],
     ['app-owner', ['8']],
@@ -297,7 +325,35 @@ describe('RLS, triggers, grants and privilege-bound statements (rules 7, 8, 9, 1
     expect(rules(unclassified)).toContain('9');
   });
 
-  it('[SEC-TC-33] rule 14: CREATE SCHEMA, CREATE EXTENSION, ALTER DATABASE, ALTER SCHEMA OWNER TO, ALTER/CREATE/DROP ROLE fail', () => {
+  it('[SEC-TC-33] rule 8: a table or sequence privilege to PUBLIC fails, REVOKE FROM PUBLIC is clean (PR11-SEC-04, CR m2)', () => {
+    expect(byMigration(lintCase('grant-to-public'))).toEqual([
+      ['20261112000000_table_to_public', '8'],
+      ['20261112000100_sequence_to_public', '8'],
+    ]);
+  });
+
+  it('[SEC-TC-33] rule 8: TRUNCATE, TRIGGER and REFERENCES to platform_app fail (they act outside RLS; PR11-SEC-04)', () => {
+    expect(byMigration(lintCase('truncate-to-app'))).toEqual([
+      ['20261112000000_truncate', '8'],
+      ['20261112000100_trigger', '8'],
+      ['20261112000200_references', '8'],
+    ]);
+  });
+
+  it.each([['policy-tautology'], ['policy-unkeyed']])(
+    '[SEC-TC-33] rule 9: %s fails as "policy not rendered from the templates" (PR11-SEC-03 probe P-C)',
+    (name) => {
+      const findings = lintCase(name);
+      expect(rules(findings)).toEqual(['9']);
+      expect(findings[0]?.message).toMatch(/^policy not rendered from the templates/);
+    },
+  );
+
+  it("[SEC-TC-33] rule 9: a GRANT to platform_app before the table's ENABLE + FORCE fails; a grant in a later file is clean (PR11-SEC-07)", () => {
+    expect(byMigration(lintCase('grant-before-force'))).toEqual([['20261112000000_grant_before_force', '9']]);
+  });
+
+  it('[SEC-TC-33] rule 14: CREATE SCHEMA, CREATE EXTENSION, ALTER DATABASE, ALTER SCHEMA OWNER TO, ALTER/CREATE/DROP ROLE, ALTER DEFAULT PRIVILEGES fail', () => {
     expect(byMigration(lintCase('bootstrap-only'))).toEqual([
       ['20261112000000_create_schema', '14'],
       ['20261112000100_create_extension', '14'],
@@ -306,21 +362,83 @@ describe('RLS, triggers, grants and privilege-bound statements (rules 7, 8, 9, 1
       ['20261112000400_alter_role', '14'],
       ['20261112000500_create_role', '14'],
       ['20261112000600_drop_role', '14'],
+      ['20261112000700_alter_default_privileges', '14'],
     ]);
+  });
+});
+
+describe('rendered RLS blocks (rules 9 and 16; PR11-SEC-03)', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'lint-rendered-'));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const rendered = FIXTURE_CLASSES.filter((entry) => ['fixture_orders', 'fixture_quotes', 'fixture_profiles'].includes(entry.name));
+  /** Writes one migration holding the renderer output for the TENANT, GUEST_CAPABLE and USER_OWNED fixture tables. */
+  const renderedCase = (name: string, edit: (sql: string) => string = (sql) => sql) => {
+    const dir = join(scratch, name, '20261112000000_rendered');
+    mkdirSync(dir, { recursive: true });
+    const sql = [
+      '-- migration-kind: expand\n-- data-changing: no\n-- reversible: yes\n',
+      'CREATE TABLE public.fixture_orders (id uuid PRIMARY KEY, org_id uuid NOT NULL);',
+      'CREATE TABLE public.fixture_quotes (id uuid PRIMARY KEY, org_id uuid, guest_token_hash bytea);',
+      'CREATE TABLE public.fixture_profiles (id uuid PRIMARY KEY, user_id uuid NOT NULL, expires_at timestamptz NOT NULL);',
+      ...rendered.map((entry) => renderRls(entry)),
+      'GRANT SELECT, INSERT, UPDATE ON public.fixture_orders, public.fixture_quotes, public.fixture_profiles TO platform_app;',
+    ].join('\n');
+    writeFileSync(join(dir, 'migration.sql'), edit(sql));
+    writeFileSync(join(dir, 'down.sql'), 'SELECT 1;\n');
+    return lintMigrations(join(scratch, name), name, { tableClasses: FIXTURE_CLASSES });
+  };
+
+  it('the renderer output for TENANT, GUEST_CAPABLE and USER_OWNED (definer flags included) lints clean; the operator atom is exempt in a CREATE POLICY', () => {
+    expect(renderedCase('clean')).toEqual([]);
+  });
+
+  it('a rendered policy whose operator literal or predicate is edited fails rule 9 (and rule 16 outside the exact atom)', () => {
+    expect(rules(renderedCase('scope', (sql) => sql.replace("= 'OPERATOR'", "= 'ANYONE'")))).toEqual(['9', '16']);
+    expect(rules(renderedCase('predicate', (sql) => sql.replace('(org_id = platform.app_org_id())', '(org_id = org_id)')))).toEqual(['9']);
+  });
+
+  it('canonicalPolicy ignores comments, case, quoting of plain names and spacing, but keeps literals verbatim', () => {
+    const rendered =
+      "CREATE POLICY p_t__operator ON public.t FOR SELECT TO platform_app USING (current_setting('app.actor_scope', true) = 'OPERATOR' AND platform.app_is_operator())";
+    expect(
+      canonicalPolicy(
+        `create policy "p_t__operator" on "public".t -- note\n for select to platform_app using(current_setting( 'app.actor_scope' , true )='OPERATOR' and platform . app_is_operator ( ))`,
+      ),
+    ).toBe(canonicalPolicy(rendered));
+    expect(canonicalPolicy(rendered.replace("'OPERATOR'", "'operator'"))).not.toBe(canonicalPolicy(rendered));
   });
 });
 
 describe('definer ownership order (rule 15; ADR-0005 am. 10 item 9)', () => {
   it('rule 15 (ADR-0005 am. 10 item 9): GRANT/REVOKE after OWNER TO platform_definer fails (definer-grant-after-owner-to)', () => {
-    expect(rules(lintCase('definer-grant-after-owner-to'))).toEqual(['15', '15']);
+    // The CREATE outside the SET ROLE block fails too since PR11-SEC-07 (no "OWNER TO later" alternative).
+    expect(lintCase('definer-grant-after-owner-to').map((finding) => finding.message.slice(0, 40))).toEqual([
+      'SECURITY DEFINER function created outsid',
+      'REVOKE after OWNER TO platform_definer f',
+      'GRANT after OWNER TO platform_definer fa',
+    ]);
   });
 
   it('rule 15 (ADR-0005 am. 10 item 9): SECURITY DEFINER created outside SET ROLE platform_definer is flagged (definer-outside-set-role)', () => {
     expect(rules(lintCase('definer-outside-set-role'))).toEqual(['15']);
   });
 
-  it.each([['definer-set-role-block'], ['definer-grants-before-owner-to']])('rule 15 (ADR-0005 am. 10 item 9): %s is clean', (name) => {
-    expect(lintCase(name)).toEqual([]);
+  it('rule 15 (ADR-0005 am. 10 item 9): definer-set-role-block is clean', () => {
+    expect(lintCase('definer-set-role-block')).toEqual([]);
+  });
+
+  it('rule 15: "grants before OWNER TO" is no longer accepted; the SET ROLE block is the only form (PR11-SEC-07)', () => {
+    expect(rules(lintCase('definer-grants-before-owner-to'))).toEqual(['15']);
+  });
+
+  it('rule 15: a file ending inside SET ROLE fails; SET LOCAL ROLE does not open the definer block (PR11-SEC-07)', () => {
+    const findings = lintCase('definer-role-not-reset');
+    expect(byMigration(findings)).toEqual([
+      ['20261112000000_role_not_reset', '15'],
+      ['20261112000100_set_local_role', '15'],
+    ]);
+    expect(findings[0]?.message).toMatch(/ends with a SET ROLE still in effect/);
+    expect(findings[1]?.message).toMatch(/created outside "SET ROLE platform_definer/);
   });
 });
 
@@ -335,6 +453,23 @@ describe('tenant context in SQL (rule 16; ADR-0005 am. 10 item 1)', () => {
 
   it('rule 16 (ADR-0005 am. 10 item 1): a §4.2 helper definition, an app.correlation_id read and a non-app set_config are clean', () => {
     expect(lintCase('context-helper')).toEqual([]);
+  });
+
+  it('rule 16 uses the shared form list: every PostgreSQL-valid evasion of probe P-B fails, one finding per statement (PR11-SEC-02, CR m1)', () => {
+    expect(byMigration(lintCase('context-evasions'))).toEqual([
+      ['20261112000000_concat_empty_literal', '16'],
+      ['20261112000100_concat_split_literal', '16'],
+      ['20261112000200_quoted_setter', '16'],
+      ['20261112000300_qualified_quoted_setter', '16'],
+      ['20261112000400_format_set_local', '16'],
+      ['20261112000500_set_local_quoted_namespace', '16'],
+      ['20261112000600_reset_quoted_namespace', '16'],
+      ['20261112000700_set_spaced_namespace', '16'],
+      ['20261112000800_execute_quoted_name', '16'],
+      ['20261112000900_read_concat_key', '16'],
+      ['20261112001000_read_dynamic_key', '16'],
+      ['20261112001100_show_format', '16'],
+    ]);
   });
 });
 
