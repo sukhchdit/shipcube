@@ -7,7 +7,7 @@
 | Security | SEC-P3-04 / SEC-COND-04 (SEC-TC-45 local part), SEC-P3-31 (`npm exec --no`) |
 | Date / host | 2026-11-12 · Windows 11 Pro 10.0.26300, Node v24.22.3 (fnm, PATH prefix), npm 11.19.1, Docker Desktop 29.8.0 (16 CPU, 15.5 GiB) |
 | Owner | senior-developer |
-| **Verdict** | **GO** for the ADR-0001 runtime/toolchain baseline on the Windows host. Six packages are **deferred** to their owning tasks and three ADR wording points need a principal-architect amendment (§5). No ADR-0001 version pin changes. The ubuntu-latest half of the exit criterion closes with TASK-007 (lane A). |
+| **Verdict** | **GO** for the ADR-0001 runtime/toolchain baseline on the Windows host. Six packages are **deferred** to their owning tasks and four ADR wording points need a principal-architect amendment (§5). No ADR-0001 version pin changes. The ubuntu-latest half of the exit criterion closes with TASK-007 (lane A). |
 
 ## 1. Exit criterion (risks.md R-ARCH-01/20) — results on the Windows host
 
@@ -71,6 +71,8 @@ Spike probes (throwaway code in commit `7bc9bd3`, removed in the next commit):
 | F-11 | API notes from the probes: `cookie` 2 renamed `parse` → `parseCookie` (and `serialize` → `stringifySetCookie`); `@types/opossum` 8.1.9 lags `opossum` 10; the Prisma `prisma-client` generator writes `globalThis.__dirname` in the generated client. | Identity tasks (cookie); TASK-003 keeps `prisma/generated` git-ignored (already in `.gitignore`). |
 | F-12 | TypeScript 6 behaviour change: `tsc <file>` in a directory that has a `tsconfig.json` now fails with `TS5112` unless `--ignoreConfig` is passed. | Anyone scripting ad-hoc `tsc` calls. |
 | F-13 | `tsc -b` compiles `*.test.ts` into `dist/` (one tsconfig per workspace covers source and tests). | TASK-014: exclude `**/*.test.*` from runtime image stages, or add a `tsconfig.build.json` per app. |
+| **F-14** | **`npm ci --omit=dev` is not enough for runtime images.** `prisma` (CLI), `@prisma/studio-core`, `elkjs` (**EPL-2.0**, not on LICENSE_ALLOWLIST), `@visx/*` **4.0.x-alpha** pre-releases and `typescript` are flagged `devOptional` in the lockfile. They are dev dependencies, but also reachable as optional peers of production packages (`@prisma/client` → `peerOptional prisma`; `react-router` → optional `typescript`). npm drops `devOptional` packages only when **both** `dev` and `optional` are omitted. | TASK-014: runtime stages (`api`, `worker`) install with `npm ci --omit=dev --omit=optional --ignore-scripts`, or prune afterwards, and verify that the runtime prebuilds still work (bcrypt ships its prebuilds inside the package, not as optional dependencies). Only the migrate job image keeps the Prisma CLI, and that image's licence closure must exclude Studio (`elkjs`). The Trivy licence scan on images (D-ARCH-003 rev 2 item 5) is the backstop. security-analyst to confirm. |
+| F-15 | Licence metadata in the lockfile: `ssh2`, `cpu-features` and `buildcheck` (dev, via `testcontainers` → `docker-modem`) use the legacy `licenses: [{type: "MIT"}]` array, so the lockfile has no `license`. `png-js` 2.0.0 (prod, via `pdfkit`) has no licence field, but its `LICENSE` file is MIT. `@visx/vendor` declares `"MIT and ISC"` (lower-case operator). `caniuse-lite` is CC-BY-4.0 (dev build data, allowed by D-ARCH-003 rev 2 item 2). | TASK-007 `licence-check.mjs`: read installed `package.json` files (legacy `licenses` arrays), keep an explicit LICENSE-file override list (`png-js`), and parse SPDX operators case-insensitively. |
 
 ## 4. Windows host specifics (R-ARCH-17)
 
@@ -83,11 +85,12 @@ Spike probes (throwaway code in commit `7bc9bd3`, removed in the next commit):
 
 ## 5. ADR amendment requests (principal-architect)
 
-None changes a version pin in the ADR-0001 baseline table. All three are wording or convention updates:
+None changes a version pin in the ADR-0001 baseline table. All four are wording or convention updates:
 
 - **A-1 (ADR-0002 §1, §2, §6; CLAUDE.md §2):** "npm 10" → npm ≥ 11.10 (bundled with Node 24.22; required for `min-release-age`), with `engines.npm ">=11.10"`. `npm run typecheck` = `tsc -b` (§2.1). `.npmrc` also carries `audit=false` and `min-release-age=7` (ADR-0023 am. F "once SPK-01 confirms": **confirmed**).
 - **A-2 (ADR-0024 conventions; ADR-0002 §6):** Jest scripts run under `node --experimental-vm-modules` for `require(esm)` (§2.2). Workspace packages use the `@platform/source` export condition (§2.3).
 - **A-3 (ADR-0002 §5, ADR-0025):** replacements for `eslint-plugin-jsx-a11y` (F-02) and `prom-client` (F-03); the Stylelint 18 / `stylelint-use-logical` choice (F-04); LHCI as a container and `size-limit` without `preset-app` (F-06); the Stryker isolation approach (F-07).
+- **A-4 (ADR-0002 §Alternatives, ADR-0023 am. F item 1, platform.md image stages):** the `prod-deps` stage installs with `--omit=dev --omit=optional` (F-14), so the Prisma CLI, Studio (`elkjs` EPL-2.0) and TypeScript stay out of runtime images.
 
 ## 6. Version pins delivered (`package-lock.json`)
 
