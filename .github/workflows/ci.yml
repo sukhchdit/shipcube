@@ -261,7 +261,7 @@ jobs:
           status=0
           node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js "$suite" \
             --selectProjects unit \
-            --testNamePattern '^(?!.*(allowed: |lints clean|is listed in the case table|`npm run lint` runs)).*$' || status=$?
+            --testNamePattern '^(?!.*(allowed: |lints clean|is listed in the case table|npm run lint. runs))' || status=$?
           rm -rf tests/fixtures/lint
           git checkout HEAD -- "$suite" tests/fixtures/lint
           echo "Base-ref lint negative fixtures (no-weakening subset): exit $status" >> "$GITHUB_STEP_SUMMARY"
