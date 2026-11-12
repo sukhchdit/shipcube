@@ -1,8 +1,10 @@
 /**
- * Pure scanners for the catalog suite (data-model.md §4.6 C3 and the C-series prosrc scan; ADR-0005 am. 10 items 1
- * and 7; data-model §8.3 rule 16; PR7-SEC-07, PR7-SEC-11, D-ARCH-065; TASK-016). They read rows the suite selects from
- * pg_policy / pg_proc and return one finding per violation, so a failing assertion names the object.
+ * Pure scanners for the catalog suite (data-model.md §4.6 C3, C9 and the C-series prosrc scan; ADR-0005 am. 10 items
+ * 1 and 7; data-model §8.3 rule 16; PR7-SEC-07, PR7-SEC-11, PR11-SEC-02, PR11-SEC-03, D-ARCH-065; TASK-016). They read
+ * rows the suite selects from pg_policy / pg_proc / pg_constraint and return one finding per violation, so a failing
+ * assertion names the object.
  */
+import { CONTEXT_DISCARD, contextReads, contextWrites } from '../../../tools/db/tenant-key-forms.js';
 
 /** A row of the C3 policy query (`pg_get_expr` output under search_path pg_catalog, pg_temp). */
 export interface PolicyRow {
@@ -29,13 +31,22 @@ const FORBIDDEN_IN_POLICY: readonly (readonly [string, RegExp])[] = [
 ];
 
 /**
- * C3: forbidden tokens in every policy expression, USING (true) for platform_app, policies for the migrator or PUBLIC,
- * and platform_definer policies outside the definer tables (manifest flags definerRead/definerPurge).
+ * The keyed atoms of the §4.3 templates (deparsed, schema-qualified; a same-named function in another schema does not
+ * count). Every platform_app USING / WITH CHECK must reference one, so `org_id = org_id`, `org_id IS NULL` and `1 = 1`
+ * are refused (PR11-SEC-03).
+ */
+const KEYED_ATOM = /(?<![\w".])platform\.app_(?:org_id|actor_id|guest_token_hash|is_operator)\(\)/;
+
+/**
+ * C3: forbidden tokens in every policy expression, USING (true) for platform_app, a platform_app clause without a
+ * keyed atom, policies for the migrator or PUBLIC, and platform_definer policies outside the definer tables (manifest
+ * flags definerRead/definerPurge).
  */
 export function scanPolicies(rows: readonly PolicyRow[], definerTables: ReadonlySet<string>): string[] {
   const findings: string[] = [];
   for (const row of rows) {
     const name = `${row.table}.${row.policy}`;
+    const forApp = row.roles.includes('platform_app');
     for (const [clause, expression] of [
       ['USING', row.qual],
       ['WITH CHECK', row.with_check],
@@ -45,8 +56,9 @@ export function scanPolicies(rows: readonly PolicyRow[], definerTables: Readonly
       for (const [token, pattern] of FORBIDDEN_IN_POLICY) {
         if (pattern.test(text)) findings.push(`${name} ${clause}: ${token}`);
       }
+      if (forApp && !KEYED_ATOM.test(expression)) findings.push(`${name} ${clause}: no keyed context atom`);
     }
-    if (row.roles.includes('platform_app') && row.qual === 'true') findings.push(`${name}: USING (true) for platform_app`);
+    if (forApp && row.qual === 'true') findings.push(`${name}: USING (true) for platform_app`);
     if (row.roles.includes('platform_migrator') || row.roles.includes('public')) findings.push(`${name}: targets ${row.roles.join(',')}`);
     if (row.roles.includes('platform_definer') && !definerTables.has(row.table))
       findings.push(`${name}: platform_definer policy outside the definer tables`);
@@ -69,27 +81,37 @@ export const CONTEXT_HELPERS: ReadonlySet<string> = new Set([
   'platform.app_is_operator()',
 ]);
 
-/** Write forms (rule 16 (i)): forbidden in every function, helpers included. */
-const WRITE_FORMS: readonly (readonly [string, RegExp])[] = [
-  // any set_config( whose first argument is not a literal key outside app.* (dynamic keys are refused too)
-  ['set_config( with an app. key', /\bset_config\s*\(\s*(?!'(?!app\.)[^']*')/i],
-  ['SET app.', /\bSET\s+(?:SESSION\s+|LOCAL\s+)?"?app\./i],
-  ['RESET app./RESET ALL', /\bRESET\s+(?:"?app\.|ALL\b)/i],
-  ['DISCARD', /\bDISCARD\b/i],
-];
-/** Reads of the four security keys (rule 16 (ii)); app.correlation_id and other literal keys stay allowed. */
-const SECURITY_KEY_READ = /\bcurrent_setting\s*\(\s*(?!'(?!app\.(?:org_id|actor_id|actor_scope|guest_token_hash)')[^']*')/i;
-
-/** C-series prosrc scan: by form, in every non-system namespace (ADR-0005 am. 10 item 1, D-ARCH-065). */
+/**
+ * C-series prosrc scan: by form, in every non-system namespace (ADR-0005 am. 10 item 1, D-ARCH-065), with the one form
+ * list shared with migration-linter rule 16 (tools/db/tenant-key-forms.ts; PR11-SEC-02, review m1). Write forms and
+ * DISCARD apply to every body, the §4.2 helpers included; read forms to every function except the helpers, matched by
+ * regprocedure. The whole body is scanned, string literals included, so dynamic SQL counts.
+ */
 export function scanFunctionBodies(rows: readonly FunctionRow[]): string[] {
   const findings: string[] = [];
   for (const row of rows) {
-    for (const [form, pattern] of WRITE_FORMS) {
-      if (pattern.test(row.prosrc)) findings.push(`${row.fn}: ${form}`);
-    }
-    if (!CONTEXT_HELPERS.has(row.fn) && SECURITY_KEY_READ.test(row.prosrc)) {
-      findings.push(`${row.fn}: reads a security key outside the §4.2 helpers`);
-    }
+    const forms = contextWrites(row.prosrc);
+    if (CONTEXT_DISCARD.test(row.prosrc)) forms.push('DISCARD');
+    if (!CONTEXT_HELPERS.has(row.fn)) forms.push(...contextReads(row.prosrc));
+    findings.push(...forms.map((form) => `${row.fn}: ${form}`));
   }
   return findings;
+}
+
+/** A row of the C9 query: a CHECK constraint whose definition holds an `= ANY (ARRAY[…])` list. */
+export interface CheckRow {
+  readonly conname: string;
+  readonly def: string;
+}
+
+/**
+ * C9: the value lists of the enum-like CHECKs (a single `col IN (…)`, deparsed as `= ANY (ARRAY[…])`, with no AND/OR
+ * around it), by constraint name, values sorted. Mixed predicates such as `ck_permissions__key_format` are not enums.
+ */
+export function enumCheckValues(rows: readonly CheckRow[]): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const row of rows.filter((r) => !/\b(?:AND|OR)\b/.test(r.def))) {
+    result[row.conname] = [...row.def.matchAll(/'((?:[^']|'')*)'::/g)].map((match) => (match[1] ?? '').replaceAll("''", "'")).sort();
+  }
+  return result;
 }
