@@ -1,0 +1,2 @@
+- [P3 security conditions](project_p3_security_conditions.md) — G2 verdict APPROVED_WITH_CONDITIONS; 4 HIGH conditions to re-verify at P4 exit, P5 reviews, G3
+- [Security review conventions](project_security_review_conventions.md) — OWASP 2021 codes, severity matrix, routing of findings, npm registry check recipe
