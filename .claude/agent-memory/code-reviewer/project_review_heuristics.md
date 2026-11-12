@@ -49,3 +49,21 @@ Round 2 of a spike PR (PR #6 r2):
 - When a fix moves a check behind an env flag, grep the plan sheet (WAVE-*.md / plan-data.mjs) and the ADR text that consume it. Plan lines written before the fix often say "runs in job X" without setting the flag. The job then silently skips the check and still reports success.
 - ADR controls must be enforceable by the engine. Placeholder `app.*` GUCs are USERSET: PostgreSQL cannot deny a role from setting them at session level, and `GRANT SET ON PARAMETER` does nothing for USERSET parameters. A "prove X cannot be set" control is therefore infeasible; the control is a lint/Semgrep token ban plus a negative control that proves the leak.
 - Fixed claims come back. A finding corrected in the spike doc (for example, "existing lint rule") can reappear in an ADR amendment that was drafted from the pre-fix SHA. Diff the claims in each amendment against the fixed doc.
+
+**Runtime/HTTP skeleton patterns (PR #9, 2026-11-12):**
+- **"First call" is not "fresh connection".** Any check that is stricter at start-up but runs lazily through a shared pool will meet connections that earlier work already used. Probe it with a fake pool whose first row is the post-use state. Also check whether a failing result is cached for the whole re-check interval, which makes it sticky.
+- **Classifier allow-lists keyed on `type`.** body-parser wraps zlib errors as `status: 400` with no `type`, so a corrupt `Content-Encoding` body becomes a 500. Probe with real HTTP (`fetch` against `app.listen(0)`), because supertest mangles Buffer gzip bodies.
+- **Public probes:** check for single-flight or TTL, and for whether they share the request DB pool.
+- **Express 5 `app.listen(port, cb)`:** cb is also the once-`error` listener.
+- **Problem handler:** check for `Cache-Control: no-store` and that headers set before the throw are stripped.
+- `git diff` covering `.env.example` is blocked by a permissions deny rule. Diff the other paths explicitly.
+
+**CI gate / supply-chain checker patterns (PR #10, 2026-11-12).** Each was proven by a probe of under a minute.
+- **npm boolean flags take a bare `true`/`false` as their value.** `npm ci --ignore-scripts false` sets the flag to false, and the CLI value beats both env and `.npmrc`. Regex guards that only know `--flag=false` / `--no-flag` miss it. Probe: `npm config get ignore-scripts --ignore-scripts false`.
+- **Install-command regexes must come from npm's alias table** (`node_modules/npm/lib/utils/cmd-list.js` `aliases`). For example `clean-install`, `ic`, `cit`, `it`, `sit`, `ins`, `isnt`.
+- **Gitleaks v8 always loads `<source>/.gitleaksignore`** (`cmd/root.go`) and honours `gitleaks:allow` unless `--ignore-gitleaks-allow` is passed. A "config from the base ref" claim is therefore not enough; check the ignore file and the allow comments.
+- **Every "base-ref" claim:** list what the base-run tool still reads from the HEAD (ignore files, registers, test harness, jest config).
+- **In-house YAML parsers:** probe lone CR, NEL and U+2028 inside a comment line. libyaml-family parsers break the line there, so the hidden content is invisible to the checker. Prettier catches only the lone CR.
+- **`git diff --name-only` reports only the new path of a rename.** Ownership or record checks need `--no-renames`.
+- **A "record names reviewed SHA, nothing changed since" check** breaks on merge-main. Intersect with the PR's own net owned paths.
+- **Verify process premises against repo settings** (`gh api repos/<r>`): squash title (`COMMIT_OR_PR_TITLE` uses the commit subject for single-commit PRs), allowed merge methods. Branch protection returns 403 on private free-plan repos, so "required check" claims are not enforceable.
