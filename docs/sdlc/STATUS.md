@@ -34,8 +34,8 @@
 | 0.3 | TASK-008 SPK-03 RLS + Prisma 7 interactive tx — GO (PR #7) | senior-developer → database-engineer (opus) | merged a00340f | ✅ | ✅ APPROVED_WITH_NITS r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ fc1: unit 753, integration 47 + 1 opt-in skipped, build, audit, clean (sr-dev) | ✅ | 1 | – |
 | 0.3 | TASK-009 SPK-02 carrier API docs — UPS GO, FedEx/DHL FALLBACK (PR #6) | senior-developer → backend-developer (sonnet) | merged 501af73 | ✅ | ✅ APPROVED_WITH_NITS r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ fc1 docs: lint, fmt, unit, build, clean (sr-dev) | ✅ | 1 | – |
 | 0.4 | TASK-013 permission catalogue + 17 seeded roles (PR #8) | senior-developer → backend-developer (opus) | merged 4dc7122 | ✅ | ✅ APPROVED_WITH_NITS r2 | ✅ PASS_WITH_FOLLOW-UPS r2 | ✅ 6e70275: unit 859, integration 33, coverage 892 (authz 100/100), build, audit (sr-dev); main 4dc7122 code tree == gated head (D-ORCH-010) | ✅ | 1 | – |
-| 0.3 | TASK-006 API + worker runtime skeleton | senior-developer → backend-developer | feat/TASK-006-* | ▶ | | | | | 0 | |
-| 0.3 | TASK-007 CI lane A + supply-chain hardening | senior-developer → devops-engineer (opus) | feat/TASK-007-* | ▶ | | | | | 0 | |
+| 0.3 | TASK-006 API + worker runtime skeleton (PR #9) | senior-developer → backend-developer | feat/TASK-006-api-worker-runtime-skeleton-express @374166d | ✅ | ▶ | ▶ | ✅ unit 986, api 17, integration 57, build, audit, clean (sr-dev); lane A after PR #10 | | 0 | merge after PR #10 + merge-main |
+| 0.3 | TASK-007 CI lane A + supply-chain hardening (PR #10) | senior-developer → devops-engineer (opus) | feat/TASK-007-ci-lane-fast-lane-workflow @28442b6 | ✅ | ▶ | ▶ | ✅ local gates + hosted lane A green (run 43268839024, 2m36s warm) | | 0 | merges first (lane A on main) |
 | 0.5 | TASK-016 RLS foundations (critical path; binding ADR-0005 am.10 items) | senior-developer → database-engineer (opus) | feat/TASK-016-* | ▶ | | | | | 0 | |
 
 ## Escalations in progress
