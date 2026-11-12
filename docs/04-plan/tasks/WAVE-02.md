@@ -40,10 +40,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Files / modules**
 - packages/carriers/src/{adapter.ts, context.ts, capabilities.ts, normalise/**}
+- packages/carriers/src/adapters/<carrier>/egress.ts contract (EGRESS rules per environment: exact origin + path prefixes + tier; derived from enabled accounts, no env override)
 
 **Acceptance tests to write**
 - All US-121 and US-124 scenarios
-- AT-US-121-01 … AT-US-121-06: all 6 scenarios of US-121, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- ADR-0010 am. 11 items 2, 3 and 6 (D-ARCH-057 rev 2): `capabilities().operations` carries a boolean for every optional operation, for `cancelShipment` and for the new optional `recoverLabel(ref, formats, ctx)` (idempotent, retryable, transactional pool); the guard answers CAPABILITY_NOT_SUPPORTED without network I/O for any operation declared unsupported (unit test per operation incl. cancelShipment and recoverLabel); `LabelDocument.format` is a `document_format` value only (PDF_4X6 | PDF_A4 | PDF_LETTER | ZPL) — raster output never leaves the adapter except as a raw-payload `$blob`; each real adapter exports `EGRESS: { sandbox: EgressRule[], production: EgressRule[] }` (`{ origin, pathPrefixes, tier }`, exact origins, no wildcards) and the outbound rule set is the union over enabled accounts of EGRESS[account.environment] plus the Stripe rules — no configuration key can add a rule; `packages/config` refuses a carrier account with environment = production unless APP_ENV = production; carrier-supplied URLs are never dereferenced
+- AT-US-121-01 … AT-US-121-07: all 7 scenarios of US-121, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-124-01 … AT-US-124-05: all 5 scenarios of US-124, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

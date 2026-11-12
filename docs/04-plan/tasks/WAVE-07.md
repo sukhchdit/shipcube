@@ -93,7 +93,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-136 (M1 Must) Redacted raw payload retention |
 | REQs | REQ-CARR-018 |
 | NFRs | NFR-PRIV-001 |
-| Spikes / security / decisions | SEC-P3-13, D-ARCH-026 |
+| Spikes / security / decisions | SEC-P3-13, D-ARCH-026, PR6-SEC-02, PR6-SEC-06, PR6-SEC-07, D-ARCH-068 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-135, TASK-139, TASK-140, TASK-019 |
@@ -107,6 +107,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-136 scenarios
 - SEC-TC-52 (storage part): no base64 blob > 1 kB and no sentinel name/address/tax ID in raw-carrier-payloads
+- PR6-SEC-02 item 2 + R2.4 (ADR-0010 am. 11 item 8; D-ARCH-068): the request redactor deny-list is PER CARRIER, loaded from each adapter typed `sensitive-fields.ts` (never one generic list); matching is case-insensitive on the leaf key plus exact paths for ambiguous `Name`/`name` leaves; WHOLE PARTY CONTAINERS are removed rather than leaf by leaf (DHL `contactInformation`, address lines, `shipmentNotification`; UPS `Phone`, `FaxNumber`, the `InternationalForms.Contacts` parties; FedEx `contact`); a completeness test fails when a README "Sensitive fields" path has no sentinel in the fixtures, and the SEC-TC-52/AC-45 sentinel run proves no sentinel survives in the stored JSON, Pino output, error messages, HTTP responses or the in-memory OTel exporter
+- PR6-SEC-06 / PR6-SEC-07 item 2: the canonical output and the stored payload carry no carrier-supplied URL (`LabelURL`, `packageDocuments[].url`, `trackingUrl`, `cancelPickupUrl` are dropped by the redactor); token-endpoint requests and responses are never captured
 - AT-US-136-01 … AT-US-136-10: all 10 scenarios of US-136, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -190,10 +192,14 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - packages/carriers/test/fixtures/**
 - tools/carriers/readme-docs-check.ts
 - root script test:contract:live
+- tests/load config test (no carrier host in k6 scripts or environment)
 
 **Acceptance tests to write**
 - All US-137 scenarios
-- AT-US-137-01 … AT-US-137-07: all 7 scenarios of US-137, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- ADR-0010 am. 11 item 4 (D-ARCH-057): readme-docs-check requires the line "Diffed against official spec by a person: yes (date, role) | no" in every real adapter README besides Docs URL, API version, Date checked, Sandbox quirks and Sources; the lane B evidence report counts fixtures flagged `"_fixture": "synthesised"` per adapter; "no" does not fail the check but is listed under COND-SANDBOX-DEMO
+- PR #6 code review R2-n1 / PR6-SEC-12 h (ADR-0010 am. 11 item 4 as clarified 2026-11-12; D-ARCH-068): the canonical subsection heading is "PII and redaction" — readme-docs-check matches a heading that starts with that text case-insensitively (a parenthetical suffix passes; "Personal data and secrets" fails), and requires the Docs URL row to carry a specification commit SHA (`@ <sha>`) for repository sources or "not pinnable · retrieved <date>" for web pages; negative fixtures for a renamed heading and a SHA-less repository Docs URL
+- PR6-SEC-10 (sandbox hygiene): the live run (`CARRIER_LIVE_SANDBOX=1`) documents a per-run call budget (one or two calls per operation) and runs single-threaded; `test:load` targets the Mock carrier only and a configuration test asserts that no carrier host appears in the k6 scripts or their environment
+- AT-US-137-01 … AT-US-137-08: all 8 scenarios of US-137, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
@@ -804,7 +810,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047 |
@@ -821,6 +827,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-013 scenarios
 - One trace spans API -> queue -> worker -> Mock carrier (NFR-OBS-003); no high-cardinality labels (NFR-OBS-002)
+- ADR-0023 am. J item 4, ADR-0017 am. 2 and D-ARCH-043 (PR1-SEC-07): add only the explicit OpenTelemetry instrumentations (http, undici, pg, ioredis, pino, express) and the AWS/container resource detectors, each through the cooldown, licence and age gates. Never re-add `@opentelemetry/auto-instrumentations-node` or the GCP/Azure/Alibaba detectors.
+- PR6-SEC-03 item 2 / PR6-SEC-12 c (ADR-0017 §4 allow-list; ADR-0010 am. 11 item 8; D-ARCH-068): client spans for carrier and gateway calls carry `server.address`, `http.request.method`, `http.response.status_code` and the adapter route template (`url.template`) only — `url.full`, `url.path`, `url.query` and the legacy `http.url`/`http.target` are excluded by the span-processor allow-list (or undici auto-instrumentation is disabled for the carrier dispatcher and manual spans are created); the in-memory exporter test asserts a `requestorName` sentinel and an account-number sentinel never appear in any span attribute Afterwards `npm audit --omit=dev` reports 0 and `npm ls gcp-metadata` is empty
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

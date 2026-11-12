@@ -646,3 +646,79 @@ Scratch directory: `…/scratchpad/review/PR-5-sec-r2/`.
 8. `node -e` zlib check: `maxOutputLength` overflow throws `RangeError ERR_BUFFER_TOO_LARGE`, and exactly at the cap succeeds.
 9. `node lockdiff.mjs lock-base.json lock-head.json`: 3 paths, all root `devDependencies`; control detected. Then `npm view pg@8.23.1 license time.modified` and `npm view {pg,pg-connection-string,@types/pg} time`.
 10. `git diff d8ba197..4574a14 | grep` for secret-shaped additions: random per-run values and test-only literals only. `git grep "initdb\.d|psql .*-v|00-roles\.sql"`: no other consumer of `00-roles.sql`.
+
+## Round 3 — merge-main delta (head 614eb96)
+
+| Field | Value |
+|---|---|
+| Delta | `4574a14..614eb96` has two merges of main (`1f9c192`, `614eb96`) and one code commit, `6b0a8a8` (`fix(lint)`, 6 files, +49 / −20). `614eb96` adds docs and agent memory only: `git diff --stat 6b0a8a8 614eb96 -- . ':!docs' ':!.claude'` is empty. The merge-pass comments are #issuecomment-6825948019 and #issuecomment-6826463285 |
+| Reviewer / date | security-analyst, 2026-11-12. I reviewed by SHA from the main checkout (`origin/main` = `281c22d`; it has no code change since `44d6c2e`). I did not touch the worktree and ran no install, build or Docker |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS (unchanged).** No new Critical, High, Medium or Low finding. One new INFO note, PR5-SEC-14. The finding status in R2.8 otherwise stands |
+
+**R3.1 Security-relevant files are byte-unchanged: CONFIRMED.** `git rev-parse` returns the same blob at `4574a14` and `614eb96` for each of these 15 paths:
+- `prisma/bootstrap/00-roles.sql` (`f6766a46`) and `01-schemas.sql` (`65d22c5d`);
+- `tools/deps/prisma-engines.json` (`84774dd0`), `prisma-engines.mjs`, `prisma-cli.mjs` and `rebuild.mjs`;
+- `tools/db/bootstrap.ts`, `scram.ts`, `lint-migrations.ts`, `sql-text.ts` and `audit-ddl-reviewers.json` (still empty);
+- `apps/api/src/platform/db/client.ts`, `prisma.config.ts`, `.npmrc` and `prisma/package.json`.
+
+The bootstrap ledger hashes and the engine pin therefore still hold. In `tools/db` and `tools/deps`, only `reset.ts` and two test files changed.
+
+**R3.2 The reset guard behaves as before.** Commit `6b0a8a8` changes `tools/db/reset.ts:96` from `connectionString: bootstrapUrl as string` to `connectionString: bootstrapUrl`.
+- **Runtime.** A TypeScript assertion is erased when the code compiles, so the emitted JavaScript is identical. `bootstrapUrl` is a `const`. `resetTarget` (lines 63–80) validates that same `const` at line 86 and throws on a missing value, an empty value, a non-loopback host, `host`/`hostaddr` parameters, or a migrator mismatch. All of that happens before the drop at line 91 and the bootstrap at line 96. No path reaches line 96 with an unvalidated value.
+- **Types.** The assertion was unnecessary because `@types/pg` 8.23.1 declares `connectionString?: string | undefined`. This is what `no-unnecessary-type-assertion` flagged. The old `as string` gave no protection either, so nothing regresses. It does show a latent gap, recorded as PR5-SEC-14 below.
+
+**R3.3 The lockfile differs from origin/main only in the root manifest: CONFIRMED.**
+- **Structural diff.** `lockdiff.mjs` compared `origin/main:package-lock.json` with `614eb96:package-lock.json`. It found 0 added, 0 removed and 1 changed entry. The changed entry is `packages[""].devDependencies`, which adds `@types/pg`, `pg` and `pg-connection-string`. The top-level keys are equal.
+- **Text diff.** `git diff --text` shows exactly 3 added lines.
+- **Resolved packages.** `node_modules/pg` 8.23.1, `pg-connection-string` 2.14.1 and `@types/pg` 8.23.1 keep their registry `resolved` and `integrity` values. No `resolved` or `integrity` value changed anywhere.
+- **Positive control.** The same script run on `4574a14` → head detects main's 69 TASK-002 additions and the `engines` change. Those were reviewed under PR #2.
+- **Root `package.json` versus main.** It differs only by the branch `db:*` scripts, `test:integration` without `--passWithNoTests`, and the same three exact-pinned devDependencies. All of these are as reviewed in R2.
+
+**R3.4 The ESLint relaxations weaken no security lint.** `eslint.config.mjs` differs from main by exactly two new blocks, both of which set import-hygiene rules only:
+- **`files: ['prisma.config.ts']`.** This block changes only the options of `import-x/no-extraneous-dependencies`: `devDependencies: true` and `packageDir: [ROOT, prisma]`. It has the same shape as the existing `jest-esm.test.ts` allowance. The general block already granted dev dependencies to `**/*.config.*` files.
+- **`files: ['prisma/tests/**']`.** This block sets `import-x/no-relative-packages: 'off'` and nothing else.
+  - The scope is already test code: `prisma/tests/**` matches `TEST_FILES` (`**/{test,tests,__tests__}/**`). The boundaries `test` category, which every layering policy excludes, already covers it.
+  - The rule is not a security control.
+  - Flat config merges rules per key, so the following all still apply to these files unchanged: `no-restricted-imports` (bcrypt), the boundaries policies, and the local rules (`outbound-http-via-client`, `no-innerhtml`, `audit-writer-allowlist`, `module-sources`, `node-path-only`, money and format).
+  - The commit adds no inline `eslint-disable`.
+- **`tools/tsconfig.json`.** The two `prisma/tests/fixtures/*/prisma.config.ts` files are now type-checked through `files`. They were not edited, and they read only `DATABASE_MIGRATOR_URL`.
+
+**R3.5 The test-fake changes keep every security assertion.**
+- **`prisma-engines.test.ts` (SEC-TC-64).** The `later()` helper wraps each fake in `new Promise((resolve) => resolve(fake(...)))`, so a throw still becomes a rejection. This means the fail-closed case (iii), "unreachable origin, 3 retries", still sees rejections.
+  - The call counts (`calls === 1` on 404), the backoff `[750, 1500]` and the off-origin and redirect refusals are unchanged.
+  - The `--record` check becomes `results[0]?.sha256` with `toBe(hash)`, and `undefined` would still fail.
+  - No `expect` was removed.
+- **`up-down-up.test.ts` and `runtime-role.int.test.ts`.** These are signature and assertion-style changes only.
+- **Secret check.** A grep of the commit for secret-shaped additions finds nothing.
+
+**R3.6 New note.**
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location (head) | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR5-SEC-14 | The `db:reset` guard is not carried in the type: `bootstrapUrl` is still `string \| undefined` at the `runBootstrap` call, and `pg` would quietly fall back to `PGHOST`/`PGDATABASE`/`PGUSER` (libpq environment defaults) if a refactor ever separated the call from `resetTarget` | INFO | CWE-1025 (defence in depth) | A04 | `tools/db/reset.ts:85-96` | TASK-034, or the next touch of `reset.ts` (bundle it with PR5-SEC-13) | Open (note) |
+
+- **Remediation.** `resetTarget` should return the validated URL, so the guard becomes a type and the compiler enforces it:
+
+  ```ts
+  // resetTarget(...): { database: string; maintenanceUrl: string; bootstrapUrl: string }
+  return { database, maintenanceUrl: url.toString(), bootstrapUrl };
+  // main():
+  const target = resetTarget(env['DATABASE_BOOTSTRAP_URL'], argv, env['DATABASE_MIGRATOR_URL']);
+  await runBootstrap({ connection: { connectionString: target.bootstrapUrl }, passwords });
+  ```
+
+  Optionally, `connectPrivileged` should also refuse a config without a non-empty `connectionString`.
+- **Verification.**
+  - The type check passes with no assertion.
+  - The existing `resetTarget` refusal tests stay green.
+  - A unit test with `DATABASE_BOOTSTRAP_URL` unset asserts that `main` returns 1 and that `connectPrivileged` is never called.
+
+**R3.7 Status.** R2.8 still holds. PR5-SEC-04 (LOW), PR5-SEC-11 (LOW), PR5-SEC-05, 07, 08, 09, 10, 12 and 13 (INFO) remain open with the same owners. PR5-SEC-14 (INFO) is added. No Critical or High finding is open, so the merge rule is met.
+
+**R3.8 Evidence (head `614eb96`).** The scratch directory is `…/scratchpad/review/PR-5-sec-r3/`.
+1. I ran `git fetch -q origin` and then `git log --oneline 4574a14..614eb96`. I also ran `git diff --stat` over `4574a14..614eb96` and over `1f9c192..6b0a8a8` (6 files), plus `git diff --stat 6b0a8a8 614eb96 -- . ':!docs' ':!.claude'`, which was empty.
+2. `git rev-parse` at both SHAs for the 15 paths in R3.1: all identical.
+3. `node lockdiff.mjs` on `origin/main` → head gave 1 changed entry, root `devDependencies` only. The `4574a14` → head control detected the changes. `git diff --text origin/main 614eb96 -- package-lock.json` shows 3 added lines.
+4. `git diff origin/main 614eb96 -- eslint.config.mjs` shows two blocks, +15 lines. I read the block order and the `TEST_FILES` and `BOUNDARIES_FILES` definitions in `614eb96:eslint.config.mjs`.
+5. In the main checkout, `node_modules/@types/pg/index.d.ts:18` reads `connectionString?: string | undefined` (version 8.23.1).
+6. I read the two merge-pass comments. The developer ran the gates on `6b0a8a8`: lint, typecheck, 289 unit tests, 28 integration tests, `npm audit --audit-level=high` with 0 High/Critical, and build. On `614eb96`, coverage passed with 317 tests. I did not re-run any of them.

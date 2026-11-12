@@ -20,3 +20,55 @@ Developer specialists stop at an 80-turn limit, and an M-size task with several 
 - Write long PR bodies with the Write tool. A Bash heredoc containing backticks and apostrophes failed with "unexpected EOF".
 
 Related: [[p5-worktrees]], [[plan-generation-workflow]]
+
+**Small fix cycles: do them solo (PR #3 cycle 2, 2026-11-12).** Four findings plus four NITs, all in one package, took about 60 tool calls including the serial background gate, with no dispatch. That was faster than briefing a specialist. Write scratch scripts that contain backslashes (regex, Windows paths) with the Write tool: a quoted Bash heredoc lost a `\` in `/\/g`.
+
+**Batch 0.3/0.4 pull-forward (TASK-008/009/013, 2026-11-12):** all 3 specialists finished and reported (59, 67, 107 tool uses). What worked:
+- A host-wide Docker lock (`mkdir <scratch>/wave0/docker.lock` = atomic, `rmdir` after). Specialists and my gate script (`until mkdir …; do sleep 15; done`) used it. Remove it yourself if a reaped run leaves it behind.
+- Specialists do not get `npm ci` themselves. I ran one serial background install for all worktrees, and briefs said "wait for `== NNN exit 0` in <bg output file>".
+- Docs or web-research tasks go to `general-purpose`. `backend-developer` has no WebFetch/WebSearch.
+- Specialist sandboxes are pinned to `.claude/worktrees/agent-<id>`, which blocks Bash heredoc writes and compound `cd X && git …`. Tell them to use the Write tool and `git -C <worktree>`.
+- `jest --selectProjects integration <path>` treats the path as a project name and runs every integration suite. Put the path first: `jest <path> --selectProjects integration`.
+- The full gate run was reaped again during `test:integration`. Once free memory recovered (check with `Get-CimInstance Win32_OperatingSystem`), I ran only the affected integration files serially (`-i`) in the foreground and reported that honestly in the PR.
+
+**Batch 0.3/0.4 fix cycle 1 (PRs #6-#8, 2026-11-12): about 75 of my own tool calls, all three specialists reported (61-82 tool uses each).** Setup: general-purpose for the docs PR (it needs WebFetch to pin source SHAs), opus database-engineer for the spike test, and opus backend-developer for authz Part A, while I did Part B in the same worktree with disjoint file ownership. What worked:
+- Merge `origin/main` into every worktree before dispatching, so specialists edit the final base.
+- One background gate script per PR, run serially, with the Docker steps behind `docker.lock`. Full integration plus coverage finished this time, in about 4.5 min for PR #8.
+- The architect published rulings that touched these PRs while the cycle ran. Re-fetch before pushing. If main's delta is docs-only, the evidence is: a normal merge, `git diff <gated> HEAD -- . ':!docs' ':!.claude'` is empty, and a re-run of lint, format and unit only.
+- A specialist's sandbox may refuse the one-line `bash -c` lock loop. A scratchpad script that runs the same protocol works.
+- To pin a generated file by SHA: drop the pin, run the generator, hash the output, then add the pin back.
+
+**Batch 0.3, TASK-006/007 (2026-11-12): 3 of the 5 opus specialists stopped at the turn limit (6A, 6B, 7C)**, even with split ownership and the shared `wave0/brief-common.md`. The two that finished (7A, 7B) each had a single, narrower area. What worked:
+- Running 3 agents at a time (the D-ORCH-010 cap) and launching the next as soon as one finished.
+- Finishing the leftover routed items myself (about 6 small items).
+- Writing contract files that named file ownership.
+
+Watch out for these:
+- One specialist was silently pinned to `.claude/worktrees/agent-*` instead of the briefed worktree. See [[agent-worktree-junctions]].
+- Review routings land on main mid-task (D-ORCH-011 added PR7/PR8 items). Grep new security reviews for the task ID before opening the PR.
+- Run commitlint per commit BEFORE the first push. A pushed bad header can't be rewritten; the only remedy is a conforming PR title for the squash merge.
+- Run actionlint locally after every ci.yml edit: shellcheck SC2016 rejects `$` or a backtick inside single quotes.
+- Lane A on its own PR took about 7 job-min (fast-lane 4 min). Runs 1–2 failed on a base-ref fixture design issue and on SC2016.
+
+**Large-task three-way split (TASK-016, 2026-11-12): all three opus specialists reported (86, 86 and 100 tool uses), and the full gate passed on the first run.** What made it work:
+- Before dispatching, the lead wrote and committed the shared contract itself (the table-class manifest loader that two specialists needed).
+- A common brief fixed every cross-specialist file name up front, so the lint exemptions could name exact paths.
+- Ownership was split by layer: SQL/catalog, runtime, linters.
+- Commit each specialist's files as soon as it reports.
+- The leftovers were small. Shared `tools/tsconfig.json` `files` entries can conflict, and new fixture `prisma.config.ts` files must be added to `tools/tsconfig.json` `files` or the lint project service fails on them.
+- Check that the hosted CI jobs a sheet assumes actually exist (`security-integration` did not), and record the deferral instead of improvising a workflow.
+
+**PR #9 fix cycle 1 (2026-11-12): hybrid split worked, about 75 of my own calls, full gate green on the first run (about 3 min).** Two opus backend-developers took the isolated, well-specified findings (tools/deps PR9-SEC-02, 43 tool uses; TLS pinning plus config guard PR9-SEC-04, 69 tool uses). I did the cross-cutting core (M1 plus readiness, http and errors) in the same worktree, with file ownership disjoint. The briefs quoted the review line ranges and said "do NOT commit". Afterwards I made one commit per finding group. Pitfall: editing TS through `node -e "…"` in bash corrupts template literals, because backticks inside double quotes get command-substituted. For anything that contains backticks, use Edit/Write or a scratch file.
+
+**PR #10 fix cycle 1 (TASK-007 CI lane, 2026-11-12): about 95 of my own tool calls plus one opus devops-engineer (71 tool uses).** I owned ci.yml and the policy/install-flags/semgrep modules; the specialist owned three independent checkers. That split worked, and lane A was green on the first push. Pitfalls:
+- The suppression counter (`tools/lint/check-suppressions.mjs`) flags the literal text `gitleaks:allow` in any code file, prose comments and test titles included. Write "inline allow markers" instead.
+- A worktree's `.git` is a pointer file. To run gitleaks or git in Docker against a worktree, mount `git rev-parse --git-common-dir` and use explicit SHAs.
+- Workflow-policy fixtures named `ci-*.yml` are checked as ci.yml. Apply repository-wide manifests (required-gates) only in repository mode, or the positive-control fixtures break.
+- The Bash tool eats backticks and `\` in heredocs and `node -e`, even quoted. For edits containing backticks or regex escapes, use Edit, or a Write-ten script with `s.replace(a, () => b)`.
+
+**PR #11 fix cycle 1 (2026-11-13): 3 opus specialists, about 45 of my own calls, full gate green on the first run (~7 min).** Before dispatching I wrote and committed the shared contract myself: the regex list plus its unit test plus its ESLint exemption. The common brief fixed the post-split exemption table up front, so the agents' files stayed inside it. The two database-engineers finished at 38 and 60 tool uses. The backend-developer (runtime Proxy plus ESLint, two areas) stopped at the 80-turn limit at 112 tool uses, but its work was complete and green. Salvage took 5 calls: run its unit tests, tsc, eslint and prettier, run the integration file under the lock, then commit. The lesson holds: split each specialist to one area, or expect to finish the second area's verification yourself.
+
+**PR #12 fix cycle 1 (spike, 2026-11-13): done solo in about 70 calls, with full gate and lane A green on the first push.** What worked:
+- For an open empirical question (M1: Prisma partial indexes), write the probe with a placeholder `expect(outcomes).toEqual({})` and run only that test with `-t`. Read the JSON report, then pin the observed values. It took 2 probe runs: Prisma preview flags come from the **config** schema, not the `--to-schema` target.
+- Making the spike suites robust to future bootstrap files was simple: bootstrap from a temporary copy that holds only the `0N-*.sql` files (`pgh.bootstrap(db, dir)`).
+- Run `node tools/ci/check-security-owned-paths.mjs --base <merge-base> --head HEAD --pr N` locally, without `--report-only`, to learn before pushing whether lane A needs a security record.

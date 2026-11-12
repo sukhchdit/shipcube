@@ -37,7 +37,7 @@ Conventions used below. Carrier call, cache and stream scenarios run against the
 - **Linked REQs:** REQ-CARR-001, REQ-CARR-002, REQ-CARR-003
 - **Linked NFRs (optional):** none
 - **As a** developer **I want** one typed `CarrierAdapter` interface with a mandatory capability declaration and a safe guard for unsupported optional operations **so that** onboarding a carrier needs only an adapter, a capability declaration and seed data.
-- **Notes:** Interface lives in `packages/carriers`. Required ops: `getRates`, `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, `track`; optional: `validateAddress`, `findServicePoints`, `uploadCustomsDocuments`, `estimateLandedCost`. `CarrierContext` carries carrier account reference, environment (`sandbox` or `production`, a property of the account, never a global flag) and correlation ID. `estimateLandedCost` is a seam only. No pickup-availability query exists (GAP-B-01).
+- **Notes:** Interface lives in `packages/carriers`. Required ops: `getRates`, `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, `track`; optional: `validateAddress`, `findServicePoints`, `uploadCustomsDocuments`, `estimateLandedCost`, `recoverLabel` (ADR-0010 am. 11, D-ARCH-062). `capabilities()` also carries `operations.cancelShipment: boolean`; a required operation declared unsupported (DHL Express `cancelShipment`, D-ARCH-057) is answered by the same `CAPABILITY_NOT_SUPPORTED` guard with no I/O. `CarrierContext` carries carrier account reference, environment (`sandbox` or `production`, a property of the account, never a global flag) and correlation ID. `estimateLandedCost` is a seam only. No pickup-availability query exists (GAP-B-01).
 
 #### Acceptance criteria
 Permission path: not applicable — build-time library with no principal; a second negative scenario is included.
@@ -47,7 +47,8 @@ Feature: CarrierAdapter contract and capabilities
     Given an adapter registered in packages/carriers
     When the type check and the interface test run
     Then every required operation accepts a CarrierContext with accountRef, environment and correlationId
-    And capabilities() returns a boolean for each of validateAddress, findServicePoints, uploadCustomsDocuments and estimateLandedCost
+    And capabilities() returns a boolean for each of validateAddress, findServicePoints, uploadCustomsDocuments, estimateLandedCost and recoverLabel
+    And capabilities() returns a boolean operations.cancelShipment
 
   Scenario: Capabilities describe services, limits and pickup constraints
     When capabilities() is called on the Mock adapter
@@ -61,6 +62,14 @@ Feature: CarrierAdapter contract and capabilities
     Then the call fails with the structured error CAPABILITY_NOT_SUPPORTED
     And zero outbound network requests are made
     # repeated as a unit test per optional operation
+
+  Scenario: Required operation declared unsupported fails without a network call
+    Given an adapter whose capabilities() declares operations.cancelShipment=false
+    And network access is monitored
+    When cancelShipment is invoked
+    Then the call fails with the structured error CAPABILITY_NOT_SUPPORTED
+    And zero outbound network requests are made
+    # contract case cancel-capability-not-supported-no-io (D-ARCH-057)
 
   Scenario: Environment is read from the account, not a global flag
     Given a CarrierContext with environment "production" and a context with environment "sandbox"
@@ -404,7 +413,7 @@ Feature: Platform carrier accounts
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-128
 - **Linked REQs:** REQ-CARR-016
 - **As a** developer **I want** OAuth access tokens cached and refreshed once per account **so that** carrier calls do not request a token each time and a burst never floods the token endpoint.
-- **Notes:** Cached in Redis until 60 s before stated expiry; one in-flight refresh; on 401 discard and retry once. Token value never logged.
+- **Notes:** Cached in Redis until 60 s before stated expiry (`ttl = clamp(expires_in − CARRIER_TOKEN_REFRESH_SKEW_S, 0, CARRIER_TOKEN_TTL_MAX_S)`, defaults 60 / 3600; missing or non-numeric `expires_in` makes the token uncacheable, never a default lifetime); one in-flight refresh; on 401 discard and retry once. Token-endpoint failures (D-ARCH-062, PR6-SEC-05/07, SEC-TC-68): 400/401 from the token endpoint is negative-cached per account for `CARRIER_TOKEN_FAIL_TTL_S=60` (fail fast with `AUTH_FAILED`, counts toward the breaker); token requests per carrier go through a shared bucket `CARRIER_TOKEN_REQUESTS_PER_S` (FedEx 1/s, burst 3); a token-endpoint 403 is handled by the adapter's static `TOKEN_ENDPOINT_POLICY` (D-ARCH-067, D-060, ADR-0010 am. 11 item 5(c)) — FedEx `carrier-cooldown`: carrier-wide `CARRIER_TOKEN_PENALTY_COOLDOWN_S=600` (no FedEx token request, every FedEx account fails fast with `CARRIER_UNAVAILABLE`, event `carrier_token_penalty`, one probe after), never treated as "refresh"; UPS `account-negative-cache`: 403 = "Blocked Merchant" for that account only, `CARRIER_TOKEN_BLOCKED_TTL_S=600`, fail fast `AUTH_FAILED`, its breaker opens, ops event, other UPS accounts unaffected and no carrier-wide key; DHL Express (HTTP Basic) has no token endpoint. `AUTH_FAILED` = "fix the credentials", `CARRIER_UNAVAILABLE` = "wait". Token value never logged.
 
 #### Acceptance criteria
 Permission path: not applicable — internal client concern with no principal; second negative scenario included.
@@ -431,6 +440,39 @@ Feature: OAuth token cache
     Given the carrier returns 401 for every token
     Then the call ends after one retry with canonical error AUTH_FAILED
 
+  Scenario: Token endpoint rejects the credentials
+    Given the token endpoint answers 401 for account acct-fedex
+    When 20 calls are made within 60 s
+    Then exactly one token request is sent
+    And every call fails fast with canonical error AUTH_FAILED
+    And the failures count toward the breaker of acct-fedex
+
+  Scenario: FedEx token endpoint 403 starts a carrier-wide cool-down (policy carrier-cooldown)
+    Given the FedEx token endpoint answers 403 for account acct-fedex-a
+    When calls are made for any FedEx account during the next 600 s
+    Then no further FedEx token request is sent
+    And the calls fail fast with canonical error CARRIER_UNAVAILABLE
+    And one security event "carrier_token_penalty" names the carrier and the cool-down end time
+    And exactly one probe token request is sent after the cool-down ends
+
+  Scenario: UPS token endpoint 403 on account A leaves accounts B and C working (policy account-negative-cache, SEC-TC-68 UPS case)
+    Given UPS accounts acct-ups-a, acct-ups-b and acct-ups-c with no cached token
+    And the UPS token endpoint answers 403 "Blocked Merchant" for acct-ups-a and 200 for the others
+    When calls are made for all three accounts during the next 600 s
+    Then calls for acct-ups-a fail fast with canonical error AUTH_FAILED after exactly one token request
+    And the circuit breaker of acct-ups-a opens and an operations event names acct-ups-a
+    And calls for acct-ups-b and acct-ups-c succeed with their own tokens
+    And no carrier-wide cool-down key exists for carrier UPS
+
+  Scenario: Token requests are rate-limited per carrier
+    Given 10 FedEx accounts with no cached token and a bucket of 1 request per second with burst 3
+    When all 10 request a token at once
+    Then at most 3 token requests are sent in the first second and the rest wait their turn
+
+  Scenario: Missing expires_in is never cached
+    Given the token response omits expires_in
+    Then the token is used for the call, is not cached and a rate-limited warning is logged
+
   Scenario: Token never logged
     When all logs of the scenarios above are scanned
     Then no token value appears
@@ -440,7 +482,7 @@ Feature: OAuth token cache
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-121
 - **Linked REQs:** REQ-CARR-017
 - **As a** shipper **I want** carrier calls to be bounded, retried safely and isolated per account **so that** one failing carrier degrades only itself.
-- **Notes:** Timeouts: rates 4 s, tracking 10 s, cancel 10 s, pickup 15 s, createShipment 20 s. Retry base 200 ms, factor 2, full jitter, at most 2 retries, only for `getRates`, `track`, `findServicePoints`, `validateAddress`, `cancelShipment`, `cancelPickup`. Breaker per account opens at 50% failures over the last 20 calls (min 10) or 5 consecutive failures; half-open probe after 30 s. Two bulkhead pools per carrier account (D-048, replacing the single pool of 10): `rates` = 6 (`CARRIER_BULKHEAD_RATES=6`: `getRates`, `findServicePoints`, `validateAddress`) and `transactional` = 4 (`CARRIER_BULKHEAD_TRANSACTIONAL=4`: `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, `track`), so booking, cancellation, pickup and tracking never queue behind rate shopping. Overflow (queue wait beyond the operation deadline) yields `CARRIER_BUSY`, a local admission rejection that the saga treats as retryable (REQ-BOOK-023, US-205). The anonymous share of the `rates` pool is US-293. All values are configuration (ASSUMED defaults, A-037; NFR-RES-003; D-048). No entity is mutated, so no audit scenario applies.
+- **Notes:** Timeouts: rates 4 s, tracking 10 s, cancel 10 s, pickup 15 s, createShipment 20 s. Retry base 200 ms, factor 2, full jitter, at most 2 retries, only for `getRates`, `track`, `findServicePoints`, `validateAddress`, `cancelShipment`, `cancelPickup`. Breaker per account opens at 50% failures over the last 20 calls (min 10) or 5 consecutive failures; half-open probe after 30 s. Two bulkhead pools per carrier account (D-048, replacing the single pool of 10): `rates` = 6 (`CARRIER_BULKHEAD_RATES=6`: `getRates`, `findServicePoints`, `validateAddress`) and `transactional` = 4 (`CARRIER_BULKHEAD_TRANSACTIONAL=4`: `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, `track`, `recoverLabel`), so booking, cancellation, pickup and tracking never queue behind rate shopping. Overflow (queue wait beyond the operation deadline) yields `CARRIER_BUSY`, a local admission rejection that the saga treats as retryable (REQ-BOOK-023, US-205). The anonymous share of the `rates` pool is US-293. All values are configuration (ASSUMED defaults, A-037; NFR-RES-003; D-048). No entity is mutated, so no audit scenario applies.
 
 #### Acceptance criteria
 Permission path: not applicable — internal resilience wrapper with no principal; second negative scenario included.
@@ -480,7 +522,7 @@ Feature: Carrier call resilience
     Given the configuration CARRIER_BULKHEAD_RATES=6 and CARRIER_BULKHEAD_TRANSACTIONAL=4
     When the pool assignment of each operation is inspected for one carrier account
     Then getRates, findServicePoints and validateAddress use the rates pool of 6
-    And createShipment, cancelShipment, schedulePickup, cancelPickup and track use the transactional pool of 4
+    And createShipment, cancelShipment, schedulePickup, cancelPickup, track and recoverLabel use the transactional pool of 4
 
   Scenario: Hung rate calls do not delay createShipment
     Given 6 getRates calls are in flight and hung for one account (Mock latency=30000)
@@ -830,7 +872,7 @@ Feature: Raw payload retention
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-125, US-131, US-132, US-133
 - **Linked REQs:** REQ-CARR-019, REQ-CARR-020
 - **As a** developer **I want** clean, labelled fixtures, adapter READMEs recording the docs version checked, and a single opt-in switch for live sandbox runs **so that** CI is safe by default and the post-release sandbox demo is one command.
-- **Notes:** README fields: docs URL, API version, date checked, sandbox quirks. Synthesised fixtures labelled as such. Live suite only with `CARRIER_LIVE_SANDBOX=1` (COND-SANDBOX-DEMO); nightly schedule only when credentials exist.
+- **Notes:** README fields: docs URL (with the commit SHA of the pinned specification), API version, date checked, sandbox quirks, "PII and redaction" subsection, and `Diffed against official spec by a person: yes (date, role) | no` (D-ARCH-057 item 1.4). `no` is allowed in this run and listed under COND-SANDBOX-DEMO; the evidence report counts synthesised fixtures per adapter. Synthesised fixtures labelled as such. Live suite only with `CARRIER_LIVE_SANDBOX=1` (COND-SANDBOX-DEMO); nightly schedule only when credentials exist.
 
 #### Acceptance criteria
 Permission path: not applicable — repository tooling with no principal; second negative scenario included.
@@ -850,12 +892,19 @@ Feature: Fixtures, README and live-sandbox opt-in
 
   Scenario: README records documentation provenance
     When each adapter README is parsed
-    Then it contains docs URL, API version, date checked and sandbox quirks
+    Then it contains docs URL with a specification commit SHA, API version, date checked, sandbox quirks, a "PII and redaction" subsection and the line "Diffed against official spec by a person"
+    And the line's value is "yes (date, role)" or "no"
     And synthesised fixtures are labelled "synthesised"
 
   Scenario: README missing a field fails the docs check
-    Given a README without "date checked"
-    Then the docs-check job fails
+    Given a README without "date checked" or without the "Diffed against official spec by a person" line
+    Then the docs-check job fails naming the file and the field
+
+  Scenario: Not yet diffed by a person is allowed but reported
+    Given an adapter README with "Diffed against official spec by a person: no"
+    When the docs check and the evidence report run
+    Then the docs check passes
+    And the evidence report lists that adapter under COND-SANDBOX-DEMO with its count of synthesised fixtures
 
   Scenario: Live suite is skipped by default
     Given CARRIER_LIVE_SANDBOX is unset

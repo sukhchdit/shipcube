@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { listManifests } from '../repo/workspaces.js';
+import { PRISMA_TREE_LOCK, withFileLock } from '../test-support/fs-lock.js';
 import { findRepoRoot, runNode, runNpm } from '../test-support/process.js';
 
 const repoRoot = findRepoRoot();
@@ -152,8 +153,15 @@ describe('install scripts are disabled (SEC-TC-45, ADR-0023 am. F)', () => {
   });
 });
 
+/**
+ * R2-n5: budget for the real `deps:rebuild` run in the unit lane. No per-test figure exists; the lane A `unit` job is
+ * budgeted at 6 job-minutes in total (platform.md §7.2, level L1, including `npm ci` and `deps:rebuild`), and this
+ * one test may use at most a tenth of it.
+ */
+const UNIT_REAL_RUN_BUDGET_MS = 36_000;
+
 describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
-  type Step = { id: string; action: 'run' | 'skip'; reason: string; command?: string[] };
+  type Step = { id: string; action: 'run' | 'skip'; reason: string; command?: string[]; env?: string[] };
   const dryRun = (...args: string[]) => {
     const result = runNode([rebuildScript, '--dry-run', ...args], { cwd: repoRoot });
     return { ...result, steps: result.status === 0 ? (JSON.parse(result.stdout) as Step[]) : [] };
@@ -164,17 +172,28 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'DEPS_REBUILD_PLAYWRIGHT'));
   const hasPrismaSchema = () => existsSync(join(repoRoot, 'prisma.config.ts')) || existsSync(join(repoRoot, 'prisma', 'schema'));
 
-  it('[SEC-TC-45] deps:rebuild runs end to end: every allow-listed step reports, then exits 0', () => {
-    // Positive control for main(): the step loop, the exit-code propagation and the final bcrypt check.
-    // On this tree it builds nothing (bcrypt's N-API prebuild loads; Playwright is opt-in).
-    const result = runNode([rebuildScript], { cwd: repoRoot, env: rebuildEnv() });
+  it('[SEC-TC-45] deps:rebuild runs end to end: every allow-listed step reports, then exits 0', async () => {
+    // Positive control for main(): the step loop, the exit-code propagation and the final bcrypt check. On this
+    // tree it builds nothing (bcrypt's N-API prebuild loads; Playwright is opt-in); the engine step runs in offline
+    // mode against the engine verified by the preceding `npm run deps:rebuild`, and `prisma generate` regenerates
+    // the client. R2-n5: the duration is asserted against UNIT_REAL_RUN_BUDGET_MS. The engine fetch from an empty
+    // directory (network) is the integration test tools/deps/prisma-engines.int.test.ts.
+    const started = Date.now();
+    const result = await withFileLock(PRISMA_TREE_LOCK, () => runNode([rebuildScript], { cwd: repoRoot, env: rebuildEnv() }));
+    const elapsed = Date.now() - started;
     expect(result.status).toBe(0);
-    const reported = result.stdout.split(/\r?\n/).filter((line) => line.startsWith('[deps:rebuild] '));
-    expect(reported.map((line) => /^\[deps:rebuild\] (\w+): (run|skip) /.exec(line)?.slice(1, 3))).toEqual([
+    const reported = result.stdout.split(/\r?\n/).filter((line) => /^\[deps:rebuild\] [\w-]+: (run|skip) /.test(line));
+    expect(reported.map((line) => /^\[deps:rebuild\] ([\w-]+): (run|skip) /.exec(line)?.slice(1, 3))).toEqual([
       ['bcrypt', 'skip'],
+      ['prisma-engines', hasPrismaSchema() ? 'run' : 'skip'],
       ['prisma', hasPrismaSchema() ? 'run' : 'skip'],
       ['playwright', 'skip'],
     ]);
+    if (hasPrismaSchema()) {
+      expect(result.stdout).toMatch(/\[deps:rebuild\] prisma-engines: .*schema-engine-[\w.-]+ verified \(cached\)/);
+      expect(result.stdout).toContain('Generated Prisma Client');
+    }
+    expect(elapsed).toBeLessThan(UNIT_REAL_RUN_BUDGET_MS);
   }, 120_000);
 
   it('[SEC-TC-45] deps:rebuild still runs when started through a directory junction or symlink (m1)', () => {
@@ -187,7 +206,7 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
       const result = runNode([join(linkedDir, 'rebuild.mjs'), '--dry-run'], { cwd: repoRoot, env: rebuildEnv() });
       expect(result.status).toBe(0);
       const steps = JSON.parse(result.stdout) as Step[];
-      expect(steps.map((s) => s.id)).toEqual(['bcrypt', 'prisma', 'playwright']);
+      expect(steps.map((s) => s.id)).toEqual(['bcrypt', 'prisma-engines', 'prisma', 'playwright']);
     } finally {
       rmSync(linkRoot, { recursive: true, force: true });
     }
@@ -208,12 +227,17 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
   it('[SEC-TC-45] plans only allow-listed steps, runs them through `npm exec --no`, and needs no bcrypt build', () => {
     const { status, steps } = dryRun();
     expect(status).toBe(0);
-    expect(steps.map((s) => s.id)).toEqual(['bcrypt', 'prisma', 'playwright']);
+    expect(steps.map((s) => s.id)).toEqual(['bcrypt', 'prisma-engines', 'prisma', 'playwright']);
     expect(steps.find((s) => s.id === 'bcrypt')?.action).toBe('skip');
     expect(steps.find((s) => s.id === 'playwright')?.action).toBe('skip');
     const prisma = steps.find((s) => s.id === 'prisma');
     expect(prisma?.action).toBe(hasPrismaSchema() ? 'run' : 'skip');
-    if (prisma?.command) expect(prisma.command.slice(0, 3)).toEqual(['exec', '--no', '--']);
+    expect(steps.find((s) => s.id === 'prisma-engines')?.action).toBe(prisma?.action);
+    if (prisma?.command) {
+      // PR9-SEC-02: `--node-options=` keeps npm from re-creating NODE_OPTIONS from its env/.npmrc setting.
+      expect(prisma.command).toEqual(['exec', '--node-options=', '--no', '--', 'prisma', 'generate']);
+      expect(prisma.env).toEqual(['PRISMA_SCHEMA_ENGINE_BINARY', 'CHECKPOINT_DISABLE']);
+    }
   });
 
   it('[SEC-TC-45] installs Playwright browsers only on request and only known engines', () => {

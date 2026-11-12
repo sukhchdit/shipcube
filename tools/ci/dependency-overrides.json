@@ -1,0 +1,4 @@
+{
+  "$comment": "ADR-0023 am. F items 2-3 (D-ARCH-020). Time-boxed overrides read by tools/ci/check-lockfile.mjs (kind \"source\": a non-registry source, matched on package + exact resolved) and tools/ci/check-dep-age.mjs (kind \"cooldown\": a security fix younger than 7 days). Entry: { package: \"name@version\", kind: \"source\" | \"cooldown\", resolved (kind source only), decision: DECISIONS.md ID, reason, granted: YYYY-MM-DD, expires: YYYY-MM-DD within 30 days of granted }. An expired entry fails the gate. New entries need security-analyst review (CODEOWNERS).",
+  "overrides": []
+}

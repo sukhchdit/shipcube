@@ -2,6 +2,14 @@
 - [Security review conventions](project_security_review_conventions.md) — OWASP 2021 codes, severity matrix, routing, npm registry recipe, dependency-auditor turn limit
 - [P5 Wave 0 supply chain](project_p5_wave0_supply_chain.md) — PR-0001 R1+R2 PASS_WITH_FOLLOW-UPS; @platform pin side effects (audit signatures), Prisma engine, bcrypt; task checks
 - [P5 PR-0002 lint controls](project_p5_pr2_lint_controls.md) — R1+R2 PASS_WITH_FOLLOW-UPS; PR2-SEC-01..12: inline disables, bcrypt residual, test-folder hole, Prisma/ui; task checks
-- [P5 config review](project_p5_wave0_config_review.md) — PR-0003 R1+R2 PASS_WITH_FOLLOW-UPS; NODE_OPTIONS/pg/ioredis opaque rediss: facts; strip-types probe; TASK-003/006/014/040+ checks
-- [P5 Wave 0 DB baseline](project_p5_wave0_db_baseline.md) — PR-0005 R1+R2 PASS_WITH_FOLLOW-UPS; SCRAM verifier-in-log ruling; rule-13 ALTER ROUTINE gap; TASK-014/016/021/034 checks
+- [P5 config review](project_p5_wave0_config_review.md) — PR-0003 R1-R3 PASS_WITH_FOLLOW-UPS (12/15/03 closed, 16 INFO new); NODE_OPTIONS/pg/PGOPTIONS/ioredis facts; strip-types+fuzz probes; TASK-006/014/040+ checks
+- [P5 Wave 0 DB baseline](project_p5_wave0_db_baseline.md) — PR-0005 R1-R3 PASS_WITH_FOLLOW-UPS; SCRAM verifier-in-log ruling; rule-13 ALTER ROUTINE gap; TASK-014/016/021/034 checks
+- [P5 Wave 0 carrier docs](project_p5_wave0_carrier_docs.md) — PR-0006 R1+R2 PASS_WITH_FOLLOW-UPS; DHL shared origin, FedEx IP penalty, UPS 403=Blocked Merchant; TASK-113/131/135/188 checks
+- [P5 Wave 0 RLS spike](project_p5_wave0_rls_spike.md) — PR-0007 R1+R2 PASS_WITH_FOLLOW-UPS; am. 10 text defects (11/12); set_config leak facts; TASK-016/051/006/010/024 checks
 - [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 PASS_WITH_FOLLOW-UPS; harness R2 owed; Vite env inlining, nginx default.conf, RR meta; TASK-014/022/111 checks
+- [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_W_F-U; record contract; main-merge voids records on owned overlap; PR10-SEC-21; TASK-015 checks
+- [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
+- [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R1+R2 @a3e8edd PASS_W_F-U; requestTransaction/Sql-splice/U& escapes; arch items 1/2b/5/6/8 open → R3; TASK-020/021/024 checks
+- [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
+- [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
+- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; supersede-round checks (D-ORCH-017); 09 TLS values→TASK-014; 11 literal on main

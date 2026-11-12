@@ -29,3 +29,12 @@ Exception: during parallel batches the orchestrator may forbid installs, builds,
 **Why:** the orchestrator's dispatch briefs set these rules. Lane A/B CI did not exist yet (D-ORCH-004 bootstrap), so the reviewer is the independent gate.
 
 **How to apply:** check the dispatch CONSTRAINTS before running anything heavy. See [[review-watchlist]] and [[scratch-copy-technique]].
+
+**Merge-main delta check (PR #3 r4, PR #5 r3).** Prove the merge is a pure union by SHA, with no build:
+- Get MB=`git merge-base P1 P2`.
+- Use `comm -12` on `git diff --name-only MB P1` and `MB P2` to list the files changed on both sides. Usually that is only the lock.
+- For each branch-only file, `git diff --quiet P1 M -- f`.
+- `comm -23` on `git diff --name-only P2 M` minus the branch-changed files must be empty.
+- The lock delta `git diff --text origin/main HEAD -- package-lock.json` must equal the branch's delta vs MB.
+- Also run `gh pr view N --json statusCheckRollup`. An empty rollup means CI has not run on the head, which is a merge condition.
+- Quickest proof (PR #9 r4): `git merge-tree --write-tree P1 P2`, then `git diff --stat <tree> M`. If the only output is conflict markers in the conflicted files, everything else is byte-identical to a clean re-merge, and `git show --cc M` shows the hand resolution.

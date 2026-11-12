@@ -26,6 +26,10 @@ To run experiments without touching the review worktree:
 **Junction pitfalls (PR #4 r2, 2026-11-12):**
 - `cmd //c "mklink /J $VAR\\node_modules …"` with a sed/tr-built path silently created `C:\node_modules` at the DRIVE ROOT. Removed with `cmd //c "rmdir C:\\node_modules"` (link only). Always check `cmd //c "dir C:\\ /AL"` afterwards.
 - PowerShell `New-Item -ItemType Junction` is denied by the auto-mode classifier. Do not retry it.
+- **Working form (PR #3 r3):** `W=$(cygpath -w copy/node_modules); M=$(cygpath -w <main>/node_modules); MSYS_NO_PATHCONV=1 cmd /c "mklink /J $W $M"`. Remove it with `MSYS_NO_PATHCONV=1 cmd /c "rmdir $W"`.
+  - `cmd //c mklink /J "$W" "$M"` fails ("Invalid switch").
+  - `cmd //c "mklink /J \"$W\" …"` fails ("syntax incorrect").
+- **Appending long markdown to a review file:** a quoted bash heredoc failed ("unexpected EOF looking for `'`"). Write the section to the scratchpad with Write, then `cat >>` it.
 
 **Junction-free type-aware probe:** in the scratch dir, write a `tsconfig.json` with `paths: { "vite": ["<main>/node_modules/vite/dist/node/index.d.ts"] }` and a minimal reproduction file. Then run a script that loads eslint/typescript-eslint via `createRequire('<main>/package.json')`, with `overrideConfigFile: true` plus `parserOptions.project`. This reproduced `no-unnecessary-type-assertion` and the `no-unsafe-*` errors on an unresolved `./+types` import in about 5 s.
 
@@ -38,3 +42,9 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 
 **Why:** reviewers have no write access, but claims like "typecheck catches errors in any workspace" or "the layering rules encode the ADR" need injection tests.
 **How to apply:** use this whenever a PR's correctness claim needs a mutation or probe. See [[project-review-conventions]].
+
+**Workspace-link override (PR #9 r3):** when the root `node_modules` junction points at a checkout whose `@platform/*` sources are older than the PR, add `copy/apps/node_modules/@platform/<pkg>` and `copy/packages/node_modules/@platform/<pkg>` junctions to the copy's own packages. Node and Jest resolve these first.
+- tsx needs `NODE_OPTIONS=--conditions=@platform/source`; the `--conditions` flag passed to the CLI is not forwarded.
+- Jest in a partial archive needs empty `prisma/` and `tests/` dirs (the `roots` validation).
+
+**PR #11 pitfall (2026-11-12):** the copy's node_modules junction vanished mid-review, after the tools/db unit run. Cause unknown; the worktree was intact. Run `ls copy/node_modules` before each run and recreate the junction if needed. Copy git-ignored `prisma/generated` into the copy when probes import the generated client.

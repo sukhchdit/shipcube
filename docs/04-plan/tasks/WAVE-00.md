@@ -2,7 +2,7 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Priority band: **Foundation (DC enablers)**
 
-Tasks: **37** (S 7 / M 30; opus 22 / sonnet 15; demo-critical 18) in **10** batches of ≤ 4 parallel tasks. Estimated effort ≈ 100.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **37** (S 7 / M 30; opus 22 / sonnet 15; demo-critical 19) in **10** batches of ≤ 4 parallel tasks. Estimated effort ≈ 100.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Lane A green on main; lane B `wave` evidence; lane C `wave-end` run #1 green; SPK-01..08 findings recorded; generators (route metadata, RBAC matrix, RLS cross-tenant, audit + immutability) green on all existing routes; thin slice e2e green; dependency-auditor baseline (R-ARCH-12) requested.
 
@@ -16,9 +16,9 @@ Tasks: **37** (S 7 / M 30; opus 22 / sonnet 15; demo-critical 18) in **10** batc
 | 0.2 | TASK-002 Lint, format and layering rules with negative fixtures<br>TASK-003 Prisma 7 + PostgreSQL 18 baseline<br>TASK-004 Web and admin app scaffolds<br>TASK-005 Typed, validated configuration and key/secret register | lint<br>prisma-core<br>web-core, admin-core, e2e-core<br>pkg-config |
 | 0.3 | TASK-006 API and worker runtime skeleton<br>TASK-007 CI lane A fast-lane workflow and supply-chain install hardening<br>TASK-008 SPK-03 spike<br>TASK-009 SPK-02 spike | api-platform-core, worker-platform-core<br>ci-workflows<br>spike-03<br>carriers-docs |
 | 0.4 | TASK-010 Structured, redacted logging with correlation IDs<br>TASK-011 Lane B local heavy lane and evidence integrity<br>TASK-012 SPK-08 spike<br>TASK-013 Typed permission catalogue, seeded roles via versioned migration, role-permission matrix document, privilege-escalation guard | logging<br>quality-tools<br>spike-08<br>pkg-authz |
-| 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls, prisma-core<br>api-openapi, shared-api-types |
-| 0.6 | TASK-018 SPK-04 spike<br>TASK-019 SPK-05 spike<br>TASK-020 Mandatory route metadata<br>TASK-021 Audit store SQL | spike-04<br>api-storage<br>api-routing<br>prisma-bootstrap-audit |
-| 0.7 | TASK-022 SPK-06 spike<br>TASK-023 Idempotent reference and demo seed framework<br>TASK-024 Generated cross-tenant isolation test suite<br>TASK-025 Audit writer core | web-build-csp, web-core, admin-core, pkg-config, lint<br>prisma-seed<br>tests-gen-rls<br>pkg-audit-core |
+| 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls, prisma-core, pkg-config, lint<br>api-openapi, shared-api-types |
+| 0.6 | TASK-018 SPK-04 spike<br>TASK-019 SPK-05 spike<br>TASK-020 Mandatory route metadata<br>TASK-021 Audit store SQL | spike-04<br>api-storage<br>api-routing, pkg-authz, lint<br>prisma-bootstrap-audit |
+| 0.7 | TASK-022 SPK-06 spike<br>TASK-023 Idempotent reference and demo seed framework<br>TASK-024 Generated cross-tenant isolation test suite<br>TASK-025 Audit writer core | web-build-csp, web-core, admin-core, pkg-config, lint<br>prisma-seed<br>tests-gen-rls, prisma-rls, prisma-core<br>pkg-audit-core |
 | 0.8 | TASK-026 Walking-skeleton slice<br>TASK-027 RBAC matrix test generator<br>TASK-028 Audit redaction and field classification registry<br>TASK-029 Automatic audit capture driven by route descriptors | mod-admin-settings-reference, web-core, ui-api<br>tests-gen-rbac<br>pkg-audit-redaction<br>api-audit-mw |
 | 0.9 | TASK-030 Per-stream audit hash chain<br>TASK-031 Audit field-level diffs and no-op update suppression<br>TASK-032 Server-controlled standard columns, UTC time and on-behalf seam<br>TASK-276 Test harness | pkg-audit-chain<br>pkg-audit-diff<br>prisma-ext<br>tests-harness |
 | 0.10 | TASK-033 Audit test generator and immutability-per-role suite<br>TASK-034 Backup/restore rehearsal and zero-downtime migration probe tooling<br>TASK-277 Test-ID traceability tooling<br>TASK-278 Generated abuse suite | tests-gen-audit<br>db-tools-backup<br>quality-trace<br>tests-gen-abuse |
@@ -227,7 +227,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-007 (M0 Must) Central error handler and framework error mapping<br>US-012 **DC** (M0 Must) Liveness and readiness endpoints |
 | REQs | REQ-PLAT-009, REQ-PLAT-010, REQ-PLAT-018 |
 | NFRs | NFR-AVAIL-002, NFR-SEC-009 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR7-SEC-02, PR7-SEC-03, PR7-SEC-06 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-001, TASK-003, TASK-005 |
@@ -244,6 +244,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-007 scenarios (framework errors mapped to RFC 9457, no internals leaked)
 - All US-012 scenarios (/health/live, /health/ready with DB + Valkey checks) for api and worker
+- PR7-SEC-03 items 2 and 4 (ADR-0005 am. 10 item 6; added while in flight, D-ORCH-011 routing): the problem+json handler never copies `message`, `originalMessage`, `detail`, `hint` or `meta` from a Prisma or driver error into a response (test: a P2039/P2010 with a table name and an input value in the message yields a body without either); `createDatabaseClient` passes `errorFormat: minimal` explicitly in every environment (Prisma defaults to colorless outside NODE_ENV=production, which echoes call-site arguments) — if TASK-016 lands first it owns this line and TASK-006 verifies it
+- PR7-SEC-06 item 3 + PR7-SEC-02 item 2 (ADR-0005 am. 10 items 4 and 12; added while in flight): /health/ready compares `pg_db_role_setting` for current_user with the expected set (one shared constant: search_path, idle_in_transaction_session_timeout, lock_timeout; TASK-016 adds the statement_timeout backstop row) at start-up and on a slow interval and reports not-ready plus security event `db_role_setting_drift` on any difference (`default_transaction_read_only = on` included); the start-up probe also reads the four `app.*` keys on a fresh connection and reports not-ready plus `db_session_default_tampered` unless all are NULL
 - AT-US-007-01 … AT-US-007-05: all 5 scenarios of US-007, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-012-01 … AT-US-012-05: all 5 scenarios of US-012, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -260,7 +262,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-005 (M0 Must) CI pipeline skeleton<br>US-048 (M0 Must) Secrets hygiene and CI security scanning |
 | REQs | REQ-PLAT-007, REQ-SEC-011, REQ-SEC-013 |
 | NFRs | NFR-OPS-003, NFR-SEC-002, NFR-SEC-012 |
-| Spikes / security / decisions | SPK-01, SEC-COND-04, SEC-P3-04, SEC-P3-22, SEC-P3-31, SEC-P3-08, D-ARCH-010, D-ARCH-020, R-ARCH-12 |
+| Spikes / security / decisions | SPK-01, SEC-COND-04, SEC-P3-04, SEC-P3-22, SEC-P3-31, SEC-P3-08, D-ARCH-010, D-ARCH-020, R-ARCH-12, D-ARCH-040, D-ARCH-041, D-ARCH-044, PR1-SEC-12, PR1-SEC-13, PR8-SEC-13, PR5-SEC-04, PR2-SEC-01, D-ARCH-069 |
 | Specialist · model | devops-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-001, TASK-002, TASK-005 |
@@ -270,6 +272,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Files / modules**
 - .github/workflows/ci.yml (pull_request fast lane: changes, fast-lane job, ci-gate; incremental)
+- tools/ci/check-migration-immutability.mjs (base-ref, A-only on prisma/migrations; PR8-SEC-13)
+- .github/CODEOWNERS (PR5-SEC-04, PR2-SEC-01, PR8-SEC-11/13)
 - tools/ci/{check-install-flags.mjs, check-lockfile.mjs (registry + sha512), check-dep-age.mjs (7-day cooldown), dependency-overrides.json, check-workflow-policy.mjs, licence-check.mjs (D-ARCH-003 rev 2)}
 - .github/dependabot.yml (cooldown)
 - .semgrep/*.yml (raw SQL, outbound HTTP, innerHTML, country branches)
@@ -283,12 +287,21 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-51 (workflow part): CARRIER_*/STRIPE_* secrets only in jobs with environment carrier-sandbox; no pull_request/push job references it
 - SEC-TC-64 (part): gate tooling runs from the base ref; `npx --no-install` only
 - SPK-01 exit (ubuntu half): typecheck + unit + build green on ubuntu-latest
+- ADR-0023 am. J item 1 (D-ARCH-040): `check-install-flags` asserts the exact `@platform:registry=https://registry.invalid/` line in the root `.npmrc` and in every `tools/isolated/*/.npmrc`; a Dockerfile `npm ci`/`npm install` in a stage that has not copied `package-lock.json` and `.npmrc` fails
+- `check-lockfile` `@platform/*` rules (am. J item 1 b, PR1-SEC-13, R2-n4): every key under `node_modules/@platform/` is `link: true` whose `resolved` is a workspace directory and carries no `integrity` (npm lockfile v3 link entries always carry `resolved`); any non-link entry whose `name` starts with `@platform/`, whose key path contains `node_modules/@platform/` or whose `resolved` contains `/@platform/` fails. Negative fixtures: (i) a non-link `node_modules/@platform/shared` entry with an npmjs `resolved` URL, (ii) an alias `node_modules/x` with `name: "@platform/shared"`. Lane A writes a lockfile delta summary (new name@version tuples, integrity changes, moves into the production closure) to the job summary
+- PR1-SEC-12 (round-2 review R2.6): signature verification runs as `npm audit signatures --@platform:registry=https://registry.npmjs.org/`. `check-workflow-policy` allows `--@platform:registry=` only on `npm audit signatures`, and rejects it and any `npm_config_@platform:registry` environment entry on `ci`, `install`, `exec`, `outdated`, `update` and `view` (negative fixtures: `npm ci --@platform:registry=…` and `npm audit signatures || true`). The freshness/age gate is lockfile-driven, skips `link: true` entries and never shells out to `npm outdated`. `.github/dependabot.yml` ignores `@platform/*`; the first run is checked for `private_source_not_reachable`
+- am. J item 2 (e) (D-ARCH-041): `check-workflow-policy` rejects the engine-redirecting variables listed by TASK-003 (at least `PRISMA_ENGINES_MIRROR`, `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING`, `PRISMA_SCHEMA_ENGINE_BINARY`, `PRISMA_QUERY_ENGINE_LIBRARY`, `PRISMA_QUERY_ENGINE_BINARY`, `PRISMA_FMT_BINARY`, `BINARY_DOWNLOAD_VERSION`, `PRISMA_CLI_BINARY_TARGETS`) and `npm_config_ignore_scripts=false`. `check-no-raw-prisma` (inside `check-install-flags`) rejects a bare `prisma` in package.json scripts, workflows, Dockerfiles and compose files. Engine caches are keyed by `enginesVersion` + runner OS and re-verified on restore
+- am. J items 3–4 (D-ARCH-003 rev 4, D-ARCH-042, D-ARCH-043): `licence-check` uses named exceptions in `tools/ci/licence-exceptions.json` (only `elkjs@0.11.1` EPL-2.0 via prisma → @prisma/studio-core, dev closure; another EPL-2.0 package fails, negative fixture). `tools/ci/maintenance-exceptions.json` holds `bcrypt@6.0.0` (direct-stale, expires 2027-05-11) and `node-abort-controller@3.1.1` (deprecated-transitive via bullmq). The freshness gate fails an expired entry and goes live only with the register
+- am. J item 5 (D-ARCH-044): every workflow sets `NPM_CONFIG_IGNORE_SCRIPTS: "true"`, `CHECKPOINT_DISABLE: "1"` and `SCARF_ANALYTICS: "false"` at workflow level (`check-workflow-policy` requires them). After `npm run build`, the job requires empty `git status --porcelain`, proven by a negative fixture whose build script touches `package.json`
+- PR8-SEC-13 / PR #8 code review R2-n3 (ADR-0008 am. 3 item 7, D-ARCH-069; added while in flight — if this task has already passed review when the line lands, TASK-016 is the fallback owner): lane A runs `tools/ci/check-migration-immutability.mjs` from the base ref — `git diff --name-status --no-renames <base>...HEAD -- prisma/migrations` must contain `A` entries only (`migration_lock.toml` allow-listed), failing with "applied migrations are immutable (D-SEC-PR8-01/02)"; a negative fixture branch that modifies an existing `migration.sql` fails and one that only adds a directory passes
+- CODEOWNERS (PR5-SEC-04, PR2-SEC-01, PR8-SEC-11, PR8-SEC-13; added while in flight): `.github/CODEOWNERS` requires a second reviewer on `packages/authz/**`, `tools/authz/**`, `prisma/migrations/**`, `prisma/bootstrap/**`, and the lint-control files (`eslint.config.mjs`, `tools/eslint-rules/**`, `.semgrep/**`, `tools/ci/**`, `tools/db/lint-migrations.ts`, `.github/workflows/**`, `.gitleaks.toml`); `check-workflow-policy` asserts the file exists and covers those paths
 - AT-US-005-01 … AT-US-005-06: all 6 scenarios of US-005, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-048-01 … AT-US-048-07: all 7 scenarios of US-048, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Workflow and tooling changes verified on their own PR; tooling invoked from the base ref; minute usage measured and recorded.
 - Lane A must be green on its own PR; dependency-auditor baseline run (R-ARCH-12) requested from security-analyst after merge
+- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-008 — SPK-03 spike: RLS with Prisma 7 interactive transactions and pooled connections
@@ -352,7 +365,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-008 (M0 Must) Correlation ID and structured, redacted logging |
 | REQs | REQ-PLAT-011, REQ-PLAT-012 |
 | NFRs | NFR-OBS-001, NFR-PRIV-001 |
-| Spikes / security / decisions | SEC-P3-23 |
+| Spikes / security / decisions | SEC-P3-23, PR7-SEC-03, PR6-SEC-02 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-006, TASK-005 |
@@ -361,7 +374,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Priority | Must |
 
 **Files / modules**
-- packages/shared/src/logging/{logger.ts, redaction.ts, security-event.ts}
+- packages/shared/src/logging/{logger.ts, redaction.ts, security-event.ts, serializers/prisma-error.ts}
 - apps/api/src/platform/logging/{request-logger.ts, correlation.ts}
 - apps/worker/src/platform/logging/**
 - wiring in apps/api/src/app.ts
@@ -370,6 +383,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-008 scenarios
 - SEC-TC-31 (extended, app part): Cookie/Set-Cookie/Authorization sentinels never appear in API log output
 - securityEvent(name, attrs) helper emits the catalogue name and never raw PII
+- PR7-SEC-03 item 3 (ADR-0005 am. 10 item 6): a Pino serializer logs Prisma/driver errors as `{ name, code, originalCode, kind }` only — never `message`, `originalMessage`, `detail`, `hint`, `meta` or the rendered query (test: a P2039 whose message carries a table name and an input value logs neither)
+- PR6-SEC-02 item 3 / PR6-SEC-03 item 1 (ADR-0010 am. 11 item 8): the logger never records carrier request or response bodies at any level; outbound log lines carry carrier code, account id, operation, route template, status, duration, error code and correlation id only — never `url.full`, `url.path` or `url.query`; redaction keys cover `Authorization` (Basic and Bearer), form-body `client_secret`/`child_secret`, and token responses
 - AT-US-008-01 … AT-US-008-06: all 6 scenarios of US-008, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -463,7 +478,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-065 and US-066 scenarios
 - Privilege-escalation guard test: no customer role holds an operator permission; matrix document regenerates identically (drift test)
 - AT-US-065-01 … AT-US-065-05: all 5 scenarios of US-065, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-- AT-US-066-01 … AT-US-066-08: all 8 scenarios of US-066, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-066-01 … AT-US-066-12: all 12 scenarios of US-066, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
@@ -481,7 +496,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (partial; completed by TASK-089) | US-003 **DC** (M0 Must) One-command local environment |
 | REQs | REQ-PLAT-006, REQ-PLAT-005 |
 | NFRs | NFR-OPS-001, NFR-OPS-002, NFR-SEC-007 |
-| Spikes / security / decisions | SEC-P3-20, SEC-P3-21, SEC-P3-23, SEC-P3-08, SEC-P3-04 |
+| Spikes / security / decisions | SEC-P3-20, SEC-P3-21, SEC-P3-23, SEC-P3-08, SEC-P3-04, D-ARCH-040, D-ARCH-041, D-ARCH-044 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-004, TASK-006, TASK-010, TASK-003 |
@@ -503,6 +518,9 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-34 (extended): edge bound to 127.0.0.1 by default
 - SEC-TC-45 (Dockerfile part): marker absent after image install
 - Valkey default user off; api/worker/healthcheck ACL users only
+- ADR-0023 am. J item 2 (e) and ADR-0022 am. 14 b (D-ARCH-041): the `migrate` image fetches and verifies the schema engine in its build stage through `deps:rebuild`. It sets `ENV PRISMA_SCHEMA_ENGINE_BINARY=/app/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x CHECKPOINT_DISABLE=1`, and its entrypoint runs `node tools/deps/prisma-cli.mjs` in `--verify-only` mode before `migrate deploy`. SEC-TC-64 (vi): `docker run --network none <migrate> prisma --version` exits 0, and `api`/`worker` hold no `node_modules/@prisma/engines` and no `schema-engine*`
+- am. J items 1 (c), 5 and 6 and ADR-0022 am. 14 a, c–f (D-ARCH-040, D-ARCH-044): image installs run from the repository root with the root `package-lock.json` and `.npmrc` (`--workspace=apps/<app>`). `web`/`admin` build stages run with `NPM_CONFIG_OFFLINE=true` and compare the SHA-256 of `package.json` and `package-lock.json` before and after the build. Images set `ENV CHECKPOINT_DISABLE=1 SCARF_ANALYTICS=false`. No `npm rebuild` appears in any Dockerfile: a bcrypt prebuild that fails to load is a build failure
+- Entrypoint preflight (D-ORCH-007 item 2; PR3-SEC-13, PR3-SEC-11 R3.4 item 2; ADR-0018 am. 8, D-ARCH-061): with APP_ENV staging or production the api/worker entrypoint refuses NODE_OPTIONS outside the option-name allow-list, any PG* variable (at least PGOPTIONS) and NODE_ENV != production, exits 78 within 5 s before any application code runs, and `--disable-sigusr1` is set; container test: `docker run -e APP_ENV=staging -e NODE_OPTIONS=--inspect-wait=0.0.0.0:9229 <image>` and `-e NODE_ENV=development` each exit 78 and nothing listens on 9229
 - AT-US-004-01 … AT-US-004-04: all 4 scenarios of US-004, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-003-01 … AT-US-003-04 that belong to its layer; US-003 closes in TASK-089
 
@@ -518,7 +536,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-006 (M0 Must) Coverage gate |
 | REQs | REQ-PLAT-008 |
 | NFRs | NFR-OPS-003, NFR-QUAL-001, NFR-QUAL-002 |
-| Spikes / security / decisions | SPK-07, D-ARCH-010, D-ARCH-021, R-ARCH-15, R-ARCH-19 |
+| Spikes / security / decisions | SPK-07, D-ARCH-010, D-ARCH-021, R-ARCH-15, R-ARCH-19, PR11-SEC-08, D-TASK016-01, D-ARCH-074 |
 | Specialist · model | devops-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-011, TASK-007 |
@@ -538,6 +556,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-006 scenarios
 - SPK-07 exit: fast lane <= 15 job-min on a typical PR and <= 20 min wall-clock; security-integration <= 12 job-min; check-evidence negative fixtures rejected; `npm run ci:minutes` prints month usage
 - Diff-coverage gate fails a PR whose changed files are below 85/75 (95 in pricing/audit/authz)
+- C-1 (ADR-0005 am. 10 W-1 and item 13; D-TASK016-01; PR #11 code review §4 ruling 2 and security review §5 ruling 2; D-ARCH-074; DUE BEFORE G3): the hosted `security-integration` job this task creates runs the spike file `prisma/tests/spikes/spk03-rls-tx.int.test.ts` on ubuntu-latest with `SPK03_BENCH=1` and uploads `SPK03_REPORT` as a job artifact that carries `d_overhead_ms` (without the flag the (d) block is skipped and C-1 would be "done" with no measurement); the measured end-to-end per-transaction delta is recorded in SPK-03 §4 and ADR-0005 am. 10 W-1 (recorded, never asserted; performance-engineer verifies against the per-request budget at P6); then, in the SAME commit, the spike file is deleted AND its exact-file entry in `TENANT_CONTEXT_EXEMPTIONS` (eslint.config.mjs) is removed — a stale entry would exempt any future file at that path (PR11-SEC-08); until that commit the spike runs only against throw-away test databases
 - AT-US-006-01 … AT-US-006-03: all 3 scenarios of US-006, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -551,11 +570,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-074 **DC** (M0 Must) RLS enabled and forced on every tenant-owned table, separate DB roles<br>US-075 **DC** (M0 Must) Per-transaction tenant context with SET LOCAL and fail-closed default |
 | REQs | REQ-RLS-001, REQ-RLS-002, REQ-RLS-005, REQ-RLS-003, REQ-RLS-004 |
 | NFRs | NFR-AVAIL-003, NFR-DATA-003, NFR-DATA-004, NFR-TENANT-001 |
-| Spikes / security / decisions | SPK-03, SEC-P3-12, SEC-P3-34, D-ARCH-045, D-ARCH-046, D-ARCH-049 |
+| Spikes / security / decisions | SPK-03, SEC-P3-12, SEC-P3-34, D-ARCH-045, D-ARCH-046, D-ARCH-049, D-ARCH-058, D-ARCH-063, D-ARCH-064, D-ARCH-065, D-ARCH-066, PR7-SEC-11, PR7-SEC-13, PR7-SEC-14, PR8-SEC-10, PR8-SEC-13, PR8-SEC-14, PR11-SEC-01, PR11-SEC-02, PR11-SEC-03, PR11-SEC-04, PR11-SEC-05, PR11-SEC-07, PR11-SEC-08, PR11-SEC-09, PR11-SEC-11, D-ORCH-014, D-ARCH-071, D-ARCH-073, D-ARCH-074 |
 | Specialist · model | database-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-008, TASK-003 |
-| Batch · locks | 0.5 · prisma-rls, prisma-core |
+| Batch · locks | 0.5 · prisma-rls, prisma-core, pkg-config, lint |
 | Branch | `feat/TASK-016-row-level-security-foundations-table` |
 | Priority | Must · demo-critical |
 
@@ -567,6 +586,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - prisma/tests/catalog/c01-c12.int.test.ts (also C13/C14 as amended: pg_default_acl, pg_database.datdba, pg_db_role_setting)
 - tools/db/lint-migrations.ts + tools/db/fixtures/lint/** (rules 3-9, 11 and 14 of data-model §8.3 with one negative fixture per rule; D-ARCH-049)
 - tools/db/bootstrap.ts readSecret hardening parity (ADR-0018 am. 6, D-ARCH-052): _FILE path lexically under /run/secrets (root injectable for tests), realpath confinement, regular file, <= 64 KiB, trailing newline stripped, empty = unset, exactly one of NAME / NAME_FILE set, errors name the variable only
+- prisma/bootstrap/02-role-backstops.sql (ALTER ROLE platform_app SET statement_timeout = 30s; new NN-name file because applied bootstrap files are immutable; shadow-DB rendering includes it; ADR-0005 am. 10 item 12, D-ARCH-064)
+- packages/config/src/schema.ts + .env.example: DB_TX_STATEMENT_TIMEOUT_MS (5000), DB_TX_LOCK_TIMEOUT_MS (2000), DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS (15000) read by the withTenantTx factory (data-model §4.1 eight-setting statement)
+- apps/api/src/platform/db/{expect-affected.ts (expectAffected(result, 1) -> NOT_FOUND | CONFLICT), map-db-error.ts}
+- eslint.config.mjs: set_config/app.* token ban outside with-tenant-tx.ts with exact-file test exemptions; no repository imports platform/db/client.ts; ALTER ROLE/ALTER USER banned in application code; prisma/tests/** import policy limited to tools-db, tools/test-support/**, db-platform and prisma-generated (replaces the tree-wide import-x/no-relative-packages off; PR #5 code review R3-n1)
+- tools/db/fixtures/lint/** rule 15 and rule 16 fixtures (data-model §8.3 as amended 2026-11-12)
+- tools/ci/check-migration-immutability.mjs — FALLBACK only if TASK-007 has merged without it (PR8-SEC-13)
 
 **Acceptance tests to write**
 - All US-074 and US-075 scenarios
@@ -576,6 +601,22 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - [SEC-TC-33] migration-lint rules 7, 8, 9, 12 and 14 (data-model §8.3): `DROP TRIGGER`, `DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL SECURITY`, `DISABLE TRIGGER`, `BYPASSRLS` / `SUPERUSER` / ownership to platform_app, `DELETE` grant outside the allow-list, any privilege on a partition, `DROP POLICY` without re-creation in the same file, a new table without its RLS block / allow-list entry (cross-checked with C1), and `CREATE SCHEMA` / `CREATE EXTENSION` / `ALTER DATABASE` / role DDL in prisma/migrations each fail the linter; one negative fixture per statement class; the `migration-lint` required suite (required-suites.json) activates with US-074
 - [NT-AVAIL-003-a] migration-lint rules 3, 4, 5, 6 and 11: `RENAME`, `ADD COLUMN ... NOT NULL` without a constant default, `ALTER COLUMN ... TYPE`, `SET NOT NULL` without a preceding validated CHECK, `CREATE INDEX` without `CONCURRENTLY` on a table created by an earlier migration, `CREATE INDEX CONCURRENTLY` in a multi-statement file, FK/CHECK on an existing table without `NOT VALID`, and a migration altering an existing table without `SET lock_timeout` each fail; negative fixtures per rule. Rule 5 prerequisite: a one-statement `CREATE INDEX CONCURRENTLY` migration is run through `migrate deploy` in the Testcontainers harness to record how Prisma 7.10 submits it (data-model §8.3 rule 5 "verify in P5 spike"); the result is written into the fixture and prisma/README.md
 - readSecret parity (D-ARCH-052): unit tests prove a _FILE path outside /run/secrets, a symlink leaving the root, a non-regular file, a file > 64 KiB and both NAME and NAME_FILE set are each refused with an error that names the variable and neither the path nor the value; a valid Compose secret file is read with its trailing newline stripped
+- ADR-0005 am. 10 (SPK-03 F-01..F-10, D-ARCH-058): `TenantDb` omits `$transaction`, `$queryRawUnsafe` and `$executeRawUnsafe`; the factory sets `transactionOptions` explicitly (maxWait <= pool checkout budget, timeout >= statement_timeout) and maps P2028 to a retryable 503; P2010/42501 maps to 403 AUTHZ_DENIED + security event `rls_write_rejected` without echoing the PostgreSQL message; 55P03 maps to a retryable 503; `current_setting(..., true) = ''` is treated as NULL (catalog test); lint forbids `SET LOCAL`, `$executeRawUnsafe` and `$queryRawUnsafe` in platform/db and repositories and no repository imports the root client module; definer migrations GRANT/REVOKE before `OWNER TO platform_definer` (data-model §4.5 order)
+- C-1 (SPK-03 §6, ADR-0005 am. 10 W-1 and item 13 as corrected 2026-11-12; PR #7 code review R2-m2; D-ARCH-063): the spike file `prisma/tests/spikes/spk03-rls-tx.int.test.ts` runs in the hosted `security-integration` job of this PR on ubuntu-latest **with `SPK03_BENCH=1`** so the uploaded `SPK03_REPORT` artifact carries `d_overhead_ms` (without the flag the (d) block is skipped and C-1 would be "done" with no measurement); the end-to-end per-transaction delta is recorded in SPK-03 §4 and ADR-0005 am. 10 (recorded, never asserted); **C-1 is due before G3**; the ported permanent suite asserts the server-side set_config p95 <= 1 ms **without** the flag (EXPLAIN ANALYZE, deterministic), reports the client-observed figure, and the spike file is deleted once ported
+- ADR-0005 am. 10 item 4 as reworded (PR #7 code review R2-m1, PR7-SEC-12 b; D-ARCH-063): the ported session-scope negative control proves that `set_config(app.*, …, false)` by platform_app LEAKS to the next checkout on the same backend (poolMax 1, pid asserted at every step, RESET in finally) and that a later withTenantTx masks it only for its own transaction — it does NOT try to prove PostgreSQL denies the session-level form (USERSET placeholders cannot be denied); the deliberate session-level call has an exact-file lint exemption; C13 proves what is deniable: no app.% row in pg_db_role_setting or pg_parameter_acl
+- ADR-0005 am. 10 item 12 as corrected (PR7-SEC-06, PR7-SEC-12 c, R2-n2 ii/iii; D-ARCH-064): new bootstrap file 02-role-backstops.sql sets `ALTER ROLE platform_app SET statement_timeout = 30s` (role-level backstop for statements outside withTenantTx; 00-roles.sql sets none today) with a C13 row and the readiness expected-set constant extended; the context statement is the data-model §4.1 EIGHT-setting statement (four app.* keys, app.correlation_id, statement_timeout, lock_timeout, idle_in_transaction_session_timeout) with values from DB_TX_STATEMENT_TIMEOUT_MS / DB_TX_LOCK_TIMEOUT_MS / DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS (added to packages/config with .env.example parity); integration test: after `ALTER ROLE platform_app RESET lock_timeout` as the role itself, withTenantTx still shows lock_timeout = 2s and the readiness probe reports drift
+- ADR-0005 am. 10 item 1 as corrected (PR7-SEC-11; D-ARCH-065) + data-model §8.3 rule 16: the pg_proc.prosrc scan is BY FORM across every non-system schema (public, platform and any later schema): no body contains `set_config(` with an app. key, `SET`/`SET SESSION`/`SET LOCAL` followed by `app.`, `RESET app.`/`RESET ALL` or `DISCARD`; a read of the four security keys via current_setting( appears only in the §4.2 helpers matched by regprocedure; reads of app.correlation_id stay allowed; the migration linter applies the same rule to prisma/migrations/** (rule 16); three negative fixtures (a platform function calling set_config(app.org_id, …, true); a public function running SET app.org_id = …; a non-helper reading current_setting(app.org_id, true)) each fail C-series and the linter; the current catalogue passes; rule 15 (GRANT/REVOKE after OWNER TO platform_definer fails; SECURITY DEFINER outside a SET ROLE platform_definer block flagged) ships with its four fixtures
+- ADR-0005 am. 10 item 15 (PR7-SEC-13; D-ARCH-066): the ported F-02 text reads "INSERT: 42501; UPDATE/DELETE: 0 rows silently"; helper `expectAffected(result, 1)` in apps/api/src/platform/db throws NOT_FOUND on 0 rows and CONFLICT on > 1; a unit test shows 0 affected rows -> error; ESLint flags updateMany/deleteMany results in repositories not passed to the helper (warning until the first module, then error)
+- ADR-0005 am. 10 item 16 (PR7-SEC-14; D-ARCH-066): the context statement reads the prior values of the four security keys in a MATERIALIZED CTE in the same round trip ($queryRaw, no extra round trip); any prior value other than NULL or empty string throws DB_SESSION_CONTEXT_LEAK before fn runs (non-retryable 500, PostgreSQL text never echoed), emits security event db_session_context_leak, increments a counter and marks the process not-ready until restart; the ported negative control asserts the detector fires after set_config(app.org_id, A, false) and that NULL and empty prior values pass
+- PR8-SEC-10 (D-ARCH-069): permissions, roles and role_permissions are registered as GLOBAL in tools/db/table-classes/authz.json (C1 allow-list entry — never RLS without policies) and prisma/sql/grants.manifest carries their SELECT-only platform_app grant (C5 equality)
+- PR8-SEC-14 (D-ARCH-069): the C-series port of the escalation backstop keys on the KEY RULE (`p.key ~ (^|:)any_org(:|$) OR p.key LIKE audit:% OR p.key IN (featureflag:manage, carrier:status:read)`), not on the operator_only column, asserts zero non-OPERATOR role links to such keys and zero links to webhook:% keys, and carries a planted-row control: inside BEGIN … ROLLBACK as the migrator, linking CUSTOMER_VIEWER to audit:read makes the query return exactly 1 row
+- PR8-SEC-13 fallback (D-ARCH-069): if `tools/ci/check-migration-immutability.mjs` is not on main when this task starts (TASK-007 is the preferred owner), this task ships it as a lane A step run from the base ref — `git diff --name-status --no-renames <base>...HEAD -- prisma/migrations` must list A entries only (migration_lock.toml allow-listed) — with a negative fixture that modifies an existing migration.sql and a positive one that only adds a directory
+- PR #5 code review R3-n1: prisma/tests/** may import only tools-db, tools/test-support/**, db-platform and prisma-generated (boundaries policy with a negative fixture importing packages/*/src); the tree-wide `import-x/no-relative-packages: off` is removed
+- ADR-0005 am. 10 items 1, 2, 4, 6, 7, 9, 11, 12 (PR #7 security review §4a, PR7-SEC-01/02/03/05/06/07/09): run-time `TenantDb` Proxy (not only `Omit`), AsyncLocalStorage re-entrance guard throwing NESTED_TENANT_TX (AT-US-075-04 as a run-time throw), SYSTEM-table writers typed on TenantDb, `set_config`/`app.*` token ban outside with-tenant-tx.ts + `pg_proc.prosrc` scan, literal `true` and validated-string-only binding, factory refuses PGOPTIONS, fresh-connection NULL probe and session-scope negative control, `mapDbError` keyed on `driverAdapterError.cause.originalCode` with retryable 40001/40P01/57014/55P03/P2028, RLS renderer predicate allow-list + C3 forbidden-token scan, C13 no `app.%` in pg_db_role_setting/pg_parameter_acl and platform_app role-setting rows, per-transaction lock_timeout/statement_timeout/idle_in_transaction_session_timeout from configuration, GUEST_CAPABLE no-de-claim trigger template (TASK-051 ships the trigger), definer functions under SET ROLE platform_definer and linter rule 15 (mandatory)
+- D-ORCH-014 RECONCILIATION + PR11-SEC-09 items 1-6 as MERGE CONDITIONS (PR #11 merges after PR #9; PR #11 code review §7 (a)-(f); D-ARCH-074): (1) one composition function in `apps/api/src/platform/db/runtime.ts` (db-platform-core) is the only importer of `client.ts`; it builds pool, client, runner and session-integrity guard and exports only the runner and the health checks; `platform/runtime/**` and `platform/health/*.int.test.ts` import it, never `client.ts` (no `db-root-client` carve-out; the `index.ts` comment matches); the worker uses the same function; (2) `deps.env` is omitted so `process.env` is checked and is never `{}`; a test proves the PGOPTIONS refusal through the composition function (PR9-SEC-03 factory half); (3) `probeFreshConnection()` runs as the FIRST query at start-up — before any other pool traffic, or on a dedicated pg.Client — and before readiness turns ready; a failure means not-ready / exit 78; (4) sinks: `onSecurityEvent` goes to the TASK-010 security logger with `{event, correlationId, sqlState}` only, the leak counter becomes a metric, and `markNotReady(db_session_context_leak)` LATCHES — the 5-minute re-check never clears it; (5) `EXPECTED_ROLE_SETTINGS` gains `statement_timeout=30s` (and `lc_messages=C`, below) and the PR #9 pin test parses EVERY `prisma/bootstrap/*.sql`; the lock_timeout-RESET integration test asserts the readiness probe reports `db_role_setting_drift`; (6) problem+json for a `DbError` carries `status`, the catalogue `code`, `Retry-After` from `retryAfterSeconds` and generic text — never `message`, `reason`, `sqlState` or `prismaCode` (log-only); plus (e) the tenant-context-ban hits in `session-integrity.int.test.ts` / `problem-handler.api.test.ts` are resolved without inline disables and (f) `.env.example` and `packages/config/src/{index,schema}.ts` are union-merged with the parity tests re-run
+- PR #11 fix-cycle items (code review M1/m1/m2/m5 merge conditions; security review PR11-SEC-01/02/04/05/08 recommended here): deep deny-by-default `TenantDb` Proxy — blocks `$parent`, `constructor` and symbol keys, wraps model delegates in the same guard, hides blocked keys from ownKeys/getOwnPropertyDescriptor, tested on the REAL Prisma 7.10.1 interactive-transaction client shape with a recording adapter (no statement on a non-transaction connection between begin and commit); one KEY/WRITE_FORMS pattern list shared by `prisma/tests/catalog/scans.ts` and rule 16 covering concatenated keys, quoted function and GUC names, `format(%I)`, spaced `app . org_id` and dynamic `current_setting(k)` — every row of the PR11-SEC-02 table is an executed C-series fixture (proves validity and coverage) and a linter fixture; C5 renders `grantee = 0` as PUBLIC so any PUBLIC table/column grant fails against the manifest (planted `GRANT TRUNCATE ON public.permissions TO PUBLIC`), and rule 8 flags `TO PUBLIC` and `TRUNCATE`/`TRIGGER`/`REFERENCES` grants; `db-raw-sql` bans `Prisma.raw(` and `$parent`, runs on every `apps/*/src/**` file plus PLANNED_PRISMA_FILES minus tests, and the boundaries policy allows `pg`/`pg-pool` value imports only under `apps/*/src/platform/db/**`, prisma, tools/db and tests (PR2-SEC-05 addendum; negative fixtures for a repository, `packages/audit/src/store/prisma-store.ts` and a `repository/tests/helper.ts`); exemptions are exact files (`prisma/tests/catalog/{c01-c12.int.test.ts,scans.ts}` replace the folder glob) and the `tokens` form is split into `keys` and `setter` with `session-integrity.*` holding `keys` only
+- REQUIRED BY THE ARCHITECTURE BEFORE MERGE (D-ARCH-071, D-ARCH-073; PR11-SEC-07, PR11-SEC-03 item 1, PR11-SEC-11 a/b/h; data-model §4.1/§4.2/§8.3 as amended 2026-11-13): rule 11 accepts the SESSION form only — `SET LOCAL lock_timeout` fails (outside a transaction block it is a warning-only no-op; fixture `set-local-lock-timeout`) and a file that raises lock_timeout above the migrator role default (3s) ends with `RESET lock_timeout`; rule 15 accepts ONLY the `SET ROLE platform_definer; … RESET ROLE;` block — the `handedOver` branch is removed, `ALTER FUNCTION … OWNER TO platform_definer` in prisma/migrations fails, a file whose last statement leaves the definer role set fails (fixture `definer-grants-before-owner-to` now FAILS, new fixture `definer-role-not-reset` fails, `definer-set-role-block` stays clean); rule 9 requires a `GRANT … TO platform_app` on an RLS-class table to come AFTER that table ENABLE + FORCE and its policies in the same file (fixture `grant-before-force`); rule 16 exempts exactly the normalised operator atom `current_setting('app.actor_scope', true) = 'OPERATOR'` and only inside a `CREATE POLICY` statement, so the rendered TENANT block lints clean while `policy-tautology` / `policy-unkeyed` fixtures still fail (required before the first CREATE POLICY migration, TASK-037); the UNMERGED helpers migration `20261112020000_platform_rls_helpers` adopts the qualified bodies of data-model §4.2 (`pg_catalog.current_setting`, `OPERATOR(pg_catalog.~*)`, `OPERATOR(pg_catalog.~)`, `pg_catalog.decode`, `::pg_catalog.uuid`) — doing it before merge avoids an immutable-migration follow-up; the UNMERGED `02-role-backstops.sql` adds `ALTER ROLE platform_app SET lc_messages = 'C'` so `mapDbError` reads English server text on any locale (C13 expects five platform_app rows; `EXPECTED_ROLE_SETTINGS` gains the row; fallback owner TASK-021 as a new `03-role-locale.sql`); C13 compares `lower(…) LIKE 'app.%'` on `pg_db_role_setting` and `pg_parameter_acl` and asserts no `pg_proc.proconfig` entry `ILIKE 'app.%'` in any non-system schema
+- DEFERRED WITH OWNERS (code review m4/m6, security review §6; D-ARCH-074) — the catalog suite header names every deferral: C6/C7 (manifest flag `immutable`)/C14 remainder → TASK-021; C8/C9 → implement here if cheap (committed authz tables are the first subjects), otherwise TASK-024; C10 → TASK-028; PR11-SEC-03 items 2-3 (rule 9 renderer equality, C3 derived expected set + keyed-atom presence), PR11-SEC-06 (C11 converse ownership set), PR11-SEC-11 e/g, rule 17 and the §8.4 prefix-reversibility check → TASK-024; T-83 lint → TASK-020; rule 10 DO-body scan (PR #5 R2-m2) and the `U&` identifier decode (PR #5 R2-n1) → fix here or TASK-021; readSecret open-once/fstat hardening (PR11-SEC-11 d) → fix here or TASK-034; `onDbError` redacting hook → TASK-010
 - AT-US-074-01 … AT-US-074-05: all 5 scenarios of US-074, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-075-01 … AT-US-075-04: all 4 scenarios of US-075, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -584,6 +625,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
 - Security-critical path (prisma/**, apps/api/src/platform/**): security-integration job
 - Linter rules 3-9, 11 and 14 are the TASK-016 half of the migration-lint suite (D-ARCH-049); rules 1, 2, 10, 12, 13 and the contract-reversibility check came with TASK-003 and stay green
+- Merge order D-ORCH-014: this PR merges after PR #9 (TASK-006) and PR #10 (TASK-007) and is the reconciler; the orchestrator re-runs the gates on the final head incl. integration (Docker) and confirms a lane A check rollup on that exact SHA (code review §7 item 4)
 - Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
@@ -655,23 +697,27 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Field | Value |
 |---|---|
 | Stories (completes) | — |
-| REQs | — (enabler; see refs) |
+| Stories (partial; completed by TASK-006) | US-012 **DC** (M0 Must) Liveness and readiness endpoints |
+| REQs | REQ-PLAT-018 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SPK-05, R-ARCH-05 |
+| Spikes / security / decisions | SPK-05, R-ARCH-05, D-TASK006-02, D-ARCH-074 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-003, TASK-006 |
 | Batch · locks | 0.6 · api-storage |
 | Branch | `feat/TASK-019-spk-05-spike-s3-compatible` |
-| Priority | Enabler |
+| Priority | Must · demo-critical |
 
 **Files / modules**
 - apps/api/src/platform/storage/{object-storage.port.ts, s3-object-storage.ts}
 - apps/api/src/platform/storage/object-storage.contract.int.test.ts (RustFS pinned tag; SeaweedFS fallback)
+- apps/api/src/platform/health/checks/object-storage.ts (replaces the ok-stub)
 - docs/04-plan/spikes/SPK-05.md
 
 **Acceptance tests to write**
 - SPK-05 exit: contract test green on RustFS (presigned GET <= 300 s, versioning, HEAD metadata, path-style) — or switch to SeaweedFS and request an ADR-0021 amendment
+- PR #9 code review m2 / D-TASK006-02 (D-ARCH-074): the production S3 adapter replaces the `object_storage` readiness ok-stub in `platform/health` with a real check — `HeadBucket` on the configured bucket with a 2 s timeout, `unavailable` on failure, never the endpoint or a credential in the response or the log line; AT-US-012-02-object-storage runs against RustFS in the integration project (not a fake); the tripwire test that enforces stub replacement is deleted in the same commit; US-012 traceability stays partial until this and the TASK-021 audit readiness checks land
+- Covers the scenarios of AT-US-012-01 … AT-US-012-05 that belong to its layer; US-012 closes in TASK-006
 
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
@@ -686,23 +732,31 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-067 **DC** (M0 Must) Mandatory route metadata with build-time route test |
 | REQs | REQ-RBAC-005 |
 | NFRs | NFR-AUDIT-004, NFR-MAINT-004 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR8-SEC-05, D-ARCH-069, T-83, PR2-SEC-05, PR11-SEC-05, PR11-SEC-09, D-ARCH-074 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-013, TASK-017, TASK-006 |
-| Batch · locks | 0.6 · api-routing |
+| Batch · locks | 0.6 · api-routing, pkg-authz, lint |
 | Branch | `feat/TASK-020-mandatory-route-metadata-build-time` |
 | Priority | Must · demo-critical |
 
 **Files / modules**
+- tools/eslint-rules/no-external-calls-in-tenant-tx.mjs + eslint.config.mjs entry + negative fixtures (T-83)
 - apps/api/src/platform/routing/{define-route.ts, pipeline.ts, route-registry.ts}
 - packages/shared/src/audit/descriptor.ts (types only)
 - tests/generated/route-metadata.test.ts (every route has permission + audit descriptor + validation schema; count = OpenAPI operations)
 - pipeline slots wired to stub implementations (authn, mfa, authz, rate-limit, validate, idempotency, etag, tx, audit), each in its own platform/<slot>/ folder — later tasks replace only their slot folder (contract stubs)
+- packages/authz/src/routes.ts (DeclaredRoute gains tenancy + auth; findRouteBindingViolations(routes, { production }))
+- packages/authz/src/guard.ts + permissions/index.ts (SUB_RESOURCES middle-segment allow-list in checkKeyShape; Compliance Auditor rule = read ∪ {audit:export} ∪ selfService) — no grant change, so `npm run authz:generate -- --check` stays green and no seed v2
 
 **Acceptance tests to write**
 - All US-067 scenarios
 - Route count equals OpenAPI operation count for implemented operations; missing metadata fails the build
+- PR8-SEC-05 (a)-(d) MERGE CONDITION (ADR-0008 am. 3 item 3, D-ARCH-069): `findRouteBindingViolations` over the mounted routes asserts (a) a selfService permission guards only `tenancy: user` routes, (b) `tenancy: operator-cross-tenant` requires an operator-only permission and an `:any_org` permission requires that tenancy, (c) a signatureOnly permission is satisfied only by `auth: signature` (never public or a session) and is never a route marker, (d) no route carries `webhook:mock_gateway:receive` when APP_ENV = production; the route-registry test runs it with one negative fixture per rule
+- PR #8 code review R2-m1 (ADR-0008 am. 3 item 2): `SUB_RESOURCES = [member, status]` plus the webhook providers (stripe, mock_gateway) is the closed set of legitimate middle segments; `checkKeyShape` rejects a three-segment key whose qualifier is not a scope qualifier unless its middle segment is a declared sub-resource (PERMISSION_FORMAT); mutated-catalogue tests P3 (`shipment:void:read` granted to the Viewer) and P3b (`shipment:purge:read` granted to the Auditor) each report a violation
+- PR #8 code review R2-n1 (ADR-0008 am. 3 item 1): `readOnlyViolations` allows the Compliance Auditor only verb `read`, exactly `audit:export`, or selfService — mutated-catalogue test P4 (`audit:purge` granted to the Auditor) reports AUDITOR_NOT_READ_ONLY; the shipped matrix is unchanged (0 violations)
+- T-83 lint (threat-model T-83 "no external calls inside withTenantTx"; PR2-SEC-05 addendum, PR11-SEC-05 item 5; D-ARCH-074 — this task owns it because the `tx` pipeline slot is the only per-request withTenantTx entry and wave-1 modules are the first possible violators): ESLint rule `platform/no-external-calls-in-tenant-tx` reports, lexically inside the callback passed to `withTenantTx(` / `.withTenantTx(` (nested closures in the same file included), any call to global `fetch`, any call on a binding imported from `undici`, `node:http`, `node:https`, `bullmq`, `ioredis`, `@aws-sdk/*`, `stripe` or `nodemailer`, any member call on an identifier in a configurable name list (`outboundHttp`, `httpClient`, `queue`, `queues`, `redis`, `valkey`, `storage`, `mailer`), and `setTimeout`-based sleeps; one negative fixture per source; TASK-113 extends the list with the OutboundHttpClient member names; cross-file calls (a service method that performs I/O) remain a review item and may get a Semgrep twin in `.semgrep/`
+- PR11-SEC-09 verification at the first withTenantTx consumer (the `tx` slot; D-ORCH-014, D-ARCH-074): the slot obtains the runner only from `apps/api/src/platform/db/runtime.ts` (never `client.ts`; boundaries fixture), and the route test proves a `DbError` surfaces as problem+json with `status`, the catalogue `code`, `Retry-After` for retryable codes and generic text — never `message`, `reason`, `sqlState` or `prismaCode`
 - AT-US-067-01 … AT-US-067-04: all 4 scenarios of US-067, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -715,10 +769,10 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Field | Value |
 |---|---|
 | Stories (completes) | — |
-| Stories (partial; completed by TASK-033, TASK-090) | US-094 **DC** (M0 Must) Database-enforced immutability and its tests<br>US-095 **DC** (M0 Must) Monthly partitions, indexes and partition-creation job |
-| REQs | REQ-AUDIT-014, REQ-AUDIT-015, REQ-AUDIT-016, REQ-AUDIT-017 |
+| Stories (partial; completed by TASK-033, TASK-090, TASK-006) | US-094 **DC** (M0 Must) Database-enforced immutability and its tests<br>US-095 **DC** (M0 Must) Monthly partitions, indexes and partition-creation job<br>US-012 **DC** (M0 Must) Liveness and readiness endpoints |
+| REQs | REQ-AUDIT-014, REQ-AUDIT-015, REQ-AUDIT-016, REQ-AUDIT-017, REQ-PLAT-018 |
 | NFRs | NFR-AUDIT-002, NFR-AUDIT-003 |
-| Spikes / security / decisions | SPK-08, SEC-COND-03, SEC-COND-05, SEC-P3-27 |
+| Spikes / security / decisions | SPK-08, SEC-COND-03, SEC-COND-05, SEC-P3-27, PR11-SEC-11, D-TASK006-02, D-ARCH-073, D-ARCH-074 |
 | Specialist · model | database-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-012, TASK-016 |
@@ -727,18 +781,25 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Priority | Must · demo-critical |
 
 **Files / modules**
-- prisma/bootstrap/0010_audit_store.sql (+ heads, checkpoints, anchors, partitions, verifications, pii_vault, data_subjects)
-- prisma/bootstrap/0011_audit_guard_event_trigger.sql
+- prisma/bootstrap/10-audit.sql (+ heads, checkpoints, anchors, partitions, verifications, pii_vault, data_subjects; NN-name per data-model §8.1)
+- prisma/bootstrap/90-audit-ddl-guard.sql
+- prisma/bootstrap/03-role-locale.sql ONLY if PR #11 merged without the lc_messages row (D-ARCH-073)
 - tools/db/audit-ddl-reviewers.json
 - prisma.config.ts tables.external list
-- prisma/tests/catalog/c11-c14-audit.int.test.ts
+- prisma/tests/catalog/c11-c14-audit.int.test.ts (C6, C7 via manifest flag immutable, C14)
+- apps/api/src/platform/health/checks/{audit-partitions,audit-chain}.ts (replace the degraded stubs)
+- tools/db/table-classes.ts: flag `immutable`
 
 **Acceptance tests to write**
 - US-094 DB scenarios (UPDATE/DELETE/TRUNCATE rejected for every role)
 - US-095 partition + index scenarios (current + 3 months exist)
 - SEC-TC-43 and SEC-TC-61 green; C11/C14 proconfig assertions pass
+- Catalog C6/C7/C14 remainder (PR #11 code review m4; data-model §4.6 as amended 2026-11-13; D-ARCH-074): C6 asserts the UPDATE/DELETE row trigger and the TRUNCATE trigger on `audit_entries` and, via `tgparentid`, on every partition; C7 is manifest-driven — the new table-class flag `immutable: true` marks every append-only table carrying the immutability trigger (`audit_checkpoint_heads`, `audit_anchors`, `audit_pii_vault` here; later creating tasks flag `compliance_packs`, `compliance_pack_sections`, `shipment_price_snapshots`, `notification_templates` and the pricing child tables) and C7 asserts the trigger on every flagged table that exists; the C14 event triggers, the proconfig of the three audit functions and the OID rename probe land in the suite; the suite header names what is still pending
+- PR #9 code review m2 / D-TASK006-02 (D-ARCH-074): the audit readiness checks replace the `degraded` stubs in `platform/health` — `audit_partitions` = at least 2 future monthly partitions exist (data-model §5.3; `unavailable` otherwise) and `audit_chain` = the latest `audit_chain_verifications` row is not failed (`degraded` while no verification has run yet); the tripwire tests are deleted in the same commit; together with TASK-019 this completes US-012
+- PR11-SEC-11 c (ADR-0005 am. 10 item 6): trigger-raised 42501/23514 from `AUDIT_IMMUTABLE` map in `mapDbError` to a distinct security event derived from the message prefix, never from the text itself; PR11-SEC-11 h FALLBACK: if PR #11 merged without `ALTER ROLE platform_app SET lc_messages = 'C'` in `02-role-backstops.sql`, this task adds it as the new bootstrap file `03-role-locale.sql` with its C13 row and the `EXPECTED_ROLE_SETTINGS` row (D-ARCH-073); rule 10 DO-body scan and the `U&` identifier decode (PR #5 R2-m2/R2-n1) land here if PR #11 did not fix them
 - Covers the scenarios of AT-US-094-01 … AT-US-094-06 that belong to its layer; US-094 closes in TASK-033
 - Covers the scenarios of AT-US-095-01 … AT-US-095-06 that belong to its layer; US-095 closes in TASK-090
+- Covers the scenarios of AT-US-012-01 … AT-US-012-05 that belong to its layer; US-012 closes in TASK-006
 
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
@@ -805,6 +866,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-049 scenarios (re-run is a no-op; demo seed refused when APP_ENV=production; SEED_* passwords from env only)
+- data-model §9.2 as amended 2026-11-12 (D-ARCH-060): the reference seed never writes permissions, roles or role_permissions (they come from the generated authz seed migration); the framework exposes the reference_dataset_versions hook the US-073 task uses for the authz parity check and CONFIG_CHANGE entry
 - AT-US-049-01 … AT-US-049-10: all 10 scenarios of US-049, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -819,26 +881,39 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-077 (M0 Must) Generated cross-tenant isolation tests |
 | REQs | REQ-RLS-007 |
 | NFRs | NFR-SEC-011, NFR-TENANT-001 |
-| Spikes / security / decisions | T-QA-04 |
+| Spikes / security / decisions | T-QA-04, PR7-SEC-04, PR7-SEC-07, DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, PR11-SEC-11, D-ARCH-071, D-ARCH-072, D-ARCH-074 |
 | Specialist · model | database-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-016, TASK-020 |
-| Batch · locks | 0.7 · tests-gen-rls |
+| Batch · locks | 0.7 · tests-gen-rls, prisma-rls, prisma-core |
 | Branch | `feat/TASK-024-generated-cross-tenant-isolation-test` |
 | Priority | Must |
 
 **Files / modules**
 - tests/generated/rls/{generator.ts, cross-tenant.int.test.ts}
 - tools/quality/required-suites.json entry rls-cross-tenant (security: true)
+- prisma/sql/policy-templates/{dr-a14-users,dr-a14-memberships,dr-a14-organisations}.sql (DR-A14 named templates, D-ARCH-072)
+- tools/db/table-classes.ts (field policySet; flag runtimeReadOnly) + tools/db/render-rls.ts (policySet blocks, exact special atoms)
+- tools/db/lint-migrations.ts rule 9 renderer equality + rule 17 + fixtures policy-not-rendered, down-without-if-exists
+- prisma/tests/catalog/{scans.ts, c01-c12.int.test.ts}: C3 derived set + keyed-atom presence + DR-A14 invariants, C11 converse ownership set, C1 scope, C8/C9 if PR #11 did not ship them
+- tools/db/up-down-up.ts prefix-reversibility check (data-model §8.4)
 
 **Acceptance tests to write**
 - All US-077 scenarios
+- DR-A14 MECHANISM (data-model §4.3 as amended 2026-11-13; PR11-SEC-10 requirements 1-5; D-ARCH-072): the three special policy sets are renderer TEMPLATES, never hand-written policies — manifest field `policySet: dr-a14-users | dr-a14-memberships | dr-a14-organisations`, accepted by the loader only on the table of the same name and class (`users` USER_OWNED, `memberships` TENANT, `organisations` TENANT); `blocksFor` renders enable-force + the set (replacing user-owned for users and tenant for organisations; adding own_read to tenant for memberships) + operator (+ definer-read); `validateTemplate` admits for these templates only the exact atoms `id = platform.app_actor_id()` (users), `id = platform.app_org_id()` (organisations) and the two exact EXISTS atoms over `public.memberships` with POSITIVE status lists (`m.status IN ('INVITED','ACTIVE','SUSPENDED')` for users, `IN ('ACTIVE','SUSPENDED')` for organisations); every forbidden token (`<>`, `!=`, `NOT`, `OR`, `coalesce`, `IS DISTINCT FROM`) stays refused inside EXISTS; the rendered output equals the data-model §4.3 SQL byte for byte after whitespace normalisation (unit test)
+- PR11-SEC-03 items 2-3 — rule 9 and C3 (ADR-0005 am. 10 item 7 as clarified 2026-11-13): every `CREATE POLICY` in prisma/migrations/** must equal, after normalisation, a statement of `renderRls(entry)` for its table (rule 9 message "policy not rendered from the templates"; fixtures `policy-tautology` and `policy-unkeyed` fail, a fixture holding the rendered TENANT, GUEST_CAPABLE, USER_OWNED and DR-A14 blocks lints clean; NO exemption file exists); C3 derives the expected policy set from the manifests + renderer by creating each rendered block on a rolled-back probe and comparing the deparsed `pg_policies` rows (the hand-edited `policies.snapshot.json` is retired), asserts a keyed atom (`platform.app_org_id()`, `app_actor_id()`, `app_guest_token_hash()` or `app_is_operator()`) in every `TO platform_app` qual/with_check (planted `p_bad_tautology` `org_id = org_id` and `p_bad_unkeyed` `org_id IS NULL` are reported), and asserts the DR-A14 invariants: `memberships` policy expressions contain no subquery (42P17 recursion), `users`/`organisations` subqueries reference `public.memberships` only, `IN (…)` lists appear only on `m.status`
+- PR11-SEC-06 (P3 §15 deviation 7 converse; D-ORCH-005 (7)): C11 asserts `platform_definer` owns exactly the allow-listed definer functions and no other function, relation, type or schema (UNION ALL over `pg_proc.proowner`, `pg_class.relowner`, `pg_type.typowner`, `pg_namespace.nspowner`); planted, rolled-back `SET ROLE platform_definer; CREATE VIEW platform.v AS SELECT 1;` and an invoker function are both reported
+- Rule 17 + prefix reversibility (data-model §8.3/§8.4 as amended 2026-11-13; PR11-SEC-07; D-ARCH-071): rule 17 requires every `DROP …` and `ALTER TABLE … DROP COLUMN|CONSTRAINT` in `down.sql` to carry `IF EXISTS` (fixture `down-without-if-exists`), and the up-down-up driver additionally applies, for every migration, each proper statement prefix on a template clone (statement by statement as the migrator, like deploy), runs `down.sql`, marks the row rolled back and asserts the schema equals the pre-migration snapshot — a down that cannot revert a partial deploy is named with its prefix length
+- Catalog remainder routed here (PR #11 code review m4, PR11-SEC-11 e/g; D-ARCH-074): C8 (no `timestamp without time zone`; every `id` is uuid DEFAULT uuidv7(); every `*_minor` is bigint with a sibling currency column carrying the `^[A-Z]{3}$` CHECK) and C9 (every `ck_*` enum CHECK equals its packages/shared enum) if PR #11 did not ship them — the committed authz tables are the first subjects; C1 and rule 9 cover every non-system schema or assert that `platform` holds no table; a `runtimeReadOnly` manifest flag on GLOBAL entries makes `validateGrants` refuse any write line at parse time
 - Every table in tools/db/table-classes/*.json and every tenant-resource route is enumerated; an unlisted tenant table fails the suite
+- PR7-SEC-07 item 3 — C12 guest-row probes (ADR-0005 am. 10 item 7): for every GUEST_CAPABLE table the generator plants a guest row (org_id NULL, hash H) and probes it with (i) no settings, (ii) all four app.* keys set to the empty string, (iii) org A context without a hash, (iv) a different hash — all four return 0 rows; the positive control with hash H returns 1
+- PR7-SEC-04 verification (ADR-0005 am. 10 item 11): for every GUEST_CAPABLE table, under the claim context (org A + hash H), the de-claim `UPDATE … SET org_id = NULL, guest_token_hash = <hash>` is rejected (GUEST_DECLAIM_FORBIDDEN) while the legitimate claim succeeds; a table in the manifest without the trigger fails the suite
 - AT-US-077-01 … AT-US-077-04: all 4 scenarios of US-077, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
+- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-025 — Audit writer core: action/actor types, complete entry fields, same-transaction write and outcome semantics
@@ -848,7 +923,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields<br>US-088 **DC** (M0 Must) Same-transaction writes and outcome semantics |
 | REQs | REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011, REQ-AUDIT-004, REQ-AUDIT-010 |
 | NFRs | NFR-AUDIT-001, NFR-AUDIT-006 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR2-SEC-05, PR11-SEC-05, D-ARCH-074 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-021, TASK-016, TASK-020 |
@@ -862,6 +937,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-087 and US-088 scenarios (audit insert failure rolls back the business row: 500 AUDIT_WRITE_FAILED)
+- PR2-SEC-05 addendum / PR11-SEC-05 item 2 (ADR-0005 am. 10 item 2; D-ARCH-074): `packages/audit/src/store/prisma-store.ts` is typed on `TenantDb` and joins the business transaction it is handed; it constructs no PrismaClient and imports no `pg`/`pg-pool` (the boundaries policy allows the SQL driver only under `apps/*/src/platform/db/**`, prisma, tools/db and tests — a negative lint fixture for this exact file fails); a second pool would run without tenant context and commit audit rows outside the business transaction
 - AT-US-087-01 … AT-US-087-08: all 8 scenarios of US-087, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-088-01 … AT-US-088-08: all 8 scenarios of US-088, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -946,7 +1022,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-091 (M0 Must) Redaction and field classification |
 | REQs | REQ-AUDIT-008, REQ-AUDIT-009 |
 | NFRs | NFR-PRIV-002, NFR-PRIV-003 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR8-SEC-10, D-ARCH-074 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-025 |
@@ -958,9 +1034,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - packages/shared/src/classification/registry.ts
 - packages/audit/src/redaction/**
 - tests: classification completeness check over prisma/schema
+- prisma/tests/catalog/c10-classification.int.test.ts (C10)
 
 **Acceptance tests to write**
 - All US-091 scenarios (SECRET removed, PERSONAL tokenised into the vault, 100 % PII columns classified)
+- Catalog C10 (data-model §4.6; PR #11 code review m4 deferral; D-ARCH-074): every column of every table in `public` and `platform` (information_schema.columns) has a classification-registry entry; SYSTEM tables carry no PER/SPER column except `idempotency_keys.response_body` and the encrypted vault; every ciphertext/HMAC column of data-model §10.4 has its `<col>_key_id` sibling — asserted in the catalog suite against the live schema, not only in the prisma/schema completeness check
+- PR8-SEC-10 (ADR-0008 am. 3 item 6, D-ARCH-069): the registry classifies every column of `permissions`, `roles` and `role_permissions` as INT except the four PUB text columns `permissions.description`, `permissions.category`, `roles.name_key`, `roles.description`; the completeness check over prisma/schema (authz.prisma included) fails on any unclassified column
 - AT-US-091-01 … AT-US-091-06: all 6 scenarios of US-091, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

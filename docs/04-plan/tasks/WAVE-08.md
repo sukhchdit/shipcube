@@ -95,19 +95,22 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-073 (M0 Should) Role definitions change only via versioned migration |
 | REQs | REQ-RBAC-013 |
 | NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR8-SEC-09, D-ARCH-060 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
-| Depends on | TASK-013, TASK-029 |
+| Depends on | TASK-013, TASK-029, TASK-023 |
 | Batch · locks | 8.1 · pkg-authz |
 | Branch | `feat/TASK-221-role-definitions-change-only-versioned` |
 | Priority | Should · cuttable |
 
 **Files / modules**
 - packages/authz/test/role-drift.int.test.ts
+- prisma/seed/reference/authz.ts (parity check + CONFIG_CHANGE per CATALOGUE_VERSION)
 
 **Acceptance tests to write**
 - All US-073 scenarios
+- data-model §9.2 / ADR-0008 am. 2 item 3 (D-ARCH-060, PR8-SEC-09): a post-migrate reconciler run as SYSTEM_JOB digests permissions/roles/role_permissions as read from the database, compares with the last audited digest in reference_dataset_versions(dataset = authz_matrix, version, content_sha256), writes one CONFIG_CHANGE audit entry per changed version (role, old -> new permission set; the first run back-fills the baseline empty -> current) and writes nothing when unchanged (AT-US-073-04); it also fails the seed on catalogue <-> database drift; no migration ever inserts into audit_entries; if this task is cut, the G3 report names the guard tests and CODEOWNERS as the residual controls
+- PR8-SEC-09 conditions 1-3 (verified at this task security review): the first CONFIG_CHANGE entry covers every version applied before the reconciler existed (old set ∅ → the current grants of v1 and any later version); the mechanism is the SYSTEM_JOB reconciler, never a migration INSERT into audit_entries; if this task is cut, T-107 residual controls (guard tests, CODEOWNERS from TASK-007) are recorded in the G3 residual-risk list
 - AT-US-073-01 … AT-US-073-04: all 4 scenarios of US-073, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -371,7 +374,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards |
 | REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014 |
 | NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | SEC-COND-01, D-042 |
+| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-227, TASK-187 |
@@ -381,9 +384,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Files / modules**
 - apps/api/src/modules/organisations/members/**
+- apps/api/src/modules/organisations/members/assign-rank.property.test.ts (ASSIGNABLE_BY vs grants, fast-check)
 
 **Acceptance tests to write**
 - All US-085 scenarios
+- PR8-SEC-06 consumer conditions (i)-(iv) (ADR-0008 am. 3 item 4; D-ARCH-069): a modify, suspend or remove passes `canAssignRole` for EVERY role the target member currently holds AND every role in the requested set (an Admin cannot act on an Owner+Viewer member through the Viewer role); `assignerRoleKeys` come from the actor ACTIVE membership in the TARGET organisation, read from the database, never from the token; the rank check is in addition to `org:member:invite`/`org:member:manage` and the 12 h step-up, never instead of them; self role change (REQ-ACCT-015) and LAST_OWNER (REQ-ORG-013) stay separate checks; AC-05 threat-model cases (Admin assigns Owner, Admin modifies an Owner, self role change) → 403/422
+- PR #8 code review R2-n2: property test — for every allowed (assigner, target) pair in ASSIGNABLE_BY, `target.permissions ⊆ assigner.permissions` on the shipped catalogue; a mutated catalogue where the Admin loses a permission the Viewer keeps fails the property
 - AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -479,7 +485,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-268 (M1 Should) Organisation profile and team invitations<br>US-269 (M1 Should) Protect the last Owner and block self role change |
 | REQs | REQ-ACCT-014, REQ-ACCT-015 |
 | NFRs | NFR-A11Y-001 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR8-SEC-06 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-231 |
@@ -492,6 +498,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-268 and US-269 scenarios
+- PR8-SEC-06 (UI side; ADR-0008 am. 3 item 4): the role picker offers only roles `canAssignRole(actorRoles, role)` allows and the modify/remove controls are disabled (with an explanatory tooltip and an aria-disabled state) for members holding any role the actor cannot assign; the server remains authoritative — a 403 from the API is rendered as the permission-denied state, never retried
 - AT-US-268-01 … AT-US-268-14: all 14 scenarios of US-268, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-269-01 … AT-US-269-07: all 7 scenarios of US-269, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -819,7 +826,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-196 scenarios
-- AT-US-196-01 … AT-US-196-10: all 10 scenarios of US-196, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-196-01 … AT-US-196-11: all 11 scenarios of US-196, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -925,7 +932,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-216 scenarios
-- AT-US-216-01 … AT-US-216-07: all 7 scenarios of US-216, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-216-01 … AT-US-216-08: all 8 scenarios of US-216, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Job payload v2 (identifiers only), tenant context from `platform.job_context`, deterministic job IDs, retries + DLQ, idempotent effects verified by a duplicate-delivery test, metrics per queue.
@@ -951,7 +958,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-229 scenarios
-- AT-US-229-01 … AT-US-229-06: all 6 scenarios of US-229, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-229-01 … AT-US-229-07: all 7 scenarios of US-229, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Job payload v2 (identifiers only), tenant context from `platform.job_context`, deterministic job IDs, retries + DLQ, idempotent effects verified by a duplicate-delivery test, metrics per queue.
@@ -1179,7 +1186,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR6-SEC-08 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1192,7 +1199,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-252 scenarios
-- AT-US-252-01 … AT-US-252-08: all 8 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- PR6-SEC-08 (binding; D-059 REQ-TRACK-006 note): `POST /webhooks/carriers/{code}` is registered only for carriers whose `capabilities().pushTracking` is true — today none of the real carriers, so the route answers 404 for DHL, FedEx and UPS and no scheme is invented for them; REQ-TRACK-006 is proven with Mock-signed fixtures (HMAC compared in constant time, timestamp/replay window, body-size cap, secret via secretRef); enabling a real carrier requires an ADR-0010 amendment documenting its authenticity mechanism; ADR-0010 am. 9 applies (a push is a hint confirmed by `track()` before any cancellation-blocking or terminal transition)
+- AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.

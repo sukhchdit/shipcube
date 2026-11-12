@@ -628,7 +628,7 @@ Feature: Authenticated tracking timeline
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-242
 - **Linked REQs:** REQ-TRACK-006
 - **As an** operator **I want** carriers to push tracking events to a verified endpoint **so that** updates arrive faster than polling.
-- **Notes:** One endpoint per carrier; signature or shared secret verification; same mapping, de-duplication and transition pipeline as polled events. Proven with signed fixtures; live proof COND-SANDBOX-DEMO. Secrets referenced only through secret manager. Polling stays the fallback.
+- **Notes:** One endpoint per carrier; signature or shared secret verification; same mapping, de-duplication and transition pipeline as polled events. Proven with signed fixtures; live proof COND-SANDBOX-DEMO. Secrets referenced only through secret manager. Polling stays the fallback. SPK-02 / PR6-SEC-08 (D-ARCH-062): no official DHL Express, FedEx or UPS specification documents an authenticated push scheme, so `pushTracking = false` for all three in this run; the verification is the Platform's own HMAC shared-secret contract, a carrier without a configured secret gets the 401 of any unverified request, and TASK-261 must not invent a carrier-specific scheme (A-107). The live scenario below runs only once a carrier documents a scheme.
 
 #### Acceptance criteria
 ```gherkin
@@ -662,11 +662,19 @@ Feature: Carrier push ingestion
     When a push is rejected
     Then the log entry contains the carrier code and reason and no secret or signature value
 
+  Scenario: Carrier without a configured push secret
+    Given no push secret is configured for carrier "UPS" (pushTracking=false)
+    When a push is posted to "/v1/webhooks/tracking/ups"
+    Then the response is 401 with problem code "AUTH_REQUIRED" and nothing is stored
+    And polling for UPS shipments continues unchanged
+
   @live-sandbox
   Scenario: Live sandbox push (COND-SANDBOX-DEMO)
-    Given sandbox credentials and a public URL are supplied
+    Given a carrier whose official specification documents an authenticated push scheme and whose capability pushTracking is true
+    And sandbox credentials and a public URL are supplied
     When the carrier sandbox sends a real tracking push
     Then the shipment timeline updates
+    # No carrier qualifies in this run (pushTracking=false for DHL, FedEx and UPS); the scenario is skipped, not failed
 ```
 Permission path: covered by the 401 scenario for unverified requests; the route is `public` with its own signature check.
 

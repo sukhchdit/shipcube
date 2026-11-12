@@ -15,6 +15,11 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - Give it at most 2 tasks per dispatch.
 - Or run the licence, audit and maintenance checks yourself with Node scripts; this is fast.
 - gitleaks works via the Docker image with `--redact`. In Git Bash, prefix it with `MSYS_NO_PATHCONV=1`, otherwise `/repo` is rewritten to `C:/Program Files/Git/repo`. For worktree commits, mount the main repo, which holds the shared object store, and use `--log-opts=<base>..<head>`.
+- **gitleaks `dir` mode** (scanning a `git archive` tree) reports paths as `/scan/...`.
+  - The path-anchored allowlists in `.gitleaks.toml` (`^docs/...`) therefore do not match in that mode.
+  - So the 17 PR1-SEC-11 hits (`openapi.yaml`, the agent docs) always show up there. Triage them as allow-listed; lane A's git mode reports repo-relative paths.
+  - Lane A scans `base.sha..head.sha` with `--diff-merges=first-parent`. Any text on main that a branch has not yet merged arrives as *added lines* in that branch's next main-merge.
+  - Therefore never quote a flagged value in docs, records or memory (PR13-SEC-11).
 - Semgrep is not installed on the host.
 - **Probing lint configs without running the suite.** A single-process `ESLint#lintText` against the worktree's real `eslint.config.mjs` stays light enough for the memory-constrained host. Load ESLint from the worktree with `createRequire(<worktree>/package.json)`, and add the `tseslint.configs.disableTypeChecked` + `projectService: false` overrides, because the probe files are not on disk. `isPathIgnored` / `calculateConfigForFile` show coverage holes. Write the probe file with a heredoc, not a `node -e` string, because quoting breaks in Git Bash.
 - **Probe scripts with regex escapes.** A Bash-tool heredoc (even `<<'EOF'`) turned `\\b` into `\b` in one case (PR-0005, 2026-11-12). The probe then silently matched nothing. Write such probes with the Write tool, and include a positive control line in every probe.
@@ -24,6 +29,25 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.
   - Run them with plain `node` (Node 24 strips types).
   - For URL guards, diff the guard's result against `new pg.Client({connectionString})`'s `host`/`port`/`database`, which needs no connection.
+- **Type-stripping PR sources (PR-0008).**
+  - Use `stripTypeScriptTypes(code, { mode: 'transform' })`. The default strip mode rejects constructor parameter properties (`constructor(readonly x: string)`), which the authz package uses.
+  - In probe scripts, build file URLs with `pathToFileURL`. Hand-built `replaceAll('\\', '/')` broke again in a Bash heredoc.
+- **Probing Prisma runtime behaviour without a database (PR-0011).**
+  - Strip the PR's sources and the worktree's `prisma/generated/prisma` into scratch.
+  - Build `new PrismaClient({ adapter: fakeFactory })`. `fakeFactory` is `{provider:'postgres', adapterName, connect()}`, and the adapter returns `{queryRaw, executeRaw, executeScript, startTransaction, dispose}`. The transaction has `options:{usePhantomQuery:false}` and savepoint methods.
+  - Log each SQL with a `ROOT`/`TXn` tag. Result sets are `{columnNames, columnTypes (7 = Text), rows}`.
+  - Throw `new DriverAdapterError({kind:'postgres', originalCode, originalMessage, …})` from `@prisma/driver-adapter-utils` to drive P2010/P2039.
+  - This proves transaction-binding and escapes cheaply.
+  - The scratch `node_modules` junction vanished once mid-session, so re-check it before re-running.
+- **Probing a capability guard (Proxy / wrapper).** Also probe what the allowed members RETURN, and use that value after the guard is revoked. In PR-0011 R2, a "deep, deny-by-default" `TenantDb` still returned Prisma's raw `PrismaPromise`, and its `requestTransaction(null)` reached the root pool. For a lint or run-time check on a tagged template, also probe the interpolated values (`Sql` objects splice raw text).
+- **Validating a record when the PR branch is not merged with main.** Use `checkSecurityOwnedPaths` with base `origin/main` and the PR head. Older head rows in the same record only produce notes, and the run still passes on the newest head (PR-0011 R2).
+- **"No commands in worktree X" includes read-only git.** On 2026-11-13 (PR-0009 R2) I slipped and ran `git status` there; disclose any such slip in the record.
+  - Check the worktree's state from the main checkout instead (`git worktree list`, `git show <sha>:<path>`).
+  - Junctions into its `node_modules` are fine.
+- **ReDoS-probe every regex that a fix adds over request input.** The PR-0009 HIGH (PR9-SEC-14) came from a charset fix.
+  - Measure in a child-process server; same-process timings hide event-loop blocking.
+  - Fuzz the proposed grammar for language equivalence.
+- **Git attribute experiments: confirm them in a Linux container, not with host git** (PR-0010 R2, 2026-11-13). With an empty work tree, Git for Windows 2.52's `git log -p` still treated `package-lock.json` as binary. The attribute source is unexplained, and `-c attr.tree=<empty tree>` cleared it. Treat host results as hints only.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]

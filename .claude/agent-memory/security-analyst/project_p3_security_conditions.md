@@ -20,7 +20,7 @@ The P3 review lives in `docs/05-quality/security/P3-architecture-security-review
 - **SEC-P3-34 (LOW now; MEDIUM at M5).** Privileged sessions outside the bootstrap lane resolve names through `public`, which the migrator can write. The migrator also owns the DB, so it can run `ALTER DATABASE SET search_path` and `CREATE SCHEMA`. Fixes go in TASK-003, TASK-016 and TASK-034: a role-in-database `search_path` for the bootstrap/master role, the harness connecting with `options`, and a catalog assertion. The break-glass runbook item is G4-production.
 - **SEC-P3-35 (LOW).** `payments` has no persisted `cvc_recollection_required` column. Fix in TASK-085.
 - **SEC-P3-36 (LOW).** The per-organisation quota share multiplies across the up-to-11 orgs one user can hold. Add a per-user share before TASK-190.
-- **SEC-P3-37 (INFO).** Drift items. Includes `ALTER DEFAULT PRIVILEGES … IN SCHEMA platform` placed in `00-roles.sql` before the schema exists (TASK-003), and partition-name squatting (TASK-021).
+- **SEC-P3-37 (INFO).** Drift items. Includes `ALTER DEFAULT PRIVILEGES … IN SCHEMA platform` placed in `00-roles.sql` before the schema exists (TASK-003), and partition-name squatting (TASK-021). **Item 6 (squatting) is superseded by PR12-SEC-02 (MEDIUM, 2026-11-13):** the "readiness catches it" claim was wrong. See [[project-p5-pr12-spk08-audit]].
 
 **Progress at PR #5 (TASK-003, `d8ba197`, PR-0005):**
 - **SEC-P3-34, TASK-003 part, RESOLVED.** Items 1, 2 (runner and harness), 3 (local assertion) and 5 (the migrator doesn't own the DB; extensions installed by bootstrap). Remaining: TASK-016 (C13, catalog harness `options`), TASK-034 (rehearsal) and the item 4 runbook.

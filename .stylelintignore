@@ -1,21 +1,30 @@
 node_modules/
 
-# Build and coverage output, anchored to the output folders (root and workspace roots): a source folder named
-# build, dist or coverage is still linted (PR2-SEC-03).
+# Same matrix as the ESLint globalIgnores in eslint.config.mjs (PR #2 R2-n8; tools/repo/gitignore.test.ts asserts the
+# symmetry). Output folders are anchored to the root and the workspace roots: a source folder named build, dist or
+# coverage is still linted (PR2-SEC-03).
 /dist/
 /build/
 /coverage/
-/apps/*/build/
 /apps/*/dist/
+/apps/*/build/
 /apps/*/coverage/
 /packages/*/dist/
+/packages/*/build/
 /packages/*/coverage/
+/tests/*/dist/
+/tests/*/build/
+/tests/*/coverage/
+/prisma/dist/
+/prisma/build/
+/prisma/coverage/
 /apps/*/.react-router/
+/packages/*/.react-router/
 /prisma/generated/
 
 # Playwright output (git-ignored; the HTML report bundles third-party viewer CSS) (PR #2 R2-n9)
-playwright-report/
-test-results/
+/**/playwright-report/
+/**/test-results/
 
 # Documentation and agent configuration
 /docs/
@@ -23,3 +32,5 @@ test-results/
 
 # Seeded negative fixtures violate the rules on purpose (tools/lint/negative-fixtures.test.ts lints them explicitly)
 /tests/fixtures/lint/
+/tests/fixtures/semgrep/
+/tools/deps/fixtures/

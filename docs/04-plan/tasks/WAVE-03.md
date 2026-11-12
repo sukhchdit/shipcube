@@ -532,7 +532,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-047 (M0 Must) SSRF-safe outbound client and security events |
 | REQs | REQ-SEC-010, REQ-SEC-012 |
 | NFRs | NFR-RES-001, NFR-SEC-010 |
-| Spikes / security / decisions | SEC-P3-30 |
+| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-010, TASK-029 |
@@ -542,11 +542,16 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Files / modules**
 - apps/api/src/platform/egress/outbound-http-client.ts (undici dispatcher, allow-list, DNS pinning, timeouts)
+- apps/api/src/platform/egress/egress-rules.ts (EgressRule { origin, pathPrefixes, tier }, egressAllowed(target, rules, ctx), rule-set assembly from enabled carrier accounts + Stripe)
 - packages/shared/src/security-events.ts
 
 **Acceptance tests to write**
 - All US-047 scenarios
 - SEC-TC-63: security-event names in packages/shared equal the api README §13 table incl. the eight SEC-P3-30 names
+- PR6-SEC-01 / ADR-0010 am. 11 item 6 as made precise 2026-11-12 (PR #6 code review R2-n3, PR6-SEC-12 b/f; D-ARCH-068): rules are `EgressRule { origin, pathPrefixes, tier }` assembled at start-up as the union over ENABLED carrier accounts of each adapter static `EGRESS[account.environment]` plus the Stripe rules — no environment variable can add a rule; `egressAllowed` requires `https:`, no credentials, no port, `origin === rule.origin`, refuses `%2f`/`%5c`/`%2e` after WHATWG normalisation, matches an entry ending in `/` by `pathname.startsWith` (segment boundary) and an entry without a trailing `/` as an EXACT path, requires `rule.tier === ctx.environment` for the calling account, and re-checks every redirect hop; start-up refuses any production-tier rule unless APP_ENV = production (names only, never values)
+- SEC-TC-66 (PR6-SEC-01 verification; sandbox rule set): blocked with SSRF_BLOCKED + `ssrf_blocked` event — `https://express.api.dhl.com/mydhlapi/shipments/X/tracking`, `…/mydhlapi/test/../shipments/X/tracking` (string-concatenated then `new URL`), `…/mydhlapi/test/%2e%2e/shipments`, `…/mydhlapi/testX/rates`, `…/mydhlapi/test/..%2Fshipments`, `https://wwwcie.ups.com/security/v1/oauth/tokenX`, `…/security/v1/oauth/token/x`, `https://wwwcie.ups.com/security/v1/other`; allowed — `…/mydhlapi/test/rates`, `https://wwwcie.ups.com/security/v1/oauth/token`; a local or test environment containing a production-tier rule refuses to start
+- PR6-SEC-03 item 1 / PR6-SEC-02 item 3 / PR6-SEC-07 item 2 (ADR-0010 am. 11 item 8): the client records `server.address`, the method and an adapter-supplied ROUTE TEMPLATE (`DELETE /mydhlapi/test/pickups/{id}`) in logs and spans — never `url.full`, `url.path`, `url.query`, `http.url` or `http.target`; error mapping drops any `cause.message` that contains a URL; request and response bodies are never logged at any level; token-endpoint requests and responses are excluded from all body logging and raw capture (FedEx secrets travel in the form body); in-memory span exporter and log capture tests assert that a `requestorName` sentinel, an account-number sentinel and a `client_secret` sentinel never appear
+- T-83 extension (D-ARCH-074): the `OutboundHttpClient` member names (and the exported factory name) are added to the `platform/no-external-calls-in-tenant-tx` list owned by TASK-020, with a negative fixture that calls the client inside a `withTenantTx` callback; the client is never handed a `TenantDb`
 - AT-US-047-01 … AT-US-047-08: all 8 scenarios of US-047, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

@@ -293,3 +293,54 @@ No BLOCKER and no MAJOR findings.
    - R2-n3 and R2-n4 → TASK-014 (bootstrap one-shot) or optional.
    - R2-n5 → the PR #3 reconciliation docs.
    - R2-n6 and R2-n7 are optional.
+
+---
+
+## Round 3 — merge-main delta (head 614eb96)
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The merge-main delta (6b0a8a8: 6 files, +49/-20) is behaviour-neutral. It adds two narrowly scoped ESLint
+         allowances, type-checks the fixture configs, and makes lint-only test refactors. 614eb96 adds docs and memory
+         only. The package.json union is correct, and the lock differs from main only in the root manifest entry. No new BLOCKER or MAJOR findings.
+```
+
+### R3.1 Verification performed by the reviewer (by SHA, main checkout, read-only)
+
+- `git show -s` confirms the chain 4574a14 → 1f9c192 (merge of main 33a9cd0) → 6b0a8a8 (fix) → 614eb96 (merge of main 44d6c2e).
+- `git diff 6b0a8a8..614eb96 --stat` shows 27 files, all under `docs/**` and `.claude/agent-memory/**`. There is no code, config or lock change.
+- `git show --cc 1f9c192` shows that the only hand-resolved hunks are `package.json` and `docs/04-plan/task-map.csv`. No other evil-merge content.
+- `package.json` vs main 44d6c2e:
+  - adds the branch `db:*` scripts;
+  - keeps main's `lint` (eslint + stylelint);
+  - drops `--passWithNoTests` from `test:integration`, which is now correct because the integration project has suites;
+  - adds `pg` 8.23.1, `pg-connection-string` 2.14.1 and `@types/pg` 8.23.1.
+- `package-lock.json` vs main: the root `packages[""]` devDependencies (+3 lines) is the only change. `node_modules/pg`, `pg-connection-string` and `@types/pg` were already resolved at exactly those versions (MIT). Nothing new is resolved.
+- `later()` semantics probe (scratch `PR-5-cr-r3/later.mjs`, Node 24): a throwing fake does **not** throw synchronously. It returns a rejected promise and runs its side effects synchronously, which is the same contract as the replaced `async` fakes. Value fakes resolve.
+- `up-down-up.test.ts`: `markRolledBack` and `snapshot` now return `Promise.resolve`. The only caller is `await options.markRolledBack(name)` / `await options.snapshot()` inside `async runUpDownUp` (tools/db/up-down-up.ts:118-147), so a synchronous `expect` throw there behaves like a rejection. No behaviour change.
+- Assertion removals are erased at runtime, so behaviour is unchanged:
+  - `runtime-role.int.test.ts`: `createDatabaseClient<TClient>` now returns the generated client, which is structurally checked against `RawClient` rather than forced through `unknown`. This is an improvement.
+  - `reset.ts`: see R3-n2.
+- `prisma-engines.test.ts` `--record` JSON is typed. With `results[0]?.sha256`, an empty `results` still fails the assertion, so the test is not weakened.
+- Not re-run, as the brief directed: lint, format, typecheck, unit, integration, coverage, build and audit. I relied on the developer's gate comments on 6b0a8a8/614eb96 (#issuecomment-6825948019 and -6826463285): lint passes with 26 errors fixed and **no inline disables**, unit 289, integration 28, coverage 317 tests at thresholds, and a clean tree.
+
+### R3.2 Focus rulings
+
+- **(a) `prisma.config.ts` packageDir `[ROOT, prisma]`.** Accepted. This one-file allowance follows the same pattern as the existing `jest-esm` block. `prisma/package.json` pins `prisma` 7.10.1 (devDependency). Adding `prisma` to the root manifest instead would duplicate the pinned CLI (ADR-0023 am. J).
+- **(b) `prisma/tests/**` `import-x/no-relative-packages: 'off'`.** Accepted for this PR, with a NIT (R3-n1).
+  - All 12 cross-package imports go to `tools/db`, `tools/test-support` or `apps/api/src/platform/db/client.ts`, consistent with D-TASK003-01.
+  - Node subpath `imports` cannot target outside the package root, so no entry-point route exists without restructuring.
+  - Twelve described per-line disables would be worse.
+  - The cost: nothing now stops `prisma/tests/**` from reaching relatively into other workspaces' internals. Boundaries does not constrain the `prisma` or `test` categories.
+- **tools/tsconfig.json fixture configs.** Accepted. `files` overrides `exclude`, so the two fixture `prisma.config.ts` files are now type-checked and linted (with `noEmit`). That is better than ignoring them. The `"//"` note could mention them (trivial).
+
+### R3.3 Findings (round 3)
+
+| ID | Sev | Location | Issue | Fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | eslint.config.mjs:412-418 | The rule is turned off for the whole tree. It permits relative imports into **any** workspace (for example `packages/*/src`, `apps/web`), not just the three intended targets. | Add a `boundaries` policy (or `no-restricted-imports` patterns) that limits `prisma/tests/**` to `tools-db`, `tools/test-support/**`, `db-platform` and `prisma-generated`. Optional; route to TASK-016, the next PR to add prisma/tests suites. |
+| R3-n2 | NIT | tools/db/reset.ts:96 | With `as string` removed, `bootstrapUrl` is `string \| undefined` at the call. It type-checks only because `pg.ClientConfig.connectionString` accepts `undefined`. Runtime is safe because `resetTarget` throws first. If that guard ever moved, pg would silently fall back to the `PG*` env or defaults, and the compiler would not notice. | Return the validated URL from `resetTarget` (`{ database, maintenanceUrl, bootstrapUrl }`) and pass that. Optional; this is in the same file as R2-n3/n4 (TASK-014). |
+
+### R3.4 Merge conditions
+
+The round-2 conditions R2.7 items 2-4 (security-analyst delta, principal-architect amendments, routing) are unchanged. Item 1 (gate on the merge commit) is **satisfied** by the developer's gate evidence above. From a code-review standpoint, nothing in the delta blocks merging 614eb96.

@@ -211,3 +211,115 @@ The alternative of moving `brand-rules.ts` and `web-schema.ts` into `@platform/s
 - Failure causes are built from code-defined identifiers only (constructor name plus an errno-shaped code), with a property test across message, code, name and raw throws.
 - Mirror-Node tokenisation with probe results recorded in the test comment. The tooling keys are refused **by name only**, and tests check that their values never appear in the config or the error output.
 - A dependency-free rules module with a static import-graph test is the right structure for every later Joi/Zod pair (address, parcel, customs). Extend it to shared predicates (R2-m1) before it is copied.
+
+## Round 3 (head 0e48a2a)
+
+| Field | Value |
+|---|---|
+| Head / delta | `0e48a2a`: one commit over `c277ea6` (16 files, +558/−100, all in `packages/config/src/**`; no dependency change). Merge base `44d6c2e`: PR #2 (lint) **is** in the branch; TASK-003 (`5964ccc`) is **not**. The concurrent merge-main commit is not part of this review |
+| Inputs | Rounds 1–2 (above); fix comment issuecomment-6826964394; D-ORCH-007 item 1; D-TASK005-03; D-ORCH-009 |
+| Reviewer | code-reviewer (independent), 2026-11-12. The review is by SHA only; no command was run in the `Shipqube-TASK-005` worktree |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-m1 is closed. Joi (.custom) and Zod (.refine) now call the same brand-rules.ts predicates and report the
+         same rule ids. A 20 000-case loader-level differential run found 0 divergences on non-empty values. All four
+         R2 NITs are closed, and every D-TASK005-03 behaviour is sound. 10 targeted mutants: 9 are killed by the
+         intended test; M8 survives the property and is killed by the curated loader vectors. No BLOCKER/MAJOR; 4 NITs.
+```
+
+### R3.1 Verification performed by the reviewer
+
+I ran `git archive 0e48a2a` into a reviewer-only scratch directory, with `node_modules` junctioned to the **main** checkout. Afterwards I removed both the junction and the directory. Main still has 740 node_modules entries, there is no stray junction at `C:\`, and `git status` is unchanged.
+
+| Check | Result |
+|---|---|
+| `jest --selectProjects unit --testPathPatterns packages/config` (Node 24.22.3) | **9 suites, 447/447 passed** (21 s) |
+| `prettier --check packages/config/src` | pass |
+| **Probe P1**: `isBrandUrl` / `isBrandName` edge cases (33 URLs, 8 names) | Refused: `user@`, `user:@`, `%75ser@`, `[v1.x]`, an unclosed `[`, `a%2Fb`, `a%00` hosts, and backslash forms. Accepted, harmless: an empty userinfo (`https://@h`, `https://:@h`), `https://./`, `xn--a` / `xn--` (Node's URL is lenient on invalid punycode), hex or decimal IPv4 (`0x7f.1`, `2130706433`), `http://localhost`, `/../..`. Names: controls, U+202E, a lone surrogate and a ZWSP-only value are accepted (R3-n4) |
+| **Probe P2**: loader-level differential. `loadConfig(api)` vs `loadWebBuildConfig` on whole `issues` arrays **including `rule`**, for `BRAND_NAME` / `BRAND_LOGO_URL` / `BRAND_FAVICON_URL`. 20 000 fast-check cases (webUrl, binary and grapheme strings, adversarial prefixes/suffixes incl. NBSP, BOM, `%`, `ü`); 10 931 of them rejected | **0 divergences** on non-empty values. The empty value is a **missing** key on both sides, but the web issue carries `rule: 'invalid_type'` and the backend issue has no rule (R3-n1, pre-existing) |
+| **Probe P3**: trim-set parity (NBSP, BOM, U+2028, U+3000, U+180E, ZWSP, NEL around 40 × `x`) | Identical on both sides: `String.prototype.trim` is used by both, so there is one trim set |
+| **Mutation runs** (sed on the copy, then the targeted test, then restore) | M1 Zod name without `.trim()`, M2 Joi returns the untrimmed value, M3 Joi back to `.uri()`, M4 Zod back to `z.url()`, M5 Joi `trimEnd` only: **all killed by the differential property alone**. M6 `ruleOf` returns `issue.code`: killed (6 AT-US-002-04 loader tests). M7 credentials check dropped: killed (curated vectors only; correct, because both sides stay equal). **M8** Zod name `.min(1).max(40)` instead of the predicate: **survives the property** (Zod 4 counts code points, so the verdicts are equal; only the rule id differs). It is killed by 3 curated loader tests (R3-n2). M9 the post-sleep deadline check removed: killed. M10 `permanent` ignored: killed (5 tests) |
+| Not re-run (constraints) | type-aware `lint`, `typecheck`, the full `test:unit` (635 claimed), `test:coverage` (config 100 % lines / 97.46 % branches claimed), `build`. For these I relied on the author's gate table at `0e48a2a`. The gatekeeper re-runs them on the merge-main commit (TASK-003 is not yet in the branch) |
+
+### R3.2 Closure of round-2 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| **R2-m1** | **Closed** | `brand-rules.ts:44-83`: `brandNameLength` counts code points. `isBrandName` checks the trimmed value, 1..40. `isBrandUrl` accepts either `ROOT_PATH_PATTERN`, or a raw lower-case `http(s)://` URL with a non-`/?#` first authority character and RFC 3986 characters only (`%XX` well-formed); the check runs *before* WHATWG can trim, lower-case or encode anything. The value must then parse with a non-empty host and empty `username`/`password`, and be at most 2048 units (identical in every unit, because the accepted set is ASCII). Joi `Joi.string().custom(...)` (`schema.ts:137-146`) and Zod `.refine(...)` (`web-schema.ts:18-25`) both report `brand.name` / `brand.url`. `load-web-config.ts:15-18` maps a Zod `custom` issue's `params.rule`. `pickConfigured` drops `''`, so Joi's `string.empty` cannot surface. The two wrappers can therefore differ only in trimming and in the returned value, and the property checks both (M1/M2/M5). AT-US-002-04 now compares **whole issue arrays** (rule included) for 3 names and 3 URLs. Probes P2 and P3 found no divergence |
+| R2-n1 | **Closed** | The AST scanner (`brand-rules.test.ts:198-224`) covers static imports, re-exports, import-equals, `import()`, `require()` and non-literal specifiers. It skips `import type` / `export type` only; inline `{ type X }` imports still count, which is correct under `verbatimModuleSyntax: true`, because the import is kept as a side-effect import. JSDoc/`ImportType` nodes are correctly ignored. The probe fixture exercises every form plus comment and string decoys. Residual: R3-n3 |
+| R2-n2 | **Closed** | `guards.ts` doc reworded as requested |
+| R2-n3 | **Closed** | `PERMANENT_ERROR_CODES` (3 `SECRET_FILE_*` codes plus `EACCES`, `EPERM`) is matched by code, so there is no adapter import. A permanent failure is marked as such and returned without sleeping (`secret-refs.ts:228`). After the sleep, `if (plan.deadline.aborted) return first` (`:234`). The changed expectation in the old "retry after the deadline" test, from `ref.timeout` to `ref.providerError (Error)`, is exactly the requested behaviour, and M9 proves the test detects removal of the line. Timer ordering is deterministic: the 200 ms deadline timer expires before the 260 ms injected sleep. `EIO` is still retried. The `errno` locator in the classification test now expects 1 call (EACCES is permanent), which is consistent |
+| R2-n4 | **Closed** | `SLACK_MS = 500`. Masking analysis: (a) the late provider now settles at **5 000 ms** (with `unref`), so a missing cut-off still shows up as about 5 s against a 550 ms bound; (b) a missing deadline gives about 5 s against 560 ms; (c) a missing per-attempt timeout is still caught by "[m1] retries a timeout once" (timeout 30 ms, default 4.5 s deadline) and by call counts. The only regressions the wider bound can hide are cut-offs that happen but 100–500 ms late, which is acceptable. The file-provider abort test now aborts after `readFile` has started. That pins the abort-during-read path, which is the one under test (the pre-aborted path is tested just above). If `readFile` were never called, the test would fail by Jest timeout rather than pass |
+
+### R3.3 D-TASK005-03 behaviour rulings
+
+| Item | Ruling |
+|---|---|
+| (1) Punycode required; credentials refused; non-RFC-3986 characters refused; one validator for `VITE_API_BASE_URL` / `VITE_FEATURE_FLAGS_ENDPOINT` | **Accept.** Refusing a lower-case-insensitive scheme (`HTTPS://`) is stricter than RFC 3986 §3.1 but deterministic, and it is documented. Invalid punycode (`xn--a`) passes because Node's URL is lenient. Both sides run in Node at build time, so parity holds; the only effect is a broken logo, which is an operator typo (INFO) |
+| (2) pg query allow-list, TCP host, no `%` in host | **Accept.** `ssl` is now refused by the allow-list, so the old explicit `!has('ssl')` check is subsumed. `postgresql:` is a non-special scheme, so WHATWG keeps `%2F` visible in `hostname` and the `%` test is effective (tested). Multi-host and bad-port URLs fail to parse and are refused (fail closed) |
+| (3) Valkey raw `rediss://`, non-empty host, no `?`/`#` | **Accept.** It mirrors ioredis's raw-prefix TLS decision. An upper-case `REDISS://` is refused, which fails closed |
+| (4) Transport guard skips keys the schema rejected | **Accept.** `configObjectSchema` includes every `CONFIG_KEY_NAMES` key for every service, so `key in values` is false only for absent or schema-rejected keys, and startup still fails on the schema issue |
+| (5) Permanent errors not retried; deadline during sleep keeps the first diagnosis | **Accept** (see R2-n3). The injected `sleep` is not abortable, but the pre-sleep fit check makes overrun possible only with a misbehaving injected sleep |
+| (6) `APP_ENV=local` or `test` refused with ECS metadata variables present | **Accept.** It checks presence only, the value never appears in the output (tested), empty counts as absent, and it does not affect hardened environments. ECS on EC2 agents inject `ECS_CONTAINER_METADATA_URI_V4`, so the signal is present on the target platform |
+| PR3-SEC-15 `errorClassName` | **Accept.** It reads own data descriptors only (no getter runs), and Error/Exception-shaped names only. Residual: a letters-only data value embedded in a dynamically named class (`L<letters>Error`) would pass. The property cannot generate that case because hex values always contain digits, but the threat (a provider building class names from secrets) is not realistic |
+
+### R3.4 New findings
+
+| ID | Sev | File:line | Problem | Why it matters | Fix |
+|---|---|---|---|---|---|
+| R3-n1 | NIT | `web/load-web-config.ts:32` vs `load-config.ts:26` | A **missing** required key yields `{code:'missing', rule:'invalid_type'}` on the web side and `{code:'missing'}` on the backend (Probe P2, `BRAND_NAME=''`). This is pre-existing and outside the AT's "invalid" wording | Another small shape drift in the same "rejected identically" surface | Omit `rule` when `code === 'missing'` in the web loader. Add `''` and unset `BRAND_NAME` to the AT-US-002-04 whole-array test |
+| R3-n2 | NIT | `brand-rules.test.ts:23-34` | The differential `Verdict` carries the accepted flag and the value, not the rule id. Mutant M8 (the Zod name back to native `.min/.max`) passes the property and is caught only by 3 curated loader vectors | The property should be the guard that cannot be sidestepped by vector choice | Add `rule` to the rejected verdict: Joi `error.details[0].context.rule ?? type`, Zod via the same `ruleOf` (export it from `load-web-config.ts` or move it next to the schema) |
+| R3-n3 | NIT | `brand-rules.test.ts:222,242-249` | The backend graph follows only relative specifiers and **deny-lists** zod. A package self-reference (`import … from '@platform/config/web'`, resolvable through `exports`), a `#imports` alias, or `process.getBuiltinModule('node:module')` would bring Zod into the backend graph undetected. `import-x/no-self-import` does not cover self-reference by package name | A realistic drift path: someone reuses `BRAND_VALUE_SCHEMAS` in `schema.ts` | Change to an allow-list: externals ⊆ {`joi`, `node:crypto`, `node:fs`, `node:fs/promises`, `node:inspector`, `node:path`, `node:timers/promises`, `node:util`} (today's exact set), so any `@platform/*`, `#…` or new package fails |
+| R3-n4 | NIT | `brand-rules.ts:51-54`; `brand-rules.test.ts:54` | `isBrandName` accepts C0/C1 controls (`\n`, NUL), bidi overrides (U+202E), lone surrogates (a curated vector **pins** `'\uD800'` as accepted) and invisible-only names (ZWSP). This is pre-existing and parity holds | BRAND_NAME reaches the e-mail From display name and Subject (backend) and the document title. A newline or bidi override there is a header and spoofing hygiene problem, even though the value is operator-set | Add one shared check in the predicate, e.g. refuse `/[\p{Cc}\p{Cs}\u200B-\u200F\u202A-\u202E\u2066-\u2069]/u` plus `!value.isWellFormed()`, and flip the lone-surrogate vector. Fix in-PR (about 3 lines) or route to TASK-022 / the e-mail template task |
+
+### R3.5 Security flags (for security-analyst)
+- R3-n4: control, bidi and lone-surrogate characters in BRAND_NAME, which flows into e-mail headers.
+- `isBrandUrl` accepts loopback, hex/decimal IPv4 and `http:` absolute URLs in hardened environments (the round-1 n5 mixed-content point is still open). This is harmless while only browsers fetch these URLs. If any backend job ever fetches `BRAND_*` URLs (for example, to inline a logo in e-mail), add host restrictions there (SSRF).
+- `errorClassName` residual (letters-only data in a class name): INFO, not exploitable in practice.
+
+### R3.6 Merge conditions
+1. Gatekeeper re-runs type-aware `lint`, `typecheck`, `test:unit`, `test:coverage` and `build` on the merge-main commit that brings in TASK-003 (`5964ccc`). Run `keys.test.ts` "tooling key set is exactly the TASK-003 names" and the pool-defaults test there.
+2. R3-n1…n4 are optional in-PR. Otherwise the orchestrator routes them (R3-n3 to TASK-015 or TASK-022, R3-n1/n2/n4 to TASK-022).
+3. Round-2 routings are unchanged: R2-m2 → TASK-014; PR3-SEC-13/14 → TASK-014/016; the `@platform/config/web` lint carve-out → TASK-022 (D-ORCH-007 item 3).
+
+### R3.7 Good patterns worth keeping
+- The predicates are applied to the **raw** string before any WHATWG normalisation, and the parser is used only as a structural second check.
+- The rule id travels in Joi `context.rule` and Zod `params.rule` and is mapped once per loader, so whole issue arrays can be compared.
+- The differential property also checks the *value* (trim output), not just the verdict. Five of six wrapper mutants die on the property alone.
+- Permanent failures are classified by code rather than by importing the adapter, so the port stays dependency-free.
+- The late provider settles at 5 s when the slack is widened, which keeps the cut-off proof meaningful.
+
+## Round 4 — merge-main delta (head 3e390e0)
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Merge 4cfd055 is a clean union of 0e48a2a and origin/main @376ceca. Only package-lock.json changed on both
+         sides, and the lock delta vs main is exactly packages/config +zod ^4.6.7. Test 3e390e0 is sound: deterministic,
+         prints no secret, and allowed by the layering rules. No new BLOCKER/MAJOR; the round-3 verdict carries forward.
+```
+
+### R4.1 Verification (by SHA, read-only, in the main checkout after `git fetch`)
+- **Merge union.** Merge-base `44d6c2e`. The only file changed on both sides is `package-lock.json`.
+  - At `4cfd055`, every branch-only path is byte-identical to `0e48a2a`.
+  - At `4cfd055`, every main-only path is byte-identical to `376ceca`.
+  - Nothing in the merge differs from both parents except the lock.
+  - Main's content (TASK-003 `5964ccc`) was already reviewed in PR-0005.
+- **Lock.** `git diff origin/main 3e390e0 -- package-lock.json` is one hunk: `packages/config` dependencies `joi` → `joi` plus `zod ^4.6.7`. This is identical to the branch's own lock delta vs the merge-base, so no transitive or version drift came in.
+- **`4cfd055..3e390e0`.** One file, `tools/config/compose-env.test.ts`, with 9 lines added. There are no production changes.
+- **Test soundness.**
+  - **Keys.** It covers the same keys that `tools/db/bootstrap.ts:271` reads (`BOOTSTRAP_MIGRATOR_PASSWORD` and `BOOTSTRAP_APP_PASSWORD`). It calls the same `scramSha256Verifier` that bootstrap calls (`bootstrap.ts:107`).
+  - **Missing key.** A missing key becomes `''`, which fails with the key name.
+  - **No secret in failure output.** The length assertion prints `{key, long}` only. `ScramPasswordError` messages never contain the password (`scram.ts` doc comment and messages).
+  - **Determinism.** The salt is random, but the assertion depends only on length and charset, so the result is deterministic. The cost is 2 × PBKDF2 at 4096 iterations, which is negligible.
+  - **Values.** I checked the compose.env values without printing them: 37 and 32 characters, both printable ASCII.
+- **Layering.** `tools/config/**` is category `tools` and `tools/db/**` is `tools-db` (`eslint.config.mjs:123-124`). No policy restricts tools → tools-db, and `scram.ts` imports only `node:crypto`, so the Prisma/SQL-driver rules don't apply. The test sits in the same `tools` tree as the code it tests.
+
+### R4.2 Findings
+| ID | Sev | File:line | Problem | Fix |
+|---|---|---|---|---|
+| R4-n1 | NIT | `tools/config/compose-env.test.ts:58-62` | If the printable-ASCII rule fails, `not.toThrow()` reports the error but not which of the two keys failed, because both are checked in one loop | Use `it.each(['BOOTSTRAP_MIGRATOR_PASSWORD','BOOTSTRAP_APP_PASSWORD'])`, or label the second assertion `{key, ok}` like the first. Optionally pass a fixed salt so it is fully deterministic |
+
+### R4.3 Merge conditions
+- R3.6 still applies. The gatekeeper re-runs the gate on `3e390e0`. The PR comment reports it green, but I did not re-run it here (no npm ci/build in this delta, per the brief).
+- `gh pr view 3` shows **no status checks** on head `3e390e0`. Merge needs passing CI (CLAUDE.md §5), so confirm the fast-lane workflow has run on this head before merging.

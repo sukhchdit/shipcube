@@ -113,7 +113,7 @@ Feature: Document versioning
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-220, EPIC-06
 - **Linked REQs:** REQ-DOC-002
 - **As a** customer **I want** the label in the size my printer needs **so that** I can print it first time.
-- **Notes:** A4 for non-US/CA origins, Letter for US/CA origins, plus 4x6 inches. COND-SANDBOX-DEMO: real labels from the DHL, FedEx and UPS sandboxes.
+- **Notes:** A4 for non-US/CA origins, Letter for US/CA origins, plus 4x6 inches. COND-SANDBOX-DEMO: real labels from the DHL, FedEx and UPS sandboxes. UPS (ADR-0010 am. 11, D-ARCH-062): the create call returns GIF/ZPL only, so the adapter declares `labelFormats = [PDF_4X6, ZPL]` and the saga's document step obtains the PDF through the optional `recoverLabel` operation (official Label Recovery API; retry-only, never a second `createShipment`); the GIF is kept only as a raw-payload `$blob`, never offered as a document; "Carrier returns one format" therefore holds for UPS (4x6 only). Unverified in the CIE sandbox until COND-SANDBOX-DEMO (R-ARCH-25, A-106).
 
 #### Acceptance criteria
 ```gherkin
@@ -134,6 +134,16 @@ Feature: Label formats
   Scenario: Carrier returns one format
     Given the carrier returns only 4x6
     Then only 4x6 is stored and offered
+
+  Scenario: Offered format recovered after creation
+    Given an adapter whose createShipment returns no PDF and whose capabilities() declares recoverLabel=true and labelFormats "PDF_4X6" and "ZPL"
+    When the booking saga reaches the document step
+    Then recoverLabel is called once for "PDF_4X6" and the 4x6 PDF is stored and offered
+    And no raster image is stored as a document and createShipment is not called again
+
+  Scenario: Label recovery fails
+    Given recoverLabel fails on every attempt
+    Then the shipment stays BOOKED with documents pending, the document step retries per the saga rules and an operator alert is raised
 
   Scenario: Format choice on confirmation page and shipment detail
     When the customer picks "A4" and presses Download
@@ -394,6 +404,12 @@ Feature: Void label
   Scenario: Void failure keeps the label usable
     Given Mock "fail=void"
     Then the label stays CURRENT and the shipment goes to EXCEPTION
+
+  Scenario: Carrier cannot void, Platform-side void
+    Given a shipment being cancelled on an adapter whose capabilities() declares operations.cancelShipment=false
+    When the cancellation records carrier_void "UNSUPPORTED"
+    Then the label is VOIDED at once with the file and metadata retained, the invoice stays CURRENT and the shipment does not enter EXCEPTION
+    And the audit entry on "document" records the reason "CAPABILITY_NOT_SUPPORTED"
 
   Scenario: Download of a voided label
     When the customer requests the voided label

@@ -25,6 +25,9 @@
     },
     {
       "path": "../../packages/carriers"
+    },
+    {
+      "path": "../api"
     }
   ]
 }

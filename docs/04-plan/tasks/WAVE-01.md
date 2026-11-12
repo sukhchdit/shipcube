@@ -96,26 +96,34 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-061 **DC** (M0 Must) Organisation types and the single operator organisation<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-001, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
-| Depends on | TASK-013, TASK-016, TASK-029, TASK-032 |
+| Depends on | TASK-013, TASK-016, TASK-024, TASK-029, TASK-032 |
 | Batch · locks | 1.1 · mod-organisations |
 | Branch | `feat/TASK-037-organisation-types-single-operator-organisation` |
 | Priority | Must · demo-critical |
 
 **Files / modules**
-- prisma/schema/organisations.prisma + migration (organisations, memberships; RLS from manifest)
+- prisma/schema/organisations.prisma + migration (organisations, memberships; RLS rendered from the manifest, pasted verbatim)
+- tools/db/table-classes/organisations.json (organisations TENANT policySet dr-a14-organisations definerRead; memberships TENANT policySet dr-a14-memberships definerRead; invitations TENANT definerRead)
+- migration: prisma/sql/function-templates/app-is-operator.sql applied verbatim after both RLS blocks (GRANT EXECUTE ON platform.app_actor_id() TO platform_definer before SET ROLE)
+- prisma/tests/catalog adaptations (plantProbe, C11 helper expectation, C3 derived set)
 - apps/api/src/modules/organisations/{service,repository,policies,events,index}.ts
 
 **Acceptance tests to write**
 - All US-061 and US-062 scenarios
+- PREREQUISITES CHECK before the first CREATE POLICY migration (D-ARCH-072, D-ARCH-074): TASK-024 has merged the DR-A14 templates and `policySet`, rule 9 renderer equality, the C3 derived set and the C11 converse; PR #11 (TASK-016) has merged the rule 16 operator-atom exemption (PR11-SEC-03 item 1), rule 11 session-form-only, rule 15 SET-ROLE-only and rule 9 grant-after-FORCE (PR11-SEC-07) — if any is missing this task reports BLOCKED naming the item; no local loosening of the linter, no inline disable, no hand-written policy
+- DR-A14 APPLICATION (data-model §4.3 as amended 2026-11-13; D-ARCH-072): the `organisations` and `memberships` RLS blocks are rendered by `tools/db/render-rls.ts` from the manifest entries (`policySet`) and pasted verbatim — `p_organisations__active` / `__member_read` (positive list `IN ('ACTIVE','SUSPENDED')`) / `__operator` / `__definer_read`, `p_memberships__tenant` / `__own_read` / `__operator` / `__definer_read`; migration order follows the prefix-safety principle (data-model §8.3): CREATE TABLE → ENABLE + FORCE → policies → GRANT (rule 9 b), then the `app_is_operator()` template inside one `SET ROLE platform_definer; … RESET ROLE;` block after both definer-read policies, preceded by `GRANT EXECUTE ON FUNCTION platform.app_actor_id() TO platform_definer` as the migrator (D-TASK016-01 decision 3 accepted, D-ARCH-071); `down.sql` is prefix-idempotent (rule 17) and the up-down-up prefix check passes
+- Catalog adaptation (PR #11 `plantProbe`, C11, C3): the probe no longer plants `memberships`/`organisations` nor renders `app_is_operator()` (the real objects exist); C11 expects `platform.app_actor_id()` EXECUTE for `platform_app`, `platform_migrator` AND `platform_definer`, and `platform.app_is_operator()` owned by `platform_definer`, SECURITY DEFINER, fixed search_path, EXECUTE for `platform_app` only; the C3 derived set includes the DR-A14 policies; `memberships` policies contain no subquery (recursion invariant); C2 special-cases `organisations` on `id`; C12 context probes (org A sees its organisation and memberships only; an actor sees own memberships across orgs; a customer with `app.actor_scope = OPERATOR` forced still sees nothing of org B because `app_is_operator()` is false)
+- MERGE CONDITION (PR11-SEC-10; PR #11 security review §5 ruling 5; D-ARCH-072): security-analyst signs off the rendered DR-A14 policies in the change-scoped review — positive status lists, exact EXISTS shapes, no context value under coalesce/NOT/IS DISTINCT FROM, recursion invariant, grant order — before merge
 - AT-US-061-01 … AT-US-061-05: all 5 scenarios of US-061, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-062-01 … AT-US-062-06: all 6 scenarios of US-062, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
+- memberships.user_id references users(id), which TASK-049 creates later (identity.prisma, lock identity-core): senior-developer decides at dispatch whether this task also creates the minimal `users` table of data-model §3.1 with its `dr-a14-users` policy set (then it takes lock identity-core for this batch) or TASK-049 adds the FK as NOT VALID + VALIDATE (rule 6); the decision is recorded in DECISIONS.md and the users policy set ships with whichever task creates the table
 - Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
@@ -273,7 +281,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-011 **DC** (M0 Must) Transactional outbox and at-least-once relay |
 | REQs | REQ-PLAT-016, REQ-PLAT-017 |
 | NFRs | NFR-RES-004, NFR-SCALE-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR2-SEC-05, PR11-SEC-05, D-ARCH-074 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-039, TASK-016 |
@@ -289,6 +297,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-011 scenarios (event committed with the business row; relay crash -> redelivery, consumers idempotent)
+- PR2-SEC-05 addendum / PR11-SEC-05 item 2 (ADR-0005 am. 10 item 2; D-ARCH-074): `apps/api/src/platform/outbox/writer.ts` takes the `TenantDb` of the business transaction and nothing else — no own PrismaClient, no `pg`/`pg-pool` import (negative lint fixture for this exact file); the worker relay reads `outbox_events` (SYSTEM, no RLS; `SKIP LOCKED` batches via $queryRaw with bound parameters) through the worker runtime runner under the SYSTEM actor context, never through a second pool or the root client
 - AT-US-011-01 … AT-US-011-06: all 6 scenarios of US-011, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -453,7 +462,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-015 **DC** (M0 Must) Register an account with a compliant password |
 | REQs | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049 |
+| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-037, TASK-041, TASK-029, TASK-043, TASK-040 |
@@ -470,6 +479,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-015 API scenarios (UI in the customer auth screens task)
 - SEC-TC-46: 6th distinct address from one IP within an hour -> 429 + registration_probe; 4th registration for one identifier -> 429; identical responses for new/existing (timing <= 100 ms)
 - SEC-TC-55 (pre-hash part): bcrypt input is base64(HMAC(pepper, pw)), 44 chars
+- ADR-0023 am. J item 4 and D-ARCH-042 (ADR-0006 am. 16, ADR-0025 PR1-SEC amendment): password hashing sits behind a `PasswordHasher` port (`hash`, `verify`, `needsRehash`; pre-hash, cost floor, dummy-hash constant-time compare). Its single implementation module is the only importer of `bcrypt`/`bcryptjs`, which the TASK-002 import-confinement lint rule enforces. `bcrypt@6.0.0` stays under its `tools/ci/maintenance-exceptions.json` entry (expires 2027-05-11; exit = `bcryptjs` in a `worker_threads` pool behind the same port)
+- DR-A14 `users` policy set (data-model §4.3 as amended 2026-11-13; D-ARCH-072) — unless TASK-037 created `users` first (its dod): `users` is USER_OWNED with `policySet: dr-a14-users` in `tools/db/table-classes/identity.json` (definerRead); the block is rendered by `tools/db/render-rls.ts` and pasted verbatim in prefix-safe order (CREATE TABLE → ENABLE + FORCE → `p_users__own` keyed on `id = platform.app_actor_id()`, `p_users__org_member_read` with the positive list `m.status IN ('INVITED','ACTIVE','SUSPENDED')`, `p_users__operator`, `p_users__definer_read` → GRANT); the `memberships.user_id` FK is in place after this migration (NOT VALID + VALIDATE if added here, rule 6); `down.sql` prefix-idempotent (rule 17); C3 derived set and C12 probes cover `users` (a member of org A reads the rows of fellow INVITED/ACTIVE/SUSPENDED members and never a REMOVED one or a stranger); MERGE CONDITION: security-analyst sign-off on the rendered policies (PR11-SEC-10)
 - AT-US-015-01 … AT-US-015-12: all 12 scenarios of US-015, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -513,7 +524,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-080 **DC** (M0 Must) Guest-capable tables and atomic claim |
 | REQs | REQ-RLS-013 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | SPK-03 |
+| Spikes / security / decisions | SPK-03, PR7-SEC-04, PR7-SEC-13 |
 | Specialist · model | database-engineer · opus |
 | Complexity | S |
 | Depends on | TASK-016 |
@@ -525,9 +536,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - prisma/sql/policy-templates/guest-capable.sql
 - GUEST_CAPABLE class support in render-rls.ts and tools/db/table-classes/*.json
 - prisma/tests/rls/guest-claim.int.test.ts
+- platform.guest_capable_guard() BEFORE UPDATE trigger (migrator-owned, not SECURITY DEFINER, SET search_path = pg_catalog, pg_temp) rendered with the policies
 
 **Acceptance tests to write**
 - All US-080 scenarios
+- ADR-0005 am. 10 item 11 / data-model §4.3 as widened 2026-11-12 (PR7-SEC-04, PR7-SEC-12 d; D-ARCH-065): the trigger raises GUEST_DECLAIM_FORBIDDEN (23514) when OLD.org_id IS NOT NULL AND NEW.org_id IS DISTINCT FROM OLD.org_id, and when NEW.guest_token_hash IS NOT NULL AND NEW.guest_token_hash IS DISTINCT FROM OLD.guest_token_hash; the four forbidden transitions (org -> NULL, org A -> org B, NULL -> hash, hash H1 -> H2) are each tested AS THE SUPERUSER so RLS is bypassed and the trigger alone is proven; the legitimate claim (NULL -> org with hash -> NULL) succeeds under the claim context; app.guest_token_hash is non-empty only on routes declaring `tenancy: guest` and on the claim operation (every other route binds the empty string)
+- ADR-0005 am. 10 item 15 (PR7-SEC-13): the claim repository uses `expectAffected(result, 1)` for its state-transition UPDATE and the unit test shows that 0 affected rows raises (the service then re-reads -> 200 / 409 per ADR-0005 §Guest rows)
 - AT-US-080-01 … AT-US-080-07: all 7 scenarios of US-080, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -775,7 +789,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-068 **DC** (M0 Must) Request pipeline order, 401/403 outcomes and live permission resolution<br>US-076 **DC** (M0 Must) Operator cross-tenant scope |
 | REQs | REQ-RBAC-006, REQ-RBAC-008, REQ-RLS-006 |
 | NFRs | NFR-SEC-011, NFR-TENANT-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR8-SEC-07 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-056, TASK-020, TASK-013 |
@@ -784,10 +798,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Priority | Must · demo-critical |
 
 **Files / modules**
-- apps/api/src/platform/authz/{authorise-mw.ts, permission-cache.ts, operator-scope.ts}
+- apps/api/src/platform/authz/{authorise-mw.ts, permission-cache.ts, operator-scope.ts, effective-permissions.repository.ts}
 
 **Acceptance tests to write**
 - All US-068 and US-076 scenarios
+- PR8-SEC-07 (ADR-0008 am. 3 item 5, D-ARCH-069): the effective-permission query joins organisations.type and keeps only roles whose scope matches the organisation type, requires an ACTIVE membership in the token active organisation and revoked_at IS NULL (in addition to the REQ-ORG-004 trigger of TASK-037); where the pure `effectivePermissions(roleKeys, roles)` helper is used it receives `expectedScope` and throws RoleScopeMismatchError on a mixed-scope set; integration test: a membership row linking an OPERATOR role inside a BUSINESS_CUSTOMER organisation (inserted as the migrator with the trigger disabled in a rolled-back transaction) yields no audit:read for that actor
 - AT-US-068-01 … AT-US-068-06: all 6 scenarios of US-068, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-076-01 … AT-US-076-04: all 4 scenarios of US-076, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

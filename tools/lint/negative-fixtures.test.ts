@@ -72,6 +72,12 @@ const LAYERING: readonly Violation[] = [
     'routes map HTTP paths to controllers only',
   ],
   [
+    "routes import another module's public index.ts (R2-n7: routes -> controller only)",
+    `layering/routes-layer/${API}/quotes/routes/bad-routes-other-module.ts`,
+    BOUNDARIES,
+    'a route must not import a module index.ts',
+  ],
+  [
     'controller imports routes',
     `layering/routes-layer/${API}/orders/controller/bad-controller-routes.ts`,
     BOUNDARIES,
@@ -122,7 +128,7 @@ const LAYERING: readonly Violation[] = [
   ],
 ];
 
-const ANY_SUPPRESSION: readonly Violation[] = ['bad-next-line', 'bad-block', 'bad-blanket'].map((name): Violation => [
+const ANY_SUPPRESSION: readonly Violation[] = ['bad-next-line', 'bad-block', 'bad-blanket', 'bad-no-task-id'].map((name): Violation => [
   `[AT-US-001-05] Unjustified any suppression is rejected (${name})`,
   `rules/any-justification/packages/pricing/src/${name}.ts`,
   'platform/any-justification',
@@ -346,6 +352,22 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     expectOnly(findingsOf(report.probes, path), BOUNDARIES, 'import only @platform/shared and @platform/ui');
   });
 
+  it('[PR #2 m8] allowed: apps/worker imports @platform/api/runtime (package exports, resolved)', () => {
+    expect(findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts')).toEqual([]);
+  });
+
+  it('[PR #2 m8] apps/worker cannot reach a non-exported @platform/api subpath', () => {
+    expect(findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-bad-api-subpath.ts').map((f) => f.ruleId)).toContain(
+      'import-x/no-unresolved',
+    );
+  });
+
+  it('[PR #2 m8] apps/worker importing apps/api platform internals by path is a layering violation', () => {
+    const findings = findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-bad-api-relative.ts');
+    const layering = findings.filter((finding) => finding.ruleId === BOUNDARIES);
+    expect(layering.map((finding) => finding.message).join('\n')).toContain('only through @platform/api/runtime');
+  });
+
   it('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {
     expect(findingsOf(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts')).toEqual([]);
   });
@@ -371,7 +393,7 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.resolver['@platform/shared']).toBe('packages/shared/src/index.ts');
   });
 
-  it('`npm run lint` generates route types, then runs ESLint and Stylelint with --max-warnings 0', () => {
+  it('`npm run lint` generates route types, runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01)', () => {
     const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     const steps = (scripts['lint'] ?? '').split('&&').map((step) => step.trim());
     // typegen first: type-aware rules must resolve the git-ignored ./+types on a clean checkout, and npm pre-hooks are
@@ -380,6 +402,7 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
       'npm run typegen',
       expect.stringMatching(/^eslint \. .*--max-warnings 0/u),
       expect.stringMatching(/^stylelint .*--max-warnings 0/u),
+      'node tools/lint/check-suppressions.mjs',
     ]);
     // No --allow-empty-input: Stylelint matching no CSS file fails instead of reading as clean (PR2-SEC-03).
     expect(steps[2]).not.toContain('--allow-empty-input');
