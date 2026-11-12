@@ -72,6 +72,12 @@ const LAYERING: readonly Violation[] = [
     'routes map HTTP paths to controllers only',
   ],
   [
+    "routes import another module's public index.ts (R2-n7: routes -> controller only)",
+    `layering/routes-layer/${API}/quotes/routes/bad-routes-other-module.ts`,
+    BOUNDARIES,
+    'a route must not import a module index.ts',
+  ],
+  [
     'controller imports routes',
     `layering/routes-layer/${API}/orders/controller/bad-controller-routes.ts`,
     BOUNDARIES,
@@ -344,6 +350,22 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     ['apps/admin imports @platform/pricing', 'apps/admin/app/routes/lint-probe-bad-pricing.ts'],
   ])('%s -> "import only @platform/shared and @platform/ui"', (_title, path) => {
     expectOnly(findingsOf(report.probes, path), BOUNDARIES, 'import only @platform/shared and @platform/ui');
+  });
+
+  it('[PR #2 m8] allowed: apps/worker imports @platform/api/runtime (package exports, resolved)', () => {
+    expect(findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-ok-api-runtime.ts')).toEqual([]);
+  });
+
+  it('[PR #2 m8] apps/worker cannot reach a non-exported @platform/api subpath', () => {
+    expect(findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-bad-api-subpath.ts').map((f) => f.ruleId)).toContain(
+      'import-x/no-unresolved',
+    );
+  });
+
+  it('[PR #2 m8] apps/worker importing apps/api platform internals by path is a layering violation', () => {
+    const findings = findingsOf(report.probes, 'apps/worker/src/jobs/lint-probe-bad-api-relative.ts');
+    const layering = findings.filter((finding) => finding.ruleId === BOUNDARIES);
+    expect(layering.map((finding) => finding.message).join('\n')).toContain('only through @platform/api/runtime');
   });
 
   it('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {

@@ -83,6 +83,17 @@ describe('process start-up edge (US-002, NFR-OPS-005)', () => {
     expect(stderr).not.toContain('abc');
   });
 
+  it('[PR-0009 R2-m2] a local DATABASE_URL query parameter the runtime would refuse exits with EX_CONFIG, naming the key only', () => {
+    const io = captureIo();
+    const secret = `v${randomBytes(16).toString('hex')}`;
+    const env = { ...createTestEnv({ appEnv: 'local' }), DATABASE_URL: `postgresql://app:${secret}@db:5432/platform?application_name=x` };
+    expect(() => loadConfigOrExit('api', { env, cwd: tempDir(), io })).toThrow(new ExitCalled(CONFIG_EXIT_CODE));
+    const stderr = io.written.join('');
+    expect(stderr).toContain('DATABASE_URL: invalid: databaseUrl.queryParameter');
+    expect(stderr).not.toContain(secret);
+    expect(stderr).not.toContain('application_name');
+  });
+
   const runtime = (execArgv: readonly string[], inspectorActive = false): RuntimeProbe => ({
     execArgv,
     inspectorActive: () => inspectorActive,

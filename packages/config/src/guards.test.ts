@@ -1,6 +1,24 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { isInspectorOption, localAppEnvOnEcsGuard, nodeOptionTokens, toolingKeyGuard } from './guards.js';
+import { isInspectorOption, localAppEnvOnEcsGuard, nodeOptionTokens, tlsVerificationGuard, toolingKeyGuard } from './guards.js';
+
+describe('NODE_TLS_REJECT_UNAUTHORIZED guard (PR9-SEC-04)', () => {
+  const refused = [{ key: 'NODE_TLS_REJECT_UNAUTHORIZED', code: 'forbidden-in-environment', rule: 'tls.rejectUnauthorized' }];
+
+  it.each(['staging', 'production'] as const)('refuses an override in %s @security', (appEnv) => {
+    expect(tlsVerificationGuard({ raw: {}, values: {}, appEnv, tlsVerificationOverridden: true })).toEqual(refused);
+  });
+
+  it('accepts hardened environments without an override (unset, empty or 1) and local/test or unknown with one', () => {
+    for (const appEnv of ['staging', 'production'] as const) {
+      expect(tlsVerificationGuard({ raw: {}, values: {}, appEnv })).toEqual([]);
+      expect(tlsVerificationGuard({ raw: {}, values: {}, appEnv, tlsVerificationOverridden: false })).toEqual([]);
+    }
+    for (const appEnv of ['local', 'test', undefined] as const) {
+      expect(tlsVerificationGuard({ raw: {}, values: {}, appEnv, tlsVerificationOverridden: true })).toEqual([]);
+    }
+  });
+});
 
 describe('APP_ENV=local|test on ECS (PR3-SEC-03 option (b), D-ORCH-007)', () => {
   it.each(['local', 'test'] as const)('refuses APP_ENV=%s when an ECS task-metadata variable is present', (appEnv) => {
