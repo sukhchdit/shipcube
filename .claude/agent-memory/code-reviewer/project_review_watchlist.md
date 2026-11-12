@@ -56,17 +56,18 @@ PR #5 (TASK-003) r2 at 4574a14 was APPROVED_WITH_NITS (2026-11-12). r3 merge-mai
   - D-ARCH-049's rule-12 "precision" sentence is superseded by deny-by-default.
   - ADR-0018 register lacks the `BOOTSTRAP_*_PASSWORD_FILE` exception.
 
-PR #3 (TASK-005) r2 at 875409d was APPROVED_WITH_NITS (2026-11-12). PR #2 was not in the branch, so type-aware lint must pass on the merge-main commit. Routed:
-- In-PR or TASK-022: R2-m1, Joi/Zod BRAND_* parity diverges outside the curated vectors; needs shared predicates.
+PR #3 (TASK-005) r3 at 0e48a2a was APPROVED_WITH_NITS (2026-11-12). R2-m1 and R2-n1..n4 are closed (shared predicates, AST scan, permanent errors, slack). Gatekeeper must re-run gates on the merge-main commit with TASK-003. New NITs, optional in-PR, else TASK-022:
+  - r4 merge-main delta at 3e390e0 (2026-11-12) was APPROVED_WITH_NITS. R4-n1: the compose-env SCRAM test loop does not name the failing key. gh showed no CI checks on that head; confirm CI before merge.
+  - R3-n1: the web `missing` issue carries `rule: invalid_type`; the backend has none.
+  - R3-n2: the differential `Verdict` lacks the rule id (mutant M8 survives the property).
+  - R3-n3: the backend import graph deny-lists zod and does not follow `@platform/config/web` self-reference; switch to an allow-list.
+  - R3-n4: BRAND_NAME accepts controls, bidi and lone surrogates (it reaches e-mail headers).
+Still open from r2:
 - TASK-014 / migrate-job owner:
   - R2-m2: tooling keys get no placeholder or verify-full check in the tools themselves.
   - The inspector guard only detects; a Checkov or task-def NODE_OPTIONS lint is needed.
 - TASK-006/014: file provider `O_NOFOLLOW` and TOCTOU; m4 `loadRuntimeConfigOrExit`; m5 holder enforcement.
 - Crypto tasks: m6 local key derivation.
-- Nits:
-  - R2-n1: import-graph regex misses dynamic `import()`.
-  - R2-n3: permanent `SecretFileError` failures are retried.
-  - R2-n4: tight timing bounds in tests.
 
 **Why:** these were deferred as tracked conditions, so they can slip silently into later PRs.
 

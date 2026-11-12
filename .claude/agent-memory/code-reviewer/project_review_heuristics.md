@@ -13,6 +13,8 @@ These patterns were confirmed in PR #3 (TASK-005, 2026-11-12) with small scratch
   - Sharing only *limits* is not enough. Joi `.uri()` (an RFC 3986 regex) and Zod `z.url()` (WHATWG `URL`: trims, lower-cases the scheme) disagree on `HTTPS://`, spaces, `http:host`, `"<{|^`, IDN hosts and ports > 65535.
   - Joi `.max()` counts UTF-16 units; Zod 4 counts code points (`'😀'.repeat(21)` passes Zod max 40).
   - Run a differential script with adversarial vectors (PR #3 r2: 16 of 30 diverged). Ask for shared *predicates* plus a fast-check differential property.
+  - Once predicates are shared (PR #3 r3), only the wrappers can drift: trimming, returned value, rule id, and the shape of `missing` issues. Check that the property compares the rule id as well as the verdict. Run a loader-level differential on whole issue arrays (20k cases in about 1 min) and sed-mutate each wrapper.
+- **Import-graph tests** that follow only `./` specifiers and deny-list a package miss package self-reference (`@platform/x/sub` via `exports`) and `#imports` aliases. Ask for an allow-list of externals.
 - **Lint-driven merge-main fixes** (new TASK-002 rules) usually do three things:
   - drop casts (`no-unnecessary-type-assertion`). Check whether the target type accepts `undefined`; if so, the guarantee now lives only in a guard in another function (PR #5 R3-n2).
   - turn `async` fakes into `Promise`-returning ones (`require-await`). Check that a throw still becomes a rejection and that callers await.
