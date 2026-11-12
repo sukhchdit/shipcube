@@ -513,6 +513,29 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     );
   });
 
+  it.each([
+    ['staging', '0'],
+    ['production', '0'],
+    ['staging', 'false'],
+  ] as const)('[PR9-SEC-04] APP_ENV=%s refuses NODE_TLS_REJECT_UNAUTHORIZED=%s by name only @security', (appEnv, value) => {
+    const error = rejection(() => loadConfig({ ...createTestEnv({ appEnv }), NODE_TLS_REJECT_UNAUTHORIZED: value }, { service: 'api' }));
+    expect(error.issues).toEqual([
+      { key: 'NODE_TLS_REJECT_UNAUTHORIZED', code: 'forbidden-in-environment', rule: 'tls.rejectUnauthorized' },
+    ]);
+    expect(rendered(error)).not.toContain(`=${value}`);
+  });
+
+  it.each([
+    ['production', undefined],
+    ['production', ''],
+    ['production', '1'],
+    ['staging', '1'],
+    ['local', '0'],
+    ['test', '0'],
+  ] as const)('[PR9-SEC-04] APP_ENV=%s accepts NODE_TLS_REJECT_UNAUTHORIZED=%s', (appEnv, value) => {
+    expect(loadConfig({ ...createTestEnv({ appEnv }), NODE_TLS_REJECT_UNAUTHORIZED: value }, { service: 'worker' }).APP_ENV).toBe(appEnv);
+  });
+
   it.each(['staging', 'production'] as const)('[PR3-SEC-03] APP_ENV=%s requires the raw NODE_ENV=production @security', (appEnv) => {
     const expected = [{ key: 'NODE_ENV', code: 'forbidden-in-environment', rule: 'nodeEnv.production' }];
     for (const nodeEnv of [undefined, '', 'development', 'test']) {

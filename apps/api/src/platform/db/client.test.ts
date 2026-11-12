@@ -1,5 +1,10 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { PrismaPg } from '@prisma/adapter-pg';
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import pg from 'pg';
 
 import {
   APP_ROLE_CONNECTION_LIMIT,
@@ -16,10 +21,14 @@ const options = {
   applicationName: 'api',
 };
 
+/** PEM-shaped dummy text (not a certificate or a key): enough to prove the file is read into `ssl.ca`. */
+const DUMMY_CA = '-----BEGIN CERTIFICATE-----\nZHVtbXktdGVzdC1jYQ==\n-----END CERTIFICATE-----\n';
+
 describe('runtime database client factory (data-model §7.1)', () => {
   it('maps the typed options onto the pg pool with the documented defaults', () => {
     expect(toPoolConfig(options)).toEqual({
       connectionString: options.connectionString,
+      ssl: false,
       max: 10,
       idleTimeoutMillis: 10_000,
       connectionTimeoutMillis: 5_000,
@@ -68,8 +77,113 @@ describe('runtime database client factory (data-model §7.1)', () => {
     'sslmode=verify-full&sslrootcert=/etc/ssl/rds.pem',
     'sslnegotiation=direct&sslmode=require',
     'uselibpqcompat=true&sslmode=verify-full',
+    'sslmode=disable',
   ])('[PR5-SEC-08] accepts the TLS query parameters %s @security', (query) => {
-    expect(toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?${query}` }).connectionString).toContain(query);
+    const dir = mkdtempSync(join(tmpdir(), 'pg-ca-'));
+    try {
+      writeFileSync(join(dir, 'rds.pem'), DUMMY_CA);
+      const connectionString = `postgresql://u@h/db?${query.replace('/etc/ssl/rds.pem', encodeURIComponent(join(dir, 'rds.pem')))}`;
+      expect(toPoolConfig({ ...options, connectionString }).connectionString).toBe('postgresql://u@h/db');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  describe('[PR9-SEC-04] TLS is pinned by toPoolConfig, not by the URL, PGSSLMODE or NODE_TLS_REJECT_UNAUTHORIZED', () => {
+    const OVERRIDES = ['NODE_TLS_REJECT_UNAUTHORIZED', 'PGSSLMODE'] as const;
+    const saved = new Map<string, string | undefined>();
+    let dir: string;
+
+    beforeEach(() => {
+      for (const key of OVERRIDES) saved.set(key, process.env[key]);
+      dir = mkdtempSync(join(tmpdir(), 'pg-ca-'));
+    });
+
+    afterEach(() => {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    /** The `ssl` setting pg itself derives for a client built from the pool config (the TLS socket options). */
+    const pgSsl = (connectionString: string): unknown =>
+      (new pg.Client(toPoolConfig({ ...options, connectionString })) as unknown as { connectionParameters: { ssl: unknown } })
+        .connectionParameters.ssl;
+
+    it('sslmode=verify-full yields ssl.rejectUnauthorized true and a connectionString without a query @security', () => {
+      const config = toPoolConfig({ ...options, connectionString: 'postgresql://u:p@db.internal:5432/platform?sslmode=verify-full' });
+      expect(config.ssl).toEqual({ rejectUnauthorized: true });
+      expect(config.connectionString).toBe('postgresql://u:p@db.internal:5432/platform');
+      expect(config).not.toHaveProperty('sslnegotiation');
+    });
+
+    it('keeps verification on under NODE_TLS_REJECT_UNAUTHORIZED=0 and PGSSLMODE=no-verify, and plain TCP stays off TLS @security', () => {
+      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+      process.env['PGSSLMODE'] = 'no-verify';
+      expect(pgSsl('postgresql://u@h/db?sslmode=verify-full')).toEqual({ rejectUnauthorized: true });
+      expect(pgSsl('postgresql://u@h/db')).toBe(false);
+      expect(pgSsl('postgresql://u@h/db?sslmode=disable')).toBe(false);
+    });
+
+    it.each(['require', 'verify-ca', 'prefer', 'allow'])(
+      'treats sslmode=%s as verify-full, with or without uselibpqcompat=true @security',
+      (mode) => {
+        expect(pgSsl(`postgresql://u@h/db?sslmode=${mode}`)).toEqual({ rejectUnauthorized: true });
+        expect(pgSsl(`postgresql://u@h/db?uselibpqcompat=true&sslmode=${mode}`)).toEqual({ rejectUnauthorized: true });
+      },
+    );
+
+    it.each([
+      ['sslmode=no-verify', /must not disable certificate verification/],
+      ['sslmode=no%2Dverify', /must not disable certificate verification/],
+      ['uselibpqcompat=true&sslmode=no-verify', /must not disable certificate verification/],
+      ['sslmode=insecure', /sslmode is not a supported value/],
+      ['sslnegotiation=fast', /sslnegotiation must be postgres or direct/],
+      ['sslmode=disable&sslnegotiation=direct', /sslnegotiation=direct requires TLS/],
+    ])('refuses %s without echoing it @security', (query, message) => {
+      const call = (): unknown => toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?${query}` });
+      expect(call).toThrow(DatabaseConfigError);
+      expect(call).toThrow(message);
+      expect(call).not.toThrow(query);
+    });
+
+    it('passes sslnegotiation through and enables verified TLS for direct negotiation without sslmode @security', () => {
+      expect(toPoolConfig({ ...options, connectionString: 'postgresql://u@h/db?sslnegotiation=direct' })).toMatchObject({
+        ssl: { rejectUnauthorized: true },
+        sslnegotiation: 'direct',
+      });
+      expect(toPoolConfig({ ...options, connectionString: 'postgresql://u@h/db?sslnegotiation=postgres' })).toMatchObject({
+        ssl: false,
+        sslnegotiation: 'postgres',
+      });
+    });
+
+    it('reads sslrootcert into ssl.ca (no sslmode still means verified TLS, as pg reads it) @security', () => {
+      const path = join(dir, 'root.pem');
+      writeFileSync(path, DUMMY_CA);
+      for (const query of [`sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}`, `sslrootcert=${encodeURIComponent(path)}`]) {
+        expect(toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?${query}` }).ssl).toEqual({
+          rejectUnauthorized: true,
+          ca: DUMMY_CA,
+        });
+      }
+    });
+
+    it('fails on an unreadable sslrootcert without naming the path @security', () => {
+      const path = join(dir, 'missing-root.pem');
+      const call = (): unknown =>
+        toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}` });
+      expect(call).toThrow(DatabaseConfigError);
+      expect(call).toThrow('connectionString sslrootcert could not be read');
+      try {
+        call();
+      } catch (error) {
+        expect(String(error)).not.toContain('missing-root');
+        expect(error).not.toHaveProperty('cause');
+      }
+    });
   });
 
   it.each([

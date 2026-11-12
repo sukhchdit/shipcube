@@ -159,8 +159,9 @@ export const DB_POOL_MAX_DEFAULTS: Readonly<Record<Service, number>> = Object.fr
 export const DB_IDLE_TIMEOUT_MS_DEFAULT = 10_000;
 export const DB_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
 /**
- * Pool-level `statement_timeout` backstop (PR-0005 code review m7): equal to the `platform_app` role value in
- * platform.md's RDS parameter-group notes (25 s, below the 30 s request cap of REQ-SEC-015). Request transactions set a tighter 5 s with
+ * Pool-level `statement_timeout` backstop (PR-0005 code review m7), default 25 000 ms (below the 30 s request cap of
+ * REQ-SEC-015); the role backstop (TASK-016, 30 s) applies only to sessions outside the pool, because this startup
+ * parameter overrides a role default on every pooled connection. Request transactions set a tighter 5 s with
  * `set_config` (data-model §4.1, T5).
  */
 export const DB_STATEMENT_TIMEOUT_MS_DEFAULT = 25_000;

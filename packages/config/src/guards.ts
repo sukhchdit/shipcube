@@ -3,7 +3,7 @@
  * ADR-0010 am. 9). Each guard is a pure function over the raw configured strings and the values that passed the
  * schema; it returns issues that name keys only.
  */
-import { type AppEnv, isHardenedAppEnv, isLocalAppEnv, type Service } from './environment.js';
+import { type AppEnv, isHardenedAppEnv, isLocalAppEnv, type Service, TLS_REJECT_UNAUTHORIZED_KEY } from './environment.js';
 import type { ConfigIssue } from './errors.js';
 import { findDuplicateKeyMaterial, KEY_REGISTER, type KeyVersion, PREVIOUS_SUFFIX } from './keys.js';
 import { isPlaceholder } from './placeholders.js';
@@ -20,6 +20,8 @@ export interface GuardInput {
   readonly toolingKeys?: readonly string[];
   /** Names of ECS task-metadata variables (`ECS_METADATA_KEYS`) present in the process environment; never values. */
   readonly ecsMetadataKeys?: readonly string[];
+  /** `NODE_TLS_REJECT_UNAUTHORIZED` is configured to something other than `1` (PR9-SEC-04); never its value. */
+  readonly tlsVerificationOverridden?: boolean;
   /** The loading service; companion keys it does not hold (register `holders`, PR3-SEC-06) are not required. */
   readonly service?: Service;
 }
@@ -186,6 +188,15 @@ export const nodeEnvGuard: Guard = ({ raw, appEnv }) =>
 export const localAppEnvOnEcsGuard: Guard = ({ ecsMetadataKeys = [], appEnv }) =>
   isLocalAppEnv(appEnv) && ecsMetadataKeys.length > 0 ? [{ key: 'APP_ENV', code: 'forbidden-in-environment', rule: 'appEnv.ecsTask' }] : [];
 
+/**
+ * PR9-SEC-04: `NODE_TLS_REJECT_UNAUTHORIZED=0` turns off certificate verification for every TLS client that does not
+ * pin `rejectUnauthorized` (Node only warns). Staging and production refuse any value but `1`; local/test allow it.
+ */
+export const tlsVerificationGuard: Guard = ({ tlsVerificationOverridden = false, appEnv }) =>
+  isHardenedAppEnv(appEnv) && tlsVerificationOverridden
+    ? [{ key: TLS_REJECT_UNAUTHORIZED_KEY, code: 'forbidden-in-environment', rule: 'tls.rejectUnauthorized' }]
+    : [];
+
 /** PR-0003 §4, PR-0005 §4: the API and the worker never hold tooling credentials outside local/test. */
 export const toolingKeyGuard: Guard = ({ toolingKeys = [], appEnv }) =>
   isHardenedAppEnv(appEnv) ? toolingKeys.map((key) => ({ key, code: 'forbidden-in-environment', rule: 'toolingKey' })) : [];
@@ -267,6 +278,7 @@ export const GUARDS: readonly Guard[] = Object.freeze([
   debugGuard,
   nodeEnvGuard,
   localAppEnvOnEcsGuard,
+  tlsVerificationGuard,
   toolingKeyGuard,
   productionGuard,
   companionGuard,

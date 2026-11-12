@@ -210,13 +210,14 @@ describe('schema metadata', () => {
   });
 
   it('guards are pure: no APP_ENV means no environment-dependent refusal', () => {
-    expect(GUARDS.length).toBe(10);
+    expect(GUARDS.length).toBe(11);
     expect(
       runGuards({
         raw: { NODE_DEBUG: 'x', DATABASE_URL: 'postgresql://h/db', BRAND_NAME: '<x>' },
         values: {},
         appEnv: undefined,
         toolingKeys: ['DATABASE_BOOTSTRAP_URL'],
+        tlsVerificationOverridden: true,
       }),
     ).toEqual([]);
   });

@@ -2,17 +2,22 @@
  * ioredis options for Valkey, built from the validated `REDIS_URL` (ADR-0013, NFR-SEC-007; PR3-SEC-02/-12 consumer
  * half). The URL string is never handed to ioredis: ioredis 6 decides TLS from the raw `rediss://` prefix and
  * merges query parameters into its options (`?tls=` would select plain TCP). This builder parses the URL once with
- * WHATWG rules and sets every option explicitly, `tls` included, with SNI and a TLS 1.2 floor for `rediss:`.
+ * WHATWG rules and sets every option explicitly, `tls` included, with SNI, a TLS 1.2 floor and pinned certificate
+ * verification for `rediss:`.
  *
  * Every connection is bounded (CLAUDE.md §9): a connect timeout, a command timeout, one retry per request and a
  * capped exponential reconnect delay with jitter. Errors never echo the URL (it carries the ACL password).
  */
 import { isIP } from 'node:net';
 
-/** TLS settings for `rediss:`: a TLS 1.2 floor and SNI for DNS names; certificates verify by default. */
+/**
+ * TLS settings for `rediss:`: a TLS 1.2 floor, SNI for DNS names and certificate verification pinned on, so a stray
+ * `NODE_TLS_REJECT_UNAUTHORIZED=0` cannot turn it off (PR9-SEC-04; Node's default reads that variable).
+ */
 export interface ValkeyTlsOptions {
   readonly servername?: string;
   readonly minVersion: 'TLSv1.2';
+  readonly rejectUnauthorized: true;
 }
 
 /** The explicit ioredis options this platform uses (a subset of ioredis `RedisOptions`). */
@@ -93,7 +98,10 @@ export function buildValkeyOptions(input: ValkeyOptionsInput): ValkeyConnectionO
   const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
   const random = input.random ?? Math.random;
   // SNI needs a DNS name; for an IP literal Node verifies the certificate's IP SAN against the host instead.
-  const tls: ValkeyTlsOptions = isIP(host) === 0 ? { servername: host, minVersion: 'TLSv1.2' } : { minVersion: 'TLSv1.2' };
+  const tls: ValkeyTlsOptions =
+    isIP(host) === 0
+      ? { servername: host, minVersion: 'TLSv1.2', rejectUnauthorized: true }
+      : { minVersion: 'TLSv1.2', rejectUnauthorized: true };
   return {
     host,
     port: url.port === '' ? 6379 : Number(url.port),

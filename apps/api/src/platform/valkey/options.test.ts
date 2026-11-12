@@ -18,7 +18,7 @@ describe('Valkey connection options (ADR-0013; PR3-SEC-02/-12 consumer half)', (
       username: 'api',
       password: secret,
       connectionName: 'api',
-      tls: { servername: 'cache.staging.test', minVersion: 'TLSv1.2' },
+      tls: { servername: 'cache.staging.test', minVersion: 'TLSv1.2', rejectUnauthorized: true },
       connectTimeout: VALKEY_DEFAULTS.connectTimeoutMs,
       commandTimeout: VALKEY_DEFAULTS.commandTimeoutMs,
       maxRetriesPerRequest: 1,
@@ -34,12 +34,29 @@ describe('Valkey connection options (ADR-0013; PR3-SEC-02/-12 consumer half)', (
   });
 
   it('an IP literal gets TLS without SNI (the certificate IP SAN is verified instead)', () => {
-    expect(buildValkeyOptions({ url: 'rediss://10.0.0.5', connectionName: 'api' }).tls).toEqual({ minVersion: 'TLSv1.2' });
+    expect(buildValkeyOptions({ url: 'rediss://10.0.0.5', connectionName: 'api' }).tls).toEqual({
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
+    });
     expect(buildValkeyOptions({ url: 'rediss://[::1]:6379', connectionName: 'api' })).toMatchObject({
       host: '::1',
-      tls: { minVersion: 'TLSv1.2' },
+      tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
     });
   });
+
+  it.each(['rediss://cache.staging.test:6380', 'rediss://10.0.0.5', 'rediss://[::1]:6379'])(
+    '[PR9-SEC-04] %s pins tls.rejectUnauthorized to true, whatever NODE_TLS_REJECT_UNAUTHORIZED says @security',
+    (url) => {
+      const previous = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+      try {
+        expect(buildValkeyOptions({ url, connectionName: 'api' }).tls?.rejectUnauthorized).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+        else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = previous;
+      }
+    },
+  );
 
   it.each([
     ['not a URL', 'valkey 6379', /not a valid URL/],

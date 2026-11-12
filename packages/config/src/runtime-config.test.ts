@@ -116,6 +116,18 @@ describe('loadRuntimeConfigOrExit (PR3-SEC-05, PR3-SEC-06)', () => {
     expect(io.written.join('')).toContain('DB_STATEMENT_TIMEOUT_MS: invalid: number.min');
   });
 
+  it('[PR9-SEC-04] staging with NODE_TLS_REJECT_UNAUTHORIZED=0 exits 78 naming the key, never the value @security', async () => {
+    for (const value of ['0', `off-${randomBytes(6).toString('hex')}`]) {
+      const io = captureIo();
+      const env = { ...createTestEnv({ appEnv: 'staging', service: 'api' }), NODE_TLS_REJECT_UNAUTHORIZED: value };
+      await expect(loadRuntimeConfigOrExit('api', { env, cwd: cwd(), io, runtime })).rejects.toThrow(new ExitCalled(CONFIG_EXIT_CODE));
+      const stderr = io.written.join('');
+      expect(stderr).toContain('NODE_TLS_REJECT_UNAUTHORIZED: forbidden-in-environment: tls.rejectUnauthorized');
+      expect(stderr).not.toContain(`NODE_TLS_REJECT_UNAUTHORIZED=${value}`);
+      if (value !== '0') expect(stderr).not.toContain(value);
+    }
+  });
+
   it('rethrows errors that are not configuration errors', async () => {
     const provider: SecretProvider = { kind: 'env', resolve: () => Promise.resolve('x') };
     const env = createTestEnv({ service: 'api' });

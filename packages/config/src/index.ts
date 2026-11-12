@@ -10,6 +10,7 @@ export {
   LOCAL_APP_ENVS,
   NODE_ENVS,
   SERVICES,
+  TLS_REJECT_UNAUTHORIZED_KEY,
 } from './environment.js';
 export type { AppEnv, NodeEnv, Service } from './environment.js';
 export { ConfigValidationError, formatConfigError } from './errors.js';
