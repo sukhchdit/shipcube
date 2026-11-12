@@ -193,6 +193,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-137 scenarios
+- ADR-0010 am. 11 item 4 (D-ARCH-057): readme-docs-check requires the line "Diffed against official spec by a person: yes (date, role) | no" in every real adapter README besides Docs URL, API version, Date checked, Sandbox quirks and Sources; the lane B evidence report counts fixtures flagged `"_fixture": "synthesised"` per adapter; "no" does not fail the check but is listed under COND-SANDBOX-DEMO
 - AT-US-137-01 … AT-US-137-07: all 7 scenarios of US-137, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
