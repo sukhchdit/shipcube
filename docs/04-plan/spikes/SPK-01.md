@@ -7,7 +7,7 @@
 | Security | SEC-P3-04 / SEC-COND-04 (SEC-TC-45 local part), SEC-P3-31 (`npm exec --no`) |
 | Date / host | 2026-11-12 · Windows 11 Pro 10.0.26300, Node v24.22.3 (fnm, PATH prefix), npm 11.19.1, Docker Desktop 29.8.0 (16 CPU, 15.5 GiB) |
 | Owner | senior-developer |
-| **Verdict** | **GO** for the ADR-0001 runtime/toolchain baseline on the Windows host. Six packages are **deferred** to their owning tasks and four ADR wording points need a principal-architect amendment (§5). No ADR-0001 version pin changes. The ubuntu-latest half of the exit criterion closes with TASK-007 (lane A). |
+| **Verdict** | **GO** for the ADR-0001 runtime/toolchain baseline on the Windows host. Thirteen packages are **not installed** and are deferred to their owning tasks (7-day cooldown, maintenance/licence rules or High advisories; §3, §6) and four ADR wording points need a principal-architect amendment (§5). No ADR-0001 version pin changes. The ubuntu-latest half of the exit criterion closes with TASK-007 (lane A). |
 
 ## 1. Exit criterion (risks.md R-ARCH-01/20) — results on the Windows host
 
