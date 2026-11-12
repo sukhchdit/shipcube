@@ -781,6 +781,12 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     'packages/carriers/src/dist/a.ts': false,
     'apps/api/src/modules/shipments/build/a.ts': false,
     'apps/web/app/routes/a.jsx': false,
+    // PR4-SEC-10: Playwright output is anchored like the build output.
+    'playwright-report/x.js': true,
+    'tests/e2e/test-results/x.js': true,
+    'tests/e2e/playwright-report/x.js': true,
+    'apps/api/src/modules/quotes/test-results/a.ts': false,
+    'packages/authz/src/playwright-report/a.ts': false,
   };
   const STYLELINT_IGNORED = {
     'dist/x.css': true,
@@ -789,6 +795,10 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     'coverage/x.css': true,
     'apps/web/app/coverage/x.css': false,
     'packages/ui/src/build/x.css': false,
+    'playwright-report/x.css': true,
+    'tests/e2e/playwright-report/x.css': true,
+    'apps/web/app/test-results/x.css': false,
+    'packages/ui/src/playwright-report/x.css': false,
   };
   const linted = (expected: Record<string, boolean>) => Object.keys(expected).filter((path) => !expected[path]);
 

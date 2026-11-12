@@ -127,6 +127,12 @@ const IGNORE_MATRIX = [
   'packages/carriers/src/dist/a.ts',
   'apps/api/src/modules/shipments/build/a.ts',
   'apps/web/app/routes/a.jsx',
+  // PR4-SEC-10: Playwright output is ignored only at the root and the workspace roots.
+  'playwright-report/x.js',
+  'tests/e2e/test-results/x.js',
+  'tests/e2e/playwright-report/x.js',
+  'apps/api/src/modules/quotes/test-results/a.ts',
+  'packages/authz/src/playwright-report/a.ts',
 ];
 /** Repository-relative paths whose Stylelint ignore decision is reported. */
 const STYLE_IGNORE_MATRIX = [
@@ -136,6 +142,10 @@ const STYLE_IGNORE_MATRIX = [
   'coverage/x.css',
   'apps/web/app/coverage/x.css',
   'packages/ui/src/build/x.css',
+  'playwright-report/x.css',
+  'tests/e2e/playwright-report/x.css',
+  'apps/web/app/test-results/x.css',
+  'packages/ui/src/playwright-report/x.css',
 ];
 
 /** Repository-relative paths whose effective rule severities are reported (`calculateConfigForFile`). */

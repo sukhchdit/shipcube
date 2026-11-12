@@ -402,9 +402,11 @@ export default defineConfig([
     'prisma/{dist,build,coverage}/**',
     '{apps,packages}/*/.react-router/**',
     'prisma/generated/**',
-    // Playwright output (git-ignored; the HTML report bundles third-party viewer JS/CSS) (PR #2 R2-n9).
-    '**/playwright-report/**',
-    '**/test-results/**',
+    // Playwright output (git-ignored; the HTML report bundles third-party viewer JS/CSS) (PR #2 R2-n9), anchored like the
+    // build output and .gitignore: a source folder named test-results or playwright-report is still linted (PR4-SEC-10).
+    '{playwright-report,test-results}/**',
+    '{apps,packages,tests}/*/{playwright-report,test-results}/**',
+    'prisma/{playwright-report,test-results}/**',
     'docs/**',
     '.claude/**',
     // Seeded negative fixtures violate rules on purpose; tools/lint/negative-fixtures.test.ts lints them explicitly.
