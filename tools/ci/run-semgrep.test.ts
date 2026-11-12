@@ -102,7 +102,9 @@ describe('output parsing', () => {
 
   it('maps Semgrep JSON results to findings with rule, message and location', () => {
     const stdout = JSON.stringify({
-      results: [{ check_id: 'semgrep.platform.raw-sql.unsafe-api', path: 'apps/api/src/a.ts', start: { line: 3 }, extra: { message: 'x\n  y' } }],
+      results: [
+        { check_id: 'semgrep.platform.raw-sql.unsafe-api', path: 'apps/api/src/a.ts', start: { line: 3 }, extra: { message: 'x\n  y' } },
+      ],
       errors: [],
       paths: { scanned: ['apps/api/src/a.ts'] },
     });

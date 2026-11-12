@@ -17,8 +17,7 @@ import { appendFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 
 /** Semgrep 1.183.0 (published 2026-10-29, older than the 7-day cooldown), pinned by the multi-arch index digest. */
-export const SEMGREP_IMAGE =
-  'semgrep/semgrep:1.183.0@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0';
+export const SEMGREP_IMAGE = 'semgrep/semgrep:1.183.0@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0';
 
 export const RULES_DIR = '.semgrep';
 export const FIXTURES_DIR = 'tests/fixtures/semgrep';
@@ -95,18 +94,7 @@ const dockerRun = (root, extraMounts) => [
 export function buildScanArgs({ root, rulesFrom }) {
   const mounts = rulesFrom === undefined ? [] : bindMount(rulesFrom, '/rules');
   const config = rulesFrom === undefined ? `/src/${RULES_DIR}` : '/rules';
-  return [
-    ...dockerRun(root, mounts),
-    'semgrep',
-    'scan',
-    '--config',
-    config,
-    '--disable-nosem',
-    '--error',
-    '--metrics=off',
-    '--json',
-    '.',
-  ];
+  return [...dockerRun(root, mounts), 'semgrep', 'scan', '--config', config, '--disable-nosem', '--error', '--metrics=off', '--json', '.'];
 }
 
 /**
@@ -157,7 +145,9 @@ export function parseScanOutput(stdout) {
     // Semgrep prefixes a rule id with its config directory (`semgrep.`, `rules.`); every repository rule id lives
     // under `platform.` (asserted by run-semgrep.test.ts), so the prefix is dropped for a stable id.
     rule: String(result.check_id ?? 'unknown').replace(/^(?:[\w-]+\.)*?(?=platform\.)/u, ''),
-    message: String(result.extra?.message ?? '').replace(/\s+/gu, ' ').trim(),
+    message: String(result.extra?.message ?? '')
+      .replace(/\s+/gu, ' ')
+      .trim(),
     location: `${String(result.path ?? '?')}:${String(result.start?.line ?? 0)}`,
   }));
   const errors = (report.errors ?? []).map((error) => String(error.message ?? JSON.stringify(error.type ?? error)));
@@ -197,9 +187,13 @@ export function toMarkdown(findings, title) {
   const rows = Object.entries(byRule)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([rule, count]) => `| \`${rule}\` | ${String(count)} |`);
-  return [`### ${title}`, '', `${String(findings.length)} finding(s).`, '', ...(rows.length > 0 ? ['| Rule | Findings |', '|---|---|', ...rows, ''] : [])].join(
-    '\n',
-  );
+  return [
+    `### ${title}`,
+    '',
+    `${String(findings.length)} finding(s).`,
+    '',
+    ...(rows.length > 0 ? ['| Rule | Findings |', '|---|---|', ...rows, ''] : []),
+  ].join('\n');
 }
 
 /**
@@ -252,7 +246,8 @@ function runScan({ root, rulesFrom, summaryFile, json }) {
         `rules from ${rulesFrom ?? RULES_DIR}`,
     );
   }
-  if (summaryFile !== undefined) appendFileSync(summaryFile, `${toMarkdown(findings, `Semgrep (rules from ${rulesFrom === undefined ? 'head' : 'base ref'})`)}\n`);
+  if (summaryFile !== undefined)
+    appendFileSync(summaryFile, `${toMarkdown(findings, `Semgrep (rules from ${rulesFrom === undefined ? 'head' : 'base ref'})`)}\n`);
   if (errors.length > 0) return 2;
   return findings.length > 0 ? 1 : 0;
 }

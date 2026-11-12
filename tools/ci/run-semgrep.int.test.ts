@@ -39,7 +39,7 @@ describe('run-semgrep (Docker)', () => {
       mkdirSync(join(tree, 'apps', 'api', 'src'), { recursive: true });
       writeFileSync(
         join(tree, 'apps', 'api', 'src', 'egress.ts'),
-        "export const call = (u: string) => fetch(u); // nosemgrep\nexport const load = (n: string) => import(n);\n",
+        'export const call = (u: string) => fetch(u); // nosemgrep\nexport const load = (n: string) => import(n);\n',
       );
       const result = runNode([script, '--root', tree, '--rules-from', join(repoRoot, '.semgrep'), '--json'], {
         cwd: repoRoot,

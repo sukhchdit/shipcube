@@ -29,11 +29,7 @@ const rulesOf = (name: string) => check(name).findings.map((finding) => finding.
 describe('suppression policy fixtures (PR2-SEC-01)', () => {
   it.each([
     ['PR2-SEC-01 (b): blanket eslint-disable, even with a TASK-linked reason', 'bad-blanket-eslint.ts', ['suppression/blanket']],
-    [
-      'PR2-SEC-01 (b): blanket stylelint-disable fails whatever its description',
-      'bad-blanket-stylelint.css',
-      ['suppression/blanket'],
-    ],
+    ['PR2-SEC-01 (b): blanket stylelint-disable fails whatever its description', 'bad-blanket-stylelint.css', ['suppression/blanket']],
     ['PR2-SEC-01 (d): a reason without a linked task ID', 'bad-no-task-id.ts', ['suppression/missing-task-id']],
     ['PR2-SEC-01 (c): a protected rule, even with a task ID', 'bad-protected-disable.ts', ['suppression/protected-rule']],
     ['PR2-SEC-01 (a): inline rule configuration', 'bad-inline-config.ts', ['suppression/inline-config']],
