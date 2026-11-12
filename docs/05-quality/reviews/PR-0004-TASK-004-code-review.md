@@ -127,3 +127,91 @@ I reviewed the drafted harness as a preview. The design is sound: 6 projects, ax
 - Drafted e2e static server: the path-traversal guard (`normalize` + `startsWith(root + sep)`) is correct. A malformed URI crashes the process (test-only; §3 item 7).
 - The jsdom test environment exposes the real Node `fetch` (test-only network egress; n4).
 - `entry.server.tsx` logs render errors with `console.error` at build time only. There is no request data, so no PII path exists.
+
+## Round 2 (head 9f5ea5e, non-harness delta)
+
+| Field | Value |
+|---|---|
+| Delta | `519bb89..9f5ea5e`: 1 commit (`9f5ea5e fix(web,admin): review fix cycle 1 for TASK-004`), 30 files, +341/−50 |
+| Reviewer | code-reviewer (independent), 2026-11-12 |
+| Inputs | Round 1 above; fix comment [6825316110](https://github.com/sukhchdit/shipcube/pull/4#issuecomment-6825316110); security round 1 (PR4-SEC-01..09); ADR-0026 am. 13; ADR-0002 batch-0.2 amendment; D-ORCH-006; `main` at `33a9cd0` (TASK-002 merged) |
+| Scope | Non-harness fixes only. The Playwright + axe harness (M1) lands after 2026-11-12T20:18Z and gets round 3 (D-ORCH-006 item 3). |
+
+```
+VERDICT: CHANGES_REQUESTED  (M1 only; every round-1 MINOR in scope is closed)
+SUMMARY: The fix cycle is precise and every change is backed by a test: per-route not-found titles (m1), dynamic gzip (m3),
+         description/h1 guards (m7), the coverage exclusion with evidence (m8), the typegen structure guard (am. 13), and
+         envPrefix with a random build canary plus a negative control (PR4-SEC-01). M1 (Playwright + axe AC) is the only
+         remaining MAJOR. Two new MINORs are predicted lint failures that appear only under main's TYPE-AWARE TASK-002
+         config. Both must be fixed in the merge-main pass before round 3.
+```
+
+### R2.1 Verification performed by the reviewer
+
+I ran no `npm ci`, build, Docker or Jest suite, and touched nothing in the `Shipqube-TASK-004` worktree. Everything ran on `git archive 9f5ea5e` extracts in my scratch dir, using the main checkout's tooling (Node 24).
+
+| Check | Result |
+|---|---|
+| Full read of the delta, plus the touched files in context (`apps/admin/app/root.tsx`, `i18n/locales.ts`, `apps/web/app/root.tsx`, `routes/home.tsx`, locale JSON) | See findings. |
+| `prettier --check` on all 28 changed non-template files, with the PR's `.prettierrc` | **Clean.** |
+| **Lint probe, untyped:** main's `eslint.config.mjs` (TASK-002 at `33a9cd0`) with `disableTypeChecked`, applied to `apps/{web,admin}/app`, `packages/ui/src`, `apps/web/tests`, both `vite.config*.ts` and the two `tools/repo` tests | **0 problems in 51 files.** The 24 round-1 hits are gone: no-console, set-state-in-effect, and the 8 source `no-literal-string` hits. The 13 test-file hits are covered by TASK-002 excluding `TEST_FILES`. **Positive control:** a probe file with `useEffect(() => setV(1))`, `console.error` and `<p>Hello</p>` produced exactly 3 errors, so the rules were live. |
+| **Lint probe, type-aware** (single rules, scratch tsconfig resolving `vite` types from main's `node_modules`) | (a) `(await import('./vite.config')).default as UserConfig` → `@typescript-eslint/no-unnecessary-type-assertion` fires. The rule is in `recommendedTypeChecked`, which main applies to `**/*.{ts,tsx}` with no override for tests. Finding R2-m1. (b) A route module whose `./+types/<route>` import is unresolved → `no-unsafe-member-access` plus `no-unsafe-argument` on `location.pathname`. Finding R2-m2. |
+| React semantics of the admin locale hook | `useSyncExternalStore(subscribeToNothing, browserLocale, () => DEFAULT_LOCALE)` is correct. During hydration React uses `getServerSnapshot` (`en`), so the SPA fallback hydrates cleanly, then re-renders with the cookie locale; `<html lang>` and the content then switch through a normal client render. The subscribe function is module-level and stable, and the snapshot is a primitive, so there is no resubscribe or tearing loop. The `renderToString` test is a real guard: it would fail if `getServerSnapshot` read the cookie. |
+| ADR-0026 am. 13 / ADR-0002 batch-0.2 amendment / CLAUDE.md §2 | The guard matches the amendment text. Both apps declare `"typegen": "react-router typegen"`. The root `typecheck` is `npm run typegen && tsc -b`. CLAUDE.md §2 is already reworded on `main`. **Round-1 focus item 1 conditions are closed.** |
+| PR body (n8, PR4-SEC-03) | It now says `no-cache` for HTML and `no-store` only on the `/` 302. The cooldown time is 20:18Z, and browsers install through `npm run deps:rebuild -- --playwright=…`, which exists on `main` (`tools/deps/rebuild.mjs`) and runs `npm exec --no -- playwright install`. |
+| Cleanup | Scratch extracts removed. `git status --porcelain` in the main checkout is empty apart from this file. |
+
+**Relied on the developer's evidence (comment 6825316110)** for the following: lint/format/typecheck exit 0 under the branch's own (pre-TASK-002) config; `test:unit` 175/175; `test:integration` 10/10, including the canary build and its negative control (`envPrefix: 'VITE_'` makes the web case fail); build + size-limit; `test:coverage` 94.87 % lines / 97.95 % branches; `npm audit --audit-level=high` exit 0; clean `git status`.
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Notes |
+|---|---|---|
+| M1 | **Open** | Harness commit after 20:18Z; round 3. Conditions are in R2.4. |
+| m1 | **Closed** | `meta` on both not-found routes: web uses the URL locale (`notFound.meta.title`, unknown prefix → en); admin uses the cookie locale. Unit-tested for en/es/fr plus fallback. The e2e assertion is in R2.4 item 4. |
+| m2 | Routed (TASK-042) | **Caveat for round 3:** the console guard (R2.4 item 5) **will** exercise this on `/es/no-such-page`. Web `HydrateFallback` reads the URL locale during SPA-mode hydration, so "Cargando" vs the built "Loading" is a text mismatch, which React 19 reports as a recoverable error (`pageerror`). If the harness sees it, the web fix lands in the harness commit: render `DEFAULT_LOCALE` during SPA hydration (the same `useSyncExternalStore` pattern now used in admin). It must **not** be allow-listed. The admin content and `lang` half is now fixed by the hook. Admin `meta()` still reads the cookie at render, which is lower risk (title hoisting); TASK-042 keeps it. |
+| m3 | **Closed** | `gzip on`, `gzip_vary on`, `gzip_types …` at server level in both templates, with an indent-anchored test. `*.gz` pre-compression is TASK-022. See R2-n2. |
+| m4 | **Closed (untyped); see R2-m1/R2-m2 for type-aware** | `process.stderr.write` is build-time only, with a justified comment and no request data. The hook replaces the effect. Constants (`ERROR_KIND`, `NOT_FOUND_KIND`, `MAIN_CONTENT_ID`, `CURRENT_PAGE`) are typed and named for intent. n3 is closed. |
+| m5, m6 | Routed | TASK-022/TASK-005 (m5); the first lazy-route task (m6). Unchanged. |
+| m7 | **Closed** | Per-locale description and `<h1>` read from the locale JSON, plus exactly one `<h1>`. Canonical and `hreflang` now assert the exact configured origin (`https://example.test`), which is a stronger positive control than the round-1 regex. |
+| m8 | **Closed** | `!apps/*/app/{entry.server.tsx,routes.ts}`, with a comment naming the integration test that exercises them. The evidence is above the 85/75 thresholds. |
+| n1, n2, n4–n7 | Routed / unchanged | As in §5. n8 is closed (PR body). |
+| PR4-SEC-01 | **Closed (code side)** | `envPrefix: 'VITE_PUBLIC_'` in both apps. There is a config test, plus a build-level canary: a random `VITE_CANARY_NOT_PUBLIC` value, and neither the value nor the name may appear in any client file. There is also a no-`.map` and no-`sourceMappingURL` check, and a documented negative control. The cast-based env read is kept; its rationale (Jest has no `import.meta.env`) is sound now that the prefix bounds what Vite can inline. security-analyst confirms. |
+| PR4-SEC-02/05/06 (optional) | **Done** | `default_server` (see R2-n3); a static `<NoIndex />` in the admin `Layout` head; the duplicate root `meta` robots entry is removed, and `root.test` asserts that it is gone; the owner-pointer wording is pinned by the test. |
+
+### R2.3 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `apps/web/vite.config.test.ts:12`, `apps/admin/vite.config.test.ts:12` | `config = (await import('./vite.config')).default as UserConfig`. `defineConfig({...})` resolves to the `UserConfig` overload, so the assertion does not change the type. `@typescript-eslint/no-unnecessary-type-assertion` (in `recommendedTypeChecked`, applied by main's config to test files too) reports it. **Reproduced** on an equivalent scratch file. The branch's own config has no type-aware block, so the PR's "lint exit 0" cannot see it. That makes 2 errors after merging `main`. | Drop `as UserConfig` (the `let config: UserConfig` annotation already types it). Re-run `npm run lint` on the merged tree. |
+| R2-m2 | MINOR (merge condition) | Root `package.json` `lint` script (main: `eslint . --max-warnings 0 && stylelint …`); `apps/web/app/root.tsx:33-34`, `apps/web/app/routes/home.tsx:8-9`, `apps/web/app/routes/not-found.tsx:7-8` | **On a clean checkout, `npm run lint` depends on `typegen` having run.** Route modules import `./+types/<route>` from the git-ignored `.react-router/`. Main's config ignores `\+types/` in `import-x/no-unresolved`, but the **type-aware** rules then see an unresolvable `Route.MetaArgs`. `location.pathname` produces `no-unsafe-member-access` and `no-unsafe-argument` (**reproduced**: "Unsafe member access .pathname on a type that cannot be resolved"). The developer's worktree already has `.react-router/` from `typecheck`, so a local lint run is falsely green. A fresh clone or lane A running lint before typecheck goes red. This is the same reason ADR-0002's batch-0.2 amendment put `typegen` in front of `tsc -b`. | In the merge-main pass, make the root script `"lint": "npm run typegen && eslint . --max-warnings 0 && stylelint …"` (pre-hooks are skipped under `ignore-scripts`, so it must be explicit). Extend `tools/repo/root-scripts.test.ts` to assert it. **Verify by deleting `apps/*/.react-router/` and then running `npm run lint`.** Have principal-architect add one sentence to the ADR-0002 batch-0.2 amendment ("lint likewise runs typegen first"). |
+| R2-n1 | NIT | Commit `9f5ea5e` trailer | `Refs: TASK-004, US-105, US-106` is wrong. TASK-004 is an enabler traced to NFR-COMPAT-001/002 and NFR-WEB-004/005. This is corrected in the PR comment, and history is not rewritten (CLAUDE.md §5). | The harness commit uses `Refs: TASK-004, NFR-COMPAT-001, NFR-COMPAT-002, NFR-WEB-004, NFR-WEB-005`. The squash-merge message carries the correct refs. |
+| R2-n2 | NIT | `infra/nginx/{web,admin}.conf.template` gzip block | `gzip_proxied` defaults to `off`, which governs `gzip_static` too. nginx therefore does not compress any request that carries a `Via` header, which CloudFront and many proxies add. `gzip_http_version` defaults to 1.1, and an nginx `edge` proxying with the default `proxy_http_version 1.0` gets no compression either. Today m3 is satisfied for direct requests only. | Route to TASK-022/TASK-111. Decide `gzip_proxied any`, or rely on CloudFront compression. Make the TASK-111 header suite assert `Content-Encoding: gzip` **through the edge**. |
+| R2-n3 | NIT | Same templates, `listen ${NGINX_PORT} default_server;` | IPv4 only. If the stock `default.conf` survives, it also listens on `[::]:80`, so IPv6 requests would still reach it. | TASK-014 removes the stock file (binding per PR4-SEC-02). Optionally add `listen [::]:${NGINX_PORT} default_server;` there. |
+
+No correctness defects in the delta. The SEC-01 canary and the `renderToString` hydration test are good examples of tests that fail for the right reason.
+
+### R2.4 Round-3 checklist: harness commit (closes M1)
+
+Round 3 reviews the harness commit plus the merge-main result. All of the following must hold:
+
+1. **Supply chain.** Install after **2026-11-12T20:18Z** (`playwright-core` 1.65.0 publish 20:17:41Z + 7 d; PR4-SEC-03), with no cooldown override flag or variable. Exact pins in `tests/e2e` devDependencies: `@playwright/test@1.65.0`, `@axe-core/playwright@4.14.0` (`--save-exact` / `.npmrc`), via `npm install --ignore-scripts -w tests/e2e -D …`. The lockfile delta may contain only these plus `playwright`, `playwright-core` and `axe-core` (Apache-2.0 / MPL-2.0). `npm audit --audit-level=high` exits 0. Browsers come only through `npm run deps:rebuild -- --playwright=chromium,firefox,webkit` (ADR-0023 am. F), never `npx`.
+2. **Evidence.** A green run of **all 6 projects** (`chromium|firefox|webkit` × `360|1280`) from the root `npm run test:e2e`, against a fresh `npm run build`, with 0 retries. Paste the list-reporter totals. Afterwards `git status --porcelain` is empty, and `npm run typecheck` passes with the `tests/e2e` sources included.
+3. **Deterministic axe.** Scan at defined points: after each settled `goto`, after state changes via `scanA11y()`, and at teardown. No unawaited `page.on('load')` scans racing interactions. Keep the navigation-race swallow narrow. Serious and critical violations block.
+4. **States covered.**
+   - web `/es/no-such-page`: `html[lang=es]`, Spanish `h1` **and `<title>`** (verifies m1 end to end);
+   - web `/es` without the trailing slash;
+   - admin with cookie `lng=fr`: `html[lang=fr]`, French `h1` and title;
+   - the loading state, if observable;
+   - the error state is optional (covered by unit tests).
+5. **Console guard.** Fail on `pageerror` and on `console.error`, including React hydration and recoverable errors. **No allow-list for hydration errors.** If item 4's `/es/no-such-page` case trips m2, fix the web SPA-hydration locale in the harness commit (R2.2 m2 row).
+6. **Mobile width.** For chromium-360 and webkit-360, use mobile descriptors (`devices['Pixel 7']`, `devices['iPhone 15']`) at width 360, so `isMobile`/`hasTouch` exercise the `pointer-coarse:` 44 px targets. Firefox gets the viewport only. Alternatively, record a deviation against NFR-COMPAT-001/002.
+7. **Static-server robustness.** A malformed `%` escape returns 400; the server must not crash (PR4-SEC-07). Read the Accept-Language regex from `infra/nginx/web.conf.template`, not a hard-coded copy (n1). The traversal guard stays.
+8. **tsconfig.** Set `erasableSyntaxOnly: true` in `tests/e2e/tsconfig.json`, because Node type-stripping executes `static-server.ts`.
+9. **Lint under `main`'s config, type-aware included.** `npm run lint` passes on the merged tree with `apps/*/.react-router/` deleted first (R2-m2), and R2-m1 is fixed. `**/playwright-report/**` and `**/test-results/**` are added to the ESLint and Stylelint ignores and to `.gitignore` (PR #2 R2-n9, routed to TASK-004).
+10. **Merge-main result.** The branch includes `main` as of the merge order (002 → 003 → 004, D-ORCH-006 item 5). Re-run the full gate on the merged head and paste it: lint, format:check, typecheck, test:unit, test:integration, build + size-limit, test:coverage, audit.
+
+### R2.5 Merge notes (round 2)
+
+- **Not mergeable yet:** M1 is open, and PR #4 holds for round 3 (D-ORCH-006 item 3). There are no other BLOCKER/MAJOR findings. Once R2.4 holds and R2-m1/R2-m2 are fixed, the expected round-3 outcome is APPROVED or APPROVED_WITH_NITS.
+- **New routings:** R2-n2 to TASK-022/TASK-111; R2-n3 to TASK-014; R2-m2's ADR sentence to principal-architect.
