@@ -56,6 +56,7 @@ const NO_CONTEXT: TenantContext = { orgId: '', actorId: '', actorScope: 'TENANT'
 let db: PlatformPostgres;
 let database: string;
 let PrismaCtor: typeof PrismaClient;
+let PrismaNs: typeof Prisma;
 let pooled: PrismaClient;
 let single: PrismaClient;
 
@@ -193,7 +194,7 @@ beforeAll(async () => {
   } finally {
     await migrator.end();
   }
-  ({ PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js')));
+  ({ PrismaClient: PrismaCtor, Prisma: PrismaNs } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js')));
   pooled = appClient(2, 'rls-pooled');
   single = appClient(1, 'rls-single');
 }, 300_000);
@@ -297,20 +298,38 @@ describe('US-075 per-transaction tenant context', () => {
     expect(outcome.after.rows).toEqual([ORG_A, ORG_A, ORG_A]);
   });
 
-  it('ADR-0005 am.10 item 1: the callback gets the TenantDb guard: $transaction and the *Unsafe methods throw on the real client', async () => {
+  it('ADR-0005 am.10 item 1 (PR11-SEC-01): the callback gets the deny-by-default TenantDb guard: no route back to an unguarded or root client', async () => {
     const { withTenantTx } = runner(pooled);
-    const blocked = await withTenantTx(tenant(ORG_A), (tx) => {
-      const record = tx as unknown as Record<string, unknown>;
-      const thrown = ['$transaction', '$queryRawUnsafe', '$executeRawUnsafe', '$extends'].map((member) => {
-        try {
-          return record[member] === undefined ? 'undefined' : 'exposed';
-        } catch (error) {
-          return (error as Error).name;
-        }
-      });
-      return Promise.resolve(thrown);
+    const outcome = (read: () => unknown): string => {
+      try {
+        return read() === undefined ? 'undefined' : 'exposed';
+      } catch (error) {
+        return (error as Error).name;
+      }
+    };
+    const parentOf = (value: unknown): Record<string, unknown> => Reflect.get(value as object, '$parent') as Record<string, unknown>;
+    const routes: ReadonlyArray<readonly [string, (tx: Db) => unknown]> = [
+      ...['$transaction', '$queryRawUnsafe', '$executeRawUnsafe', '$extends', '$parent', 'constructor', '__proto__', '_originalClient'].map(
+        (member) => [member, (tx: Db): unknown => (tx as unknown as Record<string, unknown>)[member]] as const,
+      ),
+      ['$parent._originalClient', (tx) => parentOf(tx)['_originalClient']],
+      ['permission.$parent', (tx) => parentOf(tx.permission)],
+      ['permission.constructor', (tx) => (tx.permission as unknown as Record<string, unknown>)['constructor']],
+      ['$queryRaw(Prisma.raw(…))', (tx) => tx.$queryRaw(PrismaNs.raw('SELECT 1'))],
+    ];
+    const seen = await withTenantTx(tenant(ORG_A), async (tx) => {
+      const refused = Object.fromEntries(routes.map(([name, read]) => [name, outcome(() => read(tx))]));
+      const symbols = Object.getOwnPropertySymbols(tx).length;
+      const keys = Reflect.ownKeys(tx);
+      const rows = await tx.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM public.rls_probe_shipments`;
+      return { refused, symbols, keys, rows, kept: tx.permission };
     });
-    expect(blocked).toEqual(['TenantDbAccessError', 'TenantDbAccessError', 'TenantDbAccessError', 'TenantDbAccessError']);
+    expect(seen.refused).toEqual(Object.fromEntries(routes.map(([name]) => [name, 'TenantDbAccessError'])));
+    expect(seen.symbols).toBe(0);
+    expect(seen.keys).not.toContain('$parent');
+    expect(seen.keys).toEqual(expect.arrayContaining(['permission', '$queryRaw', '$executeRaw']));
+    expect(seen.rows[0]?.n).toBeGreaterThan(0);
+    expect(() => seen.kept.findMany).toThrow('Database error: TENANT_TX_CLOSED');
   });
 
   it('SPK-03 (a) port: 50 parallel transactions over a pool of two never leak context', async () => {

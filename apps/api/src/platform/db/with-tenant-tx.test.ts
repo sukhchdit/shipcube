@@ -39,8 +39,8 @@ class FakeTx {
     this.calls.push({ sql: render(strings), values });
     return Promise.resolve((this.prev === undefined ? [] : [this.prev]) as T);
   }
-  $executeRaw(): Promise<number> {
-    return Promise.resolve(1);
+  $executeRaw(strings: TemplateStringsArray): Promise<number> {
+    return Promise.resolve(strings.length);
   }
   $transaction(): Promise<string> {
     return Promise.resolve('savepoint');
@@ -154,7 +154,7 @@ describe('withTenantTx context statement (data-model §4.1; ADR-0005 am.10 items
       seen = db;
       expect(db).not.toBe(tx);
       expect(() => (db as unknown as FakeTx).$transaction()).toThrow('TenantDb does not expose $transaction');
-      return db.$executeRaw();
+      return db.$executeRaw`SELECT 1`;
     });
     // revoked once the transaction settles: a leaked handle cannot run on a closed transaction
     expect(() => seen?.$executeRaw).toThrow('Database error: TENANT_TX_CLOSED');
