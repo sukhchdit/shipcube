@@ -21,13 +21,15 @@
 | US-024 | MFA challenge at sign-in | M0 | Must | M | US-023 | REQ-AUTH-017 | DC |
 | US-025 | Mandatory TOTP enrolment for operator members | M0 | Must | S | US-023, EPIC-03 | REQ-AUTH-018 | DC |
 | US-026 | Customer TOTP settings, re-authentication and staff recovery-code regeneration | M1 | Should | M | US-023, US-024 | REQ-AUTH-019, REQ-AUTH-020, REQ-ADMIN-008 |  |
-| US-027 | Sessions list and remote sign-out (API and My sessions page) | M1 | Should | M | US-019, EPIC-05 | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |  |
+| US-027 | Sessions list and remote sign-out (API and My sessions page) | M1 | Must | M | US-019, EPIC-05 | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |  |
 | US-028 | Change password | M1 | Should | S | US-026 | REQ-AUTH-023 |  |
 | US-029 | Refuse sign-in for suspended and deactivated users | M0 | Should | S | US-017, US-019 | REQ-AUTH-024 |  |
 | US-030 | Admin app route guard and staff-only admission | M0 | Must | S | US-017, US-020 | REQ-ADMIN-001, REQ-ADMIN-003 | DC |
 | US-031 | Staff sign-in, MFA challenge and enrolment screens | M0 | Must | M | US-030, US-023, US-024, EPIC-05 | REQ-ADMIN-002 | DC |
 | US-032 | Admin landing page, permission-aware navigation and audit-viewer routes | M0 | Must | M | US-031, EPIC-03, EPIC-04, EPIC-05 | REQ-ADMIN-005, REQ-ADMIN-006, REQ-ADMIN-009 | DC |
 | US-033 | Admin session lifetime and crawler exclusion | M0 | Should | S | US-018, US-030 | REQ-ADMIN-004, REQ-ADMIN-010 |  |
+| US-291 | Re-authentication primitive, `auth_time` and age-based step-up | M1 | Must | M | US-017, US-018, US-024 | REQ-AUTH-020, REQ-AUTH-025 |  |
+| US-292 | Unverified-account expiry and pre-hijack recovery | M0 | Must | S | US-015, US-016, EPIC-01 | REQ-AUTH-026 |  |
 
 ## Stories
 
@@ -35,7 +37,7 @@
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** EPIC-03, EPIC-15, US-036
 - **Linked REQs:** REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003
 - **As a** guest shipper **I want** to create an account with email, password, name, locale and terms acceptance **so that** I can book and manage shipments.
-- **Notes:** Email trimmed, NFC-normalised, lower-cased, at most 254 characters, case-insensitively unique. Existing email returns the same 202 as success plus an "account already exists" email (EC-A01, EC-A02). Passwords 12-128 characters; breached list of 10,000 is a bundled offline asset; bcrypt cost at least 12 (EC-A03). The registration UI form is in EPIC-05.
+- **Notes:** Email trimmed, NFC-normalised, lower-cased, at most 254 characters, case-insensitively unique. Existing email returns the same 202 as success plus an "account already exists" email (EC-A01, EC-A02). The "account already exists" email contains a password-reset entry point; the verification email says "if you did not create this account, ignore this e-mail" (D-050). `POST /auth/register` is counted in the `auth` and the `email-send` rate classes; more than 5 distinct addresses per IP per hour is `registration_probe` (D-049, EC-A52). The register-then-login existence oracle is accepted as RR-16 / PRD R-12. Passwords 12-128 characters; breached list of 10,000 is a bundled offline asset; bcrypt cost at least 12 (EC-A03). The registration UI form is in EPIC-05.
 
 #### Acceptance criteria
 ```gherkin
@@ -84,13 +86,36 @@ Feature: Register an account with a compliant password
 
   Scenario: Audit of registration
     Then CREATE audit entries for user and organisation exist with actor type ANONYMOUS, IP, outcome SUCCESS, written in the same transaction, and values exclude password and hash
+
+  Scenario: Sixth distinct address from one IP in an hour is a registration probe
+    Given one IP has registered 5 distinct normalised addresses within the last hour
+    When it posts a registration for a 6th distinct address
+    Then the response is 429 RATE_LIMITED with Retry-After
+    And one security log event "registration_probe" with no secrets is written and its counter increments
+    And no user, organisation or email is created for the 6th address
+
+  Scenario: Fourth accepted registration for one address in an hour
+    Given 3 registrations for "alice@example.com" were accepted within the last hour
+    When a 4th is posted for " ALICE@example.com"
+    Then the response is 429 RATE_LIMITED with Retry-After (email-send class, 3 per hour per normalised address)
+    And no further email is sent to that address
+
+  Scenario: New and existing addresses are indistinguishable
+    Given alice@example.com is registered and bob-new@example.com is not
+    When each address is registered once from different IPs
+    Then both responses are 202 with identical status and body
+    And the median response times differ by no more than the configured jitter tolerance (EC-A01)
+
+  Scenario: Email wording supports recovery
+    Then the "account already exists" email contains a password-reset entry point
+    And the verification email contains the sentence "if you did not create this account, ignore this e-mail" in en, es and fr
 ```
 
 ### US-016 — Verify email address
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-015, EPIC-15
 - **Linked REQs:** REQ-AUTH-004
 - **As a** registered individual **I want** to confirm my email through a link **so that** I can use features that require a verified address.
-- **Notes:** 256-bit single-use token stored hashed, valid 24 h. Resend limited to 3 per hour per account and 10 per hour per IP (DR-A22, NFR-SEC-005, D-035). Unverified users can sign in; payment gating is in EPIC-10 (US-208).
+- **Notes:** 256-bit single-use token stored hashed, valid 24 h. Resend limited to 3 per hour per account and 10 per hour per IP (DR-A22, NFR-SEC-005, D-035). Unverified users can sign in; payment gating is in EPIC-10 (US-208). Successful verification revokes every other session of the user (D-050, EC-A51); a verify call from a session of another user, or from no session, revokes all sessions. Unverified accounts expire after 7 days (US-292).
 
 #### Acceptance criteria
 ```gherkin
@@ -128,6 +153,28 @@ Feature: Verify email address
     Given the user has not verified
     When they sign in
     Then sign-in succeeds
+
+  Scenario: Verification revokes every other session (pre-hijack protection)
+    Given an attacker pre-registered the victim's address and holds a signed-in session S1 for that account
+    And the victim opens the verification link in a browser where the victim holds session S2 for the same account
+    When the victim redeems the token with S2
+    Then the response is 200 and status becomes ACTIVE
+    And S1 is revoked and the attacker's refresh returns 401 SESSION_REVOKED within 5 s
+    And exactly one SESSION_REVOKED audit entry per revoked session exists, each with the target session ID
+    And S2 is not revoked
+
+  Scenario: Verification from a fresh browser revokes all sessions
+    Given the account has sessions S1 and S2
+    When the token is redeemed by an anonymous request
+    Then the response is 200 and S1 and S2 are both revoked with one SESSION_REVOKED audit entry each
+
+  Scenario: The verifying user's own session keeps working
+    Given the verifying session S2 belongs to the same user
+    When the token is redeemed
+    Then requests with S2's access token still succeed and S2's refresh still returns 200
+
+  Scenario: Verification email wording
+    Then the verification email contains "if you did not create this account, ignore this e-mail"
 ```
 
 ### US-017 — Sign in with email and password
@@ -178,7 +225,7 @@ Feature: Sign in with email and password
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-017, US-044
 - **Linked REQs:** REQ-AUTH-006, REQ-AUTH-007, REQ-AUTH-008
 - **As a** customer **I want** my session renewed safely and a stolen cookie neutralised **so that** I stay signed in without exposing my account.
-- **Notes:** Cookie HttpOnly, Secure (relaxed only for NODE_ENV=development on localhost), SameSite=Strict, `__Host-` prefix with `Path=/` and no `Domain`, read by the server only on the auth routes (refresh, logout, CSRF token) and ignored everywhere else (REQ-AUTH-006 as amended by D-043 / ADR-0006 amendment 1), 30 days (accepted ASVS V3.3.2 deviation, D-038), names `__Host-rt_web` and `__Host-rt_admin`. Family states in DR-A03. Absolute age cap 90 days (ASSUMED GAP-A-01). Refresh requires CSRF token and allowed Origin (US-044). Refresh, logout and CSRF routes are `public` rate class (D-043).
+- **Notes:** Cookie HttpOnly, Secure (relaxed only for NODE_ENV=development on localhost), SameSite=Strict, `__Host-` prefix with `Path=/` and no `Domain`, read by the server only on the auth routes (refresh, logout, CSRF token) and ignored everywhere else (REQ-AUTH-006 as amended by D-043 / ADR-0006 amendment 1), 30 days (accepted, compensated ASVS V3.3.2 deviation, D-046 supersedes D-038), names `__Host-rt_web` and `__Host-rt_admin`. Family states in DR-A03. Absolute session cap 30 days (`AUTH_SESSION_ABSOLUTE_TTL=30d`, was 90 days; D-046); `AUTH_REFRESH_TTL` may never exceed it. The session's `authenticated_at` is copied unchanged by refresh into the `auth_time` claim (REQ-AUTH-025, US-291). Refresh requires CSRF token and allowed Origin (US-044). Refresh, logout and CSRF routes are `public` rate class (D-043).
 
 #### Acceptance criteria
 ```gherkin
@@ -208,9 +255,25 @@ Feature: Refresh cookie, rotation and reuse detection
     And a TOKEN_REUSE_DETECTED audit entry and a security log event are written
 
   Scenario: Absolute age cap
-    Given a session created 90 days and 1 s ago
+    Given a session created 30 days and 1 s ago (fake clock)
     When refresh is attempted
-    Then the response is 401 SESSION_REVOKED
+    Then the response is 401 SESSION_EXPIRED
+    And the session and its family are REVOKED and no token is issued
+
+  Scenario: Sliding expiry is clamped to the absolute cap
+    Given a session created 29 days and 23 hours ago
+    When refresh is attempted with a valid cookie, Origin and X-CSRF-Token
+    Then the response is 200 and the new refresh cookie expires at login time plus 30 days, not at now plus 30 days
+
+  Scenario: Refresh never renews auth_time
+    Given a session whose last password verification was 2 h ago
+    When refresh is called twice
+    Then the auth_time claim in each new access token equals the original login time
+
+  Scenario: Refresh lifetime may not exceed the absolute cap
+    Given the configuration AUTH_REFRESH_TTL=45d and AUTH_SESSION_ABSOLUTE_TTL=30d
+    When the API starts
+    Then start-up fails config validation naming AUTH_REFRESH_TTL
 
   Scenario: Missing CSRF token or foreign origin
     When refresh is sent without X-CSRF-Token
@@ -307,7 +370,7 @@ Feature: Client-side token handling with single-flight refresh
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-015, EPIC-15
 - **Linked REQs:** REQ-AUTH-011, REQ-AUTH-012
 - **As a** customer who forgot my password **I want** to reset it by email **so that** I regain access safely.
-- **Notes:** Token 256-bit, stored hashed, valid 60 minutes, supersedes earlier tokens. 3 requests per hour per account, 10 per hour per IP (DR-A22, NFR-SEC-005, D-035). EC-A10.
+- **Notes:** Token 256-bit, stored hashed, valid 60 minutes, supersedes earlier tokens. 3 requests per hour per account, 10 per hour per IP (DR-A22, NFR-SEC-005, D-035). EC-A10. A redeemed token sets `email_verified_at` when still null (D-050), the recovery path for a mailbox owner whose address was pre-registered by someone else (EC-A51).
 
 #### Acceptance criteria
 Permission path: not applicable — pre-authentication token flow; invalid/expired/reused token scenarios are the negative paths
@@ -337,6 +400,13 @@ Feature: Password reset
       | expired (61 min)   | 410    | TOKEN_EXPIRED |
       | already used       | 400    | TOKEN_INVALID |
       | unknown            | 400    | TOKEN_INVALID |
+
+  Scenario: Redeeming a reset token proves mailbox control
+    Given a user in PENDING_VERIFICATION with email_verified_at null and a valid reset token
+    When the token is redeemed with a compliant new password
+    Then email_verified_at is set and the status becomes ACTIVE
+    And all of the user's sessions are revoked as for any reset
+    And an UPDATE audit entry records the status transition without password or hash values
 
   Scenario: Weak new password
     When redeemed with "password1234"
@@ -489,7 +559,7 @@ Feature: MFA challenge at sign-in
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-023, EPIC-03
 - **Linked REQs:** REQ-AUTH-018
 - **As an** operator **I want** staff without TOTP restricted to enrolment **so that** no staff action happens without a second factor.
-- **Notes:** EC-A13. Seeded staff start in this state (REQ-DATA-003). Also applies to staff added to the operator org later.
+- **Notes:** EC-A13. Seeded staff start in this state (REQ-DATA-003). Also applies to staff added to the operator org later. Outside `APP_ENV` local/test the first activation needs an e-mailed one-time code (6 digits, 10 minutes, single use, sent to the staff address; wrong or expired is `MFA_INVALID` and counts toward the per-user MFA lock) and a staff member not enrolled 24 h after the membership was created is set `SUSPENDED` by `housekeeping` (D-052, SEC-P3-14). The M0 demo runs `APP_ENV=local` and is unchanged. Re-enabling a suspended account is the M2 users screen; locally re-run the seed.
 
 #### Acceptance criteria
 ```gherkin
@@ -517,13 +587,51 @@ Feature: Mandatory TOTP enrolment for operator members
 
   Scenario: Blocked attempt is audited
     Then a PERMISSION_DENIED entry with outcome DENIED and reason MFA_ENROLMENT_REQUIRED is written
+
+  Scenario: Staging requires the e-mailed code for first activation
+    Given APP_ENV=staging and a staff member without TOTP who has started enrolment
+    And a 6-digit code was e-mailed to the staff address and is visible in the mail catcher
+    When they submit a valid authenticator code without the e-mailed code
+    Then the response is 401 MFA_INVALID and MFA stays inactive
+    When they submit a valid authenticator code with the e-mailed code within 10 minutes
+    Then MFA becomes active and an UPDATE audit entry without secret or code values is written
+
+  Scenario Outline: E-mailed code misuse
+    Given APP_ENV=staging and a staff member starting first activation
+    When the e-mailed code is "<state>"
+    Then the response is 401 MFA_INVALID and the failure counts toward the per-user MFA lock
+    Examples:
+      | state                  |
+      | older than 10 minutes  |
+      | already used           |
+      | sent to another user   |
+
+  Scenario Outline: No e-mailed code in local and test
+    Given APP_ENV=<env> and a seeded staff member without TOTP
+    When they activate TOTP with a valid authenticator code and no e-mailed code
+    Then MFA becomes active (M0 demo unchanged)
+    Examples:
+      | env   |
+      | local |
+      | test  |
+
+  Scenario: Enrolment deadline suspends the staff member
+    Given APP_ENV=staging and a staff membership created 24 h and 1 s ago (fake clock) whose user has no active TOTP
+    When the housekeeping job runs
+    Then the user status becomes SUSPENDED, their sessions are revoked and an UPDATE audit entry by the system actor exists
+    And signing in returns 401 INVALID_CREDENTIALS identical to a wrong password
+
+  Scenario: Staff enrolled in time is not suspended
+    Given a staff membership created 23 h ago whose user activated TOTP
+    When the housekeeping job runs
+    Then the user stays ACTIVE
 ```
 
 ### US-026 — Customer TOTP settings, re-authentication and staff recovery-code regeneration
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-023, US-024
 - **Linked REQs:** REQ-AUTH-019, REQ-AUTH-020, REQ-ADMIN-008
 - **As a** customer or staff user **I want** to manage my second factor after proving it is me **so that** sensitive security changes are protected.
-- **Notes:** Re-authentication proof valid 5 minutes, single-use, bound to session and action scope; used by recovery regeneration, TOTP disable and password change. Staff cannot disable their own TOTP. Staff TOTP reset by an administrator is M2. UI states: loading, error, permission-denied; en/es/fr; 360 px and 1280 px.
+- **Notes:** The re-authentication primitive itself (proof, 5 minutes, single-use, bound to session and scope, `REAUTH_REQUIRED`, `auth_time`) is now specified and tested in US-291 (Must); this story keeps the consumers: TOTP disable and staff recovery-code regeneration. Staff cannot disable their own TOTP. Staff TOTP reset by an administrator is M2. UI states: loading, error, permission-denied; en/es/fr; 360 px and 1280 px.
 
 #### Acceptance criteria
 ```gherkin
@@ -565,10 +673,10 @@ Feature: Customer TOTP settings, re-authentication and staff recovery-code regen
 ```
 
 ### US-027 — Sessions list and remote sign-out (API and My sessions page)
-- **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-019, EPIC-05
+- **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-019, EPIC-05
 - **Linked REQs:** REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007
 - **As a** customer or staff user **I want** to see and end my sessions **so that** I can remove a device I no longer trust.
-- **Notes:** Own sessions only. Fields: session ID, parsed browser and OS, coarse IP (IPv4 /24, IPv6 /48), created, last used, current flag. Current session action reads "Sign out". Listing is a VIEW of entity `session`. Page exists in web (account) and admin.
+- **Notes:** Promoted to Must by D-047 (ASVS 3.3.4). Not demo-critical. Own sessions only. Fields: session ID, parsed browser and OS, coarse IP (IPv4 /24, IPv6 /48), created, last used, current flag. Current session action reads "Sign out". Listing is a VIEW of entity `session`. Page exists in web (account) and admin.
 
 #### Acceptance criteria
 ```gherkin
@@ -586,6 +694,11 @@ Feature: Sessions list and remote sign-out
 
   Scenario: Sign out all other sessions
     Then every session except the current one is revoked and the current one stays active
+
+  Scenario: Remote sign-out is audited
+    When the user signs out session S2 remotely
+    Then a SESSION_REVOKED audit entry with outcome SUCCESS and the target session ID of S2 is written in the same transaction
+    And signing out all other sessions writes one SESSION_REVOKED entry per revoked session
 
   Scenario: Foreign or unknown session
     When the user targets a session ID belonging to another user
@@ -794,7 +907,7 @@ Feature: Admin landing page, permission-aware navigation and audit-viewer routes
 - **Milestone:** M0 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-018, US-030
 - **Linked REQs:** REQ-ADMIN-004, REQ-ADMIN-010
 - **As an** operator **I want** staff sessions capped at 12 hours and the admin app hidden from crawlers **so that** cross-tenant access is time-boxed and not indexed.
-- **Notes:** 12 h is configurable (ASSUMED GAP-A-04), independent of refresh rotation.
+- **Notes:** 12 h is configurable (ASSUMED GAP-A-04), independent of refresh rotation. Idle timeout is 30 minutes of user input (pointer, keyboard, touch), enforced server-side by a sliding admin refresh TTL `AUTH_ADMIN_REFRESH_IDLE_TTL=30m` inside the 12 h cap and client-side by stopping silent refresh; warning dialog at 28 minutes (WCAG 2.2.1, D-052, D-UX-025). Background refetches and silent refresh are not activity.
 
 #### Acceptance criteria
 ```gherkin
@@ -818,6 +931,160 @@ Feature: Admin session lifetime and crawler exclusion
 
   Scenario: Expiry is audited
     Then a LOGOUT or session-expiry audit entry with reason SESSION_EXPIRED is written
+
+  Scenario: Admin refresh token idle for 30 minutes
+    Given an admin session with a valid refresh token last used 30 min and 1 s ago (fake clock) and 2 h after login
+    When refresh is attempted
+    Then the response is 401 SESSION_EXPIRED
+    And a refresh at 29 min 59 s idle returns 200 and slides the idle window
+
+  Scenario: Admin SPA signs out after 30 minutes without input
+    Given the admin app is open and receives no pointer, keyboard or touch input for 30 minutes (fake timers)
+    Then silent refresh stops, POST /api/v1/auth/logout is called and the sign-in page is shown with a localised "You were signed out for inactivity" message in en, es and fr
+
+  Scenario: Warning dialog at 28 minutes with extend action
+    Given no input for 28 minutes
+    Then a modal warning dialog with focus on an "Extend session" button appears, announced to assistive technology
+    When the user activates "Extend session"
+    Then the idle timer resets, silent refresh continues and the dialog closes
+
+  Scenario: Background activity is not user input
+    Given no user input for 29 minutes while the app performs background refetches and silent refresh
+    Then the idle timer is not reset and the user is signed out at 30 minutes
+```
+
+### US-291 — Re-authentication primitive, `auth_time` and age-based step-up
+- **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-017, US-018, US-024
+- **Linked REQs:** REQ-AUTH-020, REQ-AUTH-025
+- **As a** customer or staff user **I want** to prove it is me again before a sensitive action, and to be asked again only when my last verification is old **so that** a stolen or forgotten session cannot cause lasting harm.
+- **Notes:** Added by D-046 (REQ-AUTH-020 retagged Must; new REQ-AUTH-025). It is the compensating control for the 30-day session. Proof: 5 minutes, single-use, bound to the session and a named scope (`x-reauth-scope`); password, or a TOTP code for MFA users. `auth_time` is the last password or MFA verification (`sessions.authenticated_at`), copied unchanged by refresh; routes with `x-reauth-max-age` (43200 s) require a proof when `now − auth_time` exceeds it. `REAUTH_REQUIRED` problem detail carries `scope` and `max_age`. Consumers: US-026, US-028, US-083, US-085 and the payment and privacy stories (not repeated here). Re-authentication routes are in the `auth` rate class (DR-A22). Not demo-critical.
+
+#### Acceptance criteria
+```gherkin
+Feature: Re-authentication primitive, auth_time and age-based step-up
+  Background:
+    Given a test route R1 with x-reauth-scope "test.sensitive" and a test route R2 with x-reauth-scope "test.member" and x-reauth-max-age 43200
+
+  Scenario: Obtain a proof with the password
+    Given a signed-in customer without TOTP
+    When they post their correct password for scope "test.sensitive" to the re-authentication endpoint
+    Then the response is 200 with a proof that expires in 300 s
+    And calling R1 with the proof in X-Reauth-Proof succeeds
+
+  Scenario: Obtain a proof with a TOTP code for an MFA user
+    Given a signed-in user with active TOTP
+    When they post a valid TOTP code for scope "test.sensitive"
+    Then the response is 200 with a proof and a password alone is refused with 401 MFA_REQUIRED or MFA_INVALID and no proof
+
+  Scenario: Wrong password or code gives no proof
+    When the wrong password is posted
+    Then the response is 401 INVALID_CREDENTIALS, no proof is issued and the failure counts toward lockout (US-022)
+
+  Scenario: Proof is single-use
+    Given a proof was consumed by one successful call to R1
+    When it is presented again
+    Then the response is 401 REAUTH_REQUIRED
+
+  Scenario: Route with a scope and no proof
+    When R1 is called without X-Reauth-Proof
+    Then the response is 401 REAUTH_REQUIRED and the problem detail contains scope "test.sensitive"
+
+  Scenario Outline: Proof misuse
+    When a proof that is "<state>" is presented to R1
+    Then the response is 401 REAUTH_REQUIRED
+    Examples:
+      | state                           |
+      | older than 5 minutes            |
+      | already consumed                |
+      | issued for another action scope |
+      | issued for another session      |
+
+  Scenario: Access token carries auth_time
+    When a user signs in with password (and TOTP when enrolled) at time T
+    Then the access token contains the claim auth_time equal to T and the session's authenticated_at equals T
+
+  Scenario: Refresh leaves auth_time unchanged
+    Given a session authenticated at T
+    When the token is refreshed 3 times over the next hours
+    Then every new access token has auth_time equal to T
+
+  Scenario: Age-based step-up (fake clock)
+    Given a session whose auth_time is 11 h 59 min old
+    When R2 is called without a proof
+    Then the response is 200
+    When the clock advances to auth_time age 12 h 01 min and R2 is called without a proof
+    Then the response is 401 REAUTH_REQUIRED and the problem detail contains scope "test.member" and max_age 43200
+    When the user re-authenticates for scope "test.member" and repeats the call with the proof
+    Then the response is 200
+    And the next access token has an auth_time equal to the re-authentication time and R2 succeeds without a proof
+
+  Scenario: Scope without max age always requires a proof
+    Given a session authenticated 1 minute ago
+    When R1 is called without a proof
+    Then the response is 401 REAUTH_REQUIRED
+
+  Scenario: Unauthenticated
+    When the re-authentication endpoint or R1 is called without an access token
+    Then the response is 401 AUTH_REQUIRED
+
+  Scenario: Re-authentication is rate limited
+    When 11 re-authentication attempts arrive from one IP within a minute
+    Then the 11th returns 429 RATE_LIMITED
+
+  Scenario: Audit of a successful re-authentication
+    When a re-authentication succeeds
+    Then an UPDATE audit entry for entity "session" with the old and new authenticated_at is written in the same transaction with outcome SUCCESS
+    And the entry contains no password, TOTP code or proof value
+    And a failed re-authentication writes LOGIN_FAILED with outcome DENIED
+```
+
+### US-292 — Unverified-account expiry and pre-hijack recovery
+- **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-015, US-016, EPIC-01
+- **Linked REQs:** REQ-AUTH-026
+- **As a** platform operator **I want** accounts that never verify their e-mail to expire after 7 days **so that** nobody can squat on or pre-register a victim's address indefinitely, and the real mailbox owner can register once the week has passed.
+- **Notes:** D-050, SEC-P3-06 item 3, EC-A51. `AUTH_UNVERIFIED_TTL=7d` is configuration; the job is a `housekeeping` repeatable job (REQ-PLAT-015). The e-mail unique index excludes `DEACTIVATED` users (or the address is tombstoned). Drafts, quotes and addresses of the expired user are retained for the audit chain and removed by the later erasure jobs. Mailbox owner's earlier recovery path: password reset verifies the mailbox (US-021). Not demo-critical.
+
+#### Acceptance criteria
+Permission path: not applicable — system job, no principal
+```gherkin
+Feature: Unverified-account expiry and pre-hijack recovery
+  Scenario: Expired unverified account is deactivated
+    Given an account registered 7 days and 1 s ago (fake clock) still in PENDING_VERIFICATION with a live session and a personal organisation
+    When the housekeeping job runs
+    Then the user status is DEACTIVATED and the user's sessions are revoked
+    And the personal organisation is soft-deleted (deleted_at set)
+    And an UPDATE audit entry for the status transition exists with actor type SYSTEM_JOB, outcome SUCCESS, old status PENDING_VERIFICATION and new status DEACTIVATED
+
+  Scenario: The address can register again
+    Given the account above was expired
+    When a guest registers the same address
+    Then the response is 202 and a new user row with status PENDING_VERIFICATION exists
+    And the old row still exists with its audit history
+
+  Scenario: Account inside the window is untouched
+    Given an account registered 6 days and 23 hours ago in PENDING_VERIFICATION
+    When the housekeeping job runs
+    Then its status, sessions and organisation are unchanged and no audit entry is written
+
+  Scenario: Verified account is never touched
+    Given an ACTIVE account registered 30 days ago
+    When the housekeeping job runs
+    Then it is unchanged
+
+  Scenario: Sign-in for the expired account
+    Given the account was expired
+    When its owner signs in with the original credentials
+    Then the response is 401 INVALID_CREDENTIALS identical to a wrong password
+
+  Scenario: Job redelivery is idempotent
+    Given one expired unverified account
+    When the housekeeping job runs twice
+    Then the account is deactivated once and exactly one audit entry exists
+
+  Scenario: Failure of one account does not block the others
+    Given two expired accounts and a forced failure while expiring the first
+    When the housekeeping job runs
+    Then the second is still deactivated and the failure is logged and retried on the next run
 ```
 
 ## Coverage check
@@ -842,11 +1109,13 @@ Feature: Admin session lifetime and crawler exclusion
 | REQ-AUTH-017 | US-024 |
 | REQ-AUTH-018 | US-025 |
 | REQ-AUTH-019 | US-026 |
-| REQ-AUTH-020 | US-026 |
+| REQ-AUTH-020 | US-026, US-291 |
 | REQ-AUTH-021 | US-027 |
 | REQ-AUTH-022 | US-027 |
 | REQ-AUTH-023 | US-028 |
 | REQ-AUTH-024 | US-029 |
+| REQ-AUTH-025 | US-291 |
+| REQ-AUTH-026 | US-292 |
 | REQ-ADMIN-001 | US-030 |
 | REQ-ADMIN-002 | US-031 |
 | REQ-ADMIN-003 | US-030 |

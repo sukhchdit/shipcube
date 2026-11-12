@@ -305,7 +305,7 @@ Feature: ETags and optimistic concurrency
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-036
 - **Linked REQs:** REQ-API-014, REQ-SEC-005, REQ-SEC-006
 - **As an** operator **I want** shared, per-route request limits with standard headers **so that** brute force and abuse are throttled consistently across instances.
-- **Notes:** DR-A22 defaults (configuration): unauthenticated 120/min/IP; authentication routes 10/min/IP and 5/min/account identifier; refresh, logout and CSRF-token routes are `public` class 120/min/IP (D-043); authenticated 600/min/user; public reference and lookup routes 120/min/IP; webhooks 600/min per source IP; CSP report 20/min/IP. Two stages (DR-A08, ADR-0016 amendment 1): the per-IP limit of the route's class runs before authentication so floods never reach bcrypt or JWT verification; the per-user limit runs after authorisation. IPv6 keyed by /64. EC-A12: only configured trusted proxies' `X-Forwarded-For` hops are honoured. Redis outage: authentication routes use per-instance in-memory counters and log ERROR security event; others fail open (ASSUMED GAP-A-19).
+- **Notes:** DR-A22 defaults (configuration): unauthenticated 120/min/IP; authentication routes 10/min/IP and 5/min/account identifier; refresh, logout and CSRF-token routes are `public` class 120/min/IP (D-043); authenticated 600/min/user; public reference and lookup routes 120/min/IP; webhooks 600/min per source IP; CSP report 20/min/IP; email-sending routes (verification resend, reset request and accepted registrations, D-049) 3/h per normalised address and 10/h per IP; registration allows at most 5 distinct addresses per IP per hour (`registration_probe` beyond); concurrent quote SSE streams 2 per IP (anonymous) and 5 per user (D-048). Headers are the three draft-06 names (REQ-API-014, D-052). Two stages (DR-A08, ADR-0016 amendment 1): the per-IP limit of the route's class runs before authentication so floods never reach bcrypt or JWT verification; the per-user limit runs after authorisation. IPv6 keyed by /64. EC-A12: only configured trusted proxies' `X-Forwarded-For` hops are honoured. Redis outage: authentication routes use per-instance in-memory counters and log ERROR security event; others fail open (ASSUMED GAP-A-19).
 
 #### Acceptance criteria
 ```gherkin
@@ -361,6 +361,40 @@ Feature: Redis-backed rate limiting and headers
 
   Scenario: Unauthenticated route class used when no principal
     Then a request without token is counted against its IP, never against a user
+
+  Scenario: Registration is counted in both the auth and the email-send class
+    Given 3 accepted registrations for one normalised address within the last hour
+    When a 4th accepted registration for that address arrives
+    Then the response is 429 RATE_LIMITED with Retry-After (email-send class, 3 per hour per address)
+    Given 10 accepted registrations from one IP within the last hour for distinct addresses
+    When an 11th arrives from that IP
+    Then the response is 429 RATE_LIMITED (email-send class, 10 per hour per IP)
+    And the 11th registration from one IP within a minute is also rejected by the auth class (10/min/IP)
+
+  Scenario: Sixth distinct address from one IP is a registration probe
+    Given one IP registered 5 distinct normalised addresses within the last hour
+    When it registers a 6th distinct address
+    Then the response is 429 RATE_LIMITED
+    And one security event "registration_probe" is emitted and its counter increments
+
+  Scenario Outline: Concurrent quote SSE streams are capped
+    Given <existing> open quote streams for the same <scope>
+    When another stream is opened
+    Then the response is 429 RATE_LIMITED and the existing streams are unaffected
+    Examples:
+      | existing | scope                        |
+      | 2        | anonymous IP (3rd stream)    |
+      | 5        | authenticated user (6th)     |
+
+  Scenario: Closing a stream frees its slot
+    Given an anonymous IP with 2 open streams
+    When one stream completes and another is opened
+    Then the new stream is accepted
+
+  Scenario: Rate-limit headers use the three draft-06 names
+    When any rate-limited route responds
+    Then the response has RateLimit-Limit, RateLimit-Remaining and RateLimit-Reset
+    And it has no X-RateLimit-* and no combined RateLimit or RateLimit-Policy header
 ```
 
 ### US-041 — Data representation rules
@@ -623,7 +657,7 @@ Feature: Static safeguards
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-008, EPIC-04
 - **Linked REQs:** REQ-SEC-010, REQ-SEC-012
 - **As a** security analyst **I want** one hardened outbound HTTP client and stable security events **so that** server-side request forgery is blocked and attacks are observable.
-- **Notes:** https only, host allow-list per environment, refuse loopback, private, link-local, unique-local (including 169.254.169.254) after DNS resolution, refuse redirects leaving allow-list, timeout and response-size cap; error `SSRF_BLOCKED`. Internal services use dedicated clients. Security events: login failure, account lock, MFA failure, refresh-token reuse, permission denial, CSRF rejection, SSRF block, rate-limit hit on auth routes, repeated cross-tenant 404s (more than 20 per user per minute, ASSUMED). Field `event_type=security`, stable event name, no secrets.
+- **Notes:** https only, host allow-list per environment, refuse loopback, private, link-local, unique-local (including 169.254.169.254) after DNS resolution, refuse redirects leaving allow-list, timeout and response-size cap; error `SSRF_BLOCKED`. Internal services use dedicated clients. Security events: login failure, account lock, MFA failure, refresh-token reuse, permission denial, CSRF rejection, SSRF block, rate-limit hit on auth routes, repeated cross-tenant 404s (more than 20 per user per minute, ASSUMED), registration probing (`registration_probe`), carrier quota pressure (`carrier_quota_pressure`) and anonymous carrier-budget exhaustion (`carrier_anon_budget_exhausted`) (D-049, D-048, D-052 h). Names must appear in the event catalogue (`api/README.md` section 13). Field `event_type=security`, stable event name, no secrets.
 
 #### Acceptance criteria
 ```gherkin
@@ -671,6 +705,9 @@ Feature: SSRF-safe outbound client and security events
       | permission denial            | permission_denied      |
       | CSRF rejection               | csrf_rejected          |
       | 21 cross-tenant 404s in 1 min| cross_tenant_404_burst |
+      | 6th distinct registration address from one IP in an hour | registration_probe |
+      | carrier daily quota reaches the 70 % or 90 % threshold   | carrier_quota_pressure |
+      | anonymous carrier call budget exhausted                  | carrier_anon_budget_exhausted |
 
   Scenario: Permission path
     Given an unprivileged user requests another org's resource 21 times in a minute

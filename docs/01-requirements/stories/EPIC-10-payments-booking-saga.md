@@ -383,6 +383,7 @@ Feature: Saga compensation
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-204
 - **Linked REQs:** REQ-BOOK-023
 - **As a** customer **I want** transient carrier failures retried and unclear outcomes handled safely **so that** I am neither double-booked nor left charged.
+- **Notes:** `CARRIER_BUSY` (bulkhead overflow or quota-guard refusal, US-130, US-293) is a local admission rejection with no network call: retryable and non-ambiguous, outside the 5 transient retries (REQ-BOOK-023, DR-B03 step 2, EC-B48, D-048). A guest flood can delay a paid booking but never fail it before the 30-minute deadline.
 
 #### Acceptance criteria
 ```gherkin
@@ -408,6 +409,38 @@ Feature: createShipment failure handling
 
   Scenario: Permission paths
     Then the retry policy is system-only configuration: a customer calling it directly gets 404 "NOT_FOUND"; unauthenticated 401
+
+  Scenario: CARRIER_BUSY from the transactional bulkhead is retried without counting against transient retries
+    Given the transactional pool of the carrier account is full and createShipment is rejected locally with CARRIER_BUSY (no network call is made)
+    When the saga step runs repeatedly
+    Then each rejection is retried with full-jitter backoff (2 s base, 60 s cap) until the 30-minute saga deadline
+    And these rejections do not count against the 5 transient retries
+    And the shipment never enters DRAFT or EXCEPTION because of CARRIER_BUSY
+    And the authorisation is not released while the saga is still retrying
+
+  Scenario: A quota-guard refusal is treated like CARRIER_BUSY
+    Given the carrier account's daily quota is above 90 percent and the guard refuses a non-transactional call, or the transactional pool refuses locally
+    When createShipment is rejected with a local admission rejection
+    Then it is classified retryable and non-ambiguous, not as a definitive rejection or an ambiguous outcome
+    And it is retried with backoff until the saga deadline
+
+  Scenario: Booking succeeds once the pool frees within the deadline
+    Given createShipment is rejected with CARRIER_BUSY 4 times and then admitted
+    Then exactly one carrier shipment is created, payment is captured once and the shipment reaches BOOKED
+    And the transient retry counter is still 0
+
+  Scenario: Deadline passes while the carrier stays busy
+    Given the carrier account stays busy for longer than 30 minutes
+    When the saga deadline passes
+    Then the saga compensates with trigger SYSTEM_TIMEOUT
+    And the authorisation is released
+    And the shipment returns to DRAFT with the canonical code CARRIER_BUSY and the customer is notified
+    And one transition-history and audit entry records the DRAFT transition with trigger SYSTEM_TIMEOUT
+
+  Scenario: Guest flood does not block a paid booking
+    Given a guest rate-shopping flood saturates the rates pool of the carrier account (Mock latency on rates)
+    When a paid booking reaches saga step 2 for the same account
+    Then createShipment is admitted through the separate transactional pool and the shipment reaches BOOKED
 ```
 
 ### US-206 — Partial capture for multi-shipment orders
@@ -664,7 +697,7 @@ Feature: 3DS, declines and attempt limit
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-210
 - **Linked REQs:** REQ-PAY-011, REQ-PAY-012
 - **As the** operator **I want** gateway webhooks verified and processed once **so that** payment state is reliable even with duplicates and reordering.
-- **Notes:** EC-B11. Public route authenticated by signature, permission `webhook:stripe:receive`, actor type system.
+- **Notes:** EC-B11. Public route authenticated by signature, permission `webhook:stripe:receive`, actor type system. Run is test mode only (REQ-PAY-004), so a signed `livemode: true` event is rejected; an event-type allow-list decides what is applied and unknown types are stored and acknowledged only (REQ-PAY-012, D-052, SEC-P3-21).
 
 #### Acceptance criteria
 ```gherkin
@@ -698,6 +731,19 @@ Feature: Webhooks
 
   Scenario: Unknown event type
     Then it is stored and acknowledged with 200
+
+  Scenario: Live-mode event is rejected
+    Given a correctly signed fixture event with livemode true
+    When it is posted to the webhook endpoint
+    Then the response is 400 and the event is not processed
+    And an audit entry with outcome DENIED and the source IP is written
+    And a security log event is emitted with no secrets
+
+  Scenario: Unknown event type is stored but never processed
+    Given a correctly signed test-mode event of a type outside the event-type allow-list
+    When it is posted
+    Then the response is 200 and the event is stored by gateway event ID
+    And no handler runs and no payment, shipment or refund state changes
 
   Scenario: Permission path
     Then the endpoint accepts only signature-authenticated callers; a request with a valid user token but no signature gets 400; an unsigned call never reaches a handler
@@ -825,6 +871,7 @@ Feature: Automatic refund
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-210
 - **Linked REQs:** REQ-PAY-014
 - **As a** business customer **I want** to save and manage cards **so that** checkout is faster.
+- **Notes:** Step-up per D-046 and REQ-PAY-014: setup/add, update (set default) and remove require a valid re-authentication proof in `X-Reauth-Proof` (`x-reauth-scope: payment_method.manage`, no age exemption); listing needs none. A saved-card checkout by a session whose `auth_time` is older than 12 h sets CVC re-collection (Stripe `payment_method_options.card.require_cvc_recollection = true`; the Mock gateway exposes the same flag); a new-card checkout is unaffected. MoSCoW stays Should because REQ-PAY-014 is Should.
 
 #### Acceptance criteria
 ```gherkin
@@ -849,6 +896,46 @@ Feature: Saved payment methods
 
   Scenario: Audit
     Then add, default change and removal write audit entries on "payment_method" and listing writes VIEW
+
+  Scenario Outline: Changing a saved method without a re-authentication proof is refused
+    Given a signed-in user with "payment_method:manage" and no X-Reauth-Proof header
+    When the user performs "<action>"
+    Then the response is 401 application/problem+json with code REAUTH_REQUIRED naming scope payment_method.manage
+    And no payment method is created, changed or removed and nothing changes at the gateway
+    And a proof older than 5 minutes (REQ-AUTH-020) is refused the same way, however recently the user signed in
+    Examples:
+      | action                  |
+      | setup / add a method    |
+      | set a default method    |
+      | remove a method         |
+
+  Scenario: A valid re-authentication proof allows the change and is audited
+    Given a user with "payment_method:manage" who completed re-authentication for scope payment_method.manage
+    When the user adds, sets a default for and removes a method, each with X-Reauth-Proof
+    Then each request succeeds
+    And each writes an audit entry on "payment_method" with outcome SUCCESS in the same transaction
+
+  Scenario: Listing needs no proof
+    Given a signed-in user with "payment_method:manage" and no X-Reauth-Proof header
+    When the user lists saved methods
+    Then the response is 200 with brand, last four digits and expiry only
+
+  Scenario: Saved-card checkout with a stale session requires CVC re-collection
+    Given a user whose session auth_time is 13 hours old
+    When checkout is started with a saved card (Stripe fixture and Mock gateway)
+    Then the PaymentIntent carries payment_method_options.card.require_cvc_recollection true (Mock payment: require_cvc_recollection true)
+    And the hosted fields collect the security code again before the payment is confirmed
+
+  Scenario: Saved-card checkout with a fresh session does not require CVC re-collection
+    Given a user whose session auth_time is 11 hours old
+    When checkout is started with a saved card
+    Then the payment carries require_cvc_recollection false
+    And the saved card is used without a new code prompt unless 3-D Secure is demanded
+
+  Scenario: New-card checkout is unaffected by auth_time
+    Given a user whose session auth_time is 13 hours old
+    When checkout is started with a new card
+    Then the normal card entry flow runs and no extra re-authentication or CVC re-collection flag is added
 ```
 
 ### US-218 — Payment receipt

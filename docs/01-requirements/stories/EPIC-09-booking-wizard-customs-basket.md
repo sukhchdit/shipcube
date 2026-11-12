@@ -683,6 +683,33 @@ Feature: Invoice content and carrier customs documents
 
   Scenario: Audit
     Then invoice generation writes CREATE on "document" with type, version and SHA-256
+
+  Scenario: Identity reference printed in full only for a FULL type (REQ-COMP-001, D-051)
+    Given the seeded IN pack marks the import receiver reference type with "invoice_print: FULL"
+    And a booked US -> IN shipment with reason for export "SALE" and a receiver reference of that type
+    When the document job renders the commercial invoice
+    Then the invoice prints the receiver reference in full
+
+  Scenario: Identity reference of a MASKED type is printed masked
+    Given the test pack defines a second party identity reference type with "invoice_print: MASKED"
+    And a shipment carries a reference of that type
+    When the document job renders the invoice
+    Then the invoice prints only the masked form of that reference and never the full value
+
+  Scenario: Document carrying a FULL reference is classified SENSITIVE
+    When the US -> IN commercial invoice with the full receiver reference is stored
+    Then the document classification is "SENSITIVE"
+    And an invoice carrying only MASKED references is not classified "SENSITIVE"
+
+  Scenario: Decrypted reference exists only in the render DTO (sentinel test)
+    Given the receiver reference value is the sentinel "SENTINEL-IN-RECV-0001"
+    When the document job renders the invoice
+    Then the sentinel appears in the PDF text and in the worker's render DTO registered "SENSITIVE_PERSONAL"
+    And it does not appear in the job payload, in any log line or in any audit entry value
+
+  Scenario: API keeps returning the masked value (REQ-BOOK-008)
+    When the customer reads the shipment party reference through the API
+    Then the response contains "value_masked" and no full reference value
 ```
 
 ### US-187 — Carrier customs field mapping inside adapters

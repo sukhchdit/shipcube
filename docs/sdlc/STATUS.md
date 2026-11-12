@@ -53,7 +53,7 @@ _none_
 4. **Testcontainers on Docker Desktop.** Integration tests depend on Docker availability in CI and locally.
 
 ## Next Actions
-- principal-architect: ADR-0023 amendment + UX §5 resolutions (running).
-- product-manager: D-ARCH-006 wording + assumptions (running).
+- P3 security review (security-analyst): APPROVED_WITH_CONDITIONS, 0 Critical / 4 High (SEC-P3-01 session/step-up, 02 carrier bulkhead flood, 03 audit tamper evidence, 04 npm lifecycle scripts) + Mediums. Report: docs/05-quality/security/P3-architecture-security-review.md (commit 8fcb8be).
+- principal-architect (+ specialists): remediating SEC-P3-01..04 and 07/08/10/11/12/13/14 in the ADRs, data model, OpenAPI and platform (running).
+- product-manager: requirement side (supersede D-038, REQ-AUTH-020 → Must, budgets, RR-16, invoice_print) (running).
 - Then quality-gatekeeper G2 attempt 1.
-- Then P4: senior-developer + qa-lead (Wave 0 = skeleton + generators + spikes SPK-01..06; waves by DC tag).

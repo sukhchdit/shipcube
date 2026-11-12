@@ -31,6 +31,10 @@ Headless Chromium (table above) — rejected for M1 on image size, determinism a
 - Negative: layout code is hand-written; complex multi-locale documents later may motivate the renderer image.
 - Verification: golden-PDF byte-equality tests per template and locale; hash tests; pre-signed URL TTL and audit tests (NFR-SEC-013).
 
+## Amendment after the P3 security review (2026-11-12, `docs/05-quality/security/P3-architecture-security-review.md` SEC-P3-09, adjudication (f); D-051; D-ARCH-028)
+
+1. **Full receiver identity reference on the customs invoice — distribution and minimisation (SEC-P3-09, MEDIUM; amends §Decision "E-mailing documents").** (a) The compliance pack declares `invoice_print: FULL | MASKED` per party identity reference type (default `MASKED`; data-architect adds the pack field); the invoice template prints a reference in full **only** when its type is `FULL`, otherwise the masked form; the seeded `FULL` list needs legal `reviewed_by` before M5 (A-097). (b) A document that contains a `FULL` reference is classified `SENSITIVE` in `documents.sensitivity`; `emailShipmentDocuments` and the booking-confirmation notification **never attach** a `SENSITIVE` document — they send a link to the shipment page (fail-closed `DOWNLOAD` audit and the 300 s URL stay in the loop); labels and pickup confirmations remain attachable (≤ 10 MB rule unchanged). (c) The customer **Viewer** role lacks `document:download`, `document:email` and `privacy:export` (RBAC seed, asserted by RBAC-GEN; D-051). (d) The decrypted reference exists only in the worker's render input DTO, registered `SENSITIVE_PERSONAL` in the classification registry so Pino redacts it; it is never written to logs, job payloads (ADR-0013 amendment 1) or raw carrier payloads (ADR-0010 amendment 8 replaces embedded PDFs with `$blob`). (e) Stored PDFs use SSE (SSE-KMS at M5, ADR-0021); retention and erasure follow the pack (M4/M5 erasure job, ADR-0021 §7). Verification: SEC-TC-52.
+
 ## Reversibility
 
 High (renderer is behind `DocumentRenderer` port).

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0 |
+| Version | 1.1 (1.0 amended after the P3 architecture security review; amendments listed at the end of §12) |
 | Date | 2026-11-12 |
 | Owner | data-architect (spawned by principal-architect, P3 Architecture) |
 | Status | **Draft for G2** |
@@ -26,6 +26,7 @@ Conventions in this document: requirement IDs (`REQ-*`), domain rules (`DR-*`), 
 9. Seed plan
 10. Volume and sizing, partitioning outlook, caching, data protection, retention, open issues
 11. Handoff Report
+12. Principal-architect ratification and reconciliation; amendments after the P3 security review (2026-11-12)
 
 ---
 
@@ -145,9 +146,11 @@ All system-of-record data lives in one PostgreSQL 18 database (one schema `publi
 |---|---|---|---|---|
 | `TENANT` | `NOT NULL`, FK `organisations` | ENABLE + FORCE; tenant branch + read-only operator branch (`app_is_operator()`) | Rows of `app.org_id`; verified operator staff (read) | shipments, orders, payments, documents, address_book_entries, saga tables |
 | `GUEST_CAPABLE` | nullable; `guest_token_hash` when null | as TENANT + guest branch | As TENANT, or the holder of the guest token | quotes, quote_packages, quote_options, quote_shares |
-| `USER_OWNED` | none, or `org_id` for user-private data within an org | ENABLE + FORCE; `user_id = app_actor_id()` (and `org_id = app_org_id()` where present) + operator read + org-member read on `users` | The user; verified operator staff (read) | users, user_credentials, sessions, refresh_tokens, one-time token tables, mfa_*, reauth_proofs, notification_preferences, notification_log, saved_payment_methods, payment_gateway_customers, terms_acceptances, consent_records |
+| `USER_OWNED` | none, or `org_id` for user-private data within an org | ENABLE + FORCE; `user_id = app_actor_id()` (and `org_id = app_org_id()` where present) + operator read + org-member read on `users` | The user; verified operator staff (read) | users, user_credentials, sessions, refresh_tokens, one-time token tables, mfa_* (including `mfa_enrolment_codes`), reauth_proofs, notification_preferences, notification_log, saved_payment_methods, payment_gateway_customers, terms_acceptances, consent_records |
 | `GLOBAL` | none | none | Everyone (SELECT); writes only where listed in §4.4 | reference data, compliance packs, carriers, pricing config, roles, permissions, feature flags, number_sequences, notification_templates |
-| `SYSTEM` | none (or informational `org_id` on global index tables) | none | Only the owning module's repositories; no personal data except hashes and the encrypted vault | outbox_events, processed_events, idempotency_keys, login_attempt_counters, gateway_webhook_events, global index tables (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`), `audit_*` (entries, stream heads, partitions, verifications, checkpoint heads, PII vault, data subjects) |
+| `SYSTEM` | none (or informational `org_id` on global index tables) | none | Only the owning module's repositories; no personal data except hashes and the encrypted vault | outbox_events, processed_events, idempotency_keys, login_attempt_counters, gateway_webhook_events, global index tables (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`), `audit_*` (entries, stream heads, partitions, verifications, checkpoint heads, anchors, PII vault, data subjects), `bootstrap_migrations` (bootstrap-lane ledger, §8.3) |
+
+Amended 2026-11-12 (SEC-P3-03, SEC-P3-14): `audit_anchors` and the bootstrap-lane ledger `bootstrap_migrations` join the SYSTEM allow-list; `mfa_enrolment_codes` is USER_OWNED. All audit-module tables are owned by `platform_audit_owner`, not `platform_migrator` (§4.4).
 
 The documented list of non-RLS tables (GLOBAL + SYSTEM) is the allow-list of the REQ-RLS-001 build-time test; any table with a column named `org_id` that is not on it must have RLS forced and an `org_id`-leading index (§4.6). Pre-authentication and cross-tenant lookups use only the allow-listed definer functions of §4.5 or the global index tables (ADR-0005 amendment 1).
 
@@ -157,7 +160,7 @@ The documented list of non-RLS tables (GLOBAL + SYSTEM) is the allow-list of the
 |---|---|---|
 | SYSTEM actor | `00000000-0000-7000-8000-000000000001` | `created_by`/`updated_by` and audit `user_id` for seed and system jobs (REQ-RLS-009); seeded `users` row with `is_system = true`, no credentials |
 | ANONYMOUS actor | `00000000-0000-7000-8000-000000000002` | `created_by` of guest quotes and anonymous consent records (REQ-AUDIT-011) |
-| SYSTEM audit stream shards | `00000000-0000-0000-0000-0000000000NN`, `NN` = `00`…`0f` | `stream_id` of entries without an organisation, shard = `hash(correlation_id) mod 16` (ADR-0007 amendment 1); shard `00` (the nil UUID) also carries the nightly checkpoint |
+| SYSTEM audit stream shards | `00000000-0000-0000-0000-0000000000NN`, `NN` = `00`…`0f` | `stream_id` of entries without an organisation, shard = `hash(correlation_id) mod 16` (ADR-0007 amendment 1); shard `00` (the nil UUID) also carries the hourly checkpoint (amended 2026-11-12, SEC-P3-03; was nightly) |
 
 Both actor IDs are syntactically valid UUIDv7 (version nibble 7, variant 10, timestamp 0) so the NFR-DATA-002 key test passes.
 
@@ -185,6 +188,13 @@ Both actor IDs are syntactically valid UUIDv7 (version nibble 7, variant 10, tim
 | `notification_status` / `channel` | `QUEUED`, `SENT`, `FAILED`, `DEAD_LETTERED`, `SUPPRESSED_BY_PREFERENCE` / `EMAIL`, `SMS`, `WHATSAPP` | REQ-NOTIF-001/012 |
 | `api_mode` | `TEST`, `LIVE` | REQ-API-020 (seam) |
 | `reference_source` | `ISO`, `SEED`, `SAMPLE`, `OPERATOR` | REQ-DATA-001, DR-A27 |
+| `user_status_reason` | `MFA_ENROLMENT_OVERDUE`, `ADMIN_ACTION`, `VERIFICATION_EXPIRED`, `USER_REQUEST` | ADR-0006 amendment 14 (SEC-P3-14); `VERIFICATION_EXPIRED` reserved for the 7-day unverified deactivation of SEC-P3-06 |
+| `password_reset_purpose` | `RESET`, `SET_PASSWORD` | ADR-0006 amendment 14 (SEC-P3-14) |
+| `job_context_kind` | `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote` | ADR-0013 amendment (SEC-P3-12); values of `platform.job_context(p_kind, …)`, §4.5 |
+| `anchor_algorithm` | `ECDSA_P256_SHA256` | ADR-0007 amendment 7 (SEC-P3-03) |
+| `chain_failure_kind` | `HASH_MISMATCH`, `PREV_HASH_MISMATCH`, `SEQ_GAP`, `SEQ_DUPLICATE`, `DUPLICATE_ENTRY_HASH`, `HEAD_MISMATCH`, `CHECKPOINT_HEAD_MISMATCH`, `CHECKPOINT_SIGNATURE_INVALID`, `ANCHOR_MISSING` | REQ-AUDIT-013, ADR-0007 amendment 7 (SEC-P3-03) |
+
+Amended 2026-11-12 (SEC-P3-03, SEC-P3-12, SEC-P3-14): the last five rows were added; `chain_failure_kind` formalises the CHECK list of `audit_chain_verifications.failure_kind` (§3.4) and adds the three anchor-related kinds.
 
 
 ---
@@ -205,6 +215,8 @@ erDiagram
   users ||--o{ mfa_totp : "enrols"
   users ||--o{ mfa_recovery_codes : "holds"
   users ||--o{ mfa_challenges : "is challenged"
+  users ||--o{ mfa_enrolment_codes : "proves mailbox for first TOTP"
+  sessions ||--o{ mfa_enrolment_codes : "requested in"
   sessions ||--o{ reauth_proofs : "re-authenticates"
   users }o--o| organisations : "last_active_org / personal_org"
   users {
@@ -256,6 +268,12 @@ erDiagram
     uuid user_id FK
     bytea token_hash UK
   }
+  mfa_enrolment_codes {
+    uuid id PK
+    uuid user_id FK
+    uuid session_id FK
+    bytea code_hmac
+  }
   reauth_proofs {
     uuid id PK
     uuid session_id FK
@@ -271,6 +289,8 @@ erDiagram
     uuid id PK
   }
 ```
+
+Amended 2026-11-12 (SEC-P3-14): `mfa_enrolment_codes` added (§3.1).
 
 ### 2.2 Organisations and authz
 
@@ -357,6 +377,8 @@ erDiagram
   audit_pii_vault ||--o{ audit_entries : "referenced by $pii token in values"
   audit_chain_verifications }o--o| audit_entries : "first broken entry"
   audit_chain_verifications ||--o{ audit_checkpoint_heads : "anchors"
+  audit_entries ||--o| audit_anchors : "CHAIN_CHECKPOINT entry signed by"
+  audit_anchors ||--o| audit_anchors : "prev_anchor_hash chains"
   audit_entries {
     timestamptz occurred_at PK
     uuid id PK
@@ -397,7 +419,17 @@ erDiagram
     uuid checkpoint_entry_id
     uuid stream_id
   }
+  audit_anchors {
+    bigint anchor_seq PK
+    uuid checkpoint_entry_id
+    bytea heads_digest
+    bytea prev_anchor_hash
+    bytea anchor_hash UK
+    bytea signature
+  }
 ```
+
+Amended 2026-11-12 (SEC-P3-03): `audit_anchors` added (§3.4, §5.5). Every entity in this diagram is owned by `platform_audit_owner` and created only in the bootstrap lane (§4.4, §8.3).
 
 ### 2.4 Platform
 
@@ -955,6 +987,8 @@ REQ-AUTH-001/004/024, REQ-ORG-002/005, REQ-ACCT-017/018, REQ-I18N-007, REQ-UI-00
 | `display_name` | `text` | N | `CHECK (char_length(display_name) BETWEEN 1 AND 100)` | PER |
 | `status` | `text` | N | `DEFAULT 'PENDING_VERIFICATION'`, CHECK `user_status` | INT |
 | `status_changed_at` | `timestamptz` | N | `DEFAULT now()` | INT |
+| `status_reason` | `text` | Y | CHECK `user_status_reason` (§1.7); `ck_users__status_reason CHECK (status_reason IS NULL OR status IN ('SUSPENDED','DEACTIVATED'))`; cleared on reactivation | INT |
+| `first_signed_in_at` | `timestamptz` | Y | set once, at the first successful password verification; start of the 24 h staff enrolment deadline | INT |
 | `locale` | `text` | N | `DEFAULT 'en'`, `CHECK (locale IN ('en','es','fr'))` | INT |
 | `time_zone` | `text` | Y | IANA name, validated in service (A-077) | PER |
 | `display_currency` | `char(3)` | Y | FK `currencies(code)` | INT |
@@ -972,6 +1006,9 @@ REQ-AUTH-001/004/024, REQ-ORG-002/005, REQ-ACCT-017/018, REQ-I18N-007, REQ-UI-00
 | AP-ID-01 | Resolve user by normalised email at login/registration/reset (through `auth_lookup_user_by_email`, §4.5) | `ux_users__email ON (email) WHERE deleted_at IS NULL` (also enforces case-insensitive uniqueness, EC-A02) |
 | AP-ID-02 | Own row by id (`GET /me`) | PK |
 | AP-ID-03 | Users of an org for member list (join from memberships) | PK (driven from `memberships`) |
+| AP-ID-19 | Staff enrolment deadline: OPERATOR members, `status = 'ACTIVE'`, `first_signed_in_at < now() - 24 h`, no ACTIVE `mfa_totp` (hourly, through `mfa_enrolment_overdue_candidates`, §4.5) | Driven from the OPERATOR organisation's memberships (`ix_memberships__org_*`, tens of rows), then PK on `users` and `ux_mfa_totp__user_live`; no new index |
+
+Amended 2026-11-12 (SEC-P3-14): added `status_reason` and `first_signed_in_at` and AP-ID-19. The `housekeeping` job reads candidates through `mfa_enrolment_overdue_candidates` and then, for each candidate, opens a transaction with `app.actor_id` set to that user (the OI-25 pattern for USER_OWNED rows; audit actor `SYSTEM_JOB`, job name `mfa-enrolment-deadline`). In that transaction it re-checks the predicate, sets `status = 'SUSPENDED'`, `status_reason = 'MFA_ENROLMENT_OVERDUE'`, revokes every session with reason `USER_STATUS_CHANGED` (Redis revocation set first, as in §12 OI-25) and writes the audit entry. The audited operator CLI `ops:staff-reactivate` sets `status = 'ACTIVE'` and `status_reason = NULL`, and keeps `first_signed_in_at`, so the deadline is already past and the user must enrol at the next sign-in before housekeeping runs again.
 
 #### `user_credentials` · USER_OWNED · SD: no · mutable
 
@@ -986,6 +1023,10 @@ REQ-AUTH-002/003/012/023. One row per user; separated from `users` so that the p
 | `password_changed_at` | `timestamptz` | N | `DEFAULT now()` | INT |
 
 AP-ID-04 credential by user id → `ux_user_credentials__user_id`.
+
+**Amendment (2026-11-12, SEC-P3-14, SEC-P3-08).**
+- **A user may have no credential row.** Staff accounts created by a non-local seed (`APP_ENV ∉ {local, test}`) have no `user_credentials` row. The seed issues a `password_reset_tokens` row with `purpose = 'SET_PASSWORD'` (24 h) instead, and the e-mail carries the set-password link. A login for a user without a credential row (`auth_lookup_credential` returns no row) runs the dummy bcrypt comparison (NFR-SEC-003 timing) and answers the generic `INVALID_CREDENTIALS`. Redeeming the `SET_PASSWORD` token inserts the row.
+- **Pepper column reserved.** `pepper_key_id text` (`<purpose>-v<n>`, `PASSWORD_PEPPER` in the ADR-0018 key register) is reserved for the SEC-P3-16 backlog item, which changes the bcrypt pre-hash to a peppered HMAC. It is added by that item's expand migration, not now. Until then the column does not exist, and §10.4 lists it as "reserved".
 
 #### `email_verification_tokens`, `password_reset_tokens` · USER_OWNED · SD: no · purged by `purge_expired_tokens` (§4.5)
 
@@ -1006,6 +1047,14 @@ REQ-AUTH-004/011/012, DR-A01 (24 h / 60 min, 256-bit, hashed, single-use, supers
 | AP-ID-06 | Supersede open tokens of a user | `ix_<table>__user_id_open ON (user_id) WHERE consumed_at IS NULL AND superseded_at IS NULL` |
 | AP-ID-07 | Housekeeping purge (`expires_at < now() - 7 days`) through `purge_expired_tokens`, batches of 1,000 | `ix_<table>__expires_at` |
 
+**Amendment (2026-11-12, SEC-P3-14).** `password_reset_tokens` adds one column. The two tables are no longer identical in shape.
+
+| Column | Type | Null | Default / constraint | Class |
+|---|---|---|---|---|
+| `purpose` | `text` | N | `DEFAULT 'RESET'`, CHECK `password_reset_purpose` (`RESET`, `SET_PASSWORD`); expiry 60 min for `RESET` and 24 h for `SET_PASSWORD` (`ck_password_reset_tokens__ttl CHECK (expires_at <= created_at + CASE purpose WHEN 'SET_PASSWORD' THEN interval '24 hours' ELSE interval '60 minutes' END + interval '1 minute')`, the minute absorbing app/DB clock skew) | INT |
+
+Issuing either purpose supersedes every open token of the user in this table. `auth_lookup_one_time_token` accepts `p_purpose = 'SET_PASSWORD'`, which reads `password_reset_tokens WHERE purpose = 'SET_PASSWORD'`; `'PASSWORD_RESET'` reads `purpose = 'RESET'` (§4.5). Redemption of `SET_PASSWORD` inserts `user_credentials` (or updates it, if a row appeared in the meantime) and, like a reset, revokes the user's other sessions.
+
 #### `sessions` · USER_OWNED · SD: no · mutable
 
 REQ-AUTH-007/009/021/022, REQ-ADMIN-004/007, A-041. `id` is the `sid` claim.
@@ -1018,12 +1067,13 @@ REQ-AUTH-007/009/021/022, REQ-ADMIN-004/007, A-041. `id` is the `sid` claim.
 | `status` | `text` | N | `DEFAULT 'ACTIVE'`, CHECK `session_status` | INT |
 | `active_org_id` | `uuid` | N | FK `organisations(id)` (REQ-ORG-005/006) | INT |
 | `mfa_satisfied` | `boolean` | N | `DEFAULT false` (JWT `mfa` claim source) | INT |
+| `authenticated_at` | `timestamptz` | N | time of the last password or MFA verification: set at login, updated when the MFA challenge completes and when a re-auth proof is issued successfully (`createReauthProof`), **never changed by refresh**; copied into the access-token claim `auth_time` (ADR-0006 amendment 12); `ck_sessions__authenticated_at CHECK (authenticated_at <= absolute_expires_at)` | INT |
 | `ip_prefix_created` | `inet` | Y | network prefix only, IPv4 /24 or IPv6 /48 (`CHECK (masklen(ip_prefix_created) IN (24, 48))`, REQ-AUTH-021) | PER |
 | `ip_prefix_last` | `inet` | Y | as above | PER |
 | `user_agent_raw` | `text` | Y | `CHECK (char_length(user_agent_raw) <= 512)` | PER |
 | `ua_browser`, `ua_os` | `text` | Y | parsed by bowser | PER |
 | `last_used_at` | `timestamptz` | N | `DEFAULT now()`; updated at most once per 5 min per session (write throttling) | INT |
-| `absolute_expires_at` | `timestamptz` | N | login + 90 d (web) / 12 h (admin) (A-041, REQ-ADMIN-004) | INT |
+| `absolute_expires_at` | `timestamptz` | N | `created_at + AUTH_SESSION_ABSOLUTE_TTL`: **30 d (web)** / 12 h (admin, `AUTH_ADMIN_SESSION_ABSOLUTE_TTL`) (A-041, REQ-AUTH-007, REQ-ADMIN-004, ADR-0006 amendment 12); never extended. Database backstop: `ck_sessions__absolute_cap CHECK (absolute_expires_at <= created_at + CASE client_app WHEN 'admin' THEN interval '12 hours' ELSE interval '30 days' END + interval '1 minute')` (the minute absorbs app/DB clock skew), so a misconfiguration cannot exceed the ASVS L1 cap | INT |
 | `revoked_at` | `timestamptz` | Y | | INT |
 | `revoked_reason` | `text` | Y | `CHECK (… IN ('LOGOUT','REMOTE_SIGN_OUT','PASSWORD_RESET','PASSWORD_CHANGED','TOKEN_REUSE','MEMBERSHIP_REMOVED','USER_STATUS_CHANGED','MFA_DISABLED','ABSOLUTE_EXPIRY'))` | INT |
 
@@ -1034,6 +1084,8 @@ REQ-AUTH-007/009/021/022, REQ-ADMIN-004/007, A-041. `id` is the `sid` claim.
 | AP-ID-10 | Expire sessions past `absolute_expires_at` (housekeeping; access tokens already stop at the absolute cap, so this is cleanup) | `ix_sessions__absolute_expires ON (absolute_expires_at) WHERE status = 'ACTIVE'` |
 
 Cross-user revocations (membership removal, user status change, REQ-ORG-012, DR-A04) are performed by a worker job reacting to the outbox event with `app.actor_id` set to the affected user, because `sessions` is USER_OWNED; the Redis revocation set makes them effective within 5 s (REQ-AUTH-009, OI-25).
+
+Amended 2026-11-12 (SEC-P3-01 C1/C2, SEC-P3-11): added `authenticated_at` (the `auth_time` source for step-up, `x-reauth-max-age`, and saved-card CVC recollection after 12 h). The web absolute cap drops from the earlier three-month figure to 30 days. The `ck_sessions__absolute_cap` backstop was added. A refresh presented after `absolute_expires_at` answers 401 `SESSION_EXPIRED` and sets `status = 'EXPIRED'`, `revoked_reason = 'ABSOLUTE_EXPIRY'`.
 
 #### `refresh_tokens` · USER_OWNED · SD: no · purged by `purge_expired_tokens` (expired families)
 
@@ -1047,11 +1099,13 @@ ADR-0006, REQ-AUTH-006/007/008, DR-A03. Looked up by hash through `auth_lookup_r
 | `user_id` | `uuid` | N | FK `users(id)` | INT |
 | `token_hash` | `bytea` | N | SHA-256, 32 bytes, `UNIQUE` | SEC |
 | `status` | `text` | N | `DEFAULT 'ACTIVE'`, CHECK `refresh_token_status` | INT |
-| `expires_at` | `timestamptz` | N | issue + 30 d, never beyond session absolute expiry | INT |
+| `expires_at` | `timestamptz` | N | sliding idle lifetime, recomputed at every rotation: web `LEAST(now() + AUTH_REFRESH_TTL (30 d), sessions.absolute_expires_at)`; **admin `LEAST(now() + AUTH_ADMIN_REFRESH_IDLE_TTL (30 min), sessions.absolute_expires_at)`** | INT |
 | `rotated_at`, `revoked_at` | `timestamptz` | Y | | INT |
 | `replaced_by_id` | `uuid` | Y | FK `refresh_tokens(id)` | INT |
 
 Constraint `ux_refresh_tokens__one_active_per_family ON (family_id) WHERE status = 'ACTIVE'` makes a second concurrent rotation fail (DR-A03, EC-A04). AP-ID-11 lookup by hash (`ux_refresh_tokens__token_hash`); AP-ID-12 revoke family (`ix_refresh_tokens__family_id`); AP-ID-13 purge `expires_at < now() - 7 d` (`ix_refresh_tokens__expires_at`).
+
+Amended 2026-11-12 (SEC-P3-11, SEC-P3-01): `expires_at` is a sliding idle lifetime that is capped by the session's absolute expiry. Admin refresh tokens live 30 minutes from their issue, so an idle admin client cannot keep its session alive: a refresh presented after `expires_at` answers 401 `SESSION_EXPIRED` (ADR-0006 amendment 13). Rotation copies `sessions.authenticated_at` unchanged into the new access token's `auth_time`.
 
 #### `mfa_totp` · USER_OWNED · SD: no · mutable
 
@@ -1062,21 +1116,48 @@ REQ-AUTH-015/017/018/019, EC-A06.
 | STD | | | | INT |
 | `user_id` | `uuid` | N | FK `users(id)` | INT |
 | `status` | `text` | N | `CHECK (status IN ('PENDING','ACTIVE','DISABLED'))` | INT |
-| `secret_ciphertext` | `bytea` | N | AES-256-GCM (nonce ‖ ciphertext ‖ tag) of the base32 secret | SEC |
-| `key_id` | `text` | N | envelope key identifier/version (env key locally, KMS key ARN + version in AWS); never the key itself | INT |
+| `secret_ciphertext` | `bytea` | N | AES-256-GCM (96-bit random nonce ‖ ciphertext ‖ 128-bit tag) of the base32 secret; AAD = (`mfa_totp`, `secret_ciphertext`, `id`, `secret_ciphertext_key_id`) (§10.4) | SEC |
+| `secret_ciphertext_key_id` | `text` | N | `<purpose>-v<n>` of `MFA_ENCRYPTION_KEY` (e.g. `mfa-v1`); never the key itself; `CHECK (secret_ciphertext_key_id ~ '^[a-z][a-z0-9-]*-v[0-9]+$')` | INT |
 | `pending_expires_at` | `timestamptz` | Y | created + 15 min while PENDING | INT |
 | `activated_at`, `disabled_at` | `timestamptz` | Y | | INT |
 | `last_accepted_step` | `bigint` | Y | last accepted RFC 6238 time step; a code for a step ≤ this is rejected (EC-A06) | INT |
 
 `ux_mfa_totp__user_live ON (user_id) WHERE status IN ('PENDING','ACTIVE')` (AP-ID-14).
 
+Amended 2026-11-12 (SEC-P3-08 item 1): `key_id` renamed to `secret_ciphertext_key_id` (`<col>_key_id` convention), and the AAD tuple is stated. A rotation re-encrypts by `secret_ciphertext_key_id`, and reads accept the current and the `_PREVIOUS` key (ADR-0018 amendment 1).
+
 #### `mfa_recovery_codes` · USER_OWNED · SD: no · mutable
 
-REQ-AUTH-016, REQ-ADMIN-008. Columns: STD; `user_id uuid N FK`; `batch_id uuid N` (regeneration voids the whole previous batch); `code_hash text N` bcrypt (SEC); `used_at timestamptz Y`; `voided_at timestamptz Y`. AP-ID-15 unused codes of a user: `ix_mfa_recovery_codes__user_open ON (user_id) WHERE used_at IS NULL AND voided_at IS NULL` (≤ 10 rows, each compared with bcrypt).
+REQ-AUTH-016, REQ-ADMIN-008. Columns: STD; `user_id uuid N FK`; `batch_id uuid N` (regeneration voids the whole previous batch); `code_hmac bytea N` = HMAC-SHA256(`RECOVERY_KEY`, normalised code), `CHECK (octet_length(code_hmac) = 32)` (SEC); `code_hmac_key_id text N` (`<purpose>-v<n>` of `RECOVERY_KEY`); `used_at timestamptz Y`; `voided_at timestamptz Y`. AP-ID-15 unused codes of a user: `ix_mfa_recovery_codes__user_open ON (user_id) WHERE used_at IS NULL AND voided_at IS NULL` (≤ 10 rows; the presented code is HMAC'd under each `code_hmac_key_id` present in the batch and compared in constant time).
+
+Amended 2026-11-12 (SEC-P3-08 item 1; drift fix against ADR-0006): `code_hash text` (bcrypt) is replaced by `code_hmac bytea` plus `code_hmac_key_id`, which is the keyed HMAC that ADR-0006 already specifies. The retired `RECOVERY_KEY` is kept until every code under it is used or voided (ADR-0018 register). The `id-secret` format with a per-code salt is the SEC-P3-16 backlog item and is not designed here.
 
 #### `mfa_challenges` · USER_OWNED · SD: no · purged by `purge_expired_tokens`
 
-REQ-AUTH-017 (5 min, single use, bound to user and IP class). Columns: STD; `user_id uuid N FK`; `client_app text N`; `token_hash bytea N UNIQUE` (SEC); `ip_prefix_hmac bytea N` (HMAC-SHA256 of the client's /24 or /48 prefix, so the challenge can be bound to the IP class without storing the address; INT); `expires_at timestamptz N`; `consumed_at timestamptz Y`; `failed_attempts smallint N DEFAULT 0 CHECK (failed_attempts BETWEEN 0 AND 5)`. AP-ID-16 by hash (through `auth_lookup_one_time_token` with purpose `MFA_CHALLENGE`); AP-ID-17 purge by `expires_at`.
+REQ-AUTH-017 (5 min, single use, bound to user and IP class). Columns: STD; `user_id uuid N FK`; `client_app text N`; `token_hash bytea N UNIQUE` (SEC); `ip_prefix_hmac bytea N` (HMAC-SHA256 of the client's /24 or /48 prefix, so the challenge can be bound to the IP class without storing the address; INT); `ip_prefix_hmac_key_id text N` (amended 2026-11-12, SEC-P3-08 item 1); `expires_at timestamptz N`; `consumed_at timestamptz Y`; `failed_attempts smallint N DEFAULT 0 CHECK (failed_attempts BETWEEN 0 AND 5)`. AP-ID-16 by hash (through `auth_lookup_one_time_token` with purpose `MFA_CHALLENGE`); AP-ID-17 purge by `expires_at`.
+
+#### `mfa_enrolment_codes` · USER_OWNED · SD: no · purged by `purge_expired_tokens`
+
+**New (2026-11-12, SEC-P3-14; ADR-0006 amendment 14).** This is the one-time **enrolment e-mail code** that a user with an OPERATOR membership needs for their **first** TOTP enrolment outside `APP_ENV ∈ {local, test}`. `requestTotpEnrolmentCode` issues it; `enrolTotp` consumes it as `enrolment_code`.
+
+| Column | Type | Null | Default / constraint | Class |
+|---|---|---|---|---|
+| STD | | | | INT |
+| `user_id` | `uuid` | N | FK `users(id)` | INT |
+| `session_id` | `uuid` | N | FK `sessions(id)`; the code works only in the session that requested it | INT |
+| `code_hmac` | `bytea` | N | HMAC-SHA256(enrolment-code key, `user_id` ‖ 6-digit code); `CHECK (octet_length(code_hmac) = 32)`. A plain SHA-256 of a 6-digit code would fall to 10⁶ guesses offline, which is why the key lives outside the database | SEC |
+| `code_hmac_key_id` | `text` | N | `<purpose>-v<n>` of the enrolment-code key (ADR-0018 register entry requested, §10.4) | INT |
+| `expires_at` | `timestamptz` | N | created + 10 min; `CHECK (expires_at <= created_at + interval '11 minutes')` | INT |
+| `consumed_at` | `timestamptz` | Y | single use | INT |
+| `superseded_at` | `timestamptz` | Y | set on the user's open codes when a new one is issued | INT |
+| `failed_attempts` | `smallint` | N | `DEFAULT 0 CHECK (failed_attempts BETWEEN 0 AND 5)`; the 5th failure also supersedes the code. Every failure also counts against the per-user MFA lock (DR-A02) | INT |
+
+| AP | Query | Index |
+|---|---|---|
+| AP-ID-20 | Open code of the actor's session (`SELECT … FOR UPDATE WHERE user_id = app_actor_id() AND session_id = $sid AND consumed_at IS NULL AND superseded_at IS NULL AND expires_at > now()`; constant-time compare in the service; `UPDATE` sets `consumed_at` or increments `failed_attempts`) | `ix_mfa_enrolment_codes__user_open ON (user_id) WHERE consumed_at IS NULL AND superseded_at IS NULL` |
+| AP-ID-21 | Purge 7 days after expiry (`purge_expired_tokens`) | `ix_mfa_enrolment_codes__expires_at` |
+
+Choice recorded: the review offered two designs. One was a `purpose = 'TOTP_ENROLMENT'` value on an existing one-time-token table. The other was this table. **This table is the smaller safe change.** The existing token tables have no generic purpose column, and they are keyed by a globally `UNIQUE` SHA-256 of a 256-bit token that is resolved before any actor exists (`auth_lookup_one_time_token`). A 6-digit code breaks all three properties: codes collide across users, an unkeyed hash is brute-forceable, and an attempt counter is needed. This table, by contrast, is read under the normal own-row policy, because the user already holds a password-authenticated session. It therefore needs no new definer function, only the purge.
 
 #### `reauth_proofs` · USER_OWNED · SD: no · purged by `purge_expired_tokens`
 
@@ -1090,7 +1171,8 @@ REQ-AUTH-013/014/017, DR-A02, EC-A09. Counters exist for unknown identifiers too
 |---|---|---|---|---|
 | STD | | | | INT |
 | `kind` | `text` | N | `CHECK (kind IN ('LOGIN','MFA'))` | INT |
-| `identifier_hmac` | `bytea` | N | HMAC-SHA256(normalised email or user id, per-environment key from secret manager) | SEC |
+| `identifier_hmac` | `bytea` | N | HMAC-SHA256(normalised email or user id, `LOGIN_COUNTER_KEY` from the secret manager) | SEC |
+| `identifier_hmac_key_id` | `text` | N | `<purpose>-v<n>`; amended 2026-11-12 (SEC-P3-08 item 1). Counters are short-lived, so a rotation starts fresh counters under the new key and does not dual-read (ADR-0018 register) | INT |
 | `consecutive_failures` | `integer` | N | `DEFAULT 0 CHECK (consecutive_failures >= 0)` | INT |
 | `last_failure_at` | `timestamptz` | Y | | INT |
 | `delayed_until`, `locked_until` | `timestamptz` | Y | DR-A02 schedule | INT |
@@ -1252,6 +1334,7 @@ ADR-0007, REQ-AUDIT-002/003/004/007/008/009/010/011/012/014/016/017/018, DR-A09.
 | `session_id` | `uuid` | Y | | INT |
 | `ip_token` | `uuid` | Y | PII-vault token of the client IP (ADR-0007 amendment 2) | PER (token) |
 | `ip_hash` | `bytea` | Y | HMAC-SHA256(`AUDIT_INDEX_KEY`, IP) for the viewer's IP equality filter | INT |
+| `ip_hash_key_id` | `text` | Y | `<purpose>-v<n>` of `AUDIT_INDEX_KEY`; `ck_audit_entries__ip_hash_key CHECK ((ip_hash IS NULL) = (ip_hash_key_id IS NULL))`. Part of the hashed canonical object like every other column. During a rotation, the viewer's IP filter computes the HMAC under each live key and queries `ip_hash = ANY($hashes)` (amended 2026-11-12, SEC-P3-08 item 1) | INT |
 | `ip_coarse` | `inet` | Y | /24 (IPv4) or /48 (IPv6) network, in clear (not personal data at that granularity, ADR-0007 amendment 2) | INT |
 | `user_agent_token` | `uuid` | Y | PII-vault token of the raw UA string (ADR-0007 amendment 2) | PER (token) |
 | `ua_parsed` | `text` | Y | browser family + major version / OS family only (e.g. `Firefox 146 / Windows`) | INT |
@@ -1274,6 +1357,8 @@ ADR-0007, REQ-AUDIT-002/003/004/007/008/009/010/011/012/014/016/017/018, DR-A09.
 | `entry_hash` | `bytea` | N | `CHECK (octet_length(entry_hash) = 32)` | INT |
 
 Keys and constraints: `PRIMARY KEY (occurred_at, id)`; `UNIQUE (entry_hash, occurred_at)` — PostgreSQL requires the partition key in every unique constraint of a partitioned table, so ADR-0007's "`entry_hash` UNIQUE" is enforced per partition and global uniqueness of `entry_hash` and `(stream_id, stream_seq)` is asserted by the verifier (OI-05).
+
+Amended 2026-11-12 (SEC-P3-03, SEC-P3-08): added `ip_hash_key_id`. The table, every partition and every other audit-module table are owned by **`platform_audit_owner`** and created or altered only in the bootstrap lane (§4.4, §5, §8.3). `platform_migrator` owns none of them.
 
 | AP | Query (all carry a mandatory `occurred_at` range ≤ 31 days, REQ-AUDIT-019) | Index (created on the parent, propagated to every partition) |
 |---|---|---|
@@ -1317,11 +1402,33 @@ REQ-AUDIT-017/018 (archive marker seam), NFR-AUDIT-007. Columns: STD; `partition
 
 #### `audit_chain_verifications` · SYSTEM · SD: no · mutable (run row updated as it progresses)
 
-REQ-AUDIT-013, NFR-AUDIT-003. Columns: STD; `run_kind text N CHECK (run_kind IN ('INCREMENTAL','FULL'))`; `status text N CHECK (status IN ('RUNNING','PASSED','FAILED','ERROR'))`; `started_at timestamptz N`; `finished_at timestamptz Y`; `streams_checked integer N DEFAULT 0`; `entries_checked bigint N DEFAULT 0`; `first_broken_stream_id uuid Y`; `first_broken_entry_id uuid Y`; `first_broken_occurred_at timestamptz Y`; `failure_kind text Y CHECK (… IN ('HASH_MISMATCH','PREV_HASH_MISMATCH','SEQ_GAP','SEQ_DUPLICATE','DUPLICATE_ENTRY_HASH','HEAD_MISMATCH'))`; `checkpoint_entry_id uuid Y`. AP-AUD-12 latest result for `/health/ready` and `GET /audit/chain/status`: `ix_audit_chain_verifications__started ON (started_at DESC)`.
+REQ-AUDIT-013, NFR-AUDIT-003. Columns: STD; `run_kind text N CHECK (run_kind IN ('INCREMENTAL','FULL'))`; `status text N CHECK (status IN ('RUNNING','PASSED','FAILED','ERROR'))`; `started_at timestamptz N`; `finished_at timestamptz Y`; `streams_checked integer N DEFAULT 0`; `entries_checked bigint N DEFAULT 0`; `first_broken_stream_id uuid Y`; `first_broken_entry_id uuid Y`; `first_broken_occurred_at timestamptz Y`; `failure_kind text Y CHECK` `chain_failure_kind` (§1.7: `HASH_MISMATCH`, `PREV_HASH_MISMATCH`, `SEQ_GAP`, `SEQ_DUPLICATE`, `DUPLICATE_ENTRY_HASH`, `HEAD_MISMATCH`, `CHECKPOINT_HEAD_MISMATCH`, `CHECKPOINT_SIGNATURE_INVALID`, `ANCHOR_MISSING`); `checkpoint_entry_id uuid Y`; `anchor_seq_from bigint Y`, `anchor_seq_to bigint Y` (range of anchors checked by this run). AP-AUD-12 latest result for `/health/ready` and `GET /audit/chain/status`: `ix_audit_chain_verifications__started ON (started_at DESC)`.
+
+Amended 2026-11-12 (SEC-P3-03): three failure kinds and the `anchor_seq_from/_to` columns were added (§5.6).
 
 #### `audit_checkpoint_heads` · SYSTEM · SD: no · append-only
 
-ADR-0007 nightly `CHAIN_CHECKPOINT` (OI-07). One row per stream head captured by a checkpoint (§5.5): STD; `checkpoint_entry_id uuid N` (the SYSTEM-shard-0 entry whose `new_value.heads_digest` = SHA-256 over the sorted `(stream_id ‖ entry_count ‖ head_hash)` list); `stream_id uuid N`; `entry_count bigint N`; `head_hash bytea N`. `ux_audit_checkpoint_heads__checkpoint_stream ON (checkpoint_entry_id, stream_id)`. The digest inside the chain anchors these rows; altering any row changes the recomputed digest.
+ADR-0007 `CHAIN_CHECKPOINT` (OI-07; hourly since amendment 7). One row per stream head captured by a checkpoint (§5.5): STD; `checkpoint_entry_id uuid N` (the SYSTEM-shard-0 entry whose `new_value.heads_digest` = SHA-256 over the sorted `(stream_id ‖ entry_count ‖ head_hash)` list); `stream_id uuid N`; `entry_count bigint N`; `head_hash bytea N`; `head_occurred_at timestamptz Y` (locator: lets the verifier fetch the anchored head entry with partition pruning; not part of the digest, and a wrong value makes the lookup fail, which is reported as a mismatch). `ux_audit_checkpoint_heads__checkpoint_stream ON (checkpoint_entry_id, stream_id)`; `ix_audit_checkpoint_heads__stream_checkpoint ON (stream_id, checkpoint_entry_id DESC)` (latest captured head per stream). The digest inside the chain anchors these rows; altering any row changes the recomputed digest.
+
+Amended 2026-11-12 (SEC-P3-03): checkpoints are **hourly**, and each one stores **delta rows only**: one row per stream whose `entry_count` changed since that stream's previous captured row. The first checkpoint stores every stream. `heads_digest` is still computed over the **full** head set. The full set at checkpoint *k* is reconstructed as the latest row per stream with `checkpoint_entry_id ≤ k` (UUIDv7 order = time order; one checkpoint per hour). With about 125 k streams in Y1 (one per organisation, §10.1), full hourly snapshots would add about 3 M rows a day; deltas add about 50–100 k. Added `head_occurred_at` and the second index.
+
+#### `audit_anchors` · SYSTEM · SD: no · append-only (DB-enforced)
+
+**New (2026-11-12, SEC-P3-03; ADR-0007 amendment 7).** One signed, hash-chained record per checkpoint. The same record is appended to the external sink `AUDIT_ANCHOR_SINK` (§5.5). Owner `platform_audit_owner`; `platform_app` has `SELECT, INSERT`; the append-only triggers match those on the entries (§5.2). Exempt from P1/P2: the key is the dense `anchor_seq`, not a UUIDv7 `id`, because gap detection is the purpose of the key. It is allocated as `max + 1` under the advisory lock `audit:anchors` and never from a sequence object, because sequences skip values on rollback and would produce false gaps. Rows are never updated, so there are no `updated_*`/`version` columns (OI-08 exemption list).
+
+| Column | Type | Null | Default / constraint | Class |
+|---|---|---|---|---|
+| `anchor_seq` | `bigint` | N | PK; `CHECK (anchor_seq >= 1)`; dense (+1) | INT |
+| `checkpoint_entry_id` | `uuid` | N | `UNIQUE`; the SYSTEM-shard-0 `CHAIN_CHECKPOINT` entry (no FK: the partitioned PK is `(occurred_at, id)`; the verifier resolves it) | INT |
+| `created_at` | `timestamptz` | N | microsecond precision; part of the signed hash | INT |
+| `heads_digest` | `bytea` | N | `CHECK (octet_length(heads_digest) = 32)`; equals the checkpoint entry's `new_value.heads_digest` | INT |
+| `prev_anchor_hash` | `bytea` | N | `CHECK (octet_length(prev_anchor_hash) = 32)`; 32 zero bytes for `anchor_seq = 1` | INT |
+| `anchor_hash` | `bytea` | N | `UNIQUE`; `CHECK (octet_length(anchor_hash) = 32)`; `SHA-256(be64(anchor_seq) ‖ UTF-8(created_at as YYYY-MM-DDTHH:MM:SS.ffffffZ) ‖ heads_digest ‖ prev_anchor_hash)` | INT |
+| `algorithm` | `text` | N | `CHECK (algorithm = 'ECDSA_P256_SHA256')` | INT |
+| `key_id` | `text` | N | `<purpose>-v<n>` of `AUDIT_ANCHOR_SIGNING_KEY`; the verifier looks it up in `AUDIT_ANCHOR_PUBLIC_KEYS` | INT |
+| `signature` | `bytea` | N | ECDSA P-256 with SHA-256 over the 32-byte message `anchor_hash`, DER-encoded (`CHECK (octet_length(signature) BETWEEN 8 AND 72)`) | INT |
+
+AP-AUD-16 previous anchor and anchor ranges: PK. AP-AUD-17 anchor of a checkpoint: `ux_audit_anchors__checkpoint_entry_id`. Volume: 24 rows/day.
 
 #### `audit_pii_vault` · SYSTEM (encrypted vault) · SD: no · insert-only; hard delete only by the erasure role (M4/M5)
 
@@ -1335,11 +1442,14 @@ ADR-0007, A-045, REQ-AUDIT-009, NFR-PRIV-002. DDL in §5.7.
 | `classification` | `text` | N | `CHECK (classification IN ('PERSONAL','SENSITIVE_PERSONAL'))` | INT |
 | `entity_name` | `text` | N | audited entity (e.g. `shipment_party`, `audit_entry`) | INT |
 | `field` | `text` | N | field name (e.g. `name`, `ip`, `reason`) | INT |
-| `value_hmac` | `bytea` | N | HMAC-SHA256(value, per-env key); dedupe key so a repeated value for the same subject and field reuses its token | SEC |
-| `ciphertext` | `bytea` | N | AES-256-GCM(nonce ‖ ct ‖ tag) of the UTF-8 value | SEC (holds PER/SPER) |
-| `key_id` | `text` | N | envelope key id/version | INT |
+| `value_hmac` | `bytea` | N | HMAC-SHA256(value, per-env vault HMAC key); dedupe key so a repeated value for the same subject and field reuses its token | SEC |
+| `value_hmac_key_id` | `text` | N | `<purpose>-v<n>` of the vault HMAC key | INT |
+| `ciphertext` | `bytea` | N | AES-256-GCM(96-bit nonce ‖ ct ‖ 128-bit tag) of the UTF-8 value under `AUDIT_VAULT_KEY`; AAD = (`audit_pii_vault`, `ciphertext`, `token`, `ciphertext_key_id`) | SEC (holds PER/SPER) |
+| `ciphertext_key_id` | `text` | N | `<purpose>-v<n>` of `AUDIT_VAULT_KEY` | INT |
 
-`ux_audit_pii_vault__subject_field_value ON (subject_id, entity_name, field, value_hmac)` (AP-AUD-13 token reuse); AP-AUD-14 erasure by subject: `ix_audit_pii_vault__subject`. No RLS (SYSTEM, ADR-0005); access only through `packages/audit`; vault reads are themselves `SENSITIVE` views allowed to `audit:read` holders (ADR-0007). It is exempt from the SYSTEM-no-PII test because its PII is encrypted.
+`ux_audit_pii_vault__subject_field_value ON (subject_id, entity_name, field, value_hmac)` (AP-AUD-13 token reuse); AP-AUD-14 erasure by subject: `ix_audit_pii_vault__subject`.
+
+Amended 2026-11-12 (SEC-P3-08 item 1): `key_id` was renamed to `ciphertext_key_id`, and `value_hmac_key_id` was added. The AAD binds each ciphertext to its token, so swapping ciphertexts between vault rows fails GCM authentication (T-89, SEC-TC-49). After a rotation of the HMAC key, a repeated value under the new key gets a new token instead of reusing the old one. That only costs dedupe; it never affects correctness. Vault DDL is in the bootstrap lane (owner `platform_audit_owner`). No RLS (SYSTEM, ADR-0005); access only through `packages/audit`; vault reads are themselves `SENSITIVE` views allowed to `audit:read` holders (ADR-0007). It is exempt from the SYSTEM-no-PII test because its PII is encrypted.
 
 #### `data_subjects` · SYSTEM · SD: no · insert-only (+ `erased_at`)
 
@@ -1357,9 +1467,9 @@ ADR-0004, REQ-PLAT-016/017, DR-A25, EC-A39. DDL in §6.1.
 | `type` | `text` | N | dotted lower-case catalogue name; `CHECK (type ~ '^[a-z_]+\.[a-z_]+$')` | INT |
 | `aggregate_type` | `text` | N | | INT |
 | `aggregate_id` | `uuid` | N | | INT |
-| `org_id` | `uuid` | Y | informational (job tenant context, REQ-RLS-008); this table is on the non-RLS allow-list | INT |
-| `actor_id` | `uuid` | N | | INT |
-| `payload` | `jsonb` | N | IDs, codes, recipient locale (REQ-I18N-008); never PER values (schema-validated per type) | INT |
+| `org_id` | `uuid` | Y | **authoritative** tenant context of every job derived from the event; read by `platform.job_context('outbox_event', id)` (§4.5), never copied into the BullMQ payload (amended 2026-11-12, SEC-P3-12); this table is on the non-RLS allow-list | INT |
+| `actor_id` | `uuid` | N | initiating actor, returned by `job_context` | INT |
+| `payload` | `jsonb` | N | IDs, codes, recipient locale (REQ-I18N-008); never PER values (schema-validated per type). One-time e-mail tokens travel only as `token_enc` (base64 AES-256-GCM under `OUTBOX_PAYLOAD_KEY`) with the sibling field `token_enc_key_id`; AAD = (`outbox_events`, `payload.token_enc`, `id`, `token_enc_key_id`) (amended 2026-11-12, SEC-P3-08 item 1; §12 `token_enc`) | INT (`token_enc` registered SEC) |
 | `correlation_id` | `text` | N | | INT |
 | `trace_context` | `text` | Y | W3C `traceparent` | INT |
 | `published_at` | `timestamptz` | Y | | INT |
@@ -1390,10 +1500,13 @@ REQ-API-009/010/011, DR-A20, EC-A27..A30. Protocol in §6.2.
 | `lease_until` | `timestamptz` | N | in-progress lease (30 s) for crash recovery | INT |
 | `response_status` | `smallint` | Y | 2xx/4xx only | INT |
 | `response_headers` | `jsonb` | Y | allow-listed headers (ETag, Location) | INT |
-| `response_body` | `jsonb` | Y | may contain personal data of the caller's own resource; kept 24 h only | PER |
+| `response_body` | `bytea` | Y | AES-256-GCM (96-bit nonce ‖ ct ‖ 128-bit tag) of the UTF-8 JSON body under `IDEMPOTENCY_BODY_KEY`; AAD = (`idempotency_keys`, `response_body`, `scope_hash` (hex), `response_body_key_id`); may contain personal data of the caller's own resource; kept 24 h only; routes on the ADR-0014 one-time-secret list (`createQuote`, `createQuoteShare`, …) are `not-applicable` and never stored | PER (encrypted) |
+| `response_body_key_id` | `text` | Y | `<purpose>-v<n>`; `ck_idempotency_keys__body_key CHECK ((response_body IS NULL) = (response_body_key_id IS NULL))` | INT |
 | `expires_at` | `timestamptz` | N | created + 24 h | INT |
 
-AP-PLAT-04 claim/lookup: `ux_idempotency_keys__scope_hash`; AP-PLAT-05 purge: `ix_idempotency_keys__expires_at`. This is the one SYSTEM table allowed a `PER` column (explicit allow-list entry), justified by the 24 h hard-delete and by `response_body` only ever echoing the caller's own data.
+AP-PLAT-04 claim/lookup: `ux_idempotency_keys__scope_hash`; AP-PLAT-05 purge: `ix_idempotency_keys__expires_at`. This is the one SYSTEM table allowed a `PER` column (explicit allow-list entry), justified by the 24 h hard-delete, by encryption at rest and by `response_body` only ever echoing the caller's own data.
+
+Amended 2026-11-12 (SEC-P3-08 item 1, SEC-P3-10): `response_body` changed from clear `jsonb` to `bytea` ciphertext, and `response_body_key_id` was added. The AAD uses `scope_hash`, so a stored body cannot be replayed under another key scope. The one-time-secret routes are never stored.
 
 #### `feature_flags` · GLOBAL (runtime write under `featureflag:manage`) · SD: yes · mutable
 
@@ -1559,6 +1672,8 @@ D-012, REQ-CARR-001/015, product brief §4.3 (environment per account). Platform
 
 AP-CARR-02 enabled accounts per carrier (process cache).
 
+Amendment (2026-11-12, SEC-P3-08 item 1), applying to the M3 seam: when partner accounts arrive, their credentials are stored as `credentials_ciphertext bytea` (AES-256-GCM under a per-tenant KMS data key, ADR-0011) with the sibling `credentials_ciphertext_key_id text NOT NULL`, and AAD = (`carrier_accounts`, `credentials_ciphertext`, `id`, `credentials_ciphertext_key_id`). They are added by the M3 expand migration. Platform accounts keep `secret_ref` (a reference, not a ciphertext). OAuth tokens cached in Redis are encrypted under `CARRIER_TOKEN_CACHE_KEY` (ADR-0018 register); they are not database columns.
+
 #### `carrier_raw_payloads` · TENANT · SD: no · append-only
 
 REQ-CARR-018, product brief App. A weakness ("raw responses stored inline"). Bytes in the raw-carrier bucket; rows are metadata.
@@ -1582,6 +1697,8 @@ REQ-CARR-018, product brief App. A weakness ("raw responses stored inline"). Byt
 | `truncation_applied` | `boolean` | N | `DEFAULT false` (REQ-CUST-015 "marking the truncation in the raw record") | INT |
 
 AP-CARR-03 payloads of a shipment (staff, M2): `ix_carrier_raw_payloads__org_shipment ON (org_id, shipment_id, created_at)`.
+
+Amendment (2026-11-12, SEC-P3-13; ADR-0010 amendment). The JSON stored under `request_object_key`/`response_object_key` never contains document bytes. The redactor replaces every base64 or binary document field (labels, invoices, customs uploads) with `{"$blob": {"sha256": "<hex>", "size": <bytes>, "media_type": "<type>", "document_id": "<uuid>"?}}`. `document_id` is present when the bytes are kept as a `documents` row. Tracking and response payloads are redacted by allow-list: canonical codes, timestamps, carrier references and city/country are kept, and everything else becomes `"[REDACTED]"`. `redaction_version` identifies the redactor that ran. A storage scan in SEC-TC-52 asserts that no base64 blob over 1 kB remains.
 
 ### 3.9 Pricing module (GLOBAL configuration, versioned)
 
@@ -1710,6 +1827,8 @@ REQ-QUOTE-015, NFR-PRIV-004, EC-B29. The share row carries an allow-listed `publ
 
 AP-QUO-07 anonymous read by token (inside `quote_share_resolve`): `ux_quote_shares__share_token_hash`; AP-QUO-08 shares of a quote: `ix_quote_shares__org_quote ON (org_id, quote_id) WHERE org_id IS NOT NULL`.
 
+Amendment (2026-11-12, SEC-P3-10). `createQuoteShare` **always mints a new token**. In the same transaction it sets `revoked_at`/`revoked_by` on the quote's previous active share (the previous link then resolves to 404) and inserts the new row. It never returns an existing token, which the server could not do anyway because it holds only `share_token_hash`. Backstop: `ux_quote_shares__quote_active ON (quote_id) WHERE revoked_at IS NULL` (at most one active share per quote). A concurrent second create fails this constraint and is retried once after re-reading. The route is `x-idempotency: not-applicable`, so the token never reaches `idempotency_keys`.
+
 ### 3.11 Shipments and customs module (TENANT)
 
 REQ-BOOK-001..030, REQ-CUST-001..015, REQ-ACCT-002..007, DR-B01/B02/B20/B23/B24, DR-A06.
@@ -1816,9 +1935,9 @@ REQ-BOOK-008 (tax/identity references required by the pack; masked after entry; 
 | STD | | | | INT |
 | `org_id`, `shipment_id`, `party_id` | `uuid` | N | FKs | INT |
 | `reference_type` | `text` | N | pack code, e.g. `IN_PAN`, `IN_GSTIN`, `IN_IEC` | INT |
-| `value_ciphertext` | `bytea` | N | AES-256-GCM, envelope key per environment (KMS in AWS) | SPER |
+| `value_ciphertext` | `bytea` | N | AES-256-GCM (96-bit nonce ‖ ct ‖ 128-bit tag), envelope key per environment (KMS in AWS); AAD = (`shipment_party_identifiers`, `value_ciphertext`, `id`, `value_ciphertext_key_id`) | SPER |
 | `value_last4` | `text` | N | masking display (`••••1234`) | SPER (displayed masked) |
-| `key_id` | `text` | N | | INT |
+| `value_ciphertext_key_id` | `text` | N | `<purpose>-v<n>` (amended 2026-11-12, SEC-P3-08 item 1: was `key_id`) | INT |
 | `pack_country`, `pack_version` | `text`, `integer` | N | pack that required it (REQ-COMP-002) | INT |
 
 `ux_shipment_party_identifiers__party_type ON (party_id, reference_type) WHERE deleted_at IS NULL`; tenant index `(org_id, shipment_id)`. Values are validated against the pack regex before encryption; decryption happens only in the carrier adapter call path and in the customs document job.
@@ -2182,7 +2301,8 @@ REQ-TRACK-006/008/009/012, DR-B31, EC-B08/B39, A-050. Public tracking lookups an
 | `carrier_code` | `text` | N | | INT |
 | `tracking_number` | `text` | Y | master tracking number (set at booking) | INT |
 | `order_number` | `text` | Y | set at checkout | INT |
-| `customer_ref_postcode_hmac` | `bytea` | Y | HMAC-SHA256(normalised customer reference ‖ `\|` ‖ normalised receiver postcode, per-env key) (REQ-TRACK-009) | INT |
+| `customer_ref_postcode_hmac` | `bytea` | Y | HMAC-SHA256(normalised customer reference ‖ `\|` ‖ normalised receiver postcode, `TRACKING_INDEX_KEY`) (REQ-TRACK-009) | INT |
+| `customer_ref_postcode_hmac_key_id` | `text` | Y | `<purpose>-v<n>`; `CHECK ((customer_ref_postcode_hmac IS NULL) = (customer_ref_postcode_hmac_key_id IS NULL))`. During a rotation, lookups compute the HMAC under each live key and query `= ANY($hashes)`; the writer always uses the current key, and a throttled backfill (§8.5) re-keys old rows before the retired key is dropped (amended 2026-11-12, SEC-P3-08 item 1) | INT |
 
 AP-TRK-05 by tracking number (also carrier push matching): `ix_tracking_index__tracking_number ON (tracking_number) WHERE tracking_number IS NOT NULL`; AP-TRK-06 by order number (lists every shipment of the order): `ix_tracking_index__order_number ON (order_number) WHERE order_number IS NOT NULL`; AP-TRK-07 by reference + postcode (a result only when exactly one row matches, EC-B39): `ix_tracking_index__ref_postcode ON (customer_ref_postcode_hmac) WHERE customer_ref_postcode_hmac IS NOT NULL`. Writers: the booking saga (tracking number), checkout (order number), wizard step 1/4 saves (reference/postcode hash), all inside the transaction that changes the source row. The check-digit test on order numbers runs before any query (EC-A42), and unknown keys return the identical 404 `TRACKING_NOT_FOUND` (REQ-TRACK-012).
 
@@ -2252,7 +2372,11 @@ SELECT set_config('app.org_id',           $1, true),   -- active org uuid from t
 | `app.actor_scope` | `TENANT` by default; `OPERATOR` only for admin-app tokens (`app = admin`) of actors with an ACTIVE OPERATOR membership on routes declaring `tenancy: 'operator-cross-tenant'` (M1: the audit viewer only) (DR-A15, ADR-0005 amendments 2 and 5). There is no cross-tenant scope for workers: cross-tenant work is discovered through the §4.5 functions and the global index tables, then executed per organisation in tenant scope. | |
 | `app.guest_token_hash` | Quote routes with `X-Quote-Token` (`tenancy: 'guest'`) | SHA-256 hex |
 
-### 4.2 Helper functions (schema `platform`, owner `platform_migrator`)
+Amended 2026-11-12 (SEC-P3-12; ADR-0013 amendment): the worker no longer takes `app.org_id`/`app.actor_id` from the job payload. Payload v2 carries only `kind`, `id`, `correlation_id`, `trace_context`. The processor calls `platform.job_context(kind, id)` (§4.5) and opens `withTenantTx` with the `org_id`/`actor_id` it returns. No row → non-retryable `JOB_CONTEXT_NOT_FOUND` (DLQ). A payload that carries `org_id` or `actor_id` fails the Joi schema at dequeue → DLQ, security event `job_context_mismatch`.
+
+### 4.2 Helper functions (schema `platform`, owner `platform_migrator`; `app_is_operator` owner `platform_definer`)
+
+Amendment (2026-11-12, SEC-P3-25; §12 OI-02, ADR-0005 amendment 6). The plain `SQL` helpers (`app_org_id`, `app_actor_id`, `app_guest_token_hash`) are not `SECURITY DEFINER` and stay owned by `platform_migrator`. `app_is_operator()` **is** `SECURITY DEFINER` and reads `memberships` and `organisations`, which have FORCE RLS. It is therefore owned by **`platform_definer`** and reads through that role's definer-read policies on those two tables (§4.3). Owned by `platform_migrator`, which keeps no runtime policies, it would always see zero rows and return false. The schema `platform` is created by the bootstrap lane (§4.4), so the `CREATE SCHEMA` line below runs there and not in a Prisma migration. Add `ALTER FUNCTION platform.app_is_operator() OWNER TO platform_definer;` after its definition.
 
 Unset, empty or malformed settings evaluate to `NULL`, so every comparison is false and the query returns zero rows instead of raising (fail closed without errors, REQ-RLS-004). ADR-0005 sketches `app_org_id()` as `NULLIF(…,'')::uuid`; the regex guard below keeps its semantics and additionally turns a malformed value into "no rows" rather than a cast error. The SQL helpers are `STABLE`, have no `FROM` clause and are inlined by the planner, so `org_id = platform.app_org_id()` is an index condition.
 
@@ -2289,7 +2413,7 @@ $$;
 
 ### 4.3 Policy templates per table class
 
-Policies for the runtime are `TO platform_app` (ADR-0005). Cross-tenant access is the operator branch only, **read-only** in M0/M1 (ADR-0005 amendment 2); M2 on-behalf writes add write-capable operator policies through superseding migrations. Because `FORCE` makes the owner `platform_migrator` subject to RLS and no runtime policy targets it, the owner sees nothing by default; the narrow `TO platform_migrator` policies at the end of this section exist only so the §4.5 definer functions (which execute as their owner) can read the rows they are allowed to resolve.
+Policies for the runtime are `TO platform_app` (ADR-0005). Cross-tenant access is the operator branch only, **read-only** in M0/M1 (ADR-0005 amendment 2); M2 on-behalf writes add write-capable operator policies through superseding migrations. Because `FORCE` makes the owner `platform_migrator` subject to RLS and no runtime policy targets it, the owner sees nothing by default; the narrow `TO platform_definer` policies at the end of this section exist only so the §4.5 definer functions (which execute as their owner `platform_definer`) can read the rows they are allowed to resolve (amended 2026-11-12, SEC-P3-25: was `TO platform_migrator`; §12 OI-02, ADR-0005 amendment 6).
 
 **TENANT** (every TENANT table `<t>`):
 
@@ -2334,7 +2458,7 @@ UPDATE public.quote_shares   SET org_id = $org, guest_token_hash = NULL, updated
 
 Zero rows on `quotes` ⇒ the service re-reads by id under its own org scope: visible ⇒ already claimed by this org, idempotent 200; not visible ⇒ `quote_claim_state(id, token_hash)` (§4.5) returns `CLAIMED_ELSEWHERE` ⇒ 409 `QUOTE_ALREADY_CLAIMED`, or `UNKNOWN` ⇒ 404. After the claim the guest token stops working (REQ-QUOTE-016).
 
-**USER_OWNED** (`user_credentials`, `sessions`, `refresh_tokens`, `email_verification_tokens`, `password_reset_tokens`, `mfa_totp`, `mfa_recovery_codes`, `mfa_challenges`, `reauth_proofs`, `notification_preferences`, `terms_acceptances`):
+**USER_OWNED** (`user_credentials`, `sessions`, `refresh_tokens`, `email_verification_tokens`, `password_reset_tokens`, `mfa_totp`, `mfa_recovery_codes`, `mfa_challenges`, `mfa_enrolment_codes` (added 2026-11-12, SEC-P3-14), `reauth_proofs`, `notification_preferences`, `terms_acceptances`):
 
 ```sql
 ALTER TABLE public.<t> ENABLE ROW LEVEL SECURITY;
@@ -2389,12 +2513,13 @@ The `memberships` policies reference no other RLS table, so policy evaluation ca
 **Definer-read policies** (only on the tables the §4.5 functions read; SELECT only, plus DELETE with an expiry predicate on purge tables):
 
 ```sql
-CREATE POLICY p_<t>__definer_read  ON public.<t> FOR SELECT TO platform_migrator USING (true);
-CREATE POLICY p_<t>__definer_purge ON public.<t> FOR DELETE TO platform_migrator
+CREATE POLICY p_<t>__definer_read  ON public.<t> FOR SELECT TO platform_definer USING (true);
+CREATE POLICY p_<t>__definer_purge ON public.<t> FOR DELETE TO platform_definer
   USING (expires_at < now() - interval '7 days');                    -- token tables only
+GRANT SELECT ON public.<t> TO platform_definer;                        -- DELETE as well on the purge tables
 ```
 
-`platform_migrator` is a login role used only by the migration job; the definer policies make it able to read these tables (it could alter them as owner anyway), while `platform_app` keeps no path around its own policies (OI-02).
+Amended 2026-11-12 (SEC-P3-25; §12 OI-02, ADR-0005 amendment 6): the definer policies target the `NOLOGIN` role **`platform_definer`**, which owns the §4.5 functions and `app_is_operator`. They no longer target `platform_migrator`, which keeps no runtime policies. `platform_definer` owns no table and has no DDL rights, so a defect in a definer function runs with read access to the listed tables only, never as the schema owner. `platform_app` keeps no path around its own policies. Tables that carry definer-read policies after this amendment: `users`, `user_credentials`, `refresh_tokens`, `email_verification_tokens`, `password_reset_tokens`, `mfa_challenges`, `mfa_enrolment_codes`, `reauth_proofs` (the six purge tables carry both the read and the purge policy, because a `DELETE … WHERE` also applies the `SELECT` policy), `sessions`, `mfa_totp`, `memberships`, `organisations`, `invitations`, `quote_shares`, `quotes`, `payments`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `notification_log`. SYSTEM tables (`outbox_events`, `tracking_poll_schedule`, `gateway_refs`) have no RLS and need only the `SELECT` grant. Catalog test C3 asserts this list.
 
 **RETURNING caveat.** `INSERT … RETURNING` requires the new row to satisfy a `SELECT` policy. The only writer that inserts rows it cannot read back is the anonymous consent banner, which uses `createMany` (no `RETURNING`, §7.6). Audit tables are SYSTEM class (ADR-0005) and unaffected.
 
@@ -2425,12 +2550,68 @@ ALTER DEFAULT PRIVILEGES FOR ROLE platform_migrator IN SCHEMA platform REVOKE EX
 
 `platform_migrator` owns every table, partition, function and both schemas; `platform_app` owns nothing (REQ-RLS-005). Neither has `BYPASSRLS`. Note that `lock_timeout` also bounds the audit stream advisory-lock wait (§5.4): a wait above 2 s fails the request closed (`AUDIT_WRITE_FAILED`), which is the intended behaviour.
 
+#### Amendment (2026-11-12, SEC-P3-03, SEC-P3-25): audit ownership separation and the definer owner
+
+The sentence "`platform_migrator` owns every table, partition, function and both schemas" is superseded. Ownership is now split across three roles, so that whoever holds the migrator login (the migrate job, CI, developers, agents) cannot disable audit triggers or rewrite audit rows.
+
+| Role | Login | Owns | Member of / members |
+|---|---|---|---|
+| `platform_migrator` | LOGIN | both schemas, the database, every **non-audit** table, sequence and function, and the plain SQL helpers of §4.2 | holds `platform_definer` with `INHERIT FALSE, SET TRUE` (so it can assign function ownership; it inherits no policies). It is **not** a member of `platform_audit_owner` and owns no audit object |
+| `platform_definer` | NOLOGIN, NOINHERIT | `app_is_operator()` and every §4.5 function; no table, no DDL right | none |
+| `platform_audit_owner` | NOLOGIN, NOINHERIT | `audit_entries` and every partition, `audit_stream_heads`, `audit_checkpoint_heads`, `audit_chain_verifications`, `audit_partitions`, `audit_anchors`, `audit_pii_vault`, `data_subjects`; functions `platform.audit_forbid_mutation()`, `platform.audit_vault_guard()`, `platform.ensure_audit_partitions(integer)` | **no members**; only the cluster superuser can `SET ROLE` to it, and that happens only in the bootstrap lane |
+| `platform_app` | LOGIN | nothing | none |
+| `platform_erasure` | NOLOGIN | nothing; `SELECT, DELETE` on `audit_pii_vault`, `UPDATE (erased_at, …)` on `data_subjects` (unchanged) | none |
+
+Bootstrap lane SQL (cluster-admin credential, one-shot `bootstrap` step; files under `prisma/bootstrap/`, §8.3), appended to the role script above:
+
+```sql
+-- prisma/bootstrap/00-roles.sql (continued)
+CREATE ROLE platform_definer     NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE platform_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT platform_definer TO platform_migrator WITH INHERIT FALSE, SET TRUE;   -- PostgreSQL 16+ grant options
+-- (no GRANT platform_audit_owner TO anyone; catalog test C13 asserts pg_auth_members has no row for it)
+
+-- prisma/bootstrap/01-schemas.sql (schema-scoped; carried by pg_dump, see §8.6)
+CREATE SCHEMA IF NOT EXISTS platform AUTHORIZATION platform_migrator;       -- moved here from §4.2
+REVOKE ALL ON SCHEMA platform FROM PUBLIC;
+GRANT USAGE ON SCHEMA platform TO platform_app, platform_definer, platform_erasure;
+GRANT USAGE, CREATE ON SCHEMA public, platform TO platform_audit_owner;     -- ensure_audit_partitions creates partitions in public
+GRANT USAGE ON SCHEMA public TO platform_definer, platform_erasure;
+ALTER DEFAULT PRIVILEGES FOR ROLE platform_audit_owner IN SCHEMA public   REVOKE ALL ON TABLES FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE platform_audit_owner IN SCHEMA platform REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE platform_definer     IN SCHEMA platform REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
+-- prisma/bootstrap/10-audit.sql (every audit object; §5.1–§5.7)
+SET ROLE platform_audit_owner;            -- objects are created owned by the audit owner; the DDL guard admits this role
+--   CREATE TABLE … (§5.1, §5.7, audit_anchors §5.5), triggers (§5.2), ensure_audit_partitions (§5.3)
+GRANT SELECT, INSERT ON public.audit_entries, public.audit_checkpoint_heads, public.audit_anchors,
+                        public.audit_pii_vault, public.data_subjects TO platform_app;
+GRANT SELECT, INSERT, UPDATE ON public.audit_stream_heads, public.audit_partitions,
+                                public.audit_chain_verifications TO platform_app;
+GRANT SELECT, DELETE ON public.audit_pii_vault TO platform_erasure;
+GRANT SELECT, UPDATE (erased_at, updated_at, updated_by, version) ON public.data_subjects TO platform_erasure;
+GRANT EXECUTE ON FUNCTION platform.ensure_audit_partitions(integer) TO platform_app;
+SELECT platform.ensure_audit_partitions(3);
+RESET ROLE;
+
+-- prisma/bootstrap/90-audit-ddl-guard.sql (superuser; §5.2): event triggers platform_audit_ddl_guard_end / _drop
+```
+
+Consequences:
+- `ALTER TABLE audit_entries DISABLE TRIGGER …`, `NO FORCE ROW LEVEL SECURITY`, `DETACH PARTITION`, `DROP TRIGGER`, `GRANT`, and `CREATE OR REPLACE` of the audit functions all fail for `platform_migrator` with "must be owner" (SEC-TC-43).
+- PostgreSQL lets a **schema owner drop any table in its schema**. `platform_migrator` owns `public`, so `DROP TABLE public.audit_entries` and `DROP SCHEMA public CASCADE` would succeed on privileges alone. The identity-based `sql_drop` guard (§5.2) closes this path, and SEC-TC-43 includes both statements.
+- Moving the audit tables into a dedicated schema owned by `platform_audit_owner` would close the path by privilege as well. It was considered and not adopted in this amendment, because it renames every audit relation (`public.audit_*`) across the Prisma mapping, the ADRs and the tests. It is recorded as an option for M5.
+- Holding `platform_definer` with `SET TRUE` lets the migrator read the definer-read tables. That adds no capability, because the migrator owns those tables and could change their RLS anyway. The separation protects against a defective definer function running as the schema owner, not against the migrator.
+- Revoking the audit owner's `CREATE` on `public` (which the schema owner can do) only stops partition creation. That fails closed and is detected by readiness (fewer than 2 future partitions, §5.3).
+
+The grant-matrix rows below are unchanged except for the additions marked "2026-11-12".
+
 Grant matrix (rendered from `prisma/sql/grants.manifest.json` into each migration that adds a table; catalog test C5 compares the live privileges with the manifest):
 
 | Class / table group | `platform_app` privileges |
 |---|---|
 | TENANT and USER_OWNED mutable tables (soft-deletable or not) | `SELECT, INSERT, UPDATE` — never `DELETE` (REQ-RLS-010; expired one-time and refresh tokens are purged through `purge_expired_tokens`, §4.5) |
-| Append-only tables: `shipment_state_transitions`, `shipment_price_snapshots`, `payment_status_history`, `tracking_events`, `terms_acceptances`, `consent_records`, `carrier_raw_payloads`, `prohibited_acknowledgements`, `shipment_attestations`, `coupon_redemptions`, `audit_checkpoint_heads` | `SELECT, INSERT` |
+| Append-only tables: `shipment_state_transitions`, `shipment_price_snapshots`, `payment_status_history`, `tracking_events`, `terms_acceptances`, `consent_records`, `carrier_raw_payloads`, `prohibited_acknowledgements`, `shipment_attestations`, `coupon_redemptions`, `audit_checkpoint_heads`, `audit_anchors` (2026-11-12, SEC-P3-03; granted in the bootstrap lane) | `SELECT, INSERT` |
 | `quotes` | `SELECT, INSERT`, `UPDATE (org_id, guest_token_hash, claimed_from_token_hash, claimed_by_user_id, claimed_at, saved_at, saved_by, rating_status, carrier_statuses, rating_completed_at, deleted_at, deleted_by, updated_at, updated_by, version)` |
 | `quote_packages`, `quote_options` | `SELECT, INSERT`, `UPDATE (org_id, guest_token_hash, updated_at, updated_by, version)` |
 | `quote_shares` | `SELECT, INSERT`, `UPDATE (org_id, guest_token_hash, revoked_at, revoked_by, updated_at, updated_by, version)` |
@@ -2443,31 +2624,35 @@ Grant matrix (rendered from `prisma/sql/grants.manifest.json` into each migratio
 | Other SYSTEM: `audit_stream_heads`, `audit_partitions`, `audit_chain_verifications`, `gateway_webhook_events`, `reference_dataset_versions`, `data_migration_runs` | `SELECT, INSERT, UPDATE` |
 | `audit_entries` (parent only; never partitions) | `SELECT, INSERT` |
 | `audit_pii_vault`, `data_subjects` | `SELECT, INSERT` (`platform_erasure`: `SELECT, DELETE` on the vault, `UPDATE (erased_at, updated_at, updated_by, version)` on subjects) |
-| Functions | `EXECUTE` on `platform.app_org_id`, `app_actor_id`, `app_guest_token_hash`, `app_is_operator`, `ensure_audit_partitions` and exactly the §4.5 list |
-| Never granted to anyone at runtime | `TRUNCATE`, `REFERENCES`, `TRIGGER`, `DELETE` outside the allow-list, any privilege on partitions |
+| Functions | `EXECUTE` on `platform.app_org_id`, `app_actor_id`, `app_guest_token_hash`, `app_is_operator`, `ensure_audit_partitions` and exactly the §4.5 list (2026-11-12: including `job_context`, `sessions_for_user`, `mfa_enrolment_overdue_candidates`) |
+| `platform_definer` (2026-11-12, SEC-P3-25) | `SELECT` on the definer-read tables of §4.3 and `DELETE` on the six purge tables, each gated by its `TO platform_definer` policy; nothing else |
+| Never granted to anyone at runtime | `TRUNCATE`, `REFERENCES`, `TRIGGER`, `DELETE` outside the allow-list, any privilege on partitions, membership in `platform_audit_owner` (2026-11-12) |
 
 Compared with the P3 brief's hard-delete allow-list (expired tokens, idempotency keys, MFA challenges, re-auth proofs, outbox events older than N days, PII vault via erasure job): token-table purges run through one definer function because those tables are USER_OWNED under ADR-0005; vault deletion is assigned to the dedicated `platform_erasure` role instead of `platform_app` (OI-15).
 
 ### 4.5 Allow-listed SECURITY DEFINER functions (ADR-0005 amendment 1)
 
-Every path that must read rows before a tenant/actor context exists, or must discover work across tenants, uses one of these functions or a global index table (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`, §3.13/§3.16). Each function is owned by `platform_migrator`, is `SECURITY DEFINER` with `SET search_path = pg_catalog, public`, takes a hashed or opaque key, returns a fixed minimal column set (IDs, statuses, timestamps; never personal data beyond what the caller supplied), has `EXECUTE` revoked from `PUBLIC` and granted to `platform_app`, and has a dedicated integration test (ADR-0005). After the lookup the service sets `app.actor_id`/`app.org_id` in the same transaction and continues under the normal policies.
+Every path that must read rows before a tenant/actor context exists, or must discover work across tenants, uses one of these functions or a global index table (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`, §3.13/§3.16). Each function is owned by `platform_definer` (amended 2026-11-12, SEC-P3-25: was `platform_migrator`; §12 OI-02, ADR-0005 amendment 6), is `SECURITY DEFINER` with `SET search_path = pg_catalog, public`, takes a hashed or opaque key, returns a fixed minimal column set (IDs, statuses, timestamps; never personal data beyond what the caller supplied), has `EXECUTE` revoked from `PUBLIC` and granted to `platform_app`, and has a dedicated integration test (ADR-0005). After the lookup the service sets `app.actor_id`/`app.org_id` in the same transaction and continues under the normal policies.
 
 | Function | Returns | Reads (definer-read policy) | Used by |
 |---|---|---|---|
 | `auth_lookup_user_by_email(p_email text)` | `(user_id uuid, status text, email_verified boolean)` | `users` | login, registration duplicate check, password reset request (REQ-AUTH-001/005/011) |
 | `auth_lookup_credential(p_user_id uuid)` | `(password_hash text, bcrypt_cost smallint)` | `user_credentials` | login password check before the actor is established (the hash never leaves the identity service) |
 | `auth_lookup_refresh_token(p_token_hash bytea)` | `(token_id, family_id, session_id, user_id, status, expires_at)` | `refresh_tokens` | refresh, logout, reuse detection (REQ-AUTH-007/008) |
-| `auth_lookup_one_time_token(p_purpose text, p_token_hash bytea)` | `(token_id, user_id, expires_at, consumed_at, superseded_at)`; `p_purpose ∈ ('EMAIL_VERIFICATION','PASSWORD_RESET','MFA_CHALLENGE')` dispatches to the matching table | `email_verification_tokens`, `password_reset_tokens`, `mfa_challenges` | verify email, reset password, MFA challenge (REQ-AUTH-004/012/017) |
+| `auth_lookup_one_time_token(p_purpose text, p_token_hash bytea)` | `(token_id, user_id, expires_at, consumed_at, superseded_at)`; `p_purpose ∈ ('EMAIL_VERIFICATION','PASSWORD_RESET','SET_PASSWORD','MFA_CHALLENGE')` dispatches to the matching table (`PASSWORD_RESET` → `password_reset_tokens.purpose = 'RESET'`, `SET_PASSWORD` → `purpose = 'SET_PASSWORD'`; amended 2026-11-12, SEC-P3-14) | `email_verification_tokens`, `password_reset_tokens`, `mfa_challenges` | verify email, reset password, set first password of seeded staff, MFA challenge (REQ-AUTH-004/012/017) |
 | `invitation_lookup(p_token_hash bytea)` | `(invitation_id, org_id, email, role_id, status, expires_at)` | `invitations` | accept invitation (REQ-ORG-011) |
 | `payment_lookup_by_gateway_ref(p_gateway text, p_ref text)` | `(payment_id uuid, org_id uuid)` | `gateway_refs` (no RLS) | gateway webhooks when event metadata lacks the org (REQ-PAY-012) |
-| `quote_share_resolve(p_share_token_hash bytea)` | `(quote_id, public_snapshot jsonb, expires_at, revoked boolean)` | `quote_shares` | `GET /public/shared-quotes/{shareToken}` (REQ-QUOTE-015) |
+| `quote_share_resolve(p_share_token_hash bytea)` | `(quote_id, public_snapshot jsonb, expires_at, revoked boolean)` | `quote_shares` | `POST /public/shared-quotes/resolve` (token in the body, never in the URL; REQ-QUOTE-015; amended 2026-11-12, SEC-P3-25: was `GET /public/shared-quotes/{shareToken}`) |
 | `quote_claim_state(p_quote_id uuid, p_token_hash bytea)` | `text` (`CLAIMED_ELSEWHERE` \| `UNKNOWN`) | `quotes` (`claimed_from_token_hash`) | claim conflict answer (EC-A44). ADR-0005 sketches `quote_claim_state(id)`; the token-hash argument is a tightening so that a caller learns about claim state only for a quote whose guest token it holds (OI-19) |
 | `payment_sweeper_candidates(p_authorised_before timestamptz, p_captured_before timestamptz, p_limit int)` | `(payment_id, org_id, status)` | `payments` | REQ-PAY-018 sweeper |
 | `saga_due_candidates(p_now timestamptz, p_limit int)` | `(saga_id, org_id)` | `saga_executions` | deadline enforcement and retry pickup (REQ-BOOK-023) |
 | `draft_expiry_candidates(p_idle_before timestamptz, p_limit int)` | `(shipment_id, org_id)` | `shipments` | 30-day draft expiry (REQ-ACCT-004) |
 | `void_retry_candidates(p_now timestamptz, p_limit int)` | `(shipment_id, org_id)` | `shipments` | void retry every 4 h for 24 h (REQ-BOOK-030) |
 | `org_ids_page(p_after uuid, p_limit int)` | `setof uuid` | `organisations` | resumable backfills that iterate organisations (§8.5) |
-| `purge_expired_tokens(p_before timestamptz, p_limit int)` | `integer` (rows deleted) | `email_verification_tokens`, `password_reset_tokens`, `refresh_tokens`, `mfa_challenges`, `reauth_proofs` (definer-purge policy) | housekeeping (§10.5) |
+| `purge_expired_tokens(p_before timestamptz, p_limit int)` | `integer` (rows deleted) | `email_verification_tokens`, `password_reset_tokens`, `refresh_tokens`, `mfa_challenges`, `reauth_proofs`, `mfa_enrolment_codes` (2026-11-12, SEC-P3-14) (definer-purge policy) | housekeeping (§10.5) |
+| `sessions_for_user(p_user_id uuid)` (listed 2026-11-12; ratified in §12 OI-25) | `setof uuid` (session IDs with `status = 'ACTIVE'`) | `sessions` | synchronous Redis revocation of another user's sessions (membership removal, user status change) |
+| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid)`; one row or none | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes` | every worker processor, before `withTenantTx` (ADR-0013 amendment, payload v2) |
+| `mfa_enrolment_overdue_candidates(p_now timestamptz, p_limit int)` (**new 2026-11-12, SEC-P3-14**) | `setof uuid` (user IDs) | `organisations`, `memberships`, `users`, `mfa_totp` | `housekeeping` 24 h staff enrolment deadline (AP-ID-19) |
 
 Example (the others follow the same shape):
 
@@ -2480,12 +2665,104 @@ SET search_path = pg_catalog, public AS $$
     FROM public.users u
    WHERE u.email = p_email AND u.deleted_at IS NULL
 $$;
-ALTER FUNCTION platform.auth_lookup_user_by_email(text) OWNER TO platform_migrator;
+ALTER FUNCTION platform.auth_lookup_user_by_email(text) OWNER TO platform_definer;   -- amended 2026-11-12 (SEC-P3-25): was platform_migrator
 REVOKE ALL ON FUNCTION platform.auth_lookup_user_by_email(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.auth_lookup_user_by_email(text) TO platform_app;
 ```
 
 Candidate functions page by their partial indexes (AP-PAY-04/05, AP-ORD-05, AP-SHP-08/09) and return at most `p_limit` (≤ 1,000) rows; the worker groups them by `org_id` and processes each organisation in its own tenant-scoped transaction (REQ-RLS-008). Adding a function requires a reviewed migration, a test and an entry in this table (catalog test C11 compares the live list with it).
+
+#### Amendment (2026-11-12, SEC-P3-12): `platform.job_context`
+
+The worker resolves the tenant context of every job from PostgreSQL, never from Redis (ADR-0013 amendment, payload v2 `{v: 2, kind, id, correlation_id, trace_context}`). The returned actor is the **initiating actor** recorded on the authoritative row: the processor sets it as `app.actor_id`, and the processor's own audit entries keep `actor_type = 'SYSTEM_JOB'` with the initiator in `details`. Mapping:
+
+| `p_kind` | Source of `org_id` | Actor returned |
+|---|---|---|
+| `outbox_event` | `outbox_events.org_id` (SYSTEM table, authoritative; NULL for organisation-less events such as auth e-mails) | `outbox_events.actor_id`; type `SYSTEM_JOB` / `ANONYMOUS` / `USER` for the reserved IDs (§1.6) and others |
+| `saga` | `saga_executions.org_id` | `saga_executions.created_by` (the checkout actor) |
+| `notification` | `notification_log.org_id` (NULL for auth e-mails) | `USER`, `recipient_user_id` (the USER_OWNED policy of the log row needs it); `SYSTEM_JOB`/SYSTEM actor for invitees without an account |
+| `shipment`, `order`, `pickup`, `document`, `payment`, `quote` | the row's `org_id` | `SYSTEM_JOB`, SYSTEM actor |
+| `tracking_poll` | `shipments.org_id` joined through `tracking_poll_schedule.shipment_id` (the schedule's own `org_id` is informational only) | `SYSTEM_JOB`, SYSTEM actor |
+
+A guest quote (`quotes.org_id IS NULL`) returns `org_id = NULL`. Every processor whose queue requires a tenant treats a NULL `org_id` as non-retryable `MISSING_TENANT_CONTEXT` (ADR-0013 §2), and M1 has no worker job that writes guest-quote rows. The function never returns `guest_token_hash`, because a UUIDv7 ID is not a secret (P1) and returning the hash would turn any quote ID into guest access.
+
+```sql
+CREATE FUNCTION platform.job_context(p_kind text, p_id uuid)
+RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, public AS $$
+#variable_conflict use_column
+DECLARE
+  c_system    constant uuid := '00000000-0000-7000-8000-000000000001';
+  c_anonymous constant uuid := '00000000-0000-7000-8000-000000000002';
+BEGIN
+  CASE p_kind
+    WHEN 'outbox_event' THEN
+      RETURN QUERY SELECT e.org_id,
+                          CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
+                          e.actor_id
+                     FROM public.outbox_events e WHERE e.id = p_id;
+    WHEN 'saga' THEN
+      RETURN QUERY SELECT s.org_id,
+                          CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END,
+                          s.created_by
+                     FROM public.saga_executions s WHERE s.id = p_id;
+    WHEN 'notification' THEN
+      RETURN QUERY SELECT n.org_id,
+                          CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
+                          COALESCE(n.recipient_user_id, c_system)
+                     FROM public.notification_log n WHERE n.id = p_id;
+    WHEN 'shipment'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.shipments x WHERE x.id = p_id;
+    WHEN 'order'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.orders    x WHERE x.id = p_id;
+    WHEN 'pickup'        THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.pickups   x WHERE x.id = p_id;
+    WHEN 'document'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.documents x WHERE x.id = p_id;
+    WHEN 'payment'       THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.payments  x WHERE x.id = p_id;
+    WHEN 'quote'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.quotes    x WHERE x.id = p_id;
+    WHEN 'tracking_poll' THEN
+      RETURN QUERY SELECT s.org_id, 'SYSTEM_JOB'::text, c_system
+                     FROM public.tracking_poll_schedule t
+                     JOIN public.shipments s ON s.id = t.shipment_id
+                    WHERE t.id = p_id;
+    ELSE
+      RAISE EXCEPTION USING ERRCODE = '22023',               -- invalid_parameter_value
+                            MESSAGE = format('JOB_CONTEXT_UNKNOWN_KIND: %s', p_kind);
+  END CASE;
+END $$;
+ALTER FUNCTION platform.job_context(text, uuid) OWNER TO platform_definer;
+REVOKE ALL ON FUNCTION platform.job_context(text, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.job_context(text, uuid) TO platform_app;
+```
+
+- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`.
+- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job.
+- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50).
+- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3.
+
+`mfa_enrolment_overdue_candidates(p_now, p_limit)` (SEC-P3-14) follows the candidate-function shape:
+
+```sql
+SELECT u.id
+  FROM public.organisations o
+  JOIN public.memberships m ON m.org_id = o.id AND m.status = 'ACTIVE'
+  JOIN public.users u       ON u.id = m.user_id
+ WHERE o.type = 'OPERATOR' AND o.deleted_at IS NULL
+   AND u.status = 'ACTIVE' AND u.deleted_at IS NULL
+   AND u.first_signed_in_at < p_now - interval '24 hours'
+   AND NOT EXISTS (SELECT 1 FROM public.mfa_totp t WHERE t.user_id = u.id AND t.status = 'ACTIVE')
+ ORDER BY u.id
+ LIMIT least(p_limit, 1000);
+```
+
+#### Sensitive definer functions (amended 2026-11-12; SEC-P3-12, SEC-P3-26)
+
+These functions return data that grants or reveals more than an ID lookup. In addition to C11, a lint/Semgrep rule allows calls only from the listed module, and catalog test C11 keeps this list as a separate assertion.
+
+| Function | Why sensitive | Only caller |
+|---|---|---|
+| `auth_lookup_credential` | returns the password hash of any user ID | `apps/api/src/modules/identity/repository` |
+| `job_context` | maps any aggregate ID to its organisation and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
+| `sessions_for_user` | enumerates another user's session IDs | `apps/api/src/modules/identity/repository` (revocation service) |
+| `purge_expired_tokens` | deletes rows across users | `apps/worker` `housekeeping` processor |
 
 ### 4.6 Catalog tests (integration suite, Testcontainers, run against the migrated schema)
 
@@ -2493,22 +2770,34 @@ Candidate functions page by their partial indexes (AP-PAY-04/05, AP-ORD-05, AP-S
 |---|---|---|
 | C1 | Every non-partition table in `public` not on the GLOBAL/SYSTEM allow-list has RLS enabled **and** forced | `SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND NOT c.relispartition AND relname <> ALL($allow) AND NOT (relrowsecurity AND relforcerowsecurity)` → 0 rows (REQ-RLS-002) |
 | C2 | Every table with an `org_id` column is either allow-listed or has RLS, ≥ 1 `TO platform_app` policy and an index whose first key column is `org_id` (`organisations` special-cased on `id`) | join `pg_attribute` / `pg_policy` / `pg_index` (`indkey[0] = attnum`) (REQ-RLS-001, NFR-TENANT-001) |
-| C3 | Policy definitions equal the committed snapshot; no `TO platform_app` policy has `USING (true)`; `TO platform_migrator` policies exist only on the tables in §4.5 | `SELECT tablename, policyname, cmd, roles, qual, with_check FROM pg_policies ORDER BY 1,2` vs `tests/catalog/policies.snapshot.json` |
+| C3 | Policy definitions equal the committed snapshot; no `TO platform_app` policy has `USING (true)`; `TO platform_definer` policies exist only on the definer-read tables listed in §4.3; no policy targets `platform_migrator` | `SELECT tablename, policyname, cmd, roles, qual, with_check FROM pg_policies ORDER BY 1,2` vs `tests/catalog/policies.snapshot.json` |
 | C4 | `platform_app` is not superuser, has no `BYPASSRLS`/`CREATEROLE`/`CREATEDB`, owns no relation or function | `pg_roles`, `pg_class.relowner`, `pg_proc.proowner` (REQ-RLS-005) |
-| C5 | Table and column privileges of `platform_app` equal the grant manifest; `DELETE` only on the SYSTEM allow-list; audit tables exactly `INSERT, SELECT`; no privilege on any partition | `information_schema.role_table_grants`, `role_column_grants`, `has_table_privilege` (REQ-AUDIT-014, REQ-RLS-010) |
+| C5 | Table and column privileges of `platform_app` equal the grant manifest; `DELETE` only on the SYSTEM allow-list; audit tables (`audit_entries`, `audit_checkpoint_heads`, `audit_anchors`, `audit_pii_vault`, `data_subjects`) exactly `INSERT, SELECT`; no privilege on any partition | `information_schema.role_table_grants`, `role_column_grants`, `has_table_privilege` (REQ-AUDIT-014, REQ-RLS-010) |
 | C6 | `audit_entries` has the UPDATE/DELETE row trigger and the TRUNCATE trigger; every partition has the cloned row trigger (`tgparentid`) and its own TRUNCATE trigger | `pg_trigger` (ADR-0007) |
-| C7 | Immutability triggers exist on `compliance_packs`, `compliance_pack_sections`, `shipment_price_snapshots`, `notification_templates`, pricing child tables, `audit_checkpoint_heads`, `audit_pii_vault` | `pg_trigger` |
+| C7 | Immutability triggers exist on `compliance_packs`, `compliance_pack_sections`, `shipment_price_snapshots`, `notification_templates`, pricing child tables, `audit_checkpoint_heads`, `audit_anchors`, `audit_pii_vault` | `pg_trigger` |
 | C8 | No `timestamp without time zone`; every `id` is `uuid` with default `uuidv7()`; every `*_minor` column is `bigint` with a sibling currency column carrying the `^[A-Z]{3}$` CHECK | `information_schema.columns`, `pg_constraint` (NFR-DATA-001/002) |
 | C9 | Each named enum CHECK equals its `packages/shared` enum | parse `pg_get_constraintdef` of `ck_*` constraints |
-| C10 | Every column has a classification registry entry; SYSTEM tables have no `PER`/`SPER` columns except the documented exceptions (`idempotency_keys.response_body`, the encrypted vault) | `information_schema.columns` vs registry (NFR-PRIV-003) |
-| C11 | `SECURITY DEFINER` functions are exactly the §4.5 list plus `app_is_operator` and `ensure_audit_partitions`, each with a fixed `search_path`, owner `platform_migrator` and `EXECUTE` only for `platform_app` | `pg_proc.prosecdef`, `proconfig`, `proowner`, `has_function_privilege` |
+| C10 | Every column has a classification registry entry; SYSTEM tables have no `PER`/`SPER` columns except the documented exceptions (`idempotency_keys.response_body`, the encrypted vault); every ciphertext/HMAC column listed in §10.4 has its `<col>_key_id` sibling | `information_schema.columns` vs registry (NFR-PRIV-003) |
+| C11 | `SECURITY DEFINER` functions are exactly the §4.5 list plus `app_is_operator` (owner `platform_definer`) and `ensure_audit_partitions` (owner `platform_audit_owner`), each with a fixed `search_path` and `EXECUTE` only for `platform_app`; the §4.5 functions have owner `platform_definer`; the sensitive-definer list of §4.5 matches its lint allow-list | `pg_proc.prosecdef`, `proconfig`, `proowner`, `has_function_privilege` |
 | C12 | With no settings, every RLS table returns 0 rows to `platform_app`; with org A set, crafted IDs of org B select/update/delete 0 rows and inserts with B's `org_id` fail; a customer member with `app.actor_scope = 'OPERATOR'` forced still sees nothing of B (`app_is_operator()` false) | generated per table (REQ-RLS-004/006/007, NFR-TENANT-001) |
+| C13 | (2026-11-12, SEC-P3-03) Every audit object (the eight tables of §4.4, every `audit_entries_%` partition, the three audit functions) has owner `platform_audit_owner`. `platform_audit_owner` has `rolcanlogin = false` and **no row in `pg_auth_members`**, neither as a role granted to others nor as a member. `platform_migrator` owns no audit object | `pg_class.relowner`, `pg_proc.proowner`, `pg_roles`, `pg_auth_members` |
+| C14 | (2026-11-12, SEC-P3-03) Event triggers `platform_audit_ddl_guard_end` (`ddl_command_end`) and `platform_audit_ddl_guard_drop` (`sql_drop`) exist with `evtenabled = 'O'` and call `platform.audit_ddl_guard()`, which is **not** `SECURITY DEFINER`. `audit_anchors` has the UPDATE/DELETE row trigger and the TRUNCATE trigger | `pg_event_trigger`, `pg_proc.prosecdef`, `pg_trigger` |
+
+Amended 2026-11-12 (SEC-P3-03, SEC-P3-25, SEC-P3-26):
+- **C3.** The row was changed from "`TO platform_migrator` policies exist only on the tables in §4.5" to the `platform_definer` wording above.
+- **C5.** `audit_anchors` is `INSERT, SELECT` for `platform_app`, like the other append-only audit tables (row changed in place).
+- **C7.** `audit_anchors` is added to the immutability-trigger list (row changed in place).
+- **C10.** Each column in the §10.4 key table has its `<col>_key_id` sibling (row changed in place).
+- **C11.** The row was changed from "owner `platform_migrator`" to the owners above. The §4.5 list now includes `job_context`, `sessions_for_user` and `mfa_enrolment_overdue_candidates`, and the sensitive-definer assertion was added.
+- **Wave-end and evidence checks.** SEC-P3-07 refers to the security catalog suite as "C1–C12"; C13 and C14 belong to it as well.
 
 ---
 
 ## 5. Audit store SQL
 
 ADR-0007, REQ-AUDIT-012..018, DR-A09, NFR-AUDIT-002/003. Written as raw SQL in the initial audit migration.
+
+Amended 2026-11-12 (SEC-P3-03; ADR-0007 amendment 7): every statement in §5.1–§5.7 that creates or alters an audit object runs in the **bootstrap lane** (`prisma/bootstrap/10-audit.sql` and later `prisma/bootstrap/NN-audit-*.sql` files carrying the security-approval marker, §8.3), under `SET ROLE platform_audit_owner`. It never runs in a Prisma migration as `platform_migrator`. The audit tables are listed in `tables.external` (§7.3) so that Prisma Migrate never diffs them. DML from the application (§5.4–§5.6) is unchanged and runs as `platform_app`.
 
 ### 5.1 Partitioned table
 
@@ -2531,6 +2820,7 @@ CREATE TABLE public.audit_entries (
   session_id          uuid,
   ip_token            uuid,
   ip_hash             bytea       CONSTRAINT ck_audit_entries__ip_hash CHECK (ip_hash IS NULL OR octet_length(ip_hash) = 32),
+  ip_hash_key_id      text,                                                -- amended 2026-11-12 (SEC-P3-08 item 1)
   ip_coarse           inet        CONSTRAINT ck_audit_entries__ip_coarse CHECK (ip_coarse IS NULL OR masklen(ip_coarse) IN (24, 48)),
   user_agent_token    uuid,
   ua_parsed           text        CONSTRAINT ck_audit_entries__ua_parsed CHECK (char_length(ua_parsed) <= 120),
@@ -2556,6 +2846,7 @@ CREATE TABLE public.audit_entries (
   prev_hash           bytea       NOT NULL CONSTRAINT ck_audit_entries__prev_hash  CHECK (octet_length(prev_hash) = 32),
   entry_hash          bytea       NOT NULL CONSTRAINT ck_audit_entries__entry_hash CHECK (octet_length(entry_hash) = 32),
   CONSTRAINT ck_audit_entries__job_name CHECK (actor_type <> 'SYSTEM_JOB' OR job_name IS NOT NULL),
+  CONSTRAINT ck_audit_entries__ip_hash_key CHECK ((ip_hash IS NULL) = (ip_hash_key_id IS NULL)),
   CONSTRAINT pk_audit_entries PRIMARY KEY (occurred_at, id),
   CONSTRAINT ux_audit_entries__entry_hash UNIQUE (entry_hash, occurred_at)
 ) PARTITION BY RANGE (occurred_at);
@@ -2571,7 +2862,10 @@ CREATE INDEX ix_audit__ip_coarse_time ON public.audit_entries (ip_coarse, occurr
 CREATE INDEX ix_audit__correlation    ON public.audit_entries (correlation_id);
 CREATE INDEX ix_audit__roles          ON public.audit_entries USING gin (actor_roles);
 CREATE INDEX ix_audit__stream_seq     ON public.audit_entries (stream_id, stream_seq);
+ALTER TABLE public.audit_entries OWNER TO platform_audit_owner;   -- amended 2026-11-12 (SEC-P3-03); created under SET ROLE platform_audit_owner anyway
 ```
+
+Amended 2026-11-12 (SEC-P3-08 item 1, SEC-P3-03): added `ip_hash_key_id` with its pairing CHECK, and the owner line.
 
 ### 5.2 Immutability triggers
 
@@ -2596,9 +2890,110 @@ CREATE TRIGGER trg_audit_entries__no_truncate
 CREATE TRIGGER trg_audit_checkpoint_heads__immutable
   BEFORE UPDATE OR DELETE ON public.audit_checkpoint_heads
   FOR EACH ROW EXECUTE FUNCTION platform.audit_forbid_mutation();
+
+-- amended 2026-11-12 (SEC-P3-03): anchors are append-only like the entries
+CREATE TRIGGER trg_audit_anchors__immutable
+  BEFORE UPDATE OR DELETE ON public.audit_anchors
+  FOR EACH ROW EXECUTE FUNCTION platform.audit_forbid_mutation();
+CREATE TRIGGER trg_audit_anchors__no_truncate
+  BEFORE TRUNCATE ON public.audit_anchors
+  FOR EACH STATEMENT EXECUTE FUNCTION platform.audit_forbid_mutation();
+CREATE TRIGGER trg_audit_checkpoint_heads__no_truncate
+  BEFORE TRUNCATE ON public.audit_checkpoint_heads
+  FOR EACH STATEMENT EXECUTE FUNCTION platform.audit_forbid_mutation();
+ALTER FUNCTION platform.audit_forbid_mutation() OWNER TO platform_audit_owner;
 ```
 
-The triggers fire for every role including the owner (REQ-AUDIT-014). Disabling a trigger requires table ownership (`platform_migrator`), which the application never holds; the migration linter rejects `DISABLE TRIGGER`, `DETACH PARTITION`, `DROP TABLE … audit_*`, `NO FORCE ROW LEVEL SECURITY` and any `UPDATE`/`DELETE`/`TRUNCATE` of audit tables (§8.3). `session_replication_role = replica` (which skips triggers) needs superuser. As defence in depth the bootstrap (superuser) script installs an event trigger `platform_audit_ddl_guard` on `ddl_command_start` and `sql_drop` that raises when the statement text targets `audit_entries`/`audit_pii_vault` with `DETACH`, `DISABLE TRIGGER`, `NO FORCE`, `DISABLE ROW LEVEL SECURITY` or `DROP`. It guards against accidents, not a malicious superuser; tamper evidence against the latter is the hash chain plus the M5 Object Lock archive. The REQ-AUDIT-015 tests attempt UPDATE, DELETE and TRUNCATE as `platform_app`, `platform_migrator` and the bootstrap owner, through SQL and through the Prisma client, and expect SQLSTATE `42501`.
+The triggers fire for every role including the owner (REQ-AUDIT-014). Disabling a trigger requires table ownership (`platform_audit_owner` since the 2026-11-12 amendment below; was `platform_migrator`), which the application never holds; the migration linter rejects `DISABLE TRIGGER`, `DETACH PARTITION`, `DROP TABLE … audit_*`, `NO FORCE ROW LEVEL SECURITY` and any `UPDATE`/`DELETE`/`TRUNCATE` of audit tables (§8.3). `session_replication_role = replica` (which skips triggers) needs superuser. As defence in depth the bootstrap (superuser) script installs (**withdrawn 2026-11-12, replaced by the identity-based guard below**) an event trigger `platform_audit_ddl_guard` on `ddl_command_start` and `sql_drop` that raises when the statement text targets `audit_entries`/`audit_pii_vault` with `DETACH`, `DISABLE TRIGGER`, `NO FORCE`, `DISABLE ROW LEVEL SECURITY` or `DROP`. It guards against accidents, not a malicious superuser; tamper evidence against the latter is the hash chain plus the M5 Object Lock archive. The REQ-AUDIT-015 tests attempt UPDATE, DELETE and TRUNCATE as `platform_app`, `platform_migrator` and the bootstrap owner, through SQL and through the Prisma client, and expect SQLSTATE `42501`.
+
+#### Amendment (2026-11-12, SEC-P3-03): ownership and an identity-based event trigger
+
+The paragraph above is amended in two places:
+
+1. **Ownership.** "Disabling a trigger requires table ownership (`platform_migrator`)" now reads: ownership by **`platform_audit_owner`**, a `NOLOGIN` role with no members (§4.4). The migrator therefore gets "must be owner" on `DISABLE TRIGGER`, `NO FORCE ROW LEVEL SECURITY`, `DETACH PARTITION`, `DROP TRIGGER` and `CREATE OR REPLACE FUNCTION`.
+2. **Event trigger.** The statement-text event trigger on `ddl_command_start` is **withdrawn**: it pattern-matched statement text, which dynamic SQL defeats (`DO $$ BEGIN EXECUTE 'ALTER TABLE audit_' || 'entries DISABLE TRIGGER ALL'; END $$`). It is replaced by a guard that inspects the **identity of the objects affected**. `ddl_command_end` lists every object a command created or altered (including commands built by `EXECUTE` inside `DO` blocks and functions), and `sql_drop` lists every dropped object (including objects dropped by `CASCADE` and by the schema owner's `DROP TABLE` / `DROP SCHEMA … CASCADE`, §4.4).
+
+The guard raises unless `current_user = 'platform_audit_owner'`. That condition holds only:
+- inside `ensure_audit_partitions` (a `SECURITY DEFINER` function owned by that role), and
+- in the bootstrap lane under `SET ROLE platform_audit_owner`, which requires superuser.
+
+The guard function therefore must **not** be `SECURITY DEFINER`, otherwise `current_user` would always be its owner (C14). The row and statement triggers above stay.
+
+```sql
+-- prisma/bootstrap/90-audit-ddl-guard.sql — run by the bootstrap superuser AFTER 10-audit.sql (RESET ROLE first);
+-- event triggers require superuser, so the function and triggers are owned by the bootstrap superuser.
+CREATE OR REPLACE FUNCTION platform.audit_ddl_guard() RETURNS event_trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+DECLARE
+  r      record;
+  v_addr record;
+  c_tbl  constant text := '^(audit_[a-z0-9_]+|data_subjects)$';           -- audit tables and audit_entries_YYYY_MM partitions
+  c_idx  constant text := '^(ix_audit__|pk_audit_|ux_audit_|ux_data_subjects__|audit_entries_)';
+  c_fn   constant text[] := ARRAY['audit_forbid_mutation','audit_vault_guard','ensure_audit_partitions','audit_ddl_guard'];
+BEGIN
+  IF current_user = 'platform_audit_owner' THEN
+    RETURN;                                                                  -- ensure_audit_partitions / bootstrap lane only
+  END IF;
+
+  IF TG_EVENT = 'ddl_command_end' THEN
+    FOR r IN SELECT * FROM pg_event_trigger_ddl_commands() LOOP
+      CONTINUE WHEN r.objid IS NULL OR r.objid = 0;                          -- e.g. GRANT rows; GRANT needs ownership anyway
+      SELECT * INTO v_addr FROM pg_identify_object_as_address(r.classid, r.objid, r.objsubid);
+      IF (r.object_type IN ('table','table column','trigger','policy','table constraint','rule')
+            AND v_addr.object_names[1] = 'public' AND v_addr.object_names[2] ~ c_tbl)
+         OR (r.object_type = 'index'
+            AND EXISTS (SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid
+                         JOIN pg_namespace n ON n.oid = t.relnamespace
+                        WHERE i.indexrelid = r.objid AND n.nspname = 'public' AND t.relname ~ c_tbl))
+         OR (r.object_type = 'function'
+            AND v_addr.object_names[1] = 'platform' AND v_addr.object_names[2] = ANY (c_fn))
+         OR (r.object_type = 'schema' AND v_addr.object_names[1] IN ('public','platform'))
+      THEN
+        RAISE EXCEPTION USING ERRCODE = '42501',
+          MESSAGE = 'audit objects are immutable (SEC-P3-03)',
+          DETAIL  = format('%s on %s %s by %s', r.command_tag, r.object_type, r.object_identity, current_user);
+      END IF;
+    END LOOP;
+
+  ELSIF TG_EVENT = 'sql_drop' THEN
+    FOR r IN SELECT * FROM pg_event_trigger_dropped_objects() LOOP
+      IF (r.object_type IN ('table','table column','trigger','policy','table constraint','rule')
+            AND r.address_names[1] = 'public' AND r.address_names[2] ~ c_tbl)
+         OR (r.object_type = 'index' AND r.schema_name = 'public' AND r.object_name ~ c_idx)
+         OR (r.object_type = 'function' AND r.schema_name = 'platform'
+            AND r.address_names[2] = ANY (c_fn))
+         OR (r.object_type = 'schema' AND r.object_name IN ('public','platform'))
+      THEN
+        RAISE EXCEPTION USING ERRCODE = '42501',
+          MESSAGE = 'audit objects are immutable (SEC-P3-03)',
+          DETAIL  = format('DROP of %s %s by %s', r.object_type, r.object_identity, current_user);
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
+REVOKE ALL ON FUNCTION platform.audit_ddl_guard() FROM PUBLIC;
+
+DROP EVENT TRIGGER IF EXISTS platform_audit_ddl_guard;                      -- the withdrawn text-matching trigger
+CREATE EVENT TRIGGER platform_audit_ddl_guard_end  ON ddl_command_end EXECUTE FUNCTION platform.audit_ddl_guard();
+CREATE EVENT TRIGGER platform_audit_ddl_guard_drop ON sql_drop        EXECUTE FUNCTION platform.audit_ddl_guard();
+```
+
+What the guard covers:
+- **`ALTER TABLE` forms.** `ALTER TABLE … DISABLE TRIGGER`, `NO FORCE ROW LEVEL SECURITY`, `DISABLE ROW LEVEL SECURITY`, `DETACH PARTITION`, `ADD/DROP COLUMN`, `SET LOGGED/UNLOGGED`, `OWNER TO` and `RENAME` on an audit table or partition all surface in `ddl_command_end` with `object_type = 'table'` and the table's address.
+- **Drops.** `DROP TRIGGER`, `DROP POLICY` and `DROP TABLE` surface in `sql_drop` with the table in `address_names[2]`.
+- **Dropped indexes.** A dropped index is matched by name, because its table is gone from the catalogue at `sql_drop` time. That is why the naming prefixes of P9 matter. Partition child indexes start with the partition name.
+- **Schemas.** Altering or dropping the `public` and `platform` schemas is guarded too. They are created only by the bootstrap lane, and a migrator-owned `DROP SCHEMA public CASCADE` would otherwise remove the audit tables.
+
+What it does not cover:
+- **A cluster superuser.** The guard does not stop a superuser, who can `ALTER EVENT TRIGGER … DISABLE` or run with `session_replication_role = replica`, where event triggers do not fire. Tamper evidence against that actor is the hourly signed anchor (§5.5, §5.6) plus the M5 locked sink.
+- **Linter versus guard.** The migration linter (§8.3) remains a text-based early warning; it is not a security boundary.
+
+Tests (SEC-TC-43):
+- As `platform_migrator`, each of `ALTER TABLE audit_entries DISABLE TRIGGER ALL`, `NO FORCE ROW LEVEL SECURITY`, `DROP TRIGGER`, `DETACH PARTITION`, `DROP TABLE public.audit_entries` and `DROP SCHEMA public CASCADE` fails.
+- The same statements built through `DO $$ … EXECUTE 'ALTER TABLE audit_' || 'entries …' $$` fail too, with the guard's message wherever privilege did not already stop them.
+- `SELECT platform.ensure_audit_partitions(3)` as `platform_app` still succeeds.
 
 ### 5.3 Partition pre-creation
 
@@ -2645,10 +3040,15 @@ BEGIN
   END LOOP;
   RETURN v_created;
 END $$;
-ALTER FUNCTION platform.ensure_audit_partitions(integer) OWNER TO platform_migrator;
+ALTER FUNCTION platform.ensure_audit_partitions(integer) OWNER TO platform_audit_owner;   -- amended 2026-11-12 (SEC-P3-03): was platform_migrator
 REVOKE ALL ON FUNCTION platform.ensure_audit_partitions(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.ensure_audit_partitions(integer) TO platform_app;
 ```
+
+Amended 2026-11-12 (SEC-P3-03):
+- **The only DDL path at runtime.** The function is owned by `platform_audit_owner` and is the only code path that runs DDL on audit objects outside the bootstrap lane. Inside it, `current_user = 'platform_audit_owner'`, so the `audit_ddl_guard` (§5.2) admits its `CREATE TABLE`, `ADD CONSTRAINT`, `ATTACH PARTITION`, `CREATE TRIGGER` and `REVOKE`, and the new partitions are owned by `platform_audit_owner`.
+- **Who calls it.** `platform_app` keeps `EXECUTE` so that the daily `audit-maintenance` worker job can call it. The function only creates future months and takes no free-form input (`p_months_ahead` is bounded to 0–12), so `EXECUTE` gives no way to alter existing audit objects.
+- **First call.** The first call moves from "the initial migration" to `prisma/bootstrap/10-audit.sql` (§4.4).
 
 The initial migration calls `SELECT platform.ensure_audit_partitions(3);` (current month + 3, REQ-AUDIT-017). The daily `audit-maintenance` job calls it idempotently; readiness reports the audit component degraded when fewer than 2 future partitions exist (`SELECT count(*) FROM audit_partitions WHERE range_start > now()`), and the job alerts on any failure. The ATTACH of an empty table with a matching CHECK skips the validation scan.
 
@@ -2658,9 +3058,11 @@ Executed by `packages/audit` as the **last** database work before `COMMIT`, afte
 
 ```sql
 -- 1. Tokenise PER/SPER values (one statement per value; vault dedupes per subject/field/value)
-INSERT INTO public.audit_pii_vault (token, subject_id, classification, entity_name, field, value_hmac, ciphertext, key_id,
-                                    created_at, updated_at, created_by, updated_by, version)
-VALUES ($token, $subject_id, $classification, $entity_name, $field, $value_hmac, $ciphertext, $key_id, now(), now(), $actor, $actor, 1)
+-- amended 2026-11-12 (SEC-P3-08 item 1): key_id → ciphertext_key_id, + value_hmac_key_id; ciphertext AAD = (audit_pii_vault, ciphertext, $token, ciphertext_key_id)
+INSERT INTO public.audit_pii_vault (token, subject_id, classification, entity_name, field, value_hmac, value_hmac_key_id,
+                                    ciphertext, ciphertext_key_id, created_at, updated_at, created_by, updated_by, version)
+VALUES ($token, $subject_id, $classification, $entity_name, $field, $value_hmac, $value_hmac_key_id,
+        $ciphertext, $ciphertext_key_id, now(), now(), $actor, $actor, 1)
 ON CONFLICT (subject_id, entity_name, field, value_hmac) DO NOTHING;
 SELECT token FROM public.audit_pii_vault
  WHERE subject_id = $subject_id AND entity_name = $entity_name AND field = $field AND value_hmac = $value_hmac;
@@ -2681,11 +3083,13 @@ SELECT entry_count, head_hash, head_occurred_at, clock_timestamp() AS db_now
 
 ```sql
 -- 5. Append and advance the head (raw parameterised INSERT from packages/audit)
+--    amended 2026-11-12 (SEC-P3-08 item 1): + ip_hash_key_id (now 37 parameters)
 INSERT INTO public.audit_entries (id, occurred_at, stream_id, stream_seq, org_id, target_org_id, on_behalf_of_org_id,
-       actor_type, user_id, api_key_id, job_name, actor_roles, session_id, ip_token, ip_hash, ip_coarse, user_agent_token,
-       ua_parsed, source_app, correlation_id, action, entity_name, entity_id, outcome, reason_token, reauth_proof_id,
-       signature_meaning, http_method, route, old_value, new_value, details, pii_token_count, hash_version, prev_hash, entry_hash)
-VALUES ($1, $2, … , $36);
+       actor_type, user_id, api_key_id, job_name, actor_roles, session_id, ip_token, ip_hash, ip_hash_key_id, ip_coarse,
+       user_agent_token, ua_parsed, source_app, correlation_id, action, entity_name, entity_id, outcome, reason_token,
+       reauth_proof_id, signature_meaning, http_method, route, old_value, new_value, details, pii_token_count, hash_version,
+       prev_hash, entry_hash)
+VALUES ($1, $2, … , $37);
 
 UPDATE public.audit_stream_heads
    SET entry_count = $seq, head_entry_id = $id, head_occurred_at = $occurred_at, head_hash = $entry_hash,
@@ -2696,25 +3100,71 @@ UPDATE public.audit_stream_heads
 
 `FAILED` outcome entries (REQ-AUDIT-010) and best-effort `VIEW` entries run the same procedure in their own short transaction; fail-closed reads (DR-A12) write the `VIEW`/`DOWNLOAD` entry and commit before the response (or pre-signed URL) is released. `hashtext` returns 32 bits, so two streams can share a lock slot; that only adds occasional serialisation, never a chain error (OI-21).
 
-### 5.5 Nightly checkpoint entry (ADR-0007, amendment 3)
+### 5.5 Hourly checkpoint and signed anchor (ADR-0007, amendments 3 and 7)
+
+**Amendment (2026-11-12, SEC-P3-03; ADR-0007 amendment 7).** This section replaces the nightly checkpoint of the first version. What changed:
+- the cadence is **hourly**, after every incremental verification (§5.6);
+- the symmetric `HMAC-SHA256(AUDIT_CHECKPOINT_KEY, …)` anchor is dropped, together with the key;
+- every checkpoint gets one row in `audit_anchors` (§3.4), signed with **ECDSA P-256 / SHA-256** under a private key that only the worker can use, and chained by `anchor_seq` and `prev_anchor_hash`;
+- the same record is appended to the **mandatory** external sink `AUDIT_ANCHOR_SINK`;
+- `audit_checkpoint_heads` stores deltas (§3.4);
+- the head snapshot is taken once and reused, so the digest and the stored rows always describe the same set (the first version re-read `audit_stream_heads` for the `INSERT`, and could store heads newer than the digest).
+
+Why ECDSA P-256 and not Ed25519: AWS KMS offers no Ed25519 signing, and one algorithm for local and M5 keeps a single verifier.
+
+**Keys and configuration (ADR-0018 register).**
+
+| Item | Value |
+|---|---|
+| Signing key | `AUDIT_ANCHOR_SIGNING_KEY_REF`, worker `audit-maintenance` processor only. Locally a PEM key file (git-ignored, generated by `npm run keys:dev`); at M5 a non-exportable KMS `ECC_NIST_P256` key used through `kms:Sign` (`SigningAlgorithm = ECDSA_SHA_256`, `MessageType = RAW`) |
+| Verification keys | `AUDIT_ANCHOR_PUBLIC_KEYS` (`key_id → PEM`), held by the API (`GET /audit/chain/status`), the worker verifier and any third party. Old public keys are kept for as long as anchors signed with them exist |
+| Signature | `signature = ECDSA-P256-SHA256(message = anchor_hash)`, DER-encoded. Node `crypto.sign('sha256', anchor_hash, key)` and KMS `Sign` with `RAW` both sign SHA-256(`anchor_hash`), so one verifier checks either (ECDSA signatures are randomised, so the bytes differ between runs). A third party checks with `openssl dgst -sha256 -verify pub.pem -signature sig.der anchor_hash.bin` |
+| Sink | `AUDIT_ANCHOR_SINK`, **mandatory in every environment** (the worker refuses to start without it). `file:<path>` (append-only JSON Lines, `fsync` per record) in local, test and CI; at M5 `s3://…` (one object per anchor, `anchors/<anchor_seq 20 digits>.json`, S3 Object Lock compliance mode, worker role `s3:PutObject` only) or `cwlogs://<group>/<stream>` (retention-locked log group, no delete or put-retention permission for any app or CI role). Locking the sink is a G4-production precondition (ADR-0007 amendment 7 item 7) |
+| Sink record | One JSON object with every `audit_anchors` column (`bytea` as lower-case hex, `signature` as base64, `created_at` in the hashed text form) |
+
+**Procedure (worker `audit-maintenance`, once per hour after the incremental verification; SYSTEM actor; READ COMMITTED; one transaction).**
 
 ```sql
-BEGIN;                                                       -- worker job, SYSTEM actor, no tenant context
-SELECT pg_advisory_xact_lock(hashtext('audit:00000000-0000-0000-0000-000000000000'));   -- SYSTEM shard 0
-SELECT stream_id, entry_count, head_hash FROM public.audit_stream_heads ORDER BY stream_id;   -- committed heads now
--- app: append a SYSTEM-shard-0 entry (procedure §5.4): action 'CREATE', entity_name 'chain_checkpoint',
---      entity_id = <checkpoint id>, new_value = {"heads":[{"stream_id","head_hash","entry_count"}…],
---      "stream_count":n, "heads_digest":"<sha256 hex over the sorted heads>", "as_of":"<ts>"}
-INSERT INTO public.audit_checkpoint_heads (id, checkpoint_entry_id, stream_id, entry_count, head_hash,
+BEGIN;
+SELECT pg_advisory_xact_lock(hashtext('audit:anchors'));                 -- one anchor writer; held across the signing call
+SELECT anchor_seq, anchor_hash FROM public.audit_anchors ORDER BY anchor_seq DESC LIMIT 1;   -- none → seq 0, 32 zero bytes
+SELECT stream_id, entry_count, head_hash, head_occurred_at
+  FROM public.audit_stream_heads ORDER BY stream_id;                     -- ONE snapshot (single statement), reused below
+-- app: heads_digest = SHA-256 over the snapshot sorted by stream_id, each item stream_id(16 B) ‖ be64(entry_count) ‖ head_hash(32 B)
+-- app: checkpoint_entry_id = uuidv7(); anchor_seq = prev + 1; created_at = now, truncated to µs
+-- app: anchor_hash = SHA-256(be64(anchor_seq) ‖ UTF-8(created_at 'YYYY-MM-DDTHH:MM:SS.ffffffZ') ‖ heads_digest ‖ prev_anchor_hash)
+-- app: signature = ECDSA-P256-SHA256(anchor_hash) via the signer (key file / KMS Sign; 2 s timeout, 2 retries) — outside any audit stream lock
+
+-- delta heads: only streams whose entry_count moved since their last captured row (all streams on the first checkpoint)
+INSERT INTO public.audit_checkpoint_heads (id, checkpoint_entry_id, stream_id, entry_count, head_hash, head_occurred_at,
                                            created_at, updated_at, created_by, updated_by, version)
-SELECT uuidv7(), $checkpoint_entry_id, stream_id, entry_count, head_hash, now(), now(), $system, $system, 1
-  FROM public.audit_stream_heads;
+SELECT uuidv7(), $checkpoint_entry_id, s.stream_id, s.entry_count, s.head_hash, s.head_occurred_at, now(), now(), $system, $system, 1
+  FROM unnest($stream_ids::uuid[], $entry_counts::bigint[], $head_hashes::bytea[], $head_occurred_ats::timestamptz[])
+         AS s(stream_id, entry_count, head_hash, head_occurred_at)
+  LEFT JOIN LATERAL (SELECT c.entry_count FROM public.audit_checkpoint_heads c
+                      WHERE c.stream_id = s.stream_id
+                      ORDER BY c.checkpoint_entry_id DESC LIMIT 1) prev ON true      -- ix_audit_checkpoint_heads__stream_checkpoint
+ WHERE prev.entry_count IS DISTINCT FROM s.entry_count;                  -- batched 10,000 streams per statement
+
+INSERT INTO public.audit_anchors (anchor_seq, checkpoint_entry_id, created_at, heads_digest, prev_anchor_hash,
+                                  anchor_hash, algorithm, key_id, signature)
+VALUES ($anchor_seq, $checkpoint_entry_id, $created_at, $heads_digest, $prev_anchor_hash,
+        $anchor_hash, 'ECDSA_P256_SHA256', $key_id, $signature);
+
+-- LAST: append the SYSTEM-shard-0 checkpoint entry (procedure §5.4; takes the shard-0 lock for 1–3 ms):
+--   id = $checkpoint_entry_id, action 'CREATE', entity_name 'chain_checkpoint', entity_id = $checkpoint_entry_id,
+--   new_value = {"heads_digest":"<hex>","stream_count":n,"delta_count":d,"anchor_seq":k,"as_of":"<created_at>"}
 COMMIT;
--- after commit: HMAC-SHA256(AUDIT_CHECKPOINT_KEY, entry_hash ‖ heads_digest) is written to the external
--- append-only anchor (local file in Compose; CloudWatch Logs with retention lock / Object Lock bucket at M5)
+-- after COMMIT: append the anchor record to AUDIT_ANCHOR_SINK (retry with backoff for up to 15 min; idempotent by anchor_seq:
+-- the sink reader treats byte-identical duplicates as one record, and a differing duplicate as ANCHOR_MISSING)
 ```
 
-As ADR-0007 decides, the checkpoint value lists every stream's `(stream_id, head_hash, entry_count)`; `audit_checkpoint_heads` stores the same list relationally for verification queries. When the number of streams makes the value large (more than 10,000 organisations, ≈ 1 MB of JSONB), the value keeps only `heads_digest` and `stream_count` and the list lives in `audit_checkpoint_heads` alone, which the digest inside the chain anchors (OI-07). Heads advancing during the snapshot are harmless: each captured head was a committed head at read time. The external HMAC anchor means a database superuser cannot rebuild a stream and recompute matching checkpoints undetected (designed now, enforced at M5).
+Design notes:
+- **Lock order.** The KMS call happens under the dedicated `audit:anchors` lock, which only the hourly job takes. The shard-0 stream lock is taken last and held for milliseconds, as §5.4 requires, so a slow KMS call never stalls audit writes (`lock_timeout` 2 s).
+- **Checkpoint value.** Following §12 OI-07, the value always holds the digest and counts, not the list of heads, whatever the number of streams.
+- **No foreign key.** The anchor references the checkpoint entry by `checkpoint_entry_id`; a foreign key to the partitioned `audit_entries` is not possible on `id` alone, so the verifier resolves it.
+- **Residual window.** Entries newer than the latest anchor (at most 1 h) can still be rewritten undetected by a cluster superuser who also recomputes the chain before the next checkpoint. Any change to an entry at or before an anchored head is detected by §5.6. ADR-0007 amendment 7 accepts this residual for this run; it closes at M5 with the locked sink.
+- **Volume.** 24 anchors per day, plus delta head rows (§10.1).
 
 ### 5.6 Verification (hourly incremental, nightly full)
 
@@ -2722,10 +3172,10 @@ Per stream, keyset batches of 5,000 in `stream_seq` order; the time predicate pr
 
 ```sql
 SELECT id, occurred_at, stream_seq, org_id, target_org_id, on_behalf_of_org_id, actor_type, user_id, api_key_id, job_name,
-       actor_roles, session_id, ip_token, ip_hash, ip_coarse, user_agent_token, ua_parsed, source_app, correlation_id,
-       action, entity_name, entity_id, outcome, reason_token, reauth_proof_id, signature_meaning, http_method, route,
-       old_value, new_value, details, pii_token_count, hash_version, prev_hash, entry_hash
-  FROM public.audit_entries
+       actor_roles, session_id, ip_token, ip_hash, ip_hash_key_id, ip_coarse, user_agent_token, ua_parsed, source_app,
+       correlation_id, action, entity_name, entity_id, outcome, reason_token, reauth_proof_id, signature_meaning,
+       http_method, route, old_value, new_value, details, pii_token_count, hash_version, prev_hash, entry_hash
+  FROM public.audit_entries                                               -- + ip_hash_key_id (amended 2026-11-12, SEC-P3-08)
  WHERE stream_id = $stream_id
    AND stream_seq > $after_seq
    AND occurred_at >= $last_verified_occurred_at - interval '5 minutes'   -- omitted on the nightly full run
@@ -2733,7 +3183,7 @@ SELECT id, occurred_at, stream_seq, org_id, target_org_id, on_behalf_of_org_id, 
  LIMIT 5000;
 ```
 
-For each row the verifier asserts `stream_seq = expected`, `prev_hash = running_hash`, and recomputes `entry_hash`; it then sets `running_hash = entry_hash`. When caught up, `running_hash` must equal `audit_stream_heads.head_hash` (`HEAD_MISMATCH` otherwise) and the head's `last_verified_*` columns advance. The nightly run covers all 16 SYSTEM shards, checks the latest checkpoint (recomputing `heads_digest` from `audit_checkpoint_heads` and from the entries at those sequence numbers, and comparing the HMAC with the external anchor when configured) and global duplicates, partition by partition:
+For each row the verifier asserts `stream_seq = expected`, `prev_hash = running_hash`, and recomputes `entry_hash`; it then sets `running_hash = entry_hash`. When caught up, `running_hash` must equal `audit_stream_heads.head_hash` (`HEAD_MISMATCH` otherwise) and the head's `last_verified_*` columns advance. The nightly run covers all 16 SYSTEM shards, the anchors (see the amendment below; every hourly run checks the latest anchor, and the nightly run checks every anchor since the previous nightly run) and global duplicates, partition by partition:
 
 ```sql
 SELECT entry_hash FROM public.audit_entries_2026_11 GROUP BY entry_hash HAVING count(*) > 1;           -- DUPLICATE_ENTRY_HASH
@@ -2753,6 +3203,25 @@ SELECT id, stream_seq FROM (
 ```
 
 Results go to `audit_chain_verifications`; a break emits outbox event `audit.chain_broken`, security log event `audit_chain_broken`, an alert metric and degrades `/health/ready` (REQ-AUDIT-013). Budget: 1M entries in ≤ 5 min (NFR-AUDIT-003) — reading 1M rows in 200 batches plus 1M SHA-256 computations of ≈ 1 kB is well under a minute on the reference host.
+
+#### Amendment (2026-11-12, SEC-P3-03; ADR-0007 amendment 7): anchor verification on every run
+
+Anchor checking is no longer optional or nightly-only. The comparison happens on every hourly run, and the external sink is mandatory (§5.5). The verifier holds **only the public keys** (`AUDIT_ANCHOR_PUBLIC_KEYS`). There is no shared secret, and neither the API nor the verifier can mint an anchor. Every hourly run performs, after the chain walk above and before writing the next checkpoint (§5.5):
+
+| Step | Check | Failure → `failure_kind` / event |
+|---|---|---|
+| (i) Anchor log integrity | Read the sink records and the `audit_anchors` rows in the range under check: **hourly** from the last anchor verified by the previous run, **nightly** every anchor since the previous nightly run. Require `anchor_seq` dense (+1) with no duplicates and in order, each `prev_anchor_hash` = the previous record's `anchor_hash` (32 zero bytes for seq 1), and the table and sink records byte-identical per `anchor_seq`. The newest table anchor may be missing from the sink only while the writer's sink retry (≤ 15 min) is still running | gap, duplicate, out-of-order record, broken `prev_anchor_hash`, or table/sink disagreement → **`ANCHOR_MISSING`**: run status `FAILED`, ERROR log, security event **`audit_anchor_missing`**, alert metric `audit_anchor_missing_total`, `/health/ready` degraded |
+| (ii) Signature | For every new anchor: recompute `anchor_hash` from (`anchor_seq`, `created_at`, `heads_digest`, `prev_anchor_hash`), compare it with the stored value, then verify `signature` with the public key for `key_id` | mismatch, unknown `key_id` or invalid signature → **`CHECKPOINT_SIGNATURE_INVALID`**, security event `audit_chain_broken`, readiness degraded |
+| (iii) Anchored heads | For the latest anchor: (a) reconstruct its full head set from `audit_checkpoint_heads` (the latest row per stream at or before that checkpoint, §3.4), recompute `heads_digest` and compare it with the anchor and with the checkpoint entry's `new_value.heads_digest`; (b) for **every stream**, fetch the entry at the anchored `(stream_id, stream_seq = entry_count)` using `head_occurred_at` for partition pruning (one PK-range probe per stream) and require its `entry_hash` = the anchored `head_hash`. The incremental chain walk above has already recomputed every entry after the previous run's position; the nightly full walk recomputes all entries, so content changes behind an unchanged stored hash are caught within 24 h and can never be legitimised | any difference → **`CHECKPOINT_HEAD_MISMATCH`** with `first_broken_stream_id`, existing security event **`audit_chain_broken`**, readiness degraded |
+
+How the review's tamper case maps onto these checks (SEC-TC-44). A superuser alters an entry older than the last anchor and recomputes the chain, the stream heads and `audit_checkpoint_heads`:
+- If the attacker also rewrites the anchor's `heads_digest`, the recomputed `anchor_hash` no longer verifies under the public key: `CHECKPOINT_SIGNATURE_INVALID`.
+- If the attacker leaves the anchor untouched, step (iii) fails: `CHECKPOINT_HEAD_MISMATCH`.
+- If the attacker deletes or reorders an anchor row, step (i) fails against the sink: `ANCHOR_MISSING`.
+
+The cluster superuser therefore cannot rewrite anything older than the latest anchor without detection. The run records `anchor_seq_from/_to` in `audit_chain_verifications`. `GET /audit/chain/status` reports the latest run, the latest verified `anchor_seq`, its `created_at` and its `key_id`. An anchor older than 2 h (the job stopped) also degrades readiness.
+
+Budget for step (iii)(b): one index probe per stream, pruned to one partition. That is about 125 k probes per hour in Y1 and about 1.7 M at Y5 (§10.1), roughly 10 s and 2 min on the reference host. If the measured cost at M5 exceeds 5 min, the tuning lever is: probe only the streams that changed since the previous anchor, plus a rotating 1/24 slice of the rest, while the nightly run checks all streams. That weakens the hourly bound for idle streams to 24 h, so it requires a security-analyst re-review before adoption.
 
 ### 5.7 PII vault DDL
 
@@ -2777,8 +3246,9 @@ CREATE TABLE public.audit_pii_vault (
   entity_name    text NOT NULL CONSTRAINT ck_audit_pii_vault__entity CHECK (entity_name ~ '^[a-z][a-z0-9_]*$'),
   field          text NOT NULL CONSTRAINT ck_audit_pii_vault__field CHECK (field ~ '^[a-z][a-z0-9_]*$'),
   value_hmac     bytea NOT NULL CONSTRAINT ck_audit_pii_vault__hmac CHECK (octet_length(value_hmac) = 32),
+  value_hmac_key_id text NOT NULL,                                                          -- amended 2026-11-12 (SEC-P3-08 item 1)
   ciphertext     bytea NOT NULL CONSTRAINT ck_audit_pii_vault__ct CHECK (octet_length(ciphertext) BETWEEN 29 AND 65536),  -- 12 B nonce + ≥1 B + 16 B tag
-  key_id         text NOT NULL,
+  ciphertext_key_id text NOT NULL,                                                          -- amended 2026-11-12 (SEC-P3-08 item 1): was key_id; AAD = (audit_pii_vault, ciphertext, token, ciphertext_key_id)
   CONSTRAINT ux_audit_pii_vault__subject_field_value UNIQUE (subject_id, entity_name, field, value_hmac)
 );
 
@@ -2794,6 +3264,10 @@ CREATE TRIGGER trg_audit_pii_vault__guard BEFORE UPDATE OR DELETE ON public.audi
   FOR EACH ROW EXECUTE FUNCTION platform.audit_vault_guard();
 CREATE TRIGGER trg_audit_pii_vault__no_truncate BEFORE TRUNCATE ON public.audit_pii_vault
   FOR EACH STATEMENT EXECUTE FUNCTION platform.audit_forbid_mutation();
+-- amended 2026-11-12 (SEC-P3-03): bootstrap lane, owner platform_audit_owner
+ALTER TABLE public.data_subjects   OWNER TO platform_audit_owner;
+ALTER TABLE public.audit_pii_vault OWNER TO platform_audit_owner;
+ALTER FUNCTION platform.audit_vault_guard() OWNER TO platform_audit_owner;
 ```
 
 Erasure (M4/M5, A-045): `DELETE FROM audit_pii_vault WHERE subject_id = $1` by `platform_erasure`, then `data_subjects.erased_at = now()`; the viewer renders `[ERASED]` for tokens without a vault row. Because the chain hashes tokens, never values, no entry hash changes and archived partitions contain no personal data. Values classified `SECRET` never reach the vault (`[REDACTED]`, REQ-AUDIT-008).
@@ -2845,6 +3319,8 @@ COMMIT;
 
 Purge (housekeeping, daily): `DELETE FROM public.outbox_events WHERE id IN (SELECT id FROM public.outbox_events WHERE published_at < now() - interval '7 days' ORDER BY published_at LIMIT 5000)` repeated until 0 rows. Consumers record `processed_events (consumer, event_id)` in their own business transaction with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the event was already handled (REQ-PLAT-017).
 
+**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. Rows are purged 7 days after publish, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
+
 ### 6.2 Idempotency keys (REQ-API-009..011, DR-A20)
 
 ```sql
@@ -2863,9 +3339,11 @@ CREATE TABLE public.idempotency_keys (
   lease_until      timestamptz NOT NULL,
   response_status  smallint,
   response_headers jsonb,
-  response_body    jsonb,
+  response_body    bytea,                                   -- amended 2026-11-12 (SEC-P3-08/-10): AES-256-GCM of the JSON body (was jsonb in clear)
+  response_body_key_id text,                                -- AAD = (idempotency_keys, response_body, hex(scope_hash), response_body_key_id)
   expires_at       timestamptz NOT NULL,
-  CONSTRAINT ux_idempotency_keys__scope_hash UNIQUE (scope_hash)
+  CONSTRAINT ux_idempotency_keys__scope_hash UNIQUE (scope_hash),
+  CONSTRAINT ck_idempotency_keys__body_key CHECK ((response_body IS NULL) = (response_body_key_id IS NULL))
 );
 CREATE INDEX ix_idempotency_keys__expires_at ON public.idempotency_keys (expires_at);
 ```
@@ -2937,6 +3415,8 @@ CREATE INDEX ix_saga_steps__next_attempt ON public.saga_steps (next_attempt_at) 
 ```
 
 Each step transition is a tenant-scoped transaction: `UPDATE saga_steps SET status = …, attempts = attempts + 1, version = version + 1 WHERE id = $id AND version = $v` together with the shipment/payment state change, the transition history row, the audit entry and the next outbox event (DR-B04 G4). `CREATE_CARRIER_SHIPMENT` writes `client_reference = shipment.id` and commits **before** the carrier call; an `AMBIGUOUS` result on a carrier without idempotent create is never retried automatically (G2, REQ-BOOK-023). The sweeper finds overdue sagas and orphan payments through `saga_due_candidates` and `payment_sweeper_candidates` (§4.5, backed by `ix_saga_executions__active_deadline` and AP-PAY-04/05), then repairs each in its org's tenant scope.
+
+**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** Saga step jobs carry `{v: 2, kind: 'saga', id: <saga_executions.id>, correlation_id, trace_context}`. The step is part of the deterministic `jobId` (`booking:<saga_id>:<step>`), not of the payload. The processor resolves `org_id` and the initiating actor through `platform.job_context('saga', id)`, which reads `saga_executions.org_id` and `created_by`. The sweeper and candidate functions return `(saga_id, org_id)`; the scheduler uses only `saga_id` to enqueue, and the step processor never trusts the `org_id` that the candidate listing returned. Both the `saga_executions` and the `saga_steps` row are then read under that tenant's RLS, so a forged saga id from another organisation can only run in that organisation's own context.
 
 ### 6.4 Number sequences (DR-A24, DR-B22, REQ-DATA-015)
 
@@ -3039,6 +3519,11 @@ The generated client is imported only by repository modules (`apps/api/src/modul
 | RLS (`ENABLE`/`FORCE`, policies), roles, grants, functions, triggers, event trigger | Raw SQL | Policies generated from the §4.3 templates by a Node script (`tools/db/render-rls.ts`) into the migration file, never hand-typed per table |
 | `audit_entries` partitioned table and partitions | Raw SQL; declared in `tables.external` so Migrate never diffs it; still modelled (`model AuditEntry { … @@id([occurredAt, id]) @@map("audit_entries") }`) for typed reads | `tables.external` is preview (`experimental.externalTables`). **Verify in P5 spike** that dynamically created partitions (`audit_entries_YYYY_MM`) are ignored by the differ; fallback: drop the model and access audit through TypedSQL (`$queryRawTyped`) in `packages/audit` |
 
+Amendment (2026-11-12, SEC-P3-03):
+- **External tables.** The audit objects are created in the bootstrap lane, so `tables.external` in `prisma.config.ts` lists **all** of them: `public.audit_entries`, `public.audit_stream_heads`, `public.audit_checkpoint_heads`, `public.audit_chain_verifications`, `public.audit_partitions`, `public.audit_anchors`, `public.audit_pii_vault`, `public.data_subjects`. They stay modelled for typed reads and writes.
+- **Shadow database.** The shadow database used by `migrate dev` is initialised with the bootstrap-lane SQL (Prisma's shadow-database init hook for external tables). **Verify in P5 spike SPK-03** that the hook exists at 7.10 and that partitions created by `ensure_audit_partitions` are ignored by the differ. The fallback is unchanged: TypedSQL access in `packages/audit`.
+- **No audit DDL in Prisma migrations.** A Prisma migration never contains audit DDL (§8.3 rule 12).
+
 Workflow for a migration that needs raw SQL (REQ-SEC-009 allows raw SQL only in migrations and reviewed repository functions):
 
 1. Edit `prisma/schema/*.prisma` for the parts Prisma can express.
@@ -3100,6 +3585,11 @@ CLAUDE.md §5 database guardrail, NFR-DATA-004, NFR-AVAIL-003, NFR-REC-003, prod
 
 - Prisma Migrate (`prisma migrate deploy` in CI/CD; `migrate dev --create-only` locally), raw SQL inside `migration.sql`, hand-written `down.sql` per migration, `prisma/sql/` for templates and the grant manifest, `tools/db/*.ts` (Node/TypeScript; no Python on the dev host) for the RLS renderer, the migration linter, the up→down→up test driver, the backfill runner and the backup/restore rehearsal.
 - Migrations run as `platform_migrator` from a one-shot `migrate` container in Compose before `api`/`worker` start, and from a CD pipeline job in AWS (never from a terminal, CLAUDE.md §5).
+- **Bootstrap lane (amended 2026-11-12, SEC-P3-03).** A second, separate lane runs `prisma/bootstrap/*.sql` before `migrate`.
+  - **Credential and runner.** It uses the cluster-admin credential: the Compose `bootstrap` one-shot service locally, and at M5 a pipeline job with the break-glass RDS master secret. The runner is `tools/db/bootstrap.ts`.
+  - **Files.** They are idempotent, applied in file-name order, and recorded in the ledger `public.bootstrap_migrations (file_name text PK, sha256 bytea, applied_at timestamptz, applied_by text)`. The ledger is owned by the bootstrap superuser, has no grants to any platform role, and is on the SYSTEM allow-list. A changed SHA-256 for an applied file fails the run.
+  - **Scope.** Roles, schemas and audit DDL live only here (§4.4, §5). Regular Prisma migrations can never contain audit DDL, because `platform_migrator` is not the owner and the DDL guard rejects it.
+  - **Guardrails.** The backup and restore-test guardrail (§8.6) applies to bootstrap files exactly as it does to `data-changing: yes` migrations.
 
 ### 8.2 Expand → migrate → contract rules
 
@@ -3124,6 +3614,15 @@ Fails the build when a migration file:
 9. Drops a policy without re-creating it in the same file; or creates a table without the RLS block / allow-list entry (cross-checked with C1).
 10. Contains `UPDATE`/`DELETE`/`INSERT … SELECT` against an existing table without `data-changing: yes` (data-changing migrations trigger the backup guardrail, §8.6). Pure `INSERT` of new rows into reference tables by the seed is not a migration.
 11. Lacks `SET lock_timeout` at the top when it alters an existing table.
+
+**Amendment (2026-11-12, SEC-P3-03): audit DDL lane.** Rule 7 is extended, and one rule is added.
+
+12. **Audit DDL outside the bootstrap lane, or without approval.**
+    - **What counts as audit DDL.** Any `CREATE`, `ALTER`, `DROP`, `COMMENT`, `GRANT`, `REVOKE`, `CREATE TRIGGER`, `CREATE POLICY` or `CREATE OR REPLACE FUNCTION` that names an audit object: `audit_entries` or any `audit_entries_*` partition, `audit_stream_heads`, `audit_checkpoint_heads`, `audit_chain_verifications`, `audit_partitions`, `audit_anchors`, `audit_pii_vault`, `data_subjects`, `platform.audit_forbid_mutation`, `platform.audit_vault_guard`, `platform.ensure_audit_partitions` or `platform.audit_ddl_guard`. Statements that mention `platform_audit_owner` (`SET ROLE`, `OWNER TO`, `GRANT … TO`) count too.
+    - **In `prisma/migrations/**`.** Such a statement fails the build **unconditionally**, with or without a marker.
+    - **In `prisma/bootstrap/**`.** Such a statement needs the file header `-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>` (regex `^-- @audit-ddl security-approved: [a-z0-9._-]+ \d{4}-\d{2}-\d{2}$`). `<reviewer>` must be listed in `tools/db/audit-ddl-reviewers.json` (security-analyst identities), and the date must not be later than the commit date. Existing bootstrap files are immutable; a change is a new file.
+    - **Other checks.** The linter also rejects any `DO` block or function body in `prisma/migrations/**` that runs `EXECUTE` on a concatenated string, unless the statement carries `-- @dynamic-sql reviewed: <reviewer> <date>`.
+    - **Limits.** The linter matches text and is an early warning, not the boundary. The boundary is ownership (§4.4) plus the identity-based `audit_ddl_guard` (§5.2), which also catches dynamic SQL at execution time. The bootstrap and `migrate` lanes run as separate CI and CD steps with separate credentials, and the `migrate` job never receives the cluster-admin credential.
 
 ### 8.4 Reversibility test: up → down → up (NFR-DATA-004)
 
@@ -3151,6 +3650,11 @@ Production (M5): RDS automated backups with PITR (RPO ≤ 5 min via continuous W
 4. **Restore into a fresh stack:** start an empty Postgres 18 + RustFS (`docker compose -p restore-<run>`), run the roles bootstrap (§4.4), `pg_restore --exit-on-error --jobs=4 --dbname=platform platform.dump`, copy the objects back.
 5. **Verification script (`tools/db/verify-restore.ts`, exit 0 = pass):** row counts equal the manifest for every table; FK integrity (`ALTER TABLE … VALIDATE CONSTRAINT` is a no-op for restored validated constraints, so the script also runs generated anti-join orphan checks per FK from `pg_constraint`); catalog tests C1–C11 pass (roles, grants, RLS forced, triggers present); full audit chain verification (§5.6) passes and heads equal the manifest; `number_sequences.next_value` > allocated maximum per country; every `documents` row has an object whose recomputed SHA-256 equals `documents.sha256` (NFR-REC-003); `_prisma_migrations` head equals the manifest; a smoke API container boots against the restored DB and `/health/ready` is 200. Restore time is reported (≤ 15 min target, NFR-REC-002 sanity).
 6. Archive the report as a CI artifact; a failed rehearsal blocks the data-changing migration (CLAUDE.md §5).
+
+Amendment (2026-11-12, SEC-P3-03), applying to step 4 and step 5:
+- **Step 4, what the bootstrap runs.** The restore runs **only** `prisma/bootstrap/00-roles.sql` before `pg_restore`. That file holds the cluster- and database-level statements that `pg_dump` does not carry: `CREATE ROLE`, role memberships, `ALTER ROLE … SET`, `ALTER DATABASE … OWNER`. Everything schema-scoped comes from the dump: `01-schemas.sql` content, audit DDL and event triggers. Running `01-schemas.sql` first would make `pg_restore --exit-on-error` fail on `CREATE SCHEMA platform`. `pg_dump` emits event triggers at the very end of the archive, so they are created after every audit object has been restored with its owner.
+- **Step 4, ordering is load-bearing.** Running `90-audit-ddl-guard.sql` before `pg_restore` would make the guard block the restore of the audit objects.
+- **Step 5, added checks.** The verification also runs C13/C14 and the anchor checks of §5.6: the anchor log is dense and chained, signatures verify, and the restored `audit_anchors` equals the local file sink, which the rehearsal copies alongside the dump.
 
 ### 8.7 Zero-downtime probe (NFR-AVAIL-003)
 
@@ -3202,7 +3706,7 @@ REQ-DATA-001..017, REQ-RBAC-002/003/013, REQ-COMP-003/008, REQ-PRICE-020, REQ-NO
 | Item | Natural key | Content |
 |---|---|---|
 | Operator organisation | deterministic seed UUID (`seedId('org:operator')`, a UUIDv7-shaped id derived from a namespace hash with a fixed 2026-01-01 timestamp) | type OPERATOR, placeholder brand name from `BRAND_*` |
-| 8 staff users | `email` (`superadmin@operator.example`, `admin@…`, `operations@…`, `finance@…`, `support@…`, `sales@…`, `auditor@…`, `content@…`) | One per operator role, verified email, **no TOTP** (must enrol at first sign-in, REQ-AUTH-018, D-022) |
+| 8 staff users | `email` (`superadmin@operator.example`, `admin@…`, `operations@…`, `finance@…`, `support@…`, `sales@…`, `auditor@…`, `content@…`) | One per operator role, verified email, **no TOTP** (must enrol at first sign-in, REQ-AUTH-018, D-022). Amended 2026-11-12 (SEC-P3-14): with `APP_ENV ∈ {local, test}` the seed sets a `SEED_*` password. Otherwise it creates **no `user_credentials` row** and issues a `password_reset_tokens` row with `purpose = 'SET_PASSWORD'` (24 h), whose link is e-mailed. The first TOTP enrolment then needs the e-mailed enrolment code (`mfa_enrolment_codes`), and the 24 h enrolment deadline applies (§3.1) |
 | Acme Exports | `seedId('org:acme-exports')` | BUSINESS_CUSTOMER, country US, USD |
 | 5 Acme users | `email` (`owner@acme-exports.example`, `admin@…`, `shipper@…`, `finance@…`, `viewer@…`) | One per customer role, each also with a personal INDIVIDUAL org (REQ-AUTH-001 invariant) |
 | Individual customer | `individual@customer.example` | Personal org only |
@@ -3237,6 +3741,8 @@ Baseline: the legacy aggregate shape (product brief Appendix A: 12,500 customers
 | `audit_pii_vault` | 10 M (dedupe per subject/field/value) | 48 M | 132 M | 0.2 kB | 40 GB |
 | `outbox_events` | 20 M/yr flowing; ≤ 0.5 M resident (7-day purge) | — | — | 0.5 kB | < 1 GB |
 | `idempotency_keys` | ≤ 0.1 M resident (24 h) | — | — | 1 kB | < 0.2 GB |
+| `audit_checkpoint_heads` (2026-11-12, hourly deltas) | ≈ 25 M (≈ 50–100 k/day: streams whose head moved in the hour) | ≈ 120 M | ≈ 330 M | 0.12 kB | ≈ 70 GB (candidate for monthly range partitions on `created_at` at M5, archived with the audit partitions) |
+| `audit_anchors` (2026-11-12) | 8,760 | 26 k | 44 k | 0.3 kB | < 20 MB |
 
 Peak write rates at design load: ≈ 20 quote inserts/s (≈ 180 option rows/s), ≈ 5 bookings/s, ≈ 40 audit entries/s, ≈ 20 tracking events/s — comfortably within one RDS PostgreSQL Multi-AZ instance (e.g. `db.r7g.xlarge` class, sized by platform-architect).
 
@@ -3256,12 +3762,42 @@ Peak write rates at design load: ≈ 20 quote inserts/s (≈ 180 option rows/s),
 | Control | Design | Source |
 |---|---|---|
 | Classification | Every column tagged (§3); the registry in `packages/audit` drives audit tokenisation, Pino redaction and the C10 test | REQ-AUDIT-009, NFR-PRIV-001/003 |
-| Encryption at rest | RDS/EBS/S3/ElastiCache encryption (M5); field-level AES-256-GCM envelope encryption for `mfa_totp.secret_ciphertext`, `shipment_party_identifiers.value_ciphertext`, `audit_pii_vault.ciphertext` (key per environment from env/KMS; `key_id` stored for rotation); partner carrier credentials (M3) use per-tenant KMS data keys | product brief §4.3/§4.11/§4.12, ADR-0006/0007 |
-| Hashing | All tokens SHA-256 (256-bit randomness); passwords and recovery codes bcrypt ≥ 12; identifiers used for lookups without disclosure are HMAC-SHA256 with per-environment keys (`login_attempt_counters`, `audit_entries.ip_hash`, vault dedupe, public tracking hashes) | DR-A01/A02 |
+| Encryption at rest | RDS/EBS/S3/ElastiCache encryption (M5); field-level AES-256-GCM envelope encryption for `mfa_totp.secret_ciphertext`, `shipment_party_identifiers.value_ciphertext`, `audit_pii_vault.ciphertext`, `idempotency_keys.response_body` and the outbox `payload.token_enc` (key per purpose and environment from env/KMS; sibling `<col>_key_id` and AAD per the amendment below); partner carrier credentials (M3) use per-tenant KMS data keys | product brief §4.3/§4.11/§4.12, ADR-0006/0007/0018 |
+| Hashing | All tokens SHA-256 (256-bit randomness); passwords bcrypt ≥ 12; recovery codes HMAC-SHA256 under `RECOVERY_KEY` (ADR-0006; amended 2026-11-12, was "bcrypt"); identifiers used for lookups without disclosure are HMAC-SHA256 with per-purpose, per-environment keys (`login_attempt_counters`, `audit_entries.ip_hash`, vault dedupe, `mfa_challenges.ip_prefix_hmac`, `mfa_enrolment_codes.code_hmac`, public tracking hashes), each with a sibling `<col>_key_id` | DR-A01/A02, ADR-0018 |
 | Secrets | No secret values in any column; carrier accounts hold `secret_ref` names only (CHECK pattern) | REQ-CARR-015, CLAUDE.md §5 |
 | Public exposure | Public tracking resolves through `tracking_index` and returns only the DR-B31 fields; shared quotes return the allow-listed `public_snapshot` via `quote_share_resolve`; both are enforced by response-schema tests | DR-B31, NFR-PRIV-004 |
 | Non-production data | Never production data outside production (product brief §10); environments use the synthetic demo seed. If a masked copy is ever needed (M5), the masking job applies the registry: `PER` → deterministic synthetic values (same input → same fake per run), `SPER` → removed and re-encrypted with a test key, `SEC` → removed (users must reset), vault ciphertext re-encrypted or dropped with a new chain started in the copy | §10 product brief |
 | Erasure | Audit: vault deletion (§5.7). Operational tables (M4/M5): hard delete or anonymisation of `PER` columns by the retention job under `platform_erasure`-class privileges, keeping financial records per retention periods | A-045, D-027 |
+
+#### Amendment (2026-11-12, SEC-P3-08 item 1): `key_id` siblings and AAD for every ciphertext and HMAC lookup column
+
+This amendment follows the ADR-0018 amendment 1 key register. That register's configuration schema rejects identical values across any two keys (one key per purpose); this document only references that rule.
+
+**Rules**
+- **`key_id` sibling.** Every ciphertext column and every HMAC lookup column has a sibling `<col>_key_id text`. It is `NOT NULL` whenever the value column is non-null: either both columns are `NOT NULL`, or a pairing `CHECK ((col IS NULL) = (col_key_id IS NULL))` applies. The format is `<purpose>-v<n>`, enforced with `CHECK (… ~ '^[a-z][a-z0-9-]*-v[0-9]+$')`. Writes use the current key. Reads select the key by the stored `key_id`, so they are dual during rotation (the current key and `<NAME>_PREVIOUS`). HMAC lookups compute the hash under every live key and query `= ANY($hashes)`.
+- **AES-256-GCM parameters.** A 96-bit random nonce per encryption and a 128-bit tag; the stored value is `nonce ‖ ciphertext ‖ tag`.
+- **AAD.** AAD = table ‖ column ‖ row id or token ‖ key_id, encoded unambiguously as `UTF-8(JCS([table, column, row_ref, key_id]))` (RFC 8785, the canonicaliser already used by `packages/audit`). `row_ref` is the lower-case UUID text, or lower-case hex for `bytea` references. Because every row ID is generated by the application before the insert (P1), the AAD is known when the value is encrypted.
+- **Why AAD.** A ciphertext copied to another row, column or key version fails GCM authentication (T-89).
+- **Rotation.** A rotation is a throttled, resumable re-encryption or re-keying backfill (§8.5) filtered by `<col>_key_id`. The retired key is removed only after a count by `key_id` reaches 0. Exceptions: login counters, and vault dedupe as noted below.
+
+| Table.column | Kind · key (ADR-0018 register) | Sibling `key_id` column | AAD row reference |
+|---|---|---|---|
+| `mfa_totp.secret_ciphertext` | AES-256-GCM · `MFA_ENCRYPTION_KEY` | `secret_ciphertext_key_id` (renamed from `key_id`) | `mfa_totp.id` |
+| `mfa_recovery_codes.code_hmac` | HMAC-SHA256 · `RECOVERY_KEY` | `code_hmac_key_id` | — (HMAC) |
+| `mfa_challenges.ip_prefix_hmac` | HMAC-SHA256 · IP-prefix binding key (**register entry to add**) | `ip_prefix_hmac_key_id` | — |
+| `mfa_enrolment_codes.code_hmac` (new) | HMAC-SHA256 · enrolment-code key (**register entry to add**) | `code_hmac_key_id` | — |
+| `login_attempt_counters.identifier_hmac` | HMAC-SHA256 · `LOGIN_COUNTER_KEY` | `identifier_hmac_key_id` | — (no dual read; counters restart) |
+| `audit_pii_vault.ciphertext` | AES-256-GCM · `AUDIT_VAULT_KEY` | `ciphertext_key_id` (renamed from `key_id`) | `audit_pii_vault.token` |
+| `audit_pii_vault.value_hmac` | HMAC-SHA256 · vault dedupe key (**register entry to add**; must not reuse `AUDIT_VAULT_KEY`) | `value_hmac_key_id` | — (no dual read: a new key yields a new token) |
+| `audit_entries.ip_hash` | HMAC-SHA256 · `AUDIT_INDEX_KEY` | `ip_hash_key_id` | — (IP filter queries both ids for 90 d, per the register) |
+| `tracking_index.customer_ref_postcode_hmac` | HMAC-SHA256 · `TRACKING_INDEX_KEY` | `customer_ref_postcode_hmac_key_id` | — |
+| `outbox_events.payload.token_enc` | AES-256-GCM · `OUTBOX_PAYLOAD_KEY` | JSON sibling `payload.token_enc_key_id` | `outbox_events.id` (column name `payload.token_enc`) |
+| `idempotency_keys.response_body` | AES-256-GCM · `IDEMPOTENCY_BODY_KEY` | `response_body_key_id` | `idempotency_keys.scope_hash` (hex) |
+| `shipment_party_identifiers.value_ciphertext` | AES-256-GCM · shipment-identifier key (**register entry to add**; KMS envelope at M5) | `value_ciphertext_key_id` (renamed from `key_id`) | `shipment_party_identifiers.id` |
+| `carrier_accounts.credentials_ciphertext` (M3 seam) | AES-256-GCM · per-tenant KMS data key (ADR-0011) | `credentials_ciphertext_key_id` | `carrier_accounts.id` |
+| `user_credentials` | bcrypt pre-hash pepper `PASSWORD_PEPPER` | `pepper_key_id` **reserved**: added by the SEC-P3-16 backlog item, not now | — |
+
+Not in the table: token hashes (`token_hash`, `share_token_hash`, `guest_token_hash`, `scope_hash`, `fingerprint`, `dedupe_key`). They are unkeyed SHA-256 values of 256-bit random tokens or of content; no key is involved, so they carry no `key_id`. Verification: SEC-TC-49 (a vault ciphertext swapped between two rows fails authentication; a read with the retired key works while new writes use the current key; the catalog check C10 is extended to assert that each column in the table above has its sibling).
 
 ### 10.5 Retention (recorded, not enforced in this run)
 
@@ -3349,3 +3885,29 @@ This section records the architect's decisions on the open items raised in §10.
 | OI-12 — Prisma preview features, partition children in the differ, `CREATE INDEX CONCURRENTLY` | **Accepted as Wave-0 spike SPK-03/SPK-01 scope** (risks.md); fallbacks documented in §7 stand. | — |
 | `token_enc` in outbox payloads (api-designer) | **Ratified** per ADR-0004 amendment: AES-256-GCM under the outbox payload key; nulled after send and by housekeeping after 24 h; `outbox_events.payload` classification registers `token_enc` as SECRET for log redaction. | — |
 | Wording items OI-10/11/20/22 (NFR-PRIV-004 vs REQ-NOTIF-012, classification vocabulary, `LAST_OWNER` status, MinIO → RustFS) | Forwarded to product-manager (D-ARCH-006 g covers MinIO; the others are listed in the P3 Handoff Report). | — |
+
+### Amendments after the P3 security review (2026-11-12)
+
+Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 amendment 6, ADR-0006 amendments 12–14, ADR-0007 amendment 7, ADR-0013 amendment, ADR-0018 amendment 1. Each change is marked in place as "Amended 2026-11-12 (SEC-P3-xx)" or "Amendment (2026-11-12, SEC-P3-xx)". Where this list and earlier text disagree, the amended text in place wins.
+
+| # | Finding | Change | Sections |
+|---|---|---|---|
+| A1 | SEC-P3-03 | New `NOLOGIN NOINHERIT` role **`platform_audit_owner`** (no members) owns every audit table and partition, `audit_anchors`, `audit_pii_vault`, `data_subjects` and the functions `audit_forbid_mutation`, `audit_vault_guard`, `ensure_audit_partitions` (`SECURITY DEFINER`, `EXECUTE` for `platform_app`; the only runtime DDL path). `platform_migrator` is not a member and owns no audit object. Schema-owner `DROP TABLE` / `DROP SCHEMA … CASCADE` is named as a path and closed by the `sql_drop` guard | §1.5, §2.3, §3.4, §4.4, §5 intro, §5.1, §5.2, §5.3, §5.7, §4.6 C13 |
+| A2 | SEC-P3-03 | **Bootstrap lane** `prisma/bootstrap/*.sql` (cluster-admin credential, `tools/db/bootstrap.ts`, ledger `bootstrap_migrations`) is the only place where roles, schemas and audit DDL are created; migration-linter rule 12 rejects audit DDL in `prisma/migrations/**` unconditionally and requires `-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>` in the bootstrap lane; `tables.external` lists all audit tables; the restore rehearsal runs only `00-roles.sql` before `pg_restore` | §1.5, §4.4, §7.3, §8.1, §8.3, §8.6 |
+| A3 | SEC-P3-03 | Statement-text event trigger withdrawn; **`platform.audit_ddl_guard()`** on `ddl_command_end` (`pg_event_trigger_ddl_commands()`) and `sql_drop` (`pg_event_trigger_dropped_objects()`) matches by object identity, raises `audit objects are immutable (SEC-P3-03)` unless `current_user = 'platform_audit_owner'`; must not be `SECURITY DEFINER`. Row and statement triggers kept; `audit_anchors` and `audit_checkpoint_heads` TRUNCATE triggers added | §5.2, §4.6 C14 |
+| A4 | SEC-P3-03 | §5.5 becomes **"Hourly checkpoint and signed anchor"**: hourly `CHAIN_CHECKPOINT`, delta `audit_checkpoint_heads` (+ `head_occurred_at`), new table **`audit_anchors`** (dense `anchor_seq`, `prev_anchor_hash` chain, `anchor_hash`, algorithm `ECDSA_P256_SHA256`, `key_id`, DER `signature`) written in the same transaction; signing key `AUDIT_ANCHOR_SIGNING_KEY_REF` (worker only), verification keys `AUDIT_ANCHOR_PUBLIC_KEYS`; `AUDIT_CHECKPOINT_KEY` (HMAC) dropped; mandatory sink `AUDIT_ANCHOR_SINK` | §1.6, §1.7, §2.3, §3.4, §4.4, §5.5, §10.1 |
+| A5 | SEC-P3-03 | Verifier: every hourly run checks anchor-log integrity (`ANCHOR_MISSING`, security event `audit_anchor_missing`), signatures (`CHECKPOINT_SIGNATURE_INVALID`) and the anchored heads of the latest anchor (`CHECKPOINT_HEAD_MISMATCH`, `audit_chain_broken`); nightly checks all anchors since the previous nightly run; the "only if configured" wording is removed; new `failure_kind` values and `anchor_seq_from/_to` | §1.7, §3.4, §5.6 |
+| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
+| A7 | SEC-P3-01 C1/C2, SEC-P3-11 | `sessions.authenticated_at` (the `auth_time` source, never changed by refresh); web absolute cap 30 days (admin 12 h) with a DB backstop CHECK; `refresh_tokens.expires_at = LEAST(now() + 30 min (admin) / 30 d (web), absolute)` | §3.1 `sessions`, `refresh_tokens` |
+| A8 | SEC-P3-14 (also §9.3 staff seed row) | `users.status_reason` (CHECK incl. `MFA_ENROLMENT_OVERDUE`) and `users.first_signed_in_at`; housekeeping suspends OPERATOR members without active TOTP 24 h after first sign-in via the new candidate function `mfa_enrolment_overdue_candidates`; new table **`mfa_enrolment_codes`** (chosen over a purpose value on an existing token table; reasons in §3.1); `password_reset_tokens.purpose` (`RESET`, `SET_PASSWORD` 24 h); seeded staff outside local have no `user_credentials` row | §1.5, §1.7, §2.1, §3.1, §4.3, §4.5 |
+| A9 | SEC-P3-08 item 1 | `<col>_key_id` sibling for every ciphertext and HMAC lookup column (renames `key_id` → `secret_ciphertext_key_id`, `ciphertext_key_id`, `value_ciphertext_key_id`; adds `code_hmac_key_id`, `ip_prefix_hmac_key_id`, `identifier_hmac_key_id`, `value_hmac_key_id`, `ip_hash_key_id`, `customer_ref_postcode_hmac_key_id`, `response_body_key_id`, `payload.token_enc_key_id`, M3 `credentials_ciphertext_key_id`; `pepper_key_id` reserved for SEC-P3-16); AES-256-GCM 96-bit nonce, 128-bit tag, AAD = JCS([table, column, row id or token, key_id]); `idempotency_keys.response_body` becomes ciphertext; `mfa_recovery_codes` aligned to ADR-0006 HMAC | §3.1, §3.4, §3.5, §3.8, §3.11, §3.16, §5.1, §5.4, §5.6, §5.7, §6.2, §10.4 |
+| A10 | SEC-P3-25 | Definer functions, `app_is_operator` and definer-read policies owned by / targeted at **`platform_definer`** (was `platform_migrator`); C3/C11 updated; `sessions_for_user` (OI-25) listed in §4.5; `quote_share_resolve` serves `POST /public/shared-quotes/resolve` | §4.2, §4.3, §4.4, §4.5, §4.6 |
+| A11 | SEC-P3-10 | `createQuoteShare` always mints a new token and revokes the previous active share; backstop `ux_quote_shares__quote_active` | §3.10 `quote_shares` |
+| A12 | SEC-P3-13 | Raw carrier payload JSON replaces document bytes with `{"$blob": {sha256, size, media_type, document_id?}}`; allow-list redaction of tracking/response payloads | §3.8 `carrier_raw_payloads` |
+
+Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:
+- **ADR-0018 register gaps.** The register has no entry yet for four keys this model uses: the shipment-identifier encryption key, the vault dedupe HMAC key, the MFA-challenge IP-prefix HMAC key and the enrolment-code HMAC key (§10.4).
+- **New definer functions to ratify under ADR-0005 amendment 1.** `mfa_enrolment_overdue_candidates` was added for SEC-P3-14, and `sessions_for_user` is now listed in §4.5.
+- **Wave-0 spikes.** Confirm on PostgreSQL 18 and RDS that `rds_superuser` can create the event triggers, and that the shadow-database hook of Prisma 7.10 handles the bootstrap-lane objects (SPK-03).
+- **Option for M5.** Move the audit relations to a schema owned by `platform_audit_owner` (§4.4).
+- **Notification log, invitee rows.** `notification_log` rows for invitees without an account (`recipient_user_id IS NULL`) are not visible under the current own-row policy, which predates this amendment. `job_context` returns the SYSTEM actor for them.

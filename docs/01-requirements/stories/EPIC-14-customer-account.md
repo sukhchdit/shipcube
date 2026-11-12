@@ -685,6 +685,15 @@ Feature: Payment methods screen
 
   Scenario: States, locales and responsive
     Then loading, empty ("no saved methods"), error and offline states render in en, es and fr, cards stack at 360 px, and axe-core reports no violations
+
+  Scenario: Changing a saved method opens the re-authentication dialog (REQ-PAY-014, US-217)
+    When Olga adds, sets as default or removes a saved method and the API returns 401 "REAUTH_REQUIRED"
+    Then the screen opens the re-authentication dialog
+    And after Olga enters her password the screen retries the action and it succeeds
+
+  Scenario: Listing needs no re-authentication
+    When Olga opens the payment methods list
+    Then the list is shown without a re-authentication dialog
 ```
 
 ### US-266 — Notification preferences with consent records
@@ -836,6 +845,30 @@ Feature: Organisation profile and team
 
   Scenario: States, locales and responsive
     Then the six states render, labels are localised in en, es and fr, members are cards at 360 px and a table at 1280 px, and axe-core reports no violations
+
+  Scenario Outline: Stale session needs re-authentication for member changes (REQ-ORG-010, REQ-ORG-012, D-046)
+    Given Olga's session has "auth_time" 13 hours ago and she sends no re-authentication proof
+    When she performs "<action>"
+    Then the API returns 401 "REAUTH_REQUIRED" for scope "org.member.manage" with max_age 43200 and nothing changes
+    And the screen opens the re-authentication dialog
+    When Olga enters her password and the proof is issued
+    Then the screen retries the action and it succeeds
+    Examples:
+      | action                  |
+      | invite a member         |
+      | resend an invitation    |
+      | change a member's role  |
+      | remove a member         |
+
+  Scenario: Recently authenticated session is not prompted
+    Given Olga's session has "auth_time" 11 hours ago
+    When she invites, resends, changes a role and removes a member
+    Then no re-authentication dialog appears and every action succeeds
+
+  Scenario: Viewing the member list never prompts
+    Given Olga's session has "auth_time" 13 hours ago
+    When she opens the organisation page and the member list
+    Then the data is shown without a re-authentication dialog
 ```
 
 ### US-269 — Protect the last Owner and block self role change
@@ -918,6 +951,22 @@ Feature: Privacy export
   Scenario: Repeated request within a minute
     When Ana submits two export requests within 60 seconds
     Then the second returns 429 "RATE_LIMITED" with "Retry-After"
+
+  Scenario: Export request and download require a re-authentication proof (REQ-ACCT-016, D-046)
+    Given Ana's session is 5 minutes old
+    When she requests an export without "X-Reauth-Proof"
+    Then the response is 401 "REAUTH_REQUIRED" for scope "privacy.export" with no age exemption
+    And opening a download link without "X-Reauth-Proof" also returns 401 "REAUTH_REQUIRED"
+
+  Scenario: Valid proof accepts the request and audits the one-time download
+    Given Ana holds a valid proof for scope "privacy.export"
+    When she requests the export and, with a valid proof, opens the download link
+    Then the request is accepted
+    And the download is served once and an audit entry "DOWNLOAD" on entity "privacy_export" exists
+
+  Scenario: Viewer cannot export
+    Given a user with role "Viewer" who lacks "privacy:export"
+    Then the request returns 403 "AUTHZ_DENIED" and no export is created
 ```
 Notes on UI: localised in en, es and fr, six states, 360 px and 1280 px, keyboard operable, axe clean.
 

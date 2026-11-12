@@ -195,7 +195,7 @@ Feature: Permission catalogue
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-065, EPIC-17
 - **Linked REQs:** REQ-RBAC-002, REQ-RBAC-003, REQ-RBAC-004
 - **As an** operator Super Admin **I want** the operator, customer and partner roles seeded idempotently with a generated matrix and guard test **so that** a seed edit can never silently escalate privileges.
-- **Notes:** Operator roles: Super Admin, Admin, Operations, Finance, Support, Sales, Compliance Auditor, Content Manager. Customer: Owner, Admin, Shipper, Finance, Viewer. Partner (Owner, Developer, Operations, Finance) is data only. Matrix doc `docs/` generated from the seed. DR-A07.
+- **Notes:** Operator roles: Super Admin, Admin, Operations, Finance, Support, Sales, Compliance Auditor, Content Manager. Customer: Owner, Admin, Shipper, Finance, Viewer. Partner (Owner, Developer, Operations, Finance) is data only. Matrix doc `docs/` generated from the seed. DR-A07. Viewer explicitly lacks `document:download`, `document:email` and `privacy:export` (D-051, SEC-P3-09; A-074 binding).
 
 #### Acceptance criteria
 ```gherkin
@@ -212,6 +212,21 @@ Feature: Seeded roles
   Scenario: Customer or partner role holding an operator-only permission
     Given a seed edit gives customer "Admin" the permission "audit:read" or any ":any_org" permission
     Then the build-time test fails CI
+
+  Scenario Outline: Viewer may never download, e-mail or export (REQ-RBAC-004, D-051)
+    Given a seed edit gives the customer role "Viewer" the permission "<permission>"
+    Then the build-time guard test fails CI naming role "Viewer" and the permission
+    Examples:
+      | permission      |
+      | document:download |
+      | document:email  |
+      | privacy:export  |
+
+  Scenario: Viewer is denied the document download-URL route and the denial is audited
+    Given the generated RBAC matrix (US-071) and the seeded customer Viewer, who holds "document:read"
+    When the Viewer calls GET /api/v1/documents/{id}/download-url for a document of their own organisation
+    Then the response is 403 "AUTHZ_DENIED" and no URL is issued
+    And a "PERMISSION_DENIED" audit entry with outcome "DENIED" and required permission "document:download" exists
 
   Scenario: Partner roles are unused
     Then no route, UI or membership references a partner role in this run
@@ -650,7 +665,7 @@ Feature: Organisation profile
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-062, EPIC-15
 - **Linked REQs:** REQ-ORG-010
 - **As a** business Owner **I want** to invite colleagues by email with a role **so that** the team can book under one account.
-- **Notes:** Token single-use, 7 days (DR-A01), stored hashed. Email sent in invitee locale via EPIC-15.
+- **Notes:** Token single-use, 7 days (DR-A01), stored hashed. Email sent in invitee locale via EPIC-15. Create and resend need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Listing and revoking never need step-up.
 
 #### Acceptance criteria
 ```gherkin
@@ -679,6 +694,31 @@ Feature: Invitations
 
   Scenario: Audit
     Then invite, resend and revoke each write an entry without any raw token value
+
+  Scenario Outline: Create or resend with an old authentication needs step-up
+    Given an Owner whose session auth_time is 12 h and 1 s old (fake clock) and who sends no X-Reauth-Proof
+    When they "<action>" an invitation
+    Then the response is 401 "REAUTH_REQUIRED" with scope "org.member.manage" and max_age 43200 in the problem detail
+    And no invitation is created or resent and no email is sent
+    Examples:
+      | action |
+      | create |
+      | resend |
+
+  Scenario: Create with a fresh re-authentication proof
+    Given the same Owner session
+    When they re-authenticate for scope "org.member.manage" and repeat the create call with the proof in X-Reauth-Proof
+    Then the response is 201 and the INVITED membership exists
+
+  Scenario: Recently authenticated session needs no proof
+    Given an Owner whose session auth_time is 11 h old
+    When they invite "ravi@example.test" as "Shipper" without a proof
+    Then the response is 201
+
+  Scenario: Listing and revoking never need step-up
+    Given an Owner whose session auth_time is 13 h old and no proof
+    When they list pending invitations and revoke one
+    Then both succeed (200 and 204) and no REAUTH_REQUIRED is returned
 ```
 
 ### US-084 — Accept an invitation
@@ -721,7 +761,7 @@ Feature: Accept invitation
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-062, US-068
 - **Linked REQs:** REQ-ORG-012, REQ-ORG-013, REQ-ORG-014
 - **As a** business Owner **I want** to change roles, suspend or remove members without ever orphaning the organisation **so that** access stays controlled.
-- **Notes:** EC-A15, EC-A17. Admin cannot modify an Owner. Individual organisations: no invites, one member.
+- **Notes:** EC-A15, EC-A17. Admin cannot modify an Owner. Individual organisations: no invites, one member. Role change, suspend and remove need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Reading the member list needs no step-up.
 
 #### Acceptance criteria
 ```gherkin
@@ -747,6 +787,28 @@ Feature: Member management
 
   Scenario: Cross-tenant
     Given a membership of organisation B Then 404 "NOT_FOUND"
+
+  Scenario Outline: Member changes with an old authentication need step-up
+    Given an Owner whose session auth_time is 12 h and 1 s old (fake clock) and who sends no X-Reauth-Proof
+    When they "<change>" a Shipper member
+    Then the response is 401 "REAUTH_REQUIRED" with scope "org.member.manage" and max_age 43200 in the problem detail
+    And the membership, its role set and the member's sessions are unchanged
+    Examples:
+      | change              |
+      | change the role of  |
+      | suspend             |
+      | remove              |
+
+  Scenario: Member change with a fresh proof is audited with old and new role sets
+    Given the same Owner session
+    When they re-authenticate for scope "org.member.manage" and change a Shipper to Finance with the proof in X-Reauth-Proof
+    Then the response is 200 and the member's sessions with this active organisation are revoked
+    And one audit entry shows old role set ["Shipper"] and new role set ["Finance"] with no proof value
+
+  Scenario: Reading the member list needs no step-up
+    Given an Owner whose session auth_time is 13 h old and no proof
+    When they GET the member list
+    Then the response is 200
 ```
 
 ## Coverage check

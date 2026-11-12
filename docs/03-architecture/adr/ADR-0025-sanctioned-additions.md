@@ -23,7 +23,7 @@ Each entry: why it is used, where, licence, and the alternative rejected. Items 
 
 **helmet 8 (MIT).** Secure headers on the API (REQ-SEC-001). Alternative: manual headers — Helmet is the sanctioned standard.
 
-**express-rate-limit 8 + rate-limit-redis 6 (MIT).** Redis-backed limits shared across replicas with IETF draft-7 headers (REQ-SEC-005, REQ-API-014). Alternative: `rate-limiter-flexible` — fine, but §3.2 names express-rate-limit.
+**express-rate-limit 8 + rate-limit-redis 6 (MIT).** Redis-backed limits shared across replicas with IETF `RateLimit-*` headers — `standardHeaders: 'draft-6'`, the three separate headers REQ-API-014 names (ADR-0016 amendment 7, SEC-P3-25; the earlier "draft-7" wording here is superseded) (REQ-SEC-005, REQ-API-014). Alternative: `rate-limiter-flexible` — fine, but §3.2 names express-rate-limit.
 
 **jose 6 (MIT).** JWT ES256 sign/verify, JWK rotation (ADR-0006). Alternative: `jsonwebtoken` — HS/RS only via Node crypto, weaker key-set ergonomics; §3.2 allows either.
 

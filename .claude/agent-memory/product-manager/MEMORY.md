@@ -2,3 +2,4 @@
 - [P1 process notes](project_p1_process_notes.md) — parallel analysts + Node verification agent; story format is parsed; shared vocabulary pitfalls
 - [G1 closure & DC tag](project_g1_closure_dc_tag.md) — D-035..D-037; DC column rule, 134/74/60 counts, re-scope ladder; which rows to update together
 - [P3 alignment decisions](project_p3_alignment_decisions.md) — D-038..D-045, A-083..A-092; wording-only REQ/NFR/story edits for G2; row pairs that move together; APP_ENV key
+- [P3 security remediation](project_p3_security_remediation.md) — D-046..D-052 (D-038 superseded), new REQ/US IDs, v1.3 count baselines 434/91/293, pairs that move together

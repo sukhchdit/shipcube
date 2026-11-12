@@ -2,7 +2,7 @@
 
 - **Goal:** Any carrier (Mock now, DHL Express, FedEx and UPS in M1) can be priced, called and tracked through one resilient, normalised contract, so a quote is answered within the deadlines even when a carrier is slow or down.
 - **Milestone(s):** M0+M1
-- **REQ areas covered:** REQ-CARR (REQ-CARR-001 to REQ-CARR-021)
+- **REQ areas covered:** REQ-CARR (REQ-CARR-001 to REQ-CARR-023)
 - **Exit-demo contribution:** PRD 6.1 "Guest gets a mock quote" (Mock adapter, fan-out, scenarios, contract suite) and "One mock booking" (idempotent Mock create); PRD 6.2 outline (three fixture-backed adapters streaming results, labels per carrier) and the COND-SANDBOX-DEMO scenario.
 - **Depends on epics:** EPIC-01 (PLAT: monorepo, lint boundary rules, Redis, queues, object storage, config validation), EPIC-04 (AUDIT: `carrier_call` entries), EPIC-16 (API/SEC: problem+json, SSE framing REQ-API-017, rate limits), EPIC-17 (DATA/COMP: country and service reference data, secret scanner), EPIC-07 (pricing consumes carrier cost), EPIC-08 (quote consumes the stream), EPIC-09 (BOOK: booking jobs call the adapters)
 
@@ -28,6 +28,7 @@ Conventions used below. Carrier call, cache and stream scenarios run against the
 | US-135 | Streaming rate results (SSE) with fallback GET | M1 | Must | M | US-126, US-134, EPIC-16 | REQ-CARR-009 | DC |
 | US-136 | Redacted raw payload retention | M1 | Must | S | US-131, EPIC-01 | REQ-CARR-018 |  |
 | US-137 | Fixture hygiene, adapter README docs-check and live-sandbox opt-in | M1 | Must | S | US-125, US-131, US-132, US-133 | REQ-CARR-019, REQ-CARR-020 |  |
+| US-293 | Anonymous rate-shopping budget and daily carrier quota guard | M1 | Must | M | US-126, US-130, US-134, EPIC-16 | REQ-CARR-022, REQ-CARR-023 |  |
 
 ## Stories
 
@@ -126,10 +127,10 @@ Feature: Mock carrier
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-122, EPIC-16
 - **Linked REQs:** REQ-CARR-005, REQ-CARR-006
 - **As a** QA engineer **I want** to drive the Mock carrier with scenario directives and know it can never appear in production **so that** slow, failing and tracking-milestone cases are testable and no test carrier prices a real customer.
-- **Notes:** Vocabulary per DR-B29: `latency=<0..30000 ms>`, `fail=<rates|booking|void|pickup|cancel_pickup|track>`, `error=<canonical code>`, `rates=empty`, `track=<happy_path|customs_hold|exception|return_to_sender|delayed|unknown_number>`, separated by semicolons. Source: `X-Mock-Scenario` header or customer reference beginning `MOCK:`.
+- **Notes:** Vocabulary per DR-B29: `latency=<0..30000 ms>`, `fail=<rates|booking|void|pickup|cancel_pickup|track>`, `error=<canonical code>`, `rates=empty`, `track=<happy_path|customs_hold|exception|return_to_sender|delayed|unknown_number>`, separated by semicolons. Source: `X-Mock-Scenario` header or customer reference beginning `MOCK:`. Gating is by the explicit flags `MOCK_CARRIER_ENABLED` and `MOCK_SCENARIOS_ENABLED` (default true only when `APP_ENV` is `local` or `test`), not by `NODE_ENV` (REQ-CARR-006, D-052, SEC-P3-21). The compose demo runs `APP_ENV=local`. No state is mutated, so no audit scenario applies.
 
 #### Acceptance criteria
-Permission path: not applicable — Mock directives are request hints with no principal; the "Production ignores directives" scenario is the safety path
+Permission path: not applicable — Mock directives are request hints with no principal; the "Directives are ignored and stripped when scenarios are disabled" and "Production start-up is refused" scenarios are the safety path
 ```gherkin
 Feature: Mock scenario directives
   Scenario: Latency directive delays every call
@@ -161,17 +162,36 @@ Feature: Mock scenario directives
     Then the response is 400 application/problem+json with code MOCK_SCENARIO_INVALID
     And no carrier call is made
 
-  Scenario: Production never registers the Mock
-    Given the runtime environment is production
+  Scenario: Flags default to true only in local and test
+    Given MOCK_CARRIER_ENABLED and MOCK_SCENARIOS_ENABLED are unset
+    When the configuration is loaded with APP_ENV=local and again with APP_ENV=test
+    Then both flags resolve to true in each case
+    When the configuration is loaded with APP_ENV=staging and again with APP_ENV=production
+    Then both flags resolve to false in each case
+
+  Scenario: Staging without the flags has no Mock
+    Given APP_ENV=staging and neither MOCK_CARRIER_ENABLED nor MOCK_SCENARIOS_ENABLED is set
     When the adapter registry, the capability listing and a rate-shopping fan-out are inspected
     Then MOCK is absent from all three
     And no Mock option appears in any rate response
 
-  Scenario: Production ignores directives
-    Given the runtime environment is production
+  Scenario: Directives are ignored and stripped when scenarios are disabled
+    Given APP_ENV=staging and MOCK_SCENARIOS_ENABLED is unset
     When a rate request carries "X-Mock-Scenario: fail=rates"
     Then the directive has no effect and the header is not echoed
-    # Permission path: directive header is accepted from any caller in non-production by design; production behaviour above is the control
+    And the edge proxy strips the X-Mock-Scenario header before it reaches the API
+    # Permission path: directive header is accepted from any caller only where scenarios are enabled (local, test); the disabled behaviour above is the control
+
+  Scenario: Production start-up is refused with the Mock enabled
+    Given APP_ENV=production and MOCK_CARRIER_ENABLED=true
+    When the API process starts
+    Then start-up is refused with the error code MOCK_FORBIDDEN_IN_PRODUCTION
+    And the same refusal occurs for APP_ENV=production with MOCK_SCENARIOS_ENABLED=true
+
+  Scenario: Compose demo stack keeps directives working
+    Given the docker compose demo stack runs with APP_ENV=local
+    When a rate request carries "X-Mock-Scenario: latency=6000"
+    Then the directive is honoured and MOCK is listed in the adapter registry
 
   Scenario: Boundary values of latency
     Given "latency=0" and "latency=30000" are accepted
@@ -420,7 +440,7 @@ Feature: OAuth token cache
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-121
 - **Linked REQs:** REQ-CARR-017
 - **As a** shipper **I want** carrier calls to be bounded, retried safely and isolated per account **so that** one failing carrier degrades only itself.
-- **Notes:** Timeouts: rates 4 s, tracking 10 s, cancel 10 s, pickup 15 s, createShipment 20 s. Retry base 200 ms, factor 2, full jitter, at most 2 retries, only for `getRates`, `track`, `findServicePoints`, `validateAddress`, `cancelShipment`, `cancelPickup`. Breaker per account opens at 50% failures over the last 20 calls (min 10) or 5 consecutive failures; half-open probe after 30 s. Bulkhead 10 concurrent per account. All values configuration.
+- **Notes:** Timeouts: rates 4 s, tracking 10 s, cancel 10 s, pickup 15 s, createShipment 20 s. Retry base 200 ms, factor 2, full jitter, at most 2 retries, only for `getRates`, `track`, `findServicePoints`, `validateAddress`, `cancelShipment`, `cancelPickup`. Breaker per account opens at 50% failures over the last 20 calls (min 10) or 5 consecutive failures; half-open probe after 30 s. Two bulkhead pools per carrier account (D-048, replacing the single pool of 10): `rates` = 6 (`CARRIER_BULKHEAD_RATES=6`: `getRates`, `findServicePoints`, `validateAddress`) and `transactional` = 4 (`CARRIER_BULKHEAD_TRANSACTIONAL=4`: `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, `track`), so booking, cancellation, pickup and tracking never queue behind rate shopping. Overflow (queue wait beyond the operation deadline) yields `CARRIER_BUSY`, a local admission rejection that the saga treats as retryable (REQ-BOOK-023, US-205). The anonymous share of the `rates` pool is US-293. All values are configuration (ASSUMED defaults, A-037; NFR-RES-003; D-048). No entity is mutated, so no audit scenario applies.
 
 #### Acceptance criteria
 Permission path: not applicable — internal resilience wrapper with no principal; second negative scenario included.
@@ -456,10 +476,34 @@ Feature: Carrier call resilience
     Then the breaker opens and after 30 s one probe call is allowed
     And a successful probe closes the breaker
 
-  Scenario: Bulkhead overflow
-    Given 10 calls are in flight for one account
-    When an 11th call arrives
-    Then it fails with CARRIER_BUSY without waiting
+  Scenario: Two bulkhead pools per account
+    Given the configuration CARRIER_BULKHEAD_RATES=6 and CARRIER_BULKHEAD_TRANSACTIONAL=4
+    When the pool assignment of each operation is inspected for one carrier account
+    Then getRates, findServicePoints and validateAddress use the rates pool of 6
+    And createShipment, cancelShipment, schedulePickup, cancelPickup and track use the transactional pool of 4
+
+  Scenario: Hung rate calls do not delay createShipment
+    Given 6 getRates calls are in flight and hung for one account (Mock latency=30000)
+    When createShipment is called for the same account
+    Then it is admitted immediately through the transactional pool without queueing
+    And its admission wait is under 50 ms
+
+  Scenario: Rates pool overflow waits and then yields CARRIER_BUSY
+    Given 6 getRates calls are in flight for one account
+    When a 7th concurrent getRates call arrives
+    Then it waits in the rates queue
+    And if the queue wait exceeds the operation deadline of 4000 ms it fails with CARRIER_BUSY without calling the carrier
+
+  Scenario: Transactional pool overflow
+    Given 4 createShipment calls are in flight for one account
+    When a 5th transactional call arrives and the queue wait exceeds its operation deadline
+    Then it fails with CARRIER_BUSY without a network call
+
+  Scenario: Pool metrics are exposed
+    Given calls have queued and been rejected in both pools
+    When the metrics endpoint is scraped
+    Then queue depth is exposed per pool (rates, transactional)
+    And rejects are exposed per pool and per caller class (anonymous, authenticated, system)
 
   Scenario: Breakers are independent per account
     Given the DHL breaker is open
@@ -653,7 +697,7 @@ Feature: Rate cache
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-126, US-134, EPIC-16
 - **Linked REQs:** REQ-CARR-009
 - **As a** guest shipper **I want** prices to appear as each carrier answers **so that** I never wait for the slowest carrier.
-- **Notes:** Event types `carrier_result` (priced options), `carrier_error` (carrier code and canonical code, no raw text) and `complete` (counts per status and elapsed ms). Each event has a monotonically increasing `id`. Stream closes after `complete` or at 6 s. Resume from `Last-Event-ID` not required; fallback GET returns what has completed. Guest authorised by quote token (REQ-API-017).
+- **Notes:** Event types `carrier_result` (priced options), `carrier_error` (carrier code and canonical code, no raw text) and `complete` (counts per status and elapsed ms). Each event has a monotonically increasing `id`. Stream closes after `complete` or at 6 s. Resume from `Last-Event-ID` not required; fallback GET returns what has completed. Guest authorised by quote token (REQ-API-017). Fan-out happens exactly once, at `POST /quotes` (US-126); the stream and the GET only replay stored results. Concurrent open streams are capped at 2 per IP (anonymous) and 5 per user (DR-A22, NFR-SEC-005, D-048; NFR-RES-007).
 
 #### Acceptance criteria
 ```gherkin
@@ -700,13 +744,32 @@ Feature: Rate stream
   Scenario: Audit of the quote created by the stream request
     When the quote is created for the stream
     Then one audit entry CREATE on entity quote exists in the same transaction
+
+  Scenario: Opening, reopening and resuming a stream makes no carrier calls
+    Given a quote created by POST /quotes whose fan-out made one call per enabled Mock carrier account
+    And the Mock call counter is read after the POST
+    When the stream is opened, then reopened 10 times, including 5 reopenings that send a Last-Event-ID header
+    Then the Mock call counter is unchanged (0 extra carrier calls)
+    And each reopening replays the stored results and the complete event only
+
+  Scenario: Third concurrent stream from one anonymous IP is refused
+    Given two streams are open from one anonymous IP
+    When the same IP opens a third concurrent stream
+    Then the response is 429 application/problem+json with code RATE_LIMITED and a Retry-After header
+    And the two open streams are unaffected
+
+  Scenario: Sixth concurrent stream for one authenticated user is refused
+    Given five streams are open for one authenticated user
+    When that user opens a sixth concurrent stream
+    Then the response is 429 application/problem+json with code RATE_LIMITED
+    And closing one stream allows the next open to succeed
 ```
 
 ### US-136 — Redacted raw payload retention
 - **Milestone:** M1 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-131, EPIC-01
 - **Linked REQs:** REQ-CARR-018
 - **As a** compliance auditor **I want** raw carrier request and response stored with personal data and credentials redacted **so that** disputes can be investigated without holding personal data.
-- **Notes:** Stored for `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, in object storage and linked to the shipment; raw tracking-event payload stored with the event. Object path never exposed to customers; staff access is M2. Rate payloads retained only on failure (Could, sampled). Redaction tests use synthetic data only.
+- **Notes:** Stored for `createShipment`, `cancelShipment`, `schedulePickup`, `cancelPickup`, in object storage and linked to the shipment; raw tracking-event payload stored with the event. Object path never exposed to customers; staff access is M2. Rate payloads retained only on failure (Could, sampled). Redaction tests use synthetic data only. Redaction by field name plus blob replacement plus allow-list for tracking and response payloads (REQ-CARR-018, D-052, SEC-P3-13, SEC-TC-52).
 
 #### Acceptance criteria
 ```gherkin
@@ -741,6 +804,26 @@ Feature: Raw payload retention
   Scenario: Customs truncation marker
     Given a customs description longer than the carrier maximum
     Then the raw record marks the truncation while the Platform record keeps the full text
+
+  Scenario: Base64 documents are replaced by a blob reference
+    Given a createShipment request or response containing a base64 label, invoice or PDF field of 200 kB
+    When the payload is stored
+    Then the stored object has that field replaced by {"$blob": {"sha256", "size", "media_type", "document_id"?}}
+    And size equals the decoded byte length, sha256 equals the digest of the decoded bytes and media_type is "application/pdf"
+    And document_id is present when the document was persisted as a Platform document
+
+  Scenario: Property test finds no sentinel text or long base64 run in any stored object
+    Given a generated PDF containing the sentinel text "SENTINEL-NAME-9F3A" embedded as a base64 field in synthetic createShipment payloads
+    When 100 generated payloads are stored through the redactor
+    Then no stored object contains the sentinel text, in plain form or after base64 decoding of any field
+    And no stored object contains a base64 run longer than 1 kB
+
+  Scenario: Tracking and response payloads are allow-list redacted
+    Given a tracking response with canonical code "DELIVERED", an ISO timestamp, carrier reference "TRK-000123", city "Mumbai", country "IN", "signed by" name "Test Receiver" and a free-text note
+    When the payload is stored with the tracking event and a createShipment response is stored
+    Then canonical codes, timestamps, carrier references, city and country are kept
+    And the "signed by" name and the free text are replaced by "[REDACTED]"
+    And every other field outside the allow-list is "[REDACTED]"
 ```
 
 ### US-137 — Fixture hygiene, adapter README docs-check and live-sandbox opt-in
@@ -786,6 +869,102 @@ Feature: Fixtures, README and live-sandbox opt-in
     Then one label is booked with each carrier
 ```
 
+### US-293 — Anonymous rate-shopping budget and daily carrier quota guard
+- **Milestone:** M1 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-126, US-130, US-134, EPIC-16
+- **Linked REQs:** REQ-CARR-022, REQ-CARR-023
+- **Linked NFRs (optional):** NFR-RES-007
+- **As an** operator protecting paid bookings and the sandbox carrier accounts, and as a guest shipper, **I want** anonymous rate shopping bounded by a global per-account budget and a daily quota guard **so that** a distributed guest flood can neither starve paid bookings nor get a carrier account suspended, while guests still get cached results and the other carriers' prices.
+- **Notes:** Admission control inside the carrier layer; there is no principal-facing route. Defaults are configuration (A-094, D-048): `CARRIER_ANON_CALLS_PER_MIN=120` per account (Redis token bucket shared by all API replicas), anonymous callers hold at most 3 of the 6 `rates` slots, `CARRIER_DAILY_QUOTA` per account (`0` disables the guard, the Mock default; seed 500 for the DHL sandbox), `CARRIER_QUOTA_RESERVE_PCT=40`. A refusal is a local admission rejection (`CARRIER_BUSY`, no network call) with the REQ-BOOK-023 saga semantics (US-205). Security events `carrier_anon_budget_exhausted` and `carrier_quota_pressure` per REQ-SEC-012. Audit: not required (no entity mutation; the state is a Redis counter and metrics). Not demo-critical. Tests: SEC-TC-40 (k6 flood), SEC-TC-41 (day counter).
+
+#### Acceptance criteria
+Permission path: not applicable — admission control inside the carrier layer, no principal-facing route
+```gherkin
+Feature: Anonymous rate-shopping budget and daily carrier quota guard
+  Background:
+    Given the Mock carrier with CARRIER_ANON_CALLS_PER_MIN=120 and a rates pool of 6 for account acct-mock
+    And the other carrier accounts answer normally
+
+  Scenario: Guest flood does not starve paid bookings
+    Given 50 source IPs each send guest quotes at the per-IP limit of 20 per minute with Mock "latency=3000"
+    When 20 authenticated orders are booked concurrently during the flood
+    Then all 20 orders reach BOOKED within the 30-minute saga deadline
+    And no saga step ends with the shipment in DRAFT or EXCEPTION
+    And guests beyond the budget receive carrier_error {code: CARRIER_BUSY} for that carrier, or cached results, within the 5000 ms deadline
+    And the other carriers still answer those guest quotes
+    And the partial-results UI shows the busy carrier's inline notice and the banner "some carriers did not respond"
+
+  Scenario: Token bucket is shared across API replicas
+    Given two API replicas share one Redis
+    When replica 1 and replica 2 each receive 100 anonymous rate calls for acct-mock within one minute
+    Then at most 120 anonymous carrier calls reach acct-mock in that minute in total
+    And the remaining anonymous calls receive carrier_error {code: CARRIER_BUSY} or cached results
+
+  Scenario: Anonymous callers hold at most half of the rates slots
+    Given 3 anonymous getRates calls are in flight for acct-mock
+    When a 4th anonymous getRates call arrives
+    Then it is answered with carrier_error {code: CARRIER_BUSY} immediately without a carrier call
+    And an authenticated getRates call is still admitted into the remaining 3 slots
+
+  Scenario: Exhaustion raises one security event per minute and a reject counter
+    Given the anonymous bucket for acct-mock is exhausted
+    When 500 further anonymous calls are rejected within one minute
+    Then exactly one security event carrier_anon_budget_exhausted is logged for acct-mock in that minute
+    And the reject counter labelled caller_class=anonymous increases by 500
+
+  Scenario: Authenticated quotes are unaffected by the anonymous budget
+    Given the anonymous bucket and the anonymous slots for acct-mock are exhausted
+    When an authenticated user requests a quote
+    Then acct-mock is called and returns status OK
+    And no CARRIER_BUSY is produced for that user
+
+  Scenario: Anonymous fan-out stops at 60 percent of the daily quota
+    Given a fake clock at 10:00 UTC, CARRIER_DAILY_QUOTA=500 and CARRIER_QUOTA_RESERVE_PCT=40
+    And the day counter for acct-dhl is 299
+    When an anonymous quote fans out
+    Then acct-dhl is called
+    When the counter reaches 300 (60 percent)
+    Then the next anonymous quote receives carrier_error {code: CARRIER_BUSY} or cached results for acct-dhl without a carrier call
+    And an authenticated quote still calls acct-dhl
+    And a createShipment on acct-dhl is still admitted
+
+  Scenario: Quota pressure alarms fire once at 70 and once at 90 percent
+    Given the day counter for acct-dhl is 349
+    When calls take it to 350 (70 percent)
+    Then one security event carrier_quota_pressure with threshold 70 is emitted and the alarm metric is set
+    And further calls below 450 emit no new carrier_quota_pressure event
+    When the counter reaches 450 (90 percent)
+    Then one carrier_quota_pressure event with threshold 90 is emitted
+    And no more than 2 carrier_quota_pressure events exist for acct-dhl that day
+
+  Scenario: Above 90 percent only transactional calls continue
+    Given the day counter for acct-dhl is 451
+    When an authenticated quote, a createShipment, a cancelShipment, a schedulePickup and a track call target acct-dhl
+    Then the authenticated quote receives carrier_error {code: CARRIER_BUSY} for acct-dhl and the other carriers answer
+    And createShipment, cancelShipment, schedulePickup and track are admitted and called
+
+  Scenario: Guard is disabled with a quota of zero
+    Given CARRIER_DAILY_QUOTA=0 for acct-mock, the Mock default
+    When 1000 anonymous and authenticated calls are made in a day within the other limits
+    Then no quota refusal and no carrier_quota_pressure event occurs
+
+  Scenario: Counter resets at 00:00 UTC
+    Given the day counter for acct-dhl is 460 at 23:59:59 UTC
+    When the fake clock passes 00:00:00 UTC
+    Then the counter is 0 and an anonymous quote calls acct-dhl again
+
+  Scenario: Usage is exposed as a gauge
+    Given the day counter for acct-dhl is 250
+    When the metrics endpoint is scraped
+    Then a gauge for acct-dhl reports usage 250 of 500 (50 percent)
+
+  Scenario: Redis unavailable falls back to per-instance counting
+    Given Redis is unreachable for the anonymous token bucket
+    When anonymous rate calls arrive on one API instance
+    Then the bucket counts per instance with the same limit of 120 per minute
+    And an ERROR-level security event is logged naming the degraded limiter and no secrets
+    And authenticated and transactional calls continue and 20 concurrent bookings still reach BOOKED
+```
+
 ## Coverage check
 | REQ | Stories |
 |---|---|
@@ -810,5 +989,7 @@ Feature: Fixtures, README and live-sandbox opt-in
 | REQ-CARR-019 | US-137 |
 | REQ-CARR-020 | US-137 |
 | REQ-CARR-021 | US-127 |
+| REQ-CARR-022 | US-293 |
+| REQ-CARR-023 | US-293 |
 
-All 20 Must REQs are linked by Must stories; REQ-CARR-020 (Should) is linked by Must story US-137, whose other REQ (REQ-CARR-019) is Must, so the story priority is not above its highest linked REQ.
+All 22 Must REQs are linked by Must stories; REQ-CARR-020 (Should) is linked by Must story US-137, whose other REQ (REQ-CARR-019) is Must, so the story priority is not above its highest linked REQ.

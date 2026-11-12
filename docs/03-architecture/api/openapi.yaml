@@ -18,7 +18,7 @@ info:
     - Server-sent events per REQ-API-017/018 (`carrier_result`, `carrier_error`, `complete`).
     - Deprecation via `Deprecation`, `Sunset` and `Link: rel="deprecation"` headers (REQ-API-015); no operation is deprecated in this version.
 
-    **Vendor extensions on every operation:** `x-requirements`, `x-permission` (+ `x-permission-justification` for `public`/`authenticated`), `x-audit` {action, entity, sensitivity, reasonRequired, justification?}, `x-idempotency`, `x-rate-limit-class`, `x-tenancy`, `x-error-codes`, `x-milestone`, `x-moscow`; optional `x-csrf`, `x-mfa-gate-exempt`, `x-reauth-scope`, `x-permission-authenticated`, `x-permission-status`, `x-rate-limit-route`, `x-sse-events`.
+    **Vendor extensions on every operation:** `x-requirements`, `x-permission` (+ `x-permission-justification` for `public`/`authenticated`), `x-audit` {action, entity, sensitivity, reasonRequired, justification?}, `x-idempotency`, `x-rate-limit-class`, `x-tenancy`, `x-error-codes`, `x-milestone`, `x-moscow`; optional `x-csrf`, `x-mfa-gate-exempt`, `x-reauth-scope`, `x-reauth-max-age` (seconds; with `x-reauth-scope`, the route accepts either a valid `X-Reauth-Proof` for the scope or an access token whose `auth_time` is at most this old; without it a proof is always required), `x-permission-authenticated`, `x-permission-status`, `x-rate-limit-route`, `x-sse-events`.
 
     All example data is synthetic.
   contact:
@@ -543,7 +543,7 @@ paths:
       operationId: refreshSession
       summary: Rotate the refresh token
       description: |-
-        Cookie-authenticated (no bearer). Requires an allow-listed Origin and `X-CSRF-Token`. Rotates the refresh token in the same family and returns a new access token. Presenting a rotated or revoked token revokes the whole family and session: 401 SESSION_REVOKED, audit TOKEN_REUSE_DETECTED, security event refresh_token_reuse (EC-A04/EC-A05). Absolute cap 90 days (admin 12 h).
+        Cookie-authenticated (no bearer). Requires an allow-listed Origin and `X-CSRF-Token`. Rotates the refresh token in the same family and returns a new access token. Presenting a rotated or revoked token revokes the whole family and session: 401 SESSION_REVOKED, audit TOKEN_REUSE_DETECTED, security event refresh_token_reuse (EC-A04/EC-A05). Customer sessions: 30-day sliding refresh lifetime (`AUTH_REFRESH_TTL`) inside a 30-day absolute cap (`AUTH_SESSION_ABSOLUTE_TTL`); admin sessions: 30-minute sliding idle lifetime (`AUTH_ADMIN_REFRESH_IDLE_TTL`) inside a 12 h absolute cap. A refresh token past either limit gets 401 SESSION_EXPIRED (audit reason `SESSION_EXPIRED`); sign in again (SEC-P3-01, SEC-P3-11). The new access token carries the session's `auth_time` unchanged: refresh never renews it.
 
         **Requirements:** REQ-AUTH-007, REQ-AUTH-008, REQ-AUTH-010, REQ-SEC-004, REQ-ADMIN-004. **Permission:** `public` (Authenticated by the refresh cookie plus CSRF token, not by a bearer token.). **Audit:** UPDATE `session` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** public (not an auth-class route in DR-A22; 120/min per IP). **Tenancy:** user.
       security:
@@ -633,6 +633,7 @@ paths:
         - VALIDATION_ERROR
         - AUTH_REQUIRED
         - SESSION_REVOKED
+        - SESSION_EXPIRED
         - CSRF_REJECTED
         - PAYLOAD_TOO_LARGE
         - UNSUPPORTED_MEDIA_TYPE
@@ -1053,7 +1054,7 @@ paths:
       operationId: createReauthProof
       summary: Re-authenticate for a sensitive action
       description: |-
-        Verifies the password (or a TOTP code for MFA users) and returns a 5-minute single-use proof bound to the session and the named action scope. Send it as `X-Reauth-Proof`. Scopes that weaken MFA (`mfa.totp.disable`, `mfa.recovery_codes.regenerate`) require `totp_code` when MFA is active; a password alone is rejected with 401 INVALID_CREDENTIALS (ADR-0006 amendment 3).
+        Verifies the password (or a TOTP code for MFA users) and returns a 5-minute single-use proof bound to the session and the named action scope. Send it as `X-Reauth-Proof`. Scopes that weaken MFA (`mfa.totp.disable`, `mfa.recovery_codes.regenerate`) require `totp_code` when MFA is active; a password alone is rejected with 401 INVALID_CREDENTIALS (ADR-0006 amendment 3). Success also sets the session's `authenticated_at`; access tokens issued from then on (refresh, organisation switch) carry the new `auth_time` (SEC-P3-01).
 
         **Requirements:** REQ-AUTH-020. **Permission:** `authenticated` (Own session only.). **Audit:** CREATE `reauth_proof` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** auth. **Tenancy:** user.
       security:
@@ -1241,6 +1242,79 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+  /auth/mfa/totp/enrolment-code:
+    post:
+      tags:
+        - identity
+      operationId: requestTotpEnrolmentCode
+      summary: E-mail a TOTP enrolment code (staff first enrolment)
+      description: |-
+        Sends a 6-digit single-use code, valid for 10 minutes, to the signed-in account's e-mail address. The code is required by `enrolTotp` for a staff (OPERATOR member) user's **first** TOTP enrolment when `APP_ENV` is not `local` or `test`, which binds first enrolment to mailbox control: a leaked staff password alone cannot enrol an attacker's authenticator (SEC-P3-14, threat model T-23). Only the code hash is stored; a new request invalidates earlier codes. The response is the identical 202 whether or not a code was needed or sent (customer accounts, already-enrolled staff, local/test). Allowed for staff sessions restricted by the MFA gate.
+
+        **Requirements:** REQ-AUTH-018, REQ-ADMIN-002. **Permission:** `authenticated` (Own account only; the code goes to the account's own address.). **Audit:** CREATE `mfa_enrolment_code` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** email-send (3/h per account identifier and 10/h per IP (DR-A22)). **Tenancy:** user.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/AcceptLanguage"
+      responses:
+        "202":
+          description: Accepted; identical whether or not a code was sent.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/XCorrelationId"
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Accepted"
+              examples:
+                default:
+                  summary: Example
+                  value:
+                    status: ACCEPTED
+                    message_key: auth.mfa.enrolment_code.requested
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+      x-requirements:
+        - REQ-AUTH-018
+        - REQ-ADMIN-002
+      x-permission: authenticated
+      x-permission-justification: Own account only; the code goes to the account's own address.
+      x-audit:
+        action: CREATE
+        entity: mfa_enrolment_code
+        sensitivity: NORMAL
+        reasonRequired: false
+      x-idempotency: not-applicable
+      x-rate-limit-class: email-send
+      x-rate-limit-route: 3/h per account identifier and 10/h per IP (DR-A22)
+      x-tenancy: user
+      x-error-codes:
+        - ACCESS_TOKEN_EXPIRED
+        - AUTH_REQUIRED
+        - SESSION_REVOKED
+        - AUTHZ_DENIED
+        - RATE_LIMITED
+        - AUDIT_WRITE_FAILED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      x-milestone: M0
+      x-moscow: Must
+      x-mfa-gate-exempt: true
   /auth/mfa/totp/enrol:
     post:
       tags:
@@ -1250,12 +1324,28 @@ paths:
       description: |-
         Returns the provisioning URI and manual key once (RFC 6238, 6 digits, 30 s, SHA-1). Pending enrolment expires after 15 minutes. Allowed for staff sessions restricted by the MFA gate.
 
+        Staff first enrolment (SEC-P3-14): when `APP_ENV` is not `local` or `test` and the caller is a member of the OPERATOR organisation with no TOTP ever activated, the request must carry `enrolment_code`, the 6-digit single-use code (10 min) e-mailed to the account address by `requestTotpEnrolmentCode`. A missing, wrong, expired or used code returns 403 MFA_ENROLMENT_CODE_REQUIRED; wrong codes count against the per-user MFA lock (5 consecutive failures: 429 MFA_LOCKED, 15 min). Customers and later staff re-enrolments send no body (or `{}`); a supplied code is then ignored.
+
         **Requirements:** REQ-AUTH-015, REQ-AUTH-018, REQ-ADMIN-002, REQ-AUTH-019. **Permission:** `authenticated` (Own MFA only.). **Audit:** CREATE `mfa_enrolment` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** auth. **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpEnrolRequest"
+            examples:
+              staffFirstEnrolment:
+                summary: Staff first enrolment outside local/test, with the e-mailed code
+                value:
+                  enrolment_code: "604913"
+              noCode:
+                summary: Customer or local/test enrolment, no code needed
+                value: {}
       responses:
         "201":
           description: Success.
@@ -1279,12 +1369,18 @@ paths:
                     provisioning_uri: otpauth://totp/Platform:ana%40acme.example?secret=JBSWY3DPEHPK3PXPJBSWY3DP&issuer=Platform
                     manual_key: JBSWY3DPEHPK3PXPJBSWY3DP
                     expires_at: 2026-11-12T14:45:00Z
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -1307,11 +1403,17 @@ paths:
       x-rate-limit-class: auth
       x-tenancy: user
       x-error-codes:
+        - MALFORMED_REQUEST
+        - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
+        - MFA_ENROLMENT_CODE_REQUIRED
         - CONFLICT
+        - PAYLOAD_TOO_LARGE
+        - UNSUPPORTED_MEDIA_TYPE
+        - MFA_LOCKED
         - RATE_LIMITED
         - AUDIT_WRITE_FAILED
         - INTERNAL_ERROR
@@ -2296,11 +2398,14 @@ paths:
       description: |-
         Creates a one-time JSON export (profile, memberships, addresses, shipments, quotes, preferences, consent records; no restricted references) and returns its one-time download path.
 
-        **Requirements:** REQ-ACCT-016. **Permission:** `privacy:export`. **Audit:** CREATE `privacy_export` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated (1 request per minute per user (US-270)). **Tenancy:** user.
+        Requires re-authentication on every call (SEC-P3-01): a valid `X-Reauth-Proof` for scope `privacy.export` from `createReauthProof` (5 min, single-use, bound to the session); otherwise 401 REAUTH_REQUIRED.
+
+        **Requirements:** REQ-ACCT-016, REQ-AUTH-020. **Permission:** `privacy:export`. **Audit:** CREATE `privacy_export` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated (1 request per minute per user (US-270)). **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ReauthProof"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -2348,6 +2453,7 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
       x-requirements:
         - REQ-ACCT-016
+        - REQ-AUTH-020
       x-permission: privacy:export
       x-audit:
         action: CREATE
@@ -2362,6 +2468,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -2373,6 +2480,7 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Could
+      x-reauth-scope: privacy.export
   /me/privacy/exports/{exportId}/download:
     get:
       tags:
@@ -2382,11 +2490,14 @@ paths:
       description: |-
         Streams the export as an attachment once; a second request returns 410 DOWNLOAD_EXPIRED. Fails closed (503 AUDIT_UNAVAILABLE) if the DOWNLOAD entry cannot be written.
 
-        **Requirements:** REQ-ACCT-016, REQ-AUDIT-005. **Permission:** `privacy:export`. **Audit:** DOWNLOAD `privacy_export` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** authenticated. **Tenancy:** user.
+        Requires re-authentication on every call (SEC-P3-01): a valid `X-Reauth-Proof` for scope `privacy.export` from `createReauthProof` (5 min, single-use, bound to the session); otherwise 401 REAUTH_REQUIRED.
+
+        **Requirements:** REQ-ACCT-016, REQ-AUDIT-005, REQ-AUTH-020. **Permission:** `privacy:export`. **Audit:** DOWNLOAD `privacy_export` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** authenticated. **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ExportIdPath"
+        - $ref: "#/components/parameters/ReauthProof"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -2445,6 +2556,7 @@ paths:
       x-requirements:
         - REQ-ACCT-016
         - REQ-AUDIT-005
+        - REQ-AUTH-020
       x-permission: privacy:export
       x-audit:
         action: DOWNLOAD
@@ -2458,6 +2570,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -2469,6 +2582,7 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Could
+      x-reauth-scope: privacy.export
   /me/privacy/delete:
     post:
       tags:
@@ -3069,7 +3183,9 @@ paths:
       description: |-
         Only an Owner may grant owner or modify an Owner; a member cannot change their own roles (403 AUTHZ_DENIED). Leaving no ACTIVE Owner: 422 LAST_OWNER. Revokes the member sessions whose active context is this organisation.
 
-        **Requirements:** REQ-ORG-012, REQ-ORG-013, REQ-ORG-004, REQ-ACCT-015. **Permission:** `org:member:manage`. **Audit:** UPDATE `membership` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Step-up re-authentication (SEC-P3-01): accepted without a proof only while the access token's `auth_time` (last password or MFA verification) is at most 12 h old (`x-reauth-max-age: 43200`); otherwise a valid `X-Reauth-Proof` for scope `org.member.manage` from `createReauthProof` (5 min, single-use) is required, else 401 REAUTH_REQUIRED. Refresh never renews `auth_time`.
+
+        **Requirements:** REQ-ORG-012, REQ-ORG-013, REQ-ORG-004, REQ-ACCT-015, REQ-AUTH-020. **Permission:** `org:member:manage`. **Audit:** UPDATE `membership` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
@@ -3077,6 +3193,7 @@ paths:
         - $ref: "#/components/parameters/MembershipIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/ReauthProofConditional"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -3158,6 +3275,7 @@ paths:
         - REQ-ORG-013
         - REQ-ORG-004
         - REQ-ACCT-015
+        - REQ-AUTH-020
       x-permission: org:member:manage
       x-audit:
         action: UPDATE
@@ -3172,6 +3290,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -3190,6 +3309,8 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: org.member.manage
+      x-reauth-max-age: 43200
     delete:
       tags:
         - organisations
@@ -3198,7 +3319,9 @@ paths:
       description: |-
         Moves the membership to REMOVED (history kept) and revokes the member sessions in this organisation within 5 s. Removing the last Owner: 422 LAST_OWNER.
 
-        **Requirements:** REQ-ORG-012, REQ-ORG-013, REQ-AUTH-009. **Permission:** `org:member:manage`. **Audit:** DELETE `membership` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Step-up re-authentication (SEC-P3-01): accepted without a proof only while the access token's `auth_time` (last password or MFA verification) is at most 12 h old (`x-reauth-max-age: 43200`); otherwise a valid `X-Reauth-Proof` for scope `org.member.manage` from `createReauthProof` (5 min, single-use) is required, else 401 REAUTH_REQUIRED. Refresh never renews `auth_time`.
+
+        **Requirements:** REQ-ORG-012, REQ-ORG-013, REQ-AUTH-009, REQ-AUTH-020. **Permission:** `org:member:manage`. **Audit:** DELETE `membership` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
@@ -3206,6 +3329,7 @@ paths:
         - $ref: "#/components/parameters/MembershipIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/ReauthProofConditional"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -3250,6 +3374,7 @@ paths:
         - REQ-ORG-012
         - REQ-ORG-013
         - REQ-AUTH-009
+        - REQ-AUTH-020
       x-permission: org:member:manage
       x-audit:
         action: DELETE
@@ -3263,6 +3388,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -3278,6 +3404,8 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: org.member.manage
+      x-reauth-max-age: 43200
   /organisations/{orgId}/invitations:
     post:
       tags:
@@ -3287,12 +3415,15 @@ paths:
       description: |-
         Single-use token valid 7 days (stored hashed); email in the chosen locale via `org.invitation_created`. Owner role only by an Owner. Existing ACTIVE member: 409 ALREADY_MEMBER. INDIVIDUAL organisation: 422 ORG_TYPE_RESTRICTION.
 
-        **Requirements:** REQ-ORG-010, REQ-ORG-014, REQ-ACCT-014. **Permission:** `org:member:invite`. **Audit:** CREATE `invitation` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Step-up re-authentication (SEC-P3-01): accepted without a proof only while the access token's `auth_time` (last password or MFA verification) is at most 12 h old (`x-reauth-max-age: 43200`); otherwise a valid `X-Reauth-Proof` for scope `org.member.manage` from `createReauthProof` (5 min, single-use) is required, else 401 REAUTH_REQUIRED. Refresh never renews `auth_time`.
+
+        **Requirements:** REQ-ORG-010, REQ-ORG-014, REQ-ACCT-014, REQ-AUTH-020. **Permission:** `org:member:invite`. **Audit:** CREATE `invitation` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/OrgIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ReauthProofConditional"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -3370,6 +3501,7 @@ paths:
         - REQ-ORG-010
         - REQ-ORG-014
         - REQ-ACCT-014
+        - REQ-AUTH-020
       x-permission: org:member:invite
       x-audit:
         action: CREATE
@@ -3384,6 +3516,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -3401,6 +3534,8 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: org.member.manage
+      x-reauth-max-age: 43200
     get:
       tags:
         - organisations
@@ -3607,13 +3742,16 @@ paths:
       description: |-
         Issues a new token (superseding the old) and resends; at most 3 resends (422 LIMIT_EXCEEDED).
 
-        **Requirements:** REQ-ORG-010. **Permission:** `org:member:invite`. **Audit:** UPDATE `invitation` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Step-up re-authentication (SEC-P3-01): accepted without a proof only while the access token's `auth_time` (last password or MFA verification) is at most 12 h old (`x-reauth-max-age: 43200`); otherwise a valid `X-Reauth-Proof` for scope `org.member.manage` from `createReauthProof` (5 min, single-use) is required, else 401 REAUTH_REQUIRED. Refresh never renews `auth_time`.
+
+        **Requirements:** REQ-ORG-010, REQ-AUTH-020. **Permission:** `org:member:invite`. **Audit:** UPDATE `invitation` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/OrgIdPath"
         - $ref: "#/components/parameters/InvitationIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ReauthProofConditional"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -3670,6 +3808,7 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
       x-requirements:
         - REQ-ORG-010
+        - REQ-AUTH-020
       x-permission: org:member:invite
       x-audit:
         action: UPDATE
@@ -3683,6 +3822,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -3697,6 +3837,8 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: org.member.manage
+      x-reauth-max-age: 43200
   /invitations/accept:
     post:
       tags:
@@ -6186,15 +6328,16 @@ paths:
       operationId: createQuote
       summary: Create a quote and start rate shopping
       description: |-
-        Validates inputs against country reference data (postcode/city per location type) and package limits (DR-B34), persists the quote (expires in 24 h) and fans out to every enabled carrier account matching direction, content type, weight and dimensions (per-carrier 4 s, overall 5 s). Returns 201 immediately with carriers PENDING; results arrive on the SSE stream or via getQuote. Anonymous callers receive `guest_token` once (send as X-Quote-Token; never in URLs); authenticated callers create the quote in their active organisation. A bearer token, if present, must be valid. Non-enabled countries: 422 COUNTRY_NOT_SUPPORTED.
+        Validates inputs against country reference data (postcode/city per location type) and package limits (DR-B34), persists the quote (expires in 24 h) and fans out to every enabled carrier account matching direction, content type, weight and dimensions (per-carrier 4 s, overall 5 s). Returns 201 immediately with carriers PENDING; results arrive on the SSE stream or via getQuote. Anonymous callers receive `guest_token` once (send as X-Quote-Token; never in URLs); authenticated callers create the quote in their active organisation. A bearer token, if present, must be valid. Non-enabled countries: 422 COUNTRY_NOT_SUPPORTED. Carrier fan-out happens here, exactly once per quote; `streamQuoteResults` never triggers it (SEC-P3-02).
 
-        **Requirements:** REQ-QUOTE-001, REQ-QUOTE-002, REQ-QUOTE-003, REQ-QUOTE-004, REQ-CARR-008, REQ-CARR-010, REQ-CARR-005. **Permission:** `public` (Guests quote without an account (REQ-QUOTE-002, D-009); quote:create is held by every seeded role.). **Audit:** CREATE `quote` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** public-quote (anonymous: 20/min and 100/h per IP (REQ-QUOTE-002); authenticated callers count against the authenticated class). **Tenancy:** guest.
+        Not idempotent-key capable: the response carries a one-time secret and is never stored (ADR-0014 amendment 1). An `Idempotency-Key` header is ignored; a client retry creates a new quote (SEC-P3-10).
+
+        **Requirements:** REQ-QUOTE-001, REQ-QUOTE-002, REQ-QUOTE-003, REQ-QUOTE-004, REQ-CARR-008, REQ-CARR-010, REQ-CARR-005. **Permission:** `public` (Guests quote without an account (REQ-QUOTE-002, D-009); quote:create is held by every seeded role.). **Audit:** CREATE `quote` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** public-quote (anonymous: 20/min and 100/h per IP (REQ-QUOTE-002); authenticated callers count against the authenticated class). **Tenancy:** guest.
       security:
         - {}
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/MockScenario"
-        - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -6237,8 +6380,6 @@ paths:
               $ref: "#/components/headers/RateLimitRemaining"
             RateLimit-Reset:
               $ref: "#/components/headers/RateLimitReset"
-            Idempotent-Replayed:
-              $ref: "#/components/headers/IdempotentReplayed"
             Location:
               $ref: "#/components/headers/Location"
           content:
@@ -6313,8 +6454,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -6344,7 +6483,7 @@ paths:
         sensitivity: SENSITIVE
         reasonRequired: false
         justification: Actor ANONYMOUS for guests.
-      x-idempotency: optional
+      x-idempotency: not-applicable
       x-rate-limit-class: public-quote
       x-rate-limit-route: "anonymous: 20/min and 100/h per IP (REQ-QUOTE-002); authenticated callers count against the authenticated class"
       x-tenancy: guest
@@ -6356,11 +6495,9 @@ paths:
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
-        - IDEMPOTENCY_IN_PROGRESS
         - PAYLOAD_TOO_LARGE
         - UNSUPPORTED_MEDIA_TYPE
         - COUNTRY_NOT_SUPPORTED
-        - IDEMPOTENCY_KEY_REUSED
         - RATE_LIMITED
         - AUDIT_WRITE_FAILED
         - INTERNAL_ERROR
@@ -6845,7 +6982,9 @@ paths:
       description: |-
         Server-sent events (REQ-API-017/018): `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`, monotonically increasing `id`, comment heartbeat every 15 s. Events: `carrier_result` (SseCarrierResult: one carrier's priced options), `carrier_error` (SseCarrierError: carrier code, state timeout|error, canonical code; no raw text), `complete` (SseComplete: counts per status, per-carrier status, elapsed ms; sent by 5 s), `error` (SseError). The server closes within 1 s after `complete`/`error`, caps the stream at 30 s (normally closed by 6 s) and cancels upstream work within 1 s of client disconnect. Reconnect with `Last-Event-ID` (any replica): missed events are replayed from the persisted results before live events; the event id is the per-quote sequence number (ADR-0016 amendment 3). getQuote remains the non-streaming fallback. Authorised with the bearer header via a fetch-based client or, for guests, X-Quote-Token. Events carry no personal data.
 
-        **Requirements:** REQ-CARR-009, REQ-API-017, REQ-API-018, REQ-QUOTE-008. **Permission:** `public` (Guest branch authorised by the quote token; tenant branch requires quote:read.). **Audit:** VIEW `quote` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** public. **Tenancy:** guest.
+        Opening or reopening a stream never triggers carrier fan-out: fan-out happens once, at `POST /quotes` (`createQuote`); the stream only replays the persisted results and subscribes to new ones, so reconnects cost no carrier calls (SEC-P3-02, SEC-TC-42). Concurrent open streams are capped at 2 per client IP (IPv6 /64) and 5 per user (`SSE_MAX_STREAMS_PER_IP`, `SSE_MAX_STREAMS_PER_USER`, shared across replicas in Redis); the next stream is refused before it opens with 429 RATE_LIMITED and `Retry-After` (threat model R-15, T-47).
+
+        **Requirements:** REQ-CARR-009, REQ-API-017, REQ-API-018, REQ-QUOTE-008. **Permission:** `public` (Guest branch authorised by the quote token; tenant branch requires quote:read.). **Audit:** VIEW `quote` SENSITIVE. **Idempotency:** not-applicable. **Rate-limit class:** public (plus at most 2 concurrent streams per IP and 5 per user (SEC-P3-02)). **Tenancy:** guest.
       security:
         - bearerAuth: []
         - quoteToken: []
@@ -6921,6 +7060,7 @@ paths:
         reasonRequired: false
       x-idempotency: not-applicable
       x-rate-limit-class: public
+      x-rate-limit-route: at most 2 concurrent streams per IP (/64) and 5 per user (SSE_MAX_STREAMS_PER_IP, SSE_MAX_STREAMS_PER_USER; SEC-P3-02)
       x-tenancy: guest
       x-error-codes:
         - VALIDATION_ERROR
@@ -7489,14 +7629,15 @@ paths:
       operationId: createQuoteShare
       summary: Create a share link
       description: |-
-        Creates (or returns the active) share link with a >= 128-bit token; the shared view exposes no personal data and expires with the quote.
+        Always mints a new share link with a >= 128-bit token, revokes any previous active share of the quote in the same transaction, and returns 201. It never returns an existing token: only the token hash (`share_token_hash`) is stored, so an earlier link stops resolving (404) as soon as a new one is created (SEC-P3-10, decided variant: mint-and-revoke, not 409 `SHARE_EXISTS`). The shared view exposes no personal data and expires with the quote.
 
-        **Requirements:** REQ-QUOTE-015. **Permission:** `quote:share`. **Audit:** CREATE `quote_share` NORMAL. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Not idempotent-key capable: the response carries a one-time secret and is never stored (ADR-0014 amendment 1). An `Idempotency-Key` header is ignored; a client retry mints a new token and revokes the previous one.
+
+        **Requirements:** REQ-QUOTE-015. **Permission:** `quote:share`. **Audit:** CREATE `quote_share` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** authenticated. **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/QuoteIdPath"
-        - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -7511,8 +7652,6 @@ paths:
               $ref: "#/components/headers/RateLimitRemaining"
             RateLimit-Reset:
               $ref: "#/components/headers/RateLimitReset"
-            Idempotent-Replayed:
-              $ref: "#/components/headers/IdempotentReplayed"
           content:
             application/json:
               schema:
@@ -7523,7 +7662,7 @@ paths:
                   value:
                     share_id: 0193a5b2-7c1e-7d4a-9f3b-000000000e21
                     share_token: sh_Qz8Lp2Vx7Nb4Mk1Tw9Yc3Hd
-                    share_path: /en/shared-quote#t=sh_Qz8Lp2Vx7Nb4Mk1Tw9Yc3Hd
+                    share_path: /q#token=sh_Qz8Lp2Vx7Nb4Mk1Tw9Yc3Hd
                     expires_at: 2026-11-13T14:30:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -7551,7 +7690,7 @@ paths:
         entity: quote_share
         sensitivity: NORMAL
         reasonRequired: false
-      x-idempotency: optional
+      x-idempotency: not-applicable
       x-rate-limit-class: authenticated
       x-tenancy: tenant
       x-error-codes:
@@ -7562,9 +7701,7 @@ paths:
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
         - NOT_FOUND
-        - IDEMPOTENCY_IN_PROGRESS
         - QUOTE_EXPIRED
-        - IDEMPOTENCY_KEY_REUSED
         - RATE_LIMITED
         - AUDIT_WRITE_FAILED
         - INTERNAL_ERROR
@@ -12154,7 +12291,7 @@ paths:
       operationId: checkoutOrder
       summary: Start checkout and create the payment authorisation
       description: |-
-        Gate (REQ-BOOK-016): verified email (403 EMAIL_NOT_VERIFIED, no order number consumed), every quote unexpired (409 QUOTE_EXPIRED), steps 1-5 complete, DG attestation and prohibited checks re-run (422). Then allocates the order number (DR-B22), computes the amount server-side from stored snapshots (client `expected_amount` mismatch: 409 AMOUNT_MISMATCH; below gateway minimum: 422 AMOUNT_BELOW_MINIMUM) and creates an authorise-only payment (Mock token or Stripe PaymentIntent with manual capture). On AUTHORISED the booking saga starts via the outbox (`order.checkout_started`, `payment.authorised`). At most 5 attempts per order per hour (429 PAYMENT_ATTEMPTS_EXCEEDED). Card fields are rejected (400 CARD_DATA_NOT_ACCEPTED); non-card methods 400 PAYMENT_METHOD_NOT_AVAILABLE.
+        Gate (REQ-BOOK-016): verified email (403 EMAIL_NOT_VERIFIED, no order number consumed), every quote unexpired (409 QUOTE_EXPIRED), steps 1-5 complete, DG attestation and prohibited checks re-run (422). Then allocates the order number (DR-B22), computes the amount server-side from stored snapshots (client `expected_amount` mismatch: 409 AMOUNT_MISMATCH; below gateway minimum: 422 AMOUNT_BELOW_MINIMUM) and creates an authorise-only payment (Mock token or Stripe PaymentIntent with manual capture). On AUTHORISED the booking saga starts via the outbox (`order.checkout_started`, `payment.authorised`). Saved-card step-up (SEC-P3-01): when a saved payment method is used and the access token `auth_time` is older than 12 h, the response has `cvc_recollection_required: true`; the server then creates the PaymentIntent with `payment_method_options.card.require_cvc_recollection=true` and the Payment Element collects the CVC inside the Stripe iframe, so no PCI scope change. No `X-Reauth-Proof` is used on this route. At most 5 attempts per order per hour (429 PAYMENT_ATTEMPTS_EXCEEDED). Card fields are rejected (400 CARD_DATA_NOT_ACCEPTED); non-card methods 400 PAYMENT_METHOD_NOT_AVAILABLE.
 
         **Requirements:** REQ-BOOK-016, REQ-BOOK-026, REQ-PAY-005, REQ-PAY-006, REQ-PAY-007, REQ-PAY-008, REQ-PAY-009, REQ-PAY-010, REQ-PAY-016, REQ-PAY-019, REQ-BOOK-020, REQ-CUST-009, REQ-CUST-010. **Permission:** `payment:create`. **Audit:** CREATE `payment` NORMAL. **Idempotency:** required. **Rate-limit class:** authenticated (5 payment attempts per order per hour (REQ-PAY-010)). **Tenancy:** tenant.
       security:
@@ -12238,6 +12375,7 @@ paths:
                       redirect_url: null
                     failure_code: null
                     attempts_remaining: 4
+                    cvc_recollection_required: false
                     method:
                       type: CARD
                       brand: visa
@@ -12397,6 +12535,7 @@ paths:
                     next_action: null
                     failure_code: null
                     attempts_remaining: 4
+                    cvc_recollection_required: false
                     method:
                       type: CARD
                       brand: visa
@@ -12570,7 +12709,9 @@ paths:
       description: |-
         SSE per REQ-API-017/018: event `step_update` (SseStepUpdate) within 2 s of each saga step change, `complete` (BookingProgress) when every shipment reached a terminal saga outcome, `error` (SseError); heartbeat every 15 s; capped at 30 s, after which the client reconnects or polls.
 
-        **Requirements:** REQ-BOOK-025, REQ-API-017, REQ-API-018. **Permission:** `shipment:read`. **Audit:** VIEW `booking_progress` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** authenticated. **Tenancy:** tenant.
+        Opening or reopening the stream never triggers carrier calls or saga work: the booking saga's carrier calls are started by checkout (`checkoutOrder` / `confirmPayment`), and the stream only reads the persisted saga state and subscribes to step changes (SEC-P3-02). Concurrent open streams are capped at 2 per client IP (IPv6 /64) and 5 per user (`SSE_MAX_STREAMS_PER_IP`, `SSE_MAX_STREAMS_PER_USER`, counted together with `streamQuoteResults`, shared across replicas in Redis); the next stream is refused before it opens with 429 RATE_LIMITED and `Retry-After` (threat model R-15, T-47).
+
+        **Requirements:** REQ-BOOK-025, REQ-API-017, REQ-API-018. **Permission:** `shipment:read`. **Audit:** VIEW `booking_progress` NORMAL. **Idempotency:** not-applicable. **Rate-limit class:** authenticated (plus at most 2 concurrent streams per IP and 5 per user (SEC-P3-02)). **Tenancy:** tenant.
       security:
         - bearerAuth: []
       parameters:
@@ -12632,6 +12773,7 @@ paths:
         justification: Step states only.
       x-idempotency: not-applicable
       x-rate-limit-class: authenticated
+      x-rate-limit-route: at most 2 concurrent streams per IP (/64) and 5 per user (SSE_MAX_STREAMS_PER_IP, SSE_MAX_STREAMS_PER_USER; SEC-P3-02)
       x-tenancy: tenant
       x-error-codes:
         - VALIDATION_ERROR
@@ -12711,6 +12853,7 @@ paths:
                     next_action: null
                     failure_code: null
                     attempts_remaining: 4
+                    cvc_recollection_required: false
                     method:
                       type: CARD
                       brand: visa
@@ -12836,6 +12979,7 @@ paths:
                     next_action: null
                     failure_code: null
                     attempts_remaining: 4
+                    cvc_recollection_required: false
                     method:
                       type: CARD
                       brand: visa
@@ -13012,11 +13156,14 @@ paths:
       description: |-
         Retrieves the completed setup from the gateway and stores only the token, brand, last four and expiry. Max 10 per user (422 LIMIT_EXCEEDED). Card fields: 400 CARD_DATA_NOT_ACCEPTED.
 
-        **Requirements:** REQ-PAY-014, REQ-PAY-005. **Permission:** `payment_method:manage`. **Audit:** CREATE `payment_method` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
+        Requires re-authentication on every call (SEC-P3-01): a valid `X-Reauth-Proof` for scope `payment_method.manage` from `createReauthProof` (5 min, single-use, bound to the session); otherwise 401 REAUTH_REQUIRED.
+
+        **Requirements:** REQ-PAY-014, REQ-PAY-005, REQ-AUTH-020. **Permission:** `payment_method:manage`. **Audit:** CREATE `payment_method` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ReauthProof"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -13088,6 +13235,7 @@ paths:
       x-requirements:
         - REQ-PAY-014
         - REQ-PAY-005
+        - REQ-AUTH-020
       x-permission: payment_method:manage
       x-audit:
         action: CREATE
@@ -13104,6 +13252,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -13119,6 +13268,7 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: payment_method.manage
   /me/payment-method-setups:
     post:
       tags:
@@ -13128,11 +13278,14 @@ paths:
       description: |-
         Creates a gateway setup session (Stripe SetupIntent in test mode, or Mock) and returns its client secret for the hosted fields. No card data touches the Platform.
 
-        **Requirements:** REQ-PAY-014, REQ-PAY-005. **Permission:** `payment_method:manage`. **Audit:** CREATE `payment_method_setup` NORMAL. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
+        Requires re-authentication on every call (SEC-P3-01): a valid `X-Reauth-Proof` for scope `payment_method.manage` from `createReauthProof` (5 min, single-use, bound to the session); otherwise 401 REAUTH_REQUIRED.
+
+        **Requirements:** REQ-PAY-014, REQ-PAY-005, REQ-AUTH-020. **Permission:** `payment_method:manage`. **Audit:** CREATE `payment_method_setup` NORMAL. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ReauthProof"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -13180,6 +13333,7 @@ paths:
       x-requirements:
         - REQ-PAY-014
         - REQ-PAY-005
+        - REQ-AUTH-020
       x-permission: payment_method:manage
       x-audit:
         action: CREATE
@@ -13193,6 +13347,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -13206,6 +13361,7 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: payment_method.manage
   /me/payment-methods/{paymentMethodId}:
     patch:
       tags:
@@ -13215,13 +13371,16 @@ paths:
       description: |-
         Sets this method as the default (clears the previous default).
 
-        **Requirements:** REQ-PAY-014, REQ-ACCT-011. **Permission:** `payment_method:manage`. **Audit:** UPDATE `payment_method` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
+        Requires re-authentication on every call (SEC-P3-01): a valid `X-Reauth-Proof` for scope `payment_method.manage` from `createReauthProof` (5 min, single-use, bound to the session); otherwise 401 REAUTH_REQUIRED.
+
+        **Requirements:** REQ-PAY-014, REQ-ACCT-011, REQ-AUTH-020. **Permission:** `payment_method:manage`. **Audit:** UPDATE `payment_method` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/PaymentMethodIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/ReauthProof"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -13296,6 +13455,7 @@ paths:
       x-requirements:
         - REQ-PAY-014
         - REQ-ACCT-011
+        - REQ-AUTH-020
       x-permission: payment_method:manage
       x-audit:
         action: UPDATE
@@ -13310,6 +13470,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -13326,6 +13487,7 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: payment_method.manage
     delete:
       tags:
         - payments
@@ -13334,13 +13496,16 @@ paths:
       description: |-
         Detaches at the gateway, then removes.
 
-        **Requirements:** REQ-PAY-014. **Permission:** `payment_method:manage`. **Audit:** DELETE `payment_method` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
+        Requires re-authentication on every call (SEC-P3-01): a valid `X-Reauth-Proof` for scope `payment_method.manage` from `createReauthProof` (5 min, single-use, bound to the session); otherwise 401 REAUTH_REQUIRED.
+
+        **Requirements:** REQ-PAY-014, REQ-AUTH-020. **Permission:** `payment_method:manage`. **Audit:** DELETE `payment_method` SENSITIVE. **Idempotency:** optional. **Rate-limit class:** authenticated. **Tenancy:** user.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/PaymentMethodIdPath"
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/ReauthProof"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/AcceptLanguage"
       responses:
@@ -13383,6 +13548,7 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
       x-requirements:
         - REQ-PAY-014
+        - REQ-AUTH-020
       x-permission: payment_method:manage
       x-audit:
         action: DELETE
@@ -13396,6 +13562,7 @@ paths:
         - VALIDATION_ERROR
         - ACCESS_TOKEN_EXPIRED
         - AUTH_REQUIRED
+        - REAUTH_REQUIRED
         - SESSION_REVOKED
         - AUTHZ_DENIED
         - MFA_ENROLMENT_REQUIRED
@@ -13411,6 +13578,7 @@ paths:
         - SERVICE_UNAVAILABLE
       x-milestone: M1
       x-moscow: Should
+      x-reauth-scope: payment_method.manage
   /me/notification-preferences:
     get:
       tags:
@@ -15342,17 +15510,17 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: ES256 access token (15 min) from loginUser, completeMfaChallenge, refreshSession or switchOrganisation; claims sub, sid, org, app, mfa, iat, exp, jti; no roles or permissions (ADR-0006, REQ-AUTH-005). Held in memory only.
+      description: ES256 access token (15 min) from loginUser, completeMfaChallenge, refreshSession or switchOrganisation; claims sub, sid, org, app, mfa, auth_time, iat, exp, jti; no roles or permissions (ADR-0006, REQ-AUTH-005). `auth_time` (OIDC, seconds since epoch) is the time of the last password or MFA verification; it is set at login, updated when the MFA challenge completes and when createReauthProof succeeds, copied unchanged by refresh (persisted as sessions.authenticated_at; SEC-P3-01). Routes with x-reauth-max-age compare it with the current time. Held in memory only.
     refreshCookieWeb:
       type: apiKey
       in: cookie
       name: __Host-rt_web
-      description: "Customer web refresh token cookie (__Host- prefix: HttpOnly, Secure, SameSite=Strict, Path=/, no Domain), read by the server only on /auth/csrf, /auth/refresh and /auth/logout (ADR-0006 amendment 1); rotated on every refresh with reuse detection (REQ-AUTH-006..008)."
+      description: "Customer web refresh token cookie (__Host- prefix: HttpOnly, Secure, SameSite=Strict, Path=/, no Domain), read by the server only on /auth/csrf, /auth/refresh and /auth/logout (ADR-0006 amendment 1); rotated on every refresh with reuse detection (REQ-AUTH-006..008). 30-day sliding lifetime (AUTH_REFRESH_TTL) inside a 30-day absolute session cap (AUTH_SESSION_ABSOLUTE_TTL; SEC-P3-01); past the cap refresh returns 401 SESSION_EXPIRED."
     refreshCookieAdmin:
       type: apiKey
       in: cookie
       name: __Host-rt_admin
-      description: Admin app refresh token cookie, same attributes as __Host-rt_web; 12 h absolute session cap (REQ-ADMIN-004).
+      description: Admin app refresh token cookie, same attributes as __Host-rt_web; 12 h absolute session cap (REQ-ADMIN-004) and a 30-minute sliding idle lifetime (AUTH_ADMIN_REFRESH_IDLE_TTL=30m; SEC-P3-11); past either limit refresh returns 401 SESSION_EXPIRED.
     csrfToken:
       type: apiKey
       in: header
@@ -15454,6 +15622,15 @@ components:
       in: header
       required: true
       description: "Proof from createReauthProof for this action scope (5 min, single-use; REQ-AUTH-020). Missing/invalid: 401 REAUTH_REQUIRED."
+      schema:
+        type: string
+        minLength: 20
+        maxLength: 512
+    ReauthProofConditional:
+      name: X-Reauth-Proof
+      in: header
+      required: false
+      description: "Proof from createReauthProof for this action scope (5 min, single-use; REQ-AUTH-020). Needed only when the access token's auth_time is older than the operation's x-reauth-max-age (SEC-P3-01); then missing/invalid: 401 REAUTH_REQUIRED. A proof that is sent is always verified and consumed."
       schema:
         type: string
         minLength: 20
@@ -15689,7 +15866,7 @@ components:
       schema:
         type: string
     SetCookieRefresh:
-      description: "`__Host-rt_web` or `__Host-rt_admin` refresh cookie: HttpOnly; Secure; SameSite=Strict; Path=/ (no Domain), read only by the auth routes (ADR-0006 amendment 1); Max-Age 30 d (admin: 12 h absolute cap). Cleared on logout (REQ-AUTH-006)."
+      description: "`__Host-rt_web` or `__Host-rt_admin` refresh cookie: HttpOnly; Secure; SameSite=Strict; Path=/ (no Domain), read only by the auth routes (ADR-0006 amendment 1); Max-Age 30 d, never beyond the 30-day absolute session cap (admin: 30 min sliding idle lifetime inside a 12 h absolute cap; SEC-P3-01, SEC-P3-11). Cleared on logout (REQ-AUTH-006)."
       schema:
         type: string
     XAccelBuffering:
@@ -15831,7 +16008,7 @@ components:
                 code: WEBHOOK_SIGNATURE_INVALID
                 correlation_id: c0ffee00-1234-4abc-9def-001122334455
     Unauthorized:
-      description: "Problem (401). Codes: AUTH_REQUIRED, ACCESS_TOKEN_EXPIRED, INVALID_CREDENTIALS, MFA_REQUIRED, MFA_INVALID, SESSION_REVOKED, REAUTH_REQUIRED. See x-error-codes on each operation for the subset it can return."
+      description: "Problem (401). Codes: AUTH_REQUIRED, ACCESS_TOKEN_EXPIRED, INVALID_CREDENTIALS, MFA_REQUIRED, MFA_INVALID, SESSION_REVOKED, SESSION_EXPIRED, REAUTH_REQUIRED. See x-error-codes on each operation for the subset it can return."
       headers:
         X-Correlation-Id:
           $ref: "#/components/headers/XCorrelationId"
@@ -15904,6 +16081,16 @@ components:
                 instance: /api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01
                 code: SESSION_REVOKED
                 correlation_id: c0ffee00-1234-4abc-9def-001122334455
+            SESSION_EXPIRED:
+              summary: Session expired
+              value:
+                type: https://docs.platform.invalid/problems/SESSION_EXPIRED
+                title: Session expired
+                status: 401
+                detail: Session expired.
+                instance: /api/v1/auth/refresh
+                code: SESSION_EXPIRED
+                correlation_id: c0ffee00-1234-4abc-9def-001122334455
             REAUTH_REQUIRED:
               summary: Re-authentication required
               value:
@@ -15915,7 +16102,7 @@ components:
                 code: REAUTH_REQUIRED
                 correlation_id: c0ffee00-1234-4abc-9def-001122334455
     Forbidden:
-      description: "Problem (403). Codes: AUTHZ_DENIED, MFA_ENROLMENT_REQUIRED, CSRF_REJECTED, INVITATION_EMAIL_MISMATCH, EMAIL_NOT_VERIFIED. See x-error-codes on each operation for the subset it can return."
+      description: "Problem (403). Codes: AUTHZ_DENIED, MFA_ENROLMENT_REQUIRED, MFA_ENROLMENT_CODE_REQUIRED, CSRF_REJECTED, INVITATION_EMAIL_MISMATCH, EMAIL_NOT_VERIFIED. See x-error-codes on each operation for the subset it can return."
       headers:
         X-Correlation-Id:
           $ref: "#/components/headers/XCorrelationId"
@@ -15943,6 +16130,16 @@ components:
                 detail: MFA enrolment required.
                 instance: /api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01
                 code: MFA_ENROLMENT_REQUIRED
+                correlation_id: c0ffee00-1234-4abc-9def-001122334455
+            MFA_ENROLMENT_CODE_REQUIRED:
+              summary: MFA enrolment code required
+              value:
+                type: https://docs.platform.invalid/problems/MFA_ENROLMENT_CODE_REQUIRED
+                title: MFA enrolment code required
+                status: 403
+                detail: MFA enrolment code required.
+                instance: /api/v1/auth/mfa/totp/enrol
+                code: MFA_ENROLMENT_CODE_REQUIRED
                 correlation_id: c0ffee00-1234-4abc-9def-001122334455
             CSRF_REJECTED:
               summary: CSRF check failed
@@ -17937,7 +18134,7 @@ components:
           description: ">= 128-bit random token."
         share_path:
           type: string
-          description: Relative web path of the share page; the token travels in the URL fragment (#t=...), never in a path or query (ADR-0016 amendment 2).
+          description: Relative web path of the share page (`/q`); the token travels in the URL fragment as `#token=<base64url>`, never in a path or query (ADR-0006 amendment 8, ADR-0016 amendment 2; resolved via `POST /public/shared-quotes/resolve`).
         expires_at:
           $ref: "#/components/schemas/Timestamp"
     ShareTokenRequest:
@@ -19450,6 +19647,7 @@ components:
         - next_action
         - failure_code
         - attempts_remaining
+        - cvc_recollection_required
         - method
         - status_history
         - refunds
@@ -19519,6 +19717,9 @@ components:
           type: integer
           minimum: 0
           maximum: 5
+        cvc_recollection_required:
+          type: boolean
+          description: True when the payment uses a saved payment method and the access token auth_time was older than 12 h at checkout. The PaymentIntent was then created with payment_method_options.card.require_cvc_recollection=true, so the Payment Element collects the CVC inside the Stripe iframe before confirmation (no PCI scope change). Always false for a new card entered in hosted fields (SEC-P3-01).
         method:
           oneOf:
             - type: object
@@ -20490,6 +20691,9 @@ components:
             - mfa.totp.disable
             - mfa.recovery_codes.regenerate
             - privacy.delete
+            - privacy.export
+            - payment_method.manage
+            - org.member.manage
         password:
           type: string
           minLength: 1
@@ -20524,6 +20728,15 @@ components:
       properties:
         organisation_id:
           $ref: "#/components/schemas/Uuid"
+    TotpEnrolRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        enrolment_code:
+          type: string
+          pattern: ^[0-9]{6}$
+          writeOnly: true
+          description: Single-use code from requestTotpEnrolmentCode (10 min). Required only for a staff first enrolment when APP_ENV is not local or test (SEC-P3-14).
     TotpEnrolment:
       type: object
       additionalProperties: false

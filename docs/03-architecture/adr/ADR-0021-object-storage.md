@@ -28,6 +28,12 @@ Files (labels, invoices, customs documents, raw carrier payloads, exports, futur
 - Positive: one S3 code path everywhere; audited, short-lived downloads; hashes for integrity and restore checks.
 - Negative: RustFS is young (1.0 in 2026-09) — a Wave-0 spike validates pre-signed URLs, versioning, path-style access and `HEAD` metadata; fallback documented.
 
+## Amendment after the P3 security review (2026-11-12, `docs/05-quality/security/P3-architecture-security-review.md` SEC-P3-03 item 7, SEC-P3-09, SEC-P3-21 item 5; D-ARCH-019, D-ARCH-028)
+
+1. **`audit-anchors` sink (SEC-P3-03; amends §2 buckets).** New bucket `audit-anchors` holds the hourly signed anchor records of ADR-0007 amendment 7 (`anchors/<yyyy>/<mm>/<anchor_seq>.json`). Locally the sink is a file on a dedicated volume (`AUDIT_ANCHOR_SINK=file:…`); at M5 it is this bucket with **Object Lock in compliance mode** (retention ≥ 7 years), the worker task role holding `s3:PutObject` only (no delete, no `s3:BypassGovernanceRetention`), or a retention-locked CloudWatch Logs group. Providing the locked sink is a **G4 precondition for any production release** (risks.md R-ARCH-18). The `ObjectStorage` port gains `putIfAbsent` (conditional `If-None-Match: *`) so an anchor key is never overwritten.
+2. **Carrier label and document bytes are validated at put time (SEC-P3-21 item 5, T-59; amends §3).** Bytes returned by a carrier (`createShipment` labels, paperless documents) are accepted only if the magic bytes match the declared format (`%PDF-`, PNG signature, ZPL `^XA`), the size is ≤ 5 MB and the content type is set explicitly from the detected format (never from carrier metadata); otherwise the saga records `LABEL_INVALID`, keeps the shipment `BOOKED` with documents pending and raises an alert. Downloads keep `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`.
+3. **`SENSITIVE` documents (SEC-P3-09; amends §4).** Documents classified `SENSITIVE` (ADR-0019 amendment 1) are stored with SSE (SSE-KMS at M5), are never attached to e-mails and are downloadable only through the audited pre-signed path by holders of `document:download` (the customer Viewer is not one).
+
 ## Reversibility
 
 High (port + S3 API).

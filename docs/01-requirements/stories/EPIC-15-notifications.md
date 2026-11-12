@@ -485,6 +485,21 @@ Feature: Booking confirmation email
 
   Scenario: Unauthenticated access to attachments
     Then no URL in the email grants access without sign-in
+
+  Scenario: SENSITIVE document is excluded from attachments (REQ-NOTIF-008, D-051)
+    Given order "DE-000000042" has a US -> IN shipment whose commercial invoice carries a FULL receiver reference and is classified "SENSITIVE"
+    When the saga reaches the notify step
+    Then the invoice is not attached
+    And the email names the invoice and links to the authenticated shipment page
+
+  Scenario: Label and pickup confirmation stay attached
+    Given the same order with a label of 1 MB, a pickup confirmation of 1 MB and a SENSITIVE invoice
+    Then the label and the pickup confirmation are attached within the 10 MB total
+    And the demo step "confirmation email with documents arrives" (PRD 6.2) is met by the label attachment plus the invoice link
+
+  Scenario: No SENSITIVE document leaves attachment behaviour unchanged
+    Given no document of the order is classified "SENSITIVE"
+    Then the attachment rules above (10 MB boundary, account link over 10 MB, CURRENT only) apply unchanged
 ```
 
 ### US-284 — BullMQ send job with retries and dead-letter queue

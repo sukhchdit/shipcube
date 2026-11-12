@@ -1,19 +1,20 @@
 # Traceability Matrix
-Version 1.2 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+Version 1.3 · 2026-11-12 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
 Status values: Specified → Designed → Planned → Implemented → Verified.
+v1.3 (P3 security remediation, D-046..D-052, see PRD §11): REQ-AUTH-020/021/022 Should → Must; new REQ-AUTH-025 (M1 Must), REQ-AUTH-026 (M0 Must), REQ-CARR-022 and REQ-CARR-023 (M1 Must); new Must stories US-291 (EPIC-02, M1), US-292 (EPIC-02, M0), US-293 (EPIC-06, M1); US-027 Should → Must. None of the new or promoted stories is demo-critical (DC set unchanged at 134). Tables below regenerated from the files on 2026-11-12.
 v1.2 (P3 alignment, D-038..D-045): wording-only amendments to REQUIREMENTS.md 1.2, NFR.md 1.2 and the stories (see PRD §11); no REQ or story IDs, links, priorities, milestones or DC tags changed, so every count below is unchanged and was re-verified against the files on 2026-11-12. The Design column is populated by principal-architect at G2.
 v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column added to "Story → Requirement" per D-037; early-delivery notes and NFR traceability link added.
 
 ## Summary
 | Metric | Value |
 |---|---|
-| Total REQs | 430 (317 Must · 94 Should · 19 Could; 204 M0 · 226 M1) |
-| REQs linked by ≥1 story | 430 |
+| Total REQs | 434 (324 Must · 91 Should · 19 Could; 205 M0 · 229 M1) |
+| REQs linked by ≥1 story | 434 |
 | Orphan REQs | 0 |
-| Total stories | 290 |
-| Stories per MoSCoW | Must 214 · Should 68 · Could 8 |
-| Stories per milestone | M0 119 · M1 171 |
-| Demo-critical (DC) stories (D-037) | 134 (M0 74 · M1 60) of 214 Must |
+| Total stories | 293 |
+| Stories per MoSCoW | Must 218 · Should 67 · Could 8 |
+| Stories per milestone | M0 120 · M1 173 |
+| Demo-critical (DC) stories (D-037) | 134 (M0 74 · M1 60) of 218 Must |
 | Must REQs not linked by a Must story | 0 |
 
 **Early delivery (G1-C2 note).** Four M1 REQs are delivered by M0 stories and are therefore available from R0: REQ-DATA-014 (FX seed) by US-052, REQ-SEC-008 (Joi/Zod parity) by US-046, REQ-QUOTE-004 (package limits) by US-156 (all Must), and REQ-AUDIT-018 (archiver seam, Could) by US-100 (Should). Their M1 tag is kept because M1 is the first milestone that needs them; the R0 regression may already exercise them. These are the only REQs whose milestone differs from every linked story (verified 2026-11-12).
@@ -21,11 +22,11 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | Epic | File | Stories | Must | Should | Could | M0 | M1 |
 |---|---|---|---|---|---|---|---|
 | EPIC-01 | stories/EPIC-01-platform-foundation.md | 14 | 12 | 2 | 0 | 14 | 0 |
-| EPIC-02 | stories/EPIC-02-identity-sessions.md | 19 | 14 | 5 | 0 | 16 | 3 |
+| EPIC-02 | stories/EPIC-02-identity-sessions.md | 21 | 17 | 4 | 0 | 17 | 4 |
 | EPIC-03 | stories/EPIC-03-organisations-rbac-tenancy.md | 25 | 19 | 6 | 0 | 19 | 6 |
 | EPIC-04 | stories/EPIC-04-audit-trail-viewer.md | 15 | 13 | 2 | 0 | 14 | 1 |
 | EPIC-05 | stories/EPIC-05-design-system-shells-i18n.md | 20 | 17 | 3 | 0 | 14 | 6 |
-| EPIC-06 | stories/EPIC-06-carrier-integration.md | 17 | 17 | 0 | 0 | 6 | 11 |
+| EPIC-06 | stories/EPIC-06-carrier-integration.md | 18 | 18 | 0 | 0 | 6 | 12 |
 | EPIC-07 | stories/EPIC-07-pricing-engine.md | 16 | 13 | 2 | 1 | 3 | 13 |
 | EPIC-08 | stories/EPIC-08-quote-and-comparison.md | 17 | 11 | 6 | 0 | 3 | 14 |
 | EPIC-09 | stories/EPIC-09-booking-wizard-customs-basket.md | 26 | 18 | 8 | 0 | 1 | 25 |
@@ -37,7 +38,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | EPIC-15 | stories/EPIC-15-notifications.md | 17 | 11 | 5 | 1 | 0 | 17 |
 | EPIC-16 | stories/EPIC-16-api-conventions-security.md | 15 | 14 | 1 | 0 | 15 | 0 |
 | EPIC-17 | stories/EPIC-17-reference-data-compliance-packs.md | 12 | 11 | 1 | 0 | 5 | 7 |
-| **Total** | 17 files | 290 | 214 | 68 | 8 | 119 | 171 |
+| **Total** | 17 files | 293 | 218 | 67 | 8 | 120 | 173 |
 
 ## Requirement → Story
 | REQ | MS | MoSCoW | Story | Design (ADR/Spec) | Task(s) | Test(s) | Status |
@@ -83,11 +84,13 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-AUTH-017 | M0 | Must | US-024 | – | – | – | Specified |
 | REQ-AUTH-018 | M0 | Must | US-025 | – | – | – | Specified |
 | REQ-AUTH-019 | M1 | Should | US-026 | – | – | – | Specified |
-| REQ-AUTH-020 | M1 | Should | US-026 | – | – | – | Specified |
-| REQ-AUTH-021 | M1 | Should | US-027 | – | – | – | Specified |
-| REQ-AUTH-022 | M1 | Should | US-027 | – | – | – | Specified |
+| REQ-AUTH-020 | M1 | Must | US-026, US-291 | – | – | – | Specified |
+| REQ-AUTH-021 | M1 | Must | US-027 | – | – | – | Specified |
+| REQ-AUTH-022 | M1 | Must | US-027 | – | – | – | Specified |
 | REQ-AUTH-023 | M1 | Should | US-028 | – | – | – | Specified |
 | REQ-AUTH-024 | M0 | Should | US-029 | – | – | – | Specified |
+| REQ-AUTH-025 | M1 | Must | US-291 | – | – | – | Specified |
+| REQ-AUTH-026 | M0 | Must | US-292 | – | – | – | Specified |
 | REQ-ORG-001 | M0 | Must | US-061 | – | – | – | Specified |
 | REQ-ORG-002 | M0 | Must | US-062 | – | – | – | Specified |
 | REQ-ORG-003 | M0 | Must | US-062 | – | – | – | Specified |
@@ -283,6 +286,8 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-CARR-019 | M1 | Must | US-137 | – | – | – | Specified |
 | REQ-CARR-020 | M1 | Should | US-137 | – | – | – | Specified |
 | REQ-CARR-021 | M1 | Must | US-127 | – | – | – | Specified |
+| REQ-CARR-022 | M1 | Must | US-293 | – | – | – | Specified |
+| REQ-CARR-023 | M1 | Must | US-293 | – | – | – | Specified |
 | REQ-PRICE-001 | M0 | Must | US-138 | – | – | – | Specified |
 | REQ-PRICE-002 | M0 | Must | US-138 | – | – | – | Specified |
 | REQ-PRICE-003 | M0 | Must | US-140 | – | – | – | Specified |
@@ -502,7 +507,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | US-024 | EPIC-02 | M0 | Must | M | REQ-AUTH-017 | DC |
 | US-025 | EPIC-02 | M0 | Must | S | REQ-AUTH-018 | DC |
 | US-026 | EPIC-02 | M1 | Should | M | REQ-AUTH-019, REQ-AUTH-020, REQ-ADMIN-008 |  |
-| US-027 | EPIC-02 | M1 | Should | M | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |  |
+| US-027 | EPIC-02 | M1 | Must | M | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |  |
 | US-028 | EPIC-02 | M1 | Should | S | REQ-AUTH-023 |  |
 | US-029 | EPIC-02 | M0 | Should | S | REQ-AUTH-024 |  |
 | US-030 | EPIC-02 | M0 | Must | S | REQ-ADMIN-001, REQ-ADMIN-003 | DC |
@@ -766,6 +771,9 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | US-288 | EPIC-15 | M1 | Should | S | REQ-NOTIF-011 |  |
 | US-289 | EPIC-15 | M1 | Should | M | REQ-NOTIF-012 |  |
 | US-290 | EPIC-15 | M1 | Could | S | REQ-NOTIF-016 |  |
+| US-291 | EPIC-02 | M1 | Must | M | REQ-AUTH-020, REQ-AUTH-025 |  |
+| US-292 | EPIC-02 | M0 | Must | S | REQ-AUTH-026 |  |
+| US-293 | EPIC-06 | M1 | Must | M | REQ-CARR-022, REQ-CARR-023 |  |
 
 ## NFR traceability
-NFR → mechanism/ADR → test rows (all 90 NFR IDs, G1-C4) live in [`docs/03-architecture/nfr-traceability.md`](../03-architecture/nfr-traceability.md), owned by principal-architect (Design column) and qa-lead (Test column).
+NFR → mechanism/ADR → test rows (all 91 NFR IDs incl. NFR-RES-007 added in v1.3, G1-C4) live in [`docs/03-architecture/nfr-traceability.md`](../03-architecture/nfr-traceability.md), owned by principal-architect (Design column) and qa-lead (Test column).

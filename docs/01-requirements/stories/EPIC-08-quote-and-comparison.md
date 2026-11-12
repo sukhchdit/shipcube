@@ -88,9 +88,10 @@ Feature: Quote entity
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-154, EPIC-16
 - **Linked REQs:** REQ-QUOTE-002
 - **As a** guest shipper **I want** to get and re-open a quote with no account **so that** I see prices before any sign-up (D-009).
-- **Notes:** Permission `public`. Access token at least 128 bits, unguessable, returned to the creating client. Limits 20 requests per minute and 100 per hour per IP (configuration, ASSUMED, A-035; identical in NFR-SEC-005 per D-035). 429 `RATE_LIMITED` with `Retry-After`. Wrong or missing token returns 404 (GAP-B-27, A-078).
+- **Notes:** Permission `public`. Access token at least 128 bits, unguessable, returned to the creating client. Limits 20 requests per minute and 100 per hour per IP (configuration, ASSUMED, A-035; identical in NFR-SEC-005 per D-035). 429 `RATE_LIMITED` with `Retry-After`. Wrong or missing token returns 404 (GAP-B-27, A-078). The token stops being honoured 7 days after the quote's expiry (404 thereafter) although the row is retained for 90 days (D-045, A-085, D-052). The per-IP limits are the first line only; the global anonymous carrier budget and daily quota guard (US-293, REQ-CARR-022/023, D-048) bound total guest carrier load, and an exhausted budget shows as `CARRIER_BUSY` per carrier, never as 429.
 
 #### Acceptance criteria
+Permission path: not applicable — `public` permission with a capability token; the "Wrong token" and "Missing token" → 404 scenarios are the access-control assertions (A-078).
 ```gherkin
 Feature: Guest quoting
   Scenario: Guest creates and reads a quote
@@ -129,6 +130,22 @@ Feature: Guest quoting
 
   Scenario: Audit of anonymous creation
     Then an audit entry CREATE on entity quote exists with actor type anonymous
+
+  Scenario: Guest access token stops being honoured 7 days after quote expiry
+    Given a guest quote created at T with expires_at T+24 h and a valid access token
+    When the quote is read with that token at T+24 h plus 7 days minus 1 minute (fake clock)
+    Then the response is 200 and the quote is shown as expired
+    When it is read with the same token at T+24 h plus 7 days plus 1 minute
+    Then the response is 404 with code NOT_FOUND, identical in status, body and headers to a wrong-token response
+    And the quote row still exists in the database until the 90-day purge
+
+  Scenario: Per-IP limits are the first line and the anonymous carrier budget applies on top
+    Given a guest below the per-IP limits of 20 per minute and 100 per hour
+    And the anonymous carrier budget of US-293 is exhausted for one carrier account
+    When the guest creates a quote
+    Then the response is 201 and not 429
+    And the quote result stream contains carrier_error {code: CARRIER_BUSY} for that carrier, or cached results for it
+    And the other carriers' results are returned normally
 ```
 
 ### US-156 — Quote input validation and package limits

@@ -75,6 +75,22 @@ Feature: Idempotent reference and demo seed framework
     Given a seeded country row was altered manually
     When the seed runs
     Then the row is restored to the seeded values without duplication
+
+  Scenario: Staging seed creates staff without passwords (REQ-DATA-002, D-052)
+    Given APP_ENV=staging and no SEED_* password variables are set
+    When the demo seed runs
+    Then the staff users are created without a password
+    And each staff user is sent a set-password link through the reset flow, visible in the mail catcher
+    And the seed read no SEED_* password variable and neither stdout nor logs contain a password or token value
+
+  Scenario Outline: Local and test environments keep the seeded-password flow
+    Given APP_ENV=<env> and every SEED_* variable is set
+    When the demo seed runs
+    Then the demo users are created with the seeded passwords and no set-password link is sent
+    Examples:
+      | env   |
+      | local |
+      | test  |
 ```
 
 ### US-050 — Seed demo organisations, users and Mock configuration
@@ -209,6 +225,7 @@ Feature: Seed currencies and FX snapshots
 - **Notes:** Datasets: countries, regions, currencies, holidays, reasons for export, Incoterms, HS search, prohibited items. Labels by `Accept-Language` (DR-A18: en, es, fr, fallback en). `ETag` and `Cache-Control: public, max-age=3600`. Descriptor `NONE` justification "public reference data". Limit 120/min/IP.
 
 #### Acceptance criteria
+Permission path: not applicable — public read-only endpoints under the `public` permission; the "without authentication → 200" and "read-only → 405" scenarios are the access-control assertions.
 ```gherkin
 Feature: Public read-only reference endpoints
   Scenario: Localised countries without authentication
@@ -390,7 +407,7 @@ Permission path: not applicable — data layer with no principal; a second negat
 ```gherkin
 Feature: Compliance pack store, immutability and resolution
   Scenario: Pack structure and uniqueness
-    Then a pack has country, version, effective_from, reviewed_by, reviewed_at and all six sections
+    Then a pack has country, version, effective_from, reviewed_by, reviewed_at and all seven sections (tax rules, customs thresholds, prohibited and restricted items, privacy notice per locale, consent and cookie rule, retention periods, party identity reference types)
     And a second row with the same (country, version) is rejected
 
   Scenario: Invalid section fails the seed
@@ -423,6 +440,25 @@ Feature: Compliance pack store, immutability and resolution
   Scenario: Resolved version is recorded by consumers
     When a quote consumes the IN pack
     Then the quote stores the pack version number
+
+  Scenario: Party identity reference types section (REQ-COMP-001, D-051)
+    Then a pack has a party identity reference types section whose entries each have type code, label per locale (en, es, fr), format pattern, required-for direction and party, and "invoice_print" of FULL or MASKED
+    And an entry without "invoice_print" is stored as MASKED
+
+  Scenario: Invalid invoice_print value fails the seed
+    Given a pack whose reference type has "invoice_print: PARTIAL"
+    When the seed runs
+    Then the seed fails naming the pack, section and type, and loads nothing from it
+
+  Scenario: Seeded IN pack marks only the import receiver reference FULL
+    When the seeded IN pack is loaded
+    Then the import receiver reference type used for the US -> IN lane is FULL
+    And every other seeded reference type in every pack is MASKED
+
+  Scenario: Change to the FULL list is flagged unreviewed
+    Given a new pack version changes the set of FULL reference types and "reviewed_by" is empty
+    Then resolution reports "unreviewed: true" for that version
+    And the flag clears only after "reviewed_by" is set
 ```
 
 ### US-058 — Seed compliance packs with audited loading
@@ -432,7 +468,7 @@ Feature: Compliance pack store, immutability and resolution
 - **Notes:** Packs for US, IN, GB, CA and an EU template, each with: tax rules (rate, inclusive/exclusive display, label), de-minimis thresholds (amount, currency), prohibited/restricted entries, privacy notice en/es/fr, cookie and consent rule, retention periods (recorded, not enforced). Engineering-supplied draft, `reviewed_at` null. Labels: India GST, UK VAT, Canada GST/HST, US sales tax not collected on international shipping by default. Seed writes one `CONFIG_CHANGE` entry per pack version created by a system actor; none on a no-op re-run.
 
 #### Acceptance criteria
-Permission path: covered by scenario "Pack content cannot be changed by API".
+Permission path: not applicable — seed job with no principal; the scenario "Pack content cannot be changed by API" (404, no such route) is the access-control assertion.
 ```gherkin
 Feature: Seed compliance packs with audited loading
   Scenario: Packs present

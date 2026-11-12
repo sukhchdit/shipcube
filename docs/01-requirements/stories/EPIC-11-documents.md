@@ -263,6 +263,12 @@ Feature: Pre-signed download URL
   Scenario: Specific version
     When version 1 is requested explicitly
     Then a URL to version 1 is issued
+
+  Scenario: Customer Viewer cannot download (REQ-RBAC-004, D-051)
+    Given a customer user with role "Viewer" in the owning organisation
+    When the Viewer requests a download URL for the label or the commercial invoice
+    Then the response is 403 "AUTHZ_DENIED" because the role lacks "document:download"
+    And no URL is issued and an audit entry with outcome PERMISSION_DENIED exists
 ```
 
 ### US-226 — Fail-closed download audit
@@ -358,6 +364,18 @@ Feature: Email documents
 
   Scenario: Audit
     Then a DOWNLOAD entry with channel EMAIL is written for each document before sending
+
+  Scenario: SENSITIVE document is never attached (REQ-DOC-010, D-051)
+    Given a shipment whose commercial invoice carries a FULL identity reference and is classified "SENSITIVE"
+    And the label and pickup confirmation together total 2 MB
+    When the customer presses "Email documents"
+    Then the email has the label and the pickup confirmation attached
+    And the invoice is not attached, is named in the email body and is linked through the authenticated shipment page
+
+  Scenario: Viewer cannot email documents
+    Given a customer user with role "Viewer" who lacks "document:email"
+    When the Viewer calls the email route
+    Then the response is 403 "AUTHZ_DENIED", nothing is sent and an audit entry with outcome PERMISSION_DENIED exists
 ```
 
 ### US-229 — Void label on cancellation and refuse voided downloads

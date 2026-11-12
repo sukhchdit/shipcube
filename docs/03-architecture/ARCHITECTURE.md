@@ -32,7 +32,7 @@ Fixed stack (ADR-0001); repository layout per brief §4.1; Node/TypeScript tooli
 
 ## 2. Options analysis and overall decision
 
-Modular monolith (`api` + `worker` from one codebase, two static frontends) versus microservices versus an unstructured monolith — scored in ADR-0003 (chosen: **modular monolith with lint-enforced bounded contexts and a transactional outbox**). Compute: ECS on EC2 versus plain ASG — ADR-0022 (chosen: ECS on EC2). PDF: pdfkit versus headless Chromium — ADR-0019 (pdfkit). Local object store: RustFS versus MinIO/LocalStack/SeaweedFS — ADR-0021 (RustFS; MinIO is archived and LocalStack now needs an account). Audit erasure: tokenised vault versus key shredding — ADR-0007 (tokenised vault). Chain scope: per-stream with nightly checkpoint — ADR-0007.
+Modular monolith (`api` + `worker` from one codebase, two static frontends) versus microservices versus an unstructured monolith — scored in ADR-0003 (chosen: **modular monolith with lint-enforced bounded contexts and a transactional outbox**). Compute: ECS on EC2 versus plain ASG — ADR-0022 (chosen: ECS on EC2). PDF: pdfkit versus headless Chromium — ADR-0019 (pdfkit). Local object store: RustFS versus MinIO/LocalStack/SeaweedFS — ADR-0021 (RustFS; MinIO is archived and LocalStack now needs an account). Audit erasure: tokenised vault versus key shredding — ADR-0007 (tokenised vault). Chain scope: per-stream with hourly ECDSA-signed anchors in an external sink — ADR-0007 (amendment 7, 2026-11-12, SEC-P3-03).
 
 ## 3. System context (C4 L1)
 
@@ -427,7 +427,7 @@ Kept now: stateless API/worker; `REGION` in configuration; no region-specific id
 | Authentication / sessions / MFA / CSRF | ES256 JWT in memory, rotating `__Host-` refresh cookie with reuse detection, Redis revocation ≤ 5 s, TOTP + recovery codes, staff gate, re-auth proof, Origin + `X-CSRF-Token` | ADR-0006 |
 | Authorisation | Typed permission catalogue, roles as data, per-request resolution (5 s cache), route metadata, generated matrix tests | ADR-0008 |
 | Multi-tenancy | `org_id` + forced RLS, `set_config` per transaction, operator scope per route, guest-token branch, `WITH CHECK` | ADR-0005 |
-| Audit | Partitioned, triggered, INSERT/SELECT-only store; per-stream chain + nightly checkpoint; same-tx writes; fail-closed sensitive reads; redaction; tokenised PII vault | ADR-0007 |
+| Audit | Partitioned, triggered, INSERT/SELECT-only store owned by `platform_audit_owner` (not the migrator); identity-based DDL event trigger; per-stream chain + hourly ECDSA-signed anchors in a mandatory external sink; same-tx writes; fail-closed sensitive reads; redaction; tokenised PII vault | ADR-0007 (am. 7, SEC-P3-03) |
 | Consistency model | Strong within a request (one transaction); eventual across modules via the outbox (at-least-once, idempotent consumers); saga for cross-system steps | ADR-0004, ADR-0014 |
 | Messaging / jobs | BullMQ queues with deterministic job IDs, retries, DLQs, singleton schedulers | ADR-0013 |
 | Idempotency | `Idempotency-Key` store (24 h), saga step keys, gateway idempotency keys, carrier client references | ADR-0014 |

@@ -1,9 +1,17 @@
 # Platform API: contract and conventions
 
 - **Contract:** [`openapi.yaml`](./openapi.yaml), OpenAPI **3.1.0**, `info.version` **1.0.0-m1**, base path `/api/v1`.
-- **Scope:** every M0 and M1 endpoint (132 operations). M2 to M5 endpoints (ledger, invoicing, claims, partners, API keys, outbound webhooks, reports) are absent on purpose: there are no stub routes (brief §13 rule 5, REQ-ADMIN-009, REQ-ACCT-019).
+- **Scope:** every M0 and M1 endpoint (133 operations). M2 to M5 endpoints (ledger, invoicing, claims, partners, API keys, outbound webhooks, reports) are absent on purpose: there are no stub routes (brief §13 rule 5, REQ-ADMIN-009, REQ-ACCT-019).
 - **Owner:** api-designer (P3). Conventions are fixed by [ADR-0016](../adr/ADR-0016-api-conventions.md), including its 2026-11-12 amendments (pre-auth limiter, secrets out of URLs, SSE resume). Other fixed inputs: P3 design brief ( endpoint skeleton, catalogues), REQUIREMENTS.md Parts A and B, DR-A01..A28, DR-B01..B34, ASSUMPTIONS.md, DECISIONS.md D-009..D-036.
 - **Lint:** `npx --yes @redocly/cli@2 lint docs/03-architecture/api/openapi.yaml`. Current result: valid, 0 errors, 8 warnings (see [Lint status](#lint-status)).
+
+**Amendments (2026-11-12, SEC-P3-01/02/10/11/14).** Contract changes from the P3 architecture security review (`docs/05-quality/security/P3-architecture-security-review.md`):
+
+- **SEC-P3-01 (step-up and session cap).** The access token carries the OIDC claim `auth_time` (last password or MFA verification; persisted as `sessions.authenticated_at`; never renewed by refresh). Customer absolute session cap is 30 days (`AUTH_SESSION_ABSOLUTE_TTL=30d`, was 90 d). New vendor extension `x-reauth-max-age`. New re-auth scopes: `payment_method.manage` (always) on `createPaymentMethodSetup`, `createPaymentMethod`, `updatePaymentMethod`, `deletePaymentMethod`; `privacy.export` (always) on `requestPrivacyExport`, `downloadPrivacyExport`; `org.member.manage` with `x-reauth-max-age: 43200` on `createInvitation`, `resendInvitation`, `updateMember`, `removeMember`. All ten list `REAUTH_REQUIRED`; `ReauthRequest.action_scope` accepts the three new scopes. Saved-card checkout uses CVC recollection: `Payment.cvc_recollection_required` (new required field). New 401 code `SESSION_EXPIRED` on `refreshSession`. Verification: SEC-TC-37, SEC-TC-38.
+- **SEC-P3-11 (admin idle).** The admin refresh token has a 30-minute sliding idle lifetime (`AUTH_ADMIN_REFRESH_IDLE_TTL=30m`) inside the 12 h cap; idle refresh returns 401 `SESSION_EXPIRED`. Verification: SEC-TC-39.
+- **SEC-P3-02 item 5 (streams).** `streamQuoteResults` and `streamBookingProgress` never trigger carrier fan-out; concurrent streams are capped at 2 per IP and 5 per user (429 `RATE_LIMITED`, `x-rate-limit-route`). Verification: SEC-TC-42.
+- **SEC-P3-10 (idempotency drift).** `createQuote` and `createQuoteShare` are `x-idempotency: not-applicable` (no `Idempotency-Key`, no `Idempotent-Replayed`, no idempotency codes); `createQuoteShare` always mints a new token and revokes the previous share. §5 Scope rewritten. Verification: SEC-TC-53, SEC-TC-04.
+- **SEC-P3-14 (staff first TOTP enrolment).** New operation `requestTotpEnrolmentCode` (`POST /auth/mfa/totp/enrolment-code`, 202, `email-send`, `x-mfa-gate-exempt`); `enrolTotp` accepts an optional body `{enrolment_code}`; new 403 code `MFA_ENROLMENT_CODE_REQUIRED`. Operation count 132 → 133. Verification: SEC-TC-56.
 
 The document is the source of truth (REQ-API-002). Route metadata (`defineRoute`), Joi schemas, the error catalogue in `packages/shared` and the generated frontend types are all checked against it in CI. See [Drift test](#route-metadata-and-openapi-drift-test).
 
@@ -137,8 +145,8 @@ Pointers address `/body/...`, `/query/...`, `/params/...` (path parameters) and 
 | Aspect | Rule |
 |---|---|
 | Header | `Idempotency-Key`: 1 to 255 printable ASCII characters (UUIDv4 recommended). A malformed key is 400 `VALIDATION_ERROR`. |
-| Where | `x-idempotency: required` → missing key is 400 `IDEMPOTENCY_KEY_REQUIRED`. Required on: `createOrder`, `checkoutOrder`, `confirmPayment`, `schedulePickup`, `reschedulePickup`, `cancelShipment` (orders, payments, bookings and carrier-side effects). `optional` on every other unsafe operation. `not-applicable` on safe methods, authentication routes (REQ-API-009 note) and webhooks (de-duplicated by gateway or carrier event ID). |
-| Scope | Organisation (or the guest-token hash for guest quotes) + actor + method + route path. The same key from two organisations or two users is independent (EC-A29). |
+| Where | `x-idempotency: required` → missing key is 400 `IDEMPOTENCY_KEY_REQUIRED`. Required on: `createOrder`, `checkoutOrder`, `confirmPayment`, `schedulePickup`, `reschedulePickup`, `cancelShipment` (orders, payments, bookings and carrier-side effects). `optional` on every other unsafe operation except the one-time-secret routes below. `not-applicable` on safe methods, authentication routes (REQ-API-009 note), webhooks (de-duplicated by gateway or carrier event ID) and the routes whose response carries a one-time secret: `createQuote` (`guest_token`) and `createQuoteShare` (`share_token`) declare no `Idempotency-Key` parameter and no `Idempotent-Replayed` header; a retry creates a new quote or mints a new share token (ADR-0014 amendment 1, SEC-P3-10). |
+| Scope | Organisation, or the guest-token hash, or (anonymous routes) the client IP /64 HMAC — plus actor, method, route path and key (`scope_hash`). The same key from two organisations or two users is independent (EC-A29). Stored response bodies are encrypted at rest (AES-256-GCM, `key_id`, AAD = table ‖ column ‖ scope_hash ‖ key_id). Routes whose response carries a one-time secret are `not-applicable` and never stored: `createQuote`, `createQuoteShare`, `enrolTotp`, `regenerateRecoveryCodes`. `activateTotp` also returns one-time secrets (the recovery codes) and is `not-applicable` as an authentication route; it is proposed for the ADR-0014 list. The drift test asserts that every route on the ADR-0014 one-time-secret list is `not-applicable` (SEC-TC-53). |
 | Fingerprint | SHA-256 of method, path, canonical (sorted) query and RFC 8785 canonical body. |
 | Replay | Same key and same fingerprint within 24 h → the stored status, headers and body are returned with `Idempotent-Replayed: true`. No business action runs, and no second audit entry or outbox event is written. |
 | Conflicts | Same key with a different fingerprint → 422 `IDEMPOTENCY_KEY_REUSED`. Same key while the first request is still running → 409 `IDEMPOTENCY_IN_PROGRESS` with `Retry-After: 1`. |
@@ -165,7 +173,7 @@ There are two stages (ADR-0016 amendment 1, threat model R-13). A coarse **per-I
 | Class | Key | Default limit (config, ASSUMED A-035) | Routes |
 |---|---|---|---|
 | `auth` | IP and account identifier | 10/min per IP **and** 5/min per account identifier | register, verify-email, login, MFA challenge, password reset, password change, reauth, TOTP enrol/activate/disable, recovery codes |
-| `email-send` | account identifier and IP | 3/h per account identifier **and** 10/h per IP | resend-verification, password/forgot |
+| `email-send` | account identifier and IP | 3/h per account identifier **and** 10/h per IP | resend-verification, password/forgot, TOTP enrolment code (`requestTotpEnrolmentCode`) |
 | `public` | IP | 120/min per IP | reference, compliance, consents, shared-quote resolve, guest quote read and stream, refresh, logout, CSRF token |
 | `public-quote` | IP (anonymous) | 20/min **and** 100/h per IP | `createQuote` (authenticated callers count in `authenticated`) |
 | `public-tracking` | IP | 30/min **and** 300/h per IP; unsuccessful lookups 10/min per IP | `getPublicTracking`, `lookupPublicTracking` |
@@ -182,6 +190,7 @@ Route-specific limits are declared in `x-rate-limit-route` and run in addition t
 | `emailShipmentDocuments` | 5 per shipment per hour | 429 `RATE_LIMITED` |
 | `refreshShipmentTracking` | 1 per shipment per 5 min | 429 `RATE_LIMITED` |
 | `checkoutOrder` | 5 attempts per order per hour (a business rule) | 429 `PAYMENT_ATTEMPTS_EXCEEDED` |
+| `streamQuoteResults`, `streamBookingProgress` | At most 2 concurrent open streams per client IP (/64) and 5 per user, counted across both stream routes and all replicas in Redis (`SSE_MAX_STREAMS_PER_IP`, `SSE_MAX_STREAMS_PER_USER`; SEC-P3-02, R-15, T-47). Refused before the stream opens. | 429 `RATE_LIMITED` with `Retry-After` |
 
 **Headers.** Every rate-limited response carries the three separate headers `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (seconds) required by REQ-API-014. In express-rate-limit 8 these separate headers are produced by `standardHeaders: 'draft-6'`; `'draft-7'` (named in ADR-0016 §8) emits a single combined `RateLimit` header plus `RateLimit-Policy`. The contract follows REQ-API-014, and the mismatch is raised with the principal-architect. When a class has two windows (minute and hour), the headers describe the window closest to exhaustion. A 429 adds `Retry-After` in seconds. Login throttling has its own codes, separate from rate limiting: 429 `ACCOUNT_DELAYED` (2 s doubling to 60 s after 5 failures) and 429 `ACCOUNT_LOCKED` (15 min after 10 failures), both with `Retry-After` (DR-A02).
 
@@ -197,15 +206,19 @@ Route-specific limits are declared in `x-rate-limit-route` and run in addition t
 
 | Mode | Used by | Mechanism (security scheme) |
 |---|---|---|
-| Customer web | `apps/web` | `bearerAuth`: ES256 JWT, 15 min, in memory only. Refresh cookie `__Host-rt_web` (`refreshCookieWeb`): HttpOnly, Secure, SameSite=Strict, `Path=/`, no Domain (the `__Host-` prefix requires it). The server reads it only on `/auth/csrf`, `/auth/refresh` and `/auth/logout` (ADR-0006 amendment 1). 30 d, 90 d absolute cap. Login body `client_app: "web"`. |
-| Staff admin | `apps/admin` | Same bearer token. Cookie `__Host-rt_admin` (`refreshCookieAdmin`) with a 12 h absolute cap (REQ-ADMIN-004). `client_app: "admin"` is refused with the generic `INVALID_CREDENTIALS` for non-operator users (REQ-ADMIN-003). A staff session without TOTP is limited to routes flagged `x-mfa-gate-exempt` (`enrolTotp`, `activateTotp`, `getMe`); every other route returns 403 `MFA_ENROLMENT_REQUIRED` (REQ-AUTH-018). |
+| Customer web | `apps/web` | `bearerAuth`: ES256 JWT, 15 min, in memory only. Refresh cookie `__Host-rt_web` (`refreshCookieWeb`): HttpOnly, Secure, SameSite=Strict, `Path=/`, no Domain (the `__Host-` prefix requires it). The server reads it only on `/auth/csrf`, `/auth/refresh` and `/auth/logout` (ADR-0006 amendment 1). 30 d sliding, 30 d absolute cap (`AUTH_SESSION_ABSOLUTE_TTL`); `AUTH_REFRESH_TTL` may never exceed the cap. A refresh past the cap returns 401 `SESSION_EXPIRED` (SEC-P3-01). The access token carries `auth_time` (OIDC claim: last password or MFA verification, persisted as `sessions.authenticated_at`; set at login, updated by the MFA challenge and by `createReauthProof`, copied unchanged by refresh). Login body `client_app: "web"`. |
+| Staff admin | `apps/admin` | Same bearer token. Cookie `__Host-rt_admin` (`refreshCookieAdmin`) with a 12 h absolute cap (REQ-ADMIN-004) and a 30-minute sliding idle lifetime of the admin refresh token (`AUTH_ADMIN_REFRESH_IDLE_TTL=30m`) inside the 12 h cap; idle → 401 `SESSION_EXPIRED` (SEC-P3-11). The admin SPA stops silent refresh after 30 minutes without user input (ADR-0026). `client_app: "admin"` is refused with the generic `INVALID_CREDENTIALS` for non-operator users (REQ-ADMIN-003). A staff session without TOTP is limited to routes flagged `x-mfa-gate-exempt` (`requestTotpEnrolmentCode`, `enrolTotp`, `activateTotp`, `getMe`); every other route returns 403 `MFA_ENROLMENT_REQUIRED` (REQ-AUTH-018). Outside `APP_ENV ∈ {local, test}` a staff user's **first** TOTP enrolment needs the 6-digit e-mailed code from `requestTotpEnrolmentCode` (10 min, single-use) in the `enrolTotp` body; without it, 403 `MFA_ENROLMENT_CODE_REQUIRED` (SEC-P3-14). |
 | Guest | quote widget | `quoteToken`: header `X-Quote-Token` (256-bit base64url) returned once by `createQuote`. Never put in URLs, logs or audit values. A wrong or missing token, or a token for a claimed quote, returns 404 (A-078). Accepted on `getQuote` and `streamQuoteResults`, and on `claimQuote`, `saveQuote` and `createShipment` together with the bearer token for the claim. Share links resolve through `POST /public/shared-quotes/resolve` with the token in the body. Browser-side the web app keeps it in `localStorage` as `qt:<quoteId>` → `{token, expires_at}` and deletes it on claim, expiry, sign-out or 404 (ADR-0026 amendment 1; no cookie, no URL). |
 | Webhooks | gateways, carriers | `stripeSignature` (`Stripe-Signature` over the raw body, 300 s tolerance), `mockGatewaySignature` (`X-Mock-Signature`: HMAC-SHA256 of timestamp + raw body, non-production only), `carrierSignature` (`X-Carrier-Signature`: per-adapter algorithm). Signatures are verified before the body is parsed into the domain. |
 
 - **Refresh and logout** are cookie-authenticated and need both an allow-listed `Origin` and an `X-CSRF-Token` header (`csrfToken`) matching the signed token from `getCsrfToken`: `base64url(HMAC-SHA256(CSRF_KEY, session_id || app))`, recomputed on verification with no server state (ADR-0006 amendment 2). `getCsrfToken` itself is authenticated by the refresh cookie. Failure: 403 `CSRF_REJECTED` and security event `csrf_rejected` (REQ-SEC-004). Bearer routes are not cookie-authenticated and are exempt; the contract marks the cookie routes `x-csrf: true`.
 - **Rotation and reuse.** Every refresh rotates the token in its family. Presenting a rotated or revoked token revokes the whole family and session: 401 `SESSION_REVOKED`, audit `TOKEN_REUSE_DETECTED`, security event `refresh_token_reuse`. Revocation reaches access tokens within 5 s through the Redis `revoked:sid` set (REQ-AUTH-009).
 - **Expired access token.** 401 `ACCESS_TOKEN_EXPIRED` → the client refreshes once (single-flight across tabs) and retries once (REQ-AUTH-010, EC-A11).
-- **Re-authentication.** `createReauthProof` returns a 5-minute, single-use proof bound to the session and an `action_scope`. Routes with `x-reauth-scope` require it in `X-Reauth-Proof` and otherwise answer 401 `REAUTH_REQUIRED`. Scopes in M1: `auth.password.change`, `mfa.totp.disable`, `mfa.recovery_codes.regenerate`, `privacy.delete` (REQ-AUTH-020). The MFA-weakening scopes require a TOTP proof when MFA is active, never a password alone (ADR-0006 amendment 3).
+- **Re-authentication.** `createReauthProof` returns a 5-minute, single-use proof bound to the session and an `action_scope`, and updates the session's `authenticated_at` (so the next access token carries a fresh `auth_time`). Routes with `x-reauth-scope` require it in `X-Reauth-Proof` and otherwise answer 401 `REAUTH_REQUIRED`. When a route also declares `x-reauth-max-age` (seconds), it accepts **either** a valid proof for the scope **or** an access token whose `now − auth_time ≤ x-reauth-max-age`; such routes declare the header as optional (`ReauthProofConditional`). Without `x-reauth-max-age` a proof is always required (`ReauthProof`, required header). Scopes in M1 (REQ-AUTH-020):
+  - always required: `auth.password.change`, `mfa.totp.disable`, `mfa.recovery_codes.regenerate`, `privacy.delete`, `privacy.export` (`requestPrivacyExport`, `downloadPrivacyExport`), `payment_method.manage` (`createPaymentMethodSetup`, `createPaymentMethod`, `updatePaymentMethod`, `deletePaymentMethod`);
+  - required when `auth_time` is older than 12 h (`x-reauth-max-age: 43200`): `org.member.manage` (`createInvitation`, `resendInvitation`, `updateMember`, `removeMember`).
+
+  The MFA-weakening scopes require a TOTP proof when MFA is active, never a password alone (ADR-0006 amendment 3). **Saved-card checkout** uses no proof: when a saved payment method is used and `auth_time` is older than 12 h, `checkoutOrder` returns `cvc_recollection_required: true` and creates the PaymentIntent with `payment_method_options.card.require_cvc_recollection=true`, so the Payment Element collects the CVC inside the Stripe iframe (no PCI scope change; SEC-P3-01). **Fallback:** if this step-up is not delivered together with the payments and organisation stories, `AUTH_REFRESH_TTL=7d` (inside the 30-day absolute cap) becomes the configuration default and D-038 is re-opened (ADR-0006 amendment 12).
 - **Dual-mode routes.** `createQuote`, `getQuote` and `streamQuoteResults` declare `x-permission: public` (guest branch) and `x-permission-authenticated: quote:create|quote:read`. When a bearer token is present it must be valid and the named permission is checked in the active organisation. The RBAC matrix generator tests both branches.
 - **`X-Mock-Scenario`** (DR-B29, REQ-CARR-005). Semicolon-separated `key=value` directives, for example `latency=6000;fail=booking`. Keys: `latency` (0..30000 ms), `fail` (`rates|booking|void|pickup|cancel_pickup|track`), `error` (a canonical carrier code), `rates=empty`, `track` (`happy_path|customs_hold|exception|return_to_sender|delayed|unknown_number`). It is also read from a shipment `customer_reference` starting with `MOCK:`. Unknown keys or out-of-range values: 400 `MOCK_SCENARIO_INVALID`. The header is ignored, and the Mock carrier is absent, in production (REQ-CARR-006, EC-B41). It is declared on every operation that reaches a carrier.
 - **`X-Correlation-Id`.** Accepted inbound when it matches `^[A-Za-z0-9-]{8,64}$`, otherwise generated. Always echoed, and propagated to logs, audit, outbox, jobs and carrier calls (REQ-PLAT-011).
@@ -227,6 +240,7 @@ Route-specific limits are declared in `x-rate-limit-route` and run in addition t
 | Deadlines | Per carrier 4 s, overall 5 s. `complete` is sent by 5 s; outstanding carriers are reported as `carrier_error` with state `timeout` and are never cached (DR-B16). |
 | Termination | The server closes within 1 s after `complete` or `error`. The hard cap is 30 s, and rate shopping normally closes by 6 s. On client disconnect, in-flight upstream calls are cancelled within 1 s (AbortSignal through `CarrierContext`). |
 | Reconnect | `streamQuoteResults` accepts `Last-Event-ID`. Results are persisted as they arrive, so a client reconnecting to **any** replica gets the missed events replayed from the database before live ones. The event id is the per-quote sequence number (ADR-0016 amendment 3). `getQuote` remains the non-streaming fallback. `streamBookingProgress` has no resume: clients reconnect and receive the current state, or poll `getBookingProgress` every 3 s. |
+| Caps | Opening or reopening a stream never triggers carrier fan-out or saga work: rate-shopping fan-out happens once, at `POST /quotes` (`createQuote`), and booking carrier calls are driven by the saga after checkout. The streams only replay persisted state and subscribe (SEC-P3-02 item 5; SEC-TC-42: 10 reopenings cause 0 extra carrier calls). At most 2 concurrent open streams per client IP (/64) and 5 per user across both stream routes (`SSE_MAX_STREAMS_PER_IP`, `SSE_MAX_STREAMS_PER_USER`, Redis counters released on close); the next one gets 429 `RATE_LIMITED` with `Retry-After` before the stream opens (R-15, T-47). |
 | Auth | EventSource cannot send headers, so the web app uses a fetch-based SSE reader that sends `Authorization: Bearer` or `X-Quote-Token`. Cross-tenant and wrong-token requests get 404 before the stream opens. |
 | Privacy | Events contain no personal data and no raw carrier text, only canonical codes. |
 | Contract | The payload schemas are listed under `x-sse-events` on each stream operation and live in `components/schemas` (`Sse*`). Redocly reports them as unused because they are only referenced from a vendor extension (see lint status). |
@@ -250,8 +264,9 @@ Route-specific limits are declared in `x-rate-limit-route` and run in addition t
 | `x-error-codes` | every operation | catalogue codes | error catalogue + response statuses |
 | `x-milestone`, `x-moscow` | every operation | M0/M1, Must/Should/Could | REQUIREMENTS.md |
 | `x-csrf` | cookie routes | `true` | CSRF middleware mount |
-| `x-mfa-gate-exempt` | MFA enrolment routes and `getMe` | `true` | staff MFA gate allow-list |
-| `x-reauth-scope` | re-auth routes | scope string | `defineRoute.reauth` |
+| `x-mfa-gate-exempt` | MFA enrolment routes (`requestTotpEnrolmentCode`, `enrolTotp`, `activateTotp`) and `getMe` | `true` | staff MFA gate allow-list |
+| `x-reauth-scope` | re-auth routes (14 in M1, see §8) | scope string | `defineRoute.reauth.scope` |
+| `x-reauth-max-age` | re-auth routes that accept a recent sign-in instead of a proof (`org.member.manage` routes) | integer seconds (`43200` = 12 h). Only together with `x-reauth-scope`: the route accepts either a valid `X-Reauth-Proof` for the scope or an access token whose `now − auth_time ≤ x-reauth-max-age`. Absent: a proof is always required. | `defineRoute.reauth.maxAgeSeconds`; the parameter is `ReauthProofConditional` (optional) when present and `ReauthProof` (required) when absent |
 | `x-sse-events` | stream routes | event name → schema | SSE test helper |
 | `x-response-allow-list` | `getPublicTracking`, `lookupPublicTracking` | `DR-B31` | forbidden-field contract test |
 | `x-environments` | `receiveMockGatewayWebhook` | environments where the route is mounted | production-mode route test |
@@ -283,11 +298,13 @@ Status rule (A-073): a domain code with no stated HTTP status maps to **422**.
 | `MFA_INVALID` | 401 | Wrong, replayed or out-of-window TOTP or recovery code. | REQ-AUTH-017, EC-A06, DR-A26 |
 | `MFA_REQUIRED` | 401 | Password correct; complete the MFA challenge with the returned mfa_challenge_token (5 min, single-use). | REQ-AUTH-017, DR-A26 |
 | `REAUTH_REQUIRED` | 401 | Route needs a fresh X-Reauth-Proof bound to this session and action scope. | REQ-AUTH-020, DR-A26 |
+| `SESSION_EXPIRED` | 401 | Refresh token past the absolute session cap or (admin) the 30-minute idle limit; sign in again. | REQ-AUTH-007, REQ-ADMIN-004, SEC-P3-01, SEC-P3-11 |
 | `SESSION_REVOKED` | 401 | Session or refresh family revoked (logout, reuse detection, password reset, removal). | REQ-AUTH-008, REQ-AUTH-009, DR-A26 |
 | `AUTHZ_DENIED` | 403 | Caller lacks the route permission in the active organisation (PERMISSION_DENIED audited). | REQ-RBAC-006, REQ-RBAC-007, DR-A26 |
 | `CSRF_REJECTED` | 403 | Cookie-authenticated request without allow-listed Origin or matching X-CSRF-Token. | REQ-SEC-004, DR-A26 |
 | `EMAIL_NOT_VERIFIED` | 403 | Checkout, payment and document email require a verified account email. | REQ-BOOK-016, REQ-PAY-007, D-009 |
 | `INVITATION_EMAIL_MISMATCH` | 403 | Signed-in verified email differs from the invited address. | REQ-ORG-011, DR-A26 |
+| `MFA_ENROLMENT_CODE_REQUIRED` | 403 | Staff first TOTP enrolment outside local/test requires the e-mailed enrolment code; request one via `requestTotpEnrolmentCode`. Missing, wrong, expired or used code; wrong codes count against the per-user MFA lock (`MFA_LOCKED`). | REQ-AUTH-018, SEC-P3-14 |
 | `MFA_ENROLMENT_REQUIRED` | 403 | Operator-org member without active TOTP may only call MFA enrolment routes. | REQ-AUTH-018, DR-A26 |
 | `NOT_FOUND` | 404 | Resource absent, soft-deleted, or owned by another organisation / guest token (indistinguishable). | REQ-RBAC-007, REQ-RLS-007, DR-A26 |
 | `TRACKING_NOT_FOUND` | 404 | Unknown or not-yet-trackable public lookup; identical body and timing for every miss. | REQ-TRACK-012 |
@@ -355,7 +372,7 @@ Status rule (A-073): a domain code with no stated HTTP status maps to **422**.
 | Compliance state | `PACK_UNAVAILABLE` | `state` field of `CompliancePackPublic`, `Quote.tax_pack`, `ProhibitedItemList.pack` (200, never a hidden default; DR-A23) |
 | Pricing explanation warnings | `FX_STALE`, `PRICE_FLOOR_APPLIED`, `FUEL_NONE`, `FUEL_INCLUDED_BY_CARRIER` | `PricingExplanation.warnings` |
 | Internal / start-up only | `PRICING_CONFIG_INVALID`, `CURRENCY_MISMATCH`, `NOT_SUPPORTED_IN_M1`, `PAYMENT_LIVE_KEY_FORBIDDEN`, `NOTIFICATION_PROVIDER_FORBIDDEN`, `CHANNEL_NOT_AVAILABLE`, `MISSING_TENANT_CONTEXT`, `SSRF_BLOCKED` | Engine, config validation, worker DLQ reasons and security events. Never returned by the API: they surface as 500 `INTERNAL_ERROR` or 503, or as a carrier status. |
-| Audit reasons | `NOT_STAFF`, `SESSION_EXPIRED`, `DRAFT_EXPIRED` | audit `reason` / transition `reason_code` values |
+| Audit reasons | `NOT_STAFF`, `SESSION_EXPIRED`, `DRAFT_EXPIRED` | audit `reason` / transition `reason_code` values. The audit reason `SESSION_EXPIRED` denotes the same event as the 401 problem code `SESSION_EXPIRED` (refresh past the absolute cap or the admin idle limit). |
 
 ---
 
@@ -512,10 +529,11 @@ Notes:
 
 | # | Assertion | Failure message example |
 |---|---|---|
-| 1 | Key sets are equal and counts match (`registry.length === operations.length`, currently **132**) | `Missing in openapi.yaml: POST /api/v1/foo`; `Documented but not mounted: GET /api/v1/bar` |
+| 1 | Key sets are equal and counts match (`registry.length === operations.length`, currently **133**) | `Missing in openapi.yaml: POST /api/v1/foo`; `Documented but not mounted: GET /api/v1/bar` |
 | 2 | `x-permission` equals `route.permission`. The value is in the `packages/authz` catalogue, or is `public`/`authenticated` with a non-empty `x-permission-justification`. No `x-permission-status: proposed` remains on `main`. | `PATCH /api/v1/shipments/{}: permission shipment:update not in catalogue` |
 | 3 | `x-audit` deep-equals `route.audit` {action, entity, sensitivity, reasonRequired}. `NONE` requires a justification (REQ-AUDIT-006). | |
-| 4 | `x-idempotency`, `x-rate-limit-class`, `x-tenancy`, `x-reauth-scope`, `x-mfa-gate-exempt`, `x-csrf` equal the metadata | |
+| 4 | `x-idempotency`, `x-rate-limit-class`, `x-tenancy`, `x-reauth-scope`, `x-reauth-max-age`, `x-mfa-gate-exempt`, `x-csrf` equal the metadata. `x-reauth-max-age` appears only with `x-reauth-scope`; a route with `x-reauth-scope` references `ReauthProof` (no max-age) or `ReauthProofConditional` (with max-age) and lists `REAUTH_REQUIRED`. | `POST /api/v1/organisations/{}/invitations: reauth maxAgeSeconds 43200 not in openapi.yaml` |
+| 9 | One-time-secret routes (ADR-0014 amendment 1: `createQuote`, `createQuoteShare`, `enrolTotp`, `regenerateRecoveryCodes`) are `x-idempotency: not-applicable`, declare no `Idempotency-Key` parameter and no `Idempotent-Replayed` header (SEC-TC-53) | `POST /api/v1/quotes: one-time-secret route must be not-applicable` |
 | 5 | Schema parity: for path, query, headers and body, the Joi schema (`schema.describe()`) and the OpenAPI schema have the same property names, the same required set, closed objects on both sides (`unknown(false)` / `additionalProperties: false`), and the same enums, min/max, lengths and patterns. Implemented as an in-house comparator over `Joi.describe()` output; no new dependency. | `POST /api/v1/quotes body: Joi requires ship_date, OpenAPI does not` |
 | 6 | Every `x-error-codes` entry exists in the error catalogue, and the operation has a response for its status. Every code the module's error factory can throw for that route (each module exports `routeErrors`) is a subset of `x-error-codes`. | `checkoutOrder can throw AMOUNT_MISMATCH but does not list it` |
 | 7 | Every operation has a success response example, a request example when it has a body, `x-requirements`, `x-milestone` and `x-moscow` (REQ-API-002) | |
@@ -567,7 +585,7 @@ New test dependency (dev only): `ajv` 8 (MIT, last release 2026-04). Rejected: `
 
 ## Lint status
 
-`npx --yes @redocly/cli@2 lint docs/03-architecture/api/openapi.yaml`: **valid, 0 errors, 8 warnings**. Examples were also validated with a stricter scratch config (`recommended-strict` + `no-invalid-media-type-examples` with `allowAdditionalProperties: false`), and every example conforms.
+`npx --yes @redocly/cli@2 lint docs/03-architecture/api/openapi.yaml`: **valid, 0 errors, 8 warnings** (re-run 2026-11-12 after the SEC-P3-01/02/10/11/14 amendments; 133 operations; the warning set is unchanged). Examples were also validated with a stricter scratch config (`recommended-strict` + `no-invalid-media-type-examples` with `allowAdditionalProperties: false`), and every example conforms; that run reports only the same 8 findings, raised to errors by the strict preset.
 
 | Warnings | Rule | Reason accepted |
 |---|---|---|
@@ -579,11 +597,11 @@ New test dependency (dev only): `ajv` 8 (MIT, last release 2026-04). Rejected: `
 
 ## Appendix: operation index
 
-Total: 132
+Total: 133
 
 | Tag | Operations |
 |---|---|
-| identity | 17 |
+| identity | 18 |
 | me | 10 |
 | organisations | 17 |
 | reference | 13 |
@@ -619,6 +637,7 @@ Total: 132
 | POST | `/auth/password/change` | changePassword | `authenticated` | UPDATE user_credential (SENSITIVE) | not-applicable | auth | user | M1 | Should |
 | POST | `/auth/reauth` | createReauthProof | `authenticated` | CREATE reauth_proof (NORMAL) | not-applicable | auth | user | M1 | Should |
 | POST | `/auth/switch-organisation` | switchOrganisation | `authenticated` | UPDATE session (SENSITIVE) | not-applicable | authenticated | user | M1 | Should |
+| POST | `/auth/mfa/totp/enrolment-code` | requestTotpEnrolmentCode | `authenticated` | CREATE mfa_enrolment_code (NORMAL) | not-applicable | email-send | user | M0 | Must |
 | POST | `/auth/mfa/totp/enrol` | enrolTotp | `authenticated` | CREATE mfa_enrolment (SENSITIVE) | not-applicable | auth | user | M0 | Must |
 | POST | `/auth/mfa/totp/activate` | activateTotp | `authenticated` | MFA_ENROLLED user_mfa (SENSITIVE) | not-applicable | auth | user | M0 | Must |
 | POST | `/auth/mfa/totp/disable` | disableTotp | `authenticated` | UPDATE user_mfa (SENSITIVE) | not-applicable | auth | user | M1 | Should |
@@ -666,14 +685,14 @@ Total: 132
 | GET | `/compliance/packs/{packCountry}` | getCompliancePack | `public` | NONE | not-applicable | public | public | M1 | Must |
 | GET | `/compliance/legal/{packCountry}/{legalDocument}` | getLegalDocument | `public` | NONE | not-applicable | public | public | M1 | Should |
 | POST | `/consents` | recordConsent | `public` | CREATE consent_record (NORMAL) | optional | public | public | M1 | Should |
-| POST | `/quotes` | createQuote | `public` | CREATE quote (SENSITIVE) | optional | public-quote | guest | M0 | Must |
+| POST | `/quotes` | createQuote | `public` | CREATE quote (SENSITIVE) | not-applicable | public-quote | guest | M0 | Must |
 | GET | `/quotes` | listSavedQuotes | `quote:read` | VIEW quote (SENSITIVE) | not-applicable | authenticated | tenant | M1 | Should |
 | GET | `/quotes/{quoteId}` | getQuote | `public` | VIEW quote (SENSITIVE) | not-applicable | public | guest | M0 | Must |
 | GET | `/quotes/{quoteId}/stream` | streamQuoteResults | `public` | VIEW quote (SENSITIVE) | not-applicable | public | guest | M1 | Must |
 | POST | `/quotes/{quoteId}/claim` | claimQuote | `quote:create` | UPDATE quote (SENSITIVE) | optional | authenticated | tenant | M1 | Must |
 | POST | `/quotes/{quoteId}/save` | saveQuote | `quote:create` | UPDATE quote (SENSITIVE) | optional | authenticated | tenant | M1 | Should |
 | DELETE | `/quotes/{quoteId}` | deleteSavedQuote | `quote:delete` | DELETE quote (SENSITIVE) | optional | authenticated | tenant | M1 | Should |
-| POST | `/quotes/{quoteId}/share` | createQuoteShare | `quote:share` | CREATE quote_share (NORMAL) | optional | authenticated | tenant | M1 | Should |
+| POST | `/quotes/{quoteId}/share` | createQuoteShare | `quote:share` | CREATE quote_share (NORMAL) | not-applicable | authenticated | tenant | M1 | Should |
 | DELETE | `/quotes/{quoteId}/share` | revokeQuoteShare | `quote:share` | DELETE quote_share (NORMAL) | optional | authenticated | tenant | M1 | Should |
 | POST | `/public/shared-quotes/resolve` | resolveSharedQuote | `public` | VIEW quote_share (NORMAL) | not-applicable | public | public | M1 | Should |
 | POST | `/shipments` | createShipment | `shipment:create` | CREATE shipment (SENSITIVE) | optional | authenticated | tenant | M0 | Must |
