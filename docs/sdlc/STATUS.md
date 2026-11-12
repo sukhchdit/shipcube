@@ -41,6 +41,7 @@
 | 0.7 | TASK-023 reference + demo seed framework (PR #13; merges after #11; US-049 partial per D-061) | senior-developer → backend-developer | feat/TASK-023-… @e42e368 (fc1) | ✅ | ✅ APPROVED_WITH_NITS r2 (e42e368); superseding branch must carry R2-m1 (inserted>0 drift) + R2-n1 | r1 PASS_WITH_FOLLOW-UPS (4 LOW) | ✅ fc1 local gates; lane A fast-lane green, scans red (gitleaks synthetic literal in e6ccf60 → supersede branch D-ORCH-017) | | 1 | r2 reviews ▶; supersede + reconcile after #11 |
 
 ## Escalations in progress
+- **Gitleaks contamination watch (PR13-SEC-11):** main commits 63accea..7f8ec4f quoted a synthetic secret-shaped literal (scrubbed in 2e29004). In-flight branches TASK-016 (PR #11) and TASK-004 (PR #4) merged main locally while it contained it (unpushed at 20:3xZ). If their lane A gitleaks goes red on push, supersede each with a fresh branch from main carrying the final reviewed tree (D-ORCH-017 pattern), then a supersede security round naming the new head.
 _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuation / sr-dev completion — not fix cycles)
 
 ## Defaults applied / optional questions outstanding
