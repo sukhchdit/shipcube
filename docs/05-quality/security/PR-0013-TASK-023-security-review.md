@@ -283,3 +283,248 @@ Sources: `pg` 8.23.1 / `pg-connection-string` 2.14.1 in the worktree's `node_mod
 | Field | Value |
 |---|---|
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open at head `e92cd6f`, so the D-ORCH-004 merge rule ("no Critical/High open") is met. 4 LOW (PR13-SEC-01..04), 4 INFO (05..08). PR13-SEC-01, -02 and -03 are recommended in this PR's fix cycle. PR13-SEC-02 is a hard precondition for TASK-089's provisioner swap, and PR13-SEC-04 needs a principal-architect decision before TASK-221. The D-ORCH-015 reconciliation after PR #11 needs a round-2 delta review |
+
+## Round 2 (head e42e368)
+
+| Field | Value |
+|---|---|
+| Head | e42e368b62c43624666f4d8179612ae7d926c842 |
+| Branch | `feat/TASK-023-idempotent-reference-demo-seed-framework`. Merge-base with `main`: `d68168e`. `origin/main` is at `63accea` (docs only since then). |
+| Content reviewed | **Net diff** `origin/main...e42e368`: 36 files, +3,561 / −2, all in `prisma/**`, `package.json`, `tools/tsconfig.json` and the lockfile. **Fix-cycle delta** `e92cd6f → e42e368` on PR-owned paths: 17 files, +868 / −98. The fix-cycle commits are `1a476d6`, `e6ccf60`, `26ee487` and `5fcf177`. `297bf69`, `5d708bc`, `39625e1` and `e42e368` are main merges (PR #9, PR #12). `1a476d6`'s `packages/config` change was superseded by main's `RUNTIME_DATABASE_URL_PARAMS` (D-TASK006-03 (2)), so the net `packages/**` delta is zero. |
+| Dependencies | The lockfile delta against main is unchanged from R1: `+@platform/authz` and `+@platform/config` under the `prisma` workspace only (`git diff --text`). The migration, `down.sql` and `platform.prisma` are byte-identical to R1. |
+| Reviewer / date | security-analyst, 2026-11-13. No command was run in the TASK-023 worktree. Sources came from `git archive e42e368` in the main checkout, were type-stripped into scratch, and used a scratch junction to the worktree's `node_modules` (pg 8.23.1, pg-connection-string 2.14.1; the lock pins the same). The junction was removed afterwards. Docker was used once, for the gitleaks run in §R2.4. Nothing was installed, built or run as a suite. |
+
+### R2.1 Summary
+
+The fix cycle closes PR13-SEC-01, -02 and -03 (session half), the in-PR part of -06, and -07. The new controls held under independent probing:
+
+- **`_FILE` refusal.** The copied `readSecret` and every `node:fs` use are gone from `prisma/seed` sources. A `<NAME>_FILE` for any of the five variables the seed reads is refused first, naming the variable only, and no file is opened.
+- **ECS second signal.** The check matches `loadConfig`'s semantics exactly: a variable counts when it is non-empty, and whitespace counts. It runs for both commands, before the credential plan and before connecting.
+- **Single URL allow-list.** This is main's `RUNTIME_DATABASE_URL_PARAMS`, plus the TCP-host rule. A differential fuzz found no accepted URL whose effective node-postgres session differs from the pin.
+- **Pin read-back.** `search_path` and both timeouts are read back from `pg_settings` before any seed statement runs.
+- **Redaction.** It now covers the raw and decoded URL password and the `SEED_*` values of a seeded plan.
+
+**New: one LOW and two INFO.**
+
+- **PR13-SEC-09 (LOW):** the seed reuses the runtime's TLS parameter *names* but not its *value* rules:
+  - `sslmode=no-verify` is accepted;
+  - `PGSSLMODE` decides TLS when the URL has none;
+  - `sslrootcert` is read by pg-connection-string with no PR9-SEC-16 file rule;
+  - `NODE_TLS_REJECT_UNAUTHORIZED` is not checked.
+
+  This is the R1 TLS half made concrete. It is owned by TASK-014.
+- **PR13-SEC-10 (INFO):** the pin read-back, the only statement that runs before the pin is verified, uses an unqualified `=`.
+- **PR13-SEC-11 (INFO, process):** the literal gitleaks flagged is now quoted verbatim in two files on `main`. Lane A will fail on PR #11 and PR #4 as soon as either merges `main`.
+
+**The gitleaks hit is a synthetic test value, not a credential** (§R2.4). The final tree contains no secret-shaped literal. **D-ORCH-017 is endorsed**, with conditions (§R2.5).
+
+### R2.2 Method
+
+| Probe (scratch `review/PR-13-sec-r2`, session-scoped) | What it did | Result |
+|---|---|---|
+| **P-A r2** `probe-cli-r2.mjs` | Stripped CLI `main()` with injected env and output against `127.0.0.1:1`. ECS matrix: 4 `APP_ENV` × 7 signal states (none, `_URI`, `_V4`, both, empty `_URI`, empty `_V4`, `' '`) × 2 commands. `NODE_ENV=production` control. `_FILE` matrix: 5 names × {directory, missing, regular file}, with no `APP_ENV` and no URL set. 34 hostile URL shapes. 10 accepted-URL driver failure modes | **119/119 checks as expected.**<br>• Exit 1 `SEED_ENVIRONMENT_INVALID` for the 16 local/test cells with a non-empty signal, with subjects `['APP_ENV', …signals]` and no `ECONNREFUSED`. The other 40 cells connect.<br>• Every `_FILE` cell exits 1 and names only the variable; no `EISDIR`/`ENOENT` (nothing was opened). With `NAME` and `NAME_FILE` both set, the run is refused. `BOOTSTRAP_*_FILE` and empty values are ignored.<br>• The 34 URL shapes all exit 1 without connecting, and no value is printed. They include `%6Fptions`, `sslmode` repeated through `%73slmode`, `OPTIONS`, `?=x`, `sslcert`/`sslkey`/`sslpassword`, `uselibpqcompat`, `port`/`user`/`password`/`database` overrides, socket, DSN, relative and empty-host forms.<br>• No accepted-URL failure prints the password. `sslrootcert` cases: see PR13-SEC-09 |
+| **P-B r2** `probe-url-r2.mjs` | **Differential fuzz.** 20,000 URLs from a grammar of allow-listed and hostile names, encodings, repeats, separators, fragments, hosts and passwords. Each URL `readMigratorUrl` accepts goes through `withMigratorConnection`'s own factory, and a real `pg.Client`'s `connectionParameters` are compared with the pin. No connection is made.<br>**TLS table** per `sslmode` / `sslnegotiation`, and with `PGSSLMODE` | **1,820 accepted, 0 with a non-pinned session.** Checked fields: `options`, both timeouts, `application_name`, a TCP host equal to the WHATWG host, and the connect timeout.<br>**Positive control:** the same harness shows that `?options=` replaces the pin when the guard is bypassed.<br>**TLS:**<br>• `no-verify` → `{rejectUnauthorized:false}`<br>• none or `disable` → `false`<br>• `bogus` → `{}`<br>• `PGSSLMODE=no-verify` with no `sslmode` → `{rejectUnauthorized:false}` |
+| **P-C** re-run `probe-sql.mjs` | R1 identifier/render probe; 50k fast-check | Unchanged from R1: 237 accepted, all `[a-z_][a-z0-9_]*`. `public.t.extra` still renders when the renderer is called alone, and authz and version tables are still accepted as targets (PR13-SEC-05) |
+| `probe-validate-r2.mjs` | Reserved dataset name; own-property column check | `authz_matrix` is refused. `authz_matrix:v1` is accepted, but it is a different version-row key, so there is no collision. A column `constructor` or `toString` that a row lacks as its own property is refused |
+| **P-D r2** `probe-redact-r2.mjs` | `pg.Client.prototype.connect` rejects with crafted errors; 2 commands × 9 modes | Redacted: the full URL, the raw password, the decoded password, `SEED_*` (`demo`), cross-realm `vm` errors, and an all-forms message. Not redacted:<br>• `SEED_*` under `reference`: expected, because that command never reads them;<br>• a secret in `error.name` (synthetic). |
+| Secret shapes `secret-shapes.mjs` | Added lines of the 3,769-line net diff (lockfile excluded), with 7 rules and 3 positive-control lines | Controls 3/3. 8 hits, all non-secrets (§R2.4) |
+| **gitleaks** (Docker, once) | Lane A's pinned image, `dir` mode over `git archive e42e368` | 0 findings in PR #13 paths (§R2.4) |
+| Source review | Full fix-cycle delta, tests (`migrator-connection.test.ts`, `cli.test.ts`, `credential-plan.test.ts`, `runner.test.ts`, `seed.int.test.ts`), README. Also `apps/api/src/platform/db/client.ts` `tlsConfig` / `readRootCertificate`, `packages/config` `guards.ts` / `env-input.ts`, and lane A's gitleaks step | — |
+
+### R2.3 Closure of R1 findings
+
+| ID | R1 | Round-2 status | Evidence |
+|---|---|---|---|
+| PR13-SEC-01 | LOW | **Closed** | `refuseFileVariants` runs first in `main()`. It covers `APP_ENV`, `NODE_ENV`, `DATABASE_MIGRATOR_URL` and both `SEED_*` variables, names variables only, and opens no file. The seed has no `node:fs` import. P-A: 15/15 `_FILE` cells and the `NAME`+`NAME_FILE` case are refused. Unit and CLI tests point at `/run/secrets/never-opened` and assert exit 1. D-TASK023-01 item 05 is superseded (D-ORCH-017) |
+| PR13-SEC-02 | LOW (latent) | **Closed** | `assertNotLocalOnEcs` uses `@platform/config`'s `ECS_METADATA_KEYS` and `isLocalAppEnv`, with the same "non-empty" rule as `pickConfigured`. P-A: all 56 cells are as expected. A unit table and a CLI test (exit 1, no `ECONNREFUSED`) exist, so **the TASK-089 precondition (R1, PR13-SEC-02 verification) is met**. The optional `AWS_EXECUTION_ENV` third signal was not taken; `loadConfig` does not use it either |
+| PR13-SEC-03 | LOW | **Closed (session pin, timeouts, host).** TLS half → PR13-SEC-09 / TASK-014 | The allow-list is `RUNTIME_DATABASE_URL_PARAMS`, each name at most once, plus a TCP host without `%` and a `postgres[ql]:` scheme. The `pg_settings` read-back refuses drift and closes the client. P-A: 34 shapes refused. P-B: 0 session bypass in 20,000. Integration tests cover `ALTER ROLE platform_migrator IN DATABASE … SET search_path = public` (still pinned, exit 0) and three override URLs (exit 1, no version row written) |
+| PR13-SEC-04 | LOW | **Open** | Migration and grant unchanged; no decision logged. principal-architect + data-architect before TASK-221 (D-ORCH-016 (3)) |
+| PR13-SEC-05 | INFO | **Partly addressed** | Done: the `authz_matrix` name is reserved and the own-property check is in place. Still open → TASK-026: the target-table allow-list and the `parts.length === 2` check in `sql.ts#table()` |
+| PR13-SEC-06 | INFO | **Closed in PR scope** | `warn seed.drift_restored {dataset, rows}`, plus a `drift-restored` `ConfigChange` for audited datasets. The integration test checks for one event, an untouched version row, and none on the next no-op run. The sink logs dataset, version, hash and count only. Durable `CONFIG_CHANGE` = TASK-025/221; snapshot → migrate → seed ordering = TASK-014 (PR13-SEC-08) |
+| PR13-SEC-07 | INFO | **Closed** (optional nit) | The redaction list holds the URL, raw and decoded password, and the seeded-plan `SEED_*` values, replaced longest-first (P-D). The README now reads "never used; a present, non-empty value is refused". Nit: `error.name` is printed unredacted. No driver path sets a secret name; optional fix `redact(error.name, secrets)` |
+| PR13-SEC-08 | INFO | **Open** (later tasks), updated | TASK-014 also takes PR13-SEC-09. TASK-089: `planSecrets` covers seeded-password plans only. Set-password tokens must never enter an error message, or the provisioner adds them to the redaction list |
+
+### R2.4 The lane A gitleaks hit: triage
+
+**What fired.** gitleaks v8.30.1 rule `generic-api-key`, commit `e6ccf60`, `prisma/seed/migrator-connection.test.ts` line 19. The value is a 13-character literal assigned to the test's URL-password constant: the prefix `pw-` followed by the ten decimal digits in ascending order. It is described here, not quoted, on purpose (PR13-SEC-11).
+
+**Ruling: false positive.** It is a synthetic test value, not a credential. CWE-798 does not apply, and no rotation is needed:
+
+- **History.** `git log -S … --all` finds the value only where `e6ccf60` adds it, where `5fcf177` removes it, and in the `63accea` docs. It never appeared in Compose, `.env.example`, the bootstrap SQL, a workflow, or any configuration that authenticates anything.
+- **Use in `e6ccf60`.** It was interpolated into `postgresql://platform_migrator:…@db.internal:5432/platform`. The host does not resolve. The URL was consumed only by the pure `readMigratorUrl` and by `withMigratorConnection` with an injected fake client, so no socket was opened. The tests asserted that refusal messages never contain it.
+- **Why it fired.** 13 distinct characters (about 3.7 bits per character) clear the rule's entropy floor.
+- **Replacement.** `5fcf177` replaced it with `randomBytes(12)` hex values, generated at run time like every other seed test secret.
+
+**The final tree is clean.**
+1. `git grep -nE "pw-[0-9]{10}" e42e368` finds nothing.
+2. The secret-shape scan of the added lines (3/3 positive controls matched) gave 8 hits, all non-secrets:
+   - 2 are `/run/secrets/…` paths in `_FILE` tests;
+   - `changeme-changeme` and `postgres://user:placeholder@host/db` are deliberate placeholder vectors of the placeholder-refusal test;
+   - `set-password-link` is a credential-mode label;
+   - 3 are `passwordVariable: 'SEED_*'` variable names.
+3. One run of lane A's image (`ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0…`): `dir` over `git archive e42e368` (988 files, 10 MB), with the base-ref `.gitleaks.toml`, `--ignore-gitleaks-allow --redact`, `--network none`, and no `.gitleaksignore`.
+   - It reported 17 findings, all `generic-api-key`, all in the three files `.gitleaks.toml` already allow-lists for PR1-SEC-11 (`docs/03-architecture/api/openapi.yaml` ×15, `.claude/agents/security-analyst.md`, `claude-code-sdlc-agent-team.md`).
+   - They appear only in `dir` mode: the allowlist paths are anchored (`^docs/…`), and `dir` reports `/scan/docs/…`. Lane A's git mode reports repo-relative paths, where the allowlists match.
+   - **0 findings in any PR #13 path.**
+
+### R2.5 Ruling on D-ORCH-017 (supersede instead of allowlist)
+
+**Endorsed.** It is the only option that keeps the secret-scanning control and the no-rewrite rule both intact:
+- **A commit-scoped `[[allowlists]] commits = […]` entry.** It would be narrow, but it is a permanent exception in a CODEOWNERS-protected control. It must land on `main` first, because lane A reads the base ref's config. It also sets an "allowlist after the fact" precedent.
+- **`.gitleaksignore` and inline `gitleaks:allow`.** Both are inert in lane A by design (PR10-SEC-01: only `.git` is mounted, and `--ignore-gitleaks-allow` is set).
+- **Merging with red scans.** This violates D-ORCH-004/016. A squash merge would keep `e6ccf60` out of `main`, but not out of the PR range that lane A judges.
+- **Rewriting the branch.** Forbidden (CLAUDE.md §5) and not needed.
+
+**Conditions I will check in the supersede round:**
+1. **Ancestry.** No PR #13 commit is an ancestor of the new head: `git merge-base --is-ancestor e6ccf60 <new-head>` and the same for `5fcf177` must both exit 1. The new branch starts from a `main` commit at or after the PR #11 merge.
+2. **Same tree.** For PR #13's 36 paths, `git diff e42e368 <new-head>` contains only:
+   - the D-ORCH-015 reconciliation (R1 §6 items 1–3);
+   - any raw-SQL alignment PR #11's linter requires;
+   - optionally PR13-SEC-10.
+
+   Every other path equals `main`. Anything else gets a delta review.
+3. **Unchanged gitleaks config.** Lane A is green on the new head, gitleaks included. `git diff origin/main <new-head> -- .gitleaks.toml .gitleaksignore` is empty.
+4. **Record on the branch.** This record, with a supersede round naming the new head and a PASS* verdict, is committed on the new branch (D-ORCH-016 (1)). The migration is a security-owned path.
+5. **Closing #13.** #13 is closed unmerged with a link. `refs/pull/13/head` keeps `e6ccf60` on GitHub, which is acceptable because the value is not a credential. Deleting the branch after closing is optional housekeeping, not a rewrite. For a later full-history scan (P6, `--all` refs, GitHub secret scanning), the triage key is `e6ccf60 · prisma/seed/migrator-connection.test.ts · generic-api-key · line 19`.
+6. **PR13-SEC-11 first.** It is resolved before PR #11 or PR #4 next merges `main`.
+
+### R2.6 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR13-SEC-09 | TLS selectors pass to pg unvalidated: `no-verify` accepted, `PGSSLMODE` fallback, `sslrootcert` read without the PR9-SEC-16 rule, `NODE_TLS_REJECT_UNAUTHORIZED` not checked | LOW (latent until a hardened environment runs the seed) | CWE-295, CWE-319, CWE-73, CWE-400 | A02, A05 | `prisma/seed/migrator-connection.ts:52-66, 157-164` | TASK-014 (with PR3-SEC-14 `checkToolingEnv`); optional earlier | Open |
+| PR13-SEC-10 | Pin read-back resolves `=` through the session `search_path` it is about to verify | INFO | CWE-427 | A05 | `prisma/seed/migrator-connection.ts:131` | Superseding PR (optional, one line) or TASK-014 | Open |
+| PR13-SEC-11 | The gitleaks-flagged literal is quoted verbatim on `main`, so lane A fails on the next main-merge of PR #11 or PR #4 | INFO (process) | CWE-540 (scanner hygiene) | — | `docs/sdlc/DECISIONS.md:1325`; `.claude/agent-memory/senior-developer/feedback_lane_a_pr_hygiene.md:10` (both @ `63accea`) | sdlc-orchestrator | Open; due before PR #11 or #4 merges `main` |
+
+#### PR13-SEC-09 (LOW): TLS value rules are missing in the seed
+
+**Description.** The code comment says the seed applies "the same rule the runtime pool … appl[ies]". That holds for parameter **names** only. The runtime (`apps/api/src/platform/db/client.ts` `tlsConfig`, PR9-SEC-04/-16) also strips the query and passes an explicit `ssl` setting. The seed hands the allow-listed selectors to pg-connection-string 2.14.1 as they are. P-A and P-B show four gaps:
+- **`sslmode=no-verify`** is accepted and gives `ssl {rejectUnauthorized:false}`: TLS without certificate verification. `sslmode=bogus` is accepted too. The runtime refuses both.
+- **No `sslmode` in the URL** leaves `ssl` undefined, so pg reads `PGSSLMODE`: `no-verify` gives unverified TLS, `disable` gives plaintext. The runtime sets `ssl: false` explicitly so that the environment cannot switch.
+- **`sslrootcert`** is read synchronously by pg-connection-string with no checks:
+  - a relative path resolves against the CWD (P-A read `<cwd>\relative-ca.pem`);
+  - a directory is opened (`EISDIR`), and a FIFO or device would block or exhaust memory on Linux;
+  - there is no size cap;
+  - the `ENOENT` message prints the path (the password inside a path is redacted).
+
+  The runtime requires an absolute path to a regular file of at most 1 MiB, refuses `system`, and prints no path.
+- **`NODE_TLS_REJECT_UNAUTHORIZED=0`** turns off verification for `ssl: {}`. `loadConfig` refuses it in hardened environments, but the seed does not check it.
+
+**Exploitability / impact.**
+- An attacker needs to control the migrator URL or the seed job's environment, and also needs a network position.
+- `no-verify` is no weaker than the plaintext the URL can already select. That is the R1 TLS half, so this finding does not raise the severity class.
+- The owner credential travels on this connection in staging and production once TASK-014 / M5 runs the seed there. SCRAM without channel binding can be relayed by a man in the middle on unverified TLS.
+- Impact Medium × Likelihood Low = **LOW**. No hardened environment runs the seed today.
+
+**Remediation (TASK-014; can be done earlier).**
+
+1. **Move the TLS rules to one place.** Move `tlsConfig`, `readRootCertificate` and `withoutQuery` from `apps/api/src/platform/db/client.ts` to `@platform/config`. The package already uses `node:fs` for the file provider. Have the api pool and the seed both import them, so there is one implementation for names and values:
+
+   ```ts
+   // prisma/seed/migrator-connection.ts
+   const target = postgresClientTarget(parsed); // { connectionString (no query), ssl, sslnegotiation? }; value-free errors
+   const client = createClient({
+     connectionString: target.connectionString,
+     ssl: target.ssl, // explicit: false, or { rejectUnauthorized: true, ca? }; PGSSLMODE and the URL cannot override it
+     ...(target.sslnegotiation === undefined ? {} : { sslnegotiation: target.sslnegotiation }),
+     connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+     statement_timeout: STATEMENT_TIMEOUT_MS,
+     idle_in_transaction_session_timeout: STATEMENT_TIMEOUT_MS,
+     application_name: 'platform-seed',
+     options: SESSION_OPTIONS,
+   });
+   ```
+   Map the helper's error to `SeedRefusedError('SEED_ENVIRONMENT_INVALID', ['DATABASE_MIGRATOR_URL'])`.
+2. **Make the seed a `checkToolingEnv` caller** (PR3-SEC-14). In `APP_ENV ∈ {staging, production}` it requires exactly one `sslmode=verify-full` and refuses `NODE_TLS_REJECT_UNAUTHORIZED` ≠ `1`.
+3. **Correct the comment** at `migrator-connection.ts:52-57` until then.
+
+**Verification.** Each of the following gives exit 1 naming `DATABASE_MIGRATOR_URL`, with no path or value printed:
+- `?sslmode=no-verify`;
+- `?sslmode=bogus`;
+- `?sslrootcert=relative.pem`;
+- `?sslrootcert=<directory>`;
+- `?sslrootcert=system`.
+
+In addition:
+- With no `sslmode` and `PGSSLMODE=no-verify`, the client config has `ssl === false`.
+- With `?sslmode=verify-full`, the client config has `ssl.rejectUnauthorized === true` regardless of `NODE_TLS_REJECT_UNAUTHORIZED`.
+- In staging, a URL without `verify-full` is refused.
+
+#### PR13-SEC-10 (INFO): qualify the operator in the pin read-back
+
+**Description.** `SELECT name, setting FROM pg_catalog.pg_settings WHERE name = ANY($1::pg_catalog.text[])` is the one statement that runs **before** the pin is verified, and its `=` resolves through the session `search_path`.
+
+**When it matters.** Three conditions must all hold:
+- the startup `options` are dropped, for example by a proxy (the read-back exists to detect this);
+- a role or database setting lists a schema that another role can write (`public`: `platform_audit_owner` holds `CREATE`) explicitly before `pg_catalog`;
+- someone has planted `=(text, text)` in that schema.
+
+Then the planted function runs once as the database owner before the refusal. pg_catalog is searched first unless it is listed explicitly later, so the default settings are safe. This is defence in depth, in the spirit of D-ARCH-073 (qualify operators).
+
+**Fix (one line).** Change the predicate to `WHERE name OPERATOR(pg_catalog.=) ANY ($1::pg_catalog.text[])`.
+
+**Verification.**
+- **Unit:** the statement contains `OPERATOR(pg_catalog.=)`.
+- **Integration (optional):** create `public.=(text,text)` backed by a function that writes a marker, set `ALTER ROLE platform_migrator IN DATABASE … SET search_path = public, pg_catalog`, and use a factory that omits `options`. The run is refused and the marker is absent.
+
+#### PR13-SEC-11 (INFO, process): the flagged literal is back on `main`
+
+**Description.** `63accea` quotes the full assignment from `e6ccf60` verbatim in two places:
+- `docs/sdlc/DECISIONS.md:1325` (D-ORCH-017);
+- `.claude/agent-memory/senior-developer/feedback_lane_a_pr_hygiene.md:10`.
+
+**How it breaks lane A.**
+- Lane A scans `base.sha..head.sha` with `--diff-merges=first-parent`. When a branch created before `63accea` merges `main`, its merge commit adds these lines in its first-parent diff, and `generic-api-key` matches them exactly as it did in the `.ts` file.
+- Open PRs #11 (critical path, D-ORCH-015) and #4 are in that position. Dependabot PRs rebase and are not affected. The superseding PR branches from `main` after `63accea`, so it is not affected either.
+
+It is not a secret, so there is no security impact: it is a red gate on the critical path, and it would reproduce D-ORCH-017.
+
+**Remediation (orchestrator, docs only).**
+- Rewrite both lines without the assignment shape, for example: "a synthetic 13-character test literal (`pw-` plus ten digits)".
+- Do it in one commit on `main`, **before** PR #11 or #4 next merges `main`. A first-parent merge diff is a tree diff, so the line then never appears as added.
+- Do not allowlist it.
+- Future records and memories describe flagged values instead of quoting them. This record does.
+
+**Verification.**
+- `git grep -nE "pw-[0-9]{10}" origin/main` prints nothing.
+- Lane A's gitleaks is green on PR #11's next main-merge head.
+
+### R2.7 Merge conditions and routing (updated)
+
+**Merge.** PR #13 itself is not proposed for merge (D-ORCH-017). The **content at `e42e368` is approved**, and the superseding PR carries it.
+
+**Conditions before that PR merges:**
+- R1 §6 items 1–3: the table-class registration and the `$comment` fix; `grants.manifest` matching the PR13-SEC-04 decision, or the §4.4 status quo if it is still undecided; `db:lint-migrations` and catalog checks C1–C14 green after PR #11.
+- The D-ORCH-017 conditions in §R2.5.
+- A supersede round of this record naming the new head.
+
+| Owner | Item | Due |
+|---|---|---|
+| sdlc-orchestrator | PR13-SEC-11 (rewrite two lines on `main`) | Now, before PR #11 or #4 merges `main` |
+| sdlc-orchestrator / fix-cycle developer | Superseding branch per D-ORCH-017 and §R2.5; D-ORCH-015 reconciliation; optionally PR13-SEC-10 | Supersede round (after PR #11 merges) |
+| TASK-014 | PR13-SEC-09 (shared TLS helper and `checkToolingEnv` caller), with the TLS half of -03, -06 ordering and the -08 list | Before the seed one-shot runs with `APP_ENV` staging/production |
+| principal-architect + data-architect | PR13-SEC-04 | Before TASK-221 |
+| TASK-026 | PR13-SEC-05 remainder (target allow-list, two-part names) | With the first dataset |
+| TASK-089 | PR13-SEC-08 list. The PR13-SEC-02 gate is now met: its tests exist | With TASK-089 |
+| TASK-025 / TASK-221 | Durable `CONFIG_CHANGE` for `version` and `drift-restored`; audit-writer role on the seed path; re-baseline after `down.sql` | With those tasks |
+
+**ASVS delta.**
+
+| ASVS 4.0.3 | R1 | Round 2 |
+|---|---|---|
+| V2.10.2 / V2.10.4 (no default credentials; secure seeding) | Second signal missing | **Met** |
+| V6.4.1 / V14.1.x (secrets management, configuration hardening) | Partly met | Met for the URL guard and `_FILE`; TLS values partly met (PR13-SEC-09) |
+| V9.2.1 / V9.2.2 (verified TLS to back-end services) | Not assessed | Partly met; hardened environments are covered by TASK-014 (PR13-SEC-09) |
+| V7.1.1 (no credentials in logs) | Met | Met, with greater depth (all password forms and seeded `SEED_*` values) |
+| V7.2.x (security events) | Partial | Drift restoration is logged and reported; the durable audit entry is with TASK-025 |
+
+Sources for round 2:
+- pg 8.23.1 and pg-connection-string 2.14.1 `index.js`, observed through `connectionParameters` and `client.ssl`;
+- `apps/api/src/platform/db/client.ts` and `packages/config/src/{guards,env-input,environment}.ts` @ `e42e368`;
+- `.github/workflows/ci.yml` and `.gitleaks.toml` @ `63accea`;
+- DECISIONS D-ORCH-016, D-ORCH-017, D-TASK006-03, D-ARCH-073;
+- PostgreSQL 18 docs: *Client Connection Defaults* (`search_path`, implicit `pg_catalog`), *Operators* (§10.2 resolution by search-path order), and connection-setting precedence (client startup options over role and database settings).
+
+| Field | Value |
+|---|---|
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open at head `e42e368`, so the D-ORCH-004 merge rule is met for this content. **Closed:** PR13-SEC-01, -02, -03 (session half), -06 (PR scope), -07. **Open:** LOW PR13-SEC-04 (principal-architect, before TASK-221) and PR13-SEC-09 (TASK-014); INFO -05 (TASK-026), -08 (later tasks), -10 (optional), -11 (orchestrator, before PR #11 or #4 merges `main`). The gitleaks hit is a synthetic test value, not a credential, and the final tree is clean. D-ORCH-017 is endorsed under the §R2.5 conditions. PR #13 merges only through the superseding branch, after a supersede round of this record names its head |

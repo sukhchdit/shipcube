@@ -7,7 +7,7 @@ metadata:
 
 Before pushing any commit to a PR branch, run gitleaks locally on the new commits. Generate every test password at run time (`randomBytes`), never as a literal.
 
-**Why:** In PR #13 fix cycle 1 (2026-11-13), `const PASSWORD = 'pw-0123456789';` in a unit test tripped gitleaks `generic-api-key`. Lane A scans `base..head` of the PR. Fixing the line in a later commit does not help: the commit stays in the range, and there are no force pushes. The only remedy is a narrow allowlist (commit + path + line) committed to `.gitleaks.toml` on **main**, because lane A reads it from the base ref. That needs the orchestrator and security-analyst, so lane A stayed red.
+**Why:** In PR #13 fix cycle 1 (2026-11-13), a synthetic 13-character test password literal assigned to a PASSWORD constant in a unit test tripped gitleaks `generic-api-key`. Lane A scans `base..head` of the PR. Fixing the line in a later commit does not help: the commit stays in the range, and there are no force pushes. The only remedy is a narrow allowlist (commit + path + line) committed to `.gitleaks.toml` on **main**, because lane A reads it from the base ref. That needs the orchestrator and security-analyst, so lane A stayed red.
 
 **How to apply:**
 - Run this before the push, from the worktree:

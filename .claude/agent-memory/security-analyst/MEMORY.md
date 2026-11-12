@@ -12,4 +12,4 @@
 - [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R1+R2 @a3e8edd PASS_W_F-U; requestTransaction/Sql-splice/U& escapes; arch items 1/2b/5/6/8 open → R3; TASK-020/021/024 checks
 - [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
-- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 PASS_W_F-U @e92cd6f; ECS-signal gap gates TASK-089; R2 reconciliation + TASK-221/014/025 checks
+- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; supersede-round checks (D-ORCH-017); 09 TLS values→TASK-014; 11 literal on main

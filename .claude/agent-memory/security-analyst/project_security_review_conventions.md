@@ -15,6 +15,11 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - Give it at most 2 tasks per dispatch.
 - Or run the licence, audit and maintenance checks yourself with Node scripts; this is fast.
 - gitleaks works via the Docker image with `--redact`. In Git Bash, prefix it with `MSYS_NO_PATHCONV=1`, otherwise `/repo` is rewritten to `C:/Program Files/Git/repo`. For worktree commits, mount the main repo, which holds the shared object store, and use `--log-opts=<base>..<head>`.
+- **gitleaks `dir` mode** (scanning a `git archive` tree) reports paths as `/scan/...`.
+  - The path-anchored allowlists in `.gitleaks.toml` (`^docs/...`) therefore do not match in that mode.
+  - So the 17 PR1-SEC-11 hits (`openapi.yaml`, the agent docs) always show up there. Triage them as allow-listed; lane A's git mode reports repo-relative paths.
+  - Lane A scans `base.sha..head.sha` with `--diff-merges=first-parent`. Any text on main that a branch has not yet merged arrives as *added lines* in that branch's next main-merge.
+  - Therefore never quote a flagged value in docs, records or memory (PR13-SEC-11).
 - Semgrep is not installed on the host.
 - **Probing lint configs without running the suite.** A single-process `ESLint#lintText` against the worktree's real `eslint.config.mjs` stays light enough for the memory-constrained host. Load ESLint from the worktree with `createRequire(<worktree>/package.json)`, and add the `tseslint.configs.disableTypeChecked` + `projectService: false` overrides, because the probe files are not on disk. `isPathIgnored` / `calculateConfigForFile` show coverage holes. Write the probe file with a heredoc, not a `node -e` string, because quoting breaks in Git Bash.
 - **Probe scripts with regex escapes.** A Bash-tool heredoc (even `<<'EOF'`) turned `\\b` into `\b` in one case (PR-0005, 2026-11-12). The probe then silently matched nothing. Write such probes with the Write tool, and include a positive control line in every probe.
