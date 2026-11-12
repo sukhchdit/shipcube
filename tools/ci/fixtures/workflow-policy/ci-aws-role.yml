@@ -1,0 +1,19 @@
+name: fixture
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::000000000000:role/deploy

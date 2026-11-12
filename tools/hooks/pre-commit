@@ -1,0 +1,20 @@
+#!/bin/sh
+# Pre-commit hook (TASK-007, CLAUDE.md §2 developer experience). Installed with `npm run hooks:install`, which only sets
+# `git config core.hooksPath tools/hooks` (no lifecycle scripts, nothing downloaded).
+#
+# Fast and offline: Prettier check and ESLint on the STAGED files only, through the locally installed binaries
+# (`npm exec --no --` fails instead of downloading). Lane A runs the full gates; skip this hook with `git commit
+# --no-verify` only when you know lane A will catch it.
+set -eu
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+# Prettier: every staged file it can format (ignored and unknown files are skipped by Prettier itself).
+printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 npm exec --no -- prettier --check --ignore-unknown --no-error-on-unmatched-pattern
+
+# ESLint: staged JavaScript/TypeScript files only (the config's ignores still apply).
+lintable=$(printf '%s\n' "$staged" | grep -E '\.(js|jsx|mjs|cjs|ts|tsx|mts|cts)$' || true)
+if [ -n "$lintable" ]; then
+  printf '%s\n' "$lintable" | tr '\n' '\0' | xargs -0 npm exec --no -- eslint --max-warnings 0 --no-warn-ignored
+fi

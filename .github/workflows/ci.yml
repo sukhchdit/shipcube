@@ -1,0 +1,319 @@
+# Lane A: hosted PR fast lane (ADR-0023 amendments A, F, I, J; D-ARCH-010; TASK-007).
+#
+# - Runs on non-draft pull requests, and on pushes to main only when the repository variable CI_MAIN_FAST_LANE is
+#   'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac) is workflow_dispatch-only and
+#   belongs to TASK-015. Nothing here deploys, pushes images, publishes packages or runs terraform.
+# - Jobs: changes -> fast-lane -> ci-gate. ci-gate is the one required status check.
+# - No secrets: GITHUB_TOKEN (read-only) is the only credential (ADR-0023 amendment H).
+# - Gate tooling (tools/ci, .semgrep, .gitleaks.toml) runs from the BASE ref when the base has it (SEC-P3-31); a
+#   checker that the base does not have yet is bootstrapped from the head and the job summary says so.
+# - Every action is pinned by commit SHA and every container tool by image digest; tools/ci/check-workflow-policy.mjs
+#   enforces this file's rules for every workflow.
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'prisma/**'
+      - 'infra/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'compose*.yaml'
+      - '**/Dockerfile*'
+      - 'package*.json'
+      - '.npmrc'
+      - '.github/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # D-ARCH-044 / ADR-0023 am. J item 5: required at workflow level in every workflow.
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+  # Container tools, by digest (tag kept for readability; the digest wins).
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  ACTIONLINT_IMAGE: docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  OSV_SCANNER_IMAGE: ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
+
+jobs:
+  changes:
+    name: changes
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'push' && vars.CI_MAIN_FAST_LANE == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      lint_controls: ${{ steps.classify.outputs.lint_controls }}
+    steps:
+      - name: Classify changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          files="$RUNNER_TEMP/changed.txt"
+          if [ "$EVENT" = "pull_request" ]; then
+            gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" --jq '.[].filename' > "$files"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[].filename' > "$files"
+          else
+            : > "$files"
+          fi
+          count=$(wc -l < "$files")
+          # Docs-only changes skip install, tests and build; every other change (or an unknown list) runs everything.
+          if [ "$count" -gt 0 ] && ! grep -qvE '^(docs/|\.claude/)|\.md$' "$files"; then code=false; else code=true; fi
+          if grep -qE '^(eslint\.config\.mjs|stylelint\.config\.mjs|\.stylelintignore|tools/(eslint-rules|stylelint-rules|lint)/|tests/fixtures/(lint|semgrep)/|\.semgrep/|package\.json$)' "$files"; then
+            lint_controls=true
+          else
+            lint_controls=false
+          fi
+          {
+            echo "code=$code"
+            echo "lint_controls=$lint_controls"
+          } >> "$GITHUB_OUTPUT"
+          echo "changed files: $count, code=$code, lint_controls=$lint_controls"
+
+  fast-lane:
+    name: fast-lane
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      # PR1-SEC-03 (c): job level as well, so an out-of-graph nested install inherits it.
+      NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+      CODE: ${{ needs.changes.outputs.code }}
+      LINT_CONTROLS: ${{ needs.changes.outputs.lint_controls }}
+      RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout (full history for the base ref and the PR commit range)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Gate tooling from the base ref (SEC-P3-31)
+        run: |
+          set -euo pipefail
+          base_dir="$RUNNER_TEMP/base"
+          mkdir -p "$base_dir"
+          for path in tools/ci .semgrep .gitleaks.toml .github/CODEOWNERS; do
+            if git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then
+              git archive "$RANGE_BASE" "$path" | tar -x -C "$base_dir"
+            fi
+          done
+          {
+            echo "## Lane A (fast lane)"
+            echo
+            echo "Range \`${RANGE_BASE:0:7}..${RANGE_HEAD:0:7}\`, code changes: \`$CODE\`."
+            echo
+            echo "| Gate tool | Runs from |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for tool in check-workflow-policy check-install-flags check-migration-immutability check-lockfile check-dep-age licence-check check-audit check-porcelain check-security-owned-paths run-semgrep; do
+            var="GATE_$(echo "$tool" | tr 'a-z-' 'A-Z_')"
+            if [ -f "$base_dir/tools/ci/$tool.mjs" ]; then
+              echo "$var=$base_dir/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
+              echo "| \`$tool\` | base ref |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$var=$GITHUB_WORKSPACE/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
+              echo "| \`$tool\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          if [ -f "$base_dir/.gitleaks.toml" ]; then
+            echo "GITLEAKS_CONFIG_DIR=$base_dir" >> "$GITHUB_ENV"
+          else
+            echo "GITLEAKS_CONFIG_DIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          fi
+
+      - name: Workflow policy
+        run: node "$GATE_CHECK_WORKFLOW_POLICY" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Install flags (check-install-flags with check-no-npx and check-no-raw-prisma)
+        run: node "$GATE_CHECK_INSTALL_FLAGS" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Released migrations are immutable (PR8-SEC-01)
+        run: node "$GATE_CHECK_MIGRATION_IMMUTABILITY" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Lockfile provenance and delta
+        if: env.CODE == 'true'
+        run: node "$GATE_CHECK_LOCKFILE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Release cooldown and freshness
+        if: env.CODE == 'true'
+        run: |
+          set -euo pipefail
+          node "$GATE_CHECK_DEP_AGE" --fetch --out "$RUNNER_TEMP/registry-times.json" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE"
+          node "$GATE_CHECK_DEP_AGE" --times "$RUNNER_TEMP/registry-times.json" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Install (npm ci --ignore-scripts)
+        if: env.CODE == 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Prisma engine cache key
+        if: env.CODE == 'true'
+        id: engines
+        run: |
+          set -euo pipefail
+          version=$(node -e "process.stdout.write(JSON.parse(require('node:fs').readFileSync('tools/deps/prisma-engines.json','utf8')).enginesVersion)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Prisma schema engine (re-verified by deps:rebuild)
+        if: env.CODE == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+          key: prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}
+
+      - name: Allow-listed install steps (deps:rebuild)
+        if: env.CODE == 'true'
+        run: npm run deps:rebuild
+
+      - name: Licences
+        if: env.CODE == 'true'
+        run: node "$GATE_LICENCE_CHECK" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Registry signatures and provenance (PR1-SEC-12)
+        if: env.CODE == 'true'
+        run: npm audit signatures --@platform:registry=https://registry.npmjs.org/
+
+      - name: Vulnerability audit (npm audit + osv-scanner)
+        if: env.CODE == 'true'
+        run: |
+          # Both scanners exit non-zero when they report anything; check-audit is the gate and fails on missing or
+          # error JSON, so their exit codes are recorded rather than acted on here.
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          echo "npm audit exit $? (evaluated by check-audit)"
+          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" "$OSV_SCANNER_IMAGE" scan source --lockfile /src/package-lock.json --format json > "$RUNNER_TEMP/osv.json"
+          echo "osv-scanner exit $? (evaluated by check-audit)"
+          set -e
+          node "$GATE_CHECK_AUDIT" --root "$GITHUB_WORKSPACE" --npm-audit "$RUNNER_TEMP/npm-audit.json" --osv "$RUNNER_TEMP/osv.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint (ESLint, Stylelint, suppressions)
+        if: env.CODE == 'true'
+        run: npm run lint
+
+      - name: Format check
+        if: env.CODE == 'true'
+        run: npm run format:check
+
+      - name: Commit messages (commitlint over the range)
+        if: env.CODE == 'true'
+        run: npm exec --no -- commitlint --from "$RANGE_BASE" --to "$RANGE_HEAD" --verbose
+
+      - name: actionlint
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color
+
+      - name: Type-check
+        if: env.CODE == 'true'
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: env.CODE == 'true'
+        run: npm run test:unit
+
+      - name: Lint negative fixtures from the base ref against the head configs (PR2-SEC-08)
+        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'
+        run: |
+          set -euo pipefail
+          suite=tools/lint/negative-fixtures.test.ts
+          if ! git cat-file -e "$RANGE_BASE:$suite" 2>/dev/null; then
+            echo "Base ref has no $suite; the head copy already ran in the unit tests." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git checkout "$RANGE_BASE" -- "$suite" tests/fixtures/lint
+          status=0
+          # Path first: after --selectProjects, jest would read the path as a project name.
+          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js "$suite" --selectProjects unit || status=$?
+          git checkout HEAD -- "$suite" tests/fixtures/lint
+          git clean -fdq -- tests/fixtures/lint
+          echo "Base-ref lint negative fixtures: exit $status" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Build
+        if: env.CODE == 'true'
+        run: npm run build
+
+      - name: Build must not mutate the tree (git status --porcelain)
+        if: env.CODE == 'true'
+        run: node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Gitleaks (PR commit range)
+        run: |
+          set -euo pipefail
+          range="$RANGE_BASE..$RANGE_HEAD"
+          if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ]; then range="-1 $RANGE_HEAD"; fi
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo:ro" -v "$GITLEAKS_CONFIG_DIR/.gitleaks.toml:/config/gitleaks.toml:ro" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+            "$GITLEAKS_IMAGE" git /repo --config /config/gitleaks.toml --log-opts="$range" --redact --no-banner --exit-code 1
+
+      - name: Semgrep rule self-test (when rules or their fixtures change)
+        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'
+        run: node "$GITHUB_WORKSPACE/tools/ci/run-semgrep.mjs" --root "$GITHUB_WORKSPACE" --test --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Semgrep (rules from the base ref when it has them; --disable-nosem)
+        if: env.CODE == 'true'
+        run: |
+          set -euo pipefail
+          rules=()
+          if [ -d "$RUNNER_TEMP/base/.semgrep" ]; then rules=(--rules-from "$RUNNER_TEMP/base/.semgrep"); fi
+          node "$GATE_RUN_SEMGREP" --root "$GITHUB_WORKSPACE" "${rules[@]}" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Security-owned paths need a review record (PR5-SEC-04)
+        run: |
+          set -euo pipefail
+          mode=()
+          if [ ! -f "$RUNNER_TEMP/base/tools/ci/check-security-owned-paths.mjs" ]; then mode=(--report-only); fi
+          node "$GATE_CHECK_SECURITY_OWNED_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" "${mode[@]}" --summary "$GITHUB_STEP_SUMMARY"
+
+  ci-gate:
+    name: ci-gate
+    if: always() && needs.changes.result != 'skipped'
+    needs: [changes, fast-lane]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Aggregate lane A
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          FAST_LANE: ${{ needs.fast-lane.result }}
+        run: |
+          echo "changes=$CHANGES fast-lane=$FAST_LANE"
+          if [ "$CHANGES" != "success" ] || [ "$FAST_LANE" != "success" ]; then
+            echo "Lane A is not green." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Lane A green." >> "$GITHUB_STEP_SUMMARY"
