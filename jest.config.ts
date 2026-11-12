@@ -1,8 +1,8 @@
 /**
  * Jest 30 configuration (ADR-0024). Three projects selected by the root scripts:
  *   unit        `*.test.ts(x)`      -> npm run test:unit
- *   integration `*.int.test.ts`     -> npm run test:integration (Testcontainers; Docker required)
- *   api         `*.api.test.ts`     -> npm run test:api (Supertest + OpenAPI validation)
+ *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
+ *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
  * Sources are transpiled by @swc/jest using the root `.swcrc` (CommonJS output, no type-check;
  * `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript sources
  * through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
@@ -30,11 +30,20 @@ const common: ProjectConfig = {
 
 const config: Config = {
   coverageProvider: 'v8',
+  // The 85/75 gate spans the whole repository (TEST-STRATEGY §8). The include globs cover every workspace source
+  // root, i.e. each plain directory in a workspace tsconfig `include`: `src/` everywhere, the React Router
+  // framework-mode `app/` of apps/web and apps/admin, and the Prisma seed framework. tests/* workspaces hold test
+  // code only. tools/repo/coverage-scope.test.ts fails when the source roots and these globs drift apart.
   collectCoverageFrom: [
-    '{apps,packages}/*/src/**/*.{ts,tsx}',
+    '{apps,packages}/*/{src,app}/**/*.{ts,tsx}',
+    'prisma/seed/**/*.{ts,tsx}',
     '!**/*.test.{ts,tsx}',
     '!**/*.d.ts',
     '!**/*.generated.ts',
+    // Test helpers beside sources (the module `tests/` layer, fixtures) and generated output.
+    '!**/{tests,fixtures}/**',
+    '!**/.react-router/**',
+    '!prisma/generated/**',
     // Package entry points only re-export; the v8 provider would count them as uncovered lines.
     '!packages/*/src/index.ts',
   ],
@@ -50,17 +59,17 @@ const config: Config = {
       ...common,
       displayName: 'unit',
       testMatch: ['**/*.test.{ts,tsx}'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.int\\.test\\.ts$', '\\.api\\.test\\.ts$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx?$', '/tests/e2e/'],
     },
     {
       ...common,
       displayName: 'integration',
-      testMatch: ['**/*.int.test.ts'],
+      testMatch: ['**/*.int.test.{ts,tsx}'],
     },
     {
       ...common,
       displayName: 'api',
-      testMatch: ['**/*.api.test.ts'],
+      testMatch: ['**/*.api.test.{ts,tsx}'],
     },
   ],
 };

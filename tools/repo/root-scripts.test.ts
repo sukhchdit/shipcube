@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
+import { listManifests } from './workspaces.js';
 
 const repoRoot = findRepoRoot();
 const rootPkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
@@ -80,5 +81,54 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
     const result = typecheck("import { answer } from '../../../packages/lib/src/index.js';\nexport const right: number = answer();\n");
     expect(result.stdout).toBe('');
     expect(result.status).toBe(0);
+  });
+});
+
+/**
+ * The fixture above proves the mechanism (`tsc -b` fails on an error in a referenced project). These checks tie
+ * "a type error in any workspace" (AT-US-001-04) to the repository itself: `npm run typecheck` builds the root
+ * solution file, so a workspace missing from its `references`, or a project that includes nothing, would drop out
+ * of type-checking with every other test still green (PR #1 review M2).
+ */
+describe('the typecheck solution reaches every workspace (AT-US-001-04)', () => {
+  interface TsProject {
+    files?: string[];
+    include?: string[];
+    references?: Array<{ path: string }>;
+  }
+  const readProject = (dir: string): TsProject =>
+    JSON.parse(readFileSync(join(repoRoot, ...dir.split('/'), 'tsconfig.json'), 'utf8')) as TsProject;
+  const normalize = (path: string) => path.replace(/^\.\//, '').replace(/\/+$/, '');
+
+  /** Projects outside the npm workspaces that the solution must still type-check. */
+  const NON_WORKSPACE_PROJECTS = ['tools'];
+  const workspaceDirs = listManifests(repoRoot)
+    .map(({ dir }) => dir)
+    .filter((dir) => dir !== '.');
+  const solution = readProject('.');
+  const referenced = (solution.references ?? []).map(({ path }) => normalize(path));
+
+  it('[AT-US-001-04] every workspace has a tsconfig.json', () => {
+    expect(workspaceDirs.length).toBeGreaterThan(0);
+    const missing = workspaceDirs.filter((dir) => !existsSync(join(repoRoot, ...dir.split('/'), 'tsconfig.json')));
+    expect(missing).toEqual([]);
+  });
+
+  it('[AT-US-001-04] the root tsconfig.json references exactly the workspaces plus tools, once each', () => {
+    expect(new Set(referenced).size).toBe(referenced.length);
+    expect([...referenced].sort()).toEqual([...workspaceDirs, ...NON_WORKSPACE_PROJECTS].sort());
+  });
+
+  it('[AT-US-001-04] the root solution compiles nothing itself, so every file belongs to a referenced project', () => {
+    expect(solution.files).toEqual([]);
+    expect(solution.include).toBeUndefined();
+  });
+
+  it('[AT-US-001-04] every referenced project includes something (non-empty include or files)', () => {
+    const empty = referenced.filter((dir) => {
+      const project = readProject(dir);
+      return (project.include ?? []).length === 0 && (project.files ?? []).length === 0;
+    });
+    expect(empty).toEqual([]);
   });
 });
