@@ -121,3 +121,6 @@ Round 2 of a spike PR (PR #6 r2):
   - `NULLS NOT DISTINCT` keys;
   - partial unique arbiters;
   - columns that are insert-only or runtime-mutated (counter resets).
+
+**Drift = edit OR delete (PR #13 r2, 2026-11-13).** When a fix adds "report/log drift restoration", check that BOTH counters trigger it: an upsert reports a hand-DELETED row as `inserted`, not `updated`. With an unchanged version/hash any insert is a restoration. Probe `runDataset` with a fake returning `[{inserted:true}]` and the matching version row.
+**Client-side timeouts on pg CLIs:** `statement_timeout` is server-side; a blackholed network needs pg `query_timeout` + `keepAlive`.

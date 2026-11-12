@@ -118,3 +118,103 @@ The idempotency proof is sound. The `IS DISTINCT FROM` predicate on `DO UPDATE` 
 2. m1–m5 fixed in-PR, or explicitly routed with a DECISIONS entry. m1 and m2 are small and should be fixed in-PR. For m4, at least the documentation and the "never list a runtime-mutated column" rule must land in-PR.
 3. Per D-ORCH-015 this PR merges after PR #11. The reconcile commit carries m6: the `prisma-seed` boundary category, the `platform.json` entry with the `$comment` fix, and `grants.manifest`. It must then pass full typed lint, `db:lint-migrations` and the PR #11 catalog suite (C5) on the merged head.
 4. CI (`statusCheckRollup`) is empty on the head. Gatekeeper re-runs the gates on the final merge-main commit.
+
+## Round 2 (head e42e368)
+
+- **Head:** `e42e368`. It is a clean merge of `origin/main` `d68168e`. Fix commits: `1a476d6` (superseded by the `39625e1` resolution), `e6ccf60`, `26ee487` and `5fcf177`. Merges: `297bf69`, `5d708bc`, `39625e1` and `e42e368`.
+- **Reviewer:** code-reviewer · 2026-11-13.
+- **Scope:** per D-ORCH-017 this branch will be superseded by a fresh branch with the same tree, so this round reviews the content, not the history.
+- **Inputs:**
+  - `git diff e92cd6f e42e368 -- prisma/` and `git diff origin/main...e42e368`;
+  - the PR body "Fix cycle 1" table and comment;
+  - DECISIONS D-061, D-ORCH-016, D-ORCH-017 and D-TASK006-03;
+  - PR #11 head `a3e8edd`, for the merge-second check.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: All round-1 code findings are closed: m1, m2, m3 and m5 in code, with tests that fail when the fix is removed;
+         m4 in docs; m6 is routed to the D-ORCH-015 reconcile. My round-1 probes now pass: a dropped connection exits 2
+         with one JSON line, and 2,408 URL shapes produce 0 overrides of the pin. One new MINOR is left (R2-m1): a
+         hand-DELETED row of an audited dataset is re-inserted with no drift-restored change and no warn log. It is a
+         one-line fix to make in the superseding branch. Three NITs. M1 is closed on the PR side; the plan-sheet fold is
+         still owed (§R2.5).
+FINDINGS: R2-m1 (MINOR); R2-n1..n3 (NIT). See §R2.3.
+SECURITY-FLAGS: none new. Already routed: PR13-SEC-03 TLS half (sslmode=verify-full and sslrootcert value rules of
+         D-TASK006-03 are not applied to DATABASE_MIGRATOR_URL) → TASK-014; PR13-SEC-04 → architect before TASK-221.
+```
+
+### R2.1 Verification performed
+
+Constraints followed: read-only by SHA, no commands in the worktree, no `npm ci`, build, Docker or full suites. I made a `git archive e42e368` scratch copy (without `docs` and `.claude`) under `scratchpad/review/PR-13-cr-r2/copy`, with `node_modules` junctioned to the main checkout's (740 entries). Main's `packages/` is byte-identical to the head's (`git diff e42e368 HEAD -- packages/` is empty). Afterwards I removed the junction and the copy. There is no drive-root link. The worktree is at HEAD `e42e368` with an empty `git status`.
+
+| Check | Result |
+|---|---|
+| Unit files, one at a time (`jest --selectProjects unit`): migrator-connection, cli, runner, validate, credential-plan, hash, sql, run-demo-seed, authz-parity-step | 9 files, **166/166 passed** (29 + 17 + 15 + 20 + 49 + 12 + 7 + 12 + 5) |
+| `prettier --check prisma/seed prisma/tests/seed prisma/README.md` | clean |
+| Probe 2 re-run (fake wire-protocol server: answers the `pg_settings` read-back with the pinned values over the extended protocol, then destroys the socket on `BEGIN`) | **exit 2**, exactly one stderr line `{"event":"seed.failed","error":"Error","message":"Connection terminated unexpectedly"}`, no stack, password not printed. Round 1 crashed with exit 1. The PR's own test drops on the first query, which is now the read-back; this probe also covers the run path |
+| Probe: read-back returns `search_path=public`, or omits `statement_timeout` | **exit 1** `seed.refused SEED_ENVIRONMENT_INVALID [DATABASE_MIGRATOR_URL]`. Server saw `P B D E S X`: no `BEGIN`, so the refusal happens before any write |
+| Probe 1 re-run as a differential: 2,408 URLs (8 hosts × 15 keys including `Options`, `%6Fptions`, `options%00`, `sslmode%26options`, `uselibpqcompat`, `sslcert`, `;options=`, a path-embedded `%3Foptions`). Each URL accepted by `readMigratorUrl` was fed to pg 8.23.1 `ConnectionParameters` with the PR's client config | 280 accepted, **0** with a changed `options`, `statement_timeout`, `idle_in_transaction_session_timeout` or `application_name`, or a socket host. The URL gate and pg's parser agree, and the read-back is a second layer behind them |
+| Mutation tests (sed on the copy, each restored) | All killed: no `'error'` listener → cli 1 failed (the negative control is real); no `assertPinnedSession` → 5 failed; no `%`-host check → 1; no repeat check → 1; no drift-restored branch → runner 2; no `assertNotLocalOnEcs` call → cli 2; no `refuseFileVariants` call → cli 3 |
+| Probe: `runDataset`, audited dataset, unchanged version and hash, the upsert reports one **inserted** row (a row deleted by hand) | `status=applied inserted=1 updated=0`, **no `warn`, no `ConfigChange`** (R2-m1). The edited-row case gives `drift-restored` plus `seed.drift_restored` as claimed |
+| Merge resolutions | `git merge-tree --write-tree` of each merge's parents vs the merge: `297bf69`, `5d708bc` and `e42e368` are byte-identical (pure unions). `39625e1`: `packages/` equals main's side exactly (`git diff 39625e1^2 39625e1 -- packages/` is empty); the only hand edits are the documented `migrator-connection.ts`, its test and the README |
+| Net PR diff under `packages/` (`origin/main...e42e368` and `origin/main e42e368`) | **none**. `isAllowListedPostgresUrl` is gone from the tree |
+| Literal secrets in the final tree (`git grep` over `prisma/seed`, `prisma/tests/seed`, the net diff) | none. Every password comes from `randomBytes` (`randomHex`, `randomPassword`, `randomSecret`). `pw-0123456789` is gone from the tree; it remains only in `e6ccf60`'s history, which D-ORCH-017 handles. `'changeme-changeme'` (`credential-plan.test.ts`) is a placeholder the test asserts is *refused*; it is low-entropy and not credential-shaped |
+| PR #11 head `a3e8edd` vs `e42e368` | `git merge-tree` now conflicts in `.env.example`, `packages/config/src/index.ts` and `schema.ts`. These are PR #11 vs main (PR #9) conflicts; PR #13 has no net change there. PR #11's `prisma-tests` allow-list still lacks `prisma-seed` (eslint.config.mjs:282), and `seed.int.test.ts:20-23` still imports `../../seed/**`. m6 is unchanged and stays on the reconcile |
+| `gh pr view 13 --json statusCheckRollup` | `fast-lane` SUCCESS, `scans` FAILURE (gitleaks on `e6ccf60`, D-ORCH-017), `ci-gate` FAILURE (follows `scans`) |
+
+I did not re-run these and rely on the PR body for them: typecheck, full typed lint, `test:unit` (1,793), `test:api`, `test:integration` (83 including the 4 new seed cases), coverage (97.40 % / 96.64 %; `index.ts` 97.3 / 91.2, `migrator-connection.ts` 100 / 97.4), build and Semgrep. I read the 4 new integration cases. They assert what the table claims: the `ALTER ROLE … IN DATABASE … SET search_path = public` case is database-scoped; the refused-URL case checks that the version table stays empty; the concurrent seeds give `['applied','unchanged']` with 300 rows.
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 | **Closed (PR side)**; docs fold owed, see §R2.5 | PR body relabelled (AT-05/-10 Partial, AT-02 → TASK-014, AT-09 → TASK-089). D-061 is logged. traceability v1.5 and the EPIC-17 story note are updated. Still owed: WAVE-00 TASK-023 still reads "Stories (completes) US-049" and "AT-US-049-01 … -10"; the TASK-014 and TASK-089 sheets carry no AT-US-049 IDs; traceability rows 162-163 say `Planned`, not the "Planned (partial …)" that the v1.5 note describes |
+| m1 | **Closed** | `migrator-connection.ts:165` listener; `end()` rejection swallowed (`:172`). My probe and the PR's negative control both prove it |
+| m2 | **Closed** | `RUNTIME_DATABASE_URL_PARAMS` (single-sourced from `@platform/config`), TCP host, no repeats, read-back of 3 settings from `pg_catalog.pg_settings` before `run`. 0/280 overrides in the differential. The read-back query is fully qualified |
+| m3 | **Closed** (option A) | `readSecret` copy and `DATABASE_MIGRATOR_URL_FILE` removed. `refuseFileVariants` runs first and covers APP_ENV, NODE_ENV, the URL and SEED_*; no file is opened and no path is printed (unit + CLI). README updated |
+| m4 | **Closed** (docs, as required) | `contracts.ts:30-37` and README "Dataset contract limits": limits (a)–(d), the HARD RULE, and first-consumer owners. See R2-n1 |
+| m5 | **Closed for edits; deletions open** (R2-m1) | `ConfigChange` is now a discriminated union; the `loggingConfigChangeSink` handles both kinds; a version change takes precedence. Unit + integration tests |
+| m6 | **Routed, unchanged** | D-ORCH-015 / D-ORCH-017 reconcile after PR #11 merges. Re-checked on `a3e8edd` (see §R2.1) |
+| n1 | Closed | `Object.hasOwn`; tests for `__proto__` and `constructor` |
+| n2 | Closed | `''` counts as unset in staging/production; README + test |
+| n3 | Closed | `totalCount?/idleCount?: never` plus a run-time `'totalCount' in sql` refusal (the prototype getter on `pg.Pool` matches; a `PoolClient` correctly passes) |
+| n4 | Closed | URL + raw/decoded password + revealed SEED_* values, longest first; fake-server echo test |
+| n5 | Closed | `pg_catalog.decode`, `::pg_catalog.uuid` |
+| n6 | Closed | `RESERVED_DATASET_NAMES = ['authz_matrix']` + test |
+| n7 | Routed | TASK-014 (D-061 names `NODE_ENV=development`, `APP_ENV=local` for the one-shot) |
+| n8 | Closed | concurrent-seed integration case |
+
+The ECS guard order is correct. `main` runs `refuseFileVariants` → `parseAppEnv` → `assertNotLocalOnEcs` → `planDemoCredentials` → `readMigratorUrl` → connect. So the second-signal refusal applies to both commands, before the plan and before any connection. The CLI test against an unreachable URL pins exit 1, not 2. `ECS_METADATA_KEYS` and `isLocalAppEnv` are imported from `@platform/config` (single source with `loadConfig`).
+
+### R2.3 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `prisma/seed/framework/runner.ts:89` (`} else if (updated > 0) {`); `contracts.ts` `ConfigChange` doc | **Drift by deletion is restored silently.** With an unchanged label and hash, any row the upsert *inserts* must have been deleted by hand: a new seeded row would change the hash. The runner counts it in `inserted`, and the branch tests only `updated`. So restoring a deleted `feature_flags` row (audited) emits no `drift-restored` `ConfigChange` and no `warn seed.drift_restored`. The run only reports `status: applied` (probe in §R2.1). data-model §9.1 ("configuration changes write one `CONFIG_CHANGE` each") and the new tamper-evidence log both cover a delete as much as an edit. The same silent path applies to insert-only datasets (a deleted published row is re-inserted with no warn). | Change the condition to `inserted > 0 \|\| updated > 0`. Report `restoredRows: inserted + updated`, or add `reinsertedRows` alongside it, and log both counts in the warn. Add a runner unit test (fake returns `[{ inserted: true }]` with the existing version → one `drift-restored`) and one integration step (DELETE one row of the audited probe → restored, one change, version row unchanged). Make this fix in the superseding branch before it opens. Otherwise route it to TASK-025 with a DECISIONS line, since TASK-025 implements the sink. |
+| R2-n1 | NIT | `prisma/README.md:67` | The "- Tests: unit beside the code, …" bullet now appears twice: at :49 and again after the limits table at :67, where it renders as a stray list under the table. | Delete line 67. |
+| R2-n2 | NIT | `prisma/seed/migrator-connection.ts:58-66` | The list is single-sourced, but the predicate (unique names, every one allow-listed) is now its third copy: `packages/config/src/guards.ts:65` `hasOnlyRuntimeDatabaseUrlParams` (not exported) and `apps/api/src/platform/db/client.ts:74`. This is the same drift class as round-1 m3. | Export `hasOnlyRuntimeDatabaseUrlParams` from `@platform/config` and use it here; the host checks stay local. Can ride with TASK-014's `checkToolingEnv`, which will add the TLS value rules of D-TASK006-03 to this URL anyway. |
+| R2-n3 | NIT → TASK-014 | `migrator-connection.ts:157-164` | The timeouts are all server-side: `statement_timeout` and `idle_in_transaction_session_timeout`. A blackholed network (no RST) leaves a pending query waiting on TCP retransmission, on the order of 15 min on Linux, because pg has no client-side `query_timeout` and no keepalive by default. CLAUDE.md §9 says every external call has timeouts. Low impact for a one-shot job; `tools/db/bootstrap.ts` has the same gap. | Add `query_timeout: STATEMENT_TIMEOUT_MS + 10_000` and `keepAlive: true` to the client config, and do the same in bootstrap (TASK-014). |
+
+### R2.4 Good
+
+- The pin read-back is the right control. It sits behind a URL gate that agrees with pg's own parser on every adversarial shape I tried. The `ALTER ROLE … SET search_path = public` integration case shows startup options beat role defaults.
+- Every guard added in this cycle has a test that fails when the guard is removed (7/7 mutations killed). The m1 test has a stated negative control.
+- The `39625e1` conflict was resolved by taking main's `packages/config` wholesale and moving the seed onto `RUNTIME_DATABASE_URL_PARAMS`, rather than keeping a branch-local export. The net diff under `packages/` is zero.
+- Test hygiene: every credential is generated at run time, and secrecy assertions cover stdout and stderr in each new CLI test.
+- The `ConfigChange` union keeps the TASK-025 port explicit (`kind` discriminator; `version` wins over `drift-restored`), and `loggingConfigChangeSink` handles both arms.
+
+### R2.5 Merge conditions (for the superseding PR, D-ORCH-017)
+
+1. **Tree identity.** The superseding PR's tree must equal `e42e368`'s tree plus only the reconcile commit(s), so its delta check must be empty outside them. Ideally it also carries the R2-m1 fix and the R2-n1 line delete. If R2-m1 is not fixed there, the orchestrator logs its routing to TASK-025.
+2. **m6 / D-ORCH-015 reconcile after PR #11 merges:**
+   - a `prisma-seed` boundaries category, plus `prisma-tests → prisma-seed`;
+   - the `platform.json` SYSTEM entry with the `$comment` fix;
+   - `grants.manifest`.
+   Then run full typed lint, `db:lint-migrations` and the PR #11 catalog suite (C5) on the merged head. Re-run typecheck too: PR #11 currently conflicts with main in `packages/config/src/index.ts`, and the seed imports `RUNTIME_DATABASE_URL_PARAMS` from there.
+3. **M1 docs fold (orchestrator / architect batch, D-061 "plan-data.mjs folded by the architect batch"):**
+   - WAVE-00 TASK-023 → "Stories (partial; completed by TASK-014, TASK-089) US-049", with its AT line limited to -01/-03/-04/-06/-07/-08;
+   - TASK-014 sheet gains AT-US-049-02;
+   - TASK-089 sheet gains AT-US-049-05/-09/-10-1/-10-2;
+   - traceability rows 162-163 status → "Planned (partial …)".
+   This must land before TASK-014 or TASK-089 is dispatched, and before the gatekeeper marks TASK-023 done.
+4. **Gates and records.** Lane A must be green on the superseding head (gitleaks clean without an allowlist). Its security record must be per D-ORCH-016. The gatekeeper re-runs the gates on the final head.
