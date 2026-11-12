@@ -26,7 +26,7 @@
 ## Build Board
 | Wave | Task | Agent (model) | Branch | Dev | Review | Security | Tests | Merged | Fix cycles | Escalation step |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | feat/TASK-001-spk-01-toolchain-spike-workspace @76b69c0 | ✅ | CHANGES_REQUESTED r1 (2 MAJOR) | PASS_WITH_FOLLOW-UPS (0 C/H; 4 MED routed) | ✅ 38/38 unit, lint, typecheck (orchestrator re-run) | | 1 (fixing) | |
+| 0.1 | TASK-001 SPK-01 toolchain + workspace foundation (PR #1) | senior-developer (opus) | feat/TASK-001-spk-01-toolchain-spike-workspace @4ec1bc4 | ✅ | r1 CHANGES_REQUESTED → r2 ▶ | r1 PASS_WITH_FOLLOW-UPS → r2 ▶ | ✅ 77/77 unit; audit --omit=dev 0 | | 1 (fixing) | |
 
 ## Escalations in progress
 _none_
@@ -53,6 +53,8 @@ _none_
 | COND-G4-PROD | Locked audit-anchor sink, RDS master break-glass only, pgaudit (SEC-COND-03 item 7); SPK-08 RDS C13(b) parity; SEC-P3-34 master search_path pin + break-glass runbook; KMS envelope, TLS, WAF (RR-03) | G4 for any production release (not this run) | platform-architect, release-manager | OPEN (n/a this run: no prod target) |
 | SEC-FU-36 | Per-user carrier quota share (SEC-P3-36) | before TASK-190 | principal-architect, product-manager | OPEN |
 | SEC-FU-QA | SEC-TC-65 adopt, SEC-TC-62 multi-org, SEC-TC-53 text | before Wave 4 | qa-lead | OPEN |
+| SEC-FU-PR1 | security-analyst confirms D-ARCH-003 rev 4 (licence/deprecation registers) and D-ARCH-041 (Prisma engine pin) in the TASK-003/TASK-007 reviews; senior-developer folds ADR-0023 am. J into the TASK-003/004/007/014/049/214 sheets + corrects SPK-01 §1 | batch 0.2/0.3 | security-analyst, senior-developer | OPEN |
+| BCRYPT-EXC | bcrypt 6.0.0 maintenance exception expires 2027-05-11 (D-ARCH-042); monthly review | 2027-05-11 | principal-architect, performance-engineer | OPEN |
 | COND-SANDBOX-DEMO | Real sandbox label from DHL, FedEx and UPS booked and paid end to end (M1 exit demo); needs creds outside the repo | Post-release, when creds supplied | qa-lead | OPEN (blocked on external creds, by design) |
 
 ## Top Risks

@@ -37,6 +37,10 @@
 4. **Valkey ACL users per service** (`api`, `worker`; no default user; key-prefix limits) locally and in AWS (platform.md §2.2; ADR-0010 amendment 7). Writing to the `bull:*` prefix requires the `worker` or `api` ACL user; the `requirepass`-only local setup is withdrawn.
 5. **Schedulers** that iterate organisations (§3) read the organisation list from PostgreSQL and enqueue one `kind`/`id` job per aggregate; they never embed `org_id` either. Verification: SEC-TC-20 (now mandatory), SEC-TC-50.
 
+## Amendment (2026-11-12, PR1-SEC): BullMQ's deprecated polyfill transitive (`docs/05-quality/security/PR-0001-TASK-001-security-review.md` PR1-SEC-07; D-ARCH-043)
+
+6. **`node-abort-controller` 3.1.1 stays as BullMQ's transitive, under a watch item.** BullMQ 6.7.x (`dist/cjs/classes/abort-controller.js`) `require`s the polyfill but uses `globalThis.AbortController` whenever it exists, so on Node 24 the module is loaded and never instantiated; the registry deprecation (2026-11-10) states obsolescence on supported Node, not a defect, and the package has no dependencies, no install script and no advisory. Recorded in `tools/ci/maintenance-exceptions.json` with the parent chain and a review at every BullMQ minor bump and by 2027-05-12 (ADR-0025 PR1-SEC amendment; ADR-0023 am. J item 4). No `override`, no fork; the entry is removed when BullMQ drops the dependency.
+
 ## Reversibility
 
 High.
