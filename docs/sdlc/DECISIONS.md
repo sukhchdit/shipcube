@@ -1071,3 +1071,9 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Why:** Fix-in-PR policy for small mediums (D-ORCH-006 item 2); AT-US-002-04 must hold literally; option (b) is a cheap second signal that fails closed on AWS without new config.
 - **Alternatives:** PR3-SEC-03 option (a) (require an explicit second env flag) — rejected as more config surface.
 - **Reversibility:** High.
+
+### D-ORCH-008 · 2026-11-12 · sdlc-orchestrator · Pull dependency-satisfied tasks forward while the batch 0.2 tail completes
+- **Decision:** While PR #3 (TASK-005, fix cycle 2) and PR #4 (TASK-004, Playwright harness after the 2026-11-12T20:18Z cooldown) finish, dispatch the tasks whose dependencies are already merged on main and whose locks are free: TASK-008 (SPK-03, 0.3, deps TASK-003), TASK-009 (SPK-02, 0.3, deps TASK-001) and TASK-013 (0.4, deps TASK-003, lock pkg-authz). TASK-006/TASK-007 (need TASK-005) and TASK-012 (0.4) follow as capacity frees. Docker/Testcontainers runs are serialized host-wide because the host is memory-constrained (~4 GB free; one gate run was reaped).
+- **Why:** Keeps MAX_PARALLEL_DEVELOPERS utilisation without breaking the DAG or batch locks; batches are a scheduling aid, dependencies and locks are the constraint.
+- **Alternatives:** Wait for batch 0.2 to close (rejected: ~6 h idle until the cooldown clears).
+- **Reversibility:** High.
