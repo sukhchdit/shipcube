@@ -62,7 +62,11 @@ Round 2 of a spike PR (PR #6 r2):
   - Also check whether an earlier gate rejects the input. Here `type-is` accepted it.
   - Prove it end to end over `app.listen(0)` with an event-loop gap sampler.
   - Fix: put the OWS inside the optional group. Prove it with a random-string differential against the old regex.
-- **Two allow-lists for one value** (a config guard and a driver adapter) drift. Probe that every value the config accepts is also accepted at runtime, or the failure arrives as exit 1 with a stack, not exit 78.
+- **Verifying a regex fix (PR #9 r3):**
+  - Run an exhaustive differential against the old regex (every string of length ≤ 8 over a 6-character alphabet is about 2 M strings, in seconds) as well as a random one.
+  - Re-insert the old regex as a mutation: synchronous regex tests *hang*, they do not fail (Jest timeouts cannot interrupt them), so run them under `timeout 45`.
+  - Mutate the order of the guard checks too; order is often unpinned.
+- **Two allow-lists for one value** (a config guard and a driver adapter) drift. After names are single-sourced, probe the *values* as well with a `loadConfig` × runtime-factory matrix (PR #9 r3). Probe that every value the config accepts is also accepted at runtime, or the failure arrives as exit 1 with a stack, not exit 78.
 
 **CI gate / supply-chain checker patterns (PR #10, 2026-11-12).** Each was proven by a probe of under a minute.
 - **npm boolean flags take a bare `true`/`false` as their value.** `npm ci --ignore-scripts false` sets the flag to false, and the CLI value beats both env and `.npmrc`. Regex guards that only know `--flag=false` / `--no-flag` miss it. Probe: `npm config get ignore-scripts --ignore-scripts false`.
@@ -92,6 +96,9 @@ Round 2 of a spike PR (PR #6 r2):
 - **Record-format contracts** ("last Verdict table row wins") silently ignore a later FAIL written as prose. Tell the security-analyst to always append a header table.
 
 **DB-guard patterns (PR #11, 2026-11-12):**
+- **Guard the RETURN values too (PR #11 r2).** Prisma 7 `PrismaPromise` has an internal `requestTransaction(tx)`. Passing `null` or `{kind:'batch'}` runs the query on the ROOT client, outside the itx. Probe it with the PR's recording driver adapter (it logs ROOT vs TXn per statement).
+- **First-argument checks miss values.** A `Prisma.raw` passed as a tagged-template *value* is spliced into the SQL. Lint must resolve aliases: `Prisma as P`, `{ raw } = Prisma`, `r = Prisma.raw`.
+- **Check the ESLint twins of SQL form lists** for the quoted and spaced `SET "app"."x"` forms.
 - **Prisma client Proxy guards.** Prisma 7 clients and delegates carry the public `$parent` property (the extension context), the internal `_originalClient` and a private `Symbol()` key holding the unapplied client. A top-level deny-list misses all three. Probe on the real shape without a DB: `new PrismaClient({adapter: new PrismaPg({connectionString:'postgresql://x@127.0.0.1:1/x'})})._createItxClient({id:'t'},0,{})`.
 - **Regex "literal exemption" scans** (for example "set_config allowed when the first arg is a non-app literal") are beaten by `'' || 'app.x'`. Require a complete literal followed by `,`. Also check quoted-identifier forms (`"app"."x"`).
 - **Catalog ACL equality via `aclexplode`.** Check whether PUBLIC (`grantee = 0`) and inherited privileges are excluded. Effective privilege is what matters.

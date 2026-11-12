@@ -507,3 +507,247 @@ The URL is operator-trusted configuration (a secret reference), and the file is 
 **FAIL** at head `05855b1`: 0 Critical, **1 HIGH (PR9-SEC-14)**, 0 Medium, 1 LOW new (PR9-SEC-15), 1 INFO new (PR9-SEC-16). Of the R1 items, 01, 02 (items 1–2), 04 (items 1, 2, 4), 05, 07, 08 and 11 are closed; the rest stay routed as listed.
 
 Once PR9-SEC-14 is fixed and verified, the expected verdict is PASS_WITH_FOLLOW-UPS. No other change is needed for this PR.
+
+## Round 3 (head 6331aeb)
+
+| Field | Value |
+|---|---|
+| PR | #9, fix cycle 2 (https://github.com/sukhchdit/shipcube/pull/9#issuecomment-6833101331) |
+| Head | 6331aeb23940d6fd759c24e238eea9690ef3d11e |
+| Branch | `feat/TASK-006-api-worker-runtime-skeleton-express`; `main` is not merged at this head |
+| Delta | From the round-2 head: 1 commit (`fix(api): linear content-type grammar with a length cap`), 13 files, +373 / −96. No dependency, lockfile or security-owned path changes |
+| Scope | `apps/api/src/platform/http/json-body.ts`, `apps/api/src/platform/db/client.ts`, `apps/api/src/platform/errors/problem-handler.ts`, `apps/api/src/platform/runtime/readiness.ts`, `packages/config/src/{guards,index}.ts`, and the tests in the delta |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only, reviewed by SHA. No command was run in the TASK-006 worktree, where a merge-main pass was running. No install, build, Docker or suite run. The head's sources (and the round-2 head's, for the controls) were extracted with `git archive`, type-stripped with Node 24.22.3, and probed against the worktree's `node_modules` through a scratch junction, removed afterwards. The merge simulation ran in a scratch `git clone --shared`; nothing was written to the main repository |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** PR9-SEC-14 (HIGH) is closed and PR9-SEC-16 (INFO) is closed. 1 new INFO (PR9-SEC-17). 0 Critical, 0 High and 0 Medium are open, so the merge rule (D-ORCH-004) is met. This record binds to the head above; a head that merges `main` needs a merge-only addendum (§R3.6) |
+
+### R3.1 Summary
+
+- **PR9-SEC-14 is closed.** Three changes close it:
+  - **Grammar.** `MEDIA_TYPE` is now exactly the round-2 remediation, and it is linear.
+  - **Length cap.** A header longer than 256 characters is refused before any pattern runs.
+  - **Order.** The bounded check runs before `req.is`.
+
+  With the app in a child process, a crafted `Content-Type` of n = 24, 40 or 5,000 empty parameters gets 415 in 7–9 ms, and `/health/live` answers in 6–7 ms during the attack. The same probe against the round-2 head blocks the event loop for about 1 s at n = 22.
+- **R2-m2 holds.** `DATABASE_URL` has a single allow-list, and configuration and the runtime pool factory agree on it in every APP_ENV.
+- **PR9-SEC-16 hardening is in place.** One residual is new: **PR9-SEC-17 (INFO)**. The 1 MiB bound is checked on `stat`, not on the read.
+- **Record check.** This record parses and satisfies lane A at this head. It will **not** satisfy lane A at a head that merges `main`: three security-owned paths changed on both sides (§R3.6).
+- **Lane A tool.** Validating the record turned up a LOW in the tool itself, which is already on `main`: **PR10-SEC-21**. Commits named in earlier rounds stay bindable under the latest verdict. It is routed to TASK-015.
+
+### R3.2 Method
+
+- **Diff review.** I read the full `git diff 05855b1..6331aeb` and the fix comment, then re-traced three sinks:
+  - `Content-Type` → `isUtf8JsonContentType` → `req.is` → body-parser;
+  - `DATABASE_URL` → `loadConfig` guards and `toPoolConfig` → `pg`;
+  - `sslrootcert` → `fs` → `tls`.
+- **Probes.** Scratch `…/scratchpad/review/PR-9-sec-r3/scripts/`. Every probe has a positive control.
+  - `redos-client.mjs` (R2): the app runs in a child process. It was run at n = 24, 40 and 5,000, with a control against the round-2 head at n = 22.
+  - `probe-redos-r3.mjs` (new): the shipped `isWellFormedMediaType`, uncapped.
+    - 16 adversarial input families at 5,000 and 20,000 repetitions (up to about 100 kB).
+    - 2,000 random runs up to 16 kB, and 3,000 structured runs.
+    - 100,000 runs checking that it accepts the same strings as the round-2 grammar and the R2 remediation.
+    - The cap boundary.
+    - Control: the round-2 grammar takes 195 ms at n = 20.
+  - Re-run from R2: `probe-charset-r2.mjs`, `probe-redos.mjs` and `probe-tls-r2.mjs`. Re-run from R1: `probe-http.mjs`.
+  - `probe-sslroot-r3.mjs` and `probe-sslroot-stat0-r3.mjs` (new): `sslrootcert` refusals, and whether the read is bounded.
+  - `probe-config-r3.mjs` (new): 20 fixed URLs, plus a 6,000-run differential between `loadConfig` (local, test, staging, production) and `toPoolConfig`.
+  - Merge simulation and record check: a scratch shared clone, `git merge-tree`, and main's `tools/ci/check-security-owned-paths.mjs` (`recordVerdict`, `recordHeadShas`, `checkSecurityOwnedPaths`).
+- **Secrets.** The added lines were grepped for Stripe, PEM private-key, AWS, GitHub, Slack and credential-URL patterns. There were 3 hits, all test URLs whose password is generated at run time (`randomSecret()` or random hex). No literal secret.
+- **Supply chain.** No dependency or lockfile change.
+
+### R3.3 PR9-SEC-14: closure evidence
+
+| Check | Result |
+|---|---|
+| Grammar | `json-body.ts:39` behaves exactly like the R2 remediation: 0 differences in 100,000 runs, and every adversarial family gives the same result |
+| Linear time | Uncapped, the worst input family takes 1.35 ms at about 100 kB. Going from 5,000 to 20,000 repetitions raises the time 2–6×, which is linear growth near a sub-millisecond noise floor. Random runs: max 0.10 ms. Structured runs: max 0.02 ms |
+| Same language | 100,000 runs, 10,102 accepted, **0** differences from the round-2 grammar. `probe-redos.mjs`: 50,000 runs, 8,617 accepted, 0 differences |
+| Length cap | `json-body.ts:43`, applied at `:56`. A 256-character header is accepted and a 257-character one refused. The worst case within the cap (119 empty parameters, 255 characters) takes 0.016 ms. The capped check takes at most 0.13 ms for any input family |
+| Order | `json-body.ts:103`: the bounded check runs before `req.is`. type-is, content-type and body-parser therefore only see headers of at most 256 characters that match the grammar |
+| Over HTTP (child process) | Each request was a POST to an unknown path with no credentials. At the head, n = 24 (65 B), 40 (97 B) and 5,000 (10 kB) each get 415 in 7 / 9 / 7 ms, and liveness answers in 7 / 7 / 6 ms during the attack. Control at the round-2 head, n = 22 (61 B): 415 after 1,215 ms, with liveness blocked for 1,014 ms |
+| Charset control (no regression) | 27 of 27 cases correct over a real listener, with the handler never run on a 415. The differential against content-type 2.1.0 ran 20,000 times, accepted 5,176 headers and found **0** smuggles. A corrupt gzip body gets 400 with `no-store`; a valid one gets 201 |
+| Tests | `json-body.test.ts` and the new `problem-handler.api.test.ts` block implement the R2 verification list. They go further: the timing property covers inputs up to 2,000 characters, and a differential compares against the round-2 grammar |
+
+### R3.4 Other fix-cycle items
+
+| Item | Result |
+|---|---|
+| R2-m2: one `DATABASE_URL` allow-list | **Holds.**<br>• **Where it lives.** `guards.ts:62` is the only list, and `client.ts` imports it. `databaseUrlParamsGuard` (`guards.ts:75`) is in `GUARDS` (`:289`) and runs in every APP_ENV. Outside local/test, the transport guard (`:89`) requires exactly one `sslmode`, with the value `verify-full`.<br>• **Fixed cases.** Configuration and the runtime both refuse `application_name`, `connect_timeout`, `uselibpqcompat`, `%6Fptions`, `ssl+mode`, `=x`, `SSLMODE`, `ssl=0` and a repeated `sslmode`. Both accept `?&&` and `#?options=x`, because pg never sees the fragment.<br>• **Differential.** 6,000 runs, 1,099 accepted by configuration:<br>  – **0** runs where one side refuses a parameter name and the other accepts it;<br>  – **0** accepted URLs in staging or production that lack `rejectUnauthorized: true`;<br>  – **0** passwords in the rendered error.<br>  In 495 runs both sides refuse, under different rules: the schema's `string.uriCustomScheme` refuses a literal space in a name, and the runtime refuses the name. Errors name the key only |
+| TLS (regression) | `probe-tls-r2.mjs`, 22 cases, run with `NODE_TLS_REJECT_UNAUTHORIZED=0` and `PGSSLMODE=no-verify`:<br>• `uselibpqcompat` is now refused by the allow-list.<br>• Every TLS mode gives `rejectUnauthorized: true`.<br>• The real `tls.connect` receives `rejectUnauthorized: true` for an IP host, for a DNS host (with `servername`), and through `dedicatedConnector`.<br>• Fuzz: 20,000 runs, 5,929 accepted, 0 violations.<br>• ioredis is unchanged |
+| PR9-SEC-16 | **Closed** (`client.ts:97-110`).<br>• **Refused:** `system`, a relative path, `./x`, an empty value, a `file:` URL, a directory, and a file of 1 MiB + 1 byte.<br>• **Accepted:** a file of exactly 1 MiB.<br>• A missing file gives `could not be read`.<br>• No message carries the path, and no error carries a `cause`.<br>• Not done: confinement to a CA directory (optional in R2).<br>Residual: PR9-SEC-17 |
+| R2-n1 | `probe-http.mjs`: the BigInt `errors` entry and the Proxy posing as an `AppError` both give 500 `application/problem+json` with `no-store`, and no HTML, stack or leak. Every 500 path now has the title `Internal error` and the configured `type` base. No other change in the R1 cases |
+| R2-m1 | The `WeakSet` brand serves the tests only, and no request path reads it. The readiness output is unchanged: enum statuses and `no-store` |
+
+### R3.5 New finding
+
+| ID | Title | Severity | CWE | OWASP 2021 | Owner |
+|---|---|---|---|---|---|
+| PR9-SEC-17 | The `sslrootcert` size bound is checked on `stat`, not on the read | INFO | CWE-367, CWE-770 | A05 | Optional here; otherwise TASK-014 (preflight), with the PR9-SEC-16 directory confinement |
+| PR10-SEC-21 | Lane A record check: commits named in earlier review rounds stay bindable under the latest verdict | LOW | CWE-693 | A08 | TASK-015 (owner of `tools/ci`); found while validating this record (§R3.6); not a defect of this PR |
+
+#### PR9-SEC-17 (INFO): the CA-bundle size bound is checked on `stat`, not on the read
+
+**Where.** `apps/api/src/platform/db/client.ts:101-105` (`readRootCertificate`).
+
+**Description.** `statSync(path)` checks `isFile()` and a size of at most 1 MiB, and then `readFileSync(path, 'utf8')` opens the path again. On Node 24, `readFileSync` with `'utf8'` goes to the native `readFileUtf8`, which reads until EOF and never consults the size (as printed by `String(fs.readFileSync)` on 24.22.3). The bound and the type check therefore hold only for the `stat`. Two cases slip past them:
+- **Pseudo-files.** On Linux, procfs and sysfs files report size 0 but have content behind them; `/proc/self/pagemap` is effectively unbounded.
+- **Swapped paths.** A path replaced between the `stat` and the `open`, for example by a FIFO, blocks start-up.
+
+Probe: with `statSync` reporting size 0 for a 2 MiB file (the procfs case, synced into the ESM bindings), the file is accepted and `ca` holds 2,097,152 characters. The control, without the patch, is refused.
+
+**Exploitability / impact.** The precondition is control of `DATABASE_URL`, an operator-held secret reference, or of the file it names. The effect is a failed or hung start-up only; nothing is disclosed, because the content goes into `ca` and no message echoes it. Rated **INFO**, hardening.
+
+**Remediation.** Open once, check the open descriptor, and bound the bytes actually read:
+```ts
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+
+function readRootCertificate(path: string): string {
+  if (path === 'system') throw new DatabaseConfigError('connectionString sslrootcert must name a CA bundle file');
+  if (!isAbsolute(path)) throw new DatabaseConfigError('connectionString sslrootcert must be an absolute path');
+  let fd: number | undefined;
+  try {
+    // O_NONBLOCK: opening a FIFO must not wait for a writer (it is then refused as not a regular file).
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    if (!fstatSync(fd).isFile()) throw new DatabaseConfigError('connectionString sslrootcert must be a regular file of at most 1 MiB');
+    const buffer = Buffer.alloc(MAX_ROOT_CERTIFICATE_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const read = readSync(fd, buffer, length, buffer.length - length, null);
+      if (read === 0) break;
+      length += read;
+    }
+    if (length > MAX_ROOT_CERTIFICATE_BYTES) throw new DatabaseConfigError('connectionString sslrootcert must be a regular file of at most 1 MiB');
+    return buffer.toString('utf8', 0, length);
+  } catch (error) {
+    if (error instanceof DatabaseConfigError) throw error;
+    throw new DatabaseConfigError('connectionString sslrootcert could not be read');
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+```
+Optionally, also require the text to contain `-----BEGIN CERTIFICATE-----`, so that a wrong but readable file fails at configuration time rather than at the first TLS handshake.
+
+**Verification.**
+- **Unit.** Stub `fstatSync` to report size 0 for a 2 MiB file: it is still refused. The existing rows stay green (system, relative path, directory, 1 MiB + 1, missing file, a readable file read into `ca`).
+- **Linux, in the TASK-014 preflight suite.** `sslrootcert=/proc/self/pagemap` is refused within 1 s with flat memory, and a FIFO path is refused without blocking.
+
+### R3.6 Record check and the merge of `main`
+
+**Parser.** Running main's `recordVerdict` on this file gives `PASS_WITH_FOLLOW-UPS` from the last Verdict row; the control, main's round-2 file, gives `FAIL`. `recordHeadShas` gives 13 tokens: the R1 and R2 head-row SHAs, including the commit lists and merge base `7712c7c`, then `6331aeb23940d6fd759c24e238eea9690ef3d11e`.
+
+**Overlap.** The merge base is `7712c7c`. Three paths changed on both `main` (`8e62763`, PR #10) and this PR, and all three are security-owned:
+- `package.json`, which conflicts;
+- `eslint.config.mjs`, which merges automatically;
+- `tools/lint/negative-fixtures.test.ts`, which merges automatically.
+
+After the merge they differ both from `6331aeb` and from `main`. Lane A's clause (d) (`changedSince(<named commit>)` ∩ the PR's owned net change) is therefore non-empty for `6331aeb`, so this record **cannot** satisfy the check at a head that merges `main`.
+
+**Simulation.** Main's `checkSecurityOwnedPaths` ran from main's copy of the script against a scratch clone, with `--pr 9` and base = `main` @ `66cb34b`:
+
+| Scenario | Result |
+|---|---|
+| `6331aeb` + this record (docs-only commit) | `pass`. The tool reports the first qualifying SHA in the file's head rows. That is `05855b1`, because `05855b1..6331aeb` touched no owned path. With the Round 3 section alone, the result is `pass`, satisfied by `6331aeb` |
+| `6331aeb` + merge of `main` + this record. `package.json` was resolved by inserting the PR's `gen:modules` line after `authz:generate` in main's version (resulting blob `6595a2d`) | `missing`. Every named SHA fails, including "names 6331aeb, but eslint.config.mjs, package.json, tools/lint/negative-fixtures.test.ts changed after it" |
+| Same merge + this record + a merge-only addendum whose head row names the merge commit | `pass`, satisfied by the merge commit |
+| Control: the merge commit itself, which carries main's round-2 record (last Verdict FAIL) | `missing` ("verdict FAIL is not one of …") |
+| Control: same merge + this record, `--pr 10` | `missing`. Only `PR-0010-*` records count, and that record names no commit of the range |
+
+**Observation on the tool: PR10-SEC-21 (LOW, routed to TASK-015).**
+- **The gap.** `recordHeadShas` takes SHAs from every head row in the file, but `recordVerdict` takes the last Verdict only. The commits named in earlier rounds therefore stay bindable under the latest verdict, including the FAIL head `05855b1` (scenario 1 above).
+- **No effect on this PR.** Here it is harmless, because the round-2 FAIL concerned `json-body.ts`, which is not an owned path.
+- **The general case.** Suppose round N fails head Y over an owned path, and round N+1 passes head X after a fix. A later commit that restores the owned paths to Y's content then passes clause (d) through Y. That post-review change to an owned path is exactly what the check exists to catch.
+- **The fix.** Take head SHAs only from the table that holds the last Verdict row (or from the last `## Round` section).
+- **The test.** A record whose round 1 (FAIL) names Y and whose round 2 (PASS) names X, with head = X + a revert of the owned paths to Y, must give `missing`.
+
+**What the orchestrator needs.** Once the merge-main commit exists, it needs a short merge-only Round 3b by security-analyst. Round 3b names the merge commit in a `| Head |` row and adds a new last Verdict row. Per D-ORCH-013 the orchestrator commits records but does not author them, so it should not add the SHA itself. The merge commit `6742bec` appeared during this review, so Round 3b below already covers it; a further merge of `main` needs the same check again. The check is mechanical:
+- `eslint.config.mjs` and `tools/lint/negative-fixtures.test.ts` must equal the automatic merge (`git merge-tree --write-tree 6331aeb 66cb34b` gives blobs `ce379e2a` and `7a83afe1`; against a later `main`, recompute them).
+- `package.json` must be main's version plus the PR's `"gen:modules"` script line, and nothing else (blob `6595a2d` when the line follows `authz:generate` with LF endings).
+- `6331aeb..<merge>` must bring in no other PR-side change.
+
+Both sides of all three files were already reviewed (here in R1, and in the PR #10 reviews). The automatic merges combine hunks that do not overlap, and the expected `package.json` keeps both script lines. None of the three raises a security concern.
+
+### R3.7 Status of all items
+
+| Item | Status |
+|---|---|
+| PR9-SEC-14 (HIGH) | **Closed** (§R3.3) |
+| PR9-SEC-16 (INFO) | **Closed**; residual is PR9-SEC-17 |
+| PR9-SEC-17 (INFO) | **New**; optional here, otherwise TASK-014 |
+| PR10-SEC-21 (LOW, `tools/ci`) | **New**; routed to TASK-015. To be carried into the PR-0010 record's routing |
+| PR9-SEC-15 (LOW) | Open. TASK-007 merged without it: `tools/deps/npm-cli.mjs:15` still trusts `npm_execpath` on `main` and at this head. It needs a task ID (a tools/deps follow-up or TASK-014) |
+| PR9-SEC-03, -04 item 3, -06, -10, -12, -13 | Unchanged; routed as in R1 §7 and §R2.6 |
+| PR9-SEC-09 | Partial, unchanged (`nosniff`/CSP with TASK-111) |
+| Closed earlier | 01, 02 items 1–2, 04 items 1/2/4, 05, 07, 08 and 11 (R2) |
+
+### R3.8 Checks owed by later reviews (additions to §R2.6)
+
+- **This PR.** A merge-only Round 3b once `main` is merged (§R3.6).
+- **TASK-014.**
+  - PR9-SEC-17: bound the bytes actually read, through a single descriptor.
+  - Confine `sslrootcert` to a CA directory (PR9-SEC-16 remainder).
+  - Allow-list `NODE_EXTRA_CA_CERTS` (PR9-SEC-04 item 3).
+- **TASK-015.** PR10-SEC-21: bind head SHAs to the round that holds the last Verdict row (§R3.6).
+- **TASK-020 / TASK-108.** Unchanged. The `json-body.test.ts` pattern (an uncapped grammar timing test, a property test, a differential against the reference language, and a cap boundary test) is the template for every future header or body parser.
+
+### R3.9 Conclusion
+
+At head `6331aeb`: 0 Critical, 0 High, 0 Medium, 1 LOW open (PR9-SEC-15, routed), and INFO items routed. PR9-SEC-14 and PR9-SEC-16 are closed and PR9-SEC-17 is new. PR10-SEC-21 (LOW) concerns the lane A tool on `main`, not this PR's code. The PR may merge under D-ORCH-004 once the code review is satisfied and, after `main` is merged, the Round 3b addendum names the merge commit.
+
+## Round 3b (head 6742bec, merge of main)
+
+| Field | Value |
+|---|---|
+| PR | #9, the merge-main pass after fix cycle 2 |
+| Head | 6742becf3979b6c9fc2109dd6d10bb0c63e56495 |
+| Delta | One merge commit since the round-3 head (`chore(merge): main into TASK-006 (post TASK-007)`), with parents `6331aeb` and `main` @ `e760368` |
+| Scope | Merge only: does the merge commit carry any PR-side content that round 3 did not review? |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only, by SHA, from the main checkout (`git diff`, `git rev-parse`). No command in the TASK-006 worktree |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** The merge adds no unreviewed PR-side content, so the round-3 findings and routing apply unchanged: 0 Critical, 0 High, 0 Medium open. This holds while no later commit changes a security-owned path; docs-only and record commits are fine |
+
+**Evidence.**
+- **Same set of paths.** `git diff --name-only e760368 6742bec` lists 82 paths, exactly the PR's net change at the round-3 head (`7712c7c..6331aeb`, 82 paths). Both set differences are empty. Every path outside the PR therefore equals `main` @ `e760368`, so the merge drops nothing from `main`.
+- **Same content.** 79 of the 82 paths have the same blob as at `6331aeb`. The other 3 are the security-owned overlap paths, and each equals the independent simulation in §R3.6:
+  - `eslint.config.mjs` is `ce379e2` and `tools/lint/negative-fixtures.test.ts` is `7a83afe`, both the automatic merge;
+  - `package.json` is `6595a2d`. Its diff against `main` is the one PR line, `"gen:modules": "tsx tools/api/gen-module-registry.ts"`.
+- **Later `main`.** `main` has since moved to `66cb34b`, through two docs-only commits (`docs/`, `.claude/agent-memory/`). Neither touches a path of this PR.
+- **Lane A.** Main's `checkSecurityOwnedPaths` ran in a scratch shared clone, with head = `6742bec` + this record as a docs-only commit and `--pr 9`.
+  - Base `66cb34b`: `pass`, satisfied by `6742bec`. Base `e760368`: `pass`, satisfied by `6742bec`.
+  - Control, the same head with this Round 3b removed: `missing`, because `6331aeb` is voided by the three overlap paths.
+  - Main's `recordVerdict` reads `PASS_WITH_FOLLOW-UPS` from this table's Verdict row, the last of 4 in the file. `recordHeadShas` ends with `6742becf3979b6c9fc2109dd6d10bb0c63e56495`.
+- **Later merges.** A later merge of `main` that changes an owned path of this PR needs the same check again, and a new head row.
+
+## Round 3c (head 5e6119d, merge of main)
+
+| Field | Value |
+|---|---|
+| PR | #9, the merge-main pass after fix cycle 2. It replaces the Round 3b merge, which was never pushed |
+| Head | 5e6119d16d491a2cbedf408fb0e5f130319d65b5 |
+| Delta | One merge commit since the round-3 head (`chore(merge): main into TASK-006 (post TASK-007)`), with parents `6331aeb` and `main` @ `c998d07`. The Round 3b merge `6742bec` (parents `6331aeb` and `e760368`) never reached `origin`: the branch was reset to `6331aeb` and `main` was merged again |
+| Scope | Merge only: does `5e6119d` carry any PR-side content that round 3 did not review, and does it equal `6742bec` outside `docs/` and `.claude/`? |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only, by SHA, from the main checkout after `git fetch` (`git diff`, `git rev-parse`, `git merge-tree`, `git ls-remote`). Lane A simulated in a scratch shared clone, removed afterwards. No command in the TASK-006 worktree |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** `5e6119d` adds no unreviewed PR-side content and equals the Round 3b merge outside `docs/` and `.claude/`, so the round-3 findings and routing (§R3.7, §R3.8) apply unchanged: 0 Critical, 0 High, 0 Medium open. This holds while no later commit changes a security-owned path; docs-only and record commits are fine |
+
+**Evidence.**
+- **Pushed head.** `git ls-remote origin` gives `5e6119d` for both `refs/heads/feat/TASK-006-api-worker-runtime-skeleton-express` and `refs/pull/9/head`. `6742bec` is not an ancestor of it, so the Round 3b head row binds nothing: lane A accepts only a commit in `<base>..<head>`.
+- **Equal to Round 3b outside the docs.** `git diff 6742bec 5e6119d -- . ':!docs' ':!.claude'` is empty. The full diff between the two merges is 19 paths, all under `docs/` or `.claude/agent-memory/`. It is exactly `git diff --name-only e760368 c998d07`, i.e. main's docs-only commits between the two main parents.
+- **Same set of paths.** `git diff --name-only c998d07 5e6119d` lists 82 paths, exactly the PR's net change at the round-3 head (`7712c7c..6331aeb`, 82 paths, none under `docs/` or `.claude/`). Both set differences are empty, so the merge drops nothing from `main`.
+- **Same content.** 79 of the 82 paths have the same blob as at `6331aeb`. The other 3 are the security-owned overlap paths, which are the whole intersection of `7712c7c..c998d07` with the PR's net change. `main` did not touch any of the three between `e760368` and `c998d07`, so §R3.6's expected resolutions carry over:
+  - `eslint.config.mjs` is `ce379e2a` and `tools/lint/negative-fixtures.test.ts` is `7a83afe1`. Both equal the tree of `git merge-tree --write-tree 6331aeb c998d07` (automatic merges) and the Round 3b blobs;
+  - `package.json` is `6595a2d4`, the only conflict, and equals the Round 3b blob. Its diff against `main` @ `c998d07` is the one PR line `"gen:modules": "tsx tools/api/gen-module-registry.ts"` after `authz:generate`, with LF endings (0 CR bytes).
+- **Later `main`.** `main` is at `e3290a4`, one docs-only commit after `c998d07` (this record's rounds 3 and 3b, `docs/sdlc/STATUS.md`, security-analyst memory). The merge base of `5e6119d` and `e3290a4` is `c998d07`.
+- **Lane A run 43289999705** (developer evidence, not re-run here). It was red only at the security-owned-paths record step. The branch carries main's `c998d07` copy of this record, whose last Verdict row is round 2's FAIL. The simulation below reproduces that result and shows that committing this file onto the branch clears it.
+
+**Simulation.** Main's `tools/ci` (from `e3290a4`, via `git archive`) ran against a scratch `git clone --shared --no-checkout` of the main checkout, with base `origin/main` (= `e3290a4`) and `--pr 9`. Each head is `5e6119d`, plus a docs-only commit of the stated record where one is listed:
+
+| Scenario | Result |
+|---|---|
+| `5e6119d` + this record | `pass`, satisfied by `5e6119d` |
+| Control: `5e6119d` as pushed (round-2 copy of the record) | `missing` ("verdict FAIL is not one of …"), the lane A result |
+| Control: `5e6119d` + main's `e3290a4` copy (ends at Round 3b) | `missing`. `6331aeb` is voided by the 3 overlap paths, and `6742bec` is not a commit of the range |
+| Control: `5e6119d` + this record, `--pr 10` | `missing`. Only `PR-0010-*` records count |
+
+Main's `recordVerdict` reads `PASS_WITH_FOLLOW-UPS` from this table's Verdict row, the last of 5 in the file. `recordHeadShas` ends with `5e6119d16d491a2cbedf408fb0e5f130319d65b5`.
+
+**Residuals.**
+- The Round 3b section stays as history. Its head `6742bec` exists only in local object stores and is not reachable from any pushed ref. Under PR10-SEC-21 (LOW, TASK-015) the tool still reads it as a candidate, which is harmless here.
+- A later merge of `main` that changes an owned path of this PR needs the same check again, and a new head row.

@@ -31,6 +31,14 @@ PR #10 review: `docs/05-quality/security/PR-0010-TASK-007-security-review.md`.
   - SHAs are read only from `| Branch / head |` or `| Head… |` rows;
   - HTML comments are NOT skipped (PR10-SEC-19);
   - **my own records:** append a `## Round N (head <sha>)` table with `| Head | <full sha> |` and the `| **Verdict** |` row, and put no later row whose first cell is Verdict.
+  - **A merge of `main` can void a record** (proven with PR #9, 2026-11-13). Clause (d) is `git diff <named> <head>` ∩ the PR's owned net change. When `main` and the PR both changed an owned path, the merge brings in main's side and voids every pre-merge SHA. The orchestrator's belief that "merge-only commits are fine" holds only when no owned path overlaps.
+    - **Before hand-off,** compute the overlap: `comm -12` of `diff mb..origin/main` and `diff mb..<head>`, filtered by CODEOWNERS.
+    - **If they overlap,** a merge-only round must name the merge commit. First confirm with `git ls-remote origin` that the merge commit is the PR's pushed head: PR #9's `6742bec` was never pushed, and that cost an R3c. Then verify it like this:
+      - the paths in `diff <main parent> <merge>` equal the PR's net-change paths;
+      - every blob equals the reviewed head's, except the overlap paths;
+      - each overlap path equals `git merge-tree --write-tree` (or the expected conflict resolution).
+  - **PR10-SEC-21 (LOW, TASK-015).** `recordHeadShas` takes SHAs from every round, while the verdict is file-level. Older heads, even a FAIL round's, stay bindable, and a revert of the owned paths to the FAIL head's content passes. The fix: take head rows only from the table that holds the last Verdict.
+  - The tool reports the FIRST qualifying SHA in token order, which is often an older round's.
 - **Head workflow decides.** Under `pull_request` the head `ci.yml` runs. `required-gates` pins the gate commands but not their input-sourcing steps (PR10-SEC-17), so an owned-path record is the only catch for deliberate `ci.yml` edits.
 
 **Why:** These residuals close only if each of these is checked: TASK-015 (which touches workflows), the orchestrator procedure, principal-architect's ADR-0023 wording, and the post-merge items.
@@ -43,7 +51,14 @@ PR #10 review: `docs/05-quality/security/PR-0010-TASK-007-security-review.md`.
   4. Add controls: the old record (expect missing) and the wrong PR number (expect missing).
 
   Script: `scratchpad/review/PR-10-sec-r2/scripts/record-parse-check.mjs`. Scratch is session-scoped, so re-create it if it is gone.
+
+  **Alternative, used for PR-0009 R3** (`scratchpad/review/PR-9-sec-r3/scripts/record-sim.sh` + `parse-check.mjs`):
+  - Work in a scratch `git clone --shared --no-checkout <main>`, which writes nothing to main's `.git`.
+  - Extract main's `tools/ci` with `git archive` and run its CLI with `--root <clone> --json`.
+  - Import the module from a separate script: importing it with the module path as `argv[1]` runs its `main()`.
+  - Remove the clone afterwards.
 - **TASK-015 review:**
+  - PR10-SEC-21: bind head SHAs to the round that holds the last Verdict row. Test: round 1 FAIL names Y, round 2 PASS names X, head = X + a revert of the owned paths to Y → `missing`.
   - PR10-SEC-16: scan a clean export or fail on nested scope files.
   - PR10-SEC-17:
     - `scans-isolation` as an allow-list (`node "$GATE_*"` only);

@@ -43,4 +43,8 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 **Why:** reviewers have no write access, but claims like "typecheck catches errors in any workspace" or "the layering rules encode the ADR" need injection tests.
 **How to apply:** use this whenever a PR's correctness claim needs a mutation or probe. See [[project-review-conventions]].
 
+**Workspace-link override (PR #9 r3):** when the root `node_modules` junction points at a checkout whose `@platform/*` sources are older than the PR, add `copy/apps/node_modules/@platform/<pkg>` and `copy/packages/node_modules/@platform/<pkg>` junctions to the copy's own packages. Node and Jest resolve these first.
+- tsx needs `NODE_OPTIONS=--conditions=@platform/source`; the `--conditions` flag passed to the CLI is not forwarded.
+- Jest in a partial archive needs empty `prisma/` and `tests/` dirs (the `roots` validation).
+
 **PR #11 pitfall (2026-11-12):** the copy's node_modules junction vanished mid-review, after the tools/db unit run. Cause unknown; the worktree was intact. Run `ls copy/node_modules` before each run and recreate the junction if needed. Copy git-ignored `prisma/generated` into the copy when probes import the generated client.
