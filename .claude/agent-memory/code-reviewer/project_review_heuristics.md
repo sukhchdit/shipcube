@@ -57,6 +57,12 @@ Round 2 of a spike PR (PR #6 r2):
 - **Express 5 `app.listen(port, cb)`:** cb is also the once-`error` listener.
 - **Problem handler:** check for `Cache-Control: no-store` and that headers set before the throw are stripped.
 - `git diff` covering `.env.example` is blocked by a permissions deny rule. Diff the other paths explicitly.
+- **Fix cycles add hand-written parsers. Time every new regex on adversarial input (PR #9 r2, R2-B1).**
+  - The killer shape is an optional group with the same quantified class on both sides of a separator: `(?:\s*;\s*(?:param)?)*\s*$`. Input `';  '`×20+`'!'` stalled for 100 s.
+  - Also check whether an earlier gate rejects the input. Here `type-is` accepted it.
+  - Prove it end to end over `app.listen(0)` with an event-loop gap sampler.
+  - Fix: put the OWS inside the optional group. Prove it with a random-string differential against the old regex.
+- **Two allow-lists for one value** (a config guard and a driver adapter) drift. Probe that every value the config accepts is also accepted at runtime, or the failure arrives as exit 1 with a stack, not exit 78.
 
 **CI gate / supply-chain checker patterns (PR #10, 2026-11-12).** Each was proven by a probe of under a minute.
 - **npm boolean flags take a bare `true`/`false` as their value.** `npm ci --ignore-scripts false` sets the flag to false, and the CLI value beats both env and `.npmrc`. Regex guards that only know `--flag=false` / `--no-flag` miss it. Probe: `npm config get ignore-scripts --ignore-scripts false`.
@@ -68,8 +74,42 @@ Round 2 of a spike PR (PR #6 r2):
 - **A "record names reviewed SHA, nothing changed since" check** breaks on merge-main. Intersect with the PR's own net owned paths.
 - **Verify process premises against repo settings** (`gh api repos/<r>`): squash title (`COMMIT_OR_PR_TITLE` uses the commit subject for single-commit PRs), allowed merge methods. Branch protection returns 403 on private free-plan repos, so "required check" claims are not enforceable.
 
+**Round-2 patterns from PR #10 (2026-11-13):**
+- **"Every install" means every reify.** `update`, `dedupe`, `uninstall`, `link` and `audit fix` call Arborist `reify()` and run the install scripts of added nodes.
+  - Check guard scope against the commands in `lib/commands/*.js` that call `reify(`, not just the install aliases.
+  - A bare-flag value can be a shell expansion (`--ignore-scripts $X`).
+- **Ground-truth npm flag parsing:** `NPM_CONFIG_IGNORE_SCRIPTS=true npm config get ignore-scripts <form>`. Put the key positional FIRST, because extra positionals print `X=undefined`.
+- **Self-policing workflow rules** (required steps, mount rules, job isolation) are tripwires. Mutate the repo's own ci.yml in memory and run `checkWorkflow`:
+  - `|| true`;
+  - redirecting `GATE_*` to the head;
+  - `--mount`/`$PWD` mounts;
+  - `--exit-code 0`;
+  - relative `node x.mjs`.
+  Ask for anchored patterns, and for the claims to be worded as tripwires.
+- **Expression-injection allow-lists:** `env.*` (and `steps`/`needs` outputs) launder untrusted input, because `${{ env.T }}` is expanded into the script text.
+- **Semgrep ≥ 1.117 (Semgrepignore v2) honours nested `.semgrepignore` files.** Bind-mounting the base root file does not fix scope narrowing. Check the tool's CHANGELOG at the pinned tag (`gh api …/contents/CHANGELOG.md?ref=vX -H "Accept: application/vnd.github.raw"`).
+- **`.gitattributes -diff` hides content from `git log -p`** (and so from gitleaks) when the worktree is mounted. With only `.git` mounted, attributes are not read (verified with git 2.52). Local git reproduces it in seconds, no Docker needed.
+- **Record-format contracts** ("last Verdict table row wins") silently ignore a later FAIL written as prose. Tell the security-analyst to always append a header table.
+
 **DB-guard patterns (PR #11, 2026-11-12):**
 - **Prisma client Proxy guards.** Prisma 7 clients and delegates carry the public `$parent` property (the extension context), the internal `_originalClient` and a private `Symbol()` key holding the unapplied client. A top-level deny-list misses all three. Probe on the real shape without a DB: `new PrismaClient({adapter: new PrismaPg({connectionString:'postgresql://x@127.0.0.1:1/x'})})._createItxClient({id:'t'},0,{})`.
 - **Regex "literal exemption" scans** (for example "set_config allowed when the first arg is a non-app literal") are beaten by `'' || 'app.x'`. Require a complete literal followed by `,`. Also check quoted-identifier forms (`"app"."x"`).
 - **Catalog ACL equality via `aclexplode`.** Check whether PUBLIC (`grantee = 0`) and inherited privileges are excluded. Effective privilege is what matters.
 - **New lint boundaries in one PR vs another open PR.** Run `git merge-tree` and grep the other PR's files for imports and string tokens the new rules ban. Semantic lint conflicts are not textual conflicts.
+
+**DB spike PRs (PR #12 SPK-08, 2026-11-13):**
+- **Spike exit lists live in several places.** The sheet's acceptance is a subset. Also grep `risks.md` R-ARCH-xx (the full exit list), `rulings/*.md` ("routed → TASK-xxx") and the data-model "verify in P5 spike" notes. Routed questions get dropped silently.
+- **Refusal-branch coverage per event type.** When privilege stops every tamper statement first, the guard's second-layer branches (e.g. `sql_drop`) are never exercised. Ask for a test as a role that HAS the privilege: the schema owner via superuser `SET ROLE`, or the superuser itself.
+- **Spike suites vs the real files.** The harness applies the whole `prisma/bootstrap` dir. A spike that re-creates objects the real bootstrap will own breaks the day the real files land. The lifecycle deadline is the PR that adds the real files, not the later "porting" task.
+- **"Evidence" in an optional JSON report is not an assertion.** Look for `if (status !== 0)` branches and negative regexes over possibly-empty output. Recompute published golden vectors yourself; it takes about a minute in Node.
+- **"Verbatim from spec" claims:** extract the spec's code fences with awk, normalise whitespace and comments, and `diff`.
+
+**CLI / tooling DB clients (PR #13, 2026-11-13):**
+- **pg `Client` with no `'error'` listener.** On connection loss pg emits `'error'` even while a query is pending (`_handleErrorEvent`). With no listener the process crashes with exit 1 and a raw stack, which breaks any exit-code contract.
+  - Probe: a `net.createServer` fake. Write `R 00000008 00000000` + `Z 00000005 I` after the startup packet, then `socket.destroy()` on the first `Q` byte (0x51).
+- **pg merges `parse(connectionString)` OVER the config object.** `?options=…&statement_timeout=0` in the URL beats `options:`/`statement_timeout:` set in code. Check every "pinned session" claim for an `options=` refusal plus a post-connect `SHOW`.
+- **Framework PRs with an empty registry** (datasets added "by later tasks"): test the contract against every consumer row of the spec table. Look for:
+  - FK ids when `id` is reserved;
+  - `NULLS NOT DISTINCT` keys;
+  - partial unique arbiters;
+  - columns that are insert-only or runtime-mutated (counter resets).

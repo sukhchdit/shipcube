@@ -1,0 +1,11 @@
+# Paths Semgrep never scans (tools/ci/run-semgrep.mjs). With this file present Semgrep's built-in default ignores do
+# not apply, so the git-ignored output (node_modules, dist, build, coverage …) is included explicitly.
+:include .gitignore
+
+node_modules/
+.git/
+docs/
+.claude/
+
+# Seeded rule fixtures violate the rules on purpose; `node tools/ci/run-semgrep.mjs --test` runs them explicitly.
+/tests/fixtures/

@@ -113,3 +113,115 @@ The dispatch forbade installs, builds, Docker and full suites (memory-constraine
 - **m2:** rename-based evasion of the security-review record.
 - **m3:** the head `.semgrepignore` narrows the base-rule scan.
 - **m6:** no enforceable required checks on this plan; the workflow runs from the PR head.
+
+## Round 2 (head 26fc08d)
+
+- **Head:** `26fc08d`. Code delta `28442b6..a88aaea`: `1cff9ac` (fix), `a88aaea` (suppression-counter wording), and `cc7c598` (merge-main, docs only).
+  - `26fc08d` is a docs-only merge of `origin/main` (`c29f89b`). I checked `git diff --quiet a88aaea 26fc08d -- . ':!docs' ':!.claude'`: it is empty.
+- **Inputs:** fix comment #6832420637; D-TASK007-02, D-ORCH-012/013.
+- **Reviewer:** code-reviewer · 2026-11-13.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: All three round-1 MAJORs are closed.
+         - M1: verified against npm 11.19.1 itself.
+         - M2: only .git mounted, --ignore-gitleaks-allow, first-parent merge diffs.
+         - M3: closed procedurally (D-ORCH-012/013, settings change denied).
+         m1, m2, m4, m5, m6 and m7 are closed; m3 is partly closed. Lane A run 43279941688 is green on 26fc08d.
+         Four new MINORs, none a merge blocker:
+         - R2-m1: npm reify commands are outside the install scope.
+         - R2-m2: the new policy rules are regression tripwires that trivial edits defeat.
+         - R2-m3: Semgrep 1.183 honours nested .semgrepignore files.
+         - R2-m4: `${{ env.* }}` launders untrusted input past untrusted-expression.
+FINDINGS: 0 BLOCKER · 0 MAJOR · 4 MINOR · 8 NIT (table in R2.3)
+SECURITY-FLAGS: R2.6
+```
+
+### R2.1 Verification I performed myself
+
+The dispatch forbade installs, builds, Docker and full suites, and any command in the TASK-007 worktree. I worked in a `git archive a88aaea` scratch copy (from the main repo), with `node_modules` junctioned from the worktree. Afterwards I removed the junction and the copy. The worktree still has 740 `node_modules` entries, and there is no link at `C:\`.
+
+| Check | Result |
+|---|---|
+| `git diff 28442b6..a88aaea` (62 files) | Read in full: `ci.yml`, `npm-command.mjs`, `check-install-flags.mjs`, `check-workflow-policy.mjs`, `check-security-owned-paths.mjs`, `yaml-subset.mjs`, `check-audit.mjs`, `run-semgrep.mjs` and CODEOWNERS. Tests and fixtures sampled. |
+| Unit tests, one file at a time (copy) | `npm-command` 70/70, `check-workflow-policy` 74/74, `check-install-flags` 53/53, `yaml-subset` 14/14, `check-audit` 27/27, `ci-policy` 20/20, `run-semgrep` 14/14.<br>`check-security-owned-paths`: 62/63. The one failure is the record-format tripwire, which runs `git ls-files` and has no git root in an archive copy (a known false failure). I ran its logic myself on the committed records (next row). |
+| Record format over `docs/05-quality/security/PR-*.md` on main (`recordVerdict` / `recordHeadShas`) | PR-0001..0008, 0010 and 0011 parse as PASS_WITH_FOLLOW-UPS with head SHAs. PR-0009 parses as **FAIL** (its current last verdict). PR-0010 names only `28442b6`, so it is stale for this head (merge condition 2). |
+| **M1 probe:** the 13 round-1 forms through `segmentFindings`, `checkDockerfile` and `scriptFindings` | All 13 are now reported. Plain `npm clean-install`, `ic`, `cit`, `it`, `sit`, `ins`, `instal`, `isnt`, `install-clean`, `isntall-clean` and `clean-install-test` fail `install-flags` and `docker-install-order`; the workflow policy correctly relies on the workflow env for these. `npm rebuild --ignore-scripts false` gives `install-flags` + `docker-npm-rebuild`. |
+| **M1 probe:** 13 override forms | All are reported by **both** checkers: `--ignore-scripts false`, `=false`, `=`, `--no-ignore-scripts`, `npm --ignore-scripts false ci`, a later occurrence winning, `-ig false`, `--ig false`, `--no-ignore`, a TAB before `false`, quoted words, the `NPM_CONFIG_IGNORE_SCRIPTS=false` prefix, and `env npm_config_ignore_scripts=false`. |
+| npm 11.19.1 ground truth: `NPM_CONFIG_IGNORE_SCRIPTS=true npm config get ignore-scripts <form>` | `false` for `--ignore-scripts false`, `-ig false`, `--ig false`, `--ignore-script=false`, and `=true … --ignore-scripts false`.<br>`true` for `--ignore-scripts FALSE`/`=0`/`=`/`=no`/`=False`, `--no-ignore-scripts false`, and `--ignore_scripts=false` (unknown key).<br>So every form npm honours as false is caught. The extra forms the module reports (the `true` cases above) are fail-closed false positives, which is acceptable. |
+| Drift test vs npm's `cmd-list.js` (npm next to node, 11.19.1) | It passes. npm 11.19.1 also adds `install-scripts`, `approve-scripts` and `deny-scripts`. None of them installs, and `--ignore-scripts` still overrides `allow-scripts` and `--dangerously-allow-all-scripts` (definitions.js). |
+| **m1 probe:** NEL, and a lone CR plus a hidden step, inside a comment line of the real `ci.yml` | Both give a `yaml-subset` finding. |
+| **M2:** gitleaks v8.30.1 `sources/git.go` (gh api) | `git -C <src> log -p -U0 <log-opts>`, with no `--text` and no `--no-textconv`. |
+| **M2, new vector checked:** a `.gitattributes` with `docs/** -diff` and an AWS-key-shaped value in `docs/x.md` (local git 2.52) | With the full worktree (round-1 mount), `git log -p` prints `Binary files … differ` and **the secret is hidden**. With only `.git` (round-2 mount), the secret line is printed. So the `.git`-only mount also closes an attribute-based evasion that round 1 did not list. The `gitleaks-hardening` mount rule is what locks this in (but see R2-m2). |
+| Mutation probe on the real `ci.yml` (`checkWorkflow(…, {requiredGates:true})`) | **0 findings** for each of:<br>• `… \|\| true` on the workflow-policy step and on the record step;<br>• `mode=(--event push)` on the record step;<br>• gate tooling redirected to the head tree;<br>• `node tools/ci/evil.mjs` or `bash ./x.sh` in `scans`;<br>• `GATES_DIR=$GITHUB_WORKSPACE`;<br>• gitleaks with `--mount …src=$GITHUB_WORKSPACE` or `-v "$PWD:/repo"`;<br>• gitleaks `--exit-code 0`.<br>This is R2-m2. |
+| Probe: `untrusted-expression` | `${{ github.event.pull_request.title }}` in `run:` is reported. `env: PR_TITLE: ${{ …title }}` followed by `run: echo "${{ env.PR_TITLE }}"`: **0 findings**. `${{ steps.x.outputs.title }}`: 0 findings. This is R2-m4. |
+| Semgrep 1.183.0 CHANGELOG (gh api, tag v1.183.0) | 1.117.0: "Target file selection now uses Semgrepignore v2 by default … There can now be multiple `.semgrepignore` files in the project." This is R2-m3. |
+| `patternToRegExp('**/tsconfig*.json')` | It matches `apps/api/tsconfig.json`. It does **not** match root `tsconfig.json` or `tsconfig.lint.json`; GitHub's CODEOWNERS does (R2-n2). |
+| CI run 43279941688 (head `26fc08d`, pull_request) | fast-lane success (3m02s), scans success (34s), ci-gate success. Unit **48 suites / 1393 tests**; base-ref lint negative fixtures 68 pass / 24 skipped; gitleaks **15 commits scanned**, no leaks; Semgrep 0 findings in **91 files**, scope from base; record check report-only (143 owned paths, bootstrap). `gh pr view 10` shows the same three checks green on `26fc08d`. |
+| `gh variable list` | Empty: `CI_MAIN_FAST_LANE` is not set, so the push lane does not run today. |
+| Not re-run by me | Full `lint`, `format:check`, `typecheck`, `build`, `test:integration` (including `run-semgrep.int.test.ts`), actionlint, the Docker gitleaks probe and coverage. I relied on the CI run above and the author's local table. |
+
+### R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| **M1** | **CLOSED** | `npm-command.mjs` is shared by both checkers. The word table equals npm 11.19.1's deref set and is pinned by a drift test. All 26 probe forms are reported (R2.1), and npm's own parser agrees on every form that sets the flag to false. Dockerfile `docker-install-order` now fires for every install alias. Residuals: R2-m1 (reify commands) and R2-n1. |
+| **M2** | **CLOSED** | Gitleaks runs in the isolated `scans` job with only `.git` mounted, `--ignore-gitleaks-allow`, `--diff-merges=first-parent` and `--network none`. The policy rejects a committed `.gitleaksignore` anywhere, and the file is CODEOWNED. The author's run of my round-1 probe gives 5 of 5 findings. The CI log shows merges scanned (15 commits). The `.git`-only mount also neutralises `.gitattributes -diff` (R2.1). Residual: the static mount rule is bypassable (R2-m2). |
+| **M3** | **CLOSED (procedural)** | The settings change was denied (D-ORCH-012). The substitute control is recorded in D-ORCH-012/013 and the ci.yml header: only the orchestrator merges, always `--squash --match-head-commit <sha> --subject "<linted subject>"`, after ci-gate `success` on that SHA. That makes every main header linted, whatever the title or commit count. commitlint now also runs on docs-only PRs. The settings change stays with the repository owner (run summary). |
+| m1 | CLOSED | `FORBIDDEN_CHAR` rejects lone CR, NEL, LS, PS, C0 (other than TAB) and a non-leading BOM. 14 tests; my probe on the real ci.yml agrees. Residual: R2-n4 (compose files). |
+| m2 | CLOSED | `--no-renames` on every diff; `later` is intersected with the PR's net owned set; the `--pr` binding; the last-Verdict allow-list; SHAs from head rows only. 63 temp-repo tests (62 run green here, plus the git-root false failure). |
+| m3 | **PARTLY CLOSED** | (a) the harness and `tools/test-support` come from the base. (b) The classifier counts `jest.config.ts` and `tools/test-support/`. (c) The base root `.semgrepignore` and `.gitignore` are bind-mounted. But nested `.semgrepignore` files from the head still narrow the scan (R2-m3). |
+| m4 | CLOSED | The CODEOWNERS additions and `REQUIRED_CODEOWNED_PATHS` match the request, plus the agent control plane. Residuals: R2-n2 (record-check `**/` at the root) and R2-n3 (`.gitattributes`). |
+| m5 | CLOSED | (a) The `changes` job is folded into fast-lane (git diff, no API, no file cap; closes n7). (b) Concurrency is per PR, and per SHA on push. (c) Push uses `paths-ignore`. (d) ci-gate runs on `!cancelled()` and fails on a skipped lane. About 6 billable job-minutes (was about 7). Residual: R2-n5. |
+| m6 | CLOSED (procedural) | The ci.yml header and the PR body wording are corrected. D-ORCH-013 adds the exact-SHA / record checks to the merge procedure. Draft PRs get a red ci-gate. |
+| m7 | CLOSED | A waiver needs a `granted` date that is not in the future, at most 90 days to `expires`, and a `^D-[A-Z0-9]+-\d+$` decision. Violations exit 2. Fixtures at 90 days (pass) and 91 days (exit 2). The US-048 outline-row wording stays with the product-manager. |
+| n1 | Open, routed | TASK-015 (four-digit TASK IDs). |
+| n2 | CLOSED | `SKIP_ROOTED` anchored, with a temp-tree test. |
+| n3 | CLOSED | `ubuntu-24.04` pinned on all three jobs. |
+| n4 | Open, accepted | Convenience hook; opportunistic. |
+| n5 | CLOSED | CODEOWNERS realigned. |
+| n6 | CLOSED | The two-step CLI change is documented in the ci.yml header. Local `./` actions are still not walked; TASK-015 must revisit this when it adds actions. |
+| n7 | CLOSED | By m5 (a). |
+
+### R2.3 New findings (round 2)
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `tools/ci/npm-command.mjs:22-74`; `check-install-flags.mjs:226-248` | **npm reify commands are outside the install scope.** `update`/`up`/`u`/`upgrade`/`udpate`, `dedupe`/`ddp`, `uninstall`/`un`/`rm`/`r`/`remove`/`unlink`, `link`/`ln` and `audit fix` all call Arborist `reify()`. That builds added nodes, so it runs their install scripts unless ignore-scripts is set. Probe: all of them give **0 findings** in a Dockerfile stage without `.npmrc`, where no workflow env applies. A related gap: `npm ci --ignore-scripts $NO` (or `"${X}"`) is accepted, although npm consumes an expanded `false`. M1 is closed as specified; this is the next class. | Add a `REIFY_COMMANDS` set (`update`, `dedupe`, `uninstall`, `link`, plus `audit` when followed by `fix`) to the drift test and require canonical `--ignore-scripts` on them, as for installs. Alternatively, forbid them in Dockerfiles. Treat a word after a bare `--ignore-scripts` that contains `$` or a backtick as an override. Add negative fixtures. In-PR, or route to TASK-015 before lane C builds images. |
+| R2-m2 | MINOR | `tools/ci/check-workflow-policy.mjs:115-136` (`CI_REQUIRED_GATES`), `:337-353` (`gitleaksFindings`), `:578-592` (`scansStepViolations`) | **The new policy rules are regression tripwires, not controls.** Each passes with 0 findings after a one-token edit (R2.1):<br>• `required-gates`: patterns are unanchored, so `… \|\| true`, `--event push` on the record step, or redirecting `GATE_*` to the head all pass;<br>• `gitleaks-hardening`: only `-v`/`--volume` sources containing `GITHUB_WORKSPACE` are examined, so `--mount …src=$GITHUB_WORKSPACE`, `-v "$PWD:/repo"` and `--exit-code 0` pass. That matters for TASK-015's lane C workflows too: a `$PWD` mount re-opens M2;<br>• `scans-isolation`: only `$GITHUB_WORKSPACE/<x>.(js\|ts\|sh)` counts, so `node tools/ci/x.mjs` and `bash ./x.sh` from the head pass.<br>Deliberate edits are still caught procedurally, because every `.github/**` change needs a security record (m6, D-ORCH-013). D-TASK007-02 (11) and the fix comment describe these rules as "enforced", which overstates them. | Harden the cheap cases:<br>• required-gate `run:` must be exactly the gate line (anchored), with no `\|\|`, `;`, `set +e`, `--report-only` or `--event`;<br>• the `GATE_*` assignment step is itself a required gate;<br>• gitleaks requires `--exit-code 1` and rejects any mount (`-v`, `--volume`, `--mount`) whose source is not `…/.git` (including `$PWD`, `.` and `${{ github.workspace }}`);<br>• `scans` allows `node` only on `"$GATE_*"` and forbids `bash\|sh <path>` and `./`.<br>Reword D-TASK007-02 (11) / the ci.yml header to say "regression tripwire; adversarial edits are covered by the `.github/` record". In-PR or TASK-015. |
+| R2-m3 | MINOR | `ci.yml:369-370`; `tools/ci/run-semgrep.mjs:97-117` | **m3 (c) residual: nested `.semgrepignore`.** Semgrep 1.183.0 uses Semgrepignore v2 (since 1.117.0), which honours `.semgrepignore` files in subdirectories. The base root file is bind-mounted, but a head `apps/api/.semgrepignore` containing `*` still removes that subtree. The scan stays green unless the total reaches 0 files. The fix comment's "a PR cannot narrow it" is therefore not true yet. | Fail closed on any `.semgrepignore` other than the root one. This can be a repository-mode policy rule, like `gitleaksignore`, and a run-semgrep pre-check that lists them from the scanned tree. Alternatively, pass `--x-semgrepignore-filename` with a name the base controls. Extend `run-semgrep.int.test.ts` with a nested-file negative control. In-PR or TASK-015. |
+| R2-m4 | MINOR | `tools/ci/check-workflow-policy.mjs:108-109` (`SAFE_EXPRESSION`) | **`untrusted-expression` can be laundered through `env.*`** (also `steps.*.outputs` and `needs.*.outputs`). Writing `env: { T: ${{ github.event.pull_request.title }} }` and then `run: echo "${{ env.T }}"` is script injection: the expression is expanded into the script text before the shell runs. Probe: 0 findings. GitHub's hardening guide says to use `"$T"`, never `${{ env.T }}`. ci.yml has no instance today; the rule is new in this PR (PR10-SEC-07). | Remove `env.*` from `SAFE_EXPRESSION`; there is no reason to interpolate env in `run:`. Keep `steps`/`needs` outputs allowed only for an explicit allow-list of output names, or require them through `env:` too. Add the laundering fixture. |
+| R2-n1 | NIT | `tools/ci/npm-command.test.ts:45-53` | The drift test asserts **equality** with the npm that runs the suite. Safety only needs `INSTALL_WORDS ⊇ npm's set`, because extra words are harmless false positives. With `engines.npm >=11.10`, a contributor on an older npm 11.x with a different alias table gets a red unit suite. | Assert the superset, and log extra words as informational. Alternatively, pin the npm version in the test name and skip with a clear message on a different minor. |
+| R2-n2 | NIT | `tools/ci/check-security-owned-paths.mjs:68-78` | `patternToRegExp('**/tsconfig*.json')` requires a `/` before the file name, so a new **root** `tsconfig.*.json` is owned by GitHub's CODEOWNERS but not by the record check. Today's root files are listed explicitly. | Map a leading `**/` to `(?:.*/)?`, and add a test. |
+| R2-n3 | NIT | `.github/CODEOWNERS` | `.gitattributes` is not owned. Today its `-diff`/`binary` effects on gitleaks are neutralised by the `.git`-only mount (R2.1). It can still mark paths `linguist-generated`, which collapses their diffs in the PR review UI, and affect any future `git diff -p`-based check. | Add `/.gitattributes` to CODEOWNERS and `REQUIRED_CODEOWNED_PATHS`. |
+| R2-n4 | NIT | `tools/ci/check-install-flags.mjs:93-124, 181-191` | The m1 line-break rejection applies only to workflows (yaml-subset). Compose files, which check-install-flags reads as plain text split on `\r?\n`, and Dockerfiles can still hide a command behind NEL/LS/PS or a lone CR inside a comment. | Run the same `FORBIDDEN_CHAR` test (export it from `yaml-subset.mjs`) on every file check-install-flags reads. |
+| R2-n5 | NIT | `ci.yml:24-30, 361` | Push `paths-ignore` (m5 (c)) means a docs-only push to main is never secret-scanned. The orchestrator pushes `docs/` and `.claude/` straight to main. The `-1 $RANGE_HEAD` fallback scans one commit only. This is moot while `CI_MAIN_FAST_LANE` is unset. | Before enabling the push lane, either drop `paths-ignore` for `scans` (job-level `if` on the classifier instead), or add a scheduled or dispatch-only full-history gitleaks run in TASK-015. |
+| R2-n6 | NIT | `ci.yml:250-271` | The base-ref negative-fixture step takes `tools/test-support/` from the base but `jest.config.ts` from the head. A PR whose head jest config references a new test-support file fails this step, a false failure that needs a two-step change. | Document it next to the n6 note in the header, or take `jest.config.ts` from the base as well when `LINT_CONTROLS` is set. |
+| R2-n7 | NIT | `tools/ci/ci-policy.test.ts`; `check-workflow-policy.test.ts` | The M2 behaviour (allow marker, `.gitleaksignore`, merge-only secret) is proven only by the author's manual Docker probe. The suites assert the invocation text. | TASK-015: a lane C integration test that runs the pinned gitleaks image over a temp repo with those three cases (round 1 asked for this "ideally"). |
+| R2-n8 | NIT | `ci.yml:21-23, 336-340` | Bootstrap and `RECORD_MODE=report-only` are keyed on "the base lacks the script", which is also true of any PR that **targets** a branch forked before this merges. `pull_request` has no `branches:` filter, so such a PR runs head tooling and a report-only record check. | Add `branches: [main]` under `pull_request`. Alternatively, enforce when `github.base_ref != 'main'`. |
+
+### R2.4 Deviation rulings (round 2)
+
+| Item | Ruling |
+|---|---|
+| M3 closed procedurally instead of through repository settings (D-ORCH-012/013) | **Accepted.** The explicit, pre-linted `--subject` makes the main header independent of the PR title and commit count, which is stronger than PR_TITLE alone. The settings change stays recommended to the owner. |
+| Gate scripts bootstrapped from **head git objects** while the base lacks them | **Accepted as safe for this PR only.** On a fresh runner, nothing has run before the extraction, so the git objects and the working tree are equally head-controlled. Bootstrap trusts the head by definition. The run summary labels it, the record check is report-only, and the security record plus the D-ORCH-013 merge procedure cover it. After merge, every one of the five paths and both scripts exist on main, so the base branch is taken. R2-n8 covers non-main bases. |
+| `scans` on its own runner (≈ +1 billable minute), offset by dropping `changes` | **Accepted.** Net about 6 job-minutes per run, measured. |
+| commitlint on docs-only PRs costs an `npm ci` | **Accepted** (round-1 M3 ask). |
+| Last-Verdict-row contract, head-row SHA binding, `PR-<nnnn>` naming | **Accepted.** All committed records parse (R2.1). Format note for later security rounds: a round-2 FAIL written as prose or in a blockquote is ignored, and the earlier table verdict wins. Security-analyst must always append a new header table. I am recording this in the review conventions; the mechanism needs no change. |
+
+### R2.5 Merge conditions
+
+1. No BLOCKER/MAJOR is open. Fix R2-m1..m4 in this PR, or route them to **TASK-015** before lane C (images, more workflows) lands. R2-m2 and R2-m3 are prerequisites for any new workflow or Semgrep scope change.
+2. **Security record:** `docs/05-quality/security/PR-0010-*.md` must append a round-2 header table with a `| Head |` row naming `26fc08d` (or the final head) and a last `| **Verdict** |` of PASS / PASS_WITH_FOLLOW-UPS / PASS_WITH_CONDITIONS. The current record names only `28442b6`, after which owned paths changed.
+3. **Merge procedure (D-ORCH-013):** run `gh pr merge 10 --squash --match-head-commit <sha> --subject "<subject linted with commitlint>"` only after ci-gate `success` on that exact SHA. A docs-only commit for the security record moves the head and needs its own green run.
+4. **After merge:** PR #9 is the first PR under the enforced record gate. Its record's last Verdict currently parses as **FAIL** (PR-0009), so lane A will fail it until a passing round-2 header table names its head. That is expected, and is not a defect of this PR.
+5. Routed items: R2-n1 and R2-n2 (in-PR or TASK-015); R2-n3 (TASK-015); R2-n4 (TASK-015); R2-n5 (before `CI_MAIN_FAST_LANE=true`); R2-n6 (documentation); R2-n7 (TASK-015); R2-n8 (in-PR, one line).
+
+### R2.6 Security flags (for security-analyst)
+
+- **R2-m1:** reify-class npm commands run dependency lifecycle scripts unflagged in Dockerfiles. CWE-829; A08:2021.
+- **R2-m2:** policy rules for gate presence, gitleaks mounts and scans isolation are bypassable by one-token edits. Only the `.github/` record catches this; confirm PR10-SEC-07's rating stands with that dependency.
+- **R2-m3:** nested `.semgrepignore` narrows the base-rule Semgrep scope (follow-up to PR10-SEC-03).
+- **R2-m4:** `${{ env.* }}` in `run:` launders untrusted context. CWE-78 / CWE-94; GitHub Actions script injection.
+- **Positive:** the `.git`-only gitleaks mount also defeats `.gitattributes -diff` hiding (verified with git 2.52). Keep the mount rule, and harden it per R2-m2.

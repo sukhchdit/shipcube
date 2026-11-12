@@ -1,0 +1,4 @@
+#!/bin/sh
+# Conventional Commits at the source (TASK-007, D-TASK007-08): lane A lints the PR title, which becomes the squash
+# commit on main; this hook keeps every local commit conforming too. Installed by `npm run hooks:install`.
+exec npm exec --no -- commitlint --edit "$1"

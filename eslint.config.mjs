@@ -302,6 +302,8 @@ export default defineConfig([
     '.claude/**',
     // Seeded negative fixtures violate rules on purpose; tools/lint/negative-fixtures.test.ts lints them explicitly.
     'tests/fixtures/lint/**',
+    // Semgrep rule fixtures (`// ruleid:` lines) violate the patterns on purpose; tools/ci/run-semgrep.mjs --test runs them.
+    'tests/fixtures/semgrep/**',
     'tools/deps/fixtures/**',
   ]),
 
