@@ -188,3 +188,26 @@ export function splitStatements(sql: string): string[] {
 export function normalise(statement: string): string {
   return statement.replace(/\s+/g, ' ').trim().toLowerCase();
 }
+
+/**
+ * SQL text for the tenant-context form checks, shared by migration-linter rule 16 and the C-series `prosrc` scan
+ * (prisma/tests/catalog/scans.ts) so the two cannot drift (PR #11 review R2-n1): comments become one space,
+ * dollar-quoted bodies are expanded recursively (a body is SQL or PL/pgSQL), string literals are kept or blanked. A
+ * nested body that does not lex is kept verbatim (still scanned, fail closed); a top-level lexing error is thrown.
+ */
+export function sqlText(sql: string, keepStrings: boolean): string {
+  return tokenize(sql)
+    .map((token) => {
+      if (token.kind === 'comment') return ' ';
+      if (token.kind === 'string') return keepStrings ? token.text : ' ';
+      if (token.kind !== 'dollar') return token.text;
+      const tag = (/^\$[^$]*\$/.exec(token.text) as RegExpExecArray)[0];
+      const body = token.text.slice(tag.length, token.text.length - tag.length);
+      try {
+        return ` ${sqlText(body, keepStrings)} `;
+      } catch {
+        return ` ${body} `;
+      }
+    })
+    .join('');
+}
