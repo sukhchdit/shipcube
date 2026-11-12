@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | P0 | Intake | orchestrator | ✅ DONE | BRIEF.md, operating params (D-002), Q-001..Q-004 answered |
 | P1 | Requirements → G1 | product-manager | ✅ G1 PASS_WITH_CONDITIONS | 430 REQs, 90 NFRs, 290 stories (215 Must), D-008..D-034, A-005..A-077 (commit 9cb3205) |
-| P2 | UX | ux-designer | ▶ IN_PROGRESS | UI present (web + admin) |
+| P2 | UX | ux-designer | ✅ DONE | 108/108 Must UI stories covered; F01–F10, W00–W17, tokens.json (validated), D-UX-001..029. 11 open items → P3 (README §5) |
 | P3 | Architecture → G2 | principal-architect | ▶ IN_PROGRESS | Stack fixed (ADR-0001 documents, does not re-select) |
 | P4 | Planning | senior-developer + qa-lead | ⏳ | |
 | P5 | Build (waves, M0 → M1) | senior-developer | ⏳ | `v0.1.0-m0` pre-release after M0 waves (D-006) |
