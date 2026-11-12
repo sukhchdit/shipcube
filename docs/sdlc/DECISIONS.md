@@ -1336,3 +1336,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Why:** Required CI steps stay green and meaningful; the secret-scanning control is not weakened.
 - **Alternatives:** One-time exception / merge with red fast-lane (rejected: breaks "merges require passing CI"); allowlist `d68898a` (rejected, D-SEC-PR13-02).
 - **Reversibility:** High.
+
+### D-TASK007-03 · 2026-11-13 · devops-engineer (logged by orchestrator) · Base-ref lint fixture step: no-weakening subset semantics (PR #17 @ea78d38)
+- **Decision:** (1) The base suite owns what its mode skips: the head-controlled `--testNamePattern` filter is removed and the required gate forbids test filters; mode set only by the step's own `env: LINT_FIXTURE_MODE: no-weakening` (unknown values fail the suite load; new workflow-policy rule `lint-fixture-mode` forbids the variable anywhere else, incl. `$GITHUB_ENV`). (2) In no-weakening mode every base-expected finding must still fire with the same rule id, `error` severity and message fragment; extra findings (new rules, known rules firing more widely, directive reports) are listed in the log/job summary tagged new/known and do not fail. (3) The head run inside `test:unit` keeps exact semantics, incl. the lint-script wiring test. Residual (LOW, security-analyst): the gate checks presence, not integrity (a PR's ci.yml could add `exit 0`); `/.github/` CODEOWNED + security record is the backstop.
+- **Reversibility:** High.
