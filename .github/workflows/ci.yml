@@ -252,13 +252,19 @@ jobs:
             echo "Base ref has no $suite; the head copy already ran in the unit tests." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # Exact base copies: remove head-only fixtures first (checkout alone would keep files the PR added).
+          rm -rf tests/fixtures/lint
           git checkout "$RANGE_BASE" -- "$suite" tests/fixtures/lint
+          # The control is "no weakening": every base bad-* fixture must still be reported by the head configs.
+          # Positive assertions (ok-* fixtures lint clean, every bad-* listed, the exact lint-script steps) may change
+          # legitimately when a PR strengthens the rules, and the head suite already ran them in the unit tests.
           status=0
-          # Path first: after --selectProjects, jest would read the path as a project name.
-          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js "$suite" --selectProjects unit || status=$?
+          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js "$suite" \
+            --selectProjects unit \
+            --testNamePattern '^(?!.*(allowed: |lints clean|is listed in the case table|`npm run lint` runs)).*$' || status=$?
+          rm -rf tests/fixtures/lint
           git checkout HEAD -- "$suite" tests/fixtures/lint
-          git clean -fdq -- tests/fixtures/lint
-          echo "Base-ref lint negative fixtures: exit $status" >> "$GITHUB_STEP_SUMMARY"
+          echo "Base-ref lint negative fixtures (no-weakening subset): exit $status" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
       - name: Build
