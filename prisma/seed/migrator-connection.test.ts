@@ -160,6 +160,8 @@ describe('withMigratorConnection', () => {
     // The listener only absorbs: the pending query's rejection carries the error.
     expect(() => created?.listeners[0]?.(new Error('Connection terminated unexpectedly'))).not.toThrow();
     expect(created?.statements).toEqual([expect.stringContaining('pg_catalog.pg_settings'), 'SELECT 1']);
+    // PR13-SEC-10: the pre-verification read-back resolves no unqualified operator.
+    expect(created?.statements[0]).toContain('WHERE name OPERATOR(pg_catalog.=) ANY ($1::pg_catalog.text[])');
     expect(created?.ended).toBe(1);
   });
 

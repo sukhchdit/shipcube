@@ -125,12 +125,14 @@ const EXPECTED_SETTINGS: Readonly<Record<string, string>> = {
 /**
  * Reads the session settings back (`pg_settings.setting` is in the parameter's base unit, ms for the timeouts) and
  * refuses the run unless they equal the pin, as `tools/db/bootstrap.ts` does for `search_path` (SEC-P3-34 item 2).
- * This also catches a proxy that drops the startup `options`.
+ * This also catches a proxy that drops the startup `options`. The read-back is the only statement that runs before the
+ * pin is verified, so its operator is schema-qualified too (PR13-SEC-10).
  */
 async function assertPinnedSession(sql: SeedSql): Promise<void> {
-  const { rows } = await sql.query<SettingRow>('SELECT name, setting FROM pg_catalog.pg_settings WHERE name = ANY($1::pg_catalog.text[])', [
-    Object.keys(EXPECTED_SETTINGS),
-  ]);
+  const { rows } = await sql.query<SettingRow>(
+    'SELECT name, setting FROM pg_catalog.pg_settings WHERE name OPERATOR(pg_catalog.=) ANY ($1::pg_catalog.text[])',
+    [Object.keys(EXPECTED_SETTINGS)],
+  );
   const actual = new Map(rows.map((row) => [row.name, row.setting.replace(/\s+/g, '')]));
   const drifted = Object.entries(EXPECTED_SETTINGS)
     .filter(([name, expected]) => actual.get(name) !== expected.replace(/\s+/g, ''))
