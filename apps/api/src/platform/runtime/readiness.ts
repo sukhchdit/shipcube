@@ -54,9 +54,18 @@ export const READINESS_CHECK_TIMEOUT_MS = 2_000;
 /** AT-US-012-03: the whole readiness response within 2.5 s (the rest is left for serialisation and the network). */
 export const READINESS_DEADLINE_MS = 2_250;
 
+/**
+ * PR-0009 m3 / PR9-SEC-08: `/health/ready` is public and unthrottled, so concurrent calls share one evaluation and a
+ * report is reused for this long (dependency I/O at most about once per second per process, whatever the poll rate).
+ */
+export const READINESS_CACHE_TTL_MS = 1_000;
+
 export interface ReadinessOptions {
   readonly checkTimeoutMs?: number;
   readonly deadlineMs?: number;
+  /** Reuse a completed report for this long; 0 disables reuse (concurrent calls still share one evaluation). */
+  readonly cacheTtlMs?: number;
+  readonly now?: () => number;
 }
 
 /**
@@ -122,9 +131,9 @@ export async function evaluateReadiness(checks: readonly ReadinessCheck[], optio
 }
 
 /**
- * The report while the process drains (NFR-AVAIL-002): 503 at once, without dependency I/O, so the load balancer
- * stops routing before the listener closes. Critical components read `unavailable` (this process cannot serve
- * them any more), audit components `degraded`.
+ * The report while the process drains (NFR-AVAIL-002): 503 at once, without dependency I/O. The listener closes in
+ * the same tick; a pre-close delay that lets the load balancer deregister first is TASK-214 (PR-0009 n2). Critical
+ * components read `unavailable` (this process cannot serve them any more), audit components `degraded`.
  */
 export const DRAINING_REPORT: ReadinessReport = Object.freeze({
   httpStatus: 503,
@@ -150,9 +159,28 @@ export interface ReadinessProbe {
 
 export function createReadinessProbe(checks: readonly ReadinessCheck[], options: ReadinessOptions = {}): ReadinessProbe {
   const validated = assertReadinessChecks(checks);
+  const ttlMs = options.cacheTtlMs ?? READINESS_CACHE_TTL_MS;
+  const now = options.now ?? Date.now;
   let draining = false;
+  let inflight: Promise<ReadinessReport> | undefined;
+  let last: { readonly report: ReadinessReport; readonly at: number } | undefined;
+
+  const evaluate = (): Promise<ReadinessReport> => {
+    if (last !== undefined && now() - last.at < ttlMs) return Promise.resolve(last.report);
+    inflight ??= evaluateReadiness(validated, options)
+      .then((report) => {
+        last = { report, at: now() };
+        return report;
+      })
+      .finally(() => {
+        inflight = undefined;
+      });
+    return inflight;
+  };
+
   return {
-    readiness: () => (draining ? Promise.resolve(DRAINING_REPORT) : evaluateReadiness(validated, options)),
+    // Draining answers at once, without I/O and without a cached report.
+    readiness: () => (draining ? Promise.resolve(DRAINING_REPORT) : evaluate()),
     startDraining: () => {
       draining = true;
     },
@@ -163,9 +191,17 @@ export function createReadinessProbe(checks: readonly ReadinessCheck[], options:
 }
 
 /**
- * Placeholder for a component whose client does not exist yet: always passes. Each use names the task that
- * replaces it, so the stub cannot outlive its owner unnoticed.
+ * Placeholder for a component whose client does not exist yet. Each use names the task that replaces it, and
+ * services.test.ts fails once the replacement exists while the stub is still wired.
+ *  - A degradable (audit) component reports `degraded`: an unverified audit chain must never read healthy
+ *    (PR9-SEC-11); readiness stays 200 (AT-US-012-04).
+ *  - A critical component passes: `unavailable` would keep every stack permanently not ready (PR-0009 m2 ruling).
  */
 export function pendingCheck(name: ReadinessComponent): ReadinessCheck {
-  return Object.freeze({ name, critical: isCriticalComponent(name), check: () => Promise.resolve() });
+  const critical = isCriticalComponent(name);
+  return Object.freeze({
+    name,
+    critical,
+    check: () => (critical ? Promise.resolve() : Promise.reject(new Error(`${name} check pending`))),
+  });
 }

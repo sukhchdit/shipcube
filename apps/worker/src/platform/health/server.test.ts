@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 
 import {
   createReadinessProbe,
-  pendingCheck,
+  isCriticalComponent,
   READINESS_COMPONENTS,
   type ReadinessCheck,
   type ReadinessComponent,
@@ -16,9 +16,14 @@ const failing = (name: ReadinessComponent, critical: boolean): ReadinessCheck =>
   critical,
   check: () => Promise.reject(new Error('connect ECONNREFUSED valkey.internal.example:6379 (valkey 8.1)')),
 });
+const passing = (name: ReadinessComponent): ReadinessCheck => ({
+  name,
+  critical: isCriticalComponent(name),
+  check: () => Promise.resolve(),
+});
 const hanging = (name: ReadinessComponent): ReadinessCheck => ({ name, critical: true, check: () => new Promise<void>(() => undefined) });
 const checksWith = (overrides: Partial<Record<ReadinessComponent, ReadinessCheck>> = {}): ReadinessCheck[] =>
-  READINESS_COMPONENTS.map((name) => overrides[name] ?? pendingCheck(name));
+  READINESS_COMPONENTS.map((name) => overrides[name] ?? passing(name));
 const allOk = { database: 'ok', redis: 'ok', object_storage: 'ok', audit_partitions: 'ok', audit_chain: 'ok' };
 
 describe('US-012 liveness and readiness endpoints (worker health server)', () => {

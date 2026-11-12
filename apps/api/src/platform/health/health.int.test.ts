@@ -46,13 +46,17 @@ describe('US-012 readiness with real PostgreSQL 18 and Valkey 8 (api)', () => {
       url: `redis://${valkeyContainer.getHost()}:${String(valkeyContainer.getMappedPort(6379))}`,
       connectionName: 'api-health-it',
     });
-    const probe = createReadinessProbe([
-      createDatabaseCheck(pool),
-      createValkeyCheck(valkey),
-      pendingCheck('object_storage'),
-      pendingCheck('audit_partitions'),
-      pendingCheck('audit_chain'),
-    ]);
+    const probe = createReadinessProbe(
+      [
+        createDatabaseCheck(pool),
+        createValkeyCheck(valkey),
+        pendingCheck('object_storage'),
+        pendingCheck('audit_partitions'),
+        pendingCheck('audit_chain'),
+        // No report reuse: each test stops a container and must see the next evaluation (PR-0009 m3 TTL is 1 s).
+      ],
+      { cacheTtlMs: 0 },
+    );
     app = express();
     app.use(createHealthRouter({ probe }));
   }, STARTUP_TIMEOUT_MS);
