@@ -1,7 +1,8 @@
 // The one error handler (ADR-0016 §3, REQ-PLAT-009/010, US-007). Mounted last by createApp. It answers every
 // failure as application/problem+json with a catalogue code, echoes the correlation ID (header set by the context
 // middleware, field set here), logs 5xx with the raw thrown value for the server log only, and marks the response
-// so audit capture skips it. The body is built from catalogue data and AppError's client-safe fields only.
+// so audit capture skips it. The body is built from catalogue data and AppError's client-safe fields only; a DbError
+// contributes its catalogue code and, when retryable, `Retry-After` (never its reason, SQLSTATE or Prisma code).
 import { randomUUID } from 'node:crypto';
 
 import { AppError, ERROR_CATALOGUE, type ErrorCode } from '@platform/shared';
@@ -36,6 +37,7 @@ function codeOf(classified: Classified): ErrorCode {
     case 'app':
       return classified.error.code;
     case 'framework':
+    case 'db':
       return classified.code;
     case 'unexpected':
       return 'INTERNAL_ERROR';
@@ -64,9 +66,10 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
   });
 }
 
-function sendProblem(res: Response, status: number, body: string): void {
+function sendProblem(res: Response, status: number, body: string, retryAfterSeconds?: number): void {
   for (const header of DROPPED_ON_PROBLEM) res.removeHeader(header);
   res.setHeader('Cache-Control', 'no-store');
+  if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
   res.status(status).type(PROBLEM_CONTENT_TYPE).send(body);
 }
 
@@ -108,7 +111,7 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
 
       const body = JSON.stringify(problem);
       markErrorResponse(res, { code, status: problem.status });
-      sendProblem(res, problem.status, body);
+      sendProblem(res, problem.status, body, classified.kind === 'db' ? classified.retryAfterSeconds : undefined);
     } catch {
       // PR9-SEC-07: a failure inside the handler (an unserialisable `errors` entry, a hostile value) must not reach
       // Express's final handler, which answers HTML with a stack outside NODE_ENV=production.

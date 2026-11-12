@@ -12,12 +12,7 @@ The PR #11 review (TASK-016) is in `docs/05-quality/security/PR-0011-TASK-016-se
   - **Closed:** 09 (items 1–6), 11 a/h, 12, 13, 14 (a), 15 c/f/g. Rulings items 1, 2b, 5, 6, 8 done.
   - **New:** 16 LOW (`E'…'` escape strings in `EXECUTE` operands evade both scanners; owner TASK-024 with 14 b) and 17 INFO (a: deliberate `Sql` forge; b: lint binding-flow gaps; c: rule-11 tracking of `"lock_timeout"` / `set_config('lock_timeout')` / DO `SET`).
   - `37a2109` itself is NOT merged: merge commit `d68898a` carries main's since-scrubbed literal (gitleaks). D-ORCH-018 → a superseding branch from clean main.
-- **Supersede round (next):** append "## Supersede round (head <sha>)" with a `Head` row and a last `Verdict` row. Check:
-  - `d68898a` is not an ancestor;
-  - `git diff 37a2109 <new> -- . ':!docs' ':!.claude'` is empty (main changed only docs/.claude after `63accea`);
-  - `.gitleaks.toml` / `.gitleaksignore` are unchanged;
-  - lane A is green, including the base-ref step after the D-ORCH-018 (2) harness fix. That fix is itself a security-owned change and needs its own review.
-- Validate the record with main's checker (`record-parse-check.mjs`; controls: the old record → missing, `--pr 12` → missing).
+- **Supersede round: DONE** as PR #18 @ `0f9ff27`, in the separate record `PR-0018-TASK-016-security-review.md`. Lane A needs a record named for the new PR number, so the round was not appended here. See [[project-p5-pr18-supersede]].
 
 **Facts verified (`@prisma/client` 7.10.1; re-verify after upgrades):**
 - **`$parent` (R1) and `requestTransaction(null|batch)` (R2)** reach the root pool. Both are closed in R3: `TenantDb` results are frozen, null-prototype, lazy thenables with `then` / `catch` / `finally` only.

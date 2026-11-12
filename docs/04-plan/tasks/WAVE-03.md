@@ -489,6 +489,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-043 scenarios
 - CSP violation listener: 0 violations on all pages
+- PR4-SEC-02 / PR4-SEC-06 (header suite) + PR #4 m5: the header/response suite runs against BOTH the web and admin images, including a non-matching Host (other.example) and Host: localhost, asserting Permissions-Policy, enforcing CSP with frame-ancestors none, HSTS off-local, X-Content-Type-Options: nosniff and Server: nginx without a version; the canonical origin in pre-rendered HTML equals the configured VITE_PUBLIC_ORIGIN
 - AT-US-043-01 … AT-US-043-06: all 6 scenarios of US-043, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -519,6 +520,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-046 scenarios
+- PR2-SEC-04 (LOW; no-innerhtml deny-list gaps): the HTML-injection lint also reports srcdoc / JSX srcDoc, Range#createContextualFragment, DOMParser#parseFromString, Element#setHTMLUnsafe / Document.parseHTMLUnsafe, Object.assign(el, { innerHTML }) and window.document.write (not only the bare document identifier); fixtures bad-srcdoc.tsx, bad-contextual-fragment.ts, bad-window-document-write.ts listed in the negative-fixture table; the .semgrep innerHTML pack covers the same sink list
 - AT-US-046-01 … AT-US-046-05: all 5 scenarios of US-046, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -552,6 +554,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-66 (PR6-SEC-01 verification; sandbox rule set): blocked with SSRF_BLOCKED + `ssrf_blocked` event — `https://express.api.dhl.com/mydhlapi/shipments/X/tracking`, `…/mydhlapi/test/../shipments/X/tracking` (string-concatenated then `new URL`), `…/mydhlapi/test/%2e%2e/shipments`, `…/mydhlapi/testX/rates`, `…/mydhlapi/test/..%2Fshipments`, `https://wwwcie.ups.com/security/v1/oauth/tokenX`, `…/security/v1/oauth/token/x`, `https://wwwcie.ups.com/security/v1/other`; allowed — `…/mydhlapi/test/rates`, `https://wwwcie.ups.com/security/v1/oauth/token`; a local or test environment containing a production-tier rule refuses to start
 - PR6-SEC-03 item 1 / PR6-SEC-02 item 3 / PR6-SEC-07 item 2 (ADR-0010 am. 11 item 8): the client records `server.address`, the method and an adapter-supplied ROUTE TEMPLATE (`DELETE /mydhlapi/test/pickups/{id}`) in logs and spans — never `url.full`, `url.path`, `url.query`, `http.url` or `http.target`; error mapping drops any `cause.message` that contains a URL; request and response bodies are never logged at any level; token-endpoint requests and responses are excluded from all body logging and raw capture (FedEx secrets travel in the form body); in-memory span exporter and log capture tests assert that a `requestorName` sentinel, an account-number sentinel and a `client_secret` sentinel never appear
 - T-83 extension (D-ARCH-074): the `OutboundHttpClient` member names (and the exported factory name) are added to the `platform/no-external-calls-in-tenant-tx` list owned by TASK-020, with a negative fixture that calls the client inside a `withTenantTx` callback; the client is never handed a `TenantDb`
+- PR2-SEC-04 (LOW; outbound-http-via-client gaps): HTTP_MODULES gains http2/node:http2 and net/tls connect/createConnection; NewExpression of the globals WebSocket and EventSource is reported; any READ of the global fetch identifier (not only calls: an alias, globalThis lookup or Reflect.apply) is reported through the existing isGlobal check; a literal dynamic import() of the HTTP modules is tracked; fixtures bad-http2.ts, bad-websocket.ts, bad-fetch-alias.ts; the .semgrep outbound-HTTP pack covers the same sink list and runs with --disable-nosem
 - AT-US-047-01 … AT-US-047-08: all 8 scenarios of US-047, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -622,7 +625,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-093 (M0 Must) Chain verification job and health degradation |
 | REQs | REQ-AUDIT-013 |
 | NFRs | NFR-AUDIT-003 |
-| Spikes / security / decisions | SEC-COND-03, SPK-08, R-ARCH-18 |
+| Spikes / security / decisions | SEC-COND-03, SPK-08, R-ARCH-18, PR12-SEC-04, PR12-SEC-05, D-TASK012-02, D-ARCH-076, D-ARCH-077, D-ARCH-079 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-030, TASK-090, TASK-039 |
@@ -637,6 +640,9 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-093 scenarios
 - SEC-TC-17 and SEC-TC-44 (amended): tampered entry -> CHECKPOINT_SIGNATURE_INVALID; deleted/reordered anchor or malleated signature -> ANCHOR_MISSING; anchor written hourly
+- ANCHOR FORMAT AS RATIFIED (data-model §5.5/§5.6 as amended 2026-11-13; SPK-08 A-1..A-7; ADR-0007 am. 9; D-ARCH-077; hash inputs — fixed before the first anchor is written): heads_digest over the snapshot sorted by the 16 raw UUID bytes, item stream_id(16) || be64(entry_count) || head_hash(32), empty set = SHA-256 of the empty string; created_at = clock_timestamp() read in the anchor transaction, rendered by PostgreSQL as YYYY-MM-DD"T"HH24:MI:SS.US"Z" in UTC and re-read in that form; sink line = RFC 8785 JCS of { anchor_seq (JSON number), checkpoint_entry_id (lower-case UUID), created_at, heads_digest / prev_anchor_hash / anchor_hash (lower-case hex), algorithm, key_id, signature (base64 DER) } plus newline, compared as a STRING; DER parsed strictly (non-minimal integers and long-form lengths rejected; a WebCrypto path converts DER -> P1363); A-1: steps (i)-(iii) run to completion, every failing step emits its event, failure_kind by precedence CHECKPOINT_SIGNATURE_INVALID > CHECKPOINT_HEAD_MISMATCH > ANCHOR_MISSING > chain kinds, audit_chain_verifications gains failure_kinds text[] and details, a table/sink content mismatch carries detail code ANCHOR_SINK_MISMATCH, audit_anchor_missing pages like audit_chain_broken; A-6: a missing sink record is tolerated only for the newest anchor whose signed created_at lies within [now - 15 min, now + 2 min], a future-dated anchor fails; A-7: step (iii) runs on the latest anchor that passed (i) and (ii)
+- AF-9/AF-12 qualifier + PR12-SEC-05 b/f + PR12-SEC-04 tripwire (D-ARCH-077, D-ARCH-076): the hourly run is incremental and detects anchored head-row changes; the NIGHTLY run starts every stream at seq 1 from ZERO32 and IGNORES last_verified_* (platform_app can update it); SEC-TC-44 variant (d) "behind-head rewrite, head row intact" (hourly: no failure, documented; nightly: PREV_HASH_MISMATCH / HASH_MISMATCH) plus the algorithm != ECDSA_P256_SHA256 and malleated (r, n-s) signature rows, test titles carrying SEC-TC-44; the audit_chain readiness check is secondary (platform_app can write audit_chain_verifications) — the security event is the primary signal; the hourly verifier also asserts evtenabled of both event triggers and tgenabled of every audit trigger and partition clone (= A, ENABLE ALWAYS) and emits audit_chain_broken on any change
+- SPK-08 §8.1 PORT-THEN-DELETE (PR #12 code review M3; D-TASK012-02 (1); due at this task merge, batch 3.6, and in any case before G3): this PR ports prisma/tests/spikes/spk08-anchor.int.test.ts (SEC-TC-44 (a)-(c), ANCHOR-02/06/07 incl. the >= 11-anchor ORDER-BY regression of AF-1, plus the PR12-SEC-05 b variants) into its verifier integration suite and the golden vectors into a packages/audit unit test, and prisma/tests/spikes/spk08/anchor-prototype.ts (headsDigest, anchorHash, derToP1363, sinkLine JCS, verifier steps) into product code in packages/audit with unit tests, then DELETES both files in the SAME commit as the port
 - AT-US-093-01 … AT-US-093-05: all 5 scenarios of US-093, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

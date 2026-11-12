@@ -3,44 +3,13 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { SessionIntegrityError } from '../db/session-integrity.js';
-import { createRuntimeLog } from './log.js';
 import { isPendingCheck, pendingCheck } from './readiness.js';
-import { readinessChecks, runStartupIntegrityCheck } from './services.js';
+import { readinessChecks } from './services.js';
+
+// The start-up session-integrity check moved with the database composition to ../db/runtime.ts (runtime.test.ts).
 
 /** Repository root from this file (apps/api/src/platform/runtime). */
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..');
-
-const rejectWith = (reason: unknown) =>
-  new Promise<never>(() => {
-    throw reason;
-  });
-
-function capture() {
-  const lines: Record<string, unknown>[] = [];
-  const log = createRuntimeLog('api', { write: (line: string) => lines.push(JSON.parse(line) as Record<string, unknown>) });
-  return { lines, log };
-}
-
-describe('start-up session-integrity check (PR-0009 M1)', () => {
-  it('logs success and resolves true', async () => {
-    const { lines, log } = capture();
-    await expect(runStartupIntegrityCheck({ recheck: () => Promise.resolve() }, log)).resolves.toBe(true);
-    expect(lines).toMatchObject([{ level: 'info', event: 'db.session_integrity_ok' }]);
-  });
-
-  it.each([
-    ['drift', new SessionIntegrityError(['db_session_default_tampered']), 'SessionIntegrityError'],
-    ['an unreachable database', Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { name: 'Error' }), 'Error'],
-    ['a non-Error rejection', 'secret-value', 'non-error'],
-  ])('never rejects on %s; logs the error class only', async (_label, reason, errorClass) => {
-    const { lines, log } = capture();
-    const recheck = () => rejectWith(reason);
-    await expect(runStartupIntegrityCheck({ recheck }, log)).resolves.toBe(false);
-    expect(lines).toMatchObject([{ level: 'warn', event: 'db.session_integrity_failed', error: errorClass }]);
-    expect(JSON.stringify(lines)).not.toMatch(/ECONNREFUSED|10\.0\.0\.5|secret-value|tampered/u);
-  });
-});
 
 describe('pending readiness stubs cannot outlive their replacements (PR-0009 m2, R2-m1, PR9-SEC-11)', () => {
   const fake = { query: () => Promise.resolve({ rows: [] }), ping: () => Promise.resolve('PONG') };

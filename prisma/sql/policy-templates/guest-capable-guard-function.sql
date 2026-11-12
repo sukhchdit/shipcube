@@ -1,0 +1,16 @@
+-- template: guest-capable-guard-function (data-model §4.3 amendment; ADR-0005 am. 10 item 11; D-ARCH-062, D-ARCH-065).
+-- Rendered ONCE (TASK-051 ships it, before the first GUEST_CAPABLE table). Invariant: org_id transitions only
+-- NULL -> value, once; a guest token hash is set only at insert and may only be cleared. Owned by the migrator, not
+-- SECURITY DEFINER, fixed search path. A trigger function needs no EXECUTE grant to fire.
+CREATE FUNCTION platform.guest_capable_guard() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  IF (OLD.org_id IS NOT NULL AND NEW.org_id IS DISTINCT FROM OLD.org_id)
+     OR (NEW.guest_token_hash IS NOT NULL AND NEW.guest_token_hash IS DISTINCT FROM OLD.guest_token_hash) THEN
+    RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'GUEST_DECLAIM_FORBIDDEN', TABLE = TG_TABLE_NAME;
+  END IF;
+  RETURN NEW;
+END
+$$;
+REVOKE EXECUTE ON FUNCTION platform.guest_capable_guard() FROM PUBLIC;

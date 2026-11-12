@@ -46,6 +46,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-054 scenarios (sample labelled)
+- PR #13 code review m4 (b) — first consumer for nullable natural keys: holidays.region_code is part of a NULLS NOT DISTINCT unique key, so this task lifts the null-key refusal for NND indexes in the seed framework and makes the insert-only changed-count join with IS NOT DISTINCT FROM, with tests; the same extension serves notification_templates.variant for the first task that seeds notification_templates
 - AT-US-054-01 … AT-US-054-08: all 8 scenarios of US-054, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -107,6 +108,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-127 scenarios
+- PR #13 code review m4 (a): carrier_services and transit_days.carrier_service_id reference per-environment carrier ids — uses the fk / seedId resolution extension of the Dataset contract (first landed by TASK-066; extend it here if this task lands first)
 - AT-US-127-01 … AT-US-127-05: all 5 scenarios of US-127, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -166,6 +168,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-056 scenarios
+- PR #13 code review m4 (d): number_sequences.next_value is written on insert and NEVER restored (resetting it on a deploy seed means duplicate order numbers — a guardrail), so this task adds insertOnlyColumns to the Dataset contract (written on insert, never compared or restored; reviewed_at / reviewed_by use the same list) with a test proving a re-run leaves next_value untouched
 - AT-US-056-01 … AT-US-056-08: all 8 scenarios of US-056, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -193,6 +196,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-058 scenarios (CONFIG_CHANGE audit per load)
+- PR #13 code review m4 (a)/(c): compliance_pack_sections and prohibited_items need parent ids resolved by natural key (the fk / seedId extension shared with TASK-066) and prohibited_items uniqueness is partial (WHERE scope = COUNTRY), so this task adds the optional arbiterWhere to the Dataset contract (ON CONFLICT (cols) WHERE ...) with tests
 - AT-US-058-01 … AT-US-058-07: all 7 scenarios of US-058, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -317,6 +321,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - ADR-0010 am. 11 item 5 (a)-(b) token-endpoint failures (PR6-SEC-05, PR6-SEC-12 g; with TASK-132): negative cache `carrier:tokenfail:<account_id>` on 400/401 (CARRIER_TOKEN_FAIL_TTL_S = 60) → fail fast with the canonical AUTH_FAILED (DR-B30; the code REQ-CARR-016 names) and ops event carrier_token_auth_failed, counts toward the account breaker; global token-request bucket per carrier and egress shared across replicas (FedEx 1/s burst 3; CARRIER_TOKEN_REQUESTS_PER_S per carrier); token requests and responses are excluded from all body logging and raw-payload capture
 - ADR-0010 am. 11 item 5 (c) as revised 2026-11-12 (PR6-SEC-11; D-ARCH-067): a token-endpoint 403 is handled by the adapter static TOKEN_ENDPOINT_POLICY, never by the status code alone — FedEx `carrier-cooldown`: carrier-wide cool-down CARRIER_TOKEN_PENALTY_COOLDOWN_S = 600 for all FedEx accounts on this egress, fail fast CARRIER_UNAVAILABLE, no retries, one probe after, event carrier_token_penalty; UPS `account-negative-cache`: 403 = Blocked Merchant, so only that account is negative-cached for CARRIER_TOKEN_BLOCKED_TTL_S = 600 (fail fast AUTH_FAILED), its breaker opens and an ops event fires while other UPS accounts keep working and no carrier-wide key is written; DHL has no token endpoint; a 403 is never read as "token expired, refresh"
 - SEC-TC-68 (nock + fake clock): 200 concurrent getRates across three accounts with one failing account issue <= 13 token requests in 10 s; FedEx: one 403 → zero token requests during the cool-down, one probe after; UPS: a 403 on account A leaves accounts B and C obtaining tokens and rates inside the 600 s window, A fails fast with AUTH_FAILED, and no carrier-wide cool-down key exists
+- PR #2 code review m9 (b) (routed to the carriers adapter task; this task is the Redis token-cache consumer): packages/carriers may import the HTTP client and the Redis token cache only through injected ports — the boundaries policy gains toPackage(ioredis, iovalkey, bullmq) disallowed for IMPORTER_PACKAGE(carriers) with a negative fixture; the token-cache port is implemented in apps/api|worker platform code and injected
 - AT-US-129-01 … AT-US-129-10: all 10 scenarios of US-129, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
