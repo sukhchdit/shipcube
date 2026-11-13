@@ -63,14 +63,6 @@ Feature: CarrierAdapter contract and capabilities
     And zero outbound network requests are made
     # repeated as a unit test per optional operation
 
-  Scenario: Required operation declared unsupported fails without a network call
-    Given an adapter whose capabilities() declares operations.cancelShipment=false
-    And network access is monitored
-    When cancelShipment is invoked
-    Then the call fails with the structured error CAPABILITY_NOT_SUPPORTED
-    And zero outbound network requests are made
-    # contract case cancel-capability-not-supported-no-io (D-ARCH-057)
-
   Scenario: Environment is read from the account, not a global flag
     Given a CarrierContext with environment "production" and a context with environment "sandbox"
     When the same adapter is called with each context
@@ -86,6 +78,14 @@ Feature: CarrierAdapter contract and capabilities
     Given an adapter object without track
     When it is registered
     Then registration fails with a message naming the missing operation
+
+  Scenario: Required operation declared unsupported fails without a network call
+    Given an adapter whose capabilities() declares operations.cancelShipment=false
+    And network access is monitored
+    When cancelShipment is invoked
+    Then the call fails with the structured error CAPABILITY_NOT_SUPPORTED
+    And zero outbound network requests are made
+    # contract case cancel-capability-not-supported-no-io (D-ARCH-057)
 ```
 
 ### US-122 — Deterministic Mock carrier
@@ -440,6 +440,10 @@ Feature: OAuth token cache
     Given the carrier returns 401 for every token
     Then the call ends after one retry with canonical error AUTH_FAILED
 
+  Scenario: Token never logged
+    When all logs of all scenarios in this feature are scanned
+    Then no token value appears
+
   Scenario: Token endpoint rejects the credentials
     Given the token endpoint answers 401 for account acct-fedex
     When 20 calls are made within 60 s
@@ -472,10 +476,6 @@ Feature: OAuth token cache
   Scenario: Missing expires_in is never cached
     Given the token response omits expires_in
     Then the token is used for the call, is not cached and a rate-limited warning is logged
-
-  Scenario: Token never logged
-    When all logs of the scenarios above are scanned
-    Then no token value appears
 ```
 
 ### US-130 — Resilience: timeouts, retries, circuit breaker and bulkhead
@@ -900,12 +900,6 @@ Feature: Fixtures, README and live-sandbox opt-in
     Given a README without "date checked" or without the "Diffed against official spec by a person" line
     Then the docs-check job fails naming the file and the field
 
-  Scenario: Not yet diffed by a person is allowed but reported
-    Given an adapter README with "Diffed against official spec by a person: no"
-    When the docs check and the evidence report run
-    Then the docs check passes
-    And the evidence report lists that adapter under COND-SANDBOX-DEMO with its count of synthesised fixtures
-
   Scenario: Live suite is skipped by default
     Given CARRIER_LIVE_SANDBOX is unset
     When the live suites are invoked
@@ -916,6 +910,12 @@ Feature: Fixtures, README and live-sandbox opt-in
     Given CARRIER_LIVE_SANDBOX=1 and credentials for DHL, FedEx and UPS
     When the single documented command is executed
     Then one label is booked with each carrier
+
+  Scenario: Not yet diffed by a person is allowed but reported
+    Given an adapter README with "Diffed against official spec by a person: no"
+    When the docs check and the evidence report run
+    Then the docs check passes
+    And the evidence report lists that adapter under COND-SANDBOX-DEMO with its count of synthesised fixtures
 ```
 
 ### US-293 — Anonymous rate-shopping budget and daily carrier quota guard

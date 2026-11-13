@@ -160,3 +160,131 @@ The review worktree stayed read-only. The probes ran on a `git archive fa67aca` 
 - m8: nested open Joi objects and server-controlled fields.
 - M1: S3 SDK boundary.
 - n4: `ctx.req.res` lets a handler write before COMMIT.
+
+## Round 2 (head 11530cc)
+
+| Field | Value |
+|---|---|
+| Head reviewed | `11530cc9b86d1964bd445bf04375319e92aaa184` |
+| Delta since r1 | `fa67aca..11530cc`: union `4789de8` (PR #20), `4d21114` fix(lint), `e1d588e` fix(api), docs merge `c29e492`, `49eb01a` prettier, union `531a244` (PR #33), `64afb5b` CODEOWNERS, docs merge `11530cc` |
+| Base | `origin/main` `bb070e2` (merge-base `f2f34a7`; the main delta since then is docs only, and `git merge-tree origin/main 11530cc` is clean) |
+| Reviewer | code-reviewer, 2026-11-13 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: M1 and m1-m8 are closed as D-ARCH-106 (7) and D-ARCH-107 (7) prescribe, and 22 of 26 mutants are killed
+  (3 survive, 1 is equivalent). Both unions match `git merge-tree` outside the declared files. There are 0 BLOCKER and 0 MAJOR
+  findings. 4 new MINORs: two are cheap in-PR fixes (an open-schema form, untested wiring lines), two are routed
+  (T-83 non-literal roots, refresh-cookie presence vs ADR-0006). Merge waits on lane-B evidence and on a lane A run
+  that executes its steps; on 11530cc every lane A step after the evidence check was SKIPPED.
+```
+
+### R2.1 Verification I performed
+
+The review worktree stayed read-only. All probes ran on a `git archive 11530cc` extract with a `node_modules` junction to the worktree. I added `@platform/{api,authz,shared}` overrides for the mutation runs and copied the git-ignored `prisma/generated` for tsc. Everything was removed afterwards. The worktree is clean at `11530cc` with 748 `node_modules` entries, and its `dist/` timestamps are unchanged. No Docker, no installs.
+
+| Check | Result |
+|---|---|
+| Unions vs `git merge-tree` | `4789de8`: 10 files differ from the clean merge tree. These are the 5 conflicted files (`app.ts`, `main.ts`, `runtime-seams.api.test.ts`, `contract-validation.api.test.ts`, the modify/delete `tools/openapi/api-mounts.ts`) and 5 declared hand edits (`serve.ts` `routePrefix(DOCS_PATH)` inside `createDocsRouter`, `logging.api.test.ts`, `pipeline.test.ts` `debug`, `eslint.config.mjs` Supertest allow-list entry, `tests/generated/api-mounts.ts` `debug`). `531a244` (PR #33), `c29e492` and `11530cc` are byte-identical to `merge-tree`. Branch delta vs merge-base: `package-lock.json` and `docs/sdlc/DECISIONS.md` are unchanged. |
+| r1 §6 a-h | a: order `requestContext -> requestLogger -> ipLimiter -> corsPreflight -> json -> routes[options, docs (routePrefix first), health, api (routePrefix first, mountRoutes)] -> fallback -> problem`. b: `main.ts` keeps PR #20's logger, `exitAfterFlush`, `installProcessErrorHandlers` above `createRuntimeServices` and `api.docs_unavailable`; the boot errors go through `bootFailureOf`. c, d, f: `debug` is on every logger. e: `logging.api.test.ts` uses descriptors and is on `SUPERTEST_ALLOW_LIST` with a reason. **All done.** |
+| Targeted unit, in band | 50 suites / **959 pass**: `apps/api/src/platform/**`, `packages/authz`, `packages/shared/src/http`, `tests/generated`, `tools/openapi`, `tests/api/helpers`, `tests/contract-stubs`. Also `tools/lint/{negative-fixtures,system-models,tenant-context-forms-drift,tenant-tx-disable-ratchet}`: all pass except the 3 known archive-copy resolver false failures. The ratchet needs a git root, so it was re-run after `git init` in the copy (10/10). Parallel runs on the loaded host gave 5 s loopback timeouts, so I re-ran in band. |
+| api project, in band | **101/101** (matches the PR body) |
+| ESLint, real config, 92 changed source files | Clean apart from 4 `import-x/no-extraneous-dependencies` findings on `@platform/shared` in `tests/api/helpers` and `tests/contract-stubs`. These are copy artefacts: the symlink resolves outside the copy root. The same 3 files lint clean (exit 0) in the worktree, read-only. |
+| `tsc -b` on shared, authz, api, tests/generated, tests/api, tests/contract-stubs, tools | exit 0 |
+| Mutation (26) | Killed: credential gate; authn presence check; dual-mode permission gate; authorise private mark; `send` re-assert; problem-handler credential predicate (api project); brand check; the audit, idempotency and MFA stubs; nested schema walk; `none` with audit; `CSRF_COOKIE`; `PERMISSION_AUTH`; `AUTH_SET`; an extra `[quote-token]` set; `DUAL_MODE`; signature reverse arm; auth parity wiring; refresh-cookie presence; nested server-controlled walk. Disable ratchet: seeded `eslint-disable-next-line` and `eslint-disable-line` directives in `apps/api/src` and `packages/shared/src` are named. An inline `/* eslint rule: off */` is refused repo-wide by `suppression/inline-config`. **Survived:** `transactionProblems`, `permissionStatusProblems` and `reauthProblems` unwired from `checkRouteMetadata` (R2-m2). **Equivalent:** `principalOf` trusting an unknown credential (the credential gate still answers 401; the mutant is stricter on anonymous routes). |
+| Lane A run 43457137317 on `11530cc` | fast-lane **failure** at "Lane B evidence". Lint, format, typecheck, unit, negative fixtures from the base ref and build were all **SKIPPED**. `scans` fails only on the security-owned review record (expected). CI has therefore not executed one gate on this head. |
+| Not re-run by me | Full lint/format/unit, build, integration, coverage, gitleaks: Docker is hung (D-ORCH-049). For these I rely on the developer's gate table plus the scoped runs above. |
+
+### R2.2 r1 findings: closure
+
+| r1 | Status | Evidence |
+|---|---|---|
+| **M1** S3 SDK boundary | **Closed** | `S3_SDK_IMPORT_PATTERN` is in `RESTRICTED_IMPORT_PATTERNS`, and storage uses `restrictedImportsExcept` (no `'off'`). The fixtures pass. My lint probes flagged `@aws-sdk/lib-storage`, a type-only import, `export * from`, and an import in `apps/worker`. A literal `await import('@aws-sdk/client-s3')` is not seen by lint, but PR #30's `boundary.test` still covers it (R2-n2). |
+| m1 SEC-TC-29 | **Closed** | (a) `send()` re-asserts on the private mark (mutant killed). (b) The problem handler reads `isPrivateResponse(res)` or `presentsCredential` (mutant killed in the api project). (c) The helper, stubs and app share one predicate from `@platform/shared` (D-TASK020-20). Pre-route problems need `no-store` only (D-TASK020-26), as I recommended. |
+| m2 brand | **Closed** | P1: a spread descriptor throws `UndefinedRouteError`. The brand check is checked by mutation. Residual: R2-n1. |
+| m3 stubs | **Closed** | P3: audit `CREATE`, idempotency `required` and rate-limit `auth` each throw `SlotNotImplementedError` naming TASK-029, TASK-040 and TASK-041. The other six rate-limit classes mount (pass-through, by design). The MFA stub refuses OPERATOR principals. |
+| m4 T-83 | **Closed per D-ARCH-106 (7)** | R1, R2, R3, R5 and R6 are implemented. All 8 negative and 4 positive fixtures the ruling lists are present and pass; there is an extra `fixtureRoute` + `tenant` fixture. My probes confirmed that a `handler: async function named()` and a template-literal `` transaction: `none` `` (unknown, so treated as tenant) are both roots. Residual: R2-m3. |
+| m5 RegExp mounts | **Closed** | The walker accepts only a string-path `match` matcher, so a renamed matcher fails closed. The lint covers literal, `new RegExp`, `RegExp()` and array forms. A RegExp held in a variable or spread passes lint, but the walker refuses it at run time (D-TASK020-22), so it is covered. The README is corrected. |
+| m6 §15 sub-rules | **Closed (wiring untested)** | Both functions exist, have seeded defects and run on the whole contract. Removing their call lines from `checkRouteMetadata` leaves the test green (R2-m2). |
+| m7 auth sets | **Closed** by D-ARCH-107 (see R2.4) | |
+| m8 nested schemas | **Closed for the r1 forms** | Nested `unknown(true)`, `pattern`, arrays of open objects, `alternatives` and `when` branches are refused; the walk is checked by mutation. A new form escapes: R2-m1. |
+| n1, n2, n3, n4, n7 | **Closed** | n4 via the frozen `ctx.transport`. n5 and n6 are routed (D-TASK020 routed list). |
+
+### R2.3 D-ARCH-106 (T-83) conformance
+
+- **Roots R1, R2, R3, R5 and R6.** All five are as ruled. `txFiles` and `txHandleTypes` are set explicitly in `eslint.config.mjs`. R6 is type-name based, and callback types are excluded.
+- **Ratchets.**
+  1. `TRANSACTION_NONE_OPERATIONS = {getLiveness, getReadiness}` is pinned. Its wiring into `checkRouteMetadata` is untested (R2-m2).
+  2. The disable ratchet works and is checked by mutation.
+  3. `defineRoute` refuses `transaction: 'none'` with an audited action (mutant killed).
+- **Interim rule (9).** It holds: there is no `tenant` route with I/O in the tree.
+
+### R2.4 D-ARCH-107 conformance, and D-TASK020-21 vs `createQuote`
+
+- **Sets and kinds.** `ROUTE_AUTH_SETS` is exactly the six accepted sets, frozen and in canonical order. An extra `[quote-token]` set is caught by 3 tests.
+- **Normalisation.** `findRouteAuthSet` is order-insensitive and refuses duplicates.
+- **`permissionAuthenticated`** is required exactly on dual-mode routes and must be catalogued, neither self-service nor signature-only.
+- **`Principal.credential`.** `principalOf` maps an unknown kind to ANONYMOUS.
+- **Gate order.** The credential gate runs before the permission gate, `public` included.
+- **Binding rules.** Each of the four rules has a negative test and a killed mutant; the signature reverse arm (D-TASK020-03) is kept.
+- **Leaky-authn seam.** `public`+`signature`, `public`+`refresh-cookie`, `[session, quote-token]` and `[session]` all give 401. My probe confirmed the `[session, quote-token]` case, and an unknown credential also gives 401.
+- **Parity.** Set equality holds, the counts are 29/95/3/3/1/2 over 133 operations, and five defects are seeded. CSRF parity runs through `x-csrf`.
+- **D-TASK020-21 is sound and does not break `createQuote`.**
+  - My probe on `[anonymous, session]` + `permissionAuthenticated` gave:
+    - no credential: 201, the anonymous branch;
+    - `Authorization`: 401, `private, no-store`;
+    - refresh cookie only: 401.
+  - That is the literal stub clause of D-ARCH-107 (5): "the anonymous principal when `anonymous` is in the set and no Authorization header, refresh cookie or X-Quote-Token is present, 401 with `private, no-store` otherwise".
+  - A valid session cannot exist before TASK-052, and the stub cannot verify one.
+  - Treating a present bearer as anonymous would silently drop the user's identity on the quote. That is the exact defect D-ARCH-107 (5) forbids for the real authenticator ("never replaced by another alternative").
+  - The session branch is covered where it belongs: `authorise.test` checks `quote:create` (403 without it, 200 with it) and the guest-token branch. TASK-052 replaces only `platform/authn/`. The cookie half of the same rule needs a note: R2-m4.
+
+### R2.5 New findings
+
+| ID | Severity | Where | Problem | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| **R2-m1** | MINOR (in-PR, cheap) | `routing/define-route.ts` `openSchemaProblems` | **Schema-level preferences re-open a schema at any depth, the top level included.** `Joi.object({ a: Joi.string() }).prefs({ allowUnknown: true })` (top level) and `.options({ allowUnknown: true })` (nested) are both ACCEPTED by `defineRoute`. At run time the top-level form returns `{"a":"x","smuggled":"y"}` to the handler, because a schema's own preferences override the validate options. `Joi.link(...)` is accepted without being walked. | REQ-SEC-007 and D-TASK020-24 ("closed at every depth"). A handler that spreads `input.body` into a write would accept columns that are not server-controlled (mass assignment). `serverControlledIssues` still catches `org_id` and the like. Same class as r1 m8, a different spelling. | In `openSchemaProblems`, refuse a node whose `preferences.allowUnknown === true`, at every node. Refuse `type: 'link'`, or resolve it by id and walk the target. Add one test per form. Otherwise route to TASK-100 with the forms named. |
+| **R2-m2** | MINOR (in-PR, cheap) | `tests/generated/route-metadata.ts:437,446-447` | **Three wiring lines are unpinned.** Deleting `add('transaction', …)`, `add('permission-status', …)` or `add('reauth', …)` from `checkRouteMetadata` leaves the whole suite green (40/40). The functions are tested directly, and the real tree has no defect for the composed call to find. | The `transaction: none` pin is one of D-ARCH-106 (6)'s three ratchets, and m6's closure rests on these calls. A refactor that drops a line removes the control silently (the PR #26 "composition line" class). | Add one seeded case per rule through `checkRouteMetadata`: a mounted non-pinned `transaction: 'none'` route (`metadataFixtureSlots()`), a doc with `x-permission-status: proposed`, and a doc with max-age and no scope. Assert on `finding.rule`. |
+| **R2-m3** | MINOR (route to 020-C, which edits this rule for R4) | `tools/eslint-rules/no-external-calls-in-tenant-tx.mjs` `collectRouteHandler`, `isNamedDependencyCall` | **Some handler shapes are silently not roots.** Lint probes gave 0 T-83 findings for: (a) `defineRoute(spec)` with a non-literal `spec`; (b) a module helper `tenantRoute = (id, handler) => defineRoute({ …, handler })` called with an inline async `fetch` handler (the handler is a parameter, which R3 does not resolve); (c) `ctx.deps.queue.add()` in an inline handler (only `deps.x` and `this.x` holders are recognised). `fetch` in (a) and (b) is still caught by `outbound-http-via-client`, but a `queue.add` would not be. | All three are outside the letter of R2 (literal argument) and R3 (const or function). A wrapper helper is the first refactor a module with 10 routes will make, and the rule then protects nothing in that module. The fail-closed spirit of R2 ("non-literal counts as tenant") argues for refusing what cannot be resolved. | 020-C: report a `defineRoute(` whose first argument is not an object literal, and a `handler` that resolves to neither a function nor a member expression (a parameter or a `let`): "declare route handlers inline or as same-file const functions". Match the `names` entry on any member chain (`a.b.queue.add`). One fixture each. |
+| **R2-m4** | MINOR (route to the architect note plus the TASK-052/055 sheets) | `packages/shared/src/http/credentials.ts`; `authn/authenticate.ts` | **Refresh-cookie presence counts as a credential on every route.** ADR-0006 R-06: `__Host-rt_web` is `Path=/` (the `__Host-` prefix requires it), and it is "read only by `/api/v1/auth/refresh` and `/logout`, ignored everywhere else". My probe: a `[anonymous]` GET carrying only `__Host-rt_web` gets **401** from the stub. This follows D-ARCH-107 (5)'s stub clause verbatim and is latent today, because nothing issues the cookie before TASK-055. | Once TASK-055 lands, every same-host browser request from a signed-in user carries the cookie. If TASK-052 or TASK-055 keeps the stub's "presented credential, so refuse" rule for the cookie, `createSession` (login, `[anonymous]`), public tracking and reference reads answer 401 to any browser holding a stale cookie. Making the response private when a cookie is present is harmless and can stay. | No code change in this PR. Add one sentence in `authenticate.ts` and `credentials.ts`: the cookie-presence refusal is stub-only, and real authenticators ignore the refresh cookie on routes whose set lacks `refresh-cookie` (ADR-0006 R-06). Ask the architect to reconcile D-ARCH-107 (5) with ADR-0006 R-06, and add the line to the TASK-052 and TASK-055 sheets with one matrix row (TASK-027): `[anonymous]` + cookie gives 200. |
+| R2-n1 | NIT | `define-route.ts` `defineRoute` | `Object.freeze` is shallow. `audit`, `reauth` and `deprecated` stay mutable. P1c: `(r.audit as {action:string}).action = 'NONE'` after `defineRoute` keeps the brand, and the audit stub then mounts a route declared `CREATE`. The `readonly` types make this a cast-only path. | | Deep-freeze `audit` (and `additional`), `reauth` and `deprecated` in the descriptor (copy, then freeze). |
+| R2-n2 | NIT | `platform/storage/boundary.test.ts:2-3`; `eslint.config.mjs` S3 entry | The header still says there is "no ESLint entry while TASK-020 holds the lint lock". `no-restricted-imports` does not see `import('@aws-sdk/…')`, so the unit test remains the only control for dynamic imports. | | Update the comment: lint covers static imports, this test also covers dynamic and `require`. Optionally add `no-restricted-syntax` on `ImportExpression[source.value=/^@aws-sdk\//]`. |
+| R2-n3 | NIT | `route-state.ts` `principalOf` | The unknown-credential fallback has no direct test; its mutant is equivalent at the authz gate. | | One unit case: `principalOf` with `credential: 'bearer'` returns ANONYMOUS. |
+
+### R2.6 Decision rulings
+
+| Decision | Ruling |
+|---|---|
+| D-TASK020-18 (MFA stub 403 `AUTHZ_DENIED`, not the auth module's code) | Accepted. |
+| D-TASK020-19 (boot checks in `createApp`; production bindings by `apiMode === 'live'`; no runner check under a replaced pipeline) | Accepted. `main.ts` never passes `pipeline`. |
+| D-TASK020-20 (shared `presentsCredential` in `@platform/shared`) | Accepted. See R2-m4 for its doc comment. |
+| **D-TASK020-21** (stub refuses a presented credential on an anonymous-capable route; `authorise` marks private) | **Sound.** It is D-ARCH-107 (5) verbatim and does not break `createQuote` (R2.4). The refresh-cookie half is carried as R2-m4. |
+| D-TASK020-22 (walker accepts only path-to-regexp `match`) | Accepted. It fails closed on a router upgrade. |
+| D-TASK020-23 (`api-mounts` unused runner; `metadataFixtureSlots`) | Accepted. |
+| D-TASK020-24 (closed at every depth, depth 32) | Accepted with R2-m1. |
+| D-TASK020-25 (frozen `ctx.transport`) | Accepted. Closes n4. |
+| D-TASK020-26 (pre-route problems need `no-store` only) | Accepted. It matches my r1 m1 recommendation. |
+| D-TASK020-27 (`logging.api.test.ts` stand-in authenticator, Supertest allow-list) | Accepted. It is test-only, and the reason is recorded in `eslint.config.mjs`. |
+
+### R2.7 Merge conditions
+
+1. **Lane-B evidence** on an ancestor of the final head once Docker is back (D-ORCH-049). Then a lane A run on the final head whose lint, typecheck, unit, negative-fixtures and build steps actually **execute and pass**. On `11530cc` they were skipped.
+2. **Security record** naming the final head. It covers the merge-only rounds for the PR #20 and PR #33 unions, the new `CODEOWNERS` line and the D-ARCH-107 implementation, with D-TASK020-03 and D-TASK020-21 confirmed.
+3. **R2-m1 and R2-m2 in-PR before the evidence commit.** They are cheap, and evidence has not been produced yet, so they cost no extra lane-B run. The NITs can ride along. If they are not done, route R2-m1 to TASK-100 and R2-m2 to 020-C as sheet lines. R2-m3 goes to 020-C and R2-m4 to the architect plus TASK-052/055/027, as sheet lines either way.
+4. After the evidence commit: no non-docs commit and no non-docs main merge before the squash. Squash with the linted PR title.
+5. Next activation PR: qa-lead moves SEC-TC-29 back to `required_cases` (now 18 tagged tests across 7 files, fixed predicate).
+
+### R2 GOOD
+
+- **One predicate, three consumers.** `presentsCredential` and the `isPrivateResponse` mark replace header-text sniffing. The helper, stubs and app now agree by construction.
+- **Stubs refuse at mount and name their owner.** `bootFailureOf` maps each refusal to its own event, with route identities only.
+- **The ratchet test** reuses the suppression checker's lexer (strings and templates skipped) and covers blanket directives.
+- **The union commits are clean.** Hand edits are confined to the conflicted files plus five declared ones, and the PR body carries a checklist that matches the tree.
+
+### R2 SECURITY-FLAGS (for security-analyst)
+
+- R2-m1: `prefs`/`options({ allowUnknown: true })` re-opens a schema (mass-assignment class); `Joi.link` is not walked.
+- R2-m4: refresh-cookie presence vs ADR-0006 R-06 (login 401 risk once TASK-055 issues cookies); D-ARCH-107 (5) reconciliation.
+- R2-m3: T-83 non-literal and wrapper roots (route to 020-C).
+- R2-n1: shallow freeze of the descriptor's `audit`.
+- Confirm D-TASK020-21 and the D-ARCH-107 credential-gate ordering on the final head.
