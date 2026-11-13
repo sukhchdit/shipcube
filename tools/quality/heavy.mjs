@@ -61,7 +61,7 @@ import { isCleanTreePath, isProfile, loadManifest, manifestFile, selectSuites } 
 /** @typedef {import('./lib/junit-write.mjs').JUnitCase} JUnitCase */
 /** @typedef {'tests' | 'security' | 'performance'} EvidenceRoot */
 /**
- * @typedef {'unit' | 'unit-dom' | 'integration' | 'api' | 'e2e'} JestProject
+ * @typedef {'unit' | 'unit-dom' | 'integration' | 'api' | 'generated' | 'e2e'} JestProject
  * @typedef {{ kind: 'jest', projects: JestProject[], paths: string[], testNamePattern?: string, coverage: boolean }} JestRunner
  * @typedef {{ kind: 'command', cmd: string[], converter: 'junit' | keyof typeof CONVERTERS, native_report: string | null,
  *   evidence_root: EvidenceRoot, options: Record<string, unknown> }} CommandRunner
@@ -77,10 +77,13 @@ export const EVIDENCE_BASE = 'docs/05-quality';
 /** ADR-0023 amendment B: cap per run directory. */
 export const MAX_RUN_DIR_BYTES = 5 * 1024 * 1024;
 export const DEFAULTS = Object.freeze({ base: 'origin/main', suiteTimeoutMin: 45, buildTimeoutMin: 30, testTimeoutMs: 30_000 });
-/** Jest projects that start Testcontainers or a full app: always in band with a raised per-test timeout (host load). */
-const IN_BAND_PROJECTS = new Set(['integration', 'api']);
+/**
+ * Jest projects that start Testcontainers or a full app: always in band with a raised per-test timeout (host load).
+ * `generated` holds the RBAC, audit, RLS and abuse generator suites (`*.api` / `*.int` under tests/generated; TASK-276).
+ */
+const IN_BAND_PROJECTS = new Set(['integration', 'api', 'generated']);
 /** Jest projects of jest.config.ts a runner may select (`npm run test:unit` = unit + unit-dom since TASK-004). */
-const JEST_PROJECTS = new Set(['unit', 'unit-dom', 'integration', 'api', 'e2e']);
+const JEST_PROJECTS = new Set(['unit', 'unit-dom', 'integration', 'api', 'generated', 'e2e']);
 const SUITE_ID = /^[a-z0-9][a-z0-9-]*$/;
 
 export class UsageError extends Error {

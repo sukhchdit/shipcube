@@ -24,6 +24,7 @@ describe('Jest loads ESM-only runtime dependencies (--experimental-vm-modules)',
       'test:api',
       'test:contract',
       'test:coverage',
+      'test:generated',
       'test:integration',
       'test:unit',
     ]);

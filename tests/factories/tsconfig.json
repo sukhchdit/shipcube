@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "//": "Shared test support (TASK-276, T-QA-03). Not a workspace: no package.json, no lockfile entry. Type-checked only; Jest compiles the sources with @swc/jest.",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-factories.tsbuildinfo"
+  },
+  "files": [],
+  "include": ["**/*.ts"]
+}

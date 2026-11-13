@@ -268,6 +268,8 @@ const BOUNDARIES_FILES = [
   { pattern: DB_PLATFORM, category: 'db-platform-core' },
   // The root client factory and the one value importer of the generated client (D-ARCH-103 (3)).
   { pattern: ['apps/*/src/platform/db/client.ts', 'apps/*/src/platform/db/generated.ts'], category: 'db-root-client' },
+  // The Prisma query counter (NFR-PERF-006, TASK-276): a test seam, see the last policy (PR34-SEC-01).
+  { pattern: 'apps/*/src/platform/db/query-counter.ts', category: 'db-test-seam' },
   { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
   { pattern: 'prisma/tests/**', category: 'prisma-tests' },
   // The seed framework (TASK-023): prisma/tests/seed exercises it (D-ORCH-015 reconciliation, PR #13 code review m6).
@@ -532,6 +534,17 @@ const BOUNDARIES_POLICIES = [
   //     root, so no other packages/shared module may import or re-export the logging module or Pino. The logging
   //     folder itself may import the rest of packages/shared (correlation, errors).
   { from: IMPORTER_SHARED_OUTSIDE_LOGGING, disallow: SERVER_LOGGING_TARGETS, message: SHARED_ROOT_LOGGING_MESSAGE },
+
+  // --- The Prisma query counter is a test seam (NFR-PERF-006, D-TASK276-03; PR34-SEC-01): only test files (including
+  //     module and app `tests/` folders, i.e. the API test app builder) and prisma/tests import it, so the production
+  //     composition root cannot mount it. Last, so no broader allow above re-opens it; tools/repo/test-seams.test.ts is
+  //     the source-scan tripwire for the same rule.
+  {
+    disallow: { to: toLayer('db-test-seam') },
+    message:
+      'platform/db/query-counter.ts is a test seam: only tests and prisma/tests import it; production code never mounts it (NFR-PERF-006, PR34-SEC-01).',
+  },
+  { from: { file: { categories: { anyOf: ['test', 'prisma-tests'] } } }, allow: { to: toLayer('db-test-seam') } },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -664,6 +677,14 @@ export default defineConfig([
     // tools/repo/jest-esm.test.ts proves that Jest loads the ESM-only `jose` and `uuid`, which are dependencies of
     // apps/api (not of the root manifest). Narrow allowance for this one file; the rule stays on everywhere else.
     files: ['tools/repo/jest-esm.test.ts'],
+    rules: {
+      'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
+    },
+  },
+  {
+    // The leakage-scanner test (TASK-276) drives the real platform logger (`@platform/shared/logging`, a dependency of
+    // apps/api, not of the root manifest) into its log capture. Narrow allowance for this one file, like jest-esm above.
+    files: ['tests/helpers/leakage-scanner.test.ts'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
     },
