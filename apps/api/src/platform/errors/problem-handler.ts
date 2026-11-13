@@ -9,7 +9,13 @@ import { AppError, ERROR_CATALOGUE, type ErrorCode, presentsCredential } from '@
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
 import { requestContextOf } from '../context/request-context.js';
-import { credentialsReadOf, isPrivateResponse, PRIVATE_CACHE_CONTROL } from '../routing/route-state.js';
+import {
+  credentialsReadOf,
+  declaresPrivateResponse,
+  isPrivateResponse,
+  PRIVATE_CACHE_CONTROL,
+  routeDescriptorOf,
+} from '../routing/route-state.js';
 import { classifyThrown, thrownClassName, type Classified } from './classify.js';
 import { markErrorResponse } from './error-response.js';
 import { buildProblem, DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanceOf, PROBLEM_CONTENT_TYPE } from './problem.js';
@@ -72,13 +78,21 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
 }
 
 /**
- * SEC-TC-29 for a problem document (D-ARCH-109). Once the authn slot read the credentials on a known route, its private
- * mark alone decides: a foreign credential it ignored does not make the error private. Before that (404/405 fallback,
- * body parser, a step that failed before the slot) no route has read the request, so the generic test stays: any
- * credential header makes the answer private, which costs nothing because a problem document is no-store anyway.
+ * SEC-TC-29 for a problem document (D-ARCH-109 (4)). Private when any of these holds:
+ * - a slot marked the response private;
+ * - the route is known (the `context` step recorded its descriptor before authn ran) and its declaration makes the
+ *   response private: no `anonymous` member, or a credential of a declared kind was presented. Computed here from the
+ *   descriptor, so an authenticator that refuses a declared credential before marking still answers private (R1-m1);
+ * - the authn slot has not read the credentials yet (404/405 fallback, body parser, a step that failed before the
+ *   slot) and the request carries any credential header: the generic test, free because a problem is no-store anyway.
+ * After the slot read the credentials, a foreign credential it ignored does not make the error private.
  */
-const isAuthenticatedProblem = (req: Request, res: Response): boolean =>
-  isPrivateResponse(res) || (!credentialsReadOf(res) && presentsCredential(req.headers));
+const isAuthenticatedProblem = (req: Request, res: Response): boolean => {
+  if (isPrivateResponse(res)) return true;
+  const route = routeDescriptorOf(res);
+  if (route !== undefined && declaresPrivateResponse(route.auth, req.headers)) return true;
+  return !credentialsReadOf(res) && presentsCredential(req.headers);
+};
 
 function sendProblem(req: Request, res: Response, status: number, body: string, retryAfterSeconds?: number): void {
   for (const header of DROPPED_ON_PROBLEM) res.removeHeader(header);

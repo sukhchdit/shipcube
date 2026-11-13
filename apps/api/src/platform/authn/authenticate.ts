@@ -10,34 +10,33 @@
  * nothing, so a route declared as authenticated is never reached unauthenticated and a declared credential is never
  * mistaken for its absence. The response is marked `private, no-store` (SEC-TC-29, T-06, ASVS 8.2.1) when the set has
  * no `anonymous` member or the request presented a declared credential, 401s included; a foreign credential does not
- * mark. The slot records that it read the credentials, so the problem handler trusts the mark from here on.
+ * mark. Both decisions use `declaresPrivateResponse`, the definition the problem handler applies to the descriptor. The
+ * slot records that it read the credentials, so a foreign credential no longer makes an error private from here on.
  */
-import type { RouteAuth } from '@platform/authz';
-import { AppError, presentedKinds } from '@platform/shared';
+import { AppError } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
 
 import type { RouteSlot } from '../routing/slot.js';
-import { ANONYMOUS, markCredentialsRead, markPrivateResponse, PRIVATE_CACHE_CONTROL, setPrincipal } from '../routing/route-state.js';
+import {
+  ANONYMOUS,
+  declaresPrivateResponse,
+  markCredentialsRead,
+  markPrivateResponse,
+  PRIVATE_CACHE_CONTROL,
+  setPrincipal,
+} from '../routing/route-state.js';
 
 /** SEC-TC-29: authenticated responses are never stored by the browser or a shared cache. */
 export const AUTHENTICATED_CACHE_CONTROL = PRIVATE_CACHE_CONTROL;
 
-/**
- * The declared credential kinds the request presents. Typed `RouteAuth[]`: this assignment is the compile-time check
- * that @platform/shared's `PresentableKind` is a subset of the authz kinds (the shared package cannot import authz).
- */
-const declaredPresented = (req: Request, auth: readonly RouteAuth[]): readonly RouteAuth[] => presentedKinds(req.headers, auth);
-
-export const authenticate: RouteSlot = (route) => {
-  const anonymousAllowed = route.auth.includes('anonymous');
-  return (req: Request, res: Response, next: NextFunction) => {
-    markCredentialsRead(res);
-    if (anonymousAllowed && declaredPresented(req, route.auth).length === 0) {
-      setPrincipal(res, ANONYMOUS);
-      next();
-      return;
-    }
-    markPrivateResponse(res);
-    next(new AppError('AUTH_REQUIRED'));
-  };
+export const authenticate: RouteSlot = (route) => (req: Request, res: Response, next: NextFunction) => {
+  markCredentialsRead(res);
+  // Not private = the set contains `anonymous` and the request presents no credential of a declared kind.
+  if (!declaresPrivateResponse(route.auth, req.headers)) {
+    setPrincipal(res, ANONYMOUS);
+    next();
+    return;
+  }
+  markPrivateResponse(res);
+  next(new AppError('AUTH_REQUIRED'));
 };
