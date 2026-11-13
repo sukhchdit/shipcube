@@ -45,6 +45,8 @@ type Violation = readonly [title: string, file: string, ruleId: string | readonl
 
 const API = 'apps/api/src/modules';
 const BOUNDARIES = 'boundaries/dependencies';
+const TENANT_TX_IO = 'platform/no-external-calls-in-tenant-tx';
+const OUTBOUND_HTTP = 'platform/outbound-http-via-client';
 
 const LAYERING: readonly Violation[] = [
   // The three Examples rows of the US-001 outline "Each layering rule is enforced by a seeded negative fixture".
@@ -216,6 +218,67 @@ const RULES: readonly Violation[] = [
     'rules/outbound-http-via-client/packages/carriers/src/bad-carrier-fetch.ts',
     'platform/outbound-http-via-client',
     '',
+  ],
+  // T-83: one fixture per source. fetch, undici and node:https are also outbound HTTP (two independent controls).
+  ...(
+    [
+      ['bad-fetch', [TENANT_TX_IO, OUTBOUND_HTTP]],
+      ['bad-undici', [TENANT_TX_IO, OUTBOUND_HTTP]],
+      ['bad-http', [TENANT_TX_IO, OUTBOUND_HTTP]],
+      ['bad-ioredis', TENANT_TX_IO],
+      ['bad-aws-sdk', TENANT_TX_IO],
+      ['bad-stripe', TENANT_TX_IO],
+      ['bad-nodemailer', TENANT_TX_IO],
+      ['bad-name-list', TENANT_TX_IO],
+      ['bad-name-list-deps', TENANT_TX_IO],
+    ] as const
+  ).map(([name, ruleId]): Violation => [
+    `[T-83] ${TENANT_TX_IO}: ${name}`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/service/${name}.ts`,
+    ruleId,
+    // The fragment must be in every finding, so the two-control cases match on the rule ids only.
+    typeof ruleId === 'string' ? 'inside a withTenantTx callback' : '',
+  ]),
+  ...['bad-sleep', 'bad-timers-promises'].map((name): Violation => [
+    `[T-83] ${TENANT_TX_IO}: ${name}`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/service/${name}.ts`,
+    TENANT_TX_IO,
+    'sleeps inside a withTenantTx callback',
+  ]),
+  [
+    `[T-83] ${TENANT_TX_IO}: a server package (packages/carriers) constructs a BullMQ queue inside the callback`,
+    'rules/no-external-calls-in-tenant-tx/packages/carriers/src/bad-bullmq.ts',
+    TENANT_TX_IO,
+    "'Queue' (bullmq)",
+  ],
+  // PR20-SEC-13 item 4 (a) and (b).
+  ...[
+    'apps/api/src/platform/bad-template.ts',
+    'apps/api/src/platform/bad-concat.ts',
+    'apps/api/src/platform/bad-destructured.ts',
+    'packages/carriers/src/bad-binding.ts',
+  ].map((path): Violation => [
+    `[PR20-SEC-13] platform/no-catch-message-interpolation: ${path}`,
+    `rules/no-catch-message-interpolation/${path}`,
+    'platform/no-catch-message-interpolation',
+    "the caught error's text",
+  ]),
+  ...[
+    'apps/api/src/platform/http/bad-stringify.ts',
+    'apps/api/src/platform/http/bad-template.ts',
+    'apps/api/src/platform/http/bad-inspect.ts',
+    'tools/bad-string.mjs',
+  ].map((path): Violation => [
+    `[PR20-SEC-13] platform/no-raw-request-in-log: ${path}`,
+    `rules/no-raw-request-in-log/${path}`,
+    'platform/no-raw-request-in-log',
+    'bypassing the Pino serializers',
+  ]),
+  [
+    '[PR #21 R1-m5] no-restricted-imports: a tests/api spec imports supertest directly (not through the contract helper)',
+    'rules/supertest-confinement/tests/api/bad-supertest.api.test.ts',
+    'no-restricted-imports',
+    "import 'supertest' only in tests/api/helpers",
   ],
   // Output folders are ignored only at the root and the workspace roots: a source folder named coverage/build/dist is linted.
   ...['packages/shared/src/coverage/bad-coverage.ts', `${API}/shipments/build/bad-build.ts`, 'packages/carriers/src/dist/bad-dist.ts'].map(
@@ -411,6 +474,69 @@ const TENANT_DB: readonly Violation[] = [
     'platform/db-raw-sql',
     'reaches an unguarded client',
   ],
+  // PR11-SEC-17 a / PR #11 R3-n2: every other use of a tracked container, fragment constructors, non-tag reads of the
+  // raw members and `db[k]`, one fixture per form.
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: the Prisma namespace as a call argument',
+    `rules/db-raw-sql/${API}/orders/repository/bad-container-argument.ts`,
+    'platform/db-raw-sql',
+    'passed on as a value',
+  ],
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: the Prisma namespace in an object literal',
+    `rules/db-raw-sql/${API}/orders/repository/bad-container-literal.ts`,
+    'platform/db-raw-sql',
+    'passed on as a value',
+  ],
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: the Prisma namespace through ?: and ??',
+    `rules/db-raw-sql/${API}/orders/repository/bad-container-conditional.ts`,
+    ['platform/db-raw-sql', 'platform/db-raw-sql'],
+    'passed on as a value',
+  ],
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: new (Prisma.sql.constructor)(…)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-sql-constructor.ts`,
+    'platform/db-raw-sql',
+    'passed on as a value',
+  ],
+  [
+    '[PR11-SEC-17] [R3-n2] platform/db-raw-sql: new (fragment.constructor)([s], []) (the Sql class of a tagged fragment)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-fragment-constructor.ts`,
+    'platform/db-raw-sql',
+    "Prisma's Sql class",
+  ],
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: an aliased $queryRaw (db.$queryRaw.bind(db))',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-member-alias.ts`,
+    'platform/db-raw-sql',
+    'read other than as a template tag',
+  ],
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: Reflect.apply(db.$executeRaw, db, args)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-reflect-apply.ts`,
+    'platform/db-raw-sql',
+    'read other than as a template tag',
+  ],
+  [
+    '[PR11-SEC-17] platform/db-raw-sql: db[k] (a computed member of a database handle)',
+    `rules/db-raw-sql/${API}/orders/repository/bad-dynamic-member.ts`,
+    'platform/db-raw-sql',
+    'A computed member of a database handle',
+  ],
+  // PR19-SEC-01 / D-ARCH-080: SYSTEM delegates only in the module whose table-class manifest declares the table.
+  [
+    '[PR19-SEC-01] platform/system-model-owner: a module repository touching the outbox delegate outside the allow-list',
+    `rules/system-model-owner/${API}/orders/repository/bad-outbox-delegate.ts`,
+    'platform/system-model-owner',
+    "declared by the 'outbox' table-class manifest",
+  ],
+  [
+    '[PR19-SEC-01] platform/system-model-owner: the accessor result kept in a variable (even in the owning module)',
+    'rules/system-model-owner/apps/api/src/platform/outbox/bad-accessor-alias.ts',
+    'platform/system-model-owner',
+    'hides which SYSTEM model is reached',
+  ],
   // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
   [
     'platform/tenant-context-sql: SET of a double-quoted namespace and key in a repository (R2-m2)',
@@ -475,6 +601,12 @@ const TENANT_DB: readonly Violation[] = [
   [
     'a repository imports the root database client (ADR-0005 am. 10 item 2, PR2-SEC-05)',
     `layering/root-client-privacy/${API}/orders/repository/bad-root-client.ts`,
+    BOUNDARIES,
+    'the root database client (platform/db/client.ts) is private',
+  ],
+  [
+    'the tx slot imports the root database client instead of the runtime runner (PR11-SEC-09, TASK-020)',
+    'layering/root-client-privacy/apps/api/src/platform/tx/bad-root-client.ts',
     BOUNDARIES,
     'the root database client (platform/db/client.ts) is private',
   ],
@@ -653,6 +785,23 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       'platform/outbound-http-via-client: packages/ui (browser) uses Axios',
       'rules/outbound-http-via-client/packages/ui/src/session/ok-session-client.ts',
     ],
+    [
+      '[T-83] no-external-calls-in-tenant-tx: the same calls outside the callback and in an unrelated callback',
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/service/ok-outside.ts`,
+    ],
+    [
+      '[T-83] no-external-calls-in-tenant-tx: test files are out of scope',
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/service/ok-sleep.test.ts`,
+    ],
+    [
+      '[PR20-SEC-13] no-catch-message-interpolation: the error as a structured field, rethrown',
+      'rules/no-catch-message-interpolation/apps/api/src/platform/ok-structured.ts',
+    ],
+    [
+      '[PR20-SEC-13] no-raw-request-in-log: req as a field, picked values',
+      'rules/no-raw-request-in-log/apps/api/src/platform/http/ok-fields.ts',
+    ],
+    ['[PR #21 R1-m5] supertest is imported in tests/api/helpers', 'rules/supertest-confinement/tests/api/helpers/agent.ts'],
     ['i18next/no-literal-string: literals in a *.test.tsx file', 'react/apps/web/app/routes/ok-heading.test.tsx'],
     [
       'import-x/no-unresolved (on): @platform/shared and a NodeNext ./x.js import resolve',
@@ -747,6 +896,11 @@ describe('repository probes: workspace imports resolved to repository files (ADR
 
   it('[PR #21 R1-m4] an API contract test importing packages/*/src by relative path fails import-x/no-relative-packages', () => {
     const findings = findingsOf(report.probes, 'tests/api/lint-probe-bad-package-relative.api.test.ts');
+    expect(findings.map((finding) => finding.ruleId)).toContain('import-x/no-relative-packages');
+  });
+
+  it('[PR21-SEC-09] [R2-n1] a `..` traversal after apps/api/src/ (apps/api/src/../../../packages/...) fails import-x/no-relative-packages', () => {
+    const findings = findingsOf(report.probes, 'tests/api/lint-probe-bad-api-traversal.api.test.ts');
     expect(findings.map((finding) => finding.ruleId)).toContain('import-x/no-relative-packages');
   });
 });
