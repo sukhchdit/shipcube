@@ -69,6 +69,11 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **ReDoS-probe every regex that a fix adds over request input.** The PR-0009 HIGH (PR9-SEC-14) came from a charset fix.
   - Measure in a child-process server; same-process timings hide event-loop blocking.
   - Fuzz the proposed grammar for language equivalence.
+- **Hand-scan loops: probe the "closer at the end" family** (PR-0020 R3, PR20-SEC-18). A regex-driven loop can scan a value by hand (`valueEnd`) and then `continue` without setting `lastIndex = end`. Feed it N units whose scanned value closes only at the very end of the string (`"pin",\'` × N, then `\':`). Every unit then re-scans to the end: O(N²).
+  - Linear regexes do not prove a linear pass.
+  - Absolute-threshold tests (< 50 ms at 8 KiB) miss it. Assert a scaling ratio instead (time(8k)/time(1k) < 16), and measure uncapped functions at 8k/32k/128k by appending `export { internalFn }` to a stripped copy of the module.
+- **Redaction walkers: also probe `{ name|key, value }` records** (HAR header arrays, parsed cookie records, SDK `{Name, Value}`). These are distinct from `[name, value]` tuples, and keyed classification misses them. Also probe the logger's *event/message* argument, which may be escaped but not redacted.
+- **Never let a Bash redirect depend on a `cd`.** A failed `cd` in one call left an empty `> file` in the main checkout root (PR-0020 R3; removed). Always write outputs to absolute scratch paths.
 - **Git attribute experiments: confirm them in a Linux container, not with host git** (PR-0010 R2, 2026-11-13). With an empty work tree, Git for Windows 2.52's `git log -p` still treated `package-lock.json` as binary. The attribute source is unexplained, and `-c attr.tree=<empty tree>` cleared it. Treat host results as hints only.
 - **Probing PR code that imports `@platform/*` workspace packages (PR-0011 R3).**
   - The main checkout's `node_modules/@platform/*` resolve to main's TS sources (exports `default` → `dist`).
