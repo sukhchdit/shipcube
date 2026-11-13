@@ -5,8 +5,8 @@
  * permission key or on a flag the catalogue guard ties to the key; the free-text `category` never decides access.
  */
 import {
+  AUDITOR_NON_READ_PERMISSIONS,
   expectedCategory,
-  isAuditPermission,
   isOperatorOnlyKey,
   isReadPermission,
   type Permission,
@@ -17,6 +17,8 @@ import {
   SCOPE_QUALIFIERS,
   SELF_SERVICE_CATEGORIES,
   SELF_SERVICE_PERMISSIONS,
+  SUB_RESOURCES,
+  WEBHOOK_PROVIDERS,
 } from './permissions/index.js';
 import { COMPLIANCE_AUDITOR_ROLE, CUSTOMER_VIEWER_ROLE, type RoleDefinition, type RoleScope, SUPER_ADMIN_ROLE } from './roles.js';
 
@@ -74,16 +76,26 @@ const violation = (code: ViolationCode, message: string, role?: string, permissi
   ...(permission === undefined ? {} : { permission }),
 });
 
-/** Key shape: the format, no scope qualifier outside the third segment, no verb in both action and qualifier (n5). */
+/** A middle segment of `resource:<middle>:<verb>` from the closed set (R2-m1): a sub-resource, or a webhook provider. */
+const isDeclaredMiddleSegment = (resource: string, middle: string): boolean =>
+  SUB_RESOURCES.has(middle) || (resource === 'webhook' && WEBHOOK_PROVIDERS.has(middle));
+
+/**
+ * Key shape: the format, no scope qualifier outside the third segment, no verb in both action and qualifier (n5), and
+ * a three-segment key whose last segment is a verb names a declared sub-resource or webhook provider in the middle
+ * (ADR-0008 am. 3 item 2, PR #8 R2-m1), so no verb hides in the action segment (`shipment:void:read`).
+ */
 function checkKeyShape(key: string, verbs: ReadonlySet<string>): string | undefined {
   if (!PERMISSION_KEY_FORMAT.test(key)) return 'is not resource:action[:qualifier] with [a-z_] segments';
   const segments = key.split(':');
-  const [, action = '', qualifier] = segments;
+  const [resource = '', action = '', qualifier] = segments;
   if (segments.slice(0, 2).some((segment) => SCOPE_QUALIFIERS.has(segment))) {
     return 'uses a scope qualifier outside the third segment';
   }
-  if (qualifier !== undefined && !SCOPE_QUALIFIERS.has(qualifier) && verbs.has(action)) {
-    return `names the verb "${action}" as its action and "${qualifier}" as its qualifier`;
+  if (qualifier === undefined || SCOPE_QUALIFIERS.has(qualifier)) return undefined;
+  if (verbs.has(action)) return `names the verb "${action}" as its action and "${qualifier}" as its qualifier`;
+  if (!isDeclaredMiddleSegment(resource, action)) {
+    return `names "${action}" in the middle segment, which is neither a declared sub-resource nor a webhook provider`;
   }
   return undefined;
 }
@@ -158,14 +170,23 @@ function checkRoleSet(roles: readonly AnyRole[]): Violation[] {
   return violations;
 }
 
-/** The read-only rules of REQ-RBAC-004; the carve-out is the catalogue's `selfService` flag only (D-058 (c)). */
+/**
+ * The read-only rules of REQ-RBAC-004; the carve-out is the catalogue's `selfService` flag only (D-058 (c)). The
+ * Compliance Auditor holds verb `read`, exactly `AUDITOR_NON_READ_PERMISSIONS` (`audit:export`) or self-service
+ * (ADR-0008 am. 3 item 1, PR #8 R2-n1).
+ */
 function readOnlyViolations(role: AnyRole, definition: PermissionDefinition): Violation[] {
   const { key } = definition;
   const exempt = definition.selfService === true;
   const violations: Violation[] = [];
-  if (role.key === COMPLIANCE_AUDITOR_ROLE && !exempt && !isReadPermission(key) && !isAuditPermission(key)) {
+  if (role.key === COMPLIANCE_AUDITOR_ROLE && !exempt && !isReadPermission(key) && !AUDITOR_NON_READ_PERMISSIONS.has(key)) {
     violations.push(
-      violation('AUDITOR_NOT_READ_ONLY', `Compliance Auditor holds "${key}", which is neither read, audit nor self-service`, role.key, key),
+      violation(
+        'AUDITOR_NOT_READ_ONLY',
+        `Compliance Auditor holds "${key}", which is neither read, audit:export nor self-service`,
+        role.key,
+        key,
+      ),
     );
   }
   if (role.key === CUSTOMER_VIEWER_ROLE && !exempt && !isReadPermission(key)) {

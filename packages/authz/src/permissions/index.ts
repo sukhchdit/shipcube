@@ -37,6 +37,24 @@ export const PERMISSION_KEY_FORMAT = /^[a-z_]+:[a-z_]+(:[a-z_]+)?$/;
 /** Qualifiers that scope an action instead of naming one (`shipment:read:any_org`, `shipment:create:on_behalf`). */
 export const SCOPE_QUALIFIERS: ReadonlySet<string> = new Set(['any_org', 'on_behalf']);
 
+/**
+ * Sub-resources a three-segment key may name in its middle segment (`org:member:invite`, `carrier:status:read`;
+ * ADR-0008 am. 3 item 2, PR #8 R2-m1). With `WEBHOOK_PROVIDERS` this is the CLOSED set of middle segments of a key
+ * whose last segment is not a scope qualifier: anything else (`shipment:void:read`) hides a verb in the action
+ * segment and would classify a destructive permission as `read`, so the catalogue guard rejects it (PERMISSION_FORMAT).
+ */
+export const SUB_RESOURCES: ReadonlySet<string> = new Set(['member', 'status']);
+
+/** Signature-authenticated webhook providers: the middle segment of `webhook:<provider>:receive`, and only there. */
+export const WEBHOOK_PROVIDERS: ReadonlySet<string> = new Set(['stripe', 'mock_gateway']);
+
+/**
+ * The only non-read permissions the Compliance Auditor may hold besides the self-service set (ADR-0008 am. 3 item 1,
+ * PR #8 R2-n1): exporting the trail it reviews. Any other `audit:*` verb (a future `audit:purge`) is a violation; the
+ * read-only rule no longer trusts the whole `audit:*` resource.
+ */
+export const AUDITOR_NON_READ_PERMISSIONS: ReadonlySet<string> = new Set(['audit:export']);
+
 const PERMISSION_KEYS: ReadonlySet<string> = new Set(PERMISSIONS.map((permission) => permission.key));
 const ROUTE_MARKER_KEYS: ReadonlySet<string> = new Set(ROUTE_MARKERS);
 
