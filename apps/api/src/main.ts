@@ -1,11 +1,13 @@
 // API process entry point (ADR-0003, US-012, NFR-AVAIL-002). Thin composition root: configuration (exit 78 on a
 // rejected configuration or secret, PR3-SEC-05), shared runtime services, the Express app, the listener and
 // graceful shutdown. Testable logic lives in platform/runtime and platform/health.
-import { loadRuntimeConfigOrExit } from '@platform/config';
+import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit } from '@platform/config';
 
 import { createApp } from './app.js';
 import { moduleRegistry } from './modules/index.generated.js';
+import { resolveApiMode } from './platform/context/api-mode.js';
 import { createHealthRouter } from './platform/health/router.js';
+import { DocsSpecError, docsOptionsFrom, type DocsOptions } from './platform/openapi/serve.js';
 import { createRuntimeLog } from './platform/runtime/log.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
@@ -13,7 +15,22 @@ import { createShutdown } from './platform/runtime/shutdown.js';
 const { config } = await loadRuntimeConfigOrExit('api');
 const log = createRuntimeLog('api', process.stdout);
 const services = createRuntimeServices(config, 'api', log);
-const app = createApp({ healthRouter: createHealthRouter({ probe: services.probe }), modules: moduleRegistry });
+// The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
+const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
+let app: ReturnType<typeof createApp>;
+try {
+  app = createApp({
+    healthRouter: createHealthRouter({ probe: services.probe }),
+    modules: moduleRegistry,
+    apiMode: resolveApiMode(config.APP_ENV),
+    ...(docs === undefined ? {} : { docs }),
+  });
+} catch (error) {
+  // DOCS_ENABLED without a readable contract is a deployment error: exit like a rejected configuration.
+  if (!(error instanceof DocsSpecError)) throw error;
+  log.error('api.docs_unavailable', { error: error.name });
+  process.exit(CONFIG_EXIT_CODE);
+}
 
 // Session-integrity check on a dedicated connection before the listener opens (PR-0009 M1); never rejects.
 await services.startup();

@@ -1,66 +1,76 @@
 ---
 name: project-p5-pr20-logging
-description: PR #20 (TASK-010 redacted Pino logging) R1 @dae1f96 PASS_WITH_FOLLOW-UPS; PR20-SEC-01 MEDIUM raw header forms leak refresh cookie; 02-07 LOW, 08-12 INFO; probe-confirmed logger facts; checks owed at TASK-052/055/113/020/014/214/188
+description: PR #20 (TASK-010 redacted Pino logging) R1 @dae1f96 + R2 @9647907 PASS_WITH_FOLLOW-UPS; 01 MEDIUM closed; new LOW 13 (free-text raw lists/__Host- pairs/path queries), INFO 14-17; PR #21 merged first, so the union needs a merge-only round; checks owed at TASK-052/113/020/014/214/022
 metadata:
   type: project
 ---
 
-The PR #20 review (TASK-010) is in `docs/05-quality/security/PR-0020-TASK-010-security-review.md`. R1 at head `dae1f96` (2026-11-13): **PASS_WITH_FOLLOW-UPS**.
-- Simulated checker (main's tool @ `cdbeabf`, base `80ff2c2`): `pass` with 2 owned paths (`package-lock.json`, `tools/tsconfig.json`). Controls gave `missing`: no record, `--pr 19`, a `tools/tsconfig.json` edit after the record.
-- **Closed:** PR7-SEC-03 item 3, PR9-SEC-10, PR #11 R3-m1 (i) / R3.6 TASK-010 row, SEC-TC-63.
-- **Closed for TASK-010's part only:** PR6-SEC-02 item 3, PR6-SEC-03 item 1. The client halves stay with TASK-113.
-- **SEC-P3-23, TASK-010 part:** partly closed (keyed forms only).
+The PR #20 review (TASK-010) is in `docs/05-quality/security/PR-0020-TASK-010-security-review.md`.
 
-**Open findings:**
-- **01 (MEDIUM).** `req`, `res`, `req.socket`, `req.rawHeaders` and `Object.entries(req.headers)` are walked as plain data. They leak the `__Host-rt_*` refresh cookie, `X-Reauth-Proof`, `X-Quote-Token`, `X-Api-Key` and the query (`req._parsedUrl.path`/`_raw`).
-  - In free text, a `Cookie:` value ends at the first `;`, so only the first cookie is redacted.
-  - `AUTH_SCHEME` knows only bearer and basic.
-- **LOW:**
-  - 02: no PII-key filter on general lines; secret-key gaps (`pass`, `pwd`, `sid`, `session`, `jwt`, `dsn`, `connectionString`, nested `card.number`);
-  - 03: URL queries, `*Url` keys, URI userinfo with a dotless host, `%40` e-mails;
-  - 04: `APP_LOG_LEVEL=error` drops 22 of 27 security events; runtime integrity events default to warn;
-  - 05: security-event PII deny-list is narrow (`username`, `client_ip`, `tenant_id` pass; the `*count` exemption also exempts `*account`);
-  - 06: no `uncaughtException`/`unhandledRejection` handlers, so Node's default stderr prints Prisma text;
-  - 07: no per-line budget (about 16 MiB / 4.5 s worst; about 0.4 ms per KiB).
-- **INFO 08–12:** C1/U+2028 raw; `security.*` forgeable at any level; bound/Proxy stack getters accepted as native; outbound `correlation_id` is reserved, so it is dropped; the server-only subpath is not lint-enforced; Joi `with value` and escaped-quote pairs.
+**Rounds:**
+- **R1** at `dae1f96`: PASS_WITH_FOLLOW-UPS (01 MEDIUM, 02–07 LOW, 08–12 INFO).
+- **R2** at `9647907` (fix cycle 1, 2026-11-13): **PASS_WITH_FOLLOW-UPS**, appended as `## Round 2 (head 9647907)`.
+  - Lane A run 43353973952: fast-lane green; gitleaks found 14 commits clean; Semgrep 0 findings over 209 files.
+  - 18 owned paths: eslint, lock, `tools/tsconfig.json`, `negative-fixtures.test.ts`, and 14 shared-logging fixtures.
+  - The simulated checker passed against main `c3ff7f1` and against base `6ac9836`.
 
-**Facts (probe-confirmed 2026-11-13; re-verify after changes):**
-- **Database errors.** The serializer gives `{ name, code, originalCode, kind }` for the real Prisma 7.10 classes, `DriverAdapterError` and pg `DatabaseError`, also as a `cause` and as a field value.
-- **Problem handler** logs `thrown` only at status ≥ 500, so 4xx bodies and Joi messages are not logged today.
-- **Config secrets** are `Secret` objects with private fields, so the walker writes `{}`.
-- **Pino 10** JSON-escapes all C0 controls; `%s` in the message is not interpolated.
-- **V8 fixes the stack header at the first `.stack` read**, so a later `err.message = …` does not scrub it.
-- **TASK-113's sheet names `packages/shared/src/security-events.ts`**, but the catalogue landed at `packages/shared/src/logging/security-event.ts`.
+**R2 status of the R1 findings:**
+- **Closed:** 01 (the MEDIUM), 05, 06, 08, 09, 11.
+- **Closed for TASK-010's part:** 02, 03 (scheme URLs), 04 items 1 and 3, 07 (cost), 10 (correlation ID), 12.
+- **Routed:**
+  - 04 item 2 → TASK-014;
+  - the 10 template → TASK-113;
+  - Joi messages → TASK-020 (D-ORCH-025).
+- **SEC-P3-23** (TASK-010 part) is closed.
 
-**Why:** the logger is the last control for the "secrets/PII in logs = 0" guardrail, and its gaps close only if later reviews check them.
+**New in R2:**
+- **13 (LOW).** Free-text renderings keep credential and query values:
+  - `JSON.stringify` / `util.inspect` / `String` of `req.rawHeaders` or `req` (name and value are comma-adjacent, so the pair rule misses them);
+  - a bare `__Host-rt_x=v` pair under a neutral key;
+  - scheme-less `/x?q=` targets.
 
-**How to apply.** If the PR #20 fix cycle takes them, verify:
-- 01: the stream/EventEmitter guard, the `walkArray` pair rule, cookie value to end of line, an extended SEC-TC-31 with `{req}`, `{res}`, `{socket}`, `{rawHeaders}`;
-- 02 key lists;
-- 04 items 1 and 3;
-- 06.
+  Fixes:
+  1. the `__Host-`/`__Secure-` key prefix counts as sensitive;
+  2. a quoted-list adjacency pass;
+  3. strip `/path?query`;
+  4. a TASK-020 lint/Semgrep rule against stringifying `req` in log calls.
 
-Otherwise check at:
-- **TASK-052/055** (first refresh cookie; due date for 01);
-- **TASK-113:** 05, 10, plus the PR6 client halves;
-- **TASK-020:** 07, 12 (Joi messages without `{#value}`);
-- **TASK-014:** 04 item 2 (clamp `APP_LOG_LEVEL` in hardened envs);
-- **TASK-214:** 06 and the leak metric;
-- **TASK-188/135/139/140:** feed the per-carrier sensitive-field lists into the logger;
-- **TASK-022:** 11.
+  Items 1–3 are due before TASK-052/055 merge (first refresh cookie).
+- **INFO:**
+  - 14: PII-class gaps (`clientIp`, `x-forwarded-for`, `username`, `iban`/`accountNumber`, the card parent through arrays, PII pairs in arrays) → TASK-113 and TASK-135/139/140/188;
+  - 15: the brand can be forged by a Proxy `getOwnPropertyDescriptor` trap (fix: `types.isProxy`) → TASK-113;
+  - 16: transitive path around the guard (a non-logging `packages/shared` file imports logging, then the root re-exports it) → TASK-020/022;
+  - 17: line size covers fields only (`err` and each `child()` binding set add 16 KiB budgets; 48/88 KiB lines) → TASK-214.
 
-**Probe kit** (`scratchpad/review/PR-20-sec/scripts/`; scratch is session-scoped):
-- `build.mjs <root>` strips `git archive` sources into `build/`, rewriting `@platform/shared/logging` to relative paths.
-- Junction `build/node_modules` → the worktree's `node_modules`. Remove it with `fs.unlinkSync`.
-- Probes:
-  - `probe-redaction.mjs` (corpus);
-  - `probe-req.mjs` (live Express request);
-  - `probe-inject.mjs`;
-  - `probe-lines.mjs`;
-  - `probe-db.mjs` (real Prisma classes);
-  - `probe-redos.mjs`;
-  - `probe-uncaught.mjs`;
-  - `probe-misc.mjs`;
-  - `probe-pii.mjs`.
+**PR #21 merged first** (`62e4961`, D-ORCH-027). PR #20 must merge main, which conflicts only in `app.ts`, `main.ts` and `request-context.ts`, and auto-merges the owned `eslint.config.mjs` and `negative-fixtures.test.ts`. That voids R2 under rule (d), so a **merge-only round is required**. Its 8-item check list is §R2.7 of the record. It includes:
+- PR21-SEC-07 (b): the contract-validator excerpt list switches to `isSensitiveKey`, or is re-routed to TASK-020;
+- `installProcessErrorHandlers` stays before the services;
+- `routePrefix` becomes the first layer of `api`.
 
-Related: [[project-p5-wave0-carrier-docs]], [[project-p5-wave0-rls-spike]], [[project-p5-pr9-runtime-skeleton]], [[project-p5-pr11-rls-review]], [[project-p3-security-conditions]], [[project-p5-pr10-ci-lane]], [[project-security-review-conventions]]
+Q7 (the lint probe) on the union config gave the same result as on the head.
+
+**Facts (probe-confirmed 2026-11-13, R2; re-verify after changes):**
+- **Walker:** `instanceof EventEmitter` → `[Unsupported]` (req, res, sockets). `{...req}` is safe because `rawHeaders`, `_parsedUrl` and `*url` keys are omitted. `Headers`, `Request`, `URLSearchParams` and `FormData` walk to `{}`.
+- **Regexes:** every string-redaction regex is linear to 128k. `redactString` takes at most 4.8 ms at the 8 KiB cap, and a whole call at most 9 ms.
+- **Stack accessor:** the V8 `stack` accessor is the same function for `captureStackTrace` objects. Cross-realm errors are logged without a stack.
+- **Process errors:** an ESM top-level throw reaches `uncaughtException` with origin `unhandledRejection`.
+- **Over-redaction in security attributes:** a lower-case value with a keyword (`bad_password`) becomes `[REDACTED]`. Emitters must use UPPER_SNAKE reason codes (record §R2.8).
+- **Correlation ID:** `CORRELATION_ID_PATTERN` now lives in `@platform/shared` (root).
+
+**Why:** the logger is the last control for the "secrets/PII in logs = 0" guardrail, and its residuals close only if the owning tasks check them.
+
+**How to apply:**
+- **Merge-only round:** use record §R2.7 as the checklist. Re-run the lock delta (one path: `packages/shared` declares pino) and the Q7 lint probe on the union commit.
+- **TASK-052/055:** PR20-SEC-13 items 1–3 must be merged; the emitter conditions in §R2.8 apply.
+- **TASK-113:** 14 and 15, plus the PR6 client halves and the route template.
+- **TASK-020:** the 13 item 4 rule, 16, and Joi messages.
+- **TASK-214:** 17.
+- **TASK-022:** the bundle scan proves there is no `pino` in the web and admin bundles.
+
+The probe kit (scratch, session-scoped) is in `scratchpad/review/PR-20-sec-r2/scripts/`:
+- `build.mjs` (strips `packages/shared/src` fully and rewrites `@platform/shared` too);
+- `probe-req.mjs`, `probe-corpus.mjs`, `probe-sec.mjs`, `probe-cost.mjs`, `probe-process.mjs`;
+- `lint-probe.mjs` (22 bypass forms);
+- `lockdiff.mjs`, `record-sim.sh`.
+
+Related: [[project-p5-pr21-openapi-pipeline]], [[project-p5-pr10-ci-lane]], [[project-p5-pr9-runtime-skeleton]], [[project-p5-pr11-rls-review]], [[project-p3-security-conditions]], [[project-security-review-conventions]]

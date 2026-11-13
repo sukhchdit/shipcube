@@ -248,7 +248,7 @@ Feature: Coverage gate
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-001
 - **Linked REQs:** REQ-PLAT-009, REQ-PLAT-010
 - **As a** frontend developer **I want** every failure returned as RFC 9457 problem+json with a stable code **so that** clients handle errors deterministically and nothing internal leaks.
-- **Notes:** Code catalogue in DR-A26 (see US-036). 405 carries `Allow`.
+- **Notes:** Code catalogue in DR-A26 (see US-036). 405 carries `Allow` listing every method the route supports, **including OPTIONS** (RFC 9110 §15.5.6); OPTIONS on a known route answers 204 with the same `Allow` (RFC 9110 §9.3.7). Wording amended by D-063 (2026-11-13) after PR #21 code review R1-m3 / D-ORCH-023 (2): scenario 2 previously read `Allow` = "GET, HEAD". The api/README §3 line is api-designer's (D-ORCH-023).
 
 #### Acceptance criteria
 ```gherkin
@@ -268,7 +268,8 @@ Feature: Central error handler and framework error mapping
 
   Scenario: 405 includes the Allow header
     When DELETE is sent to a route that supports only GET and HEAD
-    Then the response header Allow is "GET, HEAD"
+    Then the response header Allow is "GET, HEAD, OPTIONS"
+    And OPTIONS sent to the same route returns 204 with no body and the same Allow header
 
   Scenario: 5xx never leaks internals
     Given the repository throws a database error containing SQL text and a thrown string "secret-token-123"
