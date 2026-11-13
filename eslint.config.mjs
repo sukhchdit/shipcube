@@ -65,6 +65,8 @@ const FORMAT_HELPERS = ['packages/shared/src/intl/**', 'packages/shared/src/form
 const SANITISING_COMPONENT = ['packages/ui/src/sanitised-html/**'];
 /** The SSRF-safe outbound client module (ADR-0016 §13, TASK-113). */
 const OUTBOUND_CLIENT = ['apps/api/src/platform/egress/**'];
+/** Container HEALTHCHECK probes: GET 127.0.0.1/health/ready of the own process, builtins only (TASK-014). */
+const LOOPBACK_PROBES = ['apps/api/src/healthcheck.ts', 'apps/worker/src/healthcheck.ts'];
 /**
  * Importers of the audit writer: the audit package and its allow-listed callers (REQ-AUDIT-001, ADR-0007). Narrowed by
  * TASK-016 (TASK-002 code review n5): the request-pipeline folders that write entries, not all of platform/**, and
@@ -679,7 +681,7 @@ export default defineConfig([
   { files: MONEY_HELPERS, rules: { 'platform/money-arith': 'off' } },
   { files: FORMAT_HELPERS, rules: { 'platform/no-tofixed-tolocalestring': 'off' } },
   { files: SANITISING_COMPONENT, rules: { 'platform/no-innerhtml': 'off' } },
-  { files: OUTBOUND_CLIENT, rules: { 'platform/outbound-http-via-client': 'off' } },
+  { files: [...OUTBOUND_CLIENT, ...LOOPBACK_PROBES], rules: { 'platform/outbound-http-via-client': 'off' } },
   { files: AUDIT_WRITER_ALLOW_LIST, rules: { 'platform/audit-writer-allowlist': 'off' } },
 
   // --- Tenant context and the database platform (ADR-0005 am. 10 items 1, 2, 4, 12, 15; PR2-SEC-05; TASK-016) ------
