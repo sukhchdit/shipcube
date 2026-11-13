@@ -25,7 +25,9 @@ export type DbErrorReason =
   | 'NESTED_TENANT_TX'
   | 'TENANT_TX_CLOSED'
   | 'INVALID_TENANT_CONTEXT'
-  | 'DB_SESSION_CONTEXT_LEAK';
+  | 'DB_SESSION_CONTEXT_LEAK'
+  /** A nested relation write would escape the standard-columns stamping (TASK-032, data-model §7.6). */
+  | 'NESTED_WRITE_UNSUPPORTED';
 
 /** Security events raised by the data layer (sink injected by the composition root). */
 export type DbSecurityEvent = 'rls_write_rejected' | 'db_privilege_denied' | 'db_session_context_leak';

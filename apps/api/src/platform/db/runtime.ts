@@ -32,6 +32,7 @@ import type { ReadinessCheck } from '../runtime/readiness.js';
 import type { Closeable } from '../runtime/shutdown.js';
 import { createDatabaseAdapter, createDatabasePool, type DatabaseClientOptions, type PrismaClientConstructor } from './client.js';
 import { dedicatedConnector } from './dedicated-connection.js';
+import { type ExtendableClient, withStandardColumns } from './extensions/standard-columns.js';
 import { createDatabaseCheck } from './health-check.js';
 import {
   createSessionIntegrityGuard,
@@ -134,8 +135,11 @@ export async function runStartupIntegrityCheck(integrity: Pick<SessionIntegrityG
   }
 }
 
-/** The client shape the runtime needs: a Prisma client over the shared pool that can be disconnected. */
-export interface RuntimeDatabaseClient<TTx> extends TransactionCapableClient<TTx> {
+/**
+ * The client shape the runtime needs: a Prisma client over the shared pool that can be disconnected and extended per
+ * transaction with the standard-columns extension (TASK-032).
+ */
+export interface RuntimeDatabaseClient<TTx> extends TransactionCapableClient<TTx>, ExtendableClient {
   $disconnect(): Promise<void>;
 }
 
@@ -203,6 +207,8 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
         leaks += 1;
       },
       markNotReady: (reason) => latch.mark(reason),
+      // Server-controlled standard columns, bound per transaction (data-model §7.6, ADR-0005 am. 10 item 5).
+      scopeClient: (stamp) => withStandardColumns(client, stamp),
     });
   }
 

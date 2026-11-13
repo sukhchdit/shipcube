@@ -374,3 +374,50 @@ describe('fresh-connection probe (ADR-0005 am.10 item 4)', () => {
     expect(await findSessionContext(fakeClient({ settings: ['app.a', 'app.b'] }).client)).toEqual(['app.a', 'app.b']);
   });
 });
+
+describe('withTenantTx per-transaction client scoping (TASK-032; data-model §7.6, ADR-0005 am. 10 item 5)', () => {
+  it('opens the transaction on the client scopeClient returns for the validated (lowercased) org and actor, not on the root client', async () => {
+    const root = fakeClient();
+    const scoped = fakeClient();
+    const { deps } = fakeDeps();
+    const stamps: unknown[] = [];
+    const runner = createWithTenantTx(root.client, OPTIONS, {
+      ...deps,
+      scopeClient: (stamp) => {
+        stamps.push(stamp);
+        return scoped.client;
+      },
+    });
+    await runner.withTenantTx(ctx({ orgId: ORG.toUpperCase(), actorId: ACTOR.toUpperCase() }), () => Promise.resolve('ok'));
+    expect(stamps).toEqual([{ orgId: ORG, actorId: ACTOR }]);
+    expect(root.transactions).toHaveLength(0);
+    expect(scoped.transactions).toHaveLength(1);
+    expect(scoped.tx.calls).toHaveLength(1);
+  });
+
+  it('an anonymous, organisation-less context is stamped with empty strings (the extension maps them; data-model §1.6)', async () => {
+    const root = fakeClient();
+    const { deps } = fakeDeps();
+    const stamps: unknown[] = [];
+    const runner = createWithTenantTx(root.client, OPTIONS, {
+      ...deps,
+      scopeClient: (stamp) => {
+        stamps.push(stamp);
+        return root.client;
+      },
+    });
+    await runner.withTenantTx(ctx({ orgId: '', actorId: '' }), () => Promise.resolve(1));
+    expect(stamps).toEqual([{ orgId: '', actorId: '' }]);
+  });
+
+  it('an invalid context is refused before scopeClient runs', async () => {
+    const root = fakeClient();
+    const { deps } = fakeDeps();
+    const scopeClient = jest.fn(() => root.client);
+    const runner = createWithTenantTx(root.client, OPTIONS, { ...deps, scopeClient });
+    expect(await caught(runner.withTenantTx(ctx({ actorId: 'not-a-uuid' }), () => Promise.resolve(1)))).toMatchObject({
+      reason: 'INVALID_TENANT_CONTEXT',
+    });
+    expect(scopeClient).not.toHaveBeenCalled();
+  });
+});
