@@ -220,3 +220,204 @@ Note on D: on today's CODEOWNERS the slot folders are not owned, so C2's one-lin
 | Conditions | **C1** PR32-SEC-01: T-83 covers `defineRoute` handlers (inline, same-file named, audit hook) unless `transaction: 'none'`, with fixtures; architect ruling on a pre-transaction phase. **C2** PR32-SEC-02: `authorise` requires an authenticated principal on every non-anonymous route, `public` included (the D-TASK020-03 compensating control), with the C7 test. **C3** PR32-SEC-03: mount-time refusal in the audit, idempotency, rate-limit (`auth`, `email-send`) and MFA (OPERATOR) stubs. Due: this PR's fix cycle (preferred, all small and in owned files), at the latest before the first module route that needs each (C1: first `transaction: 'tenant'` module route; C2: first non-anonymous `public` route; C3: first module route) |
 | Follow-ups | PR32-SEC-04 to -07 (LOW) and -08 to -11 (INFO) with the owners in §3; D-TASK020-03 confirmed (§5); D-TASK020-05 accepted (§6) |
 | **Verdict** | **PASS_WITH_CONDITIONS.** No Critical or High finding; one MEDIUM with conditions C1-C3 due before the first module route that depends on them |
+
+## Round 2 (head 11530cc, delta + merge)
+
+| Field | Value |
+|---|---|
+| Round | 2: delta of fix cycle 1 plus a merge-only check of the PR #20 and PR #33 unions (D-SEC-PR32-01 conditions C1-C3, implemented per D-ARCH-106 (7) and D-ARCH-107 (7), decisions D-TASK020-18..27) |
+| Head | 11530cc9b86d1964bd445bf04375319e92aaa184 |
+| Range | `fa67aca..11530cc`. Own commits: `4d21114` fix(lint), `e1d588e` fix(api), `49eb01a` prettier, `64afb5b` CODEOWNERS. Merges of `main`: `4789de8` (PR #20 union), `c29e492` (docs only), `531a244` (PR #33 union), `11530cc` (docs only). Merge base with `main` is now `f2f34a7`; `main` was `e8829ef` when this round was written, and its delta since `f2f34a7` is docs and `.claude/agent-memory` only |
+| Owned paths | 144 in the PR's net change against `main` (simulated checker, R2.7; `apps/api/src/platform/**` is owned since PR #33). 71 of them changed after `fa67aca`: 26 under `apps/api/src/platform/`, 28 lint fixtures, 6 files in `tools/eslint-rules/`, 3 in `packages/authz/`, 2 in `tools/lint/`, `eslint.config.mjs`, `jest.config.ts` and `package.json` (PR #33 side of the merge), `tools/tsconfig.json`, `tests/contract-stubs/tsconfig.json` (adds the cache-control helper to its file list) and `.github/CODEOWNERS`. The round-1 record therefore no longer binds the head |
+| Lane A evidence | Run [43457137317](https://github.com/sukhchdit/shipcube/actions/runs/43457137317) on `11530cc`: `fast-lane` failed at "Lane B evidence (quality:check-evidence)" as expected (no lane-B run on an ancestor; Docker hung, D-ORCH-049), so lint, typecheck, unit, negative fixtures and build were **skipped** in CI. `scans`: Gitleaks and Semgrep green; only the security-owned record step failed. This round is that record |
+| Reviewer / date | security-analyst, 2026-11-13, round 2. Read-only. Git ran in the main checkout against SHAs (`git fetch`, `git show`, `git archive`, `git merge-tree`, `gh`); no command of any kind ran in the PR worktree `Shipqube-TASK-020`. Probes ran on `git archive` extracts of `11530cc`, `fa67aca` and `main` (type-stripped TypeScript under a resolve/load hook; for Jest, a `node_modules` of junctions to the main checkout's packages with `@platform/*` pointing at the extract). The record simulation ran in a scratch `git clone --shared`. All scratch removed afterwards; the main checkout's `node_modules` is unchanged (740 entries). No Docker, no install, no build. The shared scratchpad was wiped once mid-round; the results below were taken before it |
+
+### R2.1 Summary
+
+The three conditions are met and the MEDIUM is closed.
+- **C1 (PR32-SEC-01, T-83):** the rule now treats `defineRoute` handlers (inline, function expression, method shorthand, same-file named, spread or non-literal `transaction`), `fixtureRoute` with `tenant`, the `txFiles` (audit hook, outbox writer, audit store) and any function taking a `TenantDb`/`AppDb`/`AppTransactionClient` parameter as tenant-transaction roots; the four controls stay silent; the disable ratchet holds. The round-1 config, run as the positive control, misses every one of the new forms.
+- **C2 (PR32-SEC-02):** the credential gate runs before the permission gate for every permission, `public` included. A leaky authenticator now reaches no `signature`, `refresh-cookie`, guest-token or `session` route (401), and dual-mode routes behave as D-ARCH-107 (6) says.
+- **C3 (PR32-SEC-03):** each stub refuses at mount what it cannot honour and names the owning task; `createApp` throws, `main.ts` exits 78 with `api.slot_not_implemented`.
+- **LOWs 05, 06, 07 are closed; 04 is closed for every round-1 form,** but a different spelling of the same class (schema-level `allowUnknown`, `Joi.link`, an extension type) still opens a body schema: new LOW PR32-SEC-13 (= code review R2-m1).
+- **INFO 09 is closed** by the set form of D-ARCH-107; 11 is partly closed.
+- **Both unions are faithful.** Every merge tree equals `git merge-tree` except five conflicts plus five declared hand edits in `4789de8`. The lockfile, workflows, `tools/ci`, `tools/quality` and scanner configs are byte-identical to `main`, and every PR #20 and PR #33 control I listed in §7 is intact.
+- **D-TASK020-21 is confirmed** (R2.4): it fails closed and matches D-ARCH-107 (5). The refresh-cookie half needs an architect reconciliation with ADR-0006 before TASK-052/055 (PR32-SEC-16 = code review R2-m4).
+
+**New: 2 LOW (PR32-SEC-12, -13), 3 INFO (-14 to -16). Nothing Critical, High or Medium open. Verdict: PASS_WITH_FOLLOW-UPS** (R2.9).
+
+### R2.2 Method
+
+| Area | How |
+|---|---|
+| Delta and unions | `git diff fa67aca 11530cc` (182 non-docs files). Read in full: the T-83 rule, `static-module-specifier.mjs`, the `module-sources.mjs` and `system-model-owner.mjs` diffs, the `eslint.config.mjs` diff, the disable ratchet, `authn/authenticate.ts`, `authz/authorise.ts`, `routing/{define-route,pipeline,route-state,slot}.ts`, the four stubs, `tx/execute.ts`, `validate/validate.ts`, `errors/problem-handler.ts`, `app.ts`, both `main.ts`, `packages/authz/src/routes.ts`, `packages/shared/src/http/credentials.ts`, `tests/api/helpers/cache-control.ts`. For every merge commit: `git merge-tree --write-tree <p1> <p2>` against the commit's tree |
+| Lint probes | `ESLint#lintText` with the real `eslint.config.mjs` of `11530cc`, and of `fa67aca` as the positive control (`disableTypeChecked`, no project service), over in-memory files at the paths the rules scope to: 17 T-83 root forms, 6 silent controls, 9 residual shapes and a static-import positive control; 12 import-control forms for PR32-SEC-07 plus 3 evasion shapes; the S3-SDK and RegExp-path entries (code review M1, m5) |
+| Composed app | The head's real `createApp` on a loopback listener (type-stripped sources): real slots, a leaky authenticator (`next()` without a principal) and an injected-principal seam, across 11 routes covering every accepted auth set; four credential forms (bearer, either refresh cookie, X-Quote-Token) on 6 routes; problem responses before a route matched; mount refusals for each stub; branding, boot checks, transport freezing; 17 Joi schema forms through `defineRoute` and end to end; 9 `presentsCredential` cases |
+| SEC-TC-29 helper | `requiresPrivateNoStore` and `cacheRequirement` of `tests/api/helpers/cache-control.ts` over the 133 operations of the head's `openapi.yaml`, compared with the round-1 predicate |
+| Scratch Jest on the extract | 11 security suites (authz routes, authenticate, authorise, pipeline-guards, define-route, pipeline, validate, credentials, route-metadata, contract-drift, cache-control): **247/247 pass**; `tools/lint/negative-fixtures.test.ts` **241/241**. Five source mutants (credential gate behind the `public` shortcut, authn ignoring a presented credential, audit stub accepting audited routes, nested schema walk removed, rate-limit stub accepting `auth`): **5/5 killed** (9, 4, 1, 8 and 2 failing tests). T-83 disable scan with the suppression checker's own lexer over the 209 source files of `apps/*/src` and `packages/*/src`: 0 disables, 0 inline configurations (three seeded controls detected). Not reproduced: full lint, typecheck, build, api and integration lanes |
+| Hygiene | Gitleaks v8.30.1 default-ruleset emulation (222 rules, run-time positive controls fired) over the 3,285 lines added by the own commits and the `4789de8` hand edits: 0. Count-only host-fragment scan of the same lines (user name, 8.3 stem, home and temp in both slash forms, host name, git e-mail, profile prefixes): 0 on every label, synthetic control positive |
+| Cross-check | Code review round 2 (`docs/05-quality/reviews/PR-0032-TASK-020-code-review.md`, on `main` in `e8829ef`, APPROVED_WITH_NITS): its R2-m1, R2-m3, R2-m4 and R2-n1 are the same items as my PR32-SEC-13, -12, -16 and part of -15; owners below follow it |
+
+### R2.3 Conditions and round-1 findings: closure
+
+| ID | Status | Evidence on `11530cc` |
+|---|---|---|
+| **C1 = PR32-SEC-01** (MEDIUM) | **Closed** | `queue.add` plus a `setTimeout` sleep is reported twice in an inline arrow, a function expression, a `handler() {}` shorthand, a same-file function declaration (declared after the call), a same-file `const` arrow, a `{ handler }` shorthand, a spread literal, `transaction: 'none'` followed by a spread, a non-literal and a template-literal `transaction`, and `fixtureRoute({ transaction: 'tenant' })`; `fetch` plus a sleep in `apps/api/src/platform/audit/` (R5); `fetch` in `create(db: AppDb)` and `queue.add` in methods taking `TenantDb`, `Db.TenantDb` and `TenantDb<X>` (R6); a static `undici` import used in a handler. Silent controls: `transaction: 'none'` (also `as const`), `outbox.publish(ctx.db, …)` in a handler, the `fixtureRoute` default, `ctx: CarrierContext`, `db: DatabaseRuntime`. The `fa67aca` config reports none of the new forms (positive control). Ratchet: `tenant-tx-disable-ratchet.test.ts` refuses named and blanket disables; inline `/* eslint … */` configuration is refused repo-wide by `check-suppressions` (`inline-config`). The `transaction: 'none'` operation pin exists, but its composition line in `checkRouteMetadata` is not pinned by a test (code review R2-m2, endorsed: one seeded case). The `defineRoute` refusal of `transaction: 'none'` with an audited action is in place (05 (d)). Residual lexical shapes: PR32-SEC-12. The pre-transaction phases are D-ARCH-106 (4), part 020-C |
+| **C2 = PR32-SEC-02** (LOW) | **Closed** | `authorise.ts:26` checks `route.auth.includes(principal.credential)` before the `public` branch (`:30`). Real authn stub, no credential: `[signature]`, `[refresh-cookie]`, `[session, quote-token]`, `[session]` (catalogued and `authenticated`) and a signature-only route answer 401 `private, no-store`; `[anonymous]` and `[anonymous, session]` 200. Leaky authenticator: all six non-anonymous routes 401; `[anonymous, session]` serves the anonymous branch (200). Injected principals: dual mode `session` without `quote:create` 403, with it 200, both `private, no-store`; a guest on `[session, quote-token]` 200 private; a guest on `[anonymous, session]` 401; a `signature` principal on `public` + `[signature]` 200; a `session` principal on `[signature]` and a `signature` principal on `[refresh-cookie]` 401; an unknown credential kind is ANONYMOUS (401). Module-load refusals: unsafe `refresh-cookie` route without `csrf` (`CSRF_COOKIE`), `anonymous` with a catalogued permission (`PERMISSION_AUTH`, code review m7), an unlisted set and a repeated kind (`AUTH_SET`). The D-TASK020-03 ruling of §5 stands unchanged: (c) is still one-way strict, and the compensating control (i) is now in place. Mutant killed (credential gate behind the `public` shortcut: 9 failing tests) |
+| **C3 = PR32-SEC-03** (LOW) | **Closed** | Mount-time `SlotNotImplementedError` with `bootFailureOf` event `api.slot_not_implemented`: audit `CREATE` (TASK-029; the stub refuses every action other than `NONE`), idempotency `required` and `optional` (TASK-040), rate-limit `auth` and `email-send` (TASK-041). Every other class mounts. MFA stub: an OPERATOR principal on a non-exempt route gets 403 `AUTHZ_DENIED` (D-TASK020-18, accepted: the code is the platform's, the contract code arrives with the MFA task). That 403 is `private, no-store` whenever the request carries a credential, which a real OPERATOR request always does. With a test-only principal and no credential header it is `no-store` (probe artefact, no finding). An audit hook injected through the `pipeline` test seam mounts an audited route by design; `main.ts` never passes `pipeline`. Mutants killed (audit and rate-limit stubs) |
+| PR32-SEC-04 (LOW) | **Closed for the round-1 forms; residual PR32-SEC-13** | Refused at any depth: `Joi.object()` (top and nested), `.unknown(true)`, `.pattern(…)`, `Joi.array()` without items and with open items, `Joi.any()` without `valid`, an open object four levels down, open `alternatives`, `when` and `conditional … switch` branches, `object().keys()` without argument. Server-controlled fields are refused in a nested object (`/body/address/org_id`) and in array items (`/body/items/0/id`) even when the schema declares them. Mutant killed (nested walk removed: 8 failing tests). Still accepted, with an extra `role` reaching the handler: schema-level `prefs`/`options({ allowUnknown: true })` (top level and nested), `Joi.link('#id')` to a `.shared()` open object, and a `Joi.extend` type based on an open object (PR32-SEC-13) |
+| PR32-SEC-05 (LOW) | **Closed** | (a) A spread copy `{ ...route, transaction: 'none' }`, `Object.create(route)` and a `Proxy` around a defined descriptor are refused with `UndefinedRouteError` before anything is mounted (`DEFINED` `WeakSet`, `define-route.ts:370`); the descriptor, its `schema` and its `auth` set are frozen. (b) `createApp` refuses a tenant route without a runner (`PipelineNotReadyError`) and the mock gateway webhook in `apiMode: 'live'` (`RouteBindingError`, also with a replaced pipeline), while `test` and `sandbox` mount it. (c) The handler context is `route, input, principal, correlationId, transport, db`; no `req` or `res`; `transport` is frozen `{ ip, userAgent }`. (d) As C1. Residual hardening: PR32-SEC-15 |
+| PR32-SEC-06 (LOW) | **Closed** | (a) The helper predicate now reads the effective `security`: 103 of 133 operations require `private, no-store` (95 `[session]`, 3 `[refresh-cookie]`, 3 `[signature]`, 2 `[session, quote-token]`), which adds exactly the six operations of round 1 (`refreshSession`, `logoutSession`, `getCsrfToken`, `getQuote`, `streamQuoteResults`, `receiveCarrierPush`) to the round-1 predicate's 97 and drops none; `createQuote` (`{}` or bearer) requires it only when a credential is presented. (b) A handler's `Cache-Control: public, max-age=600` on an authenticated route is replaced by `private, no-store` after the handler headers; a throw after the mark gives a private 500. Problems raised before a route is known (`MALFORMED_REQUEST`, the 404 fallback) are `no-store`, and `private, no-store` with any of a bearer, either refresh cookie or `X-Quote-Token` (D-TASK020-26). `presentsCredential` (`packages/shared/src/http/credentials.ts`) is the single predicate for app, helper and stubs: 9/9 cases, including multi-valued cookie headers and a case-variant cookie name that is not a credential |
+| PR32-SEC-07 (LOW) | **Closed (a), (b); (c) TASK-024** | `system-model-owner` reports a template-literal `import()` of the accessor, a literal `createRequire(…)('…/system-db.js')`, and a named or `export *` re-export from any `platform/db` file other than `system-db.ts`/`tenant-db.ts`. The new `static-module-specifier` reports a computed `import()`, a template with substitutions, `require(x)`, `module.require(x)`, `createRequire(url)(x)`, a `createRequire` alias variable and `mod.createRequire(url)(x)`; a literal `import()` stays silent. The `fa67aca` config reports none (positive control). `new Function` loaders are caught by `@typescript-eslint/no-implied-eval` (error in the effective config). Residual deliberate-evasion shapes: PR32-SEC-12 |
+| PR32-SEC-08 (INFO) | Open, routed | Unchanged: TASK-022 / TASK-113 (D-TASK020-18..27 routed list) |
+| PR32-SEC-09 (INFO) | **Closed** | D-ARCH-107: `auth` is a closed set read one to one from `security`, `permissionAuthenticated` is in the metadata and in parity (`route-metadata.test.ts` passes on the head contract: 29/95/3/3/1/2) |
+| PR32-SEC-10 (INFO) | Open, routed | Webhook and carrier-push tasks (§5 (ii)); see also PR32-SEC-14 |
+| PR32-SEC-11 (INFO) | **Partly closed** | Closed: `apps/api/src/platform/**` owned (PR #33), `tests/api/helpers/coverage-teardown.ts` owned (`64afb5b`), `tools/db/**` owned, the S3-SDK lint boundary (code review M1: a module service and a package refused, the storage seam allowed, bcrypt still refused inside it) and RegExp mounts (lint for literal, `new RegExp`, `RegExp()` and array forms; the drift walker refuses any non-string matcher, D-TASK020-22). Open (015-C): `tests/generated/**`, `apps/api/src/app.ts`, `apps/api/src/main.ts`, `tools/openapi/**` |
+
+### R2.4 D-TASK020-21: a credential on an anonymous-capable route
+
+**Confirmed for the stub.** The stub gives the anonymous principal only when the set contains `anonymous` and the request presents no `Authorization`, refresh cookie or `X-Quote-Token`, otherwise 401 `private, no-store` (`authenticate.ts:23`). This is the stub clause of D-ARCH-107 (5) word for word.
+
+- **Security effect.** It fails closed. It cannot grant anything, and it removes the silent-downgrade path that README §8 forbids: a present bearer must never be dropped in favour of the anonymous branch. A present but unverifiable credential gets 401 rather than anonymous service. That costs only availability, and only before any session exists.
+- **Should a valid session on `createQuote` be accepted?** Yes, but by the real authenticator (TASK-052), not by this stub. Under D-ARCH-107 (5)/(6):
+  - a valid bearer on `[anonymous, session]` yields the `session` principal, which must hold `quote:create` (403 without it, probed above);
+  - an invalid or expired bearer answers 401 and never falls back to anonymous.
+
+  The stub cannot verify a bearer, so 401 is the correct placeholder. The refusal lives only in `platform/authn`, which TASK-052 replaces, so the stub does not constrain the real design.
+- **What is not yet consistent:** the refresh cookie (PR32-SEC-16).
+
+### R2.5 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner and due |
+|---|---|---|---|---|---|---|
+| PR32-SEC-12 | Lexical residuals of the new lint controls: T-83 roots that are not literals or same-file functions, and two import-control evasions | LOW | CWE-400 | A04 | `tools/eslint-rules/no-external-calls-in-tenant-tx.mjs` `collectRouteHandler` (`:364-378`), `isNamedDependencyCall` (`:400-409`), `takesTxHandle` (`:302-316`); `tools/eslint-rules/module-sources.mjs` `isCreateRequire` | Part 020-C (it reopens the rule for R4 and ships the runtime twin; due before batch 1.3, D-ARCH-108); the two import items with it or TASK-040 |
+| PR32-SEC-13 | Closed-schema walk ignores schema-level preferences and indirection: `prefs`/`options({ allowUnknown: true })`, `Joi.link` to a shared schema, `Joi.extend` types | LOW | CWE-915 | A08 | `routing/define-route.ts` `openSchemaProblems` (`:258-274`); `validate/validate.ts:152` | senior-developer, this PR if the fix cycle reopens it, at the latest before the first route with a request body (as 04); TASK-100 parity facets |
+| PR32-SEC-14 | A signature-only catalogued permission can never be satisfied: the permission gate requires a user actor, while D-ARCH-107 (4) defines the provider principal as `authenticated: false` | INFO | CWE-285 | A01 | `authz/authorise.ts:36-43` | TASK-171 / TASK-261 (webhook authenticators) with principal-architect |
+| PR32-SEC-15 | Mutable shared state behind frozen objects: `ANONYMOUS.permissions` and the descriptor's nested `audit`, `reauth`, `deprecated` | INFO | CWE-471 | A04 | `routing/route-state.ts:18-26`; `routing/define-route.ts:381` | TASK-052 / TASK-060 (principal); senior-developer (descriptor, code review R2-n1) |
+| PR32-SEC-16 | Refresh-cookie presence counts as a credential on every route: D-ARCH-107 (5) and ADR-0006 R-06 must be reconciled before the real authenticators | INFO | CWE-287 | A07 | `packages/shared/src/http/credentials.ts:33-36`; `authn/authenticate.ts:23` | principal-architect (ADR-0008 am. 4 / ADR-0006 wording); TASK-052, TASK-055, TASK-027 matrix row |
+
+#### PR32-SEC-12 (LOW): lexical residuals of the new lint controls
+
+**Evidence (lint probes on the head config).** The following give 0 T-83 findings:
+- **(a)** `const spec = { handler: async () => { … } }; defineRoute(spec)`. The first argument must be an object literal (`:369`).
+- **(b)** A wrapped handler `handler: timed(async () => …)`, and a module helper `tenantRoute(id, handler)` that calls `defineRoute({ …, handler })` (code review R2-m3 (b)).
+- **(c)** An aliased factory `import { defineRoute as route }`.
+- **(d)** Receivers other than `deps.<name>` and `this.<name>`, such as `ctx.deps.queue.add()` and `services.queue.add()`, and an alias `const q = deps.queue; q.add()`.
+- **(e)** A class whose constructor takes `private readonly db: TenantDb` and whose methods do the I/O. R6 marks the constructor only.
+- **(f)** Waits other than `setTimeout`: `scheduler.wait()` from `node:timers/promises`, and a synchronous `Atomics.wait()`.
+- **(g)** A literal dynamic `await import('undici')`.
+- **(h)** A handler imported from another file, whose own file has no root. This is accepted by D-ARCH-106 (5) and reached through R6 at the service.
+
+Import controls:
+- **(i)** `import { createRequire as mk } from 'node:module'` followed by `mk(url)(name)` is not seen by `static-module-specifier`.
+- **(j)** A direct `eval('import(x)')`: the core `no-eval` is not enabled. `new Function` is caught.
+
+**Impact.** Each shape moves the external call out of the rule's sight. (a), (b) and (e) are ordinary refactors that a module with many routes will make, after which T-83 protects nothing in that module (code review R2-m3). The guard rail until 020-C is procedural: D-ARCH-106 (9) allows no tenant route with external I/O, and the runtime twin (an idle-in-transaction timeout of 1,000 ms in the API lanes) arrives with 020-C. (i) and (j) are deliberate evasions in reviewed code. Likelihood is low, impact as T-83: **LOW**.
+
+**Remediation (020-C).**
+1. Fail closed on what cannot be resolved:
+   - report a `defineRoute(` / `fixtureRoute(` whose first argument is not an object literal, unless it resolves to a same-file `const` object literal (then walk it);
+   - report a `handler` value that is neither a function, a same-file function name nor a member expression, with the message "declare route handlers inline or as same-file const functions".
+2. Match `names` on any member chain ending `.<name>.<method>()`.
+3. Treat the methods of a class whose constructor has a `txHandleTypes` parameter property as roots.
+4. Add `scheduler.wait` and `Atomics.wait` to the sleeps.
+5. Treat a literal `import()` of an `EXTERNAL_MODULES` entry inside a root as external.
+6. Resolve `createRequire` through import aliases in `module-sources.mjs`, and enable `no-eval` for `apps/*/src` and `packages/*/src`.
+
+Add one negative fixture per form. Once on `main`, the base-ref no-weakening step pins them.
+
+#### PR32-SEC-13 (LOW): schema-level preferences and indirection reopen a closed schema
+
+**Evidence (composed app).** `defineRoute` accepts each of these, and an extra `role` reaches the handler's `ctx.input.body`:
+- `Joi.object({ name }).prefs({ allowUnknown: true })` at the top level;
+- `Joi.object({ a: Joi.object({ x }).options({ allowUnknown: true }) })` nested;
+- `Joi.object({ a: Joi.link('#open') }).shared(Joi.object().id('open'))`;
+- a `Joi.extend({ type: 'loose', base: Joi.object().unknown(true) })` type.
+
+The cause: a schema's own preferences override the options `validateRequest` passes (`validate.ts:152`, `abortEarly` and `convert` only), `link` nodes are not followed, and node types outside Joi's built-ins are not inspected. `prefs({ stripUnknown: true })` is accepted too, but it drops the field, so it is harmless. `serverControlledIssues` still refuses `org_id`, `id`, `created_by` and similar at any depth, so the residual is business fields (roles, statuses, amounts).
+
+**Impact.** Mass assignment of non-server fields (REQ-SEC-007). This is the same class and rating as 04, and `.options({ allowUnknown: true })` is a common Joi idiom. **LOW.**
+
+**Remediation.**
+1. In `openSchemaProblems`, refuse any node whose `preferences.allowUnknown === true`.
+2. Either refuse `type: 'link'`, or resolve the link against `describe().shared` and walk the target.
+3. Refuse node types outside Joi's built-in list (`validate.ts` `JOI_TYPES`) unless they are explicitly allowed.
+4. As defence in depth, the validate slot can pass `allowUnknown: false` explicitly. A schema's own preferences still win, so the walker remains the control.
+
+Add one negative test per form (code review R2-m1). **Note for the orchestrator:** `define-route.ts` is under `/apps/api/src/platform/` (owned), so an in-PR fix voids this record and needs a small delta round. A fix in TASK-100 does not.
+
+#### PR32-SEC-14 (INFO): signature-only permissions cannot pass the permission gate
+
+`authorise` requires `principal.authenticated` for every catalogued permission (`:36`). D-ARCH-107 (4) defines the signature principal as a provider with `authenticated: false` and no actor. A `signature` principal holding `webhook:stripe:receive` on a `[signature]` route therefore gets 401 (probe). This fails closed, and no webhook route exists yet. The webhook tasks will meet it first.
+
+**Owner note.** Fix the gate, never the principal. For a signature-only permission, require credential `signature` and the permission held, with no actor. Do not set `authenticated: true` or invent an actor for providers: that would break `tenantContextOf`'s authenticated-means-actor rule (PR26-SEC-04) and attribute webhook writes to a fake user. Add a matrix row (TASK-027): a signature principal with the permission gets 200, and without it 403.
+
+#### PR32-SEC-15 (INFO): mutable shared state behind frozen objects
+
+- **`ANONYMOUS.permissions`** is a `Set` inside `Object.freeze`. A handler calling `ctx.principal.permissions.add(…)` changed the process-wide anonymous principal (probe: the added key was visible after the request; pre-existing since round 1). No grant follows today, because `authorise` needs an authenticated principal for catalogued permissions and checks `permissionAuthenticated` only for `session` principals. TASK-060 must not read `principal.permissions` without that guard. Fix: a read-only permission view per principal (a frozen wrapper exposing `has` only, or a fresh `Set` per request) in TASK-052/060.
+- **`defineRoute`'s `Object.freeze` is shallow.** `audit`, `reauth` and `deprecated` stay mutable, so `route.audit.action = 'NONE'` after `defineRoute` keeps the brand and lets the audit stub mount a route declared `CREATE` (code review R2-n1). The parity test sees a mutation made at module load, and the types make it a cast-only path. Fix: copy and freeze the nested objects (`audit.additional` included).
+
+#### PR32-SEC-16 (INFO): refresh-cookie presence vs ADR-0006 R-06
+
+`presentsCredential` counts `__Host-rt_web`/`__Host-rt_admin` as a credential on every route, and the stub answers 401 to an `[anonymous]` request that carries one (probe). The `__Host-` prefix requires `Path=/`, so once TASK-055 issues the cookie, every credentialed browser request to the API host carries it. ADR-0006 R-06 says the cookie is read only by the refresh and logout endpoints and is ignored elsewhere (quoted by code review R2-m4). If TASK-052/055 keep the stub's "present means refuse" rule for the cookie, login (`createSession`, `[anonymous]`), public tracking and `createQuote` answer 401 to any signed-in or stale browser. That is an availability defect, and it creates pressure to weaken the gate in a hurry.
+
+**Owner note.**
+- **principal-architect:** reconcile D-ARCH-107 (5) with ADR-0006 R-06. The cookie is a credential only on routes whose set contains `refresh-cookie`, and it is otherwise ignored for authentication but still makes the response `private, no-store`. Also state the rule for a present `Authorization` header on an `[anonymous]`-only route; D-ARCH-107 (5) defines it only for sets that contain `session`.
+- **TASK-052/055:** apply the reconciled rule; it changes no security property of this PR.
+- **TASK-027:** matrix row `[anonymous]` + refresh cookie gives 200 `private, no-store`.
+
+### R2.6 Union checks (PR #20 merged first, PR #33 merged during the cycle)
+
+| Check | Result |
+|---|---|
+| Merge integrity | `c29e492`, `531a244` and `11530cc` trees equal `git merge-tree --write-tree` of their parents (clean auto-merges, no hand edit). `4789de8` (PR #20 union) differs from the clean merge tree in 10 paths: 5 conflicts (`app.ts`, `main.ts`, `runtime-seams.api.test.ts`, `contract-validation.api.test.ts`, `tools/openapi/api-mounts.ts` modify/delete, kept deleted) and 5 declared hand edits (`serve.ts` `routePrefix(DOCS_PATH)` as the docs router's first layer, `pipeline.test.ts` and `tests/generated/api-mounts.ts` `debug`, `logging.api.test.ts`, and in `eslint.config.mjs` one `SUPERTEST_ALLOW_LIST` entry with its reason, D-TASK020-27). This matches the PR comment's §6 checklist and the code review |
+| Configuration overlap files | `eslint.config.mjs` = clean merge + that allow-list entry + `4d21114` (read in full). `jest.config.ts`, `package.json`, `tools/tsconfig.json` and `.gitignore` = `main` plus exactly the round-1 lines (`globalTeardown`; `test:contract`; three `platform/db` files; two ignore lines). `.github/CODEOWNERS` = `main` plus one rule with its comment (`/tests/api/helpers/coverage-teardown.ts`, required by PR #33's `jest-config-owned` test; the teardown is unchanged since `fa67aca`). `tests/generated/tsconfig.json` is unchanged since round 1 |
+| Byte-identical to `main` | `package-lock.json` (no dependency change; `npm audit` not re-run), `.github/workflows/**`, `tools/ci/**`, `tools/quality/**`, `tools/hooks/**`, `tools/deps/**`, `tools/isolated/**`, `.npmrc`, `.gitleaks.toml`, `.gitleaksignore`, `.semgrep/**`, `.semgrepignore`, `.prettierignore`, `.swcrc`, `tsconfig*.json` at the root, `.node-version`, `commitlint.config.mjs`. So PR #33's pins, ASCII-only `ci.yml` (PR33-SEC-01), coverage gate, oasdiff gate, Gitleaks baseline and `__mocks__` confinement (`modulePathIgnorePatterns` unchanged; no `__mocks__` path in the PR) are intact, and the D-ORCH-021 levers are untouched |
+| PR #20 controls | The server-only logging policies are still the last three entries of `BOUNDARIES_POLICIES` (`eslint.config.mjs:515`, `:516`, `:520`; the array ends at `:521`). `routePrefix(API_PREFIX)` is the first layer of `api` (`app.ts:110`) and `routePrefix(DOCS_PATH)` the first of the docs router. App order as §7 required. `installProcessErrorHandlers` sits above `createRuntimeServices` (`apps/api/src/main.ts:28`/`:30`; the worker `main.ts` equals `main`'s). Boot refusals exit 78 through `bootFailureOf` with route identities only. PR #20's logging, correlation, context and runtime sources are byte-identical to `main`, except `logging.api.test.ts` (descriptor conversion; 61 `expect` and 13 cases on both sides, careless-code probes kept) and `services.ts` (round 1's `tenantTx` field). `no-raw-request-in-log` and `no-catch-message-interpolation` and their fixtures are unchanged since round 1; the 20 shared-logging fixtures equal `main`'s |
+| Rule weakening | The set of rules configured `'off'` is identical on `main` and the head. `RESTRICTED_IMPORT_PATTERNS` is BCRYPT, SUPERTEST and the new S3 pattern; each exception goes through `restrictedImportsExcept`. There is one `no-restricted-syntax` block (`apps/api/src/**`), so no earlier block's options are replaced. The negative-fixtures suite passes on the extract |
+| New pre-gate execution points | None in this round |
+
+### R2.7 Record simulation and secret hygiene
+
+**Simulated `check-security-owned-paths --pr 32`.** I used `main`'s `tools/ci` (`git archive e8829ef`) in a scratch `git clone --shared`. The scenario commits were built with git plumbing on top of `11530cc`, and the clone was checked out at each scenario, because the checker reads records from the working tree. The record is this file as it stands on `main` (round 1) with this section appended.
+
+| Scenario | Exit | Status |
+|---|---|---|
+| S0 control: `11530cc` as pushed (round-1 record only), base `main` tip | 1 | missing ("names fa67aca, but … changed after it") |
+| S1 this record committed on top of `11530cc`, base `main` tip | 0 | pass, satisfied by `11530cc`; 144 owned paths (the round-1 head row only adds a note) |
+| S2 same, base = merge base `f2f34a7` | 0 | pass |
+| S3 control: `--pr 31` | 1 | missing |
+| S4 control: the same text named `PR-0033-…` | 1 | missing |
+| S5 control: owned `eslint.config.mjs` edited after the record | 1 | missing |
+| S6 control: owned `apps/api/src/platform/routing/define-route.ts` edited after the record (a PR32-SEC-13 fix) | 1 | missing |
+| S7 control: owned `tests/api/helpers/coverage-teardown.ts` edited after the record | 1 | missing |
+| S8 unowned `tests/generated/route-metadata.ts` edited after the record (a code review R2-m2 fix) | 0 | pass (lane B then needs a new run) |
+| S9 docs-only lane-B evidence commit after the record | 0 | pass |
+| S10 merge of the docs-only `main` tip after the record | 0 | pass |
+| S11 control: merge of a `main` that changed owned `eslint.config.mjs` | 1 | missing |
+| S12 / S13 controls: this round's last Verdict `FAIL` / `PENDING` | 1 / 1 | missing |
+| S14 control: this round's head row names the `main` tip | 1 | missing |
+| S15 positive: head row abbreviated to 7 hex | 0 | pass |
+
+**Secret hygiene.** Gitleaks default-ruleset emulation over this section: 0 findings (run-time positive controls fired). Count-only host-fragment scan of this section: 0 on every label (synthetic control positive). No value is quoted. Lane A's real Gitleaks passed on `11530cc`.
+
+### R2.8 Checks owed
+
+- **Before merge (procedural; not a security condition):**
+  - the lane-B evidence commit, docs-only (S9 keeps this record);
+  - a lane A run on the final head in which lint, typecheck, unit, base-ref negative fixtures and build actually execute and pass (all skipped on `11530cc`);
+  - no non-docs commit and no main merge touching an owned path after this record (S5-S8, S11).
+
+  If the fix cycle reopens for code review R2-m1 (= PR32-SEC-13), the `define-route.ts` change needs a delta round (S6). R2-m2 alone does not void the record (S8).
+- **Part 020-C:** PR32-SEC-12, the R4 line, the runtime twin. Its own record is required (D-ARCH-108).
+- **TASK-052/055/060/091/171/261:** PR32-SEC-14, -15, -16 plus the round-1 owner list (§7). TASK-027: matrix rows for PR32-SEC-14 and -16.
+- **qa-lead:** SEC-TC-29 can return to `required_cases` in the next activation PR; its predicate is fixed (PR32-SEC-06 (a)).
+
+### R2.9 Verdict
+
+| Field | Value |
+|---|---|
+| Critical / High / Medium open | 0 / 0 / 0 |
+| Closed this round | PR32-SEC-01 (C1), -02 (C2), -03 (C3), -05, -06, -07 (a)(b), -09; -04 for the round-1 forms; -11 in part |
+| Open, routed | LOW PR32-SEC-12 (020-C), -13 (before the first route with a request body), -07 (c) (TASK-024); INFO -08, -10, -11 (rest), -14, -15, -16 with the owners in R2.5 and R2.3 |
+| Decisions | D-TASK020-21 confirmed (R2.4); D-TASK020-03 stands with control (i) in place; D-TASK020-18, -19, -20, -22..-27 accepted |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** Conditions C1-C3 met and the MEDIUM closed; no Critical, High or Medium finding open; merge still needs lane-B evidence and a lane A run that executes its gates on the final head |

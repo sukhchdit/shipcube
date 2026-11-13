@@ -1,35 +1,53 @@
 ---
 name: project-p5-pr32-route-pipeline
-description: PR #32 (TASK-020 defineRoute, request pipeline, SYSTEM port, lint) R1 @fa67aca 2026-11-13 PASS_WITH_CONDITIONS; PR32-SEC-01 MEDIUM T-83 blind to handlers; C1-C3; D-TASK020-03 confirmed with C2; R2 = delta + PR #20 union checks
+description: PR #32 (TASK-020 defineRoute, request pipeline, SYSTEM port, lint) R1 @fa67aca PASS_WITH_CONDITIONS; R2 @11530cc (delta + PR #20/#33 unions) PASS_WITH_FOLLOW-UPS, C1-C3 closed, new LOW 12/13 + INFO 14-16; an in-PR R2-m1 fix (define-route.ts, owned) needs a round-3 delta
 metadata:
   type: project
 ---
 
-Record: `docs/05-quality/security/PR-0032-TASK-020-security-review.md` (R1 written uncommitted into the main checkout, 222 lines). Head `fa67aca8325bf653599d281c3f7baa3668e9b58e`, merge base `c2ddfac`, main `c48910d` at the time. Verdict **PASS_WITH_CONDITIONS**: 1 MEDIUM, 6 LOW, 4 INFO. Code review R1 (same day) was CHANGES_REQUESTED (M1 S3-SDK lint boundary = PR30-SEC-08 (e) not delivered; m1-m8 overlap my 01/03/04/05/06).
+Record: `docs/05-quality/security/PR-0032-TASK-020-security-review.md`.
+- **R1** is committed on main (`9a69797`).
+- **R2** (`## Round 2 (head 11530cc, delta + merge)`, 2026-11-13) was appended uncommitted in the main checkout, giving 423 lines (LF). It has its own `| Head | 11530cc… |` row and a final Verdict row.
 
-**Findings.**
-- 01 MEDIUM: T-83 rule `no-external-calls-in-tenant-tx` is lexical to `withTenantTx(cb)`; the tx slot runs every `defineRoute` handler inside the transaction, so handlers are never seen (probe: queue.add + setTimeout in a handler = 0 findings).
-- 02 LOW: `authorise` passes `public` before checking the route's `auth`; 6 `public`-marker ops are authenticated (refreshSession, logoutSession, getCsrfToken, getQuote, streamQuoteResults, receiveCarrierPush). Leaky-authn probe reaches the handler.
-- 03 LOW: audit/idempotency/rate-limit/MFA stubs fail open (authn fails closed).
-- 04 LOW: closed-schema check top-level only (`Joi.object()` without keys accepts anything; nested open; serverControlled not nested).
-- 05 LOW: unbranded descriptors mount (hand-built `transaction:none` on tenant, method `use`); boot checks only in main.ts; `ctx.req.res` sends before COMMIT (201 while rolled back); `transaction:none` + audited action allowed (7 public-tenancy audited ops).
-- 06 LOW: SEC-TC-29 helper keys on `x-permission`, misses the 6 ops above; handler headers override private,no-store.
-- 07 LOW: system-model-owner misses template-literal/computed `import()`, re-export from rule-excluded platform/db, raw SQL on SYSTEM tables (TASK-024).
-- 08-11 INFO: PR20-SEC-20/21 not carried, -22 partly; single-valued RouteAuth (dual-mode); webhook principal + raw body; CODEOWNERS gaps (`tests/generated`, app.ts, main.ts, tools/openapi, tools/db/table-classes) + PR30-SEC-08 (e) + RegExp mount (CR m5).
+**R1** (`fa67aca`): PASS_WITH_CONDITIONS; 01 MEDIUM, 02-07 LOW, 08-11 INFO. C1 = 01 (T-83 blind to handlers), C2 = 02 (credential gate before `public`), C3 = 03 (stubs refuse at mount). D-TASK020-03 confirmed with C2.
 
-**Conditions.** C1 = 01 (lint covers defineRoute handlers inline/same-file named/audit hook unless `transaction:'none'`, fixtures; architect pre-tx phase ruling). C2 = 02 (`auth !== 'anonymous'` ⇒ authenticated principal, before the `public` shortcut). C3 = 03 (mount-time refusal per stub). Preferred in the fix cycle; latest before the first module route needing each.
+**R2** (`11530cc`): **PASS_WITH_FOLLOW-UPS**.
+- **Closed:** 01, 02, 03, 05, 06, 07 (a)(b), 09. 04 is closed for the R1 forms. 11 is partly closed: still open are `tests/generated/**`, `app.ts`, `main.ts` and `tools/openapi/**` (015-C).
+- **New findings:**
+  - **12 LOW**, T-83 and import lexical residuals, owned by 020-C:
+    - `defineRoute(spec)` with a const spec;
+    - a wrapped or helper-param handler;
+    - an aliased factory;
+    - `ctx.deps.queue` / `services.queue`;
+    - a constructor-injected `TenantDb`;
+    - `scheduler.wait` / `Atomics.wait`;
+    - a literal dynamic `import('undici')`;
+    - an aliased `createRequire`;
+    - direct `eval`.
+  - **13 LOW**, Joi `prefs/options({allowUnknown:true})`, `Joi.link`→`.shared()` and `Joi.extend` types are accepted and let `role` reach the handler. Same as code review R2-m1. Due before the first body route.
+  - **14 INFO**, the signature-only permission gate needs a user actor, so a provider principal always gets 401. Fix the gate, never `authenticated: true`. Owners TASK-171/261.
+  - **15 INFO**, `ANONYMOUS.permissions` is a mutable shared Set, and the descriptor's nested `audit`/`reauth`/`deprecated` are not frozen (code review R2-n1).
+  - **16 INFO**, refresh-cookie presence is a credential on every route, which conflicts with ADR-0006 R-06. Same as code review R2-m4. Owners: architect, TASK-052/055/027.
+- **D-TASK020-21 confirmed:** the stub refuses any presented credential. This is fail-closed and is D-ARCH-107 (5) verbatim. A valid session on `createQuote` is accepted only by the real TASK-052 authenticator, with `quote:create` required.
+- Code review R2 (`e8829ef`, APPROVED_WITH_NITS) agrees: m1=13, m3=12, m4=16, n1⊂15.
 
-**D-TASK020-03 ruling:** confirmed. (c) forward direction kept; my R1 PR-0008 `⇔` over-specified (contract's receiveCarrierPush is `public` + carrierSignature). Compensation: C2 now; verifier list for webhook tasks (raw bytes, constant-time, tolerance, secret from route/carrierCode, mock refused in production, 400 WEBHOOK_SIGNATURE_INVALID audited, event-id de-dup).
+**Facts (probe-confirmed 2026-11-13):**
+- The record checker counts 144 owned paths in the PR's net change; 71 of them changed after `fa67aca`. `apps/api/src/platform/**` has been owned since PR #33.
+- 16-scenario sim against `e8829ef`, all as expected. These void the record: `define-route.ts`, `coverage-teardown.ts`, an `eslint.config.mjs` edit, and a main merge that touches an owned path. These keep it valid: a docs-only evidence commit, a docs-only main merge, and an edit to unowned `tests/generated/route-metadata.ts`.
+- Lane A run 43457137317 on `11530cc` skipped lint/typecheck/unit/build: the lane-B evidence step failed with Docker hung. I reproduced 11 security suites (247/247) and negative-fixtures (241/241) on a git-archive extract; 5 mutants were all killed.
+- Merge-tree:
+  - `4789de8` (PR #20 union) has 5 conflicts plus 5 declared hand edits.
+  - The other merges are clean auto-merges.
+  - The lock, workflows, `tools/ci` and `tools/quality` equal main.
 
-**Closed here:** PR8-SEC-05 (a)-(d) merge condition; PR26-SEC-04 TASK-020 half (nested part moved to 04); PR21-SEC-06/08/09; PR20-SEC-13 item 4; PR19-SEC-01 mechanism; PR11-SEC-17 a/b; PR11-SEC-09 at tx slot. D-TASK020-05 deferral accepted (fails closed).
+**How to apply:**
+- **Round 3 (if R2-m1/PR32-SEC-13 is fixed in-PR):** a delta round on the `define-route.ts` commit only. Check:
+  - `preferences.allowUnknown` refused at any node;
+  - `link` refused or walked via `describe().shared`;
+  - unknown node types refused;
+  - one test per form.
+  The R2-m2 (`tests/generated`) fix alone does not void the record, but it stales lane B.
+- **020-C:** PR32-SEC-12 list plus R4 plus the runtime twin; it needs its own record.
+- **TASK-052/055/060/171/261/027:** 14/15/16 matrix rows.
 
-**Why:** this is the O3 chokepoint; every later module route inherits its gaps, and the conditions are cheap only before routes exist.
-
-**How to apply (R2 and later):**
-- R2 must be delta + merge-only: D-ORCH-044 merges PR #20 first, so #32 carries the union (owned overlap eslint.config.mjs, tools/lint/negative-fixtures.test.ts, tools/tsconfig.json). Check the §7 union list (app order, routePrefix first in `api` and on docs router, problem-handler `private`, installProcessErrorHandlers above services, both boot checks exit 78, RESTRICTED_IMPORT_PATTERNS BCRYPT+SUPERTEST+S3, no rule `off`, PR #20 logging.api.test supertest allow-list, lock = PR #20 blob). PR #33 overlaps jest.config.ts/package.json/negative-fixtures: second merger needs merge-only round.
-- Note: on main's CODEOWNERS the slot folders are unowned, so a C2/C3-only fix in `platform/authz|audit|...` does not void the record (sim D); review all commits after fa67aca regardless. PR #33 adds `/apps/api/src/platform/`.
-- TASK-052: actorId only from verified `sub`, `setPrincipal` only from platform/authn, principal kinds for provider/guest (CR n3), SEC-06 (b). TASK-040: idempotency scope list in §7. TASK-024: SEC-07 (c). TASK-091/052: SEC-09. Webhook tasks: §5 (ii) verifier list + SEC-10.
-
-**Probe kit (session scratch, `review/PR-32-sec/probes/`):** `hooks.mjs` (copied PR-30 type-strip hooks), `p1-app.mjs` (composed createApp: hand-built descriptors, open schemas, authn/authz matrix, leaky-authn seam via `pipeline`, response-before-commit with a fake tenantTx + failing audit), `p2-lint.mjs`/`p2c-lint.mjs` (lintText on the head config), `p3-hostscan.mjs` (run dir + added lines, count-only), `p4-db.mjs` (isSqlFragment + TenantDb SYSTEM exclusion on a fake client), `p5-ctx.mjs`, `p7-filescan.mjs`, `record-sim.mjs` (15 scenarios). Extracts and clone removed; junctions unlinked (main node_modules 740).
-
-Related: [[project-p5-pr8-authz-review]], [[project-p5-pr26-standard-columns]], [[project-p5-pr21-openapi-pipeline]], [[project-p5-pr20-logging]], [[project-p5-pr10-ci-lane]], [[project-security-review-conventions]]
+Related: [[project-p5-pr8-authz-review]], [[project-p5-pr20-logging]], [[project-p5-pr33-lane-a-hardening]], [[project-p5-pr10-ci-lane]], [[project-security-review-conventions]]
