@@ -6,6 +6,7 @@ import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit } from '@platform/config';
 import { createApp } from './app.js';
 import { moduleRegistry } from './modules/index.generated.js';
 import { resolveApiMode } from './platform/context/api-mode.js';
+import { createOrExitOnConfigError } from './platform/db/config-exit.js';
 import { createHealthRouter } from './platform/health/router.js';
 import { requestLogContext } from './platform/logging/correlation.js';
 import { DocsSpecError, docsOptionsFrom, type DocsOptions } from './platform/openapi/serve.js';
@@ -25,8 +26,9 @@ const log = createRuntimeLog('api', process.stdout, {
 const exit = exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) });
 // Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06).
 installProcessErrorHandlers({ log, exit });
-// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
-const services = createRuntimeServices(config, 'api', log, secrets);
+// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11). A database
+// URL or PGOPTIONS failure exits 78 naming the variable (PR #9 R3-m1, PR #11 R3-m2; TASK-014).
+const services = await createOrExitOnConfigError(() => createRuntimeServices(config, 'api', log, secrets), { log, exit });
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
 let app: ReturnType<typeof createApp>;

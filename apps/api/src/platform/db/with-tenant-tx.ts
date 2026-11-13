@@ -111,9 +111,13 @@ export interface TenantTxRunner<TTx> {
 }
 
 export class TenantTxConfigError extends Error {
-  constructor(message: string) {
+  /** The configuration variable to name when the process refuses to start (exit 78, TASK-014; never a value). */
+  readonly variable: string;
+
+  constructor(message: string, variable = 'DB_TX_*') {
     super(message);
     this.name = 'TenantTxConfigError';
+    this.variable = variable;
   }
 }
 
@@ -295,7 +299,7 @@ export function tenantTxOptionsFromConfig(
  */
 export function assertNoSessionOptions(env: Readonly<Record<string, string | undefined>>): void {
   if (env['PGOPTIONS'] !== undefined) {
-    throw new TenantTxConfigError('PGOPTIONS must not be set: session options would bypass the per-transaction context');
+    throw new TenantTxConfigError('PGOPTIONS must not be set: session options would bypass the per-transaction context', 'PGOPTIONS');
   }
 }
 

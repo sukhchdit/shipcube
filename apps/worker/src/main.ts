@@ -3,6 +3,7 @@
 // (`@platform/api/runtime`), the health server on APP_HEALTH_PORT and graceful shutdown. Queue processors arrive
 // with the queue tasks; they register their drain here as an additional step.
 import {
+  createOrExitOnConfigError,
   createRuntimeLog,
   createRuntimeServices,
   createShutdown,
@@ -26,8 +27,9 @@ const log = createRuntimeLog('worker', process.stdout, {
 const exit = exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) });
 // Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06).
 installProcessErrorHandlers({ log, exit });
-// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
-const services = createRuntimeServices(config, 'worker', log, secrets);
+// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11). A database
+// URL or PGOPTIONS failure exits 78 naming the variable (PR #9 R3-m1, PR #11 R3-m2; TASK-014).
+const services = await createOrExitOnConfigError(() => createRuntimeServices(config, 'worker', log, secrets), { log, exit });
 const server = createWorkerHealthServer(services.probe);
 
 // Session-integrity check on a dedicated connection before the health server opens and before any queue processor
