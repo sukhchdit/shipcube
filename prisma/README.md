@@ -10,8 +10,29 @@ Prisma 7 + PostgreSQL 18 baseline (TASK-003; data-model.md §4.4, §7, §8; ADR-
 | `tests/harness/` | PostgreSQL 18 Testcontainers harness (digest-pinned image, random passwords, template cloning, runtime role). |
 | `tests/{bootstrap,migrations}/` | Integration suites: bootstrap lane and catalog assertions; up -> down -> up. |
 
+## Generated client: `@platform/prisma/client`
+
+The generator block in `schema/_base.prisma` pins `runtime`, `moduleFormat`, `generatedFileExtension` and
+`importFileExtension` (D-ARCH-102; `tools/db/prisma-client-package.test.ts` parses it). The output `generated/prisma` is
+git-ignored and is compiled by the composite project `client/tsconfig.json` into `dist/client` (`npm run build -w prisma`,
+or through the `apps/api` project reference). The package exports exactly `./client`: the TypeScript sources under the
+`@platform/source` condition (tsc, Jest, tsx), the compiled `dist/client` otherwise (plain `node`, the images).
+
+- **Regenerate** with `npm run db:generate` after a schema change (Prisma 7 no longer generates after `migrate dev`,
+  and nothing generates implicitly). `npm run typegen -w prisma` only checks: it fails with "run npm run db:generate"
+  when the client is missing or older than `schema/`.
+- **Who may import it** (D-ARCH-103, ADR-0003 amendment 2026-11-13; enforced by `eslint-plugin-boundaries`): as a value,
+  only `apps/*/src/platform/db` (in the app: `apps/api/src/platform/db/generated.ts`, the one value importer), `prisma/`,
+  `tools/db` and tests; as a type, also module repositories and the two planned stores. Repositories take the
+  `AppDb` / `AppTransactionClient` / `Prisma` types from `platform/db/index.ts` (or `@platform/api/runtime` in the
+  worker); exported repository and service functions are `async` or carry a return type (TS2883).
+- `databaseRuntimeFromConfig(config, service, log)` builds the client from `generated.ts`, so the API and the worker
+  get the same tenant-transaction runner from the one composition (D-ARCH-104).
+
+## Prisma CLI
+
 Every Prisma CLI call goes through `node tools/deps/prisma-cli.mjs` (pinned schema engine, ADR-0023 am. J item 2):
-`npm run db:migrate` (`migrate dev`), `npm run db:migrate:deploy`, `npm run db:reset -- --yes` (local only: recreates the
+`npm run db:generate` (`generate`), `npm run db:migrate` (`migrate dev`), `npm run db:migrate:deploy`, `npm run db:reset -- --yes` (local only: recreates the
 database, reruns the bootstrap lane, deploys), `npm run db:lint-migrations` (linter + `prisma validate`).
 
 ## Seeding

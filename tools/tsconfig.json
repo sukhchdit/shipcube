@@ -1,6 +1,6 @@
 {
   "extends": "../tsconfig.base.json",
-  "//": "Repository tooling plus the cross-cutting Prisma test code (prisma/tests: harness, bootstrap, migration and seed suites) and the seed framework those suites import (prisma/seed), which imports tools/db, the generated client and the runtime client factory (TASK-003).",
+  "//": "Repository tooling plus the cross-cutting Prisma test code (prisma/tests: harness, bootstrap, migration and seed suites) and the seed framework those suites import (prisma/seed), which imports tools/db, the generated client (through the prisma/client project reference, D-ARCH-102) and the runtime client factory (TASK-003).",
   "compilerOptions": {
     "noEmit": true,
     "allowJs": true,
@@ -19,6 +19,7 @@
     "../apps/api/src/platform/db/dedicated-connection.ts",
     "../apps/api/src/platform/db/expect-affected.ts",
     "../apps/api/src/platform/db/extensions/standard-columns.ts",
+    "../apps/api/src/platform/db/generated.ts",
     "../apps/api/src/platform/db/health-check.ts",
     "../apps/api/src/platform/db/index.ts",
     "../apps/api/src/platform/db/map-db-error.ts",
@@ -37,7 +38,14 @@
     "../apps/api/src/platform/runtime/readiness.ts",
     "../apps/api/src/platform/runtime/shutdown.ts"
   ],
-  "include": ["**/*.ts", "**/*.mjs", "../prisma/tests/**/*.ts", "../prisma/seed/**/*.ts", "../prisma/generated/**/*.ts"],
+  "include": ["**/*.ts", "**/*.mjs", "../prisma/tests/**/*.ts", "../prisma/seed/**/*.ts"],
   "exclude": ["**/fixtures/**", "../prisma/tests/fixtures/**"],
-  "references": [{ "path": "../packages/authz" }]
+  "references": [
+    {
+      "path": "../packages/authz"
+    },
+    {
+      "path": "../prisma/client"
+    }
+  ]
 }

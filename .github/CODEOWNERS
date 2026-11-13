@@ -42,6 +42,11 @@
 /tools/db/lint-migrations.ts            @sukhchdit
 /tools/authz/                           @sukhchdit
 /tools/db/audit-ddl-reviewers.json      @sukhchdit
+# The generated Prisma client package (D-ARCH-103 (7)): the `exports` map decides what is importable, the generator
+# block decides the emitted shape, and generated.ts is the one value importer of the client.
+/prisma/package.json                    @sukhchdit
+/prisma/schema/_base.prisma             @sukhchdit
+/apps/api/src/platform/db/generated.ts  @sukhchdit
 # The O4 oracles and assertions outside the bootstrap SQL (PR24-SEC-04): the whole prisma tree (schema, sql/grants
 # manifest, audit/catalog/health tests, seeds), every tools/db helper (shadow-init, sql-text tokenizer, table classes),
 # the Prisma config that loads at every deps:rebuild, and the API platform layer (health checks, catalog reader, db).
