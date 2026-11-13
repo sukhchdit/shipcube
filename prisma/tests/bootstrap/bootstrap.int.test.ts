@@ -17,6 +17,8 @@ import { APP_ROLE, MIGRATOR, PlatformPostgres, SUPERUSER } from '../harness/post
 const FILES = readdirSync(DEFAULT_BOOTSTRAP_DIR)
   .filter((name) => name.endsWith('.sql'))
   .sort();
+/** Audit-store files (TASK-021): plain CREATE, applied exactly once through the ledger (PR12-SEC-03). */
+const AUDIT_FILES = ['10-audit.sql', '90-audit-ddl-guard.sql'];
 
 let db: PlatformPostgres;
 const work: string[] = [];
@@ -72,7 +74,7 @@ describe('bootstrap runner (data-model §8.1)', () => {
     await db.createDatabase('order_db');
     const result = await db.bootstrap('order_db');
     expect(result.applied).toEqual(FILES);
-    expect(FILES).toEqual(['00-roles.sql', '01-schemas.sql', '02-role-backstops.sql']);
+    expect(FILES).toEqual(['00-roles.sql', '01-schemas.sql', '02-role-backstops.sql', ...AUDIT_FILES]);
     const rows = await query<{ file_name: string; sha256: Buffer; applied_by: string }>(
       'order_db',
       `SELECT file_name, sha256, applied_by FROM ${LEDGER_TABLE} ORDER BY applied_at, file_name`,
@@ -93,13 +95,43 @@ describe('bootstrap runner (data-model §8.1)', () => {
     const again = await db.bootstrap('idem_db');
     expect(again.applied).toEqual([]);
     expect(again.skipped).toEqual(FILES);
-    // The files are idempotent too: a lane copy without the ledger rows re-applies them cleanly.
-    const before = normaliseSchemaDump(await db.dumpSchema('idem_db'));
-    await query('idem_db', `DELETE FROM ${LEDGER_TABLE}`);
-    const rerun = await db.bootstrap('idem_db');
-    expect(rerun.applied).toEqual(FILES);
-    expect(normaliseSchemaDump(await db.dumpSchema('idem_db'))).toBe(before);
+    // The role/schema files are idempotent too: a lane copy without them in the ledger re-applies them cleanly. The
+    // audit files are deliberately not (plain CREATE, PR12-SEC-03); the next test covers them.
+    const lane = laneCopy();
+    AUDIT_FILES.forEach((name) => rmSync(join(lane, name)));
+    await db.createDatabase('idem2_db');
+    await db.bootstrap('idem2_db', lane);
+    const before = normaliseSchemaDump(await db.dumpSchema('idem2_db'));
+    await query('idem2_db', `DELETE FROM ${LEDGER_TABLE}`);
+    const rerun = await db.bootstrap('idem2_db', lane);
+    expect(rerun.applied).toEqual(FILES.filter((name) => !AUDIT_FILES.includes(name)));
+    expect(normaliseSchemaDump(await db.dumpSchema('idem2_db'))).toBe(before);
     expect(before).toContain('CREATE SCHEMA platform');
+  }, 120_000);
+
+  it('[PR12-SEC-03] applies the audit files exactly once: without their ledger row a re-run fails closed and rolls back', async () => {
+    await db.createDatabase('once_db');
+    await db.bootstrap('once_db');
+    await query('once_db', `DELETE FROM ${LEDGER_TABLE} WHERE file_name = '90-audit-ddl-guard.sql'`);
+    await expect(db.bootstrap('once_db')).rejects.toThrow(/90-audit-ddl-guard\.sql failed: .*already exists.*\(SQLSTATE 42723\)/);
+    await query('once_db', `DELETE FROM ${LEDGER_TABLE} WHERE file_name = '10-audit.sql'`);
+    await expect(db.bootstrap('once_db')).rejects.toThrow(/10-audit\.sql failed: .*already exists.*\(SQLSTATE 42P07\)/);
+    const rows = await query<{ file_name: string }>('once_db', `SELECT file_name FROM ${LEDGER_TABLE} ORDER BY 1`);
+    expect(rows.map((row) => row.file_name)).toEqual(FILES.filter((name) => !AUDIT_FILES.includes(name)));
+  }, 120_000);
+
+  it('[PR12-SEC-03] a platform.audit_ddl_guard() planted by the migrator before 90-audit-ddl-guard.sql fails the lane', async () => {
+    const lane = laneCopy();
+    rmSync(join(lane, '90-audit-ddl-guard.sql'));
+    await db.createDatabase('plant_db');
+    await db.bootstrap('plant_db', lane);
+    await asRole(
+      { connectionString: db.migratorUrl('plant_db') },
+      'CREATE FUNCTION platform.audit_ddl_guard() RETURNS event_trigger LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$',
+    );
+    await expect(db.bootstrap('plant_db')).rejects.toThrow(/90-audit-ddl-guard\.sql failed: .*already exists.*\(SQLSTATE 42723\)/);
+    const triggers = await query<{ n: string }>('plant_db', 'SELECT count(*)::text AS n FROM pg_catalog.pg_event_trigger');
+    expect(triggers[0]?.n).toBe('0');
   }, 120_000);
 
   it('fails on a changed SHA-256 of an applied file and applies nothing after it', async () => {
@@ -122,7 +154,7 @@ describe('bootstrap runner (data-model §8.1)', () => {
     await db.bootstrap('order2_db', lane);
     writeFileSync(join(lane, '00-zz-late.sql'), 'SET search_path = pg_catalog, pg_temp;\n');
     await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(
-      /00-zz-late\.sql sorts before the already applied (?:01|02)-[a-z-]+\.sql/,
+      /00-zz-late\.sql sorts before the already applied (?:01|02|10|90)-[a-z-]+\.sql/,
     );
     rmSync(join(lane, '00-zz-late.sql'));
     rmSync(join(lane, '01-schemas.sql'));

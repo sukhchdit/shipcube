@@ -9,9 +9,12 @@
  * therefore proven on a TENANT probe rendered by tools/db/render-rls.ts, and the committed-state assertions run on
  * the real catalogue so they bind every later migration.
  *
- * Implemented here: C1-C5, C8, C9, C11, C12 (on the probe), C13, C14 (partial). Deferred, with owners (PR #11 review
- * m4): C6, C7 and the C14 remainder -> TASK-021 (audit/immutability triggers); C10 -> TASK-028 (classification
- * registry); the per-table C12 generator -> TASK-024.
+ * Implemented here: C1-C5, C8, C9, C11, C12 (on the probe), C13, C14 (owner/enabled summary). C6, C7 and the C14
+ * remainder (immutability triggers incl. partitions, manifest-driven C7, event-trigger owner, proconfig of the audit
+ * functions, OID rename probe, audit-owner converse, pg_depend check) are in c11-c14-audit.int.test.ts (TASK-021).
+ * Deferred, with owners (PR #11 review m4): C10 -> TASK-028 (classification registry); the per-table C12 generator
+ * -> TASK-024; the full immutability-per-role generator -> TASK-033; the verifier tripwire on tgenabled/evtenabled ->
+ * TASK-116.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -222,6 +225,9 @@ const C8_SQL = `
     JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
    WHERE c.table_schema = 'public' AND c.column_name = 'id' AND c.table_name <> '_prisma_migrations'
      AND c.table_name NOT LIKE 'bootstrap\\_migrations%' AND (c.data_type <> 'uuid' OR c.column_default IS DISTINCT FROM 'uuidv7()')
+     -- audit_entries (and its partitions): the id is a UUIDv7 set by packages/audit before hashing (data-model §3.4), so
+     -- the column is uuid WITHOUT a default; a default would let an unhashed id in.
+     AND NOT (c.table_name ~ '^audit_entries(_[0-9]{4}_[0-9]{2})?$' AND c.data_type = 'uuid' AND c.column_default IS NULL)
   UNION ALL
   SELECT c.table_name || '.' || c.column_name || ': ' || c.data_type || ' minor-unit column without bigint + currency CHECK'
     FROM information_schema.columns c
@@ -243,6 +249,46 @@ const C9_SQL = `
  */
 const ENUM_CHECKS: Record<string, string[]> = {
   ck_roles__scope: [...new Set(SEED_SOURCE.roles.map((role) => role.scope))].sort(),
+  // Audit store (TASK-021, prisma/bootstrap/10-audit.sql; data-model §3.4, §5.1, §5.7). No TypeScript list exists yet:
+  // the lists are pinned from the data model here, and the packages/audit enums must equal them when they land.
+  ck_audit_chain_verifications__failure_kind: [
+    'ANCHOR_MISSING',
+    'CHECKPOINT_HEAD_MISMATCH',
+    'CHECKPOINT_SIGNATURE_INVALID',
+    'DUPLICATE_ENTRY_HASH',
+    'HASH_MISMATCH',
+    'HEAD_MISMATCH',
+    'PREV_HASH_MISMATCH',
+    'SEQ_DUPLICATE',
+    'SEQ_GAP',
+  ],
+  ck_audit_chain_verifications__run_kind: ['FULL', 'INCREMENTAL'],
+  ck_audit_chain_verifications__status: ['ERROR', 'FAILED', 'PASSED', 'RUNNING'],
+  ck_audit_entries__action: [
+    'ACCOUNT_LOCKED',
+    'API_KEY_USE',
+    'CONFIG_CHANGE',
+    'CREATE',
+    'DELETE',
+    'DOWNLOAD',
+    'EXPORT',
+    'LOGIN',
+    'LOGIN_FAILED',
+    'LOGOUT',
+    'MFA_ENROLLED',
+    'MFA_FAILED',
+    'ON_BEHALF_ACTION',
+    'PERMISSION_DENIED',
+    'STATE_TRANSITION',
+    'TOKEN_REUSE_DETECTED',
+    'UPDATE',
+    'VIEW',
+  ],
+  ck_audit_entries__actor_type: ['ANONYMOUS', 'API_KEY', 'SYSTEM_JOB', 'USER'],
+  ck_audit_entries__outcome: ['DENIED', 'FAILED', 'SUCCESS'],
+  ck_audit_entries__source_app: ['admin', 'api', 'web', 'worker'],
+  ck_audit_pii_vault__classification: ['PERSONAL', 'SENSITIVE_PERSONAL'],
+  ck_data_subjects__kind: ['CONTACT', 'USER'],
 };
 
 const names = (list: readonly { relname: string }[]): string[] => list.map((row) => row.relname);
@@ -468,9 +514,11 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
       [APP_ROLE],
     );
     expect(owned[0]?.n).toBe('0');
+    // Audit-store relations (TASK-021) are owned by platform_audit_owner; c11-c14-audit.int.test.ts pins that set exactly.
     const migration = await query<{ owner: string }>(
       `SELECT DISTINCT pg_catalog.pg_get_userbyid(c.relowner) AS owner FROM pg_catalog.pg_class c
-         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname NOT LIKE 'bootstrap\\_migrations%'`,
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname NOT LIKE 'bootstrap\\_migrations%'
+          AND c.relowner <> 'platform_audit_owner'::regrole`,
     );
     expect(migration).toEqual([{ owner: MIGRATOR }]);
   }, 60_000);
@@ -587,9 +635,9 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
     expect(session).toEqual({ statement: [{ statement_timeout: '30s' }], messages: [{ lc_messages: 'C' }], setMessages: '42501' });
   }, 60_000);
 
-  it('C13/C14: audit objects (TASK-021) are owned by platform_audit_owner and the DDL guard is enabled, as far as they exist', async () => {
-    // TASK-021 ships the audit tables, functions and event triggers; until then these sets are empty and the check
-    // binds the first audit object the moment it appears.
+  it('C13/C14: audit objects (TASK-021) are owned by platform_audit_owner and the DDL guard is enabled ALWAYS', async () => {
+    // TASK-021 ships the audit tables, partitions, functions and event triggers (prisma/bootstrap/10-audit.sql and
+    // 90-audit-ddl-guard.sql); the detailed C6/C7/C14 assertions live in c11-c14-audit.int.test.ts.
     const audit = await query<{ object: string; owner: string }>(
       `SELECT c.relname AS object, pg_catalog.pg_get_userbyid(c.relowner) AS owner FROM pg_catalog.pg_class c
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -600,6 +648,8 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
         WHERE n.nspname = 'platform' AND p.proname IN ('audit_forbid_mutation', 'audit_vault_guard', 'ensure_audit_partitions')`,
     );
     expect(audit.filter((row) => row.owner !== 'platform_audit_owner')).toEqual([]);
+    // eight tables, the current month + 3 partitions, three functions
+    expect(audit.length).toBeGreaterThanOrEqual(8 + 4 + 3);
     const guards = await query<{ evtname: string; evtenabled: string; fn: string; prosecdef: boolean; proconfig: string[] | null }>(
       `SELECT e.evtname, e.evtenabled, e.evtfoid::regprocedure::text AS fn, p.prosecdef, p.proconfig
          FROM pg_catalog.pg_event_trigger e JOIN pg_catalog.pg_proc p ON p.oid = e.evtfoid ORDER BY 1`,
@@ -607,13 +657,13 @@ describe('catalog-c1-c14: roles and ownership (C4, C13; US-074)', () => {
     for (const guard of guards) {
       expect(guard).toEqual({
         evtname: guard.evtname,
-        evtenabled: 'O',
+        evtenabled: 'A', // ENABLE ALWAYS (PR12-SEC-04 item 3, D-ARCH-076)
         fn: 'platform.audit_ddl_guard()',
         prosecdef: false,
         proconfig: ['search_path=pg_catalog, pg_temp'],
       });
     }
-    if (guards.length > 0) expect(guards.map((g) => g.evtname)).toEqual(['platform_audit_ddl_guard_drop', 'platform_audit_ddl_guard_end']);
+    expect(guards.map((g) => g.evtname)).toEqual(['platform_audit_ddl_guard_drop', 'platform_audit_ddl_guard_end']);
   }, 60_000);
 });
 
@@ -673,7 +723,7 @@ describe('catalog-c1-c14: grants and functions (C5, C11; US-074)', () => {
                             ADD CONSTRAINT ck_roles__scope CHECK (scope IN ('OPERATOR', 'CUSTOMER')) NOT VALID`);
       return enumCheckValues(await rows<CheckRow>(client, C9_SQL));
     });
-    expect(drifted).toEqual({ ck_roles__scope: ['CUSTOMER', 'OPERATOR'] });
+    expect(drifted).toEqual({ ...ENUM_CHECKS, ck_roles__scope: ['CUSTOMER', 'OPERATOR'] });
     expect(drifted).not.toEqual(ENUM_CHECKS);
   }, 60_000);
 
@@ -778,6 +828,13 @@ describe('catalog-c1-c14: grants and functions (C5, C11; US-074)', () => {
           fn: 'platform.app_is_operator()',
           owner: 'platform_definer',
           proconfig: ['search_path=pg_catalog, pg_temp'],
+          execute: [APP_ROLE],
+        },
+        {
+          // TASK-021 (prisma/bootstrap/10-audit.sql, data-model §5.3)
+          fn: 'platform.ensure_audit_partitions(integer)',
+          owner: 'platform_audit_owner',
+          proconfig: ['search_path=pg_catalog, pg_temp', 'TimeZone=UTC', 'lock_timeout=5s'],
           execute: [APP_ROLE],
         },
       ],

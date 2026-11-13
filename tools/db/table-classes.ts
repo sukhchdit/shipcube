@@ -29,6 +29,12 @@ export interface TableFlags {
   readonly definerPurge?: boolean;
   /** Hard-delete allow-list: `DELETE` may be granted to platform_app (C5, linter rule 8). SYSTEM tables only. */
   readonly hardDelete?: boolean;
+  /**
+   * Append-only table carrying the immutability trigger(s): a BEFORE UPDATE OR DELETE row trigger and a BEFORE TRUNCATE
+   * statement trigger, both ENABLE ALWAYS (catalog test C7, data-model §4.6 2026-11-13; D-ARCH-076). Never combined
+   * with hardDelete.
+   */
+  readonly immutable?: boolean;
 }
 
 export interface TableClassEntry extends TableFlags {
@@ -48,8 +54,8 @@ export const MANIFEST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'ta
 
 const MODULE_NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const TABLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
-const ENTRY_KEYS: ReadonlySet<string> = new Set(['name', 'class', 'definerRead', 'definerPurge', 'hardDelete']);
-const FLAG_KEYS = ['definerRead', 'definerPurge', 'hardDelete'] as const;
+const ENTRY_KEYS: ReadonlySet<string> = new Set(['name', 'class', 'definerRead', 'definerPurge', 'hardDelete', 'immutable']);
+const FLAG_KEYS = ['definerRead', 'definerPurge', 'hardDelete', 'immutable'] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -76,6 +82,9 @@ function parseEntry(module: string, raw: unknown, where: string): TableClassEntr
   }
   if (flags.hardDelete === true && tableClass !== 'SYSTEM') {
     throw new TableClassManifestError(`${where}: "hardDelete" is allowed on SYSTEM tables only ("${name}")`);
+  }
+  if (flags.immutable === true && (flags.hardDelete === true || flags.definerPurge === true)) {
+    throw new TableClassManifestError(`${where}: an "immutable" table cannot be on a delete allow-list ("${name}")`);
   }
   if ((flags.definerRead === true || flags.definerPurge === true) && !RLS_CLASSES.has(tableClass)) {
     throw new TableClassManifestError(`${where}: definer policies need an RLS class ("${name}")`);
@@ -128,6 +137,11 @@ export function loadTableClasses(dir: string = MANIFEST_DIR): readonly TableClas
     .filter((file) => file.endsWith('.json'))
     .sort();
   return mergeManifests(files.map((file) => parseManifest(file, readFileSync(join(dir, file), 'utf8'))));
+}
+
+/** Tables flagged `immutable`: the C7 list (append-only tables carrying the immutability triggers). */
+export function immutableTables(entries: readonly TableClassEntry[]): readonly string[] {
+  return entries.filter((entry) => entry.immutable === true).map((entry) => entry.name);
 }
 
 /** Tables outside RLS (GLOBAL and SYSTEM): the C1/C2 allow-list. */
