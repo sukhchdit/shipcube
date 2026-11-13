@@ -89,7 +89,13 @@ BEGIN
                      WHEN 'rule'             THEN (SELECT w.ev_class FROM pg_catalog.pg_rewrite    w WHERE w.oid = r.objid)
                      ELSE r.objid                                            -- 'table', 'table column'
                    END;
+          -- PR12-SEC-02-a (TASK-021 port finding): ALTER TABLE ... ADD CONSTRAINT ... UNIQUE | PRIMARY KEY | EXCLUDE,
+          -- ... USING INDEX and RENAME CONSTRAINT create or rename an index that ddl_command_end reports only as the
+          -- 'table' / 'table constraint', so the own-name match above never sees it: also match the names of the
+          -- relation's indexes. Prisma never emits audit names (SPK-08 F-08).
           SELECT c.relowner = v_owner OR (c.relnamespace = ANY (v_ns) AND c.relname ~ c_tbl)
+                 OR EXISTS (SELECT FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid
+                             WHERE i.indrelid = v_rel AND ic.relnamespace = ANY (v_ns) AND ic.relname ~ c_tbl)
             INTO v_hit FROM pg_catalog.pg_class c WHERE c.oid = v_rel;
         END IF;
       END IF;
