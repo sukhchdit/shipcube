@@ -55,6 +55,8 @@ const SERVER_SOURCES = [`apps/api/src/**/*.${LINTED}`, `apps/worker/src/**/*.${L
 const REACT_SOURCES = ['apps/web/app/**/*.{ts,tsx,js,jsx}', 'apps/admin/app/**/*.{ts,tsx,js,jsx}', 'packages/ui/src/**/*.{ts,tsx,js,jsx}'];
 const REACT_TSX = ['apps/web/app/**/*.{tsx,jsx}', 'apps/admin/app/**/*.{tsx,jsx}', 'packages/ui/src/**/*.{tsx,jsx}'];
 
+/** `@platform/shared/logging`: server-only (Pino, node:util; TASK-010, D-TASK010-01). Browser code and pricing never import it. */
+const SHARED_LOGGING = 'packages/shared/src/logging/**';
 /** Money helpers own the arithmetic on minor units (ADR-0009 §3). */
 const MONEY_HELPERS = ['packages/shared/src/money/**'];
 /** Intl-based formatting helpers (NFR-I18N-004). */
@@ -168,6 +170,8 @@ const BOUNDARIES_FILES = [
   { pattern: `${MODULE}/**`, category: 'api-module', capture: ['module'] },
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
+  // The server-only logging subpath of @platform/shared (Pino; TASK-010, PR #20 M1): the resolved-file arm of its guard.
+  { pattern: SHARED_LOGGING, category: 'shared-logging' },
   { pattern: DB_PLATFORM, category: 'db-platform' },
   // The folder itself (without the planned Prisma files below): the only importers of the root client.
   { pattern: DB_PLATFORM, category: 'db-platform-core' },
@@ -213,6 +217,20 @@ const IMPORTER_MODULE = { file: { categories: { anyOf: ['api-module'], noneOf: [
 const IMPORTER_PACKAGE = (/** @type {string} */ pkg) => ({
   file: { categories: { anyOf: ['package'], noneOf: ['test'] }, captured: { pkg } },
 });
+
+/**
+ * `@platform/shared/logging` and Pino (TASK-010, PR #20 M1). Specifier arm: `dependency.source` matches the import
+ * specifier whatever its origin (a workspace subpath resolves to a local file, so a `module.source` selector, which
+ * describes external and core modules, does not match it). Resolved-file arm: any import landing in
+ * packages/shared/src/logging (relative path, or the workspace subpath resolved through `@platform/source`).
+ */
+const SERVER_LOGGING_TARGETS = [
+  { dependency: { source: ['@platform/shared/logging', '@platform/shared/logging/**'] } },
+  { to: toPackage('pino', 'pino-*') },
+  { to: toLayer('shared-logging') },
+];
+const SERVER_LOGGING_MESSAGE =
+  '@platform/shared/logging is server-only (Pino); browser bundles and packages/pricing/ui never import it (ADR-0003, TASK-010).';
 
 /** Policies. The last matching policy decides and `default` is allow, so each entry is a prohibition or its narrow exception. */
 const BOUNDARIES_POLICIES = [
@@ -391,6 +409,14 @@ const BOUNDARIES_POLICIES = [
     message: 'packages/pricing has no I/O imports (allow-list: @platform/shared only, ADR-0003).',
   },
   { from: IMPORTER_PACKAGE('pricing'), allow: { to: toPackage('@platform/shared') } },
+
+  // --- The server-only logging subpath (ADR-0003, TASK-010; PR #20 M1, PR20-SEC-11). The allow-lists above expand
+  //     `@platform/shared` to `@platform/shared/**`, so these come last (the last matching policy decides). Both arms:
+  //     the package specifier (`@platform/shared/logging`, its subpaths, `pino`) and any import that resolves into
+  //     packages/shared/src/logging (relative or workspace path). Applies to every web/admin file (app code and build
+  //     configuration), packages/ui and packages/pricing.
+  { from: IMPORTER_APP('{web,admin}'), disallow: SERVER_LOGGING_TARGETS, message: SERVER_LOGGING_MESSAGE },
+  { from: IMPORTER_PACKAGE('{ui,pricing}'), disallow: SERVER_LOGGING_TARGETS, message: SERVER_LOGGING_MESSAGE },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------
