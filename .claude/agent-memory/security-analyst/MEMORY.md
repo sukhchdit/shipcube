@@ -26,7 +26,7 @@
 - [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1+R2+R3 (merge-only @084ee93, push moved to c694583) PASS_W_F-U; 03 open; D3 revert passes (PR10-SEC-21); probe kit
 - [P5 PR-0031 staleness+scrub](project_p5_pr31_staleness_scrub.md) — R1 @69a997c PASS_W_F-U; 28/01 closed; SEC-01 .gitmodules ignore=all hides gitlinks, SEC-02 mode guard staleness-only; merge main voids evidence
 - [P5 PR-0030 S3 adapter](project_p5_pr30_s3_adapter.md) — TASK-019 R1 @293fb62 PASS_W_COND, R2 @5f45a8b PASS_W_F-U (C1 closed); open 04 LOW + INFO 06-11; ADR am. 2 item 3 claim-vs-checksum evidence; RustFS facts
-- [P5 PR-0032 route pipeline](project_p5_pr32_route_pipeline.md) — TASK-020 R1 @fa67aca PASS_W_COND; 01 MEDIUM T-83 blind to handlers; C1-C3; D-TASK020-03 confirmed w/ C2; R2 = delta + PR #20 union
+- [P5 PR-0032 route pipeline](project_p5_pr32_route_pipeline.md) — TASK-020 R1 @fa67aca PASS_W_COND; R2 @11530cc PASS_W_F-U (C1-C3 closed, LOW 12/13, INFO 14-16); in-PR R2-m1 fix needs R3 delta
 - [P5 PR-0033 lane A hardening](project_p5_pr33_lane_a_hardening.md) — TASK-015 015-A R1 @3ed0484 + R2 @d3a46a2 PASS_W_F-U; SEC-01..04 closed; INFO 03(iii),05-10 open; `node ""` exits 0 fact; Docker hung/disk full
 - [P5 PR-0034/0035 harness + traceability](project_p5_pr34_pr35_harness_traceability.md) — R1 @4643265 / @76808c8 PASS_W_F-U; 34-SEC-01/02 + 35-SEC-01/02 LOW; Jest project testTimeout inert; scanner FN shapes; tool symlink/regex/echo
 - [Threat-model v1.1 round](project_p5_threat_model_v11_round.md) — D-SEC-TM-01 2026-11-13: §10.4 log, proposed SEC-TC-69..75 + owners (65-68 provisional), -bench vocabulary; open items
