@@ -585,6 +585,52 @@ function readJson(file) {
 }
 
 /**
+ * Test cases of a Jest JSON report. A missing, truncated (suite-timeout kill) or otherwise unreadable report becomes one
+ * error case, so the run still produces evidence that says why it failed (PR #23 R1-n1).
+ * @param {string} file
+ * @param {{ root: string, scrub: string[] }} options
+ * @returns {JUnitCase[]}
+ */
+export function jestCasesFrom(file, options) {
+  if (!existsSync(file)) return malformed('jest', 'Jest wrote no JSON report');
+  /** @type {unknown} */
+  let report;
+  try {
+    report = readJson(file);
+  } catch (error) {
+    return malformed('jest', `Jest JSON report is not readable: ${error instanceof Error ? error.message : String(error)}`.slice(0, 200));
+  }
+  return jestToCases(report, options);
+}
+
+/**
+ * The coverage summary of a Jest run, or null when it is absent or unreadable (the run's verdict does not depend on it).
+ * @param {string} file
+ * @returns {unknown}
+ */
+export function coverageFrom(file) {
+  if (!existsSync(file)) return null;
+  try {
+    return readJson(file);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where evidence is written: the repository's docs/05-quality tree, or --out-root. A restricted run (--suites) is
+ * always INVALID, so by default it goes to a fresh temp directory and can never be committed by accident (R1-n5).
+ * @param {{ outRoot: string | null, suites: string[] | null }} args
+ * @param {string} repoRoot
+ * @returns {string}
+ */
+export function resolveOutBase(args, repoRoot) {
+  if (args.outRoot !== null) return isAbsolute(args.outRoot) ? args.outRoot : resolve(process.cwd(), args.outRoot);
+  if (args.suites !== null) return mkdtempSync(join(tmpdir(), 'quality-heavy-restricted-'));
+  return join(repoRoot, ...EVIDENCE_BASE.split('/'));
+}
+
+/**
  * @param {{ id: string, runner: Runner | null, root: EvidenceRoot }} item
  * @param {{ repoRoot: string, work: string, testTimeoutMs: number, suiteTimeoutMs: number, scrub: string[] }} ctx
  * @returns {Promise<SuiteResult & { coverageRaw: unknown }>}
@@ -628,9 +674,7 @@ async function runSuite(item, ctx) {
     const coverageDir = join(ctx.work, `coverage-${item.id}`);
     const args = jestArgs(item.runner, { testTimeoutMs: ctx.testTimeoutMs, outputFile, coverageDir });
     const result = await runStreaming(process.execPath, args, { cwd: ctx.repoRoot, timeoutMs: ctx.suiteTimeoutMs });
-    const cases = existsSync(outputFile)
-      ? jestToCases(readJson(outputFile), { root: ctx.repoRoot, scrub: ctx.scrub })
-      : malformed('jest', 'Jest wrote no JSON report');
+    const cases = jestCasesFrom(outputFile, { root: ctx.repoRoot, scrub: ctx.scrub });
     const problem = exitProblem(result);
     if (problem !== null && !cases.some((c) => c.status === 'failed' || c.status === 'error'))
       cases.push({
@@ -641,7 +685,7 @@ async function runSuite(item, ctx) {
       });
     const coverageFile = join(coverageDir, 'coverage-summary.json');
     const extra = jestExtraArgs(item.runner, { testTimeoutMs: ctx.testTimeoutMs });
-    return done(cases, { jestArgs: extra, coverageRaw: item.runner.coverage && existsSync(coverageFile) ? readJson(coverageFile) : null });
+    return done(cases, { jestArgs: extra, coverageRaw: item.runner.coverage ? coverageFrom(coverageFile) : null });
   }
 
   const runner = item.runner;
@@ -797,12 +841,7 @@ export async function main(argv) {
 
   const dirtyEnd = cleanDirty(repoRoot, manifest);
   const gitDirtyPaths = [...new Set([...dirtyStart, ...dirtyEnd])];
-  const outBase =
-    args.outRoot === null
-      ? join(repoRoot, ...EVIDENCE_BASE.split('/'))
-      : isAbsolute(args.outRoot)
-        ? args.outRoot
-        : resolve(process.cwd(), args.outRoot);
+  const outBase = resolveOutBase(args, repoRoot);
   const dirName = `${stamp}_${sha.slice(0, 7)}`;
   const suiteIds = Object.keys(manifest.suites);
   /** @type {EvidenceRoot[]} */
@@ -907,8 +946,9 @@ export async function main(argv) {
     outputs.push({ dir: join(outBase, root, 'runs', dirName), summary, md, set });
   }
 
-  for (const out of outputs) {
+  for (const out of outputs)
     if (existsSync(out.dir)) throw new Error(`run directory already exists: ${out.dir} (one run per minute and sha)`);
+  for (const out of outputs) {
     for (const [name, text] of out.set) {
       const target = join(out.dir, ...name.split('/'));
       mkdirSync(dirname(target), { recursive: true });
@@ -927,6 +967,10 @@ export async function main(argv) {
   if (first !== undefined) {
     console.log(first.md.split('\n', 1)[0]);
     for (const out of outputs) console.log(`evidence: ${out.dir}`);
+    if (args.suites !== null)
+      console.log(
+        'restricted run (--suites): INVALID by design, written outside the repository unless --out-root says otherwise; do not commit it',
+      );
   }
   for (const reason of [...invalidReasons, ...failReasons]) console.log(`  - ${reason}`);
   return verdict === 'PASS' ? 0 : 1;

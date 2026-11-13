@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 
 import { afterAll, describe, expect, it } from '@jest/globals';
 
@@ -15,14 +15,17 @@ import { findRepoRoot, runNode } from '../test-support/process.js';
 import {
   buildCleanFrom,
   computeVerdict,
+  coverageFrom,
   expandCommand,
   isAllowedRunFile,
   jestArgs,
+  jestCasesFrom,
   parseArgs,
   parseRunners,
   planRun,
   relativiseCoverage,
   renderSummaryMd,
+  resolveOutBase,
   summaryValidator,
 } from './heavy.mjs';
 import { digestFromRef, envOverrides, parseNpmVersion, parsePorcelainZ, utcStamp } from './lib/host.mjs';
@@ -96,6 +99,47 @@ const base = {
   invalidEnv: [],
   restricted: null,
 };
+
+describe('Jest report reading and the evidence location (PR #23 R1-n1, R1-n5)', () => {
+  const scratch = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'heavy-report-'));
+    temps.push(dir);
+    return dir;
+  };
+
+  it('[R1-n1] a missing, truncated or empty Jest report becomes one error case instead of a crash', () => {
+    const dir = scratch();
+    const options = { root: dir, scrub: [] };
+    const expected = [expect.objectContaining({ status: 'error', classname: 'jest' })];
+    expect(jestCasesFrom(join(dir, 'absent.json'), options)).toEqual(expected);
+    writeFileSync(join(dir, 'truncated.json'), '{"numTotalTests": 3, "testResults": [{"name": "x"');
+    writeFileSync(join(dir, 'empty.json'), '');
+    expect(jestCasesFrom(join(dir, 'truncated.json'), options)).toEqual(expected);
+    expect(jestCasesFrom(join(dir, 'empty.json'), options)).toEqual(expected);
+    expect(jestCasesFrom(join(dir, 'truncated.json'), options)[0]?.message).toMatch(
+      /malformed jest report: Jest JSON report is not readable/,
+    );
+  });
+
+  it('[R1-n1] an unreadable coverage summary is null, a readable one is returned', () => {
+    const dir = scratch();
+    expect(coverageFrom(join(dir, 'absent.json'))).toBeNull();
+    writeFileSync(join(dir, 'bad.json'), '{"total":');
+    expect(coverageFrom(join(dir, 'bad.json'))).toBeNull();
+    writeFileSync(join(dir, 'good.json'), '{"total":{}}');
+    expect(coverageFrom(join(dir, 'good.json'))).toEqual({ total: {} });
+  });
+
+  it('[R1-n5] a restricted (--suites) run defaults to a temp directory outside the repository; --out-root and normal runs do not', () => {
+    const dir = scratch();
+    const restricted = resolveOutBase({ outRoot: null, suites: ['unit'] }, dir);
+    temps.push(restricted);
+    expect(isAbsolute(restricted)).toBe(true);
+    expect(relative(dir, restricted).startsWith('..')).toBe(true);
+    expect(resolveOutBase({ outRoot: null, suites: null }, dir)).toBe(join(dir, 'docs', '05-quality'));
+    expect(resolveOutBase({ outRoot: join(dir, 'out'), suites: ['unit'] }, dir)).toBe(join(dir, 'out'));
+  });
+});
 
 describe('argument parsing and planning (TASK-011)', () => {
   it('[R-ARCH-16] requires a profile and validates numbers and suite lists', () => {
