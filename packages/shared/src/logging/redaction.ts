@@ -1,9 +1,10 @@
 // Redaction of structured log fields (US-008 AT-US-008-04/05, REQ-PLAT-012, NFR-PRIV-001; SEC-TC-31; PR6-SEC-02 item 3;
-// PR20-SEC-01/02/07; TASK-010). `redactValue` deep-walks any value into a bounded, JSON-safe copy: sensitive and PII keys
+// PR20-SEC-01/02/07/19; TASK-010). `redactValue` deep-walks any value into a bounded, JSON-safe copy: sensitive and PII keys
 // become REDACTED, body and URL keys OMITTED, strings pass the string redactor, errors the error serializer. Only own
 // enumerable data properties are read (getters are never invoked). Live HTTP and stream objects (`req`, `res`, sockets:
-// every EventEmitter) are never walked, `[name, value]` pairs in arrays (`rawHeaders`, `Object.entries(headers)`) are
-// classified by the name, and depth, keys, array items, total nodes and the characters processed per call are capped.
+// every EventEmitter) are never walked, `[name, value]` pairs in arrays (`rawHeaders`, `Object.entries(headers)`) and
+// `{ name | key, value }` records (HAR headers, cookie records) are classified by the name, and depth, keys, array
+// items, total nodes and the characters processed per call are capped.
 import { EventEmitter } from 'node:events';
 import { types } from 'node:util';
 
@@ -151,11 +152,39 @@ function pairMarker(name: string): string | undefined {
   return isSensitiveKey(name) ? REDACTED : undefined;
 }
 
+/** The name keys of a `{ name | key, value }` record, compared lower-cased. */
+const RECORD_NAME_KEYS: ReadonlySet<string> = new Set(['name', 'key']);
+const RECORD_VALUE_KEY = 'value';
+
+/**
+ * The marker for the `value` of a `{ name | key, value }` record (any case), or undefined when `value` is no such
+ * record or its name is neutral (PR20-SEC-19). HAR and HTTP-trace header arrays (`{ name: 'X-Api-Key', value }`),
+ * parsed `Set-Cookie` records (`{ name: '__Host-rt_x', value, path }`), tough-cookie (`{ key, value }`) and SDK
+ * parameter records (`{ Name, Value }`) carry a credential under the neutral key `value`; the record's name decides,
+ * as for the `[name, value]` items of walkArray: sensitive (cookie prefixes included) or PII → REDACTED, an omitted
+ * key → OMITTED. `keys` is the walked slice of own keys, so the check is bounded by MAX_KEYS.
+ */
+function recordValueMarker(value: object, keys: readonly string[]): string | undefined {
+  if (!keys.some((key) => key.toLowerCase() === RECORD_VALUE_KEY)) return undefined;
+  let marker: string | undefined;
+  for (const key of keys) {
+    if (!RECORD_NAME_KEYS.has(key.toLowerCase())) continue;
+    const name = ownString(value, key);
+    if (name === undefined) continue;
+    const found = isPiiField(name) ? REDACTED : pairMarker(name);
+    if (found === REDACTED) return REDACTED;
+    marker ??= found;
+  }
+  return marker;
+}
+
 function walkObject(value: object, depth: number, state: WalkState, parentKey: string | undefined): Record<string, unknown> {
   const output: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   const keys = Object.keys(value);
+  const walked = keys.slice(0, MAX_KEYS);
+  const valueMarker = recordValueMarker(value, walked);
   let written = 0;
-  for (const key of keys.slice(0, MAX_KEYS)) {
+  for (const key of walked) {
     if (budgetSpent(state)) break;
     written += 1;
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -164,7 +193,8 @@ function walkObject(value: object, depth: number, state: WalkState, parentKey: s
     if (typeof child === 'function' || typeof child === 'symbol') continue;
     const outputKey = sanitiseKey(key);
     state.chars += outputKey.length;
-    output[outputKey] = keyMarker(key, parentKey) ?? walk(child, depth + 1, state, key);
+    const recordMarker = valueMarker !== undefined && key.toLowerCase() === RECORD_VALUE_KEY ? valueMarker : undefined;
+    output[outputKey] = recordMarker ?? keyMarker(key, parentKey) ?? walk(child, depth + 1, state, key);
   }
   if (keys.length > written) output[MORE_KEY] = more(keys.length - written);
   return output;

@@ -359,3 +359,66 @@ describe('redactValue', () => {
     );
   });
 });
+
+describe('redactValue: { name | key, value } records (PR20-SEC-19)', () => {
+  it('redacts the value of HAR header records, parsed Set-Cookie and tough-cookie records and { Name, Value } parameters', () => {
+    const apiKey = sentinel();
+    const proof = sentinel();
+    const refresh = sentinel();
+    const jar = sentinel();
+    const parameter = sentinel();
+    const output = redactValue({
+      headers: [
+        { name: 'X-Api-Key', value: apiKey },
+        { name: 'X-Reauth-Proof', value: proof },
+        { name: 'Accept', value: 'application/json' },
+      ],
+      parsed: { name: '__Host-rt_ab12', value: refresh, path: '/', secure: true },
+      tough: { key: '__Host-rt_ab12', value: jar, httpOnly: true },
+      sdk: [{ Name: 'ClientSecret', Value: parameter }],
+    });
+    for (const leaked of [apiKey, proof, refresh, jar, parameter]) expect(json(output)).not.toContain(leaked);
+    // `name` is itself a PII key, so a record's name is redacted as before (`key` stays readable); a neutral record
+    // keeps its value.
+    expect(output).toEqual({
+      headers: [
+        { name: REDACTED, value: REDACTED },
+        { name: REDACTED, value: REDACTED },
+        { name: REDACTED, value: 'application/json' },
+      ],
+      parsed: { name: REDACTED, value: REDACTED, path: '/', secure: true },
+      tough: { key: '__Host-rt_ab12', value: REDACTED, httpOnly: true },
+      sdk: [{ Name: REDACTED, Value: REDACTED }],
+    });
+  });
+
+  it('classifies by the name like the array pair rule: PII → REDACTED, an omitted key → OMITTED, any key case', () => {
+    const value = sentinel();
+    expect(redactValue({ NAME: 'email', VALUE: `${value}@example.com` })).toEqual({ NAME: REDACTED, VALUE: REDACTED });
+    expect(redactValue({ key: 'query', value })).toEqual({ key: 'query', value: OMITTED });
+    expect(redactValue({ Key: 'Authorization', Value: { scheme: 'Bearer', token: value } })).toEqual({
+      Key: 'Authorization',
+      Value: REDACTED,
+    });
+    // Both name keys present: the stronger marker wins whatever the key order.
+    expect(redactValue({ key: 'query', name: 'password', value })).toEqual({ key: 'query', name: REDACTED, value: REDACTED });
+  });
+
+  it('leaves records with a neutral or non-string name, and objects without a value key, as they were', () => {
+    expect(redactValue({ name: 'carrier', value: 'DHL' })).toEqual({ name: REDACTED, value: 'DHL' });
+    expect(redactValue({ key: 'theme', value: 'dark', count: 2 })).toEqual({ key: 'theme', value: 'dark', count: 2 });
+    expect(redactValue({ name: 42, value: 'kept' })).toEqual({ name: REDACTED, value: 'kept' });
+    expect(redactValue({ name: 'password', amount: 3 })).toEqual({ name: REDACTED, amount: 3 });
+    // A record's name is read as an own data property only: a getter is never invoked.
+    let invoked = false;
+    const record = Object.defineProperty({ value: 'kept' }, 'name', {
+      enumerable: true,
+      get: () => {
+        invoked = true;
+        return 'password';
+      },
+    });
+    expect(redactValue(record)).toEqual({ value: 'kept' });
+    expect(invoked).toBe(false);
+  });
+});

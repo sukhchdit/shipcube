@@ -28,6 +28,22 @@ interface Harness {
   setThrown(value: unknown): void;
 }
 
+/** HAR-style `{ name, value }` records of a raw header list (PR20-SEC-19). */
+function headerRecords(raw: readonly string[]): { name: string; value: string }[] {
+  const records: { name: string; value: string }[] = [];
+  for (let index = 0; index + 1 < raw.length; index += 2) records.push({ name: raw[index] ?? '', value: raw[index + 1] ?? '' });
+  return records;
+}
+
+/** The `__Host-` cookies of a Cookie header as parsed `{ name, value }` records (PR20-SEC-19). */
+function hostCookies(header: string | undefined): { name: string; value: string }[] {
+  return (header ?? '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith('__Host-'))
+    .map((part) => ({ name: part.slice(0, part.indexOf('=')), value: part.slice(part.indexOf('=') + 1) }));
+}
+
 function harness(): Harness {
   const raw: string[] = [];
   let thrown: unknown = new Error('unset');
@@ -68,6 +84,10 @@ function harness(): Harness {
       trailers: req.rawTrailers,
       entries: Object.entries(req.headers),
       note: `Cookie: ${String(req.headers.cookie)}`,
+      // PR20-SEC-19: HAR / HTTP-trace header records, a parsed Set-Cookie record and a tough-cookie record.
+      har: headerRecords(req.rawHeaders),
+      parsed: hostCookies(req.headers.cookie).map((cookie) => ({ ...cookie, path: '/', secure: true })),
+      jar: hostCookies(req.headers.cookie).map(({ name, value }) => ({ key: name, value })),
     });
     res.once('finish', () => logger.info('test.res', { res }));
     res.json({ ok: true });
@@ -207,7 +227,7 @@ describe('[SEC-TC-31] Cookie, Set-Cookie and Authorization never reach the API l
     expect(logged?.['headers']).toMatchObject({ cookie: '[REDACTED]', authorization: '[REDACTED]', 'proxy-authorization': '[REDACTED]' });
   });
 
-  it('[SEC-TC-31] [PR20-SEC-01] req, res, socket, rawHeaders, header entries and Cookie text never leak a credential or the query', async () => {
+  it('[SEC-TC-31] [PR20-SEC-01] [PR20-SEC-19] req, res, socket, rawHeaders, header entries and records, Cookie text never leak', async () => {
     const h = harness();
     const theme = sentinel('theme');
     const refresh = sentinel('refresh');
@@ -237,6 +257,16 @@ describe('[SEC-TC-31] Cookie, Set-Cookie and Authorization never reach the API l
         ['x-api-key', '[REDACTED]'],
       ]),
     );
+    // PR20-SEC-19: the records were written and only their credential values redacted (the Host value stays readable).
+    expect(raw?.['har']).toEqual(
+      expect.arrayContaining([
+        { name: '[REDACTED]', value: '[REDACTED]' },
+        { name: '[REDACTED]', value: expect.stringContaining('127.0.0.1') },
+      ]),
+    );
+    expect((raw?.['har'] as unknown[] | undefined)?.length).toBeGreaterThanOrEqual(6);
+    expect(raw?.['parsed']).toEqual([{ name: '[REDACTED]', value: '[REDACTED]', path: '/', secure: true }]);
+    expect(raw?.['jar']).toEqual([{ key: expect.stringMatching(/^__Host-rt_[0-9a-f]+$/), value: '[REDACTED]' }]);
     expect(h.lines().find((line) => line['event'] === 'test.res')).toMatchObject({ res: '[Unsupported]' });
   });
 });
