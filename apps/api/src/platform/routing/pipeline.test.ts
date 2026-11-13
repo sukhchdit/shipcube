@@ -7,6 +7,8 @@ import { describe, expect, it } from '@jest/globals';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import Joi from 'joi';
 
+import { SYSTEM_ACTOR_ID } from '@platform/authz';
+
 import { createApp } from '../../app.js';
 import { AUTHENTICATED_CACHE_CONTROL } from '../authn/authenticate.js';
 import { authorise } from '../authz/authorise.js';
@@ -22,6 +24,7 @@ import {
   ROUTE_PIPELINE,
   routeHandlers,
 } from './pipeline.js';
+import { RequestContextError, tenantContextOf } from '../tx/execute.js';
 import { ANONYMOUS, routeTemplateOf, setPrincipal } from './route-state.js';
 import { fixtureRoute } from './tests/fixture-route.js';
 
@@ -245,5 +248,30 @@ describe('route template (PR #20 code review n6, R2.5 4(i))', () => {
     expect((await call(outer, '/api/v1/widgets/43', { method: 'OPTIONS' })).status).toBe(204);
     await call(outer, '/api/v1/nowhere');
     expect(templates).toEqual(['/api/v1/widgets/:widgetId', '/health/live', '/api/v1/widgets/:widgetId', undefined]);
+  });
+});
+
+describe('request context builder (PR26-SEC-04)', () => {
+  const actor = '0193a5b2-7c1e-7d4a-9f3b-0000000000a1';
+
+  it('builds the tenant context of an anonymous or an authenticated principal', () => {
+    expect(tenantContextOf(ANONYMOUS, 'corr-12345678')).toEqual({
+      orgId: '',
+      actorId: '',
+      actorScope: 'TENANT',
+      guestTokenHash: '',
+      correlationId: 'corr-12345678',
+    });
+    const user = { ...ANONYMOUS, authenticated: true, actorId: actor, actorScope: 'OPERATOR' as const };
+    expect(tenantContextOf(user, 'corr-12345678')).toMatchObject({ actorId: actor, actorScope: 'OPERATOR' });
+  });
+
+  it.each<[string, Principal]>([
+    ['the SYSTEM actor', { ...ANONYMOUS, authenticated: true, actorId: SYSTEM_ACTOR_ID }],
+    ['an authenticated principal without an actor', { ...ANONYMOUS, authenticated: true }],
+    ['an actor on an anonymous principal', { ...ANONYMOUS, actorId: actor }],
+    ['an OPERATOR context without an actor', { ...ANONYMOUS, actorScope: 'OPERATOR' }],
+  ])('refuses %s', (_label, principal) => {
+    expect(() => tenantContextOf(principal, 'corr-12345678')).toThrow(RequestContextError);
   });
 });

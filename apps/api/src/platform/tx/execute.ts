@@ -8,6 +8,7 @@
  * `Retry-After` when retryable and the generic text, never its reason. `transaction: 'none'` routes (health) run
  * without a transaction and get no database handle. No external call may run inside the callback (T-83 lint).
  */
+import { SYSTEM_ACTOR_ID } from '@platform/authz';
 import { AppError } from '@platform/shared';
 import type { Request, Response } from 'express';
 
@@ -24,7 +25,25 @@ export interface ExecuteOptions {
   readonly audit?: AuditHook;
 }
 
+/** Ids no request may act as: the SYSTEM actor is for jobs and seeds only (PR26-SEC-04). */
+const RESERVED_ACTOR_IDS: ReadonlySet<string> = new Set([SYSTEM_ACTOR_ID]);
+
+export class RequestContextError extends Error {
+  constructor(reason: string) {
+    super(`request context refused: ${reason}`);
+    this.name = 'RequestContextError';
+  }
+}
+
+/**
+ * The request's tenant context (PR26-SEC-04 context-builder checks): an anonymous principal carries no actor and the
+ * TENANT scope; an authenticated one carries a non-reserved actor; an OPERATOR context always has a real actor. A
+ * violation is a pipeline bug, so it fails the request (500) instead of attributing writes to SYSTEM or anonymous.
+ */
 export function tenantContextOf(principal: Principal, correlationId: string): TenantContext {
+  if (RESERVED_ACTOR_IDS.has(principal.actorId)) throw new RequestContextError('a request may not act as a reserved actor');
+  if (principal.authenticated !== (principal.actorId !== '')) throw new RequestContextError('actor and authentication disagree');
+  if (principal.actorScope === 'OPERATOR' && principal.actorId === '') throw new RequestContextError('an OPERATOR context needs an actor');
   return {
     orgId: principal.orgId,
     actorId: principal.actorId,
