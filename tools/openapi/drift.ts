@@ -116,6 +116,9 @@ function routeLayer(prefix: string, route: Readonly<Record<string, unknown>>): M
   return names.map((name) => ({ method: name.toUpperCase(), path: full, key: routeKey(name, full) }));
 }
 
+/** Name of the function Express 5 wraps around a mounted sub-app (`express/lib/application.js`). */
+const SUB_APP_HANDLER = 'mounted_app';
+
 /** A path segment no literal mount path contains: a layer that also matches it has a parameter or wildcard there. */
 const PROBE_SEGMENT = '__drift_probe__';
 
@@ -129,21 +132,32 @@ function layerMatches(layer: Readonly<Record<string, unknown>>, path: string): b
   }
 }
 
+/** `path` with the probe segment inserted before the segment at `index` (`segments` starts with the empty root segment). */
+const withInsertedSegment = (segments: readonly string[], index: number): string => segments.toSpliced(index, 0, PROBE_SEGMENT).join('/');
+
 /**
  * The mount path of a router layer mounted under a path, relative to `prefix`, when the layer matches one of the
- * candidate paths literally: it matches the candidate as a whole (`layer.path` equals it) and matches no variant with
- * any one segment replaced by a probe segment (so `/api/:version` or `/*rest` is never taken for `/api/v1`).
+ * candidate paths literally. Proven by probing the layer's own matcher:
+ * - it has one matcher (an array mount such as `['/api/v1', '/hidden']` serves paths the walk would never see);
+ * - it matches the candidate, and no variant with any one segment replaced by a probe segment (so `/api/:version` or
+ *   `/*rest` is never taken for `/api/v1`);
+ * - it matches no variant with a probe segment inserted before the last segment (`/api{/:v}/v1`), and a probe segment
+ *   appended after the candidate leaves the matched path equal to the candidate (so `/api/v1{/:x}` and
+ *   `/api/v1{*rest}`, which consume it, are rejected). A prefix mount (`/api` for `/api/v1`) fails the substitution probe.
  */
 function resolveMountPath(layer: Readonly<Record<string, unknown>>, prefix: string, mountPaths: readonly string[]): string | undefined {
+  if (!Array.isArray(layer.matchers) || layer.matchers.length !== 1) return undefined;
   for (const full of mountPaths) {
     if (prefix !== '' && !full.startsWith(`${prefix}/`)) continue;
     const relative = full.slice(prefix.length);
-    if (!layerMatches(layer, relative) || layer.path !== relative) continue;
+    if (!layerMatches(layer, relative)) continue;
     const segments = relative.split('/');
-    const literal = segments.every(
-      (segment, index) => segment === '' || !layerMatches(layer, segments.map((s, i) => (i === index ? PROBE_SEGMENT : s)).join('/')),
+    const substituted = segments.some(
+      (segment, index) => segment !== '' && layerMatches(layer, segments.map((s, i) => (i === index ? PROBE_SEGMENT : s)).join('/')),
     );
-    if (literal) return relative;
+    const inserted = segments.slice(1).some((_segment, index) => layerMatches(layer, withInsertedSegment(segments, index + 1)));
+    const consumesExtra = layerMatches(layer, `${relative}/${PROBE_SEGMENT}`) && layer.path !== relative;
+    if (!substituted && !inserted && !consumesExtra) return relative;
   }
   return undefined;
 }
@@ -170,8 +184,10 @@ function walk(router: unknown, prefix: string, depth: number, out: MountedRoute[
     const handle = layer.handle;
     const isRouter = typeof handle === 'function' && Array.isArray((handle as { stack?: unknown }).stack);
     if (layer.slash === true) {
-      // Mounted without a path: a router is recursed; middleware (`router.use(fn)`) serves no route of its own.
+      // Mounted without a path: a router is recursed; middleware (`router.use(fn)`) serves no route of its own, but an
+      // Express sub-app (`use(express())`, wrapped as `mounted_app`) serves whatever it holds: never skipped.
       if (isRouter) walk(handle, prefix, depth + 1, out, options);
+      else if (layer.name === SUB_APP_HANDLER) out.push(unrecognised(prefix || '/', 'Express sub-app mounted without a path'));
       continue;
     }
     if (!isRouter) {

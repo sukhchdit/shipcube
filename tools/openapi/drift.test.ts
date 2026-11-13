@@ -124,15 +124,36 @@ describe('openapi route/document drift', () => {
     const options = { mountPaths: ['/api/v1', '/api/docs'], excluded: ['/api/docs'] };
     expect(listMountedRoutes([{ prefix: '', router: literal }], options).map((route) => route.key)).toEqual(['GET /api/v1/things']);
 
-    const parameterised = Router();
-    parameterised.use('/api/:version', inner); // matches /api/v1, but is not the literal mount path
-    const wildcard = Router();
-    wildcard.use('/*rest', inner);
-    for (const router of [parameterised, wildcard]) {
-      expect(listMountedRoutes([{ prefix: '', router }], options).map((route) => route.unrecognised)).toEqual([
-        'nested router "router" mounted under a path',
-      ]);
+    // Each of these matches /api/v1 but serves more than the literal mount path: reported, never resolved (PR #21 R2-m1).
+    const mountShapes: Readonly<Record<string, (router: Router) => void>> = {
+      'a parameter': (router) => router.use('/api/:version', inner),
+      'a wildcard': (router) => router.use('/*rest', inner),
+      'a prefix of the mount path': (router) => router.use('/api', inner),
+      'an array with a hidden alias': (router) => router.use(['/api/v1', '/hidden'], inner),
+      'an optional trailing parameter': (router) => router.use('/api/v1{/:x}', inner),
+      'an optional middle parameter': (router) => router.use('/api{/:v}/v1', inner),
+      'a trailing optional wildcard': (router) => router.use('/api/v1{*rest}', inner),
+    };
+    for (const [shape, mount] of Object.entries(mountShapes)) {
+      const router = Router();
+      mount(router);
+      expect({
+        shape,
+        reported: listMountedRoutes([{ prefix: '', router }], options).map((route) => route.unrecognised),
+      }).toEqual({ shape, reported: ['nested router "router" mounted under a path'] });
     }
+
+    const subApp = express();
+    subApp.use(express()); // Express wraps a sub-app as `mounted_app`; at the root it serves its own routes under every path
+    expect(listMountedRoutes([{ prefix: '', router: subApp.router }], options).map((route) => route.unrecognised)).toEqual([
+      'Express sub-app mounted without a path',
+    ]);
+
+    const rootMiddleware = Router();
+    rootMiddleware.use((_req, _res, next) => {
+      next();
+    });
+    expect(listMountedRoutes([{ prefix: '', router: rootMiddleware }], options)).toEqual([]);
 
     const excluded = Router();
     excluded.use('/api/docs', inner);

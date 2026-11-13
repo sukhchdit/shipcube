@@ -17,7 +17,8 @@ literal mount paths app.ts uses (`/api/v1`, `/api/docs`); `/api/docs` is the one
 
 - a mounted route the document lacks (`undocumented-route`), or a layer the walker cannot resolve
   (`unrecognised-route`): a router or a handler mounted under any other path (`router.use('/webhooks/x', handler)`
-  included), arrays, RegExps, `all()` and optional/wildcard paths;
+  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app, RegExps,
+  `all()` and optional/wildcard paths;
 - the implemented-operations ledger disagreeing with what is mounted (`not-mounted`, `not-in-ledger`, `unknown-ledger-entry`);
 - any documented operation without a success/request example, a non-empty `x-error-codes`, an `x-permission` (with a
   justification for `public`/`authenticated`), a unique camelCase `operationId`, `x-requirements` (REQ IDs),
