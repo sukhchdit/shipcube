@@ -224,6 +224,8 @@ function auditProblems(descriptor: AuditDescriptor | undefined): string[] {
 interface SchemaNode {
   readonly type?: unknown;
   readonly flags?: { readonly unknown?: unknown; readonly only?: unknown };
+  /** Schema-level `prefs()`/`options()`: they override the options the validate slot passes (PR32-SEC-13). */
+  readonly preferences?: { readonly allowUnknown?: unknown };
   readonly keys?: Readonly<Record<string, SchemaNode>>;
   readonly patterns?: readonly unknown[];
   readonly items?: readonly SchemaNode[];
@@ -251,13 +253,67 @@ function branchNodes(branches: readonly Branches[] | undefined): SchemaNode[] {
 }
 
 /**
- * Closed at every depth (REQ-SEC-007, PR #32 m8, PR32-SEC-04): every object declares its keys (possibly none) and
- * neither allows unknown keys nor has key patterns; every array declares its items; an `any` value is an explicit
- * allow-list (`valid`); alternatives and conditional branches are walked like any other node.
+ * Joi's built-in type definitions, read from the default root (`Joi.types()`): the allow-list of schema
+ * implementations a request schema may use (PR32-SEC-13). A `Joi.extend` type has its own definition and runs code
+ * (`coerce`, `prepare`, `validate`, rules) that `describe()` does not show, even when it reuses a built-in name such as
+ * `object`, so it is refused unless its definition is reviewed into this map. None is today.
+ */
+const definitionOf = (schema: object): unknown => (schema as { _definition?: unknown })._definition;
+const BUILT_IN_DEFINITIONS: ReadonlyMap<string, unknown> = new Map(
+  Object.values(Joi.types() as Record<string, Joi.Schema>).map((schema) => [String(schema.type), definitionOf(schema)]),
+);
+/** Joi keeps a schema's children in `$_terms` (its extension API): key, item, branch, condition and shared schemas. */
+const termsOf = (schema: object): unknown => (schema as { $_terms?: unknown }).$_terms;
+/** Bounds the `$_terms` walk; several term levels make one schema level (terms -> keys -> entry -> schema). */
+const MAX_TERM_DEPTH = 4 * MAX_SCHEMA_DEPTH;
+
+/**
+ * Every schema reachable from `root` is built on a built-in definition (PR32-SEC-13, `Joi.extend`). The walk follows
+ * schemas, arrays and plain objects inside `$_terms` (never class instances such as references), each object once. A
+ * Joi upgrade that drops `_definition` refuses every schema here, so the change fails the tests instead of opening.
+ */
+function extensionProblems(root: Joi.Schema, where: string): string[] {
+  const seen = new Set<object>();
+  const problems = new Set<string>();
+  const visit = (value: unknown, depth: number): void => {
+    if (typeof value !== 'object' || value === null || seen.has(value)) return;
+    if (depth > MAX_TERM_DEPTH) {
+      problems.add(`${where} is nested too deeply to inspect`);
+      return;
+    }
+    seen.add(value);
+    if (Joi.isSchema(value)) {
+      const definition = definitionOf(value);
+      if (definition === undefined || definition !== BUILT_IN_DEFINITIONS.get(String(value.type))) {
+        problems.add(`${where} uses the Joi extension type "${String(value.type)}" (Joi.extend types are not allow-listed)`);
+      }
+      visit(termsOf(value), depth + 1);
+    } else if (Array.isArray(value)) {
+      for (const item of value as readonly unknown[]) visit(item, depth + 1);
+    } else if (Object.getPrototypeOf(value) === Object.prototype) {
+      for (const item of Object.values(value)) visit(item, depth + 1);
+    }
+  };
+  visit(root, 0);
+  return [...problems];
+}
+
+/**
+ * Closed at every depth (REQ-SEC-007, PR #32 m8, PR32-SEC-04, PR32-SEC-13): every object declares its keys (possibly
+ * none) and neither allows unknown keys nor has key patterns; no node re-opens unknown keys through its own
+ * `prefs()`/`options()` (they override the validate slot's options); every array declares its items; an `any` value
+ * is an explicit allow-list (`valid`); a `Joi.link` is refused rather than resolved (declare the schema inline); a
+ * type outside Joi's built-ins is refused; alternatives and conditional branches are walked like any other node.
  */
 function openSchemaProblems(node: SchemaNode, where: string, depth: number): string[] {
   if (depth > MAX_SCHEMA_DEPTH) return [`${where} is nested deeper than ${String(MAX_SCHEMA_DEPTH)} levels`];
+  if (node.type === 'link') return [`${where} is a Joi.link (indirection is not walked; declare the schema inline)`];
+  if (typeof node.type !== 'string' || !BUILT_IN_DEFINITIONS.has(node.type)) {
+    return [`${where} has the non-built-in Joi type "${String(node.type)}" (Joi.extend types are not allow-listed)`];
+  }
   const problems: string[] = [];
+  const allowUnknown = node.preferences?.allowUnknown;
+  if (allowUnknown !== undefined && allowUnknown !== false) problems.push(`${where} re-opens unknown keys with prefs/options allowUnknown`);
   if (node.type === 'object') {
     if (node.keys === undefined) problems.push(`${where} declares no keys (an open object)`);
     if (node.flags?.unknown === true) problems.push(`${where} allows unknown keys`);
@@ -282,7 +338,7 @@ function schemaProblems(spec: RouteSpec): string[] {
       problems.push(`schema.${part} must be a Joi object schema`);
       continue;
     }
-    problems.push(...openSchemaProblems(schema.describe(), `schema.${part}`, 0));
+    problems.push(...openSchemaProblems(schema.describe(), `schema.${part}`, 0), ...extensionProblems(schema, `schema.${part}`));
   }
   const declared = spec.schema.params === undefined ? [] : Object.keys((spec.schema.params.describe() as { keys?: object }).keys ?? {});
   const expected = pathParameters(typeof spec.path === 'string' ? spec.path : '');
@@ -374,12 +430,27 @@ export function isDefinedRoute(value: unknown): value is RouteDescriptor {
   return typeof value === 'object' && value !== null && DEFINED.has(value);
 }
 
-/** Declares one route. Throws `RouteDefinitionError` naming every problem; returns the frozen descriptor. */
+/**
+ * A deep-frozen copy of plain declaration data (objects and arrays of primitives): the descriptor's nested `audit`
+ * (with `additional`), `reauth` and `deprecated` cannot be changed after the checks ran (PR32-SEC-15, code review R2-n1).
+ */
+function frozenData<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value;
+  const copy: unknown = Array.isArray(value)
+    ? (value as readonly unknown[]).map((item) => frozenData(item))
+    : Object.fromEntries(Object.entries(value).map(([key, item]) => [key, frozenData(item)]));
+  return Object.freeze(copy) as T;
+}
+
+/** Declares one route. Throws `RouteDefinitionError` naming every problem; returns the deep-frozen descriptor. */
 export function defineRoute(spec: RouteSpec): RouteDescriptor {
   const problems = routeDefinitionProblems(spec);
   if (problems.length > 0) throw new RouteDefinitionError(spec, problems);
   const descriptor: RouteDescriptor = Object.freeze({
     ...spec,
+    audit: frozenData(spec.audit),
+    ...(spec.reauth === undefined ? {} : { reauth: frozenData(spec.reauth) }),
+    ...(spec.deprecated === undefined ? {} : { deprecated: frozenData(spec.deprecated) }),
     schema: Object.freeze({ ...spec.schema }),
     // Checked above: the accepted set, frozen and in canonical order (D-ARCH-107 (1)).
     auth: findRouteAuthSet(authKinds(spec.auth)) ?? [],

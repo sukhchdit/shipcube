@@ -14,7 +14,30 @@ const DESCRIPTOR = 'routeDescriptor';
 /** Read by the access log and the metrics label (PR #20 n6): mount prefix plus the full template, never a raw path. */
 export const ROUTE_TEMPLATE_LOCAL = 'routeTemplate';
 
-/** No credential (D-ARCH-107 (4)): no actor, no organisation, no permission. */
+/**
+ * A frozen read-only view of `values` (PR32-SEC-15): it has no `add`/`delete`/`clear`, and the backing `Set` is not
+ * reachable from it, so `Set.prototype.add.call(view, ...)` throws instead of changing a principal shared across
+ * requests. The authenticators (TASK-052/055/091/171/261) build their principals' permissions with it.
+ */
+export function readonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
+  const backing = new Set(values);
+  const view: ReadonlySet<T> = {
+    get size() {
+      return backing.size;
+    },
+    has: (value) => backing.has(value),
+    forEach: (callback, thisArg?: unknown) => {
+      for (const value of backing) callback.call(thisArg, value, value, view);
+    },
+    entries: () => backing.entries(),
+    keys: () => backing.keys(),
+    values: () => backing.values(),
+    [Symbol.iterator]: () => backing.values(),
+  };
+  return Object.freeze(view);
+}
+
+/** No credential (D-ARCH-107 (4)): no actor, no organisation, no permission. Deep-frozen: shared by every request. */
 export const ANONYMOUS: Principal = Object.freeze({
   credential: 'anonymous',
   authenticated: false,
@@ -22,7 +45,7 @@ export const ANONYMOUS: Principal = Object.freeze({
   orgId: '',
   actorScope: 'TENANT',
   guestTokenHash: '',
-  permissions: new Set<string>(),
+  permissions: readonlySet<string>([]),
 });
 
 const locals = (res: Response): Record<string, unknown> => res.locals as Record<string, unknown>;

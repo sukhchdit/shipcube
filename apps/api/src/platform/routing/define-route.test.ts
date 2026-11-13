@@ -10,6 +10,7 @@ import {
   routeDefinitionProblems,
   type RouteSpec,
 } from './define-route.js';
+import { prepareSchemas, validateRequest } from '../validate/validate.js';
 import { fixtureRoute } from './tests/fixture-route.js';
 
 const base: RouteSpec = {
@@ -242,5 +243,131 @@ describe('[D-ARCH-107] route authentication set and permissionAuthenticated', ()
   it('[D-ARCH-107] accepts the refresh-cookie routes of the contract (GET, and POST with csrf)', () => {
     expect(problemsOf({ auth: 'refresh-cookie' })).toEqual([]);
     expect(problemsOf({ auth: 'refresh-cookie', method: 'post', csrf: true })).toEqual([]);
+  });
+});
+
+describe('[R2-m1] [PR32-SEC-13] schema-level preferences, Joi.link and Joi.extend cannot re-open a request schema', () => {
+  // Joi.extend returns an untyped root; each probe names only the factory it calls.
+  const extended: unknown = Joi.extend({ type: 'loose', base: Joi.object().unknown(true) });
+  const loose = extended as { loose: () => Joi.ObjectSchema; string: () => Joi.StringSchema };
+  // An extension that keeps the built-in name and hides its behaviour from describe(): it adds a field after validation.
+  const sneakyRoot: unknown = Joi.extend({
+    type: 'object',
+    base: Joi.object(),
+    validate: (value: Record<string, unknown>) => ({ value: { ...value, role: 'admin' } }),
+  });
+  const sneaky = sneakyRoot as { object: (keys: Joi.PartialSchemaMap) => Joi.ObjectSchema };
+  const top = { name: 'n', role: 'admin' };
+  const nested = { name: 'x', address: { city: 'c', role: 'admin' } };
+  const city = Joi.object({ city: Joi.string() });
+  // [label, body schema, probe body, where the smuggled role lands, expected problem]
+  const shapes: [string, Joi.ObjectSchema, Record<string, unknown>, 'top' | 'address', string][] = [
+    [
+      'prefs({ allowUnknown: true }) at the top level',
+      Joi.object({ name: Joi.string() }).prefs({ allowUnknown: true }),
+      top,
+      'top',
+      'schema.body re-opens unknown keys with prefs/options allowUnknown',
+    ],
+    [
+      'options({ allowUnknown: true }) on a nested object',
+      Joi.object({ name: Joi.string(), address: city.options({ allowUnknown: true }) }),
+      nested,
+      'address',
+      'schema.body.address re-opens unknown keys with prefs/options allowUnknown',
+    ],
+    [
+      'prefs({ allowUnknown: true }) inside a when branch',
+      Joi.object({ name: Joi.string(), address: city.when('name', { is: 'x', then: city.prefs({ allowUnknown: true }) }) }),
+      nested,
+      'address',
+      'schema.body.address re-opens unknown keys with prefs/options allowUnknown',
+    ],
+    [
+      'a Joi.link to a shared open object',
+      Joi.object({ name: Joi.string(), address: Joi.link('#open') }).shared(Joi.object().unknown(true).id('open')),
+      nested,
+      'address',
+      'schema.body.address is a Joi.link (indirection is not walked; declare the schema inline)',
+    ],
+    [
+      'a Joi.extend type based on an open object',
+      Joi.object({ name: Joi.string(), address: loose.loose() }),
+      nested,
+      'address',
+      'schema.body.address has the non-built-in Joi type "loose" (Joi.extend types are not allow-listed)',
+    ],
+    [
+      'a Joi.extend type that reuses the built-in name object',
+      Joi.object({ name: Joi.string(), address: sneaky.object({ city: Joi.string() }) }),
+      { name: 'x', address: { city: 'c' } },
+      'address',
+      'schema.body uses the Joi extension type "object" (Joi.extend types are not allow-listed)',
+    ],
+  ];
+
+  it.each(shapes)('refuses %s', (_label, body, probe, lands, expected) => {
+    // Without defineRoute's walk the validate slot hands an extra `role` to the handler (the open form is real) ...
+    const input = validateRequest(prepareSchemas({ body }), { params: {}, query: {}, body: probe, headers: {} });
+    const received: unknown = lands === 'top' ? input.body : input.body?.['address'];
+    expect(received).toEqual(expect.objectContaining({ role: 'admin' }));
+    // ... and defineRoute refuses the declaration, so no handler is ever mounted behind it.
+    const spec = { ...base, method: 'post' as const, schema: { ...base.schema, body } };
+    expect(routeDefinitionProblems(spec)).toContain(expected);
+    expect(() => defineRoute(spec)).toThrow(RouteDefinitionError);
+  });
+
+  it('accepts harmless schema-level preferences and built-in types from an extended root', () => {
+    const body = Joi.object({
+      name: loose.string(),
+      address: Joi.object({ city: Joi.string() }).prefs({ allowUnknown: false, convert: true }),
+      tags: Joi.object({ a: Joi.string() }).prefs({ stripUnknown: true }),
+    });
+    expect(problemsOf({ method: 'post', schema: { ...base.schema, body } })).toEqual([]);
+  });
+});
+
+describe('[R2-n1] [PR32-SEC-15] the descriptor is deep-frozen', () => {
+  it('freezes audit (with additional), reauth and deprecated as copies', () => {
+    const audit = {
+      action: 'UPDATE',
+      entity: 'quote',
+      sensitivity: 'NORMAL',
+      reasonRequired: false,
+      additional: [{ action: 'CREATE', entity: 'quote_share', sensitivity: 'NORMAL', when: 'shared' }],
+    };
+    const reauth = { scope: 'account.delete', maxAgeSeconds: 300 };
+    const deprecated = { since: '2026-01-01', sunset: '2027-01-01', link: 'https://docs.example.test/migrate' };
+    const route = defineRoute({
+      ...base,
+      permission: 'shipment:read',
+      permissionJustification: undefined,
+      tenancy: 'tenant',
+      auth: 'session',
+      transaction: 'tenant',
+      audit,
+      reauth,
+      deprecated,
+    } as unknown as RouteSpec);
+    expect(Object.isFrozen(route.audit)).toBe(true);
+    expect(Object.isFrozen(route.audit.additional)).toBe(true);
+    expect(Object.isFrozen(route.audit.additional?.[0])).toBe(true);
+    expect(Object.isFrozen(route.reauth)).toBe(true);
+    expect(Object.isFrozen(route.deprecated)).toBe(true);
+    expect(() => {
+      (route.audit as { action: string }).action = 'NONE';
+    }).toThrow(TypeError);
+    // A later change to the caller's objects does not reach the checked descriptor.
+    audit.action = 'NONE';
+    reauth.scope = 'x';
+    expect(route.audit.action).toBe('UPDATE');
+    expect(route.reauth?.scope).toBe('account.delete');
+    expect(route).toEqual(expect.objectContaining({ deprecated }));
+  });
+
+  it('adds no reauth or deprecated key when the declaration has none', () => {
+    const route = defineRoute(base);
+    expect('reauth' in route).toBe(false);
+    expect('deprecated' in route).toBe(false);
   });
 });
