@@ -173,7 +173,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-079 (M0 Must) Soft delete and optimistic locking |
 | REQs | REQ-RLS-010, REQ-RLS-011 |
 | NFRs | NFR-DATA-003 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR26-SEC-08, D-ARCH-091, D-ARCH-092 |
 | Specialist · model | database-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-032, TASK-096 |
@@ -186,6 +186,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-079 scenarios
+- STANDARD-COLUMNS FOLLOW-UPS (PR #26 security PR26-SEC-08 (a), code review n5; D-ARCH-091, D-ARCH-092; data-model §7.6 amendment of 2026-11-13): the standard-columns extension stays INNERMOST (applied last; the soft-delete and optimistic-lock extensions wrap it); deleted_at and deleted_by join SERVER_CONTROLLED_FIELDS, SERVER_FIELD_API_NAMES and serverControlledFieldIssues, and the standard-columns guard platform.std_columns_guard() is extended by a reviewed CREATE OR REPLACE migration (when deleted_at is set, deleted_by = the actor; a soft delete is an UPDATE and bumps version and updated_by) with new C15 cases; where.version and the 412/409 mapping per data-model §7.6; optional: updated_at onto the database clock (data-model §7.6 item 5)
 - AT-US-079-01 … AT-US-079-08: all 8 scenarios of US-079, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -626,7 +627,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-093 (M0 Must) Chain verification job and health degradation |
 | REQs | REQ-AUDIT-013 |
 | NFRs | NFR-AUDIT-003 |
-| Spikes / security / decisions | SEC-COND-03, SPK-08, R-ARCH-18, PR12-SEC-04, PR12-SEC-05, D-TASK012-02, D-ARCH-076, D-ARCH-077, D-ARCH-079 |
+| Spikes / security / decisions | SEC-COND-03, SPK-08, R-ARCH-18, PR12-SEC-04, PR12-SEC-05, D-TASK012-02, D-ARCH-076, D-ARCH-077, D-ARCH-079, PR30-SEC-06, D-ARCH-093, D-ARCH-094 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-030, TASK-090, TASK-039 |
@@ -637,6 +638,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - apps/worker/src/processors/audit-maintenance/{verify.ts, anchor.ts}
 - local anchor sink (RustFS bucket audit-anchors)
+- apps/api/src/platform/runtime/services.ts (additive: worker-only anchorSink member, D-ARCH-094; coordinate if a concurrent batch edits it)
 
 **Acceptance tests to write**
 - All US-093 scenarios
@@ -644,10 +646,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - ANCHOR FORMAT AS RATIFIED (data-model §5.5/§5.6 as amended 2026-11-13; SPK-08 A-1..A-7; ADR-0007 am. 9; D-ARCH-077; hash inputs — fixed before the first anchor is written): heads_digest over the snapshot sorted by the 16 raw UUID bytes, item stream_id(16) || be64(entry_count) || head_hash(32), empty set = SHA-256 of the empty string; created_at = clock_timestamp() read in the anchor transaction, rendered by PostgreSQL as YYYY-MM-DD"T"HH24:MI:SS.US"Z" in UTC and re-read in that form; sink line = RFC 8785 JCS of { anchor_seq (JSON number), checkpoint_entry_id (lower-case UUID), created_at, heads_digest / prev_anchor_hash / anchor_hash (lower-case hex), algorithm, key_id, signature (base64 DER) } plus newline, compared as a STRING; DER parsed strictly (non-minimal integers and long-form lengths rejected; a WebCrypto path converts DER -> P1363); A-1: steps (i)-(iii) run to completion, every failing step emits its event, failure_kind by precedence CHECKPOINT_SIGNATURE_INVALID > CHECKPOINT_HEAD_MISMATCH > ANCHOR_MISSING > chain kinds, audit_chain_verifications gains failure_kinds text[] and details, a table/sink content mismatch carries detail code ANCHOR_SINK_MISMATCH, audit_anchor_missing pages like audit_chain_broken; A-6: a missing sink record is tolerated only for the newest anchor whose signed created_at lies within [now - 15 min, now + 2 min], a future-dated anchor fails; A-7: step (iii) runs on the latest anchor that passed (i) and (ii)
 - AF-9/AF-12 qualifier + PR12-SEC-05 b/f + PR12-SEC-04 tripwire (D-ARCH-077, D-ARCH-076): the hourly run is incremental and detects anchored head-row changes; the NIGHTLY run starts every stream at seq 1 from ZERO32 and IGNORES last_verified_* (platform_app can update it); SEC-TC-44 variant (d) "behind-head rewrite, head row intact" (hourly: no failure, documented; nightly: PREV_HASH_MISMATCH / HASH_MISMATCH) plus the algorithm != ECDSA_P256_SHA256 and malleated (r, n-s) signature rows, test titles carrying SEC-TC-44; the audit_chain readiness check is secondary (platform_app can write audit_chain_verifications) — the security event is the primary signal; the hourly verifier also asserts evtenabled of both event triggers and tgenabled of every audit trigger and partition clone (= A, ENABLE ALWAYS) and emits audit_chain_broken on any change
 - SPK-08 §8.1 PORT-THEN-DELETE (PR #12 code review M3; D-TASK012-02 (1); due at this task merge, batch 3.6, and in any case before G3): this PR ports prisma/tests/spikes/spk08-anchor.int.test.ts (SEC-TC-44 (a)-(c), ANCHOR-02/06/07 incl. the >= 11-anchor ORDER-BY regression of AF-1, plus the PR12-SEC-05 b variants) into its verifier integration suite and the golden vectors into a packages/audit unit test, and prisma/tests/spikes/spk08/anchor-prototype.ts (headsDigest, anchorHash, derToP1363, sinkLine JCS, verifier steps) into product code in packages/audit with unit tests, then DELETES both files in the SAME commit as the port
+- ANCHOR SINK CONDITIONS (PR #30 code review R1-m6, security PR30-SEC-06; ADR-0021 am. 2; data-model §5.2 amendment of 2026-11-13; D-ARCH-093, D-ARCH-094): (1) the sink is built from its OWN secret references and the audit-anchors bucket as Pick<ObjectStorage, putIfAbsent | head | get> (no put, no delete) and exposed as a worker-only anchorSink member of RuntimeServices — never from the documents RuntimeServices.storage, which PR #30 or the first documents consumer (TASK-147) exposes for documents only; a composition test asserts that the anchor credential keys and bucket differ from storage (values may coincide in Compose); (2) THIS task owns the putIfAbsent retry semantics, not the port: the sink line is a pure function of the audit_anchors row, so a retry re-sends identical bytes; created:true is done; created:false — the normal result of a retry whose first attempt succeeded and whose response was lost (412 on If-None-Match: *), or of a concurrent writer — calls head() and compares sha256 with the digest of its own line: equal is success, different or absent is ANCHOR_SINK_MISMATCH and NEVER an overwrite (head().sha256 is unverified metadata; the verifier byte-exact table/sink comparison stays the control); loopback unit test with a store that applies the first PUT, drops its response and answers 412 to the retry (created:false, both requests carry If-None-Match: *) plus the digest-equal and digest-different branches; (3) AWS answers a concurrent conditional write with 409 ConditionalRequestConflict (RustFS cannot produce it, R-ARCH-05): it is retryable with jittered backoff inside the 15-minute sink retry window, never success and never created:false without the head comparison — unit rows with a fake store returning 409 then 200 and 409 then 412 (the adapter maps 409 to UNAVAILABLE per PR #30 R1-m4; until that lands it is UNEXPECTED, which fails the run closed and the next run retries); (4) the hourly tripwire also asserts to_regprocedure(platform.audit_ddl_guard()) IS NOT NULL (R2-n3 detection until the next guard version exempts by evtfoid); (5) the worker IAM wording of ADR-0021 am. 2 (PutObject plus GetObject and ListBucket on anchors/, no delete, no bypass) is carried by COND-G4-PROD, no code
 - AT-US-093-01 … AT-US-093-05: all 5 scenarios of US-093, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Job payload v2 (identifiers only), tenant context from `platform.job_context`, deterministic job IDs, retries + DLQ, idempotent effects verified by a duplicate-delivery test, metrics per queue.
+- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-117 — Password-reset screens and delay/lockout messages (customer web)

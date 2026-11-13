@@ -473,7 +473,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-095 **DC** (M0 Must) Monthly partitions, indexes and partition-creation job |
 | REQs | REQ-AUDIT-016, REQ-AUDIT-017 |
 | NFRs | NFR-AUDIT-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-093 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-039, TASK-021 |
@@ -483,9 +483,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Files / modules**
 - apps/worker/src/processors/audit-maintenance/partitions.*
+- docs/07-ops/runbooks/audit-partition-squat.md
 
 **Acceptance tests to write**
 - US-095 job scenarios (current + 3 months always exist; failure raises health degradation)
+- SQUAT RUNBOOK (data-model §5.2 amendment of 2026-11-13; PR #24 code review R2-n1; D-ARCH-093): docs/07-ops/runbooks/audit-partition-squat.md says what the audit_partition_squatted event and the audit_partitions readiness unavailable mean (kind, reason, partition_name), carries the per-kind removal table — droppable by the migrator: type, enum, range/multirange, domain, composite type, sequence, procedure, aggregate; refused by the sql_drop branch and needing a superuser to suspend platform_audit_ddl_guard_drop, DROP, and ENABLE ALWAYS again in ONE transaction: table, view, materialised view, index, function — the post-checks (evtenabled A on both event triggers, ensure_audit_partitions(3) ok, readiness back to ok), the operator-log and second-reviewer requirement, and the rule that prisma/bootstrap/90-audit-ddl-guard.sql is never edited for a runbook change; rehearsed on a local database for one droppable kind and one table squat (the rehearsal transcript goes into the PR report)
 - AT-US-095-01 … AT-US-095-06: all 6 scenarios of US-095, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
