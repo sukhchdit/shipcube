@@ -40,7 +40,9 @@ export type DbErrorReason =
   | 'INVALID_TENANT_CONTEXT'
   | 'DB_SESSION_CONTEXT_LEAK'
   | 'AUDIT_IMMUTABLE'
-  | 'AUDIT_PARTITION_NAME_TAKEN';
+  | 'AUDIT_PARTITION_NAME_TAKEN'
+  /** A nested relation write would escape the standard-columns stamping (TASK-032, data-model §7.6). */
+  | 'NESTED_WRITE_UNSUPPORTED';
 
 /** Security events raised by the data layer (sink injected by the composition root). */
 export type DbSecurityEvent =

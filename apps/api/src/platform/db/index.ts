@@ -8,6 +8,14 @@
  */
 export { type AffectedRows, expectAffected } from './expect-affected.js';
 export {
+  type ExtendableClient,
+  type ServerColumn,
+  serverStamped,
+  type StandardColumnsExtension,
+  standardColumnsExtension,
+  withStandardColumns,
+} from './extensions/standard-columns.js';
+export {
   DB_RETRY_AFTER_SECONDS,
   DbError,
   type DbErrorMapping,
@@ -33,6 +41,7 @@ export {
   type TenantTxRunner,
   type TransactionCapableClient,
   type TransactionOptions,
+  type TransactionStamp,
   type WithTenantTxDeps,
   type WithTenantTxOptions,
 } from './with-tenant-tx.js';

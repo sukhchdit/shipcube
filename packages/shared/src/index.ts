@@ -19,6 +19,14 @@ export {
   type ErrorCatalogue,
   type ErrorCode,
 } from './errors/catalogue/index.js';
+export { ANONYMOUS_ACTOR_ID, isUuidV7, SYSTEM_ACTOR_ID, uuidv7, uuidV7Timestamp } from './ids/uuidv7.js';
+export {
+  isServerControlledField,
+  SERVER_CONTROLLED_FIELDS,
+  serverControlledFieldIssues,
+  UNKNOWN_FIELD,
+  type ServerControlledField,
+} from './ids/server-controlled.js';
 // Route audit descriptor = openapi `x-audit` (TASK-020); consumed by defineRoute, the audit writer and capture.
 export {
   AUDIT_ACTIONS,

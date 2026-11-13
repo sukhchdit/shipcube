@@ -125,7 +125,13 @@ function setup(): { log: Statement[]; client: PrismaClient; runner: ReturnType<t
   const runner = createWithTenantTx<Prisma.TransactionClient>(
     client,
     { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 5_000 },
-    { onSecurityEvent: () => undefined, countSessionContextLeak: () => undefined, markNotReady: () => undefined, env: {} },
+    {
+      onSecurityEvent: () => undefined,
+      countSessionContextLeak: () => undefined,
+      markNotReady: () => undefined,
+      env: {},
+      scopeClient: () => client,
+    },
   );
   return { log, client, runner };
 }

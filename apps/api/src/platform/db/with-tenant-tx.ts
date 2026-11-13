@@ -60,12 +60,22 @@ export interface WithTenantTxOptions {
   readonly timeoutMs?: number;
 }
 
+/**
+ * The validated actor and organisation of one tenant transaction, as the standard-columns extension records them
+ * (TASK-032, data-model §7.6): lowercase UUIDs or '' (anonymous / no active organisation), exactly the values the
+ * context statement sets as `app.actor_id` / `app.org_id`.
+ */
+export interface TransactionStamp {
+  readonly orgId: string;
+  readonly actorId: string;
+}
+
 export interface SecurityEventDetail {
   readonly correlationId?: string;
   readonly sqlState?: string;
 }
 
-export interface WithTenantTxDeps {
+export interface WithTenantTxDeps<TTx = unknown> {
   /** Security-event sink (no sink on main yet; ADR-0005 am. 10 items 6 and 16). */
   readonly onSecurityEvent: (event: DbSecurityEvent, detail: SecurityEventDetail) => void;
   /** Increments the `db_session_context_leak` counter. */
@@ -74,6 +84,14 @@ export interface WithTenantTxDeps {
   readonly markNotReady: (reason: 'db_session_context_leak') => void;
   /** Environment checked for `PGOPTIONS`; defaults to `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Per-transaction client (ADR-0005 am. 10 item 5, data-model §7.6; TASK-032): the root client extended with the
+   * standard-columns extension bound to `stamp` (`withStandardColumns`). The transaction is opened on the returned
+   * client, so the stamping runs inside it; the stamp comes from this closure, never from AsyncLocalStorage. REQUIRED
+   * (PR26-SEC-02): an unscoped fallback to the root client would persist caller-supplied server columns and skip the
+   * version bump on updates. A caller that deliberately wants the plain client passes `() => client`.
+   */
+  readonly scopeClient: (stamp: TransactionStamp) => TransactionCapableClient<TTx>;
 }
 
 export interface TenantTxRunner<TTx> {
@@ -281,7 +299,7 @@ export function assertNoSessionOptions(env: Readonly<Record<string, string | und
 export function createWithTenantTx<TTx extends RawQueryClient>(
   client: TransactionCapableClient<TTx>,
   options: WithTenantTxOptions,
-  deps: WithTenantTxDeps,
+  deps: WithTenantTxDeps<TTx>,
 ): TenantTxRunner<TTx> {
   assertNoSessionOptions(deps.env ?? process.env);
   const transactionOptions = Object.freeze(resolveTransactionOptions(options));
@@ -314,9 +332,10 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     if (isInsideTenantTx()) throw new DbError(dbErrorMapping(500, 'NESTED_TENANT_TX'));
     const values = contextValues(ctx, timeouts);
     const correlationId = values[4];
+    const txClient = deps.scopeClient({ orgId: values[0], actorId: values[1] });
     try {
       return await tenantTxScope.run(true, () =>
-        client.$transaction(async (tx) => {
+        txClient.$transaction(async (tx) => {
           const prev = await setTenantContext(tx, values);
           if (hasLeakedContext(prev)) throw reportLeak(correlationId);
           const handle = createTenantDb(tx);
