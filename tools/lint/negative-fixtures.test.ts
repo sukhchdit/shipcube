@@ -787,6 +787,15 @@ describe('repository probes: workspace imports resolved to repository files (ADR
   it('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {
     expectClean(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts');
   });
+
+  it('[PR #21 R1-m4] allowed: an API contract test imports apps/api/src by relative path', () => {
+    expectClean(report.probes, 'tests/api/lint-probe-ok-apps-api.api.test.ts');
+  });
+
+  it('[PR #21 R1-m4] an API contract test importing packages/*/src by relative path fails import-x/no-relative-packages', () => {
+    const findings = findingsOf(report.probes, 'tests/api/lint-probe-bad-package-relative.api.test.ts');
+    expect(findings.map((finding) => finding.ruleId)).toContain('import-x/no-relative-packages');
+  });
 });
 
 describe('seeded negative fixtures: Stylelint (NFR-I18N-003, NFR-A11Y-006)', () => {

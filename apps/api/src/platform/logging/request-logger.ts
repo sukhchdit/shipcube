@@ -28,8 +28,10 @@ const ROUTE_PREFIX_KEY = 'routePrefix';
 const ROUTE_TEMPLATE_KEY = 'routeTemplate';
 
 /**
- * Mounted together with a router (`routes.use(API_PREFIX, routePrefix(API_PREFIX), api)`): records the static mount
- * prefix, which Express no longer exposes in `req.baseUrl` once an error has unwound the router.
+ * The first, path-less layer of a mounted router (`api.use(routePrefix(API_PREFIX))`, then `routes.use(API_PREFIX,
+ * api)`): records the static mount prefix, which Express no longer exposes in `req.baseUrl` once an error has unwound
+ * the router. It is never mounted under a path itself, because the drift check reports a path-mounted non-router layer
+ * (D-ORCH-024 (3), AT-US-034-01).
  */
 export function routePrefix(prefix: string): RequestHandler {
   return (_req: Request, res: Response, next: NextFunction): void => {

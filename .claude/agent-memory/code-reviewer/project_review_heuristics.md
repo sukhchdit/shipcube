@@ -151,9 +151,47 @@ Round 2 of a spike PR (PR #6 r2):
 - **A new framework behaviour (e.g. OPTIONS 204 + Allow) must be mirrored** in the 405 `Allow`, the contract test helper and the contract stubs. Probe the PR's own helper against the PR's own app (`api(app).options(path)`).
 - **A real-contract check with a pinned `now`** makes time-based rules (sunset passed) unable to fire on main.
 - **Ajv implements OAS 3.0 `nullable` natively**, so strict mode accepts it. A typo keyword is still rejected.
+- **"Literal mount" resolution by probe variants (PR #21 r2).** Substituting one segment rejects `/:param` and `/*rest`. It misses array mounts (router 2.x `layer.matchers` has one entry per path), optional groups (`{/:x}` in the middle or at the end; the matched `layer.path` grows), and root sub-apps (the handle is named `mounted_app`, has no stack and `slash` is true). Probe all of these with real HTTP.
+- **A "redundant, subsumed" claim for a probe needs a counter-example search (PR #21 r3).** A surviving mutant is only dead code if no input reaches it: dropping the segment-substitution probe still passed 18 tests, yet it is the only guard for a leading param (`/:x/v1` resolves as `/api/v1`, and `/:x/docs` as the excluded docs mount). Also: RegExp `use()` paths are closures in router 2.x and cannot be told from strings; alternation regexes fail open. A sub-app on a Router is not wrapped as `mounted_app` (that is Application.use only).
+- **A new fail-closed guard can break another open PR semantically.** Run the new walker or guard against the other open PR's composition (`git show <head>:apps/api/src/app.ts`), not just `git merge-tree`. Example: PR #20's path-mounted `routePrefix` against PR #21's R1-M1 fix.
+- **ESLint `ignore` regexes for no-relative-packages** must be end-anchored or reject `..` segments. An unanchored prefix lets `apps/api/src/../../../packages/x` through. Probe with `lintText` and a filePath under the target folder; no file write is needed.
 
 **Logging / redaction PRs (PR #20, 2026-11-13):**
 - **New subpath of an allow-listed package.** `toPackage(x)` allow-lists expand to `x/**`, so a new server-only subpath (`@platform/shared/logging`) is importable by web/admin/pricing. Probe with the light lint probe plus positive controls.
 - **"Native function" checks via `Function.prototype.toString` … `[native code]`** are passed by bound functions and Proxies. Compare by identity with the captured native (the V8 `stack` getter is one shared function).
 - **PII filters as substring deny-lists** miss username/display_name/client_ip/dob/passport. Ask for a per-event allow-list from the catalogue's declared fields.
 - **Redactor budgets:** caps per string × node cap can still give a huge line; time it (about 0.3 µs/char here). Free-text pair scanners: probe 4+ spaces, newline after the separator, multi-pair Cookie, `\"`-escaped JSON, IDN e-mail.
+- **Round 2 of a subpath guard (PR #20 r2):** direct-import fixtures are not enough. Probe the TRANSITIVE path: the allowed root barrel re-exporting the server-only folder (`export * from './logging/…'`) passes, because `barrel-reexport-only` allows re-exports. Ask for a policy from the package's own non-server files. Also probe `import()`, `export … from`, `createRequire`, `x/sub/path`, `pino/file`, `pino-*`, and build configs (react-router.config.ts).
+- **PII key lists:** grep the project's own `openapi.yaml` for `*_name`/`*_ip` keys (`display_name`, `receiver_name`) and test them against the class. Generic lists miss domain keys. Never suggest a bare `ip` suffix (it matches `ship`, `relationship`).
+- **Budgeted walkers:** `Object.keys(v)` before `slice(0, MAX_KEYS)` is uncharged. Probe 100 references to one 300k-key object (2 s). Budgets measured before JSON escaping, or excluding `err`, do not bound the line (quotes double it; a 50 KB line).
+- **Free-text values that start with `[` or `{`** end at the first `,`, so the second array item leaks. Also probe PEM blocks and full-width keys (an ASCII-only key regex sees no key at all).
+- **Semantic auto-merge traps:** `git merge-tree` shows the textual conflicts, but the CLEAN side may keep a line that a cross-PR ruling says to change (PR #20's `routes.use(prefix, mw, api)`). Print the merged function body and check every ruling line.
+
+**Event-trigger DDL guards (PR #24, 2026-11-13).**
+- `ddl_command_end` reports only the address a command returns. Side-effect objects with user-chosen names are invisible to an own-name match.
+  - Known case: `CREATE TYPE r AS RANGE (multirange_type_name = x)` creates pg_type x. Proved: utility.c T_CreateRangeStmt → DefineRange returns the range type.
+  - Already covered by the per-command reports or the PR12-SEC-02-a fix: identity sequences, constraint-backed indexes, EXCLUDE.
+- Ask for a post-command catalogue INVARIANT (no non-owner object under the reserved names in protected schemas) rather than enumerating command forms.
+- Probe it on PGlite (see [[scratch-copy-technique]]).
+
+**Contract-pipeline unions.** The api tests may keep their own copy of an app constant (contract-validation's CRITICAL list). A PR that changes the constant in the app passes on its own base and breaks on the merge. Always run the api project on `git merge-tree` output.
+
+**Gate-tooling PRs that add a folder (PR #23, 2026-11-13).**
+- A new tool folder that a base-ref CI step depends on must be CODEOWNED. Prove it with `node tools/ci/check-security-owned-paths.mjs --root . --base origin/main --head HEAD --pr <n> --json` and read `owned`: PR text, manifest `security_critical_paths` and docs all said "security-owned" while the list had no such paths. Same class as PR #4 R3-M1.
+- Tripwire tests that `toContain` a command prefix miss an appended flag. Mutate the base-ref line with `--report-only` (the checker then always exits 0) and run `ci-policy.test -t "<name>"` plus `check-workflow-policy.mjs`.
+- "A JUnit for a planned suite fails the check" can be implemented as "the run is rejected": the check still passes when nothing is required. Probe the all-planned manifest with a run holding those JUnits.
+- A verifier that lazily loads a dependency (Ajv only when runs exist) is untested by CI. Probe the real CI shape: script copied outside the workspace with no node_modules above it, `--root` a repo with a `node_modules` junction.
+- Squash merge + "git_sha is an ancestor of head": fine on pull_request, red on a push-to-main range. Check whether the step has an event switch like check-security-owned-paths.
+- Evidence windows ordered by an attacker-controlled stamp can only deny, not forge; confirm that runs touched by the range are always evaluated.
+
+**Tripwire-on-a-security-flag pattern (PR #23 r2, good):** `swap(run, from, to)` mutations + a findings function, asserted `changed: true, findings: true` for every variant (appended, prepended, valued, in comment, dropped, doubled, `|| true`). Ask for this shape whenever a PR pins a flag that disables a gate (`--report-only`, `continue-on-error`). Always re-mutate the real file in an extract as well.
+
+**Benchmark / load-spike PRs (PR #27 SPK-04, 2026-11-13).**
+- Check the verdict against the PR's own validity rule: count valid arms per run in `summary.json` (`validity.valid`). "Structural" claims need at least one valid arm; otherwise the honest word is "not demonstrated".
+- Re-read every number the prose cites against the artefact by arm (the `docker stats` 54% was from the collapsed `off` arm, not the arm discussed). Grep the artefacts for any figure that has no source (`0.26 cores`).
+- Test the doc's mechanism with arithmetic: M/D/1 mean wait = rho*h/(2(1-rho)). A model that predicts 3 ms where 98 ms is measured means the mechanism (or the host) is not what the doc says.
+- Same configuration at two rates with a 10x worse tail at the LOWER rate = uncontrolled variable (order, DB state, host), so that arm cannot be ranked.
+- Fixed arm order + one DB across arms: the next repetition's baseline inherits the previous (possibly invalid) arm. Flag pooled mean-of-2 deltas.
+- Kept spike harness vs sheet "throwaway not merged": ask whether any CI lane executes it. SPK-03/08 precedent was `*.int.test.ts` (CI-run, named porting task). A runner needing Docker + k6 is not comparable. Cross-check open sibling PRs for deletions of files the harness reads (`gh pr view N --json files` shows deletions; `git show origin/prN:path`); fetch with `git fetch origin pull/N/head:refs/remotes/origin/prN` then delete the ref.
+- Prototype SQL reused from an earlier spike can carry design artefacts the data-model later removed (audit_entries RLS); advice derived from them (no RETURNING under RLS) must be marked prototype-specific.
+- Cheap independent checks that worked: canonicalize differential vs the installed `canonicalize` pkg (20k random, 0 diffs; lone surrogate differs), PGlite for SQL-text defect claims (use String.fromCharCode(92) in the probe; .mts for top-level await), eslint with the config block regex-removed to prove it is needed.

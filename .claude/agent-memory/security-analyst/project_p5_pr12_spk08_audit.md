@@ -23,7 +23,7 @@ The PR #12 review (TASK-012, spike, test-only) is in `docs/05-quality/security/P
 **Why:** O4 (audit immutability) closes only if TASK-021, TASK-033 and TASK-116 carry these items, and G4-production needs the corrected RDS residual statement.
 
 **How to apply.** In these reviews, check:
-- **TASK-021:**
+- **TASK-021:** all items below were verified in PR #24 R1 (2026-11-13), except the first, which stays open as PR24-SEC-01 (side-effect squats; merge condition C1). See [[project-p5-pr24-audit-store]].
   - the guard matches the object's own name for every relkind and type;
   - `ensure` fails loudly on a name collision (`AUDIT_PARTITION_NAME_TAKEN`);
   - readiness is catalogue contiguity, current to current + 2, non-pending;
