@@ -57,25 +57,35 @@ export async function writeGenerated({ specPath, outFile }: GeneratedTypesFiles)
   await writeFile(outFile, await renderTypes(specPath, outFile), 'utf8');
 }
 
-export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
-  const files = { specPath: OPENAPI_PATH, outFile: TYPES_GEN_PATH };
+/** Where the CLI writes its messages; the process streams by default, a capture in tests. */
+export interface CliOutput {
+  readonly stdout: { write(text: string): unknown };
+  readonly stderr: { write(text: string): unknown };
+}
+
+export async function main(
+  argv: readonly string[] = process.argv.slice(2),
+  files: GeneratedTypesFiles = { specPath: OPENAPI_PATH, outFile: TYPES_GEN_PATH },
+  output: CliOutput = process,
+): Promise<number> {
+  const { stdout, stderr } = output;
   const unknown = argv.filter((arg) => arg !== '--check');
   if (unknown.length > 0) {
-    process.stderr.write(`[openapi:types] unknown argument(s): ${unknown.join(' ')} (usage: openapi:types [-- --check])\n`);
+    stderr.write(`[openapi:types] unknown argument(s): ${unknown.join(' ')} (usage: openapi:types [-- --check])\n`);
     return 2;
   }
   try {
     if (argv.includes('--check')) {
       const { stale } = await checkGenerated(files);
-      for (const file of stale) process.stdout.write(`stale: ${file}\n`);
-      if (stale.length > 0) process.stderr.write('[openapi:types] generated types are stale: run `npm run openapi:types`\n');
+      for (const file of stale) stdout.write(`stale: ${file}\n`);
+      if (stale.length > 0) stderr.write('[openapi:types] generated types are stale: run `npm run openapi:types`\n');
       return stale.length > 0 ? 1 : 0;
     }
     await writeGenerated(files);
-    process.stdout.write(`[openapi:types] wrote ${repoRelative(files.outFile)}\n`);
+    stdout.write(`[openapi:types] wrote ${repoRelative(files.outFile)}\n`);
     return 0;
   } catch (error) {
-    process.stderr.write(`[openapi:types] ${error instanceof Error ? error.message : String(error)}\n`);
+    stderr.write(`[openapi:types] ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
 }

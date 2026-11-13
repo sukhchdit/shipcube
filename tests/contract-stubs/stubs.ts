@@ -41,6 +41,8 @@ export type StubResolution =
   | { readonly kind: 'stub'; readonly stub: ContractStub; readonly variant: StubVariant }
   | { readonly kind: 'no-variant'; readonly stub: ContractStub; readonly reason: string }
   | { readonly kind: 'method-not-allowed'; readonly allow: readonly string[] }
+  /** OPTIONS on a known path without an OPTIONS operation: 204 + Allow, as the API answers (PR #21 R1-m3). */
+  | { readonly kind: 'options'; readonly allow: readonly string[] }
   | { readonly kind: 'not-found' };
 
 type JsonObject = Readonly<Record<string, unknown>>;
@@ -150,9 +152,11 @@ export function resolveStub(stubs: readonly ContractStub[], method: string, url:
     if (matching.length === 0) return { kind: 'not-found' };
     stub = matching.find((candidate) => candidate.method === wanted);
     if (stub === undefined) {
-      const allow = new Set(matching.map((candidate) => candidate.method as string));
+      // The API answers OPTIONS on every known path, so it is always allowed (RFC 9110 §15.5.6, fallback.ts).
+      const allow = new Set([...matching.map((candidate) => candidate.method as string), 'OPTIONS']);
       if (allow.has('GET')) allow.add('HEAD');
-      return { kind: 'method-not-allowed', allow: ALLOW_ORDER.filter((name) => allow.has(name)) };
+      const allowed = ALLOW_ORDER.filter((name) => allow.has(name));
+      return wanted === 'OPTIONS' ? { kind: 'options', allow: allowed } : { kind: 'method-not-allowed', allow: allowed };
     }
   } else {
     stub = stubs.find((candidate) => candidate.operationId === selection.operationId);

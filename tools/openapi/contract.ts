@@ -59,11 +59,17 @@ export interface ContractOperation {
 
 const cache = new Map<string, Promise<OpenApiDocument>>();
 
+/**
+ * `$ref` resolution never uses the network (PR21-SEC-07): an `http(s)` reference fails the load instead of fetching
+ * unreviewed schema content. Every reference in the contract is internal (`#/...`); local file references still work.
+ */
+export const DEREFERENCE_OPTIONS = { resolve: { http: false } } as const;
+
 /** Parses and dereferences the document once per path (per Jest worker). Throws on a parse or `$ref` error. */
 export function loadContract(path: string = OPENAPI_PATH): Promise<OpenApiDocument> {
   let loaded = cache.get(path);
   if (loaded === undefined) {
-    loaded = SwaggerParser.dereference(path) as unknown as Promise<OpenApiDocument>;
+    loaded = SwaggerParser.dereference(path, DEREFERENCE_OPTIONS) as unknown as Promise<OpenApiDocument>;
     cache.set(path, loaded);
   }
   return loaded;

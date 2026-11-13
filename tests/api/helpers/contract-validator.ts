@@ -15,8 +15,16 @@ export const CORRELATION_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 /** Framework errors valid on every path, whatever the operation's `x-error-codes` (api/README.md §3). */
 export const FRAMEWORK_ERROR_CODES: Readonly<Record<string, number>> = Object.freeze({ NOT_FOUND: 404, METHOD_NOT_ALLOWED: 405 });
 export const PROBLEM_MEDIA_TYPE = 'application/problem+json';
-/** Keys whose values never appear in a failure message. */
-const SENSITIVE_KEY = /token|secret|password|authorization|cookie/i;
+/**
+ * Keys whose values never appear in a failure message (PR21-SEC-07: one-time and credential-like contract fields such
+ * as `reauth_proof`, `recovery_codes`, `provisioning_uri` and signatures included). TASK-010's log redaction list
+ * becomes the single source once it lands.
+ */
+const SENSITIVE_KEY = /token|secret|password|passphrase|authorization|cookie|proof|recovery|provisioning|signature|otp|key/i;
+/** `code` is a TOTP code in auth bodies but the catalogue code in problem bodies, which the excerpt keeps readable. */
+const CODE_KEY = 'code';
+/** OpenAPI 3.0 keywords that 3.1 dropped; Ajv would still apply `nullable` natively, unlike the 3.1 semantics. */
+const OPENAPI_30_KEYWORDS = ['nullable'];
 const EXCERPT_LENGTH = 500;
 const MAX_EXCERPT_DEPTH = 8;
 /** OpenAPI 3.1 schema keywords JSON Schema 2020-12 does not define; annotations only. */
@@ -106,17 +114,25 @@ function rootSchemas(doc: OpenApiDocument): unknown[] {
   return roots;
 }
 
-/** Formats used and vendor-extension keywords found in schema positions. */
-export function scanSchemas(doc: OpenApiDocument): { formats: Set<string>; extensionKeywords: Set<string> } {
+/** Formats used, vendor-extension keywords and OpenAPI 3.0-only keywords found in schema positions. */
+export function scanSchemas(doc: OpenApiDocument): {
+  formats: Set<string>;
+  extensionKeywords: Set<string>;
+  openApi30Keywords: Set<string>;
+} {
   const formats = new Set<string>();
   const extensionKeywords = new Set<string>();
+  const openApi30Keywords = new Set<string>();
   const seen = new Set<unknown>();
   const visit = (schema: JsonObject): void => {
     if (typeof schema['format'] === 'string') formats.add(schema['format']);
-    for (const key of Object.keys(schema)) if (key.startsWith('x-')) extensionKeywords.add(key);
+    for (const key of Object.keys(schema)) {
+      if (key.startsWith('x-')) extensionKeywords.add(key);
+      if (OPENAPI_30_KEYWORDS.includes(key)) openApi30Keywords.add(key);
+    }
   };
   for (const root of rootSchemas(doc)) walkSchema(root, visit, seen);
-  return { formats, extensionKeywords };
+  return { formats, extensionKeywords, openApi30Keywords };
 }
 
 function genericServerDetailOf(doc: OpenApiDocument): string {
@@ -140,6 +156,16 @@ function headerOf(headers: Readonly<Record<string, HeaderValue>>, name: string):
   const wanted = name.toLowerCase();
   const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === wanted);
   return key === undefined ? undefined : headers[key];
+}
+
+/** The upper-case methods of a non-empty `Allow` header, or `undefined`. */
+function allowedOf(response: ResponseUnderTest): string[] | undefined {
+  const allow = headerOf(response.headers, 'allow');
+  if (typeof allow !== 'string' || allow.trim() === '') return undefined;
+  return allow
+    .toUpperCase()
+    .split(',')
+    .map((method) => method.trim());
 }
 
 function hasBody(response: ResponseUnderTest): boolean {
@@ -167,7 +193,10 @@ export function redactForExcerpt(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) return value.map((item: unknown) => redactForExcerpt(item, depth + 1));
   if (!isObject(value)) return value;
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, SENSITIVE_KEY.test(key) ? '[REDACTED]' : redactForExcerpt(item, depth + 1)]),
+    Object.entries(value).map(([key, item]) => [
+      key,
+      SENSITIVE_KEY.test(key) || (key === CODE_KEY && !isErrorCode(item)) ? '[REDACTED]' : redactForExcerpt(item, depth + 1),
+    ]),
   );
 }
 
@@ -194,8 +223,12 @@ function responseFor(operation: ContractOperation, status: number): JsonObject |
 }
 
 export function createContractValidator(doc: OpenApiDocument): ContractValidator {
-  const { formats, extensionKeywords } = scanSchemas(doc);
+  const { formats, extensionKeywords, openApi30Keywords } = scanSchemas(doc);
   assertKnownFormats(formats);
+  if (openApi30Keywords.size > 0) {
+    // Ajv implements `nullable` itself, so strict mode would accept it with 3.0 meaning (PR #21 N3); 3.1 uses type: [.., 'null'].
+    throw new Error(`openapi.yaml: OpenAPI 3.0 schema keyword(s) ${[...openApi30Keywords].join(', ')} in a 3.1 document`);
+  }
   const problemSchema = objectAt(doc, 'components', 'schemas', 'Problem');
   if (problemSchema === undefined) throw new Error('openapi.yaml: components/schemas/Problem is missing');
   const genericServerDetail = genericServerDetailOf(doc);
@@ -270,19 +303,28 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
       into.push(`/headers/content-type: a framework ${String(expected)} must be ${PROBLEM_MEDIA_TYPE}`);
     }
     if (pathKnown) {
-      const allow = headerOf(response.headers, 'allow');
-      if (typeof allow !== 'string' || allow.trim() === '') into.push('/headers/allow: a 405 must list the allowed methods');
-      else if (
-        allow
-          .toUpperCase()
-          .split(/\s*,\s*/)
-          .includes(response.method.toUpperCase())
-      ) {
-        into.push(`/headers/allow: "${allow}" lists the refused method ${response.method.toUpperCase()}`);
+      const allow = allowedOf(response);
+      if (allow === undefined) into.push('/headers/allow: a 405 must list the allowed methods');
+      else if (allow.includes(response.method.toUpperCase())) {
+        into.push(`/headers/allow: "${allow.join(', ')}" lists the refused method ${response.method.toUpperCase()}`);
+      } else if (!allow.includes('OPTIONS')) {
+        into.push(`/headers/allow: "${allow.join(', ')}" must include OPTIONS (answered on every known path)`);
       }
     }
     validateBody(`framework ${String(expected)}`, problemSchema, response.body, into);
     checkProblem(response, [code], into);
+  };
+
+  /** OPTIONS on a known path without an OPTIONS operation: 204, no body, `Allow` including OPTIONS (PR #21 R1-m3). */
+  const validateOptionsResponse = (response: ResponseUnderTest, into: string[]): void => {
+    if (response.status !== 204) {
+      into.push(`/status: OPTIONS on a known path answers 204 with Allow; got ${String(response.status)}`);
+      return;
+    }
+    if (hasBody(response)) into.push('/body: an OPTIONS 204 has no body');
+    const allow = allowedOf(response);
+    if (allow === undefined) into.push('/headers/allow: an OPTIONS 204 must list the allowed methods');
+    else if (!allow.includes('OPTIONS')) into.push(`/headers/allow: "${allow.join(', ')}" must include OPTIONS`);
   };
 
   const validateOperationResponse = (operation: ContractOperation, response: ResponseUnderTest, into: string[]): void => {
@@ -331,7 +373,9 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
     const lookup = method === 'HEAD' && resolveOperation('HEAD', response.path) === undefined ? 'GET' : method;
     const operation = resolveOperation(lookup, response.path);
     if (operation === undefined) {
-      validateFrameworkResponse(response, matchAll(templates, response.path).length > 0, deviations);
+      const pathKnown = matchAll(templates, response.path).length > 0;
+      if (pathKnown && method === 'OPTIONS') validateOptionsResponse(response, deviations);
+      else validateFrameworkResponse(response, pathKnown, deviations);
     } else if (lookup !== method) {
       if (responseFor(operation, response.status) === undefined) {
         deviations.push(`/status: status ${String(response.status)} is not declared for ${operation.operationId}`);

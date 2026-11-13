@@ -33,8 +33,10 @@ describe('path template matching', () => {
     expect(matchPath(templates, `/api/v1/orgs/${'a'.repeat(MAX_MATCH_PATH_LENGTH)}`)).toBeUndefined();
   });
 
-  it('trailing slashes and case are significant', () => {
-    expect(matchPath(templates, '/health/live/')).toBeUndefined();
+  it('one trailing slash is ignored like Express non-strict routing (PR #21 N4); more slashes and case are significant', () => {
+    expect(matchPath(templates, '/health/live/')?.value).toBe('/health/live');
+    expect(matchPath(templates, '/health/live/?probe=1')?.value).toBe('/health/live');
+    expect(matchPath(templates, '/health/live//')).toBeUndefined();
     expect(matchPath(templates, '/Health/live')).toBeUndefined();
   });
 });

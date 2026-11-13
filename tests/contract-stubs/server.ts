@@ -1,7 +1,8 @@
 // node:http server answering every openapi.yaml operation with its documented example (TASK-017 sheet item, US-034,
 // ADR-0016 §1). Local development and tests only: binds 127.0.0.1 by default, ignores request bodies, never calls out.
 // Framework behaviour mirrors the API (api/README.md §3, REQ-PLAT-010/011): X-Correlation-Id echoed when valid else
-// generated, 404 NOT_FOUND / 405 METHOD_NOT_ALLOWED (with Allow) as problem+json. `Prefer: code=<status>` and
+// generated, 404 NOT_FOUND / 405 METHOD_NOT_ALLOWED (with Allow) as problem+json, OPTIONS on a known path 204 with
+// Allow (including OPTIONS, also listed in every 405 Allow). `Prefer: code=<status>` and
 // `Prefer: example=<name>` select another documented response.
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -103,6 +104,10 @@ function handle(stubs: readonly ContractStub[], req: IncomingMessage, res: Serve
       return;
     case 'method-not-allowed':
       sendProblem(res, problem('METHOD_NOT_ALLOWED', path, correlationId), { Allow: resolution.allow.join(', ') });
+      return;
+    case 'options':
+      res.writeHead(204, { Allow: resolution.allow.join(', ') });
+      res.end();
       return;
     case 'no-variant':
       // A stub-tool usage error (unknown Prefer target), not contract behaviour of the operation.

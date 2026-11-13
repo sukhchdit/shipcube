@@ -13,7 +13,8 @@ import {
   type ReadinessCheck,
   type ReadinessComponent,
 } from '../../apps/api/src/platform/runtime/readiness.js';
-import type { ResponseUnderTest } from './helpers/contract-validator.js';
+import type { OpenApiDocument } from '../../tools/openapi/contract.js';
+import { createContractValidator, type ResponseUnderTest } from './helpers/contract-validator.js';
 import { api, contractValidator, expectContract } from './helpers/expect-contract.js';
 
 const silent = { info: () => undefined, error: () => undefined };
@@ -111,8 +112,61 @@ describe('US-034 response validation helper', () => {
   it('framework errors conform: unknown route 404 NOT_FOUND and wrong method 405 with Allow', async () => {
     const client = await api(healthApp());
     await client.get('/api/v1/does-not-exist?token=abc').expect(404);
-    await client.post('/health/live').expect(405).expect('Allow', /GET/);
+    await client.post('/health/live').expect(405).expect('Allow', 'GET, HEAD, OPTIONS');
     await expectContract(await request(healthApp()).get('/does-not-exist'));
+  });
+
+  it('[PR #21 R1-m3] OPTIONS on a known path is 204 with Allow including OPTIONS, through the helper; a 405 Allow must list OPTIONS', async () => {
+    const client = await api(healthApp());
+    await client.options('/health/live').expect(204).expect('Allow', 'GET, HEAD, OPTIONS');
+    await client.options('/api/v1/does-not-exist').expect(404);
+
+    const validator = await contractValidator();
+    const options = (overrides: Partial<ResponseUnderTest>): ResponseUnderTest =>
+      response({
+        method: 'OPTIONS',
+        path: '/health/live',
+        status: 204,
+        headers: { 'x-correlation-id': CORRELATION_ID },
+        body: undefined,
+        text: '',
+        ...overrides,
+      });
+    expect(validator.validateResponse(options({ headers: { 'x-correlation-id': CORRELATION_ID, allow: 'GET, HEAD, OPTIONS' } }))).toEqual(
+      [],
+    );
+    expect(validator.validateResponse(options({ headers: { 'x-correlation-id': CORRELATION_ID, allow: 'GET, HEAD' } }))).toEqual([
+      '/headers/allow: "GET, HEAD" must include OPTIONS',
+    ]);
+    expect(validator.validateResponse(options({ status: 405 }))).toEqual([
+      '/status: OPTIONS on a known path answers 204 with Allow; got 405',
+    ]);
+    const methodNotAllowed = response({
+      method: 'POST',
+      path: '/health/live',
+      status: 405,
+      headers: { 'content-type': 'application/problem+json', 'x-correlation-id': CORRELATION_ID, allow: 'GET, HEAD' },
+      body: problem('METHOD_NOT_ALLOWED', 405, { instance: '/health/live' }),
+    });
+    expect(validator.validateResponse(methodNotAllowed)).toEqual([
+      '/headers/allow: "GET, HEAD" must include OPTIONS (answered on every known path)',
+    ]);
+  });
+
+  it('[PR #21 N4] a request path with one trailing slash is validated like the path Express serves it from', async () => {
+    const client = await api(healthApp());
+    await client.get('/health/live/').expect(200, { status: 'ok' });
+  });
+
+  it('[PR #21 N3] refuses a document that uses the OpenAPI 3.0 nullable keyword (Ajv would apply it natively)', async () => {
+    const validator = await contractValidator();
+    const edited = structuredClone(validator.document) as unknown as { components: { schemas: Record<string, Record<string, unknown>> } };
+    const problemSchema = edited.components.schemas['Problem'];
+    if (problemSchema === undefined) throw new Error('no Problem schema');
+    problemSchema['nullable'] = true;
+    expect(() => createContractValidator(edited as unknown as OpenApiDocument)).toThrow(
+      'openapi.yaml: OpenAPI 3.0 schema keyword(s) nullable in a 3.1 document',
+    );
   });
 
   it('checks problem codes, catalogue status, type, 5xx detail, media type and the correlation header', async () => {
@@ -159,11 +213,22 @@ describe('US-034 response validation helper', () => {
 
     const sentinel = `sentinel-${String(Date.now())}`;
     const leaky = response({
-      body: { access_token: sentinel, nested: { Authorization: sentinel, refreshCookie: sentinel }, filler: 'f'.repeat(900) },
+      body: {
+        access_token: sentinel,
+        nested: { Authorization: sentinel, refreshCookie: sentinel },
+        // PR21-SEC-07: one-time and credential-like contract fields; `code` is a TOTP code unless it is a catalogue code.
+        reauth_proof: sentinel,
+        recovery_codes: [sentinel],
+        provisioning_uri: sentinel,
+        mfa: { code: sentinel },
+        code: 'NOT_FOUND',
+        filler: 'f'.repeat(900),
+      },
     });
     const message = validator.describeFailure(leaky, validator.validateResponse(leaky));
     expect(message).not.toContain(sentinel);
     expect(message).toContain('"access_token":"[REDACTED]"');
+    expect(message).toContain('"code":"NOT_FOUND"');
     const excerpt = /Body excerpt \(redacted\): (.*)$/s.exec(message)?.[1] ?? '';
     expect(excerpt.length).toBeLessThanOrEqual(501);
   });

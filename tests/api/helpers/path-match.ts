@@ -44,9 +44,13 @@ function bySpecificity(a: PathTemplate<unknown>, b: PathTemplate<unknown>): numb
   return 0;
 }
 
-/** Every template matching `target` (query ignored), most specific first. */
+/**
+ * Every template matching `target` (query ignored), most specific first. One trailing `/` is ignored, as Express's
+ * non-strict routing serves `/health/live/` from `/health/live` (PR #21 N4).
+ */
 export function matchAll<T>(templates: readonly PathTemplate<T>[], target: string): PathTemplate<T>[] {
-  const path = requestPathOf(target);
+  const requested = requestPathOf(target);
+  const path = requested.length > 1 && requested.endsWith('/') ? requested.slice(0, -1) : requested;
   if (path.length > MAX_MATCH_PATH_LENGTH) return [];
   const parts = path.split('/');
   return templates.filter((candidate) => matches(candidate.segments, parts)).sort(bySpecificity);

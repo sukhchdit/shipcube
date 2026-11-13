@@ -81,7 +81,8 @@ describe('contract stubs from openapi.yaml examples', () => {
       reason: 'getShipment documents no 418 response',
     });
     expect(resolveStub(stubs, 'GET', path, { exampleName: 'nope' })).toMatchObject({ kind: 'no-variant' });
-    expect(resolveStub(stubs, 'POST', '/health/live')).toEqual({ kind: 'method-not-allowed', allow: ['GET', 'HEAD'] });
+    expect(resolveStub(stubs, 'POST', '/health/live')).toEqual({ kind: 'method-not-allowed', allow: ['GET', 'HEAD', 'OPTIONS'] });
+    expect(resolveStub(stubs, 'OPTIONS', '/health/live')).toEqual({ kind: 'options', allow: ['GET', 'HEAD', 'OPTIONS'] });
     expect(resolveStub(stubs, 'GET', '/api/v1/nowhere')).toEqual({ kind: 'not-found' });
   });
 
@@ -127,8 +128,12 @@ describe('contract stubs from openapi.yaml examples', () => {
       expect(unknown).toMatchObject({ status: 404, body: { code: 'NOT_FOUND', instance: '/api/v1/nowhere' } });
       expect(validator.validateResponse(unknown)).toEqual([]);
       const wrongMethod = await fetched('DELETE', '/health/live', await fetch(`${server.url}/health/live`, { method: 'DELETE' }));
-      expect(wrongMethod).toMatchObject({ status: 405, headers: { allow: 'GET, HEAD' } });
+      expect(wrongMethod).toMatchObject({ status: 405, headers: { allow: 'GET, HEAD, OPTIONS' } });
       expect(validator.validateResponse(wrongMethod)).toEqual([]);
+      // PR #21 R1-m3: OPTIONS on a known path answers like the API (204, Allow including OPTIONS, no body).
+      const options = await fetched('OPTIONS', '/health/live', await fetch(`${server.url}/health/live`, { method: 'OPTIONS' }));
+      expect(options).toMatchObject({ status: 204, headers: { allow: 'GET, HEAD, OPTIONS' } });
+      expect(validator.validateResponse(options)).toEqual([]);
       const path = '/api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01';
       const preferred = await fetched('GET', path, await fetch(`${server.url}${path}`, { headers: { Prefer: 'code=404' } }));
       expect(preferred).toMatchObject({ status: 404, body: { code: 'NOT_FOUND', instance: path } });
