@@ -13,11 +13,14 @@
  */
 import { describe, expect, it } from '@jest/globals';
 
+import { sqlText } from '../db/sql-text.js';
 import { CONTEXT_READ_FORMS, CONTEXT_WRITE_FORMS, contextReads, contextWrites } from '../db/tenant-key-forms.js';
-import { FORMS } from '../eslint-rules/tenant-context-sql.mjs';
+import { FORMS, matchesForm, textVariants } from '../eslint-rules/tenant-context-sql.mjs';
 
 const SETTER_NAME = ['set', 'config'].join('_');
-const expand = (sample: string): string => sample.replaceAll('{A}', 'app').replaceAll('{S}', SETTER_NAME);
+/** `{U}` is the Unicode-escape prefix (U and an ampersand), spelled at run time for the same reason as `{A}` / `{S}`. */
+const UNICODE_PREFIX = ['U', '&'].join('');
+const expand = (sample: string): string => sample.replaceAll('{A}', 'app').replaceAll('{S}', SETTER_NAME).replaceAll('{U}', UNICODE_PREFIX);
 
 const eslintForm = (form: string): RegExp => {
   const entry = FORMS.find((candidate) => candidate.form === form);
@@ -29,6 +32,7 @@ const SESSION_SET = eslintForm('session-set');
 const KEYS = eslintForm('keys');
 const SETTER = eslintForm('setter');
 const SESSION_SET_CONFIG = eslintForm('session-set-config');
+const UNICODE = eslintForm('unicode-escape');
 
 const labelOf = (form: (typeof CONTEXT_WRITE_FORMS)[number] | undefined): string => {
   if (form === undefined) throw new Error('tenant-key-forms.ts lost a form this test relies on');
@@ -37,6 +41,32 @@ const labelOf = (form: (typeof CONTEXT_WRITE_FORMS)[number] | undefined): string
 const SETTER_WRITE = labelOf(CONTEXT_WRITE_FORMS[0]);
 const SET_WRITE = labelOf(CONTEXT_WRITE_FORMS[1]);
 const KEY_READ = labelOf(CONTEXT_READ_FORMS[0]);
+const UNICODE_WRITE = labelOf(CONTEXT_WRITE_FORMS[5]);
+
+/**
+ * PR11-SEC-17: comment-split forms. The rule matches each text as written and comment-stripped (`textVariants`); the
+ * SQL lanes read comments as one space (`sqlText`). [sample, SET/RESET of an app. setting, mentions a security key].
+ */
+const COMMENT_CORPUS: readonly (readonly [sample: string, write: boolean, key: boolean])[] = [
+  ['SET/**/{A}.org_id = 1', true, true],
+  ['SET /* x */ LOCAL /* y */ {A}.actor_id = 1', true, true],
+  ['SET -- line\n {A}.actor_scope = 1', true, true],
+  ['RESET/* x */"{A}".x', true, false],
+  ['SET/**/LOCAL/**/statement_timeout = 1000', false, false],
+  ['SELECT 1 -- {A}_org_id', false, false],
+];
+
+/** PR11-SEC-17: the Unicode-escape write form (`{U}` = the prefix). [sample, is a Unicode-escape string or identifier]. */
+const UNICODE_CORPUS: readonly (readonly [sample: string, unicode: boolean])[] = [
+  [String.raw`SET LOCAL {U}"\0061pp".org_id = 1`, true],
+  [String.raw`PERFORM {U}"\0073et_config"({U}'\0061pp.org_id', p, true)`, true],
+  [String.raw`EXECUTE {U}'SET LOCAL \0061pp.org_id = 1'`, true],
+  [String.raw`show {U}"\0061pp".actor_scope`, true],
+  [String.raw`SET/**/{U}"\0061pp".org_id = 1`, true],
+  ["SELECT menu&'x'", false],
+  ["SELECT 'U & x'", false],
+  ['SELECT 1', false],
+];
 
 /** [sample (with `{A}` / `{S}` placeholders), is a SET/RESET of an app. setting, mentions a security key]. */
 const CORPUS: readonly (readonly [sample: string, write: boolean, key: boolean])[] = [
@@ -89,5 +119,34 @@ describe('tenant-context form twins agree (R2-m2: eslint rule vs tools/db/tenant
   it('the twins are the patterns this test names (sources pinned to the shared list)', () => {
     expect(SESSION_SET.source).toBe(CONTEXT_WRITE_FORMS[1]?.[1].source);
     expect(KEYS.source).toBe(CONTEXT_READ_FORMS[0]?.[1].source);
+    // [PR11-SEC-17] WRITE[5] pinned: the rule's unicode-escape form is the shared list's Unicode-escape form.
+    expect(UNICODE.source).toBe(CONTEXT_WRITE_FORMS[5]?.[1].source);
+    expect(UNICODE_WRITE).toBe('Unicode-escape string or identifier');
+  });
+
+  it.each(COMMENT_CORPUS)('[PR11-SEC-17] comments stripped: %j (write %s, key %s)', (sample, write, key) => {
+    const text = expand(sample);
+    const sql = sqlText(text, true);
+    expect({
+      eslintWrite: matchesForm(SESSION_SET, text),
+      sqlWrite: contextWrites(sql).includes(SET_WRITE),
+      eslintKey: matchesForm(KEYS, text),
+      sqlKey: contextReads(sql).includes(KEY_READ),
+    }).toEqual({ eslintWrite: write, sqlWrite: write, eslintKey: key, sqlKey: key });
+  });
+
+  it.each(UNICODE_CORPUS)('[PR11-SEC-17] unicode escape: %j (%s)', (sample, unicode) => {
+    const text = expand(sample);
+    expect({ eslint: matchesForm(UNICODE, text), sql: contextWrites(text).includes(UNICODE_WRITE) }).toEqual({
+      eslint: unicode,
+      sql: unicode,
+    });
+  });
+
+  it('[PR11-SEC-17] the comment-stripped variant is matched in addition to the text as written, never instead of it', () => {
+    expect(textVariants('SELECT 1')).toEqual(['SELECT 1']);
+    const quoted = expand("SELECT '--', 1; SET {A}.org_id = 1");
+    expect(textVariants(quoted)).toEqual([quoted, "SELECT '"]);
+    expect(matchesForm(SESSION_SET, quoted)).toBe(true);
   });
 });

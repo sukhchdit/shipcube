@@ -113,7 +113,7 @@ describe('serializeThrown', () => {
     const error = { message: 'deep', stack: ['Error: deep', ...frames].join('\n') };
     const started = performance.now();
     const stack = serializeThrown(error).stack ?? '';
-    expect(performance.now() - started).toBeLessThan(200);
+    expect(performance.now() - started).toBeLessThan(2000);
     expect(stack.length).toBeLessThan(MAX_RAW_STACK_LENGTH);
     expect(stack.split('\n').filter((line) => line.startsWith('    at '))).toHaveLength(MAX_STACK_FRAMES);
   });

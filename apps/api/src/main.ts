@@ -6,9 +6,10 @@ import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit } from '@platform/config';
 import { createApp } from './app.js';
 import { moduleRegistry } from './modules/index.generated.js';
 import { resolveApiMode } from './platform/context/api-mode.js';
-import { createHealthRouter } from './platform/health/router.js';
+import { healthRoutes } from './platform/health/router.js';
 import { requestLogContext } from './platform/logging/correlation.js';
 import { DocsSpecError, docsOptionsFrom, type DocsOptions } from './platform/openapi/serve.js';
+import { bootFailureOf } from './platform/routing/pipeline.js';
 import { createRuntimeLog, readPackageVersion } from './platform/runtime/log.js';
 import { exitAfterFlush, installProcessErrorHandlers } from './platform/runtime/process-errors.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
@@ -29,19 +30,25 @@ installProcessErrorHandlers({ log, exit });
 const services = createRuntimeServices(config, 'api', log, secrets);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
+const health = healthRoutes({ probe: services.probe });
 let app: ReturnType<typeof createApp>;
 try {
+  // createApp runs the boot checks (TASK-020, PR32-SEC-05 (b)): routes declared with defineRoute, the runner for every
+  // tenant-transaction route, the route bindings of this APP_ENV (PR8-SEC-05) and the slot stubs' limits (PR32-SEC-03).
   app = createApp({
-    healthRouter: createHealthRouter({ probe: services.probe }),
+    health,
     modules: moduleRegistry,
+    tenantTx: services.tenantTx,
     apiMode: resolveApiMode(config.APP_ENV),
     ...(docs === undefined ? {} : { docs }),
     logger: log,
   });
 } catch (error) {
-  // DOCS_ENABLED without a readable contract is a deployment error: exit like a rejected configuration.
-  if (!(error instanceof DocsSpecError)) throw error;
-  log.error('api.docs_unavailable', { error: error.name });
+  // DOCS_ENABLED without a readable contract or a refused composition is a deployment error: exit like a rejected
+  // configuration.
+  const failure = error instanceof DocsSpecError ? { event: 'api.docs_unavailable', fields: { error: error.name } } : bootFailureOf(error);
+  if (failure === undefined) throw error;
+  log.error(failure.event, failure.fields);
   // A bare exit: top-level control flow needs `never` here (`app` is unassigned), and nothing else is queued yet.
   process.exit(CONFIG_EXIT_CODE);
 }

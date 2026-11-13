@@ -16,6 +16,7 @@ import pg from 'pg';
 import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.js';
 import { serverStamped, withStandardColumns } from '../../../apps/api/src/platform/db/index.js';
 import { DbError } from '../../../apps/api/src/platform/db/map-db-error.js';
+import { systemDelegates } from '../../../apps/api/src/platform/db/system-db.js';
 import type { TenantDb } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { createWithTenantTx, type TenantContext, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
 import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
@@ -119,7 +120,9 @@ afterAll(async () => {
 
 describe('US-064 server-controlled standard columns with the real Prisma 7 client (TASK-032)', () => {
   it('AT-US-064-01: create sets a UUIDv7 id, created_at = updated_at (timestamptz, UTC instant), created_by = updated_by = caller, version 1', async () => {
-    const created = await runner.withTenantTx(context(USER_A), (tx) => tx.referenceDatasetVersion.create({ data: dataset('std-create') }));
+    const created = await runner.withTenantTx(context(USER_A), (tx) =>
+      systemDelegates(tx).referenceDatasetVersion.create({ data: dataset('std-create') }),
+    );
     const row = await stored('std-create');
     expect(isUuidV7(row.id)).toBe(true);
     expect(row.version_nibble).toBe(7);
@@ -134,7 +137,7 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
   it('update stamps updated_by / updated_at and increments version by exactly 1; created_* are unchanged', async () => {
     const before = await stored('std-create');
     await runner.withTenantTx(context(USER_B), (tx) =>
-      tx.referenceDatasetVersion.update({ where: { dataset: 'std-create' }, data: { datasetVersion: 'v2' } }),
+      systemDelegates(tx).referenceDatasetVersion.update({ where: { dataset: 'std-create' }, data: { datasetVersion: 'v2' } }),
     );
     const after = await stored('std-create');
     expect(after).toMatchObject({ created_by: USER_A, updated_by: USER_B, version: 2, created_at_epoch: before.created_at_epoch });
@@ -143,7 +146,7 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
 
   it('createMany stamps every row with distinct, time-ordered UUIDv7 ids', async () => {
     await runner.withTenantTx(context(USER_A), (tx) =>
-      tx.referenceDatasetVersion.createMany({ data: [dataset('std-many-1'), dataset('std-many-2')] }),
+      systemDelegates(tx).referenceDatasetVersion.createMany({ data: [dataset('std-many-1'), dataset('std-many-2')] }),
     );
     const [first, second] = [await stored('std-many-1'), await stored('std-many-2')];
     expect([first.id, second.id].every(isUuidV7)).toBe(true);
@@ -152,7 +155,9 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
   });
 
   it('AT-US-064-02: a SYSTEM_JOB write records the reserved system user; the authz seed rows carry the same ID', async () => {
-    await runner.withTenantTx(context(SYSTEM_ACTOR_ID), (tx) => tx.referenceDatasetVersion.create({ data: dataset('std-system') }));
+    await runner.withTenantTx(context(SYSTEM_ACTOR_ID), (tx) =>
+      systemDelegates(tx).referenceDatasetVersion.create({ data: dataset('std-system') }),
+    );
     expect(await stored('std-system')).toMatchObject({ created_by: SYSTEM_ACTOR_ID, updated_by: SYSTEM_ACTOR_ID });
     const seeded = await raw.query<{ actors: string[] }>(
       'SELECT array_agg(DISTINCT created_by::text) || array_agg(DISTINCT updated_by::text) AS actors FROM public.permissions',
@@ -166,8 +171,8 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
       const error = await rejection(
         runner.withTenantTx(context(USER_A), async (tx) => {
           // An earlier write in the same transaction is rolled back with it.
-          await tx.referenceDatasetVersion.create({ data: dataset(`std-ok-${randomUUID()}`) });
-          return tx.referenceDatasetVersion.create({ data: { ...dataset(`std-forged-${randomUUID()}`), ...forged } });
+          await systemDelegates(tx).referenceDatasetVersion.create({ data: dataset(`std-ok-${randomUUID()}`) });
+          return systemDelegates(tx).referenceDatasetVersion.create({ data: { ...dataset(`std-forged-${randomUUID()}`), ...forged } });
         }),
       );
       expect(error).toMatchObject({ name: 'AppError', status: 400, code: 'VALIDATION_ERROR', errors: [{ code: 'UNKNOWN_FIELD' }] });
@@ -233,7 +238,7 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
 
   it('reads and raw queries pass through the extension unchanged inside the same transaction', async () => {
     const result = await runner.withTenantTx(context(USER_A), async (tx) => {
-      const found = await tx.referenceDatasetVersion.findUnique({ where: { dataset: 'std-system' } });
+      const found = await systemDelegates(tx).referenceDatasetVersion.findUnique({ where: { dataset: 'std-system' } });
       const rows = await tx.$queryRaw<Array<{ one: number }>>`SELECT 1 AS one`;
       return { found: found?.createdBy, one: rows[0]?.one };
     });

@@ -55,6 +55,8 @@ pnpm-debug.log*
 
 # Testing and coverage
 /coverage/
+# Contract-coverage report of the api lane (api/README.md §16 item 6; TASK-020).
+/reports/
 /apps/*/coverage/
 /packages/*/coverage/
 /tests/*/coverage/

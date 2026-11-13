@@ -67,6 +67,8 @@
 /tools/test-support/                    @sukhchdit
 # The unit-dom Jest environment, setup file and CSS stub (PR #4 R3-M1, PR4-SEC-11): they run before every component test.
 /tools/test-dom/                        @sukhchdit
+# The api project's global teardown (TASK-020 contract coverage report): Jest loads it for every api run (PR4-SEC-11).
+/tests/api/helpers/coverage-teardown.ts @sukhchdit
 # SWC compile options (PR17-SEC-01): jest.config.ts passes them inline with swcrc: false and the workflow policy
 # rejects any .swcrc, so a new one is both a policy finding and a record-requiring change.
 /.swcrc                                 @sukhchdit

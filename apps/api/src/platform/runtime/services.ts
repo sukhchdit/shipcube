@@ -8,6 +8,7 @@
  */
 import type { Config, Secret, Service } from '@platform/config';
 
+import type { TenantTxRunner } from '../db/index.js';
 import { type AuditReadinessChecks, databaseRuntimeFromConfig } from '../db/runtime.js';
 import { createObjectStorageCheck } from '../health/checks/object-storage.js';
 import type { ObjectStorage } from '../storage/object-storage.port.js';
@@ -40,6 +41,12 @@ export interface RuntimeServices {
    */
   readonly storage: ObjectStorage;
   readonly probe: ReadinessProbe;
+  /**
+   * The tenant-transaction runner of the database runtime, handed to createApp (the tx slot, TASK-020); undefined until
+   * the generated Prisma Client class is passed in (D-TASK020-05), and assertPipelineReady refuses to start an app that
+   * mounts a tenant-transaction route without it.
+   */
+  readonly tenantTx: TenantTxRunner<unknown> | undefined;
   /** Closed by graceful shutdown after the drain. */
   readonly resources: readonly Closeable[];
   /**
@@ -68,6 +75,7 @@ export function createRuntimeServices(
   return {
     valkey,
     storage,
+    tenantTx: database.tenantTx,
     probe: createReadinessProbe(
       readinessChecks(
         database.readinessCheck,

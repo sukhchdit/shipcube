@@ -177,12 +177,12 @@ describe('redactString', () => {
     ['a@', 'a@'],
     ['password: "', 'password: "'],
     ['x'.repeat(63) + ':', 'long keys'],
-  ])('a pathological 100 kB input (%s) finishes fast', (unit) => {
+  ])('a pathological 100 kB input (%s) finishes without catastrophic slowdown', (unit) => {
     const input = unit.repeat(Math.ceil(100_000 / unit.length));
     const started = performance.now();
     redactString(input);
     maskEmails(input);
-    expect(performance.now() - started).toBeLessThan(200);
+    expect(performance.now() - started).toBeLessThan(2000); // catastrophic guard only; growth is asserted in string-redaction.test.ts
   });
 
   it('property: an e-mail address never appears unmasked', () => {

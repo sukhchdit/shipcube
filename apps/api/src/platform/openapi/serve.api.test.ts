@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from '@jest/globals';
 import { loadConfig } from '@platform/config';
 import { createTestEnv } from '@platform/config/testing';
-import express, { type Express } from 'express';
+import type { Express } from 'express';
 import request from 'supertest';
 
 import { createApp, type AppDependencies } from '../../app.js';
@@ -40,7 +40,7 @@ const DOCS_PATHS = [
 
 function app(docs: AppDependencies['docs']): Express {
   return createApp({
-    healthRouter: express.Router(),
+    health: [],
     modules: [],
     logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
     ...(docs === undefined ? {} : { docs }),

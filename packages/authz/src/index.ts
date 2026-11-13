@@ -1,6 +1,7 @@
 // Public entry point of @platform/authz: permission catalogue, role seed, build-time guards, the authorisation
 // decision and the generators of the role-permission matrix document and the seed migration (ADR-0008).
 export {
+  AUDITOR_NON_READ_PERMISSIONS,
   CATEGORY_EXCEPTIONS,
   expectedCategory,
   isAuditPermission,
@@ -19,6 +20,8 @@ export {
   SCOPE_QUALIFIERS,
   SELF_SERVICE_CATEGORIES,
   SELF_SERVICE_PERMISSIONS,
+  SUB_RESOURCES,
+  WEBHOOK_PROVIDERS,
   type Permission,
   type PermissionCategory,
   type PermissionDefinition,
@@ -49,6 +52,29 @@ export {
 } from './guard.js';
 export { ASSIGNABLE_BY, canAssignRole } from './assign.js';
 export { authorise, effectivePermissions, UnknownRoleError, type AuthzDecision } from './authorise.js';
-export { assertRoutePermissions, findUnknownRoutePermissions, UnknownRoutePermissionError, type DeclaredRoute } from './routes.js';
+export {
+  assertRoutePermissions,
+  type BoundRoute,
+  type DeclaredRoute,
+  findRouteAuthSet,
+  findRouteBindingViolations,
+  findUnknownRoutePermissions,
+  formatRouteAuth,
+  isDualModeRoute,
+  isRouteAuth,
+  MOCK_GATEWAY_PERMISSION,
+  permissionAuthenticatedProblems,
+  ROUTE_AUTH_SETS,
+  ROUTE_AUTHS,
+  ROUTE_TENANCIES,
+  type RouteAuth,
+  type RouteAuthDeclaration,
+  routeAuthProblems,
+  type RouteAuthSet,
+  type RouteBindingRule,
+  type RouteBindingViolation,
+  type RouteTenancy,
+  UnknownRoutePermissionError,
+} from './routes.js';
 export { AUTHZ_GENERATE_COMMAND, MATRIX_DOC_PATH, renderRolePermissionMatrix } from './matrix-doc.js';
 export { linkKey, renderSeedMigration, SYSTEM_ACTOR_ID, type SeedIdFactory, type SeedIdKind, type SeedMigration } from './seed-sql.js';

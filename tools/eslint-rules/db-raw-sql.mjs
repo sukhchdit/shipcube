@@ -22,8 +22,13 @@
  *        namespace or a helper (the importing module would no longer be traceable), and a helper `sql`/`join`
  *        passed on as a value;
  *    plus `new Sql(…)` / `new <x>.Sql(…)` and `Prisma.raw` whatever the binding (belt and braces);
+ *    PR11-SEC-17 a: ANY other use of a tracked container (an argument, an object/array literal, `?:` / `??`, a spread,
+ *    a return, an array or member assignment target) is reported too, since the rule can no longer follow it, and so
+ *    is the `constructor` of a fragment (`` Prisma.sql`…`.constructor ``) and any `new (<x>.constructor)(…)`;
  *  - a NON-tagged `$queryRaw(…)` / `$executeRaw(…)` call (the `Sql`-object overload splices a pre-built fragment;
- *    only the tagged template binds every value);
+ *    only the tagged template binds every value), and (PR11-SEC-17 a) ANY read of either member that is not the tag
+ *    of a tagged template (an alias `const q = db.$queryRaw`, `Reflect.apply(db.$queryRaw, …)`, a destructured key);
+ *  - a computed member of a database handle (`db[k]`, `tx[name]`; by name, see `isDbHandle`), which hides the member;
  *  - `SET LOCAL` in source text (it cannot take a bind parameter, 42601; settings go through the transaction-local
  *    setter in withTenantTx).
  * Legal: tagged `` Prisma.sql`… ${v}` `` fragments, `Prisma.join(ids)`, `Prisma.join(ids, ', ')`, tagged
@@ -41,13 +46,16 @@ const ESCAPE_MEMBERS = new Map([
   ['requestTransaction', 'requestTransaction'],
 ]);
 const TAGGED_ONLY = new Set(['$queryRaw', '$executeRaw']);
+/** Names of database handles for the `db[k]` check (see `isDbHandle`). */
+const DB_HANDLE_NAME = /^(?:db|tx|prisma|client)$|(?:Db|Tx|Client|Prisma)$/u;
 const SET_LOCAL = /\bset\s+local\b/iu;
 /** Module specifiers that export Prisma's SQL helpers: the client, its runtime packages and the generated client. */
 const PRISMA_SOURCES = /^(?:@prisma\/client(?:\/.*)?|@prisma\/client-runtime-utils(?:\/.*)?|.*\/generated\/prisma(?:\/.*)?)$/u;
 
 /**
- * @typedef {'container' | 'raw' | 'Sql' | 'tag' | 'join' | 'typed'} Kind `container`: a module object or the
- *   `Prisma` namespace (its members are the helpers); the others: one helper.
+ * @typedef {'container' | 'raw' | 'Sql' | 'tag' | 'join' | 'typed' | 'fragment'} Kind `container`: a module object or
+ *   the `Prisma` namespace (its members are the helpers); `fragment`: a value built by `sql` / `join`; the others: one
+ *   helper.
  * @typedef {import('eslint').Rule.Node} RuleNode
  */
 
@@ -150,6 +158,12 @@ export default {
         "'{{name}}(…)' called without a tagged template splices a pre-built SQL fragment: write {{name}}`…` so every value is a bind parameter (ADR-0005 am. 10 item 4).",
       setLocal:
         'SET LOCAL cannot take a bind parameter (42601): settings are applied by withTenantTx with the transaction-local setter (ADR-0005 am. 10 item 4).',
+      containerValue:
+        "'{{name}}' (the Prisma client namespace or module) passed on as a value cannot be followed to its SQL helpers: read its members in place (ADR-0005 am. 10 item 4, PR11-SEC-17).",
+      rawRead:
+        "'{{name}}' read other than as a template tag (an alias, an argument such as Reflect.apply, a destructured key) escapes the tagged-only check: write {{name}}`…` in place (ADR-0005 am. 10 item 4, PR11-SEC-17).",
+      dynamicDbMember:
+        'A computed member of a database handle hides which member is used ($queryRawUnsafe, $parent, …): name the member statically (ADR-0005 am. 10 item 1, PR11-SEC-17).',
     },
   },
   create(context) {
@@ -212,7 +226,12 @@ export default {
           track(findVariable(sourceCode.getScope(target), target.name), kind, name);
         return;
       }
-      if (target.type !== 'ObjectPattern') return;
+      if (target.type !== 'ObjectPattern') {
+        // An array pattern or a member target (`o.p = Prisma`): the value leaves this rule's sight (PR11-SEC-17 a).
+        if (kind === 'container') report(target, 'containerValue', { name });
+        else if (kind === 'tag' || kind === 'join') report(target, 'helperValue', { name });
+        return;
+      }
       if (kind !== 'container') {
         if (kind === 'tag' || kind === 'join') report(target, 'helperValue', { name });
         return;
@@ -285,34 +304,78 @@ export default {
       // The plain ESTree union, so that `switch (parent.type)` narrows it.
       const parent = /** @type {import('estree').Node | null} */ (node.parent);
       if (!parent) return;
+      if (kind === 'fragment') {
+        followFragment(node, parent);
+        return;
+      }
       switch (parent.type) {
         case 'MemberExpression':
-          if (parent.object === node) readMember(/** @type {import('estree').MemberExpression & RuleNode} */ (parent), kind, name);
-          return;
+          if (parent.object === node) {
+            readMember(/** @type {import('estree').MemberExpression & RuleNode} */ (parent), kind, name);
+            return;
+          }
+          break;
         case 'VariableDeclarator':
-          if (parent.init === node) bind(parent.id, kind, name);
-          return;
+          if (parent.init === node) {
+            bind(parent.id, kind, name);
+            return;
+          }
+          break;
         case 'AssignmentExpression':
-          if (parent.right === node && parent.operator === '=') bind(parent.left, kind, name);
-          return;
+          if (parent.right === node && parent.operator === '=') {
+            bind(parent.left, kind, name);
+            return;
+          }
+          break;
         case 'ExportSpecifier':
         case 'ExportDefaultDeclaration':
           report(parent, 'reexport', { name });
           return;
         case 'TaggedTemplateExpression':
-          if (parent.tag === node && kind === 'tag') return;
+          if (parent.tag === node && kind === 'tag') {
+            follow(/** @type {RuleNode} */ (parent), 'fragment', name);
+            return;
+          }
           break;
         case 'CallExpression':
           if (parent.callee === node) {
-            if (kind === 'join') checkJoin(parent, name);
-            else if (kind === 'tag') report(node, 'tagCall', { name });
+            if (kind === 'join') {
+              checkJoin(parent, name);
+              follow(/** @type {RuleNode} */ (parent), 'fragment', name);
+            } else if (kind === 'tag') report(node, 'tagCall', { name });
             return;
           }
           break;
         default:
           break;
       }
+      // PR11-SEC-17 a: any other use (an argument, an object/array literal, `?:` / `??` / `||`, a spread, a return, a
+      // computed key, a compound assignment) passes the value on where this rule can no longer follow it.
       if (kind === 'tag' || kind === 'join') report(node, 'helperValue', { name });
+      else if (kind === 'container') report(node, 'containerValue', { name });
+    }
+
+    /**
+     * A Sql fragment (a tagged `Prisma.sql` template, a `Prisma.join` call, or a variable bound to one) is used. Its
+     * `constructor` is Prisma's `Sql` class (`new (Prisma.sql`x`.constructor)([s], [])` forges a fragment from any
+     * string), so reading it (statically, computed or by destructuring) is reported; every other use is legal.
+     * @param {RuleNode} node
+     * @param {import('estree').Node} parent
+     */
+    function followFragment(node, parent) {
+      if (parent.type === 'MemberExpression' && parent.object === node) {
+        const key = staticKey(parent.property, parent.computed);
+        if (key === undefined || key === 'constructor' || key === '__proto__') report(parent.property, 'sqlClass');
+        return;
+      }
+      const target = parent.type === 'VariableDeclarator' && parent.init === node ? parent.id : undefined;
+      if (target?.type === 'Identifier') track(findVariable(sourceCode.getScope(target), target.name), 'fragment', 'fragment');
+      else if (target?.type === 'ObjectPattern') {
+        for (const property of target.properties) {
+          const key = property.type === 'Property' ? staticKey(property.key, property.computed) : undefined;
+          if (key === undefined || key === 'constructor' || key === '__proto__') report(property, 'sqlClass');
+        }
+      }
     }
 
     /** @param {import('estree').ImportDeclaration} declaration */
@@ -362,6 +425,33 @@ export default {
       if (escape !== undefined) report(keyNode, escape);
     };
 
+    /**
+     * True when the member expression is the tag of a tagged template (through TypeScript wrappers).
+     * @param {RuleNode} member
+     */
+    const isTemplateTag = (member) => {
+      /** @type {RuleNode} */
+      let node = member;
+      while (node.parent && WRAPPERS.has(node.parent.type)) node = node.parent;
+      return node.parent?.type === 'TaggedTemplateExpression' && node.parent.tag === node;
+    };
+
+    /**
+     * Heuristic for `db[k]` (PR11-SEC-17 a): the object is named like a database handle (`db`, `tx`, `prisma`,
+     * `client`, or ending in `Db` / `Tx` / `Client` / `Prisma`, as an identifier or a static member). A computed key
+     * of any other object (`rows[i]`) is not a database member.
+     * @param {import('estree').Node} object
+     */
+    const isDbHandle = (object) => {
+      const name =
+        object.type === 'Identifier'
+          ? object.name
+          : object.type === 'MemberExpression'
+            ? staticKey(object.property, object.computed)
+            : undefined;
+      return name !== undefined && DB_HANDLE_NAME.test(name);
+    };
+
     const strings = stringTextVisitor((node, text) => {
       if (SET_LOCAL.test(text)) context.report({ node, messageId: 'setLocal' });
     });
@@ -380,6 +470,10 @@ export default {
       MemberExpression(node) {
         const key = staticKey(node.property, node.computed);
         checkMember(node.property, key);
+        if (key !== undefined && TAGGED_ONLY.has(key) && !isTemplateTag(node)) report(node.property, 'rawRead', { name: key });
+        // A numeric (or other non-string) literal index cannot name a member such as $queryRawUnsafe (`db[1]` of a
+        // regular-expression match is not a database handle member).
+        if (key === undefined && node.property.type !== 'Literal' && isDbHandle(node.object)) report(node.property, 'dynamicDbMember');
         // Belt and braces: `Prisma.raw` / `Prisma.Sql` on a `Prisma` this rule did not see imported.
         if (node.object.type === 'Identifier' && node.object.name === 'Prisma' && key !== undefined) {
           const variable = findVariable(sourceCode.getScope(node), 'Prisma');
@@ -389,14 +483,18 @@ export default {
       },
       ObjectPattern(node) {
         for (const property of node.properties) {
-          if (property.type === 'Property') checkMember(property.key, staticKey(property.key, property.computed));
+          if (property.type !== 'Property') continue;
+          const key = staticKey(property.key, property.computed);
+          checkMember(property.key, key);
+          if (key !== undefined && TAGGED_ONLY.has(key)) report(property.key, 'rawRead', { name: key });
         }
       },
       NewExpression(node) {
-        // Belt and braces: `new Sql(…)` / `new x.Sql(…)` whatever `Sql` is bound to.
+        // Belt and braces: `new Sql(…)` / `new x.Sql(…)` whatever `Sql` is bound to, and `new (x.constructor)(…)`
+        // (the constructor of a fragment or helper is a class or Function: PR11-SEC-17 a).
         const { callee } = node;
-        if (callee.type === 'MemberExpression' && staticKey(callee.property, callee.computed) === 'Sql')
-          report(callee.property, 'sqlClass');
+        const calleeKey = callee.type === 'MemberExpression' ? staticKey(callee.property, callee.computed) : undefined;
+        if (callee.type === 'MemberExpression' && (calleeKey === 'Sql' || calleeKey === 'constructor')) report(callee.property, 'sqlClass');
         if (callee.type === 'Identifier' && callee.name === 'Sql' && !importedSql.has(findVariable(sourceCode.getScope(node), 'Sql'))) {
           report(callee, 'sqlClass');
         }

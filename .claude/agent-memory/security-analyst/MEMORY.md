@@ -26,8 +26,9 @@
 - [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1+R2+R3 (merge-only @084ee93, push moved to c694583) PASS_W_F-U; 03 open; D3 revert passes (PR10-SEC-21); probe kit
 - [P5 PR-0031 staleness+scrub](project_p5_pr31_staleness_scrub.md) — R1 @69a997c PASS_W_F-U; 28/01 closed; SEC-01 .gitmodules ignore=all hides gitlinks, SEC-02 mode guard staleness-only; merge main voids evidence
 - [P5 PR-0030 S3 adapter](project_p5_pr30_s3_adapter.md) — TASK-019 R1 @293fb62 PASS_W_COND, R2 @5f45a8b PASS_W_F-U (C1 closed); open 04 LOW + INFO 06-11; ADR am. 2 item 3 claim-vs-checksum evidence; RustFS facts
-- [P5 PR-0032 route pipeline](project_p5_pr32_route_pipeline.md) — TASK-020 R1 @fa67aca PASS_W_COND; R2 @11530cc PASS_W_F-U (C1-C3 closed, LOW 12/13, INFO 14-16); in-PR R2-m1 fix needs R3 delta
+- [P5 PR-0032 route pipeline](project_p5_pr32_route_pipeline.md) — TASK-020 R1 @fa67aca PASS_W_COND; R2 @11530cc + R3 @308eb83 (sec + code, one pass) PASS_W_F-U; 13/15 closed, new INFO 17; 12/14/16 owners 020-C/020-B
 - [P5 PR-0033 lane A hardening](project_p5_pr33_lane_a_hardening.md) — TASK-015 015-A R1 @3ed0484 + R2 @d3a46a2 PASS_W_F-U; SEC-01..04 closed; INFO 03(iii),05-10 open; `node ""` exits 0 fact; Docker hung/disk full
 - [P5 PR-0034/0035 harness + traceability](project_p5_pr34_pr35_harness_traceability.md) — #34 R1 @4643265 (01/02 LOW open); #35 R1 @76808c8 + R2 @907b6a2 PASS_W_F-U (01/02/03 closed, new INFO 06 8.3 alias); 52-mutant + record-sim kit
+- [P5 PR-0034 round 2](project_p5_pr34_r2_harness.md) — @3934d12 sec PASS_W_F-U (01-04 closed, new INFO 07 seam hop/08 residuals) + code AWN; lint-seam/eff-config/mutation recipes; #32 union
 - [P5 PR-0036 gherkin map classify](project_p5_pr36_gherkin_map_classify.md) — R1 @3eb7689 code APPROVED_W_NITS + sec PASS_W_F-U; old KNOWN_DRIFT tests blind (mutants); reports/ not git-ignored INFO; AT-US-066-12 G3
 - [Threat-model v1.1 round](project_p5_threat_model_v11_round.md) — D-SEC-TM-01 2026-11-13: §10.4 log, proposed SEC-TC-69..75 + owners (65-68 provisional), -bench vocabulary; open items

@@ -130,6 +130,8 @@ const config: Config = {
       ...common,
       displayName: 'api',
       testMatch: ['**/*.api.test.{ts,tsx}'],
+      // api/README.md §16 item 6: merges the (operationId, status) pairs into reports/api-contract-coverage.json (report, not a gate).
+      globalTeardown: '<rootDir>/tests/api/helpers/coverage-teardown.ts',
     },
     {
       ...common,

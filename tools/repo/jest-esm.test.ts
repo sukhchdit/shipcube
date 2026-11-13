@@ -22,6 +22,7 @@ describe('Jest loads ESM-only runtime dependencies (--experimental-vm-modules)',
     const jestScripts = Object.entries(scripts).filter(([, command]) => command.includes('jest'));
     expect(jestScripts.map(([name]) => name).sort()).toEqual([
       'test:api',
+      'test:contract',
       'test:coverage',
       'test:generated',
       'test:integration',

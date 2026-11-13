@@ -5,10 +5,11 @@
 // contributes its catalogue code and, when retryable, `Retry-After` (never its reason, SQLSTATE or Prisma code).
 import { randomUUID } from 'node:crypto';
 
-import { AppError, ERROR_CATALOGUE, type ErrorCode } from '@platform/shared';
+import { AppError, ERROR_CATALOGUE, type ErrorCode, presentsCredential } from '@platform/shared';
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
 import { requestContextOf } from '../context/request-context.js';
+import { isPrivateResponse, PRIVATE_CACHE_CONTROL } from '../routing/route-state.js';
 import { classifyThrown, thrownClassName, type Classified } from './classify.js';
 import { markErrorResponse } from './error-response.js';
 import { buildProblem, DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanceOf, PROBLEM_CONTENT_TYPE } from './problem.js';
@@ -47,7 +48,10 @@ function codeOf(classified: Classified): ErrorCode {
 
 /**
  * Representation headers a handler may have set before it threw; they describe the intended response, not the
- * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`.
+ * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`, or `private, no-store` when the
+ * authn slot marked the response as authenticated or the request presented a credential (SEC-TC-29, D-ARCH-107 (5)).
+ * The mark is read from the response state, never from the header text a handler may have rewritten (PR #32 m1 (b)),
+ * so an error raised before the route is known is private exactly when the request carried a credential.
  */
 export const DROPPED_ON_PROBLEM = ['ETag', 'Last-Modified', 'Content-Disposition', 'Content-Language'] as const;
 
@@ -67,9 +71,10 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
   });
 }
 
-function sendProblem(res: Response, status: number, body: string, retryAfterSeconds?: number): void {
+function sendProblem(req: Request, res: Response, status: number, body: string, retryAfterSeconds?: number): void {
   for (const header of DROPPED_ON_PROBLEM) res.removeHeader(header);
-  res.setHeader('Cache-Control', 'no-store');
+  const authenticated = isPrivateResponse(res) || presentsCredential(req.headers);
+  res.setHeader('Cache-Control', authenticated ? PRIVATE_CACHE_CONTROL : 'no-store');
   if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
   res.status(status).type(PROBLEM_CONTENT_TYPE).send(body);
 }
@@ -112,7 +117,7 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
 
       const body = JSON.stringify(problem);
       markErrorResponse(res, { code, status: problem.status });
-      sendProblem(res, problem.status, body, classified.kind === 'db' ? classified.retryAfterSeconds : undefined);
+      sendProblem(req, res, problem.status, body, classified.kind === 'db' ? classified.retryAfterSeconds : undefined);
     } catch {
       // PR9-SEC-07: a failure inside the handler (an unserialisable `errors` entry, a hostile value) must not reach
       // Express's final handler, which answers HTML with a stack outside NODE_ENV=production.
@@ -126,7 +131,7 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
       } catch {
         // The response below is what matters; a failing logger must not prevent it.
       }
-      sendProblem(res, 500, fallbackProblemBody(correlationId, req.originalUrl, options.typeBase ?? DEFAULT_PROBLEM_TYPE_BASE));
+      sendProblem(req, res, 500, fallbackProblemBody(correlationId, req.originalUrl, options.typeBase ?? DEFAULT_PROBLEM_TYPE_BASE));
     }
   };
 }
