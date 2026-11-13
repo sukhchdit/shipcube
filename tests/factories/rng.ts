@@ -6,6 +6,9 @@
  * and nearby seeds are unrelated.
  */
 import { createHash } from 'node:crypto';
+import { relative, sep } from 'node:path';
+
+import { expect } from '@jest/globals';
 
 export interface Rng {
   /** Float in [0, 1). */
@@ -61,7 +64,7 @@ export function createRng(seed: string | number): Rng {
 }
 
 export interface RunIdentity {
-  /** Short DNS-label-safe token, unique per (seed, worker, run token): the `<run>` of `<run>.test.invalid`. */
+  /** Short DNS-label-safe token, unique per (seed, worker, run token, test file): the `<run>` of `<run>.test.invalid`. */
   readonly run: string;
   /** `<run>.test.invalid`: every e-mail address of the factories ends in `@` + this (`.invalid` never resolves, RFC 6761). */
   readonly emailDomain: string;
@@ -73,13 +76,26 @@ export interface RunIdentityOptions {
   readonly workerId?: string;
   /** Distinguishes separate runs sharing a database (default `TEST_RUN_ID`, else empty). */
   readonly runToken?: string;
+  /**
+   * Test file folded into the run (default: the current Jest test file relative to the working directory, else empty).
+   * Lane B runs integration, api and generated in band, so every file has `JEST_WORKER_ID` 1: without the file, two
+   * files using the same seed would create the same ids, e-mails and slugs in a shared database (PR #34 R1-m6).
+   */
+  readonly testFile?: string;
+}
+
+/** The running Jest test file, `/`-separated and relative to the working directory; empty outside a test file. */
+function currentTestFile(): string {
+  const testPath = expect.getState().testPath;
+  return typeof testPath === 'string' && testPath !== '' ? relative(process.cwd(), testPath).split(sep).join('/') : '';
 }
 
 export function runIdentity(options: RunIdentityOptions): RunIdentity {
   const workerId = options.workerId ?? process.env['JEST_WORKER_ID'] ?? '0';
   const token = options.runToken ?? process.env['TEST_RUN_ID'] ?? '';
+  const testFile = options.testFile ?? currentTestFile();
   const run = `r${createHash('sha256')
-    .update(`${String(options.seed)}|w${workerId}|${token}`, 'utf8')
+    .update(`${String(options.seed)}|w${workerId}|${token}|f${testFile}`, 'utf8')
     .digest('hex')
     .slice(0, 10)}`;
   return { run, emailDomain: `${run}.test.invalid` };

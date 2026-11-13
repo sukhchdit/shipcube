@@ -526,6 +526,18 @@ const TENANT_DB: readonly Violation[] = [
     'the root database client (platform/db/client.ts) is private',
   ],
   [
+    'the composition root imports the Prisma query counter test seam (PR34-SEC-01)',
+    'layering/query-counter-seam/apps/api/src/bad-app.ts',
+    BOUNDARIES,
+    'platform/db/query-counter.ts is a test seam',
+  ],
+  [
+    'a module service imports the Prisma query counter test seam (PR34-SEC-01)',
+    `layering/query-counter-seam/${API}/orders/service/bad-counter.service.ts`,
+    BOUNDARIES,
+    'platform/db/query-counter.ts is a test seam',
+  ],
+  [
     'prisma/tests imports packages/*/src (PR #5 R3-n1)',
     'layering/prisma-tests-imports/prisma/tests/rls/bad-package-import.int.test.ts',
     BOUNDARIES,
@@ -698,6 +710,10 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       `rules/bcrypt-confinement/${API}/identity/service/bcrypt-password-hasher.ts`,
     ],
     ['Prisma in the planned audit store (TASK-025)', 'layering/prisma-planned-paths/packages/audit/src/store/prisma-store.ts'],
+    [
+      'a test file imports the Prisma query counter test seam',
+      'layering/query-counter-seam/apps/api/src/platform/db/ok-query-counter.test.ts',
+    ],
     ['Prisma in the planned outbox writer (TASK-043)', 'layering/prisma-planned-paths/apps/api/src/platform/outbox/writer.ts'],
     ['platform/barrel-reexport-only: re-exports and `export {}`', 'rules/barrel-reexport-only/packages/pricing/src/index.ts'],
     ['platform/any-justification: suppression with a justification', 'rules/any-justification/packages/pricing/src/ok-justified.ts'],

@@ -101,6 +101,15 @@ describe('[NFR-QUAL-006] parallel workers never collide', () => {
     expect(a.emailDomain).not.toBe(b.emailDomain);
   });
 
+  it('two test files sharing a seed on one worker (lane B runs in band) get different runs; the default is this file', () => {
+    const base = { seed: 's', workerId: '1', runToken: '' };
+    const a = runIdentity({ ...base, testFile: 'prisma/tests/a.int.test.ts' });
+    const b = runIdentity({ ...base, testFile: 'prisma/tests/b.int.test.ts' });
+    expect(a.run).not.toBe(b.run);
+    expect(runIdentity(base).run).toBe(runIdentity({ ...base, testFile: 'tests/factories/factories.test.ts' }).run);
+    expect(runIdentity(base).run).not.toBe(runIdentity({ ...base, testFile: '' }).run);
+  });
+
   it('property: no id collides inside a worker over a few hundred records', () => {
     fc.assert(
       fc.property(fc.string({ minLength: 1, maxLength: 16 }), (seed) => {

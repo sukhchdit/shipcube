@@ -4,8 +4,10 @@
  *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
- *   generated   `tests/generated/**` -> npm run test:generated (RBAC matrix, audit, RLS and abuse generators; the other
- *               four projects ignore that folder so a generated suite never runs twice; TASK-276, T-QA-03)
+ *   generated   `tests/generated/**` `*.{api,int}.test.ts(x)` -> npm run test:generated (RBAC matrix, audit, RLS and
+ *               abuse generators, which need an app or a database; TASK-276, T-QA-03). `integration` and `api` ignore
+ *               tests/generated, so a generated suite never runs twice; a plain `*.test.ts(x)` there (route-registry,
+ *               contract drift) stays a lane A unit test (PR #34 R1-M1). tools/repo/jest-projects.test.ts pins the map.
  * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
  * type-check; `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript
  * sources through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
@@ -35,11 +37,8 @@ export const SWC_JEST_OPTIONS = {
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
-/** Folder of the `generated` project; every other project ignores it. */
+/** Folder of the `generated` project; `integration` and `api` ignore it (their suffixes would match its suites too). */
 const GENERATED_PATH = '/tests/generated/';
-
-/** Per-test and per-hook budget of the projects that start Testcontainers (the Jest default of 5 s is too tight there). */
-const CONTAINER_TEST_TIMEOUT_MS = 30_000;
 
 /** Module paths the resolver never sees (exported for tools/repo/jest-config-owned.test.ts). */
 export const MODULE_PATH_IGNORE_PATTERNS = ['<rootDir>/.*/dist/', '<rootDir>/.*/build/', '/__mocks__/'];
@@ -105,7 +104,7 @@ const config: Config = {
       ...common,
       displayName: 'unit',
       testMatch: ['**/*.test.ts'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, GENERATED_PATH, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
     },
     {
       ...common,
@@ -116,7 +115,7 @@ const config: Config = {
       testEnvironment: '<rootDir>/tools/test-dom/jsdom-environment.mjs',
       testEnvironmentOptions: { customExportConditions: ['@platform/source', 'browser'] },
       testMatch: ['**/*.test.tsx'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, GENERATED_PATH, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
       setupFilesAfterEnv: ['<rootDir>/tools/test-dom/dom-setup.ts'],
       moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-dom/style-stub.ts' },
     },
@@ -124,9 +123,8 @@ const config: Config = {
       ...common,
       displayName: 'integration',
       testMatch: ['**/*.int.test.{ts,tsx}'],
-      // Containers stop in `afterAll`; the 5 s default timed hooks out under load in the coverage run (seed.int, spk03,
-      // PR #26 code review n6). Lane B passes its own --testTimeout, which overrides this value.
-      testTimeout: CONTAINER_TEST_TIMEOUT_MS,
+      // No project-level testTimeout: Jest 30 reads only the global value (PR34-SEC-04). Container hooks set their own
+      // budget (`afterAll(..., 60_000)` in seed.int and spk03); lane B passes --testTimeout to in-band projects.
     },
     {
       ...common,
@@ -136,11 +134,10 @@ const config: Config = {
     {
       ...common,
       displayName: 'generated',
-      // Every test file under tests/generated, whatever its kind (`*.api.test.ts`, `*.int.test.ts`, `*.test.ts`): the folder
-      // decides the project, so lane B runs the generated suites with `<paths> --selectProjects generated`.
-      testMatch: ['**/tests/generated/**/*.test.{ts,tsx}'],
+      // The generator suites that need an app or a database (`*.api.test.ts`, `*.int.test.ts`) under tests/generated;
+      // lane B runs them with `<paths> --selectProjects generated`. Plain `*.test.ts` there stays in `unit` (R1-M1).
+      testMatch: ['**/tests/generated/**/*.{api,int}.test.{ts,tsx}'],
       testPathIgnorePatterns: IGNORED_PATHS,
-      testTimeout: CONTAINER_TEST_TIMEOUT_MS,
     },
   ],
 };

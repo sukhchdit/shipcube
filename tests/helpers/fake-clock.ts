@@ -4,12 +4,14 @@
  * Two layers, so a test uses the lightest one that is enough:
  *  - {@link createManualClock}: a plain injectable clock (`now(): Date`) for services that take a clock dependency.
  *    No timers are faked; the test moves time by hand. Works in any project.
- *  - {@link installFakeClock}: Jest modern fake timers (`@sinonjs/fake-timers`) pinned to a fixed instant, for code
- *    that reads `Date.now()` or schedules timers (token lifetimes, retry back-off, idle timeouts).
+ *  - {@link useFakeClock} (the default for timers): Jest modern fake timers (`@sinonjs/fake-timers`) pinned to a fixed
+ *    instant, installed before and ALWAYS removed after every test of the describe block, also when the test throws,
+ *    for code that reads `Date.now()` or schedules timers (token lifetimes, retry back-off, idle timeouts).
+ *    {@link withFakeClock} does the same around one callback; {@link installFakeClock} is the manual primitive.
  *
  * The default instant is a fixed constant, never the wall clock, so a rerun sees the same time (flake < 1 %).
  */
-import { jest } from '@jest/globals';
+import { afterEach, beforeEach, jest } from '@jest/globals';
 
 /** 2026-01-15T12:00:00.000Z: a fixed, mid-year-neutral instant used when a test does not care. */
 export const FIXED_NOW = new Date('2026-01-15T12:00:00.000Z');
@@ -63,8 +65,9 @@ export interface FakeClockOptions {
 }
 
 /**
- * Installs Jest modern fake timers at `start`. Call `uninstall()` in `afterEach` (or use `withFakeClock`). `performance`
- * is faked too, so elapsed-time measurements follow the fake clock.
+ * Installs Jest modern fake timers at `start`. Manual primitive: the caller must `uninstall()` even when the test fails,
+ * otherwise later hooks (a Testcontainers `afterAll`) run under fake timers; prefer {@link useFakeClock} or
+ * {@link withFakeClock}. `performance` is faked too, so elapsed-time measurements follow the fake clock.
  */
 export function installFakeClock(options: FakeClockOptions = {}): InstalledFakeClock {
   const start = toMs(options.start ?? FIXED_NOW);
@@ -98,4 +101,32 @@ export async function withFakeClock<T>(fn: (clock: InstalledFakeClock) => Promis
   } finally {
     clock.uninstall();
   }
+}
+
+/** Hook registrars of {@link useFakeClock} (Jest's by default; injectable so the restore guarantee can be tested). */
+export interface FakeClockHooks {
+  readonly beforeEach: (fn: () => void) => void;
+  readonly afterEach: (fn: () => void) => void;
+}
+
+/**
+ * Describe-level fake clock: installs before every test of the enclosing block and restores real timers after it,
+ * whether the test passed or threw (PR #34 R1-m7). Returns the accessor of the current test's clock.
+ *
+ *   const clock = useFakeClock();
+ *   it('expires', () => { clock().advance(60_000); ... });
+ */
+export function useFakeClock(options: FakeClockOptions = {}, hooks: FakeClockHooks = { beforeEach, afterEach }): () => InstalledFakeClock {
+  let current: InstalledFakeClock | undefined;
+  hooks.beforeEach(() => {
+    current = installFakeClock(options);
+  });
+  hooks.afterEach(() => {
+    current = undefined;
+    jest.useRealTimers();
+  });
+  return () => {
+    if (current === undefined) throw new Error('useFakeClock: the clock exists only while a test of the block runs');
+    return current;
+  };
 }

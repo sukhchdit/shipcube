@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { createManualClock, FIXED_NOW, installFakeClock, withFakeClock } from './fake-clock.js';
+import { createManualClock, FIXED_NOW, installFakeClock, useFakeClock, withFakeClock } from './fake-clock.js';
 
 afterEach(() => {
   jest.useRealTimers();
@@ -73,5 +73,36 @@ describe('[NFR-QUAL-006] installFakeClock', () => {
     ).rejects.toThrow('boom');
     expect(Date.now()).toBeGreaterThan(FIXED_NOW.getTime());
     await expect(withFakeClock((clock) => clock.advance(1_000).getTime())).resolves.toBe(FIXED_NOW.getTime() + 1_000);
+  });
+});
+
+describe('[NFR-QUAL-006] useFakeClock', () => {
+  it('restores real timers after a test that threw before cleaning up (injected hooks)', () => {
+    const before: (() => void)[] = [];
+    const after: (() => void)[] = [];
+    const clock = useFakeClock({}, { beforeEach: (fn) => before.push(fn), afterEach: (fn) => after.push(fn) });
+    expect([before.length, after.length]).toEqual([1, 1]);
+    expect(() => clock()).toThrow('useFakeClock: the clock exists only while a test of the block runs');
+    before[0]?.();
+    expect(Date.now()).toBe(FIXED_NOW.getTime());
+    expect(clock().advance(1_000).getTime()).toBe(FIXED_NOW.getTime() + 1_000);
+    // The test body throws here without uninstalling; the registered afterEach still restores real timers.
+    after[0]?.();
+    expect(Date.now()).toBeGreaterThan(FIXED_NOW.getTime());
+    expect(() => clock()).toThrow('useFakeClock');
+  });
+
+  describe('with the Jest hooks', () => {
+    const clock = useFakeClock({ start: 0 });
+
+    it('installs before each test', () => {
+      expect(Date.now()).toBe(0);
+      clock().advance(5);
+      expect(clock().nowMs()).toBe(5);
+    });
+
+    it('starts the next test at the start instant again', () => {
+      expect(Date.now()).toBe(0);
+    });
   });
 });
