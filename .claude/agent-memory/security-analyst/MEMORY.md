@@ -24,4 +24,5 @@
 - [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 PASS_W_F-U; k6 eslint block scoped; 01 LOW prisma/tests not excluded from images (TASK-014), 02-05 INFO; k6 digest/registry recipe; #20/#24 overlap
 - [P5 PR-0028 W0-ACT-1](project_p5_pr28_w0act1.md) — R1 @22c6461 PASS_W_F-U; activation semantics probed; 01/02 LOW, 03/04 INFO; staleness pattern .claude/agent-memory/*/*.md
 - [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1 @84b70c4 + R2 @a6a929b PASS_W_F-U; 01/02/05/06 closed, 03 open, new INFO 09/10; offline Prisma probe recipe
+- [P5 PR-0031 staleness+scrub](project_p5_pr31_staleness_scrub.md) — R1 @69a997c PASS_W_F-U; 28/01 closed; SEC-01 .gitmodules ignore=all hides gitlinks, SEC-02 mode guard staleness-only; merge main voids evidence
 - [P5 PR-0030 S3 adapter](project_p5_pr30_s3_adapter.md) — TASK-019 R1 @293fb62 PASS_W_COND; 01 MEDIUM SDK requestTimeout warn-only; 02-04 LOW presign type/integrity claims/cred pairing; RustFS probe facts
