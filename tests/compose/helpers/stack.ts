@@ -173,6 +173,39 @@ export function http(options: HttpOptions): Promise<HttpResult> {
   });
 }
 
+/**
+ * Status of one HTTPS GET to the edge from INSIDE the Compose network (TASK-014 stack run 4): a host TLS-inspecting
+ * antivirus re-signs every localhost certificate, so a host-side client can never verify the edge against its local
+ * CA. The probe runs `node` in the api container, trusts only `ca` (read from stdin) and connects to `edge:<port>` with
+ * SNI and Host `localhost`; certificate verification stays on. Resolves the status, or rejects with the TLS error code.
+ */
+export function httpsStatusInNetwork(stack: ComposeStack, port: number, path: string, ca: string): number {
+  const script = [
+    "const https = require('node:https');",
+    "let ca = '';",
+    "process.stdin.on('data', (chunk) => { ca += chunk; });",
+    "process.stdin.on('end', () => {",
+    `  const req = https.get({ host: 'edge', port: ${String(port)}, path: ${JSON.stringify(path)}, servername: 'localhost',`,
+    `    headers: { Host: 'localhost:${String(port)}' }, ca, timeout: 10000 }, (res) => {`,
+    "    res.resume(); res.on('end', () => process.stdout.write(String(res.statusCode)));",
+    '  });',
+    "  req.on('error', (error) => { process.stdout.write('ERR ' + (error.code || 'unknown')); });",
+    '});',
+  ].join('\n');
+  const result = docker(
+    ['compose', '-p', stack.project, ...stack.files.flatMap((file) => ['-f', file]), 'exec', '-T', 'api', 'node', '-e', script],
+    {
+      input: ca,
+      timeoutMs: 60_000,
+      env: stack.env,
+    },
+  );
+  const out = result.stdout.trim();
+  if (!/^\d{3}$/.test(out))
+    throw new Error(`in-network HTTPS probe failed: ${out.startsWith('ERR ') ? out : `exit ${String(result.status)}`}`);
+  return Number(out);
+}
+
 /** Resolves undefined instead of rejecting (for polling). */
 export async function tryHttp(options: HttpOptions): Promise<HttpResult | undefined> {
   try {

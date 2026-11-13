@@ -17,7 +17,17 @@ import type * as Presigner from '@aws-sdk/s3-request-presigner';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { readCompose, serviceEnvironment } from '../../tools/compose/compose-file.js';
-import { ComposeStack, docker, http, referenceDatasetNames, ROOT, tryHttp, uniqueProject, waitFor } from './helpers/stack.js';
+import {
+  ComposeStack,
+  docker,
+  http,
+  httpsStatusInNetwork,
+  referenceDatasetNames,
+  ROOT,
+  tryHttp,
+  uniqueProject,
+  waitFor,
+} from './helpers/stack.js';
 
 // The S3 SDK is a dependency of apps/api (the presigner the api itself uses), loaded from that workspace.
 const apiRequire = createRequire(join(ROOT, 'apps/api/package.json'));
@@ -100,7 +110,8 @@ describe('docker compose up (US-003, NFR-OPS-001)', () => {
     expect(ready.status).toBe(200);
     edgeCa = stack.run(['exec', '-T', 'edge', 'cat', '/etc/nginx/certs/ca.crt'], 30_000).stdout;
     expect(edgeCa).toContain('-----BEGIN CERTIFICATE-----');
-    expect((await http({ port: 8443, path: '/health/live', ca: edgeCa })).status).toBe(200);
+    // In-network: a host TLS-inspecting antivirus re-signs localhost certificates (helpers/stack.ts).
+    expect(httpsStatusInNetwork(stack, 8443, '/health/live', edgeCa)).toBe(200);
   });
 
   it('[AT-US-049-02] every reference dataset registered now is present with one reference_dataset_versions row', () => {
@@ -169,7 +180,7 @@ describe('docker compose up (US-003, NFR-OPS-001)', () => {
 
   it('[sheet line 527] /metrics is 404 at the edge on every host port', async () => {
     expect((await http({ port: 8080, path: '/metrics' })).status).toBe(404);
-    expect((await http({ port: 8444, path: '/metrics', ca: edgeCa })).status).toBe(404);
+    expect(httpsStatusInNetwork(stack, 8444, '/metrics', edgeCa)).toBe(404);
   });
 
   it('[D-ARCH-100] [PR30-SEC-08] the store vhost serves pre-signed GETs only, with nosniff, for the signed Host only', async () => {
