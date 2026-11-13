@@ -112,7 +112,7 @@ export function dateZoneFindings(columns: readonly ColumnRow[], exempt: Readonly
   return columns
     .filter((c) => c.type_name === 'date')
     .map((c) => ({ table: qualify(c.schema_name, c.table_name), column: c.column_name }))
-    .filter(({ table, column }) => !zoned.has(table) && !(`${table}.${column}` in exempt))
+    .filter(({ table, column }) => !zoned.has(table) && !Object.hasOwn(exempt, `${table}.${column}`))
     .map(({ table, column }) => `${table}.${column}: date without an IANA time-zone column`)
     .sort();
 }
@@ -161,7 +161,7 @@ export function standardColumnFindings(
   const findings: string[] = [];
   const tables = [...new Set(columns.map((c) => c.table_name))];
   for (const table of tables) {
-    if (table in exempt) continue;
+    if (Object.hasOwn(exempt, table)) continue;
     const cols = new Map(columns.filter((c) => c.table_name === table).map((c) => [c.column_name, c]));
     if (APPEND_ONLY_PATTERNS.some((pattern) => pattern.test(table))) {
       const created = ['created_at', 'occurred_at'].map((name) => cols.get(name));
@@ -255,12 +255,58 @@ export const ON_BEHALF_EXEMPT: Record<string, string> = {
 export function onBehalfFindings(rows: readonly OnBehalfRow[], exempt: Readonly<Record<string, string>> = ON_BEHALF_EXEMPT): string[] {
   const findings: string[] = [];
   for (const row of rows) {
-    if (row.schema_name === 'public' && row.table_name in exempt) continue;
+    if (row.schema_name === 'public' && Object.hasOwn(exempt, row.table_name)) continue;
     const where = `${qualify(row.schema_name, row.table_name)}.on_behalf_of_org_id`;
     if (row.type_name !== 'uuid') findings.push(`${where}: type is ${row.type_name}, expected uuid`);
     if (row.not_null) findings.push(`${where}: must be nullable`);
     if (!row.checks.some((def) => ON_BEHALF_NULL_CHECK.test(def))) {
       findings.push(`${where}: missing CHECK (on_behalf_of_org_id IS NULL), expected ck_${row.table_name}__on_behalf_null_m1`);
+    }
+  }
+  return findings.sort();
+}
+
+/**
+ * Prisma field name -> database column of every standard column, as the standard-columns query extension keys them
+ * (PR26-SEC-06). The extension works on Prisma names and this suite on database names; this table bridges the two.
+ */
+export const STANDARD_COLUMN_PAIRS: Readonly<Record<string, string>> = Object.freeze({
+  id: 'id',
+  orgId: 'org_id',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+  createdBy: 'created_by',
+  updatedBy: 'updated_by',
+  version: 'version',
+  onBehalfOfOrgId: 'on_behalf_of_org_id',
+});
+
+interface RuntimeField {
+  readonly name?: unknown;
+  readonly dbName?: unknown;
+}
+
+/**
+ * Naming drift between Prisma fields and database columns that would silently disable the extension's stamping and
+ * refusal: a field mapped to a standard column under another name (`creatorId @map("created_by")`), or a standard
+ * Prisma name mapped to another column. `dataModel` is Prisma's runtime data model (`models.<Name>.fields[]`, with
+ * `dbName` present only when the column is mapped).
+ */
+export function namingParityFindings(dataModel: unknown): string[] {
+  const models = (dataModel as { models?: Record<string, { fields?: RuntimeField[] }> } | null)?.models ?? {};
+  const columnToField = new Map(Object.entries(STANDARD_COLUMN_PAIRS).map(([field, column]) => [column, field]));
+  const findings: string[] = [];
+  for (const [modelName, model] of Object.entries(models)) {
+    for (const field of model.fields ?? []) {
+      if (typeof field.name !== 'string') continue;
+      const column = typeof field.dbName === 'string' ? field.dbName : field.name;
+      const expectedColumn = Object.hasOwn(STANDARD_COLUMN_PAIRS, field.name) ? STANDARD_COLUMN_PAIRS[field.name] : undefined;
+      const expectedField = columnToField.get(column);
+      if (expectedColumn !== undefined && expectedColumn !== column) {
+        findings.push(`${modelName}.${field.name}: maps to column ${column}, expected ${expectedColumn}`);
+      } else if (expectedField !== undefined && expectedField !== field.name) {
+        findings.push(`${modelName}.${field.name}: column ${column} must be the Prisma field ${expectedField}`);
+      }
     }
   }
   return findings.sort();

@@ -32,7 +32,9 @@ const field = (name: string, kind = 'scalar') => ({ name, kind, type: 'String' }
 const DATA_MODEL = {
   models: {
     Shipment: {
-      fields: [...STD, 'orgId', 'onBehalfOfOrgId', 'reference'].map((name) => field(name)).concat([field('parcels', 'object')]),
+      fields: [...STD, 'orgId', 'onBehalfOfOrgId', 'reference']
+        .map((name) => field(name))
+        .concat([field('parcels', 'object'), field('org', 'object'), field('onBehalfOfOrg', 'object')]),
     },
     ReferenceDatasetVersion: { fields: [...STD, 'dataset'].map((name) => field(name)) },
     Ledger: { fields: ['id', 'occurredAt', 'amountMinor'].map((name) => field(name)) },
@@ -62,7 +64,7 @@ function thrown(fn: () => unknown): unknown {
 
 describe('standard-columns catalogue (runtime data model)', () => {
   it('splits scalar and relation fields per model', () => {
-    expect([...model('Shipment').relations]).toEqual(['parcels']);
+    expect([...model('Shipment').relations]).toEqual(['parcels', 'org', 'onBehalfOfOrg']);
     expect(model('Shipment').scalars.has('onBehalfOfOrgId')).toBe(true);
     expect(model('Ledger').scalars.has('createdBy')).toBe(false);
   });
@@ -307,34 +309,96 @@ describe('updates and pass-through operations', () => {
     },
   );
 
-  it('an unknown model, missing args or a non-object payload pass through for Prisma to judge', () => {
-    const args = { data: { id: 'x' } };
-    expect(stampArgs(undefined, 'create', args, STAMP, NOW)).toBe(args);
+  it('a write on a model missing from the catalogue throws; reads on it pass (PR26-SEC-02)', () => {
+    const forged = { data: { createdBy: 'x', version: 9 } };
+    for (const operation of ['create', 'createMany', 'createManyAndReturn', 'update', 'updateMany', 'updateManyAndReturn', 'upsert']) {
+      expect(thrown(() => stampArgs(undefined, operation, forged, STAMP, NOW))).toBeInstanceOf(TypeError);
+    }
+    const read = { where: { id: 'x' } };
+    expect(stampArgs(undefined, 'findMany', read, STAMP, NOW)).toBe(read);
+    expect(stampArgs(undefined, 'delete', read, STAMP, NOW)).toBe(read);
+  });
+
+  it('missing args or a non-object payload pass through for Prisma to judge', () => {
     expect(stampArgs(model('Shipment'), 'create', undefined, STAMP, NOW)).toBeUndefined();
     expect(stampArgs(model('Shipment'), 'create', { data: null }, STAMP, NOW)).toEqual({ data: null });
     expect(stampArgs(model('Shipment'), 'update', { data: 'x' }, STAMP, NOW)).toEqual({ data: 'x' });
   });
 });
 
-describe('nested relation writes are refused (they would escape the stamping)', () => {
-  it.each(['create', 'createMany', 'connectOrCreate', 'upsert', 'update', 'updateMany', 'delete', 'deleteMany', 'set'])(
-    'a nested "%s" is NESTED_WRITE_UNSUPPORTED (500) before any statement',
-    (op) => {
-      const error = thrown(() => stampArgs(model('Shipment'), 'create', { data: { reference: 'r', parcels: { [op]: {} } } }, STAMP, NOW));
-      expect(error).toBeInstanceOf(DbError);
-      expect(error).toMatchObject({ status: 500, reason: 'NESTED_WRITE_UNSUPPORTED' });
+describe('every relation field is refused in a write payload (deny by default; PR26-SEC-01, D-TASK032-04)', () => {
+  const REFUSED = { status: 500, reason: 'NESTED_WRITE_UNSUPPORTED' };
+  const OPERATIONS = [
+    'create',
+    'createMany',
+    'connectOrCreate',
+    'upsert',
+    'update',
+    'updateMany',
+    'delete',
+    'deleteMany',
+    'set',
+    'connect',
+    'disconnect',
+  ];
+
+  it.each(OPERATIONS)('a "%s" inside a relation field is NESTED_WRITE_UNSUPPORTED (500) before any statement', (op) => {
+    const error = thrown(() => stampArgs(model('Shipment'), 'create', { data: { reference: 'r', parcels: { [op]: {} } } }, STAMP, NOW));
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).toMatchObject(REFUSED);
+  });
+
+  type Build = (relation: object) => unknown;
+  const SHAPES: ReadonlyArray<readonly [string, string, Build]> = [
+    ['create', 'create', (relation) => ({ data: { reference: 'r', ...relation } })],
+    ['createMany (second row)', 'createMany', (relation) => ({ data: [{ reference: 'a' }, { reference: 'b', ...relation }] })],
+    ['createManyAndReturn', 'createManyAndReturn', (relation) => ({ data: [{ reference: 'a', ...relation }] })],
+    ['update', 'update', (relation) => ({ where: { id: 'x' }, data: relation })],
+    ['updateMany', 'updateMany', (relation) => ({ where: {}, data: relation })],
+    ['updateManyAndReturn', 'updateManyAndReturn', (relation) => ({ where: {}, data: relation })],
+    [
+      'upsert (create branch)',
+      'upsert',
+      (relation) => ({ where: { id: 'x' }, create: { reference: 'c', ...relation }, update: { reference: 'u' } }),
+    ],
+    ['upsert (update branch)', 'upsert', (relation) => ({ where: { id: 'x' }, create: { reference: 'c' }, update: relation })],
+  ];
+  const FORMS: readonly object[] = [
+    { parcels: { connect: [{ id: 'p' }] } },
+    { parcels: { disconnect: [{ id: 'p' }] } },
+    { parcels: { set: [{ id: 'p' }] } },
+    { org: { connect: { id: randomUUID() } } },
+    { org: { disconnect: true } },
+    { onBehalfOfOrg: { connect: { id: randomUUID() } } },
+    { onBehalfOfOrg: { connectOrCreate: { where: { id: 'x' }, create: {} } } },
+  ];
+
+  it.each(SHAPES)(
+    '%s refuses connect / disconnect / set on a to-many relation and on the FK-backed org and on-behalf relations',
+    (_label, operation, build) => {
+      for (const form of FORMS) {
+        expect(thrown(() => stampArgs(model('Shipment'), operation, build(form), STAMP, NOW))).toMatchObject(REFUSED);
+      }
     },
   );
 
-  it('connect / disconnect are allowed, on create and on update', () => {
-    expect(() => stampArgs(model('Shipment'), 'create', { data: { parcels: { connect: [{ id: 'p' }] } } }, STAMP, NOW)).not.toThrow();
-    expect(() => stampArgs(model('Shipment'), 'update', { data: { parcels: { disconnect: [{ id: 'p' }] } } }, STAMP, NOW)).not.toThrow();
+  it('a relation key is refused whatever its value shape (array, scalar, null, empty object)', () => {
+    for (const value of [[], 'x', null, {}, 0, false]) {
+      expect(thrown(() => stampArgs(model('Shipment'), 'update', { data: { parcels: value } }, STAMP, NOW))).toMatchObject(REFUSED);
+    }
   });
 
-  it('a non-object relation value is refused too', () => {
-    expect(thrown(() => stampArgs(model('Shipment'), 'update', { data: { parcels: [] } }, STAMP, NOW))).toMatchObject({
-      reason: 'NESTED_WRITE_UNSUPPORTED',
-    });
+  it('an undefined relation value is absent for Prisma and passes; a model with no relation is unaffected', () => {
+    expect(() => stampArgs(model('Shipment'), 'update', { data: { reference: 'r', parcels: undefined } }, STAMP, NOW)).not.toThrow();
+    expect(() => stampArgs(model('Ledger'), 'create', { data: { amountMinor: 1 } }, STAMP, NOW)).not.toThrow();
+  });
+
+  it('the scalar foreign-key form of the same change is a forged server column and is refused as UNKNOWN_FIELD', () => {
+    expect(() => stampArgs(model('Shipment'), 'update', { data: { reference: 'r' } }, STAMP, NOW)).not.toThrow();
+    expect(thrown(() => stampArgs(model('Shipment'), 'update', { data: { orgId: randomUUID() } }, STAMP, NOW))).toBeInstanceOf(AppError);
+    expect(thrown(() => stampArgs(model('Shipment'), 'update', { data: { onBehalfOfOrgId: randomUUID() } }, STAMP, NOW))).toBeInstanceOf(
+      AppError,
+    );
   });
 });
 
@@ -398,7 +462,42 @@ describe('the Prisma extension object and per-transaction binding', () => {
   });
 
   it('fails closed when $extends returns something that is not a client', () => {
-    const client = { $extends: () => ({}) };
-    expect(() => withStandardColumns(client, STAMP)).toThrow(TypeError);
+    const client = { _runtimeDataModel: DATA_MODEL, $extends: () => ({}) };
+    expect(() => withStandardColumns(client, STAMP)).toThrow('$extends returned no client');
+  });
+
+  it.each<[string, object]>([
+    ['no runtime data model (a Prisma upgrade renamed the private property)', {}],
+    ['an empty runtime data model', { _runtimeDataModel: { models: {} } }],
+    ['a runtime data model of the wrong shape', { _runtimeDataModel: [] }],
+  ])('refuses to build the extension on %s (PR26-SEC-02)', (_label, shape) => {
+    let extended = 0;
+    const client = {
+      ...shape,
+      $extends() {
+        extended += 1;
+        return { $transaction: () => Promise.resolve() };
+      },
+    };
+    expect(() => withStandardColumns(client, STAMP)).toThrow('no runtime data model');
+    expect(extended).toBe(0);
+  });
+
+  it('$allOperations rejects a write on a model missing from the catalogue without calling query, and lets reads through', async () => {
+    const extension = standardColumnsExtension(STAMP, CATALOGUE);
+    let calls = 0;
+    const query = (args: unknown): Promise<unknown> => {
+      calls += 1;
+      return Promise.resolve(args);
+    };
+    const forged = { data: { createdBy: 'x', version: 9 } };
+    const run = (model: string, operation: string, args: unknown): Promise<unknown> =>
+      extension.query.$allModels.$allOperations({ model, operation, args, query });
+    await expect(run('Nope', 'update', forged)).rejects.toBeInstanceOf(TypeError);
+    await expect(run('Nope', 'create', forged)).rejects.toBeInstanceOf(TypeError);
+    expect(calls).toBe(0);
+    const read = { where: { id: 'x' } };
+    await expect(run('Nope', 'findMany', read)).resolves.toBe(read);
+    expect(calls).toBe(1);
   });
 });

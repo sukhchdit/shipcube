@@ -12,9 +12,12 @@
  *  - Caller input that already holds a server-controlled field is refused with 400 `VALIDATION_ERROR`, sub-code
  *    `UNKNOWN_FIELD` (AT-US-064-03, EC-A18) before any statement runs, so nothing is persisted. The one tolerated case
  *    is an `orgId` on create that equals the transaction's organisation (redundant, not forged).
- *  - Nested relation writes (`create`, `createMany`, `connectOrCreate`, `upsert`, `update*`, `delete*`, `set` inside a
- *    relation field) are refused (`DbError` 500 `NESTED_WRITE_UNSUPPORTED`): Prisma runs no query extension for the
- *    nested rows, so they would escape the stamping. Only `connect` / `disconnect` are allowed.
+ *  - Every relation field in a write payload is refused, deny by default (`DbError` 500 `NESTED_WRITE_UNSUPPORTED`):
+ *    nested `create` / `createMany` / `connectOrCreate` / `upsert` / `update*` / `delete*` / `set` escape the stamping
+ *    because Prisma runs no query extension for the nested rows, and `connect` / `disconnect` rewrite a foreign key
+ *    that the extension cannot tell from a server column (`org` / `onBehalfOfOrg` backing `org_id` /
+ *    `on_behalf_of_org_id`) or write the child row of a to-many relation without its stamp (PR26-SEC-01). Repositories
+ *    use the unchecked create/update inputs with scalar foreign keys (D-TASK032-02).
  * Reads, deletes and raw queries pass through unchanged (soft delete: TASK-100). A raw `INSERT` cannot skip the
  * stamping silently: `created_by`/`updated_by` have no default and are `NOT NULL` (catalog suite `catalog-std`).
  *
@@ -24,7 +27,8 @@
  * returns a lightweight wrapper over the same engine and pool. The extension never issues a query of its own.
  *
  * Which columns a model has is read from the client's own runtime data model, so a new model is covered without a
- * registry edit; a model the data model does not know passes through (the database constraints still apply).
+ * registry edit. The extension fails closed when that data model is unreadable or empty (building it throws) and
+ * when a write names a model the data model does not know (the write is rejected); reads always pass (PR26-SEC-02).
  */
 import { ANONYMOUS_ACTOR_ID, AppError, uuidv7, type ValidationIssue } from '@platform/shared';
 
@@ -41,7 +45,7 @@ export const SERVER_FIELD_API_NAMES: Readonly<Record<string, string>> = Object.f
   updatedBy: 'updated_by',
   version: 'version',
   onBehalfOfOrgId: 'on_behalf_of_org_id',
-});
+} satisfies Record<ServerColumn, string>);
 
 /** Prisma fields the extension sets on create; the generated create inputs require some of them (no column default). */
 export type ServerColumn = 'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'createdBy' | 'updatedBy' | 'version' | 'onBehalfOfOrgId';
@@ -56,9 +60,6 @@ export type ServerColumn = 'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'created
 export function serverStamped<TInput extends object>(data: Omit<TInput, ServerColumn>): TInput {
   return data as TInput;
 }
-
-/** Relation-field operations that write no row of the related model. */
-const ALLOWED_NESTED_OPERATIONS: ReadonlySet<string> = new Set(['connect', 'disconnect']);
 
 const CREATE_OPERATIONS: ReadonlySet<string> = new Set(['create', 'createMany', 'createManyAndReturn']);
 const UPDATE_OPERATIONS: ReadonlySet<string> = new Set(['update', 'updateMany', 'updateManyAndReturn']);
@@ -81,8 +82,7 @@ const isPlainObject = (value: unknown): value is PlainObject =>
 
 /**
  * Builds the catalogue from a Prisma runtime data model (`{ models: { Name: { fields: [{ name, kind }] } } }`).
- * Fails closed on an unreadable shape: an empty catalogue stamps nothing, and the `NOT NULL` server columns without
- * a default then reject every insert.
+ * An unreadable shape gives an empty catalogue; {@link withStandardColumns} refuses to build the extension on one.
  */
 export function catalogueFromDataModel(dataModel: unknown): StandardColumnsCatalogue {
   const catalogue = new Map<string, StandardColumnsModel>();
@@ -121,11 +121,10 @@ function forgedFields(data: PlainObject, stamp: TransactionStamp, isCreate: bool
   });
 }
 
-function assertNoNestedWrites(model: StandardColumnsModel, data: PlainObject): void {
+/** Refuses every relation field of a write payload (an `undefined` value is absent for Prisma and passes). */
+function assertNoRelationWrites(model: StandardColumnsModel, data: PlainObject): void {
   for (const relation of model.relations) {
-    const nested = data[relation];
-    if (nested === undefined) continue;
-    if (!isPlainObject(nested) || Object.keys(nested).some((op) => !ALLOWED_NESTED_OPERATIONS.has(op))) {
+    if (Object.hasOwn(data, relation) && data[relation] !== undefined) {
       throw new DbError(dbErrorMapping(500, 'NESTED_WRITE_UNSUPPORTED'));
     }
   }
@@ -138,7 +137,7 @@ function assertPayloads(model: StandardColumnsModel, payloads: readonly unknown[
     // A non-object payload is Prisma's to reject; nothing of ours to stamp in it.
     if (!isPlainObject(data)) continue;
     for (const field of forgedFields(data, stamp, isCreate)) forged.add(field);
-    assertNoNestedWrites(model, data);
+    assertNoRelationWrites(model, data);
   }
   if (forged.size > 0) {
     const ordered = Object.keys(SERVER_FIELD_API_NAMES).filter((field) => forged.has(field));
@@ -174,9 +173,13 @@ function stampUpdate(model: StandardColumnsModel, data: unknown, stamp: Transact
 
 const asList = (data: unknown): readonly unknown[] => (Array.isArray(data) ? (data as unknown[]) : [data]);
 
+const isWriteOperation = (operation: string): boolean =>
+  CREATE_OPERATIONS.has(operation) || UPDATE_OPERATIONS.has(operation) || operation === 'upsert';
+
 /**
  * The pure rewrite: returns the arguments Prisma should run for `operation` on `model`, or throws before any
- * statement. `args` is never mutated. Operations other than create/update/upsert are returned unchanged.
+ * statement. `args` is never mutated. Operations other than create/update/upsert are returned unchanged; a write on
+ * a model that is not in the catalogue throws (an unknown model must never let forged server columns through).
  */
 export function stampArgs(
   model: StandardColumnsModel | undefined,
@@ -185,7 +188,11 @@ export function stampArgs(
   stamp: TransactionStamp,
   now: Date,
 ): unknown {
-  if (model === undefined || !isPlainObject(args)) return args;
+  if (!isPlainObject(args)) return args;
+  if (model === undefined) {
+    if (isWriteOperation(operation)) throw new TypeError('standard-columns: write on a model missing from the runtime data model');
+    return args;
+  }
   if (CREATE_OPERATIONS.has(operation)) {
     const data = args['data'];
     assertPayloads(model, asList(data), stamp, true);
@@ -254,6 +261,8 @@ function catalogueOf(client: object): StandardColumnsCatalogue {
   let catalogue = catalogues.get(client);
   if (catalogue === undefined) {
     catalogue = catalogueFromDataModel(Reflect.get(client, '_runtimeDataModel', client));
+    // Fail closed: Prisma's private runtime data model moved or is empty, so nothing could be stamped or refused.
+    if (catalogue.size === 0) throw new TypeError('standard-columns: the client exposes no runtime data model');
     catalogues.set(client, catalogue);
   }
   return catalogue;

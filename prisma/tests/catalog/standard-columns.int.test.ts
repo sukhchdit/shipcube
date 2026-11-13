@@ -36,7 +36,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db?.stop();
-});
+}, 60_000);
 
 type Row = pg.QueryResultRow;
 

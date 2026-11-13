@@ -110,7 +110,7 @@ async function caught(promise: Promise<unknown>): Promise<unknown> {
 function setup(options: FakeOptions = {}, txOptions: WithTenantTxOptions = OPTIONS) {
   const fake = fakeClient(options);
   const { deps, events } = fakeDeps();
-  const runner = createWithTenantTx(fake.client, txOptions, deps);
+  const runner = createWithTenantTx(fake.client, txOptions, { ...deps, scopeClient: () => fake.client });
   return { ...fake, deps, events, runner };
 }
 
@@ -309,12 +309,15 @@ describe('factory configuration (ADR-0005 am.10 items 3 and 4)', () => {
     const { client } = fakeClient();
     const { deps } = fakeDeps();
     for (const value of ['-c search_path=public', '']) {
-      expect(() => createWithTenantTx(client, OPTIONS, { ...deps, env: { PGOPTIONS: value } })).toThrow(TenantTxConfigError);
+      expect(() => createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client, env: { PGOPTIONS: value } })).toThrow(
+        TenantTxConfigError,
+      );
     }
     const withoutEnv = {
       onSecurityEvent: deps.onSecurityEvent,
       countSessionContextLeak: deps.countSessionContextLeak,
       markNotReady: deps.markNotReady,
+      scopeClient: () => client,
     };
     const saved = process.env['PGOPTIONS'];
     process.env['PGOPTIONS'] = '-c statement_timeout=0';

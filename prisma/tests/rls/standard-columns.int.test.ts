@@ -16,6 +16,7 @@ import pg from 'pg';
 import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.js';
 import { serverStamped, withStandardColumns } from '../../../apps/api/src/platform/db/index.js';
 import { DbError } from '../../../apps/api/src/platform/db/map-db-error.js';
+import type { TenantDb } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { createWithTenantTx, type TenantContext, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
 import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
@@ -114,7 +115,7 @@ afterAll(async () => {
   await raw?.end();
   await client?.$disconnect();
   await db?.stop();
-});
+}, 60_000);
 
 describe('US-064 server-controlled standard columns with the real Prisma 7 client (TASK-032)', () => {
   it('AT-US-064-01: create sets a UUIDv7 id, created_at = updated_at (timestamptz, UTC instant), created_by = updated_by = caller, version 1', async () => {
@@ -174,7 +175,7 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
     expect(await rowCount()).toBe(count);
   });
 
-  it('a nested relation write is refused before any statement (NESTED_WRITE_UNSUPPORTED); connect-only writes are not', async () => {
+  it('a nested relation write is refused before any statement (NESTED_WRITE_UNSUPPORTED)', async () => {
     const error = await rejection(
       runner.withTenantTx(context(SYSTEM_ACTOR_ID), (tx) =>
         tx.role.create({
@@ -191,6 +192,43 @@ describe('US-064 server-controlled standard columns with the real Prisma 7 clien
     expect(error).toBeInstanceOf(DbError);
     expect(error).toMatchObject({ status: 500, reason: 'NESTED_WRITE_UNSUPPORTED' });
     expect((await raw.query(`SELECT 1 FROM public.roles WHERE key = 'STD_PROBE'`)).rowCount).toBe(0);
+  });
+
+  it('PR26-SEC-01: connect / disconnect on a to-many relation and on an FK-backed relation are refused before any statement', async () => {
+    const id = randomUUID();
+    const attempts: Array<[string, (tx: TenantDb<Prisma.TransactionClient>) => Promise<unknown>]> = [
+      [
+        'rolePermission.update role connect (re-parent through the relation)',
+        (tx) => tx.rolePermission.update({ where: { id }, data: { role: { connect: { id } } } }),
+      ],
+      [
+        'rolePermission.update permission connect',
+        (tx) => tx.rolePermission.update({ where: { id }, data: { permission: { connect: { id } } } }),
+      ],
+      [
+        'role.update permissions connect (to-many, child row unstamped)',
+        (tx) => tx.role.update({ where: { key: 'STD_NONE' }, data: { permissions: { connect: [{ id }] } } }),
+      ],
+      [
+        'role.update permissions disconnect',
+        (tx) => tx.role.update({ where: { key: 'STD_NONE' }, data: { permissions: { disconnect: [{ id }] } } }),
+      ],
+      ['role.update permissions set', (tx) => tx.role.update({ where: { key: 'STD_NONE' }, data: { permissions: { set: [{ id }] } } })],
+      [
+        'role.upsert update branch connect',
+        (tx) =>
+          tx.role.upsert({
+            where: { key: 'STD_NONE' },
+            create: serverStamped<Prisma.RoleCreateInput>({ key: 'STD_NONE', nameKey: 'roles.none', scope: 'CUSTOMER', description: 'x' }),
+            update: { permissions: { connect: [{ id }] } },
+          }),
+      ],
+    ];
+    for (const [label, attempt] of attempts) {
+      const error = await rejection(runner.withTenantTx(context(SYSTEM_ACTOR_ID), attempt));
+      expect({ label, error }).toMatchObject({ label, error: { status: 500, reason: 'NESTED_WRITE_UNSUPPORTED' } });
+    }
+    expect((await raw.query(`SELECT 1 FROM public.roles WHERE key = 'STD_NONE'`)).rowCount).toBe(0);
   });
 
   it('reads and raw queries pass through the extension unchanged inside the same transaction', async () => {

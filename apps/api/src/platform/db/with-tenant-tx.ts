@@ -87,10 +87,11 @@ export interface WithTenantTxDeps<TTx = unknown> {
   /**
    * Per-transaction client (ADR-0005 am. 10 item 5, data-model §7.6; TASK-032): the root client extended with the
    * standard-columns extension bound to `stamp` (`withStandardColumns`). The transaction is opened on the returned
-   * client, so the stamping runs inside it; the stamp comes from this closure, never from AsyncLocalStorage. Without
-   * it the root client is used and the server columns are left to the database (`NOT NULL`, no default: inserts fail).
+   * client, so the stamping runs inside it; the stamp comes from this closure, never from AsyncLocalStorage. REQUIRED
+   * (PR26-SEC-02): an unscoped fallback to the root client would persist caller-supplied server columns and skip the
+   * version bump on updates. A caller that deliberately wants the plain client passes `() => client`.
    */
-  readonly scopeClient?: (stamp: TransactionStamp) => TransactionCapableClient<TTx>;
+  readonly scopeClient: (stamp: TransactionStamp) => TransactionCapableClient<TTx>;
 }
 
 export interface TenantTxRunner<TTx> {
@@ -331,7 +332,7 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     if (isInsideTenantTx()) throw new DbError(dbErrorMapping(500, 'NESTED_TENANT_TX'));
     const values = contextValues(ctx, timeouts);
     const correlationId = values[4];
-    const txClient = deps.scopeClient?.({ orgId: values[0], actorId: values[1] }) ?? client;
+    const txClient = deps.scopeClient({ orgId: values[0], actorId: values[1] });
     try {
       return await tenantTxScope.run(true, () =>
         txClient.$transaction(async (tx) => {

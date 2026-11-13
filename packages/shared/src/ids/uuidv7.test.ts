@@ -15,7 +15,7 @@ describe('uuidv7 (ADR-0009, data-model P1; NFR-DATA-002)', () => {
     expect(at).toBeLessThanOrEqual(after);
   });
 
-  it('is unique and time-ordered (byte order = generation order) over a burst in one millisecond', () => {
+  it('is unique and time-ordered (byte order = generation order) over a burst of ids (several share a millisecond)', () => {
     const ids = Array.from({ length: 2_000 }, () => uuidv7());
     expect(new Set(ids).size).toBe(ids.length);
     expect([...ids].sort()).toEqual(ids);
