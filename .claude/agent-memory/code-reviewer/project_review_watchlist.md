@@ -295,3 +295,9 @@ PR #23 (TASK-011 lane B heavy lane) r1 at f61e55d: CHANGES_REQUESTED (2026-11-13
 - Routed: **m2** relation-form `connect` on update changes server FK columns (org/onBehalf) -> TASK-037 (first tenant models; check a schema test forbids Prisma `@relation(fields:[orgId])` or org-type relation refusal); n5 typed nested-write narrowing + extension ordering -> TASK-100; n6 afterAll 5 s Testcontainer stop -> TASK-276; n8 authz re-export SYSTEM_ACTOR_ID -> TASK-020; n7 §7.6 wording -> architect.
 - PR #24 union: DbErrorReason 3-member union; runtime.ts keep runStartupAuditPartitionsCheck + `RuntimeDatabaseClient extends …, ExtendableClient`. catalog-std checked by hand vs PR #24 10-audit.sql: green either order.
 - r2 = delta: m1 test (fake Client ctor recording $extends), m3 throws, DECISIONS order; security record on final head; lane-B evidence if PR #28 merged first.
+
+**PR #31 r1 AWN (2026-11-13, head 69a997c, quality staleness + scrub + pending gate).** Open for devops/security:
+- M1: `scrubPaths` prefix replace has no boundary (`C:\Users\Alice` eats the start of `AliceXavier`, leaving `xavier`). M3: belt `NAME` stops at whitespace (`Jane Doe`).
+- M2: `check-evidence --profile gate` reaches all three checkpoints, but `gate` is also the `v0.1.0-m0` regression profile, so a G3-checkpoint pending entry (SEC-TC-22) fails at the tag unless a `D-` decision is recorded. Track before the M0 tag.
+- Merge needs a PR-0031 security record (CODEOWNED tools/quality). Any later tools/quality push voids the lane-B run (bound to 4f6a6c3).
+- Technique: mutate `convert.mjs` in the archive copy per behaviour and run only `convert.test`; two survivors (env list, jestToCases classname) were redundant, not holes.
