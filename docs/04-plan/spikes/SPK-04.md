@@ -110,7 +110,7 @@ host CPU (16.7 % of samples above 85 %) and its `on` arm is invalid (1.14 % drop
 tenant in `on` queued on its stream lock. **CPU, as recorded** (`docker stats` of the Postgres container, one
 mid-arm sample, percent of one core): rep 1 off 54 %, on 144 %, batched 195 %; rep 2 off 43 %, on 134 %, batched 106 %.
 There is no per-process CPU series for the replicas in any artefact, so the CPU headroom of the app tier is **not
-established**, and Postgres at 1.3 to 1.9 cores in the `on` arms cannot be ruled out as a contributor on a shared
+established**, and Postgres at about 1.3 to 1.4 cores in the `on` arms (144 % and 134 %; the 195 % figure is rep 1 `batched`) cannot be ruled out as a contributor on a shared
 laptop. Lock-hold time × the hot-stream rate is the working explanation (hypothesis, §5.1), not a measured cause.
 Pooled over two repetitions that include the collapsed one: Δ on − off p95 +1 513 / p99 +2 008 ms; Δ batched − off p95
 +951 / p99 +1 327 ms (descriptive only).
@@ -141,7 +141,7 @@ Both `batched` arms at 150 rps were invalid (4.92 % and 1.86 % dropped; host CPU
 samples). Postgres CPU in the mid-arm `docker stats` was 67 % (rep 1) and 114 % (rep 2) for `batched`, against 95 %
 and 62 % for `on`. The audit phase p50 stayed at 8.8 ms while the tail exploded. This run cannot separate host
 contention (batched is always the last arm, at the largest vault and entry counts) from a plan problem in the batched
-statements, for example the multi-row token SELECT `JOIN unnest(…)` against the 100k–170k-row vault (§5.3, F-4).
+statements, for example the multi-row token SELECT `JOIN unnest(…)` against the 100k–170k-row vault (§5.4, F-4).
 
 **Max sustained rate observed (indicative for A-029 on this host, not a re-baseline):** with audit `on`, 150 rps was
 sustained in 2 of 2 valid repetitions (0 errors, ≤ 0.01 % dropped); 300 rps was not demonstrated. `off` sustained 300
