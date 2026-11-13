@@ -1,0 +1,20 @@
+# Redocly CLI 2 lint configuration for the contract (US-034 AT-US-034-01; REQ-API-001/002; ADR-0002 `openapi:lint`).
+# Run with `npm run openapi:lint` (tools/openapi/lint.mjs: no telemetry, no update check). Baseline: api/README.md
+# "Lint status" (0 errors; the warnings below are the accepted set, kept as warnings so a new one stays visible).
+extends:
+  - recommended
+
+rules:
+  # Every request/response example must validate against its schema, with no undeclared properties (README "Lint
+  # status": every example conforms under this stricter setting). Raised from the recommended default to an error.
+  no-invalid-media-type-examples:
+    severity: error
+    allowAdditionalProperties: false
+  # Accepted warnings (README "Lint status"), left at `warn` on purpose:
+  # - no-server-example.com (1): the local server http://localhost:3000/api/v1 is required for compose and Swagger UI.
+  # - operation-4xx-response (2): /health/live and /health/ready have no 4xx by design (probes, not rate-limited).
+  # - no-unused-components (5): the Sse* schemas are referenced only from `x-sse-events` (OpenAPI 3.1 has no item
+  #   schema for text/event-stream).
+  no-server-example.com: warn
+  operation-4xx-response: warn
+  no-unused-components: warn

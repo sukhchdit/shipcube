@@ -8,12 +8,16 @@ import { randomUUID } from 'node:crypto';
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
+import type { ApiMode } from './api-mode.js';
+
 export const CORRELATION_ID_HEADER = 'X-Correlation-Id';
 /** ADR-0016 §15 and openapi `Problem.correlation_id`. */
 export const CORRELATION_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 
 export interface RequestContext {
   readonly correlationId: string;
+  /** `test` in every non-production environment (REQ-API-020, AT-US-035-06); M3 derives it from the API key. */
+  readonly apiMode: ApiMode;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -43,11 +47,21 @@ function isRequestContext(value: unknown): value is RequestContext {
   return typeof value === 'object' && value !== null && typeof (value as { correlationId?: unknown }).correlationId === 'string';
 }
 
+export interface RequestContextOptions {
+  /** Makes the correlation ID when the client sent no valid one (default: UUID v4). */
+  readonly generateCorrelationId?: () => string;
+  /** The process's ApiMode (`resolveApiMode(APP_ENV)`); default `test`. */
+  readonly apiMode?: ApiMode;
+}
+
 /** First middleware of the app: resolves the correlation ID, echoes it, and runs the rest of the chain in context. */
-export function requestContextMiddleware(generate: () => string = randomUUID): RequestHandler {
+export function requestContextMiddleware(options: RequestContextOptions = {}): RequestHandler {
+  const generateCorrelationId = options.generateCorrelationId ?? randomUUID;
+  const apiMode = options.apiMode ?? 'test';
   return (req: Request, res: Response, next: NextFunction): void => {
     const context: RequestContext = Object.freeze({
-      correlationId: resolveCorrelationId(req.headers[CORRELATION_ID_HEADER.toLowerCase()], generate),
+      correlationId: resolveCorrelationId(req.headers[CORRELATION_ID_HEADER.toLowerCase()], generateCorrelationId),
+      apiMode,
     });
     res.locals['requestContext'] = context;
     res.setHeader(CORRELATION_ID_HEADER, context.correlationId);
