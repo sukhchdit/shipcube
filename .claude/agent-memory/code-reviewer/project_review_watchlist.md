@@ -259,3 +259,8 @@ PR #23 (TASK-011 lane B heavy lane) r1 at f61e55d: CHANGES_REQUESTED (2026-11-13
 - NITs: Jest report reads not try/caught; same-minute re-run can half-write; clean-tree check vacuous in CI and blind to ignored files; JUnit parser rejects raw `>` in attributes and DOCTYPE in CDATA (fail closed); `--suites` runs default into real docs tree; stale doc links/paths (security-test-cases.md, tooling_inputs, ADR-0023 am. B schema path).
 - Decisions D-TASK011-01..04 accepted (active-only, schema in tools/quality, one summary per root, unit = unit + unit-dom). Union with main 84d9299 clean (tree dbf09fa); PR #20/#24 zero overlap.
 - When TASK-015 or any qa-lead activation PR lands: check R1-m1..m4 and that `unit` is the first suite flipped. Base-ref Ajv path verified out of tree (25/25).
+
+## PR #25 (TASK-007 CI follow-ups: gitleaks OpenAPI allowlist removal + dependabot TS-major ignore) r1 AWN (2026-11-13)
+- Verdict APPROVED_WITH_NITS at 20a0fc6; mutation (18 mutants) killed all but: rule-level `[[rules.allowlists]]` for openapi.yaml (N2), `typescript` ignore moved to the github-actions ecosystem (N1, test regex not ecosystem-scoped), `@platform/*` ignore removal (untested, pre-existing). N3: `toHaveLength(2)` cooldown count breaks when docker/terraform ecosystems land (TASK-014/017).
+- Merge condition: security record commit turns "security-owned paths" step green. Lane A gitleaks reads BASE config, so it never exercises the new one; static proof = added lines of openapi.yaml commits in open PR ranges (first-parent) matching old allowlist shapes without EXAMPLE = 0.
+- Mutation pitfall: `replace('semver-major', ...)` hit the comment line first; replace the full `version-update:semver-major` literal.
