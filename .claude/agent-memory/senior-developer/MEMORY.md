@@ -8,3 +8,4 @@
 - [Lane A merge pitfalls](feedback_lane_a_merge_pitfalls.md) — gitleaks on merge first-parent diff, base-ref fixtures vs new rules, PR title length
 - [Supersede branch](feedback_supersede_branch.md) — fresh-ancestry PR recipe, tree-equality proof, security record keyed by NEW PR number
 - [Playwright harness](feedback_playwright_harness.md) — Firefox exe blocked on host, WebKit Tab, Accept-Language override, cooldown epoch, base-ref step vs tools/test-support
+- [Batch 0.4/0.5 TASK-010/017](feedback_batch_010_017.md) — commitlint body length, generated-file meta-tests, docker.lock contention, main moving with code
