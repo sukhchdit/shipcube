@@ -8,7 +8,7 @@
  */
 import type { Config, Service } from '@platform/config';
 
-import { databaseRuntimeFromConfig } from '../db/runtime.js';
+import { type AuditReadinessChecks, databaseRuntimeFromConfig } from '../db/runtime.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
 import { createReadinessProbe, pendingCheck, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
@@ -17,18 +17,11 @@ import type { Closeable } from './shutdown.js';
 export type ValkeyClient = ReturnType<typeof createValkeyClient>;
 
 /**
- * The five readiness components of openapi.yaml `HealthReady`. Object storage and the audit components are
- * pending until their clients exist: object storage with the S3 adapter (TASK-019), audit partitions and chain
- * verification with the audit store (TASK-021).
+ * The five readiness components of openapi.yaml `HealthReady`. Object storage is pending until the S3 adapter exists
+ * (TASK-019); the audit components read the catalogue through the database runtime (TASK-021).
  */
-export function readinessChecks(database: ReadinessCheck, valkey: ValkeyClient): readonly ReadinessCheck[] {
-  return [
-    database,
-    createValkeyCheck(valkey),
-    pendingCheck('object_storage'),
-    pendingCheck('audit_partitions'),
-    pendingCheck('audit_chain'),
-  ];
+export function readinessChecks(database: ReadinessCheck, audit: AuditReadinessChecks, valkey: ValkeyClient): readonly ReadinessCheck[] {
+  return [database, createValkeyCheck(valkey), pendingCheck('object_storage'), audit.partitions, audit.chain];
 }
 
 export interface RuntimeServices {
@@ -54,7 +47,7 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
   });
   return {
     valkey,
-    probe: createReadinessProbe(readinessChecks(database.readinessCheck, valkey)),
+    probe: createReadinessProbe(readinessChecks(database.readinessCheck, database.auditChecks, valkey)),
     resources: [...database.resources, { name: 'valkey', close: () => valkey.quit().then(() => undefined) }],
     startup: () => database.startup(),
   };
