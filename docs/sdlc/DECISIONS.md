@@ -1957,3 +1957,26 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 ### D-ORCH-049 · 2026-11-13 · sdlc-orchestrator · Docker Desktop hung after disk exhaustion; non-Docker work continues; gherkin map drift routed
 - **Decision:** (1) After the disk filled (D-ORCH-048), Docker Desktop stopped answering (`docker ps`/`docker version` time out) although 40 GB are free again. Agents cannot restart it (process control was denied by the permission classifier; not worked around), so **the user is asked to restart Docker Desktop** (optionally `docker system prune`). Until then, every lane-B evidence run, Testcontainers integration suite and Docker probe is blocked; PRs #34 (TASK-276) and #35 (TASK-277) are reviewed without evidence, which is added once Docker is back. A heavy run of the TASK-276 agent still holds the docker.lock directory (owner `t276-ev`); the orchestrator clears that stale lock after the Docker restart, before any new heavy run. (2) TASK-277 found that `docs/05-quality/tests/gherkin-test-map.md` v1.0 has drifted from the story files after D-058/D-060 (US-066, US-121, US-129, US-137, US-222: 13 unclassified scenarios; US-066 IDs currently mean two different scenarios in two tests). Routed: qa-lead classifies the 13 scenarios in `gherkin-suite-assignments.json` and regenerates the map with `npm run quality:gherkin-map`; the US-066 test titles are renumbered to the story-file numbering; `KNOWN_DRIFT` is emptied — in one PR after PR #35 merges, before the Wave-0-exit activation PR.
 - **Reversibility:** High.
+
+### D-TASK020-18..27 · 2026-11-13 · senior-developer (with two backend-developer specialists on opus) · PR #32 fix cycle 1
+- **Decision:**
+  - (18) The MFA stub answers 403 `AUTHZ_DENIED` to an OPERATOR principal on a non-exempt route. It does not use the contract's `MFA_ENROLMENT_REQUIRED`, because that code belongs to the auth module catalogue, which the MFA task creates; a stub never pre-claims another module's code.
+  - (19) `createApp` runs the boot checks (PR32-SEC-05 (b)). The production route bindings are selected by `apiMode === 'live'` (`resolveApiMode(APP_ENV)`), not by a second flag that could disagree with it. The runner check runs only with the default slots, because the `pipeline` test seam owns its execute slot. The binding check always runs.
+  - (20) The credential-presence predicate (`presentsCredential`: Authorization, `__Host-rt_web`/`__Host-rt_admin`, `X-Quote-Token`) lives in `@platform/shared` (`http/credentials.ts`). The app (authn stub, problem handler), the SEC-TC-29 contract helper and the stubs share it. `tests/api` cannot import `apps/api` sources (`import-x/no-relative-packages`).
+  - (21) The authn stub refuses a credential on an anonymous-capable route (401 with `private, no-store`, D-ARCH-107 (5)). `authorise` also marks every non-anonymous outcome private, as defence in depth.
+  - (22) The drift walker accepts only mount matchers that path-to-regexp built from a string (`match`). A RegExp mount (`regexpMatcher`), or any matcher a router upgrade renames, is reported and fails closed. Probing alone cannot see a capture-free alternation or a character class.
+  - (23) `tests/generated/api-mounts.ts` passes an unused runner, so the boot check holds for the real registry. It also offers `metadataFixtureSlots()` for the route-metadata seeded defects: those mount contract-shaped audited or idempotent routes, which the stubs rightly refuse in an app.
+  - (24) Closed schemas at every depth: `Joi.object()` without keys is refused at any depth, the top level included (`Joi.object({})` is the closed empty form). Arrays need items, `Joi.any()` needs `valid()`, alternatives and `when` branches are walked, and the depth bound is 32. Server-controlled fields are refused at any depth (bounded, capped at 50 issues).
+  - (25) The handler context gets a frozen `transport` (`ip`, `userAgent`) instead of `req` (PR32-SEC-05 (c), n4). Part 020-C keeps it in every phase.
+  - (26) SEC-TC-29 helper: a problem raised before the route is known needs `no-store`, plus `private` only when the request carried a credential (code review m1 recommendation). Those problems are `MALFORMED_REQUEST`, `UNSUPPORTED_MEDIA_TYPE` and `PAYLOAD_TOO_LARGE` from the body parser, and the 404/405 fallback. The problem handler implements the same rule.
+  - (27) PR #20's `logging.api.test.ts` keeps its careless-code probes with the live request. They run in a test slot, and a stand-in authenticator accepts the credential sentinels as anonymous. The file joins `SUPERTEST_ALLOW_LIST` with a reason.
+  - Also: `static-module-specifier` is a separate rule (PR32-SEC-07 (a)); `system-model-owner` lints `platform/db/**` except the accessor home and the handle (PR32-SEC-07 (b)); the CODEOWNERS line for `tests/api/helpers/coverage-teardown.ts` is required by PR #33's `jest-config-owned` test.
+- **Routed:**
+  - n5 and PR32-SEC-10 go to the webhook and carrier-push tasks.
+  - n6 goes to TASK-096/036.
+  - PR32-SEC-07 (c) goes to TASK-024.
+  - PR32-SEC-08 goes to TASK-022/113.
+  - PR32-SEC-11 (CODEOWNERS for `tests/generated/**`, `tools/openapi/**`, `tools/db/table-classes/`) goes to 015-C.
+  - R4, the phases, the runtime twin and the stream hook go to 020-C.
+- **Reversibility:** High (code, tests and lint configuration; no data or contract change).
+
