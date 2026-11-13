@@ -103,3 +103,125 @@ Files changed on both sides: `apps/api/src/platform/runtime/services.ts`, `runti
 - `STORAGE_ENDPOINT`/`STORAGE_PUBLIC_ENDPOINT` are config-only (SSRF not reachable from user input); HTTPS is enforced by the config guard outside local/test.
 - M5: Object Lock plus `s3:PutObject`-only worker role (ADR-0021 am. 1) interacts with `If-None-Match` and the CRC32 default; the 409 conflict shape (R1-m4) belongs in the anchor sink's threat notes.
 - `apps/api/src/platform/**` is a security-owned path: record naming the final head required.
+
+
+---
+
+## Round 2 (head 5f45a8b)
+
+Reviewer: code-reviewer · Date: 2026-11-13 · Branch head `5f45a8b350ac6786f95f8d34d872e55f67482d96` (= `origin/feat/TASK-019-spk-05-spike-s3-compatible`; confirmed by `gh pr view`) · Delta reviewed: `293fb62..5f45a8b` = `5488dac` (fix), `0a05463` (RuntimeServices.storage + port re-export), `f2cad2e` (merge of main at `b582a60`), `5f45a8b` (DECISIONS rebuild). Inputs: my r1 above, PR comments 6848438853 / 6848465716, security record PR-0030 (C1 = PR30-SEC-01), ADR-0021 am. 2, D-ARCH-093/094.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every r1 MINOR that was in scope is fixed and, unlike r1, pinned by tests that fail when the fix is removed (14 of 14 mutants
+  killed by me). The request timeout now throws, every operation has its own deadline with no caller signal (re-probed with the
+  production values: head/delete 5.0 s, get/put 15.0 s, a trickling body cut at 15.0 s), errors are mapped by name before status,
+  put sends and the store verifies ChecksumSHA256, get recomputes, presign needs a forced content type and defaults to attachment, a
+  half-written credential pair is refused before any client exists. Zero BLOCKER/MAJOR; nits only. Merge needs: security delta on this
+  head, lane-B evidence after PR #31 (and a fully green lane A, see 1), and the unions below.
+```
+
+### R2.1 Verification I performed (and what I relied on)
+
+| Check | Result |
+|---|---|
+| Head | `5f45a8b` = PR head. `origin/main` has since moved to `3425247` (2 docs commits: PR #31 security r1, PR #30 delta-review note) |
+| **Lane A run 43396720587 on the head** | `scans` success. `fast-lane`: every step through **Vulnerability audit** success, then **Lane B evidence** failed (expected, D-ORCH-035) and **all later steps were SKIPPED: commitlint, lint, format, actionlint, type-check, unit tests, lint negative fixtures, build**. `ci-gate` red. So lane A has **not** exercised lint/typecheck/unit on this head; the developer's local gate table is the only claim. I therefore re-ran them myself (next rows). Merge condition 2 |
+| `git archive 5f45a8b` extract + `node_modules` junction | targeted unit: `platform/storage/`, `health/checks/object-storage`, `runtime/services*`: **6 suites, 138 tests passed** (was 5 / 84 at r1) |
+| Type-check | `tsc -p apps/api/tsconfig.json --noEmit` in the extract: clean (tests included, `include: src`) |
+| Lint | ESLint (repo config, `--max-warnings 0`, typed) on `platform/storage`, `platform/runtime`, `platform/health`, `apps/api/src/main.ts`, `apps/worker/src/main.ts`: clean |
+| Format | `prettier --check` on storage, runtime, health, `DECISIONS.md`, `SPK-05.md`: clean |
+| **Mutation run** (14 mutants applied one at a time to `s3-object-storage.ts`, storage + composition unit files) | all killed: no `throwOnRequestTimeout` (3 fail), no `connectionTimeout` (2), no `maxAttempts` (1), **status-before-name error map (7)**, no put checksum (2), no get verification (1), no `ChecksumMode` (1), no signing-date floor (1), no `ResponseContentType` (1), inline without opt-in (2), no credential-pair refusal (4, two in the composition file), both deadlines disabled (2), byte counter off (2), `failure()` deadline mapping off (1). The "reader's own abort listener" is the developer's own surviving mutant (defence in depth, the SDK's abort also destroys the body); I agree and do not ask for more |
+| Loopback probes (tsx, real SDK, production `S3_TIMEOUTS`, no caller signal) | silent server: `head` UNAVAILABLE at **5005 ms**, `delete` 5004 ms, `get` 15014 ms, `put` 15013 ms; the server saw 6 requests for 4 operations (the 10 s request timeout now throws and the SDK retries once inside the 15 s deadline, as designed). Body trickling 1 byte / 2 s: `get` UNAVAILABLE at **15016 ms** (r1: still pending at 45 s). Headers delayed 9 s (below the 10 s request timeout): `get` succeeds. This is the r1 R1-m2 probe, now closed |
+| Get hash verification probe | metadata claim wrong: `INTEGRITY_MISMATCH` (14 ms); claim right, absent, or uppercase hex: returns the recomputed digest. `head` sends `x-amz-checksum-mode: ENABLED`; a good store checksum is exposed as `checksumSha256`, a 4-byte (crc32-like) or non-canonical base64 value is ignored, and the metadata claim stays separate |
+| Error-map probe (13 shapes) | RequestTimeout 400, ConditionalRequestConflict 409, SlowDown 503, TimeoutError, ECONNREFUSED: UNAVAILABLE. ExpiredToken, CredentialsProviderError, RequestTimeTooSkewed 403: ACCESS_DENIED. BadDigest: INTEGRITY_MISMATCH. InvalidDigest, XAmzContentSHA256Mismatch, InvalidRequest 400: UNEXPECTED (R2-n3) |
+| Presign probe (clock `08:00:00.900`) | `X-Amz-Date` `…080000Z`, `expiresAt` `08:00:02.000` for ttl 2 (exact). Missing or empty `responseContentType`: INVALID_ARGUMENT. Default disposition `attachment`; `inline` without `allowInline`: INVALID_ARGUMENT; `inline` with it: signed; `Attachment; filename=…`: signed; `attachmentx`, `form-data`: refused; `allowInline` with an `attachment` disposition: still attachment. Content types: `text/html; charset=utf-8` and `application/vnd.api+json` signed; `text/*`, CR/LF, quoted parameter, 5000-char and 2000-repeat inputs refused in 0 ms (no backtracking) |
+| Credential pair probe | none: default chain; one of two: `StorageConfigError` naming the two keys, no value; both (even empty strings): static credentials |
+| Composition test alone, twice | passes (3 tests, 1.3 s) and still prints "Jest did not exit one second after the test run" both times (R1-n5 is not fixed; the developer did not see it in a full run) |
+| Scope of `f2cad2e` | **Not docs-only as the PR comment says.** It brought PR #28 (`ab42cc6`): `tools/quality/required-suites.json` and `activation.test.ts` (5 suites now required). `git diff b582a60 f2cad2e -- tools prisma packages .github package.json package-lock.json` is empty and `apps` is byte-identical to the pre-merge commit, so it is a clean union, and it is exactly why the evidence step now asks for api, catalog-c1-c14, integration and unit |
+| Lane B / Docker | NOT re-run (no Docker). Relied on the developer table: 19 suites / 202 tests on `26e53c4`; `5488dac..5f45a8b` touches only `runtime/{services.ts,index.ts,services.composition.test.ts}` plus docs and the main merge, and no `*.int.test.ts` imports those files. RustFS-specific claims (store-verified `ChecksumSHA256`, `head().checksumSha256 === put.sha256`, forged-claim `get`, `text/html` served as forced `text/plain`, ttl 2 expiry) are therefore unverified by me and come from the developer's run |
+| Hygiene | extract and junction removed; TASK-019 worktree `node_modules` 748, `git status` clean, no `C:\node_modules` junction |
+
+### R2.2 r1 findings: closure
+
+| r1 | Status | Evidence |
+|---|---|---|
+| m1 timeouts/retries unpinned | **Closed** | `s3ClientConfig` exported and pinned (`toEqual` of the whole config, plus the SDK-resolved `NodeHttpHandler` config and `maxAttempts()`); loopback retries (500,500,200; always-500 = exactly 3 HEADs); F-10 pinned by a real destroyed socket then 412, both PUTs carry `If-None-Match: *`; mutants above. `connectionMs` itself can only be pinned by value (a loopback server cannot observe it), which is the honest limit |
+| m2 no overall deadline, unbounded chunked body | **Closed** | per-op deadline (15 s / 5 s) combined with the caller signal; counting reader (`TOO_LARGE` for a chunked 6 MiB, a lying `Content-Length`, exactly 5 MiB passes) |
+| m3 `expiresAt` overstated; flaky expiry test | **Closed** | floor to the second; unit clock with non-zero ms; contract uses ttl 2 and a 3.5 s wait (lane B, unverified by me) |
+| m4 error-map gaps | **Closed** | name before status, rows for 400 RequestTimeout, 409, ExpiredToken, BadDigest; `RequestTimeTooSkewed` dropped; AWS-only shapes recorded in SPK-05 F-07 as "not provable on RustFS" |
+| m5 nothing logs the storage failure | **Closed** | `onFailure(code)` -> `object_storage.error {error: <class>}`; at most one evaluation per second per instance (readiness cache TTL 1 s), so at most 1 warn/s; the composition assertion is no longer vacuous (see R2.3 on the realm quirk); fail-closed on one-of-two refs |
+| m6 routing and exposure | **Closed** | F-10 follow-up now on TASK-116 (SPK-05 section 4, WAVE-03.md:649 ANCHOR SINK CONDITIONS); `RuntimeServices.storage` and the port re-export exist (R2.3). The wording that still says `head().sha256` is R2.4 |
+| m7 boundary deny-list | **Closed** | every `@aws-sdk/*` plus `@smithy/signature-v4`; 8 extensions; 12 positive and 4 negative controls; D-TASK019-03 (6) now says the unit test is the control. Not covered, accepted: `@aws-crypto/*`, other `@smithy/*` signers (they are transitive and not a documented S3 path); scan limited to `apps|packages/*/src` (tests/tools out of scope by design) |
+| n1 DECISIONS insertion damage | **Closed** | `git diff b582a60 HEAD -- docs/sdlc/DECISIONS.md` has 0 removed lines, 3 appended blocks (D-TASK019-01/-02/-03), each with its own Reversibility line and a blank-line separator |
+| n2 key and metadata validation | **Open, accepted** (developer left it by choice; keys are UUID based, not exploitable today). Route to the first documents consumer (TASK-147) as an AC line |
+| n3 `get` verification wording | **Closed** (verified; port JSDoc says "unverified claim" on `head`, "recomputed" on `get`) |
+| n4 idempotency wording, head on a missing bucket | **Closed** (header reworded; contract row added, lane B) |
+| n5 Jest "did not exit" | **Open** (still reproduces solo, R2-n1) |
+
+### R2.3 Rulings requested in the dispatch
+
+- **`throwOnRequestTimeout` + deadlines + counting reader (C1):** correct and complete for the stated threat. The two layers are right: the handler timeout is per attempt until the headers (retryable), the deadline covers retries, backoff and the body. `failure()` mapping every failure after the bounded signal fired to UNAVAILABLE is sound (a typed `ObjectStorageError` such as `TOO_LARGE` or `INTEGRITY_MISMATCH` is excluded, so integrity is never downgraded to "unavailable").
+- **Error-map ordering:** name before status is right (S3 reuses 400/409 for retryable conditions). `BadDigest` -> `INTEGRITY_MISMATCH` is correct and distinct from the pre-send hash comparison; a failed put with a bad checksum stores nothing (lane B row).
+- **Class-only storage log:** yes. The line carries `error` plus the logger's own keys; the composition test asserts the exact key set and that no endpoint, bucket, access key or secret key appears anywhere in the logs or body.
+- **Composition-test realm quirk (accepts UNEXPECTED or UNAVAILABLE): acceptable.** The cause is Jest's VM realm (the SDK re-wraps the cross-realm Node error and drops `code`), a test-harness artefact, not production behaviour; I re-ran ECONNREFUSED through the map outside Jest and it is UNAVAILABLE. What the test must prove is that the line exists, is class-only and in the closed set, and that is asserted; the passthrough of every class is pinned by the `onFailure` unit test (ACCESS_DENIED, UNEXPECTED, success silent) and the code-to-class table. A stricter assertion would only encode the quirk. No change requested.
+- **One-of-two credential refusal before any pool/client:** met by construction (`storageOptionsFromConfig` throws before `createS3ObjectStorage`; storage is now built before `databaseRuntimeFromConfig` and `createValkeyClient`). The test asserts the throw and the message but not the order; R2-n2.
+- **Boundary test breadth:** adequate (above).
+- **Presign requires `responseContentType`, attachment default, `allowInline` opt-in:** correct, validated at runtime as well as in the type; the port JSDoc documents the opt-in. The filename text inside `contentDisposition` is still caller-built (security flag, unchanged).
+- **`get` hash verification:** correct for what it claims. Residual: a malformed or uppercase metadata claim is dropped by `toHead`, so no comparison happens, but the returned `sha256` is always the recomputed digest, so a caller comparing against its expected digest is still safe (R2-n4).
+- **`RuntimeServices.storage` + port re-export (ADR-0021 am. 2 item 5):** exactly what the amendment asks. The adapter and `S3ObjectStorage.destroy` are not exported from `@platform/api/runtime` (the type is `ObjectStorage`; `destroy` exists at runtime for `resources` and the composition test pins the key set). No port type changes shape for the worker. The anchor sink is correctly left to TASK-116 with its own credentials.
+- **DECISIONS = main + appended blocks:** yes against `b582a60`. Main has since appended more blocks at the same place (D-SEC-PR31-01 etc.), so the next merge of main conflicts at the end of the file; resolution is "keep both" (R2.5).
+
+### R2.4 For the principal-architect: ADR-0021 am. 2 item 3 wording
+
+Item 3 tells the writer to `head()` and compare `sha256` with the digest of its own line. After this PR `head().sha256` is the documented unverified metadata claim and `head().checksumSha256` is the store-verified SHA-256 recorded at write. The item already says the claim "decides only whether the writer stops retrying", but the safer rule is now available and costs nothing. Suggested replacement for the comparison sentence:
+
+> the writer calls `head()` and compares `checksumSha256` (the SHA-256 the store verified when the object was written through the port; present for single-PUT objects) with the digest of its own line. Equal: written (idempotent success). Different: `ANCHOR_SINK_MISMATCH`, never an overwrite. Absent (an object not written through the port, or a composite checksum): `get()` and compare the `sha256` it recomputed over the bytes. The metadata `sha256` is a claim by whoever wrote the object; it is never the basis of this decision. The verifier's byte-exact table/sink comparison (A-1, A-6) stays the control.
+
+Same edits needed in the places that quote the old rule: item 4 ("until that lands it is `UNEXPECTED`" is now stale: it landed, `UNAVAILABLE`, with 400 `RequestTimeout` and `ExpiredToken` mapped), `docs/04-plan/tasks/WAVE-03.md:649` (TASK-116 ANCHOR SINK CONDITIONS (2), "compares sha256 with the digest of its own line") and its generator source `docs/04-plan/generator/plan-data.mjs` (TASK-116 row near line 312, and the same text in `task-map.csv` if quoted), and any `head().sha256` in data-model section 5.5/5.6. Note that `head` and `get` on the anchors bucket both need `s3:GetObject` (HEAD uses it), already granted by am. 2 item 1; `ChecksumMode` needs nothing more.
+
+### R2.5 Findings (round 2)
+
+| ID | Sev | Location | Problem | Required fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `services.composition.test.ts` | R1-n5 persists: run alone, Jest prints "did not exit one second after the test run" in 2 of 2 runs (probably the first test, which really connects the SDK, Valkey and the pool; not isolated by me; the developer's runs of the whole suite did not show it). | Find the handle (`--detectOpenHandles`, or `unref`/close in the test), or route with the Valkey client teardown (TASK-010). Not a merge condition. |
+| R2-n2 | NIT | `services.ts:56-58`; composition test | "Storage first, so a half-written pair throws before any pool or client" is a comment and an ordering nobody pins; moving the line back would keep every test green. | Optional: assert with a `databaseRuntimeFromConfig` spy that it is not called on the refusal path, or reword the comment as intent. |
+| R2-n3 | NIT | `s3-object-storage.ts` `NAMED_CODES` | `InvalidDigest` (malformed checksum) and `XAmzContentSHA256Mismatch` (payload corrupted on the wire) are `UNEXPECTED`; the second is a retryable transport condition and the first can only be our bug. Both are AWS-side shapes RustFS may not produce. | Map `XAmzContentSHA256Mismatch` to `INTEGRITY_MISMATCH` (or `UNAVAILABLE`, retryable) and `InvalidDigest` to `INTEGRITY_MISMATCH`; one unit row each; add to SPK-05 F-07's "not provable on RustFS" list. |
+| R2-n4 | NIT | `toHead`, `get` | A malformed or uppercase `x-amz-meta-sha256` is silently dropped, so `get` does not flag a forged claim of that shape (the returned digest is still the recomputed one). | Optional: treat a present but malformed claim as `INTEGRITY_MISMATCH` on `get`, or document "claim ignored unless 64 lowercase hex". |
+| R2-n5 | NIT | `readBounded` | `signal.throwIfAborted()` before the abort listener is registered throws without destroying the response stream (the SDK's own abort does destroy it, per the developer's mutant note; defence in depth only). | Destroy the stream in that early-exit path as well. |
+| R2-n6 | NIT | PR comment, `f2cad2e` | The comment calls the main merge "docs-only"; it also carried PR #28's `tools/quality` change (clean union, verified). Matters because it is why the evidence step now requires four more suites. | Say so in the evidence commit message; no code change. |
+| R2-n7 | NIT | `s3-object-storage.http.test.ts` | The deadline tests assert wall-clock windows (lower bound deadline-50 ms, upper deadline+1 s; trickle < 1.8 s for 800 ms). Generous on a quiet host; on the contended local host (D-ORCH-001) a stall of one second would flake the required lane. | Keep, but widen the upper bounds to deadline+2.5 s, or note it in the test header. Not a merge condition. |
+
+### R2.6 Union notes for whoever merges second (updates r1 section 5)
+
+Conflict probes by `git merge-tree` against the current heads:
+
+- **PR #24 (`e084702`)**: 3 content conflicts, as in r1: `services.ts`, `services.test.ts`, `health.int.test.ts`. Apply r1 section 5 items 1-3 and add what this fix cycle changed in `services.ts`: (a) keep **storage built first** (before `databaseRuntimeFromConfig` and the Valkey client) so the credential refusal still precedes every pool/client; (b) keep the new `storage` member in the returned object and its JSDoc; (c) keep the `onFailure` callback on `createObjectStorageCheck(storage, bucket, (code) => log.warn('object_storage.error', { error: code }))` when composing the new `readinessChecks(database, audit, valkey, objectStorage)`; (d) the resources list keeps `object_storage` -> `storage.destroy()`. Still delete the `pendingCheck` import; `health.int.test.ts` keeps PR #24's `AUDIT_STAND_INS` and must not keep `pendingCheck('audit_*')`. Re-run `services.test`, the composition file (now also asserts the `storage` key set and the log line), `health/checks`, `db/runtime`.
+- **PR #20 (`fafa3b5`, Pino logger)**: conflicts in `apps/api/src/main.ts`, `apps/worker/src/main.ts` and `runtime/index.ts` (not in r1; the new re-export block now sits next to PR #20's `process-errors` export). Resolution: keep both export blocks in `index.ts`; in both `main.ts` keep PR #20's logger construction and `installProcessErrorHandlers`, but destructure `{ config, secrets }` and call `createRuntimeServices(config, service, log, secrets)` (PR #20's side still passes three arguments, which would silently drop the storage credentials). **Test impact (prediction by reading, not run):** PR #20's `createRuntimeLog` writes Pino lines with `timestamp`, `message`, `version` and the correlation keys, not `time` and `event`. `services.composition.test.ts` asserts `level`, `event: 'object_storage.error'` and the exact key set `[error, event, level, service, time]`, so it will fail on the union. Re-base those assertions on PR #20's shape (the event name moves to `message`; assert the key set against the logger's mandatory keys plus `error`; keep the "no endpoint, bucket, access key, secret key anywhere in the text" loop unchanged). `RuntimeLog.warn(event, fields, thrown?)` accepts the call as is.
+- **DECISIONS.md**: conflicts at the end of file with current main (both sides append). Keep both sets; check each block still ends with its Reversibility line and has a blank line before it (r1 n1).
+- PR #26: only `DECISIONS.md` conflicts (same resolution).
+
+### R2.7 Merge conditions (round 2)
+
+1. **Security delta on this head** (`apps/api/src/platform/**` and both `main.ts` are security-owned): the record must name `5f45a8b` (or the later merge head) and close PR30-SEC-01 (C1) and the cheap parts of 02/03/04/05.
+2. **Lane B evidence (D-ORCH-035)** after PR #31 merges: merge main, `npm ci --ignore-scripts && npm run deps:rebuild`, `npm run quality:heavy -- --profile pr` under docker.lock, scrub grep, docs-only evidence commit. **Lane A must then be fully green on the final head**: on `5f45a8b` lint, format, type-check, unit and build were skipped behind the failing evidence step, so my local re-run (above) is the only independent evidence for them until then. Also note R2-n6 and that the heavy run must include the four newly required suites.
+3. **Unions** per R2.6 (PR #24, PR #20, DECISIONS tail), whichever merges second, verified on the merge commit by lane A and the health/audit integration suites.
+4. **Architect wording** (R2.4) filed before TASK-116 starts (not a merge blocker for this PR; the code is already right). Route R1-n2 to TASK-147 as an AC line.
+5. Squash merge; title already Conventional Commits compliant.
+
+### R2.8 What is good (keep)
+
+- The tests now fail when the behaviour is removed: all 14 of my mutants die, including the status-before-name order and the credential pair, and the timing tests drive the real SDK against a loopback server with no Docker.
+- Two-layer time bound (per-attempt throwing request timeout, per-operation deadline) with one honest rule: after the deadline fires, everything is UNAVAILABLE except typed port errors.
+- Integrity done in the right places: the store verifies on write (`ChecksumSHA256`), `get` recomputes, `head` keeps the unverified claim and the verified value apart in the type and in the JSDoc.
+- Presign API that cannot be misused by omission: forced content type, `attachment` default, `inline` an explicit reviewed opt-in.
+- Fail-closed credential handling whose message names keys only.
+- Exposure kept minimal: the port (type and error class) is re-exported, the adapter is not, and the anchor sink is explicitly kept off `RuntimeServices.storage`.
+
+### R2.9 SECURITY-FLAGS (for the security delta)
+
+- `responseContentType` accepts any `type/subtype` (including `text/html`): the caller of `presignGet` must pass the type stored at upload (T-58), and `allowInline: true` with an active content type is the XSS-by-document path. A lint or review rule for `allowInline` at the first consumer (TASK-147) is worth recording.
+- `contentDisposition` filename text is still caller-built (quotes, `;`, non-ASCII); the port only blocks control characters and non-`attachment` types.
+- Static credential pair now refuses a half-written configuration; confirm the same posture for the audit-anchor sink credentials (TASK-116) and that `StorageConfigError` reaching the process error handler (PR #20) is logged by name only.
+- `object_storage.error` logs the class once per second at most; confirm it is acceptable that an unauthenticated `/health/ready` caller can drive one warn line per second per instance (bounded by the cache TTL).
+- AWS-only shapes (409 `ConditionalRequestConflict`, 400 `RequestTimeout`, `ExpiredToken`, and R2-n3) remain unit-tested only; the contract suite must run against real S3 before G4-production (ADR-0021 section 6).
