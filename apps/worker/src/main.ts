@@ -7,9 +7,9 @@ import { loadRuntimeConfigOrExit } from '@platform/config';
 
 import { createWorkerHealthServer } from './platform/health/server.js';
 
-const { config } = await loadRuntimeConfigOrExit('worker');
+const { config, secrets } = await loadRuntimeConfigOrExit('worker');
 const log = createRuntimeLog('worker', process.stdout);
-const services = createRuntimeServices(config, 'worker', log);
+const services = createRuntimeServices(config, 'worker', log, secrets);
 const server = createWorkerHealthServer(services.probe);
 
 // Session-integrity check on a dedicated connection before the health server opens and before any queue processor

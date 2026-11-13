@@ -36,4 +36,20 @@ export {
   type ReadinessReport,
 } from './readiness.js';
 export { createRuntimeServices, readinessChecks, type RuntimeServices, type ValkeyClient } from './services.js';
+// The ObjectStorage port only (ADR-0021 am. 2 item 5); the S3 adapter stays behind platform/storage.
+export {
+  MAX_PRESIGN_TTL_SECONDS,
+  MAX_PUT_BYTES,
+  ObjectStorageError,
+  type ObjectHead,
+  type ObjectLocator,
+  type ObjectStorage,
+  type ObjectStorageErrorCode,
+  type PresignedUrl,
+  type PresignGetInput,
+  type PutIfAbsentResult,
+  type PutObjectInput,
+  type PutObjectResult,
+  type StoredObject,
+} from '../storage/object-storage.port.js';
 export { createShutdown, DRAIN_TIMEOUT_MS, RESOURCE_CLOSE_TIMEOUT_MS, type Closeable, type ShutdownOptions } from './shutdown.js';

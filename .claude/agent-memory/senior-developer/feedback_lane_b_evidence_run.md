@@ -18,3 +18,9 @@ Lane-B evidence per PR took about 25 min wall (npm ci 1.5 min, lint 1.3, unit 3,
 - **Merging main after the evidence commit** (docs-only main delta) keeps the evidence valid: prove with `git diff <evidence commit> HEAD -- . ':!docs' ':!.claude'` empty, then re-run check-evidence. The DECISIONS rebuild script is `wave0/ev/rebuild-decisions.mjs <wt> <PREFIX>`.
 
 Related: [[pr24-fc1-lessons]], [[pr26-fc1-lessons]], [[p5-dispatch]]
+
+**Second-merger unions PR #26/#30 after PR #24 (2026-11-13): about 60 calls, both evidence runs PASS first time, lane A as expected.**
+- Agent notes (`.claude/agent-memory/*/*.md`) are now staleness-allowed (D-SEC-PR28-01, `AGENT_MEMORY_GLOB`). A re-merge of a docs+notes-only main keeps the evidence valid; re-run `check-evidence` on the new head to prove it.
+- Reviews list only the conflicts they predicted. The real merge also hit `runtime.test.ts` (keep both describe blocks), and the union left `readFileSync`/`join`/`REPO_ROOT` unused in `services.test.ts`. Run lint on every resolved file before committing.
+- `check-security-owned-paths` counts only lock, `tools/tsconfig.json` and similar paths, not `apps/api/src/platform/**`. With `--base origin/main` it answers "does the PR delta touch them", which is the lane A question.
+- Host timing: npm ci 2.5-4 min, pre-gates 8-18 min, heavy 7-8 min, lock waits 5-10 min.

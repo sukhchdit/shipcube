@@ -13,9 +13,9 @@ import { createRuntimeLog } from './platform/runtime/log.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
 
-const { config } = await loadRuntimeConfigOrExit('api');
+const { config, secrets } = await loadRuntimeConfigOrExit('api');
 const log = createRuntimeLog('api', process.stdout);
-const services = createRuntimeServices(config, 'api', log);
+const services = createRuntimeServices(config, 'api', log, secrets);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
 const health = healthRoutes({ probe: services.probe });

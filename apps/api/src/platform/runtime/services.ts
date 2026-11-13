@@ -1,32 +1,45 @@
 /**
  * Process infrastructure shared by the API and the worker (ADR-0003: the worker shares module code): the database
  * runtime (platform/db/runtime.ts: pool, session-integrity guard, `database` readiness check and, once the generated
- * client is wired, the tenant-transaction runner), the Valkey client, the readiness checks and probe, and the
- * resources graceful shutdown closes. Typed configuration in, live clients out; no `process` access here. The pool and
- * the root client stay inside platform/db (D-ORCH-014 (d), PR11-SEC-09 item 1): this module never imports
- * platform/db/client.ts.
+ * client is wired, the tenant-transaction runner), the object-storage adapter (platform/storage, SPK-05), the Valkey
+ * client, the readiness checks and probe, and the resources graceful shutdown closes. Typed configuration in, live
+ * clients out; no `process` access here. The pool and the root client stay inside platform/db (D-ORCH-014 (d),
+ * PR11-SEC-09 item 1): this module never imports platform/db/client.ts.
  */
-import type { Config, Service } from '@platform/config';
+import type { Config, Secret, Service } from '@platform/config';
 
 import type { TenantTxRunner } from '../db/index.js';
 import { type AuditReadinessChecks, databaseRuntimeFromConfig } from '../db/runtime.js';
+import { createObjectStorageCheck } from '../health/checks/object-storage.js';
+import type { ObjectStorage } from '../storage/object-storage.port.js';
+import { objectStorageFromConfig } from '../storage/s3-object-storage.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
-import { createReadinessProbe, pendingCheck, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
+import { createReadinessProbe, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
 import type { Closeable } from './shutdown.js';
 
 export type ValkeyClient = ReturnType<typeof createValkeyClient>;
 
 /**
- * The five readiness components of openapi.yaml `HealthReady`. Object storage is pending until the S3 adapter exists
- * (TASK-019); the audit components read the catalogue through the database runtime (TASK-021).
+ * The five readiness components of openapi.yaml `HealthReady`; none is pending. `object_storage` is a `HeadBucket`
+ * on the documents bucket (TASK-019); the audit components read the catalogue through the database runtime (TASK-021).
  */
-export function readinessChecks(database: ReadinessCheck, audit: AuditReadinessChecks, valkey: ValkeyClient): readonly ReadinessCheck[] {
-  return [database, createValkeyCheck(valkey), pendingCheck('object_storage'), audit.partitions, audit.chain];
+export function readinessChecks(
+  database: ReadinessCheck,
+  audit: AuditReadinessChecks,
+  valkey: ValkeyClient,
+  objectStorage: ReadinessCheck,
+): readonly ReadinessCheck[] {
+  return [database, createValkeyCheck(valkey), objectStorage, audit.partitions, audit.chain];
 }
 
 export interface RuntimeServices {
   readonly valkey: ValkeyClient;
+  /**
+   * The documents object storage (one client, `STORAGE_*`; closed with `resources`). Never the audit anchor sink, which
+   * has its own credential and bucket (ADR-0021 am. 2 item 2, TASK-116).
+   */
+  readonly storage: ObjectStorage;
   readonly probe: ReadinessProbe;
   /**
    * The tenant-transaction runner of the database runtime, handed to createApp (the tx slot, TASK-020); undefined until
@@ -45,7 +58,14 @@ export interface RuntimeServices {
   startup(): Promise<void>;
 }
 
-export function createRuntimeServices(config: Config, service: Service, log: RuntimeLog): RuntimeServices {
+export function createRuntimeServices(
+  config: Config,
+  service: Service,
+  log: RuntimeLog,
+  secrets: ReadonlyMap<string, Secret<string>>,
+): RuntimeServices {
+  // First: a half-written credential pair throws StorageConfigError before any pool or client exists (PR30-SEC-04).
+  const storage = objectStorageFromConfig(config, secrets);
   const database = databaseRuntimeFromConfig(config, service, log);
   const valkey = createValkeyClient({
     url: config.REDIS_URL.reveal(),
@@ -54,9 +74,22 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
   });
   return {
     valkey,
-    probe: createReadinessProbe(readinessChecks(database.readinessCheck, database.auditChecks, valkey)),
+    storage,
     tenantTx: database.tenantTx,
-    resources: [...database.resources, { name: 'valkey', close: () => valkey.quit().then(() => undefined) }],
+    probe: createReadinessProbe(
+      readinessChecks(
+        database.readinessCheck,
+        database.auditChecks,
+        valkey,
+        // The error class only (ObjectStorageError code): never the endpoint, bucket, key or a credential (R1-m5).
+        createObjectStorageCheck(storage, config.STORAGE_BUCKET_DOCUMENTS, (code) => log.warn('object_storage.error', { error: code })),
+      ),
+    ),
+    resources: [
+      ...database.resources,
+      { name: 'valkey', close: () => valkey.quit().then(() => undefined) },
+      { name: 'object_storage', close: () => Promise.resolve(storage.destroy()) },
+    ],
     startup: () => database.startup(),
   };
 }
