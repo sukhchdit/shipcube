@@ -142,6 +142,7 @@ describe('[D-ARCH-104] runner activation on PostgreSQL 18 as platform_app (PR11-
     const body = JSON.parse(text) as Record<string, unknown>;
     expect(body).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
     for (const leak of ['STATEMENT_TIMEOUT', '57014', 'P2010', 'pg_sleep', 'canceling statement']) expect(text).not.toContain(leak);
-    expect(Object.keys(body)).not.toEqual(expect.arrayContaining(['reason', 'sqlState', 'prismaCode', 'message']));
+    // Per key (code review R1-m3): a body that leaks any ONE of them fails, not only a body that leaks all four.
+    for (const key of ['reason', 'sqlState', 'prismaCode', 'message']) expect(body).not.toHaveProperty(key);
   });
 });

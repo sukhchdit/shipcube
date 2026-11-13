@@ -367,3 +367,48 @@ describe('[R2-m1] [PR32-SEC-13] schema-level preferences, Joi.link and Joi.exten
     expect(extensionProblems(tampered('$_terms', cycle), 'schema.body')).toEqual([]);
   });
 });
+
+describe('[R2-n1] [PR32-SEC-15] the descriptor is deep-frozen', () => {
+  it('freezes audit (with additional), reauth and deprecated as copies', () => {
+    const audit = {
+      action: 'UPDATE',
+      entity: 'quote',
+      sensitivity: 'NORMAL',
+      reasonRequired: false,
+      additional: [{ action: 'CREATE', entity: 'quote_share', sensitivity: 'NORMAL', when: 'shared' }],
+    };
+    const reauth = { scope: 'account.delete', maxAgeSeconds: 300 };
+    const deprecated = { since: '2026-01-01', sunset: '2027-01-01', link: 'https://docs.example.test/migrate' };
+    const route = defineRoute({
+      ...base,
+      permission: 'shipment:read',
+      permissionJustification: undefined,
+      tenancy: 'tenant',
+      auth: 'session',
+      transaction: 'tenant',
+      audit,
+      reauth,
+      deprecated,
+    } as unknown as RouteSpec);
+    expect(Object.isFrozen(route.audit)).toBe(true);
+    expect(Object.isFrozen(route.audit.additional)).toBe(true);
+    expect(Object.isFrozen(route.audit.additional?.[0])).toBe(true);
+    expect(Object.isFrozen(route.reauth)).toBe(true);
+    expect(Object.isFrozen(route.deprecated)).toBe(true);
+    expect(() => {
+      (route.audit as { action: string }).action = 'NONE';
+    }).toThrow(TypeError);
+    // A later change to the caller's objects does not reach the checked descriptor.
+    audit.action = 'NONE';
+    reauth.scope = 'x';
+    expect(route.audit.action).toBe('UPDATE');
+    expect(route.reauth?.scope).toBe('account.delete');
+    expect(route).toEqual(expect.objectContaining({ deprecated }));
+  });
+
+  it('adds no reauth or deprecated key when the declaration has none', () => {
+    const route = defineRoute(base);
+    expect('reauth' in route).toBe(false);
+    expect('deprecated' in route).toBe(false);
+  });
+});
