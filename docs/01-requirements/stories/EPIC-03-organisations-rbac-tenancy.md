@@ -210,6 +210,32 @@ Feature: Seeded roles
     Then "Super Admin" holds every role-assignable catalogue permission (the signature-only webhook permissions are held by no role), "Compliance Auditor" holds only read permissions, "audit:export" and the self-service set, customer "Viewer" holds no create/update/delete/manage permission other than the self-service set
     And every one of the 17 seeded roles holds "session:manage", "notification_pref:manage" and "notification:read" (D-058)
 
+  Scenario: Customer or partner role holding an operator-only permission
+    Given a seed edit gives customer "Admin" the permission "audit:read" or any ":any_org" permission
+    Then the build-time test fails CI
+
+  Scenario Outline: Viewer may never download, e-mail or export (REQ-RBAC-004, D-051)
+    Given a seed edit gives the customer role "Viewer" the permission "<permission>"
+    Then the build-time guard test fails CI naming role "Viewer" and the permission
+    Examples:
+      | permission      |
+      | document:download |
+      | document:email  |
+      | privacy:export  |
+      | privacy:delete  |
+
+  Scenario: Viewer is denied the document download-URL route and the denial is audited
+    Given the generated RBAC matrix (US-071) and the seeded customer Viewer, who holds "document:read"
+    When the Viewer calls GET /api/v1/documents/{id}/download-url for a document of their own organisation
+    Then the response is 403 "AUTHZ_DENIED" and no URL is issued
+    And a "PERMISSION_DENIED" audit entry with outcome "DENIED" and required permission "document:download" exists
+
+  Scenario: Partner roles are unused
+    Then no route, UI or membership references a partner role in this run
+
+  Scenario: Permission path
+    Given a customer Shipper When they call a route requiring an operator-only permission Then the response is 403 "AUTHZ_DENIED"
+
   Scenario Outline: Compliance Auditor may never hold a non-read audit permission other than audit:export (REQ-RBAC-004, D-ARCH-069)
     Given a seed edit gives the operator role "Compliance Auditor" the permission "<permission>"
     Then the build-time guard test fails CI naming role "Compliance Auditor" and the permission
@@ -239,32 +265,6 @@ Feature: Seeded roles
     When Vera lists GET /api/v1/me/sessions and PUT /api/v1/me/notification-preferences
     Then both succeed for her own sessions and preferences
     And DELETE /api/v1/me/sessions/{sessionId} with a session ID of another user returns 404 "NOT_FOUND"
-
-  Scenario: Customer or partner role holding an operator-only permission
-    Given a seed edit gives customer "Admin" the permission "audit:read" or any ":any_org" permission
-    Then the build-time test fails CI
-
-  Scenario Outline: Viewer may never download, e-mail or export (REQ-RBAC-004, D-051)
-    Given a seed edit gives the customer role "Viewer" the permission "<permission>"
-    Then the build-time guard test fails CI naming role "Viewer" and the permission
-    Examples:
-      | permission      |
-      | document:download |
-      | document:email  |
-      | privacy:export  |
-      | privacy:delete  |
-
-  Scenario: Viewer is denied the document download-URL route and the denial is audited
-    Given the generated RBAC matrix (US-071) and the seeded customer Viewer, who holds "document:read"
-    When the Viewer calls GET /api/v1/documents/{id}/download-url for a document of their own organisation
-    Then the response is 403 "AUTHZ_DENIED" and no URL is issued
-    And a "PERMISSION_DENIED" audit entry with outcome "DENIED" and required permission "document:download" exists
-
-  Scenario: Partner roles are unused
-    Then no route, UI or membership references a partner role in this run
-
-  Scenario: Permission path
-    Given a customer Shipper When they call a route requiring an operator-only permission Then the response is 403 "AUTHZ_DENIED"
 ```
 
 ### US-067 — Mandatory route metadata with build-time route test
