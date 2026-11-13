@@ -230,3 +230,11 @@ Round 2 of a spike PR (PR #6 r2):
 - **Security headers set by an early slot can be overridden by a late `send()`** that applies handler headers. Also check that the test helper and the app use the SAME "authenticated" predicate (x-permission vs security schemes).
 - **RegExp mount fixes keyed on captured params** miss `(?:a|b)`, character classes and top-level `|`. Probe with real HTTP.
 - **Sheet folds land on main while a PR is in flight.** Diff the sheet on main (and `git log -S` the line) against the PR body's "not done" list.
+
+**Gate-tool PRs with a container step (PR #33, 2026-11-13).**
+- **Temp dir bind-mounted into a non-root container:** `mkdtemp` is 0700 owned by the runner uid; a `--user 65534 --cap-drop ALL` container gets EACCES on Linux but not on Docker Desktop. Check mode/uid wherever tests ran only on the Windows host.
+- **"Gate vs release tag" semantics:** probe a SECOND unrelated PR after a sanctioned break merges (records searched only in the PR's own diff = main red for everyone). Probe tag selection with `vnext` / `-rc1` tags and record matching with a longer identifier (substring).
+- **Spec vs test-strategy scope drift:** diff the gate's scope list against TEST-STRATEGY section 8 and D-QA-* decisions, not only the story AC (D-QA-003 money paths; ledger is a module path, not a package).
+- **Gate wired in one line (heavy.mjs):** delete the line, run the suite; a green run means no pipeline-level test. Also ask whether the verifier requires the gate's case names.
+- **Lane A pins:** mutate the real ci.yml in memory with `checkWorkflow(..., {requiredGates:true})`: `|| true`, `; true`, `true || cmd`, redirect, step `env:` override of the `GATE_*` var (only gates that declare `env` have the exact-env rule), reordering. Pins with `ifs: []` accept a missing `if` (stricter), fine.
+- **Evidence staleness after merge-main:** build a real merge commit in a `git clone --local` of the main repo (plumbing, no worktree needed) and run the base `check-evidence`; `git merge` on a checked-out ref moves that ref, so verify which SHA you pass.
