@@ -3,6 +3,9 @@
 # - Monthly, grouped and few open PRs: each Dependabot PR costs a lane A run against the hosted-minutes budget.
 # - @platform/* are our private workspace packages; the scope on npmjs.com belongs to a third party and .npmrc pins it
 #   to registry.invalid, so Dependabot must never look them up (check the first run for private_source_not_reachable).
+# - typescript semver-major is ignored: ADR-0001 pins TypeScript ~6.0.3 and defers TypeScript 7 (tsgo) until the Jest/ESLint
+#   toolchain peers allow it. Moving to 7 is a reviewed task PR with its own superseding ADR, not an automated bump. Minor and
+#   patch updates still flow through the npm-minor-and-patch group. Other majors stay visible for review on purpose.
 # - docker and terraform ecosystems are added with the first Dockerfile/infra code (TASK-014, TASK-017).
 version: 2
 updates:
@@ -15,6 +18,8 @@ updates:
     open-pull-requests-limit: 3
     ignore:
       - dependency-name: '@platform/*'
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
