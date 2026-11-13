@@ -4,13 +4,15 @@
  * `scopeClient = withStandardColumns`. It proves what the unit suite cannot: that the top-level `$allOperations` hook
  * sees model AND raw queries, that AsyncLocalStorage scoping survives an interactive transaction and the extension
  * stack, and that two concurrent scopes stay apart. The client connects as the migrator (the only readable model on
- * main is the GLOBAL `ReferenceDatasetVersion`, as in the standard-columns suite).
+ * main is `ReferenceDatasetVersion`; it is SYSTEM-class, so inside a tenant transaction it is reached through
+ * `systemDelegates(tx)` (PR19-SEC-01, D-ARCH-080), as in the standard-columns suite).
  */
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.js';
 import { assertQueryBudget, createQueryCounter, withQueryCounter } from '../../../apps/api/src/platform/db/query-counter.js';
 import { withStandardColumns } from '../../../apps/api/src/platform/db/index.js';
+import { systemDelegates } from '../../../apps/api/src/platform/db/system-db.js';
 import { createWithTenantTx, type TenantContext, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
 import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
@@ -72,7 +74,9 @@ describe('[NT-PERF-006-b] query counter against the real Prisma 7 client', () =>
   });
 
   it('counts inside withTenantTx: the context statement plus the repository query, and fits a budget', async () => {
-    const { report } = await counter.measure(() => runner.withTenantTx(context, (tenantDb) => tenantDb.referenceDatasetVersion.findMany()));
+    const { report } = await counter.measure(() =>
+      runner.withTenantTx(context, (tenantDb) => systemDelegates(tenantDb).referenceDatasetVersion.findMany()),
+    );
     expect(report.rawCount).toBe(1);
     expect(report.queries.filter((q) => q.model === 'ReferenceDatasetVersion').map((q) => q.operation)).toEqual(['findMany']);
     expect(() => assertQueryBudget(report, 2)).not.toThrow();
