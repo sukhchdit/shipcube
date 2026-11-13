@@ -134,3 +134,103 @@ Result: green in either order. Re-run `catalog-std` on whichever PR merges secon
 - m3: reliance on the Prisma-internal `_runtimeDataModel`; an empty or unknown catalogue fails open for forged fields on update.
 - The `orgId`-equal-on-create tolerance (D-TASK032-02).
 - New runtime dependency edge `@platform/shared` → `uuid` 14.0.3 (MIT; already in the lock; browser entry uses `crypto.getRandomValues`).
+
+
+---
+
+## Round 2 (head a6a929b)
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Fix cycle 1 closes m1, m2 (as PR26-SEC-01), m3 and m4 with deny-by-default semantics that hold on the real
+  generated Prisma 7 client. 14 mutations of the delta (production wiring, relation refusal per write operation and
+  per upsert branch, undefined handling, unknown-model write and read, empty catalogue, Object.hasOwn, naming parity)
+  were run: 12 killed, 2 survivors are equivalent. No BLOCKER or MAJOR. Three NITs, all docs or optional.
+  Merge still needs lane-B evidence (D-ORCH-034/035): lane A is red on that step alone, and lint, format, typecheck,
+  unit and build were SKIPPED by it, so I ran them targeted myself.
+```
+
+- **Head reviewed:** `a6a929b17df8a1b43b901068390e10d65bee8dd2`. Delta over r1: `cf4cd65` (code, 14 files), `2d728da` (DECISIONS.md), `a6a929b` (merge of main `9607544`). The branch also carries merge `4383a77` (main `b06fa9f`, which brought PR #28's code); `a6a929b` is not part of that.
+
+### R2.1 Verification I performed
+
+| Check | Result |
+|---|---|
+| Lane A run 43390107226 on the exact head | `scans` SUCCESS (gitleaks, Semgrep, security-owned record step). `fast-lane` FAILED at "Lane B evidence (quality:check-evidence)": `no accepted lane B evidence for required suite(s): api, catalog-c1-c14, integration, unit` (RANGE_BASE `9607544`, `CODE: true`). `ci-gate` red only because of it. The steps after it (Prisma engine cache, deps:rebuild, commitlint, **lint, format, actionlint, typecheck, unit, build**, porcelain) were **skipped**. Lane A therefore did not execute them on this head. The steps before it (workflow policy, install flags, migration immutability, lockfile delta, cooldown, install, licences, signatures, audit) are green. |
+| Merge `a6a929b` is docs-only | `git diff --name-only 2d728da a6a929b` outside `docs/` and `.claude/` is empty. `git diff a6a929b origin/main` outside docs/.claude is empty except this PR's own 21 files; current `origin/main` is `8d3ae4d` (one further docs commit). |
+| `package-lock.json` and `tools/tsconfig.json` vs r1 head | `git diff --quiet 84b70c4 a6a929b -- package-lock.json tools/tsconfig.json`: byte-identical. So the lock delta I verified in r1 (single `uuid` edge) stands, and the security record's voiding clause (§8) is not triggered. |
+| DECISIONS.md | `git diff 9607544 a6a929b -- docs/sdlc/DECISIONS.md` = 24 added lines, 0 removed (`grep -c '^-[^-]'` = 0). D-SEC-PR20-02 sits at :1453 with its `- **Reversibility:** High.` at :1455 and a blank line before D-SEC-PR23-01. D-TASK032-01..04 are appended after D-SEC-PR20-03 at the end. m4 closed. |
+| Targeted unit tests (archive extract of `a6a929b`, `node_modules` junction, `prisma/generated` copied) | 5 suites, 169/169 pass in 2.3 s: `standard-columns.test`, `standard-columns-parity.test` (real generated client, no DB), `runtime.test`, `with-tenant-tx.test`, `uuidv7.test`. |
+| Prettier on the 14 changed non-doc files | clean. |
+| ESLint (`--max-warnings 0`, type-aware, real repo config) on the same 14 files | clean (0 findings). |
+| Typecheck | `tsc -b packages/shared packages/config packages/authz apps/api` clean; `tsc -p tools/tsconfig.json` (the project that covers `prisma/tests`, including the new parity test and the changed integration tests) clean, with `--tsBuildInfoFile` pointed at the extract. |
+| Real-client probe (no DB): `catalogueFromDataModel(client._runtimeDataModel)` + `stampArgs` | 4 models. `RolePermission.update({role:{connect}})` refused `NESTED_WRITE_UNSUPPORTED`; same with `role: undefined` plus a scalar passes and is stamped; `Role.upsert` update-branch `permissions.connect` and create-branch `permissions.create` refused; `createMany` with the relation in row 2 refused; unknown model `create` throws `TypeError`, `findMany` passes. |
+
+**Not re-run** (dispatch: no Docker, targeted unit only): full unit, api, integration (`standard-columns.int` including the new six-case PR26-SEC-01 test, `catalog-std`), coverage, build. These need lane-B evidence (merge condition 1). I read the new integration test: each of the six attempts asserts `status 500, reason NESTED_WRITE_UNSUPPORTED` with the label in the failure message, and a final `SELECT` proves nothing was inserted; the shapes are right for the real client (`rolePermission.update` re-parent, to-many `connect`/`disconnect`/`set`, upsert update branch).
+
+### R2.2 Mutation results (copy of `a6a929b`, targeted unit run per mutant, restored after each)
+
+| Mutant | Result |
+|---|---|
+| M1 `runtime.ts`: `scopeClient: () => client` (the r1 survivor, now the realistic pass-through form) | **killed**: `standard-columns wiring through the composition function › every tenant transaction runs on the root client extended once…` |
+| M2 relation refusal removed | killed (20 failures) |
+| M3 `undefined` relation value refused | killed (`an undefined relation value is absent…`) |
+| M4 relations ignored on `update*` | killed (4) |
+| M5 relations ignored on the upsert **update** branch | killed (1, named per branch) |
+| M6 relations ignored on the upsert **create** branch | killed (1, named per branch) |
+| M7 unknown-model write passes | killed (2, unit + `$allOperations`) |
+| M8 unknown-model read throws | killed (2) |
+| M9 empty catalogue allowed | killed (3, all three shapes) |
+| M10 `Object.hasOwn(data, relation)` to `relation in data` | survives, **equivalent and stricter**: a relation named like a prototype member would read a function and be refused. Fails closed; no finding. |
+| M11 `standardColumnFindings` `hasOwn` to `in` | killed (6) |
+| M12 `onBehalfFindings` `hasOwn` to `in` | killed (6) |
+| M13 `dateZoneFindings` `hasOwn` to `in` | survives, **equivalent**: the key is `${table}.${column}` (contains a dot), which no `Object.prototype` member has. Cosmetic. |
+| M14 naming-parity `hasOwn` guard dropped | killed |
+
+### R2.3 Focus-question rulings
+
+- **Relation fields refused on every write op, both upsert branches, `undefined` passes:** correct. `assertNoRelationWrites` runs inside `assertPayloads` for every payload of a list (create, createMany, createManyAndReturn, update, updateMany, updateManyAndReturn) and for both `upsert.create` and `upsert.update`. `Object.hasOwn(data, relation) && data[relation] !== undefined` leaves a Prisma-absent `undefined` alone and refuses `null`, `{}`, `[]`, scalars and `connect`/`disconnect`/`set`/`connectOrCreate`. The relation set comes from `kind === 'object'` of the runtime data model, so no schema-derived allow-list is needed (D-TASK032-04's reason for dropping the `relationFromFields` route is sound: the runtime model has none). A relation refusal throws before a forged-field `AppError` in the same payload; both are programming errors at the repository layer, so the order does not matter.
+- **`ALLOWED_NESTED_OPERATIONS` removal does not break a legitimate need in this PR** (no repository exists yet; the only callers are tests). Notes for the first consumers (TASK-037, TASK-100):
+  1. Repositories must use `serverStamped<Prisma.XUncheckedCreateInput>` / the unchecked update input with **scalar foreign keys** for non-server FKs (`carrierId`, `roleId`). That is already D-TASK032-02 (2). Scalar FKs of server-owned relations (`orgId`, `onBehalfOfOrgId`) stay refused as `UNKNOWN_FIELD`.
+  2. Parent-with-children writes (order plus lines) are separate `create` calls inside one `withTenantTx`. Implicit many-to-many `connect`/`set` has no replacement: model the join as an explicit table (as `RolePermission` already is) and create/delete its rows.
+  3. A deliberate allow-list (specific relations, specific ops) is a future change to `assertNoRelationWrites`, and needs a schema-derived relation-to-FK map; do not re-add a global `connect` allowance.
+  4. TASK-100's soft-delete and optimistic-lock extensions apply after this one (innermost), per my r1 ordering note; refusing relation fields means they also never see a nested write.
+- **`scopeClient` required:** correct. `createWithTenantTx` no longer has a `?? client` branch (`with-tenant-tx.ts:335`). Every call site in the repo passes it: `runtime.ts:211`, `with-tenant-tx.test.ts` (every `createWithTenantTx` call), `session-scope-leak.int`, `with-tenant-tx.int`, `standard-columns.int`, `tenant-db.real-client.test`. A caller that wants the plain client must write `() => client`, which is visible in review. Typecheck (above) confirms no missed caller.
+- **Empty or unreadable runtime data model throws:** correct. `catalogueOf` throws `TypeError` before `$extends` is called (test asserts `extended === 0`), for a missing property, `{models:{}}` and an array. The empty result is not cached. The new parity test also builds the extension on the real generated client (`withStandardColumns(client, …)` returns a client with `$transaction`), which gives a no-DB canary for a Prisma upgrade that renames `_runtimeDataModel`.
+- **Unknown-model writes rejected, reads pass:** correct, at both layers (`stampArgs` and `$allOperations`). Raw operations have `model === undefined` and are not write operations, so `$queryRaw`/`$executeRaw` still pass (test: `raw operations (no model) pass through`). `delete`/`deleteMany` on an unknown model still pass, which matches the documented soft-delete deferral.
+- **Runtime wiring test kills the mutant:** yes (M1). The fake `Client` class records `$extends` and which client each `$transaction` opened on, runs two transactions, and then drives the recorded extension to prove the stamp is bound to the context actor. It would also fail if `scopeClient` were wired but `$transaction` opened on the root client.
+- **`Object.hasOwn`:** correct for the two keys that can collide with `Object.prototype` (table names). Table-name tests cover `constructor`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`, `__proto__`; M11/M12 prove they bite. `__proto__` as a key in a literal object is the prototype setter, not an own key, so the test is meaningful either way.
+- **Naming parity check:** correct and well-aimed. `namingParityFindings` catches both directions (`creatorId @map("created_by")` and `createdBy @map("creator")`, plus the unmapped `org_id` case), is run over the generated client's own data model, and tolerates an unreadable model without throwing (the empty-catalogue guard owns that failure). A model `fields[].dbName` is only present when mapped, which the code handles.
+- **DECISIONS.md:** satisfied (see R2.1). One stale phrase, R2-n1.
+- **package-lock / tools tsconfig:** byte-identical to `84b70c4`. **Merge of main:** docs-only, as claimed.
+- **uuidv7 wording (n8) and `satisfies` (n4):** the comment now says 73 random bits at a new millisecond and 42 within one; `SERVER_FIELD_API_NAMES` is `satisfies Record<ServerColumn, string>`. n6 closed (`afterAll(…, 60_000)` on both integration suites).
+
+### R2.4 Findings
+
+| ID | Severity | file:line | Problem | Fix |
+|---|---|---|---|---|
+| R2-n1 | NIT (docs) | `docs/sdlc/DECISIONS.md` D-TASK032-01 | The entry still says `withTenantTx` "gains an **optional** `scopeClient(stamp)` dependency" and, in its Reversibility line, that without it the database rejects inserts. D-TASK032-04 (2) makes it required and says so, but the original wording now misleads. Also `map-db-error.ts:29` documents `NESTED_WRITE_UNSUPPORTED` as "a nested relation write"; it now also covers `connect`/`disconnect`. | Add "(required since D-TASK032-04)" to D-01 and widen the comment to "a relation write". Docs/comment only; may ride any later docs commit. |
+| R2-n2 | NIT (optional) | `standard-columns.ts:260-269`, `runtime.ts:211` | The empty-catalogue `TypeError` surfaces on the first tenant transaction (the extension is built per transaction), not at start-up, and escapes unmapped. A Prisma upgrade that breaks `_runtimeDataModel` is caught by the no-DB parity test in lane B and by the first integration test, so this is operability only. | Optionally call the catalogue builder once in `createDatabaseRuntime` when a client is supplied, so the process fails at boot with a clear message. No change needed for merge. |
+| R2-n3 | NIT | `standard-columns.test.ts` (relations block) | A relation value of Prisma's `skip` sentinel is refused (non-`undefined`), which is fail-closed and correct, but is untested; the first repository that tries it will see a confusing `NESTED_WRITE_UNSUPPORTED`. | Optional one-line test or a sentence in the module doc. |
+
+No BLOCKER, MAJOR or MINOR. Closed from r1: m1 (wiring), m2 (relation-form FK writes, now refused outright), m3 (empty/unknown catalogue), m4 (DECISIONS), n4, n6, n8. Still routed unchanged: n1, n2, n3, n5 (typed nested narrowing -> TASK-100), n7 (§7.6 wording -> architect). The r1 routing of n8's "authz re-exports `SYSTEM_ACTOR_ID`" to TASK-020 stands. Note for the architect: with relations refused outright, §7.6's "rejects any of these fields if present" should also say that every relation field is refused (this extends n7).
+
+### R2.5 Merge conditions
+
+1. **Lane-B evidence (D-ORCH-034/035).** Lane A is red on exactly this step for suites `api`, `catalog-c1-c14`, `integration`, `unit`. After the devops scrub PR lands, merge main into this branch **first**, then run `quality:heavy --profile pr` and commit the evidence on an ancestor of the head, with only `docs/**` commits after it (staleness allows docs only; a merge that brings `.claude/agent-memory` or any non-docs path stales it). Expect the evidence run to include `standard-columns.int` (six new PR26-SEC-01 cases), `catalog-std` and `standard-columns-parity.test`.
+2. **Lane A green on the exact final head.** Because the evidence step fails first, lint, format, typecheck, unit and build have not run in CI on this branch since `84b70c4`. I ran them targeted on the 14 changed files (clean); CI must still run them once evidence is in place.
+3. **Security record.** `scans` is green on `a6a929b`. The record names `84b70c4` and its §8 voids only on `package-lock.json` / `tools/tsconfig.json` changes (neither changed). security-analyst should confirm closure of PR26-SEC-01/02/05/06 against `cf4cd65` (this review covers SEC-01 and SEC-02 as above) and, if the orchestrator wants it on file, name `a6a929b` or the final head.
+4. **PR #24 union** per r1 §6 (`DbErrorReason` union, `runtime.ts` keep both blocks, re-run `catalog-std`); the second merger needs the merge-only security round. Squash merge (6 merge commits on the branch).
+5. Do not touch `package-lock.json` or `tools/tsconfig.json` again without a new security round; the final lane-B evidence must postdate any merge of main.
+
+### R2.6 GOOD
+
+- The fix is deny-by-default and smaller than the allow-list it replaces (one predicate, no operation table), and the tests are organised as a matrix of every write operation by every relation shape, including per-branch upsert names that make a survivor easy to read.
+- The wiring test is behavioural (records `$extends`, which client the transaction opened on, and drives the extension), not a source-text check.
+- The parity check is bidirectional and is run on the real generated client's data model, so a future `@map` that disables stamping goes red without a database.
+- Scratch cleanup note for the record: the extract, junction and probe files are removed; the worktree is unchanged (748 `node_modules` entries, clean `git status`).
+
+### R2.7 SECURITY-FLAGS (for security-analyst)
+
+- Confirm PR26-SEC-01 and SEC-02 closed at `cf4cd65`; SEC-03 (raw DML) remains the architect's ruling and is unaffected.
+- The relation refusal removes the only path for `connect`-based FK rewrites through the extension. Scalar FKs for server-owned relations remain `UNKNOWN_FIELD`.
