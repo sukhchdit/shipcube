@@ -15,4 +15,5 @@
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
 - [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; superseded by PR #19; open 05/08/09 → TASK-026/014/089
 - [P5 PR-0019 supersede round](project_p5_pr19_supersede.md) — TASK-023 @699f33d PASS_W_F-U; PR19-SEC-01 INFO SYSTEM delegates; boundaries categories accumulate; PR #4 overlap trap
+- [P5 PR-0021 OpenAPI pipeline](project_p5_pr21_openapi_pipeline.md) — TASK-017 R1 @b0ede35 PASS_W_F-U; 01 LOW ETag, 02-07 INFO; gitleaks block removal (devops); no main-merge; TASK-020/048/015 checks
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10
