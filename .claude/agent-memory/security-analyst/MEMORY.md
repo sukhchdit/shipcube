@@ -19,7 +19,7 @@
 - [P5 PR-0021 OpenAPI pipeline](project_p5_pr21_openapi_pipeline.md) — TASK-017 R1 b0ede35 + R2 b31483b/fc2 e046ea2 PASS_W_F-U; 01 closed; new INFO 08/09; ref-parser safeUrl fact; PR #20 union checks
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10
 - [P5 PR-0023 lane B evidence](project_p5_pr23_lane_b.md) — TASK-011 R2 @c0b1b31 PASS_W_COND; 01 closed; W0-ACT-1 runner gap; 03/04/05 due before Wave-0-exit activation
-- [P5 PR-0024 audit store](project_p5_pr24_audit_store.md) — TASK-021 R1 @6f498c4 PASS_W_COND; 01 multirange/side-effect squat (C1), 02 readiness `=` hijack, 03 rule-11 RESET; PG18 facts; Docker recipe
+- [P5 PR-0024 audit store](project_p5_pr24_audit_store.md) — TASK-021 R2 @7662672 PASS_W_F-U (90 blob 9aab9aa approved); 10 CIC leftover LOW; overlap-round triggers; PG18 facts; Docker recipe
 - [P5 PR-0025 CI follow-ups](project_p5_pr25_ci_followups.md) — R1 @20a0fc6 PASS_W_F-U; PR10-SEC-08 closed; 01 LOW 17-fingerprint baseline before gitleaks-full; gitleaks .gitleaksignore/override facts
 - [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 PASS_W_F-U; k6 eslint block scoped; 01 LOW prisma/tests not excluded from images (TASK-014), 02-05 INFO; k6 digest/registry recipe; #20/#24 overlap
 - [P5 PR-0028 W0-ACT-1](project_p5_pr28_w0act1.md) — R1 @22c6461 PASS_W_F-U; activation semantics probed; 01/02 LOW, 03/04 INFO; staleness pattern .claude/agent-memory/*/*.md
