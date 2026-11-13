@@ -28,3 +28,5 @@ Related: [[p5-dispatch]], [[p5-worktrees]]
 - Main's lane-A checkers run locally without CI env: `node tools/ci/<checker> --root . [--base <main> --head <HEAD>]`. `check-dep-age` needs `--fetch --out` first. `run-semgrep.mjs` uses Docker, so take docker.lock (~4 min).
 - The expected first-run failure is `scans / Security-owned paths need a review record`, which makes ci-gate red. That is the orchestrator's record, not mine.
 - When a review offers "fix at the merge-main pass, or route to TASK-xxx" and the brief is scoped to the merge, report it as an open merge condition. Don't widen the merge delta.
+
+**PR #4 post-TASK-023 pass (2026-11-13): about 30 calls, lane A fast-lane + gitleaks green on the first push.** No textual conflicts, and the lock auto-merge was byte-identical to "main's lock + `npm install --package-lock-only`". Main moved docs-only during the gate, so I reset to the branch head and re-merged (one merge commit). Reviewer watchlist routings on main ("PR #N merge-main must ...") can already be satisfied by an earlier pass: check the merged file before editing. Scratch `merge-main4/PR-4/{union.sh,gates.sh,gitleaks.sh}` are reusable templates.

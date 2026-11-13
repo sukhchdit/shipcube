@@ -1,0 +1,21 @@
+{
+  "skipToContent": "Skip to content",
+  "loading": "Loading",
+  "shell": {
+    "name": "Staff area"
+  },
+  "home": {
+    "title": "Operator console",
+    "lead": "Sign-in and the audit log arrive in a later release."
+  },
+  "error": {
+    "title": "Something went wrong",
+    "description": "Reload the page to try again. If it keeps happening, come back in a few minutes.",
+    "retry": "Try again"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The address may be wrong, or the page may have moved."
+  },
+  "goHome": "Go home"
+}

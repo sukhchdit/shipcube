@@ -36,6 +36,7 @@ PR #4 (TASK-004) r1 at 519bb89 went CHANGES_REQUESTED (2026-11-12). The only MAJ
 - Lazy-route task: the size-limit globs sum all chunks; the per-chunk 150 kB check and the cross-app check are missing (NFR-WEB-004).
 
 PR #4 r3 at d2e867b (harness + merge-main; 2026-11-13) is CHANGES_REQUESTED with ONE MAJOR, R3-M1: the move tools/test-support -> tools/test-dom de-owned the jsdom env/setup files. R2.4 items 1-10, R2-m1/m2 and m2 are closed (Firefox deferred as COND-E2E-FF, D-ORCH-019). Round 4 = delta check: `/tools/test-dom/` in CODEOWNERS + REQUIRED_CODEOWNED_PATHS (check-workflow-policy.mjs:656) + its test -> expect APPROVED_WITH_NITS. The security record must name a head at or after that fix. Routed from r3: R3-n1 (use-locale reads live html lang; capture once) -> TASK-042; R3-n3 (outputDir vs §7.8 tests/e2e/output) and R3-n4 (assert pointer:coarse/44px) -> T-QA-05; R3-n6 (WebKit-Windows close hang; CI globalTimeout) -> qa-lead/TASK-015; base-ref step minimal jest config -> TASK-007/PR #17.
+PR #4 r4 at e3cdb94 (2026-11-13): APPROVED_WITH_NITS. R3-M1 closed (checkCodeowners mutation probe), PR4-SEC-10 anchored ignores symmetric ESLint/Stylelint/.gitignore over 15 paths, both merges pure unions, lock +8 unchanged. Open: R4-m1 MINOR webkit-desktop SPA-fallback saw lang=en once (dev run 1) -> qa-lead/TASK-015 repeat-each on Linux with COND-E2E-FF; if it reproduces -> TASK-042 with R3-n1. R4-n1/n2 optional NITs. Merge conditions: security record naming e3cdb94+, COND-E2E-FF in traceability.md, squash.
 Routed:
 - TASK-022/TASK-111: `gzip_proxied`/`gzip_http_version` behind the edge or CloudFront.
 - TASK-014: IPv6 `listen` with `default_server`.
@@ -212,3 +213,20 @@ PR #17 (TASK-007 follow-up, base-ref lint fixtures no-weakening) r1 at ea78d38: 
   - Open: R2-m1 (pre-existing) no fixture/effective check that no-explicit-any is on; off + reportUnusedDisableDirectives off passes → in-PR or TASK-015. NITs: R2-n1 pin trimEnd vs bash backslash-space (fails closed 127); R2-n2 .swcrc in WAVE-00/plan-data/ADR-0023; R2-n3 job-level env comment.
   - PR #11 overlay ruling: exactly 4 prisma-client-construction extras (2 bad-orders.service, 2 ok-orders.repository), 0 failures. PR #11 supersede: WARNINGS via expectFindings(…,"warning"), allowed (TASK-016) via expectClean.
   - PR #4 merge-main: unit-dom transform must become [@swc/jest, SWC_JEST_OPTIONS] (jest-transform.test); no .swcrc.
+
+PR #21 (TASK-017 OpenAPI pipeline) r1 at b0ede35: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0021-TASK-017-code-review.md`.
+- **M1:** `tools/openapi/drift.ts:122` skips a path-mounted handler (`router.use('/x', fn)`). Fix: `slash !== true` gives unrecognised; verified green on the copy.
+- **MINORs:**
+  - m1: pinned `now` in the real drift run.
+  - m2: `api-mounts.ts` mirrors `createApp`.
+  - m3: OPTIONS 204 not mirrored in the 405 `Allow`, the validator or the stubs.
+  - m4: `no-relative-packages` `'off'` for `tests/api/**/*.api.test.ts`.
+  - m5: README §15 rule 7, the supertest ban, the coverage report, SSE and `client.ts` neither delivered nor recorded.
+  - m6: NFR-MAINT-004 `oasdiff` unowned.
+  - m7: AT-US-035-01 checked at the HTTP level only.
+- **Round 2 = delta check.** Also: the security record must name the fix head; PR #20 conflicts in app.ts, main.ts and request-context.ts; TASK-014 must ship openapi.yaml (compose `DOCS_ENABLED=true` means exit 78 without it).
+
+PR #20 (TASK-010 logging) r1 at dae1f96: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0020-TASK-010-code-review.md`.
+- M1: `@platform/shared/logging` (Pino) importable from web/admin/ui/pricing with 0 lint errors (toPackage allow expands to `/**`); needs disallow + fixtures per arm (lint lock -> orchestrator ruling). M2 (docs): AT-US-008-03 PARTIAL, owners TASK-029/035/047/saga do not own it; WAVE-00:9 says US-008 completed.
+- MINOR: m1 stack getter native check bypassed by bound/Proxy (fix: identity vs V8 accessor); m2 deny-list PII filter on security events (ask per-event allow-list from §13 Extra fields); m3 RUNTIME_SECURITY_EVENTS lists 1 of 5 (tampered/privilege_denied fall to warn); m4 free-text gaps (4+ spaces, newline, 2nd Cookie pair, \" JSON, IDN e-mail); m5 no per-line budget (16 MB / 3.9 s).
+- r2: re-run the lint probe (4 importers), bound/Proxy getter probe, PII probe, leak vectors; PR #21 union conditions (§6.4).

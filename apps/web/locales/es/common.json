@@ -1,0 +1,38 @@
+{
+  "skipToContent": "Saltar al contenido",
+  "loading": "Cargando",
+  "nav": {
+    "language": "Idioma"
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español",
+    "fr": "Français"
+  },
+  "home": {
+    "meta": {
+      "title": "Compara transportistas y envía a todo el mundo",
+      "description": "Compara precios y plazos de entrega de varios transportistas, y luego reserva y sigue tu envío en un solo lugar."
+    },
+    "hero": {
+      "title": "Compara transportistas y envía a todo el mundo",
+      "lead": "Consulta precios de varios transportistas en un solo lugar."
+    }
+  },
+  "error": {
+    "title": "Algo ha fallado",
+    "description": "Vuelve a cargar la página para intentarlo de nuevo. Si sigue ocurriendo, vuelve dentro de unos minutos.",
+    "retry": "Volver a intentarlo"
+  },
+  "notFound": {
+    "title": "Página no encontrada",
+    "description": "Puede que la dirección sea incorrecta o que la página se haya movido.",
+    "meta": {
+      "title": "Página no encontrada"
+    }
+  },
+  "goHome": "Ir al inicio",
+  "footer": {
+    "note": "Los precios y los plazos de entrega se muestran antes de reservar."
+  }
+}

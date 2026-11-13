@@ -1,0 +1,21 @@
+{
+  "skipToContent": "Saltar al contenido",
+  "loading": "Cargando",
+  "shell": {
+    "name": "Área del personal"
+  },
+  "home": {
+    "title": "Consola de operadores",
+    "lead": "El inicio de sesión y el registro de auditoría llegarán en una versión posterior."
+  },
+  "error": {
+    "title": "Algo ha fallado",
+    "description": "Vuelve a cargar la página para intentarlo de nuevo. Si sigue ocurriendo, vuelve dentro de unos minutos.",
+    "retry": "Volver a intentarlo"
+  },
+  "notFound": {
+    "title": "Página no encontrada",
+    "description": "Puede que la dirección sea incorrecta o que la página se haya movido."
+  },
+  "goHome": "Ir al inicio"
+}

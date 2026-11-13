@@ -7,3 +7,4 @@
 - [D-058 self-service permissions](project_d058_self_service_permissions.md) — PR #8 matrix ruling; session/notification_pref/notification:read on all 17 roles; grant deltas; v1.5; check route tenancy before least-privilege
 - [D-059/D-060 batch-3 alignment](project_d059_batch3_alignment.md) — Platform-side void, recoverLabel, per-carrier token 403 policy (AUTH_FAILED vs CARRIER_UNAVAILABLE), Auditor = read ∪ audit:export ∪ selfService; v1.7; pairs that move together
 - [D-061 US-049 delivery split](project_d061_us049_delivery_split.md) — AT ownership re-route pattern (no priority change); TASK-023/014/089; traceability v1.5; plan-data block keys seedfw/compose/seeddemo
+- [D-062 US-008 delivery split](project_d062_us008_delivery_split.md) — hop-by-hop AT-US-008-03 split TASK-010/029/035/043/079/092; decompose by REQ text; check completer's transitive deps first; v1.6
