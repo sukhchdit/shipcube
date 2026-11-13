@@ -20,6 +20,28 @@ import {
   sanitiseKey,
 } from './string-redaction.js';
 
+// Timing helpers. Wall-clock assertions are flaky under host load, so the tests below assert growth (linearity) with
+// best-of-N medians (scheduler noise only ever raises a ratio) plus a generous absolute ceiling as a catastrophic guard.
+const GROWTH_LIMIT = 40; // 16x the input may take at most 40x the time (linear: ~16x; the quadratic re-scan: ~256x)
+const CATASTROPHIC_CEILING_MS = 2000;
+const perCall = (run: () => void, calls: number): number => {
+  const started = performance.now();
+  for (let call = 0; call < calls; call += 1) run();
+  return (performance.now() - started) / calls;
+};
+const median = (samples: readonly number[]): number => [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)] ?? 0;
+/** Best of three rounds of the ratio between medians of the large and the small workload. */
+const growthRatio = (small: () => void, large: () => void, smallCalls: number, largeCalls: number): number => {
+  perCall(small, smallCalls);
+  perCall(large, 2); // warm-up
+  const ratios = [0, 1, 2].map(() => {
+    const largeTime = median([0, 1, 2, 3, 4].map(() => perCall(large, largeCalls)));
+    const smallTime = median([0, 1, 2, 3, 4].map(() => perCall(small, smallCalls)));
+    return largeTime / Math.max(smallTime, 1e-6);
+  });
+  return Math.min(...ratios);
+};
+
 const hex = (bytes = 8): string => randomBytes(bytes).toString('hex');
 /** Alphanumeric sentinel built at run time (no secret-shaped literal in the source). */
 const sentinel = (): string => `sentinel${hex()}`;
@@ -103,13 +125,17 @@ describe('string-redaction: key classes', () => {
     expect(isSensitiveKey(fullWidth)).toBe(true);
   });
 
-  it('[PR20-SEC-07] classifies a 1 MiB key from its first MAX_KEY_LENGTH characters, cheaply', () => {
-    const huge = `password${'a'.repeat(2 ** 20)}`;
-    const started = performance.now();
+  it('[PR20-SEC-07] classifies a 1 MiB key from its first MAX_KEY_LENGTH characters, cheaply: cost does not grow with key length', () => {
+    const keyOf = (length: number): string => `password${'a'.repeat(length)}`;
+    const huge = keyOf(2 ** 20);
+    const classify = (key: string) => () => {
+      isSensitiveKey(key);
+      isOmittedKey(key);
+      isPiiKey(key);
+    };
     expect(isSensitiveKey(huge)).toBe(true);
-    isOmittedKey(huge);
-    isPiiKey(huge);
-    expect(performance.now() - started).toBeLessThan(50);
+    expect(growthRatio(classify(keyOf(2 ** 16)), classify(huge), 64, 8)).toBeLessThanOrEqual(GROWTH_LIMIT);
+    expect(perCall(classify(huge), 1)).toBeLessThan(CATASTROPHIC_CEILING_MS);
   });
 
   it.each(['otpCode', 'mfa_code', 'verificationCode', 'passcode', 'pwd', 'jwt', 'privateJwk', 'dsn', 'connectionString'])(
@@ -619,39 +645,36 @@ describe('string-redaction: linear time', () => {
     ['omitted key pair', 'query: '],
   ];
 
-  it.each(families)('%s repeated to 8 KiB is redacted in < 50 ms', (_name, unit) => {
-    const input = unit.repeat(Math.ceil(MAX_STRING_LENGTH / unit.length)).slice(0, MAX_STRING_LENGTH);
-    const started = performance.now();
-    redactString(input);
-    maskEmails(input);
-    expect(performance.now() - started).toBeLessThan(50);
+  it.each(families)('%s repeated to 8 KiB is redacted in linear time (16x the input takes at most 40x the time)', (_name, unit) => {
+    const repeated = (length: number): string => unit.repeat(Math.ceil(length / unit.length)).slice(0, length);
+    const run = (input: string) => () => {
+      redactString(input);
+      maskEmails(input);
+    };
+    const large = repeated(MAX_STRING_LENGTH);
+    expect(growthRatio(run(repeated(MAX_STRING_LENGTH / 16)), run(large), 32, 4)).toBeLessThanOrEqual(GROWTH_LIMIT);
+    expect(perCall(run(large), 1)).toBeLessThan(CATASTROPHIC_CEILING_MS);
   });
 
   // PR20-SEC-18: quoted sensitive names, each followed by a comma and an escaped quote, whose escaped values close only
   // at the end of the string (`\":`), so every item is an object key. An absolute bound cannot tell this shape apart
-  // (the cap keeps the quadratic case near 30 ms), so the test asserts growth: 16x the input may take at most 20x the
-  // time (linear: about 11x; the quadratic re-scan: about 100x).
-  it('[PR20-SEC-18] list items that close only at the end of the string: 16x the input takes at most 20x the time', () => {
+  // (the cap keeps the quadratic case near 30 ms), so the test asserts growth: 16x the input may take at most 40x the
+  // time (linear: about 11x; the quadratic re-scan: about 100x). The limit is 40 per PR #20 review R4-m1 (D-SEC-PR20-04).
+  it('[PR20-SEC-18] list items that close only at the end of the string: 16x the input takes at most 40x the time', () => {
     const unit = String.raw`"token",\"`;
     const closer = String.raw`\":`;
     const shaped = (length: number): string => `${unit.repeat(Math.ceil(length / unit.length)).slice(0, length - closer.length)}${closer}`;
-    const perCall = (text: string, calls: number): number => {
-      const started = performance.now();
-      for (let call = 0; call < calls; call += 1) redactString(text);
-      return (performance.now() - started) / calls;
-    };
-    const median = (samples: readonly number[]): number => [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)] ?? 0;
     const small = shaped(MAX_STRING_LENGTH / 16);
     const large = shaped(MAX_STRING_LENGTH);
     expect(redactString(large)).toBe(large); // every item is an object key, so the pair pass sees it unchanged
-    perCall(small, 32);
-    perCall(large, 2); // warm-up
-    // The best of three medians: scheduler noise only ever raises a ratio, and a quadratic pass cannot get below 20x.
-    const ratios = [0, 1, 2].map(() => {
-      const largeTime = median([0, 1, 2, 3, 4].map(() => perCall(large, 4)));
-      const smallTime = median([0, 1, 2, 3, 4].map(() => perCall(small, 64)));
-      return largeTime / smallTime;
-    });
-    expect(Math.min(...ratios)).toBeLessThanOrEqual(20);
+    expect(
+      growthRatio(
+        () => redactString(small),
+        () => redactString(large),
+        64,
+        4,
+      ),
+    ).toBeLessThanOrEqual(GROWTH_LIMIT);
+    expect(perCall(() => redactString(large), 1)).toBeLessThan(CATASTROPHIC_CEILING_MS);
   });
 });

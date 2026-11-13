@@ -25,4 +25,6 @@
 - [Batch 276/277](feedback_batch_276_277.md) — disk-full + Docker hang blocker, gherkin map drift, jest generated-project merge traps
 - [PR #32 fc1](feedback_pr32_fc1.md) — specialists hit 80-turn cap unreported, createApp boot-check ripple, shared predicate in @platform/shared, Docker hang
 - [PR #34/#35 fc1](feedback_pr34_35_fc1.md) — stray failed run dirs, Edit decodes \u2028, merge subjects vs commitlint, listTests short paths, lock held by hung agents
+- [PR #34 union](feedback_pr34_union.md) — semantic conflict only typecheck catches, stub a chained script to abort it, pre-existing commitlint fails
 - [PR #32 fc2](feedback_pr32_fc2.md) — docker info false positive, kill refusal, main moved after evidence commit, Joi extend detection, coverage P1001
+- [TASK-020 part B](feedback_task020b.md) — fixture stand-ins under ignored paths, Joi tamper tests, always-on runner config trap, specialist salvage
