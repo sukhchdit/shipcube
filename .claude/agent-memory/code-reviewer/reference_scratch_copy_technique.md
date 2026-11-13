@@ -59,3 +59,12 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 The step restores itself with `git checkout HEAD --`, so `git status` stays clean between runs. Each run takes about 60 s.
 
 Write memory or markdown edits as a .cjs file with the Write tool. An inline `node -e` breaks on apostrophes in the text.
+
+**PGlite for SQL probes without Docker (PR #24, 2026-11-13).** `@electric-sql/pglite` 0.4.3 (PG 17.5 WASM) is in the worktree node_modules. Event triggers fire, and SET ROLE and CREATE ROLE work.
+- Apply `prisma/bootstrap/*.sql` in order after these substitutions:
+  - psql vars: `:'x_password'` → `NULL`, `:"db_name"` → current_database();
+  - drop the CREATE EXTENSION lines;
+  - `uuidv7()` → `gen_random_uuid()` (PG 18 only).
+- Probe each statement in `BEGIN; SET LOCAL ROLE platform_migrator; …; RESET ROLE; <readiness SQL>; SAVEPOINT; ensure(); ROLLBACK`.
+- Run it with tsx from the scratch dir and pass the head dir as an argument. About 30 s and light on memory, so it is allowed under D-ORCH-010.
+- Mutate the guard file in the copy to verify a proposed fix.

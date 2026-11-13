@@ -241,3 +241,14 @@ PR #20 (TASK-010 logging) r1 at dae1f96: CHANGES_REQUESTED (2026-11-13). Review:
   - Open MINORs (in-PR preferred, else routed): R2-m1 the shared ROOT barrel may re-export logging (probe gives 0 errors), fix = a policy from non-logging packages/shared files; R2-m2 the general-line PII parts miss openapi `display_name`/`receiver_name`, plus username/client_ip/forwarded-for.
   - NITs: R2-n1 free-text JSON array/object values, PEM, full-width keys; R2-n3 `Object.keys` is uncharged (2 s for repeated huge objects) and `err` + escaping sit outside the 16 KiB budget (50 KB line); R2-n4 log.ts:7-9 stale; R2-n5 the PR body union note still says `routes.use(API_PREFIX, routePrefix…)`.
   - **Union (PR #21 first):** the auto-merge KEEPS the path-mounted routePrefix, so move it to `api.use(routePrefix(API_PREFIX))`. Install `installProcessErrorHandlers` before PR #21's createApp try block. PR #21's `{info,error}` test loggers need `debug`. Keep `resolveCorrelationId`. A merge-only security round applies (eslint auto-merges).
+
+PR #24 (TASK-021 audit store SQL) r1 at 6f498c4: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0024-TASK-021-code-review.md`.
+- **R1-M1:** the PR #21 union is not pure. On the merge tree, `openapi:types --check` exits 1, and `tests/api/contract-validation.api.test.ts:24` has a local CRITICAL list, so 4 api tests fail with the criticality TypeError. Fix: `isCriticalComponent` plus audit_partitions unavailable/degraded variants (verified, with a negative control). Also fix the getReadiness description.
+- **R1-M2:** guard layer-1 bypass via `CREATE TYPE … AS RANGE (multirange_type_name = audit_entries_YYYY_MM)`. Fix: a post-loop invariant (no non-audit-owned pg_class/pg_type ~ c_tbl in v_ns), verified on PGlite. It must land before merge, because 90-guard becomes immutable after that.
+- MINORs:
+  - m1: AT-US-012-04 wording ("next partition missing → degraded") versus 503; PM plus architect, and an out-of-window squat should give degraded.
+  - m2: the squat event is logged at warn (D-ORCH-025 says error). PR #20 union: its exhaustiveness test breaks on the new DbSecurityEvents, and SECURITY_EVENT_FIELDS must allow name/kind/reason.
+  - m3: bootstrap files have no CI immutability check (TASK-015).
+- NITs: n1 rule-11 DO depth > 4 fails open; n2 `pendingCheck('audit_partitions')` passes; n4 intervalCache keeps `unavailable` for 60 s; n6 TASK-014 image must ship tools/db for prisma.config.
+- Closed by PR #24: PR #12 M3 port-then-delete; PR #11 R3-n5; PR #9 m2 (audit stubs); PR #5 R2-n1 (U&, both lanes); PR11-SEC-17 c DO half.
+- r2 = delta review: the multirange row in IMPLICIT, the merge-main proof, and the security record on the final head.
