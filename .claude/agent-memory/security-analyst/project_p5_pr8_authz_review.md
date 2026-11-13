@@ -25,7 +25,7 @@ The PR #8 review (TASK-013) is in `docs/05-quality/security/PR-0008-TASK-013-sec
 
 **How to apply.** In these reviews, check:
 - **TASK-007 or TASK-016 (PR8-SEC-13):** the base-ref migration-immutability check and CODEOWNERS for `packages/authz`, `tools/authz` and `prisma/migrations`. **Met at PR #10 `28442b6`** (A-only check runs before any head code). INFO residuals are the symlink mode and base-tip directories (PR10-SEC-10, before M5).
-- **TASK-020 (merge condition, PR8-SEC-05):**
+- **TASK-020 (merge condition, PR8-SEC-05): MET at PR #32 `fa67aca`** (PR-0032 §6). (c) is one-directional plus "signature route ⇒ signature-only or `public`" (D-TASK020-03, confirmed with C2 = authz requires an authenticated principal on non-anonymous routes). Original bullets:
   - selfService ⇒ `user` tenancy;
   - `operator-cross-tenant` ⇔ operator-only permission;
   - signatureOnly ⇔ signature auth;

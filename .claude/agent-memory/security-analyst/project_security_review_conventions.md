@@ -128,4 +128,8 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **Bash-tool heredocs can drop a backslash (PR-0027 R2).** A quoted-delimiter heredoc turned a regex lookbehind with an escaped backslash into an unterminated group; write scripts that contain backslash regexes with the Write tool (a NEW file name if the failed heredoc already created one), or build the character with String.fromCharCode(92).
 - **Remove scratch junctions before rm -rf (PR-0027 R2).** `cmd //c rmdir "$(cygpath -w <path>/node_modules)"` for each junction, then rm -rf the scratch dir; confirm the main checkout node_modules entry count is unchanged.
 
-Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]], [[project-p5-pr28-w0act1]], [[project-p5-pr31-staleness-scrub]]
+- **Cite line numbers only from a single-file read (PR-0032).** `cat -n a.ts b.ts` numbers continuously across files, so a line number read from a multi-file dump is offset; re-check with `grep -n` on the one file before writing it into a record.
+- **Joi 18.3.2 facts (PR-0032).** `Joi.object()` with no keys accepts ANY keys (its `describe()` has no `keys`; `Joi.object({})` has `keys: {}` and refuses all); a "closed schema" check must require `keys` and walk nested nodes. An own `__proto__` key from `JSON.parse` is silently dropped from the validated value (the raw `req.body` still has it).
+- **Lint controls that are lexical to a callee (`withTenantTx(cb)`, PR-0032):** check where the real consumers' code sits. A framework slot that calls handlers by reference makes such a rule fire on no consumer; probe the consumer shape (e.g. a `defineRoute({ handler })`) next to the inline control.
+
+Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]], [[project-p5-pr28-w0act1]], [[project-p5-pr31-staleness-scrub]], [[project-p5-pr32-route-pipeline]]
