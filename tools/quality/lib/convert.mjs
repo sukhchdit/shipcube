@@ -45,8 +45,28 @@ function listFindings(items) {
   return items.length > MAX_LISTED ? `${shown}\n... and ${items.length - MAX_LISTED} more` : shown;
 }
 
+// A path separator as it can appear in text: `/`, `\`, or `\\` (a backslash escaped inside JSON).
+const SEP = String.raw`(?:\\\\|\\|/)`;
+// One path segment (a user or directory name): ends at a separator, white space, a quote or a character no path has.
+const NAME = String.raw`[^\\/\s"'<>|:*?]+`;
+/** `C:\Users\<name>` in any separator style and case (the Windows profile directory, its 8.3 short-name form included). */
+const WINDOWS_PROFILE = new RegExp(String.raw`(?<![A-Za-z0-9_])[A-Za-z]:${SEP}Users${SEP}${NAME}`, 'gi');
+/** `/Users/<name>`, `/home/<name>`, also as `/c/Users/<name>` (Git Bash) or `/mnt/c/Users/<name>` (WSL). */
+const POSIX_PROFILE = new RegExp(String.raw`(?<![A-Za-z0-9_.~-])(?:/mnt)?(?:/[A-Za-z])?/(?:Users|home)/${NAME}`, 'g');
+/** A Windows 8.3 short-name segment (`ABCDEF~1`) below a separator, wherever it occurs. */
+const SHORT_NAME = new RegExp(String.raw`(?<=${SEP})[A-Za-z0-9_$-]{1,8}~[0-9]+(?=${SEP}|\s|"|'|$)`, 'g');
+
+/** @param {string} value */
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+
 /**
- * Replaces absolute host paths (repository root, home directory) so evidence never carries the host user name.
+ * Replaces absolute host paths so evidence never carries the host user name (PR28-SEC-02, CWE-532).
+ *
+ * 1. Each prefix of the list (repository root, home, temp directory, their real paths; see `hostScrubList`) becomes
+ *    `<root>`, in forward-slash, backslash and JSON-escaped backslash form; a Windows-style prefix (drive letter or UNC)
+ *    matches case-insensitively, as the file system does.
+ * 2. A generic belt for whatever the list misses: a user-profile path (`C:\Users\<name>`, `/Users/<name>`,
+ *    `/home/<name>`) becomes `<home>`, and a bare 8.3 short-name segment (`ABCDEF~1`) becomes `<short>`.
  * @param {string} text
  * @param {readonly string[]} prefixes absolute paths to replace, most specific first
  * @returns {string}
@@ -55,10 +75,56 @@ export function scrubPaths(text, prefixes) {
   let out = text;
   for (const prefix of prefixes) {
     if (prefix.length < 3) continue;
-    for (const variant of new Set([prefix, prefix.replaceAll('\\', '/'), prefix.replaceAll('/', '\\')]))
-      out = out.split(variant).join('<root>');
+    const forward = prefix.replaceAll('\\', '/');
+    const back = prefix.replaceAll('/', '\\');
+    const variants = [...new Set([prefix, forward, back, back.replaceAll('\\', '\\\\')])];
+    if (/^(?:[A-Za-z]:[\\/]|\\\\)/.test(prefix)) out = out.replace(new RegExp(variants.map(escapeRegExp).join('|'), 'gi'), '<root>');
+    else for (const variant of variants) out = out.split(variant).join('<root>');
   }
-  return out;
+  return out.replace(WINDOWS_PROFILE, '<home>').replace(POSIX_PROFILE, '<home>').replace(SHORT_NAME, '<short>');
+}
+
+/**
+ * The host paths to scrub from committed evidence (PR28-SEC-02): the repository root, the home and temp directories,
+ * the Windows `TEMP`, `TMP`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA` and POSIX `HOME`, `TMPDIR` values as seen, and the
+ * real path of each (which on Windows turns an 8.3 short name into the long one). Longest first, so a more specific
+ * path wins; file system roots and one-segment values are dropped.
+ * @param {{ repoRoot: string, homeDir: string, tmpDir: string, env: Readonly<Record<string, string | undefined>>,
+ *   realpath?: (path: string) => string }} input `realpath` may throw (the path is then kept as is)
+ * @returns {string[]}
+ */
+export function hostScrubList({ repoRoot, homeDir, tmpDir, env, realpath }) {
+  const seen = new Set();
+  const add = (/** @type {string | undefined} */ value) => {
+    const trimmed = (value ?? '').replace(/[\\/]+$/, '');
+    if (trimmed.length >= 4) seen.add(trimmed);
+  };
+  const named = ['TEMP', 'TMP', 'TMPDIR', 'USERPROFILE', 'HOME', 'LOCALAPPDATA', 'APPDATA'].map((key) => env[key]);
+  for (const value of [repoRoot, homeDir, tmpDir, ...named]) {
+    add(value);
+    if (value !== undefined && value !== '' && realpath !== undefined)
+      try {
+        add(realpath(value));
+      } catch {
+        // A variable that names a directory which does not exist: the literal value is already in the list.
+      }
+  }
+  return [...seen].sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
+}
+
+/**
+ * Scrubs the host paths from the name, class name and message of every case (the final pass before JUnit is written).
+ * @param {readonly JUnitCase[]} cases
+ * @param {readonly string[]} prefixes
+ * @returns {JUnitCase[]}
+ */
+export function scrubCases(cases, prefixes) {
+  return cases.map((c) => ({
+    ...c,
+    name: scrubPaths(c.name, prefixes),
+    ...(c.classname === undefined ? {} : { classname: scrubPaths(c.classname, prefixes) }),
+    ...(c.message === undefined ? {} : { message: scrubPaths(c.message, prefixes) }),
+  }));
 }
 
 // --- Jest -------------------------------------------------------------------------------------------------------
@@ -83,11 +149,11 @@ export function jestToCases(report, options = {}) {
   const cases = [];
   for (const file of report['testResults']) {
     if (!isObject(file)) continue;
-    const classname = rel(str(file['name']));
+    const classname = scrubPaths(rel(str(file['name'])), scrub);
     const assertions = arr(file['assertionResults']).filter(isObject);
     for (const a of assertions) {
       const status = str(a['status']);
-      const name = str(a['fullName']) || [...arr(a['ancestorTitles']).map(str), str(a['title'])].join(' ');
+      const name = scrubPaths(str(a['fullName']) || [...arr(a['ancestorTitles']).map(str), str(a['title'])].join(' '), scrub);
       const time = num(a['duration']) / 1000;
       if (status === 'passed') cases.push({ name, classname, time, status: 'passed' });
       else if (status === 'failed')

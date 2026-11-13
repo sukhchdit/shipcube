@@ -142,12 +142,17 @@ describe('readSecret: *_FILE hardening parity with the file provider (ADR-0018 a
     expect(refusal({ S: 'direct', S_FILE: '/run/secrets/s' })).toBe('set S or S_FILE, not both');
   });
 
-  it.each([[join(outside, 's')], ['/etc/passwd'], ['/run/secrets/../etc/passwd'], ['/run/secrets'], ['run/secrets/s']])(
-    'refuses a path that is not lexically under /run/secrets: %s',
-    (path) => {
-      expect(refusal({ S_FILE: path })).toBe('S_FILE: must name a file under /run/secrets');
-    },
-  );
+  // The titles are fixed labels: a title built from the path would embed os.tmpdir() (a host path, random per run) in the
+  // committed lane B JUnit (PR28-SEC-02).
+  it.each([
+    ['a path below the temp directory', join(outside, 's')],
+    ['an absolute path elsewhere', '/etc/passwd'],
+    ['a traversal out of the root', '/run/secrets/../etc/passwd'],
+    ['the root itself', '/run/secrets'],
+    ['a relative path', 'run/secrets/s'],
+  ])('refuses a path that is not lexically under /run/secrets (%s)', (_label, path) => {
+    expect(refusal({ S_FILE: path })).toBe('S_FILE: must name a file under /run/secrets');
+  });
 
   it('refuses a link whose real path leaves the root', () => {
     expect(refusal({ S_FILE: '/run/secrets/escape/s' })).toBe('S_FILE: resolves outside /run/secrets');
