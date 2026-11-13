@@ -229,6 +229,9 @@ Round 2 of a spike PR (PR #6 r2):
 - **Lexical lint rules vs callbacks passed by reference.** If the only `withTenantTx` call passes a function reference, the rule guards nothing. Lint-probe the real handler shape (`defineRoute({handler})`).
 - **Security headers set by an early slot can be overridden by a late `send()`** that applies handler headers. Also check that the test helper and the app use the SAME "authenticated" predicate (x-permission vs security schemes).
 - **RegExp mount fixes keyed on captured params** miss `(?:a|b)`, character classes and top-level `|`. Probe with real HTTP.
+- **Joi closed-schema walkers** that read `flags.unknown`/`patterns` miss schema-level preferences: `.prefs({allowUnknown:true})` / `.options(...)` show up only in `describe().preferences` and override the validate call's options at run time; `Joi.link` is not walked. Probe each form through `defineRoute` and `validateRequest`.
+- **Checker functions tested directly, wiring untested.** For a `checkX()` that composes `add(rule, f(...))` lines, delete each line and run the suite; with a clean real tree nothing finds the gap (PR #32 r2: 3 survivors). Ask for one seeded case through the composed function per rule.
+- **Credential-presence predicates vs cookie paths.** A `__Host-` cookie is always Path=/, so it rides on every same-host request; counting it as a presented credential on routes that do not read it 401s anonymous routes (login) once the cookie exists. Check ADR cookie scoping before accepting a presence rule.
 - **Sheet folds land on main while a PR is in flight.** Diff the sheet on main (and `git log -S` the line) against the PR body's "not done" list.
 
 **Gate-tool PRs with a container step (PR #33, 2026-11-13).**
