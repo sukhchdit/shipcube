@@ -2,6 +2,7 @@
  * Workflow policy (TASK-007; SEC-TC-32, SEC-TC-51, SEC-TC-64; PR1-SEC-02/-08/-12, PR4-SEC-08, PR5-SEC-07; D-ARCH-041,
  * D-ARCH-044; AT-US-005-04/-05). Every negative fixture under fixtures/workflow-policy/ has its own test.
  */
+import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,18 +15,24 @@ import { LINT_FIXTURE_MODE_ENV as LINT_FIXTURE_MODE_SUITE_ENV } from '../lint/fi
 import {
   BASE_LINT_FIXTURES_SCRIPT,
   CI_REQUIRED_GATES,
+  CI_TRIGGERS,
   FORBIDDEN_ENV,
+  LANE_B_EVIDENCE_SCRIPT,
   LINT_FIXTURE_MODE_ENV,
   REQUIRED_CODEOWNED_PATHS,
   checkCodeowners,
+  checkJestManualMocks,
   checkWorkflow,
   checkWorkflowPolicy,
   commandLines,
+  findDirsNamed,
   findFilesNamed,
+  laneBEvidenceProblems,
   mentionsOf,
   shellSegments,
 } from './check-workflow-policy.mjs';
 import { YamlSubsetError, parseYamlSubset } from './yaml-subset.mjs';
+import { EVENTS as EVIDENCE_EVENTS } from '../quality/check-evidence.mjs';
 
 const repoRoot = findRepoRoot();
 const fixtureDir = join(repoRoot, 'tools', 'ci', 'fixtures', 'workflow-policy');
@@ -303,6 +310,154 @@ describe('check-workflow-policy: repository', () => {
     }
   });
 
+  it('[PR17-SEC-09] jest-manual-mocks: any __mocks__ directory and any tracked node_modules/ path fail (repository mode)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workflow-policy-mocks-'));
+    const git = (...args: string[]) => {
+      const r = spawnSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', ...args], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 30_000,
+        windowsHide: true,
+      });
+      if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    try {
+      mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+      cpSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), join(root, '.github', 'workflows', 'ci.yml'));
+      cpSync(join(repoRoot, '.github', 'CODEOWNERS'), join(root, '.github', 'CODEOWNERS'));
+      // An installed package's own __mocks__ (node_modules is not walked) and an untracked node_modules are fine.
+      mkdirSync(join(root, 'node_modules', 'pkg', '__mocks__'), { recursive: true });
+      writeFileSync(join(root, 'node_modules', 'pkg', 'index.js'), '\n');
+      git('init', '-q');
+      writeFileSync(join(root, '.gitignore'), 'node_modules/\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'base');
+      expect(checkJestManualMocks(root)).toEqual([]);
+      expect(checkWorkflowPolicy(root).findings).toEqual([]);
+      mkdirSync(join(root, 'apps', 'x', '__mocks__'), { recursive: true });
+      writeFileSync(join(root, 'apps', 'x', '__mocks__', 'pg.js'), "module.exports = 'planted';\n");
+      mkdirSync(join(root, 'packages', 'p', 'node_modules', '@platform', 'authz'), { recursive: true });
+      writeFileSync(join(root, 'packages', 'p', 'node_modules', '@platform', 'authz', 'index.js'), '\n');
+      git('add', '-f', 'packages/p/node_modules/@platform/authz/index.js');
+      expect(checkWorkflowPolicy(root).findings.map((f) => `${f.rule} ${f.location}`)).toEqual([
+        'jest-manual-mocks apps/x/__mocks__/',
+        'jest-manual-mocks packages/p/node_modules/@platform/authz/index.js',
+      ]);
+      expect(findDirsNamed(root, '__mocks__')).toEqual(['apps/x/__mocks__']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  describe('[PR23-SEC-06] lane B evidence step pin (D-SEC-PR23-02 (2), D-ORCH-032 (1), R2-n2, R2-n3)', () => {
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const baseLine =
+      'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"';
+    const stepName = '      - name: Lane B evidence (quality:check-evidence)\n';
+    const pushGuard = '            if [ "$GITHUB_EVENT_NAME" = "push" ]; then\n';
+    const swap = (from: string, to: string): string => {
+      expect(ci).toContain(from);
+      return ci.replace(from, () => to);
+    };
+    const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
+
+    it('[PR23-SEC-06] the committed step passes and equals LANE_B_EVIDENCE_SCRIPT', () => {
+      expect(messages(ci)).toEqual([]);
+      expect(laneBEvidenceProblems(LANE_B_EVIDENCE_SCRIPT.join('\n'))).toEqual([]);
+    });
+
+    it.each<[string, () => string, string]>([
+      ['step removed', () => swap(stepName, '      - name: Evidence check\n'), 'must keep the lane B evidence gate step'],
+      [
+        'step made conditional',
+        () => swap(stepName, `${stepName}        if: env.CODE == 'true'\n`),
+        'lane B evidence gate step must be unconditional',
+      ],
+      [
+        'head-copy bootstrap branch restored',
+        () =>
+          swap(
+            `          ${baseLine}\n`,
+            `          ${baseLine}\n          node "$quality/head/tools/quality/check-evidence.mjs" --report-only\n`,
+          ),
+        'head-copy bootstrap branch is refused',
+      ],
+      ['--report-only on the base-ref line (R2-n3)', () => swap(baseLine, `${baseLine} --report-only`), '--report-only is refused'],
+      [
+        'literal event value',
+        () => swap(baseLine, baseLine.replace('"$GITHUB_EVENT_NAME"', 'pull_request')),
+        '--event must be "$GITHUB_EVENT_NAME" (found pull_request)',
+      ],
+      [
+        '--event= literal',
+        () => swap(baseLine, baseLine.replace('--event "$GITHUB_EVENT_NAME"', '--event=push')),
+        '--event must be "$GITHUB_EVENT_NAME" (found push)',
+      ],
+      [
+        'inline assignment',
+        () => swap(`          ${baseLine}`, `          GITHUB_EVENT_NAME=push ${baseLine}`),
+        'GITHUB_EVENT_NAME must not be assigned',
+      ],
+      [
+        'export in the script',
+        () =>
+          swap(
+            '          set -euo pipefail\n          quality=',
+            '          set -euo pipefail\n          export GITHUB_EVENT_NAME=push\n          quality=',
+          ),
+        'GITHUB_EVENT_NAME must not be assigned',
+      ],
+      [
+        'step env key',
+        () => swap(stepName, `${stepName}        env:\n          GITHUB_EVENT_NAME: push\n`),
+        'must set no env but  (found GITHUB_EVENT_NAME)',
+      ],
+      [
+        'job env key',
+        () =>
+          swap(
+            '      RANGE_BASE: ${{ github.event.pull_request.base.sha',
+            '      GITHUB_EVENT_NAME: push\n      RANGE_BASE: ${{ github.event.pull_request.base.sha',
+          ),
+        'reserved-env: GITHUB_EVENT_NAME',
+      ],
+      ['--event push with --profile wave', () => swap(baseLine, `${baseLine} --profile wave`), '--profile wave|gate is not a lane A run'],
+      [
+        'no-base branch exits 0 on pull_request',
+        () => swap(pushGuard, '            if true; then\n'),
+        'must be exactly LANE_B_EVIDENCE_SCRIPT',
+      ],
+      ['verifier made non-fatal', () => swap(baseLine, `${baseLine} || true`), 'must be exactly LANE_B_EVIDENCE_SCRIPT'],
+      [
+        'merge_group trigger added (R2-n2)',
+        () => swap('\non:\n', '\non:\n  merge_group:\n'),
+        'ci.yml trigger merge_group is not in CI_TRIGGERS',
+      ],
+      [
+        'workflow_dispatch trigger added (R2-n2)',
+        () => swap('\non:\n', '\non:\n  workflow_dispatch:\n'),
+        'ci.yml trigger workflow_dispatch is not in CI_TRIGGERS',
+      ],
+    ])('[PR23-SEC-06] probe: %s is a finding', (_name, mutate, expected) => {
+      const mutated = mutate();
+      expect(mutated).not.toBe(ci);
+      expect(messages(mutated)).toEqual(expect.arrayContaining([expect.stringContaining(expected)]));
+    });
+
+    it('[R2-n2] CI_TRIGGERS are exactly the check-evidence EVENTS', () => {
+      expect([...CI_TRIGGERS]).toEqual([...EVIDENCE_EVENTS]);
+    });
+  });
+
+  it('[PR17-SEC-09] the repository CODEOWNERS owns **/__mocks__/ and it is a required owned path', () => {
+    const text = readFileSync(join(repoRoot, '.github', 'CODEOWNERS'), 'utf8');
+    expect(text).toMatch(/^\*\*\/__mocks__\/\s+@\S+$/mu);
+    expect(REQUIRED_CODEOWNED_PATHS).toContain('**/__mocks__/');
+    expect(checkCodeowners(text.replace(/^\*\*\/__mocks__\/ .*$/mu, '')).map((f) => f.message)).toEqual([
+      expect.stringContaining('**/__mocks__/'),
+    ]);
+  });
+
   it('D-ARCH-041: the forbidden list covers every engine variable deps:rebuild refuses', () => {
     expect([...FORBIDDEN_ENV]).toEqual(expect.arrayContaining([...FORBIDDEN_ENGINE_ENV]));
   });
@@ -354,6 +509,9 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
       '/jest.config.ts @o',
       '/.swcrc @o',
       '**/.swcrc @o',
+      '**/__mocks__/ @o',
+      '/packages/shared/ @o',
+      '**/package.json @o',
       '/tsconfig.json @o',
       '/tsconfig.base.json @o',
       '/commitlint.config.mjs @o',
@@ -448,6 +606,29 @@ describe('CODEOWNERS: O4 oracles and pre-gate configs (PR24-SEC-04, PR4-SEC-13 i
   it('[PR24-SEC-04] the narrower prisma/tools-db lines are kept, so folding cannot drop coverage silently', () => {
     for (const path of ['prisma/bootstrap/', 'prisma/migrations/', 'tools/db/lint-migrations.ts', 'tools/db/audit-ddl-reviewers.json']) {
       expect(repositoryText()).toMatch(lineFor(path));
+    }
+  });
+});
+
+describe('CODEOWNERS: server-controlled ids and workspace manifests (PR26-SEC-07)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const cases: readonly (readonly [string, string])[] = [
+    ['packages/shared/src/ids/', '/packages/shared/src/ids/'],
+    ['**/package.json', '**/package.json'],
+  ];
+
+  it.each(cases)('[PR26-SEC-07] %s is required and the repository CODEOWNERS owns it', (path, line) => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain(path);
+    expect(repositoryText()).toMatch(new RegExp(`^${escape(line)}\\s+@\\S+$`, 'mu'));
+  });
+
+  it.each(cases)('[PR26-SEC-07] mutation: deleting, commenting out or un-owning the %s line yields one finding for it', (path, line) => {
+    const pattern = new RegExp(`^${escape(line)}\\s+@\\S+$`, 'mu');
+    for (const replacement of ['', `# ${line} @sukhchdit`, line]) {
+      const mutated = repositoryText().replace(pattern, replacement);
+      expect(mutated).not.toMatch(pattern);
+      expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
     }
   });
 });

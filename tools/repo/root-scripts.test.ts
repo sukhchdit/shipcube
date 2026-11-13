@@ -57,6 +57,8 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
     'test:api',
     'test:e2e',
     'test:coverage',
+    'coverage:gate',
+    'coverage:diff',
     'build',
     'deps:rebuild',
     'quality:check-evidence',

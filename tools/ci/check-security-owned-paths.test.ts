@@ -398,7 +398,12 @@ describe('CODEOWNERS (PR5-SEC-04, PR2-SEC-08)', () => {
   });
 
   it('ordinary source files are not owned', () => {
-    expect(ownedPaths(['apps/api/src/server.ts', 'packages/config/src/schema.ts', 'apps/web/package.json'], patterns)).toEqual([]);
+    expect(ownedPaths(['apps/api/src/server.ts', 'packages/config/src/schema.ts', 'apps/web/app/root.tsx'], patterns)).toEqual([]);
+  });
+
+  it('[PR26-SEC-07] every workspace manifest and the server-controlled ids are owned', () => {
+    const paths = ['apps/web/package.json', 'packages/shared/package.json', 'package.json', 'packages/shared/src/ids/uuidv7.ts'];
+    expect(ownedPaths(paths, patterns)).toEqual(paths);
   });
 
   it('pattern semantics: anchored directory, anchored file, unanchored glob', () => {

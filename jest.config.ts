@@ -33,6 +33,9 @@ export const SWC_JEST_OPTIONS = {
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
+/** Module paths the resolver never sees (exported for tools/repo/jest-config-owned.test.ts). */
+export const MODULE_PATH_IGNORE_PATTERNS = ['<rootDir>/.*/dist/', '<rootDir>/.*/build/', '/__mocks__/'];
+
 // NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
 const JS_EXTENSION_MAPPER = { '^(\\.{1,2}/.*)\\.js$': '$1' };
 
@@ -46,7 +49,11 @@ const common: ProjectConfig = {
   },
   transform: { '^.+\\.(t|j)sx?$': ['@swc/jest', SWC_JEST_OPTIONS] },
   moduleNameMapper: JS_EXTENSION_MAPPER,
-  modulePathIgnorePatterns: ['<rootDir>/.*/dist/', '<rootDir>/.*/build/'],
+  // /__mocks__/ (PR4-SEC-11, PR17-SEC-09): suites mock with jest.mock(name, factory) only. Without this pattern Jest 30
+  // would serve ANY <roots>/**/__mocks__/<pkg>.js as <pkg> for a bare require in EVERY suite, so an unowned file could
+  // replace @platform/authz or pg in the RBAC, audit and RLS suites. The jest-manual-mocks repository rule also rejects
+  // any __mocks__ directory, and CODEOWNERS owns **/__mocks__/. tools/lint/jest.base-fixtures.config.json mirrors it.
+  modulePathIgnorePatterns: MODULE_PATH_IGNORE_PATTERNS,
   testPathIgnorePatterns: IGNORED_PATHS,
 };
 
@@ -78,9 +85,10 @@ const config: Config = {
     '!apps/*/app/{entry.server.tsx,routes.ts}',
   ],
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],
-  // COVERAGE_TARGET (CLAUDE.md §3), global part: 85 % line / 75 % branch. The 95 % per-path thresholds for
-  // packages/{pricing,audit,authz} are added by TASK-015 (coverage gates) once those packages contain code:
-  // Jest fails a path threshold that matches no files.
+  // COVERAGE_TARGET (CLAUDE.md §3), global part: 85 % line / 75 % branch, an independent tripwire. The US-006 gate
+  // proper (overall 85/75 plus 95/95 for packages/{pricing,audit,authz} and, from M4, packages/ledger) is
+  // tools/ci/coverage-gate.mjs over the json-summary report (D-TASK015-10): Jest path keys would error on a package
+  // with no measured file yet and would subtract the matched files from `global`.
   coverageThreshold: {
     global: { lines: 85, branches: 75 },
   },

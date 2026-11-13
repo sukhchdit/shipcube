@@ -190,24 +190,30 @@ jobs:
       # before any head code except the locked Ajv in node_modules (PR23-SEC-03). Unconditional: docs/03-architecture/api/**
       # and the other tooling inputs are docs paths that still select lane B suites. On a push to main the verifier
       # skips itself (--event push, like the security-owned-paths check): the pushed range is a squash commit whose
-      # evidence SHAs are branch commits (PR #23 R1-m3).
+      # evidence SHAs are branch commits (PR #23 R1-m3). The run: is pinned line by line (LANE_B_EVIDENCE_SCRIPT in
+      # check-workflow-policy, PR23-SEC-06 / D-SEC-PR23-02 (2)): no head-copy bootstrap, no --report-only, no literal
+      # event; a missing base fails closed except on push, and a base without the verifier fails with "merge main"
+      # (D-ORCH-032). Adding a ci.yml trigger means extending check-evidence EVENTS on main first (PR #23 R2-n2).
       - name: Lane B evidence (quality:check-evidence)
         run: |
           set -euo pipefail
           quality="$RUNNER_TEMP/quality"
-          mkdir -p "$quality/base" "$quality/head"
+          mkdir -p "$quality/base"
           if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then
-            echo "### Lane B evidence (quality:check-evidence): not run, the range has no base commit" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              echo "### Lane B evidence (quality:check-evidence): not run, the pushed range has no base commit (push skips the check)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error title=Lane B evidence::the range has no base commit; the verifier runs only from the base ref (fail closed, PR23-SEC-06)"
+            exit 1
           fi
-          if git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then
-            git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"
-            node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"
-          else
-            git archive "$RANGE_HEAD" tools/quality | tar -x -C "$quality/head"
-            echo "Lane B evidence: \`tools/quality/check-evidence.mjs\` is not on the base ref yet (bootstrap); the head commit's copy runs in report-only mode." >> "$GITHUB_STEP_SUMMARY"
-            node "$quality/head/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY" --report-only
+          if ! git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then
+            echo "::error title=Lane B evidence::the base commit has no tools/quality/check-evidence.mjs: this branch predates the verifier. Merge main into the branch and push again (D-ORCH-032); the head copy is never trusted."
+            echo "### Lane B evidence (quality:check-evidence): FAIL, the base commit predates the verifier; merge main into the branch (D-ORCH-032)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"
+          node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Prisma engine cache key
         if: env.CODE == 'true'

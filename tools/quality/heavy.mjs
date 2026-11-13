@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import ajvModule from 'ajv/dist/2020.js';
 
+import { coverageGateCases } from '../ci/coverage-gate.mjs';
 import { CONVERTERS, convertNative, jestToCases, malformed, sanitizeNative, scrubPaths } from './lib/convert.mjs';
 import {
   changedPaths,
@@ -685,7 +686,11 @@ async function runSuite(item, ctx) {
       });
     const coverageFile = join(coverageDir, 'coverage-summary.json');
     const extra = jestExtraArgs(item.runner, { testTimeoutMs: ctx.testTimeoutMs });
-    return done(cases, { jestArgs: extra, coverageRaw: item.runner.coverage ? coverageFrom(coverageFile) : null });
+    const coverageRaw = item.runner.coverage ? coverageFrom(coverageFile) : null;
+    // US-006 coverage gate (tools/ci/coverage-gate.mjs, D-TASK015-11): one case per scope, so a below-threshold scope
+    // (or an absent summary) fails the coverage suite by name. Evidence schema unchanged: these are ordinary cases.
+    if (item.runner.coverage) cases.push(...coverageGateCases(coverageRaw, { root: ctx.repoRoot, classname: item.id }));
+    return done(cases, { jestArgs: extra, coverageRaw });
   }
 
   const runner = item.runner;

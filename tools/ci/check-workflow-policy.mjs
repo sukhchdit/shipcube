@@ -56,11 +56,14 @@
  *   swcrc                 no `.swcrc` anywhere in the tree: Jest compiles with the inline options in jest.config.ts
  *                         (`swcrc: false`), so a `.swcrc` is unused at best and an unowned compile redirect at worst
  *                         (PR17-SEC-01).
- * Both tree walks skip node_modules, .git and nested checkouts (a directory with its own `.git`, e.g. a git worktree).
+ *   jest-manual-mocks     no `__mocks__` directory anywhere in the tree and no tracked path with a `node_modules/`
+ *                         segment (PR4-SEC-11, PR17-SEC-09).
+ * The tree walks skip node_modules, .git and nested checkouts (a directory with its own `.git`, e.g. a git worktree).
  *
  * CLI: node tools/ci/check-workflow-policy.mjs [--root <dir>] [--summary <file>] [--json] [files...]
  * Exit 0 pass, 1 findings, 2 usage/internal error.
  */
+import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -186,55 +189,132 @@ const BASE_LINT_FIXTURES_RUN = Object.freeze({
 });
 
 /**
+ * The lane B evidence step (PR23-SEC-06 as amended by D-SEC-PR23-02 (2); D-ORCH-032 (1); PR #23 code review R2-n3), as
+ * command lines, pinned exactly: the verifier, its lib and the manifest come only from the base ref; the event is
+ * always `"$GITHUB_EVENT_NAME"` (never a literal, never re-assigned); there is no head-copy bootstrap and no
+ * `--report-only`; a missing base fails closed on every event but push (where the verifier skips itself anyway), and a
+ * base without the verifier fails closed with a message that says to merge main (D-ORCH-032).
+ */
+export const LANE_B_EVIDENCE_SCRIPT = Object.freeze([
+  'set -euo pipefail',
+  'quality="$RUNNER_TEMP/quality"',
+  'mkdir -p "$quality/base"',
+  'if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then',
+  '  if [ "$GITHUB_EVENT_NAME" = "push" ]; then',
+  '    echo "### Lane B evidence (quality:check-evidence): not run, the pushed range has no base commit (push skips the check)" >> "$GITHUB_STEP_SUMMARY"',
+  '    exit 0',
+  '  fi',
+  '  echo "::error title=Lane B evidence::the range has no base commit; the verifier runs only from the base ref (fail closed, PR23-SEC-06)"',
+  '  exit 1',
+  'fi',
+  'if ! git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then',
+  '  echo "::error title=Lane B evidence::the base commit has no tools/quality/check-evidence.mjs: this branch predates the verifier. Merge main into the branch and push again (D-ORCH-032); the head copy is never trusted."',
+  '  echo "### Lane B evidence (quality:check-evidence): FAIL, the base commit predates the verifier; merge main into the branch (D-ORCH-032)" >> "$GITHUB_STEP_SUMMARY"',
+  '  exit 1',
+  'fi',
+  'git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"',
+  'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"',
+]);
+
+/** Events lane A runs on; each must be an `EVENTS` value of tools/quality/check-evidence.mjs (PR #23 R2-n2). */
+export const CI_TRIGGERS = Object.freeze(['pull_request', 'push']);
+
+/**
+ * Why a lane B evidence `run:` differs from LANE_B_EVIDENCE_SCRIPT, naming the probe it trips (one message each).
+ * @param {string} script
+ * @returns {string[]}
+ */
+export function laneBEvidenceProblems(script) {
+  const lines = commandLines(script);
+  /** @type {string[]} */
+  const out = [];
+  if (/--report-only\b/u.test(script)) out.push('--report-only is refused: the base ref has the verifier (R2-n3)');
+  if (/\$quality\/head\b|"\$RANGE_HEAD" tools\/quality/u.test(script))
+    out.push('the head-copy bootstrap branch is refused: only the base copy of tools/quality runs');
+  for (const match of script.matchAll(/--event(?:=|\s+)(\S+)/gu))
+    if (match[1] !== '"$GITHUB_EVENT_NAME"') out.push(`--event must be "$GITHUB_EVENT_NAME" (found ${match[1] ?? ''})`);
+  if (/\bGITHUB_EVENT_NAME\+?=|\b(?:export|declare|typeset|readonly|local|read|unset)\b[^\n]*\bGITHUB_EVENT_NAME\b/u.test(script))
+    out.push('GITHUB_EVENT_NAME must not be assigned, exported, read or unset in the step');
+  if (/--profile(?:=|\s+)["']?(?:wave|gate)\b/u.test(script)) out.push('--profile wave|gate is not a lane A run');
+  if (lines.length !== LANE_B_EVIDENCE_SCRIPT.length || lines.some((line, index) => line !== LANE_B_EVIDENCE_SCRIPT[index])) {
+    const index = LANE_B_EVIDENCE_SCRIPT.findIndex((line, i) => lines[i] !== line);
+    out.push(
+      `the run: must be exactly LANE_B_EVIDENCE_SCRIPT (first difference at command line ${String((index === -1 ? LANE_B_EVIDENCE_SCRIPT.length : index) + 1)})`,
+    );
+  }
+  return out;
+}
+
+/** Matches a `run:` that runs the base-ref verifier (the step is then held to LANE_B_EVIDENCE_SCRIPT). */
+const LANE_B_EVIDENCE_RUN = /tools\/quality\/check-evidence\.mjs/u;
+
+/**
  * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, the only
  * `if:` values allowed on that step (empty: unconditional) and the `env:` entries it must set. Adding a gate is a
  * reviewed change to this list.
  */
-export const CI_REQUIRED_GATES = Object.freeze([
-  { job: 'fast-lane', gate: 'workflow policy', run: /node "\$GATE_CHECK_WORKFLOW_POLICY"/, ifs: [] },
-  { job: 'fast-lane', gate: 'install flags', run: /node "\$GATE_CHECK_INSTALL_FLAGS"/, ifs: [] },
-  { job: 'fast-lane', gate: 'migration immutability', run: /node "\$GATE_CHECK_MIGRATION_IMMUTABILITY"/, ifs: [] },
-  { job: 'fast-lane', gate: 'lockfile', run: /node "\$GATE_CHECK_LOCKFILE"/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'dependency age', run: /node "\$GATE_CHECK_DEP_AGE"/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'install', run: /^npm ci --ignore-scripts\b/, ifs: [] },
-  { job: 'fast-lane', gate: 'licences', run: /node "\$GATE_LICENCE_CHECK"/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'registry signatures', run: /npm audit signatures\b/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'vulnerability audit', run: /node "\$GATE_CHECK_AUDIT"/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'lint', run: /^npm run lint$/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'format', run: /^npm run format:check$/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'commitlint', run: /npm exec --no -- commitlint\b/, ifs: [] },
-  { job: 'fast-lane', gate: 'actionlint', run: /"\$ACTIONLINT_IMAGE"/, ifs: [] },
-  { job: 'fast-lane', gate: 'type-check', run: /^npm run typecheck$/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'unit tests', run: /^npm run test:unit$/, ifs: ["env.CODE == 'true'"] },
-  {
-    job: 'fast-lane',
-    gate: 'base-ref lint negative fixtures',
-    run: BASE_LINT_FIXTURES_RUN,
-    ifs: ["env.CODE == 'true' && env.LINT_CONTROLS == 'true'"],
-    env: { [LINT_FIXTURE_MODE_ENV]: 'no-weakening' },
-  },
-  { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
-  // Two porcelain gates run the same command, so each is found by its step name too (PR4-SEC-13 item 1).
-  {
-    job: 'fast-lane',
-    gate: 'porcelain after lint',
-    name: /^Lint must not mutate the tree\b/,
-    run: /node "\$GATE_CHECK_PORCELAIN"/,
-    ifs: ["env.CODE == 'true'"],
-  },
-  {
-    job: 'fast-lane',
-    gate: 'porcelain',
-    name: /^Build must not mutate the tree\b/,
-    run: /node "\$GATE_CHECK_PORCELAIN"/,
-    ifs: ["env.CODE == 'true'"],
-  },
-  { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [] },
-  { job: 'scans', gate: 'semgrep', run: /node "\$GATE_RUN_SEMGREP"/, ifs: [] },
-  { job: 'scans', gate: 'security-owned paths record', run: /node "\$GATE_CHECK_SECURITY_OWNED_PATHS"/, ifs: [] },
-  // NFR-MAINT-004, PR #21 R1-m6: the contract against the latest release tag (oasdiff, digest-pinned).
-  { job: 'scans', gate: 'openapi-breaking', run: /node "\$GATE_OPENAPI_BREAKING" .*--image "\$OASDIFF_IMAGE"/, ifs: [] },
-]);
+/**
+ * @typedef {{ job: string, gate: string, name?: RegExp, run: { test: (script: string) => boolean }, ifs: readonly string[],
+ *   env?: Record<string, string>, problems?: (script: string) => string[] }} RequiredGate
+ */
+export const CI_REQUIRED_GATES = Object.freeze(
+  /** @type {RequiredGate[]} */ ([
+    { job: 'fast-lane', gate: 'workflow policy', run: /node "\$GATE_CHECK_WORKFLOW_POLICY"/, ifs: [] },
+    { job: 'fast-lane', gate: 'install flags', run: /node "\$GATE_CHECK_INSTALL_FLAGS"/, ifs: [] },
+    { job: 'fast-lane', gate: 'migration immutability', run: /node "\$GATE_CHECK_MIGRATION_IMMUTABILITY"/, ifs: [] },
+    { job: 'fast-lane', gate: 'lockfile', run: /node "\$GATE_CHECK_LOCKFILE"/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'dependency age', run: /node "\$GATE_CHECK_DEP_AGE"/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'install', run: /^npm ci --ignore-scripts\b/, ifs: [] },
+    { job: 'fast-lane', gate: 'licences', run: /node "\$GATE_LICENCE_CHECK"/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'registry signatures', run: /npm audit signatures\b/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'vulnerability audit', run: /node "\$GATE_CHECK_AUDIT"/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'lint', run: /^npm run lint$/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'format', run: /^npm run format:check$/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'commitlint', run: /npm exec --no -- commitlint\b/, ifs: [] },
+    { job: 'fast-lane', gate: 'actionlint', run: /"\$ACTIONLINT_IMAGE"/, ifs: [] },
+    { job: 'fast-lane', gate: 'type-check', run: /^npm run typecheck$/, ifs: ["env.CODE == 'true'"] },
+    { job: 'fast-lane', gate: 'unit tests', run: /^npm run test:unit$/, ifs: ["env.CODE == 'true'"] },
+    {
+      job: 'fast-lane',
+      gate: 'base-ref lint negative fixtures',
+      run: BASE_LINT_FIXTURES_RUN,
+      ifs: ["env.CODE == 'true' && env.LINT_CONTROLS == 'true'"],
+      env: { [LINT_FIXTURE_MODE_ENV]: 'no-weakening' },
+    },
+    { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
+    // Two porcelain gates run the same command, so each is found by its step name too (PR4-SEC-13 item 1).
+    {
+      job: 'fast-lane',
+      gate: 'porcelain after lint',
+      name: /^Lint must not mutate the tree\b/,
+      run: /node "\$GATE_CHECK_PORCELAIN"/,
+      ifs: ["env.CODE == 'true'"],
+    },
+    {
+      job: 'fast-lane',
+      gate: 'porcelain',
+      name: /^Build must not mutate the tree\b/,
+      run: /node "\$GATE_CHECK_PORCELAIN"/,
+      ifs: ["env.CODE == 'true'"],
+    },
+    { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [] },
+    { job: 'scans', gate: 'semgrep', run: /node "\$GATE_RUN_SEMGREP"/, ifs: [] },
+    { job: 'scans', gate: 'security-owned paths record', run: /node "\$GATE_CHECK_SECURITY_OWNED_PATHS"/, ifs: [] },
+    // NFR-MAINT-004, PR #21 R1-m6: the contract against the latest release tag (oasdiff, digest-pinned).
+    { job: 'scans', gate: 'openapi-breaking', run: /node "\$GATE_OPENAPI_BREAKING" .*--image "\$OASDIFF_IMAGE"/, ifs: [] },
+    // PR23-SEC-06 / D-SEC-PR23-02 (2) / D-ORCH-032 (1) / R2-n3: the step is found by name and verifier path, then held to
+    // LANE_B_EVIDENCE_SCRIPT line by line, with no step env at all.
+    {
+      job: 'fast-lane',
+      gate: 'lane B evidence',
+      name: /^Lane B evidence\b/,
+      run: LANE_B_EVIDENCE_RUN,
+      ifs: [],
+      env: {},
+      problems: laneBEvidenceProblems,
+    },
+  ]),
+);
 
 const GITLEAKS_RUN = /\$\{?GITLEAKS_IMAGE\b|gitleaks\/gitleaks[:@]/;
 const VOLUME = /(?:^|\s)(?:-v|--volume)(?:\s+|=)["']?([^"'\s]+)/g;
@@ -315,6 +395,11 @@ function envEntryFindings(name, value) {
   const out = [];
   if (FORBIDDEN_ENV.includes(name) || PLAYWRIGHT_HOST.test(name)) {
     out.push({ rule: 'forbidden-env', message: `${name} redirects a binary download or engine path and is not allowed in workflows` });
+  }
+  // Runner-provided variables steer gate scripts (GITHUB_EVENT_NAME selects the lane B verdict path, RUNNER_TEMP and
+  // GITHUB_WORKSPACE where gates are extracted and read): never set by a workflow (PR23-SEC-06, D-SEC-PR23-02 (2)).
+  if (/^(?:GITHUB|RUNNER)_/iu.test(name) && name !== 'GITHUB_TOKEN') {
+    out.push({ rule: 'reserved-env', message: `${name} is a runner-provided variable gate steps rely on; workflows must not set it` });
   }
   if (/^npm_config_ignore_scripts$/i.test(name) && value.trim().toLowerCase() !== 'true') {
     out.push({ rule: 'ignore-scripts', message: `${name} must stay "true" (got "${value}")` });
@@ -672,7 +757,7 @@ export function checkWorkflow(text, fileName, options = {}) {
       add('lint-fixture-mode', `${LINT_FIXTURE_MODE_ENV} may be set only in the env of ci.yml's base-ref lint fixture step`, path);
     }
   }
-  if (options.requiredGates === true) for (const f of requiredGateFindings(jobs, doc.defaults)) add(f.rule, f.message, f.path);
+  if (options.requiredGates === true) for (const f of requiredGateFindings(jobs, doc.defaults, triggers)) add(f.rule, f.message, f.path);
   return findings;
 }
 
@@ -746,9 +831,10 @@ const GATE_STEP_OVERRIDES = Object.freeze(['shell', 'working-directory']);
 /**
  * @param {YamlMap} jobs
  * @param {YamlNode} [workflowDefaults] the workflow-level `defaults:`
+ * @param {Set<string>} [triggers] the workflow's `on:` events (checked against CI_TRIGGERS when given)
  * @returns {{ rule: string, message: string, path: string[] }[]}
  */
-export function requiredGateFindings(jobs, workflowDefaults) {
+export function requiredGateFindings(jobs, workflowDefaults, triggers) {
   /** @type {{ rule: string, message: string, path: string[] }[]} */
   const out = [];
   // `defaults.run.shell` / `working-directory` would apply to every gate step below it.
@@ -793,6 +879,15 @@ export function requiredGateFindings(jobs, workflowDefaults) {
       });
     }
     const step = asMap(steps[index]) ?? {};
+    if (gate.problems !== undefined) {
+      for (const problem of gate.problems(asString(step.run) ?? '')) {
+        out.push({
+          rule: 'required-gates',
+          message: `ci.yml ${gate.gate} gate step: ${problem}`,
+          path: ['jobs', gate.job, 'steps', String(index), 'run'],
+        });
+      }
+    }
     for (const key of GATE_STEP_OVERRIDES) {
       if (step[key] !== undefined) {
         out.push({
@@ -802,10 +897,11 @@ export function requiredGateFindings(jobs, workflowDefaults) {
         });
       }
     }
-    if (gate.env !== undefined) {
+    const gateEnv = gate.env;
+    if (gateEnv !== undefined) {
       // Exactly the listed entries: another step variable (RANGE_BASE, BASH_ENV, PATH, …) could redirect the run.
       const env = asMap(step.env) ?? {};
-      for (const [name, value] of Object.entries(gate.env)) {
+      for (const [name, value] of Object.entries(gateEnv)) {
         if (env[name] !== value) {
           out.push({
             rule: 'required-gates',
@@ -814,14 +910,25 @@ export function requiredGateFindings(jobs, workflowDefaults) {
           });
         }
       }
-      for (const name of Object.keys(env).filter((key) => !Object.hasOwn(gate.env, key))) {
+      for (const name of Object.keys(env).filter((key) => !Object.hasOwn(gateEnv, key))) {
         out.push({
           rule: 'required-gates',
-          message: `ci.yml ${gate.gate} gate step must set no env but ${Object.keys(gate.env).join(', ')} (found ${name})`,
+          message: `ci.yml ${gate.gate} gate step must set no env but ${Object.keys(gateEnv).join(', ')} (found ${name})`,
           path: ['jobs', gate.job, 'steps', String(index), 'env', name],
         });
       }
     }
+  }
+  // PR #23 R2-n2: a new ci.yml trigger (merge_group, workflow_dispatch, …) reaches check-evidence as an unknown
+  // --event and exits 2; adding one is deliberate: extend check-evidence EVENTS on main first, then CI_TRIGGERS here.
+  if (triggers !== undefined) {
+    for (const trigger of triggers)
+      if (!(/** @type {readonly string[]} */ (CI_TRIGGERS).includes(trigger)))
+        out.push({
+          rule: 'required-gates',
+          message: `ci.yml trigger ${trigger} is not in CI_TRIGGERS (${CI_TRIGGERS.join(', ')}): extend check-evidence EVENTS first, then this list (PR #23 R2-n2)`,
+          path: ['on', trigger],
+        });
   }
   const needs = asMap(jobs['ci-gate'])?.needs;
   const needList = Array.isArray(needs) ? needs : typeof needs === 'string' ? [needs] : [];
@@ -866,6 +973,73 @@ export function findFilesNamed(root, name) {
 }
 
 /**
+ * Every directory called `name` in the tree (same walk as findFilesNamed; a match is reported, not descended into).
+ * @param {string} root
+ * @param {string} name
+ * @returns {string[]} repository-relative paths, sorted
+ */
+export function findDirsNamed(root, name) {
+  /** @type {string[]} */
+  const out = [];
+  /** @param {string} dir */
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const path = join(dir, entry.name);
+      if (entry.name === name) out.push(relative(root, path).replaceAll('\\', '/'));
+      else if (entry.name !== 'node_modules' && entry.name !== '.git' && !existsSync(join(path, '.git'))) visit(path);
+    }
+  };
+  visit(root);
+  return out.sort();
+}
+
+/**
+ * jest-manual-mocks (PR4-SEC-11, PR17-SEC-09): no `__mocks__` directory anywhere in the tree (Jest would serve
+ * `<roots>/**\/__mocks__/<pkg>` as `<pkg>` in every suite; jest.config.ts also ignores the path) and no tracked path
+ * with a `node_modules/` segment (a committed package directory shadows the installed one). The tracked check reads
+ * `git ls-files`; a root that is not a git checkout tracks nothing, and git failing in a checkout is a finding.
+ * @param {string} root
+ * @returns {Finding[]}
+ */
+export function checkJestManualMocks(root) {
+  /** @type {Finding[]} */
+  const findings = findDirsNamed(root, '__mocks__').map((path) => ({
+    rule: 'jest-manual-mocks',
+    message:
+      'a __mocks__ directory would replace a module in every Jest suite; use jest.mock(name, factory) in the suite (PR4-SEC-11, PR17-SEC-09)',
+    location: `${path}/`,
+  }));
+  if (!existsSync(join(root, '.git'))) return findings;
+  const listed = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-files', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 60_000,
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (listed.error !== undefined || listed.status !== 0) {
+    findings.push({
+      rule: 'jest-manual-mocks',
+      message: `git ls-files failed, tracked node_modules/ paths cannot be checked: ${String(listed.error?.message ?? listed.stderr)
+        .trim()
+        .slice(0, 200)}`,
+      location: '.',
+    });
+    return findings;
+  }
+  for (const path of listed.stdout.split('\0')) {
+    if (/(?:^|\/)node_modules\//u.test(path))
+      findings.push({
+        rule: 'jest-manual-mocks',
+        message: 'a tracked node_modules/ path shadows an installed package for Jest and Node resolution (PR17-SEC-09)',
+        location: path,
+      });
+  }
+  return findings;
+}
+
+/**
  * Paths that `.github/CODEOWNERS` must cover (WAVE-00 TASK-007; PR5-SEC-04, PR2-SEC-01, PR8-SEC-11, PR8-SEC-13).
  * A trailing `/` marks a folder.
  */
@@ -899,6 +1073,8 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   // PR17-SEC-01: a `.swcrc` at any depth could redirect how a suite compiles (the swcrc rule also rejects it).
   '.swcrc',
   '**/.swcrc',
+  // PR4-SEC-11, PR17-SEC-09: a manual mock replaces a module in every suite (the jest-manual-mocks rule rejects it).
+  '**/__mocks__/',
   // PR24-SEC-04: the O4 oracles and assertions outside the bootstrap SQL; PR4-SEC-13 item 3: configs that run in
   // deps:rebuild, typegen and the build.
   'prisma/',
@@ -906,6 +1082,9 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'prisma.config.ts',
   'apps/api/src/platform/',
   'apps/*/vite.config.ts',
+  // PR26-SEC-07: server-controlled ids / reserved actors, and every workspace manifest (scripts run before the gates).
+  'packages/shared/src/ids/',
+  '**/package.json',
   'CLAUDE.md',
   '.claude/settings.json',
   '.claude/agents/',
@@ -990,6 +1169,7 @@ export function checkWorkflowPolicy(root, files) {
         location: path,
       });
     }
+    findings.push(...checkJestManualMocks(root));
   }
   return { findings, checked: list.map((file) => relative(root, file).replaceAll('\\', '/')) };
 }

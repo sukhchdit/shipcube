@@ -17,6 +17,7 @@ import { checkEnvExampleParity } from '../config/env-file.js';
 import { findRepoRoot } from '../test-support/process.js';
 import { checkAudit } from './check-audit.mjs';
 import { checkLicences } from './licence-check.mjs';
+import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 
 const repoRoot = findRepoRoot();
 const read = (...parts: string[]) => readFileSync(join(repoRoot, ...parts), 'utf8');
@@ -146,6 +147,57 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     const dependabot = read('.github', 'dependabot.yml');
     expect(dependabot).toMatch(/- dependency-name: typescript\n\s+update-types: \['version-update:semver-major'\]/);
     expect(dependabot.match(/cooldown:\n\s+default-days: 7/g)).toHaveLength(2);
+  });
+
+  it('[PR25-SEC-02] Dependabot, parsed: per ecosystem the ignore list, cooldown, groups, limit and schedule are exact (M8, M9)', () => {
+    const doc = parseYamlSubset(read('.github', 'dependabot.yml')).value;
+    const updates = isMap(doc) ? doc['updates'] : undefined;
+    expect(Array.isArray(updates)).toBe(true);
+    const byEcosystem = new Map(
+      (Array.isArray(updates) ? updates : [])
+        .filter(isMap)
+        .map((u) => [typeof u['package-ecosystem'] === 'string' ? u['package-ecosystem'] : '', u]),
+    );
+    expect([...byEcosystem.keys()]).toEqual(['npm', 'github-actions']);
+    expect(byEcosystem.get('npm')).toEqual({
+      'package-ecosystem': 'npm',
+      directory: '/',
+      schedule: { interval: 'monthly' },
+      cooldown: { 'default-days': '7' },
+      'open-pull-requests-limit': '3',
+      ignore: [{ 'dependency-name': '@platform/*' }, { 'dependency-name': 'typescript', 'update-types': ['version-update:semver-major'] }],
+      groups: { 'npm-minor-and-patch': { 'update-types': ['minor', 'patch'] } },
+      'commit-message': { prefix: 'chore(deps)' },
+    });
+    expect(byEcosystem.get('github-actions')).toEqual({
+      'package-ecosystem': 'github-actions',
+      directory: '/',
+      schedule: { interval: 'monthly' },
+      cooldown: { 'default-days': '7' },
+      'open-pull-requests-limit': '2',
+      groups: { 'github-actions': { patterns: ['*'] } },
+      'commit-message': { prefix: 'ci(deps)' },
+    });
+  });
+
+  it('[PR25-SEC-02] .gitleaks.toml top level is exactly title, [extend] and [[allowlists]] tables: no [[rules]], [[rules.allowlists]] or [allowlist] (M10)', () => {
+    const tablesOf = (text: string) =>
+      text
+        .split(/\r?\n/)
+        .filter((line) => /^\s*\[/.test(line))
+        .map((line) => line.trim());
+    const tables = tablesOf(gitleaks);
+    expect(new Set(tables)).toEqual(new Set(['[extend]', '[[allowlists]]']));
+    expect(tables.filter((table) => table === '[extend]')).toHaveLength(1);
+    const preamble = gitleaks.split(/^\s*\[/m)[0] ?? '';
+    const keys = preamble
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== '' && !line.trim().startsWith('#'))
+      .map((line) => line.split('=')[0]?.trim());
+    expect(keys).toEqual(['title']);
+    // M10: a default rule re-declared with its own allowlist would extend that rule silently; the table check sees it.
+    const mutated = `${gitleaks}\n[[rules]]\nid = "generic-api-key"\n[[rules.allowlists]]\nregexes = ['''x''']\n`;
+    expect(new Set(tablesOf(mutated))).not.toEqual(new Set(['[extend]', '[[allowlists]]']));
   });
 
   it('AT-US-048-05: with APP_ENV=production and a placeholder JWT signing key, start-up fails naming JWT_SIGNING_KEYS only (the ES256 successor of JWT_SECRET)', () => {

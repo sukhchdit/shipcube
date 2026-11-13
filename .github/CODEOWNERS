@@ -52,6 +52,10 @@
 /apps/api/src/platform/                 @sukhchdit
 # Vite configs run in the build and in typegen before any later gate (PR4-SEC-13 item 3).
 /apps/*/vite.config.ts                  @sukhchdit
+# Server-controlled ids and the reserved actors (PR26-SEC-07), and every workspace manifest: their `scripts` run in
+# lane A's typegen and build before the later gates (PR26-SEC-07, PR4-SEC-13).
+/packages/shared/src/ids/               @sukhchdit
+**/package.json                         @sukhchdit
 
 # Authorisation, audit and the configuration key register
 /packages/authz/                        @sukhchdit
@@ -67,6 +71,9 @@
 # rejects any .swcrc, so a new one is both a policy finding and a record-requiring change.
 /.swcrc                                 @sukhchdit
 **/.swcrc                               @sukhchdit
+# Jest manual mocks (PR4-SEC-11, PR17-SEC-09): a __mocks__/<pkg> under the roots would replace <pkg> in every suite;
+# jest.config.ts ignores the path and the jest-manual-mocks policy rule rejects any such directory.
+**/__mocks__/                           @sukhchdit
 /tsconfig.json                          @sukhchdit
 /tsconfig.base.json                     @sukhchdit
 **/tsconfig*.json                       @sukhchdit

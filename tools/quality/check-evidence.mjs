@@ -628,6 +628,9 @@ export function parseArgs(argv) {
     } else throw new UsageError(`unknown argument ${arg}`);
   }
   if (options.base === undefined || options.head === undefined) throw new UsageError('--base and --head are required');
+  // --event push skips the check, so it must never turn a wave-end or gate verification into a pass (D-SEC-PR23-02 (2)).
+  if (options.event === 'push' && options.profile !== 'pr')
+    throw new UsageError(`--event push skips the check and is refused with --profile ${options.profile}`);
   return /** @type {typeof options & { base: string, head: string }} */ (options);
 }
 
