@@ -105,6 +105,21 @@ The generated client is the package specifier `@platform/prisma/client` (data-mo
 
 Encoding (`lint` lock, held by TASK-020 part 020-B): one fixture per arm under `tests/fixtures/lint/layering/` — repository value import fails; repository `import type` passes; service `import type` fails; `platform/tx` importing `../db/generated.js` fails (`db-root-client`); `platform/db` value import passes; `prisma/tests` value import passes; the exact planned store type import passes and a different file in the same package fails.
 
+## Amendment (2026-11-13, route I/O phases: PR32-SEC-01, code review PR #32 m4; D-ARCH-106; amends "Route metadata"; ADR-0005 amendment 11 is the rule, this is the shape)
+
+`handler` stays the one transaction that writes. A route that needs an external result gains three optional fields so the call has a sanctioned place outside the transaction:
+
+| Field | Transaction | Database handle | Rules |
+|---|---|---|---|
+| `load(ctx)` optional | one short **read-only** tenant transaction (a write fails with SQLSTATE 25006) | `ctx.db` | Resolves the addressed resource under RLS (a miss is 404 before any external call) and reads what the call needs (amounts from stored snapshots, attempt counters). Returns plain data. Writes nothing and no audit entry. |
+| `call(ctx, loaded)` optional | none | none (the context has none) | The only place for HTTP, queue, Valkey, object-storage and SMTP work and for heavy CPU (password hashing). `ctx.signal` aborts at the request deadline or on client disconnect. **Every external effect carries an idempotency key derived from `loaded` (order id and attempt, never a random value)**, so a repeat after a failed `handler` transaction produces the same effect once (ADR-0014 G3). Returns plain data. |
+| `handler(ctx, { loaded, called })` required | the one **write** transaction | `ctx.db` | Writes, outbox events, optimistic checks. It re-validates what `load` read (version-conditional update, DR-B20), because the state may have changed during `call`. The audit hook runs at the end of this transaction only, so every state change stays audited in the transaction that makes it. |
+| `afterCommit(ctx, result)` optional | none | none | Runs after `COMMIT` and after the response was written. In-process and best-effort: never required for correctness (durable work is an outbox event). A throw is logged as `api.after_commit_failed` (route template and correlation id, no values) and never changes the response. Pending work is tracked and drained at shutdown inside the 30 s window (ADR-0013 item 7). |
+
+Further rules. (a) `transaction: 'none'` allows only `handler` and `afterCommit`; `load` without `call` is refused by `defineRoute` (the handler's own transaction can read). (b) A route with only a `handler` pipelines exactly as today: one transaction, nothing to change in existing routes. (c) `load` and `handler` each take a D-ARCH-086 admission permit and release it at their `COMMIT`; none is held across `call`, so a second admission can reject with `TENANT_CONCURRENCY_LIMIT` after the call, which the idempotent-effect rule makes safe to retry. (d) The idempotency window (ADR-0014) wraps all four phases. (e) A stream result (SSE; TASK-044 defines the result type and the framing) is completed after `COMMIT`, in the position of `afterCommit`, and its replay read is a short transaction (`load` or `handler`). (f) `RouteContext.req` is replaced by a frozen transport view in every phase (PR32-SEC-05 (c)). (g) Types: `RouteSpec<L, C>`; `defineRoute` infers `L` from `load` and `C` from `call`. (h) The checkout shape is the model: `load` (order, price snapshots, attempt count) then `call` (authorise at the gateway with `auth:<order_id>:<attempt>`) then `handler` (payment row with the gateway reference, audit, `order.checkout_started`); the client secret goes into the response and nowhere else.
+
+Owner and timing: TASK-020 part 020-C (D-ARCH-108). Until it merges the descriptor has no phase fields and the T-83 lint (ADR-0005 am. 11 item 20) is the only control; no `transaction: 'tenant'` route with external I/O may merge before it.
+
 ## Reversibility
 
 High within the monolith (module moves); medium for extraction (needs network interfaces).

@@ -614,6 +614,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-178 and US-185 scenarios
+- D-ARCH-106: read-then-call route: load (the addressed shipment under RLS, 404 on a miss), call (carrier address validation, no transaction open), the handler returns the result (audit as declared); never a carrier call inside the tenant transaction
 - AT-US-178-01 … AT-US-178-05: all 5 scenarios of US-178, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-185-01 … AT-US-185-06: all 6 scenarios of US-185, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -774,6 +775,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-239 scenarios
+- D-ARCH-106: read-then-call route: load (the addressed shipment under RLS, 404 on a miss), call (carrier service points, no transaction open), the handler returns the result (audit as declared); never a carrier call inside the tenant transaction
 - AT-US-239-01 … AT-US-239-10: all 10 scenarios of US-239, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -907,6 +909,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-227 scenarios
+- D-ARCH-106: the object read for the integrity check runs in the call phase (no transaction open); load resolves the document under RLS first and the handler writes the VIEW or DOWNLOAD audit entry before the response is released (fail closed)
 - AT-US-227-01 … AT-US-227-05: all 5 scenarios of US-227, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
