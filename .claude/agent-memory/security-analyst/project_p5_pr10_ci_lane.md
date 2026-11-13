@@ -39,6 +39,8 @@ PR #10 review: `docs/05-quality/security/PR-0010-TASK-007-security-review.md`.
       - each overlap path equals `git merge-tree --write-tree` (or the expected conflict resolution).
   - **PR10-SEC-21 (LOW, TASK-015).** `recordHeadShas` takes SHAs from every round, while the verdict is file-level. Older heads, even a FAIL round's, stay bindable, and a revert of the owned paths to the FAIL head's content passes. The fix: take head rows only from the table that holds the last Verdict.
   - The tool reports the FIRST qualifying SHA in token order, which is often an older round's.
+  - **The tool reads records from the `--root` WORKING TREE, not from `--head`** (PR-0021 R2, 2026-11-13). A negative control such as "head without the new record" falsely passes unless the clone is first checked out at that head.
+  - Unowned-path commits after the named head keep the record valid. This lets a light fix cycle on unowned paths follow a record (D-ORCH-024).
 - **Head workflow decides.** Under `pull_request` the head `ci.yml` runs. `required-gates` pins the gate commands but not their input-sourcing steps (PR10-SEC-17), so an owned-path record is the only catch for deliberate `ci.yml` edits.
 
 **Why:** These residuals close only if each of these is checked: TASK-015 (which touches workflows), the orchestrator procedure, principal-architect's ADR-0023 wording, and the post-merge items.

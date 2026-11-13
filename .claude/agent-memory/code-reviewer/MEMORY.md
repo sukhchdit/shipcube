@@ -1,5 +1,5 @@
 - [Review conventions](project_review_conventions.md) — review file path/name in main repo, worktree layout, Node 24 PATH prefix, re-run gates yourself; merge-main + supersede partition proofs
-- [Review watchlist](project_review_watchlist.md) — open deferred items by owner; #9 r4 AWN; #18 AWN; #12 r2 AWN; #10 r1 CR; #19 AWN; #17 r2 AWN; #4 r4 AWN; #20 r1 CR; #21 r2 AWN (R2-m1 array/optional mounts; PR #20 routePrefix union)
-- [Scratch-copy technique](reference_scratch_copy_technique.md) — mutation-test via git archive + junction; junction pitfalls; junction-free typed lint probe
+- [Review watchlist](project_review_watchlist.md) — open deferred items by owner; #23 r2 AWN; #9 r4 AWN; #18 AWN; #12 r2 AWN; #19 AWN; #17 r2 AWN; #4 r4 AWN; #20 r2 AWN; #21 r3 AWN; #24 r1 CR (PR #21 union break + multirange guard bypass)
+- [Scratch-copy technique](reference_scratch_copy_technique.md) — git archive + junction mutation tests; junction pitfalls; typed lint probe; PGlite SQL/event-trigger probes (no Docker)
 - [Lint probe technique](reference_lint_probe_technique.md) — predict a PR's lint errors under another open PR's ESLint config without installing
-- [Review heuristics](project_review_heuristics.md) — recurring defects (timeouts, flag guards, Joi/Zod, authz, Prisma, ReDoS, pg, CI bypasses, CODEOWNERS de-own, subpath allow-lists, native-fn checks, PII deny-lists, mount probes, cross-PR guards)
+- [Review heuristics](project_review_heuristics.md) — recurring defects (timeouts, flag guards, Joi/Zod, authz, Prisma, ReDoS, pg, CI bypasses, CODEOWNERS, allow-lists, PII, mount probes, cross-PR guards, event-trigger side effects)

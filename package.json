@@ -26,6 +26,8 @@
     "db:lint-migrations": "tsx tools/db/lint-migrations.ts",
     "authz:generate": "tsx --conditions=@platform/source tools/authz/generate.ts",
     "gen:modules": "tsx tools/api/gen-module-registry.ts",
+    "openapi:lint": "node tools/openapi/lint.mjs",
+    "openapi:types": "tsx tools/openapi/types.ts",
     "lint": "npm run typegen && eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 && node tools/lint/check-suppressions.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -38,7 +40,11 @@
     "test:api": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects api --passWithNoTests",
     "test:coverage": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --coverage",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
-    "hooks:install": "git config core.hooksPath tools/hooks"
+    "hooks:install": "git config core.hooksPath tools/hooks",
+    "quality:heavy": "node tools/quality/heavy.mjs",
+    "quality:fastlane": "node tools/quality/fastlane.mjs",
+    "quality:prune": "node tools/quality/prune.mjs",
+    "quality:check-evidence": "node tools/quality/check-evidence.mjs"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
