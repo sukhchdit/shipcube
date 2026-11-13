@@ -10,9 +10,9 @@ import { createRuntimeLog } from './platform/runtime/log.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
 
-const { config } = await loadRuntimeConfigOrExit('api');
+const { config, secrets } = await loadRuntimeConfigOrExit('api');
 const log = createRuntimeLog('api', process.stdout);
-const services = createRuntimeServices(config, 'api', log);
+const services = createRuntimeServices(config, 'api', log, secrets);
 const app = createApp({ healthRouter: createHealthRouter({ probe: services.probe }), modules: moduleRegistry });
 
 // Session-integrity check on a dedicated connection before the listener opens (PR-0009 M1); never rejects.

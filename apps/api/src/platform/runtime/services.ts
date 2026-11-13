@@ -1,14 +1,16 @@
 /**
  * Process infrastructure shared by the API and the worker (ADR-0003: the worker shares module code): the database
  * runtime (platform/db/runtime.ts: pool, session-integrity guard, `database` readiness check and, once the generated
- * client is wired, the tenant-transaction runner), the Valkey client, the readiness checks and probe, and the
- * resources graceful shutdown closes. Typed configuration in, live clients out; no `process` access here. The pool and
- * the root client stay inside platform/db (D-ORCH-014 (d), PR11-SEC-09 item 1): this module never imports
- * platform/db/client.ts.
+ * client is wired, the tenant-transaction runner), the object-storage adapter (platform/storage, SPK-05), the Valkey
+ * client, the readiness checks and probe, and the resources graceful shutdown closes. Typed configuration in, live
+ * clients out; no `process` access here. The pool and the root client stay inside platform/db (D-ORCH-014 (d),
+ * PR11-SEC-09 item 1): this module never imports platform/db/client.ts.
  */
-import type { Config, Service } from '@platform/config';
+import type { Config, Secret, Service } from '@platform/config';
 
 import { databaseRuntimeFromConfig } from '../db/runtime.js';
+import { createObjectStorageCheck } from '../health/checks/object-storage.js';
+import { objectStorageFromConfig } from '../storage/s3-object-storage.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
 import { createReadinessProbe, pendingCheck, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
@@ -17,18 +19,12 @@ import type { Closeable } from './shutdown.js';
 export type ValkeyClient = ReturnType<typeof createValkeyClient>;
 
 /**
- * The five readiness components of openapi.yaml `HealthReady`. Object storage and the audit components are
- * pending until their clients exist: object storage with the S3 adapter (TASK-019), audit partitions and chain
- * verification with the audit store (TASK-021).
+ * The five readiness components of openapi.yaml `HealthReady`. The audit components are pending until the audit
+ * store exists (audit partitions and chain verification: TASK-021). `object_storage` is a `HeadBucket` on the
+ * documents bucket.
  */
-export function readinessChecks(database: ReadinessCheck, valkey: ValkeyClient): readonly ReadinessCheck[] {
-  return [
-    database,
-    createValkeyCheck(valkey),
-    pendingCheck('object_storage'),
-    pendingCheck('audit_partitions'),
-    pendingCheck('audit_chain'),
-  ];
+export function readinessChecks(database: ReadinessCheck, valkey: ValkeyClient, objectStorage: ReadinessCheck): readonly ReadinessCheck[] {
+  return [database, createValkeyCheck(valkey), objectStorage, pendingCheck('audit_partitions'), pendingCheck('audit_chain')];
 }
 
 export interface RuntimeServices {
@@ -45,8 +41,14 @@ export interface RuntimeServices {
   startup(): Promise<void>;
 }
 
-export function createRuntimeServices(config: Config, service: Service, log: RuntimeLog): RuntimeServices {
+export function createRuntimeServices(
+  config: Config,
+  service: Service,
+  log: RuntimeLog,
+  secrets: ReadonlyMap<string, Secret<string>>,
+): RuntimeServices {
   const database = databaseRuntimeFromConfig(config, service, log);
+  const storage = objectStorageFromConfig(config, secrets);
   const valkey = createValkeyClient({
     url: config.REDIS_URL.reveal(),
     connectionName: service,
@@ -54,8 +56,14 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
   });
   return {
     valkey,
-    probe: createReadinessProbe(readinessChecks(database.readinessCheck, valkey)),
-    resources: [...database.resources, { name: 'valkey', close: () => valkey.quit().then(() => undefined) }],
+    probe: createReadinessProbe(
+      readinessChecks(database.readinessCheck, valkey, createObjectStorageCheck(storage, config.STORAGE_BUCKET_DOCUMENTS)),
+    ),
+    resources: [
+      ...database.resources,
+      { name: 'valkey', close: () => valkey.quit().then(() => undefined) },
+      { name: 'object_storage', close: () => Promise.resolve(storage.destroy()) },
+    ],
     startup: () => database.startup(),
   };
 }
