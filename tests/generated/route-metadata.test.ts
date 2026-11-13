@@ -200,6 +200,54 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
     expect(contractWide).toEqual([]);
   });
 
+  describe('[R2-m2] the transaction, permission-status and reauth rules are wired into checkRouteMetadata', () => {
+    /** A copy of the contract with one operation changed (the shared document is never mutated). */
+    const docWith = (change: (operation: Record<string, unknown>) => boolean): OpenApiDocument => {
+      const copy = structuredClone(doc);
+      const changed = listOperations(copy).some((op) => change(op.operation));
+      if (!changed) throw new Error('no operation of openapi.yaml fits the seeded defect');
+      return copy;
+    };
+    const checkDoc = (seeded: OpenApiDocument): MetadataFinding[] =>
+      checkRouteMetadata({ doc: seeded, mounted: listMountedRoutes(api.mounts, api.walk), descriptorOf, implemented: ledger });
+
+    it('[D-ARCH-106 (6)] a seeded transaction none route outside the pin is named through the composed check', () => {
+      const candidate = listOperations(doc).find(
+        (op) =>
+          op.fullPath.startsWith(api.apiPrefix) &&
+          op.operation['x-tenancy'] === 'public' &&
+          (op.operation['x-audit'] as Loose | undefined)?.['action'] === 'NONE' &&
+          !TRANSACTION_NONE_OPERATIONS.has(op.operationId),
+      );
+      if (candidate === undefined) throw new Error('no public, unaudited /api/v1 operation in openapi.yaml');
+      const route = descriptorFor(doc, candidate, { transaction: 'none' });
+      expect(check(withModule([route]), [...ledger, candidate.operationId])).toContainEqual(
+        expect.objectContaining({ rule: 'transaction', message: expect.stringContaining('outside TRANSACTION_NONE_OPERATIONS') }),
+      );
+    });
+
+    it('[assertion 2] a seeded x-permission-status: proposed is named through the composed check', () => {
+      const seeded = docWith((operation) => {
+        operation['x-permission-status'] = 'proposed';
+        return true;
+      });
+      expect(checkDoc(seeded)).toContainEqual(
+        expect.objectContaining({ rule: 'permission-status', message: expect.stringContaining('x-permission-status "proposed" remains') }),
+      );
+    });
+
+    it('[assertion 4] a seeded x-reauth-max-age without a scope is named through the composed check', () => {
+      const seeded = docWith((operation) => {
+        if (operation['x-reauth-scope'] !== undefined) return false;
+        operation['x-reauth-max-age'] = 600;
+        return true;
+      });
+      expect(checkDoc(seeded)).toContainEqual(
+        expect.objectContaining({ rule: 'reauth', message: expect.stringContaining('x-reauth-max-age without x-reauth-scope') }),
+      );
+    });
+  });
+
   it('[PR8-SEC-05] the mounted routes hold every binding rule, in development and in production', () => {
     expect(() => assertRouteBindings(api.descriptors, { production: false })).not.toThrow();
     expect(() => assertRouteBindings(api.descriptors, { production: true })).not.toThrow();
