@@ -47,6 +47,8 @@ env:
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
   ACTIONLINT_IMAGE: docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
   OSV_SCANNER_IMAGE: ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
+  # oasdiff v1.35.0, Apache-2.0, released 2026-10-28 (7-day cooldown); same value as OASDIFF_IMAGE in tools/ci/openapi-breaking.mjs.
+  OASDIFF_IMAGE: docker.io/tufin/oasdiff:v1.35.0@sha256:82b1840a77335562bb11ce95f77ad31745a0c6f3a770929333ed1c5ef466e400
 
 jobs:
   fast-lane:
@@ -188,24 +190,30 @@ jobs:
       # before any head code except the locked Ajv in node_modules (PR23-SEC-03). Unconditional: docs/03-architecture/api/**
       # and the other tooling inputs are docs paths that still select lane B suites. On a push to main the verifier
       # skips itself (--event push, like the security-owned-paths check): the pushed range is a squash commit whose
-      # evidence SHAs are branch commits (PR #23 R1-m3).
+      # evidence SHAs are branch commits (PR #23 R1-m3). The run: is pinned line by line (LANE_B_EVIDENCE_SCRIPT in
+      # check-workflow-policy, PR23-SEC-06 / D-SEC-PR23-02 (2)): no head-copy bootstrap, no --report-only, no literal
+      # event; a missing base fails closed except on push, and a base without the verifier fails with "merge main"
+      # (D-ORCH-032). Adding a ci.yml trigger means extending check-evidence EVENTS on main first (PR #23 R2-n2).
       - name: Lane B evidence (quality:check-evidence)
         run: |
           set -euo pipefail
           quality="$RUNNER_TEMP/quality"
-          mkdir -p "$quality/base" "$quality/head"
+          mkdir -p "$quality/base"
           if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then
-            echo "### Lane B evidence (quality:check-evidence): not run, the range has no base commit" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              echo "### Lane B evidence (quality:check-evidence): not run, the pushed range has no base commit (push skips the check)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error title=Lane B evidence::the range has no base commit; the verifier runs only from the base ref (fail closed, PR23-SEC-06)"
+            exit 1
           fi
-          if git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then
-            git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"
-            node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"
-          else
-            git archive "$RANGE_HEAD" tools/quality | tar -x -C "$quality/head"
-            echo "Lane B evidence: \`tools/quality/check-evidence.mjs\` is not on the base ref yet (bootstrap); the head commit's copy runs in report-only mode." >> "$GITHUB_STEP_SUMMARY"
-            node "$quality/head/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY" --report-only
+          if ! git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then
+            echo "::error title=Lane B evidence::the base commit has no tools/quality/check-evidence.mjs: this branch predates the verifier. Merge main into the branch and push again (D-ORCH-032); the head copy is never trusted."
+            echo "### Lane B evidence (quality:check-evidence): FAIL, the base commit predates the verifier; merge main into the branch (D-ORCH-032)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"
+          node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Prisma engine cache key
         if: env.CODE == 'true'
@@ -246,6 +254,13 @@ jobs:
       - name: Lint (ESLint, Stylelint, suppressions)
         if: env.CODE == 'true'
         run: npm run lint
+
+      # PR4-SEC-13 item 1: typegen (React Router config and route modules, vite.config.ts) runs inside `npm run lint`
+      # before ESLint, and again in Type-check. A typegen-phase rewrite of a tracked file (an owned lint config, a rule)
+      # that a later typegen restores is caught here, before Type-check can restore it.
+      - name: Lint must not mutate the tree (git status --porcelain)
+        if: env.CODE == 'true'
+        run: node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Format check
         if: env.CODE == 'true'
@@ -378,7 +393,7 @@ jobs:
           fi
           echo "GATES_DIR=$gates/base" >> "$GITHUB_ENV"
           # A script the base tools/ci lacks runs from the head tree's git objects (bootstrap), never the working tree.
-          for tool in run-semgrep check-security-owned-paths; do
+          for tool in run-semgrep check-security-owned-paths openapi-breaking; do
             var="GATE_$(echo "$tool" | tr 'a-z-' 'A-Z_')"
             if [ -f "$gates/base/tools/ci/$tool.mjs" ]; then
               echo "$var=$gates/base/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
@@ -406,6 +421,16 @@ jobs:
 
       - name: Semgrep (rules, .semgrepignore and .gitignore from the base ref; --disable-nosem)
         run: node "$GATE_RUN_SEMGREP" --root "$GITHUB_WORKSPACE" --rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR" --summary "$GITHUB_STEP_SUMMARY"
+
+      # NFR-MAINT-004, PR #21 R1-m6, D-ORCH-023 (1): the contract at the PR head against the latest release tag merged
+      # into the base (strict semver), both read from git objects (never the working tree) into oasdiff with no network.
+      # No tag: a smoke run of the head contract against itself, then "no release tag", exit 0 (PR #33 R1-M1: the
+      # container, mount and parser run on every PR). A breaking (ERR) change needs the api/README §18 record: an Accepted
+      # ADR changed since the tag that names each operationId (D-TASK015-03, R1-M2). A step of this isolated job, not a
+      # separate job: it needs only git, Node and Docker. It runs before the record step so a missing review record
+      # (expected on a first push of an owned change) does not hide the contract result.
+      - name: OpenAPI breaking changes against the latest release tag (oasdiff, NFR-MAINT-004)
+        run: node "$GATE_OPENAPI_BREAKING" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --image "$OASDIFF_IMAGE" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)
         run: |
