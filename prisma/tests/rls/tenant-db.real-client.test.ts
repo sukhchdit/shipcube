@@ -184,8 +184,9 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
     expect(seen.symbols).toEqual(rawSymbols.map(() => 'undefined'));
     expect(seen.nonTagged).toEqual(['refused', 'refused', 'refused']);
     // One delegate per Prisma model (a new model is a deliberate change of this list) plus the two tagged raw calls.
-    // referenceDatasetVersion: TASK-023's SYSTEM table; platform_app holds SELECT only (D-ARCH-075).
-    const exposed = ['permission', 'referenceDatasetVersion', 'role', 'rolePermission', '$queryRaw', '$executeRaw'];
+    // referenceDatasetVersion (TASK-023's SYSTEM table) is NOT on TenantDb: SYSTEM models are reached only through
+    // systemDelegates(tx) (PR19-SEC-01, D-ARCH-080; prisma/tests/rls/system-delegates.int.test.ts).
+    const exposed = ['permission', 'role', 'rolePermission', '$queryRaw', '$executeRaw'];
     expect([...seen.surface.ownKeys].sort()).toEqual([...exposed].sort());
     expect(seen.surface).toMatchObject({ ownSymbols: 0, hasParent: false });
     expect([...seen.surface.spread].sort()).toEqual([...exposed].sort());
@@ -227,13 +228,21 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
         executeRaw: db.$executeRaw`SELECT 2 AS executed`,
       };
       const lazyLog = log.map(({ sql }) => sql.slice(0, 12));
+      // [R3-n4] a read of any member other than then/catch/finally throws (no fluent accessor reads as undefined).
+      const readOf = (result: unknown, key: string): string => {
+        try {
+          return `read:${String(get(result, key))}`;
+        } catch (error) {
+          return error instanceof TenantDbAccessError ? 'refused' : 'other';
+        }
+      };
       const shapes = Object.fromEntries(
         Object.entries(results).map(([name, result]) => [
           name,
           {
-            requestTransaction: get(result, 'requestTransaction'),
+            requestTransaction: readOf(result, 'requestTransaction'),
             inRequestTransaction: 'requestTransaction' in result,
-            spec: get(result, 'spec'),
+            spec: readOf(result, 'spec'),
             keys: Reflect.ownKeys(result).map(String),
             proto: Object.getPrototypeOf(result) as unknown,
             tag: Object.prototype.toString.call(result),
@@ -256,9 +265,9 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
     const keys = ['then', 'catch', 'finally', 'Symbol(Symbol.toStringTag)'];
     for (const shape of Object.values(seen.shapes)) {
       expect(shape).toEqual({
-        requestTransaction: undefined,
+        requestTransaction: 'refused',
         inRequestTransaction: false,
-        spec: undefined,
+        spec: 'refused',
         keys,
         proto: null,
         tag: '[object TenantDbResult]',
