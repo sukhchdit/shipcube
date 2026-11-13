@@ -2,13 +2,13 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0 (P4 Planning) |
-| Date | 2026-11-12 |
+| Version | 1.1 (P5 Wave 0, W0-ACT-1: §9.1–§9.3 suite-activation protocol) |
+| Date | 2026-11-13 |
 | Owner | qa-lead |
 | Consumers | senior-developer (task DAG and DoD), test-engineer, e2e-test-engineer, test-runner, accessibility-auditor, performance-engineer, security-analyst, devops-engineer, quality-gatekeeper (G3) |
 | Inputs | CLAUDE.md §2, §3, §6, §8; `docs/sdlc/BRIEF.md` §9, §11; `docs/01-requirements/NFR.md` v1.3, `PRD.md` §4 and §6, `stories/EPIC-*.md` v1.3; ADR-0023 (amendments A–H), ADR-0024 (+ amendment); `platform.md` §7; `nfr-strategy.md`; `nfr-traceability.md`; `threat-model.md` §10; `risks.md`; `docs/05-quality/security/P3-architecture-security-review.md` §9 and §14; `docs/02-ux/accessibility.md` §10 |
 | Companion files | [`tools/quality/required-suites.json`](../../tools/quality/required-suites.json) (required-suite manifest) · [`tests/security-test-cases.md`](tests/security-test-cases.md) (SEC-TC-01..64) · [`tests/e2e-journeys.md`](tests/e2e-journeys.md) (critical journeys) · [`tests/gherkin-test-map.md`](tests/gherkin-test-map.md) (every Must scenario → test ID and suite) · `../03-architecture/nfr-traceability.md` (Test(s) column: every NFR → tests, lane and evidence) |
-| Decisions | D-QA-001 … D-QA-013 in `docs/sdlc/DECISIONS.md` |
+| Decisions | D-QA-001 … D-QA-014 in `docs/sdlc/DECISIONS.md` |
 
 The purpose of this document is to make gate G3 decidable. It answers five questions for every obligation in the run: **what** is tested, **where** (lane A, B or C), **with which tool**, **against which threshold**, and **which evidence file** proves it. Section 15 is the checklist that quality-gatekeeper verifies.
 
@@ -419,7 +419,7 @@ docs/05-quality/
     QUARANTINE.md                   quarantine register (qa-lead; §11)
     a11y-manual-audit.md            P6 manual sheet results
     VERIFICATION-REPORT.md          P6 report (G3 evidence)
-    schema/heavy-run.schema.json    (Wave 0, devops-engineer)
+    (schema/heavy-run.schema.json)  moved to tools/quality/summary.schema.json (D-ARCH-082 (1), ADR-0023 am. B note)
     runs/<UTCstamp>_<sha7>/         machine-generated only:
       summary.json · summary.md
       <suite>.junit.xml             one file per suite ID of the manifest
@@ -433,20 +433,24 @@ The file-name allow-list of the run directories = the fixed names above + `<suit
 
 ### 9.2 Required-suite manifest
 
-`tools/quality/required-suites.json` (moved from `tests/` by T-QA-01, D-QA-001) lists, for every suite: lane, runner, report name, `security`/`zero_skip`, `status` (`planned` or `active`), `min_tests`, `required_cases` (SEC-TC IDs that must appear by name and pass), activation trigger, and the NFRs it serves. It also holds the per-profile suite sets, the changed-path rules (§4.3), the security-critical path list (SEC-P3-07 item 5 + SEC-P3-31), and `tooling_inputs` (staleness allow-list exclusions).
+`tools/quality/required-suites.json` (moved from `tests/` by T-QA-01, D-QA-001) lists, for every suite: lane, runner, report name, `security`/`zero_skip`, `status` (`planned` or `active`), `min_tests`, `required_cases` (SEC-TC IDs that must appear by name and pass), activation trigger, and the NFRs it serves. It also holds the per-profile suite sets, the changed-path rules (§4.3), the security-critical path list (SEC-P3-07 item 5 + SEC-P3-31), `tooling_inputs` (staleness allow-list exclusions; it names the code-owned tooling inputs `tools/quality/required-suites.json` and `tools/quality/summary.schema.json` too, D-ARCH-082 (1)), and `required_cases_pending` (SEC-TC IDs of an active suite that have no test on `main` yet, each with its owner task and latest checkpoint; informational, the verifier reads only `required_cases`; D-QA-014). The `summary.json` schema is `tools/quality/summary.schema.json` (devops-engineer, code-owned).
 
 `quality:check-evidence` (devops-engineer, Wave 0) enforces, from the **base-ref copy** of the manifest and scripts (SEC-P3-31):
 
 1. Verdict recomputed from the attachments: every required suite present, `tests ≥ min_tests` and `> 0`, `failures + errors = 0`; JUnit counts equal `summary.json`.
 2. Zero-skip suites have `skipped = 0`.
 3. Every `required_cases` ID of a required suite appears in a passing testcase name of that suite.
-4. A run that holds a JUnit file for a suite whose `status` is `planned` in the base manifest is rejected: it is not credited as evidence (PR #23 R1-m1). The check fails only when the change needed that run, so the PR that activates a suite passes with its own run uncredited, and from the next PR on the suite is required; a later activation whose run also carries the newly activated suite is rejected as a whole. A manifest-only activation PR is therefore optional for the first suite and the safe form for every later one.
+4. A run that holds a JUnit file for a suite whose `status` is `planned` in the base manifest is rejected: it is not credited as evidence (PR #23 R1-m1). The check fails only when the change needed that run, so the PR that activates a suite passes with its own run uncredited, and from the next PR on the suite is required; a later activation whose run also carries the newly activated suite is rejected as a whole. Activation therefore happens in manifest-only PRs (§9.3).
 5. At the `gate` profile, every suite must be `active`, except suites listed under `deferred_at_gate` with a decision ID.
 6. Clean tree, no `SKIP_*` variable, ancestry and staleness rules of ADR-0023 amendments B and G.
 
 ### 9.3 Manifest maintenance (D-QA-010)
 
-- **Activation.** A suite moves from `planned` to `active` in the PR that adds its first test. Security suites and generators are expected active by the end of Wave 0 (T-QA-04).
+- **Activation (D-ARCH-082 as amended by D-ORCH-030 and D-SEC-PR23-02; supersedes "in the PR that adds its first test").** A suite moves from `planned` to `active` in a **manifest-only PR by qa-lead**, with a security record, after its first tests and its `tools/quality/suite-runners.json` entry are on `main`. Activations are batched at four checkpoints: **W0-ACT-1** (right after PR #23: `unit`, `integration`, `api`, `catalog-c1-c14`, `migrations`, the suites with runners), **Wave-0 exit** (the remaining W0-ACT-1 candidates with their runners — `migration-lint`, `config-guards`, `sec-static`, `ci-policy`, `lint`, `typecheck`, `contract-openapi`, `e2e-chromium`, `e2e-webkit`, `redaction` once PR #20 is merged — plus every T-QA-04 generator and security suite, `route-registry`, `compose-up` and `image-assertions`), the **`v0.1.0-m0` tag** (every suite whose owning task has merged) and **G3** (every suite `active` or in `deferred_at_gate` with a decision ID, rule 5). `e2e-firefox` stays `planned` until COND-E2E-FF. Security suites and generators are therefore active by the end of Wave 0 (T-QA-04).
+- **Runner first.** No suite is `active` without a runner entry (`tools/quality/activation.test.ts`, COND-PR23-2).
+- **Pending required cases.** A required SEC-TC ID whose test is not on `main` at activation is parked in `required_cases_pending` and moves back into `required_cases` at the first checkpoint after its owning task merges, at the latest at the checkpoint recorded with it (D-QA-014). `required_cases_pending` must be empty (every entry moved back to `required_cases`) when its checkpoint is reached, and G3 fails on any non-empty pending list. Enforcement in `quality:check-evidence --profile gate` is a devops-engineer follow-up; until it lands, qa-lead and the orchestrator's wave-exit checklist verify it by hand.
+- **Activation evidence.** The activation PR carries a `npm run quality:heavy -- --profile pr` run on its head (a manifest-only change selects `unit`), never a `wave` or `gate` run; at W0-ACT-1 that run is uncredited (rule 4). Until PR23-SEC-03/04/05 merge, its gate table states that `npm ci --ignore-scripts` and `npm run deps:rebuild` ran immediately before `quality:heavy` and that `.git/info/exclude` holds no entries (D-SEC-PR23-02). Procedure: `docs/05-quality/README.md` "Suite activation".
+- **Steady-state evidence rule.** After W0-ACT-1, every PR that touches anything outside `docs/**` (and `.github/**` where the path rules select suites) must commit a fresh `npm run quality:heavy -- --profile pr` run made on an ancestor of its head, with only `docs/**` changes after that run. Run `npm ci --ignore-scripts` then `npm run deps:rebuild` first, and state both in the gate table of the evidence commit. The checker accepts the run at the commit it was made on, not at later heads that changed non-docs paths (PR #28: run 11f1877 was accepted at dbfe4df, not at the pushed head, because `.claude/agent-memory/**` changed afterwards).
 - **Ratchet.** At each wave end qa-lead raises every suite's `min_tests` to the test count of that wave's lane B `wave` run (generated suites: to the exact cell count). Lowering a value needs a DECISIONS.md entry explaining the removal (e.g. a story withdrawn).
 - **Ownership.** The manifest is a tooling input and a security-critical path (SEC-P3-31): every change needs security-analyst review in the DoD.
 
