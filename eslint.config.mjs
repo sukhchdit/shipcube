@@ -467,6 +467,12 @@ export default defineConfig([
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
+    // k6 scripts run inside the grafana/k6 runtime (TASK-018; T-QA-06 reuses): k6 globals and built-in modules.
+    files: ['tests/load/**/*.js'],
+    languageOptions: { globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly', open: 'readonly', console: 'readonly' } },
+    settings: { 'import-x/core-modules': ['k6/http', 'k6/execution'] },
+  },
+  {
     files: DOMAIN_CODE,
     ignores: TEST_FILES,
     rules: { '@typescript-eslint/no-non-null-assertion': 'error' },
