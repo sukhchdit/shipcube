@@ -166,3 +166,165 @@ Negative controls for "no weakening": the base-ref checker is the one from `main
 | LOW open | 2 (PR34-SEC-01, -02) |
 | INFO open | 4 (PR34-SEC-03 to -06) |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** The query counter is not mounted anywhere and records names only; the Jest change leaves coverage, transform, mock confinement and project membership intact (0 files dropped); sentinels and factories are synthetic; D-ORCH-021 levers, lock and base-ref gates are unchanged; Gitleaks emulation is clean. Two LOW follow-ups (seam confinement as a lint policy; scanner false negatives) are due as routed in section 9, not blocking. Lane B evidence is the orchestrator's merge precondition (Docker). Any fix commit that touches an owned path voids this record and needs a round 2 (the lint error already forces one). |
+
+---
+
+## Round 2 (head 3934d12, delta + merge)
+
+| Field | Value |
+|---|---|
+| PR | #34, branch `feat/TASK-276-test-harness-generated-jest-project`, https://github.com/sukhchdit/shipcube/pull/34. Fix cycle 1 for code review r1 (CHANGES_REQUESTED) and this record's round 1. Base `d693e8c` (the PR's base SHA and the `main` code tip; `origin/main` is `e1805a5`, five docs and agent-memory files further, so no owned path moved on `main`). The PR's own change against `d693e8c` is 35 non-docs files, +2,527 / -10, plus 7 evidence files. |
+| Head | 3934d1224f090701c8c5ca230633971e19cf9d0d |
+| Commits since round 1 (`4643265`) | merge `422607d` (main `6420f90`), fix `8aa5b66` (the whole fix cycle), fix `81bea01` (lazy `PrismaPromise` in `measure()`), merge `030fae9` (main `d693e8c`, carries PRs #35 and #36), evidence `3934d12` (docs only). |
+| Lane A evidence | Run [43496097102](https://github.com/sukhchdit/shipcube/actions/runs/43496097102) on `3934d12`. `fast-lane` is green end to end: workflow policy, install flags, lockfile, cooldown, licences, signatures, audit, **Lane B evidence**, commitlint, Lint, Lint must not mutate the tree, Format, actionlint, Type-check, Unit tests, "Lint negative fixtures from the base ref against the head configs", Build. `scans`: **Gitleaks (PR commit range)**, **Semgrep** and OpenAPI breaking changes green. Red only at "Security-owned paths need a review record" (this record), and `ci-gate` for that reason alone. Round 1 could not see lint, type-check, unit or build in CI; this head can, so no extract substitutes are needed for them. |
+| Owned paths changed | 19 (round 1: 11), per the base-ref `check-security-owned-paths` on the main-tip tooling: the eleven of round 1 plus `eslint.config.mjs`, `tools/lint/negative-fixtures.test.ts`, `tools/quality/heavy.mjs`, `tools/quality/heavy.test.ts` and the four fixtures under `tests/fixtures/lint/layering/query-counter-seam/`. |
+| Reviewer / date | security-analyst, 2026-11-14, round 2. Read-only. Git ran in the main checkout against commit SHAs, in a scratch `git clone --shared`, and on `git archive` extracts (head, `4643265`, `d693e8c`, and the `git merge-tree` union with PR #32); the PR worktree was not touched. **No Docker**: the lane B container run is the orchestrator's accepted evidence (R2.7), not mine. Every mutant was applied to an extract and restored (byte-equal to the head blobs afterwards); the `refs/remotes/origin/pr-32-head` ref created for the union was deleted at the end. |
+
+### R2.1 Summary
+
+Round 2 verifies the fix cycle against my round 1: **PR34-SEC-01 and PR34-SEC-02 are closed** (both LOW), together with INFO 03 and 04; INFO 05 narrows and stays open with 06; **two new INFO findings** (07, 08) come out of the bypass and residual probes. The owned-path edits (`jest.config.ts`, `eslint.config.mjs`, `heavy.mjs`, fixtures, tsconfigs, `package.json`) weaken nothing: coverage collection, thresholds, `swcrc: false`, the `__mocks__` ignore, `check-evidence` and the manifest are leaf-equal to `main`, and each "no weakening" probe was shown to see a planted weakening. Both merges are pure unions. The evidence is accepted by the base-ref verifier and holds no host fragment. No new dependency, no lockfile or workflow change.
+
+| ID | Round 1 | Now | Basis |
+|---|---|---|---|
+| PR34-SEC-01 | LOW open | **Closed** | `db-test-seam` policy refuses 21 of 21 production importer shapes (round 1 build: allowed 19 of those 21) and the five bypass spellings it can see; allows the six test shapes; 7 of 8 policy mutants die; scan tripwire with positive control (R2.2) |
+| PR34-SEC-02 | LOW open | **Closed** | 243-row probe: round 1 build differs on 124 rows, head on 8 (all explained); real logger, 23 shapes: round 1 scanner missed 8 of the 14 shapes that survive into a log line, head misses none; linear time; 61 mutants of the PR's tests, 54 killed (R2.3) |
+| PR34-SEC-03 | INFO open | **Closed** | 11 key shapes, 0 echoes; 4 mutants die |
+| PR34-SEC-04 | INFO open | **Closed** | both project-level `testTimeout` values are gone from `jest.config.ts` (leaf diff); hook budgets stay per hook |
+| PR34-SEC-05 | INFO open | Open, narrowed | a plain `*.test.ts(x)` under `tests/generated/` now runs in lane A `unit` / `unit-dom`; only `*.api` / `*.int` generated suites remain lane B only, and `test:generated` still has `--passWithNoTests` (R2.4) |
+| PR34-SEC-06 | INFO open | Open | data refreshed: the logger keeps name, tax id and PAN in all spellings; the scanner now flags every one (R2.4) |
+| PR34-SEC-07 | new | INFO open | the seam allowance keys on the importer's path category, so a production file can reach the seam through a `tests/` folder or `*.test.ts` file; computed specifiers; scan walk can go vacuous (R2.5) |
+| PR34-SEC-08 | new | INFO open | residual scanner false negatives that are contrived or opaque (R2.5) |
+
+### R2.2 PR34-SEC-01: closed
+
+The policy: category `db-test-seam` for `apps/*/src/platform/db/query-counter.ts`, a last-position `disallow` to that category for every importer, and one `allow` for the `test` and `prisma-tests` categories (`eslint.config.mjs:177`, `:430-439`). Probe: the head's real `eslint.config.mjs` over a `git archive` extract, `ESLint#lintText` with type-aware rules disabled, 37 import sites (script `lint-seam.mjs`; a planted-file extract of `apps/api/src/tests/mount.ts` and `mount.test.ts` gives the resolved arm real targets); the same sites on the round 1 extract as the positive control.
+
+| Group | Head | Round 1 build (control) |
+|---|---|---|
+| 21 production importer shapes: `app.ts`, `main.ts`, module service, repository, routes, controller, entry `index.ts`, schemas, `platform/runtime`, `platform/http`, another `platform/db` file, three re-export forms in `platform/db/index.ts` (`export {} from`, `export * from`, `export * as`), `apps/worker`, `packages/shared`, `tools/`, `prisma/seed` by relative path, a specifier without extension, with `.ts`, a side-effect import | **21 REFUSED** with the seam message | **19 allowed**, 2 refused only by unrelated cross-app and cross-package rules |
+| Bypass attempts the lint can see: type-only import, `import('...')` with a string, `import(\`...\`)` with a template literal, `createRequire(import.meta.url)('...')`, a bare `require('...')` | **5 REFUSED** (imported file resolved, not just the text) | 5 allowed |
+| Root-client control (`platform/db/client.ts` from `app.ts`) | refused (`db-root-client`) | refused |
+| 6 test shapes: `query-counter.test.ts`, `prisma/tests/**/*.int.test.ts`, a module service test, `apps/api/tests/*.api.test.ts`, `apps/api/src/tests/` builder, `tests/api/helpers/` builder | **6 ALLOWED** | allowed |
+| `.ts`, `.mts`, `.tsx`, `.cts`, `.js`, `.mjs`, `.jsx` importers | all refused (`.cjs` does not parse ESM syntax; a `require` there is the covered form) | not applicable |
+
+Policy mutants run through the PR's own fixture cases (`negative-fixtures.test.ts`, the three seam cases): category row dropped, disallow dropped, allow dropped (a test refused), allow broadened to every file, to `api-module` and to `app`, allow listed before the disallow: **7 killed**. One survivor: widening the seam category to the whole `platform/db` folder, which only the full lint (every real db importer) would reject. The source-scan tripwire (`tools/repo/test-seams.test.ts`, positive control over five import forms): mutants that blind the seam regexp, drop the `from` form or drop the `require` form die; two mutants that make the walk vacuous survive (code review R2-m2). CI ran the base-ref copy of the fixture step against the head config: green.
+
+What still gets past both arms is PR34-SEC-07 (R2.5): computed specifiers, and a production file that reaches the seam through a `tests/` folder or a `*.test.ts` file. The `apps/api/dist` point of round 1 is unchanged by this PR (`apps/api/tsconfig.json` is untouched): TASK-014's image build must still exclude `dist/**/*.test.js` and `query-counter.js`.
+
+### R2.3 PR34-SEC-02 and -03: closed
+
+Probe `leak-probe.mjs`: the head's real `leakage-scanner.ts` and `sentinels.ts`, type-stripped, 243 rows, labels and HIT/GAP only (no value is printed). 188 rows expect a hit, 43 expect a gap (documented residuals and negative controls) and 12 expect a thrown message without an echo or a throw. **Head: 235 as expected, 8 differ**, all mine to explain: four rows `base64 of UPPER value` (those four sentinels are already upper-case, so the hit is right), PAN as a JSON array of groups (a residual, SEC-08), `Uint16Array` (decoded as UTF-8, residual), a function with own properties (functions are not walked, residual), and a `toJSON` accessor that throws (the one `Reflect.get` outside the `try`; the scan throws, it does not pass: code review R2-n1). **Round 1 build: 124 rows differ** (68 of them base64, base64url, `Basic` and JWT shapes, plus upper-case e-mail and hex, PAN dots, double space, NBSP, dash plus space and mixed, Error `cause`, `AggregateError`, `Uint8Array`, `ArrayBuffer`, `DataView`, `URL`, `URLSearchParams`, `Headers`, `toJSON`, non-enumerable and symbol keys, depth 40, unterminated line, three key echoes, key by case or symbol): the probe sees what the fix closed.
+
+| Check | Result |
+|---|---|
+| Encodings at every alignment | the five text sentinels at byte offsets 0, 1, 2 as bare base64, with a trailing byte, inside JSON, base64url without padding, `Basic user:value`, `Basic value:pw`, a JWT payload and a JSON log line: all hit (head); round 1 missed 68 rows |
+| Real platform logger, 23 shapes (`createLogger` into `createLogCapture`, head scanner versus round 1 scanner) | 14 shapes keep a sentinel in the logged line: name, tax id, PAN raw, PAN grouped by spaces, dots, NBSP and dash plus space, base64 of `{"token":...}` and of `{"email":...}`, a JWT-shaped string, base64 JSON of the name at offset 1, upper-case hex, a sentinel as object key, a nested array. **Head flags 14 of 14; round 1 flagged 6**, so the live-leak shapes of round 1 (kept by the logger, invisible to the guard) are closed. The other nine shapes are redacted or omitted by the logger itself (token, secret, e-mail, `Basic` value, `Error` and `AggregateError`, `URL`, bytes as `[Binary]`) |
+| Keys never echoed (SEC-03) | 11 shapes (sentinel e-mail as key, a token inside a longer key, PAN as key, base64, hex, percent and upper-case spellings of a sentinel as key, `Map` key, symbol description, nested under a safe key, safe key keeps its name): 0 echoes in the thrown message; 4 mutants die |
+| Hook (code review R1-M2) | mutate `assertClean()` in the registered hook to `void 0`: 1 of 51 fails (round 1: 0 of 15); `clear()` dropped: 7 fail; never registered: 4 fail |
+| Time | 11 adversarial text shapes (digit and separator runs, near-miss PANs, NBSP runs, half-sentinel repeats) at 8 KiB, 32 KiB, 128 KiB, 1 MiB: ratio 128k/8k between 1.6 and 10.8 (linear is 16), 1 MiB in 2.3 to 34 ms, so no ReDoS in the new `DIGIT_RUN`; 300,000 small objects in 1.9 s. `createLogCapture` re-splits its pending buffer per write (32,000 unterminated writes: 1.7 s): test-only, code review R2-n2 |
+| Mutants of the PR's own tests | 61 run (scanner, hook, fake clock, run identity, query counter, project map, `heavy.mjs`, seam scan): 54 killed; the 7 survivors are listed in the code review round 2 and none is a security-relevant gap in the scanner itself |
+
+### R2.4 The other round 1 items
+
+- **PR34-SEC-04 (INFO) closed.** The effective `jest.config.ts` no longer has a project-level `testTimeout`; `D-TASK276-07` records it. The `afterAll(..., 60_000)` budgets are unchanged and fail closed.
+- **PR34-SEC-05 (INFO) open, narrowed.** Round 1 found that any `*.test.ts` under any `/tests/generated/` path left lane A. Now `jest --listTests` on the union with PR #32 and nine planted files shows plain `.test.ts` in `unit`, plain `.test.tsx` in `unit-dom`, and only `*.api` / `*.int` under `tests/generated/` (any depth, any prefix such as `tools/ci/tests/generated/`) in `generated`, with no file in two projects and none dropped from `main` (unit 149 to 156, integration 25 to 26, other projects equal). `heavy.mjs` accepts `generated` and runs it in band, so activation is manifest-only; the four planned manifest entries (`rbac-matrix`, `audit-generator`, `rls-cross-tenant`, `abuse`) keep `min_tests: 1`, `zero_skip` and `security: true`, and `heavy.mjs` adds no `--passWithNoTests`. Still open: `package.json` `test:generated` carries `--passWithNoTests`; drop it when the first generated suite lands (qa-lead, activation PRs).
+- **PR34-SEC-06 (INFO) open, no change of owner.** The real-logger run above shows the logger keeps name, tax id and PAN (raw and in four grouped spellings) in an unkeyed field and redacts token, secret, e-mail and `Basic`. The scanner now flags all of them, which is the control until principal-architect and the `redaction` suite owner rule on a Luhn value rule in the logger (US-008).
+
+### R2.5 New findings
+
+#### PR34-SEC-07: the seam allowance keys on the importer's path, so a hop through a test-category file reaches it (INFO)
+
+| | |
+|---|---|
+| Severity | INFO (Impact L: the seam stores operation names and counts, never arguments; Likelihood VL: it needs a deliberate detour, not a careless import) |
+| CWE / OWASP | CWE-489 Active Debug Code · A05:2021 |
+| Location | `eslint.config.mjs:49` (`TEST_FILES`), `:430-439` (the seam policies), `tools/repo/test-seams.test.ts:20` (`TEST_FILE`) |
+| Description | Probed with the head's real config: `apps/api/src/app.ts` importing `./tests/mount.js` (a file in a folder named `tests`, which imports the seam) and `apps/api/src/app.ts` importing `./mount.test.js` are both **ALLOWED**. The `test` category is `**/*.test.{ts,tsx,js,jsx}` or any `test`, `tests`, `__tests__` folder at any depth, the seam allowance is granted to that whole category, no policy forbids a non-test file from importing a test-category file, and the source scan exempts the same paths. Also not seen by either arm: a computed specifier (`import('./platform/db/' + 'query-counter.js')`, ALLOWED). The scan alone misses a template-literal `import()` and `createRequire(...)(...)`; the lint refuses both. No current instance: 0 imports into a test-category file in the 242 non-test source files of `apps`, `packages`, `prisma` and `tools` (relative specifiers), so the policy below costs nothing today |
+| Exploitability / impact | None today. A future "debug" mount would have to be written into a `tests/` folder and imported from production on purpose |
+| Remediation | Add one policy to `BOUNDARIES_POLICIES` before the seam pair: `{ from: { file: { categories: { noneOf: ['test'] } } }, disallow: { to: toLayer('test') }, message: 'production code never imports a test file or folder' }`, with one negative fixture (`app.ts` importing a `tests/` helper). Give the scan a non-vacuity assertion (files scanned `> 0`, a planted offender in a temp tree is reported). Both belong with the API test app builder PR, the first PR that imports the seam from a `tests/` folder |
+| Verification | `app.ts` importing `./tests/mount.js` becomes REFUSED; the six test shapes stay ALLOWED; the two surviving scan mutants die |
+| Owner / due | senior-developer, with the API test app builder PR, before G3 |
+
+#### PR34-SEC-08: residual scanner false negatives (INFO)
+
+| | |
+|---|---|
+| Severity | INFO (Impact M, Likelihood VL: every row needs an unusual rendering of a value that a logger would have to produce unredacted) |
+| CWE / OWASP | CWE-693 Protection Mechanism Failure · A09:2021 |
+| Location | `tests/helpers/leakage-scanner.ts:90` (`DIGIT_RUN`), `:160-187` (the walk) |
+| Description | Probed and not found: a PAN written as a JSON array of groups, with three or more separators, with a thin space (U+2009), or as a grouped PAN directly followed by more digits; a boxed `String` object; own properties on an `Array`, `Map`, `Set` or typed array; a function with properties; prototype getters and `#private` fields (the header says so); a `Uint16Array` of UTF-16 text; a value encoded twice (base64 of base64), reversed, or split by spaces; a `toJSON` accessor that throws aborts the scan with its own error. A value split across two log lines is not joined. None is a regression of round 1 |
+| Remediation | None required now. If the `redaction` or `log-scan` suites need more, add the JSON-array and thin-space PAN forms to the separator class and read a boxed primitive with `valueOf()`; keep every extension behind a failing test first |
+| Owner / due | test-engineer, with the `redaction` / `log-scan` activation (US-008, T-QA-05) |
+
+### R2.6 Owned paths: no weakening
+
+| Path | Check | Result |
+|---|---|---|
+| `jest.config.ts` | Every leaf of the effective config, `main` to head (script `jestcfg-diff.mjs`) | `collectCoverageFrom`, `coverageThreshold` (85 / 75), `coverageProvider`, `SWC_JEST_OPTIONS` (`swcrc: false`, inline options), `modulePathIgnorePatterns` (`/__mocks__/` still ignored), roots, environments, `transform`, the `unit` and `unit-dom` ignore lists: equal. Changed: `api` and `integration` gain the `/tests/generated/` ignore; the new `generated` project spreads `common` (same transform, same `__mocks__` ignore). Control: removing `swcrc: false` fails `tools/ci/jest-transform.test.ts` (3 of 3); removing the `__mocks__` ignore fails `jest-config-owned.test.ts` (2 of 4) |
+| `eslint.config.mjs` | Effective config (`calculateConfigForFile`) for 32 representative and near-miss paths on `main` and head, semantic diff (script `effcfg-sem.mjs`) | Per path only: `boundaries/files` plus one category row, `boundaries/dependencies` plus two policies, appended after the 35 existing ones with the options object and severity (error) unchanged. One rule leaf changes anywhere: `import-x/no-extraneous-dependencies` at exactly `tests/helpers/leakage-scanner.test.ts`, to the same options the existing `tools/repo/jest-esm.test.ts` allowance carries (`devDependencies: true`, `packageDir` root and `apps/api`); its siblings (`.ts`, `fake-clock.test.ts`, a nested `.test.ts`, `.test.tsx`) are equal to `main`. Controls: widening that glob to `tests/**/*.test.ts` makes six paths differ (five beyond the real change); switching the rule off shows as severity 0 at the file |
+| `tools/quality/heavy.mjs`, `heavy.test.ts` | Diff and mutants | `generated` added to the typedef, `IN_BAND_PROJECTS` and `JEST_PROJECTS` (11 changed lines); `check-evidence.mjs`, `lib/**`, `required-suites.json`, `suite-runners.json`, `summary.schema.json` untouched (the only `tools/quality` files in the PR's range are these two); dropping `generated` from either set fails `heavy.test.ts` |
+| `tools/lint/negative-fixtures.test.ts`, 4 fixtures | Diff | 3 cases added (two refusals, one allowance) in the existing TENANT_DB and allowed tables; fixtures sit under the ignored `tests/fixtures/lint/**` tree; no existing case removed or relaxed; CI ran the base-ref fixture harness against the head config: green |
+| `package.json`, `tsconfig.json`, `tools/tsconfig.json`, `tests/{helpers,factories}/tsconfig.json` | Diff | one script (`test:generated`), two `references`, one `files` entry, two new type-check-only tsconfigs (`noEmit`, no `package.json`, not workspaces); no dependency, `overrides`, `.npmrc`, lifecycle script or workspace change; `package-lock.json` and every workspace `package.json` unchanged |
+| `apps/api/src/platform/db/query-counter.ts` and its test, `prisma/tests/**` | Diff | `measure()` awaits the measured function inside the scope (one line); two `afterAll(..., 60_000)` budgets; one new int test. The counter still records operation names, never arguments, and is unreachable from production code per R2.2 |
+
+### R2.7 Evidence, secrets and levers
+
+- **Evidence accepted.** Run `20261113T1943Z_030fae9` (profile pr, PASS; unit 3,890, integration 257, api 94, catalog-c1-c14 74; `git_dirty` false, `build_clean` true, no env override) is accepted by the base-ref `check-evidence` run in a shared clone at the head with the tooling of `d693e8c` and of `e1805a5` (exit 0 both; the other run directories on `main` are rejected as not-ancestors, as designed). Its `lockfile_sha256` equals the head's `package-lock.json`, its `manifest_sha256` equals the head's `required-suites.json`, and `quality:heavy` ran at `030fae9`, an ancestor of the head with only docs after it. `prisma/tests/db/query-counter.int.test.ts` executed: 4 of 4 passing, none skipped. The skips (1 integration: the SPK-03 set_config timing test, 2 unit: POSIX-only `file-secret-provider` cases) are on `main` too and none carries a SEC-TC.
+- **Host-path scan, count only.** 7 blobs of the run directory, 10 labels (OS user name, its 8.3 stem, home in both spellings, tmpdir in both, host name, git e-mail local part, `documents/projects`, `appdata`): **0 hits**; positive control 10 of 10 on a synthetic text. The commit message gate table is present, as D-SEC-PR23-02 asks (`npm ci --ignore-scripts` plus `deps:rebuild`, empty porcelain and `info/exclude`).
+- **Gitleaks emulation** (v8.30.1 default rules in Node, 222 rules, 220 compile; runtime positive controls for a GitHub token, an AWS id and a generic key fire): 0 findings over the 2,293 added code lines of the PR's range and over the 8,132 added evidence lines. Lane A's real Gitleaks and Semgrep steps are green on this head.
+- **D-ORCH-021 levers.** `git diff d693e8c 3934d12` over `.github`, `tools/ci`, `tools/deps`, `tools/eslint-rules`, `tools/test-support`, `.gitleaks.toml`, `.gitleaksignore`, CODEOWNERS: empty. `RANGE_BASE`, `BASH_ENV`, `PATH`, `BASH_FUNC_*`, `defaults.run`, folded `run: >` and `$GITHUB_ENV` / `$GITHUB_PATH` writes are therefore unchanged. Lock delta: none.
+- **Pre-lint execution points.** The PR adds none (no `vite.config`, `routes.ts`, `prisma.config.ts`, workspace script or typegen input).
+- **Not run by me:** Docker, the real `npm run lint`/`build` (lane A ran them, green), the Linux behaviour of the new tests beyond lane A and lane B.
+
+### R2.8 Merges and PR #32
+
+- **Merge `422607d` and merge `030fae9`: pure unions.** `git merge-tree --write-tree` of each merge's parents gives the merge commit's tree exactly (`73a59d5e...` and `212d4a43...`). The PR's range against `d693e8c` contains only PR files plus the 7 evidence files; no `main`-side path was reverted.
+- **Main drift.** `origin/main` (`e1805a5`) differs from the PR base by `docs/sdlc/DECISIONS.md`, `STATUS.md` and three agent-memory files: no owned path, no merge-only round on that account.
+- **Union with PR #32 (`5eee2d0`).** `jest.config.ts`, `package.json` and `tools/tsconfig.json` auto-merge; three textual conflicts of two independent additions each (`eslint.config.mjs` allowance blocks, `negative-fixtures.test.ts` cases, `jest-esm.test.ts` script list; resolution in the code review R2.5). After the union both PR #32 suites stay in `unit` and no file is in two projects; the `db-test-seam` policy and PR #32's root-client policy are independent entries of the same list. The second merger needs fresh lane B evidence and a merge-only security round that re-checks the three resolved files, the effective `eslint.config.mjs` diff and `jest.config.ts`.
+
+### R2.9 Routing and checkpoints
+
+| Item | Severity | Owner | Due |
+|---|---|---|---|
+| PR34-SEC-07 | INFO | senior-developer (policy, fixture and scan non-vacuity) | with the API test app builder PR, before G3 |
+| PR34-SEC-08 | INFO | test-engineer | with the `redaction` / `log-scan` activation (US-008, T-QA-05) |
+| PR34-SEC-05 | INFO | qa-lead | activation PRs for the generated suites: keep `min_tests` / `zero_skip`, drop `--passWithNoTests` |
+| PR34-SEC-06 | INFO | principal-architect with the `redaction` suite owner | before US-008 |
+| Code review R2-m1, R2-m2, R2-n1..n3 | MINOR / NIT | test-engineer | next touch of `tests/helpers` and `tools/repo/test-seams.test.ts` (unowned paths, but any non-docs commit stales the lane B run) |
+
+Checkpoints for later PRs: the API test app builder mounts the counter only from a test-category file; TASK-014's image build excludes `dist/**/*.test.js` and `query-counter.js`; the second merger of #32 and #34 gets a merge-only round; ASVS L2 touched: V7.1 log content (the scanner is the control), V14.1 build and deploy (test seams), V14.2 dependencies (no change). No runtime surface, no new dependency, no secret.
+
+### R2.10 Record check simulation (`check-security-owned-paths --pr 34`)
+
+Method: `git clone --shared` of the main checkout (nothing written to its `.git`), base `d693e8c`, head `3934d12` checked out detached, this record (round 1 plus this round) copied into the clone's working tree, the base-ref `tools/ci` from `origin/main` (`e1805a5`, what CI runs), scenario commits built on top of the head. The tool reads the record from the clone's working tree. 39 scenarios; 37 came out as predicted and the two that did not (E2, K) failed in the safe direction and are explained. Owned count 19 (20 when `ci.yml` is touched).
+
+| Case | Scenario | Result |
+|---|---|---|
+| A, A2, A3 | record as written / round 2 Head row abbreviated to 7 hex / `--base` = `main` tip `e1805a5` | pass, satisfied at `3934d12` |
+| B | round 1 record only (what `main` carries today; its note names `4643265`) | missing |
+| C, C2 | no record / record file named for PR 35 | missing |
+| D, D2, D3, D6 | final Verdict FAIL / PENDING / a later FAIL row after the PASS row / lower-case token | missing (the last Verdict row wins) |
+| D4, D5 | round 2 without its own Verdict row (the round 1 PASS row is last: PR10-SEC-04, procedural) / PASS_WITH_CONDITIONS | pass |
+| E, E4, E5, E6, E7 | Head row names fix `8aa5b66` / the `main` tip / is removed (round 1 row remains) / names the round 1 head / a non-hex token | missing |
+| E2 | Head row names fix `81bea01` | missing. I predicted pass: the merge `030fae9` that follows it brought PR #35's `tools/quality` files, which are owned paths, so owned paths did change after that commit. Only the head or the merge `030fae9` can be named |
+| E3 | Head row names the merge `030fae9` (docs-only evidence after it) | pass, satisfied at `030fae9` |
+| F, F2, F3, F4, F5, F6, F7, H | owned `jest.config.ts`, `eslint.config.mjs`, `tools/quality/heavy.mjs`, `query-counter.ts`, a seam fixture, `negative-fixtures.test.ts`, `package.json`, `ci.yml` edited after the named head | missing |
+| G, G2, G3 | an unowned new test file / an evidence run file / an edit of the unowned `tests/helpers/leakage-scanner.ts` (the code review nits) after the head | pass (the nits would not void this record; any non-docs commit still stales the lane B run) |
+| I | `package-lock.json` deleted then re-added with identical bytes | pass (no net change) |
+| J | real merge of `main` `e1805a5` after the record | pass |
+| K, K2 | revert of both fix commits / of `81bea01` only, after the record | missing. For K I predicted pass through the round 1 Head row (PR10-SEC-21); it does not bind here because the owned files `main`'s merge brought in changed after `4643265`, so the record cannot be reused for a reverted tree |
+| M | `--event push` | skipped |
+| N | round 2 Head row only inside a fenced block | missing |
+| O | an extra Head row naming a non-PR commit above the right row | pass |
+| P, Q | an owned change after the record, then a round 3 naming the new head, with PASS / with FAIL | pass, satisfied at the new head / missing |
+
+Negative controls for "no weakening": the checker is the base-ref copy (`git diff d693e8c 3934d12 -- tools/ci` is empty), and D3 shows a later FAIL row cannot be hidden behind an earlier PASS.
+
+### R2.11 Verdict
+
+| Item | Value |
+|---|---|
+| Critical / High / Medium open | 0 / 0 / 0 |
+| LOW open | 0 (PR34-SEC-01 and -02 closed) |
+| INFO open | 4 (PR34-SEC-05, -06, -07, -08); closed in this round: -03, -04 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** Both round 1 LOW findings are closed with probes that fail on the round 1 build and pass on this head: the query counter seam is refused from every production importer shape the lint can parse, and the leakage scanner finds every live-leak shape the platform logger lets through. The owned-path edits (`jest.config.ts`, `eslint.config.mjs`, `heavy.mjs`, fixtures, tsconfigs, `package.json`) are leaf-equal to `main` except for the intended additions, so no gate, coverage collection, transform, `__mocks__` confinement or `check-evidence` rule is weaker. The two merges are pure unions, the lane B evidence is accepted with no host fragment, and no lever, lock or dependency changed. Four INFO follow-ups are routed in R2.9, none blocking. Any later commit to an owned path voids this record and needs a round 3; any later non-docs commit voids the lane B run. |
