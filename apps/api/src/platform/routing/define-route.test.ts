@@ -331,7 +331,7 @@ describe('[R2-m1] [PR32-SEC-13] schema-level preferences, Joi.link and Joi.exten
   // fails when its branch is deleted. Tampered instances stand in for changed Joi internals; they break Joi's own
   // describe(), so the walk is exercised directly.
   const tampered = (property: string, value: unknown, schema: Joi.Schema = Joi.object({ name: Joi.string() })): Joi.Schema =>
-    Object.defineProperty(schema, property, { value, configurable: true }) as Joi.Schema;
+    Object.defineProperty<Joi.Schema>(schema, property, { value, configurable: true });
 
   it('[PR32-SEC-17] fails closed on a schema without $_terms (its children could not be inspected)', () => {
     for (const terms of [undefined, null, 'renamed']) {
