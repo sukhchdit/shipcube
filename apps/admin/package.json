@@ -5,6 +5,11 @@
   "license": "UNLICENSED",
   "type": "module",
   "description": "Operator admin SPA: React Router 8 framework mode, ssr:false, no prerender (ADR-0026).",
+  "scripts": {
+    "dev": "react-router dev",
+    "typegen": "react-router typegen",
+    "build": "react-router build"
+  },
   "dependencies": {
     "@platform/shared": "0.0.0",
     "@platform/ui": "0.0.0",

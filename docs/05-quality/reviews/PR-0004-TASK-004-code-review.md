@@ -318,3 +318,86 @@ Other observations, not findings: the request-only redirect and robustness tests
 - Static server (test-only): traversal and malformed-escape handling verified (R3.1). The `//authority` parse divergence (R3-n5) cannot be used for an open redirect, because `Location` is always `/{lng}/`.
 - The `jsdom-environment.mjs` round-1 n4 note (real Node `fetch` in jsdom) still applies, unchanged by the move.
 - Supply chain: 4 new dev-only packages (Apache-2.0/MPL-2.0), exact pins, no install scripts, and the cooldown is enforced by `.npmrc`. Browsers come only via `deps:rebuild`.
+
+## Round 4 (head e3cdb94)
+
+| Field | Value |
+|---|---|
+| Delta | `d2e867b..e3cdb94`, 5 commits: `8d5a4ac` merge of `main` @`80ff2c2` (PR #17 fixture-mode split, PR #18 TASK-016); `a8a2566` R3-M1 / PR4-SEC-11 (CODEOWNERS + `REQUIRED_CODEOWNED_PATHS` + test); `7c00aae` PR4-SEC-10 (anchored Playwright output ignores in ESLint and `.stylelintignore`, plus probe rows); `05dfe7e` R3-n2 (unmount); `e3cdb94` merge of `main` @`99ea21f` (PR #19 TASK-023). The three fix commits change 9 files, +52/−8. |
+| Reviewer | code-reviewer (independent), 2026-11-13 |
+| Inputs | Round 3 above (R3.3, R3.5); PR #4 fix-cycle-2 comment (head `05dfe7e`); lane A run 43342155742 @`e3cdb94`; `docs/05-quality/security/PR-0004-TASK-004-security-review.md` on main |
+| Main drift | `origin/main` is at `26ee568`. `git diff --name-only 99ea21f origin/main` lists only `docs/**` and `.claude/agent-memory/**`, so no code has moved since the second merge. |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R3-M1 is closed: /tools/test-dom/ is owned in CODEOWNERS and is a required owned path, and a mutation probe shows
+         that dropping the line or its owner produces a policy finding. PR4-SEC-10 anchors the Playwright output ignores at the
+         root and the workspace roots, symmetric with .gitignore over 15 probed paths. Both merges are pure unions (one has 2 hand
+         resolutions, both correct; the other has none), and the lock delta vs main is exactly the size-limit set plus the Playwright/axe set.
+         There is no BLOCKER or MAJOR. One MINOR (WebKit evidence) and two NITs, none of which block the merge.
+```
+
+### R4.1 Verification performed by the reviewer
+
+I ran nothing in the `Shipqube-TASK-004` worktree, and no `npm ci`, build, Docker or e2e. All probes used `git show` / `git archive e3cdb94` extracts in my scratch dir. The ESLint probe used `node_modules` junctioned to the main checkout's (Node 24). The extract and junction were removed afterwards; main's `node_modules` count (740) and `git status` are unchanged.
+
+| Check | Result |
+|---|---|
+| **R3-M1, file content** (`git diff 8d5a4ac 05dfe7e`) | `.github/CODEOWNERS:51-52`: `/tools/test-dom/ @sukhchdit`, in the "Test, type-check and commit-message configuration" block, with a reason comment. `tools/ci/check-workflow-policy.mjs:874-875`: `'tools/test-dom/'` is in `REQUIRED_CODEOWNED_PATHS`. `check-workflow-policy.test.ts:372`: the `arrayContaining` list includes it. |
+| **R3-M1, mutation probe:** the head's `checkCodeowners` (no external deps, imported from the archive) run on the head's real `CODEOWNERS` | Real file: `[]`. With the `/tools/test-dom/` line deleted: one finding, "must assign an owner to tools/test-dom/". With the line kept but no owner: the same finding. The gate is live. Lane A still runs the **base** tool, so main's copy enforces it only after merge. That is expected, and this head passes it too. |
+| **PR4-SEC-10, ESLint/Stylelint/git symmetry probe:** `ESLint#isPathIgnored` with the head's `eslint.config.mjs`; the `ignore` package (Stylelint's matcher) with the head's `.stylelintignore`; the same with `.gitignore` | Output roots are **ignored by all three**: `{,apps/web/,apps/admin/,packages/ui/,tests/e2e/,prisma/}{playwright-report,test-results}/…`, including deeper files (`tests/e2e/playwright-report/data/x.js`, `tests/e2e/test-results/a/b.js`). Source folders with those names are **linted by both and tracked by git**: `apps/web/app/test-results/`, `apps/api/src/playwright-report/`, `tests/e2e/support/test-results/`, `tools/test-results/`, `tools/lint/playwright-report/`, `packages/ui/src/test-results/`. All 15 paths agree across the three tools. Playwright's defaults (config dir `tests/e2e`: `test-results/`, `playwright-report/`) fall inside the ignored set. |
+| PR4-SEC-10, regression guards | The new rows in `lint-fixtures.mjs` `IGNORE_MATRIX`/`STYLE_IGNORE_MATRIX`, `negative-fixtures.test.ts` `ESLINT_IGNORED`/`STYLELINT_IGNORED` and `gitignore.test.ts` pin both directions. Reverting to `**/test-results/**` fails `'apps/api/src/modules/quotes/test-results/a.ts': false`. Once on main, the base-ref "source path becomes ignored" check also catches it. |
+| **Merge `8d5a4ac`** (`git merge-tree --write-tree d2e867b 80ff2c2` → `340e643`) | Conflicts in exactly `jest.config.ts` and `tools/lint/negative-fixtures.test.ts`. The lockfile, `package.json` and `eslint.config.mjs` auto-merge. `git diff --stat 340e643 8d5a4ac` touches only those 2 files, so every other path is byte-identical to a clean re-merge. The hand resolutions are in R4.2. |
+| **Merge `e3cdb94`** (`git merge-tree --write-tree 05dfe7e 99ea21f` → `6d97a32`) | **No conflicts.** `git diff 6d97a32 e3cdb94` is empty: the commit is exactly the clean merge. (`git show --cc` lists only the lock, as "Binary files differ", because of `.gitattributes`.) |
+| **PR delta conservation** | The file set of `99ea21f..e3cdb94` (97 files) equals the union of `22eccb2..d2e867b` (round-3 delta) and `8d5a4ac..05dfe7e` (fixes). For every round-3 file not touched by a fix, the ± line delta vs main hashes identically to its round-3 delta vs MB. **Nothing from PR #17/#18/#19 is reverted.** The `eslint.config.mjs`, `.stylelintignore` and `package.json` deltas vs main are exactly the branch's own blocks: the routes.ts dev-dependency block, the anchored ignores, and typegen/size/`unit unit-dom` with no `--allow-empty-input`. |
+| **Lockfile** (parsed `packages` maps, `99ea21f` → `e3cdb94`) | +8: `size-limit`, `@size-limit/file` 14.3.0, `lilconfig` 3.1.4, `nanospinner` 1.2.2 (MIT); `@playwright/test`, `playwright`, `playwright-core` 1.65.0 (Apache-2.0); `@axe-core/playwright` 4.14.0 (MPL-2.0). ~2: the root (`size-limit`, `@size-limit/file` exact devDependencies) and `tests/e2e` (`@playwright/test`, `@axe-core/playwright` exact). **0 removed, 0 other changes.** The added/removed/changed sets are identical to round 3's `22eccb2→d2e867b` delta. |
+| `.swcrc` | `git ls-tree -r e3cdb94` has no `.swcrc` at any depth. |
+| Lane A run 43342155742 @`e3cdb94` | fast-lane **success**, every step. Unit tests ran `--selectProjects unit unit-dom`: 106 suites / 2386 passed, including `negative-fixtures`, `check-workflow-policy`, `use-locale` and `jest-transform`. Lint, Format check, Type-check, Lockfile, Cooldown, Licences and Audit are green. The base-ref lint fixtures (no-weakening) step reports "0 extra finding(s)". scans: only **"Security-owned paths need a review record" fails** (the main record names `d2e867b`); ci-gate fails on that alone. |
+
+**Relied on the developer's evidence** (fix-cycle-2 comment, head `05dfe7e`, whose tree differs from `e3cdb94` only by main's PR #19 content):
+- `test:integration`: 164 passed.
+- `test:api`: 49 passed.
+- `test:coverage`: 97.57 % / 97.06 %.
+- size-limit and porcelain.
+- e2e: chromium-mobile/desktop and webkit-mobile 13/13 each; for webkit-desktop see R4-m1.
+
+### R4.2 Merge-resolution rulings (dispatch item 3)
+
+1. **`jest.config.ts`: correct.** `common.transform` is main's `['@swc/jest', SWC_JEST_OPTIONS]`. `unit-dom` spreads `common` and does not override `transform`, so it inherits that transform. `jest-transform.test.ts` ("every Jest project uses @swc/jest with the inline options") passes in lane A. The branch's `JS_EXTENSION_MAPPER` constant has the same value as main's inline mapper, and `unit-dom` extends it with the CSS stub. `git diff 80ff2c2 8d5a4ac -- jest.config.ts` contains only the branch's own changes: four projects, `unit-dom`, the coverage exclusion and the mapper constant.
+2. **`tools/lint/negative-fixtures.test.ts`: correct, and the guard is now stronger.**
+   - `/^npm run typegen$/u` is prepended to main's `LINT_STEPS`. Exact mode needs `[typegen, eslint, stylelint, check-suppressions]`. No-weakening mode needs that ordered subset, and main's base copy (3 steps) is an ordered subset of the head script. CI shows both.
+   - The `--allow-empty-input` check was `steps[2]` only at round 3. It is now `steps.filter(includes(...))` = `[]`, outside the `MODE` branch, so it runs in both modes and on every step. (Main's base copy has no such check, so the base-ref run is unaffected.)
+   - `git diff 99ea21f e3cdb94 -- tools/lint/negative-fixtures.test.ts` contains only the typegen row, the title, the `--allow-empty-input` line and the PR4-SEC-10 rows. PR #18's TENANT_DB / WARNINGS cases, PR #19's prisma-seed case and every `exactOnly` split are byte-identical to main.
+
+### R4.3 Closure of round-3 findings
+
+| ID | Status | Notes |
+|---|---|---|
+| R3-M1 | **Closed** | R4.1 rows 1–2 (content and mutation probe). |
+| PR4-SEC-10 (security) | **Closed in-PR** | R4.1 rows 3–4. The TASK-022 "PR4-SEC-10 fallback" routed by D-ARCH-075..079 (sheet fold 1, `spk06`) can be marked done when this merges. |
+| R3-n2 | **Closed** | `use-locale.test.tsx:49-62` collects the root and unmounts it inside `act`. Residual polish in R4-n1. |
+| R3-n5 | **Dropped (accepted)** | Test-only, and `Location` is always local. Round 3 allowed either fixing or dropping it. |
+| R3-n1, R3-n3, R3-n4, R3-n6 | **Routed, unchanged** | R3-n1 → TASK-042; R3-n3/n4 → T-QA-05; R3-n6 → TASK-015 (all folded per STATUS SHEET-FOLD-1). |
+
+### R4.4 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R4-m1 | MINOR | `tests/e2e/web.spec.ts:53-71` (SPA-fallback loading test); `apps/web/app/i18n/use-locale.ts:30-36` | The fix-cycle-2 comment reports that webkit-desktop **run 1 failed an assertion**: the SPA-fallback test saw `lang=en` after the JS release. That is more than the known R3-n6 runner-close hang. Run 2 hit an engine protocol error and run 3 passed 13/13. Host WebKit instability is the likely cause, since the unit test and three other projects are green, but a real slow-hydration race on WebKit cannot yet be ruled out, and this is the m2 hydration path. Safari at 1280 px is an O1 exit-demo browser. | No code change is required for merge. **qa-lead / TASK-015:** when COND-E2E-FF runs on Linux, also run `webkit-desktop` and `webkit-mobile` with `--repeat-each=5` (or ≥ 10 total) and attach the trace of any failure. If it reproduces, it belongs with R3-n1 under TASK-042 (capture the served locale once). Record it in TEST-STRATEGY §11 next to R3-n6 until then. |
+| R4-n1 | NIT | `apps/web/app/i18n/use-locale.test.tsx:49, 52, 58-61` | The unmount runs only when both `expect`s pass, and a `Root[]` array holds a single root. A failing assertion still leaks the root, though `afterEach` detaches its container, so the impact is cosmetic. | `let root: Root \| undefined` with `try { … } finally { act(() => root?.unmount()); }`, or move the unmount into `afterEach`. Optional; TASK-042 can absorb it. |
+| R4-n2 | NIT | `tools/lint/lint-fixtures.mjs:130-135`; `negative-fixtures.test.ts:790-795` | The "ignored" direction is probed only at the root and `tests/e2e`, not at `apps/*`, `packages/*` or `prisma/`. My probe shows those are correct today. Dropping one of them would only fail closed (more linting), so this is not a weakening gap. | Optional: add one `apps/web/playwright-report/x.js: true` row for documentation value. |
+
+### R4.5 Merge notes (round 4)
+
+- **Mergeable once these hold:**
+  1. A **PR-0004 security record naming `e3cdb94`** (or a later head) is on main. The current record names `d2e867b`. Since then the head changes owned paths (`.github/CODEOWNERS`, `.stylelintignore`, `eslint.config.mjs`, `jest.config.ts`, `tools/ci/check-workflow-policy.*`, `tools/lint/*`, and the newly owned `tools/test-dom/` is unchanged), so lane A's record step stays red until that record exists.
+  2. Lane A is green on the head that merges.
+  3. COND-E2E-FF appears in `traceability.md` against TASK-004 (round-3 R3.5 condition, not yet done on main), with the R4-m1 WebKit repeat run added to it.
+- **Merge style:** the branch contains three merge commits from `main`. Squash-merge, per the repository's PR-title-as-subject convention, keeps `main` linear.
+- **Routings:** R4-m1 → qa-lead / TASK-015 (with COND-E2E-FF); R4-n1 → TASK-042 (optional); R4-n2 optional / drop.
+
+### R4.6 Security flags for security-analyst
+
+- R3-M1 / PR4-SEC-11: confirmed closed by a mutation probe (R4.1). Please re-confirm in the `e3cdb94` record.
+- PR4-SEC-10: anchoring verified with the real ESLint config, Stylelint's matcher and `.gitignore` over 15 paths. Source folders named like output are linted again.
+- Both merges: the first has 2 hand resolutions, both correct, and the second is a clean merge (tree-identical). Lock delta = 8 dev-only packages, unchanged since round 3.

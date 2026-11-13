@@ -38,6 +38,7 @@ Exception: during parallel batches the orchestrator may forbid installs, builds,
 - The lock delta `git diff --text origin/main HEAD -- package-lock.json` must equal the branch's delta vs MB.
 - Also run `gh pr view N --json statusCheckRollup`. An empty rollup means CI has not run on the head, which is a merge condition.
 - Quickest proof (PR #9 r4): `git merge-tree --write-tree P1 P2`, then `git diff --stat <tree> M`. If the only output is conflict markers in the conflicted files, everything else is byte-identical to a clean re-merge, and `git show --cc M` shows the hand resolution.
+- Delta conservation across several merges (PR #4 r4): file set of `main..HEAD` == union of the previous round delta (`MB..oldHead`) and the fix commits; for each non-fix file compare an md5 of the `^[+-]` lines of both diffs. Lock: parse `packages` maps and compare added/removed/changed sets. A lock marked binary in .gitattributes hashes equal trivially, so always use the parsed comparison for it.
 
 **Supersede check (PR #18 r1, replaces PR #11).** Partition proof by SHA, no build:
 - MB=`git merge-base origin/main OLD`. Old PR files = `diff --name-only MB OLD`; main delta = `diff --name-only MB origin/main`; overlap via `comm -12`.

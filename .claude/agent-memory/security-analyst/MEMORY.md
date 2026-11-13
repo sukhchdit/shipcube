@@ -6,7 +6,7 @@
 - [P5 Wave 0 DB baseline](project_p5_wave0_db_baseline.md) — PR-0005 R1-R3 PASS_WITH_FOLLOW-UPS; SCRAM verifier-in-log ruling; rule-13 ALTER ROUTINE gap; TASK-014/016/021/034 checks
 - [P5 Wave 0 carrier docs](project_p5_wave0_carrier_docs.md) — PR-0006 R1+R2 PASS_WITH_FOLLOW-UPS; DHL shared origin, FedEx IP penalty, UPS 403=Blocked Merchant; TASK-113/131/135/188 checks
 - [P5 Wave 0 RLS spike](project_p5_wave0_rls_spike.md) — PR-0007 R1+R2 PASS_WITH_FOLLOW-UPS; am. 10 text defects (11/12); set_config leak facts; TASK-016/051/006/010/024 checks
-- [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 R1 + R2 @d2e867b PASS_W_F-U; 10/11 LOW new; PR #17 owned overlap (merge order); TASK-014/015/022/111 checks
+- [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 R1-R3 PASS_W_F-U (R3 @e3cdb94: 10/11 closed); 13 INFO typegen pre-lint code; TASK-014/015/022/111 checks
 - [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_W_F-U; record contract; main-merge voids records on owned overlap; PR10-SEC-21; TASK-015 checks
 - [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
 - [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R3 @37a2109 content authorised (PASS_W_F-U); supersede done as PR-0018; 16 E-string LOW, 17 forge INFO; TASK-020/024/021/010 checks

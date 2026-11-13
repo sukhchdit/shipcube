@@ -1,0 +1,38 @@
+{
+  "skipToContent": "Aller au contenu",
+  "loading": "Chargement",
+  "nav": {
+    "language": "Langue"
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español",
+    "fr": "Français"
+  },
+  "home": {
+    "meta": {
+      "title": "Comparez les transporteurs et expédiez partout dans le monde",
+      "description": "Comparez les tarifs et les délais de plusieurs transporteurs, puis réservez et suivez votre envoi au même endroit."
+    },
+    "hero": {
+      "title": "Comparez les transporteurs et expédiez partout dans le monde",
+      "lead": "Consultez les tarifs de plusieurs transporteurs au même endroit."
+    }
+  },
+  "error": {
+    "title": "Un problème est survenu",
+    "description": "Rechargez la page pour réessayer. Si le problème persiste, revenez dans quelques minutes.",
+    "retry": "Réessayer"
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "L'adresse est peut-être incorrecte, ou la page a peut-être été déplacée.",
+    "meta": {
+      "title": "Page introuvable"
+    }
+  },
+  "goHome": "Retour à l'accueil",
+  "footer": {
+    "note": "Les tarifs et les délais de livraison sont affichés avant la réservation."
+  }
+}
