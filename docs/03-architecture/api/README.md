@@ -3,7 +3,7 @@
 - **Contract:** [`openapi.yaml`](./openapi.yaml), OpenAPI **3.1.0**, `info.version` **1.0.0-m1**, base path `/api/v1`.
 - **Scope:** every M0 and M1 endpoint (133 operations). M2 to M5 endpoints (ledger, invoicing, claims, partners, API keys, outbound webhooks, reports) are absent on purpose: there are no stub routes (brief §13 rule 5, REQ-ADMIN-009, REQ-ACCT-019).
 - **Owner:** api-designer (P3). Conventions are fixed by [ADR-0016](../adr/ADR-0016-api-conventions.md), including its 2026-11-12 amendments (pre-auth limiter, secrets out of URLs, SSE resume). Other fixed inputs: P3 design brief ( endpoint skeleton, catalogues), REQUIREMENTS.md Parts A and B, DR-A01..A28, DR-B01..B34, ASSUMPTIONS.md, DECISIONS.md D-009..D-036.
-- **Lint:** `npx --yes @redocly/cli@2 lint docs/03-architecture/api/openapi.yaml`. Current result: valid, 0 errors, 8 warnings (see [Lint status](#lint-status)).
+- **Lint:** `npm run openapi:lint` (Redocly; *command name aligned 2026-11-13, SHEET-FOLD-2 — `npx` is forbidden by CLAUDE.md §2*). Current result: valid, 0 errors, 8 warnings (see [Lint status](#lint-status)).
 
 **Amendments (2026-11-12, SEC-P3-01/02/10/11/14).** Contract changes from the P3 architecture security review (`docs/05-quality/security/P3-architecture-security-review.md`):
 
@@ -30,7 +30,7 @@ The document is the source of truth (REQ-API-002). Route metadata (`defineRoute`
 | Rule | Detail | Source |
 |---|---|---|
 | Prefix | All business endpoints sit under `/api/v1`. An unknown version prefix (`/api/v2/...`) returns 404 `NOT_FOUND`. | REQ-API-001 |
-| Outside the prefix | `/health/live` and `/health/ready` (operation-level `servers` in the contract). `/metrics` runs on the internal listener and is not part of the public contract. `/api/docs` serves Swagger UI (swagger-ui-dist) over this document when `DOCS_ENABLED=true` (on locally, in test and staging; off in production). | REQ-PLAT-018, REQ-API-003 |
+| Outside the prefix | `/health/live` and `/health/ready` (operation-level `servers` in the contract). `/metrics` runs on the internal listener and is not part of the public contract. `/api/docs` serves Swagger UI (swagger-ui-dist) over this document when `DOCS_ENABLED=true`: on by default in `local` and `test`; `staging` and `production` opt in with `DOCS_ENABLED=true` (the config default `localOnly`, PR21-SEC-03 ruling D-ARCH-083; REQ-API-003 and US-035 are aligned by product-manager). A production opt-in carries the PR21-SEC-02 conditions (cookieless docs origin, try-it-out off, `validatorUrl: null`). | REQ-PLAT-018, REQ-API-003 |
 | Naming | Plural kebab-case nouns (`/address-book`, `/payment-method-setups`), camelCase path parameters (`{shipmentId}`), snake_case JSON members and query parameters. | ADR-0016 |
 | Actions | Non-CRUD actions are POST sub-resources: `/shipments/{shipmentId}/cancel`, `/orders/{orderId}/checkout`, `/quotes/{quoteId}/claim`. | ADR-0016 |
 | Secrets out of URLs | One-time and bearer-like tokens never appear in paths or query strings (ADR-0016 amendment 2). Email and share links carry the token in the URL **fragment** as `#token=<base64url>` on the unprefixed app routes `/verify-email`, `/reset-password`, `/invitations/accept` and `/q` (ADR-0006 amendment 8, ADR-0016 amendment 6; the link origin is `WEB_APP_ORIGIN` or, for operator staff, `ADMIN_APP_ORIGIN`, ADR-0006 amendment 9) and the SPA posts it in a body: `verifyEmail`, `resetPassword`, `acceptInvitation` (`POST /invitations/accept`), `resolveSharedQuote` (`POST /public/shared-quotes/resolve`). The postcode lookup is `lookupPublicTracking` (`POST /public/tracking/lookup`). Guest quotes use the `X-Quote-Token` header. | ADR-0016, threat model R-14 |
@@ -109,7 +109,7 @@ Every error is `application/problem+json`, built by one error handler (REQ-PLAT-
 
 - Order of evaluation (DR-A08): authenticate (401) → staff MFA gate (403) → authorise (403, audited `PERMISSION_DENIED`) → rate limit (429) → validate (400) → idempotency and `If-Match` (400/409/412/422/428) → execute (404/409/410/422/5xx). Denied callers therefore learn nothing about the schema.
 - A resource of another organisation or another guest token returns exactly the same 404 as a missing one. No `PERMISSION_DENIED` entry is written for it, because RLS hides the row; instead the repeated-404 counter feeds `cross_tenant_probe` (REQ-RBAC-007, EC-A08).
-- Framework-level errors apply to every path and are not repeated per operation: unknown route 404 `NOT_FOUND`, wrong method 405 `METHOD_NOT_ALLOWED` with an `Allow` header (REQ-PLAT-010).
+- Framework-level errors apply to every path and are not repeated per operation: unknown route 404 `NOT_FOUND`, wrong method 405 `METHOD_NOT_ALLOWED` with an `Allow` header (REQ-PLAT-010). The 405 `Allow` header lists every method the route supports, including `OPTIONS` (RFC 9110 §15.5.6). `OPTIONS` on a known route, including the `/api/docs` paths (mounted inside the same router), returns 204 with no body and the same `Allow` header. A route that supports only GET and HEAD therefore answers `Allow: GET, HEAD, OPTIONS` (AT-US-007-02). (amended 2026-11-13, D-063, D-ARCH-084)
 - Shared problem responses (`components/responses/BadRequest`, `Unauthorized`, ..., `ServiceUnavailable`) carry one named example per code of that status. Each operation lists the subset it can return in `x-error-codes`.
 
 ### Validation sub-codes (`errors[].code`, under 400 `VALIDATION_ERROR`)
@@ -461,9 +461,9 @@ Recipients (DR-B28, REQ-NOTIF-015): the booking user for shipment, order, paymen
 
 ## 13. Security log event catalogue
 
-Each event is a structured Pino line with `event_type=security`, a stable `event` name, `correlation_id`, `org_id`, `actor_id` and coarse IP. Secrets, tokens and raw identifiers never appear. Each event also increments `security_events_total{event}` (REQ-SEC-012).
+Each event is a structured Pino line with `event_type=security`, a stable `event` name, `correlation_id`, `org_id`, `actor_id` and coarse IP. Secrets, tokens and raw identifiers never appear. Each event also increments `security_events_total{event}` (REQ-SEC-012). Owners of these two promises (amended 2026-11-13, SHEET-FOLD-2): the coarse IP is produced by the first authentication emitter (TASK-052), through a shared helper that truncates to the /24 (IPv4) or /48 (IPv6) network; a precise address is dropped, never logged. The `security_events_total{event}` counter is published by the US-013 metrics task (TASK-214).
 
-The table below is the complete catalogue: 22 events (14 original plus the eight added on 2026-11-12 for SEC-P3-30). *Amended 2026-11-12 (SEC-P3-30):* the contract test **SEC-TC-63** asserts that the set of security-event names exported by `packages/shared` equals the `event` column of this table, in both directions; an event emitted in code but missing here, or listed here but not exported, fails the test. REQ-SEC-012 names the same set.
+The table below is the request-path catalogue checked by SEC-TC-63: 22 events (14 original plus the eight added on 2026-11-12 for SEC-P3-30). The runtime integrity events raised by platform code follow in their own table under "Runtime integrity events" and are not part of this parity. *Amended 2026-11-12 (SEC-P3-30):* the contract test **SEC-TC-63** asserts that the set of security-event names exported by `packages/shared` equals the `event` column of this table, in both directions; an event emitted in code but missing here, or listed here but not exported, fails the test. REQ-SEC-012 names the same set.
 
 | `event` | Emitted when | Extra fields | Related audit action | Source |
 |---|---|---|---|---|
@@ -489,6 +489,20 @@ The table below is the complete catalogue: 22 events (14 original plus the eight
 | `webhook_livemode_rejected` | A correctly signed Stripe webhook event has `livemode: true`; answered 400, not processed | provider, gateway event ID | CREATE webhook_event, DENIED | ADR-0012 amendment 3, REQ-PAY-012 |
 | `audit_anchor_missing` | The audit verifier (`ANCHOR_MISSING`) finds an anchor-log gap, duplicate, out-of-order record, broken `prev_anchor_hash`, or a table/sink disagreement; run `FAILED`, `/health/ready` degraded | verification_id, anchor_seq_from, anchor_seq_to, failure_kind | none (verification run record) | data-model §5.6, ADR-0007 amendment 7, REQ-AUDIT-013 |
 | `cvc_recollection_failed` | A saved-card payment with `cvc_recollection_required: true` has a retrieved `cvc_check` other than `pass` (`fail`, `unavailable`, `unchecked`, absent); the authorisation is voided and the payment `FAILED/AUTHENTICATION_FAILED`. Emitted by the shared derivation on `checkoutOrder` (Mock), `confirmPayment` and the gateway webhooks | payment_id, order_id, gateway, cvc_check value | UPDATE payment | ADR-0012 amendment 4, SEC-P3-28, REQ-PAY-014 |
+
+### Runtime integrity events (not part of the SEC-TC-63 table parity)
+
+*Added 2026-11-13 (SHEET-FOLD-2, D-ARCH-081..084).* These events are raised by platform runtime code, not by a request-path emitter. They are exported as `RUNTIME_SECURITY_EVENTS` from `packages/shared/src/logging/security-event.ts` (TASK-010, D-TASK010-01 change request; D-SEC-PR20-01) and are always logged at level `error` (D-ORCH-025 (1)). Their attribute allow-list is per event, as listed below. It is pinned by the apps/api type-level exhaustiveness test (`SessionIntegrityFinding | DbSecurityEvent` assignable to `RuntimeSecurityEventName`) and by the `SECURITY_EVENT_FIELDS` test, not by the main-table parity. They carry `correlation_id` when a request or job context exists, and never carry PostgreSQL message text, role names or credentials (ADR-0005 amendment 10 item 6).
+
+| Source | Event | Emitted when | Allowed fields | Level |
+|---|---|---|---|---|
+| `apps/api/src/platform/db/runtime.ts` (TASK-016) | `db_session_default_tampered` | A `platform_app` session default (`search_path`, `role`, `statement_timeout` …) differs from `EXPECTED_ROLE_SETTINGS` at start-up or on the slow readiness interval; readiness latches not-ready | sql_state | error |
+| same | `db_role_setting_drift` | A role-level setting drifted from the bootstrap value (PR7-SEC-06) | sql_state | error |
+| same | `db_session_context_leak` | The in-statement leak detector finds `app.*` context after a transaction ended (PR7-SEC-14); counted by `db_session_context_leak_total` (TASK-214) | sql_state | error |
+| same (`mapDbError`) | `db_privilege_denied` | SQLSTATE `42501` outside the audit-immutability and partition-guard prefixes: a grant misconfiguration, surfaced as 500 | sql_state | error |
+| same (`mapDbError`) | `rls_write_rejected` | A write refused by a row-level-security policy (`42501` / `44000` under the RLS prefix); reachable only through a code or configuration defect, never by a client | sql_state | error |
+| `mapDbError` (TASK-021) | `audit_mutation_rejected` | Trigger-raised `42501` / `23514` with the `AUDIT_IMMUTABLE:` / `AUDIT_VAULT_IMMUTABLE:` message prefix: an UPDATE/DELETE/TRUNCATE attempt on an audit table (data-model §5.2; derived from the prefix, never from the text) | sql_state | error |
+| `apps/api/src/platform/health/checks/audit-partitions.ts` and `ensure_audit_partitions` via `mapDbError` (TASK-021) | `audit_partition_squatted` | A `pg_class` / `pg_type` object in `public` matching `^audit_entries_[0-9]{4}_[0-9]{2}$` is not an attached `platform_audit_owner` partition, or `ensure_audit_partitions` raises `AUDIT_PARTITION_NAME_TAKEN` / `AUDIT_PARTITION_BOUNDS_MISMATCH`; readiness `audit_partitions` = `unavailable` (data-model §5.3 item 3, D-ARCH-076, D-ARCH-081). Emitted once per object, not once per poll | partition_name, kind, reason, sql_state | error |
 
 ---
 
@@ -547,9 +561,9 @@ Notes:
 
 **Inputs**
 
-1. **Route registry.** `defineRoute({ method, path, permission, audit, schema: { params, query, body, headers }, rateLimit, idempotency, tenancy, reauth?, deprecated?, mfaGateExempt?, csrf? })` registers each route in an in-process registry (`apps/api/src/http/route-registry.ts`) at mount time. The test builds the Express 5 app without listening, then:
+1. **Route registry.** `defineRoute({ method, path, permission, audit, schema: { params, query, body, headers }, rateLimit, idempotency, tenancy, reauth?, deprecated?, mfaGateExempt?, csrf? })` registers each route in an in-process registry (`apps/api/src/platform/routing/route-registry.ts`, TASK-020 sheet; amended 2026-11-13) at mount time. The test builds the Express 5 app without listening, then:
    - reads the registry; and
-   - walks the router stack (`app.router.stack`, recursively into mounted routers) to find every handler. A handler not registered through `defineRoute` fails the test, which catches a raw `router.get`. Exclusions are explicit and listed in the test: the static `/api/docs/*` mount and the internal `/metrics` listener.
+   - walks the **composed** `createApp(...)` from `app.router` (recursively into mounted routers) to find every handler, resolving mounts only against the literal paths `/api/v1` and `/api/docs`. A handler not registered through `defineRoute` fails the test, which catches a raw `router.get`. `/api/docs` is the sole exclusion (the internal `/metrics` listener is not on this app). Any path-mounted non-router layer, array, optional-group or RegExp mount, or sub-app is reported as `unrecognised-route` (PR #21 R1-M1, R2-m1, R3-m1; D-ORCH-024 (4), D-ORCH-026). Rate limiters, CORS and Helmet are therefore mounted path-less, inside the target router or before `routes`, never under a path (D-ORCH-024 (5)).
 2. **Contract.** `openapi.yaml` is parsed with `yaml` and bundled with Redocly (`@redocly/openapi-core` `bundle({ dereference: true })`). Paths get the server base path (`/api/v1`) except for operations with their own `servers` (health).
 
 **Normalisation.** Express `:param` and OpenAPI `{param}` both become `{}`, so `GET /api/v1/shipments/{}` is the comparison key. Methods are upper-cased.
@@ -567,6 +581,8 @@ Notes:
 | 6 | Every `x-error-codes` entry exists in the error catalogue, and the operation has a response for its status. Every code the module's error factory can throw for that route (each module exports `routeErrors`) is a subset of `x-error-codes`. | `checkoutOrder can throw AMOUNT_MISMATCH but does not list it` |
 | 7 | Every operation has a success response example, a request example when it has a body, `x-requirements`, `x-milestone` and `x-moscow` (REQ-API-002) | |
 | 8 | `operationId` values are unique and camelCase. A deprecated operation has `x-sunset` (REQ-API-015). | |
+| 10 | The excluded `/api/docs` mount answers only GET and HEAD (and OPTIONS 204) on the allow-listed docs paths; any other method is 405 `METHOD_NOT_ALLOWED` and any other path under it 404 (PR21-SEC-06 TASK-020 check; `allowedMethods` assertion over the composed app). Added 2026-11-13. | `POST /api/docs/openapi.yaml: expected 405 METHOD_NOT_ALLOWED, got 200`; `GET /api/docs/oauth2-redirect.html: expected 404 NOT_FOUND, got 200` |
+| 11 | Pipeline order: the step-0 per-IP limiter (ADR-0016 am. 1) and the CORS preflight handler precede `optionsResponder` and the `/api/docs` mount (PR21-SEC-01 step 5, PR21-SEC-06). Added 2026-11-13. | `pipeline order: optionsResponder (index 3) precedes ipLimiter (index 5)` |
 
 The same registry feeds the RBAC matrix generator (REQ-RBAC-011: route × seeded role, unauthenticated, cross-tenant) and the audit test generator (REQ-AUDIT-024). The OpenAPI `x-tenancy` value selects the cross-tenant case. The test runs in the unit stage (no database) as `npm run test:contract`.
 
@@ -574,9 +590,9 @@ The same registry feeds the RBAC matrix generator (REQ-RBAC-011: route × seeded
 
 ## 16. Response-validation helper for Supertest (REQ-API-004)
 
-`tests/support/contract.ts` exports `api(app)`, a thin wrapper around `supertest(app)`. Every request it makes is validated against the contract after the response arrives. A lint rule forbids importing `supertest` anywhere else in API tests, so no test can bypass validation.
+`tests/api/helpers/` (`contract-validator.ts`, `expect-contract.ts`; *path as implemented in PR #21, D-TASK017-01 (1); amended 2026-11-13 — the earlier `tests/support/contract.ts` name is withdrawn*) exports `api(app)`, a thin wrapper around `supertest(app)`. Every request it makes is validated against the contract after the response arrives. A lint rule forbids importing `supertest` anywhere else in API tests, so no test can bypass validation.
 
-1. **Setup (once per worker).** Bundle and dereference `openapi.yaml`, then compile with Ajv 2020 (`ajv/dist/2020`, strict mode, `allErrors`). The formats used by the contract (`date-time`, `date`, `uuid`, `email`, `uri`, `int64`) are registered in-house with `ajv.addFormat` in `tests/support/formats.ts`. Validators are cached per operation, status and media type.
+1. **Setup (once per worker).** Bundle and dereference `openapi.yaml`, then compile with Ajv 2020 (`ajv/dist/2020`, strict mode, `allErrors`). The formats used by the contract (`date-time`, `date`, `uuid`, `email`, `uri`, `int64`) are registered in-house with `ajv.addFormat` in `tests/api/helpers/formats.ts`. Validators are cached per operation, status and media type.
 2. **Operation resolution.** From the actual method and the matched Express route template (`req.route.path`, exposed through the `X-Route-Template` test-only response header, or through the registry lookup by method and path). Unknown operation: fail.
 3. **Checks on every response**
    - The status is declared for the operation, or is a framework status (404 unknown route, 405).
@@ -594,18 +610,18 @@ New test dependency (dev only): `ajv` 8 (MIT, last release 2026-04). Rejected: `
 
 ## 17. Frontend type generation (REQ-API-019)
 
-- **Generator:** `openapi-typescript` 7 (MIT, 7.13.0, last release 2026-06; dev dependency): `npx openapi-typescript docs/03-architecture/api/openapi.yaml -o packages/shared/src/api/types.gen.ts --alphabetize --immutable` (path per ADR-0016 §1). The output is committed.
+- **Generator:** `openapi-typescript` 7 (MIT, 7.13.0, last release 2026-06; dev dependency): `npm run openapi:types` (= `tsx tools/openapi/types.ts`, which runs openapi-typescript on `docs/03-architecture/api/openapi.yaml` into `packages/shared/src/api/types.gen.ts` with `--alphabetize --immutable`; PR #21, D-TASK017-01) (path per ADR-0016 §1). The output is committed.
 - **Client:** a typed wrapper over axios 1 (fixed stack) in `packages/shared/src/api/client.ts`, keyed by `paths` and `operations` from the generated file (`ApiRequest<'checkoutOrder'>`, `ApiResponse<'checkoutOrder', 201>`). It attaches the in-memory bearer token, `X-Correlation-Id` and `Idempotency-Key` (generated per user action and reused on retry for `x-idempotency` routes). It handles `ACCESS_TOKEN_EXPIRED` with a single-flight refresh, and maps problem `errors[]` pointers onto form fields (REQ-UI-010).
 - **SSE client:** an in-house fetch + `ReadableStream` event parser (about 100 lines, `packages/shared/src/api/sse.ts`). It sends headers, which EventSource cannot, and needs no new dependency. Event payload types come from `components['schemas']['SseCarrierResult']` and so on.
 - **Zod parity:** Zod 4 form schemas are hand-written from the `packages/shared` constants (REQ-SEC-008). A type test (`tsd`-style `satisfies`) asserts that `z.infer<>` of each request schema is assignable to the generated request type.
-- **CI gate:** `npm run api:types` regenerates the file and `git diff --exit-code packages/shared/src/api/types.gen.ts` fails when the contract changed without regenerated types.
+- **CI gate:** `npm run openapi:types` regenerates the file and `git diff --exit-code packages/shared/src/api/types.gen.ts` fails when the contract changed without regenerated types.
 
 ---
 
 ## 18. Contract change process
 
 1. Change `openapi.yaml` in the same PR as the route, Joi schema and tests (contract first).
-2. Run `npx --yes @redocly/cli@2 lint docs/03-architecture/api/openapi.yaml` (0 errors), `npm run test:contract` (drift), `npm run api:types` and `npm run api:check-errors`.
+2. Run `npm run openapi:lint` (0 errors), the drift and contract tests (`tools/openapi`, unit lane; the `npm run test:contract` alias and `api:check-errors` land with TASK-020 / TASK-036), `npm run openapi:types`.
 3. In CI, `oasdiff breaking` against the previous release tag must report no breaking changes on `/api/v1`. A breaking change needs a superseding ADR and the deprecation mechanism in §1.
 4. New error codes go into the `packages/shared` catalogue first. Codes are never renamed or reused.
 5. New permissions go into the `packages/authz` catalogue first (REQ-RBAC-001). The seed matrix and the RBAC matrix test update automatically.
@@ -614,7 +630,7 @@ New test dependency (dev only): `ajv` 8 (MIT, last release 2026-04). Rejected: `
 
 ## Lint status
 
-`npx --yes @redocly/cli@2 lint docs/03-architecture/api/openapi.yaml`: **valid, 0 errors, 8 warnings** (re-run 2026-11-12 after the SEC-P3-01/02/10/11/14 amendments and again after the G2-C3 amendments SEC-P3-28/29/30/32/33; 133 operations; the warning set is unchanged). Examples were also validated with a stricter scratch config (`recommended-strict` + `no-invalid-media-type-examples` with `allowAdditionalProperties: false`), and every example conforms; that run reports only the same 8 findings, raised to errors by the strict preset.
+`npm run openapi:lint`: **valid, 0 errors, 8 warnings** (re-run 2026-11-12 after the SEC-P3-01/02/10/11/14 amendments and again after the G2-C3 amendments SEC-P3-28/29/30/32/33; 133 operations; the warning set is unchanged). Examples were also validated with a stricter scratch config (`recommended-strict` + `no-invalid-media-type-examples` with `allowAdditionalProperties: false`), and every example conforms; that run reports only the same 8 findings, raised to errors by the strict preset.
 
 | Warnings | Rule | Reason accepted |
 |---|---|---|
