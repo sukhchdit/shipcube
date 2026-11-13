@@ -3,7 +3,7 @@
 // slot); no database. D-ARCH-110: a signatureOnly permission is satisfied by the signature principal.
 import type { AddressInfo } from 'node:net';
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import type { Express, NextFunction, Request, Response } from 'express';
 
 import { createApp } from '../../app.js';
@@ -14,6 +14,10 @@ import { ANONYMOUS, readonlySet, setPrincipal } from '../routing/route-state.js'
 import type { RouteSlot } from '../routing/slot.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
 import { authorise } from './authorise.js';
+
+// Each case composes createApp and makes a loopback request; the 5 s default timed out under parallel host load in
+// the heavy lane (runs 20261113T2208Z and 20261113T2226Z, never in isolation), so the file gets 20 s (TASK-020).
+jest.setTimeout(20_000);
 
 const silent = { info: () => undefined, debug: () => undefined, error: () => undefined };
 const PRIVATE = 'private, no-store';
