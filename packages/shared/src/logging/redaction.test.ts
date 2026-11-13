@@ -137,7 +137,8 @@ describe('redactString', () => {
   it('redacts the value of sensitive key=value, key: value and JSON pairs', () => {
     const value = sentinel();
     expect(redactString(`password=${value}&next=1`)).toBe(`password=${REDACTED}&next=1`);
-    expect(redactString(`token: ${value} ok`)).toBe(`token: ${REDACTED} ok`);
+    // An unquoted sensitive value runs to `&`, `,`, `;` or the end of the line (PR20-SEC-12): multi-word values never leak.
+    expect(redactString(`token: ${value} ok`)).toBe(`token: ${REDACTED}`);
     expect(redactString(`{"secret":"${value} with spaces","a":1}`)).toBe(`{"secret":${REDACTED},"a":1}`);
     expect(redactString(`{'pin': '${value}'}`)).toBe(`{'pin': ${REDACTED}}`);
     expect(redactString(`{"secret":"${value} \\" escaped"}`)).toBe(`{"secret":${REDACTED}}`);
@@ -302,7 +303,8 @@ describe('redactValue', () => {
     const output = redactValue({ error, like: { message: 'm', stack: 'S' } }) as Record<string, Record<string, unknown>>;
     expect(output['error']?.['name']).toBe('Error');
     expect(output['error']?.['message']).toBe(`failed for ${REDACTED}`);
-    expect(output['like']).toEqual({ name: 'Error', message: 'm', stack: 'S' });
+    // The stack header is rebuilt from name and message (PR20-SEC-09); `S` has no frames to keep.
+    expect(output['like']).toEqual({ name: 'Error', message: 'm', stack: 'Error: m' });
     expect(redactValue({ message: 'plain', count: 1 })).toEqual({ message: 'plain', count: 1 });
   });
 
