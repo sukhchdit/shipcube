@@ -90,6 +90,13 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Run it per line, with runtime-generated positive controls.
   - Script: `scratchpad/review/PR-21-sec/scripts/gl-emul.mjs` (session-scoped). Treat the results as hints; devops confirms with the real image.
   - Also run it over your own record before hand-off.
+- **Effective-config diff for an `eslint.config.mjs` block (PR-0027).**
+  - Run `ESLint#calculateConfigForFile` over ~50 representative plus near-miss paths on two `git archive` extracts (head and base), scrub the root path, and diff every leaf. Add a mutation control (a widened glob and a rule turned off) to prove the probe can see them.
+  - The extract needs `tools/eslint-rules`, `tools/lint` and the workspace `package.json` files, because the config reads the disk.
+  - `tseslint.configs.disableTypeChecked` is one object, not an array.
+  - Scripts: `scratchpad/review/PR-27-sec/effcfg.mjs`, `lintprobe.mjs`, `lintts.mjs`.
+- **The scratchpad persists across sessions.** Earlier `review/PR-NN-*` folders are still there, including `record-sim.sh` (PR-21, PR-25, PR-27 variants) and the Gitleaks emulators; look before rewriting. `gl-emul-multi.mjs` prints the matched line, so a positive control built at run time shows up in tool output. Print counts only.
+- **Pinned-image checks need no Docker.** Anonymous GETs to `auth.docker.io` and `registry-1.docker.io` give the manifest, config blob (user, created, entrypoint) and a body-hash check. Compare per-platform manifest digests with the moved tag, because only the attestations may differ. Script: `PR-27-sec/k6digest.mjs`.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
