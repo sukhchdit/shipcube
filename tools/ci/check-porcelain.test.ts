@@ -73,6 +73,22 @@ describe('check-porcelain', () => {
     expect(result.stdout).toContain('apps/web/package-lock.json');
   });
 
+  it('[PR4-SEC-13] a typegen-phase rewrite of a tracked lint config (appending a rule override) fails the post-lint gate', () => {
+    const { root, build } = buildRepo(
+      "import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';\nmkdirSync('.react-router', { recursive: true });\nwriteFileSync('.react-router/types.d.ts', '');\nappendFileSync('eslint.config.mjs', 'export const override = { rules: {} };\\n');\n",
+    );
+    writeFileSync(join(root, 'eslint.config.mjs'), 'export default [];\n');
+    writeFileSync(join(root, '.gitignore'), 'dist/\n.react-router/\n');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'chore: lint config']);
+    expect(runNode([script, '--root', root], { cwd: repoRoot }).status).toBe(0);
+    expect(build()).toBe(0);
+    const result = runNode([script, '--root', root], { cwd: repoRoot });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('eslint.config.mjs');
+    expect(result.stdout).not.toContain('.react-router');
+  });
+
   it('positive control: a build that writes only git-ignored output passes', () => {
     const { root, build } = buildRepo(
       "import { mkdirSync, writeFileSync } from 'node:fs';\nmkdirSync('dist');\nwriteFileSync('dist/index.js', '');\n",

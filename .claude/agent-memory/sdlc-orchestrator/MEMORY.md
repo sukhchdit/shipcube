@@ -1,2 +1,3 @@
 - [Run scope & publishing](project_run_scope_and_publishing.md) — run 1 = M0+M1, no sandbox creds, tag+GHCR release, v0.1.0-m0 pre-release
 - [User decision style](user_decision_style.md) — accepts recommended defaults; wants autonomous runs
+- [Host resource limits](project_host_resource_limits.md) — RAM/disk caps: ≤3 build agents, docker.lock, clear merged worktrees' node_modules, keep ≥20 GB free

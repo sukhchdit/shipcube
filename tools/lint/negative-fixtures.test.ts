@@ -569,6 +569,13 @@ const LINT_STEPS: readonly RegExp[] = [
   /^node tools\/lint\/check-suppressions\.mjs$/u,
 ];
 
+/** Root `typegen` (PR4-SEC-13 item 2): the CLI in the two React Router apps, never a per-workspace `typegen` script. */
+const ROOT_TYPEGEN = 'npm -w apps/web -w apps/admin exec --no -- react-router typegen';
+const typegenFindings = (script: string): string[] => [
+  ...(script === ROOT_TYPEGEN ? [] : [`root typegen must be exactly "${ROOT_TYPEGEN}"`]),
+  ...(/\bnpm run\b|--workspaces\b|\s-ws\b/u.test(script) ? ['root typegen must not run workspace scripts (--workspaces / npm run)'] : []),
+];
+
 /** Throws on an unknown LINT_FIXTURE_MODE value, so the suite fails to load rather than run in a guessed mode. */
 const MODE = fixtureMode(process.env);
 /** Positive-only assertions (case-table completeness, ignore and "off" decisions): skipped by the base-ref run. */
@@ -851,6 +858,16 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     else expect(missingSteps(steps, LINT_STEPS)).toEqual([]);
     // No --allow-empty-input: Stylelint matching no CSS file fails instead of reading as clean (PR2-SEC-03).
     expect(steps.filter((step) => step.includes('--allow-empty-input'))).toEqual([]);
+  });
+
+  it('[PR4-SEC-13] root `typegen` calls the React Router CLI in the two apps directly, so no workspace script runs in lint', () => {
+    const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+    expect(scripts['typegen']).toBe(ROOT_TYPEGEN);
+    expect(typegenFindings(scripts['typegen'] ?? '')).toEqual([]);
+    // Mutation: the per-workspace script form (any workspace package.json could add a typegen script) is rejected.
+    for (const weakened of ['npm run typegen --workspaces --if-present', 'npm run typegen --workspaces', 'npm run typegen -ws']) {
+      expect(typegenFindings(weakened)).not.toEqual([]);
+    }
   });
 
   // Ignore decisions: a source path that becomes ignored is weakening (always checked); an output path that stops

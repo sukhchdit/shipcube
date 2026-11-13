@@ -57,11 +57,20 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
     'test:api',
     'test:e2e',
     'test:coverage',
+    'coverage:gate',
+    'coverage:diff',
     'build',
     'deps:rebuild',
     'quality:check-evidence',
   ])('[AT-US-001-04] root script "%s" exists', (name) => {
     expect(rootPkg.scripts[name]).toEqual(expect.any(String));
+  });
+
+  it('[PR4-SEC-13] root typegen runs the React Router CLI in apps/web and apps/admin, never workspace typegen scripts', () => {
+    const typegen = rootPkg.scripts['typegen'] ?? '';
+    expect(typegen).toBe('npm -w apps/web -w apps/admin exec --no -- react-router typegen');
+    expect(typegen).not.toMatch(/--workspaces\b|\bnpm run\b|\s-ws\b|--if-present/u);
+    expect(rootPkg.scripts['typecheck']).toBe('npm run typegen && tsc -b');
   });
 
   const typecheck = (source: string) => {
