@@ -4,11 +4,14 @@
  * function. The PostgreSQL-backed wiring (fresh probe first, leak → latched not ready) is proved in
  * prisma/tests/rls/session-scope-leak.int.test.ts.
  */
+import { randomUUID } from 'node:crypto';
+
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { Config } from '@platform/config';
 
 import { createRuntimeLog } from '../runtime/log.js';
 import type { ReadinessCheck } from '../runtime/readiness.js';
+import type { QueryExtensionParams, StandardColumnsExtension } from './extensions/standard-columns.js';
 import { SessionIntegrityError } from './session-integrity.js';
 import {
   createDatabaseRuntime,
@@ -20,7 +23,7 @@ import {
   runStartupAuditPartitionsCheck,
   runStartupIntegrityCheck,
 } from './runtime.js';
-import { TenantTxConfigError } from './with-tenant-tx.js';
+import { type TenantContext, TenantTxConfigError } from './with-tenant-tx.js';
 
 const rejectWith = (reason: unknown) =>
   new Promise<never>(() => {
@@ -198,6 +201,88 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
     });
     const runtime = databaseRuntimeFromConfig(config, 'worker', capture().log);
     expect(runtime.tenantTx).toBeUndefined();
+    for (const resource of runtime.resources) await resource.close();
+  });
+});
+
+describe('standard-columns wiring through the composition function (PR26-SEC-02; D-TASK032-04)', () => {
+  const saved = process.env['PGOPTIONS'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['PGOPTIONS'];
+    else process.env['PGOPTIONS'] = saved;
+  });
+
+  /** A Prisma client double: records `$extends` and which client each transaction is opened on. */
+  function recordingClientClass() {
+    const extensions: StandardColumnsExtension[] = [];
+    const transactionsOn: string[] = [];
+    const tx = {
+      $queryRaw: <T>(): Promise<T> => Promise.resolve([{ org_id: null, actor_id: null, actor_scope: null, guest_token_hash: null }] as T),
+    };
+    const extended = {
+      $queryRaw: tx.$queryRaw,
+      $transaction: <R>(fn: (inner: typeof tx) => Promise<R>): Promise<R> => {
+        transactionsOn.push('extended');
+        return fn(tx);
+      },
+    };
+    class RecordingClient {
+      readonly _runtimeDataModel = {
+        models: {
+          Shipment: {
+            fields: ['id', 'createdBy', 'updatedBy', 'updatedAt', 'version', 'reference'].map((name) => ({ name, kind: 'scalar' })),
+          },
+        },
+      };
+      $queryRaw = tx.$queryRaw;
+      $transaction<R>(fn: (inner: typeof tx) => Promise<R>): Promise<R> {
+        transactionsOn.push('root');
+        return fn(tx);
+      }
+      $extends(extension: StandardColumnsExtension): typeof extended {
+        extensions.push(extension);
+        return extended;
+      }
+      $disconnect(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    return { RecordingClient, extensions, transactionsOn };
+  }
+
+  const input = () => ({
+    database: { connectionString: 'postgres://platform_app@db.invalid:5432/platform', poolMax: 1, applicationName: 'api' },
+    tx: { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 5_000 },
+    log: capture().log,
+  });
+
+  it('every tenant transaction runs on the root client extended once with the standard-columns extension bound to the context actor', async () => {
+    delete process.env['PGOPTIONS'];
+    const { RecordingClient, extensions, transactionsOn } = recordingClientClass();
+    const runtime = createDatabaseRuntime({ ...input(), Client: RecordingClient });
+    const actorId = randomUUID();
+    const context = { orgId: randomUUID(), actorId, actorScope: 'TENANT', guestTokenHash: '', correlationId: 'req-1' } as TenantContext;
+    await runtime.tenantTx?.withTenantTx(context, () => Promise.resolve('ok'));
+    await runtime.tenantTx?.withTenantTx(context, () => Promise.resolve('ok'));
+
+    expect(extensions.map((extension) => extension.name)).toEqual(['standard-columns', 'standard-columns']);
+    expect(transactionsOn).toEqual(['extended', 'extended']);
+
+    const [extension] = extensions;
+    const seen: unknown[] = [];
+    const params: QueryExtensionParams = {
+      model: 'Shipment',
+      operation: 'update',
+      args: { where: { id: 'x' }, data: { reference: 'r' } },
+      query: (args) => {
+        seen.push(args);
+        return Promise.resolve();
+      },
+    };
+    await extension?.query.$allModels.$allOperations(params);
+    expect(seen).toEqual([
+      { where: { id: 'x' }, data: { reference: 'r', updatedBy: actorId, updatedAt: expect.any(Date), version: { increment: 1 } } },
+    ]);
     for (const resource of runtime.resources) await resource.close();
   });
 });
