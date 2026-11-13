@@ -1,9 +1,10 @@
 /**
- * Jest 30 configuration (ADR-0024). Four projects selected by the root scripts:
+ * Jest 30 configuration (ADR-0024). Four projects (five with the opt-in stack project) selected by the root scripts:
  *   unit        `*.test.ts`         -> npm run test:unit (Node environment)
  *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
+ *   stack       `tests/compose/*.stack.test.ts` -> npm run test:stack (images + docker compose; opt-in, TASK-014)
  * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
  * type-check; `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript
  * sources through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
@@ -86,7 +87,7 @@ const config: Config = {
       ...common,
       displayName: 'unit',
       testMatch: ['**/*.test.ts'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api|stack)\\.test\\.ts$', '/tests/e2e/'],
     },
     {
       ...common,
@@ -111,6 +112,10 @@ const config: Config = {
       displayName: 'api',
       testMatch: ['**/*.api.test.{ts,tsx}'],
     },
+    // TASK-014: the Compose/image stack suite builds every image and runs `docker compose up`, so the project exists
+    // only when JEST_STACK=1 (`npm run test:stack`, tools/compose/run-stack-tests.mjs); test:unit, test:integration
+    // and test:coverage never include it.
+    ...(process.env.JEST_STACK === '1' ? [{ ...common, displayName: 'stack', testMatch: ['**/tests/compose/**/*.stack.test.ts'] }] : []),
   ],
 };
 

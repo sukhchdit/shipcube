@@ -40,6 +40,7 @@
     "test:api": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects api --passWithNoTests",
     "test:coverage": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --coverage",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "test:stack": "node tools/compose/run-stack-tests.mjs",
     "hooks:install": "git config core.hooksPath tools/hooks",
     "quality:heavy": "node tools/quality/heavy.mjs",
     "quality:fastlane": "node tools/quality/fastlane.mjs",
