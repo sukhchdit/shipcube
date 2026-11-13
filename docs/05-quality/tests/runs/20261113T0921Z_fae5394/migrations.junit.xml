@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="migrations" tests="6" failures="0" errors="0" skipped="0" time="59.300">
+  <testsuite name="migrations" tests="6" failures="0" errors="0" skipped="0" time="59.300">
+    <testcase name="up -&gt; down -&gt; up (NFR-DATA-004) [NT-DATA-004-a] the repository migrations go up, all the way down and up again with a schema diff of 0 (empty database)" classname="prisma/tests/migrations/up-down-up.int.test.ts" time="21.715"/>
+    <testcase name="up -&gt; down -&gt; up (NFR-DATA-004) [NT-DATA-004-a] a migration that creates a table, an index and a CHECK is reverted by its down.sql and re-applied identically" classname="prisma/tests/migrations/up-down-up.int.test.ts" time="11.368"/>
+    <testcase name="up -&gt; down -&gt; up (NFR-DATA-004) [NT-DATA-004-a] a down.sql that leaves an object behind is reported (negative control)" classname="prisma/tests/migrations/up-down-up.int.test.ts" time="6.071"/>
+    <testcase name="rule 5: CREATE INDEX CONCURRENTLY through prisma migrate deploy (Prisma 7.10, PostgreSQL 18) [NT-AVAIL-003-a] a one-statement CREATE INDEX CONCURRENTLY migration is applied outside a transaction block and leaves a valid index" classname="prisma/tests/migrations/concurrent-index.int.test.ts" time="3.767"/>
+    <testcase name="rule 5: CREATE INDEX CONCURRENTLY through prisma migrate deploy (Prisma 7.10, PostgreSQL 18) [NT-AVAIL-003-a] CREATE INDEX CONCURRENTLY after another statement in the same file is ALSO applied: the file is not one (implicit) transaction" classname="prisma/tests/migrations/concurrent-index.int.test.ts" time="3.084"/>
+    <testcase name="rule 5: CREATE INDEX CONCURRENTLY through prisma migrate deploy (Prisma 7.10, PostgreSQL 18) [NT-AVAIL-003-a] atomicity control: a file whose second statement fails is reported as failed (P3018)" classname="prisma/tests/migrations/concurrent-index.int.test.ts" time="2.742"/>
+  </testsuite>
+</testsuites>
