@@ -16,6 +16,7 @@ import type { AppEnv } from '@platform/config';
 import express, { type Request, type Response, type Router } from 'express';
 
 import { type ApiMode, resolveApiMode } from '../context/api-mode.js';
+import { routePrefix } from '../logging/request-logger.js';
 
 /** Where the UI is mounted (outside /api/v1, REQ-API-003). */
 export const DOCS_PATH = '/api/docs';
@@ -160,6 +161,8 @@ export function createDocsRouter(options: DocsOptions): Router {
   for (const [file, type] of Object.entries(ASSETS)) bodies.set(`/${file}`, staticBody(type, readFileSync(join(assetDir, file))));
 
   const router = express.Router();
+  // First, path-less layer: the access log names a docs request by its full template (D-ORCH-024 (3), PR #20 union).
+  router.use(routePrefix(DOCS_PATH));
   for (const [path, body] of bodies) router.get(path, (_req: Request, res: Response) => send(res, body));
   return router;
 }

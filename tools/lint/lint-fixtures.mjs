@@ -255,6 +255,9 @@ const REPO_PROBES = {
     "import { createApp } from '../../apps/api/src/app.js';\n\nexport const probe = (): unknown => createApp;\n",
   'tests/api/lint-probe-bad-package-relative.api.test.ts':
     "import { AppError } from '../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
+  // PR21-SEC-09 / R2-n1: a `..` traversal after apps/api/src/ leaves apps/api, so the ignore must not apply.
+  'tests/api/lint-probe-bad-api-traversal.api.test.ts':
+    "import { AppError } from '../../apps/api/src/../../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
 };
 
 /** @returns {Promise<Report>} */

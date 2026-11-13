@@ -20,7 +20,13 @@ const scripts = (JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')
 describe('Jest loads ESM-only runtime dependencies (--experimental-vm-modules)', () => {
   it('[--experimental-vm-modules] every root Jest script passes the flag', () => {
     const jestScripts = Object.entries(scripts).filter(([, command]) => command.includes('jest'));
-    expect(jestScripts.map(([name]) => name).sort()).toEqual(['test:api', 'test:coverage', 'test:integration', 'test:unit']);
+    expect(jestScripts.map(([name]) => name).sort()).toEqual([
+      'test:api',
+      'test:contract',
+      'test:coverage',
+      'test:integration',
+      'test:unit',
+    ]);
     const withoutFlag = jestScripts.filter(([, command]) => !command.startsWith('node --experimental-vm-modules '));
     expect(withoutFlag).toEqual([]);
   });

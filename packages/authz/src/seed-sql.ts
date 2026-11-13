@@ -6,11 +6,16 @@
  * adds nothing and widens no role, while a row that collides on its natural key under a different ID raises instead of
  * being silently kept (PR8-SEC-08 (b)).
  */
+import { SYSTEM_ACTOR_ID } from '@platform/shared';
+
 import type { PermissionDefinition } from './permissions/index.js';
 import type { RoleDefinition } from './roles.js';
 
-/** Reserved SYSTEM actor (data-model §1.6): `created_by`/`updated_by` of seed rows. */
-export const SYSTEM_ACTOR_ID = '00000000-0000-7000-8000-000000000001';
+/**
+ * Reserved SYSTEM actor (data-model §1.6): `created_by`/`updated_by` of seed rows. Re-exported from @platform/shared
+ * (PR #26 code review n8, PR26-SEC-04): one definition of the reserved ids for the seed, the extension and the API.
+ */
+export { SYSTEM_ACTOR_ID };
 
 export type SeedIdKind = 'permission' | 'role' | 'role_permission';
 export type SeedIdFactory = (kind: SeedIdKind, naturalKey: string) => string;

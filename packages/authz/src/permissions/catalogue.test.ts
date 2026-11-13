@@ -197,7 +197,11 @@ describe('operator-only rule and verbs (DR-A07, ADR-0008 §1)', () => {
     ['an audit-looking resource filed under audit', entry('audit_trail:read', 'audit'), ['PERMISSION_CATEGORY_MISMATCH']],
     ['a non-audit resource filed under audit', entry('retention:purge', 'audit'), ['PERMISSION_CATEGORY_MISMATCH']],
     ['a verb as action and a read qualifier (n5)', entry('document:download:read', 'document'), ['PERMISSION_FORMAT']],
-    ['a webhook key without the signature-only flag', entry('webhook:paypal:receive', 'webhook'), ['SIGNATURE_FLAG_MISMATCH']],
+    [
+      'a webhook key without the signature-only flag',
+      entry('webhook:paypal:receive', 'webhook'),
+      ['PERMISSION_FORMAT', 'SIGNATURE_FLAG_MISMATCH'],
+    ], // undeclared provider (R2-m1)
   ])('PR8-SEC-02: %s fails the catalogue guard', (_label, added, expected) => {
     const found = checkCatalogue([...PERMISSION_DEFINITIONS, added]);
     expect(found.every((v) => v.permission === added.key)).toBe(true);

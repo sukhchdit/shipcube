@@ -27,8 +27,9 @@ import { createReadinessProbe, type ReadinessBody, type ReadinessCheck } from '.
 import { createS3ObjectStorage, type S3ObjectStorage } from '../storage/s3-object-storage.js';
 import { RUSTFS_STARTUP_TIMEOUT_MS, startRustfs, type RunningRustfs } from '../storage/tests/rustfs.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
+import { defaultPipelineSlots, mountRoutes } from '../routing/pipeline.js';
 import { createObjectStorageCheck } from './checks/object-storage.js';
-import { createHealthRouter } from './router.js';
+import { healthRoutes } from './router.js';
 
 /** Valkey 8.1 (Alpine), pinned by digest; published 2026-10-27, outside the 7-day cooldown. */
 const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a';
@@ -109,7 +110,7 @@ describe('US-012 readiness with real PostgreSQL 18, Valkey 8 and RustFS (api)', 
       { cacheTtlMs: 0 },
     );
     app = express();
-    app.use(createHealthRouter({ probe }));
+    app.use(mountRoutes(express.Router(), healthRoutes({ probe }), defaultPipelineSlots({ tenantTx: undefined })));
   }, STARTUP_TIMEOUT_MS);
 
   afterAll(async () => {

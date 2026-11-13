@@ -39,13 +39,61 @@ const BCRYPT_MESSAGE = `only the PasswordHasher implementation (${PASSWORD_HASHE
 /** Static-import net over every linted file (ADR-0002 PR1-SEC am. item 3); the boundaries policy below adds import(), require and createRequire. */
 const BCRYPT_IMPORT_PATTERN = { regex: '^(?:@[^/]+/)?bcrypt[-.\\w]*(?:/.*)?$', message: BCRYPT_MESSAGE };
 /**
+ * Raw Supertest is confined to the contract helper (api/README.md §16, PR #21 R1-m5 (a), D-ARCH-084): every API test
+ * goes through `api(app)` / `expectContract(res)` in tests/api/helpers, so no response escapes contract validation.
+ */
+const SUPERTEST_IMPORT_PATTERN = {
+  regex: '^supertest(?:/.*)?$',
+  message:
+    "import 'supertest' only in tests/api/helpers: use api(app) / expectContract(res) from tests/api/helpers/expect-contract.ts, which validate every response against openapi.yaml (api/README.md §16).",
+};
+/** The one S3 seam (D-ARCH-097 (6), PR30-SEC-08 (e)): the ObjectStorage port and its S3 adapter. */
+const S3_SEAM = 'apps/api/src/platform/storage';
+/**
+ * The AWS SDK, the raw SigV4 signer and the legacy v2 SDK stay behind the ObjectStorage port (D-ARCH-097 (6),
+ * PR30-SEC-08 (e), PR #32 code review M1). The static-import twin of apps/api/src/platform/storage/boundary.test.ts.
+ */
+const S3_SDK_IMPORT_PATTERN = {
+  regex: '^(?:@aws-sdk/.*|@smithy/signature-v4(?:/.*)?|aws-sdk(?:/.*)?)$',
+  message: `only ${S3_SEAM} imports the AWS SDK, the SigV4 signer or aws-sdk: everything else uses the ObjectStorage port (D-ARCH-097, PR30-SEC-08).`,
+};
+/**
  * Every `no-restricted-imports` pattern of the repository. Flat config replaces (does not merge) rule options, so a
  * file-scoped block re-declares the rule from this list minus its own exception, never `'off'`.
  */
-const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN];
+const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATTERN, S3_SDK_IMPORT_PATTERN];
+/** `no-restricted-imports` with every repository pattern except `exception`. */
+const restrictedImportsExcept = (/** @type {object} */ exception) =>
+  /** @type {const} */ (['error', { patterns: RESTRICTED_IMPORT_PATTERNS.filter((pattern) => pattern !== exception) }]);
+/**
+ * Files that may import Supertest directly. The helper folder, plus exact files only (a new file beside them does not
+ * inherit the exception), each with its reason. apps/api cannot import tests/api (boundaries: apps import no other
+ * workspace), so its colocated tests cannot use the helper.
+ */
+const SUPERTEST_ALLOW_LIST = [
+  // The contract helper itself: the one wrapper around supertest(app).
+  'tests/api/helpers/**',
+  // US-007 problem handler over createApp with stub routers: throws arbitrary errors from routes that are not contract
+  // operations, to test the RFC 9457 mapping itself (a framework seam below the contract helper).
+  'apps/api/src/platform/errors/problem-handler.api.test.ts',
+  // TASK-017 runtime seams (version prefix, deprecated fixture operation, ApiMode, OPTIONS answer): fixture routes and
+  // headers below the contract helper.
+  'apps/api/src/platform/openapi/runtime-seams.api.test.ts',
+  // US-035 Swagger UI at /api/docs: HTML, ETag and docs-path routes that are not contract operations.
+  'apps/api/src/platform/openapi/serve.api.test.ts',
+  // Health router unit test (unit lane): the router in isolation, no contract document loaded.
+  'apps/api/src/platform/health/router.test.ts',
+  // Health integration test (integration lane, Testcontainers): real dependencies; contract checks live in tests/api.
+  'apps/api/src/platform/health/health.int.test.ts',
+  // US-008 logging sink (TASK-010): access, error and careless-code lines read from an in-memory log sink; the routes
+  // are framework fixtures, not contract operations (a logging seam below the contract helper).
+  'apps/api/src/platform/logging/logging.api.test.ts',
+];
 
 /** Every file extension ESLint lints (PR2-SEC-03: `.jsx` included, so no source file is silently skipped). */
 const LINTED = '{js,jsx,mjs,cjs,ts,tsx,mts,cts}';
+/** TypeScript source extensions. */
+const TS = '{ts,tsx,mts,cts}';
 const TEST_FILES = ['**/*.test.{ts,tsx,js,jsx}', '**/{test,tests,__tests__}/**'];
 const APP_AND_PACKAGE_SOURCES = [`apps/*/{src,app}/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`, 'prisma/seed/**/*.ts'];
 /** Browser packages: not server code (TASK-065 puts the Axios session client in packages/ui/src/session). */
@@ -88,6 +136,30 @@ const AUDIT_WRITER_ALLOW_LIST = [
 const PLANNED_PRISMA_FILES = ['packages/audit/src/store/prisma-store.ts', 'apps/api/src/platform/outbox/writer.ts'];
 /** The database platform: the only home of the root Prisma client and of withTenantTx (ADR-0005 am. 10 item 2). */
 const DB_PLATFORM = 'apps/*/src/platform/db/**';
+/**
+ * T-83 whole-file roots (D-ARCH-106 (5) R5, option `txFiles`): code that only ever runs inside the business
+ * transaction (the audit hook, the outbox writer, the audit store). Test files are outside the rule's block.
+ */
+const TENANT_TX_FILES = ['apps/api/src/platform/audit/**', 'apps/api/src/platform/outbox/writer.ts', 'packages/audit/src/store/**'];
+/** T-83 R6 (option `txHandleTypes`): a function with a parameter of one of these types runs inside the transaction. */
+const TENANT_TX_HANDLE_TYPES = ['TenantDb', 'AppDb', 'AppTransactionClient'];
+/**
+ * `platform/system-model-owner` (PR19-SEC-01, D-ARCH-080): table-class manifest module -> the code that owns its
+ * SYSTEM tables. A manifest module without an entry owns `apps/*\/src/modules/<module>/**` (e.g. `identity` for
+ * login_attempt_counters, `payments` for gateway_webhook_events). The platform-level owners are explicit.
+ */
+const SYSTEM_MODEL_OWNERS = {
+  // Bookkeeping tables (_prisma_migrations, bootstrap_migrations, reference_dataset_versions): the database platform.
+  platform: ['apps/*/src/platform/db/**'],
+  outbox: ['apps/*/src/platform/outbox/**'], // outbox_events: the writer (api) and the relay (worker)
+  idempotency: ['apps/api/src/platform/idempotency/**'], // idempotency_keys
+  worker: ['apps/worker/src/platform/**'], // job_context, processed_events
+};
+/**
+ * The only files `platform/system-model-owner` does not lint (PR32-SEC-07 (b)): the SYSTEM accessor (api and worker
+ * twins) and the TenantDb handle; both import the private system-port.
+ */
+const SYSTEM_ACCESSOR_HOMES = ['apps/*/src/platform/db/system-db.ts', 'apps/*/src/platform/db/tenant-db.ts'];
 /** Repository layer files (folder or single file), for the raw-SQL and expectAffected rules. */
 const REPOSITORY_FILES = ['apps/api/src/modules/*/repository/**', 'apps/api/src/modules/*/repository.{ts,tsx}'];
 /**
@@ -95,9 +167,10 @@ const REPOSITORY_FILES = ['apps/api/src/modules/*/repository/**', 'apps/api/src/
  * Exact files only (no folder globs: a new file in an exempted folder must not inherit the exemption), each with the
  * forms it may contain: `setter` (the context setter function name), `keys` (the four security keys, e.g. a
  * readiness read), `session-set` (`SET [SESSION] app.…` / `RESET app.…`), `session-set-config` (the setter with
- * is_local = false). Every other file gets the rule with no exemption.
+ * is_local = false), `unicode-escape` (a `U&'…'` string or `U&"…"` identifier, PR11-SEC-17). Every other file gets the
+ * rule with no exemption.
  */
-const ALL_CONTEXT_FORMS = ['setter', 'keys', 'session-set', 'session-set-config'];
+const ALL_CONTEXT_FORMS = ['setter', 'keys', 'session-set', 'session-set-config', 'unicode-escape'];
 const TENANT_CONTEXT_EXEMPTIONS = [
   // The one runtime writer of the context: transaction-local setter only (session forms stay errors).
   { files: ['apps/api/src/platform/db/with-tenant-tx.ts'], allow: ['setter', 'keys'] },
@@ -115,8 +188,8 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   // Remove this entry in the commit that deletes the spike file (a stale entry would exempt any future file there).
   { files: ['prisma/tests/spikes/spk03-rls-tx.int.test.ts'], allow: ALL_CONTEXT_FORMS },
   // Catalog C-series: the prosrc scan's negative fixtures create functions that run a session SET of a context key
-  // (transaction-local setter fixtures only: no is_local = false).
-  { files: ['prisma/tests/catalog/c01-c12.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
+  // (transaction-local setter fixtures only: no is_local = false), and the U& evasion probes of the scan (PR11-SEC-14 a).
+  { files: ['prisma/tests/catalog/c01-c12.int.test.ts'], allow: ['setter', 'keys', 'session-set', 'unicode-escape'] },
   // The catalog scan helpers name the keys (the renderer's deparsed operator-scope atom).
   { files: ['prisma/tests/catalog/scans.ts'], allow: ['keys'] },
   // The RLS renderer emits the §4.3 policies over the §4.2 helpers.
@@ -130,6 +203,27 @@ const TENANT_CONTEXT_EXEMPTIONS = [
 ];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];
+
+/**
+ * A RegExp path argument of an Express mount or route method (PR #32 code review m5, PR32-SEC-11; api/README §15): the
+ * drift walker resolves string paths, and a RegExp (non-capturing group, character class, alternation) can serve paths
+ * the walker never lists. Literal, `new RegExp(...)` and `RegExp(...)`, directly or inside an array of paths.
+ */
+const EXPRESS_PATH_METHODS = '/^(?:use|get|post|put|patch|delete|all|route|head|options)$/';
+const EXPRESS_PATH_CALL = `CallExpression[callee.type='MemberExpression'][callee.property.name=${EXPRESS_PATH_METHODS}]`;
+const REGEXP_ROUTE_PATH_MESSAGE =
+  'Express paths are strings: a RegExp path in .use/.get/.post/.put/.patch/.delete/.all/.route/.head/.options can serve paths the OpenAPI drift walker never lists (api/README §15, PR #32 m5).';
+const REGEXP_ROUTE_PATH_SELECTORS = [
+  `${EXPRESS_PATH_CALL} > Literal.arguments[regex]`,
+  `${EXPRESS_PATH_CALL} > :matches(NewExpression, CallExpression).arguments[callee.name='RegExp']`,
+  `${EXPRESS_PATH_CALL} > ArrayExpression.arguments > Literal.elements[regex]`,
+  `${EXPRESS_PATH_CALL} > ArrayExpression.arguments > :matches(NewExpression, CallExpression).elements[callee.name='RegExp']`,
+].map((selector) => ({ selector, message: REGEXP_ROUTE_PATH_MESSAGE }));
+/**
+ * Every `no-restricted-syntax` entry of apps/api/src. Flat config replaces rule options, so a narrower block that
+ * re-declares the rule spreads this list first (never `'off'`).
+ */
+const API_RESTRICTED_SYNTAX = [...REGEXP_ROUTE_PATH_SELECTORS];
 
 /** Workspace directories (apps/*, packages/*, tests/*, prisma) that own a package.json. */
 const WORKSPACE_DIRS = ['apps', 'packages', 'tests']
@@ -561,12 +655,16 @@ export default defineConfig([
     },
   },
   {
-    // The OpenAPI drift test (TASK-017, api/README.md §15) builds fixture Express 5 routers to prove the route walker
-    // against the real router stack; `express` is a dependency of apps/api, not of the root manifest. Narrow
-    // allowance for this one file, like the jest-esm one above.
-    files: ['tools/openapi/drift.test.ts'],
+    // Composed-app suites (TASK-020; api/README.md §15): the contract drift and route-metadata tests build the real
+    // createApp (and fixture Express 5 routers for the walker), so they import apps/api sources and the tools/openapi
+    // walker and loader by relative path, reached through tests/generated/tsconfig.json project references
+    // (D-TASK017-01 (6); this replaces the former tools/openapi/drift.test.ts allowance and the file-URL loading of
+    // api-mounts.ts). `express`, `joi` and the @platform packages come through apps/api's manifest. The ignore is
+    // anchored like the tests/api one (PR21-SEC-09): no `..` segment may follow apps/api/src/ or tools/openapi/.
+    files: ['tests/generated/**/*.ts'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
+      'import-x/no-relative-packages': ['error', { ignore: ['^(?:\\.\\./)+(?:apps/api/src|tools/openapi)/(?!(?:.*/)?\\.\\.(?:/|$))'] }],
     },
   },
   {
@@ -579,7 +677,9 @@ export default defineConfig([
     files: ['tests/api/**/*.api.test.ts'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
-      'import-x/no-relative-packages': ['error', { ignore: ['^(?:\\.\\./)+apps/api/src/'] }],
+      // PR21-SEC-09 / R2-n1: anchored so that no `..` segment may follow apps/api/src/ (a traversal back out of
+      // apps/api, e.g. apps/api/src/../../../packages/..., is rejected; third probe in tools/lint/lint-fixtures.mjs).
+      'import-x/no-relative-packages': ['error', { ignore: ['^(?:\\.\\./)+apps/api/src/(?!(?:.*/)?\\.\\.(?:/|$))'] }],
     },
   },
   {
@@ -676,6 +776,40 @@ export default defineConfig([
     plugins: { platform },
     rules: { 'platform/outbound-http-via-client': 'error' },
   },
+  {
+    // T-83 (D-ARCH-074, D-ARCH-106 (5)): no external I/O or sleeps inside a tenant transaction, in all non-test
+    // application code. Roots: withTenantTx callbacks, defineRoute handlers (unless transaction: 'none'), same-file
+    // named handlers, the TENANT_TX_FILES and any function taking a TENANT_TX_HANDLE_TYPES parameter. Never disabled
+    // inline (tools/lint/tenant-tx-disable-ratchet.test.ts); the only hatch is a route's transaction: 'none'.
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: {
+      'platform/no-external-calls-in-tenant-tx': ['error', { txFiles: TENANT_TX_FILES, txHandleTypes: TENANT_TX_HANDLE_TYPES }],
+    },
+  },
+  {
+    // PR #32 m5 / PR32-SEC-11: no RegExp mount or route path in apps/api/src, test files included (they build the
+    // composed app the drift walker reads).
+    files: [`apps/api/src/**/*.${LINTED}`],
+    rules: { 'no-restricted-syntax': ['error', ...API_RESTRICTED_SYNTAX] },
+  },
+  {
+    // PR20-SEC-13 item 4: log and error-message hygiene in application code and tooling (tests excluded).
+    files: [`apps/*/src/**/*.${TS}`, `packages/*/src/**/*.${TS}`, 'tools/**/*.{ts,tsx,mts,cts,mjs}'],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/no-raw-request-in-log': 'error' },
+  },
+  {
+    // PR20-SEC-13 item 4 (a), application code only. tools/** is not wired yet: its CLI entry points print a fatal
+    // error's message to the developer's or CI job's stderr (`${error instanceof Error ? error.message : String(error)}`),
+    // a different channel than the application log; extending the rule there is a lead decision (TASK-020 S1 report).
+    files: [`apps/*/src/**/*.${TS}`, `packages/*/src/**/*.${TS}`],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/no-catch-message-interpolation': 'error' },
+  },
   { files: MONEY_HELPERS, rules: { 'platform/money-arith': 'off' } },
   { files: FORMAT_HELPERS, rules: { 'platform/no-tofixed-tolocalestring': 'off' } },
   { files: SANITISING_COMPONENT, rules: { 'platform/no-innerhtml': 'off' } },
@@ -707,6 +841,24 @@ export default defineConfig([
     rules: { 'platform/db-raw-sql': 'error' },
   },
   {
+    // SYSTEM-class delegates are reached only through systemDelegates(tx), per model only by the module whose
+    // table-class manifest declares the table (PR19-SEC-01, D-ARCH-080). The accessor's home (system-db.ts), the
+    // handle that guards it (tenant-db.ts) and tests are outside the rule; every other file in apps and packages is in,
+    // the rest of platform/db included, so none of it can re-export the accessor (PR32-SEC-07 (b)).
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    ignores: [...SYSTEM_ACCESSOR_HOMES, ...TEST_FILES],
+    plugins: { platform },
+    rules: { 'platform/system-model-owner': ['error', { owners: SYSTEM_MODEL_OWNERS }] },
+  },
+  {
+    // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
+    // code names its module with a literal, so no load escapes the import controls above.
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/static-module-specifier': 'error' },
+  },
+  {
     // Role defaults belong to the bootstrap lane (item 12 d). Tests are excluded (drift probes may name the statement).
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
     ignores: TEST_FILES,
@@ -724,9 +876,17 @@ export default defineConfig([
   {
     // The hasher keeps every other restricted pattern (re-declared from the shared list, never 'off').
     files: [PASSWORD_HASHER_MODULE],
-    rules: {
-      'no-restricted-imports': ['error', { patterns: RESTRICTED_IMPORT_PATTERNS.filter((pattern) => pattern !== BCRYPT_IMPORT_PATTERN) }],
-    },
+    rules: { 'no-restricted-imports': restrictedImportsExcept(BCRYPT_IMPORT_PATTERN) },
+  },
+  {
+    // The Supertest allow-list (see SUPERTEST_ALLOW_LIST): every other restricted pattern stays (re-declared, never 'off').
+    files: SUPERTEST_ALLOW_LIST,
+    rules: { 'no-restricted-imports': restrictedImportsExcept(SUPERTEST_IMPORT_PATTERN) },
+  },
+  {
+    // The S3 seam (D-ARCH-097 (6), PR #32 M1), its tests included: every other restricted pattern stays (re-declared, never 'off').
+    files: [`${S3_SEAM}/**`],
+    rules: { 'no-restricted-imports': restrictedImportsExcept(S3_SDK_IMPORT_PATTERN) },
   },
 
   // --- React: hooks, accessibility (NFR-A11Y-*), string externalisation (NFR-I18N-001) -----------------------------

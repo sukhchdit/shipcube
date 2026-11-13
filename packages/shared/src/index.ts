@@ -9,6 +9,8 @@ export {
   type ValidationIssue,
 } from './errors/app-error.js';
 export { CORRELATION_ID_PATTERN, isCorrelationId } from './correlation/correlation-id.js';
+// Credential presence (D-ARCH-107 (5); TASK-020): one predicate for the API and the SEC-TC-29 contract helper.
+export { presentsCredential, REFRESH_COOKIE_NAMES, type CredentialHeaders } from './http/credentials.js';
 export type { CatalogueEntry, ModuleCatalogue, ProblemStatus } from './errors/catalogue-entry.js';
 // Generated from openapi.yaml (REQ-API-019, TASK-017): `npm run openapi:types`; the typed client (api/README.md §17) builds on these.
 export type { components, operations, paths } from './api/types.gen.js';
@@ -28,3 +30,12 @@ export {
   UNKNOWN_FIELD,
   type ServerControlledField,
 } from './ids/server-controlled.js';
+// Route audit descriptor = openapi `x-audit` (TASK-020); consumed by defineRoute, the audit writer and capture.
+export {
+  AUDIT_ACTIONS,
+  AUDIT_SENSITIVITIES,
+  type AdditionalAuditEntry,
+  type AuditAction,
+  type AuditDescriptor,
+  type AuditSensitivity,
+} from './audit/descriptor.js';

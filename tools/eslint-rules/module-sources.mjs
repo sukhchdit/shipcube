@@ -32,6 +32,62 @@ function importedName(specifier) {
 }
 
 /**
+ * The module specifier written as a string literal or a no-substitution template literal (PR32-SEC-07 (a)).
+ * @param {import('estree').Node | null | undefined} node
+ * @returns {string | undefined}
+ */
+export function staticSpecifier(node) {
+  if (node?.type === 'Literal') return typeof node.value === 'string' ? node.value : undefined;
+  if (node?.type === 'TemplateLiteral' && node.expressions.length === 0) return node.quasis[0]?.value.cooked ?? undefined;
+  return undefined;
+}
+
+/**
+ * @param {import('estree').Node} callee
+ * @returns {boolean} `createRequire` or `<x>.createRequire`.
+ */
+const isCreateRequire = (callee) =>
+  (callee.type === 'Identifier' && callee.name === 'createRequire') ||
+  (callee.type === 'MemberExpression' &&
+    !callee.computed &&
+    callee.property.type === 'Identifier' &&
+    callee.property.name === 'createRequire');
+
+/**
+ * Whether `call` loads a module by a CommonJS-style require: `require(x)`, `<x>.require(x)` (`module.require`),
+ * `createRequire(url)(x)`, or `req(x)` where `req` is a variable initialised with `createRequire(url)` (PR32-SEC-07 (a)).
+ * @param {import('estree').CallExpression} call
+ * @param {import('eslint').SourceCode} sourceCode
+ * @returns {boolean}
+ */
+export function isRequireCall(call, sourceCode) {
+  const { callee } = call;
+  if (callee.type === 'Identifier' && callee.name === 'require') return true;
+  if (
+    callee.type === 'MemberExpression' &&
+    !callee.computed &&
+    callee.property.type === 'Identifier' &&
+    callee.property.name === 'require'
+  ) {
+    return true;
+  }
+  if (callee.type === 'CallExpression') return isCreateRequire(callee.callee);
+  if (callee.type !== 'Identifier') return false;
+  /** @type {import('eslint').Scope.Scope | null} */
+  let scope = sourceCode.getScope(call);
+  while (scope) {
+    const variable = scope.set.get(callee.name);
+    if (variable) {
+      return variable.defs.some(
+        (def) => def.type === 'Variable' && def.node.init?.type === 'CallExpression' && isCreateRequire(def.node.init.callee),
+      );
+    }
+    scope = scope.upper;
+  }
+  return false;
+}
+
+/**
  * @param {(reference: ModuleReference) => void} onReference
  * @returns {import('eslint').Rule.RuleListener}
  */
@@ -62,19 +118,14 @@ export function moduleSourceVisitor(onReference) {
       });
     },
     ImportExpression(node) {
-      if (node.source.type === 'Literal' && typeof node.source.value === 'string') {
-        onReference({ node: node.source, source: node.source.value, names: ['*'], typeOnly: false });
-      }
+      const source = staticSpecifier(node.source);
+      if (source !== undefined) onReference({ node: node.source, source, names: ['*'], typeOnly: false });
     },
     CallExpression(node) {
       const [first] = node.arguments;
-      if (
-        node.callee.type === 'Identifier' &&
-        node.callee.name === 'require' &&
-        first?.type === 'Literal' &&
-        typeof first.value === 'string'
-      ) {
-        onReference({ node: first, source: first.value, names: ['*'], typeOnly: false });
+      const source = first === undefined || first.type === 'SpreadElement' ? undefined : staticSpecifier(first);
+      if (node.callee.type === 'Identifier' && node.callee.name === 'require' && first !== undefined && source !== undefined) {
+        onReference({ node: first, source, names: ['*'], typeOnly: false });
       }
     },
   };

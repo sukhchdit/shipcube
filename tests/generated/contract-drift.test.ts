@@ -7,8 +7,13 @@
 import { beforeAll, describe, expect, it } from '@jest/globals';
 import express, { Router } from 'express';
 
-import { type ApiMounts, loadApiMounts } from './api-mounts.js';
-import { type ContractOperation, listOperations, loadContract, type OpenApiDocument, serverBasePath } from './contract.js';
+import {
+  type ContractOperation,
+  listOperations,
+  loadContract,
+  type OpenApiDocument,
+  serverBasePath,
+} from '../../tools/openapi/contract.js';
 import {
   checkContractDrift,
   type DriftFinding,
@@ -19,7 +24,8 @@ import {
   normalisePath,
   parseLedger,
   readLedger,
-} from './drift.js';
+} from '../../tools/openapi/drift.js';
+import { type ApiMounts, loadApiMounts } from './api-mounts.js';
 
 type MutableOperation = Record<string, unknown>;
 
@@ -52,7 +58,8 @@ describe('openapi route/document drift', () => {
   const realMounts = (): Mount[] => api.mounts;
 
   beforeAll(async () => {
-    [doc, ledger, api] = await Promise.all([loadContract(), readLedger(), loadApiMounts()]);
+    [doc, ledger] = await Promise.all([loadContract(), readLedger()]);
+    api = loadApiMounts();
     byId = new Map(listOperations(doc).map((op) => [op.operationId, op]));
   });
 
@@ -133,6 +140,19 @@ describe('openapi route/document drift', () => {
       'an optional trailing parameter': (router) => router.use('/api/v1{/:x}', inner),
       'an optional middle parameter': (router) => router.use('/api{/:v}/v1', inner),
       'a trailing optional wildcard': (router) => router.use('/api/v1{*rest}', inner),
+      // [R3-n1] a leading parameter: only the substitution probe catches it (/:tenant/docs would pass for the excluded mount).
+      'a leading parameter': (router) => router.use('/:tenant/v1', inner),
+      'a leading parameter before docs': (router) => router.use('/:tenant/docs', inner),
+      // [R3-m1] a RegExp mount with alternation matches /api/v1 literally but also serves /api/v2.
+      'a RegExp with alternation': (router) => router.use(/^\/api\/(v1|v2)/, inner),
+      // A capture-free leading wildcard segment: no params, no insertion or consumption (R3-n1). Refused as a RegExp mount
+      // first since PR #32 m5; the substitution probe stays, pinned by 'a prefix of the mount path' above.
+      'a RegExp leading wildcard segment': (router) => router.use(/^\/[^/]+\/v1(?=\/|$)/, inner),
+      // [PR #32 m5] capture-free RegExp mounts that serve paths outside the literal and fail no probe: refused as RegExps.
+      'a RegExp with non-capturing alternation': (router) => router.use(/^\/api\/(?:v1|v2)/, inner),
+      'a RegExp with a character class': (router) => router.use(/^\/api\/v[12]/, inner),
+      'a RegExp with a top-level alternation': (router) => router.use(/^\/api\/v1|^\/hidden/, inner),
+      'a RegExp equal to the literal': (router) => router.use(/^\/api\/v1/, inner),
     };
     for (const [shape, mount] of Object.entries(mountShapes)) {
       const router = Router();
@@ -146,6 +166,13 @@ describe('openapi route/document drift', () => {
     const subApp = express();
     subApp.use(express()); // Express wraps a sub-app as `mounted_app`; at the root it serves its own routes under every path
     expect(listMountedRoutes([{ prefix: '', router: subApp.router }], options).map((route) => route.unrecognised)).toEqual([
+      'Express sub-app mounted without a path',
+    ]);
+
+    // [R3-n2] a path-less sub-app on a Router is not wrapped as `mounted_app` (it keeps the name `app`): duck-typed.
+    const subAppOnRouter = Router();
+    subAppOnRouter.use(express());
+    expect(listMountedRoutes([{ prefix: '', router: subAppOnRouter }], options).map((route) => route.unrecognised)).toEqual([
       'Express sub-app mounted without a path',
     ]);
 
