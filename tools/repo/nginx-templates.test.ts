@@ -112,7 +112,8 @@ describe('Nginx templates (TASK-004, platform.md §3.3)', () => {
       const instructions = dockerfile.split(/\r?\n/).filter((line) => !/^\s*#/.test(line));
       expect(instructions.filter((line) => line.includes('build/server'))).toEqual([]);
       // Rendered for the one placeholder the image fixes (8080); an unrendered placeholder fails the build.
-      expect(dockerfile).toContain("sed 's/\\${NGINX_PORT}/8080/g'");
+      expect(dockerfile).toContain('sed "s/[\\$]{NGINX_PORT}/8080/g"');
+      expect(dockerfile).toContain('grep -qF "\\${"');
       expect(dockerfile).toMatch(/^USER 101$/m);
       expect(dockerfile).toContain('CMD ["wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]');
     },
