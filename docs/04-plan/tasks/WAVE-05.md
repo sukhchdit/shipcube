@@ -60,7 +60,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-220 **DC** (M1 Must) Document model and private encrypted storage |
 | REQs | REQ-DOC-001, REQ-DOC-005, REQ-DOC-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SPK-05, D-025 |
+| Spikes / security / decisions | SPK-05, D-025, PR30-SEC-02, PR30-SEC-07, PR30-SEC-09, PR30-SEC-10, D-ARCH-097 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-019, TASK-029, TASK-016 |
@@ -71,9 +71,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - prisma/schema/documents.prisma + migration
 - apps/api/src/modules/documents/{service,repository}.ts
+- apps/api/src/modules/documents/{storage-facade.ts, document-keys.ts, storage-policy.test.ts}
+- apps/api/src/platform/storage/{object-storage.port.ts, s3-object-storage.ts} (hardening edits of D-ARCH-097; the api-storage lock is free in wave 5)
 
 **Acceptance tests to write**
 - All US-220 scenarios (SHA-256 stored, SSE-S3, private bucket)
+- DOWNLOAD, KEY AND METADATA CONTRACT (ADR-0021 am. 3, D-ARCH-097; PR #30 security r2 PR30-SEC-02, -07, -09, -10, code review r1 n2 and r2 flag 1; DUE WITH THIS TASK, binding on TASK-155 and TASK-162): (1) the documents module owns ONE storage facade (modules/documents/storage-facade.ts) and it is the only code outside platform/storage that touches RuntimeServices.storage: putDocument and presignDownload(document, ttl) — presignDownload reads the bucket, key, versionId and responseContentType from the RLS-visible document row (the type stored at put time from the detected format, never request, carrier or user text), builds the disposition with attachmentDisposition (item 3) and NEVER sets allowInline; (2) allowInline: a repository test (modules/documents/storage-policy.test.ts) fails when allowInline appears in apps or packages source outside apps/api/src/platform/storage and its tests — allowInline: true with an active content type (text/html, image/svg+xml, application/xhtml+xml, any +xml type, application/xml, a script type) is the XSS-by-document path; there is no M1 caller, and an inline preview needs an ADR-0021 amendment, a facade method restricted to an allow-list of passive types (application/pdf, image/png, image/jpeg) and a security record; (3) attachmentDisposition(name) is one pure function exported by platform/storage that returns attachment; filename="<ASCII fallback>"; filename*=UTF-8 followed by two single quotes and the RFC 5987 percent-encoded name, where the name is composed only from server-held parts (document type, shipment reference, version, an extension from a closed set) and the fallback keeps only letters, digits, dot, underscore and hyphen; the port check is anchored on ASCII (no Unicode trim) and refuses an inline token anywhere after the type; unit cases: U+00A0 before attachment, attachment; x; inline, U+2028, a quote, a backslash, CR and LF, a 300-character name and an all-non-ASCII name; (4) ONE typed key builder (modules/documents/document-keys.ts) is the only code that constructs a key string — UUID-typed parts and closed enums, the organisation id taken from the tenant context and never from request input, the grammar of ADR-0021 Decision 2; the port additionally rejects a . segment, an empty segment and a trailing / (the store answers 400 to two of those), caps the total metadata bytes (names plus values) at 2048 with INVALID_ARGUMENT before any I/O instead of an S3 MetadataTooLarge reported as UNEXPECTED, and imports the bucket predicate from the single S3_BUCKET definition of packages/config; (5) result precision (PR30-SEC-10): get().contentLength is the number of bytes read, an SDK-detected checksum mismatch on the response is INTEGRITY_MISMATCH instead of UNEXPECTED, and put compares the echoed ChecksumSHA256 with the digest it sent when the response carries one (the contract suites on RustFS now and on real S3 before G4-production pin that it is carried)
 - AT-US-220-01 … AT-US-220-07: all 7 scenarios of US-220, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -475,7 +478,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-225 **DC** (M1 Must) Pre-signed download URL after permission and tenant check<br>US-072 (M1 Must) Download and export routes with their own permission |
 | REQs | REQ-DOC-007, REQ-RBAC-012 |
 | NFRs | NFR-SEC-011, NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-09 |
+| Spikes / security / decisions | SEC-P3-09, PR30-SEC-02, PR30-SEC-09, D-ARCH-097 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-147, TASK-060 |
@@ -489,6 +492,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-225 and US-072 scenarios
 - SEC-TC-52 (permission part): Viewer gets 403 + PERMISSION_DENIED audit on getDocumentDownloadUrl
+- DOWNLOAD ROUTE CHECKS (ADR-0021 am. 3 items 1 and 2, D-ARCH-097; PR #30 security r2 R2.7; routed from TASK-147): the route calls only the documents facade presignDownload (no direct storage call); the returned URL carries response-content-type equal to the stored type, response-content-disposition attachment, SignedHeaders host, an expiry of at most 300 s and the row versionId; Cache-Control: no-store on the download JSON; no log line and no response other than that one JSON body contains X-Amz-Signature or any other X-Amz parameter; tamper variants (dropping or changing a response-* parameter) get 403 from the store; an end-to-end fetch through the edge store vhost (TASK-014) shows 200, the forced type, attachment and X-Content-Type-Options: nosniff; the SEC-TC for the download path covers expiry, tamper, method restriction and the DOWNLOAD audit entry (AC-37, NFR-SEC-013)
 - AT-US-225-01 … AT-US-225-08: all 8 scenarios of US-225, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-072-01 … AT-US-072-04: all 4 scenarios of US-072, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

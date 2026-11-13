@@ -61,7 +61,13 @@ describe('bootstrap lane files (data-model §4.4, §8.1)', () => {
   const files = listBootstrapFiles(DEFAULT_BOOTSTRAP_DIR);
 
   it('lists the lane in file-name order with SHA-256 digests of the bytes', () => {
-    expect(files.map((file) => file.name)).toEqual(['00-roles.sql', '01-schemas.sql', '02-role-backstops.sql']);
+    expect(files.map((file) => file.name)).toEqual([
+      '00-roles.sql',
+      '01-schemas.sql',
+      '02-role-backstops.sql',
+      '10-audit.sql', // TASK-021: audit store, under SET ROLE platform_audit_owner
+      '90-audit-ddl-guard.sql', // TASK-021: identity-based DDL guard (event triggers), bootstrap-role owned
+    ]);
     expect(files.every((file) => file.sha256.length === 32)).toBe(true);
   });
 

@@ -18,3 +18,4 @@
 - [PR #20 fc2 union](feedback_pr20_fc2_union.md) — union merge traps (interface merging, auto-kept lines), resolution reuse on re-merge, lock starvation, vacuous tests
 - [PR #26 fc1](feedback_pr26_fc1.md) — DECISIONS.md rebuild-from-main recipe, prettier trap on docs, commitlint range, required-dep ripple
 - [PR #30 fc1](feedback_pr30_fc1.md) — scratchpad wiped mid-run, Jest realm drops SDK error code, smithy requestTimeout warn-only, loopback SDK pins
+- [Lane B evidence run](feedback_lane_b_evidence_run.md) — scripted install+gates+lock, hostscan, check-evidence; use && before push
