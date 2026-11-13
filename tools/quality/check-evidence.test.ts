@@ -712,3 +712,156 @@ describe('check-evidence: --event (PR #23 R1-m3)', () => {
     expect(check(f, f.code, ['--event', 'push', '--profile', 'pr']).status).toBe(0);
   });
 });
+
+describe('check-evidence: staleness for agent notes and the git mode guard (D-SEC-PR28-01, PR28-SEC-03)', () => {
+  const NOTE = '.claude/agent-memory/qa-lead/zz.md';
+
+  /** A passing run on `code`, then `change` applied and committed; returns the checker result at the new head. */
+  function afterEvidence(change: (root: string) => void): RunResult {
+    const { f } = withRun();
+    change(f.root);
+    git(f.root, ['commit', '-q', '-m', 'chore: later change']);
+    return check(f, git(f.root, ['rev-parse', 'HEAD']));
+  }
+
+  /** Stages a path as a git entry of the given mode without touching the working tree (no symlink support needed). */
+  function stageMode(root: string, mode: '120000' | '160000' | '100755', path: string): void {
+    const blob = git(root, ['hash-object', '-w', 'docs/README.md']);
+    git(root, ['update-index', '--add', '--cacheinfo', `${mode},${blob},${path}`]);
+  }
+
+  it('an agent note added and an index file edited after the evidence keep it fresh', () => {
+    const result = afterEvidence((root) => {
+      write(root, NOTE, 'note\n');
+      write(root, '.claude/agent-memory/qa-lead/MEMORY.md', '# index\n');
+      git(root, ['add', '-A']);
+    });
+    expect(result.stdout).toContain('accepted');
+    expect(result.status).toBe(0);
+  });
+
+  it.each([
+    ['settings.json', '.claude/settings.json'],
+    ['an agent definition', '.claude/agents/zz.md'],
+    ['a command', '.claude/commands/zz.md'],
+    ['a nested note', '.claude/agent-memory/qa-lead/sub/zz.md'],
+    ['a non-markdown file in an agent directory', '.claude/agent-memory/qa-lead/zz.sh'],
+  ])('%s changed after the evidence makes it stale', (_what, path) => {
+    const result = afterEvidence((root) => {
+      write(root, path, 'x\n');
+      git(root, ['add', '-A']);
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('stale: 1 path(s)');
+    expect(result.stdout).toContain(path);
+  });
+
+  it.each([
+    ['a symlink', '120000'],
+    ['a submodule', '160000'],
+    ['an executable', '100755'],
+  ] as const)('%s named like an agent note makes the evidence stale (mode guard)', (_what, mode) => {
+    const result = afterEvidence((root) => stageMode(root, mode, NOTE));
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('stale: 1 path(s)');
+    expect(result.stdout).toContain(NOTE);
+  });
+
+  it('an executable docs file is stale too, and a plain regular note is not', () => {
+    expect(afterEvidence((root) => stageMode(root, '100755', 'docs/tool.md')).status).toBe(1);
+    expect(
+      afterEvidence((root) => {
+        write(root, NOTE, 'one\n');
+        git(root, ['add', '-A']);
+      }).status,
+    ).toBe(0);
+  });
+});
+
+describe('check-evidence: required_cases_pending (D-QA-014, PR28-SEC-01)', () => {
+  const entry = { case: 'SEC-TC-14', owner: 'TASK-049', checkpoint: 'v0.1.0-m0' };
+
+  /** A run of `profile` for a manifest with the given pending list; the e2e-chromium gate suite is deferred. */
+  function pendingRun(
+    profile: 'pr' | 'wave' | 'gate',
+    pending: Record<string, unknown[]>,
+    unitCases: Case[] = [{ name: 'adds numbers', status: 'passed' }],
+  ): { f: Fixture; head: string } {
+    const f = fixture({
+      ...MANIFEST,
+      deferred_at_gate: [{ suite: 'e2e-chromium', decision: 'D-QA-099' }],
+      required_cases_pending: pending,
+    });
+    const run = buildRun(f.code, { ...DEFAULT_CASES, unit: unitCases });
+    run.summary.profile = profile;
+    writeRun(f.root, run);
+    return { f, head: commitAll(f.root, `test(evidence): heavy lane ${profile} ${f.code.slice(0, 7)} PASS`) };
+  }
+
+  it('gate profile: a non-empty pending list whose checkpoint is reached FAILs and names the entry', () => {
+    const { f, head } = pendingRun('gate', { unit: [entry] });
+    const result = check(f, head, ['--profile', 'gate']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('gate profile: required_cases_pending not empty: unit:SEC-TC-14');
+  });
+
+  it('gate profile: the entry carrying a decision ID passes', () => {
+    const { f, head } = pendingRun('gate', { unit: [{ ...entry, decision: 'D-QA-099' }] });
+    const result = check(f, head, ['--profile', 'gate']);
+    expect(result.stdout).not.toContain('required_cases_pending not empty');
+    expect(result.status).toBe(0);
+  });
+
+  it('gate profile: an empty pending list passes', () => {
+    const { f, head } = pendingRun('gate', {});
+    expect(check(f, head, ['--profile', 'gate']).status).toBe(0);
+  });
+
+  it.each([
+    ['Wave-0 exit', 1],
+    ['v0.1.0-m0', 0],
+    ['G3', 0],
+  ])('wave profile: checkpoint %s -> exit %i', (checkpoint, status) => {
+    const { f, head } = pendingRun('wave', { unit: [{ ...entry, checkpoint }] });
+    expect(check(f, head, ['--profile', 'wave']).status).toBe(status);
+  });
+
+  it('pr profile: a pending list is never a problem, whatever its checkpoint', () => {
+    const { f, head } = pendingRun('pr', { unit: [{ ...entry, checkpoint: 'Wave-0 exit' }] });
+    expect(check(f, head).status).toBe(0);
+  });
+
+  const carrying: Case[] = [
+    { name: 'adds numbers', status: 'passed' },
+    { name: '[SEC-TC-14] bcrypt pre-hashes before the 72-byte limit', status: 'passed' },
+  ];
+
+  it('wave profile: a passing test case carrying a parked ID FAILs (the ID is implemented)', () => {
+    const { f, head } = pendingRun('wave', { unit: [{ ...entry, checkpoint: 'G3' }] }, carrying);
+    const result = check(f, head, ['--profile', 'wave']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('wave profile: pending ID SEC-TC-14 is implemented in suite unit');
+  });
+
+  it('pr profile: the same run is a NOTE only, so the PR that adds the test is not deadlocked', () => {
+    const { f, head } = pendingRun('pr', { unit: [{ ...entry, checkpoint: 'G3' }] }, carrying);
+    const result = check(f, head);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('note: pending ID SEC-TC-14 is implemented in suite unit');
+  });
+
+  it('a longer ID does not count as carrying the parked ID (prefix match)', () => {
+    const { f, head } = pendingRun('wave', { unit: [{ ...entry, checkpoint: 'G3' }] }, [
+      { name: 'adds numbers', status: 'passed' },
+      { name: '[SEC-TC-140] some other case', status: 'passed' },
+    ]);
+    const result = check(f, head, ['--profile', 'wave']);
+    expect(result.stdout).not.toContain('is implemented');
+    expect(result.status).toBe(0);
+  });
+
+  it('a malformed pending entry makes the checker exit 2 (never read as nothing parked)', () => {
+    const { f, head } = pendingRun('pr', { unit: [{ ...entry, checkpoint: 'someday' }] });
+    expect(check(f, head).status).toBe(2);
+  });
+});

@@ -17,3 +17,4 @@
 - [PR #24 fc1](feedback_pr24_fc1.md) — guard post-state invariant breaks committed-squat fixtures; reset-to-fix-commit re-merge; D-ORCH-034 lane B step
 - [PR #20 fc2 union](feedback_pr20_fc2_union.md) — union merge traps (interface merging, auto-kept lines), resolution reuse on re-merge, lock starvation, vacuous tests
 - [PR #26 fc1](feedback_pr26_fc1.md) — DECISIONS.md rebuild-from-main recipe, prettier trap on docs, commitlint range, required-dep ripple
+- [PR #30 fc1](feedback_pr30_fc1.md) — scratchpad wiped mid-run, Jest realm drops SDK error code, smithy requestTimeout warn-only, loopback SDK pins

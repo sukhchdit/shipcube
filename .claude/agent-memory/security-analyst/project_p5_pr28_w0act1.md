@@ -27,4 +27,6 @@ PR #28 review: `docs/05-quality/security/PR-0028-W0-ACT-1-security-review.md` (R
 - **G3:** `required_cases_pending` empty, gate transcript, SEC-P3-07 items 5 and 6.
 - **Every later evidence commit:** the D-SEC-PR23-02 gate table until 03/04/05 merge.
 
-Related: [[project-p5-pr23-lane-b]], [[project-p5-pr10-ci-lane]], [[project-security-review-conventions]]
+**Update 2026-11-13:** the staleness PR is #31, reviewed PASS_WITH_FOLLOW-UPS at 69a997c; PR28-SEC-01 and -02 are closed there, PR28-SEC-03 items 1-5 done (item 6 `.dockerignore` open). See [[project-p5-pr31-staleness-scrub]].
+
+Related: [[project-p5-pr23-lane-b]], [[project-p5-pr10-ci-lane]], [[project-security-review-conventions]], [[project-p5-pr31-staleness-scrub]]
