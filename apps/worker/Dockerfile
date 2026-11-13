@@ -115,7 +115,7 @@ COPY --from=build /app/apps/worker/package.json /app/apps/worker/package.json
 COPY --from=build /app/apps/worker/dist /app/apps/worker/dist
 COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh
 WORKDIR /app/apps/worker
-USER node
+USER 1000:1000
 # ADR-0022 am. 13: every production module and @platform entry point loads from dist without --conditions.
 RUN node dist/preflight.js
 EXPOSE 9464

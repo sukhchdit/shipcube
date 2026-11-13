@@ -120,7 +120,7 @@ COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY docs/03-architecture/api/openapi.yaml /app/docs/03-architecture/api/openapi.yaml
 COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh
 WORKDIR /app/apps/api
-USER node
+USER 1000:1000
 # ADR-0022 am. 13: every production module and @platform entry point loads from dist without --conditions.
 RUN node dist/preflight.js
 EXPOSE 3000

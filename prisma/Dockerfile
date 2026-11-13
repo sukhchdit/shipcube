@@ -78,7 +78,7 @@ COPY packages/authz/package.json packages/authz/
 COPY packages/authz/src/ packages/authz/src/
 COPY packages/config/package.json packages/config/
 COPY packages/config/src/ packages/config/src/
-USER node
+USER 1000:1000
 # SEC-TC-64 (vi) at build time too: the verified engine and the CLI work with no network and no database.
 RUN tools/docker/tooling-entrypoint.sh prisma-version
 ENTRYPOINT ["/app/tools/docker/tooling-entrypoint.sh"]

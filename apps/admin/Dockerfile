@@ -48,7 +48,7 @@ LABEL org.opencontainers.image.title="shipcube-admin" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="UNLICENSED"
-USER root
+USER 0
 # PR4-SEC-02 / PR4-SEC-12 (sheet line 537): the stock default.conf would still answer Host: localhost and IPv6, and the
 # stock html/ holds 50x.html; both go BEFORE the template and the static build are copied.
 RUN rm -f /etc/nginx/conf.d/default.conf \
@@ -56,9 +56,9 @@ RUN rm -f /etc/nginx/conf.d/default.conf \
 # The template's only placeholder is ${NGINX_PORT}; it is rendered once at build time (8080 is fixed in this image) to
 # a root-owned file, so the container needs no writable conf.d and runs with a read-only root filesystem.
 COPY infra/nginx/admin.conf.template /tmp/admin.conf.template
-RUN sed 's/\${NGINX_PORT}/8080/g' /tmp/admin.conf.template > /etc/nginx/conf.d/admin.conf \
+RUN sed "s/[\$]{NGINX_PORT}/8080/g" /tmp/admin.conf.template > /etc/nginx/conf.d/admin.conf \
  && rm /tmp/admin.conf.template \
- && if grep -q '\${' /etc/nginx/conf.d/admin.conf; then echo 'unrendered placeholder in admin.conf' >&2; exit 1; fi \
+ && if grep -qF "\${" /etc/nginx/conf.d/admin.conf; then echo 'unrendered placeholder in admin.conf' >&2; exit 1; fi \
  && chmod 0644 /etc/nginx/conf.d/admin.conf
 # ONLY build/client/ (never build/server/).
 COPY --from=build /app/apps/admin/build/client/ /usr/share/nginx/html/
