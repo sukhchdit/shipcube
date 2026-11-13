@@ -626,4 +626,32 @@ describe('string-redaction: linear time', () => {
     maskEmails(input);
     expect(performance.now() - started).toBeLessThan(50);
   });
+
+  // PR20-SEC-18: quoted sensitive names, each followed by a comma and an escaped quote, whose escaped values close only
+  // at the end of the string (`\":`), so every item is an object key. An absolute bound cannot tell this shape apart
+  // (the cap keeps the quadratic case near 30 ms), so the test asserts growth: 16x the input may take at most 20x the
+  // time (linear: about 11x; the quadratic re-scan: about 100x).
+  it('[PR20-SEC-18] list items that close only at the end of the string: 16x the input takes at most 20x the time', () => {
+    const unit = String.raw`"token",\"`;
+    const closer = String.raw`\":`;
+    const shaped = (length: number): string => `${unit.repeat(Math.ceil(length / unit.length)).slice(0, length - closer.length)}${closer}`;
+    const perCall = (text: string, calls: number): number => {
+      const started = performance.now();
+      for (let call = 0; call < calls; call += 1) redactString(text);
+      return (performance.now() - started) / calls;
+    };
+    const median = (samples: readonly number[]): number => [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)] ?? 0;
+    const small = shaped(MAX_STRING_LENGTH / 16);
+    const large = shaped(MAX_STRING_LENGTH);
+    expect(redactString(large)).toBe(large); // every item is an object key, so the pair pass sees it unchanged
+    perCall(small, 32);
+    perCall(large, 2); // warm-up
+    // The best of three medians: scheduler noise only ever raises a ratio, and a quadratic pass cannot get below 20x.
+    const ratios = [0, 1, 2].map(() => {
+      const largeTime = median([0, 1, 2, 3, 4].map(() => perCall(large, 4)));
+      const smallTime = median([0, 1, 2, 3, 4].map(() => perCall(small, 64)));
+      return largeTime / smallTime;
+    });
+    expect(Math.min(...ratios)).toBeLessThanOrEqual(20);
+  });
 });

@@ -421,7 +421,9 @@ function startsPair(text: string, end: number): boolean {
 /**
  * Replaces the item after every quoted sensitive name of a list (see QUOTED_LIST_ITEM): `["Cookie","v"]` ->
  * `["Cookie",[REDACTED]]`. An item followed by a separator is an object key (`{"t":"token","password":"v"}`) and is
- * left to the pair pass, so this pass never hides a key from it.
+ * left to the pair pass, so this pass never hides a key from it. Every scanned item moves `lastIndex` past it, the
+ * object-key case included, so no character is scanned twice (linear; PR20-SEC-18: re-scanning from the match end was
+ * quadratic for escaped values that close only at the end of the string).
  */
 function redactQuotedLists(text: string): string {
   const pattern = new RegExp(QUOTED_LIST_ITEM.source, 'g');
@@ -431,7 +433,10 @@ function redactQuotedLists(text: string): string {
     if (!isSensitivePairKey(match[3] ?? '')) continue;
     const start = match.index + match[0].length;
     const end = valueEnd(text, start, false);
-    if (startsPair(text, end)) continue;
+    if (startsPair(text, end)) {
+      pattern.lastIndex = end;
+      continue;
+    }
     output += `${text.slice(copied, start)}${REDACTED}`;
     copied = end;
     pattern.lastIndex = end;
