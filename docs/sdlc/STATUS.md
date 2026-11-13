@@ -48,6 +48,7 @@
 | 0.9 | TASK-032 server-controlled standard columns + UTC + on-behalf seam | senior-developer → database-engineer | feat/TASK-032-server-controlled-standard-columns-utc | 🟡 building (D-ORCH-023) | | | | | 0 | |
 | 0.6 | TASK-018 SPK-04 audit write throughput spike | senior-developer → performance-engineer (opus) | feat/TASK-018-spk-04-spike-audit-write | 🟡 building (D-ORCH-025) | | | | | 0 | |
 | 0.x | CI follow-up: PR10-SEC-08 gitleaks OpenAPI allowlist removal + Dependabot typescript-major ignore (PR #25; D-ORCH-027) | devops-engineer (sonnet) | ci/TASK-007-fu-… @20a0fc6 | ✅ | ✅ r1 APPROVED_WITH_NITS (N1–N3 test-hardening → next .gitleaks/dependabot change, TASK-015) | r1 ▶ | ✅ tools/ci 441, policy 0 findings; lane A fast-lane + gitleaks + semgrep green | | 0 | reviews ▶ → record → merge |
+| 0.x | W0-ACT-1 suite activation (manifest-only; D-ARCH-082/D-ORCH-030) | qa-lead | chore/W0-ACT-1-… | 🟡 building | | | | | 0 | |
 
 ## Escalations in progress
 - **Gitleaks contamination watch (PR13-SEC-11):** main commits 63accea..7f8ec4f quoted a synthetic secret-shaped literal (scrubbed in 2e29004). In-flight branches TASK-016 (PR #11) and TASK-004 (PR #4) merged main locally while it contained it (unpushed at 20:3xZ). If their lane A gitleaks goes red on push, supersede each with a fresh branch from main carrying the final reviewed tree (D-ORCH-017 pattern), then a supersede security round naming the new head. — PR #11 resolved via PR #18 (merged 0a065b4); PR #4 avoided it (re-merged before push).
