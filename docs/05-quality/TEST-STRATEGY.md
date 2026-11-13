@@ -7,7 +7,7 @@
 | Owner | qa-lead |
 | Consumers | senior-developer (task DAG and DoD), test-engineer, e2e-test-engineer, test-runner, accessibility-auditor, performance-engineer, security-analyst, devops-engineer, quality-gatekeeper (G3) |
 | Inputs | CLAUDE.md §2, §3, §6, §8; `docs/sdlc/BRIEF.md` §9, §11; `docs/01-requirements/NFR.md` v1.3, `PRD.md` §4 and §6, `stories/EPIC-*.md` v1.3; ADR-0023 (amendments A–H), ADR-0024 (+ amendment); `platform.md` §7; `nfr-strategy.md`; `nfr-traceability.md`; `threat-model.md` §10; `risks.md`; `docs/05-quality/security/P3-architecture-security-review.md` §9 and §14; `docs/02-ux/accessibility.md` §10 |
-| Companion files | [`tests/required-suites.json`](tests/required-suites.json) (required-suite manifest) · [`tests/security-test-cases.md`](tests/security-test-cases.md) (SEC-TC-01..64) · [`tests/e2e-journeys.md`](tests/e2e-journeys.md) (critical journeys) · [`tests/gherkin-test-map.md`](tests/gherkin-test-map.md) (every Must scenario → test ID and suite) · `../03-architecture/nfr-traceability.md` (Test(s) column: every NFR → tests, lane and evidence) |
+| Companion files | [`tools/quality/required-suites.json`](../../tools/quality/required-suites.json) (required-suite manifest) · [`tests/security-test-cases.md`](tests/security-test-cases.md) (SEC-TC-01..64) · [`tests/e2e-journeys.md`](tests/e2e-journeys.md) (critical journeys) · [`tests/gherkin-test-map.md`](tests/gherkin-test-map.md) (every Must scenario → test ID and suite) · `../03-architecture/nfr-traceability.md` (Test(s) column: every NFR → tests, lane and evidence) |
 | Decisions | D-QA-001 … D-QA-013 in `docs/sdlc/DECISIONS.md` |
 
 The purpose of this document is to make gate G3 decidable. It answers five questions for every obligation in the run: **what** is tested, **where** (lane A, B or C), **with which tool**, **against which threshold**, and **which evidence file** proves it. Section 15 is the checklist that quality-gatekeeper verifies.
@@ -135,7 +135,7 @@ The lane model is fixed by D-ORCH-001, D-ARCH-010 and D-ARCH-021 (ADR-0023 amend
 
 ### 4.3 Suite selection per change (summary of the manifest)
 
-The authoritative content is `tests/required-suites.json` (`path_rules`). It implements the ADR-0023 amendment C table and adds rows for risk areas the table groups together.
+The authoritative content is `tools/quality/required-suites.json` (`path_rules`). It implements the ADR-0023 amendment C table and adds rows for risk areas the table groups together.
 
 | Changed paths (glob) | Lane B suites required on the `pr` profile |
 |---|---|
@@ -411,7 +411,7 @@ Rules:
 docs/05-quality/
   TEST-STRATEGY.md                  this file (qa-lead)
   tests/
-    required-suites.json            manifest draft; moves to tools/quality/required-suites.json in Wave 0 (D-QA-001)
+    (required-suites.json)          moved to tools/quality/required-suites.json in Wave 0 (T-QA-01, D-QA-001)
     security-test-cases.md          SEC-TC-01..64 adoption (qa-lead)
     e2e-journeys.md                 journeys (qa-lead)
     gherkin-test-map.md             Must scenario → AT ID → suite (generated, qa-lead)
@@ -433,7 +433,7 @@ The file-name allow-list of the run directories = the fixed names above + `<suit
 
 ### 9.2 Required-suite manifest
 
-`tests/required-suites.json` lists, for every suite: lane, runner, report name, `security`/`zero_skip`, `status` (`planned` or `active`), `min_tests`, `required_cases` (SEC-TC IDs that must appear by name and pass), activation trigger, and the NFRs it serves. It also holds the per-profile suite sets, the changed-path rules (§4.3), the security-critical path list (SEC-P3-07 item 5 + SEC-P3-31), and `tooling_inputs` (staleness allow-list exclusions).
+`tools/quality/required-suites.json` (moved from `tests/` by T-QA-01, D-QA-001) lists, for every suite: lane, runner, report name, `security`/`zero_skip`, `status` (`planned` or `active`), `min_tests`, `required_cases` (SEC-TC IDs that must appear by name and pass), activation trigger, and the NFRs it serves. It also holds the per-profile suite sets, the changed-path rules (§4.3), the security-critical path list (SEC-P3-07 item 5 + SEC-P3-31), and `tooling_inputs` (staleness allow-list exclusions).
 
 `quality:check-evidence` (devops-engineer, Wave 0) enforces, from the **base-ref copy** of the manifest and scripts (SEC-P3-31):
 

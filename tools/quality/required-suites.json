@@ -1,5 +1,5 @@
 {
-  "$comment": "Required-suite manifest (ADR-0023 amendment G item 2, SEC-P3-07). Content owner: qa-lead. P4 draft; Wave 0 task T-QA-01 moves it verbatim to tools/quality/required-suites.json (canonical, code-owned, read from the base ref per SEC-P3-31). Until then this file is authoritative (D-QA-001). Rules: docs/05-quality/TEST-STRATEGY.md section 9.",
+  "$comment": "Required-suite manifest (ADR-0023 amendment G item 2, SEC-P3-07). Content owner: qa-lead. Moved verbatim from docs/05-quality/tests/required-suites.json by Wave 0 task T-QA-01 (TASK-011); this is the canonical, code-owned copy, read from the base ref per SEC-P3-31 (D-QA-001). Rules: docs/05-quality/TEST-STRATEGY.md section 9.",
   "manifest_version": 1,
   "date": "2026-11-12",
   "owner": "qa-lead",
