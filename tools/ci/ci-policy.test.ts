@@ -254,6 +254,20 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
     expect(ciText).toContain('npm exec --no -- commitlint');
   });
 
+  it('SEC-TC-48 (CI part, TASK-011): lane B evidence is verified by the base-ref tools/quality after npm ci and before any head code; the head copy only reports (bootstrap)', () => {
+    const index = indexOf(/Lane B evidence \(quality:check-evidence\)/);
+    const run = str(steps[index]?.run);
+    expect(steps[index]?.if).toBeUndefined();
+    expect(run).toContain('git archive "$RANGE_BASE" tools/quality');
+    expect(run).toContain(
+      'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD"',
+    );
+    expect(run).toMatch(/node "\$quality\/head\/tools\/quality\/check-evidence\.mjs" .*--report-only$/m);
+    expect(run).not.toContain('|| true');
+    expect(index).toBeGreaterThan(indexOf(/npm ci --ignore-scripts/));
+    expect(index).toBeLessThan(indexOf(/npm run deps:rebuild/));
+  });
+
   it('D-TASK007-08: commitlint gates the PR title (the squash header) via env, never interpolated into the script; a commit-msg hook lints every local commit', () => {
     const step = steps.find((candidate) => str(candidate.name).startsWith('Commit messages'));
     const env = map(step?.env, 'commitlint env');
