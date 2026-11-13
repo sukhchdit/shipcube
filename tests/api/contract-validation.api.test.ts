@@ -139,6 +139,26 @@ describe('US-034 response validation helper', () => {
       .expect((res) => expect(res.body).toMatchObject({ status: 'degraded', components: { audit_partitions: 'degraded' } }));
   });
 
+  it('[SEC-TC-29] an authenticated operation answers with Cache-Control: private, no-store, checked by the shared helper', async () => {
+    // getShipment declared as the session-authenticated route it is; the authn slot answers 401 AUTH_REQUIRED until
+    // TASK-052, and the helper validates the response against the contract including the SEC-TC-29 cache check.
+    const getShipment = fixtureRoute({
+      operationId: 'getShipment',
+      path: '/shipments/:shipmentId',
+      permission: 'shipment:read',
+      permissionJustification: undefined,
+      tenancy: 'tenant',
+      auth: 'session',
+      transaction: 'tenant',
+      schema: { params: Joi.object({ shipmentId: Joi.string().guid().required() }) },
+      handler: () => ({ status: 200, body: {} }),
+    } as Parameters<typeof fixtureRoute>[0]);
+    const client = await api(appWith([], [{ name: 'shipments', routes: [getShipment] }]));
+    const response = await client.get('/api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01').expect(401);
+    expect(response.headers['cache-control']).toBe('private, no-store');
+    expect((response.body as { code?: string }).code).toBe('AUTH_REQUIRED');
+  });
+
   it('framework errors conform: unknown route 404 NOT_FOUND and wrong method 405 with Allow', async () => {
     const client = await api(healthApp());
     await client.get('/api/v1/does-not-exist?token=abc').expect(404);
