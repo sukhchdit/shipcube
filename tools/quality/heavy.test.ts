@@ -5,7 +5,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 
@@ -346,7 +346,7 @@ function git(cwd: string, args: string[]): void {
 }
 
 /** A throw-away repository with a manifest, a runner file and a build script (dirty = the build writes a file). */
-function fixtureRepo(options: { dirtyBuild: boolean }): string {
+function fixtureRepo(options: { dirtyBuild: boolean; junit?: string }): string {
   const dir = mkdtempSync(join(tmpdir(), 'heavy-e2e-'));
   temps.push(dir);
   const write = (rel: string, content: string) => {
@@ -365,7 +365,9 @@ function fixtureRepo(options: { dirtyBuild: boolean }): string {
       : 'export {};\n',
   );
   write('tools/quality/required-suites.json', JSON.stringify(manifestJson()));
-  const junit = '<testsuite name="fake" tests="2"><testcase name="[SEC-TC-48] verdict recomputed"/><testcase name="second"/></testsuite>';
+  const junit =
+    options.junit ??
+    '<testsuite name="fake" tests="2"><testcase name="[SEC-TC-48] verdict recomputed"/><testcase name="second"/></testsuite>';
   write(
     'tools/quality/suite-runners.json',
     JSON.stringify({
@@ -430,6 +432,31 @@ describe('quality:heavy CLI end to end (temp git repository, fake command suite)
     expect(summary['lockfile_sha256']).toBe(createHash('sha256').update(lock).digest('hex'));
     expect(md.split('\n')[0]).toBe(`sha ${dirName.slice(-7)} · ${dirName.slice(0, 14)} · profile wave · verdict PASS`);
     expect(md).toContain('Skipped by manifest (status planned, never reported as JUnit): later');
+  });
+
+  it('[PR28-SEC-02] host paths (temp directory, its real path, a user-profile path) never reach the committed JUnit or summary', () => {
+    const tmp = tmpdir();
+    const real = realpathSync.native(tmp);
+    const profile = String.raw`C:\Users\Zebediah\AppData\Local\Temp`;
+    const short = String.raw`C:\Users\ZEBEDI~1\AppData\Local\Temp`;
+    const junit =
+      '<testsuite name="fake" tests="3">' +
+      `<testcase name="[SEC-TC-48] refuses ${tmp}/outside-1/s"/>` +
+      `<testcase name="real ${real}/outside-2/s"/>` +
+      `<testcase name="profile ${profile}/x and ${short}/y and /home/zebediah/z"/>` +
+      '</testsuite>';
+    const dir = fixtureRepo({ dirtyBuild: false, junit });
+    const out = join(dir, 'out');
+    const run = runNode([heavy, '--profile', 'wave', '--out-root', out], { cwd: dir, env: cliEnv(), timeoutMs: 180_000 });
+    expect(run.status).toBe(0);
+    const runDir = join(out, 'tests', 'runs', String(readdirSync(join(out, 'tests', 'runs'))[0]));
+    for (const name of readdirSync(runDir)) {
+      const text = readFileSync(join(runDir, name), 'utf8');
+      const fragments = [tmp, real, 'Zebediah', 'ZEBEDI', dir];
+      for (const fragment of [...fragments, ...fragments.map((f) => f.replaceAll('\\', '/'))])
+        expect({ file: name, leaks: text.toLowerCase().includes(fragment.toLowerCase()) }).toEqual({ file: name, leaks: false });
+    }
+    expect(readFileSync(join(runDir, 'fake.junit.xml'), 'utf8')).toContain('[SEC-TC-48] refuses &lt;root&gt;');
   });
 
   it('[R-ARCH-21] a build that leaves a file behind yields build_clean false and INVALID (exit 1)', () => {

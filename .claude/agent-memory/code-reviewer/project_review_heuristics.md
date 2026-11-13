@@ -165,6 +165,8 @@ Round 2 of a spike PR (PR #6 r2):
 - **PII key lists:** grep the project's own `openapi.yaml` for `*_name`/`*_ip` keys (`display_name`, `receiver_name`) and test them against the class. Generic lists miss domain keys. Never suggest a bare `ip` suffix (it matches `ship`, `relationship`).
 - **Budgeted walkers:** `Object.keys(v)` before `slice(0, MAX_KEYS)` is uncharged. Probe 100 references to one 300k-key object (2 s). Budgets measured before JSON escaping, or excluding `err`, do not bound the line (quotes double it; a 50 KB line).
 - **Free-text values that start with `[` or `{`** end at the first `,`, so the second array item leaks. Also probe PEM blocks and full-width keys (an ASCII-only key regex sees no key at all).
+- **Round 3 of a redactor (PR #20 r3):** run a sentinel probe over every new pass PLUS the neighbours of its lead set (`|;{@` for a `(=:,[` target-lead set), double-escaped JSON, and an omitted key whose value is an object (`query: { a, b }` ends at first comma). Over-redaction from free-text omitted/suffix classes (`curl:` hits `url`) is fail-closed; rule it, do not block. Re-check the boundary policy carve-outs: `TEST_FILES` includes `{test,tests,__tests__}/**` dirs, so a module re-exporting `./test/x.js` is a two-hop bypass.
+- **Flush-before-exit helpers:** test the premise with a real child process (pipe stdout, paused reader, 4 MB line, bare `process.exit` control) and count timer ticks between crash and exit. On Windows 11 / Node 24, `process.stdout` to a pipe was synchronous (control lossless); only TTYs are async. Also confirm a top-level ESM throw reaches `uncaughtException` (it does).
 - **Semantic auto-merge traps:** `git merge-tree` shows the textual conflicts, but the CLEAN side may keep a line that a cross-PR ruling says to change (PR #20's `routes.use(prefix, mw, api)`). Print the merged function body and check every ruling line.
 
 **Event-trigger DDL guards (PR #24, 2026-11-13).**
@@ -173,6 +175,9 @@ Round 2 of a spike PR (PR #6 r2):
   - Already covered by the per-command reports or the PR12-SEC-02-a fix: identity sequences, constraint-backed indexes, EXCLUDE.
 - Ask for a post-command catalogue INVARIANT (no non-owner object under the reserved names in protected schemas) rather than enumerating command forms.
 - Probe it on PGlite (see [[scratch-copy-technique]]).
+- Round 2 of a post-state invariant: rerun the SAME probe file against the OLD guard blob as the negative control (it should accept the bypasses), then against the new one. Plant pre-existing squats with the event trigger suspended (`ALTER EVENT TRIGGER … DISABLE` inside a rolled-back transaction) to test the "everything blocked while a squat exists" consequence. Also check whether each kind of squat can be DROPPED: a `sql_drop` name match can make relation, index and function squats undroppable.
+- Operator-hijack readiness probes: a planted `public.=(oid, integer)` is only usable once it is GRANTed (functions lose PUBLIC EXECUTE by default privileges). Plant the operator BEFORE the squat, because an existing squat makes the invariant refuse the CREATE OPERATOR too.
+- In JS `String.replace`, a replacement text containing `$f$'` expands `$'`. Pass a function replacer when editing SQL-bearing probe files.
 
 **Contract-pipeline unions.** The api tests may keep their own copy of an app constant (contract-validation's CRITICAL list). A PR that changes the constant in the app passes on its own base and breaks on the merge. Always run the api project on `git merge-tree` output.
 
@@ -185,3 +190,35 @@ Round 2 of a spike PR (PR #6 r2):
 - Evidence windows ordered by an attacker-controlled stamp can only deny, not forge; confirm that runs touched by the range are always evaluated.
 
 **Tripwire-on-a-security-flag pattern (PR #23 r2, good):** `swap(run, from, to)` mutations + a findings function, asserted `changed: true, findings: true` for every variant (appended, prepended, valued, in comment, dropped, doubled, `|| true`). Ask for this shape whenever a PR pins a flag that disables a gate (`--report-only`, `continue-on-error`). Always re-mutate the real file in an extract as well.
+
+**Benchmark / load-spike PRs (PR #27 SPK-04, 2026-11-13).**
+- Check the verdict against the PR's own validity rule: count valid arms per run in `summary.json` (`validity.valid`). "Structural" claims need at least one valid arm; otherwise the honest word is "not demonstrated".
+- Re-read every number the prose cites against the artefact by arm (the `docker stats` 54% was from the collapsed `off` arm, not the arm discussed). Grep the artefacts for any figure that has no source (`0.26 cores`).
+- Test the doc's mechanism with arithmetic: M/D/1 mean wait = rho*h/(2(1-rho)). A model that predicts 3 ms where 98 ms is measured means the mechanism (or the host) is not what the doc says.
+- Same configuration at two rates with a 10x worse tail at the LOWER rate = uncontrolled variable (order, DB state, host), so that arm cannot be ranked.
+- Fixed arm order + one DB across arms: the next repetition's baseline inherits the previous (possibly invalid) arm. Flag pooled mean-of-2 deltas.
+- Kept spike harness vs sheet "throwaway not merged": ask whether any CI lane executes it. SPK-03/08 precedent was `*.int.test.ts` (CI-run, named porting task). A runner needing Docker + k6 is not comparable. Cross-check open sibling PRs for deletions of files the harness reads (`gh pr view N --json files` shows deletions; `git show origin/prN:path`); fetch with `git fetch origin pull/N/head:refs/remotes/origin/prN` then delete the ref.
+- Prototype SQL reused from an earlier spike can carry design artefacts the data-model later removed (audit_entries RLS); advice derived from them (no RETURNING under RLS) must be marked prototype-specific.
+- Cheap independent checks that worked: canonicalize differential vs the installed `canonicalize` pkg (20k random, 0 diffs; lone surrogate differs), PGlite for SQL-text defect claims (use String.fromCharCode(92) in the probe; .mts for top-level await), eslint with the config block regex-removed to prove it is needed.
+- Evidence-checker simulation (PR #28): to test a manifest-activation PR's mechanics, clone the worktree, make a fake base commit = old base + PR manifest, run the head `check-evidence.mjs --base <fake> --head <head> --event pull_request`; then vary head (docs-only, `.claude`-only, root file) to read the steady-state consequences. Node 24 prefix and a node_modules junction suffice; ~1 s per run.
+- When a PR parks/defers items "to owner task X", grep the task AC (`docs/04-plan/generator/plan-data.mjs`) for the ID: an owner whose AC never names it will not deliver it.
+
+**Adapter / SDK-wrapper PRs (PR #30 TASK-019, 2026-11-13).**
+- **Config-constants mutation:** delete the timeout/retry options from the client config and run the unit suite. Fake-sender tests never see them (78 green). Ask for a loopback `http.createServer` test (500,500,200 = 3 hits; `socket.destroy()` then 412; connect to 10.255.255.1 = `connect()` times at 0/2/4 s) and an assertion on the effective client config.
+- **Per-socket timeouts are not deadlines.** AWS SDK `requestTimeout` is an idle timer; a server trickling 1 byte / 5 s keeps `get()` alive (probe, 45 s+). Ask for `AbortSignal.any([caller, AbortSignal.timeout(n)])` and a counting reader when `Content-Length` is missing.
+- **Presign:** the SDK floors `X-Amz-Date` to the second, so `signingDate + ttl` overstates the expiry by the sub-second part. Tests with an injected clock at `.000` hide it. A real-store expiry test with `ttl 1` flakes at about the latency/1 s rate (use ttl 2).
+- **AWS vs emulator error shapes the emulator cannot show:** S3 `RequestTimeout` is HTTP 400; conditional writes return 409 `ConditionalRequestConflict`; HEAD has no body, so a missing bucket reads as `NotFound`. Check name-before-status ordering in the error map.
+- **"Never log the cause" designs make "no secret in logs" assertions vacuous.** Count the captured log lines (here 3, all valkey). Ask for a class-only log line (precedent `valkey.error`).
+- **Deny-list import boundaries** miss sibling packages of the same family (`lib-storage`, `s3-presigned-post`, `@smithy/signature-v4`); the next feature (multipart) needs exactly those.
+- **Spike follow-up owners:** verify the owner task actually writes the thing (TASK-021 is SQL; anchors are TASK-116) and that its AC names the rule.
+- **Decision-log insertions** can steal the previous entry's trailing line; diff `DECISIONS.md` hunks, not just additions.
+
+**Prisma 7 query-extension PRs (PR #26, 2026-11-13).** Verified on the real generated client with a dead adapter (no DB):
+- **Ordering:** the EARLIER `$extends` query extension runs first (outer); a later one is inner and sees the outer's rewritten args. A recorder must be applied AFTER the extension under test to see its output.
+- **Runtime data model is slim:** fields carry only name/kind/type/dbName/relationName; no `relationFromFields`. An extension cannot map a relation field to its FK scalar, so `connect` on update can change "server-owned" FK columns (org_id). Ask for a schema rule or a type-based refusal, and name the DB backstop.
+- **Compile-before-connect:** with an adapter at 127.0.0.1:1, an invalid args shape gives `PrismaClientValidationError` in ~5 ms, a valid one gives "Can't reach database server". This separates shape validity from DB effects without Docker.
+- **"Fails closed" claims for catalogue-driven guards:** check BOTH directions. An empty catalogue fails closed for omitted NOT NULL columns but OPEN for forged fields on update.
+- **Composition lines:** mutate the one line that wires a guard into the runtime (`scopeClient: …`). If only hand-built runners test it, the mutant survives.
+- **Merges of main into DECISIONS.md** can insert a block between another entry's lines (adjacent-append auto-merge). Diff the entry headings vs main.
+
+**Lane A skip trap (PR #30 r2):** when `Lane B evidence` fails early in fast-lane, every later step (lint, format, typecheck, unit, build) is SKIPPED though the job summary looks "mostly green". Check step conclusions with `gh run view --json jobs`, never trust "scans passed". Also verify claims like "docs-only merge delta" with `git diff --name-only <pre-merge> <merge>`: PR #28's tools/quality came in under that label.

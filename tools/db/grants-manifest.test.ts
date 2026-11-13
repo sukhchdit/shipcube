@@ -6,13 +6,39 @@ import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 const entry = (name: string, extra: Partial<TableClassEntry> = {}): TableClassEntry => ({ module: 'm', name, class: 'TENANT', ...extra });
 
 describe('grant manifest (data-model §4.4, C5)', () => {
-  it('PR8-SEC-10, D-ARCH-075: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions and agrees with the table classes', () => {
+  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, and agrees with the table classes', () => {
     const grants = loadGrantsManifest();
     expect(grantTuples(grants)).toEqual([
+      'platform_app INSERT public.audit_anchors *',
+      'platform_app INSERT public.audit_chain_verifications *',
+      'platform_app INSERT public.audit_checkpoint_heads *',
+      'platform_app INSERT public.audit_entries *',
+      'platform_app INSERT public.audit_partitions *',
+      'platform_app INSERT public.audit_pii_vault *',
+      'platform_app INSERT public.audit_stream_heads *',
+      'platform_app INSERT public.data_subjects *',
+      'platform_app SELECT public.audit_anchors *',
+      'platform_app SELECT public.audit_chain_verifications *',
+      'platform_app SELECT public.audit_checkpoint_heads *',
+      'platform_app SELECT public.audit_entries *',
+      'platform_app SELECT public.audit_partitions *',
+      'platform_app SELECT public.audit_pii_vault *',
+      'platform_app SELECT public.audit_stream_heads *',
+      'platform_app SELECT public.data_subjects *',
       'platform_app SELECT public.permissions *',
       'platform_app SELECT public.reference_dataset_versions *',
       'platform_app SELECT public.role_permissions *',
       'platform_app SELECT public.roles *',
+      'platform_app UPDATE public.audit_chain_verifications *',
+      'platform_app UPDATE public.audit_partitions *',
+      'platform_app UPDATE public.audit_stream_heads *',
+      'platform_erasure DELETE public.audit_pii_vault *',
+      'platform_erasure SELECT public.audit_pii_vault *',
+      'platform_erasure SELECT public.data_subjects *',
+      'platform_erasure UPDATE public.data_subjects erased_at',
+      'platform_erasure UPDATE public.data_subjects updated_at',
+      'platform_erasure UPDATE public.data_subjects updated_by',
+      'platform_erasure UPDATE public.data_subjects version',
     ]);
     expect(validateGrants(grants, loadTableClasses())).toEqual([]);
   });
