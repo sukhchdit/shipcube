@@ -35,6 +35,7 @@ literal mount paths app.ts uses (`/api/v1`, `/api/docs`); `/api/docs` is the one
 `operations` lists the operationIds that must be mounted now. The check enforces both directions (every mounted,
 documented operation is listed; every listed operation is mounted). Adding entries only is a **process rule, not a
 mechanism**: the task that mounts an operation adds its operationId in the same change, and removing an entry together
-with its route is a breaking change under the contract change process (api/README.md §18), detected by the `oasdiff`
-gate once it lands (NFR-MAINT-004). TASK-020 (`defineRoute` route registry) may replace the ledger and adds the
+with its route is a breaking change under the contract change process (api/README.md §18). That change is caught by the
+lane A `openapi-breaking` step (`tools/ci/openapi-breaking.mjs`, oasdiff against the latest `v*` release tag;
+NFR-MAINT-004, D-ORCH-024 (4)), which fails unless the PR carries the §18 deprecation record. TASK-020 (`defineRoute` route registry) may replace the ledger and adds the
 metadata comparison of api/README.md §15 (x-permission equality, x-audit, x-idempotency, Joi parity).

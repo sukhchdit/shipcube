@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from '@jest/globals';
 
-import { checkMigrationChanges, checkRepository, parseNameStatus } from './check-migration-immutability.mjs';
+import { checkBootstrapChanges, checkMigrationChanges, checkRepository, parseNameStatus } from './check-migration-immutability.mjs';
 
 const roots: string[] = [];
 
@@ -30,6 +30,9 @@ function repo(): { root: string; write: (path: string, text: string) => void; co
   write('prisma/migrations/20261112000000_baseline/migration.sql', 'CREATE TABLE a (id int);\n');
   write('prisma/migrations/20261112000000_baseline/down.sql', 'DROP TABLE a;\n');
   write('prisma/migrations/migration_lock.toml', 'provider = "postgresql"\n');
+  write('prisma/bootstrap/00-roles.sql', 'CREATE ROLE r;\n');
+  write('prisma/bootstrap/02-role-backstops.sql', 'SELECT 2;\n');
+  write('prisma/bootstrap/README.md', 'notes\n');
   commit();
   git('checkout', '-q', '-b', 'feature');
   return { root, write, commit, git };
@@ -91,5 +94,70 @@ describe('released migrations are immutable (PR8-SEC-01 lane-A backstop)', () =>
       { status: 'A', path: 'prisma/migrations/x/migration.sql' },
     ]);
     expect(checkMigrationChanges(changes, new Set())).toEqual([]);
+  });
+});
+
+describe('released bootstrap files are immutable (PR #24 R1-m3, PR24-SEC-06)', () => {
+  const rules = (root: string): string[] =>
+    checkRepository({ root, base: 'main' })
+      .findings.map((f) => f.rule)
+      .sort();
+
+  it('[R1-m3] an added bootstrap file that sorts last passes', () => {
+    const { root, write, commit } = repo();
+    write('prisma/bootstrap/10-audit.sql', 'CREATE SCHEMA audit;\n');
+    commit();
+    expect(checkRepository({ root, base: 'main' })).toEqual({ findings: [], changes: 1 });
+  });
+
+  it('[PR24-SEC-06] an in-place edit of a released bootstrap file fails, even with a reviewer marker', () => {
+    const { root, write, commit } = repo();
+    write('prisma/bootstrap/02-role-backstops.sql', '-- @audit-ddl security-approved: security-analyst 2026-11-13\nSELECT 3;\n');
+    commit();
+    const { findings } = checkRepository({ root, base: 'main' });
+    expect(findings.map((f) => [f.rule, f.location])).toEqual([['bootstrap/released-changed', 'prisma/bootstrap/02-role-backstops.sql']]);
+    expect(findings[0]?.message).toContain('released bootstrap files are immutable (PR #24 R1-m3, PR24-SEC-06)');
+  });
+
+  it('[R1-m3] deleting or renaming a released bootstrap file fails', () => {
+    const deleted = repo();
+    deleted.git('rm', '-q', 'prisma/bootstrap/00-roles.sql');
+    deleted.commit();
+    expect(rules(deleted.root)).toEqual(['bootstrap/released-changed']);
+    const renamed = repo();
+    renamed.git('mv', 'prisma/bootstrap/02-role-backstops.sql', 'prisma/bootstrap/03-role-backstops.sql');
+    renamed.commit();
+    expect(rules(renamed.root)).toEqual(['bootstrap/released-changed']);
+  });
+
+  it('[R1-m3] an added file that sorts before the last released one fails (the runtime ledger would refuse it)', () => {
+    const { root, write, commit } = repo();
+    write('prisma/bootstrap/01-schemas.sql', 'CREATE SCHEMA s;\n');
+    commit();
+    expect(rules(root)).toEqual(['bootstrap/added-out-of-order']);
+  });
+
+  it('[R1-m3] files the runner does not apply (README, nested folders) are not part of the lane', () => {
+    const { root, write, commit } = repo();
+    write('prisma/bootstrap/README.md', 'rewritten\n');
+    write('prisma/bootstrap/fixtures/00-x.sql', 'SELECT 1;\n');
+    commit();
+    expect(checkRepository({ root, base: 'main' }).findings).toEqual([]);
+  });
+
+  it('[R1-m3] a base without bootstrap files accepts any added file; the pure policy ignores other paths', () => {
+    expect(checkBootstrapChanges([{ status: 'A', path: 'prisma/bootstrap/00-a.sql' }], [])).toEqual([]);
+    expect(
+      checkBootstrapChanges(
+        [
+          { status: 'M', path: 'prisma/migrations/x/migration.sql' },
+          { status: 'M', path: 'prisma/bootstrapx/00-a.sql' },
+        ],
+        ['00-a.sql'],
+      ),
+    ).toEqual([]);
+    expect(checkBootstrapChanges([{ status: 'T', path: 'prisma/bootstrap/00-a.sql' }], ['00-a.sql']).map((f) => f.rule)).toEqual([
+      'bootstrap/released-changed',
+    ]);
   });
 });

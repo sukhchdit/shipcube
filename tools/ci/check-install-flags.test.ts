@@ -17,6 +17,7 @@ import {
   checkMigrationsWrite,
   checkNpmrc,
   checkPackageJson,
+  nonCanonicalNpmExec,
 } from './check-install-flags.mjs';
 
 const repoRoot = findRepoRoot();
@@ -189,6 +190,34 @@ describe('workflows, compose files and package.json scripts', () => {
     expect(rules(checkPackageJson(JSON.stringify({ scripts: { gen: 'npm exec --no -- openapi-typescript x' } }), 'package.json'))).toEqual(
       [],
     );
+  });
+
+  it.each([
+    'npm -w apps/web -w apps/admin exec --no -- react-router typegen',
+    'npm -w apps/api exec --no -- tsc -b',
+    'npm exec --no -- prettier --check .',
+  ])('[TASK-015] canonical npm exec form is accepted: %s', (command) => {
+    expect(nonCanonicalNpmExec(command)).toBe(false);
+    expect(rules(checkPackageJson(JSON.stringify({ scripts: { s: command } }), 'package.json'))).toEqual([]);
+  });
+
+  it.each([
+    'npm --yes exec --no -- foo',
+    'npm --package=evil exec --no -- foo',
+    'npm -w apps/web exec --yes -- foo',
+    'npm -w apps/web exec -- foo',
+    'npm -w apps/web exec foo',
+    'npm --workspace apps/web exec --no -- foo',
+    'npm -w --yes exec --no -- foo',
+    'npm -ws exec --no -- foo',
+    'npm -w apps/web x --no -- foo',
+    'npm -w apps/web exec --no --package=evil -- foo',
+    'npm -w apps/web exec --no -- --yes',
+    'npm -w apps/web exec --no --',
+    'npm --prefix x exe --no -- foo',
+  ])('[TASK-015] options around npm exec escape no more: %s is an npx finding', (command) => {
+    expect(nonCanonicalNpmExec(command)).toBe(true);
+    expect(rules(checkPackageJson(JSON.stringify({ scripts: { s: command } }), 'package.json'))).toEqual(['npx']);
   });
 
   it.each([

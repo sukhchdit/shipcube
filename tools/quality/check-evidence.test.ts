@@ -698,6 +698,19 @@ describe('check-evidence: --event (PR #23 R1-m3)', () => {
     expect(check(f, f.code, ['--event', 'workflow_dispatch']).status).toBe(2);
     expect(check(f, f.code, ['--event']).status).toBe(2);
   });
+
+  it('[PR23-SEC-06] [R2-n2] unknown events (merge_group, workflow_dispatch) exit 2; --event push is refused with wave or gate', () => {
+    const f = fixture();
+    for (const event of ['merge_group', 'workflow_dispatch', 'pull_request_target'])
+      expect(check(f, f.code, ['--event', event]).status).toBe(2);
+    for (const profile of ['wave', 'gate']) {
+      const refused = check(f, f.code, ['--event', 'push', '--profile', profile]);
+      expect(refused.status).toBe(2);
+      expect(refused.stderr).toContain(`--event push skips the check and is refused with --profile ${profile}`);
+      expect(check(f, f.code, ['--profile', profile, '--event', 'push']).status).toBe(2);
+    }
+    expect(check(f, f.code, ['--event', 'push', '--profile', 'pr']).status).toBe(0);
+  });
 });
 
 describe('check-evidence: staleness for agent notes and the git mode guard (D-SEC-PR28-01, PR28-SEC-03)', () => {

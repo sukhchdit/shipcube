@@ -73,6 +73,8 @@ export function patternToRegExp(pattern) {
     .split('/')
     .map((part) => (part === '**' ? '.*' : part.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '[^/]*')))
     .join('/');
+  // A leading `**/` also matches at the root (`**/__mocks__/` owns `__mocks__/x`), as in gitignore (PR10-SEC-20).
+  if (source.startsWith('.*/')) return new RegExp(`^(?:.*/)?${source.slice(3)}${directory ? '/' : '(?:$|/)'}`);
   const prefix = anchored || body.includes('/') ? '^' : '^(?:.*/)?';
   return new RegExp(`${prefix}${source}${directory ? '/' : '(?:$|/)'}`);
 }

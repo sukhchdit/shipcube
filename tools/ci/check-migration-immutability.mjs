@@ -7,6 +7,13 @@
  * directory that did not exist on the base; `migration_lock.toml` is allow-listed. Anything else —
  * modify, delete, rename, type change, or a file added to an existing directory — fails.
  *
+ * Bootstrap lane (PR #24 R1-m3, PR24-SEC-06): `tools/db/bootstrap.ts` applies the direct `prisma/bootstrap/*.sql` files
+ * in byte order of their names and records each file's sha256 in its ledger, so an edited released file fails only at
+ * the first deploy against an existing database, which CI never runs (it always bootstraps fresh). The same base-vs-head
+ * rule applies: a released file (one that exists on the merge base) may not be modified, deleted, renamed or have its
+ * type changed, and an added file must sort after every released one (the runtime ledger refuses a new file that sorts
+ * before the last applied one). Other files in the folder (a README, nested folders) are not part of the lane.
+ *
  * Usage: node tools/ci/check-migration-immutability.mjs [--root <dir>] --base <git-ref> [--head <git-ref>]
  *        [--summary <file>] [--json]
  * Exit 0 = pass, 1 = finding(s), 2 = usage or internal error.
@@ -19,6 +26,10 @@ export const MIGRATIONS_DIR = 'prisma/migrations';
 /** Prisma's provider lock may be rewritten by `migrate`; it carries no schema (allow-listed, WAVE-00 TASK-007). */
 export const LOCK_FILE = `${MIGRATIONS_DIR}/migration_lock.toml`;
 const IMMUTABLE = 'applied migrations are immutable (D-SEC-PR8-01/02)';
+export const BOOTSTRAP_DIR = 'prisma/bootstrap';
+const BOOTSTRAP_IMMUTABLE = 'released bootstrap files are immutable (PR #24 R1-m3, PR24-SEC-06)';
+/** The files the bootstrap runner applies: direct children of prisma/bootstrap ending in .sql. */
+const BOOTSTRAP_FILE = /^prisma\/bootstrap\/[^/]+\.sql$/u;
 
 /**
  * @typedef {{ status: string, path: string }} Change
@@ -56,6 +67,36 @@ export function checkMigrationChanges(changes, baseDirs) {
 }
 
 /**
+ * Pure policy for the bootstrap lane over the name-status list and the released bootstrap file names on the base.
+ * @param {readonly Change[]} changes
+ * @param {readonly string[]} baseFiles `.sql` file names directly under prisma/bootstrap on the base
+ * @returns {Finding[]}
+ */
+export function checkBootstrapChanges(changes, baseFiles) {
+  /** @type {Finding[]} */
+  const findings = [];
+  const lastReleased = [...baseFiles].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).at(-1);
+  for (const { status, path } of changes) {
+    if (!BOOTSTRAP_FILE.test(path)) continue;
+    const name = path.slice(BOOTSTRAP_DIR.length + 1);
+    if (status !== 'A') {
+      findings.push({
+        rule: 'bootstrap/released-changed',
+        message: `${BOOTSTRAP_IMMUTABLE}: a released bootstrap file was ${status === 'D' ? 'deleted' : 'changed'} (status ${status}); its ledger sha256 no longer matches on existing databases, add a new file that sorts last instead`,
+        location: path,
+      });
+    } else if (lastReleased !== undefined && name < lastReleased) {
+      findings.push({
+        rule: 'bootstrap/added-out-of-order',
+        message: `${BOOTSTRAP_IMMUTABLE}: an added bootstrap file sorts before the released ${lastReleased}; the runner refuses it on existing databases, give it a name that sorts last`,
+        location: path,
+      });
+    }
+  }
+  return findings;
+}
+
+/**
  * Parses `git diff --name-status -z --no-renames` output.
  * @param {string} raw
  * @returns {Change[]}
@@ -69,7 +110,7 @@ export function parseNameStatus(raw) {
 }
 
 /** @param {string} root @param {string[]} args */
-const git = (root, args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (root, args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 60_000 });
 
 /**
  * @param {{ root: string, base: string, head?: string }} options
@@ -87,7 +128,19 @@ export function checkRepository({ root, base, head = 'HEAD' }) {
   );
   const raw = git(root, ['diff', '--name-status', '-z', '--no-renames', mergeBase, head, '--', MIGRATIONS_DIR]);
   const changes = parseNameStatus(raw);
-  return { findings: checkMigrationChanges(changes, baseDirs), changes: changes.length };
+  const hasBootstrap = git(root, ['ls-tree', '--name-only', mergeBase, '--', BOOTSTRAP_DIR]).trim() !== '';
+  const baseBootstrap = hasBootstrap
+    ? git(root, ['ls-tree', '--name-only', `${mergeBase}:${BOOTSTRAP_DIR}`])
+        .split('\n')
+        .filter((name) => name.endsWith('.sql'))
+    : [];
+  const bootstrapChanges = parseNameStatus(
+    git(root, ['diff', '--name-status', '-z', '--no-renames', mergeBase, head, '--', BOOTSTRAP_DIR]),
+  );
+  return {
+    findings: [...checkMigrationChanges(changes, baseDirs), ...checkBootstrapChanges(bootstrapChanges, baseBootstrap)],
+    changes: changes.length + bootstrapChanges.length,
+  };
 }
 
 /** @param {string[]} argv */
@@ -120,11 +173,11 @@ if (import.meta.main) {
     if (options.json) process.stdout.write(`${JSON.stringify({ findings, changes })}\n`);
     for (const f of findings) process.stdout.write(`${f.rule}: ${f.message} (${f.location})\n`);
     const verdict = findings.length === 0 ? 'PASS' : 'FAIL';
-    process.stdout.write(`check-migration-immutability: ${verdict} (${changes} change(s) under ${MIGRATIONS_DIR})\n`);
+    process.stdout.write(`check-migration-immutability: ${verdict} (${changes} change(s) under ${MIGRATIONS_DIR} and ${BOOTSTRAP_DIR})\n`);
     if (options.summary !== undefined) {
       appendFileSync(
         options.summary,
-        `\n### Released migrations immutable (PR8-SEC-01): ${verdict}\n\n${findings.map((f) => `- \`${f.location}\`: ${f.message}`).join('\n')}\n`,
+        `\n### Released migrations and bootstrap files immutable (PR8-SEC-01, PR #24 R1-m3): ${verdict}\n\n${findings.map((f) => `- \`${f.location}\`: ${f.message}`).join('\n')}\n`,
       );
     }
     process.exitCode = findings.length === 0 ? 0 : 1;

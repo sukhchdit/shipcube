@@ -345,8 +345,44 @@ function git(cwd: string, args: string[]): void {
   if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
 }
 
-/** A throw-away repository with a manifest, a runner file and a build script (dirty = the build writes a file). */
-function fixtureRepo(options: { dirtyBuild: boolean; junit?: string }): string {
+/**
+ * A stand-in for node_modules/jest/bin/jest.js: writes a passing two-test Jest JSON report to `--outputFile` and a
+ * coverage-summary.json with the given overall line/branch percentages into `--coverageDirectory=` (CommonJS).
+ */
+function fakeJest(linesPct: number, branchesPct: number): string {
+  const metric = (pct: number) => ({ total: 100, covered: pct, skipped: 0, pct });
+  const total = { lines: metric(linesPct), branches: metric(branchesPct), statements: metric(linesPct), functions: metric(linesPct) };
+  const report = {
+    testResults: [
+      {
+        name: 'a.test.ts',
+        status: 'passed',
+        assertionResults: [
+          { status: 'passed', fullName: '[SEC-TC-48] verdict recomputed', duration: 1 },
+          { status: 'passed', fullName: 'second', duration: 1 },
+        ],
+      },
+    ],
+  };
+  return [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    'const argv = process.argv.slice(2);',
+    "const out = argv[argv.indexOf('--outputFile') + 1];",
+    "const dir = argv.find((a) => a.startsWith('--coverageDirectory=')).slice('--coverageDirectory='.length);",
+    `fs.writeFileSync(out, ${JSON.stringify(JSON.stringify(report))});`,
+    'fs.mkdirSync(dir, { recursive: true });',
+    `fs.writeFileSync(path.join(dir, 'coverage-summary.json'), ${JSON.stringify(JSON.stringify({ total }))});`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * A throw-away repository with a manifest, a runner file and a build script (dirty = the build writes a file). With
+ * `jestCoverage`, the only suite is a `kind: jest` runner with `coverage: true` served by fakeJest, and the three
+ * required critical packages exist with only their re-exporting index.ts (inactive in the US-006 gate).
+ */
+function fixtureRepo(options: { dirtyBuild: boolean; junit?: string; jestCoverage?: [number, number] }): string {
   const dir = mkdtempSync(join(tmpdir(), 'heavy-e2e-'));
   temps.push(dir);
   const write = (rel: string, content: string) => {
@@ -368,17 +404,26 @@ function fixtureRepo(options: { dirtyBuild: boolean; junit?: string }): string {
   const junit =
     options.junit ??
     '<testsuite name="fake" tests="2"><testcase name="[SEC-TC-48] verdict recomputed"/><testcase name="second"/></testsuite>';
+  const coverage = options.jestCoverage;
+  if (coverage !== undefined) {
+    write('.gitignore', 'node_modules/\n');
+    write('node_modules/jest/bin/jest.js', fakeJest(...coverage));
+    for (const pkg of ['pricing', 'audit', 'authz']) write(`packages/${pkg}/src/index.ts`, 'export {};\n');
+  }
   write(
     'tools/quality/suite-runners.json',
     JSON.stringify({
       version: 1,
       testcontainers_images: [PINNED],
       suites: {
-        fake: {
-          kind: 'command',
-          cmd: ['{node}', '-e', `require('fs').writeFileSync(process.argv[1], ${JSON.stringify(junit)})`, '{junit}'],
-          converter: 'junit',
-        },
+        fake:
+          coverage === undefined
+            ? {
+                kind: 'command',
+                cmd: ['{node}', '-e', `require('fs').writeFileSync(process.argv[1], ${JSON.stringify(junit)})`, '{junit}'],
+                converter: 'junit',
+              }
+            : { kind: 'jest', project: 'unit', paths: [], coverage: true },
       },
     }),
   );
@@ -466,6 +511,28 @@ describe('quality:heavy CLI end to end (temp git repository, fake command suite)
     const { summary } = readRun(join(dir, 'docs', '05-quality'));
     expect(summary).toMatchObject({ verdict: 'INVALID', build_clean: false });
     expect((summary['invalid_reasons'] as string[]).join(' ')).toMatch(/build_clean false/);
+  });
+
+  it('[R1-m1] [US-006] [AT-US-006-02] a coverage suite carries the US-006 gate cases: below 85 % lines fails the suite by name, at target it passes', () => {
+    const casesOf = (dir: string) => {
+      const out = join(dir, 'out');
+      const run = runNode([heavy, '--profile', 'wave', '--out-root', out], { cwd: dir, env: cliEnv(), timeoutMs: 180_000 });
+      const { summary } = readRun(out);
+      const runDir = join(out, 'tests', 'runs', String(readdirSync(join(out, 'tests', 'runs'))[0]));
+      const junit = readFileSync(join(runDir, 'fake.junit.xml'), 'utf8');
+      return { status: run.status, verdict: summary['verdict'], junit };
+    };
+    const below = casesOf(fixtureRepo({ dirtyBuild: false, jestCoverage: [84, 90] }));
+    expect(below.status).toBe(1);
+    expect(below.verdict).toBe('FAIL');
+    expect(below.junit).toMatch(
+      /<testcase [^>]*name="coverage gate: overall lines"[^>]*>\s*<failure[^>]*message="overall lines 84\.00% &lt; 85%"/u,
+    );
+    expect(below.junit).toMatch(/<testcase [^>]*name="coverage gate: overall branches"[^>]*\/>/u);
+    const atTarget = casesOf(fixtureRepo({ dirtyBuild: false, jestCoverage: [90, 80] }));
+    expect([atTarget.status, atTarget.verdict]).toEqual([0, 'PASS']);
+    for (const name of ['overall lines', 'overall branches', 'packages/pricing (inactive)', 'packages/ledger (inactive)'])
+      expect(atTarget.junit).toContain(`name="coverage gate: ${name}"`);
   });
 
   it('[D-ARCH-021] a SKIP_ variable yields INVALID and only its NAME is recorded', () => {
