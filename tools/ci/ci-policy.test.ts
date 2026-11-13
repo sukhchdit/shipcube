@@ -48,6 +48,29 @@ const scanIndexOf = (pattern: RegExp): number => {
   if (index < 0) throw new Error(`no scans step matches ${String(pattern)}`);
   return index;
 };
+/** The arguments both lane B verifier invocations carry (PR #23 R1-m2, R1-m3). */
+const LANE_B_ARGS =
+  '--root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"';
+const swap = (text: string, from: string, to: string): string => text.replace(from, () => to);
+
+/**
+ * Findings for the lane B step's script. `--report-only` makes the verifier exit 0 whatever it finds, so it may occur
+ * exactly once, at the end of the bootstrap head-copy line, and the base-ref line is pinned in full (not by its prefix).
+ */
+function laneBReportOnlyFindings(run: string): string[] {
+  const findings: string[] = [];
+  const lines = run.split('\n').map((line) => line.trim());
+  const occurrences = run.split('--report-only').length - 1;
+  if (occurrences !== 1) findings.push(`--report-only occurs ${occurrences} times, expected exactly 1`);
+  const flagged = lines.filter((line) => line.includes('--report-only'));
+  const headLine = `node "$quality/head/tools/quality/check-evidence.mjs" ${LANE_B_ARGS} --report-only`;
+  if (flagged.length !== 1 || flagged[0] !== headLine)
+    findings.push('--report-only is not only at the end of the head-copy (bootstrap) line');
+  if (!lines.includes(`node "$quality/base/tools/quality/check-evidence.mjs" ${LANE_B_ARGS}`))
+    findings.push('the base-ref line is not exactly the pinned invocation');
+  return findings;
+}
+
 const scanOrder = [/GITLEAKS_IMAGE/, /GATE_RUN_SEMGREP/, /GATE_CHECK_SECURITY_OWNED_PATHS/].map(scanIndexOf);
 
 describe('ci-policy: US-005 CI pipeline skeleton', () => {
@@ -259,13 +282,42 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
     const run = str(steps[index]?.run);
     expect(steps[index]?.if).toBeUndefined();
     expect(run).toContain('git archive "$RANGE_BASE" tools/quality');
-    expect(run).toContain(
-      'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD"',
-    );
-    expect(run).toMatch(/node "\$quality\/head\/tools\/quality\/check-evidence\.mjs" .*--report-only$/m);
+    expect(laneBReportOnlyFindings(run)).toEqual([]);
     expect(run).not.toContain('|| true');
     expect(index).toBeGreaterThan(indexOf(/npm ci --ignore-scripts/));
     expect(index).toBeLessThan(indexOf(/npm run deps:rebuild/));
+  });
+
+  it('SEC-TC-48 (CI part, PR #23 R1-m2): `--report-only` occurs exactly once in the lane B step, at the end of the bootstrap head-copy line; the base-ref line is pinned in full (mutation-proof)', () => {
+    const run = str(steps[indexOf(/Lane B evidence \(quality:check-evidence\)/)]?.run);
+    const baseLine = `node "$quality/base/tools/quality/check-evidence.mjs" ${LANE_B_ARGS}`;
+    const headLine = `node "$quality/head/tools/quality/check-evidence.mjs" ${LANE_B_ARGS} --report-only`;
+    expect(run).toContain(baseLine);
+    expect(run).toContain(headLine);
+    const mutations: Record<string, string> = {
+      'report-only appended to the base-ref line': swap(run, baseLine, `${baseLine} --report-only`),
+      'report-only in front of the base-ref arguments': swap(run, baseLine, baseLine.replace(' --root', ' --report-only --root')),
+      'report-only spelled with a value': swap(run, baseLine, `${baseLine} --report-only=true`),
+      'report-only in a comment or echo': swap(run, 'exit 0\n', 'exit 0 # --report-only\n'),
+      'report-only dropped from the head-copy line': swap(run, headLine, headLine.replace(' --report-only', '')),
+      'report-only twice on the head-copy line': swap(run, headLine, `${headLine} --report-only`),
+      'base-ref line made non-fatal': swap(run, baseLine, `${baseLine} || true`),
+      'event hard-coded on the base-ref line': swap(run, baseLine, baseLine.replace('"$GITHUB_EVENT_NAME"', 'push')),
+      'base-ref line run from the head copy': swap(run, baseLine, baseLine.replace('$quality/base/', '$quality/head/')),
+    };
+    for (const [name, mutated] of Object.entries(mutations)) {
+      expect({ name, changed: mutated !== run, findings: laneBReportOnlyFindings(mutated).length > 0 }).toEqual({
+        name,
+        changed: true,
+        findings: true,
+      });
+    }
+  });
+
+  it('SEC-TC-48 (CI part, PR #23 R1-m3): the verifier is told the event name, so a push to main skips it (the squash commit has no ancestor evidence)', () => {
+    const run = str(steps[indexOf(/Lane B evidence \(quality:check-evidence\)/)]?.run);
+    expect(run.match(/--event "\$GITHUB_EVENT_NAME"/g)).toHaveLength(2);
+    expect(steps[indexOf(/Lane B evidence \(quality:check-evidence\)/)]?.env).toBeUndefined();
   });
 
   it('D-TASK007-08: commitlint gates the PR title (the squash header) via env, never interpolated into the script; a commit-msg hook lints every local commit', () => {

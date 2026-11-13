@@ -12,7 +12,7 @@
     "zero_skip": "suites with security=true or zero_skip=true must report skipped = 0",
     "required_cases": "every ID in required_cases appears in the name of at least one passing testcase of that suite; a skipped or failed testcase carrying a SEC-TC ID fails the check in any suite (required cases are zero-skip wherever they live)",
     "journeys_required_at_gate": "at profile 'gate' each listed journey ID appears in passing testcases of every project of the suite (6 projects across the three e2e suites); 0 flaky results in the gate run",
-    "planned_suite_reported": "a JUnit file for a suite whose status is 'planned' fails the check until the manifest marks it 'active'",
+    "planned_suite_reported": "a run that holds a JUnit file for a suite whose status is 'planned' in the base manifest is rejected, i.e. not credited; that fails the check only when the change needed evidence. The PR that activates a suite passes with its own run uncredited; a later activation whose run also carries the newly activated suite is rejected as a whole",
     "gate_requires_all_active": "at profile 'gate' every suite must be 'active' unless listed in deferred_at_gate with a DECISIONS.md ID",
     "invalid_env_prefixes": ["SKIP_"],
     "recorded_env_prefixes": ["SKIP_", "TEST_"],
@@ -35,9 +35,7 @@
   "security_integration_suites": ["rls-cross-tenant", "rbac-matrix", "audit-generator", "audit-immutability", "csrf-cookie", "catalog-c1-c14"],
   "tooling_inputs": [
     "docs/03-architecture/api/**",
-    "docs/05-quality/tests/required-suites.json",
     "docs/05-quality/tests/gherkin-test-map.md",
-    "docs/05-quality/tests/schema/**",
     "docs/01-requirements/stories/**",
     "docs/02-ux/design-system/**"
   ],
@@ -206,7 +204,7 @@
     {
       "id": "docs-or-ci-only",
       "globs": ["docs/**", ".github/**"],
-      "exclude": ["docs/03-architecture/api/**", "docs/05-quality/tests/required-suites.json", "docs/05-quality/tests/gherkin-test-map.md", "docs/05-quality/tests/schema/**", "docs/01-requirements/stories/**", "docs/02-ux/design-system/**"],
+      "exclude": ["docs/03-architecture/api/**", "docs/05-quality/tests/gherkin-test-map.md", "docs/01-requirements/stories/**", "docs/02-ux/design-system/**"],
       "profile_min": "none",
       "suites": [],
       "note": "Lane A only. .github/** is security-critical (SEC-P3-31): security-analyst review in the DoD."

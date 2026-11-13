@@ -440,7 +440,7 @@ The file-name allow-list of the run directories = the fixed names above + `<suit
 1. Verdict recomputed from the attachments: every required suite present, `tests ≥ min_tests` and `> 0`, `failures + errors = 0`; JUnit counts equal `summary.json`.
 2. Zero-skip suites have `skipped = 0`.
 3. Every `required_cases` ID of a required suite appears in a passing testcase name of that suite.
-4. A JUnit file for a suite whose `status` is `planned` fails the check until the manifest marks it `active` (a suite can never run without being required afterwards).
+4. A run that holds a JUnit file for a suite whose `status` is `planned` in the base manifest is rejected: it is not credited as evidence (PR #23 R1-m1). The check fails only when the change needed that run, so the PR that activates a suite passes with its own run uncredited, and from the next PR on the suite is required; a later activation whose run also carries the newly activated suite is rejected as a whole. A manifest-only activation PR is therefore optional for the first suite and the safe form for every later one.
 5. At the `gate` profile, every suite must be `active`, except suites listed under `deferred_at_gate` with a decision ID.
 6. Clean tree, no `SKIP_*` variable, ancestry and staleness rules of ADR-0023 amendments B and G.
 

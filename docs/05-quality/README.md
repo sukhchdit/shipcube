@@ -44,10 +44,10 @@ Old run directories go with `npm run quality:prune` (keeps the current and previ
 ## How `quality:check-evidence` decides
 
 ```
-npm run quality:check-evidence -- --root . --base <base-sha> --head <head-sha> [--profile pr|wave|gate] [--summary <file>] [--report-only]
+npm run quality:check-evidence -- --root . --base <base-sha> --head <head-sha> [--profile pr|wave|gate] [--event pull_request|push] [--summary <file>] [--report-only]
 ```
 
-Exit 0 is PASS, 1 is FAIL, 2 is a usage or internal error. `--report-only` always exits 0. Lane A (`.github/workflows/ci.yml`, step "Lane B evidence (quality:check-evidence)") runs the **base-ref** copy of `tools/quality` (script, lib, schema and manifest; SEC-P3-31). When the base ref has no `check-evidence.mjs` yet (bootstrap), it runs the head commit's copy with `--report-only` and says so in the step summary.
+Exit 0 is PASS, 1 is FAIL, 2 is a usage or internal error. `--report-only` always exits 0. `--event push` skips the check (exit 0, "skipped"), like `check-security-owned-paths --event push`: it is a pull-request control, and on a push to `main` the range is a squash commit whose evidence SHAs are branch commits and so are never ancestors. Lane A passes `--event "$GITHUB_EVENT_NAME"`. Lane A (`.github/workflows/ci.yml`, step "Lane B evidence (quality:check-evidence)") runs the **base-ref** copy of `tools/quality` (script, lib, schema and manifest; SEC-P3-31). When the base ref has no `check-evidence.mjs` yet (bootstrap), it runs the head commit's copy with `--report-only` and says so in the step summary.
 
 1. **Selection.** The changed paths of `base...head` select suites from the manifest:
    - At profile `pr`, a change made only of lane-A-only paths selects nothing. A lane-A-only path matches the `docs-or-ci-only` rule: `docs/**` minus its `exclude` list (the API contract and the tooling inputs) or `.github/**`. Any other change selects `profiles.pr.always` (`unit`) plus the suites of every path rule with a matching glob (`!` globs and `exclude` respected).
@@ -59,11 +59,11 @@ Exit 0 is PASS, 1 is FAIL, 2 is a usage or internal error. `--report-only` alway
    - Only allowed file names are present, and the directory is within 5 MB.
    - Every report and attachment hash matches, and no file is unlisted.
    - Every JUnit parses (strict reader: no DOCTYPE or entities). Its counts equal `summary.json`, and declared JUnit totals equal its test cases.
-   - The verdict recomputed from the JUnit equals the declared verdict. The recomputed verdict is INVALID when `git_dirty`, `!build_clean`, a `SKIP_*` override or any `invalid_reasons` is present. It is FAIL on failures or errors, a non-passed suite status, skips in a zero-skip or security suite, a SEC-TC test case skipped or failed in any suite, `tests < max(min_tests, 1)`, a missing `required_cases` ID, or a JUnit for a `planned` suite.
+   - The verdict recomputed from the JUnit equals the declared verdict. The recomputed verdict is INVALID when `git_dirty`, `!build_clean`, a `SKIP_*` override or any `invalid_reasons` is present. It is FAIL on failures or errors, a non-passed suite status, skips in a zero-skip or security suite, a SEC-TC test case skipped or failed in any suite, `tests < max(min_tests, 1)`, a missing `required_cases` ID, or a JUnit for a suite that is `planned` in the base manifest. That last case (rule 4) only **rejects the run**: it is not credited, and the check fails only if that run was needed. The PR that activates a suite therefore passes with its own run uncredited, from the next PR on the suite is required, and a later activation whose run also carries the newly activated suite is rejected as a whole (so the activation belongs in a manifest-only PR).
    - `git_sha` is an ancestor of the head, and every path changed between `git_sha` and the head is staleness-allowed: `docs/**` minus `docs/03-architecture/api/**` minus the manifest's `tooling_inputs`. Evidence is therefore stale after an `openapi.yaml` change.
    - The run's profile is at least the requested one. Every required suite is present with `tests >= max(min_tests, 1)`, `failures + errors = 0`, and `skipped = 0` if it is zero-skip.
 4. **FAIL regardless of the evidence** in any of these cases:
-   - An untracked or modified file sits on a clean-tree path of the checkout (SEC-TC-48).
+   - An untracked or modified file sits on a clean-tree path of the checkout (SEC-TC-48). In lane A the checkout is clean by construction, so this signal matters when the checker runs locally; in CI the evidence is the self-reported `git_dirty`. `git status` does not list git-ignored files, so a source file hidden by `.git/info/exclude` or a global ignore evades both the heavy run and this check (residual, security-analyst PR23-SEC-05).
    - At profile `gate`, a gate suite is neither `active` nor listed in `deferred_at_gate` (with a `D-...` decision ID).
    - A run directory that the range adds or changes fails integrity: hash, count, schema, name or size checks, or a declared PASS that its own reports contradict.
    - Something is required and no run is accepted.

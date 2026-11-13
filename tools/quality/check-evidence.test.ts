@@ -134,7 +134,7 @@ const DEFAULT_CASES: Record<string, Case[]> = {
 };
 
 /** A well-formed run for `gitSha`; `mutate` edits it before it is written and the hashes are computed afterwards. */
-function buildRun(gitSha: string, cases: Record<string, Case[]> = DEFAULT_CASES): RunSpec {
+function buildRun(gitSha: string, cases: Record<string, Case[]> = DEFAULT_CASES, stamp: string = STAMP): RunSpec {
   const files = new Map<string, string>();
   for (const [name, list] of Object.entries(cases)) files.set(`${name}.junit.xml`, junitXml(name, list));
   files.set('coverage-summary.json', '{"total":{"lines":{"pct":90}}}\n');
@@ -161,7 +161,7 @@ function buildRun(gitSha: string, cases: Record<string, Case[]> = DEFAULT_CASES)
       git_sha: gitSha,
       git_dirty: false,
       build_clean: true,
-      stamp: STAMP,
+      stamp,
       generated_at: '2026-11-13T10:00:00Z',
       host: {
         os: 'fixture',
@@ -185,9 +185,14 @@ function buildRun(gitSha: string, cases: Record<string, Case[]> = DEFAULT_CASES)
 }
 
 /** Writes the run directory after filling in the report and attachment hashes; `afterHash` tampers afterwards. */
-function writeRun(root: string, run: RunSpec, afterHash: (run: RunSpec) => void = () => undefined): string {
+function writeRun(
+  root: string,
+  run: RunSpec,
+  afterHash: (run: RunSpec) => void = () => undefined,
+  area: 'tests' | 'security' | 'performance' = 'tests',
+): string {
   const gitSha = String(run.summary.git_sha);
-  const dir = `docs/05-quality/tests/runs/${STAMP}_${gitSha.slice(0, 7)}`;
+  const dir = `docs/05-quality/${area}/runs/${String(run.summary.stamp)}_${gitSha.slice(0, 7)}`;
   for (const suite of run.summary.suites as { report: string; report_sha256: string }[])
     suite.report_sha256 = sha256(run.files.get(suite.report) ?? '');
   for (const attachment of run.summary.attachments as { file: string; sha256: string }[])
@@ -206,7 +211,7 @@ interface Fixture {
 }
 
 /** base commit -> code change under apps/api (selects integration + rbac-matrix + unit). */
-function fixture(manifest: Record<string, unknown> = MANIFEST): Fixture {
+function fixture(manifest: Record<string, unknown> = MANIFEST, beforeBase: (root: string) => void = () => undefined): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'evidence-'));
   const side = mkdtempSync(join(tmpdir(), 'evidence-manifest-'));
   temps.push(root, side);
@@ -214,6 +219,7 @@ function fixture(manifest: Record<string, unknown> = MANIFEST): Fixture {
   write(root, 'apps/api/src/app.ts', 'export const app = 1;\n');
   write(root, 'docs/03-architecture/api/openapi.yaml', 'openapi: 3.1.0\n');
   write(root, 'docs/README.md', '# docs\n');
+  beforeBase(root);
   const base = commitAll(root, 'chore: base');
   write(root, 'apps/api/src/app.ts', 'export const app = 2;\n');
   const code = commitAll(root, 'feat: change');
@@ -501,5 +507,195 @@ describe('check-evidence: CLI', () => {
     expect(allowedRunFile('report.html', manifest)).toBe(false);
     expect(nameHasId('[SEC-TC-14] x', 'SEC-TC-1')).toBe(false);
     expect(nameHasId('[SEC-TC-1] x', 'SEC-TC-1')).toBe(true);
+  });
+});
+
+/** A run directory that cannot pass integrity (summary.json is not a summary): "tampered" if the range touches it. */
+function junkRun(root: string, index: number): string {
+  const stamp = `20261114T${String(Math.floor(index / 60)).padStart(2, '0')}${String(index % 60).padStart(2, '0')}Z`;
+  const id = `${stamp}_${index.toString(16).padStart(7, '0')}`;
+  write(root, `docs/05-quality/tests/runs/${id}/summary.json`, '{}\n');
+  return id;
+}
+
+const runLines = (result: RunResult): string[] => result.stdout.split('\n').filter((line) => line.startsWith('check-evidence: run '));
+const legitId = (f: Fixture): string => `${STAMP}_${f.code.slice(0, 7)}`;
+const UNIT_ONLY: Record<string, Case[]> = { unit: [{ name: 'adds numbers', status: 'passed' }] };
+
+describe('check-evidence: rule 4, a JUnit for a planned suite (PR #23 R1-m1)', () => {
+  const allPlanned = {
+    ...MANIFEST,
+    suites: { ...MANIFEST.suites, unit: suiteSpec('planned'), integration: suiteSpec('planned'), 'rbac-matrix': suiteSpec('planned') },
+  };
+
+  it('pin: nothing required (every selected suite planned) => PASS, and the run holding planned-suite JUnit is rejected, not credited', () => {
+    const f = fixture(allPlanned);
+    writeRun(f.root, buildRun(f.code));
+    const head = commitAll(f.root, 'test(evidence): activation PR with its own run');
+    const result = check(f, head);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`run ${legitId(f)} rejected`);
+    expect(result.stdout).toContain("JUnit for a suite still 'planned' in the manifest (rule 4: the run is not credited)");
+    expect(result.stdout).toContain('no active lane B suite is required');
+  });
+
+  it('pin: a later activation whose run also carries the newly activated suite FAILs as a whole (the active suite loses its evidence)', () => {
+    const f = fixture({
+      ...MANIFEST,
+      suites: { ...MANIFEST.suites, integration: suiteSpec('planned'), 'rbac-matrix': suiteSpec('planned') },
+    });
+    writeRun(f.root, buildRun(f.code));
+    const head = commitAll(f.root, 'test(evidence): unit is active, integration is not yet');
+    const result = check(f, head);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('no accepted lane B evidence for required suite(s): unit');
+    expect(result.stdout).toContain(`run ${legitId(f)} rejected`);
+    expect(result.stdout).not.toContain('fails integrity');
+  });
+
+  it('pin: the same run, with only the active suites in it, is credited', () => {
+    const f = fixture({
+      ...MANIFEST,
+      suites: { ...MANIFEST.suites, integration: suiteSpec('planned'), 'rbac-matrix': suiteSpec('planned') },
+    });
+    writeRun(f.root, buildRun(f.code, UNIT_ONLY));
+    const head = commitAll(f.root, 'test(evidence): unit only');
+    const result = check(f, head);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`run ${legitId(f)} accepted`);
+  });
+});
+
+describe('check-evidence: run selection (PR #23 R1-m4)', () => {
+  it('the newest-30 window: the 31st-newest untouched run is not evaluated, a touched run older than the window is', () => {
+    const f = fixture(MANIFEST, (root) => {
+      for (let i = 0; i < 31; i += 1) junkRun(root, i);
+    });
+    writeRun(f.root, buildRun(f.code));
+    const head = commitAll(f.root, 'test(evidence): legit run, older than 31 untouched runs');
+    const result = check(f, head);
+    const lines = runLines(result);
+    expect(lines).toHaveLength(31);
+    expect(result.stdout).toContain(`run ${legitId(f)} accepted`);
+    expect(result.stdout).toContain('run 20261114T0030Z_000001e');
+    expect(result.stdout).not.toContain('20261114T0000Z_0000000');
+    expect(result.status).toBe(0);
+  });
+
+  it('every run the range touches is evaluated: a second touched run outside the window is judged too', () => {
+    const f = fixture(MANIFEST, (root) => {
+      for (let i = 1; i < 32; i += 1) junkRun(root, i);
+    });
+    writeRun(f.root, buildRun(f.code));
+    const touched = '20260101T0000Z_abcdef0';
+    write(f.root, `docs/05-quality/tests/runs/${touched}/summary.json`, '{}\n');
+    const head = commitAll(f.root, 'test(evidence): two runs');
+    const result = check(f, head);
+    expect(runLines(result)).toHaveLength(32);
+    expect(result.stdout).toContain(`run ${touched} rejected`);
+    expect(result.stdout).toContain('added or changed by this range fails integrity');
+    expect(result.status).toBe(1);
+  });
+
+  it('an untouched tampered run does not fail the check; the same run added by the range does', () => {
+    const untouched = fixture(MANIFEST, (root) => {
+      junkRun(root, 5);
+    });
+    writeRun(untouched.root, buildRun(untouched.code));
+    const okHead = commitAll(untouched.root, 'test(evidence): legit run next to an old broken one');
+    const ok = check(untouched, okHead);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('run 20261114T0005Z_0000005 rejected');
+    expect(ok.stdout).not.toContain('fails integrity (see its reasons)');
+
+    const touched = fixture();
+    writeRun(touched.root, buildRun(touched.code));
+    const id = junkRun(touched.root, 5);
+    const badHead = commitAll(touched.root, 'test(evidence): legit run plus a broken one');
+    const bad = check(touched, badHead);
+    expect(bad.status).toBe(1);
+    expect(bad.stdout).toContain(`run ${id} added or changed by this range fails integrity`);
+    expect(bad.stdout).toContain(`run ${legitId(touched)} accepted`);
+  });
+
+  it('a touched run that is rejected but not tampered (stale) is not a problem while another run is accepted', () => {
+    const f = fixture();
+    writeRun(f.root, buildRun(f.code));
+    const stale = writeRun(f.root, buildRun(f.base, DEFAULT_CASES, '20261112T1000Z'));
+    const head = commitAll(f.root, 'test(evidence): fresh run and a stale one');
+    const result = check(f, head);
+    expect(stale).toContain(f.base.slice(0, 7));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`run ${legitId(f)} accepted`);
+    expect(result.stdout).toContain(`run 20261112T1000Z_${f.base.slice(0, 7)} rejected: stale`);
+    expect(result.stdout).not.toContain('fails integrity');
+  });
+
+  it('multi-root: a security/ summary that agrees on git_sha, profile and stamp is accepted with the tests/ run', () => {
+    const f = fixture();
+    writeRun(f.root, buildRun(f.code));
+    writeRun(f.root, buildRun(f.code, {}), undefined, 'security');
+    const head = commitAll(f.root, 'test(evidence): tests and security roots');
+    const result = check(f, head);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`run ${legitId(f)} accepted`);
+    expect(runLines(result)).toHaveLength(1);
+  });
+
+  it.each([
+    ['profile', 'wave'],
+    ['git_sha', 'f'.repeat(40)],
+    ['stamp', '20261113T1001Z'],
+  ])('multi-root: roots that disagree on %s are tampering (the run is touched, so the check fails)', (key, value) => {
+    const f = fixture();
+    writeRun(f.root, buildRun(f.code));
+    const dir = writeRun(f.root, buildRun(f.code, {}), undefined, 'security');
+    const summaryFile = join(f.root, dir, 'summary.json');
+    const summary = JSON.parse(readFileSync(summaryFile, 'utf8')) as Record<string, unknown>;
+    summary[key] = value;
+    writeFileSync(summaryFile, `${JSON.stringify(summary, null, 2)}\n`);
+    const head = commitAll(f.root, 'test(evidence): roots disagree');
+    const result = check(f, head);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('summary.json files disagree on git_sha/profile/stamp');
+    expect(result.stdout).toContain('added or changed by this range fails integrity');
+  });
+});
+
+describe('check-evidence: --event (PR #23 R1-m3)', () => {
+  it('--event push skips the check even when the range has no evidence (squash commit on main); pull_request does not', () => {
+    const f = fixture();
+    const push = check(f, f.code, ['--event', 'push']);
+    expect(push.status).toBe(0);
+    expect(push.stdout).toContain('skipped');
+    expect(check(f, f.code, ['--event', 'pull_request']).status).toBe(1);
+    expect(check(f, f.code).status).toBe(1);
+  });
+
+  it('--event push also skips when the evidence SHA is a branch commit that is not an ancestor of the squash commit', () => {
+    const f = fixture();
+    git(f.root, ['checkout', '-q', '-b', 'branch', f.base]);
+    write(f.root, 'apps/api/src/side.ts', 'export const side = 1;\n');
+    const branchCommit = commitAll(f.root, 'feat: branch work');
+    writeRun(f.root, buildRun(branchCommit));
+    commitAll(f.root, 'test(evidence): branch run');
+    git(f.root, ['checkout', '-q', 'main']);
+    git(f.root, ['merge', '--squash', 'branch']);
+    const squash = commitAll(f.root, 'feat: squash of the branch');
+    expect(spawnSync('git', ['merge-base', '--is-ancestor', branchCommit, squash], { cwd: f.root }).status).toBe(1);
+    const asPush = check(f, squash, ['--event', 'push']);
+    expect(asPush.status).toBe(0);
+    expect(asPush.stdout).toContain('skipped');
+    expect(check(f, squash).status).toBe(1);
+  });
+
+  it('writes a skipped note to --summary and rejects an unknown event with exit 2', () => {
+    const f = fixture();
+    const summary = join(f.root, '..', `${STAMP}-event-${Math.random().toString(16).slice(2)}.md`);
+    temps.push(summary);
+    expect(check(f, f.code, ['--event', 'push', '--summary', summary]).status).toBe(0);
+    expect(readFileSync(summary, 'utf8')).toContain('Lane B evidence (quality:check-evidence): skipped');
+    expect(check(f, f.code, ['--event', 'workflow_dispatch']).status).toBe(2);
+    expect(check(f, f.code, ['--event']).status).toBe(2);
   });
 });

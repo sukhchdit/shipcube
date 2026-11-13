@@ -17,17 +17,21 @@
  *   (`docs/**` minus the API contract minus `tooling_inputs`), so evidence older than an openapi.yaml change is stale;
  * - the run's profile is at least the requested one and every required suite is present with
  *   `tests >= max(min_tests, 1)`, `failures + errors = 0`, `skipped = 0` for zero-skip/security suites and every
- *   `required_cases` ID in a passing test case; no JUnit belongs to a `planned` suite; no SEC-TC test case is skipped or
- *   failed anywhere.
+ *   `required_cases` ID in a passing test case; no SEC-TC test case is skipped or failed anywhere. A run that holds JUnit
+ *   for a suite still `planned` in the base manifest is rejected, i.e. not credited (rule 4). That fails the check only
+ *   when the change needs evidence: the PR that activates a suite passes with its own run uncredited, and a later
+ *   activation whose run also carries the newly activated suite is rejected as a whole.
  *
  * Independently of the evidence, the checker FAILs on: an entry of `git status --porcelain --untracked-files=all` of the
  * checked-out root on a clean-tree path (SEC-TC-48 "untracked files in code paths"); at profile `gate`, any gate suite
  * not `active` and not deferred (rule 5); and a run directory changed by this range whose declared PASS is not
  * supported by its own reports or whose integrity fails (tampered evidence). When the required set is empty (docs-only
  * change, or every selected suite still `planned`) the result is PASS with a note listing the planned suites.
+ * `--event push` skips the check (exit 0): it is a pull-request control, and on a push to `main` the range is a squash
+ * commit whose evidence SHAs are branch commits and so never ancestors (R1-m3; same as check-security-owned-paths).
  *
  * CLI: node tools/quality/check-evidence.mjs --root <dir> --base <sha> --head <sha> [--profile pr|wave|gate]
- *      [--summary <file>] [--report-only] [--manifest <file>] [--json]
+ *      [--event pull_request|push] [--summary <file>] [--report-only] [--manifest <file>] [--json]
  * Exit 0 PASS (always 0 with --report-only), 1 FAIL, 2 usage or internal error.
  */
 import { spawnSync } from 'node:child_process';
@@ -59,6 +63,8 @@ const RUN_ID = /^([0-9]{8}T[0-9]{4}Z)_([0-9a-f]{7})$/;
 const SHA = /^[0-9a-f]{40}$/;
 const GIT_TIMEOUT_MS = 60_000;
 const SEC_TC = /SEC-TC-[0-9]+/;
+/** GitHub event names the verifier understands; `push` skips the check (R1-m3). */
+export const EVENTS = /** @type {const} */ (['pull_request', 'push']);
 
 /** Fixed file names of a run directory (TEST-STRATEGY section 9.1, ADR-0023 amendment B), across the three areas. */
 export const FIXED_RUN_FILES = new Set([
@@ -299,7 +305,8 @@ export function recomputeVerdict(summary, results, manifest) {
       );
     if (spec === undefined) continue;
     if ((spec.security || spec.zero_skip) && junit.skipped > 0) hard.push(`${suite.name}: zero-skip suite skipped ${junit.skipped}`);
-    if (spec.status === 'planned') soft.push(`${suite.name}: JUnit for a suite still 'planned' in the manifest (rule 4)`);
+    if (spec.status === 'planned')
+      soft.push(`${suite.name}: JUnit for a suite still 'planned' in the manifest (rule 4: the run is not credited)`);
     if (junit.tests < Math.max(spec.min_tests, 1)) soft.push(`${suite.name}: tests ${junit.tests} < max(min_tests ${spec.min_tests}, 1)`);
     for (const id of spec.required_cases)
       if (!junit.cases.some((c) => c.status === 'passed' && nameHasId(c.name, id)))
@@ -597,13 +604,13 @@ export function renderMarkdown(result, reportOnly) {
  * @param {string[]} argv
  */
 export function parseArgs(argv) {
-  /** @type {{ root: string, base?: string, head?: string, profile: Profile, summary?: string, reportOnly: boolean, manifest?: string, json: boolean }} */
-  const options = { root: process.cwd(), profile: 'pr', reportOnly: false, json: false };
+  /** @type {{ root: string, base?: string, head?: string, profile: Profile, event: (typeof EVENTS)[number], summary?: string, reportOnly: boolean, manifest?: string, json: boolean }} */
+  const options = { root: process.cwd(), profile: 'pr', event: 'pull_request', reportOnly: false, json: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = /** @type {string} */ (argv[i]);
     if (arg === '--report-only') options.reportOnly = true;
     else if (arg === '--json') options.json = true;
-    else if (['--root', '--base', '--head', '--profile', '--summary', '--manifest'].includes(arg)) {
+    else if (['--root', '--base', '--head', '--profile', '--event', '--summary', '--manifest'].includes(arg)) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('--')) throw new UsageError(`${arg} needs a value`);
       i += 1;
@@ -612,7 +619,11 @@ export function parseArgs(argv) {
       else if (arg === '--head') options.head = value;
       else if (arg === '--summary') options.summary = value;
       else if (arg === '--manifest') options.manifest = resolve(value);
-      else if (isProfile(value)) options.profile = value;
+      else if (arg === '--event') {
+        const event = EVENTS.find((candidate) => candidate === value);
+        if (event === undefined) throw new UsageError(`--event must be ${EVENTS.join(' or ')} (got ${value})`);
+        options.event = event;
+      } else if (isProfile(value)) options.profile = value;
       else throw new UsageError(`--profile must be pr, wave or gate (got ${value})`);
     } else throw new UsageError(`unknown argument ${arg}`);
   }
@@ -631,6 +642,13 @@ export async function main(argv) {
   } catch (error) {
     console.error(`check-evidence: ${error instanceof Error ? error.message : String(error)}`);
     return 2;
+  }
+  if (options.event === 'push') {
+    const note = 'skipped: the evidence check is a pull-request control; the pushed range is a squash commit (--event push)';
+    console.log(`check-evidence: note: ${note}`);
+    if (options.summary !== undefined)
+      appendFileSync(options.summary, `\n### Lane B evidence (quality:check-evidence): skipped\n\n- Note: ${note}\n`);
+    return 0;
   }
   /** @type {CheckResult} */
   let result;
