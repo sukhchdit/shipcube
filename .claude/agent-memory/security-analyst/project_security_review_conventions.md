@@ -24,6 +24,10 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **Probing lint configs without running the suite.** A single-process `ESLint#lintText` against the worktree's real `eslint.config.mjs` stays light enough for the memory-constrained host. Load ESLint from the worktree with `createRequire(<worktree>/package.json)`, and add the `tseslint.configs.disableTypeChecked` + `projectService: false` overrides, because the probe files are not on disk. `isPathIgnored` / `calculateConfigForFile` show coverage holes. Write the probe file with a heredoc, not a `node -e` string, because quoting breaks in Git Bash.
 - **Probe scripts with regex escapes.** A Bash-tool heredoc (even `<<'EOF'`) turned `\\b` into `\b` in one case (PR-0005, 2026-11-12). The probe then silently matched nothing. Write such probes with the Write tool, and include a positive control line in every probe.
 - **Lock-only fix-cycle deltas.** A generic deep JSON diff of the base and head `package-lock.json` (every differing path, with a positive control) proves "only X changed" faster and more strictly than the tuple diff. Used for PR-0002 R2, 2026-11-12.
+- **Boundaries head-vs-main probe (PR-0019).**
+  - `git archive <sha> eslint.config.mjs tools/eslint-rules tools/lint` into `cfg-head` / `cfg-main`, and junction each `node_modules` to the MAIN checkout's.
+  - Write a scratch mini-repo, then run `new ESLint({cwd, overrideConfigFile, overrideConfig:[disableTypeChecked, projectService:false, no-unresolved off, {settings:{'boundaries/root-path': root}}]})`.
+  - File descriptors accumulate categories, so a new category never removes an old one.
 - **Probing a PR head without touching its worktree** (PR-0005 R2):
   - `git show <sha>:<file>` the `.ts` sources into scratch.
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.

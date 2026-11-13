@@ -203,7 +203,7 @@ PR #13 (TASK-023 seed framework) r1 at e92cd6f was CHANGES_REQUESTED (2026-11-13
   - m6: PR #11 merge-second gives 5 `boundaries` errors in seed.int.test.ts:19-23; add a `prisma-seed` category.
 - r2 at e42e368 (2026-11-13): APPROVED_WITH_NITS. Closed m1/m2/m3/m5(edits)/n1-n6/n8; probes pass (exit 2 JSON; 0/280 URL overrides; 7/7 mutations killed).
   - Open: R2-m1 deletion drift (`else if (updated > 0)` misses re-inserted rows) → fix in superseding branch or route TASK-025. R2-n1 README dup line; R2-n2 3rd copy of URL-param predicate; R2-n3 no client query_timeout/keepAlive (→ TASK-014).
-  - Superseding PR (D-ORCH-017): check tree == e42e368 + reconcile only; m6 boundaries still owed after PR #11; M1 sheet fold (WAVE-00 TASK-023 still says completes US-049; TASK-014/089 lack AT IDs) owed by architect batch.
+  - PR #19 supersede r1 at 699f33d (2026-11-13): APPROVED_WITH_NITS. Tree == e42e368 for 34 files, 2 overlap files == clean merge-file, 0 ancestors/merges; R2-m1, R2-n1, m6 closed (mutations killed); M1 fold done on main (D-ARCH-079). Open: R19-n1 NIT (migration header still lists authz_matrix as an example row; immutable after merge). Conditions: security record on 699f33d, SQUASH (commits 1-7 red), integration on head, close #13. Later dataset PRs: check m4 a-d (counter reset, NND keys, partial arbiters, uuid FKs).
 
 PR #17 (TASK-007 follow-up, base-ref lint fixtures no-weakening) r1 at ea78d38: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0017-TASK-007-code-review.md`.
 - M1: null-ruleId extras ("Unused eslint-disable directive") pass; `no-explicit-any` off repo-wide → new base run green, old failed. Fix: fail null-ruleId extras (+ relaxed check on ok-*), E9.

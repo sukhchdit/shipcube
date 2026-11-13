@@ -13,5 +13,6 @@
 - [P5 PR-0018 supersede round](project_p5_pr18_supersede.md) — TASK-016 @0f9ff27 PASS_W_F-U, no new finding; three-way tree-compare + clone --shared record-check method; PR #4 must keep TENANT_DB cases
 - [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
-- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; supersede-round checks (D-ORCH-017); 09 TLS values→TASK-014; 11 literal on main
+- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; superseded by PR #19; open 05/08/09 → TASK-026/014/089
+- [P5 PR-0019 supersede round](project_p5_pr19_supersede.md) — TASK-023 @699f33d PASS_W_F-U; PR19-SEC-01 INFO SYSTEM delegates; boundaries categories accumulate; PR #4 overlap trap
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10

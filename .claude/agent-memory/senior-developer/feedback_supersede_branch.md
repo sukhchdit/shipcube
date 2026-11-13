@@ -26,4 +26,11 @@ To supersede a PR whose pushed range is tainted (for example gitleaks on a merge
 - **Security record trap:** `check-security-owned-paths` looks for `docs/05-quality/security/PR-00NN-*.md` with the **new** PR number. A supersede round appended to the old PR's record does not satisfy it. Tell the orchestrator that security-analyst must write a `PR-00NN` record, or a file that points to the old one, naming the new head. Run the checker locally with `--pr <new N>` to confirm.
 - To replicate the base-ref fixture step locally, extract the step's `run:` block from ci.yml verbatim into a scratch script. Run it with `RANGE_BASE`, `GITHUB_STEP_SUMMARY` and `LINT_FIXTURE_MODE=no-weakening` set. It restores the worktree afterwards (check porcelain).
 
+**PR #13 → TASK-023 supersede (2026-11-13), second use of the recipe:**
+- Exclude `docs/` and `.claude/` from the net diff (`-- . ':!docs' ':!.claude'`); for overlap files prove the 3-way result with `git merge-file -p <main> <old-base> <old-head>` == commit 1's blob.
+- Old PR bodies may quote the tainted literal: never copy text from them into the new PR body.
+- TASK-016's unit suites PIN surfaces any schema-touching PR changes: `tools/db/grants-manifest.test.ts` (exact manifest tuples) and `prisma/tests/rls/tenant-db.real-client.test.ts` (one TenantDb delegate per Prisma model). A new Prisma model or grant line must update both; neither shows up in targeted lint/unit runs of the task's own folders, only in the full `test:unit`.
+- `prisma/tests/**` may import only allow-listed categories (boundaries); a suite importing new prisma/ code needs its own category in that allow-list plus an ok/bad fixture pair.
+- Don't run per-commit commitlint while the gate's `npm ci` is replacing node_modules: every check "fails" spuriously.
+
 Related: [[lane-a-merge-pitfalls]], [[lane-a-pr-hygiene]], [[merge-main-pass]]
