@@ -113,7 +113,11 @@ const codeOf = (variant: StubVariant): unknown => (isObject(variant.body) ? vari
 /** One stub per operation; the default variant is the first 2xx response (else the first one) and its first example. */
 export function buildStubs(doc: OpenApiDocument): ContractStub[] {
   return listOperations(doc).map(({ operationId, method, fullPath, operation }) => {
-    const variants = variantsOf(operation.responses ?? {});
+    // Like the API's authn slot (SEC-TC-29, TASK-020): every response of an authenticated operation is private, no-store.
+    const authenticated = operation['x-permission'] !== 'public';
+    const variants = variantsOf(operation.responses ?? {}).map((variant) =>
+      authenticated ? { ...variant, headers: { ...variant.headers, 'Cache-Control': 'private, no-store' } } : variant,
+    );
     const fallback: StubVariant = { status: 501, contentType: undefined, exampleName: undefined, body: undefined, headers: {} };
     const primary = variants.find((variant) => variant.status >= 200 && variant.status < 300) ?? variants[0] ?? fallback;
     const template = compilePathTemplate(fullPath, undefined);
