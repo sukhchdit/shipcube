@@ -2,34 +2,34 @@
 // operation carries Deprecation/Sunset/Link), AT-US-035-06 (ApiMode is test outside production) and the PR #9 code
 // review n9 OPTIONS answer (204 + Allow instead of Express's text/plain 200).
 import { describe, expect, it } from '@jest/globals';
-import express from 'express';
 import request from 'supertest';
 
 import { createApp } from '../../app.js';
 import { resolveApiMode, type ApiMode } from '../context/api-mode.js';
 import { currentRequestContext } from '../context/request-context.js';
-import { deprecationHeaders } from './deprecation.js';
+import { fixtureRoute } from '../routing/tests/fixture-route.js';
 
 function app(apiMode?: ApiMode) {
-  const health = express.Router();
-  health.get('/health/live', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
-  const fixtures = express.Router();
-  // Fixture only: no operation is deprecated in 1.0.0-m1 (US-035 notes).
-  fixtures.get(
-    '/fixtures/deprecated',
-    deprecationHeaders({ since: '2026-11-12', sunset: '2027-06-30', link: 'https://docs.platform.invalid/migrations/fixture' }),
-    (_req, res) => {
-      res.json({ ok: true });
-    },
-  );
-  fixtures.get('/fixtures/mode', (_req, res) => {
-    res.json({ apiMode: currentRequestContext()?.apiMode });
-  });
+  const health = [
+    fixtureRoute({ operationId: 'getLiveness', path: '/health/live', handler: () => ({ status: 200, body: { status: 'ok' } }) }),
+  ];
+  const fixtures = [
+    // Fixture only: no operation is deprecated in 1.0.0-m1 (US-035 notes). The pipeline sends the headers from metadata.
+    fixtureRoute({
+      operationId: 'getDeprecatedFixture',
+      path: '/fixtures/deprecated',
+      deprecated: { since: '2026-11-12', sunset: '2027-06-30', link: 'https://docs.platform.invalid/migrations/fixture' },
+      handler: () => ({ status: 200, body: { ok: true } }),
+    }),
+    fixtureRoute({
+      operationId: 'getModeFixture',
+      path: '/fixtures/mode',
+      handler: () => ({ status: 200, body: { apiMode: currentRequestContext()?.apiMode } }),
+    }),
+  ];
   return createApp({
-    healthRouter: health,
-    modules: [{ name: 'fixtures', router: fixtures }],
+    health,
+    modules: [{ name: 'fixtures', routes: fixtures }],
     logger: { info: () => undefined, error: () => undefined },
     ...(apiMode === undefined ? {} : { apiMode }),
   });

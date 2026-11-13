@@ -19,3 +19,12 @@ export {
   type ErrorCatalogue,
   type ErrorCode,
 } from './errors/catalogue/index.js';
+// Route audit descriptor = openapi `x-audit` (TASK-020); consumed by defineRoute, the audit writer and capture.
+export {
+  AUDIT_ACTIONS,
+  AUDIT_SENSITIVITIES,
+  type AdditionalAuditEntry,
+  type AuditAction,
+  type AuditDescriptor,
+  type AuditSensitivity,
+} from './audit/descriptor.js';

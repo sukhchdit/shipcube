@@ -46,7 +46,8 @@ function codeOf(classified: Classified): ErrorCode {
 
 /**
  * Representation headers a handler may have set before it threw; they describe the intended response, not the
- * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`.
+ * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`, kept `private, no-store` on a
+ * response the authn slot marked as authenticated (SEC-TC-29, TASK-020).
  */
 export const DROPPED_ON_PROBLEM = ['ETag', 'Last-Modified', 'Content-Disposition', 'Content-Language'] as const;
 
@@ -68,7 +69,8 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
 
 function sendProblem(res: Response, status: number, body: string, retryAfterSeconds?: number): void {
   for (const header of DROPPED_ON_PROBLEM) res.removeHeader(header);
-  res.setHeader('Cache-Control', 'no-store');
+  const authenticated = String(res.getHeader('Cache-Control') ?? '').includes('private');
+  res.setHeader('Cache-Control', authenticated ? 'private, no-store' : 'no-store');
   if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
   res.status(status).type(PROBLEM_CONTENT_TYPE).send(body);
 }

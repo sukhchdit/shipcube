@@ -10,13 +10,15 @@
 import { AppError } from '@platform/shared';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
+import { setRouteTemplate } from '../routing/route-state.js';
+
 /** Canonical order of the `Allow` header. */
 const METHOD_ORDER = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 
 interface LayerLike {
   match(path: string): boolean;
   readonly path?: unknown;
-  readonly route?: { readonly methods: Readonly<Record<string, unknown>> } | undefined;
+  readonly route?: { readonly methods: Readonly<Record<string, unknown>>; readonly path?: unknown } | undefined;
   readonly handle?: unknown;
 }
 
@@ -66,6 +68,24 @@ export function allowedMethods(router: unknown, path: string): string[] {
   return [...known, ...others];
 }
 
+/**
+ * The template of the first route serving `path` (mount prefixes + route path, `/api/v1/shipments/:shipmentId`), so an
+ * OPTIONS 204 access line carries the template, never the raw path (PR #20 code review n6, R2.5 4(i)).
+ */
+export function matchedTemplate(router: unknown, path: string, prefix = ''): string | undefined {
+  for (const layer of stackOf(router)) {
+    if (!matches(layer, path)) continue;
+    if (layer.route !== undefined) {
+      if (typeof layer.route.path === 'string') return `${prefix}${layer.route.path}`;
+      continue;
+    }
+    const mount = typeof layer.path === 'string' ? layer.path : '';
+    const found = matchedTemplate(layer.handle, path.slice(mount.length) || '/', `${prefix}${mount}`);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 /** `Allow` for a known path: the served methods plus OPTIONS, which optionsResponder answers on each (PR #21 R1-m3). */
 export function allowHeader(allowed: readonly string[]): string {
   return (allowed.includes('OPTIONS') ? allowed : [...allowed, 'OPTIONS']).join(', ');
@@ -77,7 +97,7 @@ export function allowHeader(allowed: readonly string[]): string {
  * Express answers; an unknown path falls through to the 404 problem. CORS preflight (TASK-048) is answered before this.
  */
 export function optionsResponder(router: unknown): RequestHandler {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return function optionsResponder(req: Request, res: Response, next: NextFunction): void {
     if (req.method !== 'OPTIONS') {
       next();
       return;
@@ -87,6 +107,8 @@ export function optionsResponder(router: unknown): RequestHandler {
       next();
       return;
     }
+    const template = matchedTemplate(router, req.path);
+    if (template !== undefined) setRouteTemplate(res, template);
     res.setHeader('Allow', allowHeader(allowed));
     res.status(204).end();
   };

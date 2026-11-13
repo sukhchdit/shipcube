@@ -1,0 +1,142 @@
+/**
+ * Request validation slot (pipeline step 6, REQ-SEC-007, REQ-API-005/006, api/README §3 validation sub-codes; TASK-020).
+ * Each route part (params, query, body, declared headers) is validated with the route's closed Joi schema; a part
+ * without a schema must be empty. Failures become 400 `VALIDATION_ERROR` with `errors[]` of `{ pointer, code,
+ * message }` where `message` is the fixed English text of the sub-code: Joi's rendered message never reaches the body
+ * (PR20-SEC-12 / PR #20 L-13). As a second line, every schema is prepared with `SAFE_MESSAGES`, templates that never
+ * interpolate the value (`{#value}`), so a Joi message that does get logged cannot carry request data either.
+ */
+import { AppError, MAX_VALIDATION_ISSUES, type ValidationIssue } from '@platform/shared';
+import Joi from 'joi';
+
+import type { RouteInput, RouteSchemas } from '../routing/define-route.js';
+
+export type RequestPart = keyof RouteInput;
+
+/** The api/README §3 sub-codes this slot emits; module rules (PASSWORD_POLICY, ...) are thrown by services. */
+export const VALIDATION_SUB_CODES = {
+  REQUIRED: 'Field is required.',
+  UNKNOWN_FIELD: 'Field is not allowed.',
+  INVALID_TYPE: 'Field has the wrong type.',
+  INVALID_FORMAT: 'Field has an invalid format.',
+  INVALID_ENUM: 'Field is not one of the allowed values.',
+  OUT_OF_RANGE: 'Field is out of range.',
+  TOO_SHORT: 'Field is too short.',
+  TOO_LONG: 'Field is too long.',
+} as const;
+export type ValidationSubCode = keyof typeof VALIDATION_SUB_CODES;
+
+/** Joi's built-in types; their definitions list every error code a schema can raise. */
+const JOI_TYPES: readonly (() => Joi.Schema)[] = [
+  () => Joi.any(),
+  () => Joi.alternatives(),
+  () => Joi.array(),
+  () => Joi.binary(),
+  () => Joi.boolean(),
+  () => Joi.date(),
+  () => Joi.function(),
+  () => Joi.link(),
+  () => Joi.number(),
+  () => Joi.object(),
+  () => Joi.string(),
+  () => Joi.symbol(),
+];
+
+/** A template that interpolates the value: `{#value}`, `{{#value}}`, `{[.]}`, `{:[.]}` and friends. */
+export const VALUE_REFERENCE = /#value|\[\.\]/;
+
+/**
+ * Every error code Joi's built-in types can raise, read from each type's definition (`_definition.messages`, Joi's
+ * extension metadata). validate.test.ts pins that the list covers the codes routes use, so a Joi upgrade that moves
+ * the field fails a test instead of silently leaving the default (value-interpolating) messages in place.
+ */
+function joiErrorCodes(): string[] {
+  const codes = new Set<string>();
+  for (const create of JOI_TYPES) {
+    const definition: unknown = (create() as unknown as { _definition?: { messages?: unknown } })._definition;
+    const messages = typeof definition === 'object' && definition !== null ? (definition as { messages?: unknown }).messages : undefined;
+    if (typeof messages === 'object' && messages !== null) for (const code of Object.keys(messages)) codes.add(code);
+  }
+  return [...codes].sort();
+}
+
+/** One value-free template per Joi error code (labels are key paths, never values). */
+export const SAFE_MESSAGES: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(joiErrorCodes().map((code) => [code, `{{#label}} failed ${code}`])),
+);
+
+/** The schema with the value-free messages; `defineRoute` schemas go through this once, when the route is mounted. */
+export function prepareSchema(schema: Joi.ObjectSchema): Joi.ObjectSchema {
+  return schema.prefs({ messages: SAFE_MESSAGES, errors: { wrap: { label: false } } });
+}
+
+const EMPTY = Joi.object({});
+
+/** Joi error type -> sub-code. Anything unrecognised is INVALID_FORMAT (never a raw Joi type). */
+export function subCodeOf(type: string): ValidationSubCode {
+  if (type === 'any.required') return 'REQUIRED';
+  if (type === 'object.unknown') return 'UNKNOWN_FIELD';
+  if (type === 'any.only' || type === 'any.invalid') return 'INVALID_ENUM';
+  if (type.endsWith('.base')) return type === 'string.pattern.base' ? 'INVALID_FORMAT' : 'INVALID_TYPE';
+  if (/^(?:number\.(?:min|max|greater|less|positive|negative|port|precision)|date\.(?:min|max|greater|less))$/.test(type))
+    return 'OUT_OF_RANGE';
+  if (/^(?:string|array|object)\.min$/.test(type) || type === 'string.empty') return 'TOO_SHORT';
+  if (/^(?:string|array|object)\.max$/.test(type)) return 'TOO_LONG';
+  return 'INVALID_FORMAT';
+}
+
+/** RFC 6901 escaping of one reference token. */
+const pointerToken = (segment: string | number): string => String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
+
+export function toIssues(part: RequestPart, error: Joi.ValidationError): ValidationIssue[] {
+  return error.details.slice(0, MAX_VALIDATION_ISSUES).map((detail) => {
+    const code = subCodeOf(detail.type);
+    const pointer = `/${part}${detail.path.map((segment) => `/${pointerToken(segment)}`).join('')}`;
+    return { pointer, code, message: VALIDATION_SUB_CODES[code] };
+  });
+}
+
+/** Projects the declared headers (lower-case names) of a header schema out of the request headers. */
+function declaredHeaders(schema: Joi.ObjectSchema, headers: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const keys = Object.keys((schema.describe() as { keys?: Record<string, unknown> }).keys ?? {});
+  return Object.fromEntries(keys.filter((key) => headers[key] !== undefined).map((key) => [key, headers[key]]));
+}
+
+export interface RawRequestParts {
+  readonly params: unknown;
+  readonly query: unknown;
+  readonly body: unknown;
+  readonly headers: Readonly<Record<string, unknown>>;
+}
+
+/** Prepared (value-free) schemas of one route, built once at mount time. */
+export type PreparedSchemas = Readonly<Record<RequestPart, Joi.ObjectSchema | undefined>>;
+
+export function prepareSchemas(schemas: RouteSchemas): PreparedSchemas {
+  const prepare = (schema: Joi.ObjectSchema | undefined): Joi.ObjectSchema | undefined =>
+    schema === undefined ? undefined : prepareSchema(schema);
+  return { params: prepare(schemas.params), query: prepare(schemas.query), body: prepare(schemas.body), headers: prepare(schemas.headers) };
+}
+
+/**
+ * Validates every part and returns the converted input, or throws 400 VALIDATION_ERROR naming every issue (capped at
+ * MAX_VALIDATION_ISSUES). A route without a body schema accepts no body (undefined or `{}`).
+ */
+export function validateRequest(schemas: PreparedSchemas, raw: RawRequestParts): RouteInput {
+  const issues: ValidationIssue[] = [];
+  const run = (part: RequestPart, schema: Joi.ObjectSchema | undefined, value: unknown): Record<string, unknown> => {
+    const result = (schema ?? EMPTY).validate(value ?? {}, { abortEarly: false, convert: true });
+    if (result.error !== undefined) {
+      issues.push(...toIssues(part, result.error));
+      return {};
+    }
+    const validated: unknown = result.value;
+    return validated as Record<string, unknown>;
+  };
+  const params = run('params', schemas.params, raw.params);
+  const query = run('query', schemas.query, raw.query);
+  const headers = schemas.headers === undefined ? {} : run('headers', schemas.headers, declaredHeaders(schemas.headers, raw.headers));
+  const body = schemas.body === undefined && raw.body === undefined ? undefined : run('body', schemas.body, raw.body);
+  if (issues.length > 0) throw new AppError('VALIDATION_ERROR', { errors: issues });
+  return { params, query, body, headers };
+}

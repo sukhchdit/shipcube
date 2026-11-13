@@ -6,8 +6,9 @@ import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit } from '@platform/config';
 import { createApp } from './app.js';
 import { moduleRegistry } from './modules/index.generated.js';
 import { resolveApiMode } from './platform/context/api-mode.js';
-import { createHealthRouter } from './platform/health/router.js';
+import { healthRoutes } from './platform/health/router.js';
 import { DocsSpecError, docsOptionsFrom, type DocsOptions } from './platform/openapi/serve.js';
+import { assertPipelineReady, assertRouteBindings, PipelineNotReadyError, RouteBindingError } from './platform/routing/pipeline.js';
 import { createRuntimeLog } from './platform/runtime/log.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
@@ -17,18 +18,27 @@ const log = createRuntimeLog('api', process.stdout);
 const services = createRuntimeServices(config, 'api', log);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
+const health = healthRoutes({ probe: services.probe });
 let app: ReturnType<typeof createApp>;
 try {
+  // Boot checks (TASK-020): every tenant-transaction route needs the runner (health alone needs none), and the route
+  // bindings hold for this APP_ENV (PR8-SEC-05; no mock gateway webhook in production).
+  const allRoutes = [...health, ...moduleRegistry.flatMap((module) => module.routes)];
+  assertPipelineReady(allRoutes, services.tenantTx);
+  assertRouteBindings(allRoutes, { production: config.APP_ENV === 'production' });
   app = createApp({
-    healthRouter: createHealthRouter({ probe: services.probe }),
+    health,
     modules: moduleRegistry,
+    tenantTx: services.tenantTx,
     apiMode: resolveApiMode(config.APP_ENV),
     ...(docs === undefined ? {} : { docs }),
   });
 } catch (error) {
-  // DOCS_ENABLED without a readable contract is a deployment error: exit like a rejected configuration.
-  if (!(error instanceof DocsSpecError)) throw error;
-  log.error('api.docs_unavailable', { error: error.name });
+  // DOCS_ENABLED without a readable contract, a tenant route without a runner or a route-binding violation is a
+  // deployment error: exit like a rejected configuration.
+  const known = error instanceof DocsSpecError || error instanceof PipelineNotReadyError || error instanceof RouteBindingError;
+  if (!known) throw error;
+  log.error(error instanceof DocsSpecError ? 'api.docs_unavailable' : 'api.pipeline_not_ready', { error: error.name });
   process.exit(CONFIG_EXIT_CODE);
 }
 

@@ -1,4 +1,4 @@
-// US-007 acceptance tests (AT-US-007-01..05) against the real createApp with stub routers; no database needed.
+// US-007 acceptance tests (AT-US-007-01..05) against the real createApp with defineRoute fixture routes; no database.
 import type { AddressInfo } from 'node:net';
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 
@@ -6,12 +6,16 @@ import { describe, expect, it } from '@jest/globals';
 import { AppError, ERROR_CATALOGUE } from '@platform/shared';
 import express, { type Express } from 'express';
 import fc from 'fast-check';
+import Joi from 'joi';
 import request, { type Response as TestResponse } from 'supertest';
 
 import { createApp, type AppDependencies, type AppLogger } from '../../app.js';
 import { CORRELATION_ID_PATTERN, currentRequestContext } from '../context/request-context.js';
 import { DbError } from '../db/index.js';
 import { dbErrorMapping } from '../db/map-db-error.js';
+import { defaultPipelineSlots } from '../routing/pipeline.js';
+import type { RouteSlot } from '../routing/slot.js';
+import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { isAuditableMutationResponse } from './error-response.js';
 import { GENERIC_SERVER_DETAIL } from './problem.js';
 
@@ -46,44 +50,77 @@ function harness(options: Pick<AppDependencies, 'problemTypeBase'> = {}): Harnes
     error: (event, fields, value) => logged.push({ event, fields, thrown: value }),
   };
 
-  const health = express.Router();
-  // Stands in for audit capture (TASK-029): it observes every finished response through the public predicate.
-  health.use((_req, res, next) => {
+  const health = [
+    fixtureRoute({ operationId: 'getLiveness', path: '/health/live', handler: () => ({ status: 200, body: { status: 'ok' } }) }),
+  ];
+  const widgets = [
+    fixtureRoute({ operationId: 'listWidgets', path: '/widgets', handler: () => ({ status: 200, body: [] }) }),
+    fixtureRoute({
+      operationId: 'getWidget',
+      path: '/widgets/:id',
+      schema: { params: Joi.object({ id: Joi.string() }) },
+      handler: ({ input }) => ({ status: 200, body: { id: input.params['id'] } }),
+    }),
+    fixtureRoute({
+      operationId: 'echo',
+      method: 'post',
+      path: '/echo',
+      schema: { body: Joi.object({ a: Joi.number() }) },
+      handler: ({ input }) => {
+        echoed.push(input.body);
+        return { status: 201, body: { body: input.body, correlationId: currentRequestContext()?.correlationId } };
+      },
+    }),
+    fixtureRoute({
+      operationId: 'boom',
+      path: '/boom',
+      handler: () => {
+        throw new Error('boom at /srv/app/dist/modules/widgets/service.js');
+      },
+    }),
+    fixtureRoute({ operationId: 'throws', path: '/throws', handler: () => rejectWith(thrown) }),
+    fixtureRoute({
+      operationId: 'download',
+      path: '/download',
+      handler: () => {
+        throw new AppError('NOT_FOUND');
+      },
+    }),
+    fixtureRoute({
+      operationId: 'unserialisable',
+      path: '/unserialisable',
+      handler: () => {
+        throw new AppError('VALIDATION_ERROR', { errors: [{ pointer: '/body/a', code: 'X', message: 10n as unknown as string }] });
+      },
+    }),
+    fixtureRoute({
+      operationId: 'private',
+      path: '/private',
+      handler: () => {
+        throw new AppError('AUTH_REQUIRED');
+      },
+    }),
+  ];
+  const slots = defaultPipelineSlots({ tenantTx: undefined });
+  // The download fixture's success headers are set before the handler throws (a pipeline step stands in for a handler
+  // that had started a response), so the problem handler must strip them (AT-US-007 header hygiene).
+  const etag: RouteSlot = (route) => (_req, res, next) => {
+    if (route.operationId === 'download') {
+      res.set({ ETag: '"v1"', 'Last-Modified': 'Wed, 11 Nov 2026 10:00:00 GMT', 'Cache-Control': 'public, max-age=3600' });
+      res.set({ 'Content-Disposition': 'attachment; filename="label.pdf"', 'Content-Language': 'en' });
+    }
+    next();
+  };
+  const inner = createApp({ health, modules: [{ name: 'widgets', routes: widgets }], logger, pipeline: { ...slots, etag }, ...options });
+  // Stands in for audit capture (TASK-029): it observes every finished response, 404s included, through the public
+  // predicate; mounted in front of the real app so the composition under test is unchanged.
+  const app = express();
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
     res.on('finish', () => auditable.push(isAuditableMutationResponse(res)));
     next();
   });
-  health.get('/health/live', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
-
-  const widgets = express.Router();
-  widgets.get('/widgets', (_req, res) => {
-    res.json([]);
-  });
-  widgets.get('/widgets/:id', (req, res) => {
-    res.json({ id: req.params['id'] });
-  });
-  widgets.post('/echo', (req, res) => {
-    echoed.push(req.body);
-    res.status(201).json({ body: req.body as unknown, correlationId: currentRequestContext()?.correlationId });
-  });
-  widgets.get('/boom', () => {
-    throw new Error('boom at /srv/app/dist/modules/widgets/service.js');
-  });
-  widgets.get('/throws', () => rejectWith(thrown));
-  widgets.get('/download', (_req, res) => {
-    res.set({ ETag: '"v1"', 'Last-Modified': 'Wed, 11 Nov 2026 10:00:00 GMT', 'Cache-Control': 'public, max-age=3600' });
-    res.set({ 'Content-Disposition': 'attachment; filename="label.pdf"', 'Content-Language': 'en' });
-    throw new AppError('NOT_FOUND');
-  });
-  widgets.get('/unserialisable', () => {
-    throw new AppError('VALIDATION_ERROR', { errors: [{ pointer: '/body/a', code: 'X', message: 10n as unknown as string }] });
-  });
-  widgets.get('/private', () => {
-    throw new AppError('AUTH_REQUIRED');
-  });
-
-  const app = createApp({ healthRouter: health, modules: [{ name: 'widgets', router: widgets }], logger, ...options });
+  app.use(inner);
   return {
     app,
     logged,

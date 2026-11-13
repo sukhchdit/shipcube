@@ -8,6 +8,7 @@
  */
 import type { Config, Service } from '@platform/config';
 
+import type { TenantTxRunner } from '../db/index.js';
 import { databaseRuntimeFromConfig } from '../db/runtime.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
@@ -34,6 +35,12 @@ export function readinessChecks(database: ReadinessCheck, valkey: ValkeyClient):
 export interface RuntimeServices {
   readonly valkey: ValkeyClient;
   readonly probe: ReadinessProbe;
+  /**
+   * The tenant-transaction runner of the database runtime, handed to createApp (the tx slot, TASK-020); undefined until
+   * the generated Prisma Client class is passed in (D-TASK020-05), and assertPipelineReady refuses to start an app that
+   * mounts a tenant-transaction route without it.
+   */
+  readonly tenantTx: TenantTxRunner<unknown> | undefined;
   /** Closed by graceful shutdown after the drain. */
   readonly resources: readonly Closeable[];
   /**
@@ -55,6 +62,7 @@ export function createRuntimeServices(config: Config, service: Service, log: Run
   return {
     valkey,
     probe: createReadinessProbe(readinessChecks(database.readinessCheck, valkey)),
+    tenantTx: database.tenantTx,
     resources: [...database.resources, { name: 'valkey', close: () => valkey.quit().then(() => undefined) }],
     startup: () => database.startup(),
   };
