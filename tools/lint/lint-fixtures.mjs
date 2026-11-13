@@ -274,6 +274,23 @@ const REPO_PROBES = {
     "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
   'apps/worker/src/jobs/lint-probe-bad-prisma-value.ts':
     "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
+  // PR38-SEC-01: platform/db-raw-sql sees the Prisma SQL helpers behind the workspace specifier (@platform/prisma/client)
+  // exactly as behind @prisma/client: seven helper forms report; a tagged fragment and a literal join separator do not.
+  'apps/api/src/platform/db/lint-probe-bad-raw-destructured.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nconst { raw } = Prisma;\n\nexport const probe = (s: string): unknown => raw(s);\n",
+  'apps/api/src/platform/db/lint-probe-bad-raw-aliased-import.ts':
+    "import { Prisma as P } from '@platform/prisma/client';\n\nexport const probe = (s: string): unknown => P.raw(s);\n",
+  'apps/api/src/platform/db/lint-probe-bad-raw-sql-call.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (s: string): unknown => Prisma.sql([s]);\n",
+  'apps/api/src/platform/db/lint-probe-bad-raw-join-separator.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (ids: readonly string[], sep: string): unknown => Prisma.join(ids, sep);\n",
+  'apps/api/src/platform/db/lint-probe-bad-raw-computed-member.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (k: 'raw' | 'sql'): unknown => Prisma[k];\n",
+  'apps/api/src/platform/db/lint-probe-bad-raw-reexport.ts': "export { Prisma } from '@platform/prisma/client';\n",
+  'apps/api/src/platform/db/lint-probe-bad-raw-sql-alias.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nconst tag = Prisma.sql;\n\nexport const probe = (s: string): unknown => tag([s]);\n",
+  'apps/api/src/platform/db/lint-probe-ok-raw-fragments.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (ids: readonly string[], v: string): unknown => [Prisma.sql`a = ${v}`, Prisma.join(ids, ', ')];\n",
 };
 
 /** @returns {Promise<Report>} */

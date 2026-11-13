@@ -486,6 +486,12 @@ const TENANT_DB: readonly Violation[] = [
     'interpolates SQL',
   ],
   [
+    'platform/db-raw-sql: `const { raw } = Prisma` from the workspace specifier @platform/prisma/client in platform/db (PR38-SEC-01)',
+    'rules/db-raw-sql/apps/api/src/platform/db/bad-raw-bare-specifier.ts',
+    'platform/db-raw-sql',
+    'Prisma.raw interpolates SQL',
+  ],
+  [
     'platform/db-raw-sql: SET LOCAL text in a repository',
     `rules/db-raw-sql/${API}/orders/repository/bad-set-local.ts`,
     'platform/db-raw-sql',
@@ -1197,6 +1203,24 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     ['a platform/db value import', 'apps/api/src/platform/db/lint-probe-ok-prisma-value.ts'],
   ])('[D-ARCH-103] allowed: @platform/prisma/client, %s (resolved, no-unresolved on)', (_title, path) => {
     expectClean(report.probes, path);
+  });
+
+  // PR38-SEC-01: in platform/db (where a value import is allowed) the raw-SQL rule traces the helpers through the
+  // workspace specifier as it does through @prisma/client. Each case was silent before the source list named it.
+  it.each([
+    ['`const { raw } = Prisma; raw(s)`', 'destructured', 'Prisma.raw interpolates SQL'],
+    ['`import { Prisma as P }; P.raw(s)`', 'aliased-import', 'Prisma.raw interpolates SQL'],
+    ['`Prisma.sql([s])` called as a function', 'sql-call', "'sql' called as a function"],
+    ['`Prisma.join(ids, sep)` with a variable separator', 'join-separator', "The separator, prefix and suffix of 'join'"],
+    ['a computed member `Prisma[k]`', 'computed-member', 'A computed member of the Prisma client namespace'],
+    ['a re-export of `Prisma`', 'reexport', "Re-exporting 'Prisma'"],
+    ['`const tag = Prisma.sql; tag([s])`', 'sql-alias', "'sql' called as a function"],
+  ])('[PR38-SEC-01] @platform/prisma/client in platform/db: %s is a raw-SQL finding', (_title, name, message) => {
+    expectFindings(report.probes, `apps/api/src/platform/db/lint-probe-bad-raw-${name}.ts`, 'platform/db-raw-sql', message);
+  });
+
+  it('[PR38-SEC-01] allowed: a tagged Prisma.sql fragment and Prisma.join with a literal separator from @platform/prisma/client', () => {
+    expectClean(report.probes, 'apps/api/src/platform/db/lint-probe-ok-raw-fragments.ts');
   });
 });
 

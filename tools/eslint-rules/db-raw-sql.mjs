@@ -49,8 +49,12 @@ const TAGGED_ONLY = new Set(['$queryRaw', '$executeRaw']);
 /** Names of database handles for the `db[k]` check (see `isDbHandle`). */
 const DB_HANDLE_NAME = /^(?:db|tx|prisma|client)$|(?:Db|Tx|Client|Prisma)$/u;
 const SET_LOCAL = /\bset\s+local\b/iu;
-/** Module specifiers that export Prisma's SQL helpers: the client, its runtime packages and the generated client. */
-const PRISMA_SOURCES = /^(?:@prisma\/client(?:\/.*)?|@prisma\/client-runtime-utils(?:\/.*)?|.*\/generated\/prisma(?:\/.*)?)$/u;
+/**
+ * Module specifiers that export Prisma's SQL helpers: the client, its runtime packages, the generated client by path and
+ * the workspace package that exports it (`@platform/prisma/client`, D-ARCH-102; any subpath, PR38-SEC-01).
+ */
+const PRISMA_SOURCES =
+  /^(?:@prisma\/client(?:\/.*)?|@prisma\/client-runtime-utils(?:\/.*)?|@platform\/prisma(?:\/.*)?|.*\/generated\/prisma(?:\/.*)?)$/u;
 
 /**
  * @typedef {'container' | 'raw' | 'Sql' | 'tag' | 'join' | 'typed' | 'fragment'} Kind `container`: a module object or
