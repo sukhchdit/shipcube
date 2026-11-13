@@ -46,7 +46,10 @@
     "quality:heavy": "node tools/quality/heavy.mjs",
     "quality:fastlane": "node tools/quality/fastlane.mjs",
     "quality:prune": "node tools/quality/prune.mjs",
-    "quality:check-evidence": "node tools/quality/check-evidence.mjs"
+    "quality:check-evidence": "node tools/quality/check-evidence.mjs",
+    "quality:trace": "node tools/quality/trace.mjs",
+    "quality:gherkin-map": "node tools/quality/gen-gherkin-map.mjs",
+    "quality:flake-report": "node tools/quality/flake-report.mjs"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
