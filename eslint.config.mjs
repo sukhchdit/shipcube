@@ -231,6 +231,12 @@ const SERVER_LOGGING_TARGETS = [
 ];
 const SERVER_LOGGING_MESSAGE =
   '@platform/shared/logging is server-only (Pino); browser bundles and packages/pricing/ui never import it (ADR-0003, TASK-010).';
+/** A packages/shared file outside src/logging (tests excepted): the root barrel and every browser-safe module. */
+const IMPORTER_SHARED_OUTSIDE_LOGGING = {
+  file: { categories: { anyOf: ['package'], noneOf: ['test', 'shared-logging'] }, captured: { pkg: 'shared' } },
+};
+const SHARED_ROOT_LOGGING_MESSAGE =
+  'packages/shared outside src/logging never imports or re-exports the logging module or Pino, so the @platform/shared root stays browser-safe (TASK-010, PR #20 R2-m1).';
 
 /** Policies. The last matching policy decides and `default` is allow, so each entry is a prohibition or its narrow exception. */
 const BOUNDARIES_POLICIES = [
@@ -417,6 +423,10 @@ const BOUNDARIES_POLICIES = [
   //     configuration), packages/ui and packages/pricing.
   { from: IMPORTER_APP('{web,admin}'), disallow: SERVER_LOGGING_TARGETS, message: SERVER_LOGGING_MESSAGE },
   { from: IMPORTER_PACKAGE('{ui,pricing}'), disallow: SERVER_LOGGING_TARGETS, message: SERVER_LOGGING_MESSAGE },
+  //     The transitive path (PR #20 R2-m1, PR20-SEC-16): web, admin, ui and pricing may import the `@platform/shared`
+  //     root, so no other packages/shared module may import or re-export the logging module or Pino. The logging
+  //     folder itself may import the rest of packages/shared (correlation, errors).
+  { from: IMPORTER_SHARED_OUTSIDE_LOGGING, disallow: SERVER_LOGGING_TARGETS, message: SHARED_ROOT_LOGGING_MESSAGE },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------
