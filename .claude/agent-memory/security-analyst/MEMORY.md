@@ -21,7 +21,7 @@
 - [P5 PR-0023 lane B evidence](project_p5_pr23_lane_b.md) — TASK-011 R2 @c0b1b31 PASS_W_COND; 01 closed; W0-ACT-1 runner gap; 03/04/05 due before Wave-0-exit activation
 - [P5 PR-0024 audit store](project_p5_pr24_audit_store.md) — TASK-021 R2 @7662672 PASS_W_F-U (90 blob 9aab9aa approved); 10 CIC leftover LOW; overlap-round triggers; PG18 facts; Docker recipe
 - [P5 PR-0025 CI follow-ups](project_p5_pr25_ci_followups.md) — R1 @20a0fc6 PASS_W_F-U; PR10-SEC-08 closed; 01 LOW 17-fingerprint baseline before gitleaks-full; gitleaks .gitleaksignore/override facts
-- [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 PASS_W_F-U; k6 eslint block scoped; 01 LOW prisma/tests not excluded from images (TASK-014), 02-05 INFO; k6 digest/registry recipe; #20/#24 overlap
+- [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 + R2 @a5cfd4b (merge+delta) PASS_W_F-U; 02 closed, 01 LOW TASK-014, 03/04 TASK-280, new 06 INFO; #20/#32 edit eslint (later one needs merge-only round)
 - [P5 PR-0028 W0-ACT-1](project_p5_pr28_w0act1.md) — R1 @22c6461 PASS_W_F-U; activation semantics probed; 01/02 LOW, 03/04 INFO; staleness pattern .claude/agent-memory/*/*.md
 - [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1+R2+R3 (merge-only @084ee93, push moved to c694583) PASS_W_F-U; 03 open; D3 revert passes (PR10-SEC-21); probe kit
 - [P5 PR-0031 staleness+scrub](project_p5_pr31_staleness_scrub.md) — R1 @69a997c PASS_W_F-U; 28/01 closed; SEC-01 .gitmodules ignore=all hides gitlinks, SEC-02 mode guard staleness-only; merge main voids evidence
