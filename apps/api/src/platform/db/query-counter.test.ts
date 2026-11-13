@@ -81,6 +81,24 @@ describe('[NT-PERF-006-b] query counter: measure()', () => {
     expect(b.report.queries.map((q) => q.model)).toEqual(['B']);
   });
 
+  it('counts a lazy query (PrismaPromise-like thenable) returned without await from the measured function', async () => {
+    const counter = createQueryCounter();
+    // Like a PrismaPromise: nothing runs (no hook call) until `then` is invoked.
+    const lazy = (model: string): PromiseLike<unknown> => ({
+      then: (onFulfilled, onRejected) => run(counter, model, 'count').then(onFulfilled, onRejected),
+    });
+    const [one, two] = await Promise.all([
+      counter.measure(() => lazy('A') as Promise<unknown>),
+      counter.measure(async () => {
+        await lazy('B');
+        await lazy('B');
+      }),
+    ]);
+    expect(one.result).toBe('ok');
+    expect(one.report.queries.map((q) => q.model)).toEqual(['A']);
+    expect(two.report.queries.map((q) => q.model)).toEqual(['B', 'B']);
+  });
+
   it('counts a query that fails, passes the result and the rejection through, and ignores calls outside any scope', async () => {
     const counter = createQueryCounter();
     await expect(run(counter, 'Order', 'findMany', 'free')).resolves.toBe('free');

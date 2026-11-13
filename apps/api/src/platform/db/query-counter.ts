@@ -108,7 +108,9 @@ export function createQueryCounter(): QueryCounter {
     extension,
     async measure(fn) {
       const scope: Scope = { queries: [] };
-      const result = await storage.run(scope, fn);
+      // Await INSIDE the scope: a PrismaPromise is lazy and runs its query (and the hook) only when `then` is called, so
+      // awaiting the bare return value outside `run` would execute it with no scope (found by the integration suite).
+      const result = await storage.run(scope, async () => await fn());
       return { result, report: buildReport(scope.queries) };
     },
     middleware() {
