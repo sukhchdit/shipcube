@@ -42,13 +42,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { parseJUnit, sha256Bytes } from './lib/junit.mjs';
 import {
+  checkpointsReached,
   gateBlockers,
   isCleanTreePath,
   isProfile,
   loadManifest,
   profileSatisfies,
   selectSuites,
-  stalenessAllowed,
+  stalenessAllowedChange,
 } from './lib/manifest.mjs';
 
 /** @typedef {import('./lib/manifest.mjs').Manifest} Manifest */
@@ -175,6 +176,27 @@ export function changedPaths(root, from, to, mergeBase) {
 }
 
 /**
+ * Changed entries between two commits with their git modes (`git diff --raw -z`, renames split into delete + add), for
+ * the staleness mode guard (PR28-SEC-03 item 3). A mode of `000000` means the path is absent on that side.
+ * @param {string} root
+ * @param {string} from
+ * @param {string} to
+ * @returns {{ path: string, oldMode: string, newMode: string }[]}
+ */
+export function changedEntries(root, from, to) {
+  const tokens = splitZ(gitText(root, ['diff', '--raw', '-z', '--no-renames', '--no-abbrev', from, to, '--']));
+  /** @type {{ path: string, oldMode: string, newMode: string }[]} */
+  const entries = [];
+  for (let i = 0; i < tokens.length; i += 2) {
+    const meta = /^:([0-7]{6}) ([0-7]{6}) [0-9a-f]+ [0-9a-f]+ [A-Z][0-9]*$/.exec(/** @type {string} */ (tokens[i]));
+    const path = tokens[i + 1];
+    if (meta === null || path === undefined) throw new Error(`git diff --raw -z: unexpected output near ${JSON.stringify(tokens[i])}`);
+    entries.push({ path, oldMode: /** @type {string} */ (meta[1]), newMode: /** @type {string} */ (meta[2]) });
+  }
+  return entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/**
  * Entries of `git status --porcelain --untracked-files=all` on clean-tree paths of the checked-out root.
  * @param {string} root
  * @param {Manifest} manifest
@@ -267,7 +289,7 @@ export function nameHasId(name, id) {
  *   verdict: 'PASS' | 'FAIL' | 'INVALID', invalid_reasons: string[] }} Summary
  * @typedef {{ suite: SummarySuite, junit: JUnitReport, area: string }} SuiteResult
  * @typedef {{ id: string, dirs: string[], touched: boolean, profile?: string, gitSha?: string, declared: string[],
- *   recomputed: string[], accepted: boolean, tampered: boolean, reasons: string[] }} RunResult
+ *   recomputed: string[], accepted: boolean, tampered: boolean, reasons: string[], pendingImplemented: string[] }} RunResult
  */
 
 /**
@@ -313,6 +335,25 @@ export function recomputeVerdict(summary, results, manifest) {
         soft.push(`${suite.name}: required case ${id} not in a passing test case`);
   }
   return { verdict: hard.length + soft.length > 0 ? 'FAIL' : 'PASS', hard, soft };
+}
+
+/**
+ * Parked SEC-TC IDs (`required_cases_pending`) that a passing test case of the run now carries (PR28-SEC-01): the ID
+ * should have moved back to `required_cases`. Matching is by title, like `required_cases`.
+ * @param {SuiteResult[]} results
+ * @param {Manifest} manifest
+ * @returns {string[]} `<suite>:<ID>`, sorted
+ */
+export function pendingImplemented(results, manifest) {
+  /** @type {string[]} */
+  const found = [];
+  for (const [suite, entries] of Object.entries(manifest.required_cases_pending)) {
+    const result = results.find((r) => r.suite.name === suite);
+    if (result === undefined) continue;
+    for (const entry of entries)
+      if (result.junit.cases.some((c) => c.status === 'passed' && nameHasId(c.name, entry.case))) found.push(`${suite}:${entry.case}`);
+  }
+  return found.sort();
 }
 
 /**
@@ -363,7 +404,17 @@ function safeRelPath(relPath) {
  */
 export function evaluateRun({ root, head, id, dirs, touched, manifest, validate, profile, required }) {
   /** @type {RunResult} */
-  const run = { id, dirs: dirs.map((d) => d.dir), touched, declared: [], recomputed: [], accepted: false, tampered: false, reasons: [] };
+  const run = {
+    id,
+    dirs: dirs.map((d) => d.dir),
+    touched,
+    declared: [],
+    recomputed: [],
+    accepted: false,
+    tampered: false,
+    reasons: [],
+    pendingImplemented: [],
+  };
   const integrity = (/** @type {string} */ reason) => {
     run.tampered = true;
     run.reasons.push(reason);
@@ -454,6 +505,7 @@ export function evaluateRun({ root, head, id, dirs, touched, manifest, validate,
   const first = /** @type {Summary} */ (summaries[0]);
   run.profile = first.profile;
   run.gitSha = first.git_sha;
+  run.pendingImplemented = pendingImplemented(results, manifest);
   for (const other of summaries.slice(1))
     if (other.git_sha !== first.git_sha || other.profile !== first.profile || other.stamp !== first.stamp)
       integrity(`run ${id}: summary.json files disagree on git_sha/profile/stamp`);
@@ -468,10 +520,12 @@ export function evaluateRun({ root, head, id, dirs, touched, manifest, validate,
       : false;
   if (!ancestor) run.reasons.push(`git_sha ${first.git_sha.slice(0, 7)} is not an ancestor of the head (R-ARCH-16)`);
   else {
-    const stale = changedPaths(root, first.git_sha, head, false).filter((path) => !stalenessAllowed(path, manifest));
+    const stale = changedEntries(root, first.git_sha, head)
+      .filter((change) => !stalenessAllowedChange(change, manifest))
+      .map((change) => change.path);
     if (stale.length > 0)
       run.reasons.push(
-        `stale: ${stale.length} path(s) outside the staleness allow-list changed since ${first.git_sha.slice(0, 7)}: ${stale.slice(0, 5).join(', ')}`,
+        `stale: ${stale.length} path(s) outside the staleness allow-list (or with a symlink, submodule or executable mode) changed since ${first.git_sha.slice(0, 7)}: ${stale.slice(0, 5).join(', ')}`,
       );
   }
   if (!profileSatisfies(first.profile, profile)) run.reasons.push(`profile ${first.profile} does not satisfy the requested ${profile}`);
@@ -519,6 +573,17 @@ export async function checkEvidence({ root, base, head, profile, manifest }) {
     const blockers = gateBlockers(manifest);
     if (blockers.length > 0) problems.push(`gate profile: suite(s) not active and not deferred: ${blockers.join(', ')} (rule 5)`);
   }
+  // PR28-SEC-01: a parked SEC-TC ID must be back in required_cases when its checkpoint is reached (wave and gate profiles),
+  // unless the entry carries a decision ID.
+  if (profile !== 'pr') {
+    const reached = checkpointsReached(profile);
+    for (const [suite, entries] of Object.entries(manifest.required_cases_pending))
+      for (const entry of entries)
+        if (reached.includes(entry.checkpoint) && entry.decision === undefined)
+          problems.push(
+            `${profile} profile: required_cases_pending not empty: ${suite}:${entry.case} (checkpoint ${entry.checkpoint} reached, owner: ${entry.owner}); move it to required_cases or record a decision`,
+          );
+  }
   const touchedIds = new Set(changed.map(runIdOf).filter((id) => id !== undefined));
   const { groups, strays } = listRuns(root, headSha);
   for (const stray of strays)
@@ -549,6 +614,14 @@ export async function checkEvidence({ root, base, head, profile, manifest }) {
     );
   else if (accepted === undefined) problems.push(`no accepted lane B evidence for required suite(s): ${selection.required.join(', ')}`);
   else if (selection.planned.length > 0) notes.push(`selected suites still planned (not required): ${selection.planned.join(', ')}`);
+  // PR28-SEC-01: the accepted run carries a passing test for a parked ID. A note at pr (the base manifest judges the PR that
+  // adds the test, so a failure there would deadlock the owning task), a problem at wave and gate.
+  for (const item of accepted?.pendingImplemented ?? []) {
+    const [suite, id] = item.split(':');
+    const message = `pending ID ${String(id)} is implemented in suite ${String(suite)}: move it from required_cases_pending to required_cases`;
+    if (profile === 'pr') notes.push(message);
+    else problems.push(`${profile} profile: ${message}`);
+  }
   return {
     verdict: problems.length === 0 ? 'PASS' : 'FAIL',
     profile,

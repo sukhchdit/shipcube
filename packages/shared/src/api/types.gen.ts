@@ -700,7 +700,7 @@ export interface paths {
     };
     /**
      * Readiness probe
-     * @description 503 with per-dependency status when PostgreSQL, Redis or object storage is unreachable (2 s timeout each); audit partitions and chain verification report degraded without failing.
+     * @description 503 with per-dependency status when PostgreSQL, Redis or object storage is unreachable (2 s timeout each), or when audit partitions are unavailable (a month in [current, current + 2] has no verified partition, or an object squats a partition name). Audit partitions report degraded, with 200, when only month current + 3 is missing; audit chain verification reports degraded without failing (D-ARCH-081).
      *
      *     **Requirements:** REQ-PLAT-018, REQ-AUDIT-013, REQ-AUDIT-017. **Permission:** `public` (Load balancer and orchestrator probes.). **Audit:** none (Health endpoint (REQ-AUDIT-006).). **Idempotency:** not-applicable. **Rate-limit class:** none. **Tenancy:** public.
      */
@@ -3399,8 +3399,11 @@ export interface components {
       readonly components: {
         /** @enum {string} */
         readonly audit_chain: 'ok' | 'degraded';
-        /** @enum {string} */
-        readonly audit_partitions: 'ok' | 'degraded';
+        /**
+         * @description Contiguity of the monthly audit partitions read from the catalogue (data-model 5.3 amendment 2026-11-13): unavailable when a month in [current, current + 2] has no verified partition or any object squats a partition name; degraded when only month current + 3 is missing.
+         * @enum {string}
+         */
+        readonly audit_partitions: 'ok' | 'degraded' | 'unavailable';
         /** @enum {string} */
         readonly database: 'ok' | 'unavailable';
         /** @enum {string} */

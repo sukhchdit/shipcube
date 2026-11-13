@@ -6,8 +6,9 @@
  * needs the bootstrap role settings, so the suite connects as a `platform_app` role created with them; D-ORCH-014
  * (d): no import of platform/db/client.ts here). `PING` goes through the ioredis client built from explicit options.
  * Object storage is the real `HeadBucket` check through the S3 adapter against RustFS (TASK-019, SPK-05; image pinned in
- * storage/tests/rustfs.ts). The audit components are still pending checks (TASK-021), so their rows are covered by the
- * unit suite only.
+ * storage/tests/rustfs.ts). The audit components need the bootstrapped catalogue, so here they are fixed stand-ins
+ * (audit_chain degraded, as before any verification); the real checks run in
+ * prisma/tests/health/audit-readiness.int.test.ts. pendingCheck refuses audit components (code review PR #24 R1-n2).
  */
 import { randomBytes } from 'node:crypto';
 
@@ -22,7 +23,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainer
 import { createDatabaseRuntime } from '../db/runtime.js';
 import { EXPECTED_ROLE_SETTINGS } from '../db/session-integrity.js';
 import { createRuntimeLog } from '../runtime/log.js';
-import { createReadinessProbe, pendingCheck, type ReadinessBody } from '../runtime/readiness.js';
+import { createReadinessProbe, type ReadinessBody, type ReadinessCheck } from '../runtime/readiness.js';
 import { createS3ObjectStorage, type S3ObjectStorage } from '../storage/s3-object-storage.js';
 import { RUSTFS_STARTUP_TIMEOUT_MS, startRustfs, type RunningRustfs } from '../storage/tests/rustfs.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
@@ -35,6 +36,12 @@ const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873
 const POSTGRES_IMAGE = 'postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42';
 const STARTUP_TIMEOUT_MS = Math.max(180_000, RUSTFS_STARTUP_TIMEOUT_MS);
 const DOCUMENTS_BUCKET = 'documents';
+
+/** Stand-ins for the audit components (no audit catalogue in this plain PostgreSQL container). */
+const AUDIT_STAND_INS: readonly ReadinessCheck[] = [
+  { name: 'audit_partitions', critical: true, check: () => Promise.resolve() },
+  { name: 'audit_chain', critical: false, check: () => Promise.resolve('degraded') },
+];
 
 /** Creates `platform_app` with the bootstrap role settings and returns its connection URL. */
 async function createAppRole(adminUrl: string): Promise<string> {
@@ -96,8 +103,7 @@ describe('US-012 readiness with real PostgreSQL 18, Valkey 8 and RustFS (api)', 
         database.readinessCheck,
         createValkeyCheck(valkey),
         createObjectStorageCheck(storage, DOCUMENTS_BUCKET),
-        pendingCheck('audit_partitions'),
-        pendingCheck('audit_chain'),
+        ...AUDIT_STAND_INS,
         // No report reuse: each test stops a container and must see the next evaluation (PR-0009 m3 TTL is 1 s).
       ],
       { cacheTtlMs: 0 },

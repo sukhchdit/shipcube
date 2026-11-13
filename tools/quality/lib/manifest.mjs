@@ -32,17 +32,34 @@ const MAX_GLOB_LENGTH = 200;
 const MAX_PATH_LENGTH = 4096;
 
 /**
+ * The one staleness-allowed agent-note pattern (D-SEC-PR28-01, PR28-SEC-03): exactly the shape of the notes under
+ * `.claude/agent-memory/<agent>/<note>.md`. `*` never crosses `/`, so this is four segments ending `.md`. It is used
+ * by `stalenessAllowed` and it is listed in the `docs-or-ci-only` path rule of the manifest, which a test keeps equal to
+ * this constant, so a memory-only change neither goes stale nor selects a heavy suite. Do not widen it: `.claude/**`
+ * (settings hooks, agent definitions, commands) is control-plane code and stays non-docs.
+ */
+export const AGENT_MEMORY_GLOB = '.claude/agent-memory/*/*.md';
+
+/** Git file modes a staleness-allowed change may carry: a regular, non-executable file, or absent (added or deleted). */
+const ALLOWED_MODES = new Set(['100644', '000000']);
+
+/** Activation checkpoints of D-ARCH-082, in order. */
+export const CHECKPOINTS = /** @type {const} */ (['Wave-0 exit', 'v0.1.0-m0', 'G3']);
+
+/**
  * @typedef {'pr' | 'wave' | 'gate'} Profile
  * @typedef {{ status: 'planned' | 'active' | 'opt-in', security: boolean, zero_skip: boolean, min_tests: number,
  *   required_cases: string[], lane: string[], journeys_required_at_gate?: string[] }} Suite
  * @typedef {{ id: string, globs: string[], exclude: string[], profile_min: 'none' | Profile, suites: string[] }} PathRule
  * @typedef {{ suite: string, decision: string }} Deferral
+ * @typedef {{ case: string, owner: string, checkpoint: (typeof CHECKPOINTS)[number], decision?: string }} PendingCase
  * @typedef {{
  *   manifest_version: 1,
  *   rules: { invalid_env_prefixes: string[], recorded_env_prefixes: string[], clean_tree_paths: string[] },
  *   tooling_inputs: string[],
  *   security_critical_paths: string[],
  *   deferred_at_gate: Deferral[],
+ *   required_cases_pending: Record<string, PendingCase[]>,
  *   suites: Record<string, Suite>,
  *   profiles: Record<Profile, { always: string[] }>,
  *   path_rules: PathRule[],
@@ -83,6 +100,58 @@ function stringArray(value, where, accept) {
 /** @param {string} glob */
 function isGlob(glob) {
   return glob.length <= MAX_GLOB_LENGTH && GLOB_TEXT.test(glob) && !glob.split('/').includes('..');
+}
+
+/**
+ * `required_cases_pending` (D-QA-014, PR28-SEC-01): SEC-TC IDs of an active suite that have no test on main yet. A
+ * malformed entry throws, so a typo is never read as "nothing parked". The `$comment` key is documentation.
+ * @param {unknown} value
+ * @param {(suite: string) => boolean} known
+ * @returns {Record<string, PendingCase[]>}
+ */
+function parsePending(value, known) {
+  if (value === undefined) return {};
+  if (!isRecord(value)) throw new ManifestError('required_cases_pending must be an object');
+  /** @type {Record<string, PendingCase[]>} */
+  const pending = {};
+  for (const [suite, entries] of Object.entries(value)) {
+    if (suite === '$comment') continue;
+    const where = `required_cases_pending.${suite}`;
+    if (!known(suite)) throw new ManifestError(`${where}: not a manifest suite`);
+    if (!Array.isArray(entries)) throw new ManifestError(`${where} must be an array`);
+    pending[suite] = entries.map((entry, index) => {
+      if (!isRecord(entry)) throw new ManifestError(`${where}[${index}] must be an object`);
+      if (typeof entry.case !== 'string' || !CASE_ID.test(entry.case))
+        throw new ManifestError(`${where}[${index}].case is not a SEC-TC ID: ${JSON.stringify(entry.case)}`);
+      if (typeof entry.owner !== 'string' || entry.owner.trim() === '')
+        throw new ManifestError(`${where}[${index}].owner must be a non-empty string`);
+      const checkpoint = CHECKPOINTS.find((candidate) => candidate === entry.checkpoint);
+      if (checkpoint === undefined)
+        throw new ManifestError(
+          `${where}[${index}].checkpoint ${JSON.stringify(entry.checkpoint)} is not one of ${CHECKPOINTS.join(' | ')}`,
+        );
+      /** @type {PendingCase} */
+      const parsed = { case: entry.case, owner: entry.owner, checkpoint };
+      if (entry.decision !== undefined) {
+        if (typeof entry.decision !== 'string' || !DECISION_ID.test(entry.decision))
+          throw new ManifestError(`${where}[${index}].decision must be a DECISIONS.md ID (D-...)`);
+        parsed.decision = entry.decision;
+      }
+      return parsed;
+    });
+  }
+  return pending;
+}
+
+/**
+ * Checkpoints a verification profile has reached (PR28-SEC-01): `wave` is the Wave-0 exit (and later wave exits),
+ * `gate` is every checkpoint including v0.1.0-m0 and G3, `pr` reaches none.
+ * @param {Profile} profile
+ * @returns {readonly string[]}
+ */
+export function checkpointsReached(profile) {
+  if (profile === 'gate') return CHECKPOINTS;
+  return profile === 'wave' ? [CHECKPOINTS[0]] : [];
 }
 
 /**
@@ -163,6 +232,7 @@ export function parseManifest(raw) {
   return {
     manifest_version: 1,
     rules: parsedRules,
+    required_cases_pending: parsePending(raw.required_cases_pending, known),
     tooling_inputs: stringArray(raw.tooling_inputs, 'tooling_inputs', isGlob),
     security_critical_paths: stringArray(raw.security_critical_paths ?? [], 'security_critical_paths', isGlob),
     deferred_at_gate: deferredAtGate,
@@ -289,17 +359,43 @@ export function isCleanTreePath(path, manifest) {
 }
 
 /**
- * Staleness allow-list of ADR-0023 amendment G item 4: `docs/**` minus `docs/03-architecture/api/**` minus every
- * `tooling_inputs` glob. A change outside it between the evidence SHA and the head makes the evidence stale.
+ * True for an agent note: exactly `AGENT_MEMORY_GLOB`, and a plain repository path (no backslash, no empty, `.` or `..`
+ * segment), so the depth accounting of the glob matcher cannot be played with a separator it normalises.
+ * @param {string} path
+ */
+export function isAgentMemoryNote(path) {
+  return (
+    !path.includes('\\') &&
+    !path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..') &&
+    matchGlob(path, AGENT_MEMORY_GLOB)
+  );
+}
+
+/**
+ * Staleness allow-list of ADR-0023 amendment G item 4 (by path): `docs/**` minus `docs/03-architecture/api/**` minus
+ * every `tooling_inputs` glob, plus the agent notes (`AGENT_MEMORY_GLOB`, D-SEC-PR28-01). A change outside it between
+ * the evidence SHA and the head makes the evidence stale.
  * @param {string} path
  * @param {Manifest} manifest
  */
 export function stalenessAllowed(path, manifest) {
   return (
-    matchGlob(path, 'docs/**') &&
-    !matchGlob(path, 'docs/03-architecture/api/**') &&
-    !manifest.tooling_inputs.some((glob) => matchGlob(path, glob.replace(/^!/, '')))
+    isAgentMemoryNote(path) ||
+    (matchGlob(path, 'docs/**') &&
+      !matchGlob(path, 'docs/03-architecture/api/**') &&
+      !manifest.tooling_inputs.some((glob) => matchGlob(path, glob.replace(/^!/, ''))))
   );
+}
+
+/**
+ * Staleness allow-list with the git mode guard (PR28-SEC-03 item 3): an allowed path stays allowed only when the change
+ * keeps it a regular, non-executable file. A symlink (120000), a submodule (160000) or an executable (100755) entry,
+ * before or after the change, makes the evidence stale, whatever the name.
+ * @param {{ path: string, oldMode: string, newMode: string }} change one `git diff --raw` entry
+ * @param {Manifest} manifest
+ */
+export function stalenessAllowedChange(change, manifest) {
+  return stalenessAllowed(change.path, manifest) && ALLOWED_MODES.has(change.oldMode) && ALLOWED_MODES.has(change.newMode);
 }
 
 /**
@@ -322,7 +418,7 @@ export function profileSatisfies(have, need) {
  * Suite selection.
  *
  * - `pr`: when every changed path is lane-A-only (it matches at least one path rule and every rule it matches has
- *   `profile_min: "none"`, i.e. `docs/**` minus the tooling inputs, or `.github/**`), nothing is selected. Otherwise
+ *   `profile_min: "none"`, i.e. `docs/**` minus the tooling inputs, `.github/**`, or an agent note), nothing is selected. Otherwise
  *   the selection is `profiles.pr.always` plus the suites of every path rule (with `profile_min` `pr`) that matches at
  *   least one changed path (`!` globs and `exclude` respected).
  * - `wave`, `gate`: the profile's suite set (`profiles.<p>.always`); changed paths are not consulted.

@@ -8,24 +8,28 @@
  */
 import type { Config, Secret, Service } from '@platform/config';
 
-import { databaseRuntimeFromConfig } from '../db/runtime.js';
+import { type AuditReadinessChecks, databaseRuntimeFromConfig } from '../db/runtime.js';
 import { createObjectStorageCheck } from '../health/checks/object-storage.js';
 import type { ObjectStorage } from '../storage/object-storage.port.js';
 import { objectStorageFromConfig } from '../storage/s3-object-storage.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
-import { createReadinessProbe, pendingCheck, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
+import { createReadinessProbe, type ReadinessCheck, type ReadinessProbe } from './readiness.js';
 import type { Closeable } from './shutdown.js';
 
 export type ValkeyClient = ReturnType<typeof createValkeyClient>;
 
 /**
- * The five readiness components of openapi.yaml `HealthReady`. The audit components are pending until the audit
- * store exists (audit partitions and chain verification: TASK-021). `object_storage` is a `HeadBucket` on the
- * documents bucket.
+ * The five readiness components of openapi.yaml `HealthReady`; none is pending. `object_storage` is a `HeadBucket`
+ * on the documents bucket (TASK-019); the audit components read the catalogue through the database runtime (TASK-021).
  */
-export function readinessChecks(database: ReadinessCheck, valkey: ValkeyClient, objectStorage: ReadinessCheck): readonly ReadinessCheck[] {
-  return [database, createValkeyCheck(valkey), objectStorage, pendingCheck('audit_partitions'), pendingCheck('audit_chain')];
+export function readinessChecks(
+  database: ReadinessCheck,
+  audit: AuditReadinessChecks,
+  valkey: ValkeyClient,
+  objectStorage: ReadinessCheck,
+): readonly ReadinessCheck[] {
+  return [database, createValkeyCheck(valkey), objectStorage, audit.partitions, audit.chain];
 }
 
 export interface RuntimeServices {
@@ -67,6 +71,7 @@ export function createRuntimeServices(
     probe: createReadinessProbe(
       readinessChecks(
         database.readinessCheck,
+        database.auditChecks,
         valkey,
         // The error class only (ObjectStorageError code): never the endpoint, bucket, key or a credential (R1-m5).
         createObjectStorageCheck(storage, config.STORAGE_BUCKET_DOCUMENTS, (code) => log.warn('object_storage.error', { error: code })),

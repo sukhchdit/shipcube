@@ -12,22 +12,37 @@
 export const READINESS_COMPONENTS = ['database', 'redis', 'object_storage', 'audit_partitions', 'audit_chain'] as const;
 export type ReadinessComponent = (typeof READINESS_COMPONENTS)[number];
 
-/** Components whose failure makes the process not ready (503); the audit components only degrade (AT-US-012-04). */
-const CRITICAL: ReadonlySet<ReadinessComponent> = new Set(['database', 'redis', 'object_storage']);
+/**
+ * Components whose failure makes the process not ready (503). `audit_partitions` is critical since TASK-021
+ * (data-model §5.3 amendment 2026-11-13, D-ARCH-076): a missing month in [current, current + 2] or a squatted partition
+ * name fails every audited write, so it is `unavailable`; only a late pre-creation (current + 3 missing) degrades it
+ * (AT-US-012-04). `audit_chain` only ever degrades.
+ */
+const CRITICAL: ReadonlySet<ReadinessComponent> = new Set(['database', 'redis', 'object_storage', 'audit_partitions']);
+
+/** Components whose schema enum includes `degraded` (openapi.yaml `HealthReady`). */
+const DEGRADABLE: ReadonlySet<ReadinessComponent> = new Set(['audit_partitions', 'audit_chain']);
 
 export const isCriticalComponent = (name: ReadinessComponent): boolean => CRITICAL.has(name);
+
+/** What a check resolves with: `undefined` (usable) or `'degraded'` (usable but late; degradable components only). */
+export type CheckOutcome = void | 'degraded';
 
 export interface ReadinessCheck {
   /** The `HealthReady.components` key this check reports. */
   readonly name: ReadinessComponent;
-  /** `false`: a failure reports `degraded` and readiness stays 200 (AT-US-012-04). Must match the schema enum. */
+  /** `true`: a failure reports `unavailable` and readiness answers 503; `false`: a failure reports `degraded`. */
   readonly critical: boolean;
-  /** Resolves when the dependency is usable; rejects otherwise. Must honour `signal`. */
-  check(signal: AbortSignal): Promise<void>;
+  /**
+   * Resolves when the dependency is usable (with `'degraded'` when usable but late, for a component whose schema enum
+   * has `degraded`); rejects otherwise. Must honour `signal`.
+   */
+  check(signal: AbortSignal): Promise<CheckOutcome>;
 }
 
 export type CriticalStatus = 'ok' | 'unavailable';
 export type DegradableStatus = 'ok' | 'degraded';
+export type AuditPartitionsStatus = 'ok' | 'degraded' | 'unavailable';
 
 /** The `HealthReady` body. */
 export interface ReadinessBody {
@@ -36,7 +51,7 @@ export interface ReadinessBody {
     readonly database: CriticalStatus;
     readonly redis: CriticalStatus;
     readonly object_storage: CriticalStatus;
-    readonly audit_partitions: DegradableStatus;
+    readonly audit_partitions: AuditPartitionsStatus;
     readonly audit_chain: DegradableStatus;
   };
 }
@@ -84,13 +99,16 @@ export function assertReadinessChecks(checks: readonly ReadinessCheck[]): readon
   return Object.freeze([...checks]);
 }
 
-/** Runs one check against its own timeout and the shared deadline; `true` only when it resolved in time. */
-async function passes(check: ReadinessCheck, timeoutMs: number, deadline: AbortSignal): Promise<boolean> {
+/** Result of one check run: resolved in time (`ok` or, for a degradable component, `degraded`) or `failed`. */
+type CheckResult = 'ok' | 'degraded' | 'failed';
+
+/** Runs one check against its own timeout and the shared deadline; `failed` unless it resolved in time. */
+async function runCheck(check: ReadinessCheck, timeoutMs: number, deadline: AbortSignal): Promise<CheckResult> {
   const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), deadline]);
-  if (signal.aborted) return false;
+  if (signal.aborted) return 'failed';
   let onAbort: () => void = () => undefined;
-  const aborted = new Promise<false>((resolve) => {
-    onAbort = () => resolve(false);
+  const aborted = new Promise<'failed'>((resolve) => {
+    onAbort = () => resolve('failed');
     signal.addEventListener('abort', onAbort, { once: true });
   });
   try {
@@ -98,8 +116,13 @@ async function passes(check: ReadinessCheck, timeoutMs: number, deadline: AbortS
     const ran = Promise.resolve(signal)
       .then((started) => check.check(started))
       .then(
-        () => !signal.aborted,
-        () => false,
+        (outcome): CheckResult => {
+          if (signal.aborted) return 'failed';
+          if (outcome === undefined) return 'ok';
+          // `degraded` from a component whose schema enum lacks it fails closed (never reported as ok).
+          return outcome === 'degraded' && DEGRADABLE.has(check.name) ? 'degraded' : 'failed';
+        },
+        (): CheckResult => 'failed',
       );
     return await Promise.race([ran, aborted]);
   } finally {
@@ -107,14 +130,15 @@ async function passes(check: ReadinessCheck, timeoutMs: number, deadline: AbortS
   }
 }
 
-function report(results: ReadonlyMap<ReadinessComponent, boolean>): ReadinessReport {
-  const critical = (name: ReadinessComponent): CriticalStatus => (results.get(name) === true ? 'ok' : 'unavailable');
-  const degradable = (name: ReadinessComponent): DegradableStatus => (results.get(name) === true ? 'ok' : 'degraded');
+function report(results: ReadonlyMap<ReadinessComponent, CheckResult>): ReadinessReport {
+  const critical = (name: ReadinessComponent): CriticalStatus => (results.get(name) === 'ok' ? 'ok' : 'unavailable');
+  const degradable = (name: ReadinessComponent): DegradableStatus => (results.get(name) === 'ok' ? 'ok' : 'degraded');
+  const partitions = results.get('audit_partitions');
   const components = {
     database: critical('database'),
     redis: critical('redis'),
     object_storage: critical('object_storage'),
-    audit_partitions: degradable('audit_partitions'),
+    audit_partitions: partitions === 'ok' || partitions === 'degraded' ? partitions : ('unavailable' as const),
     audit_chain: degradable('audit_chain'),
   };
   const values: readonly string[] = Object.values(components);
@@ -126,14 +150,14 @@ function report(results: ReadonlyMap<ReadinessComponent, boolean>): ReadinessRep
 export async function evaluateReadiness(checks: readonly ReadinessCheck[], options: ReadinessOptions = {}): Promise<ReadinessReport> {
   const timeoutMs = options.checkTimeoutMs ?? READINESS_CHECK_TIMEOUT_MS;
   const deadline = AbortSignal.timeout(options.deadlineMs ?? READINESS_DEADLINE_MS);
-  const outcomes = await Promise.all(checks.map(async (check) => [check.name, await passes(check, timeoutMs, deadline)] as const));
+  const outcomes = await Promise.all(checks.map(async (check) => [check.name, await runCheck(check, timeoutMs, deadline)] as const));
   return report(new Map(outcomes));
 }
 
 /**
  * The report while the process drains (NFR-AVAIL-002): 503 at once, without dependency I/O. The listener closes in
  * the same tick; a pre-close delay that lets the load balancer deregister first is TASK-214 (PR-0009 n2). Critical
- * components read `unavailable` (this process cannot serve them any more), audit components `degraded`.
+ * components read `unavailable` (this process cannot serve them any more), `audit_chain` `degraded`.
  */
 export const DRAINING_REPORT: ReadinessReport = Object.freeze({
   httpStatus: 503,
@@ -143,7 +167,7 @@ export const DRAINING_REPORT: ReadinessReport = Object.freeze({
       database: 'unavailable',
       redis: 'unavailable',
       object_storage: 'unavailable',
-      audit_partitions: 'degraded',
+      audit_partitions: 'unavailable',
       audit_chain: 'degraded',
     }),
   }),
@@ -193,14 +217,19 @@ export function createReadinessProbe(checks: readonly ReadinessCheck[], options:
 /** Every object pendingCheck returned (a brand: a copy or a real check with the same name is not pending). */
 const PENDING_CHECKS = new WeakSet<ReadinessCheck>();
 
+/** Components that may still be stubbed: the audit checks are real since TASK-021 and are never stubbed. */
+export type PendableComponent = Exclude<ReadinessComponent, `audit_${string}`>;
+
 /**
  * Placeholder for a component whose client does not exist yet. Each use names the task that replaces it, and
  * services.test.ts fails once the replacement exists while the stub is still wired.
- *  - A degradable (audit) component reports `degraded`: an unverified audit chain must never read healthy
- *    (PR9-SEC-11); readiness stays 200 (AT-US-012-04).
+ *  - An audit component is refused (TypeError): a stub would read an unverified audit as healthy or as merely
+ *    degraded, which PR9-SEC-11 forbids (code review PR #24 R1-n2).
  *  - A critical component passes: `unavailable` would keep every stack permanently not ready (PR-0009 m2 ruling).
+ *  - A non-critical component (none is pendable today) would report `degraded`, never `ok` (fail closed).
  */
-export function pendingCheck(name: ReadinessComponent): ReadinessCheck {
+export function pendingCheck(name: PendableComponent): ReadinessCheck {
+  if ((name as string).startsWith('audit_')) throw new TypeError(`${name} has a real readiness check and is never stubbed`);
   const critical = isCriticalComponent(name);
   const stub: ReadinessCheck = Object.freeze({
     name,
