@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.3 (P5 Wave 0, D-QA-015: qa-lead confirmed the v1.2 edits unchanged in substance; §7.10 `steady` and `audit-ab` rows aligned with D-ARCH-088/D-ORCH-033; §15 item 23 pins the W0-ACT-1 commit; §9.3 states that `required_from` is set at activation once TASK-015 ships it) · 1.2 (P5 Wave 0, sheet-fold-4: §4.2/§9.2 rule 8 checkpoint narrowing, §9.3 pending-decision and gate-table rows, §13 item 7, §15 items 23–24 — edited by principal-architect per D-ARCH-098) · 1.1 (W0-ACT-1: §9.1–§9.3 suite-activation protocol) |
+| Version | 1.4 (P5 Wave 0, D-QA-016: §6 rule 2 states where `quality:trace` writes and that the evidence attachment hook is 015-B; map v1.1 counts 1,606 G3 scenarios) · 1.3 (P5 Wave 0, D-QA-015: qa-lead confirmed the v1.2 edits unchanged in substance; §7.10 `steady` and `audit-ab` rows aligned with D-ARCH-088/D-ORCH-033; §15 item 23 pins the W0-ACT-1 commit; §9.3 states that `required_from` is set at activation once TASK-015 ships it) · 1.2 (P5 Wave 0, sheet-fold-4: §4.2/§9.2 rule 8 checkpoint narrowing, §9.3 pending-decision and gate-table rows, §13 item 7, §15 items 23–24 — edited by principal-architect per D-ARCH-098) · 1.1 (W0-ACT-1: §9.1–§9.3 suite-activation protocol) |
 | Date | 2026-11-13 |
 | Owner | qa-lead |
 | Consumers | senior-developer (task DAG and DoD), test-engineer, e2e-test-engineer, test-runner, accessibility-auditor, performance-engineer, security-analyst, devops-engineer, quality-gatekeeper (G3) |
@@ -186,8 +186,8 @@ Stories whose Gherkin needs Firefox or WebKit are accepted at the wave end on th
 **Rules (D-QA-002).**
 
 1. A test carries every ID it verifies in its title, in square brackets: `[AT-US-202-01] [J-M0-03] booking flows API → queue → worker`. Security cases also carry the tag `@security`. Playwright journey tests carry `@critical` when they belong to the PR-level set.
-2. `quality:trace` (Wave 0 task T-QA-02) reads every JUnit file of a run, extracts the IDs, and writes `ac-trace.json` into the run directory:
-   - **Must-AC coverage** = (G3-counted `AT-` IDs with at least one test, all of whose tests passed) ÷ (G3-counted `AT-` IDs in the map). At G3 the target is **100 %** (1,593 scenarios at map v1.0).
+2. `quality:trace` (Wave 0 task T-QA-02, merged in PR #35) reads every JUnit file of a run, extracts the IDs, and writes `ac-trace.json`. By default it writes `reports/ac-trace.json` (git-ignored, inside the repository root, outside the committed evidence tree); a run directory under `docs/05-quality/tests/runs` accepts only the files `quality:heavy` hashed into its `summary.json`, so `check-evidence` rejects an `ac-trace.json` placed there by hand. The attachment hook that lets `quality:heavy` hash `ac-trace.json` and `flake-report.json` into a run is TASK-015 part 015-B (lane C, due before G3; D-SEC-PR35-02 correcting D-TASK277-03). Until then the trace output is read from `reports/`, and G3 evidence cites it after 015-B. The sections of the document:
+   - **Must-AC coverage** = (G3-counted `AT-` IDs with at least one test, all of whose tests passed) ÷ (G3-counted `AT-` IDs in the map). At G3 the target is **100 %** (1,606 scenarios at map v1.1).
    - **NFR coverage** = NFRs with every listed `NT-` part passing (FULL rows) or with their "this run" evidence present (PARTIAL/DEFERRED rows).
    - **SEC-TC coverage** = 64/64 present and passing, or recorded as "route absent" for the conditional cases (§7.11, D-QA-011).
 3. An ID in a test title that is not in the maps fails `quality:trace` (no orphan tests that pretend to cover something).
@@ -580,7 +580,7 @@ At every wave end, after the wave's last merge to `main`:
 | CH-07 | Confused staff member | Admin sign-in and TOTP (QR-05) | Lost authenticator, recovery codes, wrong codes and lockout, idle timeout warnings, multiple tabs |
 | CH-08 | Assistive-technology user | Critical journeys (QR-10) | Keyboard and screen-reader proxy across sign-in, quote, wizard, checkout, tracking |
 
-4. **Confirm** every Must AC (1,593 `AT-` IDs at map v1.0) has a passing automated test in the gate evidence.
+4. **Confirm** every Must AC (1,606 `AT-` IDs at map v1.1) has a passing automated test in the gate evidence.
 5. **Write** `docs/05-quality/tests/VERIFICATION-REPORT.md`: results per suite and lane, coverage vs targets, AC coverage %, NFR verification status per row (FULL verified / PARTIAL evidence / DEFERRED evidence), SEC-TC 64/64, open defects by severity, exploratory findings, and the qa-lead recommendation for G3 (never PASS with an open S1/S2 or a failing Must AC). quality-gatekeeper decides.
 
 ---

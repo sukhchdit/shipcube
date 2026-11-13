@@ -111,10 +111,10 @@ describe('committed maps', () => {
     expect(ids.filter((id) => id.startsWith('J-KB-'))).toHaveLength(9);
   });
 
-  it('gherkin-test-map.md: 1599 rows, 1593 counted for G3', () => {
+  it('gherkin-test-map.md: 1612 rows, 1606 counted for G3', () => {
     const rows = parseGherkinMap(read(MAP_PATHS.gherkin));
-    expect(rows).toHaveLength(1599);
-    expect(rows.filter((r) => r.g3)).toHaveLength(1593);
+    expect(rows).toHaveLength(1612);
+    expect(rows.filter((r) => r.g3)).toHaveLength(1606);
     expect(new Set(rows.map((r) => r.story)).size).toBe(218);
   });
 

@@ -26,11 +26,13 @@ const repoRoot = findRepoRoot();
 const committedMap = readFileSync(join(repoRoot, ...MAP_PATHS.gherkin.split('/')), 'utf8');
 
 /**
- * Must stories whose Gherkin gained scenarios after map v1.0 was classified (D-058/D-060 story edits inserted scenarios
- * mid-block). qa-lead classifies the new scenarios in gherkin-suite-assignments.json and regenerates the map; then this
- * list must become empty (the ratchet test below fails while it names a story that no longer drifts).
+ * Must stories whose Gherkin gained scenarios that qa-lead has not classified yet. Empty since map v1.1 (D-QA-016
+ * classified the 13 scenarios appended by D-065): the committed map must equal the generator output for the real story
+ * files. A future story edit that adds scenarios fails the equality and drift tests below until qa-lead classifies them;
+ * listing the story here is only a temporary, reviewed bridge (the ratchet test fails while it names a story that no
+ * longer drifts).
  */
-const KNOWN_DRIFT = ['US-066', 'US-121', 'US-129', 'US-137', 'US-222'];
+const KNOWN_DRIFT: string[] = [];
 
 /** The story model of the real repository, with the drifted stories' scenarios taken from the committed map rows. */
 function storiesAsMapped(): Story[] {
@@ -61,11 +63,11 @@ describe('gen-gherkin-map against the real repository', () => {
     expect(text).toBe(committedMap);
   });
 
-  it('counts 218 Must stories and 1599 scenarios, 1593 of them G3-counted', () => {
+  it('counts 218 Must stories and 1612 scenarios, 1606 of them G3-counted', () => {
     const rows = buildRows(storiesAsMapped(), assignments);
     expect(new Set(rows.map((r) => r.story.id)).size).toBe(218);
-    expect(rows).toHaveLength(1599);
-    expect(rows.filter((r) => r.g3)).toHaveLength(1593);
+    expect(rows).toHaveLength(1612);
+    expect(rows.filter((r) => r.g3)).toHaveLength(1606);
   });
 
   it('drift guard: exactly the known drifted stories need qa-lead classification (ratchet)', () => {
