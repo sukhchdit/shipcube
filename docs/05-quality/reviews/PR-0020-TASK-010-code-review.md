@@ -115,3 +115,166 @@ The worktree was used read-only. All experiments ran in a `git archive dae1f96` 
    - main.ts `createRuntimeLog` options plus `logger: log`.
    Make sure the docs router and OPTIONS responder lines log `route` as a template or `null`, never a raw path. Then re-run `test:api` (both suites, including PR #21's mounted-operations drift check against the extra `routePrefix` layer) and the unit suite.
 5. Squash merge (the default).
+
+---
+
+## Round 2 (head 9647907)
+
+- **Reviewer:** code-reviewer
+- **Date:** 2026-11-13
+- **Round:** 2 (delta review after fix cycle 1 and two merges of main)
+- **Head:** `964790786d69790819569c1423d34ab96c931f98`. Previous head was `dae1f96`.
+- **Commits since r1:**
+  - Merge `ce95d37`: origin/main `e82902d`.
+  - Fixes: `36f19fc` (M1 lint), `93d1e11` (free text), `dcdbf44` (walker and budget), `75f3d4b` (stack and Joi), `67f8faa` (security allow-list, levels, brand, n2/n4), `182066f` (process handlers, api wiring, n3/n5/n6/n7/n9), `508c1f3` (`apiKey :` fix).
+  - Merge `9647907`: origin/main `6ac9836`, which includes TASK-004 `f38e6b9`.
+- **Rulings applied:**
+  - D-062: US-008 split. PR #20 now "partially completes" US-008, and TASK-092 completes it.
+  - D-ORCH-022: this PR may edit `eslint.config.mjs`.
+  - D-SEC-PR20-01.
+  - D-ORCH-024: the PR #20/#21 union rule.
+  - D-ORCH-025: all 5 runtime DB events stay at `error`.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every round-1 finding is closed: M1, M2 (via D-062), m1-m5 and n1-n9 (n8 routed). 22 of 22 mutations
+         against the new guards were killed: 6 for the lint arms, 16 for the redaction, security, process and stack
+         code. Both merges are pure unions and the lock delta is unchanged (one entry).
+         Two new MINORs, both cheap to fix in this PR:
+         - R2-m1: the M1 guard covers direct imports only. A shared-root re-export of the logging files still
+           ships Pino to web/ui/pricing with 0 lint errors.
+         - R2-m2: the general-line PII key class misses the platform's own personal-data keys `display_name` and
+           `receiver_name`, and also `username` and `client_ip`.
+FINDINGS: R2-m1, R2-m2 (MINOR); R2-n1..R2-n7 (NIT).
+GOOD: one fixture per importer x arm with the arms isolated, so each policy arm has its own failing fixture.
+      Identity check against the captured V8 accessor. Budgeted walker (the r1 16.2 MB / 3.9 s case now gives
+      16.6 KB / 12 ms). Sink-only brand plus a dedicated always-on security Pino. The fast-check property found
+      a real bug (508c1f3). The type-level runtime-event exhaustiveness test.
+SECURITY-FLAGS: R2-m1 (Pino reachable through the shared barrel); R2-m2 (PII keys on general lines);
+      R2-n1 (free-text residuals: JSON array/object values, PEM blocks, full-width keys).
+      The security delta round must name the final head: owned paths changed since dae1f96.
+```
+
+### R2.1 Verification performed
+
+The worktree was used read-only.
+- **Probe copy:** `git archive 9647907` into the reviewer scratchpad. `node_modules` was junctioned to the MAIN checkout. The lock delta versus main is only the `@platform/shared` → `pino` edge, and pino is already hoisted there. `@platform/shared` and `@platform/api` were overridden with per-workspace junctions to the copy's sources.
+- **Cleanup:** junctions and the copy were removed. Main `node_modules` still has 740 entries, there is no link at `C:\`, and the worktree `git status` is clean.
+- **Not re-run:** Docker, integration, e2e, full coverage, build and full lint (dispatch memory cap). For those I relied on lane A run 43353973952 (head 9647907; `fast-lane` success: lint, format, typecheck, 120 suites / 2778 unit tests, build, base-ref no-weakening 146 passed / 9 skipped with 0 extras) and on the developer's gate table (integration 18 suites / 185 passed, coverage 97.81 / 96.22, logging folder 99.05 / 92.78, on `65a2eab`, which is tree-identical outside docs/.claude).
+
+| Check | How | Result |
+|---|---|---|
+| Lane A | `gh pr view 20`, `gh run view 43353973952 --log` | `fast-lane` success. `scans` fails only at "Security-owned paths need a review record": 18 owned paths changed after the r1 record at `dae1f96` (eslint.config.mjs, package-lock.json, the 15 new fixtures, negative-fixtures.test.ts, tools/tsconfig.json). `ci-gate` fails as the aggregate. This is expected; the security delta round is pending |
+| M1 fixtures | `negative-fixtures.test -t TASK-010` in the copy | 13 / 13 pass: 10 bad (4 importers × 2 arms, web `vite.config.ts`, web `pino`) and 3 ok (api specifier + pino, worker resolved file, web shared root) |
+| M1 mutations | sed on the copy's `eslint.config.mjs`, then the same run | All killed: drop the `dependency.source` arm (5 fail); drop the `pino` arm (1); drop the resolved-file arm (4); drop the web/admin policy (6); drop the ui/pricing policy (4); narrow `{ui,pricing}` to `ui` (2) |
+| M1 extra vectors | Probe root `layering/zz-probe` linted by the real `tools/lint/lint-fixtures.mjs` | **Blocked:** `import()`, `export {…} from`, `export * from`, `@platform/shared/logging/types`, `pino-pretty`, `pino/file`, `createRequire(...)('@platform/shared/logging')`, admin `vite.config.ts`, web `react-router.config.ts`, admin `.tsx`, ui `.tsx` with pino. **Clean (R2-m1):** `packages/shared/src/index.ts` with `export * from './logging/logger.js'`, plus web `import { createLogger } from '@platform/shared'` and a ui import of the shared root. (`sonic-boom` is also clean; it is out of scope) |
+| No weakening of earlier boundaries rules | Diff of `eslint.config.mjs` 36f19fc; base-ref step; the merge's eslint hunk | Additive only: one file category and two policies at the end of `BOUNDARIES_POLICIES`, nothing after them. TASK-004's merged hunk only touches ignores and an `import-x` file block. Base-ref run: 0 extras |
+| Targeted unit runs | Jest `--selectProjects unit -i` on `packages/shared/src/logging`, api `logging/` + `runtime/process-errors`, worker `logging` | 13 suites / 374 tests pass. One false failure, worker `job-context` through MAIN's `@platform/api` link, passes after the workspace override |
+| Targeted api runs | Jest `--selectProjects api -i`, `apps/api/src/platform/(logging\|errors)` | 2 suites / 61 tests pass (`logging.api.test.ts` incl. the live SEC-TC-31 / PR20-SEC-01 case, `problem-handler.api.test.ts`) |
+| Fix mutations | sed, one at a time, on the copy's sources; the same unit set | **16 / 16 killed:** getter identity → any getter (5 fail); `isLiveObject` → false (1); array pair markers off (3); `MAX_LINE_CHARS` → 1e12 (3); security allow-list → allow-all (4); security Pino → the level-gated instance (1); brand check removed (1); 508c1f3 reverted (1); drift → `warn` (3); `ip_coarse` unvalidated (1); stack header not rebuilt (4); `exiting` guard removed (1); cookie/authorization to-end-of-line off (4); NFKC off (1) |
+| Free-text leak probe | `redactString` over 36 vectors with random sentinels | All r1 m4 vectors are closed: 4+ blanks, next line, second Cookie pair, `\"` JSON, `API key:`, Digest with and without `Authorization:`, NBSP, `apiKey :`, quoted values with blanks, URL userinfo / query / `:\/\/`, `X-Quote-Token`, DPoP, `x-reauth-proof`, folded `Cookie:` continuation, `otpCode`. **Leaks:** the documented gaps (3-word key, 17 blanks, scheme-less userinfo), plus R2-n1: a JSON array/object value (`{"recoveryCodes":["c1","<v>"]}`, `{"credentials":{"user":"u","key":"<v>"}}`), a PEM private-key body, and a full-width key in free text |
+| E-mail masking | 11 forms | Masked: IDN (`a***@exämple.com`), quoted local part, `%40`, upper case, `+`, `<…>`, `mailto:`. Not masked: `alice@localhost`, `alice @ example.com`, `&#64;`. Acceptable |
+| Walker | Direct `redactValue` | `rawHeaders`-style pairs and `Object.entries(headers)` redacted (values after `Authorization`/`Cookie`, multi-value `set-cookie`). A sensitive *value* shifts the pairing but fails closed. Map → `[Unsupported]`, EventEmitter → `[Unsupported]`, Buffer → `[Binary]`. Accessor `password` not invoked. `card.number`/`expMonth`/`cvc` → `[REDACTED]`. JWT/`sk_live_` keys → `[REDACTED_KEY]`. **Gaps (NIT):** PII-named pairs in arrays (`['name','Alice']`) are not marked; `nameCount: "Alice"` is exempt by the count suffix |
+| Live HTTP | `http.createServer` + a request with cookie (`__Host-rt_*` second), `x-quote-token`, `x-api-key`, Bearer and a query sentinel; logged `req`, `res`, `{...req}`, `socket`, `headers`, `rawHeaders` | No sentinel. `req`/`res`/`socket` → `[Unsupported]`; the spread copy's `rawHeaders`/`url` are omitted |
+| Budget and time | `createLogger().info` | r1 case 20 × 99 × 8 KiB: **11.7 ms, 16,619-char line** (was 3.9 s / 16.2 MB). 30 adversarial 8 KiB fields in one call: 4.3 ms. One 100k-key object: 38 ms. **R2-n3:** 100 references to one 300k-key object took 2.0 s (and 2.1 s as array items), because `Object.keys` runs before the cap and is not charged. Four 8 KiB `"` fields plus an 8 KiB `"` error message gave a **50,246-char** line, because escaping and `err` are outside the budget |
+| ReDoS | 30 adversarial 8 KiB vectors (the new `KEY_SEPARATOR` two-word / NBSP / `with value` / line-break arms, `\"` runs, `digest`, `token`+blanks, `a.` for `EMAIL_DOMAIN`, `%40`, quoted local parts, URLs, `sk_`, `eyJ`, `A_`, `apikey :`) | Linear. Worst 7.9 ms per string, which is the cap. Input is capped at 8192 before any regex |
+| Stack getter | `serializeThrown` with a plain, bound and Proxy-wrapped user `stack` getter | Not invoked in any case (0 calls). A message scrubbed after the first `.stack` read does not reappear (header rebuilt) |
+| Security events | Sink at `APP_LOG_LEVEL` silent / fatal / info; plain `logger.warn('security.login_failed', …)`; every `SECURITY_EVENT_FIELDS` key of every event with a benign value; 8 `ip_coarse` values | Written at every level, exactly one line. `username`/`clientIp` dropped (`dropped_attributes: 2`); `ip_coarse` `1.2.3.0/24` kept. The plain `security.*` warn is a general line without `event_type`, and it wrote `username: "bob"` (R2-m2). All allow-listed fields are written except `refresh_token_reuse.session_id` → `[REDACTED]` (known, D-ORCH-025 (3)). `ip_coarse`: `1.2.3.0/24` and `2001:db8:1::/48` kept. `1.2.3.4`, `/16`, a 4-group IPv6, `::1/48`, `::ffff:` and a leading zero are dropped |
+| §13 parity | `SECURITY_EVENT_FIELDS` vs api/README §13 "Extra fields", by hand | All 22 rows match. Only the 5 runtime events add `sql_state` |
+| Merges | `git merge-tree --write-tree P1 P2` vs M | `ce95d37` (dae1f96 + e82902d) and `9647907` (508c1f3 + 6ac9836): `git diff --stat <tree> M` is **empty** for both, so there is no hand resolution. Both-sides files: lock and `tools/tsconfig.json` in the first; `eslint.config.mjs`, lock and `negative-fixtures.test.ts` in the second. All merged cleanly |
+| Delta conservation | File sets and `^[+-]` md5 | `6ac9836..9647907` has 65 files = r1 delta (`80ff2c2..dae1f96`) ∪ fix-commit files. Every r1-only file has an identical hunk md5 |
+| Lock delta | `git diff --text` (the lock is `-diff`) | Identical to r1: only `packages/shared` gains `dependencies: { pino: ^10.4.0 }`. No new package |
+| Current main | `git merge-tree 9647907 origin/main` (87fcd9e, docs only) | Clean |
+
+### R2.2 Round-1 finding closure
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 | **Closed** (residual R2-m1) | `eslint.config.mjs:58-59,173-174,221-233,412-419`; fixtures `tests/fixtures/lint/layering/shared-logging-server-only/**`; `negative-fixtures.test.ts:139-168,701-710`. Six mutations killed. Every direct form is blocked, including the build config, `import()`, re-exports and `createRequire` |
+| M2 | **Closed** (plan) | D-062; PR body "Partially completes US-008 … TASK-092"; test titles suffixed at `logging.api.test.ts:119` and `job-context.test.ts:15`; sheet lines queued under SHEET-FOLD-2 (architect, OPEN) |
+| m1 | **Closed** | `serializers/error.ts:54-61,81-93`: identity vs the captured V8 accessor. Probe: bound and Proxy getters are not invoked. Mutation killed (5 tests) |
+| m2 | **Closed** | Per-event allow-list `security-event.ts:94-122`, `logger.ts:97-110`; drop count; §13 parity holds |
+| m3 | **Closed per D-ORCH-025** | All 5 runtime events at `error` (`security-event.ts:79-83`); type-level exhaustiveness test in `security-events.test.ts`. I accept D-ORCH-025 and found no concrete harm. `rls_write_rejected` and drift are only reachable through a code or configuration defect, not by a client, so `error` gives no alert-flooding path |
+| m4 | **Closed** (residual R2-n1) | Every r1 vector is redacted (§R2.1). Accepted gaps are listed in `string-redaction.ts:8-18` |
+| m5 | **Closed** (residual R2-n3) | `MAX_LINE_CHARS` (`redaction.ts:53`), keys capped at 128, raw stack cut at 16 KiB. The r1 case went from 3.9 s to 12 ms |
+| n1–n7, n9 | **Closed** | `[REDACTED_KEY]`; `CORRELATION_ID_PATTERN` in `@platform/shared` (`correlation/correlation-id.ts`); problem-handler comment; fallback nulls; api sink = shared sink; n6 documented (`request-logger.ts:7-9`); health probes at `debug`; pair-only sentinel |
+| n8 | **Routed** (D-ORCH-025 (2)) | Coarse-IP emission → TASK-052+. The logger accepts and validates `ip_coarse`. The counter goes to the US-013 metrics task |
+
+### R2.3 Findings
+
+| ID | Sev | Location | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `eslint.config.mjs:412-419` | **The server-only guard covers direct imports only.** web, admin, ui and pricing may import the `@platform/shared` root (by design). Nothing stops a non-logging file of `packages/shared` from importing or re-exporting `packages/shared/src/logging/**` or `pino`. `barrel-reexport-only` permits `export * from './logging/index.js'` in the root barrel. My probe: root `export * from './logging/logger.js'` plus web `import { createLogger } from '@platform/shared'` gives **0 errors**. That is the most likely accidental path for Pino into the browser bundle, and it bypasses the M1 promise ("Pino never reaches browser bundles or packages/pricing"). Today no non-logging shared file imports logging, so a guard costs no churn | Add one policy: `from` = `packages/shared` files that are neither `shared-logging` nor `test`, `disallow: [{ to: toLayer('shared-logging') }, { to: toPackage('pino', 'pino-*') }]`, with the same message. Add a bad fixture (`packages/shared/src/index.ts` re-exporting a logging file) and an ok fixture (a logging file importing `../correlation/…`). Mutation: dropping the policy fails the fixture. Preferred in this PR, because the eslint touch is already granted (D-ORCH-022) and the security delta round is due anyway. Otherwise route it to TASK-020 with a STATUS line |
+| R2-m2 | MINOR | `packages/shared/src/logging/string-redaction.ts:78-111` | **The general-line PII key class misses personal-data keys of this platform's own contract.** `openapi.yaml` has `display_name` (17 occurrences) and `receiver_name` (3, the POD signer). Neither normalised key contains a listed part (`displayname`, `receivername`), so `log.info('x', { receiverName })` writes the name in clear. The same holds for `username`, `user_name`, `recipient_name`, `sender_name` and the IP keys `client_ip`, `remote_ip`, `x-forwarded-for`, `x-real-ip`: `ip` is exact-only, and only `ipaddress`/`remoteaddress` hit `address`. Probe: a plain `security.login_failed` warn wrote `username: "bob"`. PR20-SEC-02 asked for "PII-key redaction on every line", and the fix cycle advertises it | Add parts `displayname`, `receivername`, `recipientname`, `sendername`, `shippername`, `consigneename`, `username`, `legalname`, `clientip`, `remoteip`, `sourceip`, `userip`, `forwardedfor`, `realip`. Do not add a bare `ip` suffix: it would hit `relationship`/`membership`/`ship`. Extend the carrier-shaped object test with these keys, and add a negative test that `carrier_name`/`service_name`/`job_name`/`entity_name` stay readable. Security-analyst confirms the list in the delta round (`legal_name` of a sole trader is personal data) |
+| R2-n1 | NIT | `string-redaction.ts:331-347` (`unquotedEnd`) | Free-text residuals beyond the documented list. (a) A JSON array/object value ends at its first `,`, so `{"recoveryCodes":["c1","<v>"]}` and `{"credentials":{"user":"u","key":"<v>"}}` keep `<v>`. Header line 11 covers this in its letter, but recovery codes are credentials. (b) A PEM block (`-----BEGIN … PRIVATE KEY-----` … `-----END`) body is kept. (c) A full-width key in free text (`ｐａｓｓｗｏｒｄ=v`) is not folded, because `KEY_SEPARATOR` is ASCII-only, while structured keys are NFKC-folded | (a) When the value starts with `[` or `{`, scan to the matching bracket with a quote-aware depth counter capped at the line end. Fail closed to the end of the line. (b) Redact `-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END[^-]*-----\|$)` (bounded by the 8 KiB cap). (c) Run `normalize('NFKC')` on the text before the pair pass, or list it as an accepted gap. Optional; the security delta round may rule them accepted |
+| R2-n2 | NIT | `redaction.ts:135-152` | Array pairs use only the sensitive and omitted classes. A PII name followed by its value (`['name','Alice']`, `['email', …]` is masked anyway) is written. `COUNT_SUFFIX` exempts `nameCount: "Alice"` | Use `keyMarker(previous, undefined)` in `pairMarker`, or document it |
+| R2-n3 | NIT | `redaction.ts:48-53`, `:154-171` | The JSDoc claims "one call costs milliseconds and its fields stay near 16 KiB, below the Docker json-file line split, whatever is logged". (a) `Object.keys(value)` runs before `slice(0, MAX_KEYS)` and is not charged. A huge object referenced repeatedly (siblings, not a cycle) is re-enumerated on each visit: 100 × 300k keys took **2.0 s**. Not reachable from a 1 MB JSON body (one pass, about 40 ms). (b) JSON escaping (`"` ×2, controls ×6) and the `err` value (message + stack + 3 causes) are outside the budget: a 50 KB line was produced, which Docker splits at 16 KiB | (a) Charge `Math.min(keys.length, …)` to `state.chars`, or keep a per-call `WeakSet` of visited objects that writes `[Repeated]`. (b) Reword the claim ("fields are budgeted at 16 Ki characters before escaping; `err` adds at most …"), or budget the serialised length |
+| R2-n4 | NIT | `apps/api/src/platform/runtime/log.ts:7-9` | Stale: "Events named `security.<event>` are security events". After 67f8faa only sink-branded fields are (`types.ts:82`) | Update the comment |
+| R2-n5 | NIT | PR #20 body | Three stale items. (a) The "PR #21 union" note still says keep `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)`, which contradicts D-ORCH-024 (3). The auto-merge keeps exactly that line, so it fails PR #21's drift check. (b) The header says "Branch is up to date with main (merged at `18d761c`…)". (c) The "Gates" table is for `dae1f96`; the fix-cycle comment has the current table | Fix the union note to D-ORCH-024 and refresh the header and gate lines (the body becomes the squash message) |
+| R2-n6 | NIT | `string-redaction.test.ts:266-280` | The fast-check property builds the value with `hex(6)` (outside fast-check), so a reported seed does not replay the same value. It does not matter today, because redaction does not depend on the alphanumeric content | Use `fc.stringMatching(/^[0-9a-f]{6}$/)` |
+| R2-n7 | NIT | `apps/api/src/platform/runtime/process-errors.ts:28-36` | `process.exit(1)` straight after the fatal write. That is fine on Linux (pipes and files are synchronous for stdout). On a Windows dev host (pipes are asynchronous) the line can be lost. No test proves that `main.ts` wires the handlers | Optional: a comment noting the Linux assumption. The wiring is two lines in each `main.ts`; reviewed by reading |
+
+### R2.4 Reviewer-focus answers
+
+1. **M1:**
+   - The `shared-logging` category plus the two final policies block the `@platform/shared/logging` specifier (and subpaths), `pino`/`pino-*`, and resolved files in `packages/shared/src/logging`. This holds for web/admin app code and build configuration (any `apps/{web,admin}/**` non-test file: vite.config, react-router.config) and for ui and pricing.
+   - Every import form is covered: static, dynamic, re-export, `createRequire`.
+   - The fixtures are negative and positive per arm, and arm-isolated. All six mutations are killed.
+   - The base-ref no-weakening step is green with 0 extras. It enforces the *earlier* fixtures against the new config; the new fixtures are enforced by the head suite now and by later PRs' base-ref runs.
+   - No earlier boundaries rule from PRs #2/#4/#17/#18/#19 is weakened. The change is additive and the policies sit last.
+   - Residual: R2-m1.
+2. **Redaction:**
+   - EventEmitter → `[Unsupported]`. It covers req/res/socket/ioredis-style clients.
+   - Raw header pairs are classified by the preceding name, failing closed on shifted pairs. `rawHeaders`/`rawTrailers`/`_parsedUrl` keys are omitted.
+   - The 16 KiB budget holds for fields, but see R2-n3 for `err` and escaping.
+   - Stack getter: the identity check is correct, and the header is rebuilt from the redacted message.
+   - Joi `ValidationError`: written as `{name, details:[{path,type}]}` with sanitised path segments, and the type is validated against `^[A-Za-z0-9_.-]{1,64}$`.
+   - The fast-check property (35 keys × 5 forms × 6 separator shapes × 4 prefixes) found a real bug, `apiKey :` (508c1f3). Reverting the fix fails the regression table.
+3. **Security events:**
+   - `SECURITY_EVENT_FIELDS` equals the README §13 Extra fields for all 22 events, plus `sql_state` for the 5 runtime events.
+   - A dedicated `securityPino` at `trace` ignores `APP_LOG_LEVEL` (silent and fatal still write). Only sink-branded fields qualify.
+   - `ip_coarse` accepts only an IPv4 `x.y.z.0/24` (no leading zeros) or an IPv6 /48 prefix with at most 3 groups.
+4. **installProcessErrorHandlers:** one fatal line through the redacting logger, then `exit(1)` exactly once, even when the logger throws. The tests are sound: a P2039 with sentinels in message/meta/detail gives an identifier-only `err`, and an uncaught exception with `password=` is redacted. The api and worker `main.ts` install the handlers right after the logger. See R2-n7.
+5. **Over-redaction:**
+   - `refresh_token_reuse.session_id` → `[REDACTED]` is acceptable. It fails closed, `family_id` still links the event to the session family, and D-ORCH-025 (3) gives TASK-052 the ruling.
+   - Free-text header names with a keyword (`X-Quote-Token: v` → `[REDACTED]: [REDACTED]`) are acceptable. Structured header objects keep the key and redact only the value.
+6. **Merges:** both are pure unions (empty merge-tree diff), delta conservation holds, and the lock delta is the same single `pino` edge.
+7. **PR #21 union:** see the checklist in §R2.5.
+
+### R2.5 Merge conditions
+
+1. **Security delta round** (D-SEC-PR20-01: every redaction change gets one) with a record naming the final head. Lane A `scans` must then be green on that head.
+2. **R2-m1 and R2-m2:** fixed in this PR (preferred), or each routed with a named owner and a STATUS ROUTED line. R2-n5 (a) is fixed in the PR body before the union.
+3. **Lane B integration** on the final head. The developer ran 18 suites / 185 tests on a tree-identical commit; the gatekeeper confirms.
+4. **Order:** PR #21 merges first (D-ORCH-024 (3), D-ORCH-025 (4)). PR #20's merge-second commit applies this **union checklist**. `git merge-tree 9647907 e046ea2` gives textual conflicts in `app.ts`, `main.ts` and `request-context.ts` only. `eslint.config.mjs`, `negative-fixtures.test.ts`, `packages/shared/src/index.ts` and `problem-handler.api.test.ts` auto-merge.
+   - (a) **`app.ts` header:** use PR #21's order with "→ access log" after the request context, and drop "Pino request logging with TASK-010".
+   - (b) **`app.ts` imports:** keep both sets:
+     - `problemHandler, type ErrorLogFields, type ErrorLogger`;
+     - `optionsResponder, routeFallback`;
+     - `createDocsRouter, DOCS_PATH, type DocsOptions`;
+     - `requestLogContext`;
+     - `requestLogger, routePrefix, type AccessLogFields`.
+   - (c) **`AppLogger`** = PR #20's `ErrorLogger & { info, debug }`. Drop PR #21's "Minimal logger seam until Pino arrives" comment.
+   - (d) **Request context and access log:** `app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }))`, then `app.use(requestLogger(logger))`.
+   - (e) **Auto-merge trap: `routePrefix`.** The clean side keeps `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)`. Replace it with:
+     - `const api = express.Router(); api.use(routePrefix(API_PREFIX));`
+     - then the module loop;
+     - then `routes.use(API_PREFIX, api)`.
+     Update the `routePrefix` JSDoc (`request-logger.ts:31`). Do not widen the drift walker.
+   - (f) **`main.ts`:**
+     - imports `requestLogContext`, `createRuntimeLog, readPackageVersion`, `installProcessErrorHandlers`, `DocsSpecError, docsOptionsFrom, type DocsOptions`;
+     - `createRuntimeLog('api', process.stdout, { version, level, context })`;
+     - `installProcessErrorHandlers(...)` **before** the `createApp` try block, so a non-`DocsSpecError` rethrow becomes one fatal line + exit 1;
+     - keep PR #21's try/catch, `apiMode` and `docs`, and add `logger: log`.
+   - (g) **`request-context.ts`:**
+     - `RequestContextOptions` = `{generateCorrelationId, generateRequestId, apiMode}`;
+     - `RequestContext` = `{correlationId, requestId, clientCorrelationId?, apiMode}`, with `isRequestContext` checking `requestId` (and `apiMode`);
+     - the middleware sets `correlationId: clientCorrelationId ?? generateCorrelationId()`, `requestId`, the optional `clientCorrelationId` and `apiMode`;
+     - keep the exported `resolveCorrelationId` (PR #21's `classify.test.ts` uses it);
+     - `CORRELATION_ID_PATTERN` is imported from `@platform/shared` and re-exported.
+   - (h) **Test loggers:** PR #21's `{ info, error }` loggers gain `debug`: `tests/api/contract-validation.api.test.ts:20`, `apps/api/src/platform/openapi/runtime-seams.api.test.ts:33`, `serve.api.test.ts:45` and `tools/openapi/api-mounts.ts` `silentLogger`. Typecheck catches the typed ones. Without it, a `/health/*` request crashes in the finish listener.
+   - (i) **Docs routes:** they log `route` as the leaf pattern (`/openapi.json`, no `/api/docs`), and OPTIONS 204 logs `route: null`. Never a raw path, so this is acceptable until TASK-020. Optionally, make `routePrefix(DOCS_PATH)` the first layer *inside* `createDocsRouter`.
+   - (j) **Re-run on the union commit:** `npm run lint` (`SHARED_LOGGING` policies still last; `negative-fixtures` incl. the base-ref step), `typecheck`, `test:unit`, `test:api` incl. the drift check. `eslint.config.mjs` and `negative-fixtures.test.ts` are owned, so a merge-only security round applies (D-ORCH-024 (3)).
+5. **Squash merge**, because the intermediate fix commits are not individually gated.
+
+_Note:_ while this round was in progress, PR #21's head moved from `e046ea2` to `c3e7f5f`, which only adds its security record (docs). `git merge-tree 9647907 c3e7f5f` gives the same three conflicts. The merged `app.ts:85` still auto-keeps `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)`. The four `{ info, error }` loggers in item (h) are unchanged. The checklist stands.

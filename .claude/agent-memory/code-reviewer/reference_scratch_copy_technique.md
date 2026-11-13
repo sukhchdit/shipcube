@@ -45,6 +45,8 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 
 **Workspace-link override (PR #9 r3):** when the root `node_modules` junction points at a checkout whose `@platform/*` sources are older than the PR, add `copy/apps/node_modules/@platform/<pkg>` and `copy/packages/node_modules/@platform/<pkg>` junctions to the copy's own packages. Node and Jest resolve these first.
 - tsx needs `NODE_OPTIONS=--conditions=@platform/source`; the `--conditions` flag passed to the CLI is not forwarded.
+- PR #20 r2: with the root junction pointing at MAIN, override EVERY `@platform/*` package the PR changed. The worker imports `@platform/api/runtime`, so a missing `apps/node_modules/@platform/api` gave a false "now is not a function". Fixture lint roots also need `tests/node_modules/@platform/<pkg>`.
+- Lint probe on a PR's own config: drop a mini-root at `copy/tests/fixtures/lint/layering/zz-probe/` and run the real `tools/lint/lint-fixtures.mjs`. Filter the JSON `eslint` report for `zz-probe` keys (about 11 s, no config rewrite). For mutation runs, sed `eslint.config.mjs` and run `negative-fixtures -t '<tag>'` (about 12 s each).
 - Jest in a partial archive needs empty `prisma/` and `tests/` dirs (the `roots` validation).
 
 **PR #11 pitfall (2026-11-12):** the copy's node_modules junction vanished mid-review, after the tools/db unit run. Cause unknown; the worktree was intact. Run `ls copy/node_modules` before each run and recreate the junction if needed. Copy git-ignored `prisma/generated` into the copy when probes import the generated client.
@@ -57,3 +59,12 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 The step restores itself with `git checkout HEAD --`, so `git status` stays clean between runs. Each run takes about 60 s.
 
 Write memory or markdown edits as a .cjs file with the Write tool. An inline `node -e` breaks on apostrophes in the text.
+
+**PGlite for SQL probes without Docker (PR #24, 2026-11-13).** `@electric-sql/pglite` 0.4.3 (PG 17.5 WASM) is in the worktree node_modules. Event triggers fire, and SET ROLE and CREATE ROLE work.
+- Apply `prisma/bootstrap/*.sql` in order after these substitutions:
+  - psql vars: `:'x_password'` → `NULL`, `:"db_name"` → current_database();
+  - drop the CREATE EXTENSION lines;
+  - `uuidv7()` → `gen_random_uuid()` (PG 18 only).
+- Probe each statement in `BEGIN; SET LOCAL ROLE platform_migrator; …; RESET ROLE; <readiness SQL>; SAVEPOINT; ensure(); ROLLBACK`.
+- Run it with tsx from the scratch dir and pass the head dir as an argument. About 30 s and light on memory, so it is allowed under D-ORCH-010.
+- Mutate the guard file in the copy to verify a proposed fix.

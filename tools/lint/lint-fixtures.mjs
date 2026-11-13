@@ -250,6 +250,11 @@ const REPO_PROBES = {
     "import { problemHandler } from '../../../api/src/platform/errors/problem-handler.js';\n\nexport const probe = (): unknown => problemHandler;\n",
   'apps/web/app/routes/lint-probe-ok-shared-ui.ts':
     "import * as shared from '@platform/shared';\nimport * as ui from '@platform/ui';\n\nexport const probe = (): unknown => [shared, ui];\n",
+  // PR #21 R1-m4: tests/api/*.api.test.ts may import apps/api/src relatively, and no other workspace's internals.
+  'tests/api/lint-probe-ok-apps-api.api.test.ts':
+    "import { createApp } from '../../apps/api/src/app.js';\n\nexport const probe = (): unknown => createApp;\n",
+  'tests/api/lint-probe-bad-package-relative.api.test.ts':
+    "import { AppError } from '../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
 };
 
 /** @returns {Promise<Report>} */

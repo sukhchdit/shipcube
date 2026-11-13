@@ -227,10 +227,10 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-I18N-012 | M1 | Should | US-118 | apps/web + pricing · ADR-0026 §2 display-currency switcher; ADR-0015 §FX (display conversion only) | TASK-230 | – | Planned |
 | REQ-I18N-013 | M0 | Should | US-115 | apps · ADR-0026 §2 (pending-linguistic-review marker per namespace); D-023 | TASK-042 | – | Planned |
 | REQ-I18N-014 | M0 | Could | US-116 | packages/shared/format · ADR-0009 §Formatting (`Intl.Collator` for localised lists) | TASK-050 | – | Planned |
-| REQ-API-001 | M0 | Must | US-034 | platform · ADR-0016 §1 paths and versioning (`/api/v1`, 404 `NOT_FOUND`); api/README §1 | TASK-017 | – | Planned |
-| REQ-API-002 | M0 | Must | US-034 | api/ · ADR-0016 §1 contract-first OpenAPI 3.1; api/README §15 drift test, §18 change process | TASK-017 | – | Planned |
-| REQ-API-003 | M0 | Should | US-035 | platform · ADR-0016 §1 (Swagger UI at `/api/docs`, config-gated) | TASK-017 | – | Planned |
-| REQ-API-004 | M0 | Must | US-034 | tests · ADR-0024; api/README §16 Supertest response-validation helper (Ajv) | TASK-017 | – | Planned |
+| REQ-API-001 | M0 | Must | US-034 | platform · ADR-0016 §1 paths and versioning (`/api/v1`, 404 `NOT_FOUND`); api/README §1 | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-API-002 | M0 | Must | US-034 | api/ · ADR-0016 §1 contract-first OpenAPI 3.1; api/README §15 drift test, §18 change process | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-API-003 | M0 | Should | US-035 | platform · ADR-0016 §1 (Swagger UI at `/api/docs`, config-gated) | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-API-004 | M0 | Must | US-034 | tests · ADR-0024; api/README §16 Supertest response-validation helper (Ajv) | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-API-005 | M0 | Must | US-036 | packages/shared · ADR-0016 §3 RFC 9457 problem details, stable codes; api/README §3/§11 | TASK-036 | – | Planned |
 | REQ-API-006 | M0 | Must | US-036 | platform · ADR-0016 §3/§4 (400 `VALIDATION_ERROR` with `errors[]`); api/README §3 sub-codes | TASK-036 | – | Planned |
 | REQ-API-007 | M0 | Must | US-037 | platform · ADR-0016 §5 keyset pagination (opaque cursors, limit 25/100); api/README §4; am. 5(d) | TASK-045 | – | Planned |
@@ -241,12 +241,12 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-API-012 | M0 | Should | US-039 | platform · ADR-0016 §6 strong `ETag` from id + `version`; api/README §6 | TASK-096 | – | Planned |
 | REQ-API-013 | M0 | Must | US-039 | platform · ADR-0016 §6 `If-Match` (412 `PRECONDITION_FAILED`, 428); api/README §6 | TASK-096 | – | Planned |
 | REQ-API-014 | M0 | Must | US-040 | platform · ADR-0016 §8 + am. 7 (`draft-6` RateLimit headers, `Retry-After`); api/README §7 | TASK-041 | – | Planned |
-| REQ-API-015 | M0 | Could | US-035 | platform · ADR-0016 §1 deprecation seam; api/README §1 Deprecation/Sunset/Link | TASK-017 | – | Planned |
+| REQ-API-015 | M0 | Could | US-035 | platform · ADR-0016 §1 deprecation seam; api/README §1 Deprecation/Sunset/Link | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-API-016 | M0 | Must | US-041 | packages/shared · ADR-0009 (ISO 8601 `Z`, `YYYY-MM-DD` + zone, Money); api/README §2 | TASK-115 | – | Planned |
 | REQ-API-017 | M0 | Must | US-042 | platform · ADR-0016 §10 SSE (`text/event-stream`, heartbeat, `Last-Event-ID` am. 3); api/README §9 | TASK-044 | – | Planned |
 | REQ-API-018 | M0 | Must | US-042 | platform · ADR-0016 §10 SSE termination (`complete`/`error`, ≤ 30 s cap); am. 9 stream caps; api/README §9 | TASK-044 | – | Planned |
-| REQ-API-019 | M0 | Should | US-035 | apps · api/README §17 type generation from the contract; ADR-0016 §1 | TASK-017 | – | Planned |
-| REQ-API-020 | M0 | Could | US-035 | platform · ADR-0016 (`ApiMode` request context, `test` in this run); ADR-0012 §7 (`livemode: false`) | TASK-017 | – | Planned |
+| REQ-API-019 | M0 | Should | US-035 | apps · api/README §17 type generation from the contract; ADR-0016 §1 | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-API-020 | M0 | Could | US-035 | platform · ADR-0016 (`ApiMode` request context, `test` in this run); ADR-0012 §7 (`livemode: false`) | TASK-017 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-SEC-001 | M0 | Must | US-043 | platform + infra/ (edge) · ADR-0016 §11 Helmet headers; ADR-0026 §9 static-site headers | TASK-111 | – | Planned |
 | REQ-SEC-002 | M0 | Must | US-043 | apps + infra/ (edge) · ADR-0026 §9 hash-based CSP (exact Stripe hosts, report endpoint); ADR-0016 §11; SPK-06 | TASK-111 | – | Planned |
 | REQ-SEC-003 | M0 | Must | US-043 | infra/ (edge) · ADR-0016 §11 HSTS outside local; platform.md §2.2 edge / §4 CloudFront | TASK-111 | – | Planned |

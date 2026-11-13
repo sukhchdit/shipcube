@@ -148,13 +148,15 @@ describe('US-007 central error handler and framework error mapping', () => {
     expect(body['detail']).toBe(GENERIC_SERVER_DETAIL);
   });
 
-  it('AT-US-007-02: 405 includes the Allow header ("GET, HEAD" for a GET-only route)', async () => {
+  // RFC 9110 §15.5.6 (PR #21 R1-m3): Allow lists every supported method, and OPTIONS is answered on every known path
+  // (204 + Allow), so a GET-only route's 405 lists "GET, HEAD, OPTIONS"; the AT-US-007-02 text update is routed to PM.
+  it('AT-US-007-02: 405 includes the Allow header ("GET, HEAD" plus OPTIONS for a GET-only route)', async () => {
     const health = await request(app).delete('/health/live');
     expectProblem(health, 405, 'METHOD_NOT_ALLOWED');
-    expect(health.headers['allow']).toBe('GET, HEAD');
+    expect(health.headers['allow']).toBe('GET, HEAD, OPTIONS');
     const widget = await request(app).delete('/api/v1/widgets/42');
-    expect(widget.headers['allow']).toBe('GET, HEAD');
-    expect((await request(app).get('/api/v1/echo')).headers['allow']).toBe('POST');
+    expect(widget.headers['allow']).toBe('GET, HEAD, OPTIONS');
+    expect((await request(app).get('/api/v1/echo')).headers['allow']).toBe('POST, OPTIONS');
   });
 
   it('maps an undecodable path parameter to 400 MALFORMED_REQUEST', async () => {

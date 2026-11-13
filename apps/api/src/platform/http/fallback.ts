@@ -66,12 +66,41 @@ export function allowedMethods(router: unknown, path: string): string[] {
   return [...known, ...others];
 }
 
-/** Mounted after every router: 405 + `Allow` for a known path, 404 otherwise. Both go to the problem handler. */
+/** `Allow` for a known path: the served methods plus OPTIONS, which optionsResponder answers on each (PR #21 R1-m3). */
+export function allowHeader(allowed: readonly string[]): string {
+  return (allowed.includes('OPTIONS') ? allowed : [...allowed, 'OPTIONS']).join(', ');
+}
+
+/**
+ * `OPTIONS` on a path the mounted routes serve (PR #9 code review n9): 204 with `Allow` (including OPTIONS) and no
+ * body, instead of Express's automatic 200 `text/plain`. Mounted first inside the routes router so it runs before
+ * Express answers; an unknown path falls through to the 404 problem. CORS preflight (TASK-048) is answered before this.
+ */
+export function optionsResponder(router: unknown): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (req.method !== 'OPTIONS') {
+      next();
+      return;
+    }
+    const allowed = allowedMethods(router, req.path);
+    if (allowed.length === 0) {
+      next();
+      return;
+    }
+    res.setHeader('Allow', allowHeader(allowed));
+    res.status(204).end();
+  };
+}
+
+/**
+ * Mounted after every router: 405 + `Allow` for a known path (RFC 9110 §15.5.6: every method the resource supports,
+ * OPTIONS included), 404 otherwise. Both go to the problem handler.
+ */
 export function routeFallback(router: unknown): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
     const allowed = allowedMethods(router, req.path);
     if (allowed.length > 0 && !allowed.includes(req.method)) {
-      res.setHeader('Allow', allowed.join(', '));
+      res.setHeader('Allow', allowHeader(allowed));
       next(new AppError('METHOD_NOT_ALLOWED'));
       return;
     }

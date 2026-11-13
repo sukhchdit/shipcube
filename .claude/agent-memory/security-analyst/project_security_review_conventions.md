@@ -34,6 +34,12 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - `git archive <sha> eslint.config.mjs tools/eslint-rules tools/lint` into `cfg-head` / `cfg-main`, and junction each `node_modules` to the MAIN checkout's.
   - Write a scratch mini-repo, then run `new ESLint({cwd, overrideConfigFile, overrideConfig:[disableTypeChecked, projectService:false, no-unresolved off, {settings:{'boundaries/root-path': root}}]})`.
   - File descriptors accumulate categories, so a new category never removes an old one.
+  - **Gotchas (PR-0020 R2, 2026-11-13):**
+    - The mini-repo needs a root `package.json`, otherwise `import-x/no-relative-packages` crashes with "path … null".
+    - Turn `import-x/no-cycle` off (it crashes the same way).
+    - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/MadelineMendoza/AppData/...`), never `MADELI~1`. An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
+    - A junctioned root dir has the same problem. Copy the root instead.
+    - `unrs-resolver` strips `?query` suffixes, so the resolved arm catches `x?worker`/`x?raw`.
 - **Probing a PR head without touching its worktree** (PR-0005 R2):
   - `git show <sha>:<file>` the `.ts` sources into scratch.
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.
@@ -63,6 +69,13 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Use a `module.registerHooks` resolve hook (`probes/hooks.mjs`) mapping `@platform/<pkg>` → `<build>/packages/<pkg>/src/index.js`.
   - In Git Bash, pass `--import ./hooks.mjs` from the probes dir, or a `file:///$(cygpath -m …)` URL; a `/c/...` path fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME`.
   - Remove scratch junctions with `cmd //c "rmdir <dir>\\node_modules"`, never `rm -rf`, which would follow the junction.
+  - **Full-app variant (PR-0021 R2).** This runs the real `createApp` with no build:
+    - `git archive <sha> apps/api/src packages/*/src` into scratch;
+    - a `registerHooks` resolve hook mapping `@platform/<pkg>` → `src/index.ts`, and relative `./x.js` → `./x.ts` when only the `.ts` exists;
+    - a load hook with `stripTypeScriptTypes(src, {mode:'transform'})`;
+    - a `node_modules` junction to the main checkout.
+    Script: `scratchpad/review/PR-21-sec-r2/probes/hooks.mjs`.
+- **Overlapping reviews.** The code reviewer often probes the same lint or walker items in parallel. Read their record on main (`docs/05-quality/reviews/`) and the latest D-ORCH rulings before finalising, so owners and fix forms align. main moves during a review, so re-fetch before writing "state of main".
 - **Raw-socket HTTP probes (PR-0004 R2).** Send the request with `socket.write`, never `socket.end`. On a half-close (FIN), Node's http server drops responses that are written asynchronously, such as piped file streams; only synchronous 4xx responses come back, so every 200 reads as "no response". Use `Connection: close` and wait for `close`.
 - **Signature and advisory spot checks without an installed tree.** `npm audit signatures` needs `node_modules`. Instead, verify each tuple's `dist.signatures` (ECDSA over `name@version:integrity`) against `-/npm/v1/keys` with `node:crypto`, add a tampered-integrity control, and POST to `-/npm/v1/security/advisories/bulk` with a known-vulnerable version as a positive control. Script: `scratchpad/review/PR-4-sec-r2/scripts/sigcheck.mjs` (session-scoped).
 - **Gitleaks without Docker (PR-0021).** Emulate the default ruleset in Node.
