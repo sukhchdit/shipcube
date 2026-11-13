@@ -141,21 +141,32 @@ describe('argument parsing and planning (TASK-011)', () => {
 
   it('[R-ARCH-16] Jest suites: paths before --selectProjects; integration and api in band with the raised test timeout', () => {
     const integration = jestArgs(
-      { kind: 'jest', project: 'integration', paths: ['prisma/tests/catalog/'], coverage: false },
+      { kind: 'jest', projects: ['integration'], paths: ['prisma/tests/catalog/'], coverage: false },
       { testTimeoutMs: 30_000, outputFile: 'o.json', coverageDir: 'c' },
     );
     expect(integration.indexOf('prisma/tests/catalog/')).toBeLessThan(integration.indexOf('--selectProjects'));
     expect(integration.slice(-2)).toEqual(['-i', '--testTimeout=30000']);
     const unit = jestArgs(
-      { kind: 'jest', project: 'unit', paths: [], coverage: true },
+      { kind: 'jest', projects: ['unit', 'unit-dom'], paths: [], coverage: true },
       { testTimeoutMs: 30_000, outputFile: 'o.json', coverageDir: 'c' },
     );
     expect(unit).not.toContain('-i');
+    // npm run test:unit selects unit + unit-dom (TASK-004): the heavy unit suite runs both in one Jest run.
+    expect(unit.slice(unit.indexOf('--selectProjects'), unit.indexOf('--selectProjects') + 3)).toEqual([
+      '--selectProjects',
+      'unit',
+      'unit-dom',
+    ]);
     expect(unit).toEqual(expect.arrayContaining(['--coverage', '--coverageReporters=json-summary', '--coverageDirectory=c']));
   });
 
   it('[R-ARCH-16] suite-runners.json is validated and command placeholders expand without a shell', () => {
     expect(() => parseRunners({ version: 1, suites: { x: { kind: 'shell' } } })).toThrow(/kind/);
+    expect(() => parseRunners({ version: 1, suites: { x: { kind: 'jest', project: [] } } })).toThrow(/project/);
+    expect(() => parseRunners({ version: 1, suites: { x: { kind: 'jest', project: ['unit', 'evil'] } } })).toThrow(/project/);
+    expect(parseRunners({ version: 1, suites: { x: { kind: 'jest', project: 'unit' } } }).suites['x']).toMatchObject({
+      projects: ['unit'],
+    });
     expect(() => parseRunners({ version: 1, suites: { x: { kind: 'jest', project: 'unit', paths: ['--config=evil.js'] } } })).toThrow(
       /paths/,
     );

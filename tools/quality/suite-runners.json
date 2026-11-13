@@ -6,7 +6,7 @@
     "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
   ],
   "suites": {
-    "unit": { "kind": "jest", "project": "unit", "coverage": true },
+    "unit": { "kind": "jest", "project": ["unit", "unit-dom"], "coverage": true },
     "integration": { "kind": "jest", "project": "integration" },
     "api": { "kind": "jest", "project": "api" },
     "catalog-c1-c14": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/catalog/"] },

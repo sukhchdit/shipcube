@@ -51,7 +51,8 @@ import { isCleanTreePath, isProfile, loadManifest, manifestFile, selectSuites } 
 /** @typedef {import('./lib/junit-write.mjs').JUnitCase} JUnitCase */
 /** @typedef {'tests' | 'security' | 'performance'} EvidenceRoot */
 /**
- * @typedef {{ kind: 'jest', project: 'unit' | 'integration' | 'api' | 'e2e', paths: string[], testNamePattern?: string, coverage: boolean }} JestRunner
+ * @typedef {'unit' | 'unit-dom' | 'integration' | 'api' | 'e2e'} JestProject
+ * @typedef {{ kind: 'jest', projects: JestProject[], paths: string[], testNamePattern?: string, coverage: boolean }} JestRunner
  * @typedef {{ kind: 'command', cmd: string[], converter: 'junit' | keyof typeof CONVERTERS, native_report: string | null,
  *   evidence_root: EvidenceRoot, options: Record<string, unknown> }} CommandRunner
  * @typedef {JestRunner | CommandRunner} Runner
@@ -68,6 +69,8 @@ export const MAX_RUN_DIR_BYTES = 5 * 1024 * 1024;
 export const DEFAULTS = Object.freeze({ base: 'origin/main', suiteTimeoutMin: 45, buildTimeoutMin: 30, testTimeoutMs: 30_000 });
 /** Jest projects that start Testcontainers or a full app: always in band with a raised per-test timeout (host load). */
 const IN_BAND_PROJECTS = new Set(['integration', 'api']);
+/** Jest projects of jest.config.ts a runner may select (`npm run test:unit` = unit + unit-dom since TASK-004). */
+const JEST_PROJECTS = new Set(['unit', 'unit-dom', 'integration', 'api', 'e2e']);
 const SUITE_ID = /^[a-z0-9][a-z0-9-]*$/;
 
 export class UsageError extends Error {
@@ -178,9 +181,15 @@ export function parseRunners(raw) {
   for (const [id, entry] of Object.entries(raw['suites'])) {
     if (!SUITE_ID.test(id) || !isRecord(entry)) throw new Error(`${RUNNERS_PATH}: suites.${id} is invalid`);
     if (entry['kind'] === 'jest') {
-      const project = entry['project'];
-      if (project !== 'unit' && project !== 'integration' && project !== 'api' && project !== 'e2e')
-        throw new Error(`suites.${id}.project must be unit|integration|api|e2e`);
+      const rawProjects = entry['project'];
+      const projectList = typeof rawProjects === 'string' ? [rawProjects] : rawProjects;
+      if (
+        !Array.isArray(projectList) ||
+        projectList.length === 0 ||
+        !projectList.every((p) => typeof p === 'string' && JEST_PROJECTS.has(p))
+      )
+        throw new Error(`suites.${id}.project must be one of, or a non-empty list of, ${[...JEST_PROJECTS].join('|')}`);
+      const projects = /** @type {JestProject[]} */ ([...new Set(projectList)]);
       const paths = strings(entry['paths'], `suites.${id}.paths`);
       if (paths.some((p) => p.startsWith('-') || p.includes('..')))
         throw new Error(`suites.${id}.paths must be repository-relative path patterns`);
@@ -189,7 +198,7 @@ export function parseRunners(raw) {
         throw new Error(`suites.${id}.testNamePattern must be a non-empty string`);
       suites[id] = {
         kind: 'jest',
-        project,
+        projects,
         paths,
         ...(typeof pattern === 'string' ? { testNamePattern: pattern } : {}),
         coverage: entry['coverage'] === true,
@@ -256,7 +265,7 @@ export function planRun({ manifest, runners, profile, changedPaths: paths, restr
  * @returns {string[]}
  */
 export function jestExtraArgs(runner, { testTimeoutMs }) {
-  return IN_BAND_PROJECTS.has(runner.project) ? ['-i', `--testTimeout=${testTimeoutMs}`] : [];
+  return runner.projects.some((project) => IN_BAND_PROJECTS.has(project)) ? ['-i', `--testTimeout=${testTimeoutMs}`] : [];
 }
 
 /**
@@ -272,7 +281,7 @@ export function jestArgs(runner, { testTimeoutMs, outputFile, coverageDir }) {
     'node_modules/jest/bin/jest.js',
     ...runner.paths,
     '--selectProjects',
-    runner.project,
+    ...runner.projects,
     '--ci',
     '--json',
     '--outputFile',
