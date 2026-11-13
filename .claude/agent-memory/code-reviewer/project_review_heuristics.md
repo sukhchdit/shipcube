@@ -183,3 +183,5 @@ Round 2 of a spike PR (PR #6 r2):
 - A verifier that lazily loads a dependency (Ajv only when runs exist) is untested by CI. Probe the real CI shape: script copied outside the workspace with no node_modules above it, `--root` a repo with a `node_modules` junction.
 - Squash merge + "git_sha is an ancestor of head": fine on pull_request, red on a push-to-main range. Check whether the step has an event switch like check-security-owned-paths.
 - Evidence windows ordered by an attacker-controlled stamp can only deny, not forge; confirm that runs touched by the range are always evaluated.
+
+**Tripwire-on-a-security-flag pattern (PR #23 r2, good):** `swap(run, from, to)` mutations + a findings function, asserted `changed: true, findings: true` for every variant (appended, prepended, valued, in comment, dropped, doubled, `|| true`). Ask for this shape whenever a PR pins a flag that disables a gate (`--report-only`, `continue-on-error`). Always re-mutate the real file in an extract as well.

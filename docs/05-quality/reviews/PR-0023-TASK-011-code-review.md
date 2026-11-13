@@ -100,3 +100,87 @@ Not re-run (relied on lane A run 43350657854 and the developer's table): lint, t
 - architect: ADR-0023 am. B schema path; rule 4 wording (R1-m1).
 - TASK-015: R1-m2 pin if not done here; push-event handling (R1-m3); `converter: junit` parser limits (R1-n4); `journeys_required_at_gate` and "0 flaky" (already declared not implemented).
 - security-analyst: R1-n3 residuals (ignored files, Ajv from head `node_modules`, self-attested evidence); R1-M1 confirmation.
+
+
+---
+
+## Round 2 (head c0b1b31)
+
+| Field | Value |
+|---|---|
+| Head | c0b1b31a2a153892bc424e3adaf9a0d6b528dc83 (fix commits de1fae3, 8321ad0, 712e25d; two normal merges of `origin/main`, the second docs-only) |
+| Base compared | `origin/main` 97bdd0a (merge base 6fd801f; main has moved by docs-only commits since the last merge) |
+| Date | 2026-11-13 |
+| **Verdict** | **APPROVED_WITH_NITS** (0 BLOCKER, 0 MAJOR, 0 MINOR, 3 NIT) |
+
+SUMMARY:
+- Every r1 finding is closed in code with a test that fails when the fix is reverted. I mutated the fixes in an extract and each mutation turned the intended test red (table below).
+- The union with current main is clean; the only non-docs delta is the four `quality:*` scripts in `package.json`; `package-lock.json` is byte-identical to main.
+- Remaining before merge is procedural: a security record naming `c0b1b31` (lane A is red on `scans` only for that reason).
+
+### R2-1. What I ran myself
+
+In a `git archive c0b1b31` copy with the worktree `node_modules` junctioned (worktree untouched: 748 modules, `git status` empty; junction and copy removed; no drive-root `node_modules`):
+
+| Check | Result |
+|---|---|
+| `jest --selectProjects unit` on `tools/ci/ci-policy`, `tools/ci/check-workflow-policy`, `tools/quality/check-evidence`, `tools/quality/heavy` | 4 suites, 168 tests, all pass (101 s) |
+| `check-security-owned-paths --base origin/main --head HEAD --pr 23` | the owned list now includes `tools/quality/check-evidence.mjs`, `check-evidence.test.ts`, `fastlane.mjs`, ... (r1: no `tools/quality` path). The checker reads patterns from base and head, so the new line is enough |
+| `git merge-tree --write-tree origin/main c0b1b31` | clean, tree 0bf7e1a. `git diff --stat <tree> c0b1b31` shows only `STATUS.md` and the two untracked `.claude` agent-memory files (main's newer docs); no code. `git diff origin/main HEAD -- package-lock.json` is empty. `package.json` delta vs main: the four `quality:*` scripts only (the `openapi:*` scripts are already on main). |
+| `gh pr view 23` rollup | `fast-lane` SUCCESS, `scans` FAILURE (security-owned-paths only, per the PR comment and the checker output above), `ci-gate` FAILURE |
+
+Not re-run, relied on lane A run 43364590973 and the developer table: lint, typecheck, format, full `test:unit`, `test:api`, build, Gitleaks and Semgrep (both green in `scans`). No Docker, integration, e2e or coverage.
+
+### R2-2. Mutation proof (my own, in the extract)
+
+| # | Mutation | Result |
+|---|---|---|
+| A | delete the `/tools/quality/` line from CODEOWNERS | 7 failures in `check-workflow-policy.test.ts`, including the new "owns tools/quality and the path is required" and the generic "covers every required path" |
+| B | drop `'tools/quality/'` from `REQUIRED_CODEOWNED_PATHS` | 5 failures (the four new `CODEOWNERS: tools/quality` tests and the pinned list) |
+| C | append `--report-only` to the base-ref `node` line of ci.yml (my r1 mutation) | `ci-policy` "SEC-TC-48 (CI part, TASK-011)" fails. `check-workflow-policy` itself does not flag it; that is the known limit, the ci-policy tripwire is the guard |
+| D | remove `--event "$GITHUB_EVENT_NAME"` from the base-ref line | 3 failures (mutation-proof test, the `--event` test, the TASK-011 test) |
+| E | remove the `--event push` early return in `check-evidence.mjs` | 3 failures |
+| F | accept any `--event` value | 1 failure ("rejects an unknown event with exit 2") |
+| G | make a planned-suite JUnit a hard (tamper) problem instead of a soft reject | 2 failures (both rule-4 pins) |
+| H | scan window 30 to 31 | 2 failures (window test, touched-run test) |
+| I | drop the "every touched run" union from the evaluated set | 2 failures |
+
+### R2-3. r1 findings: closure
+
+| ID | Status | Evidence |
+|---|---|---|
+| **R1-M1** CODEOWNERS | **Closed** | `/tools/quality/   @sukhchdit` at `.github/CODEOWNERS` (with a comment naming the reason), entry in `REQUIRED_CODEOWNED_PATHS` (`check-workflow-policy.mjs`), pinned in the list test, plus a new describe with four tests: line deleted, ownerless, commented out, parent `/tools/` covers it, sibling `/tools/qualitys/` does not. Mutations A and B. Owned-paths checker now lists `tools/quality/**` |
+| R1-m1 rule 4 | **Closed** | Behaviour kept (ruling (a)); wording changed consistently in `check-evidence.mjs` header and reason text, `required-suites.json` `planned_suite_reported`, `docs/05-quality/README.md` and TEST-STRATEGY 9.2 rule 4. All four texts say: the run is not credited; the check fails only if the run was needed; the first activation passes with its run uncredited; a later activation whose run also carries the newly activated suite is rejected as a whole. Three pinning tests (nothing required: PASS with the run rejected; active `unit` plus planned `integration` in one run: exit 1, "no accepted lane B evidence ... unit", not a tamper; the same run with only the active suite: accepted). Mutation G. The semantics match what I probed in r1 |
+| R1-m2 `--report-only` | **Closed** | The echo text no longer contains the flag. The helper `laneBReportOnlyFindings` requires exactly one occurrence, on exactly the pinned head-copy line, and the base-ref line equal to the full pinned invocation (not a prefix). Nine mutations are exercised through the helper (appended, prepended, with a value, in a comment, dropped, doubled, `\|\| true`, event hard-coded, base line run from the head copy); the test asserts each one changed the text and produced a finding. My own mutations C and D agree |
+| R1-m3 push range | **Closed** | `--event pull_request\|push` (default `pull_request`); `push` prints a note, appends a "skipped" block to `--summary` and returns 0 before any git call; an unknown value or a missing value exits 2. ci.yml passes `--event "$GITHUB_EVENT_NAME"` on both invocations and the step still has no `env:` (asserted). `GITHUB_EVENT_NAME` is runner-set, not attacker text, and is only quoted into an argument. Tests include a real squash commit whose evidence SHA is asserted not to be an ancestor (0 under `push`, 1 under `pull_request`). Mutations D, E, F. ci.yml triggers are only `pull_request` and `push`, so no other value reaches the step today |
+| R1-m4 selection | **Closed** | New fixtures: 31 junk runs (window: 30 newest plus the touched legit run; 31st not evaluated), second touched run outside the window judged, untouched tampered run does not fail while the same run added by the range does, touched stale run is not a problem while another run is accepted, multi-root agree accepted, and a `it.each` for disagreement on profile, git_sha and stamp. Mutations H and I confirm they discriminate |
+| R1-n1 | Closed | `jestCasesFrom` and `coverageFrom` in `heavy.mjs`, tests for missing, truncated, empty reports |
+| R1-n2 | Closed | all `out.dir` are checked before the first write |
+| R1-n3 | Closed | README item 4 states lane A is clean by construction and that git-ignored files evade the check (residual, PR23-SEC-05) |
+| R1-n4 | Routed as ruled | first `converter: junit` task |
+| R1-n5 | Closed | `resolveOutBase`: `--suites` runs go to a fresh temp dir unless `--out-root`, with a "do not commit" line; tested |
+| R1-n6 | a, b closed; c routed | `security-test-cases.md` link fixed; dead manifest paths removed from `tooling_inputs` and `docs-or-ci-only.exclude`. ADR-0023 am. B path stays with the architect |
+
+### R2-4. New findings
+
+| ID | Sev | Where | Finding | Suggested fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `docs/05-quality/README.md` verdict list (item 3) | The list still says the recomputed verdict "is FAIL on ... a JUnit for a suite that is `planned`", then explains that it only rejects the run. A reader skimming the list gets the pre-fix reading. | Move the planned-suite case out of the FAIL list into its own sentence ("a run holding JUnit for a planned suite is rejected, not failed"). Docs only, any later docs PR. |
+| R2-n2 | NIT | `check-evidence.mjs` `EVENTS`, `ci.yml` triggers | Unknown event exits 2 (as required). If a trigger such as `merge_group` or `workflow_dispatch` is ever added to ci.yml, lane A goes red on this step until `EVENTS` is extended, and per the ci.yml header the CLI changes in two steps (accept, then use), which the base-ref copy makes automatic. Fails closed, so it is the right default. | One sentence in the ci.yml header or the README: adding a trigger to ci.yml means extending `EVENTS` first. |
+| R2-n3 | NIT | `check-workflow-policy.mjs` vs `ci-policy.test.ts` | The `--report-only` tripwire (mutation C) lives only in the unit test, not in the checker that runs from the base ref. Same residual as r1, now documented by the pin. Both files are CODEOWNED and security-gated, so it is acceptable. | None now; optional follow-up for TASK-015 (put a "`--report-only` at most once, bootstrap line only" rule into `check-workflow-policy`). |
+
+GOOD (round 2):
+- The mutation-proof helper pattern (`swap` plus a findings function asserted to change and flag every variant) is the right shape for tripwires on a security flag; reuse it for other gate invocations.
+- The fix reuses the existing `check-security-owned-paths --event push` convention instead of inventing a new skip mechanism.
+- Behaviour was not changed to make the wording right: ruling (a) was applied in four documents at once, with the same four statements.
+
+SECURITY-FLAGS (for security-analyst round 2): (1) confirm PR23-SEC-01 / COND-PR23-1 by the CODEOWNERS line and `REQUIRED_CODEOWNED_PATHS` entry; (2) the owned paths changed after `f61e55d` are those listed in the PR comment, so the record must name `c0b1b31` (or a later commit with no owned path changed after it); (3) `--event "$GITHUB_EVENT_NAME"` is the only new data flowing from the runner into the verifier, quoted, never interpolated into the script; (4) PR23-SEC-03/04/05/06/07/10 stay routed per D-ORCH-028.
+
+### R2-5. Merge conditions (round 2)
+
+1. Security record `docs/05-quality/security/PR-0023-*.md` with verdict PASS / PASS_WITH_FOLLOW-UPS / PASS_WITH_CONDITIONS and a head row naming `c0b1b31` (or a later commit after which no owned path changed). Lane A `scans` and `ci-gate` are red only for this.
+2. Lane A green (`ci-gate` success, not skipped) on the exact head that is merged. Main moved by docs-only commits since the last merge; a merge of it changes no owned path, but then the head SHA changes, so re-confirm the record names a commit with no owned-path change after it.
+3. Squash merge with a linted subject and `--match-head-commit`.
+4. Routed items as in section 7 above and D-ORCH-028; R2-n1..n3 may ride on any later docs or TASK-015 change.
+
+No further code-review round is needed unless the head changes in a non-docs path.
