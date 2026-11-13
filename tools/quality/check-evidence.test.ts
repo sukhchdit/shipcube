@@ -837,7 +837,7 @@ describe('check-evidence: required_cases_pending (D-QA-014, PR28-SEC-01)', () =>
     expect(result.stdout).toContain('note: pending ID SEC-TC-14 is implemented in suite unit');
   });
 
-  it('a longer ID (SEC-TC-140) does not count as carrying SEC-TC-14', () => {
+  it('a longer ID does not count as carrying the parked ID (prefix match)', () => {
     const { f, head } = pendingRun('wave', { unit: [{ ...entry, checkpoint: 'G3' }] }, [
       { name: 'adds numbers', status: 'passed' },
       { name: '[SEC-TC-140] some other case', status: 'passed' },
