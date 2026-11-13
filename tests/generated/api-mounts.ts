@@ -23,7 +23,7 @@ const unusedProbe = {
   draining: false,
 };
 
-const silentLogger = { info: () => undefined, error: () => undefined };
+const silentLogger = { info: () => undefined, debug: () => undefined, error: () => undefined };
 
 export interface ApiMounts {
   /** `API_PREFIX` of apps/api/src/app.ts. */

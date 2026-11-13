@@ -28,7 +28,7 @@ import { RequestContextError, tenantContextOf } from '../tx/execute.js';
 import { ANONYMOUS, routeTemplateOf, setPrincipal } from './route-state.js';
 import { fixtureRoute } from './tests/fixture-route.js';
 
-const silent = { info: () => undefined, error: () => undefined };
+const silent = { info: () => undefined, debug: () => undefined, error: () => undefined };
 
 async function call(app: Express, path: string, init: RequestInit = {}): Promise<{ status: number; headers: Headers; body: string }> {
   const server = app.listen(0, '127.0.0.1');

@@ -30,7 +30,7 @@ function app(apiMode?: ApiMode) {
   return createApp({
     health,
     modules: [{ name: 'fixtures', routes: fixtures }],
-    logger: { info: () => undefined, error: () => undefined },
+    logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
     ...(apiMode === undefined ? {} : { apiMode }),
   });
 }

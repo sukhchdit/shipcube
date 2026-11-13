@@ -20,3 +20,4 @@
 - [PR #30 fc1](feedback_pr30_fc1.md) — scratchpad wiped mid-run, Jest realm drops SDK error code, smithy requestTimeout warn-only, loopback SDK pins
 - [Lane B evidence run](feedback_lane_b_evidence_run.md) — scripted evidence run, hostscan, check-evidence, gate pushes with &&; second-merger union notes
 - [Batch 020/015](feedback_batch_020_015.md) — Jest global hooks vs .js specifiers, Joi _definition, scratch wipe, evidence.sh recipe, base-ref forced deviations
+- [PR #20 fc3](feedback_pr20_fc3.md) — shared refs move mid-merge, owned-paths --report-only refused, ReDoS growth test, evidence lock chaining

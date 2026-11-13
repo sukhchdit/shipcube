@@ -45,6 +45,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-121 and US-124 scenarios
 - ADR-0010 am. 11 items 2, 3 and 6 (D-ARCH-057 rev 2): `capabilities().operations` carries a boolean for every optional operation, for `cancelShipment` and for the new optional `recoverLabel(ref, formats, ctx)` (idempotent, retryable, transactional pool); the guard answers CAPABILITY_NOT_SUPPORTED without network I/O for any operation declared unsupported (unit test per operation incl. cancelShipment and recoverLabel); `LabelDocument.format` is a `document_format` value only (PDF_4X6 | PDF_A4 | PDF_LETTER | ZPL) — raster output never leaves the adapter except as a raw-payload `$blob`; each real adapter exports `EGRESS: { sandbox: EgressRule[], production: EgressRule[] }` (`{ origin, pathPrefixes, tier }`, exact origins, no wildcards) and the outbound rule set is the union over enabled accounts of EGRESS[account.environment] plus the Stripe rules — no configuration key can add a rule; `packages/config` refuses a carrier account with environment = production unless APP_ENV = production; carrier-supplied URLs are never dereferenced
+- D-ARCH-106 (ADR-0005 am. 11 item 20): the binding names under which module code receives the carrier port (carriers, carrierGateway) are added to the names option of platform/no-external-calls-in-tenant-tx with one fixture, in the PR that first wires the port into module code
 - AT-US-121-01 … AT-US-121-07: all 7 scenarios of US-121, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-124-01 … AT-US-124-05: all 5 scenarios of US-124, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -160,6 +161,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-122 scenarios (same input -> same output; one shipment per client reference)
 - AT-US-008-03 Mock-carrier hop (D-062): every Mock adapter operation emits exactly one outbound carrier-call log line through the TASK-010 `outboundCallFields` allow-list with correlation_id = CarrierContext.correlationId and no request or response body, and the call record it returns carries that correlation ID so the saga carrier_call audit entry can cite it — this lands the PR #20 code review §5 rule "carrier adapters must use outboundCallFields" on the first adapter, which DHL, FedEx and UPS copy
+- D-ARCH-106 (ADR-0005 am. 11 item 21): the Mock latency scenario is the instrument of the runtime twin of the T-83 lint: the API test lanes run with DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS=1000, so a route that keeps a transaction open across a carrier call fails a test
 - AT-US-122-01 … AT-US-122-06: all 6 scenarios of US-122, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -277,6 +279,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-126 scenarios (hung carrier -> named partial at 4 s; overall 5 s; AbortSignal cancels within 1 s)
+- D-ARCH-106: no tenant transaction is open while carriers are called; the caller persists each result in its own short tenant transaction as it arrives
 - AT-US-126-01 … AT-US-126-08: all 8 scenarios of US-126, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -334,6 +337,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-199 and US-200 scenarios
+- D-ARCH-106 (ADR-0005 am. 11 item 20): the binding names under which module code receives the payment gateway (paymentGateway, gateway) are added to the names option of the T-83 lint with one fixture; every gateway call runs in a call phase or in the worker, never inside a tenant transaction
 - AT-US-199-01 … AT-US-199-07: all 7 scenarios of US-199, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-200-01 … AT-US-200-05: all 5 scenarios of US-200, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -517,6 +521,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-155 scenarios
 - SEC-TC-54 (server part): token rejected 7 days after quote expiry; never logged
 - M0 demo step "Guest gets a mock quote" via API/Swagger within 1.5 s
+- D-ARCH-107 (ADR-0008 am. 4): the quote-token authenticator applies to routes whose auth set contains quote-token (getQuote, streamQuoteResults): a bearer, when present, decides alone; otherwise a well-formed X-Quote-Token yields a guest principal (credential quote-token, authenticated false, no actor, guestTokenHash = lowercase hex SHA-256) and a missing or malformed token answers 404 NOT_FOUND with private, no-store, never 401 (A-078); createQuote (auth anonymous or session, permissionAuthenticated quote:create) branches on principal.credential. D-ARCH-106 (ADR-0003 am. 2026-11-13): createQuote starts the fan-out in its afterCommit phase (best-effort, in process, not durable): a fan-out lost to a crash must end as per-carrier timeouts at the 5 s deadline, never as a stream that does not complete (test); no tenant transaction is open while carriers are called
 - AT-US-155-01 … AT-US-155-11: all 11 scenarios of US-155, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

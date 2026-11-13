@@ -383,3 +383,86 @@ I used the worktree read-only. I extracted `git archive fafa3b5` into the review
    - **#24 (TASK-021):** `db/runtime.ts` and `tools/tsconfig.json` conflicts. Its new database security events must satisfy PR #20's type-level exhaustiveness test and `SECURITY_EVENT_FIELDS` (`name`/`kind`/`reason`), and log at `error` (PR #24 m2, D-ORCH-025).
    - Run lint, typecheck, unit and api (including drift) on each union commit.
 6. NITs R3-n1..n5 are optional in-PR. Otherwise: R3-n3 joins R2-n1 (TASK-113/214); R3-n2 and R3-n4 go to the security delta round to rule on (accept, or route to TASK-113).
+
+---
+
+## Round 4 (head 3f585b7)
+
+Delta review of fix cycle 3 (final): the second-merger union `b133c83` (main `e3c07d8`: PRs #24, #26, #30, #27), `19828e4` (PR20-SEC-18), `05cf3d8` (PR20-SEC-19), `92c3685` (R3-n1/n5, PR30-SEC-11 test), `5e6ccb7` (docs-only merge), `3f585b7` (evidence). Inputs: §R3.5 item 5 union notes, the PR #24/#30 union notes, D-TASK010-03..06, D-ORCH-044.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The union differs from a clean re-merge only in files the merge commit declares, and each hand edit
+      follows the §R3.5 notes. The per-event runtime table test, the SEC-TC-63 main-table order check, the squat
+      emit through the sink, the api/worker main.ts order and the single-pino lock delta all verify. SEC-18 and
+      SEC-19 are correct; their tests kill the mutants. No BLOCKER or MAJOR. One MINOR (test flake margin).
+FINDINGS: R4-m1 (MINOR), R4-n1..R4-n3 (NIT), §R4.3.
+GOOD: The relative-growth SEC-18 test measures shape, not speed (reverting the fix gives a ratio of 87-141 against
+      a limit of 20). The runtime-events test pins the two new allow-lists in code as well as against the README, so a
+      README edit alone cannot widen them. The squat event now carries exactly the README fields, with `component`
+      and any owner dropped and counted.
+SECURITY-FLAGS: R4-n1 (record-name keys other than name/key) is a defence-in-depth residual for the security delta
+      round. No new emitter, endpoint or credential path.
+```
+
+### R4.1 Verification performed
+
+I read the worktree read-only. I extracted `git archive 3f585b7` into the reviewer scratchpad and junctioned `node_modules` to the worktree's own (748 entries). Cleanup: junction removed first, then the copy; the worktree `node_modules` still has 748 entries, its `git status` is clean, and `C:\` has no stray link.
+
+**Not re-run** (dispatch constraints): Docker/integration, coverage, full lint, build and full unit. For those I relied on:
+- lane A run 43427180301 on the exact head `3f585b7`: `fast-lane` success, including install, lockfile provenance and delta, vulnerability audit, **Lane B evidence (`quality:check-evidence`)**, lint, format, type-check, unit, negative fixtures, build and "build must not mutate the tree". `scans` is red only at "Security-owned paths need a review record" (expected until the merge + delta security record lands), and `ci-gate` is the aggregate.
+- the Lane B evidence `20261113T1231Z_5e6ccb7` (profile `pr`, verdict PASS): api 94, catalog 74, integration 251 (1 skipped), unit 3568. `git diff --name-only 5e6ccb7 3f585b7` outside `docs/` is **empty**, and `92c3685..5e6ccb7` is docs only, so the evidence is on an ancestor with only docs after it.
+
+| Check | How | Result |
+|---|---|---|
+| Union proof | `git merge-tree --write-tree fafa3b5 e3c07d8` → `aae4494`, then `git diff --stat aae4494 b133c83` | 15 files differ. The 8 conflicted files are api/worker `main.ts`, `db/runtime.ts`, `with-tenant-tx.ts`, `runtime/index.ts`, `packages/shared/package.json`, `tools/tsconfig.json` and the lock. The other 7 are the declared union edits: `with-tenant-tx.test.ts` (`scopeClient`), `security-events.ts` and its test, `services.composition.test.ts`, `security-event.ts` and its test, `audit-readiness.int.test.ts`. Each is named in the merge message. Every other file is byte-identical to the clean merge. `git diff --name-only fafa3b5 b133c83` minus the main delta (`fafa3b5..e3c07d8`) is empty; no conflict markers remain outside `docs/` |
+| Hand resolutions | the full diff of the merge against the clean tree, read | api and worker `main.ts`: `const { config, secrets }`, then `createRuntimeLog(..., { version, level, context })` and `installProcessErrorHandlers` **above** `createRuntimeServices(config, svc, log, secrets)`. `runtime/index.ts` has both the process-errors block and the object-storage port block. `with-tenant-tx.ts` keeps `onDbError?` and the REQUIRED `scopeClient`; the only caller (`db/runtime.ts:241,251`) passes both. `db/runtime.ts` imports both the audit checks and `securityEventSinkFrom`. `tools/tsconfig.json` lists all five files once |
+| Squat emit | `db/runtime.ts:286-288`, `security-events.test.ts:40-58` | `security.emit('audit_partition_squatted', { partitionName, kind, reason })` with no `component`. Through the real logger: level `error`, `event_type: security`, keys `partition_name`, `kind`, `reason`; an `owner` or `table` attribute is dropped and `dropped_attributes` is 1 |
+| Runtime events vs README §13 | `security-event.ts:44-50,84-90,125-130`, `security-event.test.ts:41-60,114-134` | `RUNTIME_SECURITY_EVENTS` has 7 events, equal to the 7 rows of the README runtime table in both directions. Per event the allow-list and level equal the table (`audit_mutation_rejected` = `[sql_state]`, `audit_partition_squatted` = `[partition_name, kind, reason, sql_state]`, all `error`), and both are pinned in the test as well. The type-level exhaustiveness (`DbSecurityEvent` in `map-db-error.ts:36` assignable to `RuntimeSecurityEventName`) is checked by lane A type-check |
+| SEC-TC-63 scoping | `section13()`: `## 13.` to the next `## `, split at `### Runtime integrity events` | The main-table parsers use `main` only, so `expect(exported).toEqual(documented)` (in order) is unchanged. **Mutations, on a copy of the README, all killed:** a new backticked row in the main table → 1 fail; an extra field in the squat row → 1 fail; the squat row deleted → 1 fail |
+| Audit-readiness int test | the 3 changed expectations | `partitionName` (camelCase) is what the sink hands the injected stub log, and the stub copies the fields as given. The Pino snake_case shape is asserted in the apps/api unit test above (D-TASK010-06 is consistent). The int test itself ran in the lane B evidence (integration 251 passed); I did not re-run it |
+| `services.composition.test` | rebased to the Pino shape | Expects `message`, `event`, `service: 'api'` and exactly the 9 mandatory keys plus `error`; it still asserts that no endpoint, bucket or credential leaks. Passes |
+| Lock | `git diff --text e3c07d8 3f585b7 -- package-lock.json`; parsed `packages/shared`; `npm ci --ignore-scripts --dry-run --offline` | **One added line: `"pino": "^10.4.0"` under `packages/shared`**; `uuid` kept; `node_modules/pino` 10.4.0 is already in main's lock. The 5 workspace `package.json` vs lock differences in my script are key order only (I compared `apps/api` per key: none differ). The dry run exits 0, so `npm ci` is reproducible |
+| Targeted unit | `--selectProjects unit -i` on `packages/shared/src/logging`, api `platform/(logging\|runtime\|db\|health)`, `tools/openapi`, worker `platform` | **34 suites / 813 tests pass**, including drift (18/18, 0 unrecognised), `services.composition`, `with-tenant-tx` and `map-db-error` |
+| Targeted api | `--selectProjects api -i` (6 suites) | **94 tests pass** (= the evidence count), including the new `[PR20-SEC-19]` case |
+| PR20-SEC-18 mutation | revert only the `pattern.lastIndex = end` in the object-key branch of `redactQuotedLists` | The SEC-18 test **fails**: ratio 87 and 141 against the limit of 20 (2 runs). The fix is correct: every scanned item now moves `lastIndex` past itself, and the skipped span is exactly the item (a closed quoted item that a `:` follows), so the pair pass still sees the key |
+| SEC-18 test robustness | the same ratio loop in a tsx probe: 15 rounds idle, then 7 processes in parallel | The fixed code gives a min-of-3 ratio of **9.2-15.3 idle** and **8.9-20.7 under 7-way load** against the limit of 20. One of 56 loaded samples exceeded 20 (R4-m1) |
+| PR20-SEC-19 probe | `redactValue` over 21 records (tsx) | **Redacted:** a HAR header array (`X-Api-Key`, `Host`: only the value of `Host` stays), `{ name: '__Host-rt_…', value, path }`, tough-cookie `{ key: 'session', value }`, `{ Name, Value }` and `{ NAME, VALUE }` (any case), a PII name (`email`), a URL name, a record nested in an array, an object value under a sensitive name, both name keys at once (any sensitive one wins), a `value` after 300 keys. **Readable:** `{ name: 'pool_size', value: 10 }` (the `name` is redacted as PII, the value stays), a getter-defined `name` (accessors are never read). **Not covered:** `header`, `field`, `k/v` name keys (R4-n1). Over-redaction: `{ key: 'feature.password_reset', value: true }` → the value and the key are redacted, which is fail-closed (D-TASK010-05) |
+| Flushing exit | `main.ts` of api and worker, `process-errors.ts:40-65` | One `exit = exitAfterFlush(...)` is shared by the fatal handlers, `listen_failed` and shutdown. Each call exits at most once on its own; the comment now matches the R3 measurement. `api.docs_unavailable` keeps a bare `process.exit`, justified in the comment (`app` must stay unassigned for control flow, and nothing else is queued yet) |
+
+### R4.2 Round-3 closure and open items
+
+| ID | Status | Evidence |
+|---|---|---|
+| R3-n1 | **Closed** | `process-errors.ts:40-47` rewritten (sync for files and pipes, async for a Windows TTY); `listen_failed` and shutdown use the flushing exit |
+| R3-n5 | **Closed** | JSDoc now says "at least one fatal line per crash" |
+| R3-n2 / R3-n3 / R3-n4 | **Routed** to the security delta round, as in §R3.5 item 6 | unchanged |
+| PR20-SEC-18 | **Done** | §R4.1 mutation row |
+| PR20-SEC-19 | **Done** | §R4.1 probe row; `redaction.ts:155-181`; logging.api.test `har`/`parsed`/`jar` cases |
+| PR30-SEC-11 | **Done** | the comment above `createRuntimeServices` and the handler order; the storage fatal line is proven in the composition test |
+| §R3.5 item 5 (union notes #30, #26, #24) | **Done** | #30: `secrets` passed and the handlers above services. #26: dependencies `{ pino, uuid }`, lock regenerated (single-edge delta). #24: the new events satisfy the exhaustiveness type, the `SECURITY_EVENT_FIELDS` per-event table, and log at `error` |
+
+### R4.3 Findings
+
+| ID | Sev | Location | Issue | Suggested fix |
+|---|---|---|---|---|
+| R4-m1 | MINOR | `packages/shared/src/logging/string-redaction.test.ts:~649` (`toBeLessThanOrEqual(20)`) | The linear ratio is 9-15 when idle and reached 20.7 once in 56 samples with 7 processes competing for CPU. A quadratic pass gives 87-141. So the limit has only about 25% headroom on the linear side and a 4x gap on the quadratic side: it will flake rarely on a loaded runner. A flake is a rerun, not a defect, and the test is the right shape | Raise the limit to 40 (still 2x below the lowest quadratic sample). This is a non-docs change after the lane B evidence, so do not make it in this PR: raise it in the next PR that touches the file, or accept a rerun if it ever flakes |
+| R4-n1 | NIT | `redaction.ts:155-181` (`RECORD_NAME_KEYS = name, key`) | Records that name the credential under `header`, `field`, `param`, `k`/`v` keep the value (`{ header: 'X-Api-Key', value }`). HAR, `tough-cookie` and cookie-parser use `name`/`key`, so the common producers are covered | Add the other keys to the gap header, or to the set (`header`, `headerName`, `field`, `param`); routed with R3-n2/n4 |
+| R4-n2 | NIT | `exitAfterFlush`, shared by shutdown and the fatal handlers | Each call exits independently, so a shutdown `exit(0)` already queued wins over a fatal handler's `exit(1)` arriving in the same tick (exit 0 despite a fatal line). The window is a single flush callback and the fatal line is still written | None needed; optionally have `installProcessErrorHandlers` call `process.exit(1)` directly when an exit is already pending |
+| R4-n3 | NIT | `process-errors.ts` JSDoc (`exitAfterFlush`, lines ~44-47) | One comment line is over 120 characters (prettier does not reflow comments) | Rewrap |
+
+### R4.4 Reviewer-focus answers
+
+1. **Union vs `merge-tree`:** only declared files differ (§R4.1 rows 1-2); the hand edits keep every PR #20 and main behaviour named in §R3.5 item 5.
+2. **RUNTIME_SECURITY_EVENTS and the README:** per-event and in both directions; the main-table order check is untouched and mutation-tested.
+3. **Squat emit:** through the sink with no `component`; allow-list enforced by the logger.
+4. **Lock:** a single `pino` edge, `npm ci` dry run green.
+5. **SEC-18:** fixed at the root (linear scan), test proves growth, not speed. **SEC-19:** correct and bounded (at most `MAX_KEYS` per object, so about 200k comparisons across the node budget); false positives only fail closed.
+6. **Drift:** 18/18, 0 unrecognised.
+
+### R4.5 Merge conditions
+
+1. **Security merge + delta round** (D-ORCH-024 (3), D-SEC-PR20-02) with a record naming head `3f585b7` or a docs-only descendant. Lane A `scans` is red only at that step and turns green once the record lands (the redaction, logging and union files changed since `fafa3b5`). Route R3-n2, R3-n3, R3-n4 and R4-n1 there (accept, or TASK-113/214).
+2. **Lane B evidence** is on `5e6ccb7`, an ancestor of the head with only `docs/**` after it. Do **not** merge main again, and make no non-docs commit, before the merge; a docs-only merge of main stays valid. If PR #28 or another PR lands first and brings non-docs changes, rerun `quality:heavy --profile pr` after that merge.
+3. **Squash merge** (D-ORCH-044: PR #20 merges before PR #32; #32 is the next second-merger).
+4. R4-m1 and the nits are optional in this PR.

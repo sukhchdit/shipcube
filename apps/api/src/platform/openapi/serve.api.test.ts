@@ -42,7 +42,7 @@ function app(docs: AppDependencies['docs']): Express {
   return createApp({
     health: [],
     modules: [],
-    logger: { info: () => undefined, error: () => undefined },
+    logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
     ...(docs === undefined ? {} : { docs }),
   });
 }

@@ -128,7 +128,7 @@ describe('audit readiness against the bootstrapped catalogue (TASK-021)', () => 
       await asSuperuserUnguarded(database, plant(name));
       await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('failed');
       expect(lines.filter((line) => line['event'] === 'security.audit_partition_squatted')).toEqual([
-        expect.objectContaining({ level: 'error', component: 'audit_partitions', partition_name: name, kind }),
+        expect.objectContaining({ level: 'error', partitionName: name, kind }),
       ]);
     },
   );
@@ -139,7 +139,7 @@ describe('audit readiness against the bootstrapped catalogue (TASK-021)', () => 
     await asSuperuserUnguarded(database, `ALTER TABLE public.audit_entries DETACH PARTITION public.${name}`);
     await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('failed');
     expect(lines.filter((line) => line['event'] === 'security.audit_partition_squatted')).toEqual([
-      expect.objectContaining({ level: 'error', partition_name: name, kind: 'r', reason: 'not_attached' }),
+      expect.objectContaining({ level: 'error', partitionName: name, kind: 'r', reason: 'not_attached' }),
     ]);
   });
 
@@ -173,7 +173,7 @@ describe('audit readiness against the bootstrapped catalogue (TASK-021)', () => 
     await expect(asApp(database, 'SELECT (1::oid = 1) AS v')).resolves.toEqual({ ok: true, value: false });
     await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('failed');
     expect(lines.filter((line) => line['event'] === 'security.audit_partition_squatted')).toEqual([
-      expect.objectContaining({ level: 'error', partition_name: name, kind: 'type', reason: 'not_a_table' }),
+      expect.objectContaining({ level: 'error', partitionName: name, kind: 'type', reason: 'not_a_table' }),
     ]);
   });
 

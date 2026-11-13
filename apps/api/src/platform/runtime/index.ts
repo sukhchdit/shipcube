@@ -15,7 +15,15 @@ export {
 } from '../db/runtime.js';
 export { createValkeyCheck, createValkeyClient, type PingableClient, type ValkeyClientOptions } from '../valkey/client.js';
 export { buildValkeyOptions, reconnectDelayMs, VALKEY_DEFAULTS, ValkeyConfigError, type ValkeyOptionsInput } from '../valkey/options.js';
-export { createRuntimeLog, type LogFields, type LogSink, type RuntimeLog } from './log.js';
+export {
+  createRuntimeLog,
+  readPackageVersion,
+  UNKNOWN_VERSION,
+  type LogFields,
+  type LogSink,
+  type RuntimeLog,
+  type RuntimeLogOptions,
+} from './log.js';
 export {
   assertReadinessChecks,
   createReadinessProbe,
@@ -36,6 +44,14 @@ export {
   type ReadinessReport,
 } from './readiness.js';
 export { createRuntimeServices, readinessChecks, type RuntimeServices, type ValkeyClient } from './services.js';
+export {
+  exitAfterFlush,
+  installProcessErrorHandlers,
+  type ExitAfterFlushOptions,
+  type FlushableStream,
+  type ProcessErrorHandlerOptions,
+  type ProcessErrorSource,
+} from './process-errors.js';
 // The ObjectStorage port only (ADR-0021 am. 2 item 5); the S3 adapter stays behind platform/storage.
 export {
   MAX_PRESIGN_TTL_SECONDS,

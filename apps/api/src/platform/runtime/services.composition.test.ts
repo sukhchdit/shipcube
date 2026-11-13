@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 import { describe, expect, it } from '@jest/globals';
 import type { Config, Secret } from '@platform/config';
 
 import { StorageConfigError } from '../storage/s3-object-storage.js';
 import { createRuntimeLog } from './log.js';
+import { installProcessErrorHandlers } from './process-errors.js';
 import { createRuntimeServices } from './services.js';
 
 /** Unreachable dependencies: nothing listens on port 1 of the loopback interface. */
@@ -36,6 +38,9 @@ const capture = (): { lines: string[]; log: ReturnType<typeof createRuntimeLog> 
   });
   return { lines, log };
 };
+
+/** The mandatory keys of every platform log line (TASK-010, `createLogger`) plus the event name. */
+const LINE_KEYS = ['timestamp', 'level', 'message', 'service', 'version', 'correlation_id', 'org_id', 'actor_id', 'event'] as const;
 
 const storageErrorLines = (lines: readonly string[]): string[] => lines.filter((line) => line.includes('"object_storage.error"'));
 
@@ -77,11 +82,13 @@ describe('createRuntimeServices composition (TASK-019: object storage wired into
       const storageLines = storageErrorLines(lines);
       expect(storageLines.length).toBeGreaterThan(0);
       const entry = JSON.parse(storageLines[0] ?? '{}') as Record<string, unknown>;
-      expect(entry).toMatchObject({ level: 'warn', event: 'object_storage.error' });
+      // The platform logger's line shape (TASK-010): the event name is the `message` (and `event`) of a Pino line.
+      expect(entry).toMatchObject({ level: 'warn', message: 'object_storage.error', event: 'object_storage.error', service: 'api' });
       // UNAVAILABLE in a real process (connection refused). Under Jest's VM realm the SDK re-wraps the cross-realm Node
       // error and drops its `code`, so the class is UNEXPECTED here; either way it is a closed-set class, nothing else.
       expect(['UNAVAILABLE', 'UNEXPECTED']).toContain(entry['error']);
-      expect(Object.keys(entry).sort()).toEqual(['error', 'event', 'level', 'service', 'time']);
+      // The logger's mandatory keys plus `error`, nothing else (no endpoint, bucket or credential field).
+      expect(Object.keys(entry).sort()).toEqual([...LINE_KEYS, 'error'].sort());
 
       const text = JSON.stringify(report.body) + lines.join('');
       for (const leak of ['127.0.0.1:1', 'documents-test', accessKey, secretKey]) expect(text).not.toContain(leak);
@@ -107,5 +114,26 @@ describe('createRuntimeServices composition (TASK-019: object storage wired into
     expect((thrown as Error).message).toContain('STORAGE_ACCESS_KEY_ID_REF');
     expect((thrown as Error).message).toContain('STORAGE_SECRET_ACCESS_KEY_REF');
     expect((thrown as Error).message).not.toContain(value);
+  });
+
+  it('[PR30-SEC-11] the StorageConfigError of a half-written pair reaches the process handlers as one redacted fatal line', () => {
+    // The entry points install the handlers above createRuntimeServices, so its top-level throw is an uncaught exception.
+    const value = randomBytes(12).toString('hex');
+    const raw: string[] = [];
+    const log = createRuntimeLog('api', { write: (line: string) => raw.push(line) });
+    const source = new EventEmitter();
+    const exits: number[] = [];
+    installProcessErrorHandlers({ log, exit: (code) => exits.push(code), source });
+    try {
+      createRuntimeServices(config, 'api', log, new Map([['STORAGE_SECRET_ACCESS_KEY_REF', secret(value)]]));
+    } catch (error) {
+      source.emit('uncaughtException', error, 'uncaughtException');
+    }
+    const lines = raw.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 'fatal', event: 'process.uncaught_exception', err: { name: 'StorageConfigError' } });
+    expect(String((lines[0]?.['err'] as Record<string, unknown> | undefined)?.['message'])).toContain('STORAGE_ACCESS_KEY_ID_REF');
+    expect(raw.join('')).not.toContain(value);
+    expect(exits).toEqual([1]);
   });
 });

@@ -47,6 +47,7 @@ function harness(options: Pick<AppDependencies, 'problemTypeBase'> = {}): Harnes
   let thrown: unknown;
   const logger: AppLogger = {
     info: () => undefined,
+    debug: () => undefined,
     error: (event, fields, value) => logged.push({ event, fields, thrown: value }),
   };
 

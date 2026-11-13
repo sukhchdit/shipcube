@@ -138,6 +138,53 @@ const LAYERING: readonly Violation[] = [
   ],
 ];
 
+/**
+ * `@platform/shared/logging` is server-only (TASK-010, PR #20 M1, PR20-SEC-11; ADR-0003 am. 2 conventions): one fixture
+ * per importer and arm. The specifier arm (`@platform/shared/logging` resolves to the repository's real package, outside
+ * the fixture root, so only the specifier matches) and the resolved-file arm (a relative import into the fixture's
+ * packages/shared/src/logging); `pino` from the web app; the web build configuration.
+ */
+const SHARED_LOGGING_ROOT = 'layering/shared-logging-server-only';
+const SHARED_LOGGING_MESSAGE = '@platform/shared/logging is server-only (Pino); browser bundles and packages/pricing/ui never import it';
+const sharedLoggingCase = (title: string, file: string): Violation => [
+  `[TASK-010] ${title}`,
+  `${SHARED_LOGGING_ROOT}/${file}`,
+  BOUNDARIES,
+  SHARED_LOGGING_MESSAGE,
+];
+const SHARED_LOGGING_IMPORTERS: readonly (readonly [importer: string, dir: string])[] = [
+  ['apps/web app code', 'apps/web/app'],
+  ['apps/admin app code', 'apps/admin/app'],
+  ['packages/ui', 'packages/ui/src'],
+  ['packages/pricing', 'packages/pricing/src'],
+];
+/**
+ * The transitive path (PR #20 R2-m1, PR20-SEC-16): a packages/shared module outside src/logging (here the root barrel
+ * re-exporting a logging file) would carry Pino into every importer of the `@platform/shared` root. One fixture per arm.
+ */
+const SHARED_ROOT_DIR = `${SHARED_LOGGING_ROOT}/packages/shared/src`;
+const SHARED_ROOT_MESSAGE = 'packages/shared outside src/logging never imports or re-exports the logging module or Pino';
+const SHARED_ROOT_CASES: readonly (readonly [title: string, file: string])[] = [
+  ['the packages/shared root barrel re-exports a logging file (resolved file)', 'index.ts'],
+  ['a packages/shared module imports @platform/shared/logging (package specifier)', 'bad-logging-specifier.ts'],
+  ['a packages/shared module imports pino', 'bad-pino.ts'],
+];
+const SHARED_ROOT_LOGGING: readonly Violation[] = SHARED_ROOT_CASES.map(([title, file]): Violation => [
+  `[TASK-010] ${title}`,
+  `${SHARED_ROOT_DIR}/${file}`,
+  BOUNDARIES,
+  SHARED_ROOT_MESSAGE,
+]);
+const SHARED_LOGGING: readonly Violation[] = [
+  ...SHARED_LOGGING_IMPORTERS.flatMap(([importer, dir]) => [
+    sharedLoggingCase(`${importer} imports @platform/shared/logging (package specifier)`, `${dir}/bad-logging-specifier.ts`),
+    sharedLoggingCase(`${importer} imports packages/shared/src/logging (resolved file)`, `${dir}/bad-logging-resolved.ts`),
+  ]),
+  sharedLoggingCase('apps/web build configuration (vite.config.ts) imports @platform/shared/logging', 'apps/web/vite.config.ts'),
+  sharedLoggingCase('apps/web app code imports pino', 'apps/web/app/bad-pino.ts'),
+  ...SHARED_ROOT_LOGGING,
+];
+
 const ANY_SUPPRESSION: readonly Violation[] = ['bad-next-line', 'bad-block', 'bad-blanket', 'bad-no-task-id'].map((name): Violation => [
   `[AT-US-001-05] Unjustified any suppression is rejected (${name})`,
   `rules/any-justification/packages/pricing/src/${name}.ts`,
@@ -633,7 +680,16 @@ const WARNINGS: readonly (readonly [title: string, file: string, ruleId: string]
   ],
 ];
 
-const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMENT, ...RULES, ...TENANT_DB, ...REACT, ...RESOLUTION];
+const ESLINT_VIOLATIONS = [
+  ...LAYERING,
+  ...SHARED_LOGGING,
+  ...ANY_SUPPRESSION,
+  ...BCRYPT_CONFINEMENT,
+  ...RULES,
+  ...TENANT_DB,
+  ...REACT,
+  ...RESOLUTION,
+];
 
 /** The steps of `npm run lint` (`&&`-separated), in order (PR2-SEC-01/02/03). */
 const LINT_STEPS: readonly RegExp[] = [
@@ -810,6 +866,23 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ['module imports another module through its index.ts', `layering/module-internals/${API}/quotes/service/ok-quotes.service.ts`],
     ['apps/worker imports a module through its index.ts', 'layering/worker-imports-controller/apps/worker/src/jobs/ok-sync.ts'],
     ['packages/pricing imports @platform/shared', 'layering/pricing-io/packages/pricing/src/ok-price.ts'],
+    [
+      '[TASK-010] apps/api imports @platform/shared/logging and pino (package specifier)',
+      `${SHARED_LOGGING_ROOT}/apps/api/src/platform/logging/ok-logger.ts`,
+    ],
+    [
+      '[TASK-010] apps/worker imports packages/shared/src/logging (resolved file)',
+      `${SHARED_LOGGING_ROOT}/apps/worker/src/platform/logging/ok-logger-resolved.ts`,
+    ],
+    ['[TASK-010] apps/web still imports the @platform/shared root', `${SHARED_LOGGING_ROOT}/apps/web/app/ok-shared-root.ts`],
+    [
+      '[TASK-010] packages/shared/src/logging imports pino, its own files and the rest of packages/shared',
+      `${SHARED_LOGGING_ROOT}/packages/shared/src/logging/ok-internal.ts`,
+    ],
+    [
+      '[TASK-010] a packages/shared module outside src/logging imports another one',
+      `${SHARED_LOGGING_ROOT}/packages/shared/src/ok-shared-module.ts`,
+    ],
   ])('allowed: %s', (_title, file) => {
     expectClean(report.eslint, file);
   });

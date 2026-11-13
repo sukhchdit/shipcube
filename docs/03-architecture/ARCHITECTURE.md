@@ -260,6 +260,8 @@ sequenceDiagram
   Note over API,GW: Client disconnect → AbortSignal cancels outstanding calls within 1 s; late responses are discarded and never cached.
 ```
 
+*Amended 2026-11-13 (D-ARCH-106, ADR-0010 amendment 5, ADR-0003 amendment of the same date).* The fan-out is started by `createQuote` after its transaction committed and the 201 was sent, which in the route-descriptor model is the `afterCommit` phase (best-effort, in process); the stream drawn above only replays persisted `quote_options` and subscribes (ADR-0016 amendment 3), it never calls a carrier. Each result is persisted in its own short tenant transaction as it arrives, and no tenant transaction is open while a carrier is called. A fan-out lost to a crash must end as per-carrier timeouts at the 5 s deadline, never as a stream that does not complete.
+
 ### 7.2 Checkout and booking saga with compensation (ADR-0014, DR-B03/B04)
 
 ```mermaid
@@ -306,6 +308,8 @@ sequenceDiagram
   Note over W: Sweeper every 5 min: authorisations > 30 min without BOOKED → cancel; CAPTURED without BOOKED > 10 min → repair or refund (REQ-PAY-018).
 ```
 
+*Amended 2026-11-13 (D-ARCH-106, ADR-0005 amendment 11, ADR-0003 amendment of the same date).* On the API side the first steps (payment record, then PaymentIntent) are the `load` -> `call` -> `handler` phases: the order, its price snapshots and the attempt count are read in a short read-only transaction, the gateway is called with the key `auth:<order_id>:<attempt>` while no transaction is open, and the payment row (with the gateway reference), the audit entry, the number allocation and `order.checkout_started` are written in one transaction afterwards. A crash or an admission rejection between the two leaves at most an unconfirmed PaymentIntent, which a retry with the same key returns. The worker steps keep the same discipline (ADR-0014): persist the client reference, call, record the outcome, each database part in its own `withTenantTx`.
+
 ### 7.3 Audit write inside a mutation (ADR-0007)
 
 ```mermaid
@@ -326,6 +330,8 @@ sequenceDiagram
   API->>DB: COMMIT
   Note over AUD,DB: Audit insert fails (e.g. no partition) → exception → ROLLBACK → 500 AUDIT_WRITE_FAILED; business row unchanged. Sensitive VIEW: entry written before the response is released, else 503 AUDIT_UNAVAILABLE.
 ```
+
+*Amended 2026-11-13 (D-ARCH-106).* No external call lies between `BEGIN` and `COMMIT` in this sequence or in any other (ADR-0005 amendment 11): the transaction holds database work only, and a route that needs an external result reads, calls with no transaction open, and then writes and audits here (ADR-0003 amendment of the same date).
 
 ### 7.4 Login, refresh rotation and reuse detection (ADR-0006)
 

@@ -85,6 +85,13 @@ export interface WithTenantTxDeps<TTx = unknown> {
   /** Environment checked for `PGOPTIONS`; defaults to `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>>;
   /**
+   * Redacting log hook for the ORIGINAL database error before it is replaced by its DbError (TASK-010, PR #11
+   * DEFERRED item; AT-US-007-03 "full error in the server log"). The runtime passes it to the platform logger, whose
+   * serializer writes database errors as `{ name, code, originalCode, kind }` only (PR7-SEC-03 item 3). The error never
+   * becomes a `cause` of the DbError. A throwing hook never masks the mapped error.
+   */
+  readonly onDbError?: (error: unknown, mapping: DbErrorMapping) => void;
+  /**
    * Per-transaction client (ADR-0005 am. 10 item 5, data-model §7.6; TASK-032): the root client extended with the
    * standard-columns extension bound to `stamp` (`withStandardColumns`). The transaction is opened on the returned
    * client, so the stamping runs inside it; the stamp comes from this closure, never from AsyncLocalStorage. REQUIRED
@@ -319,6 +326,13 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
   const mapped = (error: unknown, correlationId: string): unknown => {
     if (error instanceof DbError || !isDatabaseError(error)) return error;
     const mapping: DbErrorMapping = mapDbError(error);
+    if (deps.onDbError !== undefined) {
+      try {
+        deps.onDbError(error, mapping);
+      } catch {
+        // Logging is best effort here: the caller must still receive the mapped DbError, never the original error.
+      }
+    }
     if (mapping.securityEvent !== undefined) {
       deps.onSecurityEvent(mapping.securityEvent, {
         correlationId,

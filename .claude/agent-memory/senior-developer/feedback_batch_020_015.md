@@ -46,6 +46,8 @@ TASK-020 (route metadata, huge sheet) and TASK-015 (CI hardening, split into 015
 - To replay the base-ref fixture step locally, run `wave0/baseref-fixtures.sh <wt> <merge-base>` (needs a clean tree).
 
 **Merges**
-- DECISIONS.md conflicts on every merge of main. Rebuild it as main's file plus our block, kept in scratch.
+- **D-ORCH-040 (2026-11-13):** PR branches must NOT edit `docs/sdlc/DECISIONS.md` or STATUS.md. Put D-TASKxxx blocks in the PR body and the handoff; the orchestrator appends them on main. If a branch already carries a block, restore the merge-base file in a docs-only commit. This ends the append-append conflict that forced extra code merges and staled evidence.
 
 Related: [[batch-019-032-lessons]], [[lane-a-pr-hygiene]], [[p5-dispatch]]
+
+**Ungated push slip (again, 2026-11-13):** I wrote `gitleaks …; git fetch && … && git push` with a `;` after the scan, wrapped in `timeout 900`. The scan timed out while waiting on docker.lock and the push still went out un-scanned. A later scan was clean, but the order was wrong. The scan must be the first link of the `&&` chain. Don't wrap a lock wait in a short `timeout` before a push: run the scan in the background, read its log, then push in a separate command.
