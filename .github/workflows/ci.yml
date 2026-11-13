@@ -422,6 +422,16 @@ jobs:
       - name: Semgrep (rules, .semgrepignore and .gitignore from the base ref; --disable-nosem)
         run: node "$GATE_RUN_SEMGREP" --root "$GITHUB_WORKSPACE" --rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR" --summary "$GITHUB_STEP_SUMMARY"
 
+      # NFR-MAINT-004, PR #21 R1-m6, D-ORCH-023 (1): the contract at the PR head against the latest release tag merged
+      # into the base (strict semver), both read from git objects (never the working tree) into oasdiff with no network.
+      # No tag: a smoke run of the head contract against itself, then "no release tag", exit 0 (PR #33 R1-M1: the
+      # container, mount and parser run on every PR). A breaking (ERR) change needs the api/README §18 record: an Accepted
+      # ADR changed since the tag that names each operationId (D-TASK015-03, R1-M2). A step of this isolated job, not a
+      # separate job: it needs only git, Node and Docker. It runs before the record step so a missing review record
+      # (expected on a first push of an owned change) does not hide the contract result.
+      - name: OpenAPI breaking changes against the latest release tag (oasdiff, NFR-MAINT-004)
+        run: node "$GATE_OPENAPI_BREAKING" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --image "$OASDIFF_IMAGE" --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)
         run: |
           set -euo pipefail
@@ -433,13 +443,6 @@ jobs:
             # A pull-request control: records name branch commits, never the squash commit on main (PR10-SEC-04 item 4).
             echo "Security-owned paths record: pull-request control, not evaluated on push." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      # NFR-MAINT-004, PR #21 R1-m6, D-ORCH-023 (1): the contract at the PR head against the latest v* release tag, both
-      # read from git objects (never the working tree) into oasdiff with no network. No tag: "no release tag", exit 0.
-      # A breaking (ERR) change needs the api/README §18 record: a changed ADR naming each operationId (D-TASK015-03).
-      # A step of this isolated job, not a separate job: it needs only git, Node and Docker, which this job already has.
-      - name: OpenAPI breaking changes against the latest release tag (oasdiff, NFR-MAINT-004)
-        run: node "$GATE_OPENAPI_BREAKING" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --image "$OASDIFF_IMAGE" --summary "$GITHUB_STEP_SUMMARY"
 
   ci-gate:
     name: ci-gate

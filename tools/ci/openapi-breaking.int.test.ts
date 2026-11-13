@@ -2,6 +2,8 @@
  * openapi-breaking against the real digest-pinned oasdiff image (NFR-MAINT-004, PR #21 R1-m6; sheet TASK-015 "a seeded
  * fixture (an operation removed from a copy of the contract) fails the check"). Needs Docker: the integration project.
  * A throw-away repository holds a copy of the real contract tagged as a release; the PR removes the first path item.
+ * The Linux proof of the mount permissions (PR #33 R1-M1) is lane A's own `scans` step, whose no-tag smoke run starts the
+ * same container on ubuntu-24.04 on every PR; Docker Desktop on Windows does not enforce POSIX modes.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -58,13 +60,14 @@ const run = () => runNode([script, '--root', root, '--base', 'main', '--json'], 
 
 describe('openapi-breaking (Docker, real oasdiff image)', () => {
   it(
-    '[R1-m6] no release tag prints "no release tag" and exits 0; an unchanged contract against the tag passes',
+    '[R1-m6] [R1-M1] no release tag: the smoke run (head contract against itself, real image, 0755/0644 mount) passes and prints "no release tag"; an unchanged contract against the tag passes',
     () => {
       git('init', '-q', '-b', 'main');
       write(CONTRACT_PATH, contract);
       commit();
       const untagged = run();
       expect(untagged.stdout).toContain('no release tag');
+      expect(untagged.stdout).toContain('openapi-breaking: smoke: oasdiff compared the head contract with itself: 0 change(s)');
       expect(untagged.status).toBe(0);
       git('tag', 'v0.1.0-m0');
       git('checkout', '-q', '-b', 'feature');
@@ -92,7 +95,10 @@ describe('openapi-breaking (Docker, real oasdiff image)', () => {
       expect(decision.uncovered.every((change) => change.id.startsWith('api-'))).toBe(true);
       expect(broken.status).toBe(1);
 
-      write('docs/03-architecture/adr/ADR-0999-v2-fixture.md', `# ADR-0999\n\n- Supersedes: ADR-0016 for ${operationIds.join(', ')}\n`);
+      write(
+        'docs/03-architecture/adr/ADR-0999-v2-fixture.md',
+        `# ADR-0999\n\n- **Status:** Accepted\n- Supersedes: ADR-0016 for ${operationIds.join(', ')}\n`,
+      );
       commit();
       const recorded = run();
       expect(JSON.parse(recorded.stdout.split('\n')[0] ?? '')).toMatchObject({

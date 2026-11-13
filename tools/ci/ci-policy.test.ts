@@ -96,15 +96,18 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     );
   });
 
-  it('[R1-m6] the scans job runs the openapi-breaking gate last, unconditionally, from the base-ref tool set', () => {
+  it('[R1-m6] [PR #33 R1-M1] the scans job runs the openapi-breaking gate after Semgrep and before the record step (so its first real run is not hidden by a missing record), unconditionally, from the base-ref tool set', () => {
     const index = scanIndexOf(/GATE_OPENAPI_BREAKING/);
-    expect(index).toBe(scanSteps.length - 1);
+    expect(index).toBe(scanIndexOf(/GATE_RUN_SEMGREP/) + 1);
+    expect(index + 1).toBe(scanIndexOf(/GATE_CHECK_SECURITY_OWNED_PATHS/));
+    expect(index + 2).toBe(scanSteps.length);
     expect(scanSteps[index]?.if).toBeUndefined();
+    expect(scanSteps[index]?.env).toBeUndefined();
     expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking; do/u);
     const dropped = ciText.replace(/--image "\$OASDIFF_IMAGE"/u, '');
-    expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toContain(
-      'ci.yml job scans must keep the openapi-breaking gate step',
-    );
+    expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
+      expect.stringContaining('ci.yml openapi-breaking gate step: the run: must be exactly'),
+    ]);
   });
 
   it('AT-US-005-01 / PR10-SEC-02: licences, registry signatures and the advisory audit run right after the install, before deps:rebuild and any head code', () => {
