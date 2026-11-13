@@ -6,7 +6,7 @@
  * (PR20-SEC-12 / PR #20 L-13). As a second line, every schema is prepared with `SAFE_MESSAGES`, templates that never
  * interpolate the value (`{#value}`), so a Joi message that does get logged cannot carry request data either.
  */
-import { AppError, MAX_VALIDATION_ISSUES, type ValidationIssue } from '@platform/shared';
+import { AppError, MAX_VALIDATION_ISSUES, serverControlledFieldIssues, type ValidationIssue } from '@platform/shared';
 import Joi from 'joi';
 
 import type { RouteInput, RouteSchemas } from '../routing/define-route.js';
@@ -102,6 +102,23 @@ function declaredHeaders(schema: Joi.ObjectSchema, headers: Readonly<Record<stri
   return Object.fromEntries(keys.filter((key) => headers[key] !== undefined).map((key) => [key, headers[key]]));
 }
 
+/**
+ * PR26-SEC-04: server-controlled fields (id, org_id, created_by, version, on_behalf_of_org_id, ...) sent at the top of
+ * the body or in any item of a bulk array property are UNKNOWN_FIELD with the shared message, whatever the route's
+ * schema says (camel-case spellings are already refused by the closed Joi schemas).
+ */
+export function serverControlledIssues(body: unknown): ValidationIssue[] {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return [];
+  const issues = serverControlledFieldIssues(body);
+  for (const [key, value] of Object.entries(body)) {
+    if (!Array.isArray(value)) continue;
+    value.forEach((item: unknown, index) =>
+      issues.push(...serverControlledFieldIssues(item, `/body/${pointerToken(key)}/${String(index)}`)),
+    );
+  }
+  return issues.slice(0, MAX_VALIDATION_ISSUES);
+}
+
 export interface RawRequestParts {
   readonly params: unknown;
   readonly query: unknown;
@@ -136,7 +153,12 @@ export function validateRequest(schemas: PreparedSchemas, raw: RawRequestParts):
   const params = run('params', schemas.params, raw.params);
   const query = run('query', schemas.query, raw.query);
   const headers = schemas.headers === undefined ? {} : run('headers', schemas.headers, declaredHeaders(schemas.headers, raw.headers));
+  const serverControlled = serverControlledIssues(raw.body);
   const body = schemas.body === undefined && raw.body === undefined ? undefined : run('body', schemas.body, raw.body);
-  if (issues.length > 0) throw new AppError('VALIDATION_ERROR', { errors: issues });
+  if (issues.length > 0 || serverControlled.length > 0) {
+    // The server-controlled issue (with its explicit message) replaces Joi's generic UNKNOWN_FIELD at the same pointer.
+    const named = new Set(serverControlled.map((issue) => issue.pointer));
+    throw new AppError('VALIDATION_ERROR', { errors: [...serverControlled, ...issues.filter((issue) => !named.has(issue.pointer))] });
+  }
   return { params, query, body, headers };
 }

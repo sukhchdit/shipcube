@@ -7,7 +7,7 @@ import { describe, expect, it } from '@jest/globals';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import Joi from 'joi';
 
-import { SYSTEM_ACTOR_ID } from '@platform/authz';
+import { ANONYMOUS_ACTOR_ID, SYSTEM_ACTOR_ID } from '@platform/shared';
 
 import { createApp } from '../../app.js';
 import { AUTHENTICATED_CACHE_CONTROL } from '../authn/authenticate.js';
@@ -268,6 +268,7 @@ describe('request context builder (PR26-SEC-04)', () => {
 
   it.each<[string, Principal]>([
     ['the SYSTEM actor', { ...ANONYMOUS, authenticated: true, actorId: SYSTEM_ACTOR_ID }],
+    ['the reserved ANONYMOUS actor', { ...ANONYMOUS, authenticated: true, actorId: ANONYMOUS_ACTOR_ID }],
     ['an authenticated principal without an actor', { ...ANONYMOUS, authenticated: true }],
     ['an actor on an anonymous principal', { ...ANONYMOUS, actorId: actor }],
     ['an OPERATOR context without an actor', { ...ANONYMOUS, actorScope: 'OPERATOR' }],

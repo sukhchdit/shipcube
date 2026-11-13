@@ -3,7 +3,15 @@ import { describe, expect, it } from '@jest/globals';
 import { AppError, MAX_VALIDATION_ISSUES } from '@platform/shared';
 import Joi from 'joi';
 
-import { prepareSchema, prepareSchemas, SAFE_MESSAGES, subCodeOf, validateRequest, VALUE_REFERENCE } from './validate.js';
+import {
+  prepareSchema,
+  prepareSchemas,
+  SAFE_MESSAGES,
+  serverControlledIssues,
+  subCodeOf,
+  validateRequest,
+  VALUE_REFERENCE,
+} from './validate.js';
 
 const raw = (overrides: Partial<Parameters<typeof validateRequest>[1]> = {}) => ({
   params: {},
@@ -117,5 +125,39 @@ describe('value-free messages (PR20-SEC-12, PR #20 L-13)', () => {
   it('VALUE_REFERENCE recognises every value interpolation form', () => {
     for (const template of ['{#value}', '{{#value}}', '{[.]}', '{:[.]}', '{{:#value}}']) expect(VALUE_REFERENCE.test(template)).toBe(true);
     expect(VALUE_REFERENCE.test('{{#label}} failed string.min')).toBe(false);
+  });
+});
+
+describe('server-controlled fields (PR26-SEC-04, REQ-SEC-007, AT-US-064-03)', () => {
+  const schemas = prepareSchemas({
+    body: Joi.object({ name: Joi.string(), items: Joi.array().items(Joi.object({ sku: Joi.string() })) }),
+  });
+
+  it('a top-level server-controlled field is UNKNOWN_FIELD with the shared message, once per pointer', () => {
+    expect(issuesOf(() => validateRequest(schemas, raw({ body: { name: 'a', id: 'x', on_behalf_of_org_id: 'y' } })))).toEqual({
+      code: 'VALIDATION_ERROR',
+      errors: [
+        { pointer: '/body/id', code: 'UNKNOWN_FIELD', message: 'id is set by the server and must not be sent' },
+        {
+          pointer: '/body/on_behalf_of_org_id',
+          code: 'UNKNOWN_FIELD',
+          message: 'on_behalf_of_org_id is set by the server and must not be sent',
+        },
+      ],
+    });
+  });
+
+  it('every item of a bulk array is checked, and camel-case spellings are refused by the closed schema', () => {
+    const result = issuesOf(() =>
+      validateRequest(schemas, raw({ body: { items: [{ sku: 'a' }, { sku: 'b', org_id: 'x' }], orgId: 'y' } })),
+    );
+    expect(result).toEqual({
+      code: 'VALIDATION_ERROR',
+      errors: [
+        { pointer: '/body/items/1/org_id', code: 'UNKNOWN_FIELD', message: 'org_id is set by the server and must not be sent' },
+        { pointer: '/body/orgId', code: 'UNKNOWN_FIELD', message: 'Field is not allowed.' },
+      ],
+    });
+    expect(serverControlledIssues([{ id: 'x' }])).toEqual([]);
   });
 });

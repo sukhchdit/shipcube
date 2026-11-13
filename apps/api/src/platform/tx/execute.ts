@@ -8,8 +8,7 @@
  * `Retry-After` when retryable and the generic text, never its reason. `transaction: 'none'` routes (health) run
  * without a transaction and get no database handle. No external call may run inside the callback (T-83 lint).
  */
-import { SYSTEM_ACTOR_ID } from '@platform/authz';
-import { AppError } from '@platform/shared';
+import { ANONYMOUS_ACTOR_ID, AppError, SYSTEM_ACTOR_ID } from '@platform/shared';
 import type { Request, Response } from 'express';
 
 import { type AuditHook, captureAudit } from '../audit/capture.js';
@@ -25,8 +24,8 @@ export interface ExecuteOptions {
   readonly audit?: AuditHook;
 }
 
-/** Ids no request may act as: the SYSTEM actor is for jobs and seeds only (PR26-SEC-04). */
-const RESERVED_ACTOR_IDS: ReadonlySet<string> = new Set([SYSTEM_ACTOR_ID]);
+/** Ids no request may act as: SYSTEM is for jobs and seeds, ANONYMOUS is stamped by the extension (PR26-SEC-04). */
+const RESERVED_ACTOR_IDS: ReadonlySet<string> = new Set([SYSTEM_ACTOR_ID, ANONYMOUS_ACTOR_ID]);
 
 export class RequestContextError extends Error {
   constructor(reason: string) {
