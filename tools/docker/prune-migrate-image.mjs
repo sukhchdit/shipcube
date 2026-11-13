@@ -56,21 +56,30 @@ module.exports = new Proxy(
 );
 `;
 
-/** Writes the throwing stub package in place of `@prisma/studio-core`. @param {string} root */
+/**
+ * Packages replaced by the throwing stub. `prisma/build/cli.js` 7.10.1 requires both at module load:
+ * `@prisma/studio-core/data/{bff,mysql2,node-sqlite,postgresjs}` and `@prisma/dev/internal/state` (the local Prisma
+ * Postgres server behind `prisma dev`); the first tooling-image build proved the second one (TASK-014).
+ */
+export const STUBBED_PACKAGES = Object.freeze(['studio-core', 'dev']);
+
+/** Writes the throwing stub packages in place of `@prisma/studio-core` and `@prisma/dev`. @param {string} root */
 export function writeStudioStub(root) {
-  const dir = join(root, 'node_modules', '@prisma', 'studio-core');
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  const target = { require: './stub.cjs', default: './stub.cjs' };
-  const manifest = {
-    name: '@prisma/studio-core',
-    version: STUB_VERSION,
-    private: true,
-    license: 'UNLICENSED',
-    exports: { '.': target, './data': target, './data/*': target, './package.json': './package.json' },
-  };
-  writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  writeFileSync(join(dir, 'stub.cjs'), STUB_MODULE);
+  for (const name of STUBBED_PACKAGES) {
+    const dir = join(root, 'node_modules', '@prisma', name);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    const target = { require: './stub.cjs', default: './stub.cjs' };
+    const manifest = {
+      name: `@prisma/${name}`,
+      version: STUB_VERSION,
+      private: true,
+      license: 'UNLICENSED',
+      exports: { '.': target, './*': target, './package.json': './package.json' },
+    };
+    writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    writeFileSync(join(dir, 'stub.cjs'), STUB_MODULE);
+  }
 }
 
 /** Invariant violations of the pruned tree. @param {string} root @returns {string[]} */
@@ -83,10 +92,10 @@ export function invariantViolations(root) {
       if (!entry.isDirectory()) continue;
       const full = join(dir, entry.name);
       if (entry.name === 'elkjs') out.push(`${full} (EPL-2.0)`);
-      if (entry.name === 'dev' && dir.endsWith('@prisma')) out.push(full);
-      if (entry.name === 'studio-core' && dir.endsWith('@prisma')) {
-        const version = JSON.parse(readFileSync(join(full, 'package.json'), 'utf8')).version;
-        if (version !== STUB_VERSION) out.push(`${full} (real Studio ${version})`);
+      if (STUBBED_PACKAGES.includes(entry.name) && dir.endsWith('@prisma')) {
+        const manifest = join(full, 'package.json');
+        const version = existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8')).version : '<no manifest>';
+        if (version !== STUB_VERSION) out.push(`${full} (real package ${version})`);
       }
       visit(full, depth + 1);
     }

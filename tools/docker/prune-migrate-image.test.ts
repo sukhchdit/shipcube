@@ -64,6 +64,10 @@ describe('prune-migrate-image', () => {
     expect(bff['__esModule']).toBeUndefined();
     expect(() => (bff['createBFF'] as () => unknown)()).toThrow(/not available in the tooling image/);
     expect((require(`${STUDIO}/package.json`) as { version: string }).version).toBe(STUB_VERSION);
+    // prisma/build/cli.js 7.10.1 also requires @prisma/dev/internal/state at module load (first tooling-image build).
+    const DEV = '@prisma/dev';
+    const state = require(`${DEV}/internal/state`) as Record<string, unknown>;
+    expect(() => (state['anything'] as () => unknown)()).toThrow(/not available in the tooling image/);
     expect(invariantViolations(root)).toEqual([]);
   });
 
@@ -80,7 +84,7 @@ describe('prune-migrate-image', () => {
     }
     const violations = invariantViolations(root).join('\n');
     expect(violations).toMatch(/elkjs/);
-    expect(violations).toMatch(/real Studio 0\.33\.0/);
+    expect(violations).toMatch(/real package 0\.33\.0/);
     expect(violations).toMatch(/@prisma[\\/]dev/);
   });
 });
