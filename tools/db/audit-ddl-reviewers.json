@@ -1,4 +1,4 @@
 {
-  "$comment": "Security-analyst identities that may approve audit DDL in prisma/bootstrap (data-model.md §8.3 rule 12). Empty until TASK-021 adds the first audit file: until then any audit DDL in the bootstrap lane fails the linter. Changes need security-analyst review (CODEOWNERS).",
-  "reviewers": []
+  "$comment": "Security-analyst identities that may approve audit DDL in prisma/bootstrap (data-model.md §8.3 rule 12): a bootstrap file whose statements touch an audit object must carry the header \"-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>\" naming one of these identities and a date not in the future. TASK-021 added the first entry (security-analyst, for 10-audit.sql and 90-audit-ddl-guard.sql); the PR's security review confirms each approval. Changes need security-analyst review (CODEOWNERS).",
+  "reviewers": ["security-analyst"]
 }

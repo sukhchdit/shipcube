@@ -1,0 +1,14 @@
+{
+  "$comment": "Audit store (ADR-0007; data-model §3.4, §4.4, §5; TASK-021). Every table is SYSTEM (no RLS, ADR-0005; PR12-SEC-08): access only through packages/audit, whose viewer repository applies the organisation scope. All eight tables and every audit_entries_YYYY_MM partition are owned by platform_audit_owner and created only in the bootstrap lane (prisma/bootstrap/10-audit.sql); Prisma never diffs them (tables.external). Partitions are not listed: C1 skips partitions and C5 requires zero privileges on them. immutable marks the append-only tables carrying the immutability triggers (catalog test C7): audit_entries (also C6, with the per-partition triggers), audit_checkpoint_heads, audit_anchors and audit_pii_vault (whose row trigger is audit_vault_guard, admitting only the M4/M5 erasure DELETE). audit_stream_heads, audit_partitions and audit_chain_verifications are mutable by design; data_subjects is insert-only plus erased_at, enforced by the grants, not a trigger.",
+  "module": "audit",
+  "tables": [
+    { "name": "audit_anchors", "class": "SYSTEM", "immutable": true },
+    { "name": "audit_chain_verifications", "class": "SYSTEM" },
+    { "name": "audit_checkpoint_heads", "class": "SYSTEM", "immutable": true },
+    { "name": "audit_entries", "class": "SYSTEM", "immutable": true },
+    { "name": "audit_partitions", "class": "SYSTEM" },
+    { "name": "audit_pii_vault", "class": "SYSTEM", "immutable": true },
+    { "name": "audit_stream_heads", "class": "SYSTEM" },
+    { "name": "data_subjects", "class": "SYSTEM" }
+  ]
+}

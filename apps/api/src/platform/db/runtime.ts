@@ -27,8 +27,11 @@
  */
 import type { Config, Service } from '@platform/config';
 
+import { createAuditChainCheck } from '../health/checks/audit-chain.js';
+import { createAuditPartitionsCheck, isPartitionsUnavailable } from '../health/checks/audit-partitions.js';
+import type { CatalogReader } from '../health/checks/catalog-reader.js';
 import type { RuntimeLog } from '../runtime/log.js';
-import type { ReadinessCheck } from '../runtime/readiness.js';
+import { READINESS_CHECK_TIMEOUT_MS, type ReadinessCheck } from '../runtime/readiness.js';
 import type { Closeable } from '../runtime/shutdown.js';
 import { createDatabaseAdapter, createDatabasePool, type DatabaseClientOptions, type PrismaClientConstructor } from './client.js';
 import { dedicatedConnector } from './dedicated-connection.js';
@@ -136,6 +139,25 @@ export async function runStartupIntegrityCheck(integrity: Pick<SessionIntegrityG
 }
 
 /**
+ * The start-up `audit_partitions` check (data-model §5.3 amendment item 3: at start-up and on the slow interval). Logs
+ * and resolves; never rejects. Squats were already reported as security events by the check itself.
+ */
+export async function runStartupAuditPartitionsCheck(check: ReadinessCheck, log: RuntimeLog): Promise<boolean> {
+  try {
+    const outcome = await check.check(AbortSignal.timeout(READINESS_CHECK_TIMEOUT_MS));
+    if (outcome === 'degraded') log.warn('audit.partitions_late', { component: 'audit_partitions' });
+    else log.info('audit.partitions_ok', { component: 'audit_partitions' });
+    return true;
+  } catch (error) {
+    const fields = isPartitionsUnavailable(error)
+      ? { component: 'audit_partitions', missing: error.evaluation.missing.length, squatted: error.evaluation.squatted.length }
+      : { component: 'audit_partitions', error: errorClass(error) };
+    log.warn('audit.partitions_not_ready', fields);
+    return false;
+  }
+}
+
+/**
  * The client shape the runtime needs: a Prisma client over the shared pool that can be disconnected and extended per
  * transaction with the standard-columns extension (TASK-032).
  */
@@ -153,9 +175,17 @@ export interface DatabaseRuntimeInput<TTx extends RawQueryClient, TClient extend
   readonly integrityIntervalMs?: number;
 }
 
+/** The audit components of `HealthReady`, read from the catalogue through the runtime pool (TASK-021). */
+export interface AuditReadinessChecks {
+  readonly partitions: ReadinessCheck;
+  readonly chain: ReadinessCheck;
+}
+
 export interface DatabaseRuntime<TTx> {
   /** The `database` component of `HealthReady`. */
   readonly readinessCheck: ReadinessCheck;
+  /** The `audit_partitions` and `audit_chain` components (TASK-021; replace the TASK-006 stubs). */
+  readonly auditChecks: AuditReadinessChecks;
   /** The tenant-transaction runner; `undefined` until the generated client is supplied. */
   readonly tenantTx: TenantTxRunner<TTx> | undefined;
   /**
@@ -237,13 +267,32 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
     return freshProbeInflight;
   };
 
+  // The audit checks read the catalogue as platform_app; a squat is a security event (data-model §5.3 item 3) at level
+  // error, a fail-closed signal that must alert (D-ORCH-025 (1); code review PR #24 R1-m2). Fields follow the api/README
+  // §13 runtime-events allow-list (partition_name, kind, reason; never an owner).
+  const catalog: CatalogReader = { query: (text) => pool.query(text) };
+  const auditChecks: AuditReadinessChecks = {
+    partitions: createAuditPartitionsCheck(catalog, {
+      onSquatted: (object) =>
+        log.error('security.audit_partition_squatted', {
+          component: 'audit_partitions',
+          partition_name: object.name,
+          kind: object.kind,
+          reason: object.reason,
+        }),
+    }),
+    chain: createAuditChainCheck(catalog),
+  };
+
   let monitor: IntegrityMonitor | undefined;
   return {
     readinessCheck: gatedDatabaseCheck(createDatabaseCheck(pool, integrity), { latch, freshProbe }),
+    auditChecks,
     tenantTx,
     startup: async () => {
       await freshProbe();
       await runStartupIntegrityCheck(integrity, log);
+      await runStartupAuditPartitionsCheck(auditChecks.partitions, log);
       monitor ??= startIntegrityMonitor(integrity);
     },
     resources: [

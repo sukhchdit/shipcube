@@ -20,6 +20,7 @@ import {
   createNotReadyLatch,
   DatabaseNotReadyError,
   gatedDatabaseCheck,
+  runStartupAuditPartitionsCheck,
   runStartupIntegrityCheck,
 } from './runtime.js';
 import { type TenantContext, TenantTxConfigError } from './with-tenant-tx.js';
@@ -165,7 +166,16 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
     expect(runtime.tenantTx).toBeUndefined();
     expect(runtime.sessionContextLeaks()).toBe(0);
     expect(runtime.resources.map((resource) => resource.name)).toEqual(['session-integrity-monitor', 'database']);
-    expect(Object.keys(runtime).sort()).toEqual(['readinessCheck', 'resources', 'sessionContextLeaks', 'startup', 'tenantTx']);
+    expect(Object.keys(runtime).sort()).toEqual([
+      'auditChecks',
+      'readinessCheck',
+      'resources',
+      'sessionContextLeaks',
+      'startup',
+      'tenantTx',
+    ]);
+    expect(runtime.auditChecks.partitions).toMatchObject({ name: 'audit_partitions', critical: true });
+    expect(runtime.auditChecks.chain).toMatchObject({ name: 'audit_chain', critical: false });
     for (const resource of runtime.resources) await resource.close();
   });
 
@@ -274,5 +284,41 @@ describe('standard-columns wiring through the composition function (PR26-SEC-02;
       { where: { id: 'x' }, data: { reference: 'r', updatedBy: actorId, updatedAt: expect.any(Date), version: { increment: 1 } } },
     ]);
     for (const resource of runtime.resources) await resource.close();
+  });
+});
+
+describe('start-up audit_partitions check (data-model §5.3 amendment item 3; TASK-021)', () => {
+  const check = (outcome: () => Promise<'degraded' | undefined>): ReadinessCheck => ({
+    name: 'audit_partitions',
+    critical: true,
+    check: outcome,
+  });
+
+  it('logs ok, late (degraded) and not-ready outcomes and never rejects', async () => {
+    const { lines, log } = capture();
+    await expect(
+      runStartupAuditPartitionsCheck(
+        check(() => Promise.resolve(undefined)),
+        log,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      runStartupAuditPartitionsCheck(
+        check(() => Promise.resolve('degraded')),
+        log,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      runStartupAuditPartitionsCheck(
+        check(() => rejectWith(new Error('connect ECONNREFUSED db.internal'))),
+        log,
+      ),
+    ).resolves.toBe(false);
+    expect(lines.map((line) => [line['level'], line['event']])).toEqual([
+      ['info', 'audit.partitions_ok'],
+      ['warn', 'audit.partitions_late'],
+      ['warn', 'audit.partitions_not_ready'],
+    ]);
+    expect(JSON.stringify(lines)).not.toMatch(/ECONNREFUSED|internal/);
   });
 });

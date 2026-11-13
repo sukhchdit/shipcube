@@ -1,6 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { TableClassManifestError, loadTableClasses, mergeManifests, parseManifest, rlsAllowList } from './table-classes.js';
+import {
+  TableClassManifestError,
+  immutableTables,
+  loadTableClasses,
+  mergeManifests,
+  parseManifest,
+  rlsAllowList,
+} from './table-classes.js';
 
 const manifest = (module: string, tables: unknown): string => JSON.stringify({ module, tables });
 
@@ -39,6 +46,19 @@ describe('table-class manifests', () => {
       manifest('x', [{ name: 't', class: 'USER_OWNED', definerPurge: true }]),
       /requires "definerRead"/,
     ],
+    ['a non-boolean immutable flag', 'x.json', manifest('x', [{ name: 't', class: 'SYSTEM', immutable: 1 }]), /must be a boolean/],
+    [
+      'immutable together with hardDelete',
+      'x.json',
+      manifest('x', [{ name: 't', class: 'SYSTEM', hardDelete: true, immutable: true }]),
+      /cannot be on a delete allow-list/,
+    ],
+    [
+      'immutable together with definerPurge',
+      'x.json',
+      manifest('x', [{ name: 't', class: 'USER_OWNED', definerRead: true, definerPurge: true, immutable: true }]),
+      /cannot be on a delete allow-list/,
+    ],
   ])('rejects %s', (_label, file, text, message) => {
     expect(() => parseManifest(file, text)).toThrow(TableClassManifestError);
     expect(() => parseManifest(file, text)).toThrow(message);
@@ -60,5 +80,34 @@ describe('table-class manifests', () => {
     expect(
       entries.filter((entry) => allow.includes(entry.name)).every((entry) => entry.class === 'GLOBAL' || entry.class === 'SYSTEM'),
     ).toBe(true);
+  });
+
+  it('[C7] keeps the immutable flag and derives the immutability list; the audit module flags its append-only tables', () => {
+    const entries = parseManifest(
+      'x.json',
+      manifest('x', [
+        { name: 't', class: 'SYSTEM', immutable: true },
+        { name: 'u', class: 'SYSTEM' },
+      ]),
+    );
+    expect(entries[0]).toEqual({ module: 'x', name: 't', class: 'SYSTEM', immutable: true });
+    expect(immutableTables(entries)).toEqual(['t']);
+    const committed = loadTableClasses();
+    expect(immutableTables(committed)).toEqual(
+      expect.arrayContaining(['audit_anchors', 'audit_checkpoint_heads', 'audit_entries', 'audit_pii_vault']),
+    );
+    const audit = committed.filter((entry) => entry.module === 'audit');
+    expect(audit.map((entry) => entry.name)).toEqual([
+      'audit_anchors',
+      'audit_chain_verifications',
+      'audit_checkpoint_heads',
+      'audit_entries',
+      'audit_partitions',
+      'audit_pii_vault',
+      'audit_stream_heads',
+      'data_subjects',
+    ]);
+    expect(audit.every((entry) => entry.class === 'SYSTEM')).toBe(true);
+    expect(rlsAllowList(committed)).toEqual(expect.arrayContaining(audit.map((entry) => entry.name)));
   });
 });

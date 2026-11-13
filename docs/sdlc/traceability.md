@@ -140,10 +140,10 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-AUDIT-011 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (actor types, sources from `X-Client-App`) | TASK-025 | – | Planned |
 | REQ-AUDIT-012 | M0 | Must | US-092 | packages/audit · ADR-0007 §Hash chain (per-stream SHA-256, advisory lock, sharded SYSTEM); data-model §5.4 | TASK-030 | – | Planned |
 | REQ-AUDIT-013 | M0 | Must | US-093 | audit (worker) · ADR-0007 §Hash chain verification + am. 7 (hourly ECDSA anchors); data-model §5.5/§5.6 | TASK-116 | – | Planned |
-| REQ-AUDIT-014 | M0 | Must | US-094 | prisma/ (bootstrap lane) · ADR-0007 §Storage immutability + am. 7–8 (`platform_audit_owner`, `search_path` hardening); data-model §4.4/§5.2 | TASK-021, TASK-033 | – | Planned |
-| REQ-AUDIT-015 | M0 | Must | US-094 | prisma/ + tests · ADR-0007 §Storage (UPDATE/DELETE/TRUNCATE per role); data-model §4.6 C13/C14; SEC-TC-43/61 | TASK-021, TASK-033 | – | Planned |
-| REQ-AUDIT-016 | M0 | Must | US-095 | prisma/ · ADR-0007 §Storage (monthly range partitions, prune test); data-model §5.1 | TASK-021, TASK-090 | – | Planned |
-| REQ-AUDIT-017 | M0 | Must | US-095 | audit (worker) · ADR-0007 §Storage (`ensure_audit_partitions`, daily `audit-maintenance`); data-model §5.3 | TASK-021, TASK-090 | – | Planned |
+| REQ-AUDIT-014 | M0 | Must | US-094 | prisma/ (bootstrap lane) · ADR-0007 §Storage immutability + am. 7–8 (`platform_audit_owner`, `search_path` hardening); data-model §4.4/§5.2 | TASK-021, TASK-033 | – | In progress (merged: TASK-021) |
+| REQ-AUDIT-015 | M0 | Must | US-094 | prisma/ + tests · ADR-0007 §Storage (UPDATE/DELETE/TRUNCATE per role); data-model §4.6 C13/C14; SEC-TC-43/61 | TASK-021, TASK-033 | – | In progress (merged: TASK-021) |
+| REQ-AUDIT-016 | M0 | Must | US-095 | prisma/ · ADR-0007 §Storage (monthly range partitions, prune test); data-model §5.1 | TASK-021, TASK-090 | – | In progress (merged: TASK-021) |
+| REQ-AUDIT-017 | M0 | Must | US-095 | audit (worker) · ADR-0007 §Storage (`ensure_audit_partitions`, daily `audit-maintenance`); data-model §5.3 | TASK-021, TASK-090 | – | In progress (merged: TASK-021) |
 | REQ-AUDIT-018 | M1 | Could | US-100 | audit · ADR-0007 §Archive seam (`AuditArchiver`, `archived_at`, manifest) | TASK-222 | – | Planned |
 | REQ-AUDIT-019 | M0 | Must | US-097 | audit module + apps/admin · ADR-0007 §Viewer (keyset list, filters, ≤ 31 d range); ADR-0026 §1 | TASK-073, TASK-081 | – | Planned |
 | REQ-AUDIT-020 | M0 | Must | US-098 | audit module + apps/admin · ADR-0007 §Viewer (detail: diff, hashes, vault tokens) | TASK-073, TASK-081 | – | Planned |
