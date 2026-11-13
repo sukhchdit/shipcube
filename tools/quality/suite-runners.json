@@ -1,0 +1,15 @@
+{
+  "$comment": "Lane B suite runners (TASK-011; devops-owned; security-critical path tools/quality/**). Maps manifest suite ids (tools/quality/required-suites.json, qa-lead) to how quality:heavy runs them. kind jest: one Jest run per suite (paths are Jest path patterns, placed before --selectProjects; integration/api run in band with a raised --testTimeout). kind command: cmd array without a shell; placeholders {node}, {npm}, {root}, {junit}, {native}; converter junit|k6|lighthouse|zap|trivy|gitleaks|stryker; native_report = allow-listed file name. A suite that becomes active in the manifest without an entry here is reported as an error (FAIL). testcontainers_images: the harness images whose digests summary.json records (prisma/tests/harness/postgres.ts, apps/api/src/platform/health/health.int.test.ts).",
+  "version": 1,
+  "testcontainers_images": [
+    "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+    "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+  ],
+  "suites": {
+    "unit": { "kind": "jest", "project": "unit", "coverage": true },
+    "integration": { "kind": "jest", "project": "integration" },
+    "api": { "kind": "jest", "project": "api" },
+    "catalog-c1-c14": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/catalog/"] },
+    "migrations": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/migrations/"] }
+  }
+}
