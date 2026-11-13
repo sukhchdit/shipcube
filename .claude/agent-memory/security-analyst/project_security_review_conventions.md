@@ -40,6 +40,11 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
     - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/MadelineMendoza/AppData/...`), never `MADELI~1`. An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
     - A junctioned root dir has the same problem. Copy the root instead.
     - `unrs-resolver` strips `?query` suffixes, so the resolved arm catches `x?worker`/`x?raw`.
+- **Probing a git-object-reading verifier (PR-0023).** Build scenario commits with plumbing in a scratch repo and never check them out:
+  - a temporary `GIT_INDEX_FILE`, `read-tree <parent>`, `update-index -z --index-info` (mode `0` deletes), `write-tree`, `commit-tree`;
+  - `-c core.protectNTFS=false` lets the Windows host commit LF/CR/colon path names;
+  - the work tree stays at the base, so `git status` stays clean.
+  Run the PR's script from outside the repo with `--manifest`, which simulates the base copy. Copy `node_modules` packages instead of using junctions when the probe swaps them. Script: `scratchpad/review/PR-23-sec/scripts/probe.mjs` (session-scoped).
 - **Probing a PR head without touching its worktree** (PR-0005 R2):
   - `git show <sha>:<file>` the `.ts` sources into scratch.
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.

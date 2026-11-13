@@ -183,6 +183,30 @@ jobs:
           set -e
           node "$GATE_CHECK_AUDIT" --root "$GITHUB_WORKSPACE" --npm-audit "$RUNNER_TEMP/npm-audit.json" --osv "$RUNNER_TEMP/osv.json" --summary "$GITHUB_STEP_SUMMARY"
 
+      # TEST-STRATEGY section 9.2, ADR-0023 am. B/G (SEC-P3-07, SEC-P3-31, SEC-TC-48): the verifier, its lib, schema and
+      # the required-suite manifest come from the base ref; evidence is read from the head commit's git objects. It runs
+      # before any head code except the locked Ajv in node_modules (PR23-SEC-03). Unconditional: docs/03-architecture/api/**
+      # and the other tooling inputs are docs paths that still select lane B suites. On a push to main the verifier
+      # skips itself (--event push, like the security-owned-paths check): the pushed range is a squash commit whose
+      # evidence SHAs are branch commits (PR #23 R1-m3).
+      - name: Lane B evidence (quality:check-evidence)
+        run: |
+          set -euo pipefail
+          quality="$RUNNER_TEMP/quality"
+          mkdir -p "$quality/base" "$quality/head"
+          if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then
+            echo "### Lane B evidence (quality:check-evidence): not run, the range has no base commit" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then
+            git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"
+            node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"
+          else
+            git archive "$RANGE_HEAD" tools/quality | tar -x -C "$quality/head"
+            echo "Lane B evidence: \`tools/quality/check-evidence.mjs\` is not on the base ref yet (bootstrap); the head commit's copy runs in report-only mode." >> "$GITHUB_STEP_SUMMARY"
+            node "$quality/head/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY" --report-only
+          fi
+
       - name: Prisma engine cache key
         if: env.CODE == 'true'
         id: engines

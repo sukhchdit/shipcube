@@ -370,6 +370,7 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
         '.node-version',
         'tools/test-support/',
         'tools/test-dom/',
+        'tools/quality/',
         '.swcrc',
         '**/.swcrc',
         'CLAUDE.md',
@@ -384,6 +385,39 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
     expect(text).toMatch(/^\/\.swcrc\s+@\S+$/mu);
     expect(text).toMatch(/^\*\*\/\.swcrc\s+@\S+$/mu);
     expect(checkCodeowners(text.replace(/^\*\*\/\.swcrc .*$/mu, '')).map((f) => f.message)).toEqual([expect.stringContaining('**/.swcrc')]);
+  });
+});
+
+describe('CODEOWNERS: tools/quality (PR #23 R1-M1, PR23-SEC-01)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const qualityLine = /^\/tools\/quality\/\s+@\S+$/mu;
+
+  it('the repository CODEOWNERS owns tools/quality and the path is required', () => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain('tools/quality/');
+    expect(repositoryText()).toMatch(qualityLine);
+  });
+
+  it('mutation: deleting the tools/quality line yields a codeowners finding for it', () => {
+    const mutated = repositoryText().replace(qualityLine, '');
+    expect(mutated).not.toMatch(qualityLine);
+    const findings = checkCodeowners(mutated);
+    expect(findings.map((f) => f.rule)).toEqual([expect.stringMatching(/^codeowners-/u)]);
+    expect(findings.map((f) => f.message)).toEqual([expect.stringContaining('tools/quality/')]);
+  });
+
+  it('mutation: leaving the tools/quality line ownerless or commenting it out yields the same finding', () => {
+    for (const replacement of ['/tools/quality/', '# /tools/quality/ @sukhchdit']) {
+      const findings = checkCodeowners(repositoryText().replace(qualityLine, replacement));
+      expect(findings.map((f) => f.message)).toEqual([expect.stringContaining('tools/quality/')]);
+    }
+  });
+
+  it('a parent-folder pattern for tools/ would cover it, a sibling folder would not', () => {
+    const without = repositoryText().replace(qualityLine, '');
+    expect(checkCodeowners(`${without}\n/tools/ @sukhchdit\n`)).toEqual([]);
+    expect(checkCodeowners(`${without}\n/tools/qualitys/ @sukhchdit\n`).map((f) => f.message)).toEqual([
+      expect.stringContaining('tools/quality/'),
+    ]);
   });
 });
 

@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/tools/quality/summary.schema.json",
+  "title": "Lane B heavy-run summary (summary.json)",
+  "description": "Written by tools/quality/heavy.mjs into docs/05-quality/{tests,security,performance}/runs/<stamp>_<sha7>/summary.json and verified by tools/quality/check-evidence.mjs from the base ref (ADR-0023 amendments B, G, I item 4; TEST-STRATEGY section 9; D-ARCH-010, D-ARCH-021; R-ARCH-16, R-ARCH-21; SEC-P3-07). The declared verdict is informational: check-evidence recomputes it from the attached reports.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "lane",
+    "profile",
+    "git_sha",
+    "git_dirty",
+    "build_clean",
+    "stamp",
+    "generated_at",
+    "host",
+    "lockfile_sha256",
+    "manifest_sha256",
+    "testcontainers_images",
+    "env_overrides",
+    "suites",
+    "attachments",
+    "verdict",
+    "invalid_reasons"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "lane": { "const": "B" },
+    "profile": { "enum": ["pr", "wave", "gate"] },
+    "git_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "Commit the suites ran against (HEAD at run start)." },
+    "git_dirty": {
+      "type": "boolean",
+      "description": "true when git status --porcelain --untracked-files=all reported any entry over the manifest rules.clean_tree_paths at run start or end; true yields verdict INVALID."
+    },
+    "build_clean": {
+      "type": "boolean",
+      "description": "R-ARCH-21 / ADR-0023 am. I item 4: git status --porcelain was empty after npm run build; false yields INVALID."
+    },
+    "stamp": {
+      "type": "string",
+      "pattern": "^[0-9]{8}T[0-9]{4}Z$",
+      "description": "UTC YYYYMMDDTHHMMZ; the run directory is <stamp>_<sha7>."
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "cpu_model", "cores", "ram_gb", "docker_version", "node_version", "npm_version"],
+      "properties": {
+        "os": { "type": "string", "maxLength": 120 },
+        "cpu_model": { "type": "string", "maxLength": 120 },
+        "cores": { "type": "integer", "minimum": 1 },
+        "ram_gb": { "type": "number", "minimum": 0 },
+        "docker_version": { "type": ["string", "null"], "maxLength": 60 },
+        "node_version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "npm_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "lockfile_sha256": { "$ref": "#/$defs/sha256" },
+    "manifest_sha256": { "$ref": "#/$defs/sha256", "description": "SHA-256 of tools/quality/required-suites.json as used by the run." },
+    "testcontainers_images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["image", "digest"],
+        "properties": {
+          "image": { "type": "string", "maxLength": 200 },
+          "digest": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "env_overrides": {
+      "type": "array",
+      "description": "NAMES (never values) of environment variables matching the manifest rules.recorded_env_prefixes (SKIP_*, TEST_*). Any rules.invalid_env_prefixes name yields INVALID.",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+      "uniqueItems": true
+    },
+    "suites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "tests", "failures", "errors", "skipped", "duration_s", "report", "report_sha256"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Suite ID of the manifest." },
+          "status": { "enum": ["passed", "failed", "error", "not_run"] },
+          "tests": { "type": "integer", "minimum": 0 },
+          "failures": { "type": "integer", "minimum": 0 },
+          "errors": { "type": "integer", "minimum": 0 },
+          "skipped": { "type": "integer", "minimum": 0 },
+          "duration_s": { "type": "number", "minimum": 0 },
+          "report": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*\\.junit\\.xml$",
+            "description": "File name inside the run directory: <suite>.junit.xml."
+          },
+          "report_sha256": { "$ref": "#/$defs/sha256" },
+          "native_report": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.json$",
+            "description": "Non-Jest tools keep their native JSON (k6, Lighthouse, ZAP, Trivy, Gitleaks, Stryker) next to the converted JUnit."
+          },
+          "native_report_sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "attachments": {
+      "type": "array",
+      "description": "Every other file of the run directory except summary.json and summary.md (coverage-summary.json, compose-up.json, ...), with its SHA-256.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "sha256"],
+        "properties": {
+          "file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "branch"],
+      "properties": {
+        "line": { "type": "number", "minimum": 0, "maximum": 100 },
+        "branch": { "type": "number", "minimum": 0, "maximum": 100 },
+        "per_package": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["line", "branch"],
+            "properties": { "line": { "type": "number" }, "branch": { "type": "number" } }
+          }
+        }
+      }
+    },
+    "jest_args": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 200 },
+      "description": "Extra Jest arguments heavy.mjs passed (e.g. -i, --testTimeout); recorded so a reviewer sees the run conditions."
+    },
+    "verdict": { "enum": ["PASS", "FAIL", "INVALID"] },
+    "invalid_reasons": { "type": "array", "items": { "type": "string", "maxLength": 300 } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

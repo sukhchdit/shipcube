@@ -175,3 +175,13 @@ Round 2 of a spike PR (PR #6 r2):
 - Probe it on PGlite (see [[scratch-copy-technique]]).
 
 **Contract-pipeline unions.** The api tests may keep their own copy of an app constant (contract-validation's CRITICAL list). A PR that changes the constant in the app passes on its own base and breaks on the merge. Always run the api project on `git merge-tree` output.
+
+**Gate-tooling PRs that add a folder (PR #23, 2026-11-13).**
+- A new tool folder that a base-ref CI step depends on must be CODEOWNED. Prove it with `node tools/ci/check-security-owned-paths.mjs --root . --base origin/main --head HEAD --pr <n> --json` and read `owned`: PR text, manifest `security_critical_paths` and docs all said "security-owned" while the list had no such paths. Same class as PR #4 R3-M1.
+- Tripwire tests that `toContain` a command prefix miss an appended flag. Mutate the base-ref line with `--report-only` (the checker then always exits 0) and run `ci-policy.test -t "<name>"` plus `check-workflow-policy.mjs`.
+- "A JUnit for a planned suite fails the check" can be implemented as "the run is rejected": the check still passes when nothing is required. Probe the all-planned manifest with a run holding those JUnits.
+- A verifier that lazily loads a dependency (Ajv only when runs exist) is untested by CI. Probe the real CI shape: script copied outside the workspace with no node_modules above it, `--root` a repo with a `node_modules` junction.
+- Squash merge + "git_sha is an ancestor of head": fine on pull_request, red on a push-to-main range. Check whether the step has an event switch like check-security-owned-paths.
+- Evidence windows ordered by an attacker-controlled stamp can only deny, not forge; confirm that runs touched by the range are always evaluated.
+
+**Tripwire-on-a-security-flag pattern (PR #23 r2, good):** `swap(run, from, to)` mutations + a findings function, asserted `changed: true, findings: true` for every variant (appended, prepended, valued, in comment, dropped, doubled, `|| true`). Ask for this shape whenever a PR pins a flag that disables a gate (`--report-only`, `continue-on-error`). Always re-mutate the real file in an extract as well.

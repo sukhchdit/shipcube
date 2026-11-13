@@ -534,7 +534,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-047 (M0 Must) SSRF-safe outbound client and security events |
 | REQs | REQ-SEC-010, REQ-SEC-012 |
 | NFRs | NFR-RES-001, NFR-SEC-010 |
-| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074 |
+| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-010, TASK-029 |
@@ -545,7 +545,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - apps/api/src/platform/egress/outbound-http-client.ts (undici dispatcher, allow-list, DNS pinning, timeouts)
 - apps/api/src/platform/egress/egress-rules.ts (EgressRule { origin, pathPrefixes, tier }, egressAllowed(target, rules, ctx), rule-set assembly from enabled carrier accounts + Stripe)
-- packages/shared/src/security-events.ts
+- packages/shared/src/logging/security-event.ts (the catalogue landed here in PR #20 — D-SEC-PR20-01; this task EXTENDS it, never a second file)
 
 **Acceptance tests to write**
 - All US-047 scenarios
@@ -555,6 +555,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - PR6-SEC-03 item 1 / PR6-SEC-02 item 3 / PR6-SEC-07 item 2 (ADR-0010 am. 11 item 8): the client records `server.address`, the method and an adapter-supplied ROUTE TEMPLATE (`DELETE /mydhlapi/test/pickups/{id}`) in logs and spans — never `url.full`, `url.path`, `url.query`, `http.url` or `http.target`; error mapping drops any `cause.message` that contains a URL; request and response bodies are never logged at any level; token-endpoint requests and responses are excluded from all body logging and raw capture (FedEx secrets travel in the form body); in-memory span exporter and log capture tests assert that a `requestorName` sentinel, an account-number sentinel and a `client_secret` sentinel never appear
 - T-83 extension (D-ARCH-074): the `OutboundHttpClient` member names (and the exported factory name) are added to the `platform/no-external-calls-in-tenant-tx` list owned by TASK-020, with a negative fixture that calls the client inside a `withTenantTx` callback; the client is never handed a `TenantDb`
 - PR2-SEC-04 (LOW; outbound-http-via-client gaps): HTTP_MODULES gains http2/node:http2 and net/tls connect/createConnection; NewExpression of the globals WebSocket and EventSource is reported; any READ of the global fetch identifier (not only calls: an alias, globalThis lookup or Reflect.apply) is reported through the existing isGlobal check; a literal dynamic import() of the HTTP modules is tracked; fixtures bad-http2.ts, bad-websocket.ts, bad-fetch-alias.ts; the .semgrep outbound-HTTP pack covers the same sink list and runs with --disable-nosem
+- PR #20 fc1 routings (D-ORCH-025 (2); D-SEC-PR20-01; D-ARCH-084): PR6-SEC-02 item 3 / PR6-SEC-03 item 1 client halves — OutboundHttpClient records the adapter ROUTE TEMPLATE taken from the EGRESS/route registry (never a free string; a test asserts {...} placeholders for parametrised routes) and drops any cause.message containing a URL (PR20-SEC-10); PR20-SEC-14 PII-class gaps on general lines — an exact IP key set (clientip, remoteip, sourceip, userip, ipaddress, xforwardedfor, forwardedfor, forwarded, xrealip, cfconnectingip, trueclientip) plus username and login in PII_EXACT_KEYS, iban/accountnumber/bankaccount/routingnumber as parts (or delegated to the carrier lists), parentKey passed through walkArray, pairMarker reusing keyMarker; PR20-SEC-15 — isSecurityEventFields refuses a Proxy (node:util types.isProxy) before the brand read, comment corrected, unit test; SEC-TC-63 compares the request-path catalogue with the api/README §13 main table and the runtime events with the §13 runtime table
 - AT-US-047-01 … AT-US-047-08: all 8 scenarios of US-047, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

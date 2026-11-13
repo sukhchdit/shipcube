@@ -16,6 +16,9 @@
 /tools/deps/                            @sukhchdit
 /tools/hooks/                           @sukhchdit
 /tools/isolated/                        @sukhchdit
+# Lane B evidence verifier, schema, required-suite manifest and suite runners (SEC-P3-31, TEST-STRATEGY 9.3; PR #23 R1-M1, PR23-SEC-01):
+# the base-ref copy of these files judges every later PR, so a change to them needs a security record.
+/tools/quality/                         @sukhchdit
 
 # Static-analysis controls (lint, Semgrep, Gitleaks)
 /eslint.config.mjs                      @sukhchdit
