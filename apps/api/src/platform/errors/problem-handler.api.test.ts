@@ -591,4 +591,36 @@ describe('[SEC-TC-29] [PR #32 m1 (b)] the problem handler decides "private" from
       .send('{"a":');
     expectProblem(res, 400, 'MALFORMED_REQUEST');
   });
+
+  it.each<[string, Record<string, string>]>([
+    ['an Authorization header', { Authorization: 'Bearer not-a-token' }],
+    ['a web refresh cookie', { Cookie: 'theme=dark; __Host-rt_web=opaque' }],
+    ['a guest quote token', { 'X-Quote-Token': 'opaque' }],
+  ])('[SEC-TC-29] [D-ARCH-109] a foreign credential (%s) on a known [anonymous] route does not make its error private', async (_l, h) => {
+    // The authn slot ran on the route and ignored the undeclared kind: the private mark alone decides.
+    expectProblem(await request(app).get('/api/v1/private').set(h), 401, 'AUTH_REQUIRED');
+    expectProblem(await request(app).get('/api/v1/boom').set(h), 500, 'INTERNAL_ERROR');
+  });
+
+  it('[SEC-TC-29] [D-ARCH-109] an error raised on a known route before the authn slot ran keeps the generic test', async () => {
+    // A step that fails before reading any credential (a replacement authenticator that throws first): no route has read
+    // the request, so any credential header makes the problem private, as before the route is known.
+    const failsFirst: RouteSlot = () => (_req, _res, next) => {
+      next(new AppError('SERVICE_UNAVAILABLE'));
+    };
+    const route = fixtureRoute({ operationId: 'probe', path: '/probe', handler: () => ({ status: 200, body: {} }) });
+    const early = createApp({
+      health: [],
+      modules: [{ name: 'probe', routes: [route] }],
+      logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+      pipeline: { ...defaultPipelineSlots({ tenantTx: undefined }), authenticate: failsFirst },
+    });
+    expectProblem(
+      await request(early).get('/api/v1/probe').set('Cookie', '__Host-rt_web=opaque'),
+      503,
+      'SERVICE_UNAVAILABLE',
+      'private, no-store',
+    );
+    expectProblem(await request(early).get('/api/v1/probe'), 503, 'SERVICE_UNAVAILABLE');
+  });
 });

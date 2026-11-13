@@ -2,7 +2,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Response } from 'express';
 
-import { ANONYMOUS, principalOf, readonlySet, setPrincipal } from './route-state.js';
+import { ANONYMOUS, credentialsReadOf, markCredentialsRead, principalOf, readonlySet, setPrincipal } from './route-state.js';
 
 const response = (): Response => ({ locals: {} }) as unknown as Response;
 
@@ -63,5 +63,21 @@ describe('[R2-n3] principalOf fails closed', () => {
     const guest = { ...ANONYMOUS, credential: 'quote-token' as const, guestTokenHash: 'a'.repeat(64) };
     setPrincipal(res, guest);
     expect(principalOf(res)).toBe(guest);
+  });
+});
+
+describe('[D-ARCH-109] the authn slot records that it read the credentials', () => {
+  it('is false on a fresh response and true once marked, only for that response', () => {
+    const res = response();
+    const other = response();
+    expect(credentialsReadOf(res)).toBe(false);
+    markCredentialsRead(res);
+    expect(credentialsReadOf(res)).toBe(true);
+    expect(credentialsReadOf(other)).toBe(false);
+  });
+
+  it('reads only the boolean true as marked (a truthy value a handler wrote is not)', () => {
+    const res = { locals: { routeCredentialsRead: 'yes' } } as unknown as Response;
+    expect(credentialsReadOf(res)).toBe(false);
   });
 });

@@ -11,7 +11,7 @@ import type { AddressInfo } from 'node:net';
 import { ERROR_CATALOGUE, type ErrorCode } from '@platform/shared';
 
 import { loadContract, type OpenApiDocument } from '../../tools/openapi/contract.js';
-import { requestCarriesCredential } from '../api/helpers/cache-control.js';
+import { credentialMakesPrivate } from '../api/helpers/cache-control.js';
 import { requestPathOf } from '../api/helpers/path-match.js';
 import { buildStubs, type ContractStub, PRIVATE_CACHE_CONTROL, resolveStub, type StubSelection, type StubVariant } from './stubs.js';
 
@@ -70,12 +70,19 @@ function problem(code: ErrorCode, path: string, correlationId: string, detail?: 
   };
 }
 
-/** Like the API's problem handler (SEC-TC-29, D-ARCH-107 (5)): no-store, and private too when the request carried a credential. */
+/**
+ * Like the API's problem handler for a problem raised before any route read the request (SEC-TC-29, D-ARCH-107 (5),
+ * D-ARCH-109): no-store, and private too when the request carried any credential (the generic test).
+ */
 function sendProblem(req: IncomingMessage, res: ServerResponse, body: Record<string, unknown>, headers: Record<string, string> = {}): void {
-  const cacheControl = requestCarriesCredential(req.headers) ? PRIVATE_CACHE_CONTROL : 'no-store';
+  const cacheControl = credentialMakesPrivate(req.headers, undefined) ? PRIVATE_CACHE_CONTROL : 'no-store';
   res.writeHead(Number(body['status']), { ...headers, 'Content-Type': PROBLEM_MEDIA_TYPE, 'Cache-Control': cacheControl });
   res.end(JSON.stringify(body));
 }
+
+/** The `code` of a problem example, if the body is one. */
+const codeOfBody = (body: unknown): unknown =>
+  typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>)['code'] : undefined;
 
 /** The example body as sent: problem examples carry this request's correlation ID and path. */
 function bodyFor(variant: StubVariant, path: string, correlationId: string): unknown {
@@ -84,10 +91,17 @@ function bodyFor(variant: StubVariant, path: string, correlationId: string): unk
   return { ...body, instance: path, correlation_id: correlationId };
 }
 
-function sendVariant(req: IncomingMessage, res: ServerResponse, variant: StubVariant, path: string, correlationId: string): void {
+function sendVariant(
+  req: IncomingMessage,
+  res: ServerResponse,
+  { stub, variant }: { readonly stub: ContractStub; readonly variant: StubVariant },
+  path: string,
+  correlationId: string,
+): void {
   const headers: Record<string, string> = { ...variant.headers };
-  // SEC-TC-29: a request that carried a credential is answered private, whatever the operation (D-ARCH-107 (5)).
-  if (requestCarriesCredential(req.headers)) headers['Cache-Control'] = PRIVATE_CACHE_CONTROL;
+  // SEC-TC-29, D-ARCH-109: a request that presented a credential of a kind the operation declares is answered private
+  // (any credential for a pre-route problem code); a foreign credential leaves the documented headers alone.
+  if (credentialMakesPrivate(req.headers, stub.auth, codeOfBody(variant.body))) headers['Cache-Control'] = PRIVATE_CACHE_CONTROL;
   const body = bodyFor(variant, path, correlationId);
   const payload =
     variant.contentType === undefined || body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
@@ -119,7 +133,7 @@ function handle(stubs: readonly ContractStub[], req: IncomingMessage, res: Serve
       sendProblem(req, res, problem('MALFORMED_REQUEST', path, correlationId, `Contract stub: ${resolution.reason}.`));
       return;
     case 'stub':
-      sendVariant(req, res, resolution.variant, path, correlationId);
+      sendVariant(req, res, resolution, path, correlationId);
   }
 }
 

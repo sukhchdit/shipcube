@@ -113,3 +113,20 @@ export function markPrivateResponse(res: Response): void {
 export function isPrivateResponse(res: Response): boolean {
   return locals(res)[PRIVATE_RESPONSE] === true;
 }
+
+const CREDENTIALS_READ = 'routeCredentialsRead';
+
+/**
+ * Records that the authn slot read this request's credentials for its route (D-ARCH-109). From then on the private
+ * mark alone decides SEC-TC-29: the slot marked the response if the route has no `anonymous` member or the request
+ * presented a credential of a declared kind, and a foreign credential must not make an error private. Every
+ * authenticator that replaces the stub (TASK-052/055/091/171/261) calls it before reading a header.
+ */
+export function markCredentialsRead(res: Response): void {
+  locals(res)[CREDENTIALS_READ] = true;
+}
+
+/** False before the route is known (404/405 fallback, body parser) and before the authn slot ran. */
+export function credentialsReadOf(res: Response): boolean {
+  return locals(res)[CREDENTIALS_READ] === true;
+}
