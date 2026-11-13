@@ -3,9 +3,14 @@
  * Coverage gate (US-006, REQ-PLAT-008; COVERAGE_TARGET in CLAUDE.md §3; TEST-STRATEGY §8; TASK-015). Reads Jest's
  * `coverage-summary.json` (the `json-summary` reporter) and checks:
  *   overall                   85 % lines / 75 % branches (the whole measured repository, `total`)
- *   packages/pricing|audit|authz  95 % lines AND 95 % branches each
- *   packages/ledger           95 % / 95 %, but vacuous while the package does not exist (the ledger lands in M4):
- *                             the gate logs that it is inactive instead of failing (AT-US-006-03)
+ *   packages/pricing|audit|authz  95 % lines AND 95 % branches each (required: the packages must exist)
+ *   D-QA-003 money paths      95 % / 95 % (TEST-STRATEGY §8, PR #33 R1-M3): `apps/api/src/modules/payments/service`,
+ *                             `packages/shared/src/money` (M1 money movement) and `apps/api/src/modules/ledger` (M4,
+ *                             ADR-0003: a module, not a package). Inactive until the path holds measured source, then
+ *                             gated (fail closed: measurable source without a summary entry is an error)
+ *   packages/ledger           95 % / 95 %, inactive while absent: the literal path of AT-US-006-03 (EPIC-01), kept so a
+ *                             package of that name could never escape the gate (D-TASK015-14)
+ * Inactive scopes are logged instead of failing (AT-US-006-03).
  * Percentages are computed from covered/total (not Jest's rounded `pct`), so 84.9 % fails an 85 % threshold.
  *
  * Fail-closed rules: a summary without `total`, or with zero measured lines, is a failure; a REQUIRED critical package
@@ -27,31 +32,58 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /**
- * @typedef {{ scope: string, lines: number, branches: number, required: boolean, note?: string }} CriticalScope
+ * @typedef {{ scope: string, lines: number, branches: number, required: boolean, roots: readonly string[], note?: string }} CriticalScope
  * @typedef {{ lines: number, branches: number }} Threshold
  */
 
-/** The single source of every coverage threshold (overall and per critical package), shared with diff-coverage.mjs. */
+/** Source roots jest.config.ts `collectCoverageFrom` measures inside a workspace package. */
+const PACKAGE_ROOTS = Object.freeze(['src', 'app']);
+/** A scope inside a source root (a module folder): the scope itself is the source root. */
+const SCOPE_ROOT = Object.freeze(['.']);
+
+/** The single source of every coverage threshold (overall and per critical scope), shared with diff-coverage.mjs. */
 export const COVERAGE_THRESHOLDS = Object.freeze({
   overall: Object.freeze({ lines: 85, branches: 75 }),
   critical: Object.freeze(
     /** @type {readonly CriticalScope[]} */ ([
-      Object.freeze({ scope: 'packages/pricing', lines: 95, branches: 95, required: true }),
-      Object.freeze({ scope: 'packages/audit', lines: 95, branches: 95, required: true }),
-      Object.freeze({ scope: 'packages/authz', lines: 95, branches: 95, required: true }),
+      Object.freeze({ scope: 'packages/pricing', lines: 95, branches: 95, required: true, roots: PACKAGE_ROOTS }),
+      Object.freeze({ scope: 'packages/audit', lines: 95, branches: 95, required: true, roots: PACKAGE_ROOTS }),
+      Object.freeze({ scope: 'packages/authz', lines: 95, branches: 95, required: true, roots: PACKAGE_ROOTS }),
+      Object.freeze({
+        scope: 'apps/api/src/modules/payments/service',
+        lines: 95,
+        branches: 95,
+        required: false,
+        roots: SCOPE_ROOT,
+        note: 'D-QA-003 money-path gate is inactive until payments service code lands (M1)',
+      }),
+      Object.freeze({
+        scope: 'packages/shared/src/money',
+        lines: 95,
+        branches: 95,
+        required: false,
+        roots: SCOPE_ROOT,
+        note: 'D-QA-003 money-path gate is inactive until shared money code lands (M1)',
+      }),
+      Object.freeze({
+        scope: 'apps/api/src/modules/ledger',
+        lines: 95,
+        branches: 95,
+        required: false,
+        roots: SCOPE_ROOT,
+        note: 'ledger gate is inactive until the ledger module lands (M4, ADR-0003)',
+      }),
       Object.freeze({
         scope: 'packages/ledger',
         lines: 95,
         branches: 95,
         required: false,
+        roots: PACKAGE_ROOTS,
         note: 'ledger gate is inactive until M4',
       }),
     ]),
   ),
 });
-
-/** Source roots jest.config.ts `collectCoverageFrom` measures inside a workspace package. */
-const SOURCE_ROOTS = ['src', 'app'];
 /** Bound on the directory walk of one package (files + directories visited). */
 const MAX_WALK_ENTRIES = 20_000;
 
@@ -99,13 +131,19 @@ export function relativeKey(key, root) {
 }
 
 /**
- * Whether a package holds a file jest.config.ts would measure: `.ts`/`.tsx` under src/ or app/, not a test, not a
- * declaration, not under tests/ or fixtures/, and not the re-exporting `src/index.ts`.
+ * Whether a scope holds a file jest.config.ts would measure: `.ts`/`.tsx` under one of its source roots (`src/` or
+ * `app/` of a package; the scope folder itself for a module path), not a test, not a declaration, not under tests/ or
+ * fixtures/, and not a package's re-exporting `src/index.ts`.
  * @param {string} root repository root
- * @param {string} scope e.g. `packages/pricing`
+ * @param {string} scope e.g. `packages/pricing`, `apps/api/src/modules/payments/service`
+ * @param {readonly string[]} [roots] the scope's source roots (default: the scope's own, else a package's src/app)
  * @returns {boolean}
  */
-export function hasMeasurableSource(root, scope) {
+export function hasMeasurableSource(
+  root,
+  scope,
+  roots = COVERAGE_THRESHOLDS.critical.find((c) => c.scope === scope)?.roots ?? PACKAGE_ROOTS,
+) {
   let budget = MAX_WALK_ENTRIES;
   /** @param {string} dir @param {string} rel @returns {boolean} */
   const walk = (dir, rel) => {
@@ -121,7 +159,7 @@ export function hasMeasurableSource(root, scope) {
     }
     return false;
   };
-  return SOURCE_ROOTS.some((sub) => {
+  return roots.some((sub) => {
     const dir = join(root, ...scope.split('/'), sub);
     return existsSync(dir) && statSync(dir).isDirectory() && walk(dir, sub);
   });

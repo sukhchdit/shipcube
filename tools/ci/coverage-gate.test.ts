@@ -37,7 +37,11 @@ function summary(
 }
 
 const ALL_AT_TARGET = { pricing: [95, 95], audit: [95, 95], authz: [95, 95] } as const satisfies Record<string, [number, number]>;
-const ALL_EXIST = { exists: (s: string) => s !== 'packages/ledger', measurable: () => true };
+const REQUIRED = new Set(['packages/pricing', 'packages/audit', 'packages/authz']);
+/** The three required packages exist with measured code; every optional scope (money paths, ledger) is absent. */
+const ALL_EXIST = { exists: (s: string) => REQUIRED.has(s), measurable: () => true };
+/** The D-QA-003 money paths and the ledger module (PR #33 R1-M3): optional scopes whose source root is the scope. */
+const MONEY_SCOPES = ['apps/api/src/modules/payments/service', 'packages/shared/src/money', 'apps/api/src/modules/ledger'] as const;
 
 /** A temp repository with the named package folders (each with one measurable file) and a summary file. */
 function repo(packages: readonly string[], body: unknown): string {
@@ -107,28 +111,73 @@ describe('coverage gate (US-006)', () => {
     const cli = runNode([script, '--root', root], { cwd: root });
     expect(cli.status).toBe(0);
     expect(cli.stdout).toContain('inactive packages/ledger does not exist: ledger gate is inactive until M4');
+    expect(cli.stdout).toContain(
+      'inactive apps/api/src/modules/ledger does not exist: ledger gate is inactive until the ledger module lands (M4, ADR-0003)',
+    );
+    for (const scope of MONEY_SCOPES) expect(cli.stdout).toContain(`inactive ${scope} does not exist`);
   });
 
   it('[AT-US-006-03] once packages/ledger has measured code it is gated at 95 %', () => {
     const body = summary('/r', [86, 76], { ...ALL_AT_TARGET, ledger: [94.9, 95] });
-    const result = evaluateCoverage(body, { root: '/r', probe: { exists: () => true, measurable: () => true } });
+    const result = evaluateCoverage(body, { root: '/r', probe: { exists: (s) => s.startsWith('packages/'), measurable: () => true } });
     expect(result.checks.filter((c) => !c.ok).map((c) => `${c.scope} ${c.metric}`)).toEqual(['packages/ledger lines']);
   });
 
-  it('[US-006] thresholds live in one constant: 85/75 overall, 95/95 for pricing, audit, authz and ledger', () => {
+  it.each(MONEY_SCOPES)(
+    '[R1-M3] [D-QA-003] [AT-US-006-03] %s: inactive while absent or without source, gated at 95/95 once it has code',
+    (scope) => {
+      const root = repo(['pricing', 'audit', 'authz'], {});
+      const body = (pcts: [number, number] | null): Record<string, Entry> => ({
+        ...summary(root, [86, 76], ALL_AT_TARGET),
+        ...(pcts === null ? {} : { [join(root, ...scope.split('/'), 'core.ts')]: entry(...pcts) }),
+      });
+      const evaluate = (pcts: [number, number] | null) => evaluateCoverage(body(pcts), { root });
+      // Absent: inactive, not failed.
+      expect(evaluate(null)).toMatchObject({
+        errors: [],
+        inactive: expect.arrayContaining([expect.stringContaining(`${scope} does not exist`)]),
+      });
+      // Present with only a placeholder, a test, a declaration and a tests/ helper: still inactive (nothing to measure).
+      mkdirSync(join(root, ...scope.split('/'), 'tests'), { recursive: true });
+      writeFileSync(join(root, ...scope.split('/'), '.gitkeep'), '');
+      writeFileSync(join(root, ...scope.split('/'), 'core.test.ts'), 'export {};\n');
+      writeFileSync(join(root, ...scope.split('/'), 'types.d.ts'), 'export {};\n');
+      writeFileSync(join(root, ...scope.split('/'), 'tests', 'helper.ts'), 'export {};\n');
+      expect(hasMeasurableSource(root, scope)).toBe(false);
+      expect(evaluate(null).inactive).toContain(`${scope} has no measured source file yet: its 95 % gate is inactive`);
+      // First source file: the scope itself is the source root, so it is measurable; without a summary entry = error.
+      writeFileSync(join(root, ...scope.split('/'), 'core.ts'), 'export const x = 1;\n');
+      expect(hasMeasurableSource(root, scope)).toBe(true);
+      expect(evaluate(null).errors).toEqual([`${scope} has measurable source files but the coverage summary has no entry for them`]);
+      // Measured: 94.9 % lines or branches fails naming the scope; 95/95 passes.
+      for (const [pcts, failing] of [
+        [[94.9, 95], [`${scope} lines`]],
+        [[95, 94.9], [`${scope} branches`]],
+        [[95, 95], []],
+      ] as const) {
+        const result = evaluate([...pcts]);
+        expect([pcts, result.errors, result.checks.filter((c) => !c.ok).map((c) => `${c.scope} ${c.metric}`)]).toEqual([pcts, [], failing]);
+      }
+    },
+  );
+
+  it('[US-006] thresholds live in one constant: 85/75 overall, 95/95 for pricing, audit, authz, the money paths and the ledger', () => {
     expect(COVERAGE_THRESHOLDS.overall).toEqual({ lines: 85, branches: 75 });
-    expect(COVERAGE_THRESHOLDS.critical.map((c) => [c.scope, c.lines, c.branches, c.required])).toEqual([
-      ['packages/pricing', 95, 95, true],
-      ['packages/audit', 95, 95, true],
-      ['packages/authz', 95, 95, true],
-      ['packages/ledger', 95, 95, false],
+    expect(COVERAGE_THRESHOLDS.critical.map((c) => [c.scope, c.lines, c.branches, c.required, [...c.roots]])).toEqual([
+      ['packages/pricing', 95, 95, true, ['src', 'app']],
+      ['packages/audit', 95, 95, true, ['src', 'app']],
+      ['packages/authz', 95, 95, true, ['src', 'app']],
+      ['apps/api/src/modules/payments/service', 95, 95, false, ['.']],
+      ['packages/shared/src/money', 95, 95, false, ['.']],
+      ['apps/api/src/modules/ledger', 95, 95, false, ['.']],
+      ['packages/ledger', 95, 95, false, ['src', 'app']],
     ]);
   });
 
   it('[US-006] fail closed: a missing required package, unmeasured sources, zero lines or no total fail', () => {
     const noAudit = evaluateCoverage(summary('/r', [86, 76], { pricing: [95, 95], authz: [95, 95] }), {
       root: '/r',
-      probe: { exists: (s) => s !== 'packages/audit' && s !== 'packages/ledger', measurable: () => true },
+      probe: { exists: (s) => s !== 'packages/audit' && REQUIRED.has(s), measurable: () => true },
     });
     expect(noAudit.errors).toEqual(['packages/audit does not exist (a required critical package)']);
     const unmeasured = evaluateCoverage(summary('/r', [86, 76], { pricing: [95, 95], authz: [95, 95] }), {

@@ -85,6 +85,19 @@ describe('diff-coverage gate', () => {
     expect(runNode([script, '--root', full, '--base', 'main'], { cwd: full }).status).toBe(0);
   });
 
+  it('[R1-M3] [D-QA-003] 90 % is below the 95 % diff threshold on the money paths and the ledger module', () => {
+    const file = 'apps/api/src/modules/payments/service/capture.ts';
+    const root = prRepo([file], (r) => lcovRecord(r, file, nine));
+    const res = runNode([script, '--root', root, '--base', 'main'], { cwd: root });
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain(`FAIL ${file} [below]`);
+    for (const path of [file, 'packages/shared/src/money/money.ts', 'apps/api/src/modules/ledger/service/post.ts'])
+      expect([path, thresholdFor(path)]).toEqual([path, { lines: 95, branches: 95 }]);
+    // Neighbours of a money path keep the overall threshold (prefix match on a whole folder).
+    for (const path of ['apps/api/src/modules/payments/controller/x.ts', 'packages/shared/src/moneyx/y.ts'])
+      expect([path, thresholdFor(path)]).toEqual([path, { lines: 85, branches: 75 }]);
+  });
+
   it('[US-006] branches on changed lines must reach 75 %; a changed in-scope file lcov does not know fails', () => {
     const branches = prRepo(['apps/api/src/b.ts'], (r) =>
       lcovRecord(r, 'apps/api/src/b.ts', all, ['3,0,0,1', '3,0,1,0', '4,1,0,1', '4,1,1,-']),

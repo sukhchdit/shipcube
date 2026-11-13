@@ -86,7 +86,7 @@ const config: Config = {
   ],
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],
   // COVERAGE_TARGET (CLAUDE.md §3), global part: 85 % line / 75 % branch, an independent tripwire. The US-006 gate
-  // proper (overall 85/75 plus 95/95 for packages/{pricing,audit,authz} and, from M4, packages/ledger) is
+  // proper (overall 85/75 plus 95/95 for packages/{pricing,audit,authz}, the D-QA-003 money paths and the ledger) is
   // tools/ci/coverage-gate.mjs over the json-summary report (D-TASK015-10): Jest path keys would error on a package
   // with no measured file yet and would subtract the matched files from `global`.
   coverageThreshold: {
