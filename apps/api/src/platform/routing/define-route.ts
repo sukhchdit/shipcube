@@ -268,11 +268,12 @@ const termsOf = (schema: object): unknown => (schema as { $_terms?: unknown }).$
 const MAX_TERM_DEPTH = 4 * MAX_SCHEMA_DEPTH;
 
 /**
- * Every schema reachable from `root` is built on a built-in definition (PR32-SEC-13, `Joi.extend`). The walk follows
- * schemas, arrays and plain objects inside `$_terms` (never class instances such as references), each object once. A
- * Joi upgrade that drops `_definition` refuses every schema here, so the change fails the tests instead of opening.
+ * Every schema reachable from `root` is built on a built-in definition (PR32-SEC-13, `Joi.extend`; exported for its unit
+ * tests, PR32-SEC-17). The walk follows schemas, arrays and plain objects inside `$_terms` (never class instances such
+ * as references), each object once. A Joi upgrade that drops `_definition` or `$_terms` refuses every schema here (PR32-SEC-17: a schema whose `$_terms` is
+ * not an object cannot be walked, so its children would go unseen), so the change fails the tests instead of opening.
  */
-function extensionProblems(root: Joi.Schema, where: string): string[] {
+export function extensionProblems(root: Joi.Schema, where: string): string[] {
   const seen = new Set<object>();
   const problems = new Set<string>();
   const visit = (value: unknown, depth: number): void => {
@@ -287,7 +288,12 @@ function extensionProblems(root: Joi.Schema, where: string): string[] {
       if (definition === undefined || definition !== BUILT_IN_DEFINITIONS.get(String(value.type))) {
         problems.add(`${where} uses the Joi extension type "${String(value.type)}" (Joi.extend types are not allow-listed)`);
       }
-      visit(termsOf(value), depth + 1);
+      const terms = termsOf(value);
+      if (typeof terms !== 'object' || terms === null) {
+        problems.add(`${where} has a Joi schema without $_terms; its children cannot be inspected (Joi internals changed)`);
+        return;
+      }
+      visit(terms, depth + 1);
     } else if (Array.isArray(value)) {
       for (const item of value as readonly unknown[]) visit(item, depth + 1);
     } else if (Object.getPrototypeOf(value) === Object.prototype) {

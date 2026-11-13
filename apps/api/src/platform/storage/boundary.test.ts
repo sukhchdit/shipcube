@@ -1,6 +1,8 @@
 /**
- * ADR-0021 §1: "no other code imports the AWS SDK for S3". This unit test IS the control (D-TASK019-02 (6); no ESLint
- * entry while TASK-020 holds the lint lock): only files under apps/api/src/platform/storage/ may import any
+ * ADR-0021 §1: "no other code imports the AWS SDK for S3". Two controls (D-TASK019-02 (6), PR #32 code review R2-n2):
+ * the ESLint no-restricted-imports entry of TASK-020 (S3_SDK_IMPORT_PATTERN in eslint.config.mjs) covers static imports
+ * and export-from; this unit test covers those and also dynamic import() and require, which that rule does not see.
+ * Only files under apps/api/src/platform/storage/ may import any
  * `@aws-sdk/*` package (client-s3, s3-request-presigner, lib-storage, s3-presigned-post, ...) or `@smithy/signature-v4`;
  * everything else goes through the `ObjectStorage` port. A future AWS adapter for another service gets its own folder
  * added to OTHER_AWS_ADAPTER_DIRS by its task, as a reviewed decision.
