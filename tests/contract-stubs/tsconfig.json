@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "//": "Contract stubs from openapi.yaml examples (TASK-017, US-034). Not a workspace. tools/openapi/contract.ts and the tests/api helpers are compiled here as listed files: both owning projects are noEmit, so a project reference would have no declarations to resolve.",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-contract-stubs.tsbuildinfo"
+  },
+  "files": [
+    "../../tools/openapi/contract.ts",
+    "../api/helpers/contract-validator.ts",
+    "../api/helpers/expect-contract.ts",
+    "../api/helpers/formats.ts",
+    "../api/helpers/path-match.ts"
+  ],
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../../packages/shared" }]
+}

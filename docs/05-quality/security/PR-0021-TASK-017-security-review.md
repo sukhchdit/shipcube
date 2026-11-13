@@ -219,3 +219,224 @@ ASVS 4.0.3 delta:
 | Field | Value |
 |---|---|
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open at head `b0ede35`, so the merge rule is met for the security dimension. The docs endpoint is config-gated (off in staging and production by default), allow-listed, and under a script-tight CSP; the served contract and the 17 replaced examples carry no secret-shaped value (emulated gitleaks: base 15 → head 0, controls caught); the owned-path changes alter no security lint rule, keep `swcrc: false`, and emit nothing new; Ajv stays out of the runtime closure. Open: PR21-SEC-01 (LOW, precomputed ETag plus limiter placement) and PR21-SEC-02..07 (INFO, routed). PR10-SEC-08 is closed on the contract side; the allowlist removal in §5.1 is devops-engineer's. **This round authorises `b0ede35` for merge** once this record is committed on top of it as a docs-only commit and lane A is green on that commit, without a further merge of `main` (§7) |
+
+## Round 2 (head b31483b)
+
+| Field | Value |
+|---|---|
+| PR | #21, branch `feat/TASK-017-contract-first-openapi-pipeline-redocly`. Delta since round 1 (`b0ede35`), first-parent: `bf3d1f7` (merge of `origin/main` `d38500a`, bringing PR #19 `51178d4`, PR #4 `f38e6b9` and docs), then fix cycle 1: `97a21c8`, `58aa986`, `b1e2bb1`, `b31483b`. The merge base with `main` is `d38500a`. `git ls-remote origin` shows `b31483b` as both the branch head and `refs/pull/21/head` |
+| Head | b31483b989827aeef29a97c17d5c0840f2b6163b |
+| Round-1 record | Voided by checker rule (d), as lane A reports: the record "names b0ede35, but eslint.config.mjs, jest.config.ts, package.json, tools/lint/lint-fixtures.mjs, tools/lint/negative-fixtures.test.ts changed after it" |
+| Lane A evidence | Run [43351989787](https://github.com/sukhchdit/shipcube/actions/runs/43351989787) on `b31483b` (`pull_request`, base `d38500a`). **fast-lane `success`**, every step (commitlint, lint, type-check, unit, base-ref negative fixtures, build). **scans:** Gitleaks and Semgrep `success`. Only "Security-owned paths need a review record" failed, listing the 8 owned paths below; `ci-gate` failed as a consequence. The `*.api.test.ts` suites and the integration suite are not lane A suites (D-ORCH-001). For those I rely on the developer's local gate table in the fix-cycle comment (`test:api` 5 suites / 80 passed, `test:integration` 18 suites, coverage 97.70 % lines); I did not re-run them |
+| Owned paths changed | 8, per lane A: `eslint.config.mjs`, `jest.config.ts`, `package.json`, `tsconfig.json`, `tests/api/tsconfig.json`, `tests/contract-stubs/tsconfig.json`, `tools/lint/lint-fixtures.mjs`, `tools/lint/negative-fixtures.test.ts` |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. Every git command ran in the main checkout against commit SHAs; no command of any kind ran in the PR worktree. Probes ran in scratch on `git archive` extracts, with junctions to the main checkout's `node_modules` (this PR does not change the lockfile), and were removed afterwards. No install, Docker, real gitleaks or suite run. One `$ref` probe variant (R2.2) made a single outbound HTTPS GET to the reserved documentation host `example.com` through json-schema-ref-parser's own HTTP client; it sent nothing but the request line |
+
+### R2.1 Summary
+
+**Fix cycle 1 closes the open items.** It closes PR21-SEC-01 (LOW), PR21-SEC-02, PR21-SEC-04 and PR21-SEC-05, and the code parts of PR21-SEC-06 and PR21-SEC-07.
+
+**The merge of `main` is a clean union.** Every path the merge touched has one of three contents:
+- the reviewed `b0ede35` blob;
+- `git merge-tree`'s clean auto-merge;
+- the conflict resolved as the union of both sides.
+
+**The owned-path changes against today's `main` are additive.** The 6 changed owned files that exist on `main` have 0 deleted lines; the other 2 are new `noEmit` tsconfigs. The effective ESLint config differs only on the three expected path classes.
+
+**Two new INFO findings:**
+- PR21-SEC-08: the `$ref` regression tests do not hold the property they name;
+- PR21-SEC-09: the narrowed `no-relative-packages` ignore is prefix-only.
+
+Nothing is Critical, High or Medium, and no LOW finding of this PR stays open.
+
+**Fix cycle 2 is in scope.** `e046ea2`, pushed during this round, is the D-ORCH-024 light cycle 2. It changes only the drift walker (unowned) and an `app.ts` comment. It closes code review R2-m1: a walker probe shows all five escaping mount shapes reported (R2.8). This record names `b31483b`, the last commit that changes an owned path, and the checker accepts it on top of `e046ea2` (R2.9 case G).
+
+### R2.2 Method
+
+| Area | How |
+|---|---|
+| Delta | `git diff bf3d1f7 b31483b` (the fix cycle, 25 files) and `git diff d38500a b31483b` (the net change, 46 files). `types.gen.ts`, `openapi.yaml`, `redocly.yaml`, `tools/openapi/lint.mjs` and `packages/shared/src/index.ts` are blob-equal to round 1 |
+| Merge `bf3d1f7` | Three-way check. The paths of `diff d38500a bf3d1f7` equal the paths of `diff 80ff2c2 b0ede35` (43 = 43). Each blob compared with `b0ede35` and with `git merge-tree --write-tree b0ede35 d38500a`, which conflicts in `eslint.config.mjs` and `package.json` (R2.3) |
+| Docs router and pipeline order | The head's `apps/api/src`, `packages/shared/src`, `packages/config/src` and `openapi.yaml` from `git archive b31483b`, run with plain Node 24 through a resolve/load hook (type stripping in transform mode; `@platform/*` mapped to the extracted sources). The real `createApp`, with the real health router and the docs options from `docsOptionsFrom` for each `APP_ENV`, served by `node:http`. Raw-socket requests. Express's ETag function was replaced with a counting function (`app.set('etag fn', …)`), with a positive control on `/health/live`. 77 of 77 checks passed |
+| `$ref` handling | Scratch documents with an external `$ref` under a plain key, a double-quoted key and a single-quoted key, over `http` and `https`, against local counting servers. Each ran through the contract test's own regex, `SwaggerParser.dereference` with and without `DEREFERENCE_OPTIONS`, and `openapi-typescript` 7.13.0 called as `tools/openapi/types.ts` calls it. A variant with a never-resolving `.invalid` host shows which assertion tells the option's presence apart (PR21-SEC-08) |
+| ESLint | Effective config of `d38500a` against `b31483b`: `calculateConfigForFile` / `isPathIgnored` on 21 probe paths, rule by rule. `lintText` probes of `tests/api/*.api.test.ts` imports against the head config, with the import targets present on disk |
+| Gitleaks | The round-1 emulator (v8.30.1 default rules, 221 compiled) over every added line of `bf3d1f7..b31483b` plus the four commit messages: 0 findings. The round-1 control file: 5 findings. The emulator also ran over this round's text before hand-off: 0 findings |
+| Overlap | `comm -12` of each open PR's net paths (against its own merge base) with this PR's net paths: #20, #22, #23, #15 (R2.7) |
+| Probe artefact | On this Windows host, a `node:http` response of 1.5 MB or more is truncated when it is written asynchronously and the request carried `Connection: close`. A plain `node:http` server using `setImmediate` reproduces this without any PR code, so it is not a finding. The probe checks read status and headers only; the one length check needs only more than 100 kB |
+
+### R2.3 The merge commit `bf3d1f7`
+
+**Paths.** `bf3d1f7` changes exactly the 43 paths against `d38500a` that `b0ede35` changed against its base `80ff2c2`.
+
+**Blobs.**
+- 39 of the 43 equal `b0ede35`'s.
+- `jest.config.ts` and `tools/repo/root-scripts.test.ts` equal `git merge-tree`'s clean auto-merge.
+- `eslint.config.mjs` and `package.json` differ from the merge-tree's conflict-marked blobs only by the resolution:
+  - `eslint.config.mjs` keeps both sides' new `files:` blocks: this PR's drift-test and API-test allowances, and `main`'s `routes.ts` allowance.
+  - `package.json` keeps both `openapi:*` scripts and `main`'s `lint` line (typegen first, no `--allow-empty-input`). The PR's side of `lint` was the unchanged base line, so this is the correct resolution.
+
+**Net effect against `main`.**
+
+| File | Change |
+|---|---|
+| `package.json` | Adds exactly the two `openapi:*` scripts |
+| `eslint.config.mjs` | +26/−0 |
+| `jest.config.ts` | +2/−0 |
+| `tools/lint/lint-fixtures.mjs` | +5/−0 |
+| `tools/lint/negative-fixtures.test.ts` | +9/−0 (2 cases added, none removed) |
+| `tsconfig.json` | +2/−0 |
+
+Every control from PRs #17, #18, #19 and #4 therefore survives byte for byte:
+- `SWC_JEST_OPTIONS` with `swcrc: false`, for every Jest project including `unit-dom`;
+- all negative-fixtures cases, including the `TENANT_DB` cases;
+- the `prisma-seed` boundaries category;
+- the typegen-first `lint` and `typecheck`.
+
+`tools/repo/root-scripts.test.ts` (unowned) only adds `tests/api` and `tests/contract-stubs` to the non-workspace projects that the typecheck solution must reach. That makes the test stricter.
+
+### R2.4 Round-1 findings at `b31483b`
+
+| ID | Round 1 | Status | Evidence |
+|---|---|---|---|
+| PR21-SEC-01 | LOW | **Closed** (code). The limiter placement (round-1 remediation step 5) stays with TASK-020/108 | `staticBody()` (`serve.ts:138`) builds every body once as a Buffer, with a quoted 27-character base64url SHA-256 prefix as its ETag. `send()` (`serve.ts:143`) sets the `ETag` header before `res.send`. Probe results:<br>- Express's ETag function was called **0 times** over 10 docs paths × 5 requests each (GET twice, exact conditional, `W/` conditional, HEAD). The `/health/live` control called it once.<br>- An exact `If-None-Match` gets 304 with an empty body. The `W/` form also gets 304 (weak comparison, RFC 9110).<br>- A mismatch gets 200 with the full body.<br>- HEAD gets 200 with the same ETag and no body |
+| PR21-SEC-02 | INFO | **Closed** for the initializer and the docs OPTIONS answer. Still routed, unchanged: the G4-production cookieless-origin condition and the Helmet ordering (TASK-048/111) | Probe per `APP_ENV`:<br>- `validatorUrl: null` and `queryConfigEnabled: false` in all four.<br>- `supportedSubmitMethods: []` only in production (`apiMode` live).<br>- `StandaloneLayout` and its preset script only in `local`; elsewhere `BaseLayout` and no preset script.<br>- The config is emitted with `JSON.stringify` from typed options into an external script; the page has no inline script.<br>- OPTIONS on a docs path gets 204 + `Allow: GET, HEAD, OPTIONS`; POST gets 405 problem+json |
+| PR21-SEC-03 | INFO | Open, routed: product-manager + api-designer (D-ORCH-023 (1)) | No code change expected |
+| PR21-SEC-04 | INFO | **Closed** | `jest.config.ts:66` `'!packages/shared/src/api/types.gen.ts'`; no `*.gen.ts` glob remains. The older `'!**/*.generated.ts'` stays with TASK-015, as in round 1 |
+| PR21-SEC-05 | INFO | **Closed** | The `types-drift.test.ts` case "[PR21-SEC-05]" is a lane A unit test. It parses the file with the TypeScript compiler API and allows only interface and type-alias declarations, or an empty `export {}`. `types.gen.ts` is blob-equal to round 1 |
+| PR21-SEC-06 | INFO | Walk part **closed**: at `b31483b` except code review R2-m1, and fully at `e046ea2` (fix cycle 2, D-ORCH-024 (1); R2.8). Remainder routed to TASK-020 / TASK-048 (D-ORCH-023 (1)) | `api-mounts.ts` builds the composed `createApp(...)` and walks `app.router`:<br>- path-mounted routers resolve only against the literal `/api/v1` and `/api/docs`; a `/api/:version` or `/*rest` mount is reported;<br>- a handler mounted under a path is reported (R1-M1);<br>- only `/api/docs` is excluded.<br>Code review R2-m1 (2026-11-13) found three kinds of mount that still escape (five shapes): array mounts, optional-group mounts and a sub-app at the root. That is the same fail-open class; it is confined to `app.ts` and the root health router.<br>**Added TASK-020 check:** any router mounted at `/api/docs` is skipped by design, so assert that the excluded mount serves only GET/HEAD on the allow-listed docs paths (an `allowedMethods` assertion over the composed app) |
+| PR21-SEC-07 | INFO | (a) code **closed**; the test residual becomes PR21-SEC-08. (b) **closed** for this PR; the single source shared with the Pino list stays routed to TASK-010 (D-ORCH-023) | (a) `loadContract` passes `DEREFERENCE_OPTIONS` (`contract.ts:66, 72`). Probe: `http` and `https` references are refused with no connection.<br>(b) `contract-validator.ts:23`: the excerpt redaction now also covers the key families passphrase, proof, recovery, provisioning, signature, OTP and key. `code` is redacted unless it is a catalogue code. This matches ADR-0017's fixed keys (`totp`, `recovery_code`, `api_key`) |
+
+### R2.5 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR21-SEC-08 | The `$ref` regression tests do not hold the property they name; `openapi-typescript` follows external `$ref`s | INFO | CWE-918 (latent) | A10 | `tools/openapi/contract.test.ts:26, 59-63`; `tools/openapi/types.ts:34` | senior-developer; TASK-020, like the other TASK-017 follow-ups (D-ORCH-023 (1)) | Open |
+| PR21-SEC-09 | The API-test `import-x/no-relative-packages` ignore is prefix-only, so `apps/api/src/../` escapes it | INFO | CWE-1127 | A04 | `eslint.config.mjs:543` | TASK-020 (D-ORCH-024 (2); the same item as code review R2-n1) | Open, routed |
+
+#### PR21-SEC-08: `$ref` guard tests (INFO)
+
+**Description.** Three gaps, all in test tooling:
+1. **The http test passes without the option.** "refuses an http $ref without sending a request" stays green without `DEREFERENCE_OPTIONS`. The http resolver of json-schema-ref-parser 16.0.5 defaults to `safeUrlResolver: true`, so it never reads loopback or private addresses. Probe: with default options, the same `127.0.0.1` reference is also refused with 0 requests. A change that drops the options from `loadContract` keeps the test green.
+2. **The text scan misses quoted keys.** "openapi.yaml references nothing outside itself" scans the raw text for `$ref:`. YAML also accepts the key quoted, as `"$ref":` or `'$ref':`, and every parser reads it as `$ref`. Probe: both quoted forms, with an `http` value, pass the regex.
+3. **`openapi-typescript` fetches.** `openapi-typescript` 7.13.0 resolves external `http(s)` references through Redocly's resolver. It runs in `npm run openapi:types` and in `types-drift.test.ts`, which renders the committed contract in lane A. Probe: 2 requests per reference, including both quoted-key forms.
+
+**Exploitability and impact.** A contract with an external reference cannot land green today: `loadContract` refuses it, and the contract, drift and validator suites load the real document. What remains:
+- lane A and a developer's `openapi:types` fetch from the network before the suites fail;
+- the guard test names a property it does not prove.
+
+The PR author already runs code in lane A, so neither is an escalation. Impact L, likelihood L → INFO (hardening).
+
+**Remediation (code-level).**
+1. Make the http test discriminate. Point the `$ref` at the never-resolving host `http://schema.example.invalid/schema.yaml`, and assert that the rejection message contains `Unable to resolve $ref pointer`, not `Error downloading`. Probe: with `DEREFERENCE_OPTIONS` the message is the former; with the options removed it is the latter. Alternatively, spy on `SwaggerParser.dereference` and assert its options argument.
+2. Collect the references from the parsed document, not the text. Parse `openapi.yaml` with the YAML parser the tools use, walk every object key equal to `$ref`, and assert that each value starts with `#/`.
+3. Once (2) holds, `openapi-typescript` and Redocly need no further change. Otherwise, give them a resolver configuration without HTTP.
+
+**Verification.** The mutant without `DEREFERENCE_OPTIONS` fails test 1. A seeded quoted-key `$ref` with an `http` value fails test 2.
+
+#### PR21-SEC-09: prefix-only lint ignore (INFO)
+
+**Description.** For `tests/api/**/*.api.test.ts` the rule stays on, with an `ignore` pattern anchored at `(../)+apps/api/src/`. import-x tests that pattern against the raw specifier, before resolving it. Probe (head config, real target files):
+- the allowed relative import of `apps/api/src/app.js` is clean;
+- `packages/shared/src/index.js` and `apps/worker/src/main.js` fail, as intended;
+- `../../apps/api/src/../../../packages/authz/src/index.js` lints clean: no rule reports it.
+
+**Exploitability and impact.** This is hygiene, not a security control. The files are tests and never part of a runtime closure, and they may import any `@platform/*` package through its entry point anyway. Against round 1 (rule off) the change is a strict improvement. Against `main` it is a narrow allowance for test files only. INFO.
+
+**Remediation.**
+1. Reject any `..` segment after the prefix. Use the code reviewer's verified form (R2-n1): `ignore: ['^(?:\\.\\./)+apps/api/src/(?!(?:.*/)?\\.\\.(?:/|$))']`.
+2. Add the traversal form as a third `REPO_PROBES` case that expects `import-x/no-relative-packages`.
+
+D-ORCH-024 (2) defers this to TASK-020, so that this PR does not change an owned path for an INFO item. I agree.
+
+### R2.6 Focus items
+
+| Focus | Result |
+|---|---|
+| 1. PR21-SEC-01 | Closed (R2.4). Each body is a Buffer with a strong ETag, computed once in `createDocsRouter`. 0 ETag-function calls per request. 304 is correct for exact and weak validators; HEAD is correct |
+| 2. PR21-SEC-02 / N7a | Closed for all four `APP_ENV`s (R2.4) |
+| 3. PR21-SEC-07, PR21-SEC-05 | `loadContract` resolves `$ref` without the network: http is off, so the loader has no SSRF path. The redaction additions are verified. The declarations-only test for `types.gen.ts` runs in lane A. Test residuals: PR21-SEC-08 |
+| 4. Middleware order | **Order.** The `app.router.stack` order is: request context, then `x-powered-by` off, then the JSON body parser, then `routes`, then `routeFallback`, then `problemHandler`. Inside `routes`: `optionsResponder`, then `/api/docs` (when enabled), then health, then the `/api/v1` module routers.<br>**Probe evidence:**<br>- A docs 404 echoes the client's correlation ID, so the context runs first.<br>- Malformed JSON POSTed to a docs path gets the body parser's 400 before any route, so the parser runs first.<br>- The docs CSP is set per response by `send()`, so a Helmet mounted before `routes` cannot replace it.<br>**Not yet built:** no Helmet, CORS or limiter exists yet. With the docs now inside `routes`, the step-0 limiter and the CORS preflight need a single placement, before `routes`, which is before both `optionsResponder` and the docs. That is routed correctly: PR21-SEC-06 to TASK-020 / TASK-048 (D-ORCH-023), and the PR21-SEC-01 step-5 limiter to TASK-020/108 |
+| 5. Lint narrowing, coverage exclusion | **Lint.** The effective-config diff from `main` to head over 21 probe paths shows only three changes:<br>- `tests/api/**/*.api.test.ts`: `no-relative-packages` gains the `apps/api/src` ignore, and `no-extraneous-dependencies` gains `apps/api` as a package dir;<br>- `tools/openapi/drift.test.ts`: the same package-dir allowance;<br>- `packages/shared/src/api/types.gen.ts` is ignored. The ignore is exact: `other.gen.ts`, `Types.gen.ts` and `packages/authz/src/x.gen.ts` are still linted.<br>No `platform/*`, `boundaries/*`, `no-restricted-imports` or `no-console` setting changes on any probe path. This is not a security weakening; the prefix-only ignore is PR21-SEC-09 (INFO).<br>**Coverage.** The exclusion is exactly `packages/shared/src/api/types.gen.ts` |
+| 6. Merge union, levers, lockfile | **Merge union:** see R2.3.<br>**Levers.** The net change touches none of these: `.github/` (workflows, actions, CODEOWNERS), `.npmrc`, `.gitleaks.toml`, `.gitleaksignore`, `.semgrepignore`, `.semgrep/`, `tools/ci`, `tools/deps`, `tools/hooks`, `tools/isolated`, `tools/eslint-rules`, `tools/test-support`, `tools/test-dom`, `.swcrc`, `prisma.config.ts`, `apps/web`, `apps/admin`, `.gitattributes`, `.gitignore`, `commitlint.config.mjs`, `.node-version`, `CLAUDE.md`, `.claude/`. So no D-ORCH-021 lever condition applies.<br>**Lockfile:** unchanged, as in round 1.<br>**Dependencies:** none added. `typescript`, which the new AST test imports, is an existing root dev dependency |
+| 7. PR4-SEC-13 (pre-lint execution) | No new pre-lint surface:<br>- `lint` and `typecheck` are `main`'s lines;<br>- no workspace manifest changes, so no new `typegen` script;<br>- neither `openapi:lint` nor `openapi:types` is called from `lint`, `typecheck`, `build` or the workflow;<br>- the new `tsconfig` projects are `noEmit`, and `tsc` runs no code;<br>- the two new lint probes are in-memory `lintText` calls.<br>`api-mounts.ts` imports `apps/api/src` at unit-test time only, the same class as any test |
+| 8. PR10-SEC-08 | **Contract side: still closed.** `openapi.yaml` is blob-equal to round 1, so the round-1 emulation still holds (base 15 → head 0, controls caught).<br>**Allowlist side: still open.** `.gitleaks.toml` is unchanged on both sides and still carries the PR1-SEC-11 OpenAPI block.<br>**Removal path, unchanged:** after this PR merges, devops-engineer applies round-1 §5.1 option A (D-ORCH-023), with the sec-static case and a real-image confirmation. Lane A reads `.gitleaks.toml` from the base ref |
+
+### R2.7 Merge conditions and overlaps
+
+**State of `main`.** Lane A ran against `d38500a`. At hand-off, `origin/main` is `c91f3ed`. The five commits after `d38500a` (`b4885ae`, `6ac9836`, `1e49d36`, `87fcd9e`, `c91f3ed`) change only `docs/` and `.claude/agent-memory/`. They touch no owned path and none of this PR's paths, and `tools/ci` and `.github/` are identical, so this round holds against either base (R2.9 cases A, A2, G and G2).
+
+**Do not merge `main` into the branch again** if the merge brings an owned path. Otherwise a merge-only round is needed (round-1 §7 procedure).
+
+**Fix cycle 2 (D-ORCH-024 (1)).** The light cycle that fixes code review R2-m1, R2-n2 and R2-n3 was pushed during this review as `e046ea2` (parent `b31483b`). It may follow this record without voiding it, because the checker voids a record only for owned paths (R2.9 cases F and G). Its content is reviewed in R2.8. The security condition on any further commit before merge:
+- It may change only `tools/openapi/**` (the drift walker, its tests, its README) and comment lines in `apps/api/src/app.ts`.
+- Before merge, the orchestrator confirms the scope with `git diff --stat e046ea2 <new head>`.
+- Any other change needs a security delta round first. That includes `app.ts` code, `serve.ts`, `fallback.ts`, `contract.ts`, `tests/api/helpers/**`, `tests/contract-stubs/**`, or any owned path.
+
+**Open PRs that overlap this PR** (computed against each PR's own merge base):
+- **PR #20** (`9647907`, TASK-010):
+  - owned: `eslint.config.mjs` and `tools/lint/negative-fixtures.test.ts`;
+  - unowned: `apps/api/src/app.ts`, `main.ts`, `platform/context/request-context.ts`, `problem-handler.api.test.ts` and `packages/shared/src/index.ts`.
+
+  D-ORCH-024 (3) and D-ORCH-025 (4) set the order: #21 first, then #20. PR #20's union commit then needs a security delta round on its merge commit, because both PRs change owned paths. The union must keep:
+  - `requestContextMiddleware(options)` with both `apiMode` and TASK-010's fields;
+  - the R2.6 item 4 order: context and body parser before `routes`; the docs inside `routes` after `optionsResponder`; `problemHandler` last;
+  - PR #20's `routePrefix` as the first layer of the `api` router, not as path-mounted middleware;
+  - the PR21-SEC-07 (b) redaction list moving to the single TASK-010 source.
+- **PR #23** (`f61e55d`, TASK-011): owned `package.json`; it also edits the unowned `tools/repo/root-scripts.test.ts`.
+- **Dependabot #22** (`804733a`) and **#15** (`a9bacfd`): owned `package.json`.
+
+Whichever of these lands first, each of the others needs a delta round after it merges `main`.
+
+### R2.8 Fix cycle 2 (`e046ea2`)
+
+`e046ea2` (one commit on top of `b31483b`; `git ls-remote` shows it as the branch head and `refs/pull/21/head`) changes four unowned files: `tools/openapi/drift.ts`, `drift.test.ts`, `README.md` and `apps/api/src/app.ts`. The `app.ts` change is comment-only: the header line is reflowed, and no non-comment line changes.
+
+`resolveMountPath` now proves a literal mount from more probes than before:
+- the layer must have exactly one matcher, so an array mount is reported;
+- a probe segment substituted into any segment, or inserted before any non-root segment, must not match;
+- an optional tail that consumes an appended probe segment is rejected.
+
+A sub-app mounted at the root (`mounted_app`) is reported. Each change makes the drift check report more, never less. When Express internals lack `matchers`, the walker reports the layer, so the check fails closed. No runtime code changes. Root middleware that answers requests itself stays outside the walker by design; TASK-020's `defineRoute` metadata becomes the authoritative route inventory.
+
+**Walker probe.** `listMountedRoutes` from each head ran on nine mount shapes over Express 5.3.0:
+
+| Shape | `b31483b` | `e046ea2` |
+|---|---|---|
+| Array mount, optional groups (`/api/v1{/:x}`, `/api{/:v}/v1`, `/api/v1{*rest}`), root sub-app | not reported | **reported** |
+| `/api/:version` and `/api` (controls) | reported | reported |
+| Literal `/api/v1` (control) | resolved | resolved |
+| `/api/docs` (control) | excluded | excluded |
+
+The array mount, the three optional-group shapes and the root sub-app make five shapes, which matches code review R2-m1.
+
+Lane A run [43355654201](https://github.com/sukhchdit/shipcube/actions/runs/43355654201) on `e046ea2`: fast-lane `success`; only the record step failed (the same 8 owned paths), so `ci-gate` failed too. Gitleaks emulation over the added lines and the commit message: 0 findings.
+
+### R2.9 Record check (simulated)
+
+**Setup.**
+1. `git clone --shared --no-checkout <main checkout>` into scratch.
+2. `checkout --detach b31483b` (cases A–F), or `e046ea2` (cases G–G3).
+3. Copy this file in and commit it as a docs-only commit on top.
+4. Run `main`'s `tools/ci/check-security-owned-paths.mjs` with `--root <clone> --pr 21 --json`. The checker was extracted from `origin/main` (`c91f3ed`) with `git archive`; `tools/ci` is identical at `d38500a`, `b4885ae`, `87fcd9e` and `c91f3ed`.
+
+The clone and the extraction were removed afterwards.
+
+| Case | Base | Branch tip checked | Expected | Observed |
+|---|---|---|---|---|
+| B: `b31483b` as pushed (round-1 record only) | `c91f3ed` | `b31483b` | missing | **missing** (exit 1): "names b0ede35, but eslint.config.mjs, jest.config.ts, package.json, tools/lint/lint-fixtures.mjs, tools/lint/negative-fixtures.test.ts changed after it", the same as lane A |
+| A: this record committed on top of `b31483b` | `c91f3ed` | record commit | pass | **pass** (exit 0), satisfied at `b31483b`; the same 8 owned paths as lane A |
+| A2: same, lane A's run base | `d38500a` | record commit | pass | **pass** (exit 0), satisfied at `b31483b` |
+| C: wrong PR number (`--pr 20`) | `c91f3ed` | record commit | missing | **missing** (exit 1): the PR-0020 record names no commit of this PR |
+| D: `main` changes `package.json`, then is merged after the record | synthetic `main` commit | merge commit | missing (rule (d)) | **missing** (exit 1): "names b31483b, but package.json changed after it" |
+| E: owned path edited after the record | `c91f3ed` | commit touching `jest.config.ts` | missing (rule (d)) | **missing** (exit 1): "names b31483b, but jest.config.ts changed after it" |
+| F: unowned paths edited after the record (`drift.ts`, `app.ts`, the fix-cycle-2 shape) | `c91f3ed` | commit touching both | pass | **pass** (exit 0), satisfied at `b31483b` |
+| G: this record committed on top of the real fix-cycle-2 head `e046ea2` | `c91f3ed` | record commit | pass | **pass** (exit 0), satisfied at `b31483b` |
+| G2: same, base `d38500a` | `d38500a` | record commit | pass | **pass** (exit 0), satisfied at `b31483b` |
+| G3: `e046ea2` as pushed (round-1 record only) | `c91f3ed` | `e046ea2` | missing | **missing** (exit 1), the same message as case B |
+
+Every passing case also notes that the round-1 head `b0ede35` is voided. That is expected: older head rows produce notes only (PR10-SEC-21 context).
+
+**Pitfall noted for the next simulation.** The checker reads the record from the `--root` working tree, not from the `--head` commit. Each case therefore checks out the branch tip it names before running. A first G3 attempt that skipped this step read the round-2 file left in the working tree and passed.
+
+| Field | Value |
+|---|---|
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open at `b31483b` or at the fix-cycle-2 head `e046ea2`, and no LOW finding of this PR remains, so the merge rule is met for the security dimension.<br>**Closed:** PR21-SEC-01 (precomputed strong ETags; 0 per-request hashing; correct 304) and the PR21-SEC-02 initializer hardening, verified for every `APP_ENV`. PR21-SEC-04 and PR21-SEC-05 are closed, as are the code parts of PR21-SEC-06 and PR21-SEC-07.<br>**Merge:** the merge of `main` is a proven union that keeps every PR #17/#18/#19/#4 control. The owned-path changes against `main` are additive, and the effective ESLint delta is the expected one. No D-ORCH-021 lever and no lockfile entry changes.<br>**Open (INFO, routed):** PR21-SEC-03, the PR21-SEC-06 remainder, PR21-SEC-07 (b) single source, PR21-SEC-08 and PR21-SEC-09. The PR10-SEC-08 allowlist removal is devops-engineer's after merge.<br>**This round authorises the current head `e046ea2`** (= `b31483b` + fix cycle 2, R2.8) **for merge**, once this record is committed on top of it as a docs-only commit and lane A is green on that commit. It does not cover a further merge of `main` that brings an owned path, or any later commit outside the R2.7 fix-cycle scope |

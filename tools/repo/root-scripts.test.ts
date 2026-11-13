@@ -103,7 +103,8 @@ describe('the typecheck solution reaches every workspace (AT-US-001-04)', () => 
   const normalize = (path: string) => path.replace(/^\.\//, '').replace(/\/+$/, '');
 
   /** Projects outside the npm workspaces that the solution must still type-check. */
-  const NON_WORKSPACE_PROJECTS = ['tools'];
+  // tests/api and tests/contract-stubs are test-only folders without a manifest (TASK-017), like tests/fixtures.
+  const NON_WORKSPACE_PROJECTS = ['tools', 'tests/api', 'tests/contract-stubs'];
   const workspaceDirs = listManifests(repoRoot)
     .map(({ dir }) => dir)
     .filter((dir) => dir !== '.');
