@@ -55,4 +55,4 @@ PR #23 review: `docs/05-quality/security/PR-0023-TASK-011-security-review.md`.
 - **TASK-015:** 06/07/10, together with PR10-SEC-17/21 and PR17-SEC-05/07/08.
 - **G3:** require the gate-profile transcript.
 
-Related: [[project-p5-pr10-ci-lane]], [[project-p5-pr17-fixture-subset]], [[project-security-review-conventions]], [[project-p3-security-conditions]]
+Related: [[project-p5-pr28-w0act1]] (W0-ACT-1 done), [[project-p5-pr10-ci-lane]], [[project-p5-pr17-fixture-subset]], [[project-security-review-conventions]], [[project-p3-security-conditions]]
