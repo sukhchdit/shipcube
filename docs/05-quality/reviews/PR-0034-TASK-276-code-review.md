@@ -187,3 +187,39 @@ Probe rows that differ from my expectation and are not findings: four `base64 of
 1. None open for this head. The nits (R2-m1, R2-m2, R2-n1..n3) are routed to the next touch of `tests/helpers` and `tools/repo/test-seams.test.ts`: the `redaction` / `log-scan` activation PR (US-008, T-QA-05) or the API test app builder PR, whichever lands first (test-engineer). Do not fix them on this branch: any non-docs commit stales the accepted lane B run (D-ORCH-034) and the PR is otherwise ready.
 2. Security record PR-0034 at `3934d12`: PASS_WITH_FOLLOW-UPS (companion round 2).
 3. Squash with a conventional-commit title; order against PR #32 as in R2.5.
+
+---
+
+## Union re-check (head 2e5e16f)
+
+Reviewer: code-reviewer. Head `2e5e16f` (full SHA `2e5e16fa73c3bee85d71e274afe9c3593ead59fa`), `origin/main` `60540ef`. Commits since the approved head `3934d12`: merge `0dc5fbb` (main `62f799e`, which carries PR #32 `f883d68` and PR #37 `ca54ae7`), semantic fix `6b62d35`, merge `5b08fe8` (main `60540ef`, docs only), evidence `2e5e16f` (7 files under `docs/05-quality/tests/runs/20261113T2217Z_5b08fe8/`). Scope per dispatch: union correctness only; no full re-review. Light commands only (git, `jest --listTests`, `gh`); no Docker, build, lint or test run by me.
+
+```
+VERDICT: APPROVED
+SUMMARY: Both merges are pure unions. The only hand edits are the three reported conflict hunks, each keeping both sides; the only post-approval code change is 6b62d35, which follows the standard-columns systemDelegates pattern exactly. PR #32's tests/generated/*.test.ts run in `unit` only, and no file is in two projects. Lane A fast-lane is green on 2e5e16f. The only red check is the security-record step, which is merge condition 2. The round-2 nits stay routed as before.
+```
+
+### U.1 Checks
+
+| Check | Method | Result |
+|---|---|---|
+| (a) Single-side files byte-equal | MB = `git merge-base 3934d12 60540ef` = `d693e8c`. Files changed on both sides (`comm -12`): `eslint.config.mjs`, `jest.config.ts`, `package.json`, `tools/lint/negative-fixtures.test.ts`, `tools/repo/jest-esm.test.ts`, `tools/tsconfig.json`. For every branch-only file, `git diff --quiet 3934d12 2e5e16f`. For every main-only file, `git diff --quiet 60540ef 2e5e16f` | Main-only: 0 differ. Branch-only: 1 differs, `prisma/tests/db/query-counter.int.test.ts`, which is exactly the `6b62d35` fix (the only file in that commit). The file set of `60540ef..2e5e16f` is the branch set of `d693e8c..3934d12` plus the 7 new evidence files, and nothing else |
+| Merges are pure unions | `git merge-tree --write-tree` of each merge's two parents, then `git diff` of that tree against the merge commit | `5b08fe8`: identical tree (clean merge). `0dc5fbb`: differs only by the conflict markers in the three reported files. The auto-merged `jest.config.ts`, `package.json` and `tools/tsconfig.json` match a clean re-merge byte for byte |
+| (b) `eslint.config.mjs` | `git show --cc 0dc5fbb`. Also compared the ordered `files:` sequence of the config blocks at base, branch, main and head | The resolution keeps the PR's `tests/helpers/leakage-scanner.test.ts` block, then main's `tests/generated/**/*.ts` block with its anchored `no-relative-packages` ignore. It drops `tools/openapi/drift.test.ts`, which PR #32 deliberately replaced; that file no longer exists. Block order at the head = main's order plus the one PR block in the position it had on the branch (main to head diff: 1 added line; branch to head diff: exactly main's edits). The two globs do not overlap, and none of main's 7 new blocks matches `tests/helpers/**`, so flat-config precedence for both allowances is unchanged |
+| (b) `negative-fixtures.test.ts` | `--cc` hunk | Keeps both seam cases (PR34-SEC-01: `bad-app.ts`, `bad-counter.service.ts`) and the tx-slot root-client case (PR11-SEC-09). All three fixture files are tracked at the head. Bracket structure is correct (the `],[` split was added) |
+| (b) `jest-esm.test.ts` | `--cc` hunk | Sorted union: `test:api, test:contract, test:coverage, test:generated, test:integration, test:unit`. This matches the 6 jest scripts in the head `package.json`, as R2.5 predicted |
+| (b) Auto-merged files | `git diff 60540ef 2e5e16f` | `package.json`: only `+test:generated`. `jest.config.ts`: the PR's own delta (header, `GENERATED_PATH` in `common`, `generated` project after `api`), and main's `api.globalTeardown` is kept. `tools/tsconfig.json`: `+query-counter.ts`, sorted next to main's `system-*.ts` lines |
+| (c) Project partition on the head | `jest --listTests --selectProjects <p>` for each project | unit 172, unit-dom 12, integration 27, api 6, generated 0. `tests/generated/route-metadata.test.ts` and `contract-drift.test.ts` are in `unit` only; 0 files are in two projects. `unit` overrides `testPathIgnorePatterns` (no `/tests/generated/`), so `common`'s new ignore does not reach it. `test:contract` (`jest tests/generated tools/openapi --selectProjects unit`) still lists both suites plus the 3 `tools/openapi` tests. This agrees with the developer's listing and with the R2.1 union listing |
+| (c) Executed, not only listed | Evidence `20261113T2217Z_5b08fe8` (`unit.junit.xml`, `integration.junit.xml`) | Both `tests/generated/*.test.ts` appear as `unit` testcases. `prisma/tests/db/query-counter.int.test.ts` runs 4 of 4 in `integration`. Verdict PASS (unit 4252, integration 258, api 101, catalog 74; 0 failures). `5b08fe8` is an ancestor of the head, and the only later commit is docs-only |
+| (d) Semantic fix `6b62d35` | Compared with `prisma/tests/rls/standard-columns.int.test.ts:19,124-241`, `apps/api/src/platform/db/system-db.ts:28`, and the `platform/system-model-owner` lint scope | Same import (`../../../apps/api/src/platform/db/system-db.js`) and the same `systemDelegates(tx).referenceDatasetVersion.<op>` form inside `withTenantTx`. The assertions are unchanged (`rawCount 1`, model ops `['findMany']`, budget 2): the accessor adds no query, and the evidence run confirms this. The other `referenceDatasetVersion` reads in the file use `counted`, the root `PrismaClient`, not a `TenantDb`, so they are correctly untouched. No other branch file reads a SYSTEM delegate. The owner lint covers `apps/*/src` and `packages/*/src` minus tests, so `prisma/tests` is outside it, as for standard-columns |
+| CI on the head (run 43519334443) | `gh pr view 34 --json statusCheckRollup` and `--log-failed` | `fast-lane` SUCCESS. `scans` FAILURE only at "Security-owned paths need a review record": the PR-0034 record names `4643265` / `3934d12`, and owned paths (`eslint.config.mjs`, `jest.config.ts`, `package.json`, `query-counter.int.test.ts`, `negative-fixtures.test.ts`, `tools/tsconfig.json`) changed after `3934d12`. `ci-gate` is red for that reason alone |
+
+### U.2 Findings
+
+None. No BLOCKER, MAJOR, MINOR or NIT is introduced by the union or by `6b62d35`. R2-m1, R2-m2 and R2-n1..n3 stay open and routed as in R2.6.
+
+### U.3 Merge conditions (replace R2.6 items 2 and 3)
+
+1. No code change. Any non-docs commit on top of `2e5e16f` makes the `5b08fe8` lane B evidence stale (D-ORCH-034).
+2. A merge-only security round: record `docs/05-quality/security/PR-0034-*.md` with a `Branch / head` row naming `2e5e16f`, or a later docs-only commit, and a PASS-family verdict, committed on the branch. Then `scans` and `ci-gate` must be green on the final head.
+3. Squash merge with a conventional-commit title. PR #32 is already on main, so there are no ordering constraints left.
