@@ -220,3 +220,5 @@ Round 2 of a spike PR (PR #6 r2):
 - **"Fails closed" claims for catalogue-driven guards:** check BOTH directions. An empty catalogue fails closed for omitted NOT NULL columns but OPEN for forged fields on update.
 - **Composition lines:** mutate the one line that wires a guard into the runtime (`scopeClient: …`). If only hand-built runners test it, the mutant survives.
 - **Merges of main into DECISIONS.md** can insert a block between another entry's lines (adjacent-append auto-merge). Diff the entry headings vs main.
+
+**Lane A skip trap (PR #30 r2):** when `Lane B evidence` fails early in fast-lane, every later step (lint, format, typecheck, unit, build) is SKIPPED though the job summary looks "mostly green". Check step conclusions with `gh run view --json jobs`, never trust "scans passed". Also verify claims like "docs-only merge delta" with `git diff --name-only <pre-merge> <merge>`: PR #28's tools/quality came in under that label.
