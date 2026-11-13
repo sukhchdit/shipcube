@@ -16,6 +16,7 @@ The PR #13 review (TASK-023) is in `docs/05-quality/security/PR-0013-TASK-023-se
     - **10 (INFO):** the read-back uses an unqualified `=`.
     - **11 (INFO):** `63accea` quotes the gitleaks-flagged literal verbatim in `DECISIONS.md` and in a senior-developer memory file.
 - **PR #13 is never merged itself (D-ORCH-017).** A superseding branch from main carries the reviewed tree.
+- **Supersede done as PR #19** (`699f33d`, PASS_W_F-U, 2026-11-13; see [[project-p5-pr19-supersede]]). It closed PR13-SEC-04 (SELECT-only), -10 and -11. Still open: 05 (TASK-026), 08 (TASK-014/089/025), 09 (TASK-014).
 
 **Why:** the seed CLI holds the DB-owner credential in every environment. Item 02 becomes the T-23 path once TASK-089 wires a writing provisioner. Item 11 is a gate problem: any branch created before `63accea` that merges main re-adds those lines in its first-parent merge diff, and lane A gitleaks then goes red. PR #11 and PR #4 are in that position.
 

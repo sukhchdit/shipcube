@@ -9,6 +9,12 @@
   "include": ["seed", "*.ts"],
   "references": [
     {
+      "path": "../packages/authz"
+    },
+    {
+      "path": "../packages/config"
+    },
+    {
       "path": "../packages/shared"
     }
   ]

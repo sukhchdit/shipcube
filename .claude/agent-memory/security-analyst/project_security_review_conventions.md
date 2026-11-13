@@ -22,8 +22,12 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Therefore never quote a flagged value in docs, records or memory (PR13-SEC-11).
 - Semgrep is not installed on the host.
 - **Probing lint configs without running the suite.** A single-process `ESLint#lintText` against the worktree's real `eslint.config.mjs` stays light enough for the memory-constrained host. Load ESLint from the worktree with `createRequire(<worktree>/package.json)`, and add the `tseslint.configs.disableTypeChecked` + `projectService: false` overrides, because the probe files are not on disk. `isPathIgnored` / `calculateConfigForFile` show coverage holes. Write the probe file with a heredoc, not a `node -e` string, because quoting breaks in Git Bash.
-- **Probe scripts with regex escapes.** A Bash-tool heredoc (even `<<'EOF'`) turned `\\b` into `\b` in one case (PR-0005, 2026-11-12). The probe then silently matched nothing. Write such probes with the Write tool, and include a positive control line in every probe.
+- **Probe scripts with regex escapes.** A Bash-tool heredoc (even `<<'EOF'`) turned `\\b` into `\b` in one case (PR-0005, 2026-11-12). The probe then silently matched nothing. Write such probes with the Write tool, and include a positive control line in every probe. **But the Write tool decodes ` `-style escapes into raw characters** (PR-0020, 2026-11-13: a raw U+2028 inside a regex literal gave a SyntaxError; `sed` repair with `\\u` failed too, GNU `\u` = uppercase). For control and line-separator characters, build them with `String.fromCharCode` and test by code point, never with escapes in the source.
 - **Lock-only fix-cycle deltas.** A generic deep JSON diff of the base and head `package-lock.json` (every differing path, with a positive control) proves "only X changed" faster and more strictly than the tuple diff. Used for PR-0002 R2, 2026-11-12.
+- **Boundaries head-vs-main probe (PR-0019).**
+  - `git archive <sha> eslint.config.mjs tools/eslint-rules tools/lint` into `cfg-head` / `cfg-main`, and junction each `node_modules` to the MAIN checkout's.
+  - Write a scratch mini-repo, then run `new ESLint({cwd, overrideConfigFile, overrideConfig:[disableTypeChecked, projectService:false, no-unresolved off, {settings:{'boundaries/root-path': root}}]})`.
+  - File descriptors accumulate categories, so a new category never removes an old one.
 - **Probing a PR head without touching its worktree** (PR-0005 R2):
   - `git show <sha>:<file>` the `.ts` sources into scratch.
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.
@@ -55,6 +59,13 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Remove scratch junctions with `cmd //c "rmdir <dir>\\node_modules"`, never `rm -rf`, which would follow the junction.
 - **Raw-socket HTTP probes (PR-0004 R2).** Send the request with `socket.write`, never `socket.end`. On a half-close (FIN), Node's http server drops responses that are written asynchronously, such as piped file streams; only synchronous 4xx responses come back, so every 200 reads as "no response". Use `Connection: close` and wait for `close`.
 - **Signature and advisory spot checks without an installed tree.** `npm audit signatures` needs `node_modules`. Instead, verify each tuple's `dist.signatures` (ECDSA over `name@version:integrity`) against `-/npm/v1/keys` with `node:crypto`, add a tampered-integrity control, and POST to `-/npm/v1/security/advisories/bulk` with a known-vulnerable version as a positive control. Script: `scratchpad/review/PR-4-sec-r2/scripts/sigcheck.mjs` (session-scoped).
+- **Gitleaks without Docker (PR-0021).** Emulate the default ruleset in Node.
+  - Download `config/gitleaks.toml` for the pinned tag. Parse it with a minimal TOML reader: `[[rules]]`, `[[rules.allowlists]]`, `[allowlist]`, `'''` literals, arrays.
+  - Convert RE2 to JS: strip `(?i)` into the `i` flag (over-approximates the mid-pattern ones), map `[:alnum:]`-style classes, `\z` → `$`. All 221 v8.30.1 rules compiled.
+  - Apply the keyword prefilter, `secretGroup` (else the first non-empty group), entropy `<=` threshold, the generic-rule digit check, and the global and rule allowlists including lower-cased stopwords.
+  - Run it per line, with runtime-generated positive controls.
+  - Script: `scratchpad/review/PR-21-sec/scripts/gl-emul.mjs` (session-scoped). Treat the results as hints; devops confirms with the real image.
+  - Also run it over your own record before hand-off.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
 Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
