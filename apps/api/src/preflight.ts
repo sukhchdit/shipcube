@@ -33,6 +33,13 @@ export interface PreflightResult {
 
 export class PreflightError extends Error {
   override readonly name = 'PreflightError';
+  /** The preflight's own reason text (built here from dist paths and specifiers only). */
+  readonly reason: string;
+
+  constructor(reason: string, options?: { cause?: unknown }) {
+    super(reason, options);
+    this.reason = reason;
+  }
 }
 
 /** Every file below `dir` (relative, `/`-separated); throws when a test file, fixture or spike is among them. */
@@ -78,14 +85,24 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   const load = options.load ?? ((specifier: string) => import(specifier));
   const resolveSpecifier = options.resolveSpecifier ?? ((specifier: string) => import.meta.resolve(specifier));
   const modules = productionModules(options.distDir);
-  for (const rel of modules) await load(pathToFileURL(join(options.distDir, rel)).href);
+  for (const rel of modules) {
+    try {
+      await load(pathToFileURL(join(options.distDir, rel)).href);
+    } catch (cause) {
+      throw new PreflightError(`cannot load dist/${rel}`, { cause });
+    }
+  }
   const entryPoints = platformEntryPoints(options.appManifest);
   for (const specifier of entryPoints) {
     const file = fileURLToPath(resolveSpecifier(specifier)).split(sep).join('/');
     if (!/\/dist\/[^/]+(?:\/[^/]+)*\.js$/.test(file) || /\/src\//.test(file)) {
       throw new PreflightError(`${specifier} resolves outside dist (${file}); the default export condition must point to dist`);
     }
-    await load(specifier);
+    try {
+      await load(specifier);
+    } catch (cause) {
+      throw new PreflightError(`cannot load ${specifier}`, { cause });
+    }
   }
   return { modules: modules.length, entryPoints };
 }
@@ -97,7 +114,12 @@ async function run(distDir: string): Promise<number> {
     process.stdout.write(`[preflight] ok: ${result.modules} module(s), entry points ${result.entryPoints.join(' ')}\n`);
     return 0;
   } catch (error) {
-    process.stderr.write(`[preflight] failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}\n`);
+    // Build log only: the preflight's own reason (a dist path or a specifier) and the error classes, never a caught
+    // message (PR20-SEC-13); `docker build` shows the failing module from the reason.
+    const reason = error instanceof PreflightError ? error.reason : undefined;
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause.name : undefined;
+    const name = error instanceof Error ? error.name : typeof error;
+    process.stderr.write(`${JSON.stringify({ event: 'preflight.failed', error: name, reason, cause })}\n`);
     return 1;
   }
 }

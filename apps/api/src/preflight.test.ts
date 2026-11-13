@@ -106,9 +106,14 @@ describe('image preflight (TASK-014, ADR-0022 am. 13)', () => {
 
   it('fails when a module cannot be loaded (a dependency is missing from the pruned install)', async () => {
     const { app, dist } = layout({ 'apps/api/dist/platform/broken.js': "import 'definitely-not-installed-package';" });
-    await expect(preflight({ distDir: dist, appManifest: join(app, 'package.json'), resolveSpecifier: fileResolver(app) })).rejects.toThrow(
-      /definitely-not-installed-package/,
-    );
+    const failure = preflight({ distDir: dist, appManifest: join(app, 'package.json'), resolveSpecifier: fileResolver(app) });
+    // The preflight's own reason names the dist module; the loader error stays the cause (never printed, PR20-SEC-13).
+    await expect(failure).rejects.toThrow('cannot load dist/platform/broken.js');
+    await expect(failure).rejects.toMatchObject({
+      name: 'PreflightError',
+      reason: 'cannot load dist/platform/broken.js',
+      cause: expect.objectContaining({ message: expect.stringContaining('definitely-not-installed-package') }) as unknown,
+    });
   });
 
   it.each([

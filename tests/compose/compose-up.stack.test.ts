@@ -12,8 +12,6 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type * as ClientS3 from '@aws-sdk/client-s3';
-import type * as Presigner from '@aws-sdk/s3-request-presigner';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { readCompose, serviceEnvironment } from '../../tools/compose/compose-file.js';
@@ -29,10 +27,29 @@ import {
   waitFor,
 } from './helpers/stack.js';
 
-// The S3 SDK is a dependency of apps/api (the presigner the api itself uses), loaded from that workspace.
+// The S3 SDK is a dependency of apps/api (the presigner the api itself uses), loaded from that workspace at run time.
+// Only apps/api/src/platform/storage may import the SDK (D-ARCH-097, PR30-SEC-08), so the suite types the two members it
+// uses locally instead of importing the SDK's types.
+interface S3Sdk {
+  readonly S3Client: new (config: {
+    endpoint: string;
+    region: string;
+    forcePathStyle: boolean;
+    credentials: { accessKeyId: string; secretAccessKey: string };
+  }) => { destroy(): void };
+  readonly GetObjectCommand: new (input: {
+    Bucket: string;
+    Key: string;
+    ResponseContentType: string;
+    ResponseContentDisposition: string;
+  }) => object;
+}
+interface Presigner {
+  readonly getSignedUrl: (client: object, command: object, options: { expiresIn: number }) => Promise<string>;
+}
 const apiRequire = createRequire(join(ROOT, 'apps/api/package.json'));
-const { GetObjectCommand, S3Client } = apiRequire('@aws-sdk/client-s3') as typeof ClientS3;
-const { getSignedUrl } = apiRequire('@aws-sdk/s3-request-presigner') as typeof Presigner;
+const { GetObjectCommand, S3Client } = apiRequire('@aws-sdk/client-s3') as S3Sdk;
+const { getSignedUrl } = apiRequire('@aws-sdk/s3-request-presigner') as Presigner;
 
 const UP_BUDGET_S = 180;
 const stack = new ComposeStack(uniqueProject());

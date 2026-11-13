@@ -854,9 +854,11 @@ export default defineConfig([
   },
   {
     // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
-    // code names its module with a literal, so no load escapes the import controls above.
+    // code names its module with a literal, so no load escapes the import controls above. The image build preflights
+    // (TASK-014, ADR-0022 am. 13) are the one exception: they run only in `docker build`, never in the served process,
+    // and import every compiled dist module and @platform entry point by computed path to prove they load.
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
-    ignores: TEST_FILES,
+    ignores: [...TEST_FILES, 'apps/api/src/preflight.ts', 'apps/worker/src/preflight.ts'],
     plugins: { platform },
     rules: { 'platform/static-module-specifier': 'error' },
   },
