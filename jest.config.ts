@@ -1,9 +1,11 @@
 /**
- * Jest 30 configuration (ADR-0024). Four projects selected by the root scripts:
+ * Jest 30 configuration (ADR-0024). Five projects selected by the root scripts:
  *   unit        `*.test.ts`         -> npm run test:unit (Node environment)
  *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
+ *   generated   `tests/generated/**` -> npm run test:generated (RBAC matrix, audit, RLS and abuse generators; the other
+ *               four projects ignore that folder so a generated suite never runs twice; TASK-276, T-QA-03)
  * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
  * type-check; `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript
  * sources through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
@@ -33,6 +35,12 @@ export const SWC_JEST_OPTIONS = {
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
+/** Folder of the `generated` project; every other project ignores it. */
+const GENERATED_PATH = '/tests/generated/';
+
+/** Per-test and per-hook budget of the projects that start Testcontainers (the Jest default of 5 s is too tight there). */
+const CONTAINER_TEST_TIMEOUT_MS = 30_000;
+
 // NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
 const JS_EXTENSION_MAPPER = { '^(\\.{1,2}/.*)\\.js$': '$1' };
 
@@ -47,7 +55,7 @@ const common: ProjectConfig = {
   transform: { '^.+\\.(t|j)sx?$': ['@swc/jest', SWC_JEST_OPTIONS] },
   moduleNameMapper: JS_EXTENSION_MAPPER,
   modulePathIgnorePatterns: ['<rootDir>/.*/dist/', '<rootDir>/.*/build/'],
-  testPathIgnorePatterns: IGNORED_PATHS,
+  testPathIgnorePatterns: [...IGNORED_PATHS, GENERATED_PATH],
 };
 
 const config: Config = {
@@ -86,7 +94,7 @@ const config: Config = {
       ...common,
       displayName: 'unit',
       testMatch: ['**/*.test.ts'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, GENERATED_PATH, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
     },
     {
       ...common,
@@ -97,7 +105,7 @@ const config: Config = {
       testEnvironment: '<rootDir>/tools/test-dom/jsdom-environment.mjs',
       testEnvironmentOptions: { customExportConditions: ['@platform/source', 'browser'] },
       testMatch: ['**/*.test.tsx'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, GENERATED_PATH, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
       setupFilesAfterEnv: ['<rootDir>/tools/test-dom/dom-setup.ts'],
       moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-dom/style-stub.ts' },
     },
@@ -105,11 +113,23 @@ const config: Config = {
       ...common,
       displayName: 'integration',
       testMatch: ['**/*.int.test.{ts,tsx}'],
+      // Containers stop in `afterAll`; the 5 s default timed hooks out under load in the coverage run (seed.int, spk03,
+      // PR #26 code review n6). Lane B passes its own --testTimeout, which overrides this value.
+      testTimeout: CONTAINER_TEST_TIMEOUT_MS,
     },
     {
       ...common,
       displayName: 'api',
       testMatch: ['**/*.api.test.{ts,tsx}'],
+    },
+    {
+      ...common,
+      displayName: 'generated',
+      // Every test file under tests/generated, whatever its kind (`*.api.test.ts`, `*.int.test.ts`, `*.test.ts`): the folder
+      // decides the project, so lane B runs the generated suites with `<paths> --selectProjects generated`.
+      testMatch: ['**/tests/generated/**/*.test.{ts,tsx}'],
+      testPathIgnorePatterns: IGNORED_PATHS,
+      testTimeout: CONTAINER_TEST_TIMEOUT_MS,
     },
   ],
 };
