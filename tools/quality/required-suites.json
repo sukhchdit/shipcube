@@ -203,11 +203,11 @@
     },
     {
       "id": "docs-or-ci-only",
-      "globs": ["docs/**", ".github/**"],
+      "globs": ["docs/**", ".github/**", ".claude/agent-memory/*/*.md"],
       "exclude": ["docs/03-architecture/api/**", "docs/05-quality/tests/gherkin-test-map.md", "docs/01-requirements/stories/**", "docs/02-ux/design-system/**"],
       "profile_min": "none",
       "suites": [],
-      "note": "Lane A only. .github/** is security-critical (SEC-P3-31): security-analyst review in the DoD."
+      "note": "Lane A only. .github/** is security-critical (SEC-P3-31): security-analyst review in the DoD. The agent-note glob is the staleness constant AGENT_MEMORY_GLOB of lib/manifest.mjs (D-SEC-PR28-01); tools/quality/lib/manifest.test.ts keeps the two equal."
     }
   ]
 }

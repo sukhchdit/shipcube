@@ -442,7 +442,8 @@ The file-name allow-list of the run directories = the fixed names above + `<suit
 3. Every `required_cases` ID of a required suite appears in a passing testcase name of that suite.
 4. A run that holds a JUnit file for a suite whose `status` is `planned` in the base manifest is rejected: it is not credited as evidence (PR #23 R1-m1). The check fails only when the change needed that run, so the PR that activates a suite passes with its own run uncredited, and from the next PR on the suite is required; a later activation whose run also carries the newly activated suite is rejected as a whole. A manifest-only activation PR is therefore optional for the first suite and the safe form for every later one.
 5. At the `gate` profile, every suite must be `active`, except suites listed under `deferred_at_gate` with a decision ID.
-6. Clean tree, no `SKIP_*` variable, ancestry and staleness rules of ADR-0023 amendments B and G.
+6. Clean tree, no `SKIP_*` variable, ancestry and staleness rules of ADR-0023 amendments B and G. The staleness allow-list is `docs/**` minus the API contract minus the tooling inputs, plus exactly the agent notes `.claude/agent-memory/*/*.md` (one shared constant, also listed in the `docs-or-ci-only` path rule so a memory-only PR selects no heavy suite; D-SEC-PR28-01), and a changed allowed path that is or was a symlink, submodule or executable entry is stale.
+7. At the `wave` and `gate` profiles, a `required_cases_pending` entry whose checkpoint is reached (without a decision ID), or a pending ID that a passing test case of the accepted run carries, fails the check; at `pr` the latter is a note (PR28-SEC-01, D-QA-014).
 
 ### 9.3 Manifest maintenance (D-QA-010)
 

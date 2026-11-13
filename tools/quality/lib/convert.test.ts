@@ -7,11 +7,13 @@ import { describe, expect, it } from '@jest/globals';
 import {
   convertNative,
   gitleaksToCases,
+  hostScrubList,
   jestToCases,
   k6ToCases,
   lighthouseToCases,
   redactGitleaks,
   sanitizeNative,
+  scrubCases,
   scrubPaths,
   strykerToCases,
   trivyToCases,
@@ -258,5 +260,115 @@ describe('convertNative and scrubPaths', () => {
     expect(scrubPaths('at C:\\Users\\me\\repo\\a.ts and C:/Users/me/repo/b.ts', ['C:\\Users\\me\\repo'])).toBe(
       'at <root>\\a.ts and <root>/b.ts',
     );
+  });
+});
+
+describe('host path scrubbing (PR28-SEC-02, CWE-532)', () => {
+  // A fake Windows host: the temp directory is reported in 8.3 form, the home directory in long form.
+  const shortTmp = String.raw`C:\Users\ABCDEF~1\AppData\Local\Temp`;
+  const longHome = String.raw`C:\Users\Abcdefghi`;
+  const longTmp = String.raw`C:\Users\Abcdefghi\AppData\Local\Temp`;
+  const repo = String.raw`D:\work\shipqube`;
+  const env = { TEMP: shortTmp, TMP: shortTmp, USERPROFILE: longHome, PATH: String.raw`C:\Windows` };
+  const realpath = (path: string): string => (path.includes('~1') ? path.replace(String.raw`ABCDEF~1`, 'Abcdefghi') : path);
+  const list = hostScrubList({ repoRoot: repo, homeDir: longHome, tmpDir: shortTmp, env, realpath });
+
+  it('the list holds the root, home, temp directory, their real paths and the env values, longest first', () => {
+    expect(list).toEqual(expect.arrayContaining([repo, longHome, shortTmp, longTmp]));
+    expect(list.map((p) => p.length)).toEqual([...list.map((p) => p.length)].sort((a, b) => b - a));
+    expect(new Set(list).size).toBe(list.length);
+    expect(list).not.toContain(String.raw`C:\Windows`);
+  });
+
+  it('drops file system roots, one-segment values, trailing separators and unreadable real paths', () => {
+    const odd = hostScrubList({
+      repoRoot: 'C:\\',
+      homeDir: '/',
+      tmpDir: '/tmp/',
+      env: { TMPDIR: '/x', HOME: undefined },
+      realpath: () => {
+        throw new Error('ENOENT');
+      },
+    });
+    expect(odd).toEqual(['/tmp']);
+  });
+
+  it('the 8.3 temp directory, its long form and a title built from them leave no user-name fragment', () => {
+    const title = `refuses a path that is not under /run/secrets: ${shortTmp}\\outside-ab12\\s and ${longTmp.replaceAll('\\', '/')}/x`;
+    const out = scrubPaths(title, list);
+    expect(out).not.toMatch(/ABCDEF|Abcdef|~1/i);
+    expect(out).toContain('refuses a path that is not under /run/secrets: <root>');
+  });
+
+  it('JSON-escaped backslashes (a native report written with JSON.stringify) are scrubbed too', () => {
+    const json = JSON.stringify({ file: `${repo}\\a.ts`, tmp: `${shortTmp}\\x` });
+    const out = scrubPaths(json, list);
+    expect(out).not.toMatch(/shipqube|ABCDEF|~1/);
+    expect(out).toContain('<root>');
+  });
+
+  it('Windows prefixes match case-insensitively, POSIX prefixes exactly', () => {
+    expect(scrubPaths(String.raw`c:\users\abcdef~1\appdata\local\temp\q`, [shortTmp])).toBe(String.raw`<root>\q`);
+    expect(scrubPaths('/Tmp/x and /tmp/x', ['/tmp'])).toBe('/Tmp/x and <root>/x');
+  });
+
+  it.each([
+    [String.raw`at C:\Users\SomeoneElse\proj\a.ts:1`, '<home>'],
+    [String.raw`at c:/users/someoneelse/proj/a.ts`, '<home>'],
+    ['at /Users/someone/proj/a.ts', '<home>'],
+    ['at /home/someone/proj/a.ts', '<home>'],
+    ['at /c/Users/someone/proj/a.ts', '<home>'],
+    ['at /mnt/c/Users/someone/proj/a.ts', '<home>'],
+    ['at file:///C:/Users/someone/proj/a.ts', '<home>'],
+    [String.raw`at E:\scratch\ABCDEF~1\a.ts`, '<short>'],
+  ])('the generic pass catches a profile path the list missed: %s', (text, marker) => {
+    const out = scrubPaths(text, []);
+    expect(out).toContain(marker);
+    expect(out).not.toMatch(/someone|SomeoneElse|ABCDEF/i);
+  });
+
+  it.each([
+    ['no host path here, just /usr/lib/node and a/b/c'],
+    ['a ratio of a~1 and the word users'],
+    ['the /homepage route and /Usersettings'],
+  ])('the generic pass leaves ordinary text alone: %s', (text) => {
+    expect(scrubPaths(text, [])).toBe(text);
+  });
+
+  it('scrubCases scrubs name, classname and message of every case, and only those', () => {
+    const cases = [
+      { name: `t ${shortTmp}\\q`, classname: `${repo}\\a.test.ts`, status: 'failed' as const, message: `at ${longTmp}\\z`, time: 1 },
+      { name: 'plain', classname: 'plain', status: 'passed' as const },
+    ];
+    const out = scrubCases(cases, list);
+    expect(JSON.stringify(out)).not.toMatch(/ABCDEF|Abcdef|shipqube/i);
+    expect(out[0]).toMatchObject({ status: 'failed', time: 1 });
+    expect(out[1]).toEqual(cases[1]);
+  });
+
+  it('jestToCases scrubs test titles and file names, not only failure messages (the bootstrap.test.ts leak)', () => {
+    const report = {
+      testResults: [
+        {
+          name: `${repo}\\tools\\db\\bootstrap.test.ts`,
+          status: 'passed',
+          assertionResults: [
+            {
+              fullName: `refuses a path: ${shortTmp}\\bootstrap-unit-x1\\outside-y2\\s`,
+              status: 'passed',
+              duration: 1,
+              failureMessages: [],
+            },
+            { fullName: 'fine', status: 'passed', duration: 1, failureMessages: [] },
+          ],
+        },
+      ],
+    };
+    const cases = jestToCases(report, { root: repo, scrub: list });
+    expect(JSON.stringify(cases)).not.toMatch(/ABCDEF|Abcdef|~1/i);
+    expect(cases[0]).toMatchObject({
+      name: 'refuses a path: <root>\\bootstrap-unit-x1\\outside-y2\\s',
+      classname: 'tools/db/bootstrap.test.ts',
+    });
   });
 });
