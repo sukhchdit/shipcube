@@ -76,11 +76,19 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
     expect(performance.now() - started).toBeLessThan(2_500);
   });
 
-  it('AT-US-012-04: a failing audit check degrades worker readiness without failing it', async () => {
-    const { call } = await start(checksWith({ audit_partitions: failing('audit_partitions', false) }));
+  it('AT-US-012-04: a failing audit_chain check degrades worker readiness without failing it', async () => {
+    const { call } = await start(checksWith({ audit_chain: failing('audit_chain', false) }));
     expect(await call('/health/ready')).toMatchObject({
       status: 200,
-      body: { status: 'degraded', components: { ...allOk, audit_partitions: 'degraded' } },
+      body: { status: 'degraded', components: { ...allOk, audit_chain: 'degraded' } },
+    });
+  });
+
+  it('[PR12-SEC-02 item 3] a failing audit_partitions check takes worker readiness to 503', async () => {
+    const { call } = await start(checksWith({ audit_partitions: failing('audit_partitions', true) }));
+    expect(await call('/health/ready')).toMatchObject({
+      status: 503,
+      body: { status: 'unavailable', components: { ...allOk, audit_partitions: 'unavailable' } },
     });
   });
 

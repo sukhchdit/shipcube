@@ -27,6 +27,9 @@
     "../apps/api/src/platform/db/system-port.ts",
     "../apps/api/src/platform/db/tenant-db.ts",
     "../apps/api/src/platform/db/with-tenant-tx.ts",
+    "../apps/api/src/platform/health/checks/audit-chain.ts",
+    "../apps/api/src/platform/health/checks/audit-partitions.ts",
+    "../apps/api/src/platform/health/checks/catalog-reader.ts",
     "../apps/api/src/platform/runtime/log.ts",
     "../apps/api/src/platform/runtime/readiness.ts",
     "../apps/api/src/platform/runtime/shutdown.ts"

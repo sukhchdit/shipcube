@@ -19,3 +19,32 @@ platform_app SELECT public.roles
 # seed idempotency (TASK-023, migration 20261112030000_reference_dataset_versions): SYSTEM, SELECT only; the seed as
 # platform_migrator (owner) is the single writer (data-model §3.5, §4.4; PR13-SEC-04, D-ARCH-075).
 platform_app SELECT public.reference_dataset_versions
+
+# audit store (TASK-021, bootstrap lane prisma/bootstrap/10-audit.sql; data-model §4.4 grant matrix, C5): SYSTEM.
+# Append-only tables exactly SELECT, INSERT; audit_entries on the parent only, never on a partition (partitions carry
+# zero privileges). Mutable SYSTEM tables SELECT, INSERT, UPDATE. Never DELETE/TRUNCATE for platform_app.
+platform_app SELECT public.audit_entries
+platform_app INSERT public.audit_entries
+platform_app SELECT public.audit_checkpoint_heads
+platform_app INSERT public.audit_checkpoint_heads
+platform_app SELECT public.audit_anchors
+platform_app INSERT public.audit_anchors
+platform_app SELECT public.audit_pii_vault
+platform_app INSERT public.audit_pii_vault
+platform_app SELECT public.data_subjects
+platform_app INSERT public.data_subjects
+platform_app SELECT public.audit_stream_heads
+platform_app INSERT public.audit_stream_heads
+platform_app UPDATE public.audit_stream_heads
+platform_app SELECT public.audit_partitions
+platform_app INSERT public.audit_partitions
+platform_app UPDATE public.audit_partitions
+platform_app SELECT public.audit_chain_verifications
+platform_app INSERT public.audit_chain_verifications
+platform_app UPDATE public.audit_chain_verifications
+# erasure role (M4/M5 erasure job, OI-15): vault hard delete (admitted by audit_vault_guard only with an erasure
+# request id) and the data_subjects erasure marker.
+platform_erasure SELECT public.audit_pii_vault
+platform_erasure DELETE public.audit_pii_vault
+platform_erasure SELECT public.data_subjects
+platform_erasure UPDATE public.data_subjects (erased_at, updated_at, updated_by, version)

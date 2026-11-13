@@ -38,10 +38,13 @@ export type DbErrorReason =
   | 'NESTED_TENANT_TX'
   | 'TENANT_TX_CLOSED'
   | 'INVALID_TENANT_CONTEXT'
-  | 'DB_SESSION_CONTEXT_LEAK';
+  | 'DB_SESSION_CONTEXT_LEAK'
+  | 'AUDIT_IMMUTABLE'
+  | 'AUDIT_PARTITION_NAME_TAKEN';
 
 /** Security events raised by the data layer (sink injected by the composition root). */
-export type DbSecurityEvent = 'rls_write_rejected' | 'db_privilege_denied' | 'db_session_context_leak';
+export type DbSecurityEvent =
+  'rls_write_rejected' | 'db_privilege_denied' | 'db_session_context_leak' | 'audit_mutation_rejected' | 'audit_partition_squatted';
 
 export type DbErrorStatus = 403 | 404 | 409 | 500 | 503;
 
@@ -65,6 +68,25 @@ export const DB_RETRY_AFTER_SECONDS = 1;
 
 /** Prefix of PostgreSQL's RLS `WITH CHECK` rejection (as opposed to a missing privilege, also 42501). */
 const RLS_WITH_CHECK_PREFIX = 'new row violates row-level security policy';
+
+/**
+ * Trigger- and function-raised audit refusals (42501, or 23514 should a later guard use check_violation), classified
+ * by the message PREFIX the audit SQL fixes (data-model §5.2/§5.3/§5.7); the text after the prefix is never read or
+ * copied (ADR-0005 am. 10 item 6, PR11-SEC-11 c, D-ARCH-073). `lc_messages = 'C'` does not touch RAISE texts.
+ */
+const AUDIT_PREFIXES: readonly (readonly [prefix: string, reason: DbErrorReason, event: DbSecurityEvent])[] = [
+  ['AUDIT_IMMUTABLE:', 'AUDIT_IMMUTABLE', 'audit_mutation_rejected'],
+  ['AUDIT_VAULT_IMMUTABLE:', 'AUDIT_IMMUTABLE', 'audit_mutation_rejected'],
+  ['AUDIT_PARTITION_NAME_TAKEN', 'AUDIT_PARTITION_NAME_TAKEN', 'audit_partition_squatted'],
+  ['AUDIT_PARTITION_BOUNDS_MISMATCH', 'AUDIT_PARTITION_NAME_TAKEN', 'audit_partition_squatted'],
+];
+const TRIGGER_RAISED_STATES: ReadonlySet<string> = new Set(['42501', '23514']);
+
+/** The audit refusal a driver message starts with, if any. */
+function auditRefusal(text: string): DbErrorMapping | undefined {
+  const match = AUDIT_PREFIXES.find(([prefix]) => text.startsWith(prefix));
+  return match === undefined ? undefined : dbErrorMapping(500, match[1], { securityEvent: match[2] });
+}
 const SQLSTATE = /^[0-9A-Z]{5}$/;
 const PRISMA_CODE = /^P\d{4}$/;
 
@@ -186,8 +208,12 @@ export function mapDbError(error: unknown): DbErrorMapping {
   const originalCode = stringField(cause, 'originalCode');
   if (originalCode !== undefined && SQLSTATE.test(originalCode)) {
     const withState = (mapping: DbErrorMapping): DbErrorMapping => withPrisma({ ...mapping, sqlState: originalCode });
+    const text = TRIGGER_RAISED_STATES.has(originalCode)
+      ? (stringField(cause, 'originalMessage') ?? stringField(cause, 'message') ?? '')
+      : '';
+    const audit = auditRefusal(text);
+    if (audit !== undefined) return withState(audit);
     if (originalCode === '42501') {
-      const text = stringField(cause, 'originalMessage') ?? stringField(cause, 'message') ?? '';
       return text.startsWith(RLS_WITH_CHECK_PREFIX)
         ? withState(dbErrorMapping(403, 'RLS_WRITE_REJECTED', { securityEvent: 'rls_write_rejected' }))
         : withState(dbErrorMapping(500, 'DB_PRIVILEGE_DENIED', { securityEvent: 'db_privilege_denied' }));

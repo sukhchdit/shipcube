@@ -4,6 +4,7 @@ import request from 'supertest';
 
 import {
   createReadinessProbe,
+  type PendableComponent,
   pendingCheck,
   READINESS_CACHE_TTL_MS,
   READINESS_COMPONENTS,
@@ -15,7 +16,7 @@ import {
 import { defaultPipelineSlots, mountRoutes } from '../routing/pipeline.js';
 import { healthRoutes } from './router.js';
 
-const critical = (name: ReadinessComponent): boolean => name === 'database' || name === 'redis' || name === 'object_storage';
+const critical = (name: ReadinessComponent): boolean => name !== 'audit_chain';
 
 /** A check that fails with a message full of internals the body must never show (AT-US-012-05). */
 const failing = (name: ReadinessComponent): ReadinessCheck => ({
@@ -109,15 +110,33 @@ describe('US-012 liveness and readiness endpoints (api)', () => {
     expect(bodyOf(ready).components.redis).toBe('unavailable');
   });
 
-  it.each(['audit_partitions', 'audit_chain'] as const)(
-    'AT-US-012-04: a failing %s check reports degraded and readiness stays 200',
-    async (component) => {
-      const { app } = appWith(checksWith({ [component]: failing(component) }));
-      const ready = await request(app).get('/health/ready');
-      expect(ready.status).toBe(200);
-      expect(ready.body).toEqual({ status: 'degraded', components: { ...allOk, [component]: 'degraded' } });
-    },
-  );
+  it('AT-US-012-04: a failing audit_chain check reports degraded and readiness stays 200', async () => {
+    const { app } = appWith(checksWith({ audit_chain: failing('audit_chain') }));
+    const ready = await request(app).get('/health/ready');
+    expect(ready.status).toBe(200);
+    expect(ready.body).toEqual({ status: 'degraded', components: { ...allOk, audit_chain: 'degraded' } });
+  });
+
+  it('AT-US-012-04: a late audit partition (check resolves "degraded") reports degraded and readiness stays 200', async () => {
+    const late: ReadinessCheck = { name: 'audit_partitions', critical: true, check: () => Promise.resolve('degraded' as const) };
+    const { app } = appWith(checksWith({ audit_partitions: late }));
+    const ready = await request(app).get('/health/ready');
+    expect(ready.status).toBe(200);
+    expect(ready.body).toEqual({ status: 'degraded', components: { ...allOk, audit_partitions: 'degraded' } });
+  });
+
+  it('[PR12-SEC-02 item 3, D-ARCH-076] a failing audit_partitions check (missing month or squat) makes readiness 503', async () => {
+    const { app } = appWith(checksWith({ audit_partitions: failing('audit_partitions') }));
+    const ready = await request(app).get('/health/ready');
+    expect(ready.status).toBe(503);
+    expect(ready.body).toEqual({ status: 'unavailable', components: { ...allOk, audit_partitions: 'unavailable' } });
+  });
+
+  it('"degraded" from a component whose schema enum lacks it fails closed', async () => {
+    const odd: ReadinessCheck = { name: 'redis', critical: true, check: () => Promise.resolve('degraded' as const) };
+    const { app } = appWith(checksWith({ redis: odd }));
+    expect(bodyOf(await request(app).get('/health/ready')).components.redis).toBe('unavailable');
+  });
 
   it('AT-US-012-05: bodies hold no version, host name, error message or stack, and nothing beyond the schema', async () => {
     const { app } = appWith(checksWith({ database: failing('database'), audit_chain: failing('audit_chain') }));
@@ -159,17 +178,19 @@ describe('US-012 liveness and readiness endpoints (api)', () => {
   it.each([
     ['a missing component', checksWith().slice(1)],
     ['a duplicated component', [...checksWith(), pendingCheck('redis')]],
-    ['an audit check marked critical', checksWith({ audit_chain: { ...pendingCheck('audit_chain'), critical: true } })],
+    ['an audit check marked critical', checksWith({ audit_chain: { ...passing('audit_chain'), critical: true } })],
   ])('refuses %s at construction', (_label, checks) => {
     expect(() => createReadinessProbe(checks)).toThrow(TypeError);
   });
 
-  it('[PR9-SEC-11] a pending audit check reports degraded (never ok); a pending critical check passes', async () => {
-    const pending = { object_storage: pendingCheck('object_storage'), audit_partitions: pendingCheck('audit_partitions') };
-    const { app } = appWith(checksWith({ ...pending, audit_chain: pendingCheck('audit_chain') }));
+  it('[PR9-SEC-11, PR #24 R1-n2] an audit component is never stubbed; a pending critical check passes', async () => {
+    for (const name of ['audit_partitions', 'audit_chain'] as const) {
+      expect(() => pendingCheck(name as ReadinessComponent as PendableComponent)).toThrow(TypeError);
+    }
+    const { app } = appWith(checksWith({ object_storage: pendingCheck('object_storage') }));
     const ready = await request(app).get('/health/ready');
     expect(ready.status).toBe(200);
-    expect(ready.body).toEqual({ status: 'degraded', components: { ...allOk, audit_partitions: 'degraded', audit_chain: 'degraded' } });
+    expect(ready.body).toEqual({ status: 'ok', components: allOk });
   });
 });
 
