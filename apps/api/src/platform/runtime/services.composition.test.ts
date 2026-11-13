@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 import { describe, expect, it } from '@jest/globals';
 import type { Config, Secret } from '@platform/config';
 
 import { StorageConfigError } from '../storage/s3-object-storage.js';
 import { createRuntimeLog } from './log.js';
+import { installProcessErrorHandlers } from './process-errors.js';
 import { createRuntimeServices } from './services.js';
 
 /** Unreachable dependencies: nothing listens on port 1 of the loopback interface. */
@@ -112,5 +114,26 @@ describe('createRuntimeServices composition (TASK-019: object storage wired into
     expect((thrown as Error).message).toContain('STORAGE_ACCESS_KEY_ID_REF');
     expect((thrown as Error).message).toContain('STORAGE_SECRET_ACCESS_KEY_REF');
     expect((thrown as Error).message).not.toContain(value);
+  });
+
+  it('[PR30-SEC-11] the StorageConfigError of a half-written pair reaches the process handlers as one redacted fatal line', () => {
+    // The entry points install the handlers above createRuntimeServices, so its top-level throw is an uncaught exception.
+    const value = randomBytes(12).toString('hex');
+    const raw: string[] = [];
+    const log = createRuntimeLog('api', { write: (line: string) => raw.push(line) });
+    const source = new EventEmitter();
+    const exits: number[] = [];
+    installProcessErrorHandlers({ log, exit: (code) => exits.push(code), source });
+    try {
+      createRuntimeServices(config, 'api', log, new Map([['STORAGE_SECRET_ACCESS_KEY_REF', secret(value)]]));
+    } catch (error) {
+      source.emit('uncaughtException', error, 'uncaughtException');
+    }
+    const lines = raw.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 'fatal', event: 'process.uncaught_exception', err: { name: 'StorageConfigError' } });
+    expect(String((lines[0]?.['err'] as Record<string, unknown> | undefined)?.['message'])).toContain('STORAGE_ACCESS_KEY_ID_REF');
+    expect(raw.join('')).not.toContain(value);
+    expect(exits).toEqual([1]);
   });
 });

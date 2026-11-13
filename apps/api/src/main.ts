@@ -21,8 +21,10 @@ const log = createRuntimeLog('api', process.stdout, {
   level: config.APP_LOG_LEVEL,
   context: requestLogContext,
 });
-// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06, R2-n7).
-installProcessErrorHandlers({ log, exit: exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) }) });
+// Every exit after a log line lets the line reach stdout first (R2-n7, R3-n1).
+const exit = exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) });
+// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06).
+installProcessErrorHandlers({ log, exit });
 // A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
 const services = createRuntimeServices(config, 'api', log, secrets);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
@@ -40,6 +42,7 @@ try {
   // DOCS_ENABLED without a readable contract is a deployment error: exit like a rejected configuration.
   if (!(error instanceof DocsSpecError)) throw error;
   log.error('api.docs_unavailable', { error: error.name });
+  // A bare exit: top-level control flow needs `never` here (`app` is unassigned), and nothing else is queued yet.
   process.exit(CONFIG_EXIT_CODE);
 }
 
@@ -51,7 +54,7 @@ const server = app.listen(config.APP_PORT, (error?: Error) => {
 });
 server.on('error', (error: Error) => {
   log.error('api.listen_failed', { error: error.name });
-  process.exit(1);
+  exit(1);
 });
 
 const shutdown = createShutdown({
@@ -64,6 +67,6 @@ const shutdown = createShutdown({
   forceClose: () => server.closeAllConnections(),
   resources: services.resources,
   log,
-  exit: (code) => process.exit(code),
+  exit,
 });
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => void shutdown(signal));

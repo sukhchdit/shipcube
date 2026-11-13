@@ -13,7 +13,7 @@ export interface ProcessErrorSource {
 
 export interface ProcessErrorHandlerOptions {
   readonly log: Pick<PlatformLogger, 'fatal'>;
-  /** Called once, with 1: `exitAfterFlush({ stream: process.stdout, exit: ... })` in the entry points. */
+  /** Requested once, with 1: `exitAfterFlush({ stream: process.stdout, exit: ... })` in the entry points. */
   readonly exit: (code: number) => void;
   /** Default `process`. */
   readonly source?: ProcessErrorSource;
@@ -38,10 +38,12 @@ export interface ExitAfterFlushOptions {
 }
 
 /**
- * An `exit` for installProcessErrorHandlers that lets the fatal line reach the stream first (PR #20 R2-n7). stdout is
- * synchronous for files and pipes on Linux, but a pipe is asynchronous on Windows, where `process.exit` straight after
- * the write can drop the line. This writes an empty chunk, whose callback runs once the earlier chunks are flushed,
- * and exits from that callback; a timer exits anyway if the stream never calls back. Exits once.
+ * An `exit` that lets the last log line reach the stream first (PR #20 R2-n7, R3-n1): used for the fatal handlers, the
+ * listen failure and the shutdown exit of the entry points. Node's stdout is synchronous for files, and for pipes on
+ * Linux and Windows (code review R3 measured a 4 MB line through a paused pipe on Windows), but asynchronous for a
+ * Windows TTY and platform-dependent elsewhere (Node "A note on process I/O"); where it is asynchronous,
+ * `process.exit` straight after the write can drop the line. This writes an empty chunk, whose callback runs once the earlier chunks are flushed, and exits from
+ * that callback; a timer exits anyway if the stream never calls back. Each returned call exits at most once.
  */
 export function exitAfterFlush(options: ExitAfterFlushOptions): (code: number) => void {
   const setTimer = options.setTimer ?? setTimeout;
@@ -62,7 +64,11 @@ export function exitAfterFlush(options: ExitAfterFlushOptions): (code: number) =
   };
 }
 
-/** Registers the handlers; the process exits with 1 after the first fatal line (crash-only, never resumes). */
+/**
+ * Registers the handlers; the process exits with 1 after the first fatal line (crash-only, never resumes). The exit is
+ * requested once; because it may wait for the flush, a second error arriving before the exit can add its own
+ * (identifier-only) fatal line, so there is at least one fatal line per crash (R3-n5).
+ */
 export function installProcessErrorHandlers(options: ProcessErrorHandlerOptions): void {
   const source = options.source ?? process;
   let exiting = false;

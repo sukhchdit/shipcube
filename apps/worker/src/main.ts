@@ -22,8 +22,10 @@ const log = createRuntimeLog('worker', process.stdout, {
   level: config.APP_LOG_LEVEL,
   context: jobLogContext,
 });
-// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06, R2-n7).
-installProcessErrorHandlers({ log, exit: exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) }) });
+// Every exit after a log line lets the line reach stdout first (R2-n7, R3-n1).
+const exit = exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) });
+// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06).
+installProcessErrorHandlers({ log, exit });
 // A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
 const services = createRuntimeServices(config, 'worker', log, secrets);
 const server = createWorkerHealthServer(services.probe);
@@ -35,7 +37,7 @@ await services.startup();
 server.listen(config.APP_HEALTH_PORT, () => log.info('worker.health_listening', { port: config.APP_HEALTH_PORT }));
 server.on('error', (error: Error) => {
   log.error('worker.listen_failed', { error: error.name });
-  process.exit(1);
+  exit(1);
 });
 
 const shutdown = createShutdown({
@@ -48,6 +50,6 @@ const shutdown = createShutdown({
   forceClose: () => server.closeAllConnections(),
   resources: services.resources,
   log,
-  exit: (code) => process.exit(code),
+  exit,
 });
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => void shutdown(signal));
