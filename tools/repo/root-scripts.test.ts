@@ -59,6 +59,7 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
     'test:coverage',
     'build',
     'deps:rebuild',
+    'quality:check-evidence',
   ])('[AT-US-001-04] root script "%s" exists', (name) => {
     expect(rootPkg.scripts[name]).toEqual(expect.any(String));
   });

@@ -18,5 +18,5 @@
 - [P5 PR-0020 logging](project_p5_pr20_logging.md) — TASK-010 R2 @9647907 PASS_W_F-U; 01 closed; new LOW 13, INFO 14-17; PR #21 union needs merge-only round (§R2.7)
 - [P5 PR-0021 OpenAPI pipeline](project_p5_pr21_openapi_pipeline.md) — TASK-017 R1 b0ede35 + R2 b31483b/fc2 e046ea2 PASS_W_F-U; 01 closed; new INFO 08/09; ref-parser safeUrl fact; PR #20 union checks
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10
-- [P5 PR-0023 lane B evidence](project_p5_pr23_lane_b.md) — TASK-011 R1 @f61e55d PASS_W_COND; 01 tools/quality not in CODEOWNERS, 02 nothing active; activation S5/S5b; Ajv from root
+- [P5 PR-0023 lane B evidence](project_p5_pr23_lane_b.md) — TASK-011 R2 @c0b1b31 PASS_W_COND; 01 closed; W0-ACT-1 runner gap; 03/04/05 due before Wave-0-exit activation
 - [P5 PR-0024 audit store](project_p5_pr24_audit_store.md) — TASK-021 R1 @6f498c4 PASS_W_COND; 01 multirange/side-effect squat (C1), 02 readiness `=` hijack, 03 rule-11 RESET; PG18 facts; Docker recipe
