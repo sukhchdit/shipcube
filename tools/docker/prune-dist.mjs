@@ -37,6 +37,12 @@ const UNUSED_POSTGRESQL_COMPILER =
   /(?:^|\/)@prisma\/client\/runtime\/query_compiler_(?:small_bg\.postgresql\.|fast_bg\.postgresql\.(?:wasm-base64\.)?js$)/;
 
 /**
+ * Test seams compiled into dist that production never mounts: the query counter of TASK-276
+ * (apps/api/src/platform/db/query-counter.ts; PR #34 security review checkpoint: the image build excludes it).
+ */
+const TEST_SEAM = /(?:^|\/)platform\/db\/query-counter\.(?:js|d\.ts)(?:\.map)?$/;
+
+/**
  * Decides whether one entry goes. Pure, so the rules are unit-tested without a file system.
  * @param {string} relPath path relative to the pruned root, `/`-separated
  * @param {boolean} isDirectory
@@ -50,6 +56,7 @@ export function shouldRemove(relPath, isDirectory, options = {}) {
     return !nodeModules && ['fixtures', 'tests', 'spikes'].includes(name);
   }
   if (/\.test\.[^/]+$/.test(name)) return true;
+  if (!nodeModules && TEST_SEAM.test(relPath)) return true;
   if (name.endsWith('.tsbuildinfo')) return true;
   if ((options.declarations === true || nodeModules) && DECLARATION.test(name)) return true;
   if (nodeModules && name.endsWith('.map')) return true;

@@ -35,6 +35,12 @@ describe('prune-dist rules', () => {
     ['pg/lib/index.js', false, { nodeModules: true }, false],
     ['some-pkg/tests', true, { nodeModules: true }, false],
     ['some-pkg/lib/x.test.js', false, { nodeModules: true }, true],
+    // PR #34 security checkpoint: the TASK-276 query counter (a test seam) never reaches an image.
+    ['platform/db/query-counter.js', false, {}, true],
+    ['platform/db/query-counter.js.map', false, {}, true],
+    ['platform/db/query-counter.d.ts', false, {}, true],
+    ['platform/db/query-counters.js', false, {}, false],
+    ['platform/db/client.js', false, {}, false],
     ['@prisma/client/runtime/query_compiler_fast_bg.mysql.wasm-base64.mjs', false, { nodeModules: true }, true],
     ['@prisma/client/runtime/query_compiler_small_bg.sqlserver.js', false, { nodeModules: true }, true],
     ['@prisma/client/runtime/query_compiler_fast_bg.cockroachdb.mjs', false, { nodeModules: true }, true],
