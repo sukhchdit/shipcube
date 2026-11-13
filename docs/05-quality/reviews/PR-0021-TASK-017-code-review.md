@@ -290,3 +290,98 @@ All routings are accepted.
 - **S8.** R2-m1: array and optional-group mounts at `/api/v1`, and root sub-apps, can expose undocumented aliases with a green drift gate (the same class as S1).
 - **S9.** R2-n1: the `no-relative-packages` ignore can be bypassed by traversal in `tests/api/*.api.test.ts` (test code only).
 - **S10.** R2.5: the PR #20 union must move `routePrefix`, not exempt path-mounted middleware from the walker.
+
+
+## Round 3 (head e046ea2, delta drift.ts)
+
+| Field | Value |
+|---|---|
+| Head reviewed | `e046ea217e9367f2059b9c594993b4c097c4cdaa`, one commit on `b31483b`: `e046ea2 fix(api): drift check reports array, optional-group and sub-app mounts (TASK-017)` |
+| Scope | `git diff b31483b e046ea2`: `tools/openapi/drift.ts`, `tools/openapi/drift.test.ts`, `tools/openapi/README.md` (one sentence), `apps/api/src/app.ts` (comment reflow). Nothing else was read or re-reviewed. |
+| Fix-cycle comment | PR #21 issuecomment 6842446775 |
+| Reviewer | code-reviewer, 2026-11-13 |
+| CI | Lane A run 43355654201 on `e046ea2`: `fast-lane` green; Gitleaks and Semgrep green; the only red step is "Security-owned paths need a review record" (and `ci-gate` because of it). Its log says the record names `b0ede35` while `eslint.config.mjs`, `jest.config.ts`, `package.json`, `tools/lint/*` changed after it, which is the round-1 state; it clears when the security round-2 record on `b31483b` lands. |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-m1 is closed for every shape I named (array alias, three optional-group forms, root Express sub-app) and the
+         walker still reports 0 unrecognised on the real composed app. R2-n2 is verified (the dropped condition was
+         redundant) and R2-n3 is fixed. My wider probe found two residual gaps of the same class that the fix does not
+         claim to cover (RegExp mounts with alternation, sub-app mounted on a Router); both are composition-root only,
+         not regressions, and are recorded below with an owner. The substitution probe is NOT redundant: keep it and
+         add one test case.
+FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR (residual, routed), 2 NIT
+```
+
+### R3.1 What I verified myself
+
+Same memory-constrained mode as round 2: a `git archive e046ea2` scratch copy with a `node_modules` junction to the main checkout (lockfile unchanged by the delta, so Express 5.3.0, router 2.2.0 and path-to-regexp 8.4.2 are the same ones I used in round 2). The copy and junction are removed; the PR worktree is clean at `e046ea2`; main's `node_modules` still has 740 entries; no `C:\node_modules` junction.
+
+| Check | Result |
+|---|---|
+| `tools/openapi` unit project (drift, contract, lint, types-drift) | 4 suites, 29/29 pass |
+| `prettier --check` on the 4 delta files | clean |
+| `eslint --max-warnings 0` on `drift.ts`, `drift.test.ts`, `app.ts` | clean |
+| Walker probe, 23 mount shapes on a root router (`probe-walker.ts`) | Reported as unrecognised: `/api/:version`, `/*rest`, prefix `/api`, array alias `['/api/v1','/hidden']`, `/api/v1{/:x}`, `/api{/:v}/v1`, `/api/v1{*rest}`, `{/:p}/api/v1`, `/api/v1/*rest`, `/api/v1/:x`, `/api/docs{/:x}`, array docs alias; path handler and path sub-app (as `middleware`). Resolved correctly: literal `/api/v1`, single-element array `['/api/v1']`, `/api/v1/` (identical matcher), `/API/v1` (case-insensitive, same path). `/api/docs` excluded. Root middleware skipped; root router recursed. |
+| The 6 round-2 shapes + root sub-app | All reported. The root sub-app on an **Application** (`app.use(express())`, wrapped as `mounted_app`) is reported as "Express sub-app mounted without a path" in the unit test. |
+| Real composed app (`loadApiMounts()` + the real walk options) | 2 routes, **0 unrecognised** |
+| Real HTTP, `use('/api/v1{/:x}', r)` | `/api/v1/anything/secret` 200 (the optional parameter absorbs a segment): the exposure is real, and the walker now reports the mount |
+
+Mutants on the 18 `drift.test.ts` tests:
+
+| Mutant | Result |
+|---|---|
+| Drop the single-matcher guard | killed (1) |
+| Drop the insert-probe | killed (1) |
+| Drop the consume check | killed (1) |
+| Drop `&& layer.path !== relative` inside the consume check | killed (6) |
+| Drop the `mounted_app` report | killed (1) |
+| Drop the substitution probe | **survives** (see R3.3) |
+
+### R3.2 R2-n2 ruling: verified, the removal is correct
+
+`layer.path !== relative` as a top-level guard is gone. The prefix mount `use('/api', inner)` is rejected anyway: the substitution probe (`/api/__drift_probe__` matches `/api`), the insert-probe (`/api/__drift_probe__/v1` matches) and the consume check (`layer.path` is `/api`, not `/api/v1`) each reject it independently. The probe shows it reported, and the new `'a prefix of the mount path'` case pins it. The condition survives only inside `consumesExtra`, where it is load-bearing (6 tests fail without it). R2-n3 is fixed: the `app.ts` header is reflowed to the 120-column style with identical wording (diff is comment-only).
+
+### R3.3 Surviving mutant ruling: keep the substitution probe, and it is NOT subsumed
+
+The orchestrator default (keep) is right, but the premise that insert-probe plus consume-check subsume it is wrong. For a **leading** parameter the substitution probe is the only check that rejects:
+
+| Mount | Without substitution probe | With it |
+|---|---|---|
+| `use('/:x/v1', inner)` | resolves as `/api/v1` (fail-open: serves `/zzz/v1/…`) | reported |
+| `use('/:x/docs', inner)` | resolves as the excluded `/api/docs`, so its routes vanish from the walk | reported |
+
+The insert-probe puts the segment before the last segment (`/__p__/api/v1` does not match `/:x/v1`), and the consume probe leaves `layer.path` equal to the candidate, so neither fires. The mutant survives only because no test uses a leading parameter. Fix in R3-n1.
+
+### R3.4 CODEOWNERS / rule (d)
+
+`git diff --name-only b31483b e046ea2` is exactly the four files above. None matches a `.github/CODEOWNERS` pattern (`apps/api/src/app.ts` and `tools/openapi/` are not owned). I also ran the repository's own checker over the range, `node tools/ci/check-security-owned-paths.mjs --root . --base b31483b --head e046ea2 --pr 21`, which printed `not-required`. The security round-2 record on `b31483b` therefore stays valid for this head under rule (d); the red lane-A record step needs only that record to exist.
+
+### R3.5 Findings
+
+| ID | Severity | file:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-m1 | MINOR (residual, not a regression; same output at `b31483b`) | `tools/openapi/drift.ts` `resolveMountPath` (:147-163); `tools/openapi/README.md:18-21` | A **RegExp** mount of the literal path with alternation resolves as the literal and hides the extra paths. Verified over real HTTP: `use(/^\/api\/(v1\|v2)/, r)` reports only `GET /api/v1/things` but serves `/api/v2/things` (200); `use(/^\/(api\|x)\/v1/, r)` serves `/x/v1/things` (200). Simple regexes such as `/\/api\/v1/` are already rejected. The router's matcher is a closure, so a regexp cannot be told from a string by inspection. The README line lists "RegExps" among the reported shapes, which is true for route layers (`router.get(/re/)`) but not for mounts. | Not in this PR. Record in D-TASK017-01 with owner TASK-020 (the composition root and `routePrefix` land there). Cheap hardening to evaluate then: reject a resolved layer whose matcher returns non-empty `params` for the candidate (catches capturing groups) and/or forbid RegExp `use()` paths by lint at `app.ts`. In this PR, if the README is touched anyway, qualify the sentence: "RegExp route paths". |
+| R3-n1 | NIT | `tools/openapi/drift.test.ts:128-136` (`mountShapes`) | No case has a **leading** parameter, which is why the substitution-probe mutant survives (R3.3). | Add `'a leading parameter': (router) => router.use('/:tenant/v1', inner)` (and optionally `/:tenant/docs`, which today would be silently treated as the excluded docs mount). One line; kills the mutant. |
+| R3-n2 | NIT | `tools/openapi/drift.ts:187-192` | The sub-app guard keys on `layer.name === 'mounted_app'`, which only exists when the sub-app is mounted on an **Application**. A path-less sub-app on a **Router** (`routes.use(express())`, `api.use(express())`, or inside a module) keeps the function name `app`, is not a router, and is skipped as root middleware, yet serves its routes (verified: `GET /hidden` 200, walker reports `[]`). | Duck-type it as well: `typeof handle.handle === 'function' && typeof handle.set === 'function'` next to the `SUB_APP_HANDLER` test. I applied this on the copy: the Router-level sub-app is reported, the real app stays at 0 unrecognised, and the root-middleware and root-router probes are unchanged. Optional in this PR; otherwise fold into the R3-m1 D-TASK017-01 line. |
+
+### R3.6 Merge conditions (round 3)
+
+1. R3-m1 (and R3-n2 if not fixed) recorded in D-TASK017-01 with owner TASK-020, by the orchestrator. R3-n1 is optional in this PR (a test-only line; if it is added, the delta is `drift.test.ts` only, not an owned path, no further review needed).
+2. The security-analyst round-2 record naming `b31483b` or later (R2.7 condition 1). Rule (d) holds for `e046ea2`, so no new security delta is needed for this commit.
+3. Merge order with PR #20 and the `routePrefix` move: unchanged from R2.5.
+4. Fast-lane green on the final head (it is green on `e046ea2`), then squash merge.
+
+R2-m1 is closed. R2-n2, R2-n3 closed. R2-n1 (eslint regex) stays routed to TASK-020; R2-n4 remains the orchestrator's.
+
+### R3.7 GOOD (keep)
+
+- Every new shape is pinned in a table-driven test that reports the shape name in the assertion (`{ shape, reported }`), so a regression names the culprit.
+- The probes remain behavioural (the layer's own matcher), not reads of `layer.regexp`; the new insert and consume probes extend the same idea with a named `withInsertedSegment` helper and a JSDoc that enumerates exactly what each probe rejects.
+- The author's claim "mutants for matchers, insert, consume and sub-app are killed" holds; the one he did not claim (substitution) is the one that survives.
+- The fix comment states precisely what was and was not applied (R2-n1 routed).
+
+### R3.8 SECURITY-FLAGS (for security-analyst)
+
+- **S8** (R2-m1) is closed by this commit: array, optional-group and Application-level sub-app mounts are now reported.
+- **S11 (new, residual).** R3-m1 / R3-n2: RegExp mounts with alternation, and Router-level path-less sub-apps, can still expose undocumented paths with a green drift gate. Composition root only; module routers fail closed. Owner TASK-020.
