@@ -20,6 +20,18 @@
 -- platform_audit_owner (inside ensure_audit_partitions or the bootstrap lane only). It is NOT SECURITY DEFINER, or
 -- current_user would always be its owner. It stops accidents and the migrator credential, not a cluster superuser
 -- (who can disable event triggers); detection for that actor is the signed anchor chain and the TASK-116 tripwire.
+--
+-- Post-state invariant (PR24-SEC-01, code review PR #24 R1-M2): pg_event_trigger_ddl_commands() reports the object a
+-- command returns, not every object it creates or moves as a side effect (the multirange of CREATE TYPE ... AS RANGE
+-- (multirange_type_name = ...), the indexes and owned sequences moved by ALTER TABLE | VIEW | MATERIALIZED VIEW ...
+-- SET SCHEMA). So after the per-row checks, every ddl_command_end also reads the catalogue state the command left and
+-- raises while any relation or type matching an audit table or partition name, or any routine named like an audit
+-- routine, exists in a protected schema with an owner other than platform_audit_owner (the guard function itself
+-- excepted). Accepted consequences: (1) while such a squat exists, every DDL by any other role fails, so migrations
+-- stop until a break-glass removal (fail closed; it generalises "DDL on a relation carrying a squatted index is
+-- refused"); (2) dropping the squat itself still passes this check, because it reads the post-drop state (the
+-- sql_drop branch below still refuses dropping an audit-named index); (3) the audit owner's own objects (partitions,
+-- their indexes and row types) are excluded by owner.
 SET search_path = pg_catalog, pg_temp;
 
 CREATE FUNCTION platform.audit_ddl_guard() RETURNS event_trigger
@@ -32,6 +44,9 @@ DECLARE
   v_ns    oid[];                                                             -- protected schema OIDs
   v_rel   oid;
   v_hit   boolean;
+  v_kind  text;                                                              -- post-state invariant: the squat found
+  v_nsp   text;
+  v_name  text;
   c_tbl   constant text   := '^(audit_[a-z0-9_]+|data_subjects)$';          -- audit tables and audit_entries_YYYY_MM partitions
   c_idx   constant text   := '^(ix_audit_|pk_audit_|ux_audit_|pk_data_subjects|ux_data_subjects__|audit_entries_)';
   c_fn    constant text[] := ARRAY['audit_forbid_mutation','audit_vault_guard','ensure_audit_partitions','audit_ddl_guard'];
@@ -69,15 +84,16 @@ BEGIN
       END IF;
       IF NOT COALESCE(v_hit, false) THEN
         IF r.object_type = 'schema' THEN
-          -- ALTER SCHEMA ... RENAME / OWNER TO on a protected schema raises unless the schema ends the command in its
-          -- bootstrap state (name public/platform, owner platform_schema_owner). That admits only the no-op re-assertion
-          -- "ALTER SCHEMA public OWNER TO platform_schema_owner" of 00-roles.sql, which tools/db/bootstrap.ts
-          -- reapplyDatabaseLevel re-runs on template clones; only the schema owner or a superuser can issue it.
+          -- A schema command on a protected schema raises unless the schema ends the command in its bootstrap state
+          -- (name public/platform, owner platform_schema_owner). So RENAME and OWNER TO another role raise, while every
+          -- command that leaves that state passes: the no-op re-assertion "ALTER SCHEMA public OWNER TO
+          -- platform_schema_owner" of 00-roles.sql (tools/db/bootstrap.ts reapplyDatabaseLevel re-runs it on template
+          -- clones), and also COMMENT ON SCHEMA / SECURITY LABEL. Only the schema owner or a superuser can issue them.
           SELECT r.objid = ANY (v_ns)
                  AND NOT COALESCE(n.nspname = ANY (c_nsnm)
                                   AND n.nspowner = pg_catalog.to_regrole('platform_schema_owner')::oid, false)
             INTO v_hit FROM pg_catalog.pg_namespace n WHERE n.oid = r.objid;
-        ELSIF r.object_type = 'function' THEN
+        ELSIF r.object_type IN ('function','procedure','aggregate') THEN
           SELECT p.proowner = v_owner OR (p.pronamespace = ANY (v_ns) AND p.proname = ANY (c_fn))
             INTO v_hit FROM pg_catalog.pg_proc p WHERE p.oid = r.objid;      -- also stops overloads planted under an audit name
         ELSIF r.object_type IN ('table','table column','index','trigger','policy','table constraint','rule') THEN
@@ -105,6 +121,28 @@ BEGIN
           DETAIL  = pg_catalog.format('%s on %s %s by %s', r.command_tag, r.object_type, r.object_identity, current_user);
       END IF;
     END LOOP;
+
+    -- PR24-SEC-01 post-state invariant (header): after the loop, so that it also runs for commands that report no row.
+    SELECT s.kind, n.nspname, s.nm INTO v_kind, v_nsp, v_name
+      FROM (SELECT 'relation' AS kind, c.relnamespace AS ns, c.relname::text AS nm
+              FROM pg_catalog.pg_class c
+             WHERE c.relnamespace = ANY (v_ns) AND c.relname ~ c_tbl AND c.relowner <> v_owner
+            UNION ALL
+            SELECT 'type', t.typnamespace, t.typname::text
+              FROM pg_catalog.pg_type t
+             WHERE t.typnamespace = ANY (v_ns) AND t.typname ~ c_tbl AND t.typowner <> v_owner
+            UNION ALL
+            SELECT 'routine', p.pronamespace, p.proname::text
+              FROM pg_catalog.pg_proc p
+             WHERE p.pronamespace = ANY (v_ns) AND p.proname = ANY (c_fn) AND p.proowner <> v_owner
+               AND p.oid <> pg_catalog.to_regprocedure('platform.audit_ddl_guard()')::oid) s
+      JOIN pg_catalog.pg_namespace n ON n.oid = s.ns
+     LIMIT 1;
+    IF v_kind IS NOT NULL THEN
+      RAISE EXCEPTION USING ERRCODE = '42501',
+        MESSAGE = 'audit objects are immutable (SEC-P3-03)',
+        DETAIL  = pg_catalog.format('%s leaves %s %s.%s squatting an audit name, by %s', TG_TAG, v_kind, v_nsp, v_name, current_user);
+    END IF;
 
   ELSIF TG_EVENT = 'sql_drop' THEN
     -- Dropped objects are already gone from the catalogue: schemas match by OID first, and by name only as the fallback

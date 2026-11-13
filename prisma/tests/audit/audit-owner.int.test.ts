@@ -364,6 +364,9 @@ describe('audit DDL guard: where privilege admits the migrator, the identity gua
       forbid_mutation_in_public:
         'CREATE FUNCTION public.audit_forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RETURN NEW; END $f$',
       guard_overload: 'CREATE FUNCTION platform.audit_ddl_guard(integer) RETURNS integer LANGUAGE sql AS $f$ SELECT 0 $f$',
+      // PR24-SEC-01 (c): routines other than functions under an audit routine name
+      ensure_procedure: 'CREATE PROCEDURE platform.ensure_audit_partitions(bigint) LANGUAGE sql AS $f$ SELECT 1 $f$',
+      forbid_mutation_aggregate: 'CREATE AGGREGATE platform.audit_forbid_mutation(integer) (SFUNC = int4pl, STYPE = integer)',
     };
     const outcomes = await directAndDynamic(dbs.tamper, statements);
     const control = await asMigrator(dbs.tamper, (client) => attempt(client, 'CREATE TABLE public.probe_control (id integer)'));
@@ -373,7 +376,9 @@ describe('audit DDL guard: where privilege admits the migrator, the identity gua
         id,
         code: '42501',
         refusedBy: 'guard',
-        detail: expect.stringMatching(/^CREATE (TABLE|FUNCTION) on (table|function) (public|platform)\..+ by platform_migrator$/),
+        detail: expect.stringMatching(
+          /^CREATE (TABLE|FUNCTION|PROCEDURE|AGGREGATE) on (table|function|procedure|aggregate) (public|platform)\..+ by platform_migrator$/,
+        ),
       });
       expect({ id, code: viaDo.code, refusedBy: viaDo.refusedBy }).toEqual({ id, code: '42501', refusedBy: 'guard' });
     }
@@ -399,11 +404,17 @@ describe('audit DDL guard: where privilege admits the migrator, the identity gua
       drop_table: await attempt(client, 'DROP TABLE public.f08_probe'),
       // PR12-SEC-02-a: any DDL on a relation that carries a squatted index is refused too (the squat is never extended)
       alter_squatted_table: await attempt(client, 'CREATE INDEX ix_f08_more ON public.f08_probe (id)'),
-      control: await attempt(client, 'DROP INDEX public.ix_f08_control', [
+      // PR24-SEC-01 post-state invariant: while the F-08 squat exists, every DDL by the migrator is refused
+      unrelated_ddl: await attempt(client, 'CREATE TABLE public.f08_unrelated (id integer)'),
+    }));
+    // control, on a squat-free clone: the migrator drops an ordinary index on its own table
+    const control = await asMigrator(dbs.tamper, (client) =>
+      attempt(client, 'DROP INDEX public.ix_f08_control', [
         'CREATE TABLE public.f08_control (id integer)',
         'CREATE INDEX ix_f08_control ON public.f08_control (id)',
       ]),
-    }));
+    );
+    expect(control).toEqual(OK);
     const guard = (detail: string | RegExp): unknown =>
       expect.objectContaining({
         code: '42501',
@@ -424,7 +435,7 @@ describe('audit DDL guard: where privilege admits the migrator, the identity gua
       drop_index_dynamic: guard(`DROP of index public.${F08_INDEX} by ${MIGRATOR}`),
       drop_table: guard(`DROP of index public.${F08_INDEX} by ${MIGRATOR}`),
       alter_squatted_table: guard(/^CREATE INDEX on index public.ix_f08_more by platform_migrator$/),
-      control: OK,
+      unrelated_ddl: guard(`CREATE TABLE leaves relation public.${F08_INDEX} squatting an audit name, by ${MIGRATOR}`),
     });
   });
 });
@@ -588,6 +599,12 @@ describe('audit DDL guard: one squatting probe per object kind (PR12-SEC-02)', (
       [probeTable],
       'ALTER TABLE public.squat_probe ADD COLUMN n integer GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME public.{name})',
     ],
+    // PR24-SEC-01 (a): ddl_command_end reports only the range type; its multirange takes the partition name
+    range_multirange: [[], 'CREATE TYPE public.squat_range AS RANGE (subtype = integer, multirange_type_name = public.{name})'],
+    range_multirange_platform: [
+      [],
+      'CREATE TYPE platform.squat_range AS RANGE (subtype = integer, multirange_type_name = platform.{name})',
+    ],
   };
 
   /**
@@ -596,7 +613,8 @@ describe('audit DDL guard: one squatting probe per object kind (PR12-SEC-02)', (
    * index they create or rename. ensure_audit_partitions still fails loudly on them (asserted above). Set to [] in the
    * commit that makes 90-audit-ddl-guard.sql check the index names of the affected relation.
    */
-  // PR12-SEC-02-a closed in the guard (index names of the altered relation are matched): no variant may bypass it.
+  // PR12-SEC-02-a closed in the guard (index names of the altered relation are matched), PR24-SEC-01 by the post-state
+  // invariant (the multirange side effect): no variant may bypass it.
   const KNOWN_GUARD_GAP: readonly string[] = [];
 
   async function squatThenEnsure(client: pg.Client, setup: readonly string[], sql: string): Promise<{ squat: Outcome; ensure?: Outcome }> {
@@ -633,6 +651,132 @@ describe('audit DDL guard: one squatting probe per object kind (PR12-SEC-02)', (
       }
     }
     expect(bypassing).toEqual(KNOWN_GUARD_GAP);
+  });
+});
+
+describe('audit DDL guard: post-state invariant (PR24-SEC-01, code review PR #24 R1-M2)', () => {
+  const squat = partitionName(7);
+  const invariant = (tag: string, kind: string, identity: string): string =>
+    `${tag} leaves ${kind} ${identity} squatting an audit name, by ${MIGRATOR}`;
+
+  /** Runs `sql` under a savepoint of the caller's transaction; returns its outcome and keeps the transaction usable. */
+  async function step(client: pg.Client, sql: string): Promise<Outcome> {
+    await client.query('SAVEPOINT step');
+    const outcome = await client.query(sql).then(() => OK, toOutcome);
+    await client.query(outcome.ok ? 'RELEASE SAVEPOINT step' : 'ROLLBACK TO SAVEPOINT step');
+    return outcome;
+  }
+
+  /**
+   * P-1 L2-L4: ALTER ... SET SCHEMA moves the relation's indexes and owned sequences, but ddl_command_end reports only
+   * the relation. Latent today (the migrator has no CREATE on the database), so the writable schema `evil` is created by
+   * the superuser inside the rolled-back transaction. [setup in evil, the move, its command tag].
+   */
+  const MOVES: Record<string, readonly [readonly string[], string, string]> = {
+    table_owned_sequence: [
+      ['CREATE TABLE evil.mover (id integer GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME evil.{name}))'],
+      'ALTER TABLE evil.mover SET SCHEMA public',
+      'ALTER TABLE',
+    ],
+    matview_index: [
+      ['CREATE MATERIALIZED VIEW evil.mover AS SELECT 1 AS id', 'CREATE INDEX {name} ON evil.mover (id)'],
+      'ALTER MATERIALIZED VIEW evil.mover SET SCHEMA public',
+      'ALTER MATERIALIZED VIEW',
+    ],
+    view_owned_sequence: [
+      ['CREATE VIEW evil.mover AS SELECT 1 AS id', 'CREATE SEQUENCE evil.{name} OWNED BY evil.mover.id'],
+      'ALTER VIEW evil.mover SET SCHEMA public',
+      'ALTER VIEW',
+    ],
+  };
+  const withName = (sql: string, name: string): string => sql.replaceAll('{name}', name);
+
+  async function moveInto(name: string): Promise<Record<string, Outcome>> {
+    return asSuperuser(dbs.tamper, async (client) => {
+      const outcomes: Record<string, Outcome> = {};
+      for (const [id, [setup, move]] of Object.entries(MOVES)) {
+        await client.query('BEGIN');
+        try {
+          await client.query(`CREATE SCHEMA evil AUTHORIZATION ${MIGRATOR}`);
+          await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
+          for (const statement of setup) await client.query(withName(statement, name));
+          outcomes[id] = await client.query(move).then(() => OK, toOutcome);
+        } finally {
+          await client.query('ROLLBACK');
+        }
+      }
+      return outcomes;
+    });
+  }
+
+  it('[PR24-SEC-01 (b)] objects moved into public by ALTER TABLE | MATERIALIZED VIEW | VIEW ... SET SCHEMA under a partition name are refused', async () => {
+    const outcomes = await moveInto(squat);
+    const expected: Record<string, unknown> = {};
+    for (const [id, [, , tag]] of Object.entries(MOVES)) {
+      expected[id] = expect.objectContaining({
+        code: '42501',
+        refusedBy: 'guard',
+        detail: invariant(tag, 'relation', `public.${squat}`),
+      });
+    }
+    expect(outcomes).toEqual(expected);
+  });
+
+  it('[PR24-SEC-01 (b)] control: the same moves under a non-audit name succeed', async () => {
+    const outcomes = await moveInto('probe_entries_2099_03');
+    expect(outcomes).toEqual(Object.fromEntries(Object.keys(MOVES).map((id) => [id, OK])));
+  });
+
+  it('[PR24-SEC-01] while a squat exists (planted with the guard suspended), unrelated migrator DDL is refused; dropping the squat passes and clears it', async () => {
+    /** [plant as the migrator, its removal, the reported kind, the reported identity]. */
+    const PLANTS: Record<string, readonly [string, string, string, string]> = {
+      multirange: [
+        `CREATE TYPE public.squat_range AS RANGE (subtype = integer, multirange_type_name = public.${squat})`,
+        'DROP TYPE public.squat_range',
+        'type',
+        `public.${squat}`,
+      ],
+      procedure: [
+        'CREATE PROCEDURE platform.ensure_audit_partitions(bigint) LANGUAGE sql AS $f$ SELECT 1 $f$',
+        'DROP PROCEDURE platform.ensure_audit_partitions(bigint)',
+        'routine',
+        'platform.ensure_audit_partitions',
+      ],
+      aggregate: [
+        'CREATE AGGREGATE platform.audit_forbid_mutation(integer) (SFUNC = int4pl, STYPE = integer)',
+        'DROP AGGREGATE platform.audit_forbid_mutation(integer)',
+        'routine',
+        'platform.audit_forbid_mutation',
+      ],
+    };
+    const unrelated = 'CREATE TABLE public.unrelated_probe (id integer)';
+    const outcomes = await asSuperuser(dbs.tamper, async (client) => {
+      const result: Record<string, { unrelated: Outcome; drop: Outcome; after: Outcome }> = {};
+      for (const [id, [plant, drop]] of Object.entries(PLANTS)) {
+        await client.query('BEGIN');
+        try {
+          await client.query('ALTER EVENT TRIGGER platform_audit_ddl_guard_end DISABLE');
+          await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
+          await client.query(plant);
+          await client.query('RESET ROLE');
+          await client.query('ALTER EVENT TRIGGER platform_audit_ddl_guard_end ENABLE ALWAYS');
+          await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
+          result[id] = { unrelated: await step(client, unrelated), drop: await step(client, drop), after: await step(client, unrelated) };
+        } finally {
+          await client.query('ROLLBACK');
+        }
+      }
+      return result;
+    });
+    const expected: Record<string, unknown> = {};
+    for (const [id, [, , kind, identity]] of Object.entries(PLANTS)) {
+      expected[id] = {
+        unrelated: expect.objectContaining({ code: '42501', refusedBy: 'guard', detail: invariant('CREATE TABLE', kind, identity) }),
+        drop: OK,
+        after: OK,
+      };
+    }
+    expect(outcomes).toEqual(expected);
   });
 });
 
