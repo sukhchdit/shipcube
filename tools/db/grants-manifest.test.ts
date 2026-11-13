@@ -6,10 +6,11 @@ import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 const entry = (name: string, extra: Partial<TableClassEntry> = {}): TableClassEntry => ({ module: 'm', name, class: 'TENANT', ...extra });
 
 describe('grant manifest (data-model §4.4, C5)', () => {
-  it('PR8-SEC-10: the committed manifest grants SELECT only on the authz catalogue and agrees with the table classes', () => {
+  it('PR8-SEC-10, D-ARCH-075: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions and agrees with the table classes', () => {
     const grants = loadGrantsManifest();
     expect(grantTuples(grants)).toEqual([
       'platform_app SELECT public.permissions *',
+      'platform_app SELECT public.reference_dataset_versions *',
       'platform_app SELECT public.role_permissions *',
       'platform_app SELECT public.roles *',
     ]);

@@ -484,6 +484,12 @@ const TENANT_DB: readonly Violation[] = [
     BOUNDARIES,
     'prisma/tests may import only',
   ],
+  [
+    'prisma/tests imports a prisma/ file outside prisma/seed (PR #5 R3-n1, PR #13 m6)',
+    'layering/prisma-tests-imports/prisma/tests/rls/bad-prisma-import.int.test.ts',
+    BOUNDARIES,
+    'prisma/tests may import only',
+  ],
 ];
 
 /** Warning-level rules ([title, file, rule]); `npm run lint` runs with --max-warnings 0, so each still blocks. */
@@ -687,7 +693,7 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ['expect-affected: results passed to expectAffected', `rules/expect-affected/${API}/orders/repository/ok-checked.ts`],
     ['withTenantTx imports the root client', 'layering/root-client-privacy/apps/api/src/platform/db/with-tenant-tx.ts'],
     [
-      'prisma/tests imports tools/db, tools/test-support, platform/db and its harness',
+      'prisma/tests imports tools/db, tools/test-support, platform/db, the seed framework and its harness (PR #13 m6)',
       'layering/prisma-tests-imports/prisma/tests/rls/ok-imports.int.test.ts',
     ],
   ])('allowed (TASK-016): %s', (_title, file) => {

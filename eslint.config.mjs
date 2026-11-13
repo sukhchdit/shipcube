@@ -174,6 +174,8 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/*/src/platform/db/client.ts', category: 'db-root-client' },
   { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
   { pattern: 'prisma/tests/**', category: 'prisma-tests' },
+  // The seed framework (TASK-023): prisma/tests/seed exercises it (D-ORCH-015 reconciliation, PR #13 code review m6).
+  { pattern: 'prisma/seed/**', category: 'prisma-seed' },
   { pattern: 'tools/test-support/**', category: 'test-support' },
   { pattern: 'tools/authz/**', category: 'tools-authz' },
   { pattern: PASSWORD_HASHER_MODULE, category: 'password-hasher' },
@@ -278,17 +280,20 @@ const BOUNDARIES_POLICIES = [
   { from: { file: { categories: { anyOf: ['db-platform-core', 'prisma-tests'] } } }, allow: { to: toLayer('db-root-client') } },
 
   // --- prisma/tests imports only what it exercises (TASK-016, PR #5 code review R3-n1): tools/db, tools/test-support,
-  //     the authz seed generator (tools/authz, authz-seed suite), the database platform, the generated client and
-  //     its own files (harness included). Packages, apps outside platform/db and other tools stay out.
+  //     the authz seed generator (tools/authz, authz-seed suite), the database platform, the generated client, the
+  //     seed framework (prisma/seed, seed suite; TASK-023, PR #13 code review m6) and its own files (harness
+  //     included). Packages, apps outside platform/db, other tools and the rest of prisma/ stay out.
   {
     from: { file: { categories: 'prisma-tests' } },
     disallow: { to: toLayer('package', 'app', 'tools', 'tests-workspace', 'prisma') },
     message:
-      'prisma/tests may import only tools/db, tools/test-support, tools/authz, apps/*/src/platform/db, prisma/generated and its own files (PR #5 R3-n1).',
+      'prisma/tests may import only tools/db, tools/test-support, tools/authz, apps/*/src/platform/db, prisma/generated, prisma/seed and its own files (PR #5 R3-n1, PR #13 m6).',
   },
   {
     from: { file: { categories: 'prisma-tests' } },
-    allow: { to: toLayer('tools-db', 'test-support', 'tools-authz', 'db-platform-core', 'prisma-generated', 'prisma-tests') },
+    allow: {
+      to: toLayer('tools-db', 'test-support', 'tools-authz', 'db-platform-core', 'prisma-generated', 'prisma-seed', 'prisma-tests'),
+    },
   },
 
   // --- The bcrypt family is confined to the PasswordHasher implementation (D-ARCH-042, ADR-0006 am. 16): import,
