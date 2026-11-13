@@ -1,0 +1,6 @@
+// Miniature schema of the platform/system-model-owner fixture root (PR19-SEC-01, D-ARCH-080).
+model OutboxEvent {
+  id String @id @db.Uuid
+
+  @@map("outbox_events")
+}

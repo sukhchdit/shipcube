@@ -8,6 +8,7 @@ import type { ErrorObject, ValidateFunction } from 'ajv';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { type ContractOperation, listOperations, type OpenApiDocument } from '../../../tools/openapi/contract.js';
+import { cacheRequirement, type HeaderValue, requestCarriesCredential } from './cache-control.js';
 import { assertKnownFormats, registerContractFormats } from './formats.js';
 import { compilePathTemplate, matchAll, type PathTemplate, requestPathOf } from './path-match.js';
 
@@ -35,7 +36,7 @@ const SCHEMA_KEYWORDS = ['items', 'additionalProperties', 'not', 'if', 'then', '
 const SCHEMA_KEYWORDS_MORE = ['unevaluatedProperties', 'unevaluatedItems', 'contentSchema'];
 const SCHEMA_ARRAY_KEYWORDS = ['allOf', 'anyOf', 'oneOf', 'prefixItems'];
 
-export type HeaderValue = string | readonly string[] | undefined;
+export type { HeaderValue };
 
 /** What the validator needs from a response; Supertest responses map onto it in expect-contract.ts. */
 export interface ResponseUnderTest {
@@ -49,6 +50,8 @@ export interface ResponseUnderTest {
   readonly body: unknown;
   /** Raw body text where available; decides "has a body" for 204/304 and media types without a schema. */
   readonly text?: string | undefined;
+  /** Headers of the request (any case), when known: a credential makes every response `private, no-store` (SEC-TC-29). */
+  readonly requestHeaders?: Readonly<Record<string, HeaderValue>> | undefined;
 }
 
 export interface ContractValidator {
@@ -218,6 +221,15 @@ export function bodyExcerpt(body: unknown, text?: string): string {
 
 const statusKeys = (operation: ContractOperation): string[] => Object.keys(operation.operation.responses ?? {});
 
+/** Lower-case directive names of a Cache-Control value (`private, no-store, max-age=0` -> private, no-store, max-age). */
+export function cacheDirectivesOf(value: HeaderValue): string[] {
+  const joined = typeof value === 'string' ? value : (value ?? []).join(',');
+  return joined
+    .split(',')
+    .map((directive) => directive.split('=', 1)[0]?.trim().toLowerCase() ?? '')
+    .filter((directive) => directive !== '');
+}
+
 function responseFor(operation: ContractOperation, status: number): JsonObject | undefined {
   const responses = operation.operation.responses ?? {};
   return objectAt(responses[String(status)]) ?? objectAt(responses[`${Math.floor(status / 100)}XX`]) ?? objectAt(responses['default']);
@@ -288,6 +300,28 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
     if (response.status >= 500 && detail !== genericServerDetail) into.push(`/body/detail: a 5xx detail must be "${genericServerDetail}"`);
   };
 
+  /**
+   * SEC-TC-29 (T-06; the shared predicate of cache-control.ts): `private, no-store` on every response of an operation
+   * whose effective `security` has no anonymous alternative and on every response to a request that carried a
+   * credential, errors included; `no-store` on problems raised before the route is known (body parser, 404/405).
+   */
+  const checkCacheControl = (operation: ContractOperation | undefined, response: ResponseUnderTest, into: string[]): void => {
+    const requirement = cacheRequirement({
+      operation,
+      doc,
+      credential: requestCarriesCredential(response.requestHeaders),
+      problemCode: isObject(response.body) ? response.body['code'] : undefined,
+    });
+    if (requirement === undefined) return;
+    const directives = cacheDirectivesOf(headerOf(response.headers, 'cache-control'));
+    const missing = requirement.directives.filter((directive) => !directives.includes(directive));
+    if (missing.length > 0) {
+      into.push(
+        `/headers/cache-control: ${operation?.operationId ?? '<no operation>'} must not be stored (${requirement.reason}); Cache-Control must include ${requirement.directives.join(' and ')}, missing ${missing.join(', ')} (SEC-TC-29)`,
+      );
+    }
+  };
+
   /** 404 on an unknown route, 405 with `Allow` when the path exists for other methods (api/README.md §3). */
   const validateFrameworkResponse = (response: ResponseUnderTest, pathKnown: boolean, into: string[]): void => {
     const expected = pathKnown ? 405 : 404;
@@ -303,6 +337,7 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
     if (mediaTypeOf(headerOf(response.headers, 'content-type')) !== PROBLEM_MEDIA_TYPE) {
       into.push(`/headers/content-type: a framework ${String(expected)} must be ${PROBLEM_MEDIA_TYPE}`);
     }
+    checkCacheControl(undefined, response, into);
     if (pathKnown) {
       const allow = allowedOf(response);
       if (allow === undefined) into.push('/headers/allow: a 405 must list the allowed methods');
@@ -329,6 +364,7 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
   };
 
   const validateOperationResponse = (operation: ContractOperation, response: ResponseUnderTest, into: string[]): void => {
+    checkCacheControl(operation, response, into);
     const declared = responseFor(operation, response.status);
     if (declared === undefined) {
       into.push(
@@ -378,6 +414,7 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
       if (pathKnown && method === 'OPTIONS') validateOptionsResponse(response, deviations);
       else validateFrameworkResponse(response, pathKnown, deviations);
     } else if (lookup !== method) {
+      checkCacheControl(operation, response, deviations);
       if (responseFor(operation, response.status) === undefined) {
         deviations.push(`/status: status ${String(response.status)} is not declared for ${operation.operationId}`);
       }

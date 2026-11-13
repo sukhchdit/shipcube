@@ -4,18 +4,22 @@
  *
  * Compile time: the transaction client without `$transaction` (a nested call is a SAVEPOINT; savepoints are not exposed
  * until a use case appears, F-01), without the `*Unsafe` raw methods (string interpolation is an injection surface,
- * F-04) and without `$queryRawTyped` (PR11-SEC-15 f, see {@link TENANT_DB_OMITTED}).
+ * F-04), without `$queryRawTyped` (PR11-SEC-15 f, see {@link TENANT_DB_OMITTED}) and without the SYSTEM-class model
+ * delegates (PR19-SEC-01, D-ARCH-080: `./system-models.ts`; the owning module reaches them through
+ * `systemDelegates(tx)` in `./system-db.ts`, whose importers the `platform/system-model-owner` lint restricts).
  *
  * Run time: a DENY-BY-DEFAULT, DEEP `Proxy` (PR #11 M1, PR11-SEC-01). The Prisma 7 transaction client and every model
  * delegate carry back-references to unguarded clients: `$parent` (the same transaction without a guard; its
  * `_originalClient` is the root client on another pooled connection), a module-private symbol key, `constructor` and
  * the `_`-prefixed internals. A deny-list cannot keep up with that surface, so the guard exposes only:
- *  - top level: the model delegates (lower-camel names from the client's own runtime data model), `$queryRaw` and
- *    `$executeRaw` (tagged-template calls only, every value bound, Sql fragments refused: PR #11 m5, PR11-SEC-13);
+ *  - top level: the model delegates (lower-camel names from the client's own runtime data model) EXCEPT the SYSTEM
+ *    ones (a read throws `TenantDbAccessError` naming the `systemDelegates` port), `$queryRaw` and `$executeRaw`
+ *    (tagged-template calls only, every value bound, Sql fragments refused: PR #11 m5, PR11-SEC-13);
  *  - each model delegate, behind its own child guard: the Prisma model operations in {@link MODEL_OPERATIONS}, bound
  *    to the raw delegate (so a query extension's `getExtensionContext(this)` still sees Prisma's own object);
  *  - what an exposed operation returns: a thenable result (Prisma's `PrismaPromise`) is replaced by a LAZY guarded
- *    result exposing only `then` / `catch` / `finally` (R2-M1, PR11-SEC-12; see {@link guardResult}). Prisma's
+ *    result exposing only `then` / `catch` / `finally` (R2-M1, PR11-SEC-12; see {@link guardResult}); reading any
+ *    other string key of it throws `TenantDbAccessError` ({@link FLUENT_HINT}, PR #11 R3-n4). Prisma's
  *    `requestTransaction` (re-runs the query with a caller-chosen transaction: `null` is the root pool), `spec` and the
  *    FLUENT relation accessors (`db.user.findUnique(…).posts()`) are therefore not exposed: load relations with
  *    `include` / `select` instead.
@@ -26,12 +30,15 @@
  * `return db` from an async function are safe). `ownKeys` / `getOwnPropertyDescriptor` / `has` report only the exposed
  * keys; each guard's Proxy target is an empty, extensible, null-prototype object, so no target invariant constrains
  * what is reported. The guard is read-only, and `revoke()` (the transaction settled) makes the top level and every
- * child guard throw `TENANT_TX_CLOSED`, including delegate and method references taken inside the callback.
+ * child guard throw `TENANT_TX_CLOSED`, including delegate and method references taken inside the callback, and the
+ * SYSTEM delegates handed out by `systemDelegates(tx)` for the same handle.
  *
  * Generic over the transaction-client type because the generated client has no import alias for `apps/api` yet
  * (data-model §7.2); the composition root instantiates it as `TenantDb<Prisma.TransactionClient>`.
  */
 import { DbError, dbErrorMapping } from './map-db-error.js';
+import { SYSTEM_MODELS, type SystemModelName } from './system-models.js';
+import { registerSystemPort } from './system-port.js';
 
 /**
  * Members removed at compile time (ADR-0005 am. 10 item 1) and refused at run time. `$queryRawTyped` (PR11-SEC-15 f)
@@ -40,8 +47,18 @@ import { DbError, dbErrorMapping } from './map-db-error.js';
  */
 export const TENANT_DB_OMITTED = ['$transaction', '$queryRawUnsafe', '$executeRawUnsafe', '$queryRawTyped'] as const;
 
-/** `TenantDb = Omit<Prisma.TransactionClient, '$transaction' | '$queryRawUnsafe' | '$executeRawUnsafe' | '$queryRawTyped'>`. */
-export type TenantDb<TTx> = Omit<TTx, (typeof TENANT_DB_OMITTED)[number]>;
+/**
+ * `TenantDb = Omit<Prisma.TransactionClient, '$transaction' | '$queryRawUnsafe' | '$executeRawUnsafe' | '$queryRawTyped'
+ * | SystemModelName>`: the SYSTEM-class model delegates are not part of it (PR19-SEC-01, D-ARCH-080).
+ *
+ * The optional symbol-keyed member is a compile-time-only carrier of `TTx` (the guard reads every symbol other than
+ * `Symbol.toStringTag` as `undefined`, so it is truthful at run time): it lets `systemDelegates(tx)` infer the
+ * transaction-client type from a `TenantDb` argument, which TypeScript cannot do through `Omit`.
+ */
+export type TenantDb<TTx> = Omit<TTx, (typeof TENANT_DB_OMITTED)[number] | SystemModelName> & {
+  readonly [TENANT_DB_CLIENT]?: TTx;
+};
+declare const TENANT_DB_CLIENT: unique symbol;
 
 /** Top-level raw members exposed by the guard; both accept the tagged-template shape only (see {@link taggedOnly}). */
 export const TENANT_DB_RAW_MEMBERS = ['$queryRaw', '$executeRaw'] as const;
@@ -49,8 +66,25 @@ const RAW_MEMBERS: ReadonlySet<string> = new Set(TENANT_DB_RAW_MEMBERS);
 
 /** `Object.prototype.toString` label of a guarded operation result. */
 export const TENANT_DB_RESULT_LABEL = 'TenantDbResult';
+/** `Object.prototype.toString` label of the SYSTEM-delegate guard handed out by `systemDelegates(tx)`. */
+export const SYSTEM_DELEGATES_LABEL = 'SystemDelegates';
+/** Why a SYSTEM model is refused on the top level: the error names the port (PR19-SEC-01, D-ARCH-080). */
+export const SYSTEM_MODEL_HINT = 'a SYSTEM model is reached only through systemDelegates(tx) (platform/db/system-db.ts, D-ARCH-080)';
+/** Why a member of a guarded operation result other than then/catch/finally is refused (PR #11 R3-n4). */
+export const FLUENT_HINT = 'fluent accessors are not exposed; use include/select';
+const SYSTEM_MODEL_SET: ReadonlySet<string> = new Set(SYSTEM_MODELS);
+/** Members of a guarded operation result (see {@link guardResult}). */
+const RESULT_MEMBERS: ReadonlySet<string> = new Set(['then', 'catch', 'finally']);
+/**
+ * Well-known probe keys of serialisers, renderers and matchers (`JSON.stringify`, React and Jest's pretty-format, Jest
+ * asymmetric matchers) read as `undefined` on a guarded result instead of throwing, so logging or printing a pending
+ * result cannot fail the request (PR #32 n2). They are not Prisma members, so nothing is exposed.
+ */
+const RESULT_PROBE_KEYS: ReadonlySet<string> = new Set(['toJSON', '$$typeof', 'asymmetricMatch', 'nodeType']);
 /** Constructor names of Prisma's `Sql` fragment class (`sql-template-tag`; the bundled class expression is `_Sql`). */
 const SQL_FRAGMENT_CLASSES: ReadonlySet<string> = new Set(['Sql', '_Sql']);
+/** Prototype chains deeper than this are treated as fragments (fail closed; bounded walk). */
+const MAX_PROTOTYPE_DEPTH = 32;
 
 /** Prisma model operations exposed on each model delegate (Prisma 7.10 model actions, relational subset). */
 export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([
@@ -76,8 +110,9 @@ export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([
 
 /** Thrown when a member outside the allow-list is touched or the guard is mutated; a programming error (500). */
 export class TenantDbAccessError extends Error {
-  constructor(member: string) {
-    super(`TenantDb does not expose ${member}`);
+  /** @param detail why the member is refused (appended to the message, e.g. the port that does expose it). */
+  constructor(member: string, detail?: string) {
+    super(detail === undefined ? `TenantDb does not expose ${member}` : `TenantDb does not expose ${member}: ${detail}`);
     this.name = 'TenantDbAccessError';
   }
 }
@@ -100,6 +135,8 @@ interface GuardSpec {
   readonly isAllowed: (key: string) => boolean;
   readonly keys: () => readonly string[];
   readonly resolve: (key: string) => unknown;
+  /** Why a refused key is refused, when there is more to say than "not exposed". */
+  readonly explain?: (key: string) => string | undefined;
 }
 
 const lowerFirst = (name: string): string => name.charAt(0).toLowerCase() + name.slice(1);
@@ -130,22 +167,38 @@ export function isTemplateStringsArray(value: unknown): value is TemplateStrings
 
 /**
  * True for a Prisma `Sql` fragment (`Prisma.raw(s)`, `` Prisma.sql`…` ``, `Prisma.sql([s])`, `Prisma.join(…)`,
- * `new Prisma.Sql([s], [])`, a subclass): duck-typed, a non-array object whose `strings` and `values` are arrays (the
- * shape Prisma's template tag splices into the statement text), or whose prototype's constructor is the `Sql` class.
- * Read through `Reflect` only. A plain JSON value of exactly that shape is refused too (fail closed).
+ * `new Prisma.Sql([s], [])`, a subclass at any depth) and for anything shaped like one (PR11-SEC-17 a/b, PR #11 R3-n2):
+ *  - duck-typed: an object or function (arrays included) with BOTH a `strings` and a `values` key, own or inherited,
+ *    whatever their values (`'strings' in v && 'values' in v`, not `Array.isArray`, so an array-like or a getter does
+ *    not slip past it). A plain JSON value of that shape is refused too (fail closed);
+ *  - nominal: ANY prototype on the chain (walked to the end, at most {@link MAX_PROTOTYPE_DEPTH} levels; deeper is
+ *    refused) has a `constructor` named `Sql` / `_Sql`. Prisma's template tag splices a value when
+ *    `value instanceof Sql`, i.e. when `Sql.prototype` is anywhere on the chain, and `Sql.prototype.constructor` is the
+ *    class itself, so an intermediate prototype with its own `constructor` (the R3-n2 forge, which passed the former
+ *    first-prototype check) no longer hides it.
+ * Read through `Reflect` only. Limit: the check sees what the value's Proxy traps (if any) report. A Proxy whose
+ * `has` / `getPrototypeOf` traps answer this check differently from Prisma's later `instanceof` (a stateful forge), or
+ * a future Prisma that renames the class AND stops storing `strings` / `values` on the instance, is not detected here;
+ * the `platform/db-raw-sql` lint (no `Sql` class, no `raw`, no untracked Prisma container or fragment constructor in
+ * application code) and code review are the control for such deliberate forges.
  */
 export function isSqlFragment(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  if (Array.isArray(Reflect.get(value, 'strings')) && Array.isArray(Reflect.get(value, 'values'))) return true;
-  const proto = Reflect.getPrototypeOf(value);
-  const ctor: unknown = proto === null ? undefined : Reflect.get(proto, 'constructor');
-  return typeof ctor === 'function' && SQL_FRAGMENT_CLASSES.has(ctor.name);
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return false;
+  if (Reflect.has(value, 'strings') && Reflect.has(value, 'values')) return true;
+  let proto = Reflect.getPrototypeOf(value);
+  for (let depth = 0; proto !== null; depth += 1) {
+    if (depth >= MAX_PROTOTYPE_DEPTH) return true;
+    const ctor: unknown = Reflect.get(proto, 'constructor');
+    if (typeof ctor === 'function' && SQL_FRAGMENT_CLASSES.has(ctor.name)) return true;
+    proto = Reflect.getPrototypeOf(proto);
+  }
+  return false;
 }
 
 const describeKey = (key: PropertyKey): string => (typeof key === 'symbol' ? key.toString() : String(key));
 
-const deny = (key: PropertyKey): never => {
-  throw new TenantDbAccessError(describeKey(key));
+const deny = (key: PropertyKey, detail?: string): never => {
+  throw new TenantDbAccessError(describeKey(key), detail);
 };
 
 const closedError = (): DbError => new DbError(dbErrorMapping(500, 'TENANT_TX_CLOSED'));
@@ -155,7 +208,7 @@ function guard(spec: GuardSpec, state: GuardState): object {
   const exposed = (key: PropertyKey): key is string => typeof key === 'string' && key !== 'then' && spec.isAllowed(key);
   const valueOf = (key: string): unknown => {
     if (state.closed) throw closedError();
-    if (!spec.isAllowed(key)) return deny(key);
+    if (!spec.isAllowed(key)) return deny(key, spec.explain?.(key));
     if (cache.has(key)) return cache.get(key);
     const value = spec.resolve(key);
     cache.set(key, value);
@@ -204,14 +257,20 @@ type Finally = Promise<unknown>['finally'];
 
 /**
  * R2-M1 / PR11-SEC-12: what an exposed operation returns, guarded. A thenable (Prisma's `PrismaPromise`) becomes a
- * frozen, null-prototype result exposing ONLY `then`, `catch`, `finally` and `Symbol.toStringTag`
- * ({@link TENANT_DB_RESULT_LABEL}); `requestTransaction`, `spec` and the fluent relation accessors are absent (`in` is
- * false, a read is `undefined`). It is LAZY like the `PrismaPromise` it wraps: nothing runs until one of the three is
- * called. Each of them first checks the transaction: once it settled (`revoke()`), they return a promise rejected with
- * `TENANT_TX_CLOSED` WITHOUT calling the wrapped `then`, so no statement is ever sent (a result kept past commit gets
- * `TENANT_TX_CLOSED`, not P2028), and that holds also for a result whose query already ran. While open, the first call
- * starts the query once (the wrapped `then`) and every call chains on that same native `Promise`, which carries no
- * Prisma member either. Non-thenable values pass through unchanged.
+ * Proxy over a frozen, null-prototype result exposing ONLY `then`, `catch`, `finally` and `Symbol.toStringTag`
+ * ({@link TENANT_DB_RESULT_LABEL}). PR #11 R3-n4: reading ANY other string key throws `TenantDbAccessError`
+ * ({@link FLUENT_HINT}), so `requestTransaction`, `spec` and a fluent relation accessor (`findUnique(…).posts()`) fail
+ * loudly instead of reading `undefined`; `in`, `Object.keys` and other symbols stay silent (`false`, the three members,
+ * `undefined`), so `await`, `Promise.resolve`, Jest and `util.inspect` behave as with any thenable. `catch` and
+ * `finally` are kept beside `then` because the declared return type is Prisma's `PrismaPromise`, a `Promise`, and code
+ * that type-checks against it may call them: refusing them would turn well-typed code into a run-time error, and both
+ * only chain on the same native promise as `then` (no Prisma member behind them).
+ * It is LAZY like the `PrismaPromise` it wraps: nothing runs until one of the three is called. Each of them first
+ * checks the transaction: once it settled (`revoke()`), they return a promise rejected with `TENANT_TX_CLOSED`
+ * WITHOUT calling the wrapped `then`, so no statement is ever sent (a result kept past commit gets `TENANT_TX_CLOSED`,
+ * not P2028), and that holds also for a result whose query already ran. While open, the first call starts the query
+ * once (the wrapped `then`) and every call chains on that same native `Promise`, which carries no Prisma member
+ * either. Non-thenable values pass through unchanged.
  */
 function guardResult(result: unknown, state: GuardState): unknown {
   const then = thenOf(result);
@@ -230,7 +289,15 @@ function guardResult(result: unknown, state: GuardState): unknown {
     finally: ((...args: Parameters<Finally>) => settle().finally(...args)) as Finally,
     [Symbol.toStringTag]: TENANT_DB_RESULT_LABEL,
   };
-  return Object.freeze(Object.assign(Object.create(null) as object, members));
+  const target = Object.freeze(Object.assign(Object.create(null) as object, members));
+  return new Proxy(target, {
+    get(frozen, key) {
+      if (typeof key !== 'symbol' && RESULT_PROBE_KEYS.has(key)) return undefined;
+      if (typeof key !== 'symbol' && !RESULT_MEMBERS.has(key)) return deny(key, FLUENT_HINT);
+      const member: unknown = Reflect.get(frozen, key);
+      return member;
+    },
+  });
 }
 
 /**
@@ -250,17 +317,23 @@ function bindMember(raw: object, key: string, state: GuardState, check?: (args: 
   };
 }
 
-function guardDelegate(name: string, delegate: object, state: GuardState): object {
+function guardDelegate(label: string, delegate: object, state: GuardState): object {
   const isAllowed = (key: string): boolean => MODEL_OPERATIONS.has(key) && Reflect.has(delegate, key);
   return guard(
     {
-      label: `TenantDb.${name}`,
+      label,
       isAllowed,
       keys: () => [...MODEL_OPERATIONS].filter(isAllowed),
       resolve: (key) => bindMember(delegate, key, state),
     },
     state,
   );
+}
+
+/** The guarded delegate `key` of `tx`, or a `TenantDbAccessError` when the data-model name has no object behind it. */
+function delegateOf(tx: object, key: string, label: string, state: GuardState): object {
+  const delegate: unknown = Reflect.get(tx, key, tx);
+  return typeof delegate === 'object' && delegate !== null ? guardDelegate(`${label}.${key}`, delegate, state) : deny(key);
 }
 
 /**
@@ -288,24 +361,46 @@ function rawMember(tx: object, key: string, state: GuardState): unknown {
   return bindMember(tx, key, state, taggedOnly(key));
 }
 
+/**
+ * The SYSTEM-delegate guard of one handle (PR19-SEC-01, D-ARCH-080): only the SYSTEM models of the client's data
+ * model, each behind the same child guard as a tenant delegate, sharing the handle's state (so `revoke()` closes them
+ * too). Built at most once per handle, when `systemDelegates(tx)` first asks for it.
+ */
+function systemGuard(tx: object, systemModels: ReadonlySet<string>, state: GuardState): () => object {
+  let built: object | undefined;
+  return () => {
+    const isAllowed = (key: string): boolean => systemModels.has(key) && Reflect.has(tx, key);
+    built ??= guard(
+      {
+        label: SYSTEM_DELEGATES_LABEL,
+        isAllowed,
+        keys: () => [...systemModels].filter(isAllowed),
+        resolve: (key) => delegateOf(tx, key, SYSTEM_DELEGATES_LABEL, state),
+      },
+      state,
+    );
+    return built;
+  };
+}
+
 /** Wraps a transaction client in the run-time `TenantDb` guard. */
 export function createTenantDb<TTx extends object>(tx: TTx): TenantDbHandle<TTx> {
   const state: GuardState = { closed: false };
-  const models = modelDelegateNames(tx);
+  const allModels = [...modelDelegateNames(tx)];
+  const models: ReadonlySet<string> = new Set(allModels.filter((name) => !SYSTEM_MODEL_SET.has(name)));
+  const systemModels: ReadonlySet<string> = new Set(allModels.filter((name) => SYSTEM_MODEL_SET.has(name)));
   const isAllowed = (key: string): boolean => (models.has(key) || RAW_MEMBERS.has(key)) && Reflect.has(tx, key);
   const db = guard(
     {
       label: 'TenantDb',
       isAllowed,
       keys: () => [...models, ...TENANT_DB_RAW_MEMBERS].filter(isAllowed),
-      resolve: (key) => {
-        if (!models.has(key)) return rawMember(tx, key, state);
-        const delegate: unknown = Reflect.get(tx, key, tx);
-        return typeof delegate === 'object' && delegate !== null ? guardDelegate(key, delegate, state) : deny(key);
-      },
+      resolve: (key) => (models.has(key) ? delegateOf(tx, key, 'TenantDb', state) : rawMember(tx, key, state)),
+      explain: (key) => (SYSTEM_MODEL_SET.has(key) ? SYSTEM_MODEL_HINT : undefined),
     },
     state,
   );
+  registerSystemPort(db, systemGuard(tx, systemModels, state));
   return {
     db: db as TenantDb<TTx>,
     revoke: () => {

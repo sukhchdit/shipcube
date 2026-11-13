@@ -2,9 +2,22 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo"
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-generated.tsbuildinfo"
   },
-  "files": [],
+  "files": ["../../tools/openapi/contract.ts", "../../tools/openapi/drift.ts"],
   "include": ["**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules"],
+  "//": "Generated and composed-app suites (route metadata, contract drift; later RBAC matrix, audit, RLS, abuse). Not a workspace project of its own emit: tools/openapi/contract.ts and drift.ts are compiled here as listed files, like tests/api (the tools project is noEmit).",
+  "references": [
+    {
+      "path": "../../packages/shared"
+    },
+    {
+      "path": "../../packages/authz"
+    },
+    {
+      "path": "../../apps/api"
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 ---
 name: project-p5-pr34-pr35-harness-traceability
-description: PR #34 (TASK-276 harness) @4643265 R1 and PR #35 (TASK-277 trace/gherkin-map/flake-report) @76808c8 R1 + @907b6a2 R2 (SEC-01/02/03 closed, new INFO 06 8.3 alias) 2026-11-13 all PASS_WITH_FOLLOW-UPS; PR34-SEC-01/02 LOW open; Jest 30 project testTimeout inert; checks owed in later PRs
+description: PR #34 (TASK-276 harness) @4643265 R1 and PR #35 (TASK-277 trace/gherkin-map/flake-report) @76808c8 R1 + @907b6a2 R2 (SEC-01/02/03 closed, new INFO 06 8.3 alias) 2026-11-13 all PASS_WITH_FOLLOW-UPS; PR34 R2 @3934d12 closed SEC-01..04 (see project-p5-pr34-r2-harness); Jest 30 project testTimeout inert; checks owed in later PRs
 metadata:
   type: project
 ---
@@ -23,6 +23,6 @@ Records (uncommitted in main when written): `docs/05-quality/security/PR-0034-TA
 - Gitleaks emulator rebuilt again (TOML reader, 222 rules); never rely on scratch: this round the whole scratchpad (extracts, junction dirs, probes) vanished mid-run except the newest files, main's node_modules untouched (740). Keep a single copy of final scripts in the record text; re-create from git archive.
 - `.NET` line readers treat a bare CR as a line end (not re-verified); JSON.stringify leaves U+2028/2029 raw.
 
-**Checks owed:** PR #34 round 2 (fix cycle: lint error, SEC-01 policy, SEC-02 scanner) must name the new head and include a delta on any owned path; API test app builder must mount the counter only from a test file; TASK-014 image build excludes `dist/**/*.test.js` and the seam; activation PRs for rbac-matrix/audit-generator/rls-cross-tenant/abuse keep `min_tests`/`zero_skip` and drop `--passWithNoTests`; PR #35: before `heavy.mjs` calls `quality:trace`, writer + `clean()` + regex fix; correct D-TASK277-03; D-SEC-PR23-02 interim: evidence commits (#34 needs Docker, #35 `unit` only) must carry the gate table.
+**Checks owed:** (PR #34 round 2 DONE 2026-11-14 @3934d12, see [[project-p5-pr34-r2-harness]]: SEC-01..04 closed.) API test app builder must mount the counter only from a test file; TASK-014 image build excludes `dist/**/*.test.js` and the seam; activation PRs for rbac-matrix/audit-generator/rls-cross-tenant/abuse keep `min_tests`/`zero_skip` and drop `--passWithNoTests`; PR #35: before `heavy.mjs` calls `quality:trace`, writer + `clean()` + regex fix; correct D-TASK277-03; D-SEC-PR23-02 interim: evidence commits (#34 needs Docker, #35 `unit` only) must carry the gate table.
 
 Related: [[project-security-review-conventions]], [[project-p5-pr33-lane-a-hardening]], [[project-p5-pr20-logging]], [[project-p5-pr23-lane-b]], [[project-p5-pr10-ci-lane]]

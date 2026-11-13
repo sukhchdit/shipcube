@@ -7,11 +7,15 @@ import { randomBytes } from 'node:crypto';
 import { inspect } from 'node:util';
 
 import { describe, expect, it } from '@jest/globals';
-import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
+import Joi from 'joi';
 import request from 'supertest';
 
 import { createApp } from '../../app.js';
 import { CORRELATION_ID_PATTERN } from '../context/request-context.js';
+import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js';
+import { ANONYMOUS, setPrincipal } from '../routing/route-state.js';
+import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { createRuntimeLog } from '../runtime/log.js';
 import { requestLogContext } from './correlation.js';
 import { securityEventSinkFrom } from './security-events.js';
@@ -57,65 +61,96 @@ function harness(): Harness {
     },
   );
 
-  const health = express.Router();
-  health.get('/health/live', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
+  // Careless code holding the live request and response, keyed by operationId. Route handlers see the validated input
+  // only (TASK-020), so the careless code runs in a test slot just before the handler: what it logs goes through the
+  // same logging seam that a careless slot or handler would use.
+  const careless: Readonly<Record<string, (req: Request, res: Response) => void>> = {
+    widgetSession: (_req, res) => {
+      res.cookie('session', sentinelCookie, { httpOnly: true });
+    },
+    widgetHeaders: (req) => {
+      // A careless handler logging the whole header object: redaction at the logging seam still holds.
+      logger.info('test.headers', { headers: req.headers });
+    },
+    widgetRaw: (req, res) => {
+      // PR20-SEC-01: a careless handler logging the live request, its socket and the raw header forms.
+      logger.info('test.raw', {
+        req,
+        socket: req.socket,
+        raw: req.rawHeaders,
+        trailers: req.rawTrailers,
+        entries: Object.entries(req.headers),
+        note: `Cookie: ${String(req.headers.cookie)}`,
+        // PR20-SEC-19: HAR / HTTP-trace header records, a parsed Set-Cookie record and a tough-cookie record.
+        har: headerRecords(req.rawHeaders),
+        parsed: hostCookies(req.headers.cookie).map((cookie) => ({ ...cookie, path: '/', secure: true })),
+        jar: hostCookies(req.headers.cookie).map(({ name, value }) => ({ key: name, value })),
+      });
+      res.once('finish', () => logger.info('test.res', { res }));
+    },
+    widgetText: (req) => {
+      // PR20-SEC-13: a careless handler that turns the raw header list or the live request into text first, echoes the
+      // refresh cookie as a Set-Cookie value under a neutral key, and puts the request target into a message.
+      const refreshPair = /__Host-rt_[0-9a-f]+=[^;]+/.exec(String(req.headers.cookie))?.[0] ?? '';
+      const parsed: unknown = Reflect.get(req, '_parsedUrl');
+      logger.info('test.text', {
+        detail: JSON.stringify(req.rawHeaders),
+        escaped: JSON.stringify({ raw: JSON.stringify(req.rawHeaders) }),
+        listed: inspect(req.rawHeaders),
+        listedWide: inspect(req.rawHeaders, { breakLength: Infinity }),
+        // The full rendering is cut at 8 KiB before its URL and header parts; the shallow ones reach them.
+        inspected: inspect(req),
+        inspectedShallow: inspect(req, { depth: 0 }),
+        inspectedParts: inspect({ url: req.url, originalUrl: req.originalUrl, headers: req.headers, parsed }),
+        value: `${refreshPair}; Path=/; Secure; HttpOnly; SameSite=Strict`,
+      });
+      logger.error('test.text_failed', { note: `GET ${req.originalUrl} failed` }, new Error(`upstream failed for ${req.originalUrl}`));
+    },
+  };
+  const defaults = defaultPipelineSlots({ tenantTx: undefined });
+  const pipeline: PipelineSlots = {
+    ...defaults,
+    // The requests carry credential sentinels, which the authn stub refuses until TASK-052 (D-ARCH-107 (5)); this
+    // stand-in accepts them as anonymous so the careless code below runs with them (what is logged is under test).
+    authenticate: () => (_req: Request, res: Response, next: NextFunction) => {
+      setPrincipal(res, ANONYMOUS);
+      next();
+    },
+    etag: (route) => (req: Request, res: Response, next: NextFunction) => {
+      careless[route.operationId]?.(req, res);
+      next();
+    },
+  };
+  const ok = (): { status: number; body: unknown } => ({ status: 200, body: { ok: true } });
+  const query = Joi.object({ q: Joi.string(), page: Joi.string() });
 
-  const widgets = express.Router();
-  widgets.post('/widgets/:widgetId/echo', (req, res) => {
-    res.status(201).json({ received: typeof req.body });
-  });
-  widgets.get('/widgets/session', (_req, res) => {
-    res.cookie('session', sentinelCookie, { httpOnly: true });
-    res.json({ ok: true });
-  });
-  widgets.get('/widgets/headers', (req, res) => {
-    // A careless handler logging the whole header object: redaction at the logging seam still holds.
-    logger.info('test.headers', { headers: req.headers });
-    res.json({ ok: true });
-  });
-  widgets.get('/widgets/raw', (req, res) => {
-    // PR20-SEC-01: a careless handler logging the live request, its socket and the raw header forms.
-    logger.info('test.raw', {
-      req,
-      socket: req.socket,
-      raw: req.rawHeaders,
-      trailers: req.rawTrailers,
-      entries: Object.entries(req.headers),
-      note: `Cookie: ${String(req.headers.cookie)}`,
-      // PR20-SEC-19: HAR / HTTP-trace header records, a parsed Set-Cookie record and a tough-cookie record.
-      har: headerRecords(req.rawHeaders),
-      parsed: hostCookies(req.headers.cookie).map((cookie) => ({ ...cookie, path: '/', secure: true })),
-      jar: hostCookies(req.headers.cookie).map(({ name, value }) => ({ key: name, value })),
-    });
-    res.once('finish', () => logger.info('test.res', { res }));
-    res.json({ ok: true });
-  });
-  widgets.get('/widgets/text', (req, res) => {
-    // PR20-SEC-13: a careless handler that turns the raw header list or the live request into text first, echoes the
-    // refresh cookie as a Set-Cookie value under a neutral key, and puts the request target into a message.
-    const refreshPair = /__Host-rt_[0-9a-f]+=[^;]+/.exec(String(req.headers.cookie))?.[0] ?? '';
-    const parsed: unknown = Reflect.get(req, '_parsedUrl');
-    logger.info('test.text', {
-      detail: JSON.stringify(req.rawHeaders),
-      escaped: JSON.stringify({ raw: JSON.stringify(req.rawHeaders) }),
-      listed: inspect(req.rawHeaders),
-      listedWide: inspect(req.rawHeaders, { breakLength: Infinity }),
-      // The full rendering is cut at 8 KiB before its URL and header parts; the shallow ones reach them.
-      inspected: inspect(req),
-      inspectedShallow: inspect(req, { depth: 0 }),
-      inspectedParts: inspect({ url: req.url, originalUrl: req.originalUrl, headers: req.headers, parsed }),
-      value: `${refreshPair}; Path=/; Secure; HttpOnly; SameSite=Strict`,
-    });
-    logger.error('test.text_failed', { note: `GET ${req.originalUrl} failed` }, new Error(`upstream failed for ${req.originalUrl}`));
-    res.json({ ok: true });
-  });
-  widgets.get('/widgets/throws', () => {
-    throw thrown;
-  });
+  const health = [fixtureRoute({ operationId: 'getLive', path: '/health/live', handler: () => ({ status: 200, body: { status: 'ok' } }) })];
+  const widgets = [
+    fixtureRoute({
+      operationId: 'widgetEcho',
+      method: 'post',
+      path: '/widgets/:widgetId/echo',
+      schema: {
+        params: Joi.object({ widgetId: Joi.string() }),
+        query: Joi.object({ token: Joi.string() }),
+        body: Joi.object({ note: Joi.string(), email: Joi.string() }),
+      },
+      handler: ({ input }) => ({ status: 201, body: { received: typeof input.body } }),
+    }),
+    fixtureRoute({ operationId: 'widgetSession', path: '/widgets/session', handler: ok }),
+    fixtureRoute({ operationId: 'widgetHeaders', path: '/widgets/headers', handler: ok }),
+    fixtureRoute({ operationId: 'widgetRaw', path: '/widgets/raw', schema: { query }, handler: ok }),
+    fixtureRoute({ operationId: 'widgetText', path: '/widgets/text', schema: { query }, handler: ok }),
+    fixtureRoute({
+      operationId: 'widgetThrows',
+      path: '/widgets/throws',
+      handler: () => {
+        throw thrown;
+      },
+    }),
+  ];
 
-  const app = createApp({ healthRouter: health, modules: [{ name: 'widgets', router: widgets }], logger });
+  const app = createApp({ health, modules: [{ name: 'widgets', routes: widgets }], logger, pipeline });
   return {
     app,
     raw,

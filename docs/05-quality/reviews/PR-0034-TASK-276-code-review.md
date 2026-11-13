@@ -107,3 +107,83 @@ CI on the head: `fast-lane` FAIL at "Lane B evidence" (steps after it skip), `sc
 ## 8. Handoff
 
 Round 2 = delta check on R1-M1..M3 plus the mutants above. Expected verdict after the fixes: APPROVED_WITH_NITS.
+
+---
+
+## Round 2 (head 3934d12, delta)
+
+Reviewer: code-reviewer role (delta check dispatched together with the security round 2; read-only, written by the security-analyst in that capacity). Head reviewed: `3934d12` (full SHA `3934d1224f090701c8c5ca230633971e19cf9d0d`). PR base `d693e8c` (the `main` code tip: `origin/main` is `e1805a5`, which differs from it by 5 docs and agent-memory files only). Commits since round 1 (`4643265`): merge `422607d` (main `6420f90`), fix `8aa5b66`, fix `81bea01`, merge `030fae9` (main `d693e8c`, which carries PRs #35 and #36), evidence `3934d12`. The PR's own change against `d693e8c` is 35 non-docs files, +2,527 / -10, plus the 7 evidence files.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1, R1-M2 and R1-M3 are fixed, and so are R1-m1..m7 and the folded n-items; every fix is pinned by a test that now fails when the fix is mutated away (61 mutants of the PR's own code: 54 killed, 1 equivalent, 6 explained below). The two merges are pure unions. Lane A is green on this head except the security-record step. Two MINOR test-strength gaps (R2-m1, R2-m2) and three NITs are new; none is a BLOCKER or MAJOR, and fixing them on this branch would void the lane B evidence for no product gain, so they go to named next touches.
+```
+
+### R2.1 What I ran
+
+Method: `git archive` extracts of the head, of `4643265` (round 1), of `d693e8c` (main) and of the `git merge-tree` union of the head with PR #32's head (`5eee2d0`); `node_modules` as a directory of junctions to the main checkout with `@platform/*` re-pointed at each extract; Node 24; no Docker, no installs, no builds. The scratch trees and junctions were removed afterwards. Every mutant was applied to an extract, run against the owning Jest suite and restored (the restored files are byte-equal to the head blobs).
+
+| Check | Result |
+|---|---|
+| Lane A on the head (run 43496097102) | `fast-lane` green end to end: commitlint, Lint, Format check, actionlint, Type-check, Unit tests, "Lint negative fixtures from the base ref against the head configs", Build, "Lane B evidence". This is the first time lint, type-check, unit and build ran in CI for this PR. `scans`: Gitleaks, Semgrep, OpenAPI green; red only at "Security-owned paths need a review record" (the companion record), so `ci-gate` is red for that reason alone |
+| Targeted unit suites on the extract (leakage scanner 51, fake clock 9, factories 14, query counter 13, jest-projects 13, test-seams 2, jest-config-owned 4, heavy 22, root-scripts, jest-esm, helpers) | 11 suites, 157 tests, all pass |
+| `jest --listTests` per project, `main` to head | 0 files dropped from any project; unit 149 to 156 (+7: the PR's own tests), integration 25 to 26 (`query-counter.int`), unit-dom 12, api 6, generated 0 (no generated suite exists yet) |
+| `jest --listTests` on the union with PR #32 | `tests/generated/route-metadata.test.ts` and `contract-drift.test.ts` are in `unit` and in no other project; 0 files in two projects; unit 172 (PR #32's own move of `tools/openapi/drift.test.ts` to `tests/generated/contract-drift.test.ts` accounts for the one name that disappears) |
+| Nine planted files (`tests/generated/` with `.test.ts`, `.api.test.ts`, `.int.test.ts`, `.test.tsx`, `.api.test.tsx`, `.int.test.tsx`, a nested one, plus `tools/ci/tests/generated/` and `apps/api/src/tests/generated/`) through real Jest | plain `.test.ts` to `unit`, plain `.test.tsx` to `unit-dom`, every `.api` / `.int` file to `generated` and to no other project. The `tools/repo/jest-projects.test.ts` map (modelled with `path.posix.matchesGlob` and `RegExp`) agrees with real Jest on all nine |
+| Effective `jest.config.ts`, `main` to head, every leaf | coverage provider, `collectCoverageFrom`, `coverageThreshold`, `SWC_JEST_OPTIONS` (`swcrc: false`), `modulePathIgnorePatterns` (`/__mocks__/`), roots, environments, `transform`: equal. Differences: `api` and `integration` gain the `/tests/generated/` ignore, the new `generated` project (spreads `common`). Round 1 to head: `unit` and `unit-dom` lose that ignore (they equal `main` again), both inert `testTimeout` values are gone |
+| Merge `422607d` and merge `030fae9` | `git merge-tree` of each merge's two parents equals the merge commit's tree: pure unions, no evil edit |
+| Scanner probe on the head's real `leakage-scanner.ts` (type-stripped, 243 rows) and the same rows on the round-1 build | head: 188 expect-hit rows hit, 43 expect-gap rows gap, 8 rows differ from my expectation (all explained in R2.3); round 1: 124 rows differ (positive control) |
+| Mutation run, 61 mutants | 54 killed, 7 survived: 1 equivalent (identical-needle de-duplication), 2 are my "is a weakening visible" controls aimed at a suite that is not the pin (the swcrc mutant dies in tools/ci/jest-transform.test.ts, 3 of 3 fail; the coverage threshold is leaf-equal to main), 4 are real test-strength gaps (R2-m1, R2-m2 twice, R2-n3) |
+
+NOT re-run by me: Docker suites (`prisma/tests/db/query-counter.int.test.ts` and lane B). I rely on the accepted evidence run `20261113T1943Z_030fae9` (base-ref `check-evidence` PASS on both the `d693e8c` and the `e1805a5` tooling), which shows `query-counter.int.test.ts` executing, 4 of 4 passing.
+
+### R2.2 Round 1 closure
+
+| ID | Status | Proof |
+|---|---|---|
+| R1-M1 | **Closed** | Suffix picks the project, `generated` is `tests/generated/**/*.{api,int}.test.{ts,tsx}`. Union with PR #32 and the nine planted files above. Three mutants (r1 testMatch, `unit` ignores the folder again, `common` stops ignoring it) die in `jest-projects.test.ts` (3, 2 and 3 failures). Header, README and D-TASK276-01 (superseded entry in DECISIONS) are updated |
+| R1-M2 | **Closed** | `useLeakageGuard(options, register = afterEach)`. Mutating the hook body `assertClean()` to `void 0`: 1 of 51 fails (was 0 of 15). `capture.clear()` dropped: 7 fail. Hook never registered: 4 fail. Default registrar replaced by a no-op: 2 fail. `assertClean` ignoring extra values or log lines: 1 and 3 fail |
+| R1-M3 | **Closed** | Three byte alignments for base64 and base64url, case-folded text, hex in any case. Mutants: alignments reduced to `[0]`, `[0,1]`, `[0,2]` (19 fail each), start ceil to floor (18), end floor to ceil (16), base64url dropped or not translated (1 each), needle minimum length 16 to 1 (1), hex case-sensitive (1), case-folded needle dropped (2), base64 compared case-insensitively (1). Probe: the five text sentinels at offsets 0, 1, 2 as bare base64, with a trailing byte, inside JSON, base64url without padding, `Basic user:value`, `Basic value:pw`, JWT payload and inside a JSON log line: all hit; round 1 missed 68 of the base64, base64url, Basic and JWT rows (124 rows differ from expectation on that build) |
+| R1-m1 | Closed | Pending last line scanned and CR stripped (also across chunks); 3 failures when the tail is dropped, 1 each when CR is not stripped |
+| R1-m2 | Closed | Keys never echoed: 11 shapes (sentinel as key, inside a longer key, PAN, base64, hex, percent and upper-case spellings, Map key, symbol description, nested) show 0 echoes; 4 mutants die |
+| R1-m3 | Closed | `cause`, `AggregateError.errors`, typed arrays, `ArrayBuffer`, `DataView`, `URL` (via `toJSON`), `URLSearchParams`, `Headers`, non-enumerable and symbol keys all hit; depth overflow is a `DEPTH_LIMIT` finding (a clean 40-level object now fails by design; `maxDepth` is the lever). Each branch has a killed mutant. Residuals in R2.3 |
+| R1-m4 | Closed | `heavy.mjs` accepts `generated` in `JEST_PROJECTS` and runs it in band (`-i --testTimeout`); D-TASK276-02 amended. Both set edits have killed mutants in `heavy.test.ts` |
+| R1-m5 | Closed | `db-test-seam` boundaries policy with lint fixtures plus `tools/repo/test-seams.test.ts`; behaviour in the security record (PR34-SEC-01) |
+| R1-m6 | Closed | The run identity folds in the Jest test file (relative to the working directory): two mutants die in `factories.test.ts` |
+| R1-m7 | Closed with a gap | `useFakeClock()` exists and installs before each test, but the test that should pin the restore is too weak (R2-m1) |
+| R1-n1..n4 | Not changed | `FIXED_NOW` duplication, v7-shaped random ids, placeholder graphs and the 1,000-entry array copy are untouched or documented; nits stay nits |
+| PR #26 review n6 (afterAll 5 s) | Closed | `afterAll(..., 60_000)` in `seed.int` and `spk03`, no project-level timeout |
+
+### R2.3 New findings
+
+| ID | Sev | Where | Problem | Fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `tests/helpers/fake-clock.test.ts` ("restores real timers after a test that threw before cleaning up") | The test advances the fake clock by 1,000 ms and then asserts `Date.now() > FIXED_NOW`. A fake clock that is still installed reads `FIXED_NOW + 1,000`, which also passes. Removing `jest.useRealTimers()` from the `useFakeClock` after-each hook survives (9 of 9). This is the guarantee R1-m7 asked for | Assert `Date.now() > FIXED_NOW + 60_000` after the hook (real time is months later), or check `setTimeout` is not the fake one |
+| R2-m2 | MINOR | `tools/repo/test-seams.test.ts` (the `apps/*/src` walk) | The planted-string control proves the regexes, not the walk. Pointing the scan at a non-existent folder, or exempting every file, still passes (2 of 2), so the tripwire can go silent unnoticed. The lint policy is the primary arm and is pinned by fixtures (seven of eight policy mutants die; the eighth widens the seam category to the whole db folder, which only the full lint would catch), so this is a tripwire-strength gap | Count the files scanned (`> 0`) and run the same walk over a temp tree holding a planted `apps/x/src/app.ts` that imports the seam (must be reported) |
+| R2-n1 | NIT | `leakage-scanner.ts:178` | `Reflect.get(value, 'toJSON')` sits outside the `try`, so a throwing `toJSON` accessor aborts the scan (the test pins a throwing `toJSON` function only). It fails closed, but the header says "A throwing getter is skipped" | Move the read into the `try` |
+| R2-n2 | NIT | `createLogCapture().stream.write` | `pending` is re-split on every write: 8,000 unterminated 10-byte writes take 35 ms, 32,000 take 1.7 s (superlinear). Only a destination that never writes a newline hits it | Split from the last `\n` only |
+| R2-n3 | NIT | `tools/repo/jest-projects.test.ts` | The map has no `node_modules` or `dist` row under `tests/generated/`, so the `generated` project's own ignore list is unpinned (survivor) | One more row |
+
+Probe rows that differ from my expectation and are not findings: four `base64 of UPPER value` rows (those four sentinels are already upper-case, so a hit is correct); functions with own properties are not walked (documented by the `typeof` guard); a `Uint16Array` holding UTF-16 text is decoded as UTF-8 (contrived); a PAN as a JSON array of groups, three or more separators, a thin space (U+2009) and a grouped PAN directly followed by more digits are not found (contrived, routed in the security record as INFO PR34-SEC-08). Scaling: 11 adversarial shapes at 8 KiB, 32 KiB, 128 KiB and 1 MiB show ratios of 1.6 to 10.8 at 128k/8k (linear is 16), 1 MiB in 2.3 to 34 ms; 300,000 small objects scan in 1.9 s.
+
+### R2.4 Deviation rulings (decisions as now on main)
+
+| Decision | Ruling |
+|---|---|
+| D-TASK276-01 (superseded: suffix picks the project; `generated` takes only `*.api` / `*.int` under `tests/generated/`) | Accepted; this is the narrowed form R1-M1 asked for |
+| D-TASK276-02 (amended: `heavy.mjs` accepts `generated`) | Accepted |
+| D-TASK276-03 (amended: seam enforced by policy plus scan) | Accepted; see R2-m2 for the scan's strength |
+| D-TASK276-05 (amended: run identity hashes the test file) | Accepted |
+| D-TASK276-07 (no project-level `testTimeout`) | Accepted; verified in the effective config |
+| D-TASK276-08 (`DEPTH_LIMIT`, `case-folded`) | Accepted |
+| Lazy `PrismaPromise` fix (`81bea01`) | Accepted: `measure()` awaits the measured function inside the `AsyncLocalStorage` scope. Found by the first real run of the integration test (0 instead of 1), pinned by a thenable unit test (reverting the line: 1 of 13 fails; a variant that returns the thenable un-awaited inside the scope: 1 fails) and by the integration test executing 4 of 4 in the accepted run. `middleware()` is unaffected (it runs `next` inside `storage.run`) |
+
+### R2.5 Union with PR #32 (whoever merges second)
+
+`git merge-tree` of the head and PR #32's head (`5eee2d0`): `jest.config.ts`, `package.json` and `tools/tsconfig.json` auto-merge cleanly. Three textual conflicts, each two independent additions side by side: `eslint.config.mjs` (this PR's `tests/helpers/leakage-scanner.test.ts` allowance and PR #32's `tests/generated/**/*.ts` allowance: keep both blocks), `tools/lint/negative-fixtures.test.ts` (the two seam cases and PR #32's root-client case: keep both), `tools/repo/jest-esm.test.ts` (script list, union `test:api`, `test:contract`, `test:coverage`, `test:generated`, `test:integration`, `test:unit`). R1-M1 needs nothing else: after the union both PR #32 suites stay in `unit` (listing above). The second merger needs fresh lane B evidence (D-ORCH-034) and a merge-only security round (shared owned paths).
+
+### R2.6 Merge conditions
+
+1. None open for this head. The nits (R2-m1, R2-m2, R2-n1..n3) are routed to the next touch of `tests/helpers` and `tools/repo/test-seams.test.ts`: the `redaction` / `log-scan` activation PR (US-008, T-QA-05) or the API test app builder PR, whichever lands first (test-engineer). Do not fix them on this branch: any non-docs commit stales the accepted lane B run (D-ORCH-034) and the PR is otherwise ready.
+2. Security record PR-0034 at `3934d12`: PASS_WITH_FOLLOW-UPS (companion round 2).
+3. Squash with a conventional-commit title; order against PR #32 as in R2.5.

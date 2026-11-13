@@ -5,6 +5,7 @@ import { describe, expect, it } from '@jest/globals';
 import { DbError } from './map-db-error.js';
 import {
   createTenantDb,
+  FLUENT_HINT,
   isSqlFragment,
   isTemplateStringsArray,
   modelDelegateNames,
@@ -210,15 +211,31 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect(db.shipment.create()).toBe(createdRow);
   });
 
+  it('[PR #32 n2] serialiser and matcher probe keys read as undefined on a pending result, so printing it cannot throw', () => {
+    const { db } = createTenantDb(new FakeTx());
+    const result = db.shipment.findFirst();
+    for (const member of ['toJSON', '$$typeof', 'asymmetricMatch', 'nodeType']) {
+      expect(read(result, member)).toBeUndefined();
+      expect(member in result).toBe(false);
+    }
+    expect(() => JSON.stringify({ pending: result })).not.toThrow();
+    expect(Reflect.ownKeys(result)).toEqual(RESULT_KEYS);
+  });
+
   it('R2-M1 / PR11-SEC-12: a thenable result exposes only then/catch/finally and its label (no requestTransaction, spec or fluent accessor)', () => {
     const tx = new FakeTx();
     const { db } = createTenantDb(tx);
     for (const result of [db.shipment.findFirst(), db.$executeRaw`SELECT 1`]) {
       expect(Reflect.ownKeys(result)).toEqual(RESULT_KEYS);
-      for (const member of ['requestTransaction', 'spec', 'author', '_createPrismaPromise']) {
+      for (const member of ['requestTransaction', 'spec', 'author', '_createPrismaPromise', 'constructor']) {
         expect(member in result).toBe(false);
-        expect(read(result, member)).toBeUndefined();
+        // [R3-n4] a read fails loudly (no fluent accessor reads as undefined and is then called on a wrong guess).
+        expect(() => read(result, member)).toThrow(new TenantDbAccessError(member, FLUENT_HINT));
       }
+      expect(FLUENT_HINT).toBe('fluent accessors are not exposed; use include/select');
+      expect(read(result, Symbol.iterator)).toBeUndefined();
+      expect(typeof read(result, 'then')).toBe('function');
+      expect(inspect(result)).toContain('TenantDbResult');
       expect(Object.getPrototypeOf(result)).toBeNull();
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.prototype.toString.call(result)).toBe(`[object ${TENANT_DB_RESULT_LABEL}]`);
@@ -306,12 +323,34 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
       ['a'],
       new Date(0),
       { strings: ['x'] },
-      { strings: 'x', values: [] },
+      { values: [] },
       Object.create(null) as object,
       Object.create({ constructor: 1 }) as object,
       new Uint8Array(2),
+      (): number => 1,
     ];
     expect(notFragments.map(isSqlFragment)).toEqual(notFragments.map(() => false));
+  });
+
+  it('[PR11-SEC-17] [R3-n2] isSqlFragment: `in` checks (not Array.isArray) and the whole prototype chain', () => {
+    class _Sql {}
+    class Deeper extends class extends _Sql {} {}
+    // R3-n2 forge: an intermediate prototype with its own constructor used to hide Sql.prototype one level up.
+    const forged = Object.create(Object.create(_Sql.prototype, { constructor: { value: Object } }) as object) as object;
+    const withGetters = Object.create({
+      get strings(): string {
+        return 'not an array';
+      },
+      get values(): number {
+        return 0;
+      },
+    }) as object;
+    const arrayShaped = Object.assign(['x'], { strings: 'x', values: 'y' });
+    const fnShaped = Object.assign((): number => 1, { strings: 1, values: 2 });
+    let deep: object = Object.create(null) as object;
+    for (let level = 0; level < 40; level += 1) deep = Object.create(deep) as object;
+    const shapes = [new Deeper(), forged, { strings: 'x', values: [] }, withGetters, arrayShaped, fnShaped, deep];
+    expect(shapes.map(isSqlFragment)).toEqual(shapes.map(() => true));
   });
 
   it('PR11-SEC-13: a Sql fragment interpolated as a VALUE of a tagged $queryRaw/$executeRaw is refused before Prisma runs', () => {

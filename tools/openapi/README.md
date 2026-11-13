@@ -8,17 +8,22 @@ The contract is `docs/03-architecture/api/openapi.yaml` (REQ-API-002); conventio
 | `npm run openapi:types` | Regenerates `packages/shared/src/api/types.gen.ts` (openapi-typescript 7, `alphabetize` + `immutable`, Prettier-formatted). Commit the result with the contract change. |
 | `npm run openapi:types -- --check` | Exits 1 printing `stale: packages/shared/src/api/types.gen.ts` when the committed file does not match the contract (AT-US-035-03). |
 
-## Route/document drift (`drift.ts`, `drift.test.ts`)
+## Route/document drift (`drift.ts`; suite `tests/generated/contract-drift.test.ts`)
 
-The unit test builds the composed app (`createApp` with the real health router, the module registry and the docs UI;
-`api-mounts.ts`) and walks its router stack from the top. Routers mounted under a path are resolved only against the
+The unit suite builds the composed app (`createApp` with the real health routes, the module registry and the docs UI;
+`tests/generated/api-mounts.ts`, which reaches apps/api through TypeScript project references) and walks its router stack from the top. Routers mounted under a path are resolved only against the
 literal mount paths app.ts uses (`/api/v1`, `/api/docs`); `/api/docs` is the one explicit exclusion (api/README.md
 §15). Middleware mounted without a path is skipped (it serves no route). The test fails, naming `METHOD path`, on:
 
 - a mounted route the document lacks (`undocumented-route`), or a layer the walker cannot resolve
   (`unrecognised-route`): a router or a handler mounted under any other path (`router.use('/webhooks/x', handler)`
-  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app, RegExps,
-  `all()` and optional/wildcard paths;
+  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app (wrapped by an app, or path-less on a Router),
+  RegExp route paths,
+  `all()` and optional/wildcard paths. A RegExp mount or route path (a literal, `new RegExp(...)` or `RegExp(...)`
+  passed to `.use/.get/.post/.put/.patch/.delete/.all/.route/.head/.options`) is refused in `apps/api/src` by the lint
+  (`no-restricted-syntax`, PR #32 m5); the walker additionally reports (`unrecognised-route`) a resolved layer whose
+  matcher captures parameters or was built from a RegExp at all (it can accept paths outside its literal prefix: a
+  non-capturing group, a character class or an alternation such as `/^\/api\/v[12]/` or `/^\/api\/v1|^\/hidden/`);
 - the implemented-operations ledger disagreeing with what is mounted (`not-mounted`, `not-in-ledger`, `unknown-ledger-entry`);
 - any documented operation without a success/request example, a non-empty `x-error-codes`, an `x-permission` (with a
   justification for `public`/`authenticated`), a unique camelCase `operationId`, `x-requirements` (REQ IDs),

@@ -377,3 +377,52 @@ describe('role scope agrees with the key prefix (PR8-SEC-02, PR #8 n3)', () => {
     expect(violations).toEqual([expect.objectContaining({ code: 'PERMISSION_CATEGORY_MISMATCH', permission: 'audit_trail:read' })]);
   });
 });
+
+describe('no verb hides in the middle segment; the Auditor holds read, audit:export or self-service only (ADR-0008 am. 3)', () => {
+  const entry = (key: string, category: PermissionDefinition['category'], operatorOnly = false): PermissionDefinition => ({
+    key,
+    description: 'x',
+    category,
+    operatorOnly,
+  });
+
+  it('[R2-m1] P3: a new "shipment:void:read" granted to the Viewer is a PERMISSION_FORMAT violation', () => {
+    const seed = withGrant('OPERATOR_SUPER_ADMIN', 'shipment:void:read', withGrant('CUSTOMER_VIEWER', 'shipment:void:read'));
+    const violations = check(seed, [...PERMISSION_DEFINITIONS, entry('shipment:void:read', 'shipment')]);
+    expect(violations).toEqual([expect.objectContaining({ code: 'PERMISSION_FORMAT', permission: 'shipment:void:read' })]);
+  });
+
+  it('[R2-m1] P3b: a new "shipment:purge:read" granted to the Auditor is a PERMISSION_FORMAT violation', () => {
+    const seed = withGrant('OPERATOR_SUPER_ADMIN', 'shipment:purge:read', withGrant('OPERATOR_COMPLIANCE_AUDITOR', 'shipment:purge:read'));
+    const violations = check(seed, [...PERMISSION_DEFINITIONS, entry('shipment:purge:read', 'shipment')]);
+    expect(violations).toEqual([expect.objectContaining({ code: 'PERMISSION_FORMAT', permission: 'shipment:purge:read' })]);
+  });
+
+  it.each([
+    ['a webhook provider outside webhook:*', 'payment:stripe:read', 'payment'],
+    ['an undeclared provider', 'webhook:paypal:receive', 'webhook'],
+  ])('[R2-m1] %s ("%s") is a PERMISSION_FORMAT violation', (_label, key, category) => {
+    const violations = check(withGrant('OPERATOR_SUPER_ADMIN', key), [
+      ...PERMISSION_DEFINITIONS,
+      { ...entry(key, category as PermissionDefinition['category']), ...(category === 'webhook' ? { signatureOnly: true } : {}) },
+    ]);
+    expect(violations).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'PERMISSION_FORMAT', permission: key })]));
+  });
+
+  it('[R2-m1] every shipped three-segment key names a scope qualifier, a declared sub-resource or a webhook provider', () => {
+    expect(check(ROLES).filter((v) => v.code === 'PERMISSION_FORMAT')).toEqual([]);
+  });
+
+  it('[R2-n1] P4: "audit:purge" (operator-only) granted to the Auditor reports AUDITOR_NOT_READ_ONLY', () => {
+    const seed = withGrant('OPERATOR_SUPER_ADMIN', 'audit:purge', withGrant('OPERATOR_COMPLIANCE_AUDITOR', 'audit:purge'));
+    const violations = check(seed, [...PERMISSION_DEFINITIONS, entry('audit:purge', 'audit', true)]);
+    expect(violations).toEqual([
+      expect.objectContaining({ code: 'AUDITOR_NOT_READ_ONLY', role: 'OPERATOR_COMPLIANCE_AUDITOR', permission: 'audit:purge' }),
+    ]);
+  });
+
+  it('[R2-n1] audit:export granted to the Auditor passes the read-only rule (only the M2 reserved-seam rule fires); the shipped matrix has no violation', () => {
+    expect(codes(check(withGrant('OPERATOR_COMPLIANCE_AUDITOR', 'audit:export')))).toEqual(['RESERVED_HELD']);
+    expect(check(ROLES)).toEqual([]);
+  });
+});

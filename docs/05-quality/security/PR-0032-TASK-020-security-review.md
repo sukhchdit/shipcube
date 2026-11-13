@@ -421,3 +421,224 @@ Add one negative test per form (code review R2-m1). **Note for the orchestrator:
 | Open, routed | LOW PR32-SEC-12 (020-C), -13 (before the first route with a request body), -07 (c) (TASK-024); INFO -08, -10, -11 (rest), -14, -15, -16 with the owners in R2.5 and R2.3 |
 | Decisions | D-TASK020-21 confirmed (R2.4); D-TASK020-03 stands with control (i) in place; D-TASK020-18, -19, -20, -22..-27 accepted |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** Conditions C1-C3 met and the MEDIUM closed; no Critical, High or Medium finding open; merge still needs lane-B evidence and a lane A run that executes its gates on the final head |
+
+## Round 3 (head 308eb83, delta)
+
+| Field | Value |
+|---|---|
+| Round | 3: delta of fix cycle 2 (D-ORCH-050): PR32-SEC-13 (= code review R2-m1), PR32-SEC-15 (= R2-n1), R2-m2, the R2-m4 comment ride-alongs, decisions D-TASK020-28..31, and a merge-only check of the PR #35 and PR #36 unions |
+| Head | 308eb8398382510c846e91b371e02d071ed1ddf7 |
+| Range | `11530cc..308eb83`. Own commits: `8c8147c` fix(api) (`define-route.ts`, `route-state.ts` and their tests), `2b1b01a` test(api) (`tests/generated/route-metadata.test.ts`), `5eee2d0` and `f7428a6` docs(api) (comments in `authn/authenticate.ts` and `packages/shared/src/http/credentials.ts`), `e7d1c9e` lane-B evidence (docs only). Merges of `main`: `68c3532` (docs only), `2b0ee65` (PR #35, TASK-277 `tools/quality`), `5a145a8` (PR #36, gherkin map), `308eb83` (docs only). Merge base with `main` is now `e1805a5`; `main` was `a1f9cef` when this round was written and has changed only `docs/sdlc/STATUS.md` since the merge base. `git merge-tree origin/main 308eb83` is clean |
+| Owned paths | 145 in the PR's net change against `main` (simulated checker, R3.8; 144 in round 2, plus the new `route-state.test.ts`). Six of them changed after `11530cc`: `routing/define-route.ts` and its test, `routing/route-state.ts` and its new test, `authn/authenticate.ts` (comment) and `package.json` (PR #35's three `quality:*` scripts arrived through merge `2b0ee65`; the PR also changes `package.json` by its `test:contract` line, so the main-side edit counts). Unowned and changed: `tests/generated/route-metadata.test.ts`, `packages/shared/src/http/credentials.ts` (comment). The round-2 head row therefore no longer binds the head |
+| Lane A evidence | Run [43498977127](https://github.com/sukhchdit/shipcube/actions/runs/43498977127) on `308eb83`: `fast-lane` **succeeded and every step executed**: lane-B evidence, commitlint, lint, lint must not mutate the tree, format, actionlint, type-check, unit, base-ref negative fixtures, build, build must not mutate the tree. `scans`: Gitleaks, Semgrep and oasdiff green; only "Security-owned paths need a review record" is red, and `ci-gate` is red through it alone. This round is that record. (On `11530cc` every step after the evidence check had been skipped.) |
+| Lane B evidence | Run `20261113T1958Z_5a145a8` (commit `e7d1c9e`): PASS on a clean tree, `build_clean: true`; api 101, catalog-c1-c14 74, integration 254 (1 skipped), unit 4,141 (2 skipped). `5a145a8` differs from the head only in `docs/**` and `.claude/**`, so the evidence covers the head's code |
+| Reviewer / date | security-analyst, 2026-11-14, round 3. Read-only. **Slip, disclosed:** my first command ran read-only `git log` and `git status` inside the PR worktree `Shipqube-TASK-020`; nothing was written, but `git status` may have refreshed that worktree's index stat cache. No later command touched it. Everything else ran in the main checkout against SHAs (`git fetch`, `show`, `archive`, `merge-tree`, `gh`) or on scratch copies: `git archive` extracts of `308eb83` and `11530cc` (the latter as the positive control) with a `node_modules` of junctions to the main checkout's packages and `@platform/*` pointing at the extract, and a `git clone --shared` for the record simulation. Scratch removed afterwards, the main checkout's `node_modules` unchanged (740 entries). No Docker, no install, no build |
+
+### R3.1 Summary
+
+- **PR32-SEC-13 (LOW) is closed.** `defineRoute` now refuses every form that re-opened a request schema in round 2: schema-level `prefs()`/`options()` with `allowUnknown`, `Joi.link`, and `Joi.extend` types (a new type name, and a type that reuses a built-in name such as `object`). A 65-case bypass matrix gives **22 accepted-with-leak on `11530cc` and 0 on the head** (R3.3). The nine families you asked about (nested `.when()`, `Joi.alternatives`, `.concat()` of an open schema, `.unknown(true)`, `.pattern()`, array items, `Joi.object().keys()` without arguments, `.fork()`, `Joi.compile`) have no bypass.
+- **PR32-SEC-15 (INFO) is closed for this PR's artefacts.** `ANONYMOUS.permissions` is a frozen read-only view whose backing `Set` cannot be reached (38 probes, R3.4), and the descriptor's `audit` (with `additional`), `reauth` and `deprecated` are deep-frozen copies. What is left is a sheet line, not a finding: the real authenticators must build their principals' permissions with `readonlySet`.
+- **D-TASK020-28..31 are accepted** (R3.5). D-TASK020-29 fails closed when Joi drops `_definition` (simulated: the first route with a schema throws at module load). It does not fail closed when Joi drops `$_terms`; that case is caught only by a test: new **INFO PR32-SEC-17**.
+- **The comments are accurate** against D-ARCH-109 and D-ORCH-051 and change no behaviour (proved by a comment-stripped compile comparison). PR32-SEC-16 is now reconciled by D-ARCH-109 and PR32-SEC-14 is ruled by D-ARCH-110; both implementations are the part 020-B follow-up (due before TASK-027 merges and before TASK-052 starts).
+- **The four merges are pure unions.** Each merge tree equals `git merge-tree --write-tree` of its parents; every `main`-side parent is an ancestor of `origin/main`; `tools/ci`, `tools/quality`, the workflows, the lockfile, the scanner configs and the other D-ORCH-021 levers are byte-identical to `main`, so PR #35's and PR #36's controls are intact. The lockfile delta is none.
+- **Evidence accepted:** the real `check-evidence --profile pr` passes on the head and credits the run; the count-only host-fragment scan of the run's seven files is 0 on every label.
+
+**New: 1 INFO (PR32-SEC-17). Nothing Critical, High or Medium open; one LOW open (PR32-SEC-12, owner 020-C). Verdict: PASS_WITH_FOLLOW-UPS** (R3.10).
+
+### R3.2 Method
+
+| Area | How |
+|---|---|
+| Delta | `git diff 11530cc 308eb83`: 82 files, 17 of them outside `docs/` and `.claude/`. Read in full: `routing/define-route.ts` (the delta is +76/-5), `routing/route-state.ts`, both new or extended test files, the three-case addition to `tests/generated/route-metadata.test.ts`, and the comment hunks. `validate/validate.ts` was re-read for the options and messages the slot passes (it passes `abortEarly` and `convert` only; `toIssues` never uses Joi's own message text) |
+| Bypass matrix | One Jest file in the scratch extract (not in the PR): for each of 65 schema constructions, whether the validate slot (`prepareSchemas` + `validateRequest`) hands an extra `role` to the handler ("leak") and whether `routeDefinitionProblems` refuses the declaration. Five controls (a closed object; top-level and nested `allowUnknown`, `unknown(true)`, `pattern`) must come out as the round-2 code classifies them. The same file ran on an extract of `11530cc` as the positive control: 22 accepted-with-leak there, 0 on the head |
+| Joi internals | A walk of `$_terms` over a schema that uses `when` (then, otherwise, switch), `alternatives` (try, conditional), `array` (items, ordered, has), `pattern`, `rename`/`and`/`assert`, `link`, `shared`, `custom` and `default` (Joi 18.3.2): every nested schema is reachable through plain objects and arrays or the `Keys` array subclass; the only class instances below `$_terms` are references and `RegExp`s, and none holds a schema. `Joi.types()` has 15 entries, 12 distinct type names after the `alt`/`bool`/`func` aliases. An extended root keeps the built-in definitions of every type it does not redefine, and gives a redefined type a new one |
+| `readonlySet` | 38 probes in a Jest file on the extract (one of them the positive control: a mutable `Set`) (R3.4) |
+| Other preferences | 18 further `prefs()` forms on a closed object (`presence` x3, `noDefaults`, `skipFunctions`, `nonEnumerables`, `convert`, `abortEarly`, `stripUnknown` x2, `messages`, `errors`, `allowUnknown: false`, `dateFormat`, `cache`, `context`, `externals`, `warnings`): none admits an extra key (15 run: the slot rejects `role`, or strips it for `stripUnknown`); Joi itself refuses `context`, `externals` and `warnings` at schema level |
+| Scratch Jest | `apps/api/src/platform` (all), `packages/authz`, `packages/shared/src/http`, `tests/generated`, `tests/api/helpers`, `tests/contract-stubs`, `tools/openapi`: **51 suites, 977 tests pass** (the code review's round 2 ran the same paths: 50 suites and 959 tests; the difference is the new `route-state.test.ts` plus 18 new tests: 7 for PR32-SEC-13, 2 for the descriptor freeze, 6 for `readonlySet`/`principalOf`, 3 for R2-m2) |
+| Mutation | 18 source mutants, each in a fresh copy and restored byte for byte: link refusal removed, `allowUnknown` check removed, non-built-in type check removed, definition identity removed, extension walk unwired, `$_terms` walk removed, `audit`/`reauth`/`deprecated` freeze removed, `frozenData` shallow, `readonlySet` returning the `Set`, not frozen, following its source, `ANONYMOUS.permissions` mutable, `principalOf` trusting an unknown credential, and the three `add(...)` calls of `checkRouteMetadata` deleted one by one: **18/18 killed**. Five more mutants of the new walker: array branch and plain-object branch removed killed; the `definition === undefined` clause, the depth guard and the `seen` set removed **survive** (R3.7, PR32-SEC-17). Two Joi-upgrade simulations (`_definition` and `$_terms` renamed), R3.5 |
+| Merges | `git merge-tree --write-tree <p1> <p2>` against each merge's tree for `68c3532`, `2b0ee65`, `5a145a8`, `308eb83`; ancestry of the `main`-side parents; byte comparison of the control files against `origin/main` (R3.6) |
+| Evidence | The real `tools/quality/check-evidence.mjs --profile pr` in a shared clone at `308eb83` (`--base origin/main` and `--base <merge base>`); `gh run view 43498977127 --json jobs` for every step; a count-only host-fragment scan of the run's seven files (user name, 8.3 stem, home and temp in both slash forms, host name, git e-mail, profile prefixes), synthetic positive control on every label |
+| Comments | Both comment-only files transpiled with comments removed and compared (head against `11530cc`), with a one-token change as the positive control |
+| Cross-check | Code review round 3 (appended to `docs/05-quality/reviews/PR-0032-TASK-020-code-review.md` in the same pass): its R2-m1, R2-m2, R2-n1 and R2-n3 closures are the same facts as here; its R3-n items 1-3 are the code-level counterpart of PR32-SEC-17 |
+
+### R3.3 PR32-SEC-13: closed
+
+**What the fix does** (`routing/define-route.ts`, head):
+- `openSchemaProblems` (`:308`) refuses, at every node it walks: `type: 'link'` (`:310`); a type that is not one of the built-in names of `BUILT_IN_DEFINITIONS` (`:311`); and `preferences.allowUnknown` set to anything but `false` (`:316`). Walked nodes are keys, items, ordered items, alternatives `matches` and `when`/`switch` branches, as before.
+- `extensionProblems` (`:275`) walks the real schema graph through `$_terms` (plain objects, arrays and the `Keys` array subclass, never class instances, each object once, bounded by `MAX_TERM_DEPTH` = 128) and refuses any schema whose `_definition` is not the one `Joi.types()` hands out for its type name (`:287`). That catches the case `describe()` cannot show: an extension that keeps the name `object` and adds code. `schemaProblems` runs both walks for each of `params`, `query`, `body` and `headers` (`:341`).
+
+**Bypass matrix** (65 cases; `leak` = an extra `role` reaches the handler through the validate slot):
+
+| Family | Forms probed | Head | `11530cc` |
+|---|---|---|---|
+| Schema-level `prefs()`/`options()` `allowUnknown` | top level; nested key; in a `when` branch; in `alternatives.try`; in array items; set by `fork`; arriving through `concat`; from a `Joi.defaults(...)` root (top and nested) | all 10 refused | all 10 accepted with leak |
+| `allowUnknown` set true and then false (last wins) | the closed result | accepted, no leak | accepted, no leak |
+| Nested `.when()` | open object in `then`, in `otherwise`, in a `switch` branch; a schema condition at the top level; a `then` with `prefs` | all refused | refused except the `prefs` form |
+| `Joi.alternatives` | `.try(open)`, `alternatives(open, string)`, `.conditional(...)`, `.match('all')`, `.try(prefs)` | all refused | refused except the `prefs` form |
+| `.concat()` of an open schema | `unknown(true)`; open `prefs`; open `keys()`; open `pattern`; open concat closed; a nested key whose child is open; a nested key whose child has `prefs` | all refused except `concat(Joi.object().keys())` (declared keys stay, `role` is still rejected: accepted, no leak) | the two `prefs` forms accepted with leak |
+| `.unknown(true)` and `.pattern()` keys | top, nested, regex key, schema key; `unknown(false)` | refused; `unknown(false)` accepted, no leak | same |
+| Array items | `items(open)`, `items(closed, open)`, `items(prefs)`, `ordered(open)`, no items; `has(open)` beside closed items | refused; `has(open)` accepted, no leak (it does not change the output) | the `prefs` form accepted with leak |
+| `Joi.object().keys()` without arguments | top; nested after declared keys; bare `Joi.object()`; `Joi.object({})` | refused; `Joi.object({})` accepted, no leak | same |
+| `.fork()` | `unknown(true)`; replacement by an open object; `prefs`; a deep path (`address.geo`) | all refused | the `prefs` form accepted with leak |
+| `Joi.compile` of a plain object | flat, nested plain (closed, accepted, no leak); nested `Joi.object()`; `compile(open)` | the last two refused | same |
+| `Joi.link` | `#id` to a shared open object; an ancestor link; a link in array items | all 3 refused (named as a link) | two accepted with leak; the ancestor link accepted but unusable (Joi throws when it validates) |
+| `Joi.extend`, new type name | nested; at the top level | refused (non-built-in type, or not an object schema) | nested form accepted with leak |
+| `Joi.extend`, built-in name `object` with added code | top; as a key; in `when` then / otherwise / switch; in `alternatives.try` / `conditional`; in array items / ordered; through `fork`; through a `concat`ed key; three levels down | all 12 refused (extension type) | 9 accepted with leak (the three `when` positions were accepted without a leak: `concat` keeps the base type's definition) |
+| Extension type used only as an `assert(...)` condition; `with()` | the value never reaches the output | accepted, no leak | same |
+
+Totals: head 0 bypass, 50 refused with a leak that would otherwise have happened, 5 refused without a leak, 10 accepted without a leak; `11530cc` 22 bypass, 28, 1 and 14. The 22 are exactly the `prefs`/`options`, `link` and `extend` forms named in round 2. The five controls classify as expected on both heads.
+
+**Not a bypass of the control, same trust domain.** A route module that replaces `describe` on its own schema instance (`Object.defineProperty(schema, 'describe', ...)`) hides its `prefs` from the walk (probed: accepted with leak, on both heads). It is code in the declaring module, visible in review, the same class as PR32-SEC-12 (i) and (j); the walker cannot defend against the code that calls it. No finding.
+
+**Mutation and upgrade behaviour.**
+- 18/18 mutants killed (R3.2). The tests' precondition (each `it.each` row first shows the validate slot would hand `role` to the handler, then shows the refusal) is what makes the refusals meaningful; I re-ran it on the head.
+- Joi renames `_definition`: every route with a schema throws `RouteDefinitionError` at module load ("uses the Joi extension type ...": the first `defineRoute` with `params` in `define-route.test.ts` fails the suite). Fails closed, as D-TASK020-29 says.
+- Joi renames `$_terms`: `defineRoute` keeps working, the root schema is still identity-checked, but a same-name extension below the root is no longer seen; one test (the nested extension) goes red. See PR32-SEC-17.
+
+### R3.4 PR32-SEC-15: closed for the PR's artefacts
+
+**`readonlySet` (`routing/route-state.ts:22`).** An object literal with a `size` getter and `has`, `forEach`, `entries`, `keys`, `values` and `[Symbol.iterator]` arrow functions closing over a private `Set`, frozen. Probes (a mutable `Set` is the positive control: `Set.prototype.add.call` works on it):
+
+| Attempt | Result |
+|---|---|
+| `Set.prototype.add`/`delete`/`clear` via `.call` and `Reflect.apply` | TypeError (6/6) |
+| `view.add(...)`, assigning or defining `add`, `has` or `size`, deleting `has`, `Object.setPrototypeOf(view, Set.prototype)` | TypeError (frozen, not extensible); the view is unchanged afterwards |
+| `ANONYMOUS.permissions = ...` | TypeError; `ANONYMOUS.permissions.size` still 0 |
+| `instanceof Set`; prototype | false; `Object.prototype`. No `add`, `delete` or `clear` property (`in` is false) |
+| Iterator objects (`[Symbol.iterator]()`, `entries()`) | no own properties; the chain is `%SetIteratorPrototype%` > `%IteratorPrototype%` > `Object.prototype`; nothing exposes the `Set` |
+| `forEach` | the third argument is the view, never the `Set`; `this` is the caller's `thisArg`, as for a real `Set` |
+| The `size` getter and `has` called with a foreign `this` | still read the private `Set` (closures), no way to swap it |
+| Closure disclosure | `toString` shows source only; `util.inspect` (showHidden) shows the getter and function names, not contents; `JSON.stringify` gives `{"size":n}` (a count, no contents); `structuredClone` throws |
+| Prototype pollution (`Object.prototype.add = fn`, then `view.add()`) | `this` is the view, not the `Set` |
+| Source mutation after construction; generator source | the view does not follow the source iterable; a generator is consumed once |
+| ES2025 set methods | absent on the view; `lib` is ES2023 so `ReadonlySet` does not declare them and `tsc` would fail closed if the lib is raised |
+
+The only consumer of `principal.permissions` is `authz/authorise.ts` (`.has`), unchanged; the `authorise`, `pipeline` and `pipeline-guards` suites pass.
+
+**Descriptor.** `defineRoute` copies `audit` (with `additional`), `reauth` and `deprecated` through `frozenData` and freezes the copies (`:437-453`), so a later change to the caller's objects does not reach the checked descriptor, and `route.audit.action = 'NONE'` throws (the exact route of code review R2-n1; mutants for each of the three copies and for the shallow form are killed). `DeprecationInfo`, `reauth` and `AuditDescriptor` hold strings, numbers, booleans, `null` and arrays of such objects, so the copy loses nothing today (code review R3-n3).
+
+**Not closed, not a finding.** `Principal.permissions` is typed `ReadonlySet`, which a mutable `Set` satisfies; the only production principal is `ANONYMOUS`, and the tests that use `new Set(...)` are test-only. The authenticators (TASK-052/055/091/171/261) must build their principals with `readonlySet`; this is a sheet line for them and for TASK-060 (read `permissions` only behind the credential check), not an open finding.
+
+### R3.5 Decisions D-TASK020-28..31 and the Joi-upgrade fail-closed claim
+
+| Decision | Ruling |
+|---|---|
+| **D-TASK020-28** (`Joi.link` refused, not resolved) | **Accepted.** Request bodies need no recursion; resolving `#id` and ancestor links would duplicate Joi's resolver and open a second place for an unwalked schema. A refusal costs one inline declaration. Probed: all three link forms refused |
+| **D-TASK020-29** (extension detection by definition identity; allow-list = `Joi.types()`; walk reads `$_terms` and `_definition`; a Joi upgrade that drops `_definition` refuses every schema) | **Accepted, with PR32-SEC-17.** Identity beats name matching: the sneaky `object` type is caught at every position of the matrix (R3.3). The `_definition` claim is true and simulated. The same claim does not hold for `$_terms` (R3.7) |
+| **D-TASK020-30** (only `allowUnknown` other than `false` is refused among schema-level preferences) | **Accepted.** `stripUnknown` removes the field and `serverControlledIssues` still reads the raw body, so a stripped `org_id` is refused anyway. The 15 other preferences Joi lets a schema carry were probed (R3.2) and none admits a key; `context`, `externals` and `warnings` cannot be set on a schema at all. `messages` and `errors` cannot leak a value: `toIssues` uses the Joi error type and the fixed sub-code text, never Joi's message. Probed: `allowUnknown: false` and `stripUnknown` are accepted, `true` is refused at every node |
+| **D-TASK020-31** (`readonlySet` in `routing/route-state.ts`, exported for the authenticators; the validate slot does not additionally pass `allowUnknown: false`) | **Accepted.** A schema's own preferences override the options passed to `validate()` (the top-level `prefs` row of the matrix leaks on both heads before `defineRoute` is consulted), so an explicit option would not be a control and would hide the walker's role |
+
+**Proposed log line (D-SEC-PR32-03).** PR #32 security r3 at 308eb83 = PASS_WITH_FOLLOW-UPS; PR32-SEC-13 (LOW) and PR32-SEC-15 (INFO) closed; D-TASK020-28..31 accepted; new INFO PR32-SEC-17 (the Joi extension walk is fail-closed on `_definition` only); PR32-SEC-14 and -16 now ruled by D-ARCH-110 and D-ARCH-109 with their code in the part 020-B follow-up; evidence run 20261113T1958Z_5a145a8 accepted.
+
+### R3.6 Comments, merges and controls
+
+**Comments (`5eee2d0`, `f7428a6`).** Both files compile to identical output with comments removed (positive control: a one-token change is seen), so there is no behaviour change. The new text matches the rulings:
+- `authenticate.ts` says the stub's refusal of a foreign credential follows D-ARCH-107 (5) verbatim, that D-ARCH-109 rules a foreign credential is ignored, and that part 020-B makes the slot read only the declared kinds before TASK-027 merges and TASK-052 starts. That is D-ARCH-109 (2) and D-ORCH-051 (1).
+- `credentials.ts` calls the "any credential counts on every route" reading superseded but in force until 020-B, names `presentedKinds` as the route-aware predicate, and says the real authenticators never inherit "present means refuse". D-ARCH-109 (4) (a foreign credential does not change the response headers) and D-ORCH-051 (1) say the same.
+- PR32-SEC-16's ids and code review R2-m4 are cited correctly. D-TASK020-21's behaviour (the stub still answers 401 to a presented credential) is unchanged by this PR, as D-ORCH-051 rules.
+
+**Merges.**
+
+| Check | Result |
+|---|---|
+| Tree equality | `68c3532` (parents `11530cc`, `6420f90`), `2b0ee65` (`5eee2d0`, `e4ecff2`), `5a145a8` (`f7428a6`, `d693e8c`), `308eb83` (`e7d1c9e`, `e1805a5`): each commit's tree equals `git merge-tree --write-tree <p1> <p2>` (clean auto-merges, no hand edit). Each `main`-side parent is an ancestor of `origin/main` |
+| Delta on the owned paths | The merges' only owned-path effect is `package.json` (PR #35's `quality:trace`, `quality:gherkin-map`, `quality:flake-report`); against `main` the head differs from `main` in `package.json` by exactly the PR's `test:contract` line |
+| PR #35 controls (`tools/quality/**`: trace, gherkin map, flake report, `lib/cli.mjs`, `lib/test-ids.mjs`) | Byte-identical to `origin/main`, so output confinement, link refusal, rename handling and the linear `SCENARIO_LINE` of PR35-SEC-01/-02 are the merged versions. This PR's `.gitignore` line `/reports/` is a side benefit for PR #35's open note R2-n1 (reports not git-ignored) |
+| PR #36 controls (the gherkin map, `KNOWN_DRIFT` empty, `tools/quality/*.test.ts`, `docs/05-quality/tests/gherkin-*`) | Byte-identical to `main` |
+| D-ORCH-021 levers | `.github/workflows/**` (only `.github/CODEOWNERS` differs: the PR's own `coverage-teardown.ts` line), `tools/ci/**`, `tools/hooks/**`, `tools/deps/**`, `tools/isolated/**`, `.npmrc`, `.node-version`, `package-lock.json`, `.gitleaks.toml`, `.gitleaksignore`, `.semgrep/**`, `.semgrepignore`, `.prettierignore`, `.swcrc`, `commitlint.config.mjs`, root `tsconfig*.json`: byte-identical to `main`. Lockfile delta since `11530cc`: none (the blob has one object id at `11530cc`, at `308eb83` and on `origin/main`) |
+| Rule weakening | `eslint.config.mjs`, `tools/eslint-rules/**`, `tools/lint/**`, `packages/authz/**`, `jest.config.ts`, `tools/tsconfig.json`, `tests/fixtures/lint/**` are unchanged since `11530cc`; lane A's base-ref negative fixtures passed on the head |
+| New pre-gate execution points | None (no new script, hook or config loader in the delta) |
+
+**Evidence.**
+- `check-evidence --profile pr` at `308eb83` (real CLI, shared clone, against `origin/main` and against the merge base): **PASS**, run `20261113T1958Z_5a145a8` accepted, the older runs rejected as stale or not ancestors (expected). Its note that SEC-TC-29 can move from `required_cases_pending` to `required_cases` stands (R2.8, qa-lead).
+- Count-only host-fragment scan of the run's seven files (1,085,786 bytes): **0** on user name, 8.3 stem, home, temp, host name, git e-mail and profile prefixes; the synthetic positive control fires on every label.
+
+### R3.7 New finding and status of the open items
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner and due |
+|---|---|---|---|---|---|---|
+| PR32-SEC-17 | The Joi extension walk fails closed on `_definition` only: a rename of `$_terms` degrades silently to the root-only identity check, and the `definition === undefined` clause is not pinned by a test | INFO | CWE-636 | A04 | `routing/define-route.ts` `extensionProblems` (`:275-299`, `:287`, `:290`), `termsOf` (`:266`) | senior-developer, with the next edit of `define-route.ts` (part 020-B/020-C or the TASK-100 parity facets); not before the merge (an edit now voids this record, S11) |
+
+#### PR32-SEC-17 (INFO)
+
+**Evidence.** Simulated on the extract: renaming `_definition` makes every schema refuse (module load throws); renaming `$_terms` leaves `defineRoute` working, with the nested same-name extension no longer seen, and only the nested-extension test goes red. Removing the `definition === undefined ||` clause survives all 71 tests of `define-route.test.ts` (equivalent under Joi 18.3.2: both sides would only be equal-and-undefined after a rename, which the sneaky-type tests would still catch). So D-TASK020-29's "refuses every schema" is true for `_definition` and rests on the test suite for `$_terms`.
+
+**Impact.** Only reachable after a Joi upgrade that changes the extension API, and only for an extension type that reuses a built-in name below the root, in a PR that adds it; the tests (which run in lane A) would fail first. INFO.
+
+**Remediation.**
+1. In `extensionProblems`, treat a schema whose `termsOf(value)` is not an object as a problem (every Joi schema has `$_terms`), so a rename refuses everything exactly like `_definition` does.
+2. Add one test that does this on a schema instance (`Object.defineProperty(schema, '$_terms', { value: undefined })`, then `routeDefinitionProblems` names it) and, optionally, one that pins the `undefined` clause with a stub definition.
+
+| Open item | Status after this round |
+|---|---|
+| PR32-SEC-12 (LOW, T-83 lexical residuals) | Open, unchanged. Part 020-C (D-ARCH-111, sheet line present) |
+| PR32-SEC-14 (INFO, signature-only permission gate) | Open, ruled by D-ARCH-110: the gate changes, the provider principal stays `authenticated: false`. Code in the part 020-B follow-up, due before TASK-027 merges |
+| PR32-SEC-15 (INFO) | **Closed** for this PR (R3.4); sheet line for the authenticators' principals |
+| PR32-SEC-16 (INFO, refresh-cookie presence) | Reconciled by D-ARCH-109 (ADR-0006 am. 17, ADR-0008 am. 5); this PR's comments are accurate. Code (`presentedKinds`, route-aware stub, problem-handler test, SEC-TC-29 helper) in the part 020-B follow-up, due before TASK-027 merges and before TASK-052 starts |
+| PR32-SEC-13 (LOW) | **Closed** (R3.3) |
+| PR32-SEC-07 (c), -08, -10, -11 (rest) | Unchanged (R2.3): TASK-024, TASK-022/113, webhook tasks, 015-C |
+| Code review R2-n2 (stale `storage/boundary.test.ts` comment) | Still open at the head. The file is under owned `apps/api/src/platform/`, so fixing it now would void this record (S15); ride it on part 020-B |
+| Threat-model wording of D-ORCH-051 (4) (R-06, T-17, T-06, §4.3, T-83, a new SEC-TC for foreign credentials) | Not part of this round; still owed by security-analyst in its next text round |
+
+### R3.8 Record simulation and secret hygiene
+
+**Simulated `check-security-owned-paths --pr 32`.** The head's own `tools/ci` (byte-identical to `main`'s) in a scratch `git clone --shared` checked out at `308eb83`. Scenario commits were made in the clone only, and the clone was checked out at each scenario because the checker reads records from the working tree. The record is this file as the PR branch carries it (rounds 1 and 2) with this section appended; base is the `main` tip `a1f9cef` unless a scenario says otherwise.
+
+| Scenario | Exit | Status |
+|---|---|---|
+| S0 control: branch as pushed (rounds 1 and 2 only) | 1 | missing |
+| S1 this record (rounds 1-3) committed on top of 308eb83, base = main tip | 0 | pass, satisfied by `308eb83` |
+| S1b same, --event push (control: skipped) | 0 | skipped |
+| S2 same, base = merge base e1805a5 | 0 | pass, satisfied by `308eb83` |
+| S3 control: --pr 31 | 1 | missing |
+| S4 control: the same text named PR-0033-... | 1 | missing |
+| S5 control: Head row of round 3 names the round-2 head 11530cc (rows of older rounds only) | 1 | missing |
+| S6 control: round 3 Head row names the main tip | 1 | missing |
+| S7 positive: round 3 Head row abbreviated to 7 hex | 0 | pass, satisfied by `308eb83` |
+| S8 control: last Verdict row FAIL | 1 | missing |
+| S9 control: last Verdict row PENDING | 1 | missing |
+| S10 procedural: round 3 without its own Verdict row (round 2 row is then the last) passes | 0 | pass, satisfied by `308eb83` |
+| S11 control: owned routing/define-route.ts edited after the record | 1 | missing |
+| S12 control: owned routing/route-state.ts edited after the record | 1 | missing |
+| S13 control: owned authn/authenticate.ts edited after the record (a comment) | 1 | missing |
+| S14 control: owned routing/define-route.test.ts edited after the record | 1 | missing |
+| S15 control: owned storage/boundary.test.ts edited after the record (code review R2-n2 comment fix) | 1 | missing |
+| S16 control: owned eslint.config.mjs edited after the record | 1 | missing |
+| S17 control: owned tests/api/helpers/coverage-teardown.ts edited after the record | 1 | missing |
+| S18 control: owned package.json edited after the record (a PR-changed path) | 1 | missing |
+| S19 unowned tests/generated/route-metadata.test.ts edited after the record | 0 | pass, satisfied by `308eb83` |
+| S20 unowned packages/shared/src/http/credentials.ts edited after the record (a comment) | 0 | pass, satisfied by `308eb83` |
+| S21 docs-only lane-B evidence commit after the record | 0 | pass, satisfied by `308eb83` |
+| S22 merge of a docs-only main tip after the record (base = new tip) | 0 | pass, satisfied by `308eb83` |
+| S23 merge of a main tip that changes owned tools/quality/trace.mjs (not a PR path) after the record | 0 | pass, satisfied by `308eb83` |
+| S24 control: merge of a main tip that changes owned package.json (a PR-changed path) after the record | 1 | missing |
+| S25 control: merge of a main tip that changes owned eslint.config.mjs (a PR-changed path) after the record | 1 | missing |
+| S26 record naming the merge head: new owned edit then a new Head row (re-reviewed) | 0 | pass, satisfied by `dcbdf79` |
+| S27 control: round-3 Head row names the merge base e1805a5 (a commit outside the PR range) | 1 | missing |
+
+29 scenarios, all as expected. The record check owns 145 paths on the head (146 in S15, which adds `storage/boundary.test.ts`).
+
+**Secret hygiene.** Gitleaks v8.30.1 default-ruleset emulation over the lines this round adds to this record and to the code review record: 222 rules of the pinned tag's default configuration (220 compile to JavaScript; run-time positive controls for a GitHub token, an AWS key id and a generic API key fired 3 of 3) over 308 added lines: **0 findings**. Count-only host-fragment scan of those lines: **0** on every label (user name, its 8.3 stem, home and temp in both slash forms, host name, git e-mail, profile prefixes), synthetic control positive on every label. No value is quoted anywhere. Lane A's real Gitleaks passed on `308eb83`.
+
+### R3.9 Checks owed
+
+- **Before merge (procedural, not a security condition):**
+  - nothing non-docs after this record: S11-S18 void it;
+  - a docs-only `main` merge (S22) or a `main` change to an owned path this PR does not change (S23) keeps it;
+  - a `main` change to an owned path this PR also changes (`package.json`, `eslint.config.mjs`, `jest.config.ts`, `.gitignore`, `.github/CODEOWNERS`, `tools/tsconfig.json`) needs a merge-only delta (S24, S25; this round's `2b0ee65` was one);
+  - an edit to the unowned `tests/generated/**` or `packages/shared/src/http/**` keeps the record (S19, S20) but stales the lane-B evidence (the staleness allow-list is `docs/**` minus the API contract and the tooling inputs), so it needs a new heavy run.
+- **Part 020-B follow-up:** PR32-SEC-14 and -16 (D-ARCH-109/110), the R2-n2 comment, PR32-SEC-17 if `define-route.ts` is opened. Its own record is required.
+- **Part 020-C:** PR32-SEC-12 and the R4 line, as in R2.8.
+- **TASK-052/055/060/091/171/261:** build `Principal.permissions` with `readonlySet`; TASK-060 reads `permissions` only behind the credential check; PR32-SEC-14/-16 matrix rows (TASK-027).
+- **qa-lead:** SEC-TC-29 from `required_cases_pending` to `required_cases` in the next activation PR.
+
+### R3.10 Verdict
+
+| Field | Value |
+|---|---|
+| Critical / High / Medium open | 0 / 0 / 0 |
+| Closed this round | PR32-SEC-13 (LOW), PR32-SEC-15 (INFO); code review R2-m1, R2-m2, R2-n1, R2-n3 |
+| Open, routed | LOW PR32-SEC-12 (020-C), -07 (c) (TASK-024); INFO -08, -10, -11 (rest), -14 and -16 (part 020-B follow-up), -17 (new, next edit of `define-route.ts`) with the owners in R3.7 |
+| Decisions | D-TASK020-28, -29, -30, -31 accepted; D-TASK020-21 and the R2 rulings stand; proposed log line D-SEC-PR32-03 in R3.5 |
+| Evidence | Lane A run 43498977127 executed every gate on the head; lane-B run `20261113T1958Z_5a145a8` accepted by the real checker; host-fragment scan 0 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** PR32-SEC-13 and PR32-SEC-15 are closed, no Critical, High or Medium finding is open, and the merge needs nothing further from security except that no non-docs commit and no main merge touching a shared owned path lands after this record |

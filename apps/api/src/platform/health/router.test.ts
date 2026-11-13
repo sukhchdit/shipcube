@@ -13,7 +13,8 @@ import {
   type ReadinessComponent,
   type ReadinessOptions,
 } from '../runtime/readiness.js';
-import { createHealthRouter } from './router.js';
+import { defaultPipelineSlots, mountRoutes } from '../routing/pipeline.js';
+import { healthRoutes } from './router.js';
 
 const critical = (name: ReadinessComponent): boolean => name !== 'audit_chain';
 
@@ -58,7 +59,7 @@ function gated(name: ReadinessComponent) {
 function appWith(checks: readonly ReadinessCheck[], options: ReadinessOptions = {}) {
   const probe = createReadinessProbe(checks, options);
   const app = express();
-  app.use(createHealthRouter({ probe }));
+  app.use(mountRoutes(express.Router(), healthRoutes({ probe }), defaultPipelineSlots({ tenantTx: undefined })));
   return { app, probe };
 }
 

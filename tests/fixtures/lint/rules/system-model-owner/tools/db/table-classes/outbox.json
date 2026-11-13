@@ -1,0 +1,5 @@
+{
+  "$comment": "Miniature manifest of the platform/system-model-owner fixture root (PR19-SEC-01, D-ARCH-080).",
+  "module": "outbox",
+  "tables": [{ "name": "outbox_events", "class": "SYSTEM" }]
+}

@@ -3,7 +3,11 @@
 // stub cannot drift from the contract. Pure: `buildStubs` reads the dereferenced document, `resolveStub` picks the
 // stub and variant for a request (default: first 2xx, first example; `Prefer: code=` / `example=` select others).
 import { type HttpMethod, listOperations, type OpenApiDocument } from '../../tools/openapi/contract.js';
+import { PRIVATE_NO_STORE, requiresPrivateNoStore } from '../api/helpers/cache-control.js';
 import { compilePathTemplate, matchAll, type PathTemplate } from '../api/helpers/path-match.js';
+
+/** SEC-TC-29: the `Cache-Control` value of a response that must not be stored by the browser or a shared cache. */
+export const PRIVATE_CACHE_CONTROL = PRIVATE_NO_STORE.join(', ');
 
 /** One documented response example: a status, its media type and one example value. */
 export interface StubVariant {
@@ -112,8 +116,14 @@ const codeOf = (variant: StubVariant): unknown => (isObject(variant.body) ? vari
 
 /** One stub per operation; the default variant is the first 2xx response (else the first one) and its first example. */
 export function buildStubs(doc: OpenApiDocument): ContractStub[] {
-  return listOperations(doc).map(({ operationId, method, fullPath, operation }) => {
-    const variants = variantsOf(operation.responses ?? {});
+  return listOperations(doc).map((contractOperation) => {
+    const { operationId, method, fullPath, operation } = contractOperation;
+    // The SEC-TC-29 predicate the contract validator uses (cache-control.ts): every response of an operation whose
+    // security has no anonymous alternative is private, no-store; the server adds it for a request with a credential.
+    const authenticated = requiresPrivateNoStore(contractOperation, doc);
+    const variants = variantsOf(operation.responses ?? {}).map((variant) =>
+      authenticated ? { ...variant, headers: { ...variant.headers, 'Cache-Control': PRIVATE_CACHE_CONTROL } } : variant,
+    );
     const fallback: StubVariant = { status: 501, contentType: undefined, exampleName: undefined, body: undefined, headers: {} };
     const primary = variants.find((variant) => variant.status >= 200 && variant.status < 300) ?? variants[0] ?? fallback;
     const template = compilePathTemplate(fullPath, undefined);

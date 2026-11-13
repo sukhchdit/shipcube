@@ -7,8 +7,21 @@
  * they are read only to classify an RLS `WITH CHECK` rejection and are never copied into a mapping or a `DbError`.
  */
 
-/** Public RFC 9457 `code` of the problem response (the API error catalogue). */
-export type DbProblemCode = 'AUTHZ_DENIED' | 'NOT_FOUND' | 'CONFLICT' | 'SERVICE_UNAVAILABLE' | 'INTERNAL_ERROR';
+import type { ErrorCode } from '@platform/shared';
+
+/**
+ * Public RFC 9457 `code` of the problem response. Every entry must be a platform catalogue code (`satisfies`), so a
+ * catalogue change that drops one is a compile error here (PR #11 code review R3-n6); AUTHZ_DENIED and CONFLICT stay
+ * in packages/shared/src/errors/catalogue/platform.ts and are never redeclared by a module catalogue.
+ */
+export const DB_PROBLEM_CODES = [
+  'AUTHZ_DENIED',
+  'NOT_FOUND',
+  'CONFLICT',
+  'SERVICE_UNAVAILABLE',
+  'INTERNAL_ERROR',
+] as const satisfies readonly ErrorCode[];
+export type DbProblemCode = (typeof DB_PROBLEM_CODES)[number];
 
 /** Stable machine reason for logs, metrics and tests. Never shown to end users as text. */
 export type DbErrorReason =

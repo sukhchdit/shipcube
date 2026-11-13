@@ -141,5 +141,16 @@ describe('contract stubs from openapi.yaml examples', () => {
       const bad = await fetched('GET', path, await fetch(`${server.url}${path}`, { headers: { Prefer: 'example=nope' } }));
       expect(bad).toMatchObject({ status: 400, body: { code: 'MALFORMED_REQUEST' } });
     });
+
+    it('[SEC-TC-29] [D-ARCH-107 (5)] answers private, no-store to a request that carried a credential, problems included', async () => {
+      const credential = { 'X-Quote-Token': 'opaque-stub-test' };
+      const live = await fetch(`${server.url}/health/live`, { headers: credential });
+      expect(live.headers.get('cache-control')).toBe('private, no-store');
+      const unknown = await fetch(`${server.url}/api/v1/nowhere`, { headers: { Cookie: 'theme=dark; __Host-rt_web=opaque' } });
+      expect(unknown.status).toBe(404);
+      expect(unknown.headers.get('cache-control')).toBe('private, no-store');
+      const anonymous = await fetch(`${server.url}/api/v1/nowhere`);
+      expect(anonymous.headers.get('cache-control')).toBe('no-store');
+    });
   });
 });

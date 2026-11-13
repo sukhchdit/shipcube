@@ -122,6 +122,8 @@ const config: Config = {
       ...common,
       displayName: 'api',
       testMatch: ['**/*.api.test.{ts,tsx}'],
+      // api/README.md §16 item 6: merges the (operationId, status) pairs into reports/api-contract-coverage.json (report, not a gate).
+      globalTeardown: '<rootDir>/tests/api/helpers/coverage-teardown.ts',
     },
     // TASK-014: the Compose/image stack suite builds every image and runs `docker compose up`, so the project exists
     // only when JEST_STACK=1 (`npm run test:stack`, tools/compose/run-stack-tests.mjs); test:unit, test:integration
