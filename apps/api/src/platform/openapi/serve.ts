@@ -3,12 +3,19 @@
 // default in local and test, off in production unless configured; disabled -> the route does not exist -> 404
 // NOT_FOUND problem+json). Public by design (descriptor NONE, "API documentation"); excluded from the route/contract
 // drift check like README §15 says. Only an allow-list of assets is served (no source maps, no OAuth redirect page),
-// with a restrictive CSP of its own; the document is read once at start-up.
+// with a restrictive CSP of its own. Every body is read once at start-up and served with a precomputed strong ETag,
+// so a request never hashes a 0.8-1.6 MB body (PR21-SEC-01). The initializer pins the hardening options instead of
+// relying on library defaults (PR21-SEC-02): no external validator badge, no `?url=`/`?configUrl=` query config, no
+// "Try it out" when the process serves live data, and the top-bar URL box only in local development.
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
+import type { AppEnv } from '@platform/config';
 import express, { type Request, type Response, type Router } from 'express';
+
+import { type ApiMode, resolveApiMode } from '../context/api-mode.js';
 
 /** Where the UI is mounted (outside /api/v1, REQ-API-003). */
 export const DOCS_PATH = '/api/docs';
@@ -37,6 +44,10 @@ const ASSETS: Readonly<Record<string, string>> = {
   'favicon-16x16.png': 'image/png',
 };
 
+const HTML = 'text/html; charset=utf-8';
+const JAVASCRIPT = 'text/javascript; charset=utf-8';
+const YAML = 'application/yaml; charset=utf-8';
+
 export class DocsSpecError extends Error {
   override readonly name = 'DocsSpecError';
 }
@@ -44,14 +55,24 @@ export class DocsSpecError extends Error {
 export interface DocsOptions {
   /** Absolute path (or file URL) of openapi.yaml. */
   readonly specPath: string | URL;
+  /** `live` renders without "Try it out" (no submit methods), PR21-SEC-02. */
+  readonly apiMode: ApiMode;
+  /** Swagger UI's top bar (a box that loads any spec URL); local development only, PR21-SEC-02. */
+  readonly topBar: boolean;
 }
 
 /** The docs options for createApp, or undefined when the UI is disabled by configuration. */
-export function docsOptionsFrom(config: { readonly DOCS_ENABLED: boolean }, specPath: string | URL): DocsOptions | undefined {
-  return config.DOCS_ENABLED ? { specPath } : undefined;
+export function docsOptionsFrom(
+  config: { readonly DOCS_ENABLED: boolean; readonly APP_ENV: AppEnv },
+  specPath: string | URL,
+): DocsOptions | undefined {
+  return config.DOCS_ENABLED ? { specPath, apiMode: resolveApiMode(config.APP_ENV), topBar: config.APP_ENV === 'local' } : undefined;
 }
 
-const PAGE = `<!DOCTYPE html>
+/** The UI page; the standalone preset (top bar) is loaded only when the layout uses it. */
+export function docsPage(options: Pick<DocsOptions, 'topBar'>): string {
+  const preset = options.topBar ? `\n    <script src="${DOCS_PATH}/swagger-ui-standalone-preset.js" charset="UTF-8"></script>` : '';
+  return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -63,55 +84,82 @@ const PAGE = `<!DOCTYPE html>
   </head>
   <body>
     <div id="swagger-ui"></div>
-    <script src="${DOCS_PATH}/swagger-ui-bundle.js" charset="UTF-8"></script>
-    <script src="${DOCS_PATH}/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+    <script src="${DOCS_PATH}/swagger-ui-bundle.js" charset="UTF-8"></script>${preset}
     <script src="${DOCS_PATH}/swagger-initializer.js" charset="UTF-8"></script>
   </body>
 </html>
 `;
+}
 
-const INITIALIZER = `window.onload = function () {
-  window.ui = SwaggerUIBundle({
-    url: '${DOCS_PATH}/${DOCS_SPEC_FILE}',
+/** Swagger UI configuration (JSON-safe part); the presets reference page globals and are added by the initializer. */
+export function swaggerUiConfig(options: Pick<DocsOptions, 'apiMode' | 'topBar'>): Readonly<Record<string, unknown>> {
+  return {
+    url: `${DOCS_PATH}/${DOCS_SPEC_FILE}`,
     dom_id: '#swagger-ui',
     deepLinking: true,
-    presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
-    layout: 'StandaloneLayout',
-  });
+    // No badge image from validator.swagger.io carrying the spec URL.
+    validatorUrl: null,
+    // Pinned (the 5.x default): `?url=` / `?configUrl=` never load another document into this origin.
+    queryConfigEnabled: false,
+    // Live data: documentation only, no request is ever sent from the page.
+    ...(options.apiMode === 'live' ? { supportedSubmitMethods: [] } : {}),
+    layout: options.topBar ? 'StandaloneLayout' : 'BaseLayout',
+  };
+}
+
+/** The initializer script; every value comes from typed options, serialised with JSON.stringify. */
+export function docsInitializer(options: Pick<DocsOptions, 'apiMode' | 'topBar'>): string {
+  const presets = options.topBar ? '[SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset]' : '[SwaggerUIBundle.presets.apis]';
+  return `window.onload = function () {
+  window.ui = SwaggerUIBundle(Object.assign(${JSON.stringify(swaggerUiConfig(options))}, { presets: ${presets} }));
 };
 `;
+}
 
 function swaggerUiDir(): string {
   return dirname(createRequire(import.meta.url).resolve('swagger-ui-dist/package.json'));
 }
 
-function readSpec(specPath: string | URL): string {
+function readSpec(specPath: string | URL): Buffer {
   try {
-    return readFileSync(specPath, 'utf8');
+    return readFileSync(specPath);
   } catch (error) {
     throw new DocsSpecError('the OpenAPI document for /api/docs cannot be read', { cause: error });
   }
 }
 
-function send(res: Response, type: string, body: string | Buffer): void {
+interface StaticBody {
+  readonly type: string;
+  readonly content: Buffer;
+  /** Strong validator computed once (a quoted base64url SHA-256 prefix). */
+  readonly etag: string;
+}
+
+function staticBody(type: string, content: Buffer | string): StaticBody {
+  const buffer = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
+  return { type, content: buffer, etag: `"${createHash('sha256').update(buffer).digest('base64url').slice(0, 27)}"` };
+}
+
+function send(res: Response, body: StaticBody): void {
   res.setHeader('Content-Security-Policy', DOCS_CSP);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'no-cache');
-  res.type(type).send(body);
+  // With an ETag already set, Express neither hashes the body nor skips its 304 answer for a matching If-None-Match.
+  res.setHeader('ETag', body.etag);
+  res.type(body.type).send(body.content);
 }
 
 /** The docs router, to mount at DOCS_PATH. Reads the document and the asset folder once; throws DocsSpecError early. */
 export function createDocsRouter(options: DocsOptions): Router {
-  const spec = readSpec(options.specPath);
+  const bodies = new Map<string, StaticBody>([
+    ['/', staticBody(HTML, docsPage(options))],
+    ['/swagger-initializer.js', staticBody(JAVASCRIPT, docsInitializer(options))],
+    [`/${DOCS_SPEC_FILE}`, staticBody(YAML, readSpec(options.specPath))],
+  ]);
   const assetDir = swaggerUiDir();
-  const router = express.Router();
+  for (const [file, type] of Object.entries(ASSETS)) bodies.set(`/${file}`, staticBody(type, readFileSync(join(assetDir, file))));
 
-  router.get('/', (_req: Request, res: Response) => send(res, 'text/html; charset=utf-8', PAGE));
-  router.get('/swagger-initializer.js', (_req: Request, res: Response) => send(res, 'text/javascript; charset=utf-8', INITIALIZER));
-  router.get(`/${DOCS_SPEC_FILE}`, (_req: Request, res: Response) => send(res, 'application/yaml; charset=utf-8', spec));
-  for (const [file, type] of Object.entries(ASSETS)) {
-    const content = readFileSync(join(assetDir, file));
-    router.get(`/${file}`, (_req: Request, res: Response) => send(res, type, content));
-  }
+  const router = express.Router();
+  for (const [path, body] of bodies) router.get(path, (_req: Request, res: Response) => send(res, body));
   return router;
 }
