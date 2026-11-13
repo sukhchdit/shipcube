@@ -189,9 +189,11 @@ const URL_PREFIX = /^[a-z][a-z0-9+.-]{0,15}:\\?\/\\?\//i;
 
 /**
  * Single-credential authorisation schemes (case-insensitive, as in HTTP). `token` and `negotiate` are English words,
- * so they count only before a credential-length run (16+ characters).
+ * so they count only before a credential-length run (16+ characters). The credential never starts with `:` or `=`:
+ * `apiKey : v` is a key/value pair (the pair pass redacts `v`), not the scheme `apikey` with the credential `:`.
  */
-const TOKEN68_SCHEME = /\b(bearer|basic|dpop|ntlm|apikey|(?:token|negotiate)(?=[ \t]{1,16}[^\s"',;]{16}))[ \t]{1,16}[^\s"',;]+/gi;
+const TOKEN68_SCHEME =
+  /\b(bearer|basic|dpop|ntlm|apikey|(?:token|negotiate)(?=[ \t]{1,16}[^\s"',;:=][^\s"',;]{15}))[ \t]{1,16}[^\s"',;:=][^\s"',;]*/gi;
 
 /** Parameter-list schemes (`Digest username="u", response="v"`): the whole rest of the line is the credential. */
 const PARAMETER_SCHEME = /\b(digest|hoba|aws4-hmac-sha256)(?=[ \t]{1,16}[A-Za-z0-9_-]{1,32}[ \t]{0,16}=)[ \t]{1,16}[^\r\n]+/gi;

@@ -254,6 +254,15 @@ describe('string-redaction: key classes', () => {
 });
 
 describe('string-redaction: sensitive pairs in free text', () => {
+  // fast-check counterexample (seed 615476765): the `apikey` scheme rule took the separator `:` as its credential.
+  it.each(['apiKey :', 'apiKey  =', 'APIKEY=', 'apikey\t: '])(
+    '%s <value> is a pair, not a scheme with the separator as credential',
+    (pair) => {
+      const value = sentinel();
+      expect(redactString(`${pair}${value} tail`)).not.toContain(value);
+    },
+  );
+
   it('property: no sensitive key form x separator form leaks its value', () => {
     fc.assert(
       fc.property(
