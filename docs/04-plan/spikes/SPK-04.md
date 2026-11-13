@@ -270,7 +270,16 @@ store); the harness on `main` applies the real bootstrap lane, so a re-run is no
 numbers. `summary.json` of the 150 rps run says `"dirty": true`: the working tree held the 300 rps run's untracked
 evidence directory (the harness diff between `c037470` and the PR head before the fix cycle is two comment lines).
 
-**Fix cycle 1 smoke (no benchmark re-run):** SMOKE_PLACEHOLDER
+**Fix cycle 1 smoke (no benchmark re-run; not evidence of any performance property).** One run of the runner against the
+real bootstrap lane under the host Docker lock: 20 rps, 3 s warm-up, 8 s measured, 1 repetition, all three arms, output
+outside the repository. Result: setup, seed, the arm loop and the integrity step ran end to end; 0 request errors in
+all arms; 443 entries in 112 streams recomputed, 0 chain faults; 523 vault rows; all eight immutability legs answered
+42501 (the superuser trigger legs need rows, so the runner now fails an empty vault or an empty entry table as
+vacuous); product trigger state `ENABLE ALWAYS` and no RLS on `audit_entries` read back; exit code 0. The first smoke
+found a real incompatibility that no static check could: the real vault constrains key ids to `^[a-z][a-z0-9-]*-v[0-9]+$`
+(the prototype did not), so `server.ts` key ids `spk04-r0-k1` failed 48 to 61 % of the audit writes with
+`INTERNAL_ERROR` and the new fail-closed integrity step reported `INTEGRITY_FAILED` (immutability legs vacuous on an
+empty vault). `server.ts` now uses `spk04-<replica>-v1`. The recorded runs are unaffected (they ran on the prototype).
 
 ## 8. Lifecycle (D-ARCH-089, D-ORCH-033): executable evidence with a named deleting PR per file
 
