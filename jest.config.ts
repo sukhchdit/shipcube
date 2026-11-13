@@ -1,9 +1,13 @@
 /**
- * Jest 30 configuration (ADR-0024). Four projects (five with the opt-in stack project) selected by the root scripts:
+ * Jest 30 configuration (ADR-0024). Five projects (six with the opt-in stack project) selected by the root scripts:
  *   unit        `*.test.ts`         -> npm run test:unit (Node environment)
  *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
+ *   generated   `tests/generated/**` `*.{api,int}.test.ts(x)` -> npm run test:generated (RBAC matrix, audit, RLS and
+ *               abuse generators, which need an app or a database; TASK-276, T-QA-03). `integration` and `api` ignore
+ *               tests/generated, so a generated suite never runs twice; a plain `*.test.ts(x)` there (route-registry,
+ *               contract drift) stays a lane A unit test (PR #34 R1-M1). tools/repo/jest-projects.test.ts pins the map.
  *   stack       `tests/compose/*.stack.test.ts` -> npm run test:stack (images + docker compose; opt-in, TASK-014)
  * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
  * type-check; `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript
@@ -34,6 +38,9 @@ export const SWC_JEST_OPTIONS = {
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
+/** Folder of the `generated` project; `integration` and `api` ignore it (their suffixes would match its suites too). */
+const GENERATED_PATH = '/tests/generated/';
+
 /** Module paths the resolver never sees (exported for tools/repo/jest-config-owned.test.ts). */
 export const MODULE_PATH_IGNORE_PATTERNS = ['<rootDir>/.*/dist/', '<rootDir>/.*/build/', '/__mocks__/'];
 
@@ -55,7 +62,7 @@ const common: ProjectConfig = {
   // replace @platform/authz or pg in the RBAC, audit and RLS suites. The jest-manual-mocks repository rule also rejects
   // any __mocks__ directory, and CODEOWNERS owns **/__mocks__/. tools/lint/jest.base-fixtures.config.json mirrors it.
   modulePathIgnorePatterns: MODULE_PATH_IGNORE_PATTERNS,
-  testPathIgnorePatterns: IGNORED_PATHS,
+  testPathIgnorePatterns: [...IGNORED_PATHS, GENERATED_PATH],
 };
 
 const config: Config = {
@@ -117,6 +124,8 @@ const config: Config = {
       ...common,
       displayName: 'integration',
       testMatch: ['**/*.int.test.{ts,tsx}'],
+      // No project-level testTimeout: Jest 30 reads only the global value (PR34-SEC-04). Container hooks set their own
+      // budget (`afterAll(..., 60_000)` in seed.int and spk03); lane B passes --testTimeout to in-band projects.
     },
     {
       ...common,
@@ -124,6 +133,14 @@ const config: Config = {
       testMatch: ['**/*.api.test.{ts,tsx}'],
       // api/README.md §16 item 6: merges the (operationId, status) pairs into reports/api-contract-coverage.json (report, not a gate).
       globalTeardown: '<rootDir>/tests/api/helpers/coverage-teardown.ts',
+    },
+    {
+      ...common,
+      displayName: 'generated',
+      // The generator suites that need an app or a database (`*.api.test.ts`, `*.int.test.ts`) under tests/generated;
+      // lane B runs them with `<paths> --selectProjects generated`. Plain `*.test.ts` there stays in `unit` (R1-M1).
+      testMatch: ['**/tests/generated/**/*.{api,int}.test.{ts,tsx}'],
+      testPathIgnorePatterns: IGNORED_PATHS,
     },
     // TASK-014: the Compose/image stack suite builds every image and runs `docker compose up`, so the project exists
     // only when JEST_STACK=1 (`npm run test:stack`, tools/compose/run-stack-tests.mjs); test:unit, test:integration

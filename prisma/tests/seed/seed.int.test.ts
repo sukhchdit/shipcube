@@ -38,7 +38,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db?.stop();
-});
+}, 60_000);
 
 const silent: SeedLogger = { info: () => undefined, warn: () => undefined };
 

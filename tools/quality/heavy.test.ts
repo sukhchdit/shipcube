@@ -190,6 +190,15 @@ describe('argument parsing and planning (TASK-011)', () => {
     );
     expect(integration.indexOf('prisma/tests/catalog/')).toBeLessThan(integration.indexOf('--selectProjects'));
     expect(integration.slice(-2)).toEqual(['-i', '--testTimeout=30000']);
+    // The generated project (TASK-276): selectable by a runner and in band like integration and api.
+    expect(parseRunners({ version: 1, suites: { g: { kind: 'jest', project: 'generated' } } }).suites['g']).toMatchObject({
+      projects: ['generated'],
+    });
+    const generated = jestArgs(
+      { kind: 'jest', projects: ['generated'], paths: ['tests/generated/'], coverage: false },
+      { testTimeoutMs: 45_000, outputFile: 'o.json', coverageDir: 'c' },
+    );
+    expect(generated.slice(-2)).toEqual(['-i', '--testTimeout=45000']);
     const unit = jestArgs(
       { kind: 'jest', projects: ['unit', 'unit-dom'], paths: [], coverage: true },
       { testTimeoutMs: 30_000, outputFile: 'o.json', coverageDir: 'c' },
