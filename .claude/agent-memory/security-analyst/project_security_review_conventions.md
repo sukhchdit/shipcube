@@ -37,7 +37,7 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - **Gotchas (PR-0020 R2, 2026-11-13):**
     - The mini-repo needs a root `package.json`, otherwise `import-x/no-relative-packages` crashes with "path … null".
     - Turn `import-x/no-cycle` off (it crashes the same way).
-    - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/MadelineMendoza/AppData/...`), never `MADELI~1`. An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
+    - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/<long user dir>/AppData/...`), never the 8.3 short form (`<FIRST6>~1`). An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
     - A junctioned root dir has the same problem. Copy the root instead.
     - `unrs-resolver` strips `?query` suffixes, so the resolved arm catches `x?worker`/`x?raw`.
 - **Probing a git-object-reading verifier (PR-0023).** Build scenario commits with plumbing in a scratch repo and never check them out:
@@ -60,6 +60,7 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Throw `new DriverAdapterError({kind:'postgres', originalCode, originalMessage, …})` from `@prisma/driver-adapter-utils` to drive P2010/P2039.
   - This proves transaction-binding and escapes cheaply.
   - The scratch `node_modules` junction vanished once mid-session, so re-check it before re-running.
+- **Probing a Prisma extension or any model-level code against a schema that does not exist yet (PR-0026).** `prisma generate --schema=<abs path>` from a scratch cwd works offline with no DB (Prisma 7 `prisma-client` generator emits `.ts`; import `client.ts` directly with Node 24 via a scratch `node_modules` junction). Write a tenant-like schema (org/shipment/parcel, standard columns, `org_id`, `on_behalf_of_org_id`, relations) and drive the PR's real sources over the recording fake adapter. Answer SELECT/RETURNING with one plausible row when Prisma needs follow-up statements (`connect` pre-checks). Details in [[project-p5-pr26-standard-columns]].
 - **Probing a capability guard (Proxy / wrapper).** Also probe what the allowed members RETURN, and use that value after the guard is revoked. In PR-0011 R2, a "deep, deny-by-default" `TenantDb` still returned Prisma's raw `PrismaPromise`, and its `requestTransaction(null)` reached the root pool. For a lint or run-time check on a tagged template, also probe the interpolated values (`Sql` objects splice raw text).
 - **Validating a record when the PR branch is not merged with main.** Use `checkSecurityOwnedPaths` with base `origin/main` and the PR head. Older head rows in the same record only produce notes, and the run still passes on the newest head (PR-0011 R2).
 - **"No commands in worktree X" includes read-only git.** On 2026-11-13 (PR-0009 R2) I slipped and ran `git status` there; disclose any such slip in the record.
@@ -90,6 +91,19 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - Run it per line, with runtime-generated positive controls.
   - Script: `scratchpad/review/PR-21-sec/scripts/gl-emul.mjs` (session-scoped). Treat the results as hints; devops confirms with the real image.
   - Also run it over your own record before hand-off.
+- **Effective-config diff for an `eslint.config.mjs` block (PR-0027).**
+  - Run `ESLint#calculateConfigForFile` over ~50 representative plus near-miss paths on two `git archive` extracts (head and base), scrub the root path, and diff every leaf. Add a mutation control (a widened glob and a rule turned off) to prove the probe can see them.
+  - The extract needs `tools/eslint-rules`, `tools/lint` and the workspace `package.json` files, because the config reads the disk.
+  - `tseslint.configs.disableTypeChecked` is one object, not an array.
+  - Scripts: `scratchpad/review/PR-27-sec/effcfg.mjs`, `lintprobe.mjs`, `lintts.mjs`.
+- **The scratchpad persists across sessions.** Earlier `review/PR-NN-*` folders are still there, including `record-sim.sh` (PR-21, PR-25, PR-27 variants) and the Gitleaks emulators; look before rewriting. `gl-emul-multi.mjs` prints the matched line, so a positive control built at run time shows up in tool output. Print counts only.
+- **Pinned-image checks need no Docker.** Anonymous GETs to `auth.docker.io` and `registry-1.docker.io` give the manifest, config blob (user, created, entrypoint) and a body-hash check. Compare per-platform manifest digests with the moved tag, because only the attestations may differ. Script: `PR-27-sec/k6digest.mjs`.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
-Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
+- **Host quirks for scratch probes (PR-0028).**
+  - With `MSYS_NO_PATHCONV=1`, Windows `git -C` and `node` need mixed paths (`cygpath -m`); `/c/...` fails ("cannot change to"). `cmd //c` then starts an interactive shell, so make a junction with `fs.symlinkSync(target, link, 'junction')` and remove it with `fs.rmdirSync(link)`.
+  - A `git archive` extract of `tools/quality` (base and head) plus a shared clone with a `node_modules` junction runs the verifier's real CLI (`--root <clone> --base --head --json`). Scenario commits come from plumbing (`scratchpad/review/PR-28-sec/probes/scenarios.mjs`: `mk(parent, {path: content|null|{mode,content}})`), and a patched scratch copy of `lib/manifest.mjs` tests a candidate pattern. The record simulation is `probes/record-sim.sh`.
+  - **Record Head rows:** the checker binds SHAs from ANY table row whose first cell starts with `Head` (word boundary), in any table. Keep exactly one such row, and never a first cell starting with `Verdict` before the final one.
+  - `os.tmpdir()` on this host is the 8.3 form (`<FIRST6>~1`), so `homedir()`-based scrubbing misses it; never quote that fragment in a record.
+
+Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]], [[project-p5-pr28-w0act1]]
