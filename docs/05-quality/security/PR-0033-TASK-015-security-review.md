@@ -239,3 +239,148 @@ Method: `git clone --shared --no-checkout` of the main checkout (nothing written
 A fix cycle that touches any of the 28 owned paths needs the Round 2 delta record described in section 11; commits that touch only unowned paths (G) keep this record valid.
 
 *Housekeeping:* the clone, the extracts, the registry stub and the Jest tree were removed from the scratchpad; `docker.lock` was acquired and released three times with an owner file; no container other than the probes' own was started; the main checkout (apart from this record) and the TASK-015 worktree were not written, and no command was run inside that worktree. The final record text was scanned with the pinned gitleaks image in `dir` mode: 0 findings.
+
+---
+
+## Round 2 (head d3a46a2, delta + merge)
+
+| Field | Value |
+|---|---|
+| Round | 2 (delta after fix cycle 1, D-ORCH-045, plus the merge of main) |
+| Head | d3a46a20cc7c5c0f001f36b9d3886bb9c077a769 |
+| Branch | `feat/TASK-015-spk-07-lane-c-full`, 5 commits over the round-1 head `3ed0484`: `70196e8`, `beaba11`, `63e2b6e`, merge `e02c4f9` of main `34505b0`, evidence `d3a46a2`. Lane A base `34505b0`; main tip when this round was written `296a87c` (agent notes, DECISIONS and STATUS only beyond `34505b0`) |
+| Reviewer | security-analyst |
+| Date | 2026-11-13 |
+| Scope | 13 of the 29 security-owned paths changed after the round-1 head: `.github/workflows/ci.yml`, `jest.config.ts` (a comment only), nine in `tools/ci` (`check-workflow-policy.mjs` and test, `ci-policy.test.ts`, `coverage-gate.mjs` and test, `diff-coverage.test.ts`, `openapi-breaking.mjs`, its test and its int test), `tools/quality/heavy.test.ts` (a new owned path: 29, not 28) and `tools/lint/negative-fixtures.test.ts` (through the merge). `.github/CODEOWNERS`, `package.json`, `package-lock.json`, `check-evidence.mjs`, `heavy.mjs`, the migration check, the baseline file and the other `tools/ci` files are byte-identical to the round-1 head, so sections 6, 7, 8 and 10 of round 1 stand |
+| Input | the R2 checklist of section 11, PR comment 6855675891, D-TASK015-14..19, D-ORCH-045, D-ORCH-047, lane A run 43440981589 (job `scans` read step by step, step results of `fast-lane`) |
+| Result | PASS_WITH_FOLLOW-UPS: PR33-SEC-01, -02, -03 (i) and (ii), -04 CLOSED; 0 Critical, 0 High, 0 Medium; 0 LOW open from this PR; 2 new INFO (PR33-SEC-09, -10) |
+
+### R2.1 Method and limits
+
+Probed on `git archive` extracts of the head (`d3a46a2`), the round-1 head (`3ed0484`, the positive control: what a probe can see only if it fails there) and main (`4cd608e`, what lane A runs today), in the session scratchpad; the main checkout and the TASK-015 worktree were not written, and no command was run inside that worktree.
+
+- 81 edits of the real `ci.yml` (M01 to M34 of round 1, 28 pin edits, 19 Unicode edits) plus 9 further pseudo-comment and equivalence edits and 6 producer-loop edits, each through `checkWorkflow(..., {requiredGates:true})` of the head, the round-1 head and main (control: 0 findings on all three).
+- `commandLines` and the ASCII rule over 18 code points against real bash 5.2, with the ASCII-space comment as the positive control.
+- `openapi-breaking.mjs` end to end on throw-away git repos (O0 to O14, R2.5), with the container runner replaced by a stub that models only the ERR rule (an operationId missing from the head spec) and the newline-carrying change of round 1; the script is a text-patched copy whose only change is the target of `spawnSync('docker', ...)`, so git, tags, ADRs, `clean`, summary and exit codes are the real code. **The real image was not started in this round:** the Docker engine did not answer (the host disk had been full, and other agents' `docker` calls hung as well), so the real-image proof is lane A's own run on Linux (R2.3, PR33-SEC-02); `parseOasdiffJson` and `oasdiffArgs` are byte-identical to round 1, whose real-image runs (O0 to O11, part L) therefore still apply to them.
+- A differential fuzz of the tag comparison against the `semver` package (300,000 pairs, 20,000 listings), the coverage-gate scopes through `evaluateCoverage` on a real temp tree (12 cases), the base-ref evidence verifier on a clone of the head, a count-only host-fragment scan with a planted-needle control, and the simulation of `check-security-owned-paths --pr 33` (R2.9).
+- Not run: full `lint`, `typecheck`, `build`, `test:*` (lane A `fast-lane` is green on this exact head, run 43440981589: every step, including the lane B evidence step from the base ref, lint, both porcelain gates, format, type-check, unit tests, the base-ref lint fixtures and the build); no `semgrep` on the host.
+
+### R2.2 The merge e02c4f9 is a pure union
+
+`e02c4f9` has parents `63e2b6e` and `34505b0`. Its tree `c449bd3` equals `git merge-tree --write-tree 63e2b6e 34505b0` (clean, no conflict, no hand edit). The two sides share one changed path, `tools/lint/negative-fixtures.test.ts`: the merge differs from the PR parent by exactly the main side's 74 non-blank changed lines and from the main parent by exactly the PR side's 15 (equal in both directions; the PR side is the root `typegen` guard, the main side the TASK-010 logging fixtures). Every other path took one side only (211 main-side paths, 36 PR-side paths). `package-lock.json` is byte-identical to the merge base. `d3a46a2` itself changes only the four files of the evidence run (`git diff e02c4f9 d3a46a2`).
+
+### R2.3 Round-1 findings
+
+| Finding | R1 | R2 disposition | Evidence |
+|---|---|---|---|
+| PR33-SEC-01 pseudo-comment | LOW | **CLOSED** | `commandLines` uses `^[ \t]*(?:#\|$)` and `[ \t]+$` (ASCII only). `NON_ASCII = /[^\t\n\r\x20-\x7e]/` is refused in the lane B step, the base-lint-fixtures step, both porcelain steps and the openapi step (`nonAsciiProblem`), and in every non-comment line of `ci.yml`. M06 is now flagged (the round-1 checker passes it). 18 code points (U+00A0, U+2000 to U+200A, U+3000, U+1680, U+202F, U+205F, U+200B, U+180E) as the first character of a pseudo-comment: bash runs every one as a command (the `\|\| exit 0` executes and the next command never runs); the round-1 `commandLines` dropped the line as a comment for 16 of them (it kept U+200B and U+180E), the head keeps it for all 18, and the head checker flags 18 of 18 in the lane B block, 3 of 3 probed in the base-lint-fixtures block and as the second line of a porcelain block. The ASCII-space comment (M09, positive control) stays a real comment and passes. U+0085, U+2028, U+2029, a bare CR and U+FEFF inside a comment line are refused by the YAML subset parser (unchanged, code review m1). A trailing NBSP is flagged too |
+| PR33-SEC-02 container modes | LOW | **CLOSED** | `writeSpecsDir`: files written 0644 and chmod 0644, then the folder chmod 0755; still a private `mkdtemp` folder, removed in `finally`. The `docker run` arguments are byte-identical to round 1 (`--network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534`, one read-only bind mount, no `-e`, no `--privileged`, no other mount or capability; compared by calling `oasdiffArgs` of both heads). Lane A run 43440981589, job `scans` on `ubuntu-24.04` (image `ubuntu24/20261111.370`), ran the head copy (`gates/head/tools/ci/openapi-breaking.mjs`, bootstrap) with `RANGE_BASE=34505b0` and `RANGE_HEAD=d3a46a2`: `openapi-breaking: smoke: oasdiff compared the head contract with itself: 0 change(s)` then `openapi-breaking: PASS: no release tag`, 2 s after the step started; the step is green and the only red step of the job is the record step. That is the Linux proof round 1 asked for, and it repeats on every PR because the smoke run is unconditional while no tag exists. On the code review's question whether 0755 widens the mount: only other local users could traverse the private temp folder, hosted runners are single-tenant, the files are public contract text, and the mount stays read-only with every restriction above unchanged |
+| PR33-SEC-03 (i) pin | LOW | **CLOSED** | `OPENAPI_BREAKING_RUN` is one exact ASCII line with `env: {}` and no `if`; workflow env `OASDIFF_IMAGE` must equal the base-ref script constant and no job may set it; any `GATE_*` or `GATES_*` key in any `env:` is refused (`gate-env`); `--image` must equal the script's own `OASDIFF_IMAGE` (O8, O9: exit 2 before any docker call); both porcelain gates are pinned the same way and must directly follow the step they guard (`after`). Edits the head flags and the round-1 checker passes: M25, M26, M28, P01 to P09, P14, P19 to P28 (R2.4). Residual: PR33-SEC-09 (the pins do not bind the loops that produce `$GATE_*`) |
+| PR33-SEC-03 (ii) tags | LOW | **CLOSED** | `git tag --list 'v*' --merged "<base>^{commit}"` and `RELEASE_TAG` (strict semver). O10: a tag on the PR branch does not change the baseline (the merged tag still fails the break); O10b: the PR branch's tag alone gives the smoke run, not a baseline; O10c: junk tags on main (`vnext`, `v1`, `v1.2`, `v1.2.3.4`, `+build`, `V2.0.0`, `v2.0.0-`) are ignored; O10d: `v0.2.0` outranks `v0.2.0-rc.1` and `v0.1.0-m0`. The comparison matches `semver` on 300,000 random pairs (0 mismatches; a string-order control disagrees on 6,588) and on 20,000 listings with junk (0). Residual note: a tag counts when it is merged into the event's base SHA, so a PR whose last event predates the first tag compares nothing until its next event; the merge procedure (`--match-head-commit`, merge main first) covers this procedurally; the code review's R2-n2 is the other face of the same staleness (a branch older than the tag sees the tag's own changes as removed) |
+| PR33-SEC-03 (iii) record | LOW | **PARTLY CLOSED, residual now INFO** | A record must be `docs/03-architecture/adr/ADR-*.md`, with the first status line `Accepted` (O7 to O7e and O7i refused: Proposed, Draft, Superseded, none, Proposed-then-Accepted, "Not Accepted"), a `Supersedes ... ADR-NNNN` line, and every broken operation named as a whole identifier (O3 to O5, O12a to O12c and O14 refused: `<op>Extended`, `Pre<op>`, `<op>-v2`, one of two operations missing; O12e backticks and punctuation accepted); the record is read from tag..head, so a sanctioned break stays sanctioned until the next tag (O13, O13b: later PRs pass, then a new tag clears it). Still self-certifying, as D-TASK015-03 says: the PR may add the Accepted ADR itself; O7f (first status line Accepted, a later Proposed line) and O7h (`Accepted-with-doubts`) pass; neither the ADR folder nor `docs/03-architecture/api/openapi.yaml` is in CODEOWNERS. Kept as INFO, owner unchanged |
+| PR33-SEC-04 output | INFO | **CLOSED** | `clean` (C0, DEL, C1, U+2028, U+2029 become a space) on every PR-controlled value in the log, the error line and the summary (`cell` also escapes `\|` and backticks); `--json` is `JSON.stringify`. O11 (a head change whose text and path carry a newline plus a workflow command): stdout lines starting with `::` = 0, summary 0, stderr 0, JSON mode 0; the round-1 script on the same input gives 1, 0 and 1. O14 (an Accepted ADR whose path contains a newline plus a command, naming one of two broken operations): 0 on stdout and in the summary; round 1: 1 and 1 |
+| PR33-SEC-05 to -08 | INFO | open as routed | no change in this delta; PR33-SEC-06 now routes to the split-out coverage hook (D-ORCH-047), see R2.8 |
+
+### R2.4 ci.yml policy matrix (head checker against the round-1 and the main checker)
+
+| Group | Edits | Head flags | R1 checker flags | Main checker flags |
+|---|---|---|---|---|
+| M01 to M34 (round 1) | 34 | 29 | 25 | 10 |
+| P01 to P28 (exact pins: `\|\| true`, `; true`, `>/dev/null`, `\|\| exit 0`, step env `GATE_*` and `OASDIFF_IMAGE`, job and workflow env, image swap, an extra leading line, `--base` swapped, `if`, `shell`, `working-directory`, an earlier decoy step, a later decoy, reorder, a step between a gate and its guarded step, swapped porcelain steps) | 28 | 24 | 4 | 0 |
+| U01 to U19 (Unicode and ASCII) | 19 | 18 | 10 | 7 |
+
+Not flagged by the head checker (10 of 81): M05, M09, P17 (the openapi step moved after the record step), P18 (trailing blanks) and U12 (non-ASCII in a comment line) are benign or equal in effect; P15 (a decoy step after the genuine one) leaves the genuine step in force; M30 and M31 (`$GITHUB_ENV` writes) are PR17-SEC-08; M29 and P16 (the openapi step moved above the gate-tooling step) are PR33-SEC-09. U09 and U19 were distorted by my own indentation (the YAML subset refused them); they were redone as L01 to L06 (a NBSP, U+2000 or U+3000 pseudo-comment inside the base-lint-fixtures block and a porcelain block: 5 of 5 flagged, the round-1 checker 0 of 5; the ASCII comment, an extra comment line and a folded or quoted scalar with the same command pass, correctly). Position: the porcelain-after-lint step is held directly after Lint and the post-build one directly after Build (P24 to P26 and P28 flagged).
+
+### R2.5 openapi-breaking.mjs scenarios (git, tags, ADRs and output are the real script; the container runner is a stub, R2.1)
+
+| Case | Result |
+|---|---|
+| O0 no merged tag | the smoke run executes (`0 change(s)`), `PASS: no release tag`, exit 0 |
+| O1 unchanged against the tag / O2 an operation removed, no record | pass / fail, exit 1, 1 uncovered |
+| O3 Accepted ADR names the operation, no `Supersedes` / O4 `Supersedes`, names nothing / O5 qualifying text outside the ADR folder | fail / fail / fail |
+| O6 Accepted ADR, `Supersedes`, names the operation | pass |
+| O7 Proposed, O7b Draft, O7c Superseded, O7d no status line, O7e Proposed first then a later Accepted line, O7i "Not Accepted" | fail (6 of 6) |
+| O7f Accepted first then a later Proposed line, O7g plain `Status: Accepted`, O7h `Accepted-with-doubts` | pass (the PR33-SEC-03 (iii) residual) |
+| O8 `--image` without digest, O9 another digest-pinned image | exit 2 for both, before any docker call; O9b the pinned image passes |
+| O10, O10b, O10c, O10d | R2.3 (ii) |
+| O11, O14 | 0 command lines (R2.3, PR33-SEC-04) |
+| O12a to O12c, O12e (O12d needs two operations: covered by O14) | R2.3 (iii) |
+| O13, O13b | a sanctioned break persists until the next tag, then clears |
+
+### R2.6 Other changes in the delta
+
+- `coverage-gate.mjs`: scopes `apps/api/src/modules/payments/service`, `packages/shared/src/money`, `apps/api/src/modules/ledger` (95/95, optional) and the literal `packages/ledger`, each with its own source roots. `evaluateCoverage` on a real temp tree: no source means inactive; a measurable source file with no summary entry is an error (also a re-exporting `index.ts`, which the module form does measure); 90 % lines fails and 96/96 passes; 94.9 % (949 of 1000) fails, because counts are compared and not Jest's rounded percentage; `packages/shared/src/moneyx/` is not part of `.../money/`; only `tests/`, `*.test.ts` and `*.d.ts` under a scope stays inactive, as Jest does not measure them either; relative keys (the `quality:heavy` form) work. A money file outside the named folders (`packages/shared/src/money.ts`) is held only to the overall 85/75: the scope list is path-based, which D-QA-003 accepts.
+- `heavy.test.ts` (test only), `jest.config.ts` (comment only), `ci-policy.test.ts`, `diff-coverage.test.ts`, `openapi-breaking.int.test.ts`: no production behaviour; the new tests write only under `mkdtemp` folders.
+- `ci.yml` against main (`4cd608e`): 37 added lines, none of `BASH_ENV`, `PATH`, `BASH_FUNC_*`, `NODE_OPTIONS`, `defaults:`, `$GITHUB_PATH`, `$GITHUB_ENV`, `shell:`, `working-directory`, `continue-on-error`, `permissions`, `secrets`, `pull_request_target`, folded or literal `run:` scalars; counts equal on both sides (`$GITHUB_ENV` 8, `RANGE_BASE` 27, `uses:` 5, `BASH_ENV` 0, `defaults:` 0); the added `GATE_` mentions are the tool loop and the step line only; 0 non-ASCII characters outside comment lines; actions still 5 of 5 pinned by SHA with no new `uses:`; `OASDIFF_IMAGE` is set once at workflow level. No D-ORCH-021 lever. The openapi step now sits after Semgrep and before the record step, so a missing record no longer hides the contract result.
+- Lane B evidence: the base-ref verifier (the `origin/main` copy, run from outside the clone) on `d3a46a2` with base `34505b0`, profile `pr`: `run 20261113T1409Z_e02c4f9 accepted`, PASS, exit 0; the round-1 run `20261113T1051Z_2e17530` is rejected as stale (129 paths changed since) and the older runs as not ancestors, which is the control that the staleness check can see. Between `e02c4f9` and `d3a46a2` only the four evidence files changed.
+- Host fragments in the run (counts only, planted-needle control passes): 14 of 15 host labels have 0 hits (user name, 8.3 stem in two cases, home in two forms, temp folder in two forms, host name, git e-mail and its local part, `APPDATA`, `LOCALAPPDATA`, repository root, scratchpad); the 15th (`claude` followed by a backslash) has 1 hit, a repository-relative `.claude` agent-notes path inside a test title; no drive path, `/home` or `/Users` path, key block, bearer token or access-key shape; 32 IPv4 literals (1 unspecified, 1 loopback, 22 RFC 1918, 8 link-local: the SSRF test vectors that arrived with main) and 2 e-mails on reserved domains.
+
+### R2.7 New findings
+
+#### PR33-SEC-09: an unset `GATE_*` variable turns a pinned gate step into a silent success, and nothing pins the loops or the position that set it (INFO)
+
+| | |
+|---|---|
+| Severity | INFO (extends PR17-SEC-08, which stays open, and the code review's R2-m1, the `$GITHUB_ENV` write form of the same class; the edit needs an owned `ci.yml` change that the record reviewer sees) |
+| CWE / OWASP | CWE-636 Not Failing Securely · A04:2021 |
+| Location | `.github/workflows/ci.yml`: the two gate-tooling steps (`for tool in ...; do` loops that write `GATE_<NAME>` to `$GITHUB_ENV`) and the gate steps that run `node "$GATE_<NAME>"` |
+| Description | `node ""` (what `node "$GATE_X"` becomes when `GATE_X` is unset or empty) does not fail: Node treats an empty script path as "read the script from standard input", and with standard input at end of file it exits 0 (Node 24.22.3, `< /dev/null`; with a non-empty standard input it runs that text). The new exact pins hold each gate's command line, but the checker does not pin the producer. Probes: dropping one word from a loop (M29 and Q01 to Q06: `openapi-breaking`, `check-porcelain`, `check-workflow-policy`, `check-install-flags`, `run-semgrep`, `check-security-owned-paths`) is passed by the head and the round-1 checker, and moving the openapi step above the gate-tooling step (P16) is passed too; in each case the step reports success without running the gate. `"${GATE_X:?gate tooling not set}"` stops the shell (probe: exit 1, the next command is not reached). This predates PR #33 for every `GATE_*` step; it matters here because D-TASK015-17 describes the three new pins as no weaker than the evidence pin, which does not depend on a variable |
+| Exploitability / impact | A one-word edit of an owned file disables a gate (including the workflow policy check and the record check) while the job stays green. Same trust class as PR17-SEC-08 (a `$GITHUB_ENV` write): the record decides, the checker does not |
+| Remediation | In 015-C with PR17-SEC-08: pin the two gate-tooling steps' `run:` blocks like the lane B step (exact command lines, ASCII) and use `"${GATE_X:?}"` in every pinned gate line, or add a `required-gates` rule that every `GATE_*` used in a gate line is written by the pinned tooling step and that the gate step comes after it |
+| Verification | M29, P16 and Q01 to Q06 flagged; a case that unsets a variable and expects a non-zero exit |
+| Owner / due | senior-developer, 015-C, before G3 and before any further pin |
+
+#### PR33-SEC-10: the oasdiff image cannot be bumped through lane A (INFO)
+
+This is the code review's R2-n1 with one addition (the two-step bump fails too). The workflow env must equal the constant of the base-ref `tools/ci/openapi-breaking.mjs` (policy check), the base-ref script refuses any `--image` other than its own constant (O9, exit 2), and the head unit test requires script and `ci.yml` to be equal. A bump PR therefore fails the workflow policy step and the openapi step on its own head whatever the order (M26, O9), and the two-step approach in the `ci.yml` header comment does not work because step 1 fails the head unit test. v1.36.0 and v1.37.0 exist and Dependabot does not read workflow env strings, so the first bump will meet this. CWE-1220 · A04:2021. Fix, simplest: drop `--image "$OASDIFF_IMAGE"` and the workflow env value (the base-ref script constant is the single pin and an edit of it needs a record anyway), or accept the head constant when script and `ci.yml` agree and the record check is satisfied. Owner: senior-developer, next touch of the gate, before the first oasdiff bump; INFO because a red gate nobody can satisfy is an operations risk (a pin switched off to get through), not an open path.
+
+### R2.8 Routing after round 2
+
+| ID | Sev | Owner | Due |
+|---|---|---|---|
+| PR33-SEC-01, -02, -03 (i) (ii), -04 | LOW / INFO | closed in this round | |
+| PR33-SEC-03 (iii) | INFO | principal-architect note in api/README §18, plus 015-C: own `/docs/03-architecture/adr/` and the contract (two CODEOWNERS lines and `REQUIRED_CODEOWNED_PATHS`) or document the residual | before G3 |
+| PR33-SEC-05, -07 | INFO | 015-C | before G3 |
+| PR33-SEC-06 | INFO | qa-lead; the merged-coverage hook is its own devops PR (D-ORCH-047) and brings the four `coverage gate: ...` names into `unit.required_cases` | before TASK-025 merges, and G3 |
+| PR33-SEC-08 | INFO | 015-B (gitleaks-full runner review) | before `gitleaks-full` activates |
+| PR33-SEC-09 | INFO | senior-developer, 015-C with PR17-SEC-08 | before G3 and before any further pin |
+| PR33-SEC-10 | INFO | senior-developer | before the first oasdiff bump |
+| PR25-SEC-01 runner half | LOW | 015-B | before `gitleaks-full` activates and before G3 |
+| PR4-SEC-13 item 4 | INFO | principal-architect (ADR-0023 am. K note) | with the next ADR-0023 amendment |
+
+Queue effect: unchanged from section 6; every open PR still has to merge main for the new base-ref policy and gate copies.
+
+ASVS L2 (touched): V1.14, V14.1, V14.2 (as round 1) and V7.1 (log injection, closed). No runtime surface, no dependency, no secret.
+
+### R2.9 Record check simulation (`check-security-owned-paths --pr 33`)
+
+Method as in section 13: a shared clone, the head `d3a46a2` detached, the round-1 record plus this section committed on top, base `34505b0` (lane A's base) and, in A3, the current main tip; the checker from `origin/main` ("main tool", what CI runs today) and from the head ("head tool", what runs after this PR merges). The PR changes 29 owned paths. All 35 scenarios behaved as predicted.
+
+| Case | Scenario | Result |
+|---|---|---|
+| A, A+, A3 | this record on top of the head; main tool / head tool / base = current main tip | pass, satisfied by this record at `d3a46a2` |
+| A2, A2+ | then a real merge of the current main (docs only) into the branch; main tool / head tool | pass |
+| B, B2 | the round-1 record only, or the record file untouched | missing |
+| C | record file named for PR 34 | missing |
+| D, D2, D3 | final Verdict row FAIL / PENDING / a later FAIL row after the PASS row | missing (the last row wins) |
+| D4 | no Verdict row in this section | pass, because the round-1 PASS row is then the last one; procedural, every round appends its own final Verdict row (PR10-SEC-04) |
+| E, E2, E3, E5 | the Head row of this section names `70196e8` / the main tip / is removed / has a wrong last digit | missing |
+| E4 | the Head row has a 7-character abbreviation of `d3a46a2` | pass |
+| F, F2, F3, F4, F5 | after the named head: `coverage-gate.mjs`, `openapi-breaking.mjs`, `check-workflow-policy.mjs`, `tools/quality/heavy.test.ts`, `negative-fixtures.test.ts` edited | missing |
+| G, H, H2, N, O2 | after the named head: an unowned `tools/repo` test, a docs file, a lane B run folder, `apps/web/react-router.config.ts` (PR33-SEC-05), an ADR file (PR33-SEC-03 (iii)) added or edited | pass |
+| I, J, K, L, O | after the named head: a workspace `package.json`, `ci.yml`, a baseline line, `apps/x/__mocks__/pg.js`, a file under `apps/api/src/platform` | missing |
+| M / M+ | a root `__mocks__/pg.js` after the head; main tool / head tool | pass / missing |
+| P | an owned change after the record, then a further round whose Head row names the new head | pass, satisfied at the new head |
+
+A fix cycle that touches any of the 29 owned paths needs a further delta record; commits that touch only unowned paths, docs or lane B run folders keep this record valid.
+
+### R2.10 Verdict
+
+| Item | Value |
+|---|---|
+| Critical / High / Medium open | 0 / 0 / 0 |
+| LOW open | 0 from this PR; PR25-SEC-01 runner half (015-B) |
+| INFO open | 7 (PR33-SEC-03 (iii), -05, -06, -07, -08, -09, -10) |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** PR33-SEC-01, -02, -03 (i) and (ii), -04 are CLOSED with probes that fail on the round-1 head and pass on `d3a46a2`; lane A's run on Linux (run 43440981589) shows the 0755/0644 mount readable as uid 65534 with the hardening arguments unchanged; the merge `e02c4f9` is a pure union; the evidence run `20261113T1409Z_e02c4f9` is accepted by the base-ref verifier and holds no host fragment; the delta of `ci.yml` has no D-ORCH-021 lever. This record names head `d3a46a2` and covers the 29 owned paths as of it; two new INFO items (PR33-SEC-09, -10) and the earlier follow-ups route as in R2.8 |
+
+*Housekeeping:* the shared scratchpad was cleared once during this round (probe scripts, extracts and outputs were lost); the results quoted above are from the runs made before that, and the simulation of R2.9 was re-run on a rebuilt tree against this final text. The Docker engine did not answer, so no container was started and the `docker.lock` directory acquired by my waiter was released (one stuck `docker` client of mine was ended). The probe trees were removed; the main checkout (apart from this record) and the TASK-015 worktree were not written, and no command was run inside that worktree. The added lines were checked with a Node emulation of the gitleaks v8.30.1 default rules (planted positive controls fire, 0 findings on this section).
