@@ -4,6 +4,9 @@
 // fields come from the request context through the logger's context provider. TASK-020 (defineRoute) sets
 // `res.locals.routeTemplate` precisely; until then the template is the mount prefix recorded by `routePrefix` plus the
 // matched Express route pattern (`req.route.path`, e.g. `/shipments/:shipmentId`), or null when no route matched.
+// Known gap until TASK-020 (PR #20 n6): a router nested under a path (`router.use('/x', sub)`) contributes the leaf
+// pattern only, so `/api/v1` + `/:id` hides `/x`; TASK-020 sets `res.locals.routeTemplate` for every route. Health
+// probes (`/health/*`) are logged at `debug`, so the probe interval does not flood the `info` log (PR #20 n7).
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
@@ -13,6 +16,7 @@ export type AccessLogFields = Readonly<Record<string, string | number | boolean 
 
 export interface AccessLogger {
   info(event: string, fields?: AccessLogFields): void;
+  debug(event: string, fields?: AccessLogFields): void;
 }
 
 export interface RequestLoggerOptions {
@@ -52,6 +56,11 @@ export function routeTemplateOf(req: Request, res: Response): string | null {
 }
 
 const NS_PER_MS = 1_000_000n;
+const HEALTH_PREFIX = '/health/';
+
+function isHealthRoute(route: string | null): boolean {
+  return route !== null && route.startsWith(HEALTH_PREFIX);
+}
 
 export function requestLogger(logger: AccessLogger, options: RequestLoggerOptions = {}): RequestHandler {
   const now = options.now ?? ((): bigint => process.hrtime.bigint());
@@ -63,9 +72,11 @@ export function requestLogger(logger: AccessLogger, options: RequestLoggerOption
       if (logged) return;
       logged = true;
       const elapsed = now() - started;
-      logger.info('http.request', {
+      const route = routeTemplateOf(req, res);
+      const write = isHealthRoute(route) ? logger.debug.bind(logger) : logger.info.bind(logger);
+      write('http.request', {
         method: req.method,
-        route: routeTemplateOf(req, res),
+        route,
         status: res.statusCode,
         duration_ms: Number(elapsed / NS_PER_MS) + Number(elapsed % NS_PER_MS) / 1e6,
         ...(aborted ? { aborted: true } : {}),

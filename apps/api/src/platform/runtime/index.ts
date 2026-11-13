@@ -44,4 +44,5 @@ export {
   type ReadinessReport,
 } from './readiness.js';
 export { createRuntimeServices, readinessChecks, type RuntimeServices, type ValkeyClient } from './services.js';
+export { installProcessErrorHandlers, type ProcessErrorHandlerOptions, type ProcessErrorSource } from './process-errors.js';
 export { createShutdown, DRAIN_TIMEOUT_MS, RESOURCE_CLOSE_TIMEOUT_MS, type Closeable, type ShutdownOptions } from './shutdown.js';

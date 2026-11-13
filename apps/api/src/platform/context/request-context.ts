@@ -8,11 +8,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
+import { CORRELATION_ID_PATTERN } from '@platform/shared';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 export const CORRELATION_ID_HEADER = 'X-Correlation-Id';
-/** ADR-0016 §15 and openapi `Problem.correlation_id`. */
-export const CORRELATION_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+/** ADR-0016 §15 and openapi `Problem.correlation_id` (single source in @platform/shared, PR #20 n2). */
+export { CORRELATION_ID_PATTERN };
 
 export interface RequestContext {
   /** Echoed in `X-Correlation-Id`: the validated inbound value, else a generated UUID. */

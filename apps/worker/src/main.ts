@@ -2,7 +2,13 @@
 // (exit 78 on a rejected configuration or secret, PR3-SEC-05), the runtime services shared with the API
 // (`@platform/api/runtime`), the health server on APP_HEALTH_PORT and graceful shutdown. Queue processors arrive
 // with the queue tasks; they register their drain here as an additional step.
-import { createRuntimeLog, createRuntimeServices, createShutdown, readPackageVersion } from '@platform/api/runtime';
+import {
+  createRuntimeLog,
+  createRuntimeServices,
+  createShutdown,
+  installProcessErrorHandlers,
+  readPackageVersion,
+} from '@platform/api/runtime';
 import { loadRuntimeConfigOrExit } from '@platform/config';
 
 import { createWorkerHealthServer } from './platform/health/server.js';
@@ -15,6 +21,8 @@ const log = createRuntimeLog('worker', process.stdout, {
   level: config.APP_LOG_LEVEL,
   context: jobLogContext,
 });
+// Uncaught exceptions and unhandled rejections: one redacted fatal line, then exit 1 (PR20-SEC-06).
+installProcessErrorHandlers({ log, exit: (code) => process.exit(code) });
 const services = createRuntimeServices(config, 'worker', log);
 const server = createWorkerHealthServer(services.probe);
 

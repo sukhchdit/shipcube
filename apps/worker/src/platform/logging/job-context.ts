@@ -5,6 +5,7 @@
 // `actor_id` come from the resolved job context there, never from the payload (ADR-0013 amendment 2).
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+import { CORRELATION_ID_PATTERN } from '@platform/shared';
 import type { LogContext } from '@platform/shared/logging';
 
 /** Correlation context of one job execution. */
@@ -13,9 +14,6 @@ export interface JobContext {
   readonly orgId?: string;
   readonly actorId?: string;
 }
-
-/** The same pattern the api accepts for `X-Correlation-Id` (ADR-0016 §15). */
-const CORRELATION_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 
 const storage = new AsyncLocalStorage<JobContext>();
 

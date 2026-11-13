@@ -12,7 +12,7 @@ function capture() {
 }
 
 describe('worker job log context', () => {
-  it('[AT-US-008-03] (worker part) lines written while a job runs carry the booking correlation ID', async () => {
+  it('[AT-US-008-03] lines written while a job runs carry the booking correlation ID (api and worker log lines; end to end in TASK-092)', async () => {
     const { log, lines } = capture();
     log.info('worker.idle');
     await runWithJobContext({ correlationId: 'demo-booking-0001', orgId: 'org-1', actorId: 'user-1' }, async () => {

@@ -25,6 +25,7 @@ export interface ModuleRegistration {
 /** The logger seam of the app; the platform logger (platform/runtime `createRuntimeLog`) satisfies it. */
 export interface AppLogger extends ErrorLogger {
   info(event: string, fields?: AccessLogFields): void;
+  debug(event: string, fields?: AccessLogFields): void;
 }
 
 export interface AppDependencies {

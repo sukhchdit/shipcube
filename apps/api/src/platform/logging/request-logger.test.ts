@@ -37,12 +37,15 @@ describe('routeTemplateOf', () => {
 });
 
 describe('requestLogger', () => {
-  function run(statusCode: number) {
+  function run(statusCode: number, path = '/things') {
     const logged: [string, AccessLogFields | undefined][] = [];
     const ticks = [1_000_000_000n, 1_012_500_000n];
-    const middleware = requestLogger({ info: (event, fields) => logged.push([event, fields]) }, { now: () => ticks.shift() ?? 0n });
+    const middleware = requestLogger(
+      { info: (event, fields) => logged.push([event, fields]), debug: (event, fields) => logged.push([`debug:${event}`, fields]) },
+      { now: () => ticks.shift() ?? 0n },
+    );
     const res = fakeRes({}, statusCode);
-    middleware({ method: 'POST', route: { path: '/things' } } as unknown as Request, res, next);
+    middleware({ method: 'POST', route: { path } } as unknown as Request, res, next);
     return { logged, res };
   }
 
@@ -58,6 +61,12 @@ describe('requestLogger', () => {
     const { logged, res } = run(200);
     res.emit('close');
     expect(logged).toEqual([['http.request', { method: 'POST', route: '/things', status: 200, duration_ms: 12.5, aborted: true }]]);
+  });
+
+  it('[PR #20 n7] logs health probes at debug, not info', () => {
+    const { logged, res } = run(200, '/health/live');
+    res.emit('finish');
+    expect(logged).toEqual([['debug:http.request', { method: 'POST', route: '/health/live', status: 200, duration_ms: 12.5 }]]);
   });
 
   it('routePrefix records the mount prefix for the template', () => {
