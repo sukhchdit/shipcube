@@ -12,3 +12,9 @@
 - [PR #21 fc1](feedback_pr21_fc1.md) — re-merge after main moves with code, fetch 304 pitfall, commitlint range, lock owner file, AT vs RFC
 - [Batch 0.6/0.4 TASK-021/011](feedback_batch_021_011.md) — never `&` in Bash (npm ci race), port suites find gaps, check-evidence base-manifest activation
 - [PR #23 fc1](feedback_pr23_fc1.md) — heredoc drops backslashes in scripts, use scratchpad+Write; --event push; mutation-proof CI pins; gitleaks count superset
+- [Batch 019/032](feedback_batch_019_032.md) — audit DDL guard vs probes, prisma/tests imports, coverage hook flakes, lane B evidence step, &&-gated push
+- [TASK-018 spike bench](feedback_task018_spike_bench.md) — check-evidence owns */runs/, DECISIONS append-conflict rebuild, Jest OOM maxWorkers, k6 loopback
+- [PR #24 fc1](feedback_pr24_fc1.md) — guard post-state invariant breaks committed-squat fixtures; reset-to-fix-commit re-merge; D-ORCH-034 lane B step
+- [PR #20 fc2 union](feedback_pr20_fc2_union.md) — union merge traps (interface merging, auto-kept lines), resolution reuse on re-merge, lock starvation, vacuous tests
+- [PR #26 fc1](feedback_pr26_fc1.md) — DECISIONS.md rebuild-from-main recipe, prettier trap on docs, commitlint range, required-dep ripple
+- [PR #30 fc1](feedback_pr30_fc1.md) — scratchpad wiped mid-run, Jest realm drops SDK error code, smithy requestTimeout warn-only, loopback SDK pins

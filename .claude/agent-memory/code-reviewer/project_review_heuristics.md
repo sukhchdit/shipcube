@@ -165,6 +165,8 @@ Round 2 of a spike PR (PR #6 r2):
 - **PII key lists:** grep the project's own `openapi.yaml` for `*_name`/`*_ip` keys (`display_name`, `receiver_name`) and test them against the class. Generic lists miss domain keys. Never suggest a bare `ip` suffix (it matches `ship`, `relationship`).
 - **Budgeted walkers:** `Object.keys(v)` before `slice(0, MAX_KEYS)` is uncharged. Probe 100 references to one 300k-key object (2 s). Budgets measured before JSON escaping, or excluding `err`, do not bound the line (quotes double it; a 50 KB line).
 - **Free-text values that start with `[` or `{`** end at the first `,`, so the second array item leaks. Also probe PEM blocks and full-width keys (an ASCII-only key regex sees no key at all).
+- **Round 3 of a redactor (PR #20 r3):** run a sentinel probe over every new pass PLUS the neighbours of its lead set (`|;{@` for a `(=:,[` target-lead set), double-escaped JSON, and an omitted key whose value is an object (`query: { a, b }` ends at first comma). Over-redaction from free-text omitted/suffix classes (`curl:` hits `url`) is fail-closed; rule it, do not block. Re-check the boundary policy carve-outs: `TEST_FILES` includes `{test,tests,__tests__}/**` dirs, so a module re-exporting `./test/x.js` is a two-hop bypass.
+- **Flush-before-exit helpers:** test the premise with a real child process (pipe stdout, paused reader, 4 MB line, bare `process.exit` control) and count timer ticks between crash and exit. On Windows 11 / Node 24, `process.stdout` to a pipe was synchronous (control lossless); only TTYs are async. Also confirm a top-level ESM throw reaches `uncaughtException` (it does).
 - **Semantic auto-merge traps:** `git merge-tree` shows the textual conflicts, but the CLEAN side may keep a line that a cross-PR ruling says to change (PR #20's `routes.use(prefix, mw, api)`). Print the merged function body and check every ruling line.
 
 **Event-trigger DDL guards (PR #24, 2026-11-13).**
@@ -173,6 +175,9 @@ Round 2 of a spike PR (PR #6 r2):
   - Already covered by the per-command reports or the PR12-SEC-02-a fix: identity sequences, constraint-backed indexes, EXCLUDE.
 - Ask for a post-command catalogue INVARIANT (no non-owner object under the reserved names in protected schemas) rather than enumerating command forms.
 - Probe it on PGlite (see [[scratch-copy-technique]]).
+- Round 2 of a post-state invariant: rerun the SAME probe file against the OLD guard blob as the negative control (it should accept the bypasses), then against the new one. Plant pre-existing squats with the event trigger suspended (`ALTER EVENT TRIGGER … DISABLE` inside a rolled-back transaction) to test the "everything blocked while a squat exists" consequence. Also check whether each kind of squat can be DROPPED: a `sql_drop` name match can make relation, index and function squats undroppable.
+- Operator-hijack readiness probes: a planted `public.=(oid, integer)` is only usable once it is GRANTed (functions lose PUBLIC EXECUTE by default privileges). Plant the operator BEFORE the squat, because an existing squat makes the invariant refuse the CREATE OPERATOR too.
+- In JS `String.replace`, a replacement text containing `$f$'` expands `$'`. Pass a function replacer when editing SQL-bearing probe files.
 
 **Contract-pipeline unions.** The api tests may keep their own copy of an app constant (contract-validation's CRITICAL list). A PR that changes the constant in the app passes on its own base and breaks on the merge. Always run the api project on `git merge-tree` output.
 
