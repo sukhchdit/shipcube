@@ -86,7 +86,13 @@ describe('PR19-SEC-01 SYSTEM delegates (D-ARCH-080)', () => {
     const { withTenantTx } = createWithTenantTx(
       single,
       { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 2_000 },
-      { onSecurityEvent: () => undefined, countSessionContextLeak: () => undefined, markNotReady: () => undefined },
+      {
+        onSecurityEvent: () => undefined,
+        countSessionContextLeak: () => undefined,
+        markNotReady: () => undefined,
+        // The plain client: this test is about the SYSTEM port, not the standard columns (PR #26 union).
+        scopeClient: () => single,
+      },
     );
     let kept: SystemDelegates<Tx>['referenceDatasetVersion'] | undefined;
     const outcome = await withTenantTx(CONTEXT, async (db) => {
