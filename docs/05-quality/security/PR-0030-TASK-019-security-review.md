@@ -1,0 +1,198 @@
+# PR-0030 / TASK-019: change-scoped security review (SPK-05 S3-compatible object-storage adapter on RustFS, pre-signed GET, real `object_storage` readiness)
+
+| Field | Value |
+|---|---|
+| PR | #30 `feat(api): spk-05 s3 storage adapter on rustfs and object_storage readiness (TASK-019)`, https://github.com/sukhchdit/shipcube/pull/30 (SPK-05, R-ARCH-05, NFR-SEC-013, REQ-PLAT-018, ADR-0021 incl. am. 1 and 2, D-TASK019-01..02, D-025) |
+| Branch | `feat/TASK-019-spk-05-spike-s3-compatible`: nine commits over the merge base `ddbeb49` (`bad6e29` port, `ddb9214` adapter, `597b2c5` readiness, `c340867` contract suite and findings, `dcafc23` decisions, `a396043` composition test, merges of main `a7e41c0`, `247fe29`, `293fb62`); 16 files, +1 521 / -45, equal to `gh pr view` |
+| Head | 293fb622d01196abd128bed0caa3b8f3444e23da |
+| Main now | `b06fa9f` at the end of the review. Main moved while I worked (`271fbf3`, `6d12b24` with PR #28 = W0-ACT-1 merged as `ab42cc6`, `f56b12f`, `b06fa9f`); everything after the merge base is docs or PR #28's lane-B activation. The only file main and this PR both changed is `docs/sdlc/DECISIONS.md` (clean `git merge-tree`). PR #24 conflicts textually on `services.ts`, `services.test.ts`, `health.int.test.ts` (code review R1 section 5 has the union steps) |
+| Security-owned paths changed (CODEOWNERS, as lane A computes them) | **none.** `apps/api/src/platform/**` and `main.ts` are not CODEOWNERS entries (the PR body and the code review say they are; lane A computed `not-required`, section 7). This record is written anyway, as the orchestrator asked, so that a later owned-path change is judged against a named review |
+| Dependencies / workflows | `package.json`, `package-lock.json`, `.npmrc`, every workspace manifest, `.github/**`, `tools/**`, `prisma/**`, `packages/**`, every `tsconfig*.json`, `.gitleaks*`, `.semgrep*` are byte-identical between the merge base and the head (three-dot diff empty). `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.1162.0 were already `apps/api` dependencies. No D-ORCH-021 lever moves |
+| Binding items checked | NFR-SEC-013 (TTL <= 300 s, issued only after a permission check, audited), D-025, ADR-0021 sections 1-4 and am. 1 (anchor sink, `putIfAbsent`) and am. 2 (label validation, attachment, nosniff), threat model T-57..T-61, T-94, T-96, T-100 and AC-37, SEC-P3-03 item 7 (locked anchor sink, G4-production), PR9-SEC-08 (public readiness), AT-US-012-05 (no endpoint or credential in bodies or logs), CLAUDE.md section 5 (secrets) and section 9 (timeouts on every external call), D-TASK019-01..02, code review R1 of this PR (`APPROVED_WITH_NITS`) and its section 8 security flags |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. **In the `Shipqube-TASK-019` worktree I ran no command and read nothing.** Everything came from `git show` / `git archive` of the head in the main checkout, probed in scratch extracts under the session scratchpad (`review/PR-30-sec`). In the main checkout I ran `git fetch origin` (three times), read-only git, read-only `gh pr view` / `gh pr list`. **Docker:** two short targeted runs of the pinned RustFS image under the `docker.lock` directory (one container each, random per-run credentials, loopback port, `docker rm -f` and `rmdir` on exit; no container or lock left). **Network:** anonymous GETs to the Docker Hub registry and tag API (digest check), the npm registry advisory and packument endpoints, one web search (AWS conditional-write status codes). **Slips to disclose:** my first attempt to create a `node_modules` junction opened two interactive `cmd.exe` consoles (a `//c` quoting mistake under `MSYS_NO_PATHCONV`); they hold no state and were not killed individually. The junction I did create was removed with `cmd //c rmdir`; the main checkout's `node_modules` was verified intact. Scratch extracts, clones and the `p20/build` tree are removed |
+
+## 1. Summary
+
+**The adapter is, with one real exception, what the PR says it is, and the pre-signed URL surface is tighter than I expected.** I found no way to obtain a write, delete or longer-lived URL from the port, no SSRF reach from user input, no endpoint, bucket, key or credential in any error, log line or readiness body, and no new dependency. The exception is a **MEDIUM**: the 10 s request timeout the PR, the adapter header and D-TASK019-02 (3) rely on is not enforced by the SDK version in the lock; a store that accepts the connection and never answers leaves a signal-less call pending for ever (section 3.1). There are no Critical or High findings, and no caller exists yet that can hit the MEDIUM.
+
+- **Pre-signed URLs (focus 1).** The port accepts only integer TTL 1..300 (0, 301, 1.5, NaN, Infinity, 2^31, `'300'`, null and undefined rejected before I/O), signs `GetObjectCommand` only, and there is no `presignPut`. On the pinned RustFS a GET-signed URL gives 403 for HEAD, PUT, DELETE, POST, and the object is unchanged afterwards; ten query-tamper variants (extend the expiry, append an unsigned `response-content-type`, flip or drop the disposition, append `versionId`, change `SignedHeaders`, truncate the signature, repeat a parameter) all give 403 or 400; anonymous GET of object, bucket, service root and `?versions` gives 403. The signed `Host` is the public endpoint's: any other `Host` gives 403, `X-Forwarded-Host`, `Forwarded` and `X-Original-URL` are ignored, duplicate `Host` gives 400. `STORAGE_ENDPOINT` and `STORAGE_PUBLIC_ENDPOINT` are configuration only and https outside local/test (guards.ts `transportGuard`), the server never fetches the public one, so there is no SSRF or host-confusion path (section 4.1).
+- **Two threat-model mitigations are only half-built (LOW, PR30-SEC-02).** `presignGet` accepts `inline` and cannot force `response-content-type` (T-58 asks for both); the store adds no `X-Content-Type-Options: nosniff` (ADR-0021 am. 2 promises it). Forcing the content type is feasible on RustFS (probed).
+- **The anchor sink's core guarantee holds** (section 4.5): `If-None-Match: *` is sent only by `putIfAbsent`; 32 concurrent writers on one key give exactly one `created` and 31 `exists`, on an unversioned and a versioned bucket, with one version and the winner's bytes kept. What the port does not give is tamper evidence by itself: the same credential's `put()` overwrote and `delete()` removed the anchor (PR30-SEC-06).
+- **Integrity values are claims (LOW, PR30-SEC-03).** `head()` and `get()` return the stored metadata `sha256` without hashing the body; the store accepts any metadata value; the SDK default CRC32 is not cryptographic. RustFS supports server-verified `ChecksumSHA256` (correct accepted, wrong gives 400 `BadDigest`).
+- **Credentials and config (LOW, PR30-SEC-04).** Both `STORAGE_*_REF` must resolve for static credentials; exactly one silently selects the SDK default chain, and no config guard or hardened-environment rule stops it.
+- **Supply chain is clean.** No lock or manifest change; the 27-package S3 SDK closure has zero advisories (positive control fires); `client-s3` and the presigner 3.1162.0 were published 2026-11-04 (nine days, outside the seven-day cooldown); the RustFS digest is a content-verified OCI index (section 4.7).
+
+Findings: **1 MEDIUM, 3 LOW and 4 INFO.** No Critical or High.
+
+## 2. Findings
+
+| ID | Sev | Title | CWE | OWASP 2021 | Where | Owner and due |
+|---|---|---|---|---|---|---|
+| **PR30-SEC-01** | **MEDIUM** | The 10 s request timeout is not enforced (SDK default is warn-only) and there is no per-operation deadline: a silent store hangs a signal-less call for ever | CWE-400, CWE-1088 | A05 (A04) | `s3-object-storage.ts:189-190`, header lines 5-9; D-TASK019-02 (3); `SPK-05.md` section 1 | backend-developer, **this PR's fix cycle** (code review R1-m1/m2 already ask for the same family); hard stop: before the first non-readiness caller merges (TASK-116, TASK-147, TASK-155, TASK-162) |
+| PR30-SEC-02 | LOW | `presignGet` cannot force `response-content-type`, accepts `inline`, and nothing delivers `nosniff` | CWE-693, CWE-79 | A05 | `s3-object-storage.ts:282-300`; `object-storage.port.ts:83-86`; ADR-0021 am. 2; T-58, T-59 | backend-developer before TASK-162; principal-architect for the ADR wording |
+| PR30-SEC-03 | LOW | The `sha256` that `head()` and `get()` return is the stored metadata claim; the body is never hashed on read and the store is not asked to verify SHA-256 | CWE-354, CWE-345 | A08 | `s3-object-storage.ts:169-180, 211-225, 260-280`; `object-storage.port.ts:70-71`; `SPK-05.md` F-10 and section 4 | backend-developer (adapter, small); TASK-116 (anchor rule); TASK-250 |
+| PR30-SEC-04 | LOW | Exactly one of the two `STORAGE_*_REF` secrets silently selects the SDK default credential chain; no pairing or hardened-environment rule; `STORAGE_ENDPOINT` without `STORAGE_PUBLIC_ENDPOINT` puts the in-network host into URLs | CWE-636, CWE-1188 | A05 | `s3-object-storage.ts:334-352`; `packages/config/src/schema.ts:390-405`, `guards.ts:43`, `keys.ts:377-387` | TASK-014 (compose env wiring) with the config owner; before the first compose with `rustfs`, and before any staging |
+| PR30-SEC-05 | INFO | `get` accepts an unbounded body when `ContentLength` is absent | CWE-770 | A04 | `s3-object-storage.ts:269` | same fix cycle as SEC-01 (code review R1-m2) |
+| PR30-SEC-06 | INFO | Anchor-sink conditions: one object exposes put/delete next to `putIfAbsent`; F-10's `head()` rule needs `s3:GetObject`, ADR-0021 am. 1 says `PutObject` only; AWS 409 maps to `UNEXPECTED` | CWE-732, CWE-755 | A01, A08 | `object-storage.port.ts:94-101`; ADR-0021 am. 1; `SPK-05.md` section 4 | TASK-116 (consumer), principal-architect (IAM wording), G4-production |
+| PR30-SEC-07 | INFO | Tenant prefix and bucket choice are the callers' job; the key grammar lets `.` segments, empty segments and a trailing `/` through (RustFS answers 400 to two of them) | CWE-22, CWE-639 | A01 | `s3-object-storage.ts:77, 90-98` | TASK-147 / TASK-162 (key builder, closed bucket set) |
+| PR30-SEC-08 | INFO | Ownership and infrastructure notes: the storage folder is not security-owned; RustFS image defaults, image contents and the lane-B image list for TASK-014 and devops | CWE-1059 | A05 | `.github/CODEOWNERS`; `tools/quality/suite-runners.json`; `storage/tests/rustfs.ts` | orchestrator/devops, TASK-014 |
+
+## 3. Finding details
+
+### 3.1 PR30-SEC-01 (MEDIUM): the request timeout is a no-op
+
+- **Where.** `createS3ObjectStorage` builds both SDK clients with `requestHandler: { connectionTimeout: 2000, requestTimeout: 10000 }` and `maxAttempts: 3` (`s3-object-storage.ts:189-190`). The adapter header ("Every call has a connect timeout (2 s), a request timeout (10 s) and SDK standard retries"), D-TASK019-02 (3) and the SPK-05 build notes all state the bound as fact. CLAUDE.md section 9 requires one on every external call.
+- **What the installed SDK does.** `@smithy/node-http-handler` 4.14.2 (`dist-cjs/index.js:84-100`) only calls `logger.warn` when `requestTimeout` elapses, unless the handler is initialised with `throwOnRequestTimeout: true`. The text of the warning says so.
+- **Probe P-7.** A loopback TCP server that accepts the connection and never replies; the real adapter (types stripped from the head's sources), no caller signal, one `head()`:
+
+  | Variant | Result |
+  |---|---|
+  | head as written | still pending after **50 s**; exactly one `console.warn` line "a request has exceeded the configured 10000 ms requestTimeout ..." at 10.0 s; one connection accepted |
+  | same call with `AbortSignal.timeout(1500)` | `UNAVAILABLE` at 1.5 s |
+  | head with `throwOnRequestTimeout: true` added in a scratch copy | `UNAVAILABLE` at 30.3 s (3 attempts x 10 s; three connections) |
+  | blackholed address (connect timeout) | `UNAVAILABLE` at 6.2 s (3 x 2 s): the connect timeout works |
+
+  The code review's trickle probe (body at one byte per 5 s, pending at 45 s) is the same family; this probe shows the stronger case, a store that never answers at all.
+- **Impact and exploitability.** Not attacker-triggered: the store is trusted infrastructure. The risk is operational and cumulative: a half-open pooled socket (NAT or load-balancer idle timeout at M5), a wedged RustFS, or a slow S3 partition leaves every signal-less `put`, `get`, `head` or `delete` pending, together with the request or the booking-saga step that awaits it (the label `put` sits between "payment captured" and "shipment booked", a guardrail the run holds at 0). The SDK's `console.warn` line also bypasses the Pino redactor (it carries no sensitive text). **Today's exposure is nil**: the only caller is the readiness check, which passes the runner's 2 s signal (verified in the health test and my probe). Severity: impact Medium x likelihood Medium = MEDIUM, because the planned callers are request- and job-path and the stated control is false.
+- **Remediation (code level).**
+
+  ```ts
+  requestHandler: { connectionTimeout: S3_CONNECTION_TIMEOUT_MS, requestTimeout: S3_REQUEST_TIMEOUT_MS, throwOnRequestTimeout: true },
+  ```
+
+  plus one overall deadline per operation, combined with the caller's signal, so the worst case is not 3 x 10 s:
+
+  ```ts
+  const bounded = (signal?: AbortSignal): AbortSignal =>
+    AbortSignal.any(signal === undefined ? [AbortSignal.timeout(S3_OPERATION_DEADLINE_MS)] : [signal, AbortSignal.timeout(S3_OPERATION_DEADLINE_MS)]);
+  ```
+
+  used in `send`, `write`, `head`, `get` (about 15 s for put/get, 5 s for head/delete, as the code review suggests). Make the SDK warning unreachable by construction.
+- **Verification.** Loopback unit test with a server that accepts and stays silent: `put`, `putIfAbsent`, `head`, `get` and `delete` without a signal reject `UNAVAILABLE` within the deadline plus 1 s; a mutation (delete `throwOnRequestTimeout`, or the deadline) must fail it; the same with a trickling body; assert no `console.warn` output. This also answers code review R1-m1 (the options are pinned by no test today).
+
+### 3.2 PR30-SEC-02 (LOW): content-type and disposition are not forced
+
+- **Evidence.** P-4: `contentDisposition: 'inline'` is accepted and signed into the URL (`response-content-disposition=inline`); `PresignGetInput` has no content-type field, so the URL carries no `response-content-type`. P-5 on RustFS: an object stored as `text/html` is served as `content-type: text/html` with `content-disposition: attachment`; the response headers are `accept-ranges, connection, content-disposition, content-length, content-type, date, etag, last-modified, x-amz-meta-sha256, x-amz-request-id, x-request-id`, with **no `x-content-type-options`**. A URL signed with `ResponseContentType: application/pdf` over the same object is served as `application/pdf` (so forcing it works on this store, and on AWS S3).
+- **Why it matters.** T-58's gap column reads "Sign the exact key with forced `response-content-type` and attachment disposition"; T-59 and ADR-0021 am. 2 say downloads keep `attachment` and `nosniff`. The store cannot send `nosniff` on a pre-signed response at all (the browser talks to the store, not to the Platform), so am. 2's promise has no delivery point today.
+- **Exploitability.** Needs a caller that passes `inline`, or an object whose stored content type an attacker influences; labels are validated and typed at put time (TASK-155, T-59) and no caller exists yet. Impact Medium x likelihood Low = LOW.
+- **Remediation.** In `object-storage.port.ts` add `readonly contentType: string` to `PresignGetInput` (required; the document module passes the type it stored) and set `ResponseContentType` in the command; replace the free-text `contentDisposition` by `filename?: string` and build `attachment; filename*=UTF-8''<percent-encoded>` inside the adapter, rejecting anything else (so `inline` cannot be expressed). For `nosniff`, principal-architect amends ADR-0021 am. 2 and T-59: either "forced content type plus attachment" is the control, or a CDN response-headers policy (CloudFront at M5, the local `edge` proxy in compose) fronts `STORAGE_PUBLIC_ENDPOINT` and adds it.
+- **Verification.** Unit: `inline`, `attachment; x`, a CR/LF and a bare `;` are `INVALID_ARGUMENT`; the URL carries `response-content-type`. Contract on RustFS: a stored `text/html` object is fetched as the forced type with `Content-Disposition: attachment; filename*=...`.
+
+### 3.3 PR30-SEC-03 (LOW): integrity values are claims
+
+- **Evidence.** `toHead` copies `output.Metadata.sha256` (if it is 64 hex) into `ObjectHead.sha256`; `get` returns it next to the body without hashing the body (`P-4`, probe 7: a body that does not match the metadata still comes back with the metadata's value). On RustFS the store accepted `x-amz-meta-sha256` that did not match the body, and `head()`/`get()` reported it (probe G). The request headers the adapter sends are CRC32 (`x-amz-sdk-checksum-algorithm: CRC32`, `x-amz-checksum-crc32`) and, over plain http, `x-amz-content-sha256` of the payload; over https the SDK uses a trailer. CRC32 detects corruption, not tampering. The same store **does** verify SHA-256 when asked: `ChecksumSHA256` correct was accepted, a wrong one gave 400 `BadDigest`, and `HeadObject` with `ChecksumMode` returned it.
+- **Impact.** The port JSDoc says "From metadata `sha256`", which is honest, but the field is called `sha256` on a `StoredObject`. A consumer that reads it as verified is wrong (T-60: the hash that counts lives in the database). The SPK-05 F-10 rule for the audit anchor ("on `created: false` compare `head().sha256` with your own hash") is satisfied by an object whose metadata names the expected hash while its body differs; the anchor keys are predictable (`anchors/<yyyy>/<mm>/<anchor_seq>.json`), so a principal with `PutObject` on the bucket could pre-seed one. Needs write access to the bucket, so impact Medium x likelihood Low = LOW.
+- **Remediation.** (1) In `write`, send `ChecksumSHA256: <base64 digest>` and map the store's `BadDigest` to `INTEGRITY_MISMATCH` (today it falls to `UNEXPECTED`); confirm the SDK then skips its CRC32 default. (2) In `get`, hash the received bytes; if the metadata value is present and differs, throw `INTEGRITY_MISMATCH`; return the computed value as `sha256`. Document `head().sha256` as an unverified claim (or return the store's `ChecksumSHA256`). (3) TASK-116: on `created: false`, `get` the object and compare the bytes (anchors are small), never the metadata. (4) TASK-250 recomputes against the database value, as REQ-DOC-009 says.
+- **Verification.** Unit: tampered fake body gives `INTEGRITY_MISMATCH`; a wrong `ChecksumSHA256` is rejected before any write is reported as success. Contract: an object written with a mismatching metadata value is refused by `get`; `put` with a wrong digest gives `INTEGRITY_MISMATCH`.
+
+### 3.4 PR30-SEC-04 (LOW): partial credential configuration fails open to the default chain
+
+- **Evidence.** `storageOptionsFromConfig` sets `credentials` only when both secrets resolved (P-4 probe 8: both gives set; only the id ref, only the secret ref and neither all give "not set"). With nothing set the SDK uses its default provider chain (environment `AWS_*`, shared config, SSO, process, container and instance credentials). `schema.ts` makes both refs optional, the register entry is `requiredFor: NONE`, and `guards.ts` has no pairing rule. The code review (R1-m5) found the same silent path. Probe P-4 also shows that with no source at all the call fails fast (`UNEXPECTED`, 4-69 ms on this host), so the failure is loud only when nothing is available.
+- **Impact.** In staging or production, a half-written pair makes the process use whatever else the host offers, possibly an identity with wider S3 rights than the intended task role (T-94 wants the signer limited to Get/Put on prefixes). The register says "local-only -> IAM task role (no static keys)", but no hardened-environment rule refuses static refs. Impact Medium x likelihood Low = LOW.
+- **Related INFO inside the same fix.** With `STORAGE_ENDPOINT` set and `STORAGE_PUBLIC_ENDPOINT` unset, the pre-signed URL carries the in-network host (probe P1b: the internal endpoint's host and port). That breaks downloads and discloses an internal name; no guard requires the public endpoint when an endpoint is set. Userinfo, query and fragment in `STORAGE_PUBLIC_ENDPOINT` do not reach the URL (the SDK drops them; probe P1d), so I raise nothing for the Joi `uri()` leniency.
+- **Remediation.** A config guard (`guards.ts` is not security-owned; `keys.ts` is) reporting an `incomplete-pair` issue that names the keys only when exactly one ref is configured, and in hardened environments (`isHardenedAppEnv`) refusing both refs unless a documented switch allows static keys; require `STORAGE_PUBLIC_ENDPOINT` whenever `STORAGE_ENDPOINT` is set outside local/test. Defence in depth: `storageOptionsFromConfig` throws when exactly one secret is present.
+- **Verification.** `loadRuntimeConfigOrExit` with one ref exits 78 with the key names and a reason code, no values; with both refs in `APP_ENV=production` it exits 78 unless allowed.
+
+### 3.5 INFO items
+
+- **PR30-SEC-05.** `get` refuses to buffer when `ContentLength > 5 MiB` (probe P6: 6 MiB reported gives `TOO_LARGE`), but `ContentLength` absent is treated as 0 (`?? 0`), and a body larger than the declared length is returned (probe P6 with a fake: 6 MiB body returned for both). S3 and RustFS always send `Content-Length` on GetObject, so this is a defence-in-depth gap. Fix with SEC-01: count bytes while reading and abort above `MAX_PUT_BYTES`.
+- **PR30-SEC-06 (anchor sink).**
+  - (a) *Atomicity is proven* (probe H): 32 concurrent `putIfAbsent` on one key give `{created: 1, exists: 31}` on the unversioned and the versioned bucket, one version, winner's body kept. The `If-None-Match: *` header is on the `putIfAbsent` request only (probe P5).
+  - (b) *The port is not the tamper-evidence control.* In the same container the same credential's `put()` overwrote an anchor written by `putIfAbsent` and `delete()` removed it. ADR-0021 am. 1 gets that guarantee from IAM (`PutObject` only, no delete, no bypass) and Object Lock. Condition for TASK-116: the anchor sink takes `Pick<ObjectStorage, 'putIfAbsent' | 'get'>` built from its own credentials and bucket (`audit-anchors`), never the documents `services.storage`; today `createRuntimeServices` makes one client with one credential pair for every bucket.
+  - (c) *Wording conflict.* F-10's rule ("compare after 412") needs `s3:GetObject` (and `s3:ListBucket` to tell 404 from 403) on the anchor prefix; ADR-0021 am. 1 says the worker holds `s3:PutObject` only. principal-architect to amend am. 1 (read on the anchor prefix, still no delete, no bypass) or change the rule.
+  - (d) *AWS differs from RustFS.* AWS answers a concurrent in-flight conditional write with 409 `ConditionalRequestConflict` and says a PutObject may be retried after it; the adapter maps 409 to `UNEXPECTED` (fails closed). Code review R1-m4 asks for the mapping; the contract suite should also run against real S3 before G4-production (ADR-0021 section 6).
+- **PR30-SEC-07 (keys and buckets).** The port enforces: key 1..1024 bytes, no leading `/`, no control characters, no `..` segment; bucket DNS-like. Not enforced and deferred to callers: the ADR-0021 section 2 template (`org/<org_id>/...`) and the closed set of buckets (the port accepts any bucket-like string, including IP-like and dotted names). Probes: `.`, `a/./b`, `a//b` and a trailing `/` are accepted by the port; the store answers **400** to `a/./b`, `a/x/../b` and `a//b` signed raw, 403 to `%2e%2e` in a path signed for another key, and serves the same object for `%2f` in place of `/` (an alias of the identical key only). So no traversal path exists on this store, and the `..` check is not load-bearing against RustFS; it is the right defence for any store that normalises. Conditions: TASK-147 builds every key in one typed builder from UUIDs (the organisation id from the tenant context, never request input) and TASK-162 presigns only keys read from the RLS-visible document row (and pins `versionId`, which the port passes through); the key grammar should reject `.` and empty segments and a trailing `/` (code review R1-n2).
+- **PR30-SEC-08 (ownership and infrastructure).**
+  - (a) Lane A computes the owned set from CODEOWNERS; `/apps/api/src/platform/storage/` is not listed, so a change to the TTL cap, the key checks or the credential mapping needs no record. Consider adding it (orchestrator or devops; `.github/` is owned).
+  - (b) TASK-014: the RustFS image sets `RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*` by default and serves a console on 9001: publish only 9000, bind to 127.0.0.1, take the credentials from the `STORAGE_*_REF` secrets (T-94, T-100); the signed `Host` must be the browser-visible one, so the local `edge` proxy must pass `Host` through unchanged; `.dockerignore` and image `find` checks for `**/storage/tests` and `*.test.js` (PR27-SEC-01 pattern; `apps/api/tsconfig.json` includes all of `src`).
+  - (c) `tools/quality/suite-runners.json` `testcontainers_images` does not list the RustFS image, so lane-B digest evidence omits it (devops; the PR comment already notes it).
+  - (d) M5 IAM (code review section 4): `HeadBucket` needs `s3:ListBucket` on the documents bucket for the API and the worker roles.
+
+## 4. Rulings on the dispatch questions
+
+### 4.1 Pre-signed URL safety
+
+| Question | Ruling | Evidence |
+|---|---|---|
+| TTL bounds | **Held.** Integer 1..300 checked before any I/O; `X-Amz-Expires` equals the TTL; expiry is enforced by the store (contract test) and tamper variants fail. `STORAGE_PRESIGN_TTL_SECONDS` (1..300) exists in config but the adapter does not read it: callers must pass it | P-4 (13 TTL values), P-5 B |
+| Method restriction, no write presign | **Held.** Only `presignGet`; only `GetObjectCommand` is signed; HEAD, PUT, DELETE, POST with the GET URL give 403, OPTIONS 400, object unchanged | P-5 A; source |
+| Host/endpoint split, SSRF, host-header confusion | **No path.** The URL is signed for the public endpoint's host only (`SignedHeaders=host`); other `Host` 403; `X-Forwarded-Host`, `Forwarded`, `X-Original-URL` ignored; duplicate `Host` 400; no `Host` 403; absolute-form with another authority plus the right `Host` header is served (the store uses the `Host` header, as S3 does, so a stray proxy cannot be steered by it). Both endpoints are config-only, https outside local/test; the server never requests the public one; the SDK does not follow redirects | P-5 C, P-6, `guards.ts:43`, source |
+| Secret material in the URL | **None.** Query holds algorithm, credential scope (key id, date, region), date, expires, signed headers, signature, `x-id`, `x-amz-checksum-mode`, the disposition. No secret key in any URL | P-4 |
+| Logging the URL (code review flag 1) | **Closed on PR #20's head `fafa3b5`.** Its redactor removed the signature and credential from 14 forms (`url`, other keys, free text, error text, JSON text, percent-encoded, absolute and relative query) with a positive control; it stays conditional on PR #20 merging. TASK-162 must add the route test | P-8 |
+
+### 4.2 Key construction, size bounds
+
+See PR30-SEC-07 and PR30-SEC-05. The 5 MiB bound on `put` is checked on `body.byteLength` before any I/O (exactly 5 MiB accepted, one byte more is `TOO_LARGE`); the metadata cap is 16 entries but not a byte budget (code review R1-n2).
+
+### 4.3 Error and log hygiene
+
+**Held.** Six store behaviours (403 `AccessDenied`, 404 `NoSuchBucket`, 500 and 503 with three attempts each, 400 `BadDigest`, 200 with garbage) were run against all six operations (36 failure paths) with an XML body that carried a sentinel host, bucket, key and key id. Every thrown `ObjectStorageError` has only its code (`message` equals the code); `String`, `.message`, `.stack`, `JSON.stringify`, `util.inspect(depth 6, showHidden)` and `.cause` contained no sentinel; no `console.*` call was made during the failures; retries ran exactly 3 times on 500/503 (18 requests for six operations). The readiness body is `object_storage: 'unavailable'` only, bounded by the 1 s cached, single-flight runner (PR9-SEC-08); the composition and health tests assert no host, port or key. The code review's point that the composition test's log assertion is vacuous for storage is right (nothing logs a storage failure by design); I add that the only place the SDK itself writes is `console.warn` (SEC-01).
+
+### 4.4 Credentials
+
+Both secret refs are required for static credentials; they come only through `secrets` resolved from `STORAGE_*_REF` (env or file provider); `Secret.reveal()` is called once in `storageOptionsFromConfig`; `compose.env` uses `local-only-*` placeholders that `placeholderGuard` refuses in staging and production; `.env.example` has `CHANGE_ME`. Gap: PR30-SEC-04.
+
+### 4.5 Anchor sink and checksums
+
+PR30-SEC-03 (integrity) and PR30-SEC-06 (sink). `If-None-Match: *` is correct and atomic on the pinned RustFS; the AWS 409 shape and the IAM wording are open for TASK-116 and G4-production (SEC-P3-03 item 7).
+
+### 4.6 Readiness `HeadBucket`
+
+**Held.** Fixed component name and enum only; failure cause never read; the 2 s per-check signal reaches the SDK (`UNAVAILABLE` at 1.5 s in P-7); a missing bucket maps to `UNEXPECTED` (readiness `unavailable`); public and unthrottled, but at most one evaluation per second per process.
+
+### 4.7 Image pin, dependencies, lock delta
+
+- **Image.** `rustfs/rustfs:1.0.4@sha256:ed9210d6...` is an OCI image index whose body hashes to the digest; amd64 and arm64 image manifests plus two attestation manifests; the `1.0.4` tag points at it (last updated 2026-10-25); non-root user `rustfs`; ports 9000/9001; created 2026-10-25. `latest` has since moved (2026-11-10). The helper pins the digest, generates per-run credentials with `randomBytes`, publishes only 9000.
+- **SDK.** Closure of the two direct S3 packages: 27 locked packages, licences Apache-2.0 (25), 0BSD (1), MIT (1), no install scripts, **zero advisories** from the registry's bulk endpoint, positive control (two known-vulnerable versions) returned two. `client-s3` and the presigner 3.1162.0: published 2026-11-04 (nine days); 3.1168.0 (2026-11-12) is inside the cooldown. No manifest, lock, `.npmrc` or workflow change.
+- **Gitleaks (default rule set emulated, 221 rules).** 16 PR files, 0 findings; a run-time generated key-shaped positive control gave 1 (its value appeared once in a tool output during the check, not in any file, record or commit). Lane A's real run on the head is green.
+
+## 5. Method
+
+| Probe | What it did | Result |
+|---|---|---|
+| **P-1** Source review | Whole diff of the adapter, port, readiness check, `services.ts`, both `main.ts`, config `schema.ts`, `guards.ts`, `keys.ts`, `compose.env`, `.env.example`, ADR-0021, threat model T-57..T-61 / T-94 / T-96 / T-100, NFR-SEC-013, SPK-05, D-TASK019-01..02, code review R1 | findings above |
+| **P-2** Lock and advisories | 27-package closure from the head's `package-lock.json`; bulk advisory POST with a positive control; packument times | 0 advisories; section 4.7 |
+| **P-3** Registry | Anonymous manifest, config blob and tag list of the pinned digest | section 4.7 |
+| **P-4** Adapter with the real SDK | The head's `s3-object-storage.ts` and port type-stripped into scratch, `node_modules` junctioned to the main checkout, SDK clients with a stub HTTP handler: presign shape; 13 TTL and 8 disposition values; 25 key and 9 bucket shapes; six store behaviours x six operations with sentinels and a `console` spy; request headers of `put` and `putIfAbsent`; `get` bound; `sha256` trust; credential mapping; no-credential timing | SEC-01..07 |
+| **P-5** RustFS | Container from the pinned digest, random credentials, loopback port: method matrix, 10 query-tamper variants, Host variants, anonymous access, raw path forms, response-type override, checksum support, 32-way `putIfAbsent` on two buckets, overwrite and delete by the same credential | sections 3, 4 |
+| **P-6** RustFS raw socket | Ten request-line and `Host` shapes written with `socket.write` | section 4.1 |
+| **P-7** Timeouts | Silent TCP server, blackholed address, fix in a scratch copy | section 3.1 |
+| **P-8** PR #20 redactor | `git archive` of `fafa3b5` `packages/shared/src`, `registerHooks` strip loader, 14 forms of a pre-signed URL plus a positive control | section 4.1 |
+| **P-9** Default-rule Gitleaks emulation | `PR-25-sec` emulator over the 16 PR files, positive control | section 4.7 |
+| **P-10** Record check | Main's `tools/ci/check-security-owned-paths.mjs` (from `b06fa9f`) against a scratch `clone --shared` | section 7 |
+| **P-11** AWS docs | Web search for the conditional-write status codes | SEC-06 (d) |
+
+## 6. Follow-ups by owner
+
+| Owner | Check or action | Findings |
+|---|---|---|
+| **backend-developer, this PR's fix cycle** | `throwOnRequestTimeout: true` and a per-operation deadline with a silent-server test; byte-counting `get`; code review R1-m1..m4 | SEC-01, 05 |
+| backend-developer (before TASK-162) | `contentType` on `PresignGetInput`, no `inline`; `ChecksumSHA256` on put, hash on `get`, `INTEGRITY_MISMATCH` on `BadDigest` | SEC-02, 03 |
+| principal-architect | ADR-0021 am. 2 (nosniff has no delivery point), am. 1 (IAM wording versus F-10), T-58/T-59 text; logged by the orchestrator | SEC-02, 06 |
+| TASK-014 | Pairing guard and hardened-environment rule for the `STORAGE_*_REF` pair; public endpoint required with an endpoint; compose `rustfs` (digest, 127.0.0.1, port 9000 only, `Host` passthrough, bucket-init); `.dockerignore` and image content check | SEC-04, 08 |
+| TASK-116 (anchors) | Sink built from `Pick<ObjectStorage, 'putIfAbsent' \| 'get'>` with its own credential and bucket; on `created: false` compare bytes; 409 handling; AC line for all three (code review R1-m6) | SEC-03, 06 |
+| TASK-147, TASK-155, TASK-162, TASK-250 | One typed key builder; presign only RLS-visible row keys; label put sets content type from the detected format; route test that no log line carries `X-Amz-*`; `Cache-Control: no-store` on the download JSON; recompute against the database hash | SEC-02, 03, 07 |
+| devops | RustFS in `testcontainers_images`; CODEOWNERS entry for the storage folder | SEC-08 |
+| G3 | SEC-TC for the download path: expiry, tamper, method restriction, audit entry (AC-37, NFR-SEC-013) | 4.1 |
+| G4-production | Locked anchor sink (Object Lock, put-only role), contract suite against real S3, `s3:ListBucket` for readiness | SEC-06 |
+
+## 7. Record-check simulation (P-10)
+
+Main's `tools/ci/check-security-owned-paths.mjs` (from `b06fa9f`) was run from outside, against a scratch `git clone --shared` at the reviewed head, with this record added as one commit on top. `--pr 30`, base `origin/main` unless stated.
+
+| Case | Scenario | Result |
+|---|---|---|
+| B | Control: no record in the tree | **`not-required`**, owned = none (no CODEOWNERS path in the PR's net change) |
+| A | This record committed on top of the reviewed head | `not-required` |
+| A2 | The same against the original merge base `ddbeb49` | `not-required` |
+| C | Control: `eslint.config.mjs` edited after the record | `missing` ("names 293fb62, but eslint.config.mjs changed after it") |
+| D | Control: `eslint.config.mjs` edited, no record | `missing` ("no record named docs/05-quality/security/PR-0030-*.md for PR #30") |
+| E | Real main merged after the record | `not-required` |
+| F | Control: owned path changed and the record's last `Verdict` row is FAIL | `missing` ("verdict FAIL is not one of PASS, PASS_WITH_FOLLOW-UPS, PASS_WITH_CONDITIONS") |
+| G | Positive control for the record parser: an owned path changes (commit X), then this record with its Head row set to X | **`pass`**, satisfied by the record (the Head row and the `PASS_WITH_CONDITIONS` verdict parse) |
+
+Cases C, D and F fail for the reason the check names and G passes with this record's own rows, so the `not-required` results in B, A, A2 and E are not vacuous. **Record validity:** lane A does not consult this record for the PR as it stands. If a later commit of this PR (for example a fix cycle) changes a CODEOWNERS path, lane A will need a record whose Head row names a commit before that change (case C). The SEC-01 and SEC-02/03 fixes touch only `apps/api/src/platform/storage/**` and need no new record, but the fix commit is reviewed under the conditions below.
+
+## 8. Verdict
+
+| **Verdict** | **PASS_WITH_CONDITIONS.** No Critical or High finding is open at head `293fb62`, so the merge rule is met for the security dimension. **Condition C1 (PR30-SEC-01, MEDIUM):** the SDK request timeout must be made effective (`throwOnRequestTimeout: true`) and every operation bounded by an overall deadline, with a silent-server test and a mutation check, **in this PR's fix cycle** (the code review already asks for the same family in R1-m1/m2); if the orchestrator rules to defer it, the hard stop is the merge of the first non-readiness caller of the port (TASK-116, TASK-147, TASK-155 or TASK-162), because today only the readiness check calls the adapter and it is bounded by the runner's 2 s signal. A delta review of the fix commit (storage folder only) closes C1. **Rulings:** pre-signed URLs are GET-only, at most 300 s, host-bound to the public endpoint, tamper-proof and free of secret material (RustFS probes); no SSRF or host-header path (endpoints are configuration only); keys cannot traverse on this store and the `..` and leading-slash checks hold; errors, logs and the readiness body leak nothing (36 failure paths, sentinel test); both credential refs are required for static credentials; `If-None-Match: *` is atomic for the anchor sink; the RustFS digest is verified; no new dependency, no lock delta, zero SDK advisories. **Open, not blocking:** PR30-SEC-02 (LOW, before TASK-162), PR30-SEC-03 (LOW, adapter now or before TASK-116), PR30-SEC-04 (LOW, TASK-014), PR30-SEC-05 to 08 (INFO). **Record validity:** see section 7; no security-owned path changed, so lane A does not consult this record. |

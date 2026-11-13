@@ -261,3 +261,229 @@ Sources: PR #24 at the head below (all 85 files, via `git archive`); merge-base 
 | Findings | 0 Critical, 0 High, 0 Medium. 4 LOW: PR24-SEC-01 (merge condition), 02, 03, 04. 5 INFO: 05–09 |
 | Conditions | **C1** PR24-SEC-01 fixed in this PR with the §4 verification rows. **C2** A round-2 delta record naming the final pushed head (the SEC-01 fix plus the merge of main, §7), which confirms the rule-12 approval of the final `90-audit-ddl-guard.sql` blob. Recommended in the same fix cycle: PR24-SEC-02, PR24-SEC-03, R1-m2 |
 | **Verdict** | **PASS_WITH_CONDITIONS.** No Critical, High or Medium finding is open at head `6f498c41169bc098a0d7a5a028d72ce000cdf062`. Audit immutability holds for every role exercised. The three-layer squat defence holds (layers 2 and 3 proved on PG 18). Decisions 2–6 are granted and decision 1 is supported. Rule-12 approval is granted for `10-audit.sql` (blob `c3d4db9`); for `90-audit-ddl-guard.sql` it is granted for the blob that implements PR24-SEC-01 (C1), to be confirmed in round 2 (C2). Merging main (owned overlap `eslint.config.mjs`) or committing the C1 fix voids this record for lane A, by design |
+
+## Round 2 (head 7662672)
+
+| Field | Value |
+|---|---|
+| Head | 766267223e2adba6e29c14d5e34c9c86dec3128c |
+| Delta reviewed | Fix commits `2318e55` (C1 guard invariant), `3fd85d0` (readiness SQL, squat event, R1-n2/n4), `362f9f2` (rule 11, R1-n1), `5020ac6` (three-state contract). Also the normal merges of main: `1fb76c1` (main at `6fd801f`) and the head `7662672` (main at `ccc1082`). Developer comment: https://github.com/sukhchdit/shipcube/pull/24#issuecomment-6846588883 |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. No command ran in the TASK-021 worktree: sources came from `git archive` / `git show` in the main checkout into scratch. One Docker probe ran under the shared `docker.lock` directory (held about 2 min, one container, `--network none`, `--rm`, released). The record-check simulation ran in a scratch `git clone --shared`, which was removed afterwards |
+
+### R2.1 Summary
+
+**C1 is met, and the round-1 conditions close.** This record is C2.
+
+- **PR24-SEC-01 closed.** The post-loop invariant in `90-audit-ddl-guard.sql` refuses every side-effect squat from round 1 on real PostgreSQL 18.6:
+  - multirange in `public`, in `platform`, and through `DO … EXECUTE`;
+  - procedure and aggregate plants;
+  - `SET SCHEMA` moves L2–L4.
+
+  It also refuses three variants round 1 did not list: range and multirange **constructor routines** named like audit routines (G6–G8). The same cases run against the round-1 guard blob in a second database are all accepted, which is the mutation control.
+- **PR24-SEC-02 closed.** With both operator plants in place, the head's readiness SQL still reports the type squats (H1) and still loads (H2). The round-1 SQL under the same plants hides the rows and then fails, which is the positive control.
+- **PR24-SEC-03 closed.** The three never-executed RESETs (w1–w3) are flagged again, as are the DO-body lowering SET (w5) and the depth-5 literal (R1-n1).
+- **Rule-12 approval (decision 7): granted for `prisma/bootstrap/90-audit-ddl-guard.sql` at blob `9aab9aaab73fcb53e3f8a5e835d7d451af606be3`.** `prisma/bootstrap/10-audit.sql` at blob `c3d4db9f3125d4915c0ff9d1ce1132d0e8e0e713` is unchanged and stays approved.
+
+**Two new items, neither blocking:**
+
+- **PR24-SEC-10 (LOW).** `CREATE INDEX CONCURRENTLY` (CIC) under an audit name survives the guard's refusal as an INVALID index. It is live for the migrator credential outside the linted lane, it predates this round, and the guard cannot fix it.
+- **PR24-SEC-11 (INFO).** Rule 11 trusts a top-level RESET inside a transaction that is rolled back. This predates the PR.
+
+**Correction to round 1.** PR24-SEC-08 (a) says that after the invariant "only a superuser or a guard-disabled session can plant a squat at all". That is wrong for CIC (PR24-SEC-10). The D-ARCH-081 acceptance still stands, because the migrator credential can already take the fleet out of rotation by other means, for example by revoking `platform_app`'s grants.
+
+### R2.2 Round-1 §7 checklist
+
+| # | Check | Result |
+|---|---|---|
+| 1 | The merge commit is the pushed head | **Met.** `git ls-remote origin` shows `refs/heads/feat/TASK-021-audit-store-sql-partitioned-audit` and `refs/pull/24/head` at `7662672`. Its parents are `5020ac6` (first) and `ccc1082` (main). The merge-base with main is `ccc1082` |
+| 2 | Changed paths | **Met.** `git diff --name-only ccc1082 7662672` gives 94 paths: round 1's 85 net-change paths (none removed), plus `packages/shared/src/api/types.gen.ts`, `tests/api/contract-validation.api.test.ts`, `apps/api/src/platform/health/health.int.test.ts` and the six w1–w3 fixture files under `tools/db/fixtures/lint/migrations/lock-timeout-do-body/`, all unowned. Under main's CODEOWNERS (`5107f1e`, which adds `/tools/quality/` from PR #23) the owned set is the same 7 paths as round 1 |
+| 3 | `eslint.config.mjs` equals `merge-tree` | **Met.** The head blob `b782cfc` equals the `eslint.config.mjs` blob of `git merge-tree --write-tree 6f498c4 ccc1082` and of `… 5020ac6 ccc1082`. The net delta against main is exactly round 1's SPK-08 exemption removal (3 lines). The head tree `4b47e3a` equals `merge-tree(5020ac6, ccc1082)`, so there are no hand edits in the merge. The first merge `1fb76c1` equals `merge-tree(6f498c4, 6fd801f)`. The tree diff from `merge-tree(6f498c4, ccc1082)` to the head is exactly the 24 paths of the four fix commits |
+| 4 | `openapi.yaml` and generated types | **Met.** The `HealthReady.components.audit_partitions` enum is `ok, degraded, unavailable`, with a contiguity description. The `getReadiness` description states the three-state rule and cites D-ARCH-081. `types.gen.ts` carries `'ok' \| 'degraded' \| 'unavailable'` and both descriptions. `contract-validation.api.test.ts` imports and uses `isCriticalComponent`. I did not re-run `openapi:types --check`; the developer reports exit 0, and lane A's fast-lane is green |
+| 5 | Other owned blobs; new `90` blob and marker | **Met.** These are unchanged from round 1: `10-audit.sql` `c3d4db9`, `audit-ddl-reviewers.json` `50b43eb`, `tenant-context-exemptions.test.ts` `169152d`, `tools/tsconfig.json` `7ac5ee0`. Changed: `90-audit-ddl-guard.sql` (`de73029` to `9aab9aa`, only in `2318e55`), `lint-migrations.ts` (`d9a2190` to `56853be`, only in `362f9f2`) and `eslint.config.mjs` (merge only). The `90` diff adds the header paragraph, three variables, the `procedure`/`aggregate` widening, the schema-comment rewording (R1-n3) and the invariant block, and nothing else. Marker line 3 still reads `-- @audit-ddl security-approved: security-analyst 2026-11-13`. The head linter over the real `prisma/migrations` and `prisma/bootstrap` gives 0 findings. With an empty reviewer list, the control flags exactly `10-audit.sql` and `90-audit-ddl-guard.sql` |
+| 6 | PR24-SEC-03 fixed in-PR | **Met** (P-2, §R2.4) |
+| 7 | Gates | **Met for security.** Lane A run 43383529879 on `7662672`:<br>- fast-lane is green: lint, type-check, unit, build and porcelain, the base-ref negative fixtures, `quality:check-evidence`;<br>- in scans, gitleaks (PR range, first-parent) and Semgrep are green;<br>- the record step fails as expected, because round 1 is void.<br><br>The developer's integration run (218 passed, 1 skipped) was on `70afa8b`, and coverage (97.79 % / 97.02 %) on `5fef0e1`:<br>- `70afa8b` differs from the head only in PR #23 and PR #25 paths (`tools/quality/**`, `tools/ci/**`, `.github/**`, `.gitleaks.toml`, `package.json`, `.prettierignore`, `tools/repo`), so none under `prisma/`, `apps/` or `tools/db/`;<br>- `git diff 5fef0e1 7662672 -- . ':!docs' ':!.claude'` has the same patch-id as PR #25's delta `4bb6dc6..600232d`.<br><br>I did not re-run these suites |
+| 8 | PR #20 union | **Open, by design** (§R2.6). PR #20 (`fafa3b5`) is unmerged and lists neither event |
+
+### R2.3 Probe P-1 round 2 (PostgreSQL 18.6, `postgres:18@sha256:e3d24f69…`, `--network none`)
+
+**Setup.**
+
+- The head's lane `00`→`90` is applied to database `probe`.
+- The same lane with the **round-1** `90` blob is applied to `probe_r1`, as the mutation control.
+- Each file runs with psql `-1`, `ON_ERROR_STOP` and empty password variables.
+
+| # | As | Case | Round-1 blob (`probe_r1`) | Head blob (`probe`) |
+|---|---|---|---|---|
+| N0 | migrator | `CREATE TABLE public.mig_t` right after the lane | — | OK: no lane object trips the invariant |
+| C1–C11 | migrator | The 11 squat controls of round 1 | (refused in round 1) | all refused (42501) |
+| B1 / B1p / B1b | migrator | `multirange_type_name = audit_entries_2027_09` in `public`; in `platform`; through `DO … EXECUTE` (2028-06) | accepted (B1, B1p) | **refused**, invariant DETAIL `CREATE TYPE leaves type public.audit_entries_2027_09 squatting an audit name, by platform_migrator` (and the `platform`/2028-06 twins) |
+| B5 / B5p / B6 / B6p | migrator | `CREATE PROCEDURE {public,platform}.ensure_audit_partitions(bigint)`; `CREATE AGGREGATE platform.audit_forbid_mutation(int)` / `public.audit_vault_guard(int)` | accepted (B5, B6) | **refused** by the widened loop branch (`CREATE PROCEDURE on procedure …`, `CREATE AGGREGATE on aggregate …`) |
+| G6 | migrator | `CREATE TYPE public.probe_ep AS RANGE (…, multirange_type_name = public.ensure_audit_partitions)`. The type name is outside `c_tbl`; the side effects are the constructor routines `ensure_audit_partitions()`, `(probe_ep)` and `(probe_ep[])` | accepted | **refused**, routine arm |
+| G7 | migrator | `CREATE TYPE platform.ensure_audit_partitions AS RANGE (subtype = int4)`: constructor overloads `(int, int)` and `(int, int, text)` of the real routine | accepted | **refused**, routine arm |
+| G8 | migrator | the multirange `platform.ensure_audit_partitions`, whose zero-argument constructor would make a bare `ensure_audit_partitions()` call ambiguous, because the real one has `DEFAULT 3` (no such caller today) | — | **refused**, routine arm |
+| G1–G3, G5 | migrator | Self-exception: `public.audit_ddl_guard()`, `platform.audit_ddl_guard(integer)`, procedure `platform.audit_ddl_guard(text)`, multirange `public.audit_ddl_guard` | — | all refused (the loop for G1–G3, the invariant type arm for G5) |
+| G4 | migrator | `CREATE FUNCTION platform.audit_ddl_guard()` again | — | 42723 duplicate, before any trigger |
+| M1–M3 | migrator | Range with a non-audit multirange name (OK); `ALTER TYPE … RENAME` of that multirange to a partition name (refused); `DROP TYPE` (OK) | — | as stated |
+| state | migrator | Every `pg_class`/`pg_type` row under an audit name not owned by the audit owner; every `c_fn` routine not owned by it | 6 squats (2 multiranges, 1 range, procedure, aggregate, 5 constructor routines) | 0 / 0 / exactly one routine: `platform.audit_ddl_guard()`, owned by the bootstrap role (the excepted OID) |
+| S1–S4, I0–I8, triggers | superuser | Schema branch, replica-mode immutability, `DISABLE TRIGGER`, `DETACH` (unchanged files; re-run) | — | identical to round 1: S1/S2 OK, S3/S4 guard; I1–I6 `AUDIT_IMMUTABLE`; I7/I8 guard; 10/10 triggers and 2/2 event triggers `A` |
+| L1 | migrator | Table carrying a squat index moved from the superuser-made writable schema `evil` into `public` | — | refused, loop branch (PR12-SEC-02-a) |
+| **L2 / L3 / L4** | migrator | Owned sequence with its table; matview index with the matview; view-owned sequence with the view, all by `SET SCHEMA` into `public` | (accepted in round 1) | **refused**, invariant (`ALTER TABLE` / `ALTER MATERIALIZED VIEW` / `ALTER VIEW leaves relation public.audit_entries_2027_0{8,7,10} …`) |
+| L5 | migrator | Control: a non-audit owned sequence moved | — | OK |
+| H1 | migrator → app | `public.=(oid, integer)` returning `false`, granted to `platform_app`; plus two multirange squats planted by the superuser with `event_triggers = off` | — | `1::oid = 1` gives `f` (the plant is live). The **head** `PARTITION_CATALOGUE_SQL` (verbatim) returns 4 partitions plus **both type rows**. The **round-1** SQL returns the 4 partitions only, so the type rows are hidden |
+| A1 / A2 | app | `ensure_audit_partitions(6)` while the two squats exist; then `ensure(12)` | — | `3` created: the audit-owner path is exempt from the invariant. Then `AUDIT_PARTITION_NAME_TAKEN` (DETAIL `audit_entries_2027_09`), rolled back; 7 partitions remain (layer 2) |
+| X1–X3 | migrator | While the squats exist: `CREATE TABLE`, `COMMENT ON TABLE`, `GRANT` (a command that reports no row to the loop) | — | all refused, invariant DETAIL naming the squat |
+| X4 / X5 / X6 | migrator | `DROP TYPE` of one of two squats; `DROP TYPE a, b`; `CREATE TABLE` again | — | **X4 refused**, because the post-state still holds the other squat. X5 OK; X6 OK |
+| H2 | migrator → app | `public.=(oid, regnamespace)`, not granted | — | The **head** SQL succeeds (7 partitions). The **round-1** SQL fails with `permission denied for function probe_oid_ns_eq`. `LATEST_VERIFICATION_SQL` (head) runs under both plants |
+| SU1–SU3 | superuser | A superuser-owned squat planted with `event_triggers = off`; then `CREATE TABLE`; `DROP TYPE` of the squat; `CREATE TABLE` | — | SU1 refused (the invariant binds every role but the audit owner); SU2 OK; SU3 OK |
+| K0 / K10 | migrator | An ordinary `CREATE INDEX CONCURRENTLY`; `REINDEX INDEX CONCURRENTLY` of an index named `audit`, whose transient `audit_ccnew`/`audit_ccold` names match `c_tbl` | — | both OK, no leftover |
+| **K1–K9, BG1–BG3** | migrator, then superuser | `CREATE INDEX CONCURRENTLY audit_entries_2029_01 ON public.mig_t (id)` and follow-ups | — | **PR24-SEC-10.** Refused with the loop DETAIL, but the index **remains**: `relkind i`, `indisready t`, `indisvalid f`, migrator-owned. Then:<br>- K2: unrelated DDL is refused (invariant);<br>- K3: `DROP INDEX` is refused (`sql_drop` `c_idx`);<br>- K4: `ALTER INDEX … RENAME TO mig_t_k1_idx` passes (post-state clean), and K5 DDL works again;<br>- K6: two leftovers on one table;<br>- K7: renaming either is refused while the other remains;<br>- K8 / K9: `DROP INDEX a, b` and `DROP TABLE` are refused;<br>- BG1: the superuser's `DROP INDEX` is refused too;<br>- BG2: with `SET event_triggers = off`, the drop is OK;<br>- BG3: DDL works again. Final state: 2/2 event triggers `A`, 0 squats |
+
+### R2.4 Probe P-2 round 2: linter, three versions
+
+Base is main `ccc1082`, round 1 is `6f498c4`, and the head is `7662672`. Each was imported under Node 24 type stripping and run over scratch fixtures.
+
+| Case | Base | Round 1 | Head |
+|---|---|---|---|
+| w0 raised, never reset (control) | 11 | 11 | 11 |
+| w1 RESET in a `RAISE NOTICE` literal | 11 | — | **11** |
+| w2 RESET in a dead `IF false` branch | 11 | — | **11** |
+| w3 RESET in an unused string | 11 | — | **11** |
+| w4 top-level RESET (control) | — | — | — |
+| w5 DO-body lower `SET lock_timeout = '1s'` after a top-level raise | 11 | — | **11** |
+| w6 / w7 / w8c DO-body raise (`SET`, `set_config(…, false)`, depth 3) | — | 11 | 11 |
+| w8 raise at nesting depth 5 (R1-n1) | — | — | **11** |
+| w9 top-level `SET lock_timeout = DEFAULT` after a raise | — | — | — |
+| w10 `SET '10s'; BEGIN; RESET lock_timeout; ROLLBACK;` | — | — | — (**PR24-SEC-11**) |
+| w11 top-level RESET, then a DO-body message naming a SET | — | — | — |
+| k1 / k1q / k1u: CIC under `audit_entries_2029_01` (plain / quoted / `U&`) in a migration | 12 / 12 / 16 | 12 / 12 / 16 | 12 / 12 / 16 |
+| k0 ordinary CIC (control) | — | — | — |
+| u0 `U&` identifier (bootstrap) | — | 12 | 12 |
+| e1 / e3 E-string / concatenation `SET ROLE` (bootstrap) | — | — | — (PR24-SEC-05, unchanged) |
+| c0 plain `SET ROLE platform_audit_owner` (control) | 12 | 12 | 12 |
+
+The head's `doBlockLockTimeouts` still reports `reset` for w1, by design: the consumer ignores it. For w8 it reports one `set` carrying the unread literal, which is the fail-closed path.
+
+### R2.5 Rulings asked for in this round
+
+**The accepted consequence (invariant consequence 1) adds no new denial-of-service path for the migrator.**
+
+- **Who is bound.** Every role except `platform_audit_owner` is bound (X1–X3 for the migrator, SU1 for the superuser). The audit write path and `ensure` are untouched (A1, A2).
+- **How a squat can arise.**
+  - Every squat that a command creates or moves is refused by that same command (C, B, G, L, M rows), so the blocked state normally needs superuser-level tampering.
+  - The one exception is a CIC leftover (PR24-SEC-10). It is reachable by the migrator credential outside the linted lane, because rules 12 and 16 refuse the name in migration files (k1, k1q, k1u) and CIC cannot run inside `DO` or a function.
+  - The migrator has no other way to create catalogue rows without DDL: no `CREATE`/`TEMP` on the database, and therefore no `CREATE EXTENSION` of trusted extensions either. Event triggers fire for every non-shared DDL.
+- **What the blocked state costs.**
+  - The only non-superuser role that runs DDL is the migrator, so the blocked state stops the migrator's own migrations. It can already do that with any failing migration or a held lock, and it already holds stronger availability levers: it owns every application table and can revoke `platform_app`'s grants.
+  - The superuser keeps break-glass (BG2).
+  - Each DDL pays one extra namespace-filtered regex scan of `pg_class`, `pg_type` and `pg_proc`, which is negligible.
+- **Recovery has to be planned (TASK-090 runbook).** Dropping or renaming away the last squat passes (X5, K4, SU2). With two or more squats, every single-object command is refused (X4, K7), so either remove them all in one command, or use break-glass as the bootstrap superuser:
+  1. `SET LOCAL event_triggers = off` in one transaction;
+  2. the drop;
+  3. assert `evtenabled = 'A'` for both triggers afterwards.
+
+**The guard's self-exception is tight.**
+
+- It excludes exactly one OID, `to_regprocedure('platform.audit_ddl_guard()')`. That routine is the bootstrap-owned guard (C14: never the audit owner).
+- Same-name routines in another schema, overloads, procedures and a multirange constructor named after the guard are all refused (G1–G3, G5). The exact signature cannot be re-created (G4).
+- After the probe, the guard is the only non-audit-owned routine under a `c_fn` name.
+- **Residual, from reading, not probed; no finding.** The exception resolves the guard by name at call time. Suppose the bootstrap superuser renamed the guard function (the loop admits it, because neither the owner nor the new name matches). The lookup would then return NULL, and the routine arm would match no row, so G6–G8-style constructor plants would pass again; direct plants stay refused by the loop. This is superuser-only, inside the D-ARCH-076 (5) documented limits. The TASK-116 tripwire should assert that both event triggers' `evtfoid` is `platform.audit_ddl_guard()` by name.
+
+**Decision 7.** Rule-12 approval is **granted** for `prisma/bootstrap/90-audit-ddl-guard.sql` at blob `9aab9aaab73fcb53e3f8a5e835d7d451af606be3`, and remains granted for `prisma/bootstrap/10-audit.sql` at blob `c3d4db9f3125d4915c0ff9d1ce1132d0e8e0e713`. Any other blob of either file needs a new security record. After merge, the ledger sha applies (PR24-SEC-06).
+
+### R2.6 Findings and status
+
+#### PR24-SEC-10: `CREATE INDEX CONCURRENTLY` under an audit name leaves an INVALID index that the guard's refusal cannot roll back. Under the invariant it then blocks every later DDL, and the `sql_drop` branch refuses its removal (LOW)
+
+| | |
+|---|---|
+| Severity | **LOW.** Impact M, availability only:<br>- readiness goes `unavailable` fleet-wide (D-ARCH-081: any squat);<br>- migrations stop;<br>- `ensure` refuses only the squatted month (layer 2), and audit writes to other months continue;<br>- detection is immediate (readiness, plus `security.audit_partition_squatted` at `error`).<br><br>Likelihood L: it needs the migrator credential used outside the reviewed lane (P-2 k1, k1q, k1u: rules 12 and 16 refuse the name in a migration; CIC cannot run in `DO` or a function). It **predates this round**: round 1's loop raised at the same point. The C1 invariant only widens the blocked set from DDL on the carrying table to all DDL. Not a merge condition: no guard-side fix exists (see Remediation) |
+| CWE / OWASP | CWE-460 Improper Cleanup on Thrown Exception (secondary CWE-386) · A04:2021 Insecure Design |
+| Location | `prisma/bootstrap/90-audit-ddl-guard.sql:118–122` (loop raise), `:125–145` (invariant), `:150–169` (`sql_drop`, `c_idx` index branch). PostgreSQL `DefineIndex` commits the CIC catalogue and build phases before `ddl_command_end` runs, so only the final validation transaction is rolled back |
+| Description | P-1 K1–K9 and BG1–BG3 (§R2.3). The refused CIC leaves a migrator-owned `public.audit_entries_2029_01` with `indisvalid = f`. The invariant then refuses every later DDL. `DROP INDEX`, a multi-object drop and `DROP TABLE` of the carrying table are refused by the `sql_drop` `c_idx` branch, for the superuser too while the guard is active. One leftover can be renamed away by its owner. Two leftovers self-lock the migrator, so break-glass is needed |
+| Exploitability / impact | The actor already holds equivalent availability levers (§R2.5). The new element is recovery cost: the operator needs the rename-away step or break-glass. No audit row is affected |
+| Remediation | **No guard change is requested.** An event trigger cannot undo committed CIC phases, and `ddl_command_start` gets no object identity (parsing `current_query()` would be fragile). Instead:<br>(1) principal-architect: data-model §5.2 "stated limits" records that the guard refuses but cannot remove a CIC leftover, and that layers 2 and 3 detect it.<br>(2) TASK-090 runbook:<br>- detection: readiness `unavailable` with `kind i`;<br>- recovery when exactly one migrator-owned leftover exists: `ALTER INDEX … RENAME TO <non-audit name>; DROP INDEX …` as the migrator;<br>- otherwise: superuser break-glass `SET LOCAL event_triggers = off` + drop in one transaction, then re-check `evtenabled = 'A'`.<br>(3) Keep the migrator credential used only by the deploy job (TASK-014/090 secret handling); a direct session with it is the only path. |
+| Verification | TASK-033 integration case:<br>1. CIC under a partition name as the migrator gives guard 42501, and an INVALID index remains.<br>2. The readiness evaluation is `unavailable` with that name.<br>3. The migrator's unrelated DDL is refused.<br>4. The rename-away recovery as the migrator succeeds, followed by unrelated DDL OK |
+| Owner | principal-architect (stated limit); TASK-090 (runbook); TASK-033 (test) |
+
+#### PR24-SEC-11 (INFO): Rule 11 clears a raised `lock_timeout` on a top-level RESET inside a transaction that is rolled back
+
+`SET lock_timeout = '10s'; BEGIN; RESET lock_timeout; ROLLBACK;` passes the base, round-1 and head linters (P-2 w10). PostgreSQL reverts a SET or RESET made in a transaction that rolls back (the `SET` reference page; not exercised in P-1), so the raised value survives into later files.
+
+This predates the PR and is the top-level sibling of PR24-SEC-03. **Fix (TASK-024, with the setter-key half):** either a RESET or lowering SET between `BEGIN`/`START TRANSACTION` and `ROLLBACK` does not lower the tracked value, or rule 1/11 refuses transaction control in migration files. Prisma runs each file as one script, so the files have no legitimate use for it.
+
+#### Status of round-1 findings at `7662672`
+
+| ID | Status |
+|---|---|
+| PR24-SEC-01 | **Closed** (C1). Verified by P-1 and by the new `audit-owner.int.test.ts` rows: `range_multirange` with a `platform` twin and `KNOWN_GUARD_GAP = []`; L2–L4 in a rolled-back writable schema with a non-audit control; procedure and aggregate in F-05; the "squat exists" control; the F-08 unrelated-DDL row |
+| PR24-SEC-02 | **Closed** in-PR: P-1 H1/H2 with positive controls; integration H1/H2; the bare-operator unit check with a negative control. The class fix (catalogue assertion on `pg_operator`, lint refusal of `CREATE OPERATOR`) stays with TASK-024: P-1 shows the guard still admits operator plants, by design |
+| PR24-SEC-03 | **Closed** in-PR (P-2 w1–w3, w5, w8; fixtures `20261113001{0,1,2}00_*`) |
+| PR24-SEC-04 | Open, TASK-015 (unchanged; P-4 case F still passes) |
+| PR24-SEC-05 / 06 | Open, TASK-024 / TASK-015 (unchanged; P-2 e1/e3) |
+| PR24-SEC-07 | Open, TASK-090 |
+| PR24-SEC-08 | (a) accepted, with the correction in §R2.1; (b) open (Wave-0 `ensure` caller) |
+| PR24-SEC-09 | R1-m2 in-PR part done: `log.error('security.audit_partition_squatted', {component, partition_name, kind, reason})`, never an owner. R1-n2 (`pendingCheck` refuses `audit_*`) and R1-n4 (`unavailable` not cached) are done. Sink routing is pending (union below) |
+
+### R2.7 Union, overlap and evidence notes
+
+- **PR #20 sink routing** (D-ARCH-081 (4), D-ORCH-029) is owed by whichever of PR #20 and PR #24 merges second. That PR must:
+  - add `audit_partition_squatted` and `audit_mutation_rejected` to `RUNTIME_SECURITY_EVENTS`, with `SECURITY_EVENT_LEVEL` `error`;
+  - set the per-event allow-lists `partition_name, kind, reason, sql_state` and `sql_state`, relaxing PR #20's `['sql_state']`-only test to a per-event one;
+  - use `securityEventSinkFrom(log)` in `apps/api/src/platform/db/runtime.ts` in place of `log.error`.
+
+  PR #20 at `fafa3b5` lists neither event.
+- **Owned overlap with other open PRs.** If any of these merges first, PR #24's next merge of main brings main's side of an owned path in this PR's net change. That voids this record (clause d), so a merge-only round must name the merge commit and repeat §R2.2 items 1–3:
+  - PR #20: `eslint.config.mjs`, `tools/tsconfig.json`;
+  - PR #26: `tools/tsconfig.json`;
+  - PR #27: `eslint.config.mjs`.
+
+  PR #28 and PR #30 have no owned overlap with this net change.
+- **D-ORCH-034, lane-B evidence.** PR #28 has merged (§R2.8), so this PR needs a `quality:heavy --profile pr` run on an ancestor of its head, after the PR28-SEC-02 scrub lands (D-ORCH-035).
+  - An **evidence-only `docs/**` commit after `7662672` keeps this record valid** (P-4 case L).
+  - So does a merge of main that brings only paths outside this PR's owned net change, such as PR #28's or the devops PR's `tools/quality/**` (case M).
+
+### R2.8 Record-check simulation P-4, round 2
+
+Main's `tools/ci/check-security-owned-paths.mjs` was extracted with `git archive origin/main tools/ci` (main `5107f1e`). It ran with `--root <scratch clone --shared, checked out at the case head, this record copied into the work tree> --base <base> --head <case head> --pr <n> --json`.
+
+The base is `ccc1082`, the `RANGE_BASE` of run 43383529879, unless noted. The clone was removed afterwards. The results are in the table below.
+
+| Case | Input | Result |
+|---|---|---|
+| A | This record, `--pr 24`, head `7662672`; also with `--base` = the main tip at each of the two runs, `656ec94` and `b06fa9f` | **`pass`**, 7 owned paths, satisfied by this record at `7662672`. The note "names `6f498c4`, but … changed after it" shows that the round-1 head is correctly voided |
+| B | `--pr 23` | `missing`: the PR-0023 record names no commit of this PR |
+| C | The last Verdict row rewritten to `FAIL` | `missing`: verdict FAIL is not accepted |
+| D | The record without this round, as committed on main | `missing`: `6f498c4` is voided by `eslint.config.mjs`, `90-audit-ddl-guard.sql` and `lint-migrations.ts` |
+| E | A scratch commit on the head appending a line to `90-audit-ddl-guard.sql` | `missing`: "`90-audit-ddl-guard.sql` changed after it" |
+| F | A scratch commit on the head changing `apps/api/src/platform/health/checks/audit-partitions.ts` (unowned) | `pass` (PR24-SEC-04 is unchanged) |
+| L | A scratch evidence-only commit on the head adding a file under `docs/05-quality/` | **`pass`**: a lane-B evidence commit keeps this record valid |
+| M | A scratch main commit touching only `tools/quality/required-suites.json` (owned, outside this net change), merged into the head; `--base` = that commit | **`pass`** |
+| N | A scratch main commit touching `eslint.config.mjs`, merged into the head; `--base` = that commit | `missing`: "`eslint.config.mjs` changed after it". This is the owned-overlap trap of §R2.7 |
+
+**State of main at hand-off** (re-fetched; main is `b06fa9f`, and the PR branch is still `7662672`):
+
+- PR #28 (W0-ACT-1) merged as `ab42cc6`, so **D-ORCH-034 now applies to this PR**. Per D-ORCH-035, its evidence commit waits for the devops staleness and scrub PR (PR28-SEC-02).
+- `git diff --name-only ccc1082 origin/main` shares **no path at all** with this PR's net change, and `git merge-tree --write-tree 7662672 origin/main` is clean. A merge of today's main into the branch therefore keeps this record valid (case M class). Repeat the overlap check before each merge of main; the devops PR touches `tools/quality/**` only.
+- Code review round 2 (`f56b12f`) is APPROVED_WITH_NITS:
+  - R2-n1 agrees with §R2.5: the `sql_drop` branch also refuses dropping table, view, matview, index and function squats, so those need break-glass.
+  - R2-n3 is the self-exception residual of §R2.5.
+  - Its ruling "the migrator can no longer create a squat" is qualified by PR24-SEC-10 (the CIC leftover).
+
+### R2.9 Routing (round 2)
+
+| ID | Severity | Owner | Due |
+|---|---|---|---|
+| PR24-SEC-10 | LOW | principal-architect (data-model §5.2 stated limit); TASK-090 (runbook: rename-away, break-glass, `evtenabled` re-check); TASK-033 (integration case) | TASK-033 / TASK-090 |
+| PR24-SEC-11 | INFO | TASK-024 (rule 11, with the setter-key half) | TASK-024 |
+| PR #20 union | — | whichever of PR #20 / PR #24 merges second | that merge |
+| Overlap round | — | orchestrator: a merge-only security round if PR #20, #26 or #27 merges first | before PR #24 merges |
+| TASK-116 note | — | tripwire asserts both event triggers' `evtfoid` = `platform.audit_ddl_guard()` by name (§R2.5 residual) | TASK-116 |
+
+| Field | Value |
+|---|---|
+| Head | 766267223e2adba6e29c14d5e34c9c86dec3128c |
+| Scope | Delta `6f498c4..7662672` (four fix commits plus two normal merges of main). The net change is `ccc1082..7662672` (94 paths). Owned paths changed after round 1: `eslint.config.mjs` (merge only, blob `b782cfc` = `merge-tree`), `prisma/bootstrap/90-audit-ddl-guard.sql` (`9aab9aa`), `tools/db/lint-migrations.ts` (`56853be`) |
+| Findings | 0 Critical, 0 High, 0 Medium. Closed: PR24-SEC-01 (C1), 02, 03. New: PR24-SEC-10 LOW (CIC leftover; predates this round; no guard-side fix), PR24-SEC-11 INFO. Still open and routed: 04 (TASK-015), 05 (TASK-024), 06 (TASK-015), 07 (TASK-090), 08 (b), 09 (sink union) |
+| Rule-12 approval | **Granted:** `prisma/bootstrap/90-audit-ddl-guard.sql` blob `9aab9aaab73fcb53e3f8a5e835d7d451af606be3`; `prisma/bootstrap/10-audit.sql` blob `c3d4db9f3125d4915c0ff9d1ce1132d0e8e0e713` (unchanged since round 1) |
+| Conditions | C1 met; C2 met by this round. No new merge condition. Process items (§R2.7): a merge-only round if an owned-overlap PR merges first; the PR #20 union for the second merger; D-ORCH-034 lane-B evidence, now due because PR #28 has merged, after the D-ORCH-035 scrub PR (an evidence-only `docs/**` commit, or a merge of main with no owned overlap, keeps this record valid) |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open at head `766267223e2adba6e29c14d5e34c9c86dec3128c`. The guard's post-state invariant closes every side-effect squat probed on PostgreSQL 18.6, with a round-1-blob mutation control. Readiness resists both operator plants, and rule 11 no longer trusts unexecuted DO-body RESETs. The rule-12 approval of both bootstrap audit files is confirmed by blob SHA. |
