@@ -159,8 +159,8 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-011 | M0 | Must | US-079 | platform · ADR-0009 §Optimistic locking (`version`, conditional UPDATE → 409/412); ADR-0016 §6 | TASK-100 | – | Planned |
 | REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Planned |
 | REQ-RLS-013 | M0 | Must | US-080 | prisma/ · ADR-0005 §Guest-capable tables (null `org_id`, `ck_<t>__owner`, guest claim policy); data-model §3.10 | TASK-051 | – | Planned |
-| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | Planned |
-| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | Planned |
+| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
+| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
 | REQ-DATA-003 | M0 | Must | US-050 | prisma/ (seed) · data-model §9 (operator org with 8 role users, demo organisations) | TASK-089 | – | Planned |
 | REQ-DATA-004 | M0 | Must | US-051 | admin-settings + prisma/ · data-model §3.6 countries (ISO 3166-1, names en/es/fr); §9 | TASK-026 | – | Planned |
 | REQ-DATA-005 | M0 | Must | US-051 | admin-settings · data-model §3.6 countries (`shipping_enabled` launch set, D-007) | TASK-026 | – | Planned |
