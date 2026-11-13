@@ -1,7 +1,8 @@
 /**
  * Route/document drift check (US-034 AT-US-034-01/02, US-035 AT-US-035-05; REQ-API-002/015; api/README.md §15, the
  * TASK-017 part): walks the mounted Express 5 routers, compares them with the contract and the implemented-operations
- * ledger, and checks every documented operation for examples, error codes, a permission, its operationId and sunset.
+ * ledger, and checks every documented operation for examples, error codes, a permission, its operationId, its
+ * traceability extensions (rule 7) and sunset.
  * Pure apart from `readLedger`. TASK-020 adds the defineRoute metadata comparison (x-audit, x-idempotency, Joi parity).
  */
 import { readFile } from 'node:fs/promises';
@@ -23,7 +24,8 @@ export type DriftRule =
   | 'missing-permission'
   | 'operation-id'
   | 'deprecated-without-sunset'
-  | 'sunset-passed';
+  | 'sunset-passed'
+  | 'missing-traceability';
 
 export interface DriftFinding {
   readonly rule: DriftRule;
@@ -39,6 +41,18 @@ export interface Mount {
   /** Mount prefix of the router: `''` for the root (health), `/api/v1` for the module routers. */
   readonly prefix: string;
   readonly router: unknown;
+}
+
+/**
+ * How path-mounted routers are resolved. Express 5 layers keep no mount path, so a router mounted under a path is
+ * resolved only when its layer matches one of `mountPaths` literally (probed with the layer's own matcher); any other
+ * path-mounted layer is reported as unrecognised.
+ */
+export interface WalkOptions {
+  /** Full literal mount paths from the walk root, e.g. `/api/v1` and `/api/docs`. */
+  readonly mountPaths?: readonly string[];
+  /** Full mount paths whose routers are deliberately not compared with the contract (api/README.md §15: `/api/docs`). */
+  readonly excluded?: readonly string[];
 }
 
 export interface MountedRoute {
@@ -57,7 +71,7 @@ export interface DriftInput {
   readonly mounted: readonly MountedRoute[];
   /** operationIds from the ledger. */
   readonly implemented: readonly string[];
-  /** Reference time for `sunset-passed`. */
+  /** Reference time for `sunset-passed`; defaults to the real clock (the contract test on `main` runs on it). */
   readonly now?: Date;
 }
 
@@ -67,6 +81,10 @@ const OPERATION_ID = /^[a-z][a-zA-Z0-9]{0,127}$/;
 /** Express 5 path syntax the walker cannot compare: optional groups, wildcards, regexp fragments. */
 const UNSUPPORTED_EXPRESS_SYNTAX = /[{}*()?+[\]\\]/;
 const ACCESS_KEYWORDS = new Set(['public', 'authenticated']);
+/** REQUIREMENTS.md IDs (`REQ-AUTH-001`); milestones of the roadmap (M0-M5); MoSCoW of a contract operation. */
+const REQUIREMENT_ID = /^REQ-[A-Z0-9]{2,12}-\d{3}$/;
+const MILESTONE = /^M[0-5]$/;
+const MOSCOW = new Set(['Must', 'Should', 'Could']);
 
 /** `:param` and `{param}` both become `{}` (api/README.md §15 normalisation). */
 export function normalisePath(path: string): string {
@@ -98,7 +116,39 @@ function routeLayer(prefix: string, route: Readonly<Record<string, unknown>>): M
   return names.map((name) => ({ method: name.toUpperCase(), path: full, key: routeKey(name, full) }));
 }
 
-function walk(router: unknown, prefix: string, depth: number, out: MountedRoute[]): void {
+/** A path segment no literal mount path contains: a layer that also matches it has a parameter or wildcard there. */
+const PROBE_SEGMENT = '__drift_probe__';
+
+function layerMatches(layer: Readonly<Record<string, unknown>>, path: string): boolean {
+  const { match } = layer;
+  if (typeof match !== 'function') return false;
+  try {
+    return (match as (path: string) => unknown).call(layer, path) === true;
+  } catch {
+    return false; // A matcher that throws (undecodable parameter) does not match.
+  }
+}
+
+/**
+ * The mount path of a router layer mounted under a path, relative to `prefix`, when the layer matches one of the
+ * candidate paths literally: it matches the candidate as a whole (`layer.path` equals it) and matches no variant with
+ * any one segment replaced by a probe segment (so `/api/:version` or `/*rest` is never taken for `/api/v1`).
+ */
+function resolveMountPath(layer: Readonly<Record<string, unknown>>, prefix: string, mountPaths: readonly string[]): string | undefined {
+  for (const full of mountPaths) {
+    if (prefix !== '' && !full.startsWith(`${prefix}/`)) continue;
+    const relative = full.slice(prefix.length);
+    if (!layerMatches(layer, relative) || layer.path !== relative) continue;
+    const segments = relative.split('/');
+    const literal = segments.every(
+      (segment, index) => segment === '' || !layerMatches(layer, segments.map((s, i) => (i === index ? PROBE_SEGMENT : s)).join('/')),
+    );
+    if (literal) return relative;
+  }
+  return undefined;
+}
+
+function walk(router: unknown, prefix: string, depth: number, out: MountedRoute[], options: WalkOptions): void {
   const stack = isRecord(router) || typeof router === 'function' ? (router as { stack?: unknown }).stack : undefined;
   if (!Array.isArray(stack)) {
     out.push(unrecognised(prefix || '/', 'mounted value is not an Express router (no stack)'));
@@ -119,20 +169,35 @@ function walk(router: unknown, prefix: string, depth: number, out: MountedRoute[
     }
     const handle = layer.handle;
     const isRouter = typeof handle === 'function' && Array.isArray((handle as { stack?: unknown }).stack);
-    if (!isRouter) continue; // Middleware (`router.use(fn)`) serves no route of its own.
-    // Express 5 layers do not keep their mount path; only a router mounted at `/` (no path) can be resolved.
-    if (layer.slash === true) walk(handle, prefix, depth + 1, out);
-    else out.push(unrecognised(prefix || '/', `nested router "${String(layer.name)}" mounted under a path`));
+    if (layer.slash === true) {
+      // Mounted without a path: a router is recursed; middleware (`router.use(fn)`) serves no route of its own.
+      if (isRouter) walk(handle, prefix, depth + 1, out, options);
+      continue;
+    }
+    if (!isRouter) {
+      // `router.use('/webhooks/x', handler)` answers requests under that path: never skipped (PR #21 R1-M1).
+      out.push(unrecognised(prefix || '/', `middleware "${String(layer.name)}" mounted under a path`));
+      continue;
+    }
+    const mountPath = resolveMountPath(layer, prefix, options.mountPaths ?? []);
+    if (mountPath === undefined) {
+      out.push(unrecognised(prefix || '/', `nested router "${String(layer.name)}" mounted under a path`));
+      continue;
+    }
+    const full = joinPath(prefix, mountPath);
+    if (!(options.excluded ?? []).includes(full)) walk(handle, full, depth + 1, out, options);
   }
 }
 
 /**
  * Every route the routers serve, with the full path. `HEAD` implied by `GET` is not listed (Express answers it from
- * the GET route); an explicit `router.head()` is. Layers the walker cannot resolve are returned with `unrecognised`.
+ * the GET route); an explicit `router.head()` is. Layers the walker cannot resolve are returned with `unrecognised`:
+ * a router or a handler mounted under a path that is not one of `options.mountPaths`, arrays, RegExps, `all()` and
+ * optional/wildcard paths. Middleware mounted without a path (`use(fn)`) is skipped by design: it serves no route.
  */
-export function listMountedRoutes(mounts: readonly Mount[]): MountedRoute[] {
+export function listMountedRoutes(mounts: readonly Mount[], options: WalkOptions = {}): MountedRoute[] {
   const out: MountedRoute[] = [];
-  for (const { prefix, router } of mounts) walk(router, prefix, 0, out);
+  for (const { prefix, router } of mounts) walk(router, prefix, 0, out, options);
   return out;
 }
 
@@ -179,6 +244,22 @@ function permissionProblem(operation: OperationObject): string | undefined {
   return undefined;
 }
 
+/** api/README.md §15 rule 7 (REQ-API-002): `x-requirements`, `x-milestone` and `x-moscow` on every operation. */
+function traceabilityProblems(operation: OperationObject): string[] {
+  const problems: string[] = [];
+  const requirements = operation['x-requirements'];
+  if (!Array.isArray(requirements) || requirements.length === 0) problems.push('no non-empty x-requirements');
+  else {
+    const invalid = requirements.filter((id) => typeof id !== 'string' || !REQUIREMENT_ID.test(id));
+    if (invalid.length > 0) problems.push(`x-requirements entries are not REQ IDs: ${invalid.map(String).join(', ')}`);
+  }
+  const milestone = operation['x-milestone'];
+  if (typeof milestone !== 'string' || !MILESTONE.test(milestone)) problems.push(`x-milestone ${String(milestone)} is not M0-M5`);
+  const moscow = operation['x-moscow'];
+  if (typeof moscow !== 'string' || !MOSCOW.has(moscow)) problems.push(`x-moscow ${String(moscow)} is not Must, Should or Could`);
+  return problems;
+}
+
 function sunsetTime(operation: OperationObject): number | undefined {
   const sunset = operation['x-sunset'];
   const value = sunset instanceof Date ? sunset.getTime() : typeof sunset === 'string' ? Date.parse(sunset) : Number.NaN;
@@ -207,6 +288,7 @@ function operationFindings(op: ContractOperation, seenIds: ReadonlyMap<string, n
   if (operation.deprecated === true && sunsetTime(operation) === undefined) {
     out.push(finding('deprecated-without-sunset', op, 'deprecated without a valid x-sunset date'));
   }
+  for (const problem of traceabilityProblems(operation)) out.push(finding('missing-traceability', op, problem));
   return out;
 }
 

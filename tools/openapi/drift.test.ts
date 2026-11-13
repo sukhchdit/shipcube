@@ -1,10 +1,11 @@
 /**
  * Route/document drift (US-034 AT-US-034-01, AT-US-034-02; US-035 AT-US-035-05; REQ-API-002/015; api/README.md §15):
- * the real routers (health at the root, the module registry under /api/v1) against the real contract and the ledger,
- * then one seeded defect per rule on a structuredClone of the document or a small fixture router.
+ * the real composed app (createApp with the health router, the module registry under /api/v1 and the docs mount) against
+ * the real contract and the ledger, then one seeded defect per rule on a structuredClone of the document or a small
+ * fixture router.
  */
 import { beforeAll, describe, expect, it } from '@jest/globals';
-import { Router } from 'express';
+import express, { Router } from 'express';
 
 import { type ApiMounts, loadApiMounts } from './api-mounts.js';
 import { type ContractOperation, listOperations, loadContract, type OpenApiDocument, serverBasePath } from './contract.js';
@@ -64,7 +65,7 @@ describe('openapi route/document drift', () => {
   const drift = (overrides: { doc?: OpenApiDocument; mounts?: Mount[]; implemented?: string[]; at?: Date } = {}): DriftFinding[] =>
     checkContractDrift({
       doc: overrides.doc ?? doc,
-      mounted: listMountedRoutes(overrides.mounts ?? realMounts()),
+      mounted: listMountedRoutes(overrides.mounts ?? realMounts(), api.walk),
       implemented: overrides.implemented ?? ledger,
       now: overrides.at ?? now,
     });
@@ -78,20 +79,64 @@ describe('openapi route/document drift', () => {
     );
   };
 
-  it('[AT-US-034-01] every mounted route is documented and every ledger operation is implemented', () => {
-    expect(drift().map(formatFinding)).toEqual([]);
+  it('[AT-US-034-01] every mounted route is documented and every ledger operation is implemented (real clock)', () => {
+    // The real clock (PR #21 R1-m1): a mounted deprecated operation whose x-sunset has passed fails this test on main.
+    expect(drift({ at: new Date() }).map(formatFinding)).toEqual([]);
   });
 
-  it('mounts the module routers under the base path the contract serves them on', () => {
+  it('walks the composed app: module routers under the base path the contract serves them on, the docs mount excluded', () => {
     expect(api.apiPrefix).toBe(serverBasePath(doc.servers));
-    expect(api.mounts.slice(1).every((mount) => mount.prefix === api.apiPrefix)).toBe(true);
+    expect(api.walk).toEqual({ mountPaths: [api.apiPrefix, api.docsPath], excluded: [api.docsPath] });
+    expect(api.mounts).toHaveLength(1);
+    // The exclusion is explicit: without it, the docs routes are walked and reported as undocumented.
+    const unexcluded = listMountedRoutes(realMounts(), { mountPaths: api.walk.mountPaths });
+    expect(unexcluded.map((route) => route.key)).toEqual(expect.arrayContaining(['GET /api/docs', 'GET /api/docs/openapi.yaml']));
+    expect(listMountedRoutes(realMounts(), api.walk).some((route) => route.path.startsWith(api.docsPath))).toBe(false);
   });
 
-  it('lists the mounted health routes (GET only, the implied HEAD is not a route)', () => {
-    expect(listMountedRoutes(realMounts()).map((route) => route.key)).toEqual(
-      expect.arrayContaining(['GET /health/live', 'GET /health/ready']),
-    );
-    expect(listMountedRoutes(realMounts()).some((route) => route.method === 'HEAD')).toBe(false);
+  it('lists the mounted health routes (GET only, the implied HEAD is not a route) and nothing it cannot resolve', () => {
+    const routes = listMountedRoutes(realMounts(), api.walk);
+    expect(routes.map((route) => route.key)).toEqual(expect.arrayContaining(['GET /health/live', 'GET /health/ready']));
+    expect(routes.some((route) => route.method === 'HEAD')).toBe(false);
+    expect(routes.filter((route) => route.unrecognised !== undefined)).toEqual([]);
+  });
+
+  it('sees a route mounted directly on an app, outside any router (PR #21 R1-m2)', () => {
+    const app = express();
+    app.use(express.json());
+    app.get('/auth/callback', (_req, res) => {
+      res.end();
+    });
+    const routes = listMountedRoutes([{ prefix: '', router: app.router }], api.walk);
+    expect(routes.map((route) => route.key)).toEqual(['GET /auth/callback']);
+    expect(findingsOf(checkContractDrift({ doc, mounted: routes, implemented: [] }), 'undocumented-route')).toEqual([
+      { rule: 'undocumented-route', method: 'GET', path: '/auth/callback', message: 'mounted but not in openapi.yaml' },
+    ]);
+  });
+
+  it('resolves a router mounted under a known literal path only, and skips only the excluded mount', () => {
+    const inner = Router();
+    inner.get('/things', (_req, res) => {
+      res.end();
+    });
+    const literal = Router();
+    literal.use('/api/v1', inner);
+    const options = { mountPaths: ['/api/v1', '/api/docs'], excluded: ['/api/docs'] };
+    expect(listMountedRoutes([{ prefix: '', router: literal }], options).map((route) => route.key)).toEqual(['GET /api/v1/things']);
+
+    const parameterised = Router();
+    parameterised.use('/api/:version', inner); // matches /api/v1, but is not the literal mount path
+    const wildcard = Router();
+    wildcard.use('/*rest', inner);
+    for (const router of [parameterised, wildcard]) {
+      expect(listMountedRoutes([{ prefix: '', router }], options).map((route) => route.unrecognised)).toEqual([
+        'nested router "router" mounted under a path',
+      ]);
+    }
+
+    const excluded = Router();
+    excluded.use('/api/docs', inner);
+    expect(listMountedRoutes([{ prefix: '', router: excluded }], options)).toEqual([]);
   });
 
   it('[AT-US-034-02-1] a mounted route missing from the document is named with its method and path', () => {
@@ -221,8 +266,12 @@ describe('openapi route/document drift', () => {
       res.end();
     });
     outer.use((_req, _res, next) => {
-      next();
+      next(); // root middleware: serves no route of its own, skipped by design
     });
+    const stripeWebhook: express.RequestHandler = (_req, res) => {
+      res.end();
+    };
+    outer.use('/webhooks/stripe', stripeWebhook); // a handler under a path answers requests: reported (R1-M1)
     const routes = listMountedRoutes([
       { prefix: '/x', router: outer },
       { prefix: '/y', router: { notARouter: true } },
@@ -232,9 +281,28 @@ describe('openapi route/document drift', () => {
       ['/x', 'nested router "router" mounted under a path'],
       ['/x/any', 'router.all() route matches every method'],
       ['/x/files{/:name}', 'route path uses optional/wildcard/regexp syntax'],
+      ['/x', 'middleware "stripeWebhook" mounted under a path'],
       ['/y', 'mounted value is not an Express router (no stack)'],
     ]);
-    expect(findingsOf(checkContractDrift({ doc, mounted: routes, implemented: [] }), 'unrecognised-route')).toHaveLength(4);
+    expect(findingsOf(checkContractDrift({ doc, mounted: routes, implemented: [] }), 'unrecognised-route')).toHaveLength(5);
+  });
+
+  it('[api/README.md §15 rule 7] an operation lacking x-requirements, x-milestone or x-moscow is named', () => {
+    const cases: [string, unknown, string][] = [
+      ['x-requirements', undefined, 'no non-empty x-requirements'],
+      ['x-requirements', [], 'no non-empty x-requirements'],
+      ['x-requirements', ['REQ-QUOTE-001', 'US-001'], 'x-requirements entries are not REQ IDs: US-001'],
+      ['x-milestone', undefined, 'x-milestone undefined is not M0-M5'],
+      ['x-milestone', 'M9', 'x-milestone M9 is not M0-M5'],
+      ['x-moscow', "Won't", "x-moscow Won't is not Must, Should or Could"],
+      ['x-moscow', undefined, 'x-moscow undefined is not Must, Should or Could'],
+    ];
+    for (const [key, value, message] of cases) {
+      const edited = withOperation(doc, 'createQuote', (op) => {
+        op[key] = value;
+      });
+      expectFinding(drift({ doc: edited }), 'missing-traceability', 'createQuote', message);
+    }
   });
 
   it('normalises Express and OpenAPI parameters to the same key', () => {
