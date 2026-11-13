@@ -85,16 +85,45 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       indexOf(/npm ci --ignore-scripts/),
       indexOf(/npm run deps:rebuild/),
       indexOf(/npm run lint/),
+      indexOf(/^Lint must not mutate the tree/),
       indexOf(/npm run format:check/),
       indexOf(/npm run typecheck/),
       indexOf(/npm run test:unit$/m),
       indexOf(/npm run build/),
-      indexOf(/GATE_CHECK_PORCELAIN/),
+      indexOf(/^Build must not mutate the tree/),
     ];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(order[0]).toBe(2); // checkout, setup-node, then the in-lane classifier (review m5 (a): no separate job)
     expect(scanOrder).toEqual([...scanOrder].sort((a, b) => a - b));
     expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'ci-gate']);
+  });
+
+  it('[PR4-SEC-13] a porcelain gate runs straight after Lint and before Type-check, with the post-build gate command', () => {
+    const lint = indexOf(/npm run lint/);
+    const afterLint = indexOf(/^Lint must not mutate the tree/);
+    const afterBuild = indexOf(/^Build must not mutate the tree/);
+    expect(afterLint).toBe(lint + 1);
+    expect(afterLint).toBeLessThan(indexOf(/npm run typecheck/));
+    expect(str(steps[afterLint]?.run)).toBe('node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"');
+    expect(str(steps[afterLint]?.run)).toBe(str(steps[afterBuild]?.run));
+    expect(str(steps[afterLint]?.if)).toBe("env.CODE == 'true'");
+    // Mutation: dropping the post-lint step leaves the post-build gate alone, which required-gates reports.
+    const dropped = ciText.replace(/ {6}- name: Lint must not mutate the tree[^\n]*\n(?: {8}[^\n]*\n)+/u, '');
+    expect(dropped).not.toContain('Lint must not mutate the tree');
+    expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toContain(
+      'ci.yml job fast-lane must keep the porcelain after lint gate step',
+    );
+  });
+
+  it('[R1-m6] the scans job runs the openapi-breaking gate last, unconditionally, from the base-ref tool set', () => {
+    const index = scanIndexOf(/GATE_OPENAPI_BREAKING/);
+    expect(index).toBe(scanSteps.length - 1);
+    expect(scanSteps[index]?.if).toBeUndefined();
+    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking; do/u);
+    const dropped = ciText.replace(/--image "\$OASDIFF_IMAGE"/u, '');
+    expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toContain(
+      'ci.yml job scans must keep the openapi-breaking gate step',
+    );
   });
 
   it('AT-US-005-01 / PR10-SEC-02: licences, registry signatures and the advisory audit run right after the install, before deps:rebuild and any head code', () => {

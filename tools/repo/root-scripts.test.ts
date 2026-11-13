@@ -64,6 +64,13 @@ describe('root scripts (US-001, REQ-PLAT-003)', () => {
     expect(rootPkg.scripts[name]).toEqual(expect.any(String));
   });
 
+  it('[PR4-SEC-13] root typegen runs the React Router CLI in apps/web and apps/admin, never workspace typegen scripts', () => {
+    const typegen = rootPkg.scripts['typegen'] ?? '';
+    expect(typegen).toBe('npm -w apps/web -w apps/admin exec --no -- react-router typegen');
+    expect(typegen).not.toMatch(/--workspaces\b|\bnpm run\b|\s-ws\b|--if-present/u);
+    expect(rootPkg.scripts['typecheck']).toBe('npm run typegen && tsc -b');
+  });
+
   const typecheck = (source: string) => {
     // `npm run typegen && tsc -b`: React Router route types are generated first (TASK-004); the fixture runs the tsc part.
     const tscCommand = (rootPkg.scripts['typecheck'] ?? '').split('&&').at(-1)?.trim() ?? '';

@@ -367,6 +367,36 @@ describe('CODEOWNERS (PR5-SEC-04, PR2-SEC-08)', () => {
     expect(ownedPaths([path], patterns)).toEqual([path]);
   });
 
+  it('[PR24-SEC-04] the O4 oracles outside the bootstrap SQL and the Prisma/Vite configs are security-owned', () => {
+    const paths = [
+      'apps/api/src/platform/health/checks/audit-partitions.ts',
+      'apps/api/src/platform/health/checks/audit-chain.ts',
+      'apps/api/src/platform/db/catalog-reader.ts',
+      'tools/db/table-classes/audit.json',
+      'tools/db/shadow-init.ts',
+      'tools/db/sql-text.ts',
+      'prisma/sql/grants.manifest',
+      'prisma/tests/audit/x.int.test.ts',
+      'prisma/schema.prisma',
+      'prisma.config.ts',
+      'apps/web/vite.config.ts',
+      'apps/admin/vite.config.ts',
+    ];
+    expect(ownedPaths(paths, patterns)).toEqual(paths);
+    expect(ownedPaths(['apps/web/src/vite.config.ts', 'apps/api/src/modules/x.ts', 'prisma.config.ts.bak'], patterns)).toEqual([]);
+  });
+
+  it('[PR24-SEC-04] a PR that changes a health check or the C7 oracle without a record fails', () => {
+    const owners = readFileSync(join(repoRoot, '.github', 'CODEOWNERS'), 'utf8');
+    for (const path of ['apps/api/src/platform/health/checks/audit-partitions.ts', 'tools/db/table-classes/audit.json']) {
+      const repo = new Repo({ '.github/CODEOWNERS': owners });
+      repo.commit({ [path]: 'changed\n' });
+      const result = repo.check();
+      expect([path, result.status]).toEqual([path, 1]);
+      expect(result.stdout).toContain(path);
+    }
+  });
+
   it('ordinary source files are not owned', () => {
     expect(ownedPaths(['apps/api/src/server.ts', 'packages/config/src/schema.ts', 'apps/web/package.json'], patterns)).toEqual([]);
   });

@@ -42,6 +42,16 @@
 /tools/db/lint-migrations.ts            @sukhchdit
 /tools/authz/                           @sukhchdit
 /tools/db/audit-ddl-reviewers.json      @sukhchdit
+# The O4 oracles and assertions outside the bootstrap SQL (PR24-SEC-04): the whole prisma tree (schema, sql/grants
+# manifest, audit/catalog/health tests, seeds), every tools/db helper (shadow-init, sql-text tokenizer, table classes),
+# the Prisma config that loads at every deps:rebuild, and the API platform layer (health checks, catalog reader, db).
+# The narrower lines above stay so that folding them later cannot drop coverage silently.
+/prisma/                                @sukhchdit
+/tools/db/                              @sukhchdit
+/prisma.config.ts                       @sukhchdit
+/apps/api/src/platform/                 @sukhchdit
+# Vite configs run in the build and in typegen before any later gate (PR4-SEC-13 item 3).
+/apps/*/vite.config.ts                  @sukhchdit
 
 # Authorisation, audit and the configuration key register
 /packages/authz/                        @sukhchdit

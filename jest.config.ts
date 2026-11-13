@@ -61,7 +61,10 @@ const config: Config = {
     'prisma/seed/**/*.{ts,tsx}',
     '!**/*.test.{ts,tsx}',
     '!**/*.d.ts',
-    '!**/*.generated.ts',
+    // Generator outputs by exact path, never by suffix (PR21-SEC-04): a hand-written `*.generated.ts` stays measured.
+    // tools/repo/coverage-scope.test.ts keeps this list equal to the tracked `*.generated.ts` / `*.gen.ts` files.
+    // tools/api/gen-module-registry.ts output (the API module registry).
+    '!apps/api/src/modules/index.generated.ts',
     // openapi-typescript output (types only, TASK-017): v8 would count its ~11.5k type lines as uncovered.
     '!packages/shared/src/api/types.gen.ts',
     // Test helpers beside sources (the module `tests/` layer, fixtures) and generated output.

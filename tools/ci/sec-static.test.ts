@@ -117,6 +117,31 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     expect(gitleaks).not.toContain('PR1-SEC-11 OpenAPI');
   });
 
+  it('[PR25-SEC-01] lane A gitleaks neither mounts nor references the baseline, a .gitleaksignore or an ignore-path flag', () => {
+    const start = ciText.indexOf('- name: Gitleaks (PR commit range)');
+    expect(start).toBeGreaterThan(-1);
+    const next = ciText.indexOf('- name:', start + 1);
+    const step = ciText.slice(start, next === -1 ? undefined : next);
+    expect(step).toContain('"$GITLEAKS_IMAGE" git /repo');
+    const forbidden = /gitleaksignore|gitleaks-baseline|--gitleaks-ignore-path|\s-i[\s=]/u;
+    expect(step).not.toMatch(forbidden);
+    expect(step.match(/-v "/gu)).toHaveLength(2);
+    // Mutation: a step that mounts the baseline is caught by the same pin.
+    const mutated = step.replace('--ignore-gitleaks-allow', '--ignore-gitleaks-allow --gitleaks-ignore-path /b/.gitleaksignore');
+    expect(mutated).toMatch(forbidden);
+  });
+
+  it('[PR25-SEC-01] the gitleaks-full baseline holds exactly the 17 recorded fingerprints and nothing else', () => {
+    const lines = read('tools', 'quality', 'gitleaks-baseline.txt')
+      .split(/\r?\n/u)
+      .filter((line) => line !== '' && !line.startsWith('#'));
+    expect(lines).toHaveLength(17);
+    for (const line of lines) expect(line).toMatch(/^[0-9a-f]{40}:[^:\s]+:generic-api-key:[1-9]\d*$/u);
+    expect(new Set(lines).size).toBe(17);
+    expect([...new Set(lines.map((line) => line.slice(0, 7)))].sort()).toEqual(['63accea', 'b8f805f', 'd5cdfa2']);
+    expect(lines.filter((line) => line.includes(':docs/03-architecture/api/openapi.yaml:'))).toHaveLength(15);
+  });
+
   it('D-ORCH-027: Dependabot ignores TypeScript semver-major (ADR-0001 pin ~6.0.3, TS 7 deferred) and keeps the cooldown', () => {
     const dependabot = read('.github', 'dependabot.yml');
     expect(dependabot).toMatch(/- dependency-name: typescript\n\s+update-types: \['version-update:semver-major'\]/);

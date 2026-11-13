@@ -327,11 +327,15 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
   });
 
   it('[PR8-SEC-13] an uncovered path, a commented line or a line without an owner fails coverage', () => {
-    const text = REQUIRED_CODEOWNED_PATHS.filter((path) => path !== 'prisma/migrations/')
+    // `/prisma/` (PR24-SEC-04) would cover prisma/migrations/, so both lines are dropped and both must be reported.
+    const text = REQUIRED_CODEOWNED_PATHS.filter((path) => path !== 'prisma/migrations/' && path !== 'prisma/')
       .map((path) => `/${path} @owner`)
-      .concat(['# /prisma/migrations/ @owner', '/prisma/migrations/'])
+      .concat(['# /prisma/migrations/ @owner', '/prisma/migrations/', '# /prisma/ @owner', '/prisma/'])
       .join('\n');
-    expect(checkCodeowners(text).map((f) => f.message)).toEqual([expect.stringContaining('prisma/migrations/')]);
+    expect(checkCodeowners(text).map((f) => f.message)).toEqual([
+      expect.stringContaining('prisma/migrations/'),
+      expect.stringContaining('prisma/ ('),
+    ]);
   });
 
   it('a parent folder or a /** pattern covers a nested required path', () => {
@@ -354,6 +358,8 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
       '/tsconfig.base.json @o',
       '/commitlint.config.mjs @o',
       '/.node-version @o',
+      '/prisma.config.ts @o',
+      '/apps/ @o',
       '/CLAUDE.md @o',
       '/.claude/ @o',
     ].join('\n');
@@ -418,6 +424,31 @@ describe('CODEOWNERS: tools/quality (PR #23 R1-M1, PR23-SEC-01)', () => {
     expect(checkCodeowners(`${without}\n/tools/qualitys/ @sukhchdit\n`).map((f) => f.message)).toEqual([
       expect.stringContaining('tools/quality/'),
     ]);
+  });
+});
+
+describe('CODEOWNERS: O4 oracles and pre-gate configs (PR24-SEC-04, PR4-SEC-13 item 3)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const lineFor = (path: string): RegExp => new RegExp(`^/${path.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\s+@\\S+$`, 'mu');
+  const added = ['prisma/', 'tools/db/', 'prisma.config.ts', 'apps/api/src/platform/', 'apps/*/vite.config.ts'];
+
+  it.each(added)('[PR24-SEC-04] %s is required and the repository CODEOWNERS owns it', (path) => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain(path);
+    expect(repositoryText()).toMatch(lineFor(path));
+  });
+
+  it.each(added)('[PR24-SEC-04] mutation: deleting, commenting out or un-owning the %s line yields one finding for it', (path) => {
+    for (const replacement of ['', `# /${path} @sukhchdit`, `/${path}`]) {
+      const mutated = repositoryText().replace(lineFor(path), replacement);
+      expect(mutated).not.toMatch(lineFor(path));
+      expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
+    }
+  });
+
+  it('[PR24-SEC-04] the narrower prisma/tools-db lines are kept, so folding cannot drop coverage silently', () => {
+    for (const path of ['prisma/bootstrap/', 'prisma/migrations/', 'tools/db/lint-migrations.ts', 'tools/db/audit-ddl-reviewers.json']) {
+      expect(repositoryText()).toMatch(lineFor(path));
+    }
   });
 });
 

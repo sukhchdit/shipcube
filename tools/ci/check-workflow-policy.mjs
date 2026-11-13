@@ -43,7 +43,8 @@
  *                         `if:` and exactly its listed `env:`, with no `shell:`/`working-directory:` on the step and no
  *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane` and `scans`
  *                         (PR10-SEC-07, PR17-SEC-03). The base-ref lint fixture step's commands are pinned line by line
- *                         (BASE_LINT_FIXTURES_SCRIPT, an allow-list); the other gates are matched by pattern.
+ *                         (BASE_LINT_FIXTURES_SCRIPT, an allow-list); the other gates are matched by pattern (and by
+ *                         step name where two gates share a command: the post-lint and post-build porcelain gates).
  *   lint-fixture-mode     LINT_FIXTURE_MODE appears nowhere but in the `env:` of ci.yml's base-ref lint fixture step
  *                         (no workflow/job/other-step env, no `run:`/`if:` mention, no $GITHUB_ENV write), so the head
  *                         unit-test run keeps exact semantics (PR2-SEC-08, D-ORCH-018). A tripwire: it finds literal
@@ -213,10 +214,26 @@ export const CI_REQUIRED_GATES = Object.freeze([
     env: { [LINT_FIXTURE_MODE_ENV]: 'no-weakening' },
   },
   { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
-  { job: 'fast-lane', gate: 'porcelain', run: /node "\$GATE_CHECK_PORCELAIN"/, ifs: ["env.CODE == 'true'"] },
+  // Two porcelain gates run the same command, so each is found by its step name too (PR4-SEC-13 item 1).
+  {
+    job: 'fast-lane',
+    gate: 'porcelain after lint',
+    name: /^Lint must not mutate the tree\b/,
+    run: /node "\$GATE_CHECK_PORCELAIN"/,
+    ifs: ["env.CODE == 'true'"],
+  },
+  {
+    job: 'fast-lane',
+    gate: 'porcelain',
+    name: /^Build must not mutate the tree\b/,
+    run: /node "\$GATE_CHECK_PORCELAIN"/,
+    ifs: ["env.CODE == 'true'"],
+  },
   { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [] },
   { job: 'scans', gate: 'semgrep', run: /node "\$GATE_RUN_SEMGREP"/, ifs: [] },
   { job: 'scans', gate: 'security-owned paths record', run: /node "\$GATE_CHECK_SECURITY_OWNED_PATHS"/, ifs: [] },
+  // NFR-MAINT-004, PR #21 R1-m6: the contract against the latest release tag (oasdiff, digest-pinned).
+  { job: 'scans', gate: 'openapi-breaking', run: /node "\$GATE_OPENAPI_BREAKING" .*--image "\$OASDIFF_IMAGE"/, ifs: [] },
 ]);
 
 const GITLEAKS_RUN = /\$\{?GITLEAKS_IMAGE\b|gitleaks\/gitleaks[:@]/;
@@ -754,7 +771,11 @@ export function requiredGateFindings(jobs, workflowDefaults) {
   for (const gate of CI_REQUIRED_GATES) {
     const job = asMap(jobs[gate.job]);
     const steps = job !== undefined && Array.isArray(job.steps) ? job.steps : [];
-    const index = steps.findIndex((node) => gate.run.test((asString(asMap(node)?.run) ?? '').trim()));
+    const index = steps.findIndex(
+      (node) =>
+        (gate.name === undefined || gate.name.test((asString(asMap(node)?.name) ?? '').trim())) &&
+        gate.run.test((asString(asMap(node)?.run) ?? '').trim()),
+    );
     if (index === -1) {
       out.push({
         rule: 'required-gates',
@@ -878,6 +899,13 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   // PR17-SEC-01: a `.swcrc` at any depth could redirect how a suite compiles (the swcrc rule also rejects it).
   '.swcrc',
   '**/.swcrc',
+  // PR24-SEC-04: the O4 oracles and assertions outside the bootstrap SQL; PR4-SEC-13 item 3: configs that run in
+  // deps:rebuild, typegen and the build.
+  'prisma/',
+  'tools/db/',
+  'prisma.config.ts',
+  'apps/api/src/platform/',
+  'apps/*/vite.config.ts',
   'CLAUDE.md',
   '.claude/settings.json',
   '.claude/agents/',
