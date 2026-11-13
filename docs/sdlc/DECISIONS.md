@@ -1432,3 +1432,57 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 ### D-ORCH-025 · 2026-11-13 · sdlc-orchestrator · PR #20 fc1 rulings; TASK-018 dispatched; STATUS edit hygiene
 - **Decision:** (1) All 5 database runtime security events stay at `error` (fail-closed signals that must alert); this supersedes the PR #20 round-1 code-review suggestion of `warn` for drift and `rls_write_rejected`. (2) PR #20 fc1 routings accepted and folded under SHEET-FOLD-2: PR6-SEC client halves + outbound route template → TASK-113; per-carrier PII field lists → TASK-135/139/140/188; `APP_LOG_LEVEL` clamp → TASK-014; coarse-IP emission → first authn emitter (TASK-052+); `security_events_total` counter → US-013 metrics task; Joi custom messages → TASK-020; api/README §13 runtime-events row → api-designer. (3) `refresh_token_reuse.session_id` logged as `[REDACTED]` (fail-closed) until TASK-052 rules whether a session id is a credential. (4) PR #20 round-2 code and security delta reviews dispatched on 9647907; PR #20 merges after PR #21 with the D-ORCH-024 union (plus AppLogger `debug`, `installProcessErrorHandlers`, `CORRELATION_ID_PATTERN` import) and a merge-only security round if owned paths change. (5) TASK-018 (SPK-04 audit write throughput spike) dispatched in the build slot freed by PR #20's fix cycle. (6) Hygiene: orchestrator STATUS edits use row-anchored replacement (find the row by task ID, then edit cells), never a first-match string replace — a non-unique tail string put PR #21's progress into PR #20's row (repaired).
 - **Reversibility:** High.
+
+### D-TASK018-01 · 2026-11-13 · performance-engineer / senior-developer · SPK-04 verdict: FALLBACK + principal-architect amendment request (R-ARCH-04 confirmed)
+- **Decision:** The SPK-04 exit (Δp95 ≤ 15 ms with the per-stream advisory lock + vault inserts at 300 rps) is **not met**. Validity per TEST-STRATEGY §7.10 is INCONCLUSIVE at 300 rps (all six arms) and at 150 rps (both `batched` arms), because the host was shared. The failure mode is structural and showed up in both 300 rps repetitions. The HOT tenant (20 % share = 60 rps on one stream) builds a lock queue (hot lock wait p95 229–603 ms). Queued transactions hold pool connections, so other tenants fail with `SERVICE_UNAVAILABLE` (2 s `maxWait`). In the less disturbed repetition, Δp95 on − off was +1 042 ms and batched − off was +217 ms. At 150 rps both `on` repetitions are valid: Δp95 +22.1 / −2.3 ms (pooled +9.9 ms), Δp99 pooled −45.2 ms. Verdict **FALLBACK**: the multi-row vault variant (SPK-04 §5.2, 3 round trips from lock grant to COMMIT) is specified for TASK-030. The batched variant alone also missed the budget at 60 rps per stream. A **principal-architect ADR-0007 amendment request** is therefore raised before TASK-030 starts, and before TASK-029, which depends on its write path. The architect rules on the levers in SPK-04 §6: (a) a `SELECT … FOR UPDATE` head-row lock instead of the advisory lock, (b) hot-tenant sub-streams, (c) a short audit lock wait that fails fast, (d) a native-Linux re-measure. Integrity held throughout:
+  - 223 118 entries fully recomputed, 0 chain faults;
+  - immutability returns 42501 at both the privilege and trigger layers;
+  - triggers, DDL guard and FORCE RLS intact.
+- **Why:** On this host every statement under the lock costs about 1.5 ms of round trip (SPK-03). Lock hold time is round trips × RTT, and that caps a stream's rate. The sheet's DoD sends a FALLBACK to the architect.
+- **Alternatives:** Declaring GO from the pooled 150 rps `on` numbers was rejected: the target rate is 300 rps, and rep 1 alone fails the budget. Re-running until the host is quiet was rejected inside the S time box. The clean 300 rps A/B is routed to the lane-B `audit-ab` job (TASK-280 / T-QA-06), with lever (a) and/or (d).
+- **Reversibility:** High. No product code changed, and the lane-B re-run revisits the verdict.
+
+### D-TASK018-02 · 2026-11-13 · senior-developer · SPK-04 harness design: real runtime path, harness-only mode switch, file placement
+- **Decision:**
+  1. Traffic runs as `platform_app` through the production `createDatabaseRuntime` / `withTenantTx` (Prisma 7 + adapter-pg, tagged `$queryRaw`/`$executeRaw` on `TenantDb`). The superuser is used only for bootstrap, fixtures, seed and the post-run integrity checks.
+  2. The `off|on|batched` switch exists only in the spike harness (`SPK04_AUDIT`, read at process start). The product's audit-off baseline remains the build-time `-bench` image (ADR-0007 item 4, R-12). There is no runtime flag.
+  3. Audit DDL is the SPK-08 prototype (`spk08/10-audit.sql` and `90-audit-ddl-guard.sql`, reused unchanged) plus `spk04/fixtures/20-spk04-audit-write.sql`, which holds data-model §5.7 verbatim and the `audit_stream_heads` columns. The guard is installed after all audit DDL. No bootstrap file and no migration were added.
+  4. The DB harness lives in `prisma/tests/spikes/spk04/`, following the SPK-03/SPK-08 precedent. That directory is type-checked by `tools/tsconfig.json`, which may import `apps/api/src/platform/db`. Only the k6 script sits at the sheet path `tests/load/spikes/spk04-audit.js`. This avoided any `tsconfig*.json` change: a composite `tests/load` project cannot compile those imports (TS6307).
+  5. JCS is a small, exact RFC 8785 implementation (`canonical.ts`, unit-tested), because only `packages/audit` declares `canonicalize`. No new dependency.
+  6. The sheet's DoD line "throwaway code is not merged" is read the way SPK-03 (TASK-008) and SPK-08 (TASK-012) were read: the spike harness ships test-only under `prisma/tests/spikes/` because it reproduces the committed evidence. It carries an explicit port-then-delete lifecycle (SPK-04 §8). It is not product code and no product path imports it. If review rules otherwise, `server.ts`, `runner.ts` and the fixtures can be dropped from this PR without touching the findings.
+  7. No `-bench` build profile was added (the spike has no product image). PR3-SEC-11 / SEC-TC-18 therefore stays open for the task that first builds the `-bench` image (TASK-280 lane-B `audit-ab`, or TASK-030), which must also add the `APP_ENV ∈ {local, test}` refusal in the `packages/config` guards (ADR-0018 vocabulary).
+- **Why:** The brief requires measuring through the real write path without weakening immutability, the DDL guard or RLS. It also rules out new dependencies and any owned-config churn beyond the lint block of D-TASK018-03.
+- **Alternatives:** Raw `pg` instead of Prisma was rejected because it would understate the per-statement overhead the product pays. Copying the SPK-08 SQL was rejected because the copy would drift. Putting the harness under `tests/load` was rejected because it needs owned tsconfig edits.
+- **Reversibility:** High. The code is throwaway; its lifecycle is in SPK-04 §8.
+
+### D-TASK018-03 · 2026-11-13 · performance-engineer / senior-developer · k6 pin, loopback binding, ESLint block for k6 scripts
+- **Decision:**
+  1. k6 is pinned **by digest only**: `grafana/k6@sha256:5221b620a4f874faff6e32ba597aa667c058391fe4898b1c6f6377f062c6cdec` (k6 v2.2.0, commit 00a9a1b7f5, image created 2026-08-10, so more than 7 days old). The `2.2.0` tag now resolves to a different index digest, so a `tag@digest` pin would mislead.
+  2. The harness replicas bind to `127.0.0.1`. The k6 container reaches them through `host.docker.internal`, which Docker Desktop proxies to host loopback; the runs saw 0 transport errors. `0.0.0.0` was not used.
+  3. One narrow `eslint.config.mjs` block for `tests/load/**/*.js` declares the k6 globals (`__ENV`, `__VU`, `__ITER`, `open`, `console`) and `import-x/core-modules: ['k6/http', 'k6/execution']`. Inline `global` comments are forbidden by the suppression policy. TASK-280 (T-QA-06) reuses the block. `eslint.config.mjs` is a security-owned path, so lane A needs a security record.
+- **Why:** Supply-chain pinning (ADR-0024: k6 via Docker), least exposure on a shared laptop, and zero suppressions.
+- **Alternatives:** A TypeScript k6 script was rejected because it needs k6 types, a new dependency. Binding `0.0.0.0` was rejected because of the network exposure and a firewall prompt.
+- **Reversibility:** High.
+
+### D-TASK018-04 · 2026-11-13 · performance-engineer / senior-developer · SPK-04 measurement method, A-029 re-baseline, routed findings
+- **Decision:**
+  1. **Method.**
+     - Per rate: 2 repetitions × [off, on, batched], in that fixed order.
+     - Each arm: CHECKPOINT first, 20 s warm-up (discarded), 120 s measured.
+     - Δ is taken within a repetition; pooled Δ is the mean of the per-repetition Δ.
+     - The fail-closed VIEW entry is written in a second short transaction before the response, which is the conservative choice.
+     - Op mix: create 35 %, update 20 %, detail 30 %, list 10 %, login_failed 5 %, with a 20 % hot tenant.
+     - Simplifications: the old value in an update is `[REDACTED]`; no RLS on the prototype vault and head tables; Postgres default settings; `SELECT 1` stands in for the login lookup.
+  2. **A-029 re-baseline** on this shared Windows / Docker Desktop host (i9-11950H, 16 logical CPUs, 32 GB). The full mix with audit `on` sustains **150 rps** cleanly, not 300 rps. A clean 300 rps A/B needs a quiet or dedicated host.
+  3. **Routed findings.**
+     - Data-model §5.4 step 3: `'\x' || repeat('00', 32)` is `text` and fails with 42804 against bytea; use `decode(repeat('00', 32), 'hex')`. Routed to principal-architect (text amendment) and to TASK-021/TASK-030.
+     - To TASK-030:
+       - SQL text rules: keep multi-argument `unnest` and `extract` unqualified; put no RETURNING on the CTE insert under RLS; bind arrays instead of `Prisma.join` on `TenantDb`.
+       - A budget of at most 3 round trips under the lock.
+       - An `EXPLAIN` of the batched token SELECT against a vault of ≥ 100k rows. The 150 rps batched arms showed Postgres CPU of 95–114 % that could not be attributed.
+     - Pool coupling (lock waiters exhaust the pool and fail other tenants): routed to TASK-025 and to principal-architect as lever (c).
+     - NFR-AUDIT-005 wording (per-repetition Δ, hot-stream share, VIEW transaction included): routed to principal-architect / product-manager.
+     - Lane-B `audit-ab` re-run before G3: routed to TASK-280.
+- **Why:** Keeps the absolute numbers indicative and the A/B comparison honest on a shared host, and gives every finding an owner.
+- **Alternatives:** Randomised arm order is deferred to TASK-280. The fixed order puts `batched` last against the largest tables; this is noted as a confounder.
+- **Reversibility:** High.
