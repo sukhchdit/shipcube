@@ -288,3 +288,88 @@ The review worktree stayed read-only. All probes ran on a `git archive 11530cc` 
 - R2-m3: T-83 non-literal and wrapper roots (route to 020-C).
 - R2-n1: shallow freeze of the descriptor's `audit`.
 - Confirm D-TASK020-21 and the D-ARCH-107 credential-gate ordering on the final head.
+
+## Round 3 (head 308eb83, delta)
+
+| Field | Value |
+|---|---|
+| Head reviewed | `308eb8398382510c846e91b371e02d071ed1ddf7` |
+| Delta since r2 | `11530cc..308eb83`: `68c3532` docs merge, `8c8147c` fix(api), `2b1b01a` test(api), `5eee2d0` docs(api), `2b0ee65` merge of `main` (PR #35), `f7428a6` docs(api), `5a145a8` merge of `main` (PR #36), `e7d1c9e` lane-B evidence, `308eb83` docs merge |
+| Base | `origin/main` `a1f9cef` (merge base `e1805a5`; `main` has changed only `docs/sdlc/STATUS.md` since, and `git merge-tree origin/main 308eb83` is clean) |
+| Reviewer | code-reviewer checks, run in one pass with the security round-3 delta by the security-analyst agent (D-ORCH-050: both delta checks, separate records). Read-only. One slip, disclosed: my first command ran read-only `git log` and `git status` inside the PR worktree; nothing was written. All other work used the main checkout and scratch extracts. Date 2026-11-14 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-m1 (schema-level prefs, Joi.link, Joi.extend), R2-m2 (three wiring lines), R2-n1 (shallow freeze) and R2-n3 are
+  closed as D-ORCH-050 prescribes, and D-TASK020-28..31 are sound. 18 of 18 source mutants of the fix are killed; three
+  defensive branches of the new extension walker survive (NIT). The four main merges are pure unions. The comment edits
+  are accurate against D-ARCH-109 and change no behaviour. 0 BLOCKER, 0 MAJOR, 0 MINOR open from this delta; 3 NITs.
+  Lane A executed every gate on this head and is green except the security-owned record step (this round's record).
+```
+
+### R3.1 Verification I performed
+
+All probes ran on a `git archive 308eb83` extract (and `11530cc` as the positive control) with a `node_modules` of junctions to the main checkout; the PR worktree was not used. No Docker, no install.
+
+| Check | Result |
+|---|---|
+| Targeted unit, in band | `apps/api/src/platform` (all), `packages/authz`, `packages/shared/src/http`, `tests/generated`, `tests/api/helpers`, `tests/contract-stubs`, `tools/openapi`: **51 suites, 977 tests pass** (round 2: 50 and 959; +1 suite, +18 tests = 7 + 2 for `define-route`, 6 for `route-state`, 3 for R2-m2) |
+| Mutation of the fix (18) | **All killed.** `Joi.link` refusal, the `allowUnknown` check, the non-built-in type check, definition identity, the extension walk unwired, the `$_terms` walk, each of the `audit` / `reauth` / `deprecated` freezes, a shallow `frozenData`, `readonlySet` returning the `Set`, unfrozen, following its source, `ANONYMOUS.permissions` mutable, `principalOf` trusting an unknown kind, and each of the three `add(...)` calls in `checkRouteMetadata` (1 failing test each) |
+| Mutation of the walker (5 more) | Array branch and plain-object branch removed: killed. **Survive:** the `definition === undefined ||` clause (equivalent under Joi 18.3.2), the `MAX_TERM_DEPTH` guard, the `seen` set (R3-n1) |
+| Joi-upgrade simulations | `_definition` renamed: every schema refuses and the suite fails at module load. `$_terms` renamed: `defineRoute` keeps working and one test goes red (R3-n1) |
+| Bypass matrix | 65 schema constructions through the validate slot and `routeDefinitionProblems`: on `11530cc` 22 are accepted while the slot hands an extra `role` to the handler; on the head **0**. Details and the other 15 schema-level preferences are in the security record, R3.3 and R3.5 |
+| Merges vs `git merge-tree` | `68c3532`, `2b0ee65`, `5a145a8`, `308eb83`: each tree equals the clean merge of its parents; each `main`-side parent is an ancestor of `origin/main`. `tools/quality/**`, the workflows, `tools/ci/**`, the lockfile and the scanner configs are byte-identical to `origin/main`; `package.json` differs from `main` by the PR's own `test:contract` line only |
+| Comment-only edits | `authn/authenticate.ts` and `packages/shared/src/http/credentials.ts` compile to identical output with comments removed (positive control: a one-token change is seen) |
+| Lane A run 43498977127 | `fast-lane` **success, every step executed** (lane-B evidence, commitlint, lint, lint tree clean, format, actionlint, type-check, unit, base-ref negative fixtures, build, build tree clean). `scans`: Gitleaks, Semgrep, oasdiff green; only the security-owned record step is red |
+| Lane-B evidence | The real `check-evidence --profile pr` passes on the head and credits run `20261113T1958Z_5a145a8` (api 101, catalog-c1-c14 74, integration 254, unit 4,141; clean tree, `build_clean`). `5a145a8` differs from the head only in `docs/**` and `.claude/**`. The run's host-fragment scan is 0 |
+| Not re-run by me | Lint, format, type-check, build, integration, coverage: lane A executed lint, format, type-check, unit and build on the head, and the evidence run carries api, integration and unit. I rely on those, plus the scoped runs above |
+
+### R3.2 Round-2 findings: closure
+
+| r2 | Status | Evidence |
+|---|---|---|
+| **R2-m1** (schema-level `prefs`/`options`, `Joi.link`, `Joi.extend`) | **Closed** | Each of the six forms has a test that first proves the validate slot hands `role` to the handler and then proves `routeDefinitionProblems` names the form and `defineRoute` throws `RouteDefinitionError` (both halves checked: the precondition passes on the unfixed schema, the refusal on the fix). A seventh test keeps harmless preferences (`allowUnknown: false`, `convert`, `stripUnknown`) and built-in types from an extended root accepted. The link, the preference and the definition checks each kill a mutant. My matrix covers the families the six forms stand for (nested `when`, `alternatives`, `concat`, `unknown`, `pattern`, array items, `keys()`, `fork`, `compile`, `Joi.defaults`) with no bypass |
+| **R2-m2** (three unpinned wiring lines) | **Closed** | Three seeded cases run through the composed `checkRouteMetadata`: a mounted public `transaction: 'none'` route outside `TRANSACTION_NONE_OPERATIONS`, a contract copy with `x-permission-status: proposed`, a contract copy with `x-reauth-max-age` and no scope. Each asserts `rule` and a message fragment, and the contract is `structuredClone`d so the shared document is never mutated. Deleting each of the three `add(...)` calls fails exactly one test |
+| **R2-m3** (T-83 non-literal and wrapper roots) | Open, routed (as ruled) | Part 020-C (D-ARCH-111; the sheet line is present) |
+| **R2-m4** (refresh cookie vs ADR-0006 R-06) | **Closed for this PR** | The comments say what R2-m4 asked, accurately (R3.3); the architect reconciled the rule (D-ARCH-109, ADR-0006 am. 17, ADR-0008 am. 5); the code is the part 020-B follow-up, due before TASK-027 merges and before TASK-052 starts (D-ORCH-051 (1)) |
+| **R2-n1** (shallow freeze) | **Closed** | `audit` (with `additional`), `reauth` and `deprecated` are deep-frozen copies; `route.audit.action = 'NONE'` throws; a later change to the caller's objects does not reach the descriptor; no `reauth`/`deprecated` key is invented when absent. Four mutants killed |
+| **R2-n2** (`boundary.test.ts` header still says "no ESLint entry") | **Open (NIT, carried)** | Not changed at the head. The file is under owned `apps/api/src/platform/`, so touching it now voids the security record; ride it on part 020-B (R3-n2) |
+| **R2-n3** (`principalOf` unknown kind) | **Closed** | `route-state.test.ts` covers missing principal, unknown kind and a known kind returned as set; the mutant (`principalOf` trusting an unknown kind) is killed |
+
+### R3.3 New findings
+
+| ID | Severity | Where | Problem | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| R3-n1 | NIT | `routing/define-route.ts` `extensionProblems` (`:275-299`) | **Three defensive branches of the new walker are not pinned by a test.** Removing the `definition === undefined ||` clause (`:287`), the `MAX_TERM_DEPTH` guard (`:280`) or the `seen` set (`:279`) leaves all 71 tests green. The first is equivalent under Joi 18.3.2, but it is the whole "fails closed" claim of D-TASK020-29. Related: a rename of `$_terms` is not fail-closed at run time (only the nested-extension test goes red), and the message names the root (`schema.body`), not the nested key | The behaviour is fine today; the guards are what a Joi upgrade leans on, and the nested path would make a refusal easier to act on | With the next edit of the file (see PR32-SEC-17): treat a schema with no `$_terms` object as a problem; one test for that on a schema instance (`Object.defineProperty(schema, '$_terms', { value: undefined })`); one test for the depth guard (a chain that needs more than four term hops per schema level, such as nested `when({ switch })`); optionally carry the key path into the message |
+| R3-n2 | NIT | `platform/storage/boundary.test.ts:1-5` | The header still says "no ESLint entry while TASK-020 holds the lint lock"; this PR added the S3 `no-restricted-imports` entry (R2-n2, unchanged) | A reader concludes the unit test is the only control for static imports | Part 020-B (the file is owned: S15 in the security record). Wording: lint covers static imports, this test also covers dynamic imports and `require` |
+| R3-n3 | NIT | `routing/define-route.ts` `frozenData` (`:437`) | The copy rebuilds every object through `Object.entries`/`Object.fromEntries`, so a non-plain value (a `Date`, `Map`, class instance or accessor) would be flattened into a plain object without an error; accessors are also read again after the checks ran | `AuditDescriptor`, `reauth` and `DeprecationInfo` hold strings, numbers, booleans, `null` and arrays and objects of those, so nothing is lost today. A future `Date` field would silently become `{}` | When a descriptor type gains a non-plain field: throw in `frozenData` for an object that is neither an array nor a plain object. No action now |
+
+### R3.4 Decisions and comment accuracy
+
+| Decision | Ruling |
+|---|---|
+| D-TASK020-28 (`Joi.link` refused, not resolved) | Accepted. Request bodies need no recursion, and resolving links would duplicate Joi's resolver |
+| D-TASK020-29 (extension detection by definition identity; allow-list read from `Joi.types()`) | Accepted with R3-n1. Identity is the right test: a same-name extension is caught at every position I tried (key, `when` then/otherwise/switch, `alternatives`, array items/ordered, `fork`, `concat`, three levels down), and an extended root's built-in types stay accepted |
+| D-TASK020-30 (only `allowUnknown` other than `false` among schema-level preferences) | Accepted. The 15 other preferences a schema can carry were probed; none admits a key |
+| D-TASK020-31 (`readonlySet` in `routing/route-state.ts`; no extra `allowUnknown: false` in the validate slot) | Accepted. A schema's own preferences override `validate()` options, so the walker is the control; the view is frozen, holds its `Set` in a closure and fails `Set.prototype.add.call` |
+
+**Comments (`5eee2d0`, `f7428a6`).** Accurate. `authenticate.ts` and `credentials.ts` say the stub's "present means refuse" follows D-ARCH-107 (5) verbatim and is superseded by D-ARCH-109 (a foreign credential is ignored and changes no header); they say TASK-020 part 020-B makes the slot and the predicate route-aware (`presentedKinds`) before TASK-027 merges and before TASK-052 starts, which is D-ORCH-051 (1). The ids (R2-m4, PR32-SEC-16) are right. No code changed.
+
+### R3.5 Merge conditions
+
+1. **No non-docs commit after the security record** (the record names `308eb83`). A `main` merge that is docs-only, or that changes an owned path this PR does not change, keeps it. A `main` change to an owned path this PR also changes (`package.json`, `eslint.config.mjs`, `jest.config.ts`, `.gitignore`, `.github/CODEOWNERS`, `tools/tsconfig.json`) needs a merge-only delta, as `2b0ee65` did.
+2. **Lane A re-runs on the record commit** (docs only); `ci-gate` turns green when the record step passes (simulated: pass).
+3. Squash with the linted PR title; nothing else outstanding for code review.
+4. **Carried, as sheet lines:** R2-m3 to part 020-C; R2-m4's code and PR32-SEC-14 to the part 020-B follow-up; R2-n2, R3-n1 and R3-n3 with the next edit of the file concerned; qa-lead moves SEC-TC-29 to `required_cases` in the next activation PR.
+
+### R3 GOOD
+
+- **The tests prove their own precondition.** Each `it.each` row first shows that the validate slot would hand `role` to the handler, then shows the refusal, so a refusal can never pass for the wrong reason.
+- **Identity, not names.** The allow-list is read from `Joi.types()` rather than listed by hand, so it follows Joi, and the fail-closed direction (an unknown definition refuses) is the safe one.
+- **`readonlySet` is small and correct.** A closure-held `Set`, frozen, no mutators, with the `Set.prototype` route tested as well as the property route.
+- **R2-m2 reuses the real helpers.** The three seeded cases go through `checkRouteMetadata` itself, on a `structuredClone` of the contract, instead of testing the sub-rules a second time.
+- **The PR body keeps its record honest**: gate numbers carry the head they were taken at, uncommitted infrastructure FAIL runs are disclosed, and the decisions are in the body per D-ORCH-040.
+
+### R3 SECURITY-FLAGS
+
+- None open for the delta; the security-analyst's checks are in the security record, "Round 3 (head 308eb83, delta)" (PR32-SEC-13 and -15 closed; new INFO PR32-SEC-17 = R3-n1).
