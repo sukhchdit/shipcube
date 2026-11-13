@@ -48,6 +48,41 @@ describe('mapDbError (ADR-0005 am.10 item 6)', () => {
   });
 
   it.each([
+    ['42501', 'AUDIT_IMMUTABLE: UPDATE on audit_entries_2026_11 is not permitted', 'AUDIT_IMMUTABLE', 'audit_mutation_rejected'],
+    ['42501', 'AUDIT_VAULT_IMMUTABLE: DELETE', 'AUDIT_IMMUTABLE', 'audit_mutation_rejected'],
+    ['23514', 'AUDIT_IMMUTABLE: TRUNCATE on audit_anchors is not permitted', 'AUDIT_IMMUTABLE', 'audit_mutation_rejected'],
+    ['42501', 'AUDIT_PARTITION_NAME_TAKEN', 'AUDIT_PARTITION_NAME_TAKEN', 'audit_partition_squatted'],
+    ['42501', 'AUDIT_PARTITION_BOUNDS_MISMATCH', 'AUDIT_PARTITION_NAME_TAKEN', 'audit_partition_squatted'],
+  ])(
+    '[PR11-SEC-11 c] trigger-raised %s "%s" maps to a distinct reason %s and security event %s from the prefix only',
+    (sqlState, message, reason, securityEvent) => {
+      const mapping = mapDbError(prismaError('P2010', sqlState, { originalMessage: message }));
+      expect(mapping).toEqual({
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        reason,
+        retryable: false,
+        securityEvent,
+        sqlState,
+        prismaCode: 'P2010',
+      });
+      expect(JSON.stringify(mapping)).not.toMatch(/audit_entries_|audit_anchors|TRUNCATE|DELETE/);
+    },
+  );
+
+  it('[PR11-SEC-11 c] the prefix must lead the message: a quoted prefix elsewhere stays a plain privilege or check failure', () => {
+    expect(mapDbError(prismaError('P2010', '42501', { originalMessage: 'permission denied: AUDIT_IMMUTABLE: x' }))).toMatchObject({
+      reason: 'DB_PRIVILEGE_DENIED',
+    });
+    expect(mapDbError(prismaError('P2010', '23514', { originalMessage: 'new row violates check constraint "ck_x"' }))).toMatchObject({
+      reason: 'DB_ERROR',
+    });
+    expect(mapDbError(prismaError('P2010', '23505', { originalMessage: 'AUDIT_IMMUTABLE: not trigger-raised' }))).toMatchObject({
+      reason: 'DB_ERROR',
+    });
+  });
+
+  it.each([
     ['55P03', 'LOCK_TIMEOUT'],
     ['40001', 'SERIALIZATION_FAILURE'],
     ['40P01', 'DEADLOCK_DETECTED'],
