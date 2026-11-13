@@ -110,7 +110,7 @@ async function caught(promise: Promise<unknown>): Promise<unknown> {
 function setup(options: FakeOptions = {}, txOptions: WithTenantTxOptions = OPTIONS) {
   const fake = fakeClient(options);
   const { deps, events } = fakeDeps();
-  const runner = createWithTenantTx(fake.client, txOptions, deps);
+  const runner = createWithTenantTx(fake.client, txOptions, { ...deps, scopeClient: () => fake.client });
   return { ...fake, deps, events, runner };
 }
 
@@ -295,7 +295,11 @@ describe('error mapping inside withTenantTx (ADR-0005 am.10 items 3 and 6)', () 
     const seen: Array<[unknown, unknown]> = [];
     const fake = fakeClient();
     const { deps } = fakeDeps();
-    const runner = createWithTenantTx(fake.client, OPTIONS, { ...deps, onDbError: (error, mapping) => void seen.push([error, mapping]) });
+    const runner = createWithTenantTx(fake.client, OPTIONS, {
+      ...deps,
+      scopeClient: () => fake.client,
+      onDbError: (error, mapping) => void seen.push([error, mapping]),
+    });
     const error = await caught(runner.withTenantTx(ctx(), () => Promise.reject(rlsError)));
     expect(error).toBeInstanceOf(DbError);
     expect(error).not.toHaveProperty('cause');
@@ -310,7 +314,7 @@ describe('error mapping inside withTenantTx (ADR-0005 am.10 items 3 and 6)', () 
     const hook = jest.fn<(error: unknown) => void>(() => {
       throw new Error('logger down');
     });
-    const runner = createWithTenantTx(fake.client, OPTIONS, { ...deps, onDbError: hook });
+    const runner = createWithTenantTx(fake.client, OPTIONS, { ...deps, scopeClient: () => fake.client, onDbError: hook });
     expect(await caught(runner.withTenantTx(ctx(), () => Promise.reject(rlsError)))).toMatchObject({ code: 'AUTHZ_DENIED' });
     const domain = new Error('domain rule');
     expect(await caught(runner.withTenantTx(ctx(), () => Promise.reject(domain)))).toBe(domain);
@@ -335,12 +339,15 @@ describe('factory configuration (ADR-0005 am.10 items 3 and 4)', () => {
     const { client } = fakeClient();
     const { deps } = fakeDeps();
     for (const value of ['-c search_path=public', '']) {
-      expect(() => createWithTenantTx(client, OPTIONS, { ...deps, env: { PGOPTIONS: value } })).toThrow(TenantTxConfigError);
+      expect(() => createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client, env: { PGOPTIONS: value } })).toThrow(
+        TenantTxConfigError,
+      );
     }
     const withoutEnv = {
       onSecurityEvent: deps.onSecurityEvent,
       countSessionContextLeak: deps.countSessionContextLeak,
       markNotReady: deps.markNotReady,
+      scopeClient: () => client,
     };
     const saved = process.env['PGOPTIONS'];
     process.env['PGOPTIONS'] = '-c statement_timeout=0';
@@ -398,5 +405,52 @@ describe('fresh-connection probe (ADR-0005 am.10 item 4)', () => {
     expect(deps.countSessionContextLeak).toHaveBeenCalledTimes(1);
     expect(deps.markNotReady).toHaveBeenCalledTimes(1);
     expect(await findSessionContext(fakeClient({ settings: ['app.a', 'app.b'] }).client)).toEqual(['app.a', 'app.b']);
+  });
+});
+
+describe('withTenantTx per-transaction client scoping (TASK-032; data-model §7.6, ADR-0005 am. 10 item 5)', () => {
+  it('opens the transaction on the client scopeClient returns for the validated (lowercased) org and actor, not on the root client', async () => {
+    const root = fakeClient();
+    const scoped = fakeClient();
+    const { deps } = fakeDeps();
+    const stamps: unknown[] = [];
+    const runner = createWithTenantTx(root.client, OPTIONS, {
+      ...deps,
+      scopeClient: (stamp) => {
+        stamps.push(stamp);
+        return scoped.client;
+      },
+    });
+    await runner.withTenantTx(ctx({ orgId: ORG.toUpperCase(), actorId: ACTOR.toUpperCase() }), () => Promise.resolve('ok'));
+    expect(stamps).toEqual([{ orgId: ORG, actorId: ACTOR }]);
+    expect(root.transactions).toHaveLength(0);
+    expect(scoped.transactions).toHaveLength(1);
+    expect(scoped.tx.calls).toHaveLength(1);
+  });
+
+  it('an anonymous, organisation-less context is stamped with empty strings (the extension maps them; data-model §1.6)', async () => {
+    const root = fakeClient();
+    const { deps } = fakeDeps();
+    const stamps: unknown[] = [];
+    const runner = createWithTenantTx(root.client, OPTIONS, {
+      ...deps,
+      scopeClient: (stamp) => {
+        stamps.push(stamp);
+        return root.client;
+      },
+    });
+    await runner.withTenantTx(ctx({ orgId: '', actorId: '' }), () => Promise.resolve(1));
+    expect(stamps).toEqual([{ orgId: '', actorId: '' }]);
+  });
+
+  it('an invalid context is refused before scopeClient runs', async () => {
+    const root = fakeClient();
+    const { deps } = fakeDeps();
+    const scopeClient = jest.fn(() => root.client);
+    const runner = createWithTenantTx(root.client, OPTIONS, { ...deps, scopeClient });
+    expect(await caught(runner.withTenantTx(ctx({ actorId: 'not-a-uuid' }), () => Promise.resolve(1)))).toMatchObject({
+      reason: 'INVALID_TENANT_CONTEXT',
+    });
+    expect(scopeClient).not.toHaveBeenCalled();
   });
 });

@@ -89,6 +89,7 @@ function runner() {
       markNotReady: (reason) => {
         notReady.push(reason);
       },
+      scopeClient: () => single,
     },
   );
   return { ...built, events, notReady, counter };

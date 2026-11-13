@@ -1,0 +1,1603 @@
+{
+  "spike": "SPK-04",
+  "task": "TASK-018",
+  "risk": "R-ARCH-04",
+  "nfr": [
+    "NFR-AUDIT-005",
+    "NFR-PERF-001"
+  ],
+  "stamp": "20261113T040201Z",
+  "sha": "c037470",
+  "dirty": true,
+  "method": {
+    "rate": 150,
+    "warmupSeconds": 20,
+    "measureSeconds": 120,
+    "repetitions": 2,
+    "arms": [
+      "off",
+      "on",
+      "batched"
+    ],
+    "armOrder": "off, on, batched within each repetition; CHECKPOINT before each arm",
+    "mix": {
+      "create": 35,
+      "update": 20,
+      "detail": 30,
+      "list": 10,
+      "login_failed": 5
+    },
+    "tenants": "100 orgs; org 0 is HOT with 20 % of all traffic; 20 orders and 3 data subjects per org",
+    "latencySource": "k6 http_req_duration (client side, includes the Docker Desktop host.docker.internal hop)",
+    "pooling": "pooled delta = mean of per-repetition deltas",
+    "budgets": {
+      "deltaP95Ms": 15,
+      "deltaP99Ms": 40
+    }
+  },
+  "repetitions": {
+    "rep1": {
+      "off": {
+        "k6": {
+          "latency": {
+            "p50": 7.19,
+            "p95": 12.61,
+            "p99": 24.08
+          },
+          "droppedRatio": 0,
+          "iterations": 18001,
+          "dropped": 0,
+          "achievedRps": 150.01,
+          "errorRate": 0,
+          "perOp": {
+            "create": {
+              "p50": 8,
+              "p95": 15.61,
+              "p99": 26.59
+            },
+            "update": {
+              "p50": 9.03,
+              "p95": 16.61,
+              "p99": 27.61
+            },
+            "detail": {
+              "p50": 5.35,
+              "p95": 7.62,
+              "p99": 11.29
+            },
+            "list": {
+              "p50": 5.64,
+              "p95": 7.99,
+              "p99": 10.4
+            },
+            "login_failed": {
+              "p50": 4.73,
+              "p95": 7.03,
+              "p99": 9.39
+            }
+          },
+          "hot": {
+            "p50": 7.33,
+            "p95": 12.78,
+            "p99": 24.44
+          },
+          "notHot": {
+            "p50": 7.16,
+            "p95": 12.58,
+            "p99": 23.99
+          },
+          "cpu": {
+            "mean": 44.55,
+            "p95": 74.2,
+            "samples": 120
+          }
+        },
+        "validity": {
+          "valid": true,
+          "reasons": [],
+          "busySampleShare": 0
+        },
+        "deltaVsOff": null,
+        "server": {
+          "perOp": {
+            "create": {
+              "count": 6392,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 6.67,
+                "p95": 13.64,
+                "p99": 24.8,
+                "max": 71.04
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            },
+            "update": {
+              "count": 3539,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 7.71,
+                "p95": 14.41,
+                "p99": 25.84,
+                "max": 66.41
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 5,
+                "min": 5,
+                "max": 5
+              }
+            },
+            "detail": {
+              "count": 5481,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 3.72,
+                "p95": 5.31,
+                "p99": 7.98,
+                "max": 34.95
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            },
+            "list": {
+              "count": 1733,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 4,
+                "p95": 5.66,
+                "p99": 7.79,
+                "max": 14.04
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            },
+            "login_failed": {
+              "count": 856,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 3.44,
+                "p95": 4.97,
+                "p99": 6.85,
+                "max": 15.22
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            }
+          },
+          "auditPhaseMs": {
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockWaitMs": {
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "hotOrg": {
+            "count": 3547,
+            "lockWaitMs": {
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            },
+            "auditPhaseMs": {
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            }
+          },
+          "errorsByKind": {}
+        }
+      },
+      "on": {
+        "k6": {
+          "latency": {
+            "p50": 16.81,
+            "p95": 34.68,
+            "p99": 83.43
+          },
+          "droppedRatio": 0.00016666666666666666,
+          "iterations": 17997,
+          "dropped": 3,
+          "achievedRps": 149.97,
+          "errorRate": 0,
+          "perOp": {
+            "create": {
+              "p50": 18.6,
+              "p95": 36.24,
+              "p99": 83.57
+            },
+            "update": {
+              "p50": 15.91,
+              "p95": 34.88,
+              "p99": 80.74
+            },
+            "detail": {
+              "p50": 15.41,
+              "p95": 33.76,
+              "p99": 91.05
+            },
+            "list": {
+              "p50": 15.63,
+              "p95": 33.51,
+              "p99": 65.44
+            },
+            "login_failed": {
+              "p50": 13.16,
+              "p95": 31.45,
+              "p99": 56.07
+            }
+          },
+          "hot": {
+            "p50": 17.31,
+            "p95": 40.02,
+            "p99": 109.8
+          },
+          "notHot": {
+            "p50": 16.7,
+            "p95": 33.8,
+            "p99": 76.19
+          },
+          "cpu": {
+            "mean": 52.53,
+            "p95": 80.6,
+            "samples": 120
+          }
+        },
+        "validity": {
+          "valid": true,
+          "reasons": [],
+          "busySampleShare": 0.016666666666666666
+        },
+        "deltaVsOff": {
+          "p50": 9.619999999999997,
+          "p95": 22.07,
+          "p99": 59.35000000000001
+        },
+        "server": {
+          "perOp": {
+            "create": {
+              "count": 6207,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 17.21,
+                "p95": 34.46,
+                "p99": 76.83,
+                "max": 462.11
+              },
+              "auditPhaseMs": {
+                "p50": 10.27,
+                "p95": 16.84,
+                "p99": 39.77,
+                "max": 206.01
+              },
+              "lockWaitMs": {
+                "p50": 0.75,
+                "p95": 1.45,
+                "p99": 9.76,
+                "max": 190.34
+              },
+              "roundTrips": {
+                "mean": 15,
+                "min": 15,
+                "max": 15
+              }
+            },
+            "update": {
+              "count": 3565,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 14.57,
+                "p95": 32.3,
+                "p99": 77.42,
+                "max": 224.08
+              },
+              "auditPhaseMs": {
+                "p50": 6.64,
+                "p95": 12,
+                "p99": 29.08,
+                "max": 153.51
+              },
+              "lockWaitMs": {
+                "p50": 0.77,
+                "p95": 2.66,
+                "p99": 13.43,
+                "max": 148
+              },
+              "roundTrips": {
+                "mean": 12,
+                "min": 12,
+                "max": 12
+              }
+            },
+            "detail": {
+              "count": 5496,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 13.78,
+                "p95": 31.54,
+                "p99": 87.41,
+                "max": 240.92
+              },
+              "auditPhaseMs": {
+                "p50": 10.41,
+                "p95": 27.23,
+                "p99": 71.04,
+                "max": 166.99
+              },
+              "lockWaitMs": {
+                "p50": 0.81,
+                "p95": 2.93,
+                "p99": 15.9,
+                "max": 112.26
+              },
+              "roundTrips": {
+                "mean": 12,
+                "min": 12,
+                "max": 12
+              }
+            },
+            "list": {
+              "count": 1822,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 13.99,
+                "p95": 30.81,
+                "p99": 60.06,
+                "max": 456.02
+              },
+              "auditPhaseMs": {
+                "p50": 10.33,
+                "p95": 26.2,
+                "p99": 48.38,
+                "max": 175.64
+              },
+              "lockWaitMs": {
+                "p50": 0.8,
+                "p95": 2.53,
+                "p99": 12.9,
+                "max": 146.31
+              },
+              "roundTrips": {
+                "mean": 12,
+                "min": 12,
+                "max": 12
+              }
+            },
+            "login_failed": {
+              "count": 907,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 11.8,
+                "p95": 29.17,
+                "p99": 50.55,
+                "max": 153.89
+              },
+              "auditPhaseMs": {
+                "p50": 4.72,
+                "p95": 7.56,
+                "p99": 18.57,
+                "max": 97.9
+              },
+              "lockWaitMs": {
+                "p50": 0.77,
+                "p95": 1.26,
+                "p99": 3.95,
+                "max": 69.72
+              },
+              "roundTrips": {
+                "mean": 9,
+                "min": 9,
+                "max": 9
+              }
+            }
+          },
+          "auditPhaseMs": {
+            "p50": 9.78,
+            "p95": 21.82,
+            "p99": 45.81,
+            "max": 206.01
+          },
+          "lockWaitMs": {
+            "p50": 0.78,
+            "p95": 2.05,
+            "p99": 13,
+            "max": 190.34
+          },
+          "hotOrg": {
+            "count": 3586,
+            "lockWaitMs": {
+              "p50": 0.81,
+              "p95": 11.03,
+              "p99": 56.18,
+              "max": 190.34
+            },
+            "auditPhaseMs": {
+              "p50": 10.16,
+              "p95": 27.26,
+              "p99": 83.53,
+              "max": 206.01
+            }
+          },
+          "errorsByKind": {}
+        }
+      },
+      "batched": {
+        "k6": {
+          "latency": {
+            "p50": 21.88,
+            "p95": 2830.67,
+            "p99": 3753.98
+          },
+          "droppedRatio": 0.04922222222222222,
+          "iterations": 17114,
+          "dropped": 886,
+          "achievedRps": 142.62,
+          "errorRate": 0.02255463363328269,
+          "perOp": {
+            "create": {
+              "p50": 22.14,
+              "p95": 1983.55,
+              "p99": 2279.88
+            },
+            "update": {
+              "p50": 22.26,
+              "p95": 1892.33,
+              "p99": 2321.62
+            },
+            "detail": {
+              "p50": 22.45,
+              "p95": 3441.93,
+              "p99": 4023.97
+            },
+            "list": {
+              "p50": 21.55,
+              "p95": 3382.95,
+              "p99": 3981.19
+            },
+            "login_failed": {
+              "p50": 17.35,
+              "p95": 1769.69,
+              "p99": 2093.35
+            }
+          },
+          "hot": {
+            "p50": 23.95,
+            "p95": 3334.59,
+            "p99": 4316.44
+          },
+          "notHot": {
+            "p50": 21.45,
+            "p95": 2743.17,
+            "p99": 3565.16
+          },
+          "cpu": {
+            "mean": 68.82,
+            "p95": 100,
+            "samples": 119
+          }
+        },
+        "validity": {
+          "valid": false,
+          "reasons": [
+            "dropped_iterations 4.92 % > 1 %",
+            "host CPU > 85 % in 33.6 % of samples (> 10 %)"
+          ],
+          "busySampleShare": 0.33613445378151263
+        },
+        "deltaVsOff": {
+          "p50": 14.689999999999998,
+          "p95": 2818.06,
+          "p99": 3729.9
+        },
+        "server": {
+          "perOp": {
+            "create": {
+              "count": 5916,
+              "errors": 113,
+              "serverTotalMs": {
+                "p50": 19.9,
+                "p95": 1798.7,
+                "p99": 2104.77,
+                "max": 3172.41
+              },
+              "auditPhaseMs": {
+                "p50": 6.65,
+                "p95": 254.22,
+                "p99": 582.89,
+                "max": 1073.57
+              },
+              "lockWaitMs": {
+                "p50": 0.95,
+                "p95": 211.64,
+                "p99": 533.98,
+                "max": 1014.9
+              },
+              "roundTrips": {
+                "mean": 9,
+                "min": 9,
+                "max": 9
+              }
+            },
+            "update": {
+              "count": 3311,
+              "errors": 43,
+              "serverTotalMs": {
+                "p50": 20.13,
+                "p95": 1741.35,
+                "p99": 2164.21,
+                "max": 3744.83
+              },
+              "auditPhaseMs": {
+                "p50": 6.32,
+                "p95": 168.1,
+                "p99": 569.5,
+                "max": 1910.1
+              },
+              "lockWaitMs": {
+                "p50": 0.91,
+                "p95": 131.85,
+                "p99": 528.41,
+                "max": 941.16
+              },
+              "roundTrips": {
+                "mean": 10,
+                "min": 10,
+                "max": 10
+              }
+            },
+            "detail": {
+              "count": 4996,
+              "errors": 163,
+              "serverTotalMs": {
+                "p50": 19.29,
+                "p95": 3330.31,
+                "p99": 3965.77,
+                "max": 4901.6
+              },
+              "auditPhaseMs": {
+                "p50": 14.98,
+                "p95": 1754.39,
+                "p99": 2149.35,
+                "max": 3723.58
+              },
+              "lockWaitMs": {
+                "p50": 0.96,
+                "p95": 181.7,
+                "p99": 560.25,
+                "max": 1982.54
+              },
+              "roundTrips": {
+                "mean": 10,
+                "min": 10,
+                "max": 10
+              }
+            },
+            "list": {
+              "count": 1656,
+              "errors": 53,
+              "serverTotalMs": {
+                "p50": 18.5,
+                "p95": 3310.54,
+                "p99": 3908.47,
+                "max": 4759.02
+              },
+              "auditPhaseMs": {
+                "p50": 13.76,
+                "p95": 1723.45,
+                "p99": 2249.46,
+                "max": 3446.52
+              },
+              "lockWaitMs": {
+                "p50": 0.95,
+                "p95": 274.17,
+                "p99": 570.61,
+                "max": 1846.16
+              },
+              "roundTrips": {
+                "mean": 10,
+                "min": 10,
+                "max": 10
+              }
+            },
+            "login_failed": {
+              "count": 849,
+              "errors": 14,
+              "serverTotalMs": {
+                "p50": 14.98,
+                "p95": 1630.09,
+                "p99": 1971.2,
+                "max": 2159.7
+              },
+              "auditPhaseMs": {
+                "p50": 3.68,
+                "p95": 32.83,
+                "p99": 73.45,
+                "max": 151.47
+              },
+              "lockWaitMs": {
+                "p50": 0.9,
+                "p95": 9.69,
+                "p99": 27.29,
+                "max": 55.52
+              },
+              "roundTrips": {
+                "mean": 7,
+                "min": 7,
+                "max": 7
+              }
+            }
+          },
+          "auditPhaseMs": {
+            "p50": 8.83,
+            "p95": 1315.53,
+            "p99": 1941.56,
+            "max": 3723.58
+          },
+          "lockWaitMs": {
+            "p50": 0.94,
+            "p95": 163.29,
+            "p99": 539.5,
+            "max": 1982.54
+          },
+          "hotOrg": {
+            "count": 3371,
+            "lockWaitMs": {
+              "p50": 1.08,
+              "p95": 537.75,
+              "p99": 760.98,
+              "max": 1982.54
+            },
+            "auditPhaseMs": {
+              "p50": 10.63,
+              "p95": 1709.06,
+              "p99": 2478.17,
+              "max": 3723.58
+            }
+          },
+          "errorsByKind": {
+            "DbError:SERVICE_UNAVAILABLE": 386
+          }
+        }
+      }
+    },
+    "rep2": {
+      "off": {
+        "k6": {
+          "latency": {
+            "p50": 7.15,
+            "p95": 30.04,
+            "p99": 192.83
+          },
+          "droppedRatio": 0.0016666666666666668,
+          "iterations": 17970,
+          "dropped": 30,
+          "achievedRps": 149.76,
+          "errorRate": 0,
+          "perOp": {
+            "create": {
+              "p50": 8.12,
+              "p95": 38.86,
+              "p99": 193.38
+            },
+            "update": {
+              "p50": 9.14,
+              "p95": 43.49,
+              "p99": 240.61
+            },
+            "detail": {
+              "p50": 5.31,
+              "p95": 12.98,
+              "p99": 169.83
+            },
+            "list": {
+              "p50": 5.61,
+              "p95": 11.65,
+              "p99": 138.65
+            },
+            "login_failed": {
+              "p50": 4.72,
+              "p95": 14.04,
+              "p99": 175.03
+            }
+          },
+          "hot": {
+            "p50": 7.34,
+            "p95": 30.3,
+            "p99": 192.16
+          },
+          "notHot": {
+            "p50": 7.1,
+            "p95": 29.75,
+            "p99": 193.16
+          },
+          "cpu": {
+            "mean": 45.45,
+            "p95": 79.5,
+            "samples": 120
+          }
+        },
+        "validity": {
+          "valid": true,
+          "reasons": [],
+          "busySampleShare": 0.041666666666666664
+        },
+        "deltaVsOff": null,
+        "server": {
+          "perOp": {
+            "create": {
+              "count": 6297,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 6.79,
+                "p95": 29.35,
+                "p99": 122.69,
+                "max": 469.81
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            },
+            "update": {
+              "count": 3608,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 7.8,
+                "p95": 33.83,
+                "p99": 156.25,
+                "max": 397.03
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 5,
+                "min": 5,
+                "max": 5
+              }
+            },
+            "detail": {
+              "count": 5373,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 3.66,
+                "p95": 6.65,
+                "p99": 66.25,
+                "max": 452.57
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            },
+            "list": {
+              "count": 1772,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 3.96,
+                "p95": 6.58,
+                "p99": 54.81,
+                "max": 216.86
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            },
+            "login_failed": {
+              "count": 920,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 3.45,
+                "p95": 7.49,
+                "p99": 83.85,
+                "max": 288.05
+              },
+              "auditPhaseMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "lockWaitMs": {
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "roundTrips": {
+                "mean": 4,
+                "min": 4,
+                "max": 4
+              }
+            }
+          },
+          "auditPhaseMs": {
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "lockWaitMs": {
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "hotOrg": {
+            "count": 3562,
+            "lockWaitMs": {
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            },
+            "auditPhaseMs": {
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            }
+          },
+          "errorsByKind": {}
+        }
+      },
+      "on": {
+        "k6": {
+          "latency": {
+            "p50": 14.97,
+            "p95": 27.71,
+            "p99": 43
+          },
+          "droppedRatio": 0,
+          "iterations": 18001,
+          "dropped": 0,
+          "achievedRps": 149.99,
+          "errorRate": 0,
+          "perOp": {
+            "create": {
+              "p50": 16.61,
+              "p95": 29.92,
+              "p99": 47.97
+            },
+            "update": {
+              "p50": 14,
+              "p95": 26.46,
+              "p99": 40.03
+            },
+            "detail": {
+              "p50": 13.79,
+              "p95": 26.79,
+              "p99": 41.31
+            },
+            "list": {
+              "p50": 14.1,
+              "p95": 26.42,
+              "p99": 39.38
+            },
+            "login_failed": {
+              "p50": 11.48,
+              "p95": 26,
+              "p99": 36.41
+            }
+          },
+          "hot": {
+            "p50": 15.31,
+            "p95": 29.79,
+            "p99": 47.91
+          },
+          "notHot": {
+            "p50": 14.89,
+            "p95": 27.25,
+            "p99": 41.49
+          },
+          "cpu": {
+            "mean": 42.25,
+            "p95": 70.1,
+            "samples": 120
+          }
+        },
+        "validity": {
+          "valid": true,
+          "reasons": [],
+          "busySampleShare": 0.008333333333333333
+        },
+        "deltaVsOff": {
+          "p50": 7.82,
+          "p95": -2.3299999999999983,
+          "p99": -149.83
+        },
+        "server": {
+          "perOp": {
+            "create": {
+              "count": 6351,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 15.44,
+                "p95": 28.48,
+                "p99": 46.21,
+                "max": 148.26
+              },
+              "auditPhaseMs": {
+                "p50": 9.42,
+                "p95": 15.38,
+                "p99": 28.27,
+                "max": 96.41
+              },
+              "lockWaitMs": {
+                "p50": 0.69,
+                "p95": 1.19,
+                "p99": 4.48,
+                "max": 34.8
+              },
+              "roundTrips": {
+                "mean": 15,
+                "min": 15,
+                "max": 15
+              }
+            },
+            "update": {
+              "count": 3572,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 12.84,
+                "p95": 24.94,
+                "p99": 38.39,
+                "max": 104.8
+              },
+              "auditPhaseMs": {
+                "p50": 6.05,
+                "p95": 10.45,
+                "p99": 19.61,
+                "max": 56.13
+              },
+              "lockWaitMs": {
+                "p50": 0.69,
+                "p95": 1.61,
+                "p99": 7.5,
+                "max": 50.51
+              },
+              "roundTrips": {
+                "mean": 12,
+                "min": 12,
+                "max": 12
+              }
+            },
+            "detail": {
+              "count": 5402,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 12.27,
+                "p95": 24.68,
+                "p99": 37.62,
+                "max": 112.47
+              },
+              "auditPhaseMs": {
+                "p50": 9.19,
+                "p95": 20.21,
+                "p99": 28.39,
+                "max": 74.65
+              },
+              "lockWaitMs": {
+                "p50": 0.73,
+                "p95": 1.75,
+                "p99": 6.97,
+                "max": 55.61
+              },
+              "roundTrips": {
+                "mean": 12,
+                "min": 12,
+                "max": 12
+              }
+            },
+            "list": {
+              "count": 1814,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 12.56,
+                "p95": 24.36,
+                "p99": 37.2,
+                "max": 106.35
+              },
+              "auditPhaseMs": {
+                "p50": 9.22,
+                "p95": 19.59,
+                "p99": 27.56,
+                "max": 75.55
+              },
+              "lockWaitMs": {
+                "p50": 0.72,
+                "p95": 1.62,
+                "p99": 6.64,
+                "max": 32.33
+              },
+              "roundTrips": {
+                "mean": 12,
+                "min": 12,
+                "max": 12
+              }
+            },
+            "login_failed": {
+              "count": 862,
+              "errors": 0,
+              "serverTotalMs": {
+                "p50": 10.33,
+                "p95": 24.31,
+                "p99": 32.61,
+                "max": 46.51
+              },
+              "auditPhaseMs": {
+                "p50": 4.27,
+                "p95": 7.14,
+                "p99": 14.06,
+                "max": 26.85
+              },
+              "lockWaitMs": {
+                "p50": 0.69,
+                "p95": 1.12,
+                "p99": 2.68,
+                "max": 13.53
+              },
+              "roundTrips": {
+                "mean": 9,
+                "min": 9,
+                "max": 9
+              }
+            }
+          },
+          "auditPhaseMs": {
+            "p50": 8.87,
+            "p95": 15.83,
+            "p99": 27.06,
+            "max": 96.41
+          },
+          "lockWaitMs": {
+            "p50": 0.71,
+            "p95": 1.4,
+            "p99": 6.25,
+            "max": 55.61
+          },
+          "hotOrg": {
+            "count": 3629,
+            "lockWaitMs": {
+              "p50": 0.73,
+              "p95": 5.23,
+              "p99": 16.32,
+              "max": 55.61
+            },
+            "auditPhaseMs": {
+              "p50": 9.11,
+              "p95": 19.42,
+              "p99": 32.59,
+              "max": 75.55
+            }
+          },
+          "errorsByKind": {}
+        }
+      },
+      "batched": {
+        "k6": {
+          "latency": {
+            "p50": 18.05,
+            "p95": 1872.27,
+            "p99": 2958.85
+          },
+          "droppedRatio": 0.018610077217932338,
+          "iterations": 17666,
+          "dropped": 335,
+          "achievedRps": 144.1,
+          "errorRate": 0.009736216460998528,
+          "perOp": {
+            "create": {
+              "p50": 17.88,
+              "p95": 1351.93,
+              "p99": 2078.76
+            },
+            "update": {
+              "p50": 18.98,
+              "p95": 1440.66,
+              "p99": 2055.04
+            },
+            "detail": {
+              "p50": 17.9,
+              "p95": 2402.49,
+              "p99": 3442.94
+            },
+            "list": {
+              "p50": 18.17,
+              "p95": 2321.71,
+              "p99": 3252.4
+            },
+            "login_failed": {
+              "p50": 14.4,
+              "p95": 1181.8,
+              "p99": 2013.76
+            }
+          },
+          "hot": {
+            "p50": 18.39,
+            "p95": 2107.78,
+            "p99": 3344.19
+          },
+          "notHot": {
+            "p50": 17.97,
+            "p95": 1787,
+            "p99": 2831.73
+          },
+          "cpu": {
+            "mean": 72.7,
+            "p95": 100,
+            "samples": 123
+          }
+        },
+        "validity": {
+          "valid": false,
+          "reasons": [
+            "dropped_iterations 1.86 % > 1 %",
+            "host CPU > 85 % in 25.2 % of samples (> 10 %)"
+          ],
+          "busySampleShare": 0.25203252032520324
+        },
+        "deltaVsOff": {
+          "p50": 10.9,
+          "p95": 1842.23,
+          "p99": 2766.02
+        },
+        "server": {
+          "perOp": {
+            "create": {
+              "count": 6106,
+              "errors": 42,
+              "serverTotalMs": {
+                "p50": 15.97,
+                "p95": 1279.06,
+                "p99": 2040.27,
+                "max": 3310.69
+              },
+              "auditPhaseMs": {
+                "p50": 7.25,
+                "p95": 61.57,
+                "p99": 564.43,
+                "max": 1989.3
+              },
+              "lockWaitMs": {
+                "p50": 1.01,
+                "p95": 18.77,
+                "p99": 522.85,
+                "max": 1979.7
+              },
+              "roundTrips": {
+                "mean": 9,
+                "min": 9,
+                "max": 9
+              }
+            },
+            "update": {
+              "count": 3580,
+              "errors": 23,
+              "serverTotalMs": {
+                "p50": 17.07,
+                "p95": 1320.63,
+                "p99": 2027.55,
+                "max": 3334.83
+              },
+              "auditPhaseMs": {
+                "p50": 6.95,
+                "p95": 76.04,
+                "p99": 571.63,
+                "max": 1902.26
+              },
+              "lockWaitMs": {
+                "p50": 1,
+                "p95": 23.07,
+                "p99": 517.16,
+                "max": 1892.4
+              },
+              "roundTrips": {
+                "mean": 10,
+                "min": 10,
+                "max": 10
+              }
+            },
+            "detail": {
+              "count": 5234,
+              "errors": 76,
+              "serverTotalMs": {
+                "p50": 15.56,
+                "p95": 2290.48,
+                "p99": 3385.43,
+                "max": 4149.73
+              },
+              "auditPhaseMs": {
+                "p50": 11.11,
+                "p95": 1133.78,
+                "p99": 1924.87,
+                "max": 2906.65
+              },
+              "lockWaitMs": {
+                "p50": 1.01,
+                "p95": 17.11,
+                "p99": 443.32,
+                "max": 1441.69
+              },
+              "roundTrips": {
+                "mean": 10,
+                "min": 10,
+                "max": 10
+              }
+            },
+            "list": {
+              "count": 1740,
+              "errors": 24,
+              "serverTotalMs": {
+                "p50": 15.8,
+                "p95": 2225.11,
+                "p99": 3076.63,
+                "max": 3931.71
+              },
+              "auditPhaseMs": {
+                "p50": 11.04,
+                "p95": 1117.85,
+                "p99": 1767.68,
+                "max": 2792.34
+              },
+              "lockWaitMs": {
+                "p50": 1.01,
+                "p95": 14.96,
+                "p99": 445.5,
+                "max": 1625.38
+              },
+              "roundTrips": {
+                "mean": 10,
+                "min": 10,
+                "max": 10
+              }
+            },
+            "login_failed": {
+              "count": 834,
+              "errors": 7,
+              "serverTotalMs": {
+                "p50": 12.68,
+                "p95": 1116.06,
+                "p99": 1960.25,
+                "max": 2105.25
+              },
+              "auditPhaseMs": {
+                "p50": 4.03,
+                "p95": 19.11,
+                "p99": 45.1,
+                "max": 211.19
+              },
+              "lockWaitMs": {
+                "p50": 0.96,
+                "p95": 6.01,
+                "p99": 16.59,
+                "max": 93.63
+              },
+              "roundTrips": {
+                "mean": 7,
+                "min": 7,
+                "max": 7
+              }
+            }
+          },
+          "auditPhaseMs": {
+            "p50": 8.82,
+            "p95": 549.7,
+            "p99": 1463.35,
+            "max": 2906.65
+          },
+          "lockWaitMs": {
+            "p50": 1,
+            "p95": 17,
+            "p99": 480.12,
+            "max": 1979.7
+          },
+          "hotOrg": {
+            "count": 3547,
+            "lockWaitMs": {
+              "p50": 1.06,
+              "p95": 475.17,
+              "p99": 1180.76,
+              "max": 1979.7
+            },
+            "auditPhaseMs": {
+              "p50": 9.45,
+              "p95": 952.03,
+              "p99": 1817.96,
+              "max": 2906.65
+            }
+          },
+          "errorsByKind": {
+            "DbError:SERVICE_UNAVAILABLE": 172
+          }
+        }
+      }
+    }
+  },
+  "decision": {
+    "verdict": "INCONCLUSIVE",
+    "onDelta": {
+      "p50": 8.719999999999999,
+      "p95": 9.870000000000001,
+      "p99": -45.24
+    },
+    "batchedDelta": {
+      "p50": 12.794999999999998,
+      "p95": 2330.145,
+      "p99": 3247.96
+    },
+    "invalid": [
+      "rep 1 batched: dropped_iterations 4.92 % > 1 %",
+      "rep 1 batched: host CPU > 85 % in 33.6 % of samples (> 10 %)",
+      "rep 2 batched: dropped_iterations 1.86 % > 1 %",
+      "rep 2 batched: host CPU > 85 % in 25.2 % of samples (> 10 %)"
+    ]
+  },
+  "hotOrgPooledDelta": {
+    "on": {
+      "p50": 8.975,
+      "p95": 13.365,
+      "p99": -29.445
+    },
+    "batched": {
+      "p50": 13.834999999999999,
+      "p95": 2699.645,
+      "p99": 3722.0150000000003
+    }
+  },
+  "integrity": {
+    "chain": {
+      "streams": 116,
+      "entries": 82213,
+      "recomputed": 82213,
+      "recomputeScope": "full (every entry of every stream)",
+      "hotOrgEntries": 16469,
+      "failures": [],
+      "failureCount": 0,
+      "entryHashGloballyUnique": true,
+      "totals": {
+        "total": "82213",
+        "unique_hashes": "82213",
+        "streams": "116"
+      },
+      "ok": true
+    },
+    "immutability": {
+      "ok": true,
+      "attempts": {
+        "app_update_entries": {
+          "ok": false,
+          "code": "42501",
+          "message": "permission denied for table audit_entries"
+        },
+        "app_delete_entries": {
+          "ok": false,
+          "code": "42501",
+          "message": "permission denied for table audit_entries"
+        },
+        "app_update_vault": {
+          "ok": false,
+          "code": "42501",
+          "message": "permission denied for table audit_pii_vault"
+        },
+        "app_delete_vault": {
+          "ok": false,
+          "code": "42501",
+          "message": "permission denied for table audit_pii_vault"
+        },
+        "superuser_update_entries_trigger": {
+          "ok": false,
+          "code": "42501",
+          "message": "AUDIT_IMMUTABLE: UPDATE on audit_entries_2026_11 is not permitted"
+        },
+        "superuser_delete_vault_trigger": {
+          "ok": false,
+          "code": "42501",
+          "message": "AUDIT_VAULT_IMMUTABLE: DELETE"
+        }
+      }
+    },
+    "triggers": {
+      "ok": true,
+      "triggers": [
+        {
+          "rel": "audit_entries",
+          "tgname": "trg_audit_entries__no_truncate",
+          "tgenabled": "O"
+        },
+        {
+          "rel": "audit_entries",
+          "tgname": "trg_audit_entries__no_update_delete",
+          "tgenabled": "O"
+        },
+        {
+          "rel": "audit_entries_2026_11",
+          "tgname": "trg_audit_entries_2026_11__no_truncate",
+          "tgenabled": "O"
+        },
+        {
+          "rel": "audit_entries_2026_11",
+          "tgname": "trg_audit_entries__no_update_delete",
+          "tgenabled": "O"
+        },
+        {
+          "rel": "audit_pii_vault",
+          "tgname": "trg_audit_pii_vault__guard",
+          "tgenabled": "O"
+        },
+        {
+          "rel": "audit_pii_vault",
+          "tgname": "trg_audit_pii_vault__no_truncate",
+          "tgenabled": "O"
+        }
+      ],
+      "eventTriggers": [
+        {
+          "evtname": "platform_audit_ddl_guard_drop",
+          "evtenabled": "O"
+        },
+        {
+          "evtname": "platform_audit_ddl_guard_end",
+          "evtenabled": "O"
+        }
+      ]
+    },
+    "forceRls": {
+      "ok": true,
+      "rls": [
+        {
+          "relname": "audit_entries",
+          "relrowsecurity": true,
+          "relforcerowsecurity": true
+        },
+        {
+          "relname": "spk04_orders",
+          "relrowsecurity": true,
+          "relforcerowsecurity": true
+        }
+      ]
+    },
+    "partitions": {
+      "ok": true,
+      "partitions": [
+        {
+          "partition": "public.audit_entries_2026_11",
+          "entries": "82213"
+        }
+      ]
+    },
+    "vaultRows": 99365,
+    "dataModelZeroHashLiteral": {
+      "ok": false,
+      "code": "42804",
+      "message": "column \"head_hash\" is of type bytea but expression is of type text"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: project-p5-pr20-logging
-description: PR #20 (TASK-010 redacted Pino logging) R1 @dae1f96 + R2 @9647907 PASS_WITH_FOLLOW-UPS; 01 MEDIUM closed; new LOW 13 (free-text raw lists/__Host- pairs/path queries), INFO 14-17; PR #21 merged first, so the union needs a merge-only round; checks owed at TASK-052/113/020/014/214/022
+description: PR #20 (TASK-010 redacted Pino logging) R1 dae1f96, R2 9647907, R3 fafa3b5 (PR #21 union + fc2) all PASS_WITH_FOLLOW-UPS; R3 new LOW 18 (quadratic re-scan, 1-line fix) and 19 ({name,value} records), INFO 20-22; checks owed at TASK-052/055/113/020/022/214
 metadata:
   type: project
 ---
@@ -9,68 +9,52 @@ The PR #20 review (TASK-010) is in `docs/05-quality/security/PR-0020-TASK-010-se
 
 **Rounds:**
 - **R1** at `dae1f96`: PASS_WITH_FOLLOW-UPS (01 MEDIUM, 02–07 LOW, 08–12 INFO).
-- **R2** at `9647907` (fix cycle 1, 2026-11-13): **PASS_WITH_FOLLOW-UPS**, appended as `## Round 2 (head 9647907)`.
-  - Lane A run 43353973952: fast-lane green; gitleaks found 14 commits clean; Semgrep 0 findings over 209 files.
-  - 18 owned paths: eslint, lock, `tools/tsconfig.json`, `negative-fixtures.test.ts`, and 14 shared-logging fixtures.
-  - The simulated checker passed against main `c3ff7f1` and against base `6ac9836`.
+- **R2** at `9647907` (fix cycle 1): PASS_WITH_FOLLOW-UPS. 01 closed. New: 13 LOW (free-text raw lists, bare `__Host-` pairs, scheme-less queries), 14–17 INFO.
+- **R3** at `fafa3b5` (2026-11-13): merge-only + delta round on the PR #21 union (`3153b3e` = merge of main `9d188fd`) and fix cycle 2. **PASS_WITH_FOLLOW-UPS.** Appended as `## Round 3 (head fafa3b5)`; written to the main checkout, uncommitted.
+  - Lane A run 43384035437: fast-lane green; gitleaks 19 commits clean; Semgrep 0 over 227 files. Only the record step was red (24 owned paths).
+  - All 8 §R2.7 items met. The merge differs from `git merge-tree` (`d2b162c`) in exactly 8 non-owned files.
+  - **Closed:** 13 items 1–3 (item 4 → TASK-020), 16, the R2-m2 part of 14, PR21-SEC-07 (b) (option 1, nothing weakened).
+  - The simulated checker passed with base `a7bb07f` and with `9d188fd`. Controls B/C/D gave `missing`. E (a non-owned fix), F (a `docs/**` evidence commit) and G (a merge of main) gave `pass`.
 
-**R2 status of the R1 findings:**
-- **Closed:** 01 (the MEDIUM), 05, 06, 08, 09, 11.
-- **Closed for TASK-010's part:** 02, 03 (scheme URLs), 04 items 1 and 3, 07 (cost), 10 (correlation ID), 12.
-- **Routed:**
-  - 04 item 2 → TASK-014;
-  - the 10 template → TASK-113;
-  - Joi messages → TASK-020 (D-ORCH-025).
-- **SEC-P3-23** (TASK-010 part) is closed.
-
-**New in R2:**
-- **13 (LOW).** Free-text renderings keep credential and query values:
-  - `JSON.stringify` / `util.inspect` / `String` of `req.rawHeaders` or `req` (name and value are comma-adjacent, so the pair rule misses them);
-  - a bare `__Host-rt_x=v` pair under a neutral key;
-  - scheme-less `/x?q=` targets.
-
-  Fixes:
-  1. the `__Host-`/`__Secure-` key prefix counts as sensitive;
-  2. a quoted-list adjacency pass;
-  3. strip `/path?query`;
-  4. a TASK-020 lint/Semgrep rule against stringifying `req` in log calls.
-
-  Items 1–3 are due before TASK-052/055 merge (first refresh cookie).
+**New in R3:**
+- **18 (LOW).** `redactQuotedLists` re-scans: when `startsPair` is true it does `continue` without advancing `lastIndex`. This is quadratic for N units of `"pin",\'` closed by one escaped quote and a colon at the end: 26–38 ms per 8 KiB string, 143 ms per call.
+  - Fix: `if (startsPair(text, end)) { pattern.lastIndex = end; continue; }` (probe-verified linear; corpus unchanged).
+  - Due: in PR #20 if a further cycle runs, otherwise before TASK-052/055.
+- **19 (LOW).** `{name|key, value}` records (HAR-style header arrays, `Set-Cookie`/tough-cookie records, SDK `{Name, Value}`) leak credentials. `name` is PII-exact, `value` is neutral.
+  - Fix: a `walkObject` pair rule.
+  - Due: before TASK-113 or TASK-055.
 - **INFO:**
-  - 14: PII-class gaps (`clientIp`, `x-forwarded-for`, `username`, `iban`/`accountNumber`, the card parent through arrays, PII pairs in arrays) → TASK-113 and TASK-135/139/140/188;
-  - 15: the brand can be forged by a Proxy `getOwnPropertyDescriptor` trap (fix: `types.isProxy`) → TASK-113;
-  - 16: transitive path around the guard (a non-logging `packages/shared` file imports logging, then the root re-exports it) → TASK-020/022;
-  - 17: line size covers fields only (`err` and each `child()` binding set add 16 KiB budgets; 48/88 KiB lines) → TASK-214.
+  - 20: lint two-hop via test-category files (`TEST_FILES` exempt; = code R3-n4 a) → TASK-020/022;
+  - 21: the logger event argument is not redacted (only escaped, cut to 128) → TASK-020 lint (literal identifier) plus an optional runtime guard;
+  - 22: free-text residuals (`util.inspect(new URL)` searchParams, target leads, backtick-quoted values, `query:{...}`, `String(rawHeaders)`) → widen 13 item 4 to flag `util.inspect`/`JSON.stringify`/`String()`/template literals in logger args (TASK-020); runtime extras → TASK-113.
+- Code review r3 (`840e39a`) said "every new regex linear, worst 4.3 ms". Its families missed the closer-at-end shape, and so did the developer's tests (absolute < 50 ms threshold).
 
-**PR #21 merged first** (`62e4961`, D-ORCH-027). PR #20 must merge main, which conflicts only in `app.ts`, `main.ts` and `request-context.ts`, and auto-merges the owned `eslint.config.mjs` and `negative-fixtures.test.ts`. That voids R2 under rule (d), so a **merge-only round is required**. Its 8-item check list is §R2.7 of the record. It includes:
-- PR21-SEC-07 (b): the contract-validator excerpt list switches to `isSensitiveKey`, or is re-routed to TASK-020;
-- `installProcessErrorHandlers` stays before the services;
-- `routePrefix` becomes the first layer of `api`.
-
-Q7 (the lint probe) on the union config gave the same result as on the head.
-
-**Facts (probe-confirmed 2026-11-13, R2; re-verify after changes):**
-- **Walker:** `instanceof EventEmitter` → `[Unsupported]` (req, res, sockets). `{...req}` is safe because `rawHeaders`, `_parsedUrl` and `*url` keys are omitted. `Headers`, `Request`, `URLSearchParams` and `FormData` walk to `{}`.
-- **Regexes:** every string-redaction regex is linear to 128k. `redactString` takes at most 4.8 ms at the 8 KiB cap, and a whole call at most 9 ms.
-- **Stack accessor:** the V8 `stack` accessor is the same function for `captureStackTrace` objects. Cross-realm errors are logged without a stack.
-- **Process errors:** an ESM top-level throw reaches `uncaughtException` with origin `unhandledRejection`.
-- **Over-redaction in security attributes:** a lower-case value with a keyword (`bad_password`) becomes `[REDACTED]`. Emitters must use UPPER_SNAKE reason codes (record §R2.8).
-- **Correlation ID:** `CORRELATION_ID_PATTERN` now lives in `@platform/shared` (root).
+**Facts (probe-confirmed 2026-11-13, re-verify after changes):**
+- Q1 has 0 leaks in all 29 request forms at `fafa3b5`.
+- `exitAfterFlush`: exit 1 with identifier-only fatal lines. Two same-phase timer throws give 2 fatal lines.
+- Lane-B evidence lives in `docs/05-quality/tests/runs/<stamp>_<sha7>/` (`docs/**`, not owned), so an evidence commit after a record keeps the record valid.
+- PR #28 merged at 07:37 UTC (`f56b12f`, owned `tools/quality/**`). A main merge into PR #20 does not overlap its owned paths.
 
 **Why:** the logger is the last control for the "secrets/PII in logs = 0" guardrail, and its residuals close only if the owning tasks check them.
 
 **How to apply:**
-- **Merge-only round:** use record §R2.7 as the checklist. Re-run the lock delta (one path: `packages/shared` declares pino) and the Q7 lint probe on the union commit.
-- **TASK-052/055:** PR20-SEC-13 items 1–3 must be merged; the emitter conditions in §R2.8 apply.
-- **TASK-113:** 14 and 15, plus the PR6 client halves and the route template.
-- **TASK-020:** the 13 item 4 rule, 16, and Joi messages.
+- **If PR #20 gets another cycle:** check the 18 one-liner (scaling test, not an absolute time) and the 19 walker rule.
+- **TASK-052/055:**
+  - check 18 (if not fixed in PR #20) and 19;
+  - the §R2.8 emitter conditions apply.
+- **TASK-113:** 14 remainder, 15, 19, the 22 runtime extras, R2-n1 (a)/R3-n3, and the 21 optional guard.
+- **TASK-020:**
+  - 13 item 4 widened per 22;
+  - the 21 literal-event rule;
+  - the 20 policy (non-test code never imports the test category);
+  - Joi messages.
 - **TASK-214:** 17.
-- **TASK-022:** the bundle scan proves there is no `pino` in the web and admin bundles.
+- **TASK-022:** the bundle scan proves there is no `pino` in the web/admin bundles (the backstop for 20).
 
-The probe kit (scratch, session-scoped) is in `scratchpad/review/PR-20-sec-r2/scripts/`:
-- `build.mjs` (strips `packages/shared/src` fully and rewrites `@platform/shared` too);
-- `probe-req.mjs`, `probe-corpus.mjs`, `probe-sec.mjs`, `probe-cost.mjs`, `probe-process.mjs`;
-- `lint-probe.mjs` (22 bypass forms);
-- `lockdiff.mjs`, `record-sim.sh`.
+Probe kit (scratch, persists): `scratchpad/review/PR-20-sec-r3/scripts/`:
+- `lint-probe3.mjs` (45 forms), `fixture-probe.mjs`, `probe-corpus3.mjs`, `probe-records.mjs`, `probe-cost3.mjs`, `probe-call3.mjs`, `probe-process3.mjs`, `excerpt-keys.mjs`, `keyclass-diff.mjs`, `record-sim3.sh`;
+- plus the R2 kit (`build.mjs`, `probe-req.mjs`, `probe-corpus.mjs`, `probe-sec.mjs`, `probe-cost.mjs`).
 
-Related: [[project-p5-pr21-openapi-pipeline]], [[project-p5-pr10-ci-lane]], [[project-p5-pr9-runtime-skeleton]], [[project-p5-pr11-rls-review]], [[project-p3-security-conditions]], [[project-security-review-conventions]]
+`build.mjs <root>` needs `<root>/src` from `git archive` and a `build/node_modules` junction to main's.
+
+Related: [[project-p5-pr21-openapi-pipeline]], [[project-p5-pr10-ci-lane]], [[project-p5-pr23-lane-b]], [[project-p5-pr9-runtime-skeleton]], [[project-p3-security-conditions]], [[project-security-review-conventions]]

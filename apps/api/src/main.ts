@@ -14,7 +14,7 @@ import { exitAfterFlush, installProcessErrorHandlers } from './platform/runtime/
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
 
-const { config } = await loadRuntimeConfigOrExit('api');
+const { config, secrets } = await loadRuntimeConfigOrExit('api');
 // Redacted Pino logger (TASK-010); every line carries the request context of the request being handled, if any.
 const log = createRuntimeLog('api', process.stdout, {
   version: readPackageVersion(new URL('../package.json', import.meta.url)),
@@ -23,7 +23,8 @@ const log = createRuntimeLog('api', process.stdout, {
 });
 // Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06, R2-n7).
 installProcessErrorHandlers({ log, exit: exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) }) });
-const services = createRuntimeServices(config, 'api', log);
+// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
+const services = createRuntimeServices(config, 'api', log, secrets);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
 let app: ReturnType<typeof createApp>;

@@ -15,7 +15,7 @@ import { loadRuntimeConfigOrExit } from '@platform/config';
 import { createWorkerHealthServer } from './platform/health/server.js';
 import { jobLogContext } from './platform/logging/job-context.js';
 
-const { config } = await loadRuntimeConfigOrExit('worker');
+const { config, secrets } = await loadRuntimeConfigOrExit('worker');
 // Redacted Pino logger (TASK-010); lines written while a job runs carry its correlation context (job-context.ts).
 const log = createRuntimeLog('worker', process.stdout, {
   version: readPackageVersion(new URL('../package.json', import.meta.url)),
@@ -24,7 +24,8 @@ const log = createRuntimeLog('worker', process.stdout, {
 });
 // Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06, R2-n7).
 installProcessErrorHandlers({ log, exit: exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) }) });
-const services = createRuntimeServices(config, 'worker', log);
+// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
+const services = createRuntimeServices(config, 'worker', log, secrets);
 const server = createWorkerHealthServer(services.probe);
 
 // Session-integrity check on a dedicated connection before the health server opens and before any queue processor

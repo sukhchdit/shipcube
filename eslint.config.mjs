@@ -114,9 +114,6 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   // SPK-03 spike, kept until the C-1 artifact is recorded (lead decision 3): ran every form, including the leak control.
   // Remove this entry in the commit that deletes the spike file (a stale entry would exempt any future file there).
   { files: ['prisma/tests/spikes/spk03-rls-tx.int.test.ts'], allow: ALL_CONTEXT_FORMS },
-  // SPK-08 spike (PR #12, merged): one migrate-diff probe policy reads a key directly. Remove this entry in the commit
-  // that ports and deletes the spike file (TASK-021, D-TASK012-02 (1)).
-  { files: ['prisma/tests/spikes/spk08-audit-owner.int.test.ts'], allow: ['keys'] },
   // Catalog C-series: the prosrc scan's negative fixtures create functions that run a session SET of a context key
   // (transaction-local setter fixtures only: no is_local = false).
   { files: ['prisma/tests/catalog/c01-c12.int.test.ts'], allow: ['setter', 'keys', 'session-set'] },
@@ -504,6 +501,12 @@ export default defineConfig([
     // Plain JavaScript (config, tooling scripts) is outside the TypeScript project service: no type-aware rules.
     files: ['**/*.{js,jsx,mjs,cjs}'],
     extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    // k6 scripts run inside the grafana/k6 runtime (TASK-018; T-QA-06 reuses): k6 globals and built-in modules.
+    files: ['tests/load/**/*.js'],
+    languageOptions: { globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly', open: 'readonly', console: 'readonly' } },
+    settings: { 'import-x/core-modules': ['k6/http', 'k6/execution'] },
   },
   {
     files: DOMAIN_CODE,

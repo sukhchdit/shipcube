@@ -1,7 +1,7 @@
 {
   "$comment": "Required-suite manifest (ADR-0023 amendment G item 2, SEC-P3-07). Content owner: qa-lead. Moved verbatim from docs/05-quality/tests/required-suites.json by Wave 0 task T-QA-01 (TASK-011); this is the canonical, code-owned copy, read from the base ref per SEC-P3-31 (D-QA-001). Rules: docs/05-quality/TEST-STRATEGY.md section 9.",
   "manifest_version": 1,
-  "date": "2026-11-12",
+  "date": "2026-11-13",
   "owner": "qa-lead",
   "canonical_location": "tools/quality/required-suites.json",
   "rules": {
@@ -37,13 +37,24 @@
     "docs/03-architecture/api/**",
     "docs/05-quality/tests/gherkin-test-map.md",
     "docs/01-requirements/stories/**",
-    "docs/02-ux/design-system/**"
+    "docs/02-ux/design-system/**",
+    "tools/quality/required-suites.json",
+    "tools/quality/summary.schema.json"
   ],
+  "required_cases_pending": {
+    "$comment": "SEC-TC IDs taken out of the required_cases of an active suite because no test carries them on main yet (W0-ACT-1, D-QA-014). Informational: the verifier reads only required_cases. Each ID returns to its suite's required_cases in the first activation checkpoint (D-ARCH-082: Wave-0 exit, v0.1.0-m0, G3) after its owning task merges, at the latest at the checkpoint named here. tools/quality/activation.test.ts keeps this list disjoint from required_cases and limited to active suites.",
+    "unit": [
+      { "case": "SEC-TC-14", "owner": "TASK-049 (US-015 bcrypt pre-hash, 72-byte truncation)", "checkpoint": "v0.1.0-m0" },
+      { "case": "SEC-TC-55", "owner": "TASK-049 (pre-hash part) and TASK-057 (recovery-code part)", "checkpoint": "v0.1.0-m0" }
+    ],
+    "integration": [{ "case": "SEC-TC-22", "owner": "TASK-172 (US-242 tracking events, Wave 6)", "checkpoint": "G3" }],
+    "api": [{ "case": "SEC-TC-29", "owner": "TASK-020 (shared API helper asserts Cache-Control on authenticated responses) with the first authenticated route", "checkpoint": "v0.1.0-m0" }]
+  },
   "deferred_at_gate": [],
   "suites": {
     "lint": { "lane": ["A", "C"], "runner": "eslint+stylelint+prettier+commitlint+actionlint+hadolint", "security": false, "zero_skip": false, "status": "planned", "activate_with": "W0 scaffold (US-001)", "min_tests": 1, "required_cases": [], "nfr": ["NFR-MAINT-001", "NFR-MAINT-002", "NFR-I18N-001", "NFR-I18N-003", "NFR-I18N-004", "NFR-A11Y-006", "NFR-DATA-001", "NFR-SEC-010", "NFR-RES-001"] },
     "typecheck": { "lane": ["A", "C"], "runner": "tsc -b --noEmit", "security": false, "zero_skip": false, "status": "planned", "activate_with": "W0 scaffold (US-001)", "min_tests": 1, "required_cases": [], "nfr": ["NFR-MAINT-002"] },
-    "unit": { "lane": ["A", "B", "C"], "runner": "jest --selectProjects unit", "security": false, "zero_skip": false, "status": "planned", "activate_with": "W0 scaffold (US-001, US-006)", "min_tests": 1, "required_cases": ["SEC-TC-14", "SEC-TC-55"], "nfr": ["NFR-QUAL-001", "NFR-QUAL-002", "NFR-A11Y-005", "NFR-I18N-004", "NFR-MAINT-003", "NFR-DATA-002", "NFR-AUDIT-003", "NFR-SEC-003", "NFR-COMPAT-001"] },
+    "unit": { "lane": ["A", "B", "C"], "runner": "jest --selectProjects unit", "security": false, "zero_skip": false, "status": "active", "activate_with": "W0 scaffold (US-001, US-006)", "min_tests": 1, "required_cases": [], "nfr": ["NFR-QUAL-001", "NFR-QUAL-002", "NFR-A11Y-005", "NFR-I18N-004", "NFR-MAINT-003", "NFR-DATA-002", "NFR-AUDIT-003", "NFR-SEC-003", "NFR-COMPAT-001"] },
     "pricing-properties": { "lane": ["A", "C"], "runner": "jest --selectProjects unit -t @property (packages/pricing)", "security": false, "zero_skip": true, "status": "planned", "activate_with": "US-138", "min_tests": 1, "required_cases": [], "nfr": ["NFR-QUAL-003", "NFR-DATA-001"] },
     "carrier-contract": { "lane": ["A", "C"], "runner": "jest --selectProjects unit (packages/carriers/test/contract, nock)", "security": false, "zero_skip": true, "status": "planned", "activate_with": "US-125 (Mock); DHL/FedEx/UPS rows with US-131..133", "min_tests": 1, "required_cases": [], "nfr": ["NFR-QUAL-005", "NFR-RES-001", "NFR-RES-002"] },
     "route-registry": { "lane": ["A", "C"], "runner": "jest --selectProjects unit (build-time route tests)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-067", "min_tests": 1, "required_cases": [], "nfr": ["NFR-AUDIT-004", "NFR-QUAL-004", "NFR-SEC-008", "NFR-SEC-009", "NFR-PERF-006"] },
@@ -56,15 +67,15 @@
     "ci-policy": { "lane": ["A", "C"], "runner": "jest (tools/ci, tools/quality fixture tests) + stage-presence test", "security": true, "zero_skip": true, "status": "planned", "activate_with": "W0 CI (US-005)", "min_tests": 1, "required_cases": ["SEC-TC-32", "SEC-TC-45", "SEC-TC-48", "SEC-TC-51", "SEC-TC-64"], "nfr": ["NFR-OPS-003", "NFR-AVAIL-001", "NFR-OBS-004", "NFR-SEC-012"] },
     "iac": { "lane": ["A", "C"], "runner": "terraform fmt -check + validate -backend=false + checkov + trivy config", "security": false, "zero_skip": false, "status": "planned", "activate_with": "first infra/** PR", "min_tests": 1, "required_cases": [], "nfr": ["NFR-OPS-004", "NFR-SEC-007", "NFR-SCALE-003"] },
 
-    "integration": { "lane": ["B", "C"], "runner": "jest --selectProjects integration", "security": false, "zero_skip": false, "status": "planned", "activate_with": "SPK-03 / US-011", "min_tests": 1, "required_cases": ["SEC-TC-22"], "nfr": ["NFR-DATA-003", "NFR-PRIV-005", "NFR-AUDIT-007"] },
-    "catalog-c1-c14": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects integration (catalog C1-C14)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-074 (T-QA-04)", "min_tests": 14, "required_cases": ["SEC-TC-05"], "nfr": ["NFR-TENANT-001", "NFR-PRIV-003", "NFR-DATA-001", "NFR-DATA-002", "NFR-AUDIT-002"] },
+    "integration": { "lane": ["B", "C"], "runner": "jest --selectProjects integration", "security": false, "zero_skip": false, "status": "active", "activate_with": "SPK-03 / US-011", "min_tests": 1, "required_cases": [], "nfr": ["NFR-DATA-003", "NFR-PRIV-005", "NFR-AUDIT-007"] },
+    "catalog-c1-c14": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects integration (catalog C1-C14)", "security": true, "zero_skip": true, "status": "active", "activate_with": "US-074 (T-QA-04)", "min_tests": 14, "required_cases": ["SEC-TC-05"], "nfr": ["NFR-TENANT-001", "NFR-PRIV-003", "NFR-DATA-001", "NFR-DATA-002", "NFR-AUDIT-002"] },
     "rls-cross-tenant": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (RLS generator)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-077 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-06", "SEC-TC-07"], "nfr": ["NFR-TENANT-001"] },
     "rbac-matrix": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (packages/authz matrix)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-071 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-01"], "nfr": ["NFR-TENANT-002", "NFR-SEC-011", "NFR-SEC-004"] },
     "audit-generator": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (packages/audit generator)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-096 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-35"], "nfr": ["NFR-AUDIT-001", "NFR-AUDIT-006", "NFR-SEC-011"] },
     "audit-immutability": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects integration (audit roles, DDL guard, search_path)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-094", "min_tests": 1, "required_cases": ["SEC-TC-43", "SEC-TC-61"], "nfr": ["NFR-AUDIT-002"] },
     "audit-chain": { "lane": ["B", "C"], "runner": "jest --selectProjects integration (chain, checkpoints, anchors, 1M timing)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-092", "min_tests": 1, "required_cases": ["SEC-TC-16", "SEC-TC-17", "SEC-TC-44", "SEC-TC-57"], "nfr": ["NFR-AUDIT-003"] },
     "abuse": { "lane": ["B", "C"], "runner": "jest --selectProjects generated (IDOR, mass assignment) + fast-check fuzz", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-069 / US-045 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-15", "SEC-TC-30", "SEC-TC-36"], "nfr": ["NFR-SEC-011", "NFR-SEC-009"] },
-    "api": { "lane": ["B", "C"], "runner": "jest --selectProjects api (Supertest + OpenAPI validator)", "security": false, "zero_skip": false, "status": "planned", "activate_with": "US-007 / US-034", "min_tests": 1, "required_cases": ["SEC-TC-29"], "nfr": ["NFR-QUAL-004", "NFR-PRIV-004", "NFR-PERF-006", "NFR-DATA-003", "NFR-SEC-013"] },
+    "api": { "lane": ["B", "C"], "runner": "jest --selectProjects api (Supertest + OpenAPI validator)", "security": false, "zero_skip": false, "status": "active", "activate_with": "US-007 / US-034", "min_tests": 1, "required_cases": [], "nfr": ["NFR-QUAL-004", "NFR-PRIV-004", "NFR-PERF-006", "NFR-DATA-003", "NFR-SEC-013"] },
     "identity-session": { "lane": ["B", "C"], "runner": "jest --selectProjects api (identity, fake clock)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-015", "min_tests": 1, "required_cases": ["SEC-TC-02", "SEC-TC-03", "SEC-TC-11", "SEC-TC-13", "SEC-TC-37", "SEC-TC-38", "SEC-TC-46", "SEC-TC-47", "SEC-TC-56"], "nfr": ["NFR-SEC-003", "NFR-SEC-004"] },
     "csrf-cookie": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects api (cookie routes, Origin, CORS)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-018 / US-044", "min_tests": 1, "required_cases": ["SEC-TC-09", "SEC-TC-58"], "nfr": ["NFR-SEC-008", "NFR-SEC-004"] },
     "rate-limit": { "lane": ["B", "C"], "runner": "jest --selectProjects api (limit+1 per class)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-040", "min_tests": 1, "required_cases": ["SEC-TC-27", "SEC-TC-46", "SEC-TC-62"], "nfr": ["NFR-SEC-005"] },
@@ -78,7 +89,7 @@
     "redaction": { "lane": ["A", "B", "C"], "runner": "jest (unit sentinel tests + integration audit/notification/raw-payload checks)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-008 / US-091", "min_tests": 1, "required_cases": ["SEC-TC-08", "SEC-TC-19", "SEC-TC-31", "SEC-TC-52"], "nfr": ["NFR-PRIV-001", "NFR-PRIV-002", "NFR-PRIV-004"] },
     "resilience-deps": { "lane": ["B"], "runner": "jest --selectProjects integration (dependency stop/start, SIGTERM) + k6 probe", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-012", "min_tests": 1, "required_cases": ["SEC-TC-10", "SEC-TC-59"], "nfr": ["NFR-AVAIL-002"] },
     "query-plan": { "lane": ["B"], "runner": "jest --selectProjects integration (EXPLAIN registry on 100k/1M rows)", "security": false, "zero_skip": false, "status": "planned", "activate_with": "first list route (US-037)", "min_tests": 1, "required_cases": [], "nfr": ["NFR-PERF-006"] },
-    "migrations": { "lane": ["B", "C"], "runner": "jest --selectProjects integration (up-down-up, schema diff, previous-image probe)", "security": false, "zero_skip": false, "status": "planned", "activate_with": "first prisma migration", "min_tests": 1, "required_cases": [], "nfr": ["NFR-DATA-004", "NFR-AVAIL-003"] },
+    "migrations": { "lane": ["B", "C"], "runner": "jest --selectProjects integration (up-down-up, schema diff, previous-image probe)", "security": false, "zero_skip": false, "status": "active", "activate_with": "first prisma migration", "min_tests": 1, "required_cases": [], "nfr": ["NFR-DATA-004", "NFR-AVAIL-003"] },
     "observability": { "lane": ["B", "C"], "runner": "jest --selectProjects integration (log schema, metrics scrape, in-memory traces)", "security": false, "zero_skip": false, "status": "planned", "activate_with": "US-008", "min_tests": 1, "required_cases": [], "nfr": ["NFR-OBS-001", "NFR-OBS-002", "NFR-OBS-003", "NFR-SCALE-003"] },
     "compose-up": { "lane": ["B", "C"], "runner": "tools/quality compose timer + smoke", "security": false, "zero_skip": false, "status": "planned", "activate_with": "US-003", "min_tests": 1, "required_cases": [], "nfr": ["NFR-OPS-001"] },
     "image-assertions": { "lane": ["B", "C"], "runner": "hadolint + parsed Dockerfile assertions + size budgets + docker history/gitleaks", "security": false, "zero_skip": false, "status": "planned", "activate_with": "US-004", "min_tests": 1, "required_cases": [], "nfr": ["NFR-OPS-002"] },
@@ -203,11 +214,11 @@
     },
     {
       "id": "docs-or-ci-only",
-      "globs": ["docs/**", ".github/**"],
+      "globs": ["docs/**", ".github/**", ".claude/agent-memory/*/*.md"],
       "exclude": ["docs/03-architecture/api/**", "docs/05-quality/tests/gherkin-test-map.md", "docs/01-requirements/stories/**", "docs/02-ux/design-system/**"],
       "profile_min": "none",
       "suites": [],
-      "note": "Lane A only. .github/** is security-critical (SEC-P3-31): security-analyst review in the DoD."
+      "note": "Lane A only. .github/** is security-critical (SEC-P3-31): security-analyst review in the DoD. The agent-note glob is the staleness constant AGENT_MEMORY_GLOB of lib/manifest.mjs (D-SEC-PR28-01); tools/quality/lib/manifest.test.ts keeps the two equal."
     }
   ]
 }

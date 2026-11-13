@@ -98,7 +98,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-061 **DC** (M0 Must) Organisation types and the single operator organisation<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-001, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074 |
+| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074, PR26-SEC-03, D-ARCH-091, D-SEC-PR26-01 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-013, TASK-016, TASK-024, TASK-029, TASK-032 |
@@ -119,6 +119,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - DR-A14 APPLICATION (data-model §4.3 as amended 2026-11-13; D-ARCH-072): the `organisations` and `memberships` RLS blocks are rendered by `tools/db/render-rls.ts` from the manifest entries (`policySet`) and pasted verbatim — `p_organisations__active` / `__member_read` (positive list `IN ('ACTIVE','SUSPENDED')`) / `__operator` / `__definer_read`, `p_memberships__tenant` / `__own_read` / `__operator` / `__definer_read`; migration order follows the prefix-safety principle (data-model §8.3): CREATE TABLE → ENABLE + FORCE → policies → GRANT (rule 9 b), then the `app_is_operator()` template inside one `SET ROLE platform_definer; … RESET ROLE;` block after both definer-read policies, preceded by `GRANT EXECUTE ON FUNCTION platform.app_actor_id() TO platform_definer` as the migrator (D-TASK016-01 decision 3 accepted, D-ARCH-071); `down.sql` is prefix-idempotent (rule 17) and the up-down-up prefix check passes
 - Catalog adaptation (PR #11 `plantProbe`, C11, C3): the probe no longer plants `memberships`/`organisations` nor renders `app_is_operator()` (the real objects exist); C11 expects `platform.app_actor_id()` EXECUTE for `platform_app`, `platform_migrator` AND `platform_definer`, and `platform.app_is_operator()` owned by `platform_definer`, SECURITY DEFINER, fixed search_path, EXECUTE for `platform_app` only; the C3 derived set includes the DR-A14 policies; `memberships` policies contain no subquery (recursion invariant); C2 special-cases `organisations` on `id`; C12 context probes (org A sees its organisation and memberships only; an actor sees own memberships across orgs; a customer with `app.actor_scope = OPERATOR` forced still sees nothing of org B because `app_is_operator()` is false)
 - MERGE CONDITION (PR11-SEC-10; PR #11 security review §5 ruling 5; D-ARCH-072): security-analyst signs off the rendered DR-A14 policies in the change-scoped review — positive status lists, exact EXISTS shapes, no context value under coalesce/NOT/IS DISTINCT FROM, recursion invariant, grant order — before merge
+- STANDARD-COLUMNS GUARD APPLICATION (PR26-SEC-03; D-ARCH-091; data-model §7.6 amendment of 2026-11-13; ADR-0009 am. 1): the PREREQUISITES CHECK above also requires that TASK-024 has merged `prisma/sql/function-templates/std-columns-guard.sql`, the manifest-driven `trg_<table>__std_columns` rendering and catalog C15 — if any is missing this task reports BLOCKED naming it. The FIRST migration that creates a runtime-writable standard-column table creates platform.std_columns_guard() from the template verbatim (as the migrator, plain CREATE FUNCTION, SECURITY INVOKER) and the rendered trigger on every STD table it creates (organisations, memberships, invitations, and users if created here), pasted verbatim and never hand-written; C15 has its first instances and the planted-forgery matrix is green on them; DUE before this task merges (merge condition, security sign-off together with the DR-A14 policies). The other checks that the PR #26 security record section 5 assigns to this task stay binding (D-SEC-PR26-01): PR26-SEC-01 and -02 closed in PR #26, the PR26-SEC-06 parity assertion (every model field whose dbName is one of the eight server column names id, created_at, updated_at, created_by, updated_by, version, org_id, on_behalf_of_org_id is named as the extension expects, and the converse), a planted-row control for an UPDATE that re-parents org_id, the first on_behalf_of_org_id column with ck_<table>__on_behalf_null_m1 (the catalog-std rule gets its first instance), and users rows with is_system for exactly the two reserved ids (PR26-SEC-04)
 - AT-US-061-01 … AT-US-061-05: all 5 scenarios of US-061, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-062-01 … AT-US-062-06: all 6 scenarios of US-062, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -409,7 +410,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-078 **DC** (M0 Must) Tenant context in worker jobs |
 | REQs | REQ-RLS-008 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | SEC-P3-12, D-ARCH-025, D-062, PR19-SEC-01, D-ARCH-080 |
+| Spikes / security / decisions | SEC-P3-12, D-ARCH-025, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-086, D-ORCH-033 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-043, TASK-016 |
@@ -420,12 +421,14 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - prisma/migrations/<ts>_platform_job_context (SECURITY DEFINER, owner platform_definer, catalog C11)
 - apps/worker/src/platform/job-context.ts
+- apps/worker/src/platform/db/ (worker withTenantTx twin: per-tenant admission bulkhead inherited from TASK-025, D-ARCH-086)
 
 **Acceptance tests to write**
 - All US-078 scenarios
 - SEC-TC-20 (mandatory): processor resolves org_id from PostgreSQL; a forged org_id in Redis has no effect
 - SEC-TC-50 (payload part): job payloads in Redis contain identifiers only
 - D-062 note: this task is NOT an owner of AT-US-008-03 — its job-context.ts edits must keep the TASK-010 correlation binding (the TASK-035 line and the TASK-092 end-to-end test catch a regression); PR19-SEC-01 CONSUMER (D-ARCH-080): job_context and processed_events are reached in the worker only through the worker platform twin of systemDelegates
+- ADMISSION BULKHEAD INHERITANCE (D-ARCH-086, D-ORCH-033 (4); data-model §7.7; TASK-025, batch 0.7, precedes this task): the worker withTenantTx twin admits at most DB_TENANT_MAX_CONCURRENT_TX concurrent job transactions per admission key per process BEFORE pool checkout, with the FIFO wait DB_TENANT_ADMISSION_WAIT_MS and queue depth 2 x cap — key rule as TASK-025 (the org_id resolved by platform.job_context; anonymous for an empty org id; operator for OPERATOR scope) — by reusing apps/api/src/platform/db/tenant-admission.ts (imported through the runtime door, or copied under a shared test that keeps both in lock-step; no second divergent implementation) and the TASK-025 configuration keys (no new keys); a rejection is the retryable 503 TENANT_CONCURRENCY_LIMIT, which surfaces to the BullMQ attempts and backoff policy (no new retry mechanism); test: with the cap at 2, three concurrent steps of one organisation make the third wait and then fail retryably while a step of another organisation completes (worker twin of the TASK-033 two-tenant scenario)
 - AT-US-078-01 … AT-US-078-04: all 4 scenarios of US-078, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

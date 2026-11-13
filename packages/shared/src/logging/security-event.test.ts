@@ -31,32 +31,60 @@ function readmePath(): string {
   }
 }
 
-/** The first-column names of the table under the `## 13.` heading. */
-function catalogueFromReadme(): string[] {
+const RUNTIME_HEADING = '### Runtime integrity events';
+
+/**
+ * The lines of README §13: `main` is the request-path catalogue (SEC-TC-63 parity), `runtime` the "Runtime integrity
+ * events" subsection, which is not part of that parity (D-ARCH-081 (4)).
+ */
+function section13(): { readonly main: string[]; readonly runtime: string[] } {
   const lines = readFileSync(readmePath(), 'utf8').split(/\r?\n/);
   const start = lines.findIndex((line) => line.startsWith('## 13.'));
   if (start < 0) throw new Error('README has no "## 13." section');
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith('## '));
+  const section = end < 0 ? rest : rest.slice(0, end);
+  const split = section.findIndex((line) => line.startsWith(RUNTIME_HEADING));
+  if (split < 0) throw new Error(`README §13 has no "${RUNTIME_HEADING}" subsection`);
+  return { main: section.slice(0, split), runtime: section.slice(split + 1) };
+}
+
+/** The first-column names of the main table under the `## 13.` heading. */
+function catalogueFromReadme(): string[] {
   const names: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (line.startsWith('## ')) break;
+  for (const line of section13().main) {
     const match = /^\|\s*`([^`]+)`\s*\|/.exec(line);
     if (match?.[1] !== undefined && match[1] !== 'event') names.push(match[1]);
   }
   return names;
 }
 
-/** Event name -> "Extra fields" cell of the README §13 table. */
+/** Event name -> "Extra fields" cell of the README §13 main table. */
 function extraFieldsFromReadme(): Map<string, string> {
-  const lines = readFileSync(readmePath(), 'utf8').split(/\r?\n/);
-  const start = lines.findIndex((line) => line.startsWith('## 13.'));
   const cells = new Map<string, string>();
-  for (const line of lines.slice(start + 1)) {
-    if (line.startsWith('## ')) break;
+  for (const line of section13().main) {
     const columns = line.split('|').map((column) => column.trim());
     const match = /^`([^`]+)`$/.exec(columns[1] ?? '');
     if (match?.[1] !== undefined && columns[3] !== undefined) cells.set(match[1], columns[3]);
   }
   return cells;
+}
+
+interface RuntimeRow {
+  readonly fields: string[];
+  readonly level: string;
+}
+
+/** Event name -> allowed fields and level of the README §13 runtime-events table (Source | Event | Emitted when | Allowed fields | Level). */
+function runtimeEventsFromReadme(): Map<string, RuntimeRow> {
+  const rows = new Map<string, RuntimeRow>();
+  for (const line of section13().runtime) {
+    const columns = line.split('|').map((column) => column.trim());
+    const match = /^`([a-z][a-z0-9_]*)`$/.exec(columns[2] ?? '');
+    if (match?.[1] === undefined || columns[4] === undefined || columns[5] === undefined) continue;
+    rows.set(match[1], { fields: columns[4].split(',').map((field) => field.trim()), level: columns[5] });
+  }
+  return rows;
 }
 
 function recordingLogger(): { readonly logger: PlatformLogger; readonly lines: () => Record<string, unknown>[] } {
@@ -84,7 +112,25 @@ describe('security event catalogue', () => {
         expect({ name, field, documented: cell.includes(field) || cell.includes(words) }).toEqual({ name, field, documented: true });
       }
     }
-    for (const name of RUNTIME_SECURITY_EVENTS) expect(SECURITY_EVENT_FIELDS[name]).toEqual(['sql_state']);
+  });
+
+  it('[D-ARCH-081 (4)] runtime events, their allow-lists and levels equal the README §13 runtime-events table, per event', () => {
+    const documented = runtimeEventsFromReadme();
+    // The same set in both directions (the runtime table is not ordered like the constant).
+    expect([...documented.keys()].sort()).toEqual([...RUNTIME_SECURITY_EVENTS].sort());
+    for (const name of RUNTIME_SECURITY_EVENTS) {
+      expect({ name, fields: SECURITY_EVENT_FIELDS[name], level: SECURITY_EVENT_LEVEL[name] }).toEqual({
+        name,
+        fields: documented.get(name)?.fields,
+        level: documented.get(name)?.level,
+      });
+    }
+    // Pinned here as well, so a README edit alone cannot widen an allow-list.
+    expect(SECURITY_EVENT_FIELDS.audit_mutation_rejected).toEqual(['sql_state']);
+    expect(SECURITY_EVENT_FIELDS.audit_partition_squatted).toEqual(['partition_name', 'kind', 'reason', 'sql_state']);
+    for (const name of RUNTIME_SECURITY_EVENTS.filter((event) => event !== 'audit_partition_squatted')) {
+      expect({ name, fields: SECURITY_EVENT_FIELDS[name] }).toEqual({ name, fields: ['sql_state'] });
+    }
   });
 
   it('has a level for every event, errors for integrity, live-key and runtime database failures', () => {
@@ -96,6 +142,8 @@ describe('security event catalogue', () => {
     expect(errors).toEqual([
       'audit_anchor_missing',
       'audit_chain_broken',
+      'audit_mutation_rejected',
+      'audit_partition_squatted',
       'audit_write_failed',
       'db_privilege_denied',
       'db_role_setting_drift',

@@ -37,6 +37,26 @@ describe('securityEventSinkFrom', () => {
     for (const line of lines) expect(Object.keys(line).filter((key) => !standard.has(key) && key !== 'sql_state')).toEqual([]);
   });
 
+  it('[D-ARCH-081 (4)] audit_partition_squatted carries partition_name, kind and reason in snake_case, nothing dropped', () => {
+    const raw: string[] = [];
+    const sink = securityEventSinkFrom(createRuntimeLog('api', { write: (line: string) => raw.push(line) }));
+    sink.emit('audit_partition_squatted', { partitionName: 'audit_entries_2030_01', kind: 'type', reason: 'not_a_table', owner: 'x' });
+    sink.emit('audit_mutation_rejected', { sqlState: '42501', table: 'audit_entries_2026_11' });
+    const lines = raw.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(
+      lines.map((line) => [line['level'], line['event_type'], line['event'], line['partition_name'], line['kind'], line['reason']]),
+    ).toEqual([
+      ['error', 'security', 'audit_partition_squatted', 'audit_entries_2030_01', 'type', 'not_a_table'],
+      ['error', 'security', 'audit_mutation_rejected', undefined, undefined, undefined],
+    ]);
+    expect(lines[1]?.['sql_state']).toBe('42501');
+    // Attributes outside the allow-list are dropped and counted (an owner or a table name never rides along).
+    expect(lines.map((line) => [line['owner'], line['table'], line['dropped_attributes']])).toEqual([
+      [undefined, undefined, 1],
+      [undefined, undefined, 1],
+    ]);
+  });
+
   it('drops null attributes and routes by the catalogue level', () => {
     const calls: Array<[string, string, unknown]> = [];
     const sink = securityEventSinkFrom({
@@ -63,6 +83,8 @@ describe('securityEventSinkFrom', () => {
       'db_session_context_leak',
       'rls_write_rejected',
       'db_privilege_denied',
+      'audit_mutation_rejected',
+      'audit_partition_squatted',
     ];
     expect([...emitted].sort()).toEqual([...RUNTIME_SECURITY_EVENTS].sort());
     const levels: string[] = [];

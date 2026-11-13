@@ -34,7 +34,8 @@ export const SECURITY_EVENTS = [
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number];
 
 /**
- * Runtime database events (TASK-016: session integrity, `with-tenant-tx` mapping); routed through the same sink but
+ * Runtime database events (TASK-016: session integrity, `with-tenant-tx` mapping; TASK-021: audit immutability and
+ * partition squats, D-ARCH-081 (4)); routed through the same sink but
  * not part of the README catalogue (api-designer change request, D-TASK010-01). apps/api asserts at type level that
  * every event its database runtime emits is listed here (PR #20 m3).
  */
@@ -44,6 +45,8 @@ export const RUNTIME_SECURITY_EVENTS = [
   'db_session_context_leak',
   'rls_write_rejected',
   'db_privilege_denied',
+  'audit_mutation_rejected',
+  'audit_partition_squatted',
 ] as const;
 export type RuntimeSecurityEventName = (typeof RUNTIME_SECURITY_EVENTS)[number];
 
@@ -81,11 +84,14 @@ export const SECURITY_EVENT_LEVEL: Readonly<Record<SecurityEventName | RuntimeSe
   db_session_context_leak: 'error',
   rls_write_rejected: 'error',
   db_privilege_denied: 'error',
+  audit_mutation_rejected: 'error',
+  audit_partition_squatted: 'error',
 };
 
 /**
  * Attributes each event may carry, in the snake_case form written to the line: the "Extra fields" column of
- * api/README.md §13 (SEC-TC-63 checks every key against that column) plus `sql_state` for the runtime events. An
+ * api/README.md §13 (SEC-TC-63 checks every key against that column) plus the runtime-events table of §13 for the
+ * runtime events (`sql_state`; the partition squat also carries `partition_name`, `kind` and `reason`). An
  * ALLOW-list (PR #20 m2, PR20-SEC-05): any other attribute is dropped and counted in `dropped_attributes`, so a raw
  * identifier, IP or name can never ride along under an unlisted key. `correlationId` is lifted into the standard
  * `correlation_id` key for every event. The coarse IP of the §13 header is not an attribute yet (first authn /
@@ -119,6 +125,8 @@ export const SECURITY_EVENT_FIELDS: Readonly<Record<SecurityEventName | RuntimeS
   db_session_context_leak: ['sql_state'],
   rls_write_rejected: ['sql_state'],
   db_privilege_denied: ['sql_state'],
+  audit_mutation_rejected: ['sql_state'],
+  audit_partition_squatted: ['partition_name', 'kind', 'reason', 'sql_state'],
 };
 
 /** Emitted instead of an event whose name is not a valid event identifier. */

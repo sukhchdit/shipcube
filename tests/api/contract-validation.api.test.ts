@@ -9,6 +9,7 @@ import { GENERIC_SERVER_DETAIL } from '../../apps/api/src/platform/errors/proble
 import { createHealthRouter } from '../../apps/api/src/platform/health/router.js';
 import {
   createReadinessProbe,
+  isCriticalComponent,
   READINESS_COMPONENTS,
   type ReadinessCheck,
   type ReadinessComponent,
@@ -21,15 +22,16 @@ const silent = { info: () => undefined, debug: () => undefined, error: () => und
 const appWith = (healthRouter: Router, modules: { name: string; router: Router }[] = []) =>
   createApp({ healthRouter, modules, logger: silent });
 
-const CRITICAL: readonly ReadinessComponent[] = ['database', 'redis', 'object_storage'];
-const checks = (failing: readonly ReadinessComponent[] = []): ReadinessCheck[] =>
+/** Every component passes, except `failing` (rejects) and `late` (resolves 'degraded', a degradable outcome). */
+const checks = (failing: readonly ReadinessComponent[] = [], late: readonly ReadinessComponent[] = []): ReadinessCheck[] =>
   READINESS_COMPONENTS.map((name) => ({
     name,
-    critical: CRITICAL.includes(name),
-    check: () => (failing.includes(name) ? Promise.reject(new Error('down')) : Promise.resolve()),
+    critical: isCriticalComponent(name),
+    check: () =>
+      failing.includes(name) ? Promise.reject(new Error('down')) : Promise.resolve(late.includes(name) ? 'degraded' : undefined),
   }));
-const healthApp = (failing: readonly ReadinessComponent[] = []) =>
-  appWith(createHealthRouter({ probe: createReadinessProbe(checks(failing), { cacheTtlMs: 0 }) }));
+const healthApp = (failing: readonly ReadinessComponent[] = [], late: readonly ReadinessComponent[] = []) =>
+  appWith(createHealthRouter({ probe: createReadinessProbe(checks(failing, late), { cacheTtlMs: 0 }) }));
 
 const CORRELATION_ID = 'c0ffee00-1234-4abc-9def-001122334455';
 const problem = (code: string, status: number, extra: Record<string, unknown> = {}) => ({
@@ -107,6 +109,21 @@ describe('US-034 response validation helper', () => {
       .get('/health/ready')
       .expect(503)
       .expect((res) => expect(res.body).toMatchObject({ status: 'unavailable' }));
+  });
+
+  it('[D-ARCH-081] the three audit_partitions states conform: unavailable (503) and degraded (200)', async () => {
+    const missingMonth = await api(healthApp(['audit_partitions']));
+    await missingMonth
+      .get('/health/ready')
+      .expect(503)
+      .expect((res) =>
+        expect(res.body).toMatchObject({ status: 'unavailable', components: { audit_partitions: 'unavailable', database: 'ok' } }),
+      );
+    const lateMonth = await api(healthApp([], ['audit_partitions']));
+    await lateMonth
+      .get('/health/ready')
+      .expect(200)
+      .expect((res) => expect(res.body).toMatchObject({ status: 'degraded', components: { audit_partitions: 'degraded' } }));
   });
 
   it('framework errors conform: unknown route 404 NOT_FOUND and wrong method 405 with Allow', async () => {
