@@ -14,7 +14,7 @@
  *    partitions) and writes the evidence: host-spec.json, k6-audit-ab.summary.json, summary.json, summary.md.
  *
  * Environment: SPK04_RATE (300), SPK04_WARMUP_S (20), SPK04_MEASURE_S (120), SPK04_REPS (2), SPK04_OUT (default
- * docs/05-quality/performance/runs/<UTC stamp>_<sha7>), SPK04_PORT_BASE (4101).
+ * docs/05-quality/performance/spikes/SPK-04/<UTC stamp>_<sha7>), SPK04_PORT_BASE (4101).
  */
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -645,7 +645,7 @@ async function main(): Promise<void> {
     .toISOString()
     .replace(/[-:]/g, '')
     .replace(/\.\d{3}Z$/, 'Z');
-  const outDir = process.env['SPK04_OUT'] ?? join(repoRoot, 'docs', '05-quality', 'performance', 'runs', `${stamp}_${sha}`);
+  const outDir = process.env['SPK04_OUT'] ?? join(repoRoot, 'docs', '05-quality', 'performance', 'spikes', 'SPK-04', `${stamp}_${sha}`);
   const work = mkdtempSync(join(tmpdir(), 'spk04-'));
   log(`SPK-04 rate ${String(RATE)} reps ${String(REPS)} -> ${outDir}`);
   const pgh = await PlatformPostgres.start();
