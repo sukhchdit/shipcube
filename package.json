@@ -39,7 +39,7 @@
     "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects integration",
     "test:api": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects api --passWithNoTests",
     "test:contract": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js tests/generated tools/openapi --selectProjects unit",
-    "test:coverage": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --coverage",
+    "test:coverage": "node tools/ci/coverage-run.mjs",
     "coverage:gate": "node tools/ci/coverage-gate.mjs",
     "coverage:diff": "node tools/ci/diff-coverage.mjs",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",

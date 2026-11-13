@@ -35,6 +35,11 @@ function suite(status: 'planned' | 'active' | 'opt-in', extra: Record<string, un
   return { lane: ['B'], security: false, zero_skip: false, status, min_tests: 1, required_cases: [], ...extra };
 }
 
+/** Overrides that keep every fixture suite and set the required_cases of unit. */
+function unitCases(cases: string[]): Record<string, unknown> {
+  return { suites: { ...(fixture().suites as Record<string, unknown>), unit: suite('active', { required_cases: cases }) } };
+}
+
 function fixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     manifest_version: 1,
@@ -359,8 +364,16 @@ describe('parseManifest structural validation', () => {
     ['unsafe glob', { tooling_inputs: ['docs/../x'] }],
     ['deferral without a decision ID', { deferred_at_gate: [{ suite: 'unit', decision: 'because' }] }],
     ['malformed required case', { suites: { unit: suite('active', { required_cases: ['TC-1'] }) } }],
+    ['coverage case without a metric', unitCases(['coverage gate: overall'])],
+    ['coverage case with an inactive suffix', unitCases(['coverage gate: packages/audit (inactive)'])],
+    ['coverage case outside the gate prefix', unitCases(['coverage merge: project unit measured'])],
   ])('throws on %s', (_title, override) => {
     expect(() => parseManifest(fixture(override))).toThrow(ManifestError);
+  });
+
+  it('[PR33-SEC-06] required_cases accept SEC-TC IDs and the exact US-006 gate case names', () => {
+    const ids = ['SEC-TC-01', 'coverage gate: overall lines', 'coverage gate: packages/authz branches'];
+    expect(parseManifest(fixture(unitCases(ids))).suites['unit']?.required_cases).toEqual(ids);
   });
 
   it('the repository manifest at its canonical location loads', () => {
