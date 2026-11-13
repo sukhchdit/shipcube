@@ -204,7 +204,12 @@ describe('US-034 response validation helper', () => {
       method: 'POST',
       path: '/health/live',
       status: 405,
-      headers: { 'content-type': 'application/problem+json', 'cache-control': 'no-store', 'x-correlation-id': CORRELATION_ID, allow: 'GET, HEAD' },
+      headers: {
+        'content-type': 'application/problem+json',
+        'cache-control': 'no-store',
+        'x-correlation-id': CORRELATION_ID,
+        allow: 'GET, HEAD',
+      },
       body: problem('METHOD_NOT_ALLOWED', 405, { instance: '/health/live' }),
     });
     expect(validator.validateResponse(methodNotAllowed)).toEqual([
