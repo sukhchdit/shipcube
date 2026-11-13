@@ -8,16 +8,18 @@ The contract is `docs/03-architecture/api/openapi.yaml` (REQ-API-002); conventio
 | `npm run openapi:types` | Regenerates `packages/shared/src/api/types.gen.ts` (openapi-typescript 7, `alphabetize` + `immutable`, Prettier-formatted). Commit the result with the contract change. |
 | `npm run openapi:types -- --check` | Exits 1 printing `stale: packages/shared/src/api/types.gen.ts` when the committed file does not match the contract (AT-US-035-03). |
 
-## Route/document drift (`drift.ts`, `drift.test.ts`)
+## Route/document drift (`drift.ts`; suite `tests/generated/contract-drift.test.ts`)
 
-The unit test builds the composed app (`createApp` with the real health router, the module registry and the docs UI;
-`api-mounts.ts`) and walks its router stack from the top. Routers mounted under a path are resolved only against the
+The unit suite builds the composed app (`createApp` with the real health routes, the module registry and the docs UI;
+`tests/generated/api-mounts.ts`, which reaches apps/api through TypeScript project references) and walks its router stack from the top. Routers mounted under a path are resolved only against the
 literal mount paths app.ts uses (`/api/v1`, `/api/docs`); `/api/docs` is the one explicit exclusion (api/README.md
 §15). Middleware mounted without a path is skipped (it serves no route). The test fails, naming `METHOD path`, on:
 
 - a mounted route the document lacks (`undocumented-route`), or a layer the walker cannot resolve
   (`unrecognised-route`): a router or a handler mounted under any other path (`router.use('/webhooks/x', handler)`
-  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app, RegExps,
+  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app (wrapped by an app, or path-less on a Router), a
+  RegExp or parameterised mount whose matcher captures parameters for the literal path (a RegExp with alternation),
+  RegExp route paths,
   `all()` and optional/wildcard paths;
 - the implemented-operations ledger disagreeing with what is mounted (`not-mounted`, `not-in-ledger`, `unknown-ledger-entry`);
 - any documented operation without a success/request example, a non-empty `x-error-codes`, an `x-permission` (with a

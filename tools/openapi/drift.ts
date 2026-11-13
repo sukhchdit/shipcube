@@ -64,6 +64,8 @@ export interface MountedRoute {
   readonly key: string;
   /** Set when the layer could not be resolved to a method and path; reported as `unrecognised-route`. */
   readonly unrecognised?: string;
+  /** The route's last handler (the defineRoute registry key, TASK-020); absent for unrecognised layers. */
+  readonly handler?: unknown;
 }
 
 export interface DriftInput {
@@ -113,11 +115,27 @@ function routeLayer(prefix: string, route: Readonly<Record<string, unknown>>): M
   if (!isRecord(methods)) return [unrecognised(full, 'route has no methods map')];
   const names = Object.keys(methods).filter((name) => methods[name] === true);
   if (names.includes('_all')) return [unrecognised(full, 'router.all() route matches every method')];
-  return names.map((name) => ({ method: name.toUpperCase(), path: full, key: routeKey(name, full) }));
+  const handlers = Array.isArray(route.stack) ? (route.stack as readonly unknown[]) : [];
+  const last = handlers.at(-1);
+  const handler = isRecord(last) ? last.handle : undefined;
+  return names.map((name) => ({ method: name.toUpperCase(), path: full, key: routeKey(name, full), handler }));
 }
 
 /** Name of the function Express 5 wraps around a mounted sub-app (`express/lib/application.js`). */
 const SUB_APP_HANDLER = 'mounted_app';
+
+/**
+ * An Express application used as middleware on a Router (`routes.use(express())`): Router.use does not wrap it, so it
+ * keeps the name `app`; duck-typed by the two functions every application has (PR #21 code review R3-n2).
+ */
+const isSubApp = (handle: unknown): boolean =>
+  typeof handle === 'function' &&
+  typeof (handle as { handle?: unknown }).handle === 'function' &&
+  typeof (handle as { set?: unknown }).set === 'function';
+
+/** Parameters the layer's matcher captured for the last path it matched (a RegExp group, a `:param`). */
+const capturedParams = (layer: Readonly<Record<string, unknown>>): boolean =>
+  isRecord(layer.params) && Object.keys(layer.params).length > 0;
 
 /** A path segment no literal mount path contains: a layer that also matches it has a parameter or wildcard there. */
 const PROBE_SEGMENT = '__drift_probe__';
@@ -138,7 +156,8 @@ const withInsertedSegment = (segments: readonly string[], index: number): string
 /**
  * The mount path of a router layer mounted under a path, relative to `prefix`, when the layer matches one of the
  * candidate paths literally. Proven by probing the layer's own matcher:
- * - it has one matcher (an array mount such as `['/api/v1', '/hidden']` serves paths the walk would never see);
+ * - it has one matcher (an array mount such as `['/api/v1', '/hidden']` serves paths the walk would never see), and it
+ *   captures no parameter for the candidate (a RegExp mount with alternation, R3-m1);
  * - it matches the candidate, and no variant with any one segment replaced by a probe segment (so `/api/:version` or
  *   `/*rest` is never taken for `/api/v1`);
  * - it matches no variant with a probe segment inserted before the last segment (`/api{/:v}/v1`), and a probe segment
@@ -151,6 +170,9 @@ function resolveMountPath(layer: Readonly<Record<string, unknown>>, prefix: stri
     if (prefix !== '' && !full.startsWith(`${prefix}/`)) continue;
     const relative = full.slice(prefix.length);
     if (!layerMatches(layer, relative)) continue;
+    // A matcher that captures parameters for the literal candidate is not that literal: a RegExp mount with
+    // alternation (`/^/api/(v1|v2)/`) matches `/api/v1` and serves `/api/v2` too (PR #21 code review R3-m1).
+    if (capturedParams(layer)) continue;
     const segments = relative.split('/');
     const substituted = segments.some(
       (segment, index) => segment !== '' && layerMatches(layer, segments.map((s, i) => (i === index ? PROBE_SEGMENT : s)).join('/')),
@@ -187,7 +209,8 @@ function walk(router: unknown, prefix: string, depth: number, out: MountedRoute[
       // Mounted without a path: a router is recursed; middleware (`router.use(fn)`) serves no route of its own, but an
       // Express sub-app (`use(express())`, wrapped as `mounted_app`) serves whatever it holds: never skipped.
       if (isRouter) walk(handle, prefix, depth + 1, out, options);
-      else if (layer.name === SUB_APP_HANDLER) out.push(unrecognised(prefix || '/', 'Express sub-app mounted without a path'));
+      else if (layer.name === SUB_APP_HANDLER || isSubApp(handle))
+        out.push(unrecognised(prefix || '/', 'Express sub-app mounted without a path'));
       continue;
     }
     if (!isRouter) {
