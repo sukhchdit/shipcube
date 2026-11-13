@@ -273,7 +273,8 @@ const RULES: readonly Violation[] = [
       ['bad-undici', [TENANT_TX_IO, OUTBOUND_HTTP]],
       ['bad-http', [TENANT_TX_IO, OUTBOUND_HTTP]],
       ['bad-ioredis', TENANT_TX_IO],
-      ['bad-aws-sdk', TENANT_TX_IO],
+      // PR #32 M1: a module service importing the AWS SDK (a value and a type import) is also outside the S3 seam.
+      ['bad-aws-sdk', [TENANT_TX_IO, 'no-restricted-imports', 'no-restricted-imports']],
       ['bad-stripe', TENANT_TX_IO],
       ['bad-nodemailer', TENANT_TX_IO],
       ['bad-name-list', TENANT_TX_IO],
@@ -297,6 +298,68 @@ const RULES: readonly Violation[] = [
     'rules/no-external-calls-in-tenant-tx/packages/carriers/src/bad-bullmq.ts',
     TENANT_TX_IO,
     "'Queue' (bullmq)",
+  ],
+  // D-ARCH-106 (5)/(7), PR32-SEC-01 (security condition C1), PR #32 code review m4: the roots R2, R3, R5 and R6. A
+  // fixture with N findings of the rule lists the rule N times.
+  ...(
+    [
+      [
+        'R2 inline defineRoute handler: fetch plus a setTimeout sleep',
+        'routes/bad-handler-inline',
+        [TENANT_TX_IO, TENANT_TX_IO, OUTBOUND_HTTP],
+        '',
+      ],
+      [
+        'R3 named same-file handlers (function declaration, const arrow)',
+        'routes/bad-handler-named',
+        [TENANT_TX_IO, TENANT_TX_IO],
+        'sleeps inside a defineRoute handler',
+      ],
+      ['R2 deps.queue.add() in a handler', 'routes/bad-handler-queue', TENANT_TX_IO, 'runs inside a defineRoute handler'],
+      [
+        'R2 handler() {} and async handler() {} method shorthand',
+        'routes/bad-handler-method',
+        [TENANT_TX_IO, TENANT_TX_IO],
+        'runs inside a defineRoute handler',
+      ],
+      [
+        "R2 a spread without transaction: 'none', a spread after it, a non-literal value",
+        'routes/bad-handler-spread',
+        [TENANT_TX_IO, TENANT_TX_IO, TENANT_TX_IO],
+        'runs inside a defineRoute handler',
+      ],
+      ["R2 fixtureRoute with transaction: 'tenant'", 'routes/bad-fixture-route-tenant', TENANT_TX_IO, 'runs inside a defineRoute handler'],
+      ['R6 create(db: AppDb) calling fetch', 'service/bad-app-db', [TENANT_TX_IO, OUTBOUND_HTTP], ''],
+      [
+        'R6 a service method with db: TenantDb calling deps.queue.add()',
+        'service/bad-tenant-db-service',
+        TENANT_TX_IO,
+        'runs inside a function that receives a tenant transaction handle',
+      ],
+      [
+        'R6 TenantDb<X>, Db.AppTransactionClient with a default value, a destructured TenantDb',
+        'service/bad-tx-handle-forms',
+        [TENANT_TX_IO, TENANT_TX_IO, TENANT_TX_IO],
+        'runs inside a function that receives a tenant transaction handle',
+      ],
+    ] as const
+  ).map(([title, name, ruleId, message]): Violation => [
+    `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: ${title}`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/${name}.ts`,
+    ruleId,
+    message,
+  ]),
+  [
+    `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R5 a function in a txFiles file (apps/api/src/platform/audit/)`,
+    'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/audit/bad-audit-hook.ts',
+    TENANT_TX_IO,
+    'runs inside a tenant-transaction file',
+  ],
+  [
+    `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R6 is type-name based (ctx: CarrierContext, db: DatabaseRuntime and a TenantDb callback type are not roots; only outbound-http fires)`,
+    'rules/no-external-calls-in-tenant-tx/packages/carriers/src/ok-carrier-context.ts',
+    OUTBOUND_HTTP,
+    '',
   ],
   // PR20-SEC-13 item 4 (a) and (b).
   ...[
@@ -327,6 +390,23 @@ const RULES: readonly Violation[] = [
     'no-restricted-imports',
     "import 'supertest' only in tests/api/helpers",
   ],
+  ...(
+    [
+      ['RegExp literal paths in app.use and router.get', 'bad-regexp-literal', 2],
+      ['new RegExp(...), RegExp(...) and a RegExp in an array of paths', 'bad-regexp-constructor', 3],
+    ] as const
+  ).map(([title, name, count]): Violation => [
+    `[PR #32 m5] [PR32-SEC-11] no-restricted-syntax: ${title}`,
+    `rules/regexp-route-path/apps/api/src/platform/http/${name}.ts`,
+    Array.from({ length: count }, () => 'no-restricted-syntax'),
+    'OpenAPI drift walker',
+  ]),
+  ...[`${API}/documents/service/bad-s3-client.ts`, 'packages/carriers/src/bad-sigv4.ts'].map((path): Violation => [
+    `[PR #32 M1] [D-ARCH-097] no-restricted-imports: the S3 SDK outside apps/api/src/platform/storage (${path})`,
+    `rules/s3-sdk-confinement/${path}`,
+    'no-restricted-imports',
+    'only apps/api/src/platform/storage imports the AWS SDK',
+  ]),
   // Output folders are ignored only at the root and the workspace roots: a source folder named coverage/build/dist is linted.
   ...['packages/shared/src/coverage/bad-coverage.ts', `${API}/shipments/build/bad-build.ts`, 'packages/carriers/src/dist/bad-dist.ts'].map(
     (path): Violation => [`source folder is linted, not ignored: ${path}`, `rules/output-ignores/${path}`, 'no-console', ''],
@@ -583,6 +663,37 @@ const TENANT_DB: readonly Violation[] = [
     'rules/system-model-owner/apps/api/src/platform/outbox/bad-accessor-alias.ts',
     'platform/system-model-owner',
     'hides which SYSTEM model is reached',
+  ],
+  // PR32-SEC-07 (a) and (b).
+  [
+    '[PR32-SEC-07] platform/system-model-owner: a template-literal import() of platform/db/system-db.js (S2)',
+    `rules/system-model-owner/${API}/orders/repository/bad-template-import.ts`,
+    'platform/system-model-owner',
+    'hides which SYSTEM model is reached',
+  ],
+  [
+    '[PR32-SEC-07] platform/system-model-owner: createRequire(import.meta.url)(literal) of the SYSTEM accessor',
+    `rules/system-model-owner/${API}/orders/repository/bad-create-require-accessor.ts`,
+    'platform/system-model-owner',
+    'hides which SYSTEM model is reached',
+  ],
+  [
+    '[PR32-SEC-07] platform/system-model-owner: a platform/db file other than system-db.ts / tenant-db.ts re-exports the accessor (S4a)',
+    'rules/system-model-owner/apps/api/src/platform/db/bad-reexport-accessor.ts',
+    'platform/system-model-owner',
+    'Re-exporting the SYSTEM accessor',
+  ],
+  [
+    '[PR32-SEC-07] platform/static-module-specifier: a computed import(where) (S3)',
+    `rules/system-model-owner/${API}/orders/service/bad-computed-import.ts`,
+    'platform/static-module-specifier',
+    'loads a module through a computed specifier',
+  ],
+  [
+    '[PR32-SEC-07] platform/static-module-specifier: createRequire(import.meta.url)(x), a createRequire alias, module.require(x)',
+    `rules/system-model-owner/${API}/orders/service/bad-computed-require.ts`,
+    ['platform/static-module-specifier', 'platform/static-module-specifier', 'platform/static-module-specifier'],
+    'loads a module through a computed specifier',
   ],
   // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
   [
@@ -850,6 +961,23 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       `rules/no-external-calls-in-tenant-tx/${API}/orders/service/ok-sleep.test.ts`,
     ],
     [
+      "[PR32-SEC-01] [D-ARCH-106] no-external-calls-in-tenant-tx: a transaction: 'none' handler (and a spread before the literal)",
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-handler-none.ts`,
+    ],
+    [
+      '[PR32-SEC-01] [D-ARCH-106] no-external-calls-in-tenant-tx: outbox.publish(db, event) in a handler',
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-handler-outbox.ts`,
+    ],
+    [
+      '[PR32-SEC-01] [D-ARCH-106] no-external-calls-in-tenant-tx: the fixtureRoute default; call and afterCommit are never roots',
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-fixture-route.ts`,
+    ],
+    ['[PR #32 M1] [D-ARCH-097] the S3 seam imports the AWS SDK', 'rules/s3-sdk-confinement/apps/api/src/platform/storage/ok-s3-adapter.ts'],
+    [
+      '[PR #32 m5] no-restricted-syntax: string mount and route paths (a RegExp elsewhere is fine)',
+      'rules/regexp-route-path/apps/api/src/platform/http/ok-string-paths.ts',
+    ],
+    [
       '[PR20-SEC-13] no-catch-message-interpolation: the error as a structured field, rethrown',
       'rules/no-catch-message-interpolation/apps/api/src/platform/ok-structured.ts',
     ],
@@ -858,6 +986,14 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       'rules/no-raw-request-in-log/apps/api/src/platform/http/ok-fields.ts',
     ],
     ['[PR #21 R1-m5] supertest is imported in tests/api/helpers', 'rules/supertest-confinement/tests/api/helpers/agent.ts'],
+    [
+      '[PR32-SEC-07] literal and no-substitution template loads (import(), createRequire) of an allowed module',
+      `rules/system-model-owner/${API}/orders/service/ok-literal-import.ts`,
+    ],
+    [
+      '[PR32-SEC-07] platform/db/system-db.ts (the accessor home) is exempt from system-model-owner',
+      'rules/system-model-owner/apps/api/src/platform/db/system-db.ts',
+    ],
     ['i18next/no-literal-string: literals in a *.test.tsx file', 'react/apps/web/app/routes/ok-heading.test.tsx'],
     [
       'import-x/no-unresolved (on): @platform/shared and a NodeNext ./x.js import resolve',

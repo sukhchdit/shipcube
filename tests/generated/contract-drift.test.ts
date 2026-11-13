@@ -145,9 +145,14 @@ describe('openapi route/document drift', () => {
       'a leading parameter before docs': (router) => router.use('/:tenant/docs', inner),
       // [R3-m1] a RegExp mount with alternation matches /api/v1 literally but also serves /api/v2.
       'a RegExp with alternation': (router) => router.use(/^\/api\/(v1|v2)/, inner),
-      // A capture-free leading wildcard segment: no params, no insertion or consumption; only the substitution probe
-      // rejects it (R3-n1: the probe stays, pinned by this shape now that captured parameters are rejected first).
+      // A capture-free leading wildcard segment: no params, no insertion or consumption (R3-n1). Refused as a RegExp mount
+      // first since PR #32 m5; the substitution probe stays, pinned by 'a prefix of the mount path' above.
       'a RegExp leading wildcard segment': (router) => router.use(/^\/[^/]+\/v1(?=\/|$)/, inner),
+      // [PR #32 m5] capture-free RegExp mounts that serve paths outside the literal and fail no probe: refused as RegExps.
+      'a RegExp with non-capturing alternation': (router) => router.use(/^\/api\/(?:v1|v2)/, inner),
+      'a RegExp with a character class': (router) => router.use(/^\/api\/v[12]/, inner),
+      'a RegExp with a top-level alternation': (router) => router.use(/^\/api\/v1|^\/hidden/, inner),
+      'a RegExp equal to the literal': (router) => router.use(/^\/api\/v1/, inner),
     };
     for (const [shape, mount] of Object.entries(mountShapes)) {
       const router = Router();

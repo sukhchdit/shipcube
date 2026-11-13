@@ -17,6 +17,7 @@ import noToFixedToLocaleString from './no-tofixed-tolocalestring.mjs';
 import nodePathOnly from './node-path-only.mjs';
 import outboundHttpViaClient from './outbound-http-via-client.mjs';
 import prismaClientConstruction from './prisma-client-construction.mjs';
+import staticModuleSpecifier from './static-module-specifier.mjs';
 import systemModelOwner from './system-model-owner.mjs';
 import tenantContextSql from './tenant-context-sql.mjs';
 
@@ -39,6 +40,7 @@ const plugin = {
     'node-path-only': nodePathOnly,
     'outbound-http-via-client': outboundHttpViaClient,
     'prisma-client-construction': prismaClientConstruction,
+    'static-module-specifier': staticModuleSpecifier,
     'system-model-owner': systemModelOwner,
     'tenant-context-sql': tenantContextSql,
   },

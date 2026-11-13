@@ -137,6 +137,18 @@ const isSubApp = (handle: unknown): boolean =>
 const capturedParams = (layer: Readonly<Record<string, unknown>>): boolean =>
   isRecord(layer.params) && Object.keys(layer.params).length > 0;
 
+/**
+ * The name of the matcher Express's router builds for a STRING mount path (path-to-regexp `match`); a RegExp mount gets
+ * `regexpMatcher` (router/lib/layer.js). Only string mounts can be proven literal by probing: a RegExp with
+ * non-capturing alternation (`/api/(?:v1|v2)`), a character class (`/api/v[12]`) or a top-level `|` (`^/api/v1` or
+ * `^/hidden`) captures nothing and fails no probe, yet serves paths outside the literal (PR #32 m5). Any
+ * other matcher is refused, so a router upgrade that renames it fails closed (reported) instead of open.
+ */
+const STRING_PATH_MATCHER = 'match';
+
+const isStringPathMatcher = (matcher: unknown): boolean =>
+  typeof matcher === 'function' && (matcher as { name?: unknown }).name === STRING_PATH_MATCHER;
+
 /** A path segment no literal mount path contains: a layer that also matches it has a parameter or wildcard there. */
 const PROBE_SEGMENT = '__drift_probe__';
 
@@ -156,8 +168,9 @@ const withInsertedSegment = (segments: readonly string[], index: number): string
 /**
  * The mount path of a router layer mounted under a path, relative to `prefix`, when the layer matches one of the
  * candidate paths literally. Proven by probing the layer's own matcher:
- * - it has one matcher (an array mount such as `['/api/v1', '/hidden']` serves paths the walk would never see), and it
- *   captures no parameter for the candidate (a RegExp mount with alternation, R3-m1);
+ * - it has one matcher (an array mount such as `['/api/v1', '/hidden']` serves paths the walk would never see), that
+ *   matcher was built from a string path (never a RegExp mount, PR #32 m5), and it captures no parameter for the
+ *   candidate (a RegExp mount with alternation, R3-m1);
  * - it matches the candidate, and no variant with any one segment replaced by a probe segment (so `/api/:version` or
  *   `/*rest` is never taken for `/api/v1`);
  * - it matches no variant with a probe segment inserted before the last segment (`/api{/:v}/v1`), and a probe segment
@@ -165,7 +178,7 @@ const withInsertedSegment = (segments: readonly string[], index: number): string
  *   `/api/v1{*rest}`, which consume it, are rejected). A prefix mount (`/api` for `/api/v1`) fails the substitution probe.
  */
 function resolveMountPath(layer: Readonly<Record<string, unknown>>, prefix: string, mountPaths: readonly string[]): string | undefined {
-  if (!Array.isArray(layer.matchers) || layer.matchers.length !== 1) return undefined;
+  if (!Array.isArray(layer.matchers) || layer.matchers.length !== 1 || !isStringPathMatcher(layer.matchers[0])) return undefined;
   for (const full of mountPaths) {
     if (prefix !== '' && !full.startsWith(`${prefix}/`)) continue;
     const relative = full.slice(prefix.length);

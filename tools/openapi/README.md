@@ -17,10 +17,13 @@ literal mount paths app.ts uses (`/api/v1`, `/api/docs`); `/api/docs` is the one
 
 - a mounted route the document lacks (`undocumented-route`), or a layer the walker cannot resolve
   (`unrecognised-route`): a router or a handler mounted under any other path (`router.use('/webhooks/x', handler)`
-  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app (wrapped by an app, or path-less on a Router), a
-  RegExp or parameterised mount whose matcher captures parameters for the literal path (a RegExp with alternation),
+  included), an array, optional-group or prefix mount of a literal mount path, an Express sub-app (wrapped by an app, or path-less on a Router),
   RegExp route paths,
-  `all()` and optional/wildcard paths;
+  `all()` and optional/wildcard paths. A RegExp mount or route path (a literal, `new RegExp(...)` or `RegExp(...)`
+  passed to `.use/.get/.post/.put/.patch/.delete/.all/.route/.head/.options`) is refused in `apps/api/src` by the lint
+  (`no-restricted-syntax`, PR #32 m5); the walker additionally reports (`unrecognised-route`) a resolved layer whose
+  matcher captures parameters or was built from a RegExp at all (it can accept paths outside its literal prefix: a
+  non-capturing group, a character class or an alternation such as `/^\/api\/v[12]/` or `/^\/api\/v1|^\/hidden/`);
 - the implemented-operations ledger disagreeing with what is mounted (`not-mounted`, `not-in-ledger`, `unknown-ledger-entry`);
 - any documented operation without a success/request example, a non-empty `x-error-codes`, an `x-permission` (with a
   justification for `public`/`authenticated`), a unique camelCase `operationId`, `x-requirements` (REQ IDs),

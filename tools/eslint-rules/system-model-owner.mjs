@@ -20,10 +20,18 @@
  *  - `port`: importing `platform/db/system-port` (the private link between a handle and its SYSTEM guard; only
  *    tenant-db.ts and system-db.ts, which this rule does not lint, may import it);
  *  - `manifest`: the manifests or the schema cannot be read (fail closed, reported on the accessor import).
- * Scoped in eslint.config.mjs to application and package sources, outside apps/*\/src/platform/db and tests.
+ * A specifier is a string literal or a no-substitution template literal; `require`, `module.require` and
+ * `createRequire(url)(…)` count as loads (PR32-SEC-07 (a)). A computed specifier (`import(where)`) is reported by
+ * `platform/static-module-specifier`, which runs on the same files.
+ * Scoped in eslint.config.mjs to application and package sources, tests excluded; in apps/*\/src/platform/db only
+ * tenant-db.ts and system-db.ts are exempt (PR32-SEC-07 (b)), so no other database-platform file can re-export the
+ * accessor.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
+
+import { isRequireCall, staticSpecifier } from './module-sources.mjs';
+import { globPattern, relativeFile } from './path-glob.mjs';
 
 /** Module specifiers of the accessor: the api file, the worker twin, the runtime entry (once it re-exports it). */
 const ACCESSOR_SOURCE = /(?:^|\/)platform\/db\/system-db(?:\.[cm]?[jt]s)?$|^@platform\/api\/runtime$/u;
@@ -116,24 +124,6 @@ function cachedModels(root, dirs) {
 }
 
 /**
- * A path glob (`*` within a segment, `**` across segments) as an anchored regular expression.
- * @param {string} glob
- */
-const globPattern = (glob) =>
-  new RegExp(
-    `^${glob
-      .split('**')
-      .map((part) =>
-        part
-          .split('*')
-          .map((text) => text.replace(/[.+?^${}()|[\]\\]/gu, '\\$&'))
-          .join('[^/]*'),
-      )
-      .join('.*')}$`,
-    'u',
-  );
-
-/**
  * @param {import('estree').Node} key
  * @param {boolean} computed
  * @returns {string | undefined}
@@ -196,7 +186,7 @@ export default {
     );
     const owners = options?.owners ?? {};
     const root = context.cwd;
-    const file = relative(root, context.filename).split(sep).join('/');
+    const file = relativeFile(context);
     const { sourceCode } = context;
     /** @type {ReadonlyMap<string, SystemModel> | undefined} */
     let models;
@@ -205,8 +195,11 @@ export default {
      * @param {import('estree').Node | null | undefined} node
      * @param {RegExp} pattern
      */
-    const sourceMatches = (node, pattern) =>
-      node?.type === 'Literal' && typeof node.value === 'string' && pattern.test(resolvedSpecifier(node.value, context.filename));
+    const sourceMatches = (node, pattern) => {
+      // PR32-SEC-07 (a): a no-substitution template literal is a literal specifier too.
+      const specifier = staticSpecifier(node);
+      return specifier !== undefined && pattern.test(resolvedSpecifier(specifier, context.filename));
+    };
 
     /** @param {string} module */
     const ownedHere = (module) => (owners[module] ?? [`apps/*/src/modules/${module}/**`]).some((glob) => globPattern(glob).test(file));
@@ -303,11 +296,12 @@ export default {
       ImportExpression(node) {
         if (sourceMatches(node.source, ACCESSOR_SOURCE) || sourceMatches(node.source, PORT_SOURCE)) dynamicLoad(node);
       },
+      // `require`, `module.require`, `createRequire(url)(…)` and a `createRequire` alias (PR32-SEC-07 (a)). A computed
+      // specifier is platform/static-module-specifier's finding.
       CallExpression(node) {
         const [first] = node.arguments;
-        if (node.callee.type !== 'Identifier' || node.callee.name !== 'require' || first === undefined) return;
-        if (first.type !== 'SpreadElement' && (sourceMatches(first, ACCESSOR_SOURCE) || sourceMatches(first, PORT_SOURCE)))
-          dynamicLoad(node);
+        if (first === undefined || first.type === 'SpreadElement' || !isRequireCall(node, sourceCode)) return;
+        if (sourceMatches(first, ACCESSOR_SOURCE) || sourceMatches(first, PORT_SOURCE)) dynamicLoad(node);
       },
     };
   },

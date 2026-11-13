@@ -47,11 +47,21 @@ const SUPERTEST_IMPORT_PATTERN = {
   message:
     "import 'supertest' only in tests/api/helpers: use api(app) / expectContract(res) from tests/api/helpers/expect-contract.ts, which validate every response against openapi.yaml (api/README.md §16).",
 };
+/** The one S3 seam (D-ARCH-097 (6), PR30-SEC-08 (e)): the ObjectStorage port and its S3 adapter. */
+const S3_SEAM = 'apps/api/src/platform/storage';
+/**
+ * The AWS SDK, the raw SigV4 signer and the legacy v2 SDK stay behind the ObjectStorage port (D-ARCH-097 (6),
+ * PR30-SEC-08 (e), PR #32 code review M1). The static-import twin of apps/api/src/platform/storage/boundary.test.ts.
+ */
+const S3_SDK_IMPORT_PATTERN = {
+  regex: '^(?:@aws-sdk/.*|@smithy/signature-v4(?:/.*)?|aws-sdk(?:/.*)?)$',
+  message: `only ${S3_SEAM} imports the AWS SDK, the SigV4 signer or aws-sdk: everything else uses the ObjectStorage port (D-ARCH-097, PR30-SEC-08).`,
+};
 /**
  * Every `no-restricted-imports` pattern of the repository. Flat config replaces (does not merge) rule options, so a
  * file-scoped block re-declares the rule from this list minus its own exception, never `'off'`.
  */
-const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATTERN];
+const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATTERN, S3_SDK_IMPORT_PATTERN];
 /** `no-restricted-imports` with every repository pattern except `exception`. */
 const restrictedImportsExcept = (/** @type {object} */ exception) =>
   /** @type {const} */ (['error', { patterns: RESTRICTED_IMPORT_PATTERNS.filter((pattern) => pattern !== exception) }]);
@@ -127,6 +137,13 @@ const PLANNED_PRISMA_FILES = ['packages/audit/src/store/prisma-store.ts', 'apps/
 /** The database platform: the only home of the root Prisma client and of withTenantTx (ADR-0005 am. 10 item 2). */
 const DB_PLATFORM = 'apps/*/src/platform/db/**';
 /**
+ * T-83 whole-file roots (D-ARCH-106 (5) R5, option `txFiles`): code that only ever runs inside the business
+ * transaction (the audit hook, the outbox writer, the audit store). Test files are outside the rule's block.
+ */
+const TENANT_TX_FILES = ['apps/api/src/platform/audit/**', 'apps/api/src/platform/outbox/writer.ts', 'packages/audit/src/store/**'];
+/** T-83 R6 (option `txHandleTypes`): a function with a parameter of one of these types runs inside the transaction. */
+const TENANT_TX_HANDLE_TYPES = ['TenantDb', 'AppDb', 'AppTransactionClient'];
+/**
  * `platform/system-model-owner` (PR19-SEC-01, D-ARCH-080): table-class manifest module -> the code that owns its
  * SYSTEM tables. A manifest module without an entry owns `apps/*\/src/modules/<module>/**` (e.g. `identity` for
  * login_attempt_counters, `payments` for gateway_webhook_events). The platform-level owners are explicit.
@@ -138,6 +155,11 @@ const SYSTEM_MODEL_OWNERS = {
   idempotency: ['apps/api/src/platform/idempotency/**'], // idempotency_keys
   worker: ['apps/worker/src/platform/**'], // job_context, processed_events
 };
+/**
+ * The only files `platform/system-model-owner` does not lint (PR32-SEC-07 (b)): the SYSTEM accessor (api and worker
+ * twins) and the TenantDb handle; both import the private system-port.
+ */
+const SYSTEM_ACCESSOR_HOMES = ['apps/*/src/platform/db/system-db.ts', 'apps/*/src/platform/db/tenant-db.ts'];
 /** Repository layer files (folder or single file), for the raw-SQL and expectAffected rules. */
 const REPOSITORY_FILES = ['apps/api/src/modules/*/repository/**', 'apps/api/src/modules/*/repository.{ts,tsx}'];
 /**
@@ -181,6 +203,27 @@ const TENANT_CONTEXT_EXEMPTIONS = [
 ];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];
+
+/**
+ * A RegExp path argument of an Express mount or route method (PR #32 code review m5, PR32-SEC-11; api/README §15): the
+ * drift walker resolves string paths, and a RegExp (non-capturing group, character class, alternation) can serve paths
+ * the walker never lists. Literal, `new RegExp(...)` and `RegExp(...)`, directly or inside an array of paths.
+ */
+const EXPRESS_PATH_METHODS = '/^(?:use|get|post|put|patch|delete|all|route|head|options)$/';
+const EXPRESS_PATH_CALL = `CallExpression[callee.type='MemberExpression'][callee.property.name=${EXPRESS_PATH_METHODS}]`;
+const REGEXP_ROUTE_PATH_MESSAGE =
+  'Express paths are strings: a RegExp path in .use/.get/.post/.put/.patch/.delete/.all/.route/.head/.options can serve paths the OpenAPI drift walker never lists (api/README §15, PR #32 m5).';
+const REGEXP_ROUTE_PATH_SELECTORS = [
+  `${EXPRESS_PATH_CALL} > Literal.arguments[regex]`,
+  `${EXPRESS_PATH_CALL} > :matches(NewExpression, CallExpression).arguments[callee.name='RegExp']`,
+  `${EXPRESS_PATH_CALL} > ArrayExpression.arguments > Literal.elements[regex]`,
+  `${EXPRESS_PATH_CALL} > ArrayExpression.arguments > :matches(NewExpression, CallExpression).elements[callee.name='RegExp']`,
+].map((selector) => ({ selector, message: REGEXP_ROUTE_PATH_MESSAGE }));
+/**
+ * Every `no-restricted-syntax` entry of apps/api/src. Flat config replaces rule options, so a narrower block that
+ * re-declares the rule spreads this list first (never `'off'`).
+ */
+const API_RESTRICTED_SYNTAX = [...REGEXP_ROUTE_PATH_SELECTORS];
 
 /** Workspace directories (apps/*, packages/*, tests/*, prisma) that own a package.json. */
 const WORKSPACE_DIRS = ['apps', 'packages', 'tests']
@@ -734,11 +777,22 @@ export default defineConfig([
     rules: { 'platform/outbound-http-via-client': 'error' },
   },
   {
-    // T-83 (D-ARCH-074): no external I/O or sleeps inside a withTenantTx callback, in all non-test application code.
-    files: [`apps/*/src/**/*.${TS}`, `packages/*/src/**/*.${TS}`],
+    // T-83 (D-ARCH-074, D-ARCH-106 (5)): no external I/O or sleeps inside a tenant transaction, in all non-test
+    // application code. Roots: withTenantTx callbacks, defineRoute handlers (unless transaction: 'none'), same-file
+    // named handlers, the TENANT_TX_FILES and any function taking a TENANT_TX_HANDLE_TYPES parameter. Never disabled
+    // inline (tools/lint/tenant-tx-disable-ratchet.test.ts); the only hatch is a route's transaction: 'none'.
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
     ignores: TEST_FILES,
     plugins: { platform },
-    rules: { 'platform/no-external-calls-in-tenant-tx': 'error' },
+    rules: {
+      'platform/no-external-calls-in-tenant-tx': ['error', { txFiles: TENANT_TX_FILES, txHandleTypes: TENANT_TX_HANDLE_TYPES }],
+    },
+  },
+  {
+    // PR #32 m5 / PR32-SEC-11: no RegExp mount or route path in apps/api/src, test files included (they build the
+    // composed app the drift walker reads).
+    files: [`apps/api/src/**/*.${LINTED}`],
+    rules: { 'no-restricted-syntax': ['error', ...API_RESTRICTED_SYNTAX] },
   },
   {
     // PR20-SEC-13 item 4: log and error-message hygiene in application code and tooling (tests excluded).
@@ -788,12 +842,21 @@ export default defineConfig([
   },
   {
     // SYSTEM-class delegates are reached only through systemDelegates(tx), per model only by the module whose
-    // table-class manifest declares the table (PR19-SEC-01, D-ARCH-080). platform/db (the accessor's home) and tests
-    // are outside the rule; everything else in apps and packages is in.
+    // table-class manifest declares the table (PR19-SEC-01, D-ARCH-080). The accessor's home (system-db.ts), the
+    // handle that guards it (tenant-db.ts) and tests are outside the rule; every other file in apps and packages is in,
+    // the rest of platform/db included, so none of it can re-export the accessor (PR32-SEC-07 (b)).
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
-    ignores: [DB_PLATFORM, ...TEST_FILES],
+    ignores: [...SYSTEM_ACCESSOR_HOMES, ...TEST_FILES],
     plugins: { platform },
     rules: { 'platform/system-model-owner': ['error', { owners: SYSTEM_MODEL_OWNERS }] },
+  },
+  {
+    // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
+    // code names its module with a literal, so no load escapes the import controls above.
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/static-module-specifier': 'error' },
   },
   {
     // Role defaults belong to the bootstrap lane (item 12 d). Tests are excluded (drift probes may name the statement).
@@ -819,6 +882,11 @@ export default defineConfig([
     // The Supertest allow-list (see SUPERTEST_ALLOW_LIST): every other restricted pattern stays (re-declared, never 'off').
     files: SUPERTEST_ALLOW_LIST,
     rules: { 'no-restricted-imports': restrictedImportsExcept(SUPERTEST_IMPORT_PATTERN) },
+  },
+  {
+    // The S3 seam (D-ARCH-097 (6), PR #32 M1), its tests included: every other restricted pattern stays (re-declared, never 'off').
+    files: [`${S3_SEAM}/**`],
+    rules: { 'no-restricted-imports': restrictedImportsExcept(S3_SDK_IMPORT_PATTERN) },
   },
 
   // --- React: hooks, accessibility (NFR-A11Y-*), string externalisation (NFR-I18N-001) -----------------------------
