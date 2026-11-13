@@ -73,7 +73,10 @@ COPY prisma/schema/ prisma/schema/
 COPY prisma/migrations/ prisma/migrations/
 COPY prisma/bootstrap/ prisma/bootstrap/
 COPY prisma/seed/ prisma/seed/
-# The seed imports @platform/authz and @platform/config through the @platform/source condition (their src).
+# The seed imports @platform/authz and @platform/config through the @platform/source condition (their src), and
+# @platform/authz imports @platform/shared since TASK-020 (the workspace link in node_modules needs its target).
+COPY packages/shared/package.json packages/shared/
+COPY packages/shared/src/ packages/shared/src/
 COPY packages/authz/package.json packages/authz/
 COPY packages/authz/src/ packages/authz/src/
 COPY packages/config/package.json packages/config/
