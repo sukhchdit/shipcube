@@ -2,11 +2,11 @@
   "schema_version": 1,
   "lane": "B",
   "profile": "pr",
-  "git_sha": "d6338a638cf05c5a2aab0655c8dc57dd50391e8e",
+  "git_sha": "4f6a6c300655e06d488894884588f6943e5251f3",
   "git_dirty": false,
   "build_clean": true,
-  "stamp": "20261113T0803Z",
-  "generated_at": "2026-11-13T08:06:55Z",
+  "stamp": "20261113T0810Z",
+  "generated_at": "2026-11-13T08:14:35Z",
   "host": {
     "os": "Windows_NT 10.0.26300 (win32)",
     "cpu_model": "11th Gen Intel(R) Core(TM) i9-11950H @ 2.60GHz",
@@ -37,9 +37,9 @@
       "failures": 0,
       "errors": 0,
       "skipped": 2,
-      "duration_s": 188.2,
+      "duration_s": 256.1,
       "report": "unit.junit.xml",
-      "report_sha256": "9919022401926413697fa9967621dc7f38b71146ffc9fb76ec8fc0ab833bdcb6"
+      "report_sha256": "786c8d3127278185bbdcf32c9d88beb50d11469a23992380221dc4956146b9a2"
     }
   ],
   "attachments": [
