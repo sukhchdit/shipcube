@@ -1,53 +1,54 @@
 // The platform logger on Pino 10 (US-008 AT-US-008-04/05, REQ-PLAT-011/012, NFR-OBS-001, NFR-PRIV-001; ADR-0016 §15;
 // TASK-010). One JSON line per call with the mandatory keys of AT-US-008-05, the per-line context, the redacted fields
-// and the serialised thrown value. Security events (`security.<name>`) get `event_type: "security"`, a PII key filter
-// and scalar-only snake_case attributes. A log call never throws: a failure writes a minimal fallback line instead.
+// and the serialised thrown value. Security events (written by the security-event sink, security-event.ts) get
+// `event_type: "security"`, the per-event attribute allow-list and scalar-only snake_case attributes, and are written
+// whatever the configured level (PR20-SEC-04). A log call never throws: a failure writes a minimal fallback line.
 import { pino, type Logger as PinoLogger } from 'pino';
 
+import { CORRELATION_ID_PATTERN } from '../correlation/correlation-id.js';
 import { normaliseKey, redactValue } from './redaction.js';
+import { securityEventFields, SECURITY_EVENT_NAME } from './security-event.js';
+import { isSecurityEventFields } from './security-mark.js';
 import { serializeThrown } from './serializers/error.js';
+import { escapeLineBreakers, MAX_KEY_LENGTH } from './string-redaction.js';
 import type { CreateLoggerOptions, LineLevel, LogContext, LogFields, PlatformLogger } from './types.js';
 
 /** Keys every line carries (AT-US-008-05). */
 export const MANDATORY_KEYS = ['timestamp', 'level', 'message', 'service', 'version', 'correlation_id', 'org_id', 'actor_id'] as const;
 
-/** Keys fields and bindings can never set. */
-const RESERVED_KEYS: ReadonlySet<string> = new Set<string>([
-  ...MANDATORY_KEYS,
-  'request_id',
-  'client_correlation_id',
-  'event',
-  'event_type',
-  'err',
-]);
+/** Key of a security line counting the attributes the per-event allow-list dropped. */
+export const DROPPED_ATTRIBUTES_KEY = 'dropped_attributes';
+
+/**
+ * Keys fields and bindings can never set, compared in normalised form (`Correlation-Id`, `correlationId` and
+ * `correlation_id` are all the same reserved key, PR20-SEC-08 (d)).
+ */
+const RESERVED_KEYS: ReadonlySet<string> = new Set<string>(
+  [...MANDATORY_KEYS, 'request_id', 'client_correlation_id', 'event', 'event_type', 'err', DROPPED_ATTRIBUTES_KEY].map(normaliseKey),
+);
+const CORRELATION_KEY = normaliseKey('correlation_id');
+
+/**
+ * The coarse IP every security event may carry (api/README.md §13 header): only an IPv4 /24 or IPv6 /48 prefix, never a
+ * precise address (a precise value is dropped and counted like any unlisted attribute).
+ */
+const COARSE_IP_KEY = 'ip_coarse';
+const COARSE_IP = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}0\/24$|^[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,2}::\/48$/i;
 
 export const SECURITY_EVENT_PREFIX = 'security.';
 /** Message of the fallback line written when a line cannot be built or written. */
 export const SERIALIZATION_FAILED = 'log.serialization_failed';
 
-/** Normalised-key substrings and exact keys that security events never carry (raw PII). */
-const PII_KEY_PARTS: readonly string[] = ['email', 'phone', 'firstname', 'lastname', 'fullname', 'address', 'postcode', 'zip'];
-const PII_EXACT_KEYS: ReadonlySet<string> = new Set(['ip', 'name']);
-
 const MAX_EVENT_LENGTH = 128;
 const MAX_CONTEXT_LENGTH = 128;
-const CORRELATION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+/** Event names the fallback line repeats (dotted lower-case identifiers chosen by code). */
+const FALLBACK_EVENT = /^[a-z][a-z0-9_.]{0,127}$/;
 
 type Fields = Record<string, unknown>;
 
-/**
- * PII-named keys, except aggregate counters: `distinct_address_count` of registration_probe (api/README.md §13) is a
- * number, not an address.
- */
-function isPiiKey(key: string): boolean {
-  const normalised = normaliseKey(key);
-  if (normalised.endsWith('count')) return false;
-  return PII_EXACT_KEYS.has(normalised) || PII_KEY_PARTS.some((part) => normalised.includes(part));
-}
-
-/** `sqlState` -> `sql_state`, `HTTPStatus` -> `http_status`; already snake_case keys are unchanged. */
+/** `sqlState` -> `sql_state`, `HTTPStatus` -> `http_status`; already snake_case keys are unchanged. Input capped. */
 export function toSnakeCase(key: string): string {
-  return key
+  return (key.length > MAX_KEY_LENGTH ? key.slice(0, MAX_KEY_LENGTH) : key)
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/[-\s.]+/g, '_')
@@ -65,43 +66,58 @@ function redactFields(fields: LogFields | undefined): Fields {
   return typeof redacted === 'object' && redacted !== null && !Array.isArray(redacted) ? { ...redacted } : {};
 }
 
+function isReserved(key: string): boolean {
+  return RESERVED_KEYS.has(normaliseKey(key));
+}
+
 /** The record without the keys only the logger writes. */
 function withoutReserved(fields: Fields): Fields {
   const output: Fields = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (!RESERVED_KEYS.has(key)) output[key] = value;
+    if (!isReserved(key)) output[key] = value;
   }
   return output;
 }
 
-interface SecurityAttributes {
-  readonly fields: Fields;
-  readonly correlationId?: string;
+/**
+ * A valid correlation ID carried in the fields (`correlationId` of a runtime security event, `correlation_id` of
+ * `outboundCallFields`): used as the line's `correlation_id` only when the context has none (PR20-SEC-10).
+ */
+function fieldCorrelationId(fields: Fields): string | undefined {
+  for (const [key, value] of Object.entries(fields)) {
+    if (normaliseKey(key) === CORRELATION_KEY && typeof value === 'string' && CORRELATION_ID_PATTERN.test(value)) return value;
+  }
+  return undefined;
 }
 
-/** PII keys dropped, values reduced to scalars, keys in snake_case; a correlation attribute is lifted out. */
-function securityAttributes(fields: Fields): SecurityAttributes {
+/**
+ * Security attributes: only the event's allow-listed keys (security-event.ts SECURITY_EVENT_FIELDS, snake_case) with
+ * scalar values; everything else, bindings included, is dropped and counted (PR #20 m2, PR20-SEC-05).
+ */
+function securityAttributes(event: string, fields: Fields): Fields {
+  const allowed = new Set(securityEventFields(event));
   const output: Fields = {};
-  let correlationId: string | undefined;
+  let dropped = 0;
   for (const [key, value] of Object.entries(fields)) {
-    if (normaliseKey(key) === 'correlationid') {
-      if (typeof value === 'string' && CORRELATION_ID.test(value)) correlationId = value;
-      continue;
-    }
+    if (normaliseKey(key) === CORRELATION_KEY) continue;
     const snake = toSnakeCase(key);
-    if (isPiiKey(key) || !isScalar(value) || RESERVED_KEYS.has(snake)) continue;
-    output[snake] = value;
+    const coarseIp = snake === COARSE_IP_KEY && typeof value === 'string' && COARSE_IP.test(value);
+    if (coarseIp || (allowed.has(snake) && isScalar(value) && !isReserved(snake))) output[snake] = value;
+    else dropped += 1;
   }
-  return correlationId === undefined ? { fields: output } : { fields: output, correlationId };
+  if (dropped > 0) output[DROPPED_ATTRIBUTES_KEY] = dropped;
+  return output;
 }
 
 function contextValue(value: unknown): string | null {
-  return typeof value === 'string' ? value.slice(0, MAX_CONTEXT_LENGTH) : null;
+  return typeof value === 'string' ? escapeLineBreakers(value.slice(0, MAX_CONTEXT_LENGTH)) : null;
 }
 
 /** Shared state of a logger and its children. */
 interface LoggerCore {
   readonly pino: PinoLogger;
+  /** Writes security events at any level: APP_LOG_LEVEL never suppresses them (PR20-SEC-04). */
+  readonly securityPino: PinoLogger;
   readonly options: CreateLoggerOptions;
   readonly now: () => Date;
 }
@@ -114,14 +130,28 @@ function readContext(core: LoggerCore): LogContext | undefined {
   }
 }
 
-function writeFallback(core: LoggerCore, level: LineLevel): void {
+/** The security event name of a line written by the sink; undefined for every other line. */
+function securityEventName(event: unknown, fields: LogFields | undefined): string | undefined {
+  if (typeof event !== 'string' || !event.startsWith(SECURITY_EVENT_PREFIX) || !isSecurityEventFields(fields)) return undefined;
+  const name = event.slice(SECURITY_EVENT_PREFIX.length);
+  return SECURITY_EVENT_NAME.test(name) ? name : undefined;
+}
+
+/** Minimal line when a line cannot be built or written: mandatory keys (context keys null) and a safe event name. */
+function writeFallback(core: LoggerCore, level: LineLevel, event: unknown, security: boolean): void {
   try {
+    const name = typeof event === 'string' && FALLBACK_EVENT.test(event) ? event : undefined;
     const line = {
       level,
       timestamp: core.now().toISOString(),
       message: SERIALIZATION_FAILED,
       service: core.options.service,
       version: core.options.version,
+      correlation_id: null,
+      org_id: null,
+      actor_id: null,
+      ...(name === undefined ? {} : { event: name }),
+      ...(security ? { event_type: 'security' } : {}),
     };
     core.options.destination.write(`${JSON.stringify(line)}\n`);
   } catch {
@@ -176,21 +206,21 @@ class PlatformPinoLogger implements PlatformLogger {
   }
 
   private write(level: LineLevel, event: string, fields: LogFields | undefined, thrown: unknown): void {
+    const security = securityEventName(event, fields);
     try {
-      if (!this.core.pino.isLevelEnabled(level)) return;
-      const name = typeof event === 'string' ? event.slice(0, MAX_EVENT_LENGTH) : 'log.invalid_event';
-      this.core.pino[level](this.line(name, fields, thrown), name);
+      const target = security === undefined ? this.core.pino : this.core.securityPino;
+      if (!target.isLevelEnabled(level)) return;
+      const name = typeof event === 'string' ? escapeLineBreakers(event.slice(0, MAX_EVENT_LENGTH)) : 'log.invalid_event';
+      target[level](this.line(name, security, fields, thrown), name);
     } catch {
-      writeFallback(this.core, level);
+      writeFallback(this.core, level, event, security !== undefined);
     }
   }
 
-  private line(name: string, fields: LogFields | undefined, thrown: unknown): Fields {
+  private line(name: string, security: string | undefined, fields: LogFields | undefined, thrown: unknown): Fields {
     const context = readContext(this.core);
     const merged = { ...this.bindings, ...redactFields(fields) };
-    const isSecurity = name.startsWith(SECURITY_EVENT_PREFIX);
-    const security = isSecurity ? securityAttributes(merged) : undefined;
-    const correlationId = contextValue(context?.correlationId) ?? security?.correlationId ?? null;
+    const correlationId = contextValue(context?.correlationId) ?? fieldCorrelationId(merged) ?? null;
     const requestId = contextValue(context?.requestId);
     const clientCorrelationId = contextValue(context?.clientCorrelationId);
     return {
@@ -199,8 +229,8 @@ class PlatformPinoLogger implements PlatformLogger {
       actor_id: contextValue(context?.actorId),
       ...(requestId === null ? {} : { request_id: requestId }),
       ...(clientCorrelationId === null ? {} : { client_correlation_id: clientCorrelationId }),
-      ...(isSecurity ? { event_type: 'security', event: name.slice(SECURITY_EVENT_PREFIX.length) } : { event: name }),
-      ...(security === undefined ? withoutReserved(merged) : security.fields),
+      ...(security === undefined ? { event: name } : { event_type: 'security', event: security }),
+      ...(security === undefined ? withoutReserved(merged) : securityAttributes(security, merged)),
       ...(thrown === undefined ? {} : { err: serializeThrown(thrown) }),
     };
   }
@@ -209,17 +239,16 @@ class PlatformPinoLogger implements PlatformLogger {
 /** The platform logger (see PlatformLogger in types.ts for the line contract). */
 export function createLogger(options: CreateLoggerOptions): PlatformLogger {
   const now = options.now ?? (() => new Date());
-  const instance = pino(
-    {
-      level: options.level ?? 'info',
-      messageKey: 'message',
-      base: { service: options.service, version: options.version },
-      timestamp: () => `,"timestamp":"${now().toISOString()}"`,
-      formatters: { level: (label: string) => ({ level: label }) },
-      // `err` is already serialised by serializeThrown; Pino's std serializer would reshape it.
-      serializers: { err: (value: unknown) => value },
-    },
-    { write: (line: string) => options.destination.write(line) },
-  );
-  return new PlatformPinoLogger({ pino: instance, options, now }, {});
+  const pinoOptions = {
+    messageKey: 'message',
+    base: { service: options.service, version: options.version },
+    timestamp: () => `,"timestamp":"${now().toISOString()}"`,
+    formatters: { level: (label: string) => ({ level: label }) },
+    // `err` is already serialised by serializeThrown; Pino's std serializer would reshape it.
+    serializers: { err: (value: unknown) => value },
+  };
+  const destination = { write: (line: string) => options.destination.write(line) };
+  const instance = pino({ ...pinoOptions, level: options.level ?? 'info' }, destination);
+  const securityPino = pino({ ...pinoOptions, level: 'trace' }, destination);
+  return new PlatformPinoLogger({ pino: instance, securityPino, options, now }, {});
 }

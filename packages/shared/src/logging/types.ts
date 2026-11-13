@@ -70,12 +70,16 @@ export interface PlatformLogger {
   isLevelEnabled(level: LineLevel): boolean;
 }
 
-/** Scalar attributes of a security event; never raw PII (keys and values pass the redactor and the PII key filter). */
+/**
+ * Scalar attributes of a security event; never raw PII: keys and values pass the redactor, and only the keys the
+ * event's SECURITY_EVENT_FIELDS entry lists are written (others are dropped and counted in `dropped_attributes`).
+ */
 export type SecurityEventAttrs = Readonly<Record<string, string | number | boolean | null>>;
 
 /**
- * Receiver of security events (`api/README.md` §13 catalogue, plus the runtime database events of TASK-016 that the
- * runtime log routes here by their `security.` prefix). Lines carry `event_type: "security"` and `event: <name>`.
+ * Receiver of security events (`api/README.md` §13 catalogue, plus the runtime database events of TASK-016). Lines
+ * carry `event_type: "security"` and `event: <name>` and are written whatever the configured level; a plain log call
+ * named `security.<x>` is an ordinary line (only the sink brands its fields, PR20-SEC-08 (b)).
  */
 export interface SecurityEventSink {
   emit(name: string, attrs?: SecurityEventAttrs): void;

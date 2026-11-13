@@ -2,8 +2,10 @@ import { randomBytes } from 'node:crypto';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { createLogger, MANDATORY_KEYS, SERIALIZATION_FAILED, toSnakeCase } from './logger.js';
+import { createLogger, DROPPED_ATTRIBUTES_KEY, MANDATORY_KEYS, SERIALIZATION_FAILED, toSnakeCase } from './logger.js';
+import { outboundCallFields } from './outbound.js';
 import { OMITTED, REDACTED } from './redaction.js';
+import { createSecurityEventSink } from './security-event.js';
 import type { CreateLoggerOptions, LogContext } from './types.js';
 
 const sentinel = (): string => `sentinel-${randomBytes(8).toString('hex')}`;
@@ -225,16 +227,18 @@ describe('createLogger', () => {
     expect(silent.raw).toHaveLength(0);
   });
 
-  it('writes security events with event_type, the bare event name, snake_case scalar attributes and no PII', () => {
+  it('writes sink events with event_type, the bare event name and only the allow-listed snake_case attributes (PR #20 m2)', () => {
     const { logger, last, raw } = setup();
     const email = 'alice@example.com';
-    logger.warn('security.login_failed', {
+    createSecurityEventSink(logger).emit('login_failed', {
       sqlState: '42501',
       identifierHash: 'h-1',
       email,
       userEmail: email,
       ip: '203.0.113.7',
       name: 'Alice',
+      username: 'alice',
+      clientIp: '203.0.113.7',
       phoneNumber: '+15550100',
       shippingAddress: 'x',
       postcode: 'x',
@@ -242,7 +246,7 @@ describe('createLogger', () => {
       firstName: 'Alice',
       lastName: 'Smith',
       fullName: 'Alice Smith',
-      nested: { a: 1 },
+      emailAccount: 'x',
       reason: `wrong password for ${email}`,
       correlationId: 'from-attr',
     });
@@ -256,25 +260,103 @@ describe('createLogger', () => {
       actor_id: null,
       event_type: 'security',
       event: 'login_failed',
-      sql_state: '42501',
       identifier_hash: 'h-1',
       reason: 'wrong password for a***@example.com',
+      [DROPPED_ATTRIBUTES_KEY]: 15,
       message: 'security.login_failed',
     });
     expect(raw.join('')).not.toContain('203.0.113.7');
+    expect(raw.join('')).not.toContain('alice');
   });
 
-  it('lifts a correlation_id security attribute when the context has none', () => {
+  it('drops child-logger bindings that are not allow-listed for the event', () => {
     const { logger, last } = setup();
-    logger.warn('security.csrf_rejected', { correlation_id: 'attr-1' });
-    expect(last()['correlation_id']).toBe('attr-1');
+    createSecurityEventSink(logger.child({ component: 'database', host: 'db' })).emit('ssrf_blocked', {
+      host: 'x.example',
+      reason: 'PRIVATE',
+    });
+    expect(last()).toMatchObject({ event: 'ssrf_blocked', host: 'x.example', reason: 'PRIVATE', [DROPPED_ATTRIBUTES_KEY]: 1 });
+    expect(last()).not.toHaveProperty('component');
+  });
+
+  it('keeps a coarse IP (an IPv4 /24 or IPv6 /48 prefix) and drops a precise one', () => {
+    const { logger, lines } = setup();
+    const sink = createSecurityEventSink(logger);
+    sink.emit('registration_probe', { ipCoarse: '203.0.113.0/24', distinct_address_count: 6 });
+    sink.emit('registration_probe', { ipCoarse: '2001:db8:1::/48' });
+    sink.emit('registration_probe', { ipCoarse: '203.0.113.7' });
+    expect(lines().map((line) => [line['ip_coarse'], line[DROPPED_ATTRIBUTES_KEY]])).toEqual([
+      ['203.0.113.0/24', undefined],
+      ['2001:db8:1::/48', undefined],
+      [undefined, 1],
+    ]);
+  });
+
+  it('[PR20-SEC-04] writes security events whatever the configured level, at their catalogue level', () => {
+    for (const level of ['silent', 'fatal', 'error'] as const) {
+      const { logger, lines } = setup({ level });
+      const sink = createSecurityEventSink(logger);
+      sink.emit('login_failed', { reason: 'BAD_PASSWORD' });
+      sink.emit('db_session_default_tampered');
+      logger.warn('ordinary.warning');
+      expect(lines().map((line) => [line['level'], line['event']])).toEqual([
+        ['warn', 'login_failed'],
+        ['error', 'db_session_default_tampered'],
+      ]);
+    }
+  });
+
+  it('[PR20-SEC-08] a plain call named security.<x> is an ordinary line: no event_type, no level bypass', () => {
+    const { logger, last, lines } = setup({ level: 'error' });
+    logger.warn('security.login_failed', { username: 'x' });
+    expect(lines()).toHaveLength(0);
+    logger.error('security.login_failed', { note: 'n' });
+    expect(last()).toMatchObject({ level: 'error', event: 'security.login_failed', note: 'n' });
+    expect(last()).not.toHaveProperty('event_type');
+  });
+
+  it('lifts a valid correlation ID from security attributes when the context has none', () => {
+    const { logger, last } = setup();
+    createSecurityEventSink(logger).emit('csrf_rejected', { correlationId: 'attr-0001' });
+    expect(last()['correlation_id']).toBe('attr-0001');
+    createSecurityEventSink(logger).emit('csrf_rejected', { correlationId: 'bad id!' });
+    expect(last()['correlation_id']).toBeNull();
   });
 
   it('prefers the context correlation id over a security attribute and never duplicates it', () => {
     const { logger, raw, last } = setup({}, { correlationId: 'ctx-1' });
-    logger.warn('security.csrf_rejected', { correlation_id: 'attr-1', route: '/x' });
+    createSecurityEventSink(logger).emit('csrf_rejected', { correlationId: 'attr-0001', route: '/x' });
     expect(last()['correlation_id']).toBe('ctx-1');
-    expect(raw.join('')).not.toContain('attr-1');
+    expect(raw.join('')).not.toContain('attr-0001');
+  });
+
+  it('[PR20-SEC-10] an outbound call line without context carries the call correlation ID', () => {
+    const { logger, last } = setup();
+    const fields = outboundCallFields({
+      carrierCode: 'MOCK',
+      accountId: 'a-1',
+      operation: 'rates',
+      routeTemplate: '/rates',
+      durationMs: 5,
+      correlationId: 'demo-booking-0001',
+    });
+    logger.info('carrier.call', fields);
+    expect(last()).toMatchObject({ correlation_id: 'demo-booking-0001', carrier_code: 'MOCK' });
+  });
+
+  it('[PR20-SEC-08] reserved keys are compared in normalised form', () => {
+    const { logger, last } = setup({}, { correlationId: 'ctx-1' });
+    logger.info('evt', { 'Correlation-Id': 'forged', correlationId: 'forged', Event_Type: 'security', Level: 'fatal', kept: 1 });
+    expect(last()).toMatchObject({ correlation_id: 'ctx-1', level: 'info', event: 'evt', kept: 1 });
+    expect(Object.keys(last()).filter((key) => key !== 'correlation_id' && /correlation/i.test(key))).toEqual([]);
+    expect(last()).not.toHaveProperty('event_type');
+  });
+
+  it('[PR20-SEC-08] escapes C1 controls and line separators in the event name and context values', () => {
+    const { logger, raw } = setup({}, { orgId: 'org x', actorId: 'ab' });
+    logger.info('evt name');
+    const text = raw.join('');
+    for (const character of [' ', ' ', '']) expect(text).not.toContain(character);
   });
 
   it('never throws: a failing destination or context degrades to a fallback line or nothing', () => {
@@ -299,7 +381,17 @@ describe('createLogger', () => {
       flaky.error('evt');
     }).not.toThrow();
     expect(written.map((line) => JSON.parse(line) as unknown)).toEqual([
-      { level: 'error', timestamp: '2026-11-13T09:30:00.123Z', message: SERIALIZATION_FAILED, service: 'api', version: '1' },
+      {
+        level: 'error',
+        timestamp: '2026-11-13T09:30:00.123Z',
+        message: SERIALIZATION_FAILED,
+        service: 'api',
+        version: '1',
+        correlation_id: null,
+        org_id: null,
+        actor_id: null,
+        event: 'evt',
+      },
     ]);
     const dead = createLogger({
       service: 'api',

@@ -9,6 +9,7 @@ import {
   INVALID_SECURITY_EVENT,
   isSecurityEventName,
   RUNTIME_SECURITY_EVENTS,
+  SECURITY_EVENT_FIELDS,
   SECURITY_EVENT_LEVEL,
   SECURITY_EVENTS,
   securityEvent,
@@ -44,6 +45,20 @@ function catalogueFromReadme(): string[] {
   return names;
 }
 
+/** Event name -> "Extra fields" cell of the README §13 table. */
+function extraFieldsFromReadme(): Map<string, string> {
+  const lines = readFileSync(readmePath(), 'utf8').split(/\r?\n/);
+  const start = lines.findIndex((line) => line.startsWith('## 13.'));
+  const cells = new Map<string, string>();
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('## ')) break;
+    const columns = line.split('|').map((column) => column.trim());
+    const match = /^`([^`]+)`$/.exec(columns[1] ?? '');
+    if (match?.[1] !== undefined && columns[3] !== undefined) cells.set(match[1], columns[3]);
+  }
+  return cells;
+}
+
 function recordingLogger(): { readonly logger: PlatformLogger; readonly lines: () => Record<string, unknown>[] } {
   const raw: string[] = [];
   const logger = createLogger({ service: 'api', version: '1', destination: { write: (line: string) => raw.push(line) } });
@@ -60,7 +75,19 @@ describe('security event catalogue', () => {
     expect(exported).toEqual(documented);
   });
 
-  it('has a level for every event, errors for integrity and live-key failures', () => {
+  it('[SEC-TC-63] every allow-listed attribute of an event is named in its README §13 "Extra fields" cell', () => {
+    const cells = extraFieldsFromReadme();
+    for (const name of SECURITY_EVENTS) {
+      const cell = (cells.get(name) ?? '').toLowerCase();
+      for (const field of SECURITY_EVENT_FIELDS[name]) {
+        const words = field.replaceAll('_', ' ');
+        expect({ name, field, documented: cell.includes(field) || cell.includes(words) }).toEqual({ name, field, documented: true });
+      }
+    }
+    for (const name of RUNTIME_SECURITY_EVENTS) expect(SECURITY_EVENT_FIELDS[name]).toEqual(['sql_state']);
+  });
+
+  it('has a level for every event, errors for integrity, live-key and runtime database failures', () => {
     for (const name of [...SECURITY_EVENTS, ...RUNTIME_SECURITY_EVENTS]) expect(SECURITY_EVENT_LEVEL[name]).toMatch(/^(warn|error)$/);
     const errors = Object.entries(SECURITY_EVENT_LEVEL)
       .filter(([, level]) => level === 'error')
@@ -70,8 +97,12 @@ describe('security event catalogue', () => {
       'audit_anchor_missing',
       'audit_chain_broken',
       'audit_write_failed',
+      'db_privilege_denied',
+      'db_role_setting_drift',
       'db_session_context_leak',
+      'db_session_default_tampered',
       'live_key_forbidden',
+      'rls_write_rejected',
     ]);
     expect(securityEventLevel('some_runtime_event')).toBe('warn');
     expect(securityEventLevel('toString')).toBe('warn');
@@ -104,9 +135,10 @@ describe('security event sink', () => {
       message: 'security.registration_probe',
       distinct_address_count: 6,
       window: '1h',
-      note: 'seen a***@example.com with [REDACTED]',
       ip_coarse: '203.0.113.0/24',
+      dropped_attributes: 4,
     });
+    expect(line).not.toHaveProperty('note');
     const output = JSON.stringify(line);
     expect(output).not.toContain('alice@example.com');
     expect(output).not.toContain('203.0.113.7');
