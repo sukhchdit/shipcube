@@ -118,6 +118,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-253 scenarios
+- D-ARCH-106: the manual refresh is load (shipment under RLS, last refresh time), call (carrier track, no transaction open) and handler (events and audit), or an outbox event with 202; the once-per-5-minutes limit is checked in load and re-checked in the handler
 - AT-US-253-01 … AT-US-253-06: all 6 scenarios of US-253, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

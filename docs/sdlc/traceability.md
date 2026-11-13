@@ -62,7 +62,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-010 | M0 | Must | US-007 | platform · ADR-0016 §3 framework-failure codes; api/README §11 error catalogue | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-011 | M0 | Must | US-008 | platform · ADR-0017 §1–2 correlation ID (validate, generate, echo) | TASK-010, TASK-029, TASK-035, TASK-043, TASK-079, TASK-092 | – | Planned (partial: TASK-010 validate/generate/echo + api/worker log lines, AT-US-008-01/02/04/05/06; completes with TASK-029 (audit entries), TASK-043 (outbox row → enqueued job), TASK-035 (payload v2 → worker logger), TASK-079 (Mock carrier call) and TASK-092 (end-to-end AT-US-008-03); D-062) |
-| REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Planned |
+| REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-013 | M0 | Must | US-009 | platform (worker) · ADR-0013 §Queues (attempts 5, exponential backoff + jitter, DLQ per queue) | TASK-035 | – | Planned |
 | REQ-PLAT-014 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Idempotent processors (deterministic job IDs, `job_executions`); data-model §3.5 | TASK-039 | – | Planned |
 | REQ-PLAT-015 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Repeatable jobs (idempotent registration) | TASK-039 | – | Planned |
@@ -105,7 +105,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-ORG-004 | M0 | Must | US-062 | organisations · ADR-0008 §Roles per organisation type; data-model §3.3 authz | TASK-037 | – | Planned |
 | REQ-ORG-005 | M0 | Must | US-063 | organisations · ADR-0005 §Context (one active org per request, `app.org_id`); ADR-0006 §Tokens (org claim) | TASK-056 | – | Planned |
 | REQ-ORG-006 | M1 | Should | US-081 | organisations · ADR-0006 §Tokens (org switch re-issues tokens); ADR-0005 §Context | TASK-224 | – | Planned |
-| REQ-ORG-007 | M0 | Must | US-064 | platform · ADR-0009 §Standard columns (`created_by`/`updated_by` stamping extension); data-model P-rules | TASK-032 | – | Planned |
+| REQ-ORG-007 | M0 | Must | US-064 | platform · ADR-0009 §Standard columns (`created_by`/`updated_by` stamping extension); data-model P-rules | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-ORG-008 | M1 | Should | US-082 | organisations · data-model §3.2 organisations profile; api/openapi `updateOrganisation` (`org:update`) | TASK-224 | – | Planned |
 | REQ-ORG-009 | M1 | Should | US-082 | organisations · data-model §3.2; api/openapi `createOrganisation` (creator = Owner) | TASK-224 | – | Planned |
 | REQ-ORG-010 | M1 | Should | US-083 | organisations · data-model §3.2 invitations; ADR-0006 am. 12 (`org.member.manage`, `x-reauth-max-age: 43200`) | TASK-227 | – | Planned |
@@ -160,10 +160,10 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-006 | M0 | Must | US-076 | prisma/ · ADR-0005 §Operator branch (read-only cross-tenant policy); data-model §4.3 | TASK-060 | – | Planned |
 | REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Planned |
 | REQ-RLS-008 | M0 | Must | US-078 | platform (worker) · ADR-0013 am. 1–5 (`platform.job_context`, payload v2); ADR-0005; data-model §4.5 | TASK-047 | – | Planned |
-| REQ-RLS-009 | M0 | Must | US-064 | prisma/ · ADR-0009 §Standard columns (UUIDv7, `timestamptz`, actor stamps); data-model P1/P2 | TASK-032 | – | Planned |
+| REQ-RLS-009 | M0 | Must | US-064 | prisma/ · ADR-0009 §Standard columns (UUIDv7, `timestamptz`, actor stamps); data-model P1/P2 | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-010 | M0 | Must | US-079 | prisma/ · ADR-0009 §Soft delete (partial unique indexes); ADR-0005 (no DELETE grant); data-model P3 | TASK-100 | – | Planned |
 | REQ-RLS-011 | M0 | Must | US-079 | platform · ADR-0009 §Optimistic locking (`version`, conditional UPDATE → 409/412); ADR-0016 §6 | TASK-100 | – | Planned |
-| REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Planned |
+| REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-013 | M0 | Must | US-080 | prisma/ · ADR-0005 §Guest-capable tables (null `org_id`, `ck_<t>__owner`, guest claim policy); data-model §3.10 | TASK-051 | – | Planned |
 | REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
 | REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |

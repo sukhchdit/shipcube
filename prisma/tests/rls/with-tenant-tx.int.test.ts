@@ -103,6 +103,7 @@ function runner(client: PrismaClient, overrides: Partial<WithTenantTxOptions> = 
       markNotReady: (reason) => {
         recorder.notReady.push(reason);
       },
+      scopeClient: () => client,
     },
   );
   return { ...built, recorder };

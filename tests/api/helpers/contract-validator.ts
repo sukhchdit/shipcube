@@ -3,6 +3,7 @@
 // annotation vocabulary instead of switching strict mode off. Pure: `validateResponse` returns the deviations (empty =
 // valid) and `describeFailure` formats them with a redacted body excerpt; the Supertest wrapper throws (expect-contract.ts).
 import { ERROR_CATALOGUE, isErrorCode } from '@platform/shared';
+import { isOmittedKey, isPiiKey, isSensitiveKey } from '@platform/shared/logging';
 import type { ErrorObject, ValidateFunction } from 'ajv';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
@@ -16,11 +17,11 @@ export const CORRELATION_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 export const FRAMEWORK_ERROR_CODES: Readonly<Record<string, number>> = Object.freeze({ NOT_FOUND: 404, METHOD_NOT_ALLOWED: 405 });
 export const PROBLEM_MEDIA_TYPE = 'application/problem+json';
 /**
- * Keys whose values never appear in a failure message (PR21-SEC-07: one-time and credential-like contract fields such
- * as `reauth_proof`, `recovery_codes`, `provisioning_uri` and signatures included). TASK-010's log redaction list
- * becomes the single source once it lands.
+ * Keys whose values never appear in a failure message: the log redaction classes are the single source (PR21-SEC-07
+ * (b)). Credentials (`reauth_proof`, `recovery_codes`, `manual_key`, signatures), personal data (`display_name`,
+ * `email`) and URLs (`provisioning_uri`, which carries the TOTP secret).
  */
-const SENSITIVE_KEY = /token|secret|password|passphrase|authorization|cookie|proof|recovery|provisioning|signature|otp|key/i;
+const isExcerptRedactedKey = (key: string): boolean => isSensitiveKey(key) || isPiiKey(key) || isOmittedKey(key);
 /** `code` is a TOTP code in auth bodies but the catalogue code in problem bodies, which the excerpt keeps readable. */
 const CODE_KEY = 'code';
 /** OpenAPI 3.0 keywords that 3.1 dropped; Ajv would still apply `nullable` natively, unlike the 3.1 semantics. */
@@ -195,7 +196,7 @@ export function redactForExcerpt(value: unknown, depth = 0): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,
-      SENSITIVE_KEY.test(key) || (key === CODE_KEY && !isErrorCode(item)) ? '[REDACTED]' : redactForExcerpt(item, depth + 1),
+      isExcerptRedactedKey(key) || (key === CODE_KEY && !isErrorCode(item)) ? '[REDACTED]' : redactForExcerpt(item, depth + 1),
     ]),
   );
 }

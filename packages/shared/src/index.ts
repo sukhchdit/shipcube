@@ -8,6 +8,7 @@ export {
   type AppErrorOptions,
   type ValidationIssue,
 } from './errors/app-error.js';
+export { CORRELATION_ID_PATTERN, isCorrelationId } from './correlation/correlation-id.js';
 export type { CatalogueEntry, ModuleCatalogue, ProblemStatus } from './errors/catalogue-entry.js';
 // Generated from openapi.yaml (REQ-API-019, TASK-017): `npm run openapi:types`; the typed client (api/README.md §17) builds on these.
 export type { components, operations, paths } from './api/types.gen.js';
@@ -19,3 +20,11 @@ export {
   type ErrorCatalogue,
   type ErrorCode,
 } from './errors/catalogue/index.js';
+export { ANONYMOUS_ACTOR_ID, isUuidV7, SYSTEM_ACTOR_ID, uuidv7, uuidV7Timestamp } from './ids/uuidv7.js';
+export {
+  isServerControlledField,
+  SERVER_CONTROLLED_FIELDS,
+  serverControlledFieldIssues,
+  UNKNOWN_FIELD,
+  type ServerControlledField,
+} from './ids/server-controlled.js';

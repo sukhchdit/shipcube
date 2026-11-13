@@ -15,7 +15,9 @@
  *  - start-up runs `probeFreshConnection()` as the FIRST query on the pool, before the dedicated-connection integrity
  *    check and before the process listens or takes work (item 3); until a probe has passed, the readiness check
  *    re-runs it and reports the database not ready;
- *  - sinks (item 4): security events go to the runtime log as `security.<event>` with `correlationId`/`sqlState`
+ *  - sinks (item 4): security events go to the security-event sink (logging/security-events.ts, TASK-010) as
+ *    `security.<event>` with exactly `correlationId`/`sqlState`; the original database error goes to the
+ *    `onDbError` hook, whose log line serialises it as { name, code, originalCode, kind }
  *    only; the `db_session_context_leak` counter is kept here (`sessionContextLeaks()`) until the metrics pipeline
  *    exports it; `markNotReady` LATCHES: nothing but a restart clears it (a leaked backend stays in the process pool,
  *    and the 5-minute integrity re-check must not make readiness flap back to ready). A tampered tenant-context
@@ -30,11 +32,13 @@ import type { Config, Service } from '@platform/config';
 import { createAuditChainCheck } from '../health/checks/audit-chain.js';
 import { createAuditPartitionsCheck, isPartitionsUnavailable } from '../health/checks/audit-partitions.js';
 import type { CatalogReader } from '../health/checks/catalog-reader.js';
+import { securityEventSinkFrom } from '../logging/security-events.js';
 import type { RuntimeLog } from '../runtime/log.js';
 import { READINESS_CHECK_TIMEOUT_MS, type ReadinessCheck } from '../runtime/readiness.js';
 import type { Closeable } from '../runtime/shutdown.js';
 import { createDatabaseAdapter, createDatabasePool, type DatabaseClientOptions, type PrismaClientConstructor } from './client.js';
 import { dedicatedConnector } from './dedicated-connection.js';
+import { type ExtendableClient, withStandardColumns } from './extensions/standard-columns.js';
 import { createDatabaseCheck } from './health-check.js';
 import {
   createSessionIntegrityGuard,
@@ -156,8 +160,11 @@ export async function runStartupAuditPartitionsCheck(check: ReadinessCheck, log:
   }
 }
 
-/** The client shape the runtime needs: a Prisma client over the shared pool that can be disconnected. */
-export interface RuntimeDatabaseClient<TTx> extends TransactionCapableClient<TTx> {
+/**
+ * The client shape the runtime needs: a Prisma client over the shared pool that can be disconnected and extended per
+ * transaction with the standard-columns extension (TASK-032).
+ */
+export interface RuntimeDatabaseClient<TTx> extends TransactionCapableClient<TTx>, ExtendableClient {
   $disconnect(): Promise<void>;
 }
 
@@ -200,6 +207,8 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
   input: DatabaseRuntimeInput<TTx, TClient>,
 ): DatabaseRuntime<TTx> {
   const { log } = input;
+  // Security events go to the security-event sink with exactly { correlationId, sqlState } (D-ARCH-079, R3-m1).
+  const security = securityEventSinkFrom(log);
   // PR11-SEC-09 item 2 / PR9-SEC-03: refused before any pool or client exists (pg reads PGOPTIONS as well).
   assertNoSessionOptions(process.env);
   const latch = createNotReadyLatch((reason) => log.error('db.not_ready_latched', { component: 'database', reason }));
@@ -211,7 +220,7 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
     connectDedicated: dedicatedConnector(input.database),
     ...(input.integrityIntervalMs === undefined ? {} : { intervalMs: input.integrityIntervalMs }),
     onDrift: (findings) => {
-      for (const finding of findings) log.warn(`security.${finding}`, { component: 'database' });
+      for (const finding of findings) security.emit(finding);
       if (findings.includes('db_session_default_tampered')) latch.mark('db_session_default_tampered');
     },
   });
@@ -224,15 +233,22 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
   if (client !== undefined) {
     tenantTx = createWithTenantTx<TTx>(client, input.tx, {
       onSecurityEvent: (event, detail) =>
-        log.warn(`security.${event}`, {
-          component: 'database',
+        security.emit(event, {
           ...(detail.correlationId === undefined ? {} : { correlationId: detail.correlationId }),
           ...(detail.sqlState === undefined ? {} : { sqlState: detail.sqlState }),
         }),
+      // The original error, serialised by the platform logger as { name, code, originalCode, kind } only (TASK-010).
+      onDbError: (error, mapping) => {
+        const fields = { component: 'database', reason: mapping.reason, status: mapping.status, retryable: mapping.retryable };
+        if (mapping.status >= 500) log.error('db.error_mapped', fields, error);
+        else log.warn('db.error_mapped', fields, error);
+      },
       countSessionContextLeak: () => {
         leaks += 1;
       },
       markNotReady: (reason) => latch.mark(reason),
+      // Server-controlled standard columns, bound per transaction (data-model §7.6, ADR-0005 am. 10 item 5).
+      scopeClient: (stamp) => withStandardColumns(client, stamp),
     });
   }
 
@@ -262,18 +278,14 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
   };
 
   // The audit checks read the catalogue as platform_app; a squat is a security event (data-model §5.3 item 3) at level
-  // error, a fail-closed signal that must alert (D-ORCH-025 (1); code review PR #24 R1-m2). Fields follow the api/README
-  // §13 runtime-events allow-list (partition_name, kind, reason; never an owner).
+  // error, a fail-closed signal that must alert (D-ORCH-025 (1); code review PR #24 R1-m2). It goes through the
+  // security-event sink (D-ARCH-081 (4)), whose allow-list is the api/README §13 runtime-events row (partition_name,
+  // kind, reason, sql_state; never an owner); the logger writes the camelCase keys in snake_case.
   const catalog: CatalogReader = { query: (text) => pool.query(text) };
   const auditChecks: AuditReadinessChecks = {
     partitions: createAuditPartitionsCheck(catalog, {
       onSquatted: (object) =>
-        log.error('security.audit_partition_squatted', {
-          component: 'audit_partitions',
-          partition_name: object.name,
-          kind: object.kind,
-          reason: object.reason,
-        }),
+        security.emit('audit_partition_squatted', { partitionName: object.name, kind: object.kind, reason: object.reason }),
     }),
     chain: createAuditChainCheck(catalog),
   };

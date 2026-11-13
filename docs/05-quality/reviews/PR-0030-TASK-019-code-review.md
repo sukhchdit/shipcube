@@ -225,3 +225,33 @@ Conflict probes by `git merge-tree` against the current heads:
 - Static credential pair now refuses a half-written configuration; confirm the same posture for the audit-anchor sink credentials (TASK-116) and that `StorageConfigError` reaching the process error handler (PR #20) is logged by name only.
 - `object_storage.error` logs the class once per second at most; confirm it is acceptable that an unauthenticated `/health/ready` caller can drive one warn line per second per instance (bounded by the cache TTL).
 - AWS-only shapes (409 `ConditionalRequestConflict`, 400 `RequestTimeout`, `ExpiredToken`, and R2-n3) remain unit-tested only; the contract suite must run against real S3 before G4-production (ADR-0021 section 6).
+
+
+## Round 3 (union with PR #24)
+
+**VERDICT: APPROVED** (zero findings). Head `fce65eac2885`: union merge `738dd7d` of main `d53fbc7` into `5f45a8b`, plus the evidence commit `fce65ea`. Scope was the union delta only; approved code was not re-reviewed.
+
+### R3.1 Verification I performed
+
+- **Pure-union proof (by SHA, no build).** `git merge-tree --write-tree 5f45a8b d53fbc7` against `738dd7d`: the only differing files are the four conflict files (`services.ts`, `services.test.ts`, `health.int.test.ts`, `DECISIONS.md`). Everything else, including every file PR #24 added, is byte-identical to a clean re-merge. `738dd7d..fce65ea` touches only `docs/05-quality/tests/runs/20261113T1054Z_738dd7d/*` (evidence). No conflict markers anywhere in the tree.
+- **`services.ts` vs main** (read the whole file and the diff against `d53fbc7`): `readinessChecks(database, audit, valkey, objectStorage)` returns `[database, createValkeyCheck(valkey), objectStorage, audit.partitions, audit.chain]`, the schema order of `HealthReady`. The `pendingCheck` import is gone from `services.ts` (`readiness.ts`/`index.ts`/`router.test.ts` keep it as a primitive, as they should). `createRuntimeServices` builds `storage` first (the PR30-SEC-04 half-credential throw happens before any pool or client exists), then `databaseRuntimeFromConfig(config, service, log)` (PR #24's `auditChecks` kept), then Valkey. The `storage` member, the `object_storage` check with the `onFailure` log callback (error class only) and the `{ name: 'object_storage', close }` resource all survive.
+- **`services.test.ts`**: the `wiredStubs()` helper passes the fourth argument; the new `expect(wiredStubs()).toEqual([])`, the live-tripwire test for a stub in the object_storage slot, and PR #24's `slice(3)` order assertion (`[audit.partitions, audit.chain]`) are all present, so the audit-stub guard from PR #24 and the S3 guard are both preserved. The two retired source-scan tripwires are removed together with their imports (no unused imports).
+- **`health.int.test.ts`**: real `createObjectStorageCheck(storage, DOCUMENTS_BUCKET)` row against RustFS, followed by `...AUDIT_STAND_INS`, with no `pendingCheck` import and no `pendingCheck('audit_*')` rows (the remaining string is a header comment). The RustFS-stopped test, startup timeout and `afterAll` stop/destroy are kept.
+- **`DECISIONS.md`**: `git diff --numstat d53fbc7 fce65ea` is `18 0`: main verbatim plus the D-TASK019-01/02/03 blocks, nothing removed.
+- **Targeted unit tests** on a `git archive` extract of `fce65ea` (node_modules junctioned to the PR #30 worktree, which is at the same SHA): `apps/api/src/platform/(runtime|health|db|storage)/`: 17 suites, 369 tests, all pass.
+- **CI**: `gh pr view 30`: lane A run `43413992420` on `fce65ea`: `fast-lane`, `scans`, `ci-gate` all SUCCESS. Integration suites were not run by me (no Docker); I rely on the developer's lane-B evidence in `fce65ea` (`summary.md` PASS for `738dd7d`).
+
+### R3.2 Findings
+
+None.
+
+### R3.3 Merge conditions (updated)
+
+1. Conditions 1 (security delta record naming the merge head) and 4/5 of R2.7 stand as written; the security record must now name `fce65ea` or the squash-time head.
+2. Union with PR #24: done and verified above. The DECISIONS tail union from R2.6 is done (PR #20 was not part of this conflict set; main's `d53fbc7` already carries whatever of it had merged).
+3. **Second-merger note against PR #26** (`084ee93`): `git merge-tree` of the two heads conflicts only in `docs/sdlc/DECISIONS.md` (append-append: keep both the D-TASK019 and D-TASK032 blocks). `package-lock.json` and `tools/tsconfig.json` merge cleanly, but a lock or tsconfig change on the second merger voids the other PR's security record condition, so state in the merge commit that both auto-merged.
+4. Squash merge.
+
+### R3.4 Cleanup
+
+Extract and junction removed; worktree unchanged (748 `node_modules` entries, clean `git status`); no `C:\node_modules` junction.

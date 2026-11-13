@@ -150,6 +150,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-209 scenarios
+- D-ARCH-106 (ADR-0003 am. 2026-11-13): checkoutOrder is load (order, price snapshots, attempt count) then call (gateway authorise with the idempotency key auth:<order_id>:<attempt>, never random) then handler (payment row with the gateway reference, audit, number allocation, outbox order.checkout_started); the client secret goes into the response only; ARCHITECTURE 7.2 is read in that order; confirmPayment has the same shape (load, call to retrieve, derive the state and void when required, handler); a fault test shows that a handler failure after call and the retry give one gateway effect
 - AT-US-209-01 … AT-US-209-08: all 8 scenarios of US-209, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

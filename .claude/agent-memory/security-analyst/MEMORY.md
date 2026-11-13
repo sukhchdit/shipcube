@@ -15,15 +15,17 @@
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
 - [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; superseded by PR #19; open 05/08/09 → TASK-026/014/089
 - [P5 PR-0019 supersede round](project_p5_pr19_supersede.md) — TASK-023 @699f33d PASS_W_F-U; PR19-SEC-01 INFO SYSTEM delegates; boundaries categories accumulate; PR #4 overlap trap
-- [P5 PR-0020 logging](project_p5_pr20_logging.md) — TASK-010 R3 @fafa3b5 (union+fc2) PASS_W_F-U; 13/16 closed; new LOW 18 quadratic re-scan, 19 {name,value}; INFO 20-22
+- [P5 PR-0020 logging](project_p5_pr20_logging.md) — TASK-010 R4 @3f585b7 (merge+delta, fc3) PASS_W_F-U; 18/19 closed; new INFO 23 record shapes + 22(f); union proof, 22-case record sim; owners TASK-113/022/214
 - [P5 PR-0021 OpenAPI pipeline](project_p5_pr21_openapi_pipeline.md) — TASK-017 R1 b0ede35 + R2 b31483b/fc2 e046ea2 PASS_W_F-U; 01 closed; new INFO 08/09; ref-parser safeUrl fact; PR #20 union checks
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10
 - [P5 PR-0023 lane B evidence](project_p5_pr23_lane_b.md) — TASK-011 R2 @c0b1b31 PASS_W_COND; 01 closed; W0-ACT-1 runner gap; 03/04/05 due before Wave-0-exit activation
 - [P5 PR-0024 audit store](project_p5_pr24_audit_store.md) — TASK-021 R2 @7662672 PASS_W_F-U (90 blob 9aab9aa approved); 10 CIC leftover LOW; overlap-round triggers; PG18 facts; Docker recipe
 - [P5 PR-0025 CI follow-ups](project_p5_pr25_ci_followups.md) — R1 @20a0fc6 PASS_W_F-U; PR10-SEC-08 closed; 01 LOW 17-fingerprint baseline before gitleaks-full; gitleaks .gitleaksignore/override facts
-- [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 PASS_W_F-U; k6 eslint block scoped; 01 LOW prisma/tests not excluded from images (TASK-014), 02-05 INFO; k6 digest/registry recipe; #20/#24 overlap
+- [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 + R2 @a5cfd4b (merge+delta) PASS_W_F-U; 02 closed, 01 LOW TASK-014, 03/04 TASK-280, new 06 INFO; #20/#32 edit eslint (later one needs merge-only round)
 - [P5 PR-0028 W0-ACT-1](project_p5_pr28_w0act1.md) — R1 @22c6461 PASS_W_F-U; activation semantics probed; 01/02 LOW, 03/04 INFO; staleness pattern .claude/agent-memory/*/*.md
-- [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1 @84b70c4 + R2 @a6a929b PASS_W_F-U; 01/02/05/06 closed, 03 open, new INFO 09/10; offline Prisma probe recipe
+- [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1+R2+R3 (merge-only @084ee93, push moved to c694583) PASS_W_F-U; 03 open; D3 revert passes (PR10-SEC-21); probe kit
 - [P5 PR-0031 staleness+scrub](project_p5_pr31_staleness_scrub.md) — R1 @69a997c PASS_W_F-U; 28/01 closed; SEC-01 .gitmodules ignore=all hides gitlinks, SEC-02 mode guard staleness-only; merge main voids evidence
 - [P5 PR-0030 S3 adapter](project_p5_pr30_s3_adapter.md) — TASK-019 R1 @293fb62 PASS_W_COND, R2 @5f45a8b PASS_W_F-U (C1 closed); open 04 LOW + INFO 06-11; ADR am. 2 item 3 claim-vs-checksum evidence; RustFS facts
+- [P5 PR-0032 route pipeline](project_p5_pr32_route_pipeline.md) — TASK-020 R1 @fa67aca PASS_W_COND; 01 MEDIUM T-83 blind to handlers; C1-C3; D-TASK020-03 confirmed w/ C2; R2 = delta + PR #20 union
+- [P5 PR-0033 lane A hardening](project_p5_pr33_lane_a_hardening.md) — TASK-015 015-A R1 @3ed0484 PASS_W_F-U; 9 closed, PR25-SEC-01 half; NBSP comment hole, oasdiff 0700 EACCES; R2 delta list
 - [Threat-model v1.1 round](project_p5_threat_model_v11_round.md) — D-SEC-TM-01 2026-11-13: §10.4 log, proposed SEC-TC-69..75 + owners (65-68 provisional), -bench vocabulary; open items

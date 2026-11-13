@@ -89,6 +89,7 @@ function runner() {
       markNotReady: (reason) => {
         notReady.push(reason);
       },
+      scopeClient: () => single,
     },
   );
   return { ...built, events, notReady, counter };
@@ -236,7 +237,8 @@ describe('PR11-SEC-09 items 1-4: the composition root (platform/db/runtime.ts) w
       expect(error).toMatchObject({ reason: 'DB_SESSION_CONTEXT_LEAK', securityEvent: 'db_session_context_leak' });
       // item 4 sinks: one security event with the correlation id only, the counter, the latch (logged once)
       expect(logged.filter(({ event }) => event.startsWith('security.'))).toEqual([
-        { level: 'warn', event: 'security.db_session_context_leak', fields: { component: 'database', correlationId: 'rls-leak-runtime' } },
+        // TASK-010 security-event sink: catalogue level error, exactly { correlationId } (D-ARCH-079)
+        { level: 'error', event: 'security.db_session_context_leak', fields: { correlationId: 'rls-leak-runtime' } },
       ]);
       expect(runtime.sessionContextLeaks()).toBe(1);
       expect(logged.filter(({ event }) => event === 'db.not_ready_latched')).toEqual([

@@ -18,7 +18,9 @@
     "../apps/api/src/platform/db/client.ts",
     "../apps/api/src/platform/db/dedicated-connection.ts",
     "../apps/api/src/platform/db/expect-affected.ts",
+    "../apps/api/src/platform/db/extensions/standard-columns.ts",
     "../apps/api/src/platform/db/health-check.ts",
+    "../apps/api/src/platform/db/index.ts",
     "../apps/api/src/platform/db/map-db-error.ts",
     "../apps/api/src/platform/db/runtime.ts",
     "../apps/api/src/platform/db/session-integrity.ts",
@@ -27,6 +29,7 @@
     "../apps/api/src/platform/health/checks/audit-chain.ts",
     "../apps/api/src/platform/health/checks/audit-partitions.ts",
     "../apps/api/src/platform/health/checks/catalog-reader.ts",
+    "../apps/api/src/platform/logging/security-events.ts",
     "../apps/api/src/platform/runtime/log.ts",
     "../apps/api/src/platform/runtime/readiness.ts",
     "../apps/api/src/platform/runtime/shutdown.ts"

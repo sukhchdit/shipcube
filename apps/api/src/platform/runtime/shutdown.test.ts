@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { createDatabaseCheck } from '../db/health-check.js';
-import { createRuntimeLog } from './log.js';
+import { createRuntimeLog, UNKNOWN_VERSION } from './log.js';
 import { createShutdown, type ShutdownOptions } from './shutdown.js';
 
 function harness(overrides: Partial<ShutdownOptions> = {}) {
@@ -12,7 +12,7 @@ function harness(overrides: Partial<ShutdownOptions> = {}) {
     probe: { startDraining: () => void (draining = true) },
     drain: () => Promise.resolve(),
     resources: [{ name: 'database', close: () => Promise.resolve() }],
-    log: createRuntimeLog('api', { write: (line: string) => lines.push(line) }, () => new Date(0)),
+    log: createRuntimeLog('api', { write: (line: string) => lines.push(line) }, { now: () => new Date(0) }),
     exit: (code) => void exits.push(code),
     drainTimeoutMs: 50,
     closeTimeoutMs: 50,
@@ -37,9 +37,14 @@ describe('graceful shutdown (NFR-AVAIL-002)', () => {
     expect(events(h.lines)).toEqual(['shutdown.start', 'shutdown.done']);
     expect(JSON.parse(h.lines[0] ?? '{}')).toEqual({
       level: 'info',
-      time: new Date(0).toISOString(),
-      service: 'api',
+      timestamp: new Date(0).toISOString(),
+      message: 'shutdown.start',
       event: 'shutdown.start',
+      service: 'api',
+      version: UNKNOWN_VERSION,
+      correlation_id: null,
+      org_id: null,
+      actor_id: null,
       signal: 'SIGTERM',
     });
   });
