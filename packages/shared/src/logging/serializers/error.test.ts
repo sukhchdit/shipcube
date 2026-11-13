@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { describe, expect, it } from '@jest/globals';
 
 import { REDACTED } from '../string-redaction.js';
-import { isErrorLike, MAX_CAUSE_DEPTH, MAX_STACK_FRAMES, serializeThrown } from './error.js';
+import { isErrorLike, MAX_CAUSE_DEPTH, MAX_RAW_STACK_LENGTH, MAX_STACK_FRAMES, serializeThrown } from './error.js';
 
 const sentinel = (): string => `sentinel-${randomBytes(8).toString('hex')}`;
 
@@ -54,25 +54,88 @@ describe('serializeThrown', () => {
     expect(stack).toContain('... 7 more frames');
   });
 
-  it('serialises errors from another realm', () => {
+  it('serialises errors from another realm without invoking their (foreign) stack accessor', () => {
     const foreign: unknown = vm.runInNewContext('new RangeError("out of range for secret-token-9")');
     const serialized = serializeThrown(foreign);
     expect(serialized.name).toBe('RangeError');
     expect(serialized.message).toBe(`out of range for ${REDACTED}`);
-    expect(serialized.stack).toContain('RangeError');
+    expect(serialized).not.toHaveProperty('stack');
   });
 
-  it('never invokes a user-defined stack getter', () => {
+  it('reads the stack of errors, subclasses and captureStackTrace targets through the V8 accessor', () => {
+    class AppError extends Error {}
+    const captured = { message: 'captured' };
+    Error.captureStackTrace(captured);
+    for (const error of [new Error('a'), new TypeError('b'), new AppError('c'), captured]) {
+      expect(serializeThrown(error).stack).toMatch(/\n\s+at /);
+    }
+  });
+
+  type Wrap = (getter: () => string) => unknown;
+  const v8StackGetter: unknown = Object.getOwnPropertyDescriptor(new Error(), 'stack')?.get;
+  const wraps: readonly (readonly [string, Wrap])[] = [
+    ['a plain function', (getter) => getter],
+    ['a bound function', (getter) => getter.bind(undefined)],
+    ['a Proxy of a function', (getter) => new Proxy(getter, {})],
+    ['a Proxy of the V8 accessor', () => new Proxy(v8StackGetter as () => string, {})],
+  ];
+
+  // PR #20 m1 / PR20-SEC-09: bound functions and Proxies also print as `[native code]`.
+  it.each(wraps)('never invokes a stack getter that is %s', (_label, wrap) => {
     let calls = 0;
+    const value = sentinel();
     const error = new Error('m');
     Object.defineProperty(error, 'stack', {
-      get: () => {
+      get: wrap(() => {
         calls += 1;
-        return 'x';
-      },
+        return `Error: m\n    at ${value}`;
+      }) as () => string,
     });
-    expect(serializeThrown(error)).toEqual({ name: 'Error', message: 'm' });
+    const serialized = serializeThrown(error);
+    expect(serialized).toEqual({ name: 'Error', message: 'm' });
+    expect(JSON.stringify(serialized)).not.toContain(value);
     expect(calls).toBe(0);
+  });
+
+  it('rebuilds the stack header from the current, redacted message (PR20-SEC-09)', () => {
+    const value = sentinel();
+    const error = new Error(`driver text ${value}`);
+    expect(error.stack).toContain(value); // V8 fixes the header at the first read
+    error.message = 'scrubbed';
+    const stack = serializeThrown(error).stack ?? '';
+    expect(stack.split('\n')[0]).toBe('Error: scrubbed');
+    expect(stack).not.toContain(value);
+    expect(stack).toMatch(/\n\s+at /);
+  });
+
+  it('reads at most MAX_RAW_STACK_LENGTH characters of a huge stack (PR20-SEC-07)', () => {
+    const frames = Array.from({ length: 200_000 }, (_, index) => `    at f${String(index)} (file.js:1:1)`);
+    const error = { message: 'deep', stack: ['Error: deep', ...frames].join('\n') };
+    const started = performance.now();
+    const stack = serializeThrown(error).stack ?? '';
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(stack.length).toBeLessThan(MAX_RAW_STACK_LENGTH);
+    expect(stack.split('\n').filter((line) => line.startsWith('    at '))).toHaveLength(MAX_STACK_FRAMES);
+  });
+
+  it('writes a Joi-shaped ValidationError as paths and rule types only, never the rejected value (PR20-SEC-12)', () => {
+    const value = sentinel();
+    class ValidationError extends Error {
+      readonly details = [
+        { message: `"note" with value "${value}" fails`, path: ['items', 0, 'note'], type: 'string.pattern.base', context: { value } },
+        { message: 'x', path: ['owner', 'alice@example.com'], type: 'bad type!' },
+      ];
+    }
+    Object.defineProperty(ValidationError.prototype, 'name', { value: 'ValidationError' });
+    const serialized = serializeThrown(new ValidationError(`"note" with value "${value}" fails`));
+    expect(serialized).toEqual({
+      name: 'ValidationError',
+      details: [
+        { path: 'items.0.note', type: 'string.pattern.base' },
+        { path: 'owner.a***@example.com', type: 'unknown' },
+      ],
+    });
+    expect(JSON.stringify(serialized)).not.toContain(value);
   });
 
   it('survives hostile proxies and throwing getters', () => {

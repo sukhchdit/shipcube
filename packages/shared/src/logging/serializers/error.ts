@@ -6,7 +6,7 @@
 import { types } from 'node:util';
 
 import { constructorName, hasOwnKey, isObjectLike, ownDataProperty, ownString } from '../own-property.js';
-import { redactString } from '../string-redaction.js';
+import { redactString, sanitiseKey } from '../string-redaction.js';
 import { errorName, isDatabaseError, serializeDatabaseError } from './prisma-error.js';
 
 /** The `err` value of a log line. Database errors carry only `name`, `code`, `originalCode` and `kind`. */
@@ -20,15 +20,45 @@ export interface SerializedError {
   readonly cause?: SerializedError;
   /** Redacted string form of a thrown non-error. */
   readonly value?: string;
+  /** Joi validation errors: the failing paths and rule types only, never the rejected values (PR20-SEC-12, L-13). */
+  readonly details?: readonly SerializedValidationDetail[];
+}
+
+/** One Joi validation detail: the path (keys sanitised) and the rule type, never the value or the message. */
+export interface SerializedValidationDetail {
+  readonly path: string;
+  readonly type: string;
 }
 
 /** Causes serialised below the thrown value. */
 export const MAX_CAUSE_DEPTH = 3;
-/** Stack frames kept (header lines are kept too). */
+/** Stack frames kept; the header is rebuilt from the name and the redacted message. */
 export const MAX_STACK_FRAMES = 20;
+/** Characters of a raw stack read before it is split into frames (bounds the cost of huge stacks, PR20-SEC-07). */
+export const MAX_RAW_STACK_LENGTH = 16_384;
+/** Joi details kept per validation error. */
+export const MAX_VALIDATION_DETAILS = 20;
 
 const SHORT_CODE = /^[A-Za-z0-9_.:-]{1,64}$/;
 const STACK_FRAME = /^\s+at /;
+const JOI_RULE_TYPE = /^[A-Za-z0-9_.-]{1,64}$/;
+const MAX_PATH_SEGMENTS = 16;
+const MAX_HEADER_MESSAGE_LENGTH = 256;
+
+/**
+ * V8's own `stack` accessor, shared by every Error of this realm (Error, its subclasses, `captureStackTrace`). A stack
+ * accessor is invoked only when it IS this function: a bound or Proxy-wrapped user getter also prints as
+ * `[native code]`, so a `toString` check is not enough (PR #20 m1, PR20-SEC-09). Errors of another realm have another
+ * accessor and are logged without a stack.
+ */
+const V8_STACK_GETTER: unknown = ((): unknown => {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(new Error(), 'stack');
+    return descriptor === undefined ? undefined : Reflect.get(descriptor, 'get');
+  } catch {
+    return undefined;
+  }
+})();
 
 function safeInstanceOfError(value: unknown): boolean {
   try {
@@ -44,17 +74,9 @@ export function isErrorLike(value: unknown): boolean {
   return types.isNativeError(value) || safeInstanceOfError(value) || ownString(value, 'message') !== undefined;
 }
 
-function isNativeFunction(fn: unknown): boolean {
-  try {
-    return typeof fn === 'function' && Function.prototype.toString.call(fn).endsWith('{ [native code] }');
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The stack of an error. Node 24 exposes `stack` as an own accessor installed by V8, so a data property is read
- * directly and an accessor is invoked only when it is native code (V8's), never a user-defined getter.
+ * directly and an accessor is invoked only when it is V8's own accessor (identity check), never a user getter.
  */
 function readStack(value: object): string | undefined {
   try {
@@ -62,7 +84,7 @@ function readStack(value: object): string | undefined {
     if (descriptor === undefined) return undefined;
     if ('value' in descriptor) return typeof descriptor.value === 'string' ? descriptor.value : undefined;
     const getter: unknown = Reflect.get(descriptor, 'get');
-    if (typeof getter !== 'function' || !isNativeFunction(getter)) return undefined;
+    if (typeof getter !== 'function' || getter !== V8_STACK_GETTER) return undefined;
     const stack: unknown = Reflect.apply(getter, value, []);
     return typeof stack === 'string' ? stack : undefined;
   } catch {
@@ -70,15 +92,19 @@ function readStack(value: object): string | undefined {
   }
 }
 
-/** Keeps the header lines and the first MAX_STACK_FRAMES frames. */
-function capFrames(stack: string): string {
-  const kept: string[] = [];
+/**
+ * `header` followed by the first MAX_STACK_FRAMES `at` frames of `stack`. V8 fixes the stack header at the first
+ * `.stack` read, so the original header can carry a message scrubbed later: it is rebuilt from the current, redacted
+ * message instead (PR20-SEC-09). The raw stack is cut before it is split (PR20-SEC-07).
+ */
+function capFrames(header: string, stack: string): string {
+  const kept: string[] = [header];
   let frames = 0;
   let omitted = 0;
-  for (const line of stack.split('\n', 1000)) {
-    if (!STACK_FRAME.test(line)) {
-      if (frames === 0) kept.push(line);
-    } else if (frames < MAX_STACK_FRAMES) {
+  const raw = stack.length > MAX_RAW_STACK_LENGTH ? stack.slice(0, MAX_RAW_STACK_LENGTH) : stack;
+  for (const line of raw.split('\n', 1000)) {
+    if (!STACK_FRAME.test(line)) continue;
+    if (frames < MAX_STACK_FRAMES) {
       kept.push(line);
       frames += 1;
     } else {
@@ -112,16 +138,42 @@ function serializeNonError(value: unknown): SerializedError {
   return { name: typeof value, value: redactString(primitiveText(value)) };
 }
 
+function pathSegment(segment: unknown): string {
+  if (typeof segment === 'number') return String(segment);
+  return typeof segment === 'string' ? sanitiseKey(segment) : '?';
+}
+
+/** A Joi `ValidationError`: its message echoes the rejected value (`"x" with value "…"`), so paths and types only. */
+function joiDetails(value: object, name: string): SerializedValidationDetail[] | undefined {
+  if (name !== 'ValidationError') return undefined;
+  const details = ownDataProperty(value, 'details');
+  if (!Array.isArray(details)) return undefined;
+  return details.slice(0, MAX_VALIDATION_DETAILS).map((detail: unknown) => {
+    const path = ownDataProperty(detail, 'path');
+    const type = ownString(detail, 'type');
+    return {
+      path: Array.isArray(path) ? path.slice(0, MAX_PATH_SEGMENTS).map(pathSegment).join('.') : '',
+      type: type !== undefined && JOI_RULE_TYPE.test(type) ? type : 'unknown',
+    };
+  });
+}
+
 function serializeError(value: object, depth: number): SerializedError {
-  const message = ownString(value, 'message');
+  const name = errorName(value);
+  const details = joiDetails(value, name);
+  if (details !== undefined) return { name, details };
+  const raw = ownString(value, 'message');
+  const message = raw === undefined ? undefined : redactString(raw);
   const stack = readStack(value);
   const code = ownDataProperty(value, 'code');
   const hasCause = depth < MAX_CAUSE_DEPTH && hasOwnKey(value, 'cause');
   const cause = hasCause ? serializeAt(ownDataProperty(value, 'cause'), depth + 1) : undefined;
+  // The full message is in `message`; the header repeats at most its start (PR20-SEC-07).
+  const header = message === undefined || message === '' ? name : `${name}: ${message.slice(0, MAX_HEADER_MESSAGE_LENGTH)}`;
   return {
-    name: errorName(value),
-    ...(message === undefined ? {} : { message: redactString(message) }),
-    ...(stack === undefined ? {} : { stack: redactString(capFrames(stack)) }),
+    name,
+    ...(message === undefined ? {} : { message }),
+    ...(stack === undefined ? {} : { stack: redactString(capFrames(header, stack)) }),
     ...(typeof code === 'string' && SHORT_CODE.test(code) ? { code } : {}),
     ...(cause === undefined ? {} : { cause }),
   };
