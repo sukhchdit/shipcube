@@ -194,7 +194,7 @@ paths:
               default:
                 summary: Example
                 value:
-                  token: Vf3kQ9xL2mN8pR4tW7yZ1aC5eG0hJ6bD3sU9iO2qE8r
+                  token: EXAMPLE_EMAIL_VERIFICATION_TOKEN_0001_XXXXX
       responses:
         "204":
           description: Email verified.
@@ -378,7 +378,7 @@ paths:
                 default:
                   summary: Example
                   value:
-                    access_token: eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJ1In0.c2lnbmF0dXJl
+                    access_token: EXAMPLE_ACCESS_TOKEN_0001
                     token_type: Bearer
                     expires_in: 900
                     session_id: 0193a5b2-7c1e-7d4a-9f3b-000000000d01
@@ -458,7 +458,7 @@ paths:
               default:
                 summary: Example
                 value:
-                  mfa_challenge_token: mfa_ch_7Kq2Zr9VbN4mX1pL8cW3sYh6dF0gA5eR
+                  mfa_challenge_token: EXAMPLE_MFA_CHALLENGE_TOKEN_0001
                   method: TOTP
                   code: "492817"
       responses:
@@ -483,7 +483,7 @@ paths:
                 default:
                   summary: Example
                   value:
-                    access_token: eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJ1In0.c2lnbmF0dXJl
+                    access_token: EXAMPLE_ACCESS_TOKEN_0001
                     token_type: Bearer
                     expires_in: 900
                     session_id: 0193a5b2-7c1e-7d4a-9f3b-000000000d01
@@ -587,7 +587,7 @@ paths:
                 default:
                   summary: Example
                   value:
-                    access_token: eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJ1In0.c2lnbmF0dXJl
+                    access_token: EXAMPLE_ACCESS_TOKEN_0001
                     token_type: Bearer
                     expires_in: 900
                     session_id: 0193a5b2-7c1e-7d4a-9f3b-000000000d01
@@ -766,7 +766,7 @@ paths:
                 default:
                   summary: Example
                   value:
-                    csrf_token: q3X9vL2mN8pR4tW7yZ1aC5eG0hJ6bD3sU9iO2qE8rT4
+                    csrf_token: EXAMPLE_CSRF_TOKEN_0001_XXXXXXXXXXXXXXXXXXX
                     expires_at: 2026-12-12T14:30:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
@@ -904,7 +904,7 @@ paths:
               default:
                 summary: Example
                 value:
-                  token: Rz8pL1qM4nV7xB2kT9wY3cH6dF0gJ5sA8eU1iO4rE2t
+                  token: EXAMPLE_PASSWORD_RESET_TOKEN_0001_XXXXXXXXX
                   new_password: another-long-passphrase-77
       responses:
         "204":
@@ -1094,7 +1094,7 @@ paths:
                 default:
                   summary: Example
                   value:
-                    reauth_proof: rap_9Lk2Qv7Xn4Bm1Tz8Wc3Yh6Df0Gj5Sa
+                    reauth_proof: EXAMPLE_REAUTH_PROOF_0001
                     action_scope: mfa.recovery_codes.regenerate
                     expires_at: 2026-11-12T14:35:00Z
         "400":
@@ -1190,7 +1190,7 @@ paths:
                 default:
                   summary: Example
                   value:
-                    access_token: eyJhbGciOiJFUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJ1In0.c2lnbmF0dXJl
+                    access_token: EXAMPLE_ACCESS_TOKEN_0001
                     token_type: Bearer
                     expires_in: 900
                     session_id: 0193a5b2-7c1e-7d4a-9f3b-000000000d01
@@ -1366,8 +1366,8 @@ paths:
                 default:
                   summary: Example
                   value:
-                    provisioning_uri: otpauth://totp/Platform:ana%40acme.example?secret=JBSWY3DPEHPK3PXPJBSWY3DP&issuer=Platform
-                    manual_key: JBSWY3DPEHPK3PXPJBSWY3DP
+                    provisioning_uri: otpauth://totp/Platform:ana%40acme.example?secret=EXAMPLEEXAMPLEEXAMPLEEXAMPLE2345&issuer=Platform
+                    manual_key: EXAMPLEEXAMPLEEXAMPLEEXAMPLE2345
                     expires_at: 2026-11-12T14:45:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -3865,7 +3865,7 @@ paths:
               default:
                 summary: Example
                 value:
-                  token: In7vT2kQ9xL4mN8pR1tW6yZ3aC5eG0hJ2bD7sU4iO9q
+                  token: EXAMPLE_INVITATION_TOKEN_0001_XXXXXXXXXXXXX
       responses:
         "201":
           description: Success.
@@ -6449,7 +6449,7 @@ paths:
                       version: 1
                       unreviewed: true
                     share: null
-                    guest_token: q7Zt3rXbV9mK2pLwN8cQ4sYhJ6dF1gA0eR5uT2iO3pE
+                    guest_token: EXAMPLE_GUEST_TOKEN_0001_XXXXXXXXXXXXXXXXXX
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -7665,8 +7665,8 @@ paths:
                   summary: Example
                   value:
                     share_id: 0193a5b2-7c1e-7d4a-9f3b-000000000e21
-                    share_token: sh_Qz8Lp2Vx7Nb4Mk1Tw9Yc3Hd
-                    share_path: /q#token=sh_Qz8Lp2Vx7Nb4Mk1Tw9Yc3Hd
+                    share_token: EXAMPLE_SHARE_TOKEN_0001
+                    share_path: /q#token=EXAMPLE_SHARE_TOKEN_0001
                     expires_at: 2026-11-13T14:30:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -7817,7 +7817,7 @@ paths:
               default:
                 summary: Example
                 value:
-                  token: sh_Qz8Lp2Vx7Nb4Mk1Tw9Yc3Hd
+                  token: EXAMPLE_SHARE_TOKEN_0001
       responses:
         "200":
           description: Success.
@@ -8261,7 +8261,7 @@ paths:
                         current_step: 7
                         created_at: 2026-11-12T14:30:00Z
                         updated_at: 2026-11-12T14:35:12Z
-                    next_cursor: eyJrIjoiMjAyNi0xMS0xMlQxNDozMDowMFoiLCJpZCI6IjAxOTMifQ
+                    next_cursor: EXAMPLE_CURSOR_0001
                     has_more: true
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -12389,7 +12389,7 @@ paths:
                     refunded_amount:
                       amount: 0
                       currency: USD
-                    client_secret: pi_3Q_test_secret_placeholder
+                    client_secret: pi_EXAMPLE_secret_EXAMPLE
                     next_action:
                       type: USE_GATEWAY_SDK
                       redirect_url: null
@@ -13379,7 +13379,7 @@ paths:
                   value:
                     setup_id: seti_test_placeholder
                     gateway: STRIPE
-                    client_secret: seti_test_secret_placeholder
+                    client_secret: seti_EXAMPLE_secret_EXAMPLE
                     expires_at: 2026-11-12T15:30:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -14270,7 +14270,7 @@ paths:
                         outcome: SUCCESS
                         ip: 203.0.113.10
                         source_app: web
-                    next_cursor: eyJrIjoiMjAyNi0xMS0xMlQxNDozMDowMFoiLCJpZCI6IjAxOTMifQ
+                    next_cursor: EXAMPLE_CURSOR_0001
                     has_more: true
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -16128,7 +16128,7 @@ components:
                 instance: /api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01
                 code: MFA_REQUIRED
                 correlation_id: c0ffee00-1234-4abc-9def-001122334455
-                mfa_challenge_token: mfa_ch_7Kq2Zr9VbN4mX1pL8cW3sYh6dF0gA5eR
+                mfa_challenge_token: EXAMPLE_MFA_CHALLENGE_TOKEN_0001
                 mfa_methods:
                   - TOTP
                   - RECOVERY_CODE

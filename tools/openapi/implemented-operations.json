@@ -1,0 +1,4 @@
+{
+  "$comment": "Implemented-operations ledger (TASK-017, REQ-API-002; tools/openapi/README.md): the openapi.yaml operationIds that must be mounted now. Process rule, not enforced by the check: every API task adds the operationIds it implements in the same change that mounts them, and removing an entry is a breaking change (api/README.md §18), detected by the oasdiff gate once it lands. tools/openapi/drift.test.ts fails on a ledger entry that is not mounted, a mounted operation missing here, or an unknown operationId. TASK-020 may replace this file with the defineRoute registry.",
+  "operations": ["getLiveness", "getReadiness"]
+}

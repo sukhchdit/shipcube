@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "//": "Contract-validated API tests and their helpers (TASK-017, US-034, REQ-API-004). Not a workspace. tools/openapi/contract.ts is compiled here as a listed file: the tools project is noEmit, so a project reference would have no declarations to resolve.",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-api.tsbuildinfo"
+  },
+  "files": ["../../tools/openapi/contract.ts"],
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../../packages/shared" }, { "path": "../../apps/api" }]
+}

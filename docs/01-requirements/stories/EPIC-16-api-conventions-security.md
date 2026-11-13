@@ -73,7 +73,7 @@ Feature: Contract-first OpenAPI 3.1 with CI cross-check and response validation
 - **Milestone:** M0 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-034
 - **Linked REQs:** REQ-API-003, REQ-API-015, REQ-API-019, REQ-API-020
 - **As a** frontend developer **I want** browsable docs, a generated typed client and standard deprecation signalling **so that** integration is fast and breaking changes are announced.
-- **Notes:** Swagger UI at `/api/docs` on in local, test and staging, off in production unless configured; public, descriptor `NONE` "API documentation". No deprecated route exists in this run; fixture only. ApiMode is `test` for every non-production request; seam only (keys are M3).
+- **Notes:** Swagger UI at `/api/docs` is on by default in local and test; staging and production opt in with `DOCS_ENABLED=true` (a production opt-in carries the PR21-SEC-02 conditions: cookieless docs origin, try-it-out off, `validatorUrl` null); wording aligned to the `DOCS_ENABLED` default by D-064 (D-ARCH-083, PR21-SEC-03), no scope change; public, descriptor `NONE` "API documentation". No deprecated route exists in this run; fixture only. ApiMode is `test` for every non-production request; seam only (keys are M3).
 
 #### Acceptance criteria
 ```gherkin
@@ -84,7 +84,7 @@ Feature: API docs UI, generated client, deprecation headers and ApiMode seam
     Then Swagger UI renders the current OpenAPI document
 
   Scenario: Docs off in production
-    Given NODE_ENV=production and DOCS_ENABLED unset
+    Given APP_ENV=production and DOCS_ENABLED unset
     Then GET /api/docs returns 404 NOT_FOUND
 
   Scenario: Stale generated client fails CI
