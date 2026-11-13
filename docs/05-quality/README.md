@@ -59,7 +59,8 @@ Exit 0 is PASS, 1 is FAIL, 2 is a usage or internal error. `--report-only` alway
    - Only allowed file names are present, and the directory is within 5 MB.
    - Every report and attachment hash matches, and no file is unlisted.
    - Every JUnit parses (strict reader: no DOCTYPE or entities). Its counts equal `summary.json`, and declared JUnit totals equal its test cases.
-   - The verdict recomputed from the JUnit equals the declared verdict. The recomputed verdict is INVALID when `git_dirty`, `!build_clean`, a `SKIP_*` override or any `invalid_reasons` is present. It is FAIL on failures or errors, a non-passed suite status, skips in a zero-skip or security suite, a SEC-TC test case skipped or failed in any suite, `tests < max(min_tests, 1)`, a missing `required_cases` ID, or a JUnit for a suite that is `planned` in the base manifest. That last case (rule 4) only **rejects the run**: it is not credited, and the check fails only if that run was needed. The PR that activates a suite therefore passes with its own run uncredited, from the next PR on the suite is required, and a later activation whose run also carries the newly activated suite is rejected as a whole (so the activation belongs in a manifest-only PR).
+   - The verdict recomputed from the JUnit equals the declared verdict. The recomputed verdict is INVALID when `git_dirty`, `!build_clean`, a `SKIP_*` override or any `invalid_reasons` is present. It is FAIL on failures or errors, a non-passed suite status, skips in a zero-skip or security suite, a SEC-TC test case skipped or failed in any suite, `tests < max(min_tests, 1)`, or a missing `required_cases` ID.
+   - **Rule 4 (planned suite): the run is rejected, not failed.** A run that holds a JUnit for a suite that is `planned` in the base manifest is never credited; the check fails only if that run was needed. The PR that activates a suite therefore passes with its own run uncredited, from the next PR on the suite is required, and a later activation whose run also carries the newly activated suite is rejected as a whole (so the activation belongs in a manifest-only PR, section "Suite activation" below).
    - `git_sha` is an ancestor of the head, and every path changed between `git_sha` and the head is staleness-allowed: `docs/**` minus `docs/03-architecture/api/**` minus the manifest's `tooling_inputs`. Evidence is therefore stale after an `openapi.yaml` change.
    - The run's profile is at least the requested one. Every required suite is present with `tests >= max(min_tests, 1)`, `failures + errors = 0`, and `skipped = 0` if it is zero-skip.
 4. **FAIL regardless of the evidence** in any of these cases:
@@ -88,4 +89,19 @@ The verdict and a per-run table (declared and recomputed verdicts, acceptance, r
 | perf-sensitive | `packages/pricing/**`, `packages/audit/**`, `packages/authz/**`, `tests/load/**` | k6-smoke |
 | docs-or-ci-only | `docs/**` (except the API contract and the tooling inputs), `.github/**` | none (lane A only) |
 
-On 2026-11-13 every suite in the manifest is still `planned`, so `quality:check-evidence` currently requires nothing and reports the planned selection. Enforcement starts per suite when qa-lead marks it `active` (TEST-STRATEGY section 9.3).
+## Suite activation
+
+Enforcement starts per suite when qa-lead marks it `active` in a manifest-only PR (TEST-STRATEGY section 9.3; D-ARCH-082 as amended by D-ORCH-030 and D-SEC-PR23-02). The checker reads the base-ref manifest, so an activation takes effect from the PR after it merges.
+
+- **Checkpoints.** W0-ACT-1 (right after PR #23), Wave-0 exit, the `v0.1.0-m0` tag, and G3 (everything `active` or in `deferred_at_gate` with a decision ID). The orchestrator's wave-exit checklist records each one.
+- **Runner first.** A suite may be `active` only when `tools/quality/suite-runners.json` has an entry for it (`tools/quality/activation.test.ts`); `quality:heavy` reports an active suite without one as an error, which would fail every PR whose paths select it.
+- **Required cases.** A SEC-TC ID with no test on `main` yet is parked in the manifest's `required_cases_pending` (owner task and latest checkpoint) and moves back into `required_cases` at the first checkpoint after its owning task merges (D-QA-014).
+- **Evidence in the activation PR.** Run `npm run quality:heavy -- --profile pr` on the activation head (a manifest change selects `unit` only) and commit it as `test(evidence): heavy lane pr <sha7> <verdict>`. At W0-ACT-1 that run is not credited (rule 4: `unit` is still `planned` in the base); at later checkpoints it is the required `unit` evidence. It must not be a `wave` or `gate` run (rule 4 would reject it as a whole), and apart from `unit` the activation PR must not touch a path that selects a suite it activates.
+- **Interim controls until PR23-SEC-03/04/05 merge** (D-SEC-PR23-02): no `wave` or `gate` run is committed, and the gate table of every evidence commit states that `npm ci --ignore-scripts` and `npm run deps:rebuild` ran in that worktree immediately before `quality:heavy`, and that the worktree's `.git/info/exclude` holds no entries.
+
+| Status on 2026-11-13 (W0-ACT-1) | Suites |
+|---|---|
+| `active` | `unit`, `integration`, `api`, `catalog-c1-c14`, `migrations` |
+| Next: Wave-0 exit, with their runners | `migration-lint`, `config-guards`, `sec-static`, `ci-policy`, `lint`, `typecheck`, `contract-openapi`, `e2e-chromium`, `e2e-webkit`, `redaction` (once PR #20 is merged), `rbac-matrix`, `audit-generator`, `audit-immutability`, `rls-cross-tenant`, `abuse`, `route-registry`, `compose-up`, `image-assertions` |
+| Held | `e2e-firefox` until COND-E2E-FF |
+| Every other suite | `v0.1.0-m0` when its owning task has merged, else G3 |
