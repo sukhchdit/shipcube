@@ -7,6 +7,10 @@
  * anonymous-capable route is never silently ignored. Responses that are authenticated in the D-ARCH-107 (5) sense (the
  * set has no `anonymous`, or the request presented a credential) are marked `private, no-store` from this step on, 401s
  * included (SEC-TC-29, T-06, ASVS 8.2.1).
+ *
+ * Stub-only (code review R2-m4, PR32-SEC-16): refusing a request on an `anonymous` route because it carries the refresh
+ * cookie follows D-ARCH-107 (5) verbatim but conflicts with ADR-0006 R-06 (the cookie is ignored outside refresh and
+ * logout). The ruling is pending with principal-architect before TASK-052/055 replace this slot; see credentials.ts.
  */
 import { AppError, presentsCredential } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';

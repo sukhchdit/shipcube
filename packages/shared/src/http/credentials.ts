@@ -6,6 +6,12 @@
  * credential on an anonymous-capable route; the problem handler answers `private, no-store` to any request that
  * presented one, errors raised before the route is known included) and for the SEC-TC-29 contract helper and stubs
  * (PR32-SEC-06 (a)). Pure; header names lower-case, as Node delivers them.
+ *
+ * Pending ruling (code review R2-m4, PR32-SEC-16): counting refresh-cookie presence as a credential on EVERY route is
+ * the TASK-020 stub reading of D-ARCH-107 (5). ADR-0006 R-06 says the `Path=/` refresh cookie is read only by
+ * `/auth/refresh` and `/auth/logout` and ignored elsewhere. principal-architect reconciles the two before TASK-052/055;
+ * until then the real authenticators must not inherit "cookie present, so refuse" on routes whose set lacks
+ * `refresh-cookie` (marking such responses `private, no-store` stays harmless).
  */
 
 /** Request headers as Node's `IncomingHttpHeaders` delivers them (lower-case names). */
