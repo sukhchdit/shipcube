@@ -22,6 +22,19 @@ node_modules/
 /packages/*/.react-router/
 /prisma/generated/
 
+# Playwright output (git-ignored; the HTML report bundles third-party viewer CSS) (PR #2 R2-n9), anchored like the
+# build output and .gitignore (PR4-SEC-10)
+/playwright-report/
+/test-results/
+/apps/*/playwright-report/
+/apps/*/test-results/
+/packages/*/playwright-report/
+/packages/*/test-results/
+/tests/*/playwright-report/
+/tests/*/test-results/
+/prisma/playwright-report/
+/prisma/test-results/
+
 # Documentation and agent configuration
 /docs/
 /.claude/

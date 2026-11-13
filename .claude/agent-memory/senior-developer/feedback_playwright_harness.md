@@ -21,3 +21,10 @@ Lessons from landing the PR #4 Playwright + axe harness (2026-11-12, about 110 c
 - Ran e2e as two invocations: 4 projects `--workers=2` (~70 s), Firefox separately. One all-6 run hung past 580 s.
 
 Related: [[merge-main-pass]], [[lane-a-pr-hygiene]], [[p5-dispatch]]
+
+**PR #4 fix cycle 2 (2026-11-13): WebKit-desktop on this host is flaky beyond the close hang.** Three sequential `--workers=1` runs:
+- run 1: SPA-fallback test saw `lang=en` after releasing held scripts, then a page-teardown hang;
+- run 2: `browserContext.newPage: Protocol error (Network.setEmulateOfflineState)`;
+- run 3: 13/13, then the known close hang.
+
+Each hung run leaves an orphan `WebKitNetworkProcess.exe`. Find yours by CreationDate with `Get-CimInstance Win32_Process -Filter "Name like 'WebKit%'"`, then `taskkill //PID n //F` only your own. Wrap every run in `timeout 400`. Report the failed runs honestly; don't retry more than about twice.

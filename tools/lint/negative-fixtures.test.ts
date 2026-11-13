@@ -484,6 +484,12 @@ const TENANT_DB: readonly Violation[] = [
     BOUNDARIES,
     'prisma/tests may import only',
   ],
+  [
+    'prisma/tests imports a prisma/ file outside prisma/seed (PR #5 R3-n1, PR #13 m6)',
+    'layering/prisma-tests-imports/prisma/tests/rls/bad-prisma-import.int.test.ts',
+    BOUNDARIES,
+    'prisma/tests may import only',
+  ],
 ];
 
 /** Warning-level rules ([title, file, rule]); `npm run lint` runs with --max-warnings 0, so each still blocks. */
@@ -499,6 +505,9 @@ const ESLINT_VIOLATIONS = [...LAYERING, ...ANY_SUPPRESSION, ...BCRYPT_CONFINEMEN
 
 /** The steps of `npm run lint` (`&&`-separated), in order (PR2-SEC-01/02/03). */
 const LINT_STEPS: readonly RegExp[] = [
+  // typegen first: type-aware rules must resolve the git-ignored ./+types on a clean checkout, and npm pre-hooks are
+  // skipped under ignore-scripts (PR #4 R2-m2).
+  /^npm run typegen$/u,
   /^eslint \. .*--max-warnings 0/u,
   /^stylelint .*--max-warnings 0/u,
   /^node tools\/lint\/check-suppressions\.mjs$/u,
@@ -684,7 +693,7 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ['expect-affected: results passed to expectAffected', `rules/expect-affected/${API}/orders/repository/ok-checked.ts`],
     ['withTenantTx imports the root client', 'layering/root-client-privacy/apps/api/src/platform/db/with-tenant-tx.ts'],
     [
-      'prisma/tests imports tools/db, tools/test-support, platform/db and its harness',
+      'prisma/tests imports tools/db, tools/test-support, platform/db, the seed framework and its harness (PR #13 m6)',
       'layering/prisma-tests-imports/prisma/tests/rls/ok-imports.int.test.ts',
     ],
   ])('allowed (TASK-016): %s', (_title, file) => {
@@ -753,11 +762,13 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     expect(report.resolver['@platform/shared']).toBe('packages/shared/src/index.ts');
   });
 
-  it('`npm run lint` runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01; no-weakening: every step still runs, in order, PR17-SEC-04)', () => {
+  it('`npm run lint` generates route types, runs ESLint and Stylelint with --max-warnings 0, then the suppression check (PR2-SEC-01; no-weakening: every step still runs, in order, PR17-SEC-04)', () => {
     const { scripts } = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     const steps = (scripts['lint'] ?? '').split('&&').map((step) => step.trim());
     if (MODE === 'exact') expect(steps).toEqual(LINT_STEPS.map((step) => expect.stringMatching(step)));
     else expect(missingSteps(steps, LINT_STEPS)).toEqual([]);
+    // No --allow-empty-input: Stylelint matching no CSS file fails instead of reading as clean (PR2-SEC-03).
+    expect(steps.filter((step) => step.includes('--allow-empty-input'))).toEqual([]);
   });
 
   // Ignore decisions: a source path that becomes ignored is weakening (always checked); an output path that stops
@@ -776,6 +787,12 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     'packages/carriers/src/dist/a.ts': false,
     'apps/api/src/modules/shipments/build/a.ts': false,
     'apps/web/app/routes/a.jsx': false,
+    // PR4-SEC-10: Playwright output is anchored like the build output.
+    'playwright-report/x.js': true,
+    'tests/e2e/test-results/x.js': true,
+    'tests/e2e/playwright-report/x.js': true,
+    'apps/api/src/modules/quotes/test-results/a.ts': false,
+    'packages/authz/src/playwright-report/a.ts': false,
   };
   const STYLELINT_IGNORED = {
     'dist/x.css': true,
@@ -784,6 +801,10 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
     'coverage/x.css': true,
     'apps/web/app/coverage/x.css': false,
     'packages/ui/src/build/x.css': false,
+    'playwright-report/x.css': true,
+    'tests/e2e/playwright-report/x.css': true,
+    'apps/web/app/test-results/x.css': false,
+    'packages/ui/src/playwright-report/x.css': false,
   };
   const linted = (expected: Record<string, boolean>) => Object.keys(expected).filter((path) => !expected[path]);
 

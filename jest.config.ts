@@ -1,6 +1,7 @@
 /**
- * Jest 30 configuration (ADR-0024). Three projects selected by the root scripts:
- *   unit        `*.test.ts(x)`      -> npm run test:unit
+ * Jest 30 configuration (ADR-0024). Four projects selected by the root scripts:
+ *   unit        `*.test.ts`         -> npm run test:unit (Node environment)
+ *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
  *   api         `*.api.test.ts(x)`  -> npm run test:api (Supertest + OpenAPI validation)
  * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
@@ -32,6 +33,9 @@ export const SWC_JEST_OPTIONS = {
 
 const IGNORED_PATHS = ['/node_modules/', '/dist/', '/build/', '/fixtures/'];
 
+// NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
+const JS_EXTENSION_MAPPER = { '^(\\.{1,2}/.*)\\.js$': '$1' };
+
 const common: ProjectConfig = {
   rootDir: '.',
   // Explicit roots: patterns like '<rootDir>/{a,b}/**' match nothing on Windows (SPK-01).
@@ -41,8 +45,7 @@ const common: ProjectConfig = {
     customExportConditions: ['@platform/source', 'node', 'node-addons'],
   },
   transform: { '^.+\\.(t|j)sx?$': ['@swc/jest', SWC_JEST_OPTIONS] },
-  // NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
-  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+  moduleNameMapper: JS_EXTENSION_MAPPER,
   modulePathIgnorePatterns: ['<rootDir>/.*/dist/', '<rootDir>/.*/build/'],
   testPathIgnorePatterns: IGNORED_PATHS,
 };
@@ -67,6 +70,9 @@ const config: Config = {
     '!prisma/generated/**',
     // Package entry points only re-export; the v8 provider would count them as uncovered lines.
     '!packages/*/src/index.ts',
+    // React Router build-time modules (ssr:false): the server entry and the route table run only inside
+    // `react-router build` (pre-render) and `typegen`; apps/web/tests/prerender.int.test.ts exercises them (PR #4 m8).
+    '!apps/*/app/{entry.server.tsx,routes.ts}',
   ],
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],
   // COVERAGE_TARGET (CLAUDE.md §3), global part: 85 % line / 75 % branch. The 95 % per-path thresholds for
@@ -79,8 +85,21 @@ const config: Config = {
     {
       ...common,
       displayName: 'unit',
-      testMatch: ['**/*.test.{ts,tsx}'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx?$', '/tests/e2e/'],
+      testMatch: ['**/*.test.ts'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
+    },
+    {
+      ...common,
+      displayName: 'unit-dom',
+      // Component tests resolve browser builds: `browser` replaces the Node-side `node`/`node-addons` conditions of `common` (m8).
+      // jsdom plus the Fetch API globals react-router needs (tools/test-dom/jsdom-environment.mjs). The DOM support files
+      // live outside tools/test-support, which lane A's base-ref lint-fixture step replaces with the base copy.
+      testEnvironment: '<rootDir>/tools/test-dom/jsdom-environment.mjs',
+      testEnvironmentOptions: { customExportConditions: ['@platform/source', 'browser'] },
+      testMatch: ['**/*.test.tsx'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
+      setupFilesAfterEnv: ['<rootDir>/tools/test-dom/dom-setup.ts'],
+      moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-dom/style-stub.ts' },
     },
     {
       ...common,

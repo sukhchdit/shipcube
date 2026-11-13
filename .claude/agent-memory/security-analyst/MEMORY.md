@@ -6,12 +6,15 @@
 - [P5 Wave 0 DB baseline](project_p5_wave0_db_baseline.md) — PR-0005 R1-R3 PASS_WITH_FOLLOW-UPS; SCRAM verifier-in-log ruling; rule-13 ALTER ROUTINE gap; TASK-014/016/021/034 checks
 - [P5 Wave 0 carrier docs](project_p5_wave0_carrier_docs.md) — PR-0006 R1+R2 PASS_WITH_FOLLOW-UPS; DHL shared origin, FedEx IP penalty, UPS 403=Blocked Merchant; TASK-113/131/135/188 checks
 - [P5 Wave 0 RLS spike](project_p5_wave0_rls_spike.md) — PR-0007 R1+R2 PASS_WITH_FOLLOW-UPS; am. 10 text defects (11/12); set_config leak facts; TASK-016/051/006/010/024 checks
-- [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 R1 + R2 @d2e867b PASS_W_F-U; 10/11 LOW new; PR #17 owned overlap (merge order); TASK-014/015/022/111 checks
+- [P5 Wave 0 web scaffolds](project_p5_wave0_web_scaffolds.md) — PR-0004 R1-R3 PASS_W_F-U (R3 @e3cdb94: 10/11 closed); 13 INFO typegen pre-lint code; TASK-014/015/022/111 checks
 - [P5 PR-0010 CI lane A](project_p5_pr10_ci_lane.md) — TASK-007 R1+R2 PASS_W_F-U; record contract; main-merge voids records on owned overlap; PR10-SEC-21; TASK-015 checks
 - [P5 PR-0008 authz review](project_p5_pr8_authz_review.md) — TASK-013 R1+R2 PASS_WITH_FOLLOW-UPS; pin bypass PR8-SEC-13 unplanned; canAssignRole consumer conds; TASK-007/016/020/231 checks
 - [P5 PR-0011 RLS review](project_p5_pr11_rls_review.md) — TASK-016 R3 @37a2109 content authorised (PASS_W_F-U); supersede done as PR-0018; 16 E-string LOW, 17 forge INFO; TASK-020/024/021/010 checks
 - [P5 PR-0018 supersede round](project_p5_pr18_supersede.md) — TASK-016 @0f9ff27 PASS_W_F-U, no new finding; three-way tree-compare + clone --shared record-check method; PR #4 must keep TENANT_DB cases
 - [P5 PR-0012 SPK-08 audit spike](project_p5_pr12_spk08_audit.md) — R1 PASS_W_F-U; PR12-SEC-02 MEDIUM squatting (supersedes SEC-P3-37 i6); PG18 event-trigger/pgaudit facts; TASK-021/033/116/G4 checks
 - [P5 PR-0009 runtime skeleton](project_p5_pr9_runtime_skeleton.md) — TASK-006 R3 PASS_W_F-U @6331aeb (ReDoS closed), R3c merge @5e6119d (R3b 6742bec unpushed); readFileSync/pg facts; TASK-014..111 checks
-- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; supersede-round checks (D-ORCH-017); 09 TLS values→TASK-014; 11 literal on main
+- [P5 PR-0013 seed framework](project_p5_pr13_seed_framework.md) — TASK-023 R1 @e92cd6f + R2 @e42e368 PASS_W_F-U; superseded by PR #19; open 05/08/09 → TASK-026/014/089
+- [P5 PR-0019 supersede round](project_p5_pr19_supersede.md) — TASK-023 @699f33d PASS_W_F-U; PR19-SEC-01 INFO SYSTEM delegates; boundaries categories accumulate; PR #4 overlap trap
+- [P5 PR-0020 logging](project_p5_pr20_logging.md) — TASK-010 R1 @dae1f96 PASS_W_F-U; 01 MEDIUM raw headers leak refresh cookie; 02-07 LOW; TASK-052/113/020/014/214 checks
+- [P5 PR-0021 OpenAPI pipeline](project_p5_pr21_openapi_pipeline.md) — TASK-017 R1 @b0ede35 PASS_W_F-U; 01 LOW ETag, 02-07 INFO; gitleaks block removal (devops); no main-merge; TASK-020/048/015 checks
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10

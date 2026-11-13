@@ -871,6 +871,8 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'commitlint.config.mjs',
   '.node-version',
   'tools/test-support/',
+  // PR #4 R3-M1, PR4-SEC-11: the unit-dom Jest environment and setup files moved out of tools/test-support.
+  'tools/test-dom/',
   // PR17-SEC-01: a `.swcrc` at any depth could redirect how a suite compiles (the swcrc rule also rejects it).
   '.swcrc',
   '**/.swcrc',

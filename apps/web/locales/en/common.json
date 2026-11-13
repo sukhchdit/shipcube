@@ -1,0 +1,38 @@
+{
+  "skipToContent": "Skip to content",
+  "loading": "Loading",
+  "nav": {
+    "language": "Language"
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español",
+    "fr": "Français"
+  },
+  "home": {
+    "meta": {
+      "title": "Compare carriers and ship worldwide",
+      "description": "Compare prices and delivery times from several carriers, then book and track your shipment in one place."
+    },
+    "hero": {
+      "title": "Compare carriers and ship worldwide",
+      "lead": "Get prices from several carriers in one place."
+    }
+  },
+  "error": {
+    "title": "Something went wrong",
+    "description": "Reload the page to try again. If it keeps happening, come back in a few minutes.",
+    "retry": "Try again"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The address may be wrong, or the page may have moved.",
+    "meta": {
+      "title": "Page not found"
+    }
+  },
+  "goHome": "Go home",
+  "footer": {
+    "note": "Prices and delivery times are shown before you book."
+  }
+}

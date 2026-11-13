@@ -1,5 +1,6 @@
 # Traceability Matrix
-Version 1.5 · 2026-11-13 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+Version 1.6 · 2026-11-13 · maintained by product-manager (P1), extended by principal-architect (Design), senior-developer (Tasks), qa-lead (Tests).
+v1.6 (D-062, US-008 delivery split after PR #20 code review M2): REQ-PLAT-011 Task(s) now reads `TASK-010, TASK-029, TASK-035, TASK-043, TASK-079, TASK-092` with a "Planned (partial …)" status naming which hop of AT-US-008-03 each task owns (TASK-010 keeps AT-US-008-01/02/04/05/06 and the api/worker log-line hops); REQ-PLAT-012 stays wholly TASK-010; US-008 becomes Implemented only when all six tasks are merged. No REQ or story IDs, links, priorities, milestones or DC tags changed; every count below is unchanged.
 v1.5 (D-061, US-049 delivery split after PR #13 code review M1): REQ-DATA-001 and REQ-DATA-002 Task(s) now read `TASK-023, TASK-014, TASK-089` with a "Planned (partial …)" status naming which AT-US-049 scenarios each task owns; US-049 becomes Implemented only when all three tasks are merged. No REQ or story IDs, links, priorities, milestones or DC tags changed; every count below is unchanged.
 Status values: Specified → Designed → Planned → Implemented → Verified.
 v1.4 (G2-C2 closure, principal-architect): the Design (ADR/Spec) column is populated for all 434 REQ rows as "owning module · ADR or spec section" (generated from `ARCHITECTURE.md` §6 and the ADR amendment index with an explicit per-REQ mapping, then reviewed row by row; no REQ carries only an area default) and every REQ status moved Specified → Designed. Task(s) stays "–" until senior-developer/orchestrator fill it in P4 (→ Planned); Test(s) is qa-lead's. No REQ or story IDs, links, priorities, milestones or DC tags changed; counts below are unchanged.
@@ -42,6 +43,11 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | EPIC-17 | stories/EPIC-17-reference-data-compliance-packs.md | 12 | 11 | 1 | 0 | 5 | 7 |
 | **Total** | 17 files | 293 | 218 | 67 | 8 | 120 | 173 |
 
+## Open verification conditions (orchestrator)
+| Condition | Task(s) | Covers | Due | Owner |
+|---|---|---|---|---|
+| COND-E2E-FF | TASK-004 (e2e harness, PR #4) | Firefox projects (firefox-mobile/-desktop) green on a Linux runner; WebKit projects `--repeat-each=5` on Linux (PR #4 R4-m1) | before G3 | TASK-015 / qa-lead |
+
 ## Requirement → Story
 | REQ | MS | MoSCoW | Story | Design (ADR/Spec) | Task(s) | Test(s) | Status |
 |---|---|---|---|---|---|---|---|
@@ -55,7 +61,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-008 | M0 | Must | US-006 | .github/ · ADR-0024 (Jest thresholds 85/75, 95 on pricing/audit/authz); ADR-0023 am. A diff-coverage gate | TASK-015 | – | Planned |
 | REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-010 | M0 | Must | US-007 | platform · ADR-0016 §3 framework-failure codes; api/README §11 error catalogue | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
-| REQ-PLAT-011 | M0 | Must | US-008 | platform · ADR-0017 §1–2 correlation ID (validate, generate, echo) | TASK-010 | – | Planned |
+| REQ-PLAT-011 | M0 | Must | US-008 | platform · ADR-0017 §1–2 correlation ID (validate, generate, echo) | TASK-010, TASK-029, TASK-035, TASK-043, TASK-079, TASK-092 | – | Planned (partial: TASK-010 validate/generate/echo + api/worker log lines, AT-US-008-01/02/04/05/06; completes with TASK-029 (audit entries), TASK-043 (outbox row → enqueued job), TASK-035 (payload v2 → worker logger), TASK-079 (Mock carrier call) and TASK-092 (end-to-end AT-US-008-03); D-062) |
 | REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Planned |
 | REQ-PLAT-013 | M0 | Must | US-009 | platform (worker) · ADR-0013 §Queues (attempts 5, exponential backoff + jitter, DLQ per queue) | TASK-035 | – | Planned |
 | REQ-PLAT-014 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Idempotent processors (deterministic job IDs, `job_executions`); data-model §3.5 | TASK-039 | – | Planned |
@@ -159,8 +165,8 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-011 | M0 | Must | US-079 | platform · ADR-0009 §Optimistic locking (`version`, conditional UPDATE → 409/412); ADR-0016 §6 | TASK-100 | – | Planned |
 | REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Planned |
 | REQ-RLS-013 | M0 | Must | US-080 | prisma/ · ADR-0005 §Guest-capable tables (null `org_id`, `ck_<t>__owner`, guest claim policy); data-model §3.10 | TASK-051 | – | Planned |
-| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | Planned |
-| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | Planned |
+| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
+| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
 | REQ-DATA-003 | M0 | Must | US-050 | prisma/ (seed) · data-model §9 (operator org with 8 role users, demo organisations) | TASK-089 | – | Planned |
 | REQ-DATA-004 | M0 | Must | US-051 | admin-settings + prisma/ · data-model §3.6 countries (ISO 3166-1, names en/es/fr); §9 | TASK-026 | – | Planned |
 | REQ-DATA-005 | M0 | Must | US-051 | admin-settings · data-model §3.6 countries (`shipping_enabled` launch set, D-007) | TASK-026 | – | Planned |

@@ -15,3 +15,7 @@
 platform_app SELECT public.permissions
 platform_app SELECT public.role_permissions
 platform_app SELECT public.roles
+
+# seed idempotency (TASK-023, migration 20261112030000_reference_dataset_versions): SYSTEM, SELECT only; the seed as
+# platform_migrator (owner) is the single writer (data-model §3.5, §4.4; PR13-SEC-04, D-ARCH-075).
+platform_app SELECT public.reference_dataset_versions

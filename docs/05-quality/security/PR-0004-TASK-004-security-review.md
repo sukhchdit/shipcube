@@ -630,3 +630,170 @@ Script `scratchpad/review/PR-4-sec-r2/scripts/record-sim.sh` (session scratch):
 | This record (rounds 1 + 2), `--pr 4` | pass | **`pass`**, exit 0. `satisfiedBy` = this record @ `d2e867b62ce9a13a712c83407ba2f6d8af3692cf`. Owned set (10): `.stylelintignore`, `apps/{admin,web}/tsconfig.json`, `eslint.config.mjs`, `jest.config.ts`, `package-lock.json`, `package.json`, `packages/ui/tsconfig.json`, `tests/e2e/tsconfig.json`, `tools/lint/negative-fixtures.test.ts`. Notes only: the round-1 head rows (`519bb89`, `b67eb36`) are voided by later owned changes |
 | Control: round-1-only record (as on `d2e867b`), `--pr 4` | missing | `missing`, exit 1 (the same two notes) |
 | Control: this record, `--pr 5` | missing | `missing`, exit 1 (`PR-0005-TASK-003-security-review.md` names no commit of this PR) |
+
+## Round 3 (head e3cdb94)
+
+| Field | Value |
+|---|---|
+| PR | #4 `feat(web): web and admin app scaffolds (TASK-004)`; round-3 delta review. It is owed because two merges of `main` resolved owned paths that PR #17, #18 and #19 also changed (D-ORCH-020; R2.5 #6), and because fix cycle 3 changed owned paths (PR4-SEC-10, PR4-SEC-11) |
+| Head | e3cdb944b2be0decf7bb54f8885b97a393ea8051 |
+| Range reviewed | `d2e867b..e3cdb94`, first parent: `8d5a4ac` (merge of `main` `80ff2c2`: PR #17 fixture-mode split, `SWC_JEST_OPTIONS`, `.swcrc` deleted; PR #18 TASK-016), `a8a2566` (PR4-SEC-11), `7c00aae` (PR4-SEC-10), `05dfe7e` (test unmount, code review R3-n2), `e3cdb94` (merge of `main` `99ea21f`, including PR #19 TASK-023). The PR's net change against `main` is 97 paths: the 92 of round 2 plus `.github/CODEOWNERS`, `tools/ci/check-workflow-policy.{mjs,test.ts}`, `tools/lint/lint-fixtures.mjs` and `tools/repo/gitignore.test.ts` |
+| Scope | Closure of PR4-SEC-10 and -11. Whether the owned-path merge resolutions weaken any control: `jest.config.ts` (does `unit-dom` inherit `swcrc: false`?), `tools/lint/negative-fixtures.test.ts` (base and no-weakening semantics, the PR #18 `TENANT_DB` and `WARNINGS` tables, the PR #19 cases), the `eslint.config.mjs` union, CODEOWNERS. Whether the lockfile delta is unchanged. The D-ORCH-021 workflow-lever check. Anything new in the delta |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. No command ran in the TASK-004 worktree: everything was read with `git show <sha>:<path>` from the main checkout or probed in scratch. Node 24.22.3 under the CLAUDE.md §2 PATH prefix. No install, build, test suite or e2e run |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open for this change, so merge is allowed once this record is committed (docs-only) on top of `e3cdb94` and lane A is green. PR4-SEC-10 and PR4-SEC-11 are closed. Both merges equal `git merge-tree` apart from two conflict resolutions, and those keep every PR #17, #18 and #19 control and every PR #4 assertion. The lockfile delta is the round-2 delta, leaf for leaf. No workflow lever changed. One INFO finding is new (PR4-SEC-13). This verdict covers `e3cdb94`. A later merge of `main` voids it only if `main` changes an owned path that this PR also changes; with `origin/main` at `21bf127` that overlap is empty |
+
+### R3.1 Summary
+
+- **PR4-SEC-10 is closed.**
+  - ESLint `globalIgnores` now list `{playwright-report,test-results}/**`, `{apps,packages,tests}/*/{playwright-report,test-results}/**` and `prisma/{playwright-report,test-results}/**`. `.stylelintignore` has the 10 matching anchored lines. Both are exactly the R2 remediation and mirror the anchored `.gitignore` lines 62-71.
+  - The lint wiring test (`ESLINT_IGNORED`, `STYLELINT_IGNORED`), the `lint-fixtures.mjs` probe matrices, the `.gitignore` "tracked" rows and the R2-n8 symmetry test all carry the deep-path cases.
+  - An independent `ESLint#isPathIgnored` probe of the head config gave 17/17 expected decisions (R3.5 #3).
+- **PR4-SEC-11 is closed.**
+  - `/tools/test-dom/   @sukhchdit` is in CODEOWNERS.
+  - `'tools/test-dom/'` is in `REQUIRED_CODEOWNED_PATHS`, so `checkCodeowners` turns the loss of that line into a `codeowners-coverage` finding. The policy test lists it.
+  - The record checker reads CODEOWNERS from the base and the head, so changes to the 3 files now require a record.
+  - The generic "every path that `jest.config.ts` references is owned" test (R2 remediation item 2) was not added. It stays with TASK-015 as hardening.
+- **The merge resolutions are clean for security.**
+  - `e3cdb94` equals `git merge-tree --write-tree 05dfe7e 99ea21f`, a clean merge, tree for tree.
+  - `8d5a4ac` differs from `git merge-tree d2e867b 80ff2c2` only in its two conflicts: `jest.config.ts` and `negative-fixtures.test.ts`.
+  - **`jest.config.ts`.** `unit-dom` spreads `common` and sets no `transform`, so it inherits `['@swc/jest', SWC_JEST_OPTIONS]` with `swcrc: false`. `main`'s `tools/ci/jest-transform.test.ts` asserts that for every project, which makes it 4 projects now, and lane A ran it green.
+  - **`negative-fixtures.test.ts`.** Against `main` the PR only adds lines and widens one test title. Every `main` line survives, including `TENANT_DB`, `WARNINGS`, `bad-prisma-import`, the `MODE === 'exact'` splits and `expect-affected`. Two PR #4 assertions were re-expressed in `main`'s structure, and each is at least as strict as before (R3.5 #2).
+  - **`eslint.config.mjs`** against `main` only adds the anchored ignores and the exact-file `routes.ts` override. The PR #19 `prisma-seed` category is untouched.
+- **The lockfile delta is unchanged.** `delta(22eccb2 → d2e867b)` and `delta(99ea21f → e3cdb94)` are the same 64 leaf changes. They are the size-limit set (`size-limit`, `@size-limit/file`, `lilconfig`, `nanospinner`) and the harness set (`@playwright/test`, `playwright`, `playwright-core`, `@axe-core/playwright`), plus the root and `tests/e2e` dependency lists.
+- **The D-ORCH-021 workflow-lever check finds nothing.**
+  - `git diff 99ea21f e3cdb94 -- .github/workflows .github/actions` is empty, and so is the same diff against `origin/main`. The head's `ci.yml` is `main`'s blob.
+  - No workflow file changed, so none of the D-ORCH-021 levers can have changed: `RANGE_BASE`, `BASH_ENV`, `PATH`, `BASH_FUNC_*`, `defaults.run`, a folded `run: >` on a gate step, or a `$GITHUB_ENV`/`$GITHUB_PATH` write.
+  - A grep of the PR's whole net diff for `RANGE_BASE`, `RANGE_HEAD`, `BASH_ENV`, `BASH_FUNC`, `GITHUB_ENV`, `GITHUB_PATH`, `NODE_OPTIONS` and `defaults:` also finds nothing, for example in a script.
+  - `.npmrc`, `.node-version`, `.gitattributes`, `.semgrepignore`, `.gitleaks*` and `tools/deps` are unchanged.
+- **New finding.** PR4-SEC-13 (INFO): since `d2e867b`, `npm run lint` and `npm run typecheck` start with `npm run typegen`. That runs unowned head code (workspace `typegen` scripts, `apps/*/vite.config.ts`, `react-router.config.ts`, `app/routes.ts`) in the same job, before ESLint and `tsc`. I described the `typegen` step in R2.5 #8 but missed this integrity angle in round 2.
+
+### R3.2 Method
+
+- **Tree equivalence.** A three-way `ls-tree -r -z` comparison over 1,424 paths. Inputs: base `22eccb2`, the round-2 head `d2e867b`, `main` `99ea21f` and the new head `e3cdb94`. The expected entry is `d2e867b`'s where the PR changed the path, else `main`'s.
+  - Result: 1,412 paths match.
+  - 5 overlaps: `eslint.config.mjs`, `jest.config.ts`, `package.json`, `package-lock.json`, `negative-fixtures.test.ts`.
+  - 7 deviations, which are exactly the paths of `a8a2566`, `7c00aae` and `05dfe7e` outside the overlaps.
+  - Positive control: `main` treated as the head gives 87 mismatches.
+- **Merges.** `git merge-tree --write-tree` for both merges, compared with the merge commits' trees (R3.1).
+- **Overlap files.**
+  - The net diff against `main` (`git diff 99ea21f e3cdb94 -- <path>`) for each overlap file, read in full.
+  - A line-carry script: lines added by either side that are missing at the head, and lines `main` removed that came back. Every "came back" line also exists in `main`'s file, so they are moves.
+  - The `package.json` added and removed lines are identical to round 2's.
+- **Fix commits.** Each of `a8a2566`, `7c00aae` and `05dfe7e` was read in full. I also read `checkCodeowners` (`check-workflow-policy.mjs:891-909`).
+- **Ignore probe.** `git archive e3cdb94` of `eslint.config.mjs`, `tools/eslint-rules`, `tools/lint` and the tsconfigs into scratch, with `node_modules` junctioned to the main checkout's. `ESLint#isPathIgnored` was run for 17 paths: 8 anchored output paths (positive controls) and 9 deep or case-variant source paths.
+- **Lockfile.** A leaf-level JSON delta-equivalence script compared `delta(base → R2 head)` with `delta(main → head)`. Positive control: `delta(base → main)` differs from the PR delta.
+- **React Router typegen.** Read `@react-router/dev` 8.5.1, the lockfile version: `cli/index.js:98-106` (`hasReactRouterRscPlugin` → `vite.resolveConfig({ configFile: flags.config, root })`, which loads `vite.config.ts`) and `:300-322`; and `typegen-CqlAVM2O.js:95-107,273,345` (the config loader evaluates `react-router.config.ts` and `app/routes.ts`).
+- **Lane A.** Run 43342155742 on `e3cdb94`:
+  - `fast-lane` succeeded in every step, including lint, type-check, unit tests, the base-ref lint fixtures in no-weakening mode, the lockfile, cooldown, licence, signature and audit steps, and the build porcelain check.
+  - `scans`: Gitleaks and Semgrep succeeded.
+  - Only the record step failed (`RANGE_BASE` `99ea21f`), plus the `ci-gate` aggregate. That failure is what this record fixes.
+- **Not done.** No suite was run locally. The registry signature and advisory checks were not repeated: the tuples are byte-identical to round 2's, and lane A's signature and audit steps are green.
+
+### R3.3 Earlier findings at `e3cdb94`
+
+| ID | Severity | Status at `e3cdb94` | Evidence / residual |
+|---|---|---|---|
+| PR4-SEC-10 | LOW | **Closed** | `eslint.config.mjs:410-414`, `.stylelintignore:25-36`, `negative-fixtures.test.ts` (`ESLINT_IGNORED` +5 rows, `STYLELINT_IGNORED` +4 rows), `lint-fixtures.mjs:130-135,145-148`, `gitignore.test.ts:59-61`. Probe in R3.5 #3 |
+| PR4-SEC-11 | LOW | **Closed** | `.github/CODEOWNERS:51-52`; `check-workflow-policy.mjs:874-875` (`REQUIRED_CODEOWNED_PATHS`); `check-workflow-policy.test.ts:372`. Hardening item 2 (generic `jest.config.ts` reference-ownership test) → TASK-015 |
+| PR4-SEC-12 | INFO | Open, TASK-014 | Templates unchanged since `d2e867b` (tree-equal) |
+| PR4-SEC-02 | LOW (latent) | Open (latent), TASK-014 | Unchanged |
+| PR4-SEC-06 | INFO | Tracked (TASK-022 / TASK-111) | Unchanged |
+| PR4-SEC-08 | INFO | Partly closed; residual (a)-(d) TASK-015 / orchestrator | Unchanged; `tools/deps` not touched |
+| PR4-SEC-09 | INFO | Report-only | Unchanged |
+| PR2-SEC-09, PR2-SEC-03 TS-only block | LOW | Open, TASK-022 | Not taken here (as routed in R2.8) |
+
+The interim per-PR check for `tools/test-dom/` and deep `test-results`/`playwright-report` folders (R2.8) ends once this PR merges, because both controls are then on `main`. At `e3cdb94` no tracked path sits under `test-results/`, `playwright-report/` or `__mocks__/` at any depth, and there is no `.swcrc` (the PR17-SEC-01 and -09 watch items).
+
+### R3.4 New finding
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner (task) | Status |
+|---|---|---|---|---|---|---|---|
+| PR4-SEC-13 | `npm run lint` and `npm run typecheck` first run `npm run typegen`, which executes unowned head code in the lane A job before ESLint and `tsc` read their owned configuration | INFO | CWE-693 | A08 | `package.json:29,32,33`; `apps/{web,admin}/package.json:10`; `@react-router/dev` `cli/index.js:98-106`; `ci.yml:222-235` | **TASK-015** (lane A gate isolation, with PR10-SEC-17 and PR17-SEC-08); architect for the ADR-0023 wording | Open |
+
+#### PR4-SEC-13: unowned code runs inside the lint and type-check steps (INFO)
+
+**Description.** Since `d2e867b`, root `lint` is `npm run typegen && eslint … && stylelint … && node tools/lint/check-suppressions.mjs`, and `typecheck` is `npm run typegen && tsc -b`. Root `typegen` is `npm run typegen --workspaces --if-present`. Under `ignore-scripts`, npm still runs explicitly named scripts, so the following execute first:
+- every workspace's `typegen` script, from an unowned `package.json`. Today that is `react-router typegen` in `apps/web` and `apps/admin`, but any workspace (`packages/*`, `tests/*`, `prisma`) can add one;
+- for each React Router app, `vite.resolveConfig`, which bundles and runs `vite.config.ts` and its plugins, and then the config loader, which evaluates `react-router.config.ts` and `app/routes.ts`.
+
+None of these paths is in CODEOWNERS. Code there runs in the `fast-lane` job, in the checked-out workspace, before ESLint loads `eslint.config.mjs` and `tools/eslint-rules`. A change could rewrite those files or the plugin code in `node_modules` and then restore them during the later `typecheck` typegen. Lint would then pass for chosen source files, while:
+- the base-ref fixture step (which runs after the restore) passes;
+- the porcelain gate (which ignores `node_modules`, and runs after the restore) passes;
+- the security-owned-paths check sees no owned path changed.
+
+**Exploitability and impact.**
+- **This is not a new capability.** Lane A already runs unowned head code before lint: `deps:rebuild` runs `prisma generate` (`rebuild.mjs:96-103`), which loads the unowned root `prisma.config.ts`. The class has existed since TASK-003. PR #4 widens the set of files that can carry it and adds a per-workspace injection point.
+- The precondition is a deliberately malicious change in a private, single-owner repository. Every PR also gets a security review that reads the diff. Likelihood L.
+- Impact M: the lint rules are cited as security mitigations (R2.4, PR4-SEC-10).
+- So the class is LOW (M×L), and this PR's increment is **INFO**.
+
+**Remediation (TASK-015; none is required in this PR).**
+1. Add a porcelain gate straight after the `Lint` step, before `Type-check` runs `typegen` again. It catches a typegen-phase rewrite of tracked files (owned configs, `tools/eslint-rules`), because only owned code runs after ESLint inside `npm run lint`.
+2. Narrow the injection point. Make root `typegen` call the CLI directly, `npm exec --no -w apps/web -w apps/admin -- react-router typegen`, so that unowned workspace `package.json` scripts no longer run in the lint and type-check steps. Extend the lint wiring test to pin that exact string.
+3. Consider CODEOWNERS lines for `/prisma.config.ts` and `/apps/*/vite.config.ts`. The Vite config also carries the PR4-SEC-01 `envPrefix` control, which decides which variables reach the public bundle.
+4. Record the residual in ADR-0023's lane A notes: "fast-lane gates see the workspace after head code from `prisma.config.ts` and the React Router config/route modules has run". The real boundary for the `node_modules` variant is the security review of every PR.
+
+**Verification test.** For item 1: a lane A fixture whose `typegen` script appends a rule override to `eslint.config.mjs` fails at the new porcelain step. For item 2: the wiring test rejects `npm run typegen --workspaces` in the root script. **Interim:** security-analyst flags, in every PR diff, changes to any workspace `typegen` script, `apps/*/{vite,react-router}.config.ts`, `apps/*/app/routes.ts` or `prisma.config.ts` that add file-system writes, child processes or network access.
+
+### R3.5 Results by focus area
+
+| # | Focus | Result |
+|---|---|---|
+| 1 | `jest.config.ts` resolution (`8d5a4ac`) | **Clean.** The PR's added and removed lines against `main` (+25/−6) are identical to round 2's against its base. Every line added by either side is present at the head (line-carry: 0 missing on both sides; nothing `main` removed returns). `common.transform` = `['@swc/jest', SWC_JEST_OPTIONS]` with `swcrc: false`, `tsx: true` and the automatic React runtime. `unit-dom` (`...common`) overrides only `testEnvironment`, `testEnvironmentOptions`, `testMatch`, `testPathIgnorePatterns`, `setupFilesAfterEnv` and `moduleNameMapper`, so it inherits the transform. `tools/ci/jest-transform.test.ts` asserts `project.transform` equals that tuple for **every** project, and lane A's unit step ran it green on this head. `tools/lint/jest.base-fixtures.config.json` (`main`, unchanged) carries the same options. `modulePathIgnorePatterns` is unchanged, and there are no `__mocks__` (PR17-SEC-09 watch) |
+| 2 | `negative-fixtures.test.ts` resolution | **Clean; nothing weakened.** `git diff 99ea21f e3cdb94` on the file is +16/−1. The one removed line is the test title, which is widened, and no `main` assertion is removed. The PR #4 lint-wiring assertions are re-expressed in `main`'s PR17-SEC-04 structure. **(a)** `/^npm run typegen$/u` is the first `LINT_STEPS` entry (end-anchored). Exact mode requires the 4 steps in order. No-weakening mode (base copy against the head) still requires every base step, in order. **(b)** `expect(steps[2]).not.toContain('--allow-empty-input')` became `expect(steps.filter((s) => s.includes('--allow-empty-input'))).toEqual([])`, which is stricter because it covers every step, and it runs in both modes. Counts equal `main`'s: `TENANT_DB` 2, `WARNINGS` 6, `bad-prisma-import` 1, `MODE === 'exact'` 6, `expect-affected` 6. The PR #18 split (the `error` halves always run, the `off` halves exact-only) is untouched. Lane A ran `main`'s copy in no-weakening mode against the head configs, and it passed |
+| 3 | `eslint.config.mjs` union and PR4-SEC-10 | **Clean.** The net diff against `main` is +13/−0. It holds only the 3 anchored ignore globs with their comment (they replace round 2's 2 unanchored globs, which never reached `main`) and round 2's exact-file `routes.ts` `no-extraneous-dependencies` override. The `prisma-seed` category (2 occurrences) and every PR #18/#19 block are intact. **Probe:** `ESLint#isPathIgnored` on the head config gave 17/17 as expected. Ignored: `playwright-report/x.js`, `test-results/x.js`, `tests/e2e/test-results/x.js`, `tests/e2e/playwright-report/trace/x.js`, `apps/web/test-results/x.ts`, `packages/ui/playwright-report/x.ts`, `prisma/test-results/x.ts`, `dist/x.js`. Linted: `apps/api/src/modules/quotes/test-results/a.ts`, `packages/authz/src/playwright-report/a.ts`, `tests/e2e/support/test-results/a.ts`, `prisma/seed/test-results/a.ts`, `tools/test-results/a.mjs`, `tools/ci/playwright-report/a.mjs`, `apps/web/app/routes/test-results/route.tsx`, `apps/web/app/playwright-report/a.tsx`, `apps/api/src/Test-Results/a.ts`. These decisions match `.gitignore` path for path |
+| 4 | CODEOWNERS and PR4-SEC-11 | **Closed.** One added line, in the "test, type-check and commit-message configuration" block. No line was removed or reordered, so last-match-wins changes nothing for other paths. The policy finding fires if the line is dropped. The remaining residual (`checkCodeowners` checks coverage, not last-match precedence) is the existing PR10-SEC-20 INFO |
+| 5 | `package.json` and lockfile | `package.json`: the PR's added and removed lines against `main` are identical to round 2's (`typegen`, `lint`, `typecheck`, `build` + `size`, `test:unit` with `unit-dom`, 2 exact devDependencies). Lockfile: 64 = 64 leaf changes, 0 differences. 8 added entries, all `registry.npmjs.org`, dev-only, no install script, licences MIT, Apache-2.0 or MPL-2.0. `tests/e2e` is the only changed entry; there are no removals. Positive control: 2 differing leaves |
+| 6 | Workflow levers (D-ORCH-021) | **None changed** (R3.1). The PR's net change under `.github/` is CODEOWNERS only |
+| 7 | Fix commit `05dfe7e` | Test-only: unmounts the `hydrateRoot` root that RTL's cleanup does not track. No security impact |
+| 8 | Owned-path overlap with current `main` | `git diff --name-only 99ea21f origin/main` (`21bf127`: agent memory, `docs/01-requirements`, `docs/05-quality/reviews/PR-0004…`, `docs/05-quality/security/PR-0020…`/`PR-0021…`, `docs/sdlc`) has no CODEOWNERS-owned path. The overlap with the PR's net change is empty, so this record is not voided by `main` as it stands |
+| 9 | Secrets | Lane A's Gitleaks (PR range `99ea21f..e3cdb94`, first parent) is green. The fix commits add only paths, globs, test rows and comments. Nothing secret-shaped was added, and this record quotes no flagged value |
+
+### R3.6 Follow-ups routed
+
+| Owner | Item | Finding | Binding? |
+|---|---|---|---|
+| **TASK-015** | Porcelain gate after `Lint`. Root `typegen` via `npm exec --no -w apps/web -w apps/admin -- react-router typegen`, pinned by the wiring test. Consider owning `/prisma.config.ts` and `/apps/*/vite.config.ts` | PR4-SEC-13 | Yes (with PR10-SEC-17 / PR17-SEC-08) |
+| **TASK-015** | Generic test: every path that `jest.config.ts` references is CODEOWNED (hardening carried from PR4-SEC-11 item 2) | PR4-SEC-11 (hardening) | Yes |
+| principal-architect | ADR-0023 lane A note: fast-lane gates run after head code from `prisma.config.ts` and the React Router config/route modules | PR4-SEC-13 | Yes (text) |
+| security-analyst | Interim, per PR: flag workspace `typegen` scripts, `apps/*/{vite,react-router}.config.ts`, `apps/*/app/routes.ts` and `prisma.config.ts` changes that add file-system writes, child processes or network access | PR4-SEC-13 | Until TASK-015 |
+| TASK-014, TASK-022, TASK-111, TASK-015, orchestrator | Unchanged from R2.8: PR4-SEC-02, -12 (TASK-014); PR2-SEC-09 and the PR2-SEC-03 TS-only block, `config/web` (TASK-022); PR4-SEC-06 wording and `gzip` (TASK-022/111); PR4-SEC-08 residuals (TASK-015, orchestrator) | various | As in R2.8 |
+
+The R2.8 interim check for `tools/test-dom/` and deep output folders retires when this PR merges.
+
+### R3.7 Evidence (commands; read-only, from the main checkout and scratch)
+
+| Command | Result |
+|---|---|
+| `git fetch -q origin`; `git ls-remote origin` | `refs/pull/4/head` = `refs/heads/feat/TASK-004-web-admin-app-scaffolds` = `e3cdb944b2be…` (re-checked before hand-off); `origin/main` = `21bf127` |
+| `git log --first-parent d2e867b..e3cdb94`; parents | `8d5a4ac` = (`d2e867b`, `80ff2c2`); `e3cdb94` = (`05dfe7e`, `99ea21f`) |
+| `treecmp.mjs 22eccb2 d2e867b 99ea21f e3cdb94` | 1,424 paths; 1,412 match; 5 overlaps; 7 deviations = the fix-commit paths; control 87 |
+| `git merge-tree --write-tree d2e867b 80ff2c2` vs `8d5a4ac^{tree}` | Conflicts in `jest.config.ts` and `negative-fixtures.test.ts`; those 2 files differ; everything else is equal (including the auto-merged `eslint.config.mjs`) |
+| `git merge-tree --write-tree 05dfe7e 99ea21f` vs `e3cdb94^{tree}` | Clean; identical |
+| `linecarry.mjs` over the overlap files | `jest.config.ts`, `package.json`: 0/0/0. `eslint.config.mjs`: 3 R2 lines missing (the unanchored globs; intended). `negative-fixtures.test.ts`: 3 R2 lines restructured (R3.5 #2), 1 `main` title widened, 26 "returned" lines all present in `main` (moves) |
+| `git diff --numstat 99ea21f e3cdb94 -- <overlap files>` | `negative-fixtures.test.ts` +16/−1 (the widened title); `eslint.config.mjs` +13/−0; `jest.config.ts` +25/−6, with the same added and removed lines as round 2; `package.json` lines identical to round 2 |
+| `lockdelta-eq.mjs 22eccb2 d2e867b 99ea21f e3cdb94` | 64 / 64 leaf changes, 0 differences; control 2 |
+| `ignore-probe.mjs` (head `eslint.config.mjs`, `ESLint#isPathIgnored`) | 17/17 as expected |
+| `git ls-tree -r e3cdb94` grep for `test-results/`, `playwright-report/`, `__mocks__/` and `.swcrc` | None |
+| `git diff 99ea21f e3cdb94` and `origin/main…e3cdb94` over `.github/workflows`, `.github/actions` and the other lever files; grep of the net diff for lever names | Empty; no match |
+| `git diff --name-only 99ea21f origin/main` ∩ CODEOWNERS | Empty |
+| `gh run view 43342155742` | `fast-lane` success; `scans`: Gitleaks success, Semgrep success, record step failure (`RANGE_BASE` `99ea21f`); `ci-gate` failure (record only) |
+| Record check (main's `tools/ci/check-security-owned-paths.mjs`, scratch `git clone --shared`, this record committed on top of `e3cdb94`) | See R3.8 |
+
+### R3.8 Record-check simulation
+
+Script `scratchpad/review/PR-4-sec-r3/scripts/record-sim.sh` (session scratch):
+- `main`'s `tools/ci` was extracted with `git archive origin/main`.
+- Each case ran in a fresh `git clone --shared --no-checkout` of the main checkout, detached at `e3cdb94`, with the record committed on top.
+- The CLI was `--root <clone> --base <base> --head HEAD --pr <n> --json`. The base was `origin/main` (`21bf127`, docs-only past `99ea21f`) unless stated otherwise.
+- Each clone was removed afterwards; nothing was written to the main repository's `.git`.
+
+Owned set (17): `.github/CODEOWNERS`, `.stylelintignore`, `apps/{admin,web}/tsconfig.json`, `eslint.config.mjs`, `jest.config.ts`, `package-lock.json`, `package.json`, `packages/ui/tsconfig.json`, `tests/e2e/tsconfig.json`, `tools/ci/check-workflow-policy.{mjs,test.ts}`, `tools/lint/lint-fixtures.mjs`, `tools/lint/negative-fixtures.test.ts`, and `tools/test-dom/{dom-setup.ts,jsdom-environment.mjs,style-stub.ts}`. The last 3 count through the head's CODEOWNERS line, which is the PR4-SEC-11 fix working.
+
+| Case | Expected | Result |
+|---|---|---|
+| This record (rounds 1-3), `--pr 4`, base `21bf127` | pass | **`pass`**, exit 0. `satisfiedBy` = this record @ `e3cdb944b2be0decf7bb54f8885b97a393ea8051`. Notes only: the older head rows (`519bb89`, `b67eb36`, `d2e867b`) are voided by later owned changes |
+| This record, `--pr 4`, base `99ea21f` (lane A's last `RANGE_BASE`) | pass | **`pass`**, exit 0; same `satisfiedBy` |
+| Control: round-2 record (as on `e3cdb94`), `--pr 4` | missing | `missing`, exit 1. The `d2e867b` row is voided by the owned changes since |
+| Control: this record, `--pr 17` | missing | `missing`, exit 1 (`PR-0017-TASK-007-security-review.md` names no commit of this PR) |
+| Control: this record plus a later commit that edits the owned `jest.config.ts`, `--pr 4` | missing | `missing`, exit 1 ("names e3cdb94, but jest.config.ts changed after it": rule (d)) |
