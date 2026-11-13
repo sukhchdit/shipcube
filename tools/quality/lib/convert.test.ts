@@ -313,25 +313,26 @@ describe('host path scrubbing (PR28-SEC-02, CWE-532)', () => {
   });
 
   it.each([
-    [String.raw`at C:\Users\SomeoneElse\proj\a.ts:1`, '<home>'],
-    [String.raw`at c:/users/someoneelse/proj/a.ts`, '<home>'],
-    ['at /Users/someone/proj/a.ts', '<home>'],
-    ['at /home/someone/proj/a.ts', '<home>'],
-    ['at /c/Users/someone/proj/a.ts', '<home>'],
-    ['at /mnt/c/Users/someone/proj/a.ts', '<home>'],
-    ['at file:///C:/Users/someone/proj/a.ts', '<home>'],
-    [String.raw`at E:\scratch\ABCDEF~1\a.ts`, '<short>'],
-  ])('the generic pass catches a profile path the list missed: %s', (text, marker) => {
+    ['Windows backslashes', String.raw`at C:\Users\SomeoneElse\proj\a.ts:1`, '<home>'],
+    ['Windows forward slashes, lower case', String.raw`at c:/users/someoneelse/proj/a.ts`, '<home>'],
+    ['macOS', 'at /Users/someone/proj/a.ts', '<home>'],
+    ['Linux', 'at /home/someone/proj/a.ts', '<home>'],
+    ['Git Bash', 'at /c/Users/someone/proj/a.ts', '<home>'],
+    ['WSL', 'at /mnt/c/Users/someone/proj/a.ts', '<home>'],
+    ['a file URL', 'at file:///C:/Users/someone/proj/a.ts', '<home>'],
+    ['an 8.3 short name', String.raw`at E:\scratch\ABCDEF~1\a.ts`, '<short>'],
+    // The labels are fixed on purpose: a title built from the input would carry a profile path into the committed JUnit.
+  ])('the generic pass catches a profile path the list missed (%s)', (_label, text, marker) => {
     const out = scrubPaths(text, []);
     expect(out).toContain(marker);
     expect(out).not.toMatch(/someone|SomeoneElse|ABCDEF/i);
   });
 
   it.each([
-    ['no host path here, just /usr/lib/node and a/b/c'],
-    ['a ratio of a~1 and the word users'],
-    ['the /homepage route and /Usersettings'],
-  ])('the generic pass leaves ordinary text alone: %s', (text) => {
+    ['a system path', 'no host path here, just /usr/lib/node and a/b/c'],
+    ['a tilde that is not a short name', 'a ratio of a~1 and the word users'],
+    ['look-alike route names', 'the /homepage route and /Usersettings'],
+  ])('the generic pass leaves ordinary text alone (%s)', (_label, text) => {
     expect(scrubPaths(text, [])).toBe(text);
   });
 
