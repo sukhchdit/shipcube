@@ -166,3 +166,22 @@ Round 2 of a spike PR (PR #6 r2):
 - **Budgeted walkers:** `Object.keys(v)` before `slice(0, MAX_KEYS)` is uncharged. Probe 100 references to one 300k-key object (2 s). Budgets measured before JSON escaping, or excluding `err`, do not bound the line (quotes double it; a 50 KB line).
 - **Free-text values that start with `[` or `{`** end at the first `,`, so the second array item leaks. Also probe PEM blocks and full-width keys (an ASCII-only key regex sees no key at all).
 - **Semantic auto-merge traps:** `git merge-tree` shows the textual conflicts, but the CLEAN side may keep a line that a cross-PR ruling says to change (PR #20's `routes.use(prefix, mw, api)`). Print the merged function body and check every ruling line.
+
+**Event-trigger DDL guards (PR #24, 2026-11-13).**
+- `ddl_command_end` reports only the address a command returns. Side-effect objects with user-chosen names are invisible to an own-name match.
+  - Known case: `CREATE TYPE r AS RANGE (multirange_type_name = x)` creates pg_type x. Proved: utility.c T_CreateRangeStmt → DefineRange returns the range type.
+  - Already covered by the per-command reports or the PR12-SEC-02-a fix: identity sequences, constraint-backed indexes, EXCLUDE.
+- Ask for a post-command catalogue INVARIANT (no non-owner object under the reserved names in protected schemas) rather than enumerating command forms.
+- Probe it on PGlite (see [[scratch-copy-technique]]).
+
+**Contract-pipeline unions.** The api tests may keep their own copy of an app constant (contract-validation's CRITICAL list). A PR that changes the constant in the app passes on its own base and breaks on the merge. Always run the api project on `git merge-tree` output.
+
+**Gate-tooling PRs that add a folder (PR #23, 2026-11-13).**
+- A new tool folder that a base-ref CI step depends on must be CODEOWNED. Prove it with `node tools/ci/check-security-owned-paths.mjs --root . --base origin/main --head HEAD --pr <n> --json` and read `owned`: PR text, manifest `security_critical_paths` and docs all said "security-owned" while the list had no such paths. Same class as PR #4 R3-M1.
+- Tripwire tests that `toContain` a command prefix miss an appended flag. Mutate the base-ref line with `--report-only` (the checker then always exits 0) and run `ci-policy.test -t "<name>"` plus `check-workflow-policy.mjs`.
+- "A JUnit for a planned suite fails the check" can be implemented as "the run is rejected": the check still passes when nothing is required. Probe the all-planned manifest with a run holding those JUnits.
+- A verifier that lazily loads a dependency (Ajv only when runs exist) is untested by CI. Probe the real CI shape: script copied outside the workspace with no node_modules above it, `--root` a repo with a `node_modules` junction.
+- Squash merge + "git_sha is an ancestor of head": fine on pull_request, red on a push-to-main range. Check whether the step has an event switch like check-security-owned-paths.
+- Evidence windows ordered by an attacker-controlled stamp can only deny, not forge; confirm that runs touched by the range are always evaluated.
+
+**Tripwire-on-a-security-flag pattern (PR #23 r2, good):** `swap(run, from, to)` mutations + a findings function, asserted `changed: true, findings: true` for every variant (appended, prepended, valued, in comment, dropped, doubled, `|| true`). Ask for this shape whenever a PR pins a flag that disables a gate (`--report-only`, `continue-on-error`). Always re-mutate the real file in an extract as well.

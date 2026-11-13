@@ -1,6 +1,6 @@
 # Security test cases SEC-TC-01..64: adoption, suites and gated stories
 
-Version 1.0 · 2026-11-12 · owner qa-lead · status: **adopted** (all 64). Sources: `docs/03-architecture/threat-model.md` §10.2 (SEC-TC-01..36), `docs/05-quality/security/P3-architecture-security-review.md` §9 (updates to 03, 04, 09, 12, 17, 20, 26, 28, 31, 32, 34; new 37..60) and §14.5 (amended 37, 44, 53; new 61..64). Strategy context: [TEST-STRATEGY.md](../TEST-STRATEGY.md) §7.11; manifest: [required-suites.json](required-suites.json).
+Version 1.0 · 2026-11-12 · owner qa-lead · status: **adopted** (all 64). Sources: `docs/03-architecture/threat-model.md` §10.2 (SEC-TC-01..36), `docs/05-quality/security/P3-architecture-security-review.md` §9 (updates to 03, 04, 09, 12, 17, 20, 26, 28, 31, 32, 34; new 37..60) and §14.5 (amended 37, 44, 53; new 61..64). Strategy context: [TEST-STRATEGY.md](../TEST-STRATEGY.md) §7.11; manifest: [required-suites.json](../../../tools/quality/required-suites.json).
 
 ## Rules for every case
 

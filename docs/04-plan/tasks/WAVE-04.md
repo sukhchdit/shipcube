@@ -425,7 +425,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-131 **DC** (M1 Must) DHL Express (MyDHL) adapter |
 | REQs | REQ-CARR-012 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-03, PR6-SEC-04, PR6-SEC-06, D-ARCH-068 |
+| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-03, PR6-SEC-04, PR6-SEC-06, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-101, TASK-124, TASK-128, TASK-132, TASK-009 |
@@ -444,6 +444,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - PR #6 code review R2-n1/R2-n4 (ADR-0010 am. 11 items 4 and 11; D-ARCH-068): the README subsection is renamed to the canonical heading "PII and redaction" (a parenthetical suffix is allowed), §3.3 and §8 cite ADR-0010 am. 11 items 2 and 9 as decided (no "Recommended" / "amendment request" wording), the §9 fixture plan lists `create-timeout-then-tracking-reconcile`, and the Docs URL row carries the specification commit SHA where the source is a repository (web sources: "not pinnable · retrieved <date>")
 - PR6-SEC-02 residual fields and container redaction (security review R2.4; ADR-0010 am. 11 item 8): `sensitive-fields.ts` and the README "Sensitive fields" table (path, class PER|SPER|SECRET|ACCOUNT_ID, handling) include `contactInformation.*` incl. `mobilePhone`, `postalAddress.addressLine1..3`, `registrationNumbers[]`, `shipmentNotification[].receiverId` (an e-mail address), `customerReferences[].value` (free text), `requestorName`, the Basic `Authorization` header and the account number; the redactor removes the whole `contactInformation`, address-line and `shipmentNotification` containers; DHL and FedEx paths are marked unverified until a person diffs the spec; AC-45 sentinels cover every table path incl. an IN_PAN sentinel and the Basic auth header
 - PR6-SEC-03/04/06 (ADR-0010 am. 11 items 6 and 8): every URL is built with `carrierPath`/`carrierUrl` from the static EGRESS base (no per-account free-form base URL); `requestorName` is a fixed non-personal value from BRAND_* and `reason` a fixed enum (fixture pickup-cancel-requestorname-not-personal); `trackingView = all-checkpoints` (never -with-remarks), no proof-of-delivery call, `epod-detail-esig` off; `trackingUrl`/`cancelPickupUrl` never dereferenced (negative fixture shipment-carrier-urls-not-followed with 169.254.169.254); the sandbox-never-emits-production unit test covers `/mydhlapi/test/` vs `/mydhlapi/`
+- PR20-SEC-02 item 5 / PR20-SEC-14 (D-ORCH-025 (2); D-ARCH-084): this adapter typed sensitive-fields.ts is loaded by the shared logger as extra redaction parts (one source for the TASK-188 raw-payload redactor and for Pino) and decides the DHL account-number keys as PII parts; a logging test proves a sentinel under each listed path never reaches a general log line
 - AT-US-131-01 … AT-US-131-09: all 9 scenarios of US-131, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -539,7 +540,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-132 **DC** (M1 Must) FedEx REST adapter |
 | REQs | REQ-CARR-013 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-04, PR6-SEC-05, PR6-SEC-07, PR6-SEC-11, D-ARCH-067, D-ARCH-068 |
+| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-04, PR6-SEC-05, PR6-SEC-07, PR6-SEC-11, D-ARCH-067, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-101, TASK-124, TASK-131, TASK-132, TASK-009 |
@@ -557,6 +558,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - PR #6 code review R2-n5/R2-n6 (README accuracy): "supports `x-customer-transaction-id`, optionally, on every API method" (F5 sends it only when options.customer_transaction_id is set), the Sources table discloses that the F11a-e URLs were reconstructed by re-running the searches on 2026-11-12, the "Decided:" sentence names option (a) of SPK-02 §4 item 3, and the header Verdict row mirrors the SPK-02 header (Rate, Ship, Cancel, Track and Address-resolve paths confirmed (secondary); FALLBACK applies to Pickup/Locations paths and to all field names)
 - PR6-SEC-02 residual fields and container redaction (security review R2.4; ADR-0010 am. 11 item 8): `sensitive-fields.ts` and the README table include `contact.*` incl. `personName`, `phoneExtension`, `faxNumber`, notification `emailAddress`, `address.streetLines[]`, `shipper.tins[]`, `accountNumber.value`, and the token form fields `client_secret`, `child_key`, `child_secret`, `child_id` (shapes marked unverified until a person diffs the spec); the redactor removes the whole `contact` container; no SPOD documents are requested; AC-45 sentinels include `client_secret` and `child_secret` in the form body
 - PR6-SEC-04/06 (ADR-0010 am. 11 items 6 and 8): every URL is built with `carrierPath`/`carrierUrl` from the static EGRESS base; carrier-supplied label and tracking URLs are never dereferenced (negative fixture ship-label-url-only-not-followed with 169.254.169.254); the sandbox-never-emits-production unit test covers both API and ETD origins
+- PR20-SEC-02 item 5 / PR20-SEC-14 (D-ORCH-025 (2); D-ARCH-084): this adapter typed sensitive-fields.ts is loaded by the shared logger as extra redaction parts (one source for the TASK-188 raw-payload redactor and for Pino) and decides `accountNumber.value` and the token form fields as PII/SECRET parts; a logging test proves a sentinel under each listed path never reaches a general log line
 - AT-US-132-01 … AT-US-132-09: all 9 scenarios of US-132, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -570,7 +572,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-133 **DC** (M1 Must) UPS REST adapter |
 | REQs | REQ-CARR-014 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, R-ARCH-25, PR6-SEC-02, PR6-SEC-04, PR6-SEC-06, PR6-SEC-11, D-ARCH-067, D-ARCH-068 |
+| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, R-ARCH-25, PR6-SEC-02, PR6-SEC-04, PR6-SEC-06, PR6-SEC-11, D-ARCH-067, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-101, TASK-124, TASK-131, TASK-132, TASK-009 |
@@ -590,6 +592,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - ADR-0010 am. 11 item 5 (c) as revised 2026-11-12 (PR6-SEC-11; D-ARCH-067): `TOKEN_ENDPOINT_POLICY = { on403: account-negative-cache }` — a UPS token-endpoint 403 is "Blocked Merchant" (one account blocked or not enabled for the product), so TASK-131 negative-caches only that account for CARRIER_TOKEN_BLOCKED_TTL_S, opens its breaker and raises an ops event while other UPS accounts keep working; fixture `token-403-blocked-merchant` carries the note "per-account negative cache; other UPS accounts keep working; no carrier-wide cool-down"; `expires_in` and `issued_at` are strings (strict parse by TASK-131)
 - PR6-SEC-02 residual fields and container redaction (security review R2.4; ADR-0010 am. 11 item 8): `sensitive-fields.ts` and the README table include `AttentionName`, `Name`, `Phone.Number`, `PhoneNumber`, `FaxNumber`, `EMailAddress`, `AddressLine`, `TaxIdentificationNumber`, `ShipperNumber`, the `InternationalForms.Contacts` parties (`ForwardAgent`, `UltimateConsignee`, `IntermediateConsignee`, `Producer`) and `AlternateDeliveryAddress` with leaf-key matching on `Name`/`AttentionName`/`AddressLine`/`Phone`; the redactor removes the whole `Phone`, `FaxNumber` and `Contacts` party containers; `returnSignature` and `returnPOD` stay false; AC-45 sentinels cover every table path
 - PR6-SEC-04 (ADR-0010 am. 11 item 8): every URL is built with `carrierPath`/`carrierUrl`; the UPS identifier pattern for shipment ids is `^1Z[0-9A-Z]{16}$`; `transId` is the correlation UUID without hyphens (32 hex) and `transactionSrc` comes from BRAND_*; the void `trackingnumber` query value is set through URLSearchParams, never string-built
+- PR20-SEC-02 item 5 / PR20-SEC-14 (D-ORCH-025 (2); D-ARCH-084): this adapter typed sensitive-fields.ts is loaded by the shared logger as extra redaction parts (one source for the TASK-188 raw-payload redactor and for Pino) and decides `ShipperNumber` and the account fields as PII parts; a logging test proves a sentinel under each listed path never reaches a general log line
 - AT-US-133-01 … AT-US-133-08: all 8 scenarios of US-133, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

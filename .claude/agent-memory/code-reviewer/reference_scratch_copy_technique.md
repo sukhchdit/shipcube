@@ -59,3 +59,18 @@ This is enough for pure tools/db-style modules: no build, about 2 s. Write the p
 The step restores itself with `git checkout HEAD --`, so `git status` stays clean between runs. Each run takes about 60 s.
 
 Write memory or markdown edits as a .cjs file with the Write tool. An inline `node -e` breaks on apostrophes in the text.
+
+**PGlite for SQL probes without Docker (PR #24, 2026-11-13).** `@electric-sql/pglite` 0.4.3 (PG 17.5 WASM) is in the worktree node_modules. Event triggers fire, and SET ROLE and CREATE ROLE work.
+- Apply `prisma/bootstrap/*.sql` in order after these substitutions:
+  - psql vars: `:'x_password'` → `NULL`, `:"db_name"` → current_database();
+  - drop the CREATE EXTENSION lines;
+  - `uuidv7()` → `gen_random_uuid()` (PG 18 only).
+- Probe each statement in `BEGIN; SET LOCAL ROLE platform_migrator; …; RESET ROLE; <readiness SQL>; SAVEPOINT; ensure(); ROLLBACK`.
+- Run it with tsx from the scratch dir and pass the head dir as an argument. About 30 s and light on memory, so it is allowed under D-ORCH-010.
+- Mutate the guard file in the copy to verify a proposed fix.
+
+**PR #23 additions (2026-11-13).**
+- Node's `fs.symlinkSync(target, path, 'junction')` creates junctions without admin; handy inside a patched test fixture. A fixture repo holding such a junction needs a committed `.gitignore` with `node_modules`, or `git add -A` walks it and stalls for minutes.
+- Patch a copy's test with a small node script (sed with `\n` literals silently did not match); verify with grep.
+- Leftover `/tmp/evidence-*` fixture dirs (a timed-out Jest run skips afterAll) keep the junction: `cmd /c rmdir` the junction in each BEFORE `rm -rf`, then recheck the worktree node_modules count (748).
+- `pkill` is denied by the auto-mode classifier; rely on `timeout`.
