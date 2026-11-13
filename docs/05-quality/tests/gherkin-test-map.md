@@ -1,6 +1,6 @@
 # Gherkin → planned test ID map (Must stories)
 
-Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requirements/stories/EPIC-*.md` (story files v1.3) by qa-lead in P4. Companion to [TEST-STRATEGY.md](../TEST-STRATEGY.md) §6 (test IDs) and §7 (suite catalogue).
+Version 1.1 · 2026-11-14 · owner qa-lead · generated from `docs/01-requirements/stories/EPIC-*.md` (story files v1.3) by qa-lead in P4. Companion to [TEST-STRATEGY.md](../TEST-STRATEGY.md) §6 (test IDs) and §7 (suite catalogue).
 
 **How to read.**
 
@@ -14,21 +14,21 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 
 ## Summary
 
-- Must stories: 218; Must scenarios: 1599 (1593 counted for G3 AC coverage, 6 `@live-sandbox`).
+- Must stories: 218; Must scenarios: 1612 (1606 counted for G3 AC coverage, 6 `@live-sandbox`).
 - Scenarios per primary suite:
 
 | Suite | Scenarios | Lane |
 |---|---|---|
 | `e2e` | 241 | B |
-| `api` | 203 | B |
-| `integration` | 178 | B |
-| `unit` | 128 | A |
+| `api` | 204 | B |
+| `integration` | 180 | B |
+| `unit` | 131 | A |
 | `audit-generator` | 122 | B+A* |
 | `identity-session` | 107 | B |
 | `rbac-matrix` | 79 | B+A* |
-| `carrier-contract` | 51 | A |
+| `carrier-contract` | 53 | A |
 | `jobs-resilience` | 42 | B |
-| `carrier-resilience` | 38 | B |
+| `carrier-resilience` | 42 | B |
 | `abuse` | 35 | B |
 | `payments-webhooks` | 33 | B |
 | `saga-fault-matrix` | 32 | B |
@@ -47,7 +47,7 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 | `ci-policy` | 9 | A |
 | `audit-chain` | 9 | B |
 | `audit-immutability` | 9 | B+A* |
-| `secrets-keys` | 8 | B |
+| `secrets-keys` | 9 | B |
 | `csrf-cookie` | 7 | B+A* |
 | `ssrf` | 7 | B |
 | `observability` | 6 | B |
@@ -65,15 +65,15 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 |---|---|---|
 | EPIC-01 | 12 | 60 |
 | EPIC-02 | 17 | 142 |
-| EPIC-03 | 19 | 102 |
+| EPIC-03 | 19 | 106 |
 | EPIC-04 | 13 | 88 |
 | EPIC-05 | 17 | 130 |
-| EPIC-06 | 18 | 146 |
+| EPIC-06 | 18 | 153 |
 | EPIC-07 | 13 | 79 |
 | EPIC-08 | 11 | 99 |
 | EPIC-09 | 18 | 132 |
 | EPIC-10 | 18 | 129 |
-| EPIC-11 | 7 | 51 |
+| EPIC-11 | 7 | 53 |
 | EPIC-12 | 6 | 45 |
 | EPIC-13 | 9 | 72 |
 | EPIC-14 | 4 | 41 |
@@ -334,6 +334,10 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-066-06 | US-066 (DC) | Viewer is denied the document download-URL route and the denial is audited | `audit-generator` | B+A* | yes |
 | AT-US-066-07 | US-066 (DC) | Partner roles are unused | `unit` | A | yes |
 | AT-US-066-08 | US-066 (DC) | Permission path | `unit` | A | yes |
+| AT-US-066-09 | US-066 (DC) | Compliance Auditor may never hold a non-read audit permission other than audit:export (REQ-RBAC-004, D-ARCH-069) (outline: one test per Examples row, suffix -<row>) | `unit` | A | yes |
+| AT-US-066-10 | US-066 (DC) | Compliance Auditor keeps audit:export and audit:read | `unit` | A | yes |
+| AT-US-066-11 | US-066 (DC) | Self-service permission removed from a seeded role (REQ-RBAC-004, D-058) (outline: one test per Examples row, suffix -<row>) | `unit` | A | yes |
+| AT-US-066-12 | US-066 (DC) | Self-service permissions reach only the caller's own rows (D-058) | `api` | B | yes |
 | AT-US-067-01 | US-067 (DC) | Complete route mounts | `route-registry` | A | yes |
 | AT-US-067-02 | US-067 (DC) | Missing any of the three refuses mount | `route-registry` | A | yes |
 | AT-US-067-03 | US-067 (DC) | Marker without justification | `route-registry` | A | yes |
@@ -639,6 +643,7 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-121-04 | US-121 (DC) | Environment is read from the account, not a global flag | `carrier-contract` | A | yes |
 | AT-US-121-05 | US-121 (DC) | Wire formats cannot leak out of the package | `carrier-contract` | A | yes |
 | AT-US-121-06 | US-121 (DC) | Adapter missing a required operation is rejected at registration | `carrier-contract` | A | yes |
+| AT-US-121-07 | US-121 (DC) | Required operation declared unsupported fails without a network call | `carrier-contract` | A | yes |
 | AT-US-122-01 | US-122 (DC) | Three services priced deterministically | `carrier-contract` | A | yes |
 | AT-US-122-02 | US-122 (DC) | Price changes only with weight, zone or service | `carrier-contract` | A | yes |
 | AT-US-122-03 | US-122 (DC) | Tracking number is stable for a client reference | `carrier-contract` | A | yes |
@@ -691,6 +696,11 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-129-03 | US-129 | 401 triggers one retry with a new token | `rbac-matrix` | B+A* | yes |
 | AT-US-129-04 | US-129 | Persistent 401 does not loop | `rbac-matrix` | B+A* | yes |
 | AT-US-129-05 | US-129 | Token never logged | `secrets-keys` | B | yes |
+| AT-US-129-06 | US-129 | Token endpoint rejects the credentials | `carrier-resilience` | B | yes |
+| AT-US-129-07 | US-129 | FedEx token endpoint 403 starts a carrier-wide cool-down (policy carrier-cooldown) | `carrier-resilience` | B | yes |
+| AT-US-129-08 | US-129 | UPS token endpoint 403 on account A leaves accounts B and C working (policy account-negative-cache, SEC-TC-68 UPS case) | `carrier-resilience` | B | yes |
+| AT-US-129-09 | US-129 | Token requests are rate-limited per carrier | `carrier-resilience` | B | yes |
+| AT-US-129-10 | US-129 | Missing expires_in is never cached | `secrets-keys` | B | yes |
 | AT-US-130-01 | US-130 | Timeout per operation | `carrier-resilience` | B | yes |
 | AT-US-130-02 | US-130 | Idempotent operation is retried with backoff | `idempotency` | B | yes |
 | AT-US-130-03 | US-130 | Non-idempotent operations are never retried | `idempotency` | B | yes |
@@ -764,6 +774,7 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-137-05 | US-137 | README missing a field fails the docs check | `carrier-contract` | A | yes |
 | AT-US-137-06 | US-137 | Live suite is skipped by default | `carrier-contract` | A | yes |
 | AT-US-137-07 | US-137 | Live sandbox runs when opted in (COND-SANDBOX-DEMO) | `contract-live` | opt-in | no (COND-SANDBOX-DEMO) |
+| AT-US-137-08 | US-137 | Not yet diffed by a person is allowed but reported | `carrier-contract` | A | yes |
 | AT-US-293-01 | US-293 | Guest flood does not starve paid bookings | `carrier-resilience` | B | yes |
 | AT-US-293-02 | US-293 | Token bucket is shared across API replicas | `carrier-resilience` | B | yes |
 | AT-US-293-03 | US-293 | Anonymous callers hold at most half of the rates slots | `carrier-resilience` | B | yes |
@@ -1265,6 +1276,8 @@ Version 1.0 · 2026-11-12 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-222-06 | US-222 (DC) | Permission paths | `rbac-matrix` | B+A* | yes |
 | AT-US-222-07 | US-222 (DC) | UI standard | `e2e` | B | yes |
 | AT-US-222-08 | US-222 (DC) | Real sandbox label (COND-SANDBOX-DEMO) | `e2e-live` | opt-in | no (COND-SANDBOX-DEMO) |
+| AT-US-222-09 | US-222 (DC) | Offered format recovered after creation | `integration` | B | yes |
+| AT-US-222-10 | US-222 (DC) | Label recovery fails | `integration` | B | yes |
 | AT-US-223-01 | US-223 (DC) | Mock booking documents within 30 seconds | `jobs-resilience` | B | yes |
 | AT-US-223-02 | US-223 (DC) | Deterministic job ID | `jobs-resilience` | B | yes |
 | AT-US-223-03 | US-223 (DC) | Redelivery creates no duplicate | `jobs-resilience` | B | yes |
