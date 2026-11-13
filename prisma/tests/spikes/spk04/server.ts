@@ -85,7 +85,8 @@ const seed = JSON.parse(readFileSync(env('SPK04_SEED'), 'utf8')) as Seed;
 const hmacKey = randomBytes(32);
 const encKey = randomBytes(32);
 const ipKey = randomBytes(32);
-const KEY_ID = `spk04-${replica}-k1`;
+// The real vault constrains key ids to ^[a-z][a-z0-9-]*-v[0-9]+$ (prisma/bootstrap/10-audit.sql).
+const KEY_ID = `spk04-${replica}-v1`;
 
 const pick = <T>(items: readonly T[]): T => {
   const item = items[randomInt(items.length)];

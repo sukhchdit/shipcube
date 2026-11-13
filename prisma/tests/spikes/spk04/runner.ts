@@ -582,7 +582,9 @@ async function integrity(pgh: PlatformPostgres, hotOrg: string): Promise<Record<
        VALUES (pg_catalog.uuidv7(), pg_catalog.gen_random_uuid(), 0, '\\x' || pg_catalog.repeat('00', 32), 0, '\\x' || pg_catalog.repeat('00', 32),
          pg_catalog.now(), pg_catalog.now(), pg_catalog.gen_random_uuid(), pg_catalog.gen_random_uuid(), 1)`,
     );
-    const immutabilityOk = Object.entries(immutability).every(([, outcome]) => !outcome.ok && outcome.code === '42501');
+    // The row-level trigger legs only fire on existing rows: with an empty vault or no entries they would pass vacuously.
+    const immutabilityOk =
+      entries > 0 && Number(vault) > 0 && Object.entries(immutability).every(([, outcome]) => !outcome.ok && outcome.code === '42501');
     return {
       chain: {
         streams: heads.length,
