@@ -4,7 +4,7 @@
  * Fixtures: tools/db/fixtures/lint/{migrations,bootstrap}/<case>/. The fixture tables are classified by
  * FIXTURE_CLASSES below (the repository's own manifests stay the source for the repository run).
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 
 import {
   canonicalPolicy,
+  doBlockLockTimeouts,
   lintBootstrap,
   lintMigrations,
   lintRepository,
@@ -20,6 +21,7 @@ import {
   parseHeader,
   readReviewers,
   type LintFinding,
+  type LockTimeoutEvent,
 } from './lint-migrations.js';
 import { renderRls } from './render-rls.js';
 import { loadTableClasses, type TableClassEntry } from './table-classes.js';
@@ -211,8 +213,47 @@ describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
     expect(rules(bootstrapCase(name, []))).toEqual(['12']);
   });
 
-  it('exempts only the tightening forms of the real 00-roles.sql and 01-schemas.sql, creation block included (rule 12 control)', () => {
-    expect(lintBootstrap(join(repoRoot, 'prisma', 'bootstrap'), { reviewers: [], today: '2026-11-12' })).toEqual([]);
+  it.each([['audit-unicode-ident'], ['audit-unicode-uescape'], ['audit-unicode-dynamic'], ['audit-unicode-owner']])(
+    'bootstrap lane: a U& escape counts as audit DDL and needs the marker: %s (rule 12; PR #5 R2-n1, PR #11 review n5/R2-n2)',
+    (name) => {
+      const findings = bootstrapCase(name);
+      expect(rules(findings)).toEqual(['12']);
+      expect(findings[0]?.message).toBe('audit DDL needs the header "-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>"');
+    },
+  );
+
+  it('bootstrap lane: an approved U& escape passes, and the & operator or a u& inside a word is no escape (rule 12 controls)', () => {
+    expect(bootstrapCase('audit-unicode-approved')).toEqual([]);
+    expect(rules(bootstrapCase('audit-unicode-approved', []))).toEqual(['12']);
+    expect(bootstrapCase('unicode-lookalike')).toEqual([]);
+  });
+
+  describe('the real bootstrap lane', () => {
+    const bootstrapDir = join(repoRoot, 'prisma', 'bootstrap');
+    const scratch = mkdtempSync(join(tmpdir(), 'lint-bootstrap-'));
+    afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+    /** Real files without the audit marker (00-roles, 01-schemas, 02-role-backstops): the exemptions apply to them. */
+    const unmarked = readdirSync(bootstrapDir).filter(
+      (name) => name.endsWith('.sql') && !/^-- @audit-ddl /m.test(readFileSync(join(bootstrapDir, name), 'utf8')),
+    );
+
+    it('exempts only the tightening forms of the real 00-roles.sql and 01-schemas.sql, creation block included (rule 12 control)', () => {
+      expect(unmarked).toEqual(expect.arrayContaining(['00-roles.sql', '01-schemas.sql']));
+      for (const name of unmarked) copyFileSync(join(bootstrapDir, name), join(scratch, name));
+      // No reviewer listed: the unmarked files lint clean only through the AUDIT_OWNER_TIGHTENING forms.
+      expect(lintBootstrap(scratch, { reviewers: [], today: '2026-11-13' })).toEqual([]);
+    });
+
+    it('the approved audit files (10-audit.sql, 90-audit-ddl-guard.sql) are the only rule-12 findings without a listed reviewer, and none with it (TASK-021)', () => {
+      expect(lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-13' })).toEqual([]);
+      const unreviewed = lintBootstrap(bootstrapDir, { reviewers: [], today: '2026-11-13' }, 'bootstrap');
+      expect(unreviewed.map((finding) => [finding.file, finding.rule])).toEqual([
+        [join('bootstrap', '10-audit.sql'), '12'],
+        [join('bootstrap', '90-audit-ddl-guard.sql'), '12'],
+      ]);
+      // An approval dated after "today" is refused for each audit file.
+      expect(rules(lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-12' }))).toEqual(['12', '12']);
+    });
   });
 
   it('requires "SET search_path = pg_catalog, pg_temp" as the first statement of every bootstrap file', () => {
@@ -289,6 +330,33 @@ describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
       ['20261112000300_zero_no_reset', '11'],
     ]);
     expect(findings[0]?.message).toContain('end it with "RESET lock_timeout"');
+  });
+
+  it('[PR11-SEC-17] rule 11 reads DO bodies: a raised SET, EXECUTE literal, set_config or computed value without RESET fails; RESET, LOCAL forms, a later lower value and mere mentions pass', () => {
+    const findings = lintCase('lock-timeout-do-body');
+    expect(byMigration(findings)).toEqual([
+      ['20261113000000_do_set_no_reset', '11'],
+      ['20261113000100_do_execute_literal', '11'],
+      ['20261113000200_do_set_config', '11'],
+      ['20261113000300_do_format_computed', '11'],
+      ['20261113000400_do_string_body', '11'],
+    ]);
+    for (const finding of findings) expect(finding.message).toContain('end it with "RESET lock_timeout"');
+  });
+
+  it.each<[string, LockTimeoutEvent[]]>([
+    ["DO $$ BEGIN SET lock_timeout = '10s'; RESET lock_timeout; END $$", [{ kind: 'set', value: "'10s'" }, { kind: 'reset' }]],
+    ["DO $$ BEGIN EXECUTE 'SET lock_timeout TO ''2s'''; END $$", [{ kind: 'set', value: "'2s'" }]],
+    ["DO $q$ BEGIN EXECUTE $x$SELECT set_config('lock_timeout', '0', false)$x$; END $q$", [{ kind: 'set', value: "'0'" }]],
+    ["DO $$ BEGIN PERFORM set_config('lock_timeout', v_value, false); END $$", [{ kind: 'set', value: 'v_value' }]],
+    ["DO $$ BEGIN EXECUTE 'SET lock_timeout = ' || v_value; END $$", [{ kind: 'set', value: '' }]],
+    ["DO $$ BEGIN SET LOCAL lock_timeout = '10s'; PERFORM set_config('lock_timeout', '10s', true); END $$", []],
+    ["SELECT set_config('lock_timeout', '10s', false)", []],
+    ["DO $$ BEGIN RAISE NOTICE 'the lock_timeout stays'; END $$", []],
+    // Every literal is read as possible dynamic SQL (fail closed): a message that starts like a SET counts as one.
+    ["DO $$ BEGIN RAISE NOTICE 'SET lock_timeout = 0'; END $$", [{ kind: 'set', value: '0' }]],
+  ])('[PR11-SEC-17] doBlockLockTimeouts(%s)', (sql, expected) => {
+    expect(doBlockLockTimeouts(sql)).toEqual(expected);
   });
 
   it.each([
@@ -518,6 +586,15 @@ describe('tenant context in SQL (rule 16; ADR-0005 am. 10 item 1)', () => {
     ]);
     for (const finding of findings) expect(finding.message).toContain('Unicode-escape string or identifier');
   });
+
+  it('rule 16 reads DO bodies (static, EXECUTE literal, string-quoted body, RESET); a non-app set_config in a DO body is clean (PR11-SEC-17 c)', () => {
+    expect(byMigration(lintCase('context-do-body'))).toEqual([
+      ['20261113000000_do_set_config', '16'],
+      ['20261113000100_do_execute_set_local', '16'],
+      ['20261113000200_do_string_body', '16'],
+      ['20261113000300_do_reset', '16'],
+    ]);
+  });
 });
 
 describe('bootstrap secret variables (PR5-SEC-12)', () => {
@@ -530,11 +607,12 @@ describe('bootstrap secret variables (PR5-SEC-12)', () => {
 
 describe('the repository lanes', () => {
   it('[NT-DATA-004-b] prisma/migrations and prisma/bootstrap of this repository have no findings', () => {
-    expect(lintRepository(repoRoot, '2026-11-12')).toEqual([]);
+    // 2026-11-13 = the approval date of 10-audit.sql and 90-audit-ddl-guard.sql (TASK-021); main() uses the clock.
+    expect(lintRepository(repoRoot, '2026-11-13')).toEqual([]);
     expect(main(['--no-validate'])).toBe(0);
   });
 
-  it('starts with an empty audit-DDL reviewer list, so audit DDL fails closed until security-analyst adds a reviewer', () => {
-    expect(readReviewers(join(repoRoot, 'tools', 'db', 'audit-ddl-reviewers.json'))).toEqual([]);
+  it('lists exactly security-analyst as the audit-DDL reviewer (added by TASK-021; any other reviewer still fails closed)', () => {
+    expect(readReviewers(join(repoRoot, 'tools', 'db', 'audit-ddl-reviewers.json'))).toEqual(['security-analyst']);
   });
 });

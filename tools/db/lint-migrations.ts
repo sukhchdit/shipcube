@@ -32,10 +32,13 @@
  *   11  ALTER TABLE, non-concurrent CREATE INDEX, CREATE TRIGGER or CREATE/ALTER/DROP POLICY on an existing table
  *       without `SET [SESSION] lock_timeout` as the first statement (`SET LOCAL` has no effect: files are not atomic);
  *       a file that leaves the session `lock_timeout` above the migrator role default (3s; 0 and unparsed values
- *       count as above) without a later `RESET lock_timeout` (the value persists into later files, D-ARCH-071)
+ *       count as above) without a later `RESET lock_timeout` (the value persists into later files, D-ARCH-071); inside
+ *       a DO body (incl. `EXECUTE '…'` literals) `SET [SESSION] lock_timeout`, `RESET lock_timeout` and a non-local
+ *       `set_config('lock_timeout', …)` move that value too (PR11-SEC-17 c, DO-body half; D-ARCH-078)
  *   12  audit objects and any mention of platform_audit_owner in prisma/migrations (unconditional); in prisma/bootstrap
  *       only with an approved `-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>` header (reviewer listed, date
- *       not in the future), except the role's own tightening statements (deny-by-default, AUDIT_OWNER_TIGHTENING)
+ *       not in the future), except the role's own tightening statements (deny-by-default, AUDIT_OWNER_TIGHTENING); in
+ *       prisma/bootstrap any `U&"…"` / `U&'…'` escape counts as audit DDL (PR #11 review n5, R2-n2)
  *   13  SECURITY DEFINER (anywhere outside the body) without exactly one `SET search_path`, equal to
  *       `pg_catalog, pg_temp`; ALTER FUNCTION | PROCEDURE | ROUTINE ... SECURITY DEFINER, RESET search_path, RESET ALL
  *       or any other SET search_path; a bootstrap file whose first statement is not that SET
@@ -53,12 +56,16 @@
  *       code is followed by :'migrator_password', :'app_password' or NULL (PR5-SEC-12)
  * Rules 2-11 and 14-16 apply to prisma/migrations; 12, 13 and S also (or only) to prisma/bootstrap.
  *
- * Stated limits (text rules cannot be complete over dynamic SQL; PR #11 review R2-n2, PR11-SEC-14/15): a setter whose
- * name and key are both built by `format()` or keyword-split concatenation, `EXECUTE` of a computed or table-read
+ * Stated limits (text rules cannot be complete over dynamic SQL; PR #11 review R2-n2, PR11-SEC-14/15/17): a setter
+ * whose name and key are both built by `format()` or keyword-split concatenation, `EXECUTE` of a computed or table-read
  * statement, a read through `pg_show_all_settings()`, and a role left set through `set_config('role', …)` or a
- * `SET ROLE` inside a DO body are not seen by rules 15 and 16; rules 8, 9 b and 15 do not read DO bodies. The outcome
- * controls are the catalog suite (C5 grants incl. PUBLIC, C1 ENABLE/FORCE, the C11 converse on definer-owned objects)
- * and the withTenantTx session-leak check. Owners: dynamic-SQL allow-list TASK-024, DO-body reading TASK-021.
+ * `SET ROLE` inside a DO body are not seen by rules 15 and 16; rules 8, 9 b and 15 do not read DO bodies. Rules 10, 11
+ * and 16 read DO bodies (TASK-021): rule 11 sees `SET [SESSION] lock_timeout`, `RESET lock_timeout` and
+ * `set_config('lock_timeout', …)` there, in the body and in its string literals, but not a key or name computed at
+ * run time (`EXECUTE v_sql`); `SET "lock_timeout"` (quoted name) and a top-level `set_config('lock_timeout', …)` are
+ * not seen yet (setter-key half, TASK-024). The outcome controls are the catalog suite (C5 grants incl. PUBLIC, C1
+ * ENABLE/FORCE, the C11 converse on definer-owned objects), the withTenantTx session-leak check and, for rule 11, the
+ * next file's own leading `SET lock_timeout`. Owners: dynamic-SQL allow-list and the rule 11 setter keys TASK-024.
  *
  * CLI (`npm run db:lint-migrations`): lints prisma/migrations and prisma/bootstrap, then runs `prisma validate`
  * through tools/deps/prisma-cli.mjs (`--no-validate` skips it). Exit 0 = clean, 1 = findings or failure.
@@ -70,7 +77,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { RenderRlsError, renderRls } from './render-rls.js';
-import { normalise, referencedVariables, splitStatements, sqlText, tokenize } from './sql-text.js';
+import { SqlLexError, normalise, referencedVariables, splitStatements, sqlText, tokenize } from './sql-text.js';
 import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { CONTEXT_DISCARD, contextReads, contextWrites } from './tenant-key-forms.js';
 
@@ -136,12 +143,22 @@ const AUDIT_OWNER_TIGHTENING = [
 const AUDIT_OWNER_CREATION_BLOCK = '736c8905e08ef1110bda2f8ab3e66b5bcf2dd521c2f364762fe884c7d89a04bc';
 const collapse = (statement: string): string => statement.replace(/\s+/g, ' ').trim();
 /**
+ * Rule 12, bootstrap lane (PR #5 R2-n1, PR #11 code review n5 + R2-n2): a `U&"…"` identifier or `U&'…'` string, in
+ * code or inside a body, spells an audit object or the audit owner without its text (`U&"audit\005fentries_x"`, with
+ * any UESCAPE character). The token itself counts as audit DDL, so the file needs the approval marker. Chosen over
+ * decoding: no decoder to get wrong (UESCAPE, 4- and 6-digit forms, surrogates, nesting in dynamic SQL), the same
+ * fail-closed choice rule 16 makes (PR11-SEC-14 a), and the lane has no use for Unicode escapes. A false positive
+ * (`U&` in a message text) only asks for a security review. In prisma/migrations rule 16 refuses every `U&` already.
+ */
+const UNICODE_ESCAPE = /(^|[^a-z0-9_$])u&["']/i;
+/**
  * Rule 12. Migrations lane: any audit object and any mention of the audit owner fails, unconditionally.
- * Bootstrap lane: audit objects and every mention of the audit owner need the approval marker, except the
- * AUDIT_OWNER_TIGHTENING forms and the creation block.
+ * Bootstrap lane: audit objects, every `U&` escape and every mention of the audit owner need the approval marker,
+ * except the AUDIT_OWNER_TIGHTENING forms and the creation block.
  */
 const isAuditDdl = (statement: string, lane: 'migrations' | 'bootstrap'): boolean => {
   if (AUDIT_OBJECT_PATTERN.test(statement)) return true;
+  if (lane === 'bootstrap' && UNICODE_ESCAPE.test(statement)) return true;
   if (!AUDIT_OWNER_PATTERN.test(statement)) return false;
   if (lane === 'migrations') return true;
   if (AUDIT_OWNER_TIGHTENING.some((pattern) => pattern.test(normalise(statement)))) return false;
@@ -279,6 +296,84 @@ const LOCK_TIMEOUT_VALUE = /^set (?:session )?lock_timeout (?:=|to) ?(.+?)$/;
 const LOCK_TIMEOUT_RESET = /^reset lock_timeout$/;
 /** PostgreSQL time units for an integer GUC whose base unit is ms (guc.c `time_unit_conversion_table`). */
 const TIME_UNIT_MS: Readonly<Record<string, number>> = { us: 0.001, ms: 1, s: 1_000, min: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/** One change of the session `lock_timeout` inside a DO block: a value (`set`, raw text) or `reset`. */
+export type LockTimeoutEvent = { readonly kind: 'set'; readonly value: string } | { readonly kind: 'reset' };
+const LITERAL_SLOT = '\u0001';
+const SLOT = new RegExp(`${LITERAL_SLOT}(\\d+)${LITERAL_SLOT}`, 'g');
+/** Nesting bound of dynamic SQL inside a DO body (`EXECUTE '… EXECUTE ''…'' …'`); deeper text is not read. */
+const MAX_DYNAMIC_DEPTH = 4;
+/**
+ * Rule 11 inside a DO body (PR11-SEC-17 c, DO-body half; D-ARCH-078), in text order. Matched on the body with every
+ * string literal and nested dollar body replaced by a slot, so a SET is only seen at a PL/pgSQL statement start (body
+ * start, `;`, BEGIN, THEN, ELSE, LOOP); each literal is then read as dynamic SQL in its own right (`EXECUTE '…'`,
+ * `format('…')`), so its SET/RESET counts at its position:
+ *  - `SET [SESSION] lock_timeout { = | TO } <value>` (the value up to `;`; an empty or computed value fails closed);
+ *  - `RESET lock_timeout`;
+ *  - `set_config('lock_timeout', <value>, <is_local>)` anywhere, unless is_local is the literal `true` (that value
+ *    ends with the DO block's transaction, like `SET LOCAL`, which is not counted either).
+ * The quoted setter name (`SET "lock_timeout"`) and a top-level `set_config` are TASK-024's setter-key half.
+ */
+const DO_LOCK_TIMEOUT = new RegExp(
+  `(?:^|[;]|\\b(?:begin|then|else|loop)\\b) ?set (?:session )?lock_timeout ?(?:=|to) ?([^;]*)` +
+    `|(?:^|[;]|\\b(?:begin|then|else|loop)\\b) ?(reset) lock_timeout\\b` +
+    `|\\bset_config"? ?\\( ?${LITERAL_SLOT}(\\d+)${LITERAL_SLOT} ?, ?([^,]*?) ?, ?([^)]*?) ?\\)` +
+    `|${LITERAL_SLOT}(\\d+)${LITERAL_SLOT}`,
+  'g',
+);
+
+/** The text of a string literal or dollar body token, unquoted (`''` -> `'`); E-string escapes are left as written. */
+function literalText(token: string): string {
+  if (token.startsWith('$')) {
+    const tag = (/^\$[^$]*\$/.exec(token) as RegExpExecArray)[0];
+    return token.slice(tag.length, token.length - tag.length);
+  }
+  return token.slice(1, -1).replaceAll("''", "'");
+}
+
+/** The `lock_timeout` changes a DO statement (or dynamic SQL text at `depth`) makes, in order; see DO_LOCK_TIMEOUT. */
+export function doBlockLockTimeouts(sql: string, depth = 0): LockTimeoutEvent[] {
+  let tokens;
+  try {
+    tokens = tokenize(sql);
+  } catch (error) {
+    if (!(error instanceof SqlLexError)) throw error;
+    // Dynamic SQL that does not lex on its own (a fragment glued at run time): read it as one unknown SET if it names
+    // the setting at all, so a raised value cannot hide in it (fail closed).
+    return /\block_timeout\b/i.test(sql) ? [{ kind: 'set', value: sql }] : [];
+  }
+  if (depth === 0 && !/^do\b/.test(codeOnly(sql))) return [];
+  const literals: string[] = [];
+  const text = normalise(
+    tokens
+      .map((token) => {
+        if (token.kind === 'comment') return ' ';
+        if (token.kind !== 'string' && token.kind !== 'dollar') return token.text;
+        return `${LITERAL_SLOT}${String(literals.push(token.text) - 1)}${LITERAL_SLOT}`;
+      })
+      .join(''),
+  );
+  const resolve = (value: string) =>
+    value
+      .replace(SLOT, (_, at: string) => literals[Number(at)] ?? '')
+      .trim()
+      .toLowerCase();
+  const events: LockTimeoutEvent[] = [];
+  for (const match of text.matchAll(DO_LOCK_TIMEOUT)) {
+    const [, setValue, reset, configKey, configValue, configLocal, nested] = match;
+    if (setValue !== undefined) events.push({ kind: 'set', value: resolve(setValue) });
+    else if (reset !== undefined) events.push({ kind: 'reset' });
+    else if (configKey !== undefined) {
+      const key = normalise(literalText(literals[Number(configKey)] ?? ''));
+      if (key === 'lock_timeout' && resolve(configLocal ?? '') !== 'true') {
+        events.push({ kind: 'set', value: resolve(configValue ?? '') });
+      }
+    } else if (nested !== undefined && depth < MAX_DYNAMIC_DEPTH) {
+      events.push(...doBlockLockTimeouts(literalText(literals[Number(nested)] ?? ''), depth + 1));
+    }
+  }
+  return events;
+}
 
 /**
  * The milliseconds a `lock_timeout` value sets, `undefined` for DEFAULT (the role default applies again) and
@@ -566,6 +661,11 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
     const lockValue = LOCK_TIMEOUT_VALUE.exec(normalise(sqlText(statements[index] ?? '', true)));
     if (lockValue) sessionLockTimeoutMs = lockTimeoutMs(lockValue[1] as string);
     else if (LOCK_TIMEOUT_RESET.test(text)) sessionLockTimeoutMs = undefined;
+    else {
+      for (const event of doBlockLockTimeouts(statements[index] ?? '')) {
+        sessionLockTimeoutMs = event.kind === 'reset' ? undefined : lockTimeoutMs(event.value);
+      }
+    }
 
     // --- Rule 14: bootstrap-lane statements.
     if (BOOTSTRAP_ONLY.some((pattern) => pattern.test(text))) {
