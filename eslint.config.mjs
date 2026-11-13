@@ -534,11 +534,13 @@ export default defineConfig([
     // Contract-validated API tests (TASK-017, US-034, api/README.md §16) run the real createApp and health router with
     // stub Express routers. Neither createApp nor `express` is reachable through a package entry point (`express` is
     // an apps/api dependency), so relative imports into apps/api are the only way in, as for prisma/tests below.
-    // Scoped to the *.api.test.ts files under tests/api; the tests/api helpers stay free of apps/api imports.
+    // Scoped to the *.api.test.ts files under tests/api; the tests/api helpers stay free of apps/api imports. The rule
+    // stays ON and ignores exactly apps/api/src (PR #21 R1-m4, the PR #5 R3-n1 pattern): a relative import into any
+    // other workspace (packages/*/src, apps/worker, ...) still fails (lint probe in tools/lint/lint-fixtures.mjs).
     files: ['tests/api/**/*.api.test.ts'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
-      'import-x/no-relative-packages': 'off',
+      'import-x/no-relative-packages': ['error', { ignore: ['^(?:\\.\\./)+apps/api/src/'] }],
     },
   },
   {
