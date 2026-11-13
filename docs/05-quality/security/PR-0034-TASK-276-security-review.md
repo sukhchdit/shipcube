@@ -328,3 +328,159 @@ Negative controls for "no weakening": the checker is the base-ref copy (`git dif
 | LOW open | 0 (PR34-SEC-01 and -02 closed) |
 | INFO open | 4 (PR34-SEC-05, -06, -07, -08); closed in this round: -03, -04 |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** Both round 1 LOW findings are closed with probes that fail on the round 1 build and pass on this head: the query counter seam is refused from every production importer shape the lint can parse, and the leakage scanner finds every live-leak shape the platform logger lets through. The owned-path edits (`jest.config.ts`, `eslint.config.mjs`, `heavy.mjs`, fixtures, tsconfigs, `package.json`) are leaf-equal to `main` except for the intended additions, so no gate, coverage collection, transform, `__mocks__` confinement or `check-evidence` rule is weaker. The two merges are pure unions, the lane B evidence is accepted with no host fragment, and no lever, lock or dependency changed. Four INFO follow-ups are routed in R2.9, none blocking. Any later commit to an owned path voids this record and needs a round 3; any later non-docs commit voids the lane B run. |
+
+---
+
+## Merge-only round (union with PR #32, head 2e5e16f)
+
+| Field | Value |
+|---|---|
+| PR | #34, branch `feat/TASK-276-test-harness-generated-jest-project`, https://github.com/sukhchdit/shipcube/pull/34. Second merger after PR #32 (TASK-020 part A, squash `f883d68`) and PR #37 (`ca54ae7`), per D-ORCH-052. Scope: what changed on the PR's owned paths between the round 2 head `3934d12` and this head, and whether the union weakened anything. |
+| Head | 2e5e16fa73c3bee85d71e274afe9c3593ead59fa |
+| Commits since round 2 (`3934d12`) | merge `0dc5fbb` (main `62f799e`, which carries PRs #32 and #37; three text conflicts), fix `6b62d35` (the one semantic conflict: `query-counter.int.test.ts` reaches the SYSTEM delegate through `systemDelegates`), merge `5b08fe8` (main `60540ef`, docs only), evidence `2e5e16f` (docs only, run `20261113T2217Z_5b08fe8`). `origin/main` is now `abe271a`: one `STATUS.md` line after `60540ef`. |
+| Lane A evidence | Run [43519334443](https://github.com/sukhchdit/shipcube/actions/runs/43519334443) on `2e5e16f` (`pull_request`). `fast-lane` is green end to end: workflow policy, install flags, migrations, lockfile, cooldown, `npm ci --ignore-scripts`, licences, signatures, audit, **Lane B evidence**, `deps:rebuild`, commitlint, Lint, Lint must not mutate the tree, Format, actionlint, Type-check, Unit tests, "Lint negative fixtures from the base ref against the head configs", Build, Build must not mutate the tree. `scans`: **Gitleaks (PR commit range)**, **Semgrep** and OpenAPI breaking changes are green. The only red step is "Security-owned paths need a review record" (this record); `ci-gate` is red for that reason alone. |
+| Owned paths changed | 19, the same set as round 2 (real base-ref checker, `--base origin/main`). Six of them changed after `3934d12`: `eslint.config.mjs`, `jest.config.ts`, `package.json`, `prisma/tests/db/query-counter.int.test.ts`, `tools/lint/negative-fixtures.test.ts` and `tools/tsconfig.json` (the checker's note on the round 2 Head row). `tools/repo/jest-esm.test.ts`, the third text conflict, is not security-owned. |
+| Reviewer / date | security-analyst, 2026-11-14, merge-only round. Read-only on code: git ran against commit SHAs (read-only commands in the PR worktree and the main checkout, plus `git fetch`), and probes ran on `git archive` extracts of `60540ef` (main), `2e5e16f` (head), `3934d12` and `d693e8c` (round 2 head and base), each with a junction to the worktree's `node_modules`. Each mutant was applied to an extract and then restored; the files were byte-equal to the head blobs afterwards. No Docker: the lane B run is the orchestrator's accepted evidence. This record is the only file written in the worktree. |
+
+### R3.1 Summary
+
+The developer's description of the union holds. Against `main`, the PR's net change is the same 42 files as round 2's change against its base, plus the 7 files of the new evidence run. For the five re-touched owned files other than the integration test, the added and removed lines match round 2's exactly. The integration test differs only by the semantic fix.
+
+Every lint boundary the brief names still holds:
+- From `main` to the head, the effective ESLint configuration of 45 linted paths changes by exactly the round 2 delta: the same insertions, at the same anchors, with the seam pair still the last two policies.
+- Five planted weakenings each show up in that comparison.
+
+Jest moves no file out of any project, and no PR #32 suite leaves lane A. The new `systemDelegates` use is one file in `prisma/tests`; every production reference belongs to `main`.
+
+No finding is new. PR34-SEC-07 narrows, because PR #32's `platform/static-module-specifier` rule now refuses the computed-specifier form.
+
+| ID | Round 2 | Now | Basis |
+|---|---|---|---|
+| PR34-SEC-05 | INFO open | Open, unchanged | `test:generated` keeps `--passWithNoTests`; the `generated` project lists 0 files on the head |
+| PR34-SEC-06 | INFO open | Open, unchanged | the logger and the scanner are byte-equal to `3934d12` |
+| PR34-SEC-07 | INFO open | **Open, narrowed** | the computed specifier is now refused by `platform/static-module-specifier` (PR32-SEC-07 (a)) in non-test `apps/*/src` and `packages/*/src`, on `main` and on the head. The hops through a `tests/` folder and through a `*.test.ts` file are still ALLOWED (R3.3) |
+| PR34-SEC-08 | INFO open | Open, unchanged | the scanner is byte-equal to `3934d12` |
+| New in this round | | none | |
+
+### R3.2 The union, commit by commit
+
+| Check | Result |
+|---|---|
+| Net change against `main` | `git diff 60540ef 2e5e16f` covers 49 files: the 42 files of round 2's `git diff d693e8c 3934d12` (the same set, none missing, none extra) plus the 7 files of run `20261113T2217Z_5b08fe8`. 36 of the 42 have the same patch identity as in round 2. `eslint.config.mjs`, `jest.config.ts`, `negative-fixtures.test.ts` and `tools/tsconfig.json` have the same added and removed lines; only the context differs. In `jest-esm.test.ts`, the PR still adds `'test:generated'` to a script list that `main` had already rewritten. `query-counter.int.test.ts` differs by the fix |
+| Merge `0dc5fbb` | `git merge-tree --write-tree 3934d12 62f799e` reports the same three conflicts (`eslint.config.mjs`, `negative-fixtures.test.ts`, `jest-esm.test.ts`) and auto-merges `jest.config.ts`, `package.json` and `tools/tsconfig.json`. The committed tree differs from merge-tree's result only in the three conflicted files, and the three auto-merged owned files are byte-equal to merge-tree's output. The resolution removes the markers and keeps both sides. In `eslint.config.mjs` it also keeps `main`'s removal of the old `tools/openapi/drift.test.ts` allowance: PR #32 moved that file to `tests/generated/contract-drift.test.ts`, and the `tests/generated/**/*.ts` block replaced the allowance. In `negative-fixtures.test.ts`, the two seam refusals sit before PR #32's tx-slot root-client case, all in `TENANT_DB` |
+| Merge `5b08fe8` | pure union: the merge-tree tree `30bc7ec2…` equals the commit's tree |
+| Fix `6b62d35` | one file, +6 / -2: a named import of `systemDelegates`, one call inside `withTenantTx`, a header comment (R3.5) |
+| Not re-touched | `tools/quality/**`, `tests/helpers/**`, `tests/factories/**`, `query-counter.ts` and its unit test, `tools/repo/test-seams.test.ts`, `jest-projects.test.ts`, the four seam fixtures, the root and `tests/*` tsconfigs, `prisma/tests/seed`, `prisma/tests/spikes`, `apps/api/tsconfig.json`: byte-equal to `3934d12` |
+
+### R3.3 Lint boundaries
+
+**Effective configuration** (script `effcfg.mjs` + `effdelta.mjs`). `calculateConfigForFile` ran for 46 paths (45 linted, 1 globally ignored seam fixture) on each of the four extracts. The comparison keeps `rules`, `settings` and `parserOptions` and scrubs absolute paths. Arrays are diffed by LCS over element JSON, and each insertion is identified by its content, its anchor (the preceding common element) and whether it comes last. Result: on **46 of 46 paths**, the change from `main` to the head equals the change from `d693e8c` to `3934d12`. That shared change has three parts:
+- `boundaries/files` gains the `db-test-seam` row directly after the `db-root-client` row (45 paths).
+- The `boundaries/dependencies` policies gain the seam `disallow` and the test/`prisma-tests` `allow` as the **last two entries** (35 to 37). The head's list minus those two equals `main`'s list exactly. The options (`default: allow`, `checkAllOrigins`, `checkInternals`, `checkUnknownLocals`) and the severity (error) are unchanged.
+- One leaf on one path changes: `import-x/no-extraneous-dependencies` at `tests/helpers/leakage-scanner.test.ts`.
+
+Nothing else differs on any path. That covers the `tests/generated/**/*.ts` block (`packageDir` plus the `no-relative-packages` ignore anchored with the `(?!(?:.*/)?\.\.(?:/|$))` lookahead), the `tests/api` and `prisma/tests` anchored ignores, the root-client policy, `platform/system-model-owner` (owners, accessor homes, ignores) and `platform/static-module-specifier`.
+
+**Controls:** each mutant was applied to the head's `eslint.config.mjs` and then restored:
+
+| Mutant | Paths whose delta differs |
+|---|---|
+| leakage allowance widened to `tests/helpers/**/*.test.ts` | 2 |
+| an `app`-wide allow appended after the seam pair | 45 |
+| `tests/generated` anchor lookahead dropped | 5 |
+| `tests/generated` block widened to `tests/**/*.ts` | 6 |
+| seam category row dropped | 45 |
+
+**Behaviour** (script `lintseam.mjs`). `ESLint#lintText` ran with each extract's real config, with type-aware rules disabled and `no-unresolved`/`no-cycle` off. On both extracts I planted `apps/api/src/tests/mount.ts` and `apps/api/src/mount.test.ts`, which re-export the seam. The `main` extract is the control, with the seam file planted into it.
+
+| Group | Head | `main` (control) |
+|---|---|---|
+| 14 production importer shapes: `app.ts`, `main.ts`, module service, repository, routes, module entry re-export, `platform/runtime`, `platform/http`, another `platform/db` file, `export *` and `export * as` in `platform/db/index.ts`, `apps/worker`, no extension, side-effect import | **14 REFUSED** with the seam message (the worker row also by `no-relative-packages`) | 13 allowed; the worker row refused by unrelated rules |
+| 5 bypass forms: type-only import, `import()` with a string, with a template literal, `createRequire(...)(...)`, bare `require` | **5 REFUSED** (seam) | 5 allowed |
+| 6 test shapes: `query-counter.test.ts`, a `prisma/tests` int test, a module service test, an `apps/api/tests` api test, an `apps/api/src/tests` builder, a `tests/generated` builder | 6 ALLOWED | 6 allowed |
+| Root-client control: `app.ts` imports `platform/db/client.ts` | REFUSED (`db-root-client`) | refused |
+| PR34-SEC-07 hops: `app.ts` imports `./tests/mount.js` / `./mount.test.js` | ALLOWED (still open) | allowed |
+| PR34-SEC-07 computed specifier: `import(where)` in `app.ts` | REFUSED by `platform/static-module-specifier` | refused (PR #32 rule) |
+| `tests/generated` anchoring: `../../packages/shared/src/index.js`; `../../apps/api/src/../../../packages/shared/src/index.js`; `../../apps/api/src/app.js` | REFUSED; REFUSED (`no-relative-packages`); ALLOWED | the same |
+| `systemDelegates(tx).referenceDatasetVersion` from a module service and from `app.ts` / from `platform/db` / from `prisma/tests` | REFUSED twice (`system-model-owner`: the platform owns that SYSTEM table) / ALLOWED / ALLOWED (tests are outside the rule by design) | the same |
+
+**CI:** on `2e5e16f`, lane A's whole-repository lint and its base-ref negative-fixture step are green. The head's own fixture cases also pass in run `20261113T2217Z_5b08fe8`: the two seam refusals, the seam allowance and PR #32's tx-slot root-client case.
+
+**Free to adopt:** non-test source files of `apps`, `packages`, `prisma` and `tools` contain 0 relative imports of a test-category file (267 files under this round's filter; round 2 counted 242). PR34-SEC-07's proposed `from: noneOf test, disallow to: test` policy therefore still costs nothing today.
+
+### R3.4 Jest projects: no security suite leaves a gated run
+
+- **Project membership.** I ran `jest --listTests --json --selectProjects <p>` on both extracts (script `listdiff.mjs`). From `main` to the head: unit 165 to 172, unit-dom 12 to 12, integration 26 to 27, api 6 to 6, generated 0 to 0. The additions are the PR's 7 unit suites and `query-counter.int.test.ts`. **No file is dropped from any project, and no file is in two projects.**
+- **PR #32's suites stay in lane A.** `tests/generated/route-metadata.test.ts` and `tests/generated/contract-drift.test.ts` are in `unit` only, so lane A's `test:unit` (`--selectProjects unit unit-dom`) runs them, and `tools/repo/jest-projects.test.ts` pins both to `unit`. `test:contract` (PR #32: `jest tests/generated tools/openapi --selectProjects unit`) selects the same 5 files on `main` and on the head.
+- **Control.** A mutant that gives `unit` the `/tests/generated/` ignore drops exactly those two suites from `unit` in the same listing (restored byte-equal).
+- **The new `api` teardown.** PR #32 added a CODEOWNED `globalTeardown` to the `api` project, and it stays on `api`. The `generated` project spreads `common`, so it neither inherits that teardown nor removes it. Not a security point: once a generated `*.api.test.ts` lands, its (operationId, status) pairs will not reach `reports/api-contract-coverage.json` unless that project gets the same teardown. That file is a report, not a gate (note for qa-lead and code review).
+- **Lane B tooling.** `heavy.mjs`, `check-evidence`, the manifest and the runners are byte-equal to `3934d12`, and `main` has not changed `tools/quality` since `d693e8c`. The four planned security generator suites keep `min_tests: 1`, `zero_skip` and `security: true`.
+
+### R3.5 `systemDelegates` stays in test code
+
+- **The fix itself.** `6b62d35` adds `import { systemDelegates } from '../../../apps/api/src/platform/db/system-db.js'` and changes one call to `systemDelegates(tenantDb).referenceDatasetVersion.findMany()` inside `withTenantTx`. That is the same form as `main`'s `prisma/tests/rls/standard-columns.int.test.ts`. The fix is required, not cosmetic: PR #32 removed SYSTEM delegates from `TenantDb`, and a read through the handle throws `TenantDbAccessError` naming the port (PR19-SEC-01, D-ARCH-080).
+- **Referencing files.** Files that reference `systemDelegates` or `system-db`: 17 on `main`, 18 on the head, and the only addition is this test. The non-test references on the head all belong to `main`: api `platform/db/system-db.ts`, `system-models.ts`, `system-port.ts` and `tenant-db.ts`, the worker's `platform/db/system-db.ts`, and the lint rule. The PR adds no production use and no allowance: `SYSTEM_MODEL_OWNERS`, `SYSTEM_ACCESSOR_HOMES` and the rule's file and ignore lists are equal to `main` (R3.3).
+- **Why the test passes lint.** By design, the test is outside `platform/system-model-owner`, which lints only non-test `apps/*/src` and `packages/*/src`. `prisma/tests` reaches `apps/*/src/platform/db/*` through the anchored `prisma/tests` ignore and the `prisma-tests` boundaries allow, both unchanged.
+- **What the run shows.** Run `20261113T2217Z_5b08fe8` executed `query-counter.int.test.ts` 4 of 4 times, none skipped. Its second case now shows that the delegate `systemDelegates(tx)` hands out runs on the counted, standard-columns-scoped transaction client: the `ReferenceDatasetVersion.findMany` is counted inside `withTenantTx`. The counter still records names only. The test connects as the migrator, as in round 1.
+
+### R3.6 Evidence, secrets and levers
+
+- **Evidence accepted.** Lane A's base-ref `check-evidence` step is green on `2e5e16f`. In `summary.json`:
+  - profile `pr`, verdict PASS, `invalid_reasons` empty;
+  - `git_sha` = `5b08fe8`, with only docs after it; `git_dirty` false, `build_clean` true, `env_overrides` empty;
+  - `lockfile_sha256` equals the head's `package-lock.json`, and `manifest_sha256` equals the head's `required-suites.json`;
+  - suites: unit 4,252 (2 skipped: the POSIX-only `file-secret-provider` cases), integration 258 (1 skipped: the SPK-03 (d) timing case), api 101, catalog-c1-c14 74, 0 failures. The skips are the same as round 2, and none carries a SEC-TC.
+- **D-SEC-PR23-02 interim control.** The evidence commit's gate table reads "npm ci + deps:rebuild (5b08fe8) | exit 0 / exit 0; porcelain 0". Unlike round 2's table, it does not literally state `--ignore-scripts` or an empty `info/exclude`. Substitutes I checked:
+  - `.npmrc` on the head has `ignore-scripts=true`;
+  - `env_overrides` is empty and `git_dirty` is false;
+  - the repository's `info/exclude` has 0 non-comment lines and `core.excludesFile` is unset (checked after the run, not at run time).
+
+  I accept the evidence for this round; D-SEC-PR34-03 (2) asks for the literal statements in future evidence commits.
+- **Host-path scan, count only.** The 7 run files, 10 labels: 0 hits, positive control 10 of 10. The fix diff and the commit messages of `0dc5fbb`, `6b62d35` and `2e5e16f` also have 0.
+- **Secret shapes** over the 9,084 lines added since round 2 (fix plus evidence). AWS, GitHub, Slack, PEM, Stripe, JWT and assignment patterns: 0. Positive controls fired for the AWS, GitHub, PEM and URL-userinfo patterns. Six URL-userinfo shapes appear. All six are junit test titles of existing `packages/config` and `prisma/seed/demo` suites with placeholder values, and the same six are already in round 2's accepted run: false positives. Lane A's real Gitleaks and Semgrep are green on this head.
+- **D-ORCH-021 levers.** `git diff 60540ef 2e5e16f` over `.github`, `tools/ci`, `tools/deps`, `tools/eslint-rules`, `tools/test-support`, `.gitleaks.toml`, `.gitleaksignore`, `package-lock.json`, `.npmrc` and every workspace `package.json` is empty. `main`'s only change in that set since `d693e8c` is one CODEOWNERS entry (with its comment) that owns PR #32's api coverage teardown, which makes the set stricter.
+
+### R3.7 Routing
+
+| Item | Severity | Owner | Due |
+|---|---|---|---|
+| PR34-SEC-07 (narrowed to the `tests/` and `*.test.ts` hops) | INFO | senior-developer: the `from: noneOf test, disallow to: test` policy, one fixture, scan non-vacuity. The computed-specifier arm needs nothing more | with the API test app builder PR, before G3 |
+| PR34-SEC-05 | INFO | qa-lead | activation PRs: keep `min_tests` / `zero_skip`, drop `--passWithNoTests` |
+| PR34-SEC-06 | INFO | principal-architect with the `redaction` suite owner | before US-008 |
+| PR34-SEC-08 | INFO | test-engineer | with the `redaction` / `log-scan` activation |
+| Evidence gate table wording (D-SEC-PR23-02) | process | orchestrator | the next evidence commit |
+| `generated` project without the api coverage teardown | not security | qa-lead / code review | the first generated `*.api.test.ts` |
+
+The checkpoints are unchanged: TASK-014's image build excludes `dist/**/*.test.js` and `query-counter.js`, and the API test app builder mounts the counter only from a test-category file.
+
+### R3.8 Record check
+
+- **Real checker.** Base-ref tooling, which this PR leaves unchanged. Run in the PR worktree with this record in the working tree: `node tools/ci/check-security-owned-paths.mjs --base origin/main --pr 34 --head HEAD --json` returns **`pass`**, satisfied by this record at `2e5e16fa73c3bee85d71e274afe9c3593ead59fa`, owned 19, exit 0. Its two notes say the round 1 and round 2 Head rows are void, which is expected. Before this section was written, the same command reported `missing`. With `--base 60540ef` it also passes.
+- **Simulation** (script `recsim.sh`: a `git clone --shared` of the main checkout, head `2e5e16f` detached, this record in the clone's working tree, scenario commits on top of the head, `--base abe271a`). **14 of 14 came out as predicted.**
+
+| Case | Scenario | Predicted | Result |
+|---|---|---|---|
+| R | real checker, worktree, record as written | pass at `2e5e16f`, owned 19 | pass at `2e5e16f`, owned 19 |
+| A | record as written | pass at `2e5e16f` | pass at `2e5e16f` |
+| A2 | Head row of this round abbreviated to 7 hex | pass | pass at `2e5e16f` |
+| B | record without this round (as committed on the branch) | missing | missing |
+| C | this round's Verdict FAIL | missing | missing |
+| D | a later FAIL Verdict row after this round's | missing | missing |
+| E1 | Head row names fix `6b62d35` (only a docs-only merge after it) | pass at `6b62d35` | pass at `6b62d35` |
+| E2 | Head row names merge `0dc5fbb` (the fix changed an owned file after it) | missing | missing |
+| E3 | Head row names merge `5b08fe8` | pass at `5b08fe8` | pass at `5b08fe8` |
+| E4 | Head row names `main`'s `60540ef` (not a PR commit) | missing | missing |
+| F | owned `eslint.config.mjs` edited after the head | missing | missing |
+| G | the record committed docs-only on top (what the orchestrator does next) | pass | pass at `2e5e16f` |
+| J | real merge of `main` `abe271a` (docs only) after the head | pass | pass at `2e5e16f` (merge parents `2e5e16f`, `abe271a`) |
+| K | unowned `tools/repo/jest-esm.test.ts` edited after the head | pass (unowned; it still stales the lane B run) | pass at `2e5e16f` |
+
+C and D show that a FAIL verdict, or a later FAIL row, cannot hide behind this round's PASS. PR10-SEC-21 (an older round's Head row stays bindable) is unchanged by this PR, and here the older rows are void anyway.
+
+### R3.9 Verdict
+
+| Item | Value |
+|---|---|
+| Critical / High / Medium / LOW open | 0 / 0 / 0 / 0 |
+| INFO open | 4 (PR34-SEC-05, -06, -07 narrowed, -08); none new |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** The union with PR #32 is a pure union plus one required test fix. Against `main`, the head changes the effective lint configuration of every probed path by exactly round 2's delta: the seam pair is still the last policy, and the root-client, `tests/generated` (anchored `no-relative-packages`), `system-model-owner` and `static-module-specifier` controls equal `main`'s. Five planted weakenings are seen. No test file leaves any Jest project, and PR #32's two `tests/generated` suites stay in lane A `unit` and `test:contract`. The new `systemDelegates` use is confined to `prisma/tests`. The lane B run is accepted, with no host fragment and no secret, and no lever, lock or dependency changed. Four INFO follow-ups are routed in R3.7, none blocking. Any later commit to an owned path voids this record. |
