@@ -212,3 +212,20 @@ PR #17 (TASK-007 follow-up, base-ref lint fixtures no-weakening) r1 at ea78d38: 
   - Open: R2-m1 (pre-existing) no fixture/effective check that no-explicit-any is on; off + reportUnusedDisableDirectives off passes → in-PR or TASK-015. NITs: R2-n1 pin trimEnd vs bash backslash-space (fails closed 127); R2-n2 .swcrc in WAVE-00/plan-data/ADR-0023; R2-n3 job-level env comment.
   - PR #11 overlay ruling: exactly 4 prisma-client-construction extras (2 bad-orders.service, 2 ok-orders.repository), 0 failures. PR #11 supersede: WARNINGS via expectFindings(…,"warning"), allowed (TASK-016) via expectClean.
   - PR #4 merge-main: unit-dom transform must become [@swc/jest, SWC_JEST_OPTIONS] (jest-transform.test); no .swcrc.
+
+PR #21 (TASK-017 OpenAPI pipeline) r1 at b0ede35: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0021-TASK-017-code-review.md`.
+- **M1:** `tools/openapi/drift.ts:122` skips a path-mounted handler (`router.use('/x', fn)`). Fix: `slash !== true` gives unrecognised; verified green on the copy.
+- **MINORs:**
+  - m1: pinned `now` in the real drift run.
+  - m2: `api-mounts.ts` mirrors `createApp`.
+  - m3: OPTIONS 204 not mirrored in the 405 `Allow`, the validator or the stubs.
+  - m4: `no-relative-packages` `'off'` for `tests/api/**/*.api.test.ts`.
+  - m5: README §15 rule 7, the supertest ban, the coverage report, SSE and `client.ts` neither delivered nor recorded.
+  - m6: NFR-MAINT-004 `oasdiff` unowned.
+  - m7: AT-US-035-01 checked at the HTTP level only.
+- **Round 2 = delta check.** Also: the security record must name the fix head; PR #20 conflicts in app.ts, main.ts and request-context.ts; TASK-014 must ship openapi.yaml (compose `DOCS_ENABLED=true` means exit 78 without it).
+
+PR #20 (TASK-010 logging) r1 at dae1f96: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0020-TASK-010-code-review.md`.
+- M1: `@platform/shared/logging` (Pino) importable from web/admin/ui/pricing with 0 lint errors (toPackage allow expands to `/**`); needs disallow + fixtures per arm (lint lock -> orchestrator ruling). M2 (docs): AT-US-008-03 PARTIAL, owners TASK-029/035/047/saga do not own it; WAVE-00:9 says US-008 completed.
+- MINOR: m1 stack getter native check bypassed by bound/Proxy (fix: identity vs V8 accessor); m2 deny-list PII filter on security events (ask per-event allow-list from §13 Extra fields); m3 RUNTIME_SECURITY_EVENTS lists 1 of 5 (tampered/privilege_denied fall to warn); m4 free-text gaps (4+ spaces, newline, 2nd Cookie pair, \" JSON, IDN e-mail); m5 no per-line budget (16 MB / 3.9 s).
+- r2: re-run the lint probe (4 importers), bound/Proxy getter probe, PII probe, leak vectors; PR #21 union conditions (§6.4).

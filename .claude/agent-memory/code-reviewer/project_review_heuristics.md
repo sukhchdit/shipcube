@@ -144,3 +144,16 @@ Round 2 of a spike PR (PR #6 r2):
 
 **Supersede PRs that add a lint boundary category (PR #19, 2026-11-13).** In this eslint.config.mjs, boundaries categories are cumulative (a file gets every matching pattern; policies are last-match-wins). A new narrow category listed before a broad one (`prisma/seed/**` before `prisma/**`) keeps the broad one, so importer-side allow-lists (DATABASE_CODE, SQL_DRIVER_CODE) still match. Kill it three ways with `negative-fixtures.test -t '<area>'` (~1 min): add the broad category to the allow, drop the new one, widen the new pattern. Each must fail one fixture.
 **Unmerged migrations edited in-PR:** stale comments become permanent once the migration is released (immutability check). Flag contradictions in the header before merge.
+
+**Route/contract drift walkers and framework behaviours (PR #21, 2026-11-13).**
+- **Express 5 stack walkers that `continue` on every non-router layer fail open.** `router.use('/path', handler)` serves requests but is neither a route nor a router. Probe: a module router with a path-mounted handler, then run `listMountedRoutes` + `checkContractDrift`. Fix: report non-router layers with `layer.slash !== true` as unrecognised.
+- **"Mirror list" mount loaders** (a tool that re-states `createApp`'s composition) miss anything mounted directly on the app. Ask for a top-level `app.router.stack` assertion with explicit exclusions.
+- **A new framework behaviour (e.g. OPTIONS 204 + Allow) must be mirrored** in the 405 `Allow`, the contract test helper and the contract stubs. Probe the PR's own helper against the PR's own app (`api(app).options(path)`).
+- **A real-contract check with a pinned `now`** makes time-based rules (sunset passed) unable to fire on main.
+- **Ajv implements OAS 3.0 `nullable` natively**, so strict mode accepts it. A typo keyword is still rejected.
+
+**Logging / redaction PRs (PR #20, 2026-11-13):**
+- **New subpath of an allow-listed package.** `toPackage(x)` allow-lists expand to `x/**`, so a new server-only subpath (`@platform/shared/logging`) is importable by web/admin/pricing. Probe with the light lint probe plus positive controls.
+- **"Native function" checks via `Function.prototype.toString` … `[native code]`** are passed by bound functions and Proxies. Compare by identity with the captured native (the V8 `stack` getter is one shared function).
+- **PII filters as substring deny-lists** miss username/display_name/client_ip/dob/passport. Ask for a per-event allow-list from the catalogue's declared fields.
+- **Redactor budgets:** caps per string × node cap can still give a huge line; time it (about 0.3 µs/char here). Free-text pair scanners: probe 4+ spaces, newline after the separator, multi-pair Cookie, `\"`-escaped JSON, IDN e-mail.
