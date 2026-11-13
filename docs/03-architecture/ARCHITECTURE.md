@@ -362,6 +362,8 @@ sequenceDiagram
   Note over API,R: Every authenticated request checks the revocation set → revoked sessions fail within 5 s (REQ-AUTH-009).
 ```
 
+*Amended 2026-11-13 (D-ARCH-109, ADR-0006 amendment 17, ADR-0008 amendment 5).* The refresh cookie is `Path=/` (the `__Host-` prefix requires it), so the browser attaches it to every request to the API host, including the login that starts the next session and every public read. The authn slot makes that harmless: a route reads only the credential kinds it declares, so the cookie is read by `refresh`, `logout` and `csrf` and is ignored everywhere else (a stale cookie on `POST /auth/login` is a normal login, never a 401, and rotated tokens sent elsewhere cause no reuse alarm); in the other direction, an expired bearer attached by the client does not fail `refresh`, `logout` or `csrf`. Failure path of the diagram: reuse detection can fire only on the routes that read the cookie, so a rotated cookie that travels to any other route is not an alarm.
+
 ### 7.5 Tracking poll with adaptive intervals (REQ-TRACK-003/004, DR-B18/B19)
 
 ```mermaid
