@@ -68,6 +68,25 @@ export function extractIds(text) {
   return [...new Set(text.match(ANY_ID) ?? [])].sort();
 }
 
+const ID_LIKE = new RegExp(`${BOUND_START}(?:AT-US-|SEC-TC-|NT-[A-Z][A-Z0-9]*-|J-[A-Za-z0-9]+-)[A-Za-z0-9-]*`, 'g');
+const ID_PREFIX = new RegExp(`^(?:${ID_PATTERNS['SEC-TC']}|${ID_PATTERNS.AT}|${ID_PATTERNS.NT}|${ID_PATTERNS.J})${BOUND_END}`);
+/** Longest malformed token reported (a token is `[A-Za-z0-9-]*` only, so it cannot carry markup or a line break). */
+const MAX_TOKEN = 40;
+
+/**
+ * ID-shaped tokens (`AT-US-`, `SEC-TC-`, `NT-<CAT>-`, `J-<area>-` at a word boundary) that do not start with a
+ * well-formed ID, unique and sorted: `AT-US-66-01`, `AT-US-001-010`, `SEC-TC-1`. `AT-US-012-02-object-storage` is
+ * fine (a well-formed ID followed by a hyphenated suffix). Such a typo would otherwise be neither credited nor reported
+ * as an orphan (R1-m4).
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function malformedIds(text) {
+  const bad = new Set();
+  for (const [token] of text.matchAll(ID_LIKE)) if (!ID_PREFIX.test(token)) bad.add(token.slice(0, MAX_TOKEN));
+  return [...bad].sort();
+}
+
 /**
  * @param {string} id
  * @returns {IdFamily | undefined}
@@ -138,7 +157,8 @@ export function tableCells(line) {
 
 const STORY_HEADING = /^### (US-\d{3}) — (.+)$/;
 const SUMMARY_ROW = /^\| (US-\d{3}) \|/;
-const SCENARIO_LINE = /^\s*Scenario( Outline)?:\s*(.*?)\s*$/;
+// `(.*)` plus trim(): linear on any line (PR35-SEC-02; a lazy group before `\s*$` backtracks quadratically).
+const SCENARIO_LINE = /^\s*Scenario( Outline)?:(.*)$/;
 
 /**
  * Parses one story file: the Story summary table (MoSCoW, DC flag in the last column) and, per `### US-nnn — title`
@@ -176,7 +196,7 @@ export function parseStoryFile(text, file) {
         if (scenario !== null)
           current.scenarios.push({
             index: current.scenarios.length + 1,
-            title: /** @type {string} */ (scenario[2]),
+            title: /** @type {string} */ (scenario[2]).trim(),
             outline: scenario[1] !== undefined,
             liveSandbox: previous.trim().split(/\s+/).includes('@live-sandbox'),
           });

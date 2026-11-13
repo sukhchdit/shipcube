@@ -12,13 +12,15 @@
  * inserted), fails the generator with the story IDs: qa-lead classifies them and re-runs it.
  *
  * `--check` compares instead of writing and exits 1 with the first differing line number (drift guard).
+ * `--out` must stay inside the root and outside the committed evidence tree; links on the way are refused and the file
+ * is replaced by a rename, never written through (PR35-SEC-01).
  * Exit: 0 ok, 1 drift or unclassified/malformed input, 2 usage or internal error.
  */
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { CONSOLE_IO, DEFAULT_ROOT, UsageError, parseArgs } from './lib/cli.mjs';
+import { CONSOLE_IO, DEFAULT_ROOT, UsageError, parseArgs, resolveOutput, safeIo, writeOutput } from './lib/cli.mjs';
 import { MAP_PATHS, MapError, OUTLINE_SUFFIX, STORIES_DIR, loadStories, readBounded, scenarioId } from './lib/test-ids.mjs';
 
 export { OUTLINE_SUFFIX };
@@ -248,15 +250,16 @@ export function firstDifference(a, b) {
 
 /**
  * @param {readonly string[]} argv
- * @param {import('./lib/cli.mjs').Io} [io]
+ * @param {import('./lib/cli.mjs').Io} [rawIo]
  * @returns {number}
  */
-export function main(argv, io = CONSOLE_IO) {
+export function main(argv, rawIo = CONSOLE_IO) {
   const name = 'quality:gherkin-map';
+  const io = safeIo(rawIo);
   try {
     const args = parseArgs(argv, ['--root', '--out'], ['--check']);
     const root = resolve(String(args.get('--root') ?? DEFAULT_ROOT));
-    const out = args.has('--out') ? resolve(String(args.get('--out'))) : join(root, ...MAP_PATHS.gherkin.split('/'));
+    const out = resolveOutput(root, args.has('--out') ? String(args.get('--out')) : undefined, MAP_PATHS.gherkin);
     const text = generate(root);
     if (args.has('--check')) {
       let current = '';
@@ -273,7 +276,7 @@ export function main(argv, io = CONSOLE_IO) {
       io.out(`${name}: up to date`);
       return 0;
     }
-    writeFileSync(out, text);
+    writeOutput(root, out, text);
     io.out(`${name}: wrote the map`);
     return 0;
   } catch (error) {

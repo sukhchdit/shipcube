@@ -2,10 +2,11 @@
  * Test-ID vocabulary and map readers (TASK-277, T-QA-02; TEST-STRATEGY section 6, D-QA-002), on synthetic text and on
  * the committed maps. Test titles here deliberately carry no test ID: quality:trace would treat them as claims.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../../test-support/process.js';
 import {
@@ -14,6 +15,7 @@ import {
   extractIds,
   idFamily,
   loadStories,
+  malformedIds,
   outlineRow,
   parseGherkinMap,
   parseJourneys,
@@ -21,6 +23,7 @@ import {
   parseNfrTraceability,
   parseSecurityCases,
   parseStoryFile,
+  readBounded,
   tableCells,
 } from './test-ids.mjs';
 
@@ -172,5 +175,102 @@ describe('parseStoryFile', () => {
 
   it('splits table cells on unescaped pipes', () => {
     expect(tableCells('| a | b \\| c | d |')).toEqual(['a', 'b \\| c', 'd']);
+  });
+
+  it('trims scenario titles and parses a megabyte-long whitespace run in linear time (PR35-SEC-02)', () => {
+    const spaces = ' '.repeat(1_000_000);
+    const started = Date.now();
+    const [story] = parseStoryFile(
+      file([
+        '### US-010 — T',
+        '```gherkin',
+        `  Scenario: a${spaces}b`,
+        `  Scenario Outline:   padded \t `,
+        `  Scenario: c${spaces}`,
+        '```',
+      ]),
+      'EPIC-02-x.md',
+    );
+    // The former lazy pattern needed seconds at 80,000 spaces and grows quadratically; the linear one needs milliseconds.
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(story?.scenarios.map((s) => s.title)).toEqual([`a${spaces}b`, 'padded', 'c']);
+  });
+});
+
+describe('malformedIds', () => {
+  it('reports ID-shaped tokens that do not start with a well-formed ID, unique and sorted', () => {
+    expect(malformedIds('[AT-US-66-01] AT-US-001-1 AT-US-001-010 SEC-TC-1 NT-PERF-6-a NT-PERF-003-ab J-M0-1 AT-US-66-01 XAT-US-1')).toEqual(
+      ['AT-US-001-010', 'AT-US-001-1', 'AT-US-66-01', 'J-M0-1', 'NT-PERF-003-ab', 'NT-PERF-6-a', 'SEC-TC-1'],
+    );
+  });
+
+  it('accepts well-formed IDs, outline rows and a well-formed ID with a hyphenated suffix', () => {
+    expect(
+      malformedIds(
+        '[AT-US-012-02] AT-US-012-02-object-storage AT-US-131-01-2 NT-A11Y-001-b SEC-TC-01..64 J-M1-01L J-KB-09 NFR-PERF-001 plain',
+      ),
+    ).toEqual([]);
+  });
+
+  it('caps a reported token at 40 characters', () => {
+    expect(malformedIds(`SEC-TC-${'9'.repeat(100)}`)).toEqual([`SEC-TC-${'9'.repeat(33)}`]);
+  });
+});
+
+describe('map validators', () => {
+  const MAP_HEAD = '| Test ID | Story | Scenario | Suite | Lane | G3 |\n|---|---|---|---|---|---|\n';
+
+  it('parseGherkinMap rejects a row without six cells, a duplicate row and a malformed story or suite cell', () => {
+    const row = '| AT-US-001-01 | US-001 | One | `unit` | A | yes |\n';
+    expect(parseGherkinMap(MAP_HEAD + row)).toHaveLength(1);
+    expect(() => parseGherkinMap(`${MAP_HEAD}| AT-US-001-01 | US-001 | One | \`unit\` | A | yes | extra |\n`)).toThrow(
+      /has 7 cells, expected 6/,
+    );
+    expect(() => parseGherkinMap(MAP_HEAD + row + row)).toThrow(/appears twice/);
+    expect(() => parseGherkinMap(`${MAP_HEAD}| AT-US-001-01 | US-1 | One | \`unit\` | A | yes |\n`)).toThrow(
+      /malformed story or suite cell/,
+    );
+    expect(() => parseGherkinMap(`${MAP_HEAD}| AT-US-001-01 | US-001 | One | unit | A | yes |\n`)).toThrow(/malformed story or suite cell/);
+  });
+
+  it('parseNfrTraceability rejects an unknown Run value, a short row and a duplicate NFR', () => {
+    const head = '| NFR | Run | Test(s) |\n|---|---|---|\n';
+    expect(parseNfrTraceability(`${head}| NFR-PERF-001 | FULL | NT-PERF-001-a |\n`)).toEqual([
+      { nfr: 'NFR-PERF-001', run: 'FULL', parts: ['NT-PERF-001-a'] },
+    ]);
+    expect(() => parseNfrTraceability(`${head}| NFR-PERF-001 | MAYBE | NT-PERF-001-a |\n`)).toThrow(/has Run "MAYBE"/);
+    expect(() => parseNfrTraceability(`${head}| NFR-PERF-001 | FULL |\n`)).toThrow(/has 2 cells, expected 3/);
+    expect(() => parseNfrTraceability(`${head}| NFR-PERF-001 | FULL | a |\n| NFR-PERF-001 | FULL | b |\n`)).toThrow(/appears twice/);
+  });
+});
+
+describe('readBounded', () => {
+  const temps: string[] = [];
+  afterEach(() => {
+    for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function makeRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), 'test-ids-read-'));
+    temps.push(root);
+    mkdirSync(join(root, 'dir'));
+    writeFileSync(join(root, 'dir', 'file.md'), 'hello');
+    return root;
+  }
+
+  it('reads a regular file within the cap', () => {
+    const root = makeRoot();
+    expect(readBounded(root, join(root, 'dir', 'file.md'))).toBe('hello');
+    expect(readBounded(root, join(root, 'dir', 'file.md'), 5)).toBe('hello');
+  });
+
+  it('refuses a file over the cap, a directory, a missing path and a junction, naming the path relative to the root', () => {
+    const root = makeRoot();
+    expect(() => readBounded(root, join(root, 'dir', 'file.md'), 4)).toThrow('dir/file.md: exceeds 4 bytes');
+    expect(() => readBounded(root, join(root, 'dir'))).toThrow('dir: not a regular file');
+    expect(() => readBounded(root, join(root, 'missing.md'))).toThrow('missing.md: cannot be read');
+    symlinkSync(join(root, 'dir'), join(root, 'link'), 'junction');
+    expect(() => readBounded(root, join(root, 'link'))).toThrow('link: not a regular file');
+    expect(() => readBounded(root, join(root, 'link'))).toThrow(MapError);
   });
 });

@@ -2,7 +2,7 @@
  * quality:flake-report (TASK-277, T-QA-02; TEST-STRATEGY section 11): tests with mixed outcomes over the stored runs,
  * same-SHA mixes (definite flakes) separated from cross-SHA mixes (informational).
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -120,6 +120,13 @@ describe('quality:flake-report', () => {
     expect(written.code).toBe(0);
     expect(written.out[0]).toContain('3 runs');
     expect(readFileSync(out, 'utf8')).toBe(`${stdout}\n`);
+    // --out stays inside the root and outside the evidence tree (PR35-SEC-01).
+    const evidence = join(root, 'docs', '05-quality', 'tests', 'runs', 'flake-report.json');
+    for (const refused of [join(root, '..', 'outside-flake.json'), evidence]) {
+      const result = run(['--root', root, '--out', refused]);
+      expect(result.code).toBe(2);
+      expect(existsSync(refused)).toBe(false);
+    }
     expect(run(['--root', root, '--fail-on-same-sha']).code).toBe(1);
     const clean = makeRoot({
       '20261113T0800Z_aaaaaaa': { 'unit.junit.xml': junit({ ok: 'passed' }) },

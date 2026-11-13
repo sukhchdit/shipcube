@@ -12,13 +12,14 @@
  *
  * Output: deterministic JSON (sorted, no timestamps, no host paths) to stdout, or to `--out`. Exit: 0 (also when
  * flakes exist, unless `--fail-on-same-sha` and `same_sha_mixed` is non-empty: 1), 1 unreadable or unparseable input,
- * 2 usage or internal error.
+ * 2 usage or internal error. `--out` must stay inside the root and outside the committed evidence tree; links on the
+ * way are refused and the file is replaced by a rename, never written through (PR35-SEC-01).
  */
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { CONSOLE_IO, DEFAULT_ROOT, parseArgs, stableJson } from './lib/cli.mjs';
+import { CONSOLE_IO, DEFAULT_ROOT, parseArgs, resolveOutput, safeIo, stableJson, writeOutput } from './lib/cli.mjs';
 import { JUnitError, MAX_JUNIT_BYTES, parseJUnit } from './lib/junit.mjs';
 import { MapError, readBounded, relPath } from './lib/test-ids.mjs';
 import { RUNS_PATH, RUN_DIR } from './trace.mjs';
@@ -140,20 +141,22 @@ export function buildFlakeReport(runs, observations, problems) {
 
 /**
  * @param {readonly string[]} argv
- * @param {import('./lib/cli.mjs').Io} [io]
+ * @param {import('./lib/cli.mjs').Io} [rawIo]
  * @returns {number}
  */
-export function main(argv, io = CONSOLE_IO) {
+export function main(argv, rawIo = CONSOLE_IO) {
   const name = 'quality:flake-report';
+  const io = safeIo(rawIo);
   try {
     const args = parseArgs(argv, ['--root', '--runs', '--out'], ['--fail-on-same-sha']);
     const root = resolve(String(args.get('--root') ?? DEFAULT_ROOT));
     const runsDir = args.has('--runs') ? resolve(String(args.get('--runs'))) : join(root, ...RUNS_PATH.split('/'));
+    const out = args.has('--out') ? resolveOutput(root, String(args.get('--out')), '') : undefined;
     const { runs, observations, problems } = scanRuns(root, runsDir);
     const report = buildFlakeReport(runs, observations, problems);
     const json = stableJson(report);
-    if (args.has('--out')) {
-      writeFileSync(resolve(String(args.get('--out'))), json);
+    if (out !== undefined) {
+      writeOutput(root, out, json);
       io.out(
         `${name}: ${report.runs.length} runs, ${report.tests_observed} tests, ${report.same_sha_mixed.length} same-SHA mixed (flaky), ${report.cross_sha_mixed.length} cross-SHA mixed, ${report.problems.length} problems`,
       );

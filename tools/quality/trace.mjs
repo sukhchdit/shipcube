@@ -5,23 +5,42 @@
  *   npm run quality:trace [-- --run <dir>] [-- --root <repo>] [-- --out <file>]
  *
  * Reads every `*.junit.xml` of a run directory under docs/05-quality/tests/runs (default: the latest), extracts the
- * AT-/NT-/SEC-TC-/J- IDs from each test case's name and classname (a describe title carries its ID to every test in
- * it), and writes `ac-trace.json` (default: into the run directory) with per-ID counts and the three coverage ratios.
+ * AT-/NT-/SEC-TC-/J- IDs from each test case's name (lane B writes Jest's full name there, so a describe title
+ * carries its ID to every test in it; the classname is the test file path and is not read, so a file name never
+ * credits its tests), and writes `ac-trace.json` with per-ID counts and the coverage sections. `--out` defaults to
+ * `reports/ac-trace.json` and must stay inside the root and outside the committed evidence tree: a run directory may
+ * only hold files that `quality:heavy` hashed into its summary.json (D-TASK277-03 as corrected in fix cycle 1).
  *
  * Known IDs: AT = gherkin-test-map.md rows UNION the scenarios of every story file (Should/Could stories are not in the
  * Must map but are not orphans, D-TASK277-02; an outline row `-<n>` is known when its outline is); NT = parts of the
  * nfr-traceability.md Test(s) column; SEC-TC = rows of security-test-cases.md (adopted and proposed); J = journey
- * headings of e2e-journeys.md. Only map rows with G3 = yes are in the Must-AC denominator.
+ * headings of e2e-journeys.md. Only map rows with G3 = yes are in the Must-AC denominator; Must scenarios of the story
+ * files without a map row are listed as `must_ac.unmapped` (the denominator is the map's until qa-lead maps them).
+ * A malformed ID-shaped token (`AT-US-66-01`, `SEC-TC-1`) is a problem, like an orphan.
+ *
+ * Must-AC pooling: an outline counts as covered when its outline ID and the `-<row>` IDs that tests carry all pass,
+ * whatever the number of Examples rows (the map does not record the row count).
  *
  * Output is deterministic (sorted keys, no timestamps, no host paths) and carries IDs and counts only, never test
  * names or messages. Exit: 0 ok (failing tests do not fail the command; coverage is informational until G3),
- * 1 orphan IDs or an unreadable/unparseable map or JUnit file, 2 usage or internal error.
+ * 1 orphan or malformed IDs or an unreadable/unparseable map or JUnit file, 2 usage or internal error.
  */
-import { lstatSync, readdirSync, writeFileSync } from 'node:fs';
+import { lstatSync, readdirSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { CONSOLE_IO, DEFAULT_ROOT, UsageError, parseArgs, ratio, stableJson } from './lib/cli.mjs';
+import {
+  CONSOLE_IO,
+  DEFAULT_ROOT,
+  UsageError,
+  firstLink,
+  parseArgs,
+  ratio,
+  resolveOutput,
+  safeIo,
+  stableJson,
+  writeOutput,
+} from './lib/cli.mjs';
 import { JUnitError, MAX_JUNIT_BYTES, parseJUnit } from './lib/junit.mjs';
 import {
   MAP_PATHS,
@@ -30,6 +49,7 @@ import {
   extractIds,
   idFamily,
   loadStories,
+  malformedIds,
   outlineRow,
   parseGherkinMap,
   parseJourneys,
@@ -44,13 +64,15 @@ import {
 export const RUNS_PATH = 'docs/05-quality/tests/runs';
 export const RUN_DIR = /^\d{8}T\d{4}Z_[0-9a-f]{7}$/;
 export const TRACE_FILE = 'ac-trace.json';
+/** Default `--out`, root-relative (git-ignored `reports/`, outside the evidence tree). */
+export const DEFAULT_OUT = `reports/${TRACE_FILE}`;
 
 /**
  * @typedef {import('./lib/test-ids.mjs').NfrRow} NfrRow
  * @typedef {import('./lib/junit.mjs').CaseStatus} CaseStatus
  * @typedef {{ g3: boolean | undefined, outline: boolean }} AtEntry
  * @typedef {{ at: Map<string, AtEntry>, nt: Set<string>, sec: Set<string>, secAdopted: string[], journeys: Set<string>,
- *   nfr: NfrRow[], mustAc: string[], sha: Record<string, string> }} Maps
+ *   nfr: NfrRow[], mustAc: string[], unmapped: string[], sha: Record<string, string> }} Maps
  * @typedef {{ suite: string, ids: string[], status: CaseStatus }} Observation
  * @typedef {{ family: string, g3?: boolean, suites: string[], tests: number, passed: number, failed: number, skipped: number }} IdStats
  */
@@ -70,9 +92,16 @@ export function loadMaps(root) {
   };
   /** @type {Map<string, AtEntry>} */
   const at = new Map();
+  /** @type {string[]} */
+  const mustScenarios = [];
   for (const story of loadStories(root, (dir) => readdirSync(dir)))
-    for (const scenario of story.scenarios) at.set(scenarioId(story.id, scenario.index), { g3: undefined, outline: scenario.outline });
+    for (const scenario of story.scenarios) {
+      const id = scenarioId(story.id, scenario.index);
+      at.set(id, { g3: undefined, outline: scenario.outline });
+      if (story.moscow === 'Must') mustScenarios.push(id);
+    }
   const mapRows = parseGherkinMap(texts.gherkin);
+  const mapped = new Set(mapRows.map((r) => r.id));
   for (const row of mapRows) {
     const outline = row.title.endsWith(OUTLINE_SUFFIX) || (at.get(row.id)?.outline ?? false);
     at.set(row.id, { g3: row.g3, outline });
@@ -87,6 +116,7 @@ export function loadMaps(root) {
     journeys: new Set(parseJourneys(texts.journeys)),
     nfr,
     mustAc: mapRows.filter((r) => r.g3).map((r) => r.id),
+    unmapped: mustScenarios.filter((id) => !mapped.has(id)).sort(),
     sha: {
       gherkin_sha256: sha256Text(texts.gherkin),
       security_sha256: sha256Text(texts.security),
@@ -121,13 +151,16 @@ export function isKnown(id, maps) {
 
 /**
  * Resolves the run directory: `--run` (relative to the working directory) must be a direct, non-symlink child of the
- * runs directory named `<UTCstamp>_<sha7>`; without it, the lexicographically latest such child.
+ * runs directory named `<UTCstamp>_<sha7>`; without it, the lexicographically latest such child (links skipped). No
+ * component between the root and the runs directory may be a symlink or junction either (PR35-SEC-01).
  * @param {string} root
  * @param {string | undefined} requested
  * @returns {string} absolute path
  */
 export function resolveRunDir(root, requested) {
   const runsDir = join(root, ...RUNS_PATH.split('/'));
+  const link = firstLink(root, runsDir);
+  if (link !== undefined) throw new UsageError(`${link} is a symbolic link or junction (links are not followed)`);
   if (requested === undefined) {
     let names;
     try {
@@ -159,8 +192,8 @@ export function resolveRunDir(root, requested) {
 }
 
 /**
- * Observations (suite, IDs, status) of every test case in the run's JUnit files. Unreadable or unparseable files are
- * returned as problems.
+ * Observations (suite, IDs, status) of every test case in the run's JUnit files. Unreadable or unparseable files and
+ * malformed ID-shaped tokens are returned as problems.
  * @param {string} root
  * @param {string} runDir
  * @returns {{ observations: Observation[], problems: string[] }}
@@ -191,10 +224,15 @@ export function collectRun(root, runDir) {
       );
       continue;
     }
+    /** @type {Set<string>} */
+    const malformed = new Set();
     for (const kase of report.cases) {
-      const ids = extractIds(`${kase.name}\n${kase.classname}`);
+      const ids = extractIds(kase.name);
       if (ids.length > 0) observations.push({ suite, ids, status: kase.status });
+      for (const token of malformedIds(kase.name)) malformed.add(token);
     }
+    for (const token of [...malformed].sort())
+      problems.push(`${relPath(root, path)}: malformed test ID ${token} (no AT-/NT-/SEC-TC-/J- form matches)`);
   }
   return { observations, problems };
 }
@@ -262,12 +300,19 @@ export function buildTrace(maps, runName, observations, problems) {
     const s = statsOf(pooled.get(id) ?? []);
     return s.tests > 0 && s.passed === s.tests;
   }).length;
+  // NFR: a part passes when it has a passing test and no failing one. Verified = FULL row whose parts all pass; partial
+  // evidence = any other row (FULL included) with at least one passing part, split by Run so TEST-STRATEGY section 6
+  // rule 2 (FULL verified + PARTIAL/DEFERRED evidence) is read off directly.
   const partOk = (/** @type {string} */ part) => {
     const s = ids[part];
     return s !== undefined && s.passed > 0 && s.failed === 0;
   };
-  const verified = maps.nfr.filter((r) => r.run === 'FULL' && r.parts.length > 0 && r.parts.every(partOk)).length;
-  const partialEvidence = maps.nfr.filter((r) => r.run !== 'FULL' && r.parts.some((p) => (ids[p]?.passed ?? 0) > 0)).length;
+  const isVerified = (/** @type {NfrRow} */ r) => r.run === 'FULL' && r.parts.length > 0 && r.parts.every(partOk);
+  const verified = maps.nfr.filter(isVerified).length;
+  /** @type {Record<string, number>} */
+  const partialByRun = { DEFERRED: 0, FULL: 0, PARTIAL: 0 };
+  for (const r of maps.nfr) if (!isVerified(r) && r.parts.some(partOk)) partialByRun[r.run] = (partialByRun[r.run] ?? 0) + 1;
+  const partialEvidence = Object.values(partialByRun).reduce((a, b) => a + b, 0);
   const secPresent = maps.secAdopted.filter((id) => ids[id] !== undefined);
   const secPassing = secPresent.filter((id) => {
     const s = /** @type {IdStats} */ (ids[id]);
@@ -279,12 +324,18 @@ export function buildTrace(maps, runName, observations, problems) {
     maps: maps.sha,
     ids,
     coverage: {
-      must_ac: { counted: maps.mustAc.length, covered, ratio: ratio(covered, maps.mustAc.length) },
+      must_ac: {
+        counted: maps.mustAc.length,
+        covered,
+        ratio: ratio(covered, maps.mustAc.length),
+        unmapped: { count: maps.unmapped.length, ids: maps.unmapped },
+      },
       nfr: {
         total: maps.nfr.length,
         verified,
+        verified_ratio: ratio(verified, maps.nfr.length),
         partial_evidence: partialEvidence,
-        ratio: ratio(verified + partialEvidence, maps.nfr.length),
+        partial_evidence_by_run: partialByRun,
       },
       sec_tc: {
         total: maps.secAdopted.length,
@@ -300,23 +351,24 @@ export function buildTrace(maps, runName, observations, problems) {
 
 /**
  * @param {readonly string[]} argv
- * @param {import('./lib/cli.mjs').Io} [io]
+ * @param {import('./lib/cli.mjs').Io} [rawIo]
  * @returns {number}
  */
-export function main(argv, io = CONSOLE_IO) {
+export function main(argv, rawIo = CONSOLE_IO) {
   const name = 'quality:trace';
+  const io = safeIo(rawIo);
   try {
     const args = parseArgs(argv, ['--root', '--run', '--out'], []);
     const root = resolve(String(args.get('--root') ?? DEFAULT_ROOT));
     const runDir = resolveRunDir(root, args.has('--run') ? String(args.get('--run')) : undefined);
-    const out = args.has('--out') ? resolve(String(args.get('--out'))) : join(runDir, TRACE_FILE);
+    const out = resolveOutput(root, args.has('--out') ? String(args.get('--out')) : undefined, DEFAULT_OUT);
     const maps = loadMaps(root);
     const { observations, problems } = collectRun(root, runDir);
     const trace = buildTrace(maps, basename(runDir), observations, problems);
-    writeFileSync(out, stableJson(trace));
+    writeOutput(root, out, stableJson(trace));
     const c = trace.coverage;
     io.out(
-      `${name}: ${trace.run}: must-AC ${c.must_ac.covered}/${c.must_ac.counted} (${c.must_ac.ratio}) · NFR ${c.nfr.verified} verified + ${c.nfr.partial_evidence} partial/${c.nfr.total} (${c.nfr.ratio}) · SEC-TC ${c.sec_tc.passing} passing, ${c.sec_tc.present} present/${c.sec_tc.total} (${c.sec_tc.ratio}) · ${Object.keys(trace.ids).length} IDs · ${trace.orphans.length} orphans · ${trace.problems.length} problems`,
+      `${name}: ${trace.run}: must-AC ${c.must_ac.covered}/${c.must_ac.counted} (${c.must_ac.ratio}, ${c.must_ac.unmapped.count} Must scenarios unmapped) · NFR ${c.nfr.verified} verified, ${c.nfr.partial_evidence} partial evidence /${c.nfr.total} · SEC-TC ${c.sec_tc.passing} passing, ${c.sec_tc.present} present/${c.sec_tc.total} (${c.sec_tc.ratio}) · ${Object.keys(trace.ids).length} IDs · ${trace.orphans.length} orphans · ${trace.problems.length} problems`,
     );
     for (const id of trace.orphans) io.err(`${name}: orphan ID ${id} (in a test title, absent from every map)`);
     for (const problem of trace.problems) io.err(`${name}: ${problem}`);
