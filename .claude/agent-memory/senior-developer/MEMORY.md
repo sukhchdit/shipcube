@@ -11,3 +11,4 @@
 - [Batch 0.4/0.5 TASK-010/017](feedback_batch_010_017.md) — commitlint ranges, Bash strips backslashes, property-test reruns, main moving with code
 - [PR #21 fc1](feedback_pr21_fc1.md) — re-merge after main moves with code, fetch 304 pitfall, commitlint range, lock owner file, AT vs RFC
 - [Batch 0.6/0.4 TASK-021/011](feedback_batch_021_011.md) — never `&` in Bash (npm ci race), port suites find gaps, check-evidence base-manifest activation
+- [PR #23 fc1](feedback_pr23_fc1.md) — heredoc drops backslashes in scripts, use scratchpad+Write; --event push; mutation-proof CI pins; gitleaks count superset
