@@ -8,9 +8,10 @@
  * set has no `anonymous`, or the request presented a credential) are marked `private, no-store` from this step on, 401s
  * included (SEC-TC-29, T-06, ASVS 8.2.1).
  *
- * Stub-only (code review R2-m4, PR32-SEC-16): refusing a request on an `anonymous` route because it carries the refresh
- * cookie follows D-ARCH-107 (5) verbatim but conflicts with ADR-0006 R-06 (the cookie is ignored outside refresh and
- * logout). The ruling is pending with principal-architect before TASK-052/055 replace this slot; see credentials.ts.
+ * Stub-only, superseded by D-ARCH-109 (code review R2-m4, PR32-SEC-16): refusing a request on an `anonymous` route
+ * because it carries a credential of a kind the route does not declare (a stale refresh cookie, an expired bearer)
+ * follows D-ARCH-107 (5) verbatim. D-ARCH-109 rules that a foreign credential is ignored; TASK-020 part 020-B makes this
+ * slot read only the declared kinds, before TASK-027 merges and TASK-052 starts. See credentials.ts.
  */
 import { AppError, presentsCredential } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';

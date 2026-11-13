@@ -7,11 +7,11 @@
  * presented one, errors raised before the route is known included) and for the SEC-TC-29 contract helper and stubs
  * (PR32-SEC-06 (a)). Pure; header names lower-case, as Node delivers them.
  *
- * Pending ruling (code review R2-m4, PR32-SEC-16): counting refresh-cookie presence as a credential on EVERY route is
- * the TASK-020 stub reading of D-ARCH-107 (5). ADR-0006 R-06 says the `Path=/` refresh cookie is read only by
- * `/auth/refresh` and `/auth/logout` and ignored elsewhere. principal-architect reconciles the two before TASK-052/055;
- * until then the real authenticators must not inherit "cookie present, so refuse" on routes whose set lacks
- * `refresh-cookie` (marking such responses `private, no-store` stays harmless).
+ * Superseded rule, still in force until part 020-B (code review R2-m4, PR32-SEC-16): counting any credential, the
+ * `Path=/` refresh cookie included, as presented on EVERY route is the stub reading of D-ARCH-107 (5). D-ARCH-109
+ * replaces it: a route reads only the kinds its `auth` set declares, and a foreign credential neither authenticates,
+ * fails nor marks the response. TASK-020 part 020-B makes this predicate route-aware (`presentedKinds`) before TASK-027
+ * merges and TASK-052 starts; the real authenticators (TASK-052/055/091) never inherit "present means refuse".
  */
 
 /** Request headers as Node's `IncomingHttpHeaders` delivers them (lower-case names). */
