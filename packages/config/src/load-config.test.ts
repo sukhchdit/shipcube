@@ -381,6 +381,7 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
       REDIS_URL: `redis://api:${randomSecret()}@cache:6379`,
       WEB_APP_ORIGIN: 'http://web.example.org',
       STORAGE_ENDPOINT: 'http://s3.example.org',
+      STORAGE_PUBLIC_ENDPOINT: 'https://s3.example.org',
     };
     const error = rejection(() => loadConfig(env, { service: 'api' }));
     expect(error.issues).toEqual(
@@ -395,6 +396,8 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
   /** Transport (outside local/test: exactly one sslmode=verify-full) and query-parameter (every APP_ENV) issues. */
   const TRANSPORT = { key: 'DATABASE_URL', code: 'insecure-transport' } as const;
   const QUERY_PARAMETER = { key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.queryParameter' } as const;
+  // TASK-014 (PR #9 R3-m1, PR #11 R3-m2): the TLS-selector values are checked in every APP_ENV too.
+  const PARAMETER_VALUE = { key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.parameterValue' } as const;
 
   // PR3-SEC-02: node-postgres (pg-connection-string 2.14.1) copies every query entry onto its config, so the LAST
   // sslmode wins and `ssl=0` turns TLS off; the guards must not read a different value than the driver.
@@ -402,7 +405,7 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     ['a later sslmode=disable', 'sslmode=verify-full&sslmode=disable', [TRANSPORT, QUERY_PARAMETER]],
     ['a later sslmode=no-verify', 'sslmode=verify-full&sslmode=no-verify', [TRANSPORT, QUERY_PARAMETER]],
     ['an earlier weaker sslmode', 'sslmode=require&sslmode=verify-full', [TRANSPORT, QUERY_PARAMETER]],
-    ['sslmode=no-verify', 'sslmode=no-verify', [TRANSPORT]],
+    ['sslmode=no-verify', 'sslmode=no-verify', [TRANSPORT, PARAMETER_VALUE]],
     ['an ssl=false override', 'sslmode=verify-full&ssl=false', [QUERY_PARAMETER]],
     ['an ssl=0 override', 'ssl=0&sslmode=verify-full', [QUERY_PARAMETER]],
     ['a duplicated sslrootcert', 'sslmode=verify-full&sslrootcert=/a.pem&sslrootcert=/b.pem', [QUERY_PARAMETER]],
@@ -588,7 +591,10 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
 
   it('[NT-SEC-007-a] plain local transport is accepted in local and test', () => {
     expect(
-      loadConfig({ ...createTestEnv({ appEnv: 'local' }), STORAGE_ENDPOINT: 'http://rustfs:9000' }, { service: 'api' }).STORAGE_ENDPOINT,
+      loadConfig(
+        { ...createTestEnv({ appEnv: 'local' }), STORAGE_ENDPOINT: 'http://rustfs:9000', STORAGE_PUBLIC_ENDPOINT: 'http://localhost:9000' },
+        { service: 'api' },
+      ).STORAGE_ENDPOINT,
     ).toBe('http://rustfs:9000');
   });
 
