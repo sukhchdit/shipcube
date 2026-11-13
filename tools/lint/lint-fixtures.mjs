@@ -32,6 +32,8 @@ const FIXTURES = join(REPO_ROOT, 'tests', 'fixtures', 'lint');
 const ESLINT_CONFIG = join(REPO_ROOT, 'eslint.config.mjs');
 const STYLELINT_CONFIG = join(REPO_ROOT, 'stylelint.config.mjs');
 const LINTED_FILE = /\.(?:[cm]?js|jsx|tsx?)$/u;
+/** Fixture-relative stand-ins that are import targets only (see lintRoot). */
+const STAND_IN = /^layering\/[^/]+\/prisma\/generated\//u;
 
 /**
  * @typedef {{ ruleId: string | null; message: string; severity: 'error' | 'warning' }} Finding
@@ -81,7 +83,9 @@ async function lintRoot(root, { resolution = false } = {}) {
       { settings: { 'boundaries/root-path': root } },
     ],
   });
-  const files = listFiles(root).filter((file) => LINTED_FILE.test(file));
+  // A fixture root's prisma/generated/** is a stand-in for the git-ignored generated client: an import target that
+  // gives the file its `prisma-generated` category (D-ARCH-103), globally ignored like the real folder, so not linted.
+  const files = listFiles(root).filter((file) => LINTED_FILE.test(file) && !STAND_IN.test(toKey(file)));
   const results = await eslint.lintFiles(files);
   return Object.fromEntries(
     results.map((result) => [
@@ -258,6 +262,18 @@ const REPO_PROBES = {
   // PR21-SEC-09 / R2-n1: a `..` traversal after apps/api/src/ leaves apps/api, so the ignore must not apply.
   'tests/api/lint-probe-bad-api-traversal.api.test.ts':
     "import { AppError } from '../../apps/api/src/../../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
+  // D-ARCH-103 (2): the workspace specifier @platform/prisma/client is classified by the generated file it resolves to
+  // (prisma/generated/**, present after `npm run db:generate`): a value only in platform/db, prisma/, tools/db, tests.
+  'apps/api/src/modules/orders/repository/lint-probe-bad-prisma-value.ts':
+    "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (): unknown => Prisma;\n",
+  'apps/api/src/modules/orders/repository/lint-probe-ok-prisma-type.ts':
+    "import type { Prisma } from '@platform/prisma/client';\n\nexport type Probe = Prisma.TransactionClient;\n",
+  'apps/api/src/modules/orders/service/lint-probe-bad-prisma-type.ts':
+    "import type { Prisma } from '@platform/prisma/client';\n\nexport type Probe = Prisma.TransactionClient;\n",
+  'apps/api/src/platform/db/lint-probe-ok-prisma-value.ts':
+    "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
+  'apps/worker/src/jobs/lint-probe-bad-prisma-value.ts':
+    "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
 };
 
 /** @returns {Promise<Report>} */

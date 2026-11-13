@@ -266,7 +266,8 @@ const BOUNDARIES_FILES = [
   { pattern: DB_PLATFORM, category: 'db-platform' },
   // The folder itself (without the planned Prisma files below): the only importers of the root client.
   { pattern: DB_PLATFORM, category: 'db-platform-core' },
-  { pattern: 'apps/*/src/platform/db/client.ts', category: 'db-root-client' },
+  // The root client factory and the one value importer of the generated client (D-ARCH-103 (3)).
+  { pattern: ['apps/*/src/platform/db/client.ts', 'apps/*/src/platform/db/generated.ts'], category: 'db-root-client' },
   { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
   { pattern: 'prisma/tests/**', category: 'prisma-tests' },
   // The seed framework (TASK-023): prisma/tests/seed exercises it (D-ORCH-015 reconciliation, PR #13 code review m6).
@@ -300,6 +301,10 @@ const DATABASE_CODE = { file: { categories: { anyOf: ['repository', 'db-platform
  * files, not repositories), prisma/, tools/db and tests (PR2-SEC-05 addendum, PR11-SEC-05).
  */
 const SQL_DRIVER_CODE = { file: { categories: { anyOf: ['db-platform-core', 'prisma', 'tools-db', 'test'] } } };
+/** Code that may import the generated Prisma client as a value (D-ARCH-103 (2)); the same set as the SQL driver. */
+const PRISMA_GENERATED_VALUE_CODE = SQL_DRIVER_CODE;
+const PRISMA_GENERATED_VALUE_MESSAGE =
+  'the generated Prisma client (@platform/prisma/client) is a value only in apps/*/src/platform/db (through platform/db/generated.ts), prisma/, tools/db and tests: repositories and the planned stores use import type, services and other code import nothing from it (D-ARCH-103, ADR-0003 amendment 2026-11-13).';
 const EXPRESS_PACKAGES = ['express', 'express-serve-static-core', '@types/express', '@types/express-serve-static-core'];
 const NOT_SAME_MODULE = '!{{ from.file.captured.module }}';
 const NOT_SAME_APP = '!{{ from.file.captured.app }}';
@@ -377,6 +382,15 @@ const BOUNDARIES_POLICIES = [
     message: 'only repositories import Prisma: go through a repository or the tenant transaction handle (ADR-0003).',
   },
   { from: DATABASE_CODE, allow: PRISMA_TARGETS.map((to) => ({ to })) },
+  // --- The generated client (`@platform/prisma/client`, classified by the file it resolves to: prisma/generated/**)
+  //     as a VALUE: the database platform core, prisma/, tools/db and tests only (D-ARCH-103 (2), ADR-0003 amendment
+  //     2026-11-13). Repositories and the two planned stores keep type-only imports (`import type`), allowed above.
+  //     Selected by file category: a `module.source` selector matches nothing for a workspace specifier.
+  {
+    disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
+    message: PRISMA_GENERATED_VALUE_MESSAGE,
+  },
+  { from: PRISMA_GENERATED_VALUE_CODE, allow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } } },
   {
     disallow: SQL_DRIVER_TARGETS.map((to) => ({ to })),
     message:
@@ -390,7 +404,7 @@ const BOUNDARIES_POLICIES = [
   {
     disallow: { to: toLayer('db-root-client') },
     message:
-      'the root database client (platform/db/client.ts) is private to apps/*/src/platform/db: use withTenantTx / TenantDb (ADR-0005 am. 10 item 2).',
+      'the root database client (platform/db/client.ts) is private to apps/*/src/platform/db, and so is the generated client module (platform/db/generated.ts): use withTenantTx / TenantDb and the types of platform/db/index.ts (ADR-0005 am. 10 item 2, D-ARCH-103).',
   },
   { from: { file: { categories: { anyOf: ['db-platform-core', 'prisma-tests'] } } }, allow: { to: toLayer('db-root-client') } },
 

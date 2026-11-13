@@ -7,6 +7,9 @@
  * PR11-SEC-09 item 1; no `db-root-client` boundary carve-out).
  */
 export { type AffectedRows, expectAffected } from './expect-affected.js';
+// Types only (D-ARCH-103 (3)): the generated client's value exports (PrismaClient, Prisma.sql, Prisma.raw,
+// Prisma.Decimal) have no path out of platform/db.
+export type { AppDb, AppTransactionClient, Prisma } from './generated.js';
 export {
   type ExtendableClient,
   type ServerColumn,
