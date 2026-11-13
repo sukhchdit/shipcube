@@ -23,6 +23,9 @@ async function listen(handler: RequestListener): Promise<number> {
   return (server.address() as AddressInfo).port;
 }
 
+// The timeout cases wait out the 2 s probe budget; slack for a loaded host (lane B runs suites in parallel).
+jest.setTimeout(20_000);
+
 describe('api healthcheck probe (TASK-014)', () => {
   it('targets the readiness route of the api router with a 2 s budget and port 3000 by default', () => {
     expect(READY_PATH).toBe(HEALTH_READY_PATH);
