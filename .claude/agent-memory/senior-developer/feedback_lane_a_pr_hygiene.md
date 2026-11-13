@@ -19,3 +19,7 @@ Before pushing any commit to a PR branch, run gitleaks locally on the new commit
 - The TASK-006 health tests (`apps/api/.../health/router.test.ts`, `apps/worker/.../health/server.test.ts`) hit the 5 s Jest timeout once under host load. A re-run passed.
 
 Related: [[merge-main-pass]], [[p5-dispatch]]
+
+**Gitleaks false green (2026-11-13):** inside the container, symbolic refs resolve against the COMMON `.git`, so `HEAD` is the main checkout's HEAD. `origin/main..HEAD` therefore scanned "0 commits" with exit 0. Always pass full 40-character SHAs (a mistyped short SHA also gives 0 commits), and check that "N commits scanned" equals `git rev-list --first-parent --count base..head`.
+
+**docker.lock protocol drift:** the orchestrator now holds `wave0/docker.lock` as a FILE whose content is `orchestrator`, not as a directory. A `trap rmdir` can remove another holder's directory lock if the lock was re-taken while yours was held. Check the lock with `ls -la` before and after you release it.

@@ -56,6 +56,9 @@ describe('.gitignore anchoring (PR2-SEC-11, R2-m1)', () => {
     'apps/web/app/routes/uploads/route.tsx',
     'packages/pricing/src/out/a.ts',
     'tools/ci/fixtures/coverage/a.json',
+    // PR4-SEC-10: Playwright output names are anchored too.
+    'apps/api/src/modules/quotes/test-results/a.ts',
+    'packages/authz/src/playwright-report/a.ts',
   ])('tracked (source folder named like an output folder): %s', (path) => {
     expect(isGitIgnored(path)).toBe(false);
   });

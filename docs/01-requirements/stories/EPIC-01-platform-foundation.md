@@ -248,7 +248,7 @@ Feature: Coverage gate
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-001
 - **Linked REQs:** REQ-PLAT-009, REQ-PLAT-010
 - **As a** frontend developer **I want** every failure returned as RFC 9457 problem+json with a stable code **so that** clients handle errors deterministically and nothing internal leaks.
-- **Notes:** Code catalogue in DR-A26 (see US-036). 405 carries `Allow`.
+- **Notes:** Code catalogue in DR-A26 (see US-036). 405 carries `Allow` listing every method the route supports, **including OPTIONS** (RFC 9110 §15.5.6); OPTIONS on a known route answers 204 with the same `Allow` (RFC 9110 §9.3.7). Wording amended by D-063 (2026-11-13) after PR #21 code review R1-m3 / D-ORCH-023 (2): scenario 2 previously read `Allow` = "GET, HEAD". The api/README §3 line is api-designer's (D-ORCH-023).
 
 #### Acceptance criteria
 ```gherkin
@@ -268,7 +268,8 @@ Feature: Central error handler and framework error mapping
 
   Scenario: 405 includes the Allow header
     When DELETE is sent to a route that supports only GET and HEAD
-    Then the response header Allow is "GET, HEAD"
+    Then the response header Allow is "GET, HEAD, OPTIONS"
+    And OPTIONS sent to the same route returns 204 with no body and the same Allow header
 
   Scenario: 5xx never leaks internals
     Given the repository throws a database error containing SQL text and a thrown string "secret-token-123"
@@ -291,6 +292,7 @@ Feature: Central error handler and framework error mapping
 - **Linked REQs:** REQ-PLAT-011, REQ-PLAT-012
 - **As an** operator **I want** one correlation ID on every log line, audit entry, outbox event, job and carrier call, with secrets redacted **so that** I can trace a booking end to end without exposing sensitive data.
 - **Notes:** Inbound pattern `^[A-Za-z0-9-]{8,64}$`. Request logs record method, route template, status, duration; never bodies. Emails masked to `a***@domain`.
+- **Delivery split (D-062, 2026-11-13):** TASK-010 delivers scenarios 1, 2, 4, 5, 6 and the api/worker log-line hops of scenario 3 (PR #20). The remaining hops of scenario 3 ("One ID is visible end to end for the M0 booking") are owned by the component that sets the value: audit entries → TASK-029; outbox event (and its copy into the enqueued job) → TASK-043; job payload v2 → worker logger binding → TASK-035; Mock carrier call → TASK-079; the end-to-end assertion with `demo-booking-0001` → TASK-092, which completes the story. Priority, milestone and DC tag unchanged; the story reads as Implemented only when all six tasks are merged.
 
 #### Acceptance criteria
 Permission path: not applicable — infrastructure behaviour valid for anonymous and authenticated callers alike; a second negative scenario is included.
