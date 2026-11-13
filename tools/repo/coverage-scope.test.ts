@@ -6,7 +6,8 @@
  * workspaces hold test code only. Matching uses `globsToMatcher` from jest-util, the function @jest/transform applies
  * to decide which files to instrument, so this test and Jest cannot disagree about glob semantics.
  */
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
@@ -80,7 +81,8 @@ describe('coverage scope covers every workspace source root (TEST-STRATEGY §8, 
     'apps/api/src/modules/quotes/tests/builders.ts',
     'packages/carriers/src/fixtures/dhl-rate.ts',
     'packages/shared/src/types.d.ts',
-    'packages/carriers/src/dhl/client.generated.ts',
+    'apps/api/src/modules/index.generated.ts',
+    'packages/shared/src/api/types.gen.ts',
     'apps/web/.react-router/types/app/+types/root.ts',
     'prisma/generated/client.ts',
     'apps/web/vite.config.ts',
@@ -88,5 +90,50 @@ describe('coverage scope covers every workspace source root (TEST-STRATEGY §8, 
     'tools/repo/structure.ts',
   ])('does not measure test, generated or config file %s', (path) => {
     expect(isMeasured(path)).toBe(false);
+  });
+});
+
+/**
+ * Structural exclusions (PR21-SEC-04): each is a test-code shape, a generated folder, or a re-export/build-time entry
+ * point with its reason in jest.config.ts. Anything else excluded from coverage must be an exact, existing path.
+ */
+const STRUCTURAL_EXCLUSIONS = new Set([
+  '!**/*.test.{ts,tsx}',
+  '!**/*.d.ts',
+  '!**/{tests,fixtures}/**',
+  '!**/.react-router/**',
+  '!prisma/generated/**',
+  '!packages/*/src/index.ts',
+  '!apps/*/app/{entry.server.tsx,routes.ts}',
+]);
+const GENERATED_SUFFIX = /\.(?:generated|gen)\.ts$/u;
+
+/** Exclusions that are neither structural nor an exact existing path (a suffix-wide pattern, a stale path). */
+const exclusionFindings = (globs: readonly string[]): string[] =>
+  globs
+    .filter((glob) => glob.startsWith('!') && !STRUCTURAL_EXCLUSIONS.has(glob))
+    .filter((glob) => GLOB_CHARS.test(glob.slice(1)) || !existsSync(join(repoRoot, ...glob.slice(1).split('/'))));
+
+describe('coverage exclusions are exact (PR21-SEC-04)', () => {
+  it('[PR21-SEC-04] every ! exclusion is structural or an exact existing path', () => {
+    expect(exclusionFindings(coverageGlobs)).toEqual([]);
+  });
+
+  it('[PR21-SEC-04] the exact generated-file exclusions equal the tracked *.generated.ts / *.gen.ts files under measured roots', () => {
+    const tracked = execFileSync('git', ['ls-files', '*.generated.ts', '*.gen.ts'], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 })
+      .split(/\r?\n/u)
+      .filter((path) => path !== '' && globsToMatcher(coverageGlobs.filter((glob) => !glob.startsWith('!')))(path));
+    const excluded = coverageGlobs.filter((glob) => glob.startsWith('!') && GENERATED_SUFFIX.test(glob)).map((glob) => glob.slice(1));
+    expect(excluded.sort()).toEqual(tracked.sort());
+    expect(tracked.filter((path) => isMeasured(path))).toEqual([]);
+  });
+
+  it('[PR21-SEC-04] mutation: a suffix-wide generated pattern or a stale exact path is reported; a hand-written *.generated.ts is measured', () => {
+    expect(exclusionFindings([...coverageGlobs, '!**/*.generated.ts'])).toEqual(['!**/*.generated.ts']);
+    expect(exclusionFindings([...coverageGlobs, '!**/*.gen.ts'])).toEqual(['!**/*.gen.ts']);
+    expect(exclusionFindings([...coverageGlobs, '!apps/api/src/modules/gone.generated.ts'])).toEqual([
+      '!apps/api/src/modules/gone.generated.ts',
+    ]);
+    expect(isMeasured('packages/carriers/src/dhl/client.generated.ts')).toBe(true);
   });
 });

@@ -1,0 +1,30 @@
+# PR25-SEC-01 (docs/05-quality/security/PR-0025-TASK-007-fu-security-review.md section 3.2): exact-fingerprint baseline
+# of the 17 historic generic-api-key hits on main (example values and one synthetic test literal; none is a credential,
+# nothing needs rotation). History cannot be rewritten (CLAUDE.md section 5), so the full-history scan needs this list.
+# Format: <commit>:<path>:<rule>:<line> (gitleaks .gitleaksignore format). Exact fingerprints only: never add a path or
+# commit allowlist to .gitleaks.toml. It deliberately is NOT named .gitleaksignore (D-TASK015-02): gitleaks auto-loads
+# <source>/.gitleaksignore, and check-workflow-policy rule gitleaksignore (PR10-SEC-01) keeps refusing such a file
+# anywhere in the tree. The gitleaks-full runner (lane B/C) extracts this file from the base or gate ref (never from a
+# PR work tree), mounts it read-only and passes --gitleaks-ignore-path, and scans the gate SHA's ancestry, not --all.
+# Lane A's range scan mounts only .git and never reads it. Security-owned via /tools/quality/ (CODEOWNERS).
+
+# 63accea: one agent-memory file and DECISIONS.md (synthetic test literal, PR13-SEC-11; scrubbed from the tree in 2e29004)
+63accea281c3ed383b116fe96b7d3f6233c8c145:.claude/agent-memory/senior-developer/feedback_lane_a_pr_hygiene.md:generic-api-key:10
+63accea281c3ed383b116fe96b7d3f6233c8c145:docs/sdlc/DECISIONS.md:generic-api-key:1325
+
+# b8f805f (P3 architecture commit) and d5cdfa2 (P3 remediation): OpenAPI example values replaced by EXAMPLE_ markers in PR #21
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:197
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:381
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:461
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:486
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:590
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:906
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:1096
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:1192
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:3726
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:6309
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:7525
+d5cdfa2877011a9c781dff375f2e8575b54cc603:docs/03-architecture/api/openapi.yaml:generic-api-key:7665
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:7673
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:12235
+b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:15883

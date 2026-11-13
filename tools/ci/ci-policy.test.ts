@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../test-support/process.js';
-import { checkWorkflow } from './check-workflow-policy.mjs';
+import { checkWorkflow, laneBEvidenceProblems } from './check-workflow-policy.mjs';
 import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 import type { YamlMap, YamlNode } from './yaml-subset.mjs';
 
@@ -48,28 +48,9 @@ const scanIndexOf = (pattern: RegExp): number => {
   if (index < 0) throw new Error(`no scans step matches ${String(pattern)}`);
   return index;
 };
-/** The arguments both lane B verifier invocations carry (PR #23 R1-m2, R1-m3). */
+/** The arguments of the lane B verifier invocation (PR #23 R1-m2, R1-m3). */
 const LANE_B_ARGS =
   '--root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"';
-const swap = (text: string, from: string, to: string): string => text.replace(from, () => to);
-
-/**
- * Findings for the lane B step's script. `--report-only` makes the verifier exit 0 whatever it finds, so it may occur
- * exactly once, at the end of the bootstrap head-copy line, and the base-ref line is pinned in full (not by its prefix).
- */
-function laneBReportOnlyFindings(run: string): string[] {
-  const findings: string[] = [];
-  const lines = run.split('\n').map((line) => line.trim());
-  const occurrences = run.split('--report-only').length - 1;
-  if (occurrences !== 1) findings.push(`--report-only occurs ${occurrences} times, expected exactly 1`);
-  const flagged = lines.filter((line) => line.includes('--report-only'));
-  const headLine = `node "$quality/head/tools/quality/check-evidence.mjs" ${LANE_B_ARGS} --report-only`;
-  if (flagged.length !== 1 || flagged[0] !== headLine)
-    findings.push('--report-only is not only at the end of the head-copy (bootstrap) line');
-  if (!lines.includes(`node "$quality/base/tools/quality/check-evidence.mjs" ${LANE_B_ARGS}`))
-    findings.push('the base-ref line is not exactly the pinned invocation');
-  return findings;
-}
 
 const scanOrder = [/GITLEAKS_IMAGE/, /GATE_RUN_SEMGREP/, /GATE_CHECK_SECURITY_OWNED_PATHS/].map(scanIndexOf);
 
@@ -85,16 +66,48 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       indexOf(/npm ci --ignore-scripts/),
       indexOf(/npm run deps:rebuild/),
       indexOf(/npm run lint/),
+      indexOf(/^Lint must not mutate the tree/),
       indexOf(/npm run format:check/),
       indexOf(/npm run typecheck/),
       indexOf(/npm run test:unit$/m),
       indexOf(/npm run build/),
-      indexOf(/GATE_CHECK_PORCELAIN/),
+      indexOf(/^Build must not mutate the tree/),
     ];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(order[0]).toBe(2); // checkout, setup-node, then the in-lane classifier (review m5 (a): no separate job)
     expect(scanOrder).toEqual([...scanOrder].sort((a, b) => a - b));
     expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'ci-gate']);
+  });
+
+  it('[PR4-SEC-13] a porcelain gate runs straight after Lint and before Type-check, with the post-build gate command', () => {
+    const lint = indexOf(/npm run lint/);
+    const afterLint = indexOf(/^Lint must not mutate the tree/);
+    const afterBuild = indexOf(/^Build must not mutate the tree/);
+    expect(afterLint).toBe(lint + 1);
+    expect(afterLint).toBeLessThan(indexOf(/npm run typecheck/));
+    expect(str(steps[afterLint]?.run)).toBe('node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"');
+    expect(str(steps[afterLint]?.run)).toBe(str(steps[afterBuild]?.run));
+    expect(str(steps[afterLint]?.if)).toBe("env.CODE == 'true'");
+    // Mutation: dropping the post-lint step leaves the post-build gate alone, which required-gates reports.
+    const dropped = ciText.replace(/ {6}- name: Lint must not mutate the tree[^\n]*\n(?: {8}[^\n]*\n)+/u, '');
+    expect(dropped).not.toContain('Lint must not mutate the tree');
+    expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toContain(
+      'ci.yml job fast-lane must keep the porcelain after lint gate step',
+    );
+  });
+
+  it('[R1-m6] [PR #33 R1-M1] the scans job runs the openapi-breaking gate after Semgrep and before the record step (so its first real run is not hidden by a missing record), unconditionally, from the base-ref tool set', () => {
+    const index = scanIndexOf(/GATE_OPENAPI_BREAKING/);
+    expect(index).toBe(scanIndexOf(/GATE_RUN_SEMGREP/) + 1);
+    expect(index + 1).toBe(scanIndexOf(/GATE_CHECK_SECURITY_OWNED_PATHS/));
+    expect(index + 2).toBe(scanSteps.length);
+    expect(scanSteps[index]?.if).toBeUndefined();
+    expect(scanSteps[index]?.env).toBeUndefined();
+    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking; do/u);
+    const dropped = ciText.replace(/--image "\$OASDIFF_IMAGE"/u, '');
+    expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
+      expect.stringContaining('ci.yml openapi-breaking gate step: the run: must be exactly'),
+    ]);
   });
 
   it('AT-US-005-01 / PR10-SEC-02: licences, registry signatures and the advisory audit run right after the install, before deps:rebuild and any head code', () => {
@@ -157,7 +170,17 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       unknown
     >;
     expect(Object.keys(baseConfig).sort()).toEqual(
-      ['cache', 'displayName', 'moduleNameMapper', 'rootDir', 'roots', 'testEnvironment', 'testMatch', 'transform'].sort(),
+      [
+        'cache',
+        'displayName',
+        'moduleNameMapper',
+        'modulePathIgnorePatterns',
+        'rootDir',
+        'roots',
+        'testEnvironment',
+        'testMatch',
+        'transform',
+      ].sort(),
     );
     expect(baseConfig).toMatchObject({ rootDir: '../..', testMatch: ['**/tools/lint/negative-fixtures.test.ts'], cache: false });
     // Only the base-ref step selects the mode: not the workflow, the job, another step, a script or the Jest config.
@@ -277,47 +300,19 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
     expect(ciText).toContain('npm exec --no -- commitlint');
   });
 
-  it('SEC-TC-48 (CI part, TASK-011): lane B evidence is verified by the base-ref tools/quality after npm ci and before any head code; the head copy only reports (bootstrap)', () => {
+  it('SEC-TC-48 (CI part, TASK-011; PR23-SEC-06): lane B evidence is verified only by the base-ref tools/quality, after npm ci and before any head code', () => {
     const index = indexOf(/Lane B evidence \(quality:check-evidence\)/);
     const run = str(steps[index]?.run);
     expect(steps[index]?.if).toBeUndefined();
-    expect(run).toContain('git archive "$RANGE_BASE" tools/quality');
-    expect(laneBReportOnlyFindings(run)).toEqual([]);
-    expect(run).not.toContain('|| true');
+    expect(steps[index]?.env).toBeUndefined();
+    // The R2-n3 tripwire now lives in the base-ref checker (laneBEvidenceProblems); this head test only confirms it holds.
+    expect(laneBEvidenceProblems(run)).toEqual([]);
+    expect(run).toContain('git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"');
+    expect(run).toContain(`node "$quality/base/tools/quality/check-evidence.mjs" ${LANE_B_ARGS}`);
+    expect(run).not.toMatch(/--report-only|\$quality\/head|\|\| true/);
+    expect(run.match(/--event "\$GITHUB_EVENT_NAME"/g)).toHaveLength(1);
     expect(index).toBeGreaterThan(indexOf(/npm ci --ignore-scripts/));
     expect(index).toBeLessThan(indexOf(/npm run deps:rebuild/));
-  });
-
-  it('SEC-TC-48 (CI part, PR #23 R1-m2): `--report-only` occurs exactly once in the lane B step, at the end of the bootstrap head-copy line; the base-ref line is pinned in full (mutation-proof)', () => {
-    const run = str(steps[indexOf(/Lane B evidence \(quality:check-evidence\)/)]?.run);
-    const baseLine = `node "$quality/base/tools/quality/check-evidence.mjs" ${LANE_B_ARGS}`;
-    const headLine = `node "$quality/head/tools/quality/check-evidence.mjs" ${LANE_B_ARGS} --report-only`;
-    expect(run).toContain(baseLine);
-    expect(run).toContain(headLine);
-    const mutations: Record<string, string> = {
-      'report-only appended to the base-ref line': swap(run, baseLine, `${baseLine} --report-only`),
-      'report-only in front of the base-ref arguments': swap(run, baseLine, baseLine.replace(' --root', ' --report-only --root')),
-      'report-only spelled with a value': swap(run, baseLine, `${baseLine} --report-only=true`),
-      'report-only in a comment or echo': swap(run, 'exit 0\n', 'exit 0 # --report-only\n'),
-      'report-only dropped from the head-copy line': swap(run, headLine, headLine.replace(' --report-only', '')),
-      'report-only twice on the head-copy line': swap(run, headLine, `${headLine} --report-only`),
-      'base-ref line made non-fatal': swap(run, baseLine, `${baseLine} || true`),
-      'event hard-coded on the base-ref line': swap(run, baseLine, baseLine.replace('"$GITHUB_EVENT_NAME"', 'push')),
-      'base-ref line run from the head copy': swap(run, baseLine, baseLine.replace('$quality/base/', '$quality/head/')),
-    };
-    for (const [name, mutated] of Object.entries(mutations)) {
-      expect({ name, changed: mutated !== run, findings: laneBReportOnlyFindings(mutated).length > 0 }).toEqual({
-        name,
-        changed: true,
-        findings: true,
-      });
-    }
-  });
-
-  it('SEC-TC-48 (CI part, PR #23 R1-m3): the verifier is told the event name, so a push to main skips it (the squash commit has no ancestor evidence)', () => {
-    const run = str(steps[indexOf(/Lane B evidence \(quality:check-evidence\)/)]?.run);
-    expect(run.match(/--event "\$GITHUB_EVENT_NAME"/g)).toHaveLength(2);
-    expect(steps[indexOf(/Lane B evidence \(quality:check-evidence\)/)]?.env).toBeUndefined();
   });
 
   it('D-TASK007-08: commitlint gates the PR title (the squash header) via env, never interpolated into the script; a commit-msg hook lints every local commit', () => {

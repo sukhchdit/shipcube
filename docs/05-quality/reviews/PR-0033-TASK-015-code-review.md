@@ -106,3 +106,99 @@ Survivors: `heavy-wiring` (R1-m1) and `openapi-breaking ... || true` (R1-m2). Th
 ## 9. Handoff
 
 Verdict CHANGES_REQUESTED: 3 MAJOR, 5 MINOR, 3 NIT. The probe scripts and mutation harness are in the session scratchpad (`review/PR-33-cr`); nothing was committed.
+
+
+---
+
+## Round 2 (head d3a46a2)
+
+| Field | Value |
+|---|---|
+| Round | 2 (delta after fix cycle 1) |
+| Branch / head | `feat/TASK-015-spk-07-lane-c-full` @ `d3a46a20cc7c5c0f001f36b9d3886bb9c077a769` |
+| Delta reviewed | `70196e8` (exact pins, ASCII-only), `beaba11` (oasdiff modes, smoke, merged strict-semver tags, Accepted records), `63e2b6e` (money-path scopes, heavy wiring test), `e02c4f9` (merge main), `d3a46a2` (evidence) |
+| Date | 2026-11-13 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: All three r1 MAJORs are fixed and each fix is mutation-proven (31 of 32 source mutants killed; the one
+  survivor is an equivalent mutant). The oasdiff container now has a per-PR Linux proof (lane A run 43440981589 ran
+  the smoke on ubuntu-24.04: 0 changes, PASS), a sanctioned break stays sanctioned until the next tag while a new
+  break fails, and the D-QA-003 money paths are gated (inactive until source exists, then fail closed). The merge of
+  main is a pure union. Open items are one MINOR (GATE_* via $GITHUB_ENV is still unpoliced, an overclaim in the new
+  gate-env wording) and NITs, none blocking.
+```
+
+### R2.1 What I verified myself, and what I did not
+
+Done on a `git archive` extract of `d3a46a2` (node_modules junction to the TASK-015 worktree, then `git init` + one base commit for the git-dependent suites). The TASK-015 worktree was not written to; extract and junction removed afterwards, worktree `git status` clean, node_modules count 748 before and after, no `C:\node_modules`, probe temp repos removed.
+
+- Targeted Jest, unit project, `tools/ci` + `tools/quality` + `tools/repo`: 37 suites, 1011 tests. 36 suites green (981 tests). `check-evidence.test.ts` failed 30 tests with `No space left on device` (the host disk was at 100 % at that moment, error text is git `copy-fd` / `unable to create temporary file`), not a code failure; I re-ran the real check instead: `check-evidence --base 2957609 --head d3a46a2 --event pull_request` (reads git only) = `run 20261113T1409Z_e02c4f9 accepted`, PASS. The other two suites that failed on the first sweep (`gitignore`, `check-security-owned-paths` record-format tripwire) failed only because the bare archive had no git root / no `docs/05-quality/security` records; both are green after `git init`.
+- Prettier `--check` on the 10 changed tools files: clean.
+- Probes (scripts in the session scratchpad `review/PR-33-cr2`): `probe-oas2.mjs` (real temp git repos, fake Docker runner), `probe-wf2.mjs` (in-memory edits of the real ci.yml through `checkWorkflow(..., {requiredGates:true})`), `probe-cov.mjs` (`evaluateCoverage` over a temp tree), `mutate3.mjs` (32 source mutants against the targeted suites).
+- `gh`: run 43440981589 is on the exact head. `fast-lane` success with no skipped step; `scans` red only at "Security-owned paths need a review record" (expected until a PR-0033 record names the head). The `openapi-breaking` step ran for real this time: `smoke: oasdiff compared the head contract with itself: 0 change(s)` then `PASS: no release tag`.
+- Merge `e02c4f9`: `git merge-tree --write-tree 63e2b6e 34505b0` gives tree `c449bd3`, `git diff --stat <tree> e02c4f9` empty, so the merge commit is byte-identical to a clean re-merge, no hand resolution. The only file changed on both sides is `tools/lint/negative-fixtures.test.ts` (merged textually). main has moved to `2957609` since, by docs and agent-memory files only (no non-docs delta), so no further merge is needed for evidence.
+
+Not re-run (evidence relied on): Docker (oasdiff int test; the Linux proof is lane A's smoke), `test:integration`, `test:api`, `test:coverage`, full `lint`/`typecheck`/`build` (fast-lane on the exact head ran all of them green).
+
+### R2.2 Round 1 findings, closure
+
+| ID | Result | Evidence |
+|---|---|---|
+| R1-M1 oasdiff Linux perms | **Closed** | `writeSpecsDir`: folder 0755, files 0644 (explicit `chmod`, injectable, test observes the calls since Windows stores no POSIX bits); mount unchanged (read-only, private temp dir). No-tag branch now runs a smoke comparison of the head contract with itself, fail-closed (non-zero exit or any ERR change is an error). Linux proof: lane A run 43440981589, ubuntu-24.04, smoke 0 changes. Mutants killed: dir chmod off, file chmod off, dir mode 0700, smoke off, smoke-error ignored. |
+| R1-M2 (a) persistence | **Closed** | Probe, tag `v0.1.0-m0`: PR1 break + Accepted ADR = pass; PR2 (README only, after PR1 merged) = **pass**; PR3 new break `deleteThing` with no record = **fail**. Records are searched `tag..head`. Mutant (base..head) killed. |
+| R1-M2 (b) tag choice | **Closed** | Listing `v0.1.0-m0`, `v0.1.0-rc1`, `vnext`, `v0.1.0-m0.5`, `v0.1.0+build` selects `v0.1.0-rc1`; `compareReleaseTags` ordering checked (rc1 > m0, release > rc, rc.10 > rc.9, 0.1.10 > 0.1.9, numeric < alphanumeric). A tag `v9.9.9` that exists only on a PR branch is ignored (`git tag --merged <base>`; chosen tag stays `v0.1.0-rc1`). Mutants killed: no `--merged`, no strict-semver filter. |
+| R1-M2 (c) substring | **Closed** | `getThingList` does not cover `getThing` (`deleteThingList` does not cover `deleteThing`); `GET /things` is not covered by `GET /things/{id}/x`; `DELETE /things/{id}` exact and `` `deleteThing`. `` (punctuation after) are covered. Mutant (`text.includes`) killed. |
+| Accepted status (new in fix cycle) | **Closed** | `Proposed`, `Superseded by ...`, `Draft`, `Rejected`, no status line, and "Proposed first, Accepted later" all fail; `Accepted` and `Accepted (amended)` pass. First status line wins. Mutant (accept anything) killed. |
+| R1-M3 coverage scopes | **Closed** | Scopes `apps/api/src/modules/payments/service`, `packages/shared/src/money`, `apps/api/src/modules/ledger` at 95/95, `required:false`, source root = the scope itself; `packages/ledger` kept (D-TASK015-14, literal AT-US-006-03 path). Probe over a temp tree: nothing present = inactive/pass; test-only or `tests/` folder = still inactive; source without a summary entry = error (fail closed); 94/100 lines fails, 95/100 lines with 94/100 branches fails, 95/95 passes; sibling `servicex/` does not leak into the scope; a `money/index.ts` barrel counts as measurable source (correct: Jest only excludes `packages/*/src/index.ts`); backslash keys handled. Mutants killed: threshold 90 on payments and on money branches, wrong source root on each of the three scopes, measurable probe off. `diff-coverage` reads the same constant (test added). |
+| R1-m1 heavy wiring | **Closed** | New end-to-end heavy test with a stub Jest (84 % lines fails the suite by case name `coverage gate: overall lines`, 90/80 passes with the inactive cases listed). The r1 survivor (`heavy-wiring`, line 703 deleted) is now **killed**. The `required_cases` route was declined with a reason (case names change when a scope activates) and moved to the 015-B hook (D-TASK015-19). Accepted. |
+| R1-m2 pin strength | **Closed (one residual, R2-m1)** | `openapi-breaking`, `porcelain after lint`, `porcelain` (after build) are held to one exact ASCII command line with `env: {}`; each porcelain gate must directly follow the step it guards (`after`); `OASDIFF_IMAGE` must equal the script constant at workflow level and may not be set at job level; `--image` is accepted only when it equals the script's constant; new repository-wide `gate-env` rule (see R2.3); ci.yml is ASCII outside comment lines; `commandLines` trims only ASCII blanks. Every form I used in r1 is now caught (R2.3 table). |
+| R1-m3 deferral lists | **Closed** | PR body "Split (D-TASK015-08) and every deferred item": 015-B lists the merged-coverage hook (R1-m4, due before TASK-025 per D-ORCH-047, split into its own devops PR) and the RustFS digest line (due before the Wave-0-exit activation PR); 015-C lists PR31-SEC-01 and PR31-SEC-03, PR31-SEC-05 (named "required"), PR #31 N1 and N2, PR31-SEC-02, PR #31 code review M1/M3 (M2 before the tag), D-ORCH-038 `temp-cleanup` (Wave-0-exit deadline) and R1-m5. Deadlines are consistent with D-ARCH-098 (5)(6). |
+| R1-m4 merged coverage | **Closed as a named deliverable** | D-TASK015-19 and D-ORCH-047 (2): hook split out of 015-B, due before TASK-025 merges. |
+| R1-m5 npm-exec expansions | Deferred to 015-C by name (PR body); acceptable, not a regression. |
+| R1-n1..n3 | Unchanged, NITs. |
+
+### R2.3 Pin and policy mutations (in-memory edits of the real ci.yml, base-ref policy)
+
+All of the following are **caught** (`required-gates`, `gate-env`, `continue-on-error`, `yaml-subset` or workflow-env rule): openapi step with `|| true`, `; true`, `true || node`, `>/dev/null 2>&1`, `--base "$RANGE_HEAD"`, an extra argument (`--json`), an extra command line, step `env: GATE_OPENAPI_BREAKING`, step `env: OASDIFF_IMAGE`, step `env: GATES_DIR`, `continue-on-error`, `if: false`, a trailing NBSP, a typographic quote in the line; workflow `OASDIFF_IMAGE` changed or removed, job-level `OASDIFF_IMAGE` (YAML subset duplicate key / job rule), workflow `GATES_DIR` / `GATE_CHECK_PORCELAIN`, job `GATE_OPENAPI_BREAKING`; porcelain-after-lint with `|| true`, step env, extra line, no `--summary`, moved before Lint, a step inserted between Lint and the porcelain step; porcelain-after-build with `|| true`, `; true`, NBSP, moved before Build, moved to the end of the job; non-ASCII in an env value and in a trailing comment on a key line. A non-ASCII character in a pure comment line is allowed by design.
+
+Source mutants (jest, targeted suites): 31 killed, 1 survivor.
+- Killed: `heavy-wiring`; oasdiff: adr-from-base, no `--merged`, no tag filter, `namesKey` = includes, accepted-always, dir chmod off, file chmod off, dir mode 0700, smoke off, smoke errors ignored, image check off, `clean` identity; workflow policy: `after` off (lint and build), `gate-env` off, exact-line check off, `env: {}` off (openapi and porcelain), image pin off, job image off, raw-line ASCII scan off, `commandLines` Unicode blanks, `commandLines` trimEnd; coverage: payments 90, money branches 90, three wrong source roots, measurable probe off.
+- Survivor `wf-ascii-exact-off` (removing the `nonAsciiProblem` call inside `exactRunProblems`) is an **equivalent mutant**: the exact comparison against an ASCII expected line already fails on any non-ASCII byte, and the ci.yml-wide raw-line scan (mutant killed) is the real guard. No action.
+
+### R2.4 Findings (round 2)
+
+| ID | Sev | Where | Problem | Fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `check-workflow-policy.mjs` `envEntryFindings` rule `gate-env`; D-TASK015-17; header comment | The new rule polices only `env:` keys. The wording ("gate locations come only from the base-ref gate-tooling steps through $GITHUB_ENV", "a head copy cannot be pointed at") overclaims: a head step that writes `GATE_OPENAPI_BREAKING=./evil.mjs` (or `GATES_DIR`, `GATE_CHECK_PORCELAIN`) to `$GITHUB_ENV` between the tooling step and the gate passes the policy (probe: "step writes GATE_OPENAPI_BREAKING to GITHUB_ENV (before)" = PASSES). Same class as the r1 step-env form, one level more indirect. Backstops: `.github/` is CODEOWNED and the security-owned-paths record applies, so this is a tripwire gap, not a hole. | Route to 015-C with the PR17-SEC-07/-08 remainder: refuse a `run:` that writes a `GATE_*`/`GATES_*` name to `GITHUB_ENV`/`GITHUB_PATH` outside the two named tooling steps, plus a one-line mutation test. Until then soften the header and D-TASK015-17 wording to "env: entries". |
+| R2-n1 | NIT | `check-workflow-policy.mjs` `requiredGateFindings` (workflow `OASDIFF_IMAGE` = base script constant) and `checkOpenapiBreaking` (`image !== OASDIFF_IMAGE`) | Both read the **base-ref** constant, so an oasdiff image bump (ci.yml and script changed in one PR) is red on its own PR in `scans`, and a script-first PR leaves main red until ci.yml follows. Not wrong (the base governs), but the first routine bump will look like a broken gate. By reading, not probed. | Document the bump procedure in the `openapi-breaking.mjs` header or `tools/ci` README: either a two-step with a temporary two-element allow-list constant, or the reviewed bootstrap exception used for other pins. |
+| R2-n2 | NIT | `openapi-breaking.mjs` `checkOpenapiBreaking` | The baseline is a tag merged into the **base**, compared with the PR **head**, which is the PR head SHA (not the merge ref). A PR branch created before the latest tag and not updated sees the tag's own changes as removed in head (possible false ERR, for example a removed operation). Only affects stale branches across a release. | Note in api/README section 18 (merge main first), or compare against `git merge-tree` of base and head. No change needed now. |
+| R2-n3 | NIT | `namesKey` | The lookbehind/lookahead also reject a key directly followed by `}`, `/` or `-` (for example `{getThing}` or a hyphen right after the id), so such a prose form is "uncovered". Fails closed, so harmless; the author can reword the ADR. | none |
+| R2-n4 | NIT | `docs/03-architecture/api/README.md` section 18 item 3 | Says "needs a superseding ADR" but not that the record must be Accepted or that it persists until the next tag; the rule lives in the script header and D-TASK015-16. Architect-owned. | Add one sentence in the next architect pass. |
+
+No BLOCKER and no MAJOR open.
+
+### R2.5 Rulings
+
+- **Smoke-in-no-tag branch (D-TASK015-15):** accepted. It also catches the case the permission fix cannot: a changed image, a broken pull, a parser regression. Cost is one container run per PR.
+- **Step order (before the record step):** accepted; the result is visible even when the record step is red, as shown by run 43440981589 (both lines printed while `scans` was red on the record).
+- **`packages/ledger` kept (D-TASK015-14):** accepted; one inactive case, justified by the literal AT-US-006-03 path.
+- **Heavy test instead of `required_cases` (D-TASK015-19):** accepted with the 015-B/hook checkpoint recorded; the stable `overall` names should go into `required_cases` then (PR33-SEC-06).
+- **Evidence:** run `20261113T1409Z_e02c4f9` is on an ancestor of the head, differs from the head by the evidence files only, and `check-evidence` accepts it. main has moved by docs only since.
+
+### R2.6 Security flags for security-analyst (round 2)
+
+1. R2-m1: `$GITHUB_ENV` writes of gate locations from a non-tooling step are still unpoliced (tripwire gap, CODEOWNED backstop).
+2. R1 flag 1 (container hardening): confirm the 0755/0644 modes do not widen the mount: it is still read-only, `--network none`, `--read-only`, `--cap-drop ALL`, no-new-privileges, uid 65534, per-run private temp dir under the runner's temp root (the directory is now world-traversable on a shared runner, but hosted runners are single-tenant and the files are public repo contract text).
+3. Record forgeability remains (an ADR the PR itself adds); the script header states it as a residual for 015-C (PR33-SEC-03 (iii)).
+4. The PR-0033 security record must name `d3a46a2` (or the final head); `scans` is red only on that step.
+
+### R2.7 Merge conditions
+
+1. Security record `PR-0033-*` naming the final head with a PASS-class verdict, committed so that `scans` (record step) goes green on that exact head. If any further code or workflow commit lands, fresh lane B evidence on an ancestor is needed (`check-evidence` staleness rule); a docs-only commit does not.
+2. Squash merge with a Conventional Commits title; orchestrator updates D-TASK015-08 / D-ORCH-043 deferral lists with R2-m1 (015-C) and R2-n1 (bump procedure note).
+3. After merge, the first PR to run after the `v0.1.0-m0` tag is the first real tag-path execution (oasdiff with two different files); the mount and parse path is already proven by the smoke.
+
+### R2.8 Handoff
+
+Verdict **APPROVED_WITH_NITS**: 0 BLOCKER, 0 MAJOR, 1 MINOR (R2-m1), 4 NIT. Probe and mutation scripts are in the session scratchpad (`review/PR-33-cr2`); nothing was committed.
