@@ -222,3 +222,11 @@ Round 2 of a spike PR (PR #6 r2):
 - **Merges of main into DECISIONS.md** can insert a block between another entry's lines (adjacent-append auto-merge). Diff the entry headings vs main.
 
 **Lane A skip trap (PR #30 r2):** when `Lane B evidence` fails early in fast-lane, every later step (lint, format, typecheck, unit, build) is SKIPPED though the job summary looks "mostly green". Check step conclusions with `gh run view --json jobs`, never trust "scans passed". Also verify claims like "docs-only merge delta" with `git diff --name-only <pre-merge> <merge>`: PR #28's tools/quality came in under that label.
+
+**Pipeline/skeleton PRs (PR #32, 2026-11-13).**
+- **Stub slots that pass through fail open.** Check that each stub refuses at MOUNT time (it gets the descriptor) any route it cannot honour, e.g. audit action != NONE or idempotency required. Prove it with a tsx probe over the real createApp.
+- **A "descriptor-only" claim needs a brand.** Typed descriptors can be spread-forged (`{...defineRoute(x), transaction:'none'}`). Probe mountRoutes with a spread; ask for a WeakSet brand.
+- **Lexical lint rules vs callbacks passed by reference.** If the only `withTenantTx` call passes a function reference, the rule guards nothing. Lint-probe the real handler shape (`defineRoute({handler})`).
+- **Security headers set by an early slot can be overridden by a late `send()`** that applies handler headers. Also check that the test helper and the app use the SAME "authenticated" predicate (x-permission vs security schemes).
+- **RegExp mount fixes keyed on captured params** miss `(?:a|b)`, character classes and top-level `|`. Probe with real HTTP.
+- **Sheet folds land on main while a PR is in flight.** Diff the sheet on main (and `git log -S` the line) against the PR body's "not done" list.
