@@ -17,8 +17,9 @@ import { buildProblem, DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanc
 export type ErrorLogFields = Readonly<Record<string, string | number | boolean>>;
 
 /**
- * Minimal logger seam until Pino arrives (TASK-010). `error` receives the raw thrown value as a separate argument:
- * a Pino adapter serialises it with redaction; the interim runtime log ignores it, so nothing unredacted is written.
+ * The logger seam of the problem handler (the platform logger, TASK-010, satisfies it). `error` receives the raw thrown
+ * value as a separate argument, which the logger serialises into `err` (database errors as { name, code, originalCode,
+ * kind } only; other errors with redacted message and stack, AT-US-007-03).
  */
 export interface ErrorLogger {
   error(event: string, fields?: ErrorLogFields, thrown?: unknown): void;

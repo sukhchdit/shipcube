@@ -24,7 +24,7 @@ const unusedProbe = {
   draining: false,
 };
 
-const silentLogger = { info: () => undefined, error: () => undefined };
+const silentLogger = { info: () => undefined, debug: () => undefined, error: () => undefined };
 
 function expectFunction(value: unknown, name: string): (...args: never[]) => unknown {
   if (typeof value !== 'function') throw new Error(`apps/api: ${name} is not a function`);

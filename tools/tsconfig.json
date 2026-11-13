@@ -29,6 +29,7 @@
     "../apps/api/src/platform/health/checks/audit-chain.ts",
     "../apps/api/src/platform/health/checks/audit-partitions.ts",
     "../apps/api/src/platform/health/checks/catalog-reader.ts",
+    "../apps/api/src/platform/logging/security-events.ts",
     "../apps/api/src/platform/runtime/log.ts",
     "../apps/api/src/platform/runtime/readiness.ts",
     "../apps/api/src/platform/runtime/shutdown.ts"

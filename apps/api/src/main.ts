@@ -7,13 +7,25 @@ import { createApp } from './app.js';
 import { moduleRegistry } from './modules/index.generated.js';
 import { resolveApiMode } from './platform/context/api-mode.js';
 import { createHealthRouter } from './platform/health/router.js';
+import { requestLogContext } from './platform/logging/correlation.js';
 import { DocsSpecError, docsOptionsFrom, type DocsOptions } from './platform/openapi/serve.js';
-import { createRuntimeLog } from './platform/runtime/log.js';
+import { createRuntimeLog, readPackageVersion } from './platform/runtime/log.js';
+import { exitAfterFlush, installProcessErrorHandlers } from './platform/runtime/process-errors.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
 
 const { config, secrets } = await loadRuntimeConfigOrExit('api');
-const log = createRuntimeLog('api', process.stdout);
+// Redacted Pino logger (TASK-010); every line carries the request context of the request being handled, if any.
+const log = createRuntimeLog('api', process.stdout, {
+  version: readPackageVersion(new URL('../package.json', import.meta.url)),
+  level: config.APP_LOG_LEVEL,
+  context: requestLogContext,
+});
+// Every exit after a log line lets the line reach stdout first (R2-n7, R3-n1).
+const exit = exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) });
+// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06).
+installProcessErrorHandlers({ log, exit });
+// A StorageConfigError thrown here reaches the handler above as one redacted fatal line (PR30-SEC-11).
 const services = createRuntimeServices(config, 'api', log, secrets);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
@@ -24,11 +36,13 @@ try {
     modules: moduleRegistry,
     apiMode: resolveApiMode(config.APP_ENV),
     ...(docs === undefined ? {} : { docs }),
+    logger: log,
   });
 } catch (error) {
   // DOCS_ENABLED without a readable contract is a deployment error: exit like a rejected configuration.
   if (!(error instanceof DocsSpecError)) throw error;
   log.error('api.docs_unavailable', { error: error.name });
+  // A bare exit: top-level control flow needs `never` here (`app` is unassigned), and nothing else is queued yet.
   process.exit(CONFIG_EXIT_CODE);
 }
 
@@ -40,7 +54,7 @@ const server = app.listen(config.APP_PORT, (error?: Error) => {
 });
 server.on('error', (error: Error) => {
   log.error('api.listen_failed', { error: error.name });
-  process.exit(1);
+  exit(1);
 });
 
 const shutdown = createShutdown({
@@ -53,6 +67,6 @@ const shutdown = createShutdown({
   forceClose: () => server.closeAllConnections(),
   resources: services.resources,
   log,
-  exit: (code) => process.exit(code),
+  exit,
 });
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => void shutdown(signal));
