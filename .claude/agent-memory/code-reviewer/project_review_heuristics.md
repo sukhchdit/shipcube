@@ -185,3 +185,13 @@ Round 2 of a spike PR (PR #6 r2):
 - Evidence windows ordered by an attacker-controlled stamp can only deny, not forge; confirm that runs touched by the range are always evaluated.
 
 **Tripwire-on-a-security-flag pattern (PR #23 r2, good):** `swap(run, from, to)` mutations + a findings function, asserted `changed: true, findings: true` for every variant (appended, prepended, valued, in comment, dropped, doubled, `|| true`). Ask for this shape whenever a PR pins a flag that disables a gate (`--report-only`, `continue-on-error`). Always re-mutate the real file in an extract as well.
+
+**Benchmark / load-spike PRs (PR #27 SPK-04, 2026-11-13).**
+- Check the verdict against the PR's own validity rule: count valid arms per run in `summary.json` (`validity.valid`). "Structural" claims need at least one valid arm; otherwise the honest word is "not demonstrated".
+- Re-read every number the prose cites against the artefact by arm (the `docker stats` 54% was from the collapsed `off` arm, not the arm discussed). Grep the artefacts for any figure that has no source (`0.26 cores`).
+- Test the doc's mechanism with arithmetic: M/D/1 mean wait = rho*h/(2(1-rho)). A model that predicts 3 ms where 98 ms is measured means the mechanism (or the host) is not what the doc says.
+- Same configuration at two rates with a 10x worse tail at the LOWER rate = uncontrolled variable (order, DB state, host), so that arm cannot be ranked.
+- Fixed arm order + one DB across arms: the next repetition's baseline inherits the previous (possibly invalid) arm. Flag pooled mean-of-2 deltas.
+- Kept spike harness vs sheet "throwaway not merged": ask whether any CI lane executes it. SPK-03/08 precedent was `*.int.test.ts` (CI-run, named porting task). A runner needing Docker + k6 is not comparable. Cross-check open sibling PRs for deletions of files the harness reads (`gh pr view N --json files` shows deletions; `git show origin/prN:path`); fetch with `git fetch origin pull/N/head:refs/remotes/origin/prN` then delete the ref.
+- Prototype SQL reused from an earlier spike can carry design artefacts the data-model later removed (audit_entries RLS); advice derived from them (no RETURNING under RLS) must be marked prototype-specific.
+- Cheap independent checks that worked: canonicalize differential vs the installed `canonicalize` pkg (20k random, 0 diffs; lone surrogate differs), PGlite for SQL-text defect claims (use String.fromCharCode(92) in the probe; .mts for top-level await), eslint with the config block regex-removed to prove it is needed.
