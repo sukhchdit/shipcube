@@ -225,6 +225,11 @@ PR #21 (TASK-017 OpenAPI pipeline) r1 at b0ede35: CHANGES_REQUESTED (2026-11-13)
   - m6: NFR-MAINT-004 `oasdiff` unowned.
   - m7: AT-US-035-01 checked at the HTTP level only.
 - **Round 2 = delta check.** Also: the security record must name the fix head; PR #20 conflicts in app.ts, main.ts and request-context.ts; TASK-014 must ship openapi.yaml (compose `DOCS_ENABLED=true` means exit 78 without it).
+- r2 at b31483b (2026-11-13): APPROVED_WITH_NITS. M1, m1-m4, rule-7 part of m5 and N1-N7a are closed, with mutants killed. Merge bf3d1f7 (main d38500a) is a pure union; no lock delta. Routed per D-ORCH-023: supertest ban + coverage report -> TASK-020; SSE -> TASK-044; client.ts -> TASK-065; oasdiff -> TASK-015 before the v0.1.0-m0 tag; CSP render smoke incl. BaseLayout -> TASK-022.
+  - **R2-m1 MINOR (open unless fixed in-PR):** `resolveMountPath` accepts array mounts (`layer.matchers.length > 1`), optional groups (`/api/v1{/:x}`, `/api{/:v}/v1`, `{*rest}`), and skips root sub-apps (`mounted_app`). The verified fix: a single matcher, an insertion probe, and a check that matching `relative + '/' + probe` leaves `layer.path === relative`. If routed -> TASK-020; check it there.
+  - NITs: R2-n1 the eslint ignore `^(?:\.\./)+apps/api/src/` is unanchored, so a traversal passes; R2-n2 `layer.path !== relative` is a surviving mutant; R2-n3 the app.ts:6 comment; R2-n4 D-TASK017-01 (2)/(4) text is stale.
+  - **PR #20 union (whoever merges second):** PR #20's `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)` becomes unrecognised-route under the R1-M1 fix, so AT-US-034-01 fails. Move it to `api.use(routePrefix(API_PREFIX))`. Check this on the merge commit.
+  - TASK-020/048: a limiter or CORS mounted under a path fails the drift check by design. Mount it path-less or add a tested WalkOptions exclusion.
 
 PR #20 (TASK-010 logging) r1 at dae1f96: CHANGES_REQUESTED (2026-11-13). Review: `docs/05-quality/reviews/PR-0020-TASK-010-code-review.md`.
 - M1: `@platform/shared/logging` (Pino) importable from web/admin/ui/pricing with 0 lint errors (toPackage allow expands to `/**`); needs disallow + fixtures per arm (lint lock -> orchestrator ruling). M2 (docs): AT-US-008-03 PARTIAL, owners TASK-029/035/047/saga do not own it; WAVE-00:9 says US-008 completed.

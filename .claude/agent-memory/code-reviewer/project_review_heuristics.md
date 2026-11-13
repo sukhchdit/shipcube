@@ -151,6 +151,9 @@ Round 2 of a spike PR (PR #6 r2):
 - **A new framework behaviour (e.g. OPTIONS 204 + Allow) must be mirrored** in the 405 `Allow`, the contract test helper and the contract stubs. Probe the PR's own helper against the PR's own app (`api(app).options(path)`).
 - **A real-contract check with a pinned `now`** makes time-based rules (sunset passed) unable to fire on main.
 - **Ajv implements OAS 3.0 `nullable` natively**, so strict mode accepts it. A typo keyword is still rejected.
+- **"Literal mount" resolution by probe variants (PR #21 r2).** Substituting one segment rejects `/:param` and `/*rest`. It misses array mounts (router 2.x `layer.matchers` has one entry per path), optional groups (`{/:x}` in the middle or at the end; the matched `layer.path` grows), and root sub-apps (the handle is named `mounted_app`, has no stack and `slash` is true). Probe all of these with real HTTP.
+- **A new fail-closed guard can break another open PR semantically.** Run the new walker or guard against the other open PR's composition (`git show <head>:apps/api/src/app.ts`), not just `git merge-tree`. Example: PR #20's path-mounted `routePrefix` against PR #21's R1-M1 fix.
+- **ESLint `ignore` regexes for no-relative-packages** must be end-anchored or reject `..` segments. An unanchored prefix lets `apps/api/src/../../../packages/x` through. Probe with `lintText` and a filePath under the target folder; no file write is needed.
 
 **Logging / redaction PRs (PR #20, 2026-11-13):**
 - **New subpath of an allow-listed package.** `toPackage(x)` allow-lists expand to `x/**`, so a new server-only subpath (`@platform/shared/logging`) is importable by web/admin/pricing. Probe with the light lint probe plus positive controls.

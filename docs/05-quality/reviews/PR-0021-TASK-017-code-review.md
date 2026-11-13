@@ -140,3 +140,153 @@ The dispatch was memory-constrained: no `npm ci`, builds, Docker or full suites.
 - **S5.** `api-mounts.ts` loads `apps/api` sources by computed file URL at test time. The dependency is invisible to boundaries lint; it is test-only.
 - **S6.** PR10-SEC-08: the contract side is done (17 `EXAMPLE_` markers). The `.gitleaks.toml` allowlist is still value-unbounded. Two remaining secret-shaped examples (`provisioning_uri` `secret=` and `next_cursor` `eyJ…`) are left for api-designer.
 - **S7.** The contract stub server takes its host from `CONTRACT_STUB_HOST` (it could bind 0.0.0.0). It is a dev tool that serves only documented examples.
+
+
+## Round 2 (head b31483b)
+
+| Field | Value |
+|---|---|
+| Head reviewed | `b31483b989827aeef29a97c17d5c0840f2b6163b`. Previous head `b0ede35`. Commits: `bf3d1f7` (merge of `origin/main` `d38500a`), then the fixes `97a21c8`, `58aa986`, `b1e2bb1`, `b31483b` |
+| Fix-cycle comment | PR #21 issuecomment 6842037971 |
+| Reviewer | code-reviewer, 2026-11-13 |
+| CI | Lane A run 43351989787 on `b31483b`. `fast-lane` passed. `scans` failed only on "Security-owned paths need a review record" (Gitleaks and Semgrep passed). `ci-gate` failed only because of `scans`. |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1 is closed. A handler mounted under a path is now reported, and the walker covers the composed app with
+         literal-only mount resolution. Mutants show that /api/:version and /*rest are rejected. Every round-1 MINOR is
+         either fixed with tests that kill a mutant or routed with an owner (D-ORCH-023). The merge bf3d1f7 is a pure
+         union. No lockfile delta. One new MINOR: array and optional-group mounts on a literal mount path still hide
+         their extra paths. Merge with PR #20 needs a one-line move (section R2.5).
+FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR, 4 NIT
+```
+
+### R2.1 What I verified myself
+
+This round was memory-constrained: no `npm ci`, build, Docker, integration or e2e. I used a `git archive b31483b` scratch copy with a `node_modules` junction to the main checkout. The lockfile is identical (Express 5.3.0, router 2.2.0, path-to-regexp 8.4.2). The copy has been removed. The PR worktree is still clean at `b31483b`, and main's `node_modules` still has 740 entries.
+
+| Check | Result |
+|---|---|
+| `tools/openapi/{drift,contract,types-drift}.test.ts` (unit) | 26/26 pass. types-drift showed one false failure in the copy until `.prettierrc` was extracted. |
+| API project, run serially: `serve`, `problem-handler`, `contract-validation`, `contract-stubs`, `runtime-seams` `*.api.test.ts` | 5 suites, 80/80 pass (matches the author's `test:api` 80) |
+| Mutant: drop the R1-M1 `unrecognised` push | killed (1 test) |
+| Mutant: drop the segment-swap check (any match counts as literal) | killed (1 test) |
+| Mutant: drop the `/api/docs` exclusion | killed (6 tests) |
+| Mutant: drop `missing-traceability` (rule 7) | killed (1 test) |
+| Mutant: drop `layer.path !== relative` | **survives** (R2-n2) |
+| Mutant: 405 `Allow` back to `allowed.join(', ')` | killed (3 tests) |
+| Mutant: validator no longer requires OPTIONS in a 405 `Allow` | killed (1 test) |
+| Walker probe: 13 mount shapes on the composed stack | Correct: `/api/:version`, `/*rest`, a path handler and a path sub-app are reported. The literal `/api/v1` is resolved and `/api/docs` is excluded. **Not reported:** `['/api/v1','/hidden']`, `/api/v1{/:x}`, `/api{/:v}/v1`, `/api/v1{*rest}`, and a sub-app at the root (R2-m1). Real HTTP shows `/api/v1/anything/secret` and `/api/zzz/v1/secret` returning 200. |
+| Candidate R2-m1 fix applied in the copy | All 6 shapes are reported and `drift.test.ts` stays 18/18 |
+| Lint probe (PR config, `lintText`) on `tests/api/*.api.test.ts` | Relative `apps/api/src` import: clean. Relative `packages/shared/src` import: `import-x/no-relative-packages`. `../../apps/api/src/../../../packages/shared/src/index.js`: **clean** (R2-n1) |
+| Probe of PR #20 head `9647907`'s composition under the new walker | `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)` is now `unrecognised-route` (R2.5) |
+
+**Not re-run (constraint):** `lint`, `format:check`, `typecheck`, `build`, `test:coverage`, the full `test:unit`, `test:integration`, `openapi:lint` and the CI checkers. For these I rely on lane A run 43351989787 (fast-lane green: lint, typecheck, unit, base-ref negative fixtures, build) and on the author's serial gate table: coverage 97.70 % / 97.10 %, integration 185 passing, `openapi:types --check` fresh.
+
+### R2.2 Focus rulings
+
+1. **R1-M1: closed.**
+   - `drift.ts:177-181`: a non-router layer with `slash !== true` becomes `unrecognised-route`, with the handler name.
+   - Root middleware is still skipped. `drift.ts:172-176` and the JSDoc at :192-197 say so, as does tools/openapi/README.
+   - The composed-app walk (`api-mounts.ts`) builds the real `createApp` with docs enabled and walks `app.router` from the top, with `mountPaths` = [`API_PREFIX`, `DOCS_PATH`] and `excluded` = [`DOCS_PATH`].
+   - A path-mounted router resolves only when the layer matches the candidate, `layer.path` equals it, and no single-segment probe variant matches. That rejects `/api/:version` and `/*rest` (tested and mutant-killed).
+   - Module routers sit under the `/api/v1` prefix, so no mount path can resolve below it. Every path-mounted layer inside a module fails closed.
+   - R1-m2 is closed by the same change: a route or router mounted directly on the app is now seen (the "sees a route mounted directly on an app" test).
+   - What remains is R2-m1. It is confined to layers that match one of the two literal mount paths, which means only `app.ts` and the root-mounted health router.
+2. **R1-m3: closed.**
+   - `fallback.ts:70-72` `allowHeader()` is the single point used by both the OPTIONS 204 and the 405.
+   - The validator has a `validateOptionsResponse` branch (204, no body, `Allow` including OPTIONS) and requires OPTIONS in a 405 `Allow`.
+   - The stubs return a `kind: 'options'` resolution and the server answers 204 + `Allow`. `contract-stubs.api.test.ts` checks this live and passes the response through the validator.
+   - N5: the docs mount now sits inside `routes`, so `OPTIONS /api/docs` gives 204 and `POST` gives a 405 problem.
+   - The story text is not blocking: D-063 has already amended AT-US-007-02 and REQ-PLAT-010.
+3. **R1-m4 / N2: closed, with R2-n1.**
+   - `eslint.config.mjs:543` keeps the rule ON with `ignore: ['^(?:\\.\\./)+apps/api/src/']`, scoped to `tests/api/**/*.api.test.ts`.
+   - The positive and negative repository probes are in `lint-fixtures.mjs` and `negative-fixtures.test.ts`.
+   - The regex has no end anchor, so a `..` traversal after `apps/api/src/` passes (R2-n1). This is a NIT: the import has to be deliberately obfuscated, and the result is still stricter than round 1's `'off'`.
+   - `jest.config.ts:66` excludes exactly `packages/shared/src/api/types.gen.ts`.
+4. **Merge `bf3d1f7`: a pure union.**
+   - Re-merging `b0ede35` with `d38500a` through `git merge-tree` conflicts only in `eslint.config.mjs` and `package.json`. `git diff <tree> bf3d1f7` touches only those two files, and the only change is that the markers are removed with both sides kept:
+     - ESLint: the TASK-017 `tools/openapi/drift.test.ts` and `tests/api/**` blocks plus main's TASK-004 `apps/{web,admin}/app/routes.ts` block.
+     - `package.json`: both `openapi:*` scripts plus main's `npm run typegen && …` `lint` (main's line, without `--allow-empty-input`).
+   - `jest.config.ts` and `tools/repo/root-scripts.test.ts` are byte-identical to git's automatic merge. `SWC_JEST_OPTIONS` with `swcrc: false` is kept, there is no committed `.swcrc`, and the `unit-dom` project is kept.
+   - Partition proof:
+     - files of `d38500a..b31483b` = files of `80ff2c2..b0ede35` ∪ files of `bf3d1f7..b31483b`, with nothing extra and nothing missing;
+     - `git rev-list --merges` shows a single merge commit.
+   - Nothing from PR #17, #18, #19 or #4 is reverted.
+5. **Lockfile:** `git diff d38500a b31483b -- package-lock.json` is empty. The `package.json` delta against main is the two `openapi:*` scripts only.
+
+### R2.3 Round-1 closure
+
+| R1 item | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed** | `drift.ts:177-181`; fixture `stripeWebhook` (5 unrecognised); mutant killed |
+| R1-m1 | Closed | AT-US-034-01 uses `drift({ at: new Date() })`. The seeded cases stay pinned. |
+| R1-m2 | Closed | Composed-app walk (`api-mounts.ts:51-78`) plus 3 tests |
+| R1-m3 | Closed | (a)(b)(c) as in R2.2 item 2. The api/README §3 line is routed to api-designer (D-ORCH-023). |
+| R1-m4 | Closed (R2-n1) | `eslint.config.mjs:543` plus 2 repository probes |
+| R1-m5 | Rule 7 closed in this PR (`missing-traceability`, 7 seeded cases, mutant killed). The remainder is routed. | D-ORCH-023 (1) |
+| R1-m6 | Routed: TASK-015, due before the `v0.1.0-m0` tag | D-ORCH-023 (1) |
+| R1-m7 | Routed: TASK-022 (Playwright smoke under CSP, including BaseLayout) | D-ORCH-023 (1) |
+| N1 | Closed | README and ledger `$comment`: "process rule, not a mechanism" |
+| N2 | Closed | `jest.config.ts:66` |
+| N3 | Closed | `scanSchemas` collects `nullable` and validator setup throws |
+| N4 | Closed | `path-match.ts:53` strips one trailing `/` |
+| N5 | Closed | Docs inside `routes`; `serve.api.test.ts` "[PR #21 N5]" |
+| N6 | Closed | `main(argv, files, output)`; stale gives exit 1 and prints exactly `stale: …` |
+| N7 | (a) closed (`validatorUrl: null`). (b) routed to PM + api-designer. | `serve.ts:101`; D-ORCH-023 |
+
+### R2.4 Findings
+
+| ID | Severity | File:line | Issue | Why it matters | Required fix |
+|---|---|---|---|---|---|
+| R2-m1 | MINOR | `tools/openapi/drift.ts:137-149` (`resolveMountPath`), `:172-176`; `tools/openapi/README.md:19-21` | Literal resolution only proves that the layer matches the literal path and no single-segment *substitution*. Three cases slip through:<br>• An **array** mount (`use(['/api/v1','/hidden'], r)`; router 2.x keeps one matcher per path in `layer.matchers`) resolves as `/api/v1`, and `/hidden/...` is never walked.<br>• **Optional groups** (`/api/v1{/:x}`, `/api{/:v}/v1`, `/api/v1{*rest}`) also resolve as `/api/v1`. Real HTTP serves `/api/v1/anything/secret` and `/api/zzz/v1/secret` with 200.<br>• A **sub-app at the root** (`use(express())`, which Express wraps as `mounted_app`) is skipped as "root middleware".<br>The README says "arrays … and optional/wildcard paths" are reported. That holds for route layers, not for mounts. | This is the same fail-open class as R1-M1, now confined to the composition root (`app.ts`) and the health router. Every module-level path mount fails closed. An alias mount (`['/api/v1', '/v1']`) is a plausible future edit and would expose every operation under an undocumented prefix while the drift check stays green. | In `resolveMountPath`, `continue` unless `Array.isArray(layer.matchers) && layer.matchers.length === 1`. Then require, in addition to the substitution check, that (i) no variant with `PROBE_SEGMENT` *inserted* between two segments matches, and (ii) `layerMatches(layer, relative + '/' + PROBE_SEGMENT)` leaves `layer.path === relative`. In `walk`, report a `slash` layer whose `layer.name === 'mounted_app'` as unrecognised ("Express sub-app"). I verified this on the copy: all 6 shapes are reported and `drift.test.ts` stays 18/18. Add those shapes to the "resolves … known literal path only" test. **In this PR (preferred, about 10 lines) or** as a D-TASK017-01 line owned by TASK-020. |
+| R2-n1 | NIT | `eslint.config.mjs:543` | `^(?:\.\./)+apps/api/src/` has no end anchor, so `../../apps/api/src/../../../packages/shared/src/index.js` lints clean (probe). The PR #5 `prisma/tests` pattern at :572 anchors with `[^/]+$`. | An obfuscated traversal re-opens the allowance this cycle narrowed. | `'^(?:\\.\\./)+apps/api/src/(?!(?:.*/)?\\.\\.(?:/|$))'` (verified against 6 strings), plus a third repository probe for the traversal form. |
+| R2-n2 | NIT | `tools/openapi/drift.ts:141` | The `layer.path !== relative` condition is a surviving mutant. The substitution probe already rejects a prefix mount (`/api` vs `/api/v1`). | Dead condition, or an untested one. | Keep it, because it becomes load-bearing with the R2-m1 "consumed" check, and pin it with a `use('/api', inner)` case. Otherwise drop it. |
+| R2-n3 | NIT | `apps/api/src/app.ts:6` | The header comment line is about 190 characters, unwrapped, and runs two sentences together. | Readability; Prettier does not reflow comments. | Reflow to the 120-column style used by the rest of the header. |
+| R2-n4 | NIT | `docs/sdlc/DECISIONS.md:1399` (D-TASK017-01) | Item (2) still says "append-only ledger" and item (4) still says `!**/*.gen.ts`. Both are superseded by N1 and N2. | The decision record contradicts the code. | Orchestrator appends an amendment line: the exact `types.gen.ts` path, "add-only is a process rule", the composed-app walk, and the R2-m1 owner if it is routed. |
+
+### R2.5 Merge with PR #20: a semantic conflict, not only a textual one
+
+`git merge-tree b31483b 9647907` (PR #20 head) still conflicts in exactly `app.ts`, `main.ts` and `request-context.ts`. On top of that, PR #20 composes `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)`, and `routePrefix` is a plain handler mounted under a path. Under this PR's R1-M1 fix the walker reports it (probe: `middleware "<anonymous>" mounted under a path`), so **AT-US-034-01 fails on the union** even if every textual conflict is resolved correctly.
+
+The fix, for whichever PR merges second: `api.use(routePrefix(API_PREFIX))` as the first layer of the `api` router, then `routes.use(API_PREFIX, api)`. That gives the same `res.locals` before any module router, and the probe walks clean. Do not widen the walker to skip path-mounted middleware.
+
+Also on the union:
+- keep the docs mount inside `routes` after `optionsResponder`;
+- keep both `RequestContext` members (`requestId` and `apiMode`);
+- re-run `drift.test.ts`, `test:unit` and `test:api` on the merge commit.
+
+### R2.6 Routing rulings (D-ORCH-023)
+
+All routings are accepted.
+- m5 remainder: the supertest ban and the coverage report to TASK-020, `expectEventStream` to TASK-044, `client.ts` to TASK-065. Each is the first consumer of its piece.
+- m6 `oasdiff` to TASK-015, due before the `v0.1.0-m0` tag. Accepted, because the date sits before the first release the NFR protects.
+- m7 to TASK-022 (CSP spike). Accepted. It must also cover the `BaseLayout` page, since the non-local layout changed in this cycle.
+- PR21-SEC-03 / N7b to PM + api-designer.
+- PR21-SEC-06 remainder to TASK-020 / TASK-048. Note for both: a limiter or CORS mounted under a path (`app.use('/api', limiter)`) now fails the drift check by design. Mount such middleware path-less inside the target router, as R2.5 does, or add an explicit, tested exclusion to `WalkOptions`.
+- PR21-SEC-07(b) to TASK-010 (or TASK-020 if PR #20 merges first).
+- api/README §3 OPTIONS line to api-designer.
+- `openapi.yaml` in the image to TASK-014. Unchanged; compose still sets `DOCS_ENABLED=true`.
+
+### R2.7 Merge conditions
+
+1. A security-analyst delta record naming `b31483b` or later. Lane A's security-record step is the only red step; this cycle changed `eslint.config.mjs` and `jest.config.ts`.
+2. R2-m1: fixed in this PR (preferred; the candidate is verified) **or** recorded in D-TASK017-01 with owner TASK-020. If it is fixed, a code-review delta check covers only `drift.ts` and its test. NITs R2-n1 to R2-n3 are optional in this PR; R2-n4 is the orchestrator's.
+3. Merge order with PR #20: R2.5. The `routePrefix` move is required on the union commit.
+4. Fast-lane green on the final head, then squash merge.
+
+### R2.8 GOOD (keep)
+
+- Literal-mount resolution by behaviour (the layer's own matcher plus probe variants) rather than by reading `layer.regexp`, which Express 5 no longer exposes reliably.
+- The exclusion is tested as load-bearing: without it, `GET /api/docs` shows up.
+- `allowHeader()` gives one revert point for the `Allow` parity, and the stubs and the validator mirror it with tests that kill mutants.
+- Precomputed strong ETags, with a test proving the `etag` function is never called and that 304 has an empty body.
+- The initializer is built with `JSON.stringify` from typed options, with no string concatenation of configuration.
+- The `$ref` loader is offline-only, with a test that counts zero requests to a local server.
+- The fix-cycle comment maps every finding to its proof, and the re-merge proof equates `+/-` lines across `d700eb5` and `bf3d1f7`.
+
+### R2.9 SECURITY-FLAGS (for security-analyst)
+
+- **S8.** R2-m1: array and optional-group mounts at `/api/v1`, and root sub-apps, can expose undocumented aliases with a green drift gate (the same class as S1).
+- **S9.** R2-n1: the `no-relative-packages` ignore can be bypassed by traversal in `tests/api/*.api.test.ts` (test code only).
+- **S10.** R2.5: the PR #20 union must move `routePrefix`, not exempt path-mounted middleware from the walker.
