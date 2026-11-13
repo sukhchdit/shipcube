@@ -43,6 +43,11 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | EPIC-17 | stories/EPIC-17-reference-data-compliance-packs.md | 12 | 11 | 1 | 0 | 5 | 7 |
 | **Total** | 17 files | 293 | 218 | 67 | 8 | 120 | 173 |
 
+## Open verification conditions (orchestrator)
+| Condition | Task(s) | Covers | Due | Owner |
+|---|---|---|---|---|
+| COND-E2E-FF | TASK-004 (e2e harness, PR #4) | Firefox projects (firefox-mobile/-desktop) green on a Linux runner; WebKit projects `--repeat-each=5` on Linux (PR #4 R4-m1) | before G3 | TASK-015 / qa-lead |
+
 ## Requirement → Story
 | REQ | MS | MoSCoW | Story | Design (ADR/Spec) | Task(s) | Test(s) | Status |
 |---|---|---|---|---|---|---|---|
