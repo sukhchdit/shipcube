@@ -17,6 +17,8 @@
     { "path": "tests/e2e" },
     { "path": "tests/load" },
     { "path": "tests/generated" },
+    { "path": "tests/helpers" },
+    { "path": "tests/factories" },
     { "path": "tests/api" },
     { "path": "tests/contract-stubs" },
     { "path": "tools" }

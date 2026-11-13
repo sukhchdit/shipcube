@@ -346,7 +346,7 @@ afterAll(async () => {
   await db?.stop();
   const target = process.env['SPK03_REPORT'];
   if (target) writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`);
-});
+}, 60_000);
 
 describe('SPK-03 (a) context isolation across pooled connections', () => {
   it('SPK-03 (a) interleaved org A and org B transactions on two pooled connections each see only their own rows', async () => {

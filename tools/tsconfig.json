@@ -22,6 +22,7 @@
     "../apps/api/src/platform/db/health-check.ts",
     "../apps/api/src/platform/db/index.ts",
     "../apps/api/src/platform/db/map-db-error.ts",
+    "../apps/api/src/platform/db/query-counter.ts",
     "../apps/api/src/platform/db/runtime.ts",
     "../apps/api/src/platform/db/session-integrity.ts",
     "../apps/api/src/platform/db/system-db.ts",
