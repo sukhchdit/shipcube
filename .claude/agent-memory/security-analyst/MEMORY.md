@@ -20,3 +20,4 @@
 - [P5 PR-0017 fixture subset](project_p5_pr17_fixture_subset.md) — R1 ea78d38 + R2 8dd1d24 PASS_W_F-U; 01,03-06 closed; new LOW 07 folded-YAML pin bypass, 08 BASH_ENV, 09 __mocks__, 10
 - [P5 PR-0023 lane B evidence](project_p5_pr23_lane_b.md) — TASK-011 R2 @c0b1b31 PASS_W_COND; 01 closed; W0-ACT-1 runner gap; 03/04/05 due before Wave-0-exit activation
 - [P5 PR-0024 audit store](project_p5_pr24_audit_store.md) — TASK-021 R1 @6f498c4 PASS_W_COND; 01 multirange/side-effect squat (C1), 02 readiness `=` hijack, 03 rule-11 RESET; PG18 facts; Docker recipe
+- [P5 PR-0025 CI follow-ups](project_p5_pr25_ci_followups.md) — R1 @20a0fc6 PASS_W_F-U; PR10-SEC-08 closed; 01 LOW 17-fingerprint baseline before gitleaks-full; gitleaks .gitleaksignore/override facts
