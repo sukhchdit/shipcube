@@ -331,3 +331,122 @@ Main's `tools/ci/check-security-owned-paths.mjs` (from `git archive 360f419 tool
 | Field | Value |
 |---|---|
 | **Verdict** | **PASS_WITH_CONDITIONS.** No Critical or High finding is open at head `f61e55d`, so the merge rule is met for the security dimension.<br>**What holds:** the lane A step runs the base-ref verifier with no new workflow lever, permission, action or secret. The verifier rejects missing, stale, non-ancestor and tampered evidence (probes S0, S2, S3, S4). The JUnit path is injection-safe, writes and deletes stay inside the evidence tree, and only environment variable names are recorded. There is no lock delta and no new dependency.<br>**Conditions (tracked, with due points):**<br>(1) **PR23-SEC-01 (MEDIUM):** add `/tools/quality/` to `.github/CODEOWNERS` before the first `planned → active` flip or the next `tools/quality` change, whichever is first.<br>(2) **PR23-SEC-02 (MEDIUM):** activation through manifest-only PRs, starting with `unit`/`integration`/`api`/`catalog-c1-c14`/`migrations` by the end of Wave 0; an active-needs-runner test; and a `--profile gate` verifier run plus SEC-P3-07 items 5–6 before G3.<br>(3) **PR23-SEC-03/04/05 (LOW):** due before the first activation.<br>(4) **PR23-SEC-06 (LOW) and the INFO items 07/08/10:** TASK-015, or with the runner that introduces them.<br>PR23-SEC-09 is the accepted SEC-P3-07 residual.<br>**This round authorises `f61e55d` for merge** once this record is committed on top of it as a docs-only commit and lane A is green on that commit, without a further merge of `main` (§7) |
+
+## Round 2 (head c0b1b31)
+
+| Field | Value |
+|---|---|
+| Head | c0b1b31a2a153892bc424e3adaf9a0d6b528dc83 |
+| Commits since R1 | Fix cycle 1 (D-ORCH-028): `de1fae3` (CODEOWNERS line, `REQUIRED_CODEOWNED_PATHS`, mutation tests), `8321ad0` (`--event`, `--report-only` pin, rule-4 wording), `712e25d` (unreadable Jest report, restricted runs to temp). Two merges of `main`: `055d373` (main `61efbb3`) and `c0b1b31` (main `6fd801f`). Merge base `6fd801f`; net change 33 path entries (+5,970 / −223) |
+| Lane A evidence | Run [43364590973](https://github.com/sukhchdit/shipcube/actions/runs/43364590973) on `c0b1b31` (`pull_request`, base `6fd801f`). **fast-lane `success`.** "Workflow policy" ran from the base ref and passed. "Lane B evidence" ran in bootstrap mode (head copy, `--event pull_request`, report-only) and printed `no active lane B suite is required for this change; selected suites still planned: unit` and `PASS (report-only)`. **scans:** Gitleaks `no leaks found` (11 commits); Semgrep `success`. Only "Security-owned paths need a review record" failed: 27 owned paths, and the R1 record names `f61e55d`, after which 11 owned paths changed. `ci-gate` failed as a consequence. This round is the missing record |
+| Owned paths changed | 27, per lane A. The checker reads CODEOWNERS from the base AND the head, so the new `/tools/quality/` line makes every `tools/quality/**` file of this PR owned in this PR. That includes the verifier, lib, schema, manifest, runners and tests from R1, plus the fix-cycle files. This round covers all of them |
+| Reviewer / date | security-analyst, 2026-11-13. Read-only. Git commands ran in the main checkout against commit SHAs, or in a scratch `git clone --shared` (removed afterwards). No command ran in the PR worktree. No install, build, Docker, integration or e2e run: the gate results are the developer's table plus lane A run 43364590973 |
+
+### R2.1 What changed, and how it was checked
+
+- **Fix delta** (`git diff 055d373 712e25d`): 13 files (+437 / −44): `.github/CODEOWNERS`, `.github/workflows/ci.yml`, `tools/ci/check-workflow-policy.mjs` (+2), `tools/ci/check-workflow-policy.test.ts`, `tools/ci/ci-policy.test.ts`, `tools/quality/{check-evidence,heavy}.mjs` with their tests, `tools/quality/required-suites.json`, and three docs.
+- **Merges.**
+  - The tree of `055d373` equals `git merge-tree --write-tree 61efbb3 f61e55d` (`cf27520`).
+  - The tree of `c0b1b31` equals `git merge-tree --write-tree 6fd801f 712e25d` (`50c3a8e`).
+  - Both merges are clean, with no manual resolution.
+- **Three-way blob compare** over the 33 net-change entries of `6fd801f..c0b1b31`. Every blob equals `f61e55d`'s, with four classes of exception:
+  - the 13 fix-cycle paths;
+  - `package.json` = `0145163`, the union R1 §7 predicted: main's `openapi:*` scripts plus the four `quality:*` scripts, and nothing else;
+  - `tools/repo/root-scripts.test.ts` and `docs/03-architecture/data-model.md`, which are unowned unions.
+- **Lockfile.** `package-lock.json` is blob `1453a95` at `d38500a`, `6fd801f`, `c0b1b31` and `origin/main`, so there is no lock delta and no new dependency.
+- **Overlap with today's main.** Main moved from `6fd801f` to `1736051` and changed only `docs/sdlc/STATUS.md`, two `docs/05-quality/reviews/` records (including the PR #23 code review r2, APPROVED_WITH_NITS) and agent memory, so no owned path overlaps. R1 §7 item 6 did not trigger: main changed none of `ci.yml`, `.prettierignore`, CODEOWNERS or `tools/quality/**`.
+
+### R2.2 Focus items
+
+| Item | Ruling |
+|---|---|
+| (a) COND-PR23-1 / PR23-SEC-01 | **Closed.**<br>• `/tools/quality/ @sukhchdit` is in the "CI, workflows, supply chain" section of CODEOWNERS, with a reason comment.<br>• `REQUIRED_CODEOWNED_PATHS` gains `'tools/quality/'`. This PR's own lane A ran main's policy copy, which does not have the entry yet. The pin binds every later PR once this PR merges, because the policy runs from the base.<br>• Four new tests, plus the updated pinned list: present and required; line deleted, ownerless, or commented out → a finding naming `tools/quality/`; a parent `/tools/` line covers it; the sibling `/tools/qualitys/` does not.<br>• The record covers this PR's own `tools/quality` changes: lane A lists them as owned, and simulated run D (§R2.5) shows that a later `tools/quality`-only commit voids this record |
+| (b) `--event "$GITHUB_EVENT_NAME"`: can the push skip be reached on `pull_request`? | **No, short of an owned `ci.yml` edit.**<br>• The skip depends only on argv `--event push`. `check-evidence.mjs` does not read `GITHUB_EVENT_NAME` itself, and when `--event` is absent it defaults to `pull_request`, which is fail-closed.<br>• The runner sets `GITHUB_EVENT_NAME` from the event. GitHub documents that a workflow `env:` assignment to a default `GITHUB_*` variable is ignored.<br>• A PR can make a `pull_request` run skip only by editing the step to pass `--event push`, by prefixing `GITHUB_EVENT_NAME=push`, or by an earlier `$GITHUB_ENV` write. The first two edit an owned file, and the third is already a D-ORCH-021 lever. All three are the same class as deleting the step, so this adds no new lever. A literal event value on either line, and a step-level `env:`, fail the head test (`ci-policy.test.ts`, mutation "event hard-coded on the base-ref line").<br>• An event outside `pull_request`/`push` (for example a future `merge_group` or `workflow_dispatch` trigger) exits 2, so the step fails closed.<br>• The base-ref policy still does not pin the step (PR23-SEC-06). The TASK-015 pin must now include the event argument (amended remediation in §R2.3).<br>• Push-to-main behaviour after merge: the pushed range's base is the pre-merge `main`, which has no verifier, so the bootstrap head copy runs with `--event push` and skips. From the next push on, the base copy skips. A squash commit can never satisfy ancestry, so skipping on push removes no control: the pull-request run is the control, as for `check-security-owned-paths` |
+| (c) Base-ref copy before head code | **Unchanged.** The step keeps its position: after `npm ci --ignore-scripts` and the audits, before "Prisma engine cache key" and `deps:rebuild`. `ci-policy.test.ts` asserts that order. The step comment now carries the PR23-SEC-03 qualification ("except the locked Ajv"), as R1 asked |
+| (d) `--report-only` | **Exactly one**, at the end of the bootstrap head-copy line. The base-ref line has none.<br>• The `ci.yml` net change is 24 added lines and 0 removed.<br>• The lever scan finds no `RANGE_BASE`/`RANGE_HEAD` assignment, and no `BASH_ENV`, `PATH`, `BASH_FUNC_*`, `defaults`, folded `run: >`, `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_OUTPUT` write, `env:`, `if:`, `shell:`, `permissions`, `uses:`, `${{ }}`, `\|\| true` or `set +e`.<br>• **D-ORCH-021: no lever moves**, and this round rules on it explicitly.<br>• The head test pins both lines in full and runs 9 mutations, each a finding: appended, prefixed, `=true`, in a comment, dropped, doubled, `\|\| true`, event hard-coded, base line run from the head copy |
+| (e) Rule 4 rewording | **No credit path.** The `check-evidence.mjs` change to rule 4 is only the soft-reason text. A planned-suite JUnit is still a `soft` reason, `accepted` still requires `reasons.length === 0`, and a run that is not accepted is never credited. Three new pins match R1's S5/S5b:<br>• nothing required → PASS, with the run `rejected`;<br>• a later activation whose run carries the new suite → FAIL, `no accepted lane B evidence for required suite(s): unit`;<br>• the same run with only active suites → accepted.<br>The TEST-STRATEGY §9.2 rule 4, README and manifest `planned_suite_reported` wording now say this correctly (the D-TASK011-01 (1) correction) |
+| (f) New fixtures and tests | `check-evidence.test.ts`: the newest-30 window, touched runs outside the window, untouched versus touched tampered runs, a stale touched run, multi-root agreement and disagreement (`profile`, `git_sha`, `stamp` → tampering), and `--event` (push skip, a squash commit with no ancestor evidence, the summary note, exit 2 on an unknown event). `heavy.test.ts`: missing, truncated or empty Jest JSON becomes one error case, and a restricted run writes to `mkdtemp` outside the repository. All fixtures are synthetic. The real gitleaks over the range found nothing |
+| (g) `heavy.mjs` changes | `jestCasesFrom` and `coverageFrom` fail closed: an error case, or `null` coverage. All existence checks now run before the first write. A restricted run defaults to a fresh `mkdtemp` directory, which closes R1-n5 (accidental commit of an INVALID run).<br>One note is added to PR23-SEC-08: V8 `JSON.parse` messages carry a quoted fragment of the unparsed text (about 10 characters, measured on Node 24.22). `malformed()` messages are not passed through `scrubPaths`, so a fragment of a home path could reach a committed JUnit message. Fix: scrub `malformed()` messages too |
+| (h) Manifest `tooling_inputs` / `exclude` edit | Two entries go: the old manifest path and `docs/05-quality/tests/schema/**`. Neither path exists any more, and nothing reads them: the verifier and schema load from `tools/quality` (D-ARCH-082 (1)). `tools/quality/**` is outside `docs/**`, so a manifest or schema change always makes evidence stale. **No security effect** |
+
+### R2.3 Findings status at `c0b1b31`
+
+| ID | Severity | Status | Note |
+|---|---|---|---|
+| PR23-SEC-01 | MEDIUM | **Closed** | §R2.2 (a) |
+| PR23-SEC-02 | MEDIUM | Open (condition) | Re-stated against D-ARCH-082 in §R2.4 |
+| PR23-SEC-03 | LOW | Open | Due point re-stated in §R2.4 |
+| PR23-SEC-04 | LOW | Open | Due point re-stated in §R2.4 |
+| PR23-SEC-05 | LOW | Open | Due point re-stated in §R2.4. The README now documents the ignored-path residual |
+| PR23-SEC-06 | LOW | Open (TASK-015) | **Remediation amended.** (1) The `CI_REQUIRED_GATES` pin must match the base line in full, including `--event "$GITHUB_EVENT_NAME"`. It must refuse a literal `--event <word>` and a `GITHUB_EVENT_NAME=` assignment in the step script, and refuse a `GITHUB_EVENT_NAME` key in any workflow, job or step `env:`. (2) Mirror `check-security-owned-paths`: refuse `--report-only` once the base ref contains `check-evidence.mjs`. This is code review R2-n3 in checker form. (3) Refuse `--event push` together with `--profile wave` or `--profile gate`. Items 2 and 3 (bootstrap `else` branch, no-base exit on `pull_request`) are unchanged |
+| PR23-SEC-07 | INFO | Open (TASK-015) | Unchanged |
+| PR23-SEC-08 | INFO | Open (with the ZAP/Trivy runners) | Add: scrub `malformed()` messages (§R2.2 (g)) |
+| PR23-SEC-09 | INFO | Accepted residual | Unchanged |
+| PR23-SEC-10 | INFO | Open (TASK-015) | Unchanged |
+
+**New findings this round: none.** No Critical or High finding is open.
+
+### R2.4 COND-PR23-2 against D-ARCH-082, and the due point of PR23-SEC-03/04/05
+
+**COND-PR23-2 (PR23-SEC-02, MEDIUM).** Owners: qa-lead (manifest), devops-engineer (runners, TASK-015), quality-gatekeeper (G3). Probed with the head `lib/manifest.mjs` `selectSuites` on the head manifest, with D-ARCH-082's W0-ACT-1 list set `active`.
+
+1. **W0-ACT-1, right after merge.**
+   - It is a manifest-only PR, and it now needs a security record, because `tools/quality/**` is owned.
+   - It passes the verifier with nothing required, because the base manifest has no active suite. Any run carried in it is not credited.
+2. **An active-needs-runner test must land with W0-ACT-1 or before it.** The test asserts that every `active` suite has a `suite-runners.json` entry.
+   - Today only 5 suites have a runner: `unit`, `integration`, `api`, `catalog-c1-c14`, `migrations`.
+   - **9 of the 13 W0-ACT-1 suites have none:** `migration-lint`, `config-guards`, `sec-static`, `ci-policy`, `lint`, `typecheck`, `contract-openapi`, `e2e-chromium`, `e2e-webkit`.
+   - Probe: with that list active, an `apps/web/**` change selects `e2e-chromium`. `quality:heavy` then writes the error case "no runner entry for active suite", so **every web PR FAILs**.
+   - This fails closed and is not a bypass. But it puts the first Wave-1 web PRs under exactly the fix-cycle pressure that SEC-P3-07 names.
+   - So W0-ACT-1 either carries runner entries for the suites it activates (devops-engineer, in the same PR), or it activates only suites that already have one.
+3. **`api`.** It has a runner, and its tests are on `main`. COND-PR23-2 puts it in the Wave-0-exit set, but D-ARCH-082 lists it at neither checkpoint. Activate it in W0-ACT-1, or at the Wave-0 exit at the latest.
+4. **Later activations** (Wave-0 exit, `v0.1.0-m0`, G3) stay manifest-only.
+   - After W0-ACT-1, a change to `tools/quality/required-suites.json` alone selects exactly `unit` (probe). The activation PR therefore needs a fresh `unit` run: `npm run quality:heavy -- --profile pr`, which selects only `unit`.
+   - A `--profile wave` or `--profile gate` run in that PR would carry the newly activated suites, and rule 4 would reject it as a whole.
+   - The activation PR must not touch a path that selects a suite it activates.
+5. **G3** is unchanged:
+   - quality-gatekeeper's `--profile gate` transcript on the gate SHA;
+   - a transcript that says `skipped` (an `--event push` run) is no evidence;
+   - SEC-P3-07 items 5 and 6 must be live (TASK-015).
+
+**PR23-SEC-03/04/05: due point re-stated.** R1 and D-SEC-PR23-01 said "before the first activation", and D-ORCH-028 (4) routed them to a devops follow-up before the first activation. D-ARCH-082 now schedules W0-ACT-1 immediately after merge. **Ruling: W0-ACT-1 does not wait for these three.**
+
+**Why.**
+- Each of them weakens an enforcement that does not exist until W0-ACT-1, and that missing enforcement is the MEDIUM gap PR23-SEC-02.
+- None of them is easier to exploit after activation than the "nothing required" state is today.
+- Holding the activation behind three LOW fixes would only prolong the MEDIUM exposure.
+
+**New due point:** merged before the **Wave-0-exit activation PR**. That is the second D-ARCH-082 checkpoint: it activates `rls-cross-tenant`, `rbac-matrix`, `audit-*`, `abuse` and `route-registry`, and it comes before the first `wave` run. That activation PR's security record will be FAIL while any of the three is open.
+
+**Interim controls from W0-ACT-1 until then:**
+- **03:** every security record of a PR that changes `package-lock.json` states the `node_modules/ajv` entry (version, integrity, no `link`) and that no non-`@platform` `link: true` entry exists.
+- **04:** no `wave` or `gate` run is committed (none is due before the Wave-0 exit). A PR that modifies or deletes a committed run directory is rejected in review.
+- **05:** the gate table of each evidence commit states two things: `npm ci --ignore-scripts` and `npm run deps:rebuild` ran in that worktree immediately before `quality:heavy`, and the worktree's `.git/info/exclude` holds no entries.
+
+**Proposed decision text** (for the orchestrator to log as D-SEC-PR23-02): "PR #23 security r2 at c0b1b31 = PASS_WITH_CONDITIONS. COND-PR23-1 closed. COND-PR23-2 re-stated against D-ARCH-082:
+- W0-ACT-1 carries an active-needs-runner test, and either runner entries for every suite it activates or only suites that already have one (9 of the 13 listed lack one; `e2e-chromium` would fail every web PR);
+- `api` joins W0-ACT-1, or the Wave-0 exit at the latest;
+- later activations are manifest-only, with a `--profile pr` unit run.
+
+PR23-SEC-03/04/05 move from 'before the first activation' to 'before the Wave-0-exit activation PR', with the interim controls of §R2.4; W0-ACT-1 proceeds right after merge. PR23-SEC-06 remediation amended (pin `--event "$GITHUB_EVENT_NAME"`; refuse `--report-only` once the base has the verifier; refuse push with wave/gate)."
+
+### R2.5 Record check (simulated)
+
+Main's `tools/ci/check-security-owned-paths.mjs` comes from `git archive origin/main tools/ci` (`1736051`; identical to `6fd801f` under `tools/` and `.github/`). It runs with `--root <clone> --json` against a scratch `git clone --shared` of the main checkout. The clone is checked out at the scenario head, with this record copied into its working tree, `--pr 23`. The clone was removed afterwards. Gitleaks emulation (v8.30.1 default rules, 221 compiled) over the final text of this record: 0 findings, both for the Round 2 section and for the whole file. Three run-time control lines gave 6 findings.
+
+| Run | Expected | Result |
+|---|---|---|
+| A: this record in the tree, `--base 6fd801f --head c0b1b31` | pass | exit 0, `pass`, 27 owned, satisfied by this record @ `c0b1b31` |
+| A1: as A, `--base 1736051` (today's `main`) | pass | exit 0, `pass`, 27 owned, @ `c0b1b31` |
+| A2: this record committed on top of `c0b1b31` (docs-only), `--head` = that commit, `--base 1736051` | pass | exit 0, `pass`, @ `c0b1b31` |
+| B: no record in the tree (clone at `c0b1b31` as pushed) | missing | exit 1, `missing`: the R1 record names `f61e55d`, and 11 owned paths changed after it |
+| C: this record, `--pr 22` | missing | exit 1, `missing` ("no record named …PR-0022-*.md") |
+| D: A2 + a later commit changing only `tools/quality/suite-runners.json` | missing | exit 1, `missing` ("names c0b1b31, but tools/quality/suite-runners.json changed after it") |
+| E: this record with its last verdict changed to FAIL | missing | exit 1, `missing` ("verdict FAIL is not one of …") |
+| F: A2 + a later commit changing only `docs/05-quality/README.md` | pass | exit 0, `pass` (an unowned commit after the named head keeps the record valid) |
+
+### R2.6 Verdict
+
+| Field | Value |
+|---|---|
+| **Verdict** | **PASS_WITH_CONDITIONS.** No Critical or High finding is open at head `c0b1b31`, so the merge rule is met for the security dimension. COND-PR23-1 (PR23-SEC-01) is **closed**.<br>**What holds:** `tools/quality/**` is code-owned and pinned in `REQUIRED_CODEOWNED_PATHS`, with mutation tests. In the lane B step, `--event "$GITHUB_EVENT_NAME"` cannot select the push skip on a `pull_request` run without an owned `ci.yml` edit, and an unknown event fails closed. No D-ORCH-021 lever moves. The base-ref copy still runs before head code, except the locked Ajv (PR23-SEC-03). `--report-only` occurs exactly once, on the bootstrap head-copy line. The rule-4 rewording changes text only, and planned-suite runs are still never credited. Both merges are clean, `package.json` is the predicted union, and there is no lock delta.<br>**Conditions (tracked):**<br>(1) **COND-PR23-2 (PR23-SEC-02, MEDIUM)** as re-stated in §R2.4: W0-ACT-1 right after merge, with an active-needs-runner test and runner entries for every suite it activates; `api` by the Wave-0 exit at the latest; later activations manifest-only with a `--profile pr` unit run; at G3 the gate-profile transcript, with SEC-P3-07 items 5–6 live.<br>(2) **PR23-SEC-03/04/05 (LOW):** merged before the Wave-0-exit activation PR, with the §R2.4 interim controls from W0-ACT-1 on. W0-ACT-1 does not wait for them.<br>(3) **PR23-SEC-06 (LOW, amended), 07, 10:** TASK-015. **08:** with the ZAP/Trivy runners, plus `malformed()` scrubbing.<br>PR23-SEC-09 remains the accepted SEC-P3-07 residual.<br>**This round authorises `c0b1b31` for merge** once this record is committed on top of it as a docs-only commit and lane A is green on that commit. A later merge of `main` keeps the record valid only if `main` changed none of this PR's 27 owned paths: `package.json`, `.prettierignore`, `.github/CODEOWNERS`, `.github/workflows/ci.yml`, `tools/ci/check-workflow-policy.mjs`, `tools/ci/check-workflow-policy.test.ts`, `tools/ci/ci-policy.test.ts` and `tools/quality/**`. Today's `main` (`1736051`) changed none of them |
