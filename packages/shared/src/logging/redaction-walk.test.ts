@@ -100,6 +100,37 @@ describe('redactValue: card data and PII keys (PR20-SEC-02)', () => {
       status: 200,
     });
   });
+
+  it('[R2-m2 / PR20-SEC-14] redacts the platform names and IP-bearing keys, keeps carrier, service, job and entity names', () => {
+    const name = sentinel();
+    const ip = `203.0.113.${String(randomBytes(1)[0] ?? 7)}`;
+    const output = redactValue({
+      shipment: { display_name: name, receiverName: name, recipient_name: name, sender_name: name, shipper_name: name },
+      party: { consignee_name: name, legal_name: name },
+      login: { username: name, user_name: name },
+      request: { client_ip: ip, clientIp: ip, remote_ip: ip, source_ip: ip, 'x-forwarded-for': ip, 'X-Real-IP': ip, forwarded: ip },
+      carrier_name: 'DHL Express',
+      service_name: 'EXPRESS_WORLDWIDE',
+      job_name: 'label.render',
+      entity_name: 'shipment',
+      relationship: 'owner',
+      membership: 'admin',
+      ship: 'yes',
+    });
+    expect(json(output)).not.toContain(name);
+    expect(json(output)).not.toContain(ip);
+    expect(output).toMatchObject({
+      shipment: { display_name: REDACTED, receiverName: REDACTED },
+      request: { 'x-forwarded-for': REDACTED, 'X-Real-IP': REDACTED },
+      carrier_name: 'DHL Express',
+      service_name: 'EXPRESS_WORLDWIDE',
+      job_name: 'label.render',
+      entity_name: 'shipment',
+      relationship: 'owner',
+      membership: 'admin',
+      ship: 'yes',
+    });
+  });
 });
 
 describe('redactValue: per-call budget (PR #20 m5, PR20-SEC-07)', () => {

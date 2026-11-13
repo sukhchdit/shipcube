@@ -1,8 +1,9 @@
 // Key and string redaction for log lines (US-008 AT-US-008-04/05, REQ-PLAT-012, NFR-PRIV-001; SEC-TC-31; PR6-SEC-02
-// item 3, PR6-SEC-03 item 1; PR20-SEC-01/02/03/08/12, PR20 m4/n1; TASK-010). Pure and linear-time: every regex is
-// anchored, bounded, or a single character-class run after disjoint classes; inputs are capped at MAX_STRING_LENGTH
-// (keys at MAX_KEY_LENGTH) before any regex, and the `key: value` scan advances monotonically. Re-exported by
-// redaction.ts; the error serializers import this module directly so the value walker can call them without a cycle.
+// item 3, PR6-SEC-03 item 1; PR20-SEC-01/02/03/08/12/13, PR20 m4/n1, R2-m2; TASK-010). Pure and linear-time: every
+// regex is anchored, bounded, or a single character-class run after disjoint classes; inputs are capped at
+// MAX_STRING_LENGTH (keys at MAX_KEY_LENGTH) before any regex, and the `key: value` and list scans advance
+// monotonically. Re-exported by redaction.ts; the error serializers import this module directly so the value walker can
+// call them without a cycle.
 //
 // Free-text redaction is defence in depth: the structured key path (isSensitiveKey / isOmittedKey / isPiiKey) is the
 // primary control. Over-redaction that fails closed is accepted (D-TASK010-01 (2)). Accepted residual gaps:
@@ -12,6 +13,9 @@
 //   value that contains its own unescaped quote keeps the part after that quote;
 // - free-text `key: value` pairs whose key is only personal data (`name: Alice`): the PII key class is structured-only;
 // - scheme-less userinfo (`user:pw@db:5432`) and percent-encoded URLs (`https%3A%2F%2F`) are not recognised as URLs;
+//   a request target loses its query only when it starts with `/` (`/x?q=v`), not when it is relative (`x?q=v`);
+// - a raw header list joined without quotes (`String(req.rawHeaders)` -> `Cookie,v`): only quoted lists
+//   (`JSON.stringify`, `util.inspect`) pair a name with the next item;
 // - a Digest/HOBA/AWS4 parameter list without its scheme word (a bare `response="v"`);
 // - double-encoded e-mails (`%2540`); a quoted local part longer than 64 characters;
 // - a sensitive word beyond the first MAX_KEY_LENGTH characters of a key, and homoglyph keys NFKC does not fold
@@ -50,6 +54,8 @@ const SENSITIVE_KEY_PARTS: readonly string[] = [
   'verificationcode',
   'securitycode',
   'recoverycode',
+  // The TOTP shared secret in its typed form (TotpEnrolment.manual_key; PR21-SEC-07 (b)).
+  'manualkey',
   'cardnumber',
   'cvv2',
   'cvc2',
@@ -74,9 +80,28 @@ const SENSITIVE_EXACT_KEYS: ReadonlySet<string> = new Set(['pan', 'cvc', 'cvv', 
 const CARD_PARENT_KEYS: ReadonlySet<string> = new Set(['card', 'paymentcard', 'paymentmethod', 'creditcard']);
 const CARD_CHILD_PREFIX = /^(?:exp|cvc|cvv)/;
 
-/** Substrings of a normalised key whose value is personal data (PR20-SEC-02 item 1). */
+/**
+ * Substrings of a normalised key whose value is personal data (PR20-SEC-02 item 1). The names and IP-bearing keys of
+ * PR #20 R2-m2 / PR20-SEC-14 are parts: `display_name`, `receiver_name` (the POD signer), `username`, `client_ip`,
+ * `x-forwarded-for`, `x-real-ip`. A bare `ip` stays exact-only (a part would hit `relationship`, `membership`, `ship`).
+ */
 const PII_KEY_PARTS: readonly string[] = [
   'fullname',
+  'displayname',
+  'receivername',
+  'recipientname',
+  'sendername',
+  'shippername',
+  'consigneename',
+  'username',
+  'legalname',
+  'clientip',
+  'remoteip',
+  'sourceip',
+  'userip',
+  'connectingip',
+  'forwardedfor',
+  'realip',
   'personname',
   'attentionname',
   'contactname',
@@ -108,7 +133,7 @@ const PII_KEY_PARTS: readonly string[] = [
 ];
 
 /** Personal-data names that are substrings of common words (`tin` in destination, `zip` in gzip): exact only. */
-const PII_EXACT_KEYS: ReadonlySet<string> = new Set(['name', 'ip', 'zip', 'tin', 'tins', 'vat', 'ein', 'iec', 'dob']);
+const PII_EXACT_KEYS: ReadonlySet<string> = new Set(['name', 'ip', 'zip', 'tin', 'tins', 'vat', 'ein', 'iec', 'dob', 'forwarded']);
 
 /** Bodies, raw header lists and URLs are never logged, whatever they contain (PR6-SEC-02 item 3, PR6-SEC-03 item 1). */
 const OMITTED_KEYS: ReadonlySet<string> = new Set([
@@ -151,9 +176,15 @@ function matchesClass(normalised: string, exact: ReadonlySet<string>, parts: rea
   return exact.has(normalised) || parts.some((part) => normalised.includes(part));
 }
 
+/**
+ * Cookie names with an RFC 6265bis prefix (`__Host-`, `__Secure-`, case-insensitive) are sensitive whatever follows:
+ * the refresh cookie is `__Host-rt_*` (ADR-0006), whose name holds no keyword (PR20-SEC-13 item 1).
+ */
+const COOKIE_NAME_PREFIX = /^__(?:host|secure)-/i;
+
 /** True when the value under `key` must be written as REDACTED, whatever its type (credentials; not PII). */
 export function isSensitiveKey(key: string): boolean {
-  return matchesClass(normaliseKey(key), SENSITIVE_EXACT_KEYS, SENSITIVE_KEY_PARTS);
+  return COOKIE_NAME_PREFIX.test(key) || matchesClass(normaliseKey(key), SENSITIVE_EXACT_KEYS, SENSITIVE_KEY_PARTS);
 }
 
 /**
@@ -205,6 +236,19 @@ const PARAMETER_SCHEME = /\b(digest|hoba|aws4-hmac-sha256)(?=[ \t]{1,16}[A-Za-z0
  */
 const KEY_SEPARATOR =
   /([A-Za-z0-9_.-]{1,64}(?:[ \t][A-Za-z0-9_.-]{1,64})?)(?:\\?["'])?(?:[ \t\u00a0]{0,16}[:=]|[ \t]with[ \t]value)[ \t\u00a0]{0,16}(?:(?:\r\n|\r|\n)[ \t\u00a0]{0,16})?/g;
+
+/**
+ * A quoted name, a comma and the next quoted item: a raw header list rendered as text (`JSON.stringify(rawHeaders)`
+ * -> `["Cookie","v"]`, `util.inspect` -> `[ 'Cookie', 'v' ]`, one item per line or column-padded when long; also the
+ * JSON-escaped `\"Cookie\",\"v\"`). Bounded: a 64-character name, 16 blanks before the comma, 64 blanks and one line
+ * break after it. The next item is scanned by hand (PR20-SEC-13 item 2).
+ */
+const QUOTED_LIST_ITEM = /(\\?)(["'])([A-Za-z0-9_.-]{1,64})\1\2[ \t]{0,16},[ \t]{0,64}(?:(?:\r\n|\r|\n)[ \t]{0,64})?(?=\\?["'])/g;
+
+/** A run that may hold a request target: no blank, quote or angle bracket (as URL_PATTERN). */
+const TARGET_RUN = /[^\s"'<>]+/g;
+/** Characters after which a `/` inside a run starts a request target (`url=/x?q`, `(/x?q)`, `GET:/x?q`). */
+const TARGET_LEAD: ReadonlySet<string> = new Set(['(', '=', ':', ',', '[', '`']);
 
 /** Separators inside a free-text key; the last segment is classified too (`user_pin`, `x-auth`). */
 const KEY_SEGMENT_SEPARATOR = /[ \t._-]/;
@@ -269,6 +313,22 @@ function redactUrl(url: string): string {
   return `${url.slice(0, prefixLength)}${withoutUserinfo}${queryAt === -1 ? '' : `?${OMITTED}`}`;
 }
 
+/**
+ * `/path?query` -> `/path?[OMITTED]` for a request target without a scheme (`req.originalUrl`, `GET /x?q=v failed`;
+ * PR20-SEC-13 item 3). The `/` starts the run or follows a TARGET_LEAD character; the first `?` after it starts the
+ * omitted part, which runs to the end of the run, also after a `#` (a hash route such as `/app#/track?ref=v` keeps
+ * its query there). A `?` that ends the run is kept (prose). One left-to-right pass per run, so the cost is linear.
+ */
+function omitTargetQuery(run: string): string {
+  let target = -1;
+  for (let index = 0; index < run.length; index += 1) {
+    const char = run[index];
+    if (char === '/' && target === -1 && (index === 0 || TARGET_LEAD.has(run[index - 1] ?? ''))) target = index;
+    else if (char === '?' && target !== -1 && index + 1 < run.length) return `${run.slice(0, index)}?${OMITTED}`;
+  }
+  return run;
+}
+
 // --- Authorisation schemes -----------------------------------------------------------------------------------------
 
 function keepScheme(_match: string, scheme: string): string {
@@ -281,9 +341,14 @@ function redactAuthSchemes(text: string): string {
 
 // --- Pairs ---------------------------------------------------------------------------------------------------------
 
-/** A free-text pair key is sensitive as a whole (`api key`) or by its last segment (`user_pin`, `x-auth`). */
+/**
+ * A free-text pair key is sensitive as a whole (`api key`), by its last word (`set __Host-rt_x`, whose prefix only
+ * counts at the start of a word) or by its last segment (`user_pin`, `x-auth`).
+ */
 function isSensitivePairKey(key: string): boolean {
   if (isSensitiveKey(key)) return true;
+  const blank = Math.max(key.lastIndexOf(' '), key.lastIndexOf('\t'));
+  if (blank !== -1 && isSensitiveKey(key.slice(blank + 1))) return true;
   const segments = key.split(KEY_SEGMENT_SEPARATOR);
   return segments.length > 1 && isSensitiveKey(segments.at(-1) ?? '');
 }
@@ -346,18 +411,58 @@ function valueEnd(text: string, start: number, toLineEnd: boolean): number {
   return unquotedEnd(text, start, toLineEnd);
 }
 
-/** Replaces the value of every pair (see KEY_SEPARATOR) whose key is sensitive. */
+/** True when `:` or `=` follows `end` (up to 16 blanks away): the quoted item is an object key, not a list value. */
+function startsPair(text: string, end: number): boolean {
+  let index = end;
+  while (index - end < 16 && (text[index] === ' ' || text[index] === '\t')) index += 1;
+  return text[index] === ':' || text[index] === '=';
+}
+
+/**
+ * Replaces the item after every quoted sensitive name of a list (see QUOTED_LIST_ITEM): `["Cookie","v"]` ->
+ * `["Cookie",[REDACTED]]`. An item followed by a separator is an object key (`{"t":"token","password":"v"}`) and is
+ * left to the pair pass, so this pass never hides a key from it.
+ */
+function redactQuotedLists(text: string): string {
+  const pattern = new RegExp(QUOTED_LIST_ITEM.source, 'g');
+  let output = '';
+  let copied = 0;
+  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+    if (!isSensitivePairKey(match[3] ?? '')) continue;
+    const start = match.index + match[0].length;
+    const end = valueEnd(text, start, false);
+    if (startsPair(text, end)) continue;
+    output += `${text.slice(copied, start)}${REDACTED}`;
+    copied = end;
+    pattern.lastIndex = end;
+  }
+  return copied === 0 ? text : output + text.slice(copied);
+}
+
+/**
+ * The marker for a free-text pair value: REDACTED under a sensitive key; OMITTED under a body, URL or query key, as on
+ * the structured path (`search: '?q=v'`, `query: 'q=v'` in `util.inspect` of a parsed URL; PR20-SEC-13 item 3);
+ * undefined when the value stays.
+ */
+function pairValueMarker(key: string): string | undefined {
+  if (isSensitivePairKey(key)) return REDACTED;
+  const blank = Math.max(key.lastIndexOf(' '), key.lastIndexOf('\t'));
+  return isOmittedKey(key.slice(blank + 1)) ? OMITTED : undefined;
+}
+
+/** Replaces the value of every pair (see KEY_SEPARATOR) whose key is sensitive or omitted. */
 function redactPairs(text: string): string {
   const pattern = new RegExp(KEY_SEPARATOR.source, 'g');
   let output = '';
   let copied = 0;
   for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
     const key = match[1] ?? '';
-    if (!isSensitivePairKey(key)) continue;
+    const marker = pairValueMarker(key);
+    if (marker === undefined) continue;
     const start = match.index + match[0].length;
     const end = valueEnd(text, start, isLineValuedKey(key));
     if (end === start) continue;
-    output += `${text.slice(copied, start)}${REDACTED}`;
+    output += `${text.slice(copied, start)}${marker}`;
     copied = end;
     pattern.lastIndex = end;
   }
@@ -420,14 +525,15 @@ function maskQuotedLocalParts(text: string): string {
 // --- Public string functions ---------------------------------------------------------------------------------------
 
 /**
- * Redacts a free-text string (field values, error messages, stacks), in order: URL userinfo and query strings;
- * authorisation-scheme credentials; values of sensitive pairs; credential-shaped words and words containing a sensitive
- * keyword become REDACTED; e-mail addresses are masked; line breakers are escaped. Capped at MAX_STRING_LENGTH.
+ * Redacts a free-text string (field values, error messages, stacks), in order: URL userinfo and query strings, and the
+ * query of scheme-less request targets; authorisation-scheme credentials; the item after a quoted sensitive name in a
+ * list; values of sensitive pairs; credential-shaped words and words containing a sensitive keyword become REDACTED;
+ * e-mail addresses are masked; line breakers are escaped. Capped at MAX_STRING_LENGTH.
  */
 export function redactString(value: string): string {
   const { text, truncated } = capped(value);
-  const withoutUrls = text.replace(URL_PATTERN, redactUrl);
-  const withoutPairs = redactPairs(redactAuthSchemes(withoutUrls));
+  const withoutUrls = text.replace(URL_PATTERN, redactUrl).replace(TARGET_RUN, omitTargetQuery);
+  const withoutPairs = redactPairs(redactQuotedLists(redactAuthSchemes(withoutUrls)));
   const redacted = escapeLineBreakers(maskQuotedLocalParts(withoutPairs).replace(WORD, redactWord));
   return truncated ? redacted + TRUNCATION_SUFFIX : redacted;
 }

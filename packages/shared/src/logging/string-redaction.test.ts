@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { inspect } from 'node:util';
 
 import { describe, expect, it } from '@jest/globals';
 import fc from 'fast-check';
@@ -129,6 +130,23 @@ describe('string-redaction: key classes', () => {
     expect(isSensitiveKey(key)).toBe(false);
   });
 
+  it.each(['__Host-rt_a1b2', '__host-session', '__Secure-id', '__SECURE-x'])(
+    '[PR20-SEC-13 item 1] %s (an RFC 6265bis cookie prefix) is sensitive',
+    (key) => {
+      expect(isSensitiveKey(key)).toBe(true);
+    },
+  );
+
+  it.each(['host', 'x__Host-a', '_Host-a', '__Hostname', 'secure_flag'])('%s carries no cookie prefix', (key) => {
+    expect(isSensitiveKey(key)).toBe(false);
+  });
+
+  it('[PR21-SEC-07 (b)] manual_key (the typed TOTP secret) is sensitive; label, rule, message and flag keys are not', () => {
+    expect(isSensitiveKey('manual_key')).toBe(true);
+    expect(isSensitiveKey('manualKey')).toBe(true);
+    for (const key of ['label_key', 'rule_key', 'message_key', 'description_key', 'key']) expect(isSensitiveKey(key)).toBe(false);
+  });
+
   it.each([
     ['card', 'number'],
     ['paymentMethod', 'expMonth'],
@@ -187,6 +205,29 @@ describe('string-redaction: key classes', () => {
     'ein',
     'iec',
     'dob',
+    // PR #20 R2-m2 / PR20-SEC-14: the platform's own name keys and the IP-bearing keys.
+    'display_name',
+    'displayName',
+    'receiver_name',
+    'recipient_name',
+    'sender_name',
+    'shipper_name',
+    'consignee_name',
+    'username',
+    'user_name',
+    'legal_name',
+    'client_ip',
+    'clientIp',
+    'remote_ip',
+    'source_ip',
+    'user_ip',
+    'cf-connecting-ip',
+    'true-client-ip',
+    'x-forwarded-for',
+    'X-Forwarded-For',
+    'forwarded',
+    'x-real-ip',
+    'X-Real-IP',
   ])('[PR20-SEC-02 item 1] %s is a PII key', (key) => {
     expect(isPiiKey(key)).toBe(true);
     expect(isSensitiveKey(key)).toBe(false);
@@ -237,6 +278,18 @@ describe('string-redaction: key classes', () => {
     'private',
     'piece',
     'gzip',
+    // R2-m2 negatives: no bare `ip` suffix, and operational names stay readable.
+    'carrier_name',
+    'service_name',
+    'entity_name',
+    'event_name',
+    'queue_name',
+    'relationship',
+    'membership',
+    'ship',
+    'tip',
+    'zip_file',
+    'forwarded_count',
   ])('%s is not a PII key', (key) => {
     expect(isPiiKey(key)).toBe(false);
   });
@@ -270,9 +323,11 @@ describe('string-redaction: sensitive pairs in free text', () => {
         fc.constantFrom(...Object.values(KEY_FORMS)),
         pairForms,
         fc.stringMatching(/^[A-Za-z0-9]{1,16}$/),
+        // R2-n6: the distinguishing suffix comes from fast-check too, so a reported seed replays the same value.
+        fc.stringMatching(/^[0-9a-f]{6}$/),
         fc.constantFrom('', 'login failed ', 'config: ', 'a=1&'),
-        (words, form, pair, random, prefix) => {
-          const value = `${random}${hex(6)}`;
+        (words, form, pair, random, suffix, prefix) => {
+          const value = `${random}${suffix}`;
           const output = redactString(`${prefix}${pair(form(words), value)} tail`);
           expect(output).not.toContain(value);
         },
@@ -387,6 +442,104 @@ describe('string-redaction: URLs', () => {
   });
 });
 
+describe('string-redaction: raw header lists, cookie prefixes and request targets in text (PR20-SEC-13)', () => {
+  /** A raw header list as Node keeps it (`req.rawHeaders`), with run-time sentinels; `secrets` are the four credentials. */
+  function rawHeaders(): { readonly raw: string[]; readonly secrets: readonly string[] } {
+    const [refresh, apiKey, csrf, quote] = [sentinel(), sentinel(), sentinel(), sentinel()];
+    const raw = [
+      'Host',
+      'api.example',
+      'Cookie',
+      `theme=dark; __Host-rt_${hex(4)}=${refresh}`,
+      'X-Api-Key',
+      apiKey,
+      'X-CSRF-Token',
+      csrf,
+      'X-Quote-Token',
+      quote,
+      'Accept',
+      '*/*',
+    ];
+    return { raw, secrets: [refresh, apiKey, csrf, quote] };
+  }
+
+  it('[item 1] a bare __Host-/__Secure- cookie pair and a Set-Cookie value under a neutral key', () => {
+    const value = sentinel();
+    const name = `__Host-rt_${hex(4)}`;
+    expect(redactString(`${name}=${value}; Path=/; Secure; HttpOnly`)).toBe(`${name}=${REDACTED}; Path=/; Secure; HttpOnly`);
+    expect(redactString(`set ${name}=${value}`)).toBe(`set ${name}=${REDACTED}`);
+    expect(redactString(`__Secure-id=${value}`)).not.toContain(value);
+    expect(redactString(`hostname=${value}`)).toBe(`hostname=${value}`);
+  });
+
+  it('[item 2] JSON.stringify(rawHeaders): the item after each sensitive name is redacted, the rest stays', () => {
+    const { raw, secrets } = rawHeaders();
+    const output = redactString(JSON.stringify(raw));
+    for (const secret of secrets) expect(output).not.toContain(secret);
+    expect(output).toContain(`"Cookie",${REDACTED},"X-Api-Key",${REDACTED},`);
+    expect(output).toContain('["Host","api.example",');
+    expect(output).toContain('"Accept","*/*"]');
+  });
+
+  it('[item 2] util.inspect of the list: one line, one item per line, and column-padded', () => {
+    const { raw, secrets } = rawHeaders();
+    const short = ['Cookie', `a=${hex(2)}`, 'X-Auth', hex(2), 'Host', 'h', 'Accept', 'a', 'Dnt', '1'];
+    const renderings = [inspect(raw), inspect(raw, { breakLength: Infinity }), inspect(short)];
+    expect(renderings[0]).toContain(",\n  '");
+    for (const rendering of renderings) {
+      const output = redactString(rendering);
+      for (const secret of secrets) expect(output).not.toContain(secret);
+      expect(output).not.toContain(short[1]);
+      expect(output).not.toContain(`'${short[3] ?? ''}'`);
+    }
+    expect(redactString(inspect(raw))).toContain("'Accept',\n  '*/*'");
+  });
+
+  it('[item 2] the JSON-escaped list inside a string', () => {
+    const { raw, secrets } = rawHeaders();
+    const output = redactString(JSON.stringify({ raw: JSON.stringify(raw) }));
+    for (const secret of secrets) expect(output).not.toContain(secret);
+  });
+
+  it('[item 2] a quoted sensitive word followed by an object key never hides that key from the pair pass', () => {
+    const value = sentinel();
+    const output = redactString(`{"type":"token","password":"${value}","next":"x"}`);
+    expect(output).toBe(`{"type":"token","password":${REDACTED},"next":"x"}`);
+  });
+
+  it('[item 2] a list of non-sensitive names keeps every item', () => {
+    const list = '["Host","api.example","Accept","*/*","X-Request-Id","r-1"]';
+    expect(redactString(list)).toBe(list);
+  });
+
+  it('[item 3] a scheme-less request target loses its query, keeps its path', () => {
+    const value = sentinel();
+    expect(redactString(`GET /api/v1/quotes?ref=${value}&page=2 failed`)).toBe(`GET /api/v1/quotes?${OMITTED} failed`);
+    expect(redactString(`target=/x?q=${value}`)).toBe(`target=/x?${OMITTED}`);
+    expect(redactString(`(/x/y?q=${value})`)).not.toContain(value);
+    expect(redactString(`'/x?q=${value}'`)).toBe(`'/x?${OMITTED}'`);
+    expect(redactString(`/x?q=${value}#frag`)).toBe(`/x?${OMITTED}`);
+    expect(redactString(`open /app#/track?ref=${value}`)).toBe(`open /app#/track?${OMITTED}`);
+  });
+
+  it('[item 3] keeps prose question marks, fragments and relative paths (documented gap) readable', () => {
+    expect(redactString('is it /health?')).toBe('is it /health?');
+    expect(redactString('see /docs#intro')).toBe('see /docs#intro');
+    expect(redactString('a/b?c=1')).toBe('a/b?c=1');
+  });
+
+  it('[item 3] a body, URL or query key in free text writes its value as OMITTED (util.inspect of a parsed URL)', () => {
+    const value = sentinel();
+    const parsed = inspect({ search: `?q=${value}`, query: `q=${value}`, pathname: '/x', href: `/x?q=${value}` });
+    const output = redactString(parsed);
+    expect(output).not.toContain(value);
+    expect(output).toContain(`search: ${OMITTED}`);
+    expect(output).toContain(`query: ${OMITTED}`);
+    expect(output).toContain("pathname: '/x'");
+    expect(redactString(`request url: /x?q=${value}`)).toBe(`request url: ${OMITTED}`);
+  });
+});
+
 describe('string-redaction: e-mail addresses', () => {
   it('[PR20 m4 (g)] masks an IDN address', () => {
     expect(redactString('to alice@exämple.com.')).toBe('to a***@exämple.com.');
@@ -453,6 +606,17 @@ describe('string-redaction: linear time', () => {
     ['next-line separator', 'password:\n'],
     ['with value', '"k" with value '],
     ['NBSP', NBSP],
+    // PR20-SEC-13: the quoted-list pass, the cookie prefix and the request-target pass.
+    ['quoted list item', '"a",'],
+    ['sensitive quoted list item', '"token",'],
+    ['quoted name, comma and column padding', `'a',${' '.repeat(64)}`],
+    ['escaped quoted list item', String.raw`\"a\",`],
+    ['quoted name, comma and line break', '"a",\n'],
+    ['cookie prefix pair', '__Host-a='],
+    ['request target lead', '(/'],
+    ['request target, no query', '/a'],
+    ['request target with query', '/a?'],
+    ['omitted key pair', 'query: '],
   ];
 
   it.each(families)('%s repeated to 8 KiB is redacted in < 50 ms', (_name, unit) => {

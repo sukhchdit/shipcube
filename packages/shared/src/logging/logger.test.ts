@@ -315,6 +315,15 @@ describe('createLogger', () => {
     expect(last()).not.toHaveProperty('event_type');
   });
 
+  it('[R2-m2] a plain security.<x> line redacts username, client_ip and x-forwarded-for as personal data', () => {
+    const { logger, last, raw } = setup();
+    const user = sentinel();
+    logger.warn('security.login_failed', { username: user, client_ip: '203.0.113.9', 'x-forwarded-for': '198.51.100.4', reason: 'R' });
+    expect(last()).toMatchObject({ username: REDACTED, client_ip: REDACTED, 'x-forwarded-for': REDACTED, reason: 'R' });
+    expect(raw.join('')).not.toContain(user);
+    expect(raw.join('')).not.toContain('203.0.113.9');
+  });
+
   it('lifts a valid correlation ID from security attributes when the context has none', () => {
     const { logger, last } = setup();
     createSecurityEventSink(logger).emit('csrf_rejected', { correlationId: 'attr-0001' });

@@ -4,6 +4,7 @@
 // createApp with the real platform logger (level `debug`, so the health-probe access lines are visible) writing to an
 // in-memory sink; no database needed.
 import { randomBytes } from 'node:crypto';
+import { inspect } from 'node:util';
 
 import { describe, expect, it } from '@jest/globals';
 import express from 'express';
@@ -69,6 +70,25 @@ function harness(): Harness {
       note: `Cookie: ${String(req.headers.cookie)}`,
     });
     res.once('finish', () => logger.info('test.res', { res }));
+    res.json({ ok: true });
+  });
+  widgets.get('/widgets/text', (req, res) => {
+    // PR20-SEC-13: a careless handler that turns the raw header list or the live request into text first, echoes the
+    // refresh cookie as a Set-Cookie value under a neutral key, and puts the request target into a message.
+    const refreshPair = /__Host-rt_[0-9a-f]+=[^;]+/.exec(String(req.headers.cookie))?.[0] ?? '';
+    const parsed: unknown = Reflect.get(req, '_parsedUrl');
+    logger.info('test.text', {
+      detail: JSON.stringify(req.rawHeaders),
+      escaped: JSON.stringify({ raw: JSON.stringify(req.rawHeaders) }),
+      listed: inspect(req.rawHeaders),
+      listedWide: inspect(req.rawHeaders, { breakLength: Infinity }),
+      // The full rendering is cut at 8 KiB before its URL and header parts; the shallow ones reach them.
+      inspected: inspect(req),
+      inspectedShallow: inspect(req, { depth: 0 }),
+      inspectedParts: inspect({ url: req.url, originalUrl: req.originalUrl, headers: req.headers, parsed }),
+      value: `${refreshPair}; Path=/; Secure; HttpOnly; SameSite=Strict`,
+    });
+    logger.error('test.text_failed', { note: `GET ${req.originalUrl} failed` }, new Error(`upstream failed for ${req.originalUrl}`));
     res.json({ ok: true });
   });
   widgets.get('/widgets/throws', () => {
@@ -218,6 +238,47 @@ describe('[SEC-TC-31] Cookie, Set-Cookie and Authorization never reach the API l
       ]),
     );
     expect(h.lines().find((line) => line['event'] === 'test.res')).toMatchObject({ res: '[Unsupported]' });
+  });
+});
+
+describe('[SEC-TC-31] [PR20-SEC-13] free-text renderings of the raw header list and the live request', () => {
+  it('[SEC-TC-31] [PR20-SEC-13] JSON.stringify(rawHeaders), util.inspect(req), a Set-Cookie value and req.originalUrl never leak', async () => {
+    const h = harness();
+    const theme = sentinel('theme');
+    const refresh = sentinel('refresh');
+    const proof = sentinel('proof');
+    const quote = sentinel('quote');
+    const apiKey = sentinel('apikey');
+    const csrf = sentinel('csrf');
+    const dpop = sentinel('dpop');
+    const query = sentinel('query');
+    const res = await request(h.app)
+      .get(`/api/v1/widgets/text?q=${query}&page=2`)
+      .set('Cookie', `theme=${theme}; __Host-rt_${randomBytes(4).toString('hex')}=${refresh}`)
+      .set('X-Reauth-Proof', proof)
+      .set('X-Quote-Token', quote)
+      .set('X-Api-Key', apiKey)
+      .set('X-CSRF-Token', csrf)
+      .set('Authorization', `DPoP ${dpop}`);
+    expect(res.status).toBe(200);
+    const all = h.raw.join('');
+    for (const leaked of [theme, refresh, proof, quote, apiKey, csrf, dpop, query]) expect(all).not.toContain(leaked);
+    // Positive controls: the lines were written and keep the non-sensitive parts readable.
+    const text = h.lines().find((line) => line['event'] === 'test.text');
+    expect(String(text?.['detail'])).toContain('"Cookie",[REDACTED]');
+    expect(String(text?.['detail'])).toContain('"X-Api-Key",[REDACTED]');
+    expect(String(text?.['listed'])).toContain("'X-Api-Key',");
+    expect(String(text?.['inspectedShallow'])).toContain('originalUrl: [OMITTED]');
+    expect(String(text?.['inspectedShallow'])).toContain("method: 'GET'");
+    expect(String(text?.['inspectedParts'])).toContain('search: [OMITTED]');
+    expect(String(text?.['inspectedParts'])).toContain('query: [OMITTED]');
+    expect(String(text?.['inspectedParts'])).toContain("host: '127.0.0.1:");
+    expect(String(text?.['value'])).toMatch(/^__Host-rt_[0-9a-f]+=\[REDACTED\]; Path=\/; Secure; HttpOnly; SameSite=Strict$/);
+    const failed = h.lines().find((line) => line['event'] === 'test.text_failed');
+    expect(failed?.['note']).toBe('GET /api/v1/widgets/text?[OMITTED] failed');
+    expect(String((failed?.['err'] as Record<string, unknown> | undefined)?.['message'])).toBe(
+      'upstream failed for /api/v1/widgets/text?[OMITTED]',
+    );
   });
 });
 
