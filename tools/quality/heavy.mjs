@@ -22,14 +22,23 @@
  *
  * Exit: 0 PASS, 1 FAIL or INVALID, 2 usage or internal error. Environment VALUES are never printed or recorded.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import ajvModule from 'ajv/dist/2020.js';
 
-import { CONVERTERS, convertNative, jestToCases, malformed, sanitizeNative, scrubPaths } from './lib/convert.mjs';
+import {
+  CONVERTERS,
+  convertNative,
+  hostScrubList,
+  jestToCases,
+  malformed,
+  sanitizeNative,
+  scrubCases,
+  scrubPaths,
+} from './lib/convert.mjs';
 import {
   changedPaths,
   envOverrides,
@@ -637,8 +646,10 @@ export function resolveOutBase(args, repoRoot) {
  */
 async function runSuite(item, ctx) {
   const started = Date.now();
-  /** @param {JUnitCase[]} cases @param {Partial<SuiteResult> & { coverageRaw?: unknown }} [more] */
-  const done = (cases, more = {}) => {
+  /** @param {JUnitCase[]} rawCases @param {Partial<SuiteResult> & { coverageRaw?: unknown }} [more] */
+  const done = (rawCases, more = {}) => {
+    // The one choke point: whatever a converter or runner produced, no host path reaches the committed JUnit (PR28-SEC-02).
+    const cases = scrubCases(rawCases, ctx.scrub);
     const durationS = Math.round((Date.now() - started) / 100) / 10;
     return {
       id: item.id,
@@ -803,7 +814,7 @@ export async function main(argv) {
   const buildClean = buildCleanFrom(before, porcelain(repoRoot));
 
   const work = mkdtempSync(join(tmpdir(), 'quality-heavy-'));
-  const scrub = [repoRoot, homedir()].sort((a, b) => b.length - a.length);
+  const scrub = hostScrubList({ repoRoot, homeDir: homedir(), tmpDir: tmpdir(), env: process.env, realpath: realpathSync.native });
   /** @type {Array<SuiteResult & { coverageRaw: unknown }>} */
   const results = [];
   try {
