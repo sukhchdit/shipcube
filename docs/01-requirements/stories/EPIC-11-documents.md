@@ -135,16 +135,6 @@ Feature: Label formats
     Given the carrier returns only 4x6
     Then only 4x6 is stored and offered
 
-  Scenario: Offered format recovered after creation
-    Given an adapter whose createShipment returns no PDF and whose capabilities() declares recoverLabel=true and labelFormats "PDF_4X6" and "ZPL"
-    When the booking saga reaches the document step
-    Then recoverLabel is called once for "PDF_4X6" and the 4x6 PDF is stored and offered
-    And no raster image is stored as a document and createShipment is not called again
-
-  Scenario: Label recovery fails
-    Given recoverLabel fails on every attempt
-    Then the shipment stays BOOKED with documents pending, the document step retries per the saga rules and an operator alert is raised
-
   Scenario: Format choice on confirmation page and shipment detail
     When the customer picks "A4" and presses Download
     Then the A4 file is downloaded and the printer-required hint is shown beside the button
@@ -164,6 +154,16 @@ Feature: Label formats
     Given CARRIER_LIVE_SANDBOX=1 and sandbox credentials for a carrier
     When a shipment is booked
     Then a real sandbox label PDF is stored for that carrier with its SHA-256 and is downloadable
+
+  Scenario: Offered format recovered after creation
+    Given an adapter whose createShipment returns no PDF and whose capabilities() declares recoverLabel=true and labelFormats "PDF_4X6" and "ZPL"
+    When the booking saga reaches the document step
+    Then recoverLabel is called once for "PDF_4X6" and the 4x6 PDF is stored and offered
+    And no raster image is stored as a document and createShipment is not called again
+
+  Scenario: Label recovery fails
+    Given recoverLabel fails on every attempt
+    Then the shipment stays BOOKED with documents pending, the document step retries per the saga rules and an operator alert is raised
 ```
 
 ### US-223 — Asynchronous document generation job

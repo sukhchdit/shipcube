@@ -506,7 +506,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-155 **DC** (M0 Must) Guest quoting with access token and rate limits |
 | REQs | REQ-QUOTE-002 |
 | NFRs | NFR-PERF-002, NFR-SEC-005 |
-| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012 |
+| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-041, TASK-044 |
@@ -522,6 +522,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-54 (server part): token rejected 7 days after quote expiry; never logged
 - M0 demo step "Guest gets a mock quote" via API/Swagger within 1.5 s
 - D-ARCH-107 (ADR-0008 am. 4): the quote-token authenticator applies to routes whose auth set contains quote-token (getQuote, streamQuoteResults): a bearer, when present, decides alone; otherwise a well-formed X-Quote-Token yields a guest principal (credential quote-token, authenticated false, no actor, guestTokenHash = lowercase hex SHA-256) and a missing or malformed token answers 404 NOT_FOUND with private, no-store, never 401 (A-078); createQuote (auth anonymous or session, permissionAuthenticated quote:create) branches on principal.credential. D-ARCH-106 (ADR-0003 am. 2026-11-13): createQuote starts the fan-out in its afterCommit phase (best-effort, in process, not durable): a fan-out lost to a crash must end as per-carrier timeouts at the 5 s deadline, never as a stream that does not complete (test); no tenant transaction is open while carriers are called
+- D-ARCH-109 (ADR-0008 am. 5 item 1): X-Quote-Token is read as a credential only on routes whose auth set contains quote-token; createQuote ignores the header (it returns the token and never takes one), and on claimQuote, saveQuote and createShipment the header is a declared companion that the handler checks against the quote, never an authenticator; a refresh cookie on getQuote or streamQuoteResults is ignored (404 when there is no bearer and no token)
 - AT-US-155-01 … AT-US-155-11: all 11 scenarios of US-155, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

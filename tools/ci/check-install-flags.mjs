@@ -32,7 +32,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from 
 import { basename, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { npmInvocations, writesIgnoreScriptsConfig } from './npm-command.mjs';
+import { commandCandidates, isNpmWord, npmInvocations, shellWords, writesIgnoreScriptsConfig } from './npm-command.mjs';
 
 /** @typedef {{ rule: string, message: string, location: string }} Finding */
 
@@ -133,6 +133,34 @@ const RAW_PRISMA = [
   /\bnpm\s+exec\b[^\n]*?\s--\s+prisma\b/,
 ];
 
+/** npm's `exec` command and its aliases. */
+const EXEC_WORDS = new Set(['exec', 'x', 'exe']);
+/** A workspace path or name after `-w` (never an option, never a shell expansion). */
+const WORKSPACE_ARG = /^[A-Za-z0-9@._][A-Za-z0-9@._/-]*$/;
+
+/**
+ * Whether a segment runs `npm exec` (or an alias) in any form other than the canonical
+ * `npm (-w <workspace> )*exec --no -- <bin>` (part 1 follow-up of TASK-015: options between `npm` and `exec`, such as
+ * `npm --yes exec` or `npm --package=x exec`, escaped the adjacent-word check).
+ * @param {string} segment
+ * @returns {boolean}
+ */
+export function nonCanonicalNpmExec(segment) {
+  const words = shellWords(segment).map((word) => word.replace(/[)`]+$/, ''));
+  for (const [index, word] of words.entries()) {
+    if (!isNpmWord(word)) continue;
+    const rest = words.slice(index + 1);
+    const end = rest.indexOf('--');
+    const head = end === -1 ? rest : rest.slice(0, end);
+    if (!commandCandidates(head).some((candidate) => EXEC_WORDS.has(candidate.toLowerCase()))) continue;
+    let i = 0;
+    while (rest[i] === '-w' && WORKSPACE_ARG.test(rest[i + 1] ?? '')) i += 2;
+    const bin = rest[i + 3] ?? '';
+    if (rest[i] !== 'exec' || rest[i + 1] !== '--no' || rest[i + 2] !== '--' || bin === '' || bin.startsWith('-')) return true;
+  }
+  return false;
+}
+
 /**
  * Rules shared by every command-bearing file.
  * @param {string} segment
@@ -158,8 +186,11 @@ export function segmentFindings(segment) {
   if (/(?:^|[\s(`$"'])(?:npx|bunx)(?:\s|$|["'])|\b(?:pnpm|yarn)\s+dlx\b/.test(segment)) {
     out.push({ rule: 'npx', message: `use \`npm exec --no -- <bin>\` instead of npx: "${short}"` });
   }
-  if (/\bnpm\s+(?:exec|x|exe)\b/.test(segment) && !/\bnpm\s+exec\s+--no\s+--\s/.test(segment)) {
-    out.push({ rule: 'npx', message: `\`npm exec\` must be \`npm exec --no -- <bin>\`: "${short}"` });
+  if ((/\bnpm\s+(?:exec|x|exe)\b/.test(segment) && !/\bnpm\s+exec\s+--no\s+--\s/.test(segment)) || nonCanonicalNpmExec(segment)) {
+    out.push({
+      rule: 'npx',
+      message: `\`npm exec\` must be \`npm exec --no -- <bin>\` (optionally \`npm -w <workspace> … exec --no -- <bin>\`): "${short}"`,
+    });
   }
   if (RAW_PRISMA.some((pattern) => pattern.test(segment))) {
     out.push({ rule: 'raw-prisma', message: `run Prisma through \`node tools/deps/prisma-cli.mjs <args>\`: "${short}"` });
