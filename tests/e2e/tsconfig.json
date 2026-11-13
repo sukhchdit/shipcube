@@ -1,10 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
+  "//": "Node type-stripping runs support/static-server.ts directly, so erasableSyntaxOnly makes tsc reject syntax Node cannot strip.",
   "compilerOptions": {
     "noEmit": true,
-    "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo"
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "erasableSyntaxOnly": true
   },
   "files": [],
   "include": ["**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "test-results", "playwright-report"]
 }

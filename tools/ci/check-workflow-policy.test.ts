@@ -369,6 +369,7 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
         'commitlint.config.mjs',
         '.node-version',
         'tools/test-support/',
+        'tools/test-dom/',
         '.swcrc',
         '**/.swcrc',
         'CLAUDE.md',

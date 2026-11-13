@@ -1,0 +1,26 @@
+[
+  {
+    "name": "web: initial JavaScript of the public pages (gzip)",
+    "path": "apps/web/build/client/assets/*.js",
+    "gzip": true,
+    "limit": "170 kB"
+  },
+  {
+    "name": "web: initial CSS (gzip)",
+    "path": "apps/web/build/client/assets/*.css",
+    "gzip": true,
+    "limit": "50 kB"
+  },
+  {
+    "name": "admin: initial JavaScript of the authenticated routes (gzip)",
+    "path": "apps/admin/build/client/assets/*.js",
+    "gzip": true,
+    "limit": "350 kB"
+  },
+  {
+    "name": "admin: initial CSS (gzip)",
+    "path": "apps/admin/build/client/assets/*.css",
+    "gzip": true,
+    "limit": "50 kB"
+  }
+]

@@ -6,11 +6,12 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node", "vite/client"],
-    "jsx": "react-jsx"
+    "types": ["node", "vite/client", "@testing-library/jest-dom/jest-globals"],
+    "jsx": "react-jsx",
+    "rootDirs": [".", "./.react-router/types"]
   },
   "files": [],
-  "include": ["app", "src", "*.ts"],
+  "include": ["app", "src", "tests", "*.ts", "locales/**/*.json", ".react-router/types/**/*"],
   "references": [
     {
       "path": "../../packages/shared"

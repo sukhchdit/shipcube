@@ -4,5 +4,9 @@
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
-  "description": "Playwright end-to-end suites (ADR-0024)."
+  "description": "Playwright end-to-end suites (ADR-0024).",
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.0"
+  }
 }
