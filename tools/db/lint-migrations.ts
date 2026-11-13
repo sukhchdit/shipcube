@@ -62,8 +62,12 @@
  * `SET ROLE` inside a DO body are not seen by rules 15 and 16; rules 8, 9 b and 15 do not read DO bodies. Rules 10, 11
  * and 16 read DO bodies (TASK-021): rule 11 sees `SET [SESSION] lock_timeout`, `RESET lock_timeout` and
  * `set_config('lock_timeout', …)` there, in the body and in its string literals, but not a key or name computed at
- * run time (`EXECUTE v_sql`); `SET "lock_timeout"` (quoted name) and a top-level `set_config('lock_timeout', …)` are
- * not seen yet (setter-key half, TASK-024). The outcome controls are the catalog suite (C5 grants incl. PUBLIC, C1
+ * run time (`EXECUTE v_sql`); a DO-body RESET or lower SET never lowers the tracked value (PR24-SEC-03: it may sit in a
+ * message, a dead branch or an unused string), so only a top-level RESET clears a raised value; dynamic SQL nested
+ * deeper than MAX_DYNAMIC_DEPTH is not read, and a literal there that names `lock_timeout` counts as a raised SET;
+ * `SET "lock_timeout"` (quoted name), a top-level `set_config('lock_timeout', …)` and a function created in the file
+ * whose body sets `lock_timeout` and that is then called (`SELECT f()`) are not seen yet (setter-key half, TASK-024).
+ * The outcome controls are the catalog suite (C5 grants incl. PUBLIC, C1
  * ENABLE/FORCE, the C11 converse on definer-owned objects), the withTenantTx session-leak check and, for rule 11, the
  * next file's own leading `SET lock_timeout`. Owners: dynamic-SQL allow-list and the rule 11 setter keys TASK-024.
  *
@@ -301,7 +305,10 @@ const TIME_UNIT_MS: Readonly<Record<string, number>> = { us: 0.001, ms: 1, s: 1_
 export type LockTimeoutEvent = { readonly kind: 'set'; readonly value: string } | { readonly kind: 'reset' };
 const LITERAL_SLOT = '\u0001';
 const SLOT = new RegExp(`${LITERAL_SLOT}(\\d+)${LITERAL_SLOT}`, 'g');
-/** Nesting bound of dynamic SQL inside a DO body (`EXECUTE '… EXECUTE ''…'' …'`); deeper text is not read. */
+/**
+ * Nesting bound of dynamic SQL inside a DO body (`EXECUTE '… EXECUTE ''…'' …'`); deeper text is not read, and a deeper
+ * literal that mentions `lock_timeout` counts as one unknown SET (fail closed).
+ */
 const MAX_DYNAMIC_DEPTH = 4;
 /**
  * Rule 11 inside a DO body (PR11-SEC-17 c, DO-body half; D-ARCH-078), in text order. Matched on the body with every
@@ -370,6 +377,10 @@ export function doBlockLockTimeouts(sql: string, depth = 0): LockTimeoutEvent[] 
       }
     } else if (nested !== undefined && depth < MAX_DYNAMIC_DEPTH) {
       events.push(...doBlockLockTimeouts(literalText(literals[Number(nested)] ?? ''), depth + 1));
+    } else if (nested !== undefined && /\block_timeout\b/i.test(literals[Number(nested)] ?? '')) {
+      // Past the nesting bound the text is not read: a literal that names the setting there counts as one unknown SET
+      // (fail closed; code review PR #24 R1-n1).
+      events.push({ kind: 'set', value: literalText(literals[Number(nested)] ?? '') });
     }
   }
   return events;
@@ -662,8 +673,13 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
     if (lockValue) sessionLockTimeoutMs = lockTimeoutMs(lockValue[1] as string);
     else if (LOCK_TIMEOUT_RESET.test(text)) sessionLockTimeoutMs = undefined;
     else {
+      // DO-body events only ever RAISE the tracked value (PR24-SEC-03): every literal is read as possible dynamic SQL,
+      // which is fail-closed for a SET but would be fail-open for a RESET or a lower SET found in a message, a dead
+      // branch or an unused string. Only a top-level RESET, or a top-level SET at or below the role default, lowers it.
       for (const event of doBlockLockTimeouts(statements[index] ?? '')) {
-        sessionLockTimeoutMs = event.kind === 'reset' ? undefined : lockTimeoutMs(event.value);
+        if (event.kind === 'reset') continue;
+        const ms = lockTimeoutMs(event.value);
+        if (ms !== undefined && ms > (sessionLockTimeoutMs ?? MIGRATOR_LOCK_TIMEOUT_MS)) sessionLockTimeoutMs = ms;
       }
     }
 

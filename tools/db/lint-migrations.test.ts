@@ -332,7 +332,7 @@ describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
     expect(findings[0]?.message).toContain('end it with "RESET lock_timeout"');
   });
 
-  it('[PR11-SEC-17] rule 11 reads DO bodies: a raised SET, EXECUTE literal, set_config or computed value without RESET fails; RESET, LOCAL forms, a later lower value and mere mentions pass', () => {
+  it('[PR11-SEC-17, PR24-SEC-03] rule 11 reads DO bodies: a raised SET, EXECUTE literal, set_config or computed value fails unless a top-level RESET follows; a DO-body RESET or lower SET never clears it; LOCAL forms and mere mentions pass', () => {
     const findings = lintCase('lock-timeout-do-body');
     expect(byMigration(findings)).toEqual([
       ['20261113000000_do_set_no_reset', '11'],
@@ -340,8 +340,28 @@ describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
       ['20261113000200_do_set_config', '11'],
       ['20261113000300_do_format_computed', '11'],
       ['20261113000400_do_string_body', '11'],
+      // PR24-SEC-03: DO-body events only raise; the RESET or the lower SET inside the body does not count
+      ['20261113000500_do_set_then_reset', '11'],
+      ['20261113000800_top_raised_do_lowers', '11'],
+      // PR24-SEC-03 w1-w3: a RESET in a message, a dead branch or an unused string (flagged by the base linter too)
+      ['20261113001000_do_reset_in_message', '11'],
+      ['20261113001100_do_reset_dead_branch', '11'],
+      ['20261113001200_do_reset_unused_string', '11'],
     ]);
     for (const finding of findings) expect(finding.message).toContain('end it with "RESET lock_timeout"');
+  });
+
+  it('[PR #24 R1-n1] past the dynamic-SQL nesting bound a literal naming lock_timeout counts as a raised SET (fail closed)', () => {
+    const sql =
+      "DO $a$ BEGIN EXECUTE $b$ DO $c$ BEGIN EXECUTE $d$ DO $e$ BEGIN EXECUTE $f$ SET lock_timeout = '10s' $f$; END $e$ $d$; END $c$ $b$; END $a$";
+    const events = doBlockLockTimeouts(sql);
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    expect(event?.kind).toBe('set');
+    expect(event?.kind === 'set' ? lockTimeoutMs(event.value) : 0).toBe(Number.POSITIVE_INFINITY);
+    expect(
+      doBlockLockTimeouts('DO $a$ BEGIN EXECUTE $b$ DO $c$ BEGIN EXECUTE $d$ DO $e$ BEGIN PERFORM 1; END $e$ $d$; END $c$ $b$; END $a$'),
+    ).toEqual([]);
   });
 
   it.each<[string, LockTimeoutEvent[]]>([
