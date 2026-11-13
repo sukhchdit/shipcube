@@ -621,3 +621,199 @@ The clone was removed afterwards.
 | Field | Value |
 |---|---|
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open at head `9647907`, so the merge rule (D-ORCH-004) is met for the security dimension. **Closed:** PR20-SEC-01 (MEDIUM), -05, -06, -08, -09, -11. **Closed for TASK-010's part:** -02, -03 (scheme URLs), -04 (items 1 and 3), -07 (cost), -10 (correlation ID), -12. SEC-P3-23 (TASK-010 part) closed. SEC-TC-31 and SEC-TC-63 met. Lock delta one path; both merges clean; D-ORCH-021 levers untouched; gitleaks and Semgrep clean. **Open:** PR20-SEC-13 LOW (free-text raw header lists, bare cookie pairs, scheme-less queries; items 1–3 due before TASK-052/055), INFO PR20-SEC-14..17, each with an owner (§R2.5). **Routed:** -04 item 2 → TASK-014; -10 template → TASK-113; Joi messages → TASK-020 (D-ORCH-025 (2)). **This round authorises the content of `9647907`**: the record committed on top of it passes the lane A check. PR #21 merged first (`62e4961`), so PR #20 must merge main before it can merge. That union changes two owned paths (`eslint.config.mjs`, `tools/lint/negative-fixtures.test.ts`), voids this round under clause (d), and needs the merge-only round of §R2.7 on the union commit before merge |
+
+## Round 3 (head fafa3b5)
+
+Merge-only and delta round on the PR #21 union and fix cycle 2 (§R2.7, D-SEC-PR20-02, D-ORCH-024 (3)). The round-2 record no longer satisfies lane A: `eslint.config.mjs`, `tools/lint/negative-fixtures.test.ts` and 6 new fixtures changed after `9647907` (checker rule (d)).
+
+| Field | Value |
+|---|---|
+| Commits since round 2 | `3153b3e` (merge of main `9d188fd`, which holds PRs #21, #23 and #25), then `11a995c`, `b4fa3b8`, `6cc3f93`, `fafa3b5`. Fix commits: 21 files, +589 / −34 |
+| Head | fafa3b540498f70e26993a1caffc51b4ea562c34 |
+| Lane A evidence | Run [43384035437](https://github.com/sukhchdit/shipcube/actions/runs/43384035437) on `fafa3b5` (`pull_request`, base `9d188fd`). **fast-lane `success`**: unit 135 suites / 3,051 tests, lint (2 suppressions), base-ref negative fixtures 148 passed / 9 skipped / 0 extras, lane B evidence PASS (no active suite required then). Gitleaks (pinned v8.30.1, base-ref config = PR #25's `.gitleaks.toml`): 19 commits, "no leaks found". Semgrep: 0 finding(s), 0 error(s) in 227 file(s). Only "Security-owned paths need a review record" failed: 24 owned paths, and the round-2 record names `9647907` while 8 of them changed after it. This round is the new record |
+| Owned paths changed | Since `9647907`: 8 (`eslint.config.mjs`, `tools/lint/negative-fixtures.test.ts`, 6 fixtures under `tests/fixtures/lint/layering/shared-logging-server-only/packages/shared/src/`). PR net change: 24 owned paths (round 2's 18 plus the 6 fixtures). `package-lock.json` and `tools/tsconfig.json` are byte-identical to `9647907` |
+| Reviewer / date / method | security-analyst, 2026-11-13. Read-only. Git commands ran in the main checkout only; **no command ran in the PR worktree**. Probes ran on `git archive fafa3b5` (and a rebuilt `9647907` for diffs), type-stripped with Node 24.22.3, against the main checkout's `node_modules` (real `pino`, `express`, Prisma 7.10 runtime classes, ESLint 10.14, eslint-plugin-boundaries 7.4.1); scratch junctions only, removed afterwards. No install, build, Docker or suite run. Suite results: lane A run 43384035437, the developer's gate table (full gate on `48aaf01`, targeted on `fafa3b5`) and code review r3's targeted unit/api/drift runs on a `fafa3b5` copy; none re-run here |
+| Inputs | Developer comment [6846663628](https://github.com/sukhchdit/shipcube/pull/20#issuecomment-6846663628); D-TASK010-02; D-ORCH-024 (3); D-ORCH-025 (4); D-ORCH-034; D-SEC-PR20-02; code review r3 (`840e39a` on main, R3-n1..n5); §R2.7 of this record |
+
+### R3.1 Summary
+
+- **The union is correct.** All 8 items of §R2.7 are met (§R3.2). `3153b3e` differs from a clean `git merge-tree` only in the 8 declared non-owned files. The owned files equal the clean merge, and the server-only policies stay last.
+- **Closed:** PR20-SEC-13 items 1–3 (item 4 stays with TASK-020); PR20-SEC-16 (policy, fixtures, mutation-proven); the R2-m2 part of PR20-SEC-14; PR21-SEC-07 (b), option 1.
+- **Q1 now has 0 leaks** in all 29 request forms, including the 5 free-text renderings that leaked in round 2.
+- **New this round:**
+  - **PR20-SEC-18 (LOW):** a regression from this cycle. `redactQuotedLists` re-scans and is quadratic for one input shape: 32 ms per 8 KiB string against round 2's 4.8 ms bound, and 143 ms for one log call. The fix is one line (probe-verified).
+  - **PR20-SEC-19 (LOW):** `{ name, value }` records (HAR-style header arrays, parsed cookie records) carry credentials past the walker. This existed at round 2 but was not probed then.
+  - **PR20-SEC-20..22 (INFO):** a lint two-hop through test-category files; the event argument is not redacted; free-text residuals after item 3.
+
+**Verdict: PASS_WITH_FOLLOW-UPS.** No Critical or High finding.
+
+### R3.2 §R2.7 merge-round checklist
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Pushed head | `git ls-remote origin`: `fafa3b5` is `refs/heads/feat/TASK-010-structured-redacted-logging-correlation-ids` and `refs/pull/20/head`. This record names `fafa3b5` |
+| 2 | Paths of `diff 9d188fd 3153b3e` | 69 paths: PR #20's 65 net-change paths at `9647907` (against merge base `6ac9836`), plus the 4 PR #21 files whose test loggers gained `debug` (`runtime-seams.api.test.ts`, `serve.api.test.ts`, `tests/api/contract-validation.api.test.ts`, `tools/openapi/api-mounts.ts`). None of the 4 is owned |
+| 3 | Blobs against `9647907` | 12 differ: the 7 union files of §R2.7 item 3, `request-logger.ts` (the `routePrefix` JSDoc only) and the 4 logger files. Every other path is byte-identical |
+| 4 | Owned files against `git merge-tree` | `git merge-tree --write-tree 9647907 9d188fd` = `d2b162c`. `3153b3e` differs from it in exactly 8 non-owned files: the 3 conflicts, the JSDoc and the 4 loggers. `eslint.config.mjs`, `negative-fixtures.test.ts`, `packages/shared/src/index.ts` and `problem-handler.api.test.ts` are byte-identical to the clean merge. At the head, the `shared-logging` category, `SERVER_LOGGING_TARGETS` and the three server-only disallow policies are the last entries of `BOUNDARIES_POLICIES` (`eslint.config.mjs:424-429`). `SHARED_LOGGING` keeps its round-2 cases and adds 3. `tools/lint/lint-fixtures.mjs` lints every `layering/*` root, which includes the new `packages/shared/src` fixtures (Q7') |
+| 5 | Non-owned union, security content | All met. `requestContextMiddleware` has `generateRequestId` (`randomUUID`), the pattern-checked `clientCorrelationId` and `apiMode`. There is one `RequestContextOptions`, and `isRequestContext` checks all 3 fields. `CORRELATION_ID_PATTERN` is imported from `@platform/shared` and re-exported. `requestLogger(logger)` comes right after the context. `api.use(routePrefix(API_PREFIX))` is the first layer of `api`, then the modules, then `routes.use(API_PREFIX, api)` (`app.ts:66-69`). The docs mount sits inside `routes`, after `optionsResponder` (`app.ts:63-64`). The access line is method, route template (a registered pattern or null), status and duration, never a URL or query (`request-logger.ts:66-88`). `main.ts` calls `installProcessErrorHandlers` right after the logger, before `createRuntimeServices` and the `createApp` try, with `logger: log`. `AppLogger` extends `ErrorLogger` with `info` and `debug`. `problem-handler.ts` is unchanged since `9647907` |
+| 6 | Lock delta | The `package-lock.json` and `tools/tsconfig.json` blobs: main `6ac9836` = `9d188fd`, head `9647907` = `fafa3b5`. So delta(`9d188fd` → `fafa3b5`) = delta(`6ac9836` → `9647907`), which is round 2's single leaf: `packages/shared` declares `pino ^10.4.0`. Main brought no lock change |
+| 7 | Lane A and union re-runs | fast-lane is green on `fafa3b5` (unit, lint, typecheck, base-ref fixtures). `test:api` and drift: the developer's run on `48aaf01` (93 tests, AT-US-034-01 0 unrecognised) and code review r3's targeted api run (6 suites / 93 tests) and drift (18/18) on a `fafa3b5` copy. The record step is this round |
+| 8 | PR21-SEC-07 (b) | **Option 1 taken; closed.** `tests/api/helpers/contract-validator.ts:6,24` uses `isSensitiveKey ∨ isPiiKey ∨ isOmittedKey`, and `manualkey` is a sensitive part. Over 1,048 `openapi.yaml` mapping keys and parameter names, 12 were redacted by the old regex but not by the new classes: `key`, `flagKey`, `FlagKeyPath`, `label_key`, `message_key`, `rule_key`, `description_key`, and 5 spellings of the idempotency key. All are identifiers, not credentials. 44 keys are newly redacted. Controls (`access_token`, `reauth_proof`, `recovery_codes`, `provisioning_uri`, `manual_key`, `signature`, a `__Host-` name) are all redacted |
+
+### R3.3 Probes
+
+| Probe | What it does | Outcome |
+|---|---|---|
+| Q1' live request | Round-2 Q1 unchanged (29 log calls, 8 sentinels, control 8/8) on the head build | **0 leaks in all 29 forms.** The round-2 free-text leaks (`JSON.stringify(rawHeaders)`, `util.inspect(rawHeaders)`, `util.inspect(req)`, `req.originalUrl` in a field, the `Set-Cookie` value) are now redacted |
+| Q2' corpus | Round-2's 186 cases on the head and on a rebuilt `9647907`, diffed | No regression. 8 cases changed, all from leak to redacted: the bare cookie pair, JSON `rawHeaders`, JSON entries, the Cookie continuation line, the scheme-less query, `clientIp`, `x-forwarded-for`, `username`. The remaining expected leaks are the round-2 accepted list, the PR20-SEC-14 remainder and `String(rawHeaders)` |
+| Q2b fix-cycle-2 corpus | 107 new cases: 8 header names as JSON and `util.inspect` lists; pretty, tab, CRLF, blank-before-comma and escaped lists; values with `"`, `'` or both; column mode; Map and `Headers`; cookie prefixes (case, two- and three-word keys, `;`/`,` adjacency, structured, nested `cookies`, in the event argument); 26 request-target forms; 8 OMITTED free-text keys; 16 R2-m2 PII keys and 3 negatives | Every fix-cycle-2 control holds. Leaks: a value holding both quote kinds (`util.inspect` switches to backticks), a non-string between name and value, `a.__Host-rt=`, the event argument (PR20-SEC-21), `util.inspect(new URL(…))` through `searchParams`, target leads `GET/x`, `]`, `{`, `|`, `;`, `@`, JSON `\/` and relative targets (PR20-SEC-22). `login` and `iban` are still gaps (PR20-SEC-14) |
+| Q2c records | `{ name, value }` and `{ key, value }` objects carrying credentials | HAR-style header arrays (`X-Api-Key`, `X-Reauth-Proof`), a parsed `Set-Cookie` record and a tough-cookie-style record **leak** (PR20-SEC-19). HAR `cookies` and `queryString` arrays are redacted or omitted by their key |
+| Q3' security events | Round-2 Q3 on the head and on `9647907`, diffed | Identical except timings. The 22 README §13 rows match, and the Proxy-brand residual (PR20-SEC-15) is unchanged. The key class of all 41 allow-listed attribute names is unchanged by R2-m2, so there is no new over-redaction on security lines |
+| Q5' cost | New regexes and functions uncapped at 8k/32k/128k over 15 families; `redactString` at the cap; whole log calls | `QUOTED_LIST_ITEM` and `TARGET_RUN`/`omitTargetQuery` are linear (at most 21× the time for 16× the input). **`redactQuotedLists` is quadratic** for a list of sensitive names whose escaped values close only at the end of the string. It takes 26–38 ms at 8k, 350–520 ms at 32k and 7.4–7.6 s at 128k, which is 200–290× the time for 16× the input. `redactString` at the cap takes 32 ms. One log call takes 20 ms per such field and 143 ms with two fields and a 4-level `err` chain. The `9647907` build takes 0.8 / 3.4 ms on the same input, and the patched build 1.0 / 4.6 ms (PR20-SEC-18). Round-2 families on the head: 4.3 ms at the cap, 12.6 ms for the worst call |
+| Q6' process handlers | Round-2 Q6 plus a `window` mode and a destroyed-stdout mode, with `exitAfterFlush` wired as in `main.ts` | Every mode: exit 1, empty stderr, identifier-only `err`, 0 sentinels. Two timers that throw in the same phase now give two identifier-only fatal lines (round 2: one; = code R3-n5). An immediate and a 20 ms timer scheduled before the throw never ran: the exit comes before the check phase |
+| Q7' lint guard | Head config in a scratch mini-repo (long paths, real resolver): 4 controls, round-2's 22 direct forms, 18 new `packages/shared` importer forms, 3 allowed controls and 5 two-hop forms. The fixture root linted the way `lint-fixtures.mjs` does, with two mutated configs | All 22 direct forms still error. All 18 shared-root forms error with the new message: relative, `index.js`, directory, `.ts`, dynamic, `createRequire`, `module.require`, the specifier, `pino`, `pino/browser.js`, `import type`, side-effect, `export * as`, a deep path, `src/logging-extra/`, `packages/shared/scripts/*.mjs`. `@platform/shared/src/…` is `no-unresolved`. The allowed controls are clean. **A two-hop through `test/`, `__tests__/` or a `*.test.ts` file is clean** (PR20-SEC-20). Fixtures: 3 bad give the root message and 4 ok are clean. Mutations: with the policy dropped, the 3 bad fixtures are clean; with `noneOf: 'shared-logging'` dropped, `ok-internal` is flagged |
+
+### R3.4 Status of the open findings at `fafa3b5`
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| PR20-SEC-13 | LOW | **Closed for items 1–3**; item 4 routed (TASK-020, widened by PR20-SEC-22) | Item 1: `string-redaction.ts:183-188` (prefix) and `:348-354` (last word). Item 2: `:246`, `:426-440`. Item 3: `:249-251`, `:322-330`, and the OMITTED marker at `:447-451`. Test `[SEC-TC-31] [PR20-SEC-13]`. Q1', Q2', Q2b. The §R2.8 due point (before TASK-052/055) is met. Residuals: PR20-SEC-22 |
+| PR20-SEC-14 | INFO | **R2-m2 part closed**; remainder open | 15 parts plus `forwarded` exact (`string-redaction.ts:88-104`, `:136`). Open: `login`, `iban`/`accountNumber`, the card parent through arrays, PII pairs in arrays → TASK-113 and TASK-135/139/140/188 |
+| PR20-SEC-15 | INFO | Open, unchanged (Q3') | TASK-113 |
+| PR20-SEC-16 | INFO | **Closed** | `eslint.config.mjs:234-239`, `:429`; 3 bad and 2 ok fixtures; mutation-proven (Q7'). Residual: PR20-SEC-20 |
+| PR20-SEC-17 | INFO | Open, unchanged | TASK-214 |
+| PR21-SEC-07 (b) | INFO | **Closed** (option 1) | §R3.2 item 8 |
+
+The round-1 statuses in §R2.3 are unchanged.
+
+### R3.5 Rulings on the code-review round-3 items
+
+- **R3-n2** (request-target lead set): accepted for this PR as part of PR20-SEC-22. TASK-113 may widen `TARGET_LEAD` to any non-alphanumeric predecessor. `GET/x` (a letter before the `/`) stays accepted.
+- **R3-n3** (`query: { … }` keeps the items after the first comma): agreed, it folds into R2-n1 (a) (TASK-113/214). Listed in PR20-SEC-22.
+- **R3-n4:** (a) the two-hop through test-category files is PR20-SEC-20 (INFO, TASK-020 plus the TASK-022 bundle scan). (b) The doubly escaped list is accepted: it is the same class as triply encoded JSON and `%2540`, and a gap-header line is optional.
+- **R3-n5:** no security action. Each extra fatal line is identifier-only, and the deferral ends before the check phase (Q6').
+- **R3-n1:** no security impact.
+- Code review §R3.4 item 4 ("every new regex is linear; worst 4.3 ms at the cap") holds for the regexes but not for the scan path of `redactQuotedLists`. Its families had no closer at the end of the string. See PR20-SEC-18.
+
+### R3.6 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| PR20-SEC-18 | `redactQuotedLists` re-scans an item that turns out to be an object key: quadratic for a list of sensitive names whose escaped values close only at the end | LOW | CWE-407, CWE-400 | A04 | `packages/shared/src/logging/string-redaction.ts:426-440` (the `continue` at `:434`); `escapedQuotedEnd` `:383-393` | senior-developer: in PR #20 if a further cycle runs (before the lane-B evidence), otherwise before TASK-052/TASK-055 merge | Open |
+| PR20-SEC-19 | `{ name, value }` / `{ key, value }` records (HAR-style header arrays, parsed cookie records, SDK parameter records) keep credential values | LOW | CWE-532 | A09 | `packages/shared/src/logging/redaction.ts:154-172` (`walkObject`); the pair rule covers arrays only (`:135-152`) | senior-developer: in PR #20 if a further cycle runs, otherwise before TASK-113 or TASK-055 merges, whichever is first | Open |
+| PR20-SEC-20 | Shared-root policy: a two-hop through a test-category file (`**/{test,tests,__tests__}/**`, `*.test.*`) is not blocked | INFO | CWE-1164 | A05 | `eslint.config.mjs:49` (`TEST_FILES`), `:234-236` | TASK-020 (lint config); backstop TASK-022 bundle scan | Open |
+| PR20-SEC-21 | The event argument of a logger call is written unredacted (escaped, cut to 128 characters) | INFO | CWE-532 | A09 | `packages/shared/src/logging/logger.ts:213` | TASK-020 (lint, with PR20-SEC-13 item 4); optional runtime guard TASK-113 | Open |
+| PR20-SEC-22 | Free-text residuals after PR20-SEC-13 items 1–3 | INFO | CWE-532 | A09 | `string-redaction.ts:246-251`, `:443-451`; gap list in the header comment | TASK-020 (widened item-4 rule); runtime extras TASK-113; R2-n1 (a) TASK-113/214 | Open |
+
+#### PR20-SEC-18 (LOW): quadratic re-scan in `redactQuotedLists`
+
+- **Description** (Q5').
+  - For each quoted sensitive name followed by a comma and a quote, the pass scans the next item with `valueEnd`. When that item is followed by `:` or `=` (`startsPair`), the loop continues from the end of the regex match, not from the end of the scanned item.
+  - With escaped quotes, `escapedQuotedEnd` stops only at a backslash-quote followed by a structural character. Take a string of N units, each a quoted sensitive name, a comma and an escaped quote, ended by one escaped quote and a colon. Every unit then scans to the end of the string: O(N²).
+  - Measured: 26–38 ms per 8 KiB string (round 2 bound 4.8 ms) and 143 ms per log call with two such fields and a 4-level `err` chain. Uncapped, 128k characters take 7.5 s; the 8 KiB cap is what bounds it.
+  - The linear-time families in `string-redaction.test.ts` (under 50 ms per 8 KiB) and code review r3's 18 families lack the closer-at-end shape. The absolute 50 ms threshold would pass this shape anyway.
+- **Exploitability and impact.** It needs about 8 KiB of attacker-shaped free text in a logged string. No current emitter logs request-controlled free text: access lines carry method, template, status and duration; the problem handler logs `thrown` only at status 500 or above; Joi details are path and type only. The impact is event-loop blocking of about 0.1 s per log call. M × L = **LOW**. It is a regression from this cycle.
+- **Remediation** (`string-redaction.ts:434`). One line: skip past an item that is an object key.
+
+  ```ts
+  if (startsPair(text, end)) { pattern.lastIndex = end; continue; }
+  ```
+
+  Probe-verified on a patched build: linear (8k → 128k: 17× the time for 16× the input), 1.0 ms per field and 4.6 ms with the `err` chain. The outputs of Q1', Q2' and Q2b are byte-identical. A list that starts inside a quoted object key is contrived, and the pair pass still runs over the whole string.
+- **Verification.** A unit test with this family that asserts scaling, not an absolute time: the median of 5 runs of time(8 KiB) / time(1 KiB) stays under 16. Alternatively, a bound of at most 10 ms. Add the family to the linear-time table.
+
+#### PR20-SEC-19 (LOW): `{ name, value }` records carry credentials past the walker
+
+- **Description** (Q2c).
+  - The walker classifies values by key, and since fix cycle 1 it also classifies `[name, value]` arrays by the name.
+  - The record form is an object with a string `name` (or `key`) and a `value`. It is classified by its literal keys: `name` is a PII exact key, so the header *name* becomes `[REDACTED]`; `value` is neutral, so the credential stays.
+  - Leaked in Q2c:
+    - `headers: [{ name: 'X-Api-Key', value }]` and the same with `X-Reauth-Proof` (HAR and HTTP-trace shape);
+    - a parsed `Set-Cookie` record `{ name: '__Host-rt_x', value, path, secure }`;
+    - a tough-cookie-style `{ key: '__Host-rt_x', value }`.
+  - The same shape appears in SDK responses (`{ Name, Value }` parameter records).
+  - A Cookie header inside a HAR array is saved by the free-text cookie prefix. HAR `cookies` and `queryString` arrays are handled by their key.
+- **Exploitability and impact.** Impact is H: an API key, a step-up proof or the refresh token. It needs code that logs header or cookie records (HTTP tracing, HAR capture, SDK debugging), and none is current or planned in Waves 0–1. Rated **LOW** on the PR20-SEC-03 and PR20-SEC-13 precedent (high impact, no current or planned emitter).
+- **Remediation** (`redaction.ts` `walkObject`). When an object has an own string `name` or `key` (any case) and an own `value` (any case), classify the value by that string with the array pair rule (`pairMarker`, which includes the cookie prefix through `isSensitiveKey`). Write the value as the marker when one applies.
+- **Verification.**
+  - Unit cases for the four shapes above plus `{ Name, Value }`.
+  - Extend `[SEC-TC-31]` with `headers: [{ name: 'X-Api-Key', value }]` and `{ name: '__Host-rt_x', value }`, and assert that no sentinel appears.
+
+#### PR20-SEC-20 (INFO): two-hop through test-category files
+
+- **Description** (Q7', = code R3-n4 (a)). Files under `**/{test,tests,__tests__}/**` and `*.test.*` are in the `test` category, which the new policy exempts. A non-test `packages/shared` module, or the root `index.ts`, may import or re-export such a file, and that file may import the logging module. Pino then reaches the `@platform/shared` root. No policy stops non-test code from importing test-category files.
+- **Fix:**
+  - a repository-wide policy that non-test files of the app and package categories never import the `test` category (production code never imports tests, which also keeps test fakes out of bundles), with a negative fixture;
+  - or narrow the `packages/shared` carve-out to `*.test.*`.
+  - The backstop is TASK-022's bundle scan (no `pino` in the web and admin bundles).
+
+#### PR20-SEC-21 (INFO): the event argument is not redacted
+
+- **Description** (Q2b). `log.<level>(event, fields)` writes `event` as both `message` and `event`. It is escaped and cut to 128 characters, but not redacted. A dynamic event, such as a template literal holding `req.originalUrl` or a cookie, keeps query values and credentials. Every current call site passes a literal or an internal constant. A grep of the head finds two non-literal call sites, both internal: the process-error event names and the sink's invalid-event constant.
+- **Fix:**
+  - (a) TASK-020 lint, together with PR20-SEC-13 item 4: the first argument of a logger method is a string literal, or an `as const` identifier, that matches `^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$`.
+  - (b) An optional runtime guard (TASK-113): an event that fails `FALLBACK_EVENT` is written as `log.invalid_event`, and its text goes through `redactString` into a field.
+
+#### PR20-SEC-22 (INFO): free-text residuals after PR20-SEC-13 items 1–3
+
+- **Description** (Q2b and code review r3). These forms keep values:
+  - (a) `util.inspect(new URL(…))` writes `searchParams: URLSearchParams { 'q' => 'v' }`, which keeps non-sensitive query values. A sensitive parameter name is still caught, because the `=` of `=>` acts as a pair separator.
+  - (b) Request-target leads outside `TARGET_LEAD`: `GET/x?q`, `]`, `{`, `|`, `;`, `@`, and a JSON-escaped `\/` (= R3-n2).
+  - (c) `query: { page, q }` keeps the items after the first comma (= R3-n3, R2-n1 (a)).
+  - (d) A list value that holds both quote kinds is backtick-quoted by `util.inspect` and is not paired. Credential formats in this system never contain quotes. Doubly escaped lists (= R3-n4 (b)).
+  - (e) `String(rawHeaders)`, which the header comment documents.
+- **Fix:**
+  - Widen PR20-SEC-13 item 4 (TASK-020): flag `util.inspect(…)`, `JSON.stringify(…)`, `String(…)` and template literals with non-literal expressions anywhere in logger call arguments. Objects go in as fields, where the walker is the control. This closes the whole class at the source.
+  - Optional runtime extras (TASK-113):
+    - any non-alphanumeric target lead;
+    - `searchparams` as an omitted key, plus a `URLSearchParams { … }` brace pass;
+    - bracket matching for omitted values (R2-n1 (a), TASK-113/214).
+
+### R3.7 Supply chain, workflow levers, scans, ASVS
+
+- **Lock and dependencies:** unchanged since round 2 (§R3.2 item 6). No new package.
+- **Inline suppressions** in the 618 added lines (the fix commits plus the hand resolution of the merge): **0** (`eslint-disable`, `nosemgrep`, `gitleaks:allow`, `@ts-ignore`, `@ts-expect-error`, `istanbul`/`c8 ignore`, `stylelint-disable`).
+- **D-ORCH-021 levers:** `git diff origin/main...fafa3b5 -- .github` is empty, so `RANGE_BASE`, `BASH_ENV`, `PATH`, `BASH_FUNC_*`, `defaults.run`, folded gate steps and `$GITHUB_ENV`/`$GITHUB_PATH` writes are unchanged.
+- **Scans.**
+  - Lane A: gitleaks with the PR #25 config found no leaks in 19 commits; Semgrep found 0 over 227 files.
+  - A Node emulation of the gitleaks v8.30.1 defaults with the head `.gitleaks.toml` found 0 over the 618 added lines (a run-time positive control: 1) and 0 over this round's text.
+  - `semgrep --config auto` and a local gitleaks image were not run (no Docker; Semgrep is not installed).
+  - All probe sentinels were random and generated at run time. None is quoted here.
+- **ASVS 4.0.3 L2 after this round:**
+  - **V7.1.1:** Met for structured fields and the round-2 free-text forms. Residuals: PR20-SEC-19 (records, LOW), PR20-SEC-21/22 (INFO).
+  - **V7.1.2:** Met for the PII class. The PR20-SEC-14 remainder is INFO.
+  - **V7.1.3, V7.1.4, V7.3.1, V7.4.1, V7.4.2:** Met as in round 2 (Q3', Q6').
+
+### R3.8 Merge-order notes (lane B evidence, merges of main)
+
+- **PR #28 has merged** (2026-11-13 07:37 UTC, `f56b12f`, which changes `tools/quality/activation.test.ts` and `required-suites.json`). Main is now `a7bb07f` (docs and agent memory after that). D-ORCH-034 (2) therefore applies to this PR.
+- **An evidence-only commit after this record keeps it valid.** Lane-B evidence goes to `docs/05-quality/tests/runs/<stamp>_<sha7>/` (`required-suites.json` `report_naming`), which is `docs/**` and not security-owned. §R3.9 case F proves it.
+- **A merge of the current main after this record keeps it valid.** `git merge-tree --write-tree fafa3b5 a7bb07f` is clean (`fcfbea3`). Since the merge base `9d188fd`, no path changed on both sides, so main's owned `tools/quality/**` change does not intersect the PR's owned net change (case G). D-ORCH-034 (3) still requires any merge of main to come **before** the evidence.
+- **Fixes after this record:**
+  - A non-owned fix (for example PR20-SEC-18's line in `string-redaction.ts`) keeps lane A green (case E). It must come before the evidence, and D-SEC-PR20-01 asks for a short delta check of it.
+  - An owned-path change after this record voids it (case D).
+- **Order:** optional PR20-SEC-18/19 fix → optional merge of main → lane-B evidence → this record as a docs-only commit → squash merge.
+
+### R3.9 Record check (simulated)
+
+**Setup.**
+1. `git clone --shared --no-checkout <main checkout>` into scratch, then `checkout --detach fafa3b5`.
+2. Copy this file in and commit it as a docs-only commit.
+3. Run main's `tools/ci/check-security-owned-paths.mjs` (extracted with `git archive` from `origin/main` `a7bb07f`) with `--root <clone> --pr 20 --json`. Each scenario commit is checked out first, because the tool reads records from the working tree.
+
+The clone was removed afterwards.
+
+**Observed: `pass`** (exit 0) with base `a7bb07f` (main) and with lane A's base `9d188fd`. 24 owned paths, satisfied by this record at `fafa3b5`. The round-1 (`dae1f96`) and round-2 (`9647907`) rows produce only notes.
+
+| Case | Change after the record | Result |
+|---|---|---|
+| B | none: head `fafa3b5` as pushed, without this round (bases `a7bb07f` and `9d188fd`) | `missing` (reproduces lane A's two notes) |
+| C | `--pr 21` | `missing` |
+| D | owned path: one byte added to `eslint.config.mjs` | `missing` ("names fafa3b5, but eslint.config.mjs changed after it") |
+| E | non-owned fix: the PR20-SEC-18 line in `string-redaction.ts` | `pass` |
+| F | lane-B evidence only: `docs/05-quality/tests/runs/<stamp>_fafa3b5/unit.junit.xml` | `pass` |
+| G | merge of the current main `a7bb07f` (includes PR #28's `tools/quality/**`) | `pass`; the merge changes no owned path of this PR |
+
+| Field | Value |
+|---|---|
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open at head `fafa3b5`, so the merge rule (D-ORCH-004) is met for the security dimension. **§R2.7 merge round: all 8 items met.** The union equals a clean merge on every owned path; the server-only policies stay last; the lock delta is the same single `pino` edge; `installProcessErrorHandlers` runs before the services; `routePrefix` is the first layer of `api`; `apiMode` sits beside `requestId`. **Closed:** PR20-SEC-13 items 1–3 (item 4 → TASK-020), PR20-SEC-16, the R2-m2 part of PR20-SEC-14, PR21-SEC-07 (b) (option 1, nothing weakened). Q1 has 0 leaks in all 29 request forms. Gitleaks and Semgrep are clean, and the D-ORCH-021 levers are untouched. **Open, new:** PR20-SEC-18 LOW (`redactQuotedLists` quadratic re-scan, a regression from this cycle; one-line fix in §R3.6; in PR #20 if a further cycle runs, otherwise before TASK-052/055); PR20-SEC-19 LOW (`{ name, value }` credential records; before TASK-113 or TASK-055); INFO PR20-SEC-20 (lint two-hop through test files, TASK-020/022), -21 (unredacted event argument, TASK-020), -22 (free-text residuals, TASK-020/113/214). **Still open:** PR20-SEC-14 remainder, -15, -17 with their round-2 owners. Code-review R3-n2/n3/n4/n5 are ruled in §R3.5. **This round authorises `fafa3b5` for merge** once this record is committed on top of it as a docs-only commit. A later lane-B evidence commit under `docs/**`, a clean merge of main that changes no owned path of this PR, or a non-owned fix keeps it valid; an owned-path change voids it (§R3.8, §R3.9) |

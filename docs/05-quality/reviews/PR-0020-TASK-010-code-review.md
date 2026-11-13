@@ -278,3 +278,108 @@ The worktree was used read-only.
 5. **Squash merge**, because the intermediate fix commits are not individually gated.
 
 _Note:_ while this round was in progress, PR #21's head moved from `e046ea2` to `c3e7f5f`, which only adds its security record (docs). `git merge-tree 9647907 c3e7f5f` gives the same three conflicts. The merged `app.ts:85` still auto-keeps `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)`. The four `{ info, error }` loggers in item (h) are unchanged. The checklist stands.
+
+## Round 3 (head fafa3b5)
+
+Delta review of fix cycle 2: the merge of main `3153b3e` (main `9d188fd`, which includes PRs #21, #23 and #25) plus four fix commits `11a995c`, `b4fa3b8`, `6cc3f93` and `fafa3b5`. Inputs: the §R2.5 union checklist (a)–(j), R2-m1/R2-m2, PR20-SEC-13 items 1–3, PR21-SEC-07 (b), R2-n4..n7, D-ORCH-024 (3), D-ORCH-025 (4) and D-SEC-PR20-02.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The PR #21 union is correct. Its merge differs from a clean re-merge in exactly the 8 claimed files, and each
+      hand edit follows §R2.5. Drift shows 0 unrecognised, and putting the old routePrefix mount back fails 4 tests.
+      R2-m1 and R2-m2 are closed (3/3 lint mutants and 10/10 redaction mutants killed). PR20-SEC-13 items 1–3 and
+      PR21-SEC-07 (b) are done, and the new regexes are linear. Only NITs are open.
+FINDINGS: R3-n1..R3-n5 (NIT), §R3.3.
+GOOD: Every fix has a mutation proof and a positive control. The contract-excerpt redactor now uses the logging key
+      classes (the only change against the old regex is for i18n/flag identifiers). exitAfterFlush is crash-only:
+      0 timer ticks between the fatal line and the exit, and a top-level ESM throw also reaches the handler.
+SECURITY-FLAGS: R3-n2 (request-target lead set) and R3-n4 (lint `test/`-folder hop, double-escaped lists) are
+      defence-in-depth residuals for the merge + delta round. Over-redaction ruling: §R3.4 item 3.
+```
+
+### R3.1 Verification performed
+
+I used the worktree read-only. I extracted `git archive fafa3b5` into the reviewer scratchpad and junctioned `node_modules` to the MAIN checkout, overriding `@platform/shared` and `@platform/api` with per-workspace junctions under `apps/`, `packages/` and `tests/`. Cleanup: junctions removed first, then the copy. MAIN `node_modules` still has 740 entries, `C:\` has no stray link, and the worktree `git status` is clean.
+
+**Not re-run** (dispatch constraints): Docker, integration, coverage, build, full lint and full unit. For those I relied on:
+- lane A run 43384035437 on the exact head `fafa3b5`: `fast-lane` success, with lint (2 suppressions), unit 135 suites / 3051 tests, and the base-ref no-weakening step at 148 passed / 9 skipped / **0 extras**. `scans` is red only at "Security-owned paths need a review record", which is expected until the merge + delta security record lands. `ci-gate` is red as the aggregate.
+- the developer's gate table: full gate on `48aaf01`, including integration 18 / 185 and coverage 97.73 / 96.19.
+
+| Check | How | Result |
+|---|---|---|
+| Merge proof | `git merge-tree --write-tree 9647907 9d188fd` → `d2b162c`; `git diff --stat d2b162c 3153b3e` | **Exactly 8 files**: the 3 conflicts (`app.ts`, `main.ts`, `request-context.ts`), the `routePrefix` JSDoc (`request-logger.ts`) and the 4 test loggers. The auto-merged `eslint.config.mjs`, `negative-fixtures.test.ts`, `packages/shared/src/index.ts` and `problem-handler.api.test.ts` are byte-identical to the clean merge |
+| Union checklist | The merged `app.ts`, `main.ts` and `request-context.ts`, read in full, plus the 5 small hunks | (a)–(j) all met (§R3.4 item 1) |
+| Drift (AT-US-034-01) | Jest unit `tools/openapi/drift` in the copy | 18/18 pass, 0 unrecognised. **Mutation:** putting `routes.use(API_PREFIX, routePrefix(API_PREFIX), api)` back fails 4 tests (`middleware "<anonymous>" mounted under a path`) |
+| Targeted unit | `--selectProjects unit -i`: `packages/shared/src/logging`, api `platform/logging` + `runtime/process-errors`, worker logging | 13 suites / 442 tests pass |
+| Targeted api | `--selectProjects api -i` (the whole project: 6 suites) | 6 suites / **93 tests** pass (= developer's `48aaf01` count), including the new `[SEC-TC-31] [PR20-SEC-13]` case, `contract-validation`, `runtime-seams` and `serve` |
+| R2-m1 fixtures | `negative-fixtures -t TASK-010` | 18/18 (13 from r2 plus 3 bad and 2 ok) |
+| R2-m1 mutations | sed on the copy's `eslint.config.mjs` | **All killed:** drop the new policy → 3 fail; `noneOf: ['test','shared-logging']` → `['test']` → 1 fail (`ok-internal`); `pkg: 'shared'` → `'xshared'` → 3 fail |
+| R2-m1 extra vectors | Mini-root `layering/zz-probe` linted by the real `tools/lint/lint-fixtures.mjs` | **Blocked** (root message): `export {…} from './logging/…'`, `import()`, `import type`, `@platform/shared/logging/redaction`, `pino-pretty`, a sibling `src/logging.ts` importing pino, `src/errors/deep.ts` → `../logging/`. **Clean:** a non-test module re-exporting `./test/helper.js` or `./__tests__/h.js`, which itself re-exports logging (R3-n4 a); `createRequire(import.meta.url)` aliased as `r('pino')` (Vite cannot bundle `node:module`, so this is not a browser path); `sonic-boom` and `thread-stream` (out of scope, as in r2) |
+| Redaction mutations | sed on the copy's `string-redaction.ts`; the shared logging suite (422 tests) | **10/10 killed:** `__Host-`/`__Secure-` prefix off (5); last-word pair key off (1); quoted-list pass off (3); request-target pass off (1); free-text OMITTED marker off (1); `manualkey` dropped (1); `username` dropped (4); `startsPair` guard off (1); `=` dropped from TARGET_LEAD (1); `forwarded` exact dropped (2) |
+| Contract excerpt mutations | sed on `tests/api/helpers/contract-validator.ts`; api `contract-validation` | Drop `isPiiKey` → 1 fail; drop `isOmittedKey` → 1 fail (`provisioning_uri`) |
+| Leak probe | `redactString` over 41 vectors with a sentinel (tsx, scratchpad) | **Redacted:** `JSON.stringify(rawHeaders)`, `util.inspect` (one-line, per-line long, `breakLength: Infinity`), single-escaped JSON, a space before the comma, CSRF/Proxy-Authorization/`x-quote-token` lists, bare `__Host-rt_*=` / `__Secure-*=`, `set __Host-rt_x=`, `{"__Host-rt_x":…}`, `GET /x?token=… HTTP/1.1`, `{"originalUrl":"/x?q"}`, `(/x?q)`, `path=/x?q`, the hash route `/app#/track?ref=`, `util.inspect({search, query, href})`, `body:`, `querystring=`, `labelUrl:`. **Kept:** the documented bounds (65 blanks, two line breaks, unquoted `String(rawHeaders)`, relative `x?q`, `name: Alice`-style free-text PII). The R2-n1 residuals (PEM, full-width key, JSON array value). New: a double-escaped list (R3-n4 b); a target after `|`, `;`, `{` or `@` (R3-n2); `query: { page: '2', q: 'v' }` keeps the items after the first comma (R3-n3) |
+| Over-redaction | 14 readable strings | `curl: (7)…` → `curl: [OMITTED]` (the `url` suffix), `invalid body: …`, `query: SELECT 1`, `payload: 42` → `[OMITTED]`; `/a?b/` in a regex message → `/a?[OMITTED]`; `["token","password","x"]` → the middle item is redacted. Readable: `docs/a?b`, `1/2?`, stack frames, `["Host","example.com",…]`, `GET /health/live 200`, `Is /x? the path`, `resource: shipment` (ruling: §R3.4 item 3) |
+| ReDoS | 18 adversarial families at 1k/2k/4k/8k characters (the new `QUOTED_LIST_ITEM` with escaped/unclosed quotes and blank runs, `startsPair`, `TARGET_RUN`/`omitTargetQuery` with `/`, `(/`, `=/`, `/a?`, `__Host-` prefix, `query:`/`url=` keys, two-word keys, backslash runs) | Linear: 8k/1k ratio ≤ 8.5 for 8× the input; **worst 4.3 ms at the 8 KiB cap**. Agrees with the developer's 11-family uncapped scaling result |
+| PII keys vs the contract | Every block-style property key of `openapi.yaml` (550) through the classes | `display_name`, `receiver_name`, `legal_name`, `name`, `email`, `phone`, `address*` → PII. `carrier_name`, `service_name`, `job_name`, `entity_name`, `holiday_name`, `ip_coarse` stay readable. No bare `ip` suffix |
+| PR21-SEC-07 (b) parity | Old excerpt regex vs `isSensitiveKey ∨ isPiiKey ∨ isOmittedKey` over the 550 keys | No longer redacted: only `key` (the feature-flag key, `^[a-z0-9][a-z0-9_.-]{2,63}$`), `label_key`, `message_key`, `rule_key` and `description_key`. These are i18n/flag identifiers, not credentials, so nothing is weakened. Newly redacted: 19 keys (PII, URLs, `session_id`) |
+| exitAfterFlush, real process | Child process (tsx) with the real `process-errors.ts`, stdout a pipe, a fake `fatal` writing a 4 MB line; parent reads, optionally paused | `flush`: the full 4 MB line arrives, exit 1, **0 timer ticks** between crash and exit, the callback path (no 1 s wait). Unhandled rejection, a top-level ESM throw after the handlers (the `createApp` rethrow path) and two queued throws each give exactly 1 fatal line and exit 1. **Control `immediate`** (bare `process.exit`): also lossless, even with the reader paused for 300 ms or 2.5 s. On this Windows 11 / Node 24 host, `process.stdout` to a pipe is synchronous (R3-n1) |
+| Lock delta | `git diff --text origin/main fafa3b5 -- package-lock.json` | Unchanged: only `packages/shared` gains `dependencies: { pino: ^10.4.0 }`. `tools/tsconfig.json` and the lock did not change since `9647907` |
+| Current main / open PRs | `git merge-tree` of `fafa3b5` against `origin/main` (4b1dace), #28, #24, #26 and #30 | main and #28: clean. #24: `db/runtime.ts`, `tools/tsconfig.json`. #26: `with-tenant-tx.ts`, lock, `packages/shared/package.json` (both add a `dependencies` block; #26 adds `uuid`). #30: api and worker `main.ts` (#30 adds `secrets`). See §R3.5 item 5 |
+| PR body (R2-n5) | `gh pr view 20` | Fixed: the header names `3153b3e`; the gates are for `48aaf01`/`fafa3b5`; the union note follows D-ORCH-024 (3) |
+
+### R3.2 Round-2 finding closure
+
+| ID | Status | Evidence |
+|---|---|---|
+| R2-m1 (PR20-SEC-16) | **Closed** | `eslint.config.mjs:234-239,426-429`: the last policy, importer = `packages/shared` outside `test` and `shared-logging`, disallowing the logging specifier, `pino*` and resolved logging files. Fixtures `…/shared-logging-server-only/packages/shared/src/**` (3 bad, 2 ok); `negative-fixtures.test.ts:159-175,729-736`. 3 mutations killed. The r2 probe (root `export *` from logging) now errors. Residual: R3-n4 (a) |
+| R2-m2 (PR20-SEC-14 part) | **Closed** | `string-redaction.ts:83-104` (15 parts), `:136` (`forwarded` exact). The bare `ip` stays exact-only. 22 positive and 11 negative key tests, the walker test and the `security.login_failed` + `username` logger test. 2 mutations killed |
+| R2-n4 | **Closed** | `log.ts:7-11` |
+| R2-n5 | **Closed** | PR body |
+| R2-n6 | **Closed** | `string-redaction.test.ts:327` `fc.stringMatching(/^[0-9a-f]{6}$/)` |
+| R2-n7 | **Closed** (R3-n1 for the comment) | `process-errors.ts:39-62`; the api and worker `main.ts`; 4 tests. Correct: it exits once, falls back to a 1 s timer, exits at once on a synchronous throw, and the fatal line comes before the exit |
+| R2-n1 / n2 / n3 | **Routed** (D-SEC-PR20-02) | TASK-113 / TASK-214, with PR20-SEC-15/17. Add R3-n3 to R2-n1 (a) |
+| PR20-SEC-13 items 1–3 | **Done** | §R3.1 leak probe and SEC-TC-31 api case (8 sentinels). Item 4 → TASK-020 |
+| PR21-SEC-07 (b) | **Done** | `contract-validator.ts:6,24`; `manualkey` is a sensitive part (`string-redaction.ts:58`); test at `contract-validation.api.test.ts:224-236` |
+
+### R3.3 Findings (NIT only)
+
+| ID | Sev | Location | Issue | Suggested fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `apps/api/src/platform/runtime/process-errors.ts:41-45` | The JSDoc premise "a pipe is asynchronous on Windows, where `process.exit` straight after the write can drop the line" did not reproduce. On this host (Windows 11, Node 24), the bare-`process.exit` control delivered a 4 MB fatal line through a pipe even with the reader paused for 2.5 s, because the child blocked in `write`. Windows TTYs are the asynchronous case. The helper is correct and harmless; only the comment is wrong. Also, `api.docs_unavailable` and `api.listen_failed` still use a bare `process.exit` | Reword it: "stdout is synchronous for files and pipes; a Windows TTY is asynchronous …". Optionally, use the same exit for the two `main.ts` exits |
+| R3-n2 | NIT | `packages/shared/src/logging/string-redaction.ts:251` (`TARGET_LEAD`) | A scheme-less target keeps its query after `|`, `;`, `{` or `@` (`{/x?q=v}`, `;/x?q=v`, `|/x?q=v`). Low reach, because a structured `url`/`originalUrl` key is OMITTED anyway | Treat any non-alphanumeric predecessor as a lead (so `docs/a?b` stays readable), or list the set in the gap header |
+| R3-n3 | NIT | `string-redaction.ts:443-466` (omitted marker + `unquotedEnd`) | The R2-n1 (a) residual also hits the new free-text OMITTED keys. `util.inspect({ query: { page: '2', q: 'v' } })` → `{ query: [OMITTED], q: 'v' } }`, so later query items leak and the brace balance breaks. `util.inspect(req)` is not affected (Express 5 `req.query` is a prototype getter) | Fold it into the routed R2-n1 (a) bracket-matching fix (TASK-113/214) |
+| R3-n4 | NIT | (a) `eslint.config.mjs:236`; (b) `string-redaction.ts:246` | (a) The "tests excepted" carve-out uses `TEST_FILES`, which includes `**/{test,tests,__tests__}/**`. A non-test module re-exporting `./test/helper.js`, where that file re-exports logging, gives 0 errors: a two-hop path into the root. This is the same exemption every policy uses, and it needs an obviously odd re-export. (b) A doubly JSON-escaped list (`\\\"Cookie\\\"`) is not paired | (a) Optional: a policy that non-test `packages/shared` files never import `test`-category files, or a gap note. (b) Add it to the gap header next to `%2540` |
+| R3-n5 | NIT | `apps/api/src/platform/runtime/process-errors.ts:73-79` | Since the exit is deferred, `crash` can write a second fatal line if another error arrives before the flush callback. The probe showed none, because exit comes on the next tick with synchronous stdout. The old JSDoc said "after the first fatal line" | None needed. Optionally, skip `log.fatal` when `exiting` is already true, or say "at least one" in the comment |
+
+### R3.4 Reviewer-focus answers
+
+1. **Union checklist (a)–(j): all met.**
+   - (a) The `app.ts` header has PR #21's order with "request context → access log", and the TASK-010 note is gone.
+   - (b) Both import sets are present. **Deviation: dropping `ErrorLogFields` is accepted**, because PR #20's `AppLogger extends ErrorLogger` does not use it and `no-unused-vars` would fail.
+   - (c) `AppLogger` is `ErrorLogger & { info, debug }`.
+   - (d) `requestContextMiddleware({apiMode?})` comes before `requestLogger(logger)`.
+   - (e) `const api = express.Router(); api.use(routePrefix(API_PREFIX));`, then modules, then `routes.use(API_PREFIX, api)`. The JSDoc is updated and the walker is not widened. Drift shows 0 unrecognised, and the mutant is killed.
+   - (f) `installProcessErrorHandlers` runs right after the logger, before `createRuntimeServices` and the `createApp` try. The probe shows that a top-level rethrow reaches it (one fatal line, exit 1). `logger: log`, `apiMode` and `docs` are kept.
+   - (g) There is now one `RequestContextOptions` (the auto-merge had two merged interface declarations). `isRequestContext` checks `correlationId`, `requestId` and `apiMode`. `resolveCorrelationId` and the `CORRELATION_ID_PATTERN` re-export are kept.
+   - (h) `debug` is on all 4 loggers.
+   - (i) Accepted: the leaf route template is logged for docs until TASK-020. Not coupling `serve.ts` to logging is reasonable.
+   - (j) Lane A on the exact head plus my targeted unit and api runs.
+2. **Merge proof:** confirmed independently (8 files, §R3.1). The lock delta is the single `pino` edge, as in r1 and r2.
+3. **`[OMITTED]` for free-text body/URL/query keys, which goes beyond the brief: accepted (fail closed).** D-TASK010-01 (2) accepts over-redaction that fails closed. The structured path already omits these keys, and the cost is readability of prose such as `curl: (7)`, `query: SELECT 1` and `invalid body: …`. No message the platform logs today depends on those values, and the event name and the structured fields stay intact. Re-open it only if operations reports a concrete loss of diagnostics.
+4. **ReDoS:** every new regex is linear. `QUOTED_LIST_ITEM` uses bounded runs that a mandatory comma and an optional line break separate, so there is no ambiguous adjacency. `TARGET_RUN` is a single class, and `omitTargetQuery` is one pass. `redactQuotedLists` and `redactPairs` advance `lastIndex` monotonically. The worst case is 4.3 ms at the cap.
+5. **`#` reset removal:** correct, and a behaviour change for the better. `/app#/track?ref=v` → `/app#/track?[OMITTED]`, so hash-route queries no longer leak. It is pinned by a test, and `see docs/a?b`-style prose stays readable.
+6. **PR21-SEC-07 (b):** a single source, with no credential weakening (§R3.1 parity row). `manual_key` is covered in logs and in excerpts.
+7. **R2-n7 `exitAfterFlush`:** correct (§R3.1). R3-n1 is a comment fix, and R3-n5 is optional.
+
+### R3.5 Merge conditions
+
+1. **Security merge + delta round** (D-ORCH-024 (3), D-SEC-PR20-02) with a record naming the final head (`fafa3b5` or later). The owned paths changed since `9647907` are `eslint.config.mjs`, `negative-fixtures.test.ts` and 6 fixtures. Lane A `scans` must then be green on that head.
+2. **Lane B evidence (D-ORCH-034):** once PR #28 merges, this non-docs PR needs a fresh `quality:heavy --profile pr` evidence commit on an ancestor of the head. Do any merge of main **before** producing the evidence: a merge that brings `.claude/agent-memory/**` or any root file makes the evidence stale, and only `docs/**` is allowed to change after it. The order is: merge main if needed → evidence → security record (docs) → merge.
+3. **Lane B integration on the final head.** The developer's 18 suites / 185 tests were on `48aaf01`; the gatekeeper confirms.
+4. **Squash merge** (the intermediate commits are not individually gated).
+5. **Second-merger union notes** (for whichever PR merges after #20):
+   - **#30 (TASK-019):** api and worker `main.ts` keep `const { config, secrets }` and `createRuntimeServices(config, '<svc>', log, secrets)`, and also keep PR #20's `createRuntimeLog(..., { version, level, context })` and `installProcessErrorHandlers({ log, exit: exitAfterFlush(...) })` before services.
+   - **#26 (TASK-032):** `packages/shared/package.json` `dependencies` = `{ pino, uuid }`, with the lock regenerated, not hand-merged.
+   - **#24 (TASK-021):** `db/runtime.ts` and `tools/tsconfig.json` conflicts. Its new database security events must satisfy PR #20's type-level exhaustiveness test and `SECURITY_EVENT_FIELDS` (`name`/`kind`/`reason`), and log at `error` (PR #24 m2, D-ORCH-025).
+   - Run lint, typecheck, unit and api (including drift) on each union commit.
+6. NITs R3-n1..n5 are optional in-PR. Otherwise: R3-n3 joins R2-n1 (TASK-113/214); R3-n2 and R3-n4 go to the security delta round to rule on (accept, or route to TASK-113).
