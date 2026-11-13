@@ -7,9 +7,12 @@
  * - Prisma 7 does not load `.env`: the caller (Compose, CI, the Testcontainers harness) provides the variables.
  *   Commands that need no database (`generate`, `validate`) run without them.
  * - `tables.external` lists objects that live outside Prisma Migrate: the bootstrap-lane ledger
- *   (`public.bootstrap_migrations`, data-model §8.1). TASK-021 adds the audit tables (data-model §7.3 amendment).
+ *   (`public.bootstrap_migrations`, data-model §8.1), the eight audit tables and a generated window of audit partition
+ *   names (data-model §7.3 amendment 2026-11-13, SPK-08 F-01; tools/db/audit-external-tables.ts).
  */
 import { defineConfig } from 'prisma/config';
+
+import { externalTables } from './tools/db/audit-external-tables.js';
 
 const migratorUrl = process.env['DATABASE_MIGRATOR_URL'];
 const shadowUrl = process.env['SHADOW_DATABASE_URL'];
@@ -22,5 +25,5 @@ export default defineConfig({
     ...(shadowUrl ? { shadowDatabaseUrl: shadowUrl } : {}),
   },
   experimental: { externalTables: true },
-  tables: { external: ['public.bootstrap_migrations'] },
+  tables: { external: externalTables() },
 });
