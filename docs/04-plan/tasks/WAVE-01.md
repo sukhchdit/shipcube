@@ -212,6 +212,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-04: createQuote/createQuoteShare never create an idempotency_keys row; stored bodies are ciphertext
 - SEC-TC-53 (contract part): x-idempotency not-applicable on every ADR-0014 am. 1 one-time-secret route
 - PR19-SEC-01 CONSUMER (D-ARCH-080; FIRST writable SYSTEM model): idempotency_keys is reached only through the platform/idempotency port via systemDelegates(tx) (TASK-020 mechanism) — never from a module repository; the lint allow-list names apps/api/src/platform/idempotency/**; the port is the only writer and reader of the ciphertext response bodies
+- PRECONDITION (D-ARCH-104): TASK-020 part 020-B is merged (the runner and the AppDb types exist); the idempotency platform folder takes AppDb as a type and imports no value from the generated client
 - AT-US-038-01 … AT-US-038-09: all 9 scenarios of US-038, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -429,6 +430,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-50 (payload part): job payloads in Redis contain identifiers only
 - D-062 note: this task is NOT an owner of AT-US-008-03 — its job-context.ts edits must keep the TASK-010 correlation binding (the TASK-035 line and the TASK-092 end-to-end test catch a regression); PR19-SEC-01 CONSUMER (D-ARCH-080): job_context and processed_events are reached in the worker only through the worker platform twin of systemDelegates
 - ADMISSION BULKHEAD INHERITANCE (D-ARCH-086, D-ORCH-033 (4); data-model §7.7; TASK-025, batch 0.7, precedes this task): the worker withTenantTx twin admits at most DB_TENANT_MAX_CONCURRENT_TX concurrent job transactions per admission key per process BEFORE pool checkout, with the FIFO wait DB_TENANT_ADMISSION_WAIT_MS and queue depth 2 x cap — key rule as TASK-025 (the org_id resolved by platform.job_context; anonymous for an empty org id; operator for OPERATOR scope) — by reusing apps/api/src/platform/db/tenant-admission.ts (imported through the runtime door, or copied under a shared test that keeps both in lock-step; no second divergent implementation) and the TASK-025 configuration keys (no new keys); a rejection is the retryable 503 TENANT_CONCURRENCY_LIMIT, which surfaces to the BullMQ attempts and backoff policy (no new retry mechanism); test: with the cap at 2, three concurrent steps of one organisation make the third wait and then fail retryably while a step of another organisation completes (worker twin of the TASK-033 two-tenant scenario)
+- D-ARCH-103: the worker twin takes AppDb, AppTransactionClient and Prisma as types from @platform/api/runtime and builds no client and no second composition; precondition: TASK-020 part 020-B is merged
 - AT-US-078-01 … AT-US-078-04: all 4 scenarios of US-078, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
