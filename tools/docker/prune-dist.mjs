@@ -27,6 +27,14 @@ const DECLARATION = /\.d\.[cm]?ts(?:\.map)?$/;
  * Server and CockroachDB compilers are dead weight in the runtime images (size budget, platform.md §3.4 / OI-08).
  */
 const OTHER_PROVIDER_COMPILER = /(?:^|\/)@prisma\/client\/runtime\/query_compiler_[a-z]+_bg\.(?:mysql|sqlite|sqlserver|cockroachdb)\./;
+/**
+ * Of the PostgreSQL compilers, the generated `prisma-client` (ESM, default `compilerBuild` fast) loads only
+ * `query_compiler_fast_bg.postgresql.mjs` and `…postgresql.wasm-base64.mjs` (prisma/generated/prisma/internal); the
+ * `small` build and the CommonJS `.js` twins are never loaded (about 13 MB; the worker size budget, OI-08). The
+ * runtime preflight that imports `@platform/prisma/client` (TASK-020 part 020-B) proves the remaining pair loads.
+ */
+const UNUSED_POSTGRESQL_COMPILER =
+  /(?:^|\/)@prisma\/client\/runtime\/query_compiler_(?:small_bg\.postgresql\.|fast_bg\.postgresql\.(?:wasm-base64\.)?js$)/;
 
 /**
  * Decides whether one entry goes. Pure, so the rules are unit-tested without a file system.
@@ -45,7 +53,7 @@ export function shouldRemove(relPath, isDirectory, options = {}) {
   if (name.endsWith('.tsbuildinfo')) return true;
   if ((options.declarations === true || nodeModules) && DECLARATION.test(name)) return true;
   if (nodeModules && name.endsWith('.map')) return true;
-  if (nodeModules && OTHER_PROVIDER_COMPILER.test(relPath)) return true;
+  if (nodeModules && (OTHER_PROVIDER_COMPILER.test(relPath) || UNUSED_POSTGRESQL_COMPILER.test(relPath))) return true;
   if (nodeModules && /\.(?:md|markdown)$/i.test(name) && !LICENCE.test(name)) return true;
   return false;
 }
