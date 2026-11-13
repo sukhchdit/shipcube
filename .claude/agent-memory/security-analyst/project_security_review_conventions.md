@@ -37,7 +37,7 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - **Gotchas (PR-0020 R2, 2026-11-13):**
     - The mini-repo needs a root `package.json`, otherwise `import-x/no-relative-packages` crashes with "path … null".
     - Turn `import-x/no-cycle` off (it crashes the same way).
-    - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/MadelineMendoza/AppData/...`), never `MADELI~1`. An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
+    - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/<long user dir>/AppData/...`), never the 8.3 short form (`<FIRST6>~1`). An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
     - A junctioned root dir has the same problem. Copy the root instead.
     - `unrs-resolver` strips `?query` suffixes, so the resolved arm catches `x?worker`/`x?raw`.
 - **Probing a git-object-reading verifier (PR-0023).** Build scenario commits with plumbing in a scratch repo and never check them out:
@@ -99,4 +99,10 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **Pinned-image checks need no Docker.** Anonymous GETs to `auth.docker.io` and `registry-1.docker.io` give the manifest, config blob (user, created, entrypoint) and a body-hash check. Compare per-platform manifest digests with the moved tag, because only the attestations may differ. Script: `PR-27-sec/k6digest.mjs`.
 - **Lockfile delta script.** Reusable at `scratchpad/review/PR-2-sec/scripts/lockdiff.mjs`, but scratch is session-scoped, so re-create it if it is gone. It reports new and removed tuples, integrity changes, flag moves, hosts, install scripts and licences.
 
-Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]]
+- **Host quirks for scratch probes (PR-0028).**
+  - With `MSYS_NO_PATHCONV=1`, Windows `git -C` and `node` need mixed paths (`cygpath -m`); `/c/...` fails ("cannot change to"). `cmd //c` then starts an interactive shell, so make a junction with `fs.symlinkSync(target, link, 'junction')` and remove it with `fs.rmdirSync(link)`.
+  - A `git archive` extract of `tools/quality` (base and head) plus a shared clone with a `node_modules` junction runs the verifier's real CLI (`--root <clone> --base --head --json`). Scenario commits come from plumbing (`scratchpad/review/PR-28-sec/probes/scenarios.mjs`: `mk(parent, {path: content|null|{mode,content}})`), and a patched scratch copy of `lib/manifest.mjs` tests a candidate pattern. The record simulation is `probes/record-sim.sh`.
+  - **Record Head rows:** the checker binds SHAs from ANY table row whose first cell starts with `Head` (word boundary), in any table. Keep exactly one such row, and never a first cell starting with `Verdict` before the final one.
+  - `os.tmpdir()` on this host is the 8.3 form (`<FIRST6>~1`), so `homedir()`-based scrubbing misses it; never quote that fragment in a record.
+
+Related: [[project-p3-security-conditions]], [[project-p5-wave0-supply-chain]], [[project-p5-pr28-w0act1]]
