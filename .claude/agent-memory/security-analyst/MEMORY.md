@@ -23,3 +23,4 @@
 - [P5 PR-0025 CI follow-ups](project_p5_pr25_ci_followups.md) — R1 @20a0fc6 PASS_W_F-U; PR10-SEC-08 closed; 01 LOW 17-fingerprint baseline before gitleaks-full; gitleaks .gitleaksignore/override facts
 - [P5 PR-0027 SPK-04 spike](project_p5_pr27_spk04_spike.md) — TASK-018 R1 @aa1cfb1 PASS_W_F-U; k6 eslint block scoped; 01 LOW prisma/tests not excluded from images (TASK-014), 02-05 INFO; k6 digest/registry recipe; #20/#24 overlap
 - [P5 PR-0028 W0-ACT-1](project_p5_pr28_w0act1.md) — R1 @22c6461 PASS_W_F-U; activation semantics probed; 01/02 LOW, 03/04 INFO; staleness pattern .claude/agent-memory/*/*.md
+- [P5 PR-0026 standard columns](project_p5_pr26_standard_columns.md) — TASK-032 R1 @84b70c4 PASS_W_F-U; 01 relation connect, 02 optional scopeClient, 03 raw SQL LOW; offline tenant-like Prisma probe recipe; TASK-037/020 checks
