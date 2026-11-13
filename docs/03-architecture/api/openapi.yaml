@@ -23381,9 +23381,14 @@ components:
                 - unavailable
             audit_partitions:
               type: string
+              description: >-
+                Contiguity of the monthly audit partitions read from the catalogue (data-model 5.3 amendment
+                2026-11-13): unavailable when a month in [current, current + 2] has no verified partition or any
+                object squats a partition name; degraded when only month current + 3 is missing.
               enum:
                 - ok
                 - degraded
+                - unavailable
             audit_chain:
               type: string
               enum:
