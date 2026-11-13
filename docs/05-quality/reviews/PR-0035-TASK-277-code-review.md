@@ -95,3 +95,108 @@ None new. `tools/quality/**` and `package.json` are owned paths: record `docs/05
 ## 8. Handoff
 
 Verdict APPROVED_WITH_NITS: no BLOCKER or MAJOR. Round 2 only if the author wants the delta checked (R1-m1, R1-m3 mutants and the default `--out`).
+
+## Round 2 (head 907b6a2, delta)
+
+Reviewer: code-reviewer (round 2 delta, run together with security-analyst's round 2). Head reviewed: `907b6a2` (full SHA `907b6a2e971ea6d4014e5c5eda2796a71e15e9b8`). Commits since round 1 (`76808c8`): `013a053` merge of `origin/main` (`6420f90`, D-065 story order), `07ba7a0` `fix(quality): confine tool output, pin trace guards, linear scenario regex` (9 files under `tools/quality`, +556/-57), `907b6a2` `test(evidence): heavy lane pr 07ba7a0 pass` (4 files under the run directory, docs only). `origin/main` when this round was written: `8e71ef5`, docs and `.claude/agent-memory` only since `6420f90`, so no merge-only round is owed.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-m1 and R1-m3 are fixed and pinned: the `tests > 0` mutant now fails a test (and so do the two neighbouring mutants of the same expression), and the default output moved to `reports/ac-trace.json` behind a writer that refuses anything inside the committed evidence tree.
+  The other R1 findings (m2, m4, m5, m6, n3, n4, n5) are fixed too. Of 52 mutants over the delta, 50 are killed and 2 survive (both equivalent in effect); every mutant behind a round 1 finding is killed now.
+  The merge is a pure union. Lane A on this head is green in every step except the security-record check. No BLOCKER or MAJOR. Four NITs, none blocks the merge.
+```
+
+### R2.1 What I verified myself
+
+Method: `git archive` extract of the exact head, `node_modules` as junctions to main's, Node 24, no Docker, no builds; a second extract at `76808c8` for comparisons; a `clone --shared` for the git-level checks. The PR worktree was not touched. Scratch removed afterwards; main's `node_modules` still 740 entries.
+
+| Check | Result |
+|---|---|
+| Targeted unit, the four PR-owned suites (`trace`, `lib/test-ids`, `gen-gherkin-map`, `flake-report`) | 4 suites, 48 tests pass (32 in round 1), 3 s |
+| Whole `tools/quality` project on the head | 13 suites, 281 tests pass |
+| Lane A run 43471372682 on `907b6a2` | `fast-lane` 33 of 33 steps success, including "Lane B evidence", Lint, Format check, Type-check, Unit tests and Build; `scans`: Gitleaks and Semgrep success; the only red step is "Security-owned paths need a review record" (this record is its input). In round 1 the evidence step aborted the job, so this is the first time lint, type-check and build ran on this PR in CI |
+| Merge `013a053` is a pure union | `git merge-tree --write-tree 76808c8 6420f90` writes tree `805e7b4f`, identical to the tree of `013a053` (clean, no conflict). Delta `76808c8` to `013a053`: 25 paths, 0 outside `docs/` and `.claude/agent-memory/`; no `tools/`, `package*.json` or `.github` path |
+| Evidence | base-ref `check-evidence --profile pr` (copy from `8e71ef5`) with base `6420f90` and with base `8e71ef5`: `run 20261113T1711Z_07ba7a0 accepted`, PASS. Run: profile `pr`, `git_dirty` false, `build_clean` true, lockfile hash equals the head's, suite `unit` 3779 tests, 0 failures, 2 skipped, coverage 95.92 % lines / 96.05 % branches. `907b6a2` itself adds only the four run files |
+| `quality:trace` on all 10 stored runs | 0 orphans, 0 problems on every one (so the new malformed-ID scan has no false positive on real data); newest run `20261113T1711Z_07ba7a0`: `must-AC 62/1593 (0.0389, 13 Must scenarios unmapped) · NFR 0 verified, 4 partial evidence /91 · SEC-TC 9 passing, 9 present/64 · 94 IDs`; two runs byte-identical |
+| D-065 effect on the five drifted stories | all 34 classified positions of US-066, US-121, US-129, US-137, US-222 now carry the same scenario titles as the map (16 mismatches at `76808c8`); `quality:gherkin-map --check` still exits 1 naming the same five stories (13 scenarios appended after the classified ones, qa-lead's job), and the `KNOWN_DRIFT` ratchet test passes. `quality:trace` now lists the 13 IDs under `must_ac.unmapped` |
+| `quality:flake-report` over the 10 stored runs | 4246 tests, 0 same-SHA mixed, 0 cross-SHA mixed, 0 problems, exit 0 |
+
+NOT re-run: Docker-bound lane B (the orchestrator's run is the evidence), gitleaks image (lane A's step is green; security-analyst emulated it), the whole-repo suites other than what lane A ran.
+
+### R2.2 Mutation run on the delta (re-run of round 1's method, 52 mutants)
+
+Each mutant was applied to the head extract alone, the four suites run, the file restored (hash compared afterwards).
+
+| Group | Mutants | Killed | Survived |
+|---|---|---|---|
+| R1-m1 Must-AC numerator (`tests > 0` dropped; `passed >= 0`; `tests > 1`) | 3 | 3 | 0 |
+| R1-m2 NFR counts (`failed === 0` dropped; `parts.length > 0` dropped; `run === 'FULL'` dropped; `some` to `every`) | 4 | 4 | 0 |
+| R1-m3 default `--out` back into the run directory | 1 | 1 | 0 |
+| R1-m4 malformed IDs (not recorded; prefix check off; 40-character cap) | 3 | 3 | 0 |
+| R1-m5 `unmapped` (all MoSCoW values; map rows ignored) | 2 | 2 | 0 |
+| R1-n3 classname credited again | 1 | 1 | 0 |
+| R1-m6 guards (size cap, regular-file check, NFR Run value, NFR duplicate, 6-cell row, duplicate row, story/suite cell, `RUN_DIR` filter in trace and flake-report, links skipped by the default, `--run` symlink refusal, `--run` name test) | 12 | 12 | 0 |
+| PR35-SEC-01 writer and resolver (`wx`, write-through, link check, regular-file check, evidence guard off / case-sensitive / three parts only, containment off, `..` prefix, `isAbsolute`, mkdir, temp cleanup, run-directory link walk) | 13 | 11 | 2 |
+| PR35-SEC-02 (regex reverted to the lazy form; `.trim()` dropped) | 2 | 2 (by timeout, see R2-n3) | 0 |
+| PR35-SEC-03 (`safeIo` err / bound / out, `clean` C0, DEL and C1, U+2028, U+2029, three `main` wrappers) | 11 | 11 | 0 |
+
+The two survivors: `flag: 'wx'` changed to `'w'` on the temporary file (a test would have to plant a file named after the process id; the guard is defence in depth) and the "regular file or directory" check of `writeOutput` (with it off, a directory at the target still fails, one step later, at the rename, and the temporary file is removed: same observable behaviour, a different message). Neither is a test gap worth a finding. The mutants behind round 1's findings (R1-m1, m2, m6, n3) are all killed now.
+
+### R2.3 Round 1 findings, one by one
+
+| ID | State | Evidence |
+|---|---|---|
+| R1-m1 | **Fixed** | The guard at `trace.mjs:301` is unchanged (`s.tests > 0 && s.passed === s.tests`); the new test "counts a Must AC as covered only with at least one test, all passing (no test, skipped row, failing sibling)" asserts `covered` 1 of 3 with a skipped outline row and a failing sibling, and 1 of 3 (ratio 0.3333) when two Must ACs have no test. Mutant "drop `tests > 0`" fails exactly that test |
+| R1-m2 | **Fixed** | `partial_evidence` is now every row that is not fully verified and has a passing part, any `Run` value, with `partial_evidence_by_run` (`DEFERRED`, `FULL`, `PARTIAL`) and a separate `verified_ratio`; the mixed `ratio` is gone. Newest run: 0 verified, 4 partial evidence (3 FULL, 1 PARTIAL), the four rows round 1 found. Tests cover a failing sibling, a row without parts and each `Run` value |
+| R1-m3 | **Fixed in code** | Default `--out` is `reports/ac-trace.json` (`DEFAULT_OUT`); `resolveOutput` refuses a path outside the root, the root itself and anything under `docs/05-quality/tests/runs` (case-insensitive, `..` and `.` segments normalised; tested with a nested run path, an upper-case spelling and the root). A test asserts nothing is written into the run directory. D-TASK277-03 on main (`8e71ef5`, line 1952) still says the default is `<run>/ac-trace.json` and that `check-evidence` "rejects unknown files": orchestrator correction owed (see 4) |
+| R1-m4 | **Fixed** | `malformedIds` (`ID_LIKE` plus `ID_PREFIX`); `AT-US-012-02-object-storage` stays accepted; `quality:trace` reports each token (capped at 40 characters, charset `[A-Za-z0-9-]`) as a problem and exits 1. Real data: 0 false positives on the 10 stored runs |
+| R1-m5 | **Fixed** | `must_ac.unmapped { count, ids }` lists the Must scenarios of the story files without a map row (13 today); the one-line output prints the count. The owner of the pin is unchanged: qa-lead classifies the 13, then empties `KNOWN_DRIFT` (see 4) |
+| R1-m6 | **Fixed** | Twelve guard mutants killed (section R2.2); the symlink and junction tests use `symlinkSync(..., 'junction')`, which creates a real symlink on the Linux runner, and lane A's Linux unit step passed |
+| R1-n1 | Open (NIT) | Duplicate titles in one file still form one group in `flake-report` |
+| R1-n2 | Open (NIT) | No `--last N` window |
+| R1-n3 | **Fixed** | IDs are read from the test name only; a test with an ID-like file name in `classname` credits nothing (test and mutant) |
+| R1-n4 | **Fixed** | All three tools write through `resolveOutput` + `writeOutput` (inside the root, outside the evidence tree, no link on the way, temporary file then rename) |
+| R1-n5 | **Fixed** | The header of `trace.mjs` states the outline pooling rule |
+
+### R2.4 New observations (all NIT)
+
+| ID | Where | Observation | Suggested fix |
+|---|---|---|---|
+| R2-n1 | `trace.mjs:67` | The comment says `reports/` is git-ignored. It is not: `.gitignore` has no `reports` entry, so a default run leaves an untracked `reports/ac-trace.json` that `git add -A` would commit | Add `/reports/` to `.gitignore` in the next PR that touches an owned path (`.gitignore` is CODEOWNED, so doing it here would void both records), or reword the comment |
+| R2-n2 | `flake-report.test.ts:125-128`, `gen-gherkin-map.test.ts:232` | The refusal assertions use a fixed file name directly in the OS temp directory (`<tmp>/outside-flake.json`, `<tmp>/outside-map.md`). A stale file left there (by a past regression, another user or process on a shared `/tmp`) makes the test fail until someone deletes it: I reproduced it, the baseline failed one test after my containment mutants had written the two files, and passed again once I removed them. `trace.test.ts` already does it right (`${basename(root)}-outside.json`) | Same pattern in the two other tests, and delete the file in `afterEach` |
+| R2-n3 | `lib/test-ids.test.ts` ("trims scenario titles and parses a megabyte-long whitespace run") | The test asserts on 1 MB strings with `toEqual`. With the trim dropped, Jest needed more than 90 s to build the diff (the mutant "hangs" instead of failing); with the lazy regex restored the synchronous call blocks the worker for many minutes (extrapolated from 80,000 spaces, which took 3 to 12 s; no timeout can interrupt it), so a regression reads as a CI timeout, not a failure | Use about 60,000 spaces (the lazy regex needs seconds there, the linear one about a millisecond), assert on `title.length` and a short prefix, and keep the time bound as a ratio (`time(60k) / time(15k) < 8`) |
+| R2-n4 | `lib/test-ids.mjs:161` (`SCENARIO_LINE`) | Not byte-equivalent to the old pattern: a CR, U+2028 or U+2029 inside the leading or trailing whitespace of a `Scenario:` line used to be swallowed by `\s` and is now a non-match (differential fuzz, 400,000 lines: every difference is of that kind; the 17 real story files contain none of them, and parse identically with LF and CRLF, 2171 scenarios). `STORY_HEADING` (`(.+)$`) already behaved this way, so a file with stray `\r\r\n` endings would already yield no stories | None required; if it ever matters, `[^\n]*` instead of `.*` restores the old reach |
+
+### R2.5 Rulings
+
+- **`--out` confinement and the evidence guard.** Correct and tested at each seam: containment (`segmentsBelow`), evidence tree (three tests plus mutants), links on the way (`firstLink`/`writeOutput`, junction at target, parent and mid-path), hard link replaced not written through, temporary file created with `wx`. The Windows 8.3 alias of `05-quality` (`05-QUA~1`) is not recognised by the evidence guard; that is security-analyst's INFO PR35-SEC-06 (explicit `--out` by an operator on a Windows host only), not a code-review finding.
+- **`safeIo`.** Every stderr message is one cleaned line capped at 2,000 characters, every stdout line is cleaned; the three `main` wrappers are pinned by mutants. `clean` replaces C0, DEL, C1, U+2028 and U+2029 (mutants for each class are killed).
+- **KNOWN_DRIFT pin.** Acceptable as ruled in round 1; D-065 removed the renumbering risk (condition (a) of round 1: every classified position now matches). What remains is the classification of 13 scenarios.
+- **D-ORCH-038 / D-ORCH-040.** Still met: tests delete only their own `mkdtemp` directories (except the fixed-name files of R2-n2); the branch does not edit `DECISIONS.md` or `STATUS.md`.
+
+### R2.6 Follow-ups to route (unchanged owners, one added)
+
+| Item | Owner | Due |
+|---|---|---|
+| Classify the 13 appended scenarios (`must_ac.unmapped`), run `quality:gherkin-map`, empty `KNOWN_DRIFT` | qa-lead | before the Wave-0-exit activation PR |
+| `quality:heavy` hook: attach `ac-trace.json` / `flake-report.json` to `summary.json`, run trace for wave and gate, fail on orphans and malformed IDs; activate the two manifest entries | devops-engineer (015-B/C or the activation PR) | before G3 |
+| Correct D-TASK277-03 on main: default is `reports/ac-trace.json`; a run directory only takes files that `quality:heavy` hashed into `summary.json`; TEST-STRATEGY §6 rule 2 and section 15 still say "into the run directory" and wait for that hook | orchestrator (D-ORCH-040), qa-lead for the strategy text | on merge |
+| R2-n1 to R2-n4 and R1-n1, R1-n2 | senior-developer | with the next change to `tools/quality` (an owned path: a security round follows; do not reopen this PR only for them) |
+
+### R2.7 Merge conditions
+
+1. Security record on `907b6a2` (security-analyst's round 2, same pass): the "Security-owned paths" step turns green once it is committed. Any later commit that touches an owned path voids it; docs-only commits are fine.
+2. Lane B evidence is accepted for `07ba7a0`, an ancestor of the head with only docs after it. Keep it that way; a merge of main that brings only docs does not stale it.
+3. Record the routed items of R2.6 in STATUS (orchestrator).
+4. Squash with a conventional-commit title (`feat(quality): ...`). No overlap with PR #34 (clean merge in round 1; neither touches the other's files).
+
+### R2.8 Good
+
+- The fix cycle did what was asked and a little more: every R1 guard has a test that kills its mutant, the output channel is one shared module instead of three copies, and the writer's comments name the threat (PR35-SEC-01) next to each rule.
+- The delta is small and mechanical (one fix commit, 556 insertions, nine files in one directory), the merge is a pure union, and the evidence commit is docs-only.
+- `must_ac.unmapped` makes the pinned drift visible to whoever reads `ac-trace.json` at the gate instead of hiding it in a test.
+
+### R2.9 Handoff
+
+Verdict APPROVED_WITH_NITS: no BLOCKER or MAJOR. Round 3 is not needed unless the author changes an owned path again.

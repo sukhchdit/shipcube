@@ -164,7 +164,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-213 **DC** (M1 Must) Webhook verification, deduplication and replay |
 | REQs | REQ-PAY-011, REQ-PAY-012 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-167, TASK-040 |
@@ -178,6 +178,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-213 scenarios
+- PR32-SEC-14 / D-ARCH-110 (ADR-0008 am. 5 items 1 and 5): the Stripe and Mock-gateway signature authenticators read their signature header only on routes whose auth set contains signature (an Authorization header or a cookie on a webhook route is ignored) and build the provider principal only after the signature over the raw body verified: credential signature, authenticated false, no actor, a read-only permission view holding exactly the signature-only permission of the route; the permission gate change itself is TASK-020 part 020-B, this task adds api tests through the real authorise: a valid signature 200, an invalid signature or a stale timestamp 401 before the body is parsed, a session bearer on the webhook route 401 (credential outside the set), and a route whose principal lacks its permission 403
 - AT-US-213-01 … AT-US-213-11: all 11 scenarios of US-213, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -193,7 +194,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-242 **DC** (M1 Must) Store events once, order them, and drive shipment state forward |
 | REQs | REQ-TRACK-002, REQ-TRACK-005 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ORCH-039 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-168, TASK-084 |
@@ -207,6 +208,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-242 scenarios
+- SEC-TC-22 (D-ORCH-039; threat model T-72, AC-36; ADR-0010 am. 9; named on this sheet because the manifest parks it in required_cases_pending with this task as owner, checkpoint G3): an integration test whose title carries [SEC-TC-22]: an event that reaches the store without a confirming track() result (the shape a carrier push has) is stored as a hint, does not advance the shipment to PICKED_UP or to a terminal state, and cancellation and refund of that shipment still succeed; conditional (security-test-cases.md rule 4): the push route belongs to US-252 (TASK-261, Should), so while it is absent the same test also asserts that no mounted route accepts a carrier push and that no code path advances state from an unconfirmed event, and TASK-261 adds the signed-push half; after this task merges qa-lead moves the ID back to integration.required_cases at the next activation checkpoint
 - AT-US-242-01 … AT-US-242-09: all 9 scenarios of US-242, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
