@@ -221,6 +221,10 @@ describe('US-034 response validation helper', () => {
         recovery_codes: [sentinel],
         provisioning_uri: sentinel,
         mfa: { code: sentinel },
+        // PR21-SEC-07 (b): the log redaction classes are the single source (credential, personal data, cookie prefix).
+        manual_key: sentinel,
+        receiver: { display_name: sentinel, '__Host-rt_x': sentinel },
+        label_key: 'shipments.title',
         code: 'NOT_FOUND',
         filler: 'f'.repeat(900),
       },
@@ -228,6 +232,8 @@ describe('US-034 response validation helper', () => {
     const message = validator.describeFailure(leaky, validator.validateResponse(leaky));
     expect(message).not.toContain(sentinel);
     expect(message).toContain('"access_token":"[REDACTED]"');
+    expect(message).toContain('"manual_key":"[REDACTED]"');
+    expect(message).toContain('"label_key":"shipments.title"');
     expect(message).toContain('"code":"NOT_FOUND"');
     const excerpt = /Body excerpt \(redacted\): (.*)$/s.exec(message)?.[1] ?? '';
     expect(excerpt.length).toBeLessThanOrEqual(501);
