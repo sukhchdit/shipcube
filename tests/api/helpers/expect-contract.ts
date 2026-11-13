@@ -1,10 +1,12 @@
 // Supertest wrapper that validates every response against openapi.yaml (US-034, REQ-API-004, api/README.md §16).
 // `const client = await api(app); await client.get('/health/live').expect(200);` - the contract check is the first
 // assertion on every request, so a deviating response fails the test whatever the test itself asserts.
-// `expectContract(res)` checks a response a test already holds.
+// `expectContract(res)` checks a response a test already holds. Both record the conforming (operationId, status) pairs
+// for the contract-coverage report (contract-coverage.ts).
 import request, { type Response, type Test } from 'supertest';
 
 import { loadContract, OPENAPI_PATH } from '../../../tools/openapi/contract.js';
+import { type CoverageRecorder, createCoverageRecorder } from './contract-coverage.js';
 import { type ContractValidator, createContractValidator, type ResponseUnderTest } from './contract-validator.js';
 
 /** The app or server Supertest accepts. */
@@ -51,6 +53,20 @@ export function assertContract(validator: ContractValidator, response: ResponseU
   if (deviations.length > 0) throw new Error(validator.describeFailure(response, deviations));
 }
 
+let recorder: CoverageRecorder | undefined;
+
+/**
+ * Validates and records the conforming (operationId, status) pair for the contract-coverage report (api/README.md §16
+ * item 6). Framework answers (no operation) and HEAD answered by a GET operation are not pairs of their own.
+ */
+function assertAndRecord(validator: ContractValidator, response: ResponseUnderTest): void {
+  assertContract(validator, response);
+  const operation = validator.resolveOperation(response.method, response.path);
+  if (operation?.method !== response.method.toUpperCase()) return;
+  recorder ??= createCoverageRecorder();
+  recorder.record({ operationId: operation.operationId, status: response.status });
+}
+
 /** Method and path of the request behind a Supertest response (`res.req` is the Node ClientRequest). */
 function requestLineOf(res: Response): { method: string; path: string } {
   const req: unknown = (res as { req?: unknown }).req;
@@ -66,7 +82,7 @@ function requestLineOf(res: Response): { method: string; path: string } {
 export async function expectContract(res: Response, requestLine?: { method: string; path: string }): Promise<void> {
   const validator = await contractValidator();
   const { method, path } = requestLine ?? requestLineOf(res);
-  assertContract(validator, toResponseUnderTest(method, path, res));
+  assertAndRecord(validator, toResponseUnderTest(method, path, res));
 }
 
 /** A Supertest agent for `app` whose every response is validated against the contract first. */
@@ -75,7 +91,7 @@ export async function api(app: TestTarget): Promise<ContractAgent> {
   const agent = request(app);
   const checked = (method: string, test: Test, path: string): Test =>
     test.expect((res: Response) => {
-      assertContract(validator, toResponseUnderTest(method, path, res));
+      assertAndRecord(validator, toResponseUnderTest(method, path, res));
     });
   return {
     validator,

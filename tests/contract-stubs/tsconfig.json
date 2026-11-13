@@ -8,6 +8,7 @@
   },
   "files": [
     "../../tools/openapi/contract.ts",
+    "../api/helpers/contract-coverage.ts",
     "../api/helpers/contract-validator.ts",
     "../api/helpers/expect-contract.ts",
     "../api/helpers/formats.ts",

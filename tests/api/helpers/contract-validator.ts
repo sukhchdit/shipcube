@@ -217,6 +217,21 @@ export function bodyExcerpt(body: unknown, text?: string): string {
 
 const statusKeys = (operation: ContractOperation): string[] => Object.keys(operation.operation.responses ?? {});
 
+/** The `x-permission` of anonymous operations (api/README.md); anything else is an authenticated operation. */
+export const PUBLIC_PERMISSION = 'public';
+const PRIVATE_NO_STORE = ['private', 'no-store'] as const;
+
+export const requiresPrivateNoStore = (operation: ContractOperation): boolean => operation.operation['x-permission'] !== PUBLIC_PERMISSION;
+
+/** Lower-case directive names of a Cache-Control value (`private, no-store, max-age=0` -> private, no-store, max-age). */
+export function cacheDirectivesOf(value: HeaderValue): string[] {
+  const joined = typeof value === 'string' ? value : (value ?? []).join(',');
+  return joined
+    .split(',')
+    .map((directive) => directive.split('=', 1)[0]?.trim().toLowerCase() ?? '')
+    .filter((directive) => directive !== '');
+}
+
 function responseFor(operation: ContractOperation, status: number): JsonObject | undefined {
   const responses = operation.operation.responses ?? {};
   return objectAt(responses[String(status)]) ?? objectAt(responses[`${Math.floor(status / 100)}XX`]) ?? objectAt(responses['default']);
@@ -287,6 +302,22 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
     if (response.status >= 500 && detail !== genericServerDetail) into.push(`/body/detail: a 5xx detail must be "${genericServerDetail}"`);
   };
 
+  /**
+   * SEC-TC-29 (T-06): every response of an authenticated operation (`x-permission` other than `public`; a missing value
+   * counts as authenticated) carries `Cache-Control` with both `private` and `no-store`, errors included.
+   */
+  const checkCacheControl = (operation: ContractOperation, response: ResponseUnderTest, into: string[]): void => {
+    if (!requiresPrivateNoStore(operation)) return;
+    const directives = cacheDirectivesOf(headerOf(response.headers, 'cache-control'));
+    const missing = PRIVATE_NO_STORE.filter((directive) => !directives.includes(directive));
+    if (missing.length > 0) {
+      const permission = operation.operation['x-permission'];
+      into.push(
+        `/headers/cache-control: ${operation.operationId} is authenticated (x-permission ${typeof permission === 'string' ? permission : '<none>'}); Cache-Control must include private and no-store, missing ${missing.join(', ')} (SEC-TC-29)`,
+      );
+    }
+  };
+
   /** 404 on an unknown route, 405 with `Allow` when the path exists for other methods (api/README.md §3). */
   const validateFrameworkResponse = (response: ResponseUnderTest, pathKnown: boolean, into: string[]): void => {
     const expected = pathKnown ? 405 : 404;
@@ -328,6 +359,7 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
   };
 
   const validateOperationResponse = (operation: ContractOperation, response: ResponseUnderTest, into: string[]): void => {
+    checkCacheControl(operation, response, into);
     const declared = responseFor(operation, response.status);
     if (declared === undefined) {
       into.push(
@@ -377,6 +409,7 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
       if (pathKnown && method === 'OPTIONS') validateOptionsResponse(response, deviations);
       else validateFrameworkResponse(response, pathKnown, deviations);
     } else if (lookup !== method) {
+      checkCacheControl(operation, response, deviations);
       if (responseFor(operation, response.status) === undefined) {
         deviations.push(`/status: status ${String(response.status)} is not declared for ${operation.operationId}`);
       }

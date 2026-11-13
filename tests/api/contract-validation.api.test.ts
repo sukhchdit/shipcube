@@ -1,12 +1,13 @@
 // US-034 contract-first pipeline: the Supertest response validator (AT-US-034-04, AT-US-034-05; REQ-API-004,
-// ADR-0016 §1, api/README.md §16). Runs the real createApp with the real health router or stub routers; no database.
+// ADR-0016 §1, api/README.md §16). Runs the real createApp with the real health routes or defineRoute fixtures; no database.
 import { describe, expect, it } from '@jest/globals';
-import express, { type Router } from 'express';
-import request from 'supertest';
+import Joi from 'joi';
 
-import { createApp } from '../../apps/api/src/app.js';
+import { createApp, type ModuleRegistration } from '../../apps/api/src/app.js';
 import { GENERIC_SERVER_DETAIL } from '../../apps/api/src/platform/errors/problem.js';
-import { createHealthRouter } from '../../apps/api/src/platform/health/router.js';
+import { healthRoutes } from '../../apps/api/src/platform/health/router.js';
+import type { RouteDescriptor } from '../../apps/api/src/platform/routing/define-route.js';
+import { fixtureRoute } from '../../apps/api/src/platform/routing/tests/fixture-route.js';
 import {
   createReadinessProbe,
   READINESS_COMPONENTS,
@@ -18,8 +19,7 @@ import { createContractValidator, type ResponseUnderTest } from './helpers/contr
 import { api, contractValidator, expectContract } from './helpers/expect-contract.js';
 
 const silent = { info: () => undefined, error: () => undefined };
-const appWith = (healthRouter: Router, modules: { name: string; router: Router }[] = []) =>
-  createApp({ healthRouter, modules, logger: silent });
+const appWith = (health: readonly RouteDescriptor[], modules: ModuleRegistration[] = []) => createApp({ health, modules, logger: silent });
 
 const CRITICAL: readonly ReadinessComponent[] = ['database', 'redis', 'object_storage'];
 const checks = (failing: readonly ReadinessComponent[] = []): ReadinessCheck[] =>
@@ -29,9 +29,11 @@ const checks = (failing: readonly ReadinessComponent[] = []): ReadinessCheck[] =
     check: () => (failing.includes(name) ? Promise.reject(new Error('down')) : Promise.resolve()),
   }));
 const healthApp = (failing: readonly ReadinessComponent[] = []) =>
-  appWith(createHealthRouter({ probe: createReadinessProbe(checks(failing), { cacheTtlMs: 0 }) }));
+  appWith(healthRoutes({ probe: createReadinessProbe(checks(failing), { cacheTtlMs: 0 }) }));
 
 const CORRELATION_ID = 'c0ffee00-1234-4abc-9def-001122334455';
+/** SEC-TC-29: authenticated operations (getShipment, the DELETE below) answer with private, no-store. */
+const PRIVATE = { 'cache-control': 'private, no-store' };
 const problem = (code: string, status: number, extra: Record<string, unknown> = {}) => ({
   type: `https://docs.platform.invalid/problems/${code}`,
   title: 'Title',
@@ -46,17 +48,20 @@ const response = (overrides: Partial<ResponseUnderTest>): ResponseUnderTest => (
   method: 'GET',
   path: '/api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01',
   status: 404,
-  headers: { 'content-type': 'application/problem+json; charset=utf-8', 'x-correlation-id': CORRELATION_ID },
+  headers: { 'content-type': 'application/problem+json; charset=utf-8', 'x-correlation-id': CORRELATION_ID, ...PRIVATE },
   body: problem('NOT_FOUND', 404),
   ...overrides,
 });
 
 describe('US-034 response validation helper', () => {
   it('[AT-US-034-04] a response deviating from the contract fails the test', async () => {
-    const health = express.Router();
-    health.get('/health/live', (_req, res) => {
-      res.status(201).json({ status: 'ok', extra: true });
-    });
+    const health = [
+      fixtureRoute({
+        operationId: 'getLiveness',
+        path: '/health/live',
+        handler: () => ({ status: 201, body: { status: 'ok', extra: true } }),
+      }),
+    ];
     const client = await api(appWith(health));
     const failure = client.get('/health/live');
     await expect(failure).rejects.toThrow(/getLiveness GET \/health\/live -> 201/);
@@ -66,21 +71,29 @@ describe('US-034 response validation helper', () => {
   });
 
   it('[AT-US-034-04] an extra member in a declared 200 body is reported with its JSON pointer', async () => {
-    const health = express.Router();
-    health.get('/health/live', (_req, res) => {
-      res.json({ status: 'ok', extra: true });
-    });
+    const health = [
+      fixtureRoute({
+        operationId: 'getLiveness',
+        path: '/health/live',
+        handler: () => ({ status: 200, body: { status: 'ok', extra: true } }),
+      }),
+    ];
     const client = await api(appWith(health));
     await expect(client.get('/health/live')).rejects.toThrow(/\/body: must NOT have additional properties \(additional property "extra"\)/);
   });
 
   it('[AT-US-034-05] a 404 problem body lacking "code" fails the helper', async () => {
-    const shipments = express.Router();
-    shipments.get('/shipments/:shipmentId', (_req, res) => {
-      const body = Object.fromEntries(Object.entries(problem('NOT_FOUND', 404)).filter(([key]) => key !== 'code'));
-      res.status(404).type('application/problem+json').send(JSON.stringify(body));
+    const shipments = fixtureRoute({
+      operationId: 'getShipment',
+      path: '/shipments/:shipmentId',
+      schema: { params: Joi.object({ shipmentId: Joi.string() }) },
+      handler: () => ({
+        status: 404,
+        body: Object.fromEntries(Object.entries(problem('NOT_FOUND', 404)).filter(([key]) => key !== 'code')),
+        headers: { 'Content-Type': 'application/problem+json', 'Cache-Control': 'private, no-store' },
+      }),
     });
-    const client = await api(appWith(express.Router(), [{ name: 'shipments', router: shipments }]));
+    const client = await api(appWith([], [{ name: 'shipments', routes: [shipments] }]));
     const pending = client.get('/api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01');
     await expect(pending).rejects.toThrow(/getShipment GET \/api\/v1\/shipments\/0193a5b2-7c1e-7d4a-9f3b-000000000f01 -> 404/);
     const validator = await contractValidator();
@@ -113,7 +126,8 @@ describe('US-034 response validation helper', () => {
     const client = await api(healthApp());
     await client.get('/api/v1/does-not-exist?token=abc').expect(404);
     await client.post('/health/live').expect(405).expect('Allow', 'GET, HEAD, OPTIONS');
-    await expectContract(await request(healthApp()).get('/does-not-exist'));
+    // expectContract re-validates a response the test already holds (here one the agent has validated once).
+    await expectContract(await client.get('/does-not-exist'));
   });
 
   it('[PR #21 R1-m3] OPTIONS on a known path is 204 with Allow including OPTIONS, through the helper; a 405 Allow must list OPTIONS', async () => {
@@ -188,7 +202,9 @@ describe('US-034 response validation helper', () => {
     expect(
       validator.validateResponse(response({ status: 500, body: problem('INTERNAL_ERROR', 500, { detail: 'boom at /srv/app' }) })),
     ).toEqual([`/body/detail: a 5xx detail must be "${GENERIC_SERVER_DETAIL}"`]);
-    expect(validator.validateResponse(response({ headers: { 'content-type': 'application/json', 'x-correlation-id': 'short' } }))).toEqual([
+    expect(
+      validator.validateResponse(response({ headers: { 'content-type': 'application/json', 'x-correlation-id': 'short', ...PRIVATE } })),
+    ).toEqual([
       '/headers/x-correlation-id: "short" does not match ^[A-Za-z0-9-]{8,64}$',
       '/headers/content-type: "application/json" is not declared for 404 (declared: application/problem+json)',
     ]);
@@ -200,7 +216,13 @@ describe('US-034 response validation helper', () => {
 
   it('204/304 must not carry a body; the failure excerpt is redacted and capped at 500 characters', async () => {
     const validator = await contractValidator();
-    const withBody = response({ method: 'DELETE', status: 204, headers: { 'x-correlation-id': CORRELATION_ID }, body: {}, text: 'x' });
+    const withBody = response({
+      method: 'DELETE',
+      status: 204,
+      headers: { 'x-correlation-id': CORRELATION_ID, ...PRIVATE },
+      body: {},
+      text: 'x',
+    });
     const op = validator.operations.find(
       (candidate) => candidate.method === 'DELETE' && Object.hasOwn(candidate.operation.responses ?? {}, '204'),
     );
