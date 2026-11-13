@@ -234,3 +234,38 @@ No BLOCKER, MAJOR or MINOR. Closed from r1: m1 (wiring), m2 (relation-form FK wr
 
 - Confirm PR26-SEC-01 and SEC-02 closed at `cf4cd65`; SEC-03 (raw DML) remains the architect's ruling and is unaffected.
 - The relation refusal removes the only path for `connect`-based FK rewrites through the extension. Scalar FKs for server-owned relations remain `UNKNOWN_FIELD`.
+
+
+## Round 3 (union with PR #24)
+
+**VERDICT: APPROVED_WITH_NITS** (no BLOCKER/MAJOR; the one item is a process condition, not code). Head `084ee93a7103`: first union `dc4447e` (main `44e51eb` into `a6a929b`), evidence `b833199`, second docs-only merge `084ee93` (main `d53fbc7`). Scope was the union delta only.
+
+### R3.1 Verification I performed
+
+- **Pure-union proof (by SHA, no build), first union.** `git merge-tree --write-tree b318229 44e51eb` against `dc4447e`: only the four conflict files differ (`map-db-error.ts`, `runtime.test.ts`, `runtime.ts`, `DECISIONS.md`). Everything else is identical to a clean re-merge, including `package-lock.json` and `tools/tsconfig.json`, which auto-merged.
+- **Second merge `084ee93`** (`b833199` + `d53fbc7`): re-merge tree vs `084ee93` differs only in `DECISIONS.md` (the single conflict). Nothing outside `docs/` came in; `d53fbc7` is docs/security only.
+- **`map-db-error.ts`**: `DbErrorReason` ends `... | 'AUDIT_IMMUTABLE' | 'AUDIT_PARTITION_NAME_TAKEN' | 'NESTED_WRITE_UNSUPPORTED'`; the diff against main is exactly the one added member and its comment. PR #24's partition-squat rows (`AUDIT_PARTITION_NAME_TAKEN`, `AUDIT_PARTITION_BOUNDS_MISMATCH` mapping and tests) are untouched, and `standard-columns.ts` throws the new reason through `dbErrorMapping(500, ...)`.
+- **`runtime.ts`**: diff against main is exactly three hunks (the `ExtendableClient, withStandardColumns` import, `RuntimeDatabaseClient extends TransactionCapableClient<TTx>, ExtendableClient`, and the `scopeClient: (stamp) => withStandardColumns(client, stamp)` line). `runStartupAuditPartitionsCheck` (line 145) and `auditChecks`/`startup()` wiring from PR #24 are intact; one declaration each of `RuntimeDatabaseClient` and `runStartupIntegrityCheck`; no duplicates.
+- **`runtime.test.ts`**: six top-level describes, including both `standard-columns wiring through the composition function (PR26-SEC-02; D-TASK032-04)` and `start-up audit_partitions check (... TASK-021)`; the import block carries the union (`randomUUID`, `QueryExtensionParams`/`StandardColumnsExtension`, `type TenantContext`, and `runStartupAuditPartitionsCheck`).
+- **`tools/tsconfig.json`**: diff against main is two added lines only (`extensions/standard-columns.ts`, `db/index.ts`); 29 entries, no duplicates, no markers.
+- **`package-lock.json`**: unchanged by the union. `084ee93` equals the pre-merge branch tip `b833199`, and the lock delta against main (a `uuid ^14.0.3` dependency on `packages/shared`) is identical to the branch's own delta from its old merge base. The same holds for the `tools/tsconfig.json` delta. So the security record's R2.5 void condition (a lock or tsconfig change) is not triggered by the unions.
+- **`DECISIONS.md`**: `24 0` against main: main verbatim plus D-TASK032-01..04.
+- **Targeted unit tests** on a `git archive` extract of `084ee93` (node_modules junctioned to the PR #26 worktree at the same SHA): `apps/api/src/platform/(runtime|health|db|storage)/` plus `packages/shared`: 15 suites, 335 tests, all pass.
+- **CI**: run `43410056933` on `084ee93`: `fast-lane` SUCCESS; `scans` and `ci-gate` red only on the step "Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)" (the expected red; `ci-gate` fails because it aggregates `scans`). No other step failed. Integration suites not run by me (no Docker); I rely on the developer's lane-B evidence (`b833199`, PASS for `dc4447e`; the second merge changed no code).
+
+### R3.2 Findings
+
+| ID | Severity | Where | Issue | Fix |
+|----|----------|-------|-------|-----|
+| R3-n1 | NIT (process) | CI `scans` on `084ee93` | The security-record step is red until the security-analyst record names the head (`084ee93` or the squash head). Nothing in the code causes it. | security-analyst files the delta record (the unions touch security-owned `apps/api/src/platform/db/**` only through the three runtime hunks above); re-run `scans`. |
+
+### R3.3 Merge conditions (updated)
+
+1. The security record names `084ee93` (or later) and `scans`/`ci-gate` go green; the record's lock/tsconfig void condition is verified not triggered (above).
+2. PR #24 union: done and verified. Re-running `catalog-std` against the merged tree is covered by the developer's lane-B evidence at `dc4447e`; no code has moved since.
+3. **Second-merger note against PR #30** (`fce65ea`): the two heads conflict only in `docs/sdlc/DECISIONS.md` (append-append: keep the D-TASK019 and D-TASK032 blocks); `package-lock.json` and `tools/tsconfig.json` auto-merge. A lock or tsconfig edit while resolving would void the security record condition, so keep the resolution to DECISIONS only.
+4. Squash merge.
+
+### R3.4 Cleanup
+
+Extract and junction removed; worktree unchanged (748 `node_modules` entries, clean `git status`); no `C:\node_modules` junction.
