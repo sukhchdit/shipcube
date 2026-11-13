@@ -1,6 +1,9 @@
 /**
- * ADR-0021 §1: "no other code imports the AWS SDK for S3". Only files under apps/api/src/platform/storage/ may import
- * `@aws-sdk/client-s3` or `@aws-sdk/s3-request-presigner`; everything else goes through the `ObjectStorage` port.
+ * ADR-0021 §1: "no other code imports the AWS SDK for S3". This unit test IS the control (D-TASK019-02 (6); no ESLint
+ * entry while TASK-020 holds the lint lock): only files under apps/api/src/platform/storage/ may import any
+ * `@aws-sdk/*` package (client-s3, s3-request-presigner, lib-storage, s3-presigned-post, ...) or `@smithy/signature-v4`;
+ * everything else goes through the `ObjectStorage` port. A future AWS adapter for another service gets its own folder
+ * added to OTHER_AWS_ADAPTER_DIRS by its task, as a reviewed decision.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -9,9 +12,15 @@ import { describe, expect, it } from '@jest/globals';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..');
 const ALLOWED_DIR = join('apps', 'api', 'src', 'platform', 'storage') + sep;
-const SDK_IMPORT = /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)['"]@aws-sdk\/(?:client-s3|s3-request-presigner)(?:\/[^'"]*)?['"]/u;
+/** Other folders allowed to import `@aws-sdk/*` (none yet). Never add S3 here: S3 stays behind the port. */
+const OTHER_AWS_ADAPTER_DIRS: readonly string[] = [];
+const SOURCE_FILE = /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/u;
+const EXCLUDED_FILE = /\.test\.(?:[cm]?ts|tsx|[cm]?js|jsx)$|\.d\.[cm]?ts$/u;
+/** Static, type-only, re-export, side-effect, dynamic (quotes or template literal) and require forms. */
+const SDK_IMPORT =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"`](?:@aws-sdk\/[a-z0-9-]+|@smithy\/signature-v4)(?:\/[^'"`]*)?['"`]/u;
 
-/** Non-test TypeScript sources under `apps/*\/src` and `packages/*\/src`, as repository-relative paths. */
+/** Non-test sources under `apps/*\/src` and `packages/*\/src`, as repository-relative paths. */
 function sourceFiles(): string[] {
   const files: string[] = [];
   for (const group of ['apps', 'packages']) {
@@ -25,7 +34,7 @@ function sourceFiles(): string[] {
         continue; // workspace without a src folder
       }
       for (const entry of entries) {
-        if (entry.isFile() && /\.tsx?$/u.test(entry.name) && !/\.test\.tsx?$/u.test(entry.name) && !/\.d\.ts$/u.test(entry.name)) {
+        if (entry.isFile() && SOURCE_FILE.test(entry.name) && !EXCLUDED_FILE.test(entry.name)) {
           files.push(relative(REPO_ROOT, join(entry.parentPath, entry.name)));
         }
       }
@@ -34,23 +43,43 @@ function sourceFiles(): string[] {
   return files;
 }
 
-const importsS3Sdk = (file: string): boolean => SDK_IMPORT.test(readFileSync(join(REPO_ROOT, file), 'utf8'));
+const importsAwsSdk = (file: string): boolean => SDK_IMPORT.test(readFileSync(join(REPO_ROOT, file), 'utf8'));
+const allowed = (file: string): boolean => [ALLOWED_DIR, ...OTHER_AWS_ADAPTER_DIRS].some((dir) => file.startsWith(dir));
 
-describe('ADR-0021 §1 boundary: only platform/storage imports the AWS SDK for S3', () => {
+describe('ADR-0021 §1 boundary: only platform/storage imports the AWS SDK', () => {
   it('positive control: the adapter is found importing the SDK, so the scan sees real files', () => {
-    const importing = sourceFiles().filter(importsS3Sdk);
+    const importing = sourceFiles().filter(importsAwsSdk);
     expect(importing).toContain(join('apps', 'api', 'src', 'platform', 'storage', 's3-object-storage.ts'));
   });
 
-  it('the pattern recognises static, dynamic and require forms and ignores other packages (control)', () => {
-    expect(SDK_IMPORT.test("import { S3Client } from '@aws-sdk/client-s3';")).toBe(true);
-    expect(SDK_IMPORT.test("const m = await import('@aws-sdk/s3-request-presigner');")).toBe(true);
-    expect(SDK_IMPORT.test('const m = require("@aws-sdk/client-s3/dist-types");')).toBe(true);
-    expect(SDK_IMPORT.test("import { SESClient } from '@aws-sdk/client-ses';")).toBe(false);
+  it.each([
+    ["import { S3Client } from '@aws-sdk/client-s3';", 'static'],
+    ["import type { S3ClientConfig } from '@aws-sdk/client-s3';", 'type-only'],
+    ["export { S3Client } from '@aws-sdk/client-s3';", 're-export'],
+    ["import '@aws-sdk/client-s3';", 'side-effect'],
+    ["const m = await import('@aws-sdk/s3-request-presigner');", 'dynamic'],
+    ['const m = await import(`@aws-sdk/client-s3`);', 'dynamic template literal'],
+    ['const m = require("@aws-sdk/client-s3/dist-types");', 'require of a subpath'],
+    ["import {\n  S3Client,\n} from '@aws-sdk/client-s3';", 'multi-line'],
+    ["import { Upload } from '@aws-sdk/lib-storage';", 'multipart helper'],
+    ["import { createPresignedPost } from '@aws-sdk/s3-presigned-post';", 'presigned POST'],
+    ["import { SignatureV4 } from '@smithy/signature-v4';", 'raw SigV4 signer'],
+    ["import { SESClient } from '@aws-sdk/client-ses';", 'another AWS client'],
+  ])('the pattern recognises %s (%s)', (source) => {
+    expect(SDK_IMPORT.test(source)).toBe(true);
+  });
+
+  it.each([
+    "import { createHash } from 'node:crypto';",
+    "import { Something } from '@smithy/types';",
+    "import { thing } from '@aws-sdkx/client-s3';",
+    "const text = 'the @aws-sdk/client-s3 package';",
+  ])('the pattern ignores %s (negative control)', (source) => {
+    expect(SDK_IMPORT.test(source)).toBe(false);
   });
 
   it('no source file outside apps/api/src/platform/storage imports it', () => {
-    const offenders = sourceFiles().filter((file) => !file.startsWith(ALLOWED_DIR) && importsS3Sdk(file));
+    const offenders = sourceFiles().filter((file) => !allowed(file) && importsAwsSdk(file));
     expect(offenders).toEqual([]);
   });
 });

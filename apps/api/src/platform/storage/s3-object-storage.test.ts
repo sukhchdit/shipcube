@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 import { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from '@jest/globals';
@@ -8,6 +9,10 @@ import { MAX_PRESIGN_TTL_SECONDS, MAX_PUT_BYTES, ObjectStorageError, type Object
 import {
   createS3ObjectStorage,
   objectStorageFromConfig,
+  S3_MAX_ATTEMPTS,
+  S3_TIMEOUTS,
+  s3ClientConfig,
+  StorageConfigError,
   storageOptionsFromConfig,
   toObjectStorageError,
   type S3Sender,
@@ -17,6 +22,7 @@ const BUCKET = 'documents';
 const KEY = '2c1f0d3e-0b7a-4d53-9a43-6a1f2d7d8e10/label.pdf';
 const SDK_MESSAGE = 'connect ECONNREFUSED 10.9.8.7:9000 for bucket documents';
 const ENDPOINT = 'http://storage.internal.test:9000';
+const TEXT = 'text/plain';
 
 interface Recorded {
   readonly name: string;
@@ -49,7 +55,10 @@ const sdkError = (name: string, status?: number, extra: Record<string, unknown> 
   Object.assign(new Error(SDK_MESSAGE), { name, ...(status === undefined ? {} : { $metadata: { httpStatusCode: status } }), ...extra });
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const sha256Base64 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('base64');
 const bytes = (text = 'label-bytes'): Uint8Array => new TextEncoder().encode(text);
+/** A Node response body as the SDK returns it (an async-iterable Readable). */
+const stream = (...chunks: Uint8Array[]): Readable => Readable.from(chunks.map((chunk) => Buffer.from(chunk)));
 
 const presignClient = (): S3Client =>
   new S3Client({
@@ -118,8 +127,7 @@ describe('SPK-05 S3 object storage adapter: validation before I/O', () => {
     await expect(storage.get({ bucket: 'X', key: KEY })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     await expect(storage.delete({ bucket: BUCKET, key: KEY, versionId: '' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     await expect(storage.head({ bucket: BUCKET, key: KEY, versionId: 'v\u0000' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
-    await expect(storage.presignGet({ ...bad, ttlSeconds: 60 })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
-    await expect(storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 60, contentDisposition: 'a\r\nb' })).rejects.toMatchObject({
+    await expect(storage.presignGet({ ...bad, ttlSeconds: 60, responseContentType: TEXT })).rejects.toMatchObject({
       code: 'INVALID_ARGUMENT',
     });
     await expect(storage.checkBucket('Bad_Bucket', new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
@@ -128,19 +136,22 @@ describe('SPK-05 S3 object storage adapter: validation before I/O', () => {
 });
 
 describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => {
-  it('put hashes the bytes, maps ContentType, ContentLength and Metadata (sha256 added) and returns the result', async () => {
+  it('put hashes the bytes, maps ContentType, ContentLength, Metadata (sha256 added) and the SHA-256 checksum', async () => {
     const { sender, calls } = fakeSender({ VersionId: 'v1', ETag: '"abc"' });
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
     const body = bytes('hello');
-    const signal = new AbortController().signal;
+    const controller = new AbortController();
     const result = await storage.put(
       { bucket: BUCKET, key: KEY, body, contentType: 'application/pdf', metadata: { kind: 'label' } },
-      signal,
+      controller.signal,
     );
     expect(result).toEqual({ sha256: sha256(body), versionId: 'v1', etag: '"abc"' });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.name).toBe('PutObjectCommand');
-    expect(calls[0]?.signal).toBe(signal);
+    // The SDK gets the caller's signal combined with the operation deadline: aborting the caller aborts the request.
+    expect(calls[0]?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(calls[0]?.signal?.aborted).toBe(true);
     expect(calls[0]?.input).toEqual({
       Bucket: BUCKET,
       Key: KEY,
@@ -148,24 +159,46 @@ describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => 
       ContentType: 'application/pdf',
       ContentLength: 5,
       Metadata: { kind: 'label', sha256: sha256(body) },
+      ChecksumAlgorithm: 'SHA256',
+      ChecksumSHA256: sha256Base64(body),
     });
+  });
+
+  it('every operation hands the SDK a bounded signal even when the caller passes none', async () => {
+    const { sender, calls } = fakeSender({});
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await storage.put({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT });
+    await storage.putIfAbsent({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT });
+    await storage.head({ bucket: BUCKET, key: KEY });
+    await storage.get({ bucket: BUCKET, key: KEY });
+    await storage.delete({ bucket: BUCKET, key: KEY });
+    expect(calls).toHaveLength(5);
+    for (const call of calls) expect(call.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('put with a matching expected sha256 succeeds; a mismatch is INTEGRITY_MISMATCH and sends nothing', async () => {
     const { sender, calls } = fakeSender({});
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
     const body = bytes('payload');
-    await expect(storage.put({ bucket: BUCKET, key: KEY, body, contentType: 'text/plain', sha256: sha256(body) })).resolves.toEqual({
+    await expect(storage.put({ bucket: BUCKET, key: KEY, body, contentType: TEXT, sha256: sha256(body) })).resolves.toEqual({
       sha256: sha256(body),
     });
     calls.length = 0;
+    await expect(storage.put({ bucket: BUCKET, key: KEY, body, contentType: TEXT, sha256: sha256(bytes('other')) })).rejects.toMatchObject({
+      code: 'INTEGRITY_MISMATCH',
+    });
     await expect(
-      storage.put({ bucket: BUCKET, key: KEY, body, contentType: 'text/plain', sha256: sha256(bytes('other')) }),
-    ).rejects.toMatchObject({ code: 'INTEGRITY_MISMATCH' });
-    await expect(
-      storage.putIfAbsent({ bucket: BUCKET, key: KEY, body, contentType: 'text/plain', sha256: sha256(bytes('other')) }),
+      storage.putIfAbsent({ bucket: BUCKET, key: KEY, body, contentType: TEXT, sha256: sha256(bytes('other')) }),
     ).rejects.toMatchObject({ code: 'INTEGRITY_MISMATCH' });
     expect(calls).toHaveLength(0);
+  });
+
+  it('a store that refuses the SHA-256 checksum (400 BadDigest) is INTEGRITY_MISMATCH', async () => {
+    const { sender } = fakeSender(sdkError('BadDigest', 400));
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.put({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT })).rejects.toMatchObject({
+      code: 'INTEGRITY_MISMATCH',
+    });
   });
 
   it('putIfAbsent sends IfNoneMatch "*" and reports created:true with the result', async () => {
@@ -182,27 +215,36 @@ describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => 
   ])('putIfAbsent maps %s to created:false', async (_label, error) => {
     const { sender } = fakeSender(error);
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
-    await expect(storage.putIfAbsent({ bucket: BUCKET, key: KEY, body: bytes(), contentType: 'text/plain' })).resolves.toEqual({
+    await expect(storage.putIfAbsent({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT })).resolves.toEqual({
       created: false,
+    });
+  });
+
+  it('putIfAbsent: an AWS 409 ConditionalRequestConflict is a retryable UNAVAILABLE, not created:false', async () => {
+    const { sender } = fakeSender(sdkError('ConditionalRequestConflict', 409));
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.putIfAbsent({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT })).rejects.toMatchObject({
+      code: 'UNAVAILABLE',
     });
   });
 
   it('put never sets IfNoneMatch and a 412 on put is an error, not created:false', async () => {
     const { sender, calls } = fakeSender(sdkError('PreconditionFailed', 412));
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
-    await expect(storage.put({ bucket: BUCKET, key: KEY, body: bytes(), contentType: 'text/plain' })).rejects.toMatchObject({
+    await expect(storage.put({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT })).rejects.toMatchObject({
       code: 'UNEXPECTED',
     });
     expect(calls[0]?.input).not.toHaveProperty('IfNoneMatch');
   });
 
-  it('head maps the SDK output, hides sha256 from metadata and passes the version id', async () => {
+  it('head maps the SDK output (claim and store checksum apart), hides sha256 from metadata and passes the version id', async () => {
     const hash = sha256(bytes());
     const modified = new Date('2026-11-01T10:00:00Z');
     const { sender, calls } = fakeSender({
       ContentType: 'application/pdf',
       ContentLength: 11,
       Metadata: { sha256: hash, kind: 'label' },
+      ChecksumSHA256: sha256Base64(bytes()),
       VersionId: 'v9',
       ETag: '"t"',
       LastModified: modified,
@@ -212,13 +254,23 @@ describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => 
       contentType: 'application/pdf',
       contentLength: 11,
       sha256: hash,
+      checksumSha256: hash,
       metadata: { kind: 'label' },
       versionId: 'v9',
       etag: '"t"',
       lastModified: modified,
     });
     expect(calls[0]?.name).toBe('HeadObjectCommand');
-    expect(calls[0]?.input).toEqual({ Bucket: BUCKET, Key: KEY, VersionId: 'v9' });
+    expect(calls[0]?.input).toEqual({ Bucket: BUCKET, Key: KEY, VersionId: 'v9', ChecksumMode: 'ENABLED' });
+  });
+
+  it.each([
+    ['a composite multipart checksum', `${sha256Base64(bytes())}-3`],
+    ['a CRC-sized value', 'AAAAAA=='],
+  ])('head ignores %s as checksumSha256', async (_label, value) => {
+    const { sender } = fakeSender({ ChecksumSHA256: value });
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.head({ bucket: BUCKET, key: KEY })).resolves.not.toHaveProperty('checksumSha256');
   });
 
   it('head tolerates a sparse output and ignores a malformed sha256 metadata value', async () => {
@@ -244,32 +296,56 @@ describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => 
     await expect(storage.head({ bucket: BUCKET, key: KEY })).rejects.toBeInstanceOf(ObjectStorageError);
   });
 
-  it('get reads the whole body and the head fields', async () => {
-    const body = bytes('stored');
+  it('get reads the whole body in chunks, returns the head fields and the sha256 computed over the bytes', async () => {
+    const body = bytes('stored body');
     const { sender, calls } = fakeSender({
-      Body: { transformToByteArray: () => Promise.resolve(body) },
+      Body: stream(body.subarray(0, 4), body.subarray(4)),
       ContentLength: body.byteLength,
-      ContentType: 'text/plain',
+      ContentType: TEXT,
       Metadata: { sha256: sha256(body) },
     });
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
     const stored = await storage.get({ bucket: BUCKET, key: KEY, versionId: 'v1' });
     expect(stored?.body).toEqual(body);
-    expect(stored).toMatchObject({ contentType: 'text/plain', contentLength: 6, sha256: sha256(body) });
+    expect(stored).toMatchObject({ contentType: TEXT, contentLength: 11, sha256: sha256(body) });
     expect(calls[0]?.input).toEqual({ Bucket: BUCKET, Key: KEY, VersionId: 'v1' });
+  });
+
+  it('get of an object without a sha256 claim still returns the computed digest', async () => {
+    const body = bytes('foreign object');
+    const { sender } = fakeSender({ Body: stream(body), ContentLength: body.byteLength });
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.get({ bucket: BUCKET, key: KEY })).resolves.toMatchObject({ sha256: sha256(body) });
+  });
+
+  it('get refuses a body that contradicts its sha256 metadata claim (INTEGRITY_MISMATCH)', async () => {
+    const { sender } = fakeSender({ Body: stream(bytes('tampered')), Metadata: { sha256: sha256(bytes('original')) } });
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.get({ bucket: BUCKET, key: KEY })).rejects.toMatchObject({ code: 'INTEGRITY_MISMATCH' });
   });
 
   it('get returns an empty body when the SDK returns none', async () => {
     const { sender } = fakeSender({ ContentLength: 0 });
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
-    await expect(storage.get({ bucket: BUCKET, key: KEY })).resolves.toMatchObject({ body: new Uint8Array(0) });
+    await expect(storage.get({ bucket: BUCKET, key: KEY })).resolves.toMatchObject({
+      body: new Uint8Array(0),
+      sha256: sha256(new Uint8Array(0)),
+    });
   });
 
-  it('get refuses to buffer an object over 5 MiB and releases the stream', async () => {
+  it('get refuses a body that is not a stream (UNEXPECTED)', async () => {
+    const { sender } = fakeSender({ Body: { transformToByteArray: () => Promise.resolve(bytes()) } });
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.get({ bucket: BUCKET, key: KEY })).rejects.toMatchObject({ code: 'UNEXPECTED' });
+  });
+
+  it('get refuses to buffer an object declared over 5 MiB and releases the stream', async () => {
     let destroyed = false;
     const { sender } = fakeSender({
       Body: {
-        transformToByteArray: () => Promise.reject(new Error('must not be read')),
+        [Symbol.asyncIterator]: () => {
+          throw new Error('must not be read');
+        },
         destroy: () => {
           destroyed = true;
         },
@@ -281,16 +357,35 @@ describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => 
     expect(destroyed).toBe(true);
   });
 
-  it('delete sends DeleteObject (with the version when given) and checkBucket sends HeadBucket with the signal', async () => {
+  it('get counts bytes: a body over 5 MiB without (or below) its ContentLength is TOO_LARGE, and exactly 5 MiB passes', async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    const over = fakeSender({ Body: stream(chunk, chunk, chunk, chunk, chunk, new Uint8Array(1)) });
+    await expect(
+      createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: over.sender }).get({ bucket: BUCKET, key: KEY }),
+    ).rejects.toMatchObject({ code: 'TOO_LARGE' });
+    const lying = fakeSender({ Body: stream(chunk, chunk, chunk, chunk, chunk, new Uint8Array(1)), ContentLength: 10 });
+    await expect(
+      createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: lying.sender }).get({ bucket: BUCKET, key: KEY }),
+    ).rejects.toMatchObject({ code: 'TOO_LARGE' });
+    const exact = fakeSender({ Body: stream(chunk, chunk, chunk, chunk, chunk) });
+    const stored = await createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: exact.sender }).get({
+      bucket: BUCKET,
+      key: KEY,
+    });
+    expect(stored?.body.byteLength).toBe(MAX_PUT_BYTES);
+  });
+
+  it('delete sends DeleteObject (with the version when given) and checkBucket sends HeadBucket under the caller signal', async () => {
     const { sender, calls } = fakeSender({});
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
     await storage.delete({ bucket: BUCKET, key: KEY, versionId: 'v2' });
-    const signal = new AbortController().signal;
-    await storage.checkBucket(BUCKET, signal);
+    const controller = new AbortController();
+    await storage.checkBucket(BUCKET, controller.signal);
     expect(calls.map((call) => call.name)).toEqual(['DeleteObjectCommand', 'HeadBucketCommand']);
     expect(calls[0]?.input).toEqual({ Bucket: BUCKET, Key: KEY, VersionId: 'v2' });
     expect(calls[1]?.input).toEqual({ Bucket: BUCKET });
-    expect(calls[1]?.signal).toBe(signal);
+    controller.abort();
+    expect(calls[1]?.signal?.aborted).toBe(true);
   });
 
   it('destroy closes the injected sender and the presign client', () => {
@@ -307,61 +402,72 @@ describe('SPK-05 S3 object storage adapter: put, putIfAbsent, head, get', () => 
 });
 
 describe('SPK-05 S3 object storage adapter: presignGet', () => {
-  const now = new Date('2026-11-13T08:00:00.000Z');
-
-  it('signs a path-style GET with attachment disposition and expiresAt from the injected clock', async () => {
-    const storage = createS3ObjectStorage({
+  // A non-zero millisecond part: X-Amz-Date is floored to the second, so must be the signing time behind expiresAt.
+  const now = new Date('2026-11-13T08:00:00.900Z');
+  const base = { bucket: BUCKET, key: KEY, responseContentType: 'application/pdf' } as const;
+  const signerStorage = (): ReturnType<typeof createS3ObjectStorage> =>
+    createS3ObjectStorage({
       region: 'us-east-1',
       forcePathStyle: true,
       client: fakeSender().sender,
       presignClient: presignClient(),
       now: () => now,
     });
-    const presigned = await storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 120 });
+
+  it('signs a path-style GET with a forced content type, attachment disposition and the exact expiry', async () => {
+    const presigned = await signerStorage().presignGet({ ...base, ttlSeconds: 120 });
     const url = new URL(presigned.url);
+    expect(url.searchParams.get('X-Amz-Date')).toBe('20261113T080000Z');
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('120');
+    // The store stops honouring the URL at X-Amz-Date + X-Amz-Expires: expiresAt must be exactly that, never later.
     expect(presigned.expiresAt).toEqual(new Date('2026-11-13T08:02:00.000Z'));
     expect(url.origin).toBe(ENDPOINT);
     expect(url.pathname.startsWith(`/${BUCKET}/`)).toBe(true);
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('120');
-    expect(url.searchParams.get('X-Amz-Date')).toBe('20261113T080000Z');
+    expect(url.searchParams.get('response-content-type')).toBe('application/pdf');
     expect(url.searchParams.get('response-content-disposition')).toBe('attachment');
   });
 
-  it('honours an explicit content disposition and version id', async () => {
-    const storage = createS3ObjectStorage({
-      region: 'us-east-1',
-      forcePathStyle: true,
-      client: fakeSender().sender,
-      presignClient: presignClient(),
-    });
-    const url = new URL(
-      (await storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 1, contentDisposition: 'inline', versionId: 'v3' })).url,
+  it('honours an attachment disposition with a filename, a version id and inline only when explicitly allowed', async () => {
+    const storage = signerStorage();
+    const named = new URL(
+      (await storage.presignGet({ ...base, ttlSeconds: 1, contentDisposition: 'attachment; filename="label.pdf"', versionId: 'v3' })).url,
     );
-    expect(url.searchParams.get('response-content-disposition')).toBe('inline');
-    expect(url.searchParams.get('versionId')).toBe('v3');
+    expect(named.searchParams.get('response-content-disposition')).toBe('attachment; filename="label.pdf"');
+    expect(named.searchParams.get('versionId')).toBe('v3');
+    const inline = new URL((await storage.presignGet({ ...base, ttlSeconds: 1, contentDisposition: 'inline', allowInline: true })).url);
+    expect(inline.searchParams.get('response-content-disposition')).toBe('inline');
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['inline without allowInline', { contentDisposition: 'inline' }],
+    ['inline with allowInline false', { contentDisposition: 'INLINE; filename=a.html', allowInline: false }],
+    ['an unknown disposition type', { contentDisposition: 'x-download' }],
+    ['a bare parameter list', { contentDisposition: '; filename=a.pdf' }],
+    ['a disposition with CR/LF', { contentDisposition: 'attachment\r\nX-Evil: 1' }],
+    ['an empty content type', { responseContentType: '' }],
+    ['a content type without subtype', { responseContentType: 'text' }],
+    ['a content type with CR/LF', { responseContentType: 'text/plain\r\nX-Evil: 1' }],
+    ['a content type with a quoted parameter', { responseContentType: 'text/plain; charset="utf-8"' }],
+  ])('rejects %s with INVALID_ARGUMENT before signing', async (_label, override) => {
+    await expect(signerStorage().presignGet({ ...base, ttlSeconds: 60, ...override })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
   });
 
   it.each([0, -1, MAX_PRESIGN_TTL_SECONDS + 1, 1.5, Number.NaN])('rejects ttlSeconds %s before any I/O', async (ttlSeconds) => {
     const { sender, calls } = fakeSender({});
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender, presignClient: presignClient() });
-    await expect(storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(storage.presignGet({ ...base, ttlSeconds })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     expect(calls).toHaveLength(0);
   });
 
-  it('accepts the bounds 1 and 300', async () => {
-    const storage = createS3ObjectStorage({
-      region: 'us-east-1',
-      forcePathStyle: true,
-      client: fakeSender().sender,
-      presignClient: presignClient(),
-    });
-    await expect(storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 1 })).resolves.toBeDefined();
-    await expect(storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 300 })).resolves.toBeDefined();
+  it('accepts the bounds 1 and 300 and a content type with a token parameter', async () => {
+    const storage = signerStorage();
+    await expect(storage.presignGet({ ...base, ttlSeconds: 1 })).resolves.toBeDefined();
+    await expect(storage.presignGet({ ...base, ttlSeconds: 300, responseContentType: 'text/plain; charset=utf-8' })).resolves.toBeDefined();
   });
 
   it('an injected sender without a presign client cannot sign (UNEXPECTED, not a crash)', async () => {
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: fakeSender().sender });
-    await expect(storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 60 })).rejects.toMatchObject({ code: 'UNEXPECTED' });
+    await expect(storage.presignGet({ ...base, ttlSeconds: 60 })).rejects.toMatchObject({ code: 'UNEXPECTED' });
   });
 
   it('without injection a second client is built for a different public endpoint and the pre-signed URL uses it', async () => {
@@ -374,7 +480,7 @@ describe('SPK-05 S3 object storage adapter: presignGet', () => {
       credentials: { accessKeyId, secretAccessKey: randomBytes(20).toString('hex') },
     });
     try {
-      const url = new URL((await storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 60 })).url);
+      const url = new URL((await storage.presignGet({ ...base, ttlSeconds: 60 })).url);
       expect(url.origin).toBe('http://localhost:9000');
       expect(url.searchParams.get('X-Amz-Credential')?.startsWith(`${accessKeyId}/`)).toBe(true);
     } finally {
@@ -390,7 +496,7 @@ describe('SPK-05 S3 object storage adapter: presignGet', () => {
       credentials: { accessKeyId: `ak${randomBytes(6).toString('hex')}`, secretAccessKey: randomBytes(20).toString('hex') },
     });
     try {
-      const url = new URL((await storage.presignGet({ bucket: BUCKET, key: KEY, ttlSeconds: 60 })).url);
+      const url = new URL((await storage.presignGet({ ...base, ttlSeconds: 60 })).url);
       expect(url.origin).toBe('http://rustfs:9000');
     } finally {
       storage.destroy();
@@ -402,22 +508,29 @@ describe('SPK-05 S3 object storage adapter: error mapping hides the SDK message'
   it.each<[string, Error, ObjectStorageErrorCode]>([
     ['403 AccessDenied', sdkError('AccessDenied', 403), 'ACCESS_DENIED'],
     ['403 SignatureDoesNotMatch', sdkError('SignatureDoesNotMatch', 403), 'ACCESS_DENIED'],
+    ['403 RequestTimeTooSkewed', sdkError('RequestTimeTooSkewed', 403), 'ACCESS_DENIED'],
+    ['400 ExpiredToken', sdkError('ExpiredToken', 400), 'ACCESS_DENIED'],
+    ['400 TokenRefreshRequired', sdkError('TokenRefreshRequired', 400), 'ACCESS_DENIED'],
+    ['no credentials (CredentialsProviderError)', sdkError('CredentialsProviderError'), 'ACCESS_DENIED'],
     ['500', sdkError('InternalError', 500), 'UNAVAILABLE'],
     ['503 SlowDown', sdkError('SlowDown', 503), 'UNAVAILABLE'],
     ['429', sdkError('Throttled', 429), 'UNAVAILABLE'],
     ['408', sdkError('RequestTimeout', 408), 'UNAVAILABLE'],
+    ['400 RequestTimeout (what S3 sends for a stalled upload)', sdkError('RequestTimeout', 400), 'UNAVAILABLE'],
+    ['409 ConditionalRequestConflict', sdkError('ConditionalRequestConflict', 409), 'UNAVAILABLE'],
     ['connection refused', sdkError('Error', undefined, { code: 'ECONNREFUSED' }), 'UNAVAILABLE'],
     ['connection reset', sdkError('Error', undefined, { code: 'ECONNRESET' }), 'UNAVAILABLE'],
     ['timeout', sdkError('TimeoutError'), 'UNAVAILABLE'],
     ['abort', sdkError('AbortError'), 'UNAVAILABLE'],
-    ['400 BadDigest', sdkError('BadDigest', 400), 'UNEXPECTED'],
+    ['400 BadDigest', sdkError('BadDigest', 400), 'INTEGRITY_MISMATCH'],
     ['404 NoSuchBucket', sdkError('NoSuchBucket', 404), 'UNEXPECTED'],
+    ['409 another conflict', sdkError('OperationAborted', 409), 'UNEXPECTED'],
     ['unknown error', sdkError('Surprise'), 'UNEXPECTED'],
   ])('%s becomes %s with a fixed message', async (_label, error, code) => {
     const { sender } = fakeSender(error);
     const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
     const operations: Array<() => Promise<unknown>> = [
-      () => storage.put({ bucket: BUCKET, key: KEY, body: bytes(), contentType: 'text/plain' }),
+      () => storage.put({ bucket: BUCKET, key: KEY, body: bytes(), contentType: TEXT }),
       () => storage.head({ bucket: BUCKET, key: KEY }),
       () => storage.get({ bucket: BUCKET, key: KEY }),
       () => storage.delete({ bucket: BUCKET, key: KEY }),
@@ -454,6 +567,44 @@ describe('SPK-05 S3 object storage adapter: error mapping hides the SDK message'
     await expect(storage.checkBucket(BUCKET, controller.signal)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
     expect(calls[0]?.signal?.aborted).toBe(true);
   });
+
+  it('once the caller aborted, any failure (even one the map calls UNEXPECTED) is UNAVAILABLE', async () => {
+    const controller = new AbortController();
+    const sender: S3Sender = {
+      send: () => {
+        controller.abort();
+        return Promise.reject(sdkError('Surprise'));
+      },
+    };
+    const storage = createS3ObjectStorage({ region: 'us-east-1', forcePathStyle: true, client: sender });
+    await expect(storage.head({ bucket: BUCKET, key: KEY }, controller.signal)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+});
+
+describe('SPK-05 SDK client configuration (CLAUDE.md §9; PR30-SEC-01)', () => {
+  it('pins connect 2 s, request 10 s that throws, and 3 attempts; deadlines 15 s (data) and 5 s (metadata)', () => {
+    expect(S3_TIMEOUTS).toEqual({ connectionMs: 2_000, requestMs: 10_000, dataDeadlineMs: 15_000, metadataDeadlineMs: 5_000 });
+    expect(S3_MAX_ATTEMPTS).toBe(3);
+    expect(s3ClientConfig({ region: 'us-east-1', forcePathStyle: true }, ENDPOINT)).toEqual({
+      region: 'us-east-1',
+      forcePathStyle: true,
+      endpoint: ENDPOINT,
+      requestHandler: { connectionTimeout: 2_000, requestTimeout: 10_000, throwOnRequestTimeout: true },
+      maxAttempts: 3,
+    });
+  });
+
+  it('the production client is built from that configuration (resolved by the SDK)', async () => {
+    const client = new S3Client(s3ClientConfig({ region: 'us-east-1', forcePathStyle: true }, ENDPOINT));
+    try {
+      expect(await client.config.maxAttempts()).toBe(3);
+      const handlerConfig = await (client.config.requestHandler as unknown as { configProvider: Promise<Record<string, unknown>> })
+        .configProvider;
+      expect(handlerConfig).toMatchObject({ connectionTimeout: 2_000, requestTimeout: 10_000, throwOnRequestTimeout: true });
+    } finally {
+      client.destroy();
+    }
+  });
 });
 
 describe('SPK-05 configuration mapping', () => {
@@ -483,12 +634,26 @@ describe('SPK-05 configuration mapping', () => {
     });
   });
 
+  it('sets no static credentials with neither secret (SDK default chain)', () => {
+    expect(storageOptionsFromConfig(base, new Map())).not.toHaveProperty('credentials');
+  });
+
   it.each([
-    ['no secrets', new Map<string, Secret<string>>()],
     ['only the access key id', new Map([['STORAGE_ACCESS_KEY_ID_REF', new Secret(accessKeyId)]])],
     ['only the secret access key', new Map([['STORAGE_SECRET_ACCESS_KEY_REF', new Secret(secretAccessKey)]])],
-  ])('sets no static credentials with %s (SDK default chain)', (_label, secrets) => {
-    expect(storageOptionsFromConfig(base, secrets)).not.toHaveProperty('credentials');
+  ])('refuses a half-written pair (%s): StorageConfigError naming the keys, never a value', (_label, secrets) => {
+    let thrown: unknown;
+    try {
+      storageOptionsFromConfig(base, secrets);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(StorageConfigError);
+    expect(thrown).toMatchObject({ name: 'StorageConfigError' });
+    const message = (thrown as Error).message;
+    expect(message).toMatch(/STORAGE_ACCESS_KEY_ID_REF.*STORAGE_SECRET_ACCESS_KEY_REF/u);
+    expect(message).not.toContain(accessKeyId);
+    expect(message).not.toContain(secretAccessKey);
   });
 
   it('omits unset endpoints (AWS S3) and builds a closeable storage from the configuration', () => {

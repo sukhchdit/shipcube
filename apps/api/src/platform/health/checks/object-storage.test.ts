@@ -30,4 +30,22 @@ describe('object_storage readiness check (US-012)', () => {
     expect(report.body.components.object_storage).toBe('unavailable');
     expect(JSON.stringify(report.body)).not.toMatch(/documents|UNAVAILABLE/u);
   });
+  it('reports the failure class to onFailure and still rejects; a non-port error is UNEXPECTED; success reports nothing', async () => {
+    const codes: string[] = [];
+    const onFailure = (code: string): void => {
+      codes.push(code);
+    };
+    const signal = new AbortController().signal;
+    const denied = new ObjectStorageError('ACCESS_DENIED');
+    await expect(
+      createObjectStorageCheck({ checkBucket: () => Promise.reject(denied) }, 'documents', onFailure).check(signal),
+    ).rejects.toBe(denied);
+    await expect(
+      createObjectStorageCheck({ checkBucket: () => Promise.reject(new Error('documents at 10.0.0.1')) }, 'documents', onFailure).check(
+        signal,
+      ),
+    ).rejects.toThrow();
+    await createObjectStorageCheck({ checkBucket: () => Promise.resolve() }, 'documents', onFailure).check(signal);
+    expect(codes).toEqual(['ACCESS_DENIED', 'UNEXPECTED']);
+  });
 });

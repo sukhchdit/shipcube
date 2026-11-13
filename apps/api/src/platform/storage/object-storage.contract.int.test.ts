@@ -2,12 +2,13 @@
  * SPK-05 (R-ARCH-05): the `ObjectStorage` port implemented by `s3-object-storage.ts`, proved against RustFS 1.0.4
  * (Testcontainers; pinned image in tests/rustfs.ts). Findings are written up in docs/04-plan/spikes/SPK-05.md.
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { ObjectStorageError } from './object-storage.port.js';
-import { createS3ObjectStorage, type S3ObjectStorage } from './s3-object-storage.js';
+import { createS3ObjectStorage, toObjectStorageError, type S3ObjectStorage } from './s3-object-storage.js';
 import { RUSTFS_STARTUP_TIMEOUT_MS, startRustfs, type RunningRustfs } from './tests/rustfs.js';
 
 const DOCUMENTS = 'spk05-documents';
@@ -20,6 +21,8 @@ const payload = (text: string): Uint8Array => new TextEncoder().encode(text);
 describe('SPK-05 ObjectStorage contract against RustFS', () => {
   let rustfs: RunningRustfs;
   let storage: S3ObjectStorage;
+  /** A raw client with the same credentials: writes what the port refuses to write (forged metadata, wrong digest). */
+  let raw: S3Client;
 
   beforeAll(async () => {
     rustfs = await startRustfs();
@@ -31,9 +34,16 @@ describe('SPK-05 ObjectStorage contract against RustFS', () => {
       forcePathStyle: true,
       credentials: { accessKeyId: rustfs.accessKeyId, secretAccessKey: rustfs.secretAccessKey },
     });
+    raw = new S3Client({
+      endpoint: rustfs.endpoint,
+      region: 'us-east-1',
+      forcePathStyle: true,
+      credentials: { accessKeyId: rustfs.accessKeyId, secretAccessKey: rustfs.secretAccessKey },
+    });
   }, RUSTFS_STARTUP_TIMEOUT_MS);
 
   afterAll(async () => {
+    raw.destroy();
     storage.destroy();
     await rustfs.stop();
   }, RUSTFS_STARTUP_TIMEOUT_MS);
@@ -46,6 +56,8 @@ describe('SPK-05 ObjectStorage contract against RustFS', () => {
 
     const head = await storage.head({ bucket: DOCUMENTS, key });
     expect(head).toMatchObject({ contentType: PDF, contentLength: 2048, sha256: put.sha256, metadata: { kind: 'label' } });
+    // PR30-SEC-03: the store's own SHA-256 (sent as ChecksumSHA256 on put, returned with checksum mode on head).
+    expect(head?.checksumSha256).toBe(put.sha256);
 
     const stored = await storage.get({ bucket: DOCUMENTS, key });
     expect(Buffer.from(stored?.body ?? new Uint8Array()).equals(body)).toBe(true);
@@ -62,11 +74,12 @@ describe('SPK-05 ObjectStorage contract against RustFS', () => {
     expect(Buffer.from(stored?.body ?? new Uint8Array()).equals(body)).toBe(true);
   });
 
-  it('SPK-05 a pre-signed GET returns the bytes with Content-Disposition attachment on a path-style URL', async () => {
+  it('SPK-05 a pre-signed GET returns the bytes with the forced content type and Content-Disposition attachment', async () => {
     const key = unique();
     const body = payload('presigned download');
-    await storage.put({ bucket: DOCUMENTS, key, body, contentType: 'text/plain' });
-    const { url, expiresAt } = await storage.presignGet({ bucket: DOCUMENTS, key, ttlSeconds: 60 });
+    // Stored as HTML, served as the forced type (PR30-SEC-02, T-58): the stored type never reaches the browser.
+    await storage.put({ bucket: DOCUMENTS, key, body, contentType: 'text/html' });
+    const { url, expiresAt } = await storage.presignGet({ bucket: DOCUMENTS, key, ttlSeconds: 60, responseContentType: 'text/plain' });
 
     expect(new URL(url).pathname.startsWith(`/${DOCUMENTS}/`)).toBe(true);
     expect(new URL(url).host).toBe(`${rustfs.host}:${String(rustfs.port)}`);
@@ -74,15 +87,19 @@ describe('SPK-05 ObjectStorage contract against RustFS', () => {
     const response = await fetch(url);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-disposition')).toBe('attachment');
+    expect(response.headers.get('content-type')).toBe('text/plain');
     expect(Buffer.from(await response.arrayBuffer()).equals(Buffer.from(body))).toBe(true);
   });
 
-  it('SPK-05 an expired pre-signed URL (ttl 1 s) is refused with 403', async () => {
+  it('SPK-05 an expired pre-signed URL (ttl 2 s) is refused with 403, and not before expiresAt', async () => {
     const key = unique();
     await storage.put({ bucket: DOCUMENTS, key, body: payload('expires'), contentType: 'text/plain' });
-    const { url } = await storage.presignGet({ bucket: DOCUMENTS, key, ttlSeconds: 1 });
+    // ttl 2: the first fetch has at least a full second of slack whatever the sub-second signing instant (R1-m3).
+    const { url, expiresAt } = await storage.presignGet({ bucket: DOCUMENTS, key, ttlSeconds: 2, responseContentType: 'text/plain' });
+    expect(expiresAt.getTime() % 1000).toBe(0);
     expect((await fetch(url)).status).toBe(200);
-    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(Date.now()).toBeGreaterThan(expiresAt.getTime());
     const expired = await fetch(url);
     expect(expired.status).toBe(403);
     expect(await expired.text()).not.toContain('expires');
@@ -91,14 +108,16 @@ describe('SPK-05 ObjectStorage contract against RustFS', () => {
   it('SPK-05 a tampered pre-signed URL (another key) is refused', async () => {
     const key = unique();
     await storage.put({ bucket: DOCUMENTS, key, body: payload('secret-bytes'), contentType: 'text/plain' });
-    const { url } = await storage.presignGet({ bucket: DOCUMENTS, key, ttlSeconds: 60 });
+    const { url } = await storage.presignGet({ bucket: DOCUMENTS, key, ttlSeconds: 60, responseContentType: 'text/plain' });
     const other = new URL(url);
     other.pathname = `/${DOCUMENTS}/${unique()}`;
     expect((await fetch(other)).status).toBe(403);
   });
 
   it('SPK-05 a pre-signed URL TTL of 301 s is rejected before any I/O', async () => {
-    await expect(storage.presignGet({ bucket: DOCUMENTS, key: unique(), ttlSeconds: 301 })).rejects.toMatchObject({
+    await expect(
+      storage.presignGet({ bucket: DOCUMENTS, key: unique(), ttlSeconds: 301, responseContentType: 'text/plain' }),
+    ).rejects.toMatchObject({
       code: 'INVALID_ARGUMENT',
     });
   });
@@ -136,6 +155,43 @@ describe('SPK-05 ObjectStorage contract against RustFS', () => {
       created: false,
     });
     expect(new TextDecoder().decode((await storage.get({ bucket: VERSIONED, key }))?.body)).toBe('anchor');
+  });
+
+  it('SPK-05 get refuses an object whose sha256 metadata claim does not match its bytes (PR30-SEC-03)', async () => {
+    const key = unique();
+    const forged = createHash('sha256').update('what the anchor should say').digest('hex');
+    await raw.send(new PutObjectCommand({ Bucket: DOCUMENTS, Key: key, Body: payload('other bytes'), Metadata: { sha256: forged } }));
+    // head reports the claim (documented as unverified); the store's own checksum tells the truth.
+    const head = await storage.head({ bucket: DOCUMENTS, key });
+    expect(head?.sha256).toBe(forged);
+    expect(head?.checksumSha256).not.toBe(forged);
+    await expect(storage.get({ bucket: DOCUMENTS, key })).rejects.toMatchObject({ code: 'INTEGRITY_MISMATCH' });
+  });
+
+  it('SPK-05 the store refuses a put whose ChecksumSHA256 does not match the body (BadDigest maps to INTEGRITY_MISMATCH)', async () => {
+    const key = unique();
+    const wrong = createHash('sha256').update('not the body').digest('base64');
+    const failure: unknown = await raw
+      .send(
+        new PutObjectCommand({
+          Bucket: DOCUMENTS,
+          Key: key,
+          Body: payload('the body'),
+          ChecksumAlgorithm: 'SHA256',
+          ChecksumSHA256: wrong,
+        }),
+      )
+      .then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+    expect(toObjectStorageError(failure).code).toBe('INTEGRITY_MISMATCH');
+    await expect(storage.head({ bucket: DOCUMENTS, key })).resolves.toBeUndefined();
+  });
+
+  it('SPK-05 head on a missing bucket resolves undefined (HEAD has no error body; checkBucket is the guard, R1-n4)', async () => {
+    await expect(storage.head({ bucket: 'spk05-no-such-bucket', key: unique() })).resolves.toBeUndefined();
+    await expect(storage.checkBucket('spk05-no-such-bucket', AbortSignal.timeout(5_000))).rejects.toMatchObject({ code: 'UNEXPECTED' });
   });
 
   it('SPK-05 head and get of a missing key resolve undefined', async () => {

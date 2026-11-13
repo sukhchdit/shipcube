@@ -47,8 +47,9 @@ export function createRuntimeServices(
   log: RuntimeLog,
   secrets: ReadonlyMap<string, Secret<string>>,
 ): RuntimeServices {
-  const database = databaseRuntimeFromConfig(config, service, log);
+  // First: a half-written credential pair throws StorageConfigError before any pool or client exists (PR30-SEC-04).
   const storage = objectStorageFromConfig(config, secrets);
+  const database = databaseRuntimeFromConfig(config, service, log);
   const valkey = createValkeyClient({
     url: config.REDIS_URL.reveal(),
     connectionName: service,
@@ -57,7 +58,12 @@ export function createRuntimeServices(
   return {
     valkey,
     probe: createReadinessProbe(
-      readinessChecks(database.readinessCheck, valkey, createObjectStorageCheck(storage, config.STORAGE_BUCKET_DOCUMENTS)),
+      readinessChecks(
+        database.readinessCheck,
+        valkey,
+        // The error class only (ObjectStorageError code): never the endpoint, bucket, key or a credential (R1-m5).
+        createObjectStorageCheck(storage, config.STORAGE_BUCKET_DOCUMENTS, (code) => log.warn('object_storage.error', { error: code })),
+      ),
     ),
     resources: [
       ...database.resources,

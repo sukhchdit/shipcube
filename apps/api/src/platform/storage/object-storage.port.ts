@@ -1,17 +1,20 @@
 /**
  * `ObjectStorage` port (ADR-0021 §1 and amendment 1; REQ-DOC-*, NFR-SEC-013; SPK-05, R-ARCH-05). The one S3 code path:
  * `s3-object-storage.ts` implements it with `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` against any S3
- * endpoint (RustFS locally, AWS S3 at M5). No other module imports the AWS SDK for S3 (boundary test in this folder).
+ * endpoint (RustFS locally, AWS S3 at M5). No other module imports the AWS SDK (boundary test in this folder).
  *
  * Contract (proved against RustFS by `object-storage.contract.int.test.ts`):
  *  - Keys are opaque UUID-based paths (ADR-0021 §2; data-model P13: no personal data in keys). Invalid keys and
  *    buckets are a programming error (`ObjectStorageError` `INVALID_ARGUMENT`), checked before any I/O.
- *  - `put` takes bytes (labels and documents are ≤ 5 MB, ADR-0021 am. 2); the SHA-256 is computed over the bytes,
- *    compared with the caller's expected hash when given, stored as object metadata `sha256` (`x-amz-meta-sha256`,
- *    lowercase hex) and returned.
+ *  - Every operation is time-bounded even without a caller signal (an optional `signal` only shortens it); a store
+ *    that stops answering yields `UNAVAILABLE`, never a call pending for ever (CLAUDE.md §9).
+ *  - `put` takes bytes (labels and documents are ≤ 5 MiB, ADR-0021 am. 2); the SHA-256 is computed over the bytes,
+ *    compared with the caller's expected hash when given, sent as the S3 `ChecksumSHA256` the store verifies before
+ *    it accepts the write, stored as object metadata `sha256` (`x-amz-meta-sha256`, lowercase hex) and returned.
  *  - `putIfAbsent` never overwrites (conditional `If-None-Match: *`, ADR-0021 am. 1: audit anchors).
  *  - `head` / `get` resolve `undefined` for a missing object (404), never throw for it.
- *  - `presignGet` signs a GET for at most 300 s (D-025) with `Content-Disposition: attachment` by default.
+ *  - `presignGet` signs a GET for at most 300 s (D-025) with a forced response content type and
+ *    `Content-Disposition: attachment` unless the caller explicitly allows `inline`.
  *  - `checkBucket` is the readiness probe (`HeadBucket`), bounded by the caller's abort signal.
  * Errors other than "not found" and "precondition failed" surface as `ObjectStorageError` with a fixed code and no
  * endpoint, bucket credential or SDK message in it (AT-US-012-05, CLAUDE.md §9).
@@ -19,7 +22,7 @@
 
 /** D-025: pre-signed URLs live at most 300 s. */
 export const MAX_PRESIGN_TTL_SECONDS = 300;
-/** ADR-0021 am. 2: carrier labels and documents are ≤ 5 MB; the port refuses larger bodies. */
+/** ADR-0021 am. 2: carrier labels and documents are ≤ 5 MiB; the port refuses larger bodies. */
 export const MAX_PUT_BYTES = 5 * 1024 * 1024;
 
 export type ObjectStorageErrorCode =
@@ -48,7 +51,7 @@ export interface PutObjectInput {
 }
 
 export interface PutObjectResult {
-  /** Lowercase hex SHA-256 of the stored bytes. */
+  /** Lowercase hex SHA-256 of the stored bytes; the store verified it on receipt (`ChecksumSHA256`). */
   readonly sha256: string;
   /** Present when the bucket has versioning enabled. */
   readonly versionId?: string;
@@ -67,8 +70,16 @@ export interface ObjectLocator {
 export interface ObjectHead {
   readonly contentType?: string;
   readonly contentLength: number;
-  /** From metadata `sha256`; `undefined` for objects not written through this port. */
+  /**
+   * On `head`: the metadata `sha256` value, an UNVERIFIED claim (anyone who can write the object can write any
+   * metadata); never use it to prove what the body is. On `get` (`StoredObject`): recomputed over the bytes read.
+   */
   readonly sha256?: string;
+  /**
+   * The store's own SHA-256 of the object (lowercase hex), computed and verified by the store at write time
+   * (`ChecksumSHA256` with checksum mode); present for objects written through this port.
+   */
+  readonly checksumSha256?: string;
   readonly metadata: Readonly<Record<string, string>>;
   readonly versionId?: string;
   readonly etag?: string;
@@ -76,18 +87,28 @@ export interface ObjectHead {
 }
 
 export interface StoredObject extends ObjectHead {
+  /** Lowercase hex SHA-256 computed over `body`; a body that contradicts its metadata claim is `INTEGRITY_MISMATCH`. */
+  readonly sha256: string;
   readonly body: Uint8Array;
 }
 
 export interface PresignGetInput extends ObjectLocator {
   /** 1 … {@link MAX_PRESIGN_TTL_SECONDS}. */
   readonly ttlSeconds: number;
-  /** `response-content-disposition`; default `attachment`. */
+  /**
+   * Forced `response-content-type` (`type/subtype`, optional token parameters): the type stored at put time, never
+   * request input (T-58). The store serves the object with this type whatever the stored one is.
+   */
+  readonly responseContentType: string;
+  /** `response-content-disposition`; default `attachment`. The disposition type must be `attachment` … */
   readonly contentDisposition?: string;
+  /** … unless this is `true`, which also permits `inline` (reviewed callers only; T-58/T-59). Default `false`. */
+  readonly allowInline?: boolean;
 }
 
 export interface PresignedUrl {
   readonly url: string;
+  /** The exact instant the store stops honouring the URL (signing time floored to the second + TTL). */
   readonly expiresAt: Date;
 }
 
