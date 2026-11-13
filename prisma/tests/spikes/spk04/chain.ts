@@ -5,6 +5,10 @@
  * canonical object = every audit_entries column except prev_hash, entry_hash and the generated scope_org_id; timestamps
  * as `YYYY-MM-DDTHH:MM:SS.ffffffZ`, bytea as lower-case hex, absent values as JSON null, hash_version included.
  * entry_hash = SHA-256( UTF-8(JCS(canonical)) || prev_hash ), the first prev_hash being 32 zero bytes (DR-A09).
+ *
+ * Lifecycle (D-ARCH-089, SPK-04 §8): deleted by the TASK-030 PR, after the pinned entry-hash vector (chain.test.ts) is
+ * ported to packages/audit/test/chain. Harness-only: nothing under apps/** or packages/** may import this file.
+ *
  * Timestamps are carried as integer microseconds since the Unix epoch (bigint) so nothing is lost to Date's milliseconds.
  */
 import { createHash, randomBytes } from 'node:crypto';

@@ -1,5 +1,6 @@
 -- SPK-04 (TASK-018) THROWAWAY PROTOTYPE: a TENANT business table for the audit A/B benchmark. Test-only: applied by
--- prisma/tests/spikes/spk04/runner.ts after the migrations; NEVER part of prisma/migrations/**.
+-- prisma/tests/spikes/spk04/runner.ts after the migrations; NEVER part of prisma/migrations/**. Deleted by the
+-- TASK-280 PR with the runner (D-ARCH-089, SPK-04 §8). The audit tables come from the real prisma/bootstrap lane.
 -- RLS: ENABLE + FORCE with the policy text of prisma/sql/policy-templates/tenant.sql (data-model §4.3 TENANT).
 -- Run by the bootstrap superuser with the pinned search path, in one transaction, as the migrator.
 SET search_path = pg_catalog, pg_temp;

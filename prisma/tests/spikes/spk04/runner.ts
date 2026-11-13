@@ -3,21 +3,28 @@
  *
  *   npm exec --no -- tsx prisma/tests/spikes/spk04/runner.ts        (Docker required; run under the host Docker lock)
  *
- * 1. Starts PostgreSQL 18 (the pinned harness image), bootstraps a database from the pre-audit bootstrap lane
- *    (`prisma/bootstrap/0N-*.sql`), applies the SPK-08 audit prototype (spk08/10-audit.sql), the SPK-04 write-path
- *    prototype (fixtures/20-spk04-audit-write.sql), the SPK-08 DDL guard (spk08/90-audit-ddl-guard.sql), every
- *    migration as the migrator, the tenant business table (fixtures/30-spk04-business.sql), then seeds 100 orgs.
+ * Lifecycle (D-ARCH-089, SPK-04 §8): deleted by the TASK-280 PR, after the arm loop, the CPU sampler, the verdict and the
+ * evidence writer are ported to tests/load. Harness-only: nothing under apps/** or packages/** imports this file, it counts
+ * toward no coverage, it ships in no image, and the `SPK04_AUDIT` switch of server.ts exists nowhere else. Every path it
+ * reads is listed in paths.ts and checked by paths.test.ts (a unit test), so a moved file fails lane A, not TASK-280.
+ *
+ * 1. Starts PostgreSQL 18 (the pinned harness image), applies the REAL bootstrap lane (`prisma/bootstrap`: 00..02, then
+ *    10-audit.sql, then 90-audit-ddl-guard.sql, TASK-021, which owns audit_entries, audit_stream_heads, data_subjects and
+ *    audit_pii_vault), every migration as the migrator, the tenant business table (fixtures/30-spk04-business.sql), then
+ *    seeds 100 orgs.
  * 2. For each repetition and arm (off, on, batched): starts two server.ts replicas in that mode on loopback, runs k6
  *    (Docker, image pinned by digest) for a discarded warm-up, resets the replica stats, runs the measured window while
  *    sampling host CPU every second and `docker stats` of the Postgres container once, then stops the replicas.
- * 3. Verifies integrity as the superuser (chain recompute, immutability as platform_app, triggers, FORCE RLS,
- *    partitions) and writes the evidence: host-spec.json, k6-audit-ab.summary.json, summary.json, summary.md.
+ * 3. Verifies integrity as the superuser (chain recompute, immutability as platform_app and as the superuser, ENABLE ALWAYS
+ *    triggers, the RLS state of the product design, partitions) and writes the evidence: host-spec.json,
+ *    k6-audit-ab.summary.json, summary.json, summary.md. The step fails closed: if it throws or any check is not ok the
+ *    verdict is INTEGRITY_FAILED and the process exits 1 (after the evidence is written).
  *
  * Environment: SPK04_RATE (300), SPK04_WARMUP_S (20), SPK04_MEASURE_S (120), SPK04_REPS (2), SPK04_OUT (default
  * docs/05-quality/performance/spikes/SPK-04/<UTC stamp>_<sha7>), SPK04_PORT_BASE (4101).
  */
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, release, tmpdir, totalmem, version as osVersion } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -29,13 +36,24 @@ import { findRepoRoot } from '../../../../tools/test-support/process.js';
 import { PlatformPostgres, POSTGRES_IMAGE } from '../../harness/postgres.js';
 import { type AuditEntry, entryHash, uuidv7, ZERO_HASH_HEX } from './chain.js';
 import type { Op, OpSamples, Seed, StatsBody } from './server.js';
-import { type Arm, type ArmMeasurement, decide, delta, percentile, pooled, type Repetition, validity } from './verdict.js';
+import { harnessPaths } from './paths.js';
+import {
+  type Arm,
+  type ArmMeasurement,
+  decide,
+  delta,
+  type FinalVerdict,
+  finalVerdict,
+  integrityFailures,
+  percentile,
+  pooled,
+  type Repetition,
+  validity,
+} from './verdict.js';
 
 const run = promisify(execFile);
 const repoRoot = findRepoRoot();
-const spikeDir = join(repoRoot, 'prisma', 'tests', 'spikes', 'spk04');
-const spk08Dir = join(repoRoot, 'prisma', 'tests', 'spikes', 'spk08');
-const K6_SCRIPT_DIR = join(repoRoot, 'tests', 'load', 'spikes');
+const paths = harnessPaths(repoRoot);
 /** grafana/k6 v2.2.0 (commit 00a9a1b7f5, image created 2026-08-10), pinned by digest (the 2.2.0 tag now resolves to another index digest). */
 const K6_IMAGE = 'grafana/k6@sha256:5221b620a4f874faff6e32ba597aa667c058391fe4898b1c6f6377f062c6cdec';
 const OPS: readonly Op[] = ['create', 'update', 'detail', 'list', 'login_failed'];
@@ -85,38 +103,21 @@ async function inTransaction(client: pg.Client, sql: string): Promise<void> {
   }
 }
 
-function preAuditBootstrapDir(target: string): string {
-  const source = join(repoRoot, 'prisma', 'bootstrap');
-  mkdirSync(target);
-  for (const name of readdirSync(source)) {
-    if (/^0\d-[a-z0-9-]+\.sql$/.test(name)) cpSync(join(source, name), join(target, name));
-  }
-  return target;
-}
-
-async function setupDatabase(pgh: PlatformPostgres, work: string): Promise<void> {
+/** The real bootstrap lane (runBootstrap applies 00..02, 10-audit.sql and 90-audit-ddl-guard.sql in order), then the migrations. */
+async function setupDatabase(pgh: PlatformPostgres): Promise<void> {
   await pgh.createDatabase(DB);
-  await pgh.bootstrap(DB, preAuditBootstrapDir(join(work, 'bootstrap')));
-  const files = [
-    join(spk08Dir, '10-audit.sql'),
-    join(spikeDir, 'fixtures', '20-spk04-audit-write.sql'),
-    join(spk08Dir, '90-audit-ddl-guard.sql'),
-  ];
-  for (const file of files) await withClient(await pgh.superuser(DB), (c) => inTransaction(c, readFileSync(file, 'utf8')));
-  const migrations = join(repoRoot, 'prisma', 'migrations');
+  await pgh.bootstrap(DB, paths.bootstrapDir);
   const migrator = new pg.Client(pgh.migratorConnection(DB));
   await migrator.connect();
   await withClient(migrator, async (c) => {
-    for (const dir of readdirSync(migrations, { withFileTypes: true })
+    for (const dir of readdirSync(paths.migrationsDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name)
       .sort()) {
-      await inTransaction(c, readFileSync(join(migrations, dir, 'migration.sql'), 'utf8'));
+      await inTransaction(c, readFileSync(join(paths.migrationsDir, dir, 'migration.sql'), 'utf8'));
     }
   });
-  await withClient(await pgh.superuser(DB), (c) =>
-    inTransaction(c, readFileSync(join(spikeDir, 'fixtures', '30-spk04-business.sql'), 'utf8')),
-  );
+  await withClient(await pgh.superuser(DB), (c) => inTransaction(c, readFileSync(paths.businessFixture, 'utf8')));
 }
 
 async function seedDatabase(pgh: PlatformPostgres): Promise<Seed> {
@@ -213,7 +214,7 @@ async function hostSpec(pgh: PlatformPostgres): Promise<Record<string, unknown>>
 // --- replicas and k6 ------------------------------------------------------------------------------------------------
 async function startReplicas(mode: Arm, seedFile: string, databaseUrl: string): Promise<ChildProcess[]> {
   const children = Array.from({ length: REPLICAS }, (_, i) =>
-    spawn(process.execPath, ['--import', 'tsx', join(spikeDir, 'server.ts')], {
+    spawn(process.execPath, ['--import', 'tsx', paths.serverEntry], {
       cwd: repoRoot,
       env: {
         ...process.env,
@@ -269,7 +270,16 @@ interface K6Summary {
 }
 
 async function k6(durationS: number): Promise<K6Result> {
-  const args = ['run', '--rm', '-v', `${K6_SCRIPT_DIR}:/scripts:ro`, '-e', `RATE=${String(RATE)}`, '-e', `DURATION=${String(durationS)}s`];
+  const args = [
+    'run',
+    '--rm',
+    '-v',
+    `${paths.k6ScriptDir}:/scripts:ro`,
+    '-e',
+    `RATE=${String(RATE)}`,
+    '-e',
+    `DURATION=${String(durationS)}s`,
+  ];
   args.push('-e', `TARGETS=${targets()}`, '-e', `ORGS=${String(ORG_COUNT)}`, K6_IMAGE, 'run', '--quiet', '/scripts/spk04-audit.js');
   const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
@@ -532,6 +542,8 @@ async function integrity(pgh: PlatformPostgres, hotOrg: string): Promise<Record<
       app_update_vault: await attempt(app, 'UPDATE public.audit_pii_vault SET field = field'),
       app_delete_vault: await attempt(app, 'DELETE FROM public.audit_pii_vault'),
       superuser_update_entries_trigger: await attempt(su, 'UPDATE public.audit_entries SET route = route'),
+      superuser_delete_entries_trigger: await attempt(su, 'DELETE FROM public.audit_entries'),
+      superuser_update_vault_trigger: await attempt(su, 'UPDATE public.audit_pii_vault SET field = field'),
       superuser_delete_vault_trigger: await attempt(su, 'DELETE FROM public.audit_pii_vault'),
     };
     const triggers = (
@@ -549,6 +561,13 @@ async function integrity(pgh: PlatformPostgres, hotOrg: string): Promise<Record<
           WHERE relnamespace = 'public'::regnamespace AND relname IN ('audit_entries', 'spk04_orders') ORDER BY 1`,
       )
     ).rows;
+    // Product design (data-model §5.2, PR12-SEC-08, ADR-0005): audit_entries is SYSTEM, so NO row-level security; the
+    // tenant fixture table has ENABLE + FORCE. (The SPK-08 prototype that the recorded runs used had RLS on audit_entries.)
+    const rlsOk =
+      rls.length === 2 &&
+      rls.every((r) =>
+        r.relname === 'audit_entries' ? !r.relrowsecurity && !r.relforcerowsecurity : r.relrowsecurity && r.relforcerowsecurity,
+      );
     const partitions = (
       await su.query<{ partition: string; entries: string }>(
         `SELECT tableoid::regclass::text AS partition, count(*)::text AS entries FROM public.audit_entries GROUP BY 1 ORDER BY 1`,
@@ -579,11 +598,17 @@ async function integrity(pgh: PlatformPostgres, hotOrg: string): Promise<Record<
       },
       immutability: { ok: immutabilityOk, attempts: immutability },
       triggers: {
-        ok: triggers.every((t) => t.tgenabled === 'O') && eventTriggers.length === 2 && eventTriggers.every((t) => t.evtenabled === 'O'),
+        // Product state (D-ARCH-076, PR12-SEC-04 item 3): every audit trigger and both event triggers are ENABLE ALWAYS ('A').
+        // An origin-mode ('O') trigger does not fire under session_replication_role = replica and is a failure here.
+        ok:
+          triggers.length > 0 &&
+          triggers.every((t) => t.tgenabled === 'A') &&
+          eventTriggers.length === 2 &&
+          eventTriggers.every((t) => t.evtenabled === 'A'),
         triggers,
         eventTriggers,
       },
-      forceRls: { ok: rls.length === 2 && rls.every((r) => r.relrowsecurity && r.relforcerowsecurity), rls },
+      rls: { ok: rlsOk, rls },
       partitions: { ok: partitions.length > 0 && partitions.every((p) => p.partition !== 'audit_entries'), partitions },
       vaultRows: Number(vault),
       dataModelZeroHashLiteral: zeroLiteral,
@@ -606,6 +631,8 @@ function markdown(
   summary: Record<string, unknown>,
   records: Record<string, Record<Arm, ArmRecord>>,
   decision: ReturnType<typeof decide>,
+  verdict: FinalVerdict,
+  integrityProblems: readonly string[],
 ): string {
   const lines = [
     `# SPK-04 audit A/B run (${String(summary['stamp'])}, ${String(summary['sha'])}${summary['dirty'] ? ', dirty' : ''})`,
@@ -630,9 +657,11 @@ function markdown(
     '',
     `Pooled Δ on − off: p95 ${round(decision.onDelta.p95).toString()} ms, p99 ${round(decision.onDelta.p99).toString()} ms. Pooled Δ batched − off: p95 ${round(decision.batchedDelta.p95).toString()} ms, p99 ${round(decision.batchedDelta.p99).toString()} ms (budget 15 / 40 ms).`,
     '',
-    `**Verdict: ${decision.verdict}**${decision.invalid.length > 0 ? ` (invalid: ${decision.invalid.join('; ')})` : ''}`,
+    `**Verdict: ${verdict}**${decision.invalid.length > 0 ? ` (invalid: ${decision.invalid.join('; ')})` : ''}`,
     '',
-    `Integrity: ${JSON.stringify(Object.fromEntries(Object.entries(summary['integrity'] as Record<string, { ok?: boolean }>).map(([k, v]) => [k, v.ok ?? v])))}`,
+    integrityProblems.length > 0
+      ? `Integrity: FAILED (${integrityProblems.join('; ')})`
+      : `Integrity: ${JSON.stringify(Object.fromEntries(Object.entries(summary['integrity'] as Record<string, { ok?: boolean }>).map(([k, v]) => [k, v.ok ?? v])))}`,
     '',
   );
   return lines.join('\n');
@@ -650,7 +679,7 @@ async function main(): Promise<void> {
   log(`SPK-04 rate ${String(RATE)} reps ${String(REPS)} -> ${outDir}`);
   const pgh = await PlatformPostgres.start();
   try {
-    await setupDatabase(pgh, work);
+    await setupDatabase(pgh);
     const seed = await seedDatabase(pgh);
     const seedFile = join(work, 'seed.json');
     writeFileSync(seedFile, JSON.stringify(seed));
@@ -701,6 +730,9 @@ async function main(): Promise<void> {
     const integrityResult = await integrity(pgh, hotOrg).catch((error: unknown) => ({ error: String(error) }));
     const repetitions: Repetition[] = Object.values(records).map((r) => ({ off: r.off.k6, on: r.on.k6, batched: r.batched.k6 }));
     const decision = decide(repetitions);
+    // Fail closed (R1-m4): a throwing or failing integrity step overrides the benchmark verdict and sets a non-zero exit.
+    const integrityProblems = integrityFailures(integrityResult);
+    const verdict = finalVerdict(decision, integrityResult);
     const hotDelta = (arm: Arm) =>
       pooled(
         Object.values(records).map((r) =>
@@ -748,17 +780,23 @@ async function main(): Promise<void> {
         ]),
       ),
       decision,
+      verdict,
       hotOrgPooledDelta: { on: hotDelta('on'), batched: hotDelta('batched') },
       integrity: integrityResult,
+      integrityFailures: integrityProblems,
     };
     mkdirSync(outDir, { recursive: true });
     writeFileSync(join(outDir, 'host-spec.json'), `${JSON.stringify({ ...host, cpuSeries }, null, 2)}\n`);
     writeFileSync(join(outDir, 'k6-audit-ab.summary.json'), `${JSON.stringify(raw, null, 2)}\n`);
     writeFileSync(join(outDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
-    writeFileSync(join(outDir, 'summary.md'), markdown(summary, records, decision));
+    writeFileSync(join(outDir, 'summary.md'), markdown(summary, records, decision, verdict, integrityProblems));
     log(
-      `verdict ${decision.verdict}; on Δp95 ${String(round(decision.onDelta.p95))} Δp99 ${String(round(decision.onDelta.p99))}; batched Δp95 ${String(round(decision.batchedDelta.p95))} Δp99 ${String(round(decision.batchedDelta.p99))}`,
+      `verdict ${verdict}; on Δp95 ${String(round(decision.onDelta.p95))} Δp99 ${String(round(decision.onDelta.p99))}; batched Δp95 ${String(round(decision.batchedDelta.p95))} Δp99 ${String(round(decision.batchedDelta.p99))}`,
     );
+    if (integrityProblems.length > 0) {
+      log(`INTEGRITY_FAILED: ${integrityProblems.join('; ')}`);
+      process.exitCode = 1;
+    }
   } finally {
     await pgh.stop();
     rmSync(work, { recursive: true, force: true });

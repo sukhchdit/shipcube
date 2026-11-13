@@ -7,6 +7,9 @@
  * other orgs are uniform. Targets: TARGETS = comma-separated replica base URLs, picked round-robin by iteration.
  * Every request is tagged group:non_carrier, op:<name> and hot:<0|1>. The NFR-PERF-001 thresholds are informational
  * (the runner tolerates exit code 99). handleSummary prints the full JSON summary between markers on stdout.
+ *
+ * Lifecycle (D-ARCH-089, SPK-04 §8): deleted by the TASK-280 PR, once this script is ported to tests/load/audit-ab.js.
+ * Harness-only: it ships in no image (PR27-SEC-01 is TASK-014's), nothing under apps/** or packages/** references it.
  */
 import exec from 'k6/execution';
 import http from 'k6/http';

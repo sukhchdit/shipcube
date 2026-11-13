@@ -1,11 +1,18 @@
 /**
  * SPK-04 (TASK-018) THROWAWAY: pure verdict logic of the audit A/B benchmark (unit-tested, no I/O).
  *
+ * Lifecycle (D-ARCH-089, SPK-04 §8): deleted by the TASK-280 PR, after the validity rule and the verdict are ported to
+ * tests/load/lib. Harness-only: nothing under apps/** or packages/** may import this file.
+ *
  * Budgets: NFR-AUDIT-005 (audit overhead <= 15 ms p95 and <= 40 ms p99 versus the same route with audit disabled).
  * Validity (TEST-STRATEGY §7.10): an arm is INCONCLUSIVE when k6 dropped more than 1 % of the scheduled iterations or
  * the host CPU was above 85 % busy for more than 10 % of the 1 s samples.
- * Exit (SPK-04): `on` meets both budgets => GO; else `batched` meets them => FALLBACK (the multi-row variant is
- * specified for TASK-030); else FALLBACK-INSUFFICIENT (escalate to principal-architect).
+ * Verdict vocabulary of this tool (four values, plus a fail-closed fifth): `on` meets both budgets => GO; else
+ * `batched` meets them => FALLBACK (the multi-row variant is the candidate for TASK-030); else FALLBACK-INSUFFICIENT;
+ * any invalid arm => INCONCLUSIVE (no exit is demonstrated). INTEGRITY_FAILED overrides all four when the post-run
+ * integrity step throws or any check is not ok (code review R1-m4). The pooling below (mean of the per-repetition
+ * deltas) cannot resolve a 15 ms budget with n = 2 on a noisy host (R1-m1); TASK-280 needs at least 5 repetitions in
+ * a randomised or balanced order and a per-repetition rule (D-ARCH-088), so do not copy the pooling.
  */
 export const P95_BUDGET_MS = 15;
 export const P99_BUDGET_MS = 40;
@@ -104,4 +111,29 @@ export function decide(repetitions: readonly Repetition[]): Decision {
   const verdict: Verdict =
     invalid.length > 0 ? 'INCONCLUSIVE' : meetsBudget(onDelta) ? 'GO' : meetsBudget(batchedDelta) ? 'FALLBACK' : 'FALLBACK-INSUFFICIENT';
   return { verdict, onDelta, batchedDelta, invalid };
+}
+
+export type FinalVerdict = Verdict | 'INTEGRITY_FAILED';
+
+/** The post-run integrity checks the runner must report; a missing one counts as a failure. */
+export const INTEGRITY_CHECKS = ['chain', 'immutability', 'triggers', 'rls', 'partitions'] as const;
+
+/**
+ * Fail-closed reading of the integrity result (code review R1-m4): an `error` entry (the step threw), a missing check
+ * or a check whose `ok` is not exactly `true` is a failure. An empty list means every check passed.
+ */
+export function integrityFailures(result: Readonly<Record<string, unknown>>): string[] {
+  const failures: string[] = [];
+  if ('error' in result) failures.push(`integrity step threw: ${String(result['error'])}`);
+  for (const check of INTEGRITY_CHECKS) {
+    const entry = result[check];
+    const ok = typeof entry === 'object' && entry !== null ? (entry as { ok?: unknown }).ok : undefined;
+    if (ok !== true) failures.push(`${check}: ${ok === undefined ? 'missing' : 'not ok'}`);
+  }
+  return failures;
+}
+
+/** A run is only as good as its integrity: any failure turns the verdict into INTEGRITY_FAILED. */
+export function finalVerdict(decision: Decision, integrity: Readonly<Record<string, unknown>>): FinalVerdict {
+  return integrityFailures(integrity).length > 0 ? 'INTEGRITY_FAILED' : decision.verdict;
 }

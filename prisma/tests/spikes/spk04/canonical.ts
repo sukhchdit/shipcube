@@ -1,5 +1,10 @@
 /**
- * SPK-04 (TASK-018) THROWAWAY: a small exact RFC 8785 (JCS) serialiser for the audit-chain prototype.
+ * SPK-04 (TASK-018) THROWAWAY: a small RFC 8785 (JCS) serialiser for the audit-chain prototype, exact for well-formed
+ * strings (a lone surrogate is accepted here, rejected by the `canonicalize` package: code review R1-n2; TASK-030 uses
+ * the package).
+ *
+ * Lifecycle (D-ARCH-089, SPK-04 §8): deleted by the TASK-030 PR, after the pinned chain vector of chain.test.ts is
+ * ported to a packages/audit unit test. Harness-only: nothing under apps/** or packages/** may import this file.
  *
  * `canonicalize` is not a dependency of this workspace (data-model §5.4 names it for packages/audit, TASK-030), so the
  * spike carries its own: object keys sorted by UTF-16 code units, strings and finite numbers serialised with the

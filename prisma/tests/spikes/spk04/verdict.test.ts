@@ -1,6 +1,19 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { type ArmMeasurement, busyShare, decide, delta, meetsBudget, percentile, pooled, type Repetition, validity } from './verdict.js';
+import {
+  type ArmMeasurement,
+  busyShare,
+  decide,
+  delta,
+  finalVerdict,
+  INTEGRITY_CHECKS,
+  integrityFailures,
+  meetsBudget,
+  percentile,
+  pooled,
+  type Repetition,
+  validity,
+} from './verdict.js';
 
 const arm = (p95: number, p99: number, overrides: Partial<ArmMeasurement> = {}): ArmMeasurement => ({
   latency: { p50: p95 / 2, p95, p99 },
@@ -85,5 +98,34 @@ describe('SPK-04 verdict', () => {
     const decision = decide([rep([1, 1], [1, 1]), rep([1, 1], [1, 1], bad)]);
     expect(decision.verdict).toBe('INCONCLUSIVE');
     expect(decision.invalid).toEqual(['rep 2 off: dropped_iterations 2.00 % > 1 %']);
+  });
+});
+
+describe('SPK-04 integrity fails closed (R1-m4)', () => {
+  const passing = Object.fromEntries(INTEGRITY_CHECKS.map((check) => [check, { ok: true }]));
+  const decision = decide([rep([5, 10], [5, 10])]);
+
+  it('passes only when every check is ok', () => {
+    expect(integrityFailures(passing)).toEqual([]);
+    expect(finalVerdict(decision, passing)).toBe('GO');
+  });
+
+  it('a thrown integrity step is a failure, not a status', () => {
+    const result = { error: 'connection refused' };
+    expect(integrityFailures(result)[0]).toContain('integrity step threw: connection refused');
+    expect(finalVerdict(decision, result)).toBe('INTEGRITY_FAILED');
+  });
+
+  it('a check that is not ok, or is missing, is a failure', () => {
+    expect(integrityFailures({ ...passing, chain: { ok: false } })).toEqual(['chain: not ok']);
+    const rest = Object.fromEntries(Object.entries(passing).filter(([check]) => check !== 'partitions'));
+    expect(integrityFailures(rest)).toEqual(['partitions: missing']);
+    expect(integrityFailures({ ...passing, rls: { ok: 'yes' } })).toEqual(['rls: not ok']);
+    expect(finalVerdict(decide([rep([50, 100], [50, 100])]), { ...passing, chain: { ok: false } })).toBe('INTEGRITY_FAILED');
+  });
+
+  it('keeps an INCONCLUSIVE decision when the integrity passes', () => {
+    const invalid = decide([{ ...rep([5, 10], [5, 10]), on: arm(100, 200, { droppedRatio: 0.05 }) }]);
+    expect(finalVerdict(invalid, passing)).toBe('INCONCLUSIVE');
   });
 });

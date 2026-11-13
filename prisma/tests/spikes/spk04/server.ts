@@ -9,14 +9,18 @@
  *   SPK04_AUDIT=on       data-model §5.4 exactly: per PII value INSERT … ON CONFLICT DO NOTHING + SELECT token; the
  *                        per-stream advisory lock; head INSERT … ON CONFLICT DO NOTHING + SELECT; entry INSERT; head
  *                        UPDATE asserting one row
- *   SPK04_AUDIT=batched  the FALLBACK candidate: one multi-row vault INSERT … SELECT FROM unnest(…) + one multi-row token
+ *   SPK04_AUDIT=batched  the batched candidate: one multi-row vault INSERT … SELECT FROM unnest(…) + one multi-row token
  *                        SELECT; the lock (own statement, before the head read's snapshot); head SELECT (create only when
  *                        absent); entry INSERT + head UPDATE in ONE statement (CTE)
  *
  * The audit statements are the last work before COMMIT (READ COMMITTED). Fail-closed reads (detail, list) write their
  * VIEW entry in a separate short transaction after the read and before the response (data-model §5.4 last paragraph).
- * Round trips are counted per request (BEGIN, the context statement and COMMIT count as three per transaction).
+ * Round trips are counted per request by the harness's own counter (BEGIN, the context statement and COMMIT count as
+ * three per transaction); they are not taken from the wire or from pg_stat_statements (code review R1-m3).
  * `GET /__stats` and `POST /__reset` serve the runner on loopback. Errors return 500 without details, counted by kind.
+ *
+ * Lifecycle (D-ARCH-089, SPK-04 §8): deleted by the TASK-280 PR, after the arm loop is ported to tests/load. Harness-only:
+ * nothing under apps/** or packages/** imports this file, it counts toward no coverage and it ships in no image.
  */
 import { createCipheriv, createHmac, randomBytes, randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
