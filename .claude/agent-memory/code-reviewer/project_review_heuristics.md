@@ -229,6 +229,9 @@ Round 2 of a spike PR (PR #6 r2):
 - **Lexical lint rules vs callbacks passed by reference.** If the only `withTenantTx` call passes a function reference, the rule guards nothing. Lint-probe the real handler shape (`defineRoute({handler})`).
 - **Security headers set by an early slot can be overridden by a late `send()`** that applies handler headers. Also check that the test helper and the app use the SAME "authenticated" predicate (x-permission vs security schemes).
 - **RegExp mount fixes keyed on captured params** miss `(?:a|b)`, character classes and top-level `|`. Probe with real HTTP.
+- **Joi closed-schema walkers** that read `flags.unknown`/`patterns` miss schema-level preferences: `.prefs({allowUnknown:true})` / `.options(...)` show up only in `describe().preferences` and override the validate call's options at run time; `Joi.link` is not walked. Probe each form through `defineRoute` and `validateRequest`.
+- **Checker functions tested directly, wiring untested.** For a `checkX()` that composes `add(rule, f(...))` lines, delete each line and run the suite; with a clean real tree nothing finds the gap (PR #32 r2: 3 survivors). Ask for one seeded case through the composed function per rule.
+- **Credential-presence predicates vs cookie paths.** A `__Host-` cookie is always Path=/, so it rides on every same-host request; counting it as a presented credential on routes that do not read it 401s anonymous routes (login) once the cookie exists. Check ADR cookie scoping before accepting a presence rule.
 - **Sheet folds land on main while a PR is in flight.** Diff the sheet on main (and `git log -S` the line) against the PR body's "not done" list.
 
 **Gate-tool PRs with a container step (PR #33, 2026-11-13).**
@@ -238,3 +241,11 @@ Round 2 of a spike PR (PR #6 r2):
 - **Gate wired in one line (heavy.mjs):** delete the line, run the suite; a green run means no pipeline-level test. Also ask whether the verifier requires the gate's case names.
 - **Lane A pins:** mutate the real ci.yml in memory with `checkWorkflow(..., {requiredGates:true})`: `|| true`, `; true`, `true || cmd`, redirect, step `env:` override of the `GATE_*` var (only gates that declare `env` have the exact-env rule), reordering. Pins with `ifs: []` accept a missing `if` (stricter), fine.
 - **Evidence staleness after merge-main:** build a real merge commit in a `git clone --local` of the main repo (plumbing, no worktree needed) and run the base `check-evidence`; `git merge` on a checked-out ref moves that ref, so verify which SHA you pass.
+
+**Test-harness / jest-project PRs (PR #34, 2026-11-13).**
+- **A project defined by folder rather than suffix** must be proven on the union with every open PR that puts files in that folder: `jest --listTests --selectProjects <p>` on a `git merge-tree` extract (jest.config.ts auto-merges, so only the listing shows the gap). Lane A runs only `test:unit`; anything moved out of `unit` stops running in the hosted lane silently.
+- **Test-support guards whose only proof is a hand call.** Mutate the registered hook (`assertClean();` -> `void 0;`): green means the AC is unpinned. Fix pattern: inject the registrar (`register = afterEach`) and drive the captured hook.
+- **Encoding scanners:** base64 needles of the bare value miss any embedded occurrence (3 alignments needed, plus base64url); probe JSON, JWT and Basic shapes. Also probe: partial line without `\n`, object keys echoed into finding paths, `Error.cause`, typed arrays, `URL`, depth cut-off (fail-open).
+- **Prisma counter without Docker:** dead adapter at 127.0.0.1:1 fires the `$allOperations` hook before connecting; `_createItxClient({id:'t'},0,{})` gives the itx shape; real Express + `express.json()` proves ALS survives body parsing.
+- **Metric tools:** run them on the newest stored run and cross-check one number by hand (NFR rows with passing parts 4 vs reported 1); mutate the zero-denominator/zero-test guards.
+- **Doc claims about the evidence checker** ("rejects unknown files") must be checked against `FIXED_RUN_FILES` and the `summary.json` attachment rule, not the README alone.

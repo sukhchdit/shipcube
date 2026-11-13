@@ -22,3 +22,5 @@
 - [Batch 020/015](feedback_batch_020_015.md) — Jest global hooks vs .js specifiers, Joi _definition, scratch wipe, evidence.sh recipe, base-ref forced deviations
 - [PR #20 fc3](feedback_pr20_fc3.md) — shared refs move mid-merge, owned-paths --report-only refused, ReDoS growth test, evidence lock chaining
 - [PR #33 fc1](feedback_pr33_fc1.md) — Edit tool decodes \u00a0-style escapes to literals; bootstrap gate proof via step order; stub-Jest heavy e2e
+- [Batch 276/277](feedback_batch_276_277.md) — disk-full + Docker hang blocker, gherkin map drift, jest generated-project merge traps
+- [PR #32 fc1](feedback_pr32_fc1.md) — specialists hit 80-turn cap unreported, createApp boot-check ripple, shared predicate in @platform/shared, Docker hang

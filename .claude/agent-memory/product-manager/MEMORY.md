@@ -9,4 +9,5 @@
 - [D-061 US-049 delivery split](project_d061_us049_delivery_split.md) — AT ownership re-route pattern (no priority change); TASK-023/014/089; traceability v1.5; plan-data block keys seedfw/compose/seeddemo
 - [D-062 US-008 delivery split](project_d062_us008_delivery_split.md) — hop-by-hop AT-US-008-03 split TASK-010/029/035/043/079/092; decompose by REQ text; check completer's transitive deps first; v1.6
 - [D-063 Allow parity wording](project_d063_allow_parity_wording.md) — AT-US-007-02 "GET, HEAD, OPTIONS" + OPTIONS 204 line; PR-driven AC literal fix = wording-amendment convention (PRD/REQ 1.8, traceability untouched)
+- [D-065 gherkin append-only](project_d065_gherkin_append_only.md) — scenario position = AT number; append new scenarios at block end; US-066/121/129/137/222 reordered; PRD 1.10
 - [D-ARCH-088 audit-ab method](project_d_arch_088_audit_ab_method.md) — SPK-04 FALLBACK; NFR-AUDIT-005/PERF-001 method, A-029 150 req/s re-baseline, NFR v1.6 FULL-conditional; flip to PARTIAL needs D-entry + §9 row
