@@ -10,6 +10,7 @@ import type { Config, Secret, Service } from '@platform/config';
 
 import { databaseRuntimeFromConfig } from '../db/runtime.js';
 import { createObjectStorageCheck } from '../health/checks/object-storage.js';
+import type { ObjectStorage } from '../storage/object-storage.port.js';
 import { objectStorageFromConfig } from '../storage/s3-object-storage.js';
 import { createValkeyCheck, createValkeyClient } from '../valkey/client.js';
 import type { RuntimeLog } from './log.js';
@@ -29,6 +30,11 @@ export function readinessChecks(database: ReadinessCheck, valkey: ValkeyClient, 
 
 export interface RuntimeServices {
   readonly valkey: ValkeyClient;
+  /**
+   * The documents object storage (one client, `STORAGE_*`; closed with `resources`). Never the audit anchor sink, which
+   * has its own credential and bucket (ADR-0021 am. 2 item 2, TASK-116).
+   */
+  readonly storage: ObjectStorage;
   readonly probe: ReadinessProbe;
   /** Closed by graceful shutdown after the drain. */
   readonly resources: readonly Closeable[];
@@ -57,6 +63,7 @@ export function createRuntimeServices(
   });
   return {
     valkey,
+    storage,
     probe: createReadinessProbe(
       readinessChecks(
         database.readinessCheck,

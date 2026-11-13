@@ -57,6 +57,17 @@ describe('createRuntimeServices composition (TASK-019: object storage wired into
     const services = createRuntimeServices(config, 'api', log, secrets);
     try {
       expect(services.resources.map((resource) => resource.name)).toEqual(expect.arrayContaining(['valkey', 'object_storage']));
+      // The documents storage is exposed for its first consumer (ADR-0021 am. 2 item 5): the port surface (destroy is for shutdown).
+      expect(Object.keys(services.storage).sort()).toEqual([
+        'checkBucket',
+        'delete',
+        'destroy',
+        'get',
+        'head',
+        'presignGet',
+        'put',
+        'putIfAbsent',
+      ]);
       const report = await services.probe.readiness();
       expect(report.httpStatus).toBe(503);
       expect(report.body.components.object_storage).toBe('unavailable');
