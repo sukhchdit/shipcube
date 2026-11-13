@@ -34,6 +34,12 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
   - `git archive <sha> eslint.config.mjs tools/eslint-rules tools/lint` into `cfg-head` / `cfg-main`, and junction each `node_modules` to the MAIN checkout's.
   - Write a scratch mini-repo, then run `new ESLint({cwd, overrideConfigFile, overrideConfig:[disableTypeChecked, projectService:false, no-unresolved off, {settings:{'boundaries/root-path': root}}]})`.
   - File descriptors accumulate categories, so a new category never removes an old one.
+  - **Gotchas (PR-0020 R2, 2026-11-13):**
+    - The mini-repo needs a root `package.json`, otherwise `import-x/no-relative-packages` crashes with "path … null".
+    - Turn `import-x/no-cycle` off (it crashes the same way).
+    - To test the *resolved-file* arm, junction `root/node_modules/@platform/<pkg>` → `root/packages/<pkg>`, and build every junction target from the **long** path (`/c/Users/MadelineMendoza/AppData/...`), never `MADELI~1`. An 8.3 short-path target puts the resolved file outside `boundaries/root-path`, and the arm silently misses. That produced a false "`?worker` bypass" until re-run.
+    - A junctioned root dir has the same problem. Copy the root instead.
+    - `unrs-resolver` strips `?query` suffixes, so the resolved arm catches `x?worker`/`x?raw`.
 - **Probing a PR head without touching its worktree** (PR-0005 R2):
   - `git show <sha>:<file>` the `.ts` sources into scratch.
   - Rewrite the `./x.js` imports to `./x.ts`, and bare `pg`-style imports to file URLs into the main checkout's `node_modules/<pkg>/esm/index.mjs`.
