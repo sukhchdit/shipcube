@@ -7,7 +7,7 @@ import request, { type Response, type Test } from 'supertest';
 
 import { loadContract, OPENAPI_PATH } from '../../../tools/openapi/contract.js';
 import { type CoverageRecorder, createCoverageRecorder } from './contract-coverage.js';
-import { type ContractValidator, createContractValidator, type ResponseUnderTest } from './contract-validator.js';
+import { type ContractValidator, createContractValidator, type HeaderValue, type ResponseUnderTest } from './contract-validator.js';
 
 /** The app or server Supertest accepts. */
 export type TestTarget = Parameters<typeof request>[0];
@@ -35,6 +35,17 @@ export function contractValidator(path: string = OPENAPI_PATH): Promise<Contract
   return validator;
 }
 
+/** The headers the request was sent with (`res.req` is the Node ClientRequest), for SEC-TC-29's credential half. */
+function requestHeadersOf(res: Response): Record<string, HeaderValue> | undefined {
+  const req: unknown = (res as { req?: unknown }).req;
+  const getHeaders: unknown = typeof req === 'object' && req !== null ? (req as { getHeaders?: unknown }).getHeaders : undefined;
+  if (typeof getHeaders !== 'function') return undefined;
+  const raw = (getHeaders as () => Record<string, unknown>).call(req);
+  return Object.fromEntries(
+    Object.entries(raw).map(([name, value]): [string, HeaderValue] => [name, Array.isArray(value) ? value.map(String) : String(value)]),
+  );
+}
+
 export function toResponseUnderTest(method: string, path: string, res: Response): ResponseUnderTest {
   const text: unknown = (res as { text?: unknown }).text;
   return {
@@ -44,6 +55,7 @@ export function toResponseUnderTest(method: string, path: string, res: Response)
     headers: res.headers,
     body: res.body,
     text: typeof text === 'string' ? text : undefined,
+    requestHeaders: requestHeadersOf(res),
   };
 }
 

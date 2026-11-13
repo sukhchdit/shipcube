@@ -4,6 +4,7 @@ import { describe, expect, it } from '@jest/globals';
 import Joi from 'joi';
 
 import { createApp, type ModuleRegistration } from '../../apps/api/src/app.js';
+import type { TenantTxRunner } from '../../apps/api/src/platform/db/index.js';
 import { GENERIC_SERVER_DETAIL } from '../../apps/api/src/platform/errors/problem.js';
 import { healthRoutes } from '../../apps/api/src/platform/health/router.js';
 import type { RouteDescriptor } from '../../apps/api/src/platform/routing/define-route.js';
@@ -153,7 +154,14 @@ describe('US-034 response validation helper', () => {
       schema: { params: Joi.object({ shipmentId: Joi.string().guid().required() }) },
       handler: () => ({ status: 200, body: {} }),
     } as Parameters<typeof fixtureRoute>[0]);
-    const client = await api(appWith([], [{ name: 'shipments', routes: [getShipment] }]));
+    // A runner is present (createApp refuses a tenant route without one, PR32-SEC-05 (b)); authn answers before it is used.
+    const tenantTx: TenantTxRunner<unknown> = {
+      transactionOptions: { maxWait: 1, timeout: 1 },
+      probeFreshConnection: () => Promise.resolve(),
+      withTenantTx: <R>(): Promise<R> => Promise.reject(new Error('authn answers first')),
+    };
+    const app = createApp({ health: [], modules: [{ name: 'shipments', routes: [getShipment] }], logger: silent, tenantTx });
+    const client = await api(app);
     const response = await client.get('/api/v1/shipments/0193a5b2-7c1e-7d4a-9f3b-000000000f01').expect(401);
     expect(response.headers['cache-control']).toBe('private, no-store');
     expect((response.body as { code?: string }).code).toBe('AUTH_REQUIRED');
@@ -196,7 +204,7 @@ describe('US-034 response validation helper', () => {
       method: 'POST',
       path: '/health/live',
       status: 405,
-      headers: { 'content-type': 'application/problem+json', 'x-correlation-id': CORRELATION_ID, allow: 'GET, HEAD' },
+      headers: { 'content-type': 'application/problem+json', 'cache-control': 'no-store', 'x-correlation-id': CORRELATION_ID, allow: 'GET, HEAD' },
       body: problem('METHOD_NOT_ALLOWED', 405, { instance: '/health/live' }),
     });
     expect(validator.validateResponse(methodNotAllowed)).toEqual([

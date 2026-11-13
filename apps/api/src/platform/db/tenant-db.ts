@@ -75,6 +75,12 @@ export const FLUENT_HINT = 'fluent accessors are not exposed; use include/select
 const SYSTEM_MODEL_SET: ReadonlySet<string> = new Set(SYSTEM_MODELS);
 /** Members of a guarded operation result (see {@link guardResult}). */
 const RESULT_MEMBERS: ReadonlySet<string> = new Set(['then', 'catch', 'finally']);
+/**
+ * Well-known probe keys of serialisers, renderers and matchers (`JSON.stringify`, React and Jest's pretty-format, Jest
+ * asymmetric matchers) read as `undefined` on a guarded result instead of throwing, so logging or printing a pending
+ * result cannot fail the request (PR #32 n2). They are not Prisma members, so nothing is exposed.
+ */
+const RESULT_PROBE_KEYS: ReadonlySet<string> = new Set(['toJSON', '$$typeof', 'asymmetricMatch', 'nodeType']);
 /** Constructor names of Prisma's `Sql` fragment class (`sql-template-tag`; the bundled class expression is `_Sql`). */
 const SQL_FRAGMENT_CLASSES: ReadonlySet<string> = new Set(['Sql', '_Sql']);
 /** Prototype chains deeper than this are treated as fragments (fail closed; bounded walk). */
@@ -286,6 +292,7 @@ function guardResult(result: unknown, state: GuardState): unknown {
   const target = Object.freeze(Object.assign(Object.create(null) as object, members));
   return new Proxy(target, {
     get(frozen, key) {
+      if (typeof key !== 'symbol' && RESULT_PROBE_KEYS.has(key)) return undefined;
       if (typeof key !== 'symbol' && !RESULT_MEMBERS.has(key)) return deny(key, FLUENT_HINT);
       const member: unknown = Reflect.get(frozen, key);
       return member;

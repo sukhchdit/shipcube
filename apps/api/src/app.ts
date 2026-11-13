@@ -24,7 +24,13 @@ import { requestLogger, routePrefix, type AccessLogFields } from './platform/log
 import { createDocsRouter, DOCS_PATH, type DocsOptions } from './platform/openapi/serve.js';
 import { ipLimiter } from './platform/rate-limit/limits.js';
 import type { RouteDescriptor } from './platform/routing/define-route.js';
-import { defaultPipelineSlots, mountRoutes, type PipelineSlots } from './platform/routing/pipeline.js';
+import {
+  assertPipelineReady,
+  assertRouteBindings,
+  defaultPipelineSlots,
+  mountRoutes,
+  type PipelineSlots,
+} from './platform/routing/pipeline.js';
 import { createRuntimeLog } from './platform/runtime/log.js';
 
 /** Prefix of every business endpoint (REQ-API-001). */
@@ -48,10 +54,14 @@ export interface AppDependencies {
   readonly modules: readonly ModuleRegistration[];
   /**
    * `RuntimeServices.tenantTx` (platform/db/runtime.ts): the runner of the one tenant transaction per request. Absent,
-   * every `transaction: 'tenant'` route answers 503; `transaction: 'none'` routes (health) work without it.
+   * createApp refuses any `transaction: 'tenant'` route (`PipelineNotReadyError`); `transaction: 'none'` routes
+   * (health) work without it.
    */
   readonly tenantTx?: TenantTxRunner<unknown> | undefined;
-  /** Test seam: replaces the pipeline slots (defaults to `defaultPipelineSlots({ tenantTx })`). */
+  /**
+   * Test seam: replaces the pipeline slots (defaults to `defaultPipelineSlots({ tenantTx })`). With replaced slots the
+   * runner check is the test's own business; the binding check still runs.
+   */
   readonly pipeline?: PipelineSlots;
   /** Defaults to the redacted platform logger on stdout with the request context on every line. */
   readonly logger?: AppLogger;
@@ -59,13 +69,28 @@ export interface AppDependencies {
   readonly problemTypeBase?: string;
   /** Request body limit (body-parser size string or bytes); default 1 MB (ADR-0016 §4). */
   readonly bodyLimit?: string | number;
-  /** ApiMode of every request context (`resolveApiMode(APP_ENV)`, REQ-API-020); default `test`. */
+  /**
+   * ApiMode of every request context (`resolveApiMode(APP_ENV)`, REQ-API-020); default `test`. `live` (APP_ENV
+   * production, and only then) also selects the production route bindings (PR8-SEC-05 (d)).
+   */
   readonly apiMode?: ApiMode;
   /** Swagger UI at /api/docs (`docsOptionsFrom(config, specPath)`); absent = not mounted (404), REQ-API-003. */
   readonly docs?: DocsOptions;
 }
 
+/**
+ * Boot checks of every composition (PR32-SEC-05 (b)), before anything is mounted: each route was declared with
+ * `defineRoute` (`mountRoutes` refuses others), every tenant-transaction route has the runner, the route bindings hold
+ * for this mode (PR8-SEC-05), and every slot stub can honour the metadata (`SlotNotImplementedError`, PR32-SEC-03).
+ */
+function assertBootable(deps: AppDependencies, routes: readonly RouteDescriptor[]): void {
+  if (deps.pipeline === undefined) assertPipelineReady(routes, deps.tenantTx);
+  assertRouteBindings(routes, { production: deps.apiMode === 'live' });
+}
+
 export function createApp(deps: AppDependencies): Express {
+  const moduleRoutes = deps.modules.flatMap((module) => module.routes);
+  assertBootable(deps, [...deps.health, ...moduleRoutes]);
   const app = express();
   const logger = deps.logger ?? createRuntimeLog('api', process.stdout, { context: requestLogContext });
   const slots = deps.pipeline ?? defaultPipelineSlots({ tenantTx: deps.tenantTx });
@@ -83,11 +108,7 @@ export function createApp(deps: AppDependencies): Express {
   mountRoutes(routes, deps.health, slots);
   const api = express.Router();
   api.use(routePrefix(API_PREFIX));
-  mountRoutes(
-    api,
-    deps.modules.flatMap((module) => module.routes),
-    slots,
-  );
+  mountRoutes(api, moduleRoutes, slots);
   routes.use(API_PREFIX, api);
   app.use(routes);
 

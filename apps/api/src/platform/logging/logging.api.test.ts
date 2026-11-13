@@ -14,6 +14,7 @@ import request from 'supertest';
 import { createApp } from '../../app.js';
 import { CORRELATION_ID_PATTERN } from '../context/request-context.js';
 import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js';
+import { ANONYMOUS, setPrincipal } from '../routing/route-state.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { createRuntimeLog } from '../runtime/log.js';
 import { requestLogContext } from './correlation.js';
@@ -109,6 +110,12 @@ function harness(): Harness {
   const defaults = defaultPipelineSlots({ tenantTx: undefined });
   const pipeline: PipelineSlots = {
     ...defaults,
+    // The requests carry credential sentinels, which the authn stub refuses until TASK-052 (D-ARCH-107 (5)); this
+    // stand-in accepts them as anonymous so the careless code below runs with them (what is logged is under test).
+    authenticate: () => (_req: Request, res: Response, next: NextFunction) => {
+      setPrincipal(res, ANONYMOUS);
+      next();
+    },
     etag: (route) => (req: Request, res: Response, next: NextFunction) => {
       careless[route.operationId]?.(req, res);
       next();

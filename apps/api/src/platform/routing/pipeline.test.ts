@@ -91,7 +91,10 @@ describe('authentication and authorisation skeleton', () => {
       transaction: 'tenant',
       handler: () => ({ status: 200, body: {} }),
     });
-    const response = await call(createApp({ health: [], modules: [{ name: 'me', routes: [route] }], logger: silent }), '/api/v1/me');
+    const response = await call(
+      createApp({ health: [], modules: [{ name: 'me', routes: [route] }], logger: silent, tenantTx: fakeRunner([]) }),
+      '/api/v1/me',
+    );
     expect(response.status).toBe(401);
     expect(JSON.parse(response.body)).toMatchObject({ code: 'AUTH_REQUIRED' });
     expect(response.headers.get('cache-control')).toBe(AUTHENTICATED_CACHE_CONTROL);
@@ -136,11 +139,17 @@ describe('tx slot: one tenant transaction per request (PR11-SEC-09 verification 
   it('runs handler and audit inside the transaction, with the request context, and sends the result after COMMIT', async () => {
     const events: string[] = [];
     const runner = fakeRunner(events);
-    const route = tenantRoute(({ db, input }) => {
-      events.push(`handler db=${String(db)} limit=${String(input.query['limit'])}`);
-      return { status: 200, body: { ok: true } };
+    const withSchema = fixtureRoute({
+      operationId: 'listThings',
+      path: '/things',
+      transaction: 'tenant',
+      tenancy: 'guest',
+      schema: { query: Joi.object({ limit: Joi.number() }) },
+      handler: ({ db, input }) => {
+        events.push(`handler db=${String(db)} limit=${String(input.query['limit'])}`);
+        return { status: 200, body: { ok: true } };
+      },
     });
-    const withSchema = { ...route, schema: { query: Joi.object({ limit: Joi.number() }) } } as RouteDescriptor;
     const slots = { ...defaultPipelineSlots({ tenantTx: runner }) };
     const audit = (ctx: RouteContext) => {
       events.push(`audit ${ctx.route.operationId}`);
@@ -208,9 +217,15 @@ describe('tx slot: one tenant transaction per request (PR11-SEC-09 verification 
     expect(response.headers.get('retry-after')).toBeNull();
   });
 
-  it('a tenant route without a runner answers 503 and the boot check refuses such an app', async () => {
+  it('createApp refuses a tenant route without a runner; the tx slot itself still answers 503 (defence in depth)', async () => {
     const route = tenantRoute(() => ({ status: 200, body: {} }));
-    const response = await call(createApp({ health: [], modules: [{ name: 't', routes: [route] }], logger: silent }), '/api/v1/things');
+    // [PR32-SEC-05 (b)] the boot check runs inside createApp, so every composition gets it, not only main.ts.
+    expect(() => createApp({ health: [], modules: [{ name: 't', routes: [route] }], logger: silent })).toThrow(PipelineNotReadyError);
+    const pipeline = defaultPipelineSlots({ tenantTx: undefined });
+    const response = await call(
+      createApp({ health: [], modules: [{ name: 't', routes: [route] }], logger: silent, pipeline }),
+      '/api/v1/things',
+    );
     expect(response.status).toBe(503);
     expect(() => assertPipelineReady([route], undefined)).toThrow(PipelineNotReadyError);
     expect(() => assertPipelineReady([route], undefined)).toThrow('listThings');

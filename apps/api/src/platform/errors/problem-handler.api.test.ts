@@ -139,7 +139,7 @@ function problemOf(res: TestResponse): Record<string, unknown> {
   return res.body as Record<string, unknown>;
 }
 
-function expectProblem(res: TestResponse, status: number, code: string): Record<string, unknown> {
+function expectProblem(res: TestResponse, status: number, code: string, cacheControl = 'no-store'): Record<string, unknown> {
   const body = problemOf(res);
   expect(res.status).toBe(status);
   expect(res.headers['content-type']).toMatch(/^application\/problem\+json(;|$)/);
@@ -147,8 +147,8 @@ function expectProblem(res: TestResponse, status: number, code: string): Record<
   expect(body).toMatchObject({ status, code, type: `https://docs.platform.invalid/problems/${code}` });
   expect(body['correlation_id']).toMatch(CORRELATION_ID_PATTERN);
   expect(res.headers['x-correlation-id']).toBe(body['correlation_id']);
-  // PR-0009 m4: a problem document is never stored by a cache.
-  expect(res.headers['cache-control']).toBe('no-store');
+  // PR-0009 m4: a problem document is never stored by a cache (private too when the request carried a credential).
+  expect(res.headers['cache-control']).toBe(cacheControl);
   return body;
 }
 
@@ -407,7 +407,9 @@ describe('AT-US-007-04: unauthenticated caller still receives problem+json', () 
 
   it('AT-US-007-04: an unknown route answers the same 404 problem+json with or without credentials', async () => {
     const anonymous = expectProblem(await request(app).get('/api/v1/unknown'), 404, 'NOT_FOUND');
-    const bearer = expectProblem(await request(app).get('/api/v1/unknown').set('Authorization', 'Bearer not-a-token'), 404, 'NOT_FOUND');
+    // D-ARCH-107 (5), SEC-TC-29: a request that presented a credential gets a private answer, errors included.
+    const bearerResponse = await request(app).get('/api/v1/unknown').set('Authorization', 'Bearer not-a-token');
+    const bearer = expectProblem(bearerResponse, 404, 'NOT_FOUND', 'private, no-store');
     expect({ ...bearer, correlation_id: 'x' }).toEqual({ ...anonymous, correlation_id: 'x' });
   });
 
@@ -565,5 +567,28 @@ describe('[PR9-SEC-14] a crafted Content-Type cannot stall the process', () => {
     const liveStarted = performance.now();
     expect((await request(app).get('/health/live')).status).toBe(200);
     expect(performance.now() - liveStarted).toBeLessThan(1_000);
+  });
+});
+
+describe('[SEC-TC-29] [PR #32 m1 (b)] the problem handler decides "private" from the request, not from header text', () => {
+  const { app } = harness();
+
+  it.each<[string, Record<string, string>]>([
+    ['an Authorization header', { Authorization: 'Bearer not-a-token' }],
+    ['a web refresh cookie', { Cookie: 'theme=dark; __Host-rt_web=opaque' }],
+    ['an admin refresh cookie', { Cookie: '__Host-rt_admin=opaque' }],
+    ['a guest quote token', { 'X-Quote-Token': 'opaque' }],
+  ])('a framework error before the route is known (malformed JSON) is private with %s', async (_label, headers) => {
+    const res = await request(app).post('/api/v1/echo').set(headers).set('Content-Type', 'application/json').send('{"a":');
+    expectProblem(res, 400, 'MALFORMED_REQUEST', 'private, no-store');
+  });
+
+  it('the same framework error without a credential is no-store only (no other cookie counts)', async () => {
+    const res = await request(app)
+      .post('/api/v1/echo')
+      .set('Cookie', 'theme=dark; rt_web=x')
+      .set('Content-Type', 'application/json')
+      .send('{"a":');
+    expectProblem(res, 400, 'MALFORMED_REQUEST');
   });
 });

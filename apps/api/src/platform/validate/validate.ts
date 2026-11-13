@@ -102,20 +102,27 @@ function declaredHeaders(schema: Joi.ObjectSchema, headers: Readonly<Record<stri
   return Object.fromEntries(keys.filter((key) => headers[key] !== undefined).map((key) => [key, headers[key]]));
 }
 
+/** Nesting below this depth is not searched (the closed schemas of define-route.ts refuse deeper schemas). */
+const MAX_BODY_DEPTH = 32;
+
 /**
- * PR26-SEC-04: server-controlled fields (id, org_id, created_by, version, on_behalf_of_org_id, ...) sent at the top of
- * the body or in any item of a bulk array property are UNKNOWN_FIELD with the shared message, whatever the route's
- * schema says (camel-case spellings are already refused by the closed Joi schemas).
+ * PR26-SEC-04, PR #32 m8 / PR32-SEC-04: server-controlled fields (id, org_id, created_by, version, on_behalf_of_org_id,
+ * ...) sent anywhere in the body, at the top, in a nested object or in any array item, are UNKNOWN_FIELD with the
+ * shared message, whatever the route's schema says (camel-case spellings are already refused by the closed Joi
+ * schemas). Linear in the body size, bounded in depth and in the number of issues.
  */
 export function serverControlledIssues(body: unknown): ValidationIssue[] {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) return [];
-  const issues = serverControlledFieldIssues(body);
-  for (const [key, value] of Object.entries(body)) {
-    if (!Array.isArray(value)) continue;
-    value.forEach((item: unknown, index) =>
-      issues.push(...serverControlledFieldIssues(item, `/body/${pointerToken(key)}/${String(index)}`)),
-    );
-  }
+  const issues: ValidationIssue[] = [];
+  const visit = (value: unknown, pointer: string, depth: number): void => {
+    if (issues.length >= MAX_VALIDATION_ISSUES || depth > MAX_BODY_DEPTH || typeof value !== 'object' || value === null) return;
+    if (Array.isArray(value)) {
+      value.forEach((item: unknown, index) => visit(item, `${pointer}/${String(index)}`, depth + 1));
+      return;
+    }
+    issues.push(...serverControlledFieldIssues(value, pointer));
+    for (const [key, child] of Object.entries(value)) visit(child, `${pointer}/${pointerToken(key)}`, depth + 1);
+  };
+  if (typeof body === 'object' && body !== null && !Array.isArray(body)) visit(body, '/body', 0);
   return issues.slice(0, MAX_VALIDATION_ISSUES);
 }
 

@@ -161,3 +161,21 @@ describe('server-controlled fields (PR26-SEC-04, REQ-SEC-007, AT-US-064-03)', ()
     expect(serverControlledIssues([{ id: 'x' }])).toEqual([]);
   });
 });
+
+describe('[PR #32 m8] [PR32-SEC-04] server-controlled fields at any depth', () => {
+  it('names a server-controlled field in a nested object and in an array nested in an object', () => {
+    const body = { address: { city: 'Pune', org_id: 'x' }, groups: [{ members: [{ version: 3 }] }] };
+    expect(serverControlledIssues(body).map((issue) => issue.pointer)).toEqual([
+      '/body/address/org_id',
+      '/body/groups/0/members/0/version',
+    ]);
+  });
+
+  it('stops at the issue cap and below the depth bound', () => {
+    const many = { items: Array.from({ length: 200 }, () => ({ id: 'x' })) };
+    expect(serverControlledIssues(many)).toHaveLength(50);
+    let deep: Record<string, unknown> = { id: 'x' };
+    for (let level = 0; level < 40; level += 1) deep = { child: deep };
+    expect(serverControlledIssues(deep)).toEqual([]);
+  });
+});

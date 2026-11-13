@@ -6,6 +6,7 @@
 import type { AddressInfo } from 'node:net';
 
 import { beforeAll, describe, expect, it } from '@jest/globals';
+import { type BoundRoute, findRouteBindingViolations, formatRouteAuth, type RouteAuth } from '@platform/authz';
 import { ERROR_CATALOGUE } from '@platform/shared';
 import type { Express } from 'express';
 import Joi from 'joi';
@@ -19,13 +20,28 @@ import { preparedSchemasOf } from '../../apps/api/src/platform/validate/slot.js'
 import { SAFE_MESSAGES, VALUE_REFERENCE } from '../../apps/api/src/platform/validate/validate.js';
 import { type ContractOperation, listOperations, loadContract, type OpenApiDocument } from '../../tools/openapi/contract.js';
 import { listMountedRoutes, readLedger } from '../../tools/openapi/drift.js';
-import { type ApiMounts, loadApiMounts } from './api-mounts.js';
-import { checkRouteMetadata, formatMetadataFinding, type MetadataFinding, schemaProblems } from './route-metadata.js';
+import { type ApiMounts, loadApiMounts, metadataFixtureSlots } from './api-mounts.js';
+import {
+  checkRouteMetadata,
+  contractAuth,
+  contractBoundRoutes,
+  formatMetadataFinding,
+  type MetadataFinding,
+  permissionStatusProblems,
+  reauthProblems,
+  schemaProblems,
+  TRANSACTION_NONE_OPERATIONS,
+  transactionProblems,
+} from './route-metadata.js';
 
 type Loose = Readonly<Record<string, unknown>>;
 
 /** A descriptor that declares exactly what openapi.yaml says about `op` (the "complete route" of AT-US-067-01). */
-function descriptorFor(op: ContractOperation, overrides: Partial<RouteSpec> = {}): RouteDescriptor {
+function descriptorFor(
+  doc: OpenApiDocument,
+  op: ContractOperation,
+  overrides: { readonly [K in keyof RouteSpec]?: RouteSpec[K] | undefined } = {},
+): RouteDescriptor {
   const x = (name: string): unknown => op.operation[name];
   const params = Object.fromEntries(
     ((op.operation['parameters'] as Loose[] | undefined) ?? [])
@@ -44,7 +60,9 @@ function descriptorFor(op: ContractOperation, overrides: Partial<RouteSpec> = {}
     ...(typeof x('x-rate-limit-route') === 'string' ? { rateLimitRoute: x('x-rate-limit-route') } : {}),
     idempotency: x('x-idempotency'),
     tenancy: x('x-tenancy'),
-    auth: 'session',
+    auth: contractAuth(op, doc),
+    ...(typeof x('x-permission-authenticated') === 'string' ? { permissionAuthenticated: x('x-permission-authenticated') } : {}),
+    ...(x('x-csrf') === true ? { csrf: true } : {}),
     handler: () => ({ status: 204 }),
     ...overrides,
   } as unknown as RouteSpec;
@@ -77,7 +95,8 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
 
   const check = (target: ApiMounts = api, implemented: readonly string[] = ledger): MetadataFinding[] =>
     checkRouteMetadata({ doc, mounted: listMountedRoutes(target.mounts, target.walk), descriptorOf, implemented });
-  const withModule = (routes: readonly RouteDescriptor[]): ApiMounts => loadApiMounts([{ name: 'fixture', routes }]);
+  const withModule = (routes: readonly RouteDescriptor[]): ApiMounts =>
+    loadApiMounts([{ name: 'fixture', routes }], metadataFixtureSlots());
 
   it('[AT-US-034-01] every mounted route has defineRoute metadata equal to openapi.yaml; count equals the implemented operations', () => {
     expect(check().map(formatMetadataFinding)).toEqual([]);
@@ -87,7 +106,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
   });
 
   it('[AT-US-067-01] a complete route (permission shipment:read, audit descriptor, schema) mounts and the build test passes', () => {
-    const route = descriptorFor(getShipment);
+    const route = descriptorFor(doc, getShipment);
     expect(route.permission).toBe('shipment:read');
     // getShipment's module codes (ACCESS_TOKEN_EXPIRED, RATE_LIMITED, ...) join the error catalogue with their modules
     // (TASK-036 and later); the catalogue rule itself is proven on the mounted routes above and seeded below.
@@ -96,7 +115,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
   });
 
   it('[assertion 6] a mounted route whose x-error-codes are not all catalogued is named', () => {
-    expect(check(withModule([descriptorFor(getShipment)]), [...ledger, 'getShipment'])).toContainEqual(
+    expect(check(withModule([descriptorFor(doc, getShipment)]), [...ledger, 'getShipment'])).toContainEqual(
       expect.objectContaining({ rule: 'error-codes', message: expect.stringContaining('is not in the error catalogue') }),
     );
   });
@@ -124,7 +143,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
     );
     const publicOp = listOperations(doc).find((op) => op.operation['x-permission'] === 'public' && op.fullPath.startsWith(api.apiPrefix));
     if (publicOp === undefined) throw new Error('no public /api/v1 operation');
-    const route = descriptorFor(publicOp, { permissionJustification: 'Something else.' });
+    const route = descriptorFor(doc, publicOp, { permissionJustification: 'Something else.' });
     expect(check(withModule([route]), [...ledger, publicOp.operationId])).toContainEqual(
       expect.objectContaining({ rule: 'permission', message: expect.stringContaining('permissionJustification differs') }),
     );
@@ -152,25 +171,24 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
     ['tenancy (assertion 4)', { tenancy: 'user' }, 'extension', 'x-tenancy "user" in metadata'],
     ['rate-limit class (assertion 4)', { rateLimit: 'public' }, 'extension', 'x-rate-limit-class "public"'],
     ['reauth (assertion 4)', { reauth: { scope: 'privacy.export' } }, 'extension', 'x-reauth-scope "privacy.export"'],
-    ['authentication', { auth: 'anonymous' }, 'auth', 'auth anonymous in metadata, session'],
   ])('a seeded %s defect is named with METHOD path', (_label, overrides, rule, text) => {
-    const findings = check(withModule([descriptorFor(getShipment, overrides)]), [...ledger, 'getShipment']);
+    const findings = check(withModule([descriptorFor(doc, getShipment, overrides)]), [...ledger, 'getShipment']);
     expect(findings).toContainEqual(
       expect.objectContaining({ rule, route: 'GET /api/v1/shipments/:shipmentId', message: expect.stringContaining(text) }),
     );
   });
 
   it('[assertion 5] Joi and OpenAPI disagreeing on a part, a required key, a closed object or a constraint is named', () => {
-    const extra = descriptorFor(getShipment, {
+    const extra = descriptorFor(doc, getShipment, {
       schema: { params: Joi.object({ shipmentId: Joi.string().required() }), body: Joi.object({ x: Joi.string().required() }) },
     });
     expect(schemaProblems(extra, getShipment)).toEqual([
       expect.stringContaining('body: Joi declares [x], OpenAPI []'),
       expect.stringContaining('body: Joi requires [x], OpenAPI []'),
     ]);
-    const optional = descriptorFor(getShipment, { schema: { params: Joi.object({ shipmentId: Joi.string() }) } });
+    const optional = descriptorFor(doc, getShipment, { schema: { params: Joi.object({ shipmentId: Joi.string() }) } });
     expect(schemaProblems(optional, getShipment)).toEqual([expect.stringContaining('params: Joi requires []')]);
-    const query = descriptorFor(getShipment, {
+    const query = descriptorFor(doc, getShipment, {
       schema: { params: Joi.object({ shipmentId: Joi.string().required() }), query: Joi.object({ q: Joi.string().max(3) }) },
     });
     expect(schemaProblems(query, getShipment)).toEqual([expect.stringContaining('query: Joi declares [q], OpenAPI []')]);
@@ -223,6 +241,135 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
     expect(() => assertRouteBindings([route], { production })).toThrow(
       rule === 'MOCK_WEBHOOK_IN_PRODUCTION' ? 'must not be mounted' : 'GET /binding',
     );
+  });
+
+  describe('[D-ARCH-107] route authentication sets versus the contract', () => {
+    const AUTH_RULES: readonly string[] = ['AUTH_SET', 'PERMISSION_AUTH', 'DUAL_MODE', 'CSRF_COOKIE'];
+    const authViolations = (routes: readonly BoundRoute[]) =>
+      findRouteBindingViolations(routes, { production: false }).filter((violation) => AUTH_RULES.includes(violation.rule));
+    const opNamed = (operationId: string): ContractOperation => {
+      const found = listOperations(doc).find((op) => op.operationId === operationId);
+      if (found === undefined) throw new Error(`${operationId} missing from openapi.yaml`);
+      return found;
+    };
+    /** The contract's routes with one operation's bound route changed (a seeded defect). */
+    const contractWith = (operationId: string, change: (route: BoundRoute) => BoundRoute): BoundRoute[] =>
+      contractBoundRoutes(doc).map((entry) => (entry.operationId === operationId ? change(entry.route) : entry.route));
+    const syntheticOp = (security: unknown): ContractOperation => ({
+      operationId: 'syntheticOp',
+      method: 'GET',
+      path: '/x',
+      fullPath: '/api/v1/x',
+      operation: { security },
+    });
+
+    it('[D-ARCH-107] contractAuth reads each security list as a set: 29/95/3/3/1/2 over the 133 operations', () => {
+      const counts: Record<string, number> = {};
+      for (const op of listOperations(doc)) {
+        const key = formatRouteAuth(contractAuth(op, doc));
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+      expect(counts).toEqual({
+        '[anonymous]': 29,
+        '[session]': 95,
+        '[refresh-cookie]': 3,
+        '[signature]': 3,
+        '[anonymous, session]': 1,
+        '[session, quote-token]': 2,
+      });
+      expect(contractAuth(opNamed('createQuote'), doc)).toEqual(['anonymous', 'session']);
+      expect(contractAuth(opNamed('getQuote'), doc)).toEqual(['session', 'quote-token']);
+      expect(contractAuth(opNamed('refreshSession'), doc)).toEqual(['refresh-cookie']);
+    });
+
+    it('[D-ARCH-107] AUTH_SET, PERMISSION_AUTH, DUAL_MODE and CSRF_COOKIE report nothing on the whole contract', () => {
+      const routes = contractBoundRoutes(doc).map(({ route }) => route);
+      expect(routes).toHaveLength(133);
+      expect(authViolations(routes)).toEqual([]);
+    });
+
+    it('[D-ARCH-107] contractAuth maps every scheme, keeps csrfToken a companion and names what no kind covers', () => {
+      expect(contractAuth(syntheticOp([]), doc)).toEqual(['anonymous']);
+      expect(contractAuth(syntheticOp(undefined), doc)).toEqual(['session']); // the document-level bearerAuth
+      expect(
+        contractAuth(
+          syntheticOp([
+            { refreshCookieWeb: [], csrfToken: [] },
+            { refreshCookieAdmin: [], csrfToken: [] },
+          ]),
+          doc,
+        ),
+      ).toEqual(['refresh-cookie']);
+      expect(contractAuth(syntheticOp([{ carrierSignature: [] }]), doc)).toEqual(['signature']);
+      expect(contractAuth(syntheticOp([{ quoteToken: [] }, { bearerAuth: [] }]), doc)).toEqual(['session', 'quote-token']);
+      expect(contractAuth(syntheticOp([{ bearerAuth: [], quoteToken: [] }]), doc)).toEqual(['session+quote-token']);
+      expect(contractAuth(syntheticOp([{ csrfToken: [] }]), doc)).toEqual(['csrfToken']);
+      expect(contractAuth(syntheticOp([{ apiKey: [] }, {}, { zKey: [] }]), doc)).toEqual(['anonymous', 'apiKey', 'zKey']);
+    });
+
+    it('[D-ARCH-107] a seeded dropped quote-token alternative is named by set parity and x-permission-authenticated', () => {
+      const route = descriptorFor(doc, opNamed('getQuote'), { auth: 'session', permissionAuthenticated: undefined });
+      const findings = check(withModule([route]), [...ledger, 'getQuote']).filter((finding) => finding.rule === 'auth');
+      expect(findings).toEqual([
+        expect.objectContaining({
+          route: expect.stringMatching(/^GET \/api\/v1\/quotes\//),
+          message: expect.stringContaining('auth [session] in metadata, [session, quote-token] from the openapi.yaml security'),
+        }),
+        expect.objectContaining({
+          message: expect.stringContaining('permissionAuthenticated null in metadata, x-permission-authenticated "quote:read"'),
+        }),
+      ]);
+    });
+
+    it('[D-ARCH-107] a seeded refresh route declared session is named by set parity', () => {
+      const route = descriptorFor(doc, opNamed('refreshSession'), { auth: 'session' });
+      expect(check(withModule([route]), [...ledger, 'refreshSession'])).toContainEqual(
+        expect.objectContaining({
+          rule: 'auth',
+          message: expect.stringContaining('auth [session] in metadata, [refresh-cookie] from the openapi.yaml security'),
+        }),
+      );
+    });
+
+    it('[D-ARCH-107] a seeded x-permission-authenticated mismatch is named', () => {
+      const route = descriptorFor(doc, opNamed('createQuote'), { permissionAuthenticated: 'quote:read' });
+      expect(check(withModule([route]), [...ledger, 'createQuote'])).toContainEqual(
+        expect.objectContaining({
+          rule: 'auth',
+          message: expect.stringContaining('permissionAuthenticated "quote:read" in metadata, x-permission-authenticated "quote:create"'),
+        }),
+      );
+    });
+
+    it('[D-ARCH-107] a seeded missing permissionAuthenticated is refused by defineRoute and by DUAL_MODE', () => {
+      expect(() => descriptorFor(doc, opNamed('createQuote'), { permissionAuthenticated: undefined })).toThrow(
+        'needs permissionAuthenticated',
+      );
+      const violations = authViolations(contractWith('createQuote', (route) => ({ ...route, permissionAuthenticated: undefined })));
+      expect(violations).toEqual([
+        expect.objectContaining({ rule: 'DUAL_MODE', message: expect.stringContaining('needs permissionAuthenticated') }),
+      ]);
+    });
+
+    it('[D-ARCH-107] a seeded permissionAuthenticated on a non-dual route is refused by defineRoute and by DUAL_MODE', () => {
+      expect(() => descriptorFor(doc, getShipment, { permissionAuthenticated: 'quote:read' })).toThrow('only allowed on a dual-mode route');
+      const violations = authViolations(contractWith('getShipment', (route) => ({ ...route, permissionAuthenticated: 'quote:read' })));
+      expect(violations).toEqual([expect.objectContaining({ rule: 'DUAL_MODE', route: 'GET /api/v1/shipments/{shipmentId}' })]);
+    });
+
+    it('[D-ARCH-107] a seeded unlisted combination is refused by defineRoute and by AUTH_SET', () => {
+      expect(() =>
+        fixtureRoute({ operationId: 'oddAuth', path: '/odd', auth: ['anonymous', 'quote-token'], handler: () => ({ status: 204 }) }),
+      ).toThrow('auth [anonymous, quote-token] is not an accepted set');
+      const odd = contractAuth(syntheticOp([{}, { quoteToken: [] }]), doc) as readonly RouteAuth[];
+      const violations = authViolations(contractWith('getQuote', (route) => ({ ...route, auth: odd })));
+      expect(violations).toContainEqual(
+        expect.objectContaining({
+          rule: 'AUTH_SET',
+          message: expect.stringContaining('auth [anonymous, quote-token] is not an accepted set'),
+        }),
+      );
+    });
   });
 
   it('[PR20-SEC-12] no mounted schema message template interpolates the value, and a rejected value never reaches the body', async () => {
@@ -297,5 +444,75 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
       route: { stack: { name: string }[] };
     };
     expect(live.route.stack.map((layer) => layer.name)).toEqual(ROUTE_PIPELINE.map((step) => `route:${step}`));
+  });
+});
+
+describe('[PR #32 m6] README §15 assertion 2 and 4 sub-rules over every operation', () => {
+  const op = (operation: Record<string, unknown>): ContractOperation => ({
+    operationId: 'seededOp',
+    method: 'POST',
+    path: '/x',
+    fullPath: '/api/v1/x',
+    operation,
+  });
+  const proof = (required: boolean): Record<string, unknown> => ({ name: 'X-Reauth-Proof', in: 'header', required });
+
+  it('[assertion 2] a remaining x-permission-status is named', () => {
+    expect(permissionStatusProblems(op({ 'x-permission-status': 'proposed' }))).toEqual([
+      'x-permission-status "proposed" remains (every permission is decided before main)',
+    ]);
+    expect(permissionStatusProblems(op({}))).toEqual([]);
+  });
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ['max-age without a scope', { 'x-reauth-max-age': 600 }, 'x-reauth-max-age without x-reauth-scope'],
+    [
+      'a scope without the proof header',
+      { 'x-reauth-scope': 'org.member_invite', 'x-error-codes': ['REAUTH_REQUIRED'] },
+      'x-reauth-scope without the X-Reauth-Proof header (ReauthProof or ReauthProofConditional)',
+    ],
+    [
+      'a scope without max-age referencing the conditional proof',
+      { 'x-reauth-scope': 'a.b', parameters: [proof(false)], 'x-error-codes': ['REAUTH_REQUIRED'] },
+      'x-reauth-scope without x-reauth-max-age needs ReauthProof (required)',
+    ],
+    [
+      'a max-age route referencing the required proof',
+      { 'x-reauth-scope': 'a.b', 'x-reauth-max-age': 600, parameters: [proof(true)], 'x-error-codes': ['REAUTH_REQUIRED'] },
+      'x-reauth-max-age needs ReauthProofConditional (not required)',
+    ],
+    [
+      'a scope without REAUTH_REQUIRED',
+      { 'x-reauth-scope': 'a.b', parameters: [proof(true)], 'x-error-codes': ['AUTH_REQUIRED'] },
+      'x-reauth-scope without REAUTH_REQUIRED in x-error-codes',
+    ],
+  ])('[assertion 4] seeded defect: %s is named', (_label, operation, expected) => {
+    expect(reauthProblems(op(operation))).toEqual([expected]);
+  });
+
+  it('[assertion 4] the two accepted shapes pass, and the whole contract has no finding of either rule', async () => {
+    const codes = { 'x-error-codes': ['REAUTH_REQUIRED'] };
+    expect(reauthProblems(op({ 'x-reauth-scope': 'a.b', parameters: [proof(true)], ...codes }))).toEqual([]);
+    expect(reauthProblems(op({ 'x-reauth-scope': 'a.b', 'x-reauth-max-age': 600, parameters: [proof(false)], ...codes }))).toEqual([]);
+    const operations = listOperations(await loadContract());
+    expect(operations.filter((candidate) => candidate.operation['x-reauth-max-age'] !== undefined).length).toBeGreaterThan(0);
+    expect(operations.flatMap((candidate) => [...permissionStatusProblems(candidate), ...reauthProblems(candidate)])).toEqual([]);
+  });
+});
+
+describe('[D-ARCH-106 (6)] the transaction none operations are pinned', () => {
+  it('pins the health operations and names a route outside the pin, or a pinned route with a transaction', () => {
+    expect([...TRANSACTION_NONE_OPERATIONS].sort()).toEqual(['getLiveness', 'getReadiness']);
+    const none = fixtureRoute({ operationId: 'listThings', path: '/things', handler: () => ({ status: 204 }) });
+    expect(transactionProblems(none)).toEqual(['transaction none on an operation outside TRANSACTION_NONE_OPERATIONS (D-ARCH-106)']);
+    const tenant = fixtureRoute({
+      operationId: 'getLiveness',
+      path: '/l',
+      tenancy: 'guest',
+      transaction: 'tenant',
+      handler: () => ({ status: 204 }),
+    });
+    expect(transactionProblems(tenant)).toEqual(['pinned in TRANSACTION_NONE_OPERATIONS but mounted with a transaction']);
+    expect(transactionProblems(fixtureRoute({ operationId: 'getReadiness', path: '/r', handler: () => ({ status: 204 }) }))).toEqual([]);
   });
 });

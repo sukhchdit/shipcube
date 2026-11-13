@@ -20,10 +20,10 @@ import { mfaGate } from '../mfa/mfa-gate.js';
 import { routeRateLimit } from '../rate-limit/limits.js';
 import { type ExecuteOptions, executeSlot } from '../tx/execute.js';
 import { validate } from '../validate/slot.js';
-import type { RouteDescriptor } from './define-route.js';
+import { isDefinedRoute, type RouteDescriptor } from './define-route.js';
 import { registerRouteHandler } from './route-registry.js';
 import { setRouteDescriptor } from './route-state.js';
-import type { RouteSlot } from './slot.js';
+import { type RouteSlot, SlotNotImplementedError } from './slot.js';
 
 /** The per-route steps, in pipeline order; the name of each Express handler is `route:<step>`. */
 export const ROUTE_PIPELINE = [
@@ -100,19 +100,42 @@ export class RouteBindingError extends Error {
 }
 
 /**
- * Boot twin of the route-metadata test (PR8-SEC-05 (a)-(d)): refuses to start an app whose routes bind a permission
- * to the wrong tenancy or authentication, or that mounts the mock gateway webhook in production.
+ * Boot twin of the route-metadata test (PR8-SEC-05 (a)-(d), D-ARCH-107 (3)): refuses to start an app whose routes bind
+ * a permission to the wrong tenancy or authentication set, declare an unlisted set, a wrong `permissionAuthenticated`
+ * or an unsafe refresh-cookie route without CSRF, or that mounts the mock gateway webhook in production.
  */
 export function assertRouteBindings(routes: readonly RouteDescriptor[], env: { readonly production: boolean }): void {
   const violations = findRouteBindingViolations(
-    routes.map(({ method, path, permission, tenancy, auth }) => ({ method, path, permission, tenancy, auth })),
+    routes.map(({ method, path, permission, tenancy, auth, permissionAuthenticated, csrf }) => ({
+      method,
+      path,
+      permission,
+      tenancy,
+      auth,
+      permissionAuthenticated,
+      csrf,
+    })),
     env,
   );
   if (violations.length > 0) throw new RouteBindingError(violations);
 }
 
-/** Mounts every route on `router` through the pipeline and registers it; returns the router. */
+export class UndefinedRouteError extends Error {
+  constructor(readonly operationId: string) {
+    super(`route ${operationId} was not returned by defineRoute (a hand-built or spread descriptor); mount refused`);
+    this.name = 'UndefinedRouteError';
+  }
+}
+
+/**
+ * Mounts every route on `router` through the pipeline and registers it; returns the router. Only descriptors returned
+ * by `defineRoute` are mounted (PR #32 m2, PR32-SEC-05 (a)): anything else throws `UndefinedRouteError` before a
+ * single handler of the batch reaches the router.
+ */
 export function mountRoutes(router: Router, routes: readonly RouteDescriptor[], slots: PipelineSlots): Router {
+  for (const route of routes) {
+    if (!isDefinedRoute(route)) throw new UndefinedRouteError(String((route as { operationId?: unknown }).operationId));
+  }
   for (const route of routes) {
     const handlers = routeHandlers(route, slots);
     const last = handlers.at(-1);
@@ -120,4 +143,31 @@ export function mountRoutes(router: Router, routes: readonly RouteDescriptor[], 
     router[route.method](route.path, ...handlers);
   }
   return router;
+}
+
+/** The log line of a refused composition: an event per error class, with route identities only (no PII, PR #32 n1). */
+export interface BootFailure {
+  readonly event: string;
+  readonly fields: Readonly<Record<string, string>>;
+}
+
+/**
+ * Maps a composition error of `createApp` to its boot log line, or undefined for anything else (rethrown by the
+ * caller). Templates, operationIds, rule names and task ids are route metadata, not personal data.
+ */
+export function bootFailureOf(error: unknown): BootFailure | undefined {
+  if (error instanceof RouteBindingError) {
+    const violations = error.violations.map((violation) => `${violation.rule} ${violation.route}`).join('; ');
+    return { event: 'api.route_bindings_refused', fields: { error: error.name, violations } };
+  }
+  if (error instanceof PipelineNotReadyError) {
+    return { event: 'api.pipeline_not_ready', fields: { error: error.name, operations: error.operationIds.join(', ') } };
+  }
+  if (error instanceof SlotNotImplementedError) {
+    const { slot, operationId, requirement, owner } = error;
+    return { event: 'api.slot_not_implemented', fields: { error: error.name, slot, operation: operationId, requirement, owner } };
+  }
+  if (error instanceof UndefinedRouteError)
+    return { event: 'api.route_not_defined', fields: { error: error.name, operation: error.operationId } };
+  return undefined;
 }

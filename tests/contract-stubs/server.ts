@@ -11,8 +11,9 @@ import type { AddressInfo } from 'node:net';
 import { ERROR_CATALOGUE, type ErrorCode } from '@platform/shared';
 
 import { loadContract, type OpenApiDocument } from '../../tools/openapi/contract.js';
+import { requestCarriesCredential } from '../api/helpers/cache-control.js';
 import { requestPathOf } from '../api/helpers/path-match.js';
-import { buildStubs, type ContractStub, resolveStub, type StubSelection, type StubVariant } from './stubs.js';
+import { buildStubs, type ContractStub, PRIVATE_CACHE_CONTROL, resolveStub, type StubSelection, type StubVariant } from './stubs.js';
 
 const CORRELATION_ID = /^[A-Za-z0-9-]{8,64}$/;
 const PROBLEM_TYPE_BASE = 'https://docs.platform.invalid/problems/';
@@ -69,8 +70,10 @@ function problem(code: ErrorCode, path: string, correlationId: string, detail?: 
   };
 }
 
-function sendProblem(res: ServerResponse, body: Record<string, unknown>, headers: Record<string, string> = {}): void {
-  res.writeHead(Number(body['status']), { ...headers, 'Content-Type': PROBLEM_MEDIA_TYPE, 'Cache-Control': 'no-store' });
+/** Like the API's problem handler (SEC-TC-29, D-ARCH-107 (5)): no-store, and private too when the request carried a credential. */
+function sendProblem(req: IncomingMessage, res: ServerResponse, body: Record<string, unknown>, headers: Record<string, string> = {}): void {
+  const cacheControl = requestCarriesCredential(req.headers) ? PRIVATE_CACHE_CONTROL : 'no-store';
+  res.writeHead(Number(body['status']), { ...headers, 'Content-Type': PROBLEM_MEDIA_TYPE, 'Cache-Control': cacheControl });
   res.end(JSON.stringify(body));
 }
 
@@ -83,6 +86,8 @@ function bodyFor(variant: StubVariant, path: string, correlationId: string): unk
 
 function sendVariant(req: IncomingMessage, res: ServerResponse, variant: StubVariant, path: string, correlationId: string): void {
   const headers: Record<string, string> = { ...variant.headers };
+  // SEC-TC-29: a request that carried a credential is answered private, whatever the operation (D-ARCH-107 (5)).
+  if (requestCarriesCredential(req.headers)) headers['Cache-Control'] = PRIVATE_CACHE_CONTROL;
   const body = bodyFor(variant, path, correlationId);
   const payload =
     variant.contentType === undefined || body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
@@ -100,10 +105,10 @@ function handle(stubs: readonly ContractStub[], req: IncomingMessage, res: Serve
   const resolution = resolveStub(stubs, req.method ?? 'GET', url, parsePrefer(req.headers.prefer));
   switch (resolution.kind) {
     case 'not-found':
-      sendProblem(res, problem('NOT_FOUND', path, correlationId));
+      sendProblem(req, res, problem('NOT_FOUND', path, correlationId));
       return;
     case 'method-not-allowed':
-      sendProblem(res, problem('METHOD_NOT_ALLOWED', path, correlationId), { Allow: resolution.allow.join(', ') });
+      sendProblem(req, res, problem('METHOD_NOT_ALLOWED', path, correlationId), { Allow: resolution.allow.join(', ') });
       return;
     case 'options':
       res.writeHead(204, { Allow: resolution.allow.join(', ') });
@@ -111,7 +116,7 @@ function handle(stubs: readonly ContractStub[], req: IncomingMessage, res: Serve
       return;
     case 'no-variant':
       // A stub-tool usage error (unknown Prefer target), not contract behaviour of the operation.
-      sendProblem(res, problem('MALFORMED_REQUEST', path, correlationId, `Contract stub: ${resolution.reason}.`));
+      sendProblem(req, res, problem('MALFORMED_REQUEST', path, correlationId, `Contract stub: ${resolution.reason}.`));
       return;
     case 'stub':
       sendVariant(req, res, resolution.variant, path, correlationId);

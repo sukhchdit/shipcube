@@ -9,7 +9,15 @@
  * enum / length / range / pattern constraints of each top-level property. Headers the pipeline owns (correlation,
  * language, idempotency, preconditions, CSRF, re-auth proof, guest token) are excluded from the header comparison.
  */
-import { isPermission, isRouteMarker, type RouteAuth } from '@platform/authz';
+import {
+  type BoundRoute,
+  formatRouteAuth,
+  isPermission,
+  isRouteMarker,
+  ROUTE_AUTHS,
+  type RouteAuth,
+  type RouteTenancy,
+} from '@platform/authz';
 import { ERROR_CATALOGUE, isErrorCode } from '@platform/shared';
 import type Joi from 'joi';
 
@@ -18,7 +26,19 @@ import { type ContractOperation, type OpenApiDocument, listOperations } from '..
 import { type MountedRoute, routeKey } from '../../tools/openapi/drift.js';
 
 export type MetadataRule =
-  'raw-handler' | 'operation-id' | 'count' | 'permission' | 'audit' | 'extension' | 'auth' | 'schema' | 'error-codes' | 'one-time-secret';
+  | 'raw-handler'
+  | 'operation-id'
+  | 'count'
+  | 'permission'
+  | 'audit'
+  | 'extension'
+  | 'auth'
+  | 'schema'
+  | 'error-codes'
+  | 'one-time-secret'
+  | 'permission-status'
+  | 'reauth'
+  | 'transaction';
 
 export interface MetadataFinding {
   readonly rule: MetadataRule;
@@ -59,16 +79,80 @@ type Loose = Readonly<Record<string, unknown>>;
 const isRecord = (value: unknown): value is Loose => typeof value === 'object' && value !== null && !Array.isArray(value);
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, inner: unknown) => (inner === undefined ? null : inner));
 
-/** The authentication the contract's `security` requirement implies. */
-export function contractAuth(op: ContractOperation, doc: OpenApiDocument): RouteAuth {
+/** Security schemes of openapi.yaml and the credential kind each one is (D-ARCH-107 (1)). */
+const SCHEME_KINDS: Readonly<Record<string, RouteAuth>> = {
+  bearerAuth: 'session',
+  refreshCookieWeb: 'refresh-cookie',
+  refreshCookieAdmin: 'refresh-cookie',
+  quoteToken: 'quote-token',
+};
+/** The double-submit CSRF token rides in the same requirement object as a refresh cookie: a companion, not a kind. */
+const COMPANION_SCHEMES: ReadonlySet<string> = new Set(['csrfToken']);
+
+/**
+ * The kind one `security` requirement object stands for: `{}` is anonymous; otherwise every scheme (companions aside)
+ * must map to the same kind. Anything else (an unknown scheme, two credentials required together) is returned verbatim
+ * so that parity and `AUTH_SET` name it.
+ */
+function requirementKind(requirement: Loose): string {
+  const schemes = Object.keys(requirement).filter((scheme) => !COMPANION_SCHEMES.has(scheme));
+  if (schemes.length === 0) return Object.keys(requirement).length === 0 ? 'anonymous' : Object.keys(requirement).join('+');
+  const kinds = new Set(schemes.map((scheme) => SCHEME_KINDS[scheme] ?? (scheme.endsWith('Signature') ? 'signature' : scheme)));
+  return [...kinds].join('+');
+}
+
+const kindRank = (kind: string): number => {
+  const rank = (ROUTE_AUTHS as readonly string[]).indexOf(kind);
+  return rank === -1 ? ROUTE_AUTHS.length : rank;
+};
+
+/**
+ * The authentication set the operation's effective `security` implies (D-ARCH-107 (1)), read one to one: each
+ * requirement object is one accepted credential kind (`{}` anonymous, `bearerAuth` session, `refreshCookieWeb` /
+ * `refreshCookieAdmin` refresh-cookie, `quoteToken` quote-token, `*Signature` signature); no requirement at all is
+ * anonymous. Deduplicated, in canonical order, so parity with `RouteDescriptor.auth` is plain equality.
+ */
+export function contractAuth(op: ContractOperation, doc: OpenApiDocument): readonly string[] {
   const declared = op.operation['security'] ?? doc['security' as `x-${string}`];
   const requirements = Array.isArray(declared) ? (declared as unknown[]).filter(isRecord) : [];
-  if (requirements.length === 0) return 'anonymous';
-  const schemes = requirements.flatMap((requirement) => Object.keys(requirement));
-  if (schemes.some((scheme) => scheme.endsWith('Signature'))) return 'signature';
-  if (schemes.includes('quoteToken')) return 'quote-token';
-  if (requirements.some((requirement) => Object.keys(requirement).length === 0)) return 'anonymous';
-  return 'session';
+  if (requirements.length === 0) return ['anonymous'];
+  return [...new Set(requirements.map(requirementKind))].sort((a, b) => kindRank(a) - kindRank(b) || a.localeCompare(b));
+}
+
+/** Every contract operation as the plain route data the D-ARCH-107 and PR8-SEC-05 binding rules read. */
+export function contractBoundRoutes(doc: OpenApiDocument): { readonly operationId: string; readonly route: BoundRoute }[] {
+  return listOperations(doc).map((op) => {
+    const x = (name: string): unknown => op.operation[name];
+    const permissionAuthenticated = x('x-permission-authenticated');
+    return {
+      operationId: op.operationId,
+      route: {
+        method: op.method,
+        path: op.fullPath,
+        permission: String(x('x-permission')),
+        tenancy: x('x-tenancy') as RouteTenancy,
+        auth: contractAuth(op, doc) as readonly RouteAuth[],
+        permissionAuthenticated: typeof permissionAuthenticated === 'string' ? permissionAuthenticated : undefined,
+        csrf: x('x-csrf') === true,
+      },
+    };
+  });
+}
+
+/** Set parity (D-ARCH-107 (1)) and `x-permission-authenticated` equality. */
+function authProblems(route: RouteDescriptor, op: ContractOperation, doc: OpenApiDocument): string[] {
+  const problems: string[] = [];
+  const contract = contractAuth(op, doc);
+  if (formatRouteAuth(contract) !== formatRouteAuth(route.auth)) {
+    problems.push(`auth ${formatRouteAuth(route.auth)} in metadata, ${formatRouteAuth(contract)} from the openapi.yaml security`);
+  }
+  const declared = op.operation['x-permission-authenticated'];
+  if (canonical(route.permissionAuthenticated) !== canonical(declared)) {
+    problems.push(
+      `permissionAuthenticated ${canonical(route.permissionAuthenticated)} in metadata, x-permission-authenticated ${canonical(declared)} in openapi.yaml`,
+    );
+  }
+  return problems;
 }
 
 /** A comparable view of one property: type, required, enum, bounds, pattern. */
@@ -277,6 +361,51 @@ export function oneTimeSecretProblems(op: ContractOperation): string[] {
   return problems;
 }
 
+/** Assertion 2 (README §15): no `x-permission-status: proposed` (or any status) remains on main (PR #32 m6). */
+export function permissionStatusProblems(op: ContractOperation): string[] {
+  const status = op.operation['x-permission-status'];
+  return status === undefined ? [] : [`x-permission-status ${JSON.stringify(status)} remains (every permission is decided before main)`];
+}
+
+const REAUTH_PROOF_HEADER = 'x-reauth-proof';
+
+/**
+ * Assertion 4 reauth sub-rules (README §15, SEC-P3-01; PR #32 m6): `x-reauth-max-age` appears only with
+ * `x-reauth-scope`; a route with `x-reauth-scope` declares the `X-Reauth-Proof` header as `ReauthProof` (required,
+ * no max-age) or `ReauthProofConditional` (optional, with max-age) and lists `REAUTH_REQUIRED`. The document is
+ * dereferenced, so the two components are told apart by `required`.
+ */
+export function reauthProblems(op: ContractOperation): string[] {
+  const scope = op.operation['x-reauth-scope'];
+  const maxAge = op.operation['x-reauth-max-age'];
+  if (scope === undefined) return maxAge === undefined ? [] : ['x-reauth-max-age without x-reauth-scope'];
+  const problems: string[] = [];
+  const parameters = Array.isArray(op.operation['parameters']) ? (op.operation['parameters'] as unknown[]).filter(isRecord) : [];
+  const proof = parameters.find((p) => p['in'] === 'header' && String(p['name']).toLowerCase() === REAUTH_PROOF_HEADER);
+  if (proof === undefined) problems.push('x-reauth-scope without the X-Reauth-Proof header (ReauthProof or ReauthProofConditional)');
+  else if (maxAge === undefined && proof['required'] !== true)
+    problems.push('x-reauth-scope without x-reauth-max-age needs ReauthProof (required)');
+  else if (maxAge !== undefined && proof['required'] === true)
+    problems.push('x-reauth-max-age needs ReauthProofConditional (not required)');
+  const codes = Array.isArray(op.operation['x-error-codes']) ? (op.operation['x-error-codes'] as unknown[]) : [];
+  if (!codes.includes('REAUTH_REQUIRED')) problems.push('x-reauth-scope without REAUTH_REQUIRED in x-error-codes');
+  return problems;
+}
+
+/**
+ * D-ARCH-106 (6) ratchet: `transaction: 'none'` is the only T-83 hatch, so the operations that use it are pinned here
+ * (today the health operations). Adding one is a reviewed change to this list; a pinned operation mounted with a
+ * transaction is drift too.
+ */
+export const TRANSACTION_NONE_OPERATIONS: ReadonlySet<string> = new Set(['getLiveness', 'getReadiness']);
+
+export function transactionProblems(route: RouteDescriptor): string[] {
+  const pinned = TRANSACTION_NONE_OPERATIONS.has(route.operationId);
+  if (route.transaction === 'none' && !pinned) return ['transaction none on an operation outside TRANSACTION_NONE_OPERATIONS (D-ARCH-106)'];
+  if (route.transaction !== 'none' && pinned) return ['pinned in TRANSACTION_NONE_OPERATIONS but mounted with a transaction'];
+  return [];
+}
+
 /** Every finding; empty means the mounted routes, their metadata and the contract agree. */
 export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented }: MetadataInput): MetadataFinding[] {
   const findings: MetadataFinding[] = [];
@@ -302,15 +431,20 @@ export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented }: 
     add('permission', name, permissionProblems(route, op));
     add('audit', name, auditProblems(route, op));
     add('extension', name, extensionProblems(route, op));
-    const auth = contractAuth(op, doc);
-    if (auth !== route.auth) add('auth', name, [`auth ${route.auth} in metadata, ${auth} from the openapi.yaml security`]);
+    add('auth', name, authProblems(route, op, doc));
     add('schema', name, schemaProblems(route, op));
     add('error-codes', name, errorCodeProblems(op));
+    add('transaction', name, transactionProblems(route));
   }
   if (seen.size !== implemented.length || implemented.some((id) => !seen.has(id))) {
     add('count', '*', [
       `${String(seen.size)} defineRoute operation(s) mounted, ${String(implemented.length)} in the implemented-operations ledger`,
     ]);
+  }
+  for (const op of operations) {
+    const name = `${op.method} ${op.fullPath}`;
+    add('permission-status', name, permissionStatusProblems(op));
+    add('reauth', name, reauthProblems(op));
   }
   for (const id of ONE_TIME_SECRET_OPERATIONS) {
     const op = operations.find((candidate) => candidate.operationId === id);

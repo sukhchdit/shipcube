@@ -211,12 +211,23 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect(db.shipment.create()).toBe(createdRow);
   });
 
+  it('[PR #32 n2] serialiser and matcher probe keys read as undefined on a pending result, so printing it cannot throw', () => {
+    const { db } = createTenantDb(new FakeTx());
+    const result = db.shipment.findFirst();
+    for (const member of ['toJSON', '$$typeof', 'asymmetricMatch', 'nodeType']) {
+      expect(read(result, member)).toBeUndefined();
+      expect(member in result).toBe(false);
+    }
+    expect(() => JSON.stringify({ pending: result })).not.toThrow();
+    expect(Reflect.ownKeys(result)).toEqual(RESULT_KEYS);
+  });
+
   it('R2-M1 / PR11-SEC-12: a thenable result exposes only then/catch/finally and its label (no requestTransaction, spec or fluent accessor)', () => {
     const tx = new FakeTx();
     const { db } = createTenantDb(tx);
     for (const result of [db.shipment.findFirst(), db.$executeRaw`SELECT 1`]) {
       expect(Reflect.ownKeys(result)).toEqual(RESULT_KEYS);
-      for (const member of ['requestTransaction', 'spec', 'author', '_createPrismaPromise', 'constructor', 'toJSON']) {
+      for (const member of ['requestTransaction', 'spec', 'author', '_createPrismaPromise', 'constructor']) {
         expect(member in result).toBe(false);
         // [R3-n4] a read fails loudly (no fluent accessor reads as undefined and is then called on a wrong guess).
         expect(() => read(result, member)).toThrow(new TenantDbAccessError(member, FLUENT_HINT));

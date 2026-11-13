@@ -3,6 +3,7 @@
  * route template. Kept in `res.locals` under fixed keys and read through guards, so a slot never trusts an earlier
  * slot blindly: a missing principal is anonymous, missing input is a pipeline bug (500, never a silent empty input).
  */
+import { isRouteAuth } from '@platform/authz';
 import type { Response } from 'express';
 
 import type { Principal, RouteDescriptor, RouteInput } from './define-route.js';
@@ -13,7 +14,9 @@ const DESCRIPTOR = 'routeDescriptor';
 /** Read by the access log and the metrics label (PR #20 n6): mount prefix plus the full template, never a raw path. */
 export const ROUTE_TEMPLATE_LOCAL = 'routeTemplate';
 
+/** No credential (D-ARCH-107 (4)): no actor, no organisation, no permission. */
 export const ANONYMOUS: Principal = Object.freeze({
+  credential: 'anonymous',
   authenticated: false,
   actorId: '',
   orgId: '',
@@ -33,9 +36,14 @@ export function setPrincipal(res: Response, principal: Principal): void {
   locals(res)[PRINCIPAL] = principal;
 }
 
+/**
+ * The request's principal. Fails closed: a missing principal, or one whose `credential` is missing or not a known kind
+ * (D-ARCH-107 (4)), is ANONYMOUS, so the authz credential gate refuses it on every route without `anonymous`.
+ */
 export function principalOf(res: Response): Principal {
   const value = locals(res)[PRINCIPAL];
-  return typeof value === 'object' && value !== null && 'permissions' in value ? (value as Principal) : ANONYMOUS;
+  if (typeof value !== 'object' || value === null || !('permissions' in value)) return ANONYMOUS;
+  return isRouteAuth((value as { credential?: unknown }).credential) ? (value as Principal) : ANONYMOUS;
 }
 
 export function setInput(res: Response, input: RouteInput): void {
@@ -63,4 +71,22 @@ export function routeTemplateOf(res: Response): string | undefined {
 
 export function setRouteTemplate(res: Response, template: string): void {
   locals(res)[ROUTE_TEMPLATE_LOCAL] = template;
+}
+
+/** SEC-TC-29 (T-06, ASVS 8.2.1): authenticated responses are never stored by the browser or a shared cache. */
+export const PRIVATE_CACHE_CONTROL = 'private, no-store';
+const PRIVATE_RESPONSE = 'routePrivateResponse';
+
+/**
+ * Marks the response as authenticated (D-ARCH-107 (5): the route's auth set has no `anonymous`, or the request
+ * presented a credential) and sets `Cache-Control: private, no-store`. The mark, not the header text, is what the tx
+ * slot re-asserts after the handler's headers and what the problem handler reads (PR #32 m1 (a)/(b)).
+ */
+export function markPrivateResponse(res: Response): void {
+  locals(res)[PRIVATE_RESPONSE] = true;
+  res.setHeader('Cache-Control', PRIVATE_CACHE_CONTROL);
+}
+
+export function isPrivateResponse(res: Response): boolean {
+  return locals(res)[PRIVATE_RESPONSE] === true;
 }
