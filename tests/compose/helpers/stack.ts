@@ -49,11 +49,24 @@ export function docker(args: readonly string[], options: { timeoutMs?: number; i
 /** A unique Compose project per run, so a developer's own `shipcube` stack is never touched. */
 export const uniqueProject = (): string => `t014-${randomBytes(4).toString('hex')}`;
 
+/**
+ * The suite's Compose environment: the data services' host ports move off the developer defaults (5432, 6379, 1025,
+ * 8025), which a host PostgreSQL or another stack may hold; the suite reaches those services through `docker compose
+ * exec`, never through the host port. Edge ports stay, because the origins and STORAGE_PUBLIC_ENDPOINT name them.
+ */
+export const STACK_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  POSTGRES_HOST_PORT: process.env.POSTGRES_HOST_PORT ?? '25432',
+  REDIS_HOST_PORT: process.env.REDIS_HOST_PORT ?? '26379',
+  MAILPIT_SMTP_HOST_PORT: process.env.MAILPIT_SMTP_HOST_PORT ?? '21025',
+  MAILPIT_UI_HOST_PORT: process.env.MAILPIT_UI_HOST_PORT ?? '28025',
+};
+
 export class ComposeStack {
   constructor(
     readonly project: string,
     readonly files: readonly string[] = ['compose.yaml'],
-    readonly env: NodeJS.ProcessEnv = process.env,
+    readonly env: NodeJS.ProcessEnv = STACK_ENV,
   ) {}
 
   run(args: readonly string[], timeoutMs = 600_000): Run {

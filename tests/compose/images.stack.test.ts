@@ -176,9 +176,21 @@ describe('image hardening (US-004)', () => {
 
   it.each([...NODE_SERVICES, ...NGINX_SERVICES])('[platform.md §3.4] %s stays within its uncompressed size budget', (name) => {
     const budget = NODE_SERVICES.includes(name as (typeof NODE_SERVICES)[number]) ? 300 * MB : 60 * MB;
-    const { Size } = inspect(IMAGES[name]);
-    process.stdout.write(`[stack] ${IMAGES[name]} ${(Size / MB).toFixed(1)} MiB (budget ${String(budget / MB)} MiB)\n`);
-    expect(Size).toBeLessThanOrEqual(budget);
+    // Uncompressed = the sum of the layer sizes (`docker history`, bytes). With Docker Desktop's containerd image store,
+    // `image inspect .Size` also counts the compressed blobs, so it is not the uncompressed size (D-TASK014-07).
+    const history = docker(['history', '--human=false', '--format', '{{.Size}}', IMAGES[name]], { timeoutMs: 60_000 });
+    expect(history.status).toBe(0);
+    const size = history.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^\d+$/.test(line))
+      .reduce((sum, line) => sum + Number(line), 0);
+    const inspected = inspect(IMAGES[name]).Size;
+    process.stdout.write(
+      `[stack] ${IMAGES[name]} layers ${(size / MB).toFixed(1)} MiB, inspect ${(inspected / MB).toFixed(1)} MiB (budget ${String(budget / MB)} MiB)\n`,
+    );
+    expect(size).toBeGreaterThan(0);
+    expect(size).toBeLessThanOrEqual(budget);
   });
 
   it.each(Object.keys(IMAGES) as (keyof typeof IMAGES)[])('[sheet line 543] %s holds no test, spike or load-test path', (name) => {
@@ -186,6 +198,9 @@ describe('image hardening (US-004)', () => {
       [
         'run',
         '--rm',
+        // As root: the image user cannot read every directory, and find exits 1 on a permission error.
+        '--user',
+        '0',
         '--network',
         'none',
         '--entrypoint',

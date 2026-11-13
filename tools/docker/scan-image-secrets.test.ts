@@ -119,6 +119,20 @@ describe('scan-image-secrets pure parts (AT-US-004-02)', () => {
     expect(gitleaksFindings('', 0, 'x')).toEqual([]);
   });
 
+  it('drops only the known base-image false positive (node headers x generic-api-key)', () => {
+    const report = JSON.stringify([
+      { File: '/scan/usr/local/include/node/v8-internal.h', RuleID: 'generic-api-key' },
+      { File: '/scan/usr/local/include/node/v8-internal.h', RuleID: 'aws-access-token' },
+      { File: '/scan/usr/local/include/node/../../app/.env', RuleID: 'generic-api-key' },
+      { File: '/scan/app/config.js', RuleID: 'generic-api-key' },
+    ]);
+    expect(gitleaksFindings(report, 2, 'a'.repeat(64)).map((finding) => `${finding.file} ${finding.rule}`)).toEqual([
+      '/usr/local/include/node/v8-internal.h aws-access-token',
+      '/usr/local/include/node/../../app/.env generic-api-key',
+      '/app/config.js generic-api-key',
+    ]);
+  });
+
   it('flags secret shapes in the build history by rule id', () => {
     const fake = ['AKIA', 'Z'.repeat(16)].join('');
     const steps = [

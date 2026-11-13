@@ -159,12 +159,33 @@ export function gitleaksFindings(reportText, layer, digest, scanRoot = '/scan') 
   if (trimmed === '') return [];
   const report = /** @type {unknown} */ (JSON.parse(trimmed));
   if (!Array.isArray(report)) throw new Error('gitleaks report is not a JSON array');
-  return report.map((item) => {
-    const record = /** @type {{ File?: unknown, RuleID?: unknown }} */ (item);
-    const file = typeof record.File === 'string' ? record.File.replace(new RegExp(`^${scanRoot}/?`), '/') : '?';
-    return { layer, digest, file, rule: typeof record.RuleID === 'string' ? record.RuleID : 'unknown' };
-  });
+  return report
+    .map((item) => {
+      const record = /** @type {{ File?: unknown, RuleID?: unknown }} */ (item);
+      const file = typeof record.File === 'string' ? record.File.replace(new RegExp(`^${scanRoot}/?`), '/') : '?';
+      return { layer, digest, file, rule: typeof record.RuleID === 'string' ? record.RuleID : 'unknown' };
+    })
+    .filter((finding) => !isKnownBaseImageFalsePositive(finding));
 }
+
+/**
+ * Known false positives of the pinned third-party base images, by exact (path prefix, rule) pair only (TASK-014 stack
+ * run 1): the V8 C++ headers that the official node image installs under /usr/local/include/node hold identifier
+ * constants that the generic-api-key rule matches. Only the tooling image keeps the full node image; a secret
+ * anywhere else, or of any other rule, still fails.
+ */
+export const BASE_IMAGE_FALSE_POSITIVES = Object.freeze([
+  Object.freeze({ pathPrefix: '/usr/local/include/node/', rule: 'generic-api-key' }),
+]);
+
+/** @param {{ file: string, rule: string }} finding */
+export const isKnownBaseImageFalsePositive = (finding) =>
+  BASE_IMAGE_FALSE_POSITIVES.some(
+    (entry) =>
+      finding.rule === entry.rule &&
+      finding.file.startsWith(entry.pathPrefix) &&
+      !finding.file.slice(entry.pathPrefix.length).includes('..'),
+  );
 
 /** Secret shapes in build history (ARG/ENV values and RUN lines); rule ids are reported, never the match. */
 export const HISTORY_RULES = Object.freeze(

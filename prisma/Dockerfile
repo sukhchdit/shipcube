@@ -37,13 +37,14 @@ COPY prisma/package.json prisma/
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm ci --ignore-scripts --no-audit --include=dev --workspace=prisma --include-workspace-root
 COPY tools/deps/ tools/deps/
-COPY tools/docker/prune-deps.mjs tools/docker/prune-migrate-image.mjs tools/docker/
+COPY tools/docker/prune-deps.mjs tools/docker/prune-dist.mjs tools/docker/prune-migrate-image.mjs tools/docker/
 COPY tools/db/audit-external-tables.ts tools/db/shadow-init.ts tools/db/sql-text.ts tools/db/
 COPY prisma.config.ts ./
 COPY prisma/schema/ prisma/schema/
 COPY prisma/bootstrap/ prisma/bootstrap/
 RUN npm run deps:rebuild \
  && node tools/docker/prune-migrate-image.mjs --stub-studio \
+ && node tools/docker/prune-dist.mjs --node-modules node_modules \
  && mkdir -p /out \
  && for dir in node_modules */node_modules */*/node_modules; do \
       if [ -d "$dir" ]; then mkdir -p "/out/$(dirname "$dir")" && cp -a "$dir" "/out/$dir"; fi; \

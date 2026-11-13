@@ -18,8 +18,10 @@ location ~ ^/api/v1/quotes/[^/]+/stream$ {
 
 location /api/ {
     include /etc/nginx/conf.d/api-proxy.inc;
+    proxy_read_timeout 30s;
 }
 
 location /health/ {
     include /etc/nginx/conf.d/api-proxy.inc;
+    proxy_read_timeout 30s;
 }
