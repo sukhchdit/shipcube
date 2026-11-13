@@ -19,18 +19,23 @@ import {
   FORBIDDEN_ENV,
   LANE_B_EVIDENCE_SCRIPT,
   LINT_FIXTURE_MODE_ENV,
+  OPENAPI_BREAKING_RUN,
+  PORCELAIN_RUN,
   REQUIRED_CODEOWNED_PATHS,
   checkCodeowners,
   checkJestManualMocks,
   checkWorkflow,
   checkWorkflowPolicy,
   commandLines,
+  exactRunProblems,
   findDirsNamed,
   findFilesNamed,
   laneBEvidenceProblems,
   mentionsOf,
+  nonAsciiProblem,
   shellSegments,
 } from './check-workflow-policy.mjs';
+import { OASDIFF_IMAGE } from './openapi-breaking.mjs';
 import { YamlSubsetError, parseYamlSubset } from './yaml-subset.mjs';
 import { EVENTS as EVIDENCE_EVENTS } from '../quality/check-evidence.mjs';
 
@@ -446,6 +451,188 @@ describe('check-workflow-policy: repository', () => {
 
     it('[R2-n2] CI_TRIGGERS are exactly the check-evidence EVENTS', () => {
       expect([...CI_TRIGGERS]).toEqual([...EVIDENCE_EVENTS]);
+    });
+
+    it.each(['\u00a0', '\u2000', '\u2005', '\u200a', '\u3000'])(
+      '[PR33-SEC-01] a "comment" line led by U+%s (bash runs it as a command) is a finding, not a skipped comment',
+      (blank) => {
+        const probe = swap(`          ${baseLine}\n`, `          ${blank}# || exit 0\n          ${baseLine}\n`);
+        const found = messages(probe);
+        expect(found.length).toBeGreaterThan(0);
+        // U+00A0 is the reviewed probe (M06): the YAML subset accepts it, so the pin itself must refuse it.
+        if (blank === '\u00a0')
+          expect(found).toEqual(
+            expect.arrayContaining([
+              expect.stringContaining('lane B evidence gate step: non-ASCII character U+00A0'),
+              expect.stringContaining('must be exactly LANE_B_EVIDENCE_SCRIPT'),
+            ]),
+          );
+      },
+    );
+  });
+
+  describe('[PR #33 R1-m2] [PR33-SEC-03] porcelain and openapi-breaking pins: exact command, no step env, fixed position', () => {
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
+    const swap = (text: string, from: string, to: string): string => {
+      expect(text.split(from)).toHaveLength(2);
+      return text.replace(from, () => to);
+    };
+    const oasRun = `        run: ${OPENAPI_BREAKING_RUN}\n`;
+    const oasName = '      - name: OpenAPI breaking changes against the latest release tag (oasdiff, NFR-MAINT-004)\n';
+    const afterLintStep = `      - name: Lint must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN}\n\n`;
+    const afterLintRun = `      - name: Lint must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN}\n`;
+    const afterBuildRun = `      - name: Build must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN}\n`;
+    const lintStep = '      - name: Lint (ESLint, Stylelint, suppressions)\n';
+    const semgrepSelfTest = '      - name: Semgrep rule self-test (when rules or their fixtures change)\n';
+    const otherDigest = `docker.io/tufin/oasdiff:v1.37.0@sha256:${'b'.repeat(64)}`;
+
+    it('the committed steps pass and carry exactly the pinned lines', () => {
+      expect(messages(ci)).toEqual([]);
+      expect(ci.split(oasRun)).toHaveLength(2);
+      expect(ci.split(afterLintRun)).toHaveLength(2);
+      expect(ci.split(afterBuildRun)).toHaveLength(2);
+      expect(exactRunProblems(PORCELAIN_RUN)(`${PORCELAIN_RUN}\n`)).toEqual([]);
+      expect(exactRunProblems(PORCELAIN_RUN)(`# why\n${PORCELAIN_RUN}\n\n`)).toEqual([]);
+    });
+
+    it.each<[string, () => string, string]>([
+      [
+        'openapi: || true',
+        () => swap(ci, oasRun, oasRun.replace(/\n$/u, ' || true\n')),
+        'openapi-breaking gate step: the run: must be exactly',
+      ],
+      [
+        'openapi: ; true',
+        () => swap(ci, oasRun, oasRun.replace(/\n$/u, '; true\n')),
+        'openapi-breaking gate step: the run: must be exactly',
+      ],
+      [
+        'openapi: true || prefix',
+        () => swap(ci, oasRun, oasRun.replace('run: node', 'run: true || node')),
+        'openapi-breaking gate step: the run: must be exactly',
+      ],
+      [
+        'openapi: output discarded',
+        () => swap(ci, oasRun, oasRun.replace(/\n$/u, ' >/dev/null 2>&1\n')),
+        'openapi-breaking gate step: the run: must be exactly',
+      ],
+      [
+        'openapi: --base "$RANGE_HEAD"',
+        () => swap(ci, oasRun, oasRun.replace('--base "$RANGE_BASE"', '--base "$RANGE_HEAD"')),
+        'openapi-breaking gate step: the run: must be exactly',
+      ],
+      [
+        'openapi: second line exit 0',
+        () => swap(ci, oasRun, `        run: |\n          ${OPENAPI_BREAKING_RUN}\n          exit 0\n`),
+        'openapi-breaking gate step: the run: must be exactly',
+      ],
+      [
+        'openapi: trailing U+00A0',
+        () => swap(ci, oasRun, oasRun.replace(/\n$/u, '\u00a0\n')),
+        'ci.yml non-ASCII character U+00A0 outside a comment line',
+      ],
+      [
+        'openapi: step env GATE_OPENAPI_BREAKING (head copy of the checker)',
+        () => swap(ci, oasName, `${oasName}        env:\n          GATE_OPENAPI_BREAKING: ./evil.mjs\n`),
+        'openapi-breaking gate step must set no env but  (found GATE_OPENAPI_BREAKING)',
+      ],
+      [
+        'openapi: step env GATE_* is also a gate-env finding',
+        () => swap(ci, oasName, `${oasName}        env:\n          GATE_OPENAPI_BREAKING: ./evil.mjs\n`),
+        'gate-env: GATE_OPENAPI_BREAKING locates gate tooling',
+      ],
+      [
+        'openapi: step env OASDIFF_IMAGE (M25)',
+        () => swap(ci, oasName, `${oasName}        env:\n          OASDIFF_IMAGE: ${otherDigest}\n`),
+        'openapi-breaking gate step must set no env but  (found OASDIFF_IMAGE)',
+      ],
+      [
+        'openapi: workflow OASDIFF_IMAGE swapped (M26)',
+        () => swap(ci, `  OASDIFF_IMAGE: ${OASDIFF_IMAGE}\n`, `  OASDIFF_IMAGE: ${otherDigest}\n`),
+        'ci.yml workflow env OASDIFF_IMAGE must be',
+      ],
+      [
+        'openapi: job env OASDIFF_IMAGE',
+        () =>
+          swap(
+            ci,
+            '      PR_NUMBER: ${{ github.event.pull_request.number }}\n',
+            `      PR_NUMBER: \${{ github.event.pull_request.number }}\n      OASDIFF_IMAGE: ${OASDIFF_IMAGE}\n`,
+          ),
+        'ci.yml job scans must not set OASDIFF_IMAGE',
+      ],
+      [
+        'openapi: job env GATES_DIR',
+        () =>
+          swap(
+            ci,
+            '      PR_NUMBER: ${{ github.event.pull_request.number }}\n',
+            '      PR_NUMBER: ${{ github.event.pull_request.number }}\n      GATES_DIR: /tmp/x\n',
+          ),
+        'gate-env: GATES_DIR locates gate tooling',
+      ],
+      [
+        'porcelain after lint: || true',
+        () => swap(ci, afterLintRun, afterLintRun.replace(/\n$/u, ' || true\n')),
+        'porcelain after lint gate step: the run: must be exactly',
+      ],
+      [
+        'porcelain after lint: output discarded',
+        () => swap(ci, afterLintRun, afterLintRun.replace(/\n$/u, ' >/dev/null\n')),
+        'porcelain after lint gate step: the run: must be exactly',
+      ],
+      [
+        'porcelain after lint: step env GATE_CHECK_PORCELAIN',
+        () =>
+          swap(
+            ci,
+            afterLintRun,
+            afterLintRun.replace('        run:', '        env:\n          GATE_CHECK_PORCELAIN: ./x.mjs\n        run:'),
+          ),
+        'porcelain after lint gate step must set no env but  (found GATE_CHECK_PORCELAIN)',
+      ],
+      [
+        'porcelain after lint: moved before Lint',
+        () => swap(swap(ci, afterLintStep, ''), lintStep, `${afterLintStep}${lintStep}`),
+        'porcelain after lint gate step must directly follow the lint gate step',
+      ],
+      [
+        'porcelain after lint: moved to the end of the job',
+        () => swap(swap(ci, afterLintStep, ''), semgrepSelfTest, `${afterLintStep}${semgrepSelfTest}`),
+        'porcelain after lint gate step must directly follow the lint gate step',
+      ],
+      [
+        'porcelain after build: || true',
+        () => swap(ci, afterBuildRun, afterBuildRun.replace(/\n$/u, ' || true\n')),
+        'porcelain gate step: the run: must be exactly',
+      ],
+      [
+        'base-ref lint fixtures: a U+00A0-led comment line (PR33-SEC-01)',
+        () =>
+          swap(
+            ci,
+            '          git checkout "$RANGE_BASE" -- "${base_paths[@]}"\n',
+            '          \u00a0# || exit 0\n          git checkout "$RANGE_BASE" -- "${base_paths[@]}"\n',
+          ),
+        'must keep the base-ref lint negative fixtures gate step',
+      ],
+      [
+        'porcelain after build: moved before Build',
+        () => swap(swap(ci, `${afterBuildRun}\n`, ''), '      - name: Build\n', `${afterBuildRun}\n      - name: Build\n`),
+        'porcelain gate step must directly follow the build gate step',
+      ],
+    ])('probe: %s is a finding', (_name, mutate, expected) => {
+      const mutated = mutate();
+      expect(mutated).not.toBe(ci);
+      expect(messages(mutated)).toEqual(expect.arrayContaining([expect.stringContaining(expected)]));
+    });
+
+    it('commandLines treats only ASCII blanks as blank (PR33-SEC-01)', () => {
+      expect(commandLines('\u00a0# x\nb\n \t# y\n\u3000\n')).toEqual(['\u00a0# x', 'b', '\u3000']);
+      expect(commandLines('a\u00a0\nb \t')).toEqual(['a\u00a0', 'b']);
+      expect(nonAsciiProblem('plain ascii\t\n')).toBeNull();
+      expect(nonAsciiProblem('x\u200ay')).toContain('U+200A');
     });
   });
 
