@@ -98,7 +98,7 @@ describe('docker compose up (US-003, NFR-OPS-001)', () => {
       30_000,
     );
     expect(ready.status).toBe(200);
-    edgeCa = stack.run(['exec', '-T', 'edge', 'cat', '/etc/nginx/certs/edge.crt'], 30_000).stdout;
+    edgeCa = stack.run(['exec', '-T', 'edge', 'cat', '/etc/nginx/certs/ca.crt'], 30_000).stdout;
     expect(edgeCa).toContain('-----BEGIN CERTIFICATE-----');
     expect((await http({ port: 8443, path: '/health/live', ca: edgeCa })).status).toBe(200);
   });
