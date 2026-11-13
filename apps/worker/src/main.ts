@@ -6,6 +6,7 @@ import {
   createRuntimeLog,
   createRuntimeServices,
   createShutdown,
+  exitAfterFlush,
   installProcessErrorHandlers,
   readPackageVersion,
 } from '@platform/api/runtime';
@@ -21,8 +22,8 @@ const log = createRuntimeLog('worker', process.stdout, {
   level: config.APP_LOG_LEVEL,
   context: jobLogContext,
 });
-// Uncaught exceptions and unhandled rejections: one redacted fatal line, then exit 1 (PR20-SEC-06).
-installProcessErrorHandlers({ log, exit: (code) => process.exit(code) });
+// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06, R2-n7).
+installProcessErrorHandlers({ log, exit: exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) }) });
 const services = createRuntimeServices(config, 'worker', log);
 const server = createWorkerHealthServer(services.probe);
 

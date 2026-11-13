@@ -4,9 +4,11 @@
  * (`timestamp`, `level`, `message`, `service`, `version`, `correlation_id`, `org_id`, `actor_id`), the correlation
  * fields read from the caller's context provider for every line, and the thrown value of `error()` serialised by the
  * PR7-SEC-03 serializer (database errors as `{ name, code, originalCode, kind }` only; other errors with redacted
- * message and stack, AT-US-007-03). Events named `security.<event>` are security events (`event_type: "security"`),
- * so the runtime's database security events (session integrity, TASK-016 `onSecurityEvent`) reach the security log
- * through this seam without code changes at the call sites (PR #11 R3-m1).
+ * message and stack, AT-US-007-03). Only lines whose fields the security-event sink branded are security events
+ * (`event_type: "security"`, written whatever the level; `createSecurityEventSink`, PR20-SEC-08 (b)): the runtime's
+ * database security events (session integrity, TASK-016 `onSecurityEvent`) reach the security log through
+ * `securityEventSinkFrom(log)` (platform/logging/security-events.ts, PR #11 R3-m1). A plain call named `security.<x>`
+ * is an ordinary line (PR #20 R2-n4).
  */
 import { readFileSync } from 'node:fs';
 

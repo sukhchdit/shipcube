@@ -10,7 +10,7 @@ import { createHealthRouter } from './platform/health/router.js';
 import { requestLogContext } from './platform/logging/correlation.js';
 import { DocsSpecError, docsOptionsFrom, type DocsOptions } from './platform/openapi/serve.js';
 import { createRuntimeLog, readPackageVersion } from './platform/runtime/log.js';
-import { installProcessErrorHandlers } from './platform/runtime/process-errors.js';
+import { exitAfterFlush, installProcessErrorHandlers } from './platform/runtime/process-errors.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
 
@@ -21,8 +21,8 @@ const log = createRuntimeLog('api', process.stdout, {
   level: config.APP_LOG_LEVEL,
   context: requestLogContext,
 });
-// Uncaught exceptions and unhandled rejections: one redacted fatal line, then exit 1 (PR20-SEC-06).
-installProcessErrorHandlers({ log, exit: (code) => process.exit(code) });
+// Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06, R2-n7).
+installProcessErrorHandlers({ log, exit: exitAfterFlush({ stream: process.stdout, exit: (code) => process.exit(code) }) });
 const services = createRuntimeServices(config, 'api', log);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));

@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it } from '@jest/globals';
 
 import { createRuntimeLog } from './log.js';
-import { installProcessErrorHandlers } from './process-errors.js';
+import { exitAfterFlush, type FlushableStream, installProcessErrorHandlers } from './process-errors.js';
 
 const sentinel = (): string => `sentinel-${randomBytes(8).toString('hex')}`;
 
@@ -71,5 +71,77 @@ describe('installProcessErrorHandlers', () => {
     });
     expect(() => source.emit('unhandledRejection', new Error('x'))).toThrow('destination failed');
     expect(exits).toEqual([1]);
+  });
+});
+
+describe('exitAfterFlush (PR #20 R2-n7)', () => {
+  function harness(write: FlushableStream['write']): {
+    readonly exitFn: (code: number) => void;
+    readonly exits: number[];
+    readonly timers: { readonly ms: number; readonly fire: () => void }[];
+  } {
+    const exits: number[] = [];
+    const timers: { ms: number; fire: () => void }[] = [];
+    const exitFn = exitAfterFlush({
+      stream: { write },
+      exit: (code) => exits.push(code),
+      timeoutMs: 250,
+      setTimer: (fire, ms) => timers.push({ fire, ms }),
+    });
+    return { exitFn, exits, timers };
+  }
+
+  it('exits only when the stream calls back, after the earlier chunks are flushed, and only once', () => {
+    let flushed: ((error?: Error | null) => void) | undefined;
+    const { exitFn, exits, timers } = harness((chunk, callback) => {
+      expect(chunk).toBe('');
+      flushed = callback;
+      return false;
+    });
+    exitFn(1);
+    expect(exits).toEqual([]);
+    flushed?.();
+    expect(exits).toEqual([1]);
+    timers[0]?.fire();
+    expect(exits).toEqual([1]);
+    expect(timers.map((timer) => timer.ms)).toEqual([250]);
+  });
+
+  it('exits on the timer when the stream never calls back (a broken pipe)', () => {
+    const { exitFn, exits, timers } = harness(() => true);
+    exitFn(1);
+    expect(exits).toEqual([]);
+    timers[0]?.fire();
+    expect(exits).toEqual([1]);
+  });
+
+  it('exits at once when the stream throws on write (destroyed)', () => {
+    const { exitFn, exits } = harness(() => {
+      throw new Error('write after end');
+    });
+    exitFn(1);
+    expect(exits).toEqual([1]);
+  });
+
+  it('the fatal line is in the stream before the exit (end to end with the handlers)', async () => {
+    const written: string[] = [];
+    const exits: number[] = [];
+    const source = new EventEmitter();
+    const stream = {
+      write: (chunk: string, callback?: (error?: Error | null) => void): boolean => {
+        written.push(chunk);
+        if (callback !== undefined) setImmediate(callback);
+        return true;
+      },
+    };
+    const log = createRuntimeLog('api', stream);
+    const exit = exitAfterFlush({ stream, exit: (code) => exits.push(code), setTimer: () => undefined });
+    installProcessErrorHandlers({ log, exit, source });
+    source.emit('uncaughtException', new Error('boom'), 'uncaughtException');
+    expect(exits).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(exits).toEqual([1]);
+    const events = written.filter((chunk) => chunk !== '').map((line) => (JSON.parse(line) as Record<string, unknown>)['event']);
+    expect(events).toEqual(['process.uncaught_exception']);
   });
 });
