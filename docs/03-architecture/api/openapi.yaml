@@ -1366,8 +1366,8 @@ paths:
                 default:
                   summary: Example
                   value:
-                    provisioning_uri: otpauth://totp/Platform:ana%40acme.example?secret=JBSWY3DPEHPK3PXPJBSWY3DP&issuer=Platform
-                    manual_key: JBSWY3DPEHPK3PXPJBSWY3DP
+                    provisioning_uri: otpauth://totp/Platform:ana%40acme.example?secret=EXAMPLEEXAMPLEEXAMPLEEXAMPLE2345&issuer=Platform
+                    manual_key: EXAMPLEEXAMPLEEXAMPLEEXAMPLE2345
                     expires_at: 2026-11-12T14:45:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -8261,7 +8261,7 @@ paths:
                         current_step: 7
                         created_at: 2026-11-12T14:30:00Z
                         updated_at: 2026-11-12T14:35:12Z
-                    next_cursor: eyJrIjoiMjAyNi0xMS0xMlQxNDozMDowMFoiLCJpZCI6IjAxOTMifQ
+                    next_cursor: EXAMPLE_CURSOR_0001
                     has_more: true
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -14270,7 +14270,7 @@ paths:
                         outcome: SUCCESS
                         ip: 203.0.113.10
                         source_app: web
-                    next_cursor: eyJrIjoiMjAyNi0xMS0xMlQxNDozMDowMFoiLCJpZCI6IjAxOTMifQ
+                    next_cursor: EXAMPLE_CURSOR_0001
                     has_more: true
         "400":
           $ref: "#/components/responses/BadRequest"
