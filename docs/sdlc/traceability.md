@@ -62,7 +62,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-010 | M0 | Must | US-007 | platform · ADR-0016 §3 framework-failure codes; api/README §11 error catalogue | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-011 | M0 | Must | US-008 | platform · ADR-0017 §1–2 correlation ID (validate, generate, echo) | TASK-010, TASK-029, TASK-035, TASK-043, TASK-079, TASK-092 | – | Planned (partial: TASK-010 validate/generate/echo + api/worker log lines, AT-US-008-01/02/04/05/06; completes with TASK-029 (audit entries), TASK-043 (outbox row → enqueued job), TASK-035 (payload v2 → worker logger), TASK-079 (Mock carrier call) and TASK-092 (end-to-end AT-US-008-03); D-062) |
-| REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Planned |
+| REQ-PLAT-012 | M0 | Must | US-008 | platform · ADR-0017 §1 Pino JSON fields and redaction | TASK-010 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-013 | M0 | Must | US-009 | platform (worker) · ADR-0013 §Queues (attempts 5, exponential backoff + jitter, DLQ per queue) | TASK-035 | – | Planned |
 | REQ-PLAT-014 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Idempotent processors (deterministic job IDs, `job_executions`); data-model §3.5 | TASK-039 | – | Planned |
 | REQ-PLAT-015 | M0 | Must | US-010 | platform (worker) · ADR-0013 §Repeatable jobs (idempotent registration) | TASK-039 | – | Planned |
