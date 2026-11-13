@@ -128,7 +128,7 @@ describe('audit readiness against the bootstrapped catalogue (TASK-021)', () => 
       await asSuperuserUnguarded(database, plant(name));
       await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('failed');
       expect(lines.filter((line) => line['event'] === 'security.audit_partition_squatted')).toEqual([
-        expect.objectContaining({ level: 'warn', component: 'audit_partitions', name, kind }),
+        expect.objectContaining({ level: 'error', component: 'audit_partitions', partition_name: name, kind }),
       ]);
     },
   );
@@ -139,8 +139,60 @@ describe('audit readiness against the bootstrapped catalogue (TASK-021)', () => 
     await asSuperuserUnguarded(database, `ALTER TABLE public.audit_entries DETACH PARTITION public.${name}`);
     await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('failed');
     expect(lines.filter((line) => line['event'] === 'security.audit_partition_squatted')).toEqual([
-      expect.objectContaining({ name, kind: 'r', reason: 'not_attached' }),
+      expect.objectContaining({ level: 'error', partition_name: name, kind: 'r', reason: 'not_attached' }),
     ]);
+  });
+
+  /** Runs `sql` as platform_app on `database` and returns its outcome (the positive controls of the operator plants). */
+  async function asApp(database: string, sql: string): Promise<{ ok: true; value: unknown } | { ok: false; code: unknown }> {
+    const app = new pg.Client(db.appConnection(database));
+    await app.connect();
+    try {
+      const { rows } = await app.query<{ v: unknown }>(sql);
+      return { ok: true, value: rows[0]?.v };
+    } catch (error: unknown) {
+      return { ok: false, code: (error as { code?: unknown }).code };
+    } finally {
+      await app.end();
+    }
+  }
+
+  it('[PR24-SEC-02 H1] a granted public.=(oid, integer) operator does not hide a free-standing type squat from readiness', async () => {
+    const { runtime, database, lines } = await runtimeOnClone();
+    const name = `audit_entries_${monthSuffix(41)}`;
+    await asSuperuserUnguarded(
+      database,
+      `SET LOCAL ROLE platform_migrator;
+       CREATE FUNCTION public.hijack_eq(oid, integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS $f$ SELECT false $f$;
+       CREATE OPERATOR public.= (LEFTARG = oid, RIGHTARG = integer, FUNCTION = public.hijack_eq);
+       GRANT EXECUTE ON FUNCTION public.hijack_eq(oid, integer) TO platform_app;
+       CREATE TYPE public.hijack_range AS RANGE (subtype = integer, multirange_type_name = public.${name});
+       RESET ROLE;`,
+    );
+    // positive control: a bare = in platform_app's path resolves to the planted operator
+    await expect(asApp(database, 'SELECT (1::oid = 1) AS v')).resolves.toEqual({ ok: true, value: false });
+    await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('failed');
+    expect(lines.filter((line) => line['event'] === 'security.audit_partition_squatted')).toEqual([
+      expect.objectContaining({ level: 'error', partition_name: name, kind: 'type', reason: 'not_a_table' }),
+    ]);
+  });
+
+  it('[PR24-SEC-02 H2] an ungranted public.=(oid, regnamespace) operator does not make the readiness query fail', async () => {
+    const { runtime, database } = await runtimeOnClone();
+    await asSuperuserUnguarded(
+      database,
+      `SET LOCAL ROLE platform_migrator;
+       CREATE FUNCTION public.hijack_ns(oid, regnamespace) RETURNS boolean LANGUAGE sql IMMUTABLE AS $f$ SELECT false $f$;
+       CREATE OPERATOR public.= (LEFTARG = oid, RIGHTARG = regnamespace, FUNCTION = public.hijack_ns);
+       REVOKE ALL ON FUNCTION public.hijack_ns(oid, regnamespace) FROM PUBLIC;
+       RESET ROLE;`,
+    );
+    // positive control: the pre-fix bare comparison now fails for platform_app (42501, permission denied)
+    await expect(
+      asApp(database, `SELECT count(*) AS v FROM pg_catalog.pg_class c WHERE c.relnamespace = 'public'::pg_catalog.regnamespace`),
+    ).resolves.toEqual({ ok: false, code: '42501' });
+    await expect(settle(runtime.auditChecks.partitions.check(signal()))).resolves.toBe('ok');
+    await expect(settle(runtime.auditChecks.chain.check(signal()))).resolves.toBe('degraded');
   });
 
   it('[AT-US-012-04] month current + 3 missing (the daily job is late) → degraded, not unavailable', async () => {

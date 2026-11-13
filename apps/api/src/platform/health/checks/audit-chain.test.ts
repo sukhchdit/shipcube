@@ -47,4 +47,18 @@ describe('intervalCache', () => {
     await expect(failing.get(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
     expect(await failing.get(load)).toBe(3);
   });
+
+  it('[R1-n4] a resolved value that keep() rejects is returned but not cached', async () => {
+    let loads = 0;
+    const cache = intervalCache<number>(
+      100,
+      () => 0,
+      (value) => value % 2 === 0,
+    );
+    const load = () => Promise.resolve((loads += 1));
+    expect(await cache.get(load)).toBe(1);
+    expect(await cache.get(load)).toBe(2);
+    expect(await cache.get(load)).toBe(2);
+    expect(loads).toBe(2);
+  });
 });

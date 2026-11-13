@@ -4,6 +4,7 @@ import request from 'supertest';
 
 import {
   createReadinessProbe,
+  type PendableComponent,
   pendingCheck,
   READINESS_CACHE_TTL_MS,
   READINESS_COMPONENTS,
@@ -176,17 +177,19 @@ describe('US-012 liveness and readiness endpoints (api)', () => {
   it.each([
     ['a missing component', checksWith().slice(1)],
     ['a duplicated component', [...checksWith(), pendingCheck('redis')]],
-    ['an audit check marked critical', checksWith({ audit_chain: { ...pendingCheck('audit_chain'), critical: true } })],
+    ['an audit check marked critical', checksWith({ audit_chain: { ...passing('audit_chain'), critical: true } })],
   ])('refuses %s at construction', (_label, checks) => {
     expect(() => createReadinessProbe(checks)).toThrow(TypeError);
   });
 
-  it('[PR9-SEC-11] a pending audit_chain check reports degraded (never ok); a pending critical check passes', async () => {
-    const pending = { object_storage: pendingCheck('object_storage'), audit_partitions: pendingCheck('audit_partitions') };
-    const { app } = appWith(checksWith({ ...pending, audit_chain: pendingCheck('audit_chain') }));
+  it('[PR9-SEC-11, PR #24 R1-n2] an audit component is never stubbed; a pending critical check passes', async () => {
+    for (const name of ['audit_partitions', 'audit_chain'] as const) {
+      expect(() => pendingCheck(name as ReadinessComponent as PendableComponent)).toThrow(TypeError);
+    }
+    const { app } = appWith(checksWith({ object_storage: pendingCheck('object_storage') }));
     const ready = await request(app).get('/health/ready');
     expect(ready.status).toBe(200);
-    expect(ready.body).toEqual({ status: 'degraded', components: { ...allOk, audit_chain: 'degraded' } });
+    expect(ready.body).toEqual({ status: 'ok', components: allOk });
   });
 });
 

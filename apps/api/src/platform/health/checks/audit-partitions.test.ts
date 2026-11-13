@@ -1,17 +1,31 @@
 import { describe, expect, it } from '@jest/globals';
 import fc from 'fast-check';
 
+import { LATEST_VERIFICATION_SQL } from './audit-chain.js';
 import {
   AUDIT_PARTITION_NAME,
   createAuditPartitionsCheck,
   evaluatePartitions,
   isPartitionsUnavailable,
+  PARTITION_CATALOGUE_SQL,
   partitionNameFor,
   type PartitionCatalogueRow,
   type SquattedObject,
 } from './audit-partitions.js';
 
 const NOW = new Date('2026-11-13T10:00:00Z');
+
+/**
+ * What remains of `sql` once string literals and `OPERATOR(pg_catalog.…)` forms are removed: every bare operator token
+ * and every cast whose type is not `pg_catalog.`-qualified (PR24-SEC-02).
+ */
+function bareSqlResidue(sql: string): { operators: string[]; casts: string[] } {
+  const stripped = sql.replaceAll(/'(?:[^']|'')*'/gu, "''").replaceAll(/OPERATOR\(pg_catalog\.[^)\s]+\)/gu, ' ');
+  return {
+    casts: [...stripped.matchAll(/::(?!pg_catalog\.)[a-z_]+/gu)].map((m) => m[0]),
+    operators: [...stripped.replaceAll(/::/gu, ' ').matchAll(/[+\-*/<>=~!@#%^&|`?]+/gu)].map((m) => m[0]),
+  };
+}
 const partition = (name: string, overrides: Partial<PartitionCatalogueRow> = {}): PartitionCatalogueRow => ({
   name,
   kind: 'r',
@@ -148,6 +162,34 @@ describe('createAuditPartitionsCheck', () => {
     await expect(check.check(signal)).rejects.toThrow('audit partitions not ready');
     expect(source.calls()).toBe(2);
     expect(events).toEqual([{ name: 'audit_entries_2099_02', kind: 'i', reason: 'not_a_table' }]);
+  });
+
+  it('[R1-n4] an unavailable evaluation is not cached: the next poll re-reads the catalogue and recovers', async () => {
+    let rows: readonly PartitionCatalogueRow[] = healthy(NOW, 1);
+    let calls = 0;
+    const source = {
+      query: () => {
+        calls += 1;
+        return Promise.resolve({ rows });
+      },
+    };
+    const check = createAuditPartitionsCheck(source, { onSquatted: () => undefined, now: () => NOW });
+    const signal = new AbortController().signal;
+    await expect(check.check(signal)).rejects.toThrow('audit partitions not ready');
+    rows = healthy(NOW);
+    await expect(check.check(signal)).resolves.toBeUndefined();
+    await expect(check.check(signal)).resolves.toBeUndefined();
+    expect(calls).toBe(2);
+  });
+
+  it('[PR24-SEC-02] the catalogue SQL has no bare operator and no unqualified type (operator-hijack hardening)', () => {
+    expect(bareSqlResidue(PARTITION_CATALOGUE_SQL)).toEqual({ operators: [], casts: [] });
+    expect(bareSqlResidue(LATEST_VERIFICATION_SQL)).toEqual({ operators: [], casts: [] });
+    // negative control: the pre-fix forms are reported
+    expect(bareSqlResidue(`SELECT 1 WHERE t.typrelid = 0 AND c.relname::text <> 'x'`)).toEqual({
+      operators: ['=', '<>'],
+      casts: ['::text'],
+    });
   });
 
   it('reads the catalogue on the slow interval only (cached result reused)', async () => {

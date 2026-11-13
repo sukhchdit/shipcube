@@ -10,10 +10,10 @@
 import type { CheckOutcome, ReadinessCheck } from '../../runtime/readiness.js';
 import { AUDIT_READINESS_INTERVAL_MS, type CatalogReader, intervalCache } from './catalog-reader.js';
 
-/** Latest finished verification run (bounded: one row). */
-export const LATEST_VERIFICATION_SQL = `SELECT v.status::text AS status
+/** Latest finished verification run (bounded: one row). Operators and types qualified, as in audit-partitions.ts (PR24-SEC-02). */
+export const LATEST_VERIFICATION_SQL = `SELECT v.status AS status
   FROM public.audit_chain_verifications v
- WHERE v.status <> 'RUNNING'
+ WHERE v.status OPERATOR(pg_catalog.<>) 'RUNNING'::pg_catalog.text
  ORDER BY v.started_at DESC, v.id DESC
  LIMIT 1`;
 

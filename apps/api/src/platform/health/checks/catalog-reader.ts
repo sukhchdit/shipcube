@@ -14,9 +14,11 @@ export interface IntervalCache<T> {
 
 /**
  * Reuses a successful load for `intervalMs` (a rejected load is not cached: the next readiness poll retries it).
- * Concurrent callers share one in-flight load.
+ * Concurrent callers share one in-flight load. A resolved value for which `keep` returns false is not cached either
+ * (code review PR #24 R1-n4: an `unavailable` evaluation must not stay sticky for a whole interval once the cause is
+ * repaired, the PR #9 M1 lesson).
  */
-export function intervalCache<T>(intervalMs: number, now: () => number): IntervalCache<T> {
+export function intervalCache<T>(intervalMs: number, now: () => number, keep: (value: T) => boolean = () => true): IntervalCache<T> {
   let last: { readonly value: T; readonly at: number } | undefined;
   let inflight: Promise<T> | undefined;
   return {
@@ -24,7 +26,7 @@ export function intervalCache<T>(intervalMs: number, now: () => number): Interva
       if (last !== undefined && now() - last.at < intervalMs) return Promise.resolve(last.value);
       inflight ??= load()
         .then((value) => {
-          last = { value, at: now() };
+          last = keep(value) ? { value, at: now() } : undefined;
           return value;
         })
         .finally(() => {

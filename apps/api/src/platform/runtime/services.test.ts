@@ -31,7 +31,7 @@ describe('pending readiness stubs cannot outlive their replacements (PR-0009 m2,
       .map((entry) => join(entry.parentPath, entry.name));
 
   it('the brand identifies stubs only: a copy and the real database/redis checks are not pending (positive control)', () => {
-    const stub = pendingCheck('audit_chain');
+    const stub = pendingCheck('object_storage');
     expect(isPendingCheck(stub)).toBe(true);
     expect(isPendingCheck({ ...stub })).toBe(false);
     expect(wiredStubs()).not.toContain('database');

@@ -261,14 +261,16 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
     return freshProbeInflight;
   };
 
-  // The audit checks read the catalogue as platform_app; a squat is a security event (data-model §5.3 item 3).
+  // The audit checks read the catalogue as platform_app; a squat is a security event (data-model §5.3 item 3) at level
+  // error, a fail-closed signal that must alert (D-ORCH-025 (1); code review PR #24 R1-m2). Fields follow the api/README
+  // §13 runtime-events allow-list (partition_name, kind, reason; never an owner).
   const catalog: CatalogReader = { query: (text) => pool.query(text) };
   const auditChecks: AuditReadinessChecks = {
     partitions: createAuditPartitionsCheck(catalog, {
       onSquatted: (object) =>
-        log.warn('security.audit_partition_squatted', {
+        log.error('security.audit_partition_squatted', {
           component: 'audit_partitions',
-          name: object.name,
+          partition_name: object.name,
           kind: object.kind,
           reason: object.reason,
         }),

@@ -217,14 +217,19 @@ export function createReadinessProbe(checks: readonly ReadinessCheck[], options:
 /** Every object pendingCheck returned (a brand: a copy or a real check with the same name is not pending). */
 const PENDING_CHECKS = new WeakSet<ReadinessCheck>();
 
+/** Components that may still be stubbed: the audit checks are real since TASK-021 and are never stubbed. */
+export type PendableComponent = Exclude<ReadinessComponent, `audit_${string}`>;
+
 /**
  * Placeholder for a component whose client does not exist yet. Each use names the task that replaces it, and
  * services.test.ts fails once the replacement exists while the stub is still wired.
- *  - A non-critical (`audit_chain`) component reports `degraded`: an unverified audit chain must never read healthy
- *    (PR9-SEC-11); readiness stays 200 (AT-US-012-04). The audit checks are real since TASK-021.
+ *  - An audit component is refused (TypeError): a stub would read an unverified audit as healthy or as merely
+ *    degraded, which PR9-SEC-11 forbids (code review PR #24 R1-n2).
  *  - A critical component passes: `unavailable` would keep every stack permanently not ready (PR-0009 m2 ruling).
+ *  - A non-critical component (none is pendable today) would report `degraded`, never `ok` (fail closed).
  */
-export function pendingCheck(name: ReadinessComponent): ReadinessCheck {
+export function pendingCheck(name: PendableComponent): ReadinessCheck {
+  if ((name as string).startsWith('audit_')) throw new TypeError(`${name} has a real readiness check and is never stubbed`);
   const critical = isCriticalComponent(name);
   const stub: ReadinessCheck = Object.freeze({
     name,
