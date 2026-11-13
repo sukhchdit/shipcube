@@ -709,6 +709,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - Re-baseline the reference host (A-029) and write host-spec.json (TEST-STRATEGY §7.10)
 - SPK-04 exit: delta p95 <= 15 ms with per-stream advisory lock + vault inserts on partitions at 300 rps; otherwise the multi-row vault insert fallback is specified for the chain task
+- RESULT AND MERGE RULING (PR #27 @aa1cfb1; D-ORCH-031, D-ARCH-085, D-ARCH-089; rulings/wave-0-spk04-rulings.md): FALLBACK — the 300 rps exit is not met on the shared host (hot-tenant lock queueing, waiters draining the pool for every tenant; INCONCLUSIVE under TEST-STRATEGY §7.10 but structural), 150 rps passes, integrity held; ADR-0007 am. 10 specifies the FALLBACK for TASK-030. The harness MERGES as executable evidence under prisma/tests/spikes/spk04/** and tests/load/spikes/** ONLY (SPK-03 PR #7 m7 / SPK-08 §8.1 precedent) with the SPK-04 §8 lifecycle table naming the deleting PR per file: chain.ts, canonical.ts and their tests -> TASK-030 (after porting the pinned chain vector); server.ts, runner.ts, verdict.ts, fixtures/** and the k6 script -> TASK-280 (after porting the arm loop, CPU sampler, verdict and evidence writer to tests/load/lib and the script to tests/load/audit-ab.js). Reviewer-applicable conditions: no file under apps/** or packages/** imports from either tree (boundaries); neither tree counts toward coverage nor ships in any image; the SPK04_AUDIT runtime switch stays harness-only (ADR-0007 am. 4, no runtime audit-off in product code); the eslint k6 block stays (TASK-280 needs it); evidence stays under docs/05-quality/performance/spikes/SPK-04/ (not runs/)
 
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
@@ -970,7 +971,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields<br>US-088 **DC** (M0 Must) Same-transaction writes and outcome semantics |
 | REQs | REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011, REQ-AUDIT-004, REQ-AUDIT-010 |
 | NFRs | NFR-AUDIT-001, NFR-AUDIT-006 |
-| Spikes / security / decisions | PR2-SEC-05, PR11-SEC-05, D-ARCH-074, PR13-SEC-08, D-ARCH-075 |
+| Spikes / security / decisions | PR2-SEC-05, PR11-SEC-05, D-ARCH-074, PR13-SEC-08, D-ARCH-075, SPK-04, D-ORCH-031, D-ARCH-085, D-ARCH-086, D-ARCH-087 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-021, TASK-016, TASK-020 |
@@ -981,11 +982,15 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - packages/audit/src/{writer.ts, entry.ts, actions.ts, store/prisma-store.ts}
 - packages/audit/test/**
+- apps/api/src/platform/db/tenant-admission.ts (+ its wiring inside with-tenant-tx.ts; worker twin follows in TASK-047)
+- packages/config: DB_TENANT_MAX_CONCURRENT_TX, DB_TENANT_ADMISSION_WAIT_MS, DB_AUDIT_LOCK_TIMEOUT_MS (+ .env.example placeholders; no pkg-config lock taken, D-ORCH-020 precedent — coordinate if a concurrent batch-0.7 PR edits packages/config)
 
 **Acceptance tests to write**
 - All US-087 and US-088 scenarios (audit insert failure rolls back the business row: 500 AUDIT_WRITE_FAILED)
 - PR2-SEC-05 addendum / PR11-SEC-05 item 2 (ADR-0005 am. 10 item 2; D-ARCH-074): `packages/audit/src/store/prisma-store.ts` is typed on `TenantDb` and joins the business transaction it is handed; it constructs no PrismaClient and imports no `pg`/`pg-pool` (the boundaries policy allows the SQL driver only under `apps/*/src/platform/db/**`, prisma, tools/db and tests — a negative lint fixture for this exact file fails); a second pool would run without tenant context and commit audit rows outside the business transaction
 - D-ARCH-075 (PR13-SEC-08 TASK-025 item; data-model §3.5): the seed-path ConfigChangeSink is NOT backed by this audit writer — the seed runs on the migrator connection and INSERT on audit_entries belongs to platform_app only; the migrator gains no privilege on any audit table (any such grant is a security-review item under §4.4 item 5); durable CONFIG_CHANGE entries for seed-originated changes are written by the TASK-221 reconciler (SYSTEM_JOB) through this writer; the writer API therefore takes a TenantDb / job context, never a raw migrator connection
+- SPK-04 POOL PROTECTION (ADR-0007 am. 10 item 3; data-model §7.7 as amended 2026-11-13; D-ARCH-086): per-tenant ADMISSION BULKHEAD inside withTenantTx, acquired BEFORE pool checkout and released in finally — key = ctx.orgId, "anonymous" for "", "operator" for OPERATOR scope; cap DB_TENANT_MAX_CONCURRENT_TX (default max(2, floor(DB_POOL_MAX / 2))), FIFO wait DB_TENANT_ADMISSION_WAIT_MS (default 250, validated <= maxWait), queue depth 2 x cap; overflow or wait expiry = DbError 503 SERVICE_UNAVAILABLE reason TENANT_CONCURRENCY_LIMIT, retryable, Retry-After 1; metrics db_tenant_admission_rejected_total{reason=wait|depth} and gauge db_tenant_admission_inflight{key_kind}; tests: unit (FIFO order, wait expiry, depth rejection, release on throw and on commit) and integration (with poolMax = cap + 2, org A parks cap + 2 transactions inside their callbacks: org B is admitted and commits within 100 ms, the org A overflow gets 503 TENANT_CONCURRENCY_LIMIT after the wait, no connection or permit leaks after the rollbacks)
+- SPK-04 WRITER API (ADR-0007 am. 10 items 1-2; data-model §5.4 as rewritten 2026-11-13; D-ARCH-085): the writer takes the COMPLETE entry with its full PII value list in ONE call (tokenise(values[]) is a batch port: one multi-row vault INSERT ... SELECT FROM unnest(...) ON CONFLICT DO NOTHING + one separate lateral token lookup per entry, never one statement per value) so TASK-030 can meet the round-trip budget without an interface change; error model reserved here and raised by TASK-030: 500 AUDIT_WRITE_FAILED non-retryable (expectAffected mismatch, missing partition, integrity) versus 503 AUDIT_LOCK_TIMEOUT retryable with Retry-After 1 — both roll back the business transaction (O4); the zero hash is a 32-zero-byte Buffer parameter or decode(repeat(00, 32), hex) in SQL, never the text expression of the old §5.4 step 3 (42804; D-ARCH-087)
 - AT-US-087-01 … AT-US-087-08: all 8 scenarios of US-087, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-088-01 … AT-US-088-08: all 8 scenarios of US-088, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -1104,7 +1109,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-086 **DC** (M0 Must) Automatic audit capture driven by route descriptors |
 | REQs | REQ-AUDIT-001, REQ-AUDIT-006 |
 | NFRs | NFR-AUDIT-001 |
-| Spikes / security / decisions | D-062, D-ARCH-084 |
+| Spikes / security / decisions | D-062, D-ARCH-084, SPK-04, D-ARCH-085, D-ARCH-086 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-025, TASK-020 |
@@ -1119,6 +1124,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-086 scenarios
 - AT-US-008-03 audit hop (D-062): the descriptor-driven middleware writes the request correlation ID into every audit entry it creates — the entry FIELD is TASK-025 (US-087); the VALUE carried from the request is this task; test: a request with X-Correlation-Id creates entries whose correlation_id equals it, and a request without one carries the server-generated request id
+- SPK-04 ORDERING AND OVERHEAD RULES (ADR-0007 am. 10; data-model §5.4 as rewritten 2026-11-13; D-ARCH-085/086): the middleware calls the writer ONCE per entry with the complete PII set, as the LAST database work of the business transaction (after the business statements, the outbox insert and the idempotency completion; nothing runs after the head-row lock but the CTE append and COMMIT; the T-83 lint forbids external calls in-tx); fail-closed VIEW/DOWNLOAD entries run in their own short withTenantTx after the result set is fixed and before the response is released, FAILED outcomes in a separate transaction; AUDIT_LOCK_TIMEOUT and TENANT_CONCURRENCY_LIMIT surface as problem+json 503 with Retry-After (never 500) and the business row is absent after the rollback — one integration test per class with a second session holding the head row FOR UPDATE
 - AT-US-086-01 … AT-US-086-07: all 7 scenarios of US-086, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1126,14 +1132,14 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
-### TASK-030 — Per-stream audit hash chain (JCS, advisory lock, stream heads) and SYSTEM shard key from a server-side id
+### TASK-030 — Per-stream audit hash chain (JCS, head-row lock, stream heads) and SYSTEM shard key from a server-side id
 
 | Field | Value |
 |---|---|
 | Stories (completes) | US-092 **DC** (M0 Must) Per-stream hash chain |
 | REQs | REQ-AUDIT-012 |
 | NFRs | NFR-AUDIT-003, NFR-AUDIT-005 |
-| Spikes / security / decisions | SPK-04, SEC-P3-17 |
+| Spikes / security / decisions | SPK-04, SEC-P3-17, R-ARCH-04, D-ORCH-031, D-ARCH-085, D-ARCH-087, D-ARCH-089 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-025, TASK-028, TASK-018 |
@@ -1142,13 +1148,16 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Priority | Must · demo-critical |
 
 **Files / modules**
-- packages/audit/src/chain/{jcs.ts, hasher.ts, stream.ts}
-- packages/audit/test/chain/**
+- packages/audit/src/chain/{jcs.ts, hasher.ts, stream.ts, head-lock.ts}
+- packages/audit/test/chain/** (incl. statement-sequence.int.test.ts, lock-timeout.int.test.ts, token-plan.int.test.ts)
 
 **Acceptance tests to write**
 - All US-092 scenarios
 - SEC-TC-57: 1,000 anonymous requests with crafted X-Correlation-Id spread over >= 12 of 16 SYSTEM shards
-- SPK-04 outcome applied (multi-row vault insert if required)
+- SPK-04 FALLBACK SPEC (ADR-0007 am. 10 items 1, 2, 5, 7; data-model §5.4 as rewritten 2026-11-13; D-ARCH-085): statement sequence per entry = (1) ONE multi-row vault INSERT ... SELECT FROM unnest($arrays) ON CONFLICT DO NOTHING when the entry has PII, (2) ONE token lookup as a SEPARATE statement (unnest WITH ORDINALITY CROSS JOIN LATERAL index lookup per key), (3) head-row lock + head read + db clock in ONE statement — WITH lt AS MATERIALIZED (SELECT set_config(lock_timeout, $ms, true)) SELECT ... FROM audit_stream_heads h CROSS JOIN lt WHERE h.stream_id = $1 FOR UPDATE OF h — the advisory lock is REMOVED, (3b) only on an empty result: INSERT the head ON CONFLICT DO NOTHING then repeat (3), (4) ONE CTE statement WITH appended AS (INSERT INTO audit_entries ... no RETURNING) UPDATE audit_stream_heads ... WHERE stream_id = $1 AND entry_count = $seq - 1 with expectAffected(1), (5) COMMIT. EXIT E1 (statement-sequence test with a query spy): exactly these statements in this order, AT MOST 2 ROUND TRIPS FROM LOCK GRANT TO COMMIT INCLUSIVE, no statement between (3) and (4) but the in-process hash, no lock taken after the head lock; round trips per audited request create (3 PII) 8, update 9, fail-closed VIEW 9, SYSTEM 6 (+2 on the first entry of a stream)
+- EXIT E2 LOCK FAIL-FAST (am. 10 item 2): DB_AUDIT_LOCK_TIMEOUT_MS (default 250, validated < DB_TX_LOCK_TIMEOUT_MS) applied by the set_config CTE of statement (3), PROVEN by a test holding the head row FOR UPDATE in a second session: the writer fails within timeout + 100 ms (not 2 s) with 55P03 mapped to DbError 503 AUDIT_LOCK_TIMEOUT (retryable, Retry-After 1; metric audit_lock_timeout_total{stream_kind=tenant|system}; histogram audit_lock_wait_ms{stream_kind} for TASK-280); FALLBACK if the CTE form does not bound the wait: a separate SET LOCAL lock_timeout round trip before (3), recorded in the PR report; after the rollback neither the business row nor the entry exists (O4)
+- EXIT E3/E4 AND SQL RULES (am. 10 item 7): REQ-AUDIT-012 50 parallel writers on one stream -> 50 distinct predecessors, gap-free seq (kept); EXPLAIN (FORMAT JSON) of statement (2) against a >= 100k-row vault seeded in-test with generate_series shows an Index Scan or Index Only Scan on ux_audit_pii_vault__subject_field_value per key and no Seq Scan or Hash Join over the vault; multi-argument unnest and extract(epoch FROM ...) stay UNQUALIFIED (pg_catalog.unnest(a, b) = 42883; pg_catalog.extract(epoch FROM ...) = syntax error) and are the two recorded exceptions to the qualified-built-ins rule (data-model §8.3); arrays bound as typed parameters ($n::uuid[], $n::bytea[]) because TenantDb refuses Prisma.join / Prisma.sql; zero hash = 32-zero-byte parameter or decode(repeat(00, 32), hex), never text (42804, D-ARCH-087); microsecond timestamps read as ((extract(epoch FROM ts) * 1000000)::bigint)::text; informational micro-benchmark in the PR report (20 concurrent writers on one stream for 10 s on Testcontainers: lock-wait p50/p95 and round trips; no gate)
+- SPK-04 LIFECYCLE (D-ARCH-089): port the pinned chain vector of prisma/tests/spikes/spk04/chain.test.ts into packages/audit/test/chain (the hasher reproduces it, or the PR documents the difference and its reason) and DELETE prisma/tests/spikes/spk04/{canonical.ts, canonical.test.ts, chain.ts, chain.test.ts} in the same commit; the rest of the spk04 tree is TASK-280's
 - AT-US-092-01 … AT-US-092-06: all 6 scenarios of US-092, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1251,7 +1260,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-096 **DC** (M0 Must) Audit test generator<br>US-094 **DC** (M0 Must) Database-enforced immutability and its tests |
 | REQs | REQ-AUDIT-024, REQ-AUDIT-014, REQ-AUDIT-015 |
 | NFRs | NFR-AUDIT-001, NFR-AUDIT-002 |
-| Spikes / security / decisions | T-QA-04, SEC-TC-43, SEC-TC-61, PR12-SEC-01, PR12-SEC-02, D-SEC-PR12-01, D-ARCH-076, D-ARCH-079, D-ARCH-081 |
+| Spikes / security / decisions | T-QA-04, SEC-TC-43, SEC-TC-61, PR12-SEC-01, PR12-SEC-02, D-SEC-PR12-01, D-ARCH-076, D-ARCH-079, D-ARCH-081, SPK-04, D-ARCH-085, D-ARCH-086 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-029, TASK-030, TASK-027, TASK-021 |
@@ -1269,6 +1278,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - US-094 test scenarios: UPDATE/DELETE attempts fail for every DB role
 - PR12-SEC-01 (LOW) escalation primitives in immutability.int.test.ts (qa-lead amends the SEC-TC-61 row text): as platform_migrator, each in attempt(), expect 42501 with the PRIVILEGE message for SET ROLE platform_audit_owner; CREATE FUNCTION public.spk() then ALTER FUNCTION public.spk() OWNER TO platform_audit_owner; REASSIGN OWNED BY in both directions; DROP OWNED BY platform_audit_owner; SET ROLE platform_definer then ALTER FUNCTION ... OWNER TO platform_audit_owner (the migrator does hold SET on platform_definer); as the test superuser expect the GUARD message for ALTER TABLE audit_entries DISABLE TRIGGER ALL, DETACH PARTITION <p>, TRUNCATE audit_entries (AUDIT_IMMUTABLE) and TRUNCATE <partition>; DETACH PARTITION <p> CONCURRENTLY through execute() then assert pg_inherits.inhdetachpending and document the residue; the CASCADE case (an audit-owner CHECK calling a migrator function, then DROP FUNCTION ... CASCADE as the migrator -> guard message via sql_drop); INHERIT drift (grant the migrator platform_audit_owner WITH INHERIT TRUE, SET FALSE inside a rolled-back transaction, then DISABLE TRIGGER ALL -> guard message); mutation check: temporarily granting SET turns the SET ROLE case green-to-red; SPK-08 §8 Q1: the guard raises "cannot resolve the protected schemas" when the audit owner owns nothing; F-05/F-07/F-10 ports and the AF-series writer pitfalls (alias ORDER BY, microsecond timestamps, uuidv7 under the lock)
 - PR12-SEC-02 tests (D-ARCH-076; data-model §5.3 item 4): as the migrator CREATE INDEX audit_entries_<now+5 months> ON public.probe(id) -> guard message, repeated for CREATE VIEW, CREATE SEQUENCE, CREATE TYPE ... AS (a int) and CREATE TYPE ... AS ENUM; with the guard disabled in a rolled-back superuser variant: SELECT platform.ensure_audit_partitions(6) raises AUDIT_PARTITION_NAME_TAKEN and the readiness query returns unavailable plus audit_partition_squatted; unit test of the readiness arithmetic (one missing month at +1 or +2 -> unavailable; ONLY month current+3 missing -> degraded with HTTP 200, which is the AT-US-012-04 fixture "the next audit partition is missing", D-ARCH-081; current..+3 all present -> ok); C6/C14 expect ENABLE ALWAYS (A)
+- SPK-04 CONTENTION SCENARIOS (ADR-0007 am. 10 items 2-3; data-model §5.4/§7.7; D-ARCH-085/086) on two representative routes (one CREATE with PII, one fail-closed VIEW): (a) a second session holds the head row FOR UPDATE -> the route answers 503 AUDIT_LOCK_TIMEOUT with Retry-After within DB_AUDIT_LOCK_TIMEOUT_MS + 100 ms and neither the business row nor an entry exists afterwards; (b) org A parks cap + 2 transactions -> org B is served within 100 ms and the org A overflow gets 503 TENANT_CONCURRENCY_LIMIT; catalog assertions: platform_app holds SELECT, INSERT, UPDATE and no DELETE on audit_stream_heads (the FOR UPDATE stream lock depends on the UPDATE grant) and no table references audit_stream_heads by foreign key (data-model §3.4 as amended)
 - AT-US-096-01 … AT-US-096-07: all 7 scenarios of US-096, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-094-01 … AT-US-094-06: all 6 scenarios of US-094, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

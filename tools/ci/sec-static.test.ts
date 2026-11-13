@@ -109,6 +109,20 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     );
   });
 
+  it('PR10-SEC-08: no allowlist path admits the OpenAPI contract (its EXAMPLE_ markers need none), so secret-shaped examples fail', () => {
+    const contract = 'docs/03-architecture/api/openapi.yaml';
+    for (const block of allowlists) {
+      for (const source of literals(block, 'paths')) expect(new RegExp(source).test(contract)).toBe(false);
+    }
+    expect(gitleaks).not.toContain('PR1-SEC-11 OpenAPI');
+  });
+
+  it('D-ORCH-027: Dependabot ignores TypeScript semver-major (ADR-0001 pin ~6.0.3, TS 7 deferred) and keeps the cooldown', () => {
+    const dependabot = read('.github', 'dependabot.yml');
+    expect(dependabot).toMatch(/- dependency-name: typescript\n\s+update-types: \['version-update:semver-major'\]/);
+    expect(dependabot.match(/cooldown:\n\s+default-days: 7/g)).toHaveLength(2);
+  });
+
   it('AT-US-048-05: with APP_ENV=production and a placeholder JWT signing key, start-up fails naming JWT_SIGNING_KEYS only (the ES256 successor of JWT_SECRET)', () => {
     const env = { ...createTestEnv({ appEnv: 'production' }), JWT_SIGNING_KEYS: 'jwt-signing-v1:CHANGE_ME' };
     let caught: unknown;

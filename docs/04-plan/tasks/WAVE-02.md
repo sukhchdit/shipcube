@@ -638,8 +638,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 |---|---|
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
-| NFRs | NFR-PERF-006, NFR-PERF-007 |
-| Spikes / security / decisions | T-QA-06 |
+| NFRs | NFR-AUDIT-005, NFR-PERF-001, NFR-PERF-006, NFR-PERF-007 |
+| Spikes / security / decisions | T-QA-06, SPK-04, R-ARCH-04, D-ORCH-031, D-ARCH-085, D-ARCH-088, D-ARCH-089 |
 | Specialist · model | performance-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-014, TASK-276 |
@@ -650,11 +650,17 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Files / modules**
 - tests/load/{compose.k6.yml, lib/**, profiles/**, seed-volume.ts}
 - root script test:load
+- tests/load/audit-ab.js (ported from tests/load/spikes/spk04-audit.js)
+- tests/load/lib/{arm-loop, cpu-sampler, verdict (+ unit test), evidence-writer} (ported from prisma/tests/spikes/spk04/{runner.ts, verdict.ts})
 
 **Acceptance tests to write**
 - A k6 run writes JSON + JUnit + host-spec.json; INCONCLUSIVE when dropped_iterations > 1 % or host CPU > 85 % for > 10 % of the run
 - Volume seeder creates 100k/1M-row datasets for list and query-plan tests
+- SPK-04 audit-ab SCENARIO (TEST-STRATEGY §7.10; NFR-AUDIT-005 method as reworded 2026-11-13; ADR-0007 am. 10 item 6; D-ARCH-088): the NFR-PERF-001 mix with a HOT-TENANT SHARE of 20 % of all traffic on one organisation stream, the fail-closed VIEW second transaction inside the route latency, audit on (release api image) versus the build-time -bench image (never a runtime flag), >= 2 repetitions per rate with RANDOMISED arm order, the delta computed PER REPETITION; pass = mean of the valid per-repetition deltas within budget (p95 <= 15 ms, p99 <= 40 ms) and no valid repetition over twice the budget; the INCONCLUSIVE rule is applied per repetition; the summary reports hot-stream lock-wait p95 (audit_lock_wait_ms, TASK-030) and the SERVICE_UNAVAILABLE / AUDIT_LOCK_TIMEOUT / TENANT_CONCURRENCY_LIMIT counts per arm
+- CLEAN 300 RPS RUN BEFORE G3 (D-ORCH-031 (2); STATUS Top Risk 6; ADR-0007 am. 10 item 4 trigger): one audit-ab run at 300 rps on a quiet or native-Linux Docker host with host-spec.json recorded and both repetitions valid — exit: budget met AND hot-stream lock-wait p95 <= 5 ms AND zero pool-exhaustion SERVICE_UNAVAILABLE; if not met, principal-architect decides lever (b) hot-tenant sub-streams by superseding amendment before G3; the A-029 re-baseline (150 rps clean with audit on on the shared Windows host) is recorded with the run
+- SPK-04 LIFECYCLE (D-ARCH-089): once audit-ab drives the real api and -bench images, port tests/load/spikes/spk04-audit.js to tests/load/audit-ab.js and the runner arm loop, CPU sampler, verdict logic (+ its unit test) and evidence writer into tests/load/lib, then DELETE prisma/tests/spikes/spk04/** (server.ts, runner.ts, verdict.ts, verdict.test.ts, fixtures/**) and tests/load/spikes/** in the same commit
 
 **DoD notes**
 - k6/Lighthouse scripts committed; host spec and results as machine-generated evidence under `docs/05-quality/performance/runs/`; thresholds taken from NFR.md.
+- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
