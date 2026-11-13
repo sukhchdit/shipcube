@@ -1,0 +1,14 @@
+# Optional debugging override (TASK-014; platform.md §2.1): `docker compose -f compose.yaml -f compose.debug.yaml up`.
+# Publishes the api (3000), the worker health/metrics port (9464) and the RustFS S3 API (as 9002, for host tooling and
+# hot-reload development) on 127.0.0.1 only. Not for scaling: a published port cannot be shared by two replicas.
+
+services:
+  api:
+    ports:
+      - '127.0.0.1:3000:3000'
+  worker:
+    ports:
+      - '127.0.0.1:9464:9464'
+  rustfs:
+    ports:
+      - '127.0.0.1:9002:9000'

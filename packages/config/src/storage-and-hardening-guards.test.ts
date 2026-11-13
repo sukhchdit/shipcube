@@ -191,7 +191,12 @@ describe('loadConfig / loadRuntimeConfigOrExit with the TASK-014 rules (exit 78,
   });
 
   it('[D-ARCH-100] the Compose environment (both endpoints, both references, local-only values) loads cleanly', async () => {
-    const compose = parseEnv(readFileSync(join(resolve(process.cwd()), 'compose.env'), 'utf8'));
+    // The api container's environment: the shared runtime base plus the api's own file (TASK-014 per-service split;
+    // compose.yaml api env_file order).
+    const compose = ['compose.env', 'infra/local/env/api.env'].reduce<Record<string, string | undefined>>(
+      (merged, file) => ({ ...merged, ...parseEnv(readFileSync(join(resolve(process.cwd()), file), 'utf8')) }),
+      {},
+    );
     const env = Object.fromEntries(Object.entries(compose).filter((entry): entry is [string, string] => entry[1] !== undefined));
     expect(env.STORAGE_ENDPOINT).toBeDefined();
     expect(env.STORAGE_PUBLIC_ENDPOINT).toBeDefined();

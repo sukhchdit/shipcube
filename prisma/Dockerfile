@@ -65,7 +65,7 @@ COPY --from=build /out/ /app/
 COPY package.json .npmrc ./
 COPY prisma.config.ts ./
 COPY tools/deps/npm-cli.mjs tools/deps/prisma-cli.mjs tools/deps/prisma-engines.mjs tools/deps/prisma-engines.json tools/deps/
-COPY tools/db/bootstrap.ts tools/db/scram.ts tools/db/sql-text.ts tools/db/shadow-init.ts tools/db/audit-external-tables.ts tools/db/
+COPY tools/db/bootstrap.ts tools/db/check-tooling-env.ts tools/db/scram.ts tools/db/sql-text.ts tools/db/shadow-init.ts tools/db/audit-external-tables.ts tools/db/
 COPY --chmod=0555 tools/docker/tooling-entrypoint.sh tools/docker/tooling-entrypoint.sh
 COPY prisma/package.json prisma/
 COPY prisma/schema/ prisma/schema/

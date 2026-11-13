@@ -1,0 +1,4 @@
+# Rendered at container start by the nginx image's envsubst step (NGINX_ENVSUBST_FILTER=^EDGE_) into /tmp/edge-env.conf.
+map $host $edge_app_env {
+    default "${EDGE_APP_ENV}";
+}

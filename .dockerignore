@@ -23,6 +23,10 @@
 .claude
 .env*
 **/.env*
+# TASK-014 round 2: the local-only Compose environment and stack configuration never enter a build context.
+compose.env
+compose*.yaml
+infra/local
 
 # Host dependencies and build output: images install and build from the lockfile themselves.
 node_modules

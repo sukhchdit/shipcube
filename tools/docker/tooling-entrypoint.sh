@@ -5,6 +5,10 @@
 #   bootstrap       tools/db/bootstrap.ts (roles, schemas, audit DDL lane) as the bootstrap superuser connection
 #   migrate         verify the pinned schema engine, then `migrate deploy` through tools/deps/prisma-cli.mjs
 #   seed            the reference seed, then the demo seed (same tsx invocation as `npm run db:seed` / `db:seed:demo`)
+#
+# PR3-SEC-14 (TASK-014 round 2): before a step connects, tools/db/check-tooling-env.ts checks the URL it uses
+# (DATABASE_BOOTSTRAP_URL for bootstrap, DATABASE_MIGRATOR_URL for migrate and seed) and exits 1 naming only the
+# variable. The image holds packages/config as sources only, so every tsx run uses the @platform/source condition.
 #   prisma-version  verify the engine and print the Prisma CLI version; needs no network and no database (SEC-TC-64 (vi))
 #
 # No npm, no npx: TypeScript entry points run through `node <tsx cli>`; Prisma runs only through prisma-cli.mjs, which
@@ -17,6 +21,10 @@ unset NODE_OPTIONS
 cd /app
 TSX=/app/node_modules/tsx/dist/cli.mjs
 
+check_env() {
+  node "$TSX" --conditions=@platform/source tools/db/check-tooling-env.ts "$1"
+}
+
 usage() {
   echo "usage: tooling-entrypoint.sh bootstrap|migrate|seed|prisma-version" >&2
   exit 64
@@ -27,13 +35,16 @@ command=$1
 
 case "$command" in
   bootstrap)
-    exec node "$TSX" tools/db/bootstrap.ts
+    check_env DATABASE_BOOTSTRAP_URL
+    exec node "$TSX" --conditions=@platform/source tools/db/bootstrap.ts
     ;;
   migrate)
+    check_env DATABASE_MIGRATOR_URL
     node tools/deps/prisma-cli.mjs --verify-only
     exec node tools/deps/prisma-cli.mjs --verify-only migrate deploy
     ;;
   seed)
+    check_env DATABASE_MIGRATOR_URL
     node "$TSX" --conditions=@platform/source prisma/seed/index.ts reference
     exec node "$TSX" --conditions=@platform/source prisma/seed/index.ts demo
     ;;

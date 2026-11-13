@@ -1,0 +1,372 @@
+# The product stack, one command: `docker compose up` (TASK-014; platform.md §2.1-§2.5, PD-08; REQ-PLAT-005,
+# NFR-OPS-001/-002, NFR-SCALE-002, US-003, US-004, US-049). Local only: every credential in the env files is a visible
+# local-only-* marker (D-022) and no cloud resource is used (CLOUD_BUDGET_MONTHLY_USD = 0).
+#
+# Order (platform.md §2.4): postgres healthy -> bootstrap -> migrate -> seed -> api, worker (with redis healthy,
+# storage-init completed, and mailpit healthy for the worker) -> edge (with web, admin healthy and tls-init completed).
+# Third-party images are pinned `name:tag@sha256:<digest>`; the platform images are built from the Dockerfiles.
+# Host ports bind to 127.0.0.1 only. The edge binds ${EDGE_BIND}, which defaults to 127.0.0.1 too (SEC-TC-34 extended).
+# api and worker publish no host port, so `--scale api=2 --scale worker=2` works (compose.debug.yaml publishes them).
+#
+# Environment partition (PR13-SEC-08/-06, PR3-SEC-06): compose.env is the shared api/worker runtime base; every other
+# value lives in the infra/local/env/<service>.env file of the service that needs it, so DATABASE_MIGRATOR_URL reaches
+# only migrate and seed, DATABASE_BOOTSTRAP_URL and BOOTSTRAP_* only bootstrap, SEED_* only seed,
+# AUDIT_ANCHOR_SIGNING_KEY only the worker, and JWT_SIGNING_KEYS never the worker (tools/config/compose-env.test.ts).
+# Carrier-sandbox and Stripe test credentials are passed by name only; unset means the Mock carrier (platform.md §2.7).
+#
+# The file is written in the YAML subset of tools/ci/yaml-subset.mjs (no anchors or flow mappings), so the lane A
+# tests in tools/compose/ read it without a YAML dependency.
+
+name: shipcube
+
+services:
+  postgres:
+    image: postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    command: ['postgres', '-c', 'wal_level=replica']
+    env_file:
+      - infra/local/env/postgres.env
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      # PostgreSQL 18 images keep PGDATA under /var/lib/postgresql/18/docker (platform.md §2.3).
+      - pgdata:/var/lib/postgresql
+    # -h 127.0.0.1: the image's first-boot init server listens on the socket only, so it never counts as ready.
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'platform']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+    # ACL users api, worker and healthcheck; default off (platform.md §2.2). BullMQ requires noeviction.
+    command: ['valkey-server', '--aclfile', '/etc/valkey/users.acl', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    env_file:
+      - infra/local/env/redis.env
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redisdata:/data
+      - ./infra/local/valkey/users.acl:/etc/valkey/users.acl:ro
+    healthcheck:
+      test: 'valkey-cli --user healthcheck --pass "$$REDIS_HEALTHCHECK_PASSWORD" --no-auth-warning ping | grep -qx PONG'
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+
+  rustfs:
+    image: rustfs/rustfs:1.0.4@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2
+    env_file:
+      - infra/local/env/rustfs.env
+    environment:
+      # The console (port 9001, CORS * by default in the image) is switched off and 9001 is never published.
+      RUSTFS_CONSOLE_ENABLE: 'false'
+    # No host port: the browser reaches the store through the edge store vhost on 127.0.0.1:9000
+    # (infra/local/edge/storage.conf); compose.debug.yaml publishes the S3 API on 127.0.0.1:9002 for host tooling.
+    volumes:
+      - rustfsdata:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', '-o', '/dev/null', 'http://127.0.0.1:9000/health']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  storage-init:
+    image: amazon/aws-cli:2.36.0@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334
+    entrypoint: ['/bin/sh', '/scripts/storage-init.sh']
+    env_file:
+      - infra/local/env/rustfs.env
+    volumes:
+      - ./infra/local/storage-init/storage-init.sh:/scripts/storage-init.sh:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
+    depends_on:
+      rustfs:
+        condition: service_healthy
+
+  mailpit:
+    image: axllent/mailpit:v1.33@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  tls-init:
+    # alpine with openssl, built locally from the pinned alpine digest (the base image carries no openssl CLI).
+    build:
+      context: infra/local/tls-init
+      dockerfile_inline: |
+        FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+        RUN apk add --no-cache openssl
+    image: shipcube-tls-init:local
+    entrypoint: ['/bin/sh', '/scripts/tls-init.sh']
+    volumes:
+      - ./infra/local/tls-init/tls-init.sh:/scripts/tls-init.sh:ro
+      - edgecerts:/certs
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
+
+  bootstrap:
+    build:
+      context: .
+      dockerfile: prisma/Dockerfile
+    image: shipcube-tooling:local
+    command: ['bootstrap']
+    env_file:
+      - infra/local/env/bootstrap.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate:
+    build:
+      context: .
+      dockerfile: prisma/Dockerfile
+    image: shipcube-tooling:local
+    command: ['migrate']
+    env_file:
+      - infra/local/env/tooling.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+  seed:
+    build:
+      context: .
+      dockerfile: prisma/Dockerfile
+    image: shipcube-tooling:local
+    command: ['seed']
+    env_file:
+      - infra/local/env/tooling.env
+      - infra/local/env/seed.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: shipcube-api:local
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - compose.env
+      - infra/local/env/api.env
+    environment:
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      CARRIER_DHL_SECRET_REF: ${CARRIER_DHL_SECRET_REF:-}
+      CARRIER_DHL_CLIENT_SECRET: ${CARRIER_DHL_CLIENT_SECRET:-}
+      CARRIER_FEDEX_SECRET_REF: ${CARRIER_FEDEX_SECRET_REF:-}
+      CARRIER_FEDEX_CLIENT_SECRET: ${CARRIER_FEDEX_CLIENT_SECRET:-}
+      CARRIER_UPS_SECRET_REF: ${CARRIER_UPS_SECRET_REF:-}
+      CARRIER_UPS_CLIENT_SECRET: ${CARRIER_UPS_CLIENT_SECRET:-}
+      STRIPE_SECRET_KEY_REF: ${STRIPE_SECRET_KEY_REF:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET_REF: ${STRIPE_WEBHOOK_SECRET_REF:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    volumes:
+      # The chain verifier reads the anchor log; only the worker writes it (platform.md §2.3).
+      - audit-anchors:/data/audit-anchors:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    image: shipcube-worker:local
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - compose.env
+      - infra/local/env/worker.env
+    environment:
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      CARRIER_DHL_SECRET_REF: ${CARRIER_DHL_SECRET_REF:-}
+      CARRIER_DHL_CLIENT_SECRET: ${CARRIER_DHL_CLIENT_SECRET:-}
+      CARRIER_FEDEX_SECRET_REF: ${CARRIER_FEDEX_SECRET_REF:-}
+      CARRIER_FEDEX_CLIENT_SECRET: ${CARRIER_FEDEX_CLIENT_SECRET:-}
+      CARRIER_UPS_SECRET_REF: ${CARRIER_UPS_SECRET_REF:-}
+      CARRIER_UPS_CLIENT_SECRET: ${CARRIER_UPS_CLIENT_SECRET:-}
+      STRIPE_SECRET_KEY_REF: ${STRIPE_SECRET_KEY_REF:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    volumes:
+      # Append-only audit anchor log, read-write in this service only (SEC-P3-03 item 7).
+      - audit-anchors:/data/audit-anchors
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: shipcube-web:local
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    environment:
+      # Plain-HTTP local use (platform.md §3.3, REQ-SEC-003); the toggle is wired by TASK-022.
+      HSTS_ENABLED: 'false'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    image: shipcube-admin:local
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    environment:
+      HSTS_ENABLED: 'false'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  edge:
+    image: nginxinc/nginx-unprivileged:1.31.7-alpine-slim@sha256:a8cb0f33d51fa107c96fd2bd3a71aaf564ec131e9d2bdf8700944f0ed8b170d7
+    environment:
+      # X-Mock-Scenario is forwarded to the api only when this is "local" (infra/local/edge/00-edge.conf).
+      EDGE_APP_ENV: ${EDGE_APP_ENV:-local}
+      NGINX_ENVSUBST_TEMPLATE_DIR: /etc/nginx/conf.d/templates
+      NGINX_ENVSUBST_OUTPUT_DIR: /tmp
+      NGINX_ENVSUBST_FILTER: ^EDGE_
+    ports:
+      - '${EDGE_BIND:-127.0.0.1}:8080:8080'
+      - '${EDGE_BIND:-127.0.0.1}:8443:8443'
+      - '${EDGE_BIND:-127.0.0.1}:8444:8444'
+      # Store vhost = STORAGE_PUBLIC_ENDPOINT (http://localhost:9000).
+      - '${EDGE_BIND:-127.0.0.1}:9000:9000'
+    volumes:
+      # Replaces the image's conf.d, so its stock default.conf never loads.
+      - ./infra/local/edge:/etc/nginx/conf.d:ro
+      - edgecerts:/etc/nginx/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8080/healthz']
+      interval: 5s
+      timeout: 2s
+      retries: 6
+      start_period: 3s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      tls-init:
+        condition: service_completed_successfully
+      web:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  rustfsdata:
+  edgecerts:
+  audit-anchors:
