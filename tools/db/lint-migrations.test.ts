@@ -11,8 +11,12 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import {
+  COVERING_INDEX_TOLERANCE,
+  DYNAMIC_SQL_ALLOW_LIST,
+  RULE_17_RELEASED,
   canonicalPolicy,
   doBlockLockTimeouts,
+  dynamicSqlAllowed,
   lintBootstrap,
   lintMigrations,
   lintRepository,
@@ -20,6 +24,7 @@ import {
   main,
   parseHeader,
   readReviewers,
+  routineDefinitionSha256,
   type LintFinding,
   type LockTimeoutEvent,
 } from './lint-migrations.js';
@@ -375,6 +380,11 @@ describe('zero-downtime DDL (rules 3, 4, 5, 6, 11; NT-AVAIL-003-a)', () => {
     ["DO $$ BEGIN RAISE NOTICE 'the lock_timeout stays'; END $$", []],
     // Every literal is read as possible dynamic SQL (fail closed): a message that starts like a SET counts as one.
     ["DO $$ BEGIN RAISE NOTICE 'SET lock_timeout = 0'; END $$", [{ kind: 'set', value: '0' }]],
+    // PR11-SEC-17 c setter-key half (TASK-024): the quoted name counts in a DO body too.
+    [
+      'DO $$ BEGIN SET SESSION "lock_timeout" TO \'10s\'; RESET "lock_timeout"; END $$',
+      [{ kind: 'set', value: "'10s'" }, { kind: 'reset' }],
+    ],
   ])('[PR11-SEC-17] doBlockLockTimeouts(%s)', (sql, expected) => {
     expect(doBlockLockTimeouts(sql)).toEqual(expected);
   });
@@ -506,6 +516,43 @@ describe('rendered RLS blocks (rules 9 and 16; PR11-SEC-03)', () => {
     expect(renderedCase('clean')).toEqual([]);
   });
 
+  it('[PR11-SEC-10] the rendered DR-A14 blocks (users, memberships, organisations) lint clean; an edited EXISTS atom or a deny-list status fails rule 9', () => {
+    const drA14: readonly TableClassEntry[] = [
+      { module: 'fixture', name: 'organisations', class: 'TENANT', policySet: 'dr-a14-organisations', definerRead: true },
+      { module: 'fixture', name: 'memberships', class: 'TENANT', policySet: 'dr-a14-memberships', definerRead: true },
+      { module: 'fixture', name: 'users', class: 'USER_OWNED', policySet: 'dr-a14-users', definerRead: true },
+    ];
+    const lintDrA14 = (name: string, edit: (sql: string) => string = (sql) => sql): LintFinding[] => {
+      const dir = join(scratch, name, '20261112000000_dr_a14');
+      mkdirSync(dir, { recursive: true });
+      const sql = [
+        '-- migration-kind: expand\n-- data-changing: no\n-- reversible: yes\n',
+        'CREATE TABLE public.organisations (id uuid PRIMARY KEY, type text NOT NULL);',
+        'CREATE TABLE public.memberships (id uuid PRIMARY KEY, org_id uuid NOT NULL, user_id uuid NOT NULL, status text NOT NULL);',
+        'CREATE INDEX ix_memberships__org_id ON public.memberships (org_id);',
+        'CREATE TABLE public.users (id uuid PRIMARY KEY);',
+        ...drA14.map((entry) => renderRls(entry)),
+      ].join('\n');
+      writeFileSync(join(dir, 'migration.sql'), edit(sql));
+      writeFileSync(join(dir, 'down.sql'), 'DROP TABLE IF EXISTS public.users, public.memberships, public.organisations;\n');
+      return lintMigrations(join(scratch, name), name, { tableClasses: [...FIXTURE_CLASSES, ...drA14] });
+    };
+    expect(lintDrA14('dr-a14-clean')).toEqual([]);
+    expect(
+      rules(lintDrA14('dr-a14-deny-list', (sql) => sql.replace("m.status IN ('ACTIVE','SUSPENDED')", "m.status <> 'REMOVED'"))),
+    ).toContain('9');
+    expect(
+      rules(
+        lintDrA14('dr-a14-other-table', (sql) =>
+          sql.replace(
+            'FROM public.memberships m\n                  WHERE m.org_id',
+            'FROM public.invitations m\n                  WHERE m.org_id',
+          ),
+        ),
+      ),
+    ).toEqual(['9']);
+  });
+
   it('a rendered policy whose operator literal or predicate is edited fails rule 9 (and rule 16 outside the exact atom)', () => {
     expect(rules(renderedCase('scope', (sql) => sql.replace("= 'OPERATOR'", "= 'ANYONE'")))).toEqual(['9', '16']);
     expect(rules(renderedCase('predicate', (sql) => sql.replace('(org_id = platform.app_org_id())', '(org_id = org_id)')))).toEqual(['9']);
@@ -625,6 +672,279 @@ describe('bootstrap secret variables (PR5-SEC-12)', () => {
   });
 });
 
+describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 setter keys, 18/19, 9 schema, 8/14)', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'lint-task024-'));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  /** One migration directory with `migration` and `down` as written; returns its findings as [file, rule]. */
+  const scratchCase = (name: string, migration: string, down = 'SELECT 1;\n') => {
+    const dir = join(scratch, name, '20261114000000_case');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'migration.sql'), `-- migration-kind: expand\n-- data-changing: no\n-- reversible: yes\n${migration}\n`);
+    writeFileSync(join(dir, 'down.sql'), down);
+    return lintMigrations(join(scratch, name), name, { tableClasses: FIXTURE_CLASSES }).map((finding) => [
+      finding.file.split(/[\\/]/)[2],
+      finding.rule,
+    ]);
+  };
+
+  it('[SEC-TC-73] rule 11c: BEGIN … ROLLBACK around a RESET fails (migration.sql), START TRANSACTION … COMMIT fails (down.sql); words in bodies, CASE … END and BEGIN ATOMIC are clean', () => {
+    const findings = lintCase('transaction-control');
+    expect(findings.map((finding) => [finding.file.split(/[\\/]/)[1], finding.file.split(/[\\/]/)[2], finding.rule])).toEqual([
+      ['20261114000000_begin_rollback', 'migration.sql', '11'],
+      ['20261114000000_begin_rollback', 'migration.sql', '11'],
+      ['20261114000100_down_commit', 'down.sql', '11'],
+      ['20261114000100_down_commit', 'down.sql', '11'],
+    ]);
+    for (const finding of findings) expect(finding.message).toMatch(/^transaction control \(rule 11c\)/);
+  });
+
+  it.each([
+    'BEGIN',
+    'begin transaction isolation level serializable',
+    'START TRANSACTION',
+    'COMMIT',
+    'END',
+    'ROLLBACK',
+    'ROLLBACK TO SAVEPOINT s',
+    'ABORT',
+    'SAVEPOINT s',
+    'RELEASE SAVEPOINT s',
+    "PREPARE TRANSACTION 'x'",
+    "COMMIT PREPARED 'x'",
+    "ROLLBACK PREPARED 'x'",
+  ])('[SEC-TC-73] rule 11c refuses top-level %s in migration.sql and in down.sql', (statement) => {
+    const name = statement.replace(/\W+/g, '-').toLowerCase();
+    expect(scratchCase(`tx-${name}`, `${statement};`, `${statement};\n`)).toEqual([
+      ['migration.sql', '11'],
+      ['down.sql', '11'],
+    ]);
+  });
+
+  it('[SEC-TC-73] rule 11c control: a file without transaction control and transaction words inside a dollar body lint clean', () => {
+    expect(scratchCase('tx-clean', "DO $x$ BEGIN EXECUTE 'COMMIT'; END $x$;\nSELECT 1;")).toEqual([]);
+  });
+
+  it('[PR11-SEC-07] rule 17: DROP and ALTER TABLE … DROP COLUMN in down.sql without IF EXISTS fail; IF EXISTS forms pass (down-without-if-exists)', () => {
+    const findings = lintCase('down-without-if-exists');
+    expect(findings.map((finding) => [finding.file.split(/[\\/]/)[2], finding.rule])).toEqual([
+      ['down.sql', '17'],
+      ['down.sql', '17'],
+    ]);
+    expect(findings[0]?.message).toContain('drop table public.fixture_items');
+    expect(findings[1]?.message).toContain('drop column remark,');
+  });
+
+  it('[PR11-SEC-16] rule 16 refuses E-strings token-level (DO body hex key, nested dynamic SQL, lowercase e in a statement); lookalikes are clean', () => {
+    const findings = lintCase('context-escape-string');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_do_hex_key', '16'],
+      ['20261114000100_nested_dynamic', '16'],
+      ['20261114000200_statement_level', '16'],
+    ]);
+    for (const finding of findings) expect(finding.message).toContain('E-prefixed escape string');
+  });
+
+  it('[PR24-SEC-05] bootstrap lane: an E-string (statement or dynamic SQL in a body) counts as audit DDL; lookalikes do not (rule 12)', () => {
+    for (const name of ['audit-estring', 'audit-estring-dynamic']) {
+      expect(bootstrapCase(name).map((finding) => finding.message)).toEqual([
+        'audit DDL needs the header "-- @audit-ddl security-approved: <reviewer> <YYYY-MM-DD>"',
+      ]);
+    }
+    expect(bootstrapCase('estring-lookalike')).toEqual([]);
+  });
+
+  it('[PR11-SEC-17] rule 11 setter keys: a quoted SET and a top-level set_config raise the value; RESET "lock_timeout" and a lower set_config clear it; set_config(…, true) is local', () => {
+    const findings = lintCase('lock-timeout-setter-keys');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_quoted_set_no_reset', '11'],
+      ['20261114000200_set_config_no_reset', '11'],
+      ['20261114000400_set_config_local', '11'],
+    ]);
+    expect(findings[0]?.message).toContain('end it with "RESET lock_timeout"');
+    expect(findings[1]?.message).toContain('end it with "RESET lock_timeout"');
+    expect(findings[2]?.message).toContain('"SET LOCAL lock_timeout" does not count');
+  });
+
+  it("[PR11-SEC-15] rule 15: set_config('role' | 'session_authorization', …) fails at top level, in a DO body, in dynamic SQL and quoted; other keys are clean", () => {
+    const findings = lintCase('set-config-role');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_top_role', '15'],
+      ['20261114000100_do_session_authorization', '15'],
+      ['20261114000200_dynamic_role', '15'],
+      // The doubled-quote key in dynamic SQL and the quoted key are computed keys for rule 16 as well.
+      ['20261114000200_dynamic_role', '16'],
+      ['20261114000300_quoted_setter', '15'],
+      ['20261114000300_quoted_setter', '16'],
+    ]);
+    for (const finding of findings.filter((entry) => entry.rule === '15')) expect(finding.message).toMatch(/^set_config\('role'/);
+  });
+
+  it('[D-ARCH-077] rules 18 (F-04) and 19 (F-11): DROP INDEX of the covering index without INCLUDE, of a partial index without WHERE or with another WHERE fails; INCLUDE and the same WHERE pass', () => {
+    // Rule 5 fires on every same-file re-create of an existing table's index (non-concurrent build).
+    const findings = lintCase('drop-index-guarded');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000100_covering_plain', '18'],
+      ['20261114000100_covering_plain', '5'],
+      ['20261114000200_covering_include', '5'],
+      ['20261114000300_partial_same_where', '5'],
+      ['20261114000400_partial_changed', '19'],
+      ['20261114000400_partial_changed', '5'],
+      ['20261114000500_partial_plain', '19'],
+      ['20261114000500_partial_plain', '5'],
+    ]);
+    expect(findings.find((finding) => finding.file.includes('partial_changed') && finding.rule === '19')?.message).toMatch(
+      /^partial-index predicate changed: review required/,
+    );
+    expect(COVERING_INDEX_TOLERANCE).toEqual(['ix_role_permissions__role_id']);
+  });
+
+  it('[D-ARCH-077] COVERING_INDEX_TOLERANCE lists every INCLUDE index of prisma/migrations', () => {
+    const migrationsDir = join(repoRoot, 'prisma', 'migrations');
+    const covering = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => [
+        ...readFileSync(join(migrationsDir, entry.name, 'migration.sql'), 'utf8').matchAll(
+          /CREATE (?:UNIQUE )?INDEX (?:CONCURRENTLY )?(?:IF NOT EXISTS )?"?([a-z0-9_]+)"?[^;]*\bINCLUDE\b/gi,
+        ),
+      ])
+      .map((match) => match[1]);
+    expect(COVERING_INDEX_TOLERANCE).toEqual(expect.arrayContaining(covering));
+  });
+
+  it('[PR11-SEC-11] rule 9: CREATE TABLE outside public fails ("tables live in public only"); an unqualified table is public', () => {
+    const findings = lintCase('table-schema-scope');
+    expect(byMigration(findings)).toEqual([['20261114000000_platform_table', '9']]);
+    expect(findings[0]?.message).toMatch(/^tables live in public only; platform holds no table/);
+  });
+
+  it('[PR11-SEC-15] rules 8 and 14: MAINTAIN to platform_app, GRANT/REVOKE ON SCHEMA, CREATE OPERATOR [CLASS], CREATE RULE fail; ALL TABLES IN SCHEMA is clean', () => {
+    expect(byMigration(lintCase('refused-objects'))).toEqual([
+      ['20261114000000_grant_maintain', '8'],
+      ['20261114000100_grant_on_schema', '14'],
+      ['20261114000200_revoke_on_schema', '14'],
+      ['20261114000300_create_operator', '14'],
+      ['20261114000400_create_operator_class', '14'],
+      ['20261114000500_create_rule', '14'],
+    ]);
+  });
+
+  it('[PR11-SEC-14] rule 16: EXECUTE in a function or procedure body off DYNAMIC_SQL_ALLOW_LIST fails; EXECUTE FUNCTION, GRANT/REVOKE EXECUTE, the word in a message and DO bodies are clean', () => {
+    const findings = lintCase('dynamic-sql-function');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_execute_in_function', '16'],
+      ['20261114000100_execute_in_procedure', '16'],
+    ]);
+    expect(findings[0]?.message).toContain('public.fixture_dynamic, which is not on DYNAMIC_SQL_ALLOW_LIST');
+    expect(DYNAMIC_SQL_ALLOW_LIST).toEqual([]);
+  });
+
+  /** `[migration, file, rule]` per finding. */
+  const byFile = (findings: LintFinding[]) =>
+    findings.map((finding) => [finding.file.split(/[\\/]/)[1], finding.file.split(/[\\/]/)[2], finding.rule]);
+
+  it('[PR43-SEC-03] a begin parameter, RETURNS TABLE column or function name, a later END; and RETURN CASE swallow nothing; BEGIN ATOMIC with CASE stays one statement; an open block is rule L in both files (transaction-control-begin)', () => {
+    const findings = lintCase('transaction-control-begin');
+    expect(byFile(findings)).toEqual([
+      ['20261114000000_begin_param', 'migration.sql', '11'],
+      ['20261114000000_begin_param', 'migration.sql', '11'],
+      ['20261114000000_begin_param', 'migration.sql', '8'],
+      ['20261114000000_begin_param', 'migration.sql', '14'],
+      ['20261114000100_returns_table_begin', 'migration.sql', '2'],
+      ['20261114000200_function_named_begin', 'migration.sql', '11'],
+      ['20261114000200_function_named_begin', 'down.sql', '17'],
+      ['20261114000200_function_named_begin', 'down.sql', '11'],
+      ['20261114000300_end_resync', 'migration.sql', '11'],
+      ['20261114000300_end_resync', 'migration.sql', '8'],
+      ['20261114000300_end_resync', 'migration.sql', '14'],
+      ['20261114000400_return_case', 'migration.sql', '14'],
+      // Control: the BEGIN ATOMIC body's END is no statement of its own (no 11c), and the CREATE SCHEMA after it splits.
+      ['20261114000500_atomic_case_control', 'migration.sql', '14'],
+      ['20261114000600_unbalanced_atomic', 'migration.sql', 'L'],
+      ['20261114000600_unbalanced_atomic', 'down.sql', 'L'],
+    ]);
+    for (const finding of findings.filter((entry) => entry.rule === 'L')) expect(finding.message).toMatch(/unbalanced BEGIN ATOMIC block/);
+  });
+
+  it('[PR43-SEC-03] rule L: a bootstrap file that ends inside a BEGIN ATOMIC block, and migration files that do not lex, are findings, never a crash', () => {
+    expect(bootstrapCase('unbalanced-atomic').map((finding) => [finding.rule, finding.message.slice(0, 64)])).toEqual([
+      ['L', 'the file does not split into statements (unbalanced BEGIN ATOMIC'],
+    ]);
+    expect(scratchCase('lex-unterminated', "SELECT 'open;", 'DROP TABLE x /* open\n')).toEqual([
+      ['migration.sql', 'L'],
+      ['down.sql', 'L'],
+    ]);
+  });
+
+  it('[PR #43 R1-m1] rule 11: a top-level setter in a materialized CTE or in VALUES raises lock_timeout; a later RESET clears it (lock-timeout-setter-cte-values)', () => {
+    expect(byMigration(lintCase('lock-timeout-setter-cte-values'))).toEqual([
+      ['20261114000000_with_materialized', '11'],
+      ['20261114000100_values', '11'],
+    ]);
+  });
+
+  it('[PR #43 R1-m2] rule 16: EXECUTE of a variable named function or procedure, and EXECUTE in an AS string body, fail (dynamic-sql-variable-name)', () => {
+    expect(byMigration(lintCase('dynamic-sql-variable-name'))).toEqual([
+      ['20261114000000_execute_function_var', '16'],
+      ['20261114000100_execute_procedure_var', '16'],
+      ['20261114000200_execute_string_body', '16'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 b] rule 16: query_to_xml, query_to_xmlschema, query_to_xml_and_xmlschema, ts_stat and ts_rewrite in PL/pgSQL, SQL dollar, RETURN, BEGIN ATOMIC and string bodies fail; a DO block is handled as for EXECUTE (dynamic-sql-query-functions)', () => {
+    expect(byMigration(lintCase('dynamic-sql-query-functions'))).toEqual([
+      ['20261114000000_query_to_xml_plpgsql', '16'],
+      ['20261114000100_ts_stat_sql_body', '16'],
+      ['20261114000200_query_to_xmlschema_return', '16'],
+      ['20261114000300_query_to_xml_and_xmlschema_atomic', '16'],
+      ['20261114000400_ts_rewrite_string_body', '16'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 d] DYNAMIC_SQL_ALLOW_LIST matches the qualified name AND the definition digest; the name alone is not enough', () => {
+    const definition = "CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'SELECT 1'; END $$";
+    const list = [{ name: 'public.f', definitionSha256: routineDefinitionSha256(definition) }];
+    expect(dynamicSqlAllowed('public.f', definition, list)).toBe(true);
+    expect(dynamicSqlAllowed('public.f', definition.replaceAll(' ', '\n  '), list)).toBe(true); // whitespace only
+    expect(dynamicSqlAllowed('public.f', definition.replace('SELECT 1', 'SELECT 2'), list)).toBe(false);
+    expect(dynamicSqlAllowed('public.f', definition.replace('LANGUAGE', 'SECURITY DEFINER LANGUAGE'), list)).toBe(false);
+    expect(dynamicSqlAllowed('public.g', definition, list)).toBe(false);
+    expect(dynamicSqlAllowed('public.f', definition)).toBe(false); // the shipped list is empty
+    expect(routineDefinitionSha256(definition)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('[PR43-SEC-05 a] rule 7: ENABLE REPLICA | ALWAYS TRIGGER | RULE fail; a plain ENABLE TRIGGER is clean (trigger-replica-mode)', () => {
+    const findings = lintCase('trigger-replica-mode');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_replica_trigger', '7'],
+      ['20261114001000_always_trigger', '7'],
+      ['20261114002000_replica_rule', '7'],
+      ['20261114003000_always_rule', '7'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 a] rule 20: standard_conforming_strings / backslash_quote in SET, SET LOCAL … TO, SET SESSION "…", the setter function, a routine SET clause, ALTER FUNCTION … SET and DO dynamic SQL fail in prisma/migrations (escape-setting)', () => {
+    const findings = lintCase('escape-setting');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_set_off', '20'],
+      ['20261114000100_set_local_to', '20'],
+      ['20261114000200_session_quoted', '20'],
+      ['20261114000300_set_config', '20'],
+      ['20261114000400_routine_set', '20'],
+      ['20261114000500_alter_function_set', '20'],
+      ['20261114000600_do_dynamic', '20'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 a] rule 20 in the bootstrap lane: SET … = off and the setter function fail, without a statement preview (escape-setting)', () => {
+    const findings = bootstrapCase('escape-setting');
+    expect(findings.map((finding) => [finding.file, finding.rule])).toEqual([
+      [join('escape-setting', '00-roles.sql'), '20'],
+      [join('escape-setting', '10-set-config.sql'), '20'],
+    ]);
+    expect(findings.map((finding) => finding.message.slice(-11))).toEqual(['statement 2', 'statement 2']);
+  });
+});
+
 describe('the repository lanes', () => {
   it('[NT-DATA-004-b] prisma/migrations and prisma/bootstrap of this repository have no findings', () => {
     // 2026-11-13 = the approval date of 10-audit.sql and 90-audit-ddl-guard.sql (TASK-021); main() uses the clock.
@@ -634,5 +954,29 @@ describe('the repository lanes', () => {
 
   it('lists exactly security-analyst as the audit-DDL reviewer (added by TASK-021; any other reviewer still fails closed)', () => {
     expect(readReviewers(join(repoRoot, 'tools', 'db', 'audit-ddl-reviewers.json'))).toEqual(['security-analyst']);
+  });
+});
+
+describe('rule 17 and released migrations (PR11-SEC-07; released down.sql files are immutable)', () => {
+  it('[PR11-SEC-07] RULE_17_RELEASED is frozen: exactly the three pre-rule migrations, each still released and each still needing the exemption', () => {
+    expect([...RULE_17_RELEASED]).toEqual([
+      '20261112010000_authz_catalogue_tables',
+      '20261112020000_platform_rls_helpers',
+      '20261112030000_reference_dataset_versions',
+    ]);
+    const work = mkdtempSync(join(tmpdir(), 'rule17-'));
+    try {
+      for (const name of RULE_17_RELEASED) {
+        const source = join(repoRoot, 'prisma', 'migrations', name);
+        const copy = join(work, `${name}_copy`);
+        mkdirSync(copy);
+        for (const file of ['migration.sql', 'down.sql']) copyFileSync(join(source, file), join(copy, file));
+        const findings = lintMigrations(work, 'rule17').filter((finding) => finding.rule === '17');
+        expect(findings.length).toBeGreaterThan(0); // renamed, the exemption no longer applies: the list cannot hide a compliant file
+        rmSync(copy, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 });

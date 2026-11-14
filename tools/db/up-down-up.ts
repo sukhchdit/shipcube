@@ -16,6 +16,8 @@
  * The driver is I/O-agnostic: the caller supplies the Prisma runner (tools/deps/prisma-cli.mjs), the schema snapshot
  * (the Testcontainers harness uses `pg_dump --schema-only` in the container, see `normaliseSchemaDump`) and the
  * history update. The integration suite prisma/tests/migrations runs it on the repository's migrations.
+ *
+ * `runPrefixReversibility` (below) adds the partial-deploy check of §8.4 as amended 2026-11-13 (PR11-SEC-07).
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -147,4 +149,119 @@ export async function runUpDownUp(options: UpDownUpOptions): Promise<UpDownUpRep
   const s2 = await options.snapshot();
   const upDiff = diffSnapshots(s1, s2);
   return { ...report, upIsRepeatable: isEmpty(upDiff), upDiff };
+}
+
+/*
+ * Prefix reversibility (data-model.md §8.4 as amended 2026-11-13; PR11-SEC-07; D-ARCH-071).
+ *
+ * A failed `migrate deploy` can leave a statement PREFIX of a migration applied: the file is not atomic. For every
+ * reversible migration M with n statements (split with `splitStatements`) and every proper prefix k = 1..n-1:
+ *   1. a fresh database in the state just before M (every earlier migration applied; M is not recorded);
+ *   2. apply M's first k statements one by one as the migrator;
+ *   3. run M's down.sql as the migrator;
+ *   4. the snapshot must equal the pre-M snapshot.
+ * A down.sql that fails or leaves a difference is reported by migration name and prefix length, with the SQLSTATE or
+ * the number of differing objects only: error messages and dump lines can carry values and are never reported.
+ * A migration declared `reversible: no` (contract, restore-based) is excluded, as in `runUpDownUp`.
+ */
+
+export interface PrefixReversibilityOptions<H> {
+  migrationsDir: string;
+  /** A fresh database in the state just before migration `index` of `listMigrations` (earlier ones applied). */
+  prepare: (index: number, migration: string) => Promise<H>;
+  /** Applies the statements in order, each on its own (autocommit), as the migrator. */
+  applyStatements: (handle: H, statements: readonly string[]) => Promise<void>;
+  /** Runs the migration's down.sql (full text) as the migrator. */
+  runDown: (handle: H, downSql: string) => Promise<void>;
+  /** Normalised snapshot of the database (see `normaliseSchemaDump`). */
+  snapshot: (handle: H) => Promise<string>;
+  /** Disposes of a prepared database (optional). */
+  release?: (handle: H) => Promise<void>;
+  log?: (line: string) => void;
+}
+
+export interface PrefixFailure {
+  migration: string;
+  /** Number of applied statements (1..statements-1). */
+  prefix: number;
+  statements: number;
+  reason: 'down-failed' | 'schema-differs';
+  /** SQLSTATE of the failing down.sql (`down-failed`), `unknown` when the error carries none. */
+  sqlstate?: string;
+  /** Number of differing snapshot objects (`schema-differs`). */
+  differing?: number;
+  /** `<migration>: prefix k/n (down.sql failed: <sqlstate>)` or `(schema differs: <n> objects)`. */
+  message: string;
+}
+
+export interface PrefixReversibilityReport {
+  /** Checked migrations with their statement count and the number of proper prefixes run. */
+  checked: { migration: string; statements: number; prefixes: number }[];
+  excluded: string[];
+  failures: PrefixFailure[];
+}
+
+/** SQLSTATE of a driver error (`pg` sets `code`), never its message. */
+export function sqlStateOf(error: unknown): string {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? code : 'unknown';
+}
+
+async function withHandle<H, T>(options: PrefixReversibilityOptions<H>, handle: H, work: (handle: H) => Promise<T>): Promise<T> {
+  try {
+    return await work(handle);
+  } finally {
+    await options.release?.(handle);
+  }
+}
+
+export async function runPrefixReversibility<H>(options: PrefixReversibilityOptions<H>): Promise<PrefixReversibilityReport> {
+  const log = options.log ?? (() => {});
+  const migrations = listMigrations(options.migrationsDir);
+  const report: PrefixReversibilityReport = { checked: [], excluded: [], failures: [] };
+  for (const [index, migration] of migrations.entries()) {
+    const dir = join(options.migrationsDir, migration);
+    if (!existsSync(join(dir, 'down.sql'))) throw new UpDownUpError(`${migration} has no down.sql`);
+    const up = readFileSync(join(dir, 'migration.sql'), 'utf8');
+    if (parseHeader(up).reversible !== true) {
+      report.excluded.push(migration);
+      log(`[prefix] ${migration} is not reversible (restore-based); excluded`);
+      continue;
+    }
+    const statements = splitStatements(up);
+    const down = readFileSync(join(dir, 'down.sql'), 'utf8');
+    const n = statements.length;
+    report.checked.push({ migration, statements: n, prefixes: Math.max(0, n - 1) });
+    if (n < 2) continue;
+
+    const before = await withHandle(options, await options.prepare(index, migration), (handle) => options.snapshot(handle));
+    for (let k = 1; k < n; k += 1) {
+      const label = `${migration}: prefix ${String(k)}/${String(n)}`;
+      const failure = await withHandle(options, await options.prepare(index, migration), async (handle) => {
+        try {
+          await options.applyStatements(handle, statements.slice(0, k));
+        } catch (error) {
+          // The up statements themselves must apply on the pre-M state; that is a migration defect, not a finding.
+          throw new UpDownUpError(`${label} (up statements failed: ${sqlStateOf(error)})`);
+        }
+        try {
+          await options.runDown(handle, down);
+        } catch (error) {
+          const sqlstate = sqlStateOf(error);
+          return { reason: 'down-failed' as const, sqlstate, message: `${label} (down.sql failed: ${sqlstate})` };
+        }
+        const diff = diffSnapshots(before, await options.snapshot(handle));
+        const differing = diff.onlyBefore.length + diff.onlyAfter.length;
+        return differing === 0
+          ? undefined
+          : { reason: 'schema-differs' as const, differing, message: `${label} (schema differs: ${String(differing)} objects)` };
+      });
+      if (failure !== undefined) {
+        report.failures.push({ migration, prefix: k, statements: n, ...failure });
+        log(`[prefix] ${failure.message}`);
+      }
+    }
+    log(`[prefix] ${migration}: ${String(n - 1)} prefixes checked`);
+  }
+  return report;
 }
