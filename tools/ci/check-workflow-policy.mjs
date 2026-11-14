@@ -1216,6 +1216,9 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'tests/api/helpers/cache-control.ts',
   'tests/api/helpers/contract-validator.ts',
   'tests/contract-stubs/',
+  // PR40-SEC-01: a `.gitattributes` at any depth decides what `git diff` reports (-diff, binary, textconv) and eol.
+  '.gitattributes',
+  '**/.gitattributes',
   'CLAUDE.md',
   '.claude/settings.json',
   '.claude/agents/',
