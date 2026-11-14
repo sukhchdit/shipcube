@@ -29,6 +29,10 @@
 /.gitleaks.toml                         @sukhchdit
 /.gitleaksignore                        @sukhchdit
 /.prettierignore                        @sukhchdit
+# Git attributes at any depth (PR40-SEC-01): `-diff`, `binary` or a textconv driver changes what `git diff` reports, and
+# eol settings change what the other gates read; the diff-coverage gate also passes --text --no-textconv.
+/.gitattributes                         @sukhchdit
+**/.gitattributes                       @sukhchdit
 /.semgrep/                              @sukhchdit
 /tools/eslint-rules/                    @sukhchdit
 /tools/stylelint-rules/                 @sukhchdit
