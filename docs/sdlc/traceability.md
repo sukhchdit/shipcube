@@ -128,16 +128,16 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RBAC-013 | M0 | Should | US-073 | packages/authz + prisma/ · ADR-0008 §Versioned seeds/migrations only; data-model §8 | TASK-221 | – | Planned |
 | REQ-RBAC-014 | M0 | Must | US-065 | packages/authz · ADR-0008 §Catalogue completeness test (every referenced string declared) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-001 | M0 | Must | US-086 | packages/audit · ADR-0007 §Capture (metadata-driven middleware, allow-listed direct callers); ADR-0003 | TASK-029 | – | Planned |
-| REQ-AUDIT-002 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (action types incl. `STATE_TRANSITION`, `CONFIG_CHANGE`) | TASK-025 | – | Planned |
-| REQ-AUDIT-003 | M0 | Must | US-087 | packages/audit · ADR-0007 §Storage columns; data-model §3.4 `audit_entries` | TASK-025 | – | Planned |
-| REQ-AUDIT-004 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (same transaction, 500 `AUDIT_WRITE_FAILED`); ARCHITECTURE §7.3 | TASK-025 | – | Planned |
+| REQ-AUDIT-002 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (action types incl. `STATE_TRANSITION`, `CONFIG_CHANGE`) | TASK-025 | – | Implemented, partial: TASK-025 merged; AT-US-087-07 needs TASK-285 (CHECK widening), AT-04/08 → TASK-041/073 (D-ARCH-125) |
+| REQ-AUDIT-003 | M0 | Must | US-087 | packages/audit · ADR-0007 §Storage columns; data-model §3.4 `audit_entries` | TASK-025 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-AUDIT-004 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (same transaction, 500 `AUDIT_WRITE_FAILED`); ARCHITECTURE §7.3 | TASK-025 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-005 | M0 | Must | US-089 | packages/audit · ADR-0007 §Capture (fail-closed SENSITIVE views/downloads, 503 `AUDIT_UNAVAILABLE`) | TASK-114 | – | Planned |
 | REQ-AUDIT-006 | M0 | Must | US-086 | platform · ADR-0003 §Route metadata audit descriptor; ADR-0016 am. 5(c) (`NONE` justifications) | TASK-029 | – | Planned |
 | REQ-AUDIT-007 | M0 | Must | US-090 | packages/audit · ADR-0007 §Capture (RFC 8785 field-level diffs) | TASK-031 | – | Planned |
 | REQ-AUDIT-008 | M0 | Must | US-091 | packages/audit · ADR-0007 §Redaction (`[REDACTED]` before hashing) | TASK-028 | – | Planned |
 | REQ-AUDIT-009 | M0 | Must | US-091 | packages/audit · ADR-0007 §Redaction and classification (registry, build-time completeness test) | TASK-028 | – | Planned |
-| REQ-AUDIT-010 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (`DENIED`/`FAILED` outcomes in their own transaction) | TASK-025 | – | Planned |
-| REQ-AUDIT-011 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (actor types, sources from `X-Client-App`) | TASK-025 | – | Planned |
+| REQ-AUDIT-010 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (`DENIED`/`FAILED` outcomes in their own transaction) | TASK-025 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-AUDIT-011 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (actor types, sources from `X-Client-App`) | TASK-025 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-012 | M0 | Must | US-092 | packages/audit · ADR-0007 §Hash chain (per-stream SHA-256, advisory lock, sharded SYSTEM); data-model §5.4 | TASK-030 | – | Planned |
 | REQ-AUDIT-013 | M0 | Must | US-093 | audit (worker) · ADR-0007 §Hash chain verification + am. 7 (hourly ECDSA anchors); data-model §5.5/§5.6 | TASK-116 | – | Planned |
 | REQ-AUDIT-014 | M0 | Must | US-094 | prisma/ (bootstrap lane) · ADR-0007 §Storage immutability + am. 7–8 (`platform_audit_owner`, `search_path` hardening); data-model §4.4/§5.2 | TASK-021, TASK-033 | – | In progress (merged: TASK-021) |
@@ -158,7 +158,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-004 | M0 | Must | US-075 | prisma/ · ADR-0005 §Policies (unset context → zero rows, writes rejected); data-model §4.3 | TASK-016 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-005 | M0 | Must | US-074 | prisma/ · ADR-0005 §Roles (`platform_app` NOSUPERUSER NOBYPASSRLS); data-model §4.4 | TASK-003, TASK-016 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-006 | M0 | Must | US-076 | prisma/ · ADR-0005 §Operator branch (read-only cross-tenant policy); data-model §4.3 | TASK-060 | – | Planned |
-| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Implemented (tasks merged; acceptance at G3) — TASK-024 + suite active in lane B (PR #47) |
+| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-008 | M0 | Must | US-078 | platform (worker) · ADR-0013 am. 1–5 (`platform.job_context`, payload v2); ADR-0005; data-model §4.5 | TASK-047 | – | Planned |
 | REQ-RLS-009 | M0 | Must | US-064 | prisma/ · ADR-0009 §Standard columns (UUIDv7, `timestamptz`, actor stamps); data-model P1/P2 | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-010 | M0 | Must | US-079 | prisma/ · ADR-0009 §Soft delete (partial unique indexes); ADR-0005 (no DELETE grant); data-model P3 | TASK-100 | – | Planned |
