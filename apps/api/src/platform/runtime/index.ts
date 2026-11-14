@@ -46,7 +46,6 @@ export {
   type ReadinessProbe,
   type ReadinessReport,
 } from './readiness.js';
-export { configErrorVariable, createOrExitOnConfigError, type ConfigExitOptions } from '../db/config-exit.js';
 export { createRuntimeServices, readinessChecks, type RuntimeServices, type ValkeyClient } from './services.js';
 export {
   exitAfterFlush,

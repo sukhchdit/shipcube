@@ -285,4 +285,20 @@ describe('entry-preflight-cli', () => {
     expect(run({ ...hardened }, []).status).toBe(78);
     expect(run({ ...hardened }, ['--', 'dist/main.js']).status).toBe(0);
   }, 60_000);
+
+  it('in process: reads process.env and the argv after the first --, and sets process.exitCode', async () => {
+    // The spawned runs above prove the exit codes; this one measures the module itself (the diff-coverage gate counts
+    // only in-process coverage). A hardened environment accepts exactly the entry argv, so 0 proves the `--` split.
+    const saved = { env: process.env, argv: process.argv, exitCode: process.exitCode };
+    process.env = { ...hardened };
+    process.argv = [process.execPath, 'entry-preflight-cli.js', '--', 'dist/main.js'];
+    try {
+      await import('./entry-preflight-cli.js');
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.env = saved.env;
+      process.argv = saved.argv;
+      process.exitCode = saved.exitCode;
+    }
+  });
 });

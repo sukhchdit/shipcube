@@ -65,6 +65,7 @@ describe('installProcessErrorHandlers', () => {
         fatal: () => {
           throw new Error('destination failed');
         },
+        error: () => undefined,
       },
       exit: (code) => exits.push(code),
       source,
