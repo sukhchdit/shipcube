@@ -31,6 +31,19 @@ import ajvModule from 'ajv/dist/2020.js';
 
 import { coverageGateCases } from '../ci/coverage-gate.mjs';
 import {
+  loadJestGlobalThreshold,
+  mergeCoverageMaps,
+  parseMergedCoverageConfig,
+  projectProblems,
+  readCoverageFinal,
+  readRanTests,
+  summarizeCoverage,
+  toLcov,
+  tripwireChecks,
+} from '../ci/coverage-merge.mjs';
+import { coverageFlags, coverageGroups, listProjectTests, requiredProjects } from '../ci/coverage-run.mjs';
+import { evaluateDiffCoverage, gitDiff, parseLcov, parseUnifiedDiff } from '../ci/diff-coverage.mjs';
+import {
   CONVERTERS,
   convertNative,
   hostScrubList,
@@ -66,7 +79,9 @@ import { isCleanTreePath, isProfile, loadManifest, manifestFile, selectSuites } 
  * @typedef {{ kind: 'command', cmd: string[], converter: 'junit' | keyof typeof CONVERTERS, native_report: string | null,
  *   evidence_root: EvidenceRoot, options: Record<string, unknown> }} CommandRunner
  * @typedef {JestRunner | CommandRunner} Runner
- * @typedef {{ testcontainers_images: string[], suites: Record<string, Runner> }} RunnersConfig
+ * @typedef {import('../ci/coverage-merge.mjs').MergedCoverageConfig} MergedCoverageConfig
+ * @typedef {import('../ci/coverage-merge.mjs').CoverageSource} CoverageSource
+ * @typedef {{ testcontainers_images: string[], suites: Record<string, Runner>, mergedCoverage: MergedCoverageConfig | null }} RunnersConfig
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -209,6 +224,9 @@ export function parseRunners(raw) {
       const pattern = entry['testNamePattern'];
       if (pattern !== undefined && (typeof pattern !== 'string' || pattern === '' || pattern.startsWith('-')))
         throw new Error(`suites.${id}.testNamePattern must be a non-empty string`);
+      // A coverage run feeds the merged gate: a path or name filter would measure part of a project as if it were all.
+      if (entry['coverage'] === true && (paths.length > 0 || pattern !== undefined))
+        throw new Error(`suites.${id}: coverage: true needs whole projects (no paths, no testNamePattern)`);
       suites[id] = {
         kind: 'jest',
         projects,
@@ -241,7 +259,17 @@ export function parseRunners(raw) {
       };
     } else throw new Error(`suites.${id}.kind must be jest|command`);
   }
-  return { testcontainers_images: images, suites };
+  const mergedCoverage = raw['merged_coverage'] === undefined ? null : parseMergedCoverageConfig(raw['merged_coverage']);
+  const coverageRunners = Object.entries(suites).filter(([, r]) => r.kind === 'jest' && r.coverage);
+  // Fail closed (PR33-SEC-06): a coverage run without a merged gate would measure and judge nothing.
+  if (coverageRunners.length > 0 && mergedCoverage === null)
+    throw new Error(`${RUNNERS_PATH}: suites with coverage: true need merged_coverage (the suite that carries the US-006 gate)`);
+  if (mergedCoverage !== null) {
+    const host = suites[mergedCoverage.suite];
+    if (host === undefined || host.kind !== 'jest' || !host.coverage)
+      throw new Error(`${RUNNERS_PATH}: merged_coverage.suite ${mergedCoverage.suite} must be a kind jest suite with coverage: true`);
+  }
+  return { testcontainers_images: images, suites, mergedCoverage };
 }
 
 // --- planning -----------------------------------------------------------------------------------------------------
@@ -300,7 +328,7 @@ export function jestArgs(runner, { testTimeoutMs, outputFile, coverageDir }) {
     '--outputFile',
     outputFile,
     ...(runner.testNamePattern === undefined ? [] : ['--testNamePattern', runner.testNamePattern]),
-    ...(runner.coverage ? ['--coverage', '--coverageReporters=json-summary', `--coverageDirectory=${coverageDir}`] : []),
+    ...(runner.coverage ? coverageFlags(coverageDir) : []),
     ...jestExtraArgs(runner, { testTimeoutMs }),
   ];
 }
@@ -331,6 +359,7 @@ export function expandCommand(cmd, values) {
 /**
  * @typedef {{ id: string, root: EvidenceRoot, cases: JUnitCase[], tests: number, failures: number, errors: number, skipped: number,
  *   durationS: number, junit: string, native: { name: string, text: string } | null, jestArgs: string[] }} SuiteResult
+ * @typedef {SuiteResult & { coverageRaw: unknown, coverageSource: CoverageSource | null }} RunResult
  */
 
 /** @param {string} name @param {string} id */
@@ -538,10 +567,31 @@ export function relativiseCoverage(raw, root) {
 }
 
 /**
+ * One summary.md line on the merged gate: projects, overall lines/branches of the merged summary and the verdict of the
+ * gate cases (`coverage gate:`, `coverage merge:`, `coverage tripwire:`, `coverage diff:`).
+ * @param {Record<string, unknown> | null} summary
+ * @param {readonly string[]} projects
+ * @param {readonly JUnitCase[]} cases
+ * @returns {string}
+ */
+export function mergedCoverageNote(summary, projects, cases) {
+  const failed = cases.filter((c) => c.status !== 'passed').length;
+  const verdict = failed === 0 ? 'PASS' : `FAIL (${failed} case(s))`;
+  const total = summary !== null && isRecord(summary['total']) ? summary['total'] : null;
+  /** @param {string} key */
+  const pct = (key) => {
+    const m = total?.[key];
+    return isRecord(m) ? `${String(m['pct'])} % (${String(m['covered'])}/${String(m['total'])})` : 'n/a';
+  };
+  return `Merged coverage (${projects.join(', ')}): lines ${pct('lines')}, branches ${pct('branches')}; US-006 merged gate ${verdict}`;
+}
+
+/**
  * summary.md (first line is the contract of ADR-0023 am. B).
  * @param {Record<string, unknown> & { git_sha: string, stamp: string, profile: string, verdict: string, invalid_reasons: string[],
  *   suites: Array<{ name: string, status: string, tests: number, failures: number, errors: number, skipped: number, duration_s: number }> }} summary
- * @param {{ planned: readonly string[], rules: readonly string[], failReasons: readonly string[], restricted: string[] | null, siblings: readonly string[] }} extra
+ * @param {{ planned: readonly string[], rules: readonly string[], failReasons: readonly string[], restricted: string[] | null, siblings: readonly string[],
+ *   coverageNote?: string | null }} extra
  */
 export function renderSummaryMd(summary, extra) {
   const lines = [
@@ -554,6 +604,7 @@ export function renderSummaryMd(summary, extra) {
     ...summary.suites.map((s) => `| ${s.name} | ${s.status} | ${s.tests} | ${s.failures} | ${s.errors} | ${s.skipped} | ${s.duration_s} |`),
     '',
   ];
+  if (extra.coverageNote) lines.push(extra.coverageNote, '');
   if (extra.rules.length > 0) lines.push(`Path rules fired: ${extra.rules.join(', ')}`, '');
   if (extra.restricted !== null) lines.push(`Restricted run (--suites): ${extra.restricted.join(', ')}`, '');
   if (extra.planned.length > 0)
@@ -617,17 +668,176 @@ export function jestCasesFrom(file, options) {
 }
 
 /**
- * The coverage summary of a Jest run, or null when it is absent or unreadable (the run's verdict does not depend on it).
- * @param {string} file
- * @returns {unknown}
+ * The coverage of one Jest run for the merge: its projects, its validated istanbul map (or the reason it has none) and
+ * the test files its Jest JSON report says ran (projectProblems requires each project to have run one of its own).
+ * @param {readonly JestProject[]} projects
+ * @param {string} coverageDir
+ * @param {string} reportFile the run's `--outputFile` Jest JSON report
+ * @returns {CoverageSource}
  */
-export function coverageFrom(file) {
-  if (!existsSync(file)) return null;
+export function coverageSourceFrom(projects, coverageDir, reportFile) {
+  const label = `coverage of ${projects.join('+')}`;
+  const file = join(coverageDir, 'coverage-final.json');
+  const ranTests = readRanTests(reportFile);
+  if (!existsSync(file)) return { projects: [...projects], map: null, problem: `${label}: Jest wrote no coverage-final.json`, ranTests };
   try {
-    return readJson(file);
-  } catch {
-    return null;
+    return { projects: [...projects], map: readCoverageFinal(file, label), problem: null, ranTests };
+  } catch (error) {
+    return { projects: [...projects], map: null, problem: error instanceof Error ? error.message : String(error), ranTests };
   }
+}
+
+/** Case name prefix of the merged step's own checks. */
+const MERGE = 'coverage merge:';
+
+/**
+ * Diff-coverage cases (US-006 changed-file gate, tools/ci/diff-coverage.mjs) over the merged lcov.
+ * @param {{ lcov: string, repoRoot: string, base: string, classname: string, diff?: (root: string, base: string, head: string) => string }} input
+ * @returns {JUnitCase[]}
+ */
+export function diffCoverageCases({ lcov, repoRoot, base, classname, diff = gitDiff }) {
+  try {
+    const verdicts = evaluateDiffCoverage(parseUnifiedDiff(diff(repoRoot, base, 'HEAD')), parseLcov(lcov, repoRoot));
+    if (verdicts.length === 0) return [{ name: 'coverage diff: no changed source file in scope', classname, status: 'passed' }];
+    /** @param {{ covered: number, total: number }} c */
+    const fmt = (c) => (c.total === 0 ? 'n/a' : `${((c.covered * 100) / c.total).toFixed(2)}% (${c.covered}/${c.total})`);
+    return verdicts.map((v) =>
+      v.status === 'ok' || v.status === 'no-executable-change'
+        ? { name: `coverage diff: ${v.file}`, classname, status: /** @type {const} */ ('passed') }
+        : {
+            name: `coverage diff: ${v.file}`,
+            classname,
+            status: /** @type {const} */ ('failed'),
+            message:
+              `${v.status}: changed lines ${fmt(v.lines)} (>= ${v.threshold.lines}%), branches ${fmt(v.branches)} (>= ${v.threshold.branches}%)` +
+              (v.uncovered.length > 0 ? `, uncovered lines ${v.uncovered.slice(0, 20).join(',')}` : ''),
+          },
+    );
+  } catch (error) {
+    return [
+      {
+        name: 'coverage diff: evaluated',
+        classname,
+        status: 'error',
+        message: `diff coverage not evaluated: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+      },
+    ];
+  }
+}
+
+/**
+ * The merged US-006 gate of a run (D-ORCH-047; PR #33 R1-m4, PR33-SEC-06). Takes the coverage of every suite that ran
+ * whole projects with `coverage: true`, runs each required project no such suite covered (one Jest run per group, same
+ * in-band rule), merges, and returns the cases for the `merged_coverage.suite` JUnit plus the merged summary.
+ * Fail-closed: a project without usable coverage, or one that ran none of its own test files (R1-m1, PR40-SEC-03), fails
+ * its `coverage merge: project <p> measured` case and the gate reports an absent summary; maps that cannot be merged
+ * fail `coverage merge: maps merged`; a coverage-only run with a failing test, a non-zero exit or a timeout fails its own
+ * case (R1-m2).
+ * @param {{ config: MergedCoverageConfig, results: readonly RunResult[], repoRoot: string, work: string, testTimeoutMs: number,
+ *   suiteTimeoutMs: number, profile: Profile, base: string,
+ *   listTests?: (project: string) => string[], loadThreshold?: () => Promise<Record<string, unknown>>,
+ *   diff?: (root: string, base: string, head: string) => string }} ctx
+ * @returns {Promise<{ cases: JUnitCase[], summary: Record<string, unknown> | null, required: string[] }>}
+ */
+export async function mergedCoverageStep(ctx) {
+  const classname = ctx.config.suite;
+  /** @type {JUnitCase[]} */
+  const cases = [];
+  const listTests = ctx.listTests ?? ((/** @type {string} */ project) => listProjectTests(ctx.repoRoot, project));
+  const { required, notRequired } = requiredProjects(ctx.config, listTests);
+  for (const project of notRequired)
+    cases.push({ name: `${MERGE} project ${project} has no test files (not required)`, classname, status: 'passed' });
+
+  const sources = ctx.results.flatMap((r) => (r.coverageSource === null ? [] : [r.coverageSource]));
+  const covered = new Set(sources.flatMap((s) => s.projects));
+  for (const group of coverageGroups(required.filter((p) => !covered.has(p)))) {
+    const projects = /** @type {JestProject[]} */ (group.projects);
+    const tag = projects.join('-');
+    const outputFile = join(ctx.work, `coverage-run-${tag}.jest.json`);
+    const coverageDir = join(ctx.work, `coverage-run-${tag}`);
+    /** @type {JestRunner} */
+    const runner = { kind: 'jest', projects, paths: [], coverage: true };
+    console.error(`quality:heavy: coverage run ${projects.join(' ')} (no selected suite ran these projects)`);
+    const result = await runStreaming(process.execPath, jestArgs(runner, { testTimeoutMs: ctx.testTimeoutMs, outputFile, coverageDir }), {
+      cwd: ctx.repoRoot,
+      timeoutMs: ctx.suiteTimeoutMs,
+    });
+    const bad = jestCasesFrom(outputFile, { root: ctx.repoRoot, scrub: [] }).filter(
+      (c) => c.status === 'failed' || c.status === 'error',
+    ).length;
+    const problem = result.timedOut
+      ? 'timed out (process tree killed)'
+      : bad > 0
+        ? `${bad} failing test case(s)`
+        : result.status !== 0
+          ? `jest exited ${String(result.status)}`
+          : null;
+    cases.push({
+      name: `${MERGE} ${projects.join('+')} coverage run`,
+      classname,
+      status: problem === null ? 'passed' : 'failed',
+      ...(problem === null ? {} : { message: `coverage-only run of ${projects.join('+')}: ${problem}` }),
+    });
+    sources.push(coverageSourceFrom(projects, coverageDir, outputFile));
+  }
+
+  const problems = projectProblems(required, sources, listTests);
+  for (const [project, problem] of problems)
+    cases.push({
+      name: `${MERGE} project ${project} measured`,
+      classname,
+      status: problem === null ? 'passed' : 'failed',
+      ...(problem === null ? {} : { message: problem }),
+    });
+  if ([...problems.values()].some((p) => p !== null)) {
+    cases.push(...coverageGateCases(null, { root: ctx.repoRoot, classname }));
+    return { cases, summary: null, required };
+  }
+  /** @type {import('../ci/coverage-merge.mjs').CoverageMap} */
+  let merged;
+  try {
+    merged = mergeCoverageMaps(sources.flatMap((s) => (s.map === null ? [] : [s.map])));
+  } catch (error) {
+    // Fail closed (PR40-SEC-04): e.g. one run's map holds two entries for one file.
+    cases.push({
+      name: `${MERGE} maps merged`,
+      classname,
+      status: 'failed',
+      message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+    });
+    cases.push(...coverageGateCases(null, { root: ctx.repoRoot, classname }));
+    return { cases, summary: null, required };
+  }
+  const summary = summarizeCoverage(merged);
+  cases.push(...coverageGateCases(summary, { root: ctx.repoRoot, classname }));
+  const loadThreshold = ctx.loadThreshold ?? (() => loadJestGlobalThreshold(pathToFileURL(join(ctx.repoRoot, 'jest.config.ts')).href));
+  try {
+    for (const check of tripwireChecks(await loadThreshold(), summary))
+      cases.push({
+        name: `coverage tripwire: jest.config.ts global ${check.metric}`,
+        classname,
+        status: check.ok ? 'passed' : 'failed',
+        ...(check.ok ? {} : { message: check.message }),
+      });
+  } catch (error) {
+    cases.push({
+      name: 'coverage tripwire: jest.config.ts global',
+      classname,
+      status: 'error',
+      message: `tripwire not evaluated: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+    });
+  }
+  if (ctx.profile === 'pr')
+    cases.push(
+      ...diffCoverageCases({
+        lcov: toLcov(merged, ctx.repoRoot),
+        repoRoot: ctx.repoRoot,
+        base: ctx.base,
+        classname,
+        ...(ctx.diff === undefined ? {} : { diff: ctx.diff }),
+      }),
+    );
+  return { cases, summary, required };
 }
 
 /**
@@ -646,11 +856,11 @@ export function resolveOutBase(args, repoRoot) {
 /**
  * @param {{ id: string, runner: Runner | null, root: EvidenceRoot }} item
  * @param {{ repoRoot: string, work: string, testTimeoutMs: number, suiteTimeoutMs: number, scrub: string[] }} ctx
- * @returns {Promise<SuiteResult & { coverageRaw: unknown }>}
+ * @returns {Promise<RunResult>}
  */
 async function runSuite(item, ctx) {
   const started = Date.now();
-  /** @param {JUnitCase[]} rawCases @param {Partial<SuiteResult> & { coverageRaw?: unknown }} [more] */
+  /** @param {JUnitCase[]} rawCases @param {Partial<RunResult>} [more] @returns {RunResult} */
   const done = (rawCases, more = {}) => {
     // The one choke point: whatever a converter or runner produced, no host path reaches the committed JUnit (PR28-SEC-02).
     const cases = scrubCases(rawCases, ctx.scrub);
@@ -663,6 +873,7 @@ async function runSuite(item, ctx) {
       native: null,
       jestArgs: [],
       coverageRaw: null,
+      coverageSource: null,
       ...junitFor(item.id, cases, durationS),
       ...more,
     };
@@ -698,13 +909,10 @@ async function runSuite(item, ctx) {
         status: 'error',
         message: `jest ${problem} without a failing test (coverage threshold, open handle or runtime error)`,
       });
-    const coverageFile = join(coverageDir, 'coverage-summary.json');
     const extra = jestExtraArgs(item.runner, { testTimeoutMs: ctx.testTimeoutMs });
-    const coverageRaw = item.runner.coverage ? coverageFrom(coverageFile) : null;
-    // US-006 coverage gate (tools/ci/coverage-gate.mjs, D-TASK015-11): one case per scope, so a below-threshold scope
-    // (or an absent summary) fails the coverage suite by name. Evidence schema unchanged: these are ordinary cases.
-    if (item.runner.coverage) cases.push(...coverageGateCases(coverageRaw, { root: ctx.repoRoot, classname: item.id }));
-    return done(cases, { jestArgs: extra, coverageRaw });
+    // The US-006 gate is judged once, on the coverage merged across projects (mergedCoverageStep), not per suite.
+    const coverageSource = item.runner.coverage ? coverageSourceFrom(item.runner.projects, coverageDir, outputFile) : null;
+    return done(cases, { jestArgs: extra, coverageSource });
   }
 
   const runner = item.runner;
@@ -823,8 +1031,10 @@ export async function main(argv) {
 
   const work = mkdtempSync(join(tmpdir(), 'quality-heavy-'));
   const scrub = hostScrubList({ repoRoot, homeDir: homedir(), tmpDir: tmpdir(), env: process.env, realpath: realpathSync.native });
-  /** @type {Array<SuiteResult & { coverageRaw: unknown }>} */
+  /** @type {RunResult[]} */
   const results = [];
+  /** @type {string | null} */
+  let coverageNote = null;
   try {
     for (const item of plan.toRun) {
       if (buildFailed) {
@@ -845,6 +1055,7 @@ export async function main(argv) {
           native: null,
           jestArgs: [],
           coverageRaw: null,
+          coverageSource: null,
           ...junitFor(item.id, cases, 0),
         });
         continue;
@@ -853,6 +1064,26 @@ export async function main(argv) {
       results.push(
         await runSuite(item, { repoRoot, work, testTimeoutMs: args.testTimeoutMs, suiteTimeoutMs: args.suiteTimeoutMin * 60_000, scrub }),
       );
+    }
+    // US-006 merged gate (D-ORCH-047): once every suite ran, in the JUnit of merged_coverage.suite (unit: in every profile).
+    const host = runners.mergedCoverage === null ? undefined : results.find((r) => r.id === runners.mergedCoverage?.suite);
+    if (!buildFailed && host !== undefined && runners.mergedCoverage !== null) {
+      console.error('quality:heavy: merged coverage');
+      const mergeStarted = Date.now();
+      const merged = await mergedCoverageStep({
+        config: runners.mergedCoverage,
+        results,
+        repoRoot,
+        work,
+        testTimeoutMs: args.testTimeoutMs,
+        suiteTimeoutMs: args.suiteTimeoutMin * 60_000,
+        profile: args.profile,
+        base: args.base,
+      });
+      const cases = [...host.cases, ...scrubCases(merged.cases, scrub)];
+      const durationS = Math.round(host.durationS * 10 + (Date.now() - mergeStarted) / 100) / 10;
+      Object.assign(host, { cases, durationS, coverageRaw: merged.summary, ...junitFor(host.id, cases, durationS) });
+      coverageNote = mergedCoverageNote(merged.summary, merged.required, merged.cases);
     }
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -961,6 +1192,7 @@ export async function main(argv) {
       failReasons,
       restricted: args.suites,
       siblings: siblingsOf(root),
+      coverageNote: root === 'tests' ? coverageNote : null,
     });
     outputs.push({ dir: join(outBase, root, 'runs', dirName), summary, md, set });
   }
