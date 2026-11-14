@@ -58,6 +58,53 @@ const GUARD_TRIGGERS_SQL = `
    WHERE NOT t.tgisinternal AND t.tgfoid = pg_catalog.to_regprocedure('platform.std_columns_guard()')
    ORDER BY 1, 2`;
 
+/** A row of GUARD_TRIGGERS_SQL. */
+interface GuardTrigger extends pg.QueryResultRow {
+  readonly table: string;
+  readonly trigger: string;
+  readonly enabled: string;
+  readonly row_level: boolean;
+  readonly before: boolean;
+  readonly on_insert: boolean;
+  readonly on_update: boolean;
+  readonly on_delete: boolean;
+  readonly on_truncate: boolean;
+}
+
+/**
+ * PR43-SEC-05 (b): the shape every guard trigger must have, on the probe and on every committed in-scope table alike:
+ * enabled in origin mode (`O`; `R` = replica-only and `A` = always also change when it fires, `D` = off), row level,
+ * BEFORE, INSERT and UPDATE, never DELETE or TRUNCATE. One finding per deviating trigger, naming it.
+ */
+const GUARD_SHAPE = { enabled: 'O', row_level: true, before: true, on_insert: true, on_update: true, on_delete: false, on_truncate: false };
+
+/** The one guard trigger row expected on an in-scope table (name from the renderer, shape {@link GUARD_SHAPE}). */
+const expectedGuard = (table: string): GuardTrigger => ({ table, trigger: `trg_${table}__std_columns`, ...GUARD_SHAPE });
+
+function guardShapeFindings(triggers: readonly GuardTrigger[]): string[] {
+  return triggers.flatMap((row) => {
+    const wrong = Object.entries(GUARD_SHAPE)
+      .filter(([key, value]) => row[key as keyof GuardTrigger] !== value)
+      .map(([key]) => `${key}=${String(row[key as keyof GuardTrigger])}`);
+    return wrong.length === 0 ? [] : [`${row.table}.${row.trigger}: ${wrong.join(', ')}`];
+  });
+}
+
+/**
+ * PR43-SEC-05 (c): BEFORE ROW triggers fire in name order (byte order of tgname), so an enabled BEFORE INSERT/UPDATE
+ * ROW trigger whose name sorts after the guard's could rewrite NEW after the guard checked it. On every table carrying
+ * a guard trigger, list every other such trigger (any enabled mode other than `D`) that sorts after it (`COLLATE "C"`).
+ */
+const AFTER_GUARD_SQL = `
+  SELECT c.relname || '.' || o.tgname AS trigger
+    FROM pg_catalog.pg_trigger g
+    JOIN pg_catalog.pg_class c ON c.oid = g.tgrelid
+    JOIN pg_catalog.pg_trigger o ON o.tgrelid = g.tgrelid AND o.oid <> g.oid AND NOT o.tgisinternal AND o.tgenabled <> 'D'
+                                AND (o.tgtype::int & 1) = 1 AND (o.tgtype::int & 2) = 2 AND (o.tgtype::int & 20) <> 0
+                                AND o.tgname COLLATE "C" > g.tgname COLLATE "C"
+   WHERE NOT g.tgisinternal AND g.tgfoid = pg_catalog.to_regprocedure('platform.std_columns_guard()')
+   ORDER BY 1`;
+
 /** A settings read or write in a function body (C15 (b)); the actor is read through platform.app_actor_id() only. */
 const SETTINGS_CALL = /\b(?:current_setting|set_config)\s*\(/i;
 
@@ -151,8 +198,15 @@ describe('catalog C15: standard-columns guard (D-ARCH-091; PR26-SEC-03)', () => 
       const scope = (await rows<{ relname: string }>(client, SCOPE_SQL, [[...READ_ONLY]])).map((row) => row.relname);
       const flagged = stdColumnsTables(ENTRIES);
       expect(scope.filter((table) => !EXEMPTIONS.has(table))).toEqual([...flagged].sort());
-      const triggers = await rows(client, GUARD_TRIGGERS_SQL);
+      const triggers = await rows<GuardTrigger>(client, GUARD_TRIGGERS_SQL);
       expect(triggers.map((row) => row['table'])).toEqual(scope.filter((table) => !EXEMPTIONS.has(table)));
+      // PR43-SEC-05 (b): per in-scope table, its one trigger has the full shape (the probe test proves this check).
+      for (const table of scope.filter((name) => !EXEMPTIONS.has(name))) {
+        expect(triggers.filter((row) => row.table === table)).toEqual([expectedGuard(table)]);
+      }
+      expect(guardShapeFindings(triggers)).toEqual([]);
+      // PR43-SEC-05 (c): no enabled BEFORE INSERT/UPDATE ROW trigger sorts after a guard on its table.
+      expect(await rows(client, AFTER_GUARD_SQL)).toEqual([]);
       expect(scope).toEqual([]); // TASK-037 applies the guard to the first runtime-writable STD tables
       expect(READ_ONLY.length + AUDIT_TABLES.length).toBeGreaterThan(0);
     } finally {
@@ -189,8 +243,48 @@ describe('catalog C15: standard-columns guard (D-ARCH-091; PR26-SEC-03)', () => 
         on_truncate: false,
       },
     ]);
+    expect(result.guarded).toEqual([expectedGuard('c15_probe')]); // the committed per-table expectation holds on the probe
     expect(result.unguarded).toEqual(['c15_unguarded']);
     expect(result.doubled.filter((row) => row['table'] === 'c15_probe')).toHaveLength(2);
+  }, 60_000);
+
+  it('[SEC-TC-74] PR43-SEC-05 (b): a guard switched to REPLICA, ALWAYS or DISABLE mode is named by the shape check the committed state runs', async () => {
+    const result = await rolledBack(async (client) => {
+      await plantGuard(client);
+      const clean = guardShapeFindings(await rows<GuardTrigger>(client, GUARD_TRIGGERS_SQL));
+      const modes: Record<string, string[]> = {};
+      for (const mode of ['ENABLE REPLICA TRIGGER', 'ENABLE ALWAYS TRIGGER', 'DISABLE TRIGGER']) {
+        await client.query(`ALTER TABLE public.c15_probe ${mode} trg_c15_probe__std_columns`);
+        modes[mode] = guardShapeFindings(await rows<GuardTrigger>(client, GUARD_TRIGGERS_SQL));
+      }
+      return { clean, modes };
+    });
+    expect(result.clean).toEqual([]);
+    expect(result.modes).toEqual({
+      'ENABLE REPLICA TRIGGER': ['c15_probe.trg_c15_probe__std_columns: enabled=R'],
+      'ENABLE ALWAYS TRIGGER': ['c15_probe.trg_c15_probe__std_columns: enabled=A'],
+      'DISABLE TRIGGER': ['c15_probe.trg_c15_probe__std_columns: enabled=D'],
+    });
+  }, 60_000);
+
+  it('[SEC-TC-74] PR43-SEC-05 (c): an enabled BEFORE INSERT/UPDATE ROW trigger sorting after the guard (byte order) is named; one sorting before, an AFTER trigger and a disabled one are not', async () => {
+    const result = await rolledBack(async (client) => {
+      await plantGuard(client);
+      const clean = await rows(client, AFTER_GUARD_SQL);
+      await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
+      await client.query(`
+        CREATE FUNCTION public.c15_noop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+        CREATE TRIGGER trg_c15_probe__aa BEFORE INSERT ON public.c15_probe FOR EACH ROW EXECUTE FUNCTION public.c15_noop();
+        CREATE TRIGGER trg_c15_probe__zz_after AFTER UPDATE ON public.c15_probe FOR EACH ROW EXECUTE FUNCTION public.c15_noop();
+        CREATE TRIGGER trg_c15_probe__zz_off BEFORE UPDATE ON public.c15_probe FOR EACH ROW EXECUTE FUNCTION public.c15_noop();
+        ALTER TABLE public.c15_probe DISABLE TRIGGER trg_c15_probe__zz_off;
+        CREATE TRIGGER trg_c15_probe__zz BEFORE UPDATE ON public.c15_probe FOR EACH ROW EXECUTE FUNCTION public.c15_noop();
+        CREATE TRIGGER "trg_c15_probe__std_columnsZ" BEFORE INSERT ON public.c15_probe FOR EACH ROW EXECUTE FUNCTION public.c15_noop();`);
+      await client.query('RESET ROLE');
+      return { clean, planted: await rows(client, AFTER_GUARD_SQL) };
+    });
+    expect(result.clean).toEqual([]);
+    expect(result.planted).toEqual([{ trigger: 'c15_probe.trg_c15_probe__std_columnsZ' }, { trigger: 'c15_probe.trg_c15_probe__zz' }]);
   }, 60_000);
 
   it('[SEC-TC-74] C15 (b): the function is owned by platform_migrator, plpgsql, not SECURITY DEFINER, proconfig {search_path=pg_catalog, pg_temp}, the body neither reads nor writes a setting', async () => {

@@ -32,13 +32,17 @@ import { findRepoRoot } from '../../../tools/test-support/process.js';
 import { APP_ROLE, MIGRATOR, PlatformPostgres, SUPERUSER } from '../harness/postgres.js';
 import {
   CONTEXT_HELPERS,
+  bodySha256,
   drA14Findings,
+  dynamicSqlFindings,
   enumCheckValues,
   scanFunctionBodies,
   scanPolicies,
   type CheckRow,
+  type DynamicSqlRow,
   type FunctionRow,
   type PolicyRow,
+  type ReviewedBody,
 } from './scans.js';
 
 const repoRoot = findRepoRoot();
@@ -299,20 +303,46 @@ const names = (list: readonly { relname: string }[]): string[] => list.map((row)
 const PROBE = 'c_probe_parcels';
 
 /**
+ * The subset of `tables` (public, unqualified names) that already exist in the catalogue the caller sees. TASK-037
+ * commits `organisations` / `memberships` and TASK-049 `users` (R1-m3): the probes plant a minimal table only when the
+ * real one is absent, so they never collide with it (42P07).
+ */
+async function committedTables(client: pg.Client, tables: readonly string[]): Promise<Set<string>> {
+  const found = await rows<{ name: string }>(
+    client,
+    `SELECT t AS name FROM pg_catalog.unnest($1::text[]) t WHERE pg_catalog.to_regclass(pg_catalog.format('public.%I', t)) IS NOT NULL`,
+    [tables],
+  );
+  return new Set(found.map((row) => row.name));
+}
+
+/**
  * Inside the caller's transaction on a superuser session: as the migrator, plant minimal `memberships` /
- * `organisations` tables (TASK-037 creates the real ones) and `platform.app_is_operator()` from its template (lead
- * decision 5), then the TENANT probe table with its leading-org_id index, seed rows (before FORCE) and the RLS block
- * rendered by tools/db/render-rls.ts.
+ * `organisations` tables when the real ones are absent (TASK-037 creates them; R1-m3) and `platform.app_is_operator()`
+ * from its template (lead decision 5), then the TENANT probe table with its leading-org_id index, seed rows (before
+ * FORCE) and the RLS block rendered by tools/db/render-rls.ts. When a real table exists, the seed rows go in as the
+ * superuser (RLS bypassed) through the same columns; TASK-037 extends the column list if its table needs more.
  */
 async function plantProbe(client: pg.Client): Promise<string> {
+  const committed = await committedTables(client, ['memberships', 'organisations']);
+  await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
+  if (!committed.has('memberships')) {
+    await client.query(`
+      CREATE TABLE public.memberships (id uuid PRIMARY KEY, org_id uuid NOT NULL, user_id uuid NOT NULL, status text NOT NULL);
+      GRANT SELECT ON public.memberships TO platform_definer;`);
+  }
+  if (!committed.has('organisations')) {
+    await client.query(`
+      CREATE TABLE public.organisations (id uuid PRIMARY KEY, type text NOT NULL);
+      GRANT SELECT ON public.organisations TO platform_definer;`);
+  }
+  if (committed.size > 0) await client.query('RESET ROLE');
+  await client.query(`
+    INSERT INTO public.organisations (id, type) VALUES ('${OPERATOR_ORG}', 'OPERATOR'), ('${ORG_A}', 'BUSINESS_CUSTOMER');
+    INSERT INTO public.memberships (id, org_id, user_id, status) VALUES
+      ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE'), ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE');`);
   await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
   await client.query(`
-    CREATE TABLE public.memberships (id uuid PRIMARY KEY, org_id uuid NOT NULL, user_id uuid NOT NULL, status text NOT NULL);
-    CREATE TABLE public.organisations (id uuid PRIMARY KEY, type text NOT NULL);
-    GRANT SELECT ON public.memberships, public.organisations TO platform_definer;
-    INSERT INTO public.organisations (id, type) VALUES ('${OPERATOR_ORG}', 'OPERATOR'), ('${ORG_A}', 'CUSTOMER');
-    INSERT INTO public.memberships (id, org_id, user_id, status) VALUES
-      ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE'), ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE');
     CREATE TABLE public.${PROBE} (id uuid PRIMARY KEY, org_id uuid NOT NULL, ref text NOT NULL);
     CREATE INDEX ix_${PROBE}__org_id ON public.${PROBE} (org_id);
     GRANT SELECT, INSERT, UPDATE ON public.${PROBE} TO platform_app;
@@ -502,12 +532,17 @@ describe('catalog-c1-c14: tenant tables (C1, C2, C3; US-074)', () => {
 
   it('C3 (PR11-SEC-10 req. 5): the rendered DR-A14 sets derive to their live rows, carry keyed atoms and hold the invariants; planted violations are named', async () => {
     const result = await rolledBack('superuser', async (client) => {
+      // R1-m3: a DR-A14 table committed by TASK-037/049 is used as it is (its policies come from its migration and its
+      // manifest entry); only an absent one is planted and rendered here, so the test holds in both states.
+      const committed = await committedTables(client, [...DR_A14_TABLES]);
       await plantProbe(client); // memberships, organisations and app_is_operator() as TASK-037 will create them
       await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
-      await client.query('CREATE TABLE public.users (id uuid PRIMARY KEY)');
-      for (const entry of DR_A14_ENTRIES) await client.query(renderRls(entry));
+      if (!committed.has('users')) await client.query('CREATE TABLE public.users (id uuid PRIMARY KEY)');
+      for (const entry of DR_A14_ENTRIES.filter((e) => !committed.has(e.name))) await client.query(renderRls(entry));
       await client.query('RESET ROLE');
-      const entries = [...ENTRIES, PROBE_ENTRY, ...DR_A14_ENTRIES];
+      const listed = new Set(ENTRIES.map((entry) => entry.name));
+      const entries = [...ENTRIES, PROBE_ENTRY, ...DR_A14_ENTRIES.filter((entry) => !listed.has(entry.name))];
+      expect([...committed].filter((table) => !listed.has(table))).toEqual([]); // a committed DR-A14 table is manifest-listed
       const live = (await rows<PolicyRow>(client, C3_SQL)).filter((row) => DR_A14_TABLES.has(row.table));
       const derived = (await derivePolicies(client, entries)).filter((row) => DR_A14_TABLES.has(row.table));
       const clean = [...scanPolicies(live, DR_A14_TABLES), ...drA14Findings(live)];
@@ -1167,14 +1202,72 @@ const OPERATORS_SQL = `
    WHERE n.nspname IN ('public', 'platform')
      AND NOT EXISTS (SELECT FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_operator'::regclass AND d.objid = o.oid AND d.deptype = 'e')
    ORDER BY 1`;
+/**
+ * PR11-SEC-14 b with PR43-SEC-06 (b): a function body that runs a computed statement. EXECUTE in plpgsql, and in EVERY
+ * language the built-ins that execute a query string (`query_to_xml`, `query_to_xmlschema`,
+ * `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite`). The scanned body is `prosrc`, or the deparsed body of a
+ * SQL-standard (`BEGIN ATOMIC`) function, whose `prosrc` is empty.
+ */
 const DYNAMIC_SQL_SQL = `
-  SELECT p.oid::regprocedure::text AS fn FROM pg_catalog.pg_proc p
-    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace JOIN pg_catalog.pg_language l ON l.oid = p.prolang
-   WHERE ${USER_NAMESPACES} AND l.lanname = 'plpgsql' AND p.prosrc OPERATOR(pg_catalog.~*) '\\mexecute\\M' ORDER BY 1`;
-/** PR11-SEC-14 b: plpgsql functions reviewed for dynamic SQL (EXECUTE of a computed statement), with the reason. */
-const DYNAMIC_SQL_REVIEWED = new Map<string, string>([
-  ['platform.ensure_audit_partitions(integer)', 'TASK-021: creates monthly audit partitions by name; security-reviewed (PR #24)'],
+  SELECT fn, body FROM (
+    SELECT p.oid::regprocedure::text AS fn, l.lanname,
+           CASE WHEN p.prosqlbody IS NULL THEN p.prosrc ELSE pg_catalog.pg_get_function_sqlbody(p.oid) END AS body
+      FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace JOIN pg_catalog.pg_language l ON l.oid = p.prolang
+     WHERE ${USER_NAMESPACES}) f
+   WHERE (f.lanname = 'plpgsql' AND f.body OPERATOR(pg_catalog.~*) '\\mexecute\\M')
+      OR f.body OPERATOR(pg_catalog.~*) '\\m(query_to_xml|query_to_xmlschema|query_to_xml_and_xmlschema|ts_stat|ts_rewrite)\\M'
+   ORDER BY 1`;
+/**
+ * PR11-SEC-14 b / PR43-SEC-06 (d): functions reviewed for dynamic SQL, keyed by signature AND the SHA-256 of the
+ * normalised body (scans.ts `normaliseBody`: every whitespace run becomes one space, then trimmed), with the reason. A
+ * changed body under the same signature is unreviewed again.
+ */
+const DYNAMIC_SQL_REVIEWED: ReadonlyMap<string, ReviewedBody> = new Map([
+  [
+    'platform.ensure_audit_partitions(integer)',
+    {
+      sha256: 'd1b613072270ac44f9a43855c348d75f1d3f47355147c32b13317c70ee406d95',
+      reason: 'TASK-021: creates monthly audit partitions by name; security-reviewed (PR #24)',
+    },
+  ],
 ]);
+
+/**
+ * PR11-SEC-11 e catalog half (R1-m4, PR43-SEC-10): no table, partitioned table, foreign table, view or materialised
+ * view in a user namespace other than `public` (C1, C2, C3 and the generator read `public` only).
+ */
+const NON_PUBLIC_RELATIONS_SQL = `
+  SELECT n.nspname || '.' || c.relname || ' (' || c.relkind::text || ')' AS relation
+    FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE ${USER_NAMESPACES} AND n.nspname <> 'public' AND c.relkind IN ('r', 'p', 'f', 'v', 'm') ORDER BY 1`;
+/** Exact relation (as NON_PUBLIC_RELATIONS_SQL renders it) -> reason. Empty: nothing lives outside `public`. */
+const NON_PUBLIC_RELATIONS_ALLOWED = new Map<string, string>();
+
+/**
+ * PR43-SEC-06 (a) catalog half: no routine SET clause and no role / database setting names standard_conforming_strings
+ * or backslash_quote (escape processing that would hide a key or an audit name without an E-string).
+ */
+const ESCAPE_SETTINGS_SQL = `
+  SELECT 'function ' || p.oid::regprocedure::text || ' ' || c AS setting FROM pg_catalog.pg_proc p, pg_catalog.unnest(p.proconfig) c
+   WHERE lower(pg_catalog.split_part(c, '=', 1)) IN ('standard_conforming_strings', 'backslash_quote')
+  UNION ALL
+  SELECT 'role ' || CASE s.setrole WHEN 0 THEN '<all>' ELSE s.setrole::regrole::text END
+         || ' database ' || CASE s.setdatabase WHEN 0 THEN '<all>' ELSE '<one>' END || ' ' || c
+    FROM pg_catalog.pg_db_role_setting s, pg_catalog.unnest(s.setconfig) c
+   WHERE lower(pg_catalog.split_part(c, '=', 1)) IN ('standard_conforming_strings', 'backslash_quote')
+   ORDER BY 1`;
+
+/**
+ * PR43-SEC-07 parameter ACL: no SET / ALTER SYSTEM grant on any parameter to PUBLIC or a platform_% role (a granted
+ * session_replication_role would let a runtime session skip every origin-mode trigger, the std-columns guard included).
+ */
+const PARAMETER_ACL_SQL = `
+  SELECT pa.parname || ' ' || a.privilege_type || ' ' || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS grant
+    FROM pg_catalog.pg_parameter_acl pa, pg_catalog.aclexplode(pa.paracl) a
+   WHERE a.grantee = 0 OR a.grantee::regrole::text LIKE 'platform\\_%'
+   ORDER BY 1`;
+const REPLICATION_ROLE_SQL = `SELECT pg_catalog.has_parameter_privilege('platform_app', 'session_replication_role', 'SET') AS app_can_set`;
 
 describe('catalog: routed object classes (PR11-SEC-15 d/e, PR24-SEC-02, PR11-SEC-14 b; TASK-024)', () => {
   it('PR11-SEC-15 d: platform_app (and so PUBLIC) holds CREATE on no schema; a planted GRANT CREATE ON SCHEMA public TO PUBLIC is named', async () => {
@@ -1205,14 +1298,104 @@ describe('catalog: routed object classes (PR11-SEC-15 d/e, PR24-SEC-02, PR11-SEC
     expect(planted).toEqual([{ operator: 'public.=(oid,oid)' }]);
   }, 60_000);
 
-  it('PR11-SEC-14 b: every plpgsql function using EXECUTE is on the reviewed dynamic-SQL list; a planted one is named', async () => {
-    const found = (await query<{ fn: string }>(DYNAMIC_SQL_SQL)).map((row) => row.fn);
-    expect(found.filter((fn) => !DYNAMIC_SQL_REVIEWED.has(fn))).toEqual([]);
+  it('PR11-SEC-14 b / PR43-SEC-06 (b): every function running a computed statement (plpgsql EXECUTE; query_to_xml family, ts_stat, ts_rewrite in any language) is reviewed; planted ones are named', async () => {
+    const found = await query<DynamicSqlRow>(DYNAMIC_SQL_SQL);
+    expect(dynamicSqlFindings(found, DYNAMIC_SQL_REVIEWED)).toEqual([]);
+    expect(found.map((row) => row.fn)).toEqual(['platform.ensure_audit_partitions(integer)']); // the reviewed entry is still seen
     const planted = await rolledBack(db.migratorConnection(database), async (client) => {
       await client.query(`CREATE FUNCTION public.c_probe_dynamic(p text) RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE p; END $$`);
+      await client.query(
+        `CREATE FUNCTION public.c_probe_xml(q text) RETURNS xml LANGUAGE sql AS $$ SELECT pg_catalog.query_to_xml(q, true, false, '') $$`,
+      );
+      await client.query(
+        `CREATE FUNCTION public.c_probe_xml_atomic() RETURNS xml LANGUAGE sql
+           BEGIN ATOMIC SELECT pg_catalog.query_to_xmlschema('SELECT 1', true, false, ''); END`,
+      );
+      await client.query(
+        `CREATE FUNCTION public.c_probe_tsstat(q text) RETURNS bigint LANGUAGE plpgsql
+           AS $$ BEGIN RETURN (SELECT count(*) FROM pg_catalog.ts_stat(q)); END $$`,
+      );
       await client.query('SET LOCAL search_path = pg_catalog, pg_temp');
-      return (await rows<{ fn: string }>(client, DYNAMIC_SQL_SQL)).map((row) => row.fn).filter((fn) => !DYNAMIC_SQL_REVIEWED.has(fn));
+      return dynamicSqlFindings(await rows<DynamicSqlRow>(client, DYNAMIC_SQL_SQL), DYNAMIC_SQL_REVIEWED).sort();
     });
-    expect(planted).toEqual(['public.c_probe_dynamic(text)']);
+    expect(planted).toEqual([
+      'public.c_probe_dynamic(text): not reviewed',
+      'public.c_probe_tsstat(text): not reviewed',
+      'public.c_probe_xml(text): not reviewed',
+      'public.c_probe_xml_atomic(): not reviewed',
+    ]);
+  }, 60_000);
+
+  it('PR43-SEC-06 (d): the reviewed list is keyed by signature plus the SHA-256 of the normalised body; a whitespace-only change passes, a body change under the same signature is named', async () => {
+    const sign = 'public.c_probe_reviewed(text)';
+    const reviewedBody = ' BEGIN EXECUTE p; END ';
+    const reviewed = new Map([...DYNAMIC_SQL_REVIEWED, [sign, { sha256: bodySha256(reviewedBody), reason: 'control' }]]);
+    const result = await rolledBack(db.migratorConnection(database), async (client) => {
+      const define = async (body: string): Promise<string[]> => {
+        await client.query(`CREATE OR REPLACE FUNCTION public.c_probe_reviewed(p text) RETURNS void LANGUAGE plpgsql AS $$${body}$$`);
+        await client.query('SET LOCAL search_path = pg_catalog, pg_temp');
+        return dynamicSqlFindings(await rows<DynamicSqlRow>(client, DYNAMIC_SQL_SQL), reviewed);
+      };
+      const same = await define(reviewedBody);
+      const reformatted = await define('\n  BEGIN\n    EXECUTE   p;\n  END\n');
+      const changed = await define(` BEGIN EXECUTE p || ' -- x'; END `);
+      return { same, reformatted, changed };
+    });
+    expect(result.same).toEqual([]);
+    expect(result.reformatted).toEqual([]);
+    expect(result.changed).toEqual([
+      `${sign}: body sha256 ${bodySha256(` BEGIN EXECUTE p || ' -- x'; END `)} is not the reviewed ${bodySha256(reviewedBody)}`,
+    ]);
+  }, 60_000);
+
+  it('PR11-SEC-11 e catalog half (R1-m4, PR43-SEC-10): no table, partitioned or foreign table, view or materialised view outside public; planted ones in platform and in a new schema are named', async () => {
+    const live = (await query<{ relation: string }>(NON_PUBLIC_RELATIONS_SQL)).map((row) => row.relation);
+    expect(live.filter((relation) => !NON_PUBLIC_RELATIONS_ALLOWED.has(relation))).toEqual([]);
+    const planted = await rolledBack('superuser', async (client) => {
+      await client.query(`
+        CREATE TABLE platform.c_probe_t (id uuid PRIMARY KEY);
+        CREATE TABLE platform.c_probe_p (id uuid NOT NULL) PARTITION BY HASH (id);
+        CREATE VIEW platform.c_probe_v AS SELECT 1 AS x;
+        CREATE MATERIALIZED VIEW platform.c_probe_m AS SELECT 1 AS x;
+        CREATE SCHEMA c_probe_schema;
+        CREATE TABLE c_probe_schema.t (id uuid);`);
+      return (await rows<{ relation: string }>(client, NON_PUBLIC_RELATIONS_SQL))
+        .map((row) => row.relation)
+        .filter((relation) => !NON_PUBLIC_RELATIONS_ALLOWED.has(relation));
+    });
+    expect(planted).toEqual([
+      'c_probe_schema.t (r)',
+      'platform.c_probe_m (m)',
+      'platform.c_probe_p (p)',
+      'platform.c_probe_t (r)',
+      'platform.c_probe_v (v)',
+    ]);
+  }, 60_000);
+
+  it('PR43-SEC-06 (a): no routine SET clause or role/database setting names standard_conforming_strings or backslash_quote; planted ones are named', async () => {
+    expect(await query(ESCAPE_SETTINGS_SQL)).toEqual([]);
+    const planted = await rolledBack('superuser', async (client) => {
+      await client.query('ALTER FUNCTION platform.app_org_id() SET standard_conforming_strings = off');
+      await client.query(`ALTER ROLE ${APP_ROLE} SET backslash_quote = on`);
+      return rows(client, ESCAPE_SETTINGS_SQL);
+    });
+    expect(planted).toEqual([
+      { setting: 'function platform.app_org_id() standard_conforming_strings=off' },
+      { setting: `role ${APP_ROLE} database <all> backslash_quote=on` },
+    ]);
+  }, 60_000);
+
+  it('PR43-SEC-07: no parameter ACL grants SET or ALTER SYSTEM to PUBLIC or a platform_% role, and platform_app cannot set session_replication_role; a planted grant is named', async () => {
+    expect(await query(PARAMETER_ACL_SQL)).toEqual([]);
+    expect(await query(REPLICATION_ROLE_SQL)).toEqual([{ app_can_set: false }]);
+    const planted = await rolledBack('superuser', async (client) => {
+      await client.query(`GRANT SET ON PARAMETER session_replication_role TO ${APP_ROLE}`);
+      await client.query('GRANT ALTER SYSTEM ON PARAMETER backslash_quote TO platform_migrator');
+      return { acl: await rows(client, PARAMETER_ACL_SQL), role: await rows(client, REPLICATION_ROLE_SQL) };
+    });
+    expect(planted).toEqual({
+      acl: [{ grant: 'backslash_quote ALTER SYSTEM platform_migrator' }, { grant: `session_replication_role SET ${APP_ROLE}` }],
+      role: [{ app_can_set: true }],
+    });
   }, 60_000);
 });

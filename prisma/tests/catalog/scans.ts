@@ -4,6 +4,8 @@
  * rows the suite selects from pg_policy / pg_proc / pg_constraint and return one finding per violation, so a failing
  * assertion names the object.
  */
+import { createHash } from 'node:crypto';
+
 import { sqlText } from '../../../tools/db/sql-text.js';
 import { CONTEXT_DISCARD, contextReads, contextWrites } from '../../../tools/db/tenant-key-forms.js';
 
@@ -141,6 +143,41 @@ export function scanFunctionBodies(rows: readonly FunctionRow[]): string[] {
     findings.push(...forms.map((form) => `${row.fn}: ${form}`));
   }
   return findings;
+}
+
+/** A row of the dynamic-SQL query: the signature and the scanned body (prosrc, or the deparsed SQL-standard body). */
+export interface DynamicSqlRow {
+  readonly fn: string;
+  readonly body: string;
+}
+
+/** A reviewed dynamic-SQL function: the SHA-256 (hex) of its normalised body and the review reason. */
+export interface ReviewedBody {
+  readonly sha256: string;
+  readonly reason: string;
+}
+
+/**
+ * The normalised body hashed by the reviewed list (PR43-SEC-06 d): every run of whitespace (`\s+`, CR and LF included)
+ * becomes one space and the result is trimmed, so a line-ending or indentation change keeps the review while any token
+ * change does not.
+ */
+export const normaliseBody = (body: string): string => body.replace(/\s+/g, ' ').trim();
+
+/** SHA-256 (hex) of the normalised body. */
+export const bodySha256 = (body: string): string => createHash('sha256').update(normaliseBody(body), 'utf8').digest('hex');
+
+/**
+ * PR11-SEC-14 b / PR43-SEC-06 (d): one finding per dynamic-SQL function that is not on the reviewed list, or whose
+ * normalised body hash differs from the reviewed one (the review binds the body, not the name).
+ */
+export function dynamicSqlFindings(rows: readonly DynamicSqlRow[], reviewed: ReadonlyMap<string, ReviewedBody>): string[] {
+  return rows.flatMap((row) => {
+    const entry = reviewed.get(row.fn);
+    if (entry === undefined) return [`${row.fn}: not reviewed`];
+    const sha256 = bodySha256(row.body);
+    return sha256 === entry.sha256 ? [] : [`${row.fn}: body sha256 ${sha256} is not the reviewed ${entry.sha256}`];
+  });
 }
 
 /** A row of the C9 query: a CHECK constraint whose definition holds an `= ANY (ARRAY[…])` list. */

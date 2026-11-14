@@ -1,9 +1,9 @@
 {
-  "$comment": "Platform bookkeeping tables in public: the Prisma migration history and the bootstrap-lane ledger (data-model §8.1), and the seed idempotency table (§3.5, TASK-023). SYSTEM: no RLS. Grants follow data-model §4.4 and prisma/sql/grants.manifest: none on _prisma_migrations and bootstrap_migrations; SELECT only for platform_app on reference_dataset_versions, whose single writer is the seed as platform_migrator, the owner (D-ARCH-075); runtimeReadOnly makes validateGrants refuse a write line for it (TASK-024).",
+  "$comment": "Platform bookkeeping tables in public: the Prisma migration history and the bootstrap-lane ledger (data-model §8.1), and the seed idempotency table (§3.5, TASK-023). SYSTEM: no RLS. Grants follow data-model §4.4 and prisma/sql/grants.manifest: none on _prisma_migrations and bootstrap_migrations; SELECT only for platform_app on reference_dataset_versions, whose single writer is the seed as platform_migrator, the owner (D-ARCH-075); runtimeReadOnly makes validateGrants refuse a write line for it (TASK-024); the two migration ledgers carry it as well (PR43-SEC-09 b): a runtime-writable ledger could mark a migration as applied, so only a SELECT line could ever parse for them (none exists).",
   "module": "platform",
   "tables": [
-    { "name": "_prisma_migrations", "class": "SYSTEM" },
-    { "name": "bootstrap_migrations", "class": "SYSTEM" },
+    { "name": "_prisma_migrations", "class": "SYSTEM", "runtimeReadOnly": true },
+    { "name": "bootstrap_migrations", "class": "SYSTEM", "runtimeReadOnly": true },
     { "name": "reference_dataset_versions", "class": "SYSTEM", "runtimeReadOnly": true }
   ]
 }
