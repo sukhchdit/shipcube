@@ -38,3 +38,4 @@
 - [PR #43 fc1](feedback_pr43_fc1.md) — no in-PR suite activation (base manifest), commit-msg rewrite via cherry-pick, ledger literal tripwire, heavy host-load reruns
 - [PR #44 fc1](feedback_pr44_fc1.md) — diff-coverage gate fails any main.ts change; exclusion denied; CJS jest blocks TLA import; declare fields
 - [PR #44 fc2](feedback_pr44_fc2.md) — entry-point testability pattern (startApi + thin main) passes diff gate; detached evidence worktree; merge semantic conflict
+- [PR #39 push](feedback_pr39_push.md) — zero main.ts diff via handler move; FAIL run burns a worktree; prisma generate unit race; lock grabbed in 1 s

@@ -145,6 +145,17 @@ const PLANNED_PRISMA_FILES = ['packages/audit/src/store/prisma-store.ts', 'apps/
 /** The database platform: the only home of the root Prisma client and of withTenantTx (ADR-0005 am. 10 item 2). */
 const DB_PLATFORM = 'apps/*/src/platform/db/**';
 /**
+ * The files that construct the Prisma client or hand its class on (PR44-SEC-01): generated.ts (the one value import of
+ * the generated client), client.ts (`new PrismaPg`, `new Client(...)`) and runtime.ts (passes `PrismaClient` from
+ * ./generated.js to client.ts). The rest of apps/*\/src/platform/db, the worker's included, is under
+ * platform/prisma-client-construction.
+ */
+const PRISMA_CLIENT_HOMES = [
+  'apps/api/src/platform/db/client.ts',
+  'apps/api/src/platform/db/generated.ts',
+  'apps/api/src/platform/db/runtime.ts',
+];
+/**
  * T-83 whole-file roots (D-ARCH-106 (5) R5, option `txFiles`): code that only ever runs inside the business
  * transaction (the audit hook, the outbox writer, the audit store). Test files are outside the rule's block.
  */
@@ -328,10 +339,18 @@ const DATABASE_CODE = { file: { categories: { anyOf: ['repository', 'db-platform
  * files, not repositories), prisma/, tools/db and tests (PR2-SEC-05 addendum, PR11-SEC-05).
  */
 const SQL_DRIVER_CODE = { file: { categories: { anyOf: ['db-platform-core', 'prisma', 'tools-db', 'test'] } } };
-/** Code that may import the generated Prisma client as a value (D-ARCH-103 (2)); the same set as the SQL driver. */
-const PRISMA_GENERATED_VALUE_CODE = SQL_DRIVER_CODE;
-const PRISMA_GENERATED_VALUE_MESSAGE =
-  'the generated Prisma client (@platform/prisma/client) is a value only in apps/*/src/platform/db (through platform/db/generated.ts), prisma/, tools/db and tests: repositories and the planned stores use import type, services and other code import nothing from it (D-ARCH-103, ADR-0003 amendment 2026-11-13).';
+/** The one application file that imports the generated Prisma client as a value (D-ARCH-103 (3), D-ARCH-114). */
+const PRISMA_GENERATED_VALUE_FILE = 'apps/api/src/platform/db/generated.ts';
+/**
+ * Code that may import the generated Prisma client as a value (D-ARCH-114, ADR-0003 amendment 2026-11-14): the one file
+ * PRISMA_GENERATED_VALUE_FILE (a file path selector, not the db-platform-core or db-root-client category, so the worker's
+ * platform/db and every other apps/api/src/platform/db file have no static value path), prisma/, tools/db and tests.
+ */
+const PRISMA_GENERATED_VALUE_CODE = [
+  { file: { path: PRISMA_GENERATED_VALUE_FILE } },
+  { file: { categories: { anyOf: ['prisma', 'tools-db', 'test'] } } },
+];
+const PRISMA_GENERATED_VALUE_MESSAGE = `the generated Prisma client (@platform/prisma/client) is a value only in ${PRISMA_GENERATED_VALUE_FILE}, prisma/, tools/db and tests: other platform/db files and the worker take the runner from createRuntimeServices and the types from platform/db/index.ts or @platform/api/runtime, repositories and the planned stores use import type, services and other code import nothing from it (D-ARCH-103, D-ARCH-114, ADR-0003 amendments 2026-11-13 and 2026-11-14).`;
 const EXPRESS_PACKAGES = ['express', 'express-serve-static-core', '@types/express', '@types/express-serve-static-core'];
 const NOT_SAME_MODULE = '!{{ from.file.captured.module }}';
 const NOT_SAME_APP = '!{{ from.file.captured.app }}';
@@ -410,9 +429,15 @@ const BOUNDARIES_POLICIES = [
   },
   { from: DATABASE_CODE, allow: PRISMA_TARGETS.map((to) => ({ to })) },
   // --- The generated client (`@platform/prisma/client`, classified by the file it resolves to: prisma/generated/**)
-  //     as a VALUE: the database platform core, prisma/, tools/db and tests only (D-ARCH-103 (2), ADR-0003 amendment
-  //     2026-11-13). Repositories and the two planned stores keep type-only imports (`import type`), allowed above.
-  //     Selected by file category: a `module.source` selector matches nothing for a workspace specifier.
+  //     as a VALUE: apps/api/src/platform/db/generated.ts, prisma/, tools/db and tests only (D-ARCH-103 (2) narrowed by
+  //     D-ARCH-114, ADR-0003 amendment 2026-11-14). Repositories and the two planned stores keep type-only imports
+  //     (`import type`), allowed above. Selected by file category: a `module.source` selector matches nothing for a
+  //     workspace specifier. Residual (D-ARCH-114 (2)): a load that is not a static import is not classified here.
+  //     PR44-SEC-01 closes it in apps/*/src and packages/*/src: platform/static-module-specifier refuses a computed
+  //     specifier and every createRequire other than createRequire(u).resolve('x'), so every load left is an import or
+  //     an import() with a literal specifier; platform/prisma-client-construction reports a value or whole-module load
+  //     of the client in every form (import(), a no-substitution template literal included, and every require form),
+  //     apps/worker/src/platform/db included. The CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
   {
     disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
     message: PRISMA_GENERATED_VALUE_MESSAGE,
@@ -810,6 +835,8 @@ export default defineConfig([
       'boundaries/root-path': ROOT,
       'boundaries/files': BOUNDARIES_FILES,
       // Besides import/export/import()/require (defaults): `createRequire(import.meta.url)('x')` and `module.require('x')`.
+      // The aliased, stored and namespaced createRequire forms are not selectable here: platform/static-module-specifier
+      // refuses them in apps/*/src and packages/*/src (PR44-SEC-01).
       'boundaries/additional-dependency-nodes': [
         {
           selector: 'CallExpression[callee.type="CallExpression"][callee.callee.name="createRequire"] > Literal',
@@ -914,9 +941,10 @@ export default defineConfig([
   },
   ...TENANT_CONTEXT_EXEMPTIONS.map(({ files, allow }) => ({ files, rules: { 'platform/tenant-context-sql': ['error', { allow }] } })),
   {
-    // A Prisma client is constructed only by the database platform, the prisma workspace, tools/db and tests.
+    // A Prisma client is constructed only by the three client homes of the database platform, the prisma workspace,
+    // tools/db and tests; the rest of apps/*/src/platform/db, the worker's included, is in (PR44-SEC-01).
     files: [`**/*.${LINTED}`],
-    ignores: [DB_PLATFORM, 'prisma/**', 'tools/db/**', ...TEST_FILES],
+    ignores: [...PRISMA_CLIENT_HOMES, 'prisma/**', 'tools/db/**', ...TEST_FILES],
     plugins: { platform },
     rules: { 'platform/prisma-client-construction': 'error' },
   },
@@ -941,11 +969,18 @@ export default defineConfig([
   },
   {
     // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
-    // code names its module with a literal, so no load escapes the import controls above.
+    // code names its module with a literal, so no load escapes the import controls above. PR44-SEC-01: createRequire
+    // itself is legal only as createRequire(<url>).resolve('<literal>') (messageId `loader`).
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
     ignores: TEST_FILES,
     plugins: { platform },
     rules: { 'platform/static-module-specifier': 'error' },
+  },
+  {
+    // D-ARCH-111 (2), ADR-0005 am. 11 item 22: no eval in application and package code, so no string becomes code that
+    // the import controls and the T-83 lint cannot see (`new Function` and string timers are @typescript-eslint/no-implied-eval, type-aware).
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    rules: { 'no-eval': 'error' },
   },
   {
     // Role defaults belong to the bootstrap lane (item 12 d). Tests are excluded (drift probes may name the statement).

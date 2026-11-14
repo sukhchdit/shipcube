@@ -22,4 +22,6 @@ Record: `docs/05-quality/security/PR-0044-TASK-020C-security-review.md`, written
 
 **How to apply (delta round):** re-run P1/P2/P4/P5 on new head vs 9def3f5 as control; check 01 fix closes F08-F11/F16/F17/A04-A06/A11-A13 while A18 `.resolve` stays clean; fresh lane-B evidence; record sim. Union with #42 (with-tenant-tx readOnly line inside admission-wrapped closure; route-phases.int 5/5 in evidence; stand-in reason → TENANT_CONCURRENCY_LIMIT) or #43 (cross-tenant.int idle 15000 → TEST_LANE constant) voids the record (sim S9/S10) → merge-only/delta round.
 
+**Superseded status:** round 2 @d943ef7 closed 01-04; see [[project-p5-pr44-r2]].
+
 Related: [[project-p5-pr38-020b]], [[project-p5-pr32-route-pipeline]], [[project-p5-pr42-audit-writer]], [[project-p5-pr43-task024-rls-generator]], [[project-security-review-conventions]]

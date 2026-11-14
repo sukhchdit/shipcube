@@ -110,9 +110,18 @@ export interface WithTenantTxDeps<TTx = unknown> {
   readonly scopeClient: (stamp: TransactionStamp) => TransactionCapableClient<TTx>;
 }
 
+/** Per-call options of `withTenantTx` (TASK-020 part 020-C). */
+export interface TenantTxCallOptions {
+  /**
+   * `true`: the transaction is READ ONLY (`SET TRANSACTION READ ONLY` right after the context statement), so any
+   * write fails with SQLSTATE 25006; the `load` route phase runs this way (ADR-0003 amendment 2026-11-13, D-ARCH-106).
+   */
+  readonly readOnly?: boolean;
+}
+
 export interface TenantTxRunner<TTx> {
   /** Runs `fn` in a tenant transaction; `fn` receives the guarded `TenantDb`, never the raw transaction client. */
-  withTenantTx<R>(ctx: TenantContext, fn: (db: TenantDb<TTx>) => Promise<R>): Promise<R>;
+  withTenantTx<R>(ctx: TenantContext, fn: (db: TenantDb<TTx>) => Promise<R>, options?: TenantTxCallOptions): Promise<R>;
   /** Start-up probe: every `app.*` setting must be NULL or '' on a fresh connection (item 4). */
   probeFreshConnection(): Promise<void>;
   /** The resolved `{ maxWait, timeout }` passed to every `$transaction`. */
@@ -397,7 +406,7 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     return new DbError(mapping);
   };
 
-  async function withTenantTx<R>(ctx: TenantContext, fn: (db: TenantDb<TTx>) => Promise<R>): Promise<R> {
+  async function withTenantTx<R>(ctx: TenantContext, fn: (db: TenantDb<TTx>) => Promise<R>, call?: TenantTxCallOptions): Promise<R> {
     if (isInsideTenantTx()) throw new DbError(dbErrorMapping(500, 'NESTED_TENANT_TX'));
     const values = contextValues(ctx, timeouts);
     const correlationId = values[4];
@@ -407,6 +416,7 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
         txClient.$transaction(async (tx) => {
           const prev = await setTenantContext(tx, values);
           if (hasLeakedContext(prev)) throw reportLeak(correlationId);
+          if (call?.readOnly === true) await tx.$queryRaw`SET TRANSACTION READ ONLY`;
           const handle = createTenantDb(tx);
           try {
             const result = await fn(handle.db);

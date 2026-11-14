@@ -5,7 +5,9 @@
  * eslint.config.mjs, which turns this rule off for those files. Type-only imports are not capabilities and pass.
  *
  * The writer is recognised by module specifier (`@platform/audit/writer`, a relative path ending `audit/src/writer`)
- * or by importing one of the writer exports from `@platform/audit`.
+ * or by importing one of the writer exports from `@platform/audit`. Loads are static imports, re-exports, `import()` and
+ * every require-style form, `createRequire` aliases and namespace members included (R1-m6, module-sources.mjs);
+ * platform/static-module-specifier refuses any `createRequire` load in the first place (PR44-SEC-01).
  */
 import { moduleSourceVisitor } from './module-sources.mjs';
 
@@ -38,6 +40,6 @@ export default {
       const isWriter =
         WRITER_MODULE.test(source) || (source === '@platform/audit' && names.some((name) => name === '*' || writerExports.has(name)));
       if (isWriter) context.report({ node, messageId: 'writerImport', data: { source } });
-    });
+    }, context.sourceCode);
   },
 };

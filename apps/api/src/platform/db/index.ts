@@ -51,6 +51,7 @@ export {
   type SecurityEventDetail,
   type TenantContext,
   tenantTxOptionsFromConfig,
+  type TenantTxCallOptions,
   TenantTxConfigError,
   type TenantTxRunner,
   type TransactionCapableClient,

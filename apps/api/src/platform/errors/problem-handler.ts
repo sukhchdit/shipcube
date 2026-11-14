@@ -2,7 +2,8 @@
 // failure as application/problem+json with a catalogue code, echoes the correlation ID (header set by the context
 // middleware, field set here), logs 5xx with the raw thrown value for the server log only, and marks the response
 // so audit capture skips it. The body is built from catalogue data and AppError's client-safe fields only; a DbError
-// contributes its catalogue code and, when retryable, `Retry-After` (never its reason, SQLSTATE or Prisma code).
+// contributes its catalogue code and, when retryable, `Retry-After` (never its reason, SQLSTATE or Prisma code); a 503
+// AppError carrying `retryAfterSeconds` (the tx slot's request deadline, PR #44 R1-M1) gets `Retry-After` too.
 import { randomUUID } from 'node:crypto';
 
 import { AppError, ERROR_CATALOGUE, type ErrorCode, presentsCredential } from '@platform/shared';
@@ -83,15 +84,18 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
  * - the route is known (the `context` step recorded its descriptor before authn ran) and its declaration makes the
  *   response private: no `anonymous` member, or a credential of a declared kind was presented. Computed here from the
  *   descriptor, so an authenticator that refuses a declared credential before marking still answers private (R1-m1);
- * - the authn slot has not read the credentials yet (404/405 fallback, body parser, a step that failed before the
- *   slot) and the request carries any credential header: the generic test, free because a problem is no-store anyway.
- * After the slot read the credentials, a foreign credential it ignored does not make the error private.
+ * - no route is known (404/405 fallback, body parser, or a descriptor local that `defineRoute` did not return) or the
+ *   authn slot has not read the credentials yet (a step that failed before the slot), and the request carries any
+ *   credential header: the generic test, free because a problem is no-store anyway.
+ * After the slot read the credentials of a known route, a foreign credential it ignored does not make the error
+ * private. An unbranded or forged descriptor local reads as no route and keeps the generic test even when the
+ * credentials-read mark is set (D-ARCH-113 (3), PR #38 code review R2-n1): fail closed, more private, never less.
  */
 const isAuthenticatedProblem = (req: Request, res: Response): boolean => {
   if (isPrivateResponse(res)) return true;
   const route = routeDescriptorOf(res);
   if (route !== undefined && declaresPrivateResponse(route.auth, req.headers)) return true;
-  return !credentialsReadOf(res) && presentsCredential(req.headers);
+  return (route === undefined || !credentialsReadOf(res)) && presentsCredential(req.headers);
 };
 
 function sendProblem(req: Request, res: Response, status: number, body: string, retryAfterSeconds?: number): void {
@@ -140,7 +144,8 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
 
       const body = JSON.stringify(problem);
       markErrorResponse(res, { code, status: problem.status });
-      sendProblem(req, res, problem.status, body, classified.kind === 'db' ? classified.retryAfterSeconds : undefined);
+      const retryAfter = classified.kind === 'db' || classified.kind === 'app' ? classified.retryAfterSeconds : undefined;
+      sendProblem(req, res, problem.status, body, retryAfter);
     } catch {
       // PR9-SEC-07: a failure inside the handler (an unserialisable `errors` entry, a hostile value) must not reach
       // Express's final handler, which answers HTML with a stack outside NODE_ENV=production.
