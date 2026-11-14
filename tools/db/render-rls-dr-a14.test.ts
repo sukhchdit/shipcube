@@ -93,7 +93,7 @@ describe('DR-A14 policy sets (data-model §4.3 as amended 2026-11-13; PR11-SEC-1
       expect([...sql.matchAll(/([a-z_.]+)\s+IN\s*\(/gi)].map((match) => match[1])).toEqual(['m.status']);
       expect(sql).not.toMatch(/NOT\s+IN|<>|!=/i);
     }
-    expect(renderRls(USERS, templates)).toContain("m.status IN ('INVITED','ACTIVE','SUSPENDED')");
+    expect(renderRls(USERS, templates)).toContain("m.status IN ('ACTIVE','SUSPENDED')");
     expect(renderRls(ORGANISATIONS, templates)).toContain("m.status IN ('ACTIVE','SUSPENDED')");
   });
 
@@ -123,7 +123,7 @@ describe('DR-A14 policy sets (data-model §4.3 as amended 2026-11-13; PR11-SEC-1
   it.each([
     [
       'a deny-list status (fail-open on enum growth)',
-      (atom: string) => atom.replace("m.status IN ('INVITED','ACTIVE','SUSPENDED')", "m.status <> 'REMOVED'"),
+      (atom: string) => atom.replace("m.status IN ('ACTIVE','SUSPENDED')", "m.status <> 'REMOVED'"),
       /forbidden token <>/,
     ],
     ['NOT IN', (atom: string) => atom.replace('m.status IN', 'm.status NOT IN'), /forbidden token NOT/],

@@ -98,7 +98,7 @@ const UNKEYED_ATOMS: ReadonlySet<string> = new Set(['org_id IS NULL', OPERATOR_S
 export const DR_A14_ATOMS: Readonly<Record<PolicySet, ReadonlySet<string>>> = {
   'dr-a14-users': new Set([
     'id = platform.app_actor_id()',
-    "EXISTS (SELECT 1 FROM public.memberships m WHERE m.user_id = {{table}}.id AND m.org_id = platform.app_org_id() AND m.status IN ('INVITED','ACTIVE','SUSPENDED'))",
+    "EXISTS (SELECT 1 FROM public.memberships m WHERE m.user_id = {{table}}.id AND m.org_id = platform.app_org_id() AND m.status IN ('ACTIVE','SUSPENDED'))",
   ]),
   'dr-a14-memberships': new Set(),
   'dr-a14-organisations': new Set([

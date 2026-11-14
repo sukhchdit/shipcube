@@ -537,7 +537,7 @@ describe('rendered RLS blocks (rules 9 and 16; PR11-SEC-03)', () => {
     };
     expect(lintDrA14('dr-a14-clean')).toEqual([]);
     expect(
-      rules(lintDrA14('dr-a14-deny-list', (sql) => sql.replace("m.status IN ('INVITED','ACTIVE','SUSPENDED')", "m.status <> 'REMOVED'"))),
+      rules(lintDrA14('dr-a14-deny-list', (sql) => sql.replace("m.status IN ('ACTIVE','SUSPENDED')", "m.status <> 'REMOVED'"))),
     ).toContain('9');
     expect(
       rules(

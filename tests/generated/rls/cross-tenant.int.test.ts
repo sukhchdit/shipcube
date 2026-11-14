@@ -297,7 +297,7 @@ describe('DR-A14 policy sets (PR11-SEC-10): positive status lists, own membershi
   const ownMemberships = 'SELECT count(*)::int AS n FROM public.memberships WHERE org_id = $1';
 
   it.each([
-    ['INVITED', 1],
+    ['INVITED', 0],
     ['ACTIVE', 1],
     ['SUSPENDED', 1],
     ['REMOVED', 0],
