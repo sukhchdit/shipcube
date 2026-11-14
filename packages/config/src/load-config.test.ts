@@ -14,6 +14,7 @@ import {
   type Config,
   CONFIG_SCHEMA,
   type ConfigKey,
+  DB_CONNECTION_TIMEOUT_MS_MIN,
   DB_POOL_MAX_LIMIT,
   DB_TX_TIMEOUT_BOUNDS,
   requiredKeysFor,
@@ -688,8 +689,11 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
     ['DB_POOL_MAX', '101', 'number.max'],
     ['DB_IDLE_TIMEOUT_MS', '0', 'number.min'],
     ['DB_IDLE_TIMEOUT_MS', '3600001', 'number.max'],
+    // R1-m2 / PR38-SEC-05: below the tenant-transaction maxWait (2000 ms) the runner cannot be built.
+    ['DB_CONNECTION_TIMEOUT_MS', '1', 'number.min'],
+    ['DB_CONNECTION_TIMEOUT_MS', '1999', 'number.min'],
     ['DB_CONNECTION_TIMEOUT_MS', '120001', 'number.max'],
-    ['DB_CONNECTION_TIMEOUT_MS', '1.5', 'number.integer'],
+    ['DB_CONNECTION_TIMEOUT_MS', '2000.5', 'number.integer'],
   ])('[m9] %s=%s is rejected (%s)', (key, value, rule) => {
     expect(rejection(() => loadConfig({ ...createTestEnv(), [key]: value }, { service: 'worker' })).issues).toEqual([
       { key, code: 'invalid', rule },
@@ -697,12 +701,16 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
   });
 
   it('[m9] explicit pool settings at the bounds are accepted', () => {
-    const env = { ...createTestEnv(), DB_POOL_MAX: '100', DB_IDLE_TIMEOUT_MS: '3600000', DB_CONNECTION_TIMEOUT_MS: '1' };
+    const env = { ...createTestEnv(), DB_POOL_MAX: '100', DB_IDLE_TIMEOUT_MS: '3600000', DB_CONNECTION_TIMEOUT_MS: '2000' };
     expect(loadConfig(env, { service: 'worker' })).toMatchObject({
       DB_POOL_MAX: 100,
       DB_IDLE_TIMEOUT_MS: 3_600_000,
-      DB_CONNECTION_TIMEOUT_MS: 1,
+      DB_CONNECTION_TIMEOUT_MS: 2_000,
     });
+    expect(DB_CONNECTION_TIMEOUT_MS_MIN).toBe(2_000);
+    expect(loadConfig({ ...createTestEnv(), DB_CONNECTION_TIMEOUT_MS: '120000' }, { service: 'api' }).DB_CONNECTION_TIMEOUT_MS).toBe(
+      120_000,
+    );
   });
 
   it('ADR-0005 am.10 item 12: the per-transaction DB_TX_* timeouts default to 5000/2000/15000 ms for both services', () => {
