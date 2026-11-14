@@ -76,6 +76,27 @@
 /packages/authz/                        @sukhchdit
 /packages/audit/                        @sukhchdit
 /packages/config/src/keys.ts            @sukhchdit
+# The start-up guards every container entrypoint and the config loader run before serving (PR39-SEC-05): the entry
+# preflight and its CLI, the NODE_OPTIONS and database-TLS guards, the tooling environment, the shared guards and the
+# environment reader.
+/packages/config/src/entry-preflight.ts @sukhchdit
+/packages/config/src/entry-preflight-cli.ts @sukhchdit
+/packages/config/src/node-options.ts    @sukhchdit
+/packages/config/src/db-tls.ts          @sukhchdit
+/packages/config/src/tooling-env.ts     @sukhchdit
+/packages/config/src/guards.ts          @sukhchdit
+/packages/config/src/environment.ts     @sukhchdit
+
+# Images, compose and infrastructure (PR39-SEC-05): base-image pins, build contexts, entrypoints and the runtime
+# hardening of every container. prisma/Dockerfile is already owned through /prisma/.
+/apps/*/Dockerfile                      @sukhchdit
+/.dockerignore                          @sukhchdit
+/.hadolint.yaml                         @sukhchdit
+/compose*.yaml                          @sukhchdit
+/compose.env                            @sukhchdit
+/infra/                                 @sukhchdit
+/tools/docker/                          @sukhchdit
+/tools/compose/                         @sukhchdit
 
 # Test, type-check and commit-message configuration (review m4): each can drop or weaken a gate.
 /jest.config.ts                         @sukhchdit

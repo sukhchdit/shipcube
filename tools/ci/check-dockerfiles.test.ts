@@ -2,15 +2,31 @@
  * Static Dockerfile rules (TASK-014, US-004; platform.md §3.2/§3.4; WAVE-00 sheet lines 530, 531, 537, 543). Every rule
  * has a passing and a failing input; the real repository Dockerfiles must all pass.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
-import { assignments, checkDockerfileText, checkRepository, copySources, instructions } from './check-dockerfiles.mjs';
+import {
+  assignments,
+  baseCodename,
+  baseImageKind,
+  checkDockerfileText,
+  checkRepository,
+  copyParts,
+  copySources,
+  crossFileBaseFindings,
+  instructions,
+  runtimeCodenameFindings,
+  stages,
+} from './check-dockerfiles.mjs';
 
 const repoRoot = findRepoRoot();
 const NODE = 'node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0';
+const DEBIAN = 'debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2';
+const OTHER_DIGEST = `@sha256:${'0'.repeat(64)}`;
 const NGINX = 'nginxinc/nginx-unprivileged:1.31.7-alpine-slim@sha256:a8cb0f33d51fa107c96fd2bd3a71aaf564ec131e9d2bdf8700944f0ed8b170d7';
 
 /** A minimal Node service Dockerfile that passes every rule; `edit` swaps lines for the negative cases. */
@@ -24,6 +40,7 @@ const good = [
   'FROM base AS runtime',
   'COPY --from=deps --chown=node:node /app/node_modules /app/node_modules',
   'COPY apps/api/package.json apps/api/',
+  'COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh',
   'USER node',
   'HEALTHCHECK --interval=5s CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "/app/healthcheck.mjs", "api"]',
   'ENTRYPOINT ["/app/entrypoint.sh"]',
@@ -88,6 +105,20 @@ describe('check-dockerfiles rules', () => {
     ['npx', 'WORKDIR /app', 'RUN npx prisma generate'],
     ['ignore-scripts', 'npm ci --ignore-scripts --include=dev', 'npm ci --include=dev'],
     ['ignore-scripts', 'npm ci --ignore-scripts --include=dev', 'npm ci --ignore-scripts --include=dev && npm install left-pad'],
+    // R1-n2: the check-install-flags predicate (npm-command.mjs npmInvocations) rejects every re-enabling spelling.
+    ['ignore-scripts', 'npm ci --ignore-scripts --include=dev', 'npm ci --ignore-scripts false --include=dev'],
+    ['ignore-scripts', 'npm ci --ignore-scripts --include=dev', 'npm ci --ignore-scripts=false --include=dev'],
+    ['ignore-scripts', 'npm ci --ignore-scripts --include=dev', 'npm ci --no-ignore-scripts --include=dev'],
+    ['ignore-scripts', 'npm ci --ignore-scripts --include=dev', 'npm clean-install --include=dev'],
+    ['entrypoint', 'ENTRYPOINT ["/app/entrypoint.sh"]', ''],
+    ['entrypoint', 'ENTRYPOINT ["/app/entrypoint.sh"]', 'ENTRYPOINT ["node", "dist/main.js"]'],
+    ['entrypoint', 'ENTRYPOINT ["/app/entrypoint.sh"]', 'ENTRYPOINT /app/entrypoint.sh'],
+    ['entrypoint', 'COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh', 'COPY tools/docker/entrypoint.sh /app/entrypoint.sh'],
+    [
+      'entrypoint',
+      'COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh',
+      'COPY --chmod=0755 tools/docker/entrypoint.sh /app/entrypoint.sh',
+    ],
     ['secret-name', 'WORKDIR /app', 'ARG NPM_TOKEN'],
     ['secret-name', 'WORKDIR /app', 'ENV DATABASE_PASSWORD=x'],
     ['secret-name', 'WORKDIR /app', 'ENV JWT_SIGNING_KEY local'],
@@ -136,6 +167,161 @@ describe('check-dockerfiles rules', () => {
 
   it('reports an empty Dockerfile', () => {
     expect(rulesOf('')).toEqual(['from-digest']);
+  });
+});
+
+describe('runtime-codename (D-ARCH-116, PR #39 R3)', () => {
+  /** The reference with a debian runtime stage that takes only the Node binary from the node stage, as apps/api does. */
+  const slim = good.replace(
+    'FROM base AS runtime',
+    [`FROM ${DEBIAN} AS runtime`, 'ENV NODE_ENV=production', 'COPY --from=base /usr/local/bin/node /usr/local/bin/node'].join('\n'),
+  );
+  const slimEdit = (from: string, to: string) => {
+    if (!slim.includes(from)) throw new Error(`fixture line not found: ${from}`);
+    return slim.replace(from, to);
+  };
+  const codenameMessages = (text: string) =>
+    checkDockerfileText(text, service)
+      .filter((finding) => finding.rule === 'runtime-codename')
+      .map((finding) => finding.message);
+
+  it('helpers: base image kind, codename and COPY parts', () => {
+    expect(baseImageKind(NODE)).toBe('node');
+    expect(baseImageKind(`docker.io/library/${DEBIAN}`)).toBe('debian');
+    expect(baseImageKind('base')).toBeUndefined();
+    expect(baseImageKind(NGINX)).toBeUndefined();
+    expect(baseCodename(NODE)).toBe('trixie');
+    expect(baseCodename(DEBIAN)).toBe('trixie');
+    expect(baseCodename(`node:24-slim${OTHER_DIGEST}`)).toBeUndefined();
+    expect(baseCodename(`debian:13-slim${OTHER_DIGEST}`)).toBeUndefined();
+    expect(baseCodename('node:24.22.3-trixie-slim')).toBeUndefined();
+    expect(copyParts('--from=base --chown=1000 /usr/local/bin/node /usr/local/bin/node')).toEqual({
+      from: 'base',
+      sources: ['/usr/local/bin/node'],
+      destination: '/usr/local/bin/node',
+    });
+    expect(copyParts('["a", "b", "/c/"]')).toEqual({ from: undefined, sources: ['a', 'b'], destination: '/c/' });
+  });
+
+  it('passes the debian runtime reference and does not apply without a debian stage', () => {
+    expect(rulesOf(slim)).toEqual([]);
+    // The node-only reference may take anything from base: (c) is about the debian runtime.
+    expect(rulesOf(edit('COPY apps/api/package.json apps/api/', 'COPY --from=base /usr/local/lib /usr/local/lib'))).toEqual([]);
+    expect(runtimeCodenameFindings(stages(instructions(good)))).toEqual([]);
+  });
+
+  it.each([
+    [
+      'node bookworm vs debian trixie',
+      `FROM ${NODE} AS base`,
+      `FROM node:24.22.3-bookworm-slim${OTHER_DIGEST} AS base`,
+      'codenames differ',
+    ],
+    [
+      'node trixie vs debian bookworm',
+      `FROM ${DEBIAN} AS runtime`,
+      `FROM debian:bookworm-slim${OTHER_DIGEST} AS runtime`,
+      'codenames differ',
+    ],
+    ['node tag without a codename', `FROM ${NODE} AS base`, `FROM node:24.22.3-slim${OTHER_DIGEST} AS base`, 'names no Debian codename'],
+    [
+      'debian tag without a codename',
+      `FROM ${DEBIAN} AS runtime`,
+      `FROM debian:13-slim${OTHER_DIGEST} AS runtime`,
+      'names no Debian codename',
+    ],
+  ])('(a) %s is a finding', (_name, from, to, message) => {
+    expect(codenameMessages(slimEdit(from, to))).toEqual(expect.arrayContaining([expect.stringContaining(message)]));
+  });
+
+  it.each([
+    ['another file from base', 'COPY --from=base /usr/local/bin/npm /usr/local/bin/npm'],
+    ['the binary to another path', 'COPY --from=base /usr/local/bin/node /usr/bin/node'],
+    ['the binary plus more', 'COPY --from=base /usr/local/bin/node /usr/local/lib/node_modules /usr/local/'],
+    ['a directory', 'COPY --from=base /usr/local/ /usr/local/'],
+    ['JSON form, another file', 'COPY --from=base ["/usr/local/lib/node_modules", "/usr/local/lib/node_modules"]'],
+    ['straight from the node image', `COPY --from=${NODE} /usr/local/lib/node_modules /usr/local/lib/node_modules`],
+  ])('(c) a debian stage that copies %s from the node stage is a finding', (_name, line) => {
+    expect(codenameMessages(slimEdit('COPY apps/api/package.json apps/api/', line))).toEqual([
+      expect.stringContaining('must copy exactly /usr/local/bin/node to /usr/local/bin/node'),
+    ]);
+  });
+
+  it('(c) a RUN --mount from the node stage into a debian stage is a finding; from a build stage it is not', () => {
+    const mounted = slimEdit(
+      'COPY apps/api/package.json apps/api/',
+      'RUN --mount=type=bind,from=base,target=/n cp -r /n/usr/local/lib /usr/local/',
+    );
+    expect(codenameMessages(mounted)).toEqual([expect.stringContaining('RUN --mount from the node stage (base)')]);
+    expect(codenameMessages(mounted.replace(',from=base,', ',from=deps,'))).toEqual([]);
+  });
+
+  it('(c) also covers a stage built from the debian stage', () => {
+    const derived = `${slim}\nFROM runtime AS final\nCOPY --from=base /usr/local/bin/npm /usr/local/bin/npm\nUSER node`;
+    expect(codenameMessages(derived)).toEqual([expect.stringContaining('must copy exactly')]);
+  });
+
+  describe('(b) cross-file byte identity', () => {
+    const api = slim;
+    const worker = slim;
+
+    it('identical node and debian references across files pass', () => {
+      expect(
+        crossFileBaseFindings([
+          { file: 'apps/api/Dockerfile', text: api },
+          { file: 'apps/worker/Dockerfile', text: worker },
+          { file: 'prisma/Dockerfile', text: good },
+        ]),
+      ).toEqual([]);
+    });
+
+    it.each([
+      ['node digest', NODE, NODE.replace(/@sha256:.*$/u, OTHER_DIGEST)],
+      ['node tag', NODE, NODE.replace('24.22.3', '24.22.4')],
+      ['node registry prefix', NODE, `docker.io/library/${NODE}`],
+      ['debian digest', DEBIAN, DEBIAN.replace(/@sha256:.*$/u, OTHER_DIGEST)],
+    ])('a %s that differs in one file is reported in that file', (_name, from, to) => {
+      const findings = crossFileBaseFindings([
+        { file: 'apps/api/Dockerfile', text: api },
+        { file: 'apps/worker/Dockerfile', text: worker },
+        { file: 'prisma/Dockerfile', text: slim.replace(from, to) },
+      ]);
+      expect(findings).toEqual([
+        {
+          file: 'prisma/Dockerfile',
+          finding: expect.objectContaining({
+            rule: 'runtime-codename',
+            message: expect.stringContaining(`FROM ${to} differs from ${from}`),
+          }),
+        },
+      ]);
+    });
+
+    it('repository mode (--root) reports the cross-file finding and exits 1', () => {
+      const root = mkdtempSync(join(tmpdir(), 'check-dockerfiles-'));
+      try {
+        for (const [dir, text] of [
+          ['apps/api', api],
+          ['apps/worker', slim.replace(DEBIAN, DEBIAN.replace(/@sha256:.*$/u, OTHER_DIGEST))],
+          ['prisma', api],
+        ] as const) {
+          mkdirSync(join(root, dir), { recursive: true });
+          writeFileSync(join(root, dir, 'Dockerfile'), text);
+        }
+        const results = checkRepository(root);
+        expect(results.map((r) => [r.file, r.findings.map((f) => f.rule)])).toEqual([
+          ['apps/api/Dockerfile', []],
+          ['apps/worker/Dockerfile', ['runtime-codename']],
+          ['prisma/Dockerfile', []],
+        ]);
+        const cli = runNode([join(repoRoot, 'tools', 'ci', 'check-dockerfiles.mjs'), '--root', root], { cwd: repoRoot });
+        expect(cli.status).toBe(1);
+        expect(cli.stderr).toContain('apps/worker/Dockerfile:');
+        expect(cli.stderr).toContain('[runtime-codename]');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });
 
