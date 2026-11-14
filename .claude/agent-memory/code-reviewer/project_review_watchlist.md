@@ -373,3 +373,8 @@ PR #23 (TASK-011 lane B heavy lane) r1 at f61e55d: CHANGES_REQUESTED (2026-11-13
 - Rulings: D-TASK020-56 accepted (pin walk, R1-n1); D-TASK020-61 settled by D-ORCH-067. PR #38 R1-m5 two-hop via tests/ still open (security).
 - Unions: #42 clean (readOnly inside admission-wrapped transaction()); #43 trips the idle ratchet at cross-tenant.int.test.ts:398 (switch to TEST_LANE constant + Docker run). Main has #40 non-docs -> fresh evidence if merged.
 - r2 = delta: re-run P1/P2/P3 loopback probes, mutants M1/M2/D3/E10, lint probes Q1/Q2 and createRequire p1/p3/p7/p8.
+
+## PR #45 (gitleaks commit-bound allow-list for PR #39 dd7a2dd, D-ORCH-068) r1 AWN at 66ae5c1 (2026-11-14)
+- Review: `docs/05-quality/reviews/PR-0045-gitleaks-allow-code-review.md`. Entry correct: regexes match only lines 272/273 of the file at dd7a2dd; 756d505 removes the values.
+- MINORs: m1 regex sources pinned by count only (value-class widening and a `(?:.*)$` tail on line 273 survive; fix = exact toEqual of the two value-free sources); m2 `allowedBy` oracle requires paths/regexes (gitleaks skips absent checks); m3 no retirement trigger (repo squash-merges; entry dead once PR #39 squashes, permanent if merge-commit).
+- Follow-up when PR #39 merges: check the entry was removed (squash) or kept (merge commit) and the description pin updated.
