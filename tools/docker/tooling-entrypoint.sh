@@ -8,7 +8,8 @@
 #
 # PR3-SEC-14 (TASK-014 round 2): before a step connects, tools/db/check-tooling-env.ts checks the URL it uses
 # (DATABASE_BOOTSTRAP_URL for bootstrap, DATABASE_MIGRATOR_URL for migrate and seed) and exits 1 naming only the
-# variable. The image holds packages/config as sources only, so every tsx run uses the @platform/source condition.
+# variable. Outside APP_ENV local/test, or with an ECS task-metadata variable set, it also refuses APP_ENV local/test
+# on ECS and every PG* variable, even empty (PR39-SEC-02, R1-n9), again by name only. The image holds packages/config as sources only, so every tsx run uses the @platform/source condition.
 #   prisma-version  verify the engine and print the Prisma CLI version; needs no network and no database (SEC-TC-64 (vi))
 #
 # No npm, no npx: TypeScript entry points run through `node <tsx cli>`; Prisma runs only through prisma-cli.mjs, which
@@ -40,7 +41,6 @@ case "$command" in
     ;;
   migrate)
     check_env DATABASE_MIGRATOR_URL
-    node tools/deps/prisma-cli.mjs --verify-only
     exec node tools/deps/prisma-cli.mjs --verify-only migrate deploy
     ;;
   seed)

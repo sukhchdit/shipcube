@@ -45,6 +45,16 @@ describe('check-tooling-env CLI (PR3-SEC-14)', () => {
       'DATABASE_MIGRATOR_URL (invalid: databaseUrl.parameterValue)',
     ],
     ['an unset variable', { APP_ENV: 'local' }, 'DATABASE_MIGRATOR_URL (missing)'],
+    [
+      'an empty PGOPTIONS in staging (PR39-SEC-02, R1-n9)',
+      { APP_ENV: 'staging', DATABASE_MIGRATOR_URL: VERIFIED, PGOPTIONS: '' },
+      'PGOPTIONS (forbidden-in-environment: pg.environment)',
+    ],
+    [
+      'APP_ENV=local inside an ECS task (PR39-SEC-02)',
+      { APP_ENV: 'local', ECS_CONTAINER_METADATA_URI_V4: 'x', DATABASE_MIGRATOR_URL: PLAIN },
+      'APP_ENV (forbidden-in-environment: appEnv.ecsTask)',
+    ],
   ])('exits 1 on %s, naming variables only', (_label, env, named) => {
     const { code, lines } = run(['DATABASE_MIGRATOR_URL'], env);
     expect(code).toBe(1);

@@ -1,5 +1,6 @@
 /**
- * PR3-SEC-14 (TASK-014): `checkToolingEnv` applies the DATABASE_URL rules to a tooling one-shot's URL, value-free.
+ * PR3-SEC-14 (TASK-014): `checkToolingEnv` applies the DATABASE_URL rules to a tooling one-shot's URL, value-free;
+ * PR39-SEC-02 / R1-n9: the ECS second signal and the PG* refusal of a hardened environment.
  */
 import { randomBytes } from 'node:crypto';
 
@@ -111,5 +112,63 @@ describe('checkToolingEnv (PR3-SEC-14)', () => {
     );
     expect(JSON.stringify(issues)).not.toContain('CHANGE_ME');
     expect(line).not.toContain('no-verify');
+  });
+});
+
+describe('checkToolingEnv: the ECS signal and PG* variables (PR39-SEC-02, R1-n9)', () => {
+  it.each(['ECS_CONTAINER_METADATA_URI', 'ECS_CONTAINER_METADATA_URI_V4'])(
+    'APP_ENV=local with %s set refuses APP_ENV (appEnv.ecsTask) even with a plain URL',
+    (ecsKey) => {
+      expect(check({ APP_ENV: 'local', [ecsKey]: 'x', [KEY]: PLAIN })).toEqual([
+        { key: 'APP_ENV', code: 'forbidden-in-environment', rule: 'appEnv.ecsTask' },
+      ]);
+    },
+  );
+
+  it('APP_ENV=test inside ECS also refuses every PG* variable', () => {
+    expect(check({ APP_ENV: 'test', ECS_CONTAINER_METADATA_URI_V4: 'x', [KEY]: PLAIN, PGHOST: 'h' })).toEqual([
+      { key: 'APP_ENV', code: 'forbidden-in-environment', rule: 'appEnv.ecsTask' },
+      { key: 'PGHOST', code: 'forbidden-in-environment', rule: 'pg.environment' },
+    ]);
+  });
+
+  it('an empty ECS variable is no signal', () => {
+    expect(check({ APP_ENV: 'local', ECS_CONTAINER_METADATA_URI_V4: '', [KEY]: PLAIN, PGHOST: 'h' })).toEqual([]);
+  });
+
+  it.each([
+    ['PGOPTIONS', ''],
+    ['PGOPTIONS', '-c statement_timeout=0'],
+    ['PGSSLMODE', 'disable'],
+    ['PGHOST', 'db.internal'],
+    ['PGPASSWORD', PASSWORD],
+  ])('APP_ENV=staging refuses %s=%p by name (even empty)', (name, value) => {
+    expect(check({ APP_ENV: 'staging', [KEY]: VERIFIED, [name]: value })).toEqual([
+      { key: name, code: 'forbidden-in-environment', rule: 'pg.environment' },
+    ]);
+    expect(check({ APP_ENV: 'production', [KEY]: VERIFIED, [name]: value })).toEqual([
+      { key: name, code: 'forbidden-in-environment', rule: 'pg.environment' },
+    ]);
+  });
+
+  it('a missing or unknown APP_ENV is hardened for PG* too (fail closed), and a missing URL does not hide them', () => {
+    expect(check({ [KEY]: PLAIN, PGHOST: 'h' })).toEqual([
+      { key: 'APP_ENV', code: 'missing' },
+      { key: 'PGHOST', code: 'forbidden-in-environment', rule: 'pg.environment' },
+    ]);
+    expect(check({ APP_ENV: 'staging', PGOPTIONS: '' })).toEqual([
+      { key: KEY, code: 'missing' },
+      { key: 'PGOPTIONS', code: 'forbidden-in-environment', rule: 'pg.environment' },
+    ]);
+  });
+
+  it.each(['local', 'test'])('APP_ENV=%s outside ECS accepts PG* variables', (appEnv) => {
+    expect(check({ APP_ENV: appEnv, [KEY]: PLAIN, PGHOST: 'postgres', PGOPTIONS: '' })).toEqual([]);
+  });
+
+  it('names PG* variables only, never their values', () => {
+    const line = formatToolingIssues(checkToolingEnv({ APP_ENV: 'staging', [KEY]: VERIFIED, PGPASSWORD: PASSWORD }, KEY));
+    expect(line).toBe('PGPASSWORD (forbidden-in-environment: pg.environment)');
+    expect(line).not.toContain(PASSWORD);
   });
 });
