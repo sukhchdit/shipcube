@@ -68,6 +68,35 @@ export function scanPolicies(rows: readonly PolicyRow[], definerTables: Readonly
   return findings;
 }
 
+/**
+ * C3 DR-A14 invariants (data-model §4.3 as amended 2026-11-13; PR11-SEC-10 requirement 5; D-ARCH-072): a `memberships`
+ * policy holds no subquery (a memberships policy reading another RLS table recurses, 42P17); every subquery of a
+ * `users` / `organisations` policy reads `public.memberships` only; an `IN (…)` list (deparsed `= ANY (ARRAY[…])`)
+ * appears only on `m.status`. The deny-list and keyed-atom checks of {@link scanPolicies} run on the same rows.
+ */
+export function drA14Findings(rows: readonly PolicyRow[]): string[] {
+  const findings: string[] = [];
+  for (const row of rows) {
+    for (const [clause, expression] of [
+      ['USING', row.qual],
+      ['WITH CHECK', row.with_check],
+    ] as const) {
+      if (expression === null) continue;
+      const name = `${row.table}.${row.policy} ${clause}`;
+      if (row.table === 'memberships' && /\bSELECT\b/i.test(expression)) findings.push(`${name}: subquery in a memberships policy (42P17)`);
+      if (row.table === 'users' || row.table === 'organisations') {
+        for (const match of expression.matchAll(/\bFROM\s+([\w".]+)/gi)) {
+          if (match[1] !== 'public.memberships') findings.push(`${name}: subquery reads ${match[1] ?? ''}, not public.memberships`);
+        }
+      }
+      for (const match of expression.matchAll(/([\w".]+)\s*=\s*ANY\s*\(/gi)) {
+        if (match[1] !== 'm.status') findings.push(`${name}: IN list on ${match[1] ?? ''}, allowed only on m.status`);
+      }
+    }
+  }
+  return findings;
+}
+
 /** A row of the prosrc query. */
 export interface FunctionRow {
   readonly fn: string;

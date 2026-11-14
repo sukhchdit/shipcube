@@ -17,7 +17,7 @@
  * TASK-116.
  */
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
@@ -26,11 +26,13 @@ import pg from 'pg';
 import { SEED_SOURCE } from '../../../tools/authz/generate.js';
 import { grantTuples, loadGrantsManifest, validateGrants } from '../../../tools/db/grants-manifest.js';
 import { renderRls } from '../../../tools/db/render-rls.js';
-import { loadTableClasses, rlsAllowList } from '../../../tools/db/table-classes.js';
+import { splitStatements } from '../../../tools/db/sql-text.js';
+import { RLS_CLASSES, loadTableClasses, rlsAllowList, type TableClassEntry } from '../../../tools/db/table-classes.js';
 import { findRepoRoot } from '../../../tools/test-support/process.js';
 import { APP_ROLE, MIGRATOR, PlatformPostgres, SUPERUSER } from '../harness/postgres.js';
 import {
   CONTEXT_HELPERS,
+  drA14Findings,
   enumCheckValues,
   scanFunctionBodies,
   scanPolicies,
@@ -44,9 +46,6 @@ const ENTRIES = loadTableClasses();
 const ALLOW_LIST = rlsAllowList(ENTRIES);
 const DEFINER_TABLES = new Set(ENTRIES.filter((e) => e.definerRead === true || e.definerPurge === true).map((e) => e.name));
 const HARD_DELETE = new Set(ENTRIES.filter((e) => e.hardDelete === true).map((e) => e.name));
-const POLICY_SNAPSHOT = JSON.parse(
-  readFileSync(join(repoRoot, 'prisma', 'tests', 'catalog', 'policies.snapshot.json'), 'utf8'),
-) as PolicyRow[];
 const APP_IS_OPERATOR_TEMPLATE = readFileSync(join(repoRoot, 'prisma', 'sql', 'function-templates', 'app-is-operator.sql'), 'utf8');
 /** RDS master at M5 (C13 (b)/(c)); empty locally. */
 const MASTER_ROLE = process.env['CATALOG_BOOTSTRAP_MASTER_ROLE'] ?? '';
@@ -326,6 +325,43 @@ async function plantProbe(client: pg.Client): Promise<string> {
   return rendered;
 }
 
+const PROBE_ENTRY: TableClassEntry = { module: 'probe', name: PROBE, class: 'TENANT' };
+/** The DR-A14 sets as TASK-037/049 will list them (rendered on the plantProbe tables plus a minimal users table). */
+const DR_A14_ENTRIES: readonly TableClassEntry[] = [
+  { module: 'probe', name: 'memberships', class: 'TENANT', policySet: 'dr-a14-memberships', definerRead: true },
+  { module: 'probe', name: 'organisations', class: 'TENANT', policySet: 'dr-a14-organisations', definerRead: true },
+  { module: 'probe', name: 'users', class: 'USER_OWNED', policySet: 'dr-a14-users', definerRead: true },
+];
+const DR_A14_TABLES: ReadonlySet<string> = new Set(DR_A14_ENTRIES.map((entry) => entry.name));
+
+/**
+ * C3 derived set (D-ARCH-072; data-model §4.6 as amended 2026-11-13): inside a savepoint that is rolled back, drop EVERY
+ * policy of the database, create the CREATE POLICY statements `renderRls` emits for each RLS manifest entry whose table
+ * exists, and read the deparsed rows back. The live rows must equal them: a policy on an unlisted table, a hand-written
+ * or edited policy and a missing policy all break the equality, and no snapshot file is edited alongside.
+ */
+async function derivePolicies(client: pg.Client, entries: readonly TableClassEntry[]): Promise<PolicyRow[]> {
+  await client.query('SAVEPOINT c3_derive');
+  try {
+    const existing = new Set(
+      (await rows<{ relname: string }>(client, `SELECT relname FROM pg_catalog.pg_class WHERE relnamespace = 'public'::regnamespace`)).map(
+        (row) => row.relname,
+      ),
+    );
+    for (const policy of await rows<{ table: string; policy: string }>(client, C3_SQL)) {
+      await client.query(`DROP POLICY ${policy.policy} ON public.${policy.table}`);
+    }
+    for (const entry of entries.filter((e) => RLS_CLASSES.has(e.class) && existing.has(e.name))) {
+      for (const statement of splitStatements(renderRls(entry)).filter((text) => /^\s*(?:--[^\n]*\n\s*)*CREATE POLICY /.test(text))) {
+        await client.query(statement);
+      }
+    }
+    return await rows<PolicyRow>(client, C3_SQL);
+  } finally {
+    await client.query('ROLLBACK TO SAVEPOINT c3_derive');
+  }
+}
+
 /** Sets the four security keys transaction-locally, as withTenantTx does (data-model §4.1). */
 async function context(client: pg.Client, org: string, actor: string, scope: 'TENANT' | 'OPERATOR'): Promise<void> {
   await client.query(
@@ -440,9 +476,76 @@ describe('catalog-c1-c14: tenant tables (C1, C2, C3; US-074)', () => {
     expect(result.malformed).toEqual([]);
   }, 60_000);
 
-  it('C3: policy definitions equal the committed snapshot and carry no forbidden token (scan proven on planted policies)', async () => {
+  it('C3 (D-ARCH-072): live pg_policies rows equal the set derived from the manifests and the renderer on a rolled-back probe; the hand-edited snapshot is retired', async () => {
     const live = await query<PolicyRow>(C3_SQL);
-    expect(live).toEqual(POLICY_SNAPSHOT);
+    expect(live).toEqual(await rolledBack('superuser', (client) => derivePolicies(client, ENTRIES)));
+    expect(existsSync(join(repoRoot, 'prisma', 'tests', 'catalog', 'policies.snapshot.json'))).toBe(false);
+    // Probe control: a rendered TENANT table derives to exactly its live rows; an added or edited policy breaks equality.
+    const control = await rolledBack('superuser', async (client) => {
+      await plantProbe(client);
+      const entries = [...ENTRIES, PROBE_ENTRY];
+      const equal = await rows<PolicyRow>(client, C3_SQL);
+      const derived = await derivePolicies(client, entries);
+      await client.query(
+        `CREATE POLICY p_${PROBE}__extra ON public.${PROBE} FOR SELECT TO platform_app USING (org_id = platform.app_org_id())`,
+      );
+      const extra = await rows<PolicyRow>(client, C3_SQL);
+      await client.query(`DROP POLICY p_${PROBE}__extra ON public.${PROBE}`);
+      await client.query(`ALTER POLICY p_${PROBE}__tenant ON public.${PROBE} USING (platform.app_org_id() = platform.app_org_id())`);
+      const edited = await rows<PolicyRow>(client, C3_SQL);
+      return { equal, derived, extra, edited };
+    });
+    expect(control.equal).toEqual(control.derived);
+    expect(control.extra).not.toEqual(control.derived);
+    expect(control.edited).not.toEqual(control.derived);
+  }, 60_000);
+
+  it('C3 (PR11-SEC-10 req. 5): the rendered DR-A14 sets derive to their live rows, carry keyed atoms and hold the invariants; planted violations are named', async () => {
+    const result = await rolledBack('superuser', async (client) => {
+      await plantProbe(client); // memberships, organisations and app_is_operator() as TASK-037 will create them
+      await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
+      await client.query('CREATE TABLE public.users (id uuid PRIMARY KEY)');
+      for (const entry of DR_A14_ENTRIES) await client.query(renderRls(entry));
+      await client.query('RESET ROLE');
+      const entries = [...ENTRIES, PROBE_ENTRY, ...DR_A14_ENTRIES];
+      const live = (await rows<PolicyRow>(client, C3_SQL)).filter((row) => DR_A14_TABLES.has(row.table));
+      const derived = (await derivePolicies(client, entries)).filter((row) => DR_A14_TABLES.has(row.table));
+      const clean = [...scanPolicies(live, DR_A14_TABLES), ...drA14Findings(live)];
+      await client.query(`
+        CREATE POLICY p_bad_recursive ON public.memberships FOR SELECT TO platform_app
+          USING (EXISTS (SELECT 1 FROM public.organisations o WHERE o.id = memberships.org_id AND o.id = platform.app_org_id()));
+        CREATE POLICY p_bad_other_table ON public.users FOR SELECT TO platform_app
+          USING (EXISTS (SELECT 1 FROM public.organisations o WHERE o.id = platform.app_org_id()));
+        CREATE POLICY p_bad_in_list ON public.organisations FOR SELECT TO platform_app
+          USING (EXISTS (SELECT 1 FROM public.memberships m WHERE m.org_id IN (organisations.id, platform.app_org_id()) AND m.user_id = platform.app_actor_id()));`);
+      const planted = drA14Findings(await rows<PolicyRow>(client, C3_SQL));
+      return { live, derived, clean, planted };
+    });
+    expect(result.live).toEqual(result.derived);
+    expect(result.live.map((row) => row.policy)).toEqual([
+      'p_memberships__definer_read',
+      'p_memberships__operator',
+      'p_memberships__own_read',
+      'p_memberships__tenant',
+      'p_organisations__active',
+      'p_organisations__definer_read',
+      'p_organisations__member_read',
+      'p_organisations__operator',
+      'p_users__definer_read',
+      'p_users__operator',
+      'p_users__org_member_read',
+      'p_users__own',
+    ]);
+    expect(result.clean).toEqual([]);
+    expect(result.planted).toEqual([
+      'memberships.p_bad_recursive USING: subquery in a memberships policy (42P17)',
+      'organisations.p_bad_in_list USING: IN list on m.org_id, allowed only on m.status',
+      'users.p_bad_other_table USING: subquery reads public.organisations, not public.memberships',
+    ]);
+  }, 60_000);
+
+  it('C3: live policies carry no forbidden token (scan proven on planted policies)', async () => {
+    const live = await query<PolicyRow>(C3_SQL);
     expect(scanPolicies(live, DEFINER_TABLES)).toEqual([]);
     const planted = await rolledBack('superuser', async (client) => {
       await plantProbe(client);
@@ -859,6 +962,7 @@ describe('catalog-c1-c14: tenant context in SQL (prosrc scan, F-07; US-075)', ()
   const MENTION = 'mentions a tenant security key';
   const COMPUTED = 'settings read with a computed key';
   const UNICODE = 'Unicode-escape string or identifier';
+  const ESCAPE = 'E-prefixed escape string';
   const NIL = `'00000000-0000-0000-0000-000000000000'`;
 
   // Every form is EXECUTED as CREATE FUNCTION (plpgsql validates the body at CREATE time), which proves it is valid
@@ -924,6 +1028,13 @@ describe('catalog-c1-c14: tenant context in SQL (prosrc scan, F-07; US-075)', ()
       'public.c_scan_unicode_string',
       String.raw`EXECUTE U&'SET LOCAL \0061pp.org_id = ''00000000-0000-0000-0000-000000000000''';`,
       [UNICODE],
+    ],
+    // PR11-SEC-16 (D-ARCH-078): an E-string spells app.org_id through hex escapes; refused token-level, never decoded.
+    [
+      "[PR11-SEC-16] EXECUTE E'SET LOCAL \\x61pp.org_id = …'",
+      'public.c_scan_escape_string',
+      String.raw`EXECUTE E'SET LOCAL \x61pp.org_id = ''00000000-0000-0000-0000-000000000000''';`,
+      [ESCAPE],
     ],
     // PR #11 review R2-n1: the scan reads the comment-stripped body, as linter rule 16 does.
     ['SET app/**/.org_id (comment inside the name)', 'public.c_scan_comment_name', `SET app/**/.org_id = ${NIL};`, [SET_RESET, MENTION]],
@@ -1037,5 +1148,71 @@ describe('catalog-c1-c14: authz escalation backstop (PR8-SEC-14, D-ARCH-069)', (
       return rows(client, ESCALATION_SQL);
     });
     expect(found).toEqual([{ role: 'CUSTOMER_VIEWER', permission: 'audit:read' }]);
+  }, 60_000);
+});
+
+/**
+ * Catalog classes routed to TASK-024 (PR11-SEC-15 d/e, PR24-SEC-02 class fix, PR11-SEC-14 b). Each committed-state
+ * assertion has a planted, rolled-back control that it names.
+ */
+const SCHEMA_CREATE_SQL = `
+  SELECT n.nspname FROM pg_catalog.pg_namespace n
+   WHERE ${USER_NAMESPACES} AND pg_catalog.has_schema_privilege('platform_app', n.oid, 'CREATE') ORDER BY 1`;
+const RULES_SQL = `
+  SELECT c.oid::regclass::text || '.' || r.rulename AS rule FROM pg_catalog.pg_rewrite r
+    JOIN pg_catalog.pg_class c ON c.oid = r.ev_class JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE ${USER_NAMESPACES} AND r.rulename <> '_RETURN' ORDER BY 1`;
+const OPERATORS_SQL = `
+  SELECT o.oid::regoperator::text AS operator FROM pg_catalog.pg_operator o JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace
+   WHERE n.nspname IN ('public', 'platform')
+     AND NOT EXISTS (SELECT FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_operator'::regclass AND d.objid = o.oid AND d.deptype = 'e')
+   ORDER BY 1`;
+const DYNAMIC_SQL_SQL = `
+  SELECT p.oid::regprocedure::text AS fn FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace JOIN pg_catalog.pg_language l ON l.oid = p.prolang
+   WHERE ${USER_NAMESPACES} AND l.lanname = 'plpgsql' AND p.prosrc OPERATOR(pg_catalog.~*) '\\mexecute\\M' ORDER BY 1`;
+/** PR11-SEC-14 b: plpgsql functions reviewed for dynamic SQL (EXECUTE of a computed statement), with the reason. */
+const DYNAMIC_SQL_REVIEWED = new Map<string, string>([
+  ['platform.ensure_audit_partitions(integer)', 'TASK-021: creates monthly audit partitions by name; security-reviewed (PR #24)'],
+]);
+
+describe('catalog: routed object classes (PR11-SEC-15 d/e, PR24-SEC-02, PR11-SEC-14 b; TASK-024)', () => {
+  it('PR11-SEC-15 d: platform_app (and so PUBLIC) holds CREATE on no schema; a planted GRANT CREATE ON SCHEMA public TO PUBLIC is named', async () => {
+    expect(await query(SCHEMA_CREATE_SQL)).toEqual([]);
+    const planted = await rolledBack('superuser', async (client) => {
+      await client.query('GRANT CREATE ON SCHEMA public TO PUBLIC');
+      return rows(client, SCHEMA_CREATE_SQL);
+    });
+    expect(planted).toEqual([{ nspname: 'public' }]);
+  }, 60_000);
+
+  it('PR11-SEC-15 e: pg_rewrite holds only the _RETURN rules of views; a planted CREATE RULE … DO ALSO is named', async () => {
+    expect(await query(RULES_SQL)).toEqual([]);
+    const planted = await rolledBack('superuser', async (client) => {
+      await client.query('CREATE RULE r_probe AS ON INSERT TO public.roles DO ALSO NOTIFY probe');
+      return rows(client, RULES_SQL);
+    });
+    expect(planted).toEqual([{ rule: 'public.roles.r_probe' }]);
+  }, 60_000);
+
+  it('PR24-SEC-02 class fix: public and platform hold no operator outside an extension; a planted operator is named', async () => {
+    expect(await query(OPERATORS_SQL)).toEqual([]);
+    const planted = await rolledBack('superuser', async (client) => {
+      await client.query('CREATE FUNCTION public.c_probe_eq(oid, oid) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT true $$');
+      await client.query('CREATE OPERATOR public.= (LEFTARG = oid, RIGHTARG = oid, FUNCTION = public.c_probe_eq)');
+      return rows(client, OPERATORS_SQL);
+    });
+    expect(planted).toEqual([{ operator: 'public.=(oid,oid)' }]);
+  }, 60_000);
+
+  it('PR11-SEC-14 b: every plpgsql function using EXECUTE is on the reviewed dynamic-SQL list; a planted one is named', async () => {
+    const found = (await query<{ fn: string }>(DYNAMIC_SQL_SQL)).map((row) => row.fn);
+    expect(found.filter((fn) => !DYNAMIC_SQL_REVIEWED.has(fn))).toEqual([]);
+    const planted = await rolledBack(db.migratorConnection(database), async (client) => {
+      await client.query(`CREATE FUNCTION public.c_probe_dynamic(p text) RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE p; END $$`);
+      await client.query('SET LOCAL search_path = pg_catalog, pg_temp');
+      return (await rows<{ fn: string }>(client, DYNAMIC_SQL_SQL)).map((row) => row.fn).filter((fn) => !DYNAMIC_SQL_REVIEWED.has(fn));
+    });
+    expect(planted).toEqual(['public.c_probe_dynamic(text)']);
   }, 60_000);
 });
