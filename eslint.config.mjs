@@ -200,6 +200,10 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   { files: ['tools/db/lint-migrations.test.ts', 'tools/db/tenant-key-forms.test.ts'], allow: ALL_CONTEXT_FORMS },
   // pg_dump's own preamble `set_config('search_path', '', false)`, asserted verbatim (no tenant key; not a session form).
   { files: ['tools/db/up-down-up.test.ts'], allow: ['setter'] },
+  // The audit head-row lock statement sets the transaction-local audit `lock_timeout` in its MATERIALIZED CTE
+  // (ADR-0007 am. 10 item 2, data-model §5.4 statement 2; TASK-025). Literal non-app key, is_local true; the store's
+  // unit test pins that this is the file's only setter and that it names `lock_timeout`. No tenant key, no read.
+  { files: ['packages/audit/src/store/prisma-store.ts'], allow: ['setter'] },
 ];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];

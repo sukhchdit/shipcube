@@ -54,8 +54,10 @@ export class AuditWriteError extends Error {
   readonly retryAfterSeconds?: number;
   /** Five-character SQLSTATE, when the failure came from PostgreSQL. */
   readonly sqlState?: string;
+  /** For INVALID_ENTRY: the offending entry field as a path (`origin.ip`, `newValue.items[2]`), never its value. */
+  readonly field?: string;
 
-  constructor(kind: AuditFailureKind, options: { readonly sqlState?: string; readonly cause?: unknown } = {}) {
+  constructor(kind: AuditFailureKind, options: { readonly sqlState?: string; readonly field?: string; readonly cause?: unknown } = {}) {
     const reason: AuditErrorReason = kind === 'LOCK_TIMEOUT' ? 'AUDIT_LOCK_TIMEOUT' : 'AUDIT_WRITE_FAILED';
     super(`Audit write failed: ${reason} (${kind})`);
     this.name = 'AuditWriteError';
@@ -65,6 +67,7 @@ export class AuditWriteError extends Error {
     this.retryable = reason === 'AUDIT_LOCK_TIMEOUT';
     if (this.retryable) this.retryAfterSeconds = AUDIT_RETRY_AFTER_SECONDS;
     if (options.sqlState !== undefined) this.sqlState = options.sqlState;
+    if (options.field !== undefined) this.field = options.field;
     if (options.cause !== undefined) causes.set(this, options.cause);
   }
 
@@ -78,6 +81,7 @@ export class AuditWriteError extends Error {
       retryable: this.retryable,
       ...(this.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: this.retryAfterSeconds }),
       ...(this.sqlState === undefined ? {} : { sqlState: this.sqlState }),
+      ...(this.field === undefined ? {} : { field: this.field }),
     };
   }
 }
@@ -119,11 +123,16 @@ function databaseFailure(error: unknown): { readonly sqlState?: string; readonly
   return { message: '' };
 }
 
-/** Classifies a failure thrown by a store statement; an `AuditWriteError` passes through unchanged. */
-export function toAuditWriteError(error: unknown): AuditWriteError {
+/**
+ * Classifies a failure thrown during the write; an `AuditWriteError` passes through unchanged. A failure that carries
+ * no SQLSTATE is reported as `fallback` (the tokeniser's own failures are `TOKENISER_FAILED`, the store's
+ * `DATABASE_ERROR`).
+ */
+export function toAuditWriteError(error: unknown, fallback: AuditFailureKind = 'DATABASE_ERROR'): AuditWriteError {
   if (error instanceof AuditWriteError) return error;
   const { sqlState, message } = databaseFailure(error);
-  const options = sqlState === undefined ? { cause: error } : { sqlState, cause: error };
+  if (sqlState === undefined) return new AuditWriteError(fallback, { cause: error });
+  const options = { sqlState, cause: error };
   if (sqlState === '55P03') return new AuditWriteError('LOCK_TIMEOUT', options);
   if (sqlState === '23514' && message.startsWith(NO_PARTITION_PREFIX)) return new AuditWriteError('PARTITION_MISSING', options);
   return new AuditWriteError('DATABASE_ERROR', options);
