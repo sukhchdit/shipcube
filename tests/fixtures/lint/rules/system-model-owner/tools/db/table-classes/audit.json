@@ -1,0 +1,8 @@
+{
+  "$comment": "Miniature audit manifest of the platform/system-model-owner fixture root (D-ARCH-124: rawSystemTable).",
+  "module": "audit",
+  "tables": [
+    { "name": "audit_entries", "class": "SYSTEM" },
+    { "name": "audit_pii_vault", "class": "SYSTEM" }
+  ]
+}

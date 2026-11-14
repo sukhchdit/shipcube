@@ -952,6 +952,12 @@ export default defineConfig([
     rules: { 'platform/db-raw-sql': 'error' },
   },
   {
+    // PR44-SEC-05 (020-D): withTenantTx alone sends `SET TRANSACTION READ ONLY` (the read-only `load` transaction; it can
+    // only restrict). Exact file; every other raw-statement form stays refused here too.
+    files: ['apps/api/src/platform/db/with-tenant-tx.ts'],
+    rules: { 'platform/db-raw-sql': ['error', { allow: ['read-only-transaction'] }] },
+  },
+  {
     // SYSTEM-class delegates are reached only through systemDelegates(tx), per model only by the module whose
     // table-class manifest declares the table (PR19-SEC-01, D-ARCH-080). The accessor's home (system-db.ts), the
     // handle that guards it (tenant-db.ts) and tests are outside the rule; every other file in apps and packages is in,

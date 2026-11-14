@@ -1,0 +1,101 @@
+{
+  "$comment": "PR44-SEC-05 (TASK-020 part 020-D): the shared corpus of the two raw-statement classifiers, the lint twin tools/eslint-rules/raw-sql-lexer.mjs (tools/lint/raw-sql-lexer.test.ts) and the TenantDb run-time guard apps/api/src/platform/db/raw-statement.ts (raw-statement.test.ts). Each case is one statement text as Prisma sends it (a template's ${...} values are $n). verdict: ok or the refused form. 'residual' cases are ALLOWED by both classifiers on purpose and say why.",
+  "cases": [
+    { "sql": "SELECT 1", "verdict": "ok" },
+    { "sql": "", "verdict": "ok" },
+    { "sql": "SELECT \"end\", \"commit\" FROM orders WHERE id = $1", "verdict": "ok" },
+    { "sql": "SELECT 'COMMIT; ROLLBACK' AS label", "verdict": "ok" },
+    { "sql": "SELECT 'it''s; COMMIT' AS label", "verdict": "ok" },
+    { "sql": "SELECT \"a\"\"; COMMIT\" FROM t", "verdict": "ok" },
+    { "sql": "SELECT 1 -- COMMIT", "verdict": "ok" },
+    { "sql": "SELECT 1 /* outer /* COMMIT */ still a comment */ + 1", "verdict": "ok" },
+    { "sql": "SELECT $body$ COMMIT; SET search_path TO x $body$ AS text", "verdict": "ok" },
+    { "sql": "SELECT E'it\\'s; COMMIT' AS text", "verdict": "ok" },
+    { "sql": "SELECT U&'d\\0061ta' AS text", "verdict": "ok" },
+    { "sql": "SELECT b'101', x'ff', n'text'", "verdict": "ok" },
+    { "sql": "UPDATE orders SET status = $1 WHERE id = $2", "verdict": "ok" },
+    { "sql": "WITH changed AS (UPDATE orders SET status = 'done' WHERE id = $1 RETURNING id) SELECT id FROM changed", "verdict": "ok" },
+    { "sql": "INSERT INTO orders (id) VALUES ($1); SELECT 2;", "verdict": "ok" },
+    { "sql": "SELECT name, setting FROM pg_settings WHERE name = $1", "verdict": "ok", "note": "reading pg_settings changes nothing" },
+    {
+      "sql": "WITH lt AS MATERIALIZED (SELECT pg_catalog.set_config('lock_timeout', $1, true) AS lock_timeout) SELECT lock_timeout FROM lt",
+      "verdict": "ok",
+      "note": "the audit store's transaction-local lock_timeout (PR #42)"
+    },
+    { "sql": "SELECT set_config('statement_timeout', $1, TRUE)", "verdict": "ok" },
+    { "sql": "SELECT do_something() AS \"do\"", "verdict": "ok" },
+    {
+      "sql": "SELECT orders_settle($1)",
+      "verdict": "ok",
+      "note": "residual: a function body that commits or sets is invisible; function bodies are bootstrap/migration DDL (that lane's linter and review), and the runtime roles cannot create functions"
+    },
+    {
+      "sql": "CALL settle_orders($1)",
+      "verdict": "ok",
+      "note": "residual: inside the tenant transaction (a transaction block) a procedure cannot COMMIT; same lane as function bodies"
+    },
+    {
+      "sql": "SELECT query_to_xml('select 1', true, false, '')",
+      "verdict": "ok",
+      "note": "residual: SQL text inside a string literal is not read (the same for rawSystemTable)"
+    },
+
+    { "sql": "COMMIT", "verdict": "transaction-control" },
+    { "sql": "commit", "verdict": "transaction-control" },
+    { "sql": "  END", "verdict": "transaction-control" },
+    { "sql": "/* done */ COMMIT", "verdict": "transaction-control" },
+    { "sql": "-- done\nROLLBACK", "verdict": "transaction-control" },
+    { "sql": "SELECT 1; ROLLBACK", "verdict": "transaction-control" },
+    { "sql": "ABORT", "verdict": "transaction-control" },
+    { "sql": "BEGIN", "verdict": "transaction-control" },
+    { "sql": "START TRANSACTION READ WRITE", "verdict": "transaction-control" },
+    { "sql": "SAVEPOINT s1", "verdict": "transaction-control" },
+    { "sql": "ROLLBACK TO SAVEPOINT s1", "verdict": "transaction-control" },
+    { "sql": "RELEASE SAVEPOINT s1", "verdict": "transaction-control" },
+    { "sql": "PREPARE TRANSACTION 'x'", "verdict": "transaction-control" },
+    { "sql": "PREPARE p AS SELECT 1", "verdict": "transaction-control", "note": "PREPARE in either form" },
+
+    { "sql": "SET search_path TO elsewhere, public", "verdict": "session" },
+    { "sql": "set session characteristics as transaction read only", "verdict": "session" },
+    { "sql": "SET LOCAL statement_timeout = 0", "verdict": "session" },
+    { "sql": "SET TRANSACTION READ ONLY", "verdict": "session", "note": "admitted only with the read-only allowance (withTenantTx)" },
+    { "sql": "SET ROLE other_role", "verdict": "session" },
+    { "sql": "RESET ALL", "verdict": "session" },
+    { "sql": "DISCARD ALL", "verdict": "session" },
+    { "sql": "LISTEN changes", "verdict": "session" },
+    { "sql": "UNLISTEN *", "verdict": "session" },
+    { "sql": "NOTIFY changes, 'x'", "verdict": "session" },
+    { "sql": "LOAD 'auto_explain'", "verdict": "session" },
+    { "sql": "EXECUTE p", "verdict": "session" },
+    { "sql": "DEALLOCATE ALL", "verdict": "session" },
+    { "sql": "SELECT 1; SET search_path TO x", "verdict": "session" },
+
+    { "sql": "DO $$ BEGIN PERFORM set_config('search_path', 'else' || 'where', false); END $$", "verdict": "anonymous-block" },
+    { "sql": "do language plpgsql $x$ begin execute 'COM' || 'MIT'; end $x$", "verdict": "anonymous-block" },
+
+    { "sql": "SELECT set_config('search_path', 'elsewhere', false)", "verdict": "session-setter" },
+    { "sql": "SELECT set_config('search_path', 'elsewhere', $1)", "verdict": "session-setter" },
+    { "sql": "SELECT set_config('search_path', 'elsewhere', 'true')", "verdict": "session-setter" },
+    { "sql": "SELECT set_config('search_path', 'elsewhere', true OR false)", "verdict": "session-setter" },
+    { "sql": "SELECT pg_catalog.\"set_config\"('search_path', 'elsewhere', false)", "verdict": "session-setter" },
+    { "sql": "SELECT set_config('search_path', 'elsewhere')", "verdict": "session-setter" },
+    { "sql": "SELECT set_config", "verdict": "session-setter" },
+    { "sql": "SELECT set_config('a', (SELECT 'b'), true", "verdict": "session-setter", "note": "unbalanced call" },
+    { "sql": "UPDATE pg_settings SET setting = 'elsewhere' WHERE name = 'search_path'", "verdict": "session-setter" },
+    { "sql": "update pg_catalog.\"pg_settings\" set setting = 'x' where name = 'y'", "verdict": "session-setter" },
+
+    { "sql": "SELECT * FROM U&\"!0061udit_entries\" UESCAPE '!'", "verdict": "unreadable" },
+    { "sql": "SELECT 'unterminated", "verdict": "unreadable" },
+    { "sql": "SELECT E'unterminated\\'", "verdict": "unreadable" },
+    { "sql": "SELECT \"unterminated", "verdict": "unreadable" },
+    { "sql": "SELECT 1 /* open", "verdict": "unreadable" },
+    { "sql": "SELECT $q$ open", "verdict": "unreadable" }
+  ],
+  "readOnlyAllowance": [
+    { "sql": "SET TRANSACTION READ ONLY", "verdict": "ok" },
+    { "sql": "set transaction read only", "verdict": "ok" },
+    { "sql": "SET TRANSACTION READ WRITE", "verdict": "session" },
+    { "sql": "SET TRANSACTION READ ONLY, ISOLATION LEVEL SERIALIZABLE", "verdict": "session" },
+    { "sql": "SET TRANSACTION READ ONLY; COMMIT", "verdict": "transaction-control" }
+  ]
+}
