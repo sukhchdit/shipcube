@@ -38,6 +38,7 @@ import { type ActiveDatabaseRuntime, databaseRuntimeFromConfig } from '../../../
 import { defaultPipelineSlots } from '../../../apps/api/src/platform/routing/pipeline.js';
 import { defineRoute, type RouteContext, type RouteDescriptor } from '../../../apps/api/src/platform/routing/define-route.js';
 import { createRuntimeLog } from '../../../apps/api/src/platform/runtime/log.js';
+import { TEST_LANE_TX_IDLE_TIMEOUT_MS } from '../../../apps/api/src/platform/tx/tests/runtime-twin.js';
 import { APP_ROLE, PlatformPostgres } from '../../../prisma/tests/harness/postgres.js';
 import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from '../../../tools/db/table-classes.js';
 import { loadApiMounts } from '../api-mounts.js';
@@ -546,7 +547,8 @@ async function serve(database: string, modules: readonly ModuleRegistration[]): 
     DB_STATEMENT_TIMEOUT_MS: 25_000,
     DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
     DB_TX_LOCK_TIMEOUT_MS: 2_000,
-    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+    // The API-lane value (D-ARCH-106 (6)): a route holding its transaction open across a call fails here too.
+    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: TEST_LANE_TX_IDLE_TIMEOUT_MS,
   } as unknown as Config;
   const log = createRuntimeLog('api', { write: () => true });
   const runtime: ActiveDatabaseRuntime<AppTransactionClient> = databaseRuntimeFromConfig(config, 'api', log);

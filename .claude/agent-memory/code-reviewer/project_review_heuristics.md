@@ -279,6 +279,9 @@ Round 2 of a spike PR (PR #6 r2):
 - **Result-shape checks after COMMIT.** Any "invalid result -> 500" check that runs after the write transaction commits invites a duplicate on retry. Probe with a recording fake runner: look for `commit` before the 500.
 - **Comment-named backstops.** When a policy comment says "the residual stays covered by rule X", lint-probe the exact residual form against rule X (here `createRequire(u)(x)` + `new PrismaClient()`: only the boundaries selector fired, the named rule did not).
 - **"Follow it or report it" lint rules:** probe a spread of a same-file const supplying the root property, and a const alias whose initialiser is a conditional/logical expression; both fell through silently.
+- **Round 2 (PR #44):** guards that handle "already happened before I subscribed" (`if (res.closed) onClose()`) need their own test; the "during phase 1" test does not kill removing them. Probe by holding an EARLIER middleware slot while the client aborts.
+- **Lint rules walking `.parent`:** ESLint's `Program.parent` is `null`, not `undefined`; a `while (current !== undefined)` walk crashes the whole lint run on module-level shapes. Probe module-level variants of every alias/def form.
+- **Name matchers for computed keys:** check `Literal` vs no-substitution `TemplateLiteral` (`nm[\`createRequire\`]`); rules that accept template literals as static specifiers often forget them as member keys.
 
 **Allow-list pins (PR #45, 2026-11-14).** When a test claims "any widened allow-list changes a test", check that the regex SOURCES are pinned exactly, not just counted; shape guards that check `^...$` let `(?:.*)$` and `[^\n]*` through. Check that test oracles modelling gitleaks AND semantics skip ABSENT keys (gitleaks does) instead of failing them, and that a commit-bound entry has a retirement trigger (main is squash-merged, so the commit drops out of every scanned range).
 

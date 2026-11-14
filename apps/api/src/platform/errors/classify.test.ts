@@ -84,6 +84,32 @@ describe('classifyThrown: DbError (PR11-SEC-09 item 6)', () => {
   });
 });
 
+describe('classifyThrown: AppError Retry-After (PR #44 R1-M1)', () => {
+  it('a 503 AppError with retryAfterSeconds keeps its Retry-After seconds', () => {
+    const error = new AppError('SERVICE_UNAVAILABLE', { retryAfterSeconds: 1 });
+    expect(classifyThrown(error)).toEqual({ kind: 'app', error, retryAfterSeconds: 1 });
+  });
+
+  it('a 503 AppError without retryAfterSeconds and a non-503 AppError with one get no Retry-After', () => {
+    const plain = new AppError('SERVICE_UNAVAILABLE');
+    const client = new AppError('CONFLICT', { retryAfterSeconds: 1 });
+    expect([classifyThrown(plain), classifyThrown(client)]).toStrictEqual([
+      { kind: 'app', error: plain },
+      { kind: 'app', error: client },
+    ]);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, 3601])('drops an out-of-range AppError Retry-After %p', (seconds) => {
+    const error = new AppError('SERVICE_UNAVAILABLE', { retryAfterSeconds: seconds });
+    expect(classifyThrown(error)).toStrictEqual({ kind: 'app', error });
+  });
+
+  it('never invokes a retryAfterSeconds getter', () => {
+    const error = Object.defineProperty(new AppError('SERVICE_UNAVAILABLE'), 'retryAfterSeconds', { get: throwing });
+    expect(classifyThrown(error)).toStrictEqual({ kind: 'app', error });
+  });
+});
+
 describe('classifyThrown', () => {
   it('keeps AppError and maps known body-parser and router failures', () => {
     const app = new AppError('NOT_FOUND');

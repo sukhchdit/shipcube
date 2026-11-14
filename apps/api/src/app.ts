@@ -32,6 +32,7 @@ import {
   type PipelineSlots,
 } from './platform/routing/pipeline.js';
 import { createRuntimeLog } from './platform/runtime/log.js';
+import { type AfterCommitQueue, createAfterCommitQueue } from './platform/tx/after-commit.js';
 
 /** Prefix of every business endpoint (REQ-API-001). */
 export const API_PREFIX = '/api/v1';
@@ -76,6 +77,11 @@ export interface AppDependencies {
   readonly apiMode?: ApiMode;
   /** Swagger UI at /api/docs (`docsOptionsFrom(config, specPath)`); absent = not mounted (404), REQ-API-003. */
   readonly docs?: DocsOptions;
+  /**
+   * Runs the routes' `afterCommit` phases (ADR-0003 amendment 2026-11-13). startApi (start-api.ts) passes the
+   * process's queue and drains it at shutdown; defaults to a queue over `logger` (tests).
+   */
+  readonly afterCommit?: AfterCommitQueue;
 }
 
 /**
@@ -93,7 +99,8 @@ export function createApp(deps: AppDependencies): Express {
   assertBootable(deps, [...deps.health, ...moduleRoutes]);
   const app = express();
   const logger = deps.logger ?? createRuntimeLog('api', process.stdout, { context: requestLogContext });
-  const slots = deps.pipeline ?? defaultPipelineSlots({ tenantTx: deps.tenantTx });
+  const afterCommit = deps.afterCommit ?? createAfterCommitQueue(logger);
+  const slots = deps.pipeline ?? defaultPipelineSlots({ tenantTx: deps.tenantTx, afterCommit });
 
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));
   app.use(requestLogger(logger));
