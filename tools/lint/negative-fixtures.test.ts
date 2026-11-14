@@ -857,8 +857,8 @@ const TENANT_DB: readonly Violation[] = [
   [
     '[D-ARCH-111] platform/static-module-specifier: an import alias of createRequire (direct and kept in a variable) and a namespace member',
     `rules/system-model-owner/${API}/orders/service/bad-create-require-alias.ts`,
-    // Three computed loads, plus (PR44-SEC-01) three createRequire uses.
-    Array<string>(6).fill('platform/static-module-specifier'),
+    // Three computed loads, plus (PR44-SEC-01) three createRequire uses, plus (PR44-SEC-14) the namespace import.
+    [...Array<string>(6).fill('platform/static-module-specifier'), 'no-restricted-imports'],
     'the import controls',
   ],
   // PR44-SEC-01: createRequire is legal only as createRequire(<url>).resolve(<literal>) (static-module-specifier `loader`).
@@ -871,8 +871,9 @@ const TENANT_DB: readonly Violation[] = [
   [
     '[PR44-SEC-01] platform/static-module-specifier: createRequire aliased, passed, returned, destructured, via import() and getBuiltinModule, a computed resolve',
     `rules/system-model-owner/${API}/orders/service/bad-create-require-escapes.ts`,
-    Array<string>(7).fill('platform/static-module-specifier'),
-    'uses createRequire other than as createRequire(<url>).resolve',
+    // PR44-SEC-14 (020-D): plus the namespace import (no-restricted-imports) and process.getBuiltinModule (no-restricted-properties).
+    [...Array<string>(7).fill('platform/static-module-specifier'), 'no-restricted-imports', 'no-restricted-properties'],
+    'the import controls',
   ],
   [
     '[PR44-SEC-01] platform/static-module-specifier: re-exporting createRequire from node:module',
@@ -881,6 +882,25 @@ const TENANT_DB: readonly Violation[] = [
     'uses createRequire other than as createRequire(<url>).resolve',
   ],
   ['[D-ARCH-111] no-eval: eval(code) in apps/api/src', `rules/no-eval/${API}/orders/service/bad-eval.ts`, 'no-eval', 'eval'],
+  // PR44-SEC-14 (TASK-020 part 020-D): built-in loaders outside every import control.
+  [
+    '[PR44-SEC-14] no-restricted-imports: Module, register, the default and a namespace import of node:module, getBuiltinModule from node:process',
+    `rules/builtin-loaders/${API}/orders/service/bad-node-module-imports.ts`,
+    [...Array<string>(5).fill('no-restricted-imports'), 'platform/node-path-only'],
+    '',
+  ],
+  [
+    '[PR44-SEC-14] no-restricted-properties: process.getBuiltinModule (direct, globalThis.process, destructured), binding, _linkedBinding, dlopen',
+    `rules/builtin-loaders/${API}/orders/service/bad-process-loaders.ts`,
+    Array<string>(6).fill('no-restricted-properties'),
+    'load built-in or native modules',
+  ],
+  [
+    '[PR44-SEC-14] no-restricted-properties: process.getBuiltinModule in packages/*/src',
+    'rules/builtin-loaders/packages/shared/src/bad-timers-builtin.ts',
+    'no-restricted-properties',
+    'load built-in or native modules',
+  ],
   // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
   [
     'platform/tenant-context-sql: SET of a double-quoted namespace and key in a repository (R2-m2)',
@@ -957,8 +977,13 @@ const TENANT_DB: readonly Violation[] = [
   ).map(([title, name, count]): Violation => [
     `[PR44-SEC-01] platform/prisma-client-construction: ${title}`,
     `rules/prisma-client-construction/${API}/orders/repository/${name}.ts`,
-    ['platform/static-module-specifier', ...Array<string>(count).fill(CLIENT_CONSTRUCTION)],
-    'PR44-SEC-01',
+    [
+      'platform/static-module-specifier',
+      ...Array<string>(count).fill(CLIENT_CONSTRUCTION),
+      // PR44-SEC-14 (020-D): a namespace or default import of node:module is refused by no-restricted-imports too.
+      ...(/-(?:namespace|default)$/u.test(name) ? ['no-restricted-imports'] : []),
+    ],
+    'PR44-SEC-',
   ]),
   [
     '[PR44-SEC-01] platform/prisma-client-construction: a second apps/api/src/platform/db file takes the client namespace',
@@ -1284,7 +1309,7 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       `rules/system-model-owner/${API}/orders/service/ok-literal-import.ts`,
     ],
     [
-      '[PR44-SEC-01] createRequire(u).resolve(literal) (the openapi/serve.ts shape, direct and namespaced) and typeof createRequire',
+      '[PR44-SEC-01] createRequire(u).resolve(literal) (the openapi/serve.ts shape) and typeof createRequire',
       `rules/system-model-owner/${API}/orders/service/ok-create-require-resolve.ts`,
     ],
     [
