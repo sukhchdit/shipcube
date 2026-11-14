@@ -49,7 +49,9 @@ const causes = new WeakMap<AuditWriteError, unknown>();
 
 /**
  * Brand of every `AuditWriteError` (R1-n6): a registry symbol, so {@link isAuditWriteError} also recognises an error
- * built by a second copy of this module (source and dist loaded side by side), where `instanceof` would not.
+ * built by a second copy of this module (source and dist loaded side by side), where `instanceof` would not. The brand
+ * is a cross-copy marker, not an authenticity check: in-process code can forge it, which only maps that object to the
+ * generic 500 / 503 audit failure (PR #42 R2-n3).
  */
 const BRAND = Symbol.for('platform.audit.AuditWriteError');
 

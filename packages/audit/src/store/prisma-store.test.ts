@@ -224,7 +224,9 @@ const ALLOWED_SETTER = `pg_catalog.${FN}('lock_timeout', ${'$'}{lockTimeoutMs}, 
 /**
  * PR #42 R1-m1 / PR42-SEC-05: the pin that bounds the `setter` exemption of prisma-store.ts. It counts with the rule's
  * own pattern (case-insensitive, whatever spacing or quoting follows), so a second setter in any spelling fails, and
- * the one hit must be the exact `lock_timeout` setter; no `app.` key anywhere in the code.
+ * the one hit must be the exact `lock_timeout` setter; no `app.` key anywhere in the file. It runs over the RAW source
+ * (PR #42 R2-n2, PR42-SEC-14): a lexical comment stripper is not string-aware, so `'/*'` … `'*\/'` literals or a
+ * template line led by `//` could hide a second setter. No comment of the file carries either text.
  */
 function setterPinViolations(code: string): string[] {
   const hits = code.match(SETTER_FORM) ?? [];
@@ -246,7 +248,7 @@ describe('store source rules (PR2-SEC-05 / PR11-SEC-05 item 2, D-ARCH-074/103, d
   });
 
   it("the file's only setter is the transaction-local audit lock_timeout (the lint exemption covers nothing else)", () => {
-    expect(setterPinViolations(code)).toEqual([]);
+    expect(setterPinViolations(source)).toEqual([]);
   });
 
   it("[PR42-SEC-05] the pin counts with the rule's own setter pattern", () => {
@@ -264,12 +266,26 @@ describe('store source rules (PR2-SEC-05 / PR11-SEC-05 item 2, D-ARCH-074/103, d
     ['a bound key', `db.$queryRaw\`SELECT pg_catalog.${FN}(${'$'}{key}, ${'$'}{lockTimeoutMs}, true)\``],
     ['a quoted function name', `db.$queryRaw\`SELECT "${FN}"${args}\``],
     ['an app key spelled with spaces', `const k = '${['app', 'org_id'].join(' . ')}';`],
+    // PR #42 R2-n2 / PR42-SEC-14: E1 (P3) and E4 hide the setter between comment-opener and -closer string literals,
+    // E2 puts it on a template line led by `//`; a comment-stripping pin passed all three.
+    [
+      'E1 (P3): a setter between /* and */ string literals',
+      `const o = '/*';\ndb.$queryRaw\`SELECT '/*', pg_catalog.${FN}${args}, '*/'\`;\nconst c = '*/';`,
+    ],
+    ['E2: a setter on a template line led by //', `db.$queryRaw\`SELECT '\n// ', pg_catalog.${FN}${args}\`;`],
+    ['E4: E1 in upper case', `const o = '/*';\ndb.$queryRaw\`SELECT '/*', PG_CATALOG.${FN.toUpperCase()}${args}, '*/'\`;\nconst c = '*/';`],
   ])('[PR42-SEC-05] mutant: %s is refused by the pin', (_label, mutant) => {
-    expect(setterPinViolations(`${code}\n${mutant}\n`)).not.toEqual([]);
+    expect(setterPinViolations(`${source}\n${mutant}\n`)).not.toEqual([]);
   });
 
   it('[PR42-SEC-05] mutant: the allowed setter rewritten to a bound key is refused by the pin', () => {
-    expect(setterPinViolations(code.replace(`${FN}('lock_timeout',`, `${FN}(${'$'}{key},`))).not.toEqual([]);
+    expect(setterPinViolations(source.replace(`${FN}('lock_timeout',`, `${FN}(${'$'}{key},`))).not.toEqual([]);
+  });
+
+  it('[PR #42 R2-n2] the comment stripper would hide E1, so the setter count must not go through it', () => {
+    const e1 = `const o = '/*';\ndb.$queryRaw\`SELECT pg_catalog.${FN}${args}\`;\nconst c = '*/';`;
+    expect(setterPinViolations(stripComments(`${source}\n${e1}\n`))).toEqual([]);
+    expect(setterPinViolations(`${source}\n${e1}\n`)).toEqual(['2 setter occurrences']);
   });
 
   it('no RETURNING, no text zero hash, no qualified multi-argument unnest or extract', () => {

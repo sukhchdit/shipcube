@@ -72,4 +72,29 @@ describe('[US-088] audit write error model (ADR-0007 am. 10 item 2; data-model Â
     expect(isAuditWriteError(new Error('x'))).toBe(false);
     expect(auditErrorCause(existing)).toBeUndefined();
   });
+
+  it('[PR #42 R2-n3] an error branded by a second copy of the module is recognised and keeps its kind and reason', () => {
+    // What a second module copy builds: its own class (so `instanceof` fails) with the same registry-symbol brand.
+    class SecondCopyAuditWriteError extends Error {
+      readonly kind = 'LOCK_TIMEOUT';
+      readonly reason = 'AUDIT_LOCK_TIMEOUT';
+      readonly status = 503;
+      constructor() {
+        super('Audit write failed: AUDIT_LOCK_TIMEOUT (LOCK_TIMEOUT)');
+        Object.defineProperty(this, Symbol.for('platform.audit.AuditWriteError'), { value: true });
+      }
+    }
+    const copy = new SecondCopyAuditWriteError();
+    expect(copy instanceof AuditWriteError).toBe(false);
+    expect(isAuditWriteError(copy)).toBe(true);
+    expect(toAuditWriteError(copy, 'TOKENISER_FAILED')).toBe(copy);
+    expect(toAuditWriteError(copy)).toMatchObject({ kind: 'LOCK_TIMEOUT', reason: 'AUDIT_LOCK_TIMEOUT', status: 503 });
+    // A plain Error, a local symbol of the same description and a brand that is not `true` are not recognised.
+    expect(isAuditWriteError(new Error('Audit write failed: AUDIT_WRITE_FAILED (HEAD_MOVED)'))).toBe(false);
+    expect(isAuditWriteError(Object.defineProperty(new Error('x'), Symbol('platform.audit.AuditWriteError'), { value: true }))).toBe(false);
+    expect(isAuditWriteError(Object.defineProperty(new Error('x'), Symbol.for('platform.audit.AuditWriteError'), { value: 'yes' }))).toBe(
+      false,
+    );
+    expect(toAuditWriteError(new Error('x'), 'TOKENISER_FAILED').kind).toBe('TOKENISER_FAILED');
+  });
 });

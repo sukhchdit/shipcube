@@ -373,10 +373,20 @@ interface ActorColumns {
   readonly sessionId: string | null;
 }
 
+/**
+ * `length` is read once and the elements by index, never through the caller's own `map` (an own `map`, or a Proxy
+ * whose `length` changes between reads, cannot smuggle unvalidated or extra roles; PR #42 R2-n1).
+ */
 function roles(value: unknown): readonly string[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > MAX_ROLES) throw invalid('actor.roles');
-  return value.map((role: unknown, index) => matching(role, ROLE_KEY, `actor.roles[${String(index)}]`));
+  if (!Array.isArray(value)) throw invalid('actor.roles');
+  const count: unknown = value.length;
+  if (typeof count !== 'number' || count > MAX_ROLES) throw invalid('actor.roles');
+  const out: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    out.push(matching(value[index], ROLE_KEY, `actor.roles[${String(index)}]`));
+  }
+  return out;
 }
 
 function actorUser(value: unknown, field: string): string {

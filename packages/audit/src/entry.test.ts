@@ -553,6 +553,52 @@ describe('[PR #42 R1-m2 / PR42-SEC-03] validate once, assemble from the snapshot
   });
 });
 
+describe('[PR #42 R2-n1] actor.roles: length read once, elements by index, the own map of the caller never called', () => {
+  const plain = withOrigin({ ip: null, userAgent: null });
+  const withRoles = (roles: unknown): AuditEntryInput =>
+    ({ ...plain, actor: { type: 'USER', userId: USER, roles, sessionId: SESSION } }) as unknown as AuditEntryInput;
+
+  it('an own map returning unvalidated values is never called: the elements are validated by index', () => {
+    const roles = Object.assign(['Owner', 'Shipper'], {
+      map: (): unknown[] => ['not a role key; DROP', 42],
+    });
+    expect(prepareEntry(withRoles(roles), OPTIONS).complete([]).actorRoles).toEqual(['Owner', 'Shipper']);
+    const hostile = Object.assign(['Owner'], { map: (): unknown[] => ['Owner'] });
+    hostile.push('has space');
+    expect(refusal(withRoles(hostile)).field).toBe('actor.roles[1]');
+  });
+
+  it('a Proxy whose length answers 1 and then 40 yields one role; 40 then 1 is refused (MAX_ROLES)', () => {
+    const flipping = (answers: number[]): { proxy: unknown; reads: () => number } => {
+      let reads = 0;
+      const target = new Array<string>(40).fill('Owner');
+      const proxy = new Proxy(target, {
+        get(inner, key, receiver) {
+          if (key === 'length') {
+            reads += 1;
+            return answers[Math.min(reads, answers.length) - 1];
+          }
+          return Reflect.get(inner, key, receiver) as unknown;
+        },
+      });
+      return { proxy, reads: () => reads };
+    };
+    const small = flipping([1, 40]);
+    expect(prepareEntry(withRoles(small.proxy), OPTIONS).complete([]).actorRoles).toEqual(['Owner']);
+    expect(small.reads()).toBe(1);
+    const large = flipping([40, 1]);
+    expect(refusal(withRoles(large.proxy)).field).toBe('actor.roles');
+    expect(large.reads()).toBe(1);
+  });
+
+  it('a length that is not a number is refused (fail closed)', () => {
+    const odd = new Proxy(['Owner'], {
+      get: (inner, key, receiver) => (key === 'length' ? '1' : (Reflect.get(inner, key, receiver) as unknown)),
+    });
+    expect(kindOf(() => prepareEntry(withRoles(odd), OPTIONS))).toBe('INVALID_ENTRY');
+  });
+});
+
 describe('[PR42-SEC-04] clear-text columns keep their shape (no query string, e-mail or raw user agent)', () => {
   it.each([
     ['route with a query string', withOrigin({ route: '/users?email=a@b.c' }), 'origin.route'],
