@@ -36,3 +36,4 @@
 - [TASK-020 part C](feedback_task020c.md) — lead-first config edit then lint specialist, story-file evidence staleness, merge-before-push loop, mid-task sheet lines
 - [PR #42 fc1](feedback_pr42_fc1.md) — merged diff gate fails unreachable branches, TenantDb surface pins, banned SQL text in tests, structuredClone realm
 - [PR #43 fc1](feedback_pr43_fc1.md) — no in-PR suite activation (base manifest), commit-msg rewrite via cherry-pick, ledger literal tripwire, heavy host-load reruns
+- [PR #44 fc1](feedback_pr44_fc1.md) — diff-coverage gate fails any main.ts change; exclusion denied; CJS jest blocks TLA import; declare fields
