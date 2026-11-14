@@ -471,3 +471,217 @@ Real `tools/ci/check-security-owned-paths.mjs` at each scenario head. Base `320e
 | Closed this round | PR32-SEC-14, PR32-SEC-16, PR32-SEC-17 (named form), PR #32 R2-n2 |
 | Merge needs from security | A record naming the final head. Because the union with `main` changes `eslint.config.mjs`, a merge-only (or delta) round is required after the union commit. Code review R1-M1 restored |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding; three LOW and three INFO follow-ups with owners and due points; the head `bdf009d` is cleared from security's side, and the coming union commit needs its own merge-only round |
+
+## Delta round 2 (fix cycle 1 + union with PR #34, head 8b3a8ed)
+
+| Field | Value |
+|---|---|
+| Head | 8b3a8edd39786b63739d8cacd5e3b4c283b29ffe |
+| Commits since round 1 | Union `976edf6` (merge of `main` `c0c31a1`, which contains PR #34 `263b790`). Six fix commits: `24e50c7` (R1-M1, R1-m3), `78039f4` (R1-m1), `5823507` (PR38-SEC-01), `c1f4918` (PR38-SEC-02 CODEOWNERS part, PR38-SEC-06 = R1-m6), `5f6e167` (PR38-SEC-05 = R1-m2), `cdd3716` (R1-n1). Evidence commit `8b3a8ed`: `cdd3716..8b3a8ed` adds only the 7 files of the evidence run |
+| Base | `main` `226c476` when this round was written. `c0c31a1..226c476` is docs-only: 8 paths under `docs/` and `.claude/agent-memory/`, including the code review round 2 and D-TASK020-40..46. The merge base is `c0c31a1`, so no re-merge is needed |
+| Lane A evidence | Run [43535675720](https://github.com/sukhchdit/shipcube/actions/runs/43535675720) on `8b3a8ed`. `fast-lane` **success**, every step executed: base-ref gates, workflow policy, install flags, migrations, lockfile provenance and delta, cooldown, `npm ci --ignore-scripts`, licences, signatures, audit + osv, lane-B `check-evidence`, `deps:rebuild`, commitlint, lint, lint-mutation, format, actionlint, type-check, unit, base-ref negative fixtures, build, build-mutation. In `scans`, Gitleaks, Semgrep and oasdiff are green. Only "Security-owned paths need a review record" failed, and with it `ci-gate`; this section is that record |
+| Lane B evidence | `docs/05-quality/tests/runs/20261114T0021Z_cdd3716`, profile `pr`, verdict PASS: api 123, catalog-c1-c14 74, integration 261 (1 skip), unit 4372 (2 skip), 0 failures. `git_sha` is `cdd3716`, `git_dirty` false, `build_clean` true, `env_overrides` `[]`. `lockfile_sha256` and `manifest_sha256` equal the head's `package-lock.json` and `tools/quality/required-suites.json` (recomputed) |
+| Owned paths | Real checker: **61** owned paths in the PR range (merge base `c0c31a1`). **22** of them changed after `bdf009d` in the PR's own commits: `.github/CODEOWNERS`, `eslint.config.mjs`, `package.json`, `tools/tsconfig.json`, 11 under `apps/api/src/platform/`, 3 under `tools/ci/`, `tools/eslint-rules/db-raw-sql.mjs`, 2 under `tools/lint/` and 1 lint fixture. The two-dot count `bdf009d..8b3a8ed` is 37: it adds 15 owned files that PR #34 brought in, which are byte-identical to `main` (R2.1) |
+| Reviewer / date | security-analyst, 2026-11-14, delta round 2. Read-only on code. Git ran in the main checkout against commit SHAs. In the PR worktree I ran only read-only commands: `git --no-optional-locks status` / `rev-parse` (clean, at `8b3a8ed`), the real `check-security-owned-paths.mjs`, and in-memory ESLint `lintText` with its config and `node_modules`. Code ran from `git archive` extracts of `cdd3716` and `bdf009d` in scratch under a resolve/load hook. No install, build, Jest or Docker run. This file is the worktree's only change |
+| Cross-check | Code review round 2 on `main` (`226c476`): APPROVED_WITH_NITS, 11/11 mutants killed, new NITs R2-n1 and R2-n2. Where we overlap, its results are cited, not repeated |
+
+### R2.1 The union `976edf6` against the §7 list
+
+**Purity.** The union is pure:
+- Against merge base `f782d95`, the branch side changed 65 paths and `main` changed 60; 4 paths overlap.
+- All 61 branch-only paths are byte-identical to `a5d135c`, and all 56 `main`-only paths are byte-identical to `c0c31a1`.
+- No path differs from both parents without one side having changed it.
+- For the 4 overlapping files, `git merge-tree --write-tree a5d135c c0c31a1` auto-merges `package.json`, `tools/tsconfig.json` and `tools/lint/negative-fixtures.test.ts` to exactly the union's blobs. `eslint.config.mjs` differs from the merge-tree result only by the 4 conflict-marker lines.
+- **Delta equivalence, both directions, for all 4 files** (`-U0` added and removed lines): the branch delta `f782d95→a5d135c` equals `c0c31a1→976edf6` (18, 1, 14 and 63 lines), and the `main` delta `f782d95→c0c31a1` equals `a5d135c→976edf6` (21, 1, 1 and 16 lines).
+- No fix commit touches `eslint.config.mjs`, `package.json`, `tools/tsconfig.json` or the lockfile. The fixes only add rows to `negative-fixtures.test.ts` (+24/-0).
+
+| §7 item | Result at `cdd3716` |
+|---|---|
+| 1. Both category lines | Kept as separate entries: `db-root-client` = `client.ts` + `generated.ts`, and `db-test-seam` = `query-counter.ts`, with its comment. `query-counter.ts` is not in `db-root-client` |
+| 2. Policy order | The `prisma-generated` value pair (`eslint.config.mjs:391-395`) directly follows `{ from: DATABASE_CODE, allow: PRISMA_TARGETS }` (`:386`). PR #34's `db-test-seam` pair is the last two `BOUNDARIES_POLICIES` entries. No policy was added after it |
+| 3. `package.json` | Both `db:generate` and `test:generated`. `test:generated` runs Jest and does not generate a client. The lockfile is unchanged since `bdf009d` |
+| 4. `tools/tsconfig.json` | `files` keeps `generated.ts` and `query-counter.ts`. `include` has no `../prisma/generated/**`. `references` keeps `../prisma/client` |
+| 5. `negative-fixtures.test.ts` | Proven by the delta equivalence: the D-ARCH-103 `TENANT_DB` rows, allowed cases and repository probes, PR #34's seam cases, and the PR19 `bad-prisma-import` / `prisma-seed` cases are all present. Lane A's base-ref negative-fixture step (fixtures of `c0c31a1`, which include PR #34's) passed against the head configs |
+| 6. Leakage-scanner `no-extraneous-dependencies` block | Present (`eslint.config.mjs`, `tests/helpers/leakage-scanner.test.ts` block) |
+| 7. Recommended fixes riding along | All of them landed as separate commits (R2.2). That makes this a delta round |
+
+**Effective lint behaviour after the union (probes, in-memory, worktree config).**
+- **P1 re-run** (the round-1 `lintprobe.mjs`, unchanged: 18 shapes x 11 importers, plus R01-R14). 212 rows. Every `boundaries`, `import-x` and construction-rule result is identical to round 1, so the union left the generated-client value boundary unchanged.
+- Only 15 rows differ, and all of them are the PR38-SEC-01 fix:
+  - the 7 bare-specifier raw-SQL cases (R01, R04, R06, R08, R10, R12, R14) now report `platform/db-raw-sql`;
+  - S05 `export * from '@platform/prisma/client'` now also draws `platform/db-raw-sql` in the 8 importers the rule lints. That includes `platform/db`, where round 1 saw it CLEAN. It is the same re-export class as R12, so it is closed by the same fix.
+  - The 5 relative-path controls report as before.
+- **Seam and root-client probe** (11 cases), all as expected:
+  - `query-counter.ts` imported from the api root, a module service, a `platform/db` sibling and `platform/tx`: refused by `boundaries/dependencies`;
+  - from an api test and `prisma/tests`: clean;
+  - `client.ts` / `generated.ts` imported from a repository or `platform/tx`: refused;
+  - from a `platform/db` sibling or `prisma/tests`: clean.
+
+### R2.2 Round-1 findings and items closed by the fix delta
+
+| Item | State | Evidence (this round, plus code review R2 where cited) |
+|---|---|---|
+| PR38-SEC-01 (LOW) | **Closed** (`5823507`) | `tools/eslint-rules/db-raw-sql.mjs:56-57` adds `@platform\/prisma(?:\/.*)?`, anchored. It matches `@platform/prisma`, `/client`, `/client.js` and `/dist/...`, but not `@platform/prismatic` or `@platform/prisma-x/client`. P1: R01-R14 bare cases 7/7 now report, and the relative controls are unchanged. The round-1 run of the same probe on `bdf009d` (0 of 7) is the positive control. 7 repository probes, 1 seeded fixture and 1 clean probe were added. The alternative-removed mutant is killed with 8 failures (code review M9) |
+| PR38-SEC-02 (LOW) | **Closed** (`c1f4918`, the CODEOWNERS part; D-ORCH-055 default "CODEOWNERS only") | `/apps/worker/src/platform/db/` is owned (`.github/CODEOWNERS:60`) and required (`check-workflow-policy.mjs:1214`). Record simulation K now turns `missing` (R2.6), so the lint-clean template `import()` / `createRequire` forms there can no longer land without a security record. The optional architect ruling that would narrow D-ARCH-103 (2) to `generated.ts` stays with principal-architect, with no due point. It is not an open finding |
+| PR38-SEC-05 (INFO) = R1-m2 | **Closed** (`5f6e167`) | `DB_CONNECTION_TIMEOUT_MS_MIN = 2_000` (`packages/config/src/schema.ts:167`) feeds `t.int(MIN, 120_000)` (`:273`). A parity test pins `MIN === DEFAULT_MAX_WAIT_MS`, and the floor builds the runner while the floor minus 1 throws. The `process-env` test gives exit 78 with the key named, for api and worker. `.env.example`, `compose.env` and the default stay at 5000, and no other setter is below 2000 (grep). Mutants M7/M8 are killed (code review) |
+| PR38-SEC-06 (INFO) = R1-m6 | **Closed** (`c1f4918`) | `/packages/shared/src/http/`, `/tests/api/helpers/cache-control.ts`, `/tests/api/helpers/contract-validator.ts` and `/tests/contract-stubs/` are owned and required. Record simulations J, J2, J3 and J4 now turn `missing`, and the neighbour controls stay `pass` (R2.6) |
+| PR32-SEC-15 regression tests (R1-M1) | **Restored** (`24e50c7`) | The `[R2-n1] [PR32-SEC-15] the descriptor is deep-frozen` block at `cdd3716` is **byte-identical** to the block on `main` `c0c31a1`, 44 lines (`cmp`). `frozenData` and `define-route.ts` are unchanged since `bdf009d`. Both tests pass in the evidence JUnit. The unfreeze mutant is killed (code review M1). PR32-SEC-15 is pinned again |
+| R1-m3 (per-key leak check) | **Closed** (`24e50c7`) | `runner-activation.int.test.ts` checks each key separately: `for (const key of [...]) expect(body).not.toHaveProperty(key)`. The 3 `[D-ARCH-104]` cases pass in the evidence integration JUnit |
+| R1-m1 | **Closed** (`78039f4`); security view in R2.3 | No new finding |
+
+### R2.3 R1-m1: no request input flips the private decision (probe M1, differential)
+
+**Change.**
+- `isAuthenticatedProblem` (`problem-handler.ts:90-95`) is now `isPrivateResponse(res) || (routeDescriptorOf(res) !== undefined && declaresPrivateResponse(route.auth, headers)) || (!credentialsReadOf(res) && presentsCredential(headers))`.
+- `declaresPrivateResponse` (`route-state.ts:134`) is the one definition the authn stub (`authenticate.ts:35`) also uses: no `anonymous` member, or a credential of a declared kind is presented through `presentedKinds(headers, auth)`.
+
+**Probe.** The real `createApp` and `defineRoute` from the `cdd3716` extract, with the `bdf009d` extract as the positive control. Raw-socket requests to a loopback port; the output is status, `Cache-Control` and booleans only.
+- **4 authenticators:** the production stub; "refuses before marking" (calls `markCredentialsRead`, then 401, which is the R1-m1 shape); "never marks read" (401 without `markCredentialsRead`); and "lets anonymous through, then the handler throws" (500).
+- **6 sets:** all of `ROUTE_AUTH_SETS`.
+- **16 header shapes:**
+  - none; `Bearer`; lower-case `bearer`; whitespace-only `Authorization`; `Basic`;
+  - two `Authorization` lines with a blank first (Node keeps the first);
+  - the refresh cookie; its name lower-cased; an unrelated cookie; two `Cookie` lines with the admin refresh cookie in the second; the cookie name without `=`;
+  - `X-Quote-Token`; a blank token; two token lines with a blank first; all three kinds together;
+  - a JSON body carrying `__proto__`, `routeDescriptor`, `routeCredentialsRead` and `routePrivateResponse` keys, plus an `X-Route-Descriptor` header.
+- **Also:** 5 shapes on an unknown path (the 404 fallback) per authenticator. 404 rows per head.
+- **Independent oracle.** "Declared" means a kind in the set is presented, after Node's header delivery: the first `Authorization` line wins, `Cookie` lines are joined with `; `, token lines with `, `. Expected private = no `anonymous` member, or declared. For the "never marks read" authenticator, any credential also counts. On the 404 fallback, any credential.
+
+| Measure | `cdd3716` (head) | `bdf009d` (control) |
+|---|---|---|
+| Rows that disagree with the oracle | **0** of 404 | 0 for the stub, the never-marks authenticator and the 404 fallback (the oracle the old handler implements) |
+| Declared credential answered without `private` | **0** of 72 declared rows | **22** (the R1-m1 defect, reproduced) |
+| Foreign-only credential made private after the slot read the credentials | **0** | 0 |
+| Status codes changed between the heads | 0 | |
+| Forged-body rows that differ from the plain request | 0 | 0 |
+
+**Transitions** from `bdf009d` to `cdd3716` all go one way, `no-store` → `private, no-store`, and never the reverse:
+- 68 from "refuses before marking";
+- 28 from "never marks read": sets without `anonymous`, no credential, now private by declaration;
+- 4 from "anonymous then throws": a declared bearer on `[anonymous, session]`.
+
+**Brand check.**
+- `isDefinedRoute` is membership in a module-private `WeakSet` (`define-route.ts:432-436`), filled only with the frozen return value of `defineRoute` (`:466`). No object built from request data (`JSON.parse` output, headers, query) can be a member.
+- The `routeDescriptor` local sits in Express 5.3.0's null-prototype `res.locals`. It has one writer: `setRouteDescriptor` in the `context` step (`pipeline.ts:65`), the first per-route step, before authn.
+- `mountRoutes` refuses unbranded descriptors.
+- Overwriting the local needs in-process code, so security concurs with code review R2-n1 (NIT, next touch). No security finding.
+
+**Cost.**
+- `presentedKinds` uses no regular expression, only `split`, `indexOf` and `trim` over the declared headers.
+- The problem handler now calls it once more per error on a known route. The work is linear and adds no new cost class.
+
+### R2.4 `tools/ci` and the required-path list: no check weakened
+
+- **`check-workflow-policy.mjs` (+7/-0).** Five entries are appended inside the frozen `REQUIRED_CODEOWNED_PATHS` (`:1212-1218`); 36 required paths become 41. `checkCodeowners` is unchanged, and an added required path can only add findings.
+  - The real `checkCodeowners` reports 0 findings on the head CODEOWNERS.
+  - For each of the 5 new lines, deleting it, commenting it out or stripping its owner yields exactly 1 finding.
+- **`check-workflow-policy.test.ts` (+26/-0, one fixture line).** The complete-coverage fixture gains `/tests/ @o`. Three new required paths sit under `tests/`, so without it that test would fail. It still asserts 0 findings on a complete fixture, and the new per-path mutation tests (deleted, commented, ownerless) carry the negative side. Code review R2 reached the same ruling.
+- **`check-security-owned-paths.test.ts` (+17/-0).** `check-security-owned-paths.mjs` is unchanged. Its `ownedPaths` over the head CODEOWNERS owns the 6 new-path samples and leaves `apps/worker/src/jobs/`, `apps/worker/src/platform/health/`, `packages/shared/src/errors/`, `tests/api/helpers/formats.ts` and `packages/config/src/schema.ts` unowned.
+- **`tools/lint/lint-fixtures.mjs` (+17/-0).** Only `REPO_PROBES` entries are added, linted in memory (`lintText`), so no file is written into `apps/`.
+- **`negative-fixtures.test.ts` (+24/-0).** Rows only.
+- **When it takes effect.** Lane A runs the base-ref copy of the gate tooling, so the new required paths are enforced from the first PR after this merge. Meanwhile, `check-security-owned-paths.mjs` reads the base **and** head CODEOWNERS, so the new owned paths already count for this PR (61 owned).
+
+### R2.5 Evidence and D-TASK020-46 (`.git/info/exclude`)
+
+- **D-SEC-PR23-02 statements.**
+  - The PR body's fix-cycle gate table states, verbatim: "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first; `.git/info/exclude` is empty".
+  - Also stated: count-only host-path scan 0; `build_clean` true; `env_overrides` `[]`; base-ref `check-evidence` PASS.
+  - The round-1 substitute ("0 non-comment lines") is no longer needed.
+- **D-TASK020-46 is accepted as evidence hygiene; no finding.**
+  - The shared `.git/info/exclude` of the main repository is 0 bytes now.
+  - The stated prior content, git's 240-byte template, matches the size of the installed git template exactly: 240 bytes, 6 comment lines, 0 patterns.
+  - Comment lines ignore nothing, so truncating it changed no `git status` result, in this worktree or any other.
+  - There is no other ignore source: `core.excludesFile` is unset, the default global ignore file is absent, and `status.showUntrackedFiles` is unset.
+  - The change is host-local, reversible and logged.
+- **Process note for future evidence runs (no ID).** If `info/exclude` ever holds a pattern, record its SHA-256 and line count in the gate table *before* any change, rather than truncating it. That keeps a possible hiding entry visible as evidence. Agents should not otherwise edit shared repository state outside their worktree.
+- **Host-fragment scan.** Count-only, 9 labels plus a run-time control (9/9 fire), over:
+  - the fix delta's added lines (373);
+  - the 7 commit messages (283 lines);
+  - the evidence diff (9,249 lines), plus a blob scan of the 7 evidence files (10 labels, control 10/10);
+  - this section.
+
+  Result: **0** for every label.
+
+### R2.6 Record simulation (real checker, sparse shared clone, plumbing commits on `8b3a8ed`)
+
+Base `226c476` (the `main` tip when written) unless noted.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| A: this record committed on `8b3a8ed` | pass | **pass**, owned 61 |
+| A2: same, base `c0c31a1` | pass | pass, owned 61 |
+| B: the round-1 record only (no section 2) | missing | missing (names `bdf009d`; 22 owned paths changed after it) |
+| C: checked as `--pr 37` | missing | missing |
+| D: last Verdict row FAIL | missing | missing |
+| E: the section's Head row names a `main` commit | missing | missing |
+| F: `eslint.config.mjs` edited after the record | missing | missing |
+| G: docs-only commit after the record | pass | pass |
+| H: merge of the `main` tip (docs-only) after the record | pass | pass |
+| J: `packages/shared/src/http/credentials.ts` edited after the record (PR38-SEC-06 closed) | missing | **missing** |
+| J2 / J3 / J4: `cache-control.ts`, `tests/contract-stubs/stubs.ts`, `contract-validator.ts` edited | missing | **missing**, **missing**, **missing** |
+| N: neighbour `tests/api/helpers/formats.ts` edited (control) | pass | pass |
+| K: new `apps/worker/src/platform/db/` file (PR38-SEC-02 closed) | missing | **missing**, owned 62 |
+| K2: new `apps/worker/src/jobs/` file (control) | pass | pass |
+| L: new `apps/api/src/platform/db/` file | missing | missing, owned 62 |
+| M: `packages/config/src/schema.ts` edited (unowned) | pass | pass (config is not owned; the floor is covered by tests and code review) |
+
+18 of 18 as predicted. Compared with round 1, J and K flipped from `pass` to `missing`: PR38-SEC-06 and PR38-SEC-02 are closed in the record trigger itself, not only in CODEOWNERS text.
+
+**Secret hygiene of this section.**
+- Gitleaks v8.30.1 default-rule emulation (222 rules, three run-time positive controls) over the fix delta, the commit messages, the evidence diff and this record: 0 findings.
+- No secret-shaped literal, OS user name, home or temporary path is quoted.
+
+### R2.7 State after this round
+
+| ID | Severity | State | Owner / due |
+|---|---|---|---|
+| PR38-SEC-01 | LOW | Closed | |
+| PR38-SEC-02 | LOW | Closed (CODEOWNERS). The narrowing ruling is optional | principal-architect, optional |
+| PR38-SEC-03 | LOW | Open, deferred (D-ORCH-055) | 020-C, before TASK-055 starts and before the first module route with `schema.headers` |
+| PR38-SEC-04 | INFO | Open, deferred | 020-C, with the next `define-route.ts` edit |
+| PR38-SEC-05 | INFO | Closed | |
+| PR38-SEC-06 | INFO | Closed | |
+| PR32-SEC-15 | INFO (closed in PR #32) | Regression tests restored; pinned again | |
+| PR34-SEC-07 + R1-m5 | INFO | Open, unchanged. The new `routing/tests/loopback.ts` adds another module-adjacent `tests/` helper (the R1-m5 shape), but it has no production importer and value-imports nothing from the generated client | senior-developer, before TASK-026 |
+
+**New this round: none.** Code review R2-n1 (forged descriptor local after the slot) and R2-n2 (loopback timeouts) are NITs. Security concurs, and neither is a security finding.
+
+### R2.8 Checks owed (delta to §8)
+
+| Owner | Check |
+|---|---|
+| TASK-052, 055, 091, 171, 261 | The D-TASK020-41 sheet wording: build permissions with `readonlySet`; call `markCredentialsRead` together with the decision; the handler's declared test comes from the route descriptor. Also, read credentials only through `presentedKinds`, so that "declared and presented" means the same thing in the authenticator and in the problem handler. A parser that treats a whitespace-only `Authorization` or a lower-cased cookie name as presented, while `presentedKinds` does not, would refuse without the private mark (probe M1 shapes) |
+| TASK-014 (images) | Besides §8: keep `dist/**/routing/tests/**` (`fixture-route`, `loopback`), `dist/**/*.test.js` and `query-counter.js` out of the image (the PR #34 note) |
+| security-analyst | Threat-model wording of D-ARCH-109 (8), still owed from §8 |
+
+### R2.9 Proposed decision entry (for the orchestrator; DECISIONS.md not edited)
+
+**D-SEC-PR38-02 · 2026-11-14 · security-analyst (logged by orchestrator) · PR #38 (TASK-020 part 020-B) delta round 2 PASS_WITH_FOLLOW-UPS**
+
+- **Decision:** PR #38 security delta round 2 at `8b3a8ed` (code `cdd3716`, union `976edf6` with `main` `c0c31a1` / PR #34) = PASS_WITH_FOLLOW-UPS. Nothing Critical, High or Medium; no new finding.
+- **Union:** pure, proven three ways (per-path parent equality, `merge-tree`, two-way delta equivalence). Every §7 item is preserved: both category lines, the `prisma-generated` pair after `DATABASE_CODE`, the seam pair last, both scripts, the tsconfig, the fixture rows and the scanner block. P1 (212 rows) is identical to round 1 apart from the PR38-SEC-01 additions, and the seam/root-client probe gives 11/11.
+- **Closed:**
+  - PR38-SEC-01 (bare specifier traced; 7/7 plus `export *`);
+  - PR38-SEC-02 (CODEOWNERS; the narrowing stays an optional architect ruling);
+  - PR38-SEC-05 (floor 2000, exit 78);
+  - PR38-SEC-06 (CODEOWNERS and required paths).
+- **Restored:** the PR32-SEC-15 tests, byte-identical to `main`.
+- **R1-m1 verified:** differential probe, 404 rows. 0 declared credentials without `private` (22 on `bdf009d`), 0 foreign credentials made private after the slot, transitions only toward `private`. The `isDefinedRoute` `WeakSet` brand cannot be forged from request input.
+- **`tools/ci`:** `REQUIRED_CODEOWNED_PATHS` is append-only (36 → 41), and `checkCodeowners` / `check-security-owned-paths.mjs` are unchanged. Each new line, deleted, commented out or ownerless, yields 1 finding.
+- **Supply chain:** the lockfile is still one leaf vs `main`.
+- **Evidence:** `20261114T0021Z_cdd3716` accepted, with the D-SEC-PR23-02 statements verbatim.
+- **D-TASK020-46:** accepted as hygiene. The 240-byte stock template is corroborated, there is no other ignore source, and the change is behaviour-neutral. Process note: record the hash before any future change to shared git state.
+- **Still open:** PR38-SEC-03 (LOW) and -04 (INFO) → 020-C per D-ORCH-055; PR34-SEC-07 with R1-m5 → before TASK-026.
+- **Merge needs from security:** none beyond this record, as long as no non-docs commit and no non-docs `main` merge follows `cdd3716`.
+- **Reversibility:** High.
+
+### R2.10 Verdict
+
+| Item | Value |
+|---|---|
+| Critical / High / Medium | 0 / 0 / 0 |
+| Low | 1 open: PR38-SEC-03 (deferred to 020-C) |
+| Info | 2 open: PR38-SEC-04 (020-C), PR34-SEC-07 with R1-m5 (before TASK-026) |
+| Closed this round | PR38-SEC-01, PR38-SEC-02, PR38-SEC-05, PR38-SEC-06; PR32-SEC-15 regression tests restored |
+| Merge needs from security | This record at `8b3a8ed` (or a later docs-only head). A non-docs commit or a non-docs `main` merge after `cdd3716` voids it, and the lane-B evidence too |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** The union is pure and preserves the §7 list. The fix delta closes PR38-SEC-01, -02, -05 and -06 and restores the PR32-SEC-15 tests. R1-m1 lets no request input make a foreign credential private or strip `private` from a declared one. No check is weakened. No Critical, High or Medium finding is open, and the head `8b3a8ed` is cleared from security's side |
