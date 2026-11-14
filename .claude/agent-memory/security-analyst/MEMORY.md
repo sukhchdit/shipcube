@@ -40,3 +40,4 @@
 - [P5 PR-0045 gitleaks allow](project_p5_pr45_gitleaks_allow.md) — R1 @66ae5c1 PASS_W_F-U; D-SEC-PR45-01 commit-bound FP class; SEC-01 LOW disabledRules pin gap; line-target `\n` fact
 - [P5 PR-0042 round 2](project_p5_pr42_r2.md) — @d2ef478 PASS_W_F-U; 02/03/05-07/12 closed; new 13 MED detached write, 14 INFO, 15/16 LOW; round 3 owed (code R2-M1)
 - [P5 PR-0044 020-C phases](project_p5_pr44_020c.md) — R1 @9def3f5 PASS_W_F-U; 01 MED aliased createRequire escapes import controls; LOW 02-05 (signal, afterCommit cap, T-83, raw COMMIT); kit
+- [P5 PR-0044 round 2](project_p5_pr44_r2.md) — @d943ef7 PASS_W_F-U; 01-04 closed; LOW 10 template createRequire key, 13 AppError cause to stderr; INFO 11/12/14; union list R2.8

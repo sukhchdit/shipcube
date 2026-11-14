@@ -7,7 +7,10 @@
  *
  * Schema parity (assertion 5) compares, per request part, the property names, the required set, closed objects and the
  * enum / length / range / pattern constraints of each top-level property. Headers the pipeline owns (correlation,
- * language, idempotency, preconditions, CSRF, re-auth proof, guest token) are excluded from the header comparison.
+ * language, idempotency, preconditions, CSRF, re-auth proof) are excluded from the header comparison. The guest token
+ * `X-Quote-Token` follows companion parity (D-ARCH-113 (1)): skipped where the operation's security lists `quoteToken`
+ * (the authn slot reads it), compared like any header elsewhere, so `schema.headers` declares it exactly where the
+ * contract declares the `QuoteToken` header parameter (claimQuote, saveQuote, createShipment on `[session]`).
  */
 import {
   type BoundRoute,
@@ -72,8 +75,10 @@ export const PIPELINE_HEADERS: ReadonlySet<string> = new Set([
   'if-none-match',
   'x-csrf-token',
   'x-reauth-proof',
-  'x-quote-token',
 ]);
+
+/** The guest quote token: a credential on `quoteToken` operations, a declared companion header elsewhere (D-ARCH-113). */
+export const QUOTE_TOKEN_HEADER = 'x-quote-token';
 
 type Loose = Readonly<Record<string, unknown>>;
 const isRecord = (value: unknown): value is Loose => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -228,14 +233,21 @@ function openApiProperty(schema: unknown): PropertyShape {
   };
 }
 
-function openApiParameters(op: ContractOperation, location: 'path' | 'query' | 'header'): PartShape {
+/** True when the operation's effective `security` lists the `quoteToken` scheme (the authn slot reads the header). */
+export function securityListsQuoteToken(op: ContractOperation, doc?: OpenApiDocument): boolean {
+  const declared = op.operation['security'] ?? doc?.['security' as `x-${string}`];
+  return Array.isArray(declared) && (declared as unknown[]).some((requirement) => isRecord(requirement) && 'quoteToken' in requirement);
+}
+
+function openApiParameters(op: ContractOperation, location: 'path' | 'query' | 'header', doc?: OpenApiDocument): PartShape {
   const parameters = Array.isArray(op.operation['parameters']) ? (op.operation['parameters'] as unknown[]).filter(isRecord) : [];
   const properties: Record<string, PropertyShape> = {};
   const required: string[] = [];
+  const quoteTokenIsCredential = location === 'header' && securityListsQuoteToken(op, doc);
   for (const parameter of parameters) {
     if (parameter['in'] !== location || typeof parameter['name'] !== 'string') continue;
     const name = location === 'header' ? parameter['name'].toLowerCase() : parameter['name'];
-    if (location === 'header' && PIPELINE_HEADERS.has(name)) continue;
+    if (location === 'header' && (PIPELINE_HEADERS.has(name) || (name === QUOTE_TOKEN_HEADER && quoteTokenIsCredential))) continue;
     properties[name] = openApiProperty(parameter['schema']);
     if (parameter['required'] === true) required.push(name);
   }
@@ -280,12 +292,12 @@ function partProblems(part: string, joi: PartShape, contract: PartShape): string
 }
 
 /** Assertion 5: Joi and OpenAPI agree on every request part. Exported for the seeded-defect tests. */
-export function schemaProblems(route: RouteDescriptor, op: ContractOperation): string[] {
+export function schemaProblems(route: RouteDescriptor, op: ContractOperation, doc?: OpenApiDocument): string[] {
   const schema: RouteSchemas = route.schema;
   return [
     ...partProblems('params', joiPart(schema.params), openApiParameters(op, 'path')),
     ...partProblems('query', joiPart(schema.query), openApiParameters(op, 'query')),
-    ...partProblems('headers', joiPart(schema.headers), openApiParameters(op, 'header')),
+    ...partProblems('headers', joiPart(schema.headers), openApiParameters(op, 'header', doc)),
     ...partProblems('body', joiPart(schema.body), openApiBody(op)),
   ];
 }
@@ -432,7 +444,7 @@ export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented }: 
     add('audit', name, auditProblems(route, op));
     add('extension', name, extensionProblems(route, op));
     add('auth', name, authProblems(route, op, doc));
-    add('schema', name, schemaProblems(route, op));
+    add('schema', name, schemaProblems(route, op, doc));
     add('error-codes', name, errorCodeProblems(op));
     add('transaction', name, transactionProblems(route));
   }

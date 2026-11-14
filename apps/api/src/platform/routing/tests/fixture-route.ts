@@ -5,14 +5,15 @@
  */
 import { defineRoute, type RouteDescriptor, type RouteHandler, type RouteSpec } from '../define-route.js';
 
-export type FixtureRouteSpec = Partial<Omit<RouteSpec, 'permission' | 'permissionJustification'>> & {
+export type FixtureRouteSpec<L = undefined, C = undefined> = Partial<Omit<RouteSpec<L, C>, 'permission' | 'permissionJustification'>> & {
   readonly operationId: string;
   readonly path: string;
-  readonly handler: RouteHandler;
+  readonly handler: RouteHandler<L, C>;
 };
 
-export function fixtureRoute(spec: FixtureRouteSpec): RouteDescriptor {
-  return defineRoute({
+/** `L` and `C` are inferred from `load` and `call`, as in `defineRoute` (part 020-C). */
+export function fixtureRoute<L = undefined, C = undefined>(spec: FixtureRouteSpec<L, C>): RouteDescriptor {
+  return defineRoute<L, C>({
     method: 'get',
     permission: 'public',
     permissionJustification: 'Framework test fixture.',

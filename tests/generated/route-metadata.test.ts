@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 
 import { beforeAll, describe, expect, it } from '@jest/globals';
 import { type BoundRoute, findRouteBindingViolations, formatRouteAuth, type RouteAuth } from '@platform/authz';
-import { ERROR_CATALOGUE } from '@platform/shared';
+import { CREDENTIAL_HEADER_NAMES, ERROR_CATALOGUE, REFRESH_COOKIE_NAMES } from '@platform/shared';
 import type { Express } from 'express';
 import Joi from 'joi';
 
@@ -30,6 +30,7 @@ import {
   permissionStatusProblems,
   reauthProblems,
   schemaProblems,
+  securityListsQuoteToken,
   TRANSACTION_NONE_OPERATIONS,
   transactionProblems,
 } from './route-metadata.js';
@@ -138,7 +139,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
 
   it('[AT-US-067-03] a "public" marker with an empty justification fails; one differing from the contract fails too', () => {
     const spec = { ...fixtureRoute({ operationId: 'getLiveness', path: '/x', handler: () => ({ status: 204 }) }) };
-    expect(() => defineRoute({ ...spec, permissionJustification: ' ' } as RouteSpec)).toThrow(
+    expect(() => defineRoute({ ...spec, permissionJustification: ' ' } as unknown as RouteSpec)).toThrow(
       'marker "public" needs a permissionJustification',
     );
     const publicOp = listOperations(doc).find((op) => op.operation['x-permission'] === 'public' && op.fullPath.startsWith(api.apiPrefix));
@@ -192,6 +193,59 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
       schema: { params: Joi.object({ shipmentId: Joi.string().required() }), query: Joi.object({ q: Joi.string().max(3) }) },
     });
     expect(schemaProblems(query, getShipment)).toEqual([expect.stringContaining('query: Joi declares [q], OpenAPI []')]);
+  });
+
+  describe('[D-ARCH-113] credential headers: the shared list and the contract', () => {
+    const operation = (operationId: string): ContractOperation => {
+      const found = listOperations(doc).find((op) => op.operationId === operationId);
+      if (found === undefined) throw new Error(`${operationId} missing from openapi.yaml`);
+      return found;
+    };
+    const components = (): Loose => (doc as unknown as { components: Loose }).components;
+
+    it('[D-ARCH-113] CREDENTIAL_HEADER_NAMES lists every header the securitySchemes derive, and nothing else', () => {
+      const schemes = components()['securitySchemes'] as Readonly<Record<string, Loose>>;
+      const derived = new Set<string>();
+      for (const [name, scheme] of Object.entries(schemes)) {
+        if (scheme['type'] === 'http' && scheme['scheme'] === 'bearer') derived.add('authorization');
+        else if (scheme['type'] === 'apiKey' && scheme['in'] === 'header') derived.add(String(scheme['name']).toLowerCase());
+        else if (scheme['type'] === 'apiKey' && scheme['in'] === 'cookie') {
+          derived.add('cookie');
+          // A cookie scheme is a credential only when the shared presence test reads it as a refresh cookie.
+          expect([name, REFRESH_COOKIE_NAMES.includes(String(scheme['name']))]).toEqual([name, true]);
+        } else throw new Error(`securityScheme ${name} has a shape this parity test does not derive: ${JSON.stringify(scheme)}`);
+      }
+      // Header PARAMETERS rather than schemes, listed by hand: the re-authentication proof (ReauthProof and
+      // ReauthProofConditional, ADR-0006 am. 3). x-csrf-token is the csrfToken scheme, so it is derived above.
+      const parameters = components()['parameters'] as Readonly<Record<string, Loose>>;
+      const proofs = Object.values(parameters).filter((parameter) => String(parameter['name']).toLowerCase() === 'x-reauth-proof');
+      expect(proofs.length).toBeGreaterThan(0);
+      const expected = [...derived, 'x-reauth-proof'].sort();
+      expect([...CREDENTIAL_HEADER_NAMES].sort()).toEqual(expected);
+      expect(Object.isFrozen(CREDENTIAL_HEADER_NAMES)).toBe(true);
+    });
+
+    it('[D-ARCH-113] x-quote-token companion parity: declared on claimQuote ([session] + QuoteToken parameter), skipped on getQuote', () => {
+      const claimQuote = operation('claimQuote');
+      expect(contractAuth(claimQuote, doc)).toEqual(['session']);
+      const headerProblems = (route: RouteDescriptor, op: ContractOperation) =>
+        schemaProblems(route, op, doc).filter((problem) => problem.startsWith('headers'));
+      // Without the companion in schema.headers the contract's QuoteToken parameter is named (no blanket exclusion).
+      const without = descriptorFor(doc, claimQuote);
+      expect(headerProblems(without, claimQuote)).toEqual([expect.stringContaining('headers: Joi declares [], OpenAPI [x-quote-token]')]);
+      const companion = descriptorFor(doc, claimQuote, {
+        schema: {
+          ...descriptorFor(doc, claimQuote).schema,
+          headers: Joi.object({ 'x-quote-token': Joi.string().pattern(/^[A-Za-z0-9_-]{43}$/) }),
+        },
+      });
+      expect(headerProblems(companion, claimQuote).filter((problem) => problem.includes('declares'))).toEqual([]);
+      // getQuote lists quoteToken in its security: the slot reads the header, so the comparison skips it either way.
+      const getQuote = operation('getQuote');
+      expect(securityListsQuoteToken(getQuote, doc)).toBe(true);
+      expect(securityListsQuoteToken(claimQuote, doc)).toBe(false);
+      expect(headerProblems(descriptorFor(doc, getQuote), getQuote)).toEqual([]);
+    });
   });
 
   it('[assertion 6, assertion 9] every x-error-codes entry is catalogued with a response; one-time-secret routes are not-applicable', () => {
@@ -284,7 +338,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
       permissionJustification: undefined,
       transaction: 'tenant',
       ...overrides,
-    } as RouteSpec);
+    } as unknown as RouteSpec);
     expect(() => assertRouteBindings([route], { production })).toThrow(RouteBindingError);
     expect(() => assertRouteBindings([route], { production })).toThrow(
       rule === 'MOCK_WEBHOOK_IN_PRODUCTION' ? 'must not be mounted' : 'GET /binding',

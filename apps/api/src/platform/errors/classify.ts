@@ -17,13 +17,14 @@ const BODY_PARSER_CODES: Readonly<Record<string, ErrorCode>> = {
 };
 
 export type Classified =
-  | { readonly kind: 'app'; readonly error: AppError }
+  /** An AppError: its catalogue code and client-safe fields, plus `Retry-After` when it carries a valid one (PR #44 R1-M1). */
+  | { readonly kind: 'app'; readonly error: AppError; readonly retryAfterSeconds?: number }
   | { readonly kind: 'framework'; readonly code: ErrorCode }
   /** A data-layer failure (PR11-SEC-09 item 6): only its code and `Retry-After` reach the client, never its reason. */
   | { readonly kind: 'db'; readonly code: ErrorCode; readonly retryAfterSeconds?: number }
   | { readonly kind: 'unexpected' };
 
-/** Upper bound for a DbError `Retry-After` (the data layer sends 1 s); anything outside 1..MAX is not sent. */
+/** Upper bound for a `Retry-After` (the data layer and the request deadline send 1 s); anything outside 1..MAX is not sent. */
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
 /** Value of an own data property; undefined for accessors, missing keys and values whose inspection throws. */
@@ -55,20 +56,26 @@ function classifyDbError(value: unknown): Classified {
   if (!isErrorCode(code) || ERROR_CATALOGUE[code].status !== ownDataProperty(value, 'status')) {
     return { kind: 'db', code: 'INTERNAL_ERROR' };
   }
-  const seconds = ownDataProperty(value, 'retryAfterSeconds');
-  const retryAfter =
-    ownDataProperty(value, 'retryable') === true &&
-    typeof seconds === 'number' &&
-    Number.isInteger(seconds) &&
-    seconds >= 1 &&
-    seconds <= MAX_RETRY_AFTER_SECONDS
-      ? seconds
-      : undefined;
+  const retryAfter = ownDataProperty(value, 'retryable') === true ? retryAfterOf(value) : undefined;
   return retryAfter === undefined ? { kind: 'db', code } : { kind: 'db', code, retryAfterSeconds: retryAfter };
 }
 
+/** An own `retryAfterSeconds` data property that is an integer in 1..MAX_RETRY_AFTER_SECONDS; otherwise undefined. */
+function retryAfterOf(value: unknown): number | undefined {
+  const seconds = ownDataProperty(value, 'retryAfterSeconds');
+  return typeof seconds === 'number' && Number.isInteger(seconds) && seconds >= 1 && seconds <= MAX_RETRY_AFTER_SECONDS
+    ? seconds
+    : undefined;
+}
+
+/** An AppError keeps `Retry-After` only on a 503 (a retryable outage), never on a client error. */
+function classifyAppError(value: AppError): Classified {
+  const retryAfter = ownDataProperty(value, 'status') === 503 ? retryAfterOf(value) : undefined;
+  return retryAfter === undefined ? { kind: 'app', error: value } : { kind: 'app', error: value, retryAfterSeconds: retryAfter };
+}
+
 export function classifyThrown(value: unknown): Classified {
-  if (safeInstanceOf(value, AppError)) return { kind: 'app', error: value as AppError };
+  if (safeInstanceOf(value, AppError)) return classifyAppError(value as AppError);
   if (safeInstanceOf(value, DbError)) return classifyDbError(value);
   if (!safeInstanceOf(value, Error)) return { kind: 'unexpected' };
   // router 2.x: a path parameter that cannot be percent-decoded is a URIError with status 400.

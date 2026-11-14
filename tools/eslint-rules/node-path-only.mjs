@@ -1,7 +1,8 @@
 /**
  * `platform/node-path-only` (ADR-0002 §5): Node.js built-in modules are imported only through the explicit `node:`
  * scheme (`node:path`, `node:fs/promises`), never as bare `path` / `fs`. A bare specifier can be shadowed by a package
- * of the same name, and the prefix makes built-ins visible to boundary and dependency checks. Auto-fixable.
+ * of the same name, and the prefix makes built-ins visible to boundary and dependency checks. Auto-fixable. Checked on
+ * static imports, re-exports, `import()` and every require-style load, `createRequire` aliases included (R1-m6).
  */
 import { builtinModules } from 'node:module';
 
@@ -32,6 +33,6 @@ export default {
           return fixer.replaceText(node, `${raw.charAt(0)}node:${source}${raw.charAt(0)}`);
         },
       });
-    });
+    }, context.sourceCode);
   },
 };

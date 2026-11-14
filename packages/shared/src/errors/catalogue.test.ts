@@ -95,6 +95,13 @@ describe('AppError', () => {
     expect(JSON.parse(json)).toEqual({ code: 'INTERNAL_ERROR', status: 500, detail: 'custom' });
   });
 
+  it('carries retryAfterSeconds as an own property only when given, and never serialises it', () => {
+    const retryable = new AppError('SERVICE_UNAVAILABLE', { retryAfterSeconds: 1 });
+    expect(retryable.retryAfterSeconds).toBe(1);
+    expect(JSON.parse(JSON.stringify(retryable))).toEqual({ code: 'SERVICE_UNAVAILABLE', status: 503, detail: 'Service unavailable.' });
+    expect(Object.hasOwn(new AppError('SERVICE_UNAVAILABLE'), 'retryAfterSeconds')).toBe(false);
+  });
+
   it('carries at most MAX_VALIDATION_ISSUES field issues', () => {
     const issues = Array.from({ length: MAX_VALIDATION_ISSUES + 5 }, (_, index) => ({
       pointer: `/body/items/${String(index)}`,

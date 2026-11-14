@@ -117,7 +117,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RBAC-002 | M0 | Must | US-066 | packages/authz + prisma/ · ADR-0008 §Role seed (operator roles); data-model §9 seed plan | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RBAC-003 | M0 | Should | US-066 | packages/authz · ADR-0008 §Role seed (partner roles); ADR-0011 partner seam | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RBAC-004 | M0 | Must | US-066 | packages/authz · ADR-0008 §Build-time tests (Super Admin holds all; Viewer exclusions, D-051) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
-| REQ-RBAC-005 | M0 | Must | US-067 | platform · ADR-0003 §Route metadata (`defineRoute` refuses routes without permission); ADR-0008 | TASK-020 | – | Planned |
+| REQ-RBAC-005 | M0 | Must | US-067 | platform · ADR-0003 §Route metadata (`defineRoute` refuses routes without permission); ADR-0008 | TASK-020 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RBAC-006 | M0 | Must | US-068 | platform · ADR-0003 §Request pipeline (authenticate → authorise → validate → execute → audit) | TASK-060 | – | Planned |
 | REQ-RBAC-007 | M0 | Must | US-069 | packages/authz + packages/audit · ADR-0008; ADR-0007 §Capture (`PERMISSION_DENIED` entry, `permission_denied` event) | TASK-104 | – | Planned |
 | REQ-RBAC-008 | M0 | Must | US-068 | packages/authz · ADR-0008 §Resolution (server-side effective permissions, 5 s authz cache) | TASK-060 | – | Planned |
@@ -158,7 +158,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-004 | M0 | Must | US-075 | prisma/ · ADR-0005 §Policies (unset context → zero rows, writes rejected); data-model §4.3 | TASK-016 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-005 | M0 | Must | US-074 | prisma/ · ADR-0005 §Roles (`platform_app` NOSUPERUSER NOBYPASSRLS); data-model §4.4 | TASK-003, TASK-016 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-006 | M0 | Must | US-076 | prisma/ · ADR-0005 §Operator branch (read-only cross-tenant policy); data-model §4.3 | TASK-060 | – | Planned |
-| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Planned |
+| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Implemented, partial: TASK-024 merged; generated suite activation in lane B pending (manifest-only PR, D-ORCH-071) |
 | REQ-RLS-008 | M0 | Must | US-078 | platform (worker) · ADR-0013 am. 1–5 (`platform.job_context`, payload v2); ADR-0005; data-model §4.5 | TASK-047 | – | Planned |
 | REQ-RLS-009 | M0 | Must | US-064 | prisma/ · ADR-0009 §Standard columns (UUIDv7, `timestamptz`, actor stamps); data-model P1/P2 | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-010 | M0 | Must | US-079 | prisma/ · ADR-0009 §Soft delete (partial unique indexes); ADR-0005 (no DELETE grant); data-model P3 | TASK-100 | – | Planned |
