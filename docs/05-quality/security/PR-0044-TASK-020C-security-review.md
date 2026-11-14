@@ -488,3 +488,365 @@ The primary controls are owned: the `defineRoute` refusal in `platform/routing` 
 | Info | 4 open: PR44-SEC-06..09 |
 | Regressions introduced by this PR | None found |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical or High finding is open at head `9def3f5`, and every closure claimed by the PR holds against its positive control. The MEDIUM and one LOW are pre-existing and routed with due points; the other LOW items coincide with code review findings that already require a fix cycle, after which a security delta round on the final head is required |
+
+## Delta round 2 (fix cycles 1–2 + unions, head d943ef7)
+
+| Field | Value |
+|---|---|
+| Round | Security delta round 2 after code review round 1 (`aae9ded`, CHANGES_REQUESTED) and the orchestrator rulings D-ORCH-069 (fix-cycle scope, the deadline is enforced) and D-ORCH-073 (testable entry point, no coverage exclusion). Decisions D-TASK020-62..77 (PR body), PR comments `#issuecomment-6874402969` (fix cycle 1) and `#issuecomment-6875213989` (fix cycle 2) |
+| Head | d943ef7f1a9b9fa7ec4f9219018f0311a8d25deb |
+| Code commit | `035687c1a361da36eee487eee6de757e7aee6681` (the last merge of `main`); `035687c..d943ef7` adds only the lane B run directory `20261114T0902Z_035687c` |
+| Range reviewed | `9def3f5..d943ef7`. PR-own commits: `a45f189` (api: deadline, lifetime, afterCommit bound, `Retry-After`), `45542bd` (lint: `createRequire` confinement, `prisma-client-construction` scope, T-83 shapes and node sources), `542a111` (`start-api.ts`), `3a21efc` (RLS suite lane timeout), `d943ef7` (evidence); `b947c24` is the round-1 record. The four merges of `main` (`71dbb4f`, `443c2f1`, `a7caa87`, `035687c`) are pure: each commit tree equals `git merge-tree --write-tree` of its two parents. Merge base with `main`: `e21b9dd`. `main`'s tip when this round was written is `bd67d66` (`48f50e0` plus the code review round 2 record); it adds `docs/**` and `.claude/agent-memory/**` only |
+| Lane A evidence | Run [43580008698](https://github.com/sukhchdit/shipcube/actions/runs/43580008698) on `d943ef7`: `fast-lane` **success** with every step executed (lane B evidence, install, licences, signatures, audit, lint, format, type-check, unit, base-ref negative fixtures, build, tree-mutation checks). `scans`: Gitleaks, Semgrep and oasdiff pass; the only failed step is "Security-owned paths need a review record" (the record named `9def3f5`), and `ci-gate` fails for that reason alone |
+| Lane B evidence | `docs/05-quality/tests/runs/20261114T0902Z_035687c`, profile `pr`, verdict PASS: api 124, catalog-c1-c14 102, integration 296 (1 skip), unit 4739 (2 skip). `git_sha` `035687c`, `git_dirty` false, `build_clean` true. `lockfile_sha256` and `manifest_sha256` equal the head's `package-lock.json` and `tools/quality/required-suites.json` (recomputed; both files equal `main`'s). Merged coverage 98.83 % lines / 96.45 % branches; `main.ts`, `start-api.ts`, `abortable.ts`, `after-commit.ts` and `classify.ts` 100/100, `execute.ts` 100/96.2. The untracked FAIL run `20261114T0742Z_3b0dd72` is not in the tree |
+| Owned paths changed | 52 of the PR's 82 owned paths changed after `9def3f5` (the checker's owned set against `main` intersected with `git diff --no-renames 9def3f5 d943ef7`): `apps/api/src/platform/` errors 3, routing 2, runtime 1, tx 6; `eslint.config.mjs`; `tools/eslint-rules/**` 7; `tools/lint/**` 2; `tests/fixtures/lint/**` 29; `tests/generated/rls/cross-tenant.int.test.ts`. **Not owned:** `apps/api/src/{start-api,main,app}.ts` and their tests, `packages/shared/src/errors/app-error.ts` (read in full anyway, R2.6) |
+| Reviewer / date | security-analyst, 2026-11-14, delta round 2. Read-only on code; no Docker. Git ran in the main checkout against commit SHAs; in the PR worktree only read-only `git log` / `git status` ran. ESLint ran in-process with the worktree's own `eslint.config.mjs` and `node_modules` on virtual paths (71 config, rule and source blobs checked equal to `d943ef7`), and on `git archive` extracts of `d943ef7` and `9def3f5` (the control). Run-time probes used type-stripped `git archive` extracts of both heads with a `node_modules` junction to the main checkout (removed afterwards). Outputs held verdicts, counts, key names and booleans only |
+
+### R2.1 Summary
+
+- **PR44-SEC-01 (MEDIUM) closed.** `createRequire` is legal only as `createRequire(<url>).resolve('<literal>')` (`platform/static-module-specifier`, messageId `loader`). `moduleSourceVisitor` uses `isRequireCall`. `platform/prisma-client-construction` now covers `apps/*/src/platform/db/**` except `client.ts`, `generated.ts` and `runtime.ts`, and reports whole-module loads and const aliases.
+  - Probe P1 (the round-1 matrix, 103 cases): every target row now reports. That is F08-F11, F16 and F17 from the worker `platform/db`, a second api `platform/db` file and a module repository (18 rows), plus A04-A06, A08 and A11-A13. 52 rows moved toward refusal and none moved away. The controls are unchanged: `generated.ts` F01-F06 clean, the 17 test-file rows clean, F15 (`import type`) clean, A18 (`.resolve`) clean.
+  - Probe P1b (47 new shapes, head vs `9def3f5`) reports the `loader` messageId on the head for:
+    - a `node:module` import without the prefix;
+    - `import()` destructured or as a member;
+    - `process.getBuiltinModule('module').createRequire`, destructured too;
+    - `Module.createRequire`;
+    - a literal computed key;
+    - `export default createRequire`;
+    - `.cache`;
+    - `.then(m => m.createRequire …)`;
+    - a namespace passed on and then read;
+    - `.mts`, worker and `packages/*` files.
+
+    None of them carried it on `9def3f5`, where 13 of them were clean. A non-literal `.resolve(n)` reports, and the `.resolve` result passed to `import()` is refused as a computed specifier. In `platform/db` (D01-D11), a namespace, alias, destructured, `import()` or stored-loader construction from a second api file or from the worker reports on the head and was clean on `9def3f5`; the three homes stay clean. `process.mainModule.require('pg')` and `new Module(…).require('pg')` are `boundaries` findings on both heads. A `.cts` `require()` call is refused by `@typescript-eslint/no-require-imports` on both heads.
+  - Three lint mutants (confinement off, visitor back to a bare `require`, `platform/db` scope reverted) each flip probe rows, so the probe sees the fix.
+  - **Residuals:**
+    - (a) a template-literal key (`` m[`createRequire`] ``, `` { [`createRequire`]: c } ``) gets no finding from any rule (PR44-SEC-10, LOW, = code review R2-m2; grep-visible);
+    - (b) the stated `Module._load`, `Reflect.get`, `m[k]` and two-hop alias forms, plus the built-in loaders of PR44-SEC-14 (INFO);
+    - (c) any read of an `import x = …` binding crashes the rule (PR44-SEC-11, INFO, fail-closed).
+- **PR44-SEC-02 (LOW) closed.** The request lifetime starts at slot entry; a closed response aborts at once; `throwIfAborted` runs before `call`. `call` and the stream are raced with `abortable()`, and the reason is a 503 `AppError` with `retryAfterSeconds: 1`. Probe P4, head vs `9def3f5`:
+  - **A (client gone during a 400 ms `load`):** `call` never runs and there is no write transaction (`begin:ro, commit` only). On `9def3f5`, `call` ran and the handler committed.
+  - **B (a `call` that ignores its signal and never settles, deadline 300 ms):** 503 with `Retry-After: 1` after 319 ms, then the connection closes. On `9def3f5` there was no response within 2.5 s.
+  - **C (a `call` that rethrows `signal.reason`):** 503 with `Retry-After: 1`; it was a 500 on `9def3f5`.
+  - **E (a never-settling stream):** the response ends at the deadline; it hung on `9def3f5`.
+  - **No leak:** in every case the body holds only `code, correlation_id, detail, instance, status, title, type`, with no cause text and no sentinel placed in the `call` closure or in a thrown message. The server log carries no sentinel either (D: an error from `call` with a sentinel message is a 500 with no leak, on both heads).
+  - `Retry-After` comes only from an own integer data property in 1..3600 on a 503 `AppError`, and is never in the body.
+  - **Pre-slot disconnect** (probe P4c: a pre-slot step held 400 ms, client gone at 100 ms): on the head `call` never runs and there is no write. With the `res.closed || res.destroyed` check removed (mutant), and on `9def3f5`, `call` runs and the write commits. The behaviour holds, but no test pins it (= code review R2-m1; test owed, R2.9).
+- **PR44-SEC-03 (LOW) closed.** `AFTER_COMMIT_MAX_PENDING` is 1,000, with a value-free `api.after_commit_dropped` line. A per-work 20 s deadline is enforced by not waiting, and the work signal aborts at drain start. Probe P5:
+  - 200,000 hung items give pending 1,000 and +4 MiB, with 199,000 drop lines whose keys are `route, operation, correlation_id, max_pending`. On `9def3f5` they gave pending 200,000 and +226 MiB.
+  - A drain-start abort reaches a well-behaved item at once.
+  - **Residual:** work abandoned at its deadline leaves the count while it keeps running (PR44-SEC-12, INFO).
+- **PR44-SEC-04 (LOW) closed.** Probe P2 (93 cases) against the round-1 head output:
+  - The 40 rows that were silent are now reported: S01-S04, K02-K04, F01-F03 and H03 in both the I/O and the sleep forms, X01-X08 and X13.
+  - The 53 other rows are unchanged; `call` and `afterCommit` (C03/C04) stay clean.
+  - P2b (23 more sources) reports on the head, all newly:
+    - `node:timers` default import and `timers` namespace;
+    - `globalThis.setInterval`;
+    - `tls`, `dgram`, `dns/promises` and `child_process` without the prefix;
+    - a dynamic `import('node:net')`;
+    - `globalThis.WebSocket`;
+    - a template `import('node:http2')`;
+    - nested spreads;
+    - an unreadable spread without a handler;
+    - `defineRoute` passed as a value.
+
+    `tls`, `dgram`, `dns/promises`, `child_process`, both WebSocket forms and the template `import('node:http2')` also report under `outbound-http-via-client`. Pure `net` helpers stay clean.
+  - **Still silent:**
+    - as the rule header now states: H08/H09, X09/X10 (a `fetch` alias, which also passes the SSRF rule) and I02;
+    - the code review's R2-n3 shapes (destructured methods, a holder alias in an enclosing factory);
+    - the P2b rows `import { promises } from 'node:timers'`, a dynamic `import('node:timers/promises')` and `process.getBuiltinModule('node:timers/promises' | 'node:net')`.
+
+    They are carried as INFO under PR44-SEC-04 (stated residuals) and PR44-SEC-14 (sources).
+  - A **module-level** holder alias used inside a root crashes the T-83 rule (= code review R2-m3, reproduced here; the destructuring form is new in fix cycle 1). It fails closed: PR44-SEC-11.
+- **`start-api.ts` (not owned, reviewed): sound.** The sequence equals the former `main.ts` in order and arguments. `main.ts` is pinned to exactly the two statements `import { raiseStartupError, startApi } …` and `startApi().catch(raiseStartupError)`, so production cannot pass overrides. Probe P6 (child processes, random sentinels):
+  - **Errors after the handlers** (a services fault, an unmapped `createApp` error, a late unhandled rejection) give exactly one stdout line (`process.uncaught_exception` / `process.unhandled_rejection`) and exit 1, with nothing on stderr. A `password` property and a connection-string password are redacted; the free-text message is kept, as PR #20 designed.
+  - **The real `loadRuntimeConfigOrExit`** over invalid values carrying sentinels exits 78 and names keys only, with no sentinel in either stream.
+  - **A mapped `DocsSpecError`** exits 78 with one `api.docs_unavailable` line.
+  - **A fault of the loader itself, before the handlers,** gets Node's default report, which is unredacted, exactly as the top-level-await entry did (D-TASK020-74). The control (no handlers) prints both sentinels.
+  - **Probe P7 (real timers):** a listener that never closes exits 1 at 25,010 ms with force-close; a hung `afterCommit` item is abandoned at its 20 s deadline and the process exits 0 at 19,993 ms; a clean shutdown exits 0 at once.
+- **New: PR44-SEC-13 (LOW, pre-existing since TASK-006).** After headers are sent, the problem handler passes a thrown `AppError` itself to Express's final handler. Express 5.3.0 `logerror` then prints it with `console.error(err)`: unredacted, including the server-only `cause`. Probe P4b: a sentinel in a stream's `AppError` cause reaches stderr on both heads, and a plain `Error` does not. The slot's own deadline reason carries fixed text only. The path is reachable through this PR's stream hook (TASK-044).
+- **No coverage gate weakened (D-ORCH-073).**
+  - No change to `jest.config*`, `tools/ci/**`, `tools/quality/**`, `package.json` or any CODEOWNERS/Gitleaks/Semgrep file in the PR's diff against `main`.
+  - No added `istanbul`/`c8`/`v8` ignore, `coveragePathIgnorePatterns`, `coverageThreshold`, `eslint-disable`, `@ts-ignore`/`@ts-expect-error`/`@ts-nocheck`, `.skip(`/`.only(`/`xit(` in the added code lines (0 in each of the four PR-own commits).
+  - The diff-coverage cases for `main.ts` and `start-api.ts` pass through executed tests (14/14).
+- **Unions pure; D-ARCH-106 (6) intact.** `3a21efc` replaces the RLS suite's `DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000` with the imported `TEST_LANE_TX_IDLE_TIMEOUT_MS`. The constant is still 1,000, and the ratchet `tools/repo/test-lane-idle-timeout.test.ts` and `runtime-twin.ts` are byte-identical to `9def3f5`, with no exemption. The suite's 126/126 on PostgreSQL 18 is the developer's run; it was not re-run here (no Docker).
+- **Evidence hygiene: accepted.**
+  - The fix-cycle-2 gate table carries the D-SEC-PR23-02 statements verbatim: "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first" and "`.git/info/exclude` is empty" (0 bytes).
+  - The run is profile `pr`, and there is no lockfile change.
+  - The count-only host-fragment scan finds 0 in the new run directory (7 files, 9,755 lines), in the PR's 5,474 added code lines against `main` and in its commit messages; the synthetic control fired.
+
+**Round 2 result: 0 Critical/High/Medium.** Open:
+- **LOW:** PR44-SEC-05 (pre-existing, 020-D), new PR44-SEC-10 (020-D) and new PR44-SEC-13 (pre-existing, before TASK-044).
+- **INFO:** PR44-SEC-04 (stated residuals), -06, -07, -08 (widened), -09, and new -11, -12, -14.
+
+The code review round 2 twin (`bd67d66` on `main`, APPROVED_WITH_NITS) was read before finalising. Its R2-m1, R2-m2 and R2-m3 are reproduced here and rated: R2-m1 is a test owed; R2-m2 = PR44-SEC-10, LOW, so 020-D, not this PR; R2-m3 is in PR44-SEC-11. Its R2-n1..n3 are folded into PR44-SEC-12 and -14.
+
+**Verdict: PASS_WITH_FOLLOW-UPS** (R2.12).
+
+### R2.2 Method
+
+| Probe | How |
+|---|---|
+| P1 / P1b `createRequire` and value importers | Round-1 `cases-l.mjs` (103) on the worktree config, diffed against the recorded `9def3f5` output; `cases-n.mjs` (47: N01-N33 loader shapes, D01-D11 `platform/db` construction, C01-C03 controls) on the worktree and on extracts of `d943ef7` and `9def3f5` (the extract cannot resolve `@platform/*` targets for `boundaries`, so `boundaries` rows were read from the worktree run). Three mutants on a `d943ef7` extract |
+| P2 / P2b T-83 and SSRF sources | Round-1 `cases-t.mjs` (55) and `cases-t2.mjs` (38, queue and sleep sources so the SSRF rule cannot mask T-83) diffed against the recorded `9def3f5` output; `cases-t3.mjs` (23) on the head and on the `9def3f5` extract |
+| P3 walk and credential headers | `define-route.ts` changed only in the `AfterCommitContext` type and the walk's leaf set (`Joi.isExpression`) and refusal text; the credential-header code is byte-identical to `9def3f5`, so the round-1 matrix stands. Joi 18.3.2: a template's `functions` option runs during validation, the same capability as `.custom()`, which the walk already accepts (PR44-SEC-06 reasoning); D-TASK020-72 accepted |
+| P4 / P4b / P4c request lifetime | Real `executeSlot` + real `problemHandler` + Express 5, a recording fake runner and a raw-socket client (scenarios A-F above); P4b a stream `AppError` with a sentinel `cause` after headers, `console.error` captured, Express `env` `production`; P4c a pre-slot step held while the client leaves, on the head, on a mutant without the `res.closed` check and on `9def3f5` |
+| P5 `afterCommit` queue | Real `createAfterCommitQueue`: 200,000 hung items with `--expose-gc`; cap 100 / deadline 50 ms with work that ignores its signal and holds a timer; a drain-start abort |
+| P6 / P7 `start-api.ts` | P6: `child-start.mjs` runs the head's real `startApi(overrides).catch(raiseStartupError)` in a child per scenario (K0 control, K1 real configuration loader, K2-K6), with a resolve hook for `@platform/*` and the generated client. P7: three real-timer shutdowns in one process with injected process events, listener and exit |
+| P8 lint robustness | `import x = require(…)` / `import x = NS.y` reads in `apps/*/src` on both heads (crash scope); the code review's module-level holder alias (R2-m3) on both heads |
+| P9 hygiene and records | Count-only host-fragment scan; Gitleaks v8.30.1 default-rule emulation over this section; record simulation (R2.10) with `main`'s real `check-security-owned-paths.mjs` and `check-evidence.mjs` |
+| Cross-check | Code review round 2 (`bd67d66` on `main`, APPROVED_WITH_NITS: R2-m1..m3, R2-n1..n4), read before finalising; overlapping IDs cited with the security rating |
+
+### R2.3 Findings opened this round
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner |
+|---|---|---|---|---|---|---|
+| PR44-SEC-10 | A no-substitution template-literal key (`` m[`createRequire`] ``, `` { [`createRequire`]: c } ``) escapes the `createRequire` confinement: the generated client, `pg` or the audit writer load with no finding from any rule (= code review R2-m2) | LOW | CWE-693 | A01 | `tools/eslint-rules/module-sources.mjs:94-99` (`isCreateRequire`: `Literal` keys only), `static-module-specifier.mjs:34-35` (`isCreateRequireKey`); `eslint.config.mjs` policy comment ("every form") | senior-developer, 020-D (`lint` lock), before 020-D merges and before the first module or worker-job code PR; until then code review greps `createRequire` |
+| PR44-SEC-11 | Two lint crashes that fail closed: `static-module-specifier` on any read of an `import x = …` binding (new in this PR), and the T-83 rule on a module-level holder alias (= code review R2-m3; the plain alias already crashed at `9def3f5`, the destructuring form is new) | INFO | CWE-754 | A04 | `tools/eslint-rules/module-sources.mjs:78-84` (`def.parent.source` assumed), reached from `static-module-specifier.mjs:121-129`; `no-external-calls-in-tenant-tx.mjs:244-250` (`enclosingFunction` stops at `undefined`, not `null`) | 020-D (two guards + fixtures) |
+| PR44-SEC-12 | The deadlines bound the wait, not the work: abandoned `call`, stream and `afterCommit` work keeps running untracked, outside the 1,000 cap; one error line per dropped item | INFO | CWE-770 | A04 | `apps/api/src/platform/tx/abortable.ts:11-25`; `after-commit.ts:89-120`; `execute.ts:236` | TASK-113 (client timeouts and `ctx.signal`); performance-engineer with the first `afterCommit` route (TASK-083/091) |
+| PR44-SEC-13 | After headers are sent, a thrown `AppError` reaches Express's final handler, which prints it unredacted to stderr with its server-only `cause` | LOW | CWE-532 | A09 | `apps/api/src/platform/errors/problem-handler.ts:138-142`; Express 5.3.0 `lib/application.js` `logerror` | senior-developer; before the first stream route (TASK-044), or the next `problem-handler.ts` touch |
+| PR44-SEC-14 | Built-in loaders and sources outside every import control: `process.getBuiltinModule('<built-in>')`; `Module` / `register` from `node:module`; T-83 misses `import { promises } from 'node:timers'`, a dynamic `import('node:timers/promises')`, destructured holder methods and a factory-scope holder alias (code review R2-n3) | INFO | CWE-693 | A10 | no rule for `process.getBuiltinModule`; `no-external-calls-in-tenant-tx.mjs:114, 734-770`; `outbound-http-via-client.mjs:13, 33` | 020-D (`lint` lock); the SSRF source list with TASK-113 |
+
+### R2.4 Finding details
+
+#### PR44-SEC-10 (LOW): a template-literal key escapes the `createRequire` confinement (= code review R2-m2)
+
+**What (probe P1b N09/N10, module service; the code review reproduced it from `apps/worker/src/platform/db` as p9/p15).** `` m[`createRequire`](import.meta.url)('pg') `` and `` const { [`createRequire`]: c } = m; c(u)('pg') `` get no finding from any rule on the head (nor on `9def3f5`). `isCreateRequire` (`module-sources.mjs:94-99`) and `isCreateRequireKey` (`static-module-specifier.mjs:34-35`) accept a `Literal` key, but not a no-substitution template literal, which `staticSpecifier` treats as static everywhere else. With the loader unseen, `isRequireCall` does not see the load either, so `prisma-client-construction`, `audit-writer-allowlist` and `node-path-only` stay silent.
+
+**Impact and rating.** The impact is the round-1 impact of PR44-SEC-01: a second Prisma or `pg` client opens connections outside `withTenantTx`, which defeats RLS. But the likelihood is below the round-1 shapes:
+- The form is a deliberate respelling of a refused one; nobody writes it by accident.
+- It still spells `createRequire`, so the interim review grep finds it.
+- The worker's `platform/db` is CODEOWNED.
+
+Rated LOW rather than MEDIUM, and therefore 020-D rather than another fix cycle of this PR. It is above the INFO of the other stated residuals because the fix claims every form and misses a two-character variant of one it covers.
+
+**Remediation.**
+- Run computed keys through `staticSpecifier(property)` in both predicates.
+- Better, fail closed: report any computed member access on a `node:module` binding or on a `getBuiltinModule(…)` result whose key is not a static string other than `createRequire`. This also closes the documented `m[k]` residual.
+- One fixture per form (call, destructure), with `negative-fixtures` rows and a mutant.
+- Correct the `eslint.config.mjs` comment.
+
+**Due.** With 020-D, before it merges, and before the first `apps/*/src/modules/**` or worker-job code PR. Until then, code review greps `createRequire` on every module or worker PR.
+
+#### PR44-SEC-11 (INFO): two lint crashes that fail closed
+
+**What.**
+- **(a) `import x = …` reads (new in this PR).** `nodeModuleImport` (`module-sources.mjs:78-84`) reads `def.parent.source.value` for every `ImportBinding` definition. typescript-eslint gives a `TSImportEqualsDeclaration` an `ImportBinding` whose parent has no `source`.
+  - On the head, any read of such a binding in non-test `apps/*/src` or `packages/*/src` throws "Cannot read properties of undefined (reading 'value')" in `platform/static-module-specifier`. That includes `import pg = require('pg')` in `.ts` or `.cts`, and `import X = NS.y` (probe P8 E01, N18/N19/N21/N22).
+  - On `9def3f5` the same files linted with findings (`no-require-imports`, `boundaries`, `no-namespace`).
+- **(b) A module-level holder alias** (`const q = deps.queue;` or `const { queue: q } = deps;` at module scope, used in a handler) throws "Cannot read properties of null (reading 'type')" in the T-83 rule. This is code review R2-m3, reproduced: on `9def3f5` the plain alias already crashed, and the destructuring form is new here.
+
+**Impact.** ESLint aborts, so `npm run lint` and lane A fail. Nothing passes silently. The cost is a confusing failure and a lost finding list for the run.
+
+**Remediation.**
+- In `nodeModuleImport`, return `undefined` unless `def.parent?.type === 'ImportDeclaration'`. Optionally, treat a `TSImportEqualsDeclaration` with a `TSExternalModuleReference` as a require-style load in `moduleSourceVisitor`.
+- In `enclosingFunction`, stop at `null` as well as `undefined` (R2-m3).
+- Add a fixture for each shape.
+
+#### PR44-SEC-14 (INFO): built-in loaders and sources outside every import control
+
+**What (probe P1b, P2b; lint-clean on both heads).**
+- `process.getBuiltinModule('node:http').get(…)`, `('node:child_process')`, `('node:net')` and `('node:timers/promises')` load built-ins that no import control sees. They pass `node-path-only`, T-83 and `outbound-http-via-client`.
+- From `node:module`, `import { Module, register }`: `Module._load` is a stated residual, and `register()` installs a resolve hook.
+- T-83 also misses:
+  - `import { promises as tp } from 'node:timers'`;
+  - `await import('node:timers/promises')`;
+  - destructured holder methods and a factory-scope holder alias (code review R2-n3).
+
+**Impact.** Each shape is deliberate or uncommon. Built-ins give no Prisma, `pg` or audit-writer client, so RLS is not reached. What they reach is the SSRF and T-83 controls: egress, child processes, and sleeps held inside the transaction. The runtime twin covers any of them that a test drives. INFO, the class of PR44-SEC-09.
+
+**Remediation.**
+- `no-restricted-properties` for `process.getBuiltinModule`, `process.binding` and `process.dlopen` in `apps/*/src` and `packages/*/src`.
+- `no-restricted-imports` for `node:module` / `module` with `allowImportNames: ['createRequire']`. This closes `Module`, `register` and the namespace or default import.
+- Add `promises` from `node:timers` and a literal `import()` of the timer modules to the T-83 timer forms.
+- If ADR-0005 am. 11 item 22 (d) is revisited, add the R2-n3 shapes.
+- One fixture each.
+
+#### PR44-SEC-12 (INFO): the deadlines bound the wait, not the work
+
+**What.**
+- `abortable()` stops waiting. The `call`, stream or `afterCommit` work that ignored its signal keeps running, and its outcome is consumed.
+- In the queue, `inFlight` drops an item at its deadline. Probe P5 (cap 100, deadline 50 ms, five rounds of 100 items that ignore the signal and hold a timer) ends with pending 0, 500 items still running and 500 `AfterCommitDeadlineError` lines.
+- Each dropped item logs one error line: 199,000 lines for 199,000 drops.
+
+**Impact.** Only work that ignores `ctx.signal` and has no timeout of its own accumulates. That is an outbound client without the ADR-0011 timeouts, or code that sleeps. So the real bound is the client layer. No route declares `afterCommit` or `call` today.
+
+The code review's R2-n1 (timer clean-up unpinned) and R2-n2 (`call` plus `afterCommit` can exceed the 25 s drain; force-close still bounds it, which P7 D1 confirms) belong to the same class.
+
+**Remediation.**
+- TASK-113: every outbound client takes `ctx.signal` and has its own total timeout, below `CALL_DEADLINE_MS` and `AFTER_COMMIT_DEADLINE_MS`, with a test.
+- Optionally keep abandoned `afterCommit` work counted, as an `abandoned` gauge toward the cap or a metric.
+- Aggregate the drop log (first drop, then a counter per interval) before the first public `afterCommit` route.
+- Optionally pin the timer clean-up (R2-n1).
+
+#### PR44-SEC-13 (LOW): an `AppError` cause reaches stderr after headers are sent
+
+**What.** `problem-handler.ts:138-142`:
+- When `res.headersSent`, it calls `next(appError ?? new AppError('INTERNAL_ERROR'))`. The comment says the final handler gets a code-only `AppError`, "never the thrown value".
+- That holds for non-`AppError` values only. For an `AppError` it is the thrown object.
+- Express 5.3.0's `logerror` runs `console.error(err)` outside `env === 'test'`. That is `util.inspect`, with every own property and the `[cause]` chain, and it bypasses the Pino redaction of PR #20.
+
+Probe P4b (Express `env` `production`): a stream that writes one chunk and throws `new AppError('INTERNAL_ERROR', { cause: new Error(<sentinel>) })` puts the sentinel on stderr on `d943ef7` and on `9def3f5`. A plain `Error` with the sentinel in its message does not.
+
+**Impact.**
+- `AppErrorOptions.cause` is documented "for the server log only". A service that wraps a carrier or gateway error, whose inspected form can include response data, gets it printed unredacted.
+- Reachable only after headers are sent, that is, from the stream hook (TASK-044 SSE).
+- The slot's own deadline reason carries the fixed text "request deadline exceeded" / "client closed the request".
+- Impact medium (the "no secrets or PII in logs" guardrail); likelihood low; LOW. Pre-existing since TASK-006.
+
+**Remediation.**
+- `next(new AppError(appError?.code ?? 'INTERNAL_ERROR'))`: code-only, as the comment promises.
+- A test with a stream that throws an `AppError` carrying a sentinel cause after the first chunk asserts that `console.error` never receives the sentinel and that the connection is destroyed.
+
+### R2.5 Round-1 findings
+
+| ID | Status at `d943ef7` |
+|---|---|
+| PR44-SEC-01 (MEDIUM) | **Closed** (P1, P1b, mutants) for every round-1 form. Residuals: PR44-SEC-10 (template key, LOW), the stated `Module._load` / `Reflect.get` / computed / two-hop forms, PR44-SEC-14. A `platform/db` file other than the three homes can still re-export the generated module whole (`export * from './generated.js'`, D04/D06). Every consumer that names `PrismaClient` is reported, though, and `apps/api/src/platform/**` is CODEOWNED |
+| PR44-SEC-02 (LOW) | **Closed** (P4 A-F, P4c). The pre-slot guard is not pinned by a test (= code review R2-m1, test owed, R2.9). Residual PR44-SEC-12 |
+| PR44-SEC-03 (LOW) | **Closed** (P5). Residual PR44-SEC-12; performance-engineer sizes the cap with TASK-083/091 |
+| PR44-SEC-04 (LOW) | **Closed** for every named row. The rule header's stated residuals (H08/H09, X09/X10, I02) stay **open as INFO**. X09/X10 (a `fetch` alias) also pass `outbound-http-via-client` → TASK-113. The source residuals are PR44-SEC-14 |
+| PR44-SEC-05 (LOW) | Open, unchanged, 020-D with D-ARCH-124 (D-ORCH-069) |
+| PR44-SEC-06 (INFO) | Open (no change to the rule-argument walk); D-TASK020-72 templates as leaves accepted (P3) |
+| PR44-SEC-07 (INFO) | Open: `afterCommit` now gets `{ ...request, signal }`, still with `input.headers` |
+| PR44-SEC-08 (INFO) | Open and **widened**: `apps/api/src/start-api.ts` (process error handlers, shutdown, exit 78) and `main.ts` / `app.ts` are outside CODEOWNERS; sim S8 below. Add `/apps/api/src/start-api.ts`, `/apps/api/src/main.ts`, `/apps/api/src/app.ts` (and the worker entry) with 015-C |
+| PR44-SEC-09 (INFO) | Open (E05-E08 unchanged) |
+| Code review R1-M1, R1-m1..m6, R1-n1..n4, R1-n8 | Security concurs with the fixes as probed above; R1-n5 → TASK-044, R1-n6 → 020-D, R1-n7 → TASK-033 |
+
+### R2.6 `start-api.ts`, `main.ts` and `app-error.ts`
+
+- **Order and text.** `startApi` matches `443c2f1:apps/api/src/main.ts` statement for statement. The steps run in this order:
+  1. `loadConfig('api')`, then the redacted runtime log.
+  2. `exitAfterFlush`, then `installProcessErrorHandlers({ log, exit, source })`.
+  3. `createRuntimeServices`, docs, health and the one `afterCommit` queue.
+  4. `createApp`; exit 78 for `DocsSpecError` and the mapped refusals; any other error is rethrown.
+  5. `await services.startup()`, `listen`, the error listener and `createShutdown`, whose `drain` is `try { server.close } finally { afterCommit.drain() }`.
+  6. `once` for SIGTERM and SIGINT.
+- **Seams.** The `API_PROCESS` defaults are the real process. `main.ts` is pinned to exactly its two statements, so no override reaches production. No top-level await remains.
+- **`raiseStartupError`** re-raises on a microtask. After the handlers, the result is one redacted fatal line and exit 1 (P6 K3). Before them, it is Node's default report (P6 K5), which equals the former entry point and is reachable only by a fault of the loader itself. The real loader exits 78 by itself for every validation, holder or secret refusal, naming keys only (K1).
+- **Shutdown** stays inside the 25 s `DRAIN_TIMEOUT_MS` (P7). `process-errors.ts`, `shutdown.ts`, `services.ts`, `log.ts` and `packages/config` are unchanged against `main`.
+- **`AppError.retryAfterSeconds`** is an own property only when given (`declare`), is never serialised (`toJSON` unchanged) and is honoured only on a 503 within 1..3600.
+
+### R2.7 Coverage gate (D-ORCH-073)
+
+The ruling holds as written: no exclusion, waiver, ignore pattern, ignore comment or threshold change (R2.1). The gate passes because `main.ts` lost its top-level await and both files run under executed tests, which the PR's 17 killed mutants and 100/100 coverage confirm. The worker's `main.ts` keeps top-level await; per D-ORCH-073, any PR that changes it, PR #39 included, gets the same pattern.
+
+### R2.8 Unions (replaces §7 for the second merger)
+
+`git merge-tree` of `d943ef7` with PR #42 at `d611fda` conflicts only in `tools/lint/negative-fixtures.test.ts`; `with-tenant-tx.ts`, `db/index.ts` and `eslint.config.mjs` auto-merge. With PR #39 at `7dd3c64`, it conflicts in `apps/api/src/main.ts` (and in `tools/ci/check-workflow-policy*`, which arrived through `main`, not from this PR). In the record simulation, both unions void this record (S9, S10), so the second merger needs a merge-only or delta security round against this list.
+
+**PR #42 (TASK-025, fix cycle 2 in flight).**
+1. **Negative-fixture rows.** `tools/lint/negative-fixtures.test.ts` keeps all three row sets:
+   - PR #43's, already in both branches;
+   - this PR's 29 fixture paths (`createRequire`, `prisma-client-construction`, T-83 shapes and node sources, `outbound-http-via-client` network and server controls, `system-model-owner` loader rows);
+   - PR #42's (`audit-writer` fixtures and the fix-cycle-2 R2-M1 import, re-export and `import()` negatives plus its positive).
+
+   `tools/lint/lint-fixtures.mjs` lists every fixture once, and the base-ref negative-fixture step in lane A must pass on the union. A dropped row silently stops testing its fixture.
+2. **Transaction body order.** Inside the one `$transaction` callback in `with-tenant-tx.ts`, the order stays:
+   1. the context statement;
+   2. the leak check;
+   3. `SET TRANSACTION READ ONLY` when `readOnly`;
+   4. `createTenantDb`;
+   5. `fn`;
+   6. the fix-cycle-2 `handle.settle()` (PR42-SEC-13);
+   7. the `rollbackOnly()` latch;
+   8. return, with `revoke` in `finally`.
+
+   This closure is the one that `admission.run(admissionKeyOf(…), transaction)` wraps, and every wrapper keeps the third `call` parameter.
+3. **`markRollbackOnly` pin.** `TenantDb` exposes `markRollbackOnly` (PR42-SEC-02), and the read-only `load` handle gets it too. A latched failure in `load` rolls that transaction back before `call`, which is fail-closed.
+   - The exact `Reflect.ownKeys` pins in `tenant-db.test.ts` and `system-db.test.ts` stay exact.
+   - `load`'s context gains no wider handle.
+   - If `track`/`settle` changes the `TenantDb` surface, the union's evidence must carry `route-phases.int.test.ts` 5/5 (25006 and the access-mode case).
+4. **Stand-in reason.** `execute-phases.test.ts` switches it from `TRANSACTION_UNAVAILABLE` to `TENANT_CONCURRENCY_LIMIT` (D-TASK020-54). The cap-of-one test and its control stay.
+5. **Per-phase permit.** Each `withTenantTx` takes and releases its own permit: one for `load`, one for `handler`, none across `call`, the stream or `afterCommit`. A union that moves admission around the slot's `run(…)` would hold a permit across `call`, and must be refused.
+6. **`eslint.config.mjs`.** This PR's `PRISMA_CLIENT_HOMES` scope, the `loader` confinement comment block, `PRISMA_GENERATED_VALUE_CODE` and the `no-eval` block stay. PR #42's `AuditSqlPort` handle type in the T-83 options, its store exemptions and the fix-cycle-2 boundaries policy for `apps/api/src/platform/audit/**` stay. In the union tree no value use of `PrismaClient`, `PrismaPg` or `@prisma/adapter-pg` exists outside the three homes, so the widened `prisma-client-construction` scope adds no finding to PR #42's files.
+7. **Lane timeout.** `TEST_LANE_TX_IDLE_TIMEOUT_MS` (1,000) stays valid under PR #42's config guards. `tenant-admission.int.test.ts` does not compose `createApp`.
+
+**PR #39 (TASK-014).**
+1. **`createOrExitOnConfigError` moves into `start-api.ts`.** The call becomes:
+
+   ```ts
+   const services = await createOrExitOnConfigError(() => deps.createRuntimeServices(config, 'api', log, secrets), { log, exit });
+   ```
+
+   It stays after `installProcessErrorHandlers`, so other errors still reach the redacted fatal handler, and `exit` stays the flushing exit built from `deps.exitProcess`.
+   - `main.ts` stays the two pinned statements.
+   - The `entry-points.test.ts` pins follow.
+   - New `start-api.test.ts` cases cover `DatabaseConfigError`: one `runtime.config_rejected` line naming `DATABASE_URL` and no value, exit 78, and no listener or signal handler. They also cover `TenantTxConfigError` naming its variable.
+2. **Worker entry.** PR #39 also changes `apps/worker/src/main.ts`, so D-ORCH-073's pattern (`startWorker` plus executed tests) is due in PR #39. Otherwise the diff-coverage case fails there.
+3. **`TenantTxConfigError`.** `TenantTxConfigError(message, variable)` coexists with `TenantTxCallOptions`.
+4. **Image prune.** PR39-SEC-01 (C1): the prune also drops the new `dist/main.test.js` and `dist/start-api.test.js` along with `dist/**/tx/tests/**` and `routing/tests/**`.
+
+**PR #43, #40, #45 (merged).** The only union-forced change was `3a21efc`, which is pure, as checked above. Diff coverage passes for the new entry files without any change to `tools/ci/diff-coverage.mjs`.
+
+### R2.9 Checks owed (routed)
+
+| Where | Check |
+|---|---|
+| 020-D (`lint` lock), or this PR if a further fix cycle happens anyway | PR44-SEC-10 (LOW, = R2-m2: template key, fail-closed computed keys, fixtures, mutant) before 020-D merges and before the first module or worker-job code PR; PR44-SEC-11 (two guards + fixtures, = R2-m3); the pre-slot disconnect test (= R2-m1: `call` never runs, no `begin:rw`, with a mutant that removes the `res.closed` check); PR44-SEC-05 (unchanged); PR44-SEC-14; PR44-SEC-09; PR44-SEC-04 stated residuals where cheap |
+| Code review, every module or worker PR until 020-D merges | Grep `createRequire` (PR44-SEC-10 interim control) |
+| TASK-113 | PR44-SEC-12: every outbound client honours `ctx.signal` and has a total timeout below the 20 s deadlines (with a test); `fetch` aliases (X09/X10) and the `getBuiltinModule` egress forms in `outbound-http-via-client` (PR44-SEC-14) |
+| TASK-044 (first stream route) | PR44-SEC-13 fixed before merge; stream duration and backpressure (R1-n5) |
+| First `afterCommit` route (TASK-083/091) | Cap sized by performance-engineer; aggregated drop log (PR44-SEC-12); PR44-SEC-07 |
+| devops-engineer 015-C | PR44-SEC-08 widened (`start-api.ts`, `main.ts`, `app.ts`, worker entry) |
+| Second merger of #42 or #39 | R2.8 list; merge-only or delta security round; fresh lane-B evidence |
+| principal-architect (SHEET-FOLD-8) | ADR-0003 am. 2026-11-14 item 2 and ADR-0005 am. 11 item 22 wording for `createRequire` (D-ORCH-069), now matching `static-module-specifier`'s `loader` arm |
+
+### R2.10 Record simulation and secret hygiene
+
+**Record simulation** (sparse `git clone --shared`; plumbing scenario commits on `d943ef7`; the real `tools/ci/check-security-owned-paths.mjs` of `main` at `bd67d66`; base = that tip unless stated): 16 of 16 scenarios as expected.
+
+| Scenario | Base -> head | Expected | Result |
+|---|---|---|---|
+| S0 round-1 record only (unchanged) | `main` -> `d943ef7` + that record | missing | missing (it names `9def3f5`; 52 owned paths changed after it) |
+| S1 this record on the head | `main` -> record commit | pass | **pass**: owned 82, satisfied by `d943ef7`; one note for the older `9def3f5` row |
+| S1-mb | merge base `e21b9dd` -> record commit | pass | pass |
+| S2 wrong PR number (`--pr 42`) | `main` -> record commit | missing | missing |
+| S3 / S3b owned edit after the record (`execute.ts` / `eslint.config.mjs`) | `main` -> edit | missing | missing / missing |
+| S4 docs-only evidence after the record | `main` -> evidence | pass | pass |
+| S5 merge of the current `main` (`bd67d66`) | `main` -> merge | pass | pass |
+| S5b a `main` that also edits `eslint.config.mjs`, then the merge | that `main` -> merge | missing | missing |
+| S6 the same record with a FAIL final verdict | `main` -> record commit | missing | missing |
+| S7 the new head row naming a SHA outside the range | `main` -> record commit | missing | missing |
+| S8 / S8b un-owned edit after the record (`start-api.ts` / `app-error.ts`) | `main` -> edit | pass | pass / pass (PR44-SEC-08) |
+| S9 union with a simulated squash of PR #42 (`d611fda`) | that `main` -> union | missing | missing (R2.8) |
+| S10 union with a simulated squash of PR #39 (`7dd3c64`) | that `main` -> union | missing | missing (R2.8) |
+| S11 this round without its own final verdict row | `main` -> record commit | pass | pass: the round-1 verdict row is then the last one (procedural, PR10-SEC-04); this round ends with its own row |
+
+**`main`'s base-ref `check-evidence.mjs` against `d943ef7`:** PASS with both base-ref copies, the `main` tip `bd67d66` and the merge base `e21b9dd`. Each accepts `20261114T0902Z_035687c` with 0 problems and rejects `20261114T0516Z_e43ccff` and `20261114T0455Z_79b9616` as stale. On the S5 merge of `bd67d66` the same verifier still accepts the run: `.claude/agent-memory/*/*.md` is in its staleness allow-list (`AGENT_MEMORY_GLOB`). So the code review's merge condition 2 ("merging that main would stale the evidence") is stricter than the gate, though harmless. A merge that brings non-docs paths still stales it.
+
+**Gitleaks emulation over this section:** 0 findings (222 rules, 221 compiled; the three run-time positive controls, a GitHub token, an AWS key id and a generic API key, fired). **Host-fragment scan of this record:** 0 (all needles, over the whole record with this section; the synthetic control fired). No secret, credential value or OS user name is quoted; the probe outputs held booleans, counts, key names and rule IDs only, and the sentinels were random per run and never written here.
+
+### R2.11 Proposed decision entry (for the orchestrator; DECISIONS.md not edited)
+
+**D-SEC-PR44-02 · 2026-11-14 · security-analyst (logged by orchestrator) · PR #44 (020-C) security delta round 2.**
+- **Decision.** PR #44 at `d943ef7` (code `035687c`): **PASS_WITH_FOLLOW-UPS**. There are 0 Critical/High/Medium findings; 3 LOW and 8 INFO are open.
+- **Closed (each against `9def3f5` as the control):**
+  - **PR44-SEC-01 (MEDIUM):** `createRequire` is confined to `.resolve('<literal>')`, the visitor uses `isRequireCall`, and `prisma-client-construction` covers `platform/db` except the three homes. In P1, 52 of 103 rows moved toward refusal, every target row reports and the controls are unchanged. 47 new shapes were probed, and 3 mutants were killed.
+  - **PR44-SEC-02:** a client gone before or during `load` means no `call` and no write. A deadline answers 503 with `Retry-After: 1` and no body leak; it was a hang on the old head. The pre-slot test is owed (= code R2-m1).
+  - **PR44-SEC-03:** the queue holds 1,000 pending and uses +4 MiB under 200k items; it was +226 MiB.
+  - **PR44-SEC-04:** 40 rows newly reported; the stated residuals are carried as INFO.
+- **New:**
+  - **PR44-SEC-10 (LOW, = code R2-m2).** A no-substitution template-literal key (`` m[`createRequire`] ``) escapes the confinement with zero findings. Rated LOW, not above: deliberate respelling, grep-visible, worker `platform/db` CODEOWNED. So **020-D, not a third fix cycle.** Due before 020-D merges and before the first module or worker-job code PR; code review greps `createRequire` until then.
+  - **PR44-SEC-13 (LOW, pre-existing since TASK-006).** After headers are sent, a thrown `AppError` with its server-only `cause` reaches Express's unredacted `console.error`. Fix with a code-only `AppError` passed to `next` before TASK-044.
+  - **PR44-SEC-11 (INFO).** Two lint crashes that fail closed: `import x = …` reads (this PR) and a module-level holder alias in T-83 (= code R2-m3) → 020-D guards.
+  - **PR44-SEC-12 (INFO).** Abandoned `call`/stream/`afterCommit` work is outside the bounds, and there is one drop line per item (with code R2-n1/n2) → TASK-113 timeouts, and an aggregated log before the first `afterCommit` route.
+  - **PR44-SEC-14 (INFO).** `process.getBuiltinModule` built-ins, `node:module` `Module`/`register`, two timers forms and code R2-n3 → 020-D, TASK-113.
+  - **PR44-SEC-08 widened** to `start-api.ts`, `main.ts` and `app.ts` → 015-C.
+- **`start-api.ts` accepted.** One redacted fatal line and exit 1 after the handlers; exit 78 with key names only from the real loader; the 25 s drain bound holds with real timers; the `main.ts` pin blocks overrides.
+- **Accepted:** the D-ORCH-073 compliance (no gate weakened) and the RLS lane-timeout union (D-ARCH-106 (6) intact).
+- **Evidence.** `20261114T0902Z_035687c` is accepted; the D-SEC-PR23-02 statements are verbatim; the host scan is 0.
+- **Unions.** R2.8 replaces §7. PR #42 must keep all `negative-fixtures` rows, the transaction-body order including `settle`/`markRollbackOnly`, `TENANT_CONCURRENCY_LIMIT` and the per-phase permit. PR #39 re-applies `createOrExitOnConfigError` inside `start-api.ts` and applies the D-ORCH-073 pattern to the worker. The second merger needs a merge-only or delta round.
+- **Reversibility.** High.
+
+### R2.12 Verdict
+
+| Item | Result at `d943ef7` |
+|---|---|
+| Critical / High | 0 |
+| Medium | 0 (PR44-SEC-01 closed) |
+| Low | 3 open: PR44-SEC-05 (pre-existing, 020-D), PR44-SEC-10 (residual of the 01 fix, 020-D, before the first module or worker-job code PR), PR44-SEC-13 (pre-existing, before TASK-044) |
+| Info | 8 open: PR44-SEC-04 (stated residuals), -06, -07, -08 (widened), -09, -11, -12, -14 |
+| Regressions introduced by this PR | PR44-SEC-11 (lint crashes that fail closed); no security regression |
+| Coverage gate (D-ORCH-073) | Not weakened |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open at head `d943ef7`. The round-1 MEDIUM and the three fix-cycle LOW items are closed against `9def3f5` as the control. The three open LOW items are routed with due points: 020-D, before the first module or worker-job code PR, and before TASK-044. The second merger of PR #42 or PR #39 needs a merge-only or delta security round against R2.8 |
