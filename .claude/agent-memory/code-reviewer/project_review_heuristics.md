@@ -249,3 +249,8 @@ Round 2 of a spike PR (PR #6 r2):
 - **Prisma counter without Docker:** dead adapter at 127.0.0.1:1 fires the `$allOperations` hook before connecting; `_createItxClient({id:'t'},0,{})` gives the itx shape; real Express + `express.json()` proves ALS survives body parsing.
 - **Metric tools:** run them on the newest stored run and cross-check one number by hand (NFR rows with passing parts 4 vs reported 1); mutate the zero-denominator/zero-test guards.
 - **Doc claims about the evidence checker** ("rejects unknown files") must be checked against `FIXED_RUN_FILES` and the `summary.json` attachment rule, not the README alone.
+
+**Fix-cycle commits that "replace the end of a file" (PR #38, 2026-11-14).** When a fix commit's diff on a test file shows `-});` plus a removed `describe(`, check that the describe still exists: `git log -S"<describe title>" -- <file>` and grep the head. PR #38 silently dropped two PR32-SEC-15 tests this way. Prove it with a mutant of the guarded code, plus the restored block as the control.
+**"Trust a flag set by a slot" designs.** If a later handler trusts a state flag that an earlier slot sets "before reading", probe a replacement slot that sets the flag and then throws before its second mark. Prefer recomputing from data already in state (the route descriptor) over authenticator discipline.
+**`expect(keys).not.toEqual(expect.arrayContaining([a,b,c]))`** passes unless ALL the keys are present, so it is vacuous for a single leak. Ask for per-key `not.toHaveProperty`.
+**A static import of a regenerated artefact** (the Prisma client) in unit suites, where the repository convention is to import it under a file lock, is a truncated-read flake risk. "Files never disappeared" probes do not cover partial content.
