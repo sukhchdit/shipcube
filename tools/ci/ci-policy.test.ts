@@ -207,7 +207,9 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(map(scans.outputs, 'scans outputs')).toEqual({ security_paths: '${{ steps.security-paths.outputs.security_paths }}' });
     const classify = scanIndexOf(/GATE_SECURITY_PATHS/);
     expect(classify).toBeLessThan(scanIndexOf(/GITLEAKS_IMAGE/));
-    expect(str(scanSteps[classify]?.run)).toContain('git show "$RANGE_BASE:tools/quality/required-suites.json"');
+    expect(str(scanSteps[classify]?.run)).toBe(
+      'node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"',
+    );
     const run = (job.steps as YamlNode[]).map((step) => str(map(step, 'step').run)).join('\n');
     expect(run).toContain('git show "$RANGE_BASE:tools/quality/$name.json"');
     expect(run).toContain('node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json"');

@@ -408,19 +408,12 @@ jobs:
             fi
           done
 
-      # ADR-0023 am. G item 5: selects the security-integration job. The globs are security_critical_paths of the BASE
-      # ref's manifest (a PR cannot drop a path from its own selection); an unknown range or a missing manifest selects
-      # the job (fail closed). Runs before the scans so a red scan cannot hide the selection.
+      # ADR-0023 am. G item 5: selects the security-integration job. The trigger list lives in the BASE ref's copy of
+      # tools/ci/security-paths.mjs (a PR cannot narrow its own selection); an unknown range selects the job (fail
+      # closed). Runs before the scans so a red scan cannot hide the selection.
       - name: Security-critical paths (selects security-integration)
         id: security-paths
-        run: |
-          set -euo pipefail
-          manifest="$RUNNER_TEMP/security-manifest.json"
-          : > "$manifest"
-          if [ -n "$RANGE_BASE" ] && git cat-file -e "$RANGE_BASE:tools/quality/required-suites.json" 2>/dev/null; then
-            git show "$RANGE_BASE:tools/quality/required-suites.json" > "$manifest"
-          fi
-          node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --manifest "$manifest" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+        run: node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       # Only .git is mounted: gitleaks loads <source>/.gitleaksignore unconditionally, so no working-tree file may reach
       # /repo. Inline allow markers are inert, merge commits are diffed against their first parent, no network
