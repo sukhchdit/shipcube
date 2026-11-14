@@ -254,3 +254,205 @@ FINDINGS: 1 MAJOR (new), 1 MINOR (route), 3 NIT
 - **R2-n1.** Unvalidated `actor_roles` through a caller-supplied `map`/length flip (in-process only; it breaks chain verification).
 - **R2-n2.** A setter-pin residual that needs planted `'/*'`/`'*/'` literals.
 - **INFO.** The `Symbol.for` brand is forgeable in-process (a generic 500/503 only).
+
+
+---
+
+# Round 3 (head 96bd37a)
+
+- **Head:** `96bd37a7b9dc4d32fd57c6badd8db19b28e2116b`. The code head is `6e3ec99`; `96bd37a` adds the 8 evidence files only (`git diff --name-only 6e3ec99 96bd37a`).
+- **Reviewer:** code-reviewer · 2026-11-14 · round 3. This is a delta review after fix cycle 2 and the unions with main (PR #43, #44, #45 and #47).
+- **Inputs:**
+  - fix commits `c459988` (PR42-SEC-13), `e02fec6` (R2-M1), `e789232` (R2-n1..n3), `13dd72a` (#44 union) and `8d346fa` (CI lint heap);
+  - merges `c7636ec`, `5964962`, `c65f205` (#44), `7e9fb3c` and `6e3ec99` (#47);
+  - PR comments issuecomment-6877867966 and -6879392983, and the PR body (D-TASK025-22..29);
+  - evidence `docs/05-quality/tests/runs/20261114T1437Z_6e3ec99/`;
+  - Lane A run 43608317119.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-M1 is closed. A resolved-file boundaries policy flags every spelling I tried (25 probe shapes, including ./, .., export *,
+         createRequire, import(), side-effect and the tx slot taking the writer). Policy mutants: 7 of 10 killed (2 survive, R3-n1;
+         1 equivalent). track/settle is sound: 10 of 12 mutants killed (1 equivalent, 1 an unpinned design choice). The NITs are
+         fixed, all five merges are pure, and the CI heap line is a reasonable, fail-loud change. One new MINOR (R3-m1): the
+         JSDoc endorses `void writer.write(…)`, but a voided write that fails is an unhandled rejection, and the API treats
+         that as fatal.
+FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR, 3 NIT
+```
+
+## R3.1 Verification I performed myself
+
+| Check | Result |
+|---|---|
+| Scratch copy (`git archive 96bd37a`, junction to the worktree's node_modules) | Created under `review/PR-42-cr3` |
+| Unit: `packages/audit/src` plus `apps/api/src/platform/db/{with-tenant-tx,tenant-db,system-db,tenant-admission}.test.ts`, `platform/audit/writer.test.ts`, `platform/tx/execute-phases.test.ts` (paths first, then `--selectProjects unit`) | 13 suites, **332/332 pass** |
+| `tools/lint/negative-fixtures.test.ts -t "PR #42 R2-M1"` | **13/13 pass** (9 negative rows, 4 positive rows) |
+| **Lint probe, round 3** (`review/PR-42-cr3-lintprobe.mjs`: the real `eslint.config.mjs`, untyped, 37 probe files across api modules, platform folders, the app root and the worker) | Details below |
+| **Policy mutants** (`review/PR-42-cr3-mutate-lint.mjs`: 10 mutants of the eslint.config.mjs policy, then `-t "PR #42 R2-M1"`) | Details below |
+| **Code mutants** (`review/PR-42-cr3-mutate.mjs`: 18 mutants) | Details below |
+| **Probe: a voided write that fails** (`PR-42-cr3/zz-probe-void.mts`, tsx with `--conditions=@platform/source`) | Details below (R3-m1) |
+| Unions | Details below |
+| Evidence `20261114T1437Z_6e3ec99` | Verdict PASS. Suites: api 128, catalog 102, integration 319 (1 pre-existing skip), rls-cross-tenant 126/0, unit 5008 (2 skips). I recomputed packages/audit/src from `coverage-summary.json`: **lines 1437/1437, branches 442/442**. Other files: with-tenant-tx 454/454 lines and 119/120 branches; tenant-db 469/469 and 155/155; tenant-admission 233/234 and 40/41; platform/audit/writer 19/19 and 2/2. The integration JUnit contains both `[PR #42 fix cycle 2] … (PR42-SEC-13)` cases. `unit.junit.xml` has `coverage gate: packages/audit lines` and `… branches`. rls-cross-tenant has 126 tests, 13 of them tagged SEC-TC-06. |
+| CI on head `96bd37a` (run 43608317119) | fast-lane: **success**. The Lint step took 40 s with the 4 GB heap, and the base-ref negative-fixtures step passed. scans: only "Security-owned paths need a review record" failed (expected; no round-3 security record names this head yet). ci-gate: red, because it aggregates scans. |
+
+**Lint probe results**
+- **Reported by the REQ-AUDIT-001 policy:**
+  - named import (= p7), `./…/platform/./audit`, a `platform/tx/../audit` detour, namespace, `import()`;
+  - `export { … } from`, `export *`, `export * as`;
+  - `createRequire(import.meta.url)(…)` (also flagged by `static-module-specifier`), `m.require(…)`, a template-literal `import()`;
+  - mixed `import { type X, value }`, a side-effect `import '…'`, no extension, a `.ts` extension;
+  - `capture.ts` from a module;
+  - from `platform/http`, `platform/runtime`, the app root, and `shipments/controller`;
+  - the tx slot taking `writer.ts`, directly or by a `..` detour.
+- **Clean:**
+  - `import type`, `export type … from`;
+  - the tx slot → `capture.ts`;
+  - allow-listed importers: `identity/service`, `shipments/service`, `platform/db`;
+  - tests (`*.int.test.ts` and a module `tests/` folder).
+- **Caught by other rules:**
+  - A `Platform/Audit` case-variant fails `import-x/no-unresolved` (it also fails on Linux).
+  - A variable specifier fails `static-module-specifier`.
+  - `typeof import()` is a type, and is reported by `consistent-type-imports`.
+  - The worker → apps/api relative import fails `no-relative-packages` plus another boundaries policy.
+  - TS `import w = require()` makes `static-module-specifier` **crash** (R3-n3, a main defect). With that rule off it is reported by boundaries and `no-require-imports`.
+- **Not caught:** a two-hop through another allow-listed folder (R3-n2).
+
+**Policy mutants**
+- **Killed (7 of 10):**
+  - A: delete the policy (9 rows fail);
+  - B: drop `kind: 'value'` (V9);
+  - C: drop the tx-slot allow (execute.ts row);
+  - D: drop the `audit-writer-caller` exclusion (V8);
+  - E: drop the `test` exclusion;
+  - F: widen the tx allow to the folder (bad-tx-writer);
+  - H: `captured: { app: 'worker' }` (9 rows).
+- **Survived:**
+  - **G** (the category narrowed to `writer.ts`) and **I** (the tx-slot allow extended to any api file): see R3-n1.
+  - J (the policy pair moved to the front of `BOUNDARIES_POLICIES`) is equivalent today, because no later policy allows api → `api-platform-audit`.
+
+**Code mutants**
+- **Track/settle, killed (10 of 12):**
+  - T1: no `settle`. The suite crashes on the unhandled TENANT_TX_CLOSED rejection; see R3-m1.
+  - T2: `while` → `if` (the nested-work test).
+  - T3: no closed check in `track`.
+  - T4: `track` does not register.
+  - T5: the writer bypasses `track`.
+  - T6: `track` returns the void promise.
+  - T7: `settle` after the latch read (L8c).
+  - T8: the work starts before the closed check.
+  - T10: `track` missing from `ownKeys`.
+  - T12: `track` wraps only `append`.
+- **Track/settle, survived:**
+  - T9 (no function check) is equivalent: `work()` throws the TypeError anyway, before registering.
+  - T11 (`settle` also on the throw path) is an unpinned design choice. D-TASK025-23 says the throw path does not wait, and both behaviours are safe.
+- **Roles (R2-n1):** R1 (`length` re-read in the loop), R2 (no number check) and R3 (back to the caller's `map`) are each killed.
+- **Brand (R2-n3):** N8 (`instanceof`) is now killed.
+- **Setter pin (R2-n2):** P3 (a setter between the `'/*'`…`'*/'` literals in the real `prisma-store.ts`) is now killed. P4 (`set_config` in a `//` comment) is also refused, which fails closed as D-TASK025-25 intends.
+
+**Probe: a voided write that fails**
+- (A) `void writer.write(db, invalid)`, then `settle()`. The latch holds `AuditWriteError INVALID_ENTRY` (correct), **and 1 `unhandledRejection` (AuditWriteError)** fires.
+- (B) The same write after `revoke()` gives 1 `unhandledRejection` (DbError TENANT_TX_CLOSED).
+
+**Unions**
+- Each merge equals `git merge-tree --write-tree p1 p2` byte for byte: `c7636ec`, `5964962`, `7e9fb3c` and `6e3ec99`.
+- `c65f205` differs only in the conflict hunk of `tools/lint/negative-fixtures.test.ts`. The resolution keeps both row sets whole: the R1-M1/PR42-SEC-06 store and assembler rows, and PR #44's `[PR44-SEC-01 A05]` aliased-createRequire row.
+- `git merge-tree HEAD origin/main` (1df519c, docs only) is clean.
+- Trial merges with the open PRs:
+  - #39 (ef195bc): the known `packages/config/src/values.test.ts` conflict; `with-tenant-tx.ts` auto-merges.
+  - #46 (ad30316): `.github/workflows/ci.yml` conflicts on the Lint step's **comment lines only**. Both sides set the identical `NODE_OPTIONS: --max-old-space-size=4096`.
+
+**Not re-run (per brief):** Docker, Testcontainers, lane B, full lint/typecheck/build. For those I relied on the evidence and Lane A above.
+
+## R3.2 Round-2 closure
+
+| ID | Status | How verified |
+|---|---|---|
+| **R2-M1** | **Closed** | `eslint.config.mjs:597-602`. The importer is any non-test `app`/`api` file outside `AUDIT_WRITER_ALLOW_LIST`. The target is the **resolved** category `api-platform-audit` (`apps/api/src/platform/audit/**`) on value imports. That is a superset of `api-module`, and it also covers the app root and the platform folders, as I asked. **Every spelling of the round-2 p7 probe is reported** (R3.1). The fixtures fire (13/13), and deleting the policy fails 9/9 negative rows (mutant A). |
+| R2-M1: tx → capture exception (D-TASK025-22) | **Narrow** | The allow runs `from` `api-tx-slot` (non-test) `to` `api-audit-capture`, which is exactly `apps/api/src/platform/audit/capture.ts`. In the probe, tx → `writer.ts` is reported, including through a `../audit/../audit` detour. Mutants C and F are killed. Residual: it is unpinned against widening the *importer* side (mutant I). That is R3-n1. |
+| PR42-SEC-13 (D-TASK025-23) | **Closed** | Points 1 to 6 below. |
+| R2-m1 | **Routed** (D-TASK025-27) | TASK-029 AC items (a)–(c) and the TASK-028 key policy are exactly what I asked for in round 2. The writer guards stay refusals. |
+| R2-n1 | **Closed** | `length` is read once, the elements are read by index, and a non-number is refused (D-TASK025-24). R1–R3 are killed. Edge cases I checked by hand: Infinity is refused, NaN gives `[]`, and 1.5 is refused at index 1. |
+| R2-n2 | **Closed** | The pin counts over the raw source. A self-test proves the stripper would hide E1. P3 is killed on the real file. |
+| R2-n3 | **Closed** | A second-copy brand test exists, and N8 is killed. The JSDoc states "cross-copy marker, not an authenticity check" (D-TASK025-26). |
+
+**PR42-SEC-13 (D-TASK025-23), in detail:**
+1. **Thunk semantics.** `track` refuses (`TENANT_TX_CLOSED`) before calling `work`, so a refused write never starts (T3 and T8 killed).
+2. **Refusal reaches the caller as a rejection.** `write` is `async`, so a refusal is a rejection, not a synchronous throw.
+3. **Registration and the promise returned.** `started` is registered via a never-rejecting `settled`, and `track` returns `started` itself, so callers keep the real outcome (T6 killed).
+4. **The settle loop.** `settle` loops until the set is empty. Each `settled` deletes itself through a callback registered before any `Promise.all`, so the loop terminates. Work started by tracked work is awaited (T2 killed).
+5. **`withTenantTx` body order.** The order is: context, leak check, READ ONLY, `createTenantDb`, `fn`, **`settle`**, latch, return, then `revoke` in `finally`. `revoke` runs synchronously after the latch check, so no tracked write can start between the latch read and `revoke`.
+6. **Real PostgreSQL 18 (in the evidence JUnit).**
+   - A detached write whose tokeniser fails after the callback returned gives 500 `AUDIT_WRITE_FAILED`, **0 business rows and 0 entries**.
+   - A `void` write that succeeds is appended inside the transaction, and its hash is recomputed from the stored row.
+7. **Pins.** `createTenantDb` has one caller (`withTenantTx`). Every `Reflect.ownKeys(db)` pin (tenant-db, system-db, real-client) gained `track`.
+
+## R3.3 Findings
+
+| ID | Sev | Location | Issue | Required fix |
+|---|---|---|---|---|
+| **R3-m1** | MINOR (in-PR preferred; may route to TASK-029 with the JSDoc fix now) | `apps/api/src/platform/db/tenant-db.ts:71` (JSDoc) · `packages/audit/src/writer.ts:114` (`write`) · `apps/api/src/platform/runtime/process-errors.ts:88` | **The JSDoc endorses `void writer.write(…)`, but a voided write that fails crashes the API process.** The latch JSDoc names `void writer.write(…)` as a handled pattern. `write` is an `async` arrow, so it returns a *new* promise. `track`'s `then(ignore, ignore)` handles `started`, but not that new promise. Probe: the latch is set correctly, **and** an `unhandledRejection` fires (an AuditWriteError on the success path, a DbError TENANT_TX_CLOSED after revoke). The API's process handler answers `unhandledRejection` with `crash('process.unhandled_rejection')`. The 55P03 lock timeout is an expected, retryable 503 under contention (D-TASK025-01), so one contended voided write would kill every in-flight request on the process. That is a health-check failure on the ROLLBACK_TRIGGERS list. Integrity holds (settle plus the latch roll the business change back). The cost is availability. No production caller exists yet, so this is latent. Mutant T1 shows the same crash inside Jest. | **Preferred:** since the transaction owner surfaces every tracked failure through the latch, the writer's returned promise can be marked handled while awaiting callers still see the rejection. Make `write` a plain function: `let p; try { p = db.track(…) } catch (e) { p = Promise.reject(e) } p.catch(() => undefined); return p;`. Add a unit test asserting no `unhandledRejection` for a voided failing write (probe A). For the after-settle case (B), the failure then becomes silent. That case is D-TASK025-23's declared residual; log it once through the writer's options if a logger exists, or leave it to TASK-033. **Minimum (if routed):** fix the JSDoc now. Remove `void writer.write(…)` as an endorsed form, and state that a detached write must attach its own `.catch`, because the API treats an unhandled rejection as fatal. Put the code fix into TASK-029's AC. |
+| R3-n1 | NIT | `tools/lint/negative-fixtures.test.ts:1091-1110` (AUDIT_COMPOSITION rows) | No negative row imports a file of the folder **other than `writer.ts`**, so two mutants survive: G (the category narrowed to `apps/api/src/platform/audit/writer.ts`) and I (the tx-slot allow given to any api file). That folder pattern is the one TASK-029 relies on for the files it adds there. | Add one row, `modules/orders/service/bad-orders-capture.service.ts`, importing `../../../platform/audit/capture.js`. On the real config it is reported (probe q19), and it kills both G and I. This is fixtures only. |
+| R3-n2 | NIT (record; route) | D-TASK025-22 "Not covered" · `AUDIT_WRITER_ALLOW_LIST` (`eslint.config.mjs:121`) | **A two-hop through another allow-listed folder is lint-clean.** Probe: `platform/db/x.ts` with `export { auditWriterFromConfig } from '../audit/writer.js'` is clean, and so is a module service importing it from `platform/db`. The same holds for `@platform/audit` writer exports re-exported from `platform/db`, `platform/authz` or an allow-listed module's entry. This was pre-existing, and the same class as R2-M1. It needs a deliberate change in a trusted, reviewed folder, so it is a NIT. | Add it to D-TASK025-22's "Not covered" list (covered by review, and by TASK-033's per-route audit-completeness suite). Optionally have TASK-029 add a tripwire. One option is a source scan, along the lines of `tools/repo/test-seams.test.ts`: no allow-listed file outside `packages/audit/**` and `apps/api/src/platform/audit/**` re-exports a writer export or anything from `platform/audit`. |
+| R3-n3 | NIT (main, out of scope; route to 020-D) | `tools/eslint-rules/module-sources.mjs:80` (PR #44) | `platform/static-module-specifier` crashes the whole lint run on TS `import w = require('…')`. The `ImportBinding` def's parent is a `TSImportEqualsDeclaration` with no `.source`. This fails closed (exit 2), `verbatimModuleSyntax` rejects the syntax in ESM anyway, and boundaries plus `no-require-imports` report it once the rule is off. It is the same class as PR #44 R2-m3 (null-parent walks). | Guard `def.parent.type === 'ImportDeclaration'` before reading `.source`, and add a fixture. |
+
+**INFO (no action in this PR):**
+- `settle` waits for as long as a tracked work runs. Prisma's JS side awaits the callback past its transaction timeout, so a tracked work stuck on a non-SQL await holds the admission permit. The same happens to an awaited write today. The tokeniser and store only run SQL on this transaction, which bounds it. When TASK-029 or the vault adds non-SQL awaits (KMS, an HMAC service), they need their own timeouts.
+- Tracked work started by *untracked* detached code in the microtask gap between `settle`'s last size check and `withTenantTx`'s resumption is not awaited. That is inside D-TASK025-23's declared residual.
+
+## R3.4 Rulings on D-TASK025-22..29
+
+| Decision | Ruling |
+|---|---|
+| 22 Boundaries policy, value imports, tx → `capture.ts` exception | **Accepted.** The resolved-file judgement and the importer superset are correct, and the exception is exact-file. Amend the "Not covered" list with R3-n2. TASK-029: `capture.ts` should export only the hook factory, because the exception is per file, not per export. |
+| 23 `track` takes a thunk; settle on the success path only | **Accepted** (R3.2 points 1 to 7). Amend the JSDoc per R3-m1. |
+| 24 `roles()` fails closed on a non-number `length` | **Accepted.** |
+| 25 Setter count over the raw source | **Accepted.** It also refuses `set_config` in a comment, which fails closed. |
+| 26 Brand as a cross-copy marker | **Accepted.** |
+| 27 R2-m1 routing to TASK-029/028 | **Accepted.** The orchestrator must put (a)–(c) and the verification line into TASK-029's AC verbatim. |
+| 28 Sequencing with #44 gains `track` | **Accepted and done.** #44 merged first. This PR keeps `TENANT_CONCURRENCY_LIMIT` (13dd72a) and both fixture row sets. Each 020-C phase is its own `withTenantTx` (`execute.ts:230`, `:238`), so each phase takes its own permit and settles its own tracked writes. No 020-C `ownKeys(db)` pin exists. |
+| 29 Lint step `NODE_OPTIONS=--max-old-space-size=4096` | **Accepted (maintainability only; security reviews it separately).** Reasons below. |
+
+**Why D-TASK025-29 is accepted**
+- **Narrow scope.** It is step-scoped and changes the heap size only (preload flags stay refused by `node-options-preload`). It does not change which rules or files are linted.
+- **Fails loud.** If a union drops the line, lint OOMs again (exit 134). Nothing passes silently.
+- **The cause is systemic, not this PR.** PR #46 independently arrived at the **identical** line, in `ci.yml` and in its new `lane-c.yml`. Its measurement: OOM at about 2 GB, pass at 3 GB. The cause is whole-repo typed ESLint in one process, which sits around 2 GB against V8's default heap on the 7–8 GB hosted runner.
+- **Headroom.** 4 GB against a measured 2.1–2.3 GB is about 1.8× headroom, inside the runner's memory.
+- **Sharding is not warranted yet.** It would:
+  - split `--max-warnings 0` and the suppressions check;
+  - complicate the "Lint must not mutate the tree" step and the base-ref fixture steps;
+  - duplicate typegen;
+  - lower the peak only if the shards do not share TS programs.
+
+**Non-blocking follow-ups for devops-engineer / TASK-015**
+1. Make the next cliff visible before it OOMs. Record the lint step's peak RSS (for example GNU `time -v` max resident) in the step summary, and warn at about 80 % of the cap.
+2. Once #46 lands, the line lives in two workflow files. Single-source it, or pin in `check-workflow-policy` that every `npm run lint` step carries the same `NODE_OPTIONS`.
+3. Local parity: developers on hosts with 8 GB of RAM or less get the roughly 2 GB default heap and will hit the same OOM. Document it (CONTRIBUTING / ADR-0023).
+
+## R3.5 Merge conditions
+
+1. **Security record round 3 naming `96bd37a`** (or the final head). The scans failure is only that record. `ci.yml` and `eslint.config.mjs` are security-owned.
+2. **Fixes on this head.**
+   - R3-n1 is fixtures only and welcome in this PR.
+   - R3-m1: either the code fix in this PR, which touches `packages/audit`, so the `audit-package` path rule asks for fresh lane B evidence; or the JSDoc fix now with the code fix in TASK-029's AC (orchestrator's choice). Either way, record it.
+   - R3-n2 is a D-entry amendment. R3-n3 routes to 020-D.
+   - No re-review is needed for R3-n1, the R3-m1 JSDoc fix or the R3-m1 code fix as described, provided Lane A is green. The code fix needs only its one unit test and the evidence.
+3. **Second-merger steps**
+   - **With #46:** the `ci.yml` conflict is comment-only. Keep **one** `NODE_OPTIONS: --max-old-space-size=4096` line on the Lint step, plus one comment naming both causes. Keep #46's `lane-c.yml` line.
+   - **With #39 (unchanged):**
+     - `values.test.ts` `GUARDS.length === 15`;
+     - the admission `TenantTxConfigError`s get `variable` (`DB_TENANT_ADMISSION_WAIT_MS`, `DB_TENANT_MAX_CONCURRENT_TX`);
+     - the images ship `packages/audit`.
+4. **Squash.** No non-docs commit after `96bd37a` other than the fixes above.
+
+## R3.6 Good: patterns worth keeping
+
+- **One policy instead of specifier regexes.** It judges the resolved file, so the whole class of spelling bypasses goes away. The fixtures enumerate the spellings anyway, the commit message quotes the deletion self-check, and the policy was placed last with its order reason stated.
+- **The thunk-based `track`.** Refusal happens before the side effect, with no orphaned promise, and the caller gets the original promise back. A never-rejecting registration set keeps `settle` simple and terminating.
+- **Real-database proof of the integrity claim.** The integration test shows 0 business rows and 0 entries for the detached failing write, and a hash recomputed from the stored row for the detached successful one.
+- **Fix-cycle tables that name the failing-on-old-code test for each finding.** This made the delta review quick to verify.
+
+## R3.7 Security flags (for security-analyst)
+
+- **R3-m1 (availability):** a voided failing audit write is an unhandled rejection, which is a process crash in the API (`process-errors.ts:88`). It becomes client-influenceable once a caller voids a write and contention produces 55P03.
+- **R3-n2:** a two-hop re-export of the writer through other allow-listed folders (pre-existing class).
+- **`ci.yml` heap line (D-TASK025-29):** size only. `node-options-preload` still applies.

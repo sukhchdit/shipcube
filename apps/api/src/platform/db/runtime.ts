@@ -29,7 +29,7 @@
  * `createDatabaseRuntime` keeps its optional `Client` input as the unit-test seam: without it no runner is built and
  * there is nothing to probe.
  */
-import type { Config, Service } from '@platform/config';
+import { type Config, DB_TENANT_ADMISSION_WAIT_MS_DEFAULT, defaultTenantMaxConcurrentTx, type Service } from '@platform/config';
 
 import { createAuditChainCheck } from '../health/checks/audit-chain.js';
 import { createAuditPartitionsCheck, isPartitionsUnavailable } from '../health/checks/audit-partitions.js';
@@ -49,9 +49,11 @@ import {
   startIntegrityMonitor,
   type IntegrityMonitor,
 } from './session-integrity.js';
+import { EMPTY_ADMISSION_SNAPSHOT, type TenantAdmissionSnapshot } from './tenant-admission.js';
 import {
   assertNoSessionOptions,
   createWithTenantTx,
+  DEFAULT_MAX_WAIT_MS,
   type RawQueryClient,
   tenantTxOptionsFromConfig,
   type TenantTxRunner,
@@ -204,6 +206,22 @@ export interface DatabaseRuntime<TTx> {
   readonly resources: readonly Closeable[];
   /** `db_session_context_leak` detections since start (exported as a metric with the metrics pipeline). */
   sessionContextLeaks(): number;
+  /**
+   * Per-tenant admission bulkhead counters (D-ARCH-086): `db_tenant_admission_rejected_total{reason}` and the
+   * `db_tenant_admission_inflight{key_kind}` gauge, exported with the metrics pipeline. All zero without a runner.
+   */
+  tenantAdmission(): TenantAdmissionSnapshot;
+}
+
+/**
+ * The transaction options with the admission bulkhead always configured (D-ARCH-086): options without one (callers
+ * other than `databaseRuntimeFromConfig`) get `max(2, floor(poolMax / 2))` permits and the default 250 ms wait, never
+ * more than their `maxWaitMs`.
+ */
+export function withAdmissionDefaults(tx: WithTenantTxOptions, poolMax: number): WithTenantTxOptions {
+  if (tx.admission !== undefined) return tx;
+  const waitMs = Math.min(DB_TENANT_ADMISSION_WAIT_MS_DEFAULT, tx.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
+  return { ...tx, admission: { maxConcurrentTx: defaultTenantMaxConcurrentTx(poolMax), waitMs } };
 }
 
 export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extends RuntimeDatabaseClient<TTx>>(
@@ -234,7 +252,7 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
     input.Client === undefined ? undefined : new input.Client({ adapter: createDatabaseAdapter(pool), errorFormat: 'minimal' });
   let tenantTx: TenantTxRunner<TTx> | undefined;
   if (client !== undefined) {
-    tenantTx = createWithTenantTx<TTx>(client, input.tx, {
+    tenantTx = createWithTenantTx<TTx>(client, withAdmissionDefaults(input.tx, input.database.poolMax), {
       onSecurityEvent: (event, detail) =>
         security.emit(event, {
           ...(detail.correlationId === undefined ? {} : { correlationId: detail.correlationId }),
@@ -310,6 +328,7 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
       { name: 'database', close: () => pool.end() },
     ],
     sessionContextLeaks: () => leaks,
+    tenantAdmission: () => tenantTx?.admission?.snapshot() ?? EMPTY_ADMISSION_SNAPSHOT,
   };
 }
 
