@@ -173,7 +173,11 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
 
   const PR39_COMMIT = 'dd7a2ddcad30ba422152300f21d7df5f105d283e';
   const PR39_PATH = 'tools/docker/scan-image-secrets.mjs';
-  /** Why a commit-bound block is not exact: one full SHA, one rule, one anchored path, anchored full-line regexes. */
+  /**
+   * Why a commit-bound block is not exact: one full SHA, one rule, one anchored path, anchored full-line regexes. A line
+   * pattern starts `^\n?` because gitleaks' git-mode line target carries the preceding newline (bare `^` never matched
+   * with the pinned image) and ends `$`.
+   */
   function commitBoundViolations(block: string): string[] {
     const out: string[] = [];
     const commits = literals(block, 'commits');
@@ -182,7 +186,8 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     const paths = literals(block, 'paths');
     if (paths.length !== 1 || !paths.every((p) => p.startsWith('^') && p.endsWith('$'))) out.push('paths: one anchored path');
     const regexes = literals(block, 'regexes');
-    if (regexes.length === 0 || !regexes.every((r) => r.startsWith('^') && r.endsWith('$'))) out.push('regexes: anchored full lines');
+    if (regexes.length === 0 || !regexes.every((r) => r.startsWith('^\\n?') && !r.startsWith('^\\n?.') && r.endsWith('$')))
+      out.push('regexes: anchored full lines');
     return out;
   }
 
@@ -207,7 +212,9 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     const shortSha = entry.replace(PR39_COMMIT, PR39_COMMIT.slice(0, 7));
     const unanchoredPath = entry.replace("'''^tools/docker/scan-image-secrets\\.mjs$'''", "'''scan-image-secrets'''");
     const twoCommits = entry.replace(`'''${PR39_COMMIT}'''`, `'''${PR39_COMMIT}''', '''${'0'.repeat(40)}'''`);
-    for (const mutated of [dropRule, shortSha, unanchoredPath, twoCommits]) {
+    const unanchoredLine = entry.replace("'''^\\n?  // effect", "'''  // effect");
+    const openEndedLine = entry.replace("src copies\\.$'''", "src copies'''");
+    for (const mutated of [dropRule, shortSha, unanchoredPath, twoCommits, unanchoredLine, openEndedLine]) {
       expect(mutated).not.toBe(entry);
       expect(commitBoundViolations(mutated)).not.toEqual([]);
     }
@@ -223,8 +230,11 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       line,
       ...over,
     });
-    expect(allowedByAny(at(line272(effectNamespaced())))).toBe(true);
-    expect(allowedByAny(at(line273(effectNamespaced())))).toBe(true);
+    // Both forms of the line target: as gitleaks hands it over (preceding newline included) and bare.
+    for (const line of [line272(effectNamespaced()), line273(effectNamespaced())]) {
+      expect(allowedByAny(at(`\n${line}`))).toBe(true);
+      expect(allowedByAny(at(line))).toBe(true);
+    }
 
     const flagged = line272(effectNamespaced());
     const controls: Record<string, GitleaksFinding> = {
@@ -239,6 +249,8 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       'another line: the second comment holding an AWS-shaped value': at(line273(awsKeyShaped())),
       'another line: a secret appended to the comment': at(`${flagged} token = ${awsKeyShaped()}`),
       'another line: the comment re-indented': at(flagged.trimStart()),
+      'another line: text before the comment': at(`const token = "${awsKeyShaped()}";\n${flagged}`),
+      'another line: a second newline before the comment': at(`\n\n${flagged}`),
     };
     const wronglyAllowed = Object.entries(controls)
       .filter(([, finding]) => allowedByAny(finding))

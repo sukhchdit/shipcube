@@ -13,6 +13,8 @@
 # pushed to a PR gets one entry here that is bound to that exact commit (full 40-hex SHA), that exact path, that one rule
 # (targetRules) AND anchored full-line patterns for the flagged lines. The same text in any other commit or path, other
 # lines of the same commit, and every other rule are still reported. Never a commit-only, path-only or rule-only entry.
+# Gitleaks (v8.30.1, git mode) hands a line target to the allowlist with the preceding newline included, so a full-line
+# pattern is written `^\n?<exact line>$` (a bare `^<line>$` never matches; verified with the pinned image).
 # Checked by tools/ci/sec-static.test.ts (D-ORCH-068).
 title = "shipqube gitleaks"
 
@@ -38,4 +40,4 @@ targetRules = ['''generic-api-key''']
 commits = ['''dd7a2ddcad30ba422152300f21d7df5f105d283e''']
 regexTarget = "line"
 paths = ['''^tools/docker/scan-image-secrets\.mjs$''']
-regexes = ['''^  // effect 3\.20\.0 \(a dependency of @prisma/config\): `IntervalSymbolKey = "effect/[A-Za-z]{1,32}"` and$''', '''^  // `IntervalsSymbolKey = "effect/[A-Za-z]{1,32}"`, in the cjs, esm and src copies\.$''']
+regexes = ['''^\n?  // effect 3\.20\.0 \(a dependency of @prisma/config\): `IntervalSymbolKey = "effect/[A-Za-z]{1,32}"` and$''', '''^\n?  // `IntervalsSymbolKey = "effect/[A-Za-z]{1,32}"`, in the cjs, esm and src copies\.$''']
