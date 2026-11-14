@@ -19,6 +19,12 @@ export interface Token {
 }
 
 const IDENT_CHAR = /[A-Za-z0-9_$]/;
+/**
+ * An identifier character as PostgreSQL's scanner reads it (scan.l `ident_cont`): ASCII letters, digits, `_`, `$` and
+ * every non-ASCII character (code unit 0x80 and above, as CODE_PIECE). Used for the E-prefix check (PR #43 R1-n2):
+ * `éE'…'` is the identifier `éE` followed by a plain string, not an escape string.
+ */
+const isIdentifierChar = (ch: string | undefined): boolean => ch !== undefined && (IDENT_CHAR.test(ch) || (ch.codePointAt(0) ?? 0) >= 0x80);
 const VARIABLE = /^:(['"])([A-Za-z_][A-Za-z0-9_]*)\1/;
 const DOLLAR_TAG = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
 
@@ -79,7 +85,7 @@ export function tokenize(sql: string): Token[] {
     } else if (ch === "'") {
       // Token level (PR11-SEC-16): the E prefix is a lone `e` directly before the quote, not the end of a longer word
       // (`name'…'`, `date'…'`) and never text inside another token (`'abcde'`, `'a e'`).
-      const escaped = /[eE]$/.test(code) && !IDENT_CHAR.test(code.at(-2) ?? ' ');
+      const escaped = /[eE]$/.test(code) && !isIdentifierChar(code.at(-2));
       const prefix = escaped ? code.slice(-1) : '';
       if (escaped) code = code.slice(0, -1);
       let j = i + 1;
@@ -169,44 +175,73 @@ export function stripComments(sql: string): string {
 const CODE_PIECE = /[A-Za-z_\u0080-￿][A-Za-z0-9_$\u0080-￿]*|[0-9][A-Za-z0-9_$.]*|[^]/g;
 const ROUTINE_HEAD = /^create (?:or replace )?(?:function|procedure)\b/;
 
+/** One piece of the token stream for splitStatements: a CODE_PIECE of a code token, or a whole other token. */
+interface Piece {
+  readonly kind: TokenKind;
+  readonly text: string;
+}
+
 /**
  * Top-level statements, comments removed, trimmed, without the terminating `;`; empty statements dropped.
  *
  * Inside a `CREATE [OR REPLACE] FUNCTION | PROCEDURE` statement a SQL-standard body (`BEGIN ATOMIC … END`) holds `;`
- * that do not end the statement. As psql does (psqlscan.l `begin_depth`), a `BEGIN` or `CASE` word that is not the
- * statement's first word opens a block and `END` closes one; a `;` splits only outside every block. The tracking is
- * limited to routine definitions, so a stray word elsewhere can never swallow the rest of a file (SEC-TC-73).
+ * that do not end the statement (SEC-TC-73). Exactly this is counted (PR43-SEC-03, PR #43 R1-M1), in such a statement
+ * only, on unquoted words at parenthesis depth 0:
+ *  - the two words `BEGIN ATOMIC` (comments and whitespace between them allowed) open a block;
+ *  - inside an open block, `BEGIN ATOMIC` and `CASE` raise the depth and `END` lowers it;
+ *  - a `;` splits only at depth 0.
+ * A bare `BEGIN` never counts: it is an unreserved keyword, so a routine named `begin`, a parameter or a `RETURNS
+ * TABLE` column `begin`, or `RETURN begin` must not open anything. A `CASE` outside a block never counts either (`RETURN
+ * CASE … END` has no `;` inside). This is narrower than psql's heuristic (psqlscan.l `begin_depth` also counts a bare
+ * `BEGIN`), not a parser. Text that ends inside an open block throws SqlLexError (fail closed: the caller reports it,
+ * it never becomes one swallowed statement).
  */
 export function splitStatements(sql: string): string[] {
+  const pieces: Piece[] = tokenize(sql).flatMap((token): Piece[] =>
+    token.kind === 'code' ? (token.text.match(CODE_PIECE) ?? []).map((text) => ({ kind: 'code', text })) : [token],
+  );
+  /** The next piece after `at` that is not a comment or whitespace, lowercased; undefined when it is not code. */
+  const nextWord = (at: number): string | undefined => {
+    for (let k = at + 1; k < pieces.length; k += 1) {
+      const piece = pieces[k] as Piece;
+      if (piece.kind === 'comment' || (piece.kind === 'code' && /^\s$/.test(piece.text))) continue;
+      return piece.kind === 'code' ? piece.text.toLowerCase() : undefined;
+    }
+    return undefined;
+  };
   const statements: string[] = [];
   let current = '';
   let words: string[] = [];
+  let parens = 0;
   let depth = 0;
-  for (const token of tokenize(sql)) {
-    if (token.kind === 'comment') {
-      current += token.text.startsWith('--') ? '' : ' ';
-      continue;
+  pieces.forEach((piece, index) => {
+    if (piece.kind === 'comment') {
+      current += piece.text.startsWith('--') ? '' : ' ';
+      return;
     }
-    if (token.kind !== 'code') {
-      current += token.text;
-      continue;
+    if (piece.kind !== 'code') {
+      current += piece.text;
+      return;
     }
-    for (const piece of token.text.match(CODE_PIECE) ?? []) {
-      if (piece === ';' && depth === 0) {
-        statements.push(current);
-        current = '';
-        words = [];
-        continue;
-      }
-      current += piece;
-      if (!/^[A-Za-z_]/.test(piece)) continue;
-      const word = piece.toLowerCase();
-      words.push(word);
-      if (!ROUTINE_HEAD.test(words.slice(0, 4).join(' '))) continue;
-      if ((word === 'begin' || word === 'case') && words.length > 1) depth += 1;
-      else if (word === 'end' && depth > 0) depth -= 1;
+    if (piece.text === ';' && depth === 0) {
+      statements.push(current);
+      current = '';
+      words = [];
+      parens = 0;
+      return;
     }
-  }
+    current += piece.text;
+    if (piece.text === '(') parens += 1;
+    else if (piece.text === ')') parens = Math.max(0, parens - 1);
+    if (!/^[A-Za-z_]/.test(piece.text)) return;
+    const word = piece.text.toLowerCase();
+    words.push(word);
+    if (parens !== 0 || !ROUTINE_HEAD.test(words.slice(0, 4).join(' '))) return;
+    const atomic = word === 'begin' && nextWord(index) === 'atomic';
+    if (atomic || (depth > 0 && word === 'case')) depth += 1;
+    else if (word === 'end' && depth > 0) depth -= 1;
+  });
+  if (depth > 0) throw new SqlLexError(`unbalanced BEGIN ATOMIC block: the text ends inside a routine body (${depth} open)`);
   statements.push(current);
   return statements.map((statement) => statement.trim()).filter((statement) => statement !== '');
 }
@@ -233,7 +268,8 @@ export const MAX_NESTED_SQL_DEPTH = 4;
  * in a dollar-quoted body, or in a string literal read as dynamic SQL (`EXECUTE 'SELECT E''\x61pp…'''`), up to
  * MAX_NESTED_SQL_DEPTH levels. Never a regular expression over the text: `'abcde'`, `'a e'` and `name'…'` hold no
  * escape string. Nested text that does not lex (prose in a literal) holds no token and counts as clean; top-level text
- * that does not lex throws SqlLexError.
+ * that does not lex throws SqlLexError. At the depth cap a string or dollar token that is still present counts as an
+ * escape string (fail closed, PR43-SEC-06 c / PR #43 R1-n1): it is not read, so it cannot be shown clean.
  */
 export function containsEscapeString(sql: string, depth = 0): boolean {
   let tokens: Token[];
@@ -246,9 +282,8 @@ export function containsEscapeString(sql: string, depth = 0): boolean {
   return tokens.some(
     (token) =>
       token.escape === true ||
-      (depth < MAX_NESTED_SQL_DEPTH &&
-        (token.kind === 'string' || token.kind === 'dollar') &&
-        containsEscapeString(literalBody(token), depth + 1)),
+      ((token.kind === 'string' || token.kind === 'dollar') &&
+        (depth >= MAX_NESTED_SQL_DEPTH || containsEscapeString(literalBody(token), depth + 1))),
   );
 }
 

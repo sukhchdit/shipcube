@@ -103,6 +103,75 @@ describe('SQL text helpers (bootstrap runner, migration linter)', () => {
     expect(splitStatements('SELECT begin FROM t; SELECT 2;')).toEqual(['SELECT begin FROM t', 'SELECT 2']);
   });
 
+  /** Statements every hostile head below must leave split: one each, never swallowed by the routine. */
+  const TAIL = 'GRANT TRUNCATE ON public.t TO platform_app; CREATE SCHEMA evil; BEGIN; COMMIT';
+  const TAIL_STATEMENTS = ['GRANT TRUNCATE ON public.t TO platform_app', 'CREATE SCHEMA evil', 'BEGIN', 'COMMIT'];
+
+  it.each([
+    ['a parameter named begin', 'CREATE FUNCTION public.f(begin integer) RETURNS integer LANGUAGE sql RETURN begin'],
+    [
+      'a RETURNS TABLE column named begin',
+      'CREATE FUNCTION public.f() RETURNS TABLE (begin timestamptz) LANGUAGE sql AS $$ SELECT now() $$',
+    ],
+    ['a function named begin', "CREATE FUNCTION public.begin() RETURNS integer LANGUAGE sql AS 'SELECT 1'"],
+    ['a function named begin (OR REPLACE)', "CREATE OR REPLACE FUNCTION public.begin() RETURNS integer LANGUAGE sql AS 'SELECT 1'"],
+    ['a procedure parameter named begin', 'CREATE PROCEDURE public.p(begin integer) LANGUAGE sql AS $$ SELECT 1 $$'],
+    [
+      'RETURN CASE … END at depth 0',
+      "CREATE FUNCTION public.f(v int) RETURNS text LANGUAGE sql RETURN CASE WHEN v > 0 THEN 'a' ELSE 'b' END",
+    ],
+    ['a bare CASE after the head', 'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$ CASE'],
+  ])('[PR43-SEC-03] splitStatements: %s opens no block; the statements after it stay split', (_shape, head) => {
+    expect(splitStatements(`${head}; ${TAIL};`)).toEqual([head, ...TAIL_STATEMENTS]);
+  });
+
+  it('[PR43-SEC-03] splitStatements: a later END; does not resync a block that never opened (the GRANT is not hidden)', () => {
+    const head = 'CREATE FUNCTION public.f(begin integer) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$';
+    expect(splitStatements(`${head}; GRANT TRUNCATE ON public.t TO platform_app; END; CREATE SCHEMA s`)).toEqual([
+      head,
+      'GRANT TRUNCATE ON public.t TO platform_app',
+      'END',
+      'CREATE SCHEMA s',
+    ]);
+  });
+
+  it('[PR43-SEC-03] splitStatements: BEGIN ATOMIC (comments between the words allowed) with CASE … END and a parenthesised CASE stays one statement (positive control)', () => {
+    const atomic = [
+      'CREATE FUNCTION public.f(v int) RETURNS text LANGUAGE sql',
+      'BEGIN /* body */ -- of f',
+      'ATOMIC',
+      "  SELECT CASE WHEN v > 0 THEN 'a' ELSE 'b' END;",
+      "  SELECT (CASE WHEN v > 1 THEN 'c' END);",
+      'END',
+    ].join('\n');
+    const statements = splitStatements(`${atomic}; ${TAIL};`);
+    expect(statements).toHaveLength(1 + TAIL_STATEMENTS.length);
+    expect(statements.slice(1)).toEqual(TAIL_STATEMENTS);
+    expect(statements[0]).toMatch(/^CREATE FUNCTION public\.f\(v int\)[^]*SELECT \(CASE WHEN v > 1 THEN 'c' END\);\nEND$/);
+  });
+
+  it('[PR43-SEC-03] splitStatements fails closed: text that ends inside a BEGIN ATOMIC block throws SqlLexError', () => {
+    const open = 'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; CREATE SCHEMA evil;';
+    expect(() => splitStatements(open)).toThrow(SqlLexError);
+    expect(() => splitStatements(open)).toThrow(/unbalanced BEGIN ATOMIC block/);
+    expect(() => splitStatements(`${open.replace('SELECT 1;', 'SELECT CASE WHEN true THEN 1 END;')} END`)).not.toThrow();
+  });
+
+  it('[PR43-SEC-06 c] containsEscapeString fails closed beyond MAX_NESTED_SQL_DEPTH: a string still present at the cap counts', () => {
+    const nest = (sql: string, levels: number): string => (levels === 0 ? sql : nest(`SELECT '${sql.replaceAll("'", "''")}'`, levels - 1));
+    for (const levels of [1, 4, 5, 6]) expect(containsEscapeString(nest(String.raw`SELECT E'\x61'`, levels))).toBe(true);
+    // Below the cap plain nesting stays clean.
+    expect(containsEscapeString(nest("SELECT 'x'", 3))).toBe(false);
+  });
+
+  it('[PR #43 R1-n2] a non-ASCII identifier character before E makes it part of the identifier, not an escape-string prefix', () => {
+    const sql = String.raw`SELECT éE'\'; SELECT 2; --'`;
+    expect(tokenize(sql).some((token) => token.escape === true)).toBe(false);
+    expect(splitStatements(sql)).toEqual([String.raw`SELECT éE'\'`, 'SELECT 2']);
+    // The ASCII control still marks a lone E.
+    expect(tokenize(String.raw`SELECT E'\''`).some((token) => token.escape === true)).toBe(true);
+  });
+
   it('fails on unterminated comments, strings, identifiers and dollar quotes', () => {
     expect(() => tokenize('/* open')).toThrow(/unterminated block comment/);
     expect(() => tokenize("SELECT 'open")).toThrow(/unterminated string literal/);

@@ -14,7 +14,8 @@
  *       SET NOT NULL without a validated `CHECK (<col> IS NOT NULL)` (validated in this or an earlier migration)
  *   5   CREATE INDEX without CONCURRENTLY on an existing table; CREATE INDEX CONCURRENTLY in a multi-statement file
  *   6   ADD FOREIGN KEY / CHECK on an existing table without NOT VALID
- *   7   DROP TRIGGER, DISABLE TRIGGER, DISABLE ROW LEVEL SECURITY, NO FORCE ROW LEVEL SECURITY (any table); UPDATE,
+ *   7   DROP TRIGGER, DISABLE TRIGGER, ENABLE REPLICA | ALWAYS TRIGGER | RULE (PR43-SEC-05 a), DISABLE ROW LEVEL
+ *       SECURITY, NO FORCE ROW LEVEL SECURITY (any table); UPDATE,
  *       DELETE, TRUNCATE, DROP or DETACH PARTITION touching audit storage (REQ-AUDIT-015)
  *   8   DELETE (or ALL) granted to platform_app on a table without the manifest `hardDelete` flag (or on ALL TABLES);
  *       TRUNCATE, TRIGGER or REFERENCES (also via ALL) granted to platform_app on a table; any table or sequence
@@ -35,8 +36,9 @@
  *       count as above) without a later `RESET lock_timeout` (the value persists into later files, D-ARCH-071); inside
  *       a DO body (incl. `EXECUTE '…'` literals) `SET [SESSION] lock_timeout`, `RESET lock_timeout` and a non-local
  *       `set_config('lock_timeout', …)` move that value too (PR11-SEC-17 c, DO-body half; D-ARCH-078); the name may be
- *       quoted (`SET "lock_timeout"`, `RESET "lock_timeout"`), and a top-level `SELECT set_config('lock_timeout', v,
- *       false)` is a SET to v (`true`: no effect, like SET LOCAL) (setter-key half, D-ARCH-078 (d), TASK-024)
+ *       quoted (`SET "lock_timeout"`, `RESET "lock_timeout"`), and a top-level `set_config('lock_timeout', v, false)`
+ *       in any statement but a routine definition (SELECT, WITH, VALUES, …; PR #43 R1-m1) is a SET to v (`true`: no
+ *       effect, like SET LOCAL) (setter-key half, D-ARCH-078 (d), TASK-024)
  *   11c a top-level transaction-control statement (BEGIN, START TRANSACTION, COMMIT, END, ROLLBACK [TO], ABORT,
  *       SAVEPOINT, RELEASE, PREPARE TRANSACTION, COMMIT/ROLLBACK PREPARED) in migration.sql or down.sql, as the first
  *       token of a statement (never in a body, CASE … END or BEGIN ATOMIC) (PR24-SEC-11, D-ARCH-099; SEC-TC-73)
@@ -59,16 +61,23 @@
  *       included): every write form anywhere (DISCARD on text without string literals; every E-prefixed escape
  *       string, token-level, PR11-SEC-16); every read form outside the §4.2 helper definitions, except the
  *       renderer's operator-scope atom, exactly, inside a CREATE POLICY (app.correlation_id reads stay allowed);
- *       `EXECUTE` in a CREATE FUNCTION | PROCEDURE body whose routine is not on DYNAMIC_SQL_ALLOW_LIST (PR11-SEC-14 b);
+ *       dynamic SQL in a CREATE FUNCTION | PROCEDURE whose name and definition digest are not on
+ *       DYNAMIC_SQL_ALLOW_LIST (PR11-SEC-14 b, PR43-SEC-06 d): a bare `execute` word in the body code (PR #43 R1-m2) or
+ *       a call of query_to_xml, query_to_xmlschema, query_to_xml_and_xmlschema, ts_stat or ts_rewrite (PR43-SEC-06 b);
  *       one finding per statement
  *   17  down.sql: every `DROP …` and `ALTER TABLE … DROP [COLUMN | CONSTRAINT]` carries IF EXISTS (PR11-SEC-07,
- *       D-ARCH-071); down.sql is otherwise only checked for 11c
+ *       D-ARCH-071); down.sql is otherwise only checked for 11c and L. Not covered (outside the TASK-024 AC; PR #43
+ *       R1-n6 b): `ALTER TYPE … DROP ATTRIBUTE` and `ALTER DOMAIN … DROP CONSTRAINT`, which have IF EXISTS forms too
  *   18  (F-04) DROP INDEX of a COVERING_INDEX_TOLERANCE index unless the same file re-creates it WITH INCLUDE
  *   19  (F-11) DROP INDEX of a partial index an earlier file created unless the same file re-creates it with its WHERE
  *       clause; a different predicate is "partial-index predicate changed: review required" (D-ARCH-077, SPK-08)
+ *   20  `standard_conforming_strings` or `backslash_quote` named anywhere (SET, set_config, routine SET clauses,
+ *       ALTER … SET; bodies and dynamic SQL included), in both lanes (PR43-SEC-06 a)
+ *   L   a file (migration.sql, down.sql, a bootstrap file) that does not lex or ends inside a `BEGIN ATOMIC` block is
+ *       reported and not linted further (fail closed; PR43-SEC-03)
  *   S   bootstrap lane: only the variables db_name, migrator_password and app_password, and every PASSWORD keyword in
  *       code is followed by :'migrator_password', :'app_password' or NULL (PR5-SEC-12)
- * Rules 2-11 and 14-19 apply to prisma/migrations; 12, 13 and S also (or only) to prisma/bootstrap.
+ * Rules 2-11 and 14-19 apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
  *
  * Stated limits (text rules cannot be complete over dynamic SQL; PR #11 review R2-n2, PR11-SEC-14/15/17): a setter
  * whose name and key are both built by `format()` or keyword-split concatenation, `EXECUTE` of a computed or table-read
@@ -97,7 +106,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { RenderRlsError, renderRls } from './render-rls.js';
-import { SqlLexError, containsEscapeString, normalise, referencedVariables, splitStatements, sqlText, tokenize } from './sql-text.js';
+import {
+  SqlLexError,
+  containsEscapeString,
+  literalBody,
+  normalise,
+  referencedVariables,
+  splitStatements,
+  sqlText,
+  tokenize,
+} from './sql-text.js';
 import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { CONTEXT_DISCARD, contextReads, contextWrites } from './tenant-key-forms.js';
 
@@ -317,10 +335,12 @@ export const MIGRATOR_LOCK_TIMEOUT_MS = 3_000;
 const LOCK_TIMEOUT_VALUE = new RegExp(`^set (?:session )?${LOCK_TIMEOUT_NAME} ?(?:=|to\\b) ?(.+?)$`);
 const LOCK_TIMEOUT_RESET = new RegExp(`^reset ${LOCK_TIMEOUT_NAME}$`);
 /**
- * A top-level `SELECT [pg_catalog.]set_config('lock_timeout', <value>, <is_local>)` (PR11-SEC-17 c, D-ARCH-078 (d)):
- * a SET to <value> unless is_local is a true literal (that value ends with the statement's own transaction, like
- * `SET LOCAL`). Matched on the statement with strings kept and bodies blanked: a function body is not executed here.
+ * A top-level `[pg_catalog.]set_config('lock_timeout', <value>, <is_local>)` in any statement that is not a routine
+ * definition (`SELECT`, `WITH … SELECT`, `VALUES`, …; PR11-SEC-17 c, D-ARCH-078 (d), PR #43 R1-m1): a SET to <value>
+ * unless is_local is a true literal (that value ends with the statement's own transaction, like `SET LOCAL`). Matched
+ * on the statement with strings kept and bodies blanked: a function body is not executed here.
  */
+const ROUTINE_DEFINITION = /^create (?:or replace )?(?:function|procedure)\b/;
 const TOP_SET_CONFIG = /\bset_config"? ?\( ?'"?lock_timeout"?' ?, ?([^,]*?) ?, ?([^)]*?) ?\)/g;
 const BOOLEAN_TRUE = /^'?(?:t|tr|tru|true|y|ye|yes|on|1)'?$/;
 /** The top-level change of the session `lock_timeout` one statement makes; `local` = a LOCAL form without effect. */
@@ -342,7 +362,9 @@ function topLevelLockTimeout(statement: string, maskedText: string): TopLockTime
   }
   const value = LOCK_TIMEOUT_VALUE.exec(kept);
   if (value) return { kind: 'set', value: value[1] as string };
-  if (!/^select\b/.test(kept)) return undefined;
+  // Every top-level statement but a routine definition (PR #43 R1-m1): `WITH … AS (SELECT set_config(…)) SELECT …`
+  // and `VALUES (set_config(…))` run the setter as `SELECT` does. Bodies are blanked above.
+  if (ROUTINE_DEFINITION.test(kept)) return undefined;
   let found: TopLockTimeout | undefined;
   for (const match of kept.matchAll(TOP_SET_CONFIG)) {
     if (!BOOLEAN_TRUE.test((match[2] ?? '').trim())) found = { kind: 'set', value: match[1] ?? '' };
@@ -574,20 +596,80 @@ function droppedIndexes(text: string): string[] {
  * body may run dynamic SQL (`EXECUTE …`). Each entry is security-reviewed; the migrations lane has none today. DO
  * bodies keep their own handling (rules 10, 11 and 16 read their literals as dynamic SQL).
  */
-export const DYNAMIC_SQL_ALLOW_LIST: readonly string[] = [];
+export const DYNAMIC_SQL_ALLOW_LIST: readonly DynamicSqlAllowance[] = [];
 /**
- * PL/pgSQL `EXECUTE` (and SQL `EXECUTE` of a prepared statement) in a routine body, on the body-expanded text without
- * string literals: not `EXECUTE FUNCTION | PROCEDURE` (CREATE TRIGGER) and not the EXECUTE privilege of GRANT/REVOKE.
+ * One reviewed routine (PR43-SEC-06 d): its qualified name and the SHA-256 (hex) of its definition as
+ * routineDefinitionSha256 computes it. A routine with the name but another definition is not allowed, so a later
+ * CREATE OR REPLACE needs a new review.
  */
-const DYNAMIC_EXECUTE = /(?<!\b(?:grant|revoke|,) ?)\bexecute\b(?! (?:function|procedure)\b| on\b)/;
+export interface DynamicSqlAllowance {
+  readonly name: string;
+  readonly definitionSha256: string;
+}
+/**
+ * SHA-256 (hex) of a routine definition: the CREATE statement as splitStatements returns it (comments removed), with
+ * whitespace runs collapsed to one space. It covers the body and the head (SECURITY DEFINER, SET clauses), so neither
+ * can change under an allow-list entry.
+ */
+export function routineDefinitionSha256(statement: string): string {
+  return createHash('sha256').update(statement.replace(/\s+/g, ' ').trim()).digest('hex');
+}
+/** True when `list` holds `name` with exactly this definition (name alone never suffices). */
+export function dynamicSqlAllowed(name: string, statement: string, list: readonly DynamicSqlAllowance[] = DYNAMIC_SQL_ALLOW_LIST): boolean {
+  const digest = routineDefinitionSha256(statement);
+  return list.some((entry) => entry.name === name && entry.definitionSha256 === digest);
+}
+/**
+ * Functions that run a query string without the EXECUTE keyword (PR43-SEC-06 b): `query_to_xml`,
+ * `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat` and `ts_rewrite` (every form, fail closed).
+ */
+const QUERY_STRING_FUNCTION = /(?<![a-z0-9_$])"?(query_to_xml|query_to_xmlschema|query_to_xml_and_xmlschema|ts_stat|ts_rewrite)"? ?\(/;
 
-/** The qualified name of the routine `statement` creates when its body runs dynamic SQL off the allow-list. */
+/**
+ * The routine's string-free code split into its body (dollar-quoted bodies and an `AS '…'` string body, each expanded
+ * with sqlText, strings and comments blanked) and the whole statement (head, `BEGIN ATOMIC` / `RETURN` bodies and the
+ * expanded bodies), both normalised.
+ */
+function routineCode(statement: string): { body: string; all: string } {
+  const bodies: string[] = [];
+  let previousCode = '';
+  const expand = (text: string): string => {
+    try {
+      return sqlText(text, false);
+    } catch {
+      return text; // A body that does not lex is scanned verbatim (fail closed).
+    }
+  };
+  const all = tokenize(statement)
+    .map((token) => {
+      if (token.kind === 'code' || token.kind === 'identifier') {
+        if (token.kind === 'code') previousCode = token.text;
+        return token.text;
+      }
+      const isBody = token.kind === 'dollar' || (token.kind === 'string' && /\bas\s*$/i.test(previousCode));
+      if (!isBody) return ' ';
+      const body = expand(literalBody(token));
+      bodies.push(body);
+      return ` ${body} `;
+    })
+    .join('');
+  return { body: normalise(bodies.join(' ; ')), all: normalise(all) };
+}
+
+/**
+ * The qualified name of the routine `statement` creates when it runs dynamic SQL and is not on DYNAMIC_SQL_ALLOW_LIST
+ * with this definition: a bare `execute` word in its body code (PR #43 R1-m2: mirrors the catalog `\mexecute\M`; a
+ * PL/pgSQL variable named `function` or `procedure` is no exemption, and `EXECUTE FUNCTION` / `GRANT EXECUTE` cannot
+ * be body code outside a string), or a QUERY_STRING_FUNCTION call anywhere in it (any language: PL/pgSQL, SQL string
+ * bodies, `BEGIN ATOMIC` and `RETURN` bodies).
+ */
 function dynamicSqlRoutine(statement: string, maskedText: string): string | undefined {
-  const routine = /^create (?:or replace )?(?:function|procedure)\b/.test(maskedText) ? ROUTINE_NAME.exec(maskedText) : null;
+  const routine = ROUTINE_DEFINITION.test(maskedText) ? ROUTINE_NAME.exec(maskedText) : null;
   if (!routine) return undefined;
   const name = qualify(routine[1] as string);
-  if (DYNAMIC_SQL_ALLOW_LIST.includes(name)) return undefined;
-  return DYNAMIC_EXECUTE.test(normalise(sqlText(statement, false))) ? name : undefined;
+  const code = routineCode(statement);
+  const dynamic = /\bexecute\b/.test(code.body) || QUERY_STRING_FUNCTION.test(code.all);
+  return dynamic && !dynamicSqlAllowed(name, statement) ? name : undefined;
 }
 
 /** Role-membership targets that would hand platform_app another role's privileges (rule 8). */
@@ -907,6 +989,9 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
       if (/(?<!\bno )\bforce row level security\b/.test(text)) forcedSoFar.add(table);
       if (/\brename\b/.test(text)) add('3', `RENAME breaks the running release; add + backfill + drop instead: ${preview(index)}`);
       if (/\bdisable trigger\b/.test(text)) add('7', `DISABLE TRIGGER: ${preview(index)}`);
+      // PR43-SEC-05 (a): REPLICA mode stops a trigger or rule in every normal (origin) session; ALWAYS is refused too.
+      if (/\benable (?:replica|always) (?:trigger|rule)\b/.test(text))
+        add('7', `ENABLE REPLICA | ALWAYS TRIGGER | RULE: ${preview(index)}`);
       if (/\b(?:disable|no force) row level security\b/.test(text))
         add('7', `row level security must never be disabled or unforced: ${preview(index)}`);
       if (isExisting) needsLockTimeout(index);
@@ -1118,7 +1203,7 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
     if (dynamic !== undefined) {
       add(
         '16',
-        `dynamic SQL (EXECUTE) in the body of ${dynamic}, which is not on DYNAMIC_SQL_ALLOW_LIST (reviewed list; PR11-SEC-14 b): ${preview(index)}`,
+        `dynamic SQL (EXECUTE, query_to_xml*, ts_stat, ts_rewrite) in ${dynamic}, which is not on DYNAMIC_SQL_ALLOW_LIST with this definition (reviewed list; PR11-SEC-14 b, PR43-SEC-06): ${preview(index)}`,
       );
     }
   });
@@ -1135,12 +1220,53 @@ export function lintMigrationDir(dir: string, label: string = dir, options: Migr
   }
   if (!existsSync(join(dir, 'down.sql'))) add('1', 'down.sql is missing (every migration ships one, §8.4)', join(label, 'down.sql'));
   const sql = readFileSync(migrationFile, 'utf8');
+  const statements = lexedStatements(sql, (message) => add('L', message));
+  if (statements !== undefined) lintMigrationSql(sql, statements, add, options);
+  if (existsSync(join(dir, 'down.sql'))) {
+    const released = RULE_17_RELEASED.has(basename(dir));
+    lintDownSql(readFileSync(join(dir, 'down.sql'), 'utf8'), (rule, message) => {
+      if (!(released && rule === '17')) add(rule, message, join(label, 'down.sql'));
+    });
+  }
+  return findings;
+}
+
+/**
+ * Rule 20 (PR43-SEC-06 a): `standard_conforming_strings` and `backslash_quote` named anywhere in a statement's code or
+ * string literals, bodies and dynamic SQL included: `SET [SESSION | LOCAL] … { = | TO }`, `set_config('…', …)`, a
+ * routine `SET` clause, `ALTER FUNCTION | ROLE | DATABASE … SET`. With `standard_conforming_strings = off` a plain
+ * `'\x61pp…'` is an escape string that the E-string controls (rules 12 and 16) do not see. No migration or bootstrap
+ * file needs either setting, so every mention is refused (reads too; fail closed).
+ */
+const ESCAPE_SETTING = /(?<![a-z0-9_$])"?(?:standard_conforming_strings|backslash_quote)"?(?![a-z0-9_$])/;
+function namesEscapeSetting(statement: string): boolean {
+  return ESCAPE_SETTING.test(normalise(sqlText(statement, true)));
+}
+const escapeSettingMessage = (where: string): string =>
+  `standard_conforming_strings / backslash_quote are refused in both lanes (they make backslash escapes live in plain strings, outside the E-string controls; PR43-SEC-06 a): ${where}`;
+
+/**
+ * Rule L (PR43-SEC-03): splitStatements of `sql`, or undefined after a finding when the text does not lex (an
+ * unterminated string, comment, identifier or dollar body) or ends inside a `BEGIN ATOMIC` block. Fail closed: such a
+ * file is reported, never linted as one swallowed statement and never a crash.
+ */
+function lexedStatements(sql: string, report: (message: string) => void): string[] | undefined {
+  try {
+    return splitStatements(sql);
+  } catch (error) {
+    if (!(error instanceof SqlLexError)) throw error;
+    report(`the file does not split into statements (${error.message}); it is not linted further until it does (fail closed)`);
+    return undefined;
+  }
+}
+
+/** The migration.sql pass of lintMigrationDir over the split `statements`. */
+function lintMigrationSql(sql: string, statements: readonly string[], add: Add, options: MigrationLintOptions): void {
   const header = parseHeader(sql);
   header.problems.forEach((problem) => add('1', problem));
   if (header.kind === 'contract' && header.reversible === true) {
     add('C', 'a contract migration is restore-based only and must declare "reversible: no" (§8.2)');
   }
-  const statements = splitStatements(sql);
   for (const statement of statements) {
     const text = normalise(statement);
     const code = codeOnly(statement);
@@ -1159,20 +1285,9 @@ export function lintMigrationDir(dir: string, label: string = dir, options: Migr
     }
     const control = transactionControl(statement);
     if (control !== undefined) add('11', control);
+    if (namesEscapeSetting(statement)) add('20', escapeSettingMessage(`"${preview}"`));
   }
-  lintTask016Rules(
-    statements,
-    (rule, message) => add(rule, message),
-    options.tableClasses ?? loadTableClasses(),
-    options.history ?? emptyHistory(),
-  );
-  if (existsSync(join(dir, 'down.sql'))) {
-    const released = RULE_17_RELEASED.has(basename(dir));
-    lintDownSql(readFileSync(join(dir, 'down.sql'), 'utf8'), (rule, message) => {
-      if (!(released && rule === '17')) add(rule, message, join(label, 'down.sql'));
-    });
-  }
-  return findings;
+  lintTask016Rules(statements, add, options.tableClasses ?? loadTableClasses(), options.history ?? emptyHistory());
 }
 
 /**
@@ -1188,7 +1303,7 @@ export const RULE_17_RELEASED: ReadonlySet<string> = new Set([
 
 /** The down.sql pass: rule 11 (c) transaction control and rule 17 DROP … IF EXISTS. */
 function lintDownSql(sql: string, add: Add): void {
-  for (const statement of splitStatements(sql)) {
+  for (const statement of lexedStatements(sql, (message) => add('L', message)) ?? []) {
     const control = transactionControl(statement);
     if (control !== undefined) add('11', control);
     if (dropWithoutIfExists(statement)) {
@@ -1229,7 +1344,8 @@ export function lintBootstrap(dir: string, options: BootstrapLintOptions, labelR
     .sort()) {
     const file = join(labelRoot, name);
     const sql = readFileSync(join(dir, name), 'utf8');
-    const statements = splitStatements(sql);
+    const statements = lexedStatements(sql, (message) => findings.push({ file, rule: 'L', message }));
+    if (statements === undefined) continue;
     const first = normalise(statements[0] ?? '');
     if (!/^set search_path (=|to) pg_catalog, ?pg_temp$/.test(first)) {
       findings.push({ file, rule: '13', message: 'the first statement must be "SET search_path = pg_catalog, pg_temp;"' });
@@ -1252,6 +1368,10 @@ export function lintBootstrap(dir: string, options: BootstrapLintOptions, labelR
         });
       }
     }
+    statements.forEach((statement, index) => {
+      // No statement preview in the bootstrap lane: a role statement may hold secret material (as rule S).
+      if (namesEscapeSetting(statement)) findings.push({ file, rule: '20', message: escapeSettingMessage(`statement ${index + 1}`) });
+    });
     statements.filter(definerWithoutFixedPath).forEach((statement) =>
       findings.push({
         file,

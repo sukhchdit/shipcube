@@ -21,7 +21,9 @@
  * Unicode escape, and every E-prefixed escape string (`E'\x61pp.org_id'`; refused token-level since TASK-024,
  * PR11-SEC-16; until then it COULD hide a key in dynamic SQL). The outcome controls for the rest are the C11 converse (platform_definer owns only allow-listed objects) and the
  * withTenantTx leak check at checkout (ADR-0005 am. 10 item 16). Rule 16 also refuses `EXECUTE` in a function body
- * outside the reviewed `DYNAMIC_SQL_ALLOW_LIST` (lint half, TASK-024; tools/db/lint-migrations.ts); rule 10 over DO
+ * (and the query-string executors `query_to_xml*`, `ts_stat`, `ts_rewrite`) unless the routine is on the reviewed
+ * `DYNAMIC_SQL_ALLOW_LIST`, keyed by name plus the SHA-256 of its definition (lint half, TASK-024, PR43-SEC-06;
+ * tools/db/lint-migrations.ts); rule 10 over DO
  * bodies whose `EXECUTE` operand is not a literal is TASK-021.
  */
 

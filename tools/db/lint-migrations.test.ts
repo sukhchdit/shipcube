@@ -16,6 +16,7 @@ import {
   RULE_17_RELEASED,
   canonicalPolicy,
   doBlockLockTimeouts,
+  dynamicSqlAllowed,
   lintBootstrap,
   lintMigrations,
   lintRepository,
@@ -23,6 +24,7 @@ import {
   main,
   parseHeader,
   readReviewers,
+  routineDefinitionSha256,
   type LintFinding,
   type LockTimeoutEvent,
 } from './lint-migrations.js';
@@ -834,6 +836,112 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
     ]);
     expect(findings[0]?.message).toContain('public.fixture_dynamic, which is not on DYNAMIC_SQL_ALLOW_LIST');
     expect(DYNAMIC_SQL_ALLOW_LIST).toEqual([]);
+  });
+
+  /** `[migration, file, rule]` per finding. */
+  const byFile = (findings: LintFinding[]) =>
+    findings.map((finding) => [finding.file.split(/[\\/]/)[1], finding.file.split(/[\\/]/)[2], finding.rule]);
+
+  it('[PR43-SEC-03] a begin parameter, RETURNS TABLE column or function name, a later END; and RETURN CASE swallow nothing; BEGIN ATOMIC with CASE stays one statement; an open block is rule L in both files (transaction-control-begin)', () => {
+    const findings = lintCase('transaction-control-begin');
+    expect(byFile(findings)).toEqual([
+      ['20261114000000_begin_param', 'migration.sql', '11'],
+      ['20261114000000_begin_param', 'migration.sql', '11'],
+      ['20261114000000_begin_param', 'migration.sql', '8'],
+      ['20261114000000_begin_param', 'migration.sql', '14'],
+      ['20261114000100_returns_table_begin', 'migration.sql', '2'],
+      ['20261114000200_function_named_begin', 'migration.sql', '11'],
+      ['20261114000200_function_named_begin', 'down.sql', '17'],
+      ['20261114000200_function_named_begin', 'down.sql', '11'],
+      ['20261114000300_end_resync', 'migration.sql', '11'],
+      ['20261114000300_end_resync', 'migration.sql', '8'],
+      ['20261114000300_end_resync', 'migration.sql', '14'],
+      ['20261114000400_return_case', 'migration.sql', '14'],
+      // Control: the BEGIN ATOMIC body's END is no statement of its own (no 11c), and the CREATE SCHEMA after it splits.
+      ['20261114000500_atomic_case_control', 'migration.sql', '14'],
+      ['20261114000600_unbalanced_atomic', 'migration.sql', 'L'],
+      ['20261114000600_unbalanced_atomic', 'down.sql', 'L'],
+    ]);
+    for (const finding of findings.filter((entry) => entry.rule === 'L')) expect(finding.message).toMatch(/unbalanced BEGIN ATOMIC block/);
+  });
+
+  it('[PR43-SEC-03] rule L: a bootstrap file that ends inside a BEGIN ATOMIC block, and migration files that do not lex, are findings, never a crash', () => {
+    expect(bootstrapCase('unbalanced-atomic').map((finding) => [finding.rule, finding.message.slice(0, 64)])).toEqual([
+      ['L', 'the file does not split into statements (unbalanced BEGIN ATOMIC'],
+    ]);
+    expect(scratchCase('lex-unterminated', "SELECT 'open;", 'DROP TABLE x /* open\n')).toEqual([
+      ['migration.sql', 'L'],
+      ['down.sql', 'L'],
+    ]);
+  });
+
+  it('[PR #43 R1-m1] rule 11: a top-level setter in a materialized CTE or in VALUES raises lock_timeout; a later RESET clears it (lock-timeout-setter-cte-values)', () => {
+    expect(byMigration(lintCase('lock-timeout-setter-cte-values'))).toEqual([
+      ['20261114000000_with_materialized', '11'],
+      ['20261114000100_values', '11'],
+    ]);
+  });
+
+  it('[PR #43 R1-m2] rule 16: EXECUTE of a variable named function or procedure, and EXECUTE in an AS string body, fail (dynamic-sql-variable-name)', () => {
+    expect(byMigration(lintCase('dynamic-sql-variable-name'))).toEqual([
+      ['20261114000000_execute_function_var', '16'],
+      ['20261114000100_execute_procedure_var', '16'],
+      ['20261114000200_execute_string_body', '16'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 b] rule 16: query_to_xml, query_to_xmlschema, query_to_xml_and_xmlschema, ts_stat and ts_rewrite in PL/pgSQL, SQL dollar, RETURN, BEGIN ATOMIC and string bodies fail; a DO block is handled as for EXECUTE (dynamic-sql-query-functions)', () => {
+    expect(byMigration(lintCase('dynamic-sql-query-functions'))).toEqual([
+      ['20261114000000_query_to_xml_plpgsql', '16'],
+      ['20261114000100_ts_stat_sql_body', '16'],
+      ['20261114000200_query_to_xmlschema_return', '16'],
+      ['20261114000300_query_to_xml_and_xmlschema_atomic', '16'],
+      ['20261114000400_ts_rewrite_string_body', '16'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 d] DYNAMIC_SQL_ALLOW_LIST matches the qualified name AND the definition digest; the name alone is not enough', () => {
+    const definition = "CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'SELECT 1'; END $$";
+    const list = [{ name: 'public.f', definitionSha256: routineDefinitionSha256(definition) }];
+    expect(dynamicSqlAllowed('public.f', definition, list)).toBe(true);
+    expect(dynamicSqlAllowed('public.f', definition.replaceAll(' ', '\n  '), list)).toBe(true); // whitespace only
+    expect(dynamicSqlAllowed('public.f', definition.replace('SELECT 1', 'SELECT 2'), list)).toBe(false);
+    expect(dynamicSqlAllowed('public.f', definition.replace('LANGUAGE', 'SECURITY DEFINER LANGUAGE'), list)).toBe(false);
+    expect(dynamicSqlAllowed('public.g', definition, list)).toBe(false);
+    expect(dynamicSqlAllowed('public.f', definition)).toBe(false); // the shipped list is empty
+    expect(routineDefinitionSha256(definition)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('[PR43-SEC-05 a] rule 7: ENABLE REPLICA | ALWAYS TRIGGER | RULE fail; a plain ENABLE TRIGGER is clean (trigger-replica-mode)', () => {
+    const findings = lintCase('trigger-replica-mode');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_replica_trigger', '7'],
+      ['20261114001000_always_trigger', '7'],
+      ['20261114002000_replica_rule', '7'],
+      ['20261114003000_always_rule', '7'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 a] rule 20: standard_conforming_strings / backslash_quote in SET, SET LOCAL … TO, SET SESSION "…", the setter function, a routine SET clause, ALTER FUNCTION … SET and DO dynamic SQL fail in prisma/migrations (escape-setting)', () => {
+    const findings = lintCase('escape-setting');
+    expect(byMigration(findings)).toEqual([
+      ['20261114000000_set_off', '20'],
+      ['20261114000100_set_local_to', '20'],
+      ['20261114000200_session_quoted', '20'],
+      ['20261114000300_set_config', '20'],
+      ['20261114000400_routine_set', '20'],
+      ['20261114000500_alter_function_set', '20'],
+      ['20261114000600_do_dynamic', '20'],
+    ]);
+  });
+
+  it('[PR43-SEC-06 a] rule 20 in the bootstrap lane: SET … = off and the setter function fail, without a statement preview (escape-setting)', () => {
+    const findings = bootstrapCase('escape-setting');
+    expect(findings.map((finding) => [finding.file, finding.rule])).toEqual([
+      [join('escape-setting', '00-roles.sql'), '20'],
+      [join('escape-setting', '10-set-config.sql'), '20'],
+    ]);
+    expect(findings.map((finding) => finding.message.slice(-11))).toEqual(['statement 2', 'statement 2']);
   });
 });
 
