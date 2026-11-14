@@ -8,8 +8,9 @@
  *   entry_hash       = SHA-256( UTF-8(JCS(canonical object)) ‖ prev_hash ), the first prev_hash being 32 zero bytes.
  *
  * JCS is RFC 8785 through the `canonicalize` package (data-model §5.4). This is the same definition as the SPK-04
- * prototype (prisma/tests/spikes/spk04/chain.ts); TASK-030 owns the chain module (`chain/hasher.ts`), ports the
- * spike's pinned vector against it and may move this code there unchanged.
+ * prototype (the harness chain.ts of the SPK-04 §8 table; product code never names the harness path, D-ARCH-089).
+ * TASK-030 owns the chain module (`chain/hasher.ts`), ports the spike's pinned vector against it and may move this
+ * code there unchanged.
  */
 import { createHash } from 'node:crypto';
 

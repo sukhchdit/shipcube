@@ -15,7 +15,7 @@ import {
   ZERO_HASH_HEX,
 } from './entry-hash.js';
 
-/** The SPK-04 pinned vector (prisma/tests/spikes/spk04/chain.test.ts), restated in this package's row shape. */
+/** The SPK-04 pinned vector (the harness chain test, SPK-04 §8 table), restated in this package's row shape. */
 const ROW: AuditRowDraft = {
   id: '019a7c3e-0000-7000-8000-000000000001',
   streamId: '019a7c3e-0000-7000-8000-0000000000aa',
