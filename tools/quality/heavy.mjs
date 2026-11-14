@@ -36,6 +36,7 @@ import {
   parseMergedCoverageConfig,
   projectProblems,
   readCoverageFinal,
+  readRanTests,
   summarizeCoverage,
   toLcov,
   tripwireChecks,
@@ -667,33 +668,22 @@ export function jestCasesFrom(file, options) {
 }
 
 /**
- * The coverage summary of a Jest run, or null when it is absent or unreadable (the run's verdict does not depend on it).
- * @param {string} file
- * @returns {unknown}
- */
-export function coverageFrom(file) {
-  if (!existsSync(file)) return null;
-  try {
-    return readJson(file);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The coverage of one Jest run for the merge: its projects and its validated istanbul map, or the reason it has none.
+ * The coverage of one Jest run for the merge: its projects, its validated istanbul map (or the reason it has none) and
+ * the test files its Jest JSON report says ran (projectProblems requires each project to have run one of its own).
  * @param {readonly JestProject[]} projects
  * @param {string} coverageDir
+ * @param {string} reportFile the run's `--outputFile` Jest JSON report
  * @returns {CoverageSource}
  */
-export function coverageSourceFrom(projects, coverageDir) {
+export function coverageSourceFrom(projects, coverageDir, reportFile) {
   const label = `coverage of ${projects.join('+')}`;
   const file = join(coverageDir, 'coverage-final.json');
-  if (!existsSync(file)) return { projects: [...projects], map: null, problem: `${label}: Jest wrote no coverage-final.json` };
+  const ranTests = readRanTests(reportFile);
+  if (!existsSync(file)) return { projects: [...projects], map: null, problem: `${label}: Jest wrote no coverage-final.json`, ranTests };
   try {
-    return { projects: [...projects], map: readCoverageFinal(file, label), problem: null };
+    return { projects: [...projects], map: readCoverageFinal(file, label), problem: null, ranTests };
   } catch (error) {
-    return { projects: [...projects], map: null, problem: error instanceof Error ? error.message : String(error) };
+    return { projects: [...projects], map: null, problem: error instanceof Error ? error.message : String(error), ranTests };
   }
 }
 
@@ -739,8 +729,10 @@ export function diffCoverageCases({ lcov, repoRoot, base, classname, diff = gitD
  * The merged US-006 gate of a run (D-ORCH-047; PR #33 R1-m4, PR33-SEC-06). Takes the coverage of every suite that ran
  * whole projects with `coverage: true`, runs each required project no such suite covered (one Jest run per group, same
  * in-band rule), merges, and returns the cases for the `merged_coverage.suite` JUnit plus the merged summary.
- * Fail-closed: a project without usable coverage fails its `coverage merge: project <p> measured` case and the gate
- * reports an absent summary; a coverage-only run with a failing test fails its own case.
+ * Fail-closed: a project without usable coverage, or one that ran none of its own test files (R1-m1, PR40-SEC-03), fails
+ * its `coverage merge: project <p> measured` case and the gate reports an absent summary; maps that cannot be merged
+ * fail `coverage merge: maps merged`; a coverage-only run with a failing test, a non-zero exit or a timeout fails its own
+ * case (R1-m2).
  * @param {{ config: MergedCoverageConfig, results: readonly RunResult[], repoRoot: string, work: string, testTimeoutMs: number,
  *   suiteTimeoutMs: number, profile: Profile, base: string,
  *   listTests?: (project: string) => string[], loadThreshold?: () => Promise<Record<string, unknown>>,
@@ -751,7 +743,8 @@ export async function mergedCoverageStep(ctx) {
   const classname = ctx.config.suite;
   /** @type {JUnitCase[]} */
   const cases = [];
-  const { required, notRequired } = requiredProjects(ctx.config, ctx.listTests ?? ((project) => listProjectTests(ctx.repoRoot, project)));
+  const listTests = ctx.listTests ?? ((/** @type {string} */ project) => listProjectTests(ctx.repoRoot, project));
+  const { required, notRequired } = requiredProjects(ctx.config, listTests);
   for (const project of notRequired)
     cases.push({ name: `${MERGE} project ${project} has no test files (not required)`, classname, status: 'passed' });
 
@@ -785,10 +778,10 @@ export async function mergedCoverageStep(ctx) {
       status: problem === null ? 'passed' : 'failed',
       ...(problem === null ? {} : { message: `coverage-only run of ${projects.join('+')}: ${problem}` }),
     });
-    sources.push(coverageSourceFrom(projects, coverageDir));
+    sources.push(coverageSourceFrom(projects, coverageDir, outputFile));
   }
 
-  const problems = projectProblems(required, sources);
+  const problems = projectProblems(required, sources, listTests);
   for (const [project, problem] of problems)
     cases.push({
       name: `${MERGE} project ${project} measured`,
@@ -800,7 +793,21 @@ export async function mergedCoverageStep(ctx) {
     cases.push(...coverageGateCases(null, { root: ctx.repoRoot, classname }));
     return { cases, summary: null, required };
   }
-  const merged = mergeCoverageMaps(sources.flatMap((s) => (s.map === null ? [] : [s.map])));
+  /** @type {import('../ci/coverage-merge.mjs').CoverageMap} */
+  let merged;
+  try {
+    merged = mergeCoverageMaps(sources.flatMap((s) => (s.map === null ? [] : [s.map])));
+  } catch (error) {
+    // Fail closed (PR40-SEC-04): e.g. one run's map holds two entries for one file.
+    cases.push({
+      name: `${MERGE} maps merged`,
+      classname,
+      status: 'failed',
+      message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+    });
+    cases.push(...coverageGateCases(null, { root: ctx.repoRoot, classname }));
+    return { cases, summary: null, required };
+  }
   const summary = summarizeCoverage(merged);
   cases.push(...coverageGateCases(summary, { root: ctx.repoRoot, classname }));
   const loadThreshold = ctx.loadThreshold ?? (() => loadJestGlobalThreshold(pathToFileURL(join(ctx.repoRoot, 'jest.config.ts')).href));
@@ -904,7 +911,7 @@ async function runSuite(item, ctx) {
       });
     const extra = jestExtraArgs(item.runner, { testTimeoutMs: ctx.testTimeoutMs });
     // The US-006 gate is judged once, on the coverage merged across projects (mergedCoverageStep), not per suite.
-    const coverageSource = item.runner.coverage ? coverageSourceFrom(item.runner.projects, coverageDir) : null;
+    const coverageSource = item.runner.coverage ? coverageSourceFrom(item.runner.projects, coverageDir, outputFile) : null;
     return done(cases, { jestArgs: extra, coverageSource });
   }
 

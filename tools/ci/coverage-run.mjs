@@ -14,8 +14,9 @@
  * 3. The jest.config.ts `coverageThreshold.global` tripwire (85/75) is applied to the MERGED total, so it stays an
  *    independent second check next to coverage-gate.mjs.
  *
- * Fail-closed: the three outputs are deleted first and written only when every required project produced coverage;
- * a failing Jest run, a missing or empty project, or a tripwire miss exits 1.
+ * Fail-closed: the three outputs are deleted first and written only when every required project produced coverage
+ * and ran at least one of its own test files; a failing Jest run, a missing or empty project, a project that ran no test
+ * file, a map with two entries for one file, or a tripwire miss exits 1.
  *
  * CLI: node tools/ci/coverage-run.mjs [--out <dir>] [--test-timeout <ms>]
  * Exit 0 pass, 1 a run failed / a project is missing / below the tripwire, 2 usage or configuration error.
@@ -31,6 +32,7 @@ import {
   parseMergedCoverageConfig,
   projectProblems,
   readCoverageFinal,
+  readRanTests,
   summarizeCoverage,
   toLcov,
   tripwireChecks,
@@ -74,16 +76,19 @@ export function coverageGroups(required) {
 /**
  * Node arguments of one group's Jest run.
  * @param {{ projects: readonly string[], inBand: boolean }} group
- * @param {{ coverageDir: string, testTimeoutMs: number }} options
+ * @param {{ coverageDir: string, testTimeoutMs: number, reportFile: string }} options `reportFile`: the Jest JSON report
+ *   (which test files ran, for the per-project check of projectProblems)
  * @returns {string[]}
  */
-export function groupJestArgs(group, { coverageDir, testTimeoutMs }) {
+export function groupJestArgs(group, { coverageDir, testTimeoutMs, reportFile }) {
   return [
     ...NODE_FLAGS,
     JEST_BIN,
     '--selectProjects',
     ...group.projects,
     ...coverageFlags(coverageDir),
+    '--json',
+    `--outputFile=${reportFile}`,
     ...(group.inBand ? ['-i', `--testTimeout=${testTimeoutMs}`] : []),
   ];
 }
@@ -217,8 +222,9 @@ export async function main(argv) {
   const sources = [];
   for (const group of coverageGroups(required)) {
     const coverageDir = join(partsDir, group.projects.join('+'));
+    const reportFile = join(partsDir, `${group.projects.join('+')}.jest.json`);
     console.error(`coverage-run: jest --selectProjects ${group.projects.join(' ')}${group.inBand ? ' (in band)' : ''}`);
-    const r = spawnSync(process.execPath, groupJestArgs(group, { coverageDir, testTimeoutMs }), {
+    const r = spawnSync(process.execPath, groupJestArgs(group, { coverageDir, testTimeoutMs, reportFile }), {
       cwd: root,
       stdio: 'inherit',
       windowsHide: true,
@@ -230,18 +236,33 @@ export async function main(argv) {
         projects: group.projects,
         map: existsSync(file) ? readCoverageFinal(file, label) : null,
         problem: r.status === 0 ? null : `${label}: jest exited ${String(r.status)}`,
+        ranTests: readRanTests(reportFile),
       });
     } catch (error) {
-      sources.push({ projects: group.projects, map: null, problem: error instanceof Error ? error.message : String(error) });
+      sources.push({
+        projects: group.projects,
+        map: null,
+        problem: error instanceof Error ? error.message : String(error),
+        ranTests: null,
+      });
     }
   }
-  const problems = [...projectProblems(required, sources).entries()].filter(([, problem]) => problem !== null);
+  const problems = [...projectProblems(required, sources, (project) => listProjectTests(root, project)).entries()].filter(
+    ([, problem]) => problem !== null,
+  );
   for (const [project, problem] of problems) console.error(`coverage-run: FAIL project ${project}: ${problem}`);
   if (problems.length > 0) {
     console.error('coverage-run: FAIL (no merged coverage written)');
     return 1;
   }
-  const merged = mergeCoverageMaps(sources.map((s) => /** @type {import('./coverage-merge.mjs').CoverageMap} */ (s.map)));
+  /** @type {import('./coverage-merge.mjs').CoverageMap} */
+  let merged;
+  try {
+    merged = mergeCoverageMaps(sources.map((s) => /** @type {import('./coverage-merge.mjs').CoverageMap} */ (s.map)));
+  } catch (error) {
+    console.error(`coverage-run: FAIL ${error instanceof Error ? error.message : String(error)} (no merged coverage written)`);
+    return 1;
+  }
   const summary = summarizeCoverage(merged);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(/** @type {string} */ (outputs[0]), `${JSON.stringify(merged)}\n`);

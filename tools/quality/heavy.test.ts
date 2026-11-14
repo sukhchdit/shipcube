@@ -15,7 +15,6 @@ import { findRepoRoot, runNode } from '../test-support/process.js';
 import {
   buildCleanFrom,
   computeVerdict,
-  coverageFrom,
   coverageSourceFrom,
   diffCoverageCases,
   expandCommand,
@@ -123,15 +122,6 @@ describe('Jest report reading and the evidence location (PR #23 R1-n1, R1-n5)', 
     expect(jestCasesFrom(join(dir, 'truncated.json'), options)[0]?.message).toMatch(
       /malformed jest report: Jest JSON report is not readable/,
     );
-  });
-
-  it('[R1-n1] an unreadable coverage summary is null, a readable one is returned', () => {
-    const dir = scratch();
-    expect(coverageFrom(join(dir, 'absent.json'))).toBeNull();
-    writeFileSync(join(dir, 'bad.json'), '{"total":');
-    expect(coverageFrom(join(dir, 'bad.json'))).toBeNull();
-    writeFileSync(join(dir, 'good.json'), '{"total":{}}');
-    expect(coverageFrom(join(dir, 'good.json'))).toEqual({ total: {} });
   });
 
   it('[R1-n5] a restricted (--suites) run defaults to a temp directory outside the repository; --out-root and normal runs do not', () => {
@@ -373,8 +363,11 @@ describe('merged coverage step (US-006; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06)',
       fc.statementMap[String(i)] = { start: { line: i + 1, column: 0 }, end: { line: i + 1, column: 5 } };
       fc.s[String(i)] = covered.includes(i + 1) ? 1 : 0;
     }
-    return { projects, map: { [path]: fc }, problem: null } as NonNullable<ReturnType<typeof coverageSourceFrom>>;
+    const ranTests = projects.map((p) => join(root, `${p}.test.ts`));
+    return { projects, map: { [path]: fc }, problem: null, ranTests } as NonNullable<ReturnType<typeof coverageSourceFrom>>;
   };
+  /** Every project lists `<root>/<project>.test.ts`, except generated (no test files). */
+  const lister = (root: string) => (project: string) => (project === 'generated' ? [] : [join(root, `${project}.test.ts`)]);
   const runResult = (id: string, coverageSource: ReturnType<typeof coverageSourceFrom> | null) => ({
     ...result({ id }),
     coverageRaw: null,
@@ -398,7 +391,7 @@ describe('merged coverage step (US-006; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06)',
       suiteTimeoutMs: 1,
       profile: 'pr',
       base: 'origin/main',
-      listTests: () => [],
+      listTests: lister(root),
       loadThreshold: () => Promise.resolve({ lines: 85, branches: 75 }),
       diff: diffAdding([9, 10]),
     });
@@ -436,6 +429,7 @@ describe('merged coverage step (US-006; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06)',
           projects: ['integration'],
           map: null,
           problem: 'coverage of integration: Jest wrote no coverage-final.json',
+          ranTests: null,
         }),
       ],
       repoRoot: root,
@@ -444,6 +438,7 @@ describe('merged coverage step (US-006; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06)',
       suiteTimeoutMs: 1,
       profile: 'wave',
       base: 'origin/main',
+      listTests: lister(root),
       loadThreshold: () => Promise.resolve({ lines: 85 }),
     });
     expect(step.summary).toBeNull();
@@ -468,6 +463,7 @@ describe('merged coverage step (US-006; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06)',
       suiteTimeoutMs: 1,
       profile: 'wave',
       base: 'origin/main',
+      listTests: lister(root),
       loadThreshold: () => Promise.reject(new Error('jest.config.ts has no coverageThreshold.global')),
     });
     expect(step.cases.find((c) => c.name.startsWith('coverage tripwire'))).toMatchObject({
@@ -511,22 +507,91 @@ describe('merged coverage step (US-006; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06)',
     ]);
   });
 
-  it('[US-006] coverageSourceFrom: absent, unreadable and valid coverage-final.json', () => {
+  it('[US-006] coverageSourceFrom: absent, unreadable and valid coverage-final.json; the test files the Jest report ran', () => {
     const dir = mkdtempSync(join(tmpdir(), 'heavy-source-'));
     temps.push(dir);
-    expect(coverageSourceFrom(['unit'], dir)).toEqual({
+    const report = join(dir, 'r.jest.json');
+    expect(coverageSourceFrom(['unit'], dir, report)).toEqual({
       projects: ['unit'],
       map: null,
       problem: 'coverage of unit: Jest wrote no coverage-final.json',
+      ranTests: null,
     });
     writeFileSync(join(dir, 'coverage-final.json'), '{"C:/x": ');
-    expect(coverageSourceFrom(['api'], dir)).toEqual({
+    writeFileSync(report, JSON.stringify({ testResults: [{ name: '/r/a.test.ts' }] }));
+    expect(coverageSourceFrom(['api'], dir, report)).toEqual({
       projects: ['api'],
       map: null,
       problem: 'coverage of api: coverage-final.json is not valid JSON',
+      ranTests: ['/r/a.test.ts'],
     });
     writeFileSync(join(dir, 'coverage-final.json'), '{}');
-    expect(coverageSourceFrom(['api'], dir)).toEqual({ projects: ['api'], map: {}, problem: null });
+    expect(coverageSourceFrom(['api'], dir, report)).toEqual({ projects: ['api'], map: {}, problem: null, ranTests: ['/r/a.test.ts'] });
+  });
+
+  it('[US-006] [R1-m1] [PR40-SEC-03] a project that ran none of its own test files fails its "measured" case by name', async () => {
+    const root = gateRoot();
+    const step = await mergedCoverageStep({
+      config: { suite: 'unit', projects: ['unit', 'unit-dom'], projectsIfSuites: [] },
+      results: [
+        runResult('unit', { ...source(root, ['unit', 'unit-dom'], [1, 2, 3, 4, 5, 6, 7, 8, 9]), ranTests: [join(root, 'unit.test.ts')] }),
+      ],
+      repoRoot: root,
+      work: root,
+      testTimeoutMs: 1,
+      suiteTimeoutMs: 1,
+      profile: 'wave',
+      base: 'origin/main',
+      listTests: lister(root),
+      loadThreshold: () => Promise.resolve({ lines: 85 }),
+    });
+    expect(step.summary).toBeNull();
+    expect(step.cases.slice(0, 2).map((c) => [c.name, c.status, c.message])).toEqual([
+      ['coverage merge: project unit measured', 'passed', undefined],
+      ['coverage merge: project unit-dom measured', 'failed', 'project unit-dom ran 0 of its 1 test file(s)'],
+    ]);
+  });
+
+  describe('[R1-m2] a failing coverage-only run fails its own case (the only run of those suites on a tools-only PR)', () => {
+    /** gateRoot plus a fake Jest whose coverage-only run of api behaves as `behaviour` says. */
+    const step = async (behaviour: { failing?: string[]; exitOnly?: string[]; sleep?: string[] }, suiteTimeoutMs = 120_000) => {
+      const root = gateRoot();
+      mkdirSync(join(root, 'node_modules', 'jest', 'bin'), { recursive: true });
+      writeFileSync(join(root, 'node_modules', 'jest', 'package.json'), JSON.stringify({ name: 'jest', type: 'commonjs' }));
+      writeFileSync(join(root, 'node_modules', 'jest', 'bin', 'jest.js'), fakeJest(90, 80, [], behaviour));
+      return mergedCoverageStep({
+        config: { suite: 'unit', projects: ['unit', 'api'], projectsIfSuites: [] },
+        results: [runResult('unit', source(root, ['unit'], [1, 2, 3, 4, 5, 6, 7, 8, 9]))],
+        repoRoot: root,
+        work: root,
+        testTimeoutMs: 1000,
+        suiteTimeoutMs,
+        profile: 'wave',
+        base: 'origin/main',
+        listTests: lister(root),
+        loadThreshold: () => Promise.resolve({ lines: 85 }),
+      });
+    };
+    const runCase = (cases: Array<{ name: string }>) => cases.find((c) => c.name === 'coverage merge: api coverage run');
+
+    it('[US-006] a failing test in the coverage-only run fails the case with the failing-test count (exit 1)', async () => {
+      const result = await step({ failing: ['api'] });
+      expect(runCase(result.cases)).toMatchObject({ status: 'failed', message: 'coverage-only run of api: 1 failing test case(s)' });
+    }, 180_000);
+
+    it('[US-006] a non-zero Jest exit without a failing test fails the case too', async () => {
+      const result = await step({ exitOnly: ['api'] });
+      expect(runCase(result.cases)).toMatchObject({ status: 'failed', message: 'coverage-only run of api: jest exited 1' });
+      expect(runCase((await step({})).cases)).toMatchObject({ status: 'passed' });
+    }, 180_000);
+
+    it('[US-006] a coverage-only run that times out fails the case', async () => {
+      const result = await step({ sleep: ['api'] }, 3000);
+      expect(runCase(result.cases)).toMatchObject({
+        status: 'failed',
+        message: 'coverage-only run of api: timed out (process tree killed)',
+      });
+    }, 180_000);
   });
 });
 
@@ -589,12 +654,19 @@ function git(cwd: string, args: string[]): void {
 }
 
 /**
- * A stand-in for node_modules/jest/bin/jest.js (CommonJS): `--listTests` prints `[]`; otherwise it writes a passing
- * two-test Jest JSON report to `--outputFile` and, unless the selected projects are listed in `noCoverage`, a
- * v8-shaped coverage-final.json for `<cwd>/packages/x/src/a.ts` (100 lines, 100 disjoint block ranges) with the given
- * line and branch percentages into `--coverageDirectory=`.
+ * A stand-in for node_modules/jest/bin/jest.js (CommonJS): `--listTests` prints `[<cwd>/<project>.test.ts]` (`[]` for
+ * generated); otherwise it writes a passing two-test Jest JSON report to `--outputFile` (plus one test-file entry per
+ * selected project, R1-m1) and, unless the selected projects are listed in `noCoverage`, a v8-shaped coverage-final.json
+ * for `<cwd>/packages/x/src/a.ts` (100 lines, 100 disjoint block ranges) with the given line and branch percentages into
+ * `--coverageDirectory=`. `behaviour` (R1-m2): projects in `failing` report one failing test and exit 1, in `exitOnly`
+ * exit 1 with a passing report, in `sleep` hang (for the suite timeout).
  */
-function fakeJest(linesPct: number, branchesPct: number, noCoverage: readonly string[] = []): string {
+function fakeJest(
+  linesPct: number,
+  branchesPct: number,
+  noCoverage: readonly string[] = [],
+  behaviour: { failing?: string[]; exitOnly?: string[]; sleep?: string[] } = {},
+): string {
   const report = {
     testResults: [
       {
@@ -611,12 +683,20 @@ function fakeJest(linesPct: number, branchesPct: number, noCoverage: readonly st
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     'const argv = process.argv.slice(2);',
-    "if (argv.includes('--listTests')) { console.log('[]'); process.exit(0); }",
-    "const out = argv[argv.indexOf('--outputFile') + 1];",
     "const at = argv.indexOf('--selectProjects');",
     'const projects = [];',
     "for (let k = at + 1; k < argv.length && !argv[k].startsWith('-'); k += 1) projects.push(argv[k]);",
-    `fs.writeFileSync(out, ${JSON.stringify(JSON.stringify(report))});`,
+    "const own = (p) => (p === 'generated' ? [] : [path.join(process.cwd(), p + '.test.ts')]);",
+    "if (argv.includes('--listTests')) { console.log(JSON.stringify(own(projects[0]))); process.exit(0); }",
+    `const behaviour = ${JSON.stringify(behaviour)};`,
+    'const hit = (k) => projects.some((p) => (behaviour[k] || []).includes(p));',
+    "if (hit('sleep')) setTimeout(() => {}, 600000);",
+    'else {',
+    "const out = argv[argv.indexOf('--outputFile') + 1];",
+    `const report = ${JSON.stringify(report)};`,
+    "if (hit('failing')) report.testResults[0] = { name: 'a.test.ts', status: 'failed', assertionResults: [{ status: 'failed', fullName: 'boom', failureMessages: ['x'] }] };",
+    "for (const p of projects) for (const name of own(p)) report.testResults.push({ name, status: 'passed', assertionResults: [] });",
+    'fs.writeFileSync(out, JSON.stringify(report));',
     "const dir = argv.find((a) => a.startsWith('--coverageDirectory=')).slice('--coverageDirectory='.length);",
     `if (projects.some((p) => ${JSON.stringify(noCoverage)}.includes(p))) process.exit(0);`,
     "const file = path.join(process.cwd(), 'packages', 'x', 'src', 'a.ts');",
@@ -628,6 +708,8 @@ function fakeJest(linesPct: number, branchesPct: number, noCoverage: readonly st
     '}',
     'fs.mkdirSync(dir, { recursive: true });',
     "fs.writeFileSync(path.join(dir, 'coverage-final.json'), JSON.stringify({ [file]: fc }));",
+    "if (hit('failing') || hit('exitOnly')) process.exit(1);",
+    '}',
     '',
   ].join('\n');
 }

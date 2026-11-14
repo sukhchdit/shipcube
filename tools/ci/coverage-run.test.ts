@@ -31,7 +31,9 @@ describe('planning (D-ORCH-047)', () => {
 
   it('[US-006] a partial run writes istanbul JSON and switches Jest’s own global threshold off', () => {
     expect(coverageFlags('d')).toEqual(['--coverage', '--coverageReporters=json', '--coverageThreshold={}', '--coverageDirectory=d']);
-    expect(groupJestArgs({ projects: ['integration', 'api'], inBand: true }, { coverageDir: 'd', testTimeoutMs: 45_000 })).toEqual([
+    expect(
+      groupJestArgs({ projects: ['integration', 'api'], inBand: true }, { coverageDir: 'd', testTimeoutMs: 45_000, reportFile: 'r.json' }),
+    ).toEqual([
       '--experimental-vm-modules',
       '--disable-warning=ExperimentalWarning',
       'node_modules/jest/bin/jest.js',
@@ -39,10 +41,14 @@ describe('planning (D-ORCH-047)', () => {
       'integration',
       'api',
       ...coverageFlags('d'),
+      '--json',
+      '--outputFile=r.json',
       '-i',
       '--testTimeout=45000',
     ]);
-    expect(groupJestArgs({ projects: ['unit'], inBand: false }, { coverageDir: 'd', testTimeoutMs: 1 })).not.toContain('-i');
+    expect(groupJestArgs({ projects: ['unit'], inBand: false }, { coverageDir: 'd', testTimeoutMs: 1, reportFile: 'r' })).not.toContain(
+      '-i',
+    );
   });
 
   it('[US-006] a conditional project is required while it has test files, and when they cannot be listed (fail closed)', () => {
@@ -58,11 +64,20 @@ describe('planning (D-ORCH-047)', () => {
 
 // --- CLI end to end -------------------------------------------------------------------------------------------------
 
-type Group = { lines: number[]; ranges: Array<[[number, number, number, number], number]>; exit?: number; write?: boolean };
+type Group = {
+  lines: number[];
+  ranges: Array<[[number, number, number, number], number]>;
+  exit?: number;
+  write?: boolean;
+  /** Projects of the group whose test file ran (default: all). */
+  ran?: string[];
+};
 
 /**
- * A stand-in Jest (CommonJS): `--listTests` prints `list[project]`; otherwise it records its argv and writes the
- * coverage of `groups[<projects joined by +>]` for `<root>/packages/audit/src/g.ts` (10 lines) as coverage-final.json.
+ * A stand-in Jest (CommonJS): `--listTests` prints `list[project]` (default: `<root>/tests/<project>.test.ts`, none for
+ * generated); otherwise it records its argv, writes a Jest JSON report whose testResults are the listed files of the
+ * group's projects that ran (`ran`, default all), and the coverage of `groups[<projects joined by +>]` for
+ * `<root>/packages/audit/src/g.ts` (10 lines) as coverage-final.json.
  */
 function fakeJest(): string {
   return [
@@ -73,10 +88,15 @@ function fakeJest(): string {
     "const at = argv.indexOf('--selectProjects');",
     'const projects = [];',
     "for (let k = at + 1; k < argv.length && !argv[k].startsWith('-'); k += 1) projects.push(argv[k]);",
-    "if (argv.includes('--listTests')) { console.log(JSON.stringify(scenario.list[projects[0]] || [])); process.exit(0); }",
+    "const listed = (p) => (p in scenario.list ? scenario.list[p] : p === 'generated' ? [] : [path.join(process.cwd(), 'tests', p + '.test.ts')]);",
+    "if (argv.includes('--listTests')) { console.log(JSON.stringify(listed(projects[0]))); process.exit(0); }",
     "const tag = projects.join('+');",
     'fs.writeFileSync(path.join(process.cwd(), `args-${tag}.json`), JSON.stringify(argv));',
     'const group = scenario.groups[tag] || { lines: [], ranges: [], write: false };',
+    "const report = argv.find((a) => a.startsWith('--outputFile=')).slice('--outputFile='.length);",
+    'const ran = (group.ran || projects).flatMap((p) => listed(p).map((name) => ({ name })));',
+    'fs.mkdirSync(path.dirname(report), { recursive: true });',
+    'fs.writeFileSync(report, JSON.stringify({ testResults: ran }));',
     "const dir = argv.find((a) => a.startsWith('--coverageDirectory=')).slice('--coverageDirectory='.length);",
     'if (group.write !== false) {',
     "  const file = path.join(process.cwd(), 'packages', 'audit', 'src', 'g.ts');",
@@ -180,6 +200,18 @@ describe('npm run test:coverage CLI end to end', () => {
     expect(r.stderr).toContain('FAIL project integration: coverage of integration+api is missing');
     expect(r.stderr).toContain('FAIL project api');
     expect([r.summary, r.lcov, r.final]).toEqual([null, null, null]);
+  });
+
+  it('[US-006] [R1-m1] [PR40-SEC-03] fail closed: a project of a group that ran none of its own test files fails by name', () => {
+    const dir = fixture({ list: {}, groups: { 'unit+unit-dom': { ...THEN_SIDE, ran: ['unit'] }, 'integration+api': ELSE_SIDE } });
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('FAIL project unit-dom: project unit-dom ran 0 of its 1 test file(s)');
+    expect(r.stderr).not.toContain('FAIL project unit:');
+    expect(r.summary).toBeNull();
+    const none = run(fixture({ list: { api: [] }, groups: { 'unit+unit-dom': THEN_SIDE, 'integration+api': ELSE_SIDE } }));
+    expect(none.status).toBe(1);
+    expect(none.stderr).toContain('FAIL project api: project api has no test files (ran 0 test files)');
   });
 
   it('[US-006] fail closed: a failing Jest run exits 1 without writing the merge', () => {

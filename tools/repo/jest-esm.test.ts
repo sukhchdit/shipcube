@@ -32,7 +32,7 @@ describe('Jest loads ESM-only runtime dependencies (--experimental-vm-modules)',
     expect(withoutFlag).toEqual([]);
     // test:coverage runs one Jest process per project group (tools/ci/coverage-run.mjs, D-ORCH-047); each passes the flag.
     expect(scripts['test:coverage']).toBe('node tools/ci/coverage-run.mjs');
-    expect(groupJestArgs({ projects: ['unit'], inBand: false }, { coverageDir: 'c', testTimeoutMs: 1 })[0]).toBe(
+    expect(groupJestArgs({ projects: ['unit'], inBand: false }, { coverageDir: 'c', testTimeoutMs: 1, reportFile: 'r' })[0]).toBe(
       '--experimental-vm-modules',
     );
   });

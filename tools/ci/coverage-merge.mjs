@@ -6,18 +6,31 @@
  * the istanbul `json` reporter (`coverage-final.json`). This module merges those maps into ONE coverage map and derives
  * from it the `json-summary` object (tools/ci/coverage-gate.mjs) and `lcov.info` (tools/ci/diff-coverage.mjs).
  *
- * Merge semantics (jest.config.ts pins `coverageProvider: 'v8'`): inside ONE Jest run, Jest merges the raw V8 block
- * coverage of all test files (`mergeProcessCovs`) before v8-to-istanbul converts it. Across runs only the istanbul
- * form exists, and V8 omits a block whose count equals its enclosing range, so a plain location-keyed sum (istanbul's
- * own `FileCoverage.merge`) loses those implicit counts: a function that takes the `then` path in unit tests and the
- * `else` path in integration tests would report 1 of 3 branches instead of 3 of 3. A range one run lacks therefore
- * gets an IMPLIED count from that run (`impliedCount`), but only one that can never claim code ran when it did not:
- * v8-to-istanbul also drops every uncalled ANONYMOUS function (no name, no block data), so "absent" is ambiguous
- * between "same count as the enclosing range" and "never called". The implied count is the innermost enclosing range's
- * count capped by the highest count that run recorded for the lines strictly inside the range (an uncalled function's
- * own lines are 0 there), and 0 for a range with no interior line. Branch coverage is thus a lower bound of a single
- * combined run's, never above it (measured on the repository: see the PR record); a location outside every range of a
- * run also counts 0. Statements (one per line under v8-to-istanbul) are summed by location, so line coverage is exact. Placeholder
+ * Merge semantics (jest.config.ts pins `coverageProvider: 'v8'`; D-TASK015-22 as restated by D-TASK015-28). Inside ONE
+ * Jest run, Jest merges the raw V8 block coverage of all test files with @bcoe/v8-coverage `mergeProcessCovs` (range
+ * trees, then normalization: adjacent equal-count siblings coalesce) before v8-to-istanbul converts it. Across runs
+ * only the istanbul form exists, and a location-keyed sum is wrong both ways: V8 omits a block whose count equals its
+ * parent's (a plain sum loses counts), and a range one run coalesced survives as an extra key next to the other run's
+ * split ranges (round 1 over-reported branches that way, PR #40 R1-M1). So this module rebuilds each run's V8 range
+ * trees from the istanbul entry and merges them per function with the same range-tree algorithm (tools/ci/
+ * v8-range-tree.mjs, an in-house port, MIT notice there):
+ * - positions are canonicalized (v8-to-istanbul writes one offset as `(line + 1, -1)` when a range starts there and as
+ *   `(line, length)` when one ends there) and compressed to integers in source order;
+ * - each run's ranges split into functions (`groupFunctions`); a function that a run lacks was not called there;
+ * - spans that cross after source mapping are uncrossed once per function for all runs (`uncrossSpans`);
+ * - an anonymous function a run never called is dropped by v8-to-istanbul; where it was grouped with its parent, the run
+ *   gets a 0 range for it (`zeroFillAbsent`, the round-1 interior-line cap in its new place);
+ * - the merged tree is normalized conservatively: siblings coalesce and a spanning child folds only where the removed
+ *   node is covered.
+ * Bound (D-TASK015-28; proof in the PR #40 fix-cycle-1 body): per function, the merged branch percentage is never
+ * above that of `mergeFunctionCovs` over the runs' trees (Jest's own merge with each run as one process): zero-filling
+ * only lowers counts, the conservative normalization keeps exactly that merge's covered nodes and only splits its
+ * uncovered ones (nothing under an uncovered node ran), and a function measured by one run is passed through. Equality
+ * with ONE combined run is not attainable from per-run output in general (`mergeFunctionCovs` is not associative, and a
+ * run's coalescing erases boundaries a combined run may keep), so that property is measured: the real-Jest trials in
+ * tools/ci/fixtures/coverage-merge/trials.json (tools/ci/coverage-merge-probe.mjs, re-run on any Jest, v8-to-istanbul,
+ * @swc/jest or transform change, PR40-SEC-06) have lines equal and branches never above the combined run. Statements
+ * (one per line under v8-to-istanbul) are summed by location, so line coverage is exact. Placeholder
  * entries Jest writes for a file no test of that run loaded (one `(empty-report)` function over the whole file) are
  * dropped when another run measured the file, as Jest itself only adds them for files absent from its map; otherwise
  * one placeholder stays and the file counts as fully uncovered.
@@ -30,13 +43,15 @@
  * No dependency: istanbul-lib-coverage is only a transitive dependency of Jest, and declaring it would add a package
  * whose last release is older than the 18-month maintenance rule (CLAUDE.md section 5).
  */
-import { readFileSync } from 'node:fs';
-import { relative } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+
+import { comparePreOrder, mergeFunctionRanges, uncrossSpans } from './v8-range-tree.mjs';
 
 /** Function name of the per-file placeholder Jest's v8 path writes for an untested file (@jest/reporters). */
 export const PLACEHOLDER_FUNCTION = '(empty-report)';
-/** Bound on one coverage-final.json (characters). */
-const MAX_COVERAGE_CHARS = 512 * 1024 * 1024;
+/** Bound on one coverage-final.json (bytes; checked before reading, below V8's longest string, R1-n4). */
+export const MAX_COVERAGE_BYTES = 256 * 1024 * 1024;
 
 /**
  * @typedef {{ line: number, column: number }} Pos
@@ -48,7 +63,7 @@ const MAX_COVERAGE_CHARS = 512 * 1024 * 1024;
  * @typedef {Record<string, FileCoverage>} CoverageMap
  * @typedef {{ total: number, covered: number, skipped: number, pct: number }} Metric
  * @typedef {{ lines: Metric, statements: Metric, functions: Metric, branches: Metric }} FileSummary
- * @typedef {{ projects: string[], map: CoverageMap | null, problem: string | null }} CoverageSource
+ * @typedef {{ projects: string[], map: CoverageMap | null, problem: string | null, ranTests: string[] | null }} CoverageSource coverage of one Jest run; ranTests = test files its Jest JSON report lists (null: no readable report)
  */
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
@@ -109,11 +124,12 @@ export function parseCoverageMap(raw, where) {
  * Reads and validates a `coverage-final.json`.
  * @param {string} file
  * @param {string} where label for messages (no host path)
+ * @param {number} [maxBytes]
  * @returns {CoverageMap}
  */
-export function readCoverageFinal(file, where) {
+export function readCoverageFinal(file, where, maxBytes = MAX_COVERAGE_BYTES) {
+  if (statSync(file).size > maxBytes) throw new Error(`${where}: coverage-final.json is too large`);
   const text = readFileSync(file, 'utf8');
-  if (text.length > MAX_COVERAGE_CHARS) throw new Error(`${where}: coverage-final.json is too large`);
   /** @type {unknown} */
   let raw;
   try {
@@ -133,73 +149,137 @@ export function isPlaceholder(fc) {
 
 /** @param {Loc} l */
 const locKey = (l) => `${l.start.line}:${l.start.column ?? -1}-${l.end.line}:${l.end.column ?? -1}`;
-/** @param {Pos} a @param {Pos} b @returns {number} */
-const cmp = (a, b) => a.line - b.line || (a.column ?? -1) - (b.column ?? -1);
-/** Whether `outer` contains `inner` (bounds inclusive). @param {Loc} outer @param {Loc} inner */
-const contains = (outer, inner) => cmp(outer.start, inner.start) <= 0 && cmp(inner.end, outer.end) <= 0;
 /** A V8 block range (v8-to-istanbul writes one location per branch entry, type `branch`). @param {BranchMeta} m */
 const isV8Range = (m) => m.type === 'branch' && m.locations.length === 1;
 
 /**
- * @typedef {{ ranges: Array<{ loc: Loc, count: number }>, lines: Map<number, number> }} RunShape
+ * @typedef {import('./v8-range-tree.mjs').RangeCov} RangeCov
+ * @typedef {[number, number]} CanonicalPos (line, column)
+ * @typedef {{ start: number, end: number }} Span compressed positions
+ * @typedef {{ root: RangeCov, ranges: RangeCov[] }} RunFunction one function of one run, ranges in pre-order
  */
 
 /**
- * What one run's file entry says about implicit counts: every V8 block range, every function range, and the highest
- * statement count per line.
- * @param {FileCoverage} fc
- * @returns {RunShape}
+ * Line lengths of a file from its statements (v8-to-istanbul writes one statement per line, column 0 to line length).
+ * @param {readonly FileCoverage[]} entries
+ * @returns {Map<number, number>}
  */
-export function runShape(fc) {
-  /** @type {Array<{ loc: Loc, count: number }>} */
-  const ranges = [];
-  for (const [id, meta] of Object.entries(fc.branchMap))
-    if (isV8Range(meta)) ranges.push({ loc: /** @type {Loc} */ (meta.locations[0]), count: fc.b[id]?.[0] ?? 0 });
-  for (const [id, meta] of Object.entries(fc.fnMap)) ranges.push({ loc: meta.loc, count: fc.f[id] ?? 0 });
+function lineLengths(entries) {
   /** @type {Map<number, number>} */
-  const lines = new Map();
-  for (const [id, loc] of Object.entries(fc.statementMap))
-    lines.set(loc.start.line, Math.max(lines.get(loc.start.line) ?? 0, fc.s[id] ?? 0));
-  return { ranges, lines };
+  const lengths = new Map();
+  for (const fc of entries)
+    for (const loc of Object.values(fc.statementMap))
+      if (loc.start.line === loc.end.line && typeof loc.end.column === 'number')
+        lengths.set(loc.start.line, Math.max(lengths.get(loc.start.line) ?? 0, loc.end.column));
+  return lengths;
 }
 
 /**
- * Count of `loc` in a run that has no entry for it, never above what that run can prove: the count of the innermost
- * range of the run containing it (smallest span; among equal spans the lowest), capped by the run's highest line
- * count strictly inside `loc`; 0 when `loc` has no interior line or no range of the run contains it.
- * @param {RunShape} shape
- * @param {Loc} loc
- * @returns {number}
+ * The canonical (line, column) of an istanbul position. v8-to-istanbul writes a source offset that lies on a line break
+ * as (next line, -1) when a range STARTS there and as (line, line length) when a range ENDS there; both name one offset
+ * (real Jest output: `5:-1` and `4:3`), and the range trees must see them as one position.
+ * @param {Pos} pos
+ * @param {ReadonlyMap<number, number>} lengths
+ * @returns {CanonicalPos}
  */
-export function impliedCount(shape, loc) {
-  let interior = 0;
-  for (let line = loc.start.line + 1; line < loc.end.line; line += 1) interior = Math.max(interior, shape.lines.get(line) ?? 0);
-  return interior === 0 ? 0 : Math.min(interior, enclosingCount(shape.ranges, loc));
+export function canonicalPos(pos, lengths) {
+  if (typeof pos.column === 'number' && pos.column < 0) {
+    const previous = lengths.get(pos.line - 1);
+    if (previous !== undefined) return [pos.line - 1, previous + 1 + pos.column];
+  }
+  return [pos.line, pos.column ?? -1];
 }
 
+/** @param {{ start: number, end: number }} r */
+const spanKey = (r) => `${r.start}:${r.end}`;
+/** Whether `outer` contains `inner` (bounds inclusive). @param {Span} outer @param {Span} inner */
+const containsSpan = (outer, inner) => outer.start <= inner.start && inner.end <= outer.end;
+/** Whether two spans overlap without one containing the other. @param {Span} a @param {Span} b */
+const crosses = (a, b) =>
+  (a.start < b.start && b.start < a.end && a.end < b.end) || (b.start < a.start && a.start < b.end && b.end < a.end);
+
 /**
- * Count of the innermost range containing `loc` (smallest span; among equal spans the lowest count), else 0.
- * @param {ReadonlyArray<{ loc: Loc, count: number }>} ranges
- * @param {Loc} loc
- * @returns {number}
+ * Splits one run's V8 ranges into functions. v8-to-istanbul writes them function by function, the functions sorted by
+ * root range and each function's ranges in pre-order (Jest normalizes the merged script coverage before converting),
+ * so a range starts a new function when it is a known root, lies outside the current root, breaks pre-order, or
+ * repeats a span of the current function. A nested anonymous function that follows its parent's ranges in pre-order
+ * cannot be told from a block of the parent; it is then grouped with the parent (see `zeroFillAbsent`).
+ * @param {readonly RangeCov[]} ranges compressed, in branchMap order
+ * @param {(range: RangeCov) => boolean} isRoot
+ * @returns {RunFunction[]}
  */
-export function enclosingCount(ranges, loc) {
-  /** @type {{ loc: Loc, count: number } | null} */
-  let best = null;
+export function groupFunctions(ranges, isRoot) {
+  /** @type {RunFunction[]} */
+  const functions = [];
+  /** @type {RunFunction | undefined} */
+  let current;
+  /** @type {Set<string>} */
+  let spans = new Set();
   for (const range of ranges) {
-    if (!contains(range.loc, loc)) continue;
-    if (best === null) best = range;
-    else {
-      const inner = contains(best.loc, range.loc);
-      const outer = contains(range.loc, best.loc);
-      if ((inner && !outer) || (inner && outer && range.count < best.count)) best = range;
+    const last = current?.ranges[current.ranges.length - 1];
+    if (
+      current === undefined ||
+      last === undefined ||
+      isRoot(range) ||
+      !containsSpan(current.root, range) ||
+      comparePreOrder(range, last) < 0 ||
+      spans.has(spanKey(range))
+    ) {
+      current = { root: range, ranges: [range] };
+      functions.push(current);
+      spans = new Set([spanKey(range)]);
+    } else {
+      current.ranges.push(range);
+      spans.add(spanKey(range));
     }
   }
-  return best === null ? 0 : best.count;
+  return functions;
+}
+
+/**
+ * Zero ranges a run must have had but v8-to-istanbul could not write: an anonymous function that a run never called is
+ * dropped entirely (no name, no block data), and when it was grouped with its parent (see `groupFunctions`) the tree
+ * merge would otherwise give it, and every block inside it, the parent's count in that run. A span absent from this run
+ * gets count 0 here when all of the following hold (the round-1 interior-line cap, kept):
+ * - `mayBeFunction(span)`: no run reports it with count 0 (an anonymous function's root appears only in runs that called
+ *   it, so a span seen with count 0 is a block);
+ * - this run's innermost range containing it counts > 0 (otherwise the tree merge already gives 0);
+ * - the run's lines strictly inside it are all 0, or there is no such line (an uncalled function's lines are 0, while a
+ *   block that ran at its parent's count has a covered line of its own).
+ * Otherwise the span is a block that this run elided at its parent's count, which the tree merge handles exactly.
+ * Zero-filling only lowers counts, so it can only under-report. Spans are processed outer first, so the blocks inside a
+ * zero-filled function inherit its 0.
+ * @param {readonly RangeCov[]} ranges this run's ranges of the function (pre-order)
+ * @param {Iterable<Span>} spans spans of the function in all runs
+ * @param {(span: Span) => number | null} interiorMax highest line count of this run strictly inside the span, or null
+ * @param {(span: Span) => boolean} mayBeFunction
+ * @returns {RangeCov[]} the ranges with the zero ranges added, pre-order
+ */
+export function zeroFillAbsent(ranges, spans, interiorMax, mayBeFunction) {
+  const present = new Set(ranges.map(spanKey));
+  const out = [...ranges];
+  const absent = [...spans].filter((span) => !present.has(spanKey(span))).sort((a, b) => a.start - b.start || b.end - a.end);
+  for (const span of absent) {
+    if (!mayBeFunction(span) || out.some((range) => crosses(range, span))) continue;
+    /** @type {RangeCov | undefined} */
+    let innermost;
+    for (const range of out)
+      if (containsSpan(range, span) && (innermost === undefined || containsSpan(innermost, range))) innermost = range;
+    if (innermost === undefined || innermost.count === 0) continue;
+    const interior = interiorMax(span);
+    if (interior === null || interior === 0) out.push({ start: span.start, end: span.end, count: 0 });
+  }
+  return out.sort(comparePreOrder);
 }
 
 /**
  * Merges the entries of one file from several runs (placeholders already removed; at least one entry).
+ *
+ * Statements are summed by location. V8 block ranges are merged per function with the range-tree semantics of
+ * @bcoe/v8-coverage `mergeFunctionCovs` (tools/ci/v8-range-tree.mjs): each run's ranges become a tree, the trees are
+ * merged as Jest merges the coverage of two test files, and the result is normalized; a function that a run lacks was
+ * not called in that run and adds nothing. Named functions are summed by location. Other branch entries (not V8
+ * ranges) are summed by location, absent = 0.
  * @param {readonly FileCoverage[]} entries
  * @returns {FileCoverage}
  */
@@ -215,87 +295,213 @@ export function mergeFileCoverage(entries) {
       statements.set(key, acc);
     }
 
-  const shapes = entries.map(runShape);
-  /** @type {Map<string, FnMeta>} */
-  const fnMetas = new Map();
-  /** @type {Map<string, BranchMeta>} */
-  const branchMetas = new Map();
-  /** @type {Array<{ fns: Map<string, number>, branches: Map<string, number[]> }>} */
-  const own = entries.map((fc) => {
-    const fns = new Map();
-    for (const [id, meta] of Object.entries(fc.fnMap)) {
-      const key = locKey(meta.loc);
-      if (!fnMetas.has(key)) fnMetas.set(key, meta);
-      fns.set(key, (fns.get(key) ?? 0) + (fc.f[id] ?? 0));
-    }
-    const branches = new Map();
-    for (const [id, meta] of Object.entries(fc.branchMap)) {
-      const key = `${meta.type}|${meta.locations.map(locKey).join(';')}`;
-      if (!branchMetas.has(key)) branchMetas.set(key, meta);
-      const counts = fc.b[id] ?? [];
-      const prev = branches.get(key);
-      branches.set(key, prev === undefined ? [...counts] : counts.map((c, i) => c + (prev[i] ?? 0)));
-    }
-    return { fns, branches };
+  // Positions: canonical, compressed to integers in source order; the first istanbul form seen per role is kept.
+  const lengths = lineLengths(entries);
+  /** @type {Map<string, { pos: CanonicalPos, asStart?: Pos, asEnd?: Pos }>} */
+  const positions = new Map();
+  /** @param {Pos} pos @param {'asStart' | 'asEnd'} role */
+  const note = (pos, role) => {
+    const canonical = canonicalPos(pos, lengths);
+    const key = `${canonical[0]}:${canonical[1]}`;
+    const rec = positions.get(key) ?? { pos: canonical };
+    rec[role] ??= { line: pos.line, column: pos.column };
+    positions.set(key, rec);
+    return key;
+  };
+  const raw = entries.map((fc) => ({
+    ranges: Object.entries(fc.branchMap).flatMap(([id, meta]) => {
+      if (!isV8Range(meta)) return [];
+      const l = /** @type {Loc} */ (meta.locations[0]);
+      return [{ start: note(l.start, 'asStart'), end: note(l.end, 'asEnd'), count: fc.b[id]?.[0] ?? 0 }];
+    }),
+    fns: Object.entries(fc.fnMap).map(([id, meta]) => ({
+      meta,
+      start: note(meta.loc.start, 'asStart'),
+      end: note(meta.loc.end, 'asEnd'),
+      count: fc.f[id] ?? 0,
+    })),
+  }));
+  const ordered = [...positions.entries()].sort(([, a], [, b]) => a.pos[0] - b.pos[0] || a.pos[1] - b.pos[1]);
+  const index = new Map(ordered.map(([key], i) => [key, i]));
+  const reps = ordered.map(([, rec]) => rec);
+  /** @param {string} key */
+  const at = (key) => /** @type {number} */ (index.get(key));
+  const runs = raw.map((run, r) => {
+    const fc = /** @type {FileCoverage} */ (entries[r]);
+    /** @type {Map<number, number>} */
+    const lines = new Map();
+    for (const [id, loc] of Object.entries(fc.statementMap))
+      lines.set(loc.start.line, Math.max(lines.get(loc.start.line) ?? 0, fc.s[id] ?? 0));
+    return {
+      ranges: run.ranges.map((x) => ({ start: at(x.start), end: at(x.end), count: x.count })),
+      fns: run.fns.map((x) => ({ meta: x.meta, start: at(x.start), end: at(x.end), count: x.count })),
+      lines,
+    };
   });
+
+  // Functions: roots named in fnMap, then every root that some run's order proves, then the final grouping per run.
+  const named = new Set(runs.flatMap((run) => run.fns.map(spanKey)));
+  const roots = new Set(named);
+  for (const run of runs) for (const fn of groupFunctions(run.ranges, (range) => named.has(spanKey(range)))) roots.add(spanKey(fn.root));
+  /** @type {Map<string, { root: Span, perRun: Map<number, { original: RangeCov[], ranges: RangeCov[] }>, spans: Map<string, Span> }>} */
+  const functions = new Map();
+  runs.forEach((run, r) => {
+    /** @type {Map<string, number>} */
+    const seen = new Map();
+    for (const fn of groupFunctions(run.ranges, (range) => roots.has(spanKey(range)))) {
+      const base = spanKey(fn.root);
+      const nth = (seen.get(base) ?? 0) + 1;
+      seen.set(base, nth);
+      const key = nth === 1 ? base : `${base}#${nth}`;
+      const acc = functions.get(key) ?? { root: { start: fn.root.start, end: fn.root.end }, perRun: new Map(), spans: new Map() };
+      acc.perRun.set(r, { original: fn.ranges, ranges: [] });
+      for (const range of fn.ranges) acc.spans.set(spanKey(range), { start: range.start, end: range.end });
+      functions.set(key, acc);
+    }
+  });
+  // One crossing-free rewrite of each function's spans, shared by all runs (see uncrossSpans).
+  for (const fn of functions.values()) {
+    const keys = [...fn.spans.keys()];
+    const rewritten = uncrossSpans([...fn.spans.values()]);
+    /** @type {Map<string, Span | null>} */
+    const rewrite = new Map(keys.map((key, i) => [key, rewritten[i] ?? null]));
+    fn.spans = new Map(rewritten.flatMap((span) => (span === null ? [] : [[spanKey(span), span]])));
+    for (const run of fn.perRun.values())
+      run.ranges = run.original.flatMap((range) => {
+        const span = rewrite.get(spanKey(range));
+        return span === null || span === undefined ? [] : [{ start: span.start, end: span.end, count: range.count }];
+      });
+  }
+
+  // A span some run reports with count 0 is a block: an anonymous function's root appears only in runs that called it.
+  /** @type {Map<string, number>} */
+  const minCount = new Map();
+  for (const fn of functions.values())
+    for (const { ranges } of fn.perRun.values())
+      for (const range of ranges) minCount.set(spanKey(range), Math.min(minCount.get(spanKey(range)) ?? Infinity, range.count));
+
+  /** @param {number} i @returns {Pos} */
+  const startOf = (i) => ({ .../** @type {Pos} */ (reps[i]?.asStart ?? reps[i]?.asEnd) });
+  /** @param {number} i @returns {Pos} */
+  const endOf = (i) => ({ .../** @type {Pos} */ (reps[i]?.asEnd ?? reps[i]?.asStart) });
+  /** @param {number} i */
+  const lineOf = (i) => {
+    const pos = reps[i]?.pos;
+    if (pos === undefined) throw new Error(`coverage merge: no position ${i}`);
+    return pos[0];
+  };
+  /** @type {Array<{ loc: Loc, count: number }>} */
+  const v8Branches = [];
+  const sortedFunctions = [...functions.entries()].sort(
+    ([ka, a], [kb, b]) => a.root.start - b.root.start || b.root.end - a.root.end || (ka < kb ? -1 : ka > kb ? 1 : 0),
+  );
+  for (const [, fn] of sortedFunctions) {
+    const only = fn.perRun.size === 1 ? [...fn.perRun.values()][0] : undefined;
+    if (only !== undefined) {
+      // One run measured the function: its ranges are already Jest's normalized result; keep them as they are.
+      for (const range of only.original)
+        v8Branches.push({ loc: { start: startOf(range.start), end: endOf(range.end) }, count: range.count });
+      continue;
+    }
+    const inputs = [...fn.perRun.entries()].map(([r, { ranges }]) => {
+      const lines = /** @type {(typeof runs)[number]} */ (runs[r]).lines;
+      /** @param {Span} span @returns {number | null} */
+      const interiorMax = (span) => {
+        /** @type {number | null} */
+        let max = null;
+        for (let line = lineOf(span.start) + 1; line < lineOf(span.end); line += 1) {
+          const count = lines.get(line);
+          if (count !== undefined) max = Math.max(max ?? 0, count);
+        }
+        return max;
+      };
+      return zeroFillAbsent(ranges, fn.spans.values(), interiorMax, (span) => (minCount.get(spanKey(span)) ?? 0) > 0);
+    });
+    for (const range of mergeFunctionRanges(inputs, { conservative: true }))
+      v8Branches.push({ loc: { start: startOf(range.start), end: endOf(range.end) }, count: range.count });
+  }
+
+  /** @type {Map<string, { meta: FnMeta, count: number }>} */
+  const fnTotals = new Map();
+  for (const run of runs)
+    for (const fn of run.fns) {
+      const acc = fnTotals.get(spanKey(fn)) ?? { meta: fn.meta, count: 0 };
+      acc.count += fn.count;
+      fnTotals.set(spanKey(fn), acc);
+    }
+
+  /** @type {Map<string, { meta: BranchMeta, counts: number[] }>} */
+  const otherBranches = new Map();
+  for (const fc of entries)
+    for (const [id, meta] of Object.entries(fc.branchMap)) {
+      if (isV8Range(meta)) continue;
+      const key = `${meta.type}|${meta.locations.map(locKey).join(';')}`;
+      const acc = otherBranches.get(key) ?? { meta, counts: meta.locations.map(() => 0) };
+      const counts = fc.b[id] ?? [];
+      acc.counts = acc.counts.map((c, k) => c + (counts[k] ?? 0));
+      otherBranches.set(key, acc);
+    }
 
   /** @type {FileCoverage} */
   const out = { path: first.path, statementMap: {}, s: {}, fnMap: {}, f: {}, branchMap: {}, b: {} };
-  let i = 0;
-  for (const { loc, count } of statements.values()) {
+  [...statements.values()].forEach(({ loc, count }, i) => {
     out.statementMap[String(i)] = loc;
     out.s[String(i)] = count;
-    i += 1;
-  }
-  i = 0;
-  for (const [key, meta] of fnMetas) {
+  });
+  [...fnTotals.values()].forEach(({ meta, count }, i) => {
     out.fnMap[String(i)] = meta;
-    out.f[String(i)] = own.reduce(
-      (sum, run, r) => sum + (run.fns.get(key) ?? impliedCount(shapes[r] ?? { ranges: [], lines: new Map() }, meta.loc)),
-      0,
-    );
-    i += 1;
-  }
-  i = 0;
-  for (const [key, meta] of branchMetas) {
+    out.f[String(i)] = count;
+  });
+  /** @type {Array<{ meta: BranchMeta, counts: number[] }>} */
+  const branches = [
+    ...v8Branches.map(({ loc, count }) => ({
+      meta: { type: 'branch', line: loc.start.line, loc, locations: [{ start: { ...loc.start }, end: { ...loc.end } }] },
+      counts: [count],
+    })),
+    ...otherBranches.values(),
+  ];
+  branches.forEach(({ meta, counts }, i) => {
     out.branchMap[String(i)] = meta;
-    out.b[String(i)] = own.reduce(
-      (sum, run, r) => {
-        const counts =
-          run.branches.get(key) ??
-          (isV8Range(meta)
-            ? [impliedCount(shapes[r] ?? { ranges: [], lines: new Map() }, /** @type {Loc} */ (meta.locations[0]))]
-            : meta.locations.map(() => 0));
-        return sum.map((c, k) => c + (counts[k] ?? 0));
-      },
-      meta.locations.map(() => 0),
-    );
-    i += 1;
-  }
+    out.b[String(i)] = counts;
+  });
   return out;
 }
 
-/** Map key used to match one file across runs. @param {string} key */
-const fileKey = (key) => key.replaceAll('\\', '/').toLowerCase();
+/**
+ * Map key used to match one file across runs. On Windows paths are case-insensitive and Jest may write either slash
+ * direction, so both are folded; elsewhere the key is the path itself, and two files that differ only in case stay
+ * two files (PR40-SEC-04).
+ * @param {string} key
+ * @param {string} platform `process.platform`
+ */
+export const fileKey = (key, platform) => (platform === 'win32' ? key.replaceAll('\\', '/').toLowerCase() : key);
 
 /**
- * Merges coverage maps of several runs into one (keys of the first run that measured a file are kept).
+ * Merges the coverage maps of several runs into one (keys of the first run that measured a file are kept). Throws when
+ * one map holds two keys for the same file (fail closed: one of the two would otherwise be absorbed, PR40-SEC-04).
  * @param {readonly CoverageMap[]} maps
+ * @param {{ platform?: string }} [options]
  * @returns {CoverageMap}
  */
-export function mergeCoverageMaps(maps) {
+export function mergeCoverageMaps(maps, options = {}) {
+  const platform = options.platform ?? process.platform;
   /** @type {Map<string, { key: string, entries: FileCoverage[] }>} */
   const files = new Map();
-  for (const map of maps)
+  maps.forEach((map, run) => {
+    /** @type {Set<string>} */
+    const own = new Set();
     for (const [key, fc] of Object.entries(map)) {
-      const k = fileKey(key);
+      const k = fileKey(key, platform);
+      if (own.has(k)) throw new Error(`coverage map ${run + 1} has two entries for one file (keys that differ only in case or slashes)`);
+      own.add(k);
       const acc = files.get(k) ?? { key, entries: [] };
       acc.entries.push(fc);
       files.set(k, acc);
     }
+  });
   /** @type {CoverageMap} */
   const out = {};
-  for (const { key, entries } of [...files.values()].sort((a, b) => fileKey(a.key).localeCompare(fileKey(b.key)))) {
+  for (const [, { key, entries }] of [...files.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     const measured = entries.filter((fc) => !isPlaceholder(fc));
     out[key] = measured.length === 0 ? /** @type {FileCoverage} */ (JSON.parse(JSON.stringify(entries[0]))) : mergeFileCoverage(measured);
   }
@@ -434,25 +640,68 @@ export function parseMergedCoverageConfig(raw) {
 
 /**
  * Fail-closed checks over the coverage sources of a merge: one problem per required project that has no source, whose
- * source failed to produce a readable map, whose map is empty, or in whose map no file was executed.
+ * source failed to produce a readable map, whose map is empty, in whose map no file was executed, or that ran none of
+ * its own test files (PR #40 R1-m1, PR40-SEC-03). The last check is per PROJECT, not per Jest run: unit and unit-dom
+ * share one run (as do integration and api in a coverage-only run), so a project that lost all its tests would
+ * otherwise pass on its group's map. A project's test files are `jest --listTests --selectProjects <p>`; at least one
+ * of them must appear in the run's Jest JSON report (`ranTests`). A listing failure, no listed file, or no report is a
+ * problem too.
  * @param {readonly string[]} required
  * @param {readonly CoverageSource[]} sources
+ * @param {(project: string) => string[]} listTests throws when Jest cannot list the project's test files
+ * @param {string} [platform] `process.platform` (path comparison folds case on win32)
  * @returns {Map<string, string | null>} project -> problem (null = measured)
  */
-export function projectProblems(required, sources) {
+export function projectProblems(required, sources, listTests, platform = process.platform) {
+  /** @param {string} p */
+  const key = (p) => fileKey(resolve(p), platform);
   /** @type {Map<string, string | null>} */
   const out = new Map();
   for (const project of required) {
     const source = sources.find((s) => s.projects.includes(project));
+    const label = source === undefined ? '' : `coverage of ${source.projects.join('+')}`;
     if (source === undefined) out.set(project, `no coverage run selected project ${project}`);
-    else if (source.problem !== null || source.map === null)
-      out.set(project, source.problem ?? `coverage of ${source.projects.join('+')} is missing`);
-    else if (Object.keys(source.map).length === 0) out.set(project, `coverage of ${source.projects.join('+')} is empty (no file measured)`);
+    else if (source.problem !== null || source.map === null) out.set(project, source.problem ?? `${label} is missing`);
+    else if (Object.keys(source.map).length === 0) out.set(project, `${label} is empty (no file measured)`);
     else if (Object.values(source.map).every(isPlaceholder))
-      out.set(project, `coverage of ${source.projects.join('+')} executed no source file (every entry is an untested placeholder)`);
-    else out.set(project, null);
+      out.set(project, `${label} executed no source file (every entry is an untested placeholder)`);
+    else {
+      /** @type {string[]} */
+      let listed;
+      try {
+        listed = listTests(project);
+      } catch {
+        out.set(project, `jest --listTests for project ${project} failed`);
+        continue;
+      }
+      const ran = new Set((source.ranTests ?? []).map(key));
+      if (listed.length === 0) out.set(project, `project ${project} has no test files (ran 0 test files)`);
+      else if (source.ranTests === null)
+        out.set(project, `${label}: no readable Jest report, so project ${project} is not shown to have run`);
+      else if (!listed.some((file) => ran.has(key(file))))
+        out.set(project, `project ${project} ran 0 of its ${listed.length} test file(s)`);
+      else out.set(project, null);
+    }
   }
   return out;
+}
+
+/**
+ * Test files a Jest JSON report (`--json --outputFile`) says ran, or null when the report is absent or unreadable.
+ * @param {string} file
+ * @returns {string[] | null}
+ */
+export function readRanTests(file) {
+  /** @type {unknown} */
+  let report;
+  try {
+    report = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  const results = isRecord(report) ? report['testResults'] : undefined;
+  if (!Array.isArray(results)) return null;
+  return results.flatMap((r) => (isRecord(r) && typeof r['name'] === 'string' ? [r['name']] : []));
 }
 
 /**

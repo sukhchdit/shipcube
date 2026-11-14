@@ -1,8 +1,10 @@
 /**
  * Merged coverage (US-006; TEST-STRATEGY section 8; D-ORCH-047; PR #33 R1-m4, PR33-SEC-06). The merge, the summary and
  * the lcov writer are pure and tested on hand-built istanbul maps shaped like v8-to-istanbul output (one statement per
- * line, one `branch` entry per V8 block range, function ranges in fnMap). The fail-closed project checks and the
- * configuration pins run against the repository's own jest.config.ts and tools/quality/suite-runners.json.
+ * line, one `branch` entry per V8 block range, function ranges in fnMap) and on REAL Jest output: the committed trials
+ * of tools/ci/coverage-merge-probe.mjs (run A, run B and one combined run of the same test files; PR #40 R1-M1). The
+ * fail-closed project checks and the configuration pins run against the repository's own jest.config.ts and
+ * tools/quality/suite-runners.json.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,10 +16,12 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 import { findRepoRoot, runNode } from '../test-support/process.js';
 import { jestExtraArgs } from '../quality/heavy.mjs';
 import {
-  enclosingCount,
-  impliedCount,
+  canonicalPos,
+  fileKey,
+  groupFunctions,
   isPlaceholder,
   istanbulPercent,
+  loadJestGlobalThreshold,
   mergeCoverageMaps,
   mergeFileCoverage,
   parseCoverageMap,
@@ -25,12 +29,14 @@ import {
   PLACEHOLDER_FUNCTION,
   projectProblems,
   readCoverageFinal,
-  runShape,
+  readRanTests,
   summarizeCoverage,
   summarizeFile,
   toLcov,
   tripwireChecks,
+  zeroFillAbsent,
 } from './coverage-merge.mjs';
+import { compareTrial, expand, PROBE_PATH, trialSpecs } from './coverage-merge-probe.mjs';
 import { IN_BAND_COVERAGE_PROJECTS } from './coverage-run.mjs';
 import { parseLcov } from './diff-coverage.mjs';
 
@@ -153,27 +159,63 @@ describe('mergeCoverageMaps: V8-aware merge (D-ORCH-047)', () => {
     expect(summarizeFile(file).branches).toMatchObject({ total: 2, covered: 1 });
   });
 
-  it('[US-006] enclosingCount: innermost containing range, 0 outside every range, lowest count among equal spans', () => {
-    const ranges = [
-      { loc: loc(1, 0, 20, 0), count: 5 },
-      { loc: loc(2, 0, 10, 0), count: 3 },
-      { loc: loc(3, 0, 4, 0), count: 0 },
-      { loc: loc(2, 0, 10, 0), count: 2 },
-    ];
-    expect(enclosingCount(ranges, loc(3, 1, 3, 9))).toBe(0);
-    expect(enclosingCount(ranges, loc(5, 0, 6, 0))).toBe(2);
-    expect(enclosingCount(ranges, loc(12, 0, 13, 0))).toBe(5);
-    expect(enclosingCount(ranges, loc(30, 0, 31, 0))).toBe(0);
-    expect(enclosingCount([], loc(1, 0, 1, 1))).toBe(0);
+  it('[US-006] [R1-M1] positions: an offset on a line break is one position whether a range starts or ends there', () => {
+    const lengths = new Map([[4, 3]]);
+    expect(canonicalPos({ line: 5, column: -1 }, lengths)).toEqual([4, 3]); // v8-to-istanbul start form of offset 4:3
+    expect(canonicalPos({ line: 4, column: 3 }, lengths)).toEqual([4, 3]); // its end form
+    expect(canonicalPos({ line: 9, column: -1 }, lengths)).toEqual([9, -1]); // previous line unknown: left as is
+    expect(canonicalPos({ line: 2, column: 7 }, lengths)).toEqual([2, 7]);
   });
 
-  it('[US-006] impliedCount never exceeds what the run proves: capped by interior lines, 0 without an interior line', () => {
-    const shape = runShape(v8File('/r/x.ts', [5, 5, 5, 2, 0, 0, 5, 5], [[loc(1, 0, 8, 1), 5]], [['x', loc(1, 0, 8, 1), 5]]));
-    expect(impliedCount(shape, loc(2, 0, 4, 1))).toBe(5); // interior line 3 ran 5 times
-    expect(impliedCount(shape, loc(3, 0, 5, 1))).toBe(2); // interior line 4 ran only twice: the cap wins
-    expect(impliedCount(shape, loc(4, 4, 7, 1))).toBe(0); // interior lines 5-6 never ran (an uncalled anonymous function)
-    expect(impliedCount(shape, loc(2, 4, 3, 9))).toBe(0); // no interior line: nothing proves it ran
-    expect(impliedCount(shape, loc(20, 0, 30, 0))).toBe(0); // outside every range
+  it('[US-006] [R1-M1] grouping: a new function starts at a known root, outside the current root, on a pre-order break or a repeated span', () => {
+    const ranges = [
+      { start: 0, end: 100, count: 1 }, // module
+      { start: 5, end: 8, count: 0 }, // module block
+      { start: 10, end: 40, count: 1 }, // named g: a known root
+      { start: 12, end: 20, count: 0 }, // g block
+      { start: 25, end: 30, count: 2 }, // anonymous function inside g after its blocks: cannot be told apart, grouped with g
+      { start: 22, end: 24, count: 1 }, // pre-order break: a new function
+      { start: 50, end: 60, count: 1 }, // outside the current root: a new function
+      { start: 50, end: 60, count: 0 }, // repeated span: a new function
+    ];
+    const groups = groupFunctions(ranges, (r) => r.start === 10 && r.end === 40);
+    expect(groups.map((g) => g.ranges.map((r) => [r.start, r.end]))).toEqual([
+      [
+        [0, 100],
+        [5, 8],
+      ],
+      [
+        [10, 40],
+        [12, 20],
+        [25, 30],
+      ],
+      [[22, 24]],
+      [[50, 60]],
+      [[50, 60]],
+    ]);
+  });
+
+  it('[US-006] [R1-M1] zero fill: only a span no run reports as 0, inside a covered range, with no covered interior line', () => {
+    const ranges = [
+      { start: 0, end: 100, count: 4 },
+      { start: 70, end: 80, count: 0 },
+    ];
+    const spans = [
+      { start: 10, end: 20 }, // may be an anonymous function, interior lines 0: filled
+      { start: 12, end: 14 }, // a block (some run reports 0): not filled, but it now sits in a 0 range
+      { start: 30, end: 40 }, // interior line covered: an elided block, not filled
+      { start: 50, end: 52 }, // no interior line: filled
+      { start: 72, end: 74 }, // inside a 0 range already: nothing to do
+      { start: 90, end: 110 }, // crosses the root: left alone
+    ];
+    const interior = (s: { start: number; end: number }) => (s.start === 10 ? 0 : s.start === 30 ? 3 : s.start === 72 ? 0 : null);
+    const out = zeroFillAbsent(ranges, spans, interior, (s) => s.start !== 12);
+    expect(out.map((r) => [r.start, r.end, r.count])).toEqual([
+      [0, 100, 4],
+      [10, 20, 0],
+      [50, 52, 0],
+      [70, 80, 0],
+    ]);
   });
 
   it('[US-006] no inflation: an anonymous function one run never called (dropped by v8-to-istanbul) adds nothing there', () => {
@@ -220,10 +262,84 @@ describe('mergeCoverageMaps: V8-aware merge (D-ORCH-047)', () => {
     expect(summarizeCoverage(merged)['total']).toMatchObject({ lines: { total: 5, covered: 1 }, branches: { total: 2, covered: 1 } });
   });
 
-  it('[US-006] file keys match across runs regardless of slash direction and case; the first key is kept', () => {
+  it('[US-006] [PR40-SEC-04] on Windows file keys match across runs regardless of slash direction and case; the first key is kept', () => {
     const a = v8File('C:\\r\\x.ts', [1], []);
     const b = v8File('c:/r/x.ts', [0], []);
-    expect(Object.keys(mergeCoverageMaps([{ 'C:\\r\\x.ts': a }, { 'c:/r/x.ts': b }]))).toEqual(['C:\\r\\x.ts']);
+    expect(Object.keys(mergeCoverageMaps([{ 'C:\\r\\x.ts': a }, { 'c:/r/x.ts': b }], { platform: 'win32' }))).toEqual(['C:\\r\\x.ts']);
+    expect(fileKey('C:\\R\\X.ts', 'win32')).toBe('c:/r/x.ts');
+  });
+
+  it('[US-006] [PR40-SEC-04] elsewhere two files that differ only in case stay two files; one map with two keys for one file fails closed', () => {
+    const upper = v8File('/r/src/A.ts', [1, 1, 1, 1], []);
+    const lower = v8File('/r/src/a.ts', [0, 0, 0, 0], []);
+    const linux = mergeCoverageMaps([{ '/r/src/A.ts': upper, '/r/src/a.ts': lower }], { platform: 'linux' });
+    expect(Object.keys(linux)).toEqual(['/r/src/A.ts', '/r/src/a.ts']);
+    expect(summarizeCoverage(linux)['total']).toMatchObject({ lines: { total: 8, covered: 4 } });
+    expect(fileKey('/r/src/A.ts', 'linux')).toBe('/r/src/A.ts');
+    expect(() => mergeCoverageMaps([{ '/r/src/A.ts': upper, '/r/src/a.ts': lower }], { platform: 'win32' })).toThrow(
+      'coverage map 1 has two entries for one file',
+    );
+  });
+});
+
+describe('real Jest output: merged A + B against ONE combined run (PR #40 R1-M1; D-TASK015-28)', () => {
+  type Trial = Parameters<typeof compareTrial>[0];
+  const fixture = JSON.parse(readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'coverage-merge', 'trials.json'), 'utf8')) as {
+    seed: number;
+    random_trials: number;
+    trials: Trial[];
+  };
+  const byName = (name: string) => fixture.trials.find((t) => t.name === name) as Trial;
+
+  it('[US-006] [R1-M1] the review probe g(1,0); h(0); m() against g(0,1); h(0): merged 5/7 = the combined run (round 1: 6/8)', () => {
+    const trial = byName('review g(1,0) h(0) m() vs g(0,1) h(0)');
+    const r = compareTrial(trial);
+    expect([r.merged.branches.covered, r.merged.branches.total]).toEqual([5, 7]);
+    expect(r.merged.branches).toEqual(r.combined.branches);
+    expect(r.merged.lines).toEqual(r.combined.lines);
+    // Not only the totals: the same ranges with the same counts as the combined run.
+    const path = PROBE_PATH.js;
+    const merged = mergeCoverageMaps([{ [path]: expand(trial.A, path) }, { [path]: expand(trial.B, path) }])[path] as FileCov;
+    const combined = expand(trial.combined, path);
+    const ranges = (fc: FileCov) =>
+      Object.entries(fc.branchMap).map(
+        ([id, m]) =>
+          `${m.loc.start.line}:${String(m.loc.start.column)}-${m.loc.end.line}:${String(m.loc.end.column)}=${String(fc.b[id]?.[0])}`,
+      );
+    expect(ranges(merged)).toEqual(ranges(combined));
+    const alone = compareTrial(byName('review g alone: g(1,0) vs g(0,1)'));
+    expect([alone.merged.branches.covered, alone.merged.branches.total]).toEqual([3, 4]); // round 1: 4/5
+  });
+
+  it('[US-006] [R1-M1] seeded differential (>= 25 random trials, JS and TS via @swc/jest): lines equal, branches never above, and tight', () => {
+    const random = fixture.trials.filter((t) => t.name.startsWith('seed '));
+    expect(random.length).toBeGreaterThanOrEqual(25);
+    let equal = 0;
+    for (const trial of fixture.trials) {
+      const r = compareTrial(trial);
+      expect([trial.name, r.merged.lines]).toEqual([trial.name, r.combined.lines]);
+      expect([trial.name, r.merged.branches.pct <= r.combined.branches.pct]).toEqual([trial.name, true]);
+      // Tight, not trivially low: at most two covered branches fewer than the combined run in any trial.
+      expect([trial.name, r.combined.branches.covered - r.merged.branches.covered <= 2]).toEqual([trial.name, true]);
+      if (r.merged.branches.pct === r.combined.branches.pct) equal += 1;
+    }
+    expect(equal).toBeGreaterThanOrEqual(20);
+  });
+
+  it('[US-006] the trials are the seeded generator output (deterministic sources and calls; re-run: tools/ci/coverage-merge-probe.mjs)', () => {
+    const specs = trialSpecs(fixture.seed, fixture.random_trials);
+    expect(fixture.trials.map((t) => [t.name, t.lang, t.source, t.tests])).toEqual(specs.map((s) => [s.name, s.lang, s.source, s.tests]));
+    expect(new Set(fixture.trials.map((t) => t.lang))).toEqual(new Set(['js', 'ts']));
+    // No host path anywhere in the fixture (the generator writes no path; its temporary project is `covprobe-*`).
+    const strings = (v: unknown): string[] =>
+      typeof v === 'string'
+        ? [v]
+        : Array.isArray(v)
+          ? v.flatMap(strings)
+          : v !== null && typeof v === 'object'
+            ? Object.values(v).flatMap(strings)
+            : [];
+    expect(strings(fixture).filter((s) => /[A-Za-z]:[\\/]|\/(?:home|Users|tmp)\/|covprobe-/u.test(s))).toEqual([]);
   });
 });
 
@@ -303,14 +419,17 @@ describe('validation and fail-closed project checks (PR33-SEC-06)', () => {
   it('[US-006] project missing, failed, empty or with no executed file is a problem; a measured project is not', () => {
     const real = { '/r/a.ts': v8File('/r/a.ts', [1], []) };
     const onlyPlaceholders = { '/r/a.ts': placeholder('/r/a.ts', 3) };
+    const listed = (project: string) => [`/r/${project}.test.ts`];
     const problems = projectProblems(
       ['unit', 'unit-dom', 'integration', 'api', 'generated', 'e2e'],
       [
-        { projects: ['unit', 'unit-dom'], map: real, problem: null },
-        { projects: ['integration'], map: null, problem: 'coverage of integration: Jest wrote no coverage-final.json' },
-        { projects: ['api'], map: {}, problem: null },
-        { projects: ['generated'], map: onlyPlaceholders, problem: null },
+        { projects: ['unit', 'unit-dom'], map: real, problem: null, ranTests: ['/r/unit.test.ts', '/r/unit-dom.test.ts'] },
+        { projects: ['integration'], map: null, problem: 'coverage of integration: Jest wrote no coverage-final.json', ranTests: [] },
+        { projects: ['api'], map: {}, problem: null, ranTests: [] },
+        { projects: ['generated'], map: onlyPlaceholders, problem: null, ranTests: [] },
       ],
+      listed,
+      'linux',
     );
     expect(Object.fromEntries(problems)).toEqual({
       unit: null,
@@ -319,6 +438,76 @@ describe('validation and fail-closed project checks (PR33-SEC-06)', () => {
       api: 'coverage of api is empty (no file measured)',
       generated: 'coverage of generated executed no source file (every entry is an untested placeholder)',
       e2e: 'no coverage run selected project e2e',
+    });
+  });
+
+  it('[US-006] [R1-m1] [PR40-SEC-03] "measured" is per project: a project of a group that ran none of its own test files fails by name', () => {
+    const real = { '/r/a.ts': v8File('/r/a.ts', [1], []) };
+    const group = (ranTests: string[] | null) => [{ projects: ['unit', 'unit-dom'], map: real, problem: null, ranTests }];
+    const lists: Record<string, string[]> = { unit: ['/r/u1.test.ts', '/r/u2.test.ts'], 'unit-dom': ['/r/d.test.tsx'] };
+    const list = (project: string) => lists[project] ?? [];
+    // unit-dom lost its test (the group's map still measures unit): it fails, unit passes.
+    expect(Object.fromEntries(projectProblems(['unit', 'unit-dom'], group(['/r/u1.test.ts']), list, 'linux'))).toEqual({
+      unit: null,
+      'unit-dom': 'project unit-dom ran 0 of its 1 test file(s)',
+    });
+    // A project with no test file at all fails closed by name (the --passWithNoTests shape).
+    expect(projectProblems(['unit-dom'], group(['/r/u1.test.ts']), () => [], 'linux').get('unit-dom')).toBe(
+      'project unit-dom has no test files (ran 0 test files)',
+    );
+    // Listing failure and an unreadable Jest report are problems, never a pass.
+    expect(
+      projectProblems(['unit'], group(['/r/u1.test.ts']), () => {
+        throw new Error('exit 1');
+      }).get('unit'),
+    ).toBe('jest --listTests for project unit failed');
+    expect(projectProblems(['unit'], group(null), list, 'linux').get('unit')).toBe(
+      'coverage of unit+unit-dom: no readable Jest report, so project unit is not shown to have run',
+    );
+    // Paths compare case-insensitively on Windows only.
+    expect(projectProblems(['unit-dom'], group(['/R/D.test.tsx']), list, 'win32').get('unit-dom')).toBeNull();
+    expect(projectProblems(['unit-dom'], group(['/R/D.test.tsx']), list, 'linux').get('unit-dom')).toBe(
+      'project unit-dom ran 0 of its 1 test file(s)',
+    );
+  });
+
+  it('[US-006] readRanTests: the test files of a Jest JSON report, null when absent or not a report', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-report-'));
+    temps.push(dir);
+    const file = join(dir, 'r.json');
+    expect(readRanTests(file)).toBeNull();
+    writeFileSync(file, '{"testResults": [{"name": "/r/a.test.ts"}, {"name": 3}, null]}');
+    expect(readRanTests(file)).toEqual(['/r/a.test.ts']);
+    writeFileSync(file, '{"numTotalTests": 1}');
+    expect(readRanTests(file)).toBeNull();
+    writeFileSync(file, '{');
+    expect(readRanTests(file)).toBeNull();
+  });
+
+  it('[US-006] [R1-n4] the size bound is checked before the file is read', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-size-'));
+    temps.push(dir);
+    const file = join(dir, 'coverage-final.json');
+    writeFileSync(file, JSON.stringify({ '/r/a.ts': v8File('/r/a.ts', [1, 1, 1], []) }));
+    expect(() => readCoverageFinal(file, 'coverage of unit', 16)).toThrow(/^coverage of unit: coverage-final.json is too large$/u);
+    expect(Object.keys(readCoverageFinal(file, 'u'))).toEqual(['/r/a.ts']);
+  });
+
+  it('[US-006] [R1-n1] a jest.config whose coverageThreshold.global is empty or absent is an error, never zero tripwire cases', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-threshold-'));
+    temps.push(dir);
+    const write = (name: string, text: string) => {
+      writeFileSync(join(dir, name), text);
+      return pathToFileURL(join(dir, name)).href;
+    };
+    await expect(loadJestGlobalThreshold(write('empty.mjs', 'export default { coverageThreshold: { global: {} } };\n'))).rejects.toThrow(
+      'jest.config.ts has no coverageThreshold.global',
+    );
+    await expect(loadJestGlobalThreshold(write('none.mjs', 'export default {};\n'))).rejects.toThrow('no coverageThreshold.global');
+    await expect(
+      loadJestGlobalThreshold(write('ok.mjs', 'export default { coverageThreshold: { global: { lines: 85 } } };\n')),
+    ).resolves.toEqual({
+      lines: 85,
     });
   });
 
