@@ -76,7 +76,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(order[0]).toBe(2); // checkout, setup-node, then the in-lane classifier (review m5 (a): no separate job)
     expect(scanOrder).toEqual([...scanOrder].sort((a, b) => a - b));
-    expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'ci-gate']);
+    expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'security-integration', 'ci-gate']);
   });
 
   it('[PR4-SEC-13] a porcelain gate runs straight after Lint and before Type-check, with the post-build gate command', () => {
@@ -103,7 +103,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(index + 2).toBe(scanSteps.length);
     expect(scanSteps[index]?.if).toBeUndefined();
     expect(scanSteps[index]?.env).toBeUndefined();
-    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking; do/u);
+    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths; do/u);
     const dropped = ciText.replace(/--image "\$OASDIFF_IMAGE"/u, '');
     expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       expect.stringContaining('ci.yml openapi-breaking gate step: the run: must be exactly'),
@@ -195,9 +195,27 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(classify).toContain("grep -qxF '.claude/settings.json'");
   });
 
-  it('AT-US-005-01: integration, images and e2e jobs are not scheduled for pull requests (D-ORCH-001)', () => {
-    expect(Object.keys(jobs).filter((id) => /integration|image|e2e|iac|deploy/.test(id))).toEqual([]);
+  it('AT-US-005-01: integration, images and e2e jobs are not scheduled for pull requests (D-ORCH-001); the one exception is security-integration (ADR-0023 am. G item 5)', () => {
+    expect(Object.keys(jobs).filter((id) => /integration|image|e2e|iac|deploy/.test(id))).toEqual(['security-integration']);
     expect(ciText).not.toMatch(/npm run test:(?:integration|e2e)/);
+  });
+
+  it('[ADR-0023 am. G item 5] security-integration: pull requests only, selected by the scans classifier over the base-ref manifest, base-ref suites, required by ci-gate unless no security-critical path changed', () => {
+    const job = map(jobs['security-integration'], 'security-integration');
+    expect(job.needs).toEqual(['scans']);
+    expect(str(job.if)).toBe("${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_paths == 'true' }}");
+    expect(map(scans.outputs, 'scans outputs')).toEqual({ security_paths: '${{ steps.security-paths.outputs.security_paths }}' });
+    const classify = scanIndexOf(/GATE_SECURITY_PATHS/);
+    expect(classify).toBeLessThan(scanIndexOf(/GITLEAKS_IMAGE/));
+    expect(str(scanSteps[classify]?.run)).toContain('git show "$RANGE_BASE:tools/quality/required-suites.json"');
+    const run = (job.steps as YamlNode[]).map((step) => str(map(step, 'step').run)).join('\n');
+    expect(run).toContain('git show "$RANGE_BASE:tools/quality/$name.json"');
+    expect(run).toContain('node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json"');
+    const gateRun = str(map((map(jobs['ci-gate'], 'ci-gate').steps as YamlNode[])[0], 'ci-gate step').run);
+    expect(gateRun).toContain(
+      '[ "$SECURITY_INTEGRATION" = "skipped" ] && { [ "$EVENT" != "pull_request" ] || [ "$SECURITY_PATHS" = "false" ]; }',
+    );
+    expect(gateRun).toContain('[ "$security_ok" != "true" ]');
   });
 
   it('AT-US-005-02 (lane A part): push to main re-runs only lane A behind CI_MAIN_FAST_LANE, skipping docs-only pushes; ci.yml has no schedule; the full stages run in lane C on workflow_dispatch (TASK-015)', () => {
@@ -221,7 +239,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     const unit = indexOf(/npm run test:unit$/m);
     expect(indexOf(/npm run build/)).toBeGreaterThan(unit);
     const gate = map(jobs['ci-gate'], 'ci-gate');
-    expect(gate.needs).toEqual(['fast-lane', 'scans']);
+    expect(gate.needs).toEqual(['fast-lane', 'scans', 'security-integration']);
     expect(str(gate.if)).toBe("${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}");
     const gateRun = str(map((gate.steps as YamlNode[])[0], 'ci-gate step').run);
     expect(gateRun).toMatch(/"\$FAST_LANE" != "success"/);

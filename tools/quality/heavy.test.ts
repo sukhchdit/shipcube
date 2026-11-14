@@ -278,6 +278,16 @@ describe('argument parsing and planning (TASK-011)', () => {
         native: 'x.json',
       }),
     ).toEqual(['n', 'cli', 'exec', '--no', '--', 'k6', '--out=x.json']);
+    expect(
+      expandCommand(['{node}', '{root}/tools/quality/gitleaks-full.mjs', '--ref', '{base}', '--report', '{native}'], {
+        node: 'n',
+        npm: ['n', 'cli'],
+        root: 'r',
+        junit: 'j',
+        native: 'x.json',
+        base: 'origin/main',
+      }),
+    ).toEqual(['n', 'r/tools/quality/gitleaks-full.mjs', '--ref', 'origin/main', '--report', 'x.json']);
   });
 });
 

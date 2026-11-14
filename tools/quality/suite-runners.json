@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane B suite runners (TASK-011; devops-owned; security-critical path tools/quality/**). Maps manifest suite ids (tools/quality/required-suites.json, qa-lead) to how quality:heavy runs them. kind jest: one Jest run per suite (paths are Jest path patterns, placed before --selectProjects; integration/api run in band with a raised --testTimeout). kind command: cmd array without a shell; placeholders {node}, {npm}, {root}, {junit}, {native}; converter junit|k6|lighthouse|zap|trivy|gitleaks|stryker; native_report = allow-listed file name. A suite that becomes active in the manifest without an entry here is reported as an error (FAIL). testcontainers_images: the harness images whose digests summary.json records (prisma/tests/harness/postgres.ts, apps/api/src/platform/health/health.int.test.ts). coverage: true = the run (whole projects only: no paths, no testNamePattern) writes istanbul coverage-final.json for the merge. merged_coverage (D-ORCH-047, PR #33 R1-m4): after all suites, quality:heavy merges the coverage of every project that measures source (projects always; projects_if_suites while jest --listTests finds a test file), runs any required project no selected suite covered, and appends the US-006 gate, the jest.config.ts tripwire and, at profile pr, the diff gate to the JUnit of suite; npm run test:coverage (tools/ci/coverage-run.mjs) reads the same list.",
+  "$comment": "Lane B suite runners (TASK-011; devops-owned; security-critical path tools/quality/**). Maps manifest suite ids (tools/quality/required-suites.json, qa-lead) to how quality:heavy runs them. kind jest: one Jest run per suite (paths are Jest path patterns, placed before --selectProjects; integration/api run in band with a raised --testTimeout). kind command: cmd array without a shell; placeholders {node}, {npm}, {root}, {junit}, {native}, {base} (the run --base ref); converter junit|k6|lighthouse|zap|trivy|gitleaks|stryker; native_report = allow-listed file name. A suite that becomes active in the manifest without an entry here is reported as an error (FAIL). testcontainers_images: the harness images whose digests summary.json records (prisma/tests/harness/postgres.ts, apps/api/src/platform/health/health.int.test.ts). coverage: true = the run (whole projects only: no paths, no testNamePattern) writes istanbul coverage-final.json for the merge. merged_coverage (D-ORCH-047, PR #33 R1-m4): after all suites, quality:heavy merges the coverage of every project that measures source (projects always; projects_if_suites while jest --listTests finds a test file), runs any required project no selected suite covered, and appends the US-006 gate, the jest.config.ts tripwire and, at profile pr, the diff gate to the JUnit of suite; npm run test:coverage (tools/ci/coverage-run.mjs) reads the same list.",
   "version": 1,
   "testcontainers_images": [
     "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
@@ -11,6 +11,12 @@
     "integration": { "kind": "jest", "project": "integration", "coverage": true },
     "api": { "kind": "jest", "project": "api", "coverage": true },
     "catalog-c1-c14": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/catalog/"] },
-    "migrations": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/migrations/"] }
+    "migrations": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/migrations/"] },
+    "gitleaks-full": {
+      "kind": "command",
+      "cmd": ["{node}", "{root}/tools/quality/gitleaks-full.mjs", "--root", "{root}", "--ref", "{base}", "--report", "{native}"],
+      "converter": "gitleaks",
+      "native_report": "gitleaks-full.json"
+    }
   }
 }

@@ -1,10 +1,12 @@
 # Lane A: hosted PR fast lane (ADR-0023 amendments A, F, I, J; D-ARCH-010; TASK-007).
 #
 # - Runs on non-draft pull requests, and on pushes to main only when the repository variable CI_MAIN_FAST_LANE is
-#   'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac) is workflow_dispatch-only and
-#   belongs to TASK-015. Nothing here deploys, pushes images, publishes packages or runs terraform.
+#   'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac, inventory) is workflow_dispatch-only
+#   and lives in lane-c.yml (TASK-015 part 015-B; this file's triggers stay pull_request + push, CI_TRIGGERS).
+#   Nothing here deploys, pushes images, publishes packages or runs terraform.
 # - Jobs: fast-lane (classify, base-ref gates, install, tests, build) and scans (gitleaks, Semgrep, security-review
-#   record) run in parallel on separate runners; ci-gate aggregates them. scans runs no npm and no head script, so code
+#   record) run in parallel on separate runners; security-integration (Testcontainers suites on Linux) runs after scans
+#   only when a pull request changes a security-critical path (ADR-0023 am. G item 5); ci-gate aggregates them. scans runs no npm and no head script, so code
 #   that fast-lane executes from the PR (deps:rebuild, lint, tests, build) cannot tamper with it (PR10-SEC-02).
 # - Gating is procedural (D-ORCH-012/013, review m6): this private repository's plan has no branch protection or
 #   rulesets, so no check can be "required". The orchestrator merges only with
@@ -347,6 +349,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      security_paths: ${{ steps.security-paths.outputs.security_paths }}
     env:
       RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -393,7 +397,7 @@ jobs:
           fi
           echo "GATES_DIR=$gates/base" >> "$GITHUB_ENV"
           # A script the base tools/ci lacks runs from the head tree's git objects (bootstrap), never the working tree.
-          for tool in run-semgrep check-security-owned-paths openapi-breaking; do
+          for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths; do
             var="GATE_$(echo "$tool" | tr 'a-z-' 'A-Z_')"
             if [ -f "$gates/base/tools/ci/$tool.mjs" ]; then
               echo "$var=$gates/base/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
@@ -403,6 +407,20 @@ jobs:
               echo "| \`tools/ci/$tool.mjs\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
+
+      # ADR-0023 am. G item 5: selects the security-integration job. The globs are security_critical_paths of the BASE
+      # ref's manifest (a PR cannot drop a path from its own selection); an unknown range or a missing manifest selects
+      # the job (fail closed). Runs before the scans so a red scan cannot hide the selection.
+      - name: Security-critical paths (selects security-integration)
+        id: security-paths
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/security-manifest.json"
+          : > "$manifest"
+          if [ -n "$RANGE_BASE" ] && git cat-file -e "$RANGE_BASE:tools/quality/required-suites.json" 2>/dev/null; then
+            git show "$RANGE_BASE:tools/quality/required-suites.json" > "$manifest"
+          fi
+          node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --manifest "$manifest" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       # Only .git is mounted: gitleaks loads <source>/.gitleaksignore unconditionally, so no working-tree file may reach
       # /repo. Inline allow markers are inert, merge commits are diffed against their first parent, no network
@@ -444,22 +462,121 @@ jobs:
             echo "Security-owned paths record: pull-request control, not evaluated on push." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # ADR-0023 am. G item 5 (SEC-P3-07; TASK-015 part 015-B): the active security_integration_suites of the BASE ref's
+  # manifest, run with their lane B runner entries on ubuntu with the runner's Docker (Testcontainers). Pull requests
+  # only, and only when job scans classified a security-critical path; ci-gate then requires it green. It still runs
+  # when scans is red (a missing security record is normal on a first push). Budget: <= 12 job-min (SPK-07).
+  security-integration:
+    name: security-integration
+    needs: [scans]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_paths == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+      RANGE_BASE: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Checkout (full history for the base-ref manifests)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install (npm ci --ignore-scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Prisma engine cache key
+        id: engines
+        run: |
+          set -euo pipefail
+          version=$(node -e "process.stdout.write(JSON.parse(require('node:fs').readFileSync('tools/deps/prisma-engines.json','utf8')).enginesVersion)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Prisma schema engine (re-verified by deps:rebuild)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+          key: prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}
+
+      - name: Allow-listed install steps (deps:rebuild)
+        run: npm run deps:rebuild
+
+      # The manifest and the runners come from the base ref when it has them (a PR neither drops a suite from its own
+      # run nor activates one early); a base without them (bootstrap) uses the head copies and says so.
+      - name: Security integration suites (base-ref manifest)
+        run: |
+          set -euo pipefail
+          manifests="$RUNNER_TEMP/security-manifests"
+          mkdir -p "$manifests"
+          for name in required-suites suite-runners; do
+            if [ -n "$RANGE_BASE" ] && git cat-file -e "$RANGE_BASE:tools/quality/$name.json" 2>/dev/null; then
+              git show "$RANGE_BASE:tools/quality/$name.json" > "$manifests/$name.json"
+            else
+              cp "tools/quality/$name.json" "$manifests/$name.json"
+              echo "- tools/quality/$name.json: head copy (bootstrap: not on the base ref)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"
+
+      # C-1 (ADR-0005 am. 10 W-1 and item 13; D-TASK016-01; D-ARCH-074): the SPK-03 exit (d) measurement on ubuntu with
+      # native Docker, once, uploaded as an artifact (recorded in SPK-03 section 4, never asserted beyond the spike's own
+      # server-side check). This step and the upload leave ci.yml in the commit that deletes the spike file.
+      - name: C-1 SPK-03 exit (d) benchmark (SPK03_BENCH=1)
+        env:
+          SPK03_BENCH: '1'
+          SPK03_REPORT: ${{ runner.temp }}/spk03-report.json
+        run: |
+          set -euo pipefail
+          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js prisma/tests/spikes/spk03-rls-tx.int.test.ts --selectProjects integration --ci -i --testTimeout=300000
+          {
+            echo "### C-1 SPK-03 exit (d) report"
+            echo
+            echo '```json'
+            cat "$SPK03_REPORT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the C-1 SPK03_REPORT artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: spk03-report
+          path: ${{ runner.temp }}/spk03-report.json
+          if-no-files-found: error
+          retention-days: 7
+
   ci-gate:
     name: ci-gate
     # Runs unless the workflow was cancelled; a skipped lane (draft PR) is not green (PR10-SEC-11, review m5 (d)).
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}
-    needs: [fast-lane, scans]
+    needs: [fast-lane, scans, security-integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
+      # security-integration may be skipped only when scans classified no security-critical path (an empty output, e.g.
+      # scans failed before the classifier, requires it) or on a push to main (it is a pull-request job).
       - name: Aggregate lane A
         env:
+          EVENT: ${{ github.event_name }}
           FAST_LANE: ${{ needs.fast-lane.result }}
           SCANS: ${{ needs.scans.result }}
+          SECURITY_INTEGRATION: ${{ needs.security-integration.result }}
+          SECURITY_PATHS: ${{ needs.scans.outputs.security_paths }}
         run: |
-          echo "fast-lane=$FAST_LANE scans=$SCANS"
-          if [ "$FAST_LANE" != "success" ] || [ "$SCANS" != "success" ]; then
+          echo "fast-lane=$FAST_LANE scans=$SCANS security-integration=$SECURITY_INTEGRATION security-paths=$SECURITY_PATHS"
+          security_ok=false
+          if [ "$SECURITY_INTEGRATION" = "success" ]; then security_ok=true; fi
+          if [ "$SECURITY_INTEGRATION" = "skipped" ] && { [ "$EVENT" != "pull_request" ] || [ "$SECURITY_PATHS" = "false" ]; }; then security_ok=true; fi
+          if [ "$FAST_LANE" != "success" ] || [ "$SCANS" != "success" ] || [ "$security_ok" != "true" ]; then
             echo "Lane A is not green (a draft PR is not gated: mark it ready for review)." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

@@ -30,8 +30,12 @@
  *   secrets-dump          no `toJSON(secrets)`.
  *   image-digest          `*_IMAGE` env values, `container`/`services` images and `docker run` images are pinned by digest.
  *   job-timeout           every job (except reusable-workflow calls) sets `timeout-minutes`.
- *   ci-no-release         in ci.yml: no `npm publish`, no `terraform apply|destroy`, no AWS role or deploy, no
- *                         `id-token: write`; image pushes only in a job `images` gated on dispatch/main/tags.
+ *   ci-no-release         in ci.yml, lane-c.yml and nightly.yml (NO_RELEASE_WORKFLOWS): no `npm publish`, no
+ *                         `terraform apply|destroy` (also through "$TERRAFORM_IMAGE"), no AWS role or deploy, no
+ *                         `id-token: write`; image pushes only in ci.yml job `images` gated on dispatch/main/tags.
+ *   dispatch-only         lane-c.yml and nightly.yml have exactly one trigger, workflow_dispatch (no schedule; D-ARCH-010).
+ *   playwright-install    Playwright browser installs (deps:rebuild --playwright, DEPS_REBUILD_PLAYWRIGHT, playwright
+ *                         install; apt via --with-deps on Linux) only in lane-c.yml (PR4-SEC-08 residual).
  *   untrusted-expression  `${{ … }}` inside `run:` or `with.script` only for SAFE_EXPRESSION contexts; everything else
  *                         goes through `env:` (script injection; PR10-SEC-07).
  *   gitleaks-hardening    a step running the gitleaks image passes `--ignore-gitleaks-allow`, `--diff-merges=first-parent`
@@ -41,7 +45,8 @@
  *                         no setup-node cache, so no head-controlled code shares its runner (PR10-SEC-02).
  *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES in its job, unconditional or with its listed
  *                         `if:` and exactly its listed `env:`, with no `shell:`/`working-directory:` on the step and no
- *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane` and `scans`
+ *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane`, `scans`
+ *                         and `security-integration`
  *                         (PR10-SEC-07, PR17-SEC-03). The base-ref lint fixture step's commands are pinned line by line
  *                         (BASE_LINT_FIXTURES_SCRIPT, an allow-list), as is the lane B evidence step; the porcelain and
  *                         openapi-breaking gates are pinned to one exact command line with no step env, each porcelain
@@ -110,6 +115,20 @@ export const REQUIRED_WORKFLOW_ENV = Object.freeze({
  * only ci.yml job holding `packages: write`. Owning tasks extend this list in a reviewed change (CODEOWNERS on tools/ci).
  */
 export const JOB_WRITE_ALLOWLIST = Object.freeze(['ci.yml:images:packages']);
+
+/**
+ * Dispatch-only workflows (D-ARCH-010 items 3 and 4; ADR-0023 am. C; TASK-015 part 015-B): lane C and nightly run only
+ * on `workflow_dispatch` (no schedule, no push or PR trigger), so hosted minutes are spent only when an agent decides.
+ */
+export const DISPATCH_ONLY_WORKFLOWS = Object.freeze(['lane-c.yml', 'nightly.yml']);
+/** Workflows that build and test but never release (AT-US-005-04/-05): no publish, push, apply, AWS role or OIDC token. */
+export const NO_RELEASE_WORKFLOWS = Object.freeze(['ci.yml', 'ci.yaml', ...DISPATCH_ONLY_WORKFLOWS]);
+/**
+ * The only workflow that may install Playwright browsers (`deps:rebuild --playwright=…`, DEPS_REBUILD_PLAYWRIGHT,
+ * `playwright install`), which on Linux also runs apt through `--with-deps` (PR4-SEC-08 residual, COND-E2E-FF).
+ */
+export const PLAYWRIGHT_INSTALL_WORKFLOWS = Object.freeze(['lane-c.yml']);
+const PLAYWRIGHT_INSTALL = /--playwright(?:=|\s)|\bDEPS_REBUILD_PLAYWRIGHT\b|\bplaywright\s+install\b/u;
 
 /** Triggers that run with a write token and secrets, or are driven by comments/reviews (PR10-SEC-07). */
 export const FORBIDDEN_TRIGGERS = Object.freeze([
@@ -497,10 +516,11 @@ function envEntryFindings(name, value) {
 /**
  * Findings for one shell script (`run:`).
  * @param {string} script
- * @param {boolean} isCi
+ * @param {boolean} isCi true for a NO_RELEASE_WORKFLOWS file (ci.yml, lane-c.yml, nightly.yml)
+ * @param {string} [fileName] named in the no-release messages
  * @returns {{ rule: string, message: string }[]}
  */
-export function scriptFindings(script, isCi) {
+export function scriptFindings(script, isCi, fileName = 'ci.yml') {
   /** @type {{ rule: string, message: string }[]} */
   const out = [];
   for (const name of FORBIDDEN_ENV) {
@@ -558,11 +578,16 @@ export function scriptFindings(script, isCi) {
       });
     }
     if (isCi) {
-      if (/\bnpm\s+publish\b/.test(text)) out.push({ rule: 'ci-no-release', message: 'ci.yml must not publish packages (AT-US-005-04)' });
-      if (/\b(?:terraform|tofu)\b(?:\s+-\S+)*\s+(?:apply|destroy)\b/.test(text))
-        out.push({ rule: 'ci-no-release', message: 'ci.yml must not run terraform apply/destroy (AT-US-005-05)' });
+      if (/\bnpm\s+publish\b/.test(text))
+        out.push({ rule: 'ci-no-release', message: `${fileName} must not publish packages (AT-US-005-04)` });
+      // Also the containerised CLI: `docker run … "$TERRAFORM_IMAGE" [-chdir=…] apply` (lane-c.yml iac).
+      if (
+        /\b(?:terraform|tofu)\b(?:\s+-\S+)*\s+(?:apply|destroy)\b/.test(text) ||
+        /TERRAFORM_IMAGE\}?"?(?:\s+-\S+)*\s+(?:apply|destroy)\b/.test(text)
+      )
+        out.push({ rule: 'ci-no-release', message: `${fileName} must not run terraform apply/destroy (AT-US-005-05)` });
       if (/\baws\s+(?:sts\s+assume-role|ecs\s+(?:update-service|deploy)|deploy\b|cloudformation\s+deploy)/.test(text)) {
-        out.push({ rule: 'ci-no-release', message: 'ci.yml must not deploy to AWS or assume an AWS role (AT-US-005-05)' });
+        out.push({ rule: 'ci-no-release', message: `${fileName} must not deploy to AWS or assume an AWS role (AT-US-005-05)` });
       }
     }
   }
@@ -659,12 +684,17 @@ export function checkWorkflow(text, fileName, options = {}) {
   const doc = asMap(parsed.value ?? undefined);
   if (doc === undefined) return [{ rule: 'yaml-subset', message: 'workflow is not a mapping', location: `${fileName}:1` }];
   const isCi = fileName === 'ci.yml' || fileName === 'ci.yaml';
+  const noRelease = NO_RELEASE_WORKFLOWS.includes(fileName);
+  const mayInstallBrowsers = PLAYWRIGHT_INSTALL_WORKFLOWS.includes(fileName);
   const triggers = triggersOf(doc.on);
   const prTriggered = triggers.has('pull_request') || triggers.has('pull_request_target');
 
   for (const event of FORBIDDEN_TRIGGERS) {
     if (triggers.has(event))
       add('forbidden-trigger', `trigger "${event}" runs with elevated privileges or comment input and is not allowed`, ['on']);
+  }
+  if (DISPATCH_ONLY_WORKFLOWS.includes(fileName) && (triggers.size !== 1 || !triggers.has('workflow_dispatch'))) {
+    add('dispatch-only', `${fileName} runs on workflow_dispatch only (no schedule, push or pull_request; D-ARCH-010)`, ['on']);
   }
 
   // permissions
@@ -689,6 +719,12 @@ export function checkWorkflow(text, fileName, options = {}) {
     if (map === undefined) return;
     for (const [name, value] of Object.entries(map)) {
       for (const f of envEntryFindings(name, typeof value === 'string' ? value : '')) add(f.rule, f.message, [...path, name]);
+      if (!mayInstallBrowsers && PLAYWRIGHT_INSTALL.test(name))
+        add(
+          'playwright-install',
+          `${name}: Playwright browsers are installed only in ${PLAYWRIGHT_INSTALL_WORKFLOWS.join(', ')} (PR4-SEC-08)`,
+          [...path, name],
+        );
     }
   };
   checkEnvMap(doc.env, ['env']);
@@ -721,8 +757,12 @@ export function checkWorkflow(text, fileName, options = {}) {
         if (level === 'write' && !JOB_WRITE_ALLOWLIST.includes(`${fileName}:${jobId}:${scope}`)) {
           add('permissions', `job ${jobId} must not hold ${scope}: write (not in JOB_WRITE_ALLOWLIST)`, [...jobPath, 'permissions', scope]);
         }
-        if (isCi && scope === 'id-token' && level === 'write')
-          add('ci-no-release', 'ci.yml must not request id-token: write (no AWS role, AT-US-005-05)', [...jobPath, 'permissions', scope]);
+        if (noRelease && scope === 'id-token' && level === 'write')
+          add('ci-no-release', `${fileName} must not request id-token: write (no AWS role, AT-US-005-05)`, [
+            ...jobPath,
+            'permissions',
+            scope,
+          ]);
       }
     }
 
@@ -777,12 +817,23 @@ export function checkWorkflow(text, fileName, options = {}) {
       }
       const run = asString(step.run);
       if (run !== undefined) {
-        for (const f of scriptFindings(run, isCi)) add(f.rule, f.message, [...stepPath, 'run']);
-        if (isCi && /\bdocker\s+(?:push|buildx\s+build\b[^\n]*--push)\b/.test(run) && !(jobId === 'images' && imagePushGuarded(job))) {
-          add('ci-no-release', 'ci.yml pushes images only from the `images` job gated on dispatch/main/tags (AT-US-005-04)', [
+        for (const f of scriptFindings(run, noRelease, fileName)) add(f.rule, f.message, [...stepPath, 'run']);
+        if (
+          noRelease &&
+          /\bdocker\s+(?:push|buildx\s+build\b[^\n]*--push)\b/.test(run) &&
+          !(isCi && jobId === 'images' && imagePushGuarded(job))
+        ) {
+          add('ci-no-release', `${fileName} pushes images only from ci.yml's \`images\` job gated on dispatch/main/tags (AT-US-005-04)`, [
             ...stepPath,
             'run',
           ]);
+        }
+        if (!mayInstallBrowsers && PLAYWRIGHT_INSTALL.test(run)) {
+          add(
+            'playwright-install',
+            `Playwright browsers (and apt --with-deps) are installed only in ${PLAYWRIGHT_INSTALL_WORKFLOWS.join(', ')} (PR4-SEC-08)`,
+            [...stepPath, 'run'],
+          );
         }
       }
       const uses = asString(step.uses) ?? '';
@@ -794,18 +845,18 @@ export function checkWorkflow(text, fileName, options = {}) {
       if (isCi && jobId === 'scans') {
         for (const message of scansStepViolations(step)) add('scans-isolation', message, stepPath);
       }
-      if (isCi && /^aws-actions\/configure-aws-credentials@/.test(uses))
-        add('ci-no-release', 'ci.yml must not assume an AWS role (AT-US-005-05)', [...stepPath, 'uses']);
-      if (isCi && withMap['role-to-assume'] !== undefined)
-        add('ci-no-release', 'ci.yml must not assume an AWS role (AT-US-005-05)', [...stepPath, 'with']);
+      if (noRelease && /^aws-actions\/configure-aws-credentials@/.test(uses))
+        add('ci-no-release', `${fileName} must not assume an AWS role (AT-US-005-05)`, [...stepPath, 'uses']);
+      if (noRelease && withMap['role-to-assume'] !== undefined)
+        add('ci-no-release', `${fileName} must not assume an AWS role (AT-US-005-05)`, [...stepPath, 'with']);
       if (
-        isCi &&
+        noRelease &&
         /^docker\/build-push-action@/.test(uses) &&
         withMap.push !== undefined &&
         withMap.push !== 'false' &&
-        !(jobId === 'images' && imagePushGuarded(job))
+        !(isCi && jobId === 'images' && imagePushGuarded(job))
       ) {
-        add('ci-no-release', 'ci.yml pushes images only from the `images` job gated on dispatch/main/tags (AT-US-005-04)', [
+        add('ci-no-release', `${fileName} pushes images only from ci.yml's \`images\` job gated on dispatch/main/tags (AT-US-005-04)`, [
           ...stepPath,
           'with',
           'push',
@@ -1056,7 +1107,7 @@ export function requiredGateFindings(jobs, workflowDefaults, triggers, workflowE
   }
   const needs = asMap(jobs['ci-gate'])?.needs;
   const needList = Array.isArray(needs) ? needs : typeof needs === 'string' ? [needs] : [];
-  for (const job of ['fast-lane', 'scans']) {
+  for (const job of ['fast-lane', 'scans', 'security-integration']) {
     if (!needList.includes(job))
       out.push({ rule: 'required-gates', message: `ci.yml ci-gate must need ${job}`, path: ['jobs', 'ci-gate'] });
   }

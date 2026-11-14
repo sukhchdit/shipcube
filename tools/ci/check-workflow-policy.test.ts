@@ -43,10 +43,20 @@ const repoRoot = findRepoRoot();
 const fixtureDir = join(repoRoot, 'tools', 'ci', 'fixtures', 'workflow-policy');
 const script = join(repoRoot, 'tools', 'ci', 'check-workflow-policy.mjs');
 
-/** Fixtures named `ci-*.yml` are checked as `ci.yml` (the AT-US-005-04/-05 rules apply to ci.yml only). */
+/**
+ * Fixtures named `ci-*.yml`, `lane-c-*.yml` and `nightly-*.yml` are checked as `ci.yml`, `lane-c.yml` and `nightly.yml`
+ * (the AT-US-005-04/-05 no-release rules, the dispatch-only rule and the Playwright install scope depend on the name).
+ */
+function checkedAs(fixture: string): string {
+  if (fixture.startsWith('ci-')) return 'ci.yml';
+  if (fixture.startsWith('lane-c-')) return 'lane-c.yml';
+  if (fixture.startsWith('nightly-')) return 'nightly.yml';
+  return fixture;
+}
+
 function rulesFor(fixture: string): string[] {
   const text = readFileSync(join(fixtureDir, fixture), 'utf8');
-  return checkWorkflow(text, fixture.startsWith('ci-') ? 'ci.yml' : fixture).map((finding) => finding.rule);
+  return checkWorkflow(text, checkedAs(fixture)).map((finding) => finding.rule);
 }
 
 describe('check-workflow-policy: negative fixtures', () => {
@@ -89,6 +99,16 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['AT-US-005-04: npm publish in ci.yml fails', 'ci-npm-publish.yml', 'ci-no-release'],
     ['AT-US-005-05: terraform apply in ci.yml fails', 'ci-terraform-apply.yml', 'ci-no-release'],
     ['AT-US-005-05: assuming an AWS role in ci.yml fails', 'ci-aws-role.yml', 'ci-no-release'],
+    ['D-ARCH-010 item 4: a schedule on lane-c.yml fails (dispatch only, hosted minutes)', 'lane-c-schedule.yml', 'dispatch-only'],
+    ['D-ARCH-010 item 4: a push trigger on nightly.yml fails (dispatch only)', 'nightly-push.yml', 'dispatch-only'],
+    ['AT-US-005-04: docker push in lane-c.yml fails (lane C never pushes)', 'lane-c-docker-push.yml', 'ci-no-release'],
+    ['AT-US-005-05: terraform apply through "$TERRAFORM_IMAGE" in nightly.yml fails', 'nightly-terraform-apply.yml', 'ci-no-release'],
+    ['PR4-SEC-08: a Playwright browser install in ci.yml fails (lane-c.yml only)', 'ci-playwright-install.yml', 'playwright-install'],
+    [
+      'PR4-SEC-08: DEPS_REBUILD_PLAYWRIGHT in a nightly.yml job env fails (lane-c.yml only)',
+      'nightly-playwright-env.yml',
+      'playwright-install',
+    ],
     ['every job needs timeout-minutes', 'missing-timeout.yml', 'job-timeout'],
     ['docker run by tag (no digest) fails', 'docker-run-by-tag.yml', 'image-digest'],
     ['YAML outside the supported subset (anchor) fails closed', 'yaml-anchor.yml', 'yaml-subset'],
@@ -128,6 +148,7 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['valid.yml: pinned actions, read-only token, workflow env, npm audit signatures with the scope override'],
     ['carrier-sandbox-dispatch.yml: SEC-TC-51 positive control (workflow_dispatch + environment carrier-sandbox)'],
     ['ci-images-guarded.yml: AT-US-005-04 positive control (images job gated on workflow_dispatch)'],
+    ['lane-c-valid.yml: D-ARCH-010 / PR4-SEC-08 positive control (dispatch only, browser install and terraform validate in lane-c.yml)'],
     ['gitleaks-hardened.yml: PR10-SEC-01 positive control (.git-only mount, --ignore-gitleaks-allow, first-parent, no network)'],
     ['safe-expression.yml: PR10-SEC-07 positive control (github.sha, runner.*, steps.*.outputs.*)'],
   ])('positive control %s', (title) => {
@@ -174,8 +195,13 @@ describe('check-workflow-policy: repository', () => {
     expect(checkWorkflow(guarded, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       expect.stringContaining('workflow policy gate step must be unconditional'),
     ]);
-    const ungated = ci.replace('needs: [fast-lane, scans]', 'needs: [fast-lane]');
+    const ungated = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, security-integration]');
     expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual(['ci.yml ci-gate must need scans']);
+    // ADR-0023 am. G item 5: the hosted security-integration job stays part of the lane A aggregate.
+    const noSecurity = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, scans]');
+    expect(checkWorkflow(noSecurity, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
+      'ci.yml ci-gate must need security-integration',
+    ]);
     expect(CI_REQUIRED_GATES.length).toBeGreaterThanOrEqual(21);
     const root = mkdtempSync(join(tmpdir(), 'workflow-policy-'));
     try {
