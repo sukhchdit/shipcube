@@ -199,7 +199,7 @@ export function main(argv) {
       `gitleaks-full: ancestry of ${sha.slice(0, 12)}; config and ${String(baselineLines.length)}-line baseline from ${configRef.slice(0, 12)}`,
     );
     const result = scan({ root, sha, configText, baselineLines, report });
-    console.log(`gitleaks-full: ${result.status} (${String(result.findings)} finding(s)); report ${reportArg}`);
+    console.log(`gitleaks-full: ${result.status} (${String(result.findings)} finding(s)); native report written`);
     return result.status === 'clean' ? 0 : 1;
   } catch (error) {
     console.error(`gitleaks-full: ${error instanceof Error ? error.message : String(error)}`);

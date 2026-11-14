@@ -310,13 +310,14 @@ jobs:
 
       # CKV_GHA_7 (workflow_dispatch inputs must be empty) is skipped with a reason: lane-c.yml and nightly.yml inputs
       # select which checks run (choice values, passed through env and validated); no artefact is built or published
-      # from a dispatched run, which is what the SLSA rule protects.
+      # from a dispatched run, which is what the SLSA rule protects. The lint/policy fixtures are deliberately bad
+      # Dockerfiles and workflows (negative tests), so their folders are skipped; every other finding fails the job.
       - name: Checkov (Terraform, Dockerfiles, workflows)
         run: |
           set -euo pipefail
           docker run --rm --network none -v "$GITHUB_WORKSPACE:/src:ro" -w /src "$CHECKOV_IMAGE" \
             --directory /src --framework terraform dockerfile github_actions \
-            --skip-check CKV_GHA_7 --skip-download --compact --quiet --soft-fail-on LOW
+            --skip-check CKV_GHA_7 --skip-path tools/ci/fixtures --skip-path tests/fixtures --skip-download --compact --quiet
 
   # The gitleaks-full suite on the dispatched SHA: the full first-parent history, the config and the PR25-SEC-01
   # baseline read from that SHA through git (tools/quality/gitleaks-full.mjs: no network, read-only .git mount, exact

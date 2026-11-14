@@ -9,6 +9,7 @@
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -332,6 +333,14 @@ beforeAll(async () => {
     await migrator.query(SETUP_SQL);
     const version = await migrator.query<{ version: string }>('SELECT version()');
     report['server'] = version.rows[0]?.version;
+    // C-1 (TASK-015 part 015-B): the hosted measurement needs the client host next to the figures (no host name or path).
+    report['client'] = {
+      platform: process.platform,
+      arch: process.arch,
+      cpus: cpus().length,
+      cpuModel: cpus()[0]?.model,
+      node: process.version,
+    };
   } finally {
     await migrator.end();
   }
