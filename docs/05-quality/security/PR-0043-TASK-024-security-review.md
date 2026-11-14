@@ -321,8 +321,9 @@ The mutation control (widened glob, folder exemption) produced 27 leaf differenc
 | #42 TASK-025 (`e7dfbac`) | `+4` in `TENANT_CONTEXT_EXEMPTIONS` after the `up-down-up.test.ts` entry; boundaries categories and policy for `packages/audit` and `prisma/tests/audit` | None textually (different lines; git merges cleanly) | Both exemption edits: this PR's `render-rls-dr-a14.test.ts` in the renderer `keys` entry, and #42's `packages/audit/src/store/prisma-store.ts` `setter` entry; this PR's `tests/generated/rls/**` block after the `apps/api/src|tools/openapi` block. The second merger's record needs a merge-only round, because both PRs change the owned `eslint.config.mjs` (PR10-SEC-21 class) |
 | 020-C (`680e458`, branch only) | `303-320`, `385-404`, `893-910` (generated-client value importer narrowing) | None textually | Same two edits. After the union, re-lint `tests/generated/rls/**`: it imports `apps/api/src/platform/db/runtime.js` and `routing/*`, and a narrowed boundaries policy must not start refusing them, nor be loosened to admit them |
 | #39 TASK-014 (`ace8c27`), #40 TASK-015 (`ee64946`) | No change to `eslint.config.mjs`, `tests/generated/tsconfig.json` or CODEOWNERS at their current heads | None | Re-check if either head moves. If PR43-SEC-04 adds a CODEOWNERS line and #40 also edits CODEOWNERS, the union keeps both |
+| #44 020-C (`443c2f1`), added in round 2 | `eslint.config.mjs`, `tools/lint/lint-fixtures.mjs`, `tools/lint/negative-fixtures.test.ts` (disjoint hunks); the new ratchet `tools/repo/test-lane-idle-timeout.test.ts` | Semantic, not textual: the ratchet refuses the idle-in-transaction value `15_000` at `tests/generated/rls/cross-tenant.int.test.ts:549` (it requires `TEST_LANE_TX_IDLE_TIMEOUT_MS`) | The second merger sets the constant there. That file is owned since PR43-SEC-04, so the edit needs a record round (§R2.12, sim S9) |
 
-`tests/generated/tsconfig.json` (owned via `**/tsconfig*.json`) is changed by no other open PR.
+`tests/generated/tsconfig.json` (owned via `**/tsconfig*.json`) is changed by no other open PR. Round 2 updates this table for the current heads of #44, #42 and #39 in §R2.12.
 
 ## 8. Routing, owners and proposed decisions
 
@@ -387,3 +388,274 @@ The record has exactly one `Head` row and one `Verdict` row (the last table). It
 | Closed by this PR | PR11-SEC-03 residual (C3 derived, D-ARCH-072); PR11-SEC-07 remainder (rule 17, §8.4 prefix reversibility); PR11-SEC-10 (mechanism; §6); PR11-SEC-11 g (`runtimeReadOnly`); PR11-SEC-11 e lint half (rule 9 CREATE TABLE scope; catalog half open, PR43-SEC-10); PR11-SEC-14 b (lint and catalog halves; residual PR43-SEC-06 b/d); PR11-SEC-15 b/d/e/i; PR11-SEC-16 and PR24-SEC-05 (token-level E-strings in both lanes; residual PR43-SEC-06 a/c); PR11-SEC-17 c; PR24-SEC-02 class fix; PR24-SEC-11 (rule 11c, subject to C1); PR26-SEC-03 (mechanism; first instance TASK-037, SEC-TC-74); PR7-SEC-04 and PR7-SEC-07 item 3 (generated probes). PR24-SEC-06 closed as superseded (§5.7) |
 | Conditions | **C1** PR43-SEC-03 fixed in this PR with fixtures, delta round 2, before merge. **C2** PR43-SEC-01 before the first tenant-, user- or guest-resource route with a path parameter merges |
 | **Verdict** | **PASS_WITH_CONDITIONS.** No Critical or High finding is open for this change. C1 is a merge condition (round 2 record required); C2 and the follow-ups are tracked per §8 |
+
+# Delta round 2 (fix cycle 1 + union with PR #40, head 585f163)
+
+| Field | Value |
+|---|---|
+| PR | #43, branch `feat/TASK-024-generated-cross-tenant-isolation-test`. Fix cycle 1 (D-ORCH-063/064/065; PR body D-TASK024-12..18; comment issuecomment-6874036152): code head `9d679f0`, evidence commit `585f163`. Three `main` merges: `9198494` (docs only), `50670f4` (PR #40 `74385a1`), `64959f2` (docs only). Merge base with `main` is `c998fae`. `main` has since moved to `b6f5071` (PR #45 `4a60ca6`: `.gitleaks.toml`, `tools/ci/sec-static.test.ts`, `tools/quality/gitleaks-baseline.txt`; then docs only). None of those paths is changed by this PR |
+| Head | 585f16318279f8f7f0975b762ea4412e84bf95f8 |
+| Fix delta | `git diff <merge-tree(8ac271d, c998fae)> 585f163` lists exactly the fix cycle: 27 code and test files plus 65 new lint fixtures (92 owned files), this record and the 7 run files. So the three merges introduced nothing beyond a clean union (§R2.8) |
+| Lane A evidence | Run [43572039629](https://github.com/sukhchdit/shipcube/actions/runs/43572039629) on `585f163`: `fast-lane` **success**, all 33 steps executed. In `scans`, Gitleaks, Semgrep and oasdiff are green; only "Security-owned paths need a review record" failed (182 owned paths; the round-1 record names `8ac271d`), and `ci-gate` failed as its aggregate. This round is that record |
+| Lane B evidence | `docs/05-quality/tests/runs/20261114T0725Z_9d679f0`, profile `pr`, verdict PASS: api 123, catalog-c1-c14 102, integration 291 (1 skip), unit 4570 (2 skip); `build_clean` true; `git_sha` `9d679f0`. `lockfile_sha256` and `manifest_sha256` equal the blobs at `9d679f0` (recomputed). `9d679f0..585f163` adds only the 7 run files. `rls-cross-tenant` is still `planned` (skipped by manifest); its 126 tests ran inside the `generated` coverage-only run, whose case `coverage merge: generated coverage run` passed (unit JUnit line 4559; `heavy.mjs:734` fails that case on any failing test; the project is `tests/generated/**/*.{api,int}.test.ts`, `jest.config.ts:141`) |
+| Reviewer / date | security-analyst, 2026-11-14, round 2 (delta). Read-only on code. Git ran in the main checkout and read-only in the PR worktree; the worktree's only change is this file. No Docker, database, install, build or test-suite run. Probes ran on `git archive` extracts of `585f163` and `8ac271d` in session scratch (§R2.2) |
+
+## R2.1 Summary
+
+Both conditions are closed, and so are the four LOW findings and the INFO parts claimed as done:
+- **C1 = PR43-SEC-03 (closed).** The splitter opens a block only on `BEGIN ATOMIC` at parenthesis depth 0 in a routine statement and fails closed (new rule L) in `migration.sql`, `down.sql` and every bootstrap file. Every round-1 `begin` row gives 7 statements with all tail findings (R1 head: 1). The `END;` resync row is split correctly. The `down.sql` rule 17 is back.
+- **C2 = PR43-SEC-01 (closed).** `API_CASES` is a map of executable cases. The suite runs every entry against the real module registry (`moduleRegistry` from `apps/api/src/modules/index.generated.js`, through `createApp` on the real runtime, with only the authenticate slot swapped). `guest` routes are enumerated. A stale or bare registration fails, and a leaking route fails its case. I drove the PR's own `runApiCase` and `routeCaseFindings` against stub routes (§R2.4).
+- **LOW 02, 04, 05, 06: closed**, each with a probe on head and the R1 head as control (§R2.5). **INFO 07, 08, 09: closed** for the parts claimed; the rest is routed to TASK-037 / TASK-051, which is accepted. **INFO 10: partly closed** (catalog half of the schema scope).
+- **DR-A14 users fence:** `('ACTIVE','SUSPENDED')` in the template, the renderer atom and data-model §4.3 (D-ARCH-123); the probe suite pins `INVITED` → 0.
+- **Union with PR #40 is pure.** No existing check is weakened: `REQUIRED_CODEOWNED_PATHS`, CODEOWNERS and `suite-runners.json` only gain lines.
+- **Evidence hygiene holds.** The gate table carries both D-SEC-PR23-02 statements verbatim, and the host-path scan is 0.
+
+New in this round:
+- **PR43-SEC-11 (LOW).** The splitter can still over-count inside a `BEGIN ATOMIC` body, and a later top-level `END;` resynchronises it. The code review found the `AS case` / `t.case` shapes (R2-m1). I add a bare label `case` and an in-block `begin atomic` (column plus bare label), which the reviewer's previous-token fix does not close. A structural fix is validated on a scratch copy.
+- **PR43-SEC-12 (LOW).** `positiveStatus` is unconstrained. A registered case with a mis-mapped parameter and `positiveStatus: 404` passes against a route that leaks every row.
+- **PR43-SEC-13 (INFO).** After D-ARCH-123, the users-row consent property rests on the service layer, because `memberships` stays tenant-writable.
+
+**Findings this round: 0 Critical, 0 High, 0 Medium, 2 LOW new, 1 INFO new. Verdict: PASS_WITH_FOLLOW-UPS** (§R2.16).
+
+## R2.2 Method
+
+| Area | How |
+|---|---|
+| Delta | Three-way: `git merge-tree --write-tree 8ac271d c998fae` (clean) against `585f163` gives the fix delta (Field table). Read in full: the `sql-text.ts`, `lint-migrations.ts`, `api-cases.ts`, `generator.ts`, `fixtures.ts` diffs; the API, write-probe and DR-A14 parts of `cross-tenant.int.test.ts` and `database.ts`; the `c15`, `c01-c12` and `scans.ts` additions; CODEOWNERS, `check-workflow-policy.{mjs,test.ts}`, `suite-runners.json`, `lint-fixtures.mjs`, `negative-fixtures.test.ts`, the DR-A14 template / atom / render test and `platform.json` |
+| P1 splitter and linter | `git archive` extracts of `tools/db`, `prisma/sql`, `prisma/migrations` and `prisma/bootstrap` at `585f163` and at `8ac271d` (control). About 75 synthetic migration and bootstrap inputs, each through both heads, went through the real `lintMigrations` / `lintBootstrap`, plus direct `splitStatements` calls (scripts `p1-begin`, `p2-lows`, `p3-toplevel`, `p5-labels`). Two candidate fixes ran on scratch copies of the head splitter, the second also over all 488 `.sql` files of the extract (`p6-fixb`). PostgreSQL acceptance of the attack inputs is taken from the PG 18 grammar (`REL_18_STABLE` `gram.y` and `kwlist.h`), not executed |
+| P2 API runner | Extract of `apps/api/src`, `packages`, `tools/db` and `tests/generated` at `585f163`, run with type stripping and a resolve hook (`@platform/*` → package sources). The PR's real `runApiCase`, `fillPath`, `tenantResourceRoutes` and `routeCaseFindings` ran against a `node:http` stub with an isolating route and a route that leaks every row (`p4-cases`) |
+| P3 catalog and suite | Reading only (Docker not used): C15 shape and order SQL, the dynamic-SQL, parameter-ACL and escape-setting catalog checks, the write mutation control, the DR-A14 probe tests |
+| P4 union and policy | `git diff c998fae 585f163` over the paths that both `main` (`201d8d9..c998fae`) and this PR change. `checkCodeowners` read against the head CODEOWNERS; later-line override scan |
+| P5 hygiene | Count-only host-fragment scan (12 labels computed at run time) over the 7 run blobs, with a synthetic control in which every label fires. Lockfile and manifest SHA-256 recomputed. `gh run view` for the lane A steps |
+| P6 record simulation | §R2.14 |
+| Cross-check | Code review round 2 on `main` (`22b0ebd`): APPROVED_WITH_NITS, R2-m1 (MINOR, security to rate), R2-n1..n3. The findings below cite it where they overlap |
+
+## R2.3 C1 (PR43-SEC-03): closed
+
+| Probe (P1; a statement before the six-statement tail of round 1 unless noted) | R1 head `8ac271d` | Head `585f163` |
+|---|---|---|
+| Control, no routine | 6 statements, all tail findings | same |
+| `CREATE FUNCTION public.begin()` / `CREATE OR REPLACE FUNCTION public.begin()` | 1 statement, one rule-9 message | **7**, all tail findings |
+| Parameter `begin` with `RETURN begin` / `CREATE PROCEDURE p(begin integer)` | 1 | **7**, all findings |
+| `RETURNS TABLE (begin integer)`; `SET search_path = begin` (GUC value) | 1 | **7**, all findings |
+| `RETURN CASE … END` at depth 0; `BEGIN /* c */ ATOMIC`; `BEGIN -- c` + newline + `ATOMIC`; procedure `BEGIN ATOMIC`; leading comment before CREATE; CASE in parentheses or nested inside a block | 7 | 7, all findings |
+| Balanced `BEGIN ATOMIC … CASE … END; END;` (control) | 7 | 7 |
+| Round-1 resync: `begin`-named function, `GRANT TRUNCATE`, lone `END;`, `GRANT TRUNCATE` | 2 statements (8 once) | 4 (11c, 8, 8) |
+| `down.sql`: `begin`-named function then `DROP TABLE public.x;` | clean | **17** |
+| Unbalanced `BEGIN ATOMIC` in `migration.sql` / `down.sql` / a bootstrap file | clean / clean / 12 only | **L** / **down: L** / **L** (bootstrap control clean) |
+
+The fixtures under `transaction-control-begin/` (7 migrations), `bootstrap/unbalanced-atomic` and the `sql-text.test.ts` shapes exist and are pinned exactly in `lint-migrations.test.ts`. The code review reports that all 55 tracked non-fixture SQL files split identically under `main`, the R1 head and the head (209 statements), with 7 of 10 splitter mutants killed. `shadow-init.ts` and `up-down-up.ts` call the splitter directly; a lex error there throws, which is fail closed. **Residual: PR43-SEC-11** (in-block over-count shapes).
+
+## R2.4 C2 (PR43-SEC-01): closed
+
+- **Executes against the real registry.** The committed layer serves `moduleRegistry` (`cross-tenant.int.test.ts:35, 593`) through `createApp` on `databaseRuntimeFromConfig`. The pipeline is `{ ...defaultPipelineSlots(...), authenticate: probePrincipalSlot }` (`:558`), so only the authenticate slot is swapped. User A holds every catalogued permission, so a 403 can never pass for isolation.
+- **Guest routes are enumerated.** `TENANT_RESOURCE_TENANCIES` = tenant, user, guest (`generator.ts:320`). `operator-cross-tenant` is excluded with a stated reason (SEC-TC-06 and the RBAC matrix cover it), which I accept.
+- **Registration without execution is impossible.** `EXECUTED` is derived from `API_CASES` (`:579-582`). Each entry runs through `it.each`, and `expect(route).toBeDefined()` / `expect(plan).toBeDefined()` fail a stale entry or one without a seeded table. The type demands `table` and `params`. `routeCaseFindings` names a missing case, a stale case, wrong parameters, a non-RLS table, a quote-token route on a non-guest table and a credential the runner cannot present.
+- **The mutation control fails.** The leaking route gives exactly 4 named problems (`:624-634`).
+
+Probe P2 used the PR's own code against stub routes:
+
+| Case (TENANT table, rows A and B) | Result |
+|---|---|
+| Leaking route, parameter mapped to `id` | FAIL, 4 problems (404 expected, not problem+json, code, 3 B values in the body) |
+| Isolating route, same mapping | PASS |
+| Leaking route, parameter mapped to `org_id` (wrong), default positive 200 | FAIL: positive control got 404 |
+| **Leaking route, parameter mapped to `org_id`, `positiveStatus: 404`** | **PASS: no problem** (→ PR43-SEC-12) |
+| Leaking route, correct mapping, `positiveStatus: 404` | FAIL, 5 problems |
+| `tenantResourceRoutes` over tenant, guest (`{quoteId}`), user, `operator-cross-tenant`, list (no parameter), public | getParcel, getQuote, getMe |
+| `routeCaseFindings`, no cases / full cases / case on a GLOBAL table / quote-token route on a TENANT table | 3 missing / none / both named |
+
+**Residual: PR43-SEC-12.**
+
+## R2.5 LOW and INFO items of round 1
+
+| Item | Status | Evidence (P1/P3; head vs R1 head) |
+|---|---|---|
+| PR43-SEC-02 (blind writes, re-parent, guest writes, write mutation control) | **Closed** | `update-blind` (`UPDATE t SET k = $1` plus constant stamps; no WHERE, no RETURNING), `delete-blind` (`DELETE FROM t`), `reparent-own-row` (expectation follows the first guard: 23514 de-claim, P0001 standard-columns guard on id-keyed tables, else WITH CHECK 42501 with the RLS marker), `guest-update-other-hash`, `guest-insert-with-org`, `guest-context-tenant-rows` (`database.ts:292-326`, `generator.ts:193-205`). The write mutation control (`cross-tenant.int.test.ts:322-332`) pins exactly `['update-blind','delete-blind']` for `FOR UPDATE/DELETE USING (true)` on `rls_probe_tokens`, and `['update-blind','guest-update-other-hash']` for `FOR UPDATE USING (true)` on `rls_probe_quotes`. That is the outcome round 1 predicted for the column-reading probes |
+| PR43-SEC-04 (CODEOWNERS) | **Closed** | `/tests/generated/rls/` and `/tests/generated/api-mounts.ts` owned (CODEOWNERS:80-81); both are in `REQUIRED_CODEOWNED_PATHS`. Mutation tests: deleted, commented out and ownerless each give one finding, and a sibling `/tests/generated/rbac/` line does not cover `rls/`. No later CODEOWNERS line matches either path without an owner (18 later lines, all owned). Lane A already counts `tests/generated/rls/*` as owned (base and head patterns), and record sim S6/S6b show an edit there now voids a record. The last-match precedence limit of `checkCodeowners` is the existing PR10-SEC-20 INFO |
+| PR43-SEC-05 (a) rule 7 | **Closed** | `ENABLE REPLICA TRIGGER`, `ENABLE ALWAYS TRIGGER`, `ENABLE REPLICA RULE`, the `IF EXISTS ONLY` quoted form, a comment between the words and a second sub-command give 7 (R1: clean). Plain `ENABLE TRIGGER` is clean. The same ALTER inside a DO body is clean on both heads (the pre-existing DO-body class, like `DISABLE TRIGGER`); its committed effect is caught by (b) |
+| PR43-SEC-05 (b) C15 committed shape | **Closed** | Per in-scope table `[expectedGuard(table)]` (`enabled 'O'`, row, BEFORE, INSERT, UPDATE, no DELETE/TRUNCATE), plus `guardShapeFindings`; REPLICA / ALWAYS / DISABLE are each named on the probe |
+| PR43-SEC-05 (c) order | **Closed** | `AFTER_GUARD_SQL`: any other non-disabled BEFORE INSERT/UPDATE ROW trigger whose name sorts after the guard's (`COLLATE "C"`; tgtype bits 1, 2 and 4/16 are correct) is named; `__zz` and `__std_columnsZ` named, `__aa` / AFTER / disabled not |
+| PR43-SEC-05 (d) generator listing | **Closed** | A replica-mode or dropped de-claim trigger is named (`cross-tenant.int.test.ts:273-303`) |
+| PR43-SEC-06 (a) escape settings | **Closed** | Rule 20 fires in both lanes on `SET … = off`, `SET LOCAL … TO`, the quoted name in either case, `set_config(…)`, `backslash_quote`, `RESET`, a routine SET clause, a DO `EXECUTE` literal and a `::text` key (R1: all clean). In the bootstrap lane, `SET standard_conforming_strings = off` followed by an escaped plain string now gives 20 (R1: clean). A concatenated `set_config` key and a `U&` name give 16. The catalog asserts no `proconfig` or `pg_db_role_setting` entry, with planted controls. Remaining: a keyword-split name inside a DO-body `EXECUTE` lints clean. That is the stated dynamic-SQL limit, and the prosrc-based catalog scans see decoded text |
+| PR43-SEC-06 (b) query-string executors | **Closed** | `query_to_xml` in an `AS '…'` SQL body, `pg_catalog.query_to_xml` in a `RETURN` body and the existing fixtures give 16 (R1: clean). Top-level and DO-body uses with a context setter in the literal give 16 on both heads. `cursor_to_xml` is clean: it takes an open cursor, not a query string. The catalog `DYNAMIC_SQL_SQL` covers every language and `BEGIN ATOMIC` bodies (`pg_get_function_sqlbody`) |
+| PR43-SEC-06 (c) nesting cap | **Closed** | `containsEscapeString` returns true at the cap while a string or dollar token remains (the reviewer killed the fail-open mutant) |
+| PR43-SEC-06 (d) allow-lists | **Closed** | Lint lane: name plus SHA-256 of the normalised CREATE statement (head and SET clauses included); the test shows whitespace kept, and a body change, `SECURITY DEFINER` or another name refused; the list is empty. Catalog: name plus SHA-256 of the normalised `prosrc`, with `ensure_audit_partitions(integer)` pinned. The catalog hash does not cover `prosecdef`/`proconfig`; C11 and bootstrap immutability cover those for that one function. No action |
+| PR43-SEC-07 | **Closed (claimed part)** | `pg_parameter_acl`: no SET / ALTER SYSTEM to PUBLIC or `platform_%`; `has_parameter_privilege('platform_app','session_replication_role','SET')` false, with planted controls. The SEC-TC-74 matrix additions, the migrator-owned `DEFINER_ALLOWED` invariant and the `NEW.x =` render check are routed to TASK-037 (D-TASK024-18): **accepted** |
+| PR43-SEC-08 | **Closed (claimed part)** | (b) a fresh-session NULL-context probe per layer (`:214-232`); (c) the genuine operator positive control (`:432`); (d) `guest-context-tenant-rows`; (e) 20 × 126 runs and an active heavy run, both reported but uncommitted (not verifiable here); the committed coverage-only run passed. (a) column-level grants routed to TASK-051: **accepted** |
+| PR43-SEC-09 | **Closed** | (a) per D-ARCH-123 (§R2.7). (b) `_prisma_migrations` and `bootstrap_migrations` are `runtimeReadOnly`; write lines for either are refused for every grantee (`grants-manifest.test.ts`) |
+| PR43-SEC-10 | **Partly closed** | The generator (R1-m4) names every relation outside `public`, and the catalog asserts no r/p/f/v/m relation there, with planted controls in `platform` and a new schema. That closes the SET SCHEMA / SELECT INTO / view residuals at catalog time, and the PR11-SEC-11 (e) catalog half. Still open (INFO, TASK-037): object kinds refused only by migrator privileges |
+
+## R2.6 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner |
+|---|---|---|---|---|---|---|
+| PR43-SEC-11 | In-block over-count of `splitStatements` (a label `case`, or the `begin atomic` alias pair) is resynchronised by a top-level `END`; the statements in between lint clean | LOW | CWE-693 (via CWE-436) | A04 | `tools/db/sql-text.ts:239-244` | senior-developer / database-engineer (§R2.13) |
+| PR43-SEC-12 | `ApiCrossTenantCase.positiveStatus` is unconstrained, so a mis-mapped case with `positiveStatus: 404` passes against a leaking route | LOW | CWE-693 (via CWE-639) | A01 | `tests/generated/rls/generator.ts:356, 365-400`; `api-cases.ts:114` | senior-developer (§R2.13) |
+| PR43-SEC-13 | After D-ARCH-123 the consent property of `p_users__org_member_read` rests on the service layer: `memberships` stays writable by any session of the organisation | INFO | CWE-359 | A01 | data-model §4.3 (`p_memberships__tenant`, `FOR ALL`, WITH CHECK `org_id = app_org_id()`); §4.3 note on registration and acceptance | TASK-227 / TASK-231, qa-lead (abuse suite) |
+
+### PR43-SEC-11 (LOW): an in-block over-count plus a top-level `END` resync
+
+**What.** Inside a block, the head counts every `case` and every `begin atomic` at parenthesis depth 0 as an opener (`sql-text.ts:240-241`). PostgreSQL 18 accepts four shapes in which those words are not openers:
+- `SELECT 1 AS case` and `t.case` (`ColLabel` and `attr_name` admit reserved words): code review R2-m1;
+- `SELECT 1 case`: CASE is a `bare_label_keyword`, so it is a column label without AS;
+- `SELECT begin atomic FROM …`: `begin` is an unreserved column reference and ATOMIC a bare label (`target_el: a_expr BareColLabel`).
+
+The routine's real `END` then leaves depth 1, and every later statement is swallowed until some top-level `END [WORK | TRANSACTION]` (a COMMIT synonym) brings it to 0.
+
+| Shape inside the body, then `GRANT TRUNCATE … TO platform_app; DROP TABLE public.y; SET lock_timeout = '10s'; END; SELECT 1;` (P1 `p5-labels`) | R1 head | Head | Head without the `END;` | Code review fix (skip `case`/`end` after `as` or `.`) |
+|---|---|---|---|---|
+| `SELECT 1 AS n` (control) | 2, 11, 8 | 2, 11, 8 | 5 statements | unchanged |
+| `SELECT 1 AS case` / `t.case` | clean | **clean** (2 statements) | L | closed (6 statements) |
+| `SELECT 1 case` (bare label) | clean | **clean** | L | **not closed** (2) |
+| `SELECT begin atomic FROM (VALUES (1)) v(begin)` | clean | **clean** | L | **not closed** (2) |
+
+**Exploitability / impact.** No innocent form silences the gate any more. A label alone gives rule L (visible), and silencing needs a deliberate label plus a top-level `END;`, which is itself transaction control that a reviewer sees. Migrations are owned and security-reviewed. The outcome controls still catch grants (C5), policies (C3), RLS state, memberships (C13) and relations outside `public`. Rules 2, 7, 11, 11c, 14 and 17 have no backstop. Impact on the guardrail is High; the likelihood is below Low for a deliberate-only, two-artefact shape, the same reasoning as PR43-SEC-02 in round 1: **LOW**. Today no repository migration defines a `BEGIN ATOMIC` routine.
+
+**Remediation (code level, validated on a scratch copy, `p6-fixb`).** A previous-token rule cannot close the bare-label and alias shapes, so make it structural:
+1. Inside a block, count `BEGIN ATOMIC` only when the current body statement itself starts with `create [or replace] function|procedure`. Keep `bodyWords`, reset at each `;` inside the block and at a block open.
+2. Track the CASE depth per body statement. At a `;` inside a block with an open CASE, throw `SqlLexError('unbalanced CASE … END in a BEGIN ATOMIC body statement')`, which is rule L. A CASE expression can never span a `;`, so an over-count can never survive one.
+3. `end` closes a CASE while one is open in the body statement, else the block. A label `end` over-splits (fail-safe, as today).
+
+On the scratch copy: `AS case`, `t.case` and bare `case` give **L**; the `begin atomic` alias gives the correct 5 statements; the controls (balanced CASE, two body statements, parameter `begin`, `RETURN CASE`) are unchanged. All **488** `.sql` files of the head extract (repository and lint fixtures) split identically to the head.
+
+Fixtures: one per shape followed by hostile statements and a top-level `END;`, plus `AS end` (stays fail-safe) and the parenthesised label of code review R2-n1. Name the limit in the JSDoc.
+
+**Verification.** The four shape rows give L or the correct split, each with the tail findings. The 55 repository SQL files are unchanged.
+
+### PR43-SEC-12 (LOW): an unconstrained `positiveStatus` makes a case vacuous
+
+**What.** `positiveStatus?: number` (`generator.ts:356`) replaces the positive control's expected 200 (`api-cases.ts:114`), and `routeCaseFindings` never checks it. Suppose a route answers with any row by id (a SYSTEM-handle read, a cache key without the organisation) and the case maps the path parameter to the wrong column. Then both calls return 404, and `positiveStatus: 404` turns the case green (P2, row 4). A developer whose positive control fails because of a wrong mapping can reach that state by copying the observed status into the case.
+
+**Exploitability / impact.** This is the C2 surface (a detection gap behind RLS, Medium impact). It needs a non-2xx value in an owned, now CODEOWNED file, so likelihood is Low: **LOW**.
+
+**Remediation.**
+- In `routeCaseFindings`, refuse a `positiveStatus` that is not an integer in 200..299: `"<route>: positiveStatus <n> is not a success status (the positive control must reach the caller's own row)"`.
+- In `runApiCase`, treat a positive call that returns 404 as a problem whatever the case says.
+- Add a unit test of the runner over a `node:http` fake server: a leaking route, the mis-mapped `positiveStatus: 404` case, and a dropped positive-control branch must fail. This also covers code review R2-n2 (c).
+
+**Verification.** Row 4 of the P2 table fails. A case with `positiveStatus: 201` on a creating route still passes.
+
+### PR43-SEC-13 (INFO): the users-row consent property now rests on the service layer
+
+D-ARCH-123 removes the designed pre-consent path: no `INVITED` membership is written, and acceptance inserts `ACTIVE`. At the RLS level, though, `p_memberships__tenant` is still `FOR ALL` with WITH CHECK `org_id = app_org_id()`. So any session of an organisation that a handler lets write a membership row for another `user_id` makes that user's `users` row visible through `p_users__org_member_read`. The data model already places the choice in the service ("the service is the only party that chooses it", §4.3 note).
+
+Recommendation for TASK-227/231 (invitations, membership management) and qa-lead (abuse suite):
+- an abuse case: a member of org A writes a membership for a user who has not accepted (direct route, mass-assignment of `user_id`, re-parenting an existing membership's `user_id`) → refused, and the users row stays invisible;
+- principal-architect to consider a database-level guard (for example, `user_id` written only on acceptance, through a definer function that requires an `ACCEPTED` invitation row) before US-083.
+
+## R2.7 DR-A14 users fence (D-ARCH-123)
+
+| Place | Value |
+|---|---|
+| `prisma/sql/policy-templates/dr-a14-users.sql` | `AND m.status IN ('ACTIVE','SUSPENDED')` |
+| `tools/db/render-rls.ts` `DR_A14_ATOMS['dr-a14-users']` | the same atom, exactly |
+| data-model §4.3 fence (`main`, line 2560) and §1.7 (`INVITED` reserved) | `('ACTIVE','SUSPENDED')`, amended 2026-11-14 |
+| `render-rls-dr-a14.test.ts` | reads the doc fence; a consistent template + atom pair that re-admits INVITED is killed by it (code review mutant e3). The describe title still says 2026-11-13 (code review R2-n3) |
+| `cross-tenant.int.test.ts:404-415` | `INVITED` → 0, `ACTIVE` → 1, `SUSPENDED` → 1, `REMOVED` → 0, each with a 0-row control |
+
+`organisations` keeps `('ACTIVE','SUSPENDED')`. The deny-list mutation still fails rule 9 and the renderer allow-list.
+
+## R2.8 Union with PR #40 and with `main`
+
+- **Fix delta is exact.** `585f163` against `merge-tree(8ac271d, c998fae)` differs only in the fix-cycle files (Field table). Every other path equals the clean union of the round-1 head and `main`.
+- **Overlap files.** Both sides change `.github/CODEOWNERS`, `tools/ci/check-workflow-policy.mjs`, `tools/ci/check-workflow-policy.test.ts` and `tools/quality/suite-runners.json`. For each, `git diff c998fae 585f163` is additions only:
+  - CODEOWNERS: +4 (comment + 2 lines);
+  - `REQUIRED_CODEOWNED_PATHS`: +3, with PR40-SEC-01's `.gitattributes` entries kept right after;
+  - the test file: +26 / −0;
+  - `suite-runners.json`: one entry added.
+
+  PR #40's content is therefore intact. The code review re-derived the `50670f4` resolution from its parents (conflict only in `REQUIRED_CODEOWNED_PATHS`, both sides kept).
+- **`main` since the merge base.** `c998fae..b6f5071` (PR #45 and docs) touches no path this PR changes. Record sim S7 passes after merging `b6f5071`.
+- **Evidence note.** Merging `main` into the branch makes `20261114T0725Z_9d679f0` stale for `check-evidence`, because non-docs paths change after `git_sha`. A squash merge without a branch update keeps it.
+
+## R2.9 Evidence hygiene
+
+- **D-SEC-PR23-02 statements.** Both are verbatim in the PR's gate table: "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first" (Install row) and "`.git/info/exclude` is empty" (Clean tree row, 0 bytes, logged by the script). The lockfile is unchanged, so no `ajv` statement is due. The profile is `pr`, and no `wave` or `gate` run is committed.
+- **Host-path scan.** 0 hits over the 7 run files for 12 labels; the synthetic control fires all 12. This agrees with the PR's own count-only scan.
+- **Hashes and range.** The lockfile and manifest hashes match. `9d679f0..585f163` touches only the run directory.
+- **Uncommitted evidence.** The 20-run flake table and the active run `20261114T0643Z_f12c7ba` are reported in the PR body only, and the FAIL run `20261114T0609Z_f12c7ba` is disclosed. They are not evidence of record. Activation (§R2.11) supplies the first credited run.
+
+## R2.10 No existing check weakened
+
+- **`check-workflow-policy.mjs`.** Only `REQUIRED_CODEOWNED_PATHS` changes (+2 paths, +1 comment).
+- **`check-workflow-policy.test.ts`.** A new describe block only.
+- **CODEOWNERS.** No line removed or reordered.
+- **`suite-runners.json`.** One entry added; `required-suites.json` is unchanged.
+- **Lint tooling.** `lint-fixtures.mjs` / `negative-fixtures.test.ts` add five repository probes (two allowed, three refused), which pin the anchored ignore of round 1 (R1-n3).
+- **`eslint.config.mjs`.** Not changed by the fix cycle, so the round-1 effective-config analysis (§5.6) stands.
+- **`lint-migrations.ts`.** Every rule of round 1 still fires on the round-1 probe rows. Rule 11 is widened (any non-routine statement), and rules 16 and 7 gain forms.
+
+## R2.11 Activation deviation (D-SEC-PR43-04 adjusted)
+
+**Endorsed**, as D-TASK024-16 and D-ORCH-071 state it. TEST-STRATEGY §9.3 rule 4 (`check-evidence.mjs:23, 352`) rejects a run that holds JUnit for a suite still `planned` in the base manifest. A code PR that activates its own suite can therefore never be credited, and activation is manifest-only by protocol (D-TASK276-02). The gap until activation is narrower than "runs in no lane": the 126 tests run inside the `generated` coverage-only run, and a failing test fails lane B. What is missing is the credit: suite-level reporting, `min_tests` and the SEC-TC-06 binding.
+
+D-SEC-PR43-04's conditions become:
+1. The manifest-only PR carries exactly the D-TASK024-16 diff. Its own lane-B run shows `rls-cross-tenant` with 126 tests, 0 failures and 0 skips; uncredited under rule 4 is acceptable.
+2. It merges **before TASK-037** and before the first `tenant` / `user` / `guest` resource route with a path parameter (TASK-027/048/049/051).
+3. `min_tests` equals the generated count at activation time, ratcheted afterwards.
+4. PR43-SEC-02 and PR43-SEC-04 ship in this PR: done.
+
+## R2.12 Sequencing update (§7)
+
+| PR (head) | Overlap with this PR | What the union must preserve |
+|---|---|---|
+| #44 020-C (`443c2f1`, after its fix cycle 1) | `eslint.config.mjs`, `tools/lint/lint-fixtures.mjs`, `tools/lint/negative-fixtures.test.ts` (disjoint hunks; code review: `merge-tree` clean). **Semantic:** #44 adds the ratchet `tools/repo/test-lane-idle-timeout.test.ts`. It requires every `*.int`/`*.api` suite that calls `createApp(` to set `DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: TEST_LANE_TX_IDLE_TIMEOUT_MS` (1 000 ms), and `cross-tenant.int.test.ts:549` sets `15_000` | The second merger switches `:549` to the constant. That file is owned since PR43-SEC-04, so the edit needs a record round: S9 in §R2.14 shows it voids this record if #44 merges first. `serve()` must keep swapping only the authenticate slot, and `probePrincipalSlot` stays test-only. Re-lint `tests/generated/rls/**` with the new import (`apps/api/src/platform/tx/tests/runtime-twin.js`). #44 also changes `apps/api/src/app.ts` (`createApp`); `serve()` follows its signature without adding a second swapped slot |
+| #42 TASK-025 (`d2ef478`) | `eslint.config.mjs`, `tools/lint/negative-fixtures.test.ts` (disjoint hunks) | Both exemption edits (round-1 §7); the second merger's record needs a merge-only round (PR10-SEC-21 class) |
+| #39 TASK-014 (`7dd3c64`) | **Textual conflicts** in `tools/ci/check-workflow-policy.mjs` (adjacent `REQUIRED_CODEOWNED_PATHS` additions) and `check-workflow-policy.test.ts` (two adjacent describe blocks); CODEOWNERS also changes on both sides | Keep both required-path pairs and both describe blocks whole (code review R2.5). The second merger needs a merge-only security round. Check that both CODEOWNERS pairs are present and pinned |
+
+## R2.13 Routing and proposed decision
+
+| Item | Owner | Due |
+|---|---|---|
+| PR43-SEC-11 | senior-developer / database-engineer. Preferred in this PR if a further commit lands anyway (with code review R2-m1/R2-n1), else a follow-up | before the first migration that defines a `BEGIN ATOMIC` routine merges, and before TASK-037 merges |
+| PR43-SEC-12 (with code review R2-n2 c) | senior-developer | before the first `API_CASES` entry merges (TASK-027/048/049/051 lines, D-ARCH-125 (4)) |
+| PR43-SEC-13 | TASK-227 / TASK-231 + qa-lead (abuse suite); principal-architect for the DB-level guard | before US-083 |
+| Activation conditions | qa-lead (manifest-only PR) | immediately after this PR merges; before TASK-037 |
+| Open from round 1 | PR43-SEC-07 rest and SEC-10 rest (TASK-037), SEC-08 (a) (TASK-051), §6 conditions (TASK-037/049) | as in §8 |
+
+Proposed decision text for the orchestrator (not edited here):
+- **D-SEC-PR43-05.** PR #43 security round 2 (delta after fix cycle 1, union with PR #40) at `585f163` = **PASS_WITH_FOLLOW-UPS**. No Critical, High or Medium is open, so merge is allowed on security grounds.
+  - **Closed:** C1 = PR43-SEC-03, C2 = PR43-SEC-01, PR43-SEC-02, -04, -05 (a)-(d), -06 (a)-(d) (keyword-split DO-body EXECUTE remains the stated limit), -07 parameter-ACL part, -08 (b)-(d), -09 (a)/(b), -10 schema-scope catalog half (with PR11-SEC-11 e catalog half). Routings to TASK-037 / TASK-051 accepted.
+  - **New:** PR43-SEC-11 LOW (code review R2-m1 extended by a bare label `case` and the in-block `begin atomic` alias; the previous-token fix is insufficient; structural fix per record §R2.6). PR43-SEC-12 LOW (`positiveStatus` unconstrained). PR43-SEC-13 INFO (membership writes carry the consent property). Owners and dues as in §R2.13.
+  - **D-SEC-PR43-04 adjusted:** activation through the manifest-only follow-up (D-ORCH-071), with the four conditions of §R2.11.
+  - **Unions:** a later merge of `main` that changes no PR-owned path keeps this record (sim S7). The #44 idle-timeout edit of `cross-tenant.int.test.ts`, the #39 conflicts and an `eslint.config.mjs` change each void it, and the second merger then needs a merge-only round.
+
+## R2.14 Record validation
+
+Simulated with `main`'s real `tools/ci/check-security-owned-paths.mjs` (tip `b6f5071`) in a `git clone --shared` whose sparse set applied (`.github/`, `docs/05-quality/security/`, `tools/ci/`). Scenario commits are built by plumbing on `585f163`, and the checker runs with `--base b6f5071 --pr 43 --json`:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S0 the head as pushed (round-1 text only) | missing | missing (182 owned; round 1 names `8ac271d`) |
+| S1 this record committed on `585f163` | pass | **pass**, bound to `585f163` |
+| S2 same, `--pr 42` | missing | missing |
+| S3 a later table whose last `Verdict` row is FAIL | missing | missing |
+| S4 an owned `tools/db/` file added after the record | missing | missing (owned 183) |
+| S5 a docs-only commit after the record | pass | pass |
+| S6 / S6b `tests/generated/rls/fixtures.ts` / `tests/generated/api-mounts.ts` edited after the record | missing (PR43-SEC-04 closed) | missing / missing |
+| S7 merge of `main` `b6f5071` after the record | pass | pass |
+| S8 `eslint.config.mjs` edited after the record | missing | missing |
+| S9 the PR #44 union edit of `cross-tenant.int.test.ts:549` after the record | missing | missing |
+| S10 round 2 without its own final Verdict row (procedural control) | passes on round 1's row | pass (procedural, see below) |
+| S11 the round-1 text alone committed on the head | missing | missing |
+
+S10 passes because round 1's `| **Verdict** |` row is then the last one. Each round must therefore end with its own Verdict row, as this one does (PR10-SEC-04, procedural). The record has two `Head` rows, `8ac271d` (round 1, which now produces only a note) and `585f163`, and its last `Verdict` row is this round's. The file is LF-only (0 CR bytes). Round 1's text is unchanged apart from one added §7 row and one sentence after that table.
+
+## R2.15 Hygiene
+
+- **Record content.** No secret values, no host paths and no OS user name; SHAs, run ids and repository paths only.
+- **Scans of this file.** The count-only host-fragment scan (the 12 labels of §R2.2) and the secret-shape scan both give 0. The secret-shape scan covers AWS key id, GitHub token, private-key header, JWT, password assignment and e-mail address, with a control in which every shape fires. The Gitleaks default rule set (v8.30.1, emulated in Node; 221 of 222 rules compiled; three runtime positive controls fired) finds 0 hits in the appended lines and in the whole file. Lane A scans it on commit.
+- **Scratch.** Probes ran in session scratch. The one `node_modules` junction was removed by unlinking, and the main checkout's `node_modules` count is unchanged (740).
+- **PR worktree.** It received only this file, appended with the editor tools and normalised to LF; no build or test command ran there.
+
+## R2.16 Verdict (round 2)
+
+| Field | Value |
+|---|---|
+| Critical / High / Medium open | 0 / 0 / 0 |
+| Closed this round | C1 = PR43-SEC-03; C2 = PR43-SEC-01; PR43-SEC-02, 04, 05 (a)-(d), 06 (a)-(d); PR43-SEC-07, 08 and 09 for the parts claimed (rest routed and accepted); PR43-SEC-10 schema-scope catalog half and PR11-SEC-11 (e) catalog half |
+| New | PR43-SEC-11 LOW, PR43-SEC-12 LOW, PR43-SEC-13 INFO |
+| Still open from round 1 | PR43-SEC-07 rest, 08 (a), 10 rest (INFO; TASK-037 / TASK-051); §6 DR-A14 conditions for TASK-037/049 |
+| Conditions | None for this merge. Follow-ups and the adjusted activation conditions per §R2.11 and §R2.13 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open for this change, and the round-1 merge conditions C1 and C2 are closed. This round binds `585f163`; a later docs-only commit keeps it, while an owned-path change or a union that edits an owned path (#44, #39, #42) needs a merge-only round |
