@@ -10,4 +10,5 @@
 - [D-062 US-008 delivery split](project_d062_us008_delivery_split.md) — hop-by-hop AT-US-008-03 split TASK-010/029/035/043/079/092; decompose by REQ text; check completer's transitive deps first; v1.6
 - [D-063 Allow parity wording](project_d063_allow_parity_wording.md) — AT-US-007-02 "GET, HEAD, OPTIONS" + OPTIONS 204 line; PR-driven AC literal fix = wording-amendment convention (PRD/REQ 1.8, traceability untouched)
 - [D-065 gherkin append-only](project_d065_gherkin_append_only.md) — scenario position = AT number; append new scenarios at block end; US-066/121/129/137/222 reordered; PRD 1.10
+- [D-066 image size MiB](project_d066_image_size_mib.md) — NFR-OPS-002/A-039 = 300/60 MiB sum of uncompressed layers, WARN 90 %; NFR 1.7, PRD 1.11; budget-raise rules; ADR-0002/0019 stale "300 MB"
 - [D-ARCH-088 audit-ab method](project_d_arch_088_audit_ab_method.md) — SPK-04 FALLBACK; NFR-AUDIT-005/PERF-001 method, A-029 150 req/s re-baseline, NFR v1.6 FULL-conditional; flip to PARTIAL needs D-entry + §9 row
