@@ -12,9 +12,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
 import { auditErrorCause, type AuditWriteError, isAuditWriteError } from '@platform/audit';
-import type { Config } from '@platform/config';
+import { type Config, DB_TENANT_ADMISSION_WAIT_MS_DEFAULT, defaultTenantMaxConcurrentTx } from '@platform/config';
 
 import { DbError, type DbErrorMapping, dbErrorMapping, type DbSecurityEvent, isDatabaseError, mapDbError } from './map-db-error.js';
+import { admissionKeyOf, createTenantAdmission, type TenantAdmissionMetrics, type TenantAdmissionOptions } from './tenant-admission.js';
 import { createTenantDb, type TenantDb } from './tenant-db.js';
 
 export type ActorScope = 'TENANT' | 'OPERATOR';
@@ -59,6 +60,13 @@ export interface WithTenantTxOptions {
   readonly maxWaitMs?: number;
   /** Prisma interactive-transaction `timeout`; must be ≥ `statementTimeoutMs`. Default `statementTimeoutMs`. */
   readonly timeoutMs?: number;
+  /**
+   * Per-tenant admission bulkhead (ADR-0007 am. 10 item 3, D-ARCH-086, data-model §7.7): `DB_TENANT_MAX_CONCURRENT_TX`
+   * permits per admission key and a `DB_TENANT_ADMISSION_WAIT_MS` wait, which may not exceed `maxWaitMs`. The database
+   * runtime always supplies it (`tenantTxOptionsFromConfig`, or the pool-size default); without it no bulkhead is built
+   * (direct-factory test seam).
+   */
+  readonly admission?: TenantAdmissionOptions;
 }
 
 /**
@@ -109,6 +117,8 @@ export interface TenantTxRunner<TTx> {
   probeFreshConnection(): Promise<void>;
   /** The resolved `{ maxWait, timeout }` passed to every `$transaction`. */
   readonly transactionOptions: TransactionOptions;
+  /** Read-only counters of the admission bulkhead (D-ARCH-086); absent when the options configure none. */
+  readonly admission?: TenantAdmissionMetrics;
 }
 
 export class TenantTxConfigError extends Error {
@@ -274,18 +284,37 @@ export function resolveTransactionOptions(options: WithTenantTxOptions): Transac
   return { maxWait, timeout };
 }
 
-/** Maps the validated configuration onto the factory options. */
+/** Validates the admission options against the resolved transaction `maxWait` (D-ARCH-086). */
+export function resolveAdmissionOptions(admission: TenantAdmissionOptions, maxWait: number): TenantAdmissionOptions {
+  const maxConcurrentTx = positiveInt('admission.maxConcurrentTx', admission.maxConcurrentTx);
+  const waitMs = positiveInt('admission.waitMs', admission.waitMs);
+  if (waitMs > maxWait) throw new TenantTxConfigError('admission.waitMs must not exceed maxWaitMs');
+  return { maxConcurrentTx, waitMs };
+}
+
+/** The admission keys `tenantTxOptionsFromConfig` reads; absent ones take their defaults (D-ARCH-086). */
+type AdmissionConfig = Pick<Config, 'DB_POOL_MAX'> & Partial<Pick<Config, 'DB_TENANT_MAX_CONCURRENT_TX' | 'DB_TENANT_ADMISSION_WAIT_MS'>>;
+
+/**
+ * Maps the validated configuration onto the factory options. An unset `DB_TENANT_MAX_CONCURRENT_TX` is
+ * `max(2, floor(DB_POOL_MAX / 2))` (its default depends on the pool size, so the schema leaves it unset).
+ */
 export function tenantTxOptionsFromConfig(
   config: Pick<
     Config,
     'DB_TX_STATEMENT_TIMEOUT_MS' | 'DB_TX_LOCK_TIMEOUT_MS' | 'DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS' | 'DB_CONNECTION_TIMEOUT_MS'
-  >,
+  > &
+    AdmissionConfig,
 ): WithTenantTxOptions {
   return {
     statementTimeoutMs: config.DB_TX_STATEMENT_TIMEOUT_MS,
     lockTimeoutMs: config.DB_TX_LOCK_TIMEOUT_MS,
     idleInTransactionTimeoutMs: config.DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS,
     poolConnectionTimeoutMs: config.DB_CONNECTION_TIMEOUT_MS,
+    admission: {
+      maxConcurrentTx: config.DB_TENANT_MAX_CONCURRENT_TX ?? defaultTenantMaxConcurrentTx(config.DB_POOL_MAX),
+      waitMs: config.DB_TENANT_ADMISSION_WAIT_MS ?? DB_TENANT_ADMISSION_WAIT_MS_DEFAULT,
+    },
   };
 }
 
@@ -324,6 +353,10 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
 ): TenantTxRunner<TTx> {
   assertNoSessionOptions(deps.env ?? process.env);
   const transactionOptions = Object.freeze(resolveTransactionOptions(options));
+  const admission =
+    options.admission === undefined
+      ? undefined
+      : createTenantAdmission(resolveAdmissionOptions(options.admission, transactionOptions.maxWait));
   const timeouts = {
     statementTimeoutMs: options.statementTimeoutMs,
     lockTimeoutMs: options.lockTimeoutMs,
@@ -369,8 +402,8 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     const values = contextValues(ctx, timeouts);
     const correlationId = values[4];
     const txClient = deps.scopeClient({ orgId: values[0], actorId: values[1] });
-    try {
-      return await tenantTxScope.run(true, () =>
+    const transaction = (): Promise<R> =>
+      tenantTxScope.run(true, () =>
         txClient.$transaction(async (tx) => {
           const prev = await setTenantContext(tx, values);
           if (hasLeakedContext(prev)) throw reportLeak(correlationId);
@@ -382,6 +415,10 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
           }
         }, transactionOptions),
       );
+    try {
+      // D-ARCH-086: the permit is acquired from the VALIDATED values before pool checkout and released once the one
+      // transaction has settled (commit, throw or mapped error); a refusal is a DbError and never starts it.
+      return await (admission === undefined ? transaction() : admission.run(admissionKeyOf(values[0], values[2]), transaction));
     } catch (error) {
       throw mapped(error, correlationId);
     }
@@ -393,5 +430,7 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     if (leaked.length > 0) throw reportLeak();
   }
 
-  return { withTenantTx, probeFreshConnection, transactionOptions };
+  return admission === undefined
+    ? { withTenantTx, probeFreshConnection, transactionOptions }
+    : { withTenantTx, probeFreshConnection, transactionOptions, admission: { snapshot: () => admission.snapshot() } };
 }
