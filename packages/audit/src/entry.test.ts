@@ -314,6 +314,8 @@ describe('[US-087] the writer refuses an invalid entry before any statement (INV
     ['route', withOrigin({ route: 'https://x/y' }), 'origin.route'],
     ['reason too long', { ...LOGIN, reason: 'r'.repeat(501) }, 'reason'],
     ['subject kind', { ...LOGIN, subject: { kind: 'ROBOT', refId: USER } }, 'subject.kind'],
+    ['subject not an object', { ...LOGIN, subject: 'user' }, 'subject.kind'],
+    ['user agent not a string', withOrigin({ userAgent: 42 as unknown as string }), 'origin.userAgent'],
     ['subject ref', { ...LOGIN, subject: { kind: 'USER', refId: 'x' } }, 'subject.refId'],
     ['non-finite number', { ...LOGIN, newValue: { n: Number.POSITIVE_INFINITY } }, 'newValue.n'],
     ['NUL in a string', { ...LOGIN, newValue: [String.fromCharCode(0)] }, 'newValue[0]'],

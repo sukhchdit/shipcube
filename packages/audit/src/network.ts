@@ -11,6 +11,9 @@
  */
 import { isIPv4, isIPv6 } from 'node:net';
 
+/** The address without its IPv6 zone (`fe80::1%eth0` -> `fe80::1`). */
+const withoutZone = (ip: string): string => ip.replace(/%.*$/su, '');
+
 /** The IPv4 address an IPv4-mapped IPv6 address carries, else the input. */
 function unmapped(ip: string): string {
   const match = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
@@ -37,8 +40,7 @@ function ipv6Groups(ip: string): number[] {
  * anything that is not an IP address, so a malformed value never reaches the database.
  */
 export function coarseNetwork(ip: string): string | null {
-  const zoneless = ip.split('%')[0] ?? '';
-  const address = unmapped(zoneless);
+  const address = unmapped(withoutZone(ip));
   if (isIPv4(address)) {
     const [a, b, c] = address.split('.').map(Number) as [number, number, number];
     return `${String(a)}.${String(b)}.${String(c)}.0/24`;
@@ -58,8 +60,7 @@ export function coarseNetwork(ip: string): string | null {
 
 /** The canonical text of a client IP (IPv4-mapped addresses unmapped, zone removed, IPv6 lower case), or `null`. */
 export function canonicalIp(ip: string): string | null {
-  const zoneless = ip.split('%')[0] ?? '';
-  const address = unmapped(zoneless);
+  const address = unmapped(withoutZone(ip));
   if (isIPv4(address)) return address;
   if (isIPv6(address)) return address.toLowerCase();
   return null;

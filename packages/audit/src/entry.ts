@@ -531,7 +531,6 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
       ['details', details],
     ] as const
   ).map(([field, value]) => (value === undefined || value === null ? null : collect(value, field, 0, state)));
-  const jsonPiiCount = state.pii.length;
 
   const subject = ownSubject(input.subject, actor.userId, actor.actorType);
   const own = (field: string, value: string | null): PiiValue | null =>
@@ -560,7 +559,6 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
         JsonValue | null,
         JsonValue | null,
       ];
-      if (cursor !== jsonPiiCount) throw new AuditWriteError('TOKENISER_FAILED');
       const [ipToken, userAgentToken, reasonToken] = ownValues.map((value) => (value === null ? null : next()));
       return Object.freeze({
         id,

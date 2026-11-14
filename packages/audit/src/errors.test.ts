@@ -52,6 +52,8 @@ describe('[US-088] audit write error model (ADR-0007 am. 10 item 2; data-model Â
   it('classifies database failures by SQLSTATE (driver-adapter and plain pg shapes)', () => {
     expect(toAuditWriteError(driverError('55P03')).kind).toBe('LOCK_TIMEOUT');
     expect(toAuditWriteError(Object.assign(new Error('x'), { code: '55P03' })).kind).toBe('LOCK_TIMEOUT');
+    // A plain object with a SQLSTATE and no message (no partition prefix to read).
+    expect(toAuditWriteError({ code: '23514' }).kind).toBe('DATABASE_ERROR');
     expect(toAuditWriteError(driverError('23514', 'new row violates check constraint')).kind).toBe('DATABASE_ERROR');
     expect(toAuditWriteError(driverError('40P01')).kind).toBe('DATABASE_ERROR');
     expect(toAuditWriteError(Object.assign(new Error('x'), { code: '23514', message: 'no partition of relation "x"' })).kind).toBe(
