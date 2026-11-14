@@ -251,8 +251,13 @@ jobs:
             npm exec --no -- commitlint --from "$RANGE_BASE" --to "$RANGE_HEAD" --verbose
           fi
 
+      # Type-aware ESLint over the whole repository needs about 1.9 GB of old space on main (OOM at 1800 MB, passes at
+      # 2048 MB), so the runner's default heap (about 2 GB) has no headroom left; 4 GB fits the 7 GB runner (TASK-014,
+      # D-TASK014-25). Heap size only: NODE_OPTIONS preloads stay refused (node-options-preload).
       - name: Lint (ESLint, Stylelint, suppressions)
         if: env.CODE == 'true'
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run lint
 
       # PR4-SEC-13 item 1: typegen (React Router config and route modules, vite.config.ts) runs inside `npm run lint`
