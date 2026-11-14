@@ -37,7 +37,7 @@ import type { RouteSlot } from '../../../apps/api/src/platform/routing/slot.js';
 import { defineRoute } from '../../../apps/api/src/platform/routing/define-route.js';
 import { createRuntimeLog } from '../../../apps/api/src/platform/runtime/log.js';
 import { APP_ROLE, PlatformPostgres } from '../../../prisma/tests/harness/postgres.js';
-import { loadTableClasses, type TableClassEntry } from '../../../tools/db/table-classes.js';
+import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from '../../../tools/db/table-classes.js';
 import { loadApiMounts } from '../api-mounts.js';
 import { readLiveTables, runCases, runProbe, seedTable, setTenantAContext, type TablePlan, TENANT_A, TENANT_B } from './database.js';
 import { API_CASES } from './fixtures.js';
@@ -98,7 +98,7 @@ async function withSuperuser<T>(database: string, fn: (client: pg.Client) => Pro
 async function prepare(layer: Layer, rlsEntries: readonly TableClassEntry[]): Promise<void> {
   await withSuperuser(layer.database, async (superuser) => {
     layer.live = await readLiveTables(superuser);
-    for (const entry of rlsEntries) {
+    for (const entry of rlsEntries.filter((e) => RLS_CLASSES.has(e.class))) {
       const table = layer.live.find((live) => live.name === entry.name);
       if (table === undefined) continue; // reported by the enumeration test, never skipped silently
       layer.plans.set(entry.name, await seedTable(superuser, table, isolationKey(entry), entry.class === 'GUEST_CAPABLE'));
