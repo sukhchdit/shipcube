@@ -37,3 +37,4 @@
 - [P5 PR-0039 TASK-014 images](project_p5_pr39_task014_images.md) — R1 @894c72e PASS_W_COND (C1 routing/tests find, C2 gitleaks skips node_modules); tooling dev closure; preflight argv/ECS; #40/#41/#42 unions
 - [P5 PR-0042 audit writer](project_p5_pr42_audit_writer.md) — TASK-025 R1 @e7dfbac PASS_W_F-U; 01 MED anon admission key, 02 MED rethrow; LOW 03-07,12; fix cycle -> R2; #39 overlap
 - [P5 PR-0043 RLS generator](project_p5_pr43_task024_rls_generator.md) — TASK-024 R1 @8ac271d PASS_W_COND; C1 splitStatements `begin` regression (R2), C2 API_CASES registration-only; PG RLS/escape facts
+- [P5 PR-0044 020-C phases](project_p5_pr44_020c.md) — R1 @9def3f5 PASS_W_F-U; 01 MED aliased createRequire escapes import controls; LOW 02-05 (signal, afterCommit cap, T-83, raw COMMIT); kit

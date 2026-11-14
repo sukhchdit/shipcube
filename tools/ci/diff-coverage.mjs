@@ -8,7 +8,8 @@
  * Inputs: `coverage/lcov.info` (jest.config.ts `coverageReporters` includes lcov) and
  * `git diff --unified=0 <base>...<head>` (merge-base diff: only the PR's own changes count).
  *
- * Fail-closed: no `--base` is a usage error; git failing is exit 2; a changed in-scope source file that lcov does not
+ * Fail-closed: no `--base` is a usage error; git failing, or git reporting a binary diff for an in-scope file
+ * (PR40-SEC-01), is exit 2; a changed in-scope source file that lcov does not
  * know is a failure (it was not measured). A changed file with no executable added line (types, comments, deletions)
  * passes and is listed as such.
  *
@@ -98,7 +99,25 @@ export function parseLcov(text, root) {
 }
 
 /**
+ * The path of a `diff --git a/<path> b/<path>` header (renames are off, so both sides name one path), else null.
+ * @param {string} line
+ * @returns {string | null}
+ */
+function headerPath(line) {
+  const rest = line.slice('diff --git '.length);
+  const length = (rest.length - 5) / 2;
+  if (!Number.isInteger(length) || length < 1) return null;
+  const path = rest.slice(2, 2 + length);
+  return rest === `a/${path} b/${path}` ? path : null;
+}
+
+/**
  * Added line numbers per new-side path from `git diff --unified=0` output.
+ *
+ * Fail-closed (PR40-SEC-01): a `Binary files ... differ` line for a coverage-scoped path (or for a file whose header
+ * cannot be read) throws, because its changed lines would otherwise count as no change at all. gitDiff passes
+ * `--text --no-textconv`, so a `.gitattributes` `-diff` or `binary` setting cannot produce such a line any more; this is
+ * the second line of defence.
  * @param {string} text
  * @returns {Map<string, Set<number>>}
  */
@@ -108,7 +127,19 @@ export function parseUnifiedDiff(text) {
   const files = new Map();
   /** @type {Set<number> | null} */
   let current = null;
+  /** @type {string | null} */
+  let header = null;
   for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('diff --git ')) {
+      header = headerPath(line);
+      current = null;
+      continue;
+    }
+    if (line.startsWith('Binary files ') && line.endsWith(' differ')) {
+      if (header === null || isCoverageScoped(header))
+        throw new Error(`git reported a binary diff for ${header ?? 'a file it did not name'}: its changed lines cannot be measured`);
+      continue;
+    }
     if (line.startsWith('+++ ')) {
       const target = line.slice(4);
       if (target === '/dev/null') current = null;
@@ -176,7 +207,10 @@ export function evaluateDiffCoverage(changed, coverage) {
 }
 
 /**
- * `git diff --unified=0 <base>...<head>` in `root`.
+ * `git diff --unified=0 <base>...<head>` in `root`, limited to TypeScript files (every coverage-scoped file is one).
+ * `--text --no-textconv` and explicit `a/` / `b/` prefixes make the output independent of `.gitattributes` (`-diff`,
+ * `binary`, a textconv driver) and of the operator's git configuration (`diff.noprefix`, `diff.dstPrefix`,
+ * `diff.mnemonicPrefix`) (PR40-SEC-01).
  * @param {string} root
  * @param {string} base
  * @param {string} head
@@ -194,9 +228,15 @@ export function gitDiff(root, base, head) {
       '--no-color',
       '--no-ext-diff',
       '--no-renames',
+      '--text',
+      '--no-textconv',
+      '--src-prefix=a/',
+      '--dst-prefix=b/',
       '--diff-filter=AM',
       `${base}...${head}`,
       '--',
+      ':(glob)**/*.ts',
+      ':(glob)**/*.tsx',
     ],
     { cwd: root, encoding: 'utf8', timeout: GIT_TIMEOUT_MS, windowsHide: true, maxBuffer: MAX_INPUT_CHARS },
   );

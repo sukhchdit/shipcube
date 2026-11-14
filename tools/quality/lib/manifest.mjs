@@ -25,6 +25,12 @@ const SUITE_STATUSES = new Set(['planned', 'active', 'opt-in']);
 const PROFILE_MIN = new Set(['none', 'pr', 'wave', 'gate']);
 const SUITE_ID = /^[a-z0-9][a-z0-9-]*$/;
 const CASE_ID = /^SEC-TC-[0-9]{2,3}$/;
+/**
+ * US-006 gate case names a suite may require besides SEC-TC IDs (PR33-SEC-06, D-ORCH-047): exactly the names the merged
+ * coverage gate of quality:heavy writes (tools/ci/coverage-gate.mjs `coverageGateCases`), so evidence without the gate
+ * is rejected by the base-ref verifier. Pending entries stay SEC-TC IDs only.
+ */
+const COVERAGE_CASE = /^coverage gate: [a-z0-9][a-z0-9/._-]* (?:lines|branches)$/;
 const DECISION_ID = /^D-[A-Z0-9][A-Z0-9-]*$/;
 const ENV_PREFIX = /^[A-Z][A-Z0-9_]*$/;
 const GLOB_TEXT = /^!?[A-Za-z0-9._*/-]+$/;
@@ -190,7 +196,11 @@ export function parseManifest(raw) {
       security,
       zero_skip: zeroSkip,
       min_tests: minTests,
-      required_cases: stringArray(value.required_cases, `suites.${name}.required_cases`, (id) => CASE_ID.test(id)),
+      required_cases: stringArray(
+        value.required_cases,
+        `suites.${name}.required_cases`,
+        (id) => CASE_ID.test(id) || COVERAGE_CASE.test(id),
+      ),
       lane: stringArray(value.lane, `suites.${name}.lane`),
     };
     if (value.journeys_required_at_gate !== undefined)
