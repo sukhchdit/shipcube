@@ -363,6 +363,9 @@ PR #23 (TASK-011 lane B heavy lane) r1 at f61e55d: CHANGES_REQUESTED (2026-11-13
   - R2-m1: client-shapeable `uaParsed`/`entityId` give 500 -> TASK-029 AC or null instead of refuse.
   - NITs: n1 `roles()` uses the caller's `map` (own map/length flip); n2 setter pin lexical strip hidden by `'/*'`…`'*/'` (P3; count over raw source); n3 brand untested (N8).
   - r3 = delta: p7 probe (scratchpad `review/PR-42-cr2-lintprobe.mjs`), new fixtures + mutant, security record on final head. Scripts: `review/PR-42-cr2-mutate.mjs`, `review/PR-42-cr2-probe-toctou.mts`.
+- **r3 AWN at 96bd37a (code 6e3ec99, 2026-11-14).** R2-M1 closed (boundaries policy on resolved file, eslint.config.mjs:597-602; 25 probe shapes reported; policy mutants 7/10, G/I survive). PR42-SEC-13 track/settle sound (10/12; T9 equivalent, T11 throw-path design). 5 merges pure; #44 union keeps both row sets. D-TASK025-29 lint heap accepted (#46 converged on identical line; comment-only ci.yml conflict).
+  - OPEN: **R3-m1** MINOR: JSDoc (tenant-db.ts:71) endorses `void writer.write()`, but the async `write` returns an unhandled promise; a failing voided write -> `unhandledRejection` -> api `crash()` (process-errors.ts:88). Fix = mark returned promise handled + test, or JSDoc now + TASK-029 AC. R3-n1 add capture.ts negative fixture (kills G/I). R3-n2 two-hop re-export via platform/db etc. clean (record in D-TASK025-22). R3-n3 `static-module-specifier` crashes on TS `import x = require()` (module-sources.mjs:80, main/020-D).
+  - Merge: security r3 record on 96bd37a+; #46 second-merger keeps one heap line; #39 items unchanged; squash. Scripts kept: `review/PR-42-cr3-{lintprobe,mutate-lint,mutate}.mjs`.
 
 ## PR #43 (TASK-024 RLS generator, DR-A14, C15, linter 11c/17/18/19) r1 CR at 8ac271d (2026-11-14)
 - Review: `docs/05-quality/reviews/PR-0043-TASK-024-code-review.md`. 43/43 mutants killed (generator, linter, sql-text, render, up-down-up).
