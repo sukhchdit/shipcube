@@ -35,12 +35,37 @@ export interface TableFlags {
    * with hardDelete.
    */
   readonly immutable?: boolean;
+  /**
+   * No runtime role may write the table (PR11-SEC-11 g, D-ARCH-074): `validateGrants` refuses any INSERT, UPDATE or
+   * DELETE line for it at parse time, and catalog C15 leaves it out of the standard-columns guard scope. GLOBAL and
+   * SYSTEM tables only (an RLS table is runtime-writable by definition).
+   */
+  readonly runtimeReadOnly?: boolean;
+  /**
+   * The table carries the full standard-column set (`id`, `created_at`, `updated_at`, `created_by`, `updated_by`,
+   * `version`) and a runtime role writes it: the renderer emits `trg_<table>__std_columns` on
+   * `platform.std_columns_guard()` (data-model §7.6 amendment of 2026-11-13, PR26-SEC-03, D-ARCH-091). Catalog C15
+   * proves this flag equals the live scope. Never on a `runtimeReadOnly` table or an audit-module table.
+   */
+  readonly stdColumns?: boolean;
 }
+
+/**
+ * DR-A14 named policy sets (data-model §4.3 as amended 2026-11-13; PR11-SEC-10; D-ARCH-072): each is accepted only on
+ * the table of the same name and class, and replaces (users, organisations) or extends (memberships) the class block.
+ */
+export const POLICY_SETS = {
+  'dr-a14-users': { table: 'users', class: 'USER_OWNED' },
+  'dr-a14-memberships': { table: 'memberships', class: 'TENANT' },
+  'dr-a14-organisations': { table: 'organisations', class: 'TENANT' },
+} as const satisfies Readonly<Record<string, { readonly table: string; readonly class: TableClass }>>;
+export type PolicySet = keyof typeof POLICY_SETS;
 
 export interface TableClassEntry extends TableFlags {
   readonly module: string;
   readonly name: string;
   readonly class: TableClass;
+  readonly policySet?: PolicySet;
 }
 
 export class TableClassManifestError extends Error {
@@ -51,11 +76,15 @@ export class TableClassManifestError extends Error {
 }
 
 export const MANIFEST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'table-classes');
+/** The audit store's module (TASK-021): its DDL is the bootstrap lane's, owned by platform_audit_owner. */
+export const AUDIT_MODULE = 'audit';
 
 const MODULE_NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const TABLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
-const ENTRY_KEYS: ReadonlySet<string> = new Set(['name', 'class', 'definerRead', 'definerPurge', 'hardDelete', 'immutable']);
-const FLAG_KEYS = ['definerRead', 'definerPurge', 'hardDelete', 'immutable'] as const;
+const FLAG_KEYS = ['definerRead', 'definerPurge', 'hardDelete', 'immutable', 'runtimeReadOnly', 'stdColumns'] as const;
+const ENTRY_KEYS: ReadonlySet<string> = new Set(['name', 'class', 'policySet', ...FLAG_KEYS]);
+
+const isPolicySet = (value: unknown): value is PolicySet => typeof value === 'string' && Object.hasOwn(POLICY_SETS, value);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -93,7 +122,27 @@ function parseEntry(module: string, raw: unknown, where: string): TableClassEntr
     // A DELETE … WHERE also applies the SELECT policy (data-model §4.3), so a purge table needs the read policy too.
     throw new TableClassManifestError(`${where}: "definerPurge" requires "definerRead" ("${name}")`);
   }
-  return { module, name, class: tableClass, ...flags };
+  if (flags.runtimeReadOnly === true && RLS_CLASSES.has(tableClass)) {
+    throw new TableClassManifestError(`${where}: "runtimeReadOnly" is allowed on GLOBAL and SYSTEM tables only ("${name}")`);
+  }
+  if (flags.runtimeReadOnly === true && (flags.hardDelete === true || flags.stdColumns === true)) {
+    throw new TableClassManifestError(`${where}: a "runtimeReadOnly" table is never written at runtime ("${name}")`);
+  }
+  if (flags.stdColumns === true && module === AUDIT_MODULE) {
+    throw new TableClassManifestError(`${where}: audit tables are outside the standard-columns guard ("${name}")`);
+  }
+  const { policySet } = raw;
+  if (policySet === undefined) return { module, name, class: tableClass, ...flags };
+  if (!isPolicySet(policySet)) {
+    throw new TableClassManifestError(`${where}: "policySet" of "${name}" must be one of ${Object.keys(POLICY_SETS).join('|')}`);
+  }
+  const expected = POLICY_SETS[policySet];
+  if (expected.table !== name || expected.class !== tableClass) {
+    throw new TableClassManifestError(
+      `${where}: "policySet" ${policySet} belongs to table "${expected.table}" (${expected.class}), not "${name}" (${tableClass})`,
+    );
+  }
+  return { module, name, class: tableClass, policySet, ...flags };
 }
 
 /** Parses one manifest's JSON text; `fileName` must be `<module>.json` and match the `module` field. */
@@ -142,6 +191,16 @@ export function loadTableClasses(dir: string = MANIFEST_DIR): readonly TableClas
 /** Tables flagged `immutable`: the C7 list (append-only tables carrying the immutability triggers). */
 export function immutableTables(entries: readonly TableClassEntry[]): readonly string[] {
   return entries.filter((entry) => entry.immutable === true).map((entry) => entry.name);
+}
+
+/** Tables flagged `stdColumns`: the C15 scope the manifest declares (the catalog proves it equals the live scope). */
+export function stdColumnsTables(entries: readonly TableClassEntry[]): readonly string[] {
+  return entries.filter((entry) => entry.stdColumns === true).map((entry) => entry.name);
+}
+
+/** Tables flagged `runtimeReadOnly` (no INSERT/UPDATE/DELETE line in the grant manifest; outside C15). */
+export function runtimeReadOnlyTables(entries: readonly TableClassEntry[]): readonly string[] {
+  return entries.filter((entry) => entry.runtimeReadOnly === true).map((entry) => entry.name);
 }
 
 /** Tables outside RLS (GLOBAL and SYSTEM): the C1/C2 allow-list. */

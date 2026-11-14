@@ -104,4 +104,26 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_definer DELETE public.tokens: definerPurge table without its manifest line',
     ]);
   });
+
+  it('PR11-SEC-11 g: a runtimeReadOnly table accepts SELECT lines only, for every grantee; the committed catalogue is flagged', () => {
+    const entries = [entry('roles', { class: 'GLOBAL', runtimeReadOnly: true }), entry('countries', { class: 'GLOBAL' })];
+    const grants = parseGrantsManifest(
+      [
+        'platform_app SELECT public.roles',
+        'platform_app INSERT public.roles',
+        'platform_app UPDATE public.roles (name)',
+        'platform_erasure DELETE public.roles',
+        'platform_app INSERT public.countries',
+      ].join('\n'),
+    );
+    expect(validateGrants(grants, entries)).toEqual([
+      'platform_app INSERT public.roles: write privilege on a runtimeReadOnly table',
+      'platform_app UPDATE public.roles: write privilege on a runtimeReadOnly table',
+      'platform_erasure DELETE public.roles: write privilege on a runtimeReadOnly table',
+    ]);
+    const readOnly = loadTableClasses()
+      .filter((e) => e.runtimeReadOnly === true)
+      .map((e) => e.name);
+    expect(readOnly).toEqual(['permissions', 'reference_dataset_versions', 'role_permissions', 'roles']);
+  });
 });
