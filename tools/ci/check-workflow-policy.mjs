@@ -1233,6 +1233,9 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'packages/config/src/tooling-env.ts',
   'packages/config/src/guards.ts',
   'packages/config/src/environment.ts',
+  // PR43-SEC-04: the O3 oracle (the RLS generator and its executable API cases) and the route enumeration source.
+  'tests/generated/rls/',
+  'tests/generated/api-mounts.ts',
   // PR40-SEC-01: a `.gitattributes` at any depth decides what `git diff` reports (-diff, binary, textconv) and eol.
   '.gitattributes',
   '**/.gitattributes',

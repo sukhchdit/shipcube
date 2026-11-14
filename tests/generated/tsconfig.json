@@ -3,12 +3,26 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "../..",
-    "tsBuildInfoFile": "../../node_modules/.cache/tests-generated.tsbuildinfo"
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-generated.tsbuildinfo",
+    "allowJs": true,
+    "checkJs": true
   },
-  "files": ["../../tools/openapi/contract.ts", "../../tools/openapi/drift.ts"],
+  "files": [
+    "../../tools/openapi/contract.ts",
+    "../../tools/openapi/drift.ts",
+    "../../prisma/tests/harness/postgres.ts",
+    "../../tools/db/bootstrap.ts",
+    "../../tools/db/render-rls.ts",
+    "../../tools/db/scram.ts",
+    "../../tools/db/sql-text.ts",
+    "../../tools/db/table-classes.ts",
+    "../../tools/deps/npm-cli.mjs",
+    "../../tools/test-support/fs-lock.ts",
+    "../../tools/test-support/process.ts"
+  ],
   "include": ["**/*.ts"],
   "exclude": ["node_modules"],
-  "//": "Generated and composed-app suites (route metadata, contract drift; later RBAC matrix, audit, RLS, abuse). Not a workspace project of its own emit: tools/openapi/contract.ts and drift.ts are compiled here as listed files, like tests/api (the tools project is noEmit).",
+  "//": "Generated and composed-app suites (route metadata, contract drift; later RBAC matrix, audit, RLS, abuse). Not a workspace project of its own emit: tools/openapi/contract.ts and drift.ts are compiled here as listed files, like tests/api (the tools project is noEmit). The RLS generator (tests/generated/rls, TASK-024) type-checks the Testcontainers harness of prisma/tests and the tools/db renderer, manifests and bootstrap it drives as listed files too (allowJs for the npm-cli.mjs resolver they import).",
   "references": [
     {
       "path": "../../packages/shared"

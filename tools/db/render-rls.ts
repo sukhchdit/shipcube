@@ -8,6 +8,15 @@
  *   GUEST_CAPABLE  enable-force + tenant + operator + guest + guest-capable-guard-trigger
  *   USER_OWNED     enable-force + user-owned + operator
  *   flags          definerRead -> definer-read; definerPurge -> definer-purge
+ *   policySet      (DR-A14, data-model §4.3 as amended 2026-11-13; D-ARCH-072) dr-a14-users replaces user-owned,
+ *                  dr-a14-organisations replaces tenant, dr-a14-memberships follows tenant
+ *
+ * `renderStdColumnsGuard(entry)` renders `trg_<table>__std_columns` for a table flagged `stdColumns` (any class;
+ * data-model §7.6 amendment of 2026-11-13, D-ARCH-091); `renderModule` appends it after the table's RLS block.
+ *
+ * The three DR-A14 templates may use, and only they, the exact extra atoms of DR_A14_ATOMS (`id = <helper>()` and one
+ * `EXISTS` over `public.memberships` with a positive status list each); the forbidden-token scan runs over the whole
+ * predicate, so every refused token stays refused inside the `EXISTS`.
  *
  * Policies are emitted ONLY from those templates, and every template is checked against the predicate allow-list
  * before it is used (ADR-0005 am. 10 item 7): a policy predicate is a conjunction of the atoms
@@ -28,9 +37,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from './table-classes.js';
+import { POLICY_SETS, RLS_CLASSES, loadTableClasses, type PolicySet, type TableClassEntry } from './table-classes.js';
 
 export const POLICY_TEMPLATE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'prisma', 'sql', 'policy-templates');
+export const FUNCTION_TEMPLATE_DIR = resolve(POLICY_TEMPLATE_DIR, '..', 'function-templates');
 
 export const TEMPLATE_NAMES = [
   'enable-force',
@@ -41,11 +51,16 @@ export const TEMPLATE_NAMES = [
   'definer-read',
   'definer-purge',
   'guest-capable-guard-trigger',
+  'dr-a14-users',
+  'dr-a14-memberships',
+  'dr-a14-organisations',
+  'std-columns-guard-trigger',
 ] as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 export type TemplateSet = Readonly<Record<TemplateName, string>>;
 
 export const GUARD_FUNCTION_TEMPLATE = 'guest-capable-guard-function';
+export const STD_COLUMNS_GUARD_FUNCTION_TEMPLATE = 'std-columns-guard';
 
 /** PostgreSQL NAMEDATALEN - 1. */
 export const MAX_IDENTIFIER_LENGTH = 63;
@@ -75,6 +90,24 @@ const OPERATOR_SCOPE_ATOM = "current_setting('app.actor_scope', true) = 'OPERATO
 const OPERATOR_ATOM = 'platform.app_is_operator()';
 /** Unkeyed atoms: allowed only next to a keyed atom. */
 const UNKEYED_ATOMS: ReadonlySet<string> = new Set(['org_id IS NULL', OPERATOR_SCOPE_ATOM]);
+
+/**
+ * DR-A14 extra atoms, per template, in template form (`{{table}}` is the table of the same name). Each is keyed: it binds
+ * the row to a context helper. Admitted ONLY in the template named (D-ARCH-072); everywhere else they are refused.
+ */
+export const DR_A14_ATOMS: Readonly<Record<PolicySet, ReadonlySet<string>>> = {
+  'dr-a14-users': new Set([
+    'id = platform.app_actor_id()',
+    "EXISTS (SELECT 1 FROM public.memberships m WHERE m.user_id = {{table}}.id AND m.org_id = platform.app_org_id() AND m.status IN ('ACTIVE','SUSPENDED'))",
+  ]),
+  'dr-a14-memberships': new Set(),
+  'dr-a14-organisations': new Set([
+    'id = platform.app_org_id()',
+    "EXISTS (SELECT 1 FROM public.memberships m WHERE m.org_id = {{table}}.id AND m.user_id = platform.app_actor_id() AND m.status IN ('ACTIVE','SUSPENDED'))",
+  ]),
+};
+const NO_EXTRA_ATOMS: ReadonlySet<string> = new Set();
+const isPolicySetName = (name: string): name is PolicySet => Object.hasOwn(POLICY_SETS, name);
 
 const DEFINER_PREDICATES: Readonly<Record<string, string>> = {
   SELECT: 'true',
@@ -114,8 +147,16 @@ function splitConjuncts(predicate: string): string[] {
   return parts.map((part) => part.trim());
 }
 
-/** Returns the reason a policy predicate is refused, or `null` when it is on the allow-list. */
-export function checkPredicate(predicate: string, role: string, command: string): string | null {
+/**
+ * Returns the reason a policy predicate is refused, or `null` when it is on the allow-list. `extraAtoms` are the keyed
+ * DR-A14 atoms of the one template being validated (empty everywhere else).
+ */
+export function checkPredicate(
+  predicate: string,
+  role: string,
+  command: string,
+  extraAtoms: ReadonlySet<string> = NO_EXTRA_ATOMS,
+): string | null {
   const text = collapse(predicate);
   for (const [token, pattern] of FORBIDDEN_PREDICATE_TOKENS) {
     if (pattern.test(text)) return `forbidden token ${token}`;
@@ -125,14 +166,15 @@ export function checkPredicate(predicate: string, role: string, command: string)
     return expected !== undefined && text === expected ? null : `predicate not allowed for platform_definer FOR ${command}`;
   }
   const conjuncts = splitConjuncts(text);
+  const keyed = (conjunct: string): boolean => KEYED_ATOMS.has(conjunct) || extraAtoms.has(conjunct);
   for (const conjunct of conjuncts) {
-    if (!KEYED_ATOMS.has(conjunct) && !UNKEYED_ATOMS.has(conjunct)) {
+    if (!keyed(conjunct) && !UNKEYED_ATOMS.has(conjunct)) {
       return /current_setting\s*\(/i.test(conjunct)
         ? 'raw current_setting( outside the helpers'
         : `predicate atom not on the allow-list: ${conjunct}`;
     }
   }
-  if (!conjuncts.some((conjunct) => KEYED_ATOMS.has(conjunct))) return 'predicate has no keyed atom';
+  if (!conjuncts.some(keyed)) return 'predicate has no keyed atom';
   const operatorPair = conjuncts.includes(OPERATOR_SCOPE_ATOM) || conjuncts.includes(OPERATOR_ATOM);
   if (operatorPair && !(conjuncts.includes(OPERATOR_SCOPE_ATOM) && conjuncts.includes(OPERATOR_ATOM))) {
     return 'the operator branch needs both the actor_scope check and platform.app_is_operator()';
@@ -177,12 +219,15 @@ const STATEMENT_SHAPES: readonly RegExp[] = [
   new RegExp(
     `^CREATE TRIGGER tg_${T}__guest_capable_guard BEFORE UPDATE ON public\\.${T} FOR EACH ROW EXECUTE FUNCTION platform\\.guest_capable_guard\\(\\)$`,
   ),
+  new RegExp(
+    `^CREATE TRIGGER trg_${T}__std_columns BEFORE INSERT OR UPDATE ON public\\.${T} FOR EACH ROW EXECUTE FUNCTION platform\\.std_columns_guard\\(\\)$`,
+  ),
 ];
 const POLICY_HEAD = new RegExp(
   `^CREATE POLICY p_${T}__([a-z_]+) ON public\\.${T} FOR (ALL|SELECT|INSERT|UPDATE|DELETE) TO (platform_app|platform_definer)`,
 );
 
-function checkPolicy(statement: string, where: string): void {
+function checkPolicy(statement: string, where: string, extraAtoms: ReadonlySet<string>): void {
   const head = POLICY_HEAD.exec(statement);
   if (head === null) throw new RenderRlsError(`${where}: policy header outside the template shape`);
   const [, , command = '', role = ''] = head;
@@ -204,7 +249,7 @@ function checkPolicy(statement: string, where: string): void {
     throw new RenderRlsError(`${where}: platform_definer policies are SELECT or DELETE only`);
   }
   for (const [clause, predicate] of Object.entries(clauses)) {
-    const reason = checkPredicate(predicate, role, command);
+    const reason = checkPredicate(predicate, role, command, extraAtoms);
     if (reason !== null) throw new RenderRlsError(`${where}: ${clause} refused (${reason})`);
   }
 }
@@ -223,9 +268,10 @@ export function validateTemplate(name: string, text: string): string {
     .slice(0, -1)
     .split(';')
     .map((statement) => collapse(statement));
+  const extraAtoms = isPolicySetName(name) ? DR_A14_ATOMS[name] : NO_EXTRA_ATOMS;
   statements.forEach((statement, index) => {
     const where = `template ${name} statement ${String(index + 1)}`;
-    if (statement.startsWith('CREATE POLICY ')) checkPolicy(statement, where);
+    if (statement.startsWith('CREATE POLICY ')) checkPolicy(statement, where, extraAtoms);
     else if (!STATEMENT_SHAPES.some((shape) => shape.test(statement)))
       throw new RenderRlsError(`${where}: statement outside the template shapes`);
   });
@@ -246,9 +292,12 @@ const defaultTemplates = (): TemplateSet => (cachedTemplates ??= loadPolicyTempl
 // ---------------------------------------------------------------------------------------------------------------------
 
 /** The template blocks of `entry`, in render order. */
-export function blocksFor(entry: Pick<TableClassEntry, 'class' | 'definerRead' | 'definerPurge'>): TemplateName[] {
+export function blocksFor(entry: Pick<TableClassEntry, 'class' | 'definerRead' | 'definerPurge' | 'policySet'>): TemplateName[] {
   const blocks: TemplateName[] = ['enable-force'];
-  switch (entry.class) {
+  if (entry.policySet !== undefined && POLICY_SETS[entry.policySet].class !== entry.class) {
+    throw new RenderRlsError(`policySet ${entry.policySet} needs class ${POLICY_SETS[entry.policySet].class}, not ${entry.class}`);
+  }
+  switch (entry.policySet ?? entry.class) {
     case 'TENANT':
       blocks.push('tenant', 'operator');
       break;
@@ -257,6 +306,15 @@ export function blocksFor(entry: Pick<TableClassEntry, 'class' | 'definerRead' |
       break;
     case 'USER_OWNED':
       blocks.push('user-owned', 'operator');
+      break;
+    case 'dr-a14-users':
+      blocks.push('dr-a14-users', 'operator');
+      break;
+    case 'dr-a14-memberships':
+      blocks.push('tenant', 'dr-a14-memberships', 'operator');
+      break;
+    case 'dr-a14-organisations':
+      blocks.push('dr-a14-organisations', 'operator');
       break;
     default:
       throw new RenderRlsError(`class ${entry.class} has no RLS block (GLOBAL and SYSTEM tables are on the C1 allow-list)`);
@@ -270,7 +328,7 @@ export function blocksFor(entry: Pick<TableClassEntry, 'class' | 'definerRead' |
 }
 
 function checkIdentifiers(sql: string): void {
-  for (const match of sql.matchAll(/\b(?:p|tg)_[a-z0-9_]+/g)) {
+  for (const match of sql.matchAll(/\b(?:p|tg|trg)_[a-z0-9_]+/g)) {
     if (Buffer.byteLength(match[0]) > MAX_IDENTIFIER_LENGTH) {
       throw new RenderRlsError(`rendered identifier ${match[0]} is longer than ${String(MAX_IDENTIFIER_LENGTH)} bytes`);
     }
@@ -278,26 +336,52 @@ function checkIdentifiers(sql: string): void {
 }
 
 /** Renders the RLS block of one table (pure given `templates`). */
-export function renderRls(entry: TableClassEntry, templates: TemplateSet = defaultTemplates()): string {
+function checkTableName(entry: Pick<TableClassEntry, 'name' | 'policySet'>): void {
   if (!IDENTIFIER.test(entry.name) || Buffer.byteLength(entry.name) > MAX_IDENTIFIER_LENGTH) {
     throw new RenderRlsError(`table name ${JSON.stringify(entry.name)} is not a lowercase SQL identifier`);
   }
+  // The DR-A14 atoms name the table they belong to; a set rendered for another table would bind the wrong rows.
+  if (entry.policySet !== undefined && POLICY_SETS[entry.policySet].table !== entry.name) {
+    throw new RenderRlsError(`policySet ${entry.policySet} belongs to table ${POLICY_SETS[entry.policySet].table}, not ${entry.name}`);
+  }
+}
+
+/** Renders the RLS block of one table (pure given `templates`). */
+export function renderRls(entry: TableClassEntry, templates: TemplateSet = defaultTemplates()): string {
+  checkTableName(entry);
   const body = blocksFor(entry)
     .map((block) => templates[block].replace(PLACEHOLDER, entry.name))
     .join('\n\n');
   checkIdentifiers(body);
-  const flags = (['definerRead', 'definerPurge'] as const).filter((flag) => entry[flag] === true);
+  const flags = [
+    ...(entry.policySet === undefined ? [] : [`policySet ${entry.policySet}`]),
+    ...(['definerRead', 'definerPurge'] as const).filter((flag) => entry[flag] === true),
+  ];
   const header = `-- RLS for public.${entry.name} (${entry.class}${flags.length > 0 ? `; ${flags.join(', ')}` : ''}), module ${entry.module}: rendered by tools/db/render-rls.ts from prisma/sql/policy-templates; do not edit.`;
   return `${header}\n${body}\n`;
 }
 
-/** Renders every RLS table of `module` (manifest order: by table name). */
+/**
+ * Renders `trg_<table>__std_columns` for a table flagged `stdColumns` (D-ARCH-091; catalog C15). Any class: the guard
+ * protects GLOBAL and SYSTEM tables a runtime role writes as well. Throws for an unflagged table.
+ */
+export function renderStdColumnsGuard(entry: TableClassEntry, templates: TemplateSet = defaultTemplates()): string {
+  checkTableName(entry);
+  if (entry.stdColumns !== true) throw new RenderRlsError(`table ${entry.name} is not flagged stdColumns`);
+  const body = templates['std-columns-guard-trigger'].replace(PLACEHOLDER, entry.name);
+  checkIdentifiers(body);
+  return `-- Standard-columns guard for public.${entry.name}, module ${entry.module}: rendered by tools/db/render-rls.ts from prisma/sql/policy-templates; do not edit.\n${body}\n`;
+}
+
+/** Renders every RLS table of `module` and the guard trigger of every `stdColumns` table (manifest order: by name). */
 export function renderModule(module: string, entries: readonly TableClassEntry[], templates: TemplateSet = defaultTemplates()): string {
   const tables = entries.filter((entry) => entry.module === module);
   if (tables.length === 0) throw new RenderRlsError(`no manifest lists module "${module}"`);
   return tables
-    .filter((entry) => RLS_CLASSES.has(entry.class))
-    .map((entry) => renderRls(entry, templates))
+    .flatMap((entry) => [
+      ...(RLS_CLASSES.has(entry.class) ? [renderRls(entry, templates)] : []),
+      ...(entry.stdColumns === true ? [renderStdColumnsGuard(entry, templates)] : []),
+    ])
     .join('\n');
 }
 
@@ -309,6 +393,26 @@ export function renderGuestCapableGuardFunction(dir: string = POLICY_TEMPLATE_DI
   if (!code.includes('SET search_path = pg_catalog, pg_temp AS $$'))
     throw new RenderRlsError('the guard function needs the fixed search path');
   if (body.match(PLACEHOLDER) !== null) throw new RenderRlsError('the guard function takes no placeholder');
+  return `${body}\n`;
+}
+
+/**
+ * The once-per-database `platform.std_columns_guard()` trigger function (data-model §7.6 amendment of 2026-11-13;
+ * D-ARCH-091): checked for the C15 (b) properties before it is handed out, so a template edit that breaks them fails at
+ * render time as well as in the catalog suite.
+ */
+export function renderStdColumnsGuardFunction(dir: string = FUNCTION_TEMPLATE_DIR): string {
+  const body = stripComments(readFileSync(join(dir, `${STD_COLUMNS_GUARD_FUNCTION_TEMPLATE}.sql`), 'utf8'));
+  const code = collapse(body);
+  if (!code.startsWith('CREATE FUNCTION platform.std_columns_guard() RETURNS trigger LANGUAGE plpgsql '))
+    throw new RenderRlsError('the standard-columns guard must be a plain CREATE FUNCTION platform.std_columns_guard() in plpgsql');
+  if (/SECURITY\s+DEFINER/i.test(code)) throw new RenderRlsError('the standard-columns guard must not be SECURITY DEFINER');
+  if (!code.includes('SET search_path = pg_catalog, pg_temp AS $$'))
+    throw new RenderRlsError('the standard-columns guard needs the fixed search path');
+  if (/\b(?:current_setting|set_config)\s*\(/i.test(code))
+    throw new RenderRlsError('the standard-columns guard reads the actor through platform.app_actor_id() only');
+  if (/\bNEW\s*\.\s*[a-z_]+\s*:=/i.test(code)) throw new RenderRlsError('the standard-columns guard asserts and never assigns');
+  if (body.match(PLACEHOLDER) !== null) throw new RenderRlsError('the standard-columns guard takes no placeholder');
   return `${body}\n`;
 }
 

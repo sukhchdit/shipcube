@@ -38,4 +38,5 @@
 - [P5 PR-0042 audit writer](project_p5_pr42_audit_writer.md) — TASK-025 R1 @e7dfbac PASS_W_F-U; 01 MED anon admission key, 02 MED rethrow; LOW 03-07,12; fix cycle -> R2; #39 overlap
 - [P5 PR-0043 RLS generator](project_p5_pr43_task024_rls_generator.md) — TASK-024 R1 @8ac271d PASS_W_COND; R2 @585f163 PASS_W_F-U (C1/C2 closed); LOW 11 over-count+END, 12 positiveStatus; #44/#39/#42 unions
 - [P5 PR-0045 gitleaks allow](project_p5_pr45_gitleaks_allow.md) — R1 @66ae5c1 PASS_W_F-U; D-SEC-PR45-01 commit-bound FP class; SEC-01 LOW disabledRules pin gap; line-target `\n` fact
+- [P5 PR-0042 round 2](project_p5_pr42_r2.md) — @d2ef478 PASS_W_F-U; 02/03/05-07/12 closed; new 13 MED detached write, 14 INFO, 15/16 LOW; round 3 owed (code R2-M1)
 - [P5 PR-0044 020-C phases](project_p5_pr44_020c.md) — R1 @9def3f5 PASS_W_F-U; 01 MED aliased createRequire escapes import controls; LOW 02-05 (signal, afterCommit cap, T-83, raw COMMIT); kit

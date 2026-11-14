@@ -110,6 +110,10 @@ export function validateGrants(grants: readonly Grant[], entries: readonly Table
       problems.push(`${label}: table is in no table-class manifest`);
       continue;
     }
+    // PR11-SEC-11 g (D-ARCH-074): a runtime-read-only table gets SELECT lines only, for every runtime role.
+    if (entry.runtimeReadOnly === true && grant.privilege !== 'SELECT') {
+      problems.push(`${label}: write privilege on a runtimeReadOnly table`);
+    }
     if (grant.grantee === 'platform_app' && grant.privilege === 'DELETE' && entry.hardDelete !== true) {
       problems.push(`${label}: DELETE outside the hard-delete allow-list`);
     }

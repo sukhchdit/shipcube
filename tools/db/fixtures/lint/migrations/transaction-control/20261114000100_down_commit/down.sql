@@ -1,0 +1,3 @@
+START TRANSACTION;
+DROP TABLE IF EXISTS public.fixture_items;
+COMMIT;
