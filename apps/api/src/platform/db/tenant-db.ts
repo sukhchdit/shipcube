@@ -12,7 +12,8 @@
  * delegate carry back-references to unguarded clients: `$parent` (the same transaction without a guard; its
  * `_originalClient` is the root client on another pooled connection), a module-private symbol key, `constructor` and
  * the `_`-prefixed internals. A deny-list cannot keep up with that surface, so the guard exposes only:
- *  - top level: the model delegates (lower-camel names from the client's own runtime data model) EXCEPT the SYSTEM
+ *  - top level: the guard's own {@link TENANT_DB_LATCH_MEMBERS} (PR42-SEC-02/-13; not Prisma members), the model
+ *    delegates (lower-camel names from the client's own runtime data model) EXCEPT the SYSTEM
  *    ones (a read throws `TenantDbAccessError` naming the `systemDelegates` port), `$queryRaw` and `$executeRaw`
  *    (tagged-template calls only, every value bound, Sql fragments refused: PR #11 m5, PR11-SEC-13);
  *  - each model delegate, behind its own child guard: the Prisma model operations in {@link MODEL_OPERATIONS}, bound
@@ -55,9 +56,32 @@ export const TENANT_DB_OMITTED = ['$transaction', '$queryRawUnsafe', '$executeRa
  * `Symbol.toStringTag` as `undefined`, so it is truthful at run time): it lets `systemDelegates(tx)` infer the
  * transaction-client type from a `TenantDb` argument, which TypeScript cannot do through `Omit`.
  */
-export type TenantDb<TTx> = Omit<TTx, (typeof TENANT_DB_OMITTED)[number] | SystemModelName> & {
-  readonly [TENANT_DB_CLIENT]?: TTx;
-};
+export type TenantDb<TTx> = Omit<TTx, (typeof TENANT_DB_OMITTED)[number] | SystemModelName> &
+  TenantDbLatch & {
+    readonly [TENANT_DB_CLIENT]?: TTx;
+  };
+
+/**
+ * The rollback-only latch (PR42-SEC-02 and PR42-SEC-13; the audit writer's `AuditSqlPort` members):
+ *  - `markRollbackOnly`: the first failure marked on a handle makes `withTenantTx` throw it after the callback
+ *    returns, so the transaction rolls back even when the callback caught and swallowed the failure. Marking is
+ *    idempotent (the first failure wins).
+ *  - `track`: starts `work` and registers it as in flight on the transaction; `withTenantTx` awaits every tracked
+ *    work that is still running when the callback returns (`TenantDbHandle.settle`) before it reads the latch and
+ *    commits. A write the callback started but did not await (`void writer.write(…)`, `writer.write(…).catch(log)`)
+ *    therefore either completes inside the transaction or marks it rollback-only; it never lets the business change
+ *    commit without its entry. Feature code calling it can only delay the commit, bounded by the transaction timeout.
+ *    Work started after settling began is awaited too; work never registered here (any other detached promise) is not.
+ * Both are refused once the transaction settled (`TENANT_TX_CLOSED`), `track` before `work` is started.
+ */
+export interface TenantDbLatch {
+  markRollbackOnly(failure: Error): void;
+  track<T>(work: () => Promise<T>): Promise<T>;
+}
+
+/** The guard-provided top-level members of {@link TenantDbLatch} (not Prisma members). */
+export const TENANT_DB_LATCH_MEMBERS = ['markRollbackOnly', 'track'] as const;
+const LATCH_MEMBERS: ReadonlySet<string> = new Set(TENANT_DB_LATCH_MEMBERS);
 declare const TENANT_DB_CLIENT: unique symbol;
 
 /** Top-level raw members exposed by the guard; both accept the tagged-template shape only (see {@link taggedOnly}). */
@@ -121,6 +145,13 @@ export interface TenantDbHandle<TTx> {
   readonly db: TenantDb<TTx>;
   /** Makes every later access (top level and model delegates) throw `TENANT_TX_CLOSED` (the transaction settled). */
   readonly revoke: () => void;
+  /** The first failure marked through {@link TenantDbLatch.markRollbackOnly}, if any (PR42-SEC-02). */
+  readonly rollbackOnly: () => Error | undefined;
+  /**
+   * Resolves once no work registered through {@link TenantDbLatch.track} is in flight, including work started while
+   * settling (PR42-SEC-13). Never rejects: a failed tracked write has already marked the latch.
+   */
+  readonly settle: () => Promise<void>;
 }
 
 type AnyFunction = (...args: unknown[]) => unknown;
@@ -202,6 +233,8 @@ const deny = (key: PropertyKey, detail?: string): never => {
 };
 
 const closedError = (): DbError => new DbError(dbErrorMapping(500, 'TENANT_TX_CLOSED'));
+
+const ignore = (): void => undefined;
 
 function guard(spec: GuardSpec, state: GuardState): object {
   const cache = new Map<string, unknown>();
@@ -389,13 +422,37 @@ export function createTenantDb<TTx extends object>(tx: TTx): TenantDbHandle<TTx>
   const allModels = [...modelDelegateNames(tx)];
   const models: ReadonlySet<string> = new Set(allModels.filter((name) => !SYSTEM_MODEL_SET.has(name)));
   const systemModels: ReadonlySet<string> = new Set(allModels.filter((name) => SYSTEM_MODEL_SET.has(name)));
-  const isAllowed = (key: string): boolean => (models.has(key) || RAW_MEMBERS.has(key)) && Reflect.has(tx, key);
+  let rollbackOnly: Error | undefined;
+  const markRollbackOnly = (failure: Error): void => {
+    if (state.closed) throw closedError();
+    rollbackOnly ??= failure instanceof Error ? failure : new TypeError('markRollbackOnly expects an Error');
+  };
+  const inFlight = new Set<Promise<void>>();
+  const track = <T>(work: () => Promise<T>): Promise<T> => {
+    if (state.closed) throw closedError();
+    if (typeof work !== 'function') throw new TypeError('track expects a function that starts the work');
+    const started = Promise.resolve(work());
+    const settled = started.then(ignore, ignore);
+    inFlight.add(settled);
+    void settled.then(() => inFlight.delete(settled));
+    return started;
+  };
+  const settle = async (): Promise<void> => {
+    // Each round awaits a snapshot; a tracked work may start another (or one may start while waiting), so loop.
+    while (inFlight.size > 0) await Promise.all([...inFlight]);
+  };
+  const latch: Readonly<Record<string, unknown>> = { markRollbackOnly, track };
+  const isTxMember = (key: string): boolean => (models.has(key) || RAW_MEMBERS.has(key)) && Reflect.has(tx, key);
+  const isAllowed = (key: string): boolean => LATCH_MEMBERS.has(key) || isTxMember(key);
   const db = guard(
     {
       label: 'TenantDb',
       isAllowed,
-      keys: () => [...models, ...TENANT_DB_RAW_MEMBERS].filter(isAllowed),
-      resolve: (key) => (models.has(key) ? delegateOf(tx, key, 'TenantDb', state) : rawMember(tx, key, state)),
+      keys: () => [...[...models, ...TENANT_DB_RAW_MEMBERS].filter(isTxMember), ...TENANT_DB_LATCH_MEMBERS],
+      resolve: (key) => {
+        if (LATCH_MEMBERS.has(key)) return latch[key];
+        return models.has(key) ? delegateOf(tx, key, 'TenantDb', state) : rawMember(tx, key, state);
+      },
       explain: (key) => (SYSTEM_MODEL_SET.has(key) ? SYSTEM_MODEL_HINT : undefined),
     },
     state,
@@ -406,5 +463,7 @@ export function createTenantDb<TTx extends object>(tx: TTx): TenantDbHandle<TTx>
     revoke: () => {
       state.closed = true;
     },
+    rollbackOnly: () => rollbackOnly,
+    settle,
   };
 }

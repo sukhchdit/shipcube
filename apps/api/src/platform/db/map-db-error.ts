@@ -20,6 +20,8 @@ export const DB_PROBLEM_CODES = [
   'CONFLICT',
   'SERVICE_UNAVAILABLE',
   'INTERNAL_ERROR',
+  // The same-transaction audit write failed and the business change rolled back (REQ-AUDIT-004; TASK-025).
+  'AUDIT_WRITE_FAILED',
 ] as const satisfies readonly ErrorCode[];
 export type DbProblemCode = (typeof DB_PROBLEM_CODES)[number];
 
@@ -42,7 +44,13 @@ export type DbErrorReason =
   | 'AUDIT_IMMUTABLE'
   | 'AUDIT_PARTITION_NAME_TAKEN'
   /** A nested relation write would escape the standard-columns stamping (TASK-032, data-model §7.6). */
-  | 'NESTED_WRITE_UNSUPPORTED';
+  | 'NESTED_WRITE_UNSUPPORTED'
+  /** The audit writer failed (head moved, partition missing, integrity, any other failure): 500 AUDIT_WRITE_FAILED. */
+  | 'AUDIT_WRITE_FAILED'
+  /** The audit stream's head-row lock was not granted within DB_AUDIT_LOCK_TIMEOUT_MS: 503, retryable (ADR-0007 am. 10). */
+  | 'AUDIT_LOCK_TIMEOUT'
+  /** The per-tenant admission bulkhead refused the transaction: 503, retryable (D-ARCH-086, data-model §7.7). */
+  | 'TENANT_CONCURRENCY_LIMIT';
 
 /** Security events raised by the data layer (sink injected by the composition root). */
 export type DbSecurityEvent =
@@ -120,12 +128,17 @@ const RETRYABLE_PRISMA_CODES: Readonly<Record<string, DbErrorReason>> = {
 export function dbErrorMapping(
   status: DbErrorStatus,
   reason: DbErrorReason,
-  extra: { readonly retryable?: boolean; readonly securityEvent?: DbSecurityEvent } = {},
+  extra: {
+    readonly retryable?: boolean;
+    readonly securityEvent?: DbSecurityEvent;
+    /** A catalogue code other than the status default; the problem handler requires its catalogue status to equal `status`. */
+    readonly code?: DbProblemCode;
+  } = {},
 ): DbErrorMapping {
   const retryable = extra.retryable ?? false;
   return {
     status,
-    code: STATUS_CODE[status],
+    code: extra.code ?? STATUS_CODE[status],
     reason,
     retryable,
     ...(retryable ? { retryAfterSeconds: DB_RETRY_AFTER_SECONDS } : {}),
