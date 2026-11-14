@@ -26,6 +26,7 @@
     "db:seed:demo": "tsx --conditions=@platform/source prisma/seed/index.ts demo",
     "db:lint-migrations": "tsx tools/db/lint-migrations.ts",
     "authz:generate": "tsx --conditions=@platform/source tools/authz/generate.ts",
+    "authz:matrix": "tsx --conditions=@platform/source tests/generated/rbac/write-matrix.ts",
     "gen:modules": "tsx tools/api/gen-module-registry.ts",
     "openapi:lint": "node tools/openapi/lint.mjs",
     "openapi:types": "tsx tools/openapi/types.ts",
