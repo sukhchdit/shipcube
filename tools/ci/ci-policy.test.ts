@@ -91,6 +91,12 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'security-integration', 'ci-gate']);
   });
 
+  it('the lint step runs with a 4 GB heap and no other step env (type-aware ESLint exceeds the hosted runner default heap; a size only, never a preload)', () => {
+    const lint = steps[indexOf(/^npm run lint$/m)];
+    expect(map(lint?.env, 'lint env')).toEqual({ NODE_OPTIONS: '--max-old-space-size=4096' });
+    expect(str(lint?.run)).toBe('npm run lint');
+  });
+
   it('[PR4-SEC-13] a porcelain gate runs straight after Lint and before Type-check, with the post-build gate command', () => {
     const lint = indexOf(/npm run lint/);
     const afterLint = indexOf(/^Lint must not mutate the tree/);

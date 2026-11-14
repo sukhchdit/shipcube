@@ -284,6 +284,11 @@ jobs:
 
       - name: Lint (ESLint, Stylelint, suppressions)
         if: env.CODE == 'true'
+        # Type-aware ESLint (projectService) over the whole repository needs more than V8's default heap on the
+        # 7-8 GB hosted runner (about 2 GB: out of memory on PR #46's first fix-cycle run; it passes at 3 GB). A heap
+        # size only, no preload (node-options-preload); the lint script and its base-ref step list are unchanged.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run lint
 
       # PR4-SEC-13 item 1: typegen (React Router config and route modules, vite.config.ts) runs inside `npm run lint`

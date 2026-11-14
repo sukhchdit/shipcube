@@ -90,6 +90,11 @@ jobs:
         run: npm run deps:rebuild
 
       - name: Lint (ESLint, Stylelint, suppressions)
+        # Type-aware ESLint (projectService) over the whole repository needs more than V8's default heap on the
+        # 7-8 GB hosted runner (about 2 GB: out of memory on PR #46's first fix-cycle run; it passes at 3 GB). A heap
+        # size only, no preload (node-options-preload); the lint script and its base-ref step list are unchanged.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run lint
 
       - name: Format check
