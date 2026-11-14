@@ -33,6 +33,7 @@ function port(): AuditSqlPort & { readonly bound: unknown[][] } {
     markRollbackOnly(): void {
       throw new Error('not expected');
     },
+    track: (work) => work(),
   };
 }
 

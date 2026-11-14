@@ -741,3 +741,59 @@ describe('[PR #42 fix cycle 1] rollback-only latch and string normalisation on P
     expect(recomputed(row as StoredEntry)).toBe(written.entryHash);
   });
 });
+
+describe('[PR #42 fix cycle 2] a write the callback starts but does not await, on PostgreSQL 18 (PR42-SEC-13)', () => {
+  const later = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  /** The test tokeniser behind a delay, so the write is still in flight when the callback returns. */
+  const slowWriter = (fail: boolean): AuditWriter =>
+    createAuditWriter({
+      store,
+      lockTimeoutMs: LOCK_TIMEOUT_MS,
+      tokeniser: {
+        tokenise: async (db, values) => {
+          await later(50);
+          if (fail) throw new Error('vault unavailable');
+          return tokeniser.tokenise(db, values);
+        },
+      },
+    });
+
+  it('a detached write whose tokeniser fails after the callback returned rolls the business row back: 0 rows, 500', async () => {
+    const org = uuidv7();
+    const id = randomUUID();
+    const logged: unknown[] = [];
+    const error = await rejection(
+      runner.withTenantTx(tenant(org), async (db) => {
+        await insertAddress(db, org, id);
+        slowWriter(true)
+          .write(db, login(org, { entityId: id }))
+          .catch((failure: unknown) => void logged.push(failure));
+        return 'business change done';
+      }),
+    );
+    expect(logged).toEqual([expect.objectContaining({ kind: 'TOKENISER_FAILED' })]);
+    expect((error as DbError).toJSON()).toEqual({
+      status: 500,
+      code: 'AUDIT_WRITE_FAILED',
+      reason: 'AUDIT_WRITE_FAILED',
+      retryable: false,
+    });
+    expect(await count('public.writer_it_addresses WHERE id = $1', [id])).toBe(0);
+    expect(await count('public.audit_entries WHERE entity_id = $1', [id])).toBe(0);
+  });
+
+  it('a detached (`void`) write that succeeds is appended inside the transaction: the business row exists only with its entry', async () => {
+    const org = uuidv7();
+    const id = randomUUID();
+    await runner.withTenantTx(tenant(org), async (db) => {
+      await insertAddress(db, org, id);
+      void slowWriter(false).write(db, login(org, { entityId: id }));
+      return 'business change done';
+    });
+    expect(await count('public.writer_it_addresses WHERE id = $1', [id])).toBe(1);
+    const [row] = await stored('entity_id', id);
+    expect(row?.['stream_id']).toBe(org);
+    expect(row?.['ip_token']).not.toBeNull();
+    expect(recomputed(row as StoredEntry)).toBe(row?.['entry_hash']);
+  });
+});

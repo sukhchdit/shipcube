@@ -410,6 +410,9 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
           const handle = createTenantDb(tx);
           try {
             const result = await fn(handle.db);
+            // PR42-SEC-13: an audit write the callback started but did not await finishes (or marks the latch) here,
+            // inside the transaction, before the latch is read; otherwise the business change could commit without it.
+            await handle.settle();
             // PR42-SEC-02: a failure marked rollback-only (an audit refusal the callback caught and swallowed) is thrown
             // here, so Prisma rolls back and `mapped` answers it; the business change never commits without its entry.
             const latched = handle.rollbackOnly();

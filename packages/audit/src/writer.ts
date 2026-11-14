@@ -19,6 +19,8 @@
  * `withTenantTx` maps it to the problem response. Every failure also marks the transaction rollback-only through
  * {@link AuditSqlPort.markRollbackOnly} before it is thrown (PR42-SEC-02), so a caller that catches and swallows it
  * still cannot commit the business change without its entry: `withTenantTx` refuses to commit a marked transaction.
+ * Every write also runs through {@link AuditSqlPort.track} (PR42-SEC-13), so one the callback started but did not await
+ * is awaited by the transaction owner before COMMIT: it completes inside the transaction or marks it rollback-only.
  */
 import { randomInt } from 'node:crypto';
 
@@ -94,7 +96,7 @@ export function createAuditWriter(options: AuditWriterOptions): AuditWriter {
     }
   }
 
-  async function write(db: AuditSqlPort, entry: AuditEntryInput): Promise<AppendedEntry> {
+  async function writeTracked(db: AuditSqlPort, entry: AuditEntryInput): Promise<AppendedEntry> {
     try {
       const prepared = prepare(entry);
       const row = prepared.complete(await tokenise(db, prepared.piiValues));
@@ -107,6 +109,9 @@ export function createAuditWriter(options: AuditWriterOptions): AuditWriter {
       throw failure;
     }
   }
+
+  // `async`: a refused `track` (the transaction already settled) is a rejection, never a synchronous throw.
+  const write = async (db: AuditSqlPort, entry: AuditEntryInput): Promise<AppendedEntry> => db.track(() => writeTracked(db, entry));
 
   return { write };
 }

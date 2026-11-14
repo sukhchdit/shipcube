@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it, jest } from '@jest/globals';
-import { type AuditEntryInput, type AuditStore, AuditWriteError, createAuditWriter } from '@platform/audit';
+import { type AppendedEntry, type AuditEntryInput, type AuditStore, AuditWriteError, createAuditWriter, pii } from '@platform/audit';
 import { DB_CONNECTION_TIMEOUT_MS_MIN, DB_TENANT_ADMISSION_WAIT_MS_MAX } from '@platform/config';
 
 import { DbError, type DbSecurityEvent } from './map-db-error.js';
@@ -731,5 +731,156 @@ describe('[PR42-SEC-02] rollback-only latch: a swallowed audit refusal never com
     await caught(runner.withTenantTx(ctx(), async (db) => writer.write(db, ENTRY).then(() => 'never')));
     await expect(runner.withTenantTx(ctx(), () => Promise.resolve('next'))).resolves.toBe('next');
     expect(outcomes).toEqual(['rollback', 'commit']);
+  });
+});
+
+describe('[PR42-SEC-13] a write the callback starts but does not await never lets the business change commit without its entry', () => {
+  const PII_ENTRY: AuditEntryInput = {
+    action: 'CREATE',
+    outcome: 'SUCCESS',
+    entityName: 'address',
+    entityId: 'a-2',
+    orgId: ORG,
+    actor: { type: 'USER', userId: ACTOR },
+    origin: { sourceApp: 'web', correlationId: 'corr-0002-detached' },
+    newValue: { name: pii({ entityName: 'address', field: 'name', classification: 'PERSONAL', value: 'Asha Rao', subject: null }) },
+  };
+  const PLAIN_ENTRY: AuditEntryInput = { ...PII_ENTRY, newValue: { city: 'Pune' } };
+  const APPENDED: AppendedEntry = { id: 'e-1', streamId: ORG, streamSeq: 1, occurredAt: '', prevHash: '', entryHash: '' };
+  const later = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** The fake client; `events` records the store's statements and whether the transaction committed or rolled back. */
+  function setup() {
+    const fake = fakeClient();
+    const events: string[] = [];
+    const client = {
+      ...fake.client,
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>, txOptions?: { maxWait?: number; timeout?: number }): Promise<R> {
+        try {
+          const result = await fake.client.$transaction(fn, txOptions);
+          events.push('commit');
+          return result;
+        } catch (error) {
+          events.push('rollback');
+          throw error;
+        }
+      },
+    };
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client });
+    /** A store whose append issues two statements on the handed transaction, each recorded once it answered. */
+    const store: AuditStore = {
+      async append(db) {
+        await db.$queryRaw`SELECT 1`;
+        events.push('statement 1');
+        await db.$executeRaw`SELECT 2`;
+        events.push('statement 2');
+        return APPENDED;
+      },
+      insertVaultRows: () => Promise.resolve([]),
+    };
+    return { runner, events, store };
+  }
+
+  it('L8: `void writer.write(...)` with a 20 ms tokeniser commits only after the entry is appended', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({
+      store,
+      lockTimeoutMs: 250,
+      tokeniser: {
+        tokenise: async (_db, values) => {
+          await later(20);
+          return values.map(() => randomUUID());
+        },
+      },
+    });
+    const result = await runner.withTenantTx(ctx(), (db) => {
+      void writer.write(db, PII_ENTRY);
+      return Promise.resolve('business change done');
+    });
+    expect(result).toBe('business change done');
+    expect(events).toEqual(['statement 1', 'statement 2', 'commit']);
+  });
+
+  it('L8c: a tokeniser failing after the callback returned rolls back with 500 (the `.catch(log)` spelling)', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({
+      store,
+      lockTimeoutMs: 250,
+      tokeniser: {
+        tokenise: async () => {
+          await later(20);
+          throw new Error('vault down');
+        },
+      },
+    });
+    const logged: unknown[] = [];
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.write(db, PII_ENTRY).catch((failure: unknown) => void logged.push(failure));
+        return Promise.resolve('business change done');
+      }),
+    );
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(logged).toEqual([expect.objectContaining({ kind: 'TOKENISER_FAILED' })]);
+    expect(events).toEqual(['rollback']);
+  });
+
+  it('L8d: no personal values and a store issuing two statements: the append completes before COMMIT (no timer)', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    await runner.withTenantTx(ctx(), (db) => {
+      void writer.write(db, PLAIN_ENTRY);
+      return Promise.resolve('ok');
+    });
+    expect(events).toEqual(['statement 1', 'statement 2', 'commit']);
+  });
+
+  it('L8d: a detached append failing after its first statement rolls back and answers the audit failure', async () => {
+    const { runner, events } = setup();
+    const failing: AuditStore = {
+      async append(db) {
+        await db.$queryRaw`SELECT 1`;
+        events.push('statement 1');
+        await later(5);
+        throw new AuditWriteError('HEAD_MOVED');
+      },
+      insertVaultRows: () => Promise.resolve([]),
+    };
+    const writer = createAuditWriter({ store: failing, lockTimeoutMs: 250 });
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.write(db, PLAIN_ENTRY).catch(() => undefined);
+        return Promise.resolve('ok');
+      }),
+    );
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(events).toEqual(['statement 1', 'rollback']);
+  });
+
+  it('L8b (control): a refusal raised before the first await of a detached write rolls back, as before', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.write(db, { ...PII_ENTRY, outcome: 'OK' as 'SUCCESS' }).catch(() => undefined);
+        return Promise.resolve('ok');
+      }),
+    );
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(events).toEqual(['rollback']);
+  });
+
+  it('a write started after the transaction settled is refused (TENANT_TX_CLOSED) and touches nothing', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    let kept: TenantDb<FakeTx> | undefined;
+    await runner.withTenantTx(ctx(), (db) => {
+      kept = db;
+      return Promise.resolve('ok');
+    });
+    await expect(writer.write(kept as TenantDb<FakeTx>, PLAIN_ENTRY)).rejects.toThrow('TENANT_TX_CLOSED');
+    expect(events).toEqual(['commit']);
   });
 });

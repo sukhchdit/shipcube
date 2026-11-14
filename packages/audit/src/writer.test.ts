@@ -256,11 +256,31 @@ describe('[PR42-SEC-02] every refusal marks the transaction rollback-only before
     expect(thrown).toMatchObject({ kind });
     expect(sql.marked).toHaveLength(1);
     expect(sql.marked[0]).toBe(thrown);
+    expect(sql.tracked()).toBe(1);
   });
 
   it('a successful write marks nothing', async () => {
     const sql = fakeSql();
     await createAuditWriter({ store: recordingStore().store, lockTimeoutMs: 250 }).write(sql, CREATE);
+    expect(sql.marked).toEqual([]);
+  });
+
+  it('[PR42-SEC-13] every write is registered through the port track synchronously; a refused track starts nothing', async () => {
+    const sql = fakeSql();
+    const { store, calls } = recordingStore();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    const pending = writer.write(sql, CREATE);
+    expect(sql.tracked()).toBe(1);
+    await pending;
+    expect(calls).toHaveLength(1);
+    const closed = {
+      ...sql,
+      track: (): never => {
+        throw new Error('TENANT_TX_CLOSED');
+      },
+    };
+    await expect(writer.write(closed, CREATE)).rejects.toThrow('TENANT_TX_CLOSED');
+    expect(calls).toHaveLength(1);
     expect(sql.marked).toEqual([]);
   });
 });

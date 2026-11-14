@@ -44,6 +44,13 @@ export interface AuditSqlPort {
    * writer calls it on every failure before throwing.
    */
   markRollbackOnly(failure: Error): void;
+  /**
+   * Starts `work` and registers it as in flight on the enclosing transaction (PR42-SEC-13): the transaction owner
+   * awaits every tracked work before it reads the latch and commits, so a write the callback did not await still
+   * completes, or marks the transaction rollback-only, before COMMIT. Refused (it throws) once the transaction settled;
+   * `work` is then never started. The writer runs every `write()` through it.
+   */
+  track<T>(work: () => Promise<T>): Promise<T>;
 }
 
 export interface AppendOptions {
