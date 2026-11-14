@@ -78,8 +78,8 @@ export interface AppDependencies {
   /** Swagger UI at /api/docs (`docsOptionsFrom(config, specPath)`); absent = not mounted (404), REQ-API-003. */
   readonly docs?: DocsOptions;
   /**
-   * Runs the routes' `afterCommit` phases (ADR-0003 amendment 2026-11-13). main.ts passes the process's queue and
-   * drains it at shutdown; defaults to a queue over `logger` (tests).
+   * Runs the routes' `afterCommit` phases (ADR-0003 amendment 2026-11-13). startApi (start-api.ts) passes the
+   * process's queue and drains it at shutdown; defaults to a queue over `logger` (tests).
    */
   readonly afterCommit?: AfterCommitQueue;
 }
