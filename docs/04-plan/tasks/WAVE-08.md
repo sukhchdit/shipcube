@@ -1190,7 +1190,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039 |
+| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1205,6 +1205,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-252 scenarios
 - PR6-SEC-08 (binding; D-059 REQ-TRACK-006 note): `POST /webhooks/carriers/{code}` is registered only for carriers whose `capabilities().pushTracking` is true — today none of the real carriers, so the route answers 404 for DHL, FedEx and UPS and no scheme is invented for them; REQ-TRACK-006 is proven with Mock-signed fixtures (HMAC compared in constant time, timestamp/replay window, body-size cap, secret via secretRef); enabling a real carrier requires an ADR-0010 amendment documenting its authenticity mechanism; ADR-0010 am. 9 applies (a push is a hint confirmed by `track()` before any cancellation-blocking or terminal transition)
 - PR32-SEC-14 / D-ARCH-110: the carrier signature authenticator builds the provider principal exactly as TASK-171 does (credential signature, no actor, only the signature-only permission of the route) and its api tests run through the real authorise (valid 200, invalid 401, a bearer on the route 401, a principal without the permission 403); SEC-TC-22 push half (D-ORCH-039; threat model T-72, AC-36; the half that TASK-172 cannot test while this route is absent): a validly signed PICKED_UP push is stored as a hint and does not block cancellation or refund until a track() poll confirms it
+- D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the carrier signature authenticator reads X-Carrier-Signature itself (signature is not a presentable kind) and only on routes whose auth set is [signature], never authorization, cookie or x-quote-token; the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, replayed, oversized body, unknown carrier code alike) and private, no-store on every 401 and 404 comes from the descriptor test; x-carrier-signature is in CREDENTIAL_HEADER_NAMES, so the push route cannot declare it in schema.headers (020-C PR38-SEC-03) and the handler reads the hint from the verified body only; api tests: markCredentialsRead called once per request, a valid Mock signature plus a bearer is accepted with the bearer never parsed (spy), the permissions view throws on mutation
 - AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

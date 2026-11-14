@@ -30,3 +30,5 @@
 - [PR #38 fc1 union](feedback_pr38_fc1.md) — merge-then-fix commits, jest selectProjects swallows paths, MSYS rev:path, info/exclude verbatim, lock-queued gitleaks
 - [TASK-020 part B](feedback_task020b.md) — fixture stand-ins under ignored paths, Joi tamper tests, always-on runner config trap, specialist salvage
 - [TASK-014 images/compose](feedback_task014_images_compose.md) — Avast TLS MITM, host 5432, containerd .Size, MSYS mangling, prisma load-time stubs, main-chasing cost
+- [TASK-024 RLS generator](feedback_task024_rls_generator.md) — tests/generated composite files list, eslint --fix import rewrite, released-migration immutability, context via CONTEXT_STATEMENT_SQL
+- [TASK-025 audit writer](feedback_task025_audit_writer.md) — DB+package test placement, audit_ name guard, spk04 path tripwire, set_config lint, stray tsc emit
