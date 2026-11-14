@@ -1209,6 +1209,13 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   // PR26-SEC-07: server-controlled ids / reserved actors, and every workspace manifest (scripts run before the gates).
   'packages/shared/src/ids/',
   '**/package.json',
+  // PR38-SEC-02: every app's database platform (the generated-client value allowance); PR38-SEC-06: the credential-kind
+  // predicate (D-ARCH-109) and the SEC-TC-29 oracles.
+  'apps/worker/src/platform/db/',
+  'packages/shared/src/http/',
+  'tests/api/helpers/cache-control.ts',
+  'tests/api/helpers/contract-validator.ts',
+  'tests/contract-stubs/',
   'CLAUDE.md',
   '.claude/settings.json',
   '.claude/agents/',
