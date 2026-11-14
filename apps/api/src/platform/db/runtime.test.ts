@@ -19,7 +19,9 @@ import {
   databaseRuntimeFromConfig,
   createNotReadyLatch,
   DatabaseNotReadyError,
+  DatabaseRuntimeError,
   gatedDatabaseCheck,
+  requireTenantTx,
   runStartupAuditPartitionsCheck,
   runStartupIntegrityCheck,
 } from './runtime.js';
@@ -179,7 +181,7 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
     for (const resource of runtime.resources) await resource.close();
   });
 
-  it('maps the validated configuration onto the pool and transaction options (worker and API share it)', async () => {
+  it('[D-ARCH-104] maps the validated configuration onto the pool and transaction options and builds the runner from the generated client (worker and API share it)', async () => {
     delete process.env['PGOPTIONS'];
     const config = {
       DATABASE_URL: { reveal: () => 'postgres://platform_app@db.invalid:5432/platform' },
@@ -199,8 +201,21 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
       connectionTimeoutMs: 5_000,
       statementTimeoutMs: 25_000,
     });
-    const runtime = databaseRuntimeFromConfig(config, 'worker', capture().log);
-    expect(runtime.tenantTx).toBeUndefined();
+    for (const service of ['worker', 'api'] as const) {
+      const runtime = databaseRuntimeFromConfig(config, service, capture().log);
+      // The generated client is built inside platform/db (no Client argument): the runner always exists, and the
+      // client is closed with the pool (no connection was opened).
+      expect(runtime.tenantTx).toMatchObject({ transactionOptions: { maxWait: 2_000, timeout: 5_000 } });
+      expect(typeof runtime.tenantTx.withTenantTx).toBe('function');
+      expect(runtime.resources.map((resource) => resource.name)).toEqual(['session-integrity-monitor', 'prisma', 'database']);
+      for (const resource of runtime.resources) await resource.close();
+    }
+  });
+
+  it('[D-ARCH-104] requireTenantTx refuses a runtime without a runner (a composition bug fails at boot)', async () => {
+    delete process.env['PGOPTIONS'];
+    const runtime = createDatabaseRuntime(input());
+    expect(() => requireTenantTx(runtime)).toThrow(DatabaseRuntimeError);
     for (const resource of runtime.resources) await resource.close();
   });
 });

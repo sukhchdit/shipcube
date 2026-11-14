@@ -14,8 +14,9 @@ import { CORRELATION_ID_PATTERN, currentRequestContext } from '../context/reques
 import { DbError } from '../db/index.js';
 import { dbErrorMapping } from '../db/map-db-error.js';
 import { defaultPipelineSlots } from '../routing/pipeline.js';
+import { markCredentialsRead } from '../routing/route-state.js';
 import type { RouteSlot } from '../routing/slot.js';
-import { fixtureRoute } from '../routing/tests/fixture-route.js';
+import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
 import { isAuditableMutationResponse } from './error-response.js';
 import { GENERIC_SERVER_DETAIL } from './problem.js';
 
@@ -590,5 +591,78 @@ describe('[SEC-TC-29] [PR #32 m1 (b)] the problem handler decides "private" from
       .set('Content-Type', 'application/json')
       .send('{"a":');
     expectProblem(res, 400, 'MALFORMED_REQUEST');
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ['an Authorization header', { Authorization: 'Bearer not-a-token' }],
+    ['a web refresh cookie', { Cookie: 'theme=dark; __Host-rt_web=opaque' }],
+    ['a guest quote token', { 'X-Quote-Token': 'opaque' }],
+  ])('[SEC-TC-29] [D-ARCH-109] a foreign credential (%s) on a known [anonymous] route does not make its error private', async (_l, h) => {
+    // The authn slot ran on the route and ignored the undeclared kind: the private mark alone decides.
+    expectProblem(await request(app).get('/api/v1/private').set(h), 401, 'AUTH_REQUIRED');
+    expectProblem(await request(app).get('/api/v1/boom').set(h), 500, 'INTERNAL_ERROR');
+  });
+
+  it('[SEC-TC-29] [D-ARCH-109] an error raised on a known route before the authn slot ran keeps the generic test', async () => {
+    // A step that fails before reading any credential (a replacement authenticator that throws first): no route has read
+    // the request, so any credential header makes the problem private, as before the route is known.
+    const failsFirst: RouteSlot = () => (_req, _res, next) => {
+      next(new AppError('SERVICE_UNAVAILABLE'));
+    };
+    const route = fixtureRoute({ operationId: 'probe', path: '/probe', handler: () => ({ status: 200, body: {} }) });
+    const early = createApp({
+      health: [],
+      modules: [{ name: 'probe', routes: [route] }],
+      logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+      pipeline: { ...defaultPipelineSlots({ tenantTx: undefined }), authenticate: failsFirst },
+    });
+    expectProblem(
+      await request(early).get('/api/v1/probe').set('Cookie', '__Host-rt_web=opaque'),
+      503,
+      'SERVICE_UNAVAILABLE',
+      'private, no-store',
+    );
+    expectProblem(await request(early).get('/api/v1/probe'), 503, 'SERVICE_UNAVAILABLE');
+  });
+
+  describe('[R1-m1] the declared test comes from the route descriptor, not from the authenticator marking first', () => {
+    // A replacement authenticator in the documented shape (TASK-052/055/091/171/261): it records the read, then refuses
+    // a declared bearer that fails verification BEFORE it marks the response private. The handler must still answer
+    // `private, no-store` (D-ARCH-109 (4)), because the descriptor the context step recorded declares the kind.
+    const refusesBeforeMarking: RouteSlot = () => (_req, res, next) => {
+      markCredentialsRead(res);
+      next(new AppError('AUTH_REQUIRED'));
+    };
+    const appFor = (spec: Partial<FixtureRouteSpec>): Express =>
+      createApp({
+        health: [],
+        modules: [
+          {
+            name: 'probe',
+            routes: [fixtureRoute({ operationId: 'probe', path: '/probe', handler: () => ({ status: 200, body: {} }), ...spec })],
+          },
+        ],
+        logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+        pipeline: { ...defaultPipelineSlots({ tenantTx: undefined }), authenticate: refusesBeforeMarking },
+      });
+    const SESSION: Partial<FixtureRouteSpec> = { auth: 'session' };
+    const DUAL: Partial<FixtureRouteSpec> = { auth: ['anonymous', 'session'], permissionAuthenticated: 'quote:create' };
+    const BEARER = { Authorization: 'Bearer not-a-valid-token' };
+
+    it.each<[string, Partial<FixtureRouteSpec>]>([
+      ['[session]', SESSION],
+      ['[anonymous, session]', DUAL],
+    ])('[SEC-TC-29] a declared bearer refused before the private mark on %s answers private, no-store', async (_label, spec) => {
+      const res = await request(appFor(spec)).get('/api/v1/probe').set(BEARER);
+      expectProblem(res, 401, 'AUTH_REQUIRED', 'private, no-store');
+    });
+
+    it('[SEC-TC-29] controls: [session] is private without a credential; [anonymous, session] is not, nor with a foreign one', async () => {
+      expectProblem(await request(appFor(SESSION)).get('/api/v1/probe'), 401, 'AUTH_REQUIRED', 'private, no-store');
+      expectProblem(await request(appFor(DUAL)).get('/api/v1/probe'), 401, 'AUTH_REQUIRED');
+      // A foreign kind (quote token, refresh cookie) on [anonymous, session]: the slot read the credentials, so it does not count.
+      expectProblem(await request(appFor(DUAL)).get('/api/v1/probe').set('X-Quote-Token', 'opaque'), 401, 'AUTH_REQUIRED');
+      expectProblem(await request(appFor(DUAL)).get('/api/v1/probe').set('Cookie', '__Host-rt_web=opaque'), 401, 'AUTH_REQUIRED');
+    });
   });
 });

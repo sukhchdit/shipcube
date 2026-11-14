@@ -2,7 +2,18 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Response } from 'express';
 
-import { ANONYMOUS, principalOf, readonlySet, setPrincipal } from './route-state.js';
+import {
+  ANONYMOUS,
+  credentialsReadOf,
+  declaresPrivateResponse,
+  markCredentialsRead,
+  principalOf,
+  readonlySet,
+  routeDescriptorOf,
+  setPrincipal,
+  setRouteDescriptor,
+} from './route-state.js';
+import { fixtureRoute } from './tests/fixture-route.js';
 
 const response = (): Response => ({ locals: {} }) as unknown as Response;
 
@@ -63,5 +74,47 @@ describe('[R2-n3] principalOf fails closed', () => {
     const guest = { ...ANONYMOUS, credential: 'quote-token' as const, guestTokenHash: 'a'.repeat(64) };
     setPrincipal(res, guest);
     expect(principalOf(res)).toBe(guest);
+  });
+});
+
+describe('[D-ARCH-109] the authn slot records that it read the credentials', () => {
+  it('is false on a fresh response and true once marked, only for that response', () => {
+    const res = response();
+    const other = response();
+    expect(credentialsReadOf(res)).toBe(false);
+    markCredentialsRead(res);
+    expect(credentialsReadOf(res)).toBe(true);
+    expect(credentialsReadOf(other)).toBe(false);
+  });
+
+  it('reads only the boolean true as marked (a truthy value a handler wrote is not)', () => {
+    const res = { locals: { routeCredentialsRead: 'yes' } } as unknown as Response;
+    expect(credentialsReadOf(res)).toBe(false);
+  });
+});
+
+describe('[D-ARCH-109 (4)] [R1-m1] the route descriptor and the declared private test', () => {
+  it('reads the descriptor the context step recorded; undefined before the route is known or for a hand-built object', () => {
+    const route = fixtureRoute({ operationId: 'probe', path: '/probe', handler: () => ({ status: 204 }) });
+    const res = response();
+    expect(routeDescriptorOf(res)).toBeUndefined();
+    setRouteDescriptor(res, route, '/api/v1/probe');
+    expect(routeDescriptorOf(res)).toBe(route);
+    // A spread copy is not a defineRoute descriptor (PR32-SEC-05 (a)): it reads as "no route", the generic test stays.
+    const forged = { locals: { routeDescriptor: { ...route, auth: ['anonymous'] } } } as unknown as Response;
+    expect(routeDescriptorOf(forged)).toBeUndefined();
+  });
+
+  it.each<[string, readonly ('anonymous' | 'session' | 'refresh-cookie' | 'quote-token')[], Record<string, string>, boolean]>([
+    ['[session] without a credential is private', ['session'], {}, true],
+    ['[refresh-cookie] with a foreign bearer is private', ['refresh-cookie'], { authorization: 'Bearer x' }, true],
+    ['[anonymous] without a credential is not private', ['anonymous'], {}, false],
+    ['[anonymous] with a bearer (foreign) is not private', ['anonymous'], { authorization: 'Bearer x' }, false],
+    ['[anonymous, session] with a bearer (declared) is private', ['anonymous', 'session'], { authorization: 'Bearer x' }, true],
+    ['[anonymous, session] with a quote token (foreign) is not private', ['anonymous', 'session'], { 'x-quote-token': 'q' }, false],
+    ['[anonymous, session] with a refresh cookie (foreign) is not private', ['anonymous', 'session'], { cookie: '__Host-rt_web=x' }, false],
+    ['[anonymous, quote-token] with a quote token (declared) is private', ['anonymous', 'quote-token'], { 'x-quote-token': 'q' }, true],
+  ])('%s', (_label, auth, headers, expected) => {
+    expect(declaresPrivateResponse(auth, headers)).toBe(expected);
   });
 });

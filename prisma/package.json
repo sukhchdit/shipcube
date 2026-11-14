@@ -5,6 +5,17 @@
   "license": "UNLICENSED",
   "type": "module",
   "description": "Prisma 7 multi-file schema, migrations, bootstrap SQL and seeds (ADR-0005, data-model.md).",
+  "exports": {
+    "./client": {
+      "@platform/source": "./generated/prisma/client.ts",
+      "types": "./dist/client/client.d.ts",
+      "default": "./dist/client/client.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b client",
+    "typegen": "node ../tools/db/check-prisma-client.mjs"
+  },
   "dependencies": {
     "@platform/authz": "0.0.0",
     "@platform/config": "0.0.0",

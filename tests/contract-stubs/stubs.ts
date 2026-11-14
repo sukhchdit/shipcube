@@ -3,7 +3,7 @@
 // stub cannot drift from the contract. Pure: `buildStubs` reads the dereferenced document, `resolveStub` picks the
 // stub and variant for a request (default: first 2xx, first example; `Prefer: code=` / `example=` select others).
 import { type HttpMethod, listOperations, type OpenApiDocument } from '../../tools/openapi/contract.js';
-import { PRIVATE_NO_STORE, requiresPrivateNoStore } from '../api/helpers/cache-control.js';
+import { declaredKinds, PRIVATE_NO_STORE } from '../api/helpers/cache-control.js';
 import { compilePathTemplate, matchAll, type PathTemplate } from '../api/helpers/path-match.js';
 
 /** SEC-TC-29: the `Cache-Control` value of a response that must not be stored by the browser or a shared cache. */
@@ -31,6 +31,8 @@ export interface ContractStub extends StubVariant {
   readonly matcher: (path: string) => boolean;
   /** `x-error-codes` of the operation. */
   readonly errorCodes: readonly string[];
+  /** The credential kinds the operation's `security` declares (D-ARCH-109): only these make a response private. */
+  readonly auth: readonly string[];
   /** Every documented status/example pair, in document order. */
   readonly variants: readonly StubVariant[];
 }
@@ -119,8 +121,10 @@ export function buildStubs(doc: OpenApiDocument): ContractStub[] {
   return listOperations(doc).map((contractOperation) => {
     const { operationId, method, fullPath, operation } = contractOperation;
     // The SEC-TC-29 predicate the contract validator uses (cache-control.ts): every response of an operation whose
-    // security has no anonymous alternative is private, no-store; the server adds it for a request with a credential.
-    const authenticated = requiresPrivateNoStore(contractOperation, doc);
+    // security has no anonymous alternative is private, no-store; the server adds it for a request that presented a
+    // credential of a declared kind (D-ARCH-109).
+    const auth = declaredKinds(contractOperation, doc);
+    const authenticated = !auth.includes('anonymous');
     const variants = variantsOf(operation.responses ?? {}).map((variant) =>
       authenticated ? { ...variant, headers: { ...variant.headers, 'Cache-Control': PRIVATE_CACHE_CONTROL } } : variant,
     );
@@ -135,6 +139,7 @@ export function buildStubs(doc: OpenApiDocument): ContractStub[] {
       fullPath,
       matcher: (path: string) => matchAll([template], path).length > 0,
       errorCodes: Array.isArray(codes) ? codes.filter((code): code is string => typeof code === 'string') : [],
+      auth,
       variants,
     };
   });

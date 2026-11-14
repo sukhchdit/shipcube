@@ -406,6 +406,23 @@ describe('CODEOWNERS (PR5-SEC-04, PR2-SEC-08)', () => {
     expect(ownedPaths(paths, patterns)).toEqual(paths);
   });
 
+  it('[PR38-SEC-02/-06] the worker database platform, the credential predicate and the SEC-TC-29 oracles are owned', () => {
+    const paths = [
+      'apps/worker/src/platform/db/system-db.ts',
+      'apps/worker/src/platform/db/zz-new.ts',
+      'packages/shared/src/http/credentials.ts',
+      'packages/shared/src/http/index.ts',
+      'tests/api/helpers/cache-control.ts',
+      'tests/api/helpers/contract-validator.ts',
+      'tests/contract-stubs/stubs.ts',
+      'tests/contract-stubs/server.ts',
+    ];
+    expect(ownedPaths(paths, patterns)).toEqual(paths);
+    // Neighbours stay unowned: the rest of the worker, other shared folders, other api test helpers.
+    const neighbours = ['apps/worker/src/jobs/x.ts', 'packages/shared/src/errors/x.ts', 'tests/api/helpers/formats.ts'];
+    expect(ownedPaths(neighbours, patterns)).toEqual([]);
+  });
+
   it('pattern semantics: anchored directory, anchored file, unanchored glob', () => {
     expect(patternToRegExp('/tools/ci/').test('tools/ci/a.mjs')).toBe(true);
     expect(patternToRegExp('/tools/ci/').test('x/tools/ci/a.mjs')).toBe(false);

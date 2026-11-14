@@ -32,4 +32,5 @@
 - [P5 PR-0034 round 2 + merge-only](project_p5_pr34_r2_harness.md) — @3934d12 PASS_W_F-U (01-04 closed, INFO 07/08); merge-only @2e5e16f PASS_W_F-U, 07 narrowed; delta-equivalence recipe; junction cleanup
 - [P5 PR-0036 gherkin map classify](project_p5_pr36_gherkin_map_classify.md) — R1 @3eb7689 code APPROVED_W_NITS + sec PASS_W_F-U; old KNOWN_DRIFT tests blind (mutants); reports/ not git-ignored INFO; AT-US-066-12 G3
 - [Threat-model v1.1 round](project_p5_threat_model_v11_round.md) — D-SEC-TM-01 2026-11-13: §10.4 log, proposed SEC-TC-69..75 + owners (65-68 provisional), -bench vocabulary; open items
-- [P5 PR-0038 020-B](project_p5_pr38_020b.md) — R1 @bdf009d PASS_W_F-U; LOW 01 raw-sql blind to @platform/prisma, 02 worker db zone, 03 credential headers in schema.headers; union voids record
+- [P5 PR-0038 020-B](project_p5_pr38_020b.md) — R1 @bdf009d + delta R2 @8b3a8ed PASS_W_F-U; 01/02/05/06 closed; 03 LOW/04 INFO open (020-C); R1-m1 differential kit; exclude-file check
+- [P5 PR-0040 merged-coverage hook](project_p5_pr40_covhook.md) — R1 @2b651f7 PASS_W_F-U; PR33-SEC-06 closed; LOW 01 .gitattributes blinds diff gate; INFO 02-06; #38 union = merge-only checklist

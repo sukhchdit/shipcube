@@ -159,6 +159,13 @@ export const DB_POOL_MAX_DEFAULTS: Readonly<Record<Service, number>> = Object.fr
 export const DB_IDLE_TIMEOUT_MS_DEFAULT = 10_000;
 export const DB_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
 /**
+ * Floor of `DB_CONNECTION_TIMEOUT_MS` (PR #38 code review R1-m2, PR38-SEC-05). The tenant-transaction runner, which
+ * the API and the worker always build, waits up to its `maxWait` (apps/api `DEFAULT_MAX_WAIT_MS`, a code constant, not
+ * a key) for a pooled connection and refuses a pool timeout below it. Refusing the value here makes it a configuration
+ * error at load (exit 78, key named) instead of a boot crash (exit 1). apps/api pins the parity with the constant.
+ */
+export const DB_CONNECTION_TIMEOUT_MS_MIN = 2_000;
+/**
  * Pool-level `statement_timeout` backstop (PR-0005 code review m7), default 25 000 ms (below the 30 s request cap of
  * REQ-SEC-015); the role backstop (TASK-016, 30 s) applies only to sessions outside the pool, because this startup
  * parameter overrides a role default on every pooled connection. Request transactions set a tighter 5 s with
@@ -263,7 +270,7 @@ export const CONFIG_SCHEMA = {
   DB_IDLE_TIMEOUT_MS: withDefault(t.int(1, 3_600_000), DB_IDLE_TIMEOUT_MS_DEFAULT, {
     description: 'Milliseconds an idle pooled connection is kept before it is closed.',
   }),
-  DB_CONNECTION_TIMEOUT_MS: withDefault(t.int(1, 120_000), DB_CONNECTION_TIMEOUT_MS_DEFAULT, {
+  DB_CONNECTION_TIMEOUT_MS: withDefault(t.int(DB_CONNECTION_TIMEOUT_MS_MIN, 120_000), DB_CONNECTION_TIMEOUT_MS_DEFAULT, {
     description: 'Milliseconds to wait for a new PostgreSQL connection before failing.',
   }),
   DB_STATEMENT_TIMEOUT_MS: withDefault(t.int(100, DB_STATEMENT_TIMEOUT_MS_LIMIT), DB_STATEMENT_TIMEOUT_MS_DEFAULT, {

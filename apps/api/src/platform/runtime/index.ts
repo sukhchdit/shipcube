@@ -2,7 +2,10 @@
 // No Express here: the database runtime composition (platform/db/runtime.ts; the pool and the root client never
 // leave platform/db, D-ORCH-014 (d)), the Valkey factory, readiness primitives, graceful shutdown and the start-up
 // log. Re-exports only.
+// The generated client's types only (D-ARCH-103 (3), (4)): the worker types its repositories from here.
+export type { AppDb, AppTransactionClient, Prisma } from '../db/index.js';
 export {
+  type ActiveDatabaseRuntime,
   createDatabaseRuntime,
   createNotReadyLatch,
   DatabaseNotReadyError,

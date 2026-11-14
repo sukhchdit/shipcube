@@ -9,7 +9,13 @@ import { AppError, ERROR_CATALOGUE, type ErrorCode, presentsCredential } from '@
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
 import { requestContextOf } from '../context/request-context.js';
-import { isPrivateResponse, PRIVATE_CACHE_CONTROL } from '../routing/route-state.js';
+import {
+  credentialsReadOf,
+  declaresPrivateResponse,
+  isPrivateResponse,
+  PRIVATE_CACHE_CONTROL,
+  routeDescriptorOf,
+} from '../routing/route-state.js';
 import { classifyThrown, thrownClassName, type Classified } from './classify.js';
 import { markErrorResponse } from './error-response.js';
 import { buildProblem, DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanceOf, PROBLEM_CONTENT_TYPE } from './problem.js';
@@ -48,10 +54,10 @@ function codeOf(classified: Classified): ErrorCode {
 
 /**
  * Representation headers a handler may have set before it threw; they describe the intended response, not the
- * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`, or `private, no-store` when the
- * authn slot marked the response as authenticated or the request presented a credential (SEC-TC-29, D-ARCH-107 (5)).
- * The mark is read from the response state, never from the header text a handler may have rewritten (PR #32 m1 (b)),
- * so an error raised before the route is known is private exactly when the request carried a credential.
+ * problem document (PR-0009 m4, CWE-525). `Cache-Control` is replaced with `no-store`, or `private, no-store` when
+ * `isAuthenticatedProblem` holds (SEC-TC-29, D-ARCH-107 (5), D-ARCH-109). The mark is read from the response state,
+ * never from the header text a handler may have rewritten (PR #32 m1 (b)), so an error raised before the route is
+ * known is private exactly when the request carried a credential.
  */
 export const DROPPED_ON_PROBLEM = ['ETag', 'Last-Modified', 'Content-Disposition', 'Content-Language'] as const;
 
@@ -71,9 +77,26 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
   });
 }
 
+/**
+ * SEC-TC-29 for a problem document (D-ARCH-109 (4)). Private when any of these holds:
+ * - a slot marked the response private;
+ * - the route is known (the `context` step recorded its descriptor before authn ran) and its declaration makes the
+ *   response private: no `anonymous` member, or a credential of a declared kind was presented. Computed here from the
+ *   descriptor, so an authenticator that refuses a declared credential before marking still answers private (R1-m1);
+ * - the authn slot has not read the credentials yet (404/405 fallback, body parser, a step that failed before the
+ *   slot) and the request carries any credential header: the generic test, free because a problem is no-store anyway.
+ * After the slot read the credentials, a foreign credential it ignored does not make the error private.
+ */
+const isAuthenticatedProblem = (req: Request, res: Response): boolean => {
+  if (isPrivateResponse(res)) return true;
+  const route = routeDescriptorOf(res);
+  if (route !== undefined && declaresPrivateResponse(route.auth, req.headers)) return true;
+  return !credentialsReadOf(res) && presentsCredential(req.headers);
+};
+
 function sendProblem(req: Request, res: Response, status: number, body: string, retryAfterSeconds?: number): void {
   for (const header of DROPPED_ON_PROBLEM) res.removeHeader(header);
-  const authenticated = isPrivateResponse(res) || presentsCredential(req.headers);
+  const authenticated = isAuthenticatedProblem(req, res);
   res.setHeader('Cache-Control', authenticated ? PRIVATE_CACHE_CONTROL : 'no-store');
   if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
   res.status(status).type(PROBLEM_CONTENT_TYPE).send(body);

@@ -157,3 +157,115 @@ NOT re-run: `quality:heavy`, the Testcontainers test `runner-activation.int.test
 - The generator-block test includes a parser self-check (a dropped option is seen), avoiding a vacuous pin.
 - The third resolution mode runs plain `node` with empty `NODE_OPTIONS`, exactly the image condition set, and asserts both the resolved path and a driver-level error class.
 - The PR body honestly reports two failed evidence runs and the D-TASK020-38/39 residuals.
+
+---
+
+## Round 2 (head 8b3a8ed)
+
+Head reviewed: `8b3a8ed` (full SHA `8b3a8edd39786b63739d8cacd5e3b4c283b29ffe`). Code head `cdd3716`; `8b3a8ed` adds evidence only (`git diff --name-only cdd3716 8b3a8ed` has no path outside `docs/`). Delta reviewed: `a5d135c..8b3a8ed`, which is the union `976edf6` plus 6 fix commits. `origin/main` is still `c0c31a1`, the second parent of the union.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The union is pure: the merge tree differs from a clean re-merge only by the hand resolution of the one conflict, and the
+  policy order meets every section 5 condition. R1-M1, R1-m1, R1-m2, R1-m3, R1-m6, R1-n1 and PR38-SEC-01/-02 are closed, and 11 of 11
+  mutants are killed. The R1-m1 design respects D-ARCH-109 (3)/(4). Two new NITs. Merge needs the security record on the final head.
+```
+
+### R2.1 What I verified myself
+
+Method: the review worktree (read-only), plus a `git archive` extract of `8b3a8ed` with a `node_modules` junction and a copy of the git-ignored `prisma/generated`. Node 24, no Docker, no installs. The extract and the junction were removed afterwards. The worktree still has 748 `node_modules` entries and `git status` is clean.
+
+| Check | Result |
+|---|---|
+| Union purity: `git merge-tree --write-tree a5d135c c0c31a1`, then `git diff --stat <tree> 976edf6` | Only `eslint.config.mjs` differs: 4 lines, which are the conflict markers. Every other file is byte-identical to a clean re-merge. `git show --cc 976edf6` shows the resolution: BOTH `db-root-client` entries (`client.ts` and `generated.ts`) and PR #34's `db-test-seam` line with its comment, kept as separate entries |
+| Policy order on the head (`eslint.config.mjs`) | The `prisma-generated` value disallow/allow pair (`:390-395`) directly follows `{ from: DATABASE_CODE, allow: PRISMA_TARGETS }` (`:386`). The `db-test-seam` pair (`:542-547`) is the last two entries of `BOUNDARIES_POLICIES`. No R1-m5 policy landed (deferred), so nothing sits after the seam pair |
+| Auto-merged files | `package.json` has both `db:generate` and `test:generated`. `tools/tsconfig.json` `files` has both `generated.ts` and `query-counter.ts`, there is no `prisma/generated` include, and the `../prisma/client` reference is kept. `DECISIONS.md` and `STATUS.md` are equal to `c0c31a1` |
+| Jest projects on the head (`--listTests`) | unit 176, integration 28 (includes `runner-activation.int.test.ts` and `query-counter.int.test.ts`), api 7 (includes `declared-credentials` and `problem-handler`), generated 0 |
+| R1-M1: restored block vs main | The block from `describe('[R2-n1] [PR32-SEC-15] the descriptor is deep-frozen'` to the end of the file is identical to `origin/main` (`diff` prints nothing) |
+| Lane A run 43535675720 on `8b3a8ed` | `fast-lane` SUCCESS with no skipped or failed step. `scans` fails only at "Security-owned paths need a review record", and `ci-gate` fails because `scans` failed (expected until the record lands) |
+| Evidence `20261114T0021Z_cdd3716` | PASS, profile `pr`, `git_sha` `cdd3716`: unit 4372 (2 skip), api 123, integration 261 (1 skip), catalog 74, 0 failures. The new R1-m1 api tests (3), PR38-SEC-01 (9), PR38-SEC-02/-06 (11), R1-m2 (4) and deep-freeze (2) cases are in the JUnit, and so are the 3 `[D-ARCH-104]` runner-activation int cases that carry the R1-m3 per-key check |
+| ESLint `--max-warnings 0` and Prettier `--check` on the 21 non-fixture `.ts`/`.mjs` files of the fix delta, plus `eslint.config.mjs` | clean |
+| Targeted unit/api run (extract): define-route, route-state, with-tenant-tx, load-config, process-env, authenticate, authorise, problem-handler | 414/415 in the combined run, with one 5 s timeout described in R2-n2. The same file run alone gives 61/61 |
+| Mutation of the fix delta (11 mutants, extract) | **11/11 killed**, see R2.3 |
+
+Not re-run: `quality:heavy`, the Testcontainers suites (including the R1-m3 line in `runner-activation.int.test.ts`), the full unit/api suites, the whole-solution `tsc -b`, and gitleaks. For these I rely on evidence `20261114T0021Z_cdd3716` and on lane A for `8b3a8ed`. The R1-m3 line was checked by reading it: `for (const key of [...]) expect(body).not.toHaveProperty(key)` fails on any single leaked key, which is the r1 fix verbatim.
+
+### R2.2 Closure of the round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed** (`24e50c7`) | The block is restored verbatim, and mutant M1 is killed (1 failed: "freezes audit (with additional), reauth and deprecated as copies") |
+| R1-m1 | **Closed** (`78039f4`) | Details in R2.4. Mutants M2-M6, M10 and M11 are killed |
+| R1-m2 / PR38-SEC-05 | **Closed** (`5f6e167`) | Details in R2.5. Mutants M7 and M8 are killed |
+| R1-m3 | **Closed** (`24e50c7`) | Each of the four keys is checked separately |
+| R1-m6 / PR38-SEC-06 | **Closed** (`c1f4918`) | CODEOWNERS and `REQUIRED_CODEOWNED_PATHS` now include `/packages/shared/src/http/`, `cache-control.ts`, `contract-validator.ts` and `/tests/contract-stubs/`. For each of the 5 lines there are presence tests and three-way mutation tests (deleted, commented out, owner stripped), plus a neighbour test that keeps `packages/shared/src/errors/` and `tests/api/helpers/formats.ts` unowned. The added `'/tests/ @o'` in the minimal complete-coverage fixture (`check-workflow-policy.test.ts:708`) is needed so that fixture stays complete; it does not weaken the test |
+| PR38-SEC-01 | **Closed** (`5823507`) | `PRISMA_SOURCES` gains `@platform\/prisma(?:\/.*)?`. It is anchored, so `@platform/prismatic` does not match. The relative path form `../../generated/prisma/client.js` was already covered. Mutant M9 (alternative removed) is killed: 8 fail (1 seeded fixture + 7 repository probes), and the positive probe stays clean |
+| PR38-SEC-02 | **Closed for the CODEOWNERS part** (`c1f4918`) | `/apps/worker/src/platform/db/` is owned and required. Narrowing D-ARCH-103 (2) is left to the architect and is optional |
+| R1-n1 | **Closed** (`cdd3716`) | `LOOPBACK_TEST_TIMEOUT_MS` lives in `routing/tests/loopback.ts`, a `test`-category helper that only tests import. The remainder is in R2-n2 |
+| R1-m4, R1-m5, R1-n2..n4; PR38-SEC-03/-04 | Deferred per D-ORCH-055 | None of them got worse. The `routing/tests/loopback.ts` helper does add another file in a module-adjacent `tests/` folder (the R1-m5 shape), but it has no production importer and value-imports nothing from the generated client |
+
+### R2.3 Mutation results (extract of `8b3a8ed`, each mutant applied alone and restored)
+
+| # | Mutant | Suites run | Result |
+|---|---|---|---|
+| M1 | `define-route.ts`: `audit: frozenData(spec.audit)` changed to `audit: spec.audit` | define-route | killed (1) |
+| M2 | `problem-handler.ts`: the descriptor arm removed | problem-handler.api | killed (3: both R1-m1 cases and the controls) |
+| M3 | `routeDescriptorOf` returns the raw local (no `isDefinedRoute` brand) | route-state | killed (1: the forged spread copy) |
+| M4 | `declaresPrivateResponse` uses `presentedKinds(headers)` (all kinds) | route-state, problem-handler.api, authenticate | killed (17) |
+| M5 | handler last arm changed to `presentsCredential(...)` (ignores `credentialsReadOf`) | problem-handler.api | killed (4) |
+| M6 | `declaresPrivateResponse` without `!auth.includes('anonymous')` | route-state, problem-handler.api | killed (3) |
+| M7 | `DB_CONNECTION_TIMEOUT_MS_MIN` = 1999 | with-tenant-tx, load-config, process-env | killed (3) |
+| M8 | schema back to `t.int(1, 120_000)` | load-config, process-env | killed (3) |
+| M9 | `PRISMA_SOURCES` without `@platform/prisma` | negative-fixtures `-t PR38-SEC-01` | killed (8) |
+| M10 | descriptor arm uses the generic `presentsCredential` | problem-handler.api | killed (4: the foreign-credential rows) |
+| M11 | the authn stub does not call `markCredentialsRead` | authenticate, problem-handler.api, declared-credentials.api, route-state | killed (8) |
+
+The author's claims of "unfreeze mutant killed" and "8 fail" for PR38-SEC-01 are reproduced exactly.
+
+### R2.4 The R1-m1 design against D-ARCH-109
+
+The handler now evaluates three checks in order: `isPrivateResponse(res)`, then `routeDescriptorOf(res)` with `declaresPrivateResponse(route.auth, headers)`, then `!credentialsReadOf(res) && presentsCredential(headers)`. The authn stub uses the same `declaresPrivateResponse`, so the problem handler and the authenticator share one definition.
+
+- **(3) and (4): a foreign credential on a known route is not made private.** `declaresPrivateResponse` counts only `presentedKinds(headers, auth)`, the declared kinds. After the slot read the credentials, the generic arm is off. The route-state table covers this (`[anonymous]` + bearer, and `[anonymous, session]` + quote token or refresh cookie, all `false`), and so do the api rows and the controls (`[anonymous, session]` + `X-Quote-Token` or refresh cookie gives `no-store`, not private). M4, M5 and M10 prove these rows are load-bearing.
+- **(4): a declared credential is private, errors included, whatever the authenticator's order.** The replacement authenticator calls `markCredentialsRead` and refuses before it marks. On `[session]` and `[anonymous, session]` the response is now `private, no-store`. That was the r1 probe, now a test.
+- **The generic case "error before the authn slot ran" still applies** when the context step recorded the descriptor but authn has not run (`credentialsRead` false). D-ARCH-109 (4) allows this explicitly, and it costs nothing.
+- **Order independence.** `markCredentialsRead` can now only switch the generic arm off. It can never hide a declared credential. An authenticator that never calls it makes errors more private, never less. The reworded `route-state.ts` JSDoc ("together with its decision; the order ... does not matter") is accurate.
+- **A forged descriptor reads as "no route".** `routeDescriptorOf` requires the `defineRoute` WeakSet brand (M3 is killed by the spread-copy case). The only writer of the local is `setRouteDescriptor` (grep), and `mountRoutes` already refuses unbranded descriptors (PR #32 m2). Combining a forged local with `credentialsRead = true` is therefore unreachable without in-process code that rewrites `res.locals`. If that ever happens, only the private mark decides, so the JSDoc sentence "the handler then keeps the generic credential test" holds only before the slot ran (R2-n1).
+- There is no import cycle: `route-state.ts` now value-imports `isDefinedRoute` from `define-route.ts`, and `define-route.ts` does not import `route-state.ts`.
+
+**Ruling on D-TASK020-41: sound.** Keeping `markCredentialsRead` is right, because without it a foreign credential would make every error on an `[anonymous]` route private after the slot (D-ARCH-109 (4) forbids that). The sheet wording proposed for TASK-052/055/091/171/261 is correct.
+
+### R2.5 The config floor (`5f6e167`)
+
+- **Single-key rule.** `DB_CONNECTION_TIMEOUT_MS_MIN = 2_000` feeds `t.int(MIN, 120_000)`. The apps/api parity test pins `MIN === DEFAULT_MAX_WAIT_MS`, builds the runner at the floor, and expects `TenantTxConfigError` at the floor minus 1. That is the exact r1 ask. `resolveTransactionOptions` has no other cross-key rule that reaches config: `timeout` defaults to `statement`, and every other value only needs to be a positive integer.
+- **Defaults stay valid.** `.env.example:155` and `compose.env:29` are 5000, and the schema default is 5000. `services.composition.test.ts` uses 2000 (exactly the floor) and the other test configs use 5000. No workflow or Terraform file sets the key (grep).
+- **api and worker exit 78.** Both entry points call `loadRuntimeConfigOrExit` (api `main.ts:18`, worker `main.ts:18`). That loader shares `loadValidated` and `exitOnConfigError` with `loadConfigOrExit`, which the new `process-env` test drives for both services: EX_CONFIG and the message `DB_CONNECTION_TIMEOUT_MS: invalid: number.min`. The config check runs before `createRuntimeServices`, so the exit-1 path of r1 is gone for this key.
+- The `'1.5'` row in the integer-rejection test became `'2000.5'`. This is right, because `'1.5'` would now be refused as `number.min` first.
+
+### R2.6 New findings
+
+| ID | Sev | Where | Problem | Fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `apps/api/src/platform/routing/route-state.ts:59-62` (JSDoc of `routeDescriptorOf`); `apps/api/src/platform/errors/problem-handler.ts:94` | The JSDoc says that for an unbranded value "the problem handler then keeps the generic credential test". That is true only while `credentialsRead` is false. If authn has run and the local was overwritten, only the private mark decides. Unreachable today (single writer, branded mounts) | Either reword it ("reads as no route; before the slot ran the generic test applies"), or fail closed at no cost: `return (route === undefined \|\| !credentialsReadOf(res)) && presentsCredential(req.headers);`. If you take the code change, add a handler test with a forged local plus `markCredentialsRead`. Next touch (020-C) |
+| R2-n2 | NIT | `apps/api/src/platform/errors/problem-handler.api.test.ts:205` (pre-existing test, unchanged here) | In my combined cold run (8 suites in parallel, extract plus junction), the first test of this file exceeded the 5 s default once. Alone the file gives 61/61, and lane A and the evidence pass it. This is the R1-n1 exposure I noted in r1: only two files adopted `LOOPBACK_TEST_TIMEOUT_MS` | Apply the constant (or a shared `beforeAll` warm-up request) to the other `createApp` loopback files: `problem-handler.api.test.ts`, `declared-credentials.api.test.ts`, and the contract-stub tests. Next touch, or on the first flake report (TASK-278) |
+
+No BLOCKER, MAJOR or MINOR is new in this round.
+
+### R2.7 Merge conditions
+
+1. A security delta record (`docs/05-quality/security/PR-0038-*`) naming `8b3a8ed` or a later docs-only head, so that `scans` and `ci-gate` go green. The fix commits touch owned paths (CODEOWNERS, `tools/ci`, `eslint-rules`, `apps/api/src/platform`, `packages/shared`/`config`), so this is a delta round, not merge-only.
+2. No non-docs commit after `cdd3716`, and no merge of a non-docs `main` change before the squash. Either would make evidence `20261114T0021Z_cdd3716` stale (D-ORCH-054). `origin/main` is `c0c31a1` today, so no re-merge is needed.
+3. Squash merge with a linted title.
+4. Still routed, unchanged: R1-m4 (devops, on the first flake), R1-m5 with PR34-SEC-07 (before TASK-026), R1-n2..n4 (next touch), PR38-SEC-03/-04 (020-C), and R2-n1/n2 (next touch).
+5. Orchestrator:
+   - add D-TASK020-40..46 to DECISIONS.md;
+   - add the TASK-052/055/091/171/261 sheet wording per D-TASK020-41;
+   - add `npm run db:generate` to CLAUDE.md §2;
+   - close D-TASK020-05 in STATUS.
+
+### R2.8 Good
+
+- Each fix is its own commit, separate from the union. This made the purity proof a one-line `merge-tree` diff.
+- `declaresPrivateResponse` is one definition used by both the authn stub and the handler, and the compile-time `RouteAuth[]` subset check moved with it. Tests that show a forged spread copy reads as "no route" ground the trust in the descriptor in the PR #32 brand.
+- The config floor is a named, exported constant tied to the runner by a parity test that checks both sides: the floor builds, and the floor minus 1 throws.
+- The CODEOWNERS tests mutate each line three ways and also pin the unowned neighbours, so an over-broad pattern would fail too.
