@@ -16,6 +16,8 @@ export interface FakeSql extends AuditSqlPort {
   readonly statements: RecordedStatement[];
   /** Answers consumed in order; a function answers from the statement. */
   readonly script: Array<Answer | ((statement: RecordedStatement) => Answer)>;
+  /** Every failure passed to `markRollbackOnly`, in call order (PR42-SEC-02). */
+  readonly marked: Error[];
 }
 
 const render = (strings: TemplateStringsArray): string =>
@@ -26,6 +28,7 @@ const render = (strings: TemplateStringsArray): string =>
 
 export function fakeSql(...script: Array<Answer | ((statement: RecordedStatement) => Answer)>): FakeSql {
   const statements: RecordedStatement[] = [];
+  const marked: Error[] = [];
   const answer = (statement: RecordedStatement): Promise<unknown> => {
     statements.push(statement);
     const next = script.shift();
@@ -36,6 +39,10 @@ export function fakeSql(...script: Array<Answer | ((statement: RecordedStatement
   return {
     statements,
     script,
+    marked,
+    markRollbackOnly(failure: Error): void {
+      marked.push(failure);
+    },
     $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T> {
       return answer({ kind: 'query', text: render(query), values }) as Promise<T>;
     },

@@ -131,7 +131,8 @@ export type TenantDbOmitsMembers = [
 ];
 
 const read = (value: unknown, key: PropertyKey): unknown => (value as Record<PropertyKey, unknown>)[key];
-const EXPOSED = ['shipment', 'ledgerEntry', '$queryRaw', '$executeRaw'];
+/** The guard-provided rollback-only latch (PR42-SEC-02) is the one non-Prisma member, always last. */
+const EXPOSED = ['shipment', 'ledgerEntry', '$queryRaw', '$executeRaw', 'markRollbackOnly'];
 const RESULT_KEYS = ['then', 'catch', 'finally', Symbol.toStringTag];
 const CLOSED = 'Database error: TENANT_TX_CLOSED';
 /** The settled outcome of a thenable: `ok:<value>` or the rejection's message. */
@@ -373,7 +374,7 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect([...modelDelegateNames({ _runtimeDataModel: { models: null } })]).toEqual([]);
     const { db } = createTenantDb({ shipment: new FakeDelegate(), $queryRaw: (): number => 1 });
     expect(() => read(db, 'shipment')).toThrow(new TenantDbAccessError('shipment'));
-    expect(Reflect.ownKeys(db)).toEqual(['$queryRaw']);
+    expect(Reflect.ownKeys(db)).toEqual(['$queryRaw', 'markRollbackOnly']);
     // A data-model name whose property is not an object is refused (fail closed).
     const ghost = createTenantDb({ _runtimeDataModel: { models: { Ghost: {} } }, ghost: 5 }).db;
     expect(() => read(ghost, 'ghost')).toThrow(new TenantDbAccessError('ghost'));
@@ -409,6 +410,32 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect(read(db, 'then')).toBeUndefined();
     expect(read(db.shipment, 'then')).toBeUndefined();
     await expect(Promise.resolve(db)).resolves.toBe(db);
+  });
+
+  it('PR42-SEC-02: markRollbackOnly latches the first failure, is not a Prisma member and closes with the transaction', () => {
+    const tx = new FakeTx();
+    const handle = createTenantDb(tx);
+    expect(handle.rollbackOnly()).toBeUndefined();
+    expect('markRollbackOnly' in tx).toBe(false);
+    const mark = handle.db.markRollbackOnly;
+    const first = new Error('first');
+    mark(first);
+    handle.db.markRollbackOnly(new Error('second'));
+    expect(handle.rollbackOnly()).toBe(first);
+    expect(Object.getOwnPropertyDescriptor(handle.db, 'markRollbackOnly')).toMatchObject({ writable: false, enumerable: true });
+    expect(() => {
+      (handle.db as unknown as Record<string, unknown>)['markRollbackOnly'] = (): void => undefined;
+    }).toThrow(TenantDbAccessError);
+    handle.revoke();
+    expect(() => mark(new Error('late'))).toThrow(CLOSED);
+    expect(() => handle.db.markRollbackOnly).toThrow(CLOSED);
+    expect(handle.rollbackOnly()).toBe(first);
+  });
+
+  it('PR42-SEC-02: a non-Error passed by an untyped caller still latches (as a TypeError)', () => {
+    const handle = createTenantDb(new FakeTx());
+    (handle.db.markRollbackOnly as (failure: unknown) => void)('not an error');
+    expect(handle.rollbackOnly()).toBeInstanceOf(TypeError);
   });
 
   it('PR11-SEC-01: after revoke every access, through the top level or a kept delegate reference, throws TENANT_TX_CLOSED', () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it, jest } from '@jest/globals';
+import { type AuditEntryInput, type AuditStore, AuditWriteError, createAuditWriter } from '@platform/audit';
 import { DB_CONNECTION_TIMEOUT_MS_MIN, DB_TENANT_ADMISSION_WAIT_MS_MAX } from '@platform/config';
 
 import { DbError, type DbSecurityEvent } from './map-db-error.js';
@@ -628,5 +629,107 @@ describe('[D-ARCH-086] per-tenant admission bulkhead inside withTenantTx (ADR-00
     expect(tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 10 }).admission).toEqual({ maxConcurrentTx: 5, waitMs: 250 });
     expect(tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 5 }).admission).toEqual({ maxConcurrentTx: 2, waitMs: 250 });
     expect(tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 1 }).admission).toEqual({ maxConcurrentTx: 2, waitMs: 250 });
+  });
+});
+
+describe('[PR42-SEC-02] rollback-only latch: a swallowed audit refusal never commits the business change', () => {
+  const ENTRY: AuditEntryInput = {
+    action: 'CREATE',
+    outcome: 'SUCCESS',
+    entityName: 'address',
+    entityId: 'a-1',
+    orgId: ORG,
+    actor: { type: 'USER', userId: ACTOR },
+    origin: { sourceApp: 'web', correlationId: 'corr-0001-latch' },
+  };
+  const store = (append: AuditStore['append']): AuditStore => ({ append, insertVaultRows: () => Promise.resolve([]) });
+
+  /** The fake client, recording whether each transaction committed (callback resolved) or rolled back (it threw). */
+  function recordingSetup() {
+    const fake = fakeClient();
+    const outcomes: string[] = [];
+    const client = {
+      ...fake.client,
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>, txOptions?: { maxWait?: number; timeout?: number }): Promise<R> {
+        try {
+          const result = await fake.client.$transaction(fn, txOptions);
+          outcomes.push('commit');
+          return result;
+        } catch (error) {
+          outcomes.push('rollback');
+          throw error;
+        }
+      },
+    };
+    const { deps } = fakeDeps();
+    const logged: unknown[] = [];
+    const runner = createWithTenantTx(client, OPTIONS, {
+      ...deps,
+      scopeClient: () => client,
+      onDbError: (error) => void logged.push(error),
+    });
+    return { runner, outcomes, logged };
+  }
+
+  it('an INVALID_ENTRY refusal raised before any SQL, caught and swallowed by the callback, still rolls back with 500', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const writer = createAuditWriter({ store: store(() => Promise.reject(new Error('never called'))), lockTimeoutMs: 250 });
+    const swallowed: unknown[] = [];
+    const error = await caught(
+      runner.withTenantTx(ctx(), async (db) => {
+        await writer.write(db, { ...ENTRY, outcome: 'OK' as 'SUCCESS' }).catch((refusal: unknown) => void swallowed.push(refusal));
+        return 'business change done';
+      }),
+    );
+    expect(swallowed).toEqual([expect.objectContaining({ kind: 'INVALID_ENTRY' })]);
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED', reason: 'AUDIT_WRITE_FAILED' });
+    expect(outcomes).toEqual(['rollback']);
+  });
+
+  it('a swallowed lock timeout rolls back and answers 503 instead of resolving', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const timeout = new AuditWriteError('LOCK_TIMEOUT', { sqlState: '55P03' });
+    const writer = createAuditWriter({ store: store(() => Promise.reject(timeout)), lockTimeoutMs: 250 });
+    const error = await caught(
+      runner.withTenantTx(ctx(), async (db) => {
+        await writer.write(db, ENTRY).catch(() => undefined);
+        return 'ok';
+      }),
+    );
+    expect(error).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE', reason: 'AUDIT_LOCK_TIMEOUT', retryable: true });
+    expect(outcomes).toEqual(['rollback']);
+  });
+
+  it('the first marked failure wins; a later error thrown by the callback itself passes through (and rolls back)', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const first = new AuditWriteError('HEAD_MOVED');
+    const own = new Error('domain rule');
+    expect(
+      await caught(
+        runner.withTenantTx(ctx(), (db) => {
+          db.markRollbackOnly(first);
+          db.markRollbackOnly(new AuditWriteError('LOCK_TIMEOUT', { sqlState: '55P03' }));
+          return Promise.resolve('ok');
+        }),
+      ),
+    ).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(
+      await caught(
+        runner.withTenantTx(ctx(), (db) => {
+          db.markRollbackOnly(first);
+          return Promise.reject(own);
+        }),
+      ),
+    ).toBe(own);
+    expect(outcomes).toEqual(['rollback', 'rollback']);
+  });
+
+  it('an unmarked transaction commits as before, and the latch is per transaction', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const writer = createAuditWriter({ store: store(() => Promise.reject(new AuditWriteError('HEAD_MOVED'))), lockTimeoutMs: 250 });
+    await caught(runner.withTenantTx(ctx(), async (db) => writer.write(db, ENTRY).then(() => 'never')));
+    await expect(runner.withTenantTx(ctx(), () => Promise.resolve('next'))).resolves.toBe('next');
+    expect(outcomes).toEqual(['rollback', 'commit']);
   });
 });

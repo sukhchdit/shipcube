@@ -197,21 +197,47 @@ describe('[US-087] PII vault batch (ADR-0007 am. 10 item 1: one INSERT + one loo
   });
 });
 
-/** packages/audit/src/store/prisma-store.ts, found from the Jest working directory (the repository root or below it). */
-function storeSource(): string {
+/** A repository file, found from the Jest working directory (the repository root or below it). */
+function repoFile(...segments: string[]): string {
   let dir = resolve(process.cwd());
   for (;;) {
-    const candidate = join(dir, 'packages', 'audit', 'src', 'store', 'prisma-store.ts');
+    const candidate = join(dir, ...segments);
     if (existsSync(candidate)) return candidate;
     const parent = dirname(dir);
-    if (parent === dir) throw new Error('prisma-store.ts not found above the working directory');
+    if (parent === dir) throw new Error(`${segments.join('/')} not found above the working directory`);
     dir = parent;
   }
 }
 
+const storeSource = (): string => repoFile('packages', 'audit', 'src', 'store', 'prisma-store.ts');
+
+/** Code without block and whole-line comments. */
+const stripComments = (source: string): string => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+/** The `setter` form of `platform/tenant-context-sql` (tools/eslint-rules/tenant-context-sql.mjs), global here to count. */
+const SETTER_FORM = /set_config/giu;
+/** The setter's name, assembled so this file carries none of the text the rule bans (it is linted like any test). */
+const FN = ['set', 'config'].join('_');
+/** The one setter the exact-file exemption admits (ADR-0007 am. 10 item 2, data-model §5.4 statement 2). */
+const ALLOWED_SETTER = `pg_catalog.${FN}('lock_timeout', ${'$'}{lockTimeoutMs}, true)`;
+
+/**
+ * PR #42 R1-m1 / PR42-SEC-05: the pin that bounds the `setter` exemption of prisma-store.ts. It counts with the rule's
+ * own pattern (case-insensitive, whatever spacing or quoting follows), so a second setter in any spelling fails, and
+ * the one hit must be the exact `lock_timeout` setter; no `app.` key anywhere in the code.
+ */
+function setterPinViolations(code: string): string[] {
+  const hits = code.match(SETTER_FORM) ?? [];
+  return [
+    ...(hits.length === 1 ? [] : [`${String(hits.length)} setter occurrences`]),
+    ...(code.includes(ALLOWED_SETTER) ? [] : ['the lock_timeout setter is not the exact allowed text']),
+    ...(/\bapp\s*\./iu.test(code) ? ['an app.* key'] : []),
+  ];
+}
+
 describe('store source rules (PR2-SEC-05 / PR11-SEC-05 item 2, D-ARCH-074/103, data-model §5.4 rules)', () => {
   const source = readFileSync(storeSource(), 'utf8');
-  const code = source.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const code = stripComments(source);
 
   it('constructs no client and imports no Prisma or SQL driver package: only the transaction it is handed', () => {
     const imports = [...code.matchAll(/from '([^']+)'/g)].map((match) => match[1]);
@@ -220,9 +246,30 @@ describe('store source rules (PR2-SEC-05 / PR11-SEC-05 item 2, D-ARCH-074/103, d
   });
 
   it("the file's only setter is the transaction-local audit lock_timeout (the lint exemption covers nothing else)", () => {
-    const setters = [...code.matchAll(/set_config\(([^)]*)\)/g)].map((match) => match[1]);
-    expect(setters).toEqual(["'lock_timeout', ${lockTimeoutMs}, true"]);
-    expect(code).not.toMatch(/app\./);
+    expect(setterPinViolations(code)).toEqual([]);
+  });
+
+  it("[PR42-SEC-05] the pin counts with the rule's own setter pattern", () => {
+    const rule = readFileSync(repoFile('tools', 'eslint-rules', 'tenant-context-sql.mjs'), 'utf8');
+    expect(rule).toContain(`{ form: 'setter', pattern: /${SETTER_FORM.source}/iu }`);
+  });
+
+  // Mutation self-test: each variant appended to the real code must turn the pin red (R1-m1 and PR42-SEC-05 T2, T9,
+  // T10: spellings the lint no longer sees once the file is exempted for `setter`).
+  const args = `(${'$'}{k}, ${'$'}{v}, true)`;
+  it.each([
+    ['a space before the parenthesis', `db.$queryRaw\`SELECT ${FN} ${args}\``],
+    ['upper case', `db.$queryRaw\`SELECT pg_catalog.${FN.toUpperCase()}${args}\``],
+    ['a newline before the parenthesis', `db.$queryRaw\`SELECT ${FN}\n${args}\``],
+    ['a bound key', `db.$queryRaw\`SELECT pg_catalog.${FN}(${'$'}{key}, ${'$'}{lockTimeoutMs}, true)\``],
+    ['a quoted function name', `db.$queryRaw\`SELECT "${FN}"${args}\``],
+    ['an app key spelled with spaces', `const k = '${['app', 'org_id'].join(' . ')}';`],
+  ])('[PR42-SEC-05] mutant: %s is refused by the pin', (_label, mutant) => {
+    expect(setterPinViolations(`${code}\n${mutant}\n`)).not.toEqual([]);
+  });
+
+  it('[PR42-SEC-05] mutant: the allowed setter rewritten to a bound key is refused by the pin', () => {
+    expect(setterPinViolations(code.replace(`${FN}('lock_timeout',`, `${FN}(${'$'}{key},`))).not.toEqual([]);
   });
 
   it('no RETURNING, no text zero hash, no qualified multi-argument unnest or extract', () => {

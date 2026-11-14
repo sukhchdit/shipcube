@@ -409,7 +409,12 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
           if (hasLeakedContext(prev)) throw reportLeak(correlationId);
           const handle = createTenantDb(tx);
           try {
-            return await fn(handle.db);
+            const result = await fn(handle.db);
+            // PR42-SEC-02: a failure marked rollback-only (an audit refusal the callback caught and swallowed) is thrown
+            // here, so Prisma rolls back and `mapped` answers it; the business change never commits without its entry.
+            const latched = handle.rollbackOnly();
+            if (latched !== undefined) throw latched;
+            return result;
           } finally {
             handle.revoke();
           }

@@ -580,12 +580,20 @@ describe('[US-088] same-transaction writes and outcome semantics (REQ-AUDIT-004/
     // The head says the stream's last entry is in 2099, so the next occurred_at falls outside every partition.
     await admin.query(`UPDATE public.audit_stream_heads SET head_occurred_at = '2099-06-01T00:00:00Z' WHERE stream_id = $1`, [org]);
     const id = randomUUID();
+    let kind: unknown;
     const error = await rejection(
       runner.withTenantTx(tenant(org), async (db) => {
         await insertAddress(db, org, id);
-        return writer.write(db, createAddress(org, id));
+        try {
+          return await writer.write(db, createAddress(org, id));
+        } catch (failure) {
+          // R1-n9: the classification against the real driver message (the lc_messages prefix), not only the SQLSTATE.
+          kind = (failure as { readonly kind?: unknown }).kind;
+          throw failure;
+        }
       }),
     );
+    expect(kind).toBe('PARTITION_MISSING');
     expect((error as DbError).toJSON()).toEqual({
       status: 500,
       code: 'AUDIT_WRITE_FAILED',
@@ -668,5 +676,68 @@ describe('[US-088] same-transaction writes and outcome semantics (REQ-AUDIT-004/
     const refused = await rejection(admin.query(`UPDATE public.audit_entries SET outcome = 'FAILED' WHERE id = $1`, [written.id]));
     expect(String((refused as Error).message)).toMatch(/^AUDIT_IMMUTABLE:/);
     expect((await stored('id', written.id))[0]).toMatchObject({ outcome: 'SUCCESS', entry_hash: written.entryHash });
+  });
+});
+
+describe('[PR #42 fix cycle 1] rollback-only latch and string normalisation on PostgreSQL 18', () => {
+  it('[PR42-SEC-02] a refusal raised before any SQL error and swallowed by the callback rolls the business row back (500)', async () => {
+    const org = uuidv7();
+    const id = randomUUID();
+    const swallowed: unknown[] = [];
+    const error = await rejection(
+      runner.withTenantTx(tenant(org), async (db) => {
+        await insertAddress(db, org, id);
+        await writer
+          .write(db, createAddress(org, id, { outcome: 'OK' as 'SUCCESS' }))
+          .catch((failure: unknown) => void swallowed.push(failure));
+        return 'business change done';
+      }),
+    );
+    expect(swallowed).toEqual([expect.objectContaining({ kind: 'INVALID_ENTRY' })]);
+    expect((error as DbError).toJSON()).toEqual({
+      status: 500,
+      code: 'AUDIT_WRITE_FAILED',
+      reason: 'AUDIT_WRITE_FAILED',
+      retryable: false,
+    });
+    expect(await count('public.writer_it_addresses WHERE id = $1', [id])).toBe(0);
+    expect(await count('public.audit_entries WHERE entity_id = $1', [id])).toBe(0);
+  });
+
+  it('[PR42-SEC-02] a swallowed head-row lock timeout answers 503 instead of resolving, and nothing persists', async () => {
+    const org = uuidv7();
+    await runner.withTenantTx(tenant(org), (db) => writer.write(db, createAddress(org, randomUUID())));
+    const holder = await pgh.superuser(database);
+    const id = randomUUID();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM public.audit_stream_heads WHERE stream_id = $1 FOR UPDATE', [org]);
+      const error = await rejection(
+        runner.withTenantTx(tenant(org), async (db) => {
+          await insertAddress(db, org, id);
+          await writer.write(db, createAddress(org, id)).catch(() => undefined);
+          return 'ok';
+        }),
+      );
+      expect(error).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE', reason: 'AUDIT_LOCK_TIMEOUT', retryable: true });
+      expect(await count('public.writer_it_addresses WHERE id = $1', [id])).toBe(0);
+    } finally {
+      await holder.query('ROLLBACK');
+      await holder.end();
+    }
+    expect(await count('public.audit_entries WHERE entity_id = $1', [id])).toBe(0);
+  });
+
+  it('[PR42-SEC-12] a lone surrogate in business data is stored as U+FFFD and the hash recomputes from the stored row', async () => {
+    const org = uuidv7();
+    const id = randomUUID();
+    const lone = String.fromCharCode(0xd800);
+    const written = await runner.withTenantTx(tenant(org), (db) =>
+      writer.write(db, createAddress(org, id, { newValue: { city: `Pune${lone}`, [`k${lone}`]: 1 } })),
+    );
+    const [row] = await stored('entity_id', id);
+    const fffd = String.fromCharCode(0xfffd);
+    expect(row?.['new_value']).toEqual({ city: `Pune${fffd}`, [`k${fffd}`]: 1 });
+    expect(recomputed(row as StoredEntry)).toBe(written.entryHash);
   });
 });

@@ -107,8 +107,9 @@ interface KeyState {
   tail: Waiter | undefined;
 }
 
+/** Wait timers are `unref`'d (R1-n7): a queued waiter never holds the process open at shutdown. */
 const GLOBAL_TIMERS: AdmissionTimers = {
-  setTimeout: (callback, ms) => setTimeout(callback, ms),
+  setTimeout: (callback, ms) => setTimeout(callback, ms).unref(),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 

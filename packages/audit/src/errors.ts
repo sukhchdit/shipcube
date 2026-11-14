@@ -29,6 +29,8 @@ export type AuditFailureKind =
   | 'TOKENISER_UNAVAILABLE'
   /** The tokeniser returned a token list that does not match the value list. */
   | 'TOKENISER_FAILED'
+  /** The `ip_hash` index threw or returned a malformed key id or digest (an infrastructure fault, not the caller's; R1-n4). */
+  | 'IP_INDEX_FAILED'
   /** The stream head moved under the lock (expectAffected(1) mismatch; impossible unless the head was tampered with). */
   | 'HEAD_MOVED'
   /** The head row is missing after it was created (impossible unless the head was deleted concurrently). */
@@ -44,6 +46,12 @@ export type AuditFailureKind =
 export const AUDIT_RETRY_AFTER_SECONDS = 1;
 
 const causes = new WeakMap<AuditWriteError, unknown>();
+
+/**
+ * Brand of every `AuditWriteError` (R1-n6): a registry symbol, so {@link isAuditWriteError} also recognises an error
+ * built by a second copy of this module (source and dist loaded side by side), where `instanceof` would not.
+ */
+const BRAND = Symbol.for('platform.audit.AuditWriteError');
 
 export class AuditWriteError extends Error {
   readonly reason: AuditErrorReason;
@@ -69,6 +77,7 @@ export class AuditWriteError extends Error {
     if (options.sqlState !== undefined) this.sqlState = options.sqlState;
     if (options.field !== undefined) this.field = options.field;
     if (options.cause !== undefined) causes.set(this, options.cause);
+    Object.defineProperty(this, BRAND, { value: true });
   }
 
   /** The safe view (what a log line may carry). */
@@ -87,7 +96,7 @@ export class AuditWriteError extends Error {
 }
 
 export function isAuditWriteError(value: unknown): value is AuditWriteError {
-  return value instanceof AuditWriteError;
+  return typeof value === 'object' && value !== null && Reflect.get(value, BRAND) === true;
 }
 
 /** The original failure behind an `AuditWriteError`, for the redacting server log only (never a response). */
@@ -129,7 +138,7 @@ function databaseFailure(error: unknown): { readonly sqlState?: string; readonly
  * `DATABASE_ERROR`).
  */
 export function toAuditWriteError(error: unknown, fallback: AuditFailureKind = 'DATABASE_ERROR'): AuditWriteError {
-  if (error instanceof AuditWriteError) return error;
+  if (isAuditWriteError(error)) return error;
   const { sqlState, message } = databaseFailure(error);
   if (sqlState === undefined) return new AuditWriteError(fallback, { cause: error });
   const options = { sqlState, cause: error };

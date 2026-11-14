@@ -23,20 +23,27 @@
  *
  * SQL rules (data-model §5.4 (a)-(f), §8.3): built-ins are `pg_catalog.`-qualified except multi-argument `unnest` and
  * `extract(… FROM …)` (keyword syntax); no `RETURNING` on the append; arrays and bytea travel as typed parameters
- * (`$n::uuid[]`, hex `text[]` decoded in SQL), never as `Prisma.join` / `Prisma.sql` fragments, which `TenantDb`
- * refuses; the zero hash is `decode(repeat('00', 32), 'hex')`, never a text expression (42804, D-ARCH-087).
+ * (`$n::uuid[]`; bytea arrays as hex `text[]` decoded in SQL, D-TASK025-12), never as `Prisma.join` / `Prisma.sql`
+ * fragments, which `TenantDb` refuses; the zero hash is `decode(repeat('00', 32), 'hex')`, never a text expression (42804, D-ARCH-087).
  */
 import type { PiiClassification } from '../actions.js';
 import { type AuditRowDraft, type ChainPosition, computeEntryHash, formatMicros, nextOccurredAt } from '../entry-hash.js';
 import { AuditWriteError } from '../errors.js';
 
 /**
- * The two raw methods of the business transaction's `TenantDb` (tagged templates only; every value is bound). A
- * `TenantDb<AppTransactionClient>` satisfies it structurally.
+ * The two raw methods of the business transaction's `TenantDb` (tagged templates only; every value is bound) and its
+ * rollback-only latch. A `TenantDb<AppTransactionClient>` satisfies it structurally. A function taking this port runs
+ * inside the transaction, so it is a T-83 root (PR42-SEC-07): no external I/O or sleeps in it.
  */
 export interface AuditSqlPort {
   $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): PromiseLike<T>;
   $executeRaw(query: TemplateStringsArray, ...values: unknown[]): PromiseLike<number>;
+  /**
+   * Marks the enclosing transaction rollback-only (PR42-SEC-02): the transaction owner refuses to commit it even when
+   * the callback returns normally (`withTenantTx` rethrows the first marked failure, so Prisma rolls back). The
+   * writer calls it on every failure before throwing.
+   */
+  markRollbackOnly(failure: Error): void;
 }
 
 export interface AppendOptions {
@@ -191,6 +198,12 @@ function vaultBatch(rows: readonly VaultRow[]) {
 export function createPrismaAuditStore(options: PrismaAuditStoreOptions = {}): AuditStore {
   const hash = options.hash ?? computeEntryHash;
 
+  /**
+   * Statement 2, and 2b + 2 for the first entry of a stream. R1-n1: when statement 2 returns no row, whether its CTE
+   * (the audit `lock_timeout`) ran depends on the plan, so 2b, which can wait on a concurrent first inserter of the
+   * same head, runs under the transaction's `DB_TX_LOCK_TIMEOUT_MS` (2 s), not the audit 250 ms; once per stream.
+   * TASK-030 E2 covers 2b.
+   */
   async function lockedHead(db: AuditSqlPort, row: AuditRowDraft, timeout: string, actor: string): Promise<HeadRow> {
     const [head] = await lockHead(db, row.streamId, timeout);
     if (head !== undefined) return head;

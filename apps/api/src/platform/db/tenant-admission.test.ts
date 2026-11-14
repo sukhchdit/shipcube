@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
 import { DbError } from './map-db-error.js';
 import {
@@ -291,5 +291,32 @@ describe('[D-ARCH-086] tenant admission bulkhead', () => {
     gate.resolve();
     await holder;
     expect(admission.snapshot()).toMatchObject({ keys: 0, rejectedTotal: { wait: 1 } });
+  });
+});
+
+describe('[PR #42 R1-n7] default timers', () => {
+  it("a queued waiter's wait timer is unref'd, so it never holds the process open at shutdown", async () => {
+    const handles: Array<ReturnType<typeof setTimeout>> = [];
+    const real = globalThis.setTimeout;
+    const spy = jest.spyOn(globalThis, 'setTimeout').mockImplementation((callback: () => void, ms?: number) => {
+      const handle = real(callback, ms);
+      handles.push(handle);
+      return handle;
+    });
+    try {
+      const admission = createTenantAdmission({ maxConcurrentTx: 1, waitMs: 1_000 });
+      const key = admissionKeyOf(randomUUID(), 'TENANT');
+      const gate = deferred();
+      const holder = admission.run(key, () => gate.promise);
+      const waiter = admission.run(key, () => Promise.resolve('admitted'));
+      await flush();
+      expect(handles).toHaveLength(1);
+      expect(handles[0]?.hasRef()).toBe(false);
+      gate.resolve();
+      await holder;
+      await expect(waiter).resolves.toBe('admitted');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

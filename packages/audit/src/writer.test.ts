@@ -162,8 +162,10 @@ describe('[US-088] audit writer (one call per complete entry; ADR-0007 am. 10 it
         },
       },
     });
+    // R1-n4: an IP-index failure is an infrastructure fault, not a caller bug.
     await expect(indexed.write(sql, { ...CREATE, origin: { ...CREATE.origin, ip: '203.0.113.9' } })).rejects.toMatchObject({
-      kind: 'INVALID_ENTRY',
+      kind: 'IP_INDEX_FAILED',
+      reason: 'AUDIT_WRITE_FAILED',
     });
     expect(sql.statements).toHaveLength(0);
   });
@@ -178,5 +180,133 @@ describe('[US-088] audit writer (one call per complete entry; ADR-0007 am. 10 it
 
   it('refuses a non-positive lock timeout at construction', () => {
     expect(() => createAuditWriter({ store: recordingStore().store, lockTimeoutMs: 0 })).toThrow(RangeError);
+  });
+});
+
+describe('[PR42-SEC-02] every refusal marks the transaction rollback-only before it is thrown', () => {
+  const withIp: AuditEntryInput = { ...CREATE, origin: { ...CREATE.origin, ip: '203.0.113.9' } };
+  const cases: Array<[string, () => { readonly writer: ReturnType<typeof createAuditWriter>; readonly entry: AuditEntryInput }, string]> = [
+    [
+      'INVALID_ENTRY',
+      () => ({
+        writer: createAuditWriter({ store: recordingStore().store, lockTimeoutMs: 250 }),
+        entry: { ...CREATE, outcome: 'OK' as 'SUCCESS' },
+      }),
+      'INVALID_ENTRY',
+    ],
+    [
+      'TOKENISER_UNAVAILABLE',
+      () => ({ writer: createAuditWriter({ store: recordingStore().store, lockTimeoutMs: 250 }), entry: withIp }),
+      'TOKENISER_UNAVAILABLE',
+    ],
+    [
+      'TOKENISER_FAILED',
+      () => ({
+        writer: createAuditWriter({
+          store: recordingStore().store,
+          lockTimeoutMs: 250,
+          tokeniser: { tokenise: () => Promise.resolve([]) },
+        }),
+        entry: withIp,
+      }),
+      'TOKENISER_FAILED',
+    ],
+    [
+      'HEAD_MOVED',
+      () => ({
+        writer: createAuditWriter({ store: recordingStore(Promise.reject(new AuditWriteError('HEAD_MOVED'))).store, lockTimeoutMs: 250 }),
+        entry: CREATE,
+      }),
+      'HEAD_MOVED',
+    ],
+    [
+      'LOCK_TIMEOUT',
+      () => ({
+        writer: createAuditWriter({ store: recordingStore(Promise.reject(driverError('55P03'))).store, lockTimeoutMs: 250 }),
+        entry: CREATE,
+      }),
+      'LOCK_TIMEOUT',
+    ],
+    [
+      'IP_INDEX_FAILED',
+      () => ({
+        writer: createAuditWriter({
+          store: recordingStore().store,
+          lockTimeoutMs: 250,
+          ipIndex: {
+            keyId: 'audit-index-v1',
+            hash: () => {
+              throw new Error('hmac');
+            },
+          },
+        }),
+        entry: withIp,
+      }),
+      'IP_INDEX_FAILED',
+    ],
+  ];
+
+  it.each(cases)('%s', async (_label, build, kind) => {
+    const sql = fakeSql();
+    const { writer, entry } = build();
+    const thrown = await writer.write(sql, entry).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(thrown).toMatchObject({ kind });
+    expect(sql.marked).toHaveLength(1);
+    expect(sql.marked[0]).toBe(thrown);
+  });
+
+  it('a successful write marks nothing', async () => {
+    const sql = fakeSql();
+    await createAuditWriter({ store: recordingStore().store, lockTimeoutMs: 250 }).write(sql, CREATE);
+    expect(sql.marked).toEqual([]);
+  });
+});
+
+describe('[PR #42 R1-m2 / PR42-SEC-03] the row is assembled from the validated snapshot, not the caller graph', () => {
+  it('mutations of the input during the tokeniser round trip never reach the stored row', async () => {
+    const { store, calls } = recordingStore();
+    const newValue: Record<string, unknown> = { city: 'Pune', nested: { street: 'MG Road' } };
+    const origin = { ...CREATE.origin, ip: '203.0.113.9' };
+    const input = { ...CREATE, action: 'LOGIN_FAILED' as const, outcome: 'DENIED' as const, origin, newValue } as AuditEntryInput;
+    const mutable = input as unknown as Record<string, unknown>;
+    const tokeniser: PiiTokeniser = {
+      tokenise: (_db, values) => {
+        mutable['outcome'] = 'SUCCESS';
+        newValue['owner'] = { $pii: TOKEN };
+        newValue['nested'] = new Date(0);
+        newValue['city'] = `x${String.fromCharCode(0)}`;
+        (origin as Record<string, unknown>)['correlationId'] = 'bad';
+        return Promise.resolve(values.map(() => TOKEN));
+      },
+    };
+    await createAuditWriter({ store, lockTimeoutMs: 250, tokeniser, newId: () => ID }).write(fakeSql(), input);
+    expect(calls[0]?.row).toMatchObject({
+      outcome: 'DENIED',
+      correlationId: 'corr-0001-writer',
+      newValue: { city: 'Pune', nested: { street: 'MG Road' } },
+    });
+    expect(Object.keys(calls[0]?.row.newValue as object)).toEqual(['city', 'nested']);
+  });
+
+  it('the tokeniser receives the writer-owned copies, so swapping a value in them cannot change the row either', async () => {
+    const { store, calls } = recordingStore();
+    const seen: PiiValue[][] = [];
+    const tokeniser: PiiTokeniser = {
+      tokenise: (_db, values) => {
+        seen.push([...values]);
+        expect(Object.isFrozen(values)).toBe(true);
+        expect(values.every((value) => Object.isFrozen(value))).toBe(true);
+        return Promise.resolve(values.map(() => TOKEN));
+      },
+    };
+    await createAuditWriter({ store, lockTimeoutMs: 250, tokeniser }).write(fakeSql(), {
+      ...CREATE,
+      origin: { ...CREATE.origin, ip: '203.0.113.9' },
+    });
+    expect(seen[0]?.map((value) => value.field)).toEqual(['ip']);
+    expect(calls[0]?.row.ipToken).toBe(TOKEN);
   });
 });

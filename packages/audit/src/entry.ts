@@ -177,12 +177,39 @@ const NAME = /^[a-z][a-z0-9_]{0,62}$/;
 const ROLE_KEY = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
 const JOB_NAME = /^[a-z][a-z0-9_.:-]{0,63}$/;
 const KEY_ID = /^[a-z][a-z0-9-]*-v[0-9]+$/;
-const ROUTE = /^\/[\x21-\x7e]{0,255}$/;
 const HTTP_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
+/*
+ * Shapes of the clear-text columns that reach the immutable, hash-chained row (PR42-SEC-04). Each is one bounded
+ * character class without nested quantifiers (linear time). They refuse the shapes that carry personal data: a query
+ * string, an e-mail address, a raw user agent. TASK-029 supplies these values from the descriptor and a parser.
+ */
+/** One segment of a route TEMPLATE: a literal, `:param` or `{param}` (never a concrete value with `@`, `?`, `%`). */
+const ROUTE_SEGMENT = /^(?:[a-z0-9._~-]{1,64}|:[A-Za-z][A-Za-z0-9_]{0,62}|\{[A-Za-z][A-Za-z0-9_]{0,62}\})$/;
+const MAX_ROUTE_LENGTH = 256;
+/** An entity identifier (UUID, code, number): no `@`, `+`, space, `/`, `?`. */
+const ENTITY_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
+/** Browser family and major version / OS family, e.g. `Firefox 146 / Windows`: no `;`, `,`, `@` (a raw user agent). */
+const UA_PARSED = /^[A-Za-z0-9][A-Za-z0-9 ._()/-]{0,119}$/;
+/** An object key that may appear in an INVALID_ENTRY field path (R1-n3); other keys are logged as `{key}`. */
+const PATH_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 /** A lone surrogate is refused by JCS (RFC 8785 §3.2.2.2). */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-/** NUL (U+0000) is not storable in `text`/`jsonb` (22P05), and a lone surrogate cannot be canonicalised. */
-const unstorable = (value: string): boolean => value.includes(String.fromCharCode(0)) || LONE_SURROGATE.test(value);
+const LONE_SURROGATES = new RegExp(LONE_SURROGATE.source, 'g');
+const REPLACEMENT_CHARACTER = String.fromCharCode(0xfffd);
+const NUL = String.fromCharCode(0);
+
+/**
+ * `String.prototype.toWellFormed` (ES2024; the repository's lib is ES2023): every lone surrogate becomes U+FFFD, which
+ * is also what PostgreSQL stores for the driver's UTF-8 encoding of such a string, so the hashed row and the stored
+ * row agree (PR #42 R1-m3, PR42-SEC-12, D-TASK025-13). A lone surrogate is valid JSON and Joi accepts it, so refusing
+ * it here would give any client a 500 at will.
+ */
+export function wellFormed(value: string): string {
+  return LONE_SURROGATE.test(value) ? value.replace(LONE_SURROGATES, REPLACEMENT_CHARACTER) : value;
+}
+
+/** NUL (U+0000) is not storable in `text`/`jsonb` (22P05): refused (the HTTP boundary owns the 400, D-TASK025-13). */
+const hasNul = (value: string): boolean => value.includes(NUL);
 const RESERVED_ACTORS: ReadonlySet<string> = new Set([SYSTEM_ACTOR_ID, ANONYMOUS_ACTOR_ID]);
 /** Entity and field of the entry's own personal columns in the vault. */
 const OWN_ENTITY = 'audit_entry';
@@ -204,9 +231,15 @@ function optionalUuid(value: unknown, field: string): string | null {
   return value === undefined || value === null ? null : uuid(value, field);
 }
 
+/** A storable string: well-formed (lone surrogates become U+FFFD) and without NUL. */
+function storable(value: string, field: string): string {
+  if (hasNul(value)) throw invalid(field);
+  return wellFormed(value);
+}
+
 function boundedText(value: unknown, field: string, max: number): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > max || unstorable(value)) throw invalid(field);
-  return value;
+  if (typeof value !== 'string' || value.length === 0 || value.length > max) throw invalid(field);
+  return storable(value, field);
 }
 
 function optionalText(value: unknown, field: string, max: number): string | null {
@@ -224,18 +257,26 @@ function truncateCodePoints(value: string, max: number): string {
   return points.length <= max ? value : points.slice(0, max).join('');
 }
 
-function checkSubject(subject: DataSubjectRef | null, field: string): void {
-  if (subject === null) return;
-  if (typeof subject !== 'object' || (subject.kind !== 'USER' && subject.kind !== 'CONTACT')) throw invalid(`${field}.kind`);
-  uuid(subject.refId, `${field}.refId`);
+/** A validated, frozen copy of a data subject reference (each property read once). */
+function copySubject(subject: unknown, field: string): DataSubjectRef | null {
+  if (subject === undefined || subject === null) return null;
+  if (typeof subject !== 'object') throw invalid(`${field}.kind`);
+  const { kind, refId } = subject as { readonly kind?: unknown; readonly refId?: unknown };
+  if (kind !== 'USER' && kind !== 'CONTACT') throw invalid(`${field}.kind`);
+  return Object.freeze({ kind, refId: uuid(refId, `${field}.refId`) });
 }
 
-function checkPiiValue(value: PiiValue, field: string): void {
-  matching(value.entityName, NAME, `${field}.entityName`);
-  matching(value.field, NAME, `${field}.field`);
-  if (!isPiiClassification(value.classification)) throw invalid(`${field}.classification`);
-  boundedText(value.value, `${field}.value`, MAX_PII_VALUE_LENGTH);
-  checkSubject(value.subject, `${field}.subject`);
+/** The writer's own validated copy of a personal value (each property read once; the copy is what is tokenised). */
+function copyPiiValue(value: PiiValue, field: string): PiiValue {
+  const { entityName, field: name, classification, value: text, subject } = value;
+  if (!isPiiClassification(classification)) throw invalid(`${field}.classification`);
+  return new PiiValue({
+    entityName: matching(entityName, NAME, `${field}.entityName`),
+    field: matching(name, NAME, `${field}.field`),
+    classification,
+    value: boundedText(text, `${field}.value`, MAX_PII_VALUE_LENGTH),
+    subject: copySubject(subject, `${field}.subject`),
+  });
 }
 
 function isPlainObject(value: object): boolean {
@@ -248,34 +289,60 @@ interface WalkState {
   readonly pii: PiiValue[];
 }
 
-/** Validates a JSON value and collects its personal values in traversal order (keys sorted, as JCS sorts them). */
-function collect(value: AuditValue, field: string, depth: number, state: WalkState): void {
+/**
+ * The INVALID_ENTRY field path of an object member (R1-n3): the keys of the top-level object are schema field names
+ * and stay readable; deeper keys, and any key outside {@link PATH_KEY}, are business data and appear as `{key}`.
+ */
+const memberPath = (path: string, key: string, depth: number): string => `${path}.${depth === 0 && PATH_KEY.test(key) ? key : '{key}'}`;
+
+/** Code-unit order (what JCS sorts by, RFC 8785 §3.2.3). */
+const byCodeUnits = (a: readonly [string, string], b: readonly [string, string]): number => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+
+/** Writes an own enumerable data property (a `__proto__` key, which JSON.parse makes an own key, stays a plain key). */
+function defineMember(target: object, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: false, configurable: false });
+}
+
+/**
+ * Validates a JSON value and returns its frozen SNAPSHOT (PR #42 R1-m2, PR42-SEC-03): every node of the caller's value
+ * is read exactly once, strings and keys are normalised ({@link wellFormed}), each personal value is replaced by the
+ * writer's own copy and collected in traversal order (keys sorted by code units, as JCS sorts them). The row is later
+ * assembled from the snapshot only, so a caller mutation after validation (during the tokeniser round trip, or from
+ * an accessor answering differently on a second read) cannot reach the row or the chain.
+ */
+function collect(value: unknown, path: string, depth: number, state: WalkState): AuditValue {
   state.nodes += 1;
-  if (state.nodes > MAX_JSON_NODES || depth > MAX_JSON_DEPTH) throw invalid(field);
-  if (value === null || typeof value === 'boolean') return;
+  if (state.nodes > MAX_JSON_NODES || depth > MAX_JSON_DEPTH) throw invalid(path);
+  if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw invalid(field);
-    return;
+    if (!Number.isFinite(value)) throw invalid(path);
+    return value;
   }
-  if (typeof value === 'string') {
-    if (unstorable(value)) throw invalid(field);
-    return;
-  }
+  if (typeof value === 'string') return storable(value, path);
   if (value instanceof PiiValue) {
-    checkPiiValue(value, field);
-    state.pii.push(value);
-    return;
+    const copy = copyPiiValue(value, path);
+    state.pii.push(copy);
+    return copy;
   }
   if (Array.isArray(value)) {
-    value.forEach((item: AuditValue, index) => collect(item, `${field}[${String(index)}]`, depth + 1, state));
-    return;
+    const items: readonly unknown[] = value;
+    const length = items.length;
+    const out: AuditValue[] = [];
+    for (let index = 0; index < length; index += 1) out.push(collect(items[index], `${path}[${String(index)}]`, depth + 1, state));
+    return Object.freeze(out);
   }
-  if (typeof value !== 'object' || !isPlainObject(value)) throw invalid(field);
-  const record = value as { readonly [key: string]: AuditValue };
-  for (const key of Object.keys(record).sort()) {
-    if (key === PII_MARKER || unstorable(key)) throw invalid(field);
-    collect(record[key] as AuditValue, `${field}.${key}`, depth + 1, state);
-  }
+  if (typeof value !== 'object' || !isPlainObject(value)) throw invalid(path);
+  const record = value as Readonly<Record<string, unknown>>;
+  const keys = Object.keys(record)
+    .map((key): readonly [string, string] => [storable(key, path), key])
+    .sort(byCodeUnits);
+  const out = {};
+  keys.forEach(([key, original], index) => {
+    // A forged token marker, or two keys that normalise to the same text, is refused.
+    if (key === PII_MARKER || (index > 0 && keys[index - 1]?.[0] === key)) throw invalid(path);
+    defineMember(out, key, collect(record[original], memberPath(path, key, depth), depth + 1, state));
+  });
+  return Object.freeze(out);
 }
 
 /** Replaces each personal value by `{"$pii": token}`, in the traversal order of {@link collect}. */
@@ -359,66 +426,114 @@ function organisation(value: unknown, field: string): string | null {
   return value === '' ? null : optionalUuid(value, field);
 }
 
+/** `ip_hash` and its key id; a failing or malformed index is `IP_INDEX_FAILED`, an infrastructure fault (R1-n4). */
 function ipHash(index: IpIndex | undefined, ip: string | null): { readonly ipHash: string | null; readonly ipHashKeyId: string | null } {
   if (ip === null || index === undefined) return { ipHash: null, ipHashKeyId: null };
-  const keyId = matching(index.keyId, KEY_ID, 'ipIndex.keyId');
-  const digest = index.hash(ip);
-  if (!(digest instanceof Uint8Array) || digest.length !== 32) throw invalid('ipIndex.hash');
+  let keyId: unknown;
+  let digest: unknown;
+  try {
+    keyId = index.keyId;
+    digest = index.hash(ip);
+  } catch (error) {
+    throw new AuditWriteError('IP_INDEX_FAILED', { cause: error });
+  }
+  if (typeof keyId !== 'string' || !KEY_ID.test(keyId)) throw new AuditWriteError('IP_INDEX_FAILED');
+  if (!(digest instanceof Uint8Array) || digest.length !== 32) throw new AuditWriteError('IP_INDEX_FAILED');
   return { ipHash: Buffer.from(digest).toString('hex'), ipHashKeyId: keyId };
 }
 
 /** The owner of the entry's own personal fields: the explicit subject, else the USER actor, else none. */
-function ownSubject(input: AuditEntryInput, userId: string | null, actorType: string): DataSubjectRef | null {
-  if (input.subject !== undefined && input.subject !== null) return input.subject;
-  return actorType === 'USER' && userId !== null ? { kind: 'USER', refId: userId } : null;
+function ownSubject(subject: unknown, userId: string | null, actorType: string): DataSubjectRef | null {
+  if (subject !== undefined && subject !== null) return copySubject(subject, 'subject');
+  return actorType === 'USER' && userId !== null ? Object.freeze({ kind: 'USER', refId: userId }) : null;
+}
+
+/** `origin.route`: a route template (PR42-SEC-04), never a concrete URL. */
+function routeTemplate(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || value.length > MAX_ROUTE_LENGTH || !value.startsWith('/')) throw invalid('origin.route');
+  if (
+    value !== '/' &&
+    !value
+      .slice(1)
+      .split('/')
+      .every((segment) => ROUTE_SEGMENT.test(segment))
+  )
+    throw invalid('origin.route');
+  return value;
+}
+
+/** A clear-text column in its shape (PR42-SEC-04), after the storable-text checks. */
+function shaped(value: unknown, field: string, max: number, pattern: RegExp): string | null {
+  const text = optionalText(value, field, max);
+  if (text !== null && !pattern.test(text)) throw invalid(field);
+  return text;
 }
 
 /**
  * Validates an entry and returns its personal values plus the function that assembles the row once their tokens are
- * known. Throws `AuditWriteError` INVALID_ENTRY.
+ * known. Throws `AuditWriteError` INVALID_ENTRY (IP_INDEX_FAILED for a failing IP index).
+ *
+ * Every property of the input is read exactly once, and the row is assembled from the validated copies only (PR #42
+ * R1-m2, PR42-SEC-03): mutating the input after this call returns changes nothing that {@link PreparedEntry.complete}
+ * produces.
  */
 export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): PreparedEntry {
   if (typeof input !== 'object' || (input as unknown) === null) throw invalid('entry');
-  if (!isAuditEntryAction(input.action)) throw invalid('action');
-  if (!isAuditOutcome(input.outcome)) throw invalid('outcome');
-  if (DENIED_ONLY_ACTIONS.has(input.action) && input.outcome !== 'DENIED') throw invalid('outcome');
+  const { action, outcome, oldValue, newValue, details } = input;
+  if (!isAuditEntryAction(action)) throw invalid('action');
+  if (!isAuditOutcome(outcome)) throw invalid('outcome');
+  if (DENIED_ONLY_ACTIONS.has(action) && outcome !== 'DENIED') throw invalid('outcome');
   const entityName = matching(input.entityName, NAME, 'entityName');
-  const entityId = optionalText(input.entityId, 'entityId', MAX_ENTITY_ID_LENGTH);
+  const entityId = shaped(input.entityId, 'entityId', MAX_ENTITY_ID_LENGTH, ENTITY_ID);
   const orgId = organisation(input.orgId, 'orgId');
   const targetOrgId = organisation(input.targetOrgId, 'targetOrgId');
   const actor = actorColumns(input.actor);
 
-  const origin = input.origin;
-  if (typeof origin !== 'object' || (origin as unknown) === null) throw invalid('origin');
-  if (!isAuditSourceApp(origin.sourceApp)) throw invalid('origin.sourceApp');
-  if (!isCorrelationId(origin.correlationId)) throw invalid('origin.correlationId');
-  const ip = origin.ip === undefined || origin.ip === null ? null : canonicalIp(String(origin.ip));
-  if (ip === null && origin.ip !== undefined && origin.ip !== null) throw invalid('origin.ip');
+  const origin: unknown = input.origin;
+  if (typeof origin !== 'object' || origin === null) throw invalid('origin');
+  const {
+    sourceApp,
+    correlationId,
+    ip: rawIp,
+    userAgent: rawUserAgent,
+    uaParsed: rawUaParsed,
+    httpMethod: rawMethod,
+    route: rawRoute,
+  } = origin as AuditOrigin;
+  if (!isAuditSourceApp(sourceApp)) throw invalid('origin.sourceApp');
+  if (!isCorrelationId(correlationId)) throw invalid('origin.correlationId');
+  const ip = rawIp === undefined || rawIp === null ? null : canonicalIp(String(rawIp));
+  if (ip === null && rawIp !== undefined && rawIp !== null) throw invalid('origin.ip');
   const userAgent =
-    origin.userAgent === undefined || origin.userAgent === null || origin.userAgent === ''
+    rawUserAgent === undefined || rawUserAgent === null || rawUserAgent === ''
       ? null
-      : boundedText(truncateCodePoints(origin.userAgent, MAX_USER_AGENT_LENGTH), 'origin.userAgent', MAX_USER_AGENT_LENGTH * 2);
-  const uaParsed = optionalText(origin.uaParsed, 'origin.uaParsed', MAX_UA_PARSED_LENGTH);
-  const httpMethod = origin.httpMethod === undefined || origin.httpMethod === null ? null : String(origin.httpMethod);
+      : boundedText(
+          typeof rawUserAgent === 'string' ? truncateCodePoints(rawUserAgent, MAX_USER_AGENT_LENGTH) : rawUserAgent,
+          'origin.userAgent',
+          MAX_USER_AGENT_LENGTH * 2,
+        );
+  const uaParsed = shaped(rawUaParsed, 'origin.uaParsed', MAX_UA_PARSED_LENGTH, UA_PARSED);
+  const httpMethod = rawMethod === undefined || rawMethod === null ? null : String(rawMethod);
   if (httpMethod !== null && !HTTP_METHODS.has(httpMethod)) throw invalid('origin.httpMethod');
-  const route = origin.route === undefined || origin.route === null ? null : matching(origin.route, ROUTE, 'origin.route');
+  const route = routeTemplate(rawRoute);
   const reason = optionalText(input.reason, 'reason', MAX_REASON_LENGTH);
 
   const absent = (value: AuditValue | undefined): boolean => value === undefined || value === null;
-  if (input.action === 'STATE_TRANSITION' && (absent(input.oldValue) || absent(input.newValue))) {
-    throw invalid(absent(input.oldValue) ? 'oldValue' : 'newValue');
+  if (action === 'STATE_TRANSITION' && (absent(oldValue) || absent(newValue))) {
+    throw invalid(absent(oldValue) ? 'oldValue' : 'newValue');
   }
   const state: WalkState = { nodes: 0, pii: [] };
-  const values: Array<readonly [string, AuditValue | null]> = [
-    ['oldValue', input.oldValue ?? null],
-    ['newValue', input.newValue ?? null],
-    ['details', input.details ?? null],
-  ];
-  for (const [field, value] of values) collect(value, field, 0, state);
+  const snapshots = (
+    [
+      ['oldValue', oldValue],
+      ['newValue', newValue],
+      ['details', details],
+    ] as const
+  ).map(([field, value]) => (value === undefined || value === null ? null : collect(value, field, 0, state)));
   const jsonPiiCount = state.pii.length;
 
-  const subject = ownSubject(input, actor.userId, actor.actorType);
-  checkSubject(subject, 'subject');
+  const subject = ownSubject(input.subject, actor.userId, actor.actorType);
   const own = (field: string, value: string | null): PiiValue | null =>
     value === null ? null : pii({ entityName: OWN_ENTITY, field, classification: 'PERSONAL', value, subject });
   const ownValues = [own('ip', ip), own('user_agent', userAgent), own('reason', reason)];
@@ -440,7 +555,7 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
       });
       let cursor = 0;
       const next = (): string => checked[cursor++] as string;
-      const [oldValue, newValue, details] = values.map(([, value]) => (value === null ? null : substitute(value, next))) as [
+      const [oldJson, newJson, detailsJson] = snapshots.map((snapshot) => (snapshot === null ? null : substitute(snapshot, next))) as [
         JsonValue | null,
         JsonValue | null,
         JsonValue | null,
@@ -461,20 +576,20 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
         ipCoarse: ip === null ? null : coarseNetwork(ip),
         userAgentToken: userAgentToken ?? null,
         uaParsed,
-        sourceApp: origin.sourceApp,
-        correlationId: origin.correlationId,
-        action: input.action,
+        sourceApp,
+        correlationId,
+        action,
         entityName,
         entityId,
-        outcome: input.outcome,
+        outcome,
         reasonToken: reasonToken ?? null,
         reauthProofId: null,
         signatureMeaning: null,
         httpMethod,
         route,
-        oldValue,
-        newValue,
-        details,
+        oldValue: oldJson,
+        newValue: newJson,
+        details: detailsJson,
         piiTokenCount: checked.length,
         hashVersion: HASH_VERSION,
       });
