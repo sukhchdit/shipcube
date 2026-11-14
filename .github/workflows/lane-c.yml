@@ -418,7 +418,8 @@ jobs:
           PROFILE: ${{ inputs.profile }}
         run: |
           echo "profile=$PROFILE results: $RESULTS"
-          for result in $RESULTS; do
+          read -r -a results <<< "$RESULTS"
+          for result in "${results[@]}"; do
             if [ "$result" != "success" ]; then
               echo "Lane C ($PROFILE) is not green: $RESULTS" >> "$GITHUB_STEP_SUMMARY"
               exit 1
