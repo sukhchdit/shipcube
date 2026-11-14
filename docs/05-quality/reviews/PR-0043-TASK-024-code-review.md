@@ -144,3 +144,131 @@ The following are closed, verified by code, fixtures and mutants:
 - #39 (TASK-014): the image COPYs `sql-text.ts`, and its imports are unchanged.
 - #40: no overlap.
 - 020-C: if it adds tenant routes, it needs R1-M2's executable cases.
+
+
+---
+
+# Round 2 (head 585f163)
+
+- **Head reviewed:** `585f163` (evidence commit). The code head is `9d679f0`. Merge base with main is `c998fae`; main is now at `4a60ca6` (#45).
+- **Reviewer:** code-reviewer (round 2, delta after fix cycle 1), 2026-11-14
+- **Inputs:**
+  - the fix-cycle comment (issuecomment-6874036152)
+  - the PR body D-TASK024-12..18
+  - evidence `20261114T0725Z_9d679f0`
+  - lane A run 43572039629
+  - the round-1 probe kit (`review/PR-43-cr/probe1-3.mts`), plus new probes and mutants in `review/PR-43-cr2/`
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Both round-1 MAJORs are fixed and pinned. The splitter opens blocks only on BEGIN ATOMIC and fails closed (rule L).
+  All 55 tracked non-fixture SQL files split identically on main, r1 and head. API_CASES is an executable map, and the runner behaves correctly against a fake server.
+  One MINOR residual: a reserved-word label (`AS case`, `t.case`) plus a top-level END resync can still hide statements. Deliberate only; fix cheaply here or route.
+FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR (R2-m1), 3 NIT (§R2.3)
+```
+
+## R2.1 What I verified myself
+
+Constraints: read-only, no Docker, light commands only. Every Node command ran on Node 24 with the fnm prefix, and test paths were passed before `--selectProjects`.
+
+| Check | Result |
+|---|---|
+| Lane A, run 43572039629 on `585f163` | `fast-lane` success. `scans` is red at one step only, "Security-owned paths need a review record", because the r1 security record names `8ac271d`. `ci-gate` is red as its aggregate. PR mergeable (UNSTABLE only for that reason). |
+| Targeted unit suites on the head (worktree): `tools/db/` (all), `generator.test`, `check-workflow-policy.test`, `scans-dynamic-sql.test` | 17 suites, **655 passed**, 0 failed |
+| Round-1 probes re-run on the new splitter (`probe1-3.mts`) | P1 `begin` parameter: 1 → **4** statements, findings 8/14/14, identical to the control. `RETURNS TABLE (begin …)`: 2 statements, 14. Function named `begin`: 2 statements, findings equal the control. `down.sql`: 17 + 11c. `END;` resync: **4** statements (`… GRANT TRUNCATE …` and `END` are separate). P1c: two 11c. CTE and VALUES `set_config('lock_timeout', …, false)`: rule 11. `EXECUTE function;`: rule 16. E-string at nesting 5 and 6: `true` (n1). `éE'\'; SELECT 2; --'`: identifier `éE`, plain string `'\'`, then `; SELECT 2;` (n2). |
+| Rule L fails closed (new probe `probe4.mts`) | Each of these gives exactly one `L` finding, with no crash and no silent pass: an unbalanced atomic block in migration.sql, the same in `down.sql`, and an unterminated string. Fixtures cover a bootstrap file too (`bootstrap/unbalanced-atomic`). The down.sql pass still runs when migration.sql is L. |
+| **Splitter equality over the repository** (`probe5.mts`: main `c998fae`, r1 `8ac271d` and the head `splitStatements` over every tracked `.sql`) | All **55** non-fixture SQL files split the same way under all three versions: **209 statements**. This is a superset of the developer's 30 files / 170 statements, because it also includes the `prisma/tests/fixtures` and spike SQL. The only differences are the 11 lint fixtures, and each one differs as intended: three throw (`unbalanced_atomic` ×2, bootstrap), the `begin` fixtures go back to main's count, and the atomic CASE control and the query_to_xml atomic fixture stay whole. |
+| API case runner driven without Docker (`probe6.mts`: `runApiCase` against a fake HTTP server, session route and dual-mode `[session, quote-token]` route) | Correct route: `[]`. B's name in `detail`: leak named (session, and guest-h2 → G). 403 FORBIDDEN: "expected 404" plus the code is named. Positive control 404: named per credential. A guest route that returns G to H2: 4 problems. `application/json` 404: "not a problem+json". Signature-only route: "no credential kind". `fillPath` with a missing param throws. `distinctiveValues(B)` = id, org_id, name (the shared constants are excluded). Header leaks are not checked (R2-n2). |
+| **Mutation testing**: archive copy of `9d679f0` with a node_modules junction, one-anchor replacements with function replacers, baseline green (188) | **35 mutants, 32 killed, 3 survived.**<br>Splitter, 7 of 10 killed: ATOMIC not required; CASE counted outside a block; CASE never counted; EOF throw dropped; nextWord stops at comments; escape cap fail-open; non-ASCII identifier dropped.<br>Survivors: **s2, the paren-depth gate dropped** (R2-n1), and s7 / s10 (the routine-head restriction; parens not reset at `;`). s7 and s10 are equivalent in practice: only SQL that PostgreSQL rejects distinguishes them.<br>Linter, 11 of 11 killed: rule L silent in migration, down and bootstrap; rule 11 back to `^select`; rule 16 function-variable exemption back; string body not read; query_to_xml off; allow-list ignores the digest; rule 7 `ALWAYS` dropped; rule 20 off in both lanes.<br>Generator API enumeration and probe expectations, 10 of 10 killed: guest tenancy dropped; stale case; params mismatch; unpresentable credential accepted; non-RLS case table; quote-token on a non-guest table; non-public relations ignored; re-parent always WITH CHECK; insert as plain 42501 (n4); blind update expects 0.<br>Batch b, 4 of 4 killed: users template re-admits INVITED (suite load refuses it); users atom re-admits INVITED (same); **consistent template + atom pair** (killed by the data-model §4.3 fence test, 3 failing); probe DDL plants every table (R1-m3); `tests/generated/rls/` dropped from `REQUIRED_CODEOWNED_PATHS`. |
+| `runApiCase` mutants | Not run: the module has no unit test, and the int suite needs Docker. By reading: the leaky-route mutation control pins all four negative-branch checks (`toEqual` of the exact 4 problems), and the fixture cases pin the positive status on the happy path. A mutant that drops the positive-control check would survive (R2-n2 c). |
+| Flake / activation evidence | Committed run `20261114T0725Z_9d679f0` PASS: api 123, catalog 102, integration 291/1, unit 4570/2. Its unit JUnit holds **`coverage merge: generated coverage run` passed**, so the whole `generated` project, including the 126 RLS tests, already ran in lane B as a coverage-only run, and that case fails on any failing test. The 20 × 126 flake runs and the active run `20261114T0643Z_f12c7ba` are uncommitted (developer's evidence). The suite code is unchanged between `253d832` and `9d679f0`: diff over `tests/ prisma/ tools/db/ apps/ packages/` shows only `grants-manifest.test.ts`. |
+
+**Not re-run:** the `generated` suite (126), catalog c01-c12/c15 and the integration suites. They need Docker. For these I relied on the committed lane-B run above and the developer's flake table.
+
+## R2.2 Assessment against the brief
+
+**(a) R1-M1: fixed.**
+- The splitter now opens a block only on the two words `BEGIN ATOMIC`, at paren depth 0, in a routine statement. Inside a block it counts only `BEGIN ATOMIC`, `CASE` and `END`. Depth > 0 at the end of the text throws `SqlLexError`, which the linter reports as rule L in all three file kinds.
+- The JSDoc is honest that this is a heuristic narrower than psql.
+- Every fixture I asked for exists: parameter, RETURNS TABLE, function name (including down.sql), the END resync, `RETURN CASE`, the balanced atomic CASE control and the unbalanced block. 19 of 21 new assertions fail on the old code (developer claim, consistent with my s1/s4/s5 kills).
+- The repository splits identically (§R2.1).
+- `shadow-init.ts` and `up-down-up.ts` call the splitter directly. A lex error there throws and fails the tool or test, which is fail closed.
+- Residual: **R2-m1**.
+
+**(b) R1-M2: fixed.**
+- `API_CASES` is a `ReadonlyMap<operationId, ApiCrossTenantCase>`, and the suite's executed list is derived from it by `it.each`. A bare operationId cannot be registered: the type requires `table` and `params`.
+- `TENANT_RESOURCE_TENANCIES` = tenant, user and guest. `operator-cross-tenant` is excluded, with the reason stated (cross-tenant by design; SEC-TC-06 and the RBAC matrix cover it).
+- `routeCaseFindings` names each of these: a missing case, a stale case, a parameter mismatch, a non-RLS table, quote-token on a non-GUEST_CAPABLE table, and a credential the runner cannot present (`signature`, `refresh-cookie`, `anonymous`). All six are mutant-killed.
+- The runner composes `createApp` over the real runtime and swaps only the authenticate slot. A holds every catalogued permission, so a 403 can never pass for isolation.
+- The mutation control (a leaking route) fails with exactly 4 named problems.
+- No production code changed: `git diff c998fae HEAD -- apps packages` is empty, and nothing outside `tests/` references the probe header or slot.
+
+**(c) Round-1 minors and nits, and the security LOWs that touch code quality.**
+- m1 (any non-routine statement), m2 (bare `execute` over the body code), m3 (per-table DDL, unit-pinned, mutant-killed; the C3 tables are created only when `to_regclass` is NULL) and m4 (the generator reads every user namespace; the catalog asserts no r/p/f/v/m relation outside `public`) are fixed.
+- m5: the runner entry ships here. The deviation is ruled below.
+- **m6 routing: accepted.** It is an observability gap, not a correctness defect, and `heavy.mjs` is owned by qa/devops and changed in #40. The numbers for this run are in the PR body. Condition: the orchestrator records D-TASK024-17 with an owner (qa-lead/devops, 015-B/C) and a due point before G3.
+- n1-n6 are fixed (n1/n2 by mutant, n3 by lint probes in negative-fixtures, n4 by mutant g9, n5 as a probe-layer test, n6 as JSDoc).
+- Security LOWs, code quality only:
+  - PR43-SEC-02 blind/re-parent probes: expectations are mutant-pinned, and the write mutation control is in the int suite.
+  - SEC-04 CODEOWNERS: pinned.
+  - SEC-05 (a) rule 7: pinned.
+  - SEC-06: rule 20, query functions and the name + SHA-256 allow-list are all pinned. One design note: the `routineCode` `catch {}` falls back to scanning the raw text, which is fail closed and acceptable.
+
+**(d) Union with main: pure.**
+- `50670f4` (PR #40): `git merge-tree` of its parents differs from the merge only by the conflict markers in `REQUIRED_CODEOWNED_PATHS`. The hand resolution keeps both PR43-SEC-04 and PR40-SEC-01, and CODEOWNERS holds both pairs.
+- `64959f2` (docs only): byte-identical to a clean re-merge.
+- The head against `origin/main` (`4a60ca6`, #45) merges cleanly. Main's delta since the base is docs, `.gitleaks.toml`, a baseline and one test, with no overlap.
+- `tools/quality/required-suites.json` is unchanged against the base, as D-TASK024-16 requires.
+
+**(e) DR-A14 users fence: correct.**
+- The template, the `DR_A14_ATOMS['dr-a14-users']` atom, the doc fence (data-model §4.3 line 2560) and the int test (`INVITED` → 0) all read `('ACTIVE','SUSPENDED')`.
+- The test reads the doc fence, so a consistent template + atom pair that re-admits INVITED is still killed (e3).
+- The organisations list is unchanged.
+
+**(f) No regressions.**
+- 655 targeted unit tests pass.
+- Mutation results are in §R2.1, with no regression in the round-1 areas.
+- Lane A fast-lane is green on the exact head.
+
+**Deviation from D-ORCH-063 (activation is not in this PR): sound.**
+- `check-evidence.mjs:23,352` (rule 4) rejects the JUnit of a suite still `planned` in the base manifest, so an activating PR cannot credit its own run. Lane A run 43569499402 shows exactly this. In-PR activation would need a change to check-evidence semantics, which is out of scope and qa-owned.
+- The gap is narrower than it looks. The `generated` project already runs in lane B through the merged-coverage step, and a failing test fails `coverage merge: generated coverage run`. What is missing until activation is the credit: `min_tests` 126, the SEC-TC-06 case binding, and suite-level reporting.
+- Conditions:
+  1. The manifest-only qa-lead PR carries exactly the D-TASK024-16 diff.
+  2. It merges **before TASK-037** (R1-m3's consumer) and before the first tenant-resource route merges.
+  3. The orchestrator records the D-ORCH-063 amendment.
+
+## R2.3 Findings (round 2)
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| **R2-m1** | MINOR (security-relevant; flag to security-analyst) | `tools/db/sql-text.ts:239-242` (splitStatements block counting) | **A reserved word used as a label still resyncs the depth.**<br>• Grammar: in PostgreSQL a column label after `AS` (`ColLabel`) and an attribute after `.` (`attr_name`) accept *reserved* keywords, so `SELECT 1 AS case` and `SELECT t.case FROM t` are valid inside a `BEGIN ATOMIC` body.<br>• Mechanism: that `case` raises the depth to 2, and the routine's real `END` lowers it only to 1. Everything that follows is swallowed until a later top-level `END;` (a no-op COMMIT) brings it back to 0.<br>• Probe (`probe4.mts`): `CREATE FUNCTION public.f() … BEGIN ATOMIC SELECT 1 AS case; END; GRANT TRUNCATE ON public.roles TO platform_app; CREATE SCHEMA evil; ALTER TABLE public.roles DROP COLUMN name; END;` gives **1 statement and lints clean**. The control without the label gives 8, 14, 2 and 11. The `t.case` form behaves the same, with `COMMIT;` swallowed too.<br>• Without the trailing `END`, rule L fails closed. `AS end` / `t.end` over-split instead, which gives a spurious 11c on a stray `END` statement and is fail closed.<br>• Severity: MINOR, not MAJOR. Innocent code no longer silences the gate. The bypass needs a deliberate reserved-word label plus a visible top-level `END;`, the same "deliberate evasion" class as the stated dynamic-SQL limits. The construct is also the psql heuristic I prescribed in round 1, so this is my recipe's gap.<br>• Backstops: C5 (grants) and the new non-public-relation check. Rules 2-7, 11, 14 and 17 have none. | Inside a block, do not count `case` / `end` when the previous significant piece is `as` or `.`. Track the last non-whitespace, non-comment piece, as `nextWord` already does forwards.<br>Add fixtures:<br>• `atomic_case_label_resync` (`AS case` + trailing `END;` → hostile statements flagged);<br>• `atomic_attr_case_resync` (`t.case`);<br>• `atomic_end_label` (`AS end` → no spurious split; the routine stays one statement).<br>Name the limit in the JSDoc. **Preferred in this PR** (about 5 lines). Otherwise, security-analyst rates it and the orchestrator routes it with an owner due before the first migration that defines a `BEGIN ATOMIC` routine (none exists today: §R2.1, 0 of 55 repository files). |
+| R2-n1 | NIT | `tools/db/sql-text.ts:239` | The paren-depth gate (`parens !== 0`) is unpinned: mutant s2 survives. It also narrows R2-m1. A `case` label inside parentheses (`xmlattributes(1 AS case)`, `f(t.case)`) is ignored only because of it. | Add a fixture with a parenthesised `AS case` or `t.end` inside an atomic body, followed by a hostile statement. It must stay split. |
+| R2-n2 | NIT | `tests/generated/rls/api-cases.ts:54-65, 95-133` | (a) `callsFor` covers A→B (session) and H2→G (quote-token), but not the cross-direction pairs of a dual-mode route: session A → guest row G, and guest H → B's org row. The DB probes cover both directions (`guest-org-without-hash`, `guest-context-tenant-rows`); the API level does not.<br>(b) The leak check reads the body only, not headers such as `ETag` or `Location`, and drops `instance`.<br>(c) `runApiCase`, `callsFor`, `fillPath` and `distinctiveValues` have no unit test. They are pinned only by the Docker suite, and dropping the positive-control check would survive. A fake-server unit test like `probe6.mts` costs about 1 s and needs no Docker. | Add the two cross-direction calls when the route accepts both kinds (expect 404). Optionally scan response headers. Add a unit test of the runner over a node `http` fake server. |
+| R2-n3 | NIT | `tools/db/render-rls-dr-a14.test.ts:68` | The describe title still says "as amended 2026-11-13". The fence is now the 2026-11-14 amendment (D-ARCH-123). | Update the title. |
+
+Closed from round 1: R1-M1 (residual tracked as R2-m1), R1-M2, R1-m1..m4, R1-n1..n6. R1-m5 is closed by the activation ruling above. R1-m6 is routed (accepted, conditional on the owner line).
+
+## R2.4 Rulings on the fix-cycle decisions
+
+| Decision | Ruling |
+|---|---|
+| D-TASK024-12 (executable cases; test-only authenticate slot; unpresentable credentials are findings) | Sound. Changing only the authenticate slot keeps the production authorise/execute path. See R2-n2 for the cross-direction pairs. |
+| D-TASK024-13 (narrower than psql; rule L; rule 20) | Sound, with R2-m1. The data-model §8.3 follow-up (data-architect) should also state the label limit until it is fixed. |
+| D-TASK024-14 (allow-lists keyed by name and SHA-256) | Sound. Mutant l8 is killed. Both lists are empty or pinned today. |
+| D-TASK024-15 (blind write probes; re-parent follows the first guard) | Sound. Mutants g8/g10 are killed, and the write mutation control is in the int suite. |
+| D-TASK024-16 (activation is a manifest-only follow-up) | **Accepted** (§R2.2), with the three conditions. |
+| D-TASK024-17 (R1-m6 routed) | Accepted, with an owner and a due point before G3. |
+| D-TASK024-18 (routes to TASK-037/051) | Accepted. The orchestrator should add the lines to the cards. |
+
+## R2.5 Merge conditions
+
+1. A security-analyst round-2 record names the final head. Lane A then goes green on that exact head, since `scans` is red only for the record step. **Squash merge.**
+2. R2-m1 is fixed in this PR (preferred), or routed with an owner line recorded by the orchestrator, after security-analyst rates it. If it is fixed here, it needs fresh lane-B evidence on the new code head (unit only is enough under the path rules if just `tools/db` changes), and a delta check by me covering the three fixtures and the s2 pin.
+3. The orchestrator records the D-ORCH-063 amendment (activation is manifest-only, before TASK-037) and the D-TASK024-17 owner line.
+
+**Union notes for whoever merges second:**
+- **#39 (TASK-014): textual conflict** in `tools/ci/check-workflow-policy.mjs`, at adjacent `REQUIRED_CODEOWNED_PATHS` additions, and in `check-workflow-policy.test.ts`, where two adjacent CODEOWNERS describe blocks were added. Git interleaves the hunks of the two describe blocks (`it.each(added)` titles and bodies). Resolve by keeping **both** describe blocks whole: PR43-SEC-04, then PR39-SEC-05, with `added` local to each. Check with `--listTests` that both titles run.
+- **#44 (020-C):** `merge-tree` is clean, and the overlap is eslint and lint-fixtures, which are disjoint hunks. Whoever merges second switches the `serve()` value `DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000` in `cross-tenant.int.test.ts:549` to `TEST_LANE_TX_IDLE_TIMEOUT_MS` (D-ORCH sequencing). If 020-C changes `createApp` / `defaultPipelineSlots`, `serve()` and `probePrincipalSlot` must follow.
+- **#42 (TASK-025):** `merge-tree` is clean, and the overlap is disjoint eslint and negative-fixtures hunks.
+- **#41 and #16 (dependabot):** clean.
