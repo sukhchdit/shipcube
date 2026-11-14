@@ -2,7 +2,8 @@
 // failure as application/problem+json with a catalogue code, echoes the correlation ID (header set by the context
 // middleware, field set here), logs 5xx with the raw thrown value for the server log only, and marks the response
 // so audit capture skips it. The body is built from catalogue data and AppError's client-safe fields only; a DbError
-// contributes its catalogue code and, when retryable, `Retry-After` (never its reason, SQLSTATE or Prisma code).
+// contributes its catalogue code and, when retryable, `Retry-After` (never its reason, SQLSTATE or Prisma code); a 503
+// AppError carrying `retryAfterSeconds` (the tx slot's request deadline, PR #44 R1-M1) gets `Retry-After` too.
 import { randomUUID } from 'node:crypto';
 
 import { AppError, ERROR_CATALOGUE, type ErrorCode, presentsCredential } from '@platform/shared';
@@ -143,7 +144,8 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
 
       const body = JSON.stringify(problem);
       markErrorResponse(res, { code, status: problem.status });
-      sendProblem(req, res, problem.status, body, classified.kind === 'db' ? classified.retryAfterSeconds : undefined);
+      const retryAfter = classified.kind === 'db' || classified.kind === 'app' ? classified.retryAfterSeconds : undefined;
+      sendProblem(req, res, problem.status, body, retryAfter);
     } catch {
       // PR9-SEC-07: a failure inside the handler (an unserialisable `errors` entry, a hostile value) must not reach
       // Express's final handler, which answers HTML with a stack outside NODE_ENV=production.

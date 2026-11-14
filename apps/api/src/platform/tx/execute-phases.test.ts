@@ -12,12 +12,20 @@ import type { Express, NextFunction, Request, Response } from 'express';
 import { createApp } from '../../app.js';
 import { DbError, type TenantContext, type TenantTxCallOptions, type TenantTxRunner } from '../db/index.js';
 import { dbErrorMapping } from '../db/map-db-error.js';
-import type { CallContext, RouteContext, RouteDescriptor, RouteRequestContext, RouteResult } from '../routing/define-route.js';
+import type {
+  AfterCommitContext,
+  CallContext,
+  RouteContext,
+  RouteDescriptor,
+  RouteRequestContext,
+  RouteResult,
+} from '../routing/define-route.js';
 import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
 import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
+import { DRAIN_TIMEOUT_MS } from '../runtime/shutdown.js';
 import { AFTER_COMMIT_FAILED_EVENT, createAfterCommitQueue } from './after-commit.js';
-import { AfterCommitNotWiredError, executeSlot, type ExecuteOptions } from './execute.js';
+import { AfterCommitNotWiredError, CALL_DEADLINE_MS, DEADLINE_RETRY_AFTER_SECONDS, executeSlot, type ExecuteOptions } from './execute.js';
 
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
@@ -330,6 +338,63 @@ describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and h
       false,
     ]);
     expect((seen['call'] as CallContext).signal).toBeInstanceOf(AbortSignal);
+    expect((seen['afterCommit'] as AfterCommitContext).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('[R1-n2] the call deadline is below the shutdown drain bound', () => {
+    expect(CALL_DEADLINE_MS).toBeLessThan(DRAIN_TIMEOUT_MS);
+    expect(DEADLINE_RETRY_AFTER_SECONDS).toBe(1);
+  });
+
+  it('[R1-M1] a call that never settles and ignores its signal answers a retryable 503 at the deadline; no handler transaction', async () => {
+    const events: string[] = [];
+    const route = phased({
+      load: () => ({ id: 'x' }),
+      call: () => {
+        events.push('call');
+        return new Promise<never>(() => undefined);
+      },
+      handler: () => {
+        events.push('handler');
+        return { status: 200 };
+      },
+    });
+    const started = Date.now();
+    const response = await request(appWith(route, fakeRunner(events), events, { callDeadlineMs: 50 }), '/api/v1/things', {
+      method: 'POST',
+    });
+    const elapsed = Date.now() - started;
+    expect([response.status, response.headers.get('retry-after'), (JSON.parse(response.body) as { code: string }).code]).toEqual([
+      503,
+      '1',
+      'SERVICE_UNAVAILABLE',
+    ]);
+    expect(elapsed).toBeLessThan(2_000);
+    await delay(20);
+    expect(events).toEqual(['begin:ro', 'commit', 'call', 'send']);
+  });
+
+  it('[R1-M1] a call that rethrows the signal reason answers the same retryable 503, not a 500', async () => {
+    const events: string[] = [];
+    const route = phased({
+      call: async (ctx) => {
+        await new Promise<void>((resolve) => {
+          ctx.signal.addEventListener('abort', () => resolve());
+        });
+        // The reason itself is the retryable 503, so a rethrow answers 503 even where nothing races the call.
+        const reason: unknown = ctx.signal.reason;
+        events.push(reason instanceof AppError ? `aborted ${reason.code} retry=${String(reason.retryAfterSeconds)}` : 'aborted other');
+        ctx.signal.throwIfAborted();
+        return 'never';
+      },
+      handler: () => ({ status: 200 }),
+    });
+    const response = await request(appWith(route, fakeRunner(events), events, { callDeadlineMs: 30 }), '/api/v1/things', {
+      method: 'POST',
+    });
+    expect([response.status, response.headers.get('retry-after')]).toEqual([503, '1']);
+    await delay(20);
+    expect(events).toEqual(['aborted SERVICE_UNAVAILABLE retry=1', 'send']);
   });
 
   it('the call signal aborts at the request deadline; the handler transaction is never opened', async () => {
@@ -386,6 +451,55 @@ describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and h
       await pending;
       expect(await sawAbort).toBeInstanceOf(AppError);
       expect(events).not.toContain('begin:rw');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('[R1-m1] a client that disconnects during load gets no call and no handler transaction', async () => {
+    const events: string[] = [];
+    let entered: () => void = () => undefined;
+    const inLoad = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const route = phased({
+      load: async () => {
+        entered();
+        await held;
+        events.push('load');
+        return { id: 'x' };
+      },
+      call: (ctx) => {
+        events.push(`call aborted=${String(ctx.signal.aborted)}`);
+        return 'effect';
+      },
+      handler: () => {
+        events.push('handler');
+        return { status: 200 };
+      },
+    });
+    const app = appWith(route, fakeRunner(events), events);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    try {
+      const controller = new AbortController();
+      const pending = fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/things`, {
+        method: 'POST',
+        signal: controller.signal,
+      }).catch((error: unknown) => error);
+      await inLoad;
+      controller.abort();
+      await pending;
+      await delay(100); // the server sees the socket close while load is still held
+      release();
+      for (let attempt = 0; attempt < 100 && !events.includes('commit'); attempt += 1) await delay(5);
+      await delay(100);
+      expect(events.filter((event) => event !== 'send')).toEqual(['begin:ro', 'load', 'commit']);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -517,13 +631,75 @@ describe('[TASK-020 part 020-C (f)] the stream hook: a stream result is complete
     expect(events).toEqual(['begin:rw', 'handler', 'audit db=write-db', 'commit', 'stream', 'send', 'afterCommit']);
   });
 
-  it('a result with both a body and a stream is a 500 and nothing is streamed', async () => {
+  it('[R1-m2] a result with both a body and a stream rolls the write back, answers 500 and streams nothing', async () => {
     const events: string[] = [];
     const complete = jest.fn(() => Promise.resolve());
-    const route = phased({ handler: () => ({ status: 200, body: {}, stream: { complete } }) });
+    const route = phased({
+      handler: () => ({ status: 200, body: {}, stream: { complete } }),
+      afterCommit: () => {
+        events.push('afterCommit');
+      },
+    });
     const response = await request(appWith(route, fakeRunner(events), events), '/api/v1/things', { method: 'POST' });
     expect(response.status).toBe(500);
     expect(complete).not.toHaveBeenCalled();
+    await delay(20);
+    expect(events).toEqual(['begin:rw', 'rollback', 'send']);
+  });
+
+  it('[R1-n4] a stream that throws after COMMIT closes the connection and afterCommit still runs', async () => {
+    const events: string[] = [];
+    const route = phased({
+      handler: (): RouteResult => ({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        stream: {
+          complete: (sink) => {
+            sink.write('data: one\n\n');
+            return Promise.reject(new Error('upstream gone'));
+          },
+        },
+      }),
+      afterCommit: () => {
+        events.push('afterCommit');
+      },
+    });
+    const outcome = await request(appWith(route, fakeRunner(events), events), '/api/v1/things', { method: 'POST' }).then(
+      () => 'completed',
+      () => 'terminated',
+    );
+    expect(outcome).toBe('terminated');
+    await eventually(events, 'afterCommit');
+    expect(events).toEqual(['begin:rw', 'audit db=write-db', 'commit', 'afterCommit']);
+  });
+
+  it('[R1-M1] a stream that never settles and ignores its signal is ended at the deadline; afterCommit still runs', async () => {
+    const events: string[] = [];
+    const route = phased({
+      handler: (): RouteResult => ({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        stream: {
+          complete: (sink) => {
+            sink.write('data: one\n\n');
+            return new Promise<never>(() => undefined);
+          },
+        },
+      }),
+      afterCommit: () => {
+        events.push('afterCommit');
+      },
+    });
+    const started = Date.now();
+    const outcome = await request(appWith(route, fakeRunner(events), events, { callDeadlineMs: 50 }), '/api/v1/things', {
+      method: 'POST',
+    }).then(
+      () => 'completed',
+      () => 'terminated',
+    );
+    expect([outcome, Date.now() - started < 2_000]).toEqual(['terminated', true]);
+    await eventually(events, 'afterCommit');
+    expect(events).toEqual(['begin:rw', 'audit db=write-db', 'commit', 'afterCommit']);
   });
 });
 

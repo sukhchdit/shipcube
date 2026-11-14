@@ -70,14 +70,17 @@ server.on('error', (error: Error) => {
 
 const shutdown = createShutdown({
   probe: services.probe,
-  // In-flight requests first (each schedules its afterCommit before it finishes), then the afterCommit work; both inside
-  // the drain bound of the 30 s stop window (ADR-0013 item 7).
+  // In-flight requests first (each schedules its afterCommit before it finishes), then the afterCommit work (also when
+  // closing the listener fails, PR #44 R1-m3); both inside the drain bound of the 30 s stop window (ADR-0013 item 7).
   drain: async () => {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error === undefined ? resolve() : reject(error)));
-      server.closeIdleConnections();
-    });
-    await afterCommit.drain();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+        server.closeIdleConnections();
+      });
+    } finally {
+      await afterCommit.drain();
+    }
   },
   forceClose: () => server.closeAllConnections(),
   resources: services.resources,

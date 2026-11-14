@@ -518,7 +518,8 @@ describe('[D-ARCH-113 (4)] [PR38-SEC-04] the $_terms walk fails closed on contai
   const realTerms = (parent as unknown as { $_terms: Record<string, unknown> }).$_terms;
   const EXTENSION = 'schema.body uses the Joi extension type "shout" (Joi.extend types are not allow-listed)';
   const CONTAINER = 'schema.body has a Joi schema whose $_terms cannot be inspected (Joi internals changed)';
-  const NESTED = 'schema.body holds a non-plain object inside $_terms that cannot be inspected (Joi internals changed)';
+  const NESTED = (kind: string): string =>
+    `schema.body holds a non-plain object (${kind}) inside $_terms that cannot be inspected (Joi internals changed, or a value Joi cannot hold here)`;
 
   it('control: the untampered parent (and a plain copy of its terms) reports the nested extension type', () => {
     expect(extensionProblems(parent, 'schema.body')).toEqual([EXTENSION]);
@@ -537,12 +538,20 @@ describe('[D-ARCH-113 (4)] [PR38-SEC-04] the $_terms walk fails closed on contai
     expect(extensionProblems(withTerms(terms), 'schema.body')).toEqual([CONTAINER]);
   });
 
-  it.each<[string, unknown]>([
-    ['a Map', new Map([['schema', custom]])],
-    ['a class instance', new Holder(custom)],
-    ['a null-prototype object', Object.assign(Object.create(null) as object, { schema: custom })],
-  ])('reports %s met inside $_terms instead of skipping it', (_label, inner) => {
-    expect(extensionProblems(withTerms({ keys: null, inner }), 'schema.body')).toEqual([NESTED]);
+  it.each<[string, unknown, string]>([
+    ['a Map', new Map([['schema', custom]]), 'Map'],
+    ['a class instance', new Holder(custom), 'Holder'],
+    ['a null-prototype object', Object.assign(Object.create(null) as object, { schema: custom }), 'null-prototype object'],
+    ['a Date (named, so the author can tell it from a Joi upgrade; R1-n3)', new Date(0), 'Date'],
+  ])('reports %s met inside $_terms instead of skipping it', (_label, inner, kind) => {
+    expect(extensionProblems(withTerms({ keys: null, inner }), 'schema.body')).toEqual([NESTED(kind)]);
+  });
+
+  it('[R1-n3] a Joi template (rename with a Joi.x target) is a leaf, like a reference', () => {
+    // Joi's typings declare `rename(from, to: string)`; a template target is the documented regex form.
+    const template: unknown = Joi.x('{#1}');
+    const schema = Joi.object({ a: Joi.string(), b: Joi.string() }).rename(/^x-(.+)$/u, template as string);
+    expect(extensionProblems(schema, 'schema.body')).toEqual([]);
   });
 
   it('keeps RegExp, Joi references and Joi object dependencies legal (and walks the dependencies)', () => {
@@ -556,5 +565,15 @@ describe('[D-ARCH-113 (4)] [PR38-SEC-04] the $_terms walk fails closed on contai
       .xor('c', 'd')
       .pattern(/^x-/, Joi.string());
     expect(extensionProblems(schema, 'schema.body')).toEqual([]);
+  });
+
+  it('[R1-n1] walks a Joi dependency entry: an extension type held inside one is reported', () => {
+    // The prototype is read the way define-route.ts reads it: from a real `.with` dependency entry.
+    const withTerm = (Joi.object({ a: Joi.any(), b: Joi.any() }).with('a', 'b') as unknown as { $_terms: { dependencies: object[] } })
+      .$_terms.dependencies[0];
+    const prototype: unknown = Object.getPrototypeOf(withTerm);
+    expect(prototype).not.toBe(Object.prototype);
+    const entry = Object.assign(Object.create(prototype as object) as object, { schema: custom });
+    expect(extensionProblems(withTerms({ keys: null, dependencies: [entry] }), 'schema.body')).toEqual([EXTENSION]);
   });
 });

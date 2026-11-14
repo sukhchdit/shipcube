@@ -165,11 +165,20 @@ export type RouteHandler<L = undefined, C = undefined> = (
   phases: PhaseResults<L, C>,
 ) => Promise<RouteResult> | RouteResult;
 /**
- * `afterCommit(ctx, result)`: after COMMIT and after the response was written, with no transaction and no database
- * handle. Best effort and in-process (durable work is an outbox event): a throw is logged as `api.after_commit_failed`
- * and never changes the response; pending work is drained at shutdown.
+ * The context of `afterCommit` (PR #44 R1-m4): no transaction and no database handle. `signal` aborts when the process
+ * starts draining (shutdown) or at the work's deadline (after-commit.ts); pass it to every external call.
  */
-export type RouteAfterCommit = (ctx: RouteRequestContext, result: RouteResult) => Promise<void> | void;
+export interface AfterCommitContext extends RouteRequestContext {
+  readonly signal: AbortSignal;
+}
+
+/**
+ * `afterCommit(ctx, result)`: after COMMIT and after the response was written (also when sending or a stream failed
+ * after COMMIT), with no transaction and no database handle. Best effort, in-process and bounded (durable work is an
+ * outbox event): a throw is logged as `api.after_commit_failed` and never changes the response; work above the queue
+ * cap is dropped (`api.after_commit_dropped`); pending work is drained at shutdown.
+ */
+export type RouteAfterCommit = (ctx: AfterCommitContext, result: RouteResult) => Promise<void> | void;
 
 /** The route I/O phases (ADR-0003 amendment 2026-11-13, D-ARCH-106 (4)); a route with only `handler` is one transaction. */
 export interface RoutePhases<L, C> {
@@ -360,6 +369,14 @@ const termsOf = (schema: object): unknown => (schema as { $_terms?: unknown }).$
 /** Bounds the `$_terms` walk; several term levels make one schema level (terms -> keys -> entry -> schema). */
 const MAX_TERM_DEPTH = 4 * MAX_SCHEMA_DEPTH;
 const isPlainObject = (value: object): boolean => Object.getPrototypeOf(value) === Object.prototype;
+/** The class of an object for a refusal message: its constructor's own name, or "null-prototype object". */
+const objectKind = (value: object): string => {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype === null) return 'null-prototype object';
+  const ctor: unknown = Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value;
+  const name: unknown = typeof ctor === 'function' ? Object.getOwnPropertyDescriptor(ctor, 'name')?.value : undefined;
+  return typeof name === 'string' && /^[A-Za-z_$][\w$]{0,63}$/u.test(name) ? name : 'object';
+};
 /**
  * The prototype of Joi's own object-dependency entries (`with`, `without`, `xor`, `and`, `or`, `nand`, `oxor`):
  * read from the default root, like the built-in definitions. Undefined if a Joi upgrade changes the shape, in which case
@@ -374,7 +391,7 @@ const JOI_DEPENDENCY_PROTOTYPE: unknown = ((): unknown => {
 /**
  * Every schema reachable from `root` is built on a built-in definition (PR32-SEC-13, `Joi.extend`; exported for its unit
  * tests, PR32-SEC-17). The walk follows schemas, arrays, plain objects and Joi's own dependency entries inside
- * `$_terms`, each object once; a `RegExp` and a Joi reference are leaves. Fails closed on everything it cannot walk
+ * `$_terms`, each object once; a `RegExp`, a Joi reference and a Joi template (`Joi.x`) are leaves. Fails closed on everything it cannot walk
  * (D-ARCH-113 (4), PR38-SEC-04): a schema whose `$_terms` is missing or is not a plain object (a null-prototype copy, a
  * Map, a class instance) is reported and not walked, and any other non-plain object inside `$_terms` is reported rather
  * than skipped, so a Joi upgrade that moves children into another container fails the tests instead of opening.
@@ -408,8 +425,11 @@ export function extensionProblems(root: Joi.Schema, where: string): string[] {
       for (const item of value as readonly unknown[]) visit(item, depth + 1);
     } else if (isPlainObject(value) || Object.getPrototypeOf(value) === JOI_DEPENDENCY_PROTOTYPE) {
       for (const item of Object.values(value)) visit(item, depth + 1);
-    } else if (!(value instanceof RegExp) && !Joi.isRef(value)) {
-      problems.add(`${where} holds a non-plain object inside $_terms that cannot be inspected (Joi internals changed)`);
+    } else if (!(value instanceof RegExp) && !Joi.isRef(value) && !Joi.isExpression(value)) {
+      // Named, so an author shape (a Date in example() or meta()) is told apart from a Joi upgrade (PR #44 R1-n3).
+      problems.add(
+        `${where} holds a non-plain object (${objectKind(value)}) inside $_terms that cannot be inspected (Joi internals changed, or a value Joi cannot hold here)`,
+      );
     }
   };
   visit(root, 0);

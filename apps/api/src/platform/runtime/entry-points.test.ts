@@ -43,4 +43,20 @@ describe('[D-ARCH-104] entry-point boot order', () => {
     const text = source('api');
     expect(only(text, 'tenantTx: services.tenantTx')).toBeLessThan(only(text, 'await services.startup();'));
   });
+
+  it('api: one afterCommit queue is passed to createApp and drained by the shutdown drain after server.close (PR #44 R1-m3)', () => {
+    const text = source('api');
+    const created = only(text, 'const afterCommit = createAfterCommitQueue(log);');
+    const composed = only(text, 'app = createApp({');
+    const passed = only(text, '    afterCommit,\n');
+    const composedEnd = text.indexOf('});', composed);
+    expect([created < composed, composed < passed, passed < composedEnd]).toEqual([true, true, true]);
+    // The drain: listener first, then the queue in a finally (also when closing the listener fails).
+    const drain = only(text, 'drain: async () => {');
+    const closed = only(text, 'server.close(');
+    const finallyAt = text.indexOf('} finally {', closed);
+    const drained = only(text, 'await afterCommit.drain();');
+    expect([drain < closed, closed < finallyAt, finallyAt !== -1 && finallyAt < drained]).toEqual([true, true, true]);
+    expect(drained).toBeLessThan(only(text, 'forceClose:'));
+  });
 });
