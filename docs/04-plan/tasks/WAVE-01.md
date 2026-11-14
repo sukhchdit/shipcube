@@ -2,11 +2,11 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Priority band: **Must DC (+ non-DC enablers)**
 
-Tasks: **40** (S 7 / M 33; opus 17 / sonnet 23; demo-critical 32) in **10** batches of ≤ 4 parallel tasks. Estimated effort ≈ 109.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **40** (S 7 / M 33; opus 17 / sonnet 23; demo-critical 33) in **10** batches of ≤ 4 parallel tasks. Estimated effort ≈ 109.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Lane B `wave` evidence; staff and customer sign-in API + screens work in compose; generated suites green incl. new identity/org routes; lane C `wave-end` if within the monthly cap (priority tier 2, PLAN.md §8).
 
-**Stories completed in this wave (42):** US-009 (DC), US-010 (DC), US-011 (DC), US-015 (DC), US-016 (DC), US-017 (DC), US-018 (DC), US-020 (DC), US-023 (DC), US-024 (DC), US-025 (DC), US-030 (DC), US-031 (DC), US-036, US-037, US-038 (DC), US-040, US-042 (DC), US-044, US-052 (DC), US-053 (DC), US-061 (DC), US-062 (DC), US-063 (DC), US-068 (DC), US-070, US-076 (DC), US-078 (DC), US-080 (DC), US-101 (DC), US-103, US-104, US-106, US-107 (DC), US-108 (DC), US-110 (DC), US-115 (DC), US-116 (DC), US-117 (DC), US-274 (DC), US-276 (DC), US-284 (DC).
+**Stories completed in this wave (43):** US-009 (DC), US-010 (DC), US-011 (DC), US-015 (DC), US-016 (DC), US-017 (DC), US-018 (DC), US-020 (DC), US-023 (DC), US-024 (DC), US-025 (DC), US-030 (DC), US-031 (DC), US-036, US-037, US-038 (DC), US-040, US-042 (DC), US-044, US-052 (DC), US-053 (DC), US-061 (DC), US-062 (DC), US-063 (DC), US-068 (DC), US-070, US-076 (DC), US-078 (DC), US-080 (DC), US-087 (DC), US-101 (DC), US-103, US-104, US-106, US-107 (DC), US-108 (DC), US-110 (DC), US-115 (DC), US-116 (DC), US-117 (DC), US-274 (DC), US-276 (DC), US-284 (DC).
 
 ## Batches
 
@@ -98,7 +98,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-061 **DC** (M0 Must) Organisation types and the single operator organisation<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-001, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074, PR26-SEC-03, D-ARCH-091, D-SEC-PR26-01, D-SEC-TM-01 |
+| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074, PR26-SEC-03, D-ARCH-091, D-SEC-PR26-01, D-SEC-TM-01, PR43-SEC-05, PR43-SEC-06, PR43-SEC-09, D-SEC-PR43-01, D-SEC-PR43-02, D-ARCH-123, D-ARCH-125, D-067 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-013, TASK-016, TASK-024, TASK-029, TASK-032 |
@@ -121,6 +121,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - MERGE CONDITION (PR11-SEC-10; PR #11 security review §5 ruling 5; D-ARCH-072): security-analyst signs off the rendered DR-A14 policies in the change-scoped review — positive status lists, exact EXISTS shapes, no context value under coalesce/NOT/IS DISTINCT FROM, recursion invariant, grant order — before merge
 - STANDARD-COLUMNS GUARD APPLICATION (PR26-SEC-03; D-ARCH-091; data-model §7.6 amendment of 2026-11-13; ADR-0009 am. 1): the PREREQUISITES CHECK above also requires that TASK-024 has merged `prisma/sql/function-templates/std-columns-guard.sql`, the manifest-driven `trg_<table>__std_columns` rendering and catalog C15 — if any is missing this task reports BLOCKED naming it. The FIRST migration that creates a runtime-writable standard-column table creates platform.std_columns_guard() from the template verbatim (as the migrator, plain CREATE FUNCTION, SECURITY INVOKER) and the rendered trigger on every STD table it creates (organisations, memberships, invitations, and users if created here), pasted verbatim and never hand-written; C15 has its first instances and the planted-forgery matrix is green on them; DUE before this task merges (merge condition, security sign-off together with the DR-A14 policies). The other checks that the PR #26 security record section 5 assigns to this task stay binding (D-SEC-PR26-01): PR26-SEC-01 and -02 closed in PR #26, the PR26-SEC-06 parity assertion (every model field whose dbName is one of the eight server column names id, created_at, updated_at, created_by, updated_by, version, org_id, on_behalf_of_org_id is named as the extension expects, and the converse), a planted-row control for an UPDATE that re-parents org_id, the first on_behalf_of_org_id column with ck_<table>__on_behalf_null_m1 (the catalog-std rule gets its first instance), and users rows with is_system for exactly the two reserved ids (PR26-SEC-04)
 - SEC-TC-74 (proposed ID, D-SEC-TM-01; adoption note 1): the planted-forgery matrix required above carries [SEC-TC-74] and is part of the evidence run of this PR; it is a merge condition, earlier than any checkpoint
+- MERGE PREREQUISITES FROM PR #43 (D-SEC-PR43-01/02, D-ORCH-063/064; D-ARCH-125): before this task merges (a) PR #43 code review R1-m3 is fixed — the DR-A14 probe layer (tests/generated/rls/probe.ts DR_A14_DDL and the C3 users table) creates and grants tables individually by PROBE_ENTRIES, so the real organisations and memberships of this migration do not collide (42P07) and the generated suite stays green with users still planted; (b) PR43-SEC-05 — linter rule 7 refuses ENABLE REPLICA | ALWAYS TRIGGER | RULE, C15 (a) committed asserts the full per-row trigger shape (enabled O, row, BEFORE, INSERT and UPDATE, not DELETE or TRUNCATE) and that no other enabled BEFORE INSERT/UPDATE ROW trigger sorts after trg_<t>__std_columns on an in-scope table, and the generator listing returns tgenabled; (c) PR43-SEC-06 — both lanes refuse SET, set_config and routine SET of standard_conforming_strings and backslash_quote (catalog: no pg_proc.proconfig or pg_db_role_setting names them), query_to_xml, query_to_xmlschema, query_to_xml_and_xmlschema, ts_stat and ts_rewrite are treated like EXECUTE in rule 16 and DYNAMIC_SQL_SQL, containsEscapeString returns true beyond the depth cap, both dynamic-SQL allow-lists are keyed by name plus the SHA-256 of the normalised body; (d) PR43-SEC-09 (b) — _prisma_migrations and bootstrap_migrations gain runtimeReadOnly in tools/db/table-classes/platform.json; (e) PR #43 record section 6 — the real users, memberships and organisations are listed with policySet and definerRead, and trg_organisations__type_immutable and ux_organisations__single_operator ship in the same migration as app_is_operator(); (a)-(d) are PR #43 fix-cycle items where cheap, otherwise this task lands them first and its PR body says which
+- NO INVITED MEMBERSHIP (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a); data-model memberships and invitations notes of 2026-11-14): this task writes memberships only as ACTIVE (registration, personal organisation); the dr-a14-memberships set is unchanged; invitations is a TENANT table and the whole pending state of an invitation (TASK-227 creates no membership before acceptance); the membership_status CHECK keeps INVITED as a reserved value and a C12 probe asserts that no fixture or seed writes it
 - AT-US-061-01 … AT-US-061-05: all 5 scenarios of US-061, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-062-01 … AT-US-062-06: all 6 scenarios of US-062, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -227,15 +229,16 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Field | Value |
 |---|---|
 | Stories (completes) | US-040 (M0 Must) Redis-backed rate limiting and headers |
-| REQs | REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
+| Stories (partial; completed by TASK-073) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
+| REQs | REQ-API-014, REQ-SEC-005, REQ-SEC-006, REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 |
 | NFRs | NFR-SEC-005 |
-| Spikes / security / decisions | PR21-SEC-01, D-ARCH-084 |
+| Spikes / security / decisions | PR21-SEC-01, D-ARCH-084, D-ARCH-125 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-036 |
 | Batch · locks | 1.2 · api-ratelimit |
 | Branch | `feat/TASK-041-valkey-backed-rate-limiting-per` |
-| Priority | Must |
+| Priority | Must · demo-critical |
 
 > Scheduling note: Non-DC enabler of US-155 (DC) and US-022.
 
@@ -246,7 +249,9 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-040 scenarios (429 problem+json, RateLimit-* headers, shared across 2 API replicas)
 - PR21-SEC-01 step 5 (PR #21 security review; D-ARCH-084; owner resolved here, not TASK-108): the step-0 per-IP limiter (ADR-0016 am. 1) fills the pipeline slot TASK-020 fixed BEFORE `routes` (path-less), so /api/docs/* is limited like every other public route; the TASK-020 pipeline-order test stays green and a test proves a docs path returns 429 after the step-0 budget
+- AT-US-087-04 (D-ARCH-125; PR #42 code review R1-m5; ADR-0016 am. item 1; EC-A12): this task owns the trusted proxy chain — the Express trust-proxy setting is derived from TRUST_PROXY_HOPS (hops or CIDRs of the edge) in the api composition, so req.ip is the first untrusted hop; api test: a request whose X-Forwarded-For carries a forged leading address from an untrusted hop yields req.ip (and therefore the audit entry IP that TASK-029 copies and the step-0 limiter key) equal to the first untrusted hop, never the forged value; the local edge proxy in Compose counts as one trusted hop; US-087 is partial here
 - AT-US-040-01 … AT-US-040-17: all 17 scenarios of US-040, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-087-01 … AT-US-087-08 that belong to its layer; US-087 closes in TASK-073
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -449,7 +454,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-044 (M0 Must) CSRF protection and CORS allow-list |
 | REQs | REQ-SEC-004, REQ-SEC-014 |
 | NFRs | NFR-SEC-008 |
-| Spikes / security / decisions | SEC-P3-18, PR21-SEC-01, PR21-SEC-02, PR21-SEC-06, D-ORCH-023, D-ORCH-024, D-ARCH-084 |
+| Spikes / security / decisions | SEC-P3-18, PR21-SEC-01, PR21-SEC-02, PR21-SEC-06, D-ORCH-023, D-ORCH-024, D-ARCH-084, PR43-SEC-01, D-SEC-PR43-01, D-ARCH-125 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-036 |
@@ -468,6 +473,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-58: foreign Origin on loginUser/registerUser/resetPassword/verifyEmail -> 403 CSRF_REJECTED; text/plain -> 415
 - SEC-TC-09 cookie/CSRF assertions (completed with the refresh task)
 - PR21-SEC-06 / PR21-SEC-01 step 5 / PR21-SEC-02 (D-ORCH-023 (1), D-ORCH-024 (5); D-ARCH-084): the CORS preflight handler and the Origin allow-list live in the pipeline slot TASK-020 fixed BEFORE `routes` (before optionsResponder and the /api/docs mount), mounted PATH-LESS — a path-mounted CORS or limiter fails the drift walker by design; if this task adds Helmet it is mounted before the docs router and never overwrites the docs route CSP (otherwise TASK-111 owns it); the TASK-020 pipeline-order test and drift stay green
+- PR43-SEC-01 C2 REVIEW REQUIREMENT (D-SEC-PR43-01; D-ARCH-125): this task mounts no tenant, user or guest route with a path parameter (getCsrfToken is [refresh-cookie]), so the reviewer records n/a; if a path-parameter route is added, its executable cross-tenant case (TASK-027 line) is required before merge
 - AT-US-044-01 … AT-US-044-07: all 7 scenarios of US-044, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -482,7 +488,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-015 **DC** (M0 Must) Register an account with a compliant password |
 | REQs | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072, D-ORCH-039 |
+| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072, D-ORCH-039, PR43-SEC-01, D-SEC-PR43-01, D-ARCH-123, D-ARCH-125 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-037, TASK-041, TASK-029, TASK-043, TASK-040 |
@@ -500,10 +506,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - SEC-TC-46: 6th distinct address from one IP within an hour -> 429 + registration_probe; 4th registration for one identifier -> 429; identical responses for new/existing (timing <= 100 ms)
 - SEC-TC-55 (pre-hash part): bcrypt input is base64(HMAC(pepper, pw)), 44 chars
 - ADR-0023 am. J item 4 and D-ARCH-042 (ADR-0006 am. 16, ADR-0025 PR1-SEC amendment): password hashing sits behind a `PasswordHasher` port (`hash`, `verify`, `needsRehash`; pre-hash, cost floor, dummy-hash constant-time compare). Its single implementation module is the only importer of `bcrypt`/`bcryptjs`, which the TASK-002 import-confinement lint rule enforces. `bcrypt@6.0.0` stays under its `tools/ci/maintenance-exceptions.json` entry (expires 2027-05-11; exit = `bcryptjs` in a `worker_threads` pool behind the same port)
-- DR-A14 `users` policy set (data-model §4.3 as amended 2026-11-13; D-ARCH-072) — unless TASK-037 created `users` first (its dod): `users` is USER_OWNED with `policySet: dr-a14-users` in `tools/db/table-classes/identity.json` (definerRead); the block is rendered by `tools/db/render-rls.ts` and pasted verbatim in prefix-safe order (CREATE TABLE → ENABLE + FORCE → `p_users__own` keyed on `id = platform.app_actor_id()`, `p_users__org_member_read` with the positive list `m.status IN ('INVITED','ACTIVE','SUSPENDED')`, `p_users__operator`, `p_users__definer_read` → GRANT); the `memberships.user_id` FK is in place after this migration (NOT VALID + VALIDATE if added here, rule 6); `down.sql` prefix-idempotent (rule 17); C3 derived set and C12 probes cover `users` (a member of org A reads the rows of fellow INVITED/ACTIVE/SUSPENDED members and never a REMOVED one or a stranger); MERGE CONDITION: security-analyst sign-off on the rendered policies (PR11-SEC-10)
+- DR-A14 `users` policy set (data-model §4.3 as amended 2026-11-13; D-ARCH-072) — unless TASK-037 created `users` first (its dod): `users` is USER_OWNED with `policySet: dr-a14-users` in `tools/db/table-classes/identity.json` (definerRead); the block is rendered by `tools/db/render-rls.ts` and pasted verbatim in prefix-safe order (CREATE TABLE → ENABLE + FORCE → `p_users__own` keyed on `id = platform.app_actor_id()`, `p_users__org_member_read` with the positive list `m.status IN ('ACTIVE','SUSPENDED')` (INVITED removed 2026-11-14, D-ARCH-123), `p_users__operator`, `p_users__definer_read` → GRANT); the `memberships.user_id` FK is in place after this migration (NOT VALID + VALIDATE if added here, rule 6); `down.sql` prefix-idempotent (rule 17); C3 derived set and C12 probes cover `users` (a member of org A reads the rows of fellow ACTIVE/SUSPENDED members and never a REMOVED one, an invitee before acceptance (D-ARCH-123) or a stranger); MERGE CONDITION: security-analyst sign-off on the rendered policies (PR11-SEC-10)
 - PR2-SEC-02 residual (PR #2 security review R2.4; password-hasher confinement, before or with the hasher module): the three bcrypt boundaries entries move to the END of BOUNDARIES_POLICIES so no later allow can override them; the coverage test becomes behavioural (lint import(bcrypt) at every matrix path and assert the bcrypt policy is in the boundaries/dependencies options); the hasher module exports only the PasswordHasher port (review checks it; a dedicated platform/password-hasher-only rule only if it adds local-binding re-export detection); the TASK-007 Semgrep backstop stays
 - D-ARCH-106: password pre-hash and hashing run in the call phase (no transaction open) once TASK-020 part 020-C has merged; recommended and not lint-enforced, because an anonymous burst of hashes inside the transaction would fill the anonymous admission key of D-ARCH-086
 - SEC-TC-14 (D-ORCH-039; threat model T-29; ADR-0006 am. 3 and 16; named on this sheet because the manifest parks it in required_cases_pending with this task as owner, checkpoint v0.1.0-m0): a unit test whose title carries [SEC-TC-14], run against the PasswordHasher port with the real pre-hash: two 100-byte passwords that share their first 72 bytes hash to distinct values and neither verifies against the hash of the other, while each verifies against its own (salted hashes differ even for equal input, so the cross-verify pair is the real assertion, and raw bcrypt over the bytes would make the pair collide); after this task merges qa-lead moves the ID from required_cases_pending back to unit.required_cases in the next activation PR
+- PR43-SEC-01 C2 REVIEW REQUIREMENT (D-SEC-PR43-01; PR #43 code review R1-M2; D-ARCH-125): if PR #43 merged with a registration-only API_CASES set, no tenant, user or guest route with a path parameter of this task merges before the executable cases of the TASK-027 line exist; a bare operationId string never satisfies the gate; the reviewer checks the generated case list for every route this task mounts
 - AT-US-015-01 … AT-US-015-12: all 12 scenarios of US-015, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -579,10 +586,10 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-017 **DC** (M0 Must) Sign in with email and password |
 | REQs | REQ-AUTH-005 |
 | NFRs | NFR-SEC-003, NFR-SEC-004 |
-| Spikes / security / decisions | SEC-P3-26, PR20-SEC-05, PR20-SEC-13, D-ORCH-025, PR19-SEC-01, D-ARCH-080, D-ARCH-084, D-ARCH-109 |
+| Spikes / security / decisions | SEC-P3-26, PR20-SEC-05, PR20-SEC-13, D-ORCH-025, PR19-SEC-01, D-ARCH-080, D-ARCH-084, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, D-ARCH-120 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
-| Depends on | TASK-049, TASK-048 |
+| Depends on | TASK-049, TASK-048, TASK-284 |
 | Batch · locks | 1.5 · identity-core |
 | Branch | `feat/TASK-052-sign-email-password-es256-access` |
 | Priority | Must · demo-critical |
@@ -600,6 +607,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - PR19-SEC-01 CONSUMER (D-ARCH-080): login_attempt_counters is a SYSTEM model owned by the identity module — reached only from apps/api/src/modules/identity/core/** through systemDelegates(tx) (lint allow-list), never from another module
 - D-ARCH-106/107: password verification runs in the call phase; the bearer authenticator sets credential session (authenticated true, actor from the verified sub), serves every route whose auth set contains session and never routes declaring refresh-cookie, and follows the ADR-0008 am. 4 rules: a present bearer is verified and never replaced by another alternative (401 ACCESS_TOKEN_EXPIRED, SESSION_REVOKED or AUTH_REQUIRED), and the bearer decides when X-Quote-Token also arrives
 - D-ARCH-109 (ADR-0008 am. 5 item 1; PR32-SEC-16): the bearer authenticator reads Authorization only on routes whose auth set contains session; on [anonymous], [refresh-cookie] and [signature] routes the header is not parsed or verified, so an expired, revoked or malformed token cannot fail login, registration, refresh, logout, csrf, reference reads or public tracking (the web client may attach its token to every request); api tests: createSession and listCountries with an expired and with a malformed bearer give the normal result with the contract Cache-Control, refreshSession with an expired bearer proceeds to the cookie check, and a [session] route with a refresh cookie and no bearer is 401 AUTH_REQUIRED and the cookie is not consumed
+- D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the bearer authenticator learns that a credential is present only through presentedKinds(req.headers, route.auth) from @platform/shared and reads the Authorization value itself only after that call reports session (it never reads cookie or x-quote-token, and no other module reads authorization); it builds principal.permissions with readonlySet from route-state.ts (a frozen read-only view, never a Set or an array); it calls markCredentialsRead(res) together with its decision, on the accept path and on every refusal (ACCESS_TOKEN_EXPIRED, SESSION_REVOKED, AUTH_REQUIRED, malformed token), the order relative to the header read being irrelevant; it never relies on its own markPrivateResponse for SEC-TC-29 on a refusal, because the problem handler decides from the route descriptor (declaresPrivateResponse(route.auth, headers)), so a bearer refused before any mark still answers 401 private, no-store; the slot replaces only platform/authn (the contract stub) and keeps the [SEC-TC-29] and declared-credentials api tests green; api tests: an expired bearer on a [session] route is 401 private, no-store while a spy shows the authenticator never called markPrivateResponse, markCredentialsRead was called exactly once per request on accept and on refuse, Set.prototype.add.call(principal.permissions, x) throws, and a fixture route that declares authorization in schema.headers fails at module load (020-C PR38-SEC-03, so no handler can ever receive the bearer)
+- ADMISSION CLASS auth (D-ARCH-120; ADR-0007 am. 11 item 1; TASK-284 admitcls is a dependency of this task): createSession declares rate class auth, so its transactions are admitted under the auth reserve and a public flood cannot refuse sign-in; api test (TASK-284 merged): 15 slow public-class requests in flight leave createSession answering non-503 at its normal rate
 - AT-US-017-01 … AT-US-017-06: all 6 scenarios of US-017, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -671,7 +680,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-018 **DC** (M0 Must) Refresh cookie, rotation and reuse detection |
 | REQs | REQ-AUTH-006, REQ-AUTH-007, REQ-AUTH-008 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | SEC-P3-01, SEC-COND-01, D-046, PR20-SEC-13, D-ARCH-084, D-ARCH-109, PR32-SEC-16 |
+| Spikes / security / decisions | SEC-P3-01, SEC-COND-01, D-046, PR20-SEC-13, D-ARCH-084, D-ARCH-109, PR32-SEC-16, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-052, TASK-048 |
@@ -691,6 +700,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - GATE (PR #20 security review R2.8; D-ARCH-084): PR20-SEC-13 items 1-3 are landed before this task merges (first refresh cookie); the session_id invariant test of the TASK-052 line (d) covers the __Host-rt_* cookie values set here
 - D-ARCH-107: refreshSession, logoutSession and getCsrfToken declare auth refresh-cookie, not session (they are called with an expired or absent access token); this task adds the cookie authenticator (credential refresh-cookie, authenticated true), and csrf true on the non-GET ones is mandatory (binding rule CSRF_COOKIE)
 - D-ARCH-109 (ADR-0006 am. 17; ADR-0008 am. 5; PR32-SEC-16, code review R2-m4): the cookie authenticator reads __Host-rt_web and __Host-rt_admin only on routes whose auth set contains refresh-cookie (refreshSession, logoutSession, getCsrfToken); on every other route the cookie is not parsed, hashed or looked up, and a current, rotated, revoked or garbage cookie changes nothing: no 401, no family revocation, no TOKEN_REUSE_DETECTED, no security event, no change to Cache-Control; when both cookies arrive (Compose shares localhost across the web and admin ports) the one whose app matches the app of the request (host or edge virtual host, Origin must agree where the browser sends it) is read and the other is ignored unevaluated, and no match gives 401 AUTH_REQUIRED without touching token state; the two cookie names appear in exactly two modules, packages/shared/src/http/credentials.ts and the cookie module (a repository test greps for them); api tests: createSession, registerUser, createQuote, public tracking and listCountries with a stale cookie answer as without it, a [session] route with only a cookie is 401, and a rotated cookie sent to createSession revokes nothing
+- D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the cookie authenticator learns that a refresh cookie is present only through presentedKinds(req.headers, route.auth), and parses the cookie header itself only after that, on the three refresh-cookie routes, to pick the one cookie by app (the TASK-055 D-ARCH-109 line); it builds the permissions of the refreshed principal with readonlySet; it calls markCredentialsRead(res) together with its decision for a current, rotated, revoked, expired or absent cookie alike; private, no-store on 401 SESSION_REVOKED, SESSION_EXPIRED and AUTH_REQUIRED comes from the descriptor test of the problem handler ([refresh-cookie] has no anonymous member, so every answer on the three routes is private whatever the authenticator marked); x-csrf-token is read by the csrf slot (TASK-048) and x-csrf-token, cookie and authorization are refused in schema.headers by 020-C (PR38-SEC-03), so no identity handler receives the cookie or the token; api tests: a reuse-detected cookie answers 401 private, no-store with the family revoked and markCredentialsRead called exactly once; a stale cookie plus a valid bearer on refreshSession takes the cookie path and the bearer is never parsed (spy)
 - AT-US-018-01 … AT-US-018-11: all 11 scenarios of US-018, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -789,12 +799,13 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Field | Value |
 |---|---|
 | Stories (completes) | US-016 **DC** (M0 Must) Verify email address |
-| REQs | REQ-AUTH-004 |
+| Stories (partial; completed by TASK-073) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
+| REQs | REQ-AUTH-004, REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-06, D-050 |
+| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-119 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
-| Depends on | TASK-052, TASK-055, TASK-049 |
+| Depends on | TASK-052, TASK-055, TASK-049, TASK-285 |
 | Batch · locks | 1.7 · identity-core |
 | Branch | `feat/TASK-059-verify-email-address` |
 | Priority | Must · demo-critical |
@@ -805,7 +816,9 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-016 scenarios (#token= fragment links per D-ARCH-011)
 - SEC-TC-47 (verify part): victim redeeming the link revokes the attacker session (next refresh -> 401 SESSION_REVOKED)
+- AT-US-087-07 EMITTER (D-ARCH-119; REQ-AUTH-004; TASK-285 auditactions is a dependency of this task): one SESSION_REVOKED entry per session revoked by a successful verification, written through the writer against the widened CHECK; test: two other sessions exist, verification revokes both, two SESSION_REVOKED entries name the revoked session ids and the verifying session is untouched; US-087 is partial here
 - AT-US-016-01 … AT-US-016-10: all 10 scenarios of US-016, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-087-01 … AT-US-087-08 that belong to its layer; US-087 closes in TASK-073
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -847,12 +860,13 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Field | Value |
 |---|---|
 | Stories (completes) | US-024 **DC** (M0 Must) MFA challenge at sign-in |
-| REQs | REQ-AUTH-017 |
+| Stories (partial; completed by TASK-073) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
+| REQs | REQ-AUTH-017, REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-119 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
-| Depends on | TASK-057 |
+| Depends on | TASK-057, TASK-285 |
 | Batch · locks | 1.7 · identity-mfa |
 | Branch | `feat/TASK-061-mfa-challenge-at-sign` |
 | Priority | Must · demo-critical |
@@ -862,7 +876,9 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-024 API scenarios
+- AT-US-087-07 EMITTER (D-ARCH-119; REQ-AUTH-017; TASK-285 auditactions is a dependency of this task): a sign-in completed with a recovery code writes MFA_RECOVERY_USED for that user through the writer against the widened CHECK; test: the entry exists with the user id and the code is consumed; US-087 is partial here
 - AT-US-024-01 … AT-US-024-07: all 7 scenarios of US-024, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-087-01 … AT-US-087-08 that belong to its layer; US-087 closes in TASK-073
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -1183,11 +1199,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 | Field | Value |
 |---|---|
-| Stories (completes) | — |
+| Stories (completes) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
 | Stories (partial; completed by TASK-081, TASK-081) | US-097 **DC** (M0 Must) Audit viewer: filterable list<br>US-098 **DC** (M0 Must) Audit viewer: entry detail with diff, and audited viewing |
-| REQs | REQ-AUDIT-019, REQ-AUDIT-023, REQ-AUDIT-020, REQ-AUDIT-022 |
+| REQs | REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011, REQ-AUDIT-019, REQ-AUDIT-023, REQ-AUDIT-020, REQ-AUDIT-022 |
 | NFRs | NFR-AUDIT-001, NFR-PERF-006 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-125 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-045, TASK-060, TASK-029, TASK-030, TASK-031 |
@@ -1200,6 +1216,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - API scenarios of US-097 and US-098 (operator scope, filters by org + date, one VIEW entry per list request)
+- AT-US-087-08 (D-ARCH-125; PR #42 code review R1-m5): a Shipper requesting entry fields through the viewer API gets 403 AUTHZ_DENIED (audit:read not held); this task COMPLETES US-087 (TASK-025 carries five scenarios, TASK-041 the forged-header one, TASK-285 with TASK-059/061 the two new action types)
+- AT-US-087-01 … AT-US-087-08: all 8 scenarios of US-087, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-097-01 … AT-US-097-10 that belong to its layer; US-097 closes in TASK-081
 - Covers the scenarios of AT-US-098-01 … AT-US-098-08 that belong to its layer; US-098 closes in TASK-081
 

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it, jest } from '@jest/globals';
 
 import { findRepoRoot, runNode, type RunResult } from '../test-support/process.js';
-import { allowedRunFile, nameHasId } from './check-evidence.mjs';
+import { allowedRunFile, nameHasId, recomputeVerdict, satisfiesRequired } from './check-evidence.mjs';
 import { parseManifest } from './lib/manifest.mjs';
 
 const repoRoot = findRepoRoot();
@@ -507,6 +507,59 @@ describe('check-evidence: CLI', () => {
     expect(allowedRunFile('report.html', manifest)).toBe(false);
     expect(nameHasId('[SEC-TC-14] x', 'SEC-TC-1')).toBe(false);
     expect(nameHasId('[SEC-TC-1] x', 'SEC-TC-1')).toBe(true);
+  });
+});
+
+describe('required merged-gate cases: exact name and classname (PR40-SEC-02, PR #40 R1-m4 b)', () => {
+  const ID = 'coverage gate: overall lines';
+  type Case = { name: string; classname: string; status: string };
+  type Verdict = { verdict: string; hard: string[]; soft: string[] };
+  const manifest = {
+    rules: { invalid_env_prefixes: ['SKIP_'] },
+    suites: { unit: { required_cases: [ID, 'SEC-TC-01'], min_tests: 1, status: 'active', security: false, zero_skip: false } },
+  };
+  const summary = { git_dirty: false, build_clean: true, env_overrides: [], invalid_reasons: [] };
+  const sec: Case = { name: 'x [SEC-TC-01] verdict', classname: 'tools/quality/a.test.ts', status: 'passed' };
+  const verdict = (cases: Case[]): Verdict =>
+    (recomputeVerdict as (s: unknown, r: unknown, m: unknown) => Verdict)(
+      summary,
+      [
+        {
+          suite: { name: 'unit', status: 'passed' },
+          junit: { failures: 0, errors: 0, skipped: 0, tests: cases.length, cases },
+          area: 'tests',
+        },
+      ],
+      manifest,
+    );
+
+  it('[PR40-SEC-02] S0: the merged gate case (exact name, classname = the suite id) satisfies the requirement', () => {
+    expect(verdict([sec, { name: ID, classname: 'unit', status: 'passed' }])).toEqual({ verdict: 'PASS', hard: [], soft: [] });
+  });
+
+  it('[PR40-SEC-02] S2/S3: a Jest test whose title contains or equals the name does not stand in for the gate', () => {
+    const missing = `unit: required case ${ID} not in a passing test case`;
+    // S2: the name inside a longer Jest title.
+    expect(verdict([sec, { name: `merge [US-006] ${ID} passes`, classname: 'tools/ci/x.test.ts', status: 'passed' }]).soft).toEqual([
+      missing,
+    ]);
+    // S3: the exact name under a Jest classname: not accepted, and the reserved prefix outside the gate is reported.
+    expect(verdict([sec, { name: ID, classname: 'tools/ci/x.test.ts', status: 'passed' }]).soft).toEqual([
+      missing,
+      `unit: case "${ID}" uses a merged-coverage case prefix under classname tools/ci/x.test.ts`,
+    ]);
+    // The real case with a suffix, or failing, does not count either; SEC-TC IDs keep their title matching.
+    expect(verdict([sec, { name: `${ID} (extra)`, classname: 'unit', status: 'passed' }]).soft).toEqual([missing]);
+    expect(verdict([sec, { name: ID, classname: 'unit', status: 'failed' }]).soft).toEqual([missing]);
+    expect(satisfiesRequired({ name: '[SEC-TC-01] y', classname: 'z.test.ts', status: 'passed' }, 'SEC-TC-01', 'unit')).toBe(true);
+    expect(satisfiesRequired({ name: '[SEC-TC-014] y', classname: 'z.test.ts', status: 'passed' }, 'SEC-TC-01', 'unit')).toBe(false);
+  });
+
+  it('[PR40-SEC-02] decoys of the other merged-coverage prefixes under a foreign classname are reported too', () => {
+    for (const name of ['coverage merge: project unit measured', 'coverage tripwire: jest.config.ts global lines', 'coverage diff: a.ts'])
+      expect(
+        verdict([sec, { name: ID, classname: 'unit', status: 'passed' }, { name, classname: 'a.test.ts', status: 'passed' }]).soft,
+      ).toEqual([`unit: case "${name}" uses a merged-coverage case prefix under classname a.test.ts`]);
   });
 });
 

@@ -144,6 +144,59 @@ describe('diff-coverage gate', () => {
     expect(thresholdFor('apps/web/app/q.tsx')).toEqual({ lines: 85, branches: 75 });
   });
 
+  it('[PR40-SEC-01] a `Binary files ... differ` line fails closed for an in-scope (or unnamed) file and is ignored elsewhere', () => {
+    const binary = (header: string) => [header, 'Binary files a/x and b/x differ'].join('\n');
+    expect(() => parseUnifiedDiff(binary('diff --git a/apps/api/src/a.ts b/apps/api/src/a.ts'))).toThrow(
+      'git reported a binary diff for apps/api/src/a.ts: its changed lines cannot be measured',
+    );
+    expect(() => parseUnifiedDiff(binary('diff --git a/x b/y'))).toThrow('a file it did not name');
+    expect(() => parseUnifiedDiff('Binary files a/apps/api/src/a.ts and b/apps/api/src/a.ts differ')).toThrow('a file it did not name');
+    expect(parseUnifiedDiff(binary('diff --git a/docs/logo.png b/docs/logo.png')).size).toBe(0);
+    expect(() => parseUnifiedDiff(binary('diff --git a/apps/api/src/a b.ts b/apps/api/src/a b.ts'))).toThrow(
+      'binary diff for apps/api/src/a b.ts',
+    );
+  });
+
+  it('[PR40-SEC-01] .gitattributes cannot hide changed lines (`*.ts -diff`, `binary`, nested), nor can git prefix settings', () => {
+    const variants: Array<{ name: string; files: Record<string, string>; config?: Array<[string, string]> }> = [
+      { name: 'root *.ts -diff', files: { '.gitattributes': '*.ts -diff\n' } },
+      { name: 'root apps/** binary', files: { '.gitattributes': 'apps/** binary\n' } },
+      { name: 'nested * -diff', files: { 'apps/api/src/.gitattributes': '* -diff\n' } },
+      { name: 'textconv driver', files: { '.gitattributes': '*.ts diff=empty\n' }, config: [['diff.empty.textconv', 'node -e ""']] },
+      { name: 'diff.dstPrefix', files: {}, config: [['diff.dstPrefix', 'zz/']] },
+      { name: 'diff.noprefix', files: {}, config: [['diff.noprefix', 'true']] },
+    ];
+    for (const variant of variants) {
+      const root = mkdtempSync(join(tmpdir(), 'diff-attr-'));
+      temps.push(root);
+      git(root, ['init', '-q', '-b', 'main']);
+      for (const [key, value] of variant.config ?? []) git(root, ['config', key, value]);
+      write(root, 'README.md', 'fixture\n');
+      git(root, ['add', '-A']);
+      git(root, ['commit', '-q', '-m', 'base']);
+      git(root, ['checkout', '-q', '-b', 'feature']);
+      for (const [rel, text] of Object.entries(variant.files)) write(root, rel, text);
+      write(root, 'apps/api/src/a.ts', Array.from({ length: 20 }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n');
+      git(root, ['add', '-A']);
+      git(root, ['commit', '-q', '-m', 'feature']);
+      write(
+        root,
+        'coverage/lcov.info',
+        `${lcovRecord(
+          root,
+          'apps/api/src/a.ts',
+          Array.from({ length: 20 }, () => 0),
+        )}\n`,
+      );
+      const r = runNode([script, '--root', root, '--base', 'main'], { cwd: root });
+      expect([variant.name, r.status, r.stdout.includes('FAIL apps/api/src/a.ts [below] lines 0.00% (0/20)')]).toEqual([
+        variant.name,
+        1,
+        true,
+      ]);
+    }
+  });
+
   it('[US-006] isCoverageScoped mirrors jest.config.ts collectCoverageFrom (drift fails here)', () => {
     expect(config.collectCoverageFrom).toEqual([
       '{apps,packages}/*/{src,app}/**/*.{ts,tsx}',

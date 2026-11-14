@@ -697,14 +697,14 @@ Feature: Organisation profile
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-062, EPIC-15
 - **Linked REQs:** REQ-ORG-010
 - **As a** business Owner **I want** to invite colleagues by email with a role **so that** the team can book under one account.
-- **Notes:** Token single-use, 7 days (DR-A01), stored hashed. Email sent in invitee locale via EPIC-15. Create and resend need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Listing and revoking never need step-up.
+- **Notes:** Token single-use, 7 days (DR-A01), stored hashed. Email sent in invitee locale via EPIC-15. Create and resend need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Listing and revoking never need step-up. The pending state is the invitation row (`PENDING` → `ACCEPTED` | `REVOKED` | `EXPIRED`), not a membership: no `memberships` row is written and the invited address is never resolved to a user id before acceptance (D-067, D-ARCH-123, PR43-SEC-09 (a)). Pending invitations (invitee e-mail) are listed to holders of `org:member:invite`, not to every `org:read` member.
 
 #### Acceptance criteria
 ```gherkin
 Feature: Invitations
   Scenario: Invite
     Given an Owner holding "org:member:invite" When they invite "ravi@example.test" as "Shipper"
-    Then an INVITED membership exists, the token hash is stored (never the raw token) and expires in 7 days
+    Then a PENDING invitation exists (no membership row yet), the token hash is stored (never the raw token) and expires in 7 days
 
   Scenario: Owner role only by an Owner
     Given an Admin invites with role "Owner" Then 403 "AUTHZ_DENIED"
@@ -740,7 +740,7 @@ Feature: Invitations
   Scenario: Create with a fresh re-authentication proof
     Given the same Owner session
     When they re-authenticate for scope "org.member.manage" and repeat the create call with the proof in X-Reauth-Proof
-    Then the response is 201 and the INVITED membership exists
+    Then the response is 201 and the PENDING invitation exists (no membership row)
 
   Scenario: Recently authenticated session needs no proof
     Given an Owner whose session auth_time is 11 h old
@@ -757,13 +757,13 @@ Feature: Invitations
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-083, EPIC-02
 - **Linked REQs:** REQ-ORG-011
 - **As an** invited colleague **I want** to accept with my verified email **so that** I join the team with the invited role.
-- **Notes:** EC-A16. Account is created first if none exists. Endpoint is `POST /api/v1/invitations/accept {token}` (ADR-0016 amendment 2, D-043): the invitation email link carries the token in the URL fragment (`#t=…`), the SPA reads it, posts it in the body and clears it with `replaceState` (D-UX-009); the token never appears in a path, query string, access log or Referer.
+- **Notes:** EC-A16. Account is created first if none exists. Endpoint is `POST /api/v1/invitations/accept {token}` (ADR-0016 amendment 2, D-043): the invitation email link carries the token in the URL fragment (`#t=…`), the SPA reads it, posts it in the body and clears it with `replaceState` (D-UX-009); the token never appears in a path, query string, access log or Referer. Acceptance is the first moment a membership row exists: it is created directly as `ACTIVE` (`created_by` = the inviter from the invitation row, `invitation_id` set) and the invitation moves `PENDING` → `ACCEPTED` in the same transaction; the reserved `INVITED` membership status is never written (D-067, D-ARCH-123).
 
 #### Acceptance criteria
 ```gherkin
 Feature: Accept invitation
   Scenario: Accept
-    Given a signed-in user whose verified email matches When they POST /api/v1/invitations/accept with the token in the body Then the membership becomes ACTIVE with the invited role and created_by is the inviter
+    Given a signed-in user whose verified email matches When they POST /api/v1/invitations/accept with the token in the body Then an ACTIVE membership is created with the invited role, created_by is the inviter, and the invitation becomes ACCEPTED, in one transaction
 
   Scenario: Token never travels in a URL
     When the invitation email link is opened
@@ -771,7 +771,7 @@ Feature: Accept invitation
     And a request to a path or query containing the token (for example /invitations/<token>/accept) returns 404 NOT_FOUND
 
   Scenario: Expired token
-    Then 410 "TOKEN_EXPIRED" and membership unchanged
+    Then 410 "TOKEN_EXPIRED" and no membership is created
 
   Scenario: Used or revoked token
     Then 400 "TOKEN_INVALID"
@@ -786,14 +786,14 @@ Feature: Accept invitation
     Then 401 "AUTH_REQUIRED" with the return URL preserved
 
   Scenario: Audit
-    Then an "UPDATE" entry on entity "membership" records INVITED to ACTIVE
+    Then a "CREATE" entry on entity "membership" (actor the accepting user, record created_by the inviter) and an "UPDATE" entry on entity "invitation" recording PENDING to ACCEPTED exist, neither containing a token value
 ```
 
 ### US-085 — Manage members, last-Owner and individual-organisation safeguards
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-062, US-068
 - **Linked REQs:** REQ-ORG-012, REQ-ORG-013, REQ-ORG-014
 - **As a** business Owner **I want** to change roles, suspend or remove members without ever orphaning the organisation **so that** access stays controlled.
-- **Notes:** EC-A15, EC-A17. Admin cannot modify an Owner. Individual organisations: no invites, one member. Role change, suspend and remove need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Reading the member list needs no step-up.
+- **Notes:** EC-A15, EC-A17. Admin cannot modify an Owner. Individual organisations: no invites, one member. Role change, suspend and remove need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Reading the member list needs no step-up. The member list (`org:read`) contains `ACTIVE` and `SUSPENDED` memberships only; there are no `INVITED` members (reserved status, D-067). Pending invitations are a separate list keyed by invitee e-mail, shown next to the members only to holders of `org:member:invite` (US-083).
 
 #### Acceptance criteria
 ```gherkin

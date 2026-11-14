@@ -2,7 +2,7 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M1** · Priority band: **Must non-DC**
 
-Tasks: **33** (S 12 / M 21; opus 8 / sonnet 25; demo-critical 0) in **9** batches of ≤ 4 parallel tasks. Estimated effort ≈ 81 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **34** (S 13 / M 21; opus 8 / sonnet 26; demo-critical 0) in **9** batches of ≤ 4 parallel tasks. Estimated effort ≈ 82.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** All 218 Must stories merged; M1 demo journey green; NFR tasks evidence committed; lane C `release-candidate` run; ready for P6 (G3).
 
@@ -22,7 +22,7 @@ Tasks: **33** (S 12 / M 21; opus 8 / sonnet 25; demo-critical 0) in **9** batche
 | 7.6 | TASK-206 Pricing property-based tests<br>TASK-207 Batch track calls per carrier account with backoff and pending handling<br>TASK-208 Mock carrier tracking scenarios on an injected clock<br>TASK-209 Drafts list, resume, delete and 30-day expiry | pkg-pricing-tests<br>mod-tracking-poll<br>pkg-carriers-mock<br>mod-shipments-drafts, web-account-drafts |
 | 7.7 | TASK-210 Rate-limit public tracking lookups<br>TASK-211 Tenant isolation on every account route<br>TASK-212 CI gate for template and variable parity across locales<br>TASK-213 Address only booking-organisation users | mod-tracking-public<br>tests-account-iso<br>notif-parity<br>mod-notifications |
 | 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs<br>infra-tf<br>tests-load<br>tests-web-perf |
-| 7.9 | TASK-218 M1 exit-demo journeys | e2e-demo |
+| 7.9 | TASK-218 M1 exit-demo journeys<br>TASK-282 Developer README and CONTRIBUTING | e2e-demo<br>docs-dev |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
 
@@ -812,7 +812,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047 |
@@ -833,6 +833,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - PR6-SEC-03 item 2 / PR6-SEC-12 c (ADR-0017 §4 allow-list; ADR-0010 am. 11 item 8; D-ARCH-068): client spans for carrier and gateway calls carry `server.address`, `http.request.method`, `http.response.status_code` and the adapter route template (`url.template`) only — `url.full`, `url.path`, `url.query` and the legacy `http.url`/`http.target` are excluded by the span-processor allow-list (or undici auto-instrumentation is disabled for the carrier dispatcher and manual spans are created); the in-memory exporter test asserts a `requestorName` sentinel and an account-number sentinel never appear in any span attribute Afterwards `npm audit --omit=dev` reports 0 and `npm ls gcp-metadata` is empty
 - PR #11 code review R3-m1 (ii) (first metrics task; D-ARCH-079): the leak counter sessionContextLeaks() exported by apps/api/src/platform/db/runtime.ts is published as the metric db_session_context_leak_total (api and worker) with an alert rule; the latched not-ready state stays visible in /health/ready
 - PR #20 code review n8 / api/README §13 header (D-ORCH-025 (2); D-ARCH-084): the counter `security_events_total{event}` is published by the security sink for every catalogue and runtime event (label = event name only; no attribute label); PR20-SEC-17 — one per-line size budget charges `err` (cause chain) and the merged child bindings together with the fields (or err is capped at MAX_LINE_CHARS in total and child bindings at 2 KiB) so a line never exceeds the 16 KiB Docker json-file split, and the shipper partial-line handling is documented in the observability runbook
+- IMAGE SIZE (D-ARCH-118 (e); ADR-0017 amendment 2026-11-14; rulings/wave-0-task-014-rulings.md section 4.3 (e); R-ARCH-31): no @opentelemetry/sdk-node — the SDK is assembled explicitly from sdk-trace-node, exporter-trace-otlp-http, resources, semantic-conventions and the five named instrumentations (registerInstrumentations); metrics stay on @prometheus-io/client; the CI exporter is InMemorySpanExporter of sdk-trace-base; the PR body shows @grpc/grpc-js, protobufjs and exporter-trace-otlp-grpc absent from the api and worker images and quotes the layer-sum delta against the TASK-283 baseline (expected about 8 MiB per image)
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -943,4 +944,32 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-282 — Developer README and CONTRIBUTING: verified command reference (install, build, typegen, db:generate, migrate, seed, test lanes, compose)
+
+| Field | Value |
+|---|---|
+| Stories (completes) | — |
+| REQs | — (enabler; see refs) |
+| NFRs | — |
+| Spikes / security / decisions | D-ARCH-105, D-SEC-PR38-01, D-ARCH-115, D-ORCH-001 |
+| Specialist · model | technical-writer · sonnet (escalate to opus from fix cycle 2) |
+| Complexity | S |
+| Depends on | TASK-014, TASK-015, TASK-020 |
+| Batch · locks | 7.9 · docs-dev |
+| Branch | `feat/TASK-282-developer-readme-contributing-verified-command` |
+| Priority | Enabler |
+
+**Files / modules**
+- README.md (repository root)
+- CONTRIBUTING.md
+- tools/repo/readme-commands.test.ts (every npm run script named in the two files exists in the root package.json; every documented repository path exists)
+
+**Acceptance tests to write**
+- D-ARCH-102..105 / D-SEC-PR38-01 (D-ARCH-115): the command reference lists npm run db:generate with when to run it (after a clone and after any prisma/schema change; nothing generates implicitly, npm run typegen only checks and fails with the text run npm run db:generate) and points to prisma/README.md for the import policy of @platform/prisma/client; it also lists npm ci --ignore-scripts, npm run deps:rebuild, npm run build, npm run typecheck, npm run lint, npm run format:check, the test lanes (test:unit, test:integration, test:api, test:e2e, test:coverage, quality:heavy --profile pr|wave|gate) and the compose commands of CLAUDE.md 2, with the Windows Node 24 PATH prefix note and the Docker Desktop requirement; the writer executes every command before documenting it and records the outputs in the PR body; CLAUDE.md 2 itself is edited only by the orchestrator
+- Drift guard: tools/repo/readme-commands.test.ts runs in lane A (ci-policy suite) and fails when a documented npm run script is missing from package.json or a documented path does not exist
+
+**DoD notes**
+- Documentation task: no product code; the drift-guard test is the only code and needs no security record unless it touches an owned path
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
