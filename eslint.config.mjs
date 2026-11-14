@@ -130,6 +130,12 @@ const AUDIT_WRITER_ALLOW_LIST = [
   'apps/api/src/modules/shipments/service/**', // the state machine writes STATE_TRANSITION entries
 ];
 /**
+ * The write-capable value exports of `@platform/audit` (option `writerExports` of `platform/audit-writer-allowlist`;
+ * PR #42 R1-M1, PR42-SEC-06): the writer, the store (append and vault insert on a handed transaction, without the
+ * entry contract) and the entry assembler. Pure helpers (hash, canonical form, vocabularies) and types stay importable.
+ */
+const AUDIT_WRITER_EXPORTS = ['AuditWriter', 'createAuditWriter', 'writeAuditEntry', 'createPrismaAuditStore', 'prepareEntry'];
+/**
  * Non-repository files planned to use Prisma, by exact path (narrow): the audit store (ADR-0007, TASK-025) and the
  * transactional outbox writer (TASK-043). Anything else beside them still goes through a repository.
  */
@@ -141,8 +147,11 @@ const DB_PLATFORM = 'apps/*/src/platform/db/**';
  * transaction (the audit hook, the outbox writer, the audit store). Test files are outside the rule's block.
  */
 const TENANT_TX_FILES = ['apps/api/src/platform/audit/**', 'apps/api/src/platform/outbox/writer.ts', 'packages/audit/src/store/**'];
-/** T-83 R6 (option `txHandleTypes`): a function with a parameter of one of these types runs inside the transaction. */
-const TENANT_TX_HANDLE_TYPES = ['TenantDb', 'AppDb', 'AppTransactionClient'];
+/**
+ * T-83 R6 (option `txHandleTypes`): a function with a parameter of one of these types runs inside the transaction.
+ * `AuditSqlPort` is the audit writer's and the tokeniser's structural view of it (PR42-SEC-07).
+ */
+const TENANT_TX_HANDLE_TYPES = ['TenantDb', 'AppDb', 'AppTransactionClient', 'AuditSqlPort'];
 /**
  * `platform/system-model-owner` (PR19-SEC-01, D-ARCH-080): table-class manifest module -> the code that owns its
  * SYSTEM tables. A manifest module without an entry owns `apps/*\/src/modules/<module>/**` (e.g. `identity` for
@@ -201,8 +210,9 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   // pg_dump's own preamble `set_config('search_path', '', false)`, asserted verbatim (no tenant key; not a session form).
   { files: ['tools/db/up-down-up.test.ts'], allow: ['setter'] },
   // The audit head-row lock statement sets the transaction-local audit `lock_timeout` in its MATERIALIZED CTE
-  // (ADR-0007 am. 10 item 2, data-model §5.4 statement 2; TASK-025). Literal non-app key, is_local true; the store's
-  // unit test pins that this is the file's only setter and that it names `lock_timeout`. No tenant key, no read.
+  // (ADR-0007 am. 10 item 2, data-model §5.4 statement 2; TASK-025). Literal non-app key, is_local true. The store's
+  // unit test pins it with the rule's own pattern (PR #42 R1-m1, PR42-SEC-05): exactly one case-insensitive
+  // `set_config` in the comment-stripped file, and that one is the exact `lock_timeout` setter. No tenant key, no read.
   { files: ['packages/audit/src/store/prisma-store.ts'], allow: ['setter'] },
 ];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
@@ -812,7 +822,7 @@ export default defineConfig([
       'platform/money-arith': 'error',
       'platform/no-tofixed-tolocalestring': 'error',
       'platform/no-innerhtml': 'error',
-      'platform/audit-writer-allowlist': 'error',
+      'platform/audit-writer-allowlist': ['error', { writerExports: AUDIT_WRITER_EXPORTS }],
     },
   },
   {

@@ -237,6 +237,19 @@ const RULES: readonly Violation[] = [
     'platform/audit-writer-allowlist',
     '',
   ],
+  // PR #42 R1-M1 / PR42-SEC-06: the write-capable store and the entry assembler are writer exports too.
+  [
+    'platform/audit-writer-allowlist: a module outside the allow-list imports the audit store (R1-M1)',
+    `rules/audit-writer-allowlist/${API}/orders/service/bad-orders-store.service.ts`,
+    'platform/audit-writer-allowlist',
+    'allowed only in the audit-writer allow-list',
+  ],
+  [
+    'platform/audit-writer-allowlist: a module outside the allow-list imports the entry assembler (PR42-SEC-06)',
+    `rules/audit-writer-allowlist/${API}/orders/service/bad-orders-prepare.service.ts`,
+    'platform/audit-writer-allowlist',
+    'allowed only in the audit-writer allow-list',
+  ],
   ['import-x/no-cycle: a <-> b (a)', 'rules/import-cycle/packages/shared/src/bad-a.ts', 'import-x/no-cycle', ''],
   ['import-x/no-cycle: a <-> b (b)', 'rules/import-cycle/packages/shared/src/bad-b.ts', 'import-x/no-cycle', ''],
   ['platform/money-arith: `+` on minor units', 'rules/money-arith/packages/pricing/src/bad-total.ts', 'platform/money-arith', ''],
@@ -354,6 +367,12 @@ const RULES: readonly Violation[] = [
     'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/audit/bad-audit-hook.ts',
     TENANT_TX_IO,
     'runs inside a tenant-transaction file',
+  ],
+  [
+    `[PR42-SEC-07] ${TENANT_TX_IO}: R6 a tokeniser taking db: AuditSqlPort (a sleep and fetch; outbound-http fires too)`,
+    'rules/no-external-calls-in-tenant-tx/packages/audit/src/bad-kms-tokeniser.ts',
+    [TENANT_TX_IO, TENANT_TX_IO, OUTBOUND_HTTP],
+    '',
   ],
   [
     `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R6 is type-name based (ctx: CarrierContext, db: DatabaseRuntime and a TenantDb callback type are not roots; only outbound-http fires)`,
@@ -995,6 +1014,14 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     [
       'platform/audit-writer-allowlist: allow-listed identity module',
       `rules/audit-writer-allowlist/${API}/identity/service/ok-login.service.ts`,
+    ],
+    [
+      'platform/audit-writer-allowlist: the audit middleware folder composes the writer over the store (R1-M1)',
+      'rules/audit-writer-allowlist/apps/api/src/platform/audit/ok-store.ts',
+    ],
+    [
+      'platform/audit-writer-allowlist: pure audit helpers outside the allow-list (PR42-SEC-06)',
+      `rules/audit-writer-allowlist/${API}/orders/service/ok-pure-helpers.ts`,
     ],
     ['platform/money-arith: the money helpers', 'rules/money-arith/packages/shared/src/money/add.ts'],
     ['platform/no-innerhtml: the sanitising component', 'rules/no-innerhtml/packages/ui/src/sanitised-html/sanitised-html.tsx'],
