@@ -42,20 +42,57 @@ export function staticSpecifier(node) {
   return undefined;
 }
 
+/** The modules that export `createRequire`. */
+const NODE_MODULE = new Set(['node:module', 'module']);
+const CREATE_REQUIRE = 'createRequire';
+
 /**
- * @param {import('estree').Node} callee
- * @returns {boolean} `createRequire` or `<x>.createRequire`.
+ * @param {import('eslint').SourceCode} sourceCode
+ * @param {import('estree').Identifier} identifier
+ * @returns {import('eslint').Scope.Variable | undefined} The variable `identifier` refers to.
  */
-const isCreateRequire = (callee) =>
-  (callee.type === 'Identifier' && callee.name === 'createRequire') ||
-  (callee.type === 'MemberExpression' &&
-    !callee.computed &&
-    callee.property.type === 'Identifier' &&
-    callee.property.name === 'createRequire');
+function resolveVariable(sourceCode, identifier) {
+  /** @type {import('eslint').Scope.Scope | null} */
+  let scope = sourceCode.getScope(identifier);
+  while (scope) {
+    const variable = scope.set.get(identifier.name);
+    if (variable) return variable;
+    scope = scope.upper;
+  }
+  return undefined;
+}
+
+/**
+ * @param {import('eslint').SourceCode} sourceCode
+ * @param {import('estree').Identifier} identifier
+ * @returns {string | undefined} The name imported from `node:module` behind `identifier` (`*` for a namespace or default).
+ */
+function nodeModuleImport(sourceCode, identifier) {
+  const def = resolveVariable(sourceCode, identifier)?.defs.find((candidate) => candidate.type === 'ImportBinding');
+  if (def === undefined || !NODE_MODULE.has(String(/** @type {import('estree').ImportDeclaration} */ (def.parent).source.value))) {
+    return undefined;
+  }
+  return def.node.type === 'ImportSpecifier' ? importedName(def.node) : '*';
+}
+
+/**
+ * D-ARCH-111 (h): `createRequire` by name, a local alias of its import from `node:module`
+ * (`import { createRequire as mk }`), or a member `createRequire` (`<x>.createRequire`, a namespace import included).
+ * @param {import('estree').Node} callee
+ * @param {import('eslint').SourceCode} sourceCode
+ * @returns {boolean}
+ */
+const isCreateRequire = (callee, sourceCode) => {
+  if (callee.type === 'Identifier') return callee.name === CREATE_REQUIRE || nodeModuleImport(sourceCode, callee) === CREATE_REQUIRE;
+  if (callee.type !== 'MemberExpression') return false;
+  if (!callee.computed) return callee.property.type === 'Identifier' && callee.property.name === CREATE_REQUIRE;
+  return callee.property.type === 'Literal' && callee.property.value === CREATE_REQUIRE;
+};
 
 /**
  * Whether `call` loads a module by a CommonJS-style require: `require(x)`, `<x>.require(x)` (`module.require`),
- * `createRequire(url)(x)`, or `req(x)` where `req` is a variable initialised with `createRequire(url)` (PR32-SEC-07 (a)).
+ * `createRequire(url)(x)`, or `req(x)` where `req` is a variable initialised with `createRequire(url)` (PR32-SEC-07 (a));
+ * `createRequire` includes its import aliases and namespace members (D-ARCH-111 (h)).
  * @param {import('estree').CallExpression} call
  * @param {import('eslint').SourceCode} sourceCode
  * @returns {boolean}
@@ -71,20 +108,11 @@ export function isRequireCall(call, sourceCode) {
   ) {
     return true;
   }
-  if (callee.type === 'CallExpression') return isCreateRequire(callee.callee);
+  if (callee.type === 'CallExpression') return isCreateRequire(callee.callee, sourceCode);
   if (callee.type !== 'Identifier') return false;
-  /** @type {import('eslint').Scope.Scope | null} */
-  let scope = sourceCode.getScope(call);
-  while (scope) {
-    const variable = scope.set.get(callee.name);
-    if (variable) {
-      return variable.defs.some(
-        (def) => def.type === 'Variable' && def.node.init?.type === 'CallExpression' && isCreateRequire(def.node.init.callee),
-      );
-    }
-    scope = scope.upper;
-  }
-  return false;
+  return (resolveVariable(sourceCode, callee)?.defs ?? []).some(
+    (def) => def.type === 'Variable' && def.node.init?.type === 'CallExpression' && isCreateRequire(def.node.init.callee, sourceCode),
+  );
 }
 
 /**

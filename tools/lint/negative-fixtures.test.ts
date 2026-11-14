@@ -349,6 +349,73 @@ const RULES: readonly Violation[] = [
     ruleId,
     message,
   ]),
+  // TASK-020 part C: R4 (D-ARCH-106 (5)), the load phase is a root in every form and whatever the transaction.
+  [
+    `[TASK-020] [D-ARCH-106] ${TENANT_TX_IO}: R4 load phase (arrow, function expression, load() {}, async load() {}, named declaration and const, transaction: 'none', fixtureRoute)`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/bad-load.ts`,
+    Array<string>(8).fill(TENANT_TX_IO),
+    'runs inside a defineRoute load phase (it runs in a read-only tenant transaction)',
+  ],
+  [
+    `[TASK-020] [D-ARCH-106] ${TENANT_TX_IO}: R4 call is never a root (fetch and a setTimeout sleep in call; only outbound-http fires)`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-call-phase.ts`,
+    OUTBOUND_HTTP,
+    '',
+  ],
+  // D-ARCH-111: the T-83 rule residuals (a)-(g). A fixture with N findings of the rule lists the rule N times.
+  ...(
+    [
+      ['(a) a same-file const spec literal is walked (handler and load)', 'routes/bad-spec-const', 2, 'runs inside a defineRoute'],
+      [
+        '(a) a spec that is a parameter, an import, a call result or a let is reported',
+        'routes/bad-spec-unreadable',
+        4,
+        'declare route specs as an inline literal or a same-file const literal',
+      ],
+      [
+        '(b) wrapped phases are walked through their function arguments (inline, named, nested, load) and a conditional through both branches',
+        'routes/bad-handler-wrapped',
+        4,
+        'runs inside a defineRoute',
+      ],
+      [
+        '(b) a handler or load that is a parameter, a let, or a call with no function argument (inline or const) is reported',
+        'routes/bad-handler-unresolved',
+        5,
+        'declare route handlers inline or as same-file const functions',
+      ],
+      ['(c) defineRoute and fixtureRoute through an import alias', 'routes/bad-factory-alias', 2, 'runs inside a defineRoute handler'],
+      [
+        '(d) holder chains at any depth (ctx.deps.queue, services.queue, this.x.queue) and one same-function const alias',
+        'service/bad-holder-depth',
+        4,
+        'runs inside a withTenantTx callback',
+      ],
+      [
+        '(e) every method of a class whose constructor takes a TenantDb parameter property',
+        'service/bad-injected-handle',
+        2,
+        'runs inside a method of a class constructed with a tenant transaction handle',
+      ],
+      [
+        '(f) scheduler.wait (named alias, namespace member) and Atomics.wait',
+        'service/bad-waits',
+        3,
+        'sleeps inside a withTenantTx callback',
+      ],
+      [
+        '(g) a literal import() of an external client module (string and template literal)',
+        'service/bad-dynamic-import',
+        2,
+        'runs inside a withTenantTx callback',
+      ],
+    ] as const
+  ).map(([title, name, count, message]): Violation => [
+    `[D-ARCH-111] ${TENANT_TX_IO}: ${title}`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/${name}.ts`,
+    Array<string>(count).fill(TENANT_TX_IO),
+    message,
+  ]),
   [
     `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R5 a function in a txFiles file (apps/api/src/platform/audit/)`,
     'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/audit/bad-audit-hook.ts',
@@ -701,6 +768,13 @@ const TENANT_DB: readonly Violation[] = [
     ['platform/static-module-specifier', 'platform/static-module-specifier', 'platform/static-module-specifier'],
     'loads a module through a computed specifier',
   ],
+  [
+    '[D-ARCH-111] platform/static-module-specifier: an import alias of createRequire (direct and kept in a variable) and a namespace member',
+    `rules/system-model-owner/${API}/orders/service/bad-create-require-alias.ts`,
+    ['platform/static-module-specifier', 'platform/static-module-specifier', 'platform/static-module-specifier'],
+    'loads a module through a computed specifier',
+  ],
+  ['[D-ARCH-111] no-eval: eval(code) in apps/api/src', `rules/no-eval/${API}/orders/service/bad-eval.ts`, 'no-eval', 'eval'],
   // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
   [
     'platform/tenant-context-sql: SET of a double-quoted namespace and key in a repository (R2-m2)',
@@ -1040,6 +1114,14 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     [
       '[PR32-SEC-01] [D-ARCH-106] no-external-calls-in-tenant-tx: the fixtureRoute default; call and afterCommit are never roots',
       `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-fixture-route.ts`,
+    ],
+    [
+      '[TASK-020] [D-ARCH-106] no-external-calls-in-tenant-tx: R4 afterCommit is never a root (a queue and the mailer)',
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-after-commit.ts`,
+    ],
+    [
+      '[D-ARCH-111] no-external-calls-in-tenant-tx: (b) a member-expression handler, an imported handler, an unfollowable handler on a none route',
+      `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-handler-member.ts`,
     ],
     ['[PR #32 M1] [D-ARCH-097] the S3 seam imports the AWS SDK', 'rules/s3-sdk-confinement/apps/api/src/platform/storage/ok-s3-adapter.ts'],
     [
