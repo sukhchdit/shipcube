@@ -11,6 +11,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
+import { auditErrorCause, type AuditWriteError, isAuditWriteError } from '@platform/audit';
 import type { Config } from '@platform/config';
 
 import { DbError, type DbErrorMapping, dbErrorMapping, type DbSecurityEvent, isDatabaseError, mapDbError } from './map-db-error.js';
@@ -300,6 +301,19 @@ export function assertNoSessionOptions(env: Readonly<Record<string, string | und
 }
 
 /**
+ * The `DbError` mapping of an audit write failure (ADR-0007 am. 10 item 2, data-model §5.4 "Error model"; TASK-025):
+ * a lock timeout is 503 SERVICE_UNAVAILABLE with `Retry-After` (reason AUDIT_LOCK_TIMEOUT; openapi.yaml has no
+ * dedicated code), any other failure is 500 AUDIT_WRITE_FAILED. The transaction has rolled back in both cases.
+ */
+export function auditDbErrorMapping(error: AuditWriteError): DbErrorMapping {
+  const mapping =
+    error.reason === 'AUDIT_LOCK_TIMEOUT'
+      ? dbErrorMapping(503, 'AUDIT_LOCK_TIMEOUT', { retryable: true })
+      : dbErrorMapping(500, 'AUDIT_WRITE_FAILED', { code: 'AUDIT_WRITE_FAILED' });
+  return error.sqlState === undefined ? mapping : { ...mapping, sqlState: error.sqlState };
+}
+
+/**
  * Builds the tenant-transaction runner over the root client. The root client stays inside this closure: it is never
  * returned, and the callback receives only the `TenantDb` guard (item 2).
  */
@@ -323,16 +337,24 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     return new DbError(dbErrorMapping(500, 'DB_SESSION_CONTEXT_LEAK', { securityEvent: 'db_session_context_leak' }));
   };
 
+  const logDbError = (error: unknown, mapping: DbErrorMapping): void => {
+    if (deps.onDbError === undefined) return;
+    try {
+      deps.onDbError(error, mapping);
+    } catch {
+      // Logging is best effort here: the caller must still receive the mapped DbError, never the original error.
+    }
+  };
+
   const mapped = (error: unknown, correlationId: string): unknown => {
+    if (isAuditWriteError(error)) {
+      const mapping = auditDbErrorMapping(error);
+      logDbError(auditErrorCause(error) ?? error, mapping);
+      return new DbError(mapping);
+    }
     if (error instanceof DbError || !isDatabaseError(error)) return error;
     const mapping: DbErrorMapping = mapDbError(error);
-    if (deps.onDbError !== undefined) {
-      try {
-        deps.onDbError(error, mapping);
-      } catch {
-        // Logging is best effort here: the caller must still receive the mapped DbError, never the original error.
-      }
-    }
+    logDbError(error, mapping);
     if (mapping.securityEvent !== undefined) {
       deps.onSecurityEvent(mapping.securityEvent, {
         correlationId,
