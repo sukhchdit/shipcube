@@ -90,7 +90,8 @@ describe('entry points (main.ts) exit 78 naming the variable @security', () => {
   const start = (service: 'api' | 'worker', extra: Record<string, string>) => {
     const env: NodeJS.ProcessEnv = { ...process.env };
     for (const name of [...CONFIG_KEY_NAMES, 'PGOPTIONS']) delete env[name];
-    Object.assign(env, createTestEnv({ service }), { DB_CONNECTION_TIMEOUT_MS: '500' }, extra);
+    // The pool connects lazily, so the default connection timeout (floor 2 s since PR #38) never comes into play.
+    Object.assign(env, createTestEnv({ service }), extra);
     const main = join(root, 'apps', service, 'src', 'main.ts');
     const result = spawnSync(process.execPath, [tsx, '--conditions=@platform/source', main], {
       cwd: root,
