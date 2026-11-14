@@ -15,11 +15,15 @@ import { quoteIdentifier } from '../../../tools/db/sql-text.js';
 import { ROW_OVERRIDES } from './fixtures.js';
 import {
   type ColumnInfo,
+  DECLAIM_MARKER,
   type IsolationCase,
   type IsolationKey,
   type LiveTable,
   type Observation,
   type ProbeKind,
+  RLS_MARKER,
+  STD_GUARD_MARKER,
+  type SynthesisedRow,
   type TablePrivilege,
   TABLE_PRIVILEGES,
   hasStdColumns,
@@ -43,6 +47,8 @@ export const TENANT_B: Tenant = { org: stableUuid('rls-generator:org-B'), actor:
 /** The guest token hash of the planted guest rows, and a different one. */
 export const GUEST_HASH = stableHash('H');
 export const OTHER_GUEST_HASH = stableHash('H2');
+/** The actor `platform.std_columns_guard()` expects when no actor is set (guest sessions; data-model §7.6). */
+export const ANONYMOUS_ACTOR = '00000000-0000-7000-8000-000000000002';
 const CORRELATION = 'rls-generator';
 /** statement_timeout, lock_timeout, idle_in_transaction_session_timeout of the probe transactions (ms). */
 const TIMEOUTS = ['10000', '2000', '10000'] as const;
@@ -64,24 +70,33 @@ const CONTEXTS = {
 // Catalogue
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * Every relation of every user schema: tables in `public` (the manifest's domain) and, outside it, any table, view,
+ * materialised view or foreign table, which `enumerationFindings` reports (R1-m4). Triggers are listed only when they
+ * fire in an ordinary session (`tgenabled` O or A): a guard switched to REPLICA or disabled is absent (PR43-SEC-05 (d)).
+ */
 const LIVE_TABLES_SQL = `
-  SELECT c.relname AS name, c.relrowsecurity AS rls, c.relforcerowsecurity AS forced,
+  SELECT n.nspname AS schema, c.relname AS name, c.relkind::text AS kind, c.relrowsecurity AS rls, c.relforcerowsecurity AS forced,
          coalesce((SELECT json_agg(json_build_object(
                      'name', a.attname, 'type', format_type(a.atttypid, a.atttypmod), 'notNull', a.attnotnull,
                      'hasDefault', a.atthasdef OR a.attidentity <> '' OR a.attgenerated <> '') ORDER BY a.attnum)
                      FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '[]') AS columns,
          coalesce((SELECT json_agg(t.tgname::text ORDER BY t.tgname) FROM pg_trigger t
-                    WHERE t.tgrelid = c.oid AND NOT t.tgisinternal), '[]') AS triggers,
+                    WHERE t.tgrelid = c.oid AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')), '[]') AS triggers,
          ARRAY(SELECT p FROM unnest($1::text[]) p WHERE has_table_privilege('platform_app', c.oid, p)) AS privileges,
          coalesce((SELECT json_agg(json_build_object('column', a.attname, 'def', pg_get_constraintdef(k.oid)))
                      FROM pg_constraint k JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
                     WHERE k.conrelid = c.oid AND k.contype = 'c' AND cardinality(k.conkey) = 1), '[]') AS checks
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
-   ORDER BY c.relname`;
+   WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%'
+     AND n.nspname NOT LIKE 'pg\\_temp\\_%' AND NOT c.relispartition
+     AND (c.relkind IN ('r', 'p') OR (n.nspname <> 'public' AND c.relkind IN ('v', 'm', 'f')))
+   ORDER BY n.nspname, c.relname`;
 
 interface LiveTableRow {
+  schema: string;
   name: string;
+  kind: string;
   rls: boolean;
   forced: boolean;
   columns: Omit<ColumnInfo, 'enumValues'>[];
@@ -110,7 +125,9 @@ export async function readLiveTables(client: pg.ClientBase): Promise<LiveTable[]
       if (values !== undefined) enums.set(check.column, values);
     }
     return {
+      schema: row.schema,
       name: row.name,
+      kind: row.kind,
       rowSecurity: row.rls,
       forceRowSecurity: row.forced,
       triggers: row.triggers,
@@ -137,6 +154,17 @@ export interface TablePlan {
   readonly keyB: string;
   /** GUEST_CAPABLE only: the guest row (org_id NULL, hash GUEST_HASH). */
   readonly guestRow?: string;
+  /** The seeded rows, column -> value (A, B and, GUEST_CAPABLE only, the guest row G): API paths and restores. */
+  readonly seeded: Readonly<Record<SeededRow, SynthesisedRow | undefined>>;
+}
+
+export type SeededRow = 'A' | 'B' | 'G';
+
+/** Column -> value of a seeded row (the API case runner fills path parameters from it). */
+export function seededValues(plan: TablePlan, row: SeededRow): Readonly<Record<string, unknown>> {
+  const seeded = plan.seeded[row];
+  if (seeded === undefined) throw new Error(`${plan.table.name}: no seeded row ${row}`);
+  return Object.fromEntries(seeded.columns.map((column, index) => [column, seeded.values[index]]));
 }
 
 const keyOf = (key: IsolationKey, tenant: Tenant): string => (key.scope === 'org' ? tenant.org : tenant.actor);
@@ -172,16 +200,7 @@ export async function seedTable(superuser: pg.ClientBase, table: LiveTable, key:
     const owner = ownership(table, key, TENANT_A, guestRow);
     rows.push(synthesiseRow(table, { ...owner, org_id: null, guest_token_hash: Buffer.from(GUEST_HASH, 'hex') }, 'G'));
   }
-  await superuser.query('BEGIN');
-  try {
-    await superuser.query('SET LOCAL session_replication_role = replica');
-    for (const row of rows) await superuser.query(insertSql(table.name, row.columns), [...row.values]);
-    await superuser.query('COMMIT');
-  } catch (error) {
-    await superuser.query('ROLLBACK');
-    throw error;
-  }
-  return {
+  const plan: TablePlan = {
     table,
     key,
     rowA,
@@ -189,7 +208,36 @@ export async function seedTable(superuser: pg.ClientBase, table: LiveTable, key:
     keyA: keyOf(key, TENANT_A),
     keyB: keyOf(key, TENANT_B),
     ...(guestRow === undefined ? {} : { guestRow }),
+    seeded: { A: rows[0], B: rows[1], G: rows[2] },
   };
+  await writeSeededRows(superuser, plan, false);
+  return plan;
+}
+
+/**
+ * Writes the plan's seeded rows in one committed transaction with triggers and foreign keys off. With `replace`, each
+ * row is deleted by id first: the API case runner restores the rows after a case whose positive control wrote to them.
+ */
+async function writeSeededRows(superuser: pg.ClientBase, plan: TablePlan, replace: boolean): Promise<void> {
+  const t = `public.${quoteIdentifier(plan.table.name)}`;
+  const ids = [plan.rowA, plan.rowB, ...(plan.guestRow === undefined ? [] : [plan.guestRow])];
+  await superuser.query('BEGIN');
+  try {
+    await superuser.query('SET LOCAL session_replication_role = replica');
+    if (replace) await superuser.query(`DELETE FROM ${t} WHERE id = ANY ($1::uuid[])`, [ids]);
+    for (const row of Object.values(plan.seeded)) {
+      if (row !== undefined) await superuser.query(insertSql(plan.table.name, row.columns), [...row.values]);
+    }
+    await superuser.query('COMMIT');
+  } catch (error) {
+    await superuser.query('ROLLBACK');
+    throw error;
+  }
+}
+
+/** Restores the seeded A/B(/G) rows of `plan` exactly (committed). */
+export async function restoreSeededRows(superuser: pg.ClientBase, plan: TablePlan): Promise<void> {
+  await writeSeededRows(superuser, plan, true);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -212,7 +260,8 @@ async function observe(client: pg.ClientBase, sql: string, params: readonly unkn
   } catch (error) {
     await client.query('ROLLBACK TO SAVEPOINT probe');
     const { code, message } = error as { code?: unknown; message?: unknown };
-    const marker = typeof message === 'string' && message.includes('GUEST_DECLAIM_FORBIDDEN') ? 'GUEST_DECLAIM_FORBIDDEN' : undefined;
+    const text = typeof message === 'string' ? message : '';
+    const marker = [DECLAIM_MARKER, STD_GUARD_MARKER, RLS_MARKER].find((candidate) => text.includes(candidate));
     return { sqlState: String(code), ...(marker === undefined ? {} : { marker }) };
   }
 }
@@ -240,6 +289,41 @@ function statementFor(plan: TablePlan, kind: ProbeKind): ProbeStatement {
       return { context: CONTEXTS.tenantA, sql: `UPDATE ${t} SET ${k} = ${k} WHERE id = $1`, params: [plan.rowB] };
     case 'delete-foreign-id':
       return { context: CONTEXTS.tenantA, sql: `DELETE FROM ${t} WHERE id = $1`, params: [plan.rowB] };
+    case 'update-blind':
+      // No column is read (constants only, no WHERE, no RETURNING), so no SELECT policy filters the rows: only the
+      // UPDATE policies decide (PR43-SEC-02). The stamps satisfy the standard-columns guard on A's row (version 1 -> 2).
+      return {
+        context: CONTEXTS.tenantA,
+        sql: `UPDATE ${t} SET ${k} = $1${hasStdColumns(plan.table) ? ', updated_by = $2, version = 2' : ''}`,
+        params: [plan.keyA, ...stampParams(plan.table)],
+      };
+    case 'delete-blind':
+      return { context: CONTEXTS.tenantA, sql: `DELETE FROM ${t}`, params: [] };
+    case 'reparent-own-row':
+      return {
+        context: CONTEXTS.tenantA,
+        sql: `UPDATE ${t} SET ${k} = $2${stampUpdate(plan.table, 3)} WHERE id = $1`,
+        params: [plan.rowA, plan.keyB, ...stampParams(plan.table)],
+      };
+    case 'guest-context-tenant-rows':
+      return {
+        context: CONTEXTS.guestOwn,
+        sql: `SELECT count(*)::int AS n FROM ${t} WHERE id = ANY ($1::uuid[])`,
+        params: [[plan.rowA, plan.rowB]],
+      };
+    case 'guest-update-other-hash':
+      return { context: CONTEXTS.guestOther, sql: `UPDATE ${t} SET guest_token_hash = $1`, params: [Buffer.from(OTHER_GUEST_HASH, 'hex')] };
+    case 'guest-insert-with-org': {
+      // A guest (hash H, no organisation, the anonymous actor's stamps) writing a row of organisation A.
+      const id = stableUuid(`${plan.table.name}:guest-insert`);
+      const owner: Record<string, unknown> = {
+        ...ownership(plan.table, plan.key, TENANT_A, id),
+        ...insertStamps(plan.table, ANONYMOUS_ACTOR),
+        guest_token_hash: Buffer.from(GUEST_HASH, 'hex'),
+      };
+      const row = synthesiseRow(plan.table, owner, 'GI');
+      return { context: CONTEXTS.guestOwn, sql: insertSql(plan.table.name, row.columns), params: row.values };
+    }
     case 'insert-foreign-key': {
       // B's key, A's stamps: the standard-columns guard (when present) passes, so WITH CHECK is what refuses it.
       const id = stableUuid(`${plan.table.name}:insert-foreign`);
@@ -332,4 +416,9 @@ export async function runCases(
 /** Sets A's tenant context (TENANT scope) transaction-locally with the production statement. */
 export async function setTenantAContext(client: pg.ClientBase): Promise<void> {
   await setContext(client, CONTEXTS.tenantA);
+}
+
+/** Sets an arbitrary context transaction-locally with the production statement (operator positive control). */
+export async function setContextValues(client: pg.ClientBase, org: string, actor: string, scope: 'TENANT' | 'OPERATOR'): Promise<void> {
+  await setContext(client, [org, actor, scope, '']);
 }

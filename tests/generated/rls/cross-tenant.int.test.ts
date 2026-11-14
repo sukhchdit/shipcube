@@ -8,15 +8,19 @@
  *  - committed: every RLS-class table of `tools/db/table-classes/*.json` is probed on a clone of the migrated template.
  *    On `main` today the manifests list none (the first arrive with TASK-037/049/051), so this layer is empty until a
  *    migration adds one and its manifest line, and then it runs without any edit here (AT-US-077-03);
- *  - probe: one table per RLS class (TENANT with the standard-columns guard, GUEST_CAPABLE, USER_OWNED) and the three
- *    DR-A14 sets, planted on a second clone from the renderer and the function templates (`probe.ts`), so every probe
- *    kind is proven against real policies.
- * Mutation controls show the probes fail on a leaking policy, on a missing de-claim trigger and on an unlisted table.
- * API level (AT-US-077-02): every tenant-resource route of the module registry needs a registered case (none exist
- * yet); a fixture tenant route served by the composed createApp over the real runtime answers B's id with 404.
+ *  - probe: one table per RLS class (TENANT with the standard-columns guard, GUEST_CAPABLE, USER_OWNED) and the
+ *    DR-A14 sets not yet committed, planted on a second clone from the renderer and the function templates
+ *    (`probe.ts`), so every probe kind is proven against real policies. The probe layer seeds the committed RLS tables
+ *    too, so the DR-A14 semantics run on the real tables once they exist.
+ * Mutation controls show the probes fail on a leaking read policy, on leaking write-only policies (PR43-SEC-02), on a
+ * missing or replica-mode de-claim trigger and on an unlisted table or a relation outside `public`.
+ * API level (AT-US-077-02): every tenant/user/guest route with a path parameter needs an executable case in
+ * `API_CASES`; the suite runs each against the real module registry composed by createApp over the real runtime, and
+ * runs the fixture cases (tenant, user and dual-mode guest routes over the probe schema) the same way, with a leaking
+ * route as the mutation control (`api-cases.ts`).
  *
  * Deterministic: every id and hash is derived from a label (`stableUuid`); each probe runs in its own rolled-back
- * transaction. Zero-skip: an unrunnable case fails.
+ * transaction; API cases restore the seeded rows. Zero-skip: an unrunnable case fails.
  */
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -27,28 +31,43 @@ import { AppError } from '@platform/shared';
 import Joi from 'joi';
 import pg from 'pg';
 
-import { createApp } from '../../../apps/api/src/app.js';
+import { createApp, type ModuleRegistration } from '../../../apps/api/src/app.js';
 import { moduleRegistry } from '../../../apps/api/src/modules/index.generated.js';
 import type { AppDb, AppTransactionClient } from '../../../apps/api/src/platform/db/index.js';
 import { type ActiveDatabaseRuntime, databaseRuntimeFromConfig } from '../../../apps/api/src/platform/db/runtime.js';
-import { markCredentialsRead, setPrincipal } from '../../../apps/api/src/platform/routing/route-state.js';
 import { defaultPipelineSlots } from '../../../apps/api/src/platform/routing/pipeline.js';
-import type { RouteSlot } from '../../../apps/api/src/platform/routing/slot.js';
-import { defineRoute } from '../../../apps/api/src/platform/routing/define-route.js';
+import { defineRoute, type RouteContext, type RouteDescriptor } from '../../../apps/api/src/platform/routing/define-route.js';
 import { createRuntimeLog } from '../../../apps/api/src/platform/runtime/log.js';
 import { APP_ROLE, PlatformPostgres } from '../../../prisma/tests/harness/postgres.js';
 import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from '../../../tools/db/table-classes.js';
 import { loadApiMounts } from '../api-mounts.js';
-import { readLiveTables, runCases, runProbe, seedTable, setTenantAContext, type TablePlan, TENANT_A, TENANT_B } from './database.js';
+import { probePrincipalSlot, runApiCase } from './api-cases.js';
+import {
+  readLiveTables,
+  restoreSeededRows,
+  runCases,
+  runProbe,
+  seedTable,
+  setContextValues,
+  setTenantAContext,
+  type TablePlan,
+  TENANT_A,
+  TENANT_B,
+} from './database.js';
 import { API_CASES } from './fixtures.js';
 import {
+  type ApiCrossTenantCase,
   enumerationFindings,
   expectedObservation,
   generateCases,
+  GUEST_PROBES,
   isolationKey,
   type IsolationCase,
   type LiveTable,
   routeCaseFindings,
+  stableUuid,
+  synthesiseRow,
+  TABLE_PROBES,
 } from './generator.js';
 import { PROBE_ENTRIES, plantProbeSchema } from './probe.js';
 
@@ -85,6 +104,15 @@ const layers: Record<Layer['name'], Layer> = {
   },
 };
 
+const rlsNames = (entries: readonly TableClassEntry[]): string[] =>
+  entries
+    .filter((entry) => RLS_CLASSES.has(entry.class))
+    .map((entry) => entry.name)
+    .sort();
+
+const publicTable = (layer: Layer, name: string): LiveTable | undefined =>
+  layer.live.find((live) => live.schema === 'public' && live.name === name);
+
 async function withSuperuser<T>(database: string, fn: (client: pg.Client) => Promise<T>): Promise<T> {
   const client = await db.superuser(database);
   try {
@@ -94,12 +122,12 @@ async function withSuperuser<T>(database: string, fn: (client: pg.Client) => Pro
   }
 }
 
-/** Seeds every RLS table of `entries` that exists in `layer` and opens the layer's platform_app session. */
-async function prepare(layer: Layer, rlsEntries: readonly TableClassEntry[]): Promise<void> {
+/** Seeds every RLS table of the layer's entries that exists and opens the layer's platform_app session. */
+async function prepare(layer: Layer): Promise<void> {
   await withSuperuser(layer.database, async (superuser) => {
     layer.live = await readLiveTables(superuser);
-    for (const entry of rlsEntries.filter((e) => RLS_CLASSES.has(e.class))) {
-      const table = layer.live.find((live) => live.name === entry.name);
+    for (const entry of layer.entries.filter((e) => RLS_CLASSES.has(e.class))) {
+      const table = publicTable(layer, entry.name);
       if (table === undefined) continue; // reported by the enumeration test, never skipped silently
       layer.plans.set(entry.name, await seedTable(superuser, table, isolationKey(entry), entry.class === 'GUEST_CAPABLE'));
     }
@@ -120,8 +148,8 @@ beforeAll(async () => {
   } finally {
     await migrator.end();
   }
-  await prepare(layers.committed, COMMITTED_ENTRIES);
-  await prepare(layers.probe, PROBE_ENTRIES);
+  await prepare(layers.committed);
+  await prepare(layers.probe);
 }, 300_000);
 
 afterAll(async () => {
@@ -170,6 +198,9 @@ const MATRIX: readonly (IsolationCase & { readonly layer: Layer['name'] })[] = [
   ...PROBE_CASES.map((c) => ({ ...c, layer: 'probe' as const })),
 ];
 
+const expectedFor = (isolationCase: IsolationCase, plan: TablePlan): ReturnType<typeof expectedObservation> =>
+  expectedObservation(isolationCase.kind, plan.table.appPrivileges, isolationCase.traits);
+
 describe('AT-US-077-01 table-level proof: generated per RLS table x probe kind (C12 generator)', () => {
   it.each(MATRIX.map((c) => [`[${c.layer}] ${c.title}`, c] as const))('%s', async (_title, isolationCase) => {
     const layer = layers[isolationCase.layer];
@@ -177,135 +208,211 @@ describe('AT-US-077-01 table-level proof: generated per RLS table x probe kind (
     expect(plan).toBeDefined(); // a listed table that does not exist fails here and in the enumeration test
     if (plan === undefined) return;
     const observed = await runProbe(layer.app, plan, isolationCase.kind);
-    expect(observed).toEqual(expectedObservation(isolationCase.kind, plan.table.appPrivileges));
+    expect(observed).toEqual(expectedFor(isolationCase, plan));
   });
+
+  it.each(['committed', 'probe'] as const)(
+    'PR43-SEC-08 (b) %s layer: on a fresh platform_app session that never set an app.* key (NULL, not empty), every RLS table returns 0 rows',
+    async (name) => {
+      const layer = layers[name];
+      for (const plan of layer.plans.values()) {
+        const fresh = new pg.Client(db.appConnection(layer.database));
+        await fresh.connect();
+        try {
+          expect([plan.table.name, await runProbe(fresh, plan, 'no-context')]).toEqual([
+            plan.table.name,
+            expectedObservation('no-context', plan.table.appPrivileges),
+          ]);
+        } finally {
+          await fresh.end();
+        }
+      }
+      if (name === 'probe') expect(layer.plans.size).toBeGreaterThanOrEqual(PROBE_ENTRIES.length);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
 // AT-US-077-03: enumeration and mutation controls
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** Runs `cases` of `table` as platform_app after `plant` (as superuser, rolled back); returns the kinds that fail. */
+async function failingAfter(table: string, plant: (client: pg.Client) => Promise<void>): Promise<string[]> {
+  const cases = PROBE_CASES.filter((c) => c.table === table);
+  const plan = layers.probe.plans.get(table);
+  if (plan === undefined) throw new Error(`probe plan ${table} missing`);
+  const client = await db.superuser(layers.probe.database);
+  try {
+    await client.query('BEGIN');
+    await plant(client);
+    await client.query(`SET LOCAL ROLE ${APP_ROLE}`);
+    const observed = await runCases(client, new Map([[table, plan]]), cases);
+    return cases
+      .filter((c) => JSON.stringify(observed.get(`${table} ${c.kind}`)) !== JSON.stringify(expectedFor(c, plan)))
+      .map((c) => c.kind);
+  } finally {
+    await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
+  }
+}
+
 describe('AT-US-077-03 a new tenant table is picked up automatically; CI fails if it is not covered', () => {
-  it('AT-US-077-03 committed: every public table is classified; every listed RLS table exists with ENABLE + FORCE, its key and (guest) de-claim trigger', () => {
+  it('AT-US-077-03 committed: no relation outside public; every public table is classified; every listed RLS table exists with ENABLE + FORCE, its key and (guest) de-claim trigger', () => {
     expect(enumerationFindings(COMMITTED_ENTRIES, layers.committed.live)).toEqual([]);
-    expect([...layers.committed.plans.keys()].sort()).toEqual(
-      COMMITTED_ENTRIES.filter((e) => COMMITTED_CASES.some((c) => c.table === e.name))
-        .map((e) => e.name)
-        .sort(),
-    );
+    expect([...layers.committed.plans.keys()].sort()).toEqual(rlsNames(COMMITTED_ENTRIES));
   });
 
   it('AT-US-077-03 probe: the planted tables are classified by their probe manifest and each has its generated cases', () => {
     expect(enumerationFindings(layers.probe.entries, layers.probe.live)).toEqual([]);
-    expect([...layers.probe.plans.keys()].sort()).toEqual(PROBE_ENTRIES.map((e) => e.name).sort());
-    for (const entry of PROBE_ENTRIES) expect(PROBE_CASES.filter((c) => c.table === entry.name).length).toBeGreaterThanOrEqual(11);
+    expect([...layers.probe.plans.keys()].sort()).toEqual(rlsNames(layers.probe.entries));
+    for (const entry of PROBE_ENTRIES) {
+      expect(PROBE_CASES.filter((c) => c.table === entry.name).length).toBeGreaterThanOrEqual(TABLE_PROBES.length);
+    }
   });
 
-  it('AT-US-077-03 a planted table with org_id that no manifest lists is named; a GUEST_CAPABLE table without its de-claim trigger is named', async () => {
+  it('AT-US-077-03 R1-m4 / PR43-SEC-05 (d) a planted unlisted table, a relation outside public and a replica-mode or dropped de-claim trigger are named', async () => {
     const findings = await withSuperuser(layers.probe.database, async (client) => {
       await client.query('BEGIN');
       try {
         await client.query('CREATE TABLE public.rls_probe_unlisted (id uuid PRIMARY KEY, org_id uuid NOT NULL)');
-        await client.query('DROP TRIGGER tg_rls_probe_quotes__guest_capable_guard ON public.rls_probe_quotes');
+        await client.query('CREATE TABLE platform.rls_probe_hidden (id uuid PRIMARY KEY, org_id uuid NOT NULL)');
+        await client.query('CREATE VIEW platform.rls_probe_hidden_v AS SELECT id FROM platform.rls_probe_hidden');
+        await client.query('ALTER TABLE public.rls_probe_quotes ENABLE REPLICA TRIGGER tg_rls_probe_quotes__guest_capable_guard');
         return enumerationFindings(layers.probe.entries, await readLiveTables(client));
       } finally {
         await client.query('ROLLBACK');
       }
     });
     expect(findings).toEqual([
+      'platform.rls_probe_hidden: relation (relkind r) outside public, where no table-class manifest or RLS template reaches it',
+      'platform.rls_probe_hidden_v: relation (relkind v) outside public, where no table-class manifest or RLS template reaches it',
       'rls_probe_unlisted: table in no table-class manifest, so the generator cannot classify it',
-      'rls_probe_quotes: GUEST_CAPABLE without tg_rls_probe_quotes__guest_capable_guard (PR7-SEC-04)',
+      'rls_probe_quotes: GUEST_CAPABLE without an enabled tg_rls_probe_quotes__guest_capable_guard (PR7-SEC-04, PR43-SEC-05 (d))',
+    ]);
+    const dropped = await withSuperuser(layers.probe.database, async (client) => {
+      await client.query('BEGIN');
+      try {
+        await client.query('DROP TRIGGER tg_rls_probe_quotes__guest_capable_guard ON public.rls_probe_quotes');
+        return enumerationFindings(layers.probe.entries, await readLiveTables(client));
+      } finally {
+        await client.query('ROLLBACK');
+      }
+    });
+    expect(dropped).toEqual([
+      'rls_probe_quotes: GUEST_CAPABLE without an enabled tg_rls_probe_quotes__guest_capable_guard (PR7-SEC-04, PR43-SEC-05 (d))',
     ]);
   });
 
-  it('AT-US-077-03 mutation control: a leaking policy makes the generated probes of that table fail (the matrix is not vacuous)', async () => {
-    const table = 'rls_probe_parcels';
-    const cases = PROBE_CASES.filter((c) => c.table === table);
-    const plan = layers.probe.plans.get(table);
-    if (plan === undefined) throw new Error('probe plan missing');
-    const client = await db.superuser(layers.probe.database);
-    try {
-      await client.query('BEGIN');
-      await client.query(`CREATE POLICY p_rls_probe_parcels__leak ON public.${table} FOR SELECT TO platform_app USING (true)`);
-      await client.query(`SET LOCAL ROLE ${APP_ROLE}`);
-      const observed = await runCases(client, new Map([[table, plan]]), cases);
-      const failing = cases.filter(
-        (c) => JSON.stringify(observed.get(`${table} ${c.kind}`)) !== JSON.stringify(expectedObservation(c.kind, plan.table.appPrivileges)),
-      );
-      expect(failing.map((c) => c.kind)).toEqual(
-        expect.arrayContaining([
-          'select-foreign-id',
-          'select-foreign-key',
-          'no-context',
-          'empty-context',
-          'malformed-context',
-          'forced-operator',
-        ]),
-      );
-    } finally {
-      await client.query('ROLLBACK').catch(() => undefined);
-      await client.end();
-    }
+  it('AT-US-077-03 mutation control: a leaking read policy makes the read probes of that table fail (the matrix is not vacuous)', async () => {
+    const failing = await failingAfter('rls_probe_parcels', async (client) => {
+      await client.query('CREATE POLICY p_rls_probe_parcels__leak ON public.rls_probe_parcels FOR SELECT TO platform_app USING (true)');
+    });
+    expect(failing).toEqual(
+      expect.arrayContaining([
+        'select-foreign-id',
+        'select-foreign-key',
+        'no-context',
+        'empty-context',
+        'malformed-context',
+        'forced-operator',
+      ]),
+    );
+  });
+
+  it('PR43-SEC-02 write mutation control: write-only leaking policies fail exactly the blind probes (the column-reading write probes and the re-parent are also held by the SELECT policies)', async () => {
+    const tokens = await failingAfter('rls_probe_tokens', async (client) => {
+      await client.query('CREATE POLICY p_rls_probe_tokens__leak_u ON public.rls_probe_tokens FOR UPDATE TO platform_app USING (true)');
+      await client.query('CREATE POLICY p_rls_probe_tokens__leak_d ON public.rls_probe_tokens FOR DELETE TO platform_app USING (true)');
+    });
+    expect(tokens).toEqual(['update-blind', 'delete-blind']);
+    const quotes = await failingAfter('rls_probe_quotes', async (client) => {
+      await client.query('CREATE POLICY p_rls_probe_quotes__leak_u ON public.rls_probe_quotes FOR UPDATE TO platform_app USING (true)');
+    });
+    expect(quotes).toEqual(['update-blind', 'guest-update-other-hash']);
   });
 
   it('AT-US-077-03 the generator derives cases from the manifest alone: a new entry yields its full probe set without a suite edit', () => {
     const added: TableClassEntry = { module: 'future', name: 'future_orders', class: 'TENANT' };
+    const guest: TableClassEntry = { module: 'future', name: 'future_quotes', class: 'GUEST_CAPABLE' };
     const before = generateCases(COMMITTED_ENTRIES).length;
-    expect(generateCases([...COMMITTED_ENTRIES, added]).filter((c) => c.table === 'future_orders')).toHaveLength(11);
-    expect(generateCases([...COMMITTED_ENTRIES, added])).toHaveLength(before + 11);
+    expect(generateCases([...COMMITTED_ENTRIES, added]).filter((c) => c.table === 'future_orders')).toHaveLength(TABLE_PROBES.length);
+    expect(generateCases([...COMMITTED_ENTRIES, added, guest])).toHaveLength(before + 2 * TABLE_PROBES.length + GUEST_PROBES.length);
   });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// DR-A14 semantics on the probe sets (data-model §4.3 as amended 2026-11-13; PR11-SEC-10)
+// DR-A14 semantics (data-model §4.3 as amended 2026-11-14, D-ARCH-123; PR11-SEC-10) and the operator scope
 // ---------------------------------------------------------------------------------------------------------------------
 
-const DR_A14_PLANTED = PROBE_ENTRIES.some((entry) => entry.policySet === 'dr-a14-users');
+type PlantedRow = readonly [table: string, values: Readonly<Record<string, unknown>>];
 
-describe('DR-A14 policy sets (PR11-SEC-10): positive status lists, own memberships, member organisations', () => {
-  /** As superuser: plant memberships (rolled back), then as platform_app in A's context count the target rows. */
-  async function visibleAs(
-    memberships: readonly (readonly [org: string, user: string, status: string])[],
-    sql: string,
-    params: unknown[],
-  ): Promise<number> {
-    const client = await db.superuser(layers.probe.database);
-    try {
-      await client.query('BEGIN');
-      await client.query('SET LOCAL session_replication_role = replica');
-      for (const [index, [org, user, status]] of memberships.entries()) {
-        await client.query('INSERT INTO public.memberships (id, org_id, user_id, status) VALUES ($1, $2, $3, $4)', [
-          `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`,
-          org,
-          user,
-          status,
-        ]);
-      }
-      await client.query('SET LOCAL session_replication_role = origin');
-      await client.query(`SET LOCAL ROLE ${APP_ROLE}`);
-      await setTenantAContext(client);
-      const { rows } = await client.query<{ n: number }>(sql, params);
-      return rows[0]?.n ?? -1;
-    } finally {
-      await client.query('ROLLBACK').catch(() => undefined);
-      await client.end();
+/**
+ * As superuser: plant rows (rolled back; triggers and foreign keys off), synthesising whatever the live table needs
+ * beyond `values` (so it works on the probe tables and on the real ones), then as platform_app in `context` run `fn`.
+ */
+async function asAppAfter<T>(
+  rows: readonly PlantedRow[],
+  context: (client: pg.Client) => Promise<void>,
+  fn: (client: pg.Client) => Promise<T>,
+): Promise<T> {
+  const client = await db.superuser(layers.probe.database);
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL session_replication_role = replica');
+    for (const [index, [name, values]] of rows.entries()) {
+      const table = publicTable(layers.probe, name);
+      if (table === undefined) throw new Error(`no table ${name} in the probe layer`);
+      const row = synthesiseRow(table, values, `planted-${String(index)}`);
+      const columns = row.columns.map((column) => `"${column}"`).join(', ');
+      const params = row.columns.map((_, i) => `$${String(i + 1)}`).join(', ');
+      await client.query(`INSERT INTO public."${name}" (${columns}) VALUES (${params})`, [...row.values]);
     }
+    await client.query('SET LOCAL session_replication_role = origin');
+    await client.query(`SET LOCAL ROLE ${APP_ROLE}`);
+    await context(client);
+    return await fn(client);
+  } finally {
+    await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
   }
+}
+
+const membership = (org: string, user: string, status: string, index: number): PlantedRow => [
+  'memberships',
+  { id: stableUuid(`dr-a14:membership:${String(index)}:${org}:${user}:${status}`), org_id: org, user_id: user, status },
+];
+
+const count = async (client: pg.Client, sql: string, params: unknown[]): Promise<number> =>
+  (await client.query<{ n: number }>(sql, params)).rows[0]?.n ?? -1;
+
+describe('DR-A14 policy sets (PR11-SEC-10, D-ARCH-123): positive status lists, own memberships, member organisations', () => {
+  const visibleAs = (rows: readonly PlantedRow[], sql: string, params: unknown[]): Promise<number> =>
+    asAppAfter(rows, setTenantAContext, (client) => count(client, sql, params));
 
   const users = 'SELECT count(*)::int AS n FROM public.users WHERE id = $1';
   const orgs = 'SELECT count(*)::int AS n FROM public.organisations WHERE id = $1';
   const ownMemberships = 'SELECT count(*)::int AS n FROM public.memberships WHERE org_id = $1';
+
+  it('the three DR-A14 tables are seeded in the probe layer (planted or committed)', () => {
+    expect(['memberships', 'organisations', 'users'].filter((name) => layers.probe.plans.has(name))).toEqual([
+      'memberships',
+      'organisations',
+      'users',
+    ]);
+  });
 
   it.each([
     ['INVITED', 0],
     ['ACTIVE', 1],
     ['SUSPENDED', 1],
     ['REMOVED', 0],
-  ] as const)('users: B is visible to a session of org A iff B holds a %s membership in A (positive list)', async (status, expected) => {
-    expect(DR_A14_PLANTED).toBe(true);
-    expect(await visibleAs([], users, [TENANT_B.actor])).toBe(0);
-    expect(await visibleAs([[TENANT_A.org, TENANT_B.actor, status]], users, [TENANT_B.actor])).toBe(expected);
-  });
+  ] as const)(
+    'users: B is visible to a session of org A iff B holds a %s membership in A (positive list ACTIVE, SUSPENDED)',
+    async (status, expected) => {
+      expect(await visibleAs([], users, [TENANT_B.actor])).toBe(0);
+      expect(await visibleAs([membership(TENANT_A.org, TENANT_B.actor, status, 1)], users, [TENANT_B.actor])).toBe(expected);
+    },
+  );
 
   it.each([
     ['ACTIVE', 1],
@@ -314,128 +421,229 @@ describe('DR-A14 policy sets (PR11-SEC-10): positive status lists, own membershi
     ['REMOVED', 0],
   ] as const)("organisations: org B is visible to A's actor iff the actor holds a %s membership in B", async (status, expected) => {
     expect(await visibleAs([], orgs, [TENANT_B.org])).toBe(0);
-    expect(await visibleAs([[TENANT_B.org, TENANT_A.actor, status]], orgs, [TENANT_B.org])).toBe(expected);
+    expect(await visibleAs([membership(TENANT_B.org, TENANT_A.actor, status, 2)], orgs, [TENANT_B.org])).toBe(expected);
   });
 
   it("memberships: the actor reads its own membership in another organisation (own_read) and no one else's there", async () => {
-    expect(await visibleAs([[TENANT_B.org, TENANT_A.actor, 'ACTIVE']], ownMemberships, [TENANT_B.org])).toBe(1);
-    expect(await visibleAs([[TENANT_B.org, TENANT_B.actor, 'ACTIVE']], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
+    expect(await visibleAs([membership(TENANT_B.org, TENANT_A.actor, 'ACTIVE', 3)], ownMemberships, [TENANT_B.org])).toBe(1);
+    expect(await visibleAs([membership(TENANT_B.org, TENANT_B.actor, 'ACTIVE', 4)], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
+  });
+
+  it("[SEC-TC-06] R1-n5 positive control: a genuine operator (ACTIVE member of an OPERATOR organisation, OPERATOR scope) reads B's row and still cannot write it; the same actor in TENANT scope sees nothing", async () => {
+    const plan = layers.probe.plans.get('rls_probe_parcels');
+    if (plan === undefined) throw new Error('probe plan missing');
+    const operatorOrg = stableUuid('rls-generator:org-OPERATOR');
+    const operator = stableUuid('rls-generator:user-OPERATOR');
+    const planted: PlantedRow[] = [
+      ['organisations', { id: operatorOrg, type: 'OPERATOR' }],
+      membership(operatorOrg, operator, 'ACTIVE', 5),
+    ];
+    const byId = 'SELECT count(*)::int AS n FROM public.rls_probe_parcels WHERE id = $1';
+    const asOperator = (client: pg.Client): Promise<void> => setContextValues(client, operatorOrg, operator, 'OPERATOR');
+    expect(await asAppAfter(planted, asOperator, (client) => count(client, byId, [plan.rowB]))).toBe(1);
+    const updated = await asAppAfter(planted, asOperator, async (client) => {
+      const result = await client.query('UPDATE public.rls_probe_parcels SET ref = ref WHERE id = $1', [plan.rowB]);
+      return result.rowCount;
+    });
+    expect(updated).toBe(0);
+    const asTenantScope = (client: pg.Client): Promise<void> => setContextValues(client, operatorOrg, operator, 'TENANT');
+    expect(await asAppAfter(planted, asTenantScope, (client) => count(client, byId, [plan.rowB]))).toBe(0);
   });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// AT-US-077-02: API-level proof
+// AT-US-077-02: API-level proof (executable cases)
 // ---------------------------------------------------------------------------------------------------------------------
 
-describe('AT-US-077-02 API-level proof: tenant-resource routes answer 404 NOT_FOUND to another tenant', () => {
-  it('AT-US-077-02 every tenant-resource route of the module registry has a registered cross-tenant case (none is skipped)', () => {
-    expect(routeCaseFindings(loadApiMounts(moduleRegistry).descriptors, API_CASES)).toEqual([]);
-    const planted = [
-      { operationId: 'getShipment', method: 'get', path: '/shipments/:shipmentId', tenancy: 'tenant' },
-      { operationId: 'listShipments', method: 'get', path: '/shipments', tenancy: 'tenant' },
-      { operationId: 'getSession', method: 'get', path: '/me/sessions/{sessionId}', tenancy: 'user' },
-      { operationId: 'getCountry', method: 'get', path: '/reference/countries/:code', tenancy: 'public' },
-    ];
-    expect(routeCaseFindings(planted, API_CASES)).toEqual([
-      'GET /me/sessions/{sessionId} (getSession): tenant-resource route without a generated cross-tenant case',
-      'GET /shipments/:shipmentId (getShipment): tenant-resource route without a generated cross-tenant case',
-    ]);
-    expect(routeCaseFindings(planted, new Set(['getShipment', 'getSession']))).toEqual([]);
+const AUDIT_NONE = {
+  action: 'NONE',
+  entity: null,
+  sensitivity: 'NONE',
+  reasonRequired: false,
+  justification: 'RLS generator fixture.',
+} as const;
+
+type ReadRow = (handle: AppDb, id: string) => Promise<{ id: string }[]>;
+
+/** A fixture route reading one probe row by id through the request's tenant transaction (the production path). */
+function readRoute(operationId: string, path: string, read: ReadRow, spec: Record<string, unknown>): RouteDescriptor {
+  const param = path.slice(path.lastIndexOf(':') + 1);
+  return defineRoute({
+    method: 'get',
+    audit: AUDIT_NONE,
+    rateLimit: 'none',
+    idempotency: 'not-applicable',
+    operationId,
+    path,
+    permissionJustification: 'RLS generator fixture: any caller of the declared credential kinds.',
+    transaction: 'tenant',
+    schema: { params: Joi.object({ [param]: Joi.string().uuid() }) },
+    handler: async ({ db: handle, input }: RouteContext) => {
+      const rows = await read(handle as AppDb, String(input.params[param]));
+      if (rows[0] === undefined) throw new AppError('NOT_FOUND');
+      return { status: 200, body: rows[0] };
+    },
+    ...spec,
+  } as unknown as Parameters<typeof defineRoute>[0]);
+}
+
+const FIXTURE_ROUTES: readonly RouteDescriptor[] = [
+  readRoute(
+    'probeGetParcel',
+    '/fixtures/rls-probe/parcels/:parcelId',
+    (handle, id) => handle.$queryRaw`SELECT id::text AS id FROM public.rls_probe_parcels WHERE id = ${id}::uuid`,
+    { tenancy: 'tenant', auth: 'session', permission: 'authenticated' },
+  ),
+  readRoute(
+    'probeGetToken',
+    '/fixtures/rls-probe/tokens/:tokenId',
+    (handle, id) => handle.$queryRaw`SELECT id::text AS id FROM public.rls_probe_tokens WHERE id = ${id}::uuid`,
+    { tenancy: 'user', auth: 'session', permission: 'authenticated' },
+  ),
+  readRoute(
+    'probeGetQuote',
+    '/fixtures/rls-probe/quotes/:quoteId',
+    (handle, id) => handle.$queryRaw`SELECT id::text AS id FROM public.rls_probe_quotes WHERE id = ${id}::uuid`,
+    { tenancy: 'guest', auth: ['session', 'quote-token'], permission: 'public', permissionAuthenticated: 'quote:read' },
+  ),
+];
+
+const FIXTURE_CASES: ReadonlyMap<string, ApiCrossTenantCase> = new Map([
+  ['probeGetParcel', { table: 'rls_probe_parcels', params: { parcelId: 'id' } }],
+  ['probeGetToken', { table: 'rls_probe_tokens', params: { tokenId: 'id' } }],
+  ['probeGetQuote', { table: 'rls_probe_quotes', params: { quoteId: 'id' } }],
+]);
+
+/** Mutation control: a route that answers any id with 200 and echoes it (no isolation at all). */
+const LEAKY_ROUTE: RouteDescriptor = defineRoute({
+  method: 'get',
+  audit: AUDIT_NONE,
+  rateLimit: 'none',
+  idempotency: 'not-applicable',
+  operationId: 'probeLeakyParcel',
+  path: '/fixtures/rls-probe/leaky-parcels/:parcelId',
+  tenancy: 'tenant',
+  auth: 'session',
+  permission: 'authenticated',
+  permissionJustification: 'RLS generator mutation control: a route that ignores isolation.',
+  transaction: 'tenant',
+  schema: { params: Joi.object({ parcelId: Joi.string().uuid() }) },
+  handler: ({ input }) => Promise.resolve({ status: 200, body: { id: String(input.params['parcelId']) } }),
+});
+
+interface Served {
+  readonly base: string;
+  readonly close: () => Promise<void>;
+}
+
+/** createApp over the real runtime on `database`, with the production slots except the test principal slot. */
+async function serve(database: string, modules: readonly ModuleRegistration[]): Promise<Served> {
+  const config = {
+    DATABASE_URL: { reveal: () => db.appUrl(database) },
+    DB_POOL_MAX: 2,
+    DB_IDLE_TIMEOUT_MS: 10_000,
+    DB_CONNECTION_TIMEOUT_MS: 5_000,
+    DB_STATEMENT_TIMEOUT_MS: 25_000,
+    DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
+    DB_TX_LOCK_TIMEOUT_MS: 2_000,
+    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+  } as unknown as Config;
+  const log = createRuntimeLog('api', { write: () => true });
+  const runtime: ActiveDatabaseRuntime<AppTransactionClient> = databaseRuntimeFromConfig(config, 'api', log);
+  await runtime.startup();
+  const app = createApp({
+    health: [],
+    modules,
+    tenantTx: runtime.tenantTx,
+    pipeline: { ...defaultPipelineSlots({ tenantTx: runtime.tenantTx }), authenticate: probePrincipalSlot },
+    logger: log,
+  });
+  const server: Server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  return {
+    base: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1`,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      for (const resource of runtime.resources) await resource.close();
+    },
+  };
+}
+
+interface ExecutedCase {
+  readonly layer: Layer['name'];
+  readonly operationId: string;
+  readonly apiCase: ApiCrossTenantCase;
+}
+
+/** Every registered case of the real registry, then the fixture cases: the list is never empty, and never hand-picked. */
+const EXECUTED: readonly ExecutedCase[] = [
+  ...[...API_CASES].map(([operationId, apiCase]) => ({ layer: 'committed' as const, operationId, apiCase })),
+  ...[...FIXTURE_CASES].map(([operationId, apiCase]) => ({ layer: 'probe' as const, operationId, apiCase })),
+];
+
+describe('AT-US-077-02 API-level proof: tenant-, user- and guest-resource routes answer 404 NOT_FOUND to another tenant', () => {
+  const served: Partial<Record<Layer['name'], Served>> = {};
+  const routes: Record<Layer['name'], readonly RouteDescriptor[]> = {
+    committed: loadApiMounts(moduleRegistry).descriptors,
+    probe: [...FIXTURE_ROUTES, LEAKY_ROUTE],
+  };
+
+  beforeAll(async () => {
+    delete process.env['PGOPTIONS'];
+    served.committed = await serve(layers.committed.database, moduleRegistry);
+    served.probe = await serve(layers.probe.database, [{ name: 'fixtures', routes: [...FIXTURE_ROUTES, LEAKY_ROUTE] }]);
+  }, 120_000);
+
+  afterAll(async () => {
+    for (const server of Object.values(served)) await server.close();
+  }, 60_000);
+
+  it('AT-US-077-02 every tenant/user/guest route with a path parameter of the module registry has an executable case, and every case has its route', () => {
+    expect(routeCaseFindings(routes.committed, API_CASES, COMMITTED_ENTRIES)).toEqual([]);
+    expect(routeCaseFindings(FIXTURE_ROUTES, FIXTURE_CASES, layers.probe.entries)).toEqual([]);
+    expect(EXECUTED.filter((c) => c.layer === 'committed')).toHaveLength(API_CASES.size);
   });
 
-  describe('a fixture tenant route over the probe schema, through the composed createApp and the real runtime', () => {
-    let runtime: ActiveDatabaseRuntime<AppTransactionClient>;
-    let server: Server;
-    let base: string;
+  it.each(EXECUTED.map((c) => [`[${c.layer}] ${c.operationId}`, c] as const))(
+    "AT-US-077-02 %s: B's id (or another guest's quote) gives 404 NOT_FOUND without B data; A's own row gives the positive status",
+    async (_title, executed) => {
+      const route = routes[executed.layer].find((descriptor) => descriptor.operationId === executed.operationId);
+      expect(route).toBeDefined();
+      const plan = layers[executed.layer].plans.get(executed.apiCase.table);
+      expect(plan).toBeDefined(); // a registered case whose table has no seeded plan fails
+      const base = served[executed.layer]?.base;
+      if (route === undefined || plan === undefined || base === undefined) return;
+      try {
+        expect(await runApiCase(base, route, executed.apiCase, plan)).toEqual([]);
+      } finally {
+        await withSuperuser(layers[executed.layer].database, (superuser) => restoreSeededRows(superuser, plan));
+      }
+    },
+  );
 
-    const PRINCIPAL_A = {
-      credential: 'session',
-      authenticated: true,
-      actorId: TENANT_A.actor,
-      orgId: TENANT_A.org,
-      actorScope: 'TENANT',
-      guestTokenHash: '',
-      permissions: new Set<string>(),
-    } as const;
-    const asTenantA: RouteSlot = () => (_req, res, next) => {
-      markCredentialsRead(res);
-      setPrincipal(res, PRINCIPAL_A);
-      next();
-    };
-    const getParcel = defineRoute({
-      method: 'get',
-      audit: { action: 'NONE', entity: null, sensitivity: 'NONE', reasonRequired: false, justification: 'RLS generator fixture.' },
-      rateLimit: 'none',
-      idempotency: 'not-applicable',
-      operationId: 'probeGetParcel',
-      path: '/fixtures/rls-probe/parcels/:id',
-      tenancy: 'tenant',
-      auth: 'session',
-      permission: 'authenticated',
-      permissionJustification: 'RLS generator fixture: any authenticated member of the active organisation.',
-      transaction: 'tenant',
-      schema: { params: Joi.object({ id: Joi.string().uuid() }) },
-      handler: async ({ db: handle, input }) => {
-        const id = String(input.params['id']);
-        const rows = await (handle as AppDb).$queryRaw<{ id: string; ref: string }[]>`
-          SELECT id::text AS id, ref FROM public.rls_probe_parcels WHERE id = ${id}::uuid`;
-        const row = rows[0];
-        if (row === undefined) throw new AppError('NOT_FOUND');
-        return { status: 200, body: row };
-      },
-    });
+  it('AT-US-077-02 mutation control: a route that ignores isolation fails its executed case (404 expected, data of B in the body)', async () => {
+    const plan = layers.probe.plans.get('rls_probe_parcels');
+    if (plan === undefined || served.probe === undefined) throw new Error('probe plan or server missing');
+    const problems = await runApiCase(served.probe.base, LEAKY_ROUTE, { table: 'rls_probe_parcels', params: { parcelId: 'id' } }, plan);
+    expect(problems).toEqual([
+      'probeLeakyParcel [tenant-a -> row B]: expected 404, got 200',
+      'probeLeakyParcel [tenant-a -> row B]: not a problem+json body',
+      'probeLeakyParcel [tenant-a -> row B]: code undefined, expected NOT_FOUND',
+      "probeLeakyParcel [tenant-a -> row B]: the body carries 1 value(s) of the other tenant's row",
+    ]);
+  });
 
-    beforeAll(async () => {
-      delete process.env['PGOPTIONS'];
-      const config = {
-        DATABASE_URL: { reveal: () => db.appUrl(layers.probe.database) },
-        DB_POOL_MAX: 2,
-        DB_IDLE_TIMEOUT_MS: 10_000,
-        DB_CONNECTION_TIMEOUT_MS: 5_000,
-        DB_STATEMENT_TIMEOUT_MS: 25_000,
-        DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
-        DB_TX_LOCK_TIMEOUT_MS: 2_000,
-        DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
-      } as unknown as Config;
-      const log = createRuntimeLog('api', { write: () => true });
-      runtime = databaseRuntimeFromConfig(config, 'api', log);
-      await runtime.startup();
-      const app = createApp({
-        health: [],
-        modules: [{ name: 'fixtures', routes: [getParcel] }],
-        tenantTx: runtime.tenantTx,
-        pipeline: { ...defaultPipelineSlots({ tenantTx: runtime.tenantTx }), authenticate: asTenantA },
-        logger: log,
-      });
-      server = app.listen(0, '127.0.0.1');
-      await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-      base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1`;
-    }, 120_000);
-
-    afterAll(async () => {
-      await new Promise<void>((resolve) => (server as Server | undefined)?.close(() => resolve()) ?? resolve());
-      for (const resource of (runtime as ActiveDatabaseRuntime<AppTransactionClient> | undefined)?.resources ?? []) await resource.close();
-    }, 60_000);
-
-    it("AT-US-077-02 positive control: user A reads A's parcel (200)", async () => {
-      const plan = layers.probe.plans.get('rls_probe_parcels');
-      const response = await fetch(`${base}/fixtures/rls-probe/parcels/${plan?.rowA ?? ''}`);
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ id: plan?.rowA, ref: 'rls-ref-A' });
-    });
-
-    it("AT-US-077-02 user A calling the tenant-resource route with B's id gets 404 NOT_FOUND with no B data", async () => {
-      const plan = layers.probe.plans.get('rls_probe_parcels');
-      const response = await fetch(`${base}/fixtures/rls-probe/parcels/${plan?.rowB ?? ''}`);
-      const text = await response.text();
-      expect(response.status).toBe(404);
-      expect(response.headers.get('content-type')).toMatch(/^application\/problem\+json/u);
-      expect((JSON.parse(text) as { code?: unknown }).code).toBe('NOT_FOUND');
-      const problem = JSON.parse(text) as Record<string, unknown>;
-      delete problem['instance']; // echoes the path A asked for
-      expect(JSON.stringify(problem)).not.toContain(plan?.rowB ?? 'missing-plan');
-      expect(text).not.toContain('rls-ref-B');
-      expect(text).not.toContain(TENANT_B.org);
-    });
+  it('AT-US-077-02 the enumeration fails closed: a guest route, a stale case, a bare registration shape and an unpresentable credential are named', () => {
+    const quote = { operationId: 'getQuote', method: 'get', path: '/quotes/:quoteId', tenancy: 'guest', auth: ['session', 'quote-token'] };
+    const signed = { operationId: 'getSigned', method: 'get', path: '/signed/:id', tenancy: 'tenant', auth: ['signature'] };
+    const cases = new Map<string, ApiCrossTenantCase>([
+      ['getSigned', { table: 'rls_probe_parcels', params: { id: 'id' } }],
+      ['gone', { table: 'rls_probe_parcels', params: {} }],
+    ]);
+    expect(routeCaseFindings([quote, signed], cases, layers.probe.entries)).toEqual([
+      'GET /quotes/:quoteId (getQuote): tenant-resource route without a generated cross-tenant case',
+      'GET /signed/:id (getSigned): accepts credential signature, which the cross-tenant case runner cannot present',
+      'gone: registered cross-tenant case without a tenant-resource route',
+    ]);
   });
 });
