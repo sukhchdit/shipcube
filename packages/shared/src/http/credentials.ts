@@ -17,6 +17,29 @@ export type CredentialHeaders = Readonly<Record<string, string | readonly string
 
 export const REFRESH_COOKIE_NAMES: readonly string[] = Object.freeze(['__Host-rt_web', '__Host-rt_admin']);
 
+/**
+ * Every request header that carries a credential or a proof (D-ARCH-113 (1), ADR-0008 am. 6 item 1), lower-case and
+ * frozen: the bearer token, the cookie header (refresh cookies), the CSRF token, the re-authentication proof, the guest
+ * quote token and the three webhook signatures. The authn slot alone reads them (through `presentedKinds` and its
+ * authenticators); `defineRoute` refuses any of them in a route's `schema.headers`, so a credential never reaches a
+ * handler as validated input (the one exception, `x-quote-token` on exactly `[session]` routes, is decided there).
+ * Pinned against openapi.yaml `securitySchemes` by tests/generated/route-metadata.test.ts.
+ */
+export const CREDENTIAL_HEADER_NAMES = Object.freeze([
+  'authorization',
+  'cookie',
+  'x-csrf-token',
+  'x-reauth-proof',
+  'x-quote-token',
+  'stripe-signature',
+  'x-mock-signature',
+  'x-carrier-signature',
+] as const);
+export type CredentialHeaderName = (typeof CREDENTIAL_HEADER_NAMES)[number];
+
+/** The value of one credential header: the readers name their header through `CredentialHeaderName`. */
+const credentialHeader = (headers: CredentialHeaders, name: CredentialHeaderName): string | readonly string[] | undefined => headers[name];
+
 /** The credential kinds a request can present in a header the stub reads, in canonical (`ROUTE_AUTHS`) order. */
 export const PRESENTABLE_KINDS = Object.freeze(['session', 'refresh-cookie', 'quote-token'] as const);
 /** A subset of `@platform/authz` `RouteAuth` (checked where both meet, apps/api authenticate.ts). */
@@ -40,9 +63,9 @@ const present = (value: string | readonly string[] | undefined): boolean => valu
 
 /** One reader per kind; each reads its own header only. */
 const READERS: Readonly<Record<PresentableKind, (headers: CredentialHeaders) => boolean>> = Object.freeze({
-  session: (headers) => present(headers['authorization']),
-  'refresh-cookie': (headers) => cookieNames(headers['cookie']).some((name) => REFRESH_COOKIE_NAMES.includes(name)),
-  'quote-token': (headers) => present(headers['x-quote-token']),
+  session: (headers) => present(credentialHeader(headers, 'authorization')),
+  'refresh-cookie': (headers) => cookieNames(credentialHeader(headers, 'cookie')).some((name) => REFRESH_COOKIE_NAMES.includes(name)),
+  'quote-token': (headers) => present(credentialHeader(headers, 'x-quote-token')),
 });
 
 /**

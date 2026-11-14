@@ -22,6 +22,7 @@ import { type ActiveDatabaseRuntime, databaseRuntimeFromConfig } from '../db/run
 import { EXPECTED_ROLE_SETTINGS } from '../db/session-integrity.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { createRuntimeLog } from '../runtime/log.js';
+import { TEST_LANE_TX_IDLE_TIMEOUT_MS } from './tests/runtime-twin.js';
 
 /** Same pinned image as prisma/tests/harness/postgres.ts. */
 const POSTGRES_IMAGE = 'postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42';
@@ -56,7 +57,7 @@ const configFor = (url: string): Config =>
     DB_STATEMENT_TIMEOUT_MS: 25_000,
     DB_TX_STATEMENT_TIMEOUT_MS: TX_STATEMENT_TIMEOUT_MS,
     DB_TX_LOCK_TIMEOUT_MS: 200,
-    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: TEST_LANE_TX_IDLE_TIMEOUT_MS,
   }) as unknown as Config;
 
 const okRoute = fixtureRoute({

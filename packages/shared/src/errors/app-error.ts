@@ -25,6 +25,11 @@ export interface AppErrorOptions {
   readonly errors?: readonly ValidationIssue[];
   /** Underlying failure, for the server log only. Never serialised. */
   readonly cause?: unknown;
+  /**
+   * Seconds for the `Retry-After` header of a retryable failure (an integer in 1..3600; the API problem handler ignores
+   * any other value), for example the request deadline of the API tx slot (PR #44 R1-M1). Never part of the body.
+   */
+  readonly retryAfterSeconds?: number;
 }
 
 /** The safe, serialisable view of an AppError. */
@@ -41,6 +46,8 @@ export class AppError extends Error {
   readonly title: string;
   readonly detail: string;
   readonly errors: readonly ValidationIssue[] | undefined;
+  /** See `AppErrorOptions.retryAfterSeconds`; an own property only when given (`declare`: no field initialiser). */
+  declare readonly retryAfterSeconds?: number;
 
   constructor(code: ErrorCode, options: AppErrorOptions = {}) {
     const entry = ERROR_CATALOGUE[code];
@@ -52,6 +59,7 @@ export class AppError extends Error {
     this.title = entry.title;
     this.detail = options.detail ?? `${entry.title}.`;
     this.errors = options.errors?.slice(0, MAX_VALIDATION_ISSUES);
+    if (options.retryAfterSeconds !== undefined) this.retryAfterSeconds = options.retryAfterSeconds;
   }
 
   toJSON(): AppErrorJson {

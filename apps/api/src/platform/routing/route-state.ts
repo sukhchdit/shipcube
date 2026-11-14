@@ -59,7 +59,8 @@ export function setRouteDescriptor(res: Response, route: RouteDescriptor, templa
 /**
  * The descriptor of the matched route, recorded by the `context` step (the first slot, before authn). Undefined before
  * the route is known (404/405 fallback, body parser) and for any value `defineRoute` did not return (fails closed to
- * "no route": the problem handler then keeps the generic credential test).
+ * "no route": the problem handler then keeps the generic credential test, whether or not the credentials-read mark is
+ * set; D-ARCH-113 (3)).
  */
 export function routeDescriptorOf(res: Response): RouteDescriptor | undefined {
   const value = locals(res)[DESCRIPTOR];

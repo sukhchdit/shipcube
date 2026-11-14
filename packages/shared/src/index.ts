@@ -12,10 +12,12 @@ export { CORRELATION_ID_PATTERN, isCorrelationId } from './correlation/correlati
 // Credential presence (D-ARCH-107 (5), D-ARCH-109; TASK-020): the declared-kind and the generic test, shared by the
 // API and the SEC-TC-29 contract helper.
 export {
+  CREDENTIAL_HEADER_NAMES,
   PRESENTABLE_KINDS,
   presentedKinds,
   presentsCredential,
   REFRESH_COOKIE_NAMES,
+  type CredentialHeaderName,
   type CredentialHeaders,
   type PresentableKind,
 } from './http/credentials.js';

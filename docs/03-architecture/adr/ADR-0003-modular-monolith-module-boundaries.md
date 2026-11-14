@@ -66,7 +66,11 @@ defineRoute({
   rateLimit: 'authenticated',                       // class per DR-A22
   tenancy: 'tenant',                                // 'tenant' | 'operator-cross-tenant' | 'guest' | 'public' | 'user'
   reauth: false,
-  handler: controller.cancel,
+  // Optional I/O phases (amendment 2026-11-13; TASK-020 part 020-C): load (read-only tx) -> call (no tx) -> handler -> afterCommit.
+  load: controller.loadForCancel,                   // (ctx) => plain data, read under RLS
+  call: controller.cancelAtCarrier,                 // (ctx, loaded) => external result; ctx.signal; idempotency key from loaded
+  handler: controller.cancel,                       // (ctx, { loaded, called }) => the one write transaction + audit
+  afterCommit: controller.afterCancel,              // (ctx, result) => best effort after the response
 });
 ```
 
