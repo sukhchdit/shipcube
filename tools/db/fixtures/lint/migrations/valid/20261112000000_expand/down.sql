@@ -1,2 +1,2 @@
-DROP FUNCTION platform.fixture_lookup(uuid);
-DROP TABLE public.fixture_items;
+DROP FUNCTION IF EXISTS platform.fixture_lookup(uuid);
+DROP TABLE IF EXISTS public.fixture_items;

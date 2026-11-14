@@ -1,9 +1,9 @@
 {
-  "$comment": "Authz catalogue (data-model §3.3): GLOBAL, read-only at runtime, SELECT-only grant to platform_app (PR8-SEC-10, D-ARCH-069). Never RLS without policies.",
+  "$comment": "Authz catalogue (data-model §3.3): GLOBAL, read-only at runtime, SELECT-only grant to platform_app (PR8-SEC-10, D-ARCH-069). Never RLS without policies. runtimeReadOnly: validateGrants refuses any write line for them (PR11-SEC-11 g, TASK-024).",
   "module": "authz",
   "tables": [
-    { "name": "permissions", "class": "GLOBAL" },
-    { "name": "role_permissions", "class": "GLOBAL" },
-    { "name": "roles", "class": "GLOBAL" }
+    { "name": "permissions", "class": "GLOBAL", "runtimeReadOnly": true },
+    { "name": "role_permissions", "class": "GLOBAL", "runtimeReadOnly": true },
+    { "name": "roles", "class": "GLOBAL", "runtimeReadOnly": true }
   ]
 }
