@@ -265,6 +265,7 @@ const BOUNDARIES_FILES = [
   { pattern: `${MODULE}/**`, category: 'api-module', capture: ['module'] },
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
+  { pattern: 'packages/audit/**', category: 'package-audit' },
   // The server-only logging subpath of @platform/shared (Pino; TASK-010, PR #20 M1): the resolved-file arm of its guard.
   { pattern: SHARED_LOGGING, category: 'shared-logging' },
   { pattern: DB_PLATFORM, category: 'db-platform' },
@@ -276,6 +277,8 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/*/src/platform/db/query-counter.ts', category: 'db-test-seam' },
   { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
   { pattern: 'prisma/tests/**', category: 'prisma-tests' },
+  // The audit store suites (TASK-025): the one prisma/tests folder that may import @platform/audit (policy below).
+  { pattern: 'prisma/tests/audit/**', category: 'prisma-tests-audit' },
   // The seed framework (TASK-023): prisma/tests/seed exercises it (D-ORCH-015 reconciliation, PR #13 code review m6).
   { pattern: 'prisma/seed/**', category: 'prisma-seed' },
   { pattern: 'tools/test-support/**', category: 'test-support' },
@@ -430,6 +433,9 @@ const BOUNDARIES_POLICIES = [
       to: toLayer('tools-db', 'test-support', 'tools-authz', 'db-platform-core', 'prisma-generated', 'prisma-seed', 'prisma-tests'),
     },
   },
+  // TASK-025: prisma/tests/audit exercises the audit store (packages/audit/src/store, database code that joins the
+  // business transaction) against the real bootstrap lane, so it may import @platform/audit, and only that package.
+  { from: { file: { categories: 'prisma-tests-audit' } }, allow: { to: toLayer('package-audit') } },
 
   // --- The bcrypt family is confined to the PasswordHasher implementation (D-ARCH-042, ADR-0006 am. 16): import,
   //     export-from, import(), require, module.require and createRequire(...)(...) (see the additional dependency

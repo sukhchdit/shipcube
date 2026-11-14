@@ -58,7 +58,7 @@ describe('[US-087] audit vocabularies equal the database CHECK constraints (REQ-
   });
 
   it('[AT-US-087-05] an unknown action fails the type check and the run-time guard', () => {
-    // @ts-expect-error -- 'FOO' is not an audit action: the type check fails (the database half is in the writer suite).
+    // @ts-expect-error -- TASK-025 'FOO' is not an audit action: the type check fails (AT-US-087-05; the database half is prisma/tests/audit).
     const foo: AuditEntryAction = 'FOO';
     expect(isAuditEntryAction(foo)).toBe(false);
     expect(isAuditEntryAction('CREATE')).toBe(true);
