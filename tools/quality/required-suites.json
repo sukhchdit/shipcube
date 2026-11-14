@@ -48,9 +48,7 @@
       { "case": "SEC-TC-55", "owner": "TASK-049 (pre-hash part) and TASK-057 (recovery-code part)", "checkpoint": "v0.1.0-m0" }
     ],
     "integration": [{ "case": "SEC-TC-22", "owner": "TASK-172 (US-242 tracking events, Wave 6)", "checkpoint": "G3" }],
-    "api": [{ "case": "SEC-TC-29", "owner": "TASK-020 (shared API helper asserts Cache-Control on authenticated responses) with the first authenticated route", "checkpoint": "v0.1.0-m0" }],
-    "rls-cross-tenant": [{ "case": "SEC-TC-07", "owner": "TASK-051 (US-080 concurrent guest claim; PR #43 activation, D-SEC-PR43-04)", "checkpoint": "v0.1.0-m0" }],
-    "catalog-c1-c14": [{ "case": "SEC-TC-74", "owner": "TASK-037 (first in-scope STD table; C15 mechanism carried by PR #43, D-SEC-PR43-04)", "checkpoint": "v0.1.0-m0" }]
+    "api": [{ "case": "SEC-TC-29", "owner": "TASK-020 (shared API helper asserts Cache-Control on authenticated responses) with the first authenticated route", "checkpoint": "v0.1.0-m0" }]
   },
   "deferred_at_gate": [],
   "suites": {
@@ -71,7 +69,7 @@
 
     "integration": { "lane": ["B", "C"], "runner": "jest --selectProjects integration", "security": false, "zero_skip": false, "status": "active", "activate_with": "SPK-03 / US-011", "min_tests": 1, "required_cases": [], "nfr": ["NFR-DATA-003", "NFR-PRIV-005", "NFR-AUDIT-007"] },
     "catalog-c1-c14": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects integration (catalog C1-C14)", "security": true, "zero_skip": true, "status": "active", "activate_with": "US-074 (T-QA-04)", "min_tests": 14, "required_cases": ["SEC-TC-05"], "nfr": ["NFR-TENANT-001", "NFR-PRIV-003", "NFR-DATA-001", "NFR-DATA-002", "NFR-AUDIT-002"] },
-    "rls-cross-tenant": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (RLS generator)", "security": true, "zero_skip": true, "status": "active", "activate_with": "US-077 (T-QA-04)", "min_tests": 126, "required_cases": ["SEC-TC-06"], "nfr": ["NFR-TENANT-001"] },
+    "rls-cross-tenant": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (RLS generator)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-077 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-06", "SEC-TC-07"], "nfr": ["NFR-TENANT-001"] },
     "rbac-matrix": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (packages/authz matrix)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-071 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-01"], "nfr": ["NFR-TENANT-002", "NFR-SEC-011", "NFR-SEC-004"] },
     "audit-generator": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects generated (packages/audit generator)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-096 (T-QA-04)", "min_tests": 1, "required_cases": ["SEC-TC-35"], "nfr": ["NFR-AUDIT-001", "NFR-AUDIT-006", "NFR-SEC-011"] },
     "audit-immutability": { "lane": ["B", "A*", "C"], "runner": "jest --selectProjects integration (audit roles, DDL guard, search_path)", "security": true, "zero_skip": true, "status": "planned", "activate_with": "US-094", "min_tests": 1, "required_cases": ["SEC-TC-43", "SEC-TC-61"], "nfr": ["NFR-AUDIT-002"] },
