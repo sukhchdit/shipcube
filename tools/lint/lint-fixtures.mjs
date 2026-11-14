@@ -263,19 +263,26 @@ const REPO_PROBES = {
   'tests/api/lint-probe-bad-api-traversal.api.test.ts':
     "import { AppError } from '../../apps/api/src/../../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
   // D-ARCH-103 (2): the workspace specifier @platform/prisma/client is classified by the generated file it resolves to
-  // (prisma/generated/**, present after `npm run db:generate`): a value only in platform/db, prisma/, tools/db, tests.
+  // (prisma/generated/**, present after `npm run db:generate`): a value only in apps/api/src/platform/db/generated.ts
+  // (D-ARCH-114), prisma/, tools/db and tests.
   'apps/api/src/modules/orders/repository/lint-probe-bad-prisma-value.ts':
     "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (): unknown => Prisma;\n",
   'apps/api/src/modules/orders/repository/lint-probe-ok-prisma-type.ts':
     "import type { Prisma } from '@platform/prisma/client';\n\nexport type Probe = Prisma.TransactionClient;\n",
   'apps/api/src/modules/orders/service/lint-probe-bad-prisma-type.ts':
     "import type { Prisma } from '@platform/prisma/client';\n\nexport type Probe = Prisma.TransactionClient;\n",
-  'apps/api/src/platform/db/lint-probe-ok-prisma-value.ts':
+  // D-ARCH-114: linted at the path of the one value importer (in memory: the file on disk is not read or changed).
+  'apps/api/src/platform/db/generated.ts':
+    "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
+  'apps/api/src/platform/db/lint-probe-bad-prisma-value.ts':
+    "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
+  'apps/worker/src/platform/db/lint-probe-bad-prisma-value.ts':
     "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
   'apps/worker/src/jobs/lint-probe-bad-prisma-value.ts':
     "import { PrismaClient } from '@platform/prisma/client';\n\nexport const probe = (): unknown => PrismaClient;\n",
   // PR38-SEC-01: platform/db-raw-sql sees the Prisma SQL helpers behind the workspace specifier (@platform/prisma/client)
   // exactly as behind @prisma/client: seven helper forms report; a tagged fragment and a literal join separator do not.
+  // Since D-ARCH-114 these platform/db paths also report the value import itself (boundaries); the suite reads both.
   'apps/api/src/platform/db/lint-probe-bad-raw-destructured.ts':
     "import { Prisma } from '@platform/prisma/client';\n\nconst { raw } = Prisma;\n\nexport const probe = (s: string): unknown => raw(s);\n",
   'apps/api/src/platform/db/lint-probe-bad-raw-aliased-import.ts':

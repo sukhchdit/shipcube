@@ -303,10 +303,18 @@ const DATABASE_CODE = { file: { categories: { anyOf: ['repository', 'db-platform
  * files, not repositories), prisma/, tools/db and tests (PR2-SEC-05 addendum, PR11-SEC-05).
  */
 const SQL_DRIVER_CODE = { file: { categories: { anyOf: ['db-platform-core', 'prisma', 'tools-db', 'test'] } } };
-/** Code that may import the generated Prisma client as a value (D-ARCH-103 (2)); the same set as the SQL driver. */
-const PRISMA_GENERATED_VALUE_CODE = SQL_DRIVER_CODE;
-const PRISMA_GENERATED_VALUE_MESSAGE =
-  'the generated Prisma client (@platform/prisma/client) is a value only in apps/*/src/platform/db (through platform/db/generated.ts), prisma/, tools/db and tests: repositories and the planned stores use import type, services and other code import nothing from it (D-ARCH-103, ADR-0003 amendment 2026-11-13).';
+/** The one application file that imports the generated Prisma client as a value (D-ARCH-103 (3), D-ARCH-114). */
+const PRISMA_GENERATED_VALUE_FILE = 'apps/api/src/platform/db/generated.ts';
+/**
+ * Code that may import the generated Prisma client as a value (D-ARCH-114, ADR-0003 amendment 2026-11-14): the one file
+ * PRISMA_GENERATED_VALUE_FILE (a file path selector, not the db-platform-core or db-root-client category, so the worker's
+ * platform/db and every other apps/api/src/platform/db file have no static value path), prisma/, tools/db and tests.
+ */
+const PRISMA_GENERATED_VALUE_CODE = [
+  { file: { path: PRISMA_GENERATED_VALUE_FILE } },
+  { file: { categories: { anyOf: ['prisma', 'tools-db', 'test'] } } },
+];
+const PRISMA_GENERATED_VALUE_MESSAGE = `the generated Prisma client (@platform/prisma/client) is a value only in ${PRISMA_GENERATED_VALUE_FILE}, prisma/, tools/db and tests: other platform/db files and the worker take the runner from createRuntimeServices and the types from platform/db/index.ts or @platform/api/runtime, repositories and the planned stores use import type, services and other code import nothing from it (D-ARCH-103, D-ARCH-114, ADR-0003 amendments 2026-11-13 and 2026-11-14).`;
 const EXPRESS_PACKAGES = ['express', 'express-serve-static-core', '@types/express', '@types/express-serve-static-core'];
 const NOT_SAME_MODULE = '!{{ from.file.captured.module }}';
 const NOT_SAME_APP = '!{{ from.file.captured.app }}';
@@ -385,9 +393,12 @@ const BOUNDARIES_POLICIES = [
   },
   { from: DATABASE_CODE, allow: PRISMA_TARGETS.map((to) => ({ to })) },
   // --- The generated client (`@platform/prisma/client`, classified by the file it resolves to: prisma/generated/**)
-  //     as a VALUE: the database platform core, prisma/, tools/db and tests only (D-ARCH-103 (2), ADR-0003 amendment
-  //     2026-11-13). Repositories and the two planned stores keep type-only imports (`import type`), allowed above.
-  //     Selected by file category: a `module.source` selector matches nothing for a workspace specifier.
+  //     as a VALUE: apps/api/src/platform/db/generated.ts, prisma/, tools/db and tests only (D-ARCH-103 (2) narrowed by
+  //     D-ARCH-114, ADR-0003 amendment 2026-11-14). Repositories and the two planned stores keep type-only imports
+  //     (`import type`), allowed above. Selected by file category: a `module.source` selector matches nothing for a
+  //     workspace specifier. Residual (D-ARCH-114 (2)): the dynamic forms (a template-literal import(), createRequire)
+  //     are outside static import analysis; they stay covered by platform/prisma-client-construction (a value
+  //     PrismaClient anywhere else) and by the CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43).
   {
     disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
     message: PRISMA_GENERATED_VALUE_MESSAGE,
@@ -892,6 +903,12 @@ export default defineConfig([
     ignores: TEST_FILES,
     plugins: { platform },
     rules: { 'platform/static-module-specifier': 'error' },
+  },
+  {
+    // D-ARCH-111 (2), ADR-0005 am. 11 item 22: no eval in application and package code, so no string becomes code that
+    // the import controls and the T-83 lint cannot see (`new Function` and string timers are @typescript-eslint/no-implied-eval, type-aware).
+    files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
+    rules: { 'no-eval': 'error' },
   },
   {
     // Role defaults belong to the bootstrap lane (item 12 d). Tests are excluded (drift probes may name the statement).

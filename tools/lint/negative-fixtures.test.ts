@@ -824,6 +824,20 @@ const TENANT_DB: readonly Violation[] = [
     BOUNDARIES,
     'only repositories import Prisma',
   ],
+  // D-ARCH-114 (ADR-0003 amendment 2026-11-14; TASK-020 part 020-C): the value allowance is the one file
+  // apps/api/src/platform/db/generated.ts, not the db-platform-core category of both apps.
+  [
+    '[D-ARCH-114] the worker platform/db imports the generated Prisma client as a value',
+    'layering/prisma-client-imports/apps/worker/src/platform/db/bad-value-generated.ts',
+    BOUNDARIES,
+    'is a value only in apps/api/src/platform/db/generated.ts',
+  ],
+  [
+    '[D-ARCH-114] a second apps/api/src/platform/db file imports the generated Prisma client as a value',
+    'layering/prisma-client-imports/apps/api/src/platform/db/bad-second-value.ts',
+    BOUNDARIES,
+    'is a value only in apps/api/src/platform/db/generated.ts',
+  ],
 ];
 
 /** Warning-level rules ([title, file, rule]); `npm run lint` runs with --max-warnings 0, so each still blocks. */
@@ -1200,13 +1214,34 @@ describe('repository probes: workspace imports resolved to repository files (ADR
 
   it.each([
     ['a repository type import', `${API}/orders/repository/lint-probe-ok-prisma-type.ts`],
-    ['a platform/db value import', 'apps/api/src/platform/db/lint-probe-ok-prisma-value.ts'],
+    ['a value import in apps/api/src/platform/db/generated.ts (D-ARCH-114)', 'apps/api/src/platform/db/generated.ts'],
   ])('[D-ARCH-103] allowed: @platform/prisma/client, %s (resolved, no-unresolved on)', (_title, path) => {
     expectClean(report.probes, path);
   });
 
-  // PR38-SEC-01: in platform/db (where a value import is allowed) the raw-SQL rule traces the helpers through the
-  // workspace specifier as it does through @prisma/client. Each case was silent before the source list named it.
+  // D-ARCH-114: the value allowance is the one file generated.ts, proven with the bare workspace specifier (real resolution).
+  it.each([
+    ['a second apps/api/src/platform/db file', 'apps/api/src/platform/db/lint-probe-bad-prisma-value.ts'],
+    ['apps/worker/src/platform/db', 'apps/worker/src/platform/db/lint-probe-bad-prisma-value.ts'],
+  ])('[D-ARCH-114] @platform/prisma/client: a value import in %s is a layering violation', (_title, path) => {
+    expectFindings(report.probes, path, BOUNDARIES, 'is a value only in apps/api/src/platform/db/generated.ts');
+  });
+
+  /** The probe's findings of one rule; in exact mode the probe reports that rule and the D-ARCH-114 value import only. */
+  const ruleFindings = (path: string, ruleId: string): Finding[] => {
+    const findings = findingsOf(report.probes, path);
+    if (MODE === 'exact') {
+      const others = findings.filter((finding) => finding.ruleId !== ruleId);
+      expect(others.map((finding) => [finding.ruleId, finding.message.includes('apps/api/src/platform/db/generated.ts')])).toEqual(
+        others.map(() => [BOUNDARIES, true]),
+      );
+    }
+    return findings.filter((finding) => finding.ruleId === ruleId);
+  };
+
+  // PR38-SEC-01: in platform/db the raw-SQL rule traces the helpers through the workspace specifier as it does through
+  // @prisma/client. Each case was silent before the source list named it. Since D-ARCH-114 the value import itself is
+  // also a layering finding on these paths (only generated.ts may import a value); the raw-SQL finding is read alone.
   it.each([
     ['`const { raw } = Prisma; raw(s)`', 'destructured', 'Prisma.raw interpolates SQL'],
     ['`import { Prisma as P }; P.raw(s)`', 'aliased-import', 'Prisma.raw interpolates SQL'],
@@ -1216,11 +1251,13 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     ['a re-export of `Prisma`', 'reexport', "Re-exporting 'Prisma'"],
     ['`const tag = Prisma.sql; tag([s])`', 'sql-alias', "'sql' called as a function"],
   ])('[PR38-SEC-01] @platform/prisma/client in platform/db: %s is a raw-SQL finding', (_title, name, message) => {
-    expectFindings(report.probes, `apps/api/src/platform/db/lint-probe-bad-raw-${name}.ts`, 'platform/db-raw-sql', message);
+    const raw = ruleFindings(`apps/api/src/platform/db/lint-probe-bad-raw-${name}.ts`, 'platform/db-raw-sql');
+    expect(raw.length).toBeGreaterThan(0);
+    for (const finding of raw) expect(finding.message).toContain(message);
   });
 
   it('[PR38-SEC-01] allowed: a tagged Prisma.sql fragment and Prisma.join with a literal separator from @platform/prisma/client', () => {
-    expectClean(report.probes, 'apps/api/src/platform/db/lint-probe-ok-raw-fragments.ts');
+    expect(ruleFindings('apps/api/src/platform/db/lint-probe-ok-raw-fragments.ts', 'platform/db-raw-sql')).toEqual([]);
   });
 });
 
