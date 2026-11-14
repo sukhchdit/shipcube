@@ -1003,6 +1003,18 @@ Built-in mitigations kept: docs-only path filters; one `images` job instead of a
 
 **Self-hosted runner as an alternative, not the default.** All heavy jobs declare `runs-on: ${{ fromJSON(vars.HEAVY_RUNNER_LABELS || '["ubuntu-latest"]') }}`; setting the variable to `["self-hosted","heavy"]` moves them without any other change (ephemeral runner, private repository only, no `pull_request_target`).
 
+*Amended 2026-11-14 (SPK-07 §6 measured; ADR-0023 amendment L; D-ARCH-126..129; `rulings/wave-0-ci-minutes.md`).* The table above is superseded. Measured 2026-11-01..14: 771 billed minutes (Dependabot runs on standard runners are not billed and are excluded), 123 PR runs at a flat ≈ 6.6 min each; 59 of them had a docs-only head commit (security records, lane B evidence) and re-proved an already-proven code tree; `security-integration` was selected on 73 % of PRs and ran on every push. Budget v2 per month at the Wave-0 rate (100 PRs, 143 code pushes, 132 docs pushes, six security suites ≈ 8 min a run, one `wave-end` + nightly):
+
+| Scenario (ADR-0023 am. L) | Lane A code | Lane A docs | `security-integration` | Lane C + nightly | Total |
+|---|---|---|---|---|---|
+| Today's workflow with the six suites | 944 | 871 | 1,520 | 83 | ≈ 3,418 (171 %) |
+| Stage 1 — push-scoped light mode, job once per code tree on merge-candidate heads, production-closure lockfile rule (PR #46 fix cycle) | 944 | 488 | 496 | 83 | ≈ 2,011 (101 %) |
+| Stage 2 — `scans` folded into `ci-gate`, CODE-gated commitlint/actionlint/install (TASK-286) | 844 | 264 | 496 | 83 | ≈ 1,687 (84 %) |
+| + incremental fast lane (TASK-287) | 672 | 264 | 496 | 83 | ≈ 1,515 (76 %) |
+| **+ orchestrator process levers P1/P2 (unions only when needed; one docs push per review round)** | 564 | 204 | 432 | 83 | **≈ 1,283 (64 %)** |
+
+Guards now act on the **forecast** (`npm run ci:minutes --forecast`): ≥ 70 % → tier-1 lane C only (≤ 1 `wave-end` a month), P1/P2 mandatory; actual ≥ 90 % → gates only, except a tier-1 `wave-end` already planned for the month up to 95 %; 100 % → degraded mode (unchanged, never for security-critical paths). `wave-end` at most once a month while the forecast exceeds 60 %; nightly only with a `wave-end`. The ≤ 20-minute wall-clock (NFR-OPS-003) holds with `security-integration` serial after `fast-lane` in stage 2 (≤ 15 min median).
+
 ---
 
 ## 8. Observability platform
