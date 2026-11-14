@@ -4,15 +4,20 @@
 #   'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac, inventory) is workflow_dispatch-only
 #   and lives in lane-c.yml (TASK-015 part 015-B; this file's triggers stay pull_request + push, CI_TRIGGERS).
 #   Nothing here deploys, pushes images, publishes packages or runs terraform.
-# - Jobs: fast-lane (classify, base-ref gates, install, tests, build) and scans (gitleaks, Semgrep, security-review
-#   record) run in parallel on separate runners; security-integration (Testcontainers suites on Linux) runs after scans
-#   only when a pull request changes a security-critical path (ADR-0023 am. G item 5); ci-gate aggregates them. scans runs no npm and no head script, so code
-#   that fast-lane executes from the PR (deps:rebuild, lint, tests, build) cannot tamper with it (PR10-SEC-02).
+# - Jobs: fast-lane (classify, base-ref gates, install, tests, build) and scans (lane scope and proofs, gitleaks, Semgrep,
+#   security-review record) run in parallel on separate runners; security-integration (Testcontainers suites on Linux)
+#   runs after both, once per code tree on merge-candidate heads that change a security-critical path (ADR-0023 am. G
+#   item 5, am. L item 2); ci-gate decides merge-readiness. scans and ci-gate run no npm and no head script, so code
+#   that fast-lane executes from the PR (deps:rebuild, lint, tests, build) cannot tamper with them (PR10-SEC-02).
+# - Lane A is scoped by the PUSH (ADR-0023 am. L item 1, D-ARCH-126): a docs-only push runs fast-lane in light mode
+#   (the env.CODE steps are skipped) and inherits them from a proof run on a code-identical commit; ci-gate verifies
+#   the proof through the jobs API (step conclusions, never a job colour) with the base-ref tools/ci/lane-scope.mjs.
 # - Gating is procedural (D-ORCH-012/013, review m6): this private repository's plan has no branch protection or
 #   rulesets, so no check can be "required". The orchestrator merges only with
 #   `gh pr merge <n> --squash --match-head-commit <sha> --subject "<linted subject>"` after ci-gate concluded `success`
 #   (not skipped) for that exact SHA and the security record names it. A draft PR gets a red ci-gate, never a skipped one.
-# - No secrets: GITHUB_TOKEN (read-only) is the only credential (ADR-0023 amendment H).
+# - No secrets: GITHUB_TOKEN (read-only) is the only credential (ADR-0023 amendment H). It reaches a step only as
+#   GH_TOKEN on the lane-scope steps of scans and ci-gate (actions: read for the jobs API; policy rule gh-token).
 # - Gate tooling (tools/ci, .semgrep, .gitleaks.toml, .semgrepignore, .gitignore, the lint fixture harness) runs from
 #   the BASE ref when the base has it (SEC-P3-31); a checker the base does not have yet is bootstrapped from the head and
 #   the job summary says so. A checker's CLI therefore changes in two steps: first accept the new argument, then use it.
@@ -34,11 +39,13 @@ on:
 permissions:
   contents: read
 
-# Pull requests share one group per PR, so a newer push cancels the superseded run. Pushes to main get one group per
-# commit and are never cancelled: every pushed range must be gitleaks- and commitlint-scanned (review m5 (b)).
+# Pull requests share one group per PR and queue (D-ARCH-126, RR-7): GitHub keeps one pending run and supersedes it on
+# the next push, but never cancels a running one, because a cancelled full run would leave a later docs push without a
+# code proof. Pushes to main get one group per commit and are never cancelled: every pushed range must be gitleaks- and
+# commitlint-scanned (review m5 (b)).
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   # D-ARCH-044 / ADR-0023 am. J item 5: required at workflow level in every workflow.
@@ -62,6 +69,9 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+    outputs:
+      # light | full (D-ARCH-126); ci-gate compares it with the scans classification (a disagreement is red).
+      mode: ${{ steps.classify.outputs.mode }}
     env:
       # PR1-SEC-03 (c): job level as well, so an out-of-graph nested install inherits it.
       NPM_CONFIG_IGNORE_SCRIPTS: 'true'
@@ -81,24 +91,41 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      # From the local clone (no API call, no file cap, no separate billed job; review m5 (a), PR10-SEC-11). Renames
-      # count as both paths. An unknown range (new branch, missing before-SHA) classifies as code and runs everything.
+      # From the local clone (no API call, no token, no separate billed job; review m5 (a), PR10-SEC-11). The BASE ref's
+      # tools/ci/lane-scope.mjs (head git objects only while the base lacks it) classifies the PUSH range (D-ARCH-126,
+      # RR-3): a docs-only push (DOCS_ONLY_PATHS) runs light, so every env.CODE step below is skipped and inherited from
+      # a proof run that ci-gate verifies; a code push, a PR opened with code, an unknown range or a push to main runs
+      # everything. Head code that later rewrites CODE through $GITHUB_ENV turns skipped steps into a red ci-gate (rule
+      # (b) reads this run's step conclusions). LINT_CONTROLS stays computed over the PR range; renames count as both.
       - name: Classify changed paths
+        id: classify
+        env:
+          RANGE_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          lane="$RUNNER_TEMP/lane-scope"
+          mkdir -p "$lane"
+          if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE:tools/ci/lane-scope.mjs" 2>/dev/null; then
+            git archive "$RANGE_BASE" tools/ci | tar -x -C "$lane"
+            from="base ref"
+          else
+            git archive "$RANGE_HEAD" tools/ci | tar -x -C "$lane"
+            from="head (bootstrap: not on the base ref yet)"
+          fi
+          scope="$RUNNER_TEMP/lane-scope.out"
+          node "$lane/tools/ci/lane-scope.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$GITHUB_EVENT_NAME" --output "$scope" --summary "$GITHUB_STEP_SUMMARY"
+          if grep -qx 'code_changed=false' "$scope"; then
+            code=false
+            mode=light
+          else
+            code=true
+            mode=full
+          fi
           files="$RUNNER_TEMP/changed.txt"
           if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then
             git diff --name-only --no-renames "$RANGE_BASE...$RANGE_HEAD" > "$files"
           else
             : > "$files"
-          fi
-          count=$(wc -l < "$files")
-          # Docs-only (docs/, .claude/ notes, *.md) skips install-dependent gates except commitlint. .claude/settings.json
-          # holds hooks and permissions, so it is code (PR10-SEC-04).
-          if [ "$count" -gt 0 ] && ! grep -qvE '^(docs/|\.claude/)|\.md$' "$files" && ! grep -qxF '.claude/settings.json' "$files"; then
-            code=false
-          else
-            code=true
           fi
           if grep -qE '^(eslint\.config\.mjs|stylelint\.config\.mjs|\.stylelintignore|jest\.config\.ts|tools/(eslint-rules|stylelint-rules|lint|test-support)/|tests/fixtures/(lint|semgrep)/|\.semgrep/|package\.json$)' "$files"; then
             lint_controls=true
@@ -109,7 +136,9 @@ jobs:
             echo "CODE=$code"
             echo "LINT_CONTROLS=$lint_controls"
           } >> "$GITHUB_ENV"
-          echo "changed files: $count, code=$code, lint_controls=$lint_controls"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "lane-scope from the $from: mode=$mode, code=$code, lint_controls=$lint_controls"
+          echo "Lane scope tool from the $from; mode $mode." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Gate tooling from the base ref (SEC-P3-31)
         run: |
@@ -347,10 +376,19 @@ jobs:
       (github.event_name == 'push' && vars.CI_MAIN_FAST_LANE == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # actions: read for the proof lookup (jobs API) of the lane-scope step, which alone receives the token (RR-4).
     permissions:
       contents: read
+      actions: read
+    # One source for every classification output: the base-ref lane-scope step (RR-4).
     outputs:
-      security_paths: ${{ steps.security-paths.outputs.security_paths }}
+      code_changed: ${{ steps.lane-scope.outputs.code_changed }}
+      pr_docs_only: ${{ steps.lane-scope.outputs.pr_docs_only }}
+      code_proof: ${{ steps.lane-scope.outputs.code_proof }}
+      security_proof: ${{ steps.lane-scope.outputs.security_proof }}
+      record_ok: ${{ steps.lane-scope.outputs.record_ok }}
+      security_paths: ${{ steps.lane-scope.outputs.security_paths }}
+      security_integration_due: ${{ steps.lane-scope.outputs.security_integration_due }}
     env:
       RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -397,7 +435,7 @@ jobs:
           fi
           echo "GATES_DIR=$gates/base" >> "$GITHUB_ENV"
           # A script the base tools/ci lacks runs from the head tree's git objects (bootstrap), never the working tree.
-          for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths; do
+          for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths lane-scope; do
             var="GATE_$(echo "$tool" | tr 'a-z-' 'A-Z_')"
             if [ -f "$gates/base/tools/ci/$tool.mjs" ]; then
               echo "$var=$gates/base/tools/ci/$tool.mjs" >> "$GITHUB_ENV"
@@ -414,6 +452,17 @@ jobs:
       - name: Security-critical paths (selects security-integration)
         id: security-paths
         run: node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      # ADR-0023 am. L items 1-2 (D-ARCH-126/127, RR-4): the base-ref lane scope (push scope, PR docs-only, code-identical
+      # set, security paths, record check) and the proofs read from the jobs API with the job's actions: read token,
+      # which only this step receives (policy rule gh-token). gh is the runner's binary; no npm, no head code. A failed
+      # lookup gives no proof (fail closed). Runs before the scans so a red scan cannot hide the classification.
+      - name: Lane scope and proofs (D-ARCH-126/127)
+        id: lane-scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RANGE_BEFORE: ${{ github.event.before }}
+        run: node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       # Only .git is mounted: gitleaks loads <source>/.gitleaksignore unconditionally, so no working-tree file may reach
       # /repo. Inline allow markers are inert, merge commits are diffed against their first parent, no network
@@ -455,14 +504,18 @@ jobs:
             echo "Security-owned paths record: pull-request control, not evaluated on push." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # ADR-0023 am. G item 5 (SEC-P3-07; TASK-015 part 015-B): the active security_integration_suites of the BASE ref's
-  # manifest, run with their lane B runner entries on ubuntu with the runner's Docker (Testcontainers). Pull requests
-  # only, and only when job scans classified a security-critical path; ci-gate then requires it green. It still runs
-  # when scans is red (a missing security record is normal on a first push). Budget: <= 12 job-min (SPK-07).
+  # ADR-0023 am. G item 5 as amended by am. L item 2 (SEC-P3-07; D-ARCH-127; RR-5): the active
+  # security_integration_suites of the BASE ref's manifest, run with their lane B runner entries on ubuntu with the
+  # runner's Docker (Testcontainers). Once per code tree, on merge-candidate heads: selected when the PR range touches a
+  # security-critical path (production-closure lockfile changes only), the head's security record check passes (pass or
+  # not-required) and no security-integration success exists on a code-identical commit (security_integration_due).
+  # Skipped is not waived: ci-gate requires this job's success or an inherited security proof. PR46-SEC-01: it runs only
+  # after fast-lane succeeded and after the lane A supply-chain gates (lockfile, cooldown, licences, signatures, audit)
+  # passed on this code tree, in this run (full mode) or in the proof run (light mode), so no PR package code runs first.
   security-integration:
     name: security-integration
-    needs: [scans]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_paths == 'true' }}
+    needs: [scans, fast-lane]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_integration_due == 'true' && needs.fast-lane.result == 'success' && (needs.fast-lane.outputs.mode == 'full' || needs.scans.outputs.code_proof != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -503,48 +556,79 @@ jobs:
       - name: Allow-listed install steps (deps:rebuild)
         run: npm run deps:rebuild
 
-      # The manifest and the runners come from the base ref when it has them (a PR neither drops a suite from its own
-      # run nor activates one early); a base without them (bootstrap) uses the head copies and says so.
+      # The manifest and the runners come only from the base ref (a PR neither drops a suite from its own run nor
+      # activates one early); a base without them fails closed. The run: is pinned line by line in the base-ref policy
+      # (SECURITY_INTEGRATION_SCRIPT; PR46-SEC-03, review m1: no head copy, no --dry-run, no `|| true`).
       - name: Security integration suites (base-ref manifest)
         run: |
           set -euo pipefail
           manifests="$RUNNER_TEMP/security-manifests"
           mkdir -p "$manifests"
           for name in required-suites suite-runners; do
-            if [ -n "$RANGE_BASE" ] && git cat-file -e "$RANGE_BASE:tools/quality/$name.json" 2>/dev/null; then
-              git show "$RANGE_BASE:tools/quality/$name.json" > "$manifests/$name.json"
-            else
-              cp "tools/quality/$name.json" "$manifests/$name.json"
-              echo "- tools/quality/$name.json: head copy (bootstrap: not on the base ref)" >> "$GITHUB_STEP_SUMMARY"
+            if [ -z "$RANGE_BASE" ] || ! git cat-file -e "$RANGE_BASE:tools/quality/$name.json" 2>/dev/null; then
+              echo "::error title=security-integration::the base ref has no tools/quality/$name.json (fail closed; the head copy is never used)"
+              exit 1
             fi
+            git show "$RANGE_BASE:tools/quality/$name.json" > "$manifests/$name.json"
           done
           node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"
 
+  # RR-6 (D-ARCH-126/127): merge-readiness from the base-ref lane scope and this run's jobs (jobs API, actions: read; the
+  # token reaches only the aggregation step). No npm, no head code: the base ref's tools/ci/lane-scope.mjs (head git
+  # objects only while the base lacks it) evaluates (a) fast-lane success, (b) a code push ran full with every CODE-gated
+  # required step concluded success, (c) a docs push has a code proof, (d) scans success, (e) security-integration
+  # success or a security proof, (f) no empty output; it prints MERGE-READY or BLOCKED: <reasons>. Runs unless the
+  # workflow was cancelled; a skipped lane (draft PR) is not green (PR10-SEC-11, review m5 (d)).
   ci-gate:
     name: ci-gate
-    # Runs unless the workflow was cancelled; a skipped lane (draft PR) is not green (PR10-SEC-11, review m5 (d)).
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}
     needs: [fast-lane, scans, security-integration]
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    permissions: {}
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      # security-integration may be skipped only when scans classified no security-critical path (an empty output, e.g.
-      # scans failed before the classifier, requires it) or on a push to main (it is a pull-request job).
+      - name: Checkout (full history for the base-ref gate tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node (literal version, no cache)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Gate tooling from the base ref (lane-scope)
+        run: |
+          set -euo pipefail
+          gates="$RUNNER_TEMP/gates"
+          mkdir -p "$gates"
+          if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE:tools/ci/lane-scope.mjs" 2>/dev/null; then
+            git archive "$RANGE_BASE" tools/ci | tar -x -C "$gates"
+            echo "Gate tool tools/ci/lane-scope.mjs: base ref." >> "$GITHUB_STEP_SUMMARY"
+          else
+            git archive "$RANGE_HEAD" tools/ci | tar -x -C "$gates"
+            echo "Gate tool tools/ci/lane-scope.mjs: head (bootstrap: not on the base ref yet)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "GATE_LANE_SCOPE=$gates/tools/ci/lane-scope.mjs" >> "$GITHUB_ENV"
+
       - name: Aggregate lane A
         env:
-          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
           FAST_LANE: ${{ needs.fast-lane.result }}
+          FAST_LANE_MODE: ${{ needs.fast-lane.outputs.mode }}
           SCANS: ${{ needs.scans.result }}
           SECURITY_INTEGRATION: ${{ needs.security-integration.result }}
+          CODE_CHANGED: ${{ needs.scans.outputs.code_changed }}
+          PR_DOCS_ONLY: ${{ needs.scans.outputs.pr_docs_only }}
+          CODE_PROOF: ${{ needs.scans.outputs.code_proof }}
+          SECURITY_PROOF: ${{ needs.scans.outputs.security_proof }}
+          RECORD_OK: ${{ needs.scans.outputs.record_ok }}
           SECURITY_PATHS: ${{ needs.scans.outputs.security_paths }}
-        run: |
-          echo "fast-lane=$FAST_LANE scans=$SCANS security-integration=$SECURITY_INTEGRATION security-paths=$SECURITY_PATHS"
-          security_ok=false
-          if [ "$SECURITY_INTEGRATION" = "success" ]; then security_ok=true; fi
-          if [ "$SECURITY_INTEGRATION" = "skipped" ] && { [ "$EVENT" != "pull_request" ] || [ "$SECURITY_PATHS" = "false" ]; }; then security_ok=true; fi
-          if [ "$FAST_LANE" != "success" ] || [ "$SCANS" != "success" ] || [ "$security_ok" != "true" ]; then
-            echo "Lane A is not green (a draft PR is not gated: mark it ready for review)." >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "Lane A green." >> "$GITHUB_STEP_SUMMARY"
+          SECURITY_INTEGRATION_DUE: ${{ needs.scans.outputs.security_integration_due }}
+        run: node "$GATE_LANE_SCOPE" --gate --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"

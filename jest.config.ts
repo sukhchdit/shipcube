@@ -124,7 +124,7 @@ const config: Config = {
       displayName: 'integration',
       testMatch: ['**/*.int.test.{ts,tsx}'],
       // No project-level testTimeout: Jest 30 reads only the global value (PR34-SEC-04). Container hooks set their own
-      // budget (`afterAll(..., 60_000)` in seed.int and spk03); lane B passes --testTimeout to in-band projects.
+      // budget (`afterAll(..., 60_000)` in seed.int); lane B passes --testTimeout to in-band projects.
     },
     {
       ...common,

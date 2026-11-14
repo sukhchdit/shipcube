@@ -7,7 +7,10 @@
  * lane B evidence committed in the repository (`docs/05-quality/tests/runs/<stamp>_<sha7>/`):
  *   - reference runs: with `--since <rev>`, every lane B run directory added in `<since>..<sha>` (the wave's merges);
  *     without it, the newest run directory in the tree (lane B evidence is taken on PR branch commits that are
- *     squash-merged, so a run's `git_sha` is usually not an ancestor of main);
+ *     squash-merged, so a run's `git_sha` is usually not an ancestor of main). inventory.json records the scope
+ *     (`references_scope`: `since:<sha>` or `newest-only`); a `wave-end` run without `--since` compares one run only,
+ *     which ADR-0023 am. G item 6 ("every lane B evidence merged during the wave") does not intend, so the summary
+ *     carries a WARNING line (code review PR #46 m6);
  *   - only `active` suites of the manifest with a Jest runner entry are compared (counted from the lane C Jest JSON
  *     reports through the suite-runners.json projects and paths, the lane B definition); lane B harness cases (the
  *     coverage gate and merge cases, classname = suite id) are not tests of a file and are left out;
@@ -46,14 +49,18 @@ export const PROFILES = Object.freeze(['wave-end', 'release-candidate']);
  * @returns {string[]}
  */
 export function projectsOf(path) {
-  if (/(^|\/)(node_modules|dist|build)\//u.test(path)) return [];
+  // IGNORED_PATHS of jest.config.ts (every project).
+  if (/(^|\/)(node_modules|dist|build|fixtures)\//u.test(path)) return [];
   const out = [];
   const intOrApi = /\.(int|api)\.test\.tsx?$/u.test(path);
+  // GENERATED_PATH: `integration` and `api` ignore tests/generated/ (the `generated` project runs those suites);
+  // `unit` and `unit-dom` do not (a plain *.test.ts there is a unit suite).
+  const generated = /(^|\/)tests\/generated\//u.test(path);
   if (/\.test\.ts$/u.test(path) && !intOrApi && !path.startsWith('tests/e2e/')) out.push('unit');
   if (/\.test\.tsx$/u.test(path) && !intOrApi && !path.startsWith('tests/e2e/')) out.push('unit-dom');
-  if (/\.int\.test\.tsx?$/u.test(path)) out.push('integration');
-  if (/\.api\.test\.tsx?$/u.test(path)) out.push('api');
-  if (/(^|\/)tests\/generated\/.*\.(api|int)\.test\.tsx?$/u.test(path)) out.push('generated');
+  if (/\.int\.test\.tsx?$/u.test(path) && !generated) out.push('integration');
+  if (/\.api\.test\.tsx?$/u.test(path) && !generated) out.push('api');
+  if (generated && /\.(api|int)\.test\.tsx?$/u.test(path)) out.push('generated');
   return out;
 }
 
@@ -68,35 +75,56 @@ export function fileInSuite(path, runner) {
 }
 
 /**
- * Per-file counts from Jest `--json` reports (duplicates of one file+test across reports count once).
+ * Per-file counts from Jest `--json` reports. One report counts every test case, including cases of one file that share
+ * a full name (lane B JUnit keeps each of them, code review PR #46 M1); a test seen in several reports (the same file run
+ * by two projects or shards) counts as often as the report with the most occurrences, not once per report. Failed wins:
+ * a (file, full name) failed in any report keeps that report's failure count.
  * @param {readonly unknown[]} reports
  * @param {string} root
  * @returns {FileCounts}
  */
 export function jestFileCounts(reports, root) {
-  /** @type {Map<string, { status: string }>} */
-  const seen = new Map();
+  /** @type {Map<string, Count>} merged over reports */
+  const merged = new Map();
   for (const report of reports) {
     const results = /** @type {{ testResults?: { name: string, assertionResults: { fullName: string, status: string }[] }[] }} */ (report)
       .testResults;
     if (!Array.isArray(results)) throw new Error('a Jest report has no testResults');
+    /** @type {Map<string, Count>} this report's multiplicity per (file, full name) */
+    const local = new Map();
     for (const file of results) {
       const rel = relative(root, file.name).replaceAll('\\', '/');
       for (const a of file.assertionResults) {
         const key = `${rel}\0${a.fullName}`;
-        const prev = seen.get(key);
-        if (prev === undefined || a.status === 'failed') seen.set(key, { status: a.status });
+        const c = local.get(key) ?? { tests: 0, failures: 0, skipped: 0 };
+        c.tests += 1;
+        if (a.status === 'failed') c.failures += 1;
+        if (a.status === 'pending' || a.status === 'skipped' || a.status === 'todo') c.skipped += 1;
+        local.set(key, c);
+      }
+    }
+    for (const [key, c] of local) {
+      const prev = merged.get(key);
+      if (prev === undefined) merged.set(key, { ...c });
+      else {
+        // The first report with the most occurrences sets the skip count; failures are the most seen in any report.
+        if (c.tests > prev.tests) {
+          prev.tests = c.tests;
+          prev.skipped = c.skipped;
+        }
+        prev.failures = Math.max(prev.failures, c.failures);
       }
     }
   }
   /** @type {FileCounts} */
   const out = {};
-  for (const [key, { status }] of seen) {
+  for (const [key, c] of merged) {
     const file = /** @type {string} */ (key.split('\0')[0]);
-    const c = (out[file] ??= { tests: 0, failures: 0, skipped: 0 });
-    c.tests += 1;
-    if (status === 'failed') c.failures += 1;
-    if (status === 'pending' || status === 'skipped' || status === 'todo') c.skipped += 1;
+    const entry = (out[file] ??= { tests: 0, failures: 0, skipped: 0 });
+    const failures = Math.min(c.failures, c.tests);
+    entry.tests += c.tests;
+    entry.failures += failures;
+    entry.skipped += Math.min(c.skipped, c.tests - failures);
   }
   return out;
 }
@@ -317,6 +345,12 @@ export function main(argv) {
       return { run, git_sha: summary.git_sha, profile: summary.profile, same_code: sameCode(root, summary.git_sha, sha), suites };
     });
     const discrepancies = compare({ laneC, references });
+    const since = v['--since'];
+    const referencesScope = since === undefined ? 'newest-only' : `since:${since}`;
+    const scopeWarning =
+      since === undefined && v['--profile'] === 'wave-end'
+        ? 'WARNING: wave-end without --since compares the newest lane B run only (references_scope newest-only), not every run merged during the wave (ADR-0023 am. G item 6)'
+        : undefined;
     const playwrightDir = v['--playwright'];
     const e2e =
       playwrightDir !== undefined && existsSync(playwrightDir)
@@ -335,6 +369,7 @@ export function main(argv) {
       suites: Object.fromEntries(Object.entries(laneC).map(([id, f]) => [id, { ...total(f), files: Object.keys(f).length }])),
       e2e,
       not_inventoried: notInventoried,
+      references_scope: referencesScope,
       references: references.map((r) => ({ run: r.run, git_sha: r.git_sha, profile: r.profile, same_code: r.same_code })),
       discrepancies,
       verdict: discrepancies.length === 0 ? 'CONSISTENT' : 'DISCREPANCY',
@@ -344,8 +379,9 @@ export function main(argv) {
     const lines = [
       `### Lane C inventory: ${inventory.verdict}`,
       '',
-      `References: ${references.length === 0 ? 'none (no lane B run reachable)' : references.map((r) => `\`${r.run}\``).join(', ')}`,
+      `References (${referencesScope}): ${references.length === 0 ? 'none (no lane B run reachable)' : references.map((r) => `\`${r.run}\``).join(', ')}`,
       '',
+      ...(scopeWarning === undefined ? [] : [`**${scopeWarning}**`, '']),
       '| Suite | Tests | Failures | Skipped | Files |',
       '|---|---|---|---|---|',
       ...Object.entries(inventory.suites).map(

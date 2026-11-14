@@ -109,6 +109,20 @@ describe('check-workflow-policy: negative fixtures', () => {
       'nightly-playwright-env.yml',
       'playwright-install',
     ],
+    ['[review N6] id-token: write in nightly.yml fails (no-release workflows)', 'nightly-id-token.yml', 'ci-no-release'],
+    [
+      '[PR46-SEC-02] [review m3] npm_config_playwright_download_host in a job env fails (the npm channel Playwright reads)',
+      'npm-config-playwright-host.yml',
+      'forbidden-env',
+    ],
+    [
+      '[PR46-SEC-07] a repository secret in a lane-c.yml job fails (no-release workflows use GITHUB_TOKEN only)',
+      'lane-c-npm-token.yml',
+      'pr-secrets',
+    ],
+    ['[RR-8 (i)] GH_TOKEN in a job env fails (token on lane-scope steps only)', 'ci-gh-token-job-env.yml', 'gh-token'],
+    ['[RR-8 (i)] GH_TOKEN on a scans step that does not run "$GATE_LANE_SCOPE" fails', 'ci-gh-token-other-step.yml', 'gh-token'],
+    ['[RR-8 (ii)] actions: read on fast-lane fails (only scans and ci-gate)', 'ci-actions-read-fast-lane.yml', 'permissions'],
     ['every job needs timeout-minutes', 'missing-timeout.yml', 'job-timeout'],
     ['docker run by tag (no digest) fails', 'docker-run-by-tag.yml', 'image-digest'],
     ['YAML outside the supported subset (anchor) fails closed', 'yaml-anchor.yml', 'yaml-subset'],
@@ -151,6 +165,9 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['lane-c-valid.yml: D-ARCH-010 / PR4-SEC-08 positive control (dispatch only, browser install and terraform validate in lane-c.yml)'],
     ['gitleaks-hardened.yml: PR10-SEC-01 positive control (.git-only mount, --ignore-gitleaks-allow, first-parent, no network)'],
     ['safe-expression.yml: PR10-SEC-07 positive control (github.sha, runner.*, steps.*.outputs.*)'],
+    [
+      'ci-gh-token-lane-scope.yml: RR-8 (i)-(iii) positive control (GH_TOKEN = github.token or secrets.GITHUB_TOKEN on lane-scope steps of scans and ci-gate, which hold actions: read; pr-secrets accepts both)',
+    ],
   ])('positive control %s', (title) => {
     const fixture = title.split(':')[0] ?? '';
     expect(rulesFor(fixture)).toEqual([]);
@@ -196,11 +213,15 @@ describe('check-workflow-policy: repository', () => {
       expect.stringContaining('workflow policy gate step must be unconditional'),
     ]);
     const ungated = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, security-integration]');
-    expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual(['ci.yml ci-gate must need scans']);
+    expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
+      'ci.yml ci-gate must need scans',
+      'ci.yml job ci-gate needs must be exactly [fast-lane, scans, security-integration] (RR-5, PR46-SEC-01, RR-6)',
+    ]);
     // ADR-0023 am. G item 5: the hosted security-integration job stays part of the lane A aggregate.
     const noSecurity = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, scans]');
     expect(checkWorkflow(noSecurity, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       'ci.yml ci-gate must need security-integration',
+      'ci.yml job ci-gate needs must be exactly [fast-lane, scans, security-integration] (RR-5, PR46-SEC-01, RR-6)',
     ]);
     expect(CI_REQUIRED_GATES.length).toBeGreaterThanOrEqual(21);
     const root = mkdtempSync(join(tmpdir(), 'workflow-policy-'));

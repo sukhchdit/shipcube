@@ -125,8 +125,12 @@ export function plan(argv) {
   return steps;
 }
 
-/** Playwright browser download redirects (PR4-SEC-08; the shape of check-workflow-policy PLAYWRIGHT_HOST, any case). */
-const PLAYWRIGHT_REDIRECT = /^PLAYWRIGHT_(?:[A-Z]+_)?DOWNLOAD_HOST$/iu;
+/**
+ * Playwright browser download redirects (PR4-SEC-08; PR46-SEC-02, code review PR #46 m3; the shape of
+ * check-workflow-policy PLAYWRIGHT_HOST, any case). Playwright's getFromENV also reads `npm_config_<name>` (an `.npmrc`
+ * key, which npm exports to `npm run` children) and `npm_package_config_<name>` (a `package.json` "config" key).
+ */
+export const PLAYWRIGHT_REDIRECT = /^(?:npm_config_|npm_package_config_)?playwright_(?:[a-z]+_)?download_host$/iu;
 
 /**
  * Names of Playwright download-redirect variables set (non-empty) in `env` when the plan installs browsers.

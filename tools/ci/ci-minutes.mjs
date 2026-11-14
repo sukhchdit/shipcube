@@ -1,8 +1,9 @@
 // @ts-check
 /**
- * `npm run ci:minutes` (ADR-0023 amendment C "Guards", D-ARCH-010 item 6; SPK-07; TASK-015 part 015-B): hosted Actions
- * minutes of one calendar month (UTC) for this repository, the share of the free-tier allowance, the guard level and the
- * per-run figures SPK-07 measures (lane A job-minutes and wall-clock per PR run, security-integration job-minutes).
+ * `npm run ci:minutes` (ADR-0023 amendment C "Guards" as replaced by amendment L item 4, D-ARCH-010 item 6,
+ * D-ARCH-129; SPK-07; TASK-015 part 015-B): hosted Actions minutes of one calendar month (UTC) for this repository, the
+ * share of the free-tier allowance, the guard level, the month forecast and the per-run figures SPK-07 measures (lane A
+ * job-minutes and wall-clock per PR run, `fast-lane` split into full and light mode, security-integration job-minutes).
  *
  * How minutes are counted: GitHub bills a private repository per JOB, each rounded UP to a whole minute, times the
  * runner multiplier (Linux 1, Windows 2, macOS 10; self-hosted 0). The script reads every run created in the month and
@@ -11,26 +12,82 @@
  * is the account's billing report (`--billing` asks the billing usage endpoint, which needs a token with the `user`
  * scope; without it the script says so and keeps the estimate). Skipped jobs (no duration) count 0.
  *
- * CLI: node tools/ci/ci-minutes.mjs [--month YYYY-MM] [--repo owner/name] [--allowance <minutes>] [--json] [--billing]
+ * Not billed: runs whose workflow `path` starts with `dynamic/dependabot/` (Dependabot version/security updates run on
+ * standard GitHub-hosted runners, which GitHub does not bill). They are listed under "Not billed" and left out of the
+ * total, the share and the forecast. Workflows that Dependabot PRs trigger (ci.yml) ARE billed and stay in the total.
+ *
+ * Mode split (ADR-0023 am. L item 1): a ci.yml `fast-lane` job ran in light mode when its `Unit tests` step concluded
+ * `skipped` AND either the job succeeded or (a failed job) its `Install` step succeeded while the CODE-gated `Licences`
+ * step right after it was skipped. A full run that fails before the unit tests also leaves `Unit tests` skipped; any
+ * other combination, or a missing step, counts as full (fail safe: a full run is never reported as light).
+ *
+ * Forecast (`--forecast [--planned <min>]`, am. L item 4): billed-to-date + rate x remaining + planned, where
+ *   rate      = billed-to-date / elapsed days, elapsed = (run time - first instant of the month UTC) in days (fractional);
+ *   remaining = (first instant of the next month UTC - run time) in days (fractional, 0 for a past month);
+ *   planned   = minutes already decided for the rest of the month (lane C wave-end, nightly), counted in the month total.
+ * Each guard line's projected date is the UTC day on which billed-to-date + rate x days reaches its share (organic rate
+ * only; planned minutes have no date and are counted in the total only). The 70 % guard acts on the FORECAST share, the
+ * 90 %, 95 % and 100 % guards on the ACTUAL share (D-ARCH-129).
+ *
+ * Limits: runs are attributed to the month in which they were CREATED (a run started just before midnight UTC on the
+ * last day is billed partly in the next month); deleted runs are billed but no longer listed, so the estimate is low by
+ * their minutes; the runs list endpoint returns at most 1,000 runs for a filtered query, so a month with more runs is
+ * refused (exit 1) rather than silently under-counted.
+ *
+ * CLI: node tools/ci/ci-minutes.mjs [--month YYYY-MM] [--repo owner/name] [--allowance <minutes>] [--forecast
+ *        [--planned <minutes>]] [--json] [--billing]
  * Defaults: the current UTC month, the `origin` remote's GitHub repository, allowance 2000 (GitHub Free, private).
- * Exit 0 printed, 1 the GitHub API could not be read, 2 usage error.
+ * Exit 0 printed, 1 the GitHub API could not be read (or the 1,000-run cap was hit), 2 usage error.
  */
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export const DEFAULT_ALLOWANCE = 2000;
-/** ADR-0023 am. C guards: share of the allowance -> action. */
+/** The runs list endpoint's cap for filtered queries (`created=`): more runs than this are not listed. */
+export const RUN_LIST_CAP = 1000;
+/** Workflow paths GitHub does not bill (Dependabot updates on standard GitHub-hosted runners). */
+export const NOT_BILLED_PATH = /^dynamic\/dependabot\//u;
+const DAY_MS = 86_400_000;
+
+/**
+ * ADR-0023 amendment L item 4 / D-ARCH-129 guards, highest first: share of the allowance -> action. `basis` says which
+ * share the guard acts on (the 70 % guard acts on the month forecast, the others on actual usage).
+ */
 export const GUARDS = Object.freeze([
-  { at: 100, level: 'degraded', action: 'degraded mode: lane A runs locally (npm run quality:fastlane), lane C waits for the reset' },
-  { at: 90, level: 'guard-90', action: 'lane C for gates only (no wave-end dispatch)' },
-  { at: 70, level: 'guard-70', action: 'CI_MAIN_FAST_LANE=false and no further wave-end dispatches this month (lane B wave profile only)' },
+  {
+    at: 100,
+    basis: 'actual',
+    level: 'degraded',
+    action:
+      'degraded mode (amendment C): lane A runs locally (npm run quality:fastlane), lane C waits for the reset; never for security-critical paths',
+  },
+  {
+    at: 95,
+    basis: 'actual',
+    level: 'guard-95',
+    action: 'hard stop: lane C for gates only, the planned tier-1 wave-end is no longer dispatched',
+  },
+  {
+    at: 90,
+    basis: 'actual',
+    level: 'guard-90',
+    action: 'lane C for gates only, except a tier-1 wave-end already planned for the month (dispatched up to the 95 % hard stop)',
+  },
+  {
+    at: 70,
+    basis: 'forecast',
+    level: 'guard-70',
+    action: 'tier-1 lane C only (<= 1 wave-end a month), process levers P1/P2 mandatory, CI_MAIN_FAST_LANE stays false',
+  },
 ]);
 
 /**
  * @typedef {{ id: number, name: string, path: string, event: string, created_at: string, run_started_at?: string | null,
- *   updated_at: string, status: string, conclusion: string | null }} Run
+ *   updated_at: string, status: string, conclusion: string | null, total_count?: number }} Run
  * @typedef {{ run_id: number, name: string, started_at: string | null, completed_at: string | null, labels: string[],
- *   conclusion: string | null, run_attempt?: number }} Job
+ *   conclusion: string | null, run_attempt?: number, unit_tests?: string | null,
+ *   install?: string | null, licences?: string | null }} Job
+ * @typedef {{ month: string, now: Date, planned?: number }} ForecastOptions
  */
 
 /**
@@ -57,6 +114,25 @@ export function billedMinutes(job) {
 }
 
 /**
+ * True for a run GitHub does not bill (Dependabot updates).
+ * @param {Pick<Run, 'path'>} run
+ */
+export const notBilled = (run) => NOT_BILLED_PATH.test(run.path);
+
+/**
+ * `fast-lane (full)` / `fast-lane (light)` for ci.yml's fast-lane job (light = its `Unit tests` step was skipped);
+ * every other job keeps its name.
+ * @param {string} workflow the workflow file name
+ * @param {Job} job
+ */
+export function jobLabel(workflow, job) {
+  if (workflow !== 'ci.yml' || job.name !== 'fast-lane') return job.name;
+  if (job.unit_tests !== 'skipped') return 'fast-lane (full)';
+  if (job.conclusion === 'success') return 'fast-lane (light)';
+  return job.install === 'success' && job.licences === 'skipped' ? 'fast-lane (light)' : 'fast-lane (full)';
+}
+
+/**
  * @param {readonly number[]} values
  * @param {number} p percentile 0-100 (nearest rank)
  */
@@ -68,24 +144,86 @@ export function percentile(values, p) {
 }
 
 /**
- * @param {number} percent share of the allowance used
+ * The guard in force: the 100/95/90 % guards on the actual share, the 70 % guard on the forecast share (the actual
+ * share when no forecast was computed; actual usage above 70 % always counts).
+ * @param {number} percent actual share of the allowance used
+ * @param {number} [forecastPercent] forecast share of the allowance at month end
  * @returns {{ level: string, action: string }}
  */
-export function guardFor(percent) {
-  for (const guard of GUARDS) if (percent >= guard.at) return { level: guard.level, action: guard.action };
+export function guardFor(percent, forecastPercent = percent) {
+  for (const guard of GUARDS) {
+    const share = guard.basis === 'forecast' ? Math.max(percent, forecastPercent) : percent;
+    if (share >= guard.at) return { level: guard.level, action: guard.action };
+  }
   return { level: 'ok', action: 'no guard reached' };
+}
+
+/** @param {number} n */
+const round1 = (n) => Math.round(n * 10) / 10;
+
+/**
+ * First instant of the month and of the next month (UTC), in epoch milliseconds.
+ * @param {string} month YYYY-MM
+ */
+export function monthBounds(month) {
+  const [year, mon] = month.split('-').map(Number);
+  const start = Date.UTC(/** @type {number} */ (year), /** @type {number} */ (mon) - 1, 1);
+  const end = Date.UTC(/** @type {number} */ (year), /** @type {number} */ (mon), 1);
+  return { start, end };
+}
+
+/**
+ * Month forecast (see the header: rate = billed / elapsed days, remaining days to the next month, plus planned).
+ * @param {number} billed billed minutes to date (Dependabot excluded)
+ * @param {number} allowance
+ * @param {ForecastOptions} options
+ */
+export function forecast(billed, allowance, { month, now, planned = 0 }) {
+  const { start, end } = monthBounds(month);
+  const t = Math.min(Math.max(now.getTime(), start), end);
+  const elapsedDays = (t - start) / DAY_MS;
+  const remainingDays = (end - t) / DAY_MS;
+  const rate = elapsedDays > 0 ? billed / elapsedDays : 0;
+  const minutes = Math.round(billed + rate * remainingDays + planned);
+  const percent = allowance > 0 ? round1((minutes / allowance) * 100) : 0;
+  const guards = [...GUARDS]
+    .sort((a, b) => a.at - b.at)
+    .map((guard) => {
+      const target = (guard.at / 100) * allowance;
+      /** @type {string} */
+      let date;
+      if (billed >= target) date = 'reached';
+      else if (rate <= 0) date = 'not this month';
+      else {
+        const when = t + ((target - billed) / rate) * DAY_MS;
+        date = when < end ? new Date(when).toISOString().slice(0, 10) : 'not this month';
+      }
+      return { at: guard.at, basis: guard.basis, level: guard.level, minutes: Math.round(target), date };
+    });
+  return {
+    as_of: new Date(t).toISOString(),
+    elapsed_days: round1(elapsedDays),
+    remaining_days: round1(remainingDays),
+    rate_per_day: round1(rate),
+    planned,
+    minutes,
+    percent,
+    guards,
+  };
 }
 
 /**
  * Month usage and per-run figures.
  * @param {readonly Run[]} runs
  * @param {readonly Job[]} jobs every job attempt of those runs
- * @param {{ allowance: number }} options
+ * @param {{ allowance: number, forecast?: ForecastOptions }} options
  */
-export function summarize(runs, jobs, { allowance }) {
+export function summarize(runs, jobs, { allowance, forecast: forecastOptions }) {
   const byRun = new Map(runs.map((run) => [run.id, run]));
   /** @type {Map<string, { runs: Set<number>, minutes: number }>} */
   const byWorkflow = new Map();
+  /** @type {Map<string, { runs: Set<number>, minutes: number }>} */
+  const unbilled = new Map();
   /** @type {Map<string, number[]>} */
   const perJobName = new Map();
   /** @type {Map<number, number>} */
@@ -95,15 +233,18 @@ export function summarize(runs, jobs, { allowance }) {
     const run = byRun.get(job.run_id);
     if (run === undefined) continue;
     const minutes = billedMinutes(job);
-    total += minutes;
     const key = run.path.split('/').pop() ?? run.name;
-    const entry = byWorkflow.get(key) ?? { runs: new Set(), minutes: 0 };
+    const skip = notBilled(run);
+    const bucket = skip ? unbilled : byWorkflow;
+    const entry = bucket.get(key) ?? { runs: new Set(), minutes: 0 };
     entry.runs.add(run.id);
     entry.minutes += minutes;
-    byWorkflow.set(key, entry);
+    bucket.set(key, entry);
+    if (skip) continue;
+    total += minutes;
     perRun.set(run.id, (perRun.get(run.id) ?? 0) + minutes);
     if (minutes > 0) {
-      const name = `${key}:${job.name}`;
+      const name = `${key}:${jobLabel(key, job)}`;
       perJobName.set(name, [...(perJobName.get(name) ?? []), minutes]);
     }
   }
@@ -113,21 +254,31 @@ export function summarize(runs, jobs, { allowance }) {
     .filter((run) => run.status === 'completed' && run.conclusion !== 'cancelled')
     .map((run) => (Date.parse(run.updated_at) - Date.parse(run.run_started_at ?? run.created_at)) / 60_000)
     .filter((m) => Number.isFinite(m) && m > 0);
-  const percent = allowance > 0 ? Math.round((total / allowance) * 1000) / 10 : 0;
+  const percent = allowance > 0 ? round1((total / allowance) * 100) : 0;
+  const projection = forecastOptions === undefined ? null : forecast(total, allowance, forecastOptions);
   const stat = (/** @type {number[]} */ xs) => ({
     n: xs.length,
-    median: Math.round(percentile(xs, 50) * 10) / 10,
-    p90: Math.round(percentile(xs, 90) * 10) / 10,
-    max: Math.round(Math.max(0, ...xs) * 10) / 10,
+    median: round1(percentile(xs, 50)),
+    p90: round1(percentile(xs, 90)),
+    max: round1(Math.max(0, ...xs)),
   });
+  const list = (/** @type {Map<string, { runs: Set<number>, minutes: number }>} */ m) =>
+    [...m.entries()]
+      .map(([workflow, entry]) => ({ workflow, runs: entry.runs.size, minutes: entry.minutes }))
+      .sort((a, b) => b.minutes - a.minutes);
+  const notBilledList = list(unbilled);
   return {
     total_minutes: total,
     allowance,
     percent,
-    guard: guardFor(percent),
-    workflows: [...byWorkflow.entries()]
-      .map(([workflow, entry]) => ({ workflow, runs: entry.runs.size, minutes: entry.minutes }))
-      .sort((a, b) => b.minutes - a.minutes),
+    guard: guardFor(percent, projection?.percent ?? percent),
+    forecast: projection,
+    workflows: list(byWorkflow),
+    not_billed: {
+      minutes: notBilledList.reduce((a, w) => a + w.minutes, 0),
+      runs: notBilledList.reduce((a, w) => a + w.runs, 0),
+      workflows: notBilledList,
+    },
     jobs: [...perJobName.entries()]
       .map(([job, xs]) => ({ job, ...stat(xs), minutes: xs.reduce((a, b) => a + b, 0) }))
       .sort((a, b) => b.minutes - a.minutes),
@@ -141,12 +292,17 @@ export function summarize(runs, jobs, { allowance }) {
  * @param {string} repo
  */
 export function render(s, month, repo) {
+  const row = (/** @type {{ workflow: string, runs: number, minutes: number }} */ w) =>
+    `  ${w.workflow.padEnd(16)} ${String(w.runs).padStart(5)} runs ${String(w.minutes).padStart(7)} min`;
   const lines = [
     `Hosted Actions minutes, ${repo}, ${month} (UTC); estimate = per-job duration rounded up x runner multiplier`,
     `Total: ${String(s.total_minutes)} of ${String(s.allowance)} min (${String(s.percent)} %), guard: ${s.guard.level} (${s.guard.action})`,
     '',
     'By workflow:',
-    ...s.workflows.map((w) => `  ${w.workflow.padEnd(16)} ${String(w.runs).padStart(5)} runs ${String(w.minutes).padStart(7)} min`),
+    ...s.workflows.map(row),
+    '',
+    `Not billed (Dependabot on standard runners): ${String(s.not_billed.minutes)} min in ${String(s.not_billed.runs)} run(s), excluded from the total`,
+    ...s.not_billed.workflows.map(row),
     '',
     'By job (billed minutes per run: median / p90 / max, n):',
     ...s.jobs.map(
@@ -156,6 +312,18 @@ export function render(s, month, repo) {
     '',
     `Lane A per pull-request run (ci.yml): job-min median ${String(s.lane_a_pr_run.job_minutes.median)}, p90 ${String(s.lane_a_pr_run.job_minutes.p90)} (n=${String(s.lane_a_pr_run.job_minutes.n)}); wall-clock min median ${String(s.lane_a_pr_run.wall_clock_minutes.median)}, p90 ${String(s.lane_a_pr_run.wall_clock_minutes.p90)}`,
   ];
+  const f = s.forecast;
+  if (f !== null) {
+    lines.push(
+      '',
+      `Forecast (as of ${f.as_of}): ${String(f.minutes)} of ${String(s.allowance)} min (${String(f.percent)} %) = billed ${String(s.total_minutes)} + ${String(f.rate_per_day)} min/day x ${String(f.remaining_days)} remaining day(s) + planned ${String(f.planned)}`,
+      `  rate = billed to date / ${String(f.elapsed_days)} elapsed UTC day(s); guard dates use the rate only (planned minutes have no date)`,
+      ...f.guards.map(
+        (g) =>
+          `  ${String(g.at).padStart(3)} % (${String(g.minutes).padStart(5)} min, ${g.basis === 'forecast' ? 'acts on the forecast' : 'acts on actual usage'}): ${g.date}`,
+      ),
+    );
+  }
   return `${lines.join('\n')}\n`;
 }
 
@@ -181,11 +349,20 @@ function ghLines(endpoint, jq) {
 
 /** @param {string} month YYYY-MM */
 export function monthRange(month) {
-  const [year, mon] = month.split('-').map(Number);
-  const start = new Date(Date.UTC(/** @type {number} */ (year), /** @type {number} */ (mon) - 1, 1));
-  const end = new Date(Date.UTC(/** @type {number} */ (year), /** @type {number} */ (mon), 0));
-  const day = (/** @type {Date} */ d) => d.toISOString().slice(0, 10);
-  return `${day(start)}..${day(end)}`;
+  const { start, end } = monthBounds(month);
+  const day = (/** @type {number} */ ms) => new Date(ms).toISOString().slice(0, 10);
+  return `${day(start)}..${day(end - DAY_MS)}`;
+}
+
+/**
+ * The problem when the runs list hit the endpoint's cap (N4), or null.
+ * @param {readonly Run[]} runs each carries the list's `total_count`
+ */
+export function runCapProblem(runs) {
+  const count = Math.max(0, runs.length, ...runs.map((run) => run.total_count ?? 0));
+  return count > RUN_LIST_CAP
+    ? `the month has ${String(count)} runs, more than the ${String(RUN_LIST_CAP)} the runs list returns for a filtered query; the total would be under-counted (split the query, e.g. by half month, before using this figure)`
+    : null;
 }
 
 /** The GitHub `owner/name` of the origin remote, or null. */
@@ -197,18 +374,29 @@ function originRepo() {
 
 /**
  * @param {readonly string[]} argv
+ * @param {{ gh?: (endpoint: string, jq: string) => unknown[], now?: () => Date, write?: (text: string) => void }} [deps]
+ *   injectable for tests: the `gh api` reader, the clock and stdout
  * @returns {number}
  */
-export function main(argv) {
+export function main(argv, deps = {}) {
+  const gh = deps.gh ?? ghLines;
+  const now = deps.now ?? (() => new Date());
+  const write =
+    deps.write ??
+    ((/** @type {string} */ text) => {
+      process.stdout.write(text);
+    });
   /** @type {Record<string, string>} */
   const values = {};
   let json = false;
   let billing = false;
+  let withForecast = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = /** @type {string} */ (argv[i]);
     if (arg === '--json') json = true;
     else if (arg === '--billing') billing = true;
-    else if (['--month', '--repo', '--allowance'].includes(arg) && i + 1 < argv.length) {
+    else if (arg === '--forecast') withForecast = true;
+    else if (['--month', '--repo', '--allowance', '--planned'].includes(arg) && i + 1 < argv.length) {
       values[arg] = /** @type {string} */ (argv[i + 1]);
       i += 1;
     } else {
@@ -216,7 +404,7 @@ export function main(argv) {
       return 2;
     }
   }
-  const month = values['--month'] ?? new Date().toISOString().slice(0, 7);
+  const month = values['--month'] ?? now().toISOString().slice(0, 7);
   if (!/^\d{4}-(0[1-9]|1[0-2])$/u.test(month)) {
     console.error('ci:minutes: --month must be YYYY-MM');
     return 2;
@@ -231,25 +419,37 @@ export function main(argv) {
     console.error('ci:minutes: --allowance must be a non-negative integer');
     return 2;
   }
+  const plannedText = values['--planned'];
+  if (plannedText !== undefined && !withForecast) {
+    console.error('ci:minutes: --planned needs --forecast');
+    return 2;
+  }
+  if (plannedText !== undefined && !/^\d{1,6}$/u.test(plannedText)) {
+    console.error('ci:minutes: --planned must be a non-negative integer number of minutes');
+    return 2;
+  }
+  const planned = Number(plannedText ?? '0');
   try {
     const runs = /** @type {Run[]} */ (
-      ghLines(
+      gh(
         `repos/${repo}/actions/runs?per_page=100&created=${monthRange(month)}`,
-        '.workflow_runs[] | {id, name, path, event, created_at, run_started_at, updated_at, status, conclusion}',
+        '.total_count as $total | .workflow_runs[] | {id, name, path, event, created_at, run_started_at, updated_at, status, conclusion, total_count: $total}',
       )
     );
+    const cap = runCapProblem(runs);
+    if (cap !== null) throw new Error(cap);
     /** @type {Job[]} */
     const jobs = [];
     for (const run of runs) {
-      for (const job of ghLines(
+      for (const job of gh(
         `repos/${repo}/actions/runs/${String(run.id)}/jobs?per_page=100&filter=all`,
-        '.jobs[] | {run_id, name, started_at, completed_at, labels, conclusion, run_attempt}',
+        '.jobs[] | {run_id, name, started_at, completed_at, labels, conclusion, run_attempt, unit_tests: ([.steps[]? | select(.name == "Unit tests") | .conclusion][0]), install: ([.steps[]? | select(.name | startswith("Install (npm ci")) | .conclusion][0]), licences: ([.steps[]? | select(.name == "Licences") | .conclusion][0])}',
       ))
         jobs.push(/** @type {Job} */ (job));
     }
-    const summary = summarize(runs, jobs, { allowance });
-    if (json) process.stdout.write(`${JSON.stringify({ repo, month, ...summary }, null, 2)}\n`);
-    else process.stdout.write(render(summary, month, repo));
+    const summary = summarize(runs, jobs, { allowance, ...(withForecast ? { forecast: { month, now: now(), planned } } : {}) });
+    if (json) write(`${JSON.stringify({ repo, month, ...summary }, null, 2)}\n`);
+    else write(render(summary, month, repo));
   } catch (error) {
     console.error(`ci:minutes: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
@@ -271,9 +471,9 @@ export function main(argv) {
         timeout: 60_000,
       },
     );
-    if (r.status === 0) process.stdout.write(`\nBilling report (authoritative):\n${r.stdout}`);
+    if (r.status === 0) write(`\nBilling report (authoritative):\n${r.stdout}`);
     else
-      process.stdout.write(
+      write(
         '\nBilling report: not readable with this token (needs the `user` scope: gh auth refresh -s user); the estimate above stands.\n',
       );
   }

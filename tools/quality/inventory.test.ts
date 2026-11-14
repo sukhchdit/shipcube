@@ -3,7 +3,7 @@
  * lane C and lane B per-file counts, the discrepancy rules and the CLI against the repository's own lane B evidence.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,10 +32,22 @@ describe('inventory: suite membership (jest.config.ts projects, suite-runners.js
     expect(projectsOf('apps/web/app/x.test.tsx')).toEqual(['unit-dom']);
     expect(projectsOf('prisma/tests/catalog/c01-c12.int.test.ts')).toEqual(['integration']);
     expect(projectsOf('tests/api/x.api.test.ts')).toEqual(['api']);
-    expect(projectsOf('tests/generated/rls/cross-tenant.int.test.ts')).toEqual(['integration', 'generated']);
+    expect(projectsOf('tests/generated/rls/cross-tenant.int.test.ts')).toEqual(['generated']);
     expect(projectsOf('tests/generated/rbac/matrix.test.ts')).toEqual(['unit']);
     expect(projectsOf('tests/e2e/web.spec.ts')).toEqual([]);
     expect(projectsOf('apps/api/dist/x.test.ts')).toEqual([]);
+  });
+
+  it('[PR #46 N7] tests/generated/** is in neither integration nor api (jest.config.ts GENERATED_PATH), fixtures are in no project', () => {
+    expect(projectsOf('tests/generated/rls/cross-tenant.int.test.ts')).not.toContain('integration');
+    expect(projectsOf('tests/generated/rbac/matrix.api.test.ts')).toEqual(['generated']);
+    expect(projectsOf('apps/api/tests/generated/x.int.test.ts')).toEqual(['generated']);
+    expect(projectsOf('tests/api/generated/x.api.test.ts')).toEqual(['api']);
+    expect(projectsOf('tests/fixtures/lint/x.test.ts')).toEqual([]);
+    expect(fileInSuite('tests/generated/rls/cross-tenant.int.test.ts', { projects: ['integration'], paths: [] })).toBe(false);
+    expect(fileInSuite('tests/generated/rls/cross-tenant.int.test.ts', { projects: ['generated'], paths: ['tests/generated/rls/'] })).toBe(
+      true,
+    );
   });
 
   it('a suite holds the files of its projects under its paths', () => {
@@ -63,6 +75,67 @@ describe('inventory: counts', () => {
     expect(jestFileCounts([report('passed'), report('failed')], repoRoot)).toEqual({
       'a/x.int.test.ts': { tests: 2, failures: 1, skipped: 1 },
     });
+  });
+
+  const assertions = (cases: [string, string][]) => ({
+    testResults: [{ name: join(repoRoot, 'a', 'x.test.ts'), assertionResults: cases.map(([fullName, status]) => ({ fullName, status })) }],
+  });
+
+  it('[PR #46 M1] two tests of one file that share a full name count twice in one report', () => {
+    expect(
+      jestFileCounts(
+        [
+          assertions([
+            ['same name', 'passed'],
+            ['same name', 'passed'],
+            ['other', 'passed'],
+          ]),
+        ],
+        repoRoot,
+      ),
+    ).toEqual({ 'a/x.test.ts': { tests: 3, failures: 0, skipped: 0 } });
+  });
+
+  it('[PR #46 M1] a duplicate pair seen in two reports counts as the most occurrences of one report, and a failed copy is a failure', () => {
+    const pair = assertions([
+      ['same name', 'passed'],
+      ['same name', 'passed'],
+    ]);
+    expect(jestFileCounts([pair, pair], repoRoot)).toEqual({ 'a/x.test.ts': { tests: 2, failures: 0, skipped: 0 } });
+    const oneFailed = assertions([
+      ['same name', 'passed'],
+      ['same name', 'failed'],
+    ]);
+    expect(jestFileCounts([oneFailed], repoRoot)).toEqual({ 'a/x.test.ts': { tests: 2, failures: 1, skipped: 0 } });
+    expect(jestFileCounts([pair, assertions([['same name', 'failed']])], repoRoot)).toEqual({
+      'a/x.test.ts': { tests: 2, failures: 1, skipped: 0 },
+    });
+    expect(jestFileCounts([assertions([['same name', 'failed']]), pair], repoRoot)).toEqual({
+      'a/x.test.ts': { tests: 2, failures: 1, skipped: 0 },
+    });
+  });
+
+  it('[PR #46 M1] lane B JUnit with a duplicate pair and the lane C Jest report of the same file give no lower-count', () => {
+    const xml = [
+      '<testsuites><testsuite name="unit" tests="3" failures="0" errors="0" skipped="0">',
+      '<testcase name="same name" classname="a/x.test.ts" time="0"/>',
+      '<testcase name="same name" classname="a/x.test.ts" time="0"/>',
+      '<testcase name="other" classname="a/x.test.ts" time="0"/>',
+      '</testsuite></testsuites>',
+    ].join('');
+    const laneC = {
+      unit: jestFileCounts(
+        [
+          assertions([
+            ['same name', 'passed'],
+            ['same name', 'passed'],
+            ['other', 'passed'],
+          ]),
+        ],
+        repoRoot,
+      ),
+    };
+    expect(compare({ laneC, references: [{ run: 'r', same_code: true, suites: { unit: junitFileCounts(xml) } }] })).toEqual([]);
   });
 
   it('lane B JUnit: per file, the harness cases (classname = suite id) are left out', () => {
@@ -120,6 +193,65 @@ describe('inventory: discrepancies (SEC-TC-48 cross-check)', () => {
   });
 });
 
+describe('inventory: reference runs and same code in a scratch repository (PR #46 m6)', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'inventory-git-'));
+  temps.push(repo);
+  const git = (...args: string[]): string => {
+    const r = spawnSync(
+      'git',
+      ['-c', 'user.name=inventory-test', '-c', 'user.email=inventory-test@example.invalid', '-c', 'commit.gpgsign=false', ...args],
+      { cwd: repo, encoding: 'utf8' },
+    );
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  const put = (path: string, text: string) => {
+    const full = join(repo, ...path.split('/'));
+    mkdirSync(join(full, '..'), { recursive: true });
+    writeFileSync(full, text);
+  };
+  const runs = 'docs/05-quality/tests/runs';
+  git('init', '-q');
+  put('src/a.ts', 'export const a = 1;\n');
+  put(`${runs}/20261101T1000Z_aaaaaaa/summary.json`, '{"v":1}\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
+  const since = git('rev-parse', 'HEAD');
+  put(`${runs}/20261102T1000Z_bbbbbbb/summary.json`, '{}\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'run b');
+  put(`${runs}/20261103T1000Z_ccccccc/summary.json`, '{}\n');
+  put('docs/notes.md', 'notes\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'run c and docs');
+  const docsOnly = git('rev-parse', 'HEAD');
+  put(`${runs}/20261101T1000Z_aaaaaaa/summary.json`, '{"v":2}\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'modify the old run');
+  const modified = git('rev-parse', 'HEAD');
+  put('src/a.ts', 'export const a = 2;\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'code');
+  const code = git('rev-parse', 'HEAD');
+
+  it('--since selects every run directory ADDED in since..sha (two runs), not one whose summary was only modified', () => {
+    expect(referenceRuns(repo, modified, since)).toEqual(['20261102T1000Z_bbbbbbb', '20261103T1000Z_ccccccc']);
+    expect(referenceRuns(repo, docsOnly, since)).toEqual(['20261102T1000Z_bbbbbbb', '20261103T1000Z_ccccccc']);
+    expect(referenceRuns(repo, since, since)).toEqual([]);
+  });
+
+  it('without --since only the newest run directory of the tree is taken', () => {
+    expect(referenceRuns(repo, code, undefined)).toEqual(['20261103T1000Z_ccccccc']);
+  });
+
+  it('same code: a diff only under docs/ is the same code, a code diff is not', () => {
+    expect(sameCode(repo, since, docsOnly)).toBe(true);
+    expect(sameCode(repo, since, modified)).toBe(true);
+    expect(sameCode(repo, since, code)).toBe(false);
+    expect(sameCode(repo, modified, code)).toBe(false);
+  });
+});
+
 describe('inventory: CLI', () => {
   it('takes the newest lane B run directory of the tree without --since', () => {
     const runs = referenceRuns(repoRoot, 'HEAD', undefined);
@@ -142,6 +274,28 @@ describe('inventory: CLI', () => {
     const r = runNode([script, '--root', repoRoot, '--jest', dir, '--profile', 'wave-end', '--out', out], { cwd: repoRoot });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('**missing-suite** `unit`');
+  });
+
+  it('[PR #46 m6] wave-end without --since records references_scope newest-only and prints a WARNING; with --since it records the since scope and no warning', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'inventory-'));
+    temps.push(dir);
+    writeFileSync(join(dir, 'unit.jest.json'), JSON.stringify({ testResults: [] }));
+    const out = join(dir, 'inventory.json');
+    const newest = runNode([script, '--root', repoRoot, '--jest', dir, '--profile', 'wave-end', '--out', out], { cwd: repoRoot });
+    expect(newest.stdout).toContain('**WARNING: wave-end without --since compares the newest lane B run only');
+    expect((JSON.parse(readFileSync(out, 'utf8')) as { references_scope: string }).references_scope).toBe('newest-only');
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
+    const scoped = runNode([script, '--root', repoRoot, '--jest', dir, '--profile', 'wave-end', '--since', head, '--out', out], {
+      cwd: repoRoot,
+    });
+    expect(scoped.status).toBe(0);
+    expect(scoped.stdout).not.toContain('WARNING');
+    expect(scoped.stdout).toContain(`References (since:${head}): none`);
+    const inventory = JSON.parse(readFileSync(out, 'utf8')) as { references_scope: string; references: unknown[] };
+    expect(inventory.references_scope).toBe(`since:${head}`);
+    expect(inventory.references).toEqual([]);
+    const rc = runNode([script, '--root', repoRoot, '--jest', dir, '--profile', 'release-candidate', '--out', out], { cwd: repoRoot });
+    expect(rc.stdout).not.toContain('WARNING');
   });
 
   it('refuses a bad profile, a non-SHA --since and an empty report directory with exit 2', () => {

@@ -9,7 +9,9 @@
  * runners (a PR neither drops a suite from its own run nor activates one early, like quality:check-evidence); a suite
  * that is `planned` there is listed as not run. Per suite: Jest exit 0, tests >= max(min_tests, 1), no failure, no skip
  * when the suite is `security` or `zero_skip`, and every `required_cases` ID in a passing test name. No active suite
- * at all fails closed (a security job that tests nothing is not green).
+ * at all fails closed (a security job that tests nothing is not green). Required IDs match exactly (check-evidence
+ * `nameHasId`: the ID not followed by another digit). `--dry-run` prints the plan, exits 1 on a plan error, and is
+ * refused (exit 2) when GITHUB_ACTIONS=true.
  *
  * This is a Linux re-run of head code, not a tamper-proof control: the lane B evidence check (base ref) and the
  * security record are the controls; this job catches Windows/Linux drift on the paths that matter most (R-ARCH-17).
@@ -23,6 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { nameHasId } from '../quality/check-evidence.mjs';
 import { jestArgs, parseRunners } from '../quality/heavy.mjs';
 import { parseManifest } from '../quality/lib/manifest.mjs';
 
@@ -91,7 +94,8 @@ export function suiteProblems(planned, { status, report }) {
   if ((planned.suite.security || planned.suite.zero_skip) && skipped > 0) out.push(`${String(skipped)} skipped in a zero-skip suite`);
   const passing = report.testResults.flatMap((file) => file.assertionResults.filter((a) => a.status === 'passed').map((a) => a.fullName));
   for (const id of planned.suite.required_cases) {
-    if (!passing.some((name) => name.includes(id))) out.push(`required case ${id} is not in a passing test name`);
+    // Exact ID match as in check-evidence (PR46-SEC-06): `SEC-TC-050` does not satisfy `SEC-TC-05`.
+    if (!passing.some((name) => nameHasId(name, id))) out.push(`required case ${id} is not in a passing test name`);
   }
   if (status !== 0 && out.length === 0) out.push(`jest exited ${String(status)} without a failing test (open handle or runtime error)`);
   return out;
@@ -148,6 +152,11 @@ export function main(argv) {
   const root = values['--root'];
   if (root === undefined || values['--manifest'] === undefined || values['--runners'] === undefined) {
     console.error('security-integration: --root, --manifest and --runners are required');
+    return 2;
+  }
+  // A dry run runs no Jest, so it never stands in for the gate on a runner (code review PR #46 m1, mutant W1).
+  if (dryRun && process.env['GITHUB_ACTIONS'] === 'true') {
+    console.error('security-integration: --dry-run is refused on GitHub Actions (it runs no suite and is not the gate)');
     return 2;
   }
   const timeout = values['--test-timeout'] ?? String(DEFAULT_TEST_TIMEOUT_MS);

@@ -16,6 +16,10 @@
  *    read-only as `/repo/.git` and no working tree is mounted (gitleaks would auto-load `<source>/.gitleaksignore`).
  * 4. The scan covers the ancestry of the gate commit (`--log-opts=--diff-merges=first-parent <sha>`), not `--all`;
  *    `--network none`, `--ignore-gitleaks-allow` (inline allow markers are inert), `--redact`, `--exit-code 1`.
+ * 5. The mounted git directory keeps `$GIT_DIR/info/attributes` and `$GIT_DIR/config` in effect (lane B runs on the
+ *    developer host), so the log options also pass `--text --no-textconv --no-ext-diff`: a `* -diff` attribute cannot
+ *    turn every patch into "Binary files differ" and no textconv or external diff driver runs in the container (PR #46
+ *    r1 m5). gitleaks appends the options to `git log -p -U0`.
  *
  * quality:heavy runs it as a `command` suite (tools/quality/suite-runners.json, converter `gitleaks`, native report
  * `gitleaks-full.json`); lane C and nightly.yml run the CLI directly.
@@ -38,6 +42,8 @@ export const BASELINE_LINE = /^[0-9a-f]{40}:[^:\s]+:generic-api-key:[1-9]\d*$/u;
 /** PR25-SEC-01: the 17 recorded fingerprints; a different count is a reviewed change of this constant. */
 export const BASELINE_COUNT = 17;
 const SHA = /^[0-9a-f]{40}$/u;
+/** Every option gitleaks passes on to `git log -p -U0` before the scanned commit (PR10-SEC-01; PR #46 r1 m5). */
+export const LOG_OPTS = '--diff-merges=first-parent --text --no-textconv --no-ext-diff';
 const SCAN_TIMEOUT_MS = 30 * 60_000;
 
 export class BaselineError extends Error {
@@ -108,7 +114,7 @@ export function dockerArgs({ gitDir, configFile, baselineFile, outDir, sha, imag
     '/config/gitleaks.toml',
     '--gitleaks-ignore-path',
     '/config/baseline.txt',
-    `--log-opts=--diff-merges=first-parent ${sha}`,
+    `--log-opts=${LOG_OPTS} ${sha}`,
     '--ignore-gitleaks-allow',
     '--redact',
     '--no-banner',
@@ -132,11 +138,36 @@ function git(root, args) {
 }
 
 /**
+ * @typedef {(args: string[]) => { status: number | null, stderr: string }} DockerRunner
+ */
+
+/** @type {DockerRunner} */
+function spawnDocker(args) {
+  const r = spawnSync('docker', args, { encoding: 'utf8', windowsHide: true, timeout: SCAN_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
+  return { status: r.status, stderr: r.stderr || '' };
+}
+
+/**
+ * The config text and the validated baseline lines at `ref`, read from git objects (never the working tree or HEAD):
+ * in lane B `ref` is the run's base, so a PR cannot widen its own allow-list or baseline (D-TASK015-39, PR #46 r1 m2).
+ * @param {string} root
+ * @param {string} ref
+ * @returns {{ configRef: string, configText: string, baselineLines: string[] }}
+ */
+export function readInputs(root, ref) {
+  const configRef = git(root, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).trim();
+  const configText = git(root, ['show', `${configRef}:${CONFIG_PATH}`]);
+  const baselineLines = validateBaseline(git(root, ['show', `${configRef}:${BASELINE_PATH}`]), { count: BASELINE_COUNT });
+  return { configRef, configText, baselineLines };
+}
+
+/**
  * Scans the ancestry of `sha` with the given config and validated baseline lines; writes the native report.
- * @param {{ root: string, sha: string, configText: string, baselineLines: readonly string[], report: string, image?: string }} input
+ * @param {{ root: string, sha: string, configText: string, baselineLines: readonly string[], report: string, image?: string,
+ *   runDocker?: DockerRunner }} input `runDocker`: the docker invocation (tests inject one; default spawns `docker`)
  * @returns {{ status: 'clean' | 'findings', findings: number }}
  */
-export function scan({ root, sha, configText, baselineLines, report, image = GITLEAKS_IMAGE }) {
+export function scan({ root, sha, configText, baselineLines, report, image = GITLEAKS_IMAGE, runDocker = spawnDocker }) {
   const gitDir = resolve(root, git(root, ['rev-parse', '--git-common-dir']).trim());
   const work = mkdtempSync(join(tmpdir(), 'gitleaks-full-'));
   try {
@@ -146,12 +177,7 @@ export function scan({ root, sha, configText, baselineLines, report, image = GIT
     mkdirSync(outDir, { mode: 0o777 });
     writeFileSync(configFile, configText, { mode: 0o644 });
     writeFileSync(baselineFile, `${baselineLines.join('\n')}\n`, { mode: 0o644 });
-    const r = spawnSync('docker', dockerArgs({ gitDir, configFile, baselineFile, outDir, sha, image }), {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: SCAN_TIMEOUT_MS,
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    const r = runDocker(dockerArgs({ gitDir, configFile, baselineFile, outDir, sha, image }));
     const native = join(outDir, 'gitleaks-full.json');
     if ((r.status !== 0 && r.status !== 1) || !existsSync(native))
       throw new Error(`gitleaks did not complete (exit ${String(r.status)}): ${(r.stderr || '').trim().split('\n').slice(-1)[0] ?? ''}`);
@@ -168,9 +194,10 @@ export function scan({ root, sha, configText, baselineLines, report, image = GIT
 
 /**
  * @param {readonly string[]} argv
+ * @param {{ runDocker?: DockerRunner }} [options] `runDocker`: injected by the unit tests (default spawns `docker`)
  * @returns {number}
  */
-export function main(argv) {
+export function main(argv, { runDocker } = {}) {
   /** @type {Record<string, string>} */
   const values = {};
   const valued = new Set(['--root', '--ref', '--report', '--scan']);
@@ -192,13 +219,11 @@ export function main(argv) {
   const report = isAbsolute(reportArg) ? reportArg : resolve(root, reportArg);
   try {
     const sha = git(root, ['rev-parse', '--verify', '--end-of-options', `${values['--scan'] ?? 'HEAD'}^{commit}`]).trim();
-    const configRef = git(root, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).trim();
-    const configText = git(root, ['show', `${configRef}:${CONFIG_PATH}`]);
-    const baselineLines = validateBaseline(git(root, ['show', `${configRef}:${BASELINE_PATH}`]), { count: BASELINE_COUNT });
+    const { configRef, configText, baselineLines } = readInputs(root, ref);
     console.log(
       `gitleaks-full: ancestry of ${sha.slice(0, 12)}; config and ${String(baselineLines.length)}-line baseline from ${configRef.slice(0, 12)}`,
     );
-    const result = scan({ root, sha, configText, baselineLines, report });
+    const result = scan({ root, sha, configText, baselineLines, report, ...(runDocker === undefined ? {} : { runDocker }) });
     console.log(`gitleaks-full: ${result.status} (${String(result.findings)} finding(s)); native report written`);
     return result.status === 'clean' ? 0 : 1;
   } catch (error) {

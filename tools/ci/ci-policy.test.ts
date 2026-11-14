@@ -11,7 +11,19 @@ import { join } from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../test-support/process.js';
-import { checkWorkflow, laneBEvidenceProblems } from './check-workflow-policy.mjs';
+import {
+  CI_GATE_ENV,
+  CI_GATE_RUN,
+  LANE_SCOPE_ENV,
+  LANE_SCOPE_RUN,
+  SCANS_OUTPUTS,
+  SECURITY_INTEGRATION_IF,
+  SECURITY_INTEGRATION_NEEDS,
+  SECURITY_INTEGRATION_SCRIPT,
+  checkWorkflow,
+  commandLines,
+  laneBEvidenceProblems,
+} from './check-workflow-policy.mjs';
 import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 import type { YamlMap, YamlNode } from './yaml-subset.mjs';
 
@@ -103,7 +115,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(index + 2).toBe(scanSteps.length);
     expect(scanSteps[index]?.if).toBeUndefined();
     expect(scanSteps[index]?.env).toBeUndefined();
-    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths; do/u);
+    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths lane-scope; do/u);
     const dropped = ciText.replace(/--image "\$OASDIFF_IMAGE"/u, '');
     expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       expect.stringContaining('ci.yml openapi-breaking gate step: the run: must be exactly'),
@@ -192,7 +204,12 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(classify).toContain('jest\\.config\\.ts');
     expect(classify).toContain('test-support');
     expect(classify).toContain('git diff --name-only --no-renames "$RANGE_BASE...$RANGE_HEAD"');
-    expect(classify).toContain("grep -qxF '.claude/settings.json'");
+    // D-ARCH-126 / RR-3: CODE comes from the base-ref lane-scope (push range); .claude/settings.json is its DOCS_ONLY_PATHS exception.
+    expect(classify).toContain(
+      'node "$lane/tools/ci/lane-scope.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$GITHUB_EVENT_NAME"',
+    );
+    expect(classify).toContain('if grep -qx \'code_changed=false\' "$scope"; then');
+    expect(classify).not.toMatch(/GH_TOKEN|github.token|--lookup/u);
   });
 
   it('AT-US-005-01: integration, images and e2e jobs are not scheduled for pull requests (D-ORCH-001); the one exception is security-integration (ADR-0023 am. G item 5)', () => {
@@ -200,24 +217,129 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(ciText).not.toMatch(/npm run test:(?:integration|e2e)/);
   });
 
-  it('[ADR-0023 am. G item 5] security-integration: pull requests only, selected by the scans classifier over the base-ref manifest, base-ref suites, required by ci-gate unless no security-critical path changed', () => {
+  it('[ADR-0023 am. G item 5, am. L item 2] [RR-4] [RR-5] [PR46-SEC-01] security-integration: once per code tree on merge-candidate heads, after fast-lane and the supply-chain gates, base-ref manifests only, required by ci-gate (pinned exactly)', () => {
     const job = map(jobs['security-integration'], 'security-integration');
-    expect(job.needs).toEqual(['scans']);
-    expect(str(job.if)).toBe("${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_paths == 'true' }}");
-    expect(map(scans.outputs, 'scans outputs')).toEqual({ security_paths: '${{ steps.security-paths.outputs.security_paths }}' });
-    const classify = scanIndexOf(/GATE_SECURITY_PATHS/);
-    expect(classify).toBeLessThan(scanIndexOf(/GITLEAKS_IMAGE/));
-    expect(str(scanSteps[classify]?.run)).toBe(
-      'node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"',
-    );
-    const run = (job.steps as YamlNode[]).map((step) => str(map(step, 'step').run)).join('\n');
-    expect(run).toContain('git show "$RANGE_BASE:tools/quality/$name.json"');
-    expect(run).toContain('node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json"');
-    const gateRun = str(map((map(jobs['ci-gate'], 'ci-gate').steps as YamlNode[])[0], 'ci-gate step').run);
-    expect(gateRun).toContain(
-      '[ "$SECURITY_INTEGRATION" = "skipped" ] && { [ "$EVENT" != "pull_request" ] || [ "$SECURITY_PATHS" = "false" ]; }',
-    );
-    expect(gateRun).toContain('[ "$security_ok" != "true" ]');
+    expect(job.needs).toEqual([...SECURITY_INTEGRATION_NEEDS]);
+    expect(str(job.if)).toBe(SECURITY_INTEGRATION_IF);
+    expect(map(job.permissions, 'permissions')).toEqual({ contents: 'read' });
+    expect(map(scans.outputs, 'scans outputs')).toEqual(SCANS_OUTPUTS);
+    expect(map(scans.permissions, 'scans permissions')).toEqual({ contents: 'read', actions: 'read' });
+    const lane = scanIndexOf(/GATE_LANE_SCOPE/);
+    expect(lane).toBeLessThan(scanIndexOf(/GITLEAKS_IMAGE/));
+    expect(scanSteps[lane]?.id).toBe('lane-scope');
+    expect(str(scanSteps[lane]?.run)).toBe(LANE_SCOPE_RUN);
+    expect(map(scanSteps[lane]?.env, 'lane scope env')).toEqual(LANE_SCOPE_ENV);
+    const suites = (job.steps as YamlNode[])
+      .map((step) => map(step, 'step'))
+      .find((step) => /^Security integration suites/u.test(str(step.name)));
+    expect(commandLines(str(suites?.run))).toEqual([...SECURITY_INTEGRATION_SCRIPT]);
+    expect(map(jobs['fast-lane'], 'fast-lane').outputs).toEqual({ mode: '${{ steps.classify.outputs.mode }}' });
+  });
+
+  describe('[PR46-SEC-03] [review m1] the base-ref policy kills every security-integration / ci-gate mutant of both r1 reviews', () => {
+    const findingsOf = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
+    const swap = (from: string, to: string) => {
+      expect(ciText.split(from)).toHaveLength(2);
+      return ciText.replace(from, () => to);
+    };
+    const suitesLine =
+      'node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"';
+    it('the committed ci.yml passes', () => {
+      expect(findingsOf(ciText)).toEqual([]);
+    });
+    it.each([
+      ['W1 --dry-run appended to the suites step', suitesLine, `${suitesLine} --dry-run`, 'required-gates'],
+      ['C9 || true after the suites runner', suitesLine, `${suitesLine} || true`, 'required-gates'],
+      [
+        'W3 -z -> -n: the base manifests never used',
+        'if [ -z "$RANGE_BASE" ] || ! git cat-file',
+        'if [ -n "$RANGE_BASE" ] || ! git cat-file',
+        'required-gates',
+      ],
+      [
+        'C5 head manifests (cp of the head copy)',
+        '            git show "$RANGE_BASE:tools/quality/$name.json" > "$manifests/$name.json"',
+        '            cp "tools/quality/$name.json" "$manifests/$name.json"',
+        'required-gates',
+      ],
+      [
+        'C2 / W4 classifier replaced by echo false',
+        LANE_SCOPE_RUN,
+        'echo "security_integration_due=false" >> "$GITHUB_OUTPUT"',
+        'required-gates',
+      ],
+      [
+        'C3 base = head in the classifier',
+        LANE_SCOPE_RUN,
+        LANE_SCOPE_RUN.replace('--base "$RANGE_BASE"', '--base "$RANGE_HEAD"'),
+        'required-gates',
+      ],
+      ['classifier without --lookup', LANE_SCOPE_RUN, LANE_SCOPE_RUN.replace(' --lookup', ''), 'required-gates'],
+      [
+        'scans outputs from the old security-paths step',
+        'security_paths: ${{ steps.lane-scope.outputs.security_paths }}',
+        'security_paths: ${{ steps.security-paths.outputs.security_paths }}',
+        'required-gates',
+      ],
+      [
+        'scans job env base swapped',
+        '      RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}\n      EVENT:',
+        '      RANGE_HEAD: ${{ github.event.pull_request.base.sha }}\n      EVENT:',
+        'required-gates',
+      ],
+      ['W2 / C4 ci-gate accepts a failure (aggregation masked)', CI_GATE_RUN, `${CI_GATE_RUN} || true`, 'required-gates'],
+      ['ci-gate aggregation replaced by an echo', CI_GATE_RUN, 'echo "Lane A green."', 'required-gates'],
+      [
+        'ci-gate fed a literal success',
+        'SECURITY_INTEGRATION: ${{ needs.security-integration.result }}',
+        'SECURITY_INTEGRATION: success',
+        'required-gates',
+      ],
+      [
+        'ci-gate tooling from the head working tree',
+        '          echo "GATE_LANE_SCOPE=$gates/tools/ci/lane-scope.mjs" >> "$GITHUB_ENV"',
+        '          echo "GATE_LANE_SCOPE=$GITHUB_WORKSPACE/tools/ci/lane-scope.mjs" >> "$GITHUB_ENV"',
+        'required-gates',
+      ],
+      [
+        'security-integration selected by security paths alone (once-per-tree dropped)',
+        "needs.scans.outputs.security_integration_due == 'true'",
+        "needs.scans.outputs.security_paths == 'true'",
+        'required-gates',
+      ],
+      ['PR46-SEC-01 fast-lane success condition dropped', " && needs.fast-lane.result == 'success'", '', 'required-gates'],
+      ['PR46-SEC-01 fast-lane dropped from needs', 'needs: [scans, fast-lane]', 'needs: [scans]', 'required-gates'],
+      ['RR-7 cancel-in-progress back to true', 'cancel-in-progress: false', 'cancel-in-progress: true', 'required-gates'],
+      [
+        'RR-8 (ii) actions: read on fast-lane',
+        '    permissions:\n      contents: read\n    outputs:\n      # light',
+        '    permissions:\n      contents: read\n      actions: read\n    outputs:\n      # light',
+        'permissions',
+      ],
+      [
+        'RR-8 (ii) ci-gate without actions: read',
+        '    timeout-minutes: 3\n    permissions:\n      contents: read\n      actions: read\n',
+        '    timeout-minutes: 3\n    permissions:\n      contents: read\n',
+        'required-gates',
+      ],
+      [
+        'RR-8 (i) the token on the security-integration job',
+        "    env:\n      NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n      RANGE_BASE: ${{ github.event.pull_request.base.sha }}\n",
+        "    env:\n      NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n      RANGE_BASE: ${{ github.event.pull_request.base.sha }}\n      GH_TOKEN: ${{ github.token }}\n",
+        'gh-token',
+      ],
+      ['RR-8 (i) the token at workflow level', 'env:\n  # D-ARCH-044', 'env:\n  GH_TOKEN: ${{ github.token }}\n  # D-ARCH-044', 'gh-token'],
+      [
+        'RR-8 (i) the token on the classify step of fast-lane',
+        '        env:\n          RANGE_BEFORE: ${{ github.event.before }}\n        run: |\n          set -euo pipefail\n          lane=',
+        '        env:\n          GH_TOKEN: ${{ github.token }}\n          RANGE_BEFORE: ${{ github.event.before }}\n        run: |\n          set -euo pipefail\n          lane=',
+        'gh-token',
+      ],
+      ['ci-gate runs npm (isolation)', CI_GATE_RUN, `npm ci --ignore-scripts && ${CI_GATE_RUN}`, 'scans-isolation'],
+      ['fast-lane mode output pinned', 'mode: ${{ steps.classify.outputs.mode }}', 'mode: full', 'required-gates'],
+    ])('%s', (_title, from, to, rule) => {
+      expect(findingsOf(swap(from, to)).some((finding) => finding.startsWith(`${rule}:`))).toBe(true);
+    });
   });
 
   it('AT-US-005-02 (lane A part): push to main re-runs only lane A behind CI_MAIN_FAST_LANE, skipping docs-only pushes; ci.yml has no schedule; the full stages run in lane C on workflow_dispatch (TASK-015)', () => {
@@ -229,10 +351,10 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
   });
 
-  it('review m5 (b): pull-request runs share a per-PR group and cancel superseded runs; every push to main gets its own group, so none is cancelled', () => {
+  it('review m5 (b) / RR-7: pull-request runs share a per-PR group and queue (a running full run is never cancelled, so a docs push finds its proof); every push to main gets its own group', () => {
     const concurrency = map(ci.concurrency, 'concurrency');
     expect(concurrency.group).toBe('ci-${{ github.event.pull_request.number || github.sha }}');
-    expect(concurrency['cancel-in-progress']).toBe('true');
+    expect(concurrency['cancel-in-progress']).toBe('false');
   });
 
   it('AT-US-005-03: any failing stage fails the run: no continue-on-error, no always()/failure() steps, a failing unit test skips build; ci-gate runs unless cancelled and fails unless both lanes succeeded (a skipped lane is not green)', () => {
@@ -243,10 +365,14 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     const gate = map(jobs['ci-gate'], 'ci-gate');
     expect(gate.needs).toEqual(['fast-lane', 'scans', 'security-integration']);
     expect(str(gate.if)).toBe("${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}");
-    const gateRun = str(map((gate.steps as YamlNode[])[0], 'ci-gate step').run);
-    expect(gateRun).toMatch(/"\$FAST_LANE" != "success"/);
-    expect(gateRun).toMatch(/"\$SCANS" != "success"/);
-    expect(gateRun).toMatch(/exit 1/);
+    // RR-6: the aggregation is the base-ref lane-scope --gate (rules (a)-(f), unit-tested in lane-scope.test.ts).
+    const gateSteps = (gate.steps as YamlNode[]).map((step) => map(step, 'ci-gate step'));
+    const aggregate = gateSteps.at(-1);
+    expect(str(aggregate?.name)).toBe('Aggregate lane A');
+    expect(str(aggregate?.run)).toBe(CI_GATE_RUN);
+    expect(map(aggregate?.env, 'aggregate env')).toEqual(CI_GATE_ENV);
+    expect(map(gate.permissions, 'ci-gate permissions')).toEqual({ contents: 'read', actions: 'read' });
+    expect(gate['timeout-minutes']).toBe('3');
   });
 
   it('AT-US-005-04 (lane A part): a pull request run pushes no image; the policy allows image pushes only in an `images` job gated on dispatch/main/tags (lane C images job: TASK-015)', () => {

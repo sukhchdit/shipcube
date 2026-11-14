@@ -67,13 +67,15 @@ describe('ci-policy: lane C (lane-c.yml)', () => {
     expect(runsOf(jobs.integration)).toContain('npm run coverage:gate -- --summary "$out/coverage-summary.json"');
   });
 
-  it('[COND-E2E-FF] e2e-stack: one shard per engine, mobile and desktop projects, WebKit --repeat-each from a 1|5 choice, browsers only through deps:rebuild', () => {
+  it('[COND-E2E-FF] e2e-stack: one shard per engine, mobile and desktop projects, WebKit --repeat-each from a 1|5 choice, browsers only through deps:rebuild; [review m4] a flaky test fails the shard', () => {
     const e2e = map(jobsOf(laneC)['e2e-stack'], 'e2e-stack');
     expect(map(map(e2e.strategy, 'strategy').matrix, 'matrix').engine).toEqual(['chromium', 'firefox', 'webkit']);
     expect(map(e2e.strategy, 'strategy')['fail-fast']).toBe('false');
     const run = runsOf(e2e);
     expect(run).toContain('npm run deps:rebuild -- "--playwright=$ENGINE"');
-    expect(run).toContain('npm run test:e2e -- "--project=$ENGINE-mobile" "--project=$ENGINE-desktop" "--repeat-each=$repeat"');
+    expect(run).toContain(
+      'npm run test:e2e -- "--project=$ENGINE-mobile" "--project=$ENGINE-desktop" "--repeat-each=$repeat" --fail-on-flaky-tests',
+    );
     expect(run).toContain('case "$WEBKIT_REPEAT_EACH" in 1|5)');
     expect(map(map(map(laneC.on, 'on').workflow_dispatch, 'd').inputs, 'i').webkit_repeat_each).toMatchObject({ default: '5' });
     expect(code(laneCText)).not.toMatch(/playwright\s+install|PLAYWRIGHT_[A-Z_]*DOWNLOAD_HOST/u);

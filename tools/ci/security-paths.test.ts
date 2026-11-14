@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { globsMatch as manifestGlobsMatch } from '../quality/lib/manifest.mjs';
 import { findRepoRoot, runNode } from '../test-support/process.js';
-import { SECURITY_INTEGRATION_PATHS, classify, globsMatch, securityMatches } from './security-paths.mjs';
+import { SECURITY_INTEGRATION_PATHS, classify, classifyRange, globsMatch, lockfileChange, securityMatches } from './security-paths.mjs';
 
 const repoRoot = findRepoRoot();
 const script = join(repoRoot, 'tools', 'ci', 'security-paths.mjs');
@@ -118,6 +118,146 @@ describe('security-paths: classification', () => {
   });
 });
 
+/** A repository with `files` at the base, then `edit` applied (null deletes) in a head commit; optional extra moves. */
+function repoChange(
+  files: Record<string, string>,
+  edit: Record<string, string | null>,
+  moves: Array<[string, string]> = [],
+): { root: string; base: string; head: string } {
+  const root = mkdtempSync(join(tmpdir(), 'security-paths-'));
+  temps.push(root);
+  git(root, ['init', '-q', '-b', 'main']);
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  };
+  write('README.md', 'base\n');
+  for (const [path, text] of Object.entries(files)) write(path, text);
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '-m', 'base']);
+  const base = git(root, ['rev-parse', 'HEAD']);
+  for (const [path, text] of Object.entries(edit)) {
+    if (text === null) rmSync(join(root, path));
+    else write(path, text);
+  }
+  for (const [from, to] of moves) {
+    mkdirSync(dirname(join(root, to)), { recursive: true });
+    git(root, ['mv', from, to]);
+  }
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '-m', 'head']);
+  return { root, base, head: git(root, ['rev-parse', 'HEAD']) };
+}
+
+type Entry = Record<string, unknown>;
+const lock = (packages: Record<string, Entry>, version = 3): string =>
+  `${JSON.stringify({ name: 'platform', version: '0.0.0', lockfileVersion: version, requires: true, packages }, null, 2)}\n`;
+const root0: Entry = { name: 'platform', version: '0.0.0', engines: { node: '>=24' } };
+const devJest = (version: string): Entry => ({ version, resolved: `https://registry.npmjs.org/jest/-/jest-${version}.tgz`, dev: true });
+const pg = (version: string): Entry => ({ version, resolved: `https://registry.npmjs.org/pg/-/pg-${version}.tgz` });
+const basePackages = { '': root0, 'node_modules/jest': devJest('30.0.0'), 'node_modules/pg': pg('8.16.0') };
+const LOCK = 'package-lock.json';
+
+describe('security-paths: package-lock.json production-closure rule (ADR-0023 am. L item 2 (b), RR-2)', () => {
+  it('lockfileChange: a dev-only bump does not select; prod patch, root entry, dev->prod, new, deleted, corrupt and v1 do', () => {
+    const base = lock(basePackages);
+    expect(lockfileChange(base, lock({ ...basePackages, 'node_modules/jest': devJest('30.0.1') }))).toEqual({
+      selected: false,
+      reason: 'package-lock.json: dev-only change (1 entries)',
+    });
+    // Added and removed dev-only entries, devOptional, and key order alone.
+    const reordered = lock({ 'node_modules/pg': pg('8.16.0'), '': root0, 'node_modules/jest': devJest('30.0.0') });
+    expect(lockfileChange(base, reordered)).toMatchObject({ selected: false, reason: 'package-lock.json: dev-only change (0 entries)' });
+    const devAdded = lock({ ...basePackages, 'node_modules/eslint': { version: '10.0.0', devOptional: true } });
+    expect(lockfileChange(base, devAdded).selected).toBe(false);
+    const devRemoved = lock({ '': root0, 'node_modules/pg': pg('8.16.0') });
+    expect(lockfileChange(base, devRemoved).selected).toBe(false);
+
+    expect(lockfileChange(base, lock({ ...basePackages, 'node_modules/pg': pg('8.16.1') }))).toEqual({
+      selected: true,
+      reason: 'package-lock.json: production-closure change (node_modules/pg)',
+    });
+    const engines = lock({ ...basePackages, '': { ...root0, engines: { node: '>=24.1' } } });
+    expect(lockfileChange(base, engines)).toMatchObject({ selected: true, reason: expect.stringContaining('(root entry)') });
+    // The root entry selects whatever flags it carries.
+    const devRoot = (engine: string) => lock({ ...basePackages, '': { ...root0, dev: true, engines: { node: engine } } });
+    expect(lockfileChange(devRoot('>=24'), devRoot('>=25')).selected).toBe(true);
+    const moved = lock({ ...basePackages, 'node_modules/jest': { version: '30.0.0', resolved: devJest('30.0.0')['resolved'] } });
+    expect(lockfileChange(base, moved)).toMatchObject({ selected: true, reason: expect.stringContaining('node_modules/jest') });
+    const prodAdded = lock({ ...basePackages, 'node_modules/jose': { version: '6.0.0' } });
+    expect(lockfileChange(base, prodAdded).selected).toBe(true);
+    const prodRemoved = lock({ '': root0, 'node_modules/jest': devJest('30.0.0') });
+    expect(lockfileChange(base, prodRemoved).selected).toBe(true);
+    // Lockfile v2 (packages + dependencies) is read through its packages map.
+    expect(lockfileChange(lock(basePackages, 2), lock({ ...basePackages, 'node_modules/jest': devJest('30.0.1') }, 2)).selected).toBe(
+      false,
+    );
+
+    expect(lockfileChange(null, base)).toMatchObject({ selected: true, reason: expect.stringContaining('new lockfile') });
+    expect(lockfileChange(base, null)).toMatchObject({ selected: true, reason: expect.stringContaining('deleted lockfile') });
+    expect(lockfileChange(base, '{ not json')).toMatchObject({ selected: true, reason: expect.stringContaining('unparseable') });
+    expect(lockfileChange(base, JSON.stringify({ lockfileVersion: 1, dependencies: {} })).selected).toBe(true);
+    expect(lockfileChange(base, JSON.stringify({ packages: [] })).selected).toBe(true);
+    expect(lockfileChange(base, 'null').selected).toBe(true);
+  });
+
+  it('classifyRange reads both lockfiles from git objects: dev-only bump false, pg patch true, root engines true, corrupt true, new true, dev->prod true', () => {
+    const base = { [LOCK]: lock(basePackages) };
+    const cases: Array<[string, Record<string, string>, Record<string, string | null>, boolean]> = [
+      ['dev-only bump', base, { [LOCK]: lock({ ...basePackages, 'node_modules/jest': devJest('30.0.1') }) }, false],
+      ['pg patch', base, { [LOCK]: lock({ ...basePackages, 'node_modules/pg': pg('8.16.1') }) }, true],
+      ['root engines', base, { [LOCK]: lock({ ...basePackages, '': { ...root0, engines: { node: '>=25' } } }) }, true],
+      ['corrupt', base, { [LOCK]: '{"packages": {' }, true],
+      ['new lockfile', {}, { [LOCK]: lock(basePackages) }, true],
+      ['deleted lockfile', base, { [LOCK]: null }, true],
+      ['dev -> prod', base, { [LOCK]: lock({ ...basePackages, 'node_modules/jest': { version: '30.0.0' } }) }, true],
+    ];
+    for (const [label, files, edit, selected] of cases) {
+      const repo = repoChange(files, edit);
+      const result = classifyRange(repo.root, repo.base, repo.head);
+      expect([label, result.selected, result.matched]).toEqual([label, selected, selected ? [LOCK] : []]);
+      expect(result.reason).toContain('package-lock.json:');
+    }
+  });
+
+  it('a dev-only lockfile bump next to another security path still selects through that path only', () => {
+    const repo = repoChange(
+      { [LOCK]: lock(basePackages) },
+      { [LOCK]: lock({ ...basePackages, 'node_modules/jest': devJest('30.0.1') }), 'prisma/schema/x.prisma': 'model X {}\n' },
+    );
+    expect(classifyRange(repo.root, repo.base, repo.head)).toMatchObject({ selected: true, matched: ['prisma/schema/x.prisma'] });
+  });
+
+  it('the lockfile is compared against the merge base, not the moved base tip', () => {
+    const repo = repoChange({ [LOCK]: lock(basePackages) }, { [LOCK]: lock({ ...basePackages, 'node_modules/jest': devJest('30.0.1') }) });
+    // main moves on with a production change the PR does not carry: the PR's own change stays dev-only.
+    git(repo.root, ['checkout', '-q', '-b', 'moved', repo.base]);
+    writeFileSync(join(repo.root, LOCK), lock({ ...basePackages, 'node_modules/pg': pg('9.0.0') }));
+    git(repo.root, ['commit', '-q', '-am', 'main moves']);
+    const moved = git(repo.root, ['rev-parse', 'HEAD']);
+    expect(classifyRange(repo.root, moved, repo.head)).toMatchObject({ selected: false, matched: [] });
+  });
+
+  it('fails closed on an unknown range and keeps the classify shape for a non-lockfile change', () => {
+    const repo = repoChange({}, { 'apps/web/x.ts': 'x\n' });
+    expect(classifyRange(repo.root, '0'.repeat(40), repo.head)).toMatchObject({
+      selected: true,
+      reason: expect.stringContaining('fail closed'),
+    });
+    expect(classifyRange(repo.root, 'f'.repeat(40), repo.head).selected).toBe(true);
+    expect(classifyRange(repo.root, repo.base, repo.head)).toEqual({
+      selected: false,
+      reason: 'no security-critical path among 1 changed path(s)',
+      matched: [],
+    });
+  });
+
+  it('[review N1] a rename out of prisma/** selects (renames count as both paths)', () => {
+    const repo = repoChange({ 'prisma/x.sql': 'select 1;\n' }, {}, [['prisma/x.sql', 'tools/x.sql']]);
+    expect(classifyRange(repo.root, repo.base, repo.head)).toMatchObject({ selected: true, matched: ['prisma/x.sql'] });
+  });
+});
+
 describe('security-paths: CLI', () => {
   it('writes security_paths=true for a selected change and lists only the selecting paths in the summary', () => {
     const { root, base, head } = repoWith(['packages/audit/src/writer.ts', 'apps/web/x.ts']);
@@ -128,6 +268,20 @@ describe('security-paths: CLI', () => {
     expect(readFileSync(output, 'utf8')).toBe('security_paths=true\n');
     expect(readFileSync(summary, 'utf8')).toContain('`packages/audit/src/writer.ts`');
     expect(readFileSync(summary, 'utf8')).not.toContain('apps/web/x.ts');
+  });
+
+  it('[RR-2] applies the lockfile rule: a dev-only lockfile bump writes false, a production change true', () => {
+    const run = (packages: Record<string, Entry>): string => {
+      const { root, base, head } = repoChange({ [LOCK]: lock(basePackages) }, { [LOCK]: lock(packages) });
+      const output = join(root, 'out.txt');
+      const summary = join(root, 'summary.md');
+      const r = runNode([script, '--root', root, '--base', base, '--head', head, '--output', output, '--summary', summary], { cwd: root });
+      expect(r.status).toBe(0);
+      expect(readFileSync(summary, 'utf8')).toContain('package-lock.json: ');
+      return readFileSync(output, 'utf8');
+    };
+    expect(run({ ...basePackages, 'node_modules/jest': devJest('30.0.1') })).toBe('security_paths=false\n');
+    expect(run({ ...basePackages, 'node_modules/pg': pg('8.16.1') })).toBe('security_paths=true\n');
   });
 
   it('writes security_paths=false for other changes, true for a zero or unknown base', () => {

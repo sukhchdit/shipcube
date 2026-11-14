@@ -209,7 +209,9 @@ jobs:
   # projects, against the production builds the Playwright config serves. Browsers come only through deps:rebuild
   # (which refuses download redirects); `--with-deps` (apt) runs only here. WebKit runs --repeat-each (default 5, so
   # >= 10 runs of each test across its two projects); the config's CI globalTimeout turns a close hang into a clear
-  # failure. Traces of failures are uploaded (1 day) and never committed.
+  # failure. While COND-E2E-FF is open a flaky test (failed, then passed on the CI retry) fails the shard
+  # (--fail-on-flaky-tests; code review PR #46 m4): its JUnit has no <failure>, so inventory alone would not see it.
+  # Traces of failures are uploaded (1 day) and never committed.
   e2e-stack:
     name: e2e-stack (${{ matrix.engine }})
     runs-on: ${{ fromJSON(vars.HEAVY_RUNNER_LABELS || '["ubuntu-24.04"]') }}
@@ -254,7 +256,7 @@ jobs:
           if [ "$ENGINE" = "webkit" ]; then
             case "$WEBKIT_REPEAT_EACH" in 1|5) repeat="$WEBKIT_REPEAT_EACH" ;; *) echo "::error::webkit_repeat_each must be 1 or 5"; exit 2 ;; esac
           fi
-          npm run test:e2e -- "--project=$ENGINE-mobile" "--project=$ENGINE-desktop" "--repeat-each=$repeat"
+          npm run test:e2e -- "--project=$ENGINE-mobile" "--project=$ENGINE-desktop" "--repeat-each=$repeat" --fail-on-flaky-tests
 
       - name: Upload the JUnit report
         if: ${{ !cancelled() }}
@@ -319,9 +321,10 @@ jobs:
             --directory /src --framework terraform dockerfile github_actions \
             --skip-check CKV_GHA_7 --skip-path tools/ci/fixtures --skip-path tests/fixtures --skip-download --compact --quiet
 
-  # The gitleaks-full suite on the dispatched SHA: the full first-parent history, the config and the PR25-SEC-01
-  # baseline read from that SHA through git (tools/quality/gitleaks-full.mjs: no network, read-only .git mount, exact
-  # fingerprints validated before the scan). Node runs the repository's own script; no npm install.
+  # The gitleaks-full suite on the dispatched SHA: every commit reachable from it, merges diffed against their first
+  # parent (PR46-SEC-10), with the config and the PR25-SEC-01 baseline read from that SHA through git
+  # (tools/quality/gitleaks-full.mjs: no network, read-only .git mount, exact fingerprints validated before the scan).
+  # Node runs the repository's own script; no npm install.
   scans-full:
     name: scans-full
     runs-on: ubuntu-24.04

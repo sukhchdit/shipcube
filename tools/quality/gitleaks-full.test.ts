@@ -11,7 +11,20 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot, runNode } from '../test-support/process.js';
-import { BASELINE_COUNT, BASELINE_LINE, BaselineError, GITLEAKS_IMAGE, dockerArgs, validateBaseline } from './gitleaks-full.mjs';
+import {
+  BASELINE_COUNT,
+  BASELINE_LINE,
+  BASELINE_PATH,
+  BaselineError,
+  CONFIG_PATH,
+  GITLEAKS_IMAGE,
+  LOG_OPTS,
+  dockerArgs,
+  main,
+  readInputs,
+  scan,
+  validateBaseline,
+} from './gitleaks-full.mjs';
 
 const repoRoot = findRepoRoot();
 const script = join(repoRoot, 'tools', 'quality', 'gitleaks-full.mjs');
@@ -70,7 +83,11 @@ describe('gitleaks-full: docker invocation', () => {
     expect(args).toContain('type=bind,src=/b.txt,dst=/config/baseline.txt,readonly');
     expect(args).toContain('type=bind,src=/o,dst=/out');
     expect(args.join(' ')).toContain('--gitleaks-ignore-path /config/baseline.txt');
-    expect(args).toContain(`--log-opts=--diff-merges=first-parent ${SHA}`);
+    // PR #46 r1 m5: exact, so neither --text/--no-textconv/--no-ext-diff nor first-parent can be dropped.
+    expect(LOG_OPTS).toBe('--diff-merges=first-parent --text --no-textconv --no-ext-diff');
+    expect(args.filter((a) => a.startsWith('--log-opts'))).toEqual([
+      `--log-opts=--diff-merges=first-parent --text --no-textconv --no-ext-diff ${SHA}`,
+    ]);
     expect(args).toContain('--ignore-gitleaks-allow');
     expect(args.join(' ')).toContain('--exit-code 1');
     expect(args.join(' ')).not.toMatch(/--all\b|--baseline-path|--max-target-megabytes|--no-git/u);
@@ -101,16 +118,17 @@ describe('gitleaks-full: docker invocation', () => {
   });
 });
 
-describe('gitleaks-full: CLI', () => {
-  function git(cwd: string, args: string[]): void {
-    const r = spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.name=f', '-c', 'user.email=f@example.invalid', ...args], {
-      cwd,
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (r.status !== 0) throw new Error(r.stderr);
-  }
+function git(cwd: string, args: string[]): string {
+  const r = spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.name=f', '-c', 'user.email=f@example.invalid', ...args], {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return r.stdout;
+}
 
+describe('gitleaks-full: CLI', () => {
   it('[PR33-SEC-08] a commit-less baseline line at the config ref is rejected before any scan (exit 2, no report)', () => {
     const root = mkdtempSync(join(tmpdir(), 'gitleaks-full-cli-'));
     temps.push(root);
@@ -132,5 +150,111 @@ describe('gitleaks-full: CLI', () => {
   it('refuses missing arguments and an unknown ref with exit 2', () => {
     expect(runNode([script, '--root', repoRoot], { cwd: repoRoot }).status).toBe(2);
     expect(runNode([script, '--root', repoRoot, '--ref', 'no-such-ref-x', '--report', 'r.json'], { cwd: repoRoot }).status).toBe(2);
+  });
+});
+
+/** A docker stand-in: records what scan() mounted and writes `findings` as the native report. */
+function fakeDocker(findings: unknown[], status: number | null) {
+  const calls: { args: string[]; config: string; baseline: string }[] = [];
+  const srcOf = (args: string[], dst: string): string => {
+    const mount = args.find((a) => a.startsWith('type=bind,') && a.includes(`,dst=${dst}`)) ?? '';
+    return (/,src=(.*?),dst=/u.exec(mount) ?? [])[1] ?? '';
+  };
+  const run = (args: string[]) => {
+    calls.push({
+      args,
+      config: readFileSync(srcOf(args, '/config/gitleaks.toml'), 'utf8'),
+      baseline: readFileSync(srcOf(args, '/config/baseline.txt'), 'utf8'),
+    });
+    writeFileSync(join(srcOf(args, '/out'), 'gitleaks-full.json'), JSON.stringify(findings));
+    return { status, stderr: '' };
+  };
+  return { run, calls };
+}
+
+describe('gitleaks-full: config and baseline come from --ref, never HEAD (D-TASK015-39; PR #46 r1 m2)', () => {
+  // Commit A: a valid 17-line baseline (the committed one) and config A. Commit B (HEAD): a commit-less baseline line
+  // (which would silence every commit at that path) and config B. In lane B the ref is the base and HEAD the PR.
+  const root = mkdtempSync(join(tmpdir(), 'gitleaks-full-ref-'));
+  temps.push(root);
+  git(root, ['init', '-q', '-b', 'main']);
+  mkdirSync(join(root, 'tools', 'quality'), { recursive: true });
+  const committedBaseline = git(repoRoot, ['show', `HEAD:${BASELINE_PATH}`]);
+  writeFileSync(join(root, CONFIG_PATH), '[extend]\nuseDefault = true\n# config A\n');
+  writeFileSync(join(root, ...BASELINE_PATH.split('/')), committedBaseline);
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'A']);
+  const a = git(root, ['rev-parse', 'HEAD']).trim();
+  writeFileSync(join(root, CONFIG_PATH), '[extend]\nuseDefault = true\n[allowlist]\npaths = [".*"]\n# config B\n');
+  writeFileSync(
+    join(root, ...BASELINE_PATH.split('/')),
+    `${Array.from({ length: 16 }, (_, i) => fingerprint(i + 1)).join('\n')}\ndocs/x.md:generic-api-key:99\n`,
+  );
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'B']);
+  const b = git(root, ['rev-parse', 'HEAD']).trim();
+  const atA = { config: git(root, ['show', `${a}:${CONFIG_PATH}`]), baseline: git(root, ['show', `${a}:${BASELINE_PATH}`]) };
+
+  it('readInputs(root, A) returns the config and baseline of A while HEAD is B', () => {
+    const inputs = readInputs(root, a);
+    expect(inputs.configRef).toBe(a);
+    expect(inputs.configText).toBe(atA.config);
+    expect(inputs.baselineLines).toEqual(validateBaseline(atA.baseline, { count: BASELINE_COUNT }));
+    expect(() => readInputs(root, b)).toThrow(BaselineError);
+  });
+
+  it('--ref A --scan B passes validation and mounts exactly A config and A baseline while scanning B', () => {
+    const docker = fakeDocker([], 0);
+    const report = join(root, 'out', 'a.json');
+    expect(main(['--root', root, '--ref', a, '--scan', b, '--report', report], { runDocker: docker.run })).toBe(0);
+    expect(docker.calls).toHaveLength(1);
+    const [call] = docker.calls;
+    expect(call?.config).toBe(atA.config);
+    expect(call?.baseline).toBe(`${validateBaseline(atA.baseline, { count: BASELINE_COUNT }).join('\n')}\n`);
+    expect(call?.args).toContain(`--log-opts=${LOG_OPTS} ${b}`);
+    expect(readFileSync(report, 'utf8')).toBe('[]');
+  });
+
+  it('--ref B (the commit-less baseline) exits 2 before docker runs', () => {
+    const docker = fakeDocker([], 0);
+    expect(main(['--root', root, '--ref', b, '--scan', b, '--report', join(root, 'out', 'b.json')], { runDocker: docker.run })).toBe(2);
+    expect(docker.calls).toHaveLength(0);
+  });
+});
+
+describe('gitleaks-full: exit status and report together decide the verdict (PR #46 r1 G4)', () => {
+  const lines = Array.from({ length: 2 }, (_, i) => fingerprint(i + 1));
+  const run = (findings: unknown[], status: number | null) => {
+    const dir = mkdtempSync(join(tmpdir(), 'gitleaks-full-scan-'));
+    temps.push(dir);
+    return scan({
+      root: repoRoot,
+      sha: SHA,
+      configText: 'x',
+      baselineLines: lines,
+      report: join(dir, 'r.json'),
+      runDocker: fakeDocker(findings, status).run,
+    });
+  };
+
+  it('exit 0 with an empty array is clean; exit 1 is findings even when the array is empty; findings count', () => {
+    expect(run([], 0)).toEqual({ status: 'clean', findings: 0 });
+    expect(run([], 1)).toEqual({ status: 'findings', findings: 0 });
+    expect(run([{ RuleID: 'generic-api-key' }], 1)).toEqual({ status: 'findings', findings: 1 });
+  });
+
+  it('any other exit status, or a report that is not an array, is an error', () => {
+    expect(() => run([], 2)).toThrow(/did not complete \(exit 2\)/u);
+    expect(() => run([], null)).toThrow(/did not complete/u);
+    const dir = mkdtempSync(join(tmpdir(), 'gitleaks-full-scan-'));
+    temps.push(dir);
+    const notArray = (args: string[]) => {
+      const out = (/,src=(.*?),dst=\/out$/u.exec(args.find((x) => x.endsWith(',dst=/out')) ?? '') ?? [])[1] ?? '';
+      writeFileSync(join(out, 'gitleaks-full.json'), '{}');
+      return { status: 0, stderr: '' };
+    };
+    expect(() =>
+      scan({ root: repoRoot, sha: SHA, configText: 'x', baselineLines: lines, report: join(dir, 'r.json'), runDocker: notArray }),
+    ).toThrow(/not a findings array/u);
   });
 });
