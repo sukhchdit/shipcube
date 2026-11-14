@@ -66,3 +66,18 @@ Consequences:
 - Containers (`node:24-trixie-slim` by digest) and hosted runners (`setup-node` with `node-version-file: .node-version`) are unaffected. `.node-version` stays `24`, so `fnm use` works for a developer who later adds fnm to their profile (the prefix then becomes a no-op).
 - Local heavy-lane runs (ADR-0023 amendment, lane B) record `node_version` in their evidence `summary.json`; it must be `24.x`.
 - risks.md R-ARCH-09 is closed by this amendment.
+
+## Amendment (2026-11-14, D-ARCH-116): service-image runtime = `debian:trixie-slim` + the Node binary of the pinned node image (TASK-014 / PR #39 D-TASK014-02; platform.md §3.2; `rulings/wave-0-task-014-rulings.md`)
+
+The Node 24 baseline and the rule "Docker base `node:24-trixie-slim` pinned by digest" are **refined, not changed**: that image remains the digest-pinned source of the Node runtime and the base of every build stage, but the `runtime` stage of `apps/api/Dockerfile` and `apps/worker/Dockerfile` is `debian:trixie-slim@sha256:<digest>` with exactly one artefact copied from it, `/usr/local/bin/node`. Measured on the PR #39 images: Debian trixie-slim 83.6 MiB + Node 24.22.3 binary 121.0 MiB = 204.6 MiB of fixed cost; the full node image adds ≈ 47 MiB (npm, corepack, yarn, V8 headers, `ca-certificates`) and would put `api` at ≈ 324 MiB and `worker` at ≈ 344 MiB against the 300 MiB budget of NFR-OPS-002.
+
+Rules (normative; platform.md §3.2 carries the detail):
+
+1. Both `FROM`s are `name:tag@sha256` with an exact version tag and share the Debian codename (lane A rule `runtime-codename`). The official nodejs.org binary needs glibc ≥ 2.28 and links only `libc`, `libm`, `libdl`, `libpthread`, `libstdc++`, `libgcc_s` dynamically (verified `ldd`); `node --version` and the preflight at build time are the fail-fast for any mismatch.
+2. Nothing but the binary is copied; the runtime holds no package manager, headers or `docker-entrypoint.sh`.
+3. CVE response is a rebuild from Dependabot bumps: `node:` tag + digest for Node security releases, `debian:` digest for Debian point releases (`.github/dependabot.yml` ecosystems `docker` and `docker-compose`, 7-day cooldown). The Node runtime was never a dpkg package in the official image either, so Trivy coverage is unchanged.
+4. The runtime has no system CA store: Node's bundled Mozilla store serves outbound TLS; the PostgreSQL CA is a file under `/etc/ssl/platform`; `--use-openssl-ca` is a fail-closed trap and is kept out of the entrypoint allow-list.
+5. `/bin/sh` (dash) and `/usr/bin/env` stay: the entrypoint preflight removes `NODE_OPTIONS` before the first Node process (PR3-SEC-13). Distroless bases are therefore **not** the fallback when the budget is tight (platform.md OI-08 superseded); the recorded lever is `gcr.io/distroless/cc-debian13` + a static busybox shell, by superseding amendment only (risks R-ARCH-31).
+6. The web/admin images (nginx-unprivileged) and the tooling image (`prisma/Dockerfile`, ADR-0022 am. 15) are unaffected; the tooling image may adopt the same pattern (recommended).
+
+Reversibility: Medium (one Dockerfile stage per service image, one lint rule, two Dependabot entries).
