@@ -367,6 +367,10 @@ describe('parseManifest structural validation', () => {
     ['coverage case without a metric', unitCases(['coverage gate: overall'])],
     ['coverage case with an inactive suffix', unitCases(['coverage gate: packages/audit (inactive)'])],
     ['coverage case outside the gate prefix', unitCases(['coverage merge: project unit measured'])],
+    // R1-n6: the metric is exactly lines or branches, and the name is anchored at both ends.
+    ['coverage case with another metric', unitCases(['coverage gate: overall statements'])],
+    ['coverage case with a leading prefix', unitCases(['x coverage gate: overall lines'])],
+    ['coverage case with a trailing suffix', unitCases(['coverage gate: overall lines x'])],
   ])('throws on %s', (_title, override) => {
     expect(() => parseManifest(fixture(override))).toThrow(ManifestError);
   });
