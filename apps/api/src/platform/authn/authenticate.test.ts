@@ -10,11 +10,11 @@ import { AppError } from '@platform/shared';
 import { createApp } from '../../app.js';
 import { PRIVATE_CACHE_CONTROL } from '../routing/route-state.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
+import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import { AUTHENTICATED_CACHE_CONTROL } from './authenticate.js';
 
-// Each case composes createApp and makes a loopback request; the 5 s default timed out under parallel host load in
-// the heavy lane (runs 20261113T2208Z and 20261113T2226Z, never in isolation), so the file gets 20 s (TASK-020).
-jest.setTimeout(20_000);
+// Each case composes createApp and makes a loopback request: the shared loopback budget (see tests/loopback.ts).
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 const silent = { info: () => undefined, debug: () => undefined, error: () => undefined };
 /** The contract's public reference-data value (openapi.yaml CacheControl header, REQ-DATA-016). */
