@@ -12,6 +12,7 @@ import { describe, expect, it } from '@jest/globals';
 import { SignJWT, jwtVerify } from 'jose';
 import { v7 as uuidv7, version as uuidVersion } from 'uuid';
 
+import { groupJestArgs } from '../ci/coverage-run.mjs';
 import { findRepoRoot } from '../test-support/process.js';
 
 const repoRoot = findRepoRoot();
@@ -23,13 +24,17 @@ describe('Jest loads ESM-only runtime dependencies (--experimental-vm-modules)',
     expect(jestScripts.map(([name]) => name).sort()).toEqual([
       'test:api',
       'test:contract',
-      'test:coverage',
       'test:generated',
       'test:integration',
       'test:unit',
     ]);
     const withoutFlag = jestScripts.filter(([, command]) => !command.startsWith('node --experimental-vm-modules '));
     expect(withoutFlag).toEqual([]);
+    // test:coverage runs one Jest process per project group (tools/ci/coverage-run.mjs, D-ORCH-047); each passes the flag.
+    expect(scripts['test:coverage']).toBe('node tools/ci/coverage-run.mjs');
+    expect(groupJestArgs({ projects: ['unit'], inBand: false }, { coverageDir: 'c', testTimeoutMs: 1, reportFile: 'r' })[0]).toBe(
+      '--experimental-vm-modules',
+    );
   });
 
   it('[--experimental-vm-modules] uuid (ESM-only) generates a version 7 id', () => {

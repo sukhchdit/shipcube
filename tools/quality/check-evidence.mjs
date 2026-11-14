@@ -17,7 +17,9 @@
  *   (`docs/**` minus the API contract minus `tooling_inputs`), so evidence older than an openapi.yaml change is stale;
  * - the run's profile is at least the requested one and every required suite is present with
  *   `tests >= max(min_tests, 1)`, `failures + errors = 0`, `skipped = 0` for zero-skip/security suites and every
- *   `required_cases` ID in a passing test case; no SEC-TC test case is skipped or failed anywhere. A run that holds JUnit
+ *   `required_cases` ID in a passing test case (a `coverage gate:` ID: that exact name with classname = the suite id,
+ *   and no case under another classname may use a merged-coverage prefix, PR40-SEC-02); no SEC-TC test case is
+ *   skipped or failed anywhere. A run that holds JUnit
  *   for a suite still `planned` in the base manifest is rejected, i.e. not credited (rule 4). That fails the check only
  *   when the change needs evidence: the PR that activates a suite passes with its own run uncredited, and a later
  *   activation whose run also carries the newly activated suite is rejected as a whole.
@@ -281,6 +283,26 @@ export function nameHasId(name, id) {
   }
 }
 
+/** Prefix of the merged US-006 gate's case names (`coverage gate: <scope> lines|branches`, D-TASK015-26). */
+export const GATE_CASE_PREFIX = 'coverage gate: ';
+/** Case-name prefixes that quality:heavy's merged coverage step owns (tools/quality/heavy.mjs mergedCoverageStep). */
+export const RESERVED_COVERAGE_PREFIXES = Object.freeze(['coverage gate:', 'coverage merge:', 'coverage tripwire:', 'coverage diff:']);
+
+/**
+ * Whether a test case satisfies a required ID of suite `suite`. A `coverage gate:` name needs the exact title AND
+ * classname = the suite id (quality:heavy writes the merged gate's cases with classname = merged_coverage.suite, Jest
+ * cases carry their test file), so a Jest test whose title contains or equals the name cannot stand in for the gate
+ * (PR40-SEC-02, PR #40 R1-m4 b). Any other ID (SEC-TC) is matched in the title by nameHasId.
+ * @param {{ name: string, classname: string, status: string }} testCase
+ * @param {string} id
+ * @param {string} suite
+ */
+export function satisfiesRequired(testCase, id, suite) {
+  if (testCase.status !== 'passed') return false;
+  if (id.startsWith(GATE_CASE_PREFIX)) return testCase.name === id && testCase.classname === suite;
+  return nameHasId(testCase.name, id);
+}
+
 /**
  * @typedef {{ name: string, status: string, tests: number, failures: number, errors: number, skipped: number,
  *   report: string, report_sha256: string, native_report?: string, native_report_sha256?: string }} SummarySuite
@@ -331,8 +353,14 @@ export function recomputeVerdict(summary, results, manifest) {
       soft.push(`${suite.name}: JUnit for a suite still 'planned' in the manifest (rule 4: the run is not credited)`);
     if (junit.tests < Math.max(spec.min_tests, 1)) soft.push(`${suite.name}: tests ${junit.tests} < max(min_tests ${spec.min_tests}, 1)`);
     for (const id of spec.required_cases)
-      if (!junit.cases.some((c) => c.status === 'passed' && nameHasId(c.name, id)))
+      if (!junit.cases.some((c) => satisfiesRequired(c, id, suite.name)))
         soft.push(`${suite.name}: required case ${id} not in a passing test case`);
+    // A case named like the merged coverage step's own cases but filed under another classname is a decoy (PR40-SEC-02).
+    for (const c of junit.cases)
+      if (c.classname !== suite.name && RESERVED_COVERAGE_PREFIXES.some((prefix) => c.name.startsWith(prefix)))
+        soft.push(
+          `${suite.name}: case "${c.name.slice(0, 80)}" uses a merged-coverage case prefix under classname ${c.classname.slice(0, 80)}`,
+        );
   }
   return { verdict: hard.length + soft.length > 0 ? 'FAIL' : 'PASS', hard, soft };
 }

@@ -706,6 +706,8 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
       '/prisma.config.ts @o',
       '/apps/ @o',
       '/tests/ @o',
+      '/.gitattributes @o',
+      '**/.gitattributes @o',
       '/CLAUDE.md @o',
       '/.claude/ @o',
     ].join('\n');
@@ -794,6 +796,29 @@ describe('CODEOWNERS: O4 oracles and pre-gate configs (PR24-SEC-04, PR4-SEC-13 i
   it('[PR24-SEC-04] the narrower prisma/tools-db lines are kept, so folding cannot drop coverage silently', () => {
     for (const path of ['prisma/bootstrap/', 'prisma/migrations/', 'tools/db/lint-migrations.ts', 'tools/db/audit-ddl-reviewers.json']) {
       expect(repositoryText()).toMatch(lineFor(path));
+    }
+  });
+});
+
+describe('CODEOWNERS: git attributes at any depth (PR40-SEC-01)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const cases: readonly (readonly [string, string])[] = [
+    ['.gitattributes', '/.gitattributes'],
+    ['**/.gitattributes', '**/.gitattributes'],
+  ];
+
+  it.each(cases)('[PR40-SEC-01] %s is required and the repository CODEOWNERS owns it', (path, line) => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain(path);
+    expect(repositoryText()).toMatch(new RegExp(`^${escape(line)}\\s+@\\S+$`, 'mu'));
+  });
+
+  it.each(cases)('[PR40-SEC-01] mutation: deleting, commenting out or un-owning the %s line yields one finding for it', (path, line) => {
+    const pattern = new RegExp(`^${escape(line)}\\s+@\\S+$`, 'mu');
+    for (const replacement of ['', `# ${line} @sukhchdit`, line]) {
+      const mutated = repositoryText().replace(pattern, replacement);
+      expect(mutated).not.toMatch(pattern);
+      expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`to ${path} (`)]);
     }
   });
 });
