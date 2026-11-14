@@ -264,7 +264,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-083 (M1 Should) Invite members into a business organisation<br>US-084 (M1 Should) Accept an invitation |
 | REQs | REQ-ORG-010, REQ-ORG-011 |
 | NFRs | — |
-| Spikes / security / decisions | SEC-COND-01 |
+| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-224, TASK-169, TASK-187 |
@@ -277,6 +277,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-083 and US-084 scenarios
+- INVITATION IS THE PENDING STATE (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a)): inviting writes only the invitations row (PENDING, token hash, expires_at, role, locale) and never a memberships row nor a lookup of the address against users; 409 ALREADY_MEMBER compares the lower-cased address with the ACTIVE or SUSPENDED members of the inviting organisation only; acceptance creates the membership directly as ACTIVE with created_by = the inviter and invitation_id set and marks the invitation ACCEPTED in one transaction (audit: CREATE membership + UPDATE invitation, no token value); the pending-invitation list is served to holders of org:member:invite only (not org:read); api tests: after an invite no memberships row exists for the address, an organisation member cannot read the users row of the invitee before acceptance (RLS probe) and can after it
 - AT-US-083-01 … AT-US-083-12: all 12 scenarios of US-083, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-084-01 … AT-US-084-08: all 8 scenarios of US-084, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -375,7 +376,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards |
 | REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014 |
 | NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069 |
+| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-227, TASK-187 |
@@ -391,6 +392,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-085 scenarios
 - PR8-SEC-06 consumer conditions (i)-(iv) (ADR-0008 am. 3 item 4; D-ARCH-069): a modify, suspend or remove passes `canAssignRole` for EVERY role the target member currently holds AND every role in the requested set (an Admin cannot act on an Owner+Viewer member through the Viewer role); `assignerRoleKeys` come from the actor ACTIVE membership in the TARGET organisation, read from the database, never from the token; the rank check is in addition to `org:member:invite`/`org:member:manage` and the 12 h step-up, never instead of them; self role change (REQ-ACCT-015) and LAST_OWNER (REQ-ORG-013) stay separate checks; AC-05 threat-model cases (Admin assigns Owner, Admin modifies an Owner, self role change) → 403/422
 - PR #8 code review R2-n2: property test — for every allowed (assigner, target) pair in ASSIGNABLE_BY, `target.permissions ⊆ assigner.permissions` on the shipped catalogue; a mutated catalogue where the Admin loses a permission the Viewer keeps fails the property
+- MEMBER LIST (D-ARCH-123; D-067): the member list holds ACTIVE and SUSPENDED memberships only (INVITED is reserved and never written); pending invitations are a separate list keyed by invitee e-mail (TASK-227), rendered only when the /me permissions include org:member:invite
 - AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1190,7 +1192,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039 |
+| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1205,6 +1207,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - All US-252 scenarios
 - PR6-SEC-08 (binding; D-059 REQ-TRACK-006 note): `POST /webhooks/carriers/{code}` is registered only for carriers whose `capabilities().pushTracking` is true — today none of the real carriers, so the route answers 404 for DHL, FedEx and UPS and no scheme is invented for them; REQ-TRACK-006 is proven with Mock-signed fixtures (HMAC compared in constant time, timestamp/replay window, body-size cap, secret via secretRef); enabling a real carrier requires an ADR-0010 amendment documenting its authenticity mechanism; ADR-0010 am. 9 applies (a push is a hint confirmed by `track()` before any cancellation-blocking or terminal transition)
 - PR32-SEC-14 / D-ARCH-110: the carrier signature authenticator builds the provider principal exactly as TASK-171 does (credential signature, no actor, only the signature-only permission of the route) and its api tests run through the real authorise (valid 200, invalid 401, a bearer on the route 401, a principal without the permission 403); SEC-TC-22 push half (D-ORCH-039; threat model T-72, AC-36; the half that TASK-172 cannot test while this route is absent): a validly signed PICKED_UP push is stored as a hint and does not block cancellation or refund until a track() poll confirms it
+- D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the carrier signature authenticator reads X-Carrier-Signature itself (signature is not a presentable kind) and only on routes whose auth set is [signature], never authorization, cookie or x-quote-token; the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, replayed, oversized body, unknown carrier code alike) and private, no-store on every 401 and 404 comes from the descriptor test; x-carrier-signature is in CREDENTIAL_HEADER_NAMES, so the push route cannot declare it in schema.headers (020-C PR38-SEC-03) and the handler reads the hint from the verified body only; api tests: markCredentialsRead called once per request, a valid Mock signature plus a bearer is accepted with the bearer never parsed (spy), the permissions view throws on mutation
 - AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

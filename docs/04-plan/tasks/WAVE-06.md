@@ -164,7 +164,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-213 **DC** (M1 Must) Webhook verification, deduplication and replay |
 | REQs | REQ-PAY-011, REQ-PAY-012 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14 |
+| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-167, TASK-040 |
@@ -179,6 +179,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-213 scenarios
 - PR32-SEC-14 / D-ARCH-110 (ADR-0008 am. 5 items 1 and 5): the Stripe and Mock-gateway signature authenticators read their signature header only on routes whose auth set contains signature (an Authorization header or a cookie on a webhook route is ignored) and build the provider principal only after the signature over the raw body verified: credential signature, authenticated false, no actor, a read-only permission view holding exactly the signature-only permission of the route; the permission gate change itself is TASK-020 part 020-B, this task adds api tests through the real authorise: a valid signature 200, an invalid signature or a stale timestamp 401 before the body is parsed, a session bearer on the webhook route 401 (credential outside the set), and a route whose principal lacks its permission 403
+- D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the Stripe and Mock-gateway signature authenticators read Stripe-Signature or X-Mock-Signature themselves (signature is not a presentable kind) and only on routes whose auth set is [signature]; they never read authorization, cookie or x-quote-token (presentedKinds(req.headers, route.auth) is empty on a [signature] route and the authenticator does not consult those headers); the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, stale timestamp, missing header alike) and private, no-store on every 401 comes from the descriptor test ([signature] has no anonymous member); stripe-signature and x-mock-signature are in CREDENTIAL_HEADER_NAMES, so no webhook route can declare them in schema.headers (020-C PR38-SEC-03) and the handler reads the verified event from the body only; api tests: markCredentialsRead called once per request, a valid signature plus a bearer is 200 with the bearer never parsed (spy), the permissions view throws on mutation
 - AT-US-213-01 … AT-US-213-11: all 11 scenarios of US-213, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

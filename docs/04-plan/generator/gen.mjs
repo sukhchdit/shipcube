@@ -41,7 +41,9 @@ for (const f of fs.readdirSync(STORIES_DIR).filter(f => /^EPIC-\d+/.test(f))) {
 // ---------- assign IDs
 const order = [...rawTasks].map((t, i) => ({ us: [], part: [], x: [], nfr: [], dod: [], lk: [], f: [], a: [], kind: [], d: [], ...t, i })).sort((a, b) => a.w - b.w || a.b - b.b || a.i - b.i);
 const byKey = new Map();
-let seq = 0; for (const t of [...order.filter(t => !t.late), ...order.filter(t => t.late)]) { t.id = `TASK-${String(++seq).padStart(3, '0')}`; byKey.set(t.k, t); }
+// Late tasks (late:true) are numbered after every planned task in ARRAY order (append-only), not by (wave, batch): a late task may be
+// scheduled in any batch without moving an existing ID (D-ARCH-125, sheet-fold 7; TASK-276..282 keep their IDs because they are listed in that order).
+let seq = 0; for (const t of [...order.filter(t => !t.late), ...order.filter(t => t.late).sort((a, b) => a.i - b.i)]) { t.id = `TASK-${String(++seq).padStart(3, '0')}`; byKey.set(t.k, t); }
 const errors = [], warnings = [];
 if (byKey.size !== rawTasks.length) errors.push('duplicate keys');
 

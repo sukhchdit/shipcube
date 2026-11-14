@@ -33,3 +33,7 @@
 - [P5 PR-0036 gherkin map classify](project_p5_pr36_gherkin_map_classify.md) — R1 @3eb7689 code APPROVED_W_NITS + sec PASS_W_F-U; old KNOWN_DRIFT tests blind (mutants); reports/ not git-ignored INFO; AT-US-066-12 G3
 - [Threat-model v1.1 round](project_p5_threat_model_v11_round.md) — D-SEC-TM-01 2026-11-13: §10.4 log, proposed SEC-TC-69..75 + owners (65-68 provisional), -bench vocabulary; open items
 - [P5 PR-0038 020-B](project_p5_pr38_020b.md) — R1 @bdf009d + delta R2 @8b3a8ed PASS_W_F-U; 01/02/05/06 closed; 03 LOW/04 INFO open (020-C); R1-m1 differential kit; exclude-file check
+- [P5 PR-0040 merged-coverage hook](project_p5_pr40_covhook.md) — R1 @2b651f7 PASS_W_F-U; PR33-SEC-06 closed; LOW 01 .gitattributes blinds diff gate; INFO 02-06; #38 union = merge-only checklist
+- [P5 PR-0039 TASK-014 images](project_p5_pr39_task014_images.md) — R1 @894c72e PASS_W_COND (C1 routing/tests find, C2 gitleaks skips node_modules); tooling dev closure; preflight argv/ECS; #40/#41/#42 unions
+- [P5 PR-0042 audit writer](project_p5_pr42_audit_writer.md) — TASK-025 R1 @e7dfbac PASS_W_F-U; 01 MED anon admission key, 02 MED rethrow; LOW 03-07,12; fix cycle -> R2; #39 overlap
+- [P5 PR-0043 RLS generator](project_p5_pr43_task024_rls_generator.md) — TASK-024 R1 @8ac271d PASS_W_COND; C1 splitStatements `begin` regression (R2), C2 API_CASES registration-only; PG RLS/escape facts
