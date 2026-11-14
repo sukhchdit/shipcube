@@ -34,3 +34,5 @@
 - [PR #39 fc1](feedback_pr39_fc1.md) — gitleaks EVERY push (quoted false positive tainted range), PR-body host-path leak, optional peers, stack titles via --json
 - [TASK-025 audit writer](feedback_task025_audit_writer.md) — DB+package test placement, audit_ name guard, spk04 path tripwire, set_config lint, stray tsc emit
 - [TASK-020 part C](feedback_task020c.md) — lead-first config edit then lint specialist, story-file evidence staleness, merge-before-push loop, mid-task sheet lines
+- [PR #42 fc1](feedback_pr42_fc1.md) — merged diff gate fails unreachable branches, TenantDb surface pins, banned SQL text in tests, structuredClone realm
+- [PR #43 fc1](feedback_pr43_fc1.md) — no in-PR suite activation (base manifest), commit-msg rewrite via cherry-pick, ledger literal tripwire, heavy host-load reruns
