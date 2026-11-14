@@ -3,6 +3,9 @@
  * head-row lock waits `DB_AUDIT_LOCK_TIMEOUT_MS`, the key the config guard keeps below `DB_TX_LOCK_TIMEOUT_MS`
  * (`databaseGuard`, packages/config). The capture hook (TASK-029, D-ARCH-122) builds its writer here, so the running
  * writer and the guarded value cannot differ.
+ *
+ * REQ-AUDIT-001: outside the audit-writer allow-list, api code imports only the types of this folder; a boundaries
+ * policy on the resolved file enforces it (eslint.config.mjs, PR #42 R2-M1 / PR42-SEC-16).
  */
 import { type AuditWriter, type AuditWriterOptions, createAuditWriter, createPrismaAuditStore } from '@platform/audit';
 import type { Config } from '@platform/config';

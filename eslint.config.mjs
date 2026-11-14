@@ -135,6 +135,8 @@ const AUDIT_WRITER_ALLOW_LIST = [
  * entry contract) and the entry assembler. Pure helpers (hash, canonical form, vocabularies) and types stay importable.
  */
 const AUDIT_WRITER_EXPORTS = ['AuditWriter', 'createAuditWriter', 'writeAuditEntry', 'createPrismaAuditStore', 'prepareEntry'];
+const AUDIT_COMPOSITION_MESSAGE =
+  'REQ-AUDIT-001: apps/api/src/platform/audit composes the audit writer; api code outside the audit-writer allow-list imports only its types (the tx slot mounts capture.ts) (PR #42 R2-M1).';
 /**
  * Non-repository files planned to use Prisma, by exact path (narrow): the audit store (ADR-0007, TASK-025) and the
  * transactional outbox writer (TASK-043). Anything else beside them still goes through a repository.
@@ -276,6 +278,12 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
   { pattern: 'packages/audit/**', category: 'package-audit' },
+  // The api-side audit composition (writer factory, capture hook) and the allow-listed importers of the audit writer:
+  // the resolved-file arm of REQ-AUDIT-001 (PR #42 R2-M1, PR42-SEC-16; policy below).
+  { pattern: 'apps/api/src/platform/audit/**', category: 'api-platform-audit' },
+  { pattern: 'apps/api/src/platform/audit/capture.ts', category: 'api-audit-capture' },
+  { pattern: 'apps/api/src/platform/tx/**', category: 'api-tx-slot' },
+  ...AUDIT_WRITER_ALLOW_LIST.map((pattern) => ({ pattern, category: 'audit-writer-caller' })),
   // The server-only logging subpath of @platform/shared (Pino; TASK-010, PR #20 M1): the resolved-file arm of its guard.
   { pattern: SHARED_LOGGING, category: 'shared-logging' },
   { pattern: DB_PLATFORM, category: 'db-platform' },
@@ -554,6 +562,19 @@ const BOUNDARIES_POLICIES = [
   //     root, so no other packages/shared module may import or re-export the logging module or Pino. The logging
   //     folder itself may import the rest of packages/shared (correlation, errors).
   { from: IMPORTER_SHARED_OUTSIDE_LOGGING, disallow: SERVER_LOGGING_TARGETS, message: SHARED_ROOT_LOGGING_MESSAGE },
+
+  // --- The api-side audit composition (REQ-AUDIT-001; PR #42 R2-M1, PR42-SEC-16). apps/api/src/platform/audit is in the
+  //     audit-writer allow-list (it composes the writer over the store), so `platform/audit-writer-allowlist` is off in
+  //     it and cannot see what it hands out. Judged on the RESOLVED file, so no spelling gets past (`./`, `..`,
+  //     `platform/./audit`, a re-export, `import()`): api code outside the allow-list, tests excepted, value-imports
+  //     nothing from that folder; its types stay importable. The one exception is the request pipeline's tx slot,
+  //     which mounts the capture hook (capture.ts) and nothing else from it. Last matching policy decides.
+  {
+    from: { file: { categories: { anyOf: ['app'], noneOf: ['test', 'audit-writer-caller'] }, captured: { app: 'api' } } },
+    disallow: { to: toLayer('api-platform-audit'), dependency: { kind: 'value' } },
+    message: AUDIT_COMPOSITION_MESSAGE,
+  },
+  { from: { file: { categories: { anyOf: ['api-tx-slot'], noneOf: ['test'] } } }, allow: { to: toLayer('api-audit-capture') } },
 
   // --- The Prisma query counter is a test seam (NFR-PERF-006, D-TASK276-03; PR34-SEC-01): only test files (including
   //     module and app `tests/` folders, i.e. the API test app builder) and prisma/tests import it, so the production
