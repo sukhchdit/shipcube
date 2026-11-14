@@ -28,7 +28,6 @@ import {
   KNOWN_LARGE_BINARIES,
   layerDigest,
   layersFromManifest,
-  NODE_BASE_DIFF_IDS,
   oversizeFinding,
   packageFile,
   parseTar,
@@ -227,14 +226,24 @@ describe('scan-image-secrets pure parts (AT-US-004-02)', () => {
       for (const entry of bad) expect(() => assertExactAllowList([entry])).toThrow(/allow-list entry 0/);
     });
 
-    it('binds the node header entry to both platforms of the pinned node base image', () => {
-      expect(NODE_BASE_DIFF_IDS).toHaveLength(2);
-      for (const list of NODE_BASE_DIFF_IDS) expect(list.length).toBeGreaterThan(0);
-      const [entry] = IMAGE_SCAN_ALLOW_LIST;
-      expect(entry?.kind === 'base-layer' ? entry.baseLayers : undefined).toBe(NODE_BASE_DIFF_IDS);
-      const pin = /^FROM (node:\S+@sha256:([0-9a-f]{64}))/m.exec(readFileSync(join(findRepoRoot(), 'prisma/Dockerfile'), 'utf8'));
-      // Re-read NODE_BASE_DIFF_IDS when this pin moves (see its comment).
-      expect(pin?.[2]).toBe('af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0');
+    it('[D-TASK014-19] holds exactly the reviewed package files, and no base-layer entry since no final stage is FROM node', () => {
+      expect(IMAGE_SCAN_ALLOW_LIST.map((entry) => (entry.kind === 'package-file' ? `${entry.rule} ${entry.file}` : entry.kind))).toEqual([
+        'generic-api-key /app/node_modules/effect/dist/cjs/internal/schedule/interval.js',
+        'generic-api-key /app/node_modules/effect/dist/cjs/internal/schedule/intervals.js',
+        'generic-api-key /app/node_modules/effect/dist/esm/internal/schedule/interval.js',
+        'generic-api-key /app/node_modules/effect/dist/esm/internal/schedule/intervals.js',
+        'generic-api-key /app/node_modules/effect/src/internal/schedule/interval.ts',
+        'generic-api-key /app/node_modules/effect/src/internal/schedule/intervals.ts',
+        'generic-api-key /app/node_modules/prisma/build/cli.js',
+      ]);
+      // Architect R6 / D-ARCH-116 rule 2: every Node final stage is debian + the node binary, so the node image's
+      // /usr/local/include/node headers (the old D-TASK014-13 entry) are in no image.
+      for (const dockerfile of ['apps/api/Dockerfile', 'apps/worker/Dockerfile', 'prisma/Dockerfile']) {
+        const froms = [...readFileSync(join(findRepoRoot(), dockerfile), 'utf8').matchAll(/^FROM\s+(\S+)/gm)].map(
+          (match) => match[1] ?? '',
+        );
+        expect({ dockerfile, final: froms.at(-1)?.split(':')[0] }).toEqual({ dockerfile, final: 'debian' });
+      }
     });
   });
 

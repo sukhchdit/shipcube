@@ -257,30 +257,6 @@ export const baseLayer = (rule, path, baseLayers, reason) => Object.freeze({ kin
 export const packageFile = (rule, file, reason) => Object.freeze({ kind: 'package-file', rule, file, reason });
 
 /**
- * rootfs.diff_ids of node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
- * (the build-stage pin of apps/* and prisma/Dockerfile), one ordered list per platform. Re-read them whenever that pin
- * changes: `docker buildx imagetools inspect <ref> --format '{{json .Image}}'` (rootfs.diff_ids of each platform).
- */
-export const NODE_BASE_DIFF_IDS = Object.freeze([
-  // linux/amd64
-  Object.freeze([
-    'sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90',
-    'sha256:0f079896db8a96ffbc8221713a7fb493fccb5a74b804897d2be032c383b4aa39',
-    'sha256:243faa29328ab266e203cb09c063ffb1c15432a9e63f53bc3d33f5e10b543b2b',
-    'sha256:8fda72e5950aa765515dc2d28a14fc875b095ebf5db380d89e1d599df6832aaf',
-    'sha256:fcd44f416dbc8525ccc3a3647fcfcd70f461b2cb0675abe51fb5227c0f62318a',
-  ]),
-  // linux/arm64
-  Object.freeze([
-    'sha256:04e61ff9ed2c84e88795bf7562d69d0980188e2bb6d6152d6fe721383e10db9e',
-    'sha256:bfc2cfeca76a6283c5c50be4667dd826035a07d0d02dae947a7ceb124218e6e4',
-    'sha256:34f85d2d70ca7d7913def71bf67c298d970616ee9afc5bd95b490d3254b2f116',
-    'sha256:8af18a6c0a7e878642e58f3a6d0d3aac3725a485e6431d6340132d0cbfc32e91',
-    'sha256:0b667c8babf9955ae908cb7bcb3a232aea490c5847a0043fcc88ecb8615c8a51',
-  ]),
-]);
-
-/**
  * Reviewed exceptions of the image scan (PR39-SEC-03 remediation 2-3). Exact entries only: rule + full-path match +
  * a base-image layer binding (`baseLayer`) or one third-party package file (`packageFile`); never a prefix alone.
  * One line per reviewed finding, with the decision id and the reason in the comment above it, for example
@@ -289,10 +265,20 @@ export const NODE_BASE_DIFF_IDS = Object.freeze([
  * @type {ReadonlyArray<AllowListEntry>}
  */
 export const IMAGE_SCAN_ALLOW_LIST = Object.freeze([
-  // D-TASK014-13, accepted by D-SEC-PR39-04 when bound to the base layers: the V8 C++ headers that the official node
-  // image installs under /usr/local/include/node hold identifier constants that generic-api-key matches. Dead once no
-  // final stage is FROM the node image (architect R6); delete the line then.
-  baseLayer('generic-api-key', /^\/usr\/local\/include\/node\/(?:[\w-]+\/)*[\w.-]+\.h$/, NODE_BASE_DIFF_IDS, 'node base image V8 headers'),
+  // D-TASK014-13 (the node image's /usr/local/include/node V8 headers) is gone: since architect R6 no final stage is
+  // FROM the node image, so no image carries those headers and the base-layer entry was deleted.
+  //
+  // D-TASK014-19, tooling image, first scan of node_modules (2026-11-14). generic-api-key matched module symbol keys of
+  // effect 3.20.0 (a dependency of @prisma/config): `IntervalSymbolKey = "effect/ScheduleInterval"` and
+  // `IntervalsSymbolKey = "effect/ScheduleIntervals"`, in the cjs, esm and src copies.
+  packageFile('generic-api-key', '/app/node_modules/effect/dist/cjs/internal/schedule/interval.js', 'effect symbol key'),
+  packageFile('generic-api-key', '/app/node_modules/effect/dist/cjs/internal/schedule/intervals.js', 'effect symbol key'),
+  packageFile('generic-api-key', '/app/node_modules/effect/dist/esm/internal/schedule/interval.js', 'effect symbol key'),
+  packageFile('generic-api-key', '/app/node_modules/effect/dist/esm/internal/schedule/intervals.js', 'effect symbol key'),
+  packageFile('generic-api-key', '/app/node_modules/effect/src/internal/schedule/interval.ts', 'effect symbol key'),
+  packageFile('generic-api-key', '/app/node_modules/effect/src/internal/schedule/intervals.ts', 'effect symbol key'),
+  // D-TASK014-19: prisma 7.10.1 build/cli.js line 203 is minified JSON-parser state (`this.state=mn.KEY,this.key=…`).
+  packageFile('generic-api-key', '/app/node_modules/prisma/build/cli.js', 'prisma CLI minified parser state'),
 ]);
 
 /**
