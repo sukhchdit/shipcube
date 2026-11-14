@@ -1,6 +1,6 @@
 ---
 name: project-p5-pr34-r2-harness
-description: PR #34 (TASK-276 harness) round 2 @3934d12 2026-11-14 — security PASS_WITH_FOLLOW-UPS (SEC-01/02/03/04 closed, new INFO 07/08, 05/06 open) + code APPROVED_WITH_NITS (R2-m1/m2); probe recipes for lint-seam policies, effective-config semantic diff, mutation harness; merge/record facts
+description: PR #34 (TASK-276 harness) merge-only round @2e5e16f (union with PR #32) PASS_WITH_FOLLOW-UPS, SEC-07 narrowed; round 2 @3934d12 2026-11-14 — security PASS_WITH_FOLLOW-UPS (SEC-01/02/03/04 closed, new INFO 07/08, 05/06 open) + code APPROVED_WITH_NITS (R2-m1/m2); probe recipes for lint-seam policies, effective-config semantic diff, mutation harness; merge/record facts
 metadata:
   type: project
 ---
@@ -20,6 +20,9 @@ Both round-2 sections were appended (uncommitted, LF) to `docs/05-quality/securi
 - `jest --listTests --json` per project on `git archive` extracts: use `realpathSync.native` (the 8.3 temp dir makes `relative()` produce `..` paths), pass `cygpath -m` paths to node; planted-file model check (`posix.matchesGlob` + RegExp from the test) agreed with real Jest on 9/9 files.
 - Real-logger probe: throwaway test file copied into an extract (`createLogger` into `createLogCapture`, scanner of both builds). The platform logger keeps name, tax id, PAN raw and grouped, base64/JWT/hex forms; redacts token, secret, e-mail, `Basic`; drops `err`, renders bytes as `[Binary]`, URL as `[OMITTED]`.
 - Safety hook: `rm -f $W/$t/x` was blocked (variable expansion); write `"${W:?}"/"${t:?}"/x`. Creating `refs/remotes/origin/pr-N-head` with `git fetch origin refs/pull/N/head:...` adds a ref to the main repo: delete it (`git update-ref -d`) at the end.
+
+**Merge-only round (2026-11-14, head `2e5e16f`, after PR #32 `f883d68` + #37 merged; section "Merge-only round (union with PR #32, head 2e5e16f)", R3.1-R3.9, record 486 lines LF, uncommitted in the PR worktree):** PASS_WITH_FOLLOW-UPS, no new finding; PR34-SEC-07 narrowed (computed `import(where)` now refused by PR #32's `platform/static-module-specifier` in non-test apps/packages; the `tests/` and `*.test.ts` hops still ALLOWED). Proposed D-SEC-PR34-03. Real checker pass @2e5e16f owned 19; sim 14/14. Evidence `20261113T2217Z_5b08fe8`: gate table omitted the literal `--ignore-scripts` / empty `info/exclude` statements (D-SEC-PR23-02), accepted on substitutes. Method that worked: effective-config **delta equivalence** (`main->head` vs `r2base->r2head`, arrays by LCS with anchor + last marker; 46/46 equal; 5 mutants all detected) instead of raw equality; `jest --listTests` membership main vs head + a mutant control.
+- Facts: the host name equals the git author name, so a `git show` header hits the host-name label: scan diff bodies (`git diff`) and `%B` messages, not `git show`. Bash heredocs mangled `'\\'` in a JS file: write probe scripts with the Write tool. Junctions from extracts to the worktree `node_modules`: create with `fs.symlinkSync(target, p, 'junction')`, remove with `fs.rmdirSync(p)` BEFORE any `rm -rf` of the extract.
 
 **Why:** PR #34 is the T-QA-03 harness whose scanner and counter later back NFR-PRIV-001 / NFR-PERF-006 claims at G3.
 
