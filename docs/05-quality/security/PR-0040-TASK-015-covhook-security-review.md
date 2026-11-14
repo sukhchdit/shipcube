@@ -216,3 +216,203 @@ All 17 scenarios behaved as predicted; in A the checker reports the record satis
 | INFO open | 5 (PR40-SEC-02 to -06) |
 | Closed by this PR | PR33-SEC-06 |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding. PR33-SEC-06 is CLOSED: the four gate names are required at the base-ref verifier from the merge on, the merged gate fails closed for a missing, empty or failing project, thresholds are unchanged and the critical scopes keep their fail-closed rule. Evidence `20261114T0031Z_5262707` is accepted (verbatim `npm ci --ignore-scripts` and empty `info/exclude`, host-path scan 0). This record names head `2b651f7`; the union with PR #38 voids it, and the follow-up is a merge-only round under section 7 |
+
+## Delta round 2 (fix cycle 1 + union with PR #38, head e8f4461)
+
+| Field | Value |
+|---|---|
+| Round | 2 (delta round: fix cycle 1 of D-ORCH-057 plus the union with PR #38 through main; change-scoped, P5) |
+| Head | e8f4461f343e9b2949d6dc798d88f36161e006a4 |
+| Commits since round 1 | `ee64946` (round-1 record), `0b7ce90` (merge of main `ff9673c`, which carries PR #38 `1735719`: the union), `da2f0a5` (R1-M1 range-tree merge, PR40-SEC-03, PR40-SEC-04), `87c7178` (PR40-SEC-01), `6b07dd6` (PR40-SEC-02), `08637c8` (merge of main `bf8515f`, docs only), `f335e7e` (evidence, now stale), `bc97720` (merge of main `37afe2c`, docs only), `e8f4461` (evidence). The code is final at `08637c8`; `git ls-remote` shows `e8f4461` as the pushed branch tip; main tip when written `f155a0e` (since `37afe2c` only docs and agent memory: the code review twin, DECISIONS, STATUS) |
+| Reviewer | security-analyst |
+| Date | 2026-11-14 |
+| Scope | Security-owned paths the PR changed since `2b651f7` (18 plus `package.json`): `.github/CODEOWNERS`; `tools/ci/`: `check-workflow-policy.mjs` and its test, `coverage-merge.mjs` and its test, `coverage-merge-probe.mjs` (new), `coverage-run.mjs` and its test, `diff-coverage.mjs` and its test, `fixtures/coverage-merge/trials.json` (new), `v8-range-tree.mjs` and its test (new); `tools/quality/`: `check-evidence.mjs` and its test, `heavy.mjs` and its test, `lib/manifest.test.ts`; root `package.json` only through the union (main's `db:generate` line). Unowned: `tools/repo/jest-esm.test.ts`, `tools/repo/path-case.test.ts` (new), the run directories `20261114T0420Z_08637c8/` and `20261114T0437Z_bc97720/` |
+| Input | PR body (D-TASK015-28 to -32, D-TASK015-22 restated); the fix-cycle comment (issuecomment-6871969199); sections 7 and 8 of this record; DECISIONS D-SEC-PR23-02, D-ORCH-057; lane A run 43558481519 on `e8f4461`; run `20261114T0437Z_bc97720`; the code review twin, round 2 on `e8f4461` (APPROVED_WITH_NITS, on main at `f155a0e`), read before finalising: its R2-m1 and R2-n2 are cited below, not duplicated |
+| Result | PASS_WITH_FOLLOW-UPS: 0 Critical, 0 High, 0 Medium. PR40-SEC-01, -02, -03 and -04 are CLOSED. New: LOW PR40-SEC-07 (a file name with a space hides a changed file from the diff gate), LOW PR40-SEC-09 (the probe CLI's temporary Jest project loads its test environment from the temp directory's ancestors), INFO PR40-SEC-08 (`GIT_LITERAL_PATHSPECS` empties the new pathspec) |
+
+### R2.1 Method and limits
+
+Read: the delta `2b651f7..e8f4461` of every owned path; for the two paths PR #38 also changed, the PR's net change against main (`.github/CODEOWNERS` +4 lines, `check-workflow-policy.mjs` +3 lines, its test +2 fixture lines and one new describe); `diff-coverage.mjs`, `check-evidence.mjs` (changed parts), `coverage-run.mjs` and `coverage-merge-probe.mjs` end to end; the `coverage-merge.mjs` hunks for `fileKey`, `mergeCoverageMaps`, `projectProblems`, `readRanTests` and `readCoverageFinal`; the header, exports and merge entry of `v8-range-tree.mjs`; every `heavy.mjs` hunk; the new tests' titles and the PR40-SEC-01 and -02 test bodies; the lane A log of run 43558481519.
+
+Probed (scripts in the session scratchpad `review/PR-40-sec-r2`; scenario commits live only in two `git clone --shared` scratch clones; nothing was written to the main checkout, and nothing to the PR worktree except this section):
+
+- Diff gate: 19 variants on throw-away repositories, each judged by the round-1 copy (`2b651f7`) and the head copy of `diff-coverage.mjs`, plus three mutants of the head copy and five synthetic diff texts for the second line of defence (R2.5.1).
+- Verifier matrix: 10 plumbing scenarios on top of `e8f4461`, each judged by three copies of `check-evidence.mjs`: base-ref `37afe2c` (what lane A runs on this PR), round 1 `2b651f7` (positive control) and head `e8f4461` (what lane A runs on every PR after this merge); a head-only re-run counted the reasons by kind (R2.5.2).
+- Merge: synthetic maps for PR40-SEC-03 and -04 on the round-1 and head copies; the 32 committed trials replayed with the head merge and with the round-1 merge (positive control); 3,000 random merges of the port against the installed `@bcoe/v8-coverage` 0.2.3, independent of the developer's 5,000, with a deliberately wrong merge as positive control (R2.5.3).
+- Probe CLI: one targeted `runTrial` call with the OS temp directory pointed at a scratch directory that held a planted package, plus a control call without it (R2.5.4).
+- Evidence and union: the lane A log; a count-only host-fragment scan with runtime needles (synthetic and real-data controls); the developer's install and heavy logs in the shared scratchpad; `git merge-tree --write-tree` re-derivation of all three merge commits.
+- Record check simulation (R2.8).
+
+Not done: no `quality:heavy`, no `test:coverage`, no Docker and no full Jest run (light-commands constraint). The attribute variants were probed with host git 2.52 (Windows); the PR's own temp-repository tests of the same variants ran green on Linux in lane A's unit step (4437 tests), which stands in for the Linux confirmation. The real-Jest generation of `trials.json` (about 96 Jest runs) was not repeated; its committed output was replayed. Lane A run 43558481519 on this exact head: every step green (lint, format, type-check, unit, negative fixtures, build, Gitleaks, Semgrep, lane B evidence) except the record step and the aggregate. The only command run against the PR worktree was the requested read-only validation `node tools/ci/check-security-owned-paths.mjs --root <worktree> --base origin/main --pr 40 --head HEAD` (main's copy, run from the main checkout) after this section was appended: pass, satisfied at `e8f4461`.
+
+### R2.2 Round-1 findings
+
+| Finding | Sev | Status | Evidence |
+|---|---|---|---|
+| PR40-SEC-01 | LOW | **CLOSED** | `gitDiff` (`diff-coverage.mjs:219-246`) passes `--text --no-textconv --src-prefix=a/ --dst-prefix=b/` (with `-c core.quotePath=false`); `parseUnifiedDiff` throws on a `Binary files ... differ` line for an in-scope file or one whose header it cannot read (`:138-142`); CODEOWNERS owns `/.gitattributes` and `**/.gitattributes`, both in `REQUIRED_CODEOWNED_PATHS` with delete, comment-out and un-own mutation tests. Probe R2.5.1: every round-1 lever (root `-diff`, `binary`, nested, textconv, `.git/info/attributes`, `diff.dstPrefix`, `diff.srcPrefix`) now yields `below`, where the round-1 copy writes a PASSED case. Mutants: without `--text` the throw fails closed; without `--text` and the throw the probe sees the pass again; without `--dst-prefix=b/` `diff.dstPrefix` passes again. Record simulation G and G2: a root or nested `.gitattributes` change after the record now voids it (round 1: G3 passed). Two residuals of the same family: PR40-SEC-07 and -08 |
+| PR40-SEC-02 | INFO | **CLOSED** | `satisfiesRequired` (`check-evidence.mjs:300-304`): a `coverage gate:` ID needs the exact name and classname = the suite id; a case under another classname that starts with a reserved prefix is a soft reason (`:359-363`). Matrix R2.5.2: the head copy rejects S1 to S8 and accepts S0; the round-1 copy accepted the decoys S2 and S3; lane A's base-ref copy accepted `bc97720` (log: `run 20261114T0437Z_bc97720 accepted`, PASS). S9, a hand-written case with classname `unit`, passes every copy: Jest cases carry the test-file path as classname (`lib/convert.mjs:152`) and no test file is named `unit`, so only fabricated evidence can carry it, which stays the PR23 residual (D-ORCH-013) |
+| PR40-SEC-03 | INFO | **CLOSED** | `projectProblems` (`coverage-merge.mjs:655-687`) requires each project to have run one of its own `jest --listTests --selectProjects <p>` files, read from the run's Jest JSON report (`readRanTests`); no listed file, a listing failure and no readable report fail by name. Probe R2.5.3: the head copy fails `unit-dom` in all four cases (both projects when the report is missing) and passes both when each ran an own file; the round-1 copy passed `unit-dom` in all four. The evidence carries four `coverage merge: project <p> measured` cases, now per project. Residual, no new finding: a project whose files all skip or fail to execute still counts as run (code review R2-n2, optional fix `numPassingTests > 0`; skips are visible in the JUnit and a failed file fails the run) |
+| PR40-SEC-04 | INFO | **CLOSED** | `fileKey` (`coverage-merge.mjs:477`) folds case and slashes on `win32` only; one map with two keys that fold together throws (`:495`), heavy turns that into a failed `coverage merge: maps merged` case plus the gate's error cases and `coverage-run` exits 1. Probe R2.5.3: `A.ts` (4/4) plus `a.ts` (0/4) give 2 files and 4/8 on Linux (round 1: 1 file, 4/4) and throw on win32; `C:\...` against `c:/...` across runs still merge into one file on win32. `tools/repo/path-case.test.ts` keeps the tree free of case-colliding paths (green in lane A) |
+| PR40-SEC-05 | INFO | open, unchanged | qa-lead with TASK-025; the evidence still shows audit, pricing, money and ledger inactive |
+| PR40-SEC-06 | INFO | open; re-run aid shipped | `coverage-merge-probe.mjs` and `trials.json`. Replay with the head merge: 23 equal, 9 below, 0 above the combined run, lines equal in all 32 (round-1 merge over the same trials: 4 above, the positive control). The port equals `@bcoe/v8-coverage` on 3,000 independent random merges (R2.5.3). The "never above" result is a property of these trials only: the code review's targeted TypeScript shapes (async/try-finally, `??`, `?.`, one-line returns) put the merge above one combined run in 3 of 42 trials, +1 or +2 covered branches per file and up to +4.0 pp on a file (R2-m1), with the uncovered count never lower in any of its 133 trials. That confirms this finding as written (an over-report of a few branches, so a borderline 95 % critical scope can pass the merged gate while one combined run would fail it); it stays INFO because the uncovered count is never lower and the net direction is under-report. Added to the G3 action: the code review's R2-m1 (b) and (c) (pin the uncovered-count invariant on every trial; one whole-repository per-file comparison) and a combined-run cross-check of any critical scope within 1 pp of 95 %. PR40-SEC-09 must be fixed before that re-run |
+
+### R2.3 Focus questions
+
+1. **PR40-SEC-01:** closed, see R2.2 and R2.5.1. CODEOWNERS covers both forms; `checkCodeowners` treats each as a literal required entry, and the record checker matched a nested `apps/api/src/.gitattributes` through `**/.gitattributes` (simulation G).
+2. **PR40-SEC-02:** closed, see R2.2 and R2.5.2. Lane A keeps verifying with the base-ref copy (`ci.yml:215-216` extracts `git archive "$RANGE_BASE" tools/quality`); on this PR that copy (main's manifest, `unit.required_cases: []`) accepted the run, and from the merge on the head copy is the one that requires the exact names.
+3. **PR40-SEC-03 and -04:** closed, see R2.2 and R2.5.3.
+4. **Probe CLI and fixture.**
+   - `trials.json`: 32 trials (2 fixed, 30 seeded), keys `name`, `lang`, `source`, `tests`, `A`, `B`, `combined`; no path field (the compact entries hold positions and counts; the reader expands them under `/probe/src/m.js|ts`). Host-fragment scan 0 for all 10 needles; the 14 generic `<letter>:\` or `<letter>:/` matches are `default:` lines of generated `switch` statements. A unit test pins the sources and calls to the seeded generator.
+   - Child processes: `coverage-merge-probe.mjs` spawns `process.execPath` with argument arrays only: the repository's Jest bin with `--config <temp>/jest.config.json` and `--runTestsByPath` over constant relative names, then Prettier on the output path. No shell; `--seed` and `--trials` are digit-bounded; `--out` and `--report` are operator paths. `coverage-run.mjs` adds `--json` and `--outputFile=<out>/.parts/<group>.jest.json` to its argument array, no shell. No injection point.
+   - Temporary files: the probe uses `mkdtempSync(join(tmpdir(), 'covprobe-'))` (random suffix, owner-only on POSIX) and removes it in `finally` (`:221`, `:274`). `coverage-run` deletes its outputs and `<out>/.parts` before running (`:215-217`), so a stale Jest report cannot be read; heavy's reports live in its fresh `mkdtemp` work directory. A missing or unreadable report is `ranTests: null`, which fails closed. One weakness: the temporary Jest project resolves Jest's test environment through the temp directory's ancestors first (PR40-SEC-09).
+5. **`v8-range-tree.mjs` port:** the header reproduces the MIT notice of `@bcoe/v8-coverage` 0.2.3 (Copyright 2015-2017 Charles Samborski), identical to the package's `LICENSE.md`; the package's `package.json` and README declare MIT. "Adapted from" names the version and the source files, and the changes are listed. The module imports nothing; `coverage-merge.mjs` imports only `node:` built-ins and the sibling. No dependency change: `package-lock.json` is untouched, and the root `package.json` differs from main only in the `test:coverage` line. The package also ships an ISC `LICENSE.txt` ("Copyright (c) 2017, Contributors"); MIT and ISC are both on LICENSE_ALLOWLIST, and adding that notice too would be belt and braces (nit, no finding).
+6. **Pure union:** `git merge-tree --write-tree` of each merge's parents gives exactly the committed tree for `0b7ce90`, `08637c8` and `bc97720`, so no merge carries a hand edit. `package.json` at the head equals round 1 plus main's `db:generate` line; its net change against main is the `test:coverage` line only. `jest.config.ts` is unchanged (`2b651f7..e8f4461` and `37afe2c...e8f4461` both empty). `08637c8` to `bc97720` changes no non-docs path; `bc97720` to `e8f4461` changes only the 4 run files.
+7. **Evidence hygiene:**
+   - The PR body's evidence table states verbatim "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first (both exit 0), then `npm run quality:heavy -- --profile pr --base origin/main`" and "`.git/info/exclude` is empty (0 bytes)". Corroboration: the developer's install log in the shared scratchpad, written at the run stamp, ends with a completed `npm ci` (1507 packages, no lifecycle output) and `deps:rebuild`; the heavy log starts with `npm ci + deps:rebuild exit=0` and `porcelain=0` and ends with `verdict PASS`; the common `info/exclude` is 0 bytes now. The install command line itself is not in the log; `.npmrc` `ignore-scripts=true` covers that anyway.
+   - Host-path scan: 0 over the 4 run files of `bc97720`, the 4 files of the stale run, `trials.json`, the owned code delta and the PR's commit messages (10 needles in 6 labels: user name, its 8.3 stem, home in 4 spellings, temp directory in 2, host name, git e-mail; built at run time; a synthetic control fires every label and `git config --list --show-origin` gives real-data hits). The 6 `tmp/` and 22 `<letter>:/` matches in the JUnit are repository-relative `tmp/` paths in test titles and URL schemes.
+   - Content against section 7 item 4: the four `coverage gate:` names pass with classname `unit`; four projects measured; `generated` "has no test files (not required)"; authz active, the other critical scopes inactive; tripwire lines and branches pass; `coverage diff: no changed source file in scope`; verdict PASS. Counts: 4456 = 4437 lane A unit cases + 19 merged-step cases; the 2 skips are Windows-only cases that run on Linux in lane A.
+   - The stale run does not confuse lane A: the base-ref copy accepts `bc97720`, rejects `08637c8` as stale (one story file changed since) and `5262707` (87 paths), and passes; the head copy decides the same (S0). A stale committed run is reported and never credited; staleness is computed against each PR's own head, so it cannot help a later PR either.
+8. **No existing check weakened:** CODEOWNERS net +4 lines (two comments, two owned patterns), none removed; `REQUIRED_CODEOWNED_PATHS` +2 entries, none removed; `checkCodeowners` unchanged. `check-evidence.mjs`: SEC-TC IDs keep `status === 'passed' && nameHasId` (the only removed code line is that condition, moved into `satisfiesRequired`); the gate IDs are stricter and one soft rule is new. `lib/manifest.mjs`, `required-suites.json` and `suite-runners.json` are unchanged since round 1. `heavy.mjs` removed only the unused `coverageFrom` helper.
+
+### R2.4 New findings
+
+#### PR40-SEC-07: a source file whose name contains a space is invisible to the diff gate (LOW)
+
+git appends a TAB to the `---` and `+++` file names when a name contains a space (the GNU patch convention), so `+++ b/apps/api/src/mod/my x.ts<TAB>` reaches `parseUnifiedDiff` (`tools/ci/diff-coverage.mjs:143-150`), which keys the file as `apps/api/src/mod/my x.ts` plus a TAB; `isCoverageScoped` (`:42`) rejects that key (`.tsx?$` fails on the TAB), `evaluateDiffCoverage` drops the file and heavy writes a PASSED `coverage diff: no changed source file in scope`. Probe R2.5.1 V14 and V18: a fully uncovered 20-line file passes on both the round-1 and the head copy. The parser predates this PR, but this PR makes the gate enforcing and its PR40-SEC-01 fix targets this class (an unowned change that blinds the gate); a file name is not owned, so no record is needed (simulation G4). The PR's own test covers a space in the `diff --git` header (`diff-coverage.test.ts:155`), not in `+++`. On Linux a name holding `"`, `\` or a control character is C-quoted (`+++ "b/..."`) and is skipped the same way (synthetic probe; such names cannot be checked out on the Windows lane B host).
+
+Impact: as PR40-SEC-01: the per-PR changed-line gate (85/75, 95/95 in critical scopes) passes for untested code, while the overall and per-scope gates still bound the aggregate. Likelihood: low (an unusual, visible file name; no lint rule forbids it; 0 such paths today). CWE-693 · A08:2021.
+
+Fix (code level, `tools/ci/diff-coverage.mjs`): in `parseUnifiedDiff`, strip one trailing TAB from the `+++ ` target and fail closed on a target that starts with `"` (or C-unquote it); and, to close the class, list the changed files independently (`git diff --name-only -z --no-renames --diff-filter=AM <base>...<head> -- <same pathspecs>`; `-z` gives raw names) and throw when a coverage-scoped listed file has no parsed `+++` entry. Verification test: a temporary repository with `apps/api/src/a b.ts` at 0 of 20 covered lines must give `below`; a synthetic `+++ "b/apps/api/src/a\"b.ts"` must throw or be measured. Owner: devops, 015-C or the next `tools/ci` change, before G3.
+
+#### PR40-SEC-08: `GIT_LITERAL_PATHSPECS` in the operator's environment empties the new TypeScript pathspec (INFO)
+
+The fix limits the diff to `:(glob)**/*.ts` and `:(glob)**/*.tsx` (`diff-coverage.mjs:238-239`). With `GIT_LITERAL_PATHSPECS=1` git takes both literally, matches nothing and exits 0, and the gate reports no changed file (probe V15; the round-1 copy, which had no pathspec, gives `below`). It is the environment twin of `diff.dstPrefix`, which the fix set out to neutralise; an unowned repository file cannot set the variable for heavy, hence INFO. The PR40-SEC-07 cross-check would not catch it, because it uses the same pathspec. CWE-693 · A08:2021. Fix: put `--glob-pathspecs` before `diff` (probed: git then refuses a literal environment with "global 'literal' pathspec setting is incompatible with all other global pathspec settings", exit 128, so `gitDiff` throws), or remove `GIT_LITERAL_PATHSPECS`, `GIT_DIFF_OPTS` and `GIT_EXTERNAL_DIFF` from the child's `env`. Verification test: `gitDiff` with the variable set must throw or give `below`. Owner: devops, with PR40-SEC-07.
+
+#### PR40-SEC-09: the probe CLI's temporary Jest project loads Jest's test environment from the temp directory's ancestors (LOW)
+
+`runTrial` (`tools/ci/coverage-merge-probe.mjs:220-276`) writes each trial project into `mkdtemp(<os.tmpdir()>/covprobe-)` and runs the repository's Jest with `rootDir` there and `testEnvironment: 'node'` (`:241`). Jest resolves `jest-environment-node` from `rootDir` first, walking up the directory chain, and falls back to its own install only afterwards, so a `node_modules/jest-environment-node` in any ancestor of the temp directory wins. Probe R2.5.4: with the temp directory pointed at a scratch directory under which a planted package sat, the planted module loaded and the trial still produced identical coverage (a silent takeover); the control call without it did not load it. On this host the chain ends in `C:\node_modules`, which any authenticated user may create (`icacls C:\`: Authenticated Users have `AD`); on a shared Linux host it is `/tmp/node_modules` in the world-writable `/tmp`. The tool runs only by hand (qa-lead for PR40-SEC-06: the G3 transcript and tooling bumps), never in lane A or heavy; the unit test replays the committed fixture and spawns no Jest.
+
+Impact: code execution as the developer who runs the probe, and a falsified trial set, which is the PR40-SEC-06 G3 evidence. Likelihood: very low (a second local account on the developer host, or a shared Linux host). Impact Medium × Likelihood Low = LOW. CWE-427 · A08:2021.
+
+Fix (code level, `tools/ci/coverage-merge-probe.mjs`): pass the environment as an absolute path resolved from the repository (`testEnvironment: createRequire(join(REPO, 'package.json')).resolve('jest-environment-node')`), and preferably create the trial project under a git-ignored directory of the repository (for example `coverage/.probe/`) instead of the OS temp directory, so that the lookup chain is the repository's. Verification test: the R2.5.4 probe (planted ancestor package, temp directory below it) must not load the package. Owner: qa-lead with devops, the next change to the probe and in any case before the PR40-SEC-06 G3 re-run.
+
+### R2.5 Probe results
+
+#### R2.5.1 Diff gate (`gitDiff` + `parseUnifiedDiff` + `evaluateDiffCoverage`; changed file with 0 of 20 changed lines covered)
+
+| Variant | Round-1 copy `2b651f7` | Copy at `e8f4461` |
+|---|---|---|
+| V0 no attribute (control) | `below` 0/20 | `below` 0/20 |
+| V1 root `*.ts -diff` | PASSED, no file in scope | `below` |
+| V2 root `apps/** binary` | PASSED | `below` |
+| V3 nested `apps/api/src/.gitattributes` `* -diff` | PASSED | `below` |
+| V4 textconv driver that prints nothing | PASSED | `below` |
+| V5 `.git/info/attributes` `* binary` | PASSED | `below` |
+| V6 `diff.dstPrefix=zz/` | PASSED (`zz/` key) | `below` |
+| V7, V8 `diff.noprefix`, `diff.mnemonicPrefix` | `below` | `below` |
+| V9 `diff.srcPrefix=yy/` + `diff.dstPrefix=zz/` | PASSED | `below` |
+| V10 to V13, V16, V17: `color.ui/diff=always`, `diff.external`, a `.tsx` file, a non-ASCII name, `GIT_DIFF_OPTS=--unified=3`, `diff.relative` | `below` | `below` |
+| V14 file name with a space | PASSED (key ends in a TAB) | **PASSED** (PR40-SEC-07) |
+| V15 `GIT_LITERAL_PATHSPECS=1` | `below` | **PASSED**, empty diff (PR40-SEC-08) |
+| V18 root `*.ts -diff` and a name with a space | PASSED | **PASSED** (PR40-SEC-07) |
+
+Mutants of the head copy: without `--text`, V1 to V3 and V5 throw "git reported a binary diff for apps/api/src/mod/x.ts" (fail closed, the second line of defence); without `--text` and the throw, V1 to V3 and V5 pass again (the probe sees the hole); without `--dst-prefix=b/`, V6 and V9 pass again. Synthetic texts: a `Binary files` line for an in-scope path, for an unreadable (quoted) header and with no header throws on the head copy and is ignored by the round-1 copy; one for `docs/x.png` is ignored by both; a quoted `+++ "b/..."` target is skipped by both (PR40-SEC-07, Linux names).
+
+#### R2.5.2 Verifier matrix (base `37afe2c`; scenarios edit the committed run's `unit.junit.xml` and rewrite `report_sha256`; a control asserts the committed hash first)
+
+| Scenario | Base-ref copy `37afe2c` (lane A on this PR) | Round-1 copy `2b651f7` | Copy at `e8f4461` (lane A after merge) |
+|---|---|---|---|
+| S0 committed run as is | accepted | accepted | accepted |
+| S1 the four gate cases renamed away | accepted | rejected | rejected: 4 required-case reasons |
+| S2 S1 plus four Jest cases whose titles contain the names | accepted | **accepted** (decoy) | rejected: 4 required-case |
+| S3 S1 plus four Jest cases titled exactly with the names | accepted | **accepted** (decoy) | rejected: 4 required-case, 4 decoy |
+| S4 the real cases (classname `unit`) with a suffix ` (x)` | accepted | accepted | rejected: 4 required-case |
+| S5 the real cases failed plus four exact-name Jest decoys | rejected (integrity) | rejected | rejected: failures declared 0 but 4 present |
+| S6 authz cases turned `(inactive)` | accepted | rejected | rejected: 2 required-case |
+| S7 S0 plus one Jest case titled `coverage merge: project unit measured` | accepted | accepted | rejected: 1 decoy |
+| S8 S1 plus exact-name decoys under classname `Unit` | accepted | accepted | rejected: 4 required-case, 4 decoy |
+| S9 S1 plus exact-name cases under classname `unit` (fabrication control) | accepted | accepted | accepted (only hand-made evidence can do this, PR23 residual) |
+
+Every rejection on the head copy also carries "declared PASS, recomputed FAIL" and "no accepted lane B evidence for required suite(s): unit".
+
+#### R2.5.3 Merge logic (synthetic maps; trials; port)
+
+| Case | Round-1 copy | Copy at `e8f4461` |
+|---|---|---|
+| `A.ts` (4/4) and `a.ts` (0/4) in one map, Linux | 1 file, 4/4 | 2 files, 4/8 |
+| the same, win32 | 1 file, 4/4 | throws "two entries for one file" |
+| `C:\r\src\x.ts` and `c:/r/src/x.ts` in two runs, win32 | 1 file | 1 file, 2/3 (correct) |
+| `unit-dom` listed, not in the Jest report | measured | FAIL |
+| `unit-dom` lists 0 files | measured | FAIL |
+| listing fails for `unit-dom` | measured | FAIL |
+| no readable Jest report | both measured | both FAIL |
+| both ran one of their own files (control) | both measured | both measured |
+| win32 path folding in the per-project check (`C:\R\tests\u.test.ts` against `c:/R/Tests/U.test.ts`) | n/a | measured on win32, FAIL on Linux |
+| the 32 committed trials, merged against one combined run | 4 above, 13 equal, 15 below | 0 above, 23 equal, 9 below; lines equal in all 32 |
+| port against `@bcoe/v8-coverage` 0.2.3, 3,000 random merges of 2 or 3 runs | n/a | 0 differences; conservative mode never a higher branch percentage, identical covered offsets; wrong-merge control: 200 of 200 differ |
+
+#### R2.5.4 Probe CLI temp project
+
+| Call | Planted `node_modules/jest-environment-node` in an ancestor of the temp directory | Result |
+|---|---|---|
+| `runTrial` on the fixed trial "review g alone" | present | planted module loaded; coverage identical to the control |
+| the same | renamed away (control) | not loaded |
+
+### R2.6 Union with PR #38: the section 7 conditions
+
+| Item | Condition | Status |
+|---|---|---|
+| 1 | owned overlap only `package.json`, both lines kept | met: the union `0b7ce90` re-derives cleanly; `package.json` holds `db:generate` and the PR's `test:coverage`. The later CODEOWNERS and `check-workflow-policy.mjs` overlap comes from fix-cycle edits after the union and is additive |
+| 2 | every other path byte-identical to `2b651f7` | superseded: fix cycle 1 changed owned paths, so this round is a delta round (item 6) |
+| 3 | `jest.config.ts` unchanged, no new Jest script | met |
+| 4 | fresh evidence with the D-SEC-PR23-02 statements, host scan 0, the listed cases | met: run `20261114T0437Z_bc97720` (R2.3 item 7) |
+| 5 | lane A accepts the run; the record names the pushed union head | met: run 43558481519 accepted `bc97720`; the record step is red only because the round-1 record names `2b651f7`; this round names `e8f4461`, the pushed branch tip |
+| 6 | an owned fix riding along makes it a delta round with probes 5.1 and 5.2 re-run | done: R2.5.1 and R2.5.2 |
+
+### R2.7 Routing and proposed decision
+
+| ID | Sev | Owner | Due |
+|---|---|---|---|
+| PR40-SEC-07 | LOW | devops (015-C or the next `tools/ci` change) | before G3 |
+| PR40-SEC-08 | INFO | devops, with PR40-SEC-07 | before G3 |
+| PR40-SEC-09 | LOW | qa-lead with devops (next change to `coverage-merge-probe.mjs`) | before the PR40-SEC-06 G3 re-run |
+| PR40-SEC-05 | INFO | qa-lead with TASK-025, then the pricing, money-path and ledger owners | unchanged |
+| PR40-SEC-06 | INFO | qa-lead, with code review R2-m1 (b) and (c) | G3 transcript and tooling bumps, after PR40-SEC-09; any critical scope within 1 pp of 95 % cross-checked against one combined run |
+
+Proposed text for DECISIONS.md (for the orchestrator to log): **D-SEC-PR40-02** · 2026-11-14 · security-analyst · PR #40 delta round 2 (fix cycle 1 + union with PR #38) at `e8f4461` = PASS_WITH_FOLLOW-UPS. CLOSED: PR40-SEC-01 (diff gate passes `--text --no-textconv` and explicit prefixes, fails closed on `Binary files`, CODEOWNERS and `REQUIRED_CODEOWNED_PATHS` own `/.gitattributes` and `**/.gitattributes`; all round-1 levers now give `below`), PR40-SEC-02 (exact name and classname for `coverage gate:` IDs, reserved prefixes under foreign classnames rejected; decoys S2/S3/S7/S8 rejected, lane A base-ref copy still accepts the run), PR40-SEC-03 (per-project "ran an own test file"), PR40-SEC-04 (case folding on win32 only, duplicate folded keys fail closed). New LOW PR40-SEC-07 (git's TAB after a `+++` name with a space, and C-quoted names on Linux, hide a changed file from the diff gate; strip the TAB, refuse quoted targets, cross-check against `--name-only -z`) → devops before G3; new INFO PR40-SEC-08 (`GIT_LITERAL_PATHSPECS` empties the new pathspec; `--glob-pathspecs` or a scrubbed env) → devops with -07; new LOW PR40-SEC-09 (`coverage-merge-probe.mjs` runs Jest from the OS temp dir, so an ancestor `node_modules/jest-environment-node` such as `C:\node_modules` is loaded; absolute environment path or a repository-local temp project) → qa-lead with devops before the PR40-SEC-06 G3 re-run. PR40-SEC-05 unchanged; PR40-SEC-06 stays INFO and is confirmed by code review R2-m1 (merge above one combined run in 3 of 42 TypeScript trials, uncovered count never lower): its G3 action adds R2-m1 (b) and (c) and a combined-run cross-check of any critical scope within 1 pp of 95 %. The `v8-range-tree.mjs` port carries the MIT notice and equals `@bcoe/v8-coverage` 0.2.3 on 3,000 independent random merges; the union is pure (merge-tree re-derivation of all three merges); evidence `20261114T0437Z_bc97720` accepted (verbatim D-SEC-PR23-02 statements, host scan 0). A later main merge voids this record only if main changes a path this PR also changes (`package.json`, `.github/CODEOWNERS`, `tools/ci/check-workflow-policy.mjs` and its test). **Reversibility:** High.
+
+ASVS L2 (touched): V1.14 (build pipeline integrity), V14.1 (CI gates), V14.2 (no new dependency; in-house port with licence notice). No runtime surface, no secret.
+
+### R2.8 Record check simulation (`check-security-owned-paths --pr 40`)
+
+Method: a `git clone --shared --no-checkout` of the main checkout with a sparse checkout of `.github/`, `docs/05-quality/security/` and `tools/ci/`; scenario commits by plumbing on top of `e8f4461`; each scenario checked out detached and judged by its own `tools/ci/check-security-owned-paths.mjs` (equal to main's: this PR does not change it) with base `37afe2c` (A3: base `f155a0e`, the main tip when written), or with a simulated moved main for H and H2 (merge by `git merge-tree --write-tree`).
+
+All 15 scenarios behaved as predicted; in A the checker reports the record satisfied at `e8f4461`. The PR's net owned change against main is 22 paths.
+
+| Case | Scenario | Result |
+|---|---|---|
+| A | this record (round 2 appended) committed on top of `e8f4461`; base `37afe2c` (lane A's range base) | pass, owned 22, satisfied at `e8f4461` |
+| A3 | the same with base `f155a0e` (the main tip when written) | pass, owned 22, satisfied at `e8f4461` |
+| B | the head without this round (round 1 names `2b651f7`) | missing: the state lane A run 43558481519 reported |
+| C | the record checked as PR 41 | missing |
+| D | the last Verdict row FAIL | missing |
+| E | this round's Head row names `da2f0a5` (before the PR40-SEC-01 and -02 fixes) | missing |
+| E2 | this round's Head row names `08637c8` (the last code commit) | pass (only docs and main's docs after it) |
+| F, F2 | after the record: `diff-coverage.mjs` edited / the `test:coverage` line edited | missing |
+| G, G2 | after the record: a nested `apps/api/src/.gitattributes` added / the root `.gitattributes` edited | missing, owned 23 (round 1 G3 passed: the CODEOWNERS half of PR40-SEC-01 works at the checker) |
+| G3 | after the record: a docs file | pass |
+| G4 | after the record: an unowned in-scope source file with a space in its name | pass (PR40-SEC-07 needs no record) |
+| H | main moves with a `package.json` script line and the branch merges it after the record | missing (owned overlap) |
+| H2 | main moves with docs only and the branch merges it after the record | pass |
+
+This round holds exactly one Head row, and its final Verdict row is the last Verdict row of the record (control D shows the last row decides).
+
+### R2.9 Verdict
+
+| Item | Value |
+|---|---|
+| Critical / High / Medium open | 0 / 0 / 0 |
+| LOW open | 2 (PR40-SEC-07, PR40-SEC-09) |
+| INFO open | 3 (PR40-SEC-05, -06, -08) |
+| Closed in this round | PR40-SEC-01, -02, -03, -04 |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding. The four fixes hold under differential probes: every round-1 `.gitattributes` and prefix lever now gives `below`, the head verifier rejects every decoy that Jest can produce, a project that ran none of its own files fails by name, and case folding is win32-only with duplicates failing closed. The union with PR #38 is pure and evidence `20261114T0437Z_bc97720` is accepted. Two LOW findings (PR40-SEC-07 file names with a space, PR40-SEC-09 the probe's temp project) and one INFO (PR40-SEC-08) go to devops and qa-lead before G3. This round names head `e8f4461f343e9b2949d6dc798d88f36161e006a4`; later docs-only commits keep it valid |
