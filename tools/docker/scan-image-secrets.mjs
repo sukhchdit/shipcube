@@ -269,8 +269,9 @@ export const IMAGE_SCAN_ALLOW_LIST = Object.freeze([
   // FROM the node image, so no image carries those headers and the base-layer entry was deleted.
   //
   // D-TASK014-19, tooling image, first scan of node_modules (2026-11-14). generic-api-key matched module symbol keys of
-  // effect 3.20.0 (a dependency of @prisma/config): `IntervalSymbolKey = "effect/ScheduleInterval"` and
-  // `IntervalsSymbolKey = "effect/ScheduleIntervals"`, in the cjs, esm and src copies.
+  // effect 3.20.0 (a dependency of @prisma/config): the constants IntervalSymbolKey and IntervalsSymbolKey, whose values
+  // are effect's own module path strings, in the cjs, esm and src copies. (Never quote such an assignment here: the
+  // repository's own Gitleaks lane matches it too.)
   packageFile('generic-api-key', '/app/node_modules/effect/dist/cjs/internal/schedule/interval.js', 'effect symbol key'),
   packageFile('generic-api-key', '/app/node_modules/effect/dist/cjs/internal/schedule/intervals.js', 'effect symbol key'),
   packageFile('generic-api-key', '/app/node_modules/effect/dist/esm/internal/schedule/interval.js', 'effect symbol key'),
