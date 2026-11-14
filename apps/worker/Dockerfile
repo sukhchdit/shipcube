@@ -45,6 +45,7 @@ COPY tools/db/audit-external-tables.ts tools/db/shadow-init.ts tools/db/sql-text
 COPY prisma.config.ts ./
 COPY prisma/schema/ prisma/schema/
 COPY prisma/bootstrap/ prisma/bootstrap/
+COPY prisma/client/tsconfig.json prisma/client/
 COPY packages/shared/ packages/shared/
 COPY packages/config/ packages/config/
 COPY packages/authz/ packages/authz/
@@ -55,7 +56,7 @@ COPY apps/api/ apps/api/
 COPY apps/worker/ apps/worker/
 RUN npm run deps:rebuild \
  && npm run build -w apps/worker \
- && node tools/docker/prune-dist.mjs --declarations apps/worker/dist apps/api/dist packages/shared/dist \
+ && node tools/docker/prune-dist.mjs --declarations prisma/dist/client apps/worker/dist apps/api/dist packages/shared/dist \
       packages/config/dist packages/authz/dist packages/audit/dist packages/pricing/dist packages/carriers/dist
 
 # ---- prod-deps: production closure of apps/worker only (it reaches the api runtime through @platform/api);
@@ -107,8 +108,11 @@ COPY --from=build /app/packages/pricing/package.json /app/packages/pricing/packa
 COPY --from=build /app/packages/pricing/dist /app/packages/pricing/dist
 COPY --from=build /app/packages/carriers/package.json /app/packages/carriers/package.json
 COPY --from=build /app/packages/carriers/dist /app/packages/carriers/dist
-# TASK-020 part 020-B owns the prisma/package.json + prisma/dist/client COPY lines and the preflight import of
-# @platform/prisma/client (D-ARCH-105; sheet line 544).
+# The generated Prisma client package (D-ARCH-102/-105, sheet line 544; TASK-020 part 020-B merged first): its
+# manifest and the compiled JavaScript only. Never prisma/generated, schema, migrations, bootstrap, seed or tests.
+# The preflight imports @platform/prisma/client through the default condition (no --conditions).
+COPY --from=build /app/prisma/package.json /app/prisma/package.json
+COPY --from=build /app/prisma/dist/client /app/prisma/dist/client
 COPY --from=build /app/apps/api/package.json /app/apps/api/package.json
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=build /app/apps/worker/package.json /app/apps/worker/package.json
