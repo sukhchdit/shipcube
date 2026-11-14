@@ -2,7 +2,9 @@
 # of the 17 historic generic-api-key hits on main (example values and one synthetic test literal; none is a credential,
 # nothing needs rotation). History cannot be rewritten (CLAUDE.md section 5), so the full-history scan needs this list.
 # Format: <commit>:<path>:<rule>:<line> (gitleaks .gitleaksignore format). Exact fingerprints only: never add a path or
-# commit allowlist to .gitleaks.toml. It deliberately is NOT named .gitleaksignore (D-TASK015-02): gitleaks auto-loads
+# commit allowlist to .gitleaks.toml for these. (Lane A cannot read this file, so a false positive in an already-pushed
+# PR commit gets one commit AND path AND rule AND anchored-line entry in .gitleaks.toml instead; D-ORCH-068 is the
+# first.) It deliberately is NOT named .gitleaksignore (D-TASK015-02): gitleaks auto-loads
 # <source>/.gitleaksignore, and check-workflow-policy rule gitleaksignore (PR10-SEC-01) keeps refusing such a file
 # anywhere in the tree. The gitleaks-full runner (lane B/C) extracts this file from the base or gate ref (never from a
 # PR work tree), mounts it read-only and passes --gitleaks-ignore-path, and scans the gate SHA's ancestry, not --all.

@@ -38,6 +38,34 @@ function literals(block: string, key: string): string[] {
 const awsKeyShaped = () =>
   `AKIA${Array.from({ length: 16 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.charAt(Math.floor(Math.random() * 32))).join('')}`;
 
+/** A finding as gitleaks' global allowlists see it (git mode): commit, path, rule id and the full flagged line. */
+interface GitleaksFinding {
+  commit: string;
+  path: string;
+  rule: string;
+  line: string;
+}
+/**
+ * Gitleaks v8 `[[allowlists]]` semantics for the keys this config uses (every block is `condition = "AND"` with
+ * `regexTarget = "line"`, asserted below): `targetRules` scopes the entry to those rules; then every present check must
+ * hold (the commit equals one of `commits`, a `paths` regex matches the path, a `regexes` regex matches the full line).
+ * The pinned gitleaks image gave the same decisions over the real commit (D-ORCH-068 reproduction in the PR record).
+ */
+function allowedBy(block: string, finding: GitleaksFinding): boolean {
+  const targetRules = literals(block, 'targetRules');
+  if (targetRules.length > 0 && !targetRules.includes(finding.rule)) return false;
+  const commits = literals(block, 'commits');
+  return (
+    (commits.length === 0 || commits.includes(finding.commit)) &&
+    literals(block, 'paths').some((source) => new RegExp(source).test(finding.path)) &&
+    literals(block, 'regexes').some((source) => new RegExp(source).test(finding.line))
+  );
+}
+const allowedByAny = (finding: GitleaksFinding) => allowlists.some((block) => allowedBy(block, finding));
+/** A random `effect/<Name>` module-namespace string, generated at run time (never committed). */
+const effectNamespaced = () =>
+  `effect/${Array.from({ length: 12 + Math.floor(Math.random() * 12) }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'.charAt(Math.floor(Math.random() * 52))).join('')}`;
+
 const advisory = (overrides: Partial<Parameters<typeof checkAudit>[0][number]>) => ({
   id: 'GHSA-aaaa-bbbb-cccc',
   package: 'fixture-pkg',
@@ -141,6 +169,81 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     expect(new Set(lines).size).toBe(17);
     expect([...new Set(lines.map((line) => line.slice(0, 7)))].sort()).toEqual(['63accea', 'b8f805f', 'd5cdfa2']);
     expect(lines.filter((line) => line.includes(':docs/03-architecture/api/openapi.yaml:'))).toHaveLength(15);
+  });
+
+  const PR39_COMMIT = 'dd7a2ddcad30ba422152300f21d7df5f105d283e';
+  const PR39_PATH = 'tools/docker/scan-image-secrets.mjs';
+  /** Why a commit-bound block is not exact: one full SHA, one rule, one anchored path, anchored full-line regexes. */
+  function commitBoundViolations(block: string): string[] {
+    const out: string[] = [];
+    const commits = literals(block, 'commits');
+    if (commits.length !== 1 || !/^[0-9a-f]{40}$/u.test(commits[0] ?? '')) out.push('commits: exactly one full 40-hex SHA');
+    if (literals(block, 'targetRules').length !== 1) out.push('targetRules: exactly one rule');
+    const paths = literals(block, 'paths');
+    if (paths.length !== 1 || !paths.every((p) => p.startsWith('^') && p.endsWith('$'))) out.push('paths: one anchored path');
+    const regexes = literals(block, 'regexes');
+    if (regexes.length === 0 || !regexes.every((r) => r.startsWith('^') && r.endsWith('$'))) out.push('regexes: anchored full lines');
+    return out;
+  }
+
+  it('[D-ORCH-068] .gitleaks.toml holds exactly the two reviewed allowlists; a commit-bound entry names one full SHA, one rule, one anchored path and anchored full-line patterns', () => {
+    // Deliberate shape pin: a new allowlist (or a widened one) changes this test and needs its own security review.
+    const descriptions = allowlists.map((block) => /^description = "(.*)"$/mu.exec(block)?.[1]);
+    expect(descriptions).toEqual(['PR1-SEC-11 agent docs prose', 'D-ORCH-068 PR #39 dd7a2dd effect symbol-key comment']);
+    for (const block of allowlists) {
+      expect(block).toMatch(/^condition = "AND"$/m);
+      expect(block).toMatch(/^regexTarget = "line"$/m);
+      if (literals(block, 'commits').length > 0) expect(commitBoundViolations(block)).toEqual([]);
+    }
+    const entry = allowlists[1] ?? '';
+    expect(literals(entry, 'commits')).toEqual([PR39_COMMIT]);
+    expect(literals(entry, 'targetRules')).toEqual(['generic-api-key']);
+    expect(literals(entry, 'paths')).toEqual(['^tools/docker/scan-image-secrets\\.mjs$']);
+    expect(literals(entry, 'regexes')).toHaveLength(2);
+    // The exact fingerprints are recorded next to the entry (values are never quoted).
+    expect(gitleaks).toContain(`${PR39_COMMIT}:${PR39_PATH}:generic-api-key:272 and :273`);
+    // Mutations: dropping the commit, the rule scope or an anchor is refused by the same guard.
+    const dropRule = entry.replace(/^targetRules = .*$/mu, '');
+    const shortSha = entry.replace(PR39_COMMIT, PR39_COMMIT.slice(0, 7));
+    const unanchoredPath = entry.replace("'''^tools/docker/scan-image-secrets\\.mjs$'''", "'''scan-image-secrets'''");
+    const twoCommits = entry.replace(`'''${PR39_COMMIT}'''`, `'''${PR39_COMMIT}''', '''${'0'.repeat(40)}'''`);
+    for (const mutated of [dropRule, shortSha, unanchoredPath, twoCommits]) {
+      expect(mutated).not.toBe(entry);
+      expect(commitBoundViolations(mutated)).not.toEqual([]);
+    }
+  });
+
+  it('[D-ORCH-068] the dd7a2dd entry admits only the two flagged comment lines at that commit, path and rule; any other commit, path, rule or line is still reported (negative controls)', () => {
+    const line272 = (value: string) => `  // effect 3.20.0 (a dependency of @prisma/config): \`IntervalSymbolKey = "${value}"\` and`;
+    const line273 = (value: string) => `  // \`IntervalsSymbolKey = "${value}"\`, in the cjs, esm and src copies.`;
+    const at = (line: string, over: Partial<GitleaksFinding> = {}): GitleaksFinding => ({
+      commit: PR39_COMMIT,
+      path: PR39_PATH,
+      rule: 'generic-api-key',
+      line,
+      ...over,
+    });
+    expect(allowedByAny(at(line272(effectNamespaced())))).toBe(true);
+    expect(allowedByAny(at(line273(effectNamespaced())))).toBe(true);
+
+    const flagged = line272(effectNamespaced());
+    const controls: Record<string, GitleaksFinding> = {
+      'same line, the follow-up commit': at(flagged, { commit: 'f'.repeat(40) }),
+      'same line, abbreviated SHA': at(flagged, { commit: PR39_COMMIT.slice(0, 7) }),
+      'same line, the test file': at(flagged, { path: 'tools/docker/scan-image-secrets.test.ts' }),
+      'same line, a nested copy of the path': at(flagged, { path: `apps/api/${PR39_PATH}` }),
+      'same line, a suffixed path': at(flagged, { path: `${PR39_PATH}.bak` }),
+      'same line, another rule': at(flagged, { rule: 'aws-access-token' }),
+      'another line: an api key assignment': at(`const apiKey = "${awsKeyShaped()}";`),
+      'another line: the comment holding an AWS-shaped value': at(line272(awsKeyShaped())),
+      'another line: the second comment holding an AWS-shaped value': at(line273(awsKeyShaped())),
+      'another line: a secret appended to the comment': at(`${flagged} token = ${awsKeyShaped()}`),
+      'another line: the comment re-indented': at(flagged.trimStart()),
+    };
+    const wronglyAllowed = Object.entries(controls)
+      .filter(([, finding]) => allowedByAny(finding))
+      .map(([label]) => label);
+    expect(wronglyAllowed).toEqual([]);
   });
 
   it('D-ORCH-027: Dependabot ignores TypeScript semver-major (ADR-0001 pin ~6.0.3, TS 7 deferred) and keeps the cooldown', () => {
