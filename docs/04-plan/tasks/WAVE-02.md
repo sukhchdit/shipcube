@@ -60,7 +60,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-138 **DC** (M0 Must) Pure pricing engine with integer money and rounding<br>US-139 **DC** (M0 Must) Billable weight calculation |
 | REQs | REQ-PRICE-001, REQ-PRICE-002, REQ-PRICE-004 |
 | NFRs | NFR-DATA-001, NFR-QUAL-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR40-SEC-05, D-ARCH-115 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-001, TASK-002 |
@@ -75,6 +75,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-138 and US-139 scenarios (fast-check properties)
 - PR #2 code review m10 (routed here): when the branded Minor type lands in packages/shared/src/money/**, tools/eslint-rules/money-arith.mjs gains a type-aware branch (parserServices -> checker: an operand type carrying the Minor brand is reported) with the name heuristic kept as fallback and a typed negative fixture
+- PR40-SEC-05 / PR #40 code review R1-m4 (a) (D-ARCH-115): this task lands the first measured packages/pricing and packages/shared/src/money sources, which activates their 95/95 critical scopes in tools/ci/coverage-gate.mjs; the PR body quotes the merged lines and branches of both scopes from the lane B evidence, and in the first activation checkpoint after it merges qa-lead adds coverage gate: packages/pricing lines, coverage gate: packages/pricing branches, coverage gate: packages/shared/src/money lines and coverage gate: packages/shared/src/money branches to unit.required_cases (manifest-only PR with a security record)
 - AT-US-138-01 … AT-US-138-06: all 6 scenarios of US-138, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-139-01 … AT-US-139-06: all 6 scenarios of US-139, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -323,7 +324,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-199 **DC** (M0 Must) Payment gateway interface and deterministic Mock gateway<br>US-200 **DC** (M0 Must) Payment record with status history |
 | REQs | REQ-PAY-001, REQ-PAY-002, REQ-PAY-003 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-011 |
+| Spikes / security / decisions | D-011, PR40-SEC-05, D-ARCH-115 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-032, TASK-029 |
@@ -338,6 +339,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **Acceptance tests to write**
 - All US-199 and US-200 scenarios
 - D-ARCH-106 (ADR-0005 am. 11 item 20): the binding names under which module code receives the payment gateway (paymentGateway, gateway) are added to the names option of the T-83 lint with one fixture; every gateway call runs in a call phase or in the worker, never inside a tenant transaction
+- PR40-SEC-05 / PR #40 code review R1-m4 (a) (D-ARCH-115): the D-QA-003 money-path scope of tools/ci/coverage-gate.mjs and TEST-STRATEGY 8 is the folder apps/api/src/modules/payments/service/**, while this task lists apps/api/src/modules/payments/service.ts, a file the scope does not match; before merging, place the money-moving service code under apps/api/src/modules/payments/service/** (preferred) or ask qa-lead to re-point the scope with a D-QA decision, so the scope activates with this task; the PR body quotes the merged lines and branches of the scope, and in the first activation checkpoint after it merges qa-lead adds coverage gate: apps/api/src/modules/payments/service lines and branches to unit.required_cases (manifest-only PR with a security record)
 - AT-US-199-01 … AT-US-199-07: all 7 scenarios of US-199, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-200-01 … AT-US-200-05: all 5 scenarios of US-200, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -506,7 +508,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-155 **DC** (M0 Must) Guest quoting with access token and rate limits |
 | REQs | REQ-QUOTE-002 |
 | NFRs | NFR-PERF-002, NFR-SEC-005 |
-| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109 |
+| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-041, TASK-044 |
@@ -523,6 +525,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - M0 demo step "Guest gets a mock quote" via API/Swagger within 1.5 s
 - D-ARCH-107 (ADR-0008 am. 4): the quote-token authenticator applies to routes whose auth set contains quote-token (getQuote, streamQuoteResults): a bearer, when present, decides alone; otherwise a well-formed X-Quote-Token yields a guest principal (credential quote-token, authenticated false, no actor, guestTokenHash = lowercase hex SHA-256) and a missing or malformed token answers 404 NOT_FOUND with private, no-store, never 401 (A-078); createQuote (auth anonymous or session, permissionAuthenticated quote:create) branches on principal.credential. D-ARCH-106 (ADR-0003 am. 2026-11-13): createQuote starts the fan-out in its afterCommit phase (best-effort, in process, not durable): a fan-out lost to a crash must end as per-carrier timeouts at the 5 s deadline, never as a stream that does not complete (test); no tenant transaction is open while carriers are called
 - D-ARCH-109 (ADR-0008 am. 5 item 1): X-Quote-Token is read as a credential only on routes whose auth set contains quote-token; createQuote ignores the header (it returns the token and never takes one), and on claimQuote, saveQuote and createShipment the header is a declared companion that the handler checks against the quote, never an authenticator; a refresh cookie on getQuote or streamQuoteResults is ignored (404 when there is no bearer and no token)
+- D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the quote-token authenticator learns that X-Quote-Token is present only through presentedKinds(req.headers, route.auth) on getQuote and streamQuoteResults (when session is also present the bearer authenticator decides and the token header is never read, spy), builds the guest principal permissions with readonlySet holding exactly the quote read permissions the route needs, calls markCredentialsRead(res) together with its decision, and answers a missing or malformed token with 404 NOT_FOUND (A-078) whose private, no-store comes from the descriptor test ([session, quote-token] has no anonymous member), not from the authenticator; COMPANION CASE (ADR-0008 am. 6 item 1 (b)): on claimQuote, saveQuote and createShipment, whose auth set is exactly [session], x-quote-token is declared in schema.headers as the contract declares the QuoteToken header parameter there (route-metadata companion parity, 020-C), and the handler compares the SHA-256 of the presented value with the stored guest_token hash in constant time, never stores or logs the raw value and never treats it as authentication; on every other route schema.headers may not name it (defineRoute refuses it at module load); api tests: a bearer plus a token on getQuote ignores the token, a token alone yields a guest principal whose permissions view throws on mutation, a malformed token is 404 private, no-store, and claimQuote with a wrong token is 404 while the quote stays unclaimed
 - AT-US-155-01 … AT-US-155-11: all 11 scenarios of US-155, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

@@ -705,6 +705,7 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
       '/.node-version @o',
       '/prisma.config.ts @o',
       '/apps/ @o',
+      '/tests/ @o',
       '/CLAUDE.md @o',
       '/.claude/ @o',
     ].join('\n');
@@ -815,6 +816,31 @@ describe('CODEOWNERS: server-controlled ids and workspace manifests (PR26-SEC-07
     for (const replacement of ['', `# ${line} @sukhchdit`, line]) {
       const mutated = repositoryText().replace(pattern, replacement);
       expect(mutated).not.toMatch(pattern);
+      expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
+    }
+  });
+});
+
+describe('CODEOWNERS: every app database platform, the credential predicate and the SEC-TC-29 oracles (PR38-SEC-02/-06)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const lineFor = (path: string): RegExp => new RegExp(`^/${path.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\s+@\\S+$`, 'mu');
+  const added = [
+    'apps/worker/src/platform/db/',
+    'packages/shared/src/http/',
+    'tests/api/helpers/cache-control.ts',
+    'tests/api/helpers/contract-validator.ts',
+    'tests/contract-stubs/',
+  ];
+
+  it.each(added)('[PR38-SEC-02/-06] %s is required and the repository CODEOWNERS owns it', (path) => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain(path);
+    expect(repositoryText()).toMatch(lineFor(path));
+  });
+
+  it.each(added)('[PR38-SEC-02/-06] mutation: deleting, commenting out or un-owning the %s line yields one finding for it', (path) => {
+    for (const replacement of ['', `# /${path} @sukhchdit`, `/${path}`]) {
+      const mutated = repositoryText().replace(lineFor(path), replacement);
+      expect(mutated).not.toMatch(lineFor(path));
       expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
     }
   });

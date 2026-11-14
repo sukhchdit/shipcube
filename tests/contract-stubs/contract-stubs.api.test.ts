@@ -143,14 +143,45 @@ describe('contract stubs from openapi.yaml examples', () => {
     });
 
     it('[SEC-TC-29] [D-ARCH-107 (5)] answers private, no-store to a request that carried a credential, problems included', async () => {
-      const credential = { 'X-Quote-Token': 'opaque-stub-test' };
-      const live = await fetch(`${server.url}/health/live`, { headers: credential });
-      expect(live.headers.get('cache-control')).toBe('private, no-store');
+      // createQuote declares [anonymous, session]: a bearer is a declared credential (D-ARCH-109).
+      const bearer = { Authorization: 'Bearer opaque-stub-test' };
+      const quote = await fetched(
+        'POST',
+        '/api/v1/quotes',
+        await fetch(`${server.url}/api/v1/quotes`, { method: 'POST', headers: bearer }),
+      );
+      expect(quote.headers['cache-control']).toBe('private, no-store');
+      expect(validator.validateResponse({ ...quote, requestHeaders: bearer })).toEqual([]);
+      // Before any route is known the generic test stays: any credential makes the problem private.
       const unknown = await fetch(`${server.url}/api/v1/nowhere`, { headers: { Cookie: 'theme=dark; __Host-rt_web=opaque' } });
       expect(unknown.status).toBe(404);
       expect(unknown.headers.get('cache-control')).toBe('private, no-store');
       const anonymous = await fetch(`${server.url}/api/v1/nowhere`);
       expect(anonymous.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it.each<[string, Record<string, string>, string | null]>([
+      ['a bearer (session)', { Authorization: 'Bearer expired-or-malformed' }, 'private, no-store'],
+      ['a refresh cookie (refresh-cookie)', { Cookie: 'theme=dark; __Host-rt_web=opaque' }, null],
+      ['an X-Quote-Token (quote-token)', { 'X-Quote-Token': 'opaque-stub-test' }, null],
+    ])('[SEC-TC-29] [D-ARCH-109] a foreign credential, %s, on listCountries does not mark the answer', async (_l, headers, onQuote) => {
+      const path = '/api/v1/reference/countries';
+      const countries = await fetched('GET', path, await fetch(`${server.url}${path}`, { headers }));
+      expect(countries.status).toBe(200);
+      expect(countries.headers['cache-control']).toBeUndefined();
+      expect(validator.validateResponse({ ...countries, requestHeaders: headers })).toEqual([]);
+      // On createQuote ([anonymous, session]) only the bearer is declared.
+      const quote = await fetch(`${server.url}/api/v1/quotes`, { method: 'POST', headers });
+      expect(quote.headers.get('cache-control')).toBe(onQuote);
+    });
+
+    it('[SEC-TC-29] [D-ARCH-109] a pre-route problem example of a known operation keeps the generic test', async () => {
+      const path = '/api/v1/quotes';
+      const headers = { 'X-Quote-Token': 'opaque-stub-test', Prefer: 'example=MALFORMED_REQUEST' };
+      const malformed = await fetched('POST', path, await fetch(`${server.url}${path}`, { method: 'POST', headers }));
+      expect(malformed).toMatchObject({ status: 400, body: { code: 'MALFORMED_REQUEST' } });
+      expect(malformed.headers['cache-control']).toBe('private, no-store');
+      expect(validator.validateResponse({ ...malformed, requestHeaders: headers })).toEqual([]);
     });
   });
 });

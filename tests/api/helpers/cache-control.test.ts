@@ -1,12 +1,13 @@
 // SEC-TC-29 (T-06; US-043, US-068): the contract helper fails a response that must not be stored but lacks
 // `Cache-Control: private, no-store`, naming the operationId. One predicate for helper, stubs and app (PR32-SEC-06 (a),
-// PR #32 code review m1 (c), D-ARCH-107 (5)): the operation's effective `security` has no anonymous alternative, or the
-// request carried a credential; problems raised before the route is known need `no-store` only. A small in-memory
-// contract; no app, no openapi.yaml.
+// PR #32 code review m1 (c), D-ARCH-107 (5), D-ARCH-109): the operation's effective `security` has no anonymous
+// alternative, or the request presented a credential of a kind the operation declares (a foreign credential requires
+// nothing); problems raised before the route is known need `no-store`, and `private` with any credential. A small
+// in-memory contract; no app, no openapi.yaml.
 import { describe, expect, it } from '@jest/globals';
 
 import type { OpenApiDocument } from '../../../tools/openapi/contract.js';
-import { allowsAnonymous, cacheRequirement, requestCarriesCredential } from './cache-control.js';
+import { allowsAnonymous, cacheRequirement, credentialMakesPrivate, declaredKinds, requestCarriesCredential } from './cache-control.js';
 import { cacheDirectivesOf, createContractValidator, type ResponseUnderTest } from './contract-validator.js';
 
 const CORRELATION_ID = 'c0ffee00-1234-4abc-9def-001122334455';
@@ -44,6 +45,22 @@ const contract = {
         responses: { '200': okResponse },
       },
     },
+    '/quote-thing': {
+      get: {
+        operationId: 'getQuoteThing',
+        'x-permission': 'public',
+        security: [{ bearerAuth: [] }, { quoteToken: [] }],
+        responses: { '200': okResponse },
+      },
+    },
+    '/webhook-thing': {
+      get: {
+        operationId: 'receiveWebhookThing',
+        'x-permission': 'public',
+        security: [{ stripeSignature: [] }],
+        responses: { '200': okResponse },
+      },
+    },
   },
   components: {
     schemas: { Problem: { type: 'object' } },
@@ -59,6 +76,11 @@ const contract = {
 type Operation = Parameters<typeof allowsAnonymous>[0];
 
 const validator = createContractValidator(contract);
+const operationAt = (path: string): Operation => {
+  const operation = validator.resolveOperation('GET', path);
+  if (operation === undefined) throw new Error(`no fixture operation at ${path}`);
+  return operation;
+};
 const get = (path: string, headers: Record<string, string> = {}, requestHeaders?: Record<string, string>): ResponseUnderTest => ({
   method: 'GET',
   path,
@@ -70,6 +92,10 @@ const get = (path: string, headers: Record<string, string> = {}, requestHeaders?
 });
 const cacheFindings = (response: ResponseUnderTest): string[] =>
   validator.validateResponse(response).filter((message) => message.startsWith('/headers/cache-control'));
+
+const BEARER = { Authorization: 'Bearer expired-or-malformed' };
+const COOKIE = { Cookie: 'theme=dark; __Host-rt_web=opaque' };
+const QUOTE_TOKEN = { 'X-Quote-Token': 'opaque' };
 
 describe('[SEC-TC-29] responses that must not be stored carry Cache-Control: private, no-store', () => {
   it('[SEC-TC-29] an anonymous operation without Cache-Control passes', () => {
@@ -100,27 +126,82 @@ describe('[SEC-TC-29] responses that must not be stored carry Cache-Control: pri
     expect(validator.validateResponse(get('/private-thing', { 'Cache-Control': 'No-Store, max-age=0, PRIVATE' }))).toEqual([]);
   });
 
-  it('[SEC-TC-29] [D-ARCH-107 (5)] a dual-mode operation is private only when the request carried a credential', () => {
+  it('[SEC-TC-29] [D-ARCH-107 (5)] a dual-mode operation is private only when the request carried a declared credential', () => {
     expect(validator.validateResponse(get('/dual-thing'))).toEqual([]);
     expect(cacheFindings(get('/dual-thing', {}, { Authorization: 'Bearer opaque' }))).toEqual([
-      expect.stringContaining('createDualThing must not be stored (the request carried a credential)'),
+      expect.stringContaining('createDualThing must not be stored (the request carried a credential of a kind the operation declares)'),
     ]);
-    expect(cacheFindings(get('/public-thing', { 'cache-control': 'private, no-store' }, { 'X-Quote-Token': 'opaque' }))).toEqual([]);
+    expect(cacheFindings(get('/dual-thing', { 'cache-control': 'private, no-store' }, { Authorization: 'Bearer opaque' }))).toEqual([]);
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ['a bearer (session)', BEARER],
+    ['a refresh cookie (refresh-cookie)', COOKIE],
+    ['an X-Quote-Token (quote-token)', QUOTE_TOKEN],
+  ])('[SEC-TC-29] [D-ARCH-109] a foreign credential, %s, on an [anonymous] operation requires nothing', (_label, requestHeaders) => {
+    expect(cacheFindings(get('/public-thing', { 'cache-control': 'public, max-age=3600' }, requestHeaders))).toEqual([]);
+    expect(cacheFindings(get('/public-thing', {}, requestHeaders))).toEqual([]);
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ['a refresh cookie (refresh-cookie)', COOKIE],
+    ['an X-Quote-Token (quote-token)', QUOTE_TOKEN],
+  ])('[SEC-TC-29] [D-ARCH-109] a foreign credential, %s, on [anonymous, session] requires nothing', (_label, requestHeaders) => {
+    expect(cacheFindings(get('/dual-thing', { 'cache-control': 'public, max-age=3600' }, requestHeaders))).toEqual([]);
   });
 
   it('[SEC-TC-29] an operation without its own security inherits the document requirement (fail closed)', () => {
     const op = { operationId: 'x', method: 'GET', path: '/x', fullPath: '/x', operation: {} } as unknown as Operation;
     expect(allowsAnonymous(op, contract)).toBe(false);
+    expect(declaredKinds(op, contract)).toEqual(['session']);
+  });
+
+  it('[D-ARCH-109] declared kinds follow the security alternatives one to one (companions aside, signatures by suffix)', () => {
+    expect(declaredKinds(operationAt('/public-thing'), contract)).toEqual(['anonymous']);
+    expect(declaredKinds(operationAt('/dual-thing'), contract)).toEqual(['anonymous', 'session']);
+    expect(declaredKinds(operationAt('/auth/refresh'), contract)).toEqual(['refresh-cookie']);
+    expect(declaredKinds(operationAt('/quote-thing'), contract)).toEqual(['session', 'quote-token']);
+    expect(declaredKinds(operationAt('/webhook-thing'), contract)).toEqual(['signature']);
+    const unknownScheme = { operationId: 'u', operation: { security: [{ apiKey: [] }, { csrfToken: [] }] } } as unknown as Operation;
+    expect(declaredKinds(unknownScheme, contract)).toEqual(['apiKey']);
+    expect(allowsAnonymous(unknownScheme, contract)).toBe(false);
+    const noRequirement = { operationId: 'n', operation: { security: ['not-an-object'] } } as unknown as Operation;
+    expect(declaredKinds(noRequirement, contract)).toEqual(['anonymous']);
+    expect(Object.isFrozen(declaredKinds(noRequirement, contract))).toBe(true);
   });
 
   it('[SEC-TC-29] [PR #32 m1] a problem raised before the route is known needs no-store, and private only with a credential', () => {
-    const operation = { operationId: 'getPrivateThing', method: 'GET', path: '/p', fullPath: '/p', operation: {} } as unknown as Operation;
-    const directives = (credential: boolean, problemCode?: string): readonly string[] | undefined =>
-      cacheRequirement({ operation, doc: contract, credential, problemCode })?.directives;
-    expect(directives(false, 'MALFORMED_REQUEST')).toEqual(['no-store']);
-    expect(directives(true, 'MALFORMED_REQUEST')).toEqual(['private', 'no-store']);
-    expect(directives(false, 'AUTH_REQUIRED')).toEqual(['private', 'no-store']);
-    expect(cacheRequirement({ operation: undefined, doc: contract, credential: false })?.directives).toEqual(['no-store']);
+    const operation = operationAt('/private-thing');
+    const directives = (requestHeaders: Record<string, string> | undefined, problemCode?: string): readonly string[] | undefined =>
+      cacheRequirement({ operation, doc: contract, requestHeaders, problemCode })?.directives;
+    expect(directives(undefined, 'MALFORMED_REQUEST')).toEqual(['no-store']);
+    expect(directives(BEARER, 'MALFORMED_REQUEST')).toEqual(['private', 'no-store']);
+    expect(directives(undefined, 'AUTH_REQUIRED')).toEqual(['private', 'no-store']);
+    expect(cacheRequirement({ operation: undefined, doc: contract, requestHeaders: undefined })?.directives).toEqual(['no-store']);
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ['a bearer (session)', BEARER],
+    ['a refresh cookie (refresh-cookie)', COOKIE],
+    ['an X-Quote-Token (quote-token)', QUOTE_TOKEN],
+  ])('[SEC-TC-29] [D-ARCH-109] before the route is known the generic test stays: %s makes the problem private', (_l, requestHeaders) => {
+    // A foreign kind for the public operation, yet the body parser and the 404/405 fallback ran before any route read it.
+    const operation = operationAt('/public-thing');
+    expect(cacheRequirement({ operation, doc: contract, requestHeaders, problemCode: 'PAYLOAD_TOO_LARGE' })).toEqual({
+      directives: ['private', 'no-store'],
+      reason: 'the request carried a credential',
+    });
+    expect(cacheRequirement({ operation: undefined, doc: contract, requestHeaders })?.directives).toEqual(['private', 'no-store']);
+    expect(cacheRequirement({ operation, doc: contract, requestHeaders, problemCode: 'VALIDATION_ERROR' })).toBeUndefined();
+  });
+
+  it('[D-ARCH-109] credentialMakesPrivate: generic before the route is known or for a pre-route code, declared otherwise', () => {
+    expect(credentialMakesPrivate(COOKIE, undefined)).toBe(true);
+    expect(credentialMakesPrivate(COOKIE, ['anonymous'])).toBe(false);
+    expect(credentialMakesPrivate(COOKIE, ['anonymous'], 'UNSUPPORTED_MEDIA_TYPE')).toBe(true);
+    expect(credentialMakesPrivate(COOKIE, ['refresh-cookie'])).toBe(true);
+    expect(credentialMakesPrivate({}, undefined)).toBe(false);
+    expect(credentialMakesPrivate(undefined, undefined)).toBe(false);
   });
 
   it('[SEC-TC-29] a credential is an Authorization header, a refresh cookie or X-Quote-Token, in any header case', () => {
@@ -128,7 +209,16 @@ describe('[SEC-TC-29] responses that must not be stored carry Cache-Control: pri
     expect(requestCarriesCredential({ cookie: 'a=1; __Host-rt_admin=x' })).toBe(true);
     expect(requestCarriesCredential({ 'x-quote-token': 'x' })).toBe(true);
     expect(requestCarriesCredential({ cookie: 'theme=dark' })).toBe(false);
+    expect(requestCarriesCredential({ cookie: undefined, Cookie: ['__Host-rt_web=x'] })).toBe(true);
     expect(requestCarriesCredential(undefined)).toBe(false);
+  });
+
+  it('[D-ARCH-109] with declared kinds, only a credential of a declared kind counts, in any header case', () => {
+    expect(requestCarriesCredential({ AUTHORIZATION: 'Bearer x' }, ['anonymous', 'session'])).toBe(true);
+    expect(requestCarriesCredential({ AUTHORIZATION: 'Bearer x' }, ['refresh-cookie'])).toBe(false);
+    expect(requestCarriesCredential({ 'X-Quote-Token': 'q' }, ['session', 'quote-token'])).toBe(true);
+    expect(requestCarriesCredential({ 'X-Quote-Token': 'q' }, ['anonymous'])).toBe(false);
+    expect(requestCarriesCredential(undefined, ['session'])).toBe(false);
   });
 
   it('[SEC-TC-29] parses directive names from single and repeated header values', () => {

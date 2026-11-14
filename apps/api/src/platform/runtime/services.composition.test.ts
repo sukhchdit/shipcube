@@ -14,7 +14,8 @@ const config = {
   DATABASE_URL: { reveal: () => 'postgres://platform_app@127.0.0.1:1/platform' },
   DB_POOL_MAX: 1,
   DB_IDLE_TIMEOUT_MS: 1_000,
-  DB_CONNECTION_TIMEOUT_MS: 1_000,
+  // At least the tenant-transaction maxWait (2 s): the runner is always built since part 020-B (D-ARCH-104).
+  DB_CONNECTION_TIMEOUT_MS: 2_000,
   DB_STATEMENT_TIMEOUT_MS: 25_000,
   DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
   DB_TX_LOCK_TIMEOUT_MS: 2_000,
@@ -48,6 +49,31 @@ async function until(condition: () => boolean, timeoutMs: number): Promise<void>
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
 }
+
+describe('[D-ARCH-104] runner activation: one composition hands the same kind of runner to the API and the worker', () => {
+  it.each(['api', 'worker'] as const)(
+    'createRuntimeServices(%s) returns a defined tenant-transaction runner; resources close the client',
+    async (service) => {
+      delete process.env['PGOPTIONS'];
+      const services = createRuntimeServices(config, service, capture().log, new Map());
+      try {
+        expect(services.tenantTx).toBeDefined();
+        expect(typeof services.tenantTx.withTenantTx).toBe('function');
+        expect(typeof services.tenantTx.probeFreshConnection).toBe('function');
+        expect(services.resources.map((resource) => resource.name)).toEqual([
+          'session-integrity-monitor',
+          'prisma',
+          'database',
+          'valkey',
+          'object_storage',
+        ]);
+      } finally {
+        services.valkey.disconnect();
+        for (const resource of services.resources.filter((r) => r.name !== 'valkey')) await resource.close();
+      }
+    },
+  );
+});
 
 describe('createRuntimeServices composition (TASK-019: object storage wired into readiness and shutdown)', () => {
   it('readiness reports object_storage unavailable for an unreachable store and logs the class only; resources close it', async () => {

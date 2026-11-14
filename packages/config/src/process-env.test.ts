@@ -94,6 +94,15 @@ describe('process start-up edge (US-002, NFR-OPS-005)', () => {
     expect(stderr).not.toContain('application_name');
   });
 
+  it('[R1-m2] [PR38-SEC-05] a pool connection timeout below the tenant-transaction maxWait exits with EX_CONFIG, naming the key', () => {
+    for (const service of ['api', 'worker'] as const) {
+      const io = captureIo();
+      const env = { ...createTestEnv(), DB_CONNECTION_TIMEOUT_MS: '1999' };
+      expect(() => loadConfigOrExit(service, { env, cwd: tempDir(), io })).toThrow(new ExitCalled(CONFIG_EXIT_CODE));
+      expect(io.written.join('')).toContain('DB_CONNECTION_TIMEOUT_MS: invalid: number.min');
+    }
+  });
+
   const runtime = (execArgv: readonly string[], inspectorActive = false): RuntimeProbe => ({
     execArgv,
     inspectorActive: () => inspectorActive,

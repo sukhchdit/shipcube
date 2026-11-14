@@ -19,7 +19,11 @@ import { inputOf, isPrivateResponse, principalOf, PRIVATE_CACHE_CONTROL } from '
 import type { RouteSlot } from '../routing/slot.js';
 
 export interface ExecuteOptions {
-  /** `RuntimeServices.tenantTx`; undefined until the runtime builds a runner, then every tenant route answers 503. */
+  /**
+   * `RuntimeServices.tenantTx` (always defined since TASK-020 part 020-B, D-ARCH-104). Optional only for test
+   * compositions: createApp refuses a tenant route without it (assertPipelineReady), and this slot answers 503 as the
+   * last line of defence.
+   */
   readonly tenantTx: TenantTxRunner<unknown> | undefined;
   readonly audit?: AuditHook;
 }

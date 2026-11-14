@@ -4,6 +4,7 @@ import Joi from 'joi';
 
 import {
   defineRoute,
+  extensionProblems,
   isDefinedRoute,
   pathParameters,
   RouteDefinitionError,
@@ -324,6 +325,46 @@ describe('[R2-m1] [PR32-SEC-13] schema-level preferences, Joi.link and Joi.exten
       tags: Joi.object({ a: Joi.string() }).prefs({ stripUnknown: true }),
     });
     expect(problemsOf({ method: 'post', schema: { ...base.schema, body } })).toEqual([]);
+  });
+
+  // PR32-SEC-17 (code review R3-n1): the three defensive branches of the walk are what a Joi upgrade leans on; each test
+  // fails when its branch is deleted. Tampered instances stand in for changed Joi internals; they break Joi's own
+  // describe(), so the walk is exercised directly.
+  const tampered = (property: string, value: unknown, schema: Joi.Schema = Joi.object({ name: Joi.string() })): Joi.Schema =>
+    Object.defineProperty<Joi.Schema>(schema, property, { value, configurable: true });
+
+  it('[PR32-SEC-17] fails closed on a schema without $_terms (its children could not be inspected)', () => {
+    for (const terms of [undefined, null, 'renamed']) {
+      expect(extensionProblems(tampered('$_terms', terms), 'schema.body')).toEqual([
+        'schema.body has a Joi schema without $_terms; its children cannot be inspected (Joi internals changed)',
+      ]);
+    }
+    // A nested schema without $_terms is refused as well (the walk reaches it through its parent's terms).
+    const parent = Joi.object({ name: Joi.string(), address: tampered('$_terms', undefined, Joi.object({ city: Joi.string() })) });
+    expect(extensionProblems(parent, 'schema.body')).toContainEqual(expect.stringContaining('without $_terms'));
+    expect(extensionProblems(Joi.object({ name: Joi.string() }), 'schema.body')).toEqual([]);
+  });
+
+  it('[PR32-SEC-17] refuses a schema without _definition even when its type has no built-in definition either', () => {
+    // Without the `definition === undefined` clause, undefined === BUILT_IN_DEFINITIONS.get('custom') would pass it.
+    const schema = tampered('type', 'custom', tampered('_definition', undefined));
+    expect(extensionProblems(schema, 'schema.body')).toContain(
+      'schema.body uses the Joi extension type "custom" (Joi.extend types are not allow-listed)',
+    );
+  });
+
+  it('[PR32-SEC-17] bounds the $_terms walk: a term chain deeper than the bound is refused, not followed', () => {
+    let deep: Record<string, unknown> = {};
+    for (let level = 0; level < 200; level += 1) deep = { next: deep };
+    expect(extensionProblems(tampered('$_terms', { keys: null, deep }), 'schema.body')).toEqual([
+      'schema.body is nested too deeply to inspect',
+    ]);
+  });
+
+  it('[PR32-SEC-17] visits each $_terms object once: a cycle among the terms is accepted, not reported as too deep', () => {
+    const cycle: Record<string, unknown> = { keys: null };
+    cycle['self'] = cycle;
+    expect(extensionProblems(tampered('$_terms', cycle), 'schema.body')).toEqual([]);
   });
 });
 
