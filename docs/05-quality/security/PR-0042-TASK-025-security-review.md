@@ -519,3 +519,338 @@ The union must preserve, and the next round checks:
 | Closed by this PR | SEC-P3-17 (writer layer) |
 | Merge needs from security | This record covers `e7dfbac`. The fix cycle that the code review requires (R1-M1) changes owned paths and voids it, so a round-2 delta and union record on the final head is needed before merge (§7) |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** The audit writer, store and bulkhead do what ADR-0007 am. 10 items 1 to 3 require, and nothing Critical or High is open. Two MEDIUM items are routed with due points: before the first anonymous sign-in route (TASK-052), and before the first production caller of the writer (TASK-029). The head `e7dfbac` is cleared from security's side. The fix cycle that the code review requires needs a round-2 delta and union record on the final head |
+
+---
+
+# Delta round 2 (fix cycle 1 + union, head d2ef478)
+
+| Field | Value |
+|---|---|
+| PR | #42, branch `feat/TASK-025-audit-writer-core`. Since round 1 (`e7dfbac`): this record (`21be73d`), merge of `main` with PR #40 (`b69854a`), fix commits `cd46414` (lint), `5ba9b71` (latch, snapshot, normalisation, guards), `a16ce0f` (manifest names), `01e9809` (coverage), merge of `main` (`7af2ef8`, docs only), lane B evidence (`9262c6c`) and a docs-only merge of `main` (`d2ef478`). Inputs: the PR body (D-TASK025-12..21), comment issuecomment-6873943769, and the code review round 2 that landed on `main` during this round (`f26c335`, CHANGES_REQUESTED, R2-M1; §R2.6) |
+| Head | d2ef478501052ef6e2088268d3b06fb5dd4ab4dd |
+| Code commit / merge base | Code `7af2ef8`; `9262c6c` adds the 7 evidence files only, and `d2ef478` merges `162a132` (docs and `.claude/` only). Merge base with `main`: `162a132` |
+| Lane A evidence | Run [43573446773](https://github.com/sukhchdit/shipcube/actions/runs/43573446773) on `d2ef478` (GitHub merge ref with `47bac24`). `fast-lane` **success** with every step executed, including the lane-B evidence step with the base-ref verifier (`RANGE_BASE` `162a132`: "run 20261114T0713Z_7af2ef8 accepted"), lint, the lint-mutation check, type-check, unit, the base-ref negative fixtures and build. In `scans`, Gitleaks, Semgrep and oasdiff are green; only "Security-owned paths need a review record" failed, which this round answers |
+| Lane B evidence | `docs/05-quality/tests/runs/20261114T0713Z_7af2ef8`, profile `pr`, PASS: api 127, catalog-c1-c14 74, integration 282 (1 skip), unit 4706 (2 skips). `git_sha` `7af2ef8`; only docs and `.claude/` change after it. `lockfile_sha256` equals the head's lockfile hash (recomputed). `manifest_sha256` equals the head's `required-suites.json`. Merged `packages/audit` coverage: lines 1413/1413, branches 433/433 |
+| Owned paths changed | 44 (real checker, base `162a132`): `packages/audit/**` (16), `apps/api/src/platform/db/**` (12), `apps/api/src/platform/audit/**` (3), `tests/fixtures/lint/**` (5), `prisma/**` (3), and one each of `eslint.config.mjs`, `package-lock.json`, `tools/lint/negative-fixtures.test.ts`, `tools/quality/required-suites.json` and `tools/tsconfig.json`. Round 1 had 31; the 13 new ones are the fix cycle's tests, fixtures, the new `apps/api/src/platform/audit/writer.ts`, the manifest and `prisma/tests/rls/tenant-db.real-client.test.ts` |
+| Reviewer / date | security-analyst, 2026-11-14, delta round 2. Read-only on code. Git ran in the main checkout against SHAs, plus a sparse `git clone --shared` in scratch checked out only at real or simulated commits. Probes ran on `git archive` extracts of `d2ef478` and of `e7dfbac` (the positive control), each with a `node_modules` of junctions to the main checkout's and `@platform/*` pointed at the extract. No command, install, build or Docker run in the PR worktree; its only change is this appended section. `.env.example` was not opened (tool policy); it is not in the `e7dfbac..7af2ef8` name list |
+
+## R2.1 Summary
+
+Fix cycle 1 closes what it set out to close, and the probes confirm it against the round-1 head as a positive control:
+
+- **PR42-SEC-02 (MEDIUM) is closed.** In the real `withTenantTx` and `TenantDb` guard over a recording client, every swallowed refusal now rolls back: `INVALID_ENTRY`, `TOKENISER_UNAVAILABLE`, `TOKENISER_FAILED`, `IP_INDEX_FAILED` and `HEAD_MOVED` answer 500, and a swallowed 55P03 answers 503. On `e7dfbac` all of them committed. The new `TenantDb` member exposes nothing but the latch (§R2.4.1).
+- **PR42-SEC-03, -05, -06, -07 and -12 are closed** for the forms round 1 named, plus new bypass forms (Proxies, `ownKeys` flips, look-alike `PiiValue`s, re-exports, aliased imports, `Readonly`/`Pick` port types).
+- **PR42-SEC-04 is narrowed.** The writer now guards `route`, `entity_id` and `ua_parsed`. Routing the JSON-key policy to TASK-028 is acceptable with the verification in §R2.3.
+- **D-TASK025-21 is exact.** The two names equal the gate's cases with classname `unit`. The head verifier requires them, the base-ref verifier does not, and lane A judged this PR with the base-ref manifest.
+- **The union is pure** (three merges re-derived), evidence hygiene holds, and nothing round 1 verified regressed.
+
+New in this round:
+
+- **PR42-SEC-13 (MEDIUM):** the latch only sees failures that happen before the callback returns. A write that is started but not awaited (`void writer.write(…)` or `writer.write(…).catch(…)`, both lint-clean) commits the business change without its entry. This happens deterministically, even with no personal values in the entry.
+- **PR42-SEC-16 (LOW, = code review R2-M1):** `apps/api/src/platform/audit/writer.ts` (`auditWriterFromConfig`, new in the fix cycle) hands the full writer to any api module through a relative import, and 7 of 7 import shapes are lint-clean.
+- **PR42-SEC-15 (LOW):** writer refusals that a client can steer still give a 500. These are two object keys that normalise to the same text, and `ua_parsed` or `entity_id` passed through unvalidated (= code review R2-m1).
+- **PR42-SEC-14 (INFO, = code review R2-n2):** the setter pin's regex comment-stripper is not string-aware, so a second setter between `'/*'` and `'*/'` literals, or on a template line that starts with `//`, passes both pin and lint.
+
+**Findings now open: 2 MEDIUM (01, 13), 3 LOW (04, 15, 16), 5 INFO (08, 09, 10, 11, 14). Closed: 02, 03, 05, 06, 07, 12. Nothing Critical or High. Verdict: PASS_WITH_FOLLOW-UPS** (§R2.10).
+
+The code review round 2 is CHANGES_REQUESTED (R2-M1), so a second fix cycle is certain. It changes owned paths (`eslint.config.mjs`, `tests/fixtures/lint/**`), and that voids this round. A round-3 delta is due on its head (§R2.7).
+
+## R2.2 Method
+
+| # | Probe | Result in |
+|---|---|---|
+| Q1 | TOCTOU matrix (31 cases) through the real `createAuditWriter` with a recording store, a slow tokeniser and a port that records `markRollbackOnly`. It covers the round-1 cases (C1–C2, M1–M6, G1), new forms N1–N20 (Proxies on the entry, origin, values and arrays, an `ownKeys` flip, a look-alike `PiiValue` with a flipping accessor, a tokeniser that mutates what it receives, a subject accessor, a reserved actor id, a deep read counter) and one refusal per failure kind. Run on head and on `e7dfbac` | §R2.3 (03, 02, 12) |
+| Q2 | Latch matrix (20 cases) through the head's real `createWithTenantTx` and `createTenantDb` over a fake Prisma client that records commit or rollback. The callback swallows each failure kind, detaches the write (L8, L8b to L8d), marks a non-Error or a forged branded error, and touches the member (set, define, delete, setPrototypeOf, `ownKeys`, spread, captured reference after settle). Run on head and on `e7dfbac` | §R2.4.1, PR42-SEC-13 |
+| Q3 | ESLint `lintText` with each extract's real config (type-aware rules off): boundaries B1–B10, writer allow-list W1–W12, setter exemption T0–T10 plus E1–E4, T-83 roots K1–K7. Also an exact emulation of the head's pin (`stripComments` + `setterPinViolations`) over every T and E text, and a repo-wide baseline R0–R2 in a module repository | §R2.3 (05, 06, 07), PR42-SEC-14 |
+| Q4 | `wellFormed` against Node 24's `String.prototype.toWellFormed` (300,000 seeded strings weighted to surrogates, a wrong-implementation control) and its time at 8 K / 128 K / 1 M lone surrogates. The column guards ran over 21 shapes through `prepareEntry`, including 32 KB inputs | §R2.3 (04, 12) |
+| Q5 | `tenant-admission.ts` on head: D1 (4,000 random operations), D2, D4 | §R2.5 |
+| Q6 | `check-evidence.mjs` from `162a132` (lane A's base-ref copy), `d2ef478` and `22b0ebd`, on the sparse clone. Plus plumbing scenario commits on `d2ef478` that rename or reclassify the two audit gate cases, with `report_sha256` kept consistent | §R2.4.2 |
+| Q7 | `git merge-tree --write-tree` re-derivation of `b69854a`, `7af2ef8` and `d2ef478`; a deep JSON diff of `main`'s and the head's lockfile (with a control); union simulations of `d2ef478` with `main` `f26c335` (PR #43 merged) and with PR #44's head `443c2f1` | §R2.4.3, §R2.7 |
+| Q8 | Count-only host-fragment scan of the 7 evidence blobs (12 runtime-computed labels; control `.claude/` at `main`: 6 hits) | §R2.4.4 |
+| Q9 | Lint cross-check of code review R2-M1: V0–V9, importing `apps/api/src/platform/audit/writer.ts` from feature code | PR42-SEC-16 |
+| Q10 | Record simulation with `main`'s real checker (§R2.9) | §R2.9 |
+
+No database, Docker or Testcontainers run. The PostgreSQL behaviour of the latch (0 business rows after a swallowed refusal or 55P03) rests on the three new `[PR #42 fix cycle 1]` integration cases, which pass in the evidence.
+
+## R2.3 Round-1 findings: status
+
+| ID | Round 1 | Now | Evidence |
+|---|---|---|---|
+| PR42-SEC-01 | MEDIUM | **Open**, owner now TASK-284 (D-ARCH-120), a dependency of TASK-052 | Code unchanged apart from `unref()` on wait timers (no security effect) |
+| PR42-SEC-02 | MEDIUM | **Closed** | Q2 L1–L7: head rolls back with 500 (or 503 for 55P03); `e7dfbac` committed all seven. Q1: every refusal marks exactly once, and every stored entry marks nothing. Integration: swallowed INVALID_ENTRY gives 500 with 0 business rows; swallowed held-row 55P03 gives 503 with 0 rows. Residual: PR42-SEC-13 |
+| PR42-SEC-03 | LOW | **Closed** | Q1 head: M1–M6, G1, N1–N6, N16 are SAFE (`e7dfbac`: BYPASS for all 13 except N1, which `e7dfbac` refused). The tokeniser receives frozen writer-owned copies, never the caller's object (N6, N7). The deep read counter shows that one path is read twice on head, `actor.roles.length`, against 16 paths on `e7dfbac`. That remainder (N9: a Proxy array reporting length 1 at the `MAX_ROLES` check and 40 when copied; each role is still validated) is in-process only, and it is code review R2-n1 (fix: read `length` once and index-loop) |
+| PR42-SEC-04 | LOW | **Open (narrowed)**: JSON keys → TASK-028; route from the descriptor → TASK-029 | Q4: query strings, e-mail and `%40` segments, trailing slashes and 32 KB routes are refused; e-mail, `+`-phone, spaced and 32 KB entity ids are refused; raw user agents with `;` or `,` are refused; every check runs in under 1 ms. Accepted by design: templates, UUIDs, `Firefox 146 / Windows`. Inherent residuals of shape checks: a lower-case name-like literal segment (`/users/alice.smith`), a bare digit segment, a dotted name or bare phone digits as entity id, `curl/8.4.0` as `ua_parsed`. **Routing the JSON-key policy to TASK-028 (D-TASK025-16) is acceptable.** A writer-side key shape would turn client-keyed maps into the R1-m3 500 lever, and only the differ and redaction know which keys come from client data. Conditions for TASK-028: diffs carry schema field names as keys; client-keyed maps are either tokenised per key or carried as `[{key: PiiValue, value}]`; and a test shows that an e-mail-shaped key in a free-form map does not reach `audit_entries` in clear |
+| PR42-SEC-05 | LOW | **Closed** for the named forms; residual PR42-SEC-14 (INFO) | Q3: T2, T9 and T10 stay lint-silent (the file is exempt for `setter`), but the head pin now fails them, and T1, T3, T4, T5, T7 and T8 too. T0 (the committed store) passes. The pin's self-test has 7 mutants and a drift guard on the rule's pattern |
+| PR42-SEC-06 | LOW | **Closed** for `@platform/audit`; new path PR42-SEC-16 | Q3: W2 (`createPrismaAuditStore`), W3 (`prepareEntry`), W5 (aliased) and W8 (re-export) are reported on head and silent on `e7dfbac`. W6, W7 and W9 (namespace, dynamic, `export *`) are reported on both. Pure helpers (W3b) and types (W4) stay clean by design (D-TASK025-17). The allow-listed folders W10/W11 stay clean, and the web app (W12) now draws the allow-list error as well as boundaries |
+| PR42-SEC-07 | LOW | **Closed** | Q3: K1 (`db: AuditSqlPort` in `packages/audit/src`), K3 (in an identity module), K4 (`Readonly<AuditSqlPort>`) and K5 (`Pick<AuditSqlPort, …>`) draw T-83 on head, but none on `e7dfbac`. K6, a local type alias of the port, stays silent on both; that is the accepted type-name residual of D-ARCH-106 / PR32-SEC-01. K7: the new `apps/api/src/platform/audit/writer.ts` is a whole-file root |
+| PR42-SEC-08 | INFO | Open → TASK-284 (D-ARCH-121) | D4 still accepts a cap of 2^53 − 1 at the factory |
+| PR42-SEC-09 / -10 / -11 | INFO | Open, routing unchanged (TASK-030/031/033/116) | 10: the new `IP_INDEX_FAILED` kind is also lost from the log line when a cause exists (`mapped()` unchanged) |
+| PR42-SEC-12 | LOW | **Closed**; residual PR42-SEC-15 | Q4: `wellFormed` equals `toWellFormed` on 300,000 of 300,000 strings, and the control differs on 2,000/2,000. It is linear (1,048,576 lone surrogates in 50.9 ms). Q1 N12: a lone surrogate is stored as U+FFFD. The integration case recomputes the hash from the stored row (value and key) |
+
+## R2.4 VERIFY items
+
+### R2.4.1 The latch, and what the new `TenantDb` member exposes
+
+Q2 on head (`e7dfbac` in brackets, the positive control):
+
+| Case | Head | `e7dfbac` |
+|---|---|---|
+| L1–L5, L7 swallowed INVALID_ENTRY, TOKENISER_UNAVAILABLE, TOKENISER_FAILED, IP_INDEX_FAILED, HEAD_MOVED; swallow then more SQL | 500 `AUDIT_WRITE_FAILED`, rollback | resolved, commit |
+| L6 swallowed 55P03 | 503 `SERVICE_UNAVAILABLE` / `AUDIT_LOCK_TIMEOUT`, rollback | resolved, commit |
+| L8b detached write refused before its first `await` | 500, rollback (`prepare` runs synchronously and marks) | commit |
+| L8, L8c, L8d detached write (`void` / `.catch`) still running when the callback returns | **resolved, commit; no entry** (the write's next statement gets `TENANT_TX_CLOSED`) | commit |
+| L9 `markRollbackOnly('nope')` | TypeError latched, rollback | member refused |
+| L10 a forged branded error marked by feature code | 503, rollback; its `sqlState` text reaches the `DbError` fields used for logs | member refused |
+| L11 two concurrent transactions, one marked | marked one rolls back, the other commits | — |
+| L12 latch reference kept and called after settle | `TENANT_TX_CLOSED`; the next transaction is unaffected | — |
+| L13 assign, `defineProperty`, `delete`, `setPrototypeOf` on `db` | each refused (`TenantDbAccessError`); `ownKeys` = `$queryRaw`, `$executeRaw`, `markRollbackOnly` | — |
+| L14 a spread copy `{ ...db }` given to the writer | rollback (the copy carries the real latch) | commit |
+| L15 a hand-built port with a no-op latch | commit | commit |
+| L16 / L17 controls (successful write; propagated refusal) | commit / 500 rollback | commit / 500 rollback |
+
+**Exposure assessment.** The member is a closure over the handle's own `rollbackOnly` slot and guard state. It holds no reference to `tx`, cannot read or clear the latch (`rollbackOnly()` lives on the handle, not on `db`), is cached and non-writable through the Proxy, and is refused once the transaction has settled. What feature code can do with it:
+
+- force a rollback, which it can already do by throwing;
+- force a 503 with a forged `Symbol.for` brand (L10), which it can already do by throwing the same object (D-TASK025-19; code review R2-n3). The brand confers no capability, but a forged brand's `sqlState` skips the `SQLSTATE` shape check that real errors get. It reaches the redacting log path only, never the response.
+
+**L15 is not a defect of the latch.** A caller that builds its own port with a no-op latch is deliberately skipping the control, which is equivalent to not calling the writer. The structural port cannot prevent that. PR42-SEC-16's boundary on who may hold a writer is the relevant control. **L8 is a defect** (PR42-SEC-13).
+
+### R2.4.2 D-TASK025-21: the gate names
+
+- **Exact names.** `unit.required_cases` gains exactly `coverage gate: packages/audit lines` and `coverage gate: packages/audit branches`. The evidence's `unit.junit.xml` carries both as passing cases with `classname="unit"` (lines 4685–4686). The `coverage gate (US-006) …` titles from `tools/ci/coverage-gate.test.ts` use the prefix `coverage gate (`, not the reserved `coverage gate:`, so they are not decoys.
+- **Q6.** All three verifier copies accept the run. Scenario S1 (both audit cases renamed with a suffix) is accepted by the base-ref copy (`main`'s manifest does not require them) and rejected by the head copy with exactly the two required-case reasons. S2 (exact names, classname `Unit`) and S3 (exact names, a test file's classname) are rejected by both copies: the decoy rule of D-SEC-PR40-02 applies, and the head copy adds the required-case reasons. The head copy also rejects four older runs of other PRs for the missing audit names (positive control).
+- **The names bind from the next PR on.** Lane A extracts `git archive "$RANGE_BASE" tools/quality` (`ci.yml:215-216`), and the run log shows the base-ref copy at `162a132` accepted this run. This PR therefore cannot self-activate a requirement its own evidence misses (the D-TASK024-16 trap), and later PRs are bound.
+- **Position:** accepted, with qa-lead's acknowledgement pending as the PR asks.
+
+### R2.4.3 The union is pure; lane A on the base-ref manifest
+
+- **Merges.** Each of `b69854a`, `7af2ef8` and `d2ef478` equals `git merge-tree --write-tree <p1> <p2>`. After `9262c6c` only `docs/` and `.claude/` change.
+- **§7 item 1, `eslint.config.mjs`.** `main` did not touch it between `2dd6958` and `22b0ebd`. The head's delta against `e7dfbac` is the four fix-cycle hunks. The exact-file setter entry is still last in `TENANT_CONTEXT_EXEMPTIONS` (line 216). `package-audit` (278) and `prisma-tests-audit` (291) sit after their parents, and the single policy is at line 448. B1–B10 give the round-1 results on head.
+- **§7 item 2, `package-lock.json`.** The head's lockfile is byte-identical to `e7dfbac`'s (`3782ae2e…`), and `main`'s is unchanged since `2dd6958` (`f0d07b62…`). The deep diff against `main` is exactly 1 leaf, `packages["prisma"].devDependencies["@platform/audit"] = "0.0.0"`, and the control mutation was seen. D-SEC-PR23-02 interim statement: `node_modules/ajv` is `8.20.0`, `https://registry.npmjs.org/ajv/-/ajv-8.20.0.tgz`, MIT, with integrity equal to `main`'s. There are 15 `link: true` entries, all `node_modules/@platform/*`, and **no non-`@platform` `link: true` entry**.
+- **§7 item 3, `tools/tsconfig.json`.** Unchanged since `e7dfbac`: the `tenant-admission.ts` entry (line 32) and the `../packages/audit` reference (line 47). `prisma/package.json`, `packages/config/**` and `packages/shared/src/errors/**` are unchanged too.
+- **§7 item 4, `with-tenant-tx.ts`.** Admission still wraps the whole `$transaction`, keyed by `admissionKeyOf(values[0], values[2])` from the validated values. `mapped()` checks `isAuditWriteError` first and logs only through `onDbError`. The latch check sits inside `$transaction`, after `await fn(...)` and before `return`, with `revoke()` in `finally`.
+- **Lane A** verified the evidence with the base-ref verifier and manifest (R2.4.2).
+
+### R2.4.4 Evidence hygiene (D-SEC-PR23-02)
+
+- **Gate table.** The PR body's gate table states verbatim that "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first" and that "`.git/info/exclude` is empty" (0 bytes).
+- **Run.** Profile `pr`, `git_dirty: false`, `build_clean: true`, `env_overrides` empty.
+- **Host-path scan** (12 labels, count-only): **0** over the 7 files. Control: 6 hits in `.claude/` at `main`.
+- **Lockfile.** `lockfile_sha256` equals the recomputed SHA-256 of the head's `package-lock.json`.
+- **Correction to round 1 and the PR body.** The one integration skip is `SPK-03 (d) set_config overhead`, an opt-in benchmark (`SPK03_BENCH=1`). It is not "the parked SEC-TC-43 migrator case". The same case was the skip in round 1's run, so round 1's header row repeated the error. All four SEC-TC-43 cases pass in both runs. Nothing depends on the wrong label.
+
+### R2.4.5 Nothing regressed from round 1
+
+- **Chain coverage.** `entry-hash.ts` (canonical object, 35 columns) is unchanged since `e7dfbac`. The 20 `audit-writer.int.test.ts` cases pass, including the recompute-from-database checks and the U+FFFD row.
+- **Immutability.** No `.sql`, grant or DDL change. The `platform_app` 42501 and `AUDIT_IMMUTABLE:` case passes.
+- **Generic error bodies.** `auditDbErrorMapping`, `map-db-error.ts` and the error catalogue are unchanged, and the 4 `audit-failure.api.test.ts` cases pass. The original failure is still held in the `WeakMap`.
+- **No permit leak.** Q5 D1: 4,000 operations; 2,275 ran and 1,725 were refused (95 `wait`, 1,630 `depth`). No key exceeded its cap, and the end state was inflight `{0,0,0}`, queued 0 and keys 0. D2: a saturated tenant leaves another tenant admitted in 0.1 ms.
+- **SYSTEM shard.** The default is still `randomInt(16)` (`writer.ts` unchanged there).
+
+## R2.5 New findings
+
+| ID | Title | Severity | CWE | OWASP | Location | Owner / due | Status |
+|---|---|---|---|---|---|---|---|
+| PR42-SEC-13 | A detached (not awaited) audit write commits the business change without its entry; the latch only sees failures raised before the callback returns | MEDIUM | CWE-778 | A09:2021 | `apps/api/src/platform/db/with-tenant-tx.ts:412-419`; `apps/api/src/platform/db/tenant-db.ts:409-413`; `packages/audit/src/writer.ts:97-109` | senior-developer: this PR's fix cycle 2, else before TASK-029 merges (its `record` + `flush` design); TASK-047 for the job port | Open |
+| PR42-SEC-14 | The setter pin's comment-stripper is not string-aware: a second setter between `'/*'` and `'*/'` literals, or on a template line led by `//`, passes pin and lint (= code review R2-n2) | INFO | CWE-693 | A04:2021 | `packages/audit/src/store/prisma-store.test.ts:215` | senior-developer (fix cycle 2) or TASK-030 with D-TASK025-18's lint-level option | Open |
+| PR42-SEC-15 | Writer refusals a client can steer still answer 500: keys that normalise to the same text; `ua_parsed` / `entity_id` passed through unvalidated (≈ code review R2-m1) | LOW | CWE-20 | A04:2021 | `packages/audit/src/entry.ts:336-344, 467-471, 488, 516` | TASK-029 (AC) and TASK-028 (keys), before TASK-029 merges | Open |
+| PR42-SEC-16 | `auditWriterFromConfig` re-exports the writer from an allow-listed folder; any api module imports it lint-clean (= code review R2-M1) | LOW | CWE-284 | A04:2021 | `apps/api/src/platform/audit/writer.ts:13`; `eslint.config.mjs:121-131, 825`; `tools/eslint-rules/audit-writer-allowlist.mjs` | senior-developer: this PR's fix cycle 2 (the code review's MAJOR makes it certain) | Open |
+
+### PR42-SEC-13 (MEDIUM): a detached write escapes the latch
+
+- **Description.** `withTenantTx` reads the latch once, right after `await fn(handle.db)` resolves, and then revokes the handle. A write the callback starts but does not await is still running at that point. Its next statement gets `TENANT_TX_CLOSED`. The writer's own `catch` then calls `markRollbackOnly` on the closed handle, which throws `TENANT_TX_CLOSED` again and replaces the audit error. The transaction has already committed. Both lint-clean spellings do this: `void writer.write(db, e)` (`no-floating-promises` ignores `void` by default) and `writer.write(db, e).catch(log)` (a handled promise).
+- **Probe Q2.**
+  - L8: a slow tokeniser that succeeds gives commit, and no entry.
+  - L8c: a tokeniser that fails after the callback returned gives commit; the detached promise settles as `TENANT_TX_CLOSED`.
+  - L8d: no personal values and a store that issues two statements gives commit; `append` never completes. This is deterministic, not a race window.
+  - Control L8b: a refusal raised before the write's first `await` rolls back, because `prepare` marks synchronously.
+- **Exploitability / impact.** It takes a developer's missing `await` in one of the allow-listed callers. The JSDoc forbids it, but nothing enforces it. "Best-effort" audit writes (sign-in failures, views) invite the fire-and-forget spelling, though there it costs only that entry; inside a mutating transaction it costs the business change's entry. The impact is High, as for PR42-SEC-02: a mutation without its entry breaks O4 and REQ-AUDIT-004. The likelihood is Low: no caller exists yet, and TASK-029's designed `flush` is awaited. That gives **MEDIUM**. The generated audit-completeness suite (TASK-033, before G3) would catch it per route, but that suite is still `planned`.
+- **Remediation (track in-flight writes on the handle; withTenantTx settles them before deciding).**
+
+  ```ts
+  // tenant-db.ts: the latch gains a tracker; feature code calling it can only delay the commit (bounded by the tx timeout).
+  export interface TenantDbLatch {
+    markRollbackOnly(failure: Error): void;
+    track<T>(work: Promise<T>): Promise<T>;
+  }
+  const pending = new Set<Promise<void>>();
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    if (state.closed) throw closedError();
+    const settled = work.then(() => undefined, () => undefined);
+    pending.add(settled);
+    void settled.finally(() => pending.delete(settled));
+    return work;
+  };
+  // handle: settle: async () => { while (pending.size > 0) await Promise.all([...pending]); }
+
+  // with-tenant-tx.ts, inside the $transaction callback
+  const result = await fn(handle.db);
+  await handle.settle();                      // a detached write finishes, or marks, before commit
+  const latched = handle.rollbackOnly();
+  if (latched !== undefined) throw latched;
+  return result;
+
+  // writer.ts
+  write: (db, entry) => db.track(writeOnce(db, entry)),   // AuditSqlPort gains the required `track`
+  ```
+
+  Add the `track` key to the `ownKeys` pins (`tenant-db.test`, `system-db.test`, `tenant-db.real-client.test`). TASK-047's job port implements both members.
+- **Verification.** Unit tests: L8 (`void writer.write` with a 20 ms tokeniser) commits only after the entry is appended; L8c (the tokeniser fails after the callback returned) rolls back with 500; L8d rolls back or completes, but never commits without the entry. Integration case (as `platform_app`): the callback inserts a business row, starts `writer.write(...).catch(() => {})` without `await` and returns. Afterwards the business row exists only together with its entry.
+
+### PR42-SEC-14 (INFO): the pin's comment-stripper is not string-aware
+
+- **Description.** The pin strips `/*…*/` and whole-line `//` comments with regexes before counting `set_config`. Those regexes also strip text inside string and template literals.
+- **Probe Q3.**
+  - E1 appends `SELECT '/*', pg_catalog.set_config(${k}, ${v}, true), '*/'` (valid SQL).
+  - E2 puts the setter on a template line that starts with `//` after a newline inside a SQL string literal.
+  - E4 is E1 in upper case.
+  - All three are lint-silent (`setter` is exempt in this file, and `keys` needs a literal `app.`) and **pass** the head pin.
+  - E3, `UPDATE pg_catalog.pg_settings SET setting = ${v} WHERE name = ${k}`, passes too, but that is repo-wide (below).
+- **Why INFO.** It needs a deliberately disguised edit of a CODEOWNED file under a security record. The same author can already hide a setter from `platform/tenant-context-sql` anywhere in the repository by dynamic SQL: R2, a DO block with a concatenated function name and key, is lint-silent in a module repository. So the pin is not the binding control; owned-path review is.
+- **Remediation.** Count over the raw source: no comment in `prisma-store.ts` contains the setter name, as the code review checked. Alternatively strip comments with the TypeScript scanner. Add E1 and E2 to the self-test mutants. D-TASK025-18's lint-level `allowSetterKeys` remains the structural option for TASK-030.
+- **Repo-wide note for PR44-SEC-05 (020-D, not this PR).** `UPDATE pg_catalog.pg_settings … WHERE name = ${k}` is a session-level `SET` with a bound key. It and a DO-block `EXECUTE` with a concatenated setter name (R1, R2) are invisible to every lint rule in a module repository. Add both shapes to the D-ARCH-124 scanner's scope; the next-checkout leak probe (`hasLeakedContext`) stays the run-time backstop for `app.*` keys.
+
+### PR42-SEC-15 (LOW): writer refusals a client can steer
+
+- **Description.** The fix cycle removed the lone-surrogate 500, but three refusals that a client can steer remain:
+  - **Key collision.** A JSON object with two keys that normalise to the same text, such as `k` plus U+D800 and `k` plus U+DBFF, is refused with INVALID_ENTRY (Q1 N13). `JSON.parse` keeps both keys, so a client-keyed map reaching a diff answers 500.
+  - **`uaParsed` and `entityId`.** If the capture hook passes a parser's family, or a path parameter before validation, a client can shape either value into a refusal (code review R2-m1).
+  - **jsonb business columns.** The same JSON body may already fail in the business insert, by reasoning, not probed (no database this round). Prisma serialises a jsonb value with `JSON.stringify`, which escapes a lone surrogate, and PostgreSQL's json parser refuses an unpaired surrogate escape (22P02).
+- **Exploitability / impact.** Same as PR42-SEC-12: a client-controlled 5xx that feeds `ROLLBACK_TRIGGERS`. No data effect. Today it depends on how TASK-028/029 build entries. Impact L × likelihood H if a caller passes raw values gives **LOW**.
+- **Remediation.**
+  - **TASK-029 AC.** The capture hook passes `uaParsed` only when the parser output matches the writer's shape, else `null`. `entityId` is a validated id, else `null` on DENIED and pre-validation entries. The JSON body boundary answers 400 for NUL **and for lone surrogates in strings and keys** (this extends D-TASK025-13's NUL item).
+  - **TASK-028.** Client-keyed maps never reach a diff as raw keys (also covers PR42-SEC-04).
+  - The writer may keep refusing; the refusal then only fires on server bugs.
+- **Verification.** Api tests: a body with a colliding key pair, a crafted `User-Agent` and an e-mail path parameter each answer 400 or the route's normal status, never 500.
+
+### PR42-SEC-16 (LOW): the writer is reachable through `apps/api/src/platform/audit/writer.ts`
+
+- **Description.** `platform/audit-writer-allowlist` recognises the writer by `@platform/audit` export names and by a specifier ending in `audit/src/writer`. The new composition module sits in an allow-listed folder, so the rule is off inside it. Nothing polices who imports it, and it returns a full writer over the Prisma store.
+- **Probe Q9** (head config, importer `apps/api/src/modules/quotes/service/`).
+  - V0, the control (`createAuditWriter` from `@platform/audit`), is reported.
+  - These are all **CLEAN**: V1 (named import of `../../../platform/audit/writer.js`), V2 (namespace import), V3 (dynamic `import()`), V4 (re-export), V5 (from a repository), V6 (the `platform/./audit` spelling) and V7 (from a file at the app root).
+  - V8 (the allow-listed identity module) and V9 (type-only import) are clean by design.
+  - This confirms code review R2-M1 independently.
+- **Exploitability / impact.** Feature code can append any validated entry (any action, actor or outcome) to its tenant's chain. That is a forged or misleading audit trail, and it defeats REQ-AUDIT-001's "writer only from allow-listed callers". It needs a developer's import, under review. Impact M × likelihood L gives **LOW**, the same reasoning as PR42-SEC-06. TASK-029 will add more capabilities to this folder.
+- **Remediation.** Choose one of the code review's two fixes and keep the fixtures in either case.
+  - **Preferred: a resolved-file boundaries policy.**
+
+    ```js
+    // eslint.config.mjs (sketch in the file's own policy style): categories accumulate
+    { pattern: 'apps/api/src/platform/audit/**', category: 'api-platform-audit' },
+    ...AUDIT_WRITER_ALLOW_LIST.map((pattern) => ({ pattern, category: 'audit-writer-caller' })),
+    { from: { file: { categories: { anyOf: ['api-module'], noneOf: ['audit-writer-caller', 'test'] } } },
+      disallow: { to: { file: { categories: 'api-platform-audit' } } }, importKind: 'value',
+      message: 'REQ-AUDIT-001: the audit writer composition is imported only by allow-listed callers' },
+    ```
+
+  - **Alternative: a rule arm.** The rule resolves a relative specifier with `path.posix.normalize(path.posix.join(dirname(file), spec))` and reports any target under `apps/*/src/platform/audit/`.
+  - **Fixtures.** A negative one for each of V1, V3, V4 and V6, a positive one from an allow-listed module, and a self-check that deleting the policy turns the negative fixtures green.
+- **Verification.** V1–V7 reported, V0 still reported, V8 and V9 clean, and the head's real files lint clean.
+
+## R2.6 Code review round 2 (`f26c335`, CHANGES_REQUESTED): alignment
+
+| Code review item | Security view |
+|---|---|
+| R2-M1 (MAJOR) writer re-exported from `apps/api/src/platform/audit/` | Same defect as PR42-SEC-16, found independently (Q9). Concur: fix in this PR |
+| R2-m1 (MINOR) client-shapeable `uaParsed` / `entityId` give 500 | Part of PR42-SEC-15, which adds the key-collision refusal and the jsonb boundary item |
+| R2-n1 `actor.roles` read twice / own `map` | Same as Q1 N9 (§R2.3, 03). In-process only; fix welcome in cycle 2 |
+| R2-n2 pin hides a setter between `'/*'` and `'*/'` | Same as PR42-SEC-14 (E1), plus the `//`-line form E2 |
+| R2-n3 brand untested and forgeable | Concur. Q2 L10 shows a forged brand maps only to the generic 503 and rolls back; no capability beyond throwing |
+| Latch "sound, 7/7 mutants" | Concur for awaited writes. The detached write (PR42-SEC-13) is outside its mutants |
+
+## R2.7 Sequencing: what voids this round
+
+The record checker voids a round when an owned path that the PR changes changes after the named commit (rule (d)). Paths that only `main` changes do not void it.
+
+1. **Docs-only commits after this record:** valid (simulated, S4).
+2. **Fix cycle 2** (code review R2-M1 and PR42-SEC-16) changes `eslint.config.mjs` and `tests/fixtures/lint/**`. That **voids this round**, and round 3 is a delta: Q9 (V0–V9 plus the fixture spellings), Q3 W and B rows, the self-check mutant, plus Q1/Q2 if PR42-SEC-13/-14/R2-n1 ride the cycle, fresh lane B evidence, and the record simulation.
+3. **A later merge of `main`.**
+   - **PR #45's files alone** (`.gitleaks.toml`, `tools/ci/sec-static.test.ts`, `tools/quality/gitleaks-baseline.txt`) do **not** void the record, because this PR changes none of them (S5 passes). They do make the lane B run stale: `check-evidence` rejects `7af2ef8` against a union head (S9). So fresh evidence is needed after such a merge, but no new security round.
+   - **But `main` has moved past that.** Its tip when this round was written was `e2d0fa2` (only docs after `cc2a57d`), and it contains PR #43 (`cc2a57d`), which changes `eslint.config.mjs` and `tools/lint/negative-fixtures.test.ts`. Both are paths this PR changes. **Any merge of current `main` voids this round** (S5b). The union itself is clean: `merge-tree` `c799a11`, with this PR's allow-list, T-83, exemption, category and policy lines intact. It needs a merge-only check of §7 items 1–5, or it folds into round 3.
+   - **qa-lead's `rls-cross-tenant` activation PR** (D-ORCH-071/074) edits `tools/quality/required-suites.json`. Once on `main`, a merge of it voids this round too (a different line of the same owned file, so the textual merge is clean).
+4. **PR #44 (020-C, open at `443c2f1`).** The union is **not** textually clean: `tools/lint/negative-fixtures.test.ts` conflicts, because both PRs add rows. `with-tenant-tx.ts`, `db/index.ts` and `eslint.config.mjs` auto-merge correctly. In the simulated union, the `readOnly` statement precedes `createTenantDb` (line 419/420), the latch check follows `fn` (425), admission wraps `$transaction` (436), and `TENANT_TX_HANDLE_TYPES` keeps `AuditSqlPort`. Whichever PR merges second:
+   - keeps both PRs' fixture rows;
+   - switches `execute-phases.test.ts`'s stand-in reason `TRANSACTION_UNAVAILABLE` to `TENANT_CONCURRENCY_LIMIT`;
+   - keeps one admission permit per phase transaction. The latch is per handle, so a phase cannot latch another;
+   - adds `markRollbackOnly` (and `track`, if PR42-SEC-13 lands) to any `Reflect.ownKeys(db)` pin. PR #44's changed files hold none today;
+   - takes the union of the `db/index.ts` exports (`TenantTxCallOptions`).
+   It voids whichever record it lands on.
+5. **PR #39 (TASK-014, open at `7dd3c64`):** unchanged from round 1: `GUARDS.length === 15`, the `variable` argument in the admission `TenantTxConfigError`s, and images that ship `packages/audit` with `canonicalize`.
+
+## R2.8 Checks owed (routed; updates §8)
+
+| Owner | Check | Due |
+|---|---|---|
+| senior-developer (fix cycle 2) | PR42-SEC-16 (= R2-M1) with fixtures and self-check; PR42-SEC-13 `track` + settle (or explicitly routed to TASK-029); PR42-SEC-14 raw-source count and E1/E2 mutants; R2-n1 `roles` index loop; R2-n3 brand test | Fix cycle 2; else the §R2.5 due points |
+| TASK-029 (capture middleware) | PR42-SEC-15 AC (`uaParsed`/`entityId` null unless valid; 400 for NUL and lone surrogates in JSON strings and keys); PR42-SEC-13 if not taken in cycle 2 (`flush` awaited and tracked); route = descriptor template (04) | Before TASK-029 merges |
+| TASK-028 (tokeniser, redaction) | JSON-key policy with the 04 verification (no e-mail-shaped key in clear); no external I/O in `tokenise` (07 lint now enforces it for `AuditSqlPort` parameters) | Before TASK-028 merges |
+| TASK-047 (worker twin) | The job port implements `markRollbackOnly` (and `track`); worker anonymous class (01) | Before TASK-047 merges |
+| TASK-020 part 020-D (PR44-SEC-05) | Add `UPDATE pg_settings` and DO-block concatenated setters to the D-ARCH-124 scanner scope | With 020-D, before G3 |
+| TASK-284 / TASK-285 | PR42-SEC-01 and -08 (D-ARCH-120/121); CHECK widening for `MFA_RECOVERY_USED` / `SESSION_REVOKED` (D-ARCH-119) | Before TASK-052 merges / before the first emitter |
+| qa-lead | Acknowledge D-TASK025-21 | Activation PR |
+| TASK-030 / -031 / -033 / -116 | 09, 10 (now including `IP_INDEX_FAILED`), 11 as in §8; the audit-completeness generator also asserts PR42-SEC-13's property per route | As in §8 |
+
+## R2.9 Record simulation and secret hygiene
+
+**Setup.** `main`'s real `tools/ci/check-security-owned-paths.mjs` (`git archive` of `main` `f26c335`, and of `162a132` for lane A's base-ref copy) ran against the sparse shared clone (`/.github/`, `/docs/05-quality/`, `/tools/`, `/package*.json`). Scenario commits were built with plumbing on `d2ef478`, and the record under test is this file. Nothing was written to the main repository's refs or to the PR worktree. In S5 to S9 the union commits were made with `merge-tree --write-tree` plus `commit-tree`.
+
+| Scenario | Base → head | Expected | Result |
+|---|---|---|---|
+| S0 round-1 record only (as committed at `d2ef478`) | `162a132` → `d2ef478` | missing | missing (names `e7dfbac`; 29 owned paths changed after it) |
+| S1 this record committed on `d2ef478` | `162a132` → S1 | pass | **pass**, 44 owned paths, satisfied by `d2ef478` |
+| S1b S1 with lane A's base-ref checker copy (`162a132`) | `162a132` → S1 | pass | pass |
+| S2 same tree, `--pr 40` | `162a132` → S1 | missing | missing |
+| S3 owned edit after the record (`packages/audit/src/writer.ts`) | `162a132` → S3 | missing | missing |
+| S3b owned edit after the record (`tools/quality/required-suites.json`) | `162a132` → S3b | missing | missing |
+| S4 docs-only commit after the record | `162a132` → S4 | pass | pass |
+| S5 union with `22b0ebd` (PR #45 files) | `22b0ebd` → S5 | pass | pass |
+| S5b union with `main` `f26c335` (PR #43: `eslint.config.mjs`, `negative-fixtures.test.ts`) | `f26c335` → S5b | missing | missing |
+| S6 the last Verdict row FAIL | `162a132` → S6 | missing | missing |
+| S7 the Head row names `main`'s tip | `162a132` → S7 | missing | missing |
+| S9 `check-evidence` (head copy) on the S5 union | `22b0ebd` → S5 | stale | `20261114T0713Z_7af2ef8` rejected as stale (3 paths: `.gitleaks.toml`, `tools/ci/sec-static.test.ts`, `tools/quality/gitleaks-baseline.txt`) |
+
+**Secret hygiene of this section.**
+- It quotes no secret, no OS user name and no host path; probe sentinels were random and are not quoted.
+- The Gitleaks v8.30.1 default-ruleset emulation reports 0 findings over the appended lines. Its runtime positive controls (a GitHub PAT, an AWS key ID and a generic key) fired.
+- The count-only host scan reports 0 over this file.
+
+## R2.10 Proposed decision entry (for the orchestrator; DECISIONS.md not edited)
+
+**D-SEC-PR42-02 · 2026-11-14 · security-analyst (logged by orchestrator) · PR #42 (TASK-025) delta round 2 at d2ef478: PASS_WITH_FOLLOW-UPS**
+
+- **Decision:** PR #42 delta round 2 at `d2ef478` (fix cycle 1 + union with PR #38/#40) = PASS_WITH_FOLLOW-UPS. Nothing Critical or High.
+- **Closed, each probed against `e7dfbac` as the positive control:**
+  - **PR42-SEC-02.** Swallowed INVALID_ENTRY, TOKENISER_UNAVAILABLE, TOKENISER_FAILED, IP_INDEX_FAILED and HEAD_MOVED now roll back with 500, and a swallowed 55P03 with 503 (all committed before). The new `TenantDb` member is a non-writable closure with no `tx` reference, refused after settle.
+  - **PR42-SEC-03.** 13 bypass forms, including Proxies, `ownKeys` flips and look-alike `PiiValue`s, are now SAFE.
+  - **PR42-SEC-05** (named forms), **-06** (`@platform/audit` names, aliases, re-exports) and **-07** (`AuditSqlPort`, `Readonly`/`Pick` forms).
+  - **PR42-SEC-12.** `wellFormed` equals `toWellFormed` on 300,000 of 300,000 strings, and is linear.
+- **Narrowed:** PR42-SEC-04. The writer guards route, entity id and `ua_parsed`. Routing the JSON-key policy to TASK-028 (D-TASK025-16) is accepted, with a test that no e-mail-shaped key reaches the row in clear.
+- **New:**
+  - **PR42-SEC-13 (MEDIUM).** A detached (`void` or `.catch`, lint-clean) write commits the business change without its entry, deterministically. Fix: track in-flight writes on the handle and settle them before the latch check. Owner: fix cycle 2, else before TASK-029 merges; TASK-047 for the job port.
+  - **PR42-SEC-14 (INFO, = R2-n2).** The setter pin's regex stripper is fooled by `'/*'`…`'*/'` literals and by `//`-led template lines. Fix: count over the raw source.
+  - **PR42-SEC-15 (LOW, ⊇ R2-m1).** Colliding normalised keys and unvalidated `uaParsed`/`entityId` are client-steerable 500s. Fix: TASK-029 AC (null unless valid; 400 for NUL and lone surrogates in JSON strings and keys) and TASK-028.
+  - **PR42-SEC-16 (LOW, = R2-M1).** `auditWriterFromConfig` is importable by any api module (7/7 shapes lint-clean). Fix: a resolved-file boundaries policy, with fixtures, in fix cycle 2.
+  - **Repo-wide note for PR44-SEC-05 / 020-D:** `UPDATE pg_settings` and DO-block concatenated setters are invisible to every lint rule.
+- **D-TASK025-12..21:** all accepted. 16 with the TASK-028 condition; 17 incomplete until PR42-SEC-16 is fixed; 19's brand is forgeable but confers only the generic 500/503; 21 is exact (classname `unit`; the head verifier rejects a run without the cases while the base-ref verifier accepts it, so the names bind from the next PR on).
+- **Union and evidence:**
+  - The union is pure (three merges re-derived).
+  - The lockfile is one leaf (ajv 8.20.0, no non-`@platform` `link: true`).
+  - Evidence `20261114T0713Z_7af2ef8`: the verbatim D-SEC-PR23-02 statements are present, the host scan is 0 and the lockfile hash matches.
+  - Correction: the integration skip is the opt-in `SPK-03 (d)` benchmark, not SEC-TC-43.
+- **Sequencing:**
+  - The code review's R2-M1 fix cycle voids this round, so a round-3 delta is due on its head.
+  - A merge of `main` voids it too, now that `main` holds PR #43 (`eslint.config.mjs`, `negative-fixtures.test.ts`). PR #45's files alone would not, but they would make the lane B evidence stale.
+  - The PR #44 union conflicts in `negative-fixtures.test.ts`.
+- **Reversibility:** High.
+
+## R2.11 Verdict (round 2)
+
+| Item | Value |
+|---|---|
+| Critical / High / Medium | 0 / 0 / 2 (PR42-SEC-01 → TASK-284 before TASK-052; PR42-SEC-13 → fix cycle 2, else before TASK-029) |
+| Low | 3 open: PR42-SEC-04 (narrowed), -15, -16 |
+| Info | 5 open: PR42-SEC-08, -09, -10, -11, -14 |
+| Closed by this round | PR42-SEC-02, -03, -05, -06, -07, -12 |
+| Merge needs from security | This round covers `d2ef478` and any later docs-only head. The code review's fix cycle 2 (R2-M1 = PR42-SEC-16) and any merge of current `main` change owned paths and void it. A round-3 delta (§R2.7 item 2, plus the §7 union checks if `main` is merged) is due on the final head |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** Fix cycle 1 closes PR42-SEC-02, -03, -05, -06, -07 and -12 under probing. Nothing Critical or High is open. PR42-SEC-13 (MEDIUM) and -16 (LOW) are best fixed in the fix cycle 2 that the code review already requires; the rest are routed with due points. The head `d2ef478` is cleared from security's side |
