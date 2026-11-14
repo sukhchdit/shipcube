@@ -42,6 +42,11 @@
 /tools/db/lint-migrations.ts            @sukhchdit
 /tools/authz/                           @sukhchdit
 /tools/db/audit-ddl-reviewers.json      @sukhchdit
+# The generated Prisma client package (D-ARCH-103 (7)): the `exports` map decides what is importable, the generator
+# block decides the emitted shape, and generated.ts is the one value importer of the client.
+/prisma/package.json                    @sukhchdit
+/prisma/schema/_base.prisma             @sukhchdit
+/apps/api/src/platform/db/generated.ts  @sukhchdit
 # The O4 oracles and assertions outside the bootstrap SQL (PR24-SEC-04): the whole prisma tree (schema, sql/grants
 # manifest, audit/catalog/health tests, seeds), every tools/db helper (shadow-init, sql-text tokenizer, table classes),
 # the Prisma config that loads at every deps:rebuild, and the API platform layer (health checks, catalog reader, db).
@@ -50,12 +55,22 @@
 /tools/db/                              @sukhchdit
 /prisma.config.ts                       @sukhchdit
 /apps/api/src/platform/                 @sukhchdit
+# The worker's database platform (PR38-SEC-02): the D-ARCH-103 value allowance for the generated client covers every
+# app's platform/db, so a second composition there needs a record too.
+/apps/worker/src/platform/db/           @sukhchdit
 # Vite configs run in the build and in typegen before any later gate (PR4-SEC-13 item 3).
 /apps/*/vite.config.ts                  @sukhchdit
 # Server-controlled ids and the reserved actors (PR26-SEC-07), and every workspace manifest: their `scripts` run in
 # lane A's typegen and build before the later gates (PR26-SEC-07, PR4-SEC-13).
 /packages/shared/src/ids/               @sukhchdit
 **/package.json                         @sukhchdit
+# The credential-kind predicate (D-ARCH-109: which credential headers the authn slot reads and when a response is
+# private) and the SEC-TC-29 oracles: the declared-credential Cache-Control helper, the contract response validator and
+# the contract stubs (PR38-SEC-06, PR #38 code review R1-m6).
+/packages/shared/src/http/              @sukhchdit
+/tests/api/helpers/cache-control.ts     @sukhchdit
+/tests/api/helpers/contract-validator.ts @sukhchdit
+/tests/contract-stubs/                  @sukhchdit
 
 # Authorisation, audit and the configuration key register
 /packages/authz/                        @sukhchdit

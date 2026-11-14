@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "//": "The generated Prisma client as a composite project (D-ARCH-102 (2); TASK-020 part 020-B): compiles the git-ignored prisma/generated/prisma (npm run db:generate) into prisma/dist/client, which the `default` condition of the `@platform/prisma/client` export serves at run time. Referenced by apps/api and tools; deliberately NOT in the root tsconfig.json (tools/repo/root-scripts.test.ts pins that list). No references: the generated code imports only @prisma/client and node builtins.",
+  "compilerOptions": {
+    "rootDir": "../generated/prisma",
+    "outDir": "../dist/client",
+    "tsBuildInfoFile": "../dist/client/.tsbuildinfo",
+    "sourceMap": false,
+    "declarationMap": false
+  },
+  "files": [],
+  "include": ["../generated/prisma/**/*.ts"]
+}

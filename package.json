@@ -18,6 +18,7 @@
   "scripts": {
     "deps:rebuild": "node tools/deps/rebuild.mjs",
     "db:bootstrap": "tsx tools/db/bootstrap.ts",
+    "db:generate": "node tools/deps/prisma-cli.mjs generate",
     "db:migrate": "node tools/deps/prisma-cli.mjs migrate dev",
     "db:migrate:deploy": "node tools/deps/prisma-cli.mjs migrate deploy",
     "db:reset": "tsx tools/db/reset.ts",

@@ -23,9 +23,11 @@
  *    and the 5-minute integrity re-check must not make readiness flap back to ready). A tampered tenant-context
  *    default found by the integrity guard latches as well.
  *
- * The generated client: apps/* cannot import it yet (data-model §7.2, the alias is a principal-architect call), so
- * `Client` is optional and the API and the worker run without a runner until the first consumer (TASK-020, `tx`
- * pipeline slot) supplies it. Without a runner no tenant transaction can run, so there is nothing to probe.
+ * The generated client (D-ARCH-104; TASK-020 part 020-B): `databaseRuntimeFromConfig` builds the client from
+ * `./generated.js` (the one value importer of `@platform/prisma/client`), so the API and the worker get the same runner
+ * from the one composition (`createRuntimeServices`, never a second composition) and no entry point passes a class.
+ * `createDatabaseRuntime` keeps its optional `Client` input as the unit-test seam: without it no runner is built and
+ * there is nothing to probe.
  */
 import type { Config, Service } from '@platform/config';
 
@@ -39,6 +41,7 @@ import type { Closeable } from '../runtime/shutdown.js';
 import { createDatabaseAdapter, createDatabasePool, type DatabaseClientOptions, type PrismaClientConstructor } from './client.js';
 import { dedicatedConnector } from './dedicated-connection.js';
 import { type ExtendableClient, withStandardColumns } from './extensions/standard-columns.js';
+import { type AppTransactionClient, PrismaClient } from './generated.js';
 import { createDatabaseCheck } from './health-check.js';
 import {
   createSessionIntegrityGuard,
@@ -310,17 +313,36 @@ export function createDatabaseRuntime<TTx extends RawQueryClient, TClient extend
   };
 }
 
-/** `createDatabaseRuntime` from the validated configuration of `service`. */
-export function databaseRuntimeFromConfig<TTx extends RawQueryClient, TClient extends RuntimeDatabaseClient<TTx>>(
-  config: Config,
-  service: Service,
-  log: RuntimeLog,
-  Client?: PrismaClientConstructor<TClient>,
-): DatabaseRuntime<TTx> {
-  return createDatabaseRuntime<TTx, TClient>({
-    database: databaseOptionsFrom(config, service),
-    tx: tenantTxOptionsFromConfig(config),
-    log,
-    ...(Client === undefined ? {} : { Client }),
-  });
+/** A database runtime whose tenant-transaction runner exists (what every deployed process runs, D-ARCH-104). */
+export interface ActiveDatabaseRuntime<TTx> extends DatabaseRuntime<TTx> {
+  readonly tenantTx: TenantTxRunner<TTx>;
+}
+
+export class DatabaseRuntimeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseRuntimeError';
+  }
+}
+
+/** Narrows a runtime built with a client class; a missing runner is a composition bug (refused at boot). */
+export function requireTenantTx<TTx>(runtime: DatabaseRuntime<TTx>): ActiveDatabaseRuntime<TTx> {
+  const { tenantTx } = runtime;
+  if (tenantTx === undefined) throw new DatabaseRuntimeError('the database runtime has no tenant-transaction runner');
+  return Object.assign(runtime, { tenantTx });
+}
+
+/**
+ * `createDatabaseRuntime` from the validated configuration of `service`, with the generated client (D-ARCH-104 (1)):
+ * no `Client` argument, the class comes from `./generated.js`, and the runtime's `tenantTx` is always defined.
+ */
+export function databaseRuntimeFromConfig(config: Config, service: Service, log: RuntimeLog): ActiveDatabaseRuntime<AppTransactionClient> {
+  return requireTenantTx(
+    createDatabaseRuntime<AppTransactionClient, PrismaClient>({
+      database: databaseOptionsFrom(config, service),
+      tx: tenantTxOptionsFromConfig(config),
+      log,
+      Client: PrismaClient,
+    }),
+  );
 }

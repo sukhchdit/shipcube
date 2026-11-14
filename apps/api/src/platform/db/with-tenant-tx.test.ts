@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it, jest } from '@jest/globals';
+import { DB_CONNECTION_TIMEOUT_MS_MIN } from '@platform/config';
 
 import { DbError, type DbSecurityEvent } from './map-db-error.js';
 import type { TenantDb } from './tenant-db.js';
@@ -379,6 +380,20 @@ describe('factory configuration (ADR-0005 am.10 items 3 and 4)', () => {
     expect(options).toEqual(OPTIONS);
     expect(resolveTransactionOptions(options)).toEqual({ maxWait: 2_000, timeout: 5_000 });
     expect(contextValues(ctx(), options).slice(5)).toEqual(['5000', '2000', '15000']);
+  });
+
+  it('[R1-m2] [PR38-SEC-05] the config floor of DB_CONNECTION_TIMEOUT_MS is the runner maxWait: the floor builds, one below cannot', () => {
+    // Parity: packages/config refuses (exit 78) every value this runner would refuse at boot (exit 1), and no more.
+    expect(DB_CONNECTION_TIMEOUT_MS_MIN).toBe(DEFAULT_MAX_WAIT_MS);
+    const at = (ms: number): WithTenantTxOptions =>
+      tenantTxOptionsFromConfig({
+        DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
+        DB_TX_LOCK_TIMEOUT_MS: 2_000,
+        DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+        DB_CONNECTION_TIMEOUT_MS: ms,
+      });
+    expect(resolveTransactionOptions(at(DB_CONNECTION_TIMEOUT_MS_MIN))).toEqual({ maxWait: DEFAULT_MAX_WAIT_MS, timeout: 5_000 });
+    expect(() => resolveTransactionOptions(at(DB_CONNECTION_TIMEOUT_MS_MIN - 1))).toThrow(TenantTxConfigError);
   });
 
   it('ADR-0005 am.10 item 8: guestTokenHash is the lowercase hex SHA-256 computed server-side', () => {

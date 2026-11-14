@@ -1,14 +1,14 @@
 /**
  * Process infrastructure shared by the API and the worker (ADR-0003: the worker shares module code): the database
- * runtime (platform/db/runtime.ts: pool, session-integrity guard, `database` readiness check and, once the generated
- * client is wired, the tenant-transaction runner), the object-storage adapter (platform/storage, SPK-05), the Valkey
+ * runtime (platform/db/runtime.ts: pool, session-integrity guard, `database` readiness check and the
+ * tenant-transaction runner over the generated client, D-ARCH-104), the object-storage adapter (platform/storage, SPK-05), the Valkey
  * client, the readiness checks and probe, and the resources graceful shutdown closes. Typed configuration in, live
  * clients out; no `process` access here. The pool and the root client stay inside platform/db (D-ORCH-014 (d),
  * PR11-SEC-09 item 1): this module never imports platform/db/client.ts.
  */
 import type { Config, Secret, Service } from '@platform/config';
 
-import type { TenantTxRunner } from '../db/index.js';
+import type { AppTransactionClient, TenantTxRunner } from '../db/index.js';
 import { type AuditReadinessChecks, databaseRuntimeFromConfig } from '../db/runtime.js';
 import { createObjectStorageCheck } from '../health/checks/object-storage.js';
 import type { ObjectStorage } from '../storage/object-storage.port.js';
@@ -42,16 +42,16 @@ export interface RuntimeServices {
   readonly storage: ObjectStorage;
   readonly probe: ReadinessProbe;
   /**
-   * The tenant-transaction runner of the database runtime, handed to createApp (the tx slot, TASK-020); undefined until
-   * the generated Prisma Client class is passed in (D-TASK020-05), and assertPipelineReady refuses to start an app that
-   * mounts a tenant-transaction route without it.
+   * The tenant-transaction runner of the database runtime, handed to createApp (the tx slot, TASK-020) by the API and
+   * used by the worker's jobs: one composition, one runner (PR11-SEC-09, D-ARCH-104). Always defined;
+   * assertPipelineReady still refuses an app that mounts a tenant-transaction route without one (defence in depth).
    */
-  readonly tenantTx: TenantTxRunner<unknown> | undefined;
+  readonly tenantTx: TenantTxRunner<AppTransactionClient>;
   /** Closed by graceful shutdown after the drain. */
   readonly resources: readonly Closeable[];
   /**
    * Start-up checks, awaited by both entry points before they listen or take work (PR-0009 M1, PR9-SEC-05,
-   * PR11-SEC-09 item 3): the fresh-connection probe as the first pool query (once a runner exists), the
+   * PR11-SEC-09 item 3): the fresh-connection probe as the first pool query, the
    * session-integrity check on a dedicated new connection, then the interval monitor. Never rejects: a failure is
    * logged (drift and leaks are security events) and readiness keeps the database not ready.
    */

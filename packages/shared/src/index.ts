@@ -9,8 +9,16 @@ export {
   type ValidationIssue,
 } from './errors/app-error.js';
 export { CORRELATION_ID_PATTERN, isCorrelationId } from './correlation/correlation-id.js';
-// Credential presence (D-ARCH-107 (5); TASK-020): one predicate for the API and the SEC-TC-29 contract helper.
-export { presentsCredential, REFRESH_COOKIE_NAMES, type CredentialHeaders } from './http/credentials.js';
+// Credential presence (D-ARCH-107 (5), D-ARCH-109; TASK-020): the declared-kind and the generic test, shared by the
+// API and the SEC-TC-29 contract helper.
+export {
+  PRESENTABLE_KINDS,
+  presentedKinds,
+  presentsCredential,
+  REFRESH_COOKIE_NAMES,
+  type CredentialHeaders,
+  type PresentableKind,
+} from './http/credentials.js';
 export type { CatalogueEntry, ModuleCatalogue, ProblemStatus } from './errors/catalogue-entry.js';
 // Generated from openapi.yaml (REQ-API-019, TASK-017): `npm run openapi:types`; the typed client (api/README.md §17) builds on these.
 export type { components, operations, paths } from './api/types.gen.js';

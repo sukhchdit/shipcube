@@ -8,7 +8,7 @@ import type { ErrorObject, ValidateFunction } from 'ajv';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { type ContractOperation, listOperations, type OpenApiDocument } from '../../../tools/openapi/contract.js';
-import { cacheRequirement, type HeaderValue, requestCarriesCredential } from './cache-control.js';
+import { cacheRequirement, type HeaderValue } from './cache-control.js';
 import { assertKnownFormats, registerContractFormats } from './formats.js';
 import { compilePathTemplate, matchAll, type PathTemplate, requestPathOf } from './path-match.js';
 
@@ -50,7 +50,10 @@ export interface ResponseUnderTest {
   readonly body: unknown;
   /** Raw body text where available; decides "has a body" for 204/304 and media types without a schema. */
   readonly text?: string | undefined;
-  /** Headers of the request (any case), when known: a credential makes every response `private, no-store` (SEC-TC-29). */
+  /**
+   * Headers of the request (any case), when known: a credential of a kind the operation declares makes its response
+   * `private, no-store`, and any credential a problem raised before the route is known (SEC-TC-29, D-ARCH-109).
+   */
   readonly requestHeaders?: Readonly<Record<string, HeaderValue>> | undefined;
 }
 
@@ -302,14 +305,16 @@ export function createContractValidator(doc: OpenApiDocument): ContractValidator
 
   /**
    * SEC-TC-29 (T-06; the shared predicate of cache-control.ts): `private, no-store` on every response of an operation
-   * whose effective `security` has no anonymous alternative and on every response to a request that carried a
-   * credential, errors included; `no-store` on problems raised before the route is known (body parser, 404/405).
+   * whose effective `security` has no anonymous alternative and on every response to a request that presented a
+   * credential of a declared kind, errors included (D-ARCH-109: a foreign credential requires nothing); `no-store` on
+   * problems raised before the route is known (body parser, 404/405), `private` too when the request carried any
+   * credential.
    */
   const checkCacheControl = (operation: ContractOperation | undefined, response: ResponseUnderTest, into: string[]): void => {
     const requirement = cacheRequirement({
       operation,
       doc,
-      credential: requestCarriesCredential(response.requestHeaders),
+      requestHeaders: response.requestHeaders,
       problemCode: isObject(response.body) ? response.body['code'] : undefined,
     });
     if (requirement === undefined) return;
