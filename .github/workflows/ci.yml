@@ -520,32 +520,6 @@ jobs:
           done
           node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"
 
-      # C-1 (ADR-0005 am. 10 W-1 and item 13; D-TASK016-01; D-ARCH-074): the SPK-03 exit (d) measurement on ubuntu with
-      # native Docker, once, uploaded as an artifact (recorded in SPK-03 section 4, never asserted beyond the spike's own
-      # server-side check). This step and the upload leave ci.yml in the commit that deletes the spike file.
-      - name: C-1 SPK-03 exit (d) benchmark (SPK03_BENCH=1)
-        env:
-          SPK03_BENCH: '1'
-          SPK03_REPORT: ${{ runner.temp }}/spk03-report.json
-        run: |
-          set -euo pipefail
-          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js prisma/tests/spikes/spk03-rls-tx.int.test.ts --selectProjects integration --ci -i --testTimeout=300000
-          {
-            echo "### C-1 SPK-03 exit (d) report"
-            echo
-            echo '```json'
-            cat "$SPK03_REPORT"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the C-1 SPK03_REPORT artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: spk03-report
-          path: ${{ runner.temp }}/spk03-report.json
-          if-no-files-found: error
-          retention-days: 7
-
   ci-gate:
     name: ci-gate
     # Runs unless the workflow was cancelled; a skipped lane (draft PR) is not green (PR10-SEC-11, review m5 (d)).
