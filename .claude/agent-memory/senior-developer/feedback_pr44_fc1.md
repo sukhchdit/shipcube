@@ -10,7 +10,7 @@ PR #44 fc1: I did the api runtime items myself (about 120 calls, 17/17 own mutan
 **Why:** the evidence run FAILED only on the PR #40 diff-coverage case for `apps/api/src/main.ts` (0/16 changed lines). main.ts has top-level await and the Jest transform is CommonJS, so it can never be loaded by a test; every PR that touches an entry point now fails lane-B evidence.
 
 **How to apply:**
-- Before any PR that edits `apps/*/src/main.ts`, expect the diff-coverage case to fail; get an orchestrator/devops ruling on the gate first. Editing `jest.config.ts` collectCoverageFrom / `tools/ci/diff-coverage.mjs` to exclude entry points was DENIED by the auto-mode classifier ("undermining oversight"): do not retry it or work around it; report it.
+- Before any PR that edits `apps/*/src/main.ts`, expect the diff-coverage case to fail unless the entry point already follows the D-ORCH-073 startApi pattern (see [[pr44-fc2]]). Editing `jest.config.ts` collectCoverageFrom / `tools/ci/diff-coverage.mjs` to exclude entry points was DENIED by the auto-mode classifier ("undermining oversight"): do not retry it or work around it; report it.
 - `jest.unstable_mockModule` + `await import('./main.js')` does not work here: the swc transform emits CommonJS, so top-level await is a SyntaxError.
 - Class fields with `useDefineForClassFields` create an own `undefined` property; use `declare readonly x?: T` when "own property only when given" matters.
 - A git commit message body line over 100 chars fails commitlint as `footer-max-line-length`; wrap at about 85.
