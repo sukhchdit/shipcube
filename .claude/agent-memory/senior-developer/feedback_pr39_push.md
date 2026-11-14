@@ -21,6 +21,10 @@ Pushing PR #39 fix cycle 1 with fresh lane B evidence took 5 evidence worktrees 
 - **Heavy flakes seen under load:** a 5 s timeout in the worker `health/server.test.ts`, and Testcontainers P1001 in `audit-readiness.int`. Re-run the file in isolation, then use a new worktree.
 - **Main moved with code (PR #43) between my merge and the heavy run.** `git fetch` immediately before each heavy run. Docs-only main moves: merge first, then point the ev worktree at the merge (`checkout --detach`).
 - **Other agents take docker.lock within 1 s of a release.** Queue the next locked step early, as a background script polling mkdir.
+- **Lane A ESLint OOM (2026-11-14):** type-aware `eslint .` on main needs about 1.9 GB of old space (OOM at 1800 MB, pass at 2048 MB). A big PR pushed it over the hosted runner's default heap of about 2 GB. Locally it passed because this host's default heap is larger.
+  - Reproduce with `node --max-old-space-size=2048 node_modules/eslint/bin/eslint.js .`.
+  - Fix: set `env: NODE_OPTIONS: --max-old-space-size=4096` on the ci.yml lint step. Changing the lint script would break the PR17-SEC-04 `^eslint \.` step matcher, and `.npmrc` node-options are policed.
+  - Before pushing any large PR, run the 2048 MB check.
 - **Before pushing,** build PR-body tables from scratch files with placeholders, filled by Edit, never by `node -e` regex.
 
 Related: [[pr39-fc1]], [[lane-b-evidence-run]], [[pr43-fc1]], [[task014-images-compose]]
