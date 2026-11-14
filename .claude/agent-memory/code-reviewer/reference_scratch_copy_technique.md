@@ -74,3 +74,5 @@ Write memory or markdown edits as a .cjs file with the Write tool. An inline `no
 - Patch a copy's test with a small node script (sed with `\n` literals silently did not match); verify with grep.
 - Leftover `/tmp/evidence-*` fixture dirs (a timed-out Jest run skips afterAll) keep the junction: `cmd /c rmdir` the junction in each BEFORE `rm -rf`, then recheck the worktree node_modules count (748).
 - `pkill` is denied by the auto-mode classifier; rely on `timeout`.
+
+**String-replace mutants (PR #45, 2026-11-14):** a replacement STRING containing `$'` (for example TOML `'''…$'''`) expands to "text after match" and silently produces a garbage mutant that some unrelated pin catches. Always use a function replacer (`s.replace(x, () => "…")`). Also, Bash heredocs written through the tool lost `\` escapes: write probe scripts with the Write tool.
