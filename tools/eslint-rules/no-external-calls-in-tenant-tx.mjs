@@ -9,9 +9,9 @@
  *  - R1: a function passed as an argument to `withTenantTx(...)` / `<x>.withTenantTx(...)`;
  *  - R2: the `handler` property of the route spec of `defineRoute(...)`, in every function form (arrow, function
  *    expression, `handler() {}`, `async handler() {}`), unless the spec's effective `transaction` is the string literal
- *    `'none'`. A non-literal value, a computed key or a spread element after the last `transaction` property makes it
- *    unknown, which counts as tenant. `fixtureRoute(...)` defaults to `none`: its handler is a root only when the
- *    effective value is `'tenant'` or unknown;
+ *    `'none'`. A non-literal value, an unresolved computed key or an unreadable spread element after the last
+ *    `transaction` property makes it unknown, which counts as tenant. `fixtureRoute(...)` defaults to `none`: its
+ *    handler is a root only when the effective value is `'tenant'` or unknown;
  *  - R3: `handler: name` (or `{ handler }`) where `name` resolves in scope to a function declaration or a `const`
  *    function (arrow or function expression) of the same file;
  *  - R4: the `load` property of the route spec of `defineRoute(...)` / `fixtureRoute(...)` (it runs in a read-only
@@ -27,35 +27,54 @@
  *
  * Route specs and phases the rule must be able to read (D-ARCH-111 (a)-(c)):
  *  - the factory is recognised by name (`defineRoute`, `fixtureRoute`, `<x>.defineRoute`) and through an import alias
- *    (`import { defineRoute as route }`);
+ *    (`import { defineRoute as route }`). Any other reference to a factory (`defineRoute.call(undefined, spec)`,
+ *    `const dr = defineRoute`, `(0, defineRoute)(spec)`, `x.defineRoute` passed as a value) is reported (PR44-SEC-04
+ *    F01-F03): call the factory directly. Import and export specifiers, declarations and type positions are not;
  *  - the spec is an inline object literal or an identifier resolving to a same-file `const` object literal (walked like
  *    an inline one); any other spec (a parameter, an import, a call result, a `let`/`var`) is reported;
+ *  - a spread in the spec (`{ operationId, ...phases }`, `...{ load }`) whose argument is an inline or same-file `const`
+ *    object literal is walked as part of the spec, recursively, in evaluation order (code review R1-m5 Q1, S01-S04).
+ *    Any other spread (a parameter, an import, a call result, a `let`/`var`) is reported unless an explicit `handler`
+ *    property follows it (it then makes `transaction` unknown only);
+ *  - a computed key resolves like the plain key when it is a string literal, a no-substitution template literal
+ *    (`` [`load`] ``) or a same-file `const` string (`[K]`) (K02-K04); any other computed key is reported;
  *  - a root phase (`handler` on a tenant route, `load` always) that is a call is walked through its function arguments
- *    (`timed(async () => ...)`, `timed(named)`, nested wrappers too), each becoming a root; a conditional is walked
- *    through both branches. A phase that is a function parameter, a `let`/`var` binding or a call with no function
- *    argument (`makeHandler(deps)`) is reported, so a route-building helper `build(h)` is reported at its defineRoute
- *    call. A member expression (`controller.cancel`) and an imported binding are not reported (R6 reaches the service).
+ *    (`timed(async () => ...)`, `timed(named)`, nested wrappers too), each becoming a root; a conditional and a logical
+ *    expression (`maybe ?? (async () => ...)`, `||`, `&&`) are walked through every operand (H03), and an identifier is
+ *    followed through every same-file `const` initialiser that is not a member expression (R1-m5 Q2: `const pick =
+ *    flag ? async () => ... : ...`). A phase that is a function parameter, a `let`/`var` binding or a call with no
+ *    function argument (`makeHandler(deps)`) is reported, so a route-building helper `build(h)` is reported at its
+ *    defineRoute call. A member expression (`controller.cancel`) and an imported binding are not reported (R6 reaches
+ *    the service).
  *
  * Reported inside a root:
- *  - a call of the global `fetch` (`fetch()`, `globalThis.fetch()`);
+ *  - a call or `new` of the global `fetch` or `WebSocket` (bare, or as a `globalThis.` member);
  *  - a call or `new` on a value import (default, named or namespace) from `undici`, `node:http`, `node:https`, `http`,
- *    `https`, `bullmq`, `ioredis`, `@aws-sdk/*`, `stripe` or `nodemailer`, including member calls on it
+ *    `https`, `http2`, `net`, `tls`, `dgram`, `dns` (and `dns/promises`), `child_process` (each with or without the
+ *    `node:` prefix), `bullmq`, `ioredis`, `@aws-sdk/*`, `stripe` or `nodemailer`, including member calls on it
  *    (`http.request()`, `nodemailer.createTransport()`), and member calls on a same-file variable initialised from such
- *    an import (`const s3 = new S3Client(...)` ... `s3.send(cmd)`);
+ *    an import (`const s3 = new S3Client(...)` ... `s3.send(cmd)`). The pure `net` helpers (`isIP`, `isIPv4`,
+ *    `isIPv6`, `BlockList`, `SocketAddress`) are not I/O and stay clean; type-only imports are never sources;
  *  - a literal `import()` of one of those modules (string literal or no-substitution template literal);
  *  - a member call whose receiver chain ends in an identifier of the `names` option, at any depth (`queue.add()`,
  *    `this.queue.add()`, `deps.queue.add()`, `ctx.deps.queue.add()`, `this.x.queue.add()`), and through one `const`
- *    alias of such a chain declared in the same function (`const q = deps.queue; q.add()`);
- *  - sleeps and waits: a call of the global `setTimeout` (so `new Promise((r) => setTimeout(r, n))` too), of
- *    `setTimeout` and `scheduler.wait` from `node:timers/promises` / `timers/promises` (any local name, named or
- *    namespace import: `import { scheduler as s }`, `tp.scheduler.wait()`), and of the global `Atomics.wait` /
- *    `Atomics.waitAsync`.
+ *    alias of such a chain declared in the same function (`const q = deps.queue; q.add()`), a destructured `names` key
+ *    included (`const { queue: q } = deps; q.add()`, code review R1-n8);
+ *  - sleeps and waits: a call of the global `setTimeout` / `setInterval` (bare, `globalThis.` or `global.`; so
+ *    `new Promise((r) => setTimeout(r, n))` too), of `setTimeout` / `setInterval` from `node:timers`, `timers`,
+ *    `node:timers/promises` or `timers/promises`, and of `scheduler.wait` from the promises modules (any local name,
+ *    named or namespace import: `import { scheduler as s }`, `tp.scheduler.wait()`, `timers.promises.setTimeout()`),
+ *    and of the global `Atomics.wait` / `Atomics.waitAsync`.
  *
  * Limits (review items, not lint): the rule is lexical and per file. A handler resolved through another file (an
  * injected `controller.cancel`, an imported handler) is reached through R6 in the file of the service method it ends
  * in; a root calling an imported function without a transaction-handle parameter that performs I/O in another file,
- * dynamic dispatch (`obj[name]()`) and generated handlers are not followed: R6, the `names` option and the runtime twin
- * of D-ARCH-106 (6) (a low idle-in-transaction timeout in the API lanes) cover them (D-ARCH-106 (6), D-ARCH-111 (3)). A
+ * dynamic dispatch (`obj[name]()`), generated handlers, a phase held in an array literal or an object member
+ * (`handler: handlers[0]`, `handler: table.cancel`; type information would be needed, PR44-SEC-04 H08/H09), a `load`
+ * hidden in an unreadable spread that an explicit `handler` follows, setter-injected handles (I02) and aliases of a
+ * source itself (`const f = fetch`, `fetch.call(...)`, X09/X10) are not followed: R6, the `names` option, the
+ * NFR-SEC-010 `outbound-http-via-client` rule and the runtime twin of D-ARCH-106 (6) (a low idle-in-transaction
+ * timeout in the API lanes) cover them (D-ARCH-106 (6), D-ARCH-111 (3)). A
  * false positive on an in-memory variable named like a port (`const queue = []`) is fixed by renaming it, never by a
  * disable. TASK-113 extends `names` with the OutboundHttpClient member names when the client lands. The outbox is
  * never in `names`: `outbox.publish(db, event)` is the sanctioned in-transaction effect (D-ARCH-106 (2)).
@@ -64,8 +83,46 @@ import { staticSpecifier } from './module-sources.mjs';
 import { globPattern, relativeFile } from './path-glob.mjs';
 
 /** Modules whose bindings perform network I/O (exact names, or a scope prefix ending in `/`). */
-const EXTERNAL_MODULES = ['undici', 'node:http', 'node:https', 'http', 'https', 'bullmq', 'ioredis', '@aws-sdk/', 'stripe', 'nodemailer'];
-const TIMER_PROMISE_MODULES = new Set(['node:timers/promises', 'timers/promises']);
+const EXTERNAL_MODULES = [
+  'undici',
+  'node:http',
+  'node:https',
+  'http',
+  'https',
+  // PR44-SEC-04 X04-X08: the other Node network and process modules (`dns` covers `dns/promises`).
+  'node:http2',
+  'http2',
+  'node:net',
+  'net',
+  'node:tls',
+  'tls',
+  'node:dgram',
+  'dgram',
+  'node:dns',
+  'dns',
+  'node:child_process',
+  'child_process',
+  'bullmq',
+  'ioredis',
+  '@aws-sdk/',
+  'stripe',
+  'nodemailer',
+];
+/** Members of an external module that do no I/O (module family without `node:` -> member names). */
+const PURE_MEMBERS = new Map([['net', new Set(['isIP', 'isIPv4', 'isIPv6', 'BlockList', 'SocketAddress'])]]);
+/** Timer modules: the callback forms and the promise forms (PR44-SEC-04 X01-X03). */
+const TIMER_MODULES = new Set(['node:timers', 'timers', 'node:timers/promises', 'timers/promises']);
+/** Timer functions that sleep or wait, as globals or imports. */
+const SLEEP_TIMERS = new Set(['setTimeout', 'setInterval']);
+/** Global objects whose members are the timer and network globals. */
+const GLOBAL_OBJECTS = new Set(['globalThis', 'global']);
+/** Global network constructors and functions (`fetch()`, `new WebSocket(url)`) -> the `{{source}}` text. */
+const NETWORK_GLOBALS = new Map([
+  ['fetch', 'global fetch'],
+  ['WebSocket', 'global WebSocket'],
+]);
+/** Parents in which a factory identifier is not a value reference (declarations, specifiers, keys). */
+const FACTORY_NAME_PARENTS = new Set(['ImportSpecifier', 'ImportDefaultSpecifier', 'ImportNamespaceSpecifier', 'ExportSpecifier']);
 const DEFAULT_NAMES = ['outboundHttp', 'httpClient', 'queue', 'queues', 'redis', 'valkey', 'storage', 'mailer'];
 /** R5 defaults (D-ARCH-106 (5)); eslint.config.mjs sets the same list explicitly. */
 const DEFAULT_TX_FILES = ['apps/api/src/platform/audit/**', 'apps/api/src/platform/outbox/writer.ts', 'packages/audit/src/store/**'];
@@ -154,39 +211,30 @@ function unwrap(node) {
 }
 
 /**
- * @param {import('estree').Property} property
- * @returns {string | undefined} The static key of an object-literal property.
+ * @param {string} family an `EXTERNAL_MODULES` entry
+ * @returns {ReadonlySet<string> | undefined} The members of `family` that do no I/O.
  */
-function propertyKey(property) {
-  const { key } = property;
-  if (!property.computed && key.type === 'Identifier') return key.name;
-  if (key.type === 'Literal' && typeof key.value === 'string') return key.value;
-  return undefined;
+function pureMembers(family) {
+  return PURE_MEMBERS.get(family.startsWith('node:') ? family.slice('node:'.length) : family);
 }
 
 /**
- * The effective `transaction` of a route literal (D-ARCH-106 (5) R2): the last `transaction` property when no spread or
- * computed key follows it; `'unknown'` for a non-literal value, or when a spread or computed key may override it.
+ * The member of a module a call reaches: the imported name of a named import, or the first property after a namespace
+ * or default import (`net.connect` -> `connect`, `net.Socket.prototype.x` -> `Socket`).
  *
- * @param {import('estree').ObjectExpression} literal
- * @param {string} fallback the factory default
- * @returns {string}
+ * @param {import('estree').Node} callee
+ * @param {{ imported: string }} fromImport
+ * @returns {string | undefined}
  */
-function routeTransaction(literal, fallback) {
-  let value = fallback;
-  for (const property of literal.properties) {
-    if (property.type === 'SpreadElement') {
-      value = 'unknown';
-      continue;
-    }
-    const key = propertyKey(property);
-    if (key === undefined) value = 'unknown';
-    else if (key === 'transaction') {
-      const literalValue = unwrap(property.value);
-      value = literalValue.type === 'Literal' && typeof literalValue.value === 'string' ? literalValue.value : 'unknown';
-    }
+function moduleMember(callee, fromImport) {
+  if (fromImport.imported !== '*' && fromImport.imported !== 'default') return fromImport.imported;
+  let current = callee;
+  let member;
+  while (current.type === 'MemberExpression') {
+    member = propertyName(current);
+    current = current.object;
   }
-  return value;
+  return member;
 }
 
 /**
@@ -229,6 +277,8 @@ export default {
         "'{{factory}}' receives a route spec the rule cannot read: declare route specs as an inline literal or a same-file const literal, so the tenant-transaction phases (handler, load) can be checked (T-83, D-ARCH-111).",
       routePhase:
         "The route {{phase}} '{{text}}' cannot be followed: declare route handlers inline or as same-file const functions (a wrapper call must receive the function itself), so the tenant-transaction check can see what runs inside the transaction (T-83, D-ARCH-111).",
+      routeFactory:
+        "'{{text}}' uses the route factory '{{factory}}' without calling it: call {{factory}} directly so the tenant-transaction lint can see the route spec (T-83, D-ARCH-111).",
     },
   },
   create(context) {
@@ -246,6 +296,12 @@ export default {
     const phaseRoots = new Map();
     /** Route phase values already reported as unreadable (a const spec may be shared by several routes). */
     const reportedPhases = new WeakSet();
+    /** Spreads and computed keys of route specs already reported as unreadable (same reason). */
+    const reportedSpecParts = new WeakSet();
+    /** Local names of value imports of a route factory (`import { defineRoute as route }`) -> the factory name. */
+    const factoryAliases = new Map();
+    /** Identifiers naming a route factory, checked at the end (F01-F03). @type {[import('estree').Identifier, string][]} */
+    const factoryReferences = [];
     /** R6 decision per function node. @type {WeakMap<import('estree').Node, boolean>} */
     const handleRoots = new WeakMap();
 
@@ -474,15 +530,20 @@ export default {
      * follow. A member expression and an imported binding are left to R6.
      * @param {import('estree').Node} node the phase value
      * @param {string} phase `handler` or `load`
+     * @param {Set<import('estree').Node>} [seen] the const initialisers already followed (a cycle stops)
      */
-    function collectPhase(node, phase) {
+    function collectPhase(node, phase, seen = new Set()) {
       const value = unwrap(node);
       const root = phase === 'load' ? ROOT_TEXT.load : ROOT_TEXT.handler;
       if (FUNCTION_TYPES.has(value.type)) {
         phaseRoots.set(value, root);
       } else if (value.type === 'ConditionalExpression') {
-        collectPhase(value.consequent, phase);
-        collectPhase(value.alternate, phase);
+        collectPhase(value.consequent, phase, seen);
+        collectPhase(value.alternate, phase, seen);
+      } else if (value.type === 'LogicalExpression') {
+        // PR44-SEC-04 H03: `maybe ?? (async () => ...)`, `a || b`, `flag && fn`.
+        collectPhase(value.left, phase, seen);
+        collectPhase(value.right, phase, seen);
       } else if (value.type === 'CallExpression') {
         const functions = wrappedFunctions(value);
         if (functions.length === 0) reportPhase(node, phase);
@@ -495,14 +556,92 @@ export default {
         }
         for (const def of resolve(value.name, value)?.defs ?? []) {
           if (def.type === 'Parameter' || (def.type === 'Variable' && def.parent.kind !== 'const')) reportPhase(node, phase);
-          else if (def.type === 'Variable' && def.node.init?.type === 'CallExpression') collectPhase(def.node.init, phase);
+          else if (def.type === 'Variable' && def.node.init && def.node.id.type === 'Identifier') {
+            // R1-m5 (b): every const initialiser but a member expression (left to R6 by design) is followed.
+            const init = def.node.init;
+            if (unwrap(init).type === 'MemberExpression' || seen.has(init)) continue;
+            seen.add(init);
+            collectPhase(init, phase, seen);
+          }
         }
       }
     }
 
     /**
+     * The static key of an object-literal property: a plain or string-literal key, or a computed key that is a string
+     * literal, a no-substitution template literal or a same-file `const` string (PR44-SEC-04 K02-K04).
+     * @param {import('estree').Property} property
+     * @returns {string | undefined} undefined for a computed key the rule cannot resolve.
+     */
+    function staticKey(property) {
+      const { key } = property;
+      if (!property.computed) {
+        if (key.type === 'Identifier') return key.name;
+        return key.type === 'Literal' ? String(key.value) : undefined;
+      }
+      return constantString(key, new Set());
+    }
+
+    /**
+     * @param {import('estree').Node} node
+     * @param {Set<import('estree').Node>} seen the const initialisers already followed
+     * @returns {string | undefined} The string `node` always evaluates to, when the file says so lexically.
+     */
+    function constantString(node, seen) {
+      const value = unwrap(node);
+      if (value.type === 'Literal') return typeof value.value === 'string' ? value.value : undefined;
+      if (value.type === 'TemplateLiteral')
+        return value.expressions.length === 0 ? (value.quasis[0]?.value.cooked ?? undefined) : undefined;
+      if (value.type !== 'Identifier') return undefined;
+      for (const def of resolve(value.name, value)?.defs ?? []) {
+        const init = def.type === 'Variable' && def.parent.kind === 'const' && def.node.id.type === 'Identifier' ? def.node.init : null;
+        if (init === null || init === undefined || seen.has(init)) continue;
+        seen.add(init);
+        return constantString(init, seen);
+      }
+      return undefined;
+    }
+
+    /**
+     * @typedef {{ property: import('estree').Property; key: string | undefined } | { spread: import('estree').SpreadElement }} SpecEntry
+     */
+
+    /**
+     * R1-m5 (a), PR44-SEC-04 S01-S04: the properties of a route spec in evaluation order, a spread of an inline or
+     * same-file `const` object literal inlined (recursively), any other spread kept as an unreadable entry.
+     * @param {import('estree').ObjectExpression} literal
+     * @param {Set<import('estree').ObjectExpression>} open the literals being expanded (a cycle is unreadable)
+     * @returns {SpecEntry[]}
+     */
+    function specEntries(literal, open) {
+      open.add(literal);
+      /** @type {SpecEntry[]} */
+      const entries = [];
+      for (const property of literal.properties) {
+        if (property.type === 'SpreadElement') {
+          const spread = routeSpec(property.argument);
+          if (spread === undefined || open.has(spread)) entries.push({ spread: property });
+          else entries.push(...specEntries(spread, open));
+        } else entries.push({ property, key: staticKey(property) });
+      }
+      open.delete(literal);
+      return entries;
+    }
+
+    /**
+     * @param {import('estree').Node} node an unreadable spread or computed key of a route spec
+     * @param {string} factory
+     */
+    function reportSpecPart(node, factory) {
+      if (reportedSpecParts.has(node)) return;
+      reportedSpecParts.add(node);
+      context.report({ node, messageId: 'routeSpec', data: { factory } });
+    }
+
+    /**
      * R2/R3/R4: records the root phases (`handler` unless the route is `transaction: 'none'`, `load` always) of a
-     * `defineRoute(...)` / `fixtureRoute(...)` spec; reports a spec the rule cannot read (D-ARCH-111 (a)).
+     * `defineRoute(...)` / `fixtureRoute(...)` spec; reports a spec the rule cannot read (D-ARCH-111 (a)): the spec
+     * itself, an unresolved computed key, and an unreadable spread that no explicit `handler` follows.
      * @param {import('estree').CallExpression} call
      */
     function collectRoute(call) {
@@ -514,13 +653,75 @@ export default {
         context.report({ node: first, messageId: 'routeSpec', data: { factory } });
         return;
       }
-      const transaction = routeTransaction(literal, ROUTE_FACTORIES.get(factory) ?? 'tenant');
-      const tenantHandler = factory === 'defineRoute' ? transaction !== 'none' : transaction === 'tenant' || transaction === 'unknown';
-      for (const property of literal.properties) {
-        if (property.type !== 'Property') continue;
-        const key = propertyKey(property);
-        if (key === 'load' || (key === 'handler' && tenantHandler)) collectPhase(property.value, key);
+      const entries = specEntries(literal, new Set());
+      // The effective `transaction` (D-ARCH-106 (5) R2): the last `transaction` property when no unreadable spread or
+      // computed key follows it; 'unknown' for a non-literal value, or when one may override it.
+      let transaction = ROUTE_FACTORIES.get(factory) ?? 'tenant';
+      /** @type {import('estree').SpreadElement[]} */
+      let unreadSpreads = [];
+      for (const entry of entries) {
+        if ('spread' in entry) {
+          transaction = 'unknown';
+          unreadSpreads.push(entry.spread);
+        } else if (entry.key === undefined) {
+          transaction = 'unknown';
+          reportSpecPart(entry.property.key, factory);
+        } else if (entry.key === 'transaction') {
+          const value = unwrap(entry.property.value);
+          transaction = value.type === 'Literal' && typeof value.value === 'string' ? value.value : 'unknown';
+        } else if (entry.key === 'handler') unreadSpreads = [];
       }
+      for (const spread of unreadSpreads) reportSpecPart(spread, factory);
+      const tenantHandler = factory === 'defineRoute' ? transaction !== 'none' : transaction === 'tenant' || transaction === 'unknown';
+      for (const entry of entries) {
+        if ('spread' in entry) continue;
+        if (entry.key === 'load' || (entry.key === 'handler' && tenantHandler)) collectPhase(entry.property.value, entry.key);
+      }
+    }
+
+    /**
+     * PR44-SEC-04 F01-F03: a reference to a route factory that is neither a direct callee nor a name position
+     * (an import or export specifier, a declaration, a parameter, a property key, a type position) hides the spec.
+     * @param {import('estree').Identifier} identifier
+     * @param {string} factory
+     */
+    function checkFactoryReference(identifier, factory) {
+      /** @type {import('estree').Node} */
+      let node = identifier;
+      let parent = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (identifier).parent;
+      if (parent === undefined || FACTORY_NAME_PARENTS.has(parent.type)) return;
+      const isProperty = parent.type === 'MemberExpression' && parent.property === identifier && !parent.computed;
+      // An import alias counts only where it reads the import (not `obj.route`, not a shadowing binding).
+      if (identifier.name !== factory && (isProperty || importOf(resolve(identifier.name, identifier))?.imported !== factory)) return;
+      if (isProperty) {
+        // `<x>.defineRoute`: a callee, or the target of an assignment, is not a hidden use.
+        node = parent;
+        parent = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (parent).parent;
+        if (parent?.type === 'AssignmentExpression' && parent.left === node) return;
+      } else if (isNamePosition(identifier, parent)) return;
+      if ((parent?.type === 'CallExpression' || parent?.type === 'NewExpression') && parent.callee === node) return;
+      // A shorthand property may hold the same identifier as key and value: report it once.
+      if (reportedSpecParts.has(node)) return;
+      reportedSpecParts.add(node);
+      const text = sourceCode.getText(parent ?? node);
+      context.report({ node, messageId: 'routeFactory', data: { factory, text: text.length > 60 ? `${text.slice(0, 57)}...` : text } });
+    }
+
+    /**
+     * @param {import('estree').Identifier} identifier
+     * @param {import('estree').Node} parent
+     * @returns {boolean} `identifier` names something (a declaration, a parameter, a key, a type) rather than reading it.
+     */
+    function isNamePosition(identifier, parent) {
+      const loose = /** @type {Record<string, unknown> & { type: string }} */ (/** @type {unknown} */ (parent));
+      if (parent.type.startsWith('TS') && !VALUE_WRAPPERS.has(parent.type)) return true;
+      if (loose.id === identifier) return true;
+      if (FUNCTION_TYPES.has(parent.type) && /** @type {import('estree').Function} */ (parent).params.includes(identifier)) return true;
+      // A destructuring target (`const { defineRoute } = routing`) declares the name; its calls are direct.
+      if (parent.type === 'Property' && /** @type {{ parent?: import('estree').Node }} */ (parent).parent?.type === 'ObjectPattern')
+        return true;
+      const isKeyed = parent.type === 'Property' || parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition';
+      return isKeyed && loose.key === identifier && loose.computed !== true && loose.shorthand !== true;
     }
 
     /**
@@ -529,8 +730,9 @@ export default {
      */
     function isSleep(callee) {
       if (callee.type === 'Identifier') {
-        if (callee.name === 'setTimeout' && isGlobal('setTimeout', callee)) return true;
-        return timersImport(callee) === 'setTimeout';
+        if (SLEEP_TIMERS.has(callee.name) && isGlobal(callee.name, callee)) return true;
+        const imported = timersImport(callee);
+        return imported !== undefined && SLEEP_TIMERS.has(imported);
       }
       if (callee.type !== 'MemberExpression') return false;
       const name = propertyName(callee);
@@ -539,23 +741,30 @@ export default {
       if (name !== undefined && ATOMICS_WAITS.has(name) && object.type === 'Identifier' && object.name === 'Atomics') {
         return isGlobal('Atomics', object);
       }
-      if (name !== 'setTimeout' || object.type !== 'Identifier') return false;
-      if (object.name === 'globalThis') return isGlobal('globalThis', callee);
+      if (name === undefined || !SLEEP_TIMERS.has(name)) return false;
+      // `timers.promises.setTimeout()` (namespace of `node:timers`).
+      if (object.type === 'MemberExpression') {
+        return propertyName(object) === 'promises' && object.object.type === 'Identifier' && isTimersNamespace(object.object);
+      }
+      if (object.type !== 'Identifier') return false;
+      // PR44-SEC-04 X01: `globalThis.setTimeout()` and `global.setTimeout()`.
+      if (GLOBAL_OBJECTS.has(object.name)) return isGlobal(object.name, callee);
       return isTimersNamespace(object);
     }
 
     /**
      * @param {import('estree').Identifier} identifier
-     * @returns {string | undefined} The name imported from `node:timers/promises` behind `identifier`.
+     * @returns {string | undefined} The name imported from a timer module (`node:timers`, `node:timers/promises`)
+     * behind `identifier` (PR44-SEC-04 X02/X03).
      */
     function timersImport(identifier) {
       const fromImport = importOf(resolve(identifier.name, identifier));
-      return fromImport !== undefined && TIMER_PROMISE_MODULES.has(fromImport.source) ? fromImport.imported : undefined;
+      return fromImport !== undefined && TIMER_MODULES.has(fromImport.source) ? fromImport.imported : undefined;
     }
 
     /**
      * @param {import('estree').Identifier} identifier
-     * @returns {boolean} A namespace (or default) import of `node:timers/promises`.
+     * @returns {boolean} A namespace (or default) import of a timer module.
      */
     function isTimersNamespace(identifier) {
       const imported = timersImport(identifier);
@@ -606,9 +815,21 @@ export default {
           def.parent.kind === 'const' &&
           def.node.init !== null &&
           def.node.init !== undefined &&
-          endsInName(unwrap(def.node.init)) &&
+          (endsInName(unwrap(def.node.init)) || isNamedKeyTarget(def.name)) &&
           enclosingFunction(def.node) === scopeFunction,
       );
+    }
+
+    /**
+     * Code review R1-n8: `q` in `const { queue: q } = deps` (a destructuring property whose key is a `names` entry).
+     * @param {import('estree').Identifier} name the declared identifier
+     * @returns {boolean}
+     */
+    function isNamedKeyTarget(name) {
+      const property = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (name).parent;
+      if (property?.type !== 'Property' || property.value !== name) return false;
+      const key = staticKey(property);
+      return key !== undefined && names.has(key);
     }
 
     /**
@@ -627,6 +848,35 @@ export default {
       });
     }
 
+    /**
+     * @param {import('estree').Node} callee
+     * @returns {string | undefined} The `{{source}}` text when `callee` is the global `fetch` or `WebSocket` (bare or a
+     * `globalThis.` member; PR44-SEC-04 X04-X08 for `WebSocket`).
+     */
+    function networkGlobalSource(callee) {
+      if (callee.type === 'Identifier') {
+        const source = NETWORK_GLOBALS.get(callee.name);
+        return source !== undefined && isGlobal(callee.name, callee) ? source : undefined;
+      }
+      const name = propertyName(callee);
+      if (name === undefined || callee.type !== 'MemberExpression' || callee.object.type !== 'Identifier') return undefined;
+      return callee.object.name === 'globalThis' ? NETWORK_GLOBALS.get(name) : undefined;
+    }
+
+    /**
+     * @param {import('estree').Node} callee
+     * @param {import('estree').Identifier} receiver the root identifier of `callee`
+     * @param {string} family
+     * @returns {boolean} `callee` reaches a member of `family` that does no I/O (`isIP` from `node:net`).
+     */
+    function isPureMember(callee, receiver, family) {
+      const pure = pureMembers(family);
+      const fromImport = pure === undefined ? undefined : importOf(resolve(receiver.name, receiver));
+      if (pure === undefined || fromImport === undefined) return false;
+      const member = moduleMember(callee, fromImport);
+      return member !== undefined && pure.has(member);
+    }
+
     /** @param {import('estree').CallExpression | import('estree').NewExpression | import('estree').ImportExpression} node */
     function check(node) {
       const root = tenantTxRoot(node);
@@ -641,21 +891,21 @@ export default {
         context.report({ node: callee, messageId: 'sleep', data: { call, root } });
         return;
       }
-      if (
-        node.type === 'CallExpression' &&
-        ((callee.type === 'Identifier' && callee.name === 'fetch' && isGlobal('fetch', callee)) ||
-          (propertyName(callee) === 'fetch' &&
-            callee.type === 'MemberExpression' &&
-            callee.object.type === 'Identifier' &&
-            callee.object.name === 'globalThis'))
-      ) {
-        context.report({ node: callee, messageId: 'external', data: { call, root, source: 'global fetch' } });
+      const networkGlobal = networkGlobalSource(callee);
+      if (networkGlobal !== undefined) {
+        context.report({ node: callee, messageId: 'external', data: { call, root, source: networkGlobal } });
         return;
       }
       const receiver = rootIdentifier(callee);
       const family = receiver === undefined ? undefined : clientFamilyOf(receiver);
-      if (family !== undefined) {
-        context.report({ node: callee, messageId: 'external', data: { call, root, source: family.endsWith('/') ? `${family}*` : family } });
+      if (family !== undefined && receiver !== undefined) {
+        if (!isPureMember(callee, receiver, family)) {
+          context.report({
+            node: callee,
+            messageId: 'external',
+            data: { call, root, source: family.endsWith('/') ? `${family}*` : family },
+          });
+        }
         return;
       }
       if (isNamedDependencyCall(callee)) {
@@ -664,6 +914,21 @@ export default {
     }
 
     return {
+      Program(node) {
+        // Import declarations are top-level: the factory aliases are known before any identifier is visited.
+        for (const statement of node.body) {
+          if (statement.type !== 'ImportDeclaration') continue;
+          for (const specifier of statement.specifiers) {
+            const fromImport = importOf(resolve(specifier.local.name, specifier));
+            if (fromImport !== undefined && ROUTE_FACTORIES.has(fromImport.imported))
+              factoryAliases.set(specifier.local.name, fromImport.imported);
+          }
+        }
+      },
+      Identifier(node) {
+        const factory = ROUTE_FACTORIES.has(node.name) ? node.name : factoryAliases.get(node.name);
+        if (factory !== undefined) factoryReferences.push([node, factory]);
+      },
       // Every call is a candidate; the roots are decided at the end, once every route handler of the file is known
       // (a named handler is often declared before the defineRoute call that names it).
       CallExpression(node) {
@@ -684,11 +949,14 @@ export default {
         const variable = resolve(node.id.name, node.id);
         const fromImport = root === undefined ? undefined : importOf(resolve(root.name, root));
         const family = fromImport === undefined ? undefined : externalFamily(fromImport.source);
-        if (family !== undefined && variable !== undefined) clientVariables.set(variable, family);
+        if (family !== undefined && variable !== undefined && root !== undefined && !isPureMember(init.callee, root, family)) {
+          clientVariables.set(variable, family);
+        }
       },
       // Evaluated at the end, so a client variable declared after the callback that uses it, and a handler named
       // before its defineRoute call, are still known.
       'Program:exit'() {
+        for (const [identifier, factory] of factoryReferences) checkFactoryReference(identifier, factory);
         for (const node of candidates) check(node);
       },
     };

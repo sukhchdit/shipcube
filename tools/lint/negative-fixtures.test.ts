@@ -213,7 +213,13 @@ const BCRYPT_CONFINEMENT: readonly Violation[] = [
   bcryptCase('a sibling package (bcrypt-ts)', `bcrypt-confinement/${API}/orders/service/bad-sibling.ts`, BCRYPT_BOTH),
   bcryptCase('a scoped sibling package (@node-rs/bcrypt)', `bcrypt-confinement/${API}/orders/service/bad-scoped-sibling.ts`, BCRYPT_BOTH),
   bcryptCase('dynamic import()', `bcrypt-confinement/${API}/orders/service/bad-dynamic-hash.ts`, BOUNDARIES),
-  bcryptCase('createRequire(import.meta.url)(...)', `bcrypt-confinement/${API}/orders/service/bad-create-require.ts`, BOUNDARIES),
+  // PR44-SEC-01: the createRequire load itself is also refused (static-module-specifier `loader`).
+  bcryptCase(
+    'createRequire(import.meta.url)(...)',
+    `bcrypt-confinement/${API}/orders/service/bad-create-require.ts`,
+    [BOUNDARIES, 'platform/static-module-specifier'],
+    '',
+  ),
   bcryptCase('require() in a .cjs file', `bcrypt-confinement/${API}/orders/service/bad-require.cjs`, BOUNDARIES),
   bcryptCase('module.require() in a .cjs file', `bcrypt-confinement/${API}/orders/service/bad-module-require.cjs`, BOUNDARIES),
   bcryptCase(
@@ -237,6 +243,12 @@ const RULES: readonly Violation[] = [
     'platform/audit-writer-allowlist',
     '',
   ],
+  [
+    '[PR44-SEC-01 A05] platform/audit-writer-allowlist: the audit writer through an aliased createRequire (R1-m6)',
+    `rules/audit-writer-allowlist/${API}/orders/service/bad-create-require-writer.ts`,
+    ['platform/audit-writer-allowlist', 'platform/static-module-specifier'],
+    '',
+  ],
   ['import-x/no-cycle: a <-> b (a)', 'rules/import-cycle/packages/shared/src/bad-a.ts', 'import-x/no-cycle', ''],
   ['import-x/no-cycle: a <-> b (b)', 'rules/import-cycle/packages/shared/src/bad-b.ts', 'import-x/no-cycle', ''],
   ['platform/money-arith: `+` on minor units', 'rules/money-arith/packages/pricing/src/bad-total.ts', 'platform/money-arith', ''],
@@ -253,6 +265,12 @@ const RULES: readonly Violation[] = [
     'rules/node-path-only/apps/api/src/platform/bad-paths.ts',
     'platform/node-path-only',
     '',
+  ],
+  [
+    `[PR44-SEC-04] ${OUTBOUND_HTTP}: X04-X08 http2, net (Socket, connect), tls, dgram, dns, dns/promises, child_process (named and import()) and the global WebSocket (bare, globalThis)`,
+    `rules/outbound-http-via-client/${API}/carriers/service/bad-network.ts`,
+    Array<string>(11).fill(OUTBOUND_HTTP),
+    'through OutboundHttpClient',
   ],
   ...['bad-fetch', 'bad-axios', 'bad-http'].map((name): Violation => [
     `platform/outbound-http-via-client: ${name}`,
@@ -416,6 +434,72 @@ const RULES: readonly Violation[] = [
     Array<string>(count).fill(TENANT_TX_IO),
     message,
   ]),
+  // PR #44 code review R1-m5 / R1-n8 and PR44-SEC-04: the residual route-spec shapes and sources. Each fixture injects
+  // a deps.queue.add() or a sleep, so outbound-http-via-client cannot mask the result.
+  ...(
+    [
+      [
+        'R1-m5 (a) S01-S04 a spread of a same-file const or inline phases literal is walked (recursively)',
+        'routes/bad-phase-spread',
+        5,
+        'runs inside a defineRoute',
+      ],
+      [
+        'R1-m5 (a) a spread of a parameter, an import, a call result or a let with no handler after it is reported',
+        'routes/bad-spread-unreadable',
+        4,
+        'declare route specs as an inline literal or a same-file const literal',
+      ],
+      [
+        'K02-K04 a template-literal key and a const string key resolve like the plain key (handler and load)',
+        'routes/bad-computed-key',
+        4,
+        'runs inside a defineRoute',
+      ],
+      [
+        'K02-K04 any other computed key in a route spec is reported',
+        'routes/bad-computed-key-unreadable',
+        2,
+        'declare route specs as an inline literal or a same-file const literal',
+      ],
+      [
+        'F01-F03 defineRoute.call, a const alias, a sequence callee and an import alias used as a value are reported',
+        'routes/bad-factory-indirection',
+        4,
+        'so the tenant-transaction lint can see the route spec',
+      ],
+      ['H03 a ??, || or && phase is walked through every operand', 'routes/bad-handler-logical', 3, 'runs inside a defineRoute'],
+      [
+        'R1-m5 (b) Q2 a const conditional, a const ?? and a const alias of it are followed',
+        'routes/bad-handler-const-conditional',
+        3,
+        'runs inside a defineRoute',
+      ],
+      [
+        'R1-n8 a destructured names key (const { queue: jobs } = deps, nested) matches like the const alias',
+        'service/bad-holder-destructure',
+        2,
+        'runs inside a withTenantTx callback',
+      ],
+      [
+        'X01-X03 node:timers (named, namespace, .promises), timers/promises setInterval, global.setTimeout, globalThis.setInterval',
+        'service/bad-node-timers',
+        7,
+        'sleeps inside a withTenantTx callback',
+      ],
+    ] as const
+  ).map(([title, name, count, message]): Violation => [
+    `[PR44-SEC-04] ${TENANT_TX_IO}: ${title}`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/${name}.ts`,
+    Array<string>(count).fill(TENANT_TX_IO),
+    message,
+  ]),
+  [
+    `[PR44-SEC-04] ${TENANT_TX_IO}: X04-X08 http2, net, tls, dgram, dns, dns/promises, child_process and the global WebSocket (T-83 and NFR-SEC-010 each)`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/service/bad-network-modules.ts`,
+    [...Array<string>(8).fill(TENANT_TX_IO), ...Array<string>(8).fill(OUTBOUND_HTTP)],
+    '',
+  ],
   [
     `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R5 a function in a txFiles file (apps/api/src/platform/audit/)`,
     'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/audit/bad-audit-hook.ts',
@@ -747,8 +831,9 @@ const TENANT_DB: readonly Violation[] = [
   [
     '[PR32-SEC-07] platform/system-model-owner: createRequire(import.meta.url)(literal) of the SYSTEM accessor',
     `rules/system-model-owner/${API}/orders/repository/bad-create-require-accessor.ts`,
-    'platform/system-model-owner',
-    'hides which SYSTEM model is reached',
+    // PR44-SEC-01: the createRequire load itself is also refused (static-module-specifier `loader`).
+    ['platform/system-model-owner', 'platform/static-module-specifier'],
+    '',
   ],
   [
     '[PR32-SEC-07] platform/system-model-owner: a platform/db file other than system-db.ts / tenant-db.ts re-exports the accessor (S4a)',
@@ -765,14 +850,35 @@ const TENANT_DB: readonly Violation[] = [
   [
     '[PR32-SEC-07] platform/static-module-specifier: createRequire(import.meta.url)(x), a createRequire alias, module.require(x)',
     `rules/system-model-owner/${API}/orders/service/bad-computed-require.ts`,
-    ['platform/static-module-specifier', 'platform/static-module-specifier', 'platform/static-module-specifier'],
-    'loads a module through a computed specifier',
+    // Three computed loads, plus (PR44-SEC-01) two createRequire uses: called and stored.
+    Array<string>(5).fill('platform/static-module-specifier'),
+    'the import controls',
   ],
   [
     '[D-ARCH-111] platform/static-module-specifier: an import alias of createRequire (direct and kept in a variable) and a namespace member',
     `rules/system-model-owner/${API}/orders/service/bad-create-require-alias.ts`,
-    ['platform/static-module-specifier', 'platform/static-module-specifier', 'platform/static-module-specifier'],
-    'loads a module through a computed specifier',
+    // Three computed loads, plus (PR44-SEC-01) three createRequire uses.
+    Array<string>(6).fill('platform/static-module-specifier'),
+    'the import controls',
+  ],
+  // PR44-SEC-01: createRequire is legal only as createRequire(<url>).resolve(<literal>) (static-module-specifier `loader`).
+  [
+    '[PR44-SEC-01 A13] platform/static-module-specifier: the pg driver through a createRequire loader kept in a variable',
+    `rules/system-model-owner/${API}/orders/service/bad-require-pg.ts`,
+    'platform/static-module-specifier',
+    'uses createRequire other than as createRequire(<url>).resolve',
+  ],
+  [
+    '[PR44-SEC-01] platform/static-module-specifier: createRequire aliased, passed, returned, destructured, via import() and getBuiltinModule, a computed resolve',
+    `rules/system-model-owner/${API}/orders/service/bad-create-require-escapes.ts`,
+    Array<string>(7).fill('platform/static-module-specifier'),
+    'uses createRequire other than as createRequire(<url>).resolve',
+  ],
+  [
+    '[PR44-SEC-01] platform/static-module-specifier: re-exporting createRequire from node:module',
+    `rules/system-model-owner/${API}/orders/service/bad-create-require-reexport.ts`,
+    'platform/static-module-specifier',
+    'uses createRequire other than as createRequire(<url>).resolve',
   ],
   ['[D-ARCH-111] no-eval: eval(code) in apps/api/src', `rules/no-eval/${API}/orders/service/bad-eval.ts`, 'no-eval', 'eval'],
   // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
@@ -835,6 +941,42 @@ const TENANT_DB: readonly Violation[] = [
     `rules/prisma-client-construction/${API}/orders/repository/bad-adapter.ts`,
     CLIENT_CONSTRUCTION,
     'PR2-SEC-05',
+  ],
+  // PR44-SEC-01 / R1-m6: require-style loads of the client (moduleSourceVisitor sees every isRequireCall form), the
+  // constructor through an alias, and the rule on in platform/db outside the three client homes. Every createRequire
+  // load is also a static-module-specifier `loader` finding; both messages cite PR44-SEC-01.
+  ...(
+    [
+      ['F08: a createRequire loader kept in a variable loads the client', 'bad-require-variable', 1],
+      ['F09: an import alias of createRequire, mk(u)(G)', 'bad-create-require-alias', 1],
+      ['F10: a namespace member, m.createRequire(u)(G)', 'bad-create-require-namespace', 1],
+      ['F11: a default-import member, module.createRequire(u)(G)', 'bad-create-require-default', 1],
+      ['F17: new C() through a member alias and a destructuring alias of the constructor', 'bad-new-alias', 4],
+      ['code review p8: inline createRequire(u)(G), then new PrismaClient()', 'bad-inline-create-require', 2],
+    ] as const
+  ).map(([title, name, count]): Violation => [
+    `[PR44-SEC-01] platform/prisma-client-construction: ${title}`,
+    `rules/prisma-client-construction/${API}/orders/repository/${name}.ts`,
+    ['platform/static-module-specifier', ...Array<string>(count).fill(CLIENT_CONSTRUCTION)],
+    'PR44-SEC-01',
+  ]),
+  [
+    '[PR44-SEC-01] platform/prisma-client-construction: a second apps/api/src/platform/db file takes the client namespace',
+    `rules/prisma-client-construction/apps/api/src/platform/db/bad-second-client.ts`,
+    CLIENT_CONSTRUCTION,
+    'PR44-SEC-01',
+  ],
+  [
+    '[PR44-SEC-01] platform/prisma-client-construction: the worker platform/db constructs a client (code review p1/p3/p7)',
+    'rules/prisma-client-construction/apps/worker/src/platform/db/bad-second-client.ts',
+    [CLIENT_CONSTRUCTION, CLIENT_CONSTRUCTION],
+    'PR44-SEC-01',
+  ],
+  [
+    '[PR44-SEC-01] platform/prisma-client-construction: the worker platform/db loads the client through a createRequire loader (p1)',
+    'rules/prisma-client-construction/apps/worker/src/platform/db/bad-require-variable.ts',
+    ['platform/static-module-specifier', CLIENT_CONSTRUCTION],
+    'PR44-SEC-01',
   ],
   [
     'a repository imports the root database client (ADR-0005 am. 10 item 2, PR2-SEC-05)',
@@ -1138,8 +1280,12 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     ],
     ['[PR #21 R1-m5] supertest is imported in tests/api/helpers', 'rules/supertest-confinement/tests/api/helpers/agent.ts'],
     [
-      '[PR32-SEC-07] literal and no-substitution template loads (import(), createRequire) of an allowed module',
+      '[PR32-SEC-07] literal and no-substitution template loads (import()) of an allowed module, createRequire(u).resolve(literal)',
       `rules/system-model-owner/${API}/orders/service/ok-literal-import.ts`,
+    ],
+    [
+      '[PR44-SEC-01] createRequire(u).resolve(literal) (the openapi/serve.ts shape, direct and namespaced) and typeof createRequire',
+      `rules/system-model-owner/${API}/orders/service/ok-create-require-resolve.ts`,
     ],
     [
       '[PR32-SEC-07] platform/db/system-db.ts (the accessor home) is exempt from system-model-owner',
@@ -1306,7 +1452,10 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     ['a second apps/api/src/platform/db file', 'apps/api/src/platform/db/lint-probe-bad-prisma-value.ts'],
     ['apps/worker/src/platform/db', 'apps/worker/src/platform/db/lint-probe-bad-prisma-value.ts'],
   ])('[D-ARCH-114] @platform/prisma/client: a value import in %s is a layering violation', (_title, path) => {
-    expectFindings(report.probes, path, BOUNDARIES, 'is a value only in apps/api/src/platform/db/generated.ts');
+    // PR44-SEC-01: platform/prisma-client-construction is on there too (only client.ts, generated.ts, runtime.ts are out).
+    expectFindings(report.probes, path, [BOUNDARIES, CLIENT_CONSTRUCTION], '');
+    const layering = findingsOf(report.probes, path).filter((finding) => finding.ruleId === BOUNDARIES);
+    expect(layering.map((finding) => finding.message).join('\n')).toContain('is a value only in apps/api/src/platform/db/generated.ts');
   });
 
   /** The probe's findings of one rule; in exact mode the probe reports that rule and the D-ARCH-114 value import only. */

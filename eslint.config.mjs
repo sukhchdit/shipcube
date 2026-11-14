@@ -137,6 +137,17 @@ const PLANNED_PRISMA_FILES = ['packages/audit/src/store/prisma-store.ts', 'apps/
 /** The database platform: the only home of the root Prisma client and of withTenantTx (ADR-0005 am. 10 item 2). */
 const DB_PLATFORM = 'apps/*/src/platform/db/**';
 /**
+ * The files that construct the Prisma client or hand its class on (PR44-SEC-01): generated.ts (the one value import of
+ * the generated client), client.ts (`new PrismaPg`, `new Client(...)`) and runtime.ts (passes `PrismaClient` from
+ * ./generated.js to client.ts). The rest of apps/*\/src/platform/db, the worker's included, is under
+ * platform/prisma-client-construction.
+ */
+const PRISMA_CLIENT_HOMES = [
+  'apps/api/src/platform/db/client.ts',
+  'apps/api/src/platform/db/generated.ts',
+  'apps/api/src/platform/db/runtime.ts',
+];
+/**
  * T-83 whole-file roots (D-ARCH-106 (5) R5, option `txFiles`): code that only ever runs inside the business
  * transaction (the audit hook, the outbox writer, the audit store). Test files are outside the rule's block.
  */
@@ -396,9 +407,12 @@ const BOUNDARIES_POLICIES = [
   //     as a VALUE: apps/api/src/platform/db/generated.ts, prisma/, tools/db and tests only (D-ARCH-103 (2) narrowed by
   //     D-ARCH-114, ADR-0003 amendment 2026-11-14). Repositories and the two planned stores keep type-only imports
   //     (`import type`), allowed above. Selected by file category: a `module.source` selector matches nothing for a
-  //     workspace specifier. Residual (D-ARCH-114 (2)): the dynamic forms (a template-literal import(), createRequire)
-  //     are outside static import analysis; they stay covered by platform/prisma-client-construction (a value
-  //     PrismaClient anywhere else) and by the CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43).
+  //     workspace specifier. Residual (D-ARCH-114 (2)): a load that is not a static import is not classified here.
+  //     PR44-SEC-01 closes it in apps/*/src and packages/*/src: platform/static-module-specifier refuses a computed
+  //     specifier and every createRequire other than createRequire(u).resolve('x'), so every load left is an import or
+  //     an import() with a literal specifier; platform/prisma-client-construction reports a value or whole-module load
+  //     of the client in every form (import(), a no-substitution template literal included, and every require form),
+  //     apps/worker/src/platform/db included. The CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
   {
     disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
     message: PRISMA_GENERATED_VALUE_MESSAGE,
@@ -767,6 +781,8 @@ export default defineConfig([
       'boundaries/root-path': ROOT,
       'boundaries/files': BOUNDARIES_FILES,
       // Besides import/export/import()/require (defaults): `createRequire(import.meta.url)('x')` and `module.require('x')`.
+      // The aliased, stored and namespaced createRequire forms are not selectable here: platform/static-module-specifier
+      // refuses them in apps/*/src and packages/*/src (PR44-SEC-01).
       'boundaries/additional-dependency-nodes': [
         {
           selector: 'CallExpression[callee.type="CallExpression"][callee.callee.name="createRequire"] > Literal',
@@ -871,9 +887,10 @@ export default defineConfig([
   },
   ...TENANT_CONTEXT_EXEMPTIONS.map(({ files, allow }) => ({ files, rules: { 'platform/tenant-context-sql': ['error', { allow }] } })),
   {
-    // A Prisma client is constructed only by the database platform, the prisma workspace, tools/db and tests.
+    // A Prisma client is constructed only by the three client homes of the database platform, the prisma workspace,
+    // tools/db and tests; the rest of apps/*/src/platform/db, the worker's included, is in (PR44-SEC-01).
     files: [`**/*.${LINTED}`],
-    ignores: [DB_PLATFORM, 'prisma/**', 'tools/db/**', ...TEST_FILES],
+    ignores: [...PRISMA_CLIENT_HOMES, 'prisma/**', 'tools/db/**', ...TEST_FILES],
     plugins: { platform },
     rules: { 'platform/prisma-client-construction': 'error' },
   },
@@ -898,7 +915,8 @@ export default defineConfig([
   },
   {
     // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
-    // code names its module with a literal, so no load escapes the import controls above.
+    // code names its module with a literal, so no load escapes the import controls above. PR44-SEC-01: createRequire
+    // itself is legal only as createRequire(<url>).resolve('<literal>') (messageId `loader`).
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
     ignores: TEST_FILES,
     plugins: { platform },
