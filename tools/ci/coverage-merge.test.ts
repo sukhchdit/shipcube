@@ -14,6 +14,7 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 import { findRepoRoot, runNode } from '../test-support/process.js';
 import { jestExtraArgs } from '../quality/heavy.mjs';
 import {
+  enclosingCount,
   impliedCount,
   isPlaceholder,
   istanbulPercent,
@@ -24,6 +25,7 @@ import {
   PLACEHOLDER_FUNCTION,
   projectProblems,
   readCoverageFinal,
+  runShape,
   summarizeCoverage,
   summarizeFile,
   toLcov,
@@ -151,18 +153,50 @@ describe('mergeCoverageMaps: V8-aware merge (D-ORCH-047)', () => {
     expect(summarizeFile(file).branches).toMatchObject({ total: 2, covered: 1 });
   });
 
-  it('[US-006] impliedCount: innermost containing range, 0 outside every range, lowest count among equal spans', () => {
+  it('[US-006] enclosingCount: innermost containing range, 0 outside every range, lowest count among equal spans', () => {
     const ranges = [
       { loc: loc(1, 0, 20, 0), count: 5 },
       { loc: loc(2, 0, 10, 0), count: 3 },
       { loc: loc(3, 0, 4, 0), count: 0 },
       { loc: loc(2, 0, 10, 0), count: 2 },
     ];
-    expect(impliedCount(ranges, loc(3, 1, 3, 9))).toBe(0);
-    expect(impliedCount(ranges, loc(5, 0, 6, 0))).toBe(2);
-    expect(impliedCount(ranges, loc(12, 0, 13, 0))).toBe(5);
-    expect(impliedCount(ranges, loc(30, 0, 31, 0))).toBe(0);
-    expect(impliedCount([], loc(1, 0, 1, 1))).toBe(0);
+    expect(enclosingCount(ranges, loc(3, 1, 3, 9))).toBe(0);
+    expect(enclosingCount(ranges, loc(5, 0, 6, 0))).toBe(2);
+    expect(enclosingCount(ranges, loc(12, 0, 13, 0))).toBe(5);
+    expect(enclosingCount(ranges, loc(30, 0, 31, 0))).toBe(0);
+    expect(enclosingCount([], loc(1, 0, 1, 1))).toBe(0);
+  });
+
+  it('[US-006] impliedCount never exceeds what the run proves: capped by interior lines, 0 without an interior line', () => {
+    const shape = runShape(v8File('/r/x.ts', [5, 5, 5, 2, 0, 0, 5, 5], [[loc(1, 0, 8, 1), 5]], [['x', loc(1, 0, 8, 1), 5]]));
+    expect(impliedCount(shape, loc(2, 0, 4, 1))).toBe(5); // interior line 3 ran 5 times
+    expect(impliedCount(shape, loc(3, 0, 5, 1))).toBe(2); // interior line 4 ran only twice: the cap wins
+    expect(impliedCount(shape, loc(4, 4, 7, 1))).toBe(0); // interior lines 5-6 never ran (an uncalled anonymous function)
+    expect(impliedCount(shape, loc(2, 4, 3, 9))).toBe(0); // no interior line: nothing proves it ran
+    expect(impliedCount(shape, loc(20, 0, 30, 0))).toBe(0); // outside every range
+  });
+
+  it('[US-006] no inflation: an anonymous function one run never called (dropped by v8-to-istanbul) adds nothing there', () => {
+    // Measured shape (apps/api/src/platform/db/dedicated-connection.ts): `connector` 12:7-26:1 returns an async arrow
+    // 14:9-25:4 with a catch 20:6-23:5. Unit tests call the connector 4 times but never the arrow, so the unit run has no
+    // entry for the arrow or the catch (anonymous, uncalled) and its interior lines are 0; integration calls it 7 times.
+    const lines = (outer: number, arrow: number) =>
+      Array.from({ length: 26 }, (_, i) => (i + 1 < 12 ? 0 : i + 1 >= 15 && i + 1 <= 24 ? arrow : outer));
+    const root = loc(12, 7, 26, 1);
+    const unit = v8File('/r/d.ts', lines(4, 0), [[root, 4]], [['connector', root, 4]]);
+    const integration = v8File(
+      '/r/d.ts',
+      lines(18, 7),
+      [
+        [root, 18],
+        [loc(14, 9, 25, 4), 7],
+        [loc(20, 6, 23, 5), 0],
+      ],
+      [['connector', root, 18]],
+    );
+    const file = mergeCoverageMaps([{ '/r/d.ts': unit }, { '/r/d.ts': integration }])['/r/d.ts'] as FileCov;
+    expect(Object.values(file.b).map((c) => c[0])).toEqual([22, 7, 0]); // = the single combined Jest run
+    expect(summarizeFile(file).branches).toMatchObject({ total: 3, covered: 2 });
   });
 
   it('[US-006] non-V8 branch entries (several locations) merge by location key and position, absent = zeros', () => {

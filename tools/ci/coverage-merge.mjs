@@ -10,11 +10,14 @@
  * coverage of all test files (`mergeProcessCovs`) before v8-to-istanbul converts it. Across runs only the istanbul
  * form exists, and V8 omits a block whose count equals its enclosing range, so a plain location-keyed sum (istanbul's
  * own `FileCoverage.merge`) loses those implicit counts: a function that takes the `then` path in unit tests and the
- * `else` path in integration tests would report 1 of 3 branches instead of 3 of 3. Here a range one run lacks gets
- * the count of the innermost range of THAT run that contains it (branch ranges and function ranges), which is how V8
- * defines the omitted count and what `mergeProcessCovs` reconstructs. Counts per location therefore equal a single
- * combined run's; a location missing from every range of a run (module top level) counts 0 there (conservative).
- * Statements (one per line under v8-to-istanbul) are summed by location, so line coverage is exact. Placeholder
+ * `else` path in integration tests would report 1 of 3 branches instead of 3 of 3. A range one run lacks therefore
+ * gets an IMPLIED count from that run (`impliedCount`), but only one that can never claim code ran when it did not:
+ * v8-to-istanbul also drops every uncalled ANONYMOUS function (no name, no block data), so "absent" is ambiguous
+ * between "same count as the enclosing range" and "never called". The implied count is the innermost enclosing range's
+ * count capped by the highest count that run recorded for the lines strictly inside the range (an uncalled function's
+ * own lines are 0 there), and 0 for a range with no interior line. Branch coverage is thus a lower bound of a single
+ * combined run's, never above it (measured on the repository: see the PR record); a location outside every range of a
+ * run also counts 0. Statements (one per line under v8-to-istanbul) are summed by location, so line coverage is exact. Placeholder
  * entries Jest writes for a file no test of that run loaded (one `(empty-report)` function over the whole file) are
  * dropped when another run measured the file, as Jest itself only adds them for files absent from its map; otherwise
  * one placeholder stays and the file counts as fully uncovered.
@@ -138,27 +141,49 @@ const contains = (outer, inner) => cmp(outer.start, inner.start) <= 0 && cmp(inn
 const isV8Range = (m) => m.type === 'branch' && m.locations.length === 1;
 
 /**
- * The ranges of one run's file entry that define implicit counts: every V8 block range and every function range.
- * @param {FileCoverage} fc
- * @returns {Array<{ loc: Loc, count: number }>}
+ * @typedef {{ ranges: Array<{ loc: Loc, count: number }>, lines: Map<number, number> }} RunShape
  */
-function rangesOf(fc) {
+
+/**
+ * What one run's file entry says about implicit counts: every V8 block range, every function range, and the highest
+ * statement count per line.
+ * @param {FileCoverage} fc
+ * @returns {RunShape}
+ */
+export function runShape(fc) {
   /** @type {Array<{ loc: Loc, count: number }>} */
   const ranges = [];
   for (const [id, meta] of Object.entries(fc.branchMap))
     if (isV8Range(meta)) ranges.push({ loc: /** @type {Loc} */ (meta.locations[0]), count: fc.b[id]?.[0] ?? 0 });
   for (const [id, meta] of Object.entries(fc.fnMap)) ranges.push({ loc: meta.loc, count: fc.f[id] ?? 0 });
-  return ranges;
+  /** @type {Map<number, number>} */
+  const lines = new Map();
+  for (const [id, loc] of Object.entries(fc.statementMap))
+    lines.set(loc.start.line, Math.max(lines.get(loc.start.line) ?? 0, fc.s[id] ?? 0));
+  return { ranges, lines };
 }
 
 /**
- * Count of `loc` in a run that has no entry for it: the count of the innermost range of that run containing it
- * (smallest span; among equal spans the lowest count), else 0.
+ * Count of `loc` in a run that has no entry for it, never above what that run can prove: the count of the innermost
+ * range of the run containing it (smallest span; among equal spans the lowest), capped by the run's highest line
+ * count strictly inside `loc`; 0 when `loc` has no interior line or no range of the run contains it.
+ * @param {RunShape} shape
+ * @param {Loc} loc
+ * @returns {number}
+ */
+export function impliedCount(shape, loc) {
+  let interior = 0;
+  for (let line = loc.start.line + 1; line < loc.end.line; line += 1) interior = Math.max(interior, shape.lines.get(line) ?? 0);
+  return interior === 0 ? 0 : Math.min(interior, enclosingCount(shape.ranges, loc));
+}
+
+/**
+ * Count of the innermost range containing `loc` (smallest span; among equal spans the lowest count), else 0.
  * @param {ReadonlyArray<{ loc: Loc, count: number }>} ranges
  * @param {Loc} loc
  * @returns {number}
  */
-export function impliedCount(ranges, loc) {
+export function enclosingCount(ranges, loc) {
   /** @type {{ loc: Loc, count: number } | null} */
   let best = null;
   for (const range of ranges) {
@@ -190,7 +215,7 @@ export function mergeFileCoverage(entries) {
       statements.set(key, acc);
     }
 
-  const ranges = entries.map(rangesOf);
+  const shapes = entries.map(runShape);
   /** @type {Map<string, FnMeta>} */
   const fnMetas = new Map();
   /** @type {Map<string, BranchMeta>} */
@@ -225,7 +250,10 @@ export function mergeFileCoverage(entries) {
   i = 0;
   for (const [key, meta] of fnMetas) {
     out.fnMap[String(i)] = meta;
-    out.f[String(i)] = own.reduce((sum, run, r) => sum + (run.fns.get(key) ?? impliedCount(ranges[r] ?? [], meta.loc)), 0);
+    out.f[String(i)] = own.reduce(
+      (sum, run, r) => sum + (run.fns.get(key) ?? impliedCount(shapes[r] ?? { ranges: [], lines: new Map() }, meta.loc)),
+      0,
+    );
     i += 1;
   }
   i = 0;
@@ -235,7 +263,9 @@ export function mergeFileCoverage(entries) {
       (sum, run, r) => {
         const counts =
           run.branches.get(key) ??
-          (isV8Range(meta) ? [impliedCount(ranges[r] ?? [], /** @type {Loc} */ (meta.locations[0]))] : meta.locations.map(() => 0));
+          (isV8Range(meta)
+            ? [impliedCount(shapes[r] ?? { ranges: [], lines: new Map() }, /** @type {Loc} */ (meta.locations[0]))]
+            : meta.locations.map(() => 0));
         return sum.map((c, k) => c + (counts[k] ?? 0));
       },
       meta.locations.map(() => 0),
