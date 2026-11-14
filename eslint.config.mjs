@@ -204,7 +204,7 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   // The catalog scan helpers name the keys (the renderer's deparsed operator-scope atom).
   { files: ['prisma/tests/catalog/scans.ts'], allow: ['keys'] },
   // The RLS renderer emits the §4.3 policies over the §4.2 helpers.
-  { files: ['tools/db/render-rls.ts', 'tools/db/render-rls.test.ts'], allow: ['keys'] },
+  { files: ['tools/db/render-rls.ts', 'tools/db/render-rls.test.ts', 'tools/db/render-rls-dr-a14.test.ts'], allow: ['keys'] },
   // Migration-linter rule 16 names the forms it rejects; its tests and the shared form list's tests name every
   // evasion form, session forms included (PR11-SEC-02).
   { files: ['tools/db/lint-migrations.ts'], allow: ['setter', 'keys'] },
@@ -725,6 +725,19 @@ export default defineConfig([
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { devDependencies: true, packageDir: [ROOT, join(ROOT, 'apps/api')] }],
       'import-x/no-relative-packages': ['error', { ignore: ['^(?:\\.\\./)+(?:apps/api/src|tools/openapi)/(?!(?:.*/)?\\.\\.(?:/|$))'] }],
+    },
+  },
+  {
+    // The RLS generator (TASK-024, US-077) also drives the tools/db renderer and table-class manifests and the
+    // PostgreSQL 18 Testcontainers harness of prisma/tests, which are no package entry points: exactly those two targets
+    // are added, anchored like the rule above (no `..` segment may follow them). tests/generated/tsconfig.json lists the
+    // files it type-checks.
+    files: ['tests/generated/rls/**/*.ts'],
+    rules: {
+      'import-x/no-relative-packages': [
+        'error',
+        { ignore: ['^(?:\\.\\./)+(?:apps/api/src|tools/openapi|tools/db|prisma/tests/harness)/(?!(?:.*/)?\\.\\.(?:/|$))'] },
+      ],
     },
   },
   {

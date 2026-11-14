@@ -262,6 +262,19 @@ const REPO_PROBES = {
   // PR21-SEC-09 / R2-n1: a `..` traversal after apps/api/src/ leaves apps/api, so the ignore must not apply.
   'tests/api/lint-probe-bad-api-traversal.api.test.ts':
     "import { AppError } from '../../apps/api/src/../../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
+  // PR #43 R1-n3 (D-TASK024-03): the RLS generator may also import tools/db and prisma/tests/harness relatively; a
+  // traversal after tools/db/, another prisma/tests folder, and the same imports from another tests/generated folder
+  // stay refused.
+  'tests/generated/rls/lint-probe-ok-tools-db.ts':
+    "import { quoteIdentifier } from '../../../tools/db/sql-text.js';\n\nexport const probe = (): unknown => quoteIdentifier;\n",
+  'tests/generated/rls/lint-probe-ok-harness.ts':
+    "import { APP_ROLE } from '../../../prisma/tests/harness/postgres.js';\n\nexport const probe = (): unknown => APP_ROLE;\n",
+  'tests/generated/rls/lint-probe-bad-tools-db-traversal.ts':
+    "import { AppError } from '../../../tools/db/../../packages/shared/src/index.js';\n\nexport const probe = (): unknown => AppError;\n",
+  'tests/generated/rls/lint-probe-bad-catalog.ts':
+    "import * as scans from '../../../prisma/tests/catalog/scans.js';\n\nexport const probe = (): unknown => scans;\n",
+  'tests/generated/lint-probe-bad-tools-db-elsewhere.ts':
+    "import { quoteIdentifier } from '../../tools/db/sql-text.js';\n\nexport const probe = (): unknown => quoteIdentifier;\n",
   // D-ARCH-103 (2): the workspace specifier @platform/prisma/client is classified by the generated file it resolves to
   // (prisma/generated/**, present after `npm run db:generate`): a value only in apps/api/src/platform/db/generated.ts
   // (D-ARCH-114), prisma/, tools/db and tests.

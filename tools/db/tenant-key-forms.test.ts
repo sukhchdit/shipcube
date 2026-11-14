@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { CONTEXT_DISCARD, contextReads, contextWrites } from './tenant-key-forms.js';
+import { ESCAPE_STRING_MARK, normalise, sqlText } from './sql-text.js';
+import { CONTEXT_DISCARD, CONTEXT_WRITE_FORMS, contextReads, contextWrites } from './tenant-key-forms.js';
 
 // Every evasion form of the PR #11 review (m1) and security review (PR11-SEC-02, probe P-B), in raw and in the
 // linter's lowercased/whitespace-collapsed shape. The SQL validity of each form is proven by the C-series fixtures.
@@ -77,6 +78,18 @@ describe('tenant-context SQL forms shared by rule 16 and the C-series scan (PR11
 
   it.each(UNICODE_ONLY)('Unicode escape is a write form on its own (PR11-SEC-14 a): %s', (sql) => {
     expect(contextWrites(sql)).toEqual(['Unicode-escape string or identifier']);
+  });
+
+  it('[PR11-SEC-16] the E-string write form matches the sqlText mark only: escape strings anywhere, never lookalikes or raw text', () => {
+    const [label, pattern] = CONTEXT_WRITE_FORMS.at(-1) ?? ['', /$^/];
+    expect(label).toBe('E-prefixed escape string');
+    expect(pattern.test(ESCAPE_STRING_MARK)).toBe(true);
+    const forms = (sql: string) => contextWrites(normalise(sqlText(sql, true)));
+    expect(forms(String.raw`DO $$ BEGIN EXECUTE E'SELECT 1'; END $$`)).toEqual(['E-prefixed escape string']);
+    expect(forms("DO $$ BEGIN EXECUTE 'SELECT e''x'''; END $$")).toEqual(['E-prefixed escape string']);
+    expect(forms("SELECT 'abcde', 'a e', date'2026-11-14'")).toEqual([]);
+    // Raw text carries no mark: callers pass sqlText(…, true).
+    expect(contextWrites("SELECT E'x'")).toEqual([]);
   });
 
   it('DISCARD forms reset the session; the word in prose does not match', () => {

@@ -1422,6 +1422,21 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     expect(findings.map((finding) => finding.ruleId)).toContain('import-x/no-relative-packages');
   });
 
+  it.each([
+    ['tools/db', 'tests/generated/rls/lint-probe-ok-tools-db.ts'],
+    ['prisma/tests/harness', 'tests/generated/rls/lint-probe-ok-harness.ts'],
+  ])('[PR #43 R1-n3] allowed: the RLS generator imports %s by relative path', (_title, path) => {
+    expectClean(report.probes, path);
+  });
+
+  it.each([
+    ['a `..` traversal after tools/db/', 'tests/generated/rls/lint-probe-bad-tools-db-traversal.ts'],
+    ['another prisma/tests folder (catalog)', 'tests/generated/rls/lint-probe-bad-catalog.ts'],
+    ['tools/db from another tests/generated folder', 'tests/generated/lint-probe-bad-tools-db-elsewhere.ts'],
+  ])('[PR #43 R1-n3] %s fails import-x/no-relative-packages', (_title, path) => {
+    expect(findingsOf(report.probes, path).map((finding) => finding.ruleId)).toContain('import-x/no-relative-packages');
+  });
+
   // D-ARCH-103 (1)-(2): the bare workspace specifier resolves to prisma/generated/** (category prisma-generated).
   it.each([
     [

@@ -11,6 +11,7 @@
     "integration": { "kind": "jest", "project": "integration", "coverage": true },
     "api": { "kind": "jest", "project": "api", "coverage": true },
     "catalog-c1-c14": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/catalog/"] },
-    "migrations": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/migrations/"] }
+    "migrations": { "kind": "jest", "project": "integration", "paths": ["prisma/tests/migrations/"] },
+    "rls-cross-tenant": { "kind": "jest", "project": "generated", "paths": ["tests/generated/rls/"] }
   }
 }

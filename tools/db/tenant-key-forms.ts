@@ -17,11 +17,14 @@
  *  - keyword-split dynamic SQL (`'SET' || ' LOCAL ' || 'app.' || 'org_id'`, `format('%s %s = %L', 'SET LOCAL', …)`);
  *  - `EXECUTE` of a computed statement (a statement read from a table, `chr()`-built text, a variable);
  *  - a read through `pg_show_all_settings()`.
- * `U&` Unicode escapes are refused outright (write form below), so escaped identifiers and strings cannot hide a key.
- * The outcome controls for the rest are the C11 converse (platform_definer owns only allow-listed objects) and the
- * withTenantTx leak check at checkout (ADR-0005 am. 10 item 16). Follow-ups: a reviewed dynamic-SQL allow-list for
- * `EXECUTE` in function bodies (C-series and rule 16) is TASK-024; rule 10 over DO bodies whose `EXECUTE` operand is
- * not a literal is TASK-021.
+ * Escapes are refused outright (write forms below), so an escaped identifier or string cannot hide a key: every `U&`
+ * Unicode escape, and every E-prefixed escape string (`E'\x61pp.org_id'`; refused token-level since TASK-024,
+ * PR11-SEC-16; until then it COULD hide a key in dynamic SQL). The outcome controls for the rest are the C11 converse (platform_definer owns only allow-listed objects) and the
+ * withTenantTx leak check at checkout (ADR-0005 am. 10 item 16). Rule 16 also refuses `EXECUTE` in a function body
+ * (and the query-string executors `query_to_xml*`, `ts_stat`, `ts_rewrite`) unless the routine is on the reviewed
+ * `DYNAMIC_SQL_ALLOW_LIST`, keyed by name plus the SHA-256 of its definition (lint half, TASK-024, PR43-SEC-06;
+ * tools/db/lint-migrations.ts); rule 10 over DO
+ * bodies whose `EXECUTE` operand is not a literal is TASK-021.
  */
 
 /** A labelled pattern: the label names the form in a finding. */
@@ -39,6 +42,12 @@ export type ContextForm = readonly [label: string, pattern: RegExp];
  *  - any `U&'…'` string or `U&"…"` identifier (PR11-SEC-14 a): `U&"\0061pp".org_id` and `U&'SET LOCAL \0061pp.…'`
  *    spell every form above without its text. No migration needs Unicode escapes, so the escape itself is refused.
  *    (`u &'…'`, with a space, is the `&` operator, not an escape, and is not matched.)
+ *  - any E-prefixed escape string (PR11-SEC-16, D-ARCH-078): `E'SELECT set_config(\x27\x61pp.org_id\x27, …)'` spells
+ *    a key in hex. Detected TOKEN-level, never by a pattern over the text (`'a e'`, `'abcde'` and `name'…'` end in an
+ *    `e` before a quote and are no escape strings): `sqlText(…, true)` (tools/db/sql-text.ts) writes
+ *    `ESCAPE_STRING_MARK` before each literal that is, or as dynamic SQL contains, one, and this form matches the mark.
+ *    Callers must therefore pass `sqlText(…, true)` text; raw text never matches it. Kept LAST: the eslint drift test
+ *    pins forms 0, 1 and 5 by index.
  */
 export const CONTEXT_WRITE_FORMS: readonly ContextForm[] = [
   ['context setter with an app. or computed key', /\bset_config"?\s*\(\s*(?!'(?!app\.)[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?'\s*,)/i],
@@ -47,6 +56,8 @@ export const CONTEXT_WRITE_FORMS: readonly ContextForm[] = [
   ['RESET ALL', /\breset\s+all\b/i],
   ['pg_settings', /\bpg_settings\b/i],
   ['Unicode-escape string or identifier', /\bu&["']/i],
+  // ESCAPE_STRING_MARK of tools/db/sql-text.ts (pinned by tenant-key-forms.test.ts).
+  ['E-prefixed escape string', /⁣escape-string⁣/i],
 ];
 
 /**

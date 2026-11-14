@@ -871,6 +871,32 @@ describe('CODEOWNERS: every app database platform, the credential predicate and 
   });
 });
 
+describe('CODEOWNERS: the O3 oracle, the RLS generator and the route enumeration source (PR43-SEC-04)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const lineFor = (path: string): RegExp => new RegExp(`^/${path.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\s+@\\S+$`, 'mu');
+  const added = ['tests/generated/rls/', 'tests/generated/api-mounts.ts'];
+
+  it.each(added)('[PR43-SEC-04] %s is required and the repository CODEOWNERS owns it', (path) => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain(path);
+    expect(repositoryText()).toMatch(lineFor(path));
+  });
+
+  it.each(added)('[PR43-SEC-04] mutation: deleting, commenting out or un-owning the %s line yields one finding for it', (path) => {
+    for (const replacement of ['', `# /${path} @sukhchdit`, `/${path}`]) {
+      const mutated = repositoryText().replace(lineFor(path), replacement);
+      expect(mutated).not.toMatch(lineFor(path));
+      expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
+    }
+  });
+
+  it('[PR43-SEC-04] a sibling generated folder is not covered by the rls line', () => {
+    const without = repositoryText().replace(lineFor('tests/generated/rls/'), '');
+    expect(checkCodeowners(`${without}\n/tests/generated/rbac/ @sukhchdit\n`).map((f) => f.message)).toEqual([
+      expect.stringContaining('tests/generated/rls/ ('),
+    ]);
+  });
+});
+
 describe('shellSegments', () => {
   it('splits on operators outside quotes and keeps the following operator', () => {
     expect(shellSegments("a --x='1|2' || true\nb && c; d | e")).toEqual([

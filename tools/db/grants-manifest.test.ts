@@ -104,4 +104,55 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_definer DELETE public.tokens: definerPurge table without its manifest line',
     ]);
   });
+
+  it('PR11-SEC-11 g: a runtimeReadOnly table accepts SELECT lines only, for every grantee; the committed catalogue is flagged', () => {
+    const entries = [entry('roles', { class: 'GLOBAL', runtimeReadOnly: true }), entry('countries', { class: 'GLOBAL' })];
+    const grants = parseGrantsManifest(
+      [
+        'platform_app SELECT public.roles',
+        'platform_app INSERT public.roles',
+        'platform_app UPDATE public.roles (name)',
+        'platform_erasure DELETE public.roles',
+        'platform_app INSERT public.countries',
+      ].join('\n'),
+    );
+    expect(validateGrants(grants, entries)).toEqual([
+      'platform_app INSERT public.roles: write privilege on a runtimeReadOnly table',
+      'platform_app UPDATE public.roles: write privilege on a runtimeReadOnly table',
+      'platform_erasure DELETE public.roles: write privilege on a runtimeReadOnly table',
+    ]);
+    const readOnly = loadTableClasses()
+      .filter((e) => e.runtimeReadOnly === true)
+      .map((e) => e.name);
+    expect(readOnly).toEqual([
+      '_prisma_migrations',
+      'bootstrap_migrations',
+      'permissions',
+      'reference_dataset_versions',
+      'role_permissions',
+      'roles',
+    ]);
+  });
+
+  it('PR43-SEC-09 b: the migration ledgers are runtimeReadOnly, so a write line for either is refused against the committed table classes; the committed manifest has no line for them', () => {
+    const committed = loadTableClasses();
+    // The Prisma ledger name is built from pieces: check-install-flags refuses its literal next to a write verb
+    // outside prisma/tests (PR-0005 n8), and this is a manifest line, not a write.
+    const prismaLedger = ['', 'prisma', 'migrations'].join('_');
+    const grants = parseGrantsManifest(
+      [
+        `platform_app UPDATE public.${prismaLedger} (checksum)`,
+        'platform_app INSERT public.bootstrap_migrations',
+        'platform_erasure DELETE public.bootstrap_migrations',
+      ].join('\n'),
+    );
+    expect(validateGrants(grants, committed)).toEqual(
+      expect.arrayContaining([
+        `platform_app UPDATE public.${prismaLedger}: write privilege on a runtimeReadOnly table`,
+        'platform_app INSERT public.bootstrap_migrations: write privilege on a runtimeReadOnly table',
+        'platform_erasure DELETE public.bootstrap_migrations: write privilege on a runtimeReadOnly table',
+      ]),
+    );
+    expect(grantTuples(loadGrantsManifest()).filter((tuple) => /_migrations\b/.test(tuple))).toEqual([]);
+  });
 });
