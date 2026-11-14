@@ -83,15 +83,18 @@ function fallbackProblemBody(correlationId: string, url: string, typeBase: strin
  * - the route is known (the `context` step recorded its descriptor before authn ran) and its declaration makes the
  *   response private: no `anonymous` member, or a credential of a declared kind was presented. Computed here from the
  *   descriptor, so an authenticator that refuses a declared credential before marking still answers private (R1-m1);
- * - the authn slot has not read the credentials yet (404/405 fallback, body parser, a step that failed before the
- *   slot) and the request carries any credential header: the generic test, free because a problem is no-store anyway.
- * After the slot read the credentials, a foreign credential it ignored does not make the error private.
+ * - no route is known (404/405 fallback, body parser, or a descriptor local that `defineRoute` did not return) or the
+ *   authn slot has not read the credentials yet (a step that failed before the slot), and the request carries any
+ *   credential header: the generic test, free because a problem is no-store anyway.
+ * After the slot read the credentials of a known route, a foreign credential it ignored does not make the error
+ * private. An unbranded or forged descriptor local reads as no route and keeps the generic test even when the
+ * credentials-read mark is set (D-ARCH-113 (3), PR #38 code review R2-n1): fail closed, more private, never less.
  */
 const isAuthenticatedProblem = (req: Request, res: Response): boolean => {
   if (isPrivateResponse(res)) return true;
   const route = routeDescriptorOf(res);
   if (route !== undefined && declaresPrivateResponse(route.auth, req.headers)) return true;
-  return !credentialsReadOf(res) && presentsCredential(req.headers);
+  return (route === undefined || !credentialsReadOf(res)) && presentsCredential(req.headers);
 };
 
 function sendProblem(req: Request, res: Response, status: number, body: string, retryAfterSeconds?: number): void {

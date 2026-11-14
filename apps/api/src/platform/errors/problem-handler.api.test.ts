@@ -665,4 +665,29 @@ describe('[SEC-TC-29] [PR #32 m1 (b)] the problem handler decides "private" from
       expectProblem(await request(appFor(DUAL)).get('/api/v1/probe').set('Cookie', '__Host-rt_web=opaque'), 401, 'AUTH_REQUIRED');
     });
   });
+
+  it('[D-ARCH-113] [R2-n1] a forged descriptor local reads as no route: the generic credential test holds after markCredentialsRead', async () => {
+    // A slot replaces the recorded descriptor with an unbranded copy (not returned by defineRoute), marks the
+    // credentials read and fails: the problem handler must not trust the mark for an unknown route (fail closed).
+    const route = fixtureRoute({ operationId: 'probe', path: '/probe', handler: () => ({ status: 200, body: {} }) });
+    const forges: RouteSlot = () => (_req, res, next) => {
+      (res.locals as Record<string, unknown>)['routeDescriptor'] = { ...route };
+      markCredentialsRead(res);
+      next(new AppError('SERVICE_UNAVAILABLE'));
+    };
+    const forged = createApp({
+      health: [],
+      modules: [{ name: 'probe', routes: [route] }],
+      logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+      pipeline: { ...defaultPipelineSlots({ tenantTx: undefined }), authenticate: forges },
+    });
+    expectProblem(
+      await request(forged).get('/api/v1/probe').set('Authorization', 'Bearer opaque'),
+      503,
+      'SERVICE_UNAVAILABLE',
+      'private, no-store',
+    );
+    // Control: without a credential the forged route's problem stays public no-store.
+    expectProblem(await request(forged).get('/api/v1/probe'), 503, 'SERVICE_UNAVAILABLE');
+  });
 });

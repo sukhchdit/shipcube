@@ -3,7 +3,7 @@
 // only the kinds it declares.
 import { describe, expect, it } from '@jest/globals';
 
-import { PRESENTABLE_KINDS, presentedKinds, presentsCredential, REFRESH_COOKIE_NAMES } from './credentials.js';
+import { CREDENTIAL_HEADER_NAMES, PRESENTABLE_KINDS, presentedKinds, presentsCredential, REFRESH_COOKIE_NAMES } from './credentials.js';
 
 describe('[D-ARCH-107] presentsCredential', () => {
   it('[D-ARCH-107] no header, an empty Authorization or X-Quote-Token, or unrelated cookies present no credential', () => {
@@ -83,5 +83,39 @@ describe('[D-ARCH-109] presentedKinds', () => {
     read.length = 0;
     expect(presentedKinds(recording, ['session', 'quote-token'])).toEqual(['session', 'quote-token']);
     expect(read).toEqual(['authorization', 'x-quote-token']);
+  });
+});
+
+describe('[D-ARCH-113] CREDENTIAL_HEADER_NAMES', () => {
+  it('[D-ARCH-113] is the frozen lower-case list of every credential or proof header', () => {
+    expect(CREDENTIAL_HEADER_NAMES).toEqual([
+      'authorization',
+      'cookie',
+      'x-csrf-token',
+      'x-reauth-proof',
+      'x-quote-token',
+      'stripe-signature',
+      'x-mock-signature',
+      'x-carrier-signature',
+    ]);
+    expect(Object.isFrozen(CREDENTIAL_HEADER_NAMES)).toBe(true);
+    for (const name of CREDENTIAL_HEADER_NAMES) expect(name).toBe(name.toLowerCase());
+  });
+
+  it('[D-ARCH-113] the presence readers read only headers from the list', () => {
+    const read = new Set<string>();
+    const recording = new Proxy<Record<string, string>>(
+      { authorization: 'Bearer x', cookie: '__Host-rt_web=x', 'x-quote-token': 'q', 'x-other': 'o' },
+      {
+        get: (target, name): string | undefined => {
+          if (typeof name !== 'string') return undefined;
+          read.add(name);
+          return target[name];
+        },
+      },
+    );
+    expect(presentedKinds(recording)).toEqual(['session', 'refresh-cookie', 'quote-token']);
+    expect([...read].every((name) => (CREDENTIAL_HEADER_NAMES as readonly string[]).includes(name))).toBe(true);
+    expect([...read].sort()).toEqual(['authorization', 'cookie', 'x-quote-token']);
   });
 });

@@ -19,7 +19,7 @@ import {
   type RouteMarker,
   type RouteTenancy,
 } from '@platform/authz';
-import { AUDIT_ACTIONS, AUDIT_SENSITIVITIES, type AuditDescriptor } from '@platform/shared';
+import { AUDIT_ACTIONS, AUDIT_SENSITIVITIES, type AuditDescriptor, CREDENTIAL_HEADER_NAMES } from '@platform/shared';
 import Joi from 'joi';
 
 import type { TenantContext } from '../db/index.js';
@@ -79,12 +79,28 @@ export interface Principal {
   readonly permissions: ReadonlySet<string>;
 }
 
+/** Where a stream result writes its body: chunks only, never the status line or headers (already sent). */
+export interface RouteStreamSink {
+  write(chunk: string): void;
+}
+
+/**
+ * A result whose body is produced after COMMIT (TASK-020 part 020-C (f), the stream hook; ADR-0003 amendment
+ * 2026-11-13 (e)). The tx slot sends the status line and headers, then awaits `complete` and ends the response; the
+ * result type and the SSE framing are TASK-044's. `signal` aborts at the request deadline or when the client goes.
+ */
+export interface RouteStream {
+  complete(sink: RouteStreamSink, signal: AbortSignal): Promise<void>;
+}
+
 /** The handler's response; the pipeline sends it after the transaction committed, so a rollback never sends 2xx. */
 export interface RouteResult {
   readonly status: number;
-  /** JSON body; omit for 204/304. */
+  /** JSON body; omit for 204/304 and for a stream result. */
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
+  /** A body completed after COMMIT (see `RouteStream`); exclusive with `body`. */
+  readonly stream?: RouteStream;
 }
 
 /**
@@ -96,23 +112,90 @@ export interface RouteTransport {
   readonly userAgent: string;
 }
 
-export interface RouteContext {
+/**
+ * What every phase reads about the request (ADR-0003 amendment 2026-11-13): the descriptor, the validated input, the
+ * principal, the correlation id and the frozen transport view, never the live request or response (PR32-SEC-05 (c)).
+ */
+export interface RouteRequestContext {
   readonly route: RouteDescriptor;
   readonly input: RouteInput;
   readonly principal: Principal;
   readonly correlationId: string;
-  /** The guarded TenantDb of the request's transaction (tx slot); undefined on `transaction: 'none'` routes. */
-  readonly db: unknown;
   readonly transport: RouteTransport;
 }
 
-export type RouteHandler = (ctx: RouteContext) => Promise<RouteResult> | RouteResult;
+/** The context of `load` and `handler`: the request plus the guarded TenantDb of the phase's own transaction. */
+export interface RouteContext extends RouteRequestContext {
+  /**
+   * The guarded TenantDb of the phase's transaction (tx slot): read-only in `load`, the one write transaction in
+   * `handler`; undefined on `transaction: 'none'` routes.
+   */
+  readonly db: unknown;
+}
+
+/**
+ * The context of `call` (D-ARCH-106 (4)): no transaction and no database handle. `signal` aborts at the request
+ * deadline or when the client disconnects; pass it to every external call.
+ */
+export interface CallContext extends RouteRequestContext {
+  readonly signal: AbortSignal;
+}
+
+/** What `handler` receives from the earlier phases: `undefined` for a phase the route does not declare. */
+export interface PhaseResults<L, C> {
+  readonly loaded: L;
+  readonly called: C;
+}
+
+/**
+ * `load(ctx)` (ADR-0003 amendment 2026-11-13): one short READ-ONLY tenant transaction (a write fails with SQLSTATE
+ * 25006) that resolves the addressed resource under RLS and reads what `call` needs; returns plain data, writes nothing
+ * and records no audit entry. A tenant-transaction root of the T-83 lint (R4).
+ */
+export type RouteLoad<L> = (ctx: RouteContext) => Promise<L> | L;
+/**
+ * `call(ctx, loaded)`: the only place for external I/O (HTTP, queue, Valkey, object storage, SMTP) and heavy CPU, with
+ * no transaction open. Every external effect carries an idempotency key derived from `loaded`, never a random value, so
+ * a repeat after a failed handler transaction produces the effect once (ADR-0014 G3).
+ */
+export type RouteCall<L, C> = (ctx: CallContext, loaded: L) => Promise<C> | C;
+/** `handler(ctx, { loaded, called })`: the one write transaction, with the audit hook; re-validates what `load` read. */
+export type RouteHandler<L = undefined, C = undefined> = (
+  ctx: RouteContext,
+  phases: PhaseResults<L, C>,
+) => Promise<RouteResult> | RouteResult;
+/**
+ * `afterCommit(ctx, result)`: after COMMIT and after the response was written, with no transaction and no database
+ * handle. Best effort and in-process (durable work is an outbox event): a throw is logged as `api.after_commit_failed`
+ * and never changes the response; pending work is drained at shutdown.
+ */
+export type RouteAfterCommit = (ctx: RouteRequestContext, result: RouteResult) => Promise<void> | void;
+
+/** The route I/O phases (ADR-0003 amendment 2026-11-13, D-ARCH-106 (4)); a route with only `handler` is one transaction. */
+export interface RoutePhases<L, C> {
+  readonly load?: RouteLoad<L>;
+  readonly call?: RouteCall<L, C>;
+  readonly handler: RouteHandler<L, C>;
+  readonly afterCommit?: RouteAfterCommit;
+}
+
+/**
+ * The phases of a descriptor with their result types erased: `never` parameters accept every typed phase, and the tx
+ * slot (the one caller) hands each phase's own result to the next.
+ */
+export interface DescriptorPhases {
+  readonly load?: (ctx: RouteContext) => unknown;
+  readonly call?: (ctx: CallContext, loaded: never) => unknown;
+  readonly handler: (ctx: RouteContext, phases: PhaseResults<never, never>) => Promise<RouteResult> | RouteResult;
+  readonly afterCommit?: RouteAfterCommit;
+}
 
 type RoutePermission =
   | { readonly permission: Permission; readonly permissionJustification?: undefined }
   | { readonly permission: RouteMarker; readonly permissionJustification: string };
 
-export type RouteSpec = RoutePermission & {
+/** Every field of a route declaration except the phases. */
+type RouteDeclaration = RoutePermission & {
   /** openapi.yaml operationId (camelCase); the route-metadata test pairs routes and operations by it. */
   readonly operationId: string;
   readonly method: RouteMethod;
@@ -142,21 +225,31 @@ export type RouteSpec = RoutePermission & {
   readonly mfaGateExempt?: true;
   readonly csrf?: true;
   /**
-   * `tenant` (default): the handler runs inside one `withTenantTx` with the audit entry (DR-A08). `none`: no database
-   * transaction (health, docs-like routes); such a route may not reach the database at all.
+   * `tenant` (default): the handler runs inside one `withTenantTx` with the audit entry (DR-A08), after the optional
+   * read-only `load` transaction and the transaction-free `call`. `none`: no database transaction (health, docs-like
+   * routes); such a route may not reach the database at all and declares only `handler` and `afterCommit`.
    */
   readonly transaction?: 'tenant' | 'none';
-  readonly handler: RouteHandler;
 };
+
+/**
+ * A route declaration (ADR-0003 "Route metadata", amendment 2026-11-13 (g)): `defineRoute` infers `L` from `load` and
+ * `C` from `call`; a route without them has `undefined` results.
+ */
+export type RouteSpec<L = undefined, C = undefined> = RouteDeclaration & RoutePhases<L, C>;
 
 type WithoutAuth<T> = T extends unknown ? Omit<T, 'auth'> : never;
 
+/** A declaration as the checks read it: untrusted data, the phases as unknown values (JavaScript callers included). */
+type CheckedSpec = RouteDeclaration & { readonly [phase in (typeof PHASES)[number]]?: unknown };
+
 /** A validated, frozen route declaration; `auth` is normalised to the frozen accepted set, in canonical order. */
-export type RouteDescriptor = Readonly<WithoutAuth<RouteSpec>> & {
-  readonly auth: RouteAuthSet;
-  readonly transaction: 'tenant' | 'none';
-  readonly pathParams: readonly string[];
-};
+export type RouteDescriptor = Readonly<WithoutAuth<RouteDeclaration>> &
+  DescriptorPhases & {
+    readonly auth: RouteAuthSet;
+    readonly transaction: 'tenant' | 'none';
+    readonly pathParams: readonly string[];
+  };
 
 export class RouteDefinitionError extends Error {
   constructor(spec: { readonly method?: unknown; readonly path?: unknown; readonly operationId?: unknown }, problems: readonly string[]) {
@@ -192,7 +285,7 @@ function pathProblems(path: unknown): string[] {
   return new Set(params).size === params.length ? [] : ['path repeats a parameter name'];
 }
 
-function permissionProblems(spec: RouteSpec): string[] {
+function permissionProblems(spec: CheckedSpec): string[] {
   const { permission, permissionJustification } = spec;
   if (isRouteMarker(permission)) return nonEmpty(permissionJustification) ? [] : [`marker "${permission}" needs a permissionJustification`];
   if (!isPermission(permission)) return [`permission "${String(permission)}" is not in the catalogue`];
@@ -266,12 +359,25 @@ const BUILT_IN_DEFINITIONS: ReadonlyMap<string, unknown> = new Map(
 const termsOf = (schema: object): unknown => (schema as { $_terms?: unknown }).$_terms;
 /** Bounds the `$_terms` walk; several term levels make one schema level (terms -> keys -> entry -> schema). */
 const MAX_TERM_DEPTH = 4 * MAX_SCHEMA_DEPTH;
+const isPlainObject = (value: object): boolean => Object.getPrototypeOf(value) === Object.prototype;
+/**
+ * The prototype of Joi's own object-dependency entries (`with`, `without`, `xor`, `and`, `or`, `nand`, `oxor`):
+ * read from the default root, like the built-in definitions. Undefined if a Joi upgrade changes the shape, in which case
+ * such entries are reported like any other unknown class instance (fail closed).
+ */
+const JOI_DEPENDENCY_PROTOTYPE: unknown = ((): unknown => {
+  const terms = termsOf(Joi.object({ a: Joi.any(), b: Joi.any() }).with('a', 'b'));
+  const entry: unknown = (terms as { dependencies?: readonly unknown[] } | undefined)?.dependencies?.[0];
+  return typeof entry === 'object' && entry !== null && !isPlainObject(entry) ? Object.getPrototypeOf(entry) : undefined;
+})();
 
 /**
  * Every schema reachable from `root` is built on a built-in definition (PR32-SEC-13, `Joi.extend`; exported for its unit
- * tests, PR32-SEC-17). The walk follows schemas, arrays and plain objects inside `$_terms` (never class instances such
- * as references), each object once. A Joi upgrade that drops `_definition` or `$_terms` refuses every schema here (PR32-SEC-17: a schema whose `$_terms` is
- * not an object cannot be walked, so its children would go unseen), so the change fails the tests instead of opening.
+ * tests, PR32-SEC-17). The walk follows schemas, arrays, plain objects and Joi's own dependency entries inside
+ * `$_terms`, each object once; a `RegExp` and a Joi reference are leaves. Fails closed on everything it cannot walk
+ * (D-ARCH-113 (4), PR38-SEC-04): a schema whose `$_terms` is missing or is not a plain object (a null-prototype copy, a
+ * Map, a class instance) is reported and not walked, and any other non-plain object inside `$_terms` is reported rather
+ * than skipped, so a Joi upgrade that moves children into another container fails the tests instead of opening.
  */
 export function extensionProblems(root: Joi.Schema, where: string): string[] {
   const seen = new Set<object>();
@@ -293,11 +399,17 @@ export function extensionProblems(root: Joi.Schema, where: string): string[] {
         problems.add(`${where} has a Joi schema without $_terms; its children cannot be inspected (Joi internals changed)`);
         return;
       }
+      if (!isPlainObject(terms)) {
+        problems.add(`${where} has a Joi schema whose $_terms cannot be inspected (Joi internals changed)`);
+        return;
+      }
       visit(terms, depth + 1);
     } else if (Array.isArray(value)) {
       for (const item of value as readonly unknown[]) visit(item, depth + 1);
-    } else if (Object.getPrototypeOf(value) === Object.prototype) {
+    } else if (isPlainObject(value) || Object.getPrototypeOf(value) === JOI_DEPENDENCY_PROTOTYPE) {
       for (const item of Object.values(value)) visit(item, depth + 1);
+    } else if (!(value instanceof RegExp) && !Joi.isRef(value)) {
+      problems.add(`${where} holds a non-plain object inside $_terms that cannot be inspected (Joi internals changed)`);
     }
   };
   visit(root, 0);
@@ -336,7 +448,7 @@ function openSchemaProblems(node: SchemaNode, where: string, depth: number): str
 }
 
 /** Joi schemas must be closed objects at every depth (REQ-SEC-007). */
-function schemaProblems(spec: RouteSpec): string[] {
+function schemaProblems(spec: CheckedSpec): string[] {
   const problems: string[] = [];
   for (const [part, schema] of Object.entries(spec.schema) as [keyof RouteSchemas, Joi.Schema | undefined][]) {
     if (schema === undefined) continue;
@@ -365,7 +477,7 @@ function deprecationProblems(info: DeprecationInfo): string[] {
   }
 }
 
-function optionProblems(spec: RouteSpec): string[] {
+function optionProblems(spec: CheckedSpec): string[] {
   const problems: string[] = [];
   if (spec.reauth !== undefined) {
     if (!REAUTH_SCOPE.test(spec.reauth.scope)) problems.push(`reauth scope "${spec.reauth.scope}" is not dotted lower-case`);
@@ -382,8 +494,54 @@ function optionProblems(spec: RouteSpec): string[] {
     problems.push('transaction none is only allowed with audit action NONE');
   }
   if (spec.rateLimitRoute !== undefined && !nonEmpty(spec.rateLimitRoute)) problems.push('rateLimitRoute must be non-empty when set');
-  if (typeof spec.handler !== 'function') problems.push('handler is not a function');
   return problems;
+}
+
+const PHASES = ['load', 'call', 'handler', 'afterCommit'] as const;
+
+/**
+ * ADR-0003 amendment 2026-11-13 (a), D-ARCH-106 (4): every declared phase is a function and `handler` is required;
+ * `load` without `call` is refused (the handler's own transaction can read); `transaction: 'none'` allows only
+ * `handler` and `afterCommit` (no transaction for `load`, and `call` exists to keep I/O out of one).
+ */
+function phaseProblems(spec: CheckedSpec): string[] {
+  const problems: string[] = [];
+  for (const phase of PHASES) {
+    const value = spec[phase];
+    if (typeof value !== 'function' && (phase === 'handler' || value !== undefined)) problems.push(`${phase} is not a function`);
+  }
+  if (spec.load !== undefined && spec.call === undefined)
+    problems.push('load without call is refused: the handler transaction can read (D-ARCH-106)');
+  if (spec.transaction === 'none' && (spec.load !== undefined || spec.call !== undefined)) {
+    problems.push('transaction none allows only handler and afterCommit (D-ARCH-106)');
+  }
+  return problems;
+}
+
+/** The one `auth` set on which `x-quote-token` is a legal companion header (ADR-0008 am. 5 item 1, am. 6 item 1). */
+const QUOTE_TOKEN_COMPANION_AUTH = 'session';
+
+/**
+ * D-ARCH-113 (1), PR38-SEC-03: a credential never reaches a handler as validated input. `schema.headers` may not name
+ * a `CREDENTIAL_HEADER_NAMES` entry (keys compared case-insensitively), with one exception: `x-quote-token` on a
+ * route whose `auth` is exactly `[session]` (the companion of claimQuote, saveQuote and createShipment, where the
+ * contract declares the QuoteToken header parameter; the handler compares hashes in constant time, never logs it).
+ */
+function credentialHeaderProblems(spec: CheckedSpec): string[] {
+  const headers = spec.schema.headers;
+  if (headers === undefined || !Joi.isSchema(headers)) return [];
+  const keys = Object.keys((headers.describe() as { keys?: object }).keys ?? {});
+  const kinds = authKinds(spec.auth);
+  const companion = kinds.length === 1 && kinds[0] === QUOTE_TOKEN_COMPANION_AUTH;
+  const refused = keys.filter((key) => {
+    const name = key.toLowerCase();
+    if (!(CREDENTIAL_HEADER_NAMES as readonly string[]).includes(name)) return false;
+    return !(name === 'x-quote-token' && companion);
+  });
+  return refused.map(
+    (key) =>
+      `schema.headers declares the credential header "${key}": credentials are read by the authn slot only, never projected into a handler's input (x-quote-token only as the companion of auth [session]; D-ARCH-113)`,
+  );
 }
 
 /** `auth` as written: one kind (sugar) or a set; JavaScript callers may pass anything. */
@@ -395,7 +553,7 @@ const authKinds = (auth: unknown): readonly unknown[] => (Array.isArray(auth) ? 
  * on a dual-mode route and is a catalogued tenant permission, and an unsafe refresh-cookie route checks CSRF. The
  * tenancy and signature bindings (PR8-SEC-05) stay with the boot check and the route-metadata test.
  */
-function authProblems(spec: RouteSpec): string[] {
+function authProblems(spec: CheckedSpec): string[] {
   const kinds = authKinds(spec.auth);
   const unknown = kinds.filter((kind) => !isRouteAuth(kind));
   if (unknown.length > 0) return [`auth ${unknown.map((kind) => `"${String(kind)}"`).join(', ')} is unknown`];
@@ -409,7 +567,8 @@ function authProblems(spec: RouteSpec): string[] {
 }
 
 /** Every problem of a route declaration; empty means `defineRoute` accepts it. Exported for the negative tests. */
-export function routeDefinitionProblems(spec: RouteSpec): string[] {
+export function routeDefinitionProblems<L, C>(declared: RouteSpec<L, C>): string[] {
+  const spec: CheckedSpec = declared;
   const problems: string[] = [];
   if (!OPERATION_ID.test(String(spec.operationId))) problems.push('operationId must be camelCase');
   if (!isOneOf(ROUTE_METHODS, spec.method)) problems.push(`method "${String(spec.method)}" is not one of ${ROUTE_METHODS.join(', ')}`);
@@ -419,8 +578,8 @@ export function routeDefinitionProblems(spec: RouteSpec): string[] {
   if (!isOneOf(ROUTE_TENANCIES, spec.tenancy)) problems.push(`tenancy "${String(spec.tenancy)}" is unknown`);
   problems.push(...authProblems(spec));
   if (typeof spec.schema !== 'object' || spec.schema === null) problems.push('schema is missing');
-  else problems.push(...schemaProblems(spec));
-  problems.push(...optionProblems(spec));
+  else problems.push(...schemaProblems(spec), ...credentialHeaderProblems(spec));
+  problems.push(...optionProblems(spec), ...phaseProblems(spec));
   return problems;
 }
 
@@ -448,8 +607,11 @@ function frozenData<T>(value: T): T {
   return Object.freeze(copy) as T;
 }
 
-/** Declares one route. Throws `RouteDefinitionError` naming every problem; returns the deep-frozen descriptor. */
-export function defineRoute(spec: RouteSpec): RouteDescriptor {
+/**
+ * Declares one route. Throws `RouteDefinitionError` naming every problem; returns the deep-frozen descriptor. `L` and
+ * `C` are inferred from `load` and `call` (ADR-0003 amendment 2026-11-13 (g)).
+ */
+export function defineRoute<L = undefined, C = undefined>(spec: RouteSpec<L, C>): RouteDescriptor {
   const problems = routeDefinitionProblems(spec);
   if (problems.length > 0) throw new RouteDefinitionError(spec, problems);
   const descriptor: RouteDescriptor = Object.freeze({

@@ -15,7 +15,7 @@ import { authorise } from '../authz/authorise.js';
 import { DbError, type TenantContext, type TenantTxRunner } from '../db/index.js';
 import { dbErrorMapping } from '../db/map-db-error.js';
 import { GENERIC_SERVER_DETAIL } from '../errors/problem.js';
-import type { Principal, RouteContext, RouteDescriptor } from './define-route.js';
+import type { Principal, RouteContext, RouteDescriptor, RouteHandler } from './define-route.js';
 import {
   assertPipelineReady,
   defaultPipelineSlots,
@@ -59,7 +59,7 @@ function fakeRunner(events: string[], failure?: Error): TenantTxRunner<unknown> 
   };
 }
 
-const tenantRoute = (handler: RouteDescriptor['handler'], path = '/things'): RouteDescriptor =>
+const tenantRoute = (handler: RouteHandler, path = '/things'): RouteDescriptor =>
   fixtureRoute({ operationId: 'listThings', path, transaction: 'tenant', tenancy: 'guest', handler });
 
 describe('per-route pipeline order (api/README.md §15 assertion 11)', () => {

@@ -2,6 +2,8 @@
 import { describe, expect, it } from '@jest/globals';
 import Joi from 'joi';
 
+import { CREDENTIAL_HEADER_NAMES } from '@platform/shared';
+
 import {
   defineRoute,
   extensionProblems,
@@ -14,14 +16,14 @@ import {
 import { prepareSchemas, validateRequest } from '../validate/validate.js';
 import { fixtureRoute } from './tests/fixture-route.js';
 
-const base: RouteSpec = {
+const base = {
   ...fixtureRoute({
     operationId: 'getThing',
     path: '/things/:thingId',
     schema: { params: Joi.object({ thingId: Joi.string() }) },
     handler: () => ({ status: 204 }),
   }),
-};
+} as unknown as RouteSpec;
 const problemsOf = (overrides: Record<string, unknown>): string[] => routeDefinitionProblems({ ...base, ...overrides });
 
 describe('defineRoute (US-067)', () => {
@@ -410,5 +412,149 @@ describe('[R2-n1] [PR32-SEC-15] the descriptor is deep-frozen', () => {
     const route = defineRoute(base);
     expect('reauth' in route).toBe(false);
     expect('deprecated' in route).toBe(false);
+  });
+});
+
+describe('[D-ARCH-113] [PR38-SEC-03] schema.headers never names a credential header', () => {
+  const credentialProblems = (overrides: Record<string, unknown>): string[] =>
+    problemsOf(overrides).filter((problem) => problem.includes('credential header'));
+  const headers = (name: string): Record<string, unknown> => ({
+    schema: { ...base.schema, headers: Joi.object({ [name]: Joi.string() }) },
+  });
+  const SESSION = { auth: 'session', permission: 'authenticated', permissionJustification: 'Own account.', tenancy: 'user' };
+
+  it.each([...CREDENTIAL_HEADER_NAMES, 'Authorization', 'COOKIE', 'X-Csrf-Token', 'Stripe-Signature'])(
+    '[D-ARCH-113] refuses "%s" in schema.headers at module load, naming D-ARCH-113',
+    (name) => {
+      expect(credentialProblems(headers(name))).toEqual([expect.stringContaining(`credential header "${name}"`)]);
+      expect(credentialProblems(headers(name))[0]).toContain('D-ARCH-113');
+      expect(() => defineRoute({ ...base, ...headers(name) })).toThrow(RouteDefinitionError);
+    },
+  );
+
+  it('[D-ARCH-113] accepts ordinary headers (accept-language, x-mock-scenario)', () => {
+    expect(problemsOf(headers('accept-language'))).toEqual([]);
+    expect(problemsOf(headers('x-mock-scenario'))).toEqual([]);
+  });
+
+  it('[D-ARCH-113] x-quote-token is accepted only as the companion of exactly [session] (ADR-0008 am. 5 item 1)', () => {
+    expect(credentialProblems({ ...SESSION, ...headers('x-quote-token') })).toEqual([]);
+    expect(credentialProblems({ ...SESSION, auth: ['session'], ...headers('X-Quote-Token') })).toEqual([]);
+    for (const auth of [['anonymous'], ['anonymous', 'session'], ['session', 'quote-token'], ['refresh-cookie'], ['signature']]) {
+      expect([auth, credentialProblems({ ...SESSION, auth, ...headers('x-quote-token') })]).toEqual([
+        auth,
+        [expect.stringContaining('credential header "x-quote-token"')],
+      ]);
+    }
+    // The carve-out is x-quote-token only: [session] still refuses every other credential header.
+    expect(credentialProblems({ ...SESSION, ...headers('authorization') })).toHaveLength(1);
+  });
+
+  it('[D-ARCH-113] the PR #38 P3 probe: three [anonymous] routes declaring cookie, authorization and x-quote-token throw', () => {
+    for (const name of ['cookie', 'authorization', 'x-quote-token']) {
+      expect(() =>
+        fixtureRoute({
+          operationId: 'probeCredential',
+          path: '/probe',
+          schema: { headers: Joi.object({ [name]: Joi.string() }) },
+          handler: () => ({ status: 204 }),
+        }),
+      ).toThrow(/credential header .*D-ARCH-113/);
+    }
+  });
+});
+
+describe('[D-ARCH-106 (4)] route I/O phases at module load (ADR-0003 amendment 2026-11-13)', () => {
+  const TENANT = { transaction: 'tenant', tenancy: 'guest' };
+  const load = (): { id: string } => ({ id: 'a' });
+  const call = (): string => 'key';
+
+  it('accepts load + call + handler + afterCommit on a tenant route and keeps the phases on the frozen descriptor', () => {
+    const afterCommit = (): void => undefined;
+    const route = defineRoute({ ...base, ...TENANT, load, call, afterCommit } as unknown as RouteSpec);
+    expect([route.load, route.call, route.afterCommit]).toEqual([load, call, afterCommit]);
+    expect(Object.isFrozen(route)).toBe(true);
+    expect(problemsOf({ ...TENANT, call })).toEqual([]);
+  });
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ['load without call', { ...TENANT, load }, 'load without call is refused: the handler transaction can read (D-ARCH-106)'],
+    ['load on transaction none', { load, call }, 'transaction none allows only handler and afterCommit (D-ARCH-106)'],
+    ['call on transaction none', { call }, 'transaction none allows only handler and afterCommit (D-ARCH-106)'],
+    ['a non-function load', { ...TENANT, load: 'x', call }, 'load is not a function'],
+    ['a non-function call', { ...TENANT, call: {} }, 'call is not a function'],
+    ['a non-function afterCommit', { afterCommit: 1 }, 'afterCommit is not a function'],
+    ['a missing handler', { handler: undefined }, 'handler is not a function'],
+  ])('refuses %s', (_label, overrides, expected) => {
+    expect(problemsOf(overrides)).toContain(expected);
+    expect(() => defineRoute({ ...base, ...overrides })).toThrow(RouteDefinitionError);
+  });
+
+  it('allows afterCommit on transaction none (health-like routes)', () => {
+    expect(problemsOf({ afterCommit: () => undefined })).toEqual([]);
+  });
+
+  it('infers the loaded and called types from load and call (compile-time check)', () => {
+    const route = fixtureRoute({
+      operationId: 'typedPhases',
+      path: '/typed',
+      transaction: 'tenant',
+      tenancy: 'guest',
+      load: () => ({ orderId: 'o-1', attempt: 2 }),
+      call: (ctx, loaded) => ({ key: `auth:${loaded.orderId}:${String(loaded.attempt)}`, aborted: ctx.signal.aborted }),
+      handler: (_ctx, { loaded, called }) => ({ status: 200, body: { id: loaded.orderId, key: called.key } }),
+    });
+    expect(route.operationId).toBe('typedPhases');
+  });
+});
+
+describe('[D-ARCH-113 (4)] [PR38-SEC-04] the $_terms walk fails closed on containers it cannot inspect', () => {
+  const extendedRoot: unknown = Joi.extend({ type: 'shout', base: Joi.string() });
+  const custom = (extendedRoot as { shout: () => Joi.Schema }).shout();
+  const withTerms = (terms: unknown): Joi.Schema =>
+    Object.defineProperty<Joi.Schema>(Joi.object({ name: Joi.string() }), '$_terms', { value: terms, configurable: true });
+  /** The real `$_terms` of a parent holding the extension type, copied into other container shapes. */
+  const parent = Joi.object({ name: Joi.string(), nested: custom });
+  const realTerms = (parent as unknown as { $_terms: Record<string, unknown> }).$_terms;
+  const EXTENSION = 'schema.body uses the Joi extension type "shout" (Joi.extend types are not allow-listed)';
+  const CONTAINER = 'schema.body has a Joi schema whose $_terms cannot be inspected (Joi internals changed)';
+  const NESTED = 'schema.body holds a non-plain object inside $_terms that cannot be inspected (Joi internals changed)';
+
+  it('control: the untampered parent (and a plain copy of its terms) reports the nested extension type', () => {
+    expect(extensionProblems(parent, 'schema.body')).toEqual([EXTENSION]);
+    expect(extensionProblems(withTerms({ ...realTerms }), 'schema.body')).toEqual([EXTENSION]);
+  });
+
+  class Holder {
+    constructor(readonly keys: unknown) {}
+  }
+
+  it.each<[string, unknown]>([
+    ['a null-prototype copy', Object.assign(Object.create(null) as object, realTerms)],
+    ['a Map', new Map(Object.entries(realTerms))],
+    ['a class instance', new Holder(realTerms['keys'])],
+  ])('reports a $_terms that is %s and does not walk it', (_label, terms) => {
+    expect(extensionProblems(withTerms(terms), 'schema.body')).toEqual([CONTAINER]);
+  });
+
+  it.each<[string, unknown]>([
+    ['a Map', new Map([['schema', custom]])],
+    ['a class instance', new Holder(custom)],
+    ['a null-prototype object', Object.assign(Object.create(null) as object, { schema: custom })],
+  ])('reports %s met inside $_terms instead of skipping it', (_label, inner) => {
+    expect(extensionProblems(withTerms({ keys: null, inner }), 'schema.body')).toEqual([NESTED]);
+  });
+
+  it('keeps RegExp, Joi references and Joi object dependencies legal (and walks the dependencies)', () => {
+    const schema = Joi.object({
+      a: Joi.string().pattern(/^[a-z]+$/),
+      b: Joi.number().min(Joi.ref('c')),
+      c: Joi.number(),
+      d: Joi.alternatives().conditional('c', { is: 1, then: Joi.string(), otherwise: Joi.number() }),
+    })
+      .with('a', 'b')
+      .xor('c', 'd')
+      .pattern(/^x-/, Joi.string());
+    expect(extensionProblems(schema, 'schema.body')).toEqual([]);
   });
 });

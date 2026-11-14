@@ -14,6 +14,7 @@ import { createRuntimeLog, readPackageVersion } from './platform/runtime/log.js'
 import { exitAfterFlush, installProcessErrorHandlers } from './platform/runtime/process-errors.js';
 import { createRuntimeServices } from './platform/runtime/services.js';
 import { createShutdown } from './platform/runtime/shutdown.js';
+import { createAfterCommitQueue } from './platform/tx/after-commit.js';
 
 const { config, secrets } = await loadRuntimeConfigOrExit('api');
 // Redacted Pino logger (TASK-010); every line carries the request context of the request being handled, if any.
@@ -31,6 +32,8 @@ const services = createRuntimeServices(config, 'api', log, secrets);
 // The contract served by /api/docs when DOCS_ENABLED (REQ-API-003); same depth from src/ and dist/.
 const docs: DocsOptions | undefined = docsOptionsFrom(config, new URL('../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
 const health = healthRoutes({ probe: services.probe });
+// The routes' afterCommit work (ADR-0003 amendment 2026-11-13): drained by the shutdown sequence below.
+const afterCommit = createAfterCommitQueue(log);
 let app: ReturnType<typeof createApp>;
 try {
   // createApp runs the boot checks (TASK-020, PR32-SEC-05 (b)): routes declared with defineRoute, the runner for every
@@ -39,6 +42,7 @@ try {
     health,
     modules: moduleRegistry,
     tenantTx: services.tenantTx,
+    afterCommit,
     apiMode: resolveApiMode(config.APP_ENV),
     ...(docs === undefined ? {} : { docs }),
     logger: log,
@@ -66,11 +70,15 @@ server.on('error', (error: Error) => {
 
 const shutdown = createShutdown({
   probe: services.probe,
-  drain: () =>
-    new Promise<void>((resolve, reject) => {
+  // In-flight requests first (each schedules its afterCommit before it finishes), then the afterCommit work; both inside
+  // the drain bound of the 30 s stop window (ADR-0013 item 7).
+  drain: async () => {
+    await new Promise<void>((resolve, reject) => {
       server.close((error) => (error === undefined ? resolve() : reject(error)));
       server.closeIdleConnections();
-    }),
+    });
+    await afterCommit.drain();
+  },
   forceClose: () => server.closeAllConnections(),
   resources: services.resources,
   log,
