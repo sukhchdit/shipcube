@@ -505,6 +505,60 @@ describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and h
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it('[R2-m1] a client gone before the tx slot runs (an earlier slot held) gets no call and no handler transaction', async () => {
+    const events: string[] = [];
+    let entered: () => void = () => undefined;
+    const inEtag = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const route = phased({
+      call: (ctx) => {
+        events.push(`call aborted=${String(ctx.signal.aborted)}`);
+        return 'effect';
+      },
+      handler: () => {
+        events.push('handler');
+        return { status: 200 };
+      },
+    });
+    const runner = fakeRunner(events);
+    // The etag slot (before the tx slot) is held while the client goes away, then released: the tx slot starts with
+    // the response already closed, so only the pre-slot `res.closed || res.destroyed` check can see it (P7).
+    const slots: PipelineSlots = {
+      ...recordingSlots(runner, events),
+      etag: () => (_req: Request, _res: Response, next: NextFunction) => {
+        entered();
+        void held.then(() => next());
+      },
+    };
+    const app = createApp({ health: [], modules: [{ name: 't', routes: [route] }], logger: silent, pipeline: slots });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    try {
+      const controller = new AbortController();
+      const pending = fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/things`, {
+        method: 'POST',
+        signal: controller.signal,
+      }).catch((error: unknown) => error);
+      await inEtag;
+      controller.abort();
+      await pending;
+      await delay(100); // the server sees the socket close while the etag slot is still held
+      release();
+      await delay(200);
+      expect(events.filter((event) => event.startsWith('call'))).toEqual([]);
+      expect(events).not.toContain('begin:rw');
+      expect(events).not.toContain('handler');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe('[D-ARCH-086] [D-ARCH-106 (4)] no admission permit or connection is held across call', () => {

@@ -367,6 +367,41 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect(tx.started).toEqual([]);
   });
 
+  it('[PR44-SEC-05] a transaction-control, session, DO or unreadable statement is refused before Prisma is called', () => {
+    const sent: string[] = [];
+    class RecordingTx extends FakeTx {
+      override $queryRaw(strings: TemplateStringsArray, ...values: unknown[]): string {
+        sent.push(strings.join('?'));
+        return super.$queryRaw(strings, ...values);
+      }
+    }
+    const tx = new RecordingTx();
+    const { db } = createTenantDb(tx);
+    const refused = (statement: () => unknown, message: string): void => {
+      expect(statement).toThrow(new TenantDbAccessError(message));
+    };
+    refused(() => db.$queryRaw`COMMIT`, '$queryRaw with a transaction-control statement (COMMIT)');
+    refused(() => db.$queryRaw`SELECT ${1}; rollback`, '$queryRaw with a transaction-control statement (ROLLBACK)');
+    refused(() => db.$executeRaw`SET search_path TO elsewhere`, '$executeRaw with a session statement (SET)');
+    refused(() => db.$queryRaw`RESET ALL`, '$queryRaw with a session statement (RESET)');
+    refused(() => db.$queryRaw`DO $$ BEGIN NULL; END $$`, '$queryRaw with a anonymous-block statement (DO)');
+    refused(
+      () => db.$queryRaw`UPDATE pg_settings SET setting = ${'x'} WHERE name = ${'y'}`,
+      '$queryRaw with a session-setter statement (UPDATE pg_settings)',
+    );
+    // A tagged template part without a cooked value (an invalid escape) cannot be read: refused (fail closed).
+    const uncooked = Object.freeze(Object.assign([undefined], { raw: Object.freeze(['x']) }));
+    refused(
+      () => (db.$queryRaw as (...args: unknown[]) => unknown)(uncooked),
+      '$queryRaw with a unreadable statement (a template part with an invalid escape)',
+    );
+    expect(sent).toEqual([]);
+    expect(tx.started).toEqual([]);
+    // Ordinary statements still reach Prisma, keywords inside strings, quoted names and comments included.
+    expect(db.$queryRaw`SELECT 'COMMIT' AS "end" -- ROLLBACK`).toBe(`internal:SELECT 'COMMIT' AS "end" -- ROLLBACK:0`);
+    expect(sent).toEqual([`SELECT 'COMMIT' AS "end" -- ROLLBACK`]);
+  });
+
   it('PR11-SEC-01: model names come from the runtime data model and fail closed without one', () => {
     expect([...modelDelegateNames(new FakeTx())]).toEqual(['shipment', 'ledgerEntry']);
     expect([...modelDelegateNames({ shipment: new FakeDelegate() })]).toEqual([]);

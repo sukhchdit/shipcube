@@ -4,6 +4,8 @@
  * request never reaches `call` or `handler`), the `handler` transaction is read-write, and the T-83 runtime twin: with
  * the API test lanes' `DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS` (1 000 ms), a route whose service in another file keeps
  * the transaction open across a Mock-latency carrier call fails, while the same route written with `call` passes.
+ * TASK-020 part 020-D: a raw `COMMIT` sent from `load` is refused by the TenantDb guard before it reaches the server
+ * (PR44-SEC-05), and the runtime-twin failure is pinned to the hold duration (020-C code review R1-n6).
  */
 import { randomBytes } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -89,6 +91,25 @@ const writeInLoad = fixtureRoute({
     return { status: 200, body: {} };
   },
 });
+/** PR44-SEC-05 (020-D): a load that ends its read-only transaction, then writes in what would be autocommit. */
+const commitInLoad = fixtureRoute({
+  ...GUEST,
+  operationId: 'probeLoadCommit',
+  path: '/fixtures/load-commit',
+  load: async ({ db }) => {
+    await (db as AppDb).$executeRaw`COMMIT`;
+    await (db as AppDb).$executeRaw`INSERT INTO public.phase_probe (id) VALUES (4)`;
+    return 'unreachable';
+  },
+  call: () => {
+    ranPhases.push('call');
+    return 'unreachable';
+  },
+  handler: () => {
+    ranPhases.push('handler');
+    return { status: 200, body: {} };
+  },
+});
 const accessModes = fixtureRoute({
   ...GUEST,
   operationId: 'probeAccessModes',
@@ -107,6 +128,14 @@ const holdsAcrossCall = fixtureRoute({
   operationId: 'probeRateHolding',
   path: '/fixtures/rate-holding',
   handler: async ({ db }) => ({ status: 200, body: await rateWhileHolding(db as AppDb, carrier, 'shp-1') }),
+});
+/** R1-n6 control: the same holding service with a latency well below the idle-in-transaction bound. */
+const briefCarrier = mockLatencyCarrier(TEST_LANE_TX_IDLE_TIMEOUT_MS / 10);
+const holdsBriefly = fixtureRoute({
+  ...GUEST,
+  operationId: 'probeRateHoldingBrief',
+  path: '/fixtures/rate-holding-brief',
+  handler: async ({ db }) => ({ status: 200, body: await rateWhileHolding(db as AppDb, briefCarrier, 'shp-1') }),
 });
 /** The same route written with the phases: read in load, carrier in call, write transaction after it. */
 const withCall = fixtureRoute({
@@ -145,7 +174,7 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
     await runtime.startup();
     const app = createApp({
       health: [],
-      modules: [{ name: 'fixtures', routes: [writeInLoad, accessModes, holdsAcrossCall, withCall] }],
+      modules: [{ name: 'fixtures', routes: [writeInLoad, commitInLoad, accessModes, holdsAcrossCall, holdsBriefly, withCall] }],
       tenantTx: runtime.tenantTx,
       logger: log,
     });
@@ -190,6 +219,22 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
     expect(logged.length).toBeGreaterThan(0);
   });
 
+  it('[PR44-SEC-05] a raw COMMIT in load is refused before it reaches the server: no row is written, handler never runs', async () => {
+    const response = await fetch(`${base}/fixtures/load-commit`, { method: 'POST' });
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(response.headers.get('content-type')).toMatch(/^application\/problem\+json/u);
+    expect(ranPhases).toEqual([]);
+    // Without the TenantDb statement guard the COMMIT ends the read-only transaction and the INSERT commits in autocommit.
+    const admin = new pg.Client({ connectionString: container.getConnectionUri() });
+    await admin.connect();
+    try {
+      const { rows } = await admin.query<{ n: number }>('SELECT count(*)::int AS n FROM public.phase_probe WHERE id = 4');
+      expect(rows).toEqual([{ n: 0 }]);
+    } finally {
+      await admin.end();
+    }
+  });
+
   it('[D-ARCH-106 (4)] load runs read-only and handler read-write, each in its own transaction', async () => {
     const response = await fetch(`${base}/fixtures/access-modes`, { method: 'POST' });
     expect([response.status, await response.json()]).toEqual([200, { load: 'on', handler: 'off' }]);
@@ -199,6 +244,11 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
     const response = await fetch(`${base}/fixtures/rate-holding`, { method: 'POST' });
     expect(response.status).toBeGreaterThanOrEqual(500);
     expect(response.headers.get('content-type')).toMatch(/^application\/problem\+json/u);
+    // R1-n6 (020-C code review): the failure is caused by the hold duration alone. The same service and route shape
+    // with a carrier latency below the idle-in-transaction bound passes. (The 25P03 termination reaches the app as a
+    // closed-connection Error, not as a DbError with a SQLSTATE, so the log line cannot carry it.)
+    const control = await fetch(`${base}/fixtures/rate-holding-brief`, { method: 'POST' });
+    expect([control.status, await control.json()]).toEqual([200, { amount: 500 }]);
   }, 30_000);
 
   it('[D-ARCH-106 (6)] runtime twin: the same route written with call passes (no transaction is open during the carrier call)', async () => {
