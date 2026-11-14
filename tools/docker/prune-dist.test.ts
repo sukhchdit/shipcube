@@ -20,6 +20,10 @@ describe('prune-dist rules', () => {
     ['platform/db/client.test.js.map', false, {}, true],
     ['modules/quotes/__fixtures__', true, {}, true],
     ['modules/quotes/tests', true, {}, true],
+    // D-ARCH-115 / WAVE-00 sheet line 545 (R1-M1, PR39-SEC-01): the routing test seams go with their directory.
+    ['platform/routing/tests', true, {}, true],
+    // The file rule alone keeps a non-`.test.` file; only the directory rule above removes it.
+    ['platform/routing/tests/fixture-route.js', false, {}, false],
     ['fixtures', true, {}, true],
     ['spikes', true, {}, true],
     ['.tsbuildinfo', false, {}, true],
@@ -72,6 +76,24 @@ describe('prune-dist on a directory', () => {
     expect(existsSync(join(root, 'dist', 'a', 'b.js'))).toBe(true);
     expect(existsSync(join(root, 'dist', 'main.test.js'))).toBe(false);
     expect(existsSync(join(root, 'dist', 'a', '__fixtures__'))).toBe(false);
+  });
+
+  it('[D-ARCH-115] removes dist/platform/routing/tests (fixture route, loopback) and keeps define-route.js', () => {
+    const root = mkdtempSync(join(tmpdir(), 'prune-dist-routing-'));
+    temps.push(root);
+    const files = [
+      'dist/platform/routing/define-route.js',
+      'dist/platform/routing/tests/fixture-route.js',
+      'dist/platform/routing/tests/fixture-route.js.map',
+      'dist/platform/routing/tests/loopback.js',
+    ];
+    for (const rel of files) {
+      mkdirSync(join(root, rel, '..'), { recursive: true });
+      writeFileSync(join(root, rel), '');
+    }
+    expect(prune(join(root, 'dist'))).toBe(1);
+    expect(existsSync(join(root, 'dist', 'platform', 'routing', 'tests'))).toBe(false);
+    expect(existsSync(join(root, 'dist', 'platform', 'routing', 'define-route.js'))).toBe(true);
   });
 
   it('CLI: usage errors exit 2, a missing directory exits 1', () => {

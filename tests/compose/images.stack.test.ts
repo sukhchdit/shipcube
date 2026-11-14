@@ -28,6 +28,8 @@ const DOCKERFILES: Readonly<Record<keyof typeof IMAGES, string>> = {
   tooling: 'prisma/Dockerfile',
 };
 const MB = 1024 * 1024;
+/** D-ARCH-118: a WARN line at or above this share of an image's budget. */
+const SIZE_WARN_PERCENT = 90;
 const NODE_SERVICES = ['api', 'worker'] as const;
 const NGINX_SERVICES = ['web', 'admin'] as const;
 const NGINX_TMPFS = ['--tmpfs', '/tmp', '--tmpfs', '/var/cache/nginx', '--tmpfs', '/var/run'];
@@ -108,12 +110,26 @@ describe('image hardening (US-004)', () => {
       const keyId = `AKIA${[...randomBytes(16)].map((byte) => alphabet[byte % 32]).join('')}`;
       writeFileSync(join(dir, 'creds.txt'), `[default]\naws_access_key_id = ${keyId}\n`);
       const alpine = /^\s+FROM (alpine:\S+)$/m.exec(readFileSync(join(ROOT, 'compose.yaml'), 'utf8'))?.[1] ?? '';
-      // The file is deleted in a later layer: the layer that added it still holds it.
-      writeFileSync(join(dir, 'Dockerfile'), `FROM ${alpine}\nCOPY creds.txt /opt/creds.txt\nRUN rm /opt/creds.txt\nUSER 65534\n`);
+      // The file is deleted in a later layer: the layer that added it still holds it. PR39-SEC-03 (C2): copies under a
+      // root and a workspace-nested node_modules must be found too (Gitleaks' default config skips node_modules).
+      writeFileSync(
+        join(dir, 'Dockerfile'),
+        [
+          `FROM ${alpine}`,
+          'COPY creds.txt /opt/creds.txt',
+          'COPY creds.txt /app/node_modules/x/creds.txt',
+          'COPY creds.txt /app/packages/y/node_modules/z/creds.txt',
+          'RUN rm /opt/creds.txt',
+          'USER 65534',
+          '',
+        ].join('\n'),
+      );
       expect(docker(['build', '-q', '-t', probe, dir], { timeoutMs: 600_000 }).status).toBe(0);
       const result = spawnScanner(probe);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/layer \d+ \(sha256:[0-9a-f]{12}\) \/opt\/creds\.txt: \S+/);
+      expect(result.stderr).toMatch(/layer \d+ \(sha256:[0-9a-f]{12}\) \/app\/node_modules\/x\/creds\.txt: \S+/);
+      expect(result.stderr).toMatch(/layer \d+ \(sha256:[0-9a-f]{12}\) \/app\/packages\/y\/node_modules\/z\/creds\.txt: \S+/);
       expect(`${result.stdout}${result.stderr}`).not.toContain(keyId);
       expect(`${result.stdout}${result.stderr}`).not.toContain(keyId.slice(4));
     } finally {
@@ -175,22 +191,26 @@ describe('image hardening (US-004)', () => {
   });
 
   it.each([...NODE_SERVICES, ...NGINX_SERVICES])('[platform.md §3.4] %s stays within its uncompressed size budget', (name) => {
+    // D-ARCH-118: budgets are MiB (300 MiB = 314,572,800 bytes; 60 MiB for Nginx), measured as the layer sum.
     const budget = NODE_SERVICES.includes(name as (typeof NODE_SERVICES)[number]) ? 300 * MB : 60 * MB;
-    // Uncompressed = the sum of the layer sizes (`docker history`, bytes). With Docker Desktop's containerd image store,
-    // `image inspect .Size` also counts the compressed blobs, so it is not the uncompressed size (D-TASK014-07).
-    const history = docker(['history', '--human=false', '--format', '{{.Size}}', IMAGES[name]], { timeoutMs: 60_000 });
-    expect(history.status).toBe(0);
-    const size = history.stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => /^\d+$/.test(line))
-      .reduce((sum, line) => sum + Number(line), 0);
+    const size = layerSum(IMAGES[name]);
     const inspected = inspect(IMAGES[name]).Size;
+    const percent = (size / budget) * 100;
     process.stdout.write(
-      `[stack] ${IMAGES[name]} layers ${(size / MB).toFixed(1)} MiB, inspect ${(inspected / MB).toFixed(1)} MiB (budget ${String(budget / MB)} MiB)\n`,
+      `[stack] ${IMAGES[name]} layers ${(size / MB).toFixed(1)} MiB = ${percent.toFixed(1)} % of ${String(budget / MB)} MiB, inspect ${(inspected / MB).toFixed(1)} MiB\n`,
     );
+    // D-ARCH-118 / ruling R5: growth past 90 % is visible on every run; only > 100 % fails.
+    if (percent >= SIZE_WARN_PERCENT) {
+      process.stderr.write(`[stack] WARN ${IMAGES[name]} at ${percent.toFixed(1)} % of its budget\n`);
+    }
     expect(size).toBeGreaterThan(0);
     expect(size).toBeLessThanOrEqual(budget);
+  });
+
+  it('[D-ARCH-118] the tooling image size is reported, not gated', () => {
+    const size = layerSum(IMAGES.tooling);
+    process.stdout.write(`[stack] ${IMAGES.tooling} layers ${(size / MB).toFixed(1)} MiB (reported, not gated)\n`);
+    expect(size).toBeGreaterThan(0);
   });
 
   it.each(Object.keys(IMAGES) as (keyof typeof IMAGES)[])('[sheet line 543] %s holds no test, spike or load-test path', (name) => {
@@ -229,12 +249,95 @@ describe('image hardening (US-004)', () => {
         '-o',
         '-name',
         'query-counter.*',
+        // D-ARCH-115 / sheet line 545 (R1-M1, PR39-SEC-01): the routing test seams (fixture route, loopback) and any
+        // compiled tests directory of a platform dist. The generic arm excludes node_modules, where some packages
+        // keep runtime code in folders named tests (rulings/wave-0-task-014 §4.3 (f)).
+        '-o',
+        '-path',
+        '*/routing/tests*',
+        '-o',
+        '(',
+        '-path',
+        '*/dist/*/tests/*',
+        '!',
+        '-path',
+        '*/node_modules/*',
+        ')',
         ')',
         '-print',
       ],
       { timeoutMs: 120_000 },
     );
     expect({ status: result.status, found: result.stdout.trim() }).toEqual({ status: 0, found: '' });
+  });
+
+  it.each(Object.keys(IMAGES) as (keyof typeof IMAGES)[])('[D-ARCH-117] [ADR-0022 am. 12] %s holds no typescript package', (name) => {
+    const found = findInImage(IMAGES[name], [
+      '/',
+      '-path',
+      '/proc',
+      '-prune',
+      '-o',
+      '-path',
+      '*/node_modules/typescript',
+      '-prune',
+      '-print',
+    ]);
+    expect(found).toEqual({ status: 0, found: '' });
+  });
+
+  it('[D-ARCH-117] [PR39-SEC-04] the tooling image holds no root devDependency closure and no PEM private-key fixture', () => {
+    const names = [
+      'typescript',
+      'eslint',
+      'eslint-*',
+      '@eslint',
+      'prettier',
+      'stylelint',
+      '@redocly',
+      'react',
+      'react-dom',
+      '@swc',
+      '@babel',
+      'jest',
+      'jest-*',
+      '@jest',
+      'playwright',
+      'playwright-core',
+      '@playwright',
+      'testcontainers',
+      '@testcontainers',
+      'dockerode',
+      'ssh2',
+      'nock',
+      'supertest',
+      'jsdom',
+      'lodash',
+      '@commitlint',
+    ];
+    const pattern = names.flatMap((entry, index) => [...(index === 0 ? [] : ['-o']), '-path', `*/node_modules/${entry}`]);
+    expect(findInImage(IMAGES.tooling, ['/app', '(', ...pattern, ')', '-prune', '-print'])).toEqual({ status: 0, found: '' });
+    const pem = docker(
+      [
+        'run',
+        '--rm',
+        '--user',
+        '0',
+        '--network',
+        'none',
+        '--entrypoint',
+        'grep',
+        IMAGES.tooling,
+        '-rlI',
+        'PRIVATE KEY-----',
+        '/app/node_modules',
+      ],
+      { timeoutMs: 120_000 },
+    );
+    // grep exits 1 when nothing matches; only the count is printed, never a path's content.
+    const files = pem.stdout.split('\n').filter((line) => line.trim() !== '');
+    process.stdout.write(`[stack] ${IMAGES.tooling} PEM private-key files under /app/node_modules: ${String(files.length)}\n`);
+    expect({ status: pem.status, files }).toEqual({ status: 1, files: [] });
   });
 
   it.each(NODE_SERVICES)('[SEC-TC-64 (vi)] [D-ARCH-105] %s holds no Prisma engines, schema engine or generated client sources', (name) => {
@@ -287,6 +390,21 @@ describe('image hardening (US-004)', () => {
     const logs = docker(['logs', name], { timeoutMs: 30_000 });
     expect(`${logs.stdout}${logs.stderr}`).not.toMatch(/Debugger listening|9229/);
   });
+
+  it.each(NODE_SERVICES)(
+    '[R1-m1] [PR39-SEC-02 (a)] %s with APP_ENV=staging and CMD --inspect=0.0.0.0:9229 dist/main.js exits 78 naming CMD only',
+    (service) => {
+      const name = runDetached(['--network', 'none', '-e', 'APP_ENV=staging', IMAGES[service], '--inspect=0.0.0.0:9229', 'dist/main.js']);
+      const wait = docker(['wait', name], { timeoutMs: 30_000 });
+      expect(wait.stdout.trim()).toBe('78');
+      const state = containerState(name);
+      expect(Date.parse(state.FinishedAt) - Date.parse(state.StartedAt)).toBeLessThanOrEqual(5_000);
+      const result = docker(['logs', name], { timeoutMs: 30_000 });
+      const logs = `${result.stdout}${result.stderr}`;
+      expect(logs).toMatch(/\bCMD\b/);
+      expect(logs).not.toMatch(/Debugger listening|9229|--inspect/);
+    },
+  );
 });
 
 describe('web and admin Nginx (PR4-SEC-02, PR4-SEC-12; sheet line 537)', () => {
@@ -325,6 +443,28 @@ function spawnNode(args: readonly string[]): { status: number | null; stdout: st
     windowsHide: true,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+/**
+ * Uncompressed size = the sum of the layer sizes (`docker history`, bytes). With Docker Desktop's containerd image
+ * store, `image inspect .Size` also counts the compressed blobs, so it is not the uncompressed size (D-TASK014-07).
+ */
+function layerSum(image: string): number {
+  const history = docker(['history', '--human=false', '--format', '{{.Size}}', image], { timeoutMs: 60_000 });
+  expect(history.status).toBe(0);
+  return history.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^\d+$/.test(line))
+    .reduce((sum, line) => sum + Number(line), 0);
+}
+
+/** `find <args>` inside `image` as root with no network; the status and the trimmed list of printed paths. */
+function findInImage(image: string, args: readonly string[]): { status: number | null; found: string } {
+  const result = docker(['run', '--rm', '--user', '0', '--network', 'none', '--entrypoint', 'find', image, ...args], {
+    timeoutMs: 120_000,
+  });
+  return { status: result.status, found: result.stdout.trim() };
 }
 
 function spawnScanner(image: string): { status: number | null; stdout: string; stderr: string } {
