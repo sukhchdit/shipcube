@@ -2174,3 +2174,33 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 ### D-TASK024-01..11 · 2026-11-14 · senior-developer (logged by orchestrator per D-ORCH-040) · PR #43 generated cross-tenant isolation suite
 - **Decision:** (01) Two layers: a manifest-driven committed layer (empty until TASK-037) and a probe layer that plants one table per RLS class plus the DR-A14 tables only while the manifests don't list them. (02) Tenant context via the imported production `CONTEXT_STATEMENT_SQL`; only new tenant-context exemption is `render-rls-dr-a14.test.ts`. (03) `tests/generated/tsconfig.json` lists the harness/tools files; `eslint.config.mjs` extends `import-x/no-relative-packages` for `tests/generated/rls/**` by exactly `tools/db` and `prisma/tests/harness`, anchored. (04) `runtimeReadOnly` allowed on GLOBAL and SYSTEM entries (covers `reference_dataset_versions`, D-ARCH-075); refused on RLS classes. (05) `stdColumns` is a manifest flag; C15 proves it equals the catalogue-derived scope. (06) Rule 17 grandfathers exactly the three migrations released before it (frozen list; a test proves each still needs it, so it can only shrink). (07) Missing privileges are pinned (42501), not skipped. (08) No tenant-resource route exists yet; `API_CASES` + `routeCaseFindings` make the first such route fail until its case is registered (TASK-027 / module tasks / TASK-211); a fixture route proves the 404 path. (09) C3 derivation drops every policy, so a policy on an unlisted or SYSTEM table breaks equality. (10) Not built: PR24-SEC-06 content-hash marker (stays optional); PR32-SEC-07 (c) needs a new owner (raw-SQL manifest rejected by D-ARCH-091 → principal-architect); flake < 1 % over 20 runs not measured. (11) Prefix snapshots add per-table row counts; four failing prefixes of grandfathered migrations pinned. Evidence 20261114T0257Z_4513512 PASS (unit 4445, integration 285, api 123, catalog 96); generated suite 92/92 (one run; outside lane-B evidence until qa-lead activates `rls-cross-tenant`, min_tests 92).
 - **Reversibility:** High.
+
+### D-SEC-PR39-01..07 / D-ORCH-062 · 2026-11-14 · security-analyst + code-reviewer (logged by orchestrator) · PR #39 r1; fix cycle 1 scope
+- **Decision:** PR #39 r1 at 894c72e: security **PASS_WITH_CONDITIONS** (0 C/H/M; LOW PR39-SEC-01..06; INFO 07..10). The probe confirms the runtime controls: non-root, root-owned code, no npm in runtime images, preflight exit 78, `db-tls.ts` confinement, loopback-only ports, store vhost, Valkey ACL, per-service env partition, `local-only-*` committed values. PR9-SEC-15 closed.
+- **C1 (= SEC-01, before merge):** the image find asserts `*/routing/tests*` (D-ARCH-115).
+- **C2 (= SEC-03, before lane-B `image-assertions` activation and G3):** `scan-image-secrets` uses Gitleaks defaults, which skip `node_modules/`. The tooling image holds third-party PEM fixtures.
+- **SEC-02:** the preflight forwards `-`-prefixed argv to node. An `--import data:` URL runs before main.
+- **SEC-04:** the tooling image ships the root devDependency closure (= architect R1).
+- **SEC-05:** CODEOWNERS for the Dockerfiles, compose files, `infra/`, `tools/docker/`, preflight and db-tls.
+- **SEC-06:** Dependabot docker ecosystems.
+- **INFO:**
+  - 07: setuid binaries; `no-new-privileges` and read-only root in ECS (M5).
+  - 08: Valkey `SCAN` key-name listing; the healthcheck password is on the command line.
+  - 09: the web/admin edge answers any Host, so DNS rebinding reaches the local api.
+  - 10: stack evidence is not committed (activation PR).
+- **(02)** Trivy is not needed before this merge, because the images are local-only. It is due at the Wave-0-exit image-suite activation, before any publication (TASK-119), and for G3.
+- **(03)** `enableReadyCheck: false` accepted.
+- **(04)** The D-TASK014-13 allowlist is accepted if bound to base-image layers.
+- **(05)** No security objection to D-TASK014-02; node and debian pins move together.
+- **(06)** Re-routes:
+  - PR10-SEC-06 → TASK-119;
+  - PR9-SEC-12 and SEC-07 → M5 ECS task definitions;
+  - PR9-SEC-08 → M5 ALB/WAF.
+- **(07)** Union checklists for #40, #41 and #42 (record §7).
+- **Code review CHANGES_REQUESTED.** R1-M1 = C1. R1-m1 = SEC-02. R1-m2 = SEC-06. R1-m3 docs drift → TASK-282 / architect. R1-m4: per-test stack results for the final head. NITs n1..n9.
+- **Fix cycle 1 (D-ORCH-062)** covers: C1, architect R1/R2/R3/R5, SEC-02, SEC-05, R4 (drop `--use-openssl-ca`), C2 (or a justified deferral), R1-m4, optional R6 and cheap NITs, and fresh evidence. After that: code r2 and a security delta round.
+- **Routed:**
+  - INFO 08/09 → the Wave-0-exit activation PR and local-dev hardening backlog (devops), before G3;
+  - SEC-10 → activation PR;
+  - the CLAUDE.md §2 run-locally URLs (api :3000, admin :8081, Swagger) are stale behind the edge. The run does not edit CLAUDE.md; TASK-282's README uses the edge URLs, and the human is told.
+- **Reversibility:** High.
