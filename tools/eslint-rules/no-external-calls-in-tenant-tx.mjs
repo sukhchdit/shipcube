@@ -58,13 +58,17 @@
  *  - a literal `import()` of one of those modules (string literal or no-substitution template literal);
  *  - a member call whose receiver chain ends in an identifier of the `names` option, at any depth (`queue.add()`,
  *    `this.queue.add()`, `deps.queue.add()`, `ctx.deps.queue.add()`, `this.x.queue.add()`), and through one `const`
- *    alias of such a chain declared in the same function (`const q = deps.queue; q.add()`), a destructured `names` key
- *    included (`const { queue: q } = deps; q.add()`, code review R1-n8);
+ *    alias of such a chain declared in any scope the call sees (the same function, an enclosing factory function or
+ *    the module: `const q = deps.queue; q.add()`; code review R2-m3 / R2-n3, PR44-SEC-11 (b)), a destructured `names`
+ *    key included (`const { queue: q } = deps; q.add()`, code review R1-n8), and a method destructured from such a
+ *    chain and called bare (`const { add } = deps.queue; add()`, `const { queue: { add } } = deps; add()`, R2-n3);
  *  - sleeps and waits: a call of the global `setTimeout` / `setInterval` (bare, `globalThis.` or `global.`; so
  *    `new Promise((r) => setTimeout(r, n))` too), of `setTimeout` / `setInterval` from `node:timers`, `timers`,
  *    `node:timers/promises` or `timers/promises`, and of `scheduler.wait` from the promises modules (any local name,
- *    named or namespace import: `import { scheduler as s }`, `tp.scheduler.wait()`, `timers.promises.setTimeout()`),
- *    and of the global `Atomics.wait` / `Atomics.waitAsync`.
+ *    named or namespace import: `import { scheduler as s }`, `tp.scheduler.wait()`, `timers.promises.setTimeout()`,
+ *    the `promises` member imported by name: `import { promises as tp } from 'node:timers'`, PR44-SEC-14), and of
+ *    the global `Atomics.wait` / `Atomics.waitAsync`; a literal `import()` of a timer module is itself a sleep, and a
+ *    `const` holding it is followed like a namespace import (`const tp = await import('node:timers/promises')`).
  *
  * Limits (review items, not lint): the rule is lexical and per file. A handler resolved through another file (an
  * injected `controller.cancel`, an imported handler) is reached through R6 in the file of the service method it ends
@@ -237,18 +241,6 @@ function moduleMember(callee, fromImport) {
   return member;
 }
 
-/**
- * @param {import('estree').Node} node
- * @returns {import('estree').Node | undefined} The innermost function around `node` (undefined at module level).
- */
-function enclosingFunction(node) {
-  let current = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (node).parent;
-  while (current !== undefined && !FUNCTION_TYPES.has(current.type)) {
-    current = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (current).parent;
-  }
-  return current;
-}
-
 /** @type {import('eslint').Rule.RuleModule} */
 export default {
   meta: {
@@ -338,6 +330,17 @@ export default {
     function importOf(variable) {
       const def = variable?.defs.find((candidate) => candidate.type === 'ImportBinding');
       if (def === undefined) return undefined;
+      // A typescript-eslint `TSImportEqualsDeclaration` is not an estree type.
+      const equals =
+        /** @type {{ type: string; moduleReference?: { type: string; expression?: import('estree').Node }; importKind?: string }} */ (
+          /** @type {unknown} */ (def.node)
+        );
+      // PR44-SEC-11 (a): `import x = require('m')` is the whole module (fail closed); `import X = NS.y` is no import.
+      if (equals.type === 'TSImportEqualsDeclaration') {
+        const source =
+          equals.moduleReference?.type === 'TSExternalModuleReference' ? staticSpecifier(equals.moduleReference.expression) : undefined;
+        return source === undefined || equals.importKind === 'type' ? undefined : { source, imported: '*' };
+      }
       const declaration = /** @type {import('estree').ImportDeclaration & { importKind?: string }} */ (def.parent);
       const specifier = /** @type {import('estree').ImportDeclaration['specifiers'][number] & { importKind?: string }} */ (def.node);
       if (declaration.importKind === 'type' || specifier.importKind === 'type') return undefined;
@@ -764,11 +767,24 @@ export default {
 
     /**
      * @param {import('estree').Identifier} identifier
-     * @returns {boolean} A namespace (or default) import of a timer module.
+     * @returns {boolean} A namespace (or default) import of a timer module, its `promises` member imported by name
+     * (`import { promises as tp } from 'node:timers'`), or a `const` holding a literal `import()` of a timer module
+     * (`const tp = await import('node:timers/promises')`; PR44-SEC-14).
      */
     function isTimersNamespace(identifier) {
       const imported = timersImport(identifier);
-      return imported === '*' || imported === 'default';
+      if (imported === '*' || imported === 'default' || imported === 'promises') return true;
+      return constDefs(identifier).some((def) => isTimersImportExpression(def.node.init));
+    }
+
+    /**
+     * @param {import('estree').Node} node
+     * @returns {boolean} `node` is a literal `import()` of a timer module, awaited or not (PR44-SEC-14).
+     */
+    function isTimersImportExpression(node) {
+      const value = unwrap(node.type === 'AwaitExpression' ? node.argument : node);
+      const source = value.type === 'ImportExpression' ? staticSpecifier(value.source) : undefined;
+      return source !== undefined && TIMER_MODULES.has(source);
     }
 
     /**
@@ -798,26 +814,56 @@ export default {
 
     /**
      * D-ARCH-111 (d): a member call whose receiver chain ends in a `names` entry at any depth (`queue.add()`,
-     * `ctx.deps.queue.add()`, `this.x.queue.add()`), or whose receiver is one same-function `const` alias of such a
-     * chain (`const q = deps.queue; q.add()`).
+     * `ctx.deps.queue.add()`, `this.x.queue.add()`), or whose receiver is one `const` alias of such a chain
+     * (`const q = deps.queue; q.add()`) declared in any scope the call sees: the same function, an enclosing factory
+     * function (`createSvc(d) { const q = d.queue; ... }`, code review R2-n3) or the module (R2-m3, PR44-SEC-11 (b));
+     * a `const` is as followable in each. Also a method destructured from such a chain and called bare (R2-n3).
      * @param {import('estree').Node} callee
      * @returns {boolean}
      */
     function isNamedDependencyCall(callee) {
+      if (callee.type === 'Identifier') return isHolderMethod(callee);
       if (callee.type !== 'MemberExpression') return false;
       const receiver = unwrap(callee.object);
       if (endsInName(receiver)) return true;
       if (receiver.type !== 'Identifier') return false;
-      const scopeFunction = enclosingFunction(callee);
-      return (resolve(receiver.name, receiver)?.defs ?? []).some(
-        (def) =>
-          def.type === 'Variable' &&
-          def.parent.kind === 'const' &&
-          def.node.init !== null &&
-          def.node.init !== undefined &&
-          (endsInName(unwrap(def.node.init)) || isNamedKeyTarget(def.name)) &&
-          enclosingFunction(def.node) === scopeFunction,
+      return constDefs(receiver).some((def) => endsInName(unwrap(def.node.init)) || isNamedKeyTarget(def.name));
+    }
+
+    /**
+     * @param {import('estree').Identifier} identifier
+     * @returns {{ name: import('estree').Identifier; node: import('estree').VariableDeclarator & { init: import('estree').Expression } }[]}
+     * The initialised `const` declarations `identifier` resolves to.
+     */
+    function constDefs(identifier) {
+      return /** @type {{ name: import('estree').Identifier; node: import('estree').VariableDeclarator & { init: import('estree').Expression } }[]} */ (
+        (resolve(identifier.name, identifier)?.defs ?? []).filter(
+          (def) => def.type === 'Variable' && def.parent.kind === 'const' && def.node.init !== null && def.node.init !== undefined,
+        )
       );
+    }
+
+    /**
+     * Code review R2-n3: `add` in `const { add } = deps.queue` or `const { queue: { add } } = deps`, a method taken out
+     * of a `names` holder (the initialiser ends in a `names` entry, or an outer key of the pattern is one).
+     * @param {import('estree').Identifier} callee
+     * @returns {boolean}
+     */
+    function isHolderMethod(callee) {
+      return constDefs(callee).some((def) => {
+        /** @type {(import('estree').Node & { parent?: import('estree').Node | null }) | null | undefined} */
+        let property = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (def.name).parent;
+        if (property?.type !== 'Property' || property.value !== def.name) return false;
+        // Walk out of the pattern: every key above the method's own key names a holder on the way.
+        for (let pattern = property.parent; pattern?.type === 'ObjectPattern'; pattern = property?.parent) {
+          const outer = /** @type {import('estree').Node & { parent?: import('estree').Node | null }} */ (pattern).parent;
+          if (outer?.type !== 'Property') return outer === def.node && endsInName(unwrap(def.node.init));
+          const key = staticKey(/** @type {import('estree').Property} */ (outer));
+          if (key !== undefined && names.has(key)) return true;
+          property = outer;
+        }
+        return false;
+      });
     }
 
     /**
@@ -833,11 +879,16 @@ export default {
     }
 
     /**
-     * D-ARCH-111 (g): a literal `import()` of an external client module.
+     * D-ARCH-111 (g): a literal `import()` of an external client module; PR44-SEC-14: a literal `import()` of a timer
+     * module is a sleep, whatever is done with it.
      * @param {import('estree').ImportExpression} node
      * @param {string} root
      */
     function checkImport(node, root) {
+      if (isTimersImportExpression(node)) {
+        context.report({ node, messageId: 'sleep', data: { call: sourceCode.getText(node), root } });
+        return;
+      }
       const source = staticSpecifier(node.source);
       const family = source === undefined ? undefined : externalFamily(source);
       if (family === undefined) return;

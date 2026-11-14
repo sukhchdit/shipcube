@@ -443,10 +443,13 @@ const BOUNDARIES_POLICIES = [
   //     (`import type`), allowed above. Selected by file category: a `module.source` selector matches nothing for a
   //     workspace specifier. Residual (D-ARCH-114 (2)): a load that is not a static import is not classified here.
   //     PR44-SEC-01 closes it in apps/*/src and packages/*/src: platform/static-module-specifier refuses a computed
-  //     specifier and every createRequire other than createRequire(u).resolve('x'), so every load left is an import or
-  //     an import() with a literal specifier; platform/prisma-client-construction reports a value or whole-module load
-  //     of the client in every form (import(), a no-substitution template literal included, and every require form),
-  //     apps/worker/src/platform/db included. The CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
+  //     specifier, every createRequire other than createRequire(u).resolve('x') (under any static key, a template-literal
+  //     key included, PR44-SEC-10), and every computed key on a node:module value that is not a static string (`m[k]`,
+  //     `Reflect.get(await import('node:module'), k)`), so every load left is an import or an import() with a literal
+  //     specifier; platform/prisma-client-construction reports a value or whole-module load of the client in every form
+  //     (import(), a no-substitution template literal included, `import x = require()` and every require form, a
+  //     variable holding createRequire included), apps/worker/src/platform/db included. no-restricted-imports and
+  //     no-restricted-properties refuse Module, register and process.getBuiltinModule (PR44-SEC-14). The CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
   {
     disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
     message: PRISMA_GENERATED_VALUE_MESSAGE,
@@ -970,7 +973,9 @@ export default defineConfig([
   {
     // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
     // code names its module with a literal, so no load escapes the import controls above. PR44-SEC-01: createRequire
-    // itself is legal only as createRequire(<url>).resolve('<literal>') (messageId `loader`).
+    // itself is legal only as createRequire(<url>).resolve('<literal>') (messageId `loader`). PR44-SEC-10: a computed
+    // key on a node:module value that is not a static string, and any use of import('node:module') other than a static
+    // member read, is `loader` too.
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
     ignores: TEST_FILES,
     plugins: { platform },
