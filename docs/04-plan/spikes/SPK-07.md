@@ -4,10 +4,10 @@
 |---|---|
 | Task | TASK-015 part 015-B (Wave 0) · branch `feat/TASK-015-b-lane-c-nightly` |
 | Risk | R-ARCH-15 (minutes exhaustion), R-ARCH-19 (`security-integration` minutes), R-PLAN-03; NFR-OPS-003 |
-| Design under test | ADR-0023 amendments A, C and G items 5-6; D-ORCH-001; D-ARCH-010 items 1-6; platform.md section 7.8; PLAN.md section 8 |
+| Design under test | ADR-0023 amendments A, C, G items 5-6 and L (stage 1, D-ARCH-126..129; ruling `docs/03-architecture/rulings/wave-0-ci-minutes.md`); D-ORCH-001; D-ARCH-010 items 1-6; platform.md section 7.8; PLAN.md section 8 |
 | Date / data | 2026-11-14. Hosted figures: `npm run ci:minutes` over every run of `sukhchdit/shipcube` created 2026-11-01..2026-11-14 (UTC) and every job attempt of those runs, read through `gh api` |
 | Owner | devops-engineer |
-| **Verdict** | **GO with a budget warning.** Lane A meets its exit targets with a wide margin (≤ 15 job-min, ≤ 20 min wall-clock). `security-integration` meets ≤ 12 job-min (section 3). The evidence verifier's negative fixtures are rejected (section 4). `npm run ci:minutes` prints the month (section 5). **But** the month's run rate already reaches the ADR-0023 70 % guard around 2026-11-23 and ≈ 90 % by month end before any lane C run (section 6); the orchestrator applies the guard levers below. |
+| **Verdict** | **GO with a budget warning.** Lane A meets its exit targets with a wide margin (≤ 15 job-min, ≤ 20 min wall-clock). `security-integration` meets ≤ 12 job-min (section 3). The evidence verifier's negative fixtures are rejected (section 4). `npm run ci:minutes` prints the month (section 5). **But** the month's run rate reaches the ADR-0023 70 % guard around 2026-11-23 and ≈ 94 % by month end at the unchanged rate, ≈ 100 % with `security-integration` on every push (section 6). The CI-minutes ruling (ADR-0023 am. L) answers it; its stage 1 (push-scoped light mode, `security-integration` once per code tree, production-closure lockfile rule, forecast guards) lands in this PR, stage 2 in TASK-286. |
 
 ## 1. Method
 
@@ -15,7 +15,10 @@
 each run (`filter=all`), and applies GitHub's private-repository billing rule: each job's duration rounded **up** to a
 whole minute, times the runner multiplier (Linux 1). Skipped jobs count 0. The result is an estimate of the billed
 figure; the authoritative number is the billing report, which this repository's token cannot read (the usage endpoint
-needs the `user` scope; `--billing` says so and keeps the estimate). Per-run figures: job-minutes of one `ci.yml`
+needs the `user` scope; `--billing` says so and keeps the estimate). **Dependabot runs are not billed**: runs whose
+path starts with `dynamic/dependabot/` run on standard GitHub-hosted runners, which GitHub does not bill for Dependabot,
+so the tool lists them under "Not billed" and leaves them out of the total, the share and the forecast (ADR-0023 am. L
+item 4, D-ARCH-129). Per-run figures: job-minutes of one `ci.yml`
 pull-request run (all its jobs), and wall-clock from the run's start to its last update (completed, not cancelled).
 
 ## 2. Lane A (fast lane) on a typical PR — exit: ≤ 15 job-min and ≤ 20 min wall-clock
@@ -57,6 +60,16 @@ runs (117 runs / 45 PRs: fix cycles and unions are pushed as new commits). With 
 bills ≈ 2 min a run; with all six security suites active the estimate is ≈ 6–10 min a run (the generated RLS suite alone
 runs ≈ 126 tests with a database per table class).
 
+**Trigger from this PR's fix cycle (ADR-0023 am. L item 2, D-ARCH-127):** the job runs **once per code tree, on
+merge-candidate heads**. The base ref's `tools/ci/lane-scope.mjs` (job `scans`, token on that step only) sets
+`security_integration_due` when (a) the PR range touches the item 5 paths, with `package-lock.json` counting only for a
+production-closure change (an added, removed or changed `packages[*]` entry without `dev`/`devOptional`, or the root
+entry; a new, deleted or unparseable lockfile selects; `security-paths.mjs` `classifyRange`), (b) the security record
+check passes (`pass` or `not-required`), and (c) no `security-integration` success exists on a commit whose tree differs
+from the head only in docs (a security proof, read from the jobs API). The job also needs `fast-lane` green with the
+supply-chain gates passed on this code tree (PR46-SEC-01). Skipped is not waived: `ci-gate` is red with
+`security-integration pending (record missing | not run)` until the job or a proof is green.
+
 ## 4. Evidence integrity — exit: check-evidence negative fixtures rejected
 
 `tools/quality/check-evidence.test.ts`, block "SEC-TC-48 negative fixtures" (10 cases), runs in lane A's unit suite on
@@ -68,33 +81,48 @@ a gate profile with a planned suite: **all rejected (PASS)**. The lane C invento
 
 ## 5. `npm run ci:minutes` — exit: prints the month's usage
 
+At the ruling's reading (2026-11-14 ≈ 08:30Z) the month stood at **771 billed minutes** (38.6 %): 803 job-minutes, of
+which the 32 of the 8 `dynamic/dependabot/dependabot-updates` runs are not billed (section 1). The tool now prints that
+split, the `fast-lane` mode split (full / light, from the `Unit tests` step: skipped in a run whose job succeeded or whose
+install ran with the code steps skipped is light) and, with `--forecast [--planned <min>]`, the month forecast:
+
 ```
 Hosted Actions minutes, sukhchdit/shipcube, 2026-11 (UTC); estimate = per-job duration rounded up x runner multiplier
-Total: 803 of 2000 min (40.2 %), guard: ok (no guard reached)
+Total: 851 of 2000 min (42.6 %), guard: guard-70 (tier-1 lane C only (<= 1 wave-end a month), process levers P1/P2 mandatory, CI_MAIN_FAST_LANE stays false)
 
 By workflow:
-  ci.yml             143 runs     771 min
+  ci.yml             155 runs     851 min
+
+Not billed (Dependabot on standard runners): 32 min in 8 run(s), excluded from the total
   dependabot-updates     8 runs      32 min
 
 By job (billed minutes per run: median / p90 / max, n):
-  ci.yml:fast-lane                             5 /     6 /     8  n= 116  total 525 min
-  ci.yml:scans                                 1 /     2 /     2  n= 112  total 125 min
-  ci.yml:ci-gate                               1 /     1 /     1  n= 116  total 116 min
-  dependabot-updates:Dependabot                5 /     8 /     8  n=   8  total 32 min
+  ci.yml:fast-lane (full)                      5 /     6 /     8  n= 126  total 575 min
+  ci.yml:scans                                 1 /     2 /     3  n= 122  total 141 min
+  ci.yml:ci-gate                               1 /     1 /     1  n= 126  total 126 min
   ci.yml:changes                               1 /     1 /     1  n=   5  total 5 min
+  ci.yml:security-integration                  2 /     2 /     2  n=   2  total 4 min
 
-Lane A per pull-request run (ci.yml): job-min median 7, p90 9 (n=117); wall-clock min median 4.3, p90 6.1
+Lane A per pull-request run (ci.yml): job-min median 7, p90 9 (n=127); wall-clock min median 4.3, p90 6.1
+
+Forecast (as of 2026-11-14T13:52:12.890Z): 1880 of 2000 min (94 %) = billed 851 + 62.7 min/day x 16.4 remaining day(s) + planned 0
+  rate = billed to date / 13.6 elapsed UTC day(s); guard dates use the rate only (planned minutes have no date)
+   70 % ( 1400 min, acts on the forecast): 2026-11-23
+   90 % ( 1800 min, acts on actual usage): 2026-11-29
+   95 % ( 1900 min, acts on actual usage): not this month
+  100 % ( 2000 min, acts on actual usage): not this month
 ```
 
-(2026-11-14 ≈ 08:30Z; `--billing`: not readable with this token. Runtime ≈ 3 min: one API call per run.)
+(`npm run ci:minutes -- --forecast`, 2026-11-14 ≈ 13:52Z; `--billing`: not readable with this token. Runtime ≈ 3 min: one
+API call per run. No light run yet: stage 1 is not on any pushed head.)
 
 ## 6. Month forecast and guards (R-ARCH-15, R-ARCH-19)
 
 | Item | Figure |
 |---|---|
-| Used 2026-11-01..14 (13.4 days) | 803 min (40.2 %) |
-| Run rate | ≈ 60 min/day (≈ 8.7 PR runs/day × ≈ 6.6 job-min + Dependabot) |
-| Forecast lane A + Dependabot, 30 days | ≈ 1,800 min (≈ 90 %) |
+| Used 2026-11-01..14 (13.4 days) | 771 billed (38.6 %); the 32 Dependabot minutes are not billed |
+| Run rate | ≈ 58 billed min/day (≈ 8.7 PR runs/day × ≈ 6.6 job-min) |
+| Forecast lane A, 30 days | ≈ 1,815 min (≈ 91 %); the tool's live forecast at 13:52Z is 1,880 (94 %, section 5) |
 | 70 % guard (1,400 min) reached | ≈ 2026-11-23 at the current rate |
 | `security-integration` at the Wave-0 mix (≈ 73 PRs/month × 2.6 runs) | ≈ 380 min/month today (2 min a run); ≈ 1,100–1,900 once all six suites are active |
 | Lane C (one `wave-end`, estimate) | ≈ 60–85 job-min per run (section 7) |
@@ -111,6 +139,41 @@ security suite active it alone would take most of the allowance. Options for pri
 rather than on every push; (b) keep it on every push but select suites by changed path within the job; (c) one of the
 ADR-0023 levers above. The Wave-0 exit lane C `wave-end` run and the G3 `release-candidate` run should be
 planned into the month in which they fall, ahead of PR churn.
+
+**What the runs are (2026-11-01..14, ruling section 1).** Of the 123 pull-request runs of `ci.yml`, **83 were red and
+40 green**; by head commit, **59 were docs-only pushes** (security records, lane B evidence, quality docs) and **64 code
+pushes, 21 of them unions** of `main`. A docs-only push re-ran the whole 6.6-minute lane on a code tree an earlier run
+had already proved, and `security-integration` ran on every push of a selected PR.
+
+**Forecast with `security-integration` (code review PR #46 m7).** The lane A + Dependabot row above leaves out the job
+this PR enables. At its measured 2 min a run on every push of a selected PR (≈ 12.7 min/day for the remaining
+16.6 days ≈ 210 min) November reaches ≈ 2,010 min (≈ 100 %), ≈ 104 % with the Wave-0 exit `wave-end`; the 70 % line
+moves to ≈ 2026-11-22, 90 % to ≈ 2026-11-27 and 100 % to ≈ 2026-11-30. In degraded mode security-path PRs cannot
+merge, because degraded mode never applies to them. `npm run ci:minutes -- --forecast` (section 5) prints the same
+arithmetic from live data (billed to date + daily rate × remaining UTC days + planned lane C) with the date of each guard.
+
+**Budget v2 (ruling section 7; per month at the Wave-0 rate: 100 PRs, 73 % security-critical, 143 code pushes incl. 47
+unions, 132 docs pushes; six security suites ≈ 8 min a run; one `wave-end` ≈ 75 + nightly ≈ 8).**
+
+| Scenario | Lane A code pushes | Lane A docs pushes | `security-integration` | Lane C + nightly | Total |
+|---|---|---|---|---|---|
+| Today's workflow, suites active on every push | 143 × 6.6 = 944 | 132 × 6.6 = 871 | 190 × 8 = 1,520 | 83 | 3,418 (171 %) |
+| **Stage 1 (this fix cycle: light mode, once-per-tree job, lockfile rule)** | 944 | 132 × 3.7 = 488 | 62 × 8 = 496 | 83 | **2,011 (101 %)** |
+| Stage 2 (TASK-286: fold, CODE-gated commitlint/actionlint/install, conditional Semgrep/oasdiff) | 143 × 5.9 = 844 | 132 × 2 = 264 | 496 | 83 | 1,687 (84 %) |
+| Stage 2 + TASK-287 (incremental) | 143 × 4.7 = 672 | 264 | 496 | 83 | 1,515 (76 %) |
+| Stage 2 + P1/P2 (no incremental) | 120 × 5.9 = 708 | 102 × 2 = 204 | 54 × 8 = 432 | 83 | 1,427 (71 %) |
+| Stage 2 + TASK-287 + P1/P2 | 120 × 4.7 = 564 | 204 | 432 | 83 | 1,283 (64 %) |
+
+**Acceptance:** under 70 % with all six suites at the current PR rate holds with stage 2 + TASK-287 + the process
+levers P1/P2; stage 2 + P1/P2 alone is at the line (71 %), and the mechanisms without the levers land at 76–84 %. Stage
+1 alone does not fit a month, so TASK-286 is due in November. Guards act on the forecast (ADR-0023 am. L item 4): ≥ 70 %
+forecast → tier-1 lane C only (≤ 1 `wave-end` a month), P1/P2 mandatory, `CI_MAIN_FAST_LANE` stays `false`; actual ≥ 90 %
+→ lane C for gates only, except a tier-1 `wave-end` already planned, up to a hard stop at 95 %; 100 % → degraded mode.
+
+**First light run (stage 1).** This fix cycle's own push carries code, so it runs in full mode. The first light run is
+the next docs-only push of this PR (the security delta record), which inherits the code proof of the fix-cycle run; its
+billed minutes are recorded here when it has run (ruling estimate ≈ 60–70 s of `fast-lane` work, 1–2 billed minutes,
+≈ 3.7 billed minutes for the whole run with `scans` and `ci-gate`).
 
 ## 7. Lane C and nightly (built; first run after merge)
 

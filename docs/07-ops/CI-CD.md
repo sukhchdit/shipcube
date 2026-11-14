@@ -1,7 +1,7 @@
 # CI/CD: lanes, workflows and the minutes budget
 
 Operator view of the pipeline as built in Wave 0 (TASK-007, TASK-011, TASK-015). The design and its reasons are in
-ADR-0023 (amendments A to K) and D-ORCH-001 / D-ARCH-010; the test-side rules are in
+ADR-0023 (amendments A to L) and D-ORCH-001 / D-ARCH-010; the test-side rules are in
 [TEST-STRATEGY section 4](../05-quality/TEST-STRATEGY.md). Every `node`/`npm` command below runs with the CLAUDE.md
 section 2 PATH prefix on the Windows host. Nothing in this pipeline deploys, pushes images or applies infrastructure yet
 (`DEPLOY_TARGET_*` blank, `CLOUD_BUDGET_MONTHLY_USD` = 0).
@@ -10,19 +10,38 @@ section 2 PATH prefix on the Windows host. Nothing in this pipeline deploys, pus
 
 | Lane | Where | Trigger | What | Verdict |
 |---|---|---|---|---|
-| A (fast lane) | `.github/workflows/ci.yml`, hosted | non-draft pull request; push to `main` only with `CI_MAIN_FAST_LANE=true` | `fast-lane` (base-ref gates, install, lint, format, typecheck, unit, build, lane B evidence check), `scans` (gitleaks range, Semgrep, oasdiff, security record), `security-integration` (only when a security-critical path changed) | `ci-gate` |
+| A (fast lane) | `.github/workflows/ci.yml`, hosted | non-draft pull request; push to `main` only with `CI_MAIN_FAST_LANE=true` | `fast-lane` (base-ref gates, install, lint, format, typecheck, unit, build, lane B evidence check; light mode on a docs-only push), `scans` (lane scope and proofs, gitleaks range, Semgrep, oasdiff, security record), `security-integration` (once per code tree on merge-candidate heads that change a security-critical path) | `ci-gate` (`MERGE-READY` or `BLOCKED: <reasons>`) |
 | B (heavy lane) | developer host, Docker Desktop | `npm run quality:heavy -- --profile pr\|wave\|gate` | integration, API, generated suites, merged coverage gate, and every other active suite of `tools/quality/required-suites.json` | committed `docs/05-quality/*/runs/<stamp>_<sha7>/summary.json`, checked by lane A |
 | C (full lane) | `.github/workflows/lane-c.yml`, hosted | `workflow_dispatch` only | static, integration (merged coverage, US-006 gate), images, e2e-stack (one shard per engine), iac, scans-full, inventory | `lane-c-gate` |
 | nightly | `.github/workflows/nightly.yml`, hosted | `workflow_dispatch` only (no schedule) | dependency freshness report, gitleaks over the full history | job conclusions |
 
-### security-integration (lane A)
+### Light mode and proofs (lane A, ADR-0023 amendment L item 1)
 
-ADR-0023 amendment G item 5. Job `scans` classifies the PR's changed paths with the **base ref's** copy of
-`tools/ci/security-paths.mjs`: `packages/authz/**`, `packages/audit/**`, `packages/config/**`, `prisma/**`,
-`apps/api/src/platform/**`, `apps/api/src/modules/identity/**` and `package-lock.json` (unknown range = run). When it matches,
-`security-integration` runs every `active` suite of the base manifest's `security_integration_suites` with its lane B
-runner entry on ubuntu with Testcontainers (`tools/ci/security-integration.mjs`). `ci-gate` requires it green; it may
-be skipped only when the classifier said `false`. Degraded mode never applies to these paths.
+The base ref's `tools/ci/lane-scope.mjs` classifies the **push** (`github.event.before` → head; without a usable
+`before`, the PR range). A push whose every path is in `DOCS_ONLY_PATHS` (`docs/**` minus the API contract and the
+manifest's `tooling_inputs`, `.claude/**` minus `.claude/settings.json`, `*.md` outside the code roots; regular files
+only) runs `fast-lane` in **light** mode: the `env.CODE` steps (supply-chain gates, lint, format, type-check, unit, build)
+are skipped and inherited from a **code proof**, a completed pull-request run on a commit whose tree differs from the
+head only in docs, whose code steps and gitleaks/Semgrep/oasdiff steps concluded `success` (jobs API, read with
+`actions: read` by `scans` and `ci-gate`, token on the lane-scope steps only). Every other gate runs on the exact head.
+`ci-gate` is red when a code push ran light or skipped a code step, when a docs push has no proof, or when a
+classification output is empty. Pull-request runs queue (`cancel-in-progress: false`), so a full run is never
+cancelled by a later docs push. GitHub keeps one pending run per PR and replaces it on the next push,
+so push the code, let its run start and finish, then push the record or evidence (P2: one docs push per review round);
+a docs push that replaces a still-pending code run leaves itself without a proof (red: re-run the replaced code run,
+then re-run the docs run).
+
+### security-integration (lane A, amendment G item 5 as amended by L item 2)
+
+Selected by the base-ref lane scope when the PR range changes `packages/authz/**`, `packages/audit/**`,
+`packages/config/**`, `prisma/**`, `apps/api/src/platform/**`, `apps/api/src/modules/identity/**` or makes a
+production-closure `package-lock.json` change (dev-only bumps do not select; a new or unparseable lockfile does),
+**and** the head is a merge candidate (security record check `pass` or `not-required`), **and** no
+`security-integration` success exists on a code-identical commit. It runs after `fast-lane` succeeded (the supply-chain
+gates passed on this tree), every `active` suite of the base manifest's `security_integration_suites` with its lane B
+runner entry on ubuntu with Testcontainers (`tools/ci/security-integration.mjs`). `ci-gate` requires its success in the
+run or an inherited security proof; until then it reports `security-integration pending (record missing | not run)`.
+Degraded mode never applies to these paths.
 
 ## 2. Dispatching lane C and nightly
 
@@ -61,20 +80,26 @@ A discrepancy fails the wave end; the orchestrator logs it in DECISIONS.md and r
 
 ```bash
 npm run ci:minutes                    # this month (UTC), estimate per job, guard level, lane A per-run figures
+npm run ci:minutes -- --forecast --planned 75   # month forecast (rate x remaining UTC days + planned lane C), guard dates
 npm run ci:minutes -- --month 2026-11 --json
 npm run ci:minutes -- --billing       # also asks the billing report (needs a token with the `user` scope)
 ```
 
 The estimate applies GitHub's private-repository rule (each job rounded up to a whole minute, Linux x1); the billing
-page is authoritative. Guards (ADR-0023 amendment C): at 70 % `CI_MAIN_FAST_LANE=false` and no further `wave-end`
-dispatch that month; at 90 % lane C for gates only; at 100 % degraded mode (`npm run quality:fastlane` locally). The
-measured figures and the forecast are in [SPK-07](../04-plan/spikes/SPK-07.md).
+page is authoritative. Dependabot runs (standard runners) are not billed and are listed apart. Guards (ADR-0023
+amendment L item 4, D-ARCH-129): **forecast** ≥ 70 % → tier-1 lane C only (≤ 1 `wave-end` a month), process levers
+P1/P2 mandatory, `CI_MAIN_FAST_LANE` stays `false`; **actual** ≥ 90 % → lane C for gates only, except a tier-1
+`wave-end` already planned, up to a hard stop at 95 %; 100 % → degraded mode (`npm run quality:fastlane` locally).
+`nightly.yml` is dispatched only together with a `wave-end` run. Run `--forecast` every Monday and at each wave-exit
+checklist (P4). The measured figures and the forecast are in [SPK-07](../04-plan/spikes/SPK-07.md).
 
 ## 5. Rules the workflow policy enforces
 
 `tools/ci/check-workflow-policy.mjs` (lane A, from the base ref) checks every workflow: actions pinned by commit SHA,
 container tools by digest, read-only top-level permissions, no privileged triggers, no secrets in pull-request jobs,
-fail-closed jobs and steps. On top of that: `lane-c.yml` and `nightly.yml` are `workflow_dispatch` only; ci.yml,
+fail-closed jobs and steps; the GitHub token only as `GH_TOKEN` on the lane-scope steps of `scans` and `ci-gate`,
+the only jobs that hold `actions: read`; the lane-scope step, the `security-integration` job and `ci-gate` pinned to
+exact text. On top of that: `lane-c.yml` and `nightly.yml` are `workflow_dispatch` only; ci.yml,
 lane-c.yml and nightly.yml never publish, push, apply or assume a cloud role; Playwright browsers (and apt through
 `--with-deps`) are installed only in lane-c.yml, and only through `npm run deps:rebuild`, which refuses Playwright and
 Prisma download redirects.
