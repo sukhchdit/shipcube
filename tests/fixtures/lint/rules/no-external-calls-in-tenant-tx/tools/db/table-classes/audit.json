@@ -1,0 +1,5 @@
+{
+  "$comment": "Miniature audit manifest of the T-83 fixture root: platform/system-model-owner reads the manifests for every raw template (D-ARCH-124) and fails closed without them; the tokeniser fixture in packages/audit owns its tables.",
+  "module": "audit",
+  "tables": [{ "name": "audit_pii_vault", "class": "SYSTEM" }]
+}
