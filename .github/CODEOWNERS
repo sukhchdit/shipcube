@@ -71,6 +71,10 @@
 /tests/api/helpers/cache-control.ts     @sukhchdit
 /tests/api/helpers/contract-validator.ts @sukhchdit
 /tests/contract-stubs/                  @sukhchdit
+# The O3 oracle (PR43-SEC-04): the RLS generator (probe kinds, expected observations, row overrides, the executable
+# API cases) and the route enumeration source it reads.
+/tests/generated/rls/                   @sukhchdit
+/tests/generated/api-mounts.ts          @sukhchdit
 
 # Authorisation, audit and the configuration key register
 /packages/authz/                        @sukhchdit

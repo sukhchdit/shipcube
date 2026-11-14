@@ -1216,6 +1216,9 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'tests/api/helpers/cache-control.ts',
   'tests/api/helpers/contract-validator.ts',
   'tests/contract-stubs/',
+  // PR43-SEC-04: the O3 oracle (the RLS generator and its executable API cases) and the route enumeration source.
+  'tests/generated/rls/',
+  'tests/generated/api-mounts.ts',
   'CLAUDE.md',
   '.claude/settings.json',
   '.claude/agents/',
