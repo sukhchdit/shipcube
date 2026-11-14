@@ -13,7 +13,7 @@
  *   node tools/docker/prune-deps.mjs [--root <dir>] [--dry-run] <workspace dir>...
  *
  * Plain ESM with `node:` builtins only (it runs in image build stages). The graph helpers are shared with
- * prune-migrate-image.mjs. The runtime-stage preflight (dist/preflight.js) proves afterwards that nothing needed went.
+ * prune-migrate-image.mjs. The runtime-stage preflight (tools/docker/preflight.mjs) proves afterwards that nothing needed went.
  */
 import { readFileSync, rmSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';

@@ -25,7 +25,7 @@ const good = [
   'COPY --from=deps --chown=node:node /app/node_modules /app/node_modules',
   'COPY apps/api/package.json apps/api/',
   'USER node',
-  'HEALTHCHECK --interval=5s CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "dist/healthcheck.js"]',
+  'HEALTHCHECK --interval=5s CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "/app/healthcheck.mjs", "api"]',
   'ENTRYPOINT ["/app/entrypoint.sh"]',
   'CMD ["dist/main.js"]',
 ].join('\n');
@@ -74,7 +74,7 @@ describe('check-dockerfiles rules', () => {
     ['final-user', 'USER node', ''],
     [
       'healthcheck',
-      'HEALTHCHECK --interval=5s CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "dist/healthcheck.js"]',
+      'HEALTHCHECK --interval=5s CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "/app/healthcheck.mjs", "api"]',
       'HEALTHCHECK NONE',
     ],
     ['node-flags', 'CMD ["dist/main.js"]', 'CMD ["--conditions=@platform/source", "dist/main.js"]'],

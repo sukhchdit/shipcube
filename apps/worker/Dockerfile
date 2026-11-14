@@ -114,12 +114,14 @@ COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=build /app/apps/worker/package.json /app/apps/worker/package.json
 COPY --from=build /app/apps/worker/dist /app/apps/worker/dist
 COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh
+# Image tools (TASK-014): root-owned and read-only; build-time preflight and HEALTHCHECK probe, never served code.
+COPY --chmod=0444 tools/docker/healthcheck.mjs tools/docker/preflight.mjs /app/
 WORKDIR /app/apps/worker
 USER 1000:1000
 # ADR-0022 am. 13: every production module and @platform entry point loads from dist without --conditions.
-RUN node dist/preflight.js
+RUN node /app/preflight.mjs /app/apps/worker/dist
 EXPOSE 9464
 HEALTHCHECK --interval=5s --timeout=3s --retries=6 --start-period=20s \
-  CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "dist/healthcheck.js"]
+  CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "/app/healthcheck.mjs", "worker"]
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["dist/main.js"]

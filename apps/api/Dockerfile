@@ -119,12 +119,14 @@ COPY --from=build /app/apps/api/dist /app/apps/api/dist
 # The contract served by /api/docs (D-TASK017-01 (7)): main.js resolves ../../../docs/... from apps/api/dist.
 COPY docs/03-architecture/api/openapi.yaml /app/docs/03-architecture/api/openapi.yaml
 COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh
+# Image tools (TASK-014): root-owned and read-only; build-time preflight and HEALTHCHECK probe, never served code.
+COPY --chmod=0444 tools/docker/healthcheck.mjs tools/docker/preflight.mjs /app/
 WORKDIR /app/apps/api
 USER 1000:1000
 # ADR-0022 am. 13: every production module and @platform entry point loads from dist without --conditions.
-RUN node dist/preflight.js
+RUN node /app/preflight.mjs /app/apps/api/dist
 EXPOSE 3000
 HEALTHCHECK --interval=5s --timeout=3s --retries=6 --start-period=20s \
-  CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "dist/healthcheck.js"]
+  CMD ["/usr/bin/env", "-u", "NODE_OPTIONS", "node", "/app/healthcheck.mjs", "api"]
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["dist/main.js"]
