@@ -24,8 +24,10 @@ import {
   requireTenantTx,
   runStartupAuditPartitionsCheck,
   runStartupIntegrityCheck,
+  withAdmissionDefaults,
 } from './runtime.js';
-import { type TenantContext, TenantTxConfigError } from './with-tenant-tx.js';
+import { EMPTY_ADMISSION_SNAPSHOT } from './tenant-admission.js';
+import { DEFAULT_MAX_WAIT_MS, type TenantContext, TenantTxConfigError } from './with-tenant-tx.js';
 
 const rejectWith = (reason: unknown) =>
   new Promise<never>(() => {
@@ -167,6 +169,7 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
     const runtime = createDatabaseRuntime(input());
     expect(runtime.tenantTx).toBeUndefined();
     expect(runtime.sessionContextLeaks()).toBe(0);
+    expect(runtime.tenantAdmission()).toEqual(EMPTY_ADMISSION_SNAPSHOT);
     expect(runtime.resources.map((resource) => resource.name)).toEqual(['session-integrity-monitor', 'database']);
     expect(Object.keys(runtime).sort()).toEqual([
       'auditChecks',
@@ -174,6 +177,7 @@ describe('composition function (PR11-SEC-09 item 2, PR9-SEC-03 factory half)', (
       'resources',
       'sessionContextLeaks',
       'startup',
+      'tenantAdmission',
       'tenantTx',
     ]);
     expect(runtime.auditChecks.partitions).toMatchObject({ name: 'audit_partitions', critical: true });
@@ -299,6 +303,43 @@ describe('standard-columns wiring through the composition function (PR26-SEC-02;
       { where: { id: 'x' }, data: { reference: 'r', updatedBy: actorId, updatedAt: expect.any(Date), version: { increment: 1 } } },
     ]);
     for (const resource of runtime.resources) await resource.close();
+  });
+
+  it('[D-ARCH-086] the runner always has the admission bulkhead; the runtime exposes its counters read-only', async () => {
+    delete process.env['PGOPTIONS'];
+    const { RecordingClient } = recordingClientClass();
+    const runtime = createDatabaseRuntime({ ...input(), Client: RecordingClient });
+    const context = {
+      orgId: randomUUID(),
+      actorId: randomUUID(),
+      actorScope: 'TENANT',
+      guestTokenHash: '',
+      correlationId: 'req-1',
+    } as TenantContext;
+    let during: unknown;
+    await runtime.tenantTx?.withTenantTx(context, () => {
+      during = runtime.tenantAdmission();
+      return Promise.resolve('ok');
+    });
+    expect(during).toMatchObject({ inflight: { tenant: 1, anonymous: 0, operator: 0 }, keys: 1 });
+    expect(runtime.tenantAdmission()).toEqual(EMPTY_ADMISSION_SNAPSHOT);
+    for (const resource of runtime.resources) await resource.close();
+  });
+});
+
+describe('[D-ARCH-086] admission defaults of the composition', () => {
+  const tx = { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 5_000 };
+
+  it('fills max(2, floor(poolMax / 2)) permits and the 250 ms wait (never above maxWait) when the options carry none', () => {
+    expect(withAdmissionDefaults(tx, 10).admission).toEqual({ maxConcurrentTx: 5, waitMs: 250 });
+    expect(withAdmissionDefaults(tx, 1).admission).toEqual({ maxConcurrentTx: 2, waitMs: 250 });
+    expect(withAdmissionDefaults({ ...tx, maxWaitMs: 100 }, 4).admission).toEqual({ maxConcurrentTx: 2, waitMs: 100 });
+    expect(withAdmissionDefaults({ ...tx, maxWaitMs: DEFAULT_MAX_WAIT_MS }, 4).admission?.waitMs).toBe(250);
+  });
+
+  it('keeps configured admission options unchanged', () => {
+    const configured = { ...tx, admission: { maxConcurrentTx: 7, waitMs: 400 } };
+    expect(withAdmissionDefaults(configured, 10)).toBe(configured);
   });
 });
 

@@ -30,6 +30,7 @@
     "../apps/api/src/platform/db/system-db.ts",
     "../apps/api/src/platform/db/system-models.ts",
     "../apps/api/src/platform/db/system-port.ts",
+    "../apps/api/src/platform/db/tenant-admission.ts",
     "../apps/api/src/platform/db/tenant-db.ts",
     "../apps/api/src/platform/db/with-tenant-tx.ts",
     "../apps/api/src/platform/health/checks/audit-chain.ts",
@@ -43,6 +44,9 @@
   "include": ["**/*.ts", "**/*.mjs", "../prisma/tests/**/*.ts", "../prisma/seed/**/*.ts"],
   "exclude": ["**/fixtures/**", "../prisma/tests/fixtures/**"],
   "references": [
+    {
+      "path": "../packages/audit"
+    },
     {
       "path": "../packages/authz"
     },

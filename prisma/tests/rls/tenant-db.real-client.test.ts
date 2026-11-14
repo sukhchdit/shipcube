@@ -189,10 +189,11 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
     expect(Object.fromEntries(seen.refused)).toEqual(Object.fromEntries(REFUSED.map(([name]) => [name, 'refused'])));
     expect(seen.symbols).toEqual(rawSymbols.map(() => 'undefined'));
     expect(seen.nonTagged).toEqual(['refused', 'refused', 'refused']);
-    // One delegate per Prisma model (a new model is a deliberate change of this list) plus the two tagged raw calls.
+    // One delegate per Prisma model (a new model is a deliberate change of this list) plus the two tagged raw calls and
+    // the guard's own rollback-only latch (PR42-SEC-02; not a Prisma member).
     // referenceDatasetVersion (TASK-023's SYSTEM table) is NOT on TenantDb: SYSTEM models are reached only through
     // systemDelegates(tx) (PR19-SEC-01, D-ARCH-080; prisma/tests/rls/system-delegates.int.test.ts).
-    const exposed = ['permission', 'role', 'rolePermission', '$queryRaw', '$executeRaw'];
+    const exposed = ['permission', 'role', 'rolePermission', '$queryRaw', '$executeRaw', 'markRollbackOnly', 'track'];
     expect([...seen.surface.ownKeys].sort()).toEqual([...exposed].sort());
     expect(seen.surface).toMatchObject({ ownSymbols: 0, hasParent: false });
     expect([...seen.surface.spread].sort()).toEqual([...exposed].sort());

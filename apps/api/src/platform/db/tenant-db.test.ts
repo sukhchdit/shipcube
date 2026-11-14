@@ -9,6 +9,7 @@ import {
   isSqlFragment,
   isTemplateStringsArray,
   modelDelegateNames,
+  TENANT_DB_LATCH_MEMBERS,
   TENANT_DB_OMITTED,
   TENANT_DB_RAW_MEMBERS,
   TENANT_DB_RESULT_LABEL,
@@ -17,6 +18,14 @@ import {
 } from './tenant-db.js';
 
 const PRIVATE = Symbol('prisma-private-client');
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 /**
  * A stand-in for Prisma's `PrismaPromise`: lazy (the query "runs" when `then` is called, logged in `started`), with
@@ -131,7 +140,8 @@ export type TenantDbOmitsMembers = [
 ];
 
 const read = (value: unknown, key: PropertyKey): unknown => (value as Record<PropertyKey, unknown>)[key];
-const EXPOSED = ['shipment', 'ledgerEntry', '$queryRaw', '$executeRaw'];
+/** The guard-provided latch members (PR42-SEC-02, PR42-SEC-13) are the only non-Prisma members, always last. */
+const EXPOSED = ['shipment', 'ledgerEntry', '$queryRaw', '$executeRaw', 'markRollbackOnly', 'track'];
 const RESULT_KEYS = ['then', 'catch', 'finally', Symbol.toStringTag];
 const CLOSED = 'Database error: TENANT_TX_CLOSED';
 /** The settled outcome of a thenable: `ok:<value>` or the rejection's message. */
@@ -408,7 +418,7 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect([...modelDelegateNames({ _runtimeDataModel: { models: null } })]).toEqual([]);
     const { db } = createTenantDb({ shipment: new FakeDelegate(), $queryRaw: (): number => 1 });
     expect(() => read(db, 'shipment')).toThrow(new TenantDbAccessError('shipment'));
-    expect(Reflect.ownKeys(db)).toEqual(['$queryRaw']);
+    expect(Reflect.ownKeys(db)).toEqual(['$queryRaw', 'markRollbackOnly', 'track']);
     // A data-model name whose property is not an object is refused (fail closed).
     const ghost = createTenantDb({ _runtimeDataModel: { models: { Ghost: {} } }, ghost: 5 }).db;
     expect(() => read(ghost, 'ghost')).toThrow(new TenantDbAccessError('ghost'));
@@ -444,6 +454,104 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect(read(db, 'then')).toBeUndefined();
     expect(read(db.shipment, 'then')).toBeUndefined();
     await expect(Promise.resolve(db)).resolves.toBe(db);
+  });
+
+  it('PR42-SEC-02: markRollbackOnly latches the first failure, is not a Prisma member and closes with the transaction', () => {
+    const tx = new FakeTx();
+    const handle = createTenantDb(tx);
+    expect(handle.rollbackOnly()).toBeUndefined();
+    expect('markRollbackOnly' in tx).toBe(false);
+    const mark = handle.db.markRollbackOnly;
+    const first = new Error('first');
+    mark(first);
+    handle.db.markRollbackOnly(new Error('second'));
+    expect(handle.rollbackOnly()).toBe(first);
+    expect(Object.getOwnPropertyDescriptor(handle.db, 'markRollbackOnly')).toMatchObject({ writable: false, enumerable: true });
+    expect(() => {
+      (handle.db as unknown as Record<string, unknown>)['markRollbackOnly'] = (): void => undefined;
+    }).toThrow(TenantDbAccessError);
+    handle.revoke();
+    expect(() => mark(new Error('late'))).toThrow(CLOSED);
+    expect(() => handle.db.markRollbackOnly).toThrow(CLOSED);
+    expect(handle.rollbackOnly()).toBe(first);
+  });
+
+  it('PR42-SEC-13: track starts the work, returns its own promise, is not a Prisma member and settle awaits it', async () => {
+    const tx = new FakeTx();
+    const handle = createTenantDb(tx);
+    expect('track' in tx).toBe(false);
+    expect(TENANT_DB_LATCH_MEMBERS).toEqual(['markRollbackOnly', 'track']);
+    expect(Object.getOwnPropertyDescriptor(handle.db, 'track')).toMatchObject({ writable: false, enumerable: true });
+    expect(() => {
+      (handle.db as unknown as Record<string, unknown>)['track'] = (): void => undefined;
+    }).toThrow(TenantDbAccessError);
+    const order: string[] = [];
+    const release = deferred();
+    let started = false;
+    const work = handle.db.track(async () => {
+      started = true;
+      await release.promise;
+      order.push('work done');
+      return 7;
+    });
+    expect(started).toBe(true);
+    const settling = handle.settle().then(() => order.push('settled'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    release.resolve();
+    await settling;
+    expect(order).toEqual(['work done', 'settled']);
+    await expect(work).resolves.toBe(7);
+    // Nothing in flight: settle resolves at once, and again after a failed work (settle never rejects).
+    await expect(handle.settle()).resolves.toBeUndefined();
+    const failing = handle.db.track(() => Promise.reject(new Error('tracked failure')));
+    await expect(handle.settle()).resolves.toBeUndefined();
+    await expect(failing).rejects.toThrow('tracked failure');
+  });
+
+  it('PR42-SEC-13: settle also awaits work a tracked work starts later, and work started while settling', async () => {
+    const handle = createTenantDb(new FakeTx());
+    const done: string[] = [];
+    const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+    void handle.db.track(async () => {
+      await tick();
+      done.push('outer');
+      void handle.db.track(async () => {
+        await tick();
+        await tick();
+        done.push('inner');
+      });
+    });
+    await handle.settle();
+    expect(done).toEqual(['outer', 'inner']);
+  });
+
+  it('PR42-SEC-13: track refuses after revoke without starting the work, and a non-function or a synchronous throw', () => {
+    const handle = createTenantDb(new FakeTx());
+    const track = handle.db.track;
+    expect(() => (track as (work: unknown) => unknown)(Promise.resolve(1))).toThrow(TypeError);
+    expect(() =>
+      track(() => {
+        throw new Error('sync');
+      }),
+    ).toThrow('sync');
+    handle.revoke();
+    let started = false;
+    expect(() =>
+      track(() => {
+        started = true;
+        return Promise.resolve(1);
+      }),
+    ).toThrow(CLOSED);
+    expect(started).toBe(false);
+    expect(() => handle.db.track).toThrow(CLOSED);
+  });
+
+  it('PR42-SEC-02: a non-Error passed by an untyped caller still latches (as a TypeError)', () => {
+    const handle = createTenantDb(new FakeTx());
+    (handle.db.markRollbackOnly as (failure: unknown) => void)('not an error');
+    expect(handle.rollbackOnly()).toBeInstanceOf(TypeError);
   });
 
   it('PR11-SEC-01: after revoke every access, through the top level or a kept delegate reference, throws TENANT_TX_CLOSED', () => {

@@ -2,10 +2,12 @@
 // only aggregates them, one typed import per file. errors/catalogue.test.ts discovers every `catalogue/*.ts` and
 // fails when one is not listed here, when a code is duplicated, or when a code is not SCREAMING_SNAKE.
 import type { CatalogueEntry, ModuleCatalogue } from '../catalogue-entry.js';
+import { auditCatalogue } from './audit.js';
 import { platformCatalogue } from './platform.js';
 
 /** Module name (the catalogue file name) to that module's codes. */
 export const CATALOGUE_MODULES = {
+  audit: auditCatalogue,
   platform: platformCatalogue,
 } as const satisfies Readonly<Record<string, ModuleCatalogue>>;
 
