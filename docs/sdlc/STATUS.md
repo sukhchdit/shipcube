@@ -1,7 +1,7 @@
 # SDLC Status
 - **Product:** the Platform (multi-carrier shipping platform, repo `sukhchdit/shipcube`)    **Updated:** 2026-11-12
 - **Run scope:** M0 Foundation + M1 Customer MVP (brief §12). M2–M5 = backlog.
-- **Current phase:** P5 Build — Wave 0 (Foundation): 24 of 37 tasks merged (TASK-020 counted at part B; 020-C pending)    **State:** IN_PROGRESS
+- **Current phase:** P5 Build — Wave 0 (Foundation): 23 of 37 tasks merged (partials in that count: TASK-015 015-A; TASK-020 parts A + B, 020-C pending)    **State:** IN_PROGRESS
 
 ## Phase / Task list
 | # | Phase | Owner | State | Notes |
