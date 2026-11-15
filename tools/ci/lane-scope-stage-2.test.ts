@@ -101,6 +101,21 @@ function stalePr() {
   return { root, m0, f1, m1, merge };
 }
 
+/**
+ * One stale-PR repository shared by the cases that only read it (fewer git and bash processes in the parallel unit
+ * run); a case that moves HEAD does so through `at`, which puts the test merge back.
+ */
+let shared: ReturnType<typeof stalePr> | undefined;
+const sharedPr = () => (shared ??= stalePr());
+function at<T>(pr: ReturnType<typeof stalePr>, rev: string, body: () => T): T {
+  git(pr.root, ['checkout', '-q', '--detach', rev]);
+  try {
+    return body();
+  } finally {
+    git(pr.root, ['checkout', '-q', '--detach', pr.merge]);
+  }
+}
+
 /** Git for Windows' bash on win32 (the runner's bash elsewhere): the pinned step scripts run under it as on the runner. */
 function bash(): string {
   if (process.platform !== 'win32') return 'bash';
@@ -136,7 +151,7 @@ function runStep(root: string, script: readonly string[], env: Record<string, st
 
 describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks the tooling starts lane A', () => {
   it('precondition: neither the merge base nor the PR head has tools/ci/lane-scope.mjs (the stage-1 bootstrap had no tool: MODULE_NOT_FOUND)', () => {
-    const { root, m0, f1 } = stalePr();
+    const { root, m0, f1 } = sharedPr();
     for (const rev of [m0, f1]) {
       const shown = spawnSync('git', ['cat-file', '-e', `${rev}:tools/ci/lane-scope.mjs`], { cwd: root, windowsHide: true });
       expect(shown.status).not.toBe(0);
@@ -144,7 +159,7 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
   });
 
   it('fast-lane: the pinned tooling step takes every gate tool from HEAD^1 (current main) and sets TOOLS_REF; the classify command then runs', () => {
-    const { root, m0, f1, m1 } = stalePr();
+    const { root, m0, f1, m1 } = sharedPr();
     const step = runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1 });
     expect(step.stderr).toBe('');
     expect(step.status).toBe(0);
@@ -177,7 +192,7 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
   });
 
   it('ci-gate: the pinned tooling step takes lane-scope and the scan configuration from the tested base too', () => {
-    const { root, m0, f1, m1 } = stalePr();
+    const { root, m0, f1, m1 } = sharedPr();
     const step = runStep(root, CI_GATE_TOOLING_SCRIPT_TESTED_BASE, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1 });
     expect(step.status).toBe(0);
     expect(step.env.TOOLS_REF).toBe(m1);
@@ -188,26 +203,24 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
   });
 
   it('fails closed when the checkout is not the test merge of the PR head into a descendant of its base', () => {
-    const { root, m0, f1, m1 } = stalePr();
+    const pr = sharedPr();
+    const { root, m0, f1, m1 } = pr;
     // HEAD^2 is not the PR head.
     expect(runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: m0 }).status).toBe(1);
     // RANGE_BASE is not an ancestor of HEAD^1.
     expect(runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: f1, RANGE_HEAD: f1 }).status).toBe(1);
     // Not a merge at all (HEAD^2 missing).
-    git(root, ['checkout', '-q', '--detach', m1]);
-    const notMerge = runStep(root, CI_GATE_TOOLING_SCRIPT_TESTED_BASE, {
-      GITHUB_EVENT_NAME: 'pull_request',
-      RANGE_BASE: m0,
-      RANGE_HEAD: f1,
-    });
+    const notMerge = at(pr, m1, () =>
+      runStep(root, CI_GATE_TOOLING_SCRIPT_TESTED_BASE, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1 }),
+    );
     expect(notMerge.status).toBe(1);
     expect(notMerge.env.GATE_LANE_SCOPE).toBeUndefined();
   });
 
   it('on a push (CI_MAIN_FAST_LANE) the tested base is the pushed range base', () => {
-    const { root, m0, m1 } = stalePr();
-    git(root, ['checkout', '-q', '--detach', m1]);
-    const step = runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'push', RANGE_BASE: m0, RANGE_HEAD: m1 });
+    const pr = sharedPr();
+    const { root, m0, m1 } = pr;
+    const step = at(pr, m1, () => runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'push', RANGE_BASE: m0, RANGE_HEAD: m1 }));
     expect(step.status).toBe(0);
     expect(step.env.TOOLS_REF).toBe(m0);
     // m0 has no tools/ci: every tool is the head's (bootstrap), and the summary says so.
@@ -265,7 +278,7 @@ describe('[D-ARCH-126] [PR46-SEC-17] the stage-2 classify CLI on a docs push', (
 
 describe('[PR46-SEC-17] testedBase (lane-scope verifies --tools-ref against the checkout)', () => {
   it('accepts HEAD^1 of the test merge; refuses another commit, a non-merge checkout and a base outside its history', () => {
-    const { root, m0, f1, m1 } = stalePr();
+    const { root, m0, f1, m1 } = sharedPr();
     expect(testedBase({ root, toolsRef: m1, base: m0, head: f1, event: 'pull_request' })).toEqual({ sha: m1 });
     expect(testedBase({ root, toolsRef: m0, base: m0, head: f1, event: 'pull_request' })).toMatchObject({
       problem: expect.stringContaining('HEAD^1'),
@@ -283,7 +296,7 @@ describe('[PR46-SEC-17] testedBase (lane-scope verifies --tools-ref against the 
   });
 
   it('the CLI exits 2 on a wrong --tools-ref (fail closed) and needs --lookup with it', () => {
-    const { root, m0, f1 } = stalePr();
+    const { root, m0, f1 } = sharedPr();
     const args = ['--root', root, '--base', m0, '--head', f1, '--pr', '53', '--head-ref', 'test/x', '--lookup'];
     expect(main([...args, '--tools-ref', m0], { env: {}, api: () => ({ ok: false, problem: 'none' }) })).toBe(2);
     expect(parseArgs(['--root', root, '--base', m0, '--head', f1, '--tools-ref', m0])).toMatchObject({
@@ -329,11 +342,20 @@ describe('[PR46-SEC-16] a proof is void when the tested base changed a lane A in
     commit(root, { 'docs/y.md': 'y\n' }, 'docs 2', '2026-11-14T13:00:00Z');
     return { root, tip: git(root, ['rev-parse', 'HEAD']) };
   }
+  /** The two histories the cases share (read-only): a package.json change at 12:00, or a docs change at 12:00. */
+  const histories = new Map<string, ReturnType<typeof mainHistory>>();
+  const historyWith = (kind: 'package' | 'docs') => {
+    const found = histories.get(kind);
+    if (found !== undefined) return found;
+    const made = mainHistory(kind === 'package' ? { 'package.json': '{"name":"x"}\n' } : { 'docs/z.md': 'z\n' });
+    histories.set(kind, made);
+    return made;
+  };
 
   it('baseChangedAt is the newest first-parent commit on a proofBasePath (docs commits do not count)', () => {
-    const base = mainHistory({ 'package.json': '{"name":"x"}\n' });
+    const base = historyWith('package');
     expect(baseChangedAt(base.root, base.tip, INPUTS)).toBe(Date.parse('2026-11-14T12:00:00Z'));
-    const docsOnly = mainHistory({ 'docs/z.md': 'z\n' });
+    const docsOnly = historyWith('docs');
     // Only the root commit (08:00, which added the manifest) touches a lane A input.
     expect(baseChangedAt(docsOnly.root, docsOnly.tip, INPUTS)).toBe(Date.parse('2026-11-14T08:00:00Z'));
     expect(baseChangedAt(docsOnly.root, 'f'.repeat(40), INPUTS)).toBeNull();
@@ -341,7 +363,7 @@ describe('[PR46-SEC-16] a proof is void when the tested base changed a lane A in
   });
 
   it('beyond the history window the oldest commit read dates the base (conservative), within it 0 means none', () => {
-    const docsOnly = mainHistory({ 'docs/z.md': 'z\n' });
+    const docsOnly = historyWith('docs');
     // Two docs commits read (13:00, 12:00), no lane A input among them: the window's oldest (12:00) dates it.
     expect(baseChangedAt(docsOnly.root, docsOnly.tip, INPUTS, 2)).toBe(Date.parse('2026-11-14T12:00:00Z'));
     // A history with no lane A input at all, shorter than the window: 0.
@@ -409,8 +431,8 @@ describe('[PR46-SEC-16] a proof is void when the tested base changed a lane A in
     lookupProofs({ api: api(created), repo: 'o/r', identical: [SHA], steps: STEPS, pr: '53', headRef: 'feat/x', baseChangedAt: changedAt });
 
   it('a main commit on package.json newer than the candidate run gives no proof; the same commit on docs/** keeps it', () => {
-    const changed = mainHistory({ 'package.json': '{"name":"x"}\n' });
-    const docs = mainHistory({ 'docs/z.md': 'z\n' });
+    const changed = historyWith('package');
+    const docs = historyWith('docs');
     const created = '2026-11-14T11:00:00Z';
     const voided = lookup(created, baseChangedAt(changed.root, changed.tip, INPUTS));
     expect(voided).toMatchObject({ codeProof: '', securityProof: '' });
