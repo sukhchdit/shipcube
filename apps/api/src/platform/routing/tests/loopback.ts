@@ -4,7 +4,7 @@
  * and 20261113T2226Z, never in isolation); one case takes about 15-100 ms alone, so 60 s is wide headroom, not a mask.
  * One constant, so a later change reaches every such file. Never imported by production code.
  */
-import type { Server } from 'node:http';
+import { request as httpRequest, type Server } from 'node:http';
 
 export const LOOPBACK_TEST_TIMEOUT_MS = 60_000;
 
@@ -58,12 +58,55 @@ export async function timeOperation<T>(
 }
 
 /**
- * `fetch` that never reuses a pooled socket (`Connection: close`). Each probe runs against its own short-lived server on an
- * ephemeral port; a pooled socket to a previous server on a recycled port, or one the server idled out during a host stall,
- * is reset or hangs the next request (W0-FLAKE). The response is read in full by the caller. Never imported by production code.
+ * A one-shot HTTP request to a loopback test server that returns a fetch `Response`: a fresh socket (`agent: false`,
+ * `Connection: close`) and no connection pool. Under host load the global fetch dispatcher left a connect that the server
+ * had accepted without ever delivering its request (the pooled client for a recycled ephemeral port, or one idled out during
+ * a stall); the case then waited for the whole test budget (W0-FLAKE). The response is read in full before it is returned.
+ * Only string and byte bodies, no redirects. Never imported by production code.
  */
 export function fetchOnce(url: string, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set('connection', 'close');
-  return fetch(url, { ...init, headers });
+  return new Promise<Response>((resolve, reject) => {
+    const target = new URL(url);
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((value, name) => {
+      headers[name] = value;
+    });
+    headers['connection'] = 'close';
+    const request = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: init.method ?? 'GET',
+        headers,
+        agent: false,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('error', reject);
+        response.on('end', () => {
+          const answered = new Headers();
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (Array.isArray(value)) for (const item of value) answered.append(name, item);
+            else if (value !== undefined) answered.set(name, value);
+          }
+          const status = response.statusCode ?? 0;
+          const withoutBody = status === 101 || status === 204 || status === 205 || status === 304;
+          resolve(
+            new Response(withoutBody ? null : Buffer.concat(chunks), {
+              status,
+              statusText: response.statusMessage ?? '',
+              headers: answered,
+            }),
+          );
+        });
+      },
+    );
+    request.on('error', reject);
+    const { body } = init;
+    if (typeof body === 'string' || body instanceof Uint8Array) request.write(body);
+    else if (body !== undefined && body !== null) reject(new Error('fetchOnce: only string and byte bodies'));
+    request.end();
+  });
 }
