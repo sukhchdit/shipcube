@@ -5,10 +5,13 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
 import type { SeedLogger, SeedSql } from './framework/contracts.js';
 import { loggingConfigChangeSink, main, type Output } from './index.js';
+
+// Fake-server and unreachable-database cases open real sockets; the 5 s Jest default timed out under parallel host load (W0-FLAKE).
+jest.setTimeout(30_000);
 
 describe('logging ConfigChangeSink (stand-in until TASK-025/TASK-221)', () => {
   it('logs both change kinds with dataset, versions, hashes and counts only', async () => {

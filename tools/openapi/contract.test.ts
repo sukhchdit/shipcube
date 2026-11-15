@@ -10,11 +10,14 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 
 import SwaggerParser from '@apidevtools/swagger-parser';
 
 import { loadContract, OPENAPI_PATH } from './contract.js';
+
+// Parses the full contract and serves a loopback request; the 5 s Jest default timed out under parallel host load (W0-FLAKE).
+jest.setTimeout(30_000);
 
 /** Every value of an object key equal to `$ref`, anywhere in a parsed document. */
 function collectRefs(node: unknown, out: string[] = []): string[] {
