@@ -128,7 +128,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RBAC-013 | M0 | Should | US-073 | packages/authz + prisma/ · ADR-0008 §Versioned seeds/migrations only; data-model §8 | TASK-221 | – | Planned |
 | REQ-RBAC-014 | M0 | Must | US-065 | packages/authz · ADR-0008 §Catalogue completeness test (every referenced string declared) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-001 | M0 | Must | US-086 | packages/audit · ADR-0007 §Capture (metadata-driven middleware, allow-listed direct callers); ADR-0003 | TASK-029 | – | Planned |
-| REQ-AUDIT-002 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (action types incl. `STATE_TRANSITION`, `CONFIG_CHANGE`) | TASK-025 | – | Implemented, partial: TASK-025 merged; AT-US-087-07 needs TASK-285 (CHECK widening), AT-04/08 → TASK-041/073 (D-ARCH-125) |
+| REQ-AUDIT-002 | M0 | Must | US-087 | packages/audit · ADR-0007 §Capture (action types incl. `STATE_TRANSITION`, `CONFIG_CHANGE`) | TASK-025 | – | Implemented, partial: TASK-025 + TASK-285 merged (20-action CHECK, AT-US-087-07 DB side); AT-04/08 → TASK-041/073; openapi enums → TASK-073 (D-ARCH-125, D-ORCH-099) |
 | REQ-AUDIT-003 | M0 | Must | US-087 | packages/audit · ADR-0007 §Storage columns; data-model §3.4 `audit_entries` | TASK-025 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-004 | M0 | Must | US-088 | packages/audit · ADR-0007 §Capture (same transaction, 500 `AUDIT_WRITE_FAILED`); ARCHITECTURE §7.3 | TASK-025 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-AUDIT-005 | M0 | Must | US-089 | packages/audit · ADR-0007 §Capture (fail-closed SENSITIVE views/downloads, 503 `AUDIT_UNAVAILABLE`) | TASK-114 | – | Planned |
