@@ -5,13 +5,21 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 
+import pg from 'pg';
+
 import { describe, expect, it, jest } from '@jest/globals';
 
 import type { SeedLogger, SeedSql } from './framework/contracts.js';
 import { loggingConfigChangeSink, main, type Output } from './index.js';
+import type { MigratorClientFactory } from './migrator-connection.js';
+
+// The production connect bound (10 s) is a bound on the seed, not on these cases: a host stall longer than it ended the
+// connection before the fake server answered (W0-FLAKE). The fake-server cases connect with a patient client; every other
+// setting of the production client is unchanged.
+const patientClient: MigratorClientFactory = (config) => new pg.Client({ ...config, connectionTimeoutMillis: 120_000 });
 
 // Fake-server and unreachable-database cases open real sockets; the 5 s Jest default timed out under parallel host load (W0-FLAKE).
-jest.setTimeout(30_000);
+jest.setTimeout(60_000);
 
 describe('logging ConfigChangeSink (stand-in until TASK-025/TASK-221)', () => {
   it('logs both change kinds with dataset, versions, hashes and counts only', async () => {
@@ -209,7 +217,7 @@ describe('seed CLI main: hardening (code review PR #13 m1-m3, PR13-SEC-01..03, n
     const output = capture();
     const password = randomPassword();
     const status = await withFakeServer({ kind: 'drop-on-query' }, (port) =>
-      main(['reference'], { APP_ENV: 'local', DATABASE_MIGRATOR_URL: fakeServerUrl(password, port) }, output),
+      main(['reference'], { APP_ENV: 'local', DATABASE_MIGRATOR_URL: fakeServerUrl(password, port) }, output, patientClient),
     );
     expect(status).toBe(2);
     expect(output.errors).toHaveLength(1);
@@ -227,7 +235,7 @@ describe('seed CLI main: hardening (code review PR #13 m1-m3, PR13-SEC-01..03, n
     const env = { APP_ENV: 'local', SEED_SUPERADMIN_PASSWORD: superadmin, SEED_CUSTOMER_PASSWORD: customer };
     const status = await withFakeServer(
       { kind: 'reject-password', message: (password) => `password ${password} rejected; seed ${superadmin} / ${customer}` },
-      (port) => main(['demo'], { ...env, DATABASE_MIGRATOR_URL: fakeServerUrl(raw, port) }, output),
+      (port) => main(['demo'], { ...env, DATABASE_MIGRATOR_URL: fakeServerUrl(raw, port) }, output, patientClient),
     );
     expect(status).toBe(2);
     const printed = [...output.lines, ...output.errors].join('\n');
