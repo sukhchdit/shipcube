@@ -77,4 +77,36 @@ export {
   UnknownRoutePermissionError,
 } from './routes.js';
 export { AUTHZ_GENERATE_COMMAND, MATRIX_DOC_PATH, renderRolePermissionMatrix } from './matrix-doc.js';
+export {
+  appliesTo,
+  type CellOutcome,
+  expectCell,
+  FIXED_CALLERS,
+  generateMatrix,
+  type MatrixCaller,
+  type MatrixCell,
+  type MatrixRoute,
+  type MatrixRow,
+  type MatrixSource,
+  matrixCallers,
+  presentedKind,
+  type PresentedKind,
+  REFUSALS,
+  type RouteMatrix,
+  signatureOnlyOf,
+  verifiedId,
+} from './generator/matrix.js';
+export {
+  CELL_SYMBOLS,
+  type CommittedMatrix,
+  type CommittedRow,
+  type DriftOptions,
+  matrixDrift,
+  NOT_APPLICABLE,
+  parseRouteMatrix,
+  renderRouteMatrix,
+  ROUTE_MATRIX_COMMAND,
+  ROUTE_MATRIX_PATH,
+} from './generator/document.js';
+export { type OrgMismatchCase, orgMismatchCases, orgScopedRoutes, ORG_PATH_PARAMETER, pathParameterNames } from './generator/org-scope.js';
 export { linkKey, renderSeedMigration, SYSTEM_ACTOR_ID, type SeedIdFactory, type SeedIdKind, type SeedMigration } from './seed-sql.js';

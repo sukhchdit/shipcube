@@ -341,7 +341,9 @@ export function tenantResourceRoutes<R extends RouteShape>(routes: readonly R[])
  * The suite runs every registered case against the real module registry, mounted by `createApp` on the real runtime,
  * once per credential kind the route accepts:
  *  - `session`: user A asks for B's row → 404 `NOT_FOUND` with no B data; A's own row → `positiveStatus`;
- *  - `quote-token`: the guest of hash H2 asks for the guest row of hash H → 404; the guest of hash H → `positiveStatus`.
+ *  - `quote-token`: the guest of hash H2 asks for the guest row of hash H → 404; the guest of hash H → `positiveStatus`;
+ *  - both (a dual-mode route, code review R2-n2 (a)): also the cross directions, user A → the guest row G and the guest
+ *    of hash H → B's organisation row, each 404.
  * There is no way to register a route without the suite executing it: the registry is this map, and the suite's case
  * list is derived from it.
  */
@@ -352,15 +354,23 @@ export interface ApiCrossTenantCase {
   readonly params: Readonly<Record<string, string>>;
   readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
-  /** The status of the positive control (the caller's own row); default 200. */
+  /**
+   * The status of the positive control (the caller's own row); default 200. A success status only, an integer in
+   * 200..299 (PR43-SEC-12): the positive control must reach the caller's own row, so a mis-mapped case can never be
+   * turned green by copying an observed 404 into it. `routeCaseFindings` refuses anything else, and the runner treats a
+   * positive call answered 404 as a problem whatever the case says.
+   */
   readonly positiveStatus?: number;
 }
+
+/** PR43-SEC-12: a positive-control status is a success status (an integer in 200..299). */
+export const isSuccessStatus = (status: number): boolean => Number.isInteger(status) && status >= 200 && status <= 299;
 
 /**
  * Findings of the API enumeration, sorted: a tenant-resource route without a case; a case whose operationId is not a
  * tenant-resource route (stale or misplaced registration); a case whose parameters differ from the route's; a route
  * that accepts a credential the runner cannot present; a case whose table is not an RLS-class manifest entry, or a
- * `quote-token` route whose table is not GUEST_CAPABLE.
+ * `quote-token` route whose table is not GUEST_CAPABLE; a `positiveStatus` that is not a success status (PR43-SEC-12).
  */
 export function routeCaseFindings(
   routes: readonly RouteShape[],
@@ -382,6 +392,11 @@ export function routeCaseFindings(
     const declared = Object.keys(registered.params).sort();
     if (JSON.stringify(expected) !== JSON.stringify(declared)) {
       findings.push(`${label(route)}: case parameters [${declared.join(', ')}] differ from the route's [${expected.join(', ')}]`);
+    }
+    if (registered.positiveStatus !== undefined && !isSuccessStatus(registered.positiveStatus)) {
+      findings.push(
+        `${label(route)}: positiveStatus ${String(registered.positiveStatus)} is not a success status (the positive control must reach the caller's own row)`,
+      );
     }
     for (const credential of route.auth.filter((kind) => !API_CASE_CREDENTIALS.has(kind))) {
       findings.push(`${label(route)}: accepts credential ${credential}, which the cross-tenant case runner cannot present`);

@@ -123,7 +123,7 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RBAC-008 | M0 | Must | US-068 | packages/authz · ADR-0008 §Resolution (server-side effective permissions, 5 s authz cache) | TASK-060 | – | Planned |
 | REQ-RBAC-009 | M0 | Must | US-070 | packages/ui + apps · ADR-0026 §5 `can()` helper; api/openapi `getMe` permissions | TASK-064 | – | Planned |
 | REQ-RBAC-010 | M0 | Must | US-070 | apps/web + apps/admin · ADR-0026 §5 route guards (permission-denied state without fetch) | TASK-064 | – | Planned |
-| REQ-RBAC-011 | M0 | Must | US-071 | packages/authz · ADR-0008 §Matrix generator (route × role, 401, cross-tenant 404); ADR-0024 | TASK-027 | – | Planned |
+| REQ-RBAC-011 | M0 | Must | US-071 | packages/authz · ADR-0008 §Matrix generator (route × role, 401, cross-tenant 404); ADR-0024 | TASK-027 | – | Implemented, partial: TASK-027 merged; rbac-matrix suite activation in lane B pending (qa-lead manifest PR, D-ORCH-094) |
 | REQ-RBAC-012 | M1 | Must | US-072 | packages/authz · ADR-0008 (`*:download`/`*:export` permissions); ADR-0021 (presign only after permission) | TASK-162 | – | Planned |
 | REQ-RBAC-013 | M0 | Should | US-073 | packages/authz + prisma/ · ADR-0008 §Versioned seeds/migrations only; data-model §8 | TASK-221 | – | Planned |
 | REQ-RBAC-014 | M0 | Must | US-065 | packages/authz · ADR-0008 §Catalogue completeness test (every referenced string declared) | TASK-013 | – | Implemented (tasks merged; acceptance at G3) |
