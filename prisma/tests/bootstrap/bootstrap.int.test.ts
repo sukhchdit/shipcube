@@ -129,6 +129,8 @@ describe('bootstrap runner (data-model §8.1)', () => {
   it('[PR12-SEC-03] a platform.audit_ddl_guard() planted by the migrator before 90-audit-ddl-guard.sql fails the lane', async () => {
     const lane = laneCopy();
     rmSync(join(lane, '90-audit-ddl-guard.sql'));
+    // 91 sorts after 90: applied here, it would make the runner refuse 90 as sorting before an applied file (TASK-285).
+    rmSync(join(lane, '91-audit-actions-v2.sql'));
     await db.createDatabase('plant_db');
     await db.bootstrap('plant_db', lane);
     await asRole(
