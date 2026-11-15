@@ -10,9 +10,9 @@
  *                 tools/deps/prisma-engines.mjs): refuses engine-redirecting variables, checks the
  *                 manifest against the installed engines version, uses the existing file when its
  *                 SHA-256 equals tools/deps/prisma-engines.json, otherwise fetches and verifies it.
- *   3. prisma   – `npm exec --node-options= --no -- prisma generate` with PRISMA_SCHEMA_ENGINE_BINARY=<verified
- *                 engine>, CHECKPOINT_DISABLE=1 and no NODE_OPTIONS, once a Prisma schema or prisma.config.ts
- *                 exists. `--node-options=` stops npm re-creating NODE_OPTIONS from its env/.npmrc (PR9-SEC-02).
+ *   3. prisma   – `node <prisma CLI> generate` (the CLI resolved from prisma/package.json and started with
+ *                 process.execPath, no npm: PR9-SEC-15) with PRISMA_SCHEMA_ENGINE_BINARY=<verified engine>,
+ *                 CHECKPOINT_DISABLE=1 and no NODE_OPTIONS, once a Prisma schema or prisma.config.ts exists.
  *   4. playwright – browsers, opt-in only: `--playwright=chromium[,firefox,webkit]` or
  *                 DEPS_REBUILD_PLAYWRIGHT=… (local e2e and lane C; never in images).
  *
@@ -21,7 +21,8 @@
  * per-user Prisma cache are never used. Steps 1 and 4 run npm/Playwright, which use their registries.
  *
  * Nothing else is ever executed. `--dry-run` prints the plan as JSON and changes nothing.
- * `npm exec --no` (not `npx`) refuses to download a missing binary (SEC-P3-31).
+ * `npm exec --no` (not `npx`) refuses to download a missing binary (SEC-P3-31). Steps with `runner: 'prisma'`
+ * run `command` as Prisma CLI arguments (`prismaArgv`); every other command is npm arguments.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -29,7 +30,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { npmCli } from './npm-cli.mjs';
-import { ensureEngine, forbiddenEnv, prismaChildEnv, prismaExecArgs, reverifyEngine } from './prisma-engines.mjs';
+import { ensureEngine, forbiddenEnv, prismaArgv, prismaChildEnv, reverifyEngine } from './prisma-engines.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLAYWRIGHT_BROWSERS = new Set(['chromium', 'firefox', 'webkit']);
@@ -42,6 +43,7 @@ const BCRYPT_OWNER = join(ROOT, 'apps', 'api');
  *   action: 'run' | 'skip',
  *   reason: string,
  *   command?: string[],
+ *   runner?: 'npm' | 'prisma',
  *   env?: string[],
  * }} Step
  */
@@ -100,7 +102,8 @@ export function plan(argv) {
       id: 'prisma',
       action: 'run',
       reason: 'Prisma schema present',
-      command: prismaExecArgs(['generate']),
+      runner: 'prisma',
+      command: ['generate'],
       env: ['PRISMA_SCHEMA_ENGINE_BINARY', 'CHECKPOINT_DISABLE'],
     });
   } else {
@@ -159,7 +162,8 @@ async function main(argv) {
       return 1;
     }
     const env = step.id === 'prisma' && engine !== undefined ? prismaChildEnv(process.env, engine.path) : process.env;
-    const r = spawnSync(process.execPath, [cli, ...step.command], { cwd: ROOT, stdio: 'inherit', windowsHide: true, env });
+    const argv = step.runner === 'prisma' ? prismaArgv(step.command, ROOT) : [cli, ...step.command];
+    const r = spawnSync(process.execPath, argv, { cwd: ROOT, stdio: 'inherit', windowsHide: true, env });
     if (step.id === 'prisma' && engine !== undefined) {
       try {
         reverifyEngine(engine.path, engine.sha256);

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,7 +21,6 @@ const options = {
   applicationName: 'api',
 };
 
-/** PEM-shaped dummy text (not a certificate or a key): enough to prove the file is read into `ssl.ca`. */
 /** Writes a CA bundle just above the 1 MiB cap into `dir` and returns its path. */
 function oversized(dir: string): string {
   const path = join(dir, 'huge.pem');
@@ -29,6 +28,21 @@ function oversized(dir: string): string {
   return path;
 }
 
+/** A directory inside `dir` (refused: not a regular file). */
+function subdirectory(dir: string): string {
+  const path = join(dir, 'bundle.d');
+  mkdirSync(path);
+  return path;
+}
+
+/** A readable file in a fresh temporary directory that is not a CA directory (PR9-SEC-17). */
+function outsideFile(): string {
+  const path = join(mkdtempSync(join(tmpdir(), 'pg-outside-')), 'root.pem');
+  writeFileSync(path, DUMMY_CA);
+  return path;
+}
+
+/** PEM-shaped dummy text (not a certificate or a key): enough to prove the file is read into `ssl.ca`. */
 const DUMMY_CA = '-----BEGIN CERTIFICATE-----\nZHVtbXktdGVzdC1jYQ==\n-----END CERTIFICATE-----\n';
 
 describe('runtime database client factory (data-model §7.1)', () => {
@@ -89,7 +103,7 @@ describe('runtime database client factory (data-model §7.1)', () => {
     try {
       writeFileSync(join(dir, 'rds.pem'), DUMMY_CA);
       const connectionString = `postgresql://u@h/db?${query.replace('/etc/ssl/rds.pem', encodeURIComponent(join(dir, 'rds.pem')))}`;
-      expect(toPoolConfig({ ...options, connectionString }).connectionString).toBe('postgresql://u@h/db');
+      expect(toPoolConfig({ ...options, connectionString }, [dir]).connectionString).toBe('postgresql://u@h/db');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -115,7 +129,7 @@ describe('runtime database client factory (data-model §7.1)', () => {
 
     /** The `ssl` setting pg itself derives for a client built from the pool config (the TLS socket options). */
     const pgSsl = (connectionString: string): unknown =>
-      (new pg.Client(toPoolConfig({ ...options, connectionString })) as unknown as { connectionParameters: { ssl: unknown } })
+      (new pg.Client(toPoolConfig({ ...options, connectionString }, [dir])) as unknown as { connectionParameters: { ssl: unknown } })
         .connectionParameters.ssl;
 
     it('sslmode=verify-full yields ssl.rejectUnauthorized true and a connectionString without a query @security', () => {
@@ -165,7 +179,7 @@ describe('runtime database client factory (data-model §7.1)', () => {
       const path = join(dir, 'root.pem');
       writeFileSync(path, DUMMY_CA);
       for (const query of [`sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}`, `sslrootcert=${encodeURIComponent(path)}`]) {
-        expect(toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?${query}` }).ssl).toEqual({
+        expect(toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?${query}` }, [dir]).ssl).toEqual({
           rejectUnauthorized: true,
           ca: DUMMY_CA,
         });
@@ -175,7 +189,9 @@ describe('runtime database client factory (data-model §7.1)', () => {
     it('fails on an unreadable sslrootcert without naming the path @security', () => {
       const path = join(dir, 'missing-root.pem');
       const call = (): unknown =>
-        toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}` });
+        toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}` }, [
+          dir,
+        ]);
       expect(call).toThrow(DatabaseConfigError);
       expect(call).toThrow('connectionString sslrootcert could not be read');
       try {
@@ -189,12 +205,15 @@ describe('runtime database client factory (data-model §7.1)', () => {
     it.each([
       ['the libpq system keyword', () => 'system', /sslrootcert must name a CA bundle file/],
       ['a relative path', () => 'root.pem', /sslrootcert must be an absolute path/],
-      ['a directory', (base: string) => base, /sslrootcert must be a regular file of at most 1 MiB/],
+      ['a directory', (base: string) => subdirectory(base), /sslrootcert must be a regular file of at most 1 MiB/],
+      ['a file outside every CA directory', () => outsideFile(), /sslrootcert must lie inside a CA directory/],
       ['a file above 1 MiB', (base: string) => oversized(base), /sslrootcert must be a regular file of at most 1 MiB/],
     ])('[PR9-SEC-16] refuses %s as sslrootcert without naming it @security', (_label, pathIn, message) => {
       const path = pathIn(dir);
       const call = (): unknown =>
-        toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}` });
+        toPoolConfig({ ...options, connectionString: `postgresql://u@h/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}` }, [
+          dir,
+        ]);
       expect(call).toThrow(DatabaseConfigError);
       expect(call).toThrow(message);
       expect(call).not.toThrow(path);

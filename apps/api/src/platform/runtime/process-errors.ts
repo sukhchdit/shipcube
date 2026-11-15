@@ -3,7 +3,12 @@
 // including a Prisma error's `meta.driverAdapterError` with PostgreSQL's message and `detail`, bypassing the redactor.
 // These handlers write ONE fatal line through the platform logger instead (database errors as { name, code,
 // originalCode, kind } only, other errors with redacted message and stack) and keep crash-only semantics: exit code 1.
+// A runtime configuration error (platform/db/config-exit.ts: DATABASE_URL, PGOPTIONS, DB_TX_*) is a deployment error
+// instead: one `runtime.config_rejected` line naming the variable and the class, then exit 78 (TASK-014, D-TASK014-24).
+import { CONFIG_EXIT_CODE } from '@platform/config';
 import type { PlatformLogger } from '@platform/shared/logging';
+
+import { configErrorVariable } from '../db/config-exit.js';
 
 /** The `process` events used here (an EventEmitter in tests). */
 export interface ProcessErrorSource {
@@ -12,8 +17,11 @@ export interface ProcessErrorSource {
 }
 
 export interface ProcessErrorHandlerOptions {
-  readonly log: Pick<PlatformLogger, 'fatal'>;
-  /** Requested once, with 1: `exitAfterFlush({ stream: process.stdout, exit: ... })` in the entry points. */
+  readonly log: Pick<PlatformLogger, 'fatal' | 'error'>;
+  /**
+   * Requested once, with 1 (or 78 for a runtime configuration error): `exitAfterFlush({ stream: process.stdout,
+   * exit: ... })` in the entry points.
+   */
   readonly exit: (code: number) => void;
   /** Default `process`. */
   readonly source?: ProcessErrorSource;
@@ -65,20 +73,23 @@ export function exitAfterFlush(options: ExitAfterFlushOptions): (code: number) =
 }
 
 /**
- * Registers the handlers; the process exits with 1 after the first fatal line (crash-only, never resumes). The exit is
- * requested once; because it may wait for the flush, a second error arriving before the exit can add its own
- * (identifier-only) fatal line, so there is at least one fatal line per crash (R3-n5).
+ * Registers the handlers; the process exits with 1 after the first fatal line (crash-only, never resumes), or with 78
+ * after a `runtime.config_rejected` line when the first error is a runtime configuration error. The exit is requested
+ * once, with the code of the first error; because it may wait for the flush, a second error arriving before the exit
+ * can add its own (identifier-only) line, so there is at least one line per crash (R3-n5).
  */
 export function installProcessErrorHandlers(options: ProcessErrorHandlerOptions): void {
   const source = options.source ?? process;
   let exiting = false;
   const crash = (event: string, fields: Readonly<Record<string, string>>, thrown: unknown): void => {
+    const variable = configErrorVariable(thrown);
     try {
-      options.log.fatal(event, fields, thrown);
+      if (variable === undefined) options.log.fatal(event, fields, thrown);
+      else options.log.error('runtime.config_rejected', { variable, error: (thrown as Error).name, exitCode: CONFIG_EXIT_CODE });
     } finally {
       if (!exiting) {
         exiting = true;
-        options.exit(1);
+        options.exit(variable === undefined ? 1 : CONFIG_EXIT_CODE);
       }
     }
   };

@@ -126,7 +126,7 @@ export interface RuntimeConfig {
   readonly secrets: ReadonlyMap<string, Secret<string>>;
 }
 
-/** PR3-SEC-06: refused in staging/production; named on stderr in local (one shared compose.env until TASK-014). */
+/** PR3-SEC-06: refused in staging/production; named on stderr in local (Compose uses per-service env files since TASK-014). */
 function enforceHolders(service: Service, env: EnvInput, config: Config, io: StartupIo): void {
   const issues = holderIssues(env, service, config.APP_ENV);
   if (issues.length > 0) throw new ConfigValidationError(issues);

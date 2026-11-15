@@ -40,6 +40,8 @@ describe('Jest project selection', () => {
     ['prisma/tests/db/query-counter.int.test.ts', ['integration']],
     ['tests/e2e/smoke.test.ts', []],
     ['packages/shared/node_modules/x/y.test.ts', []],
+    // R1-n3 (PR #39): the opt-in stack suite builds images; without JEST_STACK=1 no project runs it.
+    ['tests/compose/x.stack.test.ts', []],
   ])('%s runs in %j', (path, expected) => {
     expect(projectsOf(path)).toEqual(expected);
   });
