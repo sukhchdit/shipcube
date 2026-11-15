@@ -148,6 +148,39 @@ Interpretation:
 - Side observation: on this host a Prisma interactive transaction costs ~0.8–1.1 ms p50 more than the same three
   statements over raw `pg` (run 4: 3.72 vs 2.64 ms). This is client-side query-compiler/adapter work, not RLS.
 
+### 4.1 C-1 on ubuntu with native Docker (2026-11-14, TASK-015 part 015-B)
+
+Run: hosted `security-integration` job of PR #46, GitHub Actions run 43583093175 (head `9fd3b4d`), `ubuntu-24.04`,
+2 vCPU AMD EPYC 7763, Node v24.22.2, `postgres:18` = PostgreSQL 18.6 in the runner's Docker (native, no port proxy),
+`SPK03_BENCH=1`, N = 400 per variant after 50 warm-up rounds (the same test as runs 2–6). The `SPK03_REPORT` JSON was
+uploaded as artifact `spk03-report` (7-day retention) and printed in the job summary; all 20 spike tests passed. The
+spike file and its `TENANT_CONTEXT_EXEMPTIONS` entry were then deleted in one commit (`8d83468`).
+
+| Variant (ms) | p50 | p95 | p99 |
+|---|---|---|---|
+| Prisma tx, `set_config` first (= `withTenantTx`) | 1.774 | 3.039 | 5.533 |
+| Prisma tx, `SELECT 1` first (control) | 1.563 | 2.464 | 4.985 |
+| Prisma tx, no first statement | 1.113 | 1.775 | 2.909 |
+| `set_config` statement alone (client-observed) | 0.545 | 1.001 | 1.604 |
+| `SELECT 1` statement alone (client-observed) | 0.436 | 0.696 | 0.931 |
+| **`set_config` server-side** | **0.022** | **0.050** | 0.062 |
+| raw `pg` tx with `set_config` | 1.018 | 1.615 | 2.860 |
+| raw `pg` tx without | 0.694 | 1.037 | 2.762 |
+
+| Derived (C-1) | ubuntu-24.04 | Windows host (run 6) | Asserted |
+|---|---|---|---|
+| server-side `set_config` p95 | 0.050 ms | 0.069 ms | ≤ 1 ms ✔ |
+| p95(`set_config` statement) − p95(`SELECT 1` statement) | 0.305 ms | 0.386 ms | recorded |
+| p95(tx with `set_config`) − p95(tx with `SELECT 1`) | 0.575 ms | 0.688 ms | recorded |
+| **p95(tx with) − p95(tx without)** (end-to-end per-transaction delta) | **1.264 ms** (p50 **0.661 ms**) | 2.251 ms (p50 1.564 ms) | recorded |
+| raw `pg` p95(with) − p95(without) | 0.578 ms | 1.384 ms | recorded |
+
+Reading: on a 2-vCPU runner with a loopback round trip the end-to-end p95 delta is 1.26 ms and the p50 delta 0.66 ms,
+about half the Windows figure, but above the "< 1 ms" expectation at p95. The statement itself stays ≈ 0.3 ms above any
+one-row round trip and 0.05 ms server-side; the rest is the extra round trip plus Prisma client work on a 2-vCPU host
+(the raw `pg` delta is 0.58 ms). The figure is **recorded, not asserted** (ADR-0005 am. 10 W-1); performance-engineer
+judges it against the per-request budget at P6 and re-measures on RDS at M5.
+
 ## 5. Findings for consumers
 
 | ID | Finding | Consumer / action |
@@ -168,7 +201,10 @@ Interpretation:
 
 ## 6. Open questions
 
-1. **C-1 (condition of the GO):** re-run exit (d) with `SPK03_BENCH=1` on ubuntu-latest with native Docker, which
+1. **C-1 (condition of the GO): DONE 2026-11-14** (section 4.1; run by TASK-015 part 015-B on the hosted
+   `security-integration` job, D-ARCH-074): end-to-end p95 delta 1.264 ms, p50 0.661 ms, server-side 0.050 ms p95;
+   recorded, not asserted; the spike file and its lint exemption are deleted. Original text: re-run exit (d) with
+   `SPK03_BENCH=1` on ubuntu-latest with native Docker, which
    has a sub-0.2 ms loopback RTT, to measure the end-to-end per-transaction delta against the 1 ms budget.
    **Owner: TASK-016. Due: before G3.** Lifecycle of this spike file (code review m7): TASK-016 ports the (a)–(c)
    and (e) assertions (including the F-04 negative control and the pinned error shapes) into the RLS foundations /

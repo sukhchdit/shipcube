@@ -11,9 +11,16 @@
  *                         `pull_request_review_comment`, `discussion`, `discussion_comment` (privileged or comment-driven
  *                         triggers; PR10-SEC-07).
  *   permissions           top-level `permissions` present and read-only (`{}` or scopes set to read/none); job-level
- *                         `write` only for the (workflow, job, scope) triples in JOB_WRITE_ALLOWLIST.
+ *                         `write` only for the (workflow, job, scope) triples in JOB_WRITE_ALLOWLIST; `actions:` (other
+ *                         than none) never at workflow level and only on ACTIONS_READ_JOBS (ci.yml scans and ci-gate,
+ *                         the no-head-code proof lookups; RR-8 (ii)).
+ *   gh-token              a token reference (`github.token`, `secrets.GITHUB_TOKEN`, GH_TOKEN, GITHUB_TOKEN) appears
+ *                         only as the `GH_TOKEN` step env entry of a ci.yml scans/ci-gate step whose `run:` invokes
+ *                         "$GATE_LANE_SCOPE"; never at workflow or job level, never in fast-lane or security-integration
+ *                         (ADR-0023 am. L; RR-8 (i); stage 2 widens it to "lane-scope steps only").
  *   workflow-env          NPM_CONFIG_IGNORE_SCRIPTS="true", CHECKPOINT_DISABLE="1", SCARF_ANALYTICS="false" at workflow level.
- *   forbidden-env         Prisma engine redirects (FORBIDDEN_ENV) and PLAYWRIGHT_*DOWNLOAD_HOST in any env map or run script.
+ *   forbidden-env         Prisma engine redirects (FORBIDDEN_ENV) and PLAYWRIGHT_*DOWNLOAD_HOST (any case, also as
+ *                         npm_config_* / npm_package_config_*; PR46-SEC-02) in any env map or run script.
  *   ignore-scripts        npm_config_ignore_scripts (any case) set to anything but true; any npm invocation that
  *                         re-enables lifecycle scripts or spells ignore-scripts non-canonically (`--ignore-scripts false`,
  *                         `=false`, `--no-ignore-scripts`, `--ig false`, `npm config set ignore-scripts …`), under every
@@ -24,31 +31,44 @@
  *   audit-signatures-masked  `npm audit signatures … || …`.
  *   continue-on-error     no job or step may set it to anything but false.
  *   npx                   no `npx`/`bunx`/`pnpm dlx`/`yarn dlx`; `npm exec` only as `npm exec --no -- <bin>`.
- *   pr-secrets            pull_request workflows reference no secret except GITHUB_TOKEN and never `secrets: inherit`.
+ *   pr-secrets            pull_request workflows, and the no-release workflows outside a carrier-sandbox job (PR46-SEC-07),
+ *                         reference no secret except GITHUB_TOKEN and never `secrets: inherit`; `github.token` is the
+ *                         GITHUB_TOKEN reference (RR-8 (iii); gh-token decides where it may appear).
  *   sandbox-secrets       secrets.CARRIER_* / secrets.STRIPE_* only in jobs with `environment: carrier-sandbox`; no
  *                         pull_request/push workflow references that environment (SEC-TC-51).
  *   secrets-dump          no `toJSON(secrets)`.
  *   image-digest          `*_IMAGE` env values, `container`/`services` images and `docker run` images are pinned by digest.
  *   job-timeout           every job (except reusable-workflow calls) sets `timeout-minutes`.
- *   ci-no-release         in ci.yml: no `npm publish`, no `terraform apply|destroy`, no AWS role or deploy, no
- *                         `id-token: write`; image pushes only in a job `images` gated on dispatch/main/tags.
+ *   ci-no-release         in ci.yml, lane-c.yml and nightly.yml (NO_RELEASE_WORKFLOWS): no `npm publish`, no
+ *                         `terraform apply|destroy` (also through "$TERRAFORM_IMAGE"), no AWS role or deploy, no
+ *                         `id-token: write`; image pushes only in ci.yml job `images` gated on dispatch/main/tags.
+ *   dispatch-only         lane-c.yml and nightly.yml have exactly one trigger, workflow_dispatch (no schedule; D-ARCH-010).
+ *   playwright-install    Playwright browser installs (deps:rebuild --playwright, DEPS_REBUILD_PLAYWRIGHT, playwright
+ *                         install; apt via --with-deps on Linux) only in lane-c.yml (PR4-SEC-08 residual).
  *   untrusted-expression  `${{ … }}` inside `run:` or `with.script` only for SAFE_EXPRESSION contexts; everything else
  *                         goes through `env:` (script injection; PR10-SEC-07).
  *   gitleaks-hardening    a step running the gitleaks image passes `--ignore-gitleaks-allow`, `--diff-merges=first-parent`
  *                         and `--network none`, and mounts no workspace path except `.git` (gitleaks auto-loads
  *                         `<source>/.gitleaksignore`; PR10-SEC-01).
- *   scans-isolation       ci.yml job `scans` runs no npm, nothing from node_modules or the workspace, no local action and
- *                         no setup-node cache, so no head-controlled code shares its runner (PR10-SEC-02).
+ *   scans-isolation       ci.yml jobs `scans` and `ci-gate` run no npm, nothing from node_modules or the workspace, no
+ *                         local action and no setup-node cache, so no head-controlled code shares their runner or their
+ *                         actions: read token (PR10-SEC-02; RR-6).
  *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES in its job, unconditional or with its listed
  *                         `if:` and exactly its listed `env:`, with no `shell:`/`working-directory:` on the step and no
- *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane` and `scans`
+ *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane`, `scans`
+ *                         and `security-integration`
  *                         (PR10-SEC-07, PR17-SEC-03). The base-ref lint fixture step's commands are pinned line by line
  *                         (BASE_LINT_FIXTURES_SCRIPT, an allow-list), as is the lane B evidence step; the porcelain and
  *                         openapi-breaking gates are pinned to one exact command line with no step env, each porcelain
  *                         gate directly after the step it guards, and OASDIFF_IMAGE is the openapi-breaking.mjs pin, set
  *                         at workflow level only (PR #33 R1-m2, PR33-SEC-03 (i)); pinned scripts are pure ASCII
  *                         (PR33-SEC-01). The other gates are matched by pattern (and by step name where two gates share
- *                         a command: the post-lint and post-build porcelain gates).
+ *                         a command: the post-lint and post-build porcelain gates). ADR-0023 am. L stage 1 (RR-4..RR-7,
+ *                         PR46-SEC-01/-03; laneScopeFindings): the lane-scope step (exact command and env, id, before
+ *                         gitleaks), the security-integration suites step (SECURITY_INTEGRATION_SCRIPT), ci-gate's tooling
+ *                         and aggregation steps (exact; aggregation last), the pinned jobs' `if:`, `needs`, permissions,
+ *                         job env and outputs, the pull-request concurrency (cancel-in-progress: false), and the
+ *                         pull-request base filter `branches: [main]` (CI_PULL_REQUEST_BRANCHES; R2-M1, PR46-SEC-13).
  *   gate-env              no `env:` entry named GATE_* or GATES_* anywhere: gate locations come only from the base-ref
  *                         gate-tooling steps through $GITHUB_ENV.
  *   lint-fixture-mode     LINT_FIXTURE_MODE appears nowhere but in the `env:` of ci.yml's base-ref lint fixture step
@@ -96,8 +116,12 @@ export const FORBIDDEN_ENV = Object.freeze([
   'PRISMA_FMT_BINARY',
 ]);
 
-/** Playwright browser download redirects (PR4-SEC-08): PLAYWRIGHT_DOWNLOAD_HOST and the per-browser variants. */
-const PLAYWRIGHT_HOST = /^PLAYWRIGHT_(?:[A-Z]+_)?DOWNLOAD_HOST$/;
+/**
+ * Playwright browser download redirects (PR4-SEC-08; PR46-SEC-02, code review PR #46 m3): PLAYWRIGHT_DOWNLOAD_HOST and
+ * the per-browser variants, in any case, also through npm's channels (Playwright's getFromENV falls back to
+ * npm_config_<name> from .npmrc and npm_package_config_<name> from package.json "config").
+ */
+export const PLAYWRIGHT_HOST = /^(?:npm_config_|npm_package_config_)?playwright_(?:[a-z]+_)?download_host$/iu;
 
 export const REQUIRED_WORKFLOW_ENV = Object.freeze({
   NPM_CONFIG_IGNORE_SCRIPTS: 'true',
@@ -110,6 +134,20 @@ export const REQUIRED_WORKFLOW_ENV = Object.freeze({
  * only ci.yml job holding `packages: write`. Owning tasks extend this list in a reviewed change (CODEOWNERS on tools/ci).
  */
 export const JOB_WRITE_ALLOWLIST = Object.freeze(['ci.yml:images:packages']);
+
+/**
+ * Dispatch-only workflows (D-ARCH-010 items 3 and 4; ADR-0023 am. C; TASK-015 part 015-B): lane C and nightly run only
+ * on `workflow_dispatch` (no schedule, no push or PR trigger), so hosted minutes are spent only when an agent decides.
+ */
+export const DISPATCH_ONLY_WORKFLOWS = Object.freeze(['lane-c.yml', 'nightly.yml']);
+/** Workflows that build and test but never release (AT-US-005-04/-05): no publish, push, apply, AWS role or OIDC token. */
+export const NO_RELEASE_WORKFLOWS = Object.freeze(['ci.yml', 'ci.yaml', ...DISPATCH_ONLY_WORKFLOWS]);
+/**
+ * The only workflow that may install Playwright browsers (`deps:rebuild --playwright=…`, DEPS_REBUILD_PLAYWRIGHT,
+ * `playwright install`), which on Linux also runs apt through `--with-deps` (PR4-SEC-08 residual, COND-E2E-FF).
+ */
+export const PLAYWRIGHT_INSTALL_WORKFLOWS = Object.freeze(['lane-c.yml']);
+const PLAYWRIGHT_INSTALL = /--playwright(?:=|\s)|\bDEPS_REBUILD_PLAYWRIGHT\b|\bplaywright\s+install\b/u;
 
 /** Triggers that run with a write token and secrets, or are driven by comments/reviews (PR10-SEC-07). */
 export const FORBIDDEN_TRIGGERS = Object.freeze([
@@ -303,6 +341,152 @@ export function laneBEvidenceProblems(script) {
 const LANE_B_EVIDENCE_RUN = /tools\/quality\/check-evidence\.mjs/u;
 
 /**
+ * A `problems` check holding a multi-line `run:` to exactly `expected` (command lines, pure ASCII; PR17-SEC-03 style).
+ * @param {readonly string[]} expected
+ * @returns {(script: string) => string[]}
+ */
+export function pinnedScriptProblems(expected) {
+  return (script) => {
+    /** @type {string[]} */
+    const out = [];
+    const ascii = nonAsciiProblem(script);
+    if (ascii !== null) out.push(ascii);
+    const lines = commandLines(script);
+    if (lines.length !== expected.length || lines.some((line, index) => line !== expected[index])) {
+      const index = expected.findIndex((line, i) => lines[i] !== line);
+      out.push(
+        `the run: must be exactly the pinned script (first difference at command line ${String((index === -1 ? expected.length : index) + 1)})`,
+      );
+    }
+    return out;
+  };
+}
+
+/*
+ * ADR-0023 amendment L (D-ARCH-126/127; ruling rulings/wave-0-ci-minutes.md section 4 RR-4..RR-8; PR46-SEC-01/-03;
+ * code review PR #46 m1). Stage 1 pins: the lane-scope step of `scans`, the `security-integration` job, `ci-gate` and the
+ * pull-request concurrency are held to exact text here (base ref), so a PR cannot narrow its own selection, accept a
+ * failed or skipped job, run the suites from head manifests, mask a step or reach the token from head code. Step `if:`s
+ * of the other gates and the `ci-gate` needs list change only in the stage-2 policy PR (TASK-286, two-step).
+ */
+/** The lane-scope step of job `scans` (RR-4): exact command; GH_TOKEN and RANGE_BEFORE are its only step env. */
+export const LANE_SCOPE_RUN =
+  'node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"';
+export const LANE_SCOPE_ENV = Object.freeze({
+  GH_TOKEN: '${{ github.token }}',
+  RANGE_BEFORE: '${{ github.event.before }}',
+  // R2-M1 / PR46-SEC-13: proofs are bound to this PR's head branch (an env value, never interpolated into run:).
+  HEAD_REF: '${{ github.head_ref }}',
+});
+/**
+ * R2-M1 / PR46-SEC-13 (D-ORCH-090): lane A runs for pull requests into main only, so no ci.yml run against another base
+ * exists to be adopted as a proof (lane-scope.mjs PROOF_BASE_REF binds the lookup as well).
+ */
+export const CI_PULL_REQUEST_BRANCHES = Object.freeze(['main']);
+/** The step id the `scans` outputs read (RR-4). */
+export const LANE_SCOPE_STEP_ID = 'lane-scope';
+/** Job `scans` outputs: one source, the base-ref lane-scope step (RR-4). */
+export const SCANS_OUTPUTS = Object.freeze(
+  Object.fromEntries(
+    ['code_changed', 'pr_docs_only', 'code_proof', 'security_proof', 'record_ok', 'security_paths', 'security_integration_due'].map(
+      (key) => [key, `\${{ steps.${LANE_SCOPE_STEP_ID}.outputs.${key} }}`],
+    ),
+  ),
+);
+/** Job `fast-lane` outputs: the mode its classify step chose (ci-gate compares it with the scans classification). */
+export const FAST_LANE_OUTPUTS = Object.freeze({ mode: '${{ steps.classify.outputs.mode }}' });
+/** Job-level env of the pinned jobs: the range and event inputs the pinned commands read. */
+export const PINNED_JOB_ENV = Object.freeze({
+  scans: Object.freeze({
+    RANGE_BASE: '${{ github.event.pull_request.base.sha || github.event.before }}',
+    RANGE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
+    EVENT: '${{ github.event_name }}',
+    PR_NUMBER: '${{ github.event.pull_request.number }}',
+  }),
+  'security-integration': Object.freeze({ NPM_CONFIG_IGNORE_SCRIPTS: 'true', RANGE_BASE: '${{ github.event.pull_request.base.sha }}' }),
+  'ci-gate': Object.freeze({
+    RANGE_BASE: '${{ github.event.pull_request.base.sha || github.event.before }}',
+    RANGE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
+  }),
+});
+/** Job-level permissions of the pinned jobs (RR-4, RR-6, RR-8 (ii)). */
+export const PINNED_JOB_PERMISSIONS = Object.freeze({
+  'fast-lane': Object.freeze({ contents: 'read' }),
+  // pull-requests: read for the proof binding's pulls and issue-events calls (R2-M1, PR46-SEC-13).
+  scans: Object.freeze({ contents: 'read', actions: 'read', 'pull-requests': 'read' }),
+  'security-integration': Object.freeze({ contents: 'read' }),
+  'ci-gate': Object.freeze({ contents: 'read', actions: 'read' }),
+});
+/**
+ * RR-5 + PR46-SEC-01: once per code tree on merge-candidate heads, and only after fast-lane succeeded with the lane A
+ * supply-chain gates passed on this code tree (full mode here, or the proof run of a light run).
+ */
+export const SECURITY_INTEGRATION_IF =
+  "${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_integration_due == 'true' && needs.fast-lane.result == 'success' && (needs.fast-lane.outputs.mode == 'full' || needs.scans.outputs.code_proof != '') }}";
+export const SECURITY_INTEGRATION_NEEDS = Object.freeze(['scans', 'fast-lane']);
+/** The suites step: base-ref manifests only (no head-copy branch), then the runner with no extra flag (no --dry-run). */
+export const SECURITY_INTEGRATION_SCRIPT = Object.freeze([
+  'set -euo pipefail',
+  'manifests="$RUNNER_TEMP/security-manifests"',
+  'mkdir -p "$manifests"',
+  'for name in required-suites suite-runners; do',
+  '  if [ -z "$RANGE_BASE" ] || ! git cat-file -e "$RANGE_BASE:tools/quality/$name.json" 2>/dev/null; then',
+  '    echo "::error title=security-integration::the base ref has no tools/quality/$name.json (fail closed; the head copy is never used)"',
+  '    exit 1',
+  '  fi',
+  '  git show "$RANGE_BASE:tools/quality/$name.json" > "$manifests/$name.json"',
+  'done',
+  'node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"',
+]);
+export const CI_GATE_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}";
+export const CI_GATE_NEEDS = Object.freeze(['fast-lane', 'scans', 'security-integration']);
+/** ci-gate's tooling step: the base ref's tools/ci (head git objects only while the base lacks lane-scope.mjs). */
+export const CI_GATE_TOOLING_SCRIPT = Object.freeze([
+  'set -euo pipefail',
+  'gates="$RUNNER_TEMP/gates"',
+  'mkdir -p "$gates"',
+  'if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE:tools/ci/lane-scope.mjs" 2>/dev/null; then',
+  '  git archive "$RANGE_BASE" tools/ci | tar -x -C "$gates"',
+  '  echo "Gate tool tools/ci/lane-scope.mjs: base ref." >> "$GITHUB_STEP_SUMMARY"',
+  'else',
+  '  git archive "$RANGE_HEAD" tools/ci | tar -x -C "$gates"',
+  '  echo "Gate tool tools/ci/lane-scope.mjs: head (bootstrap: not on the base ref yet)." >> "$GITHUB_STEP_SUMMARY"',
+  'fi',
+  'echo "GATE_LANE_SCOPE=$gates/tools/ci/lane-scope.mjs" >> "$GITHUB_ENV"',
+]);
+/** ci-gate's aggregation (RR-6 rules (a)-(f) in the base-ref lane-scope.mjs --gate). */
+export const CI_GATE_RUN = 'node "$GATE_LANE_SCOPE" --gate --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"';
+export const CI_GATE_ENV = Object.freeze({
+  GH_TOKEN: '${{ github.token }}',
+  FAST_LANE: '${{ needs.fast-lane.result }}',
+  FAST_LANE_MODE: '${{ needs.fast-lane.outputs.mode }}',
+  SCANS: '${{ needs.scans.result }}',
+  SECURITY_INTEGRATION: '${{ needs.security-integration.result }}',
+  CODE_CHANGED: '${{ needs.scans.outputs.code_changed }}',
+  PR_DOCS_ONLY: '${{ needs.scans.outputs.pr_docs_only }}',
+  CODE_PROOF: '${{ needs.scans.outputs.code_proof }}',
+  SECURITY_PROOF: '${{ needs.scans.outputs.security_proof }}',
+  RECORD_OK: '${{ needs.scans.outputs.record_ok }}',
+  SECURITY_PATHS: '${{ needs.scans.outputs.security_paths }}',
+  SECURITY_INTEGRATION_DUE: '${{ needs.scans.outputs.security_integration_due }}',
+});
+/** RR-7: pull-request runs queue per PR; a running full run is never cancelled (its proof serves a later docs push). */
+export const CI_CONCURRENCY = Object.freeze({
+  group: '${{ github.event.pull_request.number || github.sha }}',
+  'cancel-in-progress': 'false',
+});
+/** Jobs that may hold `actions:` (read), as `<workflow file>:<job id>`: the no-head-code lookup jobs (RR-8 (ii)). */
+export const ACTIONS_READ_JOBS = Object.freeze(['ci.yml:scans', 'ci.yml:ci-gate']);
+/**
+ * RR-8 (i) `gh-token`: a token reference (`github.token`, `secrets.GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`) may appear
+ * only as the `GH_TOKEN` env entry of a ci.yml step in these jobs whose `run:` invokes "$GATE_LANE_SCOPE".
+ */
+export const TOKEN_JOBS = Object.freeze(['scans', 'ci-gate']);
+const TOKEN_MENTION =
+  /\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])|\bsecrets\s*(?:\.\s*GITHUB_TOKEN\b|\[\s*['"]GITHUB_TOKEN['"]\s*\])|\bGH_TOKEN\b|\bGITHUB_TOKEN\b/u;
+const TOKEN_VALUES = Object.freeze(['${{ github.token }}', '${{ secrets.GITHUB_TOKEN }}']);
+
+/**
  * ci.yml gate steps that must stay (PR10-SEC-07 `required-gates`): the job, a pattern its `run:` matches, the only
  * `if:` values allowed on that step (empty: unconditional) and the `env:` entries it must set. Adding a gate is a
  * reviewed change to this list.
@@ -382,6 +566,45 @@ export const CI_REQUIRED_GATES = Object.freeze(
       ifs: [],
       env: {},
       problems: laneBEvidenceProblems,
+    },
+    // ADR-0023 am. L (D-ARCH-126/127; RR-4, RR-6; PR46-SEC-03, code review PR #46 m1): the classifier and proof lookup,
+    // the security-integration suites step and ci-gate's aggregation are held to exact text, with exact step env.
+    {
+      job: 'scans',
+      gate: 'lane scope',
+      name: /^Lane scope and proofs\b/,
+      run: /node "\$GATE_LANE_SCOPE"/,
+      ifs: [],
+      env: LANE_SCOPE_ENV,
+      problems: exactRunProblems(LANE_SCOPE_RUN),
+    },
+    {
+      job: 'security-integration',
+      gate: 'security integration suites',
+      name: /^Security integration suites\b/,
+      run: /tools\/ci\/security-integration\.mjs/,
+      ifs: [],
+      env: {},
+      problems: pinnedScriptProblems(SECURITY_INTEGRATION_SCRIPT),
+    },
+    {
+      job: 'ci-gate',
+      gate: 'ci-gate tooling',
+      name: /^Gate tooling from the base ref \(lane-scope\)/,
+      run: /GATE_LANE_SCOPE=/,
+      ifs: [],
+      env: {},
+      problems: pinnedScriptProblems(CI_GATE_TOOLING_SCRIPT),
+    },
+    {
+      job: 'ci-gate',
+      gate: 'ci-gate aggregate',
+      name: /^Aggregate lane A\b/,
+      run: /node "\$GATE_LANE_SCOPE" --gate\b/,
+      ifs: [],
+      env: CI_GATE_ENV,
+      problems: exactRunProblems(CI_GATE_RUN),
+      after: 'ci-gate tooling',
     },
   ]),
 );
@@ -497,16 +720,17 @@ function envEntryFindings(name, value) {
 /**
  * Findings for one shell script (`run:`).
  * @param {string} script
- * @param {boolean} isCi
+ * @param {boolean} isCi true for a NO_RELEASE_WORKFLOWS file (ci.yml, lane-c.yml, nightly.yml)
+ * @param {string} [fileName] named in the no-release messages
  * @returns {{ rule: string, message: string }[]}
  */
-export function scriptFindings(script, isCi) {
+export function scriptFindings(script, isCi, fileName = 'ci.yml') {
   /** @type {{ rule: string, message: string }[]} */
   const out = [];
   for (const name of FORBIDDEN_ENV) {
     if (new RegExp(`\\b${name}\\s*=`).test(script)) out.push({ rule: 'forbidden-env', message: `${name} is set in a run script` });
   }
-  const playwright = /\b(PLAYWRIGHT_(?:[A-Z]+_)?DOWNLOAD_HOST)\s*=/.exec(script);
+  const playwright = /\b((?:npm_config_|npm_package_config_)?PLAYWRIGHT_(?:[A-Z]+_)?DOWNLOAD_HOST)\s*=/iu.exec(script);
   if (playwright) out.push({ rule: 'forbidden-env', message: `${playwright[1] ?? 'PLAYWRIGHT_DOWNLOAD_HOST'} is set in a run script` });
   const ignore = /\bnpm_config_ignore_scripts\s*=\s*["']?([^\s"';]*)/i.exec(script);
   if (ignore && (ignore[1] ?? '').toLowerCase() !== 'true') {
@@ -558,11 +782,16 @@ export function scriptFindings(script, isCi) {
       });
     }
     if (isCi) {
-      if (/\bnpm\s+publish\b/.test(text)) out.push({ rule: 'ci-no-release', message: 'ci.yml must not publish packages (AT-US-005-04)' });
-      if (/\b(?:terraform|tofu)\b(?:\s+-\S+)*\s+(?:apply|destroy)\b/.test(text))
-        out.push({ rule: 'ci-no-release', message: 'ci.yml must not run terraform apply/destroy (AT-US-005-05)' });
+      if (/\bnpm\s+publish\b/.test(text))
+        out.push({ rule: 'ci-no-release', message: `${fileName} must not publish packages (AT-US-005-04)` });
+      // Also the containerised CLI: `docker run … "$TERRAFORM_IMAGE" [-chdir=…] apply` (lane-c.yml iac).
+      if (
+        /\b(?:terraform|tofu)\b(?:\s+-\S+)*\s+(?:apply|destroy)\b/.test(text) ||
+        /TERRAFORM_IMAGE\}?"?(?:\s+-\S+)*\s+(?:apply|destroy)\b/.test(text)
+      )
+        out.push({ rule: 'ci-no-release', message: `${fileName} must not run terraform apply/destroy (AT-US-005-05)` });
       if (/\baws\s+(?:sts\s+assume-role|ecs\s+(?:update-service|deploy)|deploy\b|cloudformation\s+deploy)/.test(text)) {
-        out.push({ rule: 'ci-no-release', message: 'ci.yml must not deploy to AWS or assume an AWS role (AT-US-005-05)' });
+        out.push({ rule: 'ci-no-release', message: `${fileName} must not deploy to AWS or assume an AWS role (AT-US-005-05)` });
       }
     }
   }
@@ -659,12 +888,17 @@ export function checkWorkflow(text, fileName, options = {}) {
   const doc = asMap(parsed.value ?? undefined);
   if (doc === undefined) return [{ rule: 'yaml-subset', message: 'workflow is not a mapping', location: `${fileName}:1` }];
   const isCi = fileName === 'ci.yml' || fileName === 'ci.yaml';
+  const noRelease = NO_RELEASE_WORKFLOWS.includes(fileName);
+  const mayInstallBrowsers = PLAYWRIGHT_INSTALL_WORKFLOWS.includes(fileName);
   const triggers = triggersOf(doc.on);
   const prTriggered = triggers.has('pull_request') || triggers.has('pull_request_target');
 
   for (const event of FORBIDDEN_TRIGGERS) {
     if (triggers.has(event))
       add('forbidden-trigger', `trigger "${event}" runs with elevated privileges or comment input and is not allowed`, ['on']);
+  }
+  if (DISPATCH_ONLY_WORKFLOWS.includes(fileName) && (triggers.size !== 1 || !triggers.has('workflow_dispatch'))) {
+    add('dispatch-only', `${fileName} runs on workflow_dispatch only (no schedule, push or pull_request; D-ARCH-010)`, ['on']);
   }
 
   // permissions
@@ -676,8 +910,16 @@ export function checkWorkflow(text, fileName, options = {}) {
     for (const [scope, level] of Object.entries(top)) {
       if (level !== 'read' && level !== 'none')
         add('permissions', `top-level permission ${scope}: ${String(level)} must be read or none`, ['permissions', scope]);
+      // RR-8 (ii): `actions:` only on the no-head-code lookup jobs, never for every job of a workflow.
+      if (scope === 'actions' && level !== 'none')
+        add(
+          'permissions',
+          `top-level permission actions: ${String(level)} is not allowed (only ${ACTIONS_READ_JOBS.join(', ')} hold actions: read)`,
+          ['permissions', scope],
+        );
     }
   }
+  for (const f of tokenFindings(doc, isCi)) add(f.rule, f.message, f.path);
 
   // workflow-level env
   const workflowEnv = asMap(doc.env) ?? {};
@@ -689,6 +931,12 @@ export function checkWorkflow(text, fileName, options = {}) {
     if (map === undefined) return;
     for (const [name, value] of Object.entries(map)) {
       for (const f of envEntryFindings(name, typeof value === 'string' ? value : '')) add(f.rule, f.message, [...path, name]);
+      if (!mayInstallBrowsers && PLAYWRIGHT_INSTALL.test(name))
+        add(
+          'playwright-install',
+          `${name}: Playwright browsers are installed only in ${PLAYWRIGHT_INSTALL_WORKFLOWS.join(', ')} (PR4-SEC-08)`,
+          [...path, name],
+        );
     }
   };
   checkEnvMap(doc.env, ['env']);
@@ -721,8 +969,19 @@ export function checkWorkflow(text, fileName, options = {}) {
         if (level === 'write' && !JOB_WRITE_ALLOWLIST.includes(`${fileName}:${jobId}:${scope}`)) {
           add('permissions', `job ${jobId} must not hold ${scope}: write (not in JOB_WRITE_ALLOWLIST)`, [...jobPath, 'permissions', scope]);
         }
-        if (isCi && scope === 'id-token' && level === 'write')
-          add('ci-no-release', 'ci.yml must not request id-token: write (no AWS role, AT-US-005-05)', [...jobPath, 'permissions', scope]);
+        if (scope === 'actions' && level !== 'none' && !ACTIONS_READ_JOBS.includes(`${fileName}:${jobId}`)) {
+          add('permissions', `job ${jobId} must not hold actions: (only ${ACTIONS_READ_JOBS.join(', ')}; RR-8 (ii))`, [
+            ...jobPath,
+            'permissions',
+            scope,
+          ]);
+        }
+        if (noRelease && scope === 'id-token' && level === 'write')
+          add('ci-no-release', `${fileName} must not request id-token: write (no AWS role, AT-US-005-05)`, [
+            ...jobPath,
+            'permissions',
+            scope,
+          ]);
       }
     }
 
@@ -738,13 +997,15 @@ export function checkWorkflow(text, fileName, options = {}) {
     if (environment !== SANDBOX_ENVIRONMENT && jobStrings.some((value) => SANDBOX_SECRET.test(value))) {
       add('sandbox-secrets', `secrets.CARRIER_*/STRIPE_* only in jobs with environment ${SANDBOX_ENVIRONMENT} (SEC-TC-51)`, jobPath);
     }
-    if (prTriggered) {
-      if (job.secrets === 'inherit') add('pr-secrets', 'pull_request workflows must not pass `secrets: inherit`', [...jobPath, 'secrets']);
+    // RR-8 (iii): `github.token` is the GITHUB_TOKEN reference and is not a secret here (gh-token decides where it may
+    // appear). PR46-SEC-07: the no-release workflows (lane C, nightly) follow the same rule, except a carrier-sandbox job.
+    if (prTriggered || (noRelease && environment !== SANDBOX_ENVIRONMENT)) {
+      const what = prTriggered ? 'pull_request jobs' : `${fileName} jobs`;
+      if (job.secrets === 'inherit') add('pr-secrets', `${what} must not pass \`secrets: inherit\``, [...jobPath, 'secrets']);
       for (const value of jobStrings) {
         for (const match of value.matchAll(ANY_SECRET)) {
           const name = match[1] ?? match[2] ?? '';
-          if (name !== 'GITHUB_TOKEN')
-            add('pr-secrets', `pull_request jobs use GITHUB_TOKEN only (found secrets.${name}; ADR-0023 am. H)`, jobPath);
+          if (name !== 'GITHUB_TOKEN') add('pr-secrets', `${what} use GITHUB_TOKEN only (found secrets.${name}; ADR-0023 am. H)`, jobPath);
         }
       }
     }
@@ -777,12 +1038,23 @@ export function checkWorkflow(text, fileName, options = {}) {
       }
       const run = asString(step.run);
       if (run !== undefined) {
-        for (const f of scriptFindings(run, isCi)) add(f.rule, f.message, [...stepPath, 'run']);
-        if (isCi && /\bdocker\s+(?:push|buildx\s+build\b[^\n]*--push)\b/.test(run) && !(jobId === 'images' && imagePushGuarded(job))) {
-          add('ci-no-release', 'ci.yml pushes images only from the `images` job gated on dispatch/main/tags (AT-US-005-04)', [
+        for (const f of scriptFindings(run, noRelease, fileName)) add(f.rule, f.message, [...stepPath, 'run']);
+        if (
+          noRelease &&
+          /\bdocker\s+(?:push|buildx\s+build\b[^\n]*--push)\b/.test(run) &&
+          !(isCi && jobId === 'images' && imagePushGuarded(job))
+        ) {
+          add('ci-no-release', `${fileName} pushes images only from ci.yml's \`images\` job gated on dispatch/main/tags (AT-US-005-04)`, [
             ...stepPath,
             'run',
           ]);
+        }
+        if (!mayInstallBrowsers && PLAYWRIGHT_INSTALL.test(run)) {
+          add(
+            'playwright-install',
+            `Playwright browsers (and apt --with-deps) are installed only in ${PLAYWRIGHT_INSTALL_WORKFLOWS.join(', ')} (PR4-SEC-08)`,
+            [...stepPath, 'run'],
+          );
         }
       }
       const uses = asString(step.uses) ?? '';
@@ -791,21 +1063,22 @@ export function checkWorkflow(text, fileName, options = {}) {
       if (script !== undefined) {
         for (const f of untrustedExpressionFindings(script, 'with.script')) add(f.rule, f.message, [...stepPath, 'with', 'script']);
       }
-      if (isCi && jobId === 'scans') {
-        for (const message of scansStepViolations(step)) add('scans-isolation', message, stepPath);
+      // ci-gate holds actions: read and runs the base-ref lane-scope, so it is isolated like scans (RR-6).
+      if (isCi && (jobId === 'scans' || jobId === 'ci-gate')) {
+        for (const message of scansStepViolations(step)) add('scans-isolation', message.replace('job scans', `job ${jobId}`), stepPath);
       }
-      if (isCi && /^aws-actions\/configure-aws-credentials@/.test(uses))
-        add('ci-no-release', 'ci.yml must not assume an AWS role (AT-US-005-05)', [...stepPath, 'uses']);
-      if (isCi && withMap['role-to-assume'] !== undefined)
-        add('ci-no-release', 'ci.yml must not assume an AWS role (AT-US-005-05)', [...stepPath, 'with']);
+      if (noRelease && /^aws-actions\/configure-aws-credentials@/.test(uses))
+        add('ci-no-release', `${fileName} must not assume an AWS role (AT-US-005-05)`, [...stepPath, 'uses']);
+      if (noRelease && withMap['role-to-assume'] !== undefined)
+        add('ci-no-release', `${fileName} must not assume an AWS role (AT-US-005-05)`, [...stepPath, 'with']);
       if (
-        isCi &&
+        noRelease &&
         /^docker\/build-push-action@/.test(uses) &&
         withMap.push !== undefined &&
         withMap.push !== 'false' &&
-        !(jobId === 'images' && imagePushGuarded(job))
+        !(isCi && jobId === 'images' && imagePushGuarded(job))
       ) {
-        add('ci-no-release', 'ci.yml pushes images only from the `images` job gated on dispatch/main/tags (AT-US-005-04)', [
+        add('ci-no-release', `${fileName} pushes images only from ci.yml's \`images\` job gated on dispatch/main/tags (AT-US-005-04)`, [
           ...stepPath,
           'with',
           'push',
@@ -834,6 +1107,7 @@ export function checkWorkflow(text, fileName, options = {}) {
   }
   if (options.requiredGates === true) {
     for (const f of requiredGateFindings(jobs, doc.defaults, triggers, doc.env ?? {})) add(f.rule, f.message, f.path);
+    for (const f of laneScopeFindings(doc)) add(f.rule, f.message, f.path);
     // PR33-SEC-01: outside comment lines ci.yml is pure ASCII. The YAML subset trims Unicode blanks that GitHub's parser
     // keeps (and bash does not treat as blanks), so a non-ASCII character in a key, value or run: line is refused.
     for (const [index, line] of rawLines.entries()) {
@@ -914,6 +1188,21 @@ function isBaseLintFixtureModeEntry(jobs, path) {
   return BASE_LINT_FIXTURES_RUN.test(asString(step?.run) ?? '');
 }
 
+/**
+ * Index of the first step that is `gate` (its `name` pattern, when it has one, and its `run` pattern), or -1. Shared with
+ * tools/ci/lane-scope.mjs, which maps CI_REQUIRED_GATES to step names for the jobs API (D-ARCH-126).
+ * @param {readonly YamlNode[]} steps
+ * @param {RequiredGate} gate
+ * @returns {number}
+ */
+export function gateStepIndex(steps, gate) {
+  return steps.findIndex(
+    (node) =>
+      (gate.name === undefined || gate.name.test((asString(asMap(node)?.name) ?? '').trim())) &&
+      gate.run.test((asString(asMap(node)?.run) ?? '').trim()),
+  );
+}
+
 /** Step keys that change how a gate's `run:` executes (PR17-SEC-03): `shell: 'true {0}'` runs nothing. */
 const GATE_STEP_OVERRIDES = Object.freeze(['shell', 'working-directory']);
 
@@ -966,12 +1255,7 @@ export function requiredGateFindings(jobs, workflowDefaults, triggers, workflowE
     return job !== undefined && Array.isArray(job.steps) ? job.steps : [];
   };
   /** @param {RequiredGate} gate */
-  const stepIndex = (gate) =>
-    stepsOf(gate.job).findIndex(
-      (node) =>
-        (gate.name === undefined || gate.name.test((asString(asMap(node)?.name) ?? '').trim())) &&
-        gate.run.test((asString(asMap(node)?.run) ?? '').trim()),
-    );
+  const stepIndex = (gate) => gateStepIndex(stepsOf(gate.job), gate);
   for (const gate of CI_REQUIRED_GATES) {
     const steps = stepsOf(gate.job);
     const index = stepIndex(gate);
@@ -1054,13 +1338,189 @@ export function requiredGateFindings(jobs, workflowDefaults, triggers, workflowE
           path: ['on', trigger],
         });
   }
+  // RR-8 (iv): the step `if:`s above and this needs list change only in the stage-2 policy PR (TASK-286, two-step).
   const needs = asMap(jobs['ci-gate'])?.needs;
   const needList = Array.isArray(needs) ? needs : typeof needs === 'string' ? [needs] : [];
-  for (const job of ['fast-lane', 'scans']) {
+  for (const job of ['fast-lane', 'scans', 'security-integration']) {
     if (!needList.includes(job))
       out.push({ rule: 'required-gates', message: `ci.yml ci-gate must need ${job}`, path: ['jobs', 'ci-gate'] });
   }
   return out;
+}
+
+/** @param {YamlNode | undefined} node */
+const asList = (node) => (Array.isArray(node) ? node : typeof node === 'string' ? [node] : []);
+
+/**
+ * True when `node` is a mapping with exactly the entries of `expected` (string values, no other key).
+ * @param {YamlNode | undefined} node
+ * @param {Readonly<Record<string, string>>} expected
+ */
+function sameMap(node, expected) {
+  const map = asMap(node);
+  if (map === undefined) return false;
+  const keys = Object.keys(map);
+  return keys.length === Object.keys(expected).length && keys.every((key) => Object.hasOwn(expected, key) && map[key] === expected[key]);
+}
+
+/** @param {Readonly<Record<string, string>>} map */
+const showMap = (map) =>
+  `{ ${Object.entries(map)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(', ')} }`;
+
+/**
+ * Stage-1 pins of ADR-0023 amendment L for ci.yml (see the constants above): concurrency, the pinned jobs' `if:`, `needs`,
+ * permissions, job env and outputs, the lane-scope step's id and position, and ci-gate's last step.
+ * @param {YamlMap} doc the parsed ci.yml
+ * @returns {{ rule: string, message: string, path: string[] }[]}
+ */
+export function laneScopeFindings(doc) {
+  /** @type {{ rule: string, message: string, path: string[] }[]} */
+  const out = [];
+  const add = (/** @type {string} */ message, /** @type {string[]} */ path) => out.push({ rule: 'required-gates', message, path });
+  const jobs = asMap(doc.jobs) ?? {};
+  const pullRequest = asMap(asMap(doc.on)?.pull_request);
+  const branches = asList(pullRequest?.branches);
+  if (
+    pullRequest === undefined ||
+    branches.length !== CI_PULL_REQUEST_BRANCHES.length ||
+    branches.some((branch, index) => branch !== CI_PULL_REQUEST_BRANCHES[index]) ||
+    pullRequest['branches-ignore'] !== undefined
+  )
+    add(
+      `ci.yml on.pull_request.branches must be exactly [${CI_PULL_REQUEST_BRANCHES.join(', ')}] with no branches-ignore (R2-M1, PR46-SEC-13: proof runs are runs against main)`,
+      ['on', 'pull_request', 'branches'],
+    );
+  const concurrency = asMap(doc.concurrency);
+  if (
+    concurrency === undefined ||
+    asString(concurrency.group) !== `ci-${CI_CONCURRENCY.group}` ||
+    concurrency['cancel-in-progress'] !== 'false' ||
+    Object.keys(concurrency).length !== 2
+  )
+    add(
+      `ci.yml concurrency must be exactly { group: ci-${CI_CONCURRENCY.group}, cancel-in-progress: false } (RR-7: a full run is never cancelled)`,
+      ['concurrency'],
+    );
+  for (const [jobId, expected] of Object.entries(PINNED_JOB_PERMISSIONS)) {
+    if (!sameMap(asMap(jobs[jobId])?.permissions, expected))
+      add(`ci.yml job ${jobId} permissions must be exactly ${showMap(expected)} (RR-4, RR-6, RR-8 (ii))`, ['jobs', jobId, 'permissions']);
+  }
+  for (const [jobId, expected] of Object.entries(PINNED_JOB_ENV)) {
+    if (!sameMap(asMap(jobs[jobId])?.env, expected))
+      add(`ci.yml job ${jobId} env must be exactly ${showMap(expected)} (the pinned commands read these inputs)`, ['jobs', jobId, 'env']);
+  }
+  if (!sameMap(asMap(jobs.scans)?.outputs, SCANS_OUTPUTS))
+    add(`ci.yml job scans outputs must be exactly the lane-scope step's outputs (${Object.keys(SCANS_OUTPUTS).join(', ')}; RR-4)`, [
+      'jobs',
+      'scans',
+      'outputs',
+    ]);
+  if (!sameMap(asMap(jobs['fast-lane'])?.outputs, FAST_LANE_OUTPUTS))
+    add(`ci.yml job fast-lane outputs must be exactly ${showMap(FAST_LANE_OUTPUTS)} (D-ARCH-126)`, ['jobs', 'fast-lane', 'outputs']);
+  const securityIntegration = asMap(jobs['security-integration']) ?? {};
+  if (asString(securityIntegration.if) !== SECURITY_INTEGRATION_IF)
+    add(`ci.yml security-integration if: must be exactly ${SECURITY_INTEGRATION_IF} (RR-5, PR46-SEC-01)`, [
+      'jobs',
+      'security-integration',
+      'if',
+    ]);
+  const ciGate = asMap(jobs['ci-gate']) ?? {};
+  if (asString(ciGate.if) !== CI_GATE_IF) add(`ci.yml ci-gate if: must be exactly ${CI_GATE_IF}`, ['jobs', 'ci-gate', 'if']);
+  for (const [jobId, job, expected] of /** @type {const} */ ([
+    ['security-integration', securityIntegration, SECURITY_INTEGRATION_NEEDS],
+    ['ci-gate', ciGate, CI_GATE_NEEDS],
+  ])) {
+    const list = asList(job.needs);
+    if (list.length !== expected.length || !expected.every((need) => list.includes(need)))
+      add(`ci.yml job ${jobId} needs must be exactly [${expected.join(', ')}] (RR-5, PR46-SEC-01, RR-6)`, ['jobs', jobId, 'needs']);
+  }
+  for (const [jobId, job] of /** @type {const} */ ([
+    ['security-integration', securityIntegration],
+    ['ci-gate', ciGate],
+  ])) {
+    for (const key of ['defaults', 'container', 'services', 'strategy', 'continue-on-error'])
+      if (job[key] !== undefined) add(`ci.yml job ${jobId} must not set ${key} (pinned job shape)`, ['jobs', jobId, key]);
+  }
+  const ciGateSteps = Array.isArray(ciGate.steps) ? ciGate.steps : [];
+  const last = asMap(ciGateSteps.at(-1));
+  if (!/^Aggregate lane A\b/u.test((asString(last?.name) ?? '').trim()) || asString(last?.if) !== undefined)
+    add('ci.yml ci-gate must end with its unconditional "Aggregate lane A" step (RR-6)', ['jobs', 'ci-gate', 'steps']);
+  const scansSteps = Array.isArray(asMap(jobs.scans)?.steps) ? /** @type {YamlNode[]} */ (asMap(jobs.scans)?.steps) : [];
+  const laneGate = CI_REQUIRED_GATES.find((gate) => gate.gate === 'lane scope');
+  const gitleaksGate = CI_REQUIRED_GATES.find((gate) => gate.gate === 'gitleaks');
+  const laneIndex = laneGate === undefined ? -1 : gateStepIndex(scansSteps, laneGate);
+  const gitleaksIndex = gitleaksGate === undefined ? -1 : gateStepIndex(scansSteps, gitleaksGate);
+  if (laneIndex !== -1) {
+    if (asString(asMap(scansSteps[laneIndex])?.id) !== LANE_SCOPE_STEP_ID)
+      add(`ci.yml lane scope step must have id ${LANE_SCOPE_STEP_ID} (the scans outputs read it)`, [
+        'jobs',
+        'scans',
+        'steps',
+        String(laneIndex),
+      ]);
+    if (gitleaksIndex !== -1 && laneIndex > gitleaksIndex)
+      add('ci.yml lane scope step must run before the gitleaks step (a red scan must not hide the classification)', [
+        'jobs',
+        'scans',
+        'steps',
+        String(laneIndex),
+      ]);
+  }
+  return out;
+}
+
+/**
+ * RR-8 (i) `gh-token` findings for one workflow: every token reference outside the allowed GH_TOKEN step env entries.
+ * @param {YamlMap} doc
+ * @param {boolean} isCi
+ * @returns {{ rule: string, message: string, path: string[] }[]}
+ */
+export function tokenFindings(doc, isCi) {
+  /** @type {string[][]} */
+  const paths = [];
+  /**
+   * @param {YamlNode | undefined} node
+   * @param {string[]} path
+   */
+  const visit = (node, path) => {
+    if (typeof node === 'string') {
+      if (TOKEN_MENTION.test(node)) paths.push(path);
+    } else if (Array.isArray(node)) node.forEach((child, index) => visit(child, [...path, String(index)]));
+    else if (isMap(node)) {
+      for (const [key, child] of Object.entries(node)) {
+        if (TOKEN_MENTION.test(key)) paths.push([...path, key]);
+        visit(child, [...path, key]);
+      }
+    }
+  };
+  visit(doc, []);
+  const jobs = asMap(doc.jobs) ?? {};
+  /** @param {string[]} path */
+  const allowed = (path) => {
+    const [root, jobId, steps, index, env, key] = path;
+    if (!isCi || path.length !== 6 || root !== 'jobs' || steps !== 'steps' || env !== 'env' || key !== 'GH_TOKEN') return false;
+    if (!(/** @type {readonly string[]} */ (TOKEN_JOBS).includes(jobId ?? ''))) return false;
+    const list = asMap(jobs[jobId ?? ''])?.steps;
+    const step = Array.isArray(list) ? asMap(list[Number(index)]) : undefined;
+    const value = asString(asMap(step?.env)?.GH_TOKEN) ?? '';
+    return (asString(step?.run) ?? '').includes('"$GATE_LANE_SCOPE"') && TOKEN_VALUES.includes(value);
+  };
+  const seen = new Set();
+  return paths
+    .filter((path) => !allowed(path))
+    .filter((path) => {
+      const id = path.join('.');
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .map((path) => ({
+      rule: 'gh-token',
+      message: `a token reference is allowed only as the GH_TOKEN env entry (${TOKEN_VALUES.join(' or ')}) of a ci.yml ${TOKEN_JOBS.join('/')} step that runs "$GATE_LANE_SCOPE" (RR-8 (i)); found at ${path.join('.')}`,
+      path,
+    }));
 }
 
 /**

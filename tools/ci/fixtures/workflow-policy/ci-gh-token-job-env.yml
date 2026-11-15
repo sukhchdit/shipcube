@@ -1,0 +1,17 @@
+name: fixture
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+jobs:
+  fast-lane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: gh api repos/o/r/actions/runs

@@ -278,6 +278,21 @@ describe('argument parsing and planning (TASK-011)', () => {
         native: 'x.json',
       }),
     ).toEqual(['n', 'cli', 'exec', '--no', '--', 'k6', '--out=x.json']);
+    expect(
+      expandCommand(['{node}', '{root}/tools/quality/gitleaks-full.mjs', '--ref', '{base}', '--report', '{native}'], {
+        node: 'n',
+        npm: ['n', 'cli'],
+        root: 'r',
+        junit: 'j',
+        native: 'x.json',
+        base: 'feat/run-base',
+      }),
+    ).toEqual(['n', 'r/tools/quality/gitleaks-full.mjs', '--ref', 'feat/run-base', '--report', 'x.json']);
+    // N5 (PR #46 r1): a value other than DEFAULTS.base, so ignoring the run's base cannot pass.
+    expect(expandCommand(['--ref', '{base}'], { node: 'n', npm: ['n', 'cli'], root: 'r', junit: 'j', native: 'x.json' })).toEqual([
+      '--ref',
+      'origin/main',
+    ]);
   });
 });
 

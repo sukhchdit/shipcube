@@ -14,7 +14,10 @@
  *                 process.execPath, no npm: PR9-SEC-15) with PRISMA_SCHEMA_ENGINE_BINARY=<verified engine>,
  *                 CHECKPOINT_DISABLE=1 and no NODE_OPTIONS, once a Prisma schema or prisma.config.ts exists.
  *   4. playwright – browsers, opt-in only: `--playwright=chromium[,firefox,webkit]` or
- *                 DEPS_REBUILD_PLAYWRIGHT=… (local e2e and lane C; never in images).
+ *                 DEPS_REBUILD_PLAYWRIGHT=… (local e2e and lane C; never in images). Refused before any step when
+ *                 the environment carries a download redirect (PLAYWRIGHT_DOWNLOAD_HOST or PLAYWRIGHT_<BROWSER>_
+ *                 DOWNLOAD_HOST, any case; PR4-SEC-08). `--with-deps` (apt on Linux) is added on Linux only, and
+ *                 the workflow policy confines browser installs to lane-c.yml.
  *
  * Network: the single origin this script itself may contact is https://binaries.prisma.sh/all_commits/
  * (`ENGINE_ORIGIN`, step 2, only when no verified engine is present). Prisma's own downloader and the
@@ -125,6 +128,26 @@ export function plan(argv) {
   return steps;
 }
 
+/**
+ * Playwright browser download redirects (PR4-SEC-08; PR46-SEC-02, code review PR #46 m3; the shape of
+ * check-workflow-policy PLAYWRIGHT_HOST, any case). Playwright's getFromENV also reads `npm_config_<name>` (an `.npmrc`
+ * key, which npm exports to `npm run` children) and `npm_package_config_<name>` (a `package.json` "config" key).
+ */
+export const PLAYWRIGHT_REDIRECT = /^(?:npm_config_|npm_package_config_)?playwright_(?:[a-z]+_)?download_host$/iu;
+
+/**
+ * Names of Playwright download-redirect variables set (non-empty) in `env` when the plan installs browsers.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {readonly Step[]} steps
+ * @returns {string[]}
+ */
+export function playwrightRedirects(env, steps) {
+  if (!steps.some((step) => step.id === 'playwright' && step.action === 'run')) return [];
+  return Object.keys(env)
+    .filter((name) => PLAYWRIGHT_REDIRECT.test(name) && (env[name] ?? '') !== '')
+    .sort();
+}
+
 /** @param {string[]} argv */
 async function main(argv) {
   const steps = plan(argv);
@@ -137,6 +160,13 @@ async function main(argv) {
   if (inherited.length > 0) {
     process.stderr.write(
       `[deps:rebuild] refusing to run: engine-redirecting variable(s) set in the environment: ${inherited.join(', ')}\n`,
+    );
+    return 1;
+  }
+  const redirects = playwrightRedirects(process.env, steps);
+  if (redirects.length > 0) {
+    process.stderr.write(
+      `[deps:rebuild] refusing to run: Playwright download redirect(s) set in the environment: ${redirects.join(', ')} (PR4-SEC-08)\n`,
     );
     return 1;
   }
