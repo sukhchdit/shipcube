@@ -16,3 +16,10 @@ jobs:
       actions: read
     steps:
       - run: npm ci --ignore-scripts
+  scans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo scans

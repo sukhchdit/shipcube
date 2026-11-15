@@ -1,6 +1,8 @@
 # Dependabot (TASK-007; ADR-0023 am. F item 2, PR1-SEC-12 item 4, D-ARCH-010 item 6).
 # - 7-day cooldown on every ecosystem (the same release age the lane A cooldown gate and .npmrc min-release-age use).
-# - Monthly, grouped and few open PRs: each Dependabot PR costs a lane A run against the hosted-minutes budget.
+# - Monthly, grouped and few open PRs: each Dependabot PR costs a lane A run against the hosted-minutes budget. The npm
+#   group holds at most ONE open PR (D-ORCH-078 P3, ruling wave-0-ci-minutes.md section 6): merge it or `@dependabot ignore`
+#   rather than close it, because a closed group PR is recreated at the next check.
 # - @platform/* are our private workspace packages; the scope on npmjs.com belongs to a third party and .npmrc pins it
 #   to registry.invalid, so Dependabot must never look them up (check the first run for private_source_not_reachable).
 # - typescript semver-major is ignored: ADR-0001 pins TypeScript ~6.0.3 and defers TypeScript 7 (tsgo) until the Jest/ESLint
@@ -16,7 +18,7 @@ updates:
       interval: monthly
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
     ignore:
       - dependency-name: '@platform/*'
       - dependency-name: typescript

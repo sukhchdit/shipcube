@@ -40,6 +40,28 @@ so push the code, let its run start and finish, then push the record or evidence
 a docs push that replaces a still-pending code run leaves itself without a proof (red: re-run the replaced code run,
 then re-run the docs run).
 
+### Stage 2: the folded topology (amendment L item 3, D-ARCH-128, TASK-286)
+
+The base-ref policy changes the lane A job graph in two steps, policy first. The **policy PR** teaches
+`check-workflow-policy.mjs` and `lane-scope.mjs` the stage-2 topology next to stage 1: a ci.yml with a `scans` job is
+held to the stage-1 pins, one without it to the stage-2 pins, each in full (no mixture passes). The **workflow PR** then
+installs `tools/ci/fixtures/stage-2/ci.yml` as `ci.yml`. In stage 2:
+
+- `fast-lane` takes its gate tooling from the **tested base** `TOOLS_REF`: on a pull request the first parent of
+  GitHub's test merge (`HEAD^1`, the current `main`; `HEAD^2` must be the PR head and the event's base an ancestor),
+  on a push the pushed range's base (PR46-SEC-17). A PR whose merge base predates a tool (PR #53, D-ORCH-103) therefore
+  starts lane A without a union. The lane B evidence verifier, the lint fixtures and the `security-integration`
+  manifests come from `TOOLS_REF` too.
+- `fast-lane`'s classify step (the only step with the token, before any head code) classifies the push and looks up
+  the proofs; a proof is void when the tested base changed a lane A input (P1 directories, root non-Markdown files,
+  the manifest's `tooling_inputs`) after the proof run was created (PR46-SEC-16). Commitlint, actionlint and the
+  head-code checks run only on a code push; registry signatures and the advisory audit run on **every** push
+  (PR46-SEC-11).
+- `security-integration` needs `fast-lane` only. `ci-gate` is last and holds the former `scans` steps: it recomputes
+  the classification with the tested base's `lane-scope.mjs`, re-reads the proofs under the same binding, runs
+  gitleaks and the record check on every head and Semgrep/oasdiff unless a docs push has a code proof, and is red when
+  its classification differs from `fast-lane`'s (PR46-SEC-12). Expected bill: docs push 2 minutes, code push about 6.
+
 ### security-integration (lane A, amendment G item 5 as amended by L item 2)
 
 Selected by the base-ref lane scope when the PR range changes `packages/authz/**`, `packages/audit/**`,
@@ -106,9 +128,13 @@ checklist (P4). The measured figures and the forecast are in [SPK-07](../04-plan
 
 `tools/ci/check-workflow-policy.mjs` (lane A, from the base ref) checks every workflow: actions pinned by commit SHA,
 container tools by digest, read-only top-level permissions, no privileged triggers, no secrets in pull-request jobs,
-fail-closed jobs and steps; the GitHub token only as `GH_TOKEN` on the lane-scope steps of `scans` and `ci-gate`,
-the only jobs that hold `actions: read`; the lane-scope step, the `security-integration` job and `ci-gate` pinned to
-exact text. On top of that: `lane-c.yml` and `nightly.yml` are `workflow_dispatch` only; ci.yml,
+fail-closed jobs and steps; the GitHub token only as `GH_TOKEN` on the lane-scope steps (stage 1: of `scans` and
+`ci-gate`; stage 2: of `fast-lane`'s classify step and `ci-gate`), the only jobs that hold `actions: read` and
+`pull-requests: read` (never at workflow level, never in another workflow; PR46-SEC-15); the tooling, lane-scope,
+`security-integration` and `ci-gate` steps pinned to exact text, gate tools called as `"${GATE_*:?}"` in stage 2, and
+`$GITHUB_ENV` written only by the pinned tooling and classify steps (PR46-SEC-12); every `npm run lint` step with exactly
+`NODE_OPTIONS: --max-old-space-size=4096` and no `${{ }}` in any `NODE_OPTIONS` (PR42-SEC-18). On top of that:
+`lane-c.yml` and `nightly.yml` are `workflow_dispatch` only; ci.yml,
 lane-c.yml and nightly.yml never publish, push, apply or assume a cloud role; Playwright browsers (and apt through
 `--with-deps`) are installed only in lane-c.yml, and only through `npm run deps:rebuild`, which refuses Playwright and
 Prisma download redirects.
