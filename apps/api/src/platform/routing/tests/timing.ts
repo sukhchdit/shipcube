@@ -27,6 +27,14 @@ export const HEARTBEAT_TICK_MS = 20;
 export const HEARTBEAT_JITTER_MS = 50;
 
 /**
+ * The part of a heartbeat tick's lateness that counts as a stall: nothing up to and including {@link HEARTBEAT_JITTER_MS}
+ * (timer jitter), the whole lateness above it. Pure, so the threshold is tested deterministically (PR #53 R2-m1).
+ */
+export function stallBooked(lateMs: number): number {
+  return lateMs > HEARTBEAT_JITTER_MS ? lateMs : 0;
+}
+
+/**
  * Measures how long `operation` took and how much of that the host stole. A heartbeat timer notes every tick that fires
  * later than scheduled by more than {@link HEARTBEAT_JITTER_MS}; the sum of that lateness is time this process did not run
  * (host load, GC, a suspended process) OR was blocked by its own synchronous work. `ms` is the raw elapsed time, so a
@@ -41,8 +49,7 @@ export async function timeOperation<T>(
   let last = started;
   let stalledMs = 0;
   const book = (now: number): void => {
-    const late = now - last - HEARTBEAT_TICK_MS;
-    if (late > HEARTBEAT_JITTER_MS) stalledMs += late;
+    stalledMs += stallBooked(now - last - HEARTBEAT_TICK_MS);
     last = now;
   };
   const heartbeat = setInterval(() => book(performance.now()), HEARTBEAT_TICK_MS);

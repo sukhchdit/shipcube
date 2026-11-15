@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { closeLoopbackServer, fetchOnce, FetchOnceTimeoutError, LOOPBACK_TEST_TIMEOUT_MS } from './loopback.js';
-import { HEARTBEAT_JITTER_MS, recordAbortTimeouts, timeOperation } from './timing.js';
+import { HEARTBEAT_JITTER_MS, HEARTBEAT_TICK_MS, recordAbortTimeouts, stallBooked, timeOperation } from './timing.js';
 
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
@@ -82,11 +82,35 @@ describe('fetchOnce (test helper)', () => {
 });
 
 describe('timeOperation (test helper)', () => {
-  it('an asynchronous wait is not hidden: workMs tracks ms when the heartbeat keeps arriving', async () => {
+  it('the live wait only asserts load-proof facts: the raw elapsed time has a lower bound and workMs never exceeds it', async () => {
     const { ms, workMs } = await timeOperation(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
     expect(ms).toBeGreaterThanOrEqual(550);
-    // Timer jitter below the threshold is not subtracted (the old estimator under-reported an idle wait by a third).
-    expect(workMs).toBeGreaterThanOrEqual(ms - HEARTBEAT_JITTER_MS);
+    expect(workMs).toBeLessThanOrEqual(ms);
+  });
+
+  it.each([
+    [0, 0],
+    [HEARTBEAT_JITTER_MS - 20, 0],
+    [HEARTBEAT_JITTER_MS, 0],
+    [HEARTBEAT_JITTER_MS + 1, HEARTBEAT_JITTER_MS + 1],
+    [400, 400],
+    [-5, 0],
+  ])('a tick %i ms late books %i ms of stall (the threshold, deterministic)', (late, booked) => {
+    expect(stallBooked(late)).toBe(booked);
+  });
+
+  it('an asynchronous wait is not hidden: with a heartbeat that arrives on schedule workMs equals ms (fake clock)', async () => {
+    jest.useFakeTimers();
+    try {
+      const pending = timeOperation(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
+      await jest.advanceTimersByTimeAsync(600);
+      const { ms, workMs } = await pending;
+      expect(ms).toBe(600);
+      expect(workMs).toBe(600);
+      expect(HEARTBEAT_TICK_MS).toBeLessThan(600);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('a stall above the jitter threshold is subtracted from workMs but not from ms', async () => {

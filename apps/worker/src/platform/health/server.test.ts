@@ -9,7 +9,7 @@ import {
   type ReadinessCheck,
   type ReadinessComponent,
 } from '@platform/api/runtime';
-import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, recordAbortTimeouts, timeOperation } from '@platform/api/test-support/timing';
+import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, recordAbortTimeouts, timeOperation } from '@platform/api/testing';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createWorkerHealthServer } from './server.js';

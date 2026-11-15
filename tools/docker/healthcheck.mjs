@@ -85,7 +85,9 @@ export async function main(argv, env = process.env, options = {}) {
     return 1;
   }
   const { portVariable, defaultPort } = SERVICES[name];
-  return (await probeReady(probePort(env[portVariable], defaultPort), options)) ? 0 : 1;
+  return (await probeReady(probePort(env[portVariable], defaultPort), options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }))
+    ? 0
+    : 1;
 }
 
 if (import.meta.main === true) {

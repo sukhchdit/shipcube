@@ -221,22 +221,20 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
 
   it('a caller signal shorter than the deadline wins', async () => {
     const server = await loopback(silent);
+    // Created before the recorder is installed: the recorder must see only the operation's own deadline, never the test's signal.
+    const callerSignal = AbortSignal.timeout(300);
     const timers = recordAbortTimeouts();
     let result;
     try {
       result = await timed(() =>
-        storageFor(server, { ...LOAD_TOLERANT_TIMEOUTS, requestMs: LONG_REQUEST_MS }).get(
-          { bucket: BUCKET, key: KEY },
-          AbortSignal.timeout(300),
-        ),
+        storageFor(server, { ...LOAD_TOLERANT_TIMEOUTS, requestMs: LONG_REQUEST_MS }).get({ bucket: BUCKET, key: KEY }, callerSignal),
       );
     } finally {
       timers.restore();
     }
     const { outcome, workMs } = result;
-    // The caller's 300 ms and the operation's own deadline (here 120 s) are both armed at their configured values.
-    expect(timers.calls.filter((ms) => ms === 300)).toHaveLength(1);
-    expect(timers.calls.filter((ms) => ms === LONG_REQUEST_MS)).toHaveLength(1);
+    // The operation arms exactly its own deadline (here 120 s); the caller's 300 ms is the test's signal, not counted.
+    expect(timers.calls).toEqual([LONG_REQUEST_MS]);
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
     expect(workMs).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
   });

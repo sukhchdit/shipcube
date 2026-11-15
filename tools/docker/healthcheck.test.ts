@@ -95,12 +95,28 @@ describe('image healthcheck probe (TASK-014)', () => {
   it('is unhealthy when the answer does not arrive within the budget', async () => {
     const port = await listen(() => undefined);
     const timers = jest.spyOn(globalThis, 'setTimeout');
-    const started = performance.now();
-    // The server never answers, so the probe can only resolve false because its own budget fired (a hang would hit the Jest budget).
-    await expect(probeReady(port, { budgetMs: 200 })).resolves.toBe(false);
-    expect(performance.now() - started).toBeGreaterThanOrEqual(150);
-    // Magnitude, deterministic: the configured budget is what the probe armed (a wall-clock upper bound is not host-load-proof).
-    expect(timers.mock.calls.filter(([, ms]) => ms === 200)).toHaveLength(1);
+    try {
+      const started = performance.now();
+      // The server never answers, so the probe can only resolve false because its own budget fired (a hang would hit the Jest budget).
+      await expect(probeReady(port, { budgetMs: 200 })).resolves.toBe(false);
+      expect(performance.now() - started).toBeGreaterThanOrEqual(150);
+      // Magnitude, deterministic: the configured budget is what the probe armed (a wall-clock upper bound is not host-load-proof).
+      expect(timers.mock.calls.filter(([, ms]) => ms === 200)).toHaveLength(1);
+    } finally {
+      timers.mockRestore();
+    }
+  });
+
+  it('main without options arms the production BUDGET_MS (the seam does not change the image default)', async () => {
+    const port = await listen(() => undefined);
+    const timers = jest.spyOn(globalThis, 'setTimeout');
+    try {
+      // The server never answers, so this resolves 1 only because the probe's own default budget fired.
+      await expect(main(['api'], { APP_PORT: String(port) })).resolves.toBe(1);
+      expect(timers.mock.calls.filter(([, ms]) => ms === BUDGET_MS)).toHaveLength(1);
+    } finally {
+      timers.mockRestore();
+    }
   });
 
   it('is unhealthy when nothing listens', async () => {

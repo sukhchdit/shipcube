@@ -6,7 +6,7 @@
   "type": "module",
   "description": "HTTP API process of the modular monolith (ADR-0003).",
   "exports": {
-    "./test-support/timing": {
+    "./testing": {
       "@platform/source": "./src/platform/routing/tests/timing.ts",
       "types": "./dist/platform/routing/tests/timing.d.ts",
       "default": "./dist/platform/routing/tests/timing.js"
