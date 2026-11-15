@@ -196,3 +196,78 @@ Round 3 is a delta check: R2-B1 by reproduction, the regression check by mutant 
 
 - R2-B1 is not a vulnerability, but it concerns an image-shipped manifest. Today, adding an `exports` entry to `@platform/api` silently changes what the image preflight imports. Please confirm the fix keeps test-only helpers out of every export the preflight loads.
 - PR30-SEC-01 / PR53-SEC-04 magnitude pin: restored and verified by mutants S1, S2 and S3 (C1 closed from the code side).
+
+---
+
+# Round 3 (head 378af72)
+
+| Field | Value |
+|---|---|
+| Head / code | `378af72` (evidence only) / `60a1659` |
+| Delta since r2 (`69a0d75`) | `64504ab` (fix: `./testing` subpath, `image-exports.test.ts`, `stallBooked`, R2-n1, R2-n2) → `60a1659` (merge of origin/main `f68cc38`, O-1) → `378af72` (evidence `20261115T1711Z_60a1659` PASS) |
+| Orchestrator ruling | The helper ships as `@platform/api/testing`, in the preflight's `SKIPPED_EXPORTS`, the same convention as `@platform/config/testing`. Accepted; I review the implementation, not the choice. |
+| Reviewer | code-reviewer · 2026-11-15 · round 3 (delta check) |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-B1 is closed. The real preflight plus prune-dist fail on the r2 manifest and pass on the fixed one, and the
+         new no-Docker check kills the re-added export. R2-m1, R2-n1 and R2-n2 are closed, and all 19 mutant rows die on
+         a fresh copy (H4 included). The merge of f68cc38 is a pure union. Three NITs remain: SKIPPED_EXPORTS itself is
+         unpinned (mutant X2 survives), the scan misses prisma/ and non-default conditions, and one pre-existing note.
+```
+
+## R3.1 Verification I performed myself
+
+| # | Check | Result |
+|---|---|---|
+| V1 | `git log`/`diff 69a0d75..378af72` | Fix `64504ab`: 8 files. `apps/api/package.json` renames one key (`./test-support/timing` → `./testing`) and changes nothing else. `timing.ts` adds `stallBooked` and nothing else; `book()` calls it. Test changes: `loopback.test.ts`, `s3-object-storage.http.test.ts` and worker `server.test.ts` (the import specifier). `healthcheck.mjs` forwards only `budgetMs`, `healthcheck.test.ts` is updated, and `tools/docker/image-exports.test.ts` is new. `378af72` adds only the run directory. |
+| V2 | **R2-B1 reproduction (V10 re-run, no Docker).** Script `scratchpad/cr53r3/v10.mjs`: the worktree's built `apps/api/dist` is copied, pruned by the real `prune-dist.mjs --declarations` (374 entries removed, `tests/` included), and given the manifest under test. A worker layout is built (`dist/main.js` only, manifest reduced to `@platform/api`), and the real `preflight.mjs` runs as the CLI. | **r2 manifest (`69a0d75`):** `{"event":"preflight.failed",…,"reason":"cannot load @platform/api/test-support/timing"}`, exit 1. **Fixed manifest (`378af72`):** `[preflight] ok: 0 module(s), entry points @platform/api/runtime`, exit 0. **Base (`dbfb1bd`):** the same ok line, exit 0. The developer's comment also reports real `docker build` of both Dockerfiles at exit 0 (not re-run: no Docker). |
+| V3 | **Fail-closed probe:** in the fixed layout, a worker dist module `import '@platform/api/testing'` is added | `reason":"cannot load dist/prod-uses-testing.js"`, exit 1. A production import of the subpath cannot reach a built image: its target sits under `tests/`, which prune-dist deletes. |
+| V4 | **`image-exports.test.ts`, read in full** | Scope: every `apps/*/package.json` and `packages/*/package.json` that exists (11 manifests, web, admin and ui included), with a non-vacuity case (api, worker and config are found; api has `exports`). Rule: prune-dist's own `shouldRemove` is applied to every path prefix of every `default` leaf target. Directories are passed as directories, and the query-counter `TEST_SEAM` regex is covered too. Exemption: `SKIPPED_EXPORTS` only. It is stricter than the preflight in two ways: wildcard and string targets are checked as well. Self-tests: tests, fixtures, `__fixtures__`, spikes, `*.test.*`, a wildcard through `tests/`, the query-counter seam, and the exact r2 export re-added to the real api manifest. Gaps → R3-n2. |
+| V5 | **Is the `SKIPPED_EXPORTS` exemption pinned?** (grep, plus mutant X2) | **No.** `SKIPPED_EXPORTS` is imported, not asserted. `preflight.test.ts` pins `ENTRY_FILES` with `toEqual(['main.js'])` but not `SKIPPED_EXPORTS`. The "never publishes a test helper through a non-testing subpath" case also reads the live constant. X2 (adds `./test-support` both as a pruned-target api export and as a `SKIPPED_EXPORTS` entry) passes all 46 tests of `image-exports` and `preflight`. Mitigation: `/tools/docker/` and `**/package.json` are CODEOWNERS paths, and V3 shows that a production import of any pruned target still fails the image build. → R3-n1 (NIT). |
+| V6 | **Lint confinement of `@platform/api/testing`** (ESLint API `lintText` probes on real file paths with the repo config, `scratchpad/cr53r3/lintprobe.mjs`) | A worker production file (`server.ts`) fails `boundaries/dependencies` ("apps/worker imports apps/api only through @platform/api/runtime…"). `packages/shared/src/index.ts` fails `boundaries` ("packages may not import apps") and `import-x/no-extraneous-dependencies`. web and admin are covered by the `toPackage('@platform/api')` disallow. An **api** production file (`router.ts`) importing `@platform/api/testing` (self-reference) is lint-clean, as is the relative `../routing/tests/timing.js` (the same pre-existing gap as r2 V9). The image preflight is the backstop (V3). The worker `server.test.ts` as it stands is clean. → R3-n3. |
+| V7 | **R2-m1** (`loopback.test.ts`, `timing.ts`) | `stallBooked` is pure, and `book()` delegates to it, so the table tests the code path the helper really uses. Rows: 0, 30 and 50 → 0; 51 → 51; 400 → 400; −5 → 0. The −5 row matters because the final `book(now)` usually sees negative lateness. The fake-timer case is correct: Jest 30 modern timers fake `performance` by default (`ms` is exactly 600, which proves it), ticks arrive exactly on schedule, so `ms === workMs === 600`. `useRealTimers` runs in a `finally`, and `HEARTBEAT_TICK_MS < 600` guards against a vacuous run with no ticks. The live case keeps only `ms >= 550` and `workMs <= ms`. Both hold under any load, since stalls are ≥ 0 and are subtracted only from `workMs`. |
+| V8 | **R2-n1, R2-n2** | n1: the caller signal is created before `recordAbortTimeouts()`, and `expect(timers.calls).toEqual([LONG_REQUEST_MS])`, which is stronger than r2's two filters (S1 and S2 now also fail this case). n2: (a) `mockRestore()` in `finally` in both spy cases; (b) a new case where `main(['api'], {APP_PORT})` arms exactly one `BUDGET_MS` (H4 is killed); (c) `main` forwards `{ budgetMs }` only, so `host`/`path` can no longer leak through the seam. The CLI still calls `main(process.argv.slice(2))` without options. |
+| V9 | **Mutants (e)**: own script `scratchpad/cr53r3/mut-r3.mjs` on a fresh `git archive 378af72` copy. `node_modules` and `prisma/generated` are junctioned to the worktree, and `apps/node_modules/@platform/api` is junctioned to the **copy's** `apps/api`, so the worker suite sees the mutated `readiness.ts` (R2w and W10 prove it). Each row restores its files, and they were byte-compared to `378af72` afterwards. | **C0** control: 7 suites, 132/132 pass. **Killed:** R1 (api overall ×20), R2 (8 s/9 s, api), R2w (8 s/9 s, worker), R3 (per-check ×10), W10 (overall ×10, worker), S1 (`bounded()` ×10, 3 cases), S2 (×2, 3 cases), S3 (caller signal dropped; killed after 125 s by the `workMs` bound), H1 (entry unguarded), H2 (probe `setTimeout` ×10), H3 (`BUDGET_MS` 5000), **H4** (`main` default 20 s; survived in r2), N1 (threshold 500), N2 (`>=`), N3 (never book), N4 (book every lateness: the r1 bias), **X1** (re-add `./test-support/timing` to the real api manifest: 2 cases fail), X3 (`./runtime` retargeted into `fixtures/`). **Survives:** X2 (V5, R3-n1). |
+| V10 | **Union with `f68cc38` (d)** | MB = `dbfb1bd`. PR side 40 files, main side 111; `comm -12` **overlap: none**. `git merge-tree --write-tree 64504ab f68cc38` = `2ee98f0` = the tree of `60a1659`, so it is byte-identical to a clean re-merge, with no hand edits. Current `origin/main` `81f26a8` is 3 commits ahead, all docs and `.claude/agent-memory`. Overlap with the PR is none, and `merge-tree HEAD origin/main` is clean. |
+| V11 | Evidence `20261115T1711Z_60a1659` | `summary.json`: verdict PASS, sha `60a1659…`, `git_dirty` false, `build_clean` true. 0 `<failure` in all 5 JUnit files. Counts: unit 5,937 (2 skipped), integration 315, api 128, catalog 102, rls-cross-tenant 126. The unit JUnit holds the 23 `image-exports` cases. `60a1659..378af72` adds only the run directory. |
+| V12 | Hosted lane A, run 43741823824 on `378af72` | `fast-lane` **success**, every step executed (lint, format, type-check, unit, which runs `image-exports.test.ts`, build, evidence check). `scans` fails **only** on "Security-owned paths need a review record", and `ci-gate` fails on aggregation as a consequence. The O-1 bootstrap crash is gone. |
+| V13 | `prettier --check` and `eslint --max-warnings 0` on the 8 changed files | Prettier clean. ESLint: 0 problems on the code files; the only output is the "file ignored" warning for `package.json`, which I passed by mistake. |
+| Not re-run | Full lint, typecheck, unit and build; integration and api projects; `docker build` | Per the brief (light, no Docker). I relied on V11 and V12. V2 replaces the image build for the R2-B1 question. |
+
+## R3.2 Findings
+
+| ID | Severity | Location | Issue | Required fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `tools/docker/preflight.mjs:25`; `tools/docker/image-exports.test.ts:42, 67`; `tools/docker/preflight.test.ts:84` | **The exemption list is not pinned.** Both new guards read the live `SKIPPED_EXPORTS`, so adding a name there also exempts it from the regression check: mutant X2 survives. The impact is bounded. The edit lands on CODEOWNERS paths. Any production import of a pruned target still fails `docker build` (V3). An unpruned target is never exempted anyway. But the convention the orchestrator ruled on ("test helpers ship only as `./testing`") is enforced only by review. | One line next to the `ENTRY_FILES` pin in `preflight.test.ts`, or in `image-exports.test.ts`: `expect(SKIPPED_EXPORTS).toEqual(['./testing'])`, with a comment that widening it needs a security review. |
+| R3-n2 | NIT | `tools/docker/image-exports.test.ts:23-28, 31-37, 48` | **Scope and precision of the check.** (a) `prisma/package.json` (`@platform/prisma`, `./client`) is image-shipped (both Dockerfiles copy it, and the api preflight imports it), but it is not scanned: the roots are only `apps` and `packages`. (b) `defaultTargets` follows only `default`. The preflight resolves with Node's default conditions (`node`, `import`, `default`, in key order), so a future `import` or `node` condition pointing into a pruned path would be missed. Today every manifest uses only `@platform/source`, `types` and `default` (verified), so nothing is missed now. (c) A wildcard is checked by substituting a placeholder segment. It is not expanded against the file tree, so the PR comment's "wildcards expanded" overclaims. This is harmless, because the preflight never imports wildcard subpaths. | (a) Add `'prisma'` (or read the root `workspaces`) to the scanned manifests. (b) Follow every condition except `types` and `@platform/source`, or assert that the condition-key set stays `{@platform/source, types, default}`. (c) Fix the wording in the next touch. |
+| R3-n3 | NIT (pre-existing; no action required in this PR) | `eslint.config.mjs:283-285, 545-554` | An api production file may import `@platform/api/testing` (self-reference) or `../routing/tests/timing.js` lint-clean (V6). The worker and every package are blocked. The fail-closed backstop is the image preflight (V3). The same lint gap applies to `@platform/config/testing` from worker production code, and **that** target (`dist/testing/index.js`) is **not** pruned, so it would ship. This predates the PR. | Optional, for the next touch of `eslint.config.mjs`: a `no-restricted-imports` pattern `@platform/*/testing` for non-test files. Routed to security-analyst below for the config case. |
+
+## R3.3 Round-2 closure
+
+| r2 item | Status | Evidence |
+|---|---|---|
+| R2-B1 worker image build | **Closed** | V2 (old fails, new and base pass on the real preflight + prune-dist), V3 (fail-closed), V4 and V9 X1/X3 (the no-Docker regression check kills the re-added export), V12 (it runs in hosted lane A). |
+| R2-m1 load-sensitive assertion | **Closed** | V7: the pure `stallBooked` table, the fake-clock case and the live case reduced to load-proof facts. N1-N4 killed. |
+| R2-n1 vacuous 300 pin | **Closed** | V8: `toEqual([LONG_REQUEST_MS])`. S1 and S2 now also fail this case. |
+| R2-n2 spy restore / H4 / seam leak | **Closed** | V8: H4 killed (V9). |
+| O-1 lane A bootstrap | **Resolved for #53** | V10 (pure union) and V12 (fast-lane green). The PR #46 fallback fix stays with devops (D-ORCH-103). |
+
+## R3.4 Merge conditions
+
+1. A security record naming the final head `378af72` (D-SEC-PR53-01). `scans` is red only on that step (V12). After it, re-run or confirm `ci-gate` green.
+2. **Do not merge `origin/main` again before merging.** Its delta since `f68cc38` is docs and `.claude/agent-memory` only, with no overlap and a clean `merge-tree` (V10). Merging it would bring agent memory after the evidence, and that is unnecessary. Squash.
+3. NITs R3-n1 and R3-n2 are optional. If they ship, they need a fresh lane-B run (any code push stales `60a1659`), so they are better done as a follow-up on the next touch of `tools/docker`. R3-n3 is not this PR's.
+
+## R3.5 Good patterns worth keeping
+
+- The regression check reuses prune-dist's own `shouldRemove` instead of copying its rules, so the check cannot drift from the pruner. It is also stricter than the preflight (wildcards and string targets).
+- The check proves itself non-vacuous in two ways: the expected manifests are found, and the exact historical defect is re-added to the real manifest.
+- `stallBooked` is extracted as a pure function and called by the helper itself, so the deterministic table tests the real code path, not a twin.
+- A single fix push carried the main union with SHA-level proof (predicted tree = merge tree).
+
+## R3.6 Security flags (for security-analyst)
+
+- R2-B1 / R2.6: test-only helpers are now kept out of every export the preflight loads (V2, V4). The `./testing` exemption itself is not pinned (R3-n1). Decide whether widening `SKIPPED_EXPORTS` needs a test-enforced review.
+- Pre-existing, outside this PR (R3-n3): `@platform/config/testing` (`createTestEnv`) is importable lint-clean from worker and api production code, and it is **not** pruned from the images. Please confirm it carries no secret-bearing defaults, or route a lint restriction.
+- PR30-SEC-01 / PR53-SEC-04: the magnitude pins still hold on this head (S1-S3 killed, V9).
