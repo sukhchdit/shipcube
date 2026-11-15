@@ -42,8 +42,11 @@ function sourceConstant(rel: string, pattern: RegExp): string | undefined {
   return pattern.exec(readFileSync(join(repoRoot, rel), 'utf8'))?.[1];
 }
 
-// The timeout cases wait out the 2 s probe budget; slack for a loaded host (lane B runs suites in parallel).
-jest.setTimeout(20_000);
+// Real loopback HTTP: 20 s timed out when the host starved the suite (W0-FLAKE; same hang-detector budget as the api loopback suites).
+// The probe's own 2 s budget is pinned by BUDGET_MS and by the explicit 200 ms case; a case that expects a 200 passes the wide
+// budget below, because a loaded host can take longer than 2 s to deliver an answer the server already sent.
+jest.setTimeout(180_000);
+const LOAD_TOLERANT_BUDGET_MS = 120_000;
 
 describe('image healthcheck probe (TASK-014)', () => {
   it('targets the readiness routes of the api router and the worker health server with a 2 s budget', () => {
@@ -79,7 +82,7 @@ describe('image healthcheck probe (TASK-014)', () => {
       seen.push(`${req.method ?? ''} ${req.url ?? ''}`);
       res.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ready","secret-looking":"body"}');
     });
-    await expect(probeReady(port)).resolves.toBe(true);
+    await expect(probeReady(port, { budgetMs: LOAD_TOLERANT_BUDGET_MS })).resolves.toBe(true);
     expect(seen).toEqual(['GET /health/ready']);
     expect(write).not.toHaveBeenCalled();
   });
@@ -91,9 +94,13 @@ describe('image healthcheck probe (TASK-014)', () => {
 
   it('is unhealthy when the answer does not arrive within the budget', async () => {
     const port = await listen(() => undefined);
-    const started = Date.now();
+    const timers = jest.spyOn(globalThis, 'setTimeout');
+    const started = performance.now();
+    // The server never answers, so the probe can only resolve false because its own budget fired (a hang would hit the Jest budget).
     await expect(probeReady(port, { budgetMs: 200 })).resolves.toBe(false);
-    expect(Date.now() - started).toBeLessThan(1500);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(150);
+    // Magnitude, deterministic: the configured budget is what the probe armed (a wall-clock upper bound is not host-load-proof).
+    expect(timers.mock.calls.filter(([, ms]) => ms === 200)).toHaveLength(1);
   });
 
   it('is unhealthy when nothing listens', async () => {
@@ -126,7 +133,7 @@ describe('image healthcheck entry (TASK-014)', () => {
       seen.push(req.url ?? '');
       res.writeHead(200).end('body');
     });
-    await expect(main([name], { [variable]: String(port) })).resolves.toBe(0);
+    await expect(main([name], { [variable]: String(port) }, { budgetMs: LOAD_TOLERANT_BUDGET_MS })).resolves.toBe(0);
     expect(seen).toEqual(['/health/ready']);
   });
 
@@ -134,7 +141,9 @@ describe('image healthcheck entry (TASK-014)', () => {
     const port = await listen((_req, res) => res.writeHead(200).end());
     const closed = await closedPort();
     await expect(main(['worker'], { APP_PORT: String(port), APP_HEALTH_PORT: String(closed) })).resolves.toBe(1);
-    await expect(main(['api'], { APP_PORT: String(port), APP_HEALTH_PORT: String(closed) })).resolves.toBe(0);
+    await expect(
+      main(['api'], { APP_PORT: String(port), APP_HEALTH_PORT: String(closed) }, { budgetMs: LOAD_TOLERANT_BUDGET_MS }),
+    ).resolves.toBe(0);
   });
 
   it('exits 1 on 503', async () => {

@@ -75,16 +75,17 @@ function isService(name) {
  * Probes the named service; exit code 0 = healthy, 1 = unhealthy or unusable arguments (Docker reserves exit 2).
  * @param {string[]} argv
  * @param {Record<string, string | undefined>} [env]
+ * @param {{ budgetMs?: number }} [options] test seam (W0-FLAKE): a wider budget for a host-load-tolerant test; the CLI passes nothing, so the image uses BUDGET_MS
  * @returns {Promise<number>}
  */
-export async function main(argv, env = process.env) {
+export async function main(argv, env = process.env, options = {}) {
   const [name = '', ...rest] = argv;
   if (!isService(name) || rest.length > 0) {
     process.stderr.write(`usage: healthcheck.mjs ${Object.keys(SERVICES).join('|')}\n`);
     return 1;
   }
   const { portVariable, defaultPort } = SERVICES[name];
-  return (await probeReady(probePort(env[portVariable], defaultPort))) ? 0 : 1;
+  return (await probeReady(probePort(env[portVariable], defaultPort), options)) ? 0 : 1;
 }
 
 if (import.meta.main === true) {
