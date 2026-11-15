@@ -3,6 +3,13 @@
 // anything reads it. Parse failures and oversized bodies surface as body-parser errors, which platform/errors maps to
 // catalogue codes; any other client-side body error (a corrupt gzip/deflate/br stream) is MALFORMED_REQUEST here.
 // Per-route limits and media types arrive with route metadata (TASK-020).
+//
+// PR42-SEC-15 (c), D-TASK025-13/-27: a parsed body whose string values or object keys (at any depth) hold a NUL
+// (U+0000) or a lone surrogate is refused with 400 MALFORMED_REQUEST before any route sees it. The audit writer refuses
+// NUL and normalises lone surrogates, and PostgreSQL JSONB refuses NUL (SQLSTATE 22P05) and unpaired surrogate escapes
+// (22P02), so a client could otherwise steer a request into a 500 (or two keys into one after normalisation); the
+// boundary answers 400 instead. JSON escapes (`\u0000`, `\ud800`) are the only way in: UTF-8 bytes cannot encode
+// either. A well-formed surrogate pair (an emoji) is accepted.
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { AppError } from '@platform/shared';
@@ -88,6 +95,54 @@ function statusOf(error: unknown): unknown {
   return undefined;
 }
 
+const HIGH_SURROGATE_FIRST = 0xd800;
+const HIGH_SURROGATE_LAST = 0xdbff;
+const LOW_SURROGATE_FIRST = 0xdc00;
+const LOW_SURROGATE_LAST = 0xdfff;
+
+const isLowSurrogate = (unit: number): boolean => unit >= LOW_SURROGATE_FIRST && unit <= LOW_SURROGATE_LAST;
+
+/**
+ * True when `text` can be stored as-is (PR42-SEC-15 (c)): no NUL and no lone surrogate (a high surrogate not followed
+ * by a low one, or a low surrogate not preceded by a high one). One pass over the UTF-16 code units, no regex.
+ */
+export function isStorableText(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit === 0 || isLowSurrogate(unit)) return false;
+    if (unit >= HIGH_SURROGATE_FIRST && unit <= HIGH_SURROGATE_LAST) {
+      // charCodeAt past the end is NaN, which is not a low surrogate.
+      if (!isLowSurrogate(text.charCodeAt(index + 1))) return false;
+      index += 1;
+    }
+  }
+  return true;
+}
+
+/**
+ * True when any string value or object key in a parsed JSON value, at any depth, is not storable (`isStorableText`).
+ * Iterative over an explicit stack (a 1 MB body can nest far deeper than the call stack allows), linear in the size of
+ * the value, and read-only. JSON.parse yields only arrays, plain objects and primitives, so own enumerable entries are
+ * the whole content (a `__proto__` key is an own property there and is checked like any other).
+ */
+export function containsUnstorableText(value: unknown): boolean {
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === 'string') {
+      if (!isStorableText(current)) return true;
+    } else if (Array.isArray(current)) {
+      for (const item of current) pending.push(item);
+    } else if (typeof current === 'object' && current !== null) {
+      for (const [key, item] of Object.entries(current)) {
+        if (!isStorableText(key)) return true;
+        pending.push(item);
+      }
+    }
+  }
+  return false;
+}
+
 export function jsonBodyParser(options: JsonBodyOptions = {}): RequestHandler {
   const parse = express.json({
     limit: options.limit ?? DEFAULT_BODY_LIMIT,
@@ -109,6 +164,10 @@ export function jsonBodyParser(options: JsonBodyOptions = {}): RequestHandler {
       req,
       res,
       AsyncLocalStorage.bind((error?: unknown) => {
+        if (error === undefined && containsUnstorableText(req.body)) {
+          next(new AppError('MALFORMED_REQUEST'));
+          return;
+        }
         next(toBodyError(error));
       }),
     );
