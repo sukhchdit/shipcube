@@ -67,6 +67,7 @@ describe('bootstrap lane files (data-model §4.4, §8.1)', () => {
       '02-role-backstops.sql',
       '10-audit.sql', // TASK-021: audit store, under SET ROLE platform_audit_owner
       '90-audit-ddl-guard.sql', // TASK-021: identity-based DDL guard (event triggers), bootstrap-role owned
+      '91-audit-actions-v2.sql', // TASK-285: action CHECK widening, under SET ROLE platform_audit_owner; sorts last
     ]);
     expect(files.every((file) => file.sha256.length === 32)).toBe(true);
   });
