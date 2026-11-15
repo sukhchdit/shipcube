@@ -18,7 +18,8 @@
 #   `gh pr merge <n> --squash --match-head-commit <sha> --subject "<linted subject>"` after ci-gate concluded `success`
 #   (not skipped) for that exact SHA and the security record names it. A draft PR gets a red ci-gate, never a skipped one.
 # - No secrets: GITHUB_TOKEN (read-only) is the only credential (ADR-0023 amendment H). It reaches a step only as
-#   GH_TOKEN on the lane-scope steps of scans and ci-gate (actions: read for the jobs API; policy rule gh-token).
+#   GH_TOKEN on the lane-scope steps of scans and ci-gate (actions: read for the jobs API, and pull-requests: read on
+#   scans for the proof binding; policy rule gh-token).
 # - Gate tooling (tools/ci, .semgrep, .gitleaks.toml, .semgrepignore, .gitignore, the lint fixture harness) runs from
 #   the BASE ref when the base has it (SEC-P3-31); a checker the base does not have yet is bootstrapped from the head and
 #   the job summary says so. A checker's CLI therefore changes in two steps: first accept the new argument, then use it.
@@ -386,10 +387,13 @@ jobs:
       (github.event_name == 'push' && vars.CI_MAIN_FAST_LANE == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # actions: read for the proof lookup (jobs API) of the lane-scope step, which alone receives the token (RR-4).
+    # actions: read for the proof lookup (jobs API) of the lane-scope step, which alone receives the token (RR-4);
+    # pull-requests: read for its binding of proofs to this PR (the head branch's pull requests and this PR's issue events;
+    # R2-M1, PR46-SEC-13).
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     # One source for every classification output: the base-ref lane-scope step (RR-4).
     outputs:
       code_changed: ${{ steps.lane-scope.outputs.code_changed }}

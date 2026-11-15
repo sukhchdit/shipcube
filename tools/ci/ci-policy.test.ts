@@ -229,7 +229,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(str(job.if)).toBe(SECURITY_INTEGRATION_IF);
     expect(map(job.permissions, 'permissions')).toEqual({ contents: 'read' });
     expect(map(scans.outputs, 'scans outputs')).toEqual(SCANS_OUTPUTS);
-    expect(map(scans.permissions, 'scans permissions')).toEqual({ contents: 'read', actions: 'read' });
+    expect(map(scans.permissions, 'scans permissions')).toEqual({ contents: 'read', actions: 'read', 'pull-requests': 'read' });
     const lane = scanIndexOf(/GATE_LANE_SCOPE/);
     expect(lane).toBeLessThan(scanIndexOf(/GITLEAKS_IMAGE/));
     expect(scanSteps[lane]?.id).toBe('lane-scope');
@@ -368,6 +368,13 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
         LANE_SCOPE_RUN.replace(' --head-ref "$HEAD_REF"', ''),
         'required-gates',
       ],
+      [
+        'R2-M1 scans without pull-requests: read (the binding calls would fail: every docs push without a proof)',
+        '      actions: read\n      pull-requests: read\n',
+        '      actions: read\n',
+        'required-gates',
+      ],
+      ['R2-M1 pull-requests: write on scans', '      pull-requests: read\n', '      pull-requests: write\n', 'permissions'],
       ['R2-M1 HEAD_REF from the base branch', 'HEAD_REF: ${{ github.head_ref }}', 'HEAD_REF: ${{ github.base_ref }}', 'required-gates'],
     ])('%s', (_title, from, to, rule) => {
       expect(findingsOf(swap(from, to)).some((finding) => finding.startsWith(`${rule}:`))).toBe(true);

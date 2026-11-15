@@ -412,7 +412,8 @@ export const PINNED_JOB_ENV = Object.freeze({
 /** Job-level permissions of the pinned jobs (RR-4, RR-6, RR-8 (ii)). */
 export const PINNED_JOB_PERMISSIONS = Object.freeze({
   'fast-lane': Object.freeze({ contents: 'read' }),
-  scans: Object.freeze({ contents: 'read', actions: 'read' }),
+  // pull-requests: read for the proof binding's pulls and issue-events calls (R2-M1, PR46-SEC-13).
+  scans: Object.freeze({ contents: 'read', actions: 'read', 'pull-requests': 'read' }),
   'security-integration': Object.freeze({ contents: 'read' }),
   'ci-gate': Object.freeze({ contents: 'read', actions: 'read' }),
 });

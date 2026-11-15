@@ -29,7 +29,10 @@ branch has exactly one pull request (this one, into `main`), the run lists exact
 created after the PR's last `base_ref_changed` event. An empty or ambiguous `pull_requests` list (a fork, a stacked PR)
 is no proof, and lane A runs only for pull requests into `main` (`on.pull_request.branches: [main]`, policy-pinned).
 **Never retarget a PR** (D-ORCH-090): a retarget voids every earlier proof and record and needs a full run; close the PR
-and reopen it from a fresh branch instead. Every other gate runs on the exact head.
+and reopen it from a fresh branch instead, and never open a second PR from a branch. When a docs push finds no proof
+(`ci-gate`: `no code proof for this tree`; the `scans` summary names the binding problem), closing and reopening the PR
+runs the full lane on the same head (a `reopened` event has no push range, so the PR range decides). The binding needs
+`pull-requests: read` on `scans` (policy-pinned). Every other gate runs on the exact head.
 `ci-gate` is red when a code push ran light or skipped a code step, when a docs push has no proof, or when a
 classification output is empty. Pull-request runs queue (`cancel-in-progress: false`), so a full run is never
 cancelled by a later docs push. GitHub keeps one pending run per PR and replaces it on the next push,
