@@ -86,7 +86,12 @@ describe('loadRuntimeConfigOrExit (PR3-SEC-05, PR3-SEC-06)', () => {
   });
 
   it('[PR3-SEC-05] an unresolvable reference exits 78 with the failure class', async () => {
-    const env = { ...createTestEnv({ service: 'worker' }), STORAGE_ACCESS_KEY_ID_REF: `env:${randomVar()}` };
+    // Both members of the pair: one alone is refused earlier by credentialPairGuard (TASK-014, D-ARCH-100 item 1).
+    const env = {
+      ...createTestEnv({ service: 'worker' }),
+      STORAGE_ACCESS_KEY_ID_REF: `env:${randomVar()}`,
+      STORAGE_SECRET_ACCESS_KEY_REF: `env:${randomVar()}`,
+    };
     const io = captureIo();
     await expect(loadRuntimeConfigOrExit('worker', { env, cwd: cwd(), io, runtime })).rejects.toThrow(new ExitCalled(CONFIG_EXIT_CODE));
     expect(io.written.join('')).toContain('STORAGE_ACCESS_KEY_ID_REF: unresolvable: ref.notFound');
@@ -202,14 +207,15 @@ describe('loadRuntimeConfigOrExit (PR3-SEC-05, PR3-SEC-06)', () => {
 
     it('[PR3-SEC-05] staging with a placeholder behind a *_REF exits 78 naming the key @security', () => {
       const variable = randomVar();
-      const result = runService('worker', {
-        ...createTestEnv({ appEnv: 'staging', service: 'worker' }),
-        STORAGE_SECRET_ACCESS_KEY_REF: `env:${variable}`,
+      const result = runService('api', {
+        ...createTestEnv({ appEnv: 'staging', service: 'api' }),
+        // Static storage references are refused in staging since TASK-014 (D-ARCH-100); the api's Stripe webhook reference is not.
+        STRIPE_WEBHOOK_SECRET_REF: `env:${variable}`,
         [variable]: 'change-me',
       });
       expect(result.status).toBe(CONFIG_EXIT_CODE);
       expect(result.stdout).not.toContain('ready');
-      expect(result.stderr).toContain('STORAGE_SECRET_ACCESS_KEY_REF: placeholder');
+      expect(result.stderr).toContain('STRIPE_WEBHOOK_SECRET_REF: placeholder');
     });
 
     it('a valid worker resolves its references and reaches ready', () => {

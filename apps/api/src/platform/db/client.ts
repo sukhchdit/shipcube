@@ -12,12 +12,11 @@
  * TLS is decided here, never by `pg` (PR9-SEC-04): `pg` lets URL-derived TLS settings replace an explicit `ssl`
  * object, reads `PGSSLMODE` when `ssl` is unset (`no-verify` turns verification off) and otherwise leaves
  * `rejectUnauthorized` to Node's default, which `NODE_TLS_REJECT_UNAUTHORIZED=0` flips. `toPoolConfig` therefore hands
- * `pg` the URL without its query string plus an explicit `ssl` value with `rejectUnauthorized: true` pinned.
+ * `pg` the URL without its query string plus an explicit `ssl` value with `rejectUnauthorized: true` pinned. The
+ * translation is the platform's one implementation in @platform/config (`databaseConnectionSettings`, TASK-014), shared
+ * with the seed and bootstrap connections; the worker builds its pool through this module.
  */
-import { readFileSync, statSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
-
-import { RUNTIME_DATABASE_URL_PARAMS } from '@platform/config';
+import { DATABASE_CA_DIRECTORIES, databaseConnectionSettings, DatabaseConfigError } from '@platform/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg, { type PoolConfig } from 'pg';
 
@@ -44,12 +43,8 @@ export interface DatabaseClientOptions {
   readonly statementTimeoutMs?: number;
 }
 
-export class DatabaseConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DatabaseConfigError';
-  }
-}
+/** Moved to @platform/config (TASK-014 T-01); re-exported so `config-exit.ts` and existing callers keep one class. */
+export { DatabaseConfigError };
 
 const DEFAULT_IDLE_TIMEOUT_MS = 10_000;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 5_000;
@@ -57,102 +52,6 @@ const DEFAULT_STATEMENT_TIMEOUT_MS = 25_000;
 const MAX_STATEMENT_TIMEOUT_MS = 300_000;
 /** Client-side `query_timeout` margin above `statement_timeout`: the server cancels first; the client gives up next. */
 export const QUERY_TIMEOUT_MARGIN_MS = 1_000;
-
-/**
- * Query parameters a runtime URL may carry (PR5-SEC-08): only the TLS selectors, from the one list in
- * @platform/config (`RUNTIME_DATABASE_URL_PARAMS`; configuration validation applies it in every APP_ENV, PR-0009
- * R2-m2). pg copies every query entry over the explicit pool settings, so any other one (`options`, `lock_timeout`,
- * `idle_in_transaction_session_timeout`, `application_name`, `connect_timeout`, `host`, `ssl`, ...) would silently
- * override the role settings or the values below. Names are compared after percent-decoding, as pg reads them, so
- * `%6Fptions` is `options`. Since PR9-SEC-04 pg never sees the query string at all (`tlsConfig` translates the TLS
- * selectors); the allow-list still fails fast on anything else rather than silently dropping it.
- */
-function assertAllowedParams(params: URLSearchParams): void {
-  const names = [...params.keys()];
-  if (new Set(names).size !== names.length) throw new DatabaseConfigError('connectionString must not repeat a query parameter');
-  // The offending name is not echoed: the URL is a secret-bearing value.
-  if (names.some((name) => !RUNTIME_DATABASE_URL_PARAMS.has(name))) {
-    throw new DatabaseConfigError('connectionString carries a query parameter outside the TLS allow-list');
-  }
-}
-
-/** `sslmode` values that select TLS; every one of them is verified as libpq `verify-full` (see `tlsConfig`). */
-const TLS_SSLMODES: ReadonlySet<string> = new Set(['allow', 'prefer', 'require', 'verify-ca', 'verify-full']);
-
-/** The TLS part of the pool settings, derived from the allow-listed URL parameters only. */
-type TlsPoolConfig = Pick<PoolConfig, 'ssl' | 'sslnegotiation'>;
-type SslNegotiation = NonNullable<PoolConfig['sslnegotiation']>;
-
-function isSslNegotiation(value: string): value is SslNegotiation {
-  return value === 'postgres' || value === 'direct';
-}
-
-/** A CA bundle is small (the RDS global bundle is about 160 kB); the cap keeps a wrong path from exhausting memory. */
-const MAX_ROOT_CERTIFICATE_BYTES = 1_048_576;
-
-/**
- * PR9-SEC-16: an absolute path to a regular file of at most 1 MiB, checked before reading so that a FIFO or a device
- * cannot block start-up. libpq's `system` keyword (the OS trust store) is refused: pinning means a named CA bundle.
- */
-function readRootCertificate(path: string): string {
-  if (path === 'system') throw new DatabaseConfigError('connectionString sslrootcert must name a CA bundle file');
-  if (!isAbsolute(path)) throw new DatabaseConfigError('connectionString sslrootcert must be an absolute path');
-  try {
-    const stats = statSync(path);
-    if (!stats.isFile() || stats.size > MAX_ROOT_CERTIFICATE_BYTES) {
-      throw new DatabaseConfigError('connectionString sslrootcert must be a regular file of at most 1 MiB');
-    }
-    return readFileSync(path, 'utf8');
-  } catch (error) {
-    if (error instanceof DatabaseConfigError) throw error;
-    // Neither the path nor the fs error (which names the path) is echoed.
-    throw new DatabaseConfigError('connectionString sslrootcert could not be read');
-  }
-}
-
-/**
- * Explicit `pg` TLS settings for the URL's TLS selectors (PR9-SEC-04). Values are percent-decoded, as pg reads them.
- *
- * - no `sslmode` (and neither `sslrootcert` nor `sslnegotiation=direct`), or `sslmode=disable` → `ssl: false`, set
- *   explicitly so that `PGSSLMODE` cannot switch on an unverified connection;
- * - `sslmode=no-verify` → refused;
- * - `allow`, `prefer`, `require`, `verify-ca`, `verify-full` (or no `sslmode` with `sslrootcert` or
- *   `sslnegotiation=direct`, which pg also reads as TLS) → `rejectUnauthorized: true` with Node's default host-name
- *   check, i.e. libpq `verify-full`; `sslrootcert` is read into `ca`; `sslnegotiation` is passed through.
- *
- * pg's `uselibpqcompat` (weaker libpq semantics for `prefer`, `require` and `verify-ca`) is not an allowed parameter:
- * pg no longer parses the TLS selectors itself, so it could have no effect (PR-0009 R2-m2).
- */
-function tlsConfig(params: URLSearchParams): TlsPoolConfig {
-  const sslmode = params.get('sslmode');
-  const sslnegotiation = params.get('sslnegotiation');
-  const sslrootcert = params.get('sslrootcert');
-  if (sslmode === 'no-verify') throw new DatabaseConfigError('connectionString must not disable certificate verification');
-  if (sslmode !== null && sslmode !== 'disable' && !TLS_SSLMODES.has(sslmode)) {
-    throw new DatabaseConfigError('connectionString sslmode is not a supported value');
-  }
-  if (sslnegotiation !== null && !isSslNegotiation(sslnegotiation)) {
-    throw new DatabaseConfigError('connectionString sslnegotiation must be postgres or direct');
-  }
-  const negotiation = sslnegotiation === null ? {} : { sslnegotiation };
-  const tls = sslmode === null ? sslnegotiation === 'direct' || sslrootcert !== null : sslmode !== 'disable';
-  if (!tls) {
-    if (sslnegotiation === 'direct') throw new DatabaseConfigError('connectionString sslnegotiation=direct requires TLS');
-    return { ssl: false, ...negotiation };
-  }
-  return {
-    ssl: { rejectUnauthorized: true, ...(sslrootcert === null ? {} : { ca: readRootCertificate(sslrootcert) }) },
-    ...negotiation,
-  };
-}
-
-/** The URL without its query string and fragment: what pg may parse (host, port, user, password, database only). */
-function withoutQuery(url: URL): string {
-  const bare = new URL(url.href);
-  bare.search = '';
-  bare.hash = '';
-  return bare.href;
-}
 
 const APPLICATION_NAME = /^[a-z][a-z0-9-]{0,62}$/;
 
@@ -168,8 +67,9 @@ function positiveInteger(name: string, value: number, max: number): number {
  *
  * `connectionString` is the input URL without its query string; the TLS selectors it carried come back as the
  * explicit `ssl` (and `sslnegotiation`) settings, which neither the URL nor `PGSSLMODE` can then override.
+ * `caDirectories` is a unit-test seam for the `sslrootcert` confinement (PR9-SEC-17); production uses the default.
  */
-export function toPoolConfig(options: DatabaseClientOptions): PoolConfig {
+export function toPoolConfig(options: DatabaseClientOptions, caDirectories: readonly string[] = DATABASE_CA_DIRECTORIES): PoolConfig {
   let url: URL;
   try {
     url = new URL(options.connectionString);
@@ -179,9 +79,9 @@ export function toPoolConfig(options: DatabaseClientOptions): PoolConfig {
   if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
     throw new DatabaseConfigError(`connectionString must use postgres:// or postgresql://, got ${url.protocol}`);
   }
-  // The runtime role's search path and timeouts are role settings (data-model §4.4); a URL must not override them.
-  assertAllowedParams(url.searchParams);
-  const tls = tlsConfig(url.searchParams);
+  // The runtime role's search path and timeouts are role settings (data-model §4.4); a URL must not override them:
+  // only the TLS selectors pass (PR5-SEC-08), and they come back as explicit settings.
+  const connection = databaseConnectionSettings(url, caDirectories);
   if (!APPLICATION_NAME.test(options.applicationName)) {
     throw new DatabaseConfigError('applicationName must be 1-63 lowercase letters, digits or dashes, starting with a letter');
   }
@@ -191,8 +91,7 @@ export function toPoolConfig(options: DatabaseClientOptions): PoolConfig {
     MAX_STATEMENT_TIMEOUT_MS,
   );
   return {
-    connectionString: withoutQuery(url),
-    ...tls,
+    ...connection,
     max: positiveInteger('poolMax', options.poolMax, APP_ROLE_CONNECTION_LIMIT),
     idleTimeoutMillis: positiveInteger('idleTimeoutMs', options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS, 3_600_000),
     connectionTimeoutMillis: positiveInteger('connectionTimeoutMs', options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS, 120_000),

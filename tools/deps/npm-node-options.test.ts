@@ -1,13 +1,14 @@
 /**
- * PR9-SEC-02: the Prisma child is npm (`node <npm-cli.js> exec … -- prisma`), and npm copies its `node-options`
- * setting into `NODE_OPTIONS` for the bin it runs. `prismaChildEnv` dropping `NODE_OPTIONS` is therefore not enough;
- * `PRISMA_NPM_EXEC_OPTIONS` (`--node-options=`) must neutralise every source npm reads the setting from.
+ * PR9-SEC-02 / PR9-SEC-15: npm copies its `node-options` setting (env, any `.npmrc` layer) into `NODE_OPTIONS` for the
+ * bin it runs, and an `.npmrc` `script-shell` chooses the shell that starts it. Since TASK-014 the Prisma CLI is no
+ * longer started through npm at all (`prismaArgv`: `process.execPath <prisma CLI entry>`), and `npmCli()` no longer
+ * trusts `npm_execpath`.
  *
- * This proof runs the REAL npm of the running Node with exactly the production options, but against a tiny local bin
- * in a scratch directory instead of the Prisma CLI, so it needs no engine, no network and no install: the bin only
- * reports the `NODE_OPTIONS` it received, and a `--require` probe writes a marker file if it was ever preloaded. Every
- * source is paired with a positive control (the same run without `--node-options=`) that must show the preload, so a
- * green negative case cannot come from a probe that never worked.
+ * This proof runs the REAL npm of the running Node against a tiny local bin in a scratch directory (no engine, no
+ * network, no install): the bin reports the `NODE_OPTIONS` it received, and a `--require` probe writes a marker file
+ * if it was ever preloaded. Every source has a positive control (`npm exec`) that must show the preload, so the green
+ * direct-start case cannot come from a probe that never worked. The same proof against the real Prisma CLI through
+ * `runPrisma` is `prisma-cli-npm-free.int.test.ts`.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from '@jest/globals';
 
 import { npmCli } from './npm-cli.mjs';
-import { PRISMA_NPM_EXEC_OPTIONS, prismaExecArgs } from './prisma-engines.mjs';
+import { prismaArgv } from './prisma-engines.mjs';
 
 const BIN = 'show-node-options';
 const NPM_TIMEOUT_MS = 30_000;
@@ -105,13 +106,30 @@ const SOURCES: readonly [name: string, plant: (box: Scratch) => Record<string, s
   ],
 ];
 
-describe('[PR9-SEC-02] npm exec with the Prisma npm options never hands a node-options preload to the bin', () => {
-  it('the proof runs exactly the npm options the Prisma argv uses', () => {
-    expect(prismaExecArgs([])).toEqual(['exec', ...PRISMA_NPM_EXEC_OPTIONS, '--', 'prisma']);
+/** The scratch bin started the way `prismaArgv` starts the Prisma CLI: `process.execPath <entry>`, no npm. */
+function direct(box: Scratch, env: NodeJS.ProcessEnv) {
+  const result = spawnSync(process.execPath, [join(box.dir, 'show.cjs')], {
+    cwd: box.dir,
+    env,
+    encoding: 'utf8',
+    timeout: NPM_TIMEOUT_MS,
+    windowsHide: true,
+  });
+  if (result.error !== undefined) throw result.error;
+  expect(result.status).toBe(0);
+  const { nodeOptions } = JSON.parse(result.stdout) as { nodeOptions: string };
+  return { nodeOptions, preloaded: existsSync(box.marker) };
+}
+
+describe('[PR9-SEC-02, PR9-SEC-15] npm hands its node-options to the bin it runs, so Prisma never runs through npm', () => {
+  it('[PR9-SEC-15] the Prisma argv is the CLI entry for process.execPath: no npm-cli.js, no exec', () => {
+    const argv = prismaArgv(['--version']);
+    expect(argv.at(-1)).toBe('--version');
+    expect(argv.some((arg) => arg.endsWith('npm-cli.js') || arg === 'exec')).toBe(false);
   });
 
   it.each(SOURCES)(
-    '%s: positive control preloads without --node-options=, and the Prisma options neutralise it',
+    '%s: positive control preloads under npm exec; the direct start used for Prisma does not',
     (_name, plant) => {
       const box = scratch();
       const env = hermeticEnv(box, plant(box));
@@ -121,9 +139,24 @@ describe('[PR9-SEC-02] npm exec with the Prisma npm options never hands a node-o
       expect(control.preloaded).toBe(true);
 
       rmSync(box.marker, { force: true });
-      const guarded = npmExec(box, PRISMA_NPM_EXEC_OPTIONS, env);
-      expect(guarded).toEqual({ nodeOptions: '', preloaded: false });
+      expect(direct(box, env)).toEqual({ nodeOptions: '', preloaded: false });
     },
     NPM_TIMEOUT_MS * 2,
   );
+
+  it('[PR9-SEC-15] npmCli ignores npm_execpath and returns the npm installed with the running Node', () => {
+    const box = scratch();
+    const planted = join(box.dir, 'npm-cli.js');
+    writeFileSync(planted, "require('node:fs').writeFileSync(process.argv[1] + '.ran', 'x');\n");
+    const previous = process.env.npm_execpath;
+    process.env.npm_execpath = planted;
+    try {
+      expect(npmCli()).not.toBe(planted);
+      expect(npmCli()).toBe(npmCli(process.execPath));
+      expect(npmCli().startsWith(join(process.execPath, '..', '..'))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.npm_execpath;
+      else process.env.npm_execpath = previous;
+    }
+  });
 });

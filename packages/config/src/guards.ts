@@ -3,9 +3,13 @@
  * ADR-0010 am. 9). Each guard is a pure function over the raw configured strings and the values that passed the
  * schema; it returns issues that name keys only.
  */
+import { isAbsolute } from 'node:path';
+
+import { SUPPRESSING_LOG_LEVELS } from './entry-preflight.js';
 import { type AppEnv, isHardenedAppEnv, isLocalAppEnv, type Service, TLS_REJECT_UNAUTHORIZED_KEY } from './environment.js';
 import type { ConfigIssue } from './errors.js';
 import { findDuplicateKeyMaterial, KEY_REGISTER, type KeyVersion, PREVIOUS_SUFFIX } from './keys.js';
+import { isInspectorOption, nodeOptionTokens } from './node-options.js';
 import { isPlaceholder } from './placeholders.js';
 import { Secret } from './secret.js';
 
@@ -31,6 +35,9 @@ const heldBy = (key: string, service: Service | undefined): boolean =>
   service === undefined || (KEY_REGISTER.find((entry) => entry.variables.includes(key))?.holders.includes(service) ?? true);
 
 export type Guard = (input: GuardInput) => readonly ConfigIssue[];
+
+// Moved to node-options.ts (TASK-014: the entrypoint preflight needs them without the key register); re-exported here.
+export { isInspectorOption, nodeOptionTokens };
 
 /** SEC-P3-08 item 5, SEC-TC-51: placeholder and `local-only-*` values are refused in staging and production. */
 export const placeholderGuard: Guard = ({ raw, appEnv }) =>
@@ -62,23 +69,47 @@ const parseUrl = (value: string): URL | undefined => {
 export const RUNTIME_DATABASE_URL_PARAMS: ReadonlySet<string> = new Set(['sslmode', 'sslrootcert', 'sslnegotiation']);
 
 /** Query parameter names, percent-decoded as pg reads them; false when one repeats or is not allow-listed. */
-const hasOnlyRuntimeDatabaseUrlParams = (url: URL): boolean => {
+export const hasOnlyRuntimeDatabaseUrlParams = (url: URL): boolean => {
   const names = [...url.searchParams.keys()];
   return new Set(names).size === names.length && names.every((name) => RUNTIME_DATABASE_URL_PARAMS.has(name));
+};
+
+/** libpq `sslmode` values; `no-verify` (a pg-only extension that turns verification off) is not one of them. */
+export const DATABASE_SSLMODES: ReadonlySet<string> = new Set(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']);
+
+/**
+ * PR #9 code review R3-m1, PR #11 code review R3-m2 (TASK-014): the VALUES of the TLS selectors, with the same rules
+ * the runtime TLS translation applies, so a bad value fails at configuration load (exit 78 naming DATABASE_URL)
+ * instead of later as an uncaught `DatabaseConfigError`. Values are percent-decoded, as pg reads them.
+ *  - `sslmode` ∈ {disable, allow, prefer, require, verify-ca, verify-full};
+ *  - `sslnegotiation` ∈ {postgres, direct}, and `direct` implies TLS (pg reads TLS from a non-`disable` sslmode, or
+ *    from no sslmode with `sslrootcert` or `sslnegotiation=direct`);
+ *  - `sslrootcert` is an absolute path, never libpq's `system` trust-store keyword.
+ * Whether the file exists and is readable is decided where it is opened (`readRootCertificate`), not here.
+ */
+export const hasValidDatabaseUrlParamValues = (url: URL): boolean => {
+  const sslmode = url.searchParams.get('sslmode');
+  const sslnegotiation = url.searchParams.get('sslnegotiation');
+  const sslrootcert = url.searchParams.get('sslrootcert');
+  if (sslmode !== null && !DATABASE_SSLMODES.has(sslmode)) return false;
+  if (sslnegotiation !== null && sslnegotiation !== 'postgres' && sslnegotiation !== 'direct') return false;
+  const tls = sslmode === null ? sslnegotiation === 'direct' || sslrootcert !== null : sslmode !== 'disable';
+  if (sslnegotiation === 'direct' && !tls) return false;
+  return sslrootcert === null || (sslrootcert !== 'system' && isAbsolute(sslrootcert));
 };
 
 /**
  * PR-0009 R2-m2 (r1 n6): the query-parameter rule applies in every APP_ENV, so a local URL the runtime would refuse
  * fails here with exit 78 and the key name, not later with a stack. A URL the WHATWG parser cannot read is left to
- * the schema and, outside local/test, to the transport guard.
+ * the schema and, outside local/test, to the transport guard. TASK-014 adds the value predicate above.
  */
 export const databaseUrlParamsGuard: Guard = ({ raw, values }) => {
   const value = raw.DATABASE_URL;
   if (value === undefined || !('DATABASE_URL' in values)) return [];
   const url = parseUrl(value);
-  return url === undefined || hasOnlyRuntimeDatabaseUrlParams(url)
-    ? []
-    : [{ key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.queryParameter' }];
+  if (url === undefined) return [];
+  if (!hasOnlyRuntimeDatabaseUrlParams(url)) return [{ key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.queryParameter' }];
+  return hasValidDatabaseUrlParamValues(url) ? [] : [{ key: 'DATABASE_URL', code: 'invalid', rule: 'databaseUrl.parameterValue' }];
 };
 
 /**
@@ -122,52 +153,6 @@ export const transportGuard: Guard = ({ raw, values, appEnv }) => {
   insecure('REDIS_URL', isTlsRedisUrl);
   HTTPS_KEYS.forEach((key) => insecure(key, isHttpsUrl));
   return issues;
-};
-
-const isSpace = (char: string): boolean => /\s/.test(char);
-
-/**
- * Splits NODE_OPTIONS like Node's parser for quotes: a double-quoted section belongs to the current token with the
- * quotes removed, and `\` escapes the next character inside quotes. It splits on ANY whitespace, which is stricter
- * than Node (U+0020 only); over-splitting can only add refusals (R2-n2).
- */
-export function nodeOptionTokens(value: string): readonly string[] {
-  const tokens: string[] = [];
-  let current = '';
-  let started = false;
-  let quoted = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value.charAt(index);
-    if (quoted && char === '\\') {
-      index += 1;
-      current += value.charAt(index);
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (!quoted && isSpace(char)) {
-      if (started) tokens.push(current);
-      current = '';
-      started = false;
-      continue;
-    } else {
-      current += char;
-    }
-    started = true;
-  }
-  if (started) tokens.push(current);
-  return tokens;
-}
-
-/**
- * Option name of a token, normalised: single quotes dropped (Node keeps them, but they mark an intent to pass
- * the flag), the `=value` part removed, `_` read as `-` (Node accepts `--inspect_brk` for `--inspect-brk`), and
- * lower-cased.
- */
-const optionName = (token: string): string => (token.replace(/'/g, '').split('=', 1)[0] ?? '').replace(/_/g, '-').toLowerCase();
-
-/** Every `--inspect*` option and the `--debug*` aliases (`--debug-port`) configure or start the inspector. */
-export const isInspectorOption = (token: string): boolean => {
-  const name = optionName(token);
-  return name.startsWith('--inspect') || name.startsWith('--debug');
 };
 
 /** SEC-P3-08 item 6, R-22: no debug sections or inspector outside `APP_ENV=local`. */
@@ -233,8 +218,56 @@ export const companionGuard: Guard = ({ raw, values, appEnv, service }) => {
   for (const code of CARRIER_CODES) if (values[`CARRIER_${code}_ENABLED`] === true) required.push(`CARRIER_${code}_SECRET_REF`);
   if (values.MAIL_PROVIDER === 'smtp') required.push('MAIL_HOST');
   if (values.OTEL_ENABLED === true) required.push('OTEL_EXPORTER_OTLP_ENDPOINT');
+  // D-ARCH-100 item 1 (PR30-SEC-04): with an in-network STORAGE_ENDPOINT the pre-signed URL would carry the internal
+  // host; the browser-reachable endpoint is required in every environment.
+  if (values.STORAGE_ENDPOINT !== undefined) required.push('STORAGE_PUBLIC_ENDPOINT');
   return required.filter((key) => raw[key] === undefined && heldBy(key, service)).map((key) => ({ key, code: 'missing' }));
 };
+
+/** A pair of secret references that is configured together or not at all (D-ARCH-100 item 1). */
+export interface CredentialPair {
+  readonly keys: readonly [string, string];
+  /** Rule reported when exactly one member is configured (code `inconsistent`). */
+  readonly pairRule: string;
+  /** Rule reported for each configured member in staging and production (code `forbidden-in-environment`). */
+  readonly hardenedRule: string;
+}
+
+/**
+ * PR30-SEC-04 config half and PR30-SEC-11 (D-ARCH-100 item 1; ADR-0021 am. 2 item 6 and am. 3). Static object-store
+ * credentials are a local/test convenience (RustFS); in staging and production the IAM task role is the identity, so
+ * both references are refused there with no override switch (a non-IAM store for staging needs an ADR-0021
+ * amendment first). TASK-116 appends the audit-anchor sink pair.
+ */
+export const CREDENTIAL_PAIRS: readonly CredentialPair[] = Object.freeze([
+  Object.freeze({
+    keys: Object.freeze(['STORAGE_ACCESS_KEY_ID_REF', 'STORAGE_SECRET_ACCESS_KEY_REF'] as const),
+    pairRule: 'storage.credentialPair',
+    hardenedRule: 'storage.staticCredentials',
+  }),
+]);
+
+/**
+ * One member of a credential pair alone is `inconsistent` on the configured key (local/test); any member in staging
+ * or production is `forbidden-in-environment`. Keys only, never a value. This replaces the uncaught
+ * `StorageConfigError` of PR30-SEC-11 for the configuration case; the adapter-level throw stays as defence in depth.
+ */
+export const credentialPairGuard: Guard = ({ raw, appEnv }) =>
+  CREDENTIAL_PAIRS.flatMap(({ keys, pairRule, hardenedRule }): ConfigIssue[] => {
+    const configured = keys.filter((key) => raw[key] !== undefined);
+    if (isHardenedAppEnv(appEnv)) return configured.map((key) => ({ key, code: 'forbidden-in-environment', rule: hardenedRule }));
+    return configured.length === 1 ? configured.map((key) => ({ key, code: 'inconsistent', rule: pairRule })) : [];
+  });
+
+/**
+ * PR20-SEC-04 item 2 (D-ORCH-025 (2); D-ARCH-084): staging and production keep at least `warn`; local and test keep
+ * the full range. The security sink bypasses the level gate already (PR #20); this protects the error lines and the
+ * fatal process-error line. The TASK-014 entrypoint preflight applies the same floor before Node loads the app.
+ */
+export const logLevelGuard: Guard = ({ values, appEnv }) =>
+  isHardenedAppEnv(appEnv) && typeof values.APP_LOG_LEVEL === 'string' && SUPPRESSING_LOG_LEVELS.has(values.APP_LOG_LEVEL)
+    ? [{ key: 'APP_LOG_LEVEL', code: 'forbidden-in-environment', rule: 'logLevel.floor' }]
+    : [];
 
 const exceeds = (values: GuardInput['values'], key: string, limitKey: string): boolean => {
   const value = values[key];
@@ -311,6 +344,8 @@ export const GUARDS: readonly Guard[] = Object.freeze([
   toolingKeyGuard,
   productionGuard,
   companionGuard,
+  credentialPairGuard,
+  logLevelGuard,
   sessionGuard,
   databaseGuard,
   keyMaterialGuard,

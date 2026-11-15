@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "//": "Compose/image stack suite (TASK-014; npm run test:stack). Not a workspace. The tools and seed modules it reads (compose-file, env-file, yaml-subset) are compiled here as listed files: the tools project is noEmit, so a project reference would have no declarations to resolve.",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-compose.tsbuildinfo"
+  },
+  "files": ["../../tools/compose/compose-file.ts", "../../tools/config/env-file.ts", "../../tools/ci/yaml-subset.mjs"],
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../../packages/config" }]
+}

@@ -12,17 +12,29 @@
  * - the role passwords (`migrator_password`, `app_password`) are reserved too: they come from `passwords` and are
  *   substituted as client-side SCRAM-SHA-256 verifiers, so the plaintext never reaches the server or its log
  *   (PR5-SEC-01, tools/db/scram.ts).
- * - concurrent runners serialise on an advisory lock, waited for at most `lockTimeoutMs`; the connection attempt and
- *   every file are bounded too (CLAUDE.md §9).
+ * - concurrent runners serialise on an advisory lock, waited for at most `lockTimeoutMs`; the connection attempt,
+ *   every file and every query are bounded too, the socket keeps TCP keep-alive on, and a connection-level `'error'`
+ *   event writes one value-free line instead of crashing the process (CLAUDE.md §9; PR #13 R2-n2/-n3/m1);
+ * - TLS is the platform's one implementation (`databaseConnectionSettings` in @platform/config, PR13-SEC-09): pg gets
+ *   the URL without its query plus an explicit `ssl`, so neither the URL, `PGSSLMODE` nor
+ *   `NODE_TLS_REJECT_UNAUTHORIZED` decides it.
  *
  * CLI (`npm run db:bootstrap`): DATABASE_BOOTSTRAP_URL plus BOOTSTRAP_MIGRATOR_PASSWORD and BOOTSTRAP_APP_PASSWORD
- * (or the `*_FILE` variants naming Compose secret files). Exit 0 = applied or up to date, 1 = failure.
+ * (or the `*_FILE` variants naming Compose secret files); `checkToolingEnv` runs first (PR3-SEC-14). Exit 0 = applied
+ * or up to date, 1 = failure.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  checkToolingEnv,
+  DATABASE_CA_DIRECTORIES,
+  databaseConnectionSettings,
+  DatabaseConfigError,
+  formatToolingIssues,
+} from '@platform/config';
 import pg from 'pg';
 
 import { ScramPasswordError, scramSha256Verifier } from './scram.js';
@@ -40,6 +52,12 @@ export const PASSWORD_VARIABLES = { migrator: 'migrator_password', app: 'app_pas
 export const CONNECT_TIMEOUT_MS = 10_000;
 export const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 export const FILE_STATEMENT_TIMEOUT = '5min';
+/** `FILE_STATEMENT_TIMEOUT` in milliseconds: the longest a single bootstrap statement may run on the server. */
+export const STATEMENT_TIMEOUT_MS = 300_000;
+/** Client-side `query_timeout`: the server cancels at `STATEMENT_TIMEOUT_MS`; the client gives up 10 s later (R2-n2). */
+export const QUERY_TIMEOUT_MS = STATEMENT_TIMEOUT_MS + 10_000;
+/** The variable every bootstrap connection URL comes from (reset.ts derives its maintenance URL from it). */
+export const BOOTSTRAP_URL_VARIABLE = 'DATABASE_BOOTSTRAP_URL';
 const FILE_NAME = /^\d{2}-[a-z0-9-]+\.sql$/;
 /** Advisory-lock key: the first 8 bytes of SHA-256("platform:bootstrap-lane"), as a signed bigint. */
 export const LOCK_KEY = createHash('sha256').update('platform:bootstrap-lane').digest().readBigInt64BE(0).toString();
@@ -71,9 +89,15 @@ export function listBootstrapFiles(dir: string): BootstrapFile[] {
   });
 }
 
+/**
+ * Cluster-admin connection settings. No `options` (the runner sets the search path) and no `ssl`: TLS comes from the
+ * URL's selectors only, through the platform's one implementation (an object without `connectionString` is plain TCP).
+ */
+export type PrivilegedConnection = Omit<pg.ClientConfig, 'options' | 'ssl'>;
+
 export interface BootstrapOptions {
   /** Cluster-admin connection. Must not carry its own `options`; the runner sets the search path. */
-  connection: Omit<pg.ClientConfig, 'options'>;
+  connection: PrivilegedConnection;
   /** Role passwords from the secret manager; they reach the server only as SCRAM-SHA-256 verifiers. */
   passwords: RolePasswords;
   /** Further variable values. `db_name` and every `*_password` name are reserved. */
@@ -128,12 +152,65 @@ export interface BootstrapResult {
   skipped: string[];
 }
 
-/** Opens a privileged session pinned to `pg_catalog, pg_temp` and checks the effective path. */
-export async function connectPrivileged(connection: Omit<pg.ClientConfig, 'options'>): Promise<pg.Client> {
-  if (typeof connection.connectionString === 'string' && /[?&]options=/i.test(connection.connectionString)) {
+export interface PrivilegedConnectionOptions {
+  /** CA directories `sslrootcert` must lie in; a unit-test seam, production uses `DATABASE_CA_DIRECTORIES`. */
+  readonly caDirectories?: readonly string[];
+  /** Receives the value-free line of a connection-level `'error'` event (default: stderr). */
+  readonly writeError?: (line: string) => void;
+}
+
+/**
+ * The `pg.Client` config of a privileged session: explicit TLS from the URL's selectors (`ssl: false` for an object
+ * without `connectionString`), the pinned search path, bounded connect and query time, TCP keep-alive. A TLS refusal
+ * (`no-verify`, an unknown `sslmode`, an unusable `sslrootcert`, a parameter outside the TLS allow-list) is a
+ * `BootstrapError` naming DATABASE_BOOTSTRAP_URL, never the value or a path.
+ */
+export function privilegedClientConfig(
+  connection: PrivilegedConnection,
+  caDirectories: readonly string[] = DATABASE_CA_DIRECTORIES,
+): pg.ClientConfig {
+  const { connectionString, ...rest } = connection;
+  if (typeof connectionString === 'string' && /[?&]options=/i.test(connectionString)) {
     throw new BootstrapError('the bootstrap connection string must not carry an options parameter');
   }
-  const client = new pg.Client({ connectionTimeoutMillis: CONNECT_TIMEOUT_MS, ...connection, options: PRIVILEGED_SESSION_OPTIONS });
+  let tls: Pick<pg.ClientConfig, 'connectionString' | 'ssl' | 'sslnegotiation'> = { ssl: false };
+  if (connectionString !== undefined) {
+    const url = URL.parse(connectionString);
+    if (url === null) throw new BootstrapError(`${BOOTSTRAP_URL_VARIABLE}: connectionString is not a valid URL`);
+    try {
+      tls = databaseConnectionSettings(url, caDirectories);
+    } catch (error) {
+      // The message is fixed text without a value or a path (packages/config/src/db-tls.ts); no cause is kept.
+      if (error instanceof DatabaseConfigError) throw new BootstrapError(`${BOOTSTRAP_URL_VARIABLE}: ${error.message}`);
+      throw error;
+    }
+  }
+  return {
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    ...rest,
+    ...tls,
+    query_timeout: QUERY_TIMEOUT_MS,
+    keepAlive: true,
+    options: PRIVILEGED_SESSION_OPTIONS,
+  };
+}
+
+/** One value-free line for a connection-level `'error'` event: the error class and an errno/SQLSTATE code only. */
+export function connectionErrorLine(error: unknown): string {
+  const name = error instanceof Error ? error.name : 'non-error';
+  const code = (error as { code?: unknown } | null)?.code;
+  const safeCode = typeof code === 'string' && /^(?:E[A-Z]{2,15}|[0-9A-Z]{5})$/.test(code) ? ` ${code}` : '';
+  return `[bootstrap] connection error (${name}${safeCode})`;
+}
+
+/** Opens a privileged session pinned to `pg_catalog, pg_temp` and checks the effective path. */
+export async function connectPrivileged(connection: PrivilegedConnection, options: PrivilegedConnectionOptions = {}): Promise<pg.Client> {
+  const client = new pg.Client(privilegedClientConfig(connection, options.caDirectories));
+  const writeError = options.writeError ?? ((line: string) => process.stderr.write(`${line}\n`));
+  // Without a listener an idle-connection error would crash the process; a pending query still rejects (R2 m1).
+  client.on('error', (error) => {
+    writeError(connectionErrorLine(error));
+  });
   await client.connect();
   try {
     const { rows } = await client.query<{ search_path: string }>('SHOW search_path');
@@ -325,8 +402,11 @@ export function readRolePasswords(env: NodeJS.ProcessEnv): RolePasswords {
 
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   try {
-    const connectionString = env['DATABASE_BOOTSTRAP_URL'];
-    if (connectionString === undefined || connectionString === '') throw new BootstrapError('DATABASE_BOOTSTRAP_URL is not set');
+    const connectionString = env[BOOTSTRAP_URL_VARIABLE];
+    if (connectionString === undefined || connectionString === '') throw new BootstrapError(`${BOOTSTRAP_URL_VARIABLE} is not set`);
+    // PR3-SEC-14: staging/production need verify-full, no placeholder and NODE_TLS_REJECT_UNAUTHORIZED unset or 1.
+    const issues = checkToolingEnv(env, BOOTSTRAP_URL_VARIABLE);
+    if (issues.length > 0) throw new BootstrapError(`environment refused: ${formatToolingIssues(issues)}`);
     const result = await runBootstrap({
       connection: { connectionString },
       passwords: readRolePasswords(env),

@@ -1,5 +1,5 @@
 /**
- * Jest 30 configuration (ADR-0024). Five projects selected by the root scripts:
+ * Jest 30 configuration (ADR-0024). Five projects (six with the opt-in stack project) selected by the root scripts:
  *   unit        `*.test.ts`         -> npm run test:unit (Node environment)
  *   unit-dom    `*.test.tsx`        -> npm run test:unit (jsdom: React Testing Library component tests)
  *   integration `*.int.test.ts(x)`  -> npm run test:integration (Testcontainers; Docker required)
@@ -8,6 +8,7 @@
  *               abuse generators, which need an app or a database; TASK-276, T-QA-03). `integration` and `api` ignore
  *               tests/generated, so a generated suite never runs twice; a plain `*.test.ts(x)` there (route-registry,
  *               contract drift) stays a lane A unit test (PR #34 R1-M1). tools/repo/jest-projects.test.ts pins the map.
+ *   stack       `tests/compose/*.stack.test.ts` -> npm run test:stack (images + docker compose; opt-in, TASK-014)
  * Sources are transpiled by @swc/jest with the inline SWC_JEST_OPTIONS below (CommonJS output, no
  * type-check; `npm run typecheck` is the type gate). Workspace packages resolve to their TypeScript
  * sources through the `@platform/source` export condition, the same condition `tsconfig.base.json` uses.
@@ -104,7 +105,7 @@ const config: Config = {
       ...common,
       displayName: 'unit',
       testMatch: ['**/*.test.ts'],
-      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.ts$', '/tests/e2e/'],
+      testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api|stack)\\.test\\.ts$', '/tests/e2e/'],
     },
     {
       ...common,
@@ -141,6 +142,10 @@ const config: Config = {
       testMatch: ['**/tests/generated/**/*.{api,int}.test.{ts,tsx}'],
       testPathIgnorePatterns: IGNORED_PATHS,
     },
+    // TASK-014: the Compose/image stack suite builds every image and runs `docker compose up`, so the project exists
+    // only when JEST_STACK=1 (`npm run test:stack`, tools/compose/run-stack-tests.mjs); test:unit, test:integration
+    // and test:coverage never include it.
+    ...(process.env.JEST_STACK === '1' ? [{ ...common, displayName: 'stack', testMatch: ['**/tests/compose/**/*.stack.test.ts'] }] : []),
   ],
 };
 

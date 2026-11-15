@@ -36,6 +36,7 @@ import {
   shellSegments,
 } from './check-workflow-policy.mjs';
 import { OASDIFF_IMAGE } from './openapi-breaking.mjs';
+import { ownedPaths, parseCodeowners } from './check-security-owned-paths.mjs';
 import { YamlSubsetError, parseYamlSubset } from './yaml-subset.mjs';
 import { EVENTS as EVIDENCE_EVENTS } from '../quality/check-evidence.mjs';
 
@@ -710,6 +711,13 @@ describe('CODEOWNERS coverage (PR5-SEC-04, PR8-SEC-11, PR8-SEC-13)', () => {
       '**/.gitattributes @o',
       '/CLAUDE.md @o',
       '/.claude/ @o',
+      // PR39-SEC-05: /packages/config/ covers the start-up guards, /tools/ and /apps/ the image paths.
+      '/packages/config/ @o',
+      '/.dockerignore @o',
+      '/.hadolint.yaml @o',
+      '/compose*.yaml @o',
+      '/compose.env @o',
+      '/infra/ @o',
     ].join('\n');
     expect(checkCodeowners(text)).toEqual([]);
   });
@@ -868,6 +876,75 @@ describe('CODEOWNERS: every app database platform, the credential predicate and 
       expect(mutated).not.toMatch(lineFor(path));
       expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
     }
+  });
+});
+
+describe('CODEOWNERS: images, compose, infrastructure and the start-up guards (PR39-SEC-05)', () => {
+  const repositoryText = (): string => readFileSync(join(findRepoRoot(), '.github', 'CODEOWNERS'), 'utf8');
+  const lineFor = (path: string): RegExp => new RegExp(`^/${path.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\s+@\\S+$`, 'mu');
+  const added = [
+    'apps/*/Dockerfile',
+    '.dockerignore',
+    '.hadolint.yaml',
+    'compose*.yaml',
+    'compose.env',
+    'infra/',
+    'tools/docker/',
+    'tools/compose/',
+    'packages/config/src/entry-preflight.ts',
+    'packages/config/src/entry-preflight-cli.ts',
+    'packages/config/src/node-options.ts',
+    'packages/config/src/db-tls.ts',
+    'packages/config/src/tooling-env.ts',
+    'packages/config/src/guards.ts',
+    'packages/config/src/environment.ts',
+  ];
+
+  it.each(added)('[PR39-SEC-05] %s is required and the repository CODEOWNERS owns it', (path) => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain(path);
+    expect(repositoryText()).toMatch(lineFor(path));
+  });
+
+  it.each(added)('[PR39-SEC-05] mutation: deleting, commenting out or un-owning the %s line yields one finding for it', (path) => {
+    for (const replacement of ['', `# /${path} @sukhchdit`, `/${path}`]) {
+      const mutated = repositoryText().replace(lineFor(path), replacement);
+      expect(mutated).not.toMatch(lineFor(path));
+      expect(checkCodeowners(mutated).map((f) => f.message)).toEqual([expect.stringContaining(`${path} (`)]);
+    }
+  });
+
+  it('[PR39-SEC-05] prisma/Dockerfile needs no line of its own: prisma/ is required and owns it', () => {
+    expect(REQUIRED_CODEOWNED_PATHS).toContain('prisma/');
+    expect(ownedPaths(['prisma/Dockerfile'], parseCodeowners(repositoryText()))).toEqual(['prisma/Dockerfile']);
+  });
+
+  // check-security-owned-paths derives the record-requiring set from these same CODEOWNERS patterns, so a PR touching
+  // any of these files now needs a security review record.
+  it.each([
+    'apps/api/Dockerfile',
+    'apps/worker/Dockerfile',
+    'apps/web/Dockerfile',
+    'apps/admin/Dockerfile',
+    'prisma/Dockerfile',
+    '.dockerignore',
+    '.hadolint.yaml',
+    'compose.yaml',
+    'compose.debug.yaml',
+    'compose.env',
+    'infra/terraform/main.tf',
+    'tools/docker/entrypoint.sh',
+    'tools/docker/tooling-entrypoint.sh',
+    'tools/docker/healthcheck.mjs',
+    'tools/compose/edge/Caddyfile',
+    'packages/config/src/entry-preflight.ts',
+    'packages/config/src/entry-preflight-cli.ts',
+    'packages/config/src/node-options.ts',
+    'packages/config/src/db-tls.ts',
+    'packages/config/src/tooling-env.ts',
+    'packages/config/src/guards.ts',
+    'packages/config/src/environment.ts',
+  ])('[PR39-SEC-05] check-security-owned-paths treats %s as security-owned', (path) => {
+    expect(ownedPaths([path], parseCodeowners(repositoryText()))).toEqual([path]);
   });
 });
 

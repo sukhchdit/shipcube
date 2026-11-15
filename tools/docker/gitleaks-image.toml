@@ -1,0 +1,18 @@
+# Gitleaks config for the image layer scan (tools/docker/scan-image-secrets.mjs; TASK-014, AT-US-004-02,
+# PR39-SEC-03). Mounted read-only at /cfg/gitleaks-image.toml and passed with --config, so:
+# - the rule set is pinned by this repository plus the Gitleaks image digest (GITLEAKS_IMAGE), never by a
+#   `.gitleaks.toml` that a scanned layer happens to carry at its root (without --config, Gitleaks loads
+#   `<source>/.gitleaks.toml`, which an image could use to switch every rule off);
+# - every default rule, per-rule allow-list and global stop-word/regex allow-list of Gitleaks v8.30.1 applies
+#   unchanged (`useDefault = true`).
+#
+# The default global PATH allow-list skips `(?:^|/)node_modules(?:/.*)?$`, and an extending config cannot remove an
+# inherited entry. The scanner therefore renames every `node_modules` path segment to `node_modules.scan` while it
+# unpacks a layer (and maps reported paths back), so node_modules trees are scanned with the default rules. Exceptions
+# are never added here: reviewed, exact entries live in IMAGE_SCAN_ALLOW_LIST in scan-image-secrets.mjs, where each is
+# bound to a rule, a full path and a base-image layer or a third-party package file.
+
+title = "shipcube image layer scan (Gitleaks v8.30.1 defaults, node_modules scanned)"
+
+[extend]
+useDefault = true
