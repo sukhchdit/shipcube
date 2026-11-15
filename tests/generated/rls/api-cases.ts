@@ -4,8 +4,14 @@
  * app composed by `createApp` over the real database runtime, once per credential kind the route accepts:
  *  - `session`: user A asks for B's seeded row (404 `NOT_FOUND`, problem+json, no B value in the body), then for A's own
  *    row (the case's positive status);
- *  - `quote-token`: the guest of hash H2 asks for the guest row of hash H (404 as above), then the guest of hash H.
- * The runner returns problems instead of asserting, so a mutation control can show that a leaking route fails it.
+ *  - `quote-token`: the guest of hash H2 asks for the guest row of hash H (404 as above), then the guest of hash H;
+ *  - a dual-mode route (both kinds; code review R2-n2 (a), TASK-027): also the cross directions, user A asks for the
+ *    guest row G and the guest of hash H asks for B's organisation row, each 404 as above.
+ * A refusal must leak nothing of the other row in the body (except `instance`, which echoes the path asked for) or in any
+ * response header (R2-n2 (b): `ETag`, `Location` and the like). A positive call answered with anything but its success
+ * status is a problem, a 404 included whatever the case says (PR43-SEC-12). The runner returns problems instead of
+ * asserting, so a mutation control can show that a leaking route fails it; api-cases.test.ts drives it over a fake
+ * server without Docker (R2-n2 (c)).
  *
  * The principal is chosen per request by the test-only authenticate slot `probePrincipalSlot` from the header
  * `x-rls-probe-principal`; every other slot (MFA gate, authorise, rate limit, validate, idempotency, ETag, execute with
@@ -17,10 +23,18 @@ import { PERMISSIONS } from '@platform/authz';
 import type { Principal } from '../../../apps/api/src/platform/routing/define-route.js';
 import { ANONYMOUS, markCredentialsRead, readonlySet, setPrincipal } from '../../../apps/api/src/platform/routing/route-state.js';
 import type { RouteSlot } from '../../../apps/api/src/platform/routing/slot.js';
+import { loadTableClasses } from '../../../tools/db/table-classes.js';
 import { GUEST_HASH, OTHER_GUEST_HASH, type SeededRow, seededValues, type TablePlan, TENANT_A } from './database.js';
-import { type ApiCrossTenantCase, pathParameters, type RouteShape } from './generator.js';
+import { API_CASES } from './fixtures.js';
+import { type ApiCrossTenantCase, isSuccessStatus, pathParameters, routeCaseFindings, type RouteShape } from './generator.js';
 
 export const PRINCIPAL_HEADER = 'x-rls-probe-principal';
+
+/**
+ * The API enumeration of `routes` against the registered `API_CASES` and the committed table-class manifests: what the
+ * rls-cross-tenant suite asserts for the module registry, also read by the RBAC matrix (AT-US-071-03, TASK-027).
+ */
+export const registryCaseFindings = (routes: readonly RouteShape[]): string[] => routeCaseFindings(routes, API_CASES, loadTableClasses());
 
 export const PROBE_PRINCIPALS: Readonly<Record<string, Principal>> = {
   'tenant-a': Object.freeze({
@@ -50,14 +64,22 @@ interface Call {
   readonly negative: boolean;
 }
 
-/** The calls of a case: per credential kind the route accepts, the cross-tenant (negative) call first, then the positive. */
+/**
+ * The calls of a case: per credential kind the route accepts, the cross-tenant (negative) call first, then the
+ * positive; a route accepting both kinds then adds the two cross-direction negatives (R2-n2 (a)).
+ */
 export function callsFor(route: Pick<RouteShape, 'auth'>): Call[] {
   const calls: Call[] = [];
-  if (route.auth.includes('session')) {
+  const session = route.auth.includes('session');
+  const guest = route.auth.includes('quote-token');
+  if (session) {
     calls.push({ principal: 'tenant-a', row: 'B', negative: true }, { principal: 'tenant-a', row: 'A', negative: false });
   }
-  if (route.auth.includes('quote-token')) {
+  if (guest) {
     calls.push({ principal: 'guest-h2', row: 'G', negative: true }, { principal: 'guest-h', row: 'G', negative: false });
+  }
+  if (session && guest) {
+    calls.push({ principal: 'tenant-a', row: 'G', negative: true }, { principal: 'guest-h', row: 'B', negative: true });
   }
   return calls;
 }
@@ -112,7 +134,8 @@ export async function runApiCase(base: string, route: RouteShape, apiCase: ApiCr
     const body = await response.text();
     if (!call.negative) {
       const expected = apiCase.positiveStatus ?? 200;
-      if (response.status !== expected)
+      if (!isSuccessStatus(expected)) problems.push(`${label}: positiveStatus ${String(expected)} is not a success status`);
+      if (response.status !== expected || !isSuccessStatus(response.status))
         problems.push(`${label}: positive control expected ${String(expected)}, got ${String(response.status)}`);
       continue;
     }
@@ -128,8 +151,14 @@ export async function runApiCase(base: string, route: RouteShape, apiCase: ApiCr
     if (problem['code'] !== 'NOT_FOUND') problems.push(`${label}: code ${String(problem['code'])}, expected NOT_FOUND`);
     delete problem['instance']; // echoes the path the caller asked for
     const visible = Object.keys(problem).length > 0 ? JSON.stringify(problem) : body;
-    const leaked = distinctiveValues(plan, call.row).filter((value) => visible.includes(value));
+    const distinctive = distinctiveValues(plan, call.row);
+    const leaked = distinctive.filter((value) => visible.includes(value));
     if (leaked.length > 0) problems.push(`${label}: the body carries ${String(leaked.length)} value(s) of the other tenant's row`);
+    for (const [name, value] of response.headers) {
+      const inHeader = distinctive.filter((candidate) => value.includes(candidate));
+      if (inHeader.length > 0)
+        problems.push(`${label}: response header ${name} carries ${String(inHeader.length)} value(s) of the other tenant's row`);
+    }
   }
   return problems;
 }
