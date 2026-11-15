@@ -22,6 +22,8 @@ describe('Valkey connection options (ADR-0013; PR3-SEC-02/-12 consumer half)', (
       connectTimeout: VALKEY_DEFAULTS.connectTimeoutMs,
       commandTimeout: VALKEY_DEFAULTS.commandTimeoutMs,
       maxRetriesPerRequest: 1,
+      // TASK-014: no INFO-based ready check (the api ACL user is denied INFO); readiness is the PING probe.
+      enableReadyCheck: false,
     });
     expect(JSON.stringify(options)).not.toContain('rediss://');
   });
