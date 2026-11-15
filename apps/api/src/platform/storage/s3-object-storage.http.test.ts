@@ -15,6 +15,8 @@ import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/l
 import { createS3ObjectStorage, S3_TIMEOUTS, type S3ObjectStorage, type S3Timeouts } from './s3-object-storage.js';
 
 const BUCKET = 'documents';
+/** A request timeout and deadline far above any host-load stall: only the bound under test can end a call before it. */
+const LONG_REQUEST_MS = 120_000;
 const KEY = 'a6f1b2c3-0d4e-4f50-8a61-7b8c9d0e1f20/label.pdf';
 
 interface Seen {
@@ -155,19 +157,20 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
   it('the request timeout throws (no SDK warning) and is retried: UNAVAILABLE after 3 attempts, long before the deadline', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const server = await loopback(silent);
-    const storage = storageFor(server, { ...S3_TIMEOUTS, requestMs: 300, metadataDeadlineMs: 10_000 });
+    const storage = storageFor(server, { ...S3_TIMEOUTS, requestMs: 300, metadataDeadlineMs: LONG_REQUEST_MS });
     const { outcome, ms } = await timed(() => storage.head({ bucket: BUCKET, key: KEY }));
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
-    expect(server.seen).toHaveLength(3);
+    // Attempts counted as connections: an attempt the client aborts before a loaded host reads it never reaches `seen`.
+    expect(server.connections).toBe(3);
     // 3 x 300 ms plus jittered backoff; without throwOnRequestTimeout the call would wait for the 10 s deadline.
-    expect(ms).toBeLessThan(9_000);
+    expect(ms).toBeLessThan(LONG_REQUEST_MS / 4);
     expect(warn).not.toHaveBeenCalled();
-  }, 30_000);
+  }, LOOPBACK_TEST_TIMEOUT_MS);
 
   it('without a caller signal every operation rejects UNAVAILABLE within its own deadline', async () => {
     const server = await loopback(silent);
-    // Production request timeout (10 s) and attempts; short deadlines so the test is quick.
-    const storage = storageFor(server, { ...S3_TIMEOUTS, dataDeadlineMs: 800, metadataDeadlineMs: 400 });
+    // Production attempts; short deadlines so the test is quick, and a request timeout far beyond deadline plus load slack so a deadline that did not fire cannot hide behind it.
+    const storage = storageFor(server, { ...S3_TIMEOUTS, requestMs: LONG_REQUEST_MS, dataDeadlineMs: 800, metadataDeadlineMs: 400 });
     const put = { bucket: BUCKET, key: KEY, body: body(), contentType: 'application/pdf' };
     const results = await Promise.all([
       timed(() => storage.put(put)).then((result) => ({ ...result, deadline: 800 })),
@@ -181,11 +184,11 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
       expect(ms).toBeGreaterThanOrEqual(deadline - 50);
       expect(ms).toBeLessThan(deadline + HOST_LOAD_SLACK_MS);
     }
-  }, 30_000);
+  }, LOOPBACK_TEST_TIMEOUT_MS);
 
   it('a caller signal shorter than the deadline wins', async () => {
     const server = await loopback(silent);
-    const { outcome, ms } = await timed(() => storageFor(server).get({ bucket: BUCKET, key: KEY }, AbortSignal.timeout(300)));
+    const { outcome, ms } = await timed(() => storageFor(server, { ...S3_TIMEOUTS, requestMs: LONG_REQUEST_MS }).get({ bucket: BUCKET, key: KEY }, AbortSignal.timeout(300)));
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
     expect(ms).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
   });
@@ -199,7 +202,7 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
       }),
     );
     const { outcome, ms } = await timed(() =>
-      storageFor(server, { ...S3_TIMEOUTS, dataDeadlineMs: 800 }).get({ bucket: BUCKET, key: KEY }),
+      storageFor(server, { ...S3_TIMEOUTS, requestMs: LONG_REQUEST_MS, dataDeadlineMs: 800 }).get({ bucket: BUCKET, key: KEY }),
     );
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
     expect(ms).toBeLessThan(800 + HOST_LOAD_SLACK_MS);

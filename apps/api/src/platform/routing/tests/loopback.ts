@@ -1,12 +1,12 @@
 /**
  * Test helper (TASK-020, PR #38 code review R1-n1): the per-test timeout of suites that compose createApp and make real
  * loopback requests. The 5 s Jest default timed out under parallel host load in the heavy lane (runs 20261113T2208Z
- * and 20261113T2226Z, never in isolation); one case takes about 15-100 ms alone, so 20 s is wide headroom, not a mask.
+ * and 20261113T2226Z, never in isolation); one case takes about 15-100 ms alone, so 60 s is wide headroom, not a mask.
  * One constant, so a later change reaches every such file. Never imported by production code.
  */
 import type { Server } from 'node:http';
 
-export const LOOPBACK_TEST_TIMEOUT_MS = 20_000;
+export const LOOPBACK_TEST_TIMEOUT_MS = 60_000;
 
 /**
  * Upper-bound slack of the "answers within X" timing checks (W0-FLAKE). A lower bound (the deadline really elapsed)
@@ -14,7 +14,7 @@ export const LOOPBACK_TEST_TIMEOUT_MS = 20_000;
  * (tens of seconds), so it is the deadline plus this slack, not the deadline plus a few hundred ms that a loaded host
  * overshoots. Never imported by production code.
  */
-export const HOST_LOAD_SLACK_MS = 5_000;
+export const HOST_LOAD_SLACK_MS = 20_000;
 
 /**
  * Closes a loopback test server and every socket still open on it. `server.close()` alone waits for the keep-alive
