@@ -17,7 +17,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import {
   expectCell,
   FIXED_CALLERS,
@@ -60,6 +60,16 @@ const PRINCIPALS: MatrixPrincipals = matrixPrincipals([...CALLERS.values()]);
 const SIGNATURE_ONLY = signatureOnlyOf(PERMISSION_DEFINITIONS);
 /** Contract rows run in parallel batches of this size (loopback only; each row's own requests stay sequential). */
 const ROW_CONCURRENCY = 8;
+
+/**
+ * Per-test and per-hook bounds (the LOOPBACK_TEST_TIMEOUT_MS rationale of apps/api platform/routing/tests/loopback.ts).
+ * A row is about 31 loopback requests, the contract layer about 4,300. Alone they take about 0.3 s and 15 s; under
+ * parallel host load (flake loop 2026-11-14, runs 12-20) rows took over 5 s and the contract layer over 120 s, while
+ * every result stayed correct. A hang still fails at the bound.
+ */
+const MATRIX_TEST_TIMEOUT_MS = 120_000;
+const CONTRACT_LAYER_TIMEOUT_MS = 900_000;
+jest.setTimeout(MATRIX_TEST_TIMEOUT_MS);
 
 /** A readiness probe the matrix never calls (the terminal answers before any handler). */
 const unusedProbe = {
@@ -153,7 +163,7 @@ beforeAll(async () => {
   );
   served.registry = await listen(registryApp(matrixSlots(PRINCIPALS)));
   served.contract = await listen(app);
-}, 60_000);
+}, MATRIX_TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   await close(served.registry);
@@ -219,20 +229,24 @@ describe('AT-US-071-01 contract layer: every openapi.yaml operation x every seed
 
   // The contract is read asynchronously (dereferenced), so the operations are one test; `runRow` names each failing
   // cell. Rows run ROW_CONCURRENCY at a time (each row's requests stay in order: the `none` reference first).
-  it('AT-US-071-01 every cell of every contract operation gets its generated outcome over HTTP', async () => {
-    const problems: string[] = [];
-    const operations = contractTargets.map((entry) => entry.target.operationId);
-    for (let start = 0; start < operations.length; start += ROW_CONCURRENCY) {
-      const batch = operations.slice(start, start + ROW_CONCURRENCY);
-      const results = await Promise.all(
-        batch.map((operationId) =>
-          runRow(String(served.contract?.origin), targetOf(contractTargets, operationId), rowOf(contractMatrix, operationId), CALLERS),
-        ),
-      );
-      problems.push(...results.flat());
-    }
-    expect(problems).toEqual([]);
-  }, 120_000);
+  it(
+    'AT-US-071-01 every cell of every contract operation gets its generated outcome over HTTP',
+    async () => {
+      const problems: string[] = [];
+      const operations = contractTargets.map((entry) => entry.target.operationId);
+      for (let start = 0; start < operations.length; start += ROW_CONCURRENCY) {
+        const batch = operations.slice(start, start + ROW_CONCURRENCY);
+        const results = await Promise.all(
+          batch.map((operationId) =>
+            runRow(String(served.contract?.origin), targetOf(contractTargets, operationId), rowOf(contractMatrix, operationId), CALLERS),
+          ),
+        );
+        problems.push(...results.flat());
+      }
+      expect(problems).toEqual([]);
+    },
+    CONTRACT_LAYER_TIMEOUT_MS,
+  );
 
   it('AT-US-071-01 allow iff the role holds the permission, else 403 AUTHZ_DENIED (getShipment, shipment:read)', () => {
     const row = rowOf(contractMatrix, 'getShipment');
