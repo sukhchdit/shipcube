@@ -1034,3 +1034,260 @@ After #46, `lane-scope.mjs` classifies #39's image paths as code: `DOCS_ONLY_PAT
 | Findings | 0 Critical, 0 High, 0 Medium, 0 Low open. Closed: PR39-SEC-01 (C1), -02, -03 (C2), -04, -05, -06. Open INFO: PR39-SEC-07, -08, -09, -10 (round 1) and PR39-SEC-11, -12, -13 (new) |
 | Conditions | C1 and C2 closed. None open |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High, Medium or Low finding is open at head `c85d5e5`. Both conditions are closed and every round-1 LOW is fixed, each confirmed by probes on the head sources and the local images. The unions are pure, and PR45-SEC-02 is met. The INFO follow-ups have owners in R2.14. Merging current `main` (PR #42) into this branch voids this record: a merge-only round with the R2.13 checklist is required before merge |
+
+---
+
+## Merge-only round (union with PR #42, head ea1e010)
+
+| Field | Value |
+|---|---|
+| PR | #39, branch `feat/TASK-014-hardened-multi-stage-images-docker`, pushed at `ea1e010` in one push from `c85d5e5` (PR comment 6890259994; `git ls-remote` and `gh pr view` both give `ea1e010`). Commits since `c85d5e5`: `b63fe6e` (round-2 record, docs only), `018dfa7` (merge of `main` `3d9aa8b`: PR #42 `a082560` plus docs), `14f3ea7` (the `DB_TENANT_*` variable names), `ea1e010` (lane B evidence). |
+| Head | ea1e0105d57bbe8dd995fea65c281746a70e029a |
+| Base | Merge base `3d9aa8b0dbf1da0ec743d16981fa7c35ad6670f2` (lane A `RANGE_BASE`). When this round was written, `main` was at `5d2c102`; since `3d9aa8b` it gained only `docs/sdlc/STATUS.md`. |
+| Owned paths changed since `c85d5e5` | 5: `apps/api/src/platform/db/config-exit.test.ts`, `apps/api/src/platform/db/with-tenant-tx.ts`, `package-lock.json`, `packages/config/src/guards.ts`, `prisma/package.json`. Lane A's note names exactly these five. The PR now touches 99 owned paths: `ci.yml` equals `main` and has left the diff. |
+| Lane A evidence | Run [43684115250](https://github.com/sukhchdit/shipcube/actions/runs/43684115250) on `ea1e010` (`pull_request`, `RANGE_BASE` `3d9aa8b`). `fast-lane` **success**, every step executed: workflow policy, install flags, lockfile provenance and delta, cooldown, licences, signatures, audit + osv, lane B evidence check, deps:rebuild, commitlint, lint with the 4 GB heap, format, actionlint, type-check, unit, negative fixtures, build, both porcelain gates. `scans`: Gitleaks success (71 commits scanned, no leaks), Semgrep success, oasdiff success. The only failing step is "Security-owned paths need a review record": the record names `c85d5e5`, and the five paths above changed after it. |
+| Lane B evidence | `docs/05-quality/tests/runs/20261115T0541Z_14f3ea7`: profile `pr`, verdict PASS, `git_sha` `14f3ea7`, `git_dirty` false, `build_clean` true, `env_overrides` and `invalid_reasons` empty. api 128, catalog-c1-c14 102, integration 321 (1 skipped), **rls-cross-tenant 126 tests, 0 failures, 0 skipped**, unit 5639 (2 skipped); merged coverage 98.98 % lines / 96.85 % branches; `packages/audit` 100 % / 100 %. Hygiene: MO.7. |
+| Reviewer / date | security-analyst, 2026-11-15, merge-only round against the R2.13 checklist. Read-only on code. No command ran in the PR worktree: this section is the only write there, and the untracked FAIL-run directory was not touched. Git ran in the main checkout against commit SHAs. Docker was used only under the host-wide `docker.lock`, owner tag `sec-pr39mo`, in two short holds. Those holds inspected the developer's local images with `docker run --rm --pull=never --network none` and ran the pinned Gitleaks image with `--pull=never --network none` (the PR range and this record). Nothing was built, pulled or pushed. |
+
+### MO.1 Summary
+
+The union is pure, and every R2.13 item holds:
+
+- **Merge `018dfa7`.** `git merge-tree --write-tree b63fe6e 3d9aa8b` conflicts in exactly `ci.yml` and `values.test.ts`, as the PR body says. The merge commit's tree differs from the merge-tree result only in those two files. `ci.yml` at `ea1e010` is byte-equal to `main`, with one Lint `env:` block and one `NODE_OPTIONS: --max-old-space-size=4096`. `values.test.ts` changes one line against each parent: `GUARDS.length` 15.
+- **`14f3ea7`.** It adds only an optional `variable` argument to `positiveInt` and three literal key names (`DB_TENANT_MAX_CONCURRENT_TX` once, `DB_TENANT_ADMISSION_WAIT_MS` twice), plus test rows. No message changes, and no value reaches a message. `runtime.config_rejected` still carries `{variable, error: <class name>, exitCode: 78}`; `process-errors.ts` and `config-exit.ts` are unchanged since `c85d5e5`. The code-review R2.4 item 2 mislabel is closed.
+- **`GUARDS`** holds 15 distinct guards.
+- **Lockfile.** The leaf-level delta against `main` is exactly the `tsx` leaf of the `prisma` workspace, and it equals the round-2 delta set. The positive control saw `main`'s `@platform/audit` leaf arrive.
+- **Images and stack.** The local api, worker and tooling images were created after `14f3ea7`, matching the developer's stack run (MO.6). My find over them shows 0 test seams, no `typescript`, no package manager and no PEM private-key file outside jose's parsing code. The head scanner reports 0 findings on all three, and the tooling image allows exactly the 7 reviewed entries. Layer sums from `docker history` equal the stack run: worker 296.2 MiB (98.7 % of 300 MiB), api 276.6 MiB (92.2 %), tooling 328.0 MiB (reported, not gated). Stack 54/54 (PR body).
+- **Tooling closure.** The dangling `@platform/audit` link and the unused `canonicalize` 5.1.0 are acceptable. Nothing in the image imports either, `/app` is root-owned, the one-shots run with a read-only root filesystem in Compose, and the scan allow-list is unchanged at 7 entries. Rated INFO as PR39-SEC-14 (MO.5): the image that holds the migrator credentials should not carry test-only closures.
+- **PR45-SEC-02 is still met.** Lane A's Gitleaks command over `origin/main..ea1e010` (71 commits) with `main`'s config finds 0. The pre-#45 config finds the 2 `dd7a2dd` hits, which is the positive control. `dd7a2dd` is not an ancestor of `main`.
+- **Evidence hygiene.** Both D-SEC-PR23-02 statements are verbatim in the union gate table. The host-fragment scan of the 8 new evidence files is 0, with a positive control. No FAIL run is committed: all 10 committed run directories are PASS, profile `pr`.
+
+No new Critical, High, Medium or Low finding. New INFO: PR39-SEC-14. **Verdict: PASS_WITH_FOLLOW-UPS** (MO.12).
+
+### MO.2 Method
+
+1. **Union purity.** `git merge-tree --write-tree --name-only b63fe6e 3d9aa8b`, then `git diff --name-status <merge tree> 018dfa7`. For the two conflicted files, the numstat of `018dfa7` against each parent. `ci.yml` compared with `3d9aa8b` and `origin/main` byte for byte.
+2. **Commit classification.** `git diff --name-status` per commit since `c85d5e5`:
+   - `b63fe6e` touches only this record;
+   - `14f3ea7` touches only `config-exit.test.ts` and `with-tenant-tx.ts`;
+   - `ea1e010` touches only its 8 evidence files.
+
+   Since `c85d5e5`, no image input changed: no Dockerfile, preflight, entrypoint, scanner, Gitleaks config, CODEOWNERS, Dependabot or `tests/compose` file (empty `git diff --stat` over those paths).
+3. **`14f3ea7`.** Read in full, plus `git diff origin/main ea1e010` of `with-tenant-tx.ts`: 18 added, 8 deleted, which are this PR's `variable` parameter, `'PGOPTIONS'` and the three admission names. The 5 new test cases were matched by name in the lane B `unit.junit.xml`; all passed.
+4. **Lockfile.** Leaf-level deltas as `(path, before, after)` sets: `d753027 → c85d5e5` (round 2) against `origin/main → ea1e010`, with `c85d5e5 → ea1e010` as the positive control.
+5. **Images.** `docker image inspect` (created time), then, as root with `--network none`:
+   - the round-2 extended find (seams, `typescript`, key-named files, PEM blocks, package managers, top-level count);
+   - the tooling closure list;
+   - a link probe: every `@platform/*` entry and whether it resolves, all dangling links, `canonicalize` version and install scripts, and files that name `@platform/audit` or `canonicalize`;
+   - owners and modes under `/app`.
+
+   As uid 1000: `require.resolve` from `/app/prisma`, and `prisma-version`. Layer sums came from `docker history`, as the stack test computes them. The head `scan-image-secrets.mjs` was copied to scratch with one change, `--pull=never` added to `gitleaksArgs`, and run over the three images.
+6. **PR45-SEC-02.** Lane A's Gitleaks command (`git` mode, `--diff-merges=first-parent`, `.git` mounted read-only) over `origin/main..ea1e010`. It ran once with `main`'s `.gitleaks.toml` and once, as the positive control, with the config before PR #45 (`4a60ca6^`). Ancestry by `git merge-base --is-ancestor`.
+7. **Evidence.** The `summary.json` of every committed run directory; the count-only host-fragment scan (10 labels) over the 8 new files; the PR body's union gate table and the evidence commit message.
+8. **Sequencing.** `git merge-tree` previews of `ea1e010` with PR #46's pushed head `ad30316` and with its local fix-cycle-2 head `0f17495`, and the overlap of the two PRs' non-docs paths against `main`.
+9. **Record simulation** (MO.10).
+
+### MO.3 The R2.13 checklist, item by item
+
+| Item | Check | Result |
+|---|---|---|
+| 1. `values.test.ts` | `expect(GUARDS.length).toBe(15)`. `main` has 13 (12 + #42's `databaseGuard`); the branch has 14 (12 + this PR's two). | **Met.** The resolution changes one line against each parent. `GUARDS` (`guards.ts:336`) lists 15 distinct names, `localAppEnvOnEcsGuard`, `credentialPairGuard`, `logLevelGuard`, `sessionGuard`, `databaseGuard` and `keyMaterialGuard` among them. `guards.ts` changed 18 added / 0 deleted since `c85d5e5` (#42's `databaseGuard`, auto-merged). |
+| 2. `with-tenant-tx.ts` | `TenantTxConfigError(message, variable)` kept; `'PGOPTIONS'` kept; the admission throws name `DB_TENANT_*`; `config-exit.test.ts` rows | **Met** (MO.4). |
+| 3. `ci.yml` | One Lint `env:` block, one heap line, `run: npm run lint` unchanged | **Met.** `ci.yml` at `ea1e010` equals `main` byte for byte; line 260 is its only `max-old-space-size`. The file is no longer in this PR's diff, so the workflow-policy checks of the PR17/D-TASK014-25 heap line now judge `main`'s own state. Lane A's workflow policy and actionlint passed. |
+| 4. `prisma/package.json` and lockfile | `tsx` and `@platform/audit` both in the `prisma` devDependencies; lockfile delta only `tsx`; tooling link state; one-shots | **Met.** The devDependencies are `@platform/audit`, `prisma`, `@types/pg` and `tsx`; the diff against `main` adds only `tsx`. Lockfile: MO.1. Tooling image: MO.5 and MO.6. One-shots: the stack's compose-up case runs migrate and seed (`[AT-US-003-01]`, `[AT-US-049-02]`), and `[SEC-TC-64 (vi)]` runs `prisma-version` with no network. My own `prisma-version` run on the local tooling image exited 0 with `--network none`. |
+| 5. Images and stack | api and worker keep `packages/audit/{package.json,dist}`; stack re-run; fresh evidence | **Met.** The Dockerfiles are unchanged since `c85d5e5`. Stack suite 54/54 on `14f3ea7` (PR body), with these passing: `[sheet line 543]` × 5, `[AT-US-004-02]` × 5, the 6 preflight cases and the 4 size cases. Worker 296.2 MiB = 98.7 % of 300 MiB; api 92.2 %. My own checks: MO.6. |
+| 6. `config/index.ts` | Union of the export lists | **Met.** Against `c85d5e5`: 6 added, 0 deleted (#42's `DB_AUDIT_LOCK_TIMEOUT_MS_*`, `DB_TENANT_*` and `defaultTenantMaxConcurrentTx`). Against `main`: this PR's db-tls, tooling-env, `DATABASE_SSLMODES` and `hasValid…`/`hasOnly…` exports. The 1 deleted line is the one-line `guards.js` export, which this PR expands. |
+| 7. Record | The round names the pushed union commit | **Met.** This section's head row is `ea1e010`, checked with `git ls-remote` before writing. |
+
+### MO.4 `14f3ea7`: the admission refusals name their keys
+
+`with-tenant-tx.ts` at `ea1e010`:
+- `positiveInt(name, value, variable?)` passes `variable` to `TenantTxConfigError`, whose default stays `'DB_TX_*'` (line 137).
+- `resolveAdmissionOptions` (lines 305-312) passes `'DB_TENANT_MAX_CONCURRENT_TX'` and `'DB_TENANT_ADMISSION_WAIT_MS'` to `positiveInt`. It also passes `'DB_TENANT_ADMISSION_WAIT_MS'` for the "wait above `maxWaitMs`" refusal.
+- The transaction-option refusals (`resolveTransactionOptions`) keep the default, and `assertNoSessionOptions` keeps `'PGOPTIONS'`.
+
+Every `variable` is a string literal. Every message is a literal or interpolates only the literal option name (`admission.waitMs`), never a value. `configErrorVariable` and `installProcessErrorHandlers` are unchanged since `c85d5e5`, so their R2.8 probe still applies:
+- one `runtime.config_rejected` line with `{variable, error: <class name>, exitCode: 78}`;
+- no error object reaches the logger;
+- the first error decides the exit code;
+- look-alike names are not diverted to 78.
+
+`CONFIG_EXIT_CODE` is 78 (`packages/config/src/process-env.ts:34`).
+
+Tests added in `config-exit.test.ts`; each one is in the lane B `unit.junit.xml` as passed:
+- four `configErrorVariable` rows: a wait above `maxWaitMs` and a non-positive wait (`DB_TENANT_ADMISSION_WAIT_MS`), a non-integer and a zero concurrency (`DB_TENANT_MAX_CONCURRENT_TX`);
+- one `DB_TX_*` row through `resolveTransactionOptions`;
+- one process-handler case: `runtime.config_rejected` names `DB_TENANT_ADMISSION_WAIT_MS`, with `error` `TenantTxConfigError` and exit 78.
+
+These refusals are a second line of defence. The configuration schema already bounds both keys (`DB_TENANT_MAX_CONCURRENT_TX` `t.int(1, DB_POOL_MAX_LIMIT)`, `DB_TENANT_ADMISSION_WAIT_MS` `t.int(1, DB_TENANT_ADMISSION_WAIT_MS_MAX)`), and so does `databaseGuard` (`db.tenantConcurrency`). The "(ms)" suffix in the concurrency message is a cosmetic leftover of `positiveInt`'s wording, not a security matter.
+
+### MO.5 PR39-SEC-14 (INFO): the tooling image carries a test-only closure
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner / due | Status |
+|---|---|---|---|---|---|---|---|
+| PR39-SEC-14 | The tooling image ships the `prisma` workspace's test-only devDependency `@platform/audit` as a dangling workspace link, plus its unused dependency `canonicalize`; dangling `.bin` shims of pruned packages also remain | INFO | CWE-1164 | A05 | `prisma/package.json:27`; `prisma/Dockerfile` (the `prune-deps --dev … prisma` step keeps every `prisma` devDependency and its production closure) | devops, with PR39-SEC-12 (before lane B `image-assertions` activation), or the next PR that changes `prisma/Dockerfile` | Open |
+
+- **Description.**
+  - #42 added `@platform/audit` to the `prisma` devDependencies for `prisma/tests/audit/audit-writer.int.test.ts`. The tooling build runs `npm ci --include=dev --workspace=prisma` and then `prune-deps --dev … prisma`, which keeps every `prisma` devDependency and its production closure.
+  - So `/app/node_modules/@platform/audit` stays as a link to `../../packages/audit`, a folder the final stage never copies (`/app/packages` holds `authz`, `config` and `shared`). `canonicalize` 5.1.0, its one third-party dependency, ships with its `.bin/canonicalize` shim. The top-level count rises from 67 to 68.
+  - The other `@platform` links (`authz`, `config`, `prisma`, `shared`) resolve.
+  - The image holds 6 dangling links: `@platform/audit`, and 5 `.bin` shims of packages that `prune-deps` removed (`tsc` and `tsserver` of `typescript`, `pglite-server` of `@electric-sql/pglite-socket`, `safe-regex2`, and `node-which` of `which`). The shims are not from the union. `prune-deps` removes packages but not their `.bin` links, the lockfile gained no package in the union (`c85d5e5 → ea1e010` changes one leaf), and neither `canonicalize` nor `packages/audit` declares one of those bins.
+  - Only `/app/prisma/package.json` (the devDependency declaration) and the hidden lockfile name either package; no source file in the image imports them.
+- **Impact.** No exposure today:
+  - nothing in the image imports either package; a `require.resolve('@platform/audit')` from `/app/prisma` fails with `MODULE_NOT_FOUND`, which fails closed;
+  - the link target is relative and inside `/app`. `/app`, `/app/packages` and `/app/node_modules` are root-owned 755. Compose runs the one-shots with `read_only: true`, and ECS will run them with a read-only root filesystem (PR39-SEC-07 M5 list). So the link cannot be made to resolve to planted code. No directory under `/app` is owned by uid 1000 or world-writable. The 18 mode-777 entries the probe lists are symlinks, whose mode Linux ignores.
+  - `canonicalize` 5.1.0 is Apache-2.0 (allow-listed). It has no dependencies and no install script, was published 2026-09-18, and passed lane A's licence, signature, audit and osv steps. The api and worker images already ship it for the audit writer;
+  - the image secret scan still allows exactly the 7 reviewed entries, and no entry was added (`scan-image-secrets.mjs` is unchanged since `c85d5e5`).
+
+  The residual is hygiene. The image that holds the migrator credentials carries code that no tooling command needs, and the next test-only devDependency added to `prisma` will ship the same way, unnoticed. INFO.
+- **Remediation (code level, optional).** Keep test-only workspace links out of the tooling closure, drop dangling links, and assert both.
+  ```dockerfile
+  # prisma/Dockerfile, build stage, after prune-deps and prune-dist (packages/audit is not copied to the final stage)
+   && rm -f node_modules/@platform/audit \
+   && find node_modules -xtype l -delete \
+  ```
+  Stop the `--dev` closure at the link as well, so `canonicalize` goes too. For example, add a `prune-deps --omit-dev <name>` option that drops named devDependencies, and pass `--omit-dev @platform/audit`. Then `--dev` keeps only what the tooling commands run: `prisma`, `tsx`, and `@types/pg`, which is type-only.
+  ```ts
+  // tests/compose/images.stack.test.ts, next to the [PR39-SEC-04] tooling case
+  expect(findInImage(IMAGES.tooling, ['/app', '-xtype', 'l'])).toEqual({ status: 0, found: '' });
+  expect(findInImage(IMAGES.tooling, ['/app/node_modules', '-maxdepth', '1', '-name', 'canonicalize'])).toEqual({ status: 0, found: '' });
+  ```
+- **Verification.**
+  - The tooling image has 0 dangling links and no `canonicalize`.
+  - `prisma-version`, `migrate` and `seed` still pass.
+  - The tooling secret scan still allows exactly 7 entries.
+
+### MO.6 Images
+
+**Provenance.**
+- `shipcube-{api,worker,tooling}:local` were created 05:05Z on 2026-11-15. That is four minutes after `14f3ea7` was committed (05:01Z), which matches the PR body's stack run on `14f3ea7`. `14f3ea7..ea1e010` adds only the 8 evidence files, which no build context reads.
+- `shipcube-{web,admin}:local` are the 2026-11-13 images. Their inputs are unchanged since round 1 apart from bundle inputs, and the PR body reports cache hits with byte-identical bundles. My web/admin evidence is the stack run only.
+
+| Image | Seams (round-2 extended find) | `typescript` | PEM private-key files | Package managers | Top-level packages | Head scanner (`--pull=never` copy) |
+|---|---|---|---|---|---|---|
+| tooling | 0 | 0 | 0 | none | 68 (67 + `canonicalize`) | exit 0, 0 findings; exactly the 7 reviewed entries allowed; `/usr/local/bin/node` reported as skipped (known binary); 53 s |
+| api | 0 | 0 | 2 (jose's PEM-parsing code, as in round 2) | none | 152 | exit 0, 0 findings, none allowed, node binary reported as skipped |
+| worker | 0 | 0 | 2 (same) | none | 170 | exit 0, 0 findings, none allowed, node binary reported as skipped |
+
+- **Tooling closure.** Of the probed names, the image holds only the expected `@types`, `tsx`, `prisma`, `@prisma`, `pg` and `effect`. It holds no `eslint-*` or `jest-*` package and no other root-toolchain name.
+- **api and worker.** `canonicalize` and `packages/audit/dist` are present (the audit writer needs both), and the images have 0 dangling links.
+
+**Sizes** (layer sum from `docker history`, as the stack test computes it):
+
+| Image | Layer sum | Budget | Share |
+|---|---|---|---|
+| worker | 310,603,776 bytes = 296.2 MiB | 300 MiB | 98.7 % (WARN) |
+| api | 290,062,336 bytes = 276.6 MiB | 300 MiB | 92.2 % (WARN) |
+| tooling | 343,941,120 bytes = 328.0 MiB | reported, not gated | n/a |
+
+These equal the stack run's figures. The worker has 3.8 MiB of headroom, and the size case fails the stack suite on any breach (D-ARCH-118). That is capacity, not security.
+
+### MO.7 PR45-SEC-02 and evidence hygiene
+
+**PR45-SEC-02.**
+
+| Check | Result |
+|---|---|
+| Lane A's Gitleaks command, `main`'s `.gitleaks.toml` (with the PR #45 entry), `--diff-merges=first-parent origin/main..ea1e010` (`5d2c102..ea1e010`, the same commits as `3d9aa8b..ea1e010`) | 71 commits scanned, **0 findings** |
+| Same range, the config before PR #45 (`4a60ca6^`), positive control | 2 findings, both `dd7a2dd` `tools/docker/scan-image-secrets.mjs` lines 272-273 `generic-api-key` |
+| `git merge-base --is-ancestor dd7a2dd origin/main` | exit 1: **`dd7a2dd` is not an ancestor of `main`**. It is an ancestor of `ea1e010`, as expected until the squash merge. |
+| `756d505` in the head | An ancestor of `ea1e010` |
+| Lane A, a new `pull_request` event | Run 43684115250 on `ea1e010`: Gitleaks success, 71 commits, no leaks |
+
+**Lane B evidence `20261115T0541Z_14f3ea7`.**
+- **D-SEC-PR23-02 statements, verbatim, in the union gate table of the PR body:**
+  - "**`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first**", in a fresh clean worktree of the branch at `14f3ea7`;
+  - "**`.git/info/exclude` is empty** (0 bytes)".
+
+  The evidence commit message repeats both statements. I checked the shared `.git/info/exclude`: 0 bytes.
+- **Host-fragment scan.** My count-only scan covered all 8 files of the new run directory with 10 labels: OS user, its 8.3 stem, home and temp dir in both separator forms, host name, git e-mail, and two users-dir forms. It found 0 hits; the positive control fired for every label.
+- **Committed runs.** The PR now adds 10 run directories. In every `summary.json`, the verdict is PASS, the profile `pr`, `git_dirty` false, `build_clean` true and `env_overrides` empty. No `FAIL` verdict is committed anywhere under `docs/05-quality/tests/runs/` at `ea1e010`, and no `wave` or `gate` run is committed.
+- **The untracked FAIL directory in the PR worktree** is untouched and is not in any commit.
+- **Parked SEC-TC note.** check-evidence's note "pending ID SEC-TC-74 is implemented in suite catalog-c1-c14" belongs to `main`'s manifest (D-SEC-PR47-01, D-ORCH-088), not to this PR.
+
+### MO.8 Sequencing and unions (updates §7 and R2.13)
+
+**PR #42: done.** This round closes the R2.13 merge-only requirement.
+
+**PR #46 (015-B, fix cycle 2 in progress).**
+- **Pushed head `ad30316`** (base `d753027`). A union with `ea1e010` still conflicts in `ci.yml` only, because both sides add the Lint heap block.
+- **Local head `0f17495`** (not pushed). It has merged `main` `3d9aa8b`, and it adds `pull_request: branches: [main]` plus the lane-scope proof binding (R2-M1, PR46-SEC-13).
+  - A union with `ea1e010` is **clean**. Its `ci.yml` is #46's file, with exactly one `max-old-space-size` line.
+  - The two PRs' non-docs diffs against `main` overlap in 5 paths, all auto-merged: `jest.config.ts`, `package.json`, `tools/ci/check-workflow-policy.{mjs,test.ts}` and `tools/deps/rebuild.mjs`.
+  - The preview union keeps:
+    - the PR39-SEC-05, PR40-SEC-01 and PR43-SEC-04 `REQUIRED_CODEOWNED_PATHS` blocks;
+    - #46's `gh-token`, `dispatch-only`, `playwright-install` and `scans-isolation` rules;
+    - `prismaArgv` and the Playwright-redirect refusal in `rebuild.mjs`;
+    - `test:stack`, `test:coverage` and `ci:minutes`;
+    - the `stack` project behind `JEST_STACK`.
+
+Whichever of #39 and #46 merges second needs a merge-only round. Simulation S8 shows why: if #46 merges first, the union voids this record through those overlapping owned paths. That round checks:
+- **`ci.yml`.** Exactly one Lint `env:` block with one heap line, `run: npm run lint` byte-identical, and every stage-1 hunk of #46: `pull_request: branches: [main]`, the push `paths-ignore`, and the lane-scope and proof steps. If #39 merges second, its `ci.yml` must equal the new `main` byte for byte, as it does now.
+- **The other overlapping files.** The R2.13 #46 list for `check-workflow-policy`, `package.json`, `jest.config.ts` and `rebuild.mjs` (unchanged).
+- **The policy checker.** `main`'s base-ref `check-workflow-policy` and the head copy both pass on the union `ci.yml`.
+
+**PR #45 retirement.** Unchanged (R2.13). After #39 squash-merges and `dd7a2dd` is confirmed absent from `main`'s ancestry, the commit-bound entry may be retired by its own PR (D-SEC-PR45-01).
+
+### MO.9 Checks owed (updates R2.14)
+
+| Owner / when | Item |
+|---|---|
+| Second merger of #39 and #46 | MO.8 list; merge-only security round |
+| qa-lead + devops, Wave-0-exit activation PR | PR39-SEC-10 and PR39-SEC-11, unchanged |
+| devops, with PR39-SEC-10 | PR39-SEC-12, plus PR39-SEC-14 (test-only closure and dangling links out of the tooling image, with a stack assertion) |
+| devops, first Dependabot run | Unchanged (R2.14) |
+| M5 ECS task definitions | PR39-SEC-07, the round-1 M5 list and PR39-SEC-13; the tooling one-shots with `readonlyRootFilesystem` (this keeps PR39-SEC-14 at INFO) |
+| 015-C | R2.9 observation, unchanged |
+| TASK-119 / G3 | Trivy (D-SEC-PR39-02), unchanged |
+
+### MO.10 Record simulation and secret hygiene
+
+**Setup.**
+- `main`'s `tools/ci/check-security-owned-paths.mjs`, run as lane A runs it. `main`'s tip is `5d2c102`, and its `tools/ci` equals the base-ref copy at `3d9aa8b`.
+- A scratch `git clone --shared --no-checkout` with a sparse checkout of `.github/`, `docs/05-quality/security/` and `tools/ci/`.
+- Scenario commits built with plumbing on `ea1e010`, each checked out detached and checked with `--root <clone> --json`.
+- Nothing is written to the main repository's refs or objects.
+- This section, checked before the run: exactly one table row whose first cell starts with `Head` (the full `ea1e010` SHA), and exactly one `| **Verdict** |` row, which is the last line.
+
+| Scenario | `--base` / `--head` / `--pr` | Expected | Result |
+|---|---|---|---|
+| S0: `ea1e010` as pushed, with rounds 1 and 2 only (control) | `3d9aa8b` / `ea1e010` / 39 | missing (names `c85d5e5`, 5 paths) | missing: names `c85d5e5`; `config-exit.test.ts`, `with-tenant-tx.ts`, `package-lock.json`, `guards.ts` and `prisma/package.json` changed after it (lane A's note) |
+| S1: this section appended and committed on `ea1e010` | `3d9aa8b` / S1 / 39 | pass, satisfied by `ea1e010` | **pass**: 99 owned paths, satisfied by `ea1e010`. The `894c72e` and `c85d5e5` rows only add notes. |
+| S2: S1 with `--base` = the `main` tip | `5d2c102` / S1 / 39 | pass | pass, satisfied by `ea1e010` |
+| S3: S1 checked as PR #40 | `3d9aa8b` / S1 / 40 | missing | missing |
+| S4: S1 plus a later edit of `with-tenant-tx.ts` | `3d9aa8b` / S4 / 39 | missing | missing: names `ea1e010`, and `with-tenant-tx.ts` changed after it |
+| S5: S1 with this round's verdict set to FAIL | `3d9aa8b` / S5 / 39 | missing | missing (verdict FAIL) |
+| S6: S1 plus a docs-only commit | `3d9aa8b` / S6 / 39 | pass | pass |
+| S7: S1 without this round's final verdict row (control) | `3d9aa8b` / S7 / 39 | pass on round 2's row (the procedural gap noted in PR10-SEC-04) | pass (procedural, as expected) |
+| S8: #46's local head `0f17495` squashed onto `main`, then merged into S1 (both merges clean) | squash commit / S8 / 39 | missing (MO.8) | missing: names `ea1e010`; `jest.config.ts`, `package.json`, `check-workflow-policy.{mjs,test.ts}` and `rebuild.mjs` changed after it |
+| S9: this section with its head row naming `c85d5e5` instead | `3d9aa8b` / S9 / 39 | missing | missing: names `c85d5e5` and the 5 paths |
+
+**Secret and host hygiene of this section.**
+- **Gitleaks.** The pinned Gitleaks image (`--pull=never`, `--network none`, default config, `dir` mode, `--redact`) scanned the whole candidate record, beside a runtime-generated positive control. The candidate was rounds 1 and 2 plus this section, before the last hold figures were filled in. Result: 1 finding, the control only. The Gitleaks emulator (222 rules, three runtime controls fired) then re-checked the final text: 0 findings.
+- **Host fragments.** A count-only host-fragment scan of the final record (10 labels, positive control fired) found 0 hits.
+- **Quoted content.** The section quotes no secret value, no env-file value, no `effect` constant value, no scratch path and no user name. `.env.example`, which `main` changed in #42, was not opened; lane A's Gitleaks scanned its added lines in the range.
+- **Docker.** `docker.lock` was released after each hold (owner tag `sec-pr39mo`). Every container ran with `--rm`, and Docker never mounted the PR worktree.
+
+### MO.11 Proposed decision entry (for the orchestrator; DECISIONS.md not edited)
+
+- **D-SEC-PR39-09 · security-analyst · PR #39 merge-only round at `ea1e010` (union with PR #42).**
+  - **Verdict:** PASS_WITH_FOLLOW-UPS.
+  - **R2.13 checklist met:**
+    - the union is pure: `018dfa7` equals `git merge-tree` outside the two conflicted files, and `ci.yml` equals `main` with one Lint heap line;
+    - `GUARDS` has 15 entries;
+    - `14f3ea7` adds only the `DB_TENANT_*` variable names and test rows (exit 78, names only);
+    - the lockfile delta against `main` is only the `tsx` leaf;
+    - the stack is 54/54, with the worker at 296.2 MiB (98.7 %);
+    - fresh lane B evidence is PASS (rls-cross-tenant 126/0/0, the `packages/audit` gates).
+  - **New INFO:** PR39-SEC-14. The tooling image carries the test-only `@platform/audit` link (dangling), the unused `canonicalize` and dangling `.bin` shims. Owner: devops, with PR39-SEC-12.
+  - **PR45-SEC-02 met:** range scan `origin/main..ea1e010` 0 findings (71 commits), positive control 2, `dd7a2dd` not an ancestor of `main`.
+  - **Sequencing:** the second merger of #39 and #46 needs a merge-only round (MO.8).
+  - **Reversibility:** high.
+
+### MO.12 Verdict (merge-only round)
+
+| Field | Value |
+|---|---|
+| Findings | 0 Critical, 0 High, 0 Medium, 0 Low open. Open INFO: PR39-SEC-07, -08, -09, -10 (round 1), -11, -12, -13 (round 2) and -14 (new) |
+| Conditions | None open |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High, Medium or Low finding is open at head `ea1e010`. The union with PR #42 is pure, every R2.13 item is met, and `14f3ea7` only names the `DB_TENANT_*` keys. The lockfile delta is the `tsx` leaf alone, the stack and lane B evidence are fresh and green, and PR45-SEC-02 still holds. The INFO follow-ups have owners in MO.9. The second merger of #39 and #46 needs a merge-only round (MO.8) |
