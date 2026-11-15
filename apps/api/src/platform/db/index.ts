@@ -30,6 +30,16 @@ export {
   mapDbError,
   toDbError,
 } from './map-db-error.js';
+export {
+  type AdmissionKey,
+  type AdmissionKeyKind,
+  admissionKeyOf,
+  type AdmissionRejectReason,
+  TENANT_ADMISSION_METRICS,
+  type TenantAdmissionMetrics,
+  type TenantAdmissionOptions,
+  type TenantAdmissionSnapshot,
+} from './tenant-admission.js';
 export { TENANT_DB_OMITTED, type TenantDb, TenantDbAccessError } from './tenant-db.js';
 export {
   type ActorScope,
@@ -37,6 +47,7 @@ export {
   DEFAULT_MAX_WAIT_MS,
   guestTokenHash,
   isInsideTenantTx,
+  resolveAdmissionOptions,
   type SecurityEventDetail,
   type TenantContext,
   tenantTxOptionsFromConfig,

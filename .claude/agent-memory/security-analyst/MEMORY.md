@@ -35,6 +35,7 @@
 - [P5 PR-0038 020-B](project_p5_pr38_020b.md) — R1 @bdf009d + delta R2 @8b3a8ed PASS_W_F-U; 01/02/05/06 closed; 03 LOW/04 INFO open (020-C); R1-m1 differential kit; exclude-file check
 - [P5 PR-0040 merged-coverage hook](project_p5_pr40_covhook.md) — R1 @2b651f7 + R2 delta @e8f4461 PASS_W_F-U; 01-04 closed; new LOW 07 space-in-name, LOW 09 probe temp Jest, INFO 08
 - [P5 PR-0039 TASK-014 images](project_p5_pr39_task014_images.md) — R1 @894c72e PASS_W_COND (C1 routing/tests find, C2 gitleaks skips node_modules); tooling dev closure; preflight argv/ECS; #40/#41/#42 unions
+- [P5 PR-0039 round 2](project_p5_pr39_r2.md) — @c85d5e5 PASS_W_F-U; C1/C2 + 02-06 closed; INFO 11-13; #42 merged after head → merge-only R2.13; gitleaks ignore/archive + env-proxy facts
 - [P5 PR-0042 audit writer](project_p5_pr42_audit_writer.md) — TASK-025 R1 @e7dfbac PASS_W_F-U; 01 MED anon admission key, 02 MED rethrow; LOW 03-07,12; fix cycle -> R2; #39 overlap
 - [P5 PR-0043 RLS generator](project_p5_pr43_task024_rls_generator.md) — TASK-024 R1 @8ac271d PASS_W_COND; R2 @585f163 PASS_W_F-U (C1/C2 closed); LOW 11 over-count+END, 12 positiveStatus; #44/#39/#42 unions
 - [P5 PR-0045 gitleaks allow](project_p5_pr45_gitleaks_allow.md) — R1 @66ae5c1 PASS_W_F-U; D-SEC-PR45-01 commit-bound FP class; SEC-01 LOW disabledRules pin gap; line-target `\n` fact
@@ -42,4 +43,6 @@
 - [P5 PR-0044 020-C phases](project_p5_pr44_020c.md) — R1 @9def3f5 PASS_W_F-U; 01 MED aliased createRequire escapes import controls; LOW 02-05 (signal, afterCommit cap, T-83, raw COMMIT); kit
 - [P5 PR-0044 round 2](project_p5_pr44_r2.md) — @d943ef7 PASS_W_F-U; 01-04 closed; LOW 10 template createRequire key, 13 AppError cause to stderr; INFO 11/12/14; union list R2.8
 - [P5 PR-0046 015-B lane C](project_p5_pr46_015b_lane_c.md) — R1 @12ea6a6 PASS_W_F-U; PR33-SEC-08 closed; LOW 01 supply-chain order, 02 npm_config_ Playwright redirect, 03-05; D-ORCH-077 delta round owed
+- [P5 PR-0046 round 2](project_p5_pr46_r2.md) — @ad30316 PASS_W_F-U; 01/02/03/06 closed; new LOW 11 audit, 12 scans GATE_LANE_SCOPE, 13 cross-base proof; CODEOWNERS ruling; #42/#39 unions
 - [P5 PR-0047 rls activation](project_p5_pr47_rls_activation.md) — R1 @be8780b PASS_W_F-U; D-SEC-PR47-01 SEC-TC-74 to required before TASK-037; LOW 01/02 (heavy --base), INFO 03
+- [P5 PR-0042 round 3](project_p5_pr42_r3.md) — @96bd37a PASS_W_F-U; 13/14/16 closed; new MED 17 deferred-start write (H2 fix), LOW 19, INFO 18 lint env; round-4 triggers

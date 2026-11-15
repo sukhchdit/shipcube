@@ -39,8 +39,8 @@ const ADMISSION_WAIT_MS = 300;
 /**
  * Records `begin:ro` / `begin:rw`, `commit` and `rollback`. With `cap` it is a bulkhead like the D-ARCH-086 admission
  * permit: at most `cap` transactions are open, a further one waits up to ADMISSION_WAIT_MS for a permit and is then
- * refused with a retryable 503 DbError (TENANT_CONCURRENCY_LIMIT; that reason code arrives with TASK-025, the stand-in
- * reason here maps to the same status and Retry-After). `refuse` refuses the transactions whose 1-based index it lists.
+ * refused with the same retryable 503 DbError as the real one (TENANT_CONCURRENCY_LIMIT, TASK-025). `refuse` refuses
+ * the transactions whose 1-based index it lists.
  */
 function fakeRunner(events: string[], options: { readonly cap?: number; readonly refuse?: readonly number[] } = {}): FakeRunner {
   const contexts: TenantContext[] = [];
@@ -49,7 +49,7 @@ function fakeRunner(events: string[], options: { readonly cap?: number; readonly
   const waiting: (() => void)[] = [];
   const refused = (): DbError => {
     events.push('refused');
-    return new DbError(dbErrorMapping(503, 'TRANSACTION_UNAVAILABLE', { retryable: true }));
+    return new DbError(dbErrorMapping(503, 'TENANT_CONCURRENCY_LIMIT', { retryable: true }));
   };
   const admit = async (): Promise<boolean> => {
     const deadline = Date.now() + ADMISSION_WAIT_MS;

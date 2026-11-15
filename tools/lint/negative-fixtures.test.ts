@@ -243,6 +243,19 @@ const RULES: readonly Violation[] = [
     'platform/audit-writer-allowlist',
     '',
   ],
+  // PR #42 R1-M1 / PR42-SEC-06: the write-capable store and the entry assembler are writer exports too.
+  [
+    'platform/audit-writer-allowlist: a module outside the allow-list imports the audit store (R1-M1)',
+    `rules/audit-writer-allowlist/${API}/orders/service/bad-orders-store.service.ts`,
+    'platform/audit-writer-allowlist',
+    'allowed only in the audit-writer allow-list',
+  ],
+  [
+    'platform/audit-writer-allowlist: a module outside the allow-list imports the entry assembler (PR42-SEC-06)',
+    `rules/audit-writer-allowlist/${API}/orders/service/bad-orders-prepare.service.ts`,
+    'platform/audit-writer-allowlist',
+    'allowed only in the audit-writer allow-list',
+  ],
   [
     '[PR44-SEC-01 A05] platform/audit-writer-allowlist: the audit writer through an aliased createRequire (R1-m6)',
     `rules/audit-writer-allowlist/${API}/orders/service/bad-create-require-writer.ts`,
@@ -505,6 +518,12 @@ const RULES: readonly Violation[] = [
     'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/audit/bad-audit-hook.ts',
     TENANT_TX_IO,
     'runs inside a tenant-transaction file',
+  ],
+  [
+    `[PR42-SEC-07] ${TENANT_TX_IO}: R6 a tokeniser taking db: AuditSqlPort (a sleep and fetch; outbound-http fires too)`,
+    'rules/no-external-calls-in-tenant-tx/packages/audit/src/bad-kms-tokeniser.ts',
+    [TENANT_TX_IO, TENANT_TX_IO, OUTBOUND_HTTP],
+    '',
   ],
   [
     `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R6 is type-name based (ctx: CarrierContext, db: DatabaseRuntime and a TenantDb callback type are not roots; only outbound-http fires)`,
@@ -1065,8 +1084,32 @@ const WARNINGS: readonly (readonly [title: string, file: string, ruleId: string]
   ],
 ];
 
+/**
+ * PR #42 R2-M1 / PR42-SEC-16 (REQ-AUDIT-001): api code outside the audit-writer allow-list value-imports nothing from
+ * apps/api/src/platform/audit (the composed writer), judged on the resolved file whatever the spelling.
+ */
+const AUDIT_COMPOSITION_ROOT = 'layering/audit-writer-composition/apps/api/src';
+const AUDIT_COMPOSITION_MESSAGE = 'REQ-AUDIT-001: apps/api/src/platform/audit composes the audit writer';
+const AUDIT_COMPOSITION: readonly Violation[] = [
+  ['V1 a named import (probe p7)', 'modules/orders/service/bad-orders-platform-writer.service.ts'],
+  ['V2 a namespace import', 'modules/orders/service/bad-orders-platform-writer-namespace.service.ts'],
+  ['V3 a dynamic import()', 'modules/orders/service/bad-orders-platform-writer-dynamic.service.ts'],
+  ['V4 a re-export', 'modules/orders/service/bad-orders-platform-writer-reexport.service.ts'],
+  ['V6 the ./ and platform/./audit spellings', 'modules/orders/service/bad-orders-platform-writer-dot.service.ts'],
+  ['a .. detour through the folder', 'modules/orders/service/bad-orders-platform-writer-dotdot.service.ts'],
+  ['V7 a file at the app root', 'bad-root-writer.ts'],
+  ['a platform folder outside the allow-list (platform/http)', 'platform/http/bad-http-writer.ts'],
+  ['the tx slot takes the writer, not only the capture hook', 'platform/tx/bad-tx-writer.ts'],
+].map(([title, file]): Violation => [
+  `[PR #42 R2-M1] api code outside the audit-writer allow-list imports the audit composition: ${title}`,
+  `${AUDIT_COMPOSITION_ROOT}/${file}`,
+  BOUNDARIES,
+  AUDIT_COMPOSITION_MESSAGE,
+]);
+
 const ESLINT_VIOLATIONS = [
   ...LAYERING,
+  ...AUDIT_COMPOSITION,
   ...SHARED_LOGGING,
   ...ANY_SUPPRESSION,
   ...BCRYPT_CONFINEMENT,
@@ -1225,6 +1268,30 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     [
       'platform/audit-writer-allowlist: allow-listed identity module',
       `rules/audit-writer-allowlist/${API}/identity/service/ok-login.service.ts`,
+    ],
+    [
+      'platform/audit-writer-allowlist: the audit middleware folder composes the writer over the store (R1-M1)',
+      'rules/audit-writer-allowlist/apps/api/src/platform/audit/ok-store.ts',
+    ],
+    [
+      'platform/audit-writer-allowlist: pure audit helpers outside the allow-list (PR42-SEC-06)',
+      `rules/audit-writer-allowlist/${API}/orders/service/ok-pure-helpers.ts`,
+    ],
+    [
+      '[PR #42 R2-M1] V8 the allow-listed identity module imports the audit composition',
+      'layering/audit-writer-composition/apps/api/src/modules/identity/service/ok-identity-writer.service.ts',
+    ],
+    [
+      '[PR #42 R2-M1] V9 a type-only import of the audit composition outside the allow-list',
+      'layering/audit-writer-composition/apps/api/src/modules/orders/service/ok-type-only-platform-writer.ts',
+    ],
+    [
+      '[PR #42 R2-M1] a test file imports the audit composition',
+      'layering/audit-writer-composition/apps/api/src/modules/orders/service/ok-platform-writer.test.ts',
+    ],
+    [
+      '[PR #42 R2-M1] the tx slot mounts the capture hook (capture.ts)',
+      'layering/audit-writer-composition/apps/api/src/platform/tx/execute.ts',
     ],
     ['platform/money-arith: the money helpers', 'rules/money-arith/packages/shared/src/money/add.ts'],
     ['platform/no-innerhtml: the sanitising component', 'rules/no-innerhtml/packages/ui/src/sanitised-html/sanitised-html.tsx'],

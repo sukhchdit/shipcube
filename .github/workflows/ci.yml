@@ -253,6 +253,11 @@ jobs:
 
       - name: Lint (ESLint, Stylelint, suppressions)
         if: env.CODE == 'true'
+        # The typed ESLint pass over the whole workspace needs more than the runner's default V8 heap (about 2 GB) once
+        # packages/audit joins the 020-C rule set (measured 2.1-2.3 GB; the job died with "heap out of memory"). A heap
+        # size only, no preload (node-options-preload policy); every rule and file is linted as before (PR #42 fc2).
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run lint
 
       # PR4-SEC-13 item 1: typegen (React Router config and route modules, vite.config.ts) runs inside `npm run lint`

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it, jest } from '@jest/globals';
-import { DB_CONNECTION_TIMEOUT_MS_MIN } from '@platform/config';
+import { type AppendedEntry, type AuditEntryInput, type AuditStore, AuditWriteError, createAuditWriter, pii } from '@platform/audit';
+import { DB_CONNECTION_TIMEOUT_MS_MIN, DB_TENANT_ADMISSION_WAIT_MS_MAX } from '@platform/config';
 
 import { DbError, type DbSecurityEvent } from './map-db-error.js';
 import type { TenantDb } from './tenant-db.js';
@@ -15,6 +16,7 @@ import {
   guestTokenHash,
   hasLeakedContext,
   isInsideTenantTx,
+  resolveAdmissionOptions,
   resolveTransactionOptions,
   type SecurityEventDetail,
   type TenantContext,
@@ -370,14 +372,17 @@ describe('factory configuration (ADR-0005 am.10 items 3 and 4)', () => {
     expect(() => resolveTransactionOptions({ ...OPTIONS, ...overrides })).toThrow(message);
   });
 
-  it('tenantTxOptionsFromConfig maps the DB_TX_* keys and the pool connection timeout', () => {
+  it('tenantTxOptionsFromConfig maps the DB_TX_* keys, the pool connection timeout and the admission keys', () => {
     const options = tenantTxOptionsFromConfig({
       DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
       DB_TX_LOCK_TIMEOUT_MS: 2_000,
       DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
       DB_CONNECTION_TIMEOUT_MS: 5_000,
+      DB_POOL_MAX: 10,
+      DB_TENANT_MAX_CONCURRENT_TX: 3,
+      DB_TENANT_ADMISSION_WAIT_MS: 400,
     });
-    expect(options).toEqual(OPTIONS);
+    expect(options).toEqual({ ...OPTIONS, admission: { maxConcurrentTx: 3, waitMs: 400 } });
     expect(resolveTransactionOptions(options)).toEqual({ maxWait: 2_000, timeout: 5_000 });
     expect(contextValues(ctx(), options).slice(5)).toEqual(['5000', '2000', '15000']);
   });
@@ -391,6 +396,7 @@ describe('factory configuration (ADR-0005 am.10 items 3 and 4)', () => {
         DB_TX_LOCK_TIMEOUT_MS: 2_000,
         DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
         DB_CONNECTION_TIMEOUT_MS: ms,
+        DB_POOL_MAX: 10,
       });
     expect(resolveTransactionOptions(at(DB_CONNECTION_TIMEOUT_MS_MIN))).toEqual({ maxWait: DEFAULT_MAX_WAIT_MS, timeout: 5_000 });
     expect(() => resolveTransactionOptions(at(DB_CONNECTION_TIMEOUT_MS_MIN - 1))).toThrow(TenantTxConfigError);
@@ -467,5 +473,414 @@ describe('withTenantTx per-transaction client scoping (TASK-032; data-model §7.
       reason: 'INVALID_TENANT_CONTEXT',
     });
     expect(scopeClient).not.toHaveBeenCalled();
+  });
+});
+
+describe('[D-ARCH-086] per-tenant admission bulkhead inside withTenantTx (ADR-0007 am.10 item 3)', () => {
+  const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+  /** A client whose transactions park until released, so permits stay held. */
+  function parkingClient(options: { readonly transactionError?: Error } = {}) {
+    const tx = new FakeTx(CLEAN);
+    const gates: Array<() => void> = [];
+    let started = 0;
+    const client = {
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>): Promise<R> {
+        started += 1;
+        await new Promise<void>((resolve) => gates.push(resolve));
+        if (options.transactionError !== undefined) throw options.transactionError;
+        return fn(tx);
+      },
+      $queryRaw<T>(): Promise<T> {
+        return Promise.resolve([] as T);
+      },
+    };
+    const openAll = (): void => {
+      for (const open of gates.splice(0)) open();
+    };
+    return { client, started: () => started, openAll };
+  }
+
+  const admitted = (maxConcurrentTx: number, waitMs: number, extra: Partial<WithTenantTxOptions> = {}): WithTenantTxOptions => ({
+    ...OPTIONS,
+    ...extra,
+    admission: { maxConcurrentTx, waitMs },
+  });
+
+  const LIMIT = { status: 503, code: 'SERVICE_UNAVAILABLE', reason: 'TENANT_CONCURRENCY_LIMIT', retryable: true, retryAfterSeconds: 1 };
+
+  it('[D-ARCH-086] a refused admission (queue depth, then wait expiry) never calls $transaction and is the retryable 503', async () => {
+    const parking = parkingClient();
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(parking.client, admitted(1, 20), { ...deps, scopeClient: () => parking.client });
+    const first = runner.withTenantTx(ctx(), () => Promise.resolve('first'));
+    await flush();
+    expect(parking.started()).toBe(1);
+    // The queue holds 2 × cap waiters; the key is the validated (lowercased) organisation.
+    const queued = [
+      runner.withTenantTx(ctx({ orgId: ORG.toUpperCase() }), () => Promise.resolve('q1')),
+      runner.withTenantTx(ctx(), () => Promise.resolve('q2')),
+    ];
+    const overflow = await caught(runner.withTenantTx(ctx(), () => Promise.resolve('overflow')));
+    expect(overflow).toBeInstanceOf(DbError);
+    expect(overflow).toMatchObject(LIMIT);
+    expect(runner.admission?.snapshot()).toMatchObject({ rejectedTotal: { wait: 0, depth: 1 }, queued: 2, keys: 1 });
+    for (const waiter of queued) expect(await caught(waiter)).toMatchObject(LIMIT);
+    expect(parking.started()).toBe(1);
+    expect(runner.admission?.snapshot()).toMatchObject({ rejectedTotal: { wait: 2, depth: 1 }, inflight: { tenant: 1 }, queued: 0 });
+    parking.openAll();
+    await expect(first).resolves.toBe('first');
+    expect(runner.admission?.snapshot()).toMatchObject({ inflight: { tenant: 0, anonymous: 0, operator: 0 }, queued: 0, keys: 0 });
+  });
+
+  it('[D-ARCH-086] the permit is released when $transaction rejects (mapped error) and when the callback throws', async () => {
+    const p2028 = Object.assign(new Error('Unable to start a transaction in the given time.'), {
+      name: 'PrismaClientKnownRequestError',
+      code: 'P2028',
+    });
+    const failing = parkingClient({ transactionError: p2028 });
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(failing.client, admitted(1, 50), { ...deps, scopeClient: () => failing.client });
+    const rejected = runner.withTenantTx(ctx(), () => Promise.resolve('never'));
+    // A waiter queued behind it receives the permit by direct hand-off once the failed transaction settles.
+    const next = runner.withTenantTx(ctx(), () => Promise.resolve('never'));
+    await flush();
+    failing.openAll();
+    expect(await caught(rejected)).toMatchObject({ status: 503, reason: 'TRANSACTION_UNAVAILABLE' });
+    await flush();
+    expect(failing.started()).toBe(2);
+    failing.openAll();
+    expect(await caught(next)).toMatchObject({ reason: 'TRANSACTION_UNAVAILABLE' });
+    expect(runner.admission?.snapshot()).toMatchObject({
+      inflight: { tenant: 0 },
+      queued: 0,
+      keys: 0,
+      rejectedTotal: { wait: 0, depth: 0 },
+    });
+
+    const fake = fakeClient();
+    const throwing = createWithTenantTx(fake.client, admitted(1, 50), { ...deps, scopeClient: () => fake.client });
+    const domain = new Error('domain rule');
+    expect(await caught(throwing.withTenantTx(ctx(), () => Promise.reject(domain)))).toBe(domain);
+    expect(throwing.admission?.snapshot()).toMatchObject({ inflight: { tenant: 0 }, keys: 0 });
+    await expect(throwing.withTenantTx(ctx(), () => Promise.resolve('committed'))).resolves.toBe('committed');
+    expect(throwing.admission?.snapshot()).toMatchObject({ inflight: { tenant: 0 }, keys: 0 });
+  });
+
+  it('[D-ARCH-086] the key comes from the validated values: an operator transaction never takes its organisation’s permits', async () => {
+    const parking = parkingClient();
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(parking.client, admitted(1, 20), { ...deps, scopeClient: () => parking.client });
+    const operator = runner.withTenantTx(ctx({ actorScope: 'OPERATOR' }), () => Promise.resolve('operator'));
+    const tenant = runner.withTenantTx(ctx(), () => Promise.resolve('tenant'));
+    const anonymous = runner.withTenantTx(ctx({ orgId: '', actorId: '' }), () => Promise.resolve('anonymous'));
+    await flush();
+    expect(parking.started()).toBe(3);
+    expect(runner.admission?.snapshot()).toMatchObject({ inflight: { tenant: 1, anonymous: 1, operator: 1 }, keys: 3 });
+    // An invalid context is refused before admission: no key state appears.
+    expect(await caught(runner.withTenantTx(ctx({ orgId: 'not-a-uuid' }), () => Promise.resolve(1)))).toMatchObject({
+      reason: 'INVALID_TENANT_CONTEXT',
+    });
+    expect(runner.admission?.snapshot()).toMatchObject({ keys: 3, queued: 0 });
+    parking.openAll();
+    await expect(Promise.all([operator, tenant, anonymous])).resolves.toEqual(['operator', 'tenant', 'anonymous']);
+    expect(runner.admission?.snapshot()).toMatchObject({ keys: 0 });
+  });
+
+  it('[D-ARCH-086] without admission options no bulkhead is built (direct-factory seam)', () => {
+    const { runner } = setup();
+    expect(runner.admission).toBeUndefined();
+  });
+
+  it.each<[string, WithTenantTxOptions, string]>([
+    ['an admission wait above maxWait', admitted(2, 501, { maxWaitMs: 500 }), 'admission.waitMs must not exceed maxWaitMs'],
+    ['an admission wait above the default maxWait', admitted(2, DEFAULT_MAX_WAIT_MS + 1), 'admission.waitMs must not exceed maxWaitMs'],
+    ['a zero cap', admitted(0, 250), 'admission.maxConcurrentTx must be a positive integer'],
+    ['a fractional wait', admitted(2, 2.5), 'admission.waitMs must be a positive integer'],
+  ])('[D-ARCH-086] createWithTenantTx refuses %s with TenantTxConfigError', (_label, options, message) => {
+    const { client } = fakeClient();
+    const { deps } = fakeDeps();
+    const build = () => createWithTenantTx(client, options, { ...deps, scopeClient: () => client });
+    expect(build).toThrow(TenantTxConfigError);
+    expect(build).toThrow(message);
+  });
+
+  it('[D-ARCH-086] an admission wait equal to maxWait builds; resolveAdmissionOptions returns the validated pair', () => {
+    const { client } = fakeClient();
+    const { deps } = fakeDeps();
+    expect(
+      createWithTenantTx(client, admitted(2, 500, { maxWaitMs: 500 }), { ...deps, scopeClient: () => client }).admission,
+    ).toBeDefined();
+    expect(resolveAdmissionOptions({ maxConcurrentTx: 3, waitMs: 250 }, 2_000)).toEqual({ maxConcurrentTx: 3, waitMs: 250 });
+  });
+
+  it('[D-ARCH-086] config parity: DB_TENANT_ADMISSION_WAIT_MS_MAX is the runner maxWait; unset keys take the pool-derived defaults', () => {
+    expect(DB_TENANT_ADMISSION_WAIT_MS_MAX).toBe(DEFAULT_MAX_WAIT_MS);
+    const base = {
+      DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
+      DB_TX_LOCK_TIMEOUT_MS: 2_000,
+      DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+      DB_CONNECTION_TIMEOUT_MS: 5_000,
+    };
+    const atMax = tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 10, DB_TENANT_ADMISSION_WAIT_MS: DB_TENANT_ADMISSION_WAIT_MS_MAX });
+    const { client } = fakeClient();
+    const { deps } = fakeDeps();
+    expect(createWithTenantTx(client, atMax, { ...deps, scopeClient: () => client }).admission).toBeDefined();
+    expect(tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 10 }).admission).toEqual({ maxConcurrentTx: 5, waitMs: 250 });
+    expect(tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 5 }).admission).toEqual({ maxConcurrentTx: 2, waitMs: 250 });
+    expect(tenantTxOptionsFromConfig({ ...base, DB_POOL_MAX: 1 }).admission).toEqual({ maxConcurrentTx: 2, waitMs: 250 });
+  });
+});
+
+describe('[PR42-SEC-02] rollback-only latch: a swallowed audit refusal never commits the business change', () => {
+  const ENTRY: AuditEntryInput = {
+    action: 'CREATE',
+    outcome: 'SUCCESS',
+    entityName: 'address',
+    entityId: 'a-1',
+    orgId: ORG,
+    actor: { type: 'USER', userId: ACTOR },
+    origin: { sourceApp: 'web', correlationId: 'corr-0001-latch' },
+  };
+  const store = (append: AuditStore['append']): AuditStore => ({ append, insertVaultRows: () => Promise.resolve([]) });
+
+  /** The fake client, recording whether each transaction committed (callback resolved) or rolled back (it threw). */
+  function recordingSetup() {
+    const fake = fakeClient();
+    const outcomes: string[] = [];
+    const client = {
+      ...fake.client,
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>, txOptions?: { maxWait?: number; timeout?: number }): Promise<R> {
+        try {
+          const result = await fake.client.$transaction(fn, txOptions);
+          outcomes.push('commit');
+          return result;
+        } catch (error) {
+          outcomes.push('rollback');
+          throw error;
+        }
+      },
+    };
+    const { deps } = fakeDeps();
+    const logged: unknown[] = [];
+    const runner = createWithTenantTx(client, OPTIONS, {
+      ...deps,
+      scopeClient: () => client,
+      onDbError: (error) => void logged.push(error),
+    });
+    return { runner, outcomes, logged };
+  }
+
+  it('an INVALID_ENTRY refusal raised before any SQL, caught and swallowed by the callback, still rolls back with 500', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const writer = createAuditWriter({ store: store(() => Promise.reject(new Error('never called'))), lockTimeoutMs: 250 });
+    const swallowed: unknown[] = [];
+    const error = await caught(
+      runner.withTenantTx(ctx(), async (db) => {
+        await writer.write(db, { ...ENTRY, outcome: 'OK' as 'SUCCESS' }).catch((refusal: unknown) => void swallowed.push(refusal));
+        return 'business change done';
+      }),
+    );
+    expect(swallowed).toEqual([expect.objectContaining({ kind: 'INVALID_ENTRY' })]);
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED', reason: 'AUDIT_WRITE_FAILED' });
+    expect(outcomes).toEqual(['rollback']);
+  });
+
+  it('a swallowed lock timeout rolls back and answers 503 instead of resolving', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const timeout = new AuditWriteError('LOCK_TIMEOUT', { sqlState: '55P03' });
+    const writer = createAuditWriter({ store: store(() => Promise.reject(timeout)), lockTimeoutMs: 250 });
+    const error = await caught(
+      runner.withTenantTx(ctx(), async (db) => {
+        await writer.write(db, ENTRY).catch(() => undefined);
+        return 'ok';
+      }),
+    );
+    expect(error).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE', reason: 'AUDIT_LOCK_TIMEOUT', retryable: true });
+    expect(outcomes).toEqual(['rollback']);
+  });
+
+  it('the first marked failure wins; a later error thrown by the callback itself passes through (and rolls back)', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const first = new AuditWriteError('HEAD_MOVED');
+    const own = new Error('domain rule');
+    expect(
+      await caught(
+        runner.withTenantTx(ctx(), (db) => {
+          db.markRollbackOnly(first);
+          db.markRollbackOnly(new AuditWriteError('LOCK_TIMEOUT', { sqlState: '55P03' }));
+          return Promise.resolve('ok');
+        }),
+      ),
+    ).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(
+      await caught(
+        runner.withTenantTx(ctx(), (db) => {
+          db.markRollbackOnly(first);
+          return Promise.reject(own);
+        }),
+      ),
+    ).toBe(own);
+    expect(outcomes).toEqual(['rollback', 'rollback']);
+  });
+
+  it('an unmarked transaction commits as before, and the latch is per transaction', async () => {
+    const { runner, outcomes } = recordingSetup();
+    const writer = createAuditWriter({ store: store(() => Promise.reject(new AuditWriteError('HEAD_MOVED'))), lockTimeoutMs: 250 });
+    await caught(runner.withTenantTx(ctx(), async (db) => writer.write(db, ENTRY).then(() => 'never')));
+    await expect(runner.withTenantTx(ctx(), () => Promise.resolve('next'))).resolves.toBe('next');
+    expect(outcomes).toEqual(['rollback', 'commit']);
+  });
+});
+
+describe('[PR42-SEC-13] a write the callback starts but does not await never lets the business change commit without its entry', () => {
+  const PII_ENTRY: AuditEntryInput = {
+    action: 'CREATE',
+    outcome: 'SUCCESS',
+    entityName: 'address',
+    entityId: 'a-2',
+    orgId: ORG,
+    actor: { type: 'USER', userId: ACTOR },
+    origin: { sourceApp: 'web', correlationId: 'corr-0002-detached' },
+    newValue: { name: pii({ entityName: 'address', field: 'name', classification: 'PERSONAL', value: 'Asha Rao', subject: null }) },
+  };
+  const PLAIN_ENTRY: AuditEntryInput = { ...PII_ENTRY, newValue: { city: 'Pune' } };
+  const APPENDED: AppendedEntry = { id: 'e-1', streamId: ORG, streamSeq: 1, occurredAt: '', prevHash: '', entryHash: '' };
+  const later = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** The fake client; `events` records the store's statements and whether the transaction committed or rolled back. */
+  function setup() {
+    const fake = fakeClient();
+    const events: string[] = [];
+    const client = {
+      ...fake.client,
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>, txOptions?: { maxWait?: number; timeout?: number }): Promise<R> {
+        try {
+          const result = await fake.client.$transaction(fn, txOptions);
+          events.push('commit');
+          return result;
+        } catch (error) {
+          events.push('rollback');
+          throw error;
+        }
+      },
+    };
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client });
+    /** A store whose append issues two statements on the handed transaction, each recorded once it answered. */
+    const store: AuditStore = {
+      async append(db) {
+        await db.$queryRaw`SELECT 1`;
+        events.push('statement 1');
+        await db.$executeRaw`SELECT 2`;
+        events.push('statement 2');
+        return APPENDED;
+      },
+      insertVaultRows: () => Promise.resolve([]),
+    };
+    return { runner, events, store };
+  }
+
+  it('L8: `void writer.write(...)` with a 20 ms tokeniser commits only after the entry is appended', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({
+      store,
+      lockTimeoutMs: 250,
+      tokeniser: {
+        tokenise: async (_db, values) => {
+          await later(20);
+          return values.map(() => randomUUID());
+        },
+      },
+    });
+    const result = await runner.withTenantTx(ctx(), (db) => {
+      void writer.write(db, PII_ENTRY);
+      return Promise.resolve('business change done');
+    });
+    expect(result).toBe('business change done');
+    expect(events).toEqual(['statement 1', 'statement 2', 'commit']);
+  });
+
+  it('L8c: a tokeniser failing after the callback returned rolls back with 500 (the `.catch(log)` spelling)', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({
+      store,
+      lockTimeoutMs: 250,
+      tokeniser: {
+        tokenise: async () => {
+          await later(20);
+          throw new Error('vault down');
+        },
+      },
+    });
+    const logged: unknown[] = [];
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.write(db, PII_ENTRY).catch((failure: unknown) => void logged.push(failure));
+        return Promise.resolve('business change done');
+      }),
+    );
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(logged).toEqual([expect.objectContaining({ kind: 'TOKENISER_FAILED' })]);
+    expect(events).toEqual(['rollback']);
+  });
+
+  it('L8d: no personal values and a store issuing two statements: the append completes before COMMIT (no timer)', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    await runner.withTenantTx(ctx(), (db) => {
+      void writer.write(db, PLAIN_ENTRY);
+      return Promise.resolve('ok');
+    });
+    expect(events).toEqual(['statement 1', 'statement 2', 'commit']);
+  });
+
+  it('L8d: a detached append failing after its first statement rolls back and answers the audit failure', async () => {
+    const { runner, events } = setup();
+    const failing: AuditStore = {
+      async append(db) {
+        await db.$queryRaw`SELECT 1`;
+        events.push('statement 1');
+        await later(5);
+        throw new AuditWriteError('HEAD_MOVED');
+      },
+      insertVaultRows: () => Promise.resolve([]),
+    };
+    const writer = createAuditWriter({ store: failing, lockTimeoutMs: 250 });
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.write(db, PLAIN_ENTRY).catch(() => undefined);
+        return Promise.resolve('ok');
+      }),
+    );
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(events).toEqual(['statement 1', 'rollback']);
+  });
+
+  it('L8b (control): a refusal raised before the first await of a detached write rolls back, as before', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.write(db, { ...PII_ENTRY, outcome: 'OK' as 'SUCCESS' }).catch(() => undefined);
+        return Promise.resolve('ok');
+      }),
+    );
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(events).toEqual(['rollback']);
+  });
+
+  it('a write started after the transaction settled is refused (TENANT_TX_CLOSED) and touches nothing', async () => {
+    const { runner, events, store } = setup();
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    let kept: TenantDb<FakeTx> | undefined;
+    await runner.withTenantTx(ctx(), (db) => {
+      kept = db;
+      return Promise.resolve('ok');
+    });
+    await expect(writer.write(kept as TenantDb<FakeTx>, PLAIN_ENTRY)).rejects.toThrow('TENANT_TX_CLOSED');
+    expect(events).toEqual(['commit']);
   });
 });
