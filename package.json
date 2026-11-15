@@ -44,6 +44,7 @@
     "test:coverage": "node tools/ci/coverage-run.mjs",
     "coverage:gate": "node tools/ci/coverage-gate.mjs",
     "coverage:diff": "node tools/ci/diff-coverage.mjs",
+    "ci:minutes": "node tools/ci/ci-minutes.mjs",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "test:generated": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js --selectProjects generated --passWithNoTests",
     "test:stack": "node tools/compose/run-stack-tests.mjs",

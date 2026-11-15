@@ -1,0 +1,93 @@
+# nightly.yml: workflow_dispatch only, NO schedule (ADR-0023 section 1 as amended by amendment C; D-ARCH-010 item 4;
+# TASK-015 part 015-B). Its scheduled content is lane B's wave/gate profiles, run locally (D-ORCH-001); these jobs are
+# the hosted extras an agent dispatches when it needs them, on the free allowance (`npm run ci:minutes` first):
+#   gh workflow run nightly.yml --ref main -f job=all
+# - dependency-freshness: `npm outdated` as a report (ADR-0023 section 1 "dependency freshness report"); never fails on
+#   outdated packages (Dependabot and the lane A cooldown/age gates act on them).
+# - gitleaks-full: the full-history secret scan alone (the lane C scans-full job without the rest of lane C).
+# Jobs that join with their owning tasks, each behind its suite's activation: k6 soak and k6 load (T-QA-06), Stryker
+# on packages/pricing (US-151), ZAP baseline, restore rehearsal (NFR-REC-003), and contract-live / Stripe test-live in
+# the `carrier-sandbox` environment only when its secrets exist (ADR-0023 am. H; SEC-TC-51 forbids them anywhere else).
+# Nothing here deploys, publishes, pushes or applies; GITHUB_TOKEN (read-only) is the only credential.
+name: nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        type: choice
+        options:
+          - all
+          - dependency-freshness
+          - gitleaks-full
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+
+jobs:
+  dependency-freshness:
+    name: dependency-freshness
+    if: ${{ inputs.job == 'all' || inputs.job == 'dependency-freshness' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      # `npm outdated` reads the lockfile and the registry; it installs nothing. Exit 1 means "something is outdated",
+      # which is the report, not a failure; any other exit code fails the job.
+      - name: Dependency freshness report (npm outdated)
+        run: |
+          set -uo pipefail
+          npm outdated --all --long > "$RUNNER_TEMP/outdated.txt"
+          status=$?
+          if [ "$status" -gt 1 ]; then echo "::error::npm outdated exited $status"; exit "$status"; fi
+          {
+            echo "### Dependency freshness (npm outdated, exit $status)"
+            echo
+            echo '```'
+            head -n 200 "$RUNNER_TEMP/outdated.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gitleaks-full:
+    name: gitleaks-full
+    if: ${{ inputs.job == 'all' || inputs.job == 'gitleaks-full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node (literal version, no cache)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Gitleaks over the full history (gitleaks-full)
+        run: node tools/quality/gitleaks-full.mjs --root "$GITHUB_WORKSPACE" --ref "$GITHUB_SHA" --scan "$GITHUB_SHA" --report "$RUNNER_TEMP/gitleaks-full.json"
