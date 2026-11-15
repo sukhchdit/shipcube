@@ -902,3 +902,243 @@ All 17 checker scenarios give the expected result. G is the real merge tree of t
 | Closed | PR46-SEC-13 (code R2-M1) |
 | Merge | Valid for `4bbce92` and any later commit that touches no owned path (R3.10 A, F, H). The union with `main` after PR #39 voids it (R3.10 G), so the merge needs that union and a merge-only round against R3.9, then `ci-gate` `MERGE-READY` on the exact final head (with `security-integration`) and the PR46-SEC-11 interim rule |
 | **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding at head `4bbce92`. Proofs are now bound to runs of this PR into `main`: another PR, a fork, another base, a retarget, a second PR on the branch, an empty or ambiguous `pull_requests` and every failed call give no proof. The trigger filter, the `pull-requests: read` scope and the `HEAD_REF` plumbing are pinned by the post-merge policy, and branch names cannot inject. The union with PR #42 kept every stage-1 hunk and one heap line. Two INFO items remain (scope confinement, base binding of proofs), both routed to TASK-286 |
+
+## Merge-only round (union with #39/#48, head 0230e50)
+
+| Field | Value |
+|---|---|
+| Head | 0230e50f67dd34012896b8a98316feb8e4512db2 |
+| Commits since round 3 | `a351dbc` (the round-3 record; parent `4bbce92`), `f981713` (merge of `main` `78cd2a4`, which brings PR #39 `3f58935`, PR #48 `be4b0d3` and docs; the code head), `0230e50` (lane B evidence `20261115T1431Z_f981713`, 8 files, docs only). One push `4bbce92..0230e50` at 14:50:59Z. Merge base with `main`: `78cd2a4` |
+| State of `main` | `78cd2a4` at the union. Since then: `cb96be4` and `f0d5052` (docs); **PR #52 `3eafa74` (TASK-285, merged 14:45:40Z)**; then `7e97eb7`, `dbfb1bd` and `bf8b866` (docs). PR #52 changes `packages/audit/src/actions{,.test}.ts`, `prisma/bootstrap/91-audit-actions-v2.sql`, three `prisma/tests` suites and four `tools/db` files. None of them is a path of this PR. `tools/ci`, `tools/quality`, `.semgrep`, `.gitleaks.toml`, `.semgrepignore`, `.gitignore` and `eslint.config.mjs` are blob-equal at `78cd2a4` and `bf8b866`. `git merge-tree --write-tree 0230e50 bf8b866` is clean (`a233fda`) |
+| Lane A evidence | Run [43726593786](https://github.com/sukhchdit/shipcube/actions/runs/43726593786) on `0230e50`, created 14:51:04Z, attempt 1. GitHub's test merge is `731eb7d` "Merge 0230e50 into dbfb1bd" (parents `dbfb1bd`, `0230e50`; tree `d10ad7f`, equal to the local `git merge-tree --write-tree 0230e50 dbfb1bd`), so the run tested this PR merged with PR #52. `RANGE_BASE` was `78cd2a4`, the merge base, not `main`'s tip (MO.6). `fast-lane` **success**, full mode, 33 of 33 steps `success`. `scans`: gitleaks (28 commits) no leaks, Semgrep pass, openapi-breaking PASS. The only red step is "Security-owned paths need a review record" (44 owned paths): the three `Head` rows name `12ea6a6`, `ad30316` and `4bbce92`, and the five overlap files changed after `4bbce92`. `security-integration` skipped; `ci-gate` `BLOCKED`. Lane scope: `push_scope=code`, `mode=full`, `identical=0230e50 f981713`, `security_paths=true` (the deleted `prisma/tests/spikes/spk03-rls-tx.int.test.ts`), `record_ok=false`, `code_proof` empty, `security_integration_due=false`. `GATE_LANE_SCOPE` and `GATE_SECURITY_PATHS` were head bootstrap; the other three gate scripts came from the base ref. `HEAD_REF` showed as the plain branch name, and `GH_TOKEN` was masked |
+| Lane B evidence | `docs/05-quality/tests/runs/20261115T1431Z_f981713`, profile `pr`, PASS (`git_dirty` false, `build_clean` true, no `env_overrides`, no `invalid_reasons`). Suites: unit 5,883 (2 skip), integration 303, api 128, catalog-c1-c14 102, rls-cross-tenant 126 (0 skipped). Merged coverage 99 % lines, 96.93 % branches. Base-ref `check-evidence` (`78cd2a4`'s `tools/quality`, re-run by me on `0230e50`): PASS. The run is accepted and 29 earlier runs are rejected (stale, not an ancestor, or missing the `packages/audit` gate cases). The notes are the planned suites and the parked SEC-TC-74. `package-lock.json` at `0230e50` equals `78cd2a4`'s (blob `be89160`): the PR's net change has no lockfile change. #39's lockfile change reaches the branch through the merge |
+| Owned paths changed | 44 (run log, and the checker in MO.10), the same as round 3 |
+| Reviewer / date | security-analyst, 2026-11-15, merge-only round against R3.9. Read-only on the PR worktree: I appended only this section, and `git status` there was clean before writing. No workflow was triggered and Docker was not used. Read-only `gh api` GETs: PR #46 (body, state), comment 6896616255, run 43726593786 (run, jobs, three job logs), the test-merge commit `731eb7d`, the repository activity of `main` and of the head branch, the head branch's pull requests and PR #46's issue events. Probes ran from session scratch (MO.2) |
+
+### MO.1 Summary
+
+**The union is pure.** `f981713` is a conflict-free merge, and its tree `124180a` equals `git merge-tree --write-tree` of its parents `a351dbc` and `78cd2a4`. The three-way compare from `5d2c102` shows that only the five expected paths were changed by both sides. Those five files are delta-equivalent in both directions (MO.3).
+
+**R3.9 is met** (MO.4):
+- the three workflows equal `4bbce92`'s byte for byte;
+- there is no spike exemption;
+- PR #39's `test:stack`, `stack` project and `prismaArgv`, and PR #48's `authz:matrix`, are present;
+- `rebuild.mjs` keeps the Playwright redirect refusal before any step;
+- the policy keeps every PR #46 pin and both `REQUIRED_CODEOWNED_PATHS` sets (60 entries).
+
+**Policy.** The head checker and `main`'s checkers (`78cd2a4`, `bf8b866`) give 0 findings on the union. Eight mutant controls give the expected findings (MO.5).
+
+**What the proof run tested.** Run 43726593786 tested this PR merged with `main` `dbfb1bd`, which includes PR #52. `main` has since moved only by docs, so PR46-SEC-16 is not live for the record push (MO.6).
+
+**New INFO PR46-SEC-17.** `RANGE_BASE` (the event's `base.sha`) is the merge base, not `main`'s tip. So base-ref gate tooling is the `main` a branch last merged, not the current one. This has no effect here, because every base-ref input is blob-equal at `78cd2a4` and `bf8b866` (MO.6, MO.9).
+
+**Evidence hygiene holds.** The two D-SEC-PR23-02 statements are verbatim, and the host-fragment scan is 0 (MO.10).
+
+**Live prediction for the record push** (MO.10): `push_scope=docs`, `mode=light`, `code_proof=43726593786:0230e50f67dd34012896b8a98316feb8e4512db2`, `security_integration_due=true`. `security-integration` runs `catalog-c1-c14` and `rls-cross-tenant`, and `ci-gate` shows `MERGE-READY` if they pass.
+
+**Findings this round: 0 Critical, 0 High, 0 Medium, 0 LOW, 1 INFO (new). Verdict: PASS_WITH_FOLLOW-UPS** (MO.13).
+
+### MO.2 Method
+
+| Area | How |
+|---|---|
+| Inputs | The PR body sections "Union with `main` after PR #39 and PR #48" and "Gate table (union)", comment 6896616255, D-ORCH-095/098/100 and D-SEC-PR52-01 on `main`, and R3.9 of this record |
+| Purity | `git merge-tree --write-tree` of the union's real parents, and of `4bbce92` with `78cd2a4` (the form in the PR body). Then a three-way compare from `5d2c102`: path sets per side, and blob equality of every one-sided path in the union |
+| Delta equivalence | For each of the five overlap files, the `-U0` hunk bodies (headers stripped): `diff(5d2c102→a351dbc)` against `diff(78cd2a4→f981713)`, and `diff(5d2c102→78cd2a4)` against `diff(a351dbc→f981713)` |
+| R3.9 symbols | `git show 0230e50:<path>` reads of `ci.yml`, `eslint.config.mjs`, `jest.config.ts`, `package.json`, `rebuild.mjs` and `check-workflow-policy.mjs`. Blob ids of the workflows at `4bbce92`, `f981713`, `0230e50` and on `main` |
+| Policy | `git archive 0230e50` into scratch. The checkers of `0230e50`, `78cd2a4` and `bf8b866` over it, plus 8 text mutants of the union's `ci.yml` and `CODEOWNERS` (`mut.mjs`) |
+| Tested base | Run 43726593786: its run object, jobs, job logs (checkout and env groups), the test-merge commit, and the repository activity API for `main` and the head branch |
+| Record simulation and live prediction (`record-sim-mo.mjs`) | 14 scenarios in a scratch `git clone --shared` with a sparse working tree. The commits are plumbing only. The checkers are `main`'s real `check-security-owned-paths.mjs` copies at `78cd2a4` and `bf8b866` (blob-equal to the head's). Then the head's `lane-scope.mjs` `main()` CLI (`--pr 46 --head-ref … --lookup --json`) for the record commit, against the real API (GET only, through `gh` with its stored auth, `GH_TOKEN` removed from the child env, three attempts per call as in `ghApi`), with `--base` `78cd2a4` and with `bf8b866`. The clone was removed afterwards |
+| Hygiene | Count-only host-fragment scan (`hostscan.mjs`; needles computed at run time, 17 needles, positive control). The PR body's statements. A gitleaks `generic-api-key`-shaped scan of this section (MO.10) |
+
+### MO.3 Union purity
+
+| Check | Result |
+|---|---|
+| `f981713` against `git merge-tree` | Parents `a351dbc` (the round-3 record on `4bbce92`) and `78cd2a4`. `git merge-tree --write-tree a351dbc 78cd2a4` = `124180a` = the union's tree, clean |
+| The PR body's form | `git merge-tree --write-tree 4bbce92 78cd2a4` = `969de83`. That tree differs from `124180a` only by the round-3 record (327 added lines, `a351dbc`'s only change). The PR body's "identical to `git merge-tree --write-tree 4bbce92 78cd2a4`" holds once that record is added. This is a wording point, not a finding |
+| Three-way compare from `5d2c102` | PR side 95 paths, `main` side 234 paths. Changed by both: exactly `jest.config.ts`, `package.json`, `tools/ci/check-workflow-policy.mjs`, `tools/ci/check-workflow-policy.test.ts` and `tools/deps/rebuild.mjs`. All 90 PR-only paths equal `a351dbc`'s (the spike test stays deleted), and all 229 `main`-only paths equal `78cd2a4`'s. No path differs from both sides |
+| Delta equivalence | Both directions are equal for all five files. PR side over `main`: `jest.config.ts` 2 lines, `package.json` 1, `check-workflow-policy.mjs` 546, `.test.ts` 60, `rebuild.mjs` 32. `main` side over the PR: 9, 2, 17, 77 and 18. So both PRs' changes are kept whole, with no hunk lost, duplicated or re-resolved |
+| `0230e50` | Adds only the 8 files of `docs/05-quality/tests/runs/20261115T1431Z_f981713/` |
+
+### MO.4 R3.9 checklist
+
+| R3.9 row | Result at `0230e50` |
+|---|---|
+| `.github/workflows/ci.yml` | Blob `84ba61b` at `4bbce92`, `f981713` and `0230e50` (`main`'s is `a477711`). `lane-c.yml` (`12f9aff`) and `nightly.yml` (`26e63f9`) are also unchanged from `4bbce92`; `main` has neither. So the R3.4/R3.5 results carry over unchanged: <ul><li>one Lint `env:` with exactly `NODE_OPTIONS: --max-old-space-size=4096` (one `NODE_OPTIONS` in the file);</li><li>`pull_request` `branches: [main]`;</li><li>`scans` `contents`/`actions`/`pull-requests` `read`;</li><li>`${{ github.head_ref }}` only as the lane-scope step's `HEAD_REF` env, with the run line `--head-ref "$HEAD_REF"`;</li><li>`ci-gate` as reviewed</li></ul> |
+| No spike exemption | `eslint.config.mjs` equals `4bbce92`'s (blob `1e8a779`). It has 0 occurrences of `spikes`, and #42's `prisma-store.ts` `setter` exemption is kept. `main` and the union differ in this file only by this PR's own change |
+| `jest.config.ts` | #39's opt-in `stack` project (only with `JEST_STACK=1`) and the `int`/`api`/`stack` test-suffix pattern in the unit ignore list; #46's comment. Delta-equivalent (MO.3) |
+| `package.json` | `test:stack` (#39), `authz:matrix` (#48) and `ci:minutes` (#46) are all present. `deps:rebuild` is unchanged |
+| `tools/deps/rebuild.mjs` | #39's Prisma step goes through `prismaArgv` (`step.runner === 'prisma'`, imported from `prisma-engines.mjs`). #46's `PLAYWRIGHT_REDIRECT` / `playwrightRedirects()` refusal runs after `forbiddenEnv` and before the first step, so before any network call |
+| `tools/ci/check-workflow-policy.mjs` (+ test) | `REQUIRED_CODEOWNED_PATHS` has 60 entries: round 3's list (PR #46 added none) plus #39's 15 (images, compose, infra and the `packages/config` start-up guards). PR #48 added none. Every #46 symbol is present: <ul><li>`CI_PULL_REQUEST_BRANCHES = ['main']`;</li><li>`LANE_SCOPE_RUN` with `--head-ref "$HEAD_REF"`;</li><li>`LANE_SCOPE_ENV.HEAD_REF`;</li><li>`PINNED_JOB_PERMISSIONS.scans` with `pull-requests: read`;</li><li>`ACTIONS_READ_JOBS`;</li><li>`export function gateStepIndex`;</li><li>the trigger check in `laneScopeFindings`</li></ul> The test file is delta-equivalent both ways, so both PRs' cases are kept |
+| Policy on the union | 0 findings from all three checkers (MO.5) |
+
+### MO.5 Policy on the union and mutant controls
+
+The checkers are `0230e50`'s (head) and `main`'s `78cd2a4` and `bf8b866` copies (blob-equal to each other). Each runs over `git archive 0230e50`, with the union's `ci.yml`, `lane-c.yml`, `nightly.yml` and `CODEOWNERS`. Each mutant is a copy of the union's `.github` with one text change.
+
+| Case | head | `main` (`78cd2a4` = `bf8b866`) |
+|---|---|---|
+| Union as is (control) | 0 | 0 |
+| m1 `branches: [main]` dropped from `pull_request` | `required-gates` | 0 (the pin arrives with this PR, as in R3 Y1) |
+| m2 `scans` `pull-requests: write` | `permissions`, `required-gates` | `permissions` |
+| m3 `--head-ref "${{ github.head_ref }}"` interpolated | `untrusted-expression`, `required-gates` | `untrusted-expression` |
+| m4 a second `NODE_OPTIONS` key on the Lint step | `yaml-subset` | `yaml-subset` |
+| m5 the heap line plus `--require ./x.cjs` | `node-options-preload` | `node-options-preload` |
+| m6 `CODEOWNERS` loses `/infra/` (#39's set) | `codeowners-coverage` | `codeowners-coverage` |
+| m7 `CODEOWNERS` loses `/tools/ci/` (the older set) | `codeowners-coverage` | `codeowners-coverage` |
+| m8 `CODEOWNERS` loses `/tools/compose/` (#39's set) | `codeowners-coverage` | `codeowners-coverage` |
+
+9 of 9 as expected. #39's coverage rows are active in both checkers, and the head checker refuses each #46 pin that is mutated.
+
+### MO.6 What the proof run tested, and what "base ref" means
+
+- **The tested tree.**
+  - Run 43726593786 checked out `refs/pull/46/merge` = `731eb7d`, whose first parent is `main`'s tip `dbfb1bd`. The activity API confirms the timing: `main` reached `dbfb1bd` at 14:46:57Z, and the branch push came at 14:50:59Z.
+  - So lint, type-check, unit, build and every supply-chain gate of that run saw this PR merged with PR #52 (`3eafa74`).
+  - Since then `main` gained only `bf8b866`. The union trees `d10ad7f` (with `dbfb1bd`) and `a233fda` (with `bf8b866`) differ only in `docs/sdlc/DECISIONS.md` and `docs/sdlc/STATUS.md`.
+  - The inherited code proof therefore covers the tree the record push will test. PR46-SEC-16 is not live for this push. It becomes live again if `main` gains a non-docs commit before the push or the merge (P1, MO.11).
+- **The base ref.**
+  - The event's `pull_request.base.sha`, and so `RANGE_BASE`, was `78cd2a4`: the merge base of `0230e50` and `main`, not the tip `dbfb1bd` that the run actually merged with. The PR object still shows `base.sha` `78cd2a4` now that `main` is at `bf8b866`.
+  - Every base-ref input therefore came from `78cd2a4`: lane-scope's tooling inputs, the workflow policy, `check-evidence`, the scans tooling and configuration, and `security-integration`'s manifest.
+  - For this PR that makes no difference, because each of them is blob-equal at `78cd2a4` and `bf8b866` (header).
+  - In general it means that a gate added to `main` reaches a PR only when the PR merges `main` (PR46-SEC-17).
+- **Correction to R3.10.** That prediction said the base-ref gates "run against `main` `8c65315`". Under the observed behaviour they would have run against the merge base `5d2c102`. That push never happened on its own (D-ORCH-095), and the two refs' gate inputs were equal, so nothing depended on it.
+
+### MO.7 Earlier findings and decisions
+
+| Item | Status at `0230e50` |
+|---|---|
+| PR46-SEC-11 (LOW) | Open, routed. Interim rule: the proof run must be at most 24 h old at merge. Run 43726593786 was created 2026-11-15 14:51:04Z, so a merge after 2026-11-16 14:51Z needs a fresh full run on the code tree first (a code push, or close and reopen) |
+| PR46-SEC-12 (LOW) | Open; deferral to TASK-286 (D-TASK015-68) unchanged. The union does not touch the `scans` tooling loop (`ci.yml` blob-equal) |
+| PR46-SEC-15, -16 (INFO) | Open, routed to TASK-286. -16 is not live for the record push (MO.6) |
+| PR46-SEC-04, -05 (LOW); -07 remainder, -08, -09, -10 test case, -14 (INFO) | Unchanged, routed as in R3.6 |
+| D-ORCH-100 (CI-minutes guard) | Consistent with this order. No code push is still coming for this PR, so the record push is the one light run. `security-integration` runs once on the final tree, and TASK-286 follows the merge |
+
+### MO.8 Findings of this round
+
+| ID | Severity | Title | Owner / due |
+|---|---|---|---|
+| PR46-SEC-17 | INFO | Base-ref gate tooling is the PR's merge base (`pull_request.base.sha`), not `main`'s tip | devops-engineer, TASK-286 (with PR46-SEC-16); control until then: P1 (orchestrator) |
+
+### MO.9 Finding details
+
+#### PR46-SEC-17 (INFO): base-ref gate tooling is the PR's merge base, not `main`'s tip
+
+- **CWE-693** (Protection Mechanism Failure) · **OWASP A08:2021**.
+- **Where.** `.github/workflows/ci.yml`:
+  - `RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}` in `fast-lane`, `scans` and `security-integration`;
+  - every base-ref extraction that follows it: `git archive "$RANGE_BASE" tools/ci`, `tools/quality`, `.semgrep`, `.gitleaks.toml`, `.semgrepignore`, `.gitignore`, the lint fixtures, and the `security-integration` manifests.
+- **Description.**
+  - **What GitHub sent.** For the synchronize event of run 43726593786, `pull_request.base.sha` was `78cd2a4`, the merge base of the head and `main`. `main`'s tip was `dbfb1bd`, the first parent of the test merge that the run checked out.
+  - **Effect on the gates.** "Base ref" gate tooling is the `main` commit the branch last merged (or forked from), not the current `main`.
+  - **What is still fresh.** The code under test is the merge with the tip, so the test results are current. Only the deciding tooling and the manifests lag.
+- **Exploitability / impact.**
+  - **Who could use it.** Someone with push access, the trusted-writer class of PR10-SEC-04. They keep a branch on an old base, so a gate added to `main` since then (a policy pin, a Semgrep rule, a manifest activation, a `check-evidence` rule) does not apply to the PR.
+  - **What still holds:**
+    - `base.sha` is always a commit of `main`'s history, so a PR still cannot supply its own gate code;
+    - owned edits still need a record (the record check is on every relevant base);
+    - P1 (union, then a merge-only round) moves the merge base to the tip before a merge.
+  - **Why it matters anyway.** The post-merge lane on `main` is off (`CI_MAIN_FAST_LANE`), so no run re-checks the squash under the newest gates before `nightly` or `wave-end`.
+  - **Here:** no effect, because all base-ref inputs are blob-equal at `78cd2a4` and `bf8b866`. INFO.
+- **Remediation (TASK-286, in the same change as PR46-SEC-16).**
+  - For `pull_request` runs, take the tooling and manifests from the test merge's first parent:
+    ```
+    TOOLS_REF=$(git rev-parse HEAD^1)
+    ```
+    Require that `HEAD^2` is `RANGE_HEAD`, and that `git merge-base --is-ancestor "$RANGE_BASE" "$TOOLS_REF"` holds. Keep `RANGE_BASE` for the range diffs (`<base>...<head>` is unchanged).
+  - Publish `TOOLS_REF` as a job output. That is the "tested base" which PR46-SEC-16's option 2 needs, so the light run can void a proof whose tested base is older than the current base on P1 paths.
+  - Pin the `git archive` sources to `$TOOLS_REF` in the policy.
+- **Verification.**
+  - A policy test refuses `git archive "$RANGE_BASE" tools/ci` once `TOOLS_REF` exists.
+  - On a PR whose merge base is behind `main`, the scans summary names the tip as the gate source.
+  - A `lane-scope.test.ts` case: a proof whose published tested base precedes a P1-path commit on `main` gives no proof.
+
+### MO.10 Record simulation, live-run prediction and hygiene
+
+`record-sim-mo.mjs` committed this record on `0230e50` as the scenario head (plumbing only) and ran `main`'s real checkers (`78cd2a4` and `bf8b866` copies) with `--pr 46 --json`. Both copies gave the same result in every scenario.
+
+| # | Scenario | Expected | Result |
+|---|---|---|---|
+| A | This record on `0230e50`, base `78cd2a4` (the expected `RANGE_BASE`) | pass | pass by `0230e50` (exit 0, 44 owned paths) |
+| A' | Same, base `bf8b866` (`main`'s tip) | pass | pass by `0230e50` |
+| A'' | Same, base `dbfb1bd` | pass | pass by `0230e50` |
+| B | `0230e50` as pushed (round-3 record only: what run 43726593786 saw) | missing | missing (exit 1, 44 owned paths) |
+| C | This round's Head row naming the code head `f981713` instead (control) | pass | pass by `f981713` |
+| D | Last Verdict row changed to FAIL | missing | missing |
+| E | Owned edit after the record (`tools/ci/lane-scope.mjs`) | missing | missing |
+| F | Docs-only commit after the record (`docs/07-ops/CI-CD.md`) | pass | pass by `0230e50` |
+| G | Head row naming the pre-union `a351dbc` | missing | missing |
+| H | Head row naming `4bbce92` (round 3) | missing | missing |
+| I | Merge of `main` `bf8b866` (docs only) after the record, base `bf8b866` | pass | pass by `0230e50` |
+| J | Merge of a `main` commit that edits `package.json` (an owned path this PR changes) after the record, base that commit | missing | missing |
+| J2 | Merge of a `main` commit that edits `tools/db/shadow-init.ts` (owned, not changed by this PR) after the record, base that commit | pass (by design: the owned set is the PR's own net change) | pass by `0230e50` |
+| K | This record also saved as `PR-0045-…` (the round-3 record left in place) | missing | missing |
+| L | Row check of the candidate | 4 `Head` rows (`12ea6a6`, `ad30316`, `4bbce92`, `0230e50`), 4 `Verdict` rows, and the last table row of the file is this round's `Verdict` | as expected; last verdict token `PASS_WITH_FOLLOW-UPS` |
+
+**Live prediction for the push of this record on `0230e50`.** I ran the head's `lane-scope.mjs` `main()` with `--base 78cd2a4 --before 0230e50 --pr 46 --head-ref feat/TASK-015-b-lane-c-nightly --lookup` against the real API (GET only). A second run with `--base bf8b866` gave the same outputs.
+
+- **`fast-lane`** (classify step, head bootstrap):
+  - `push_scope=docs`, `mode=light`, `code_changed=false`, `pr_docs_only=false`. Push range `0230e50..<record>`: 1 path, all docs; PR range: 103 paths.
+  - The CODE-gated steps are skipped. The base-ref gates run with `78cd2a4`'s tooling: the workflow policy gives 0 findings (MO.5), and `check-evidence` accepts `20261115T1431Z_f981713` (PASS on `0230e50`; the record commit adds only a `docs/05-quality/security` file).
+- **`scans`, lane-scope step:**
+  - `identical=<record> 0230e50f67dd34012896b8a98316feb8e4512db2 f981713d87f2a95f55e7d9df94b9bf86f0c258c8`;
+  - `security_paths=true` (the deleted spike test), `record_ok=true`;
+  - **`code_proof=43726593786:0230e50f67dd34012896b8a98316feb8e4512db2`**, `security_proof=` (empty), **`security_integration_due=true`**;
+  - no note. A binding problem would show `no proof (binding, fail closed): …`, and a refused run `run … is not a run of this PR into main: …`;
+  - **6 API calls:** three runs lists (the record commit: its own run is not complete; `0230e50`; `f981713`: none), the binding's pulls list (one PR, #46 open into `main`), one events page (13 `referenced`, no `base_ref_changed`, so `since = 0`), and the jobs of run 43726593786.
+  - **The proof run qualifies.** Its `fast-lane` steps are all `success`. Its `scans` proof steps succeeded; the record step is not one of them. `security-integration` was skipped, so there is no security proof.
+- **`scans`, other steps.** Gitleaks over `78cd2a4..<record>` (first parent, 29 commits), Semgrep and openapi-breaking pass. The record step passes at `0230e50` (sim A).
+- **`security-integration`** runs: `due`, `fast-lane` success, and `code_proof` is not empty. Its suites are `catalog-c1-c14` and `rls-cross-tenant`, the active `security_integration_suites` of `78cd2a4`'s manifest; `rbac-matrix`, `audit-generator`, `audit-immutability` and `csrf-cookie` are planned.
+- **`ci-gate`**: `MERGE-READY` if `security-integration` succeeds. Control: `BLOCKED: security-integration red` if it fails.
+- **Assumptions.**
+  - The job token (`contents`, `actions`, `pull-requests` read) gets the same answers as my read token. If it does not, the binding fails closed: no proof, and `ci-gate` is red with "no code proof for this tree".
+  - No new push or retarget lands before the record push.
+  - `main` stays clean-mergeable (`a233fda` today).
+
+**This push is the first live test of the binding.** For security, it is also the last check before the merge (MO.11).
+
+**Hygiene.**
+- **D-SEC-PR23-02 statements.** The "Gate table (union)" carries both verbatim: "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first" and "`.git/info/exclude` is empty". The run of record is profile `pr`: no `wave` or `gate` run is committed, no FAIL run was added, and the PR has no lockfile change.
+- **Host-fragment scan (count-only).** The needles are computed at run time: the account name, its 8.3 stem, the home and temp directories in four spellings each, the host name, the git e-mail, the drive-letter and POSIX users-directory forms, and the directory-account prefix. A positive control file fires.
+  - The 8 files of `20261115T1431Z_f981713`: **0 for every needle**.
+  - The final record file: 0 for every host-specific needle.
+- **This section.** A `generic-api-key`-shaped scan (keyword, assignment operator, a 10+ character value with Shannon entropy at least 3.5) finds 0 lines. The only long hex strings are commit ids in `Head`, `identical` and `code_proof` positions. Lane A's real gitleaks scans the record push.
+
+### MO.11 Checks owed (routed)
+
+| When | Check |
+|---|---|
+| The push of this record | The `scans` summary shows the MO.10 values: `code proof: run 43726593786:0230e50…`, no binding note, `security-integration due: true`. `security-integration` succeeds and `ci-gate` shows `MERGE-READY`. **If the binding fails closed instead**, read the note: <ul><li>a `pull requests of the head branch` or `events` problem is a token-scope difference (R3.11: add `issues: read` to `scans` and pin it, which is an owned change and so a delta round);</li><li>a refused run names its reason.</li></ul> No security impact either way (fail closed). Record the outcome in a PR comment |
+| Merge of #46 (orchestrator) | Merge only if all of these hold: <ul><li>`ci-gate` `MERGE-READY` on the exact final head (this record's commit, or a later docs-only one);</li><li>the PR46-SEC-11 interim rule (proof run 43726593786 at most 24 h old: merge by 2026-11-16 14:51Z, otherwise a fresh full run);</li><li>**P1**: `git diff --name-only dbfb1bd origin/main` at merge time touches only `docs/**` or agent memory. Otherwise the union and a merge-only round come again (PR46-SEC-16, -17).</li></ul> Code review's sign-off on the union is a separate DoD item |
+| TASK-286 policy PR (stage 2, right after this merge; D-ORCH-100) | PR46-SEC-11 item 1; PR46-SEC-12; PR46-SEC-15; PR46-SEC-16 together with PR46-SEC-17 (`TOOLS_REF` = the test merge's first parent, published as the tested base); PR33-SEC-09 |
+| SHEET-FOLD-8, next manifest PR, 015-C, G3 | As in R3.11 |
+
+### MO.12 Proposed decision entry (for the orchestrator; DECISIONS.md not edited)
+
+**D-SEC-PR46-04 · 2026-11-15 · security-analyst · PR #46 (TASK-015 015-B) merge-only security round at `0230e50` (union with `main` `78cd2a4` after PR #39 and PR #48), against record R3.9 = PASS_WITH_FOLLOW-UPS.**
+
+- **Union.** It is pure: `f981713`'s tree `124180a` equals `git merge-tree` of its parents `a351dbc` and `78cd2a4`. The PR body's `4bbce92` form differs only by the r3 record. Only the five expected paths were changed by both sides, and each is delta-equivalent both ways.
+- **R3.9.** It is met:
+  - workflows byte-equal to `4bbce92`: one Lint heap line, `branches: [main]`, `pull-requests: read`, `HEAD_REF` via env;
+  - no spike exemption;
+  - `test:stack`, the `stack` project, `prismaArgv` and `authz:matrix` present;
+  - the Playwright refusal kept before any step;
+  - every #46 pin and both `REQUIRED_CODEOWNED_PATHS` sets (60 entries) kept.
+
+  The policy gives 0 findings under the head's and `main`'s checkers, and 8 mutant controls fire as expected.
+- **Evidence.** `20261115T1431Z_f981713` is accepted by the base-ref `check-evidence`. The D-SEC-PR23-02 statements are verbatim, and the host scan is 0.
+- **Tested base.** Proof run 43726593786 tested the merge with `dbfb1bd`, which includes PR #52. `main` has moved only by docs since, so PR46-SEC-16 is not live for the record push.
+- **New INFO PR46-SEC-17** (devops-engineer, TASK-286 with -16): `RANGE_BASE` = `pull_request.base.sha` is the merge base, not `main`'s tip, so base-ref gates lag `main` until the PR unions it. No effect here, because the gate inputs at `78cd2a4` and `bf8b866` are equal. The control until the fix is P1.
+- **Record push.** Predicted: light, `code_proof=43726593786:0230e50…`, `security_integration_due=true`, 6 API calls; `security-integration` runs `catalog-c1-c14` and `rls-cross-tenant`; `ci-gate` `MERGE-READY` if green.
+- **Merge, from the security side:** allowed on `MERGE-READY` for the exact final head, with the PR46-SEC-11 24-hour rule (by 2026-11-16 14:51Z) and P1 (`main` docs-only since `dbfb1bd`).
+- **Reversibility:** High.
+
+### MO.13 Verdict (merge-only round)
+
+| Item | Value |
+|---|---|
+| Findings | 0 Critical, 0 High, 0 Medium, 0 LOW. New: 1 INFO (PR46-SEC-17). Still open: LOW PR46-SEC-04, -05, -11, -12; INFO -07 (remainder), -08, -09, -10 (test case), -14, -15, -16 |
+| Closed | None this round (merge-only) |
+| Merge | Valid for `0230e50` and any later commit that touches no owned path of this PR (MO.10 A, F, I, J2). A union that brings `main` changes to an owned path this PR changes voids it (J). Merge on `ci-gate` `MERGE-READY` for the exact final head, with the PR46-SEC-11 interim rule and P1 (MO.11) |
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding at head `0230e50`. The union with `main` after PR #39 and PR #48 is pure and delta-equivalent, and it keeps every R3.9 item: workflows byte-equal to `4bbce92`, no spike exemption, both PRs' `package.json`/`jest.config.ts`/`rebuild.mjs` changes, and every PR #46 pin with both CODEOWNERS sets. The proof run tested the current code merge. One INFO item (PR46-SEC-17, base-ref tooling from the merge base) is routed to TASK-286 |
