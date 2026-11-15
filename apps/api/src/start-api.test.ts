@@ -27,6 +27,9 @@ import {
   type StartApiDependencies,
 } from './start-api.js';
 
+// Composes the app (a cold module graph) and answers real requests: the 5 s Jest default timed out under parallel host load (W0-FLAKE, D-ORCH-097).
+jest.setTimeout(60_000);
+
 type LogLine = Readonly<Record<string, unknown>>;
 
 /** The http.Server seam: records calls; the test decides when (and how) `close` calls back. */
