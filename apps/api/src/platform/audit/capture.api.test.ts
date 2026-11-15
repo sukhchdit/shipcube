@@ -228,7 +228,8 @@ const routes: RouteDescriptor[] = [
       throw new Error('unexpected');
     },
   }),
-  route({
+  defineRoute<string, string>({
+    ...ADDRESS_ROUTE,
     operationId: 'importAddress',
     method: 'put',
     path: '/address-book/:addressId/import',
@@ -332,6 +333,9 @@ describe('[US-086] descriptor-driven capture: mutations, ordering and the reques
     });
     // the client IP and the raw user agent are tokenised in the same flush, never stored in clear
     expect(tokenised.map((value) => value.field)).toEqual(['ip', 'user_agent']);
+    // AT-US-087-04 value hop (D-ARCH-125): the entry IP is req.ip as Express computed it, never parsed from a header here
+    expect(tokenised[0]?.value).toBe('127.0.0.1');
+    expect(entries()[0]?.ipCoarse).toBe('127.0.0.0/24');
     expect(entries()[0]?.ipToken).toMatch(/^[0-9a-f-]{36}$/);
     expect(businessRows()).toEqual([id]);
   });
@@ -548,18 +552,19 @@ describe('[ADR-0007 am. 10 item 2-3] 503 classes surface with Retry-After and ro
 describe('[PR #42 R1-n5] the capture takes DB_AUDIT_LOCK_TIMEOUT_MS from the configuration createApp receives', () => {
   /** A client whose transactions answer the head-row lock with an empty stream head and record the bound timeout. */
   function lockingRunner(locks: unknown[]) {
+    const tx = {
+      $queryRaw<T>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T> {
+        if (!strings.join('?').includes('FOR UPDATE OF h')) {
+          return Promise.resolve([{ org_id: null, actor_id: null, actor_scope: null, guest_token_hash: null }] as T);
+        }
+        locks.push(values[0]);
+        return Promise.resolve([{ entry_count: '0', head_hash: '00'.repeat(32), head_us: null, now_us: '1763000000123456' }] as T);
+      },
+      $executeRaw: (): Promise<number> => Promise.resolve(1),
+    };
     const lockingClient = {
-      $transaction<R>(fn: (tx: unknown) => Promise<R>): Promise<R> {
-        return fn({
-          $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown> => {
-            if (!strings.join('?').includes('FOR UPDATE OF h')) {
-              return Promise.resolve([{ org_id: null, actor_id: null, actor_scope: null, guest_token_hash: null }]);
-            }
-            locks.push(values[0]);
-            return Promise.resolve([{ entry_count: '0', head_hash: '00'.repeat(32), head_us: null, now_us: '1763000000123456' }]);
-          },
-          $executeRaw: (): Promise<number> => Promise.resolve(1),
-        });
+      $transaction<R>(fn: (inner: typeof tx) => Promise<R>): Promise<R> {
+        return fn(tx);
       },
       $queryRaw: <T>(): Promise<T> => Promise.resolve([] as T),
     };
