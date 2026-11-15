@@ -40,3 +40,4 @@
 - [PR #44 fc2](feedback_pr44_fc2.md) — entry-point testability pattern (startApi + thin main) passes diff gate; detached evidence worktree; merge semantic conflict
 - [PR #39 push](feedback_pr39_push.md) — zero main.ts diff via handler move; FAIL run burns a worktree; prisma generate unit race; lock grabbed in 1 s
 - [PR #42 fc2](feedback_pr42_fc2.md) — CI ESLint heap OOM (2 GB proxy), ci.yml voids evidence, refetch main before evidence, lock 3 s poll, junction-safe rm
+- [TASK-027 RBAC matrix](feedback_task027_rbac_matrix.md) — classifier refuses tools/quality edits, npm ci during live run, loopback timeouts under load, contract fixtures
