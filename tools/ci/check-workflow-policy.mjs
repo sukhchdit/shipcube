@@ -549,11 +549,11 @@ export const PULL_REQUESTS_READ_JOBS = Object.freeze(['ci.yml:scans']);
  * and the install on env.CODE and runs Semgrep and oasdiff unless a docs-only push has a code proof. The change is two
  * steps because this file runs from the base ref: this policy first accepts BOTH topologies, each held to its own pins
  * in full (a ci.yml with a `scans` job is stage 1, without one stage 2; no mixture passes), then the workflow PR
- * switches ci.yml and drops the stage-1 pins. Stage 2 also carries the routed security items: the tested base
- * TOOLS_REF = HEAD^1 for every base-ref extraction (PR46-SEC-17), pinned tooling steps and "${GATE_*:?}" (PR46-SEC-12,
- * PR33-SEC-09), the classification recomputed in ci-gate (PR46-SEC-12), `pull-requests:` confined like `actions:`
- * (PR46-SEC-15), the advisory gates re-run on a light run with a stale proof (PR46-SEC-11) and the Lint step env pinned
- * (PR42-SEC-18).
+ * switches ci.yml; the stage-1 pins stay until a follow-up retires them. Stage 2 also carries the routed security
+ * items: the tested base TOOLS_REF = HEAD^1 for every base-ref extraction (PR46-SEC-17), pinned tooling steps and
+ * "${GATE_*:?}" (PR46-SEC-12, PR33-SEC-09), the classification recomputed in ci-gate (PR46-SEC-12), `pull-requests:`
+ * confined like `actions:` (PR46-SEC-15), registry signatures and the advisory audit on every push, a light one too
+ * (PR46-SEC-11), and the Lint step env pinned (PR42-SEC-18).
  */
 /** The job topology of a parsed ci.yml: `stage-1` while it has a `scans` job, else `stage-2`. */
 export const TOPOLOGIES = Object.freeze(['stage-1', 'stage-2']);
