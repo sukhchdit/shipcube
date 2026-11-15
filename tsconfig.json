@@ -20,6 +20,7 @@
     { "path": "tests/helpers" },
     { "path": "tests/factories" },
     { "path": "tests/api" },
+    { "path": "tests/compose" },
     { "path": "tests/contract-stubs" },
     { "path": "tools" }
   ]

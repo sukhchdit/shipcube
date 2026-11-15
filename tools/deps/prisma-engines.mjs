@@ -23,7 +23,8 @@
  * The per-user Prisma cache (`%APPDATA%\Prisma`, `~/.cache/prisma`) is never read, written or trusted. Children of
  * Prisma get `PRISMA_SCHEMA_ENGINE_BINARY=<verified path>` and `CHECKPOINT_DISABLE=1` (`prismaChildEnv`), which makes
  * the CLI's `ensureNeededBinariesExist()` return before it looks at the cache or the network, and no Node preload
- * from `NODE_OPTIONS` or npm's `node-options` (`prismaChildEnv`, `prismaExecArgs`; PR5-SEC-07, PR9-SEC-02).
+ * from `NODE_OPTIONS` (`prismaChildEnv`; PR5-SEC-07). The CLI is started directly with `process.execPath`, never
+ * through npm (`prismaArgv`; PR9-SEC-15).
  *
  * Plain ESM with `node:` imports only: it runs from `deps:rebuild` right after `npm ci --ignore-scripts`.
  *
@@ -439,27 +440,37 @@ export function reverifyEngine(path, expected) {
  * Variables never passed to a Prisma child besides the engine redirects (PR5-SEC-07): `NODE_OPTIONS` can preload
  * code (`--require`, `--import`, `--env-file`) that sets an engine variable INSIDE the child, after this filter ran
  * and while the verified file stays untouched, so `reverifyEngine` would still pass. Prisma needs no Node options.
- * `NPM_CONFIG_NODE_OPTIONS` (PR9-SEC-02): the direct child is npm, which copies its `node-options` setting into
- * `NODE_OPTIONS` for the `prisma` bin. Dropping the env layer is the belt; `PRISMA_NPM_EXEC_OPTIONS` is the braces
- * that also covers every `.npmrc` layer.
+ * `NPM_CONFIG_NODE_OPTIONS` (PR9-SEC-02): kept as a belt although npm is no longer in the chain (PR9-SEC-15), so a
+ * Prisma child that ever starts npm itself cannot turn the setting into `NODE_OPTIONS` either.
  */
 const DROPPED_CHILD_ENV = ['NODE_OPTIONS', 'NPM_CONFIG_NODE_OPTIONS'];
 
 /**
- * npm options of every `npm exec … prisma` (PR9-SEC-02, SEC-P3-31). `--node-options=` sets npm's `node-options` to
- * empty on the command line, which outranks the env (`npm_config_node_options`, any case) and every `.npmrc` (project,
- * user, global, or files named by `npm_config_userconfig` / `npm_config_globalconfig`), so npm writes no
- * `NODE_OPTIONS` for the bin. `--no` refuses to download a missing binary.
+ * Absolute path of the Prisma CLI entry (PR9-SEC-15, TASK-014). npm is out of the Prisma child chain: the CLI is
+ * resolved from the `prisma` workspace manifest (`<root>/prisma/package.json`, which declares the pinned CLI) through
+ * `createRequire`, and every caller starts it as `process.execPath <cli> …`. No `npm exec`, so an `.npmrc`
+ * `script-shell`, `node-options` or a planted `node_modules/.bin/prisma` cannot choose the code that runs with the
+ * migrator credentials; no shell, no `.cmd` shim. The manifest's `bin.prisma` must be a relative path inside the package.
+ * @param {string} [root] repository root (the directory holding `prisma/package.json`) @returns {string}
  */
-export const PRISMA_NPM_EXEC_OPTIONS = Object.freeze(['--node-options=', '--no']);
+export function prismaCliPath(root = REPO_ROOT) {
+  const require = createRequire(join(root, 'prisma', 'package.json'));
+  const manifestPath = require.resolve('prisma/package.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const bin = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.prisma;
+  if (typeof bin !== 'string' || bin === '' || /^[\\/]|^[A-Za-z]:/.test(bin) || bin.split(/[\\/]/).includes('..')) {
+    throw new EngineError('the prisma package manifest has no relative bin.prisma entry');
+  }
+  return join(dirname(manifestPath), bin);
+}
 
 /**
- * npm arguments (after the `npm-cli.js` path) that run the Prisma CLI with `args`; every caller (prisma-cli.mjs,
- * rebuild.mjs) builds its argv here, so the PR9-SEC-02 options cannot be left out.
- * @param {readonly string[]} args @returns {string[]}
+ * Arguments after `process.execPath` that run the Prisma CLI with `args`; every caller (prisma-cli.mjs, rebuild.mjs)
+ * builds its argv here (PR9-SEC-15).
+ * @param {readonly string[]} args @param {string} [root] @returns {string[]}
  */
-export function prismaExecArgs(args) {
-  return ['exec', ...PRISMA_NPM_EXEC_OPTIONS, '--', 'prisma', ...args];
+export function prismaArgv(args, root = REPO_ROOT) {
+  return [prismaCliPath(root), ...args];
 }
 
 /**

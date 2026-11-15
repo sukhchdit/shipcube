@@ -4,13 +4,19 @@
  * paths (fake server, dropped socket) are in cli.test.ts and prisma/tests/seed/seed.int.test.ts.
  */
 import { randomBytes } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { describe, expect, it } from '@jest/globals';
-import type pg from 'pg';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import pg from 'pg';
 
 import { SeedRefusedError, type SeedSql } from './framework/contracts.js';
 import {
   CONNECT_TIMEOUT_MS,
+  connectionErrorLine,
+  migratorClientConfig,
+  QUERY_TIMEOUT_MS,
   readMigratorUrl,
   refuseFileVariants,
   STATEMENT_TIMEOUT_MS,
@@ -62,13 +68,13 @@ describe('readMigratorUrl (PR13-SEC-03, code review m2)', () => {
     const [head, tail] = [randomHex(), randomHex()];
     const raw = `${head}%40${tail}%2F`;
     const url = `postgresql://platform_migrator:${raw}@db.internal:5432/platform?sslmode=verify-full&sslnegotiation=direct`;
-    expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url })).toEqual({ url, secrets: [url, raw, `${head}@${tail}/`] });
+    expect(readMigratorUrl({ APP_ENV: 'staging', DATABASE_MIGRATOR_URL: url })).toEqual({ url, secrets: [url, raw, `${head}@${tail}/`] });
   });
 
   it('keeps only the raw password when it holds a malformed escape', () => {
     const raw = `${randomHex()}%zz`;
     const url = `postgresql://platform_migrator:${raw}@db.internal/platform`;
-    expect(readMigratorUrl({ DATABASE_MIGRATOR_URL: url }).secrets).toEqual([url, raw]);
+    expect(readMigratorUrl({ APP_ENV: 'local', DATABASE_MIGRATOR_URL: url }).secrets).toEqual([url, raw]);
   });
 
   it('refuses a missing or empty URL with SEED_VARIABLE_MISSING', () => {
@@ -146,7 +152,7 @@ describe('withMigratorConnection', () => {
         await sql.query('SELECT 1');
         return 'done';
       },
-      (config) => (created = factory(config)),
+      { createClient: (config) => (created = factory(config)), writeError: () => undefined },
     );
     expect(result).toBe('done');
     expect(created?.config).toMatchObject({
@@ -180,7 +186,7 @@ describe('withMigratorConnection', () => {
         ran = true;
         return Promise.resolve();
       },
-      (config) => (created = factory(config)),
+      { createClient: (config) => (created = factory(config)) },
     ).catch((reason: unknown) => reason);
     expect(error).toBeInstanceOf(SeedRefusedError);
     expect(error).toMatchObject({ code: 'SEED_ENVIRONMENT_INVALID', subjects: ['DATABASE_MIGRATOR_URL'] });
@@ -191,6 +197,134 @@ describe('withMigratorConnection', () => {
 
   it('reports the run error, not a failing end() after a lost connection', async () => {
     const failure = new Error('Connection terminated unexpectedly');
-    await expect(withMigratorConnection(BASE, () => Promise.reject(failure), fakeClient(PINNED, true))).rejects.toBe(failure);
+    await expect(withMigratorConnection(BASE, () => Promise.reject(failure), { createClient: fakeClient(PINNED, true) })).rejects.toBe(
+      failure,
+    );
+  });
+});
+
+/** PEM-shaped dummy text (not a certificate or a key). */
+const DUMMY_CA = '-----BEGIN CERTIFICATE-----\nZHVtbXktdGVzdC1jYQ==\n-----END CERTIFICATE-----\n';
+
+/** A directory inside `dir` (refused: not a regular file). */
+function subdirectory(dir: string): string {
+  const path = join(dir, 'bundle.d');
+  mkdirSync(path);
+  return path;
+}
+
+describe('one TLS implementation for the migrator connection (PR13-SEC-09, PR9-SEC-16/-17, R2-n2/-n3)', () => {
+  const OVERRIDES = ['NODE_TLS_REJECT_UNAUTHORIZED', 'PGSSLMODE'] as const;
+  const saved = new Map<string, string | undefined>();
+  let ca: string;
+
+  beforeEach(() => {
+    for (const key of OVERRIDES) saved.set(key, process.env[key]);
+    ca = mkdtempSync(join(tmpdir(), 'seed-ca-'));
+  });
+
+  afterEach(() => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(ca, { recursive: true, force: true });
+  });
+
+  it('bounds the client (query_timeout = statement_timeout + 10 s), keeps TCP alive and hands pg no query string', () => {
+    expect(QUERY_TIMEOUT_MS).toBe(STATEMENT_TIMEOUT_MS + 10_000);
+    expect(migratorClientConfig(`${BASE}?sslmode=verify-full&sslnegotiation=direct`, [ca])).toEqual({
+      connectionString: BASE,
+      ssl: { rejectUnauthorized: true },
+      sslnegotiation: 'direct',
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+      statement_timeout: STATEMENT_TIMEOUT_MS,
+      idle_in_transaction_session_timeout: STATEMENT_TIMEOUT_MS,
+      query_timeout: QUERY_TIMEOUT_MS,
+      keepAlive: true,
+      application_name: 'platform-seed',
+      options: '-c search_path=pg_catalog,pg_temp',
+    });
+  });
+
+  it('reads sslrootcert from a CA directory into ssl.ca', () => {
+    const path = join(ca, 'root.pem');
+    writeFileSync(path, DUMMY_CA);
+    expect(migratorClientConfig(`${BASE}?sslmode=verify-full&sslrootcert=${encodeURIComponent(path)}`, [ca]).ssl).toEqual({
+      rejectUnauthorized: true,
+      ca: DUMMY_CA,
+    });
+  });
+
+  it('ignores PGSSLMODE and NODE_TLS_REJECT_UNAUTHORIZED: pg sees the explicit ssl only', () => {
+    process.env['PGSSLMODE'] = 'no-verify';
+    process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+    const pgSsl = (url: string): unknown =>
+      (new pg.Client(migratorClientConfig(url, [ca])) as unknown as { connectionParameters: { ssl: unknown } }).connectionParameters.ssl;
+    expect(pgSsl(BASE)).toBe(false);
+    expect(pgSsl(`${BASE}?sslmode=require`)).toEqual({ rejectUnauthorized: true });
+  });
+
+  it.each([
+    ['sslmode=no-verify', () => 'sslmode=no-verify'],
+    ['sslmode=bogus', () => 'sslmode=bogus'],
+    ['sslrootcert=system', () => 'sslmode=verify-full&sslrootcert=system'],
+    ['a relative sslrootcert', () => 'sslmode=verify-full&sslrootcert=root.pem'],
+    ['a directory sslrootcert', (dir: string) => `sslmode=verify-full&sslrootcert=${encodeURIComponent(subdirectory(dir))}`],
+    ['a missing sslrootcert', (dir: string) => `sslmode=verify-full&sslrootcert=${encodeURIComponent(join(dir, 'missing-root.pem'))}`],
+    ['an sslrootcert outside every CA directory', (dir: string) => `sslmode=verify-full&sslrootcert=${encodeURIComponent(`${dir}-x.pem`)}`],
+  ])('refuses %s with exit-1 SEED_ENVIRONMENT_INVALID before creating a client, naming only the variable', async (_label, query) => {
+    let created = false;
+    const error = await withMigratorConnection(`${BASE}?${query(ca)}`, () => Promise.resolve(), {
+      createClient: () => {
+        created = true;
+        throw new Error('must not be reached');
+      },
+      caDirectories: [ca],
+    }).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(SeedRefusedError);
+    expect(error).toMatchObject({ code: 'SEED_ENVIRONMENT_INVALID', subjects: ['DATABASE_MIGRATOR_URL'] });
+    expect((error as Error).message).toMatch(/^Seed refused: DATABASE_MIGRATOR_URL /);
+    expect((error as Error).message).not.toContain(ca);
+    expect((error as Error).message).not.toContain(PASSWORD);
+    expect(error).not.toHaveProperty('cause');
+    expect(created).toBe(false);
+  });
+
+  it('[PR3-SEC-14] readMigratorUrl applies checkToolingEnv: hardened APP_ENV needs verify-full and NODE_TLS_REJECT_UNAUTHORIZED unset', () => {
+    const verified = `${BASE}?sslmode=verify-full`;
+    expect(readMigratorUrl({ APP_ENV: 'production', DATABASE_MIGRATOR_URL: verified }).url).toBe(verified);
+    expect(readMigratorUrl({ APP_ENV: 'local', DATABASE_MIGRATOR_URL: BASE, NODE_TLS_REJECT_UNAUTHORIZED: '0' }).url).toBe(BASE);
+    const refused: readonly (readonly [Record<string, string>, readonly string[]])[] = [
+      [{ APP_ENV: 'staging', DATABASE_MIGRATOR_URL: BASE }, ['DATABASE_MIGRATOR_URL']],
+      [{ APP_ENV: 'local', DATABASE_MIGRATOR_URL: `${BASE}?sslmode=no-verify` }, ['DATABASE_MIGRATOR_URL']],
+      [{ APP_ENV: 'local', DATABASE_MIGRATOR_URL: `${BASE}?sslmode=bogus` }, ['DATABASE_MIGRATOR_URL']],
+      [{ APP_ENV: 'production', DATABASE_MIGRATOR_URL: verified, NODE_TLS_REJECT_UNAUTHORIZED: '0' }, ['NODE_TLS_REJECT_UNAUTHORIZED']],
+      [{ DATABASE_MIGRATOR_URL: BASE }, ['APP_ENV']],
+    ];
+    for (const [env, subjects] of refused) {
+      const error = refusal(() => readMigratorUrl(env));
+      expect(error).toMatchObject({ code: 'SEED_ENVIRONMENT_INVALID', subjects });
+      expect(error.message).not.toContain(PASSWORD);
+      expect(error.message).not.toContain('no-verify');
+    }
+  });
+
+  it('[R2-n3] the error listener writes one value-free line', async () => {
+    let created: FakeClient | undefined;
+    const factory = fakeClient(PINNED);
+    const lines: string[] = [];
+    await withMigratorConnection(BASE, () => Promise.resolve(), {
+      createClient: (config) => (created = factory(config)),
+      writeError: (line) => lines.push(line),
+    });
+    const lost = Object.assign(new Error(`terminated for ${BASE}`), { code: 'ECONNRESET' });
+    created?.listeners[0]?.(lost);
+    expect(lines).toEqual([JSON.stringify({ level: 'error', event: 'seed.connection_error', error: 'Error', code: 'ECONNRESET' })]);
+    expect(connectionErrorLine(Object.assign(new Error('x'), { code: `bad ${PASSWORD}` }))).not.toContain(PASSWORD);
+    expect(connectionErrorLine(Object.assign(new Error('x'), { code: '57P01' }))).toContain('"code":"57P01"');
+    const nonError = JSON.stringify({ level: 'error', event: 'seed.connection_error', error: 'non-error' });
+    expect(connectionErrorLine('a string')).toBe(nonError);
+    expect(connectionErrorLine(null)).toBe(nonError);
   });
 });

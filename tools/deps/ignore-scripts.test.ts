@@ -161,7 +161,7 @@ describe('install scripts are disabled (SEC-TC-45, ADR-0023 am. F)', () => {
 const UNIT_REAL_RUN_BUDGET_MS = 36_000;
 
 describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
-  type Step = { id: string; action: 'run' | 'skip'; reason: string; command?: string[]; env?: string[] };
+  type Step = { id: string; action: 'run' | 'skip'; reason: string; command?: string[]; runner?: 'npm' | 'prisma'; env?: string[] };
   const dryRun = (...args: string[]) => {
     const result = runNode([rebuildScript, '--dry-run', ...args], { cwd: repoRoot });
     return { ...result, steps: result.status === 0 ? (JSON.parse(result.stdout) as Step[]) : [] };
@@ -224,7 +224,7 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     expect(bcrypt.compareSync('wrong horse', hash)).toBe(false);
   });
 
-  it('[SEC-TC-45] plans only allow-listed steps, runs them through `npm exec --no`, and needs no bcrypt build', () => {
+  it('[SEC-TC-45] plans only allow-listed steps, runs npm ones through `npm exec --no`, and needs no bcrypt build', () => {
     const { status, steps } = dryRun();
     expect(status).toBe(0);
     expect(steps.map((s) => s.id)).toEqual(['bcrypt', 'prisma-engines', 'prisma', 'playwright']);
@@ -234,8 +234,9 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     expect(prisma?.action).toBe(hasPrismaSchema() ? 'run' : 'skip');
     expect(steps.find((s) => s.id === 'prisma-engines')?.action).toBe(prisma?.action);
     if (prisma?.command) {
-      // PR9-SEC-02: `--node-options=` keeps npm from re-creating NODE_OPTIONS from its env/.npmrc setting.
-      expect(prisma.command).toEqual(['exec', '--node-options=', '--no', '--', 'prisma', 'generate']);
+      // PR9-SEC-15: the Prisma CLI is started directly with process.execPath (prismaArgv), never through npm.
+      expect(prisma.runner).toBe('prisma');
+      expect(prisma.command).toEqual(['generate']);
       expect(prisma.env).toEqual(['PRISMA_SCHEMA_ENGINE_BINARY', 'CHECKPOINT_DISABLE']);
     }
   });

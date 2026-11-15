@@ -19,3 +19,6 @@ tests/fixtures/lint/suppressions/
 # Required-suite manifest: qa-lead content moved verbatim from docs/ (T-QA-01, D-QA-001); one line per suite keeps
 # its reviews readable, so Prettier does not reflow it.
 tools/quality/required-suites.json
+
+# nginx include snippets of the local edge (TASK-014): Prettier would parse *.inc as HTML.
+infra/local/edge/*.inc

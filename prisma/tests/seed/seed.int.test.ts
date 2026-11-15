@@ -371,14 +371,22 @@ describe('seed CLI (US-049)', () => {
   const stderrRefusal = (stderr: string): { code: string; subjects: string[] } =>
     JSON.parse(stderr.trim().split('\n').at(-1) ?? '') as { code: string; subjects: string[] };
 
-  it('[AT-US-049-03] APP_ENV=production demo: the reference seed runs, the demo seed is skipped, exit 0', async () => {
+  // TASK-014 (PR3-SEC-14, D-TASK014-08): a production seed needs exactly one sslmode=verify-full, which the plain-TCP
+  // Testcontainers database cannot offer, so the end-to-end production run is no longer possible here. The production
+  // skip itself is planned by planDemoCredentials (prisma/seed/demo/credential-plan.test.ts, [AT-US-049-03]); this case
+  // proves that a production seed against a plain-TCP URL is refused before any connection and writes nothing.
+  it('[AT-US-049-03][PR3-SEC-14] APP_ENV=production demo over plain TCP is refused before connecting (exit 1, variable named)', async () => {
     const database = await freshDatabase();
-    const result = cli('demo', { APP_ENV: 'production', NODE_ENV: 'production', DATABASE_MIGRATOR_URL: db.migratorUrl(database) });
-    expect(result.status).toBe(0);
-    const lines = events(result.stdout);
-    expect(lines).toContainEqual(expect.objectContaining({ event: 'seed.step', step: 'authz-parity' }));
-    expect(lines).toContainEqual(expect.objectContaining({ event: 'seed.reference.done' }));
-    expect(lines).toContainEqual(expect.objectContaining({ event: 'seed.demo.done', skipped: true, created: 0 }));
+    const url = db.migratorUrl(database);
+    const result = cli('demo', { APP_ENV: 'production', NODE_ENV: 'production', DATABASE_MIGRATOR_URL: url });
+    expect(result.status).toBe(1);
+    const refused = stderrRefusal(result.stderr);
+    expect(refused.code).toBe('SEED_ENVIRONMENT_INVALID');
+    expect(refused.subjects).toEqual(['DATABASE_MIGRATOR_URL']);
+    expect(result.stdout + result.stderr).not.toContain(url);
+    await withClient(db.migratorConnection(database), async (client) => {
+      expect((await versionRows(client)).rows).toEqual([]);
+    });
   }, 120_000);
 
   it.each([

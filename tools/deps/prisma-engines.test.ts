@@ -25,15 +25,15 @@ import {
   FETCH_RETRIES,
   FORBIDDEN_ENGINE_ENV,
   MAX_BINARY_BYTES,
-  PRISMA_NPM_EXEC_OPTIONS,
   ensureEngine,
   engineFileName,
   engineUrl,
   fetchFromOrigin,
   forbiddenEnv,
   locateInstall,
+  prismaArgv,
   prismaChildEnv,
-  prismaExecArgs,
+  prismaCliPath,
   readManifest,
   recordHashes,
   reverifyEngine,
@@ -369,19 +369,30 @@ describe('pinned Prisma schema engine (SEC-TC-64, ADR-0023 am. J item 2)', () =>
     expect(prismaChildEnv({ npm_config_cache: '/c' }, '/e')).toMatchObject({ npm_config_cache: '/c' });
   });
 
-  it('[PR9-SEC-02] the npm argv for Prisma empties npm node-options on the command line, before `--`, and keeps `--no`', () => {
-    const argv = prismaExecArgs(['migrate', 'deploy']);
-    expect(argv).toEqual(['exec', '--node-options=', '--no', '--', 'prisma', 'migrate', 'deploy']);
-    const separator = argv.indexOf('--');
-    expect(argv.indexOf('--node-options=')).toBeGreaterThan(0);
-    expect(argv.indexOf('--node-options=')).toBeLessThan(separator);
-    expect(argv.indexOf('--no')).toBeLessThan(separator);
-    expect(argv.slice(separator + 1, separator + 2)).toEqual(['prisma']);
-    // A Prisma argument that looks like an npm option stays after `--`, so npm never parses it.
-    const hostile = prismaExecArgs(['--node-options=--require x']);
-    expect(hostile.indexOf('--node-options=--require x')).toBeGreaterThan(hostile.indexOf('--'));
-    expect(PRISMA_NPM_EXEC_OPTIONS).toEqual(['--node-options=', '--no']);
-    expect(Object.isFrozen(PRISMA_NPM_EXEC_OPTIONS)).toBe(true);
+  it('[PR9-SEC-15] the Prisma argv starts the CLI resolved from prisma/package.json directly: no npm-cli.js, no npm exec', () => {
+    const argv = prismaArgv(['migrate', 'deploy']);
+    expect(argv.slice(1)).toEqual(['migrate', 'deploy']);
+    expect(argv.join(' ')).not.toMatch(/npm-cli\.js|\bexec\b/);
+    const manifest = createRequire(join(repoRoot, 'prisma', 'package.json')).resolve('prisma/package.json');
+    expect(argv[0]).toBe(join(manifest, '..', 'build', 'index.js'));
+    expect(existsSync(argv[0] ?? '')).toBe(true);
+    // A Prisma argument that looks like an npm or Node option is just a Prisma argument.
+    expect(prismaArgv(['--node-options=--require x']).slice(1)).toEqual(['--node-options=--require x']);
+  });
+
+  it('[PR9-SEC-15] prismaCliPath refuses a manifest whose bin is absolute or leaves the package', () => {
+    for (const bin of ['/usr/bin/evil.js', '../evil.js', 'build/../../evil.js', 'C:/evil.js', '', 42]) {
+      const root = mkdtempSync(join(tmpdir(), 'prisma-bin-'));
+      try {
+        mkdirSync(join(root, 'prisma'), { recursive: true });
+        mkdirSync(join(root, 'node_modules', 'prisma'), { recursive: true });
+        writeFileSync(join(root, 'prisma', 'package.json'), '{"name":"p"}');
+        writeFileSync(join(root, 'node_modules', 'prisma', 'package.json'), JSON.stringify({ name: 'prisma', bin: { prisma: bin } }));
+        expect(() => prismaCliPath(root)).toThrow(EngineError);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
   });
 
   it('[PR5-SEC-07] prisma.config.ts files load no dotenv and call no loadEnvFile', () => {

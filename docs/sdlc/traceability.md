@@ -55,8 +55,8 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-PLAT-002 | M0 | Must | US-001 | platform · ADR-0003 §Layering (routes → controller → service → repository, `eslint-plugin-boundaries`); ADR-0002 §5 | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-003 | M0 | Must | US-001 | platform · ADR-0001 (TypeScript 6 strict); ADR-0002 §Scripts (`tsc -b`, root scripts) | TASK-001, TASK-002 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-004 | M0 | Must | US-002 | packages/config · ADR-0018 §Typed configuration (Joi schema, fail-fast, `.env.example` parity) | TASK-005 | – | Implemented (tasks merged; acceptance at G3) |
-| REQ-PLAT-005 | M0 | Must | US-003 | infra/ (compose) · platform.md §2 Compose stack (`--wait` ≤ 180 s); ADR-0021 (RustFS); ADR-0001 (Valkey 8) | TASK-014, TASK-026, TASK-089 | – | Planned |
-| REQ-PLAT-006 | M0 | Must | US-004 | infra/ (Dockerfiles) · platform.md §3 hardened images; ADR-0022; ADR-0023 am. F (`npm ci --ignore-scripts`) | TASK-014 | – | Planned |
+| REQ-PLAT-005 | M0 | Must | US-003 | infra/ (compose) · platform.md §2 Compose stack (`--wait` ≤ 180 s); ADR-0021 (RustFS); ADR-0001 (Valkey 8) | TASK-014, TASK-026, TASK-089 | – | In progress (merged: TASK-014) |
+| REQ-PLAT-006 | M0 | Must | US-004 | infra/ (Dockerfiles) · platform.md §3 hardened images; ADR-0022; ADR-0023 am. F (`npm ci --ignore-scripts`) | TASK-014 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-007 | M0 | Must | US-005 | .github/ · ADR-0023 §1 + am. A–D lane model (D-ORCH-001); platform.md §7 | TASK-007 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-PLAT-008 | M0 | Must | US-006 | .github/ · ADR-0024 (Jest thresholds 85/75, 95 on pricing/audit/authz); ADR-0023 am. A diff-coverage gate | TASK-015 | – | Planned |
 | REQ-PLAT-009 | M0 | Must | US-007 | platform · ADR-0016 §3 single problem+json error handler; api/README §3 | TASK-006 | – | Implemented (tasks merged; acceptance at G3) |
@@ -158,15 +158,15 @@ v1.1 (G1 condition closure): tags corrected per D-036; DC (demo-critical) column
 | REQ-RLS-004 | M0 | Must | US-075 | prisma/ · ADR-0005 §Policies (unset context → zero rows, writes rejected); data-model §4.3 | TASK-016 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-005 | M0 | Must | US-074 | prisma/ · ADR-0005 §Roles (`platform_app` NOSUPERUSER NOBYPASSRLS); data-model §4.4 | TASK-003, TASK-016 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-006 | M0 | Must | US-076 | prisma/ · ADR-0005 §Operator branch (read-only cross-tenant policy); data-model §4.3 | TASK-060 | – | Planned |
-| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Implemented (tasks merged; acceptance at G3) |
+| REQ-RLS-007 | M0 | Must | US-077 | prisma/ + tests · ADR-0005 §Verification (generated cross-tenant suite); data-model §4.6 catalog tests | TASK-024 | – | Implemented (tasks merged; acceptance at G3) — TASK-024 + suite active in lane B (PR #47) |
 | REQ-RLS-008 | M0 | Must | US-078 | platform (worker) · ADR-0013 am. 1–5 (`platform.job_context`, payload v2); ADR-0005; data-model §4.5 | TASK-047 | – | Planned |
 | REQ-RLS-009 | M0 | Must | US-064 | prisma/ · ADR-0009 §Standard columns (UUIDv7, `timestamptz`, actor stamps); data-model P1/P2 | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-010 | M0 | Must | US-079 | prisma/ · ADR-0009 §Soft delete (partial unique indexes); ADR-0005 (no DELETE grant); data-model P3 | TASK-100 | – | Planned |
 | REQ-RLS-011 | M0 | Must | US-079 | platform · ADR-0009 §Optimistic locking (`version`, conditional UPDATE → 409/412); ADR-0016 §6 | TASK-100 | – | Planned |
 | REQ-RLS-012 | M0 | Must | US-064 | prisma/ · ADR-0009 §Time (`timestamptz` UTC; local `date` + IANA zone); data-model P-rules | TASK-032 | – | Implemented (tasks merged; acceptance at G3) |
 | REQ-RLS-013 | M0 | Must | US-080 | prisma/ · ADR-0005 §Guest-capable tables (null `org_id`, `ck_<t>__owner`, guest claim policy); data-model §3.10 | TASK-051 | – | Planned |
-| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
-| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023) |
+| REQ-DATA-001 | M0 | Must | US-049 | prisma/ (seed) · data-model §9 seed plan (idempotent upsert by natural key) | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023, TASK-014) |
+| REQ-DATA-002 | M0 | Must | US-049 | prisma/ (seed) · ADR-0018 (`SEED_*` env); ADR-0006 am. 14 (non-local staff created without passwords); data-model §9 | TASK-023, TASK-014, TASK-089 | – | In progress (merged: TASK-023, TASK-014) |
 | REQ-DATA-003 | M0 | Must | US-050 | prisma/ (seed) · data-model §9 (operator org with 8 role users, demo organisations) | TASK-089 | – | Planned |
 | REQ-DATA-004 | M0 | Must | US-051 | admin-settings + prisma/ · data-model §3.6 countries (ISO 3166-1, names en/es/fr); §9 | TASK-026 | – | Planned |
 | REQ-DATA-005 | M0 | Must | US-051 | admin-settings · data-model §3.6 countries (`shipping_enabled` launch set, D-007) | TASK-026 | – | Planned |

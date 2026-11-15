@@ -1,0 +1,4 @@
+user default off resetpass resetkeys resetchannels -@all
+user api on #92e605c82b17b367bf73bd1c0b175434af5b5cd419ec3555a3ebff0dc30ba19b ~auth:* ~rl:* ~cache:* ~carrier:* ~sse:* &sse:* +@all -@dangerous
+user worker on #d4e106c776c15627907e79c8945f62a33d3fb52580e0cb59dc8b15e4e2f6e0ee ~bull:* ~carrier:* ~audit:* ~cache:* +@all -@dangerous +info
+user healthcheck on #0a3953c8f34aa39459468168bbadc1c7649262e79625d876e2f929306d698bd5 -@all +ping

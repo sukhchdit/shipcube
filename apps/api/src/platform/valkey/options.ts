@@ -30,6 +30,11 @@ export interface ValkeyConnectionOptions {
   readonly commandTimeout: number;
   readonly maxRetriesPerRequest: number;
   readonly retryStrategy: (times: number) => number;
+  /**
+   * Always false (TASK-014): the ioredis ready check sends INFO, which the `api` ACL user may not run (platform.md §2.2,
+   * `-@dangerous`); ioredis would skip it with an unstructured console warning. Readiness is the PING probe instead.
+   */
+  readonly enableReadyCheck: false;
   readonly username?: string;
   readonly password?: string;
   readonly tls?: ValkeyTlsOptions;
@@ -111,6 +116,7 @@ export function buildValkeyOptions(input: ValkeyOptionsInput): ValkeyConnectionO
     commandTimeout: bounded('commandTimeoutMs', input.commandTimeoutMs ?? VALKEY_DEFAULTS.commandTimeoutMs, 60_000),
     maxRetriesPerRequest: input.maxRetriesPerRequest ?? VALKEY_DEFAULTS.maxRetriesPerRequest,
     retryStrategy: (times: number) => reconnectDelayMs(times, random),
+    enableReadyCheck: false,
     ...(url.username === '' ? {} : { username: decodeURIComponent(url.username) }),
     ...(url.password === '' ? {} : { password: decodeURIComponent(url.password) }),
     ...(url.protocol === 'rediss:' ? { tls } : {}),

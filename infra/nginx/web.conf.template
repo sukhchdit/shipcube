@@ -1,8 +1,9 @@
 # Nginx server for apps/web (platform.md §3.3, ADR-0026 §1 and amendment 4). TASK-004 scaffold.
 #
-# Template for the nginx image's envsubst step (/etc/nginx/templates/*.template -> /etc/nginx/conf.d/*.conf). The
-# only placeholder is ${NGINX_PORT} (8080 in nginx-unprivileged). The image substitutes defined environment variables
-# only, so the nginx runtime variables below ($uri, $lng, $cookie_lng, ...) pass through unchanged. No secrets.
+# Template rendered once at image build time by apps/web/Dockerfile (TASK-014) into the root-owned
+# /etc/nginx/conf.d/web.conf. The only placeholder is ${NGINX_PORT} (8080 in nginx-unprivileged); the render replaces
+# that one name only, so the nginx runtime variables below ($uri, $lng, $cookie_lng, ...) pass through unchanged.
+# No secrets.
 #
 # The document root holds `apps/web/build/client/`:
 #   /en/index.html, /es/index.html, /fr/index.html  pre-rendered public pages
@@ -54,8 +55,8 @@ map $uri $web_vary {
 }
 
 server {
-    # default_server: this block answers every request even if the image still carries the stock conf.d/default.conf
-    # (PR4-SEC-02); TASK-014 removes that file.
+    # default_server: answers requests whose Host matches no server_name; TASK-014 deletes the stock default.conf, which
+    # would still take Host: localhost and IPv6 (PR4-SEC-02, PR4-SEC-12).
     listen ${NGINX_PORT} default_server;
     server_name _;
     server_tokens off;
