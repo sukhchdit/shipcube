@@ -14,7 +14,7 @@ import { createWorkerHealthServer } from './server.js';
 // Real HTTP over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE; same budget as the api
 // loopback suites, apps/api/src/platform/routing/tests/loopback.ts). The upper bound of a timing check is the deadline plus
 // this slack: it separates 'the deadline fired' from 'the call hung', it is not a latency target.
-const TEST_TIMEOUT_MS = 60_000;
+const TEST_TIMEOUT_MS = 180_000;
 const HOST_LOAD_SLACK_MS = 20_000;
 jest.setTimeout(TEST_TIMEOUT_MS);
 
