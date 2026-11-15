@@ -4,13 +4,14 @@
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { loadConfig } from '@platform/config';
 import { createTestEnv } from '@platform/config/testing';
 import type { Express } from 'express';
 import request from 'supertest';
 
 import { createApp, type AppDependencies } from '../../app.js';
+import { closeLoopbackServer, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import {
   createDocsRouter,
   DOCS_CSP,
@@ -24,7 +25,9 @@ import {
 
 const SPEC = new URL('../../../../../docs/03-architecture/api/openapi.yaml', import.meta.url);
 /** createTestEnv generates key material and the docs router reads the 1.5 MB UI bundle: slow on a loaded host. */
-const SLOW = 30_000;
+// A 1.6 MB bundle over loopback: the 30 s budget and the 5 s default of the hooks timed out under parallel host load (W0-FLAKE, D-ORCH-097).
+const SLOW = LOOPBACK_TEST_TIMEOUT_MS;
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 const TEST_DOCS: DocsOptions = { specPath: SPEC, apiMode: 'test', topBar: false };
 const DOCS_PATHS = [
   '/api/docs',
@@ -55,7 +58,7 @@ async function withServer(target: Express, run: (get: (path: string, init?: Requ
   try {
     await run((path, init) => fetch(`http://127.0.0.1:${String(port)}${path}`, init));
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
 }
 

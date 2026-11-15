@@ -5,7 +5,7 @@
 // code review m1 (a)), and the boot log line names each refusal (n1). Real createApp over loopback; no database.
 import type { AddressInfo } from 'node:net';
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import type { Express, NextFunction, Request, Response } from 'express';
 
 import { createApp } from '../../app.js';
@@ -23,6 +23,10 @@ import {
 import { ANONYMOUS, markPrivateResponse, PRIVATE_CACHE_CONTROL, setPrincipal } from './route-state.js';
 import { SlotNotImplementedError } from './slot.js';
 import { fixtureRoute } from './tests/fixture-route.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from './tests/loopback.js';
+
+// Real createApp over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE, PR #38 R1-n1).
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 const silent = { info: () => undefined, debug: () => undefined, error: () => undefined };
 const ACTOR = '0193a5b2-7c1e-7d4a-9f3b-0000000000a1';
@@ -32,10 +36,10 @@ async function call(app: Express, path: string, init: RequestInit = {}): Promise
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
+    const response = await fetchOnce(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
     return { status: response.status, headers: response.headers, body: await response.text() };
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
 }
 

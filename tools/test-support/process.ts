@@ -40,7 +40,7 @@ export function runNode(
     ...(options.input === undefined ? {} : { input: options.input }),
     env: options.env ?? process.env,
     encoding: 'utf8',
-    timeout: options.timeoutMs ?? 120_000,
+    timeout: options.timeoutMs ?? 300_000,
     windowsHide: true,
   });
   if (result.error !== undefined) throw result.error;

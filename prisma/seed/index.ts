@@ -18,7 +18,7 @@ import {
 } from './framework/contracts.js';
 import { runReferenceSeed } from './framework/runner.js';
 import { assertNotLocalOnEcs, DEFERRED_PROVISIONER, DEMO_USERS, parseAppEnv, planDemoCredentials, runDemoSeed } from './demo/index.js';
-import { readMigratorUrl, refuseFileVariants, withMigratorConnection } from './migrator-connection.js';
+import { type MigratorClientFactory, readMigratorUrl, refuseFileVariants, withMigratorConnection } from './migrator-connection.js';
 import { REFERENCE_DATASETS, REFERENCE_STEPS } from './reference/index.js';
 
 export const COMMANDS = ['reference', 'demo'] as const;
@@ -86,7 +86,13 @@ function redact(text: string, secrets: readonly string[]): string {
 const planSecrets = (plan: DemoCredentialPlan | undefined): string[] =>
   plan?.kind === 'seeded-passwords' ? [...plan.passwords.values()].map((password) => password.reveal()) : [];
 
-export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, output: Output = processOutput): Promise<number> {
+export async function main(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+  output: Output = processOutput,
+  /** Test seam only (the CLI entry passes nothing): replaces the driver client factory. */
+  createClient?: MigratorClientFactory,
+): Promise<number> {
   const command = argv[0];
   if (!isCommand(command)) {
     output.err(JSON.stringify({ level: 'error', event: 'seed.usage', message: `usage: seed <${COMMANDS.join('|')}>` }));
@@ -105,14 +111,17 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
 
     const migrator = readMigratorUrl(env);
     secrets.push(...migrator.secrets);
-    const reference = await withMigratorConnection(migrator.url, (sql) =>
-      runReferenceSeed({
-        sql,
-        datasets: REFERENCE_DATASETS,
-        steps: REFERENCE_STEPS,
-        logger,
-        configChanges: loggingConfigChangeSink(logger),
-      }),
+    const reference = await withMigratorConnection(
+      migrator.url,
+      (sql) =>
+        runReferenceSeed({
+          sql,
+          datasets: REFERENCE_DATASETS,
+          steps: REFERENCE_STEPS,
+          logger,
+          configChanges: loggingConfigChangeSink(logger),
+        }),
+      createClient === undefined ? {} : { createClient },
     );
     logger.info('seed.reference.done', {
       datasets: reference.datasets.length,
