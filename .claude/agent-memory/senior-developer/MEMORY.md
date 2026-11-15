@@ -43,3 +43,4 @@
 - [PR #39 union with #42](feedback_pr39_union42.md) — take main's file verbatim, overlap stack+evidence, check-evidence before commit body, 4 GB lint proxy
 - [TASK-027 RBAC matrix](feedback_task027_rbac_matrix.md) — classifier refuses tools/quality edits, npm ci during live run, loopback timeouts under load, contract fixtures, resume/flake budget
 - [TASK-020D resume](feedback_task020d_resume.md) — leftover mutant after outage, guard breaks existing int test, main.ts comments vs diff gate, host-overload probe
+- [TASK-285 audit actions](feedback_task285_audit_actions.md) — bootstrap name must sort last, shadow-init KEEP ripple, lane-test pins, saturation-only evidence FAILs
