@@ -6,15 +6,7 @@
  */
 import { request as httpRequest, type Server } from 'node:http';
 
-export const LOOPBACK_TEST_TIMEOUT_MS = 180_000;
-
-/**
- * Upper-bound slack of the "answers within X" timing checks (W0-FLAKE). A lower bound (the deadline really elapsed)
- * stays exact; an upper bound only has to tell "the deadline fired" from "the call hung or ran to a far longer limit"
- * (tens of seconds), so it is the deadline plus this slack, not the deadline plus a few hundred ms that a loaded host
- * overshoots. Never imported by production code.
- */
-export const HOST_LOAD_SLACK_MS = 20_000;
+export { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, timeOperation } from './timing.js';
 
 /**
  * Closes a loopback test server and every socket still open on it. `server.close()` alone waits for the keep-alive
@@ -28,33 +20,17 @@ export function closeLoopbackServer(server: Server): Promise<void> {
   });
 }
 
-/**
- * Measures how long `operation` took and how much of that the host stole (W0-FLAKE). A heartbeat timer notes every tick
- * that fires later than scheduled; the sum of that lateness is the time this process was not running (host load, GC,
- * a suspended process). `ms` is the raw elapsed time, so a lower bound ("the deadline really elapsed") stays exact;
- * `workMs` is `ms` minus the stalls, so an upper bound ("the deadline fired, the call did not run on to a far longer
- * limit") no longer depends on how long the host froze the process. Never imported by production code.
- */
-export async function timeOperation<T>(
-  operation: () => Promise<T>,
-): Promise<{ readonly value: T; readonly ms: number; readonly workMs: number }> {
-  const tickMs = 20;
-  const started = performance.now();
-  let last = started;
-  let stalledMs = 0;
-  const heartbeat = setInterval(() => {
-    const now = performance.now();
-    stalledMs += Math.max(0, now - last - tickMs);
-    last = now;
-  }, tickMs);
-  try {
-    const value = await operation();
-    const now = performance.now();
-    stalledMs += Math.max(0, now - last - tickMs);
-    return { value, ms: now - started, workMs: Math.max(0, now - started - stalledMs) };
-  } finally {
-    clearInterval(heartbeat);
-  }
+/** The per-request deadline of {@link fetchOnce}: a hang fails fast and named instead of consuming the whole test budget. */
+export const FETCH_ONCE_DEADLINE_MS = 60_000;
+
+/** Thrown (rejected) by {@link fetchOnce} when the server sent no complete response within the deadline. */
+export class FetchOnceTimeoutError extends Error {
+  override readonly name = 'FetchOnceTimeoutError';
+}
+
+export interface FetchOnceOptions {
+  /** Test seam for {@link FetchOnceTimeoutError}; defaults to {@link FETCH_ONCE_DEADLINE_MS}. */
+  readonly deadlineMs?: number;
 }
 
 /**
@@ -62,30 +38,64 @@ export async function timeOperation<T>(
  * `Connection: close`) and no connection pool. Under host load the global fetch dispatcher left a connect that the server
  * had accepted without ever delivering its request (the pooled client for a recycled ephemeral port, or one idled out during
  * a stall); the case then waited for the whole test budget (W0-FLAKE). The response is read in full before it is returned.
- * Only string and byte bodies, no redirects. Never imported by production code.
+ *
+ * Only string and byte bodies (sent with `Content-Length`, like fetch), no redirects. An unsupported body is refused BEFORE
+ * anything is sent. An already-aborted `init.signal` rejects without sending; a later abort destroys the request. No
+ * complete response within the deadline rejects with {@link FetchOnceTimeoutError} naming the method and path.
+ * Never imported by production code.
  */
-export function fetchOnce(url: string, init: RequestInit = {}): Promise<Response> {
+export function fetchOnce(url: string, init: RequestInit = {}, options: FetchOnceOptions = {}): Promise<Response> {
   return new Promise<Response>((resolve, reject) => {
     const target = new URL(url);
+    const method = init.method ?? 'GET';
+    const path = `${target.pathname}${target.search}`;
+    const { body, signal } = init;
+    let payload: Buffer | undefined;
+    if (typeof body === 'string') payload = Buffer.from(body);
+    else if (body instanceof Uint8Array) payload = Buffer.from(body);
+    else if (body !== undefined && body !== null) {
+      reject(new TypeError('fetchOnce: only string and byte bodies are supported'));
+      return;
+    }
+    if (signal?.aborted === true) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('fetchOnce: aborted'));
+      return;
+    }
     const headers: Record<string, string> = {};
     new Headers(init.headers).forEach((value, name) => {
       headers[name] = value;
     });
     headers['connection'] = 'close';
+    if (payload !== undefined) headers['content-length'] = String(payload.byteLength);
+    const deadlineMs = options.deadlineMs ?? FETCH_ONCE_DEADLINE_MS;
+    const timer = setTimeout(() => {
+      request.destroy(new FetchOnceTimeoutError(`fetchOnce: no response from ${method} ${path} within ${String(deadlineMs)} ms`));
+    }, deadlineMs);
+    const onAbort = (): void => {
+      request.destroy(signal?.reason instanceof Error ? signal.reason : new Error('fetchOnce: aborted'));
+    };
+    const settle = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
     const request = httpRequest(
       {
-        hostname: target.hostname,
+        hostname: target.hostname.replace(/^\[|\]$/g, ''),
         port: target.port,
-        path: `${target.pathname}${target.search}`,
-        method: init.method ?? 'GET',
+        path,
+        method,
         headers,
         agent: false,
       },
       (response) => {
         const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer) => chunks.push(chunk));
-        response.on('error', reject);
+        response.on('error', (error) => {
+          settle();
+          reject(error);
+        });
         response.on('end', () => {
+          settle();
           const answered = new Headers();
           for (const [name, value] of Object.entries(response.headers)) {
             if (Array.isArray(value)) for (const item of value) answered.append(name, item);
@@ -103,10 +113,12 @@ export function fetchOnce(url: string, init: RequestInit = {}): Promise<Response
         });
       },
     );
-    request.on('error', reject);
-    const { body } = init;
-    if (typeof body === 'string' || body instanceof Uint8Array) request.write(body);
-    else if (body !== undefined && body !== null) reject(new Error('fetchOnce: only string and byte bodies'));
+    request.on('error', (error) => {
+      settle();
+      reject(error);
+    });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (payload !== undefined) request.write(payload);
     request.end();
   });
 }

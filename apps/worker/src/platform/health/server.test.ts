@@ -3,19 +3,21 @@ import type { AddressInfo } from 'node:net';
 import {
   createReadinessProbe,
   isCriticalComponent,
+  READINESS_CHECK_TIMEOUT_MS,
   READINESS_COMPONENTS,
+  READINESS_DEADLINE_MS,
   type ReadinessCheck,
   type ReadinessComponent,
 } from '@platform/api/runtime';
+import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, recordAbortTimeouts, timeOperation } from '@platform/api/test-support/timing';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createWorkerHealthServer } from './server.js';
 
-// Real HTTP over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE; same budget as the api
-// loopback suites, apps/api/src/platform/routing/tests/loopback.ts). The upper bound of a timing check is the deadline plus
-// this slack: it separates 'the deadline fired' from 'the call hung', it is not a latency target.
-const TEST_TIMEOUT_MS = 180_000;
-const HOST_LOAD_SLACK_MS = 20_000;
+// Real HTTP over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE; same budget and timing helpers as the
+// api loopback suites). The upper bound of a timing check separates 'the deadline fired' from 'the call hung'; the magnitude of
+// a deadline is pinned by what reaches the timer (recordAbortTimeouts), not by wall-clock slack.
+const TEST_TIMEOUT_MS = LOOPBACK_TEST_TIMEOUT_MS;
 jest.setTimeout(TEST_TIMEOUT_MS);
 
 const failing = (name: ReadinessComponent, critical: boolean): ReadinessCheck => ({
@@ -48,6 +50,7 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
   async function start(checks: readonly ReadinessCheck[], deadlineMs?: number) {
     const probe = createReadinessProbe(checks, deadlineMs === undefined ? {} : { deadlineMs });
     const server = createWorkerHealthServer(probe);
+    expect([server.headersTimeout, server.requestTimeout]).toEqual([5_000, 5_000]);
     // The production server drops a request whose headers take over 5 s (slowloris bound); a host stall that long reset the probe (W0-FLAKE). Widened on this test instance only.
     server.headersTimeout = TEST_TIMEOUT_MS;
     server.requestTimeout = TEST_TIMEOUT_MS;
@@ -89,25 +92,34 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
     expect((await call('/health/live')).status).toBe(200);
   });
 
-  it('AT-US-012-03: worker readiness is bounded when PostgreSQL does not answer', async () => {
-    const { call } = await start(checksWith({ database: hanging('database') }), 300);
-    const started = performance.now();
-    let last = started;
-    let stalledMs = 0;
-    // Heartbeat: the time this process was not scheduled (host load) is not the time the deadline took.
-    const heartbeat = setInterval(() => {
-      const now = performance.now();
-      stalledMs += Math.max(0, now - last - 20);
-      last = now;
-    }, 20);
+  it('AT-US-012-03: worker readiness is bounded when PostgreSQL does not answer (the configured deadline reaches the timer)', async () => {
+    const timers = recordAbortTimeouts();
     try {
-      expect((await call('/health/ready')).status).toBe(503);
+      const { call } = await start(checksWith({ database: hanging('database') }), 300);
+      const { value: ready, workMs } = await timeOperation(() => call('/health/ready'));
+      expect(ready.status).toBe(503);
+      // Magnitude, deterministic: a worker deadline x10 would arm 3 000 ms.
+      expect(timers.calls.filter((ms) => ms === 300)).toHaveLength(1);
+      expect(timers.calls.filter((ms) => ms === READINESS_CHECK_TIMEOUT_MS)).toHaveLength(READINESS_COMPONENTS.length);
+      // Fired, not hung.
+      expect(workMs).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
     } finally {
-      clearInterval(heartbeat);
+      timers.restore();
     }
-    const end = performance.now();
-    stalledMs += Math.max(0, end - last - 20);
-    expect(end - started - stalledMs).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
+  });
+
+  it('AT-US-012-03: the worker uses the AC readiness bounds by default (2 s per check, whole response within 2.5 s)', async () => {
+    const timers = recordAbortTimeouts();
+    try {
+      const { call } = await start(checksWith());
+      expect((await call('/health/ready')).status).toBe(200);
+      expect(READINESS_CHECK_TIMEOUT_MS).toBe(2_000);
+      expect(READINESS_DEADLINE_MS).toBeLessThanOrEqual(2_500);
+      expect(timers.calls.filter((ms) => ms === READINESS_DEADLINE_MS)).toHaveLength(1);
+      expect(Math.max(...timers.calls.filter((ms) => ms < TEST_TIMEOUT_MS - 5_000))).toBeLessThanOrEqual(2_500);
+    } finally {
+      timers.restore();
+    }
   });
 
   it('AT-US-012-04: a failing audit_chain check degrades worker readiness without failing it', async () => {

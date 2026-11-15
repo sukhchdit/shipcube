@@ -12,6 +12,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, timeOperation } from '../routing/tests/loopback.js';
+import { recordAbortTimeouts } from '../routing/tests/timing.js';
 import { createS3ObjectStorage, type S3ObjectStorage, type S3Timeouts } from './s3-object-storage.js';
 
 const BUCKET = 'documents';
@@ -191,13 +192,24 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
         metadataDeadlineMs: 400,
       });
       const put = { bucket: BUCKET, key: KEY, body: body(), contentType: 'application/pdf' };
-      const results = await Promise.all([
-        timed(() => storage.put(put)).then((result) => ({ ...result, deadline: 800 })),
-        timed(() => storage.putIfAbsent(put)).then((result) => ({ ...result, deadline: 800 })),
-        timed(() => storage.get({ bucket: BUCKET, key: KEY })).then((result) => ({ ...result, deadline: 800 })),
-        timed(() => storage.head({ bucket: BUCKET, key: KEY })).then((result) => ({ ...result, deadline: 400 })),
-        timed(() => storage.delete({ bucket: BUCKET, key: KEY })).then((result) => ({ ...result, deadline: 400 })),
-      ]);
+      const timers = recordAbortTimeouts();
+      let results;
+      try {
+        results = await Promise.all([
+          timed(() => storage.put(put)).then((result) => ({ ...result, deadline: 800 })),
+          timed(() => storage.putIfAbsent(put)).then((result) => ({ ...result, deadline: 800 })),
+          timed(() => storage.get({ bucket: BUCKET, key: KEY })).then((result) => ({ ...result, deadline: 800 })),
+          timed(() => storage.head({ bucket: BUCKET, key: KEY })).then((result) => ({ ...result, deadline: 400 })),
+          timed(() => storage.delete({ bucket: BUCKET, key: KEY })).then((result) => ({ ...result, deadline: 400 })),
+        ]);
+      } finally {
+        timers.restore();
+      }
+      // Magnitude, deterministic (R1-M2, PR30-SEC-01): each operation arms exactly its configured deadline, so a bounded()
+      // that stretches it (x2, x10) cannot pass however loose the wall-clock slack is. put, putIfAbsent, get: data; head, delete: metadata.
+      expect(timers.calls.filter((ms) => ms === 800)).toHaveLength(3);
+      expect(timers.calls.filter((ms) => ms === 400)).toHaveLength(2);
+      expect(Math.max(...timers.calls)).toBeLessThanOrEqual(800);
       for (const { outcome, ms, workMs, deadline } of results) {
         expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
         expect(ms).toBeGreaterThanOrEqual(deadline - 50);
@@ -209,12 +221,22 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
 
   it('a caller signal shorter than the deadline wins', async () => {
     const server = await loopback(silent);
-    const { outcome, workMs } = await timed(() =>
-      storageFor(server, { ...LOAD_TOLERANT_TIMEOUTS, requestMs: LONG_REQUEST_MS }).get(
-        { bucket: BUCKET, key: KEY },
-        AbortSignal.timeout(300),
-      ),
-    );
+    const timers = recordAbortTimeouts();
+    let result;
+    try {
+      result = await timed(() =>
+        storageFor(server, { ...LOAD_TOLERANT_TIMEOUTS, requestMs: LONG_REQUEST_MS }).get(
+          { bucket: BUCKET, key: KEY },
+          AbortSignal.timeout(300),
+        ),
+      );
+    } finally {
+      timers.restore();
+    }
+    const { outcome, workMs } = result;
+    // The caller's 300 ms and the operation's own deadline (here 120 s) are both armed at their configured values.
+    expect(timers.calls.filter((ms) => ms === 300)).toHaveLength(1);
+    expect(timers.calls.filter((ms) => ms === LONG_REQUEST_MS)).toHaveLength(1);
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
     expect(workMs).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
   });
@@ -227,9 +249,20 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
         response.on('close', () => clearInterval(timer));
       }),
     );
-    const { outcome, workMs } = await timed(() =>
-      storageFor(server, { ...LOAD_TOLERANT_TIMEOUTS, requestMs: LONG_REQUEST_MS, dataDeadlineMs: 800 }).get({ bucket: BUCKET, key: KEY }),
-    );
+    const timers = recordAbortTimeouts();
+    let result;
+    try {
+      result = await timed(() =>
+        storageFor(server, { ...LOAD_TOLERANT_TIMEOUTS, requestMs: LONG_REQUEST_MS, dataDeadlineMs: 800 }).get({
+          bucket: BUCKET,
+          key: KEY,
+        }),
+      );
+    } finally {
+      timers.restore();
+    }
+    const { outcome, workMs } = result;
+    expect(timers.calls.filter((ms) => ms === 800)).toHaveLength(1);
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
     expect(workMs).toBeLessThan(800 + HOST_LOAD_SLACK_MS);
   });
