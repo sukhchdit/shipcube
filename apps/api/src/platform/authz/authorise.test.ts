@@ -13,7 +13,7 @@ import { defaultPipelineSlots } from '../routing/pipeline.js';
 import { ANONYMOUS, readonlySet, setPrincipal } from '../routing/route-state.js';
 import type { RouteSlot } from '../routing/slot.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
-import { closeLoopbackServer, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import { authorise } from './authorise.js';
 
 // Each case composes createApp and makes a loopback request: the shared loopback budget (see tests/loopback.ts).
@@ -32,7 +32,7 @@ async function call(app: Express, path: string): Promise<Answer> {
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`);
+    const response = await fetchOnce(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`);
     const text = await response.text();
     const code = text === '' ? undefined : (JSON.parse(text) as { code?: unknown }).code;
     return { status: response.status, code, cacheControl: response.headers.get('cache-control') };
@@ -185,7 +185,7 @@ describe('[D-ARCH-110] permission gate: a signatureOnly permission is held by th
     await new Promise<void>((resolve) => server.once('listening', resolve));
     try {
       const url = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/probe`;
-      const response = await fetch(url, { method: 'POST' });
+      const response = await fetchOnce(url, { method: 'POST' });
       const text = await response.text();
       return { status: response.status, code: text === '' ? undefined : (JSON.parse(text) as { code?: unknown }).code };
     } finally {

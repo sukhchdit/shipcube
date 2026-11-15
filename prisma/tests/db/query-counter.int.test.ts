@@ -42,7 +42,12 @@ beforeAll(async () => {
   db = await PlatformPostgres.start();
   const database = await db.clone(await db.template({ migrated: true }));
   const { PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
-  client = createDatabaseClient(PrismaCtor, { connectionString: db.migratorUrl(database), poolMax: 3, connectionTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS, applicationName: 'qc-it' });
+  client = createDatabaseClient(PrismaCtor, {
+    connectionString: db.migratorUrl(database),
+    poolMax: 3,
+    connectionTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS,
+    applicationName: 'qc-it',
+  });
   counted = withQueryCounter(client, counter);
   runner = createWithTenantTx(
     counted,

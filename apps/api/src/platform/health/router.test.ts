@@ -15,7 +15,7 @@ import {
   type ReadinessOptions,
 } from '../runtime/readiness.js';
 import { defaultPipelineSlots, mountRoutes } from '../routing/pipeline.js';
-import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
+import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, timeOperation } from '../routing/tests/loopback.js';
 import { healthRoutes } from './router.js';
 
 // Every case makes real HTTP requests; the 5 s Jest default timed out under parallel host load (W0-FLAKE).
@@ -100,18 +100,16 @@ describe('US-012 liveness and readiness endpoints (api)', () => {
 
   it('AT-US-012-03: a dependency that does not answer is bounded (per-check timeout and overall deadline)', async () => {
     const { app } = appWith(checksWith({ database: hanging('database') }));
-    const started = performance.now();
-    const ready = await request(app).get('/health/ready');
-    expect(performance.now() - started).toBeLessThan(READINESS_DEADLINE_MS + HOST_LOAD_SLACK_MS);
+    const { value: ready, workMs } = await timeOperation(() => request(app).get('/health/ready'));
+    expect(workMs).toBeLessThan(READINESS_DEADLINE_MS + HOST_LOAD_SLACK_MS);
     expect(ready.status).toBe(503);
     expect(bodyOf(ready).components).toEqual({ ...allOk, database: 'unavailable' });
   });
 
   it('AT-US-012-03: the overall deadline bounds checks even when the per-check timeout is longer', async () => {
     const { app } = appWith(checksWith({ redis: hanging('redis') }), { checkTimeoutMs: 60_000, deadlineMs: 100 });
-    const started = performance.now();
-    const ready = await request(app).get('/health/ready');
-    expect(performance.now() - started).toBeLessThan(100 + HOST_LOAD_SLACK_MS);
+    const { value: ready, workMs } = await timeOperation(() => request(app).get('/health/ready'));
+    expect(workMs).toBeLessThan(100 + HOST_LOAD_SLACK_MS);
     expect(bodyOf(ready).components.redis).toBe('unavailable');
   });
 

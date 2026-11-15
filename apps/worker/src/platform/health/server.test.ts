@@ -48,11 +48,18 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
   async function start(checks: readonly ReadinessCheck[], deadlineMs?: number) {
     const probe = createReadinessProbe(checks, deadlineMs === undefined ? {} : { deadlineMs });
     const server = createWorkerHealthServer(probe);
+    // The production server drops a request whose headers take over 5 s (slowloris bound); a host stall that long reset the probe (W0-FLAKE). Widened on this test instance only.
+    server.headersTimeout = TEST_TIMEOUT_MS;
+    server.requestTimeout = TEST_TIMEOUT_MS;
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const { port } = server.address() as AddressInfo;
     const call = async (path: string, method = 'GET') => {
-      const response = await fetch(`http://127.0.0.1:${String(port)}${path}`, { method, signal: AbortSignal.timeout(TEST_TIMEOUT_MS - 5_000) });
+      const response = await fetch(`http://127.0.0.1:${String(port)}${path}`, {
+        method,
+        headers: { connection: 'close' },
+        signal: AbortSignal.timeout(TEST_TIMEOUT_MS - 5_000),
+      });
       const text = await response.text();
       return { status: response.status, headers: response.headers, text, body: text === '' ? undefined : (JSON.parse(text) as unknown) };
     };
@@ -85,8 +92,22 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
   it('AT-US-012-03: worker readiness is bounded when PostgreSQL does not answer', async () => {
     const { call } = await start(checksWith({ database: hanging('database') }), 300);
     const started = performance.now();
-    expect((await call('/health/ready')).status).toBe(503);
-    expect(performance.now() - started).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
+    let last = started;
+    let stalledMs = 0;
+    // Heartbeat: the time this process was not scheduled (host load) is not the time the deadline took.
+    const heartbeat = setInterval(() => {
+      const now = performance.now();
+      stalledMs += Math.max(0, now - last - 20);
+      last = now;
+    }, 20);
+    try {
+      expect((await call('/health/ready')).status).toBe(503);
+    } finally {
+      clearInterval(heartbeat);
+    }
+    const end = performance.now();
+    stalledMs += Math.max(0, end - last - 20);
+    expect(end - started - stalledMs).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
   });
 
   it('AT-US-012-04: a failing audit_chain check degrades worker readiness without failing it', async () => {

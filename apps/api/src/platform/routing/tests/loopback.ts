@@ -27,3 +27,43 @@ export function closeLoopbackServer(server: Server): Promise<void> {
     server.closeAllConnections();
   });
 }
+
+/**
+ * Measures how long `operation` took and how much of that the host stole (W0-FLAKE). A heartbeat timer notes every tick
+ * that fires later than scheduled; the sum of that lateness is the time this process was not running (host load, GC,
+ * a suspended process). `ms` is the raw elapsed time, so a lower bound ("the deadline really elapsed") stays exact;
+ * `workMs` is `ms` minus the stalls, so an upper bound ("the deadline fired, the call did not run on to a far longer
+ * limit") no longer depends on how long the host froze the process. Never imported by production code.
+ */
+export async function timeOperation<T>(
+  operation: () => Promise<T>,
+): Promise<{ readonly value: T; readonly ms: number; readonly workMs: number }> {
+  const tickMs = 20;
+  const started = performance.now();
+  let last = started;
+  let stalledMs = 0;
+  const heartbeat = setInterval(() => {
+    const now = performance.now();
+    stalledMs += Math.max(0, now - last - tickMs);
+    last = now;
+  }, tickMs);
+  try {
+    const value = await operation();
+    const now = performance.now();
+    stalledMs += Math.max(0, now - last - tickMs);
+    return { value, ms: now - started, workMs: Math.max(0, now - started - stalledMs) };
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+/**
+ * `fetch` that never reuses a pooled socket (`Connection: close`). Each probe runs against its own short-lived server on an
+ * ephemeral port; a pooled socket to a previous server on a recycled port, or one the server idled out during a host stall,
+ * is reset or hangs the next request (W0-FLAKE). The response is read in full by the caller. Never imported by production code.
+ */
+export function fetchOnce(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set('connection', 'close');
+  return fetch(url, { ...init, headers });
+}

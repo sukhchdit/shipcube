@@ -27,7 +27,7 @@ import {
 import { RequestContextError, tenantContextOf } from '../tx/execute.js';
 import { ANONYMOUS, routeTemplateOf, setPrincipal } from './route-state.js';
 import { fixtureRoute } from './tests/fixture-route.js';
-import { closeLoopbackServer, LOOPBACK_TEST_TIMEOUT_MS } from './tests/loopback.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from './tests/loopback.js';
 
 // Real createApp over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE, PR #38 R1-n1).
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
@@ -38,7 +38,7 @@ async function call(app: Express, path: string, init: RequestInit = {}): Promise
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
+    const response = await fetchOnce(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
     return { status: response.status, headers: response.headers, body: await response.text() };
   } finally {
     await closeLoopbackServer(server);
