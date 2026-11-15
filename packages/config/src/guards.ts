@@ -285,6 +285,23 @@ export const sessionGuard: Guard = ({ values }) => {
   return issues;
 };
 
+/**
+ * D-ARCH-086, ADR-0007 am. 10 items 2-3: the per-tenant admission cap never exceeds the pool it protects, and the audit
+ * insert's lock wait stays strictly inside the transaction lock wait.
+ */
+export const databaseGuard: Guard = ({ values }) => {
+  const issues: ConfigIssue[] = [];
+  if (exceeds(values, 'DB_TENANT_MAX_CONCURRENT_TX', 'DB_POOL_MAX')) {
+    issues.push({ key: 'DB_TENANT_MAX_CONCURRENT_TX', code: 'inconsistent', rule: 'db.tenantConcurrency' });
+  }
+  const auditLock = values.DB_AUDIT_LOCK_TIMEOUT_MS;
+  const txLock = values.DB_TX_LOCK_TIMEOUT_MS;
+  if (typeof auditLock === 'number' && typeof txLock === 'number' && auditLock >= txLock) {
+    issues.push({ key: 'DB_AUDIT_LOCK_TIMEOUT_MS', code: 'inconsistent', rule: 'db.auditLockTimeout' });
+  }
+  return issues;
+};
+
 const isKeyVersion = (value: unknown): value is KeyVersion =>
   typeof value === 'object' && value !== null && 'material' in value && value.material instanceof Secret && 'keyId' in value;
 
@@ -330,6 +347,7 @@ export const GUARDS: readonly Guard[] = Object.freeze([
   credentialPairGuard,
   logLevelGuard,
   sessionGuard,
+  databaseGuard,
   keyMaterialGuard,
 ]);
 

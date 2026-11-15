@@ -14,9 +14,15 @@ import {
   type Config,
   CONFIG_SCHEMA,
   type ConfigKey,
+  DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS,
+  DB_AUDIT_LOCK_TIMEOUT_MS_DEFAULT,
   DB_CONNECTION_TIMEOUT_MS_MIN,
   DB_POOL_MAX_LIMIT,
+  DB_TENANT_ADMISSION_WAIT_MS_DEFAULT,
+  DB_TENANT_ADMISSION_WAIT_MS_MAX,
+  DB_TENANT_MAX_CONCURRENT_TX_FLOOR,
   DB_TX_TIMEOUT_BOUNDS,
+  defaultTenantMaxConcurrentTx,
   requiredKeysFor,
   SECRET_KEY_NAMES,
 } from './schema.js';
@@ -743,12 +749,108 @@ describe('start-up refusals (SEC-TC-51 start-up part, SEC-P3-08 items 5–6, NFR
   });
 
   it('ADR-0005 am.10 item 12: DB_TX_* values at the bounds are accepted as integers', () => {
-    const atMin = Object.fromEntries(Object.entries(DB_TX_TIMEOUT_BOUNDS).map(([key, { min }]) => [key, String(min)]));
+    // DB_AUDIT_LOCK_TIMEOUT_MS must stay below DB_TX_LOCK_TIMEOUT_MS (D-ARCH-086 guard): at the lock minimum it is lowered too.
+    const atMin = {
+      ...Object.fromEntries(Object.entries(DB_TX_TIMEOUT_BOUNDS).map(([key, { min }]) => [key, String(min)])),
+      DB_AUDIT_LOCK_TIMEOUT_MS: String(DB_TX_TIMEOUT_BOUNDS.DB_TX_LOCK_TIMEOUT_MS.min - 1),
+    };
     const atMax = Object.fromEntries(Object.entries(DB_TX_TIMEOUT_BOUNDS).map(([key, { max }]) => [key, String(max)]));
     for (const bound of [atMin, atMax]) {
       const config = loadConfig({ ...createTestEnv(), ...bound }, { service: 'worker' });
       for (const [key, value] of Object.entries(bound)) expect(config[key as ConfigKey]).toBe(Number(value));
     }
+  });
+
+  describe('[D-ARCH-086] tenant admission bulkhead and audit lock timeout keys (ADR-0007 am. 10 items 2-3)', () => {
+    it('defaults: no explicit cap (derived from DB_POOL_MAX), a 250 ms admission wait and a 250 ms audit lock timeout', () => {
+      for (const service of SERVICES) {
+        const config = loadConfig(createTestEnv(), { service });
+        expect(config.DB_TENANT_MAX_CONCURRENT_TX).toBeUndefined();
+        expect(config.DB_TENANT_ADMISSION_WAIT_MS).toBe(DB_TENANT_ADMISSION_WAIT_MS_DEFAULT);
+        expect(config.DB_AUDIT_LOCK_TIMEOUT_MS).toBe(DB_AUDIT_LOCK_TIMEOUT_MS_DEFAULT);
+      }
+      expect([DB_TENANT_ADMISSION_WAIT_MS_DEFAULT, DB_AUDIT_LOCK_TIMEOUT_MS_DEFAULT, DB_TENANT_ADMISSION_WAIT_MS_MAX]).toEqual([
+        250, 250, 2_000,
+      ]);
+    });
+
+    it('the default cap is max(2, floor(DB_POOL_MAX / 2)): api 10 → 5, worker 5 → 2, a pool of 1 → 2', () => {
+      expect([10, 5, 4, 3, 2, 1, 100].map(defaultTenantMaxConcurrentTx)).toEqual([5, 2, 2, 2, 2, 2, 50]);
+      expect(DB_TENANT_MAX_CONCURRENT_TX_FLOOR).toBe(2);
+    });
+
+    it('explicit values at the bounds are accepted', () => {
+      const env = {
+        ...createTestEnv(),
+        DB_POOL_MAX: '4',
+        DB_TENANT_MAX_CONCURRENT_TX: '4',
+        DB_TENANT_ADMISSION_WAIT_MS: String(DB_TENANT_ADMISSION_WAIT_MS_MAX),
+        DB_TX_LOCK_TIMEOUT_MS: '2000',
+        DB_AUDIT_LOCK_TIMEOUT_MS: '1999',
+      };
+      expect(loadConfig(env, { service: 'api' })).toMatchObject({
+        DB_TENANT_MAX_CONCURRENT_TX: 4,
+        DB_TENANT_ADMISSION_WAIT_MS: 2_000,
+        DB_AUDIT_LOCK_TIMEOUT_MS: 1_999,
+      });
+      const low = { ...createTestEnv(), DB_TENANT_MAX_CONCURRENT_TX: '1', DB_TENANT_ADMISSION_WAIT_MS: '1', DB_AUDIT_LOCK_TIMEOUT_MS: '1' };
+      expect(loadConfig(low, { service: 'worker' })).toMatchObject({
+        DB_TENANT_MAX_CONCURRENT_TX: 1,
+        DB_TENANT_ADMISSION_WAIT_MS: 1,
+        DB_AUDIT_LOCK_TIMEOUT_MS: 1,
+      });
+    });
+
+    it.each([
+      ['DB_TENANT_MAX_CONCURRENT_TX', '0', 'number.min'],
+      ['DB_TENANT_MAX_CONCURRENT_TX', String(DB_POOL_MAX_LIMIT + 1), 'number.max'],
+      ['DB_TENANT_MAX_CONCURRENT_TX', '2.5', 'number.integer'],
+      ['DB_TENANT_ADMISSION_WAIT_MS', '0', 'number.min'],
+      ['DB_TENANT_ADMISSION_WAIT_MS', '2001', 'number.max'],
+      ['DB_TENANT_ADMISSION_WAIT_MS', '250ms', 'number.base'],
+      ['DB_AUDIT_LOCK_TIMEOUT_MS', '0', 'number.min'],
+      ['DB_AUDIT_LOCK_TIMEOUT_MS', String(DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS.max + 1), 'number.max'],
+      ['DB_AUDIT_LOCK_TIMEOUT_MS', '12.5', 'number.integer'],
+    ])('%s=%s is rejected (%s)', (key, value, rule) => {
+      expect(rejection(() => loadConfig({ ...createTestEnv(), [key]: value }, { service: 'api' })).issues).toEqual([
+        { key, code: 'invalid', rule },
+      ]);
+    });
+
+    it('a cap above DB_POOL_MAX is inconsistent (the explicit or the service-default pool size)', () => {
+      const inconsistent = [{ key: 'DB_TENANT_MAX_CONCURRENT_TX', code: 'inconsistent', rule: 'db.tenantConcurrency' }];
+      const explicitPool = { ...createTestEnv(), DB_POOL_MAX: '4', DB_TENANT_MAX_CONCURRENT_TX: '5' };
+      expect(rejection(() => loadConfig(explicitPool, { service: 'api' })).issues).toEqual(inconsistent);
+      // The worker pool defaults to 5, the API pool to 10.
+      const six = { ...createTestEnv(), DB_TENANT_MAX_CONCURRENT_TX: '6' };
+      expect(rejection(() => loadConfig(six, { service: 'worker' })).issues).toEqual(inconsistent);
+      expect(loadConfig(six, { service: 'api' }).DB_TENANT_MAX_CONCURRENT_TX).toBe(6);
+    });
+
+    it.each([
+      ['equal to', '2000', '2000'],
+      ['above', '2000', '2001'],
+      ['above (the default 250 against a 100 ms lock timeout)', '100', undefined],
+    ])('DB_AUDIT_LOCK_TIMEOUT_MS %s DB_TX_LOCK_TIMEOUT_MS is inconsistent', (_label, txLock, auditLock) => {
+      const env = {
+        ...createTestEnv(),
+        DB_TX_LOCK_TIMEOUT_MS: txLock,
+        ...(auditLock === undefined ? {} : { DB_AUDIT_LOCK_TIMEOUT_MS: auditLock }),
+      };
+      expect(rejection(() => loadConfig(env, { service: 'api' })).issues).toEqual([
+        { key: 'DB_AUDIT_LOCK_TIMEOUT_MS', code: 'inconsistent', rule: 'db.auditLockTimeout' },
+      ]);
+    });
+
+    it('an invalid partner key reports only its own schema issue, never a second cross-key issue', () => {
+      expect(rejection(() => loadConfig({ ...createTestEnv(), DB_TX_LOCK_TIMEOUT_MS: '99' }, { service: 'api' })).issues).toEqual([
+        { key: 'DB_TX_LOCK_TIMEOUT_MS', code: 'invalid', rule: 'number.min' },
+      ]);
+      const badPool = { ...createTestEnv(), DB_POOL_MAX: '0', DB_TENANT_MAX_CONCURRENT_TX: '50' };
+      expect(rejection(() => loadConfig(badPool, { service: 'api' })).issues).toEqual([
+        { key: 'DB_POOL_MAX', code: 'invalid', rule: 'number.min' },
+      ]);
+    });
   });
 
   it('debug flags are allowed in local; harmless NODE_OPTIONS everywhere', () => {

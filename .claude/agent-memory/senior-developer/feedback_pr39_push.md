@@ -25,6 +25,9 @@ Pushing PR #39 fix cycle 1 with fresh lane B evidence took 5 evidence worktrees 
   - Reproduce with `node --max-old-space-size=2048 node_modules/eslint/bin/eslint.js .`.
   - Fix: set `env: NODE_OPTIONS: --max-old-space-size=4096` on the ci.yml lint step. Changing the lint script would break the PR17-SEC-04 `^eslint \.` step matcher, and `.npmrc` node-options are policed.
   - Before pushing any large PR, run the 2048 MB check.
+- **The classifier denied a second push when the brief said "push once"** (D-ORCH-078 P2, one push per fix cycle). If lane A fails after the single push, prepare the fix locally (commit, evidence, gitleaks) and hand back for an orchestrator decision; do not retry the push.
+  - Run the 2048 MB lint check BEFORE the single push.
+  - PR #42 fc2 hit the same ESLint OOM in parallel, so expect `ci.yml` unions.
 - **Before pushing,** build PR-body tables from scratch files with placeholders, filled by Edit, never by `node -e` regex.
 
 Related: [[pr39-fc1]], [[lane-b-evidence-run]], [[pr43-fc1]], [[task014-images-compose]]

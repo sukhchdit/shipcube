@@ -11,9 +11,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
-import type { Config } from '@platform/config';
+import { auditErrorCause, type AuditWriteError, isAuditWriteError } from '@platform/audit';
+import { type Config, DB_TENANT_ADMISSION_WAIT_MS_DEFAULT, defaultTenantMaxConcurrentTx } from '@platform/config';
 
 import { DbError, type DbErrorMapping, dbErrorMapping, type DbSecurityEvent, isDatabaseError, mapDbError } from './map-db-error.js';
+import { admissionKeyOf, createTenantAdmission, type TenantAdmissionMetrics, type TenantAdmissionOptions } from './tenant-admission.js';
 import { createTenantDb, type TenantDb } from './tenant-db.js';
 
 export type ActorScope = 'TENANT' | 'OPERATOR';
@@ -58,6 +60,13 @@ export interface WithTenantTxOptions {
   readonly maxWaitMs?: number;
   /** Prisma interactive-transaction `timeout`; must be ≥ `statementTimeoutMs`. Default `statementTimeoutMs`. */
   readonly timeoutMs?: number;
+  /**
+   * Per-tenant admission bulkhead (ADR-0007 am. 10 item 3, D-ARCH-086, data-model §7.7): `DB_TENANT_MAX_CONCURRENT_TX`
+   * permits per admission key and a `DB_TENANT_ADMISSION_WAIT_MS` wait, which may not exceed `maxWaitMs`. The database
+   * runtime always supplies it (`tenantTxOptionsFromConfig`, or the pool-size default); without it no bulkhead is built
+   * (direct-factory test seam).
+   */
+  readonly admission?: TenantAdmissionOptions;
 }
 
 /**
@@ -117,6 +126,8 @@ export interface TenantTxRunner<TTx> {
   probeFreshConnection(): Promise<void>;
   /** The resolved `{ maxWait, timeout }` passed to every `$transaction`. */
   readonly transactionOptions: TransactionOptions;
+  /** Read-only counters of the admission bulkhead (D-ARCH-086); absent when the options configure none. */
+  readonly admission?: TenantAdmissionMetrics;
 }
 
 export class TenantTxConfigError extends Error {
@@ -286,18 +297,37 @@ export function resolveTransactionOptions(options: WithTenantTxOptions): Transac
   return { maxWait, timeout };
 }
 
-/** Maps the validated configuration onto the factory options. */
+/** Validates the admission options against the resolved transaction `maxWait` (D-ARCH-086). */
+export function resolveAdmissionOptions(admission: TenantAdmissionOptions, maxWait: number): TenantAdmissionOptions {
+  const maxConcurrentTx = positiveInt('admission.maxConcurrentTx', admission.maxConcurrentTx);
+  const waitMs = positiveInt('admission.waitMs', admission.waitMs);
+  if (waitMs > maxWait) throw new TenantTxConfigError('admission.waitMs must not exceed maxWaitMs');
+  return { maxConcurrentTx, waitMs };
+}
+
+/** The admission keys `tenantTxOptionsFromConfig` reads; absent ones take their defaults (D-ARCH-086). */
+type AdmissionConfig = Pick<Config, 'DB_POOL_MAX'> & Partial<Pick<Config, 'DB_TENANT_MAX_CONCURRENT_TX' | 'DB_TENANT_ADMISSION_WAIT_MS'>>;
+
+/**
+ * Maps the validated configuration onto the factory options. An unset `DB_TENANT_MAX_CONCURRENT_TX` is
+ * `max(2, floor(DB_POOL_MAX / 2))` (its default depends on the pool size, so the schema leaves it unset).
+ */
 export function tenantTxOptionsFromConfig(
   config: Pick<
     Config,
     'DB_TX_STATEMENT_TIMEOUT_MS' | 'DB_TX_LOCK_TIMEOUT_MS' | 'DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS' | 'DB_CONNECTION_TIMEOUT_MS'
-  >,
+  > &
+    AdmissionConfig,
 ): WithTenantTxOptions {
   return {
     statementTimeoutMs: config.DB_TX_STATEMENT_TIMEOUT_MS,
     lockTimeoutMs: config.DB_TX_LOCK_TIMEOUT_MS,
     idleInTransactionTimeoutMs: config.DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS,
     poolConnectionTimeoutMs: config.DB_CONNECTION_TIMEOUT_MS,
+    admission: {
+      maxConcurrentTx: config.DB_TENANT_MAX_CONCURRENT_TX ?? defaultTenantMaxConcurrentTx(config.DB_POOL_MAX),
+      waitMs: config.DB_TENANT_ADMISSION_WAIT_MS ?? DB_TENANT_ADMISSION_WAIT_MS_DEFAULT,
+    },
   };
 }
 
@@ -313,6 +343,19 @@ export function assertNoSessionOptions(env: Readonly<Record<string, string | und
 }
 
 /**
+ * The `DbError` mapping of an audit write failure (ADR-0007 am. 10 item 2, data-model §5.4 "Error model"; TASK-025):
+ * a lock timeout is 503 SERVICE_UNAVAILABLE with `Retry-After` (reason AUDIT_LOCK_TIMEOUT; openapi.yaml has no
+ * dedicated code), any other failure is 500 AUDIT_WRITE_FAILED. The transaction has rolled back in both cases.
+ */
+export function auditDbErrorMapping(error: AuditWriteError): DbErrorMapping {
+  const mapping =
+    error.reason === 'AUDIT_LOCK_TIMEOUT'
+      ? dbErrorMapping(503, 'AUDIT_LOCK_TIMEOUT', { retryable: true })
+      : dbErrorMapping(500, 'AUDIT_WRITE_FAILED', { code: 'AUDIT_WRITE_FAILED' });
+  return error.sqlState === undefined ? mapping : { ...mapping, sqlState: error.sqlState };
+}
+
+/**
  * Builds the tenant-transaction runner over the root client. The root client stays inside this closure: it is never
  * returned, and the callback receives only the `TenantDb` guard (item 2).
  */
@@ -323,6 +366,10 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
 ): TenantTxRunner<TTx> {
   assertNoSessionOptions(deps.env ?? process.env);
   const transactionOptions = Object.freeze(resolveTransactionOptions(options));
+  const admission =
+    options.admission === undefined
+      ? undefined
+      : createTenantAdmission(resolveAdmissionOptions(options.admission, transactionOptions.maxWait));
   const timeouts = {
     statementTimeoutMs: options.statementTimeoutMs,
     lockTimeoutMs: options.lockTimeoutMs,
@@ -336,16 +383,24 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     return new DbError(dbErrorMapping(500, 'DB_SESSION_CONTEXT_LEAK', { securityEvent: 'db_session_context_leak' }));
   };
 
+  const logDbError = (error: unknown, mapping: DbErrorMapping): void => {
+    if (deps.onDbError === undefined) return;
+    try {
+      deps.onDbError(error, mapping);
+    } catch {
+      // Logging is best effort here: the caller must still receive the mapped DbError, never the original error.
+    }
+  };
+
   const mapped = (error: unknown, correlationId: string): unknown => {
+    if (isAuditWriteError(error)) {
+      const mapping = auditDbErrorMapping(error);
+      logDbError(auditErrorCause(error) ?? error, mapping);
+      return new DbError(mapping);
+    }
     if (error instanceof DbError || !isDatabaseError(error)) return error;
     const mapping: DbErrorMapping = mapDbError(error);
-    if (deps.onDbError !== undefined) {
-      try {
-        deps.onDbError(error, mapping);
-      } catch {
-        // Logging is best effort here: the caller must still receive the mapped DbError, never the original error.
-      }
-    }
+    logDbError(error, mapping);
     if (mapping.securityEvent !== undefined) {
       deps.onSecurityEvent(mapping.securityEvent, {
         correlationId,
@@ -360,20 +415,32 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     const values = contextValues(ctx, timeouts);
     const correlationId = values[4];
     const txClient = deps.scopeClient({ orgId: values[0], actorId: values[1] });
-    try {
-      return await tenantTxScope.run(true, () =>
+    const transaction = (): Promise<R> =>
+      tenantTxScope.run(true, () =>
         txClient.$transaction(async (tx) => {
           const prev = await setTenantContext(tx, values);
           if (hasLeakedContext(prev)) throw reportLeak(correlationId);
           if (call?.readOnly === true) await tx.$queryRaw`SET TRANSACTION READ ONLY`;
           const handle = createTenantDb(tx);
           try {
-            return await fn(handle.db);
+            const result = await fn(handle.db);
+            // PR42-SEC-13: an audit write the callback started but did not await finishes (or marks the latch) here,
+            // inside the transaction, before the latch is read; otherwise the business change could commit without it.
+            await handle.settle();
+            // PR42-SEC-02: a failure marked rollback-only (an audit refusal the callback caught and swallowed) is thrown
+            // here, so Prisma rolls back and `mapped` answers it; the business change never commits without its entry.
+            const latched = handle.rollbackOnly();
+            if (latched !== undefined) throw latched;
+            return result;
           } finally {
             handle.revoke();
           }
         }, transactionOptions),
       );
+    try {
+      // D-ARCH-086: the permit is acquired from the VALIDATED values before pool checkout and released once the one
+      // transaction has settled (commit, throw or mapped error); a refusal is a DbError and never starts it.
+      return await (admission === undefined ? transaction() : admission.run(admissionKeyOf(values[0], values[2]), transaction));
     } catch (error) {
       throw mapped(error, correlationId);
     }
@@ -385,5 +452,7 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
     if (leaked.length > 0) throw reportLeak();
   }
 
-  return { withTenantTx, probeFreshConnection, transactionOptions };
+  return admission === undefined
+    ? { withTenantTx, probeFreshConnection, transactionOptions }
+    : { withTenantTx, probeFreshConnection, transactionOptions, admission: { snapshot: () => admission.snapshot() } };
 }
