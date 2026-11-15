@@ -123,6 +123,11 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['[RR-8 (i)] GH_TOKEN in a job env fails (token on lane-scope steps only)', 'ci-gh-token-job-env.yml', 'gh-token'],
     ['[RR-8 (i)] GH_TOKEN on a scans step that does not run "$GATE_LANE_SCOPE" fails', 'ci-gh-token-other-step.yml', 'gh-token'],
     ['[RR-8 (ii)] actions: read on fast-lane fails (only scans and ci-gate)', 'ci-actions-read-fast-lane.yml', 'permissions'],
+    [
+      '[RR-8 (ii)] [R2-n1 P10] top-level actions: read fails (never for every job of a workflow)',
+      'ci-actions-read-top-level.yml',
+      'permissions',
+    ],
     ['every job needs timeout-minutes', 'missing-timeout.yml', 'job-timeout'],
     ['docker run by tag (no digest) fails', 'docker-run-by-tag.yml', 'image-digest'],
     ['YAML outside the supported subset (anchor) fails closed', 'yaml-anchor.yml', 'yaml-subset'],

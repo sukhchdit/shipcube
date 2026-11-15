@@ -343,6 +343,32 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       ],
       ['ci-gate runs npm (isolation)', CI_GATE_RUN, `npm ci --ignore-scripts && ${CI_GATE_RUN}`, 'scans-isolation'],
       ['fast-lane mode output pinned', 'mode: ${{ steps.classify.outputs.mode }}', 'mode: full', 'required-gates'],
+      ['R2-M1 pull_request base filter dropped', '  pull_request:\n    branches: [main]\n', '  pull_request:\n', 'required-gates'],
+      [
+        'R2-M1 pull_request base filter widened',
+        '    branches: [main]\n    types:',
+        '    branches: [main, weak]\n    types:',
+        'required-gates',
+      ],
+      [
+        'R2-M1 pull_request base filter replaced by a glob',
+        '    branches: [main]\n    types:',
+        "    branches: ['**']\n    types:",
+        'required-gates',
+      ],
+      [
+        'R2-M1 branches-ignore next to the base filter',
+        '    branches: [main]\n    types:',
+        '    branches: [main]\n    branches-ignore: [main]\n    types:',
+        'required-gates',
+      ],
+      [
+        'R2-M1 --head-ref dropped from the lane-scope step',
+        LANE_SCOPE_RUN,
+        LANE_SCOPE_RUN.replace(' --head-ref "$HEAD_REF"', ''),
+        'required-gates',
+      ],
+      ['R2-M1 HEAD_REF from the base branch', 'HEAD_REF: ${{ github.head_ref }}', 'HEAD_REF: ${{ github.base_ref }}', 'required-gates'],
     ])('%s', (_title, from, to, rule) => {
       expect(findingsOf(swap(from, to)).some((finding) => finding.startsWith(`${rule}:`))).toBe(true);
     });
@@ -355,6 +381,8 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     for (const job of [fastLane, scans]) expect(str(job.if)).toContain("vars.CI_MAIN_FAST_LANE == 'true'");
     expect(Object.keys(triggers)).not.toContain('schedule');
     expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
+    // R2-M1 / PR46-SEC-13: pull requests into main only (CI_PULL_REQUEST_BRANCHES).
+    expect(map(triggers.pull_request, 'pull_request').branches).toEqual(['main']);
   });
 
   it('review m5 (b) / RR-7: pull-request runs share a per-PR group and queue (a running full run is never cancelled, so a docs push finds its proof); every push to main gets its own group', () => {

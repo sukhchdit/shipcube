@@ -17,13 +17,16 @@ import {
   classify,
   docsOnlyPath,
   fastLaneProblems,
+  gateInputFromEnv,
   gateVerdict,
   ghApi,
   lookupProofs,
   main,
   parseArgs,
   parseRaw,
+  proofBinding,
   proofSteps,
+  runBindingProblem,
   scansProblems,
 } from './lane-scope.mjs';
 import type { Api, GateInput, ProofSteps } from './lane-scope.mjs';
@@ -325,17 +328,51 @@ function jobsOf(options: {
   };
 }
 
-/** A fake jobs API: run lists per commit and job lists per run id. */
-function fakeApi(runs: Record<string, object[]>, jobs: Record<string, object>): Api & { calls: string[] } {
+/** This PR (R2-M1 binding): PR 46 of o/r from HEAD_REF into main. */
+const PR = '46';
+const HEAD_REF = 'feat/TASK-046-x';
+const REPO_REF = { id: 1, name: 'r', url: 'https://api.github.com/repos/o/r' };
+const FORK_REF = { id: 2, name: 'r', url: 'https://api.github.com/repos/fork/r' };
+/** A workflow run's `pull_requests` entry (repositories named by API url, as GitHub returns them). */
+const prEntry = (overrides: { number?: number; base?: string; head?: string; baseRepo?: object; headRepo?: object } = {}) => ({
+  id: 5000 + (overrides.number ?? 46),
+  number: overrides.number ?? 46,
+  url: `https://api.github.com/repos/o/r/pulls/${String(overrides.number ?? 46)}`,
+  base: { ref: overrides.base ?? 'main', sha: 'c'.repeat(40), repo: overrides.baseRepo ?? REPO_REF },
+  head: { ref: overrides.head ?? HEAD_REF, sha: 'd'.repeat(40), repo: overrides.headRepo ?? REPO_REF },
+});
+/** A `pulls` API item (repositories named by full_name). */
+const pull = (overrides: { number?: number; base?: string; head?: string; headRepo?: string } = {}) => ({
+  number: overrides.number ?? 46,
+  state: 'open',
+  base: { ref: overrides.base ?? 'main', repo: { full_name: 'o/r' } },
+  head: { ref: overrides.head ?? HEAD_REF, repo: { full_name: overrides.headRepo ?? 'o/r' } },
+});
+const PULLS_PATH = 'repos/o/r/pulls?state=all&head=o%3Afeat%2FTASK-046-x&per_page=100';
+const eventsPath = (page: number) => `repos/o/r/issues/46/events?per_page=100&page=${String(page)}`;
+
+/**
+ * A fake API: run lists per commit, job lists per run id, and this PR's binding calls (the head branch's pull requests
+ * and the PR's issue events, one array per page). `false` makes that binding call fail.
+ */
+function fakeApi(
+  runs: Record<string, object[]>,
+  jobs: Record<string, object>,
+  binding: { pulls?: unknown; events?: unknown[][] | false } = {},
+): Api & { calls: string[] } {
   const calls: string[] = [];
   const api = (path: string) => {
     calls.push(path);
-    const runList = /actions\/workflows\/ci\.yml\/runs\?head_sha=([0-9a-f]{40})&event=pull_request&status=completed&per_page=100$/u.exec(
-      path,
-    );
+    const runList =
+      /^repos\/o\/r\/actions\/workflows\/ci\.yml\/runs\?head_sha=([0-9a-f]{40})&event=pull_request&status=completed&per_page=100$/u.exec(
+        path,
+      );
     if (runList) return { ok: true as const, json: { total_count: 0, workflow_runs: runs[runList[1] ?? ''] ?? [] } };
-    const jobList = /actions\/runs\/(\d+)\/jobs\?per_page=100$/u.exec(path);
+    const jobList = /^repos\/o\/r\/actions\/runs\/(\d+)\/jobs\?per_page=100$/u.exec(path);
     if (jobList && jobs[jobList[1] ?? ''] !== undefined) return { ok: true as const, json: jobs[jobList[1] ?? ''] };
+    if (path === PULLS_PATH && binding.pulls !== false) return { ok: true as const, json: binding.pulls ?? [pull()] };
+    const events = /^repos\/o\/r\/issues\/46\/events\?per_page=100&page=(\d+)$/u.exec(path);
+    if (events && binding.events !== false) return { ok: true as const, json: (binding.events ?? [[]])[Number(events[1]) - 1] ?? [] };
     return { ok: false as const, problem: `unexpected ${path}` };
   };
   return Object.assign(api, { calls });
@@ -344,18 +381,25 @@ function fakeApi(runs: Record<string, object[]>, jobs: Record<string, object>): 
 const run = (id: number, sha: string, extra: Record<string, unknown> = {}) => ({
   id,
   head_sha: sha,
+  head_branch: HEAD_REF,
+  head_repository: { full_name: 'o/r' },
   event: 'pull_request',
   status: 'completed',
   conclusion: 'failure',
+  created_at: '2026-11-14T10:00:00Z',
   path: '.github/workflows/ci.yml',
-  pull_requests: [{ number: 46 }],
+  pull_requests: [prEntry()],
   ...extra,
 });
+
+/** lookupProofs for this PR (repository o/r, PR 46, head branch HEAD_REF). */
+const lookup = (api: Api, identical: string[], extra: { currentRunId?: string; pr?: string; headRef?: string } = {}) =>
+  lookupProofs({ api, repo: 'o/r', identical, steps: STEPS, pr: PR, headRef: HEAD_REF, ...extra });
 
 describe('lane-scope: proof selection against the jobs API (D-ARCH-126/127)', () => {
   it('a full run with every CODE-gated step and the three scans steps green is a code proof; its security-integration success is a security proof', () => {
     const api = fakeApi({ [PREV]: [run(11, PREV)] }, { 11: jobsOf({ si: 'success' }) });
-    expect(lookupProofs({ api, repo: 'o/r', identical: [HEAD, PREV], steps: STEPS })).toMatchObject({
+    expect(lookup(api, [HEAD, PREV])).toMatchObject({
       codeProof: `11:${PREV}`,
       securityProof: `11:${PREV}`,
     });
@@ -364,7 +408,7 @@ describe('lane-scope: proof selection against the jobs API (D-ARCH-126/127)', ()
 
   it('a light run (fast-lane success, code steps skipped) is never a proof, so a light success cannot chain', () => {
     const api = fakeApi({ [PREV]: [run(12, PREV, { conclusion: 'success' })] }, { 12: jobsOf({ code: 'skipped' }) });
-    const found = lookupProofs({ api, repo: 'o/r', identical: [PREV], steps: STEPS });
+    const found = lookup(api, [PREV]);
     expect(found.codeProof).toBe('');
     expect(found.notes.join('\n')).toContain('Lockfile provenance and delta: skipped');
   });
@@ -377,12 +421,12 @@ describe('lane-scope: proof selection against the jobs API (D-ARCH-126/127)', ()
       jobsOf({ lint: 'failure' }),
     ]) {
       const api = fakeApi({ [PREV]: [run(13, PREV)] }, { 13: jobs });
-      expect(lookupProofs({ api, repo: 'o/r', identical: [PREV], steps: STEPS }).codeProof).toBe('');
+      expect(lookup(api, [PREV]).codeProof).toBe('');
     }
     const missing = jobsOf({});
     (missing.jobs[0] as { steps: unknown[] }).steps.pop();
     const api = fakeApi({ [PREV]: [run(14, PREV)] }, { 14: missing });
-    expect(lookupProofs({ api, repo: 'o/r', identical: [PREV], steps: STEPS }).codeProof).toBe('');
+    expect(lookup(api, [PREV]).codeProof).toBe('');
   });
 
   it('in-progress or queued runs, other events, other workflows, other commits and the current run are not proofs', () => {
@@ -399,30 +443,142 @@ describe('lane-scope: proof selection against the jobs API (D-ARCH-126/127)', ()
       },
       { 21: jobsOf({}), 22: jobsOf({}), 23: jobsOf({}), 24: jobsOf({}), 25: jobsOf({}), 26: jobsOf({ fastLane: 'in_progress' }) },
     );
-    expect(lookupProofs({ api, repo: 'o/r', identical: [PREV], steps: STEPS, currentRunId: '27' })).toMatchObject({
+    expect(lookup(api, [PREV], { currentRunId: '27' })).toMatchObject({
       codeProof: '',
       securityProof: '',
     });
     expect(api.calls.filter((path) => /\/runs\/\d+\/jobs/u.test(path))).toEqual(['repos/o/r/actions/runs/26/jobs?per_page=100']);
     const self = fakeApi({ [PREV]: [run(28, PREV)] }, { 28: jobsOf({}) });
-    expect(lookupProofs({ api: self, repo: 'o/r', identical: [PREV], steps: STEPS, currentRunId: '28' }).codeProof).toBe('');
+    expect(lookup(self, [PREV], { currentRunId: '28' }).codeProof).toBe('');
   });
 
-  it('a run of another PR on the same commit is accepted; the newest run is tried first', () => {
+  it('[R2-M1] a run of another PR on the same commit is refused before its jobs are read; among this PR runs the newest is tried first', () => {
     const api = fakeApi(
-      { [PREV]: [run(31, PREV, { pull_requests: [{ number: 99 }] }), run(32, PREV)] },
-      { 31: jobsOf({}), 32: jobsOf({ code: 'skipped' }) },
+      { [PREV]: [run(31, PREV, { pull_requests: [prEntry({ number: 99 })] }), run(32, PREV), run(30, PREV)] },
+      { 30: jobsOf({}), 31: jobsOf({ si: 'success' }), 32: jobsOf({ code: 'skipped' }) },
     );
-    expect(lookupProofs({ api, repo: 'o/r', identical: [PREV], steps: STEPS }).codeProof).toBe(`31:${PREV}`);
+    const found = lookup(api, [PREV]);
+    expect(found).toMatchObject({ codeProof: `30:${PREV}`, securityProof: '' });
+    expect(found.notes.join('\n')).toContain('run 31 (bbbbbbb) is not a run of this PR into main: not this PR into main');
     expect(api.calls.filter((path) => /\/jobs/u.test(path))).toEqual([
       'repos/o/r/actions/runs/32/jobs?per_page=100',
-      'repos/o/r/actions/runs/31/jobs?per_page=100',
+      'repos/o/r/actions/runs/30/jobs?per_page=100',
     ]);
+    // The binding calls happen once, after the first completed candidate and before any jobs call.
+    expect(api.calls.slice(0, 4)).toEqual([
+      `repos/o/r/actions/workflows/ci.yml/runs?head_sha=${PREV}&event=pull_request&status=completed&per_page=100`,
+      PULLS_PATH,
+      eventsPath(1),
+      'repos/o/r/actions/runs/32/jobs?per_page=100',
+    ]);
+  });
+
+  it.each([
+    ['another head branch (a stacked PR from another branch)', { head_branch: 'feat/other' }, 'another head branch'],
+    [
+      'a fork run (another head repository, this PR listed)',
+      { head_repository: { full_name: 'fork/r' } },
+      'another head repository (fork)',
+    ],
+    ['a fork-shaped run (empty pull_requests)', { pull_requests: [] }, '0 pull requests listed (exactly this PR is required)'],
+    ['a run with no pull_requests field', { pull_requests: undefined }, '0 pull requests listed (exactly this PR is required)'],
+    [
+      'an ambiguous run (this PR and another listed)',
+      { pull_requests: [prEntry(), prEntry({ number: 99 })] },
+      '2 pull requests listed (exactly this PR is required)',
+    ],
+    ['another PR listed', { pull_requests: [prEntry({ number: 99 })] }, 'not this PR into main'],
+    ['a run against another base (PR into weak)', { pull_requests: [prEntry({ base: 'weak' })] }, 'not this PR into main'],
+    ['a base in another repository', { pull_requests: [prEntry({ baseRepo: FORK_REF })] }, 'not this PR into main'],
+    ['an entry from another head branch', { pull_requests: [prEntry({ head: 'feat/other' })] }, 'not this PR into main'],
+    ['an entry whose head is a fork', { pull_requests: [prEntry({ headRepo: FORK_REF })] }, 'not this PR into main'],
+    ['a run without a creation time', { created_at: 'yesterday' }, 'no creation time'],
+  ])('[R2-M1] %s is refused (no proof)', (_title, extra, problem) => {
+    const api = fakeApi({ [PREV]: [run(33, PREV, extra)] }, { 33: jobsOf({ si: 'success' }) });
+    const found = lookup(api, [PREV]);
+    expect(found).toMatchObject({ codeProof: '', securityProof: '' });
+    expect(found.notes).toEqual([`run 33 (bbbbbbb) is not a run of this PR into main: ${problem}`]);
+    expect(api.calls.some((path) => /\/jobs/u.test(path))).toBe(false);
+  });
+
+  it('[R2-M1] a retargeted PR: runs created at or before the last base_ref_changed are refused, a later run is a proof', () => {
+    const noRetarget = [[{ event: 'referenced', created_at: '2026-11-14T13:00:00Z' }], []] as unknown[][];
+    const events = [
+      [
+        { event: 'base_ref_changed', created_at: '2026-11-14T11:00:00Z' },
+        { event: 'labeled', created_at: '2026-11-14T11:30:00Z' },
+        { event: 'base_ref_changed', created_at: '2026-11-14T12:00:00Z' },
+      ],
+    ];
+    const old = fakeApi({ [PREV]: [run(34, PREV, { created_at: '2026-11-14T11:59:59Z' })] }, { 34: jobsOf({ si: 'success' }) }, { events });
+    expect(lookup(old, [PREV])).toMatchObject({ codeProof: '', securityProof: '' });
+    const same = fakeApi({ [PREV]: [run(35, PREV, { created_at: '2026-11-14T12:00:00Z' })] }, { 35: jobsOf({}) }, { events });
+    expect(lookup(same, [PREV]).notes).toEqual([
+      'run 35 (bbbbbbb) is not a run of this PR into main: created before the last base change of this PR',
+    ]);
+    const later = fakeApi(
+      { [PREV]: [run(36, PREV, { created_at: '2026-11-14T12:00:01Z' })] },
+      { 36: jobsOf({ si: 'success' }) },
+      { events },
+    );
+    expect(lookup(later, [PREV])).toMatchObject({ codeProof: `36:${PREV}`, securityProof: `36:${PREV}` });
+    // No retarget at all: other events give no cutoff.
+    const plain = fakeApi({ [PREV]: [run(37, PREV)] }, { 37: jobsOf({}) }, { events: noRetarget });
+    expect(lookup(plain, [PREV]).codeProof).toBe(`37:${PREV}`);
+  });
+
+  it('[R2-M1] a retarget on a later events page is found (a full page reads the next one)', () => {
+    const filler = Array.from({ length: 100 }, () => ({ event: 'referenced', created_at: '2026-11-14T09:00:00Z' }));
+    const events = [filler, [{ event: 'base_ref_changed', created_at: '2026-11-14T12:00:00Z' }]];
+    const api = fakeApi({ [PREV]: [run(38, PREV)] }, { 38: jobsOf({}) }, { events });
+    expect(lookup(api, [PREV]).codeProof).toBe('');
+    expect(api.calls).toContain(eventsPath(2));
+  });
+
+  it.each([
+    ['the head branch has a second PR (into another base)', { pulls: [pull(), pull({ number: 99, base: 'weak' })] }, '2 pull request(s)'],
+    ['the head branch has no PR', { pulls: [] }, '0 pull request(s)'],
+    ['the head branch PR is another PR', { pulls: [pull({ number: 99 })] }, '1 pull request(s)'],
+    ['the head branch PR targets another base', { pulls: [pull({ base: 'weak' })] }, '1 pull request(s)'],
+    ['the head branch PR comes from a fork', { pulls: [pull({ headRepo: 'fork/r' })] }, '1 pull request(s)'],
+    ['the pulls answer is not a list', { pulls: { message: 'x' } }, 'not a list'],
+    ['the pulls call fails', { pulls: false }, 'pull requests of the head branch: unexpected'],
+    ['the events call fails', { events: false as const }, 'events of PR 46: unexpected'],
+    ['an event is not an object', { events: [['x']] }, 'not a list of events'],
+    ['a base_ref_changed event has no time', { events: [[{ event: 'base_ref_changed' }]] }, 'without a time'],
+  ])('[R2-M1] %s: no proof at all, and no jobs are read (fail closed)', (_title, binding, problem) => {
+    const api = fakeApi({ [PREV]: [run(39, PREV)] }, { 39: jobsOf({ si: 'success' }) }, binding);
+    const found = lookup(api, [PREV]);
+    expect(found).toMatchObject({ codeProof: '', securityProof: '' });
+    expect(found.notes.join('\n')).toContain('no proof (binding, fail closed): ');
+    expect(found.notes.join('\n')).toContain(problem);
+    expect(api.calls.some((path) => /\/jobs/u.test(path))).toBe(false);
+  });
+
+  it('[R2-M1] without a PR number or a usable head branch there is no proof (no binding call is made)', () => {
+    for (const extra of [{ pr: '' }, { pr: '0' }, { headRef: '' }, { headRef: '-x' }, { headRef: 'a..b' }, { headRef: 'a b' }]) {
+      const api = fakeApi({ [PREV]: [run(40, PREV)] }, { 40: jobsOf({}) });
+      const found = lookup(api, [PREV], extra);
+      expect(found.codeProof).toBe('');
+      expect(api.calls).toHaveLength(1);
+    }
+    const binding = proofBinding({ call: fakeApi({}, {}), repo: 'o/r', pr: PR, headRef: HEAD_REF });
+    expect(binding).toEqual({ repo: 'o/r', pr: PR, headRef: HEAD_REF, since: 0 });
+    expect(runBindingProblem(run(41, PREV), { repo: 'o/r', pr: PR, headRef: HEAD_REF, since: 0 })).toBe('');
+  });
+
+  it('[R2-M1] binding calls count toward MAX_API_CALLS (endless full event pages give no proof)', () => {
+    const filler = Array.from({ length: 100 }, () => ({ event: 'referenced', created_at: '2026-11-14T09:00:00Z' }));
+    const api = fakeApi({ [PREV]: [run(42, PREV)] }, { 42: jobsOf({}) }, { events: Array.from({ length: 60 }, () => filler) });
+    const found = lookup(api, [PREV]);
+    expect(found.codeProof).toBe('');
+    expect(found.notes.join('\n')).toContain('more than 40 API calls');
+    expect(api.calls).toHaveLength(40);
   });
 
   it('an API failure gives no proof (fail closed), and the lookup stops after MAX_API_CALLS', () => {
     const failing: Api = () => ({ ok: false, problem: 'HTTP 403' });
-    expect(lookupProofs({ api: failing, repo: 'o/r', identical: [PREV], steps: STEPS })).toMatchObject({
+    expect(lookup(failing, [PREV])).toMatchObject({
       codeProof: '',
       securityProof: '',
     });
@@ -574,10 +730,15 @@ describe('lane-scope CLI', () => {
     });
     expect(parseArgs(['--root', '.', '--base', 'x', '--head', 'y', '--pr', '0'])).toMatchObject({ error: expect.stringContaining('--pr') });
     expect(parseArgs(['--root', '.', '--gate', '--lookup'])).toMatchObject({ error: expect.stringContaining('--gate') });
+    expect(parseArgs(['--root', '.', '--gate', '--head-ref', 'x'])).toMatchObject({ error: expect.stringContaining('--gate') });
+    expect(parseArgs(['--root', '.', '--base', 'x', '--head', 'y', '--head-ref'])).toMatchObject({
+      error: expect.stringContaining('--head-ref'),
+    });
     expect(main(['--bogus'])).toBe(2);
   });
 
-  it('writes key=value outputs; --lookup adds the proofs and security_integration_due from the fake API', () => {
+  /** A PR with a code commit, docs, the real ci.yml and more docs: the ci.yml commit is the code-identical proof commit. */
+  function cliRepo() {
     const { root, base } = repo();
     const code = commit(root, { 'prisma/schema.prisma': 'model A { id Int @id }\n' }, 'code');
     const docs = commit(root, { 'docs/y.md': 'y\n' }, 'docs');
@@ -586,12 +747,17 @@ describe('lane-scope CLI', () => {
     git(root, ['commit', '-q', '-m', 'ci']);
     const ci = git(root, ['rev-parse', 'HEAD']);
     const head = commit(root, { 'docs/z.md': 'z\n' }, 'docs 2');
+    expect(code).not.toBe(docs);
+    return { root, base, ci, head };
+  }
+  const cliEnv = { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '42' };
+
+  it('writes key=value outputs; --lookup adds the proofs and security_integration_due from the fake API', () => {
+    const { root, base, ci, head } = cliRepo();
     const output = join(root, 'out.txt');
     const api = fakeApi({ [ci]: [run(41, ci)] }, { 41: jobsOf({}) });
-    const env = { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '42' };
-    expect(
-      main(['--root', root, '--base', base, '--head', head, '--before', ci, '--pr', '5', '--lookup', '--output', output], { env, api }),
-    ).toBe(0);
+    const args = ['--root', root, '--base', base, '--head', head, '--before', ci, '--pr', PR, '--head-ref', HEAD_REF, '--lookup'];
+    expect(main([...args, '--output', output], { env: cliEnv, api })).toBe(0);
     const lines = readFileSync(output, 'utf8').trim().split('\n');
     expect(lines).toEqual([
       'push_scope=docs',
@@ -605,7 +771,29 @@ describe('lane-scope CLI', () => {
       'security_proof=',
       'security_integration_due=true',
     ]);
-    expect(code).not.toBe(docs);
+  });
+
+  it('[R2-M1] --pr and --head-ref reach the binding (a run of another branch is no proof); [R2-n1 L14] no record, not due', () => {
+    const { root, base, ci, head } = cliRepo();
+    const api = fakeApi({ [ci]: [run(41, ci)] }, { 41: jobsOf({ si: 'success' }) });
+    const args = ['--root', root, '--base', base, '--head', head, '--before', ci, '--lookup'];
+    const other = join(root, 'other.txt');
+    expect(main([...args, '--pr', PR, '--head-ref', 'feat/other', '--output', other], { env: cliEnv, api })).toBe(0);
+    expect(readFileSync(other, 'utf8').trim().split('\n').slice(-3)).toEqual([
+      'code_proof=',
+      'security_proof=',
+      'security_integration_due=true',
+    ]);
+    // Without --pr the record is not evaluated (record_ok=false): security-integration is not due although no proof exists.
+    const unbound = join(root, 'unbound.txt');
+    expect(main([...args, '--head-ref', HEAD_REF, '--output', unbound], { env: cliEnv, api })).toBe(0);
+    expect(readFileSync(unbound, 'utf8').trim().split('\n').slice(-5)).toEqual([
+      'security_paths=true',
+      'record_ok=false',
+      'code_proof=',
+      'security_proof=',
+      'security_integration_due=false',
+    ]);
   });
 
   it('--gate reads the step env and exits 0 on MERGE-READY, 1 on BLOCKED', () => {
@@ -627,5 +815,116 @@ describe('lane-scope CLI', () => {
     expect(main(['--gate', '--root', repoRoot], { env, api })).toBe(0);
     expect(main(['--gate', '--root', repoRoot], { env: { ...env, CODE_PROOF: '' }, api })).toBe(1);
     expect(main(['--gate', '--root', repoRoot], { env: { ...env, SECURITY_PATHS: '' }, api })).toBe(1);
+  });
+});
+
+describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions (gateInputFromEnv)', () => {
+  const gateEnv = {
+    GITHUB_EVENT_NAME: 'pull_request',
+    GITHUB_REPOSITORY: 'o/r',
+    GITHUB_RUN_ID: '77',
+    GITHUB_RUN_ATTEMPT: '2',
+    FAST_LANE: 'success',
+    FAST_LANE_MODE: 'full',
+    SCANS: 'success',
+    SECURITY_INTEGRATION: 'skipped',
+    CODE_CHANGED: 'true',
+    PR_DOCS_ONLY: 'false',
+    CODE_PROOF: '',
+    SECURITY_PROOF: '',
+    RECORD_OK: 'true',
+    SECURITY_PATHS: 'false',
+    SECURITY_INTEGRATION_DUE: 'false',
+  };
+  /** A clone whose HEAD has the real ci.yml (the step names ci-gate requires come from it). */
+  function ciRoot(): string {
+    const { root } = repo();
+    commit(root, { '.github/workflows/ci.yml': ciText }, 'ci');
+    return root;
+  }
+  const ATTEMPT_PATH = 'repos/o/r/actions/runs/77/attempts/2/jobs?per_page=100';
+  /** A fake API answering only this run attempt's jobs. */
+  function attemptApi(jobs: object): Api & { calls: string[] } {
+    const calls: string[] = [];
+    const api = (path: string) => {
+      calls.push(path);
+      return path === ATTEMPT_PATH ? { ok: true as const, json: jobs } : { ok: false as const, problem: `unexpected ${path}` };
+    };
+    return Object.assign(api, { calls });
+  }
+
+  it('reads exactly runs/<id>/attempts/<attempt>/jobs: every CODE-gated step success is MERGE-READY', () => {
+    const root = ciRoot();
+    const api = attemptApi(jobsOf({}));
+    const input = gateInputFromEnv({ root, env: gateEnv, api });
+    expect(input.thisRunCodeProblems()).toEqual([]);
+    expect(api.calls).toEqual([ATTEMPT_PATH]);
+    expect(gateVerdict(gateInputFromEnv({ root, env: gateEnv, api }))).toEqual({ ready: true, reasons: [] });
+  });
+
+  it('a skipped CODE-gated step in this run (head code rewrote CODE through $GITHUB_ENV) is BLOCKED', () => {
+    const root = ciRoot();
+    const jobs = jobsOf({});
+    const unit = (jobs.jobs[0] as { steps: { name: string; conclusion: string }[] }).steps.find((step) => step.name === 'Unit tests');
+    if (unit === undefined) throw new Error('no Unit tests step');
+    unit.conclusion = 'skipped';
+    const verdict = gateVerdict(gateInputFromEnv({ root, env: gateEnv, api: attemptApi(jobs) }));
+    expect(verdict).toEqual({ ready: false, reasons: ['code gates skipped on a code push (Unit tests: skipped)'] });
+  });
+
+  it('a run that cannot be identified, or a failing jobs API, is BLOCKED (fail closed)', () => {
+    const root = ciRoot();
+    const noRunId = { ...gateEnv, GITHUB_RUN_ID: '' };
+    const api = attemptApi(jobsOf({}));
+    expect(gateVerdict(gateInputFromEnv({ root, env: noRunId, api })).reasons).toEqual([
+      'code gates skipped on a code push (this run is not identifiable (GITHUB_REPOSITORY, GITHUB_RUN_ID))',
+    ]);
+    expect(api.calls).toEqual([]);
+    const failing: Api = () => ({ ok: false, problem: 'HTTP 502' });
+    expect(gateVerdict(gateInputFromEnv({ root, env: gateEnv, api: failing })).reasons).toEqual([
+      'code gates skipped on a code push (jobs API: HTTP 502)',
+    ]);
+  });
+});
+
+describe('[R2-n1] pinned guards', () => {
+  it('L1: the API contract is code even when the base manifest tooling_inputs omit it (API_CONTRACT_GLOB backstop)', () => {
+    expect(docsOnlyPath('docs/03-architecture/api/openapi.yaml', ['docs/05-quality/tests/gherkin-test-map.md'])).toBe(false);
+    expect(docsOnlyPath('docs/03-architecture/api/README.md', [])).toBe(false);
+    expect(docsOnlyPath('docs/03-architecture/other.md', [])).toBe(true);
+  });
+
+  it('L12: a before-SHA that is not an ancestor is not a push range even when its tree diff to the head is docs-only', () => {
+    const { root, base } = repo();
+    const code = commit(root, { 'apps/api/src/a.ts': 'export const a = 9;\n' }, 'code');
+    const head = commit(root, { 'docs/y.md': 'y\n' }, 'docs');
+    git(root, ['checkout', '-q', '-b', 'sibling', code]);
+    const sibling = commit(root, { 'docs/sibling.md': 's\n' }, 'sibling docs');
+    expect(classify({ root, base, head, before: sibling })).toMatchObject({ pushScope: 'code', prDocsOnly: false });
+    expect(classify({ root, base, head, before: code }).pushScope).toBe('docs');
+  });
+
+  it('L20/L21: a duplicated job name or step name never takes the first match', () => {
+    const twoJobs = jobsOf({});
+    twoJobs.jobs.push({ ...twoJobs.jobs[0] } as (typeof twoJobs.jobs)[number]);
+    expect(fastLaneProblems(twoJobs, STEPS.fastLane)).toEqual(['2 jobs named fast-lane']);
+    const twoSteps = jobsOf({});
+    const fast = twoSteps.jobs[0] as { steps: { name: string; conclusion: string }[] };
+    fast.steps.push({ name: 'Unit tests', conclusion: 'success' });
+    expect(fastLaneProblems(twoSteps, STEPS.fastLane)).toEqual(['Unit tests: ambiguous']);
+    const twoScans = jobsOf({});
+    const scans = twoScans.jobs[1] as { steps: { name: string; conclusion: string }[] };
+    scans.steps.push({ name: STEPS.scans[0] ?? '', conclusion: 'success' });
+    expect(scansProblems(twoScans, STEPS.scans)).toEqual([`${STEPS.scans[0] ?? ''}: missing`]);
+  });
+
+  it('L27: an empty PR range (the head tree equals the base tree) is code, never docs-only', () => {
+    const { root, base } = repo();
+    const head = commit(root, {}, 'empty');
+    expect(classify({ root, base, head, before: '' })).toMatchObject({
+      pushScope: 'code',
+      prDocsOnly: false,
+      prReason: 'the PR range changes nothing (code)',
+    });
   });
 });

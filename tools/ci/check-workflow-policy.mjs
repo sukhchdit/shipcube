@@ -67,7 +67,8 @@
  *                         PR46-SEC-01/-03; laneScopeFindings): the lane-scope step (exact command and env, id, before
  *                         gitleaks), the security-integration suites step (SECURITY_INTEGRATION_SCRIPT), ci-gate's tooling
  *                         and aggregation steps (exact; aggregation last), the pinned jobs' `if:`, `needs`, permissions,
- *                         job env and outputs, and the pull-request concurrency (cancel-in-progress: false).
+ *                         job env and outputs, the pull-request concurrency (cancel-in-progress: false), and the
+ *                         pull-request base filter `branches: [main]` (CI_PULL_REQUEST_BRANCHES; R2-M1, PR46-SEC-13).
  *   gate-env              no `env:` entry named GATE_* or GATES_* anywhere: gate locations come only from the base-ref
  *                         gate-tooling steps through $GITHUB_ENV.
  *   lint-fixture-mode     LINT_FIXTURE_MODE appears nowhere but in the `env:` of ci.yml's base-ref lint fixture step
@@ -370,8 +371,18 @@ export function pinnedScriptProblems(expected) {
  */
 /** The lane-scope step of job `scans` (RR-4): exact command; GH_TOKEN and RANGE_BEFORE are its only step env. */
 export const LANE_SCOPE_RUN =
-  'node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"';
-export const LANE_SCOPE_ENV = Object.freeze({ GH_TOKEN: '${{ github.token }}', RANGE_BEFORE: '${{ github.event.before }}' });
+  'node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"';
+export const LANE_SCOPE_ENV = Object.freeze({
+  GH_TOKEN: '${{ github.token }}',
+  RANGE_BEFORE: '${{ github.event.before }}',
+  // R2-M1 / PR46-SEC-13: proofs are bound to this PR's head branch (an env value, never interpolated into run:).
+  HEAD_REF: '${{ github.head_ref }}',
+});
+/**
+ * R2-M1 / PR46-SEC-13 (D-ORCH-090): lane A runs for pull requests into main only, so no ci.yml run against another base
+ * exists to be adopted as a proof (lane-scope.mjs PROOF_BASE_REF binds the lookup as well).
+ */
+export const CI_PULL_REQUEST_BRANCHES = Object.freeze(['main']);
 /** The step id the `scans` outputs read (RR-4). */
 export const LANE_SCOPE_STEP_ID = 'lane-scope';
 /** Job `scans` outputs: one source, the base-ref lane-scope step (RR-4). */
@@ -1368,6 +1379,18 @@ export function laneScopeFindings(doc) {
   const out = [];
   const add = (/** @type {string} */ message, /** @type {string[]} */ path) => out.push({ rule: 'required-gates', message, path });
   const jobs = asMap(doc.jobs) ?? {};
+  const pullRequest = asMap(asMap(doc.on)?.pull_request);
+  const branches = asList(pullRequest?.branches);
+  if (
+    pullRequest === undefined ||
+    branches.length !== CI_PULL_REQUEST_BRANCHES.length ||
+    branches.some((branch, index) => branch !== CI_PULL_REQUEST_BRANCHES[index]) ||
+    pullRequest['branches-ignore'] !== undefined
+  )
+    add(
+      `ci.yml on.pull_request.branches must be exactly [${CI_PULL_REQUEST_BRANCHES.join(', ')}] with no branches-ignore (R2-M1, PR46-SEC-13: proof runs are runs against main)`,
+      ['on', 'pull_request', 'branches'],
+    );
   const concurrency = asMap(doc.concurrency);
   if (
     concurrency === undefined ||

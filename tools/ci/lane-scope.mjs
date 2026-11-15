@@ -27,12 +27,19 @@
  * for the lane B staleness rule (PR28-SEC-03 item 3).
  *
  * --lookup (job `scans`; `GH_TOKEN` in that step's env only, `actions: read`): proofs read from the GitHub jobs API.
- *   code_proof      `<run_id>:<sha>` of a completed `ci.yml` pull_request run (workflow conclusion any, any PR) on a
- *                   commit of `identical` whose `fast-lane` job concluded success with every CODE-gated step of
- *                   CI_REQUIRED_GATES concluded success (steps also gated by LINT_CONTROLS may be skipped) and whose
- *                   `scans` job's gitleaks, Semgrep and openapi-breaking steps concluded success; else empty. Step
- *                   conclusions, never the job colour: a light run is green with its code steps skipped, so it is never
- *                   a proof. Queued and in-progress runs (and this run) are not proofs.
+ *   Binding (code review PR #46 R2-M1 = PR46-SEC-13, D-ORCH-090): a proof run is a run of THIS pull request into
+ *   PROOF_BASE_REF only. Before the first candidate's jobs are read, the head branch (`--head-ref`, `github.head_ref`)
+ *   must have exactly one pull request (state all), this one (`--pr`), into `main` of this repository, and the PR's
+ *   `base_ref_changed` issue events give a cutoff: runs created at or before the last retarget are never proofs. A
+ *   candidate run must be on that head branch in this repository and list exactly this PR with base `main`; an empty,
+ *   longer or other `pull_requests` list (a fork, another PR, another base) is no proof. Any failed or malformed binding
+ *   call gives no proof at all (fail closed: the full lane runs).
+ *   code_proof      `<run_id>:<sha>` of a completed `ci.yml` pull_request run of this PR (bound as above; workflow
+ *                   conclusion any) on a commit of `identical` whose `fast-lane` job concluded success with every
+ *                   CODE-gated step of CI_REQUIRED_GATES concluded success (steps also gated by LINT_CONTROLS may be
+ *                   skipped) and whose `scans` job's gitleaks, Semgrep and openapi-breaking steps concluded success;
+ *                   else empty. Step conclusions, never the job colour: a light run is green with its code steps
+ *                   skipped, so it is never a proof. Queued and in-progress runs (and this run) are not proofs.
  *   security_proof  `<run_id>:<sha>` of such a run whose `security-integration` job concluded success; else empty.
  *   security_integration_due  pull_request && security_paths && record_ok && security_proof == ''.
  *   A failed or unauthenticated API call yields no proof (fail closed: the gate is red, the job runs).
@@ -47,7 +54,7 @@
  *   `BLOCKED: <reasons>` (exit 1). On push events (CI_MAIN_FAST_LANE) only (a), (b), (d) and (f) apply.
  *
  * CLI: node tools/ci/lane-scope.mjs --root <dir> --base <sha> --head <sha> [--before <sha>] [--event <name>]
- *        [--pr <n>] [--lookup] [--output <$GITHUB_OUTPUT>] [--summary <$GITHUB_STEP_SUMMARY>] [--json]
+ *        [--pr <n>] [--head-ref <branch>] [--lookup] [--output <$GITHUB_OUTPUT>] [--summary <$GITHUB_STEP_SUMMARY>] [--json]
  *      node tools/ci/lane-scope.mjs --gate --root <dir> [--summary <file>] [--json]
  * Exit 0 classified / MERGE-READY, 1 BLOCKED (--gate), 2 usage or internal error.
  */
@@ -79,6 +86,12 @@ export const MAX_IDENTICAL = 50;
 export const MAX_API_CALLS = 40;
 /** The scans gates whose step conclusions belong to a code proof (by CI_REQUIRED_GATES `gate`). */
 export const PROOF_SCANS_GATES = Object.freeze(['gitleaks', 'semgrep', 'openapi-breaking']);
+/** Proof runs are runs against this base branch only (R2-M1, PR46-SEC-13; ci.yml `on.pull_request.branches`). */
+export const PROOF_BASE_REF = 'main';
+/** A page of the issue events API; a full page means another page is read (within MAX_API_CALLS). */
+const EVENTS_PAGE = 100;
+/** Head branch names a binding accepts (a git ref subset; anything else is no proof, never a usage error). */
+const BRANCH = /^(?![-/.])(?!.*(?:\.\.|\/\/|@\{|\.lock$|\/$|\.$))[A-Za-z0-9._/-]{1,200}$/u;
 const CODE_IF = "env.CODE == 'true'";
 const LINT_IF = "env.LINT_CONTROLS == 'true'";
 const DOC_MODES = new Set(['100644', '000000']);
@@ -425,11 +438,96 @@ export function securityIntegrationPassed(jobsJson) {
 }
 
 /**
- * Proof lookup over the code-identical set (D-ARCH-126/127).
- * @param {{ api: Api, repo: string, identical: readonly string[], steps: ProofSteps, currentRunId?: string }} input
+ * @typedef {object} Binding this PR's proof binding (R2-M1, PR46-SEC-13)
+ * @property {string} repo `owner/name`
+ * @property {string} pr the pull request number
+ * @property {string} headRef its head branch
+ * @property {number} since runs created at or before this time (ms; the last `base_ref_changed`, else 0) are no proofs
+ */
+
+/**
+ * The repository named by a pull-request entry's `repo` (`full_name`, or the API `url` of a workflow run's entry).
+ * @param {unknown} repoJson
+ * @param {string} repo
+ */
+function sameRepo(repoJson, repo) {
+  if (!isRecord(repoJson)) return false;
+  if (typeof repoJson.full_name === 'string') return repoJson.full_name === repo;
+  return typeof repoJson.url === 'string' && repoJson.url.endsWith(`/repos/${repo}`);
+}
+
+/**
+ * True when a pull-request entry is THIS pull request: number, head branch and base `main`, all in this repository.
+ * @param {unknown} entry a `pulls` item or a workflow run's `pull_requests` item
+ * @param {{ repo: string, pr: string, headRef: string }} binding
+ */
+function isThisPullRequest(entry, binding) {
+  if (!isRecord(entry) || String(entry.number) !== binding.pr) return false;
+  const base = isRecord(entry.base) ? entry.base : {};
+  const head = isRecord(entry.head) ? entry.head : {};
+  return (
+    base.ref === PROOF_BASE_REF && sameRepo(base.repo, binding.repo) && head.ref === binding.headRef && sameRepo(head.repo, binding.repo)
+  );
+}
+
+/**
+ * Binds proofs to this pull request (D-ORCH-090): the head branch has exactly one pull request (state all), this one into
+ * `main`, and the cutoff is its last `base_ref_changed` event (no-retarget rule: a retarget voids every earlier run).
+ * @param {{ call: Api, repo: string, pr: string, headRef: string }} input
+ * @returns {Binding | { problem: string }}
+ */
+export function proofBinding({ call, repo, pr, headRef }) {
+  if (!PR_NUMBER.test(pr)) return { problem: 'no pull request number (--pr)' };
+  if (!BRANCH.test(headRef)) return { problem: 'no usable head branch (--head-ref)' };
+  const binding = { repo, pr, headRef };
+  const owner = repo.split('/')[0] ?? '';
+  const pulls = call(`repos/${repo}/pulls?state=all&head=${encodeURIComponent(`${owner}:${headRef}`)}&per_page=100`);
+  if (!pulls.ok) return { problem: `pull requests of the head branch: ${pulls.problem}` };
+  if (!Array.isArray(pulls.json)) return { problem: 'pull requests of the head branch: not a list' };
+  if (pulls.json.length !== 1 || !isThisPullRequest(pulls.json[0], binding))
+    return {
+      problem: `${String(pulls.json.length)} pull request(s) from the head branch; exactly this PR into ${PROOF_BASE_REF} is required`,
+    };
+  let since = 0;
+  for (let page = 1; ; page += 1) {
+    const events = call(`repos/${repo}/issues/${pr}/events?per_page=${String(EVENTS_PAGE)}&page=${String(page)}`);
+    if (!events.ok) return { problem: `events of PR ${pr}: ${events.problem}` };
+    if (!Array.isArray(events.json) || !events.json.every(isRecord)) return { problem: `events of PR ${pr}: not a list of events` };
+    for (const event of events.json) {
+      if (event.event !== 'base_ref_changed') continue;
+      const at = Date.parse(String(event.created_at));
+      if (!Number.isFinite(at)) return { problem: `events of PR ${pr}: a base_ref_changed event without a time` };
+      since = Math.max(since, at);
+    }
+    if (events.json.length < EVENTS_PAGE) break;
+  }
+  return { ...binding, since };
+}
+
+/**
+ * Why a run is not a run of this pull request into `main` after its last retarget ('' = bound).
+ * @param {Record<string, any>} run a workflow run of the runs API
+ * @param {Binding} binding
+ */
+export function runBindingProblem(run, binding) {
+  if (run.head_branch !== binding.headRef) return 'another head branch';
+  if (!sameRepo(run.head_repository, binding.repo)) return 'another head repository (fork)';
+  const listed = Array.isArray(run.pull_requests) ? run.pull_requests : [];
+  if (listed.length !== 1) return `${String(listed.length)} pull requests listed (exactly this PR is required)`;
+  if (!isThisPullRequest(listed[0], binding)) return `not this PR into ${PROOF_BASE_REF}`;
+  const created = Date.parse(String(run.created_at));
+  if (!Number.isFinite(created)) return 'no creation time';
+  if (created <= binding.since) return 'created before the last base change of this PR';
+  return '';
+}
+
+/**
+ * Proof lookup over the code-identical set (D-ARCH-126/127), bound to this pull request (R2-M1, PR46-SEC-13).
+ * @param {{ api: Api, repo: string, identical: readonly string[], steps: ProofSteps, currentRunId?: string, pr?: string,
+ *   headRef?: string }} input
  * @returns {{ codeProof: string, securityProof: string, notes: string[] }}
  */
-export function lookupProofs({ api, repo, identical, steps, currentRunId = '' }) {
+export function lookupProofs({ api, repo, identical, steps, currentRunId = '', pr = '', headRef = '' }) {
   /** @type {string[]} */
   const notes = [];
   let codeProof = '';
@@ -440,6 +538,8 @@ export function lookupProofs({ api, repo, identical, steps, currentRunId = '' })
     if (calls > MAX_API_CALLS) return /** @type {ApiResult} */ ({ ok: false, problem: `more than ${String(MAX_API_CALLS)} API calls` });
     return api(path);
   };
+  /** @type {Binding | { problem: string } | null} read once, before the first candidate's jobs */
+  let binding = null;
   for (const sha of identical) {
     if (codeProof !== '' && securityProof !== '') break;
     const listed = call(`repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=pull_request&status=completed&per_page=100`);
@@ -449,18 +549,30 @@ export function lookupProofs({ api, repo, identical, steps, currentRunId = '' })
       continue;
     }
     const runs = isRecord(listed.json) && Array.isArray(listed.json.workflow_runs) ? listed.json.workflow_runs.filter(isRecord) : [];
-    const candidates = runs
-      .filter(
-        (run) =>
-          run.head_sha === sha &&
-          run.event === 'pull_request' &&
-          run.status === 'completed' &&
-          typeof run.path === 'string' &&
-          /^\.github\/workflows\/ci\.yml(?:@|$)/u.test(run.path) &&
-          RUN_ID.test(String(run.id)) &&
-          String(run.id) !== currentRunId,
-      )
-      .sort((a, b) => Number(b.id) - Number(a.id));
+    const completed = runs.filter(
+      (run) =>
+        run.head_sha === sha &&
+        run.event === 'pull_request' &&
+        run.status === 'completed' &&
+        typeof run.path === 'string' &&
+        /^\.github\/workflows\/ci\.yml(?:@|$)/u.test(run.path) &&
+        RUN_ID.test(String(run.id)) &&
+        String(run.id) !== currentRunId,
+    );
+    if (completed.length === 0) continue;
+    if (binding === null) binding = proofBinding({ call, repo, pr, headRef });
+    if ('problem' in binding) {
+      notes.push(`no proof (binding, fail closed): ${binding.problem}`);
+      break;
+    }
+    /** @type {Record<string, any>[]} */
+    const candidates = [];
+    for (const run of completed) {
+      const problem = runBindingProblem(run, binding);
+      if (problem === '') candidates.push(run);
+      else notes.push(`run ${String(run.id)} (${sha.slice(0, 7)}) is not a run of this PR into ${PROOF_BASE_REF}: ${problem}`);
+    }
+    candidates.sort((a, b) => Number(b.id) - Number(a.id));
     for (const run of candidates) {
       if (codeProof !== '' && securityProof !== '') break;
       const jobs = call(`repos/${repo}/actions/runs/${String(run.id)}/jobs?per_page=100`);
@@ -639,7 +751,7 @@ const safe = (/** @type {string} */ text) => text.replace(/[`\r\n|]/gu, '?');
  * @returns {{ values: Record<string, string>, flags: Set<string> } | { error: string }}
  */
 export function parseArgs(argv) {
-  const valued = new Set(['--root', '--base', '--head', '--before', '--event', '--pr', '--output', '--summary']);
+  const valued = new Set(['--root', '--base', '--head', '--before', '--event', '--pr', '--head-ref', '--output', '--summary']);
   const boolean = new Set(['--lookup', '--json', '--gate']);
   /** @type {Record<string, string>} */
   const values = {};
@@ -654,7 +766,7 @@ export function parseArgs(argv) {
   }
   if (values['--root'] === undefined || values['--root'] === '') return { error: '--root is required' };
   if (flags.has('--gate')) {
-    if (flags.has('--lookup') || values['--base'] !== undefined || values['--head'] !== undefined)
+    if (flags.has('--lookup') || ['--base', '--head', '--head-ref'].some((name) => values[name] !== undefined))
       return { error: '--gate takes --root, --summary and --json only' };
     return { values, flags };
   }
@@ -730,7 +842,15 @@ export function main(argv, deps = {}) {
       const steps = shown.ok ? proofSteps(shown.stdout) : { problem: `${WORKFLOW_PATH} is not readable at the head` };
       if ('problem' in steps) notes.push(`no lookup: ${steps.problem}`);
       else {
-        const found = lookupProofs({ api, repo, identical: result.identical, steps, currentRunId: (env.GITHUB_RUN_ID ?? '').trim() });
+        const found = lookupProofs({
+          api,
+          repo,
+          identical: result.identical,
+          steps,
+          currentRunId: (env.GITHUB_RUN_ID ?? '').trim(),
+          pr: values['--pr'] ?? '',
+          headRef: values['--head-ref'] ?? '',
+        });
         codeProof = found.codeProof;
         securityProof = found.securityProof;
         notes = [...notes, ...found.notes];

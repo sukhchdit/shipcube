@@ -1,8 +1,9 @@
 # Lane A: hosted PR fast lane (ADR-0023 amendments A, F, I, J; D-ARCH-010; TASK-007).
 #
-# - Runs on non-draft pull requests, and on pushes to main only when the repository variable CI_MAIN_FAST_LANE is
-#   'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac, inventory) is workflow_dispatch-only
-#   and lives in lane-c.yml (TASK-015 part 015-B; this file's triggers stay pull_request + push, CI_TRIGGERS).
+# - Runs on non-draft pull requests into main, and on pushes to main only when the repository variable
+#   CI_MAIN_FAST_LANE is 'true' (D-ARCH-010 item 4). No schedule; lane C (integration, images, e2e, iac, inventory) is
+#   workflow_dispatch-only and lives in lane-c.yml (TASK-015 part 015-B; this file's triggers stay pull_request + push,
+#   CI_TRIGGERS).
 #   Nothing here deploys, pushes images, publishes packages or runs terraform.
 # - Jobs: fast-lane (classify, base-ref gates, install, tests, build) and scans (lane scope and proofs, gitleaks, Semgrep,
 #   security-review record) run in parallel on separate runners; security-integration (Testcontainers suites on Linux)
@@ -26,7 +27,11 @@
 name: ci
 
 on:
+  # Pull requests into main only (code review PR #46 R2-M1, PR46-SEC-13; base-ref policy pin CI_PULL_REQUEST_BRANCHES): a
+  # run against another base executes that base's workflow and tooling, so it must never exist as a proof run. The
+  # base-ref lane-scope.mjs binds proofs to this PR into main as well (an attacker-controlled base can drop this filter).
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
@@ -460,6 +465,7 @@ jobs:
 
       # ADR-0023 am. L items 1-2 (D-ARCH-126/127, RR-4): the base-ref lane scope (push scope, PR docs-only, code-identical
       # set, security paths, record check) and the proofs read from the jobs API with the job's actions: read token,
+      # bound to this PR into main by its head branch (HEAD_REF, an env value: never interpolated into run; R2-M1),
       # which only this step receives (policy rule gh-token). gh is the runner's binary; no npm, no head code. A failed
       # lookup gives no proof (fail closed). Runs before the scans so a red scan cannot hide the classification.
       - name: Lane scope and proofs (D-ARCH-126/127)
@@ -467,7 +473,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RANGE_BEFORE: ${{ github.event.before }}
-        run: node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          HEAD_REF: ${{ github.head_ref }}
+        run: node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       # Only .git is mounted: gitleaks loads <source>/.gitleaksignore unconditionally, so no working-tree file may reach
       # /repo. Inline allow markers are inert, merge commits are diffed against their first parent, no network
