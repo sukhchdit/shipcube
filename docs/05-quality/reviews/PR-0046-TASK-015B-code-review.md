@@ -179,3 +179,112 @@ The dispatch allowed light commands only, with no Docker and no workflow trigger
 3. Fresh lane B evidence on the final code head. Lane A green on the exact head: fast-lane, scans with the security record, `security-integration` and ci-gate.
 4. A security-analyst record naming the final head.
 5. Round 2 = delta: re-run the 37-mutant table (scratch script recipe in §4); expect M1, W1–W3, G5/G6, V1–V3 and the m3 channels killed.
+
+
+---
+
+# Round 2 (head ad30316)
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: Every r1 item is closed and pinned. All 31 re-run r1 mutants are killed, and so are 57 of 67 new mutants on the
+         stage-1 code; the policy pins hold (W1-W11 fail the base-ref policy). The two unions are pure, and the heap
+         line matches #42/#39. ONE MAJOR: a "code proof" can come from a ci.yml run against ANY base branch. A run
+         whose workflow came from an attacker-controlled base forges every step name the proof checks, so ci-gate
+         turns MERGE-READY with no real check on that code tree. Two MINORs: ci-gate's own-run step check is
+         untested, and `devOptional` (the Prisma CLI and engines) is counted as dev.
+```
+
+| Field | Value |
+|---|---|
+| Head reviewed | `ad3031694a44ea75b3ea6f0f26248860e408150b` (code head `6e94ba4`; `ad30316` adds lane B evidence only) |
+| Delta | `12ea6a6..ad30316`: fix commits `5a48afb` (stage 1 + r1 fixes, 29 files), `382a6e1` (SPK-07, CI-CD.md), `6e94ba4` (lint heap); merges `ed67a98`, `814c5bf`; 3 evidence commits |
+| Reviewer | code-reviewer (round 2), 2026-11-14/15 |
+
+## R2.1 Verification performed
+
+The dispatch allowed light commands only, with no Docker and no workflow triggers.
+
+| Check | Result |
+|---|---|
+| Changed tool suites on the head, paths passed positionally BEFORE `--selectProjects unit` (`lane-scope`, `ci-policy`, `check-workflow-policy`, `security-paths`, `security-integration`, `ci-minutes`, `lane-c-policy`, `inventory`, `gitleaks-full`, `heavy`, `rebuild-playwright`) | 11 suites, **408 passed**. `lane-scope.test.ts` = 57 (34 `it` + `it.each` rows). |
+| Base-ref `check-evidence` (`git archive origin/main tools/quality`, `--event pull_request --base origin/main --head HEAD`) | **PASS**. Run `20261114T1505Z_6e94ba4` was accepted (it includes `rls-cross-tenant` from #47). |
+| Lane A run 43609726745 (jobs API, read-only) | `head_sha` = `ad30316`. fast-lane success with every step success (full mode). scans failed only at the record step. security-integration skipped. ci-gate failed at "Aggregate lane A". This matches the PR comment. The rollup on the PR is the same. |
+| Mutation run: scratch copy of `6e94ba4` (`git archive`, node_modules junction, `git init`; script `review/PR-46-cr/mut2.mjs`; one Jest run per mutant; `ci.yml` mutants also run the real `check-workflow-policy.mjs`) | **98 mutants: 88 killed, 10 survived** (table R2.4). The unmutated copy gave 401/401 and policy exit 0. |
+| Union purity (`git merge-tree --write-tree P1 P2` vs the merge) | `ed67a98` and `814c5bf`: `git diff --stat <tree> <merge>` is empty for both, so each is byte-identical to a clean re-merge. Main's side is `.claude/**` and `docs/**`, plus `tools/quality/required-suites.json` in `814c5bf` (#47 activation). `origin/main` has moved since only under `docs/`/`.claude/`. |
+| Unions with #42 (`96bd37a`) and #39 (`c85d5e5`) | Both conflict ONLY on the lint step's comment lines in `ci.yml`. The `env: NODE_OPTIONS: --max-old-space-size=4096` lines are common and appear once in each merge tree. #42: `eslint.config.mjs` auto-merges. #39: `check-workflow-policy.{mjs,test.ts}`, `rebuild.mjs`, `jest.config.ts` and `package.json` auto-merge. |
+| Lockfile probe (`package-lock.json` `packages`) | 131 `devOptional` entries, including `node_modules/prisma` 7.10.1, `@prisma/engines` and `@prisma/config` (R2-m2) |
+| Repository PRs into a base other than `main` (`gh pr list --state all --limit 100`) | 0. R2-M1 has not happened yet, but nothing prevents it. |
+
+**Not re-run:** typecheck, build, full `test:unit`, coverage, lane B and actionlint. For these I relied on lane A run 43609726745 (fast-lane full, all steps green on `ad30316`) and the base-ref-verified lane B run `20261114T1505Z_6e94ba4`.
+
+## R2.2 Findings
+
+| ID | Sev | Location | Issue | Required fix |
+|---|---|---|---|---|
+| **R2-M1** | **MAJOR** (security flag) | `tools/ci/lane-scope.mjs:443-477` (candidate filter `:452-463`); `.github/workflows/ci.yml:29-30` (`pull_request` has no `branches:`); `lane-scope.test.ts:411` | **A code proof or security proof can come from a run against any base branch, so it can be forged.** `lookupProofs` accepts any completed `ci.yml` `pull_request` run on a commit of the identical set, "any PR". It never looks at the run's base. ci.yml's `pull_request` trigger has no base filter. For a `pull_request` run, GitHub takes the workflow, and every base-ref tool it runs, from the merge commit of head + base.<br>**Attack:** a writer pushes a branch `weak` whose `ci.yml` defines a job `fast-lane` with the 13 required step names (`proofSteps` list, test `:250-264`), a job `scans` with the 3 proof step names and a job `security-integration`, all `run: true`. The writer then opens PR B, `<branch of PR A> → weak`. B's run on commit C (PR A's code head) is `completed`, `pull_request`, path `.github/workflows/ci.yml`, with every named step `success`. PR A's next docs push then gets `code_proof = security_proof = <B's run>:C`. ci-gate rules (a)–(f) all pass (light fast-lane, scans re-run on main's tooling, the record names the docs head), so the result is **MERGE-READY**. Yet lint, unit, build, licences, cooldown, signatures, audit, lint fixtures and the Testcontainers security suites never ran on that code against `main`'s tooling.<br>**The same weakness without malice:** a stacked PR whose base is PR A's branch donates a proof that was evaluated with PR A's OWN head tooling. That breaks the base-ref principle (SEC-P3-31) that the ruling's §3 "against the same base-ref tooling" depends on.<br>**Pre-existing variant (not introduced here, closed by the same fix):** retargeting a PR to `weak` for one push and back to `main` leaves a green ci-gate from the `weak` run on the exact SHA, and D-ORCH-012/013 merges on that.<br>**Why the trigger filter alone is not enough:** an attacker-controlled base supplies the merge commit's `ci.yml`, so it can drop the filter. | **In-PR (preferred):**<br>(1) Bind proofs to THIS PR's head branch. Pass `--head-ref` (`github.head_ref`, pinned in `LANE_SCOPE_RUN`/`PINNED_JOB_ENV`). Accept only runs with `run.head_branch === head_ref`. One extra call, `pulls?state=all&head=<owner>:<head_ref>`, must list only this PR, and its `issues/{n}/events` must have no `base_ref_changed` event. Otherwise give no proof (fail closed: the docs push needs a full run). Branches are one-PR-per-task, so this almost never costs a run.<br>(2) Add `branches: [main]` to the `pull_request` trigger. The base policy only checks trigger names (`CI_TRIGGERS`), so it accepts this. Add a base-ref pin and a fixture. This stops mis-targeted and stacked PRs from producing proofs.<br>(3) Add fake-API cases: a run on another head branch is rejected; a branch with a second PR or a retarget is rejected. Replace the `:411` "other PR accepted" case or narrow it.<br>(4) Orchestrator procedural rule: never retarget a PR; close it and reopen from a fresh branch.<br>**Alternative:** principal-architect + security-analyst rule the residual acceptable under the trusted-agent model. Then (2), (4) and a documented residual are the minimum, and this finding drops to MINOR. RR-1's "other-PR run on the same commit accepted" needs the wording "other PR **into main from the same head branch**" either way. |
+| R2-m1 | MINOR | `tools/ci/lane-scope.mjs:604-617` (`gateInputFromEnv().thisRunCodeProblems`) | **ci-gate's read of this run's own step conclusions is untested.** Mutant L10 (`return []`) and mutant L10b (the `attempts/{n}` path dropped) both pass all 57 tests: every gate test injects `thisRunCodeProblems`, and the `--gate` CLI test uses a light push. This is the control that `ci.yml:98-99` relies on: head code that rewrites `CODE` through `$GITHUB_ENV` must make ci-gate red. It is base-ref code, so a regression would silently remove rule (b)'s second half. | Add a unit test of `gateInputFromEnv` with a temp repo whose HEAD has the real `ci.yml`, an env with `GITHUB_REPOSITORY`/`GITHUB_RUN_ID`/`GITHUB_RUN_ATTEMPT=2`, and a fake API. Assert three things: the exact `runs/<id>/attempts/2/jobs` path; a skipped `Unit tests` gives `code gates skipped on a code push (Unit tests: skipped)`; a missing run id gives `this run is not identifiable`. |
+| R2-m2 | MINOR (route: principal-architect; security flag) | `tools/ci/security-paths.mjs:207-212` (`devOnly`); ADR-0023 am. L item 2 (b); ruling §3 (3) | **`devOptional` is not dev-only.** In npm, `devOptional` means a dev dependency that is ALSO an optional dependency of a non-dev package. Here that is the Prisma CLI (`node_modules/prisma` 7.10.1, an optional peer of `@prisma/client`), `@prisma/engines` and `@prisma/config` (131 such entries). The integration harness applies the migrations those suites prove with the Prisma CLI (`tools/db/reset.ts`). A lockfile-only Prisma CLI or engines change (within the `package.json` range) therefore does not select `security-integration`. That contradicts the rule's own reason ("a Prisma, adapter or `pg` bump changes the transaction and RLS behaviour"). Today it is masked: a Dependabot bump edits the root entry's `devDependencies`, which selects. The refinement D-TASK015-59 proposes (ignore `devDependencies` in the root entry) would expose it. The implementation follows the ADR text literally, and mutant K8 shows the tests pin that. | Architect amends am. L item 2 (b): `devOptional` counts as production closure, or at least `node_modules/prisma`, `node_modules/@prisma/**` and `node_modules/pg*` always select. Do not adopt the D-TASK015-59 refinement before this. Fix in-PR if the ruling lands in time; otherwise 015-C or TASK-286. |
+| R2-n1 | NIT | `lane-scope.test.ts` | Unpinned guards (survivors):<br>• **L1:** the `API_CONTRACT_GLOB` backstop. The test's `INPUTS` already lists `docs/03-architecture/api/**`, so the backstop is never exercised; test with inputs that omit it.<br>• **L12:** the `--is-ancestor` check. The non-ancestor case's tree diff contains code anyway; add a non-ancestor `before` whose tree diff is docs-only.<br>• **L14:** `security_integration_due` ignores `record_ok`. The CLI case has `record_ok=true`.<br>• **L20/L21:** a duplicated job name or step name takes the first match.<br>• **L27:** an empty PR range counts as code.<br>• **P10:** top-level `permissions: actions:` has no fixture.<br>All of these fail closed or are cost-only today, except L20/L21, which need a reviewed `ci.yml` change. | One case each. |
+| R2-n2 | NIT | `tools/ci/check-security-owned-paths.test.ts:475` | This is the one unit test that reads committed `docs/**` (the record-format tripwire). Its result is inherited across docs pushes, so a malformed record for ANOTHER PR can merge in a light run and turn every PR's unit lane red. A PR's own record is still parsed by the base-ref record gate on every push. This is the residual the PR comment names; it is accepted. | Optional: have the record gate also parse every changed `PR-*.md` in the push range. Otherwise record it in the security record's residual list. |
+
+## R2.3 Ruling requirements RR-1..RR-11
+
+| RR | Verdict | Notes |
+|---|---|---|
+| RR-1 lane-scope | **Met, except R2-M1** | Push scope: the `before..head` tree diff when `before` is an ancestor, else the PR range (D-TASK015-50 accepted: a code PR still runs full). The identical set is the first-parent tree diff to the head (union-merge fixture), and modes are guarded. `--lookup` reads step conclusions, never job colour; light, failed, in-progress and current runs are rejected (L4–L7, L16, L24–L26, L33 killed). The API cap is 40 calls and fails closed. `DOCS_ONLY_PATHS` (D-TASK015-51 accepted): `.prettierignore` ignores `docs/` and `*.md`, so format:check is not an inherited input. The only non-`.md` code under `docs/` is `docs/04-plan/generator/*.mjs` (ESLint-ignored, untested, outside lane A), so it is safe. |
+| RR-2 lockfile | Met (see R2-m2 on the spec) | Merge-base vs head from git objects; root entry, new, deleted and unparseable all select; dev→prod selects. K1–K8 killed. |
+| RR-3 fast-lane | Met | `CODE` = push scope, `LINT_CONTROLS` over the PR range, `mode` output from the classify step (before any head code). A hard-coded `mode` (W12) is unpinned but safety-equivalent: ci-gate's mode-vs-classification check (D-TASK015-55, L19 killed) turns either direction red. |
+| RR-4 scans | Met | The step's token, exact run, env, id and order before gitleaks are all pinned; outputs come from one source; `actions: read` (W7, W10 killed). |
+| RR-5 security-integration | Met | `if` on `security_integration_due` plus PR46-SEC-01; needs `[scans, fast-lane]`; base-ref manifests only, head copy removed (W3, W5 killed). |
+| RR-6 ci-gate | Met; rules (a)–(f) killed (L8, L9, L11, L15, L19, L29–L32, L36) | Untested own-run read: R2-m1. **D-TASK015-52 (`contents: read`) accepted.** The job checks out the merge ref but runs only the base-ref archive (`scans-isolation` now covers ci-gate; P8 killed), with the token on the aggregation step only. Same trust class as scans. |
+| RR-7 concurrency | Met (W6 killed) | CI-CD.md:28-32 documents how to recover when a pending code run is superseded. |
+| RR-8 policy | Met (P6, P7, P9 killed; P10 NIT) | gh-token, actions-read and pr-secrets fixtures are wired (`check-workflow-policy.test.ts:112-169`). |
+| RR-9 ci-minutes | Met (X-M5..M8 killed) | |
+| RR-10 SPK-07 | Met | §6:148-152 has the combined forecast (closes m7). The first light run is still pending, as stated. |
+| RR-11 | Met / routed | TEST-STRATEGY §4.1 → qa-lead, accepted. `platform.md` §7.8 `cancel-in-progress` wording → architect. |
+
+**Is proof inheritance as strong as re-running for a code-identical tree?** Within one PR into `main`, yes:
+- The tree identity is exact: tree diff with modes, symlinks and executables counted as code, and a missing base manifest counted as code.
+- A light run cannot chain.
+- A failed or cancelled full run gives no proof.
+- Every base-ref gate re-runs on the exact head.
+
+Across PRs, no: R2-M1. The time-dependent and base-movement residuals (ruling §3) are unchanged and accepted. One related point for the security record: an inherited `security_proof` does not bind the manifest's `security_integration_suites` version, so a suite activated on `main` after the proof run is not exercised until the PR unions `main` (P1).
+
+## R2.4 Mutation results (copy of `6e94ba4`)
+
+| Area | Killed | Survived |
+|---|---|---|
+| r1 table re-run (31 of 37; I2/S3 equivalent, P1–P4 killed in r1) | W1–W4 (policy AND ci-policy), S1, S2, S4, I1, I3–I7, G1–G6, V1–V4, M1–M4, R1, R2, P5, H1 (direct probe; its Jest run hit the host-load timeout) | – |
+| r1 M1 + fix additions | X-M1 (duplicate collapse), X-V6, X-V7, X-G7, X-I8, X-I9, X-R3, X-M5–M8 | – |
+| lockfile rule | K1–K8 | – |
+| lane-scope (35) | L2–L9, L11, L13, L15, L16, L18, L19, L22–L26, L28–L33, L35, L36 | **L10, L10b** (R2-m1); L1, L12, L14, L20, L21, L27 (R2-n1) |
+| policy code | P6–P9 | P10 (R2-n1) |
+| ci.yml stage-1 (policy CLI + ci-policy) | W5–W11 | W12 (safety-equivalent) |
+
+## R2.5 Follow-up closure (round 1)
+
+- **Closed (verified by mutant or probe):** M1, m1 (= PR46-SEC-03), m2, m3 (= PR46-SEC-02, both channels plus the policy fixture), m4 (`lane-c-policy.test.ts:77` pin), m5, m6, m7, N1, N2, N3, N4, N5, N6, N7.
+- **Routed, accepted with owner:** N8 (with PR46-SEC-08).
+- **(c) Lint heap line, D-TASK015-63: accepted.** It is a size only, with no preload, and it is identical to #42 (D-TASK025-29) and #39. Union: whichever of #46/#42/#39 merges second resolves a comment-only conflict above the shared `env:` block in `ci.yml` and keeps ONE `NODE_OPTIONS` line. `lane-c.yml` exists only in #46.
+- **(d) Unions: pure** (R2.1).
+- **(e) Test quality:**
+  - The 57 lane-scope tests are real-git fixtures plus a fake jobs API, with exact assertions.
+  - The policy fixtures cover each RR-8 arm in both directions.
+  - Gaps: R2-m1, R2-n1.
+
+## R2.6 SECURITY-FLAGS (for security-analyst)
+
+1. R2-M1: proofs are accepted from runs against any base, so a proof can be forged with an attacker-controlled base workflow. The pre-existing retarget variant also affects the D-ORCH-012/013 merge rule.
+2. R2-m2: `devOptional` Prisma CLI/engines lockfile changes do not select `security-integration`.
+3. INFO: an inherited `security_proof` is not bound to the current base manifest's suite list (ruling §3 residual; P1 is the control).
+4. INFO: the security record's §3 residual list should add R2-n2 (unit tests reading `docs/**` are inherited across docs pushes).
+
+## R2.7 Merge conditions
+
+1. R2-M1 is fixed in-PR per (1)–(3), with fake-API tests, and (4) is recorded as a D-ORCH rule. Alternatively, an architect + security ruling accepts the residual and (2) + (4) land in-PR, which downgrades R2-M1 to MINOR.
+2. R2-m1 is fixed in-PR (one test). R2-m2 is ruled by principal-architect, then fixed in-PR or routed with an owner and a due point.
+3. Fresh lane B evidence if any code changes. Lane A on the exact final head: fast-lane, scans with the security delta record, `security-integration` (or a verified security proof that satisfies the R2-M1 binding) and ci-gate `MERGE-READY`.
+4. A security-analyst delta record naming the final head.
+5. Round 3 = delta. Re-run `review/PR-46-cr/mut2.mjs` (paths before `--selectProjects`; add the R2-M1 binding mutants: head-branch check dropped, PR-count check dropped, `base_ref_changed` check dropped). Expect L10/L10b to be killed.
