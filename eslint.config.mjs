@@ -22,6 +22,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 import platform from './tools/eslint-rules/index.mjs';
+import { NODE_MODULE_ALLOWED } from './tools/eslint-rules/module-sources.mjs';
 import { resolverOptions } from './tools/lint/resolver.mjs';
 
 const ROOT = import.meta.dirname;
@@ -65,19 +66,21 @@ const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATT
 /**
  * Built-in loaders outside every import control (PR44-SEC-14, TASK-020 part 020-D): from `node:module` only
  * `createRequire` (itself confined by platform/static-module-specifier) and the two read-only lookups `builtinModules`
- * and `isBuiltin` may be imported. `Module` (`Module._load`, `Module.prototype.require`), `register` /
- * `registerHooks` (a resolve hook rewrites every later import) and a namespace or default import (which carries all
- * of them) are refused, as are the `node:process` named exports that load a built-in or native module.
- * Everywhere, tooling included (nothing imports them today).
+ * and `isBuiltin` may be reached (NODE_MODULE_ALLOWED, one list in tools/eslint-rules/module-sources.mjs). A static
+ * import is bounded here by no-restricted-imports, everywhere, tooling included (nothing imports them today): `Module`
+ * (`Module._load`, `Module.prototype.require`), `register` / `registerHooks` (a resolve hook rewrites every later
+ * import) and a namespace or default import (which carries all of them) are refused, as are the `node:process` named
+ * exports that load a built-in or native module. Every other `node:module` value (`await import('node:module')`, its
+ * inline `.then` parameter, a namespace or default import, `require('module')`, `process.getBuiltinModule('module')`)
+ * is bounded by platform/static-module-specifier with the same list in application and package code (PR54-SEC-03).
  */
-const NODE_MODULE_ALLOWED = ['createRequire', 'builtinModules', 'isBuiltin'];
 const NODE_MODULE_MESSAGE =
   "only createRequire (createRequire(<url>).resolve('<literal>')), builtinModules and isBuiltin come from node:module: Module, register and the module object load modules that the import controls do not see (PR44-SEC-14).";
 const PROCESS_LOADER_NAMES = ['getBuiltinModule', 'binding', '_linkedBinding', 'dlopen'];
 const PROCESS_LOADER_MESSAGE =
   'process.getBuiltinModule / binding / dlopen load built-in or native modules that the import controls (node-path-only, T-83, outbound-http-via-client) do not see: use a static import (PR44-SEC-14).';
 const RESTRICTED_IMPORT_PATHS = [
-  ...['node:module', 'module'].map((name) => ({ name, allowImportNames: NODE_MODULE_ALLOWED, message: NODE_MODULE_MESSAGE })),
+  ...['node:module', 'module'].map((name) => ({ name, allowImportNames: [...NODE_MODULE_ALLOWED], message: NODE_MODULE_MESSAGE })),
   ...['node:process', 'process'].map((name) => ({ name, importNames: PROCESS_LOADER_NAMES, message: PROCESS_LOADER_MESSAGE })),
 ];
 /** `no-restricted-imports` with every repository path and every pattern except `exception`. */
@@ -87,14 +90,17 @@ const restrictedImportsExcept = (/** @type {object} */ exception) =>
     { paths: RESTRICTED_IMPORT_PATHS, patterns: RESTRICTED_IMPORT_PATTERNS.filter((pattern) => pattern !== exception) },
   ]);
 /**
- * `no-restricted-properties` (PR44-SEC-14): the `process` members that load built-in or native modules. getBuiltinModule
- * and dlopen are matched on any object (`globalThis.process.getBuiltinModule`, an alias of `process`, a destructuring).
+ * `no-restricted-properties` (PR44-SEC-14): the `process` members that load built-in or native modules, each matched on
+ * any object under a static name (`globalThis.process.binding`, an alias of `process`, a destructuring; PR54-SEC-03:
+ * no application or package code has a `.binding` / `._linkedBinding` member). The respellings this rule cannot see
+ * (`process[k]`, `Reflect.get(process, k)`, `Object.getOwnPropertyDescriptor(process, k)`, `const p = process`) are
+ * platform/static-module-specifier `processMember` in application and package code.
  */
 const RESTRICTED_PROPERTIES = [
   { property: 'getBuiltinModule', message: PROCESS_LOADER_MESSAGE },
   { property: 'dlopen', message: PROCESS_LOADER_MESSAGE },
-  { object: 'process', property: 'binding', message: PROCESS_LOADER_MESSAGE },
-  { object: 'process', property: '_linkedBinding', message: PROCESS_LOADER_MESSAGE },
+  { property: 'binding', message: PROCESS_LOADER_MESSAGE },
+  { property: '_linkedBinding', message: PROCESS_LOADER_MESSAGE },
 ];
 /**
  * Files that may import Supertest directly. The helper folder, plus exact files only (a new file beside them does not
@@ -466,13 +472,16 @@ const BOUNDARIES_POLICIES = [
   //     workspace specifier. Residual (D-ARCH-114 (2)): a load that is not a static import is not classified here.
   //     PR44-SEC-01 closes it in apps/*/src and packages/*/src: platform/static-module-specifier refuses a computed
   //     specifier, every createRequire other than createRequire(u).resolve('x') (under any static key, a template-literal
-  //     key included, PR44-SEC-10), and every computed key on a node:module value that is not a static string (`m[k]`,
-  //     `Reflect.get(await import('node:module'), k)`), so every load left is an import or an import() with a literal
-  //     specifier; platform/prisma-client-construction reports a value or whole-module load of the client in every form
-  //     (import(), a no-substitution template literal included, `import x = require()` and every require form, a
-  //     variable holding createRequire included), apps/worker/src/platform/db included. no-restricted-imports and
-  //     no-restricted-properties refuse Module, register and process.getBuiltinModule (PR44-SEC-14). The CODEOWNERS
-  //     line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
+  //     key included, PR44-SEC-10), and every key on a node:module value outside NODE_MODULE_ALLOWED or not a static
+  //     string (`m.Module`, `m.register`, `m.default`, `m[k]`, `Reflect.get(await import('node:module'), k)`,
+  //     PR54-SEC-03), so every load left is an import or an import() with a literal specifier;
+  //     platform/prisma-client-construction reports a value or whole-module load of the client in every form (import(),
+  //     a no-substitution template literal included, `import x = require()` and every require form, a variable holding
+  //     createRequire included), apps/worker/src/platform/db included. no-restricted-imports bounds a static import of
+  //     node:module by the same NODE_MODULE_ALLOWED; no-restricted-properties refuses process.getBuiltinModule, binding,
+  //     _linkedBinding and dlopen under a static name, and static-module-specifier (`processMember`) the computed,
+  //     Reflect / Object and aliased forms of process (PR44-SEC-14, PR54-SEC-03). The CODEOWNERS line for
+  //     apps/worker/src/platform/db/ (D-TASK020-43) remains.
   {
     disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
     message: PRISMA_GENERATED_VALUE_MESSAGE,
@@ -1000,6 +1009,14 @@ export default defineConfig([
     rules: { 'platform/db-raw-sql': ['error', { allow: ['read-only-transaction'] }] },
   },
   {
+    // Code review R1-n3 / PR54-SEC-04 (PR #54): the PR44-SEC-05 statement check (`rawStatement`) in package sources
+    // too, alone (`only: ['statement']`); the planned Prisma files keep the whole rule from the block above.
+    files: [`packages/*/src/**/*.${LINTED}`],
+    ignores: [...TEST_FILES, ...PLANNED_PRISMA_FILES],
+    plugins: { platform },
+    rules: { 'platform/db-raw-sql': ['error', { only: ['statement'] }] },
+  },
+  {
     // SYSTEM-class delegates are reached only through systemDelegates(tx), per model only by the module whose
     // table-class manifest declares the table (PR19-SEC-01, D-ARCH-080). The accessor's home (system-db.ts), the
     // handle that guards it (tenant-db.ts) and tests are outside the rule; every other file in apps and packages is in,
@@ -1012,9 +1029,10 @@ export default defineConfig([
   {
     // PR32-SEC-07 (a): every import(), require(), module.require() and createRequire(...)() in application and package
     // code names its module with a literal, so no load escapes the import controls above. PR44-SEC-01: createRequire
-    // itself is legal only as createRequire(<url>).resolve('<literal>') (messageId `loader`). PR44-SEC-10: a computed
-    // key on a node:module value that is not a static string, and any use of import('node:module') other than a static
-    // member read, is `loader` too.
+    // itself is legal only as createRequire(<url>).resolve('<literal>') (messageId `loader`). PR44-SEC-10 / PR54-SEC-03:
+    // a key on any node:module value outside NODE_MODULE_ALLOWED (or not a static string), a rest element of it, and any
+    // use of import('node:module') other than an allowed member read, is `loader` too. PR54-SEC-03 (`processMember`):
+    // `process[k]`, process passed to a Reflect / Object method, and process aliased (`const p = process`).
     files: [`apps/*/src/**/*.${LINTED}`, `packages/*/src/**/*.${LINTED}`],
     ignores: TEST_FILES,
     plugins: { platform },

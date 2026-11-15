@@ -16,27 +16,46 @@
  * A messageId of this rule rather than a rule of its own: same hole (a load the import controls cannot see), same
  * scope, and `isRequireCall` / `isCreateRequire` already live beside it.
  *
- * The `node:module` value fails closed (PR44-SEC-10, D-TASK020-59), also `loader`. Wherever the whole module is in
- * hand (a namespace or default import of `node:module` / `module`, `(await) import('node:module')`,
- * `process.getBuiltinModule('module')`, `require('module')`, directly or through the one `const` it initialises), a
- * computed key that is not a static string (`m[k]`, `m['create' + 'Require']`, `const { [k]: v } = m`) is reported,
- * since the member it reaches is unknown. The dynamic import (also the parameter of an inline `.then` callback) is
- * stricter: only a member read under a static key (`m.x`, `m['x']`, `` m[`x`] ``), a destructuring with static keys,
- * the one `const` and a discarded expression are legal; every other use (passed, as to `Reflect.get(m, k)`, returned,
- * aliased into a second variable, stored, a rest element, a non-inline `.then` callback) is reported. The other three
- * sources are refused outright by configuration (no-restricted-imports allows only `createRequire`, `builtinModules`
- * and `isBuiltin` from `node:module`; no-restricted-properties refuses `process.getBuiltinModule`; the
- * no-require-imports rule refuses `require`), so the rule keeps to computed keys there.
+ * The `node:module` value fails closed (PR44-SEC-10, D-TASK020-59, PR54-SEC-03), also `loader`. Wherever the whole
+ * module is in hand (a namespace or default import of `node:module` / `module`, `(await) import('node:module')`, the
+ * parameter of an inline `.then` callback on it, `process.getBuiltinModule('module')`, `require('module')`, directly or
+ * through the one `const` it initialises), it is bounded by the configuration's own allow-list, `NODE_MODULE_ALLOWED`
+ * (module-sources.mjs, also the `allowImportNames` of no-restricted-imports): a member read or a destructuring key
+ * other than `createRequire`, `builtinModules` or `isBuiltin` (`m.Module`, `m.register`, `m.registerHooks`, `m._load`,
+ * `const { default: M } = m`, the whole module again), a key that is not a static string (`m[k]`,
+ * `m['create' + 'Require']`, `const { [k]: v } = m`) and a rest element (`const { ...rest } = m`, it carries the
+ * other members) are reported in every source. The dynamic import is stricter still: only an allowed member read, a
+ * destructuring with allowed keys, the one `const` and a discarded expression are legal; every other use (passed, as
+ * to `Reflect.get(m, k)`, returned, aliased into a second variable, stored, a non-inline `.then` callback) is reported.
+ * A static import is bounded by no-restricted-imports with the same list; no-restricted-properties refuses
+ * `process.getBuiltinModule` and the no-require-imports rule refuses `require`, so the other non-member uses of those
+ * two sources are left to them.
+ *
+ * `process` respellings (PR44-SEC-14, PR54-SEC-03, messageId `processMember`): no-restricted-properties matches the
+ * loader members of `process` (`getBuiltinModule`, `binding`, `_linkedBinding`, `dlopen`) only under a static name.
+ * Matched by name (`process`, or `globalThis.process` / `global.process` under any static key, shadowing ignored: fail
+ * closed), the rule reports a computed member of it whose key is not a static string (`process[name]`,
+ * `process['getBuiltin' + 'Module']`), `process` passed as an argument to any `Reflect.*` or `Object.*` call
+ * (`Reflect.get(process, k)`, `Object.getOwnPropertyDescriptor(process, k)`), and `process` held anywhere but a
+ * destructuring with static keys: an identifier declarator or assignment (`const p = process`, `p = process`), a
+ * default value (`(p = process) => p`), a rest element or a computed key in the destructuring. `const { env } = process`
+ * stays legal.
  *
  * A rule of its own rather than a branch of `system-model-owner`: the finding is not about SYSTEM models, the same
  * hole defeats every import control, and its scope (all non-test application and package code, the database platform
  * included) differs from that rule's exemptions. Tests and tooling are outside it (eslint.config.mjs).
  *
- * Residuals: a loader the syntax does not name (`Module._load`, `process.mainModule`; `Module`, `register` and the
- * namespace import itself are refused by no-restricted-imports, `process.getBuiltinModule` by no-restricted-properties);
- * `eval` / `new Function` are no-eval / no-implied-eval.
+ * Residuals (routed to TASK-113; lexical, per file, no type information): `process` handed to a user function
+ * (`f(process)`), reached through a container (`[process][0]`, `{ ...process }`, `{ p: process }.p`, a spread argument
+ * `Reflect.get(...[process, k])`), through a computed key or an alias of the global object (`globalThis[k]`,
+ * `const g = globalThis; g.process[k]`), through `process.mainModule`, or returned / yielded (`() => process`); the
+ * `node:module` value of `require('module')` or `process.getBuiltinModule('module')` passed, returned or aliased into
+ * a second variable (refused at the source by no-require-imports / no-restricted-properties); a loader reached from an
+ * allowed member (none exists in Node 24); and the `eval` class (`eval`, `new Function`, string timers), which is
+ * no-eval / no-implied-eval.
  */
 import {
+  NODE_MODULE_ALLOWED,
   isCreateRequire,
   isCreateRequireKey,
   isNodeModule,
@@ -49,6 +68,58 @@ import {
 const TS_WRAPPERS = new Set(['TSAsExpression', 'TSSatisfiesExpression', 'TSNonNullExpression', 'TSTypeAssertion']);
 /** The same, plus `await` (awaiting a module value yields the module value). */
 const VALUE_WRAPPERS = new Set([...TS_WRAPPERS, 'AwaitExpression']);
+/** PR54-SEC-03: the `node:module` members any module value may give (the no-restricted-imports allow-list). */
+const MODULE_ALLOWED = new Set(NODE_MODULE_ALLOWED);
+/** The global objects `process` is also reachable on (`globalThis.process`, `global.process`). */
+const GLOBAL_OBJECTS = new Set(['globalThis', 'global']);
+/** PR54-SEC-03: the globals whose static methods read or copy the members of an object argument. */
+const REFLECTORS = new Set(['Reflect', 'Object']);
+
+/**
+ * @param {import('estree').Node} node
+ * @returns {import('estree').Node} `node` with the TypeScript wrappers around its expression removed.
+ */
+const unwrapTs = (node) => {
+  let current = node;
+  while (TS_WRAPPERS.has(current.type))
+    current = /** @type {{ expression: import('estree').Node }} */ (/** @type {unknown} */ (current)).expression;
+  return current;
+};
+
+/**
+ * @param {import('estree').MemberExpression} member
+ * @returns {string | undefined} The key a member read names, when it is static (`m.x`, `m['x']`, `` m[`x`] ``).
+ */
+const memberKey = (member) => {
+  if (member.computed) return staticSpecifier(member.property);
+  return member.property.type === 'Identifier' ? member.property.name : undefined;
+};
+
+/**
+ * @param {import('estree').Property} property A destructuring property.
+ * @returns {string | undefined} The key it takes, when it is static (`{ x }`, `{ 'x': v }`, `` { [`x`]: v } ``).
+ */
+const patternKey = (property) => {
+  if (!property.computed && property.key.type === 'Identifier') return property.key.name;
+  return staticSpecifier(property.key);
+};
+
+/**
+ * @param {import('estree').Node} node
+ * @returns {string | undefined} The global `node` names: an identifier, or a static member of `globalThis` / `global`.
+ */
+const globalName = (node) => {
+  const value = unwrapTs(node);
+  if (value.type === 'Identifier') return value.name;
+  if (value.type !== 'MemberExpression' || value.object.type !== 'Identifier' || !GLOBAL_OBJECTS.has(value.object.name)) return undefined;
+  return memberKey(value);
+};
+
+/**
+ * @param {import('estree').Node | null | undefined} node
+ * @returns {boolean} `node` is `process`, `globalThis.process` or `global.process` (any static key form).
+ */
+const isProcess = (node) => node !== null && node !== undefined && globalName(node) === 'process';
 
 /**
  * @param {import('estree').Node} callee
@@ -97,7 +168,9 @@ export default {
       computed:
         "'{{call}}' loads a module through a computed specifier: name the module with a string literal so the import controls (boundaries, no-restricted-imports, system-model-owner) can see it (PR32-SEC-07).",
       loader:
-        "'{{call}}' uses createRequire other than as createRequire(<url>).resolve('<literal>'): a require function loads modules that the import controls (boundaries, prisma-client-construction, audit-writer-allowlist) do not all see; use a static import or a literal import() (PR44-SEC-01).",
+        "'{{call}}' uses createRequire other than as createRequire(<url>).resolve('<literal>'), or node:module beyond createRequire, builtinModules and isBuiltin: a require function, Module._load and register load modules that the import controls (boundaries, prisma-client-construction, audit-writer-allowlist) do not all see; use a static import or a literal import() (PR44-SEC-01, PR44-SEC-10, PR54-SEC-03).",
+      processMember:
+        "'{{call}}' reaches the members of process other than by a static name or a destructuring with static keys: process.getBuiltinModule / binding / dlopen load modules that the import controls do not see, and no-restricted-properties matches only static names (PR44-SEC-14, PR54-SEC-03).",
     },
   },
   create(context) {
@@ -139,13 +212,15 @@ export default {
     };
 
     /**
+     * PR54-SEC-03: every key outside the allow-list, every key that is not a static string and a rest element (it
+     * carries the other members) is reported. `createRequire` is allowed here; the `ObjectPattern > Property` visitor
+     * confines it.
      * @param {import('estree').ObjectPattern} pattern Destructured from the `node:module` value.
-     * @param {boolean} strict whether a rest element (the module's members, keys unknown) is reported too
      */
-    const checkPattern = (pattern, strict) => {
+    const checkPattern = (pattern) => {
       for (const property of pattern.properties) {
-        const unbounded = property.type === 'RestElement' ? strict : property.computed && staticSpecifier(property.key) === undefined;
-        if (unbounded) reportValue(property);
+        const key = property.type === 'RestElement' ? undefined : patternKey(property);
+        if (key === undefined || !MODULE_ALLOWED.has(key)) reportValue(property);
       }
     };
 
@@ -162,10 +237,11 @@ export default {
     };
 
     /**
-     * PR44-SEC-10 (fail closed): `node` evaluates to the whole `node:module` value. A computed key that is not a static
-     * string (member or destructuring) is always reported; one `const` holding the value (when `aliasable`) is followed.
-     * When `strict` (the dynamic import, D-TASK020-59), every other use is reported too: legal are only a member read
-     * under a static key, a destructuring with static keys, the one `const`, and a discarded expression.
+     * PR44-SEC-10 / PR54-SEC-03 (fail closed): `node` evaluates to the whole `node:module` value. A member read or a
+     * destructuring key outside `NODE_MODULE_ALLOWED` (or not a static string) is always reported; one `const` holding
+     * the value (when `aliasable`) is followed. When `strict` (the dynamic import, D-TASK020-59), every other use is
+     * reported too: legal are only an allowed member read, a destructuring with allowed keys, the one `const`, and a
+     * discarded expression.
      * @param {import('estree').Node} node
      * @param {boolean} aliasable
      * @param {boolean} strict
@@ -174,12 +250,13 @@ export default {
       const value = outermost(node, VALUE_WRAPPERS);
       const { parent } = value;
       if (parent?.type === 'MemberExpression' && parent.object === value) {
-        if (parent.computed && staticSpecifier(parent.property) === undefined) reportValue(parent);
+        const key = memberKey(parent);
+        if (key === undefined || !MODULE_ALLOWED.has(key)) reportValue(parent);
         return;
       }
       if (parent?.type === 'VariableDeclarator' && parent.init === value) {
         if (parent.id.type === 'ObjectPattern') {
-          checkPattern(parent.id, strict);
+          checkPattern(parent.id);
           return;
         }
         const declaration = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (parent).parent;
@@ -217,7 +294,7 @@ export default {
         }
         const [param] = callback.params;
         if (param === undefined) return;
-        if (param.type === 'ObjectPattern') checkPattern(param, true);
+        if (param.type === 'ObjectPattern') checkPattern(param);
         else if (param.type !== 'Identifier') reportValue(param);
         else for (const variable of sourceCode.getDeclaredVariables(callback)) if (variable.name === param.name) checkReads(variable, true);
         return;
@@ -235,6 +312,30 @@ export default {
       if (passes) context.report({ node, messageId: 'loader', data: { call: excerpt(node) } });
     };
 
+    /** @param {import('estree').Node} node A use of `process` that reaches its members unseen (PR54-SEC-03). */
+    const reportProcess = (node) => context.report({ node, messageId: 'processMember', data: { call: excerpt(node) } });
+
+    /**
+     * PR54-SEC-03: `process` is stored into `target`. Legal only as an object pattern whose keys are all static (no rest
+     * element): `const { env } = process`.
+     * @param {import('estree').Node} target a declarator id, an assignment target or a parameter pattern
+     * @param {import('estree').Node} node the declarator or assignment, reported when `target` holds `process` whole
+     */
+    const checkProcessTarget = (target, node) => {
+      if (target.type !== 'ObjectPattern') {
+        reportProcess(node);
+        return;
+      }
+      for (const property of target.properties) {
+        if (property.type === 'RestElement' || patternKey(property) === undefined) reportProcess(property);
+      }
+    };
+
+    /** @param {import('estree').AssignmentExpression | import('estree').AssignmentPattern} node `x = process`, `(x = process) => x`. */
+    const checkProcessAssignment = (node) => {
+      if (isProcess(node.right)) checkProcessTarget(node.left, node);
+    };
+
     return {
       ImportExpression(node) {
         check(node, node.source);
@@ -245,11 +346,23 @@ export default {
         if (isRequire) check(node, node.arguments[0]);
         if (isBuiltinNodeModule(node) || (isRequire && isNodeModule(staticSpecifier(node.arguments[0]))))
           checkModuleValue(node, true, false);
+        // PR54-SEC-03: `Reflect.get(process, k)`, `Object.getOwnPropertyDescriptor(process, k)`, any Reflect / Object method.
+        const { callee } = node;
+        if (callee.type === 'MemberExpression' && REFLECTORS.has(globalName(callee.object) ?? '')) {
+          for (const argument of node.arguments) if (argument.type !== 'SpreadElement' && isProcess(argument)) reportProcess(argument);
+        }
       },
-      // `<x>.createRequire` / `<x>['createRequire']` / `` <x>[`createRequire`] ``.
+      // `<x>.createRequire` / `<x>['createRequire']` / `` <x>[`createRequire`] ``; PR54-SEC-03: `process[k]`.
       MemberExpression(node) {
         if (isCreateRequire(node, sourceCode)) confine(node);
+        if (node.computed && staticSpecifier(node.property) === undefined && isProcess(node.object)) reportProcess(node);
       },
+      // PR54-SEC-03: `const p = process`, `const { ...rest } = process`, `const { [k]: v } = process`.
+      VariableDeclarator(node) {
+        if (isProcess(node.init)) checkProcessTarget(node.id, node);
+      },
+      AssignmentExpression: checkProcessAssignment,
+      AssignmentPattern: checkProcessAssignment,
       // `const { createRequire: mk } = <x>` (any static key form): the function itself is taken out.
       'ObjectPattern > Property'(/** @type {import('estree').Property} */ node) {
         if (isCreateRequireKey(node.key, node.computed)) context.report({ node, messageId: 'loader', data: { call: excerpt(node) } });

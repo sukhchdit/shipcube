@@ -394,6 +394,12 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     refused(() => db.$queryRaw`SELECT ${1}; rollback`, '$queryRaw with a transaction-control statement (ROLLBACK)');
     refused(() => db.$executeRaw`SET search_path TO elsewhere`, '$executeRaw with a session statement (SET)');
     refused(() => db.$queryRaw`RESET ALL`, '$queryRaw with a session statement (RESET)');
+    // Code review R1-n4 (PR #54): the TenantDb guard has no read-only allowance (only withTenantTx sends it, D-TASK020-80).
+    refused(() => db.$executeRaw`SET TRANSACTION READ ONLY`, '$executeRaw with a session statement (SET)');
+    // PR54-SEC-01 / -02 (a): a CR-ended comment, a held cursor and a session advisory lock.
+    refused(() => db.$executeRaw`SELECT 1 -- x\r; COMMIT`, '$executeRaw with a transaction-control statement (COMMIT)');
+    refused(() => db.$executeRaw`DECLARE c CURSOR WITH HOLD FOR SELECT ${1}`, '$executeRaw with a session statement (DECLARE)');
+    refused(() => db.$queryRaw`SELECT pg_advisory_lock(${1})`, '$queryRaw with a session statement (a session advisory lock)');
     refused(() => db.$queryRaw`DO $$ BEGIN NULL; END $$`, '$queryRaw with a anonymous-block statement (DO)');
     refused(
       () => db.$queryRaw`UPDATE pg_settings SET setting = ${'x'} WHERE name = ${'y'}`,

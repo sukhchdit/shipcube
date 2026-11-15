@@ -33,11 +33,16 @@
  *    setter in withTenantTx);
  *  - PR44-SEC-05 (TASK-020 part 020-D): a tagged `$queryRaw` / `$executeRaw` template whose statement ends, nests or
  *    prepares the transaction (`COMMIT`, `ROLLBACK`, `END`, `BEGIN`, `SAVEPOINT`, …), changes the pooled session
- *    (`SET` in any form, `RESET`, `DISCARD`, `LISTEN`, `NOTIFY`, `EXECUTE`, …), is an anonymous `DO` block, calls
- *    the setting function other than transaction-local (a literal `true` is_local) or updates `pg_settings`
- *    (D-SEC-PR42-02), or cannot be read (fail closed). Classified by ./raw-sql-lexer.mjs, the twin of the `TenantDb`
+ *    (`SET` in any form, `RESET`, `DISCARD`, `LISTEN`, `NOTIFY`, `EXECUTE`, the cursor statements `DECLARE` /
+ *    `FETCH` / `MOVE` / `CLOSE`, a session advisory lock, PR54-SEC-02 (a)), is an anonymous `DO` block, calls the
+ *    setting function other than transaction-local (a literal `true` is_local and a literal name on the
+ *    transaction-local list), names a string-syntax setting (PR54-SEC-01 (e)) or updates `pg_settings`
+ *    (D-SEC-PR42-02), or cannot be read (fail closed; a character outside ASCII outside a string or comment
+ *    included, PR54-SEC-01 (b)). Classified by ./raw-sql-lexer.mjs, the twin of the `TenantDb`
  *    run-time guard (apps/api/src/platform/db/raw-statement.ts). Option `allow: ['read-only-transaction']` admits
- *    exactly `SET TRANSACTION READ ONLY` (withTenantTx only, eslint.config.mjs).
+ *    exactly `SET TRANSACTION READ ONLY` (withTenantTx only, eslint.config.mjs). Option `only: ['statement']` runs
+ *    this check alone: package sources (packages/*\/src, code review R1-n3 of PR #54), where the rest of the rule
+ *    applies only to the planned Prisma files.
  *    Residual (pinned in tools/lint/raw-sql-lexer.test.ts): a function or procedure whose BODY does any of this
  *    (`SELECT f()`) is invisible here; function bodies are bootstrap/migration DDL, owned by that lane's linter and
  *    review, and application roles cannot create functions.
@@ -154,7 +159,10 @@ export default {
     schema: [
       {
         type: 'object',
-        properties: { allow: { type: 'array', items: { enum: ['read-only-transaction'] }, uniqueItems: true } },
+        properties: {
+          allow: { type: 'array', items: { enum: ['read-only-transaction'] }, uniqueItems: true },
+          only: { type: 'array', items: { enum: ['statement'] }, uniqueItems: true },
+        },
         additionalProperties: false,
       },
     ],
@@ -199,8 +207,9 @@ export default {
   },
   create(context) {
     const { sourceCode } = context;
-    const allow = /** @type {{ allow?: string[] } | undefined} */ (context.options[0])?.allow ?? [];
-    const allowReadOnlyTransaction = allow.includes('read-only-transaction');
+    const options = /** @type {{ allow?: string[]; only?: string[] } | undefined} */ (context.options[0]);
+    const allowReadOnlyTransaction = (options?.allow ?? []).includes('read-only-transaction');
+    const statementOnly = (options?.only ?? []).includes('statement');
     /** One finding per node, whichever path reaches it first. */
     const reported = new Set();
     /** Variables bound (directly or derived) to the Prisma client or one of its helpers. */
@@ -505,6 +514,8 @@ export default {
       if (refusal !== undefined) report(node.quasi, 'rawStatement', { what: RAW_STATEMENT_WHAT[refusal.form], detail: refusal.detail });
     };
 
+    // Code review R1-n3 (PR #54): `only: ['statement']` runs the PR44-SEC-05 statement check alone (packages/*/src).
+    if (statementOnly) return { TaggedTemplateExpression: checkStatement };
     return {
       ...strings,
       TaggedTemplateExpression: checkStatement,

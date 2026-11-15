@@ -17,9 +17,17 @@ interface CorpusCase {
   readonly sql: string;
   readonly verdict: string;
   readonly note?: string;
+  /** When present, the refusal's detail (the same in both twins). */
+  readonly detail?: string;
+}
+interface TemplateCase {
+  readonly strings: readonly string[];
+  readonly verdict: string;
 }
 interface Corpus {
   readonly cases: readonly CorpusCase[];
+  readonly templates: readonly TemplateCase[];
+  readonly linearTime: { readonly open: string; readonly inner: string; readonly close: string; readonly depth: number };
   readonly readOnlyAllowance: readonly CorpusCase[];
 }
 
@@ -40,6 +48,13 @@ describe('[PR44-SEC-05] raw-statement classifier, lint twin (shared corpus)', ()
     expect(verdictOf(sql)).toBe(verdict);
   });
 
+  it.each(corpus.templates.map((entry) => [entry.strings, entry.verdict] as const))(
+    '[PR54-SEC-01] template %j -> %s',
+    (strings, verdict) => {
+      expect(verdictOf(templateText(strings) ?? '')).toBe(verdict);
+    },
+  );
+
   it.each(corpus.readOnlyAllowance.map((entry) => [entry.sql, entry.verdict] as const))(
     'with the withTenantTx read-only allowance: %j -> %s',
     (sql, verdict) => {
@@ -50,6 +65,23 @@ describe('[PR44-SEC-05] raw-statement classifier, lint twin (shared corpus)', ()
   it('names the refused keyword', () => {
     expect(refusedStatement('SELECT 1; rollback')).toEqual({ form: 'transaction-control', detail: 'ROLLBACK' });
     expect(refusedStatement('discard all')).toEqual({ form: 'session', detail: 'DISCARD' });
+  });
+
+  it.each(corpus.cases.flatMap((entry) => (entry.detail === undefined ? [] : [[entry.sql, entry.detail] as const])))(
+    '%j is refused naming %j',
+    (sql, detail) => {
+      expect(refusedStatement(sql)?.detail).toBe(detail);
+    },
+  );
+
+  it('[PR54-SEC-06] classifies deeply nested setter calls in linear time', () => {
+    const { open, inner, close, depth } = corpus.linearTime;
+    const text = `SELECT ${open.repeat(depth)}${inner}${close.repeat(depth)}`;
+    const started = performance.now();
+    // Every level is a transaction-local setter, so every level is checked (the worst case).
+    expect(refusedStatement(text)).toBeUndefined();
+    // Quadratic classification took ~77 s at 32 000 levels (PR54-SEC-06); linear takes well under a second.
+    expect(performance.now() - started).toBeLessThan(10_000);
   });
 });
 
@@ -80,12 +112,22 @@ describe('[PR44-SEC-05] [D-ARCH-124] raw-SQL lexer', () => {
     ]);
   });
 
+  it('[PR54-SEC-01] a line comment ends at CR; a string continued across a newline is one token in its own mode', () => {
+    expect(lexSql('SELECT 1 -- x\rFROM t').tokens.map((token) => token.value)).toEqual(['select', '1', 'from', 't']);
+    expect(lexSql("E'a'\n'\\'b' 'c' 'd'\r\n  -- e\n'f'").tokens).toEqual([
+      { kind: 'string', value: "a\\'b" },
+      { kind: 'string', value: 'c' },
+      { kind: 'string', value: 'df' },
+    ]);
+  });
+
   it('a line comment at the end of the text ends the text', () => {
     expect(lexSql('SELECT 1 -- trailing').tokens.map((token) => token.value)).toEqual(['select', '1']);
   });
 
   it('templateText binds each value as a parameter and refuses a part without a cooked value', () => {
-    expect(templateText(['SELECT ', ' + ', ''])).toBe('SELECT  $1  +  $1 ');
+    expect(templateText(['SELECT ', ' + ', ''])).toBe('SELECT $1 + $2');
+    expect(templateText(['SELECT $q', '$q$'])).toBe('SELECT $q$1$q$');
     expect(templateText(['SELECT ', undefined])).toBeUndefined();
     expect(templateText(['SELECT ', null])).toBeUndefined();
   });

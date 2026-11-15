@@ -529,11 +529,30 @@ describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and h
     const runner = fakeRunner(events);
     // The etag slot (before the tx slot) is held while the client goes away, then released: the tx slot starts with
     // the response already closed, so only the pre-slot `res.closed || res.destroyed` check can see it (P7).
+    // Code review R1-n1 (PR #54): sequenced on events, not delays. The etag slot resolves `closed` when the server
+    // sees the response close; the execute slot resolves `executed` when it has returned, whatever it decided.
+    let closed: Promise<unknown> = Promise.resolve();
+    let finished: () => void = () => undefined;
+    const executed = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+    const recording = recordingSlots(runner, events);
     const slots: PipelineSlots = {
-      ...recordingSlots(runner, events),
-      etag: () => (_req: Request, _res: Response, next: NextFunction) => {
+      ...recording,
+      etag: () => (_req: Request, res: Response, next: NextFunction) => {
+        closed = new Promise((resolve) => res.once('close', resolve));
         entered();
         void held.then(() => next());
+      },
+      execute: (descriptor) => {
+        const inner = recording.execute(descriptor);
+        return async (req: Request, res: Response, next: NextFunction) => {
+          try {
+            await inner(req, res, next);
+          } finally {
+            finished();
+          }
+        };
       },
     };
     const app = createApp({ health: [], modules: [{ name: 't', routes: [route] }], logger: silent, pipeline: slots });
@@ -548,9 +567,9 @@ describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and h
       await inEtag;
       controller.abort();
       await pending;
-      await delay(100); // the server sees the socket close while the etag slot is still held
+      await closed; // the server has seen the close while the etag slot is still held
       release();
-      await delay(200);
+      await executed; // the execute slot ran to its end with the response already closed
       expect(events.filter((event) => event.startsWith('call'))).toEqual([]);
       expect(events).not.toContain('begin:rw');
       expect(events).not.toContain('handler');

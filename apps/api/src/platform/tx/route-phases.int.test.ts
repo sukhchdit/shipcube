@@ -110,6 +110,41 @@ const commitInLoad = fixtureRoute({
     return { status: 200, body: {} };
   },
 });
+/**
+ * PR54-SEC-01 (a) and (c), code review R1-M1 (PR #54): the same COMMIT behind a line comment ended by CR, and behind
+ * an `E'…'` string continued across a newline (it keeps its escapes). Both texts commit on PostgreSQL 18 (the control
+ * case below sends them directly); the guard must read them the same way.
+ */
+const LEXER_FORMS = [
+  { path: '/fixtures/load-commit-cr', id: 5, send: (db: AppDb) => db.$executeRaw`SELECT 1 -- note\r; COMMIT; SELECT 2` },
+  {
+    path: '/fixtures/load-commit-continuation',
+    id: 6,
+    send: (db: AppDb) => db.$executeRaw`SELECT E'a'\n'\\' ; ' ; COMMIT ; SELECT ' -- '`,
+  },
+] as const;
+/** The same texts as LEXER_FORMS, sent without the guard (PostgreSQL 18 control). */
+const LEXER_FORM_TEXTS = ['SELECT 1 -- note\r; COMMIT; SELECT 2', "SELECT E'a'\n'\\' ; ' ; COMMIT ; SELECT ' -- '"] as const;
+const lexerFormRoutes = LEXER_FORMS.map(({ path, id, send }) =>
+  fixtureRoute({
+    ...GUEST,
+    operationId: `probeLoadCommit${String(id)}`,
+    path,
+    load: async ({ db }) => {
+      await send(db as AppDb);
+      await (db as AppDb).$executeRaw`INSERT INTO public.phase_probe (id) VALUES (${id})`;
+      return 'unreachable';
+    },
+    call: () => {
+      ranPhases.push('call');
+      return 'unreachable';
+    },
+    handler: () => {
+      ranPhases.push('handler');
+      return { status: 200, body: {} };
+    },
+  }),
+);
 const accessModes = fixtureRoute({
   ...GUEST,
   operationId: 'probeAccessModes',
@@ -174,7 +209,12 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
     await runtime.startup();
     const app = createApp({
       health: [],
-      modules: [{ name: 'fixtures', routes: [writeInLoad, commitInLoad, accessModes, holdsAcrossCall, holdsBriefly, withCall] }],
+      modules: [
+        {
+          name: 'fixtures',
+          routes: [writeInLoad, commitInLoad, ...lexerFormRoutes, accessModes, holdsAcrossCall, holdsBriefly, withCall],
+        },
+      ],
       tenantTx: runtime.tenantTx,
       logger: log,
     });
@@ -230,6 +270,42 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
     try {
       const { rows } = await admin.query<{ n: number }>('SELECT count(*)::int AS n FROM public.phase_probe WHERE id = 4');
       expect(rows).toEqual([{ n: 0 }]);
+    } finally {
+      await admin.end();
+    }
+  });
+
+  it.each(LEXER_FORMS.map(({ path, id }) => [path, id] as const))(
+    '[PR54-SEC-01] %s: a COMMIT the old lexer missed is refused before the server: no row %i, handler never runs',
+    async (path, id) => {
+      const response = await fetch(`${base}${path}`, { method: 'POST' });
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(response.headers.get('content-type')).toMatch(/^application\/problem\+json/u);
+      expect(ranPhases).toEqual([]);
+      const admin = new pg.Client({ connectionString: container.getConnectionUri() });
+      await admin.connect();
+      try {
+        const { rows } = await admin.query<{ n: number }>('SELECT count(*)::int AS n FROM public.phase_probe WHERE id = $1', [id]);
+        expect(rows).toEqual([{ n: 0 }]);
+      } finally {
+        await admin.end();
+      }
+    },
+  );
+
+  it('[PR54-SEC-01] control: PostgreSQL 18 executes the COMMIT in both texts (a row inserted before it survives ROLLBACK)', async () => {
+    const admin = new pg.Client({ connectionString: container.getConnectionUri() });
+    await admin.connect();
+    try {
+      for (const [index, text] of LEXER_FORM_TEXTS.entries()) {
+        const id = 70 + index;
+        await admin.query('BEGIN');
+        await admin.query('INSERT INTO public.phase_probe (id) VALUES ($1)', [id]);
+        await admin.query(text);
+        await admin.query('ROLLBACK'); // a warning only: the COMMIT in the text already ended the transaction
+        const { rows } = await admin.query<{ n: number }>('SELECT count(*)::int AS n FROM public.phase_probe WHERE id = $1', [id]);
+        expect(rows).toEqual([{ n: 1 }]);
+      }
     } finally {
       await admin.end();
     }

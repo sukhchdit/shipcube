@@ -61,7 +61,9 @@
  *    alias of such a chain declared in any scope the call sees (the same function, an enclosing factory function or
  *    the module: `const q = deps.queue; q.add()`; code review R2-m3 / R2-n3, PR44-SEC-11 (b)), a destructured `names`
  *    key included (`const { queue: q } = deps; q.add()`, code review R1-n8), and a method destructured from such a
- *    chain and called bare (`const { add } = deps.queue; add()`, `const { queue: { add } } = deps; add()`, R2-n3);
+ *    chain and called bare (`const { add } = deps.queue; add()`, `const { queue: { add } } = deps; add()`, R2-n3) or
+ *    kept as a member alias in such a `const` (`const add = deps.queue.add`, `const add = deps.queue.add.bind(deps.queue)`,
+ *    code review R1-n2);
  *  - sleeps and waits: a call of the global `setTimeout` / `setInterval` (bare, `globalThis.` or `global.`; so
  *    `new Promise((r) => setTimeout(r, n))` too), of `setTimeout` / `setInterval` from `node:timers`, `timers`,
  *    `node:timers/promises` or `timers/promises`, and of `scheduler.wait` from the promises modules (any local name,
@@ -76,7 +78,9 @@
  * dynamic dispatch (`obj[name]()`), generated handlers, a phase held in an array literal or an object member
  * (`handler: handlers[0]`, `handler: table.cancel`; type information would be needed, PR44-SEC-04 H08/H09), a `load`
  * hidden in an unreadable spread that an explicit `handler` follows, setter-injected handles (I02) and aliases of a
- * source itself (`const f = fetch`, `fetch.call(...)`, X09/X10) are not followed: R6, the `names` option, the
+ * source itself (`const f = fetch`, `fetch.call(...)`, X09/X10) are not followed; nor is a holder method held other
+ * than in one `const` (a `let`, a second alias `const a = add`, an object member) or invoked through `.call` /
+ * `.apply` (`deps.queue.add.call(deps.queue)`, R1-n2): R6, the `names` option, the
  * NFR-SEC-010 `outbound-http-via-client` rule and the runtime twin of D-ARCH-106 (6) (a low idle-in-transaction
  * timeout in the API lanes) cover them (D-ARCH-106 (6), D-ARCH-111 (3)). A
  * false positive on an in-memory variable named like a port (`const queue = []`) is fixed by renaming it, never by a
@@ -844,13 +848,29 @@ export default {
     }
 
     /**
+     * Code review R1-n2: `deps.queue.add` or `deps.queue.add.bind(deps.queue)`, a member read off a `names` holder
+     * (the member's object ends in a `names` entry), kept as a function value.
+     * @param {import('estree').Node} init an initialiser, wrappers removed
+     * @returns {boolean}
+     */
+    function isHolderMember(init) {
+      let member = init;
+      if (init.type === 'CallExpression' && init.callee.type === 'MemberExpression' && propertyName(init.callee) === 'bind') {
+        member = unwrap(init.callee.object);
+      }
+      return member.type === 'MemberExpression' && endsInName(unwrap(member.object));
+    }
+
+    /**
      * Code review R2-n3: `add` in `const { add } = deps.queue` or `const { queue: { add } } = deps`, a method taken out
-     * of a `names` holder (the initialiser ends in a `names` entry, or an outer key of the pattern is one).
+     * of a `names` holder (the initialiser ends in a `names` entry, or an outer key of the pattern is one). Code review
+     * R1-n2: also a member alias, `const add = deps.queue.add` or `const add = deps.queue.add.bind(deps.queue)`.
      * @param {import('estree').Identifier} callee
      * @returns {boolean}
      */
     function isHolderMethod(callee) {
       return constDefs(callee).some((def) => {
+        if (def.node.id === def.name) return isHolderMember(unwrap(def.node.init));
         /** @type {(import('estree').Node & { parent?: import('estree').Node | null }) | null | undefined} */
         let property = /** @type {import('estree').Node & { parent?: import('estree').Node }} */ (def.name).parent;
         if (property?.type !== 'Property' || property.value !== def.name) return false;

@@ -26,12 +26,18 @@
  *    SYSTEM tables have no RLS and one runtime role, so this is the only control on module raw SQL that reaches them.
  *    The template is read by ./raw-sql-lexer.mjs: every unquoted identifier (lower-cased, so `public.`-qualified and
  *    upper-case spellings count) and every quoted identifier outside string literals and comments; a monthly partition
- *    `<table>_YYYY_MM` (audit_entries_2026_11) counts as its table. `platform/db-raw-sql` already refuses non-literal
- *    SQL and Sql fragments, so the static template text is the whole statement. Reported once per table and template;
+ *    `<table>_YYYY_MM` (audit_entries_2026_11) counts as its table. `platform/db-raw-sql` refuses non-literal SQL,
+ *    and the TenantDb run-time guard refuses every interpolated Sql fragment (a tagged `Prisma.sql` fragment is
+ *    lint-legal, PR54-SEC-04), so the static template text is the whole statement. The text is rendered and read as
+ *    PostgreSQL reads it (./raw-sql-lexer.mjs, PR54-SEC-01). Reported once per table and template;
  *  - `rawUnreadable`: a raw template the lexer cannot read (a Unicode-escape identifier, an unterminated string or
- *    comment, an invalid escape): it could spell any table name, so it fails closed.
- *    Residual: a table name inside a string literal that SQL executes (`query_to_xml('select … from t', …)`) or
- *    concatenates; `platform/db-raw-sql` refuses `DO` blocks, and such functions are a review item.
+ *    comment, a character outside ASCII outside a string or comment, an invalid escape): it could spell any table
+ *    name, so it fails closed.
+ *    Residuals (code review R1-n5, PR54-SEC-02 (b), routed to TASK-073): a table name inside a string literal that
+ *    SQL executes (`query_to_xml('select … from t', …)`) or concatenates, a table NAME in a string cast to
+ *    `regclass` (`table_to_xml('audit_entries'::regclass, …)`, `table_to_xmlschema`), and readers that name no table
+ *    (`database_to_xml`, `schema_to_xml`); `platform/db-raw-sql` refuses `DO` blocks, and such functions are a
+ *    review item.
  * A specifier is a string literal or a no-substitution template literal; `require`, `module.require` and
  * `createRequire(url)(…)` count as loads (PR32-SEC-07 (a)). A computed specifier (`import(where)`) is reported by
  * `platform/static-module-specifier`, which runs on the same files.

@@ -14,6 +14,12 @@
  * strings (`'…'`, `E'…'` and the other prefixes, Unicode-escape strings, dollar quotes), bind parameters and single
  * punctuation characters; comments (nested block comments included) and white space are dropped. A Unicode-escape
  * identifier (it can spell any name in escapes) or an unterminated token makes the text unreadable, which is refused.
+ * It reads the text as PostgreSQL 18's scan.l does wherever a difference would hide a statement (PR54-SEC-01, code
+ * review R1-M1 of PR #54): white space is `[ \t\n\r\f\v]` only; a `--` comment ends at the first LF or CR; a character
+ * outside ASCII outside a string, quoted identifier or comment is unreadable (PostgreSQL would read it as part of an
+ * identifier; application SQL is ASCII, so the guard refuses rather than follow byte and encoding rules); a string
+ * continued across a newline (`'…'<LF>'…'`) stays one literal in the same mode, so `E'…'` keeps its escapes; and the
+ * text is rendered exactly as Prisma's `Sql#text` renders it (`$1`, `$2`, … with no spaces).
  * Name and keyword comparisons use regular-expression literals, so this file carries none of the text that
  * `platform/tenant-context-sql` refuses in string literals.
  * Residual (pinned in the corpus): a function or procedure whose BODY commits or sets; function bodies are
@@ -41,22 +47,37 @@ export interface RawStatementOptions {
   readonly allowReadOnlyTransaction?: boolean;
 }
 
-const WORD_START = /[A-Za-z_\u0080-￿]/u;
-const WORD_PART = /[A-Za-z0-9_$\u0080-￿]/u;
-const SPACE = /\s/u;
+const WORD_START = /[A-Za-z_]/u;
+const WORD_PART = /[A-Za-z0-9_$]/u;
+/** PostgreSQL's `space`; not `\s`, which also matches the Unicode spaces. */
+const SPACE = /[ \t\n\r\f\v]/u;
+const NON_ASCII = /[\u0080-\u{10ffff}]/u;
+/** The end of a `--` comment (`non_newline` is `[^\n\r]`). Global: used with `lastIndex`. */
+const LINE_END = /[\n\r]/gu;
+/** A quote continuation after a closing quote (scan.l `quotecontinue`), unambiguous (linear time). Sticky. */
+const CONTINUATION = /[ \t\f\v]*(?:--[^\n\r]*)?[\n\r](?:[ \t\n\r\f\v]|--[^\n\r]*[\n\r])*'/uy;
 const PARAM = /^\$\d+/u;
-const DOLLAR_TAG = /^\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/u;
+const DOLLAR_TAG = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u;
 const STRING_PREFIX = /^[ebxn]$/u;
 const UNICODE_PREFIX = /^u$/u;
 
 const TRANSACTION_CONTROL = /^(?:begin|start|commit|end|rollback|abort|savepoint|release|prepare)$/u;
-const SESSION = /^(?:set|reset|discard|listen|unlisten|notify|load|execute|deallocate)$/u;
+/** Session first keywords; the cursor statements too (`DECLARE … WITH HOLD` outlives the commit, PR54-SEC-02 (a)). */
+const SESSION = /^(?:set|reset|discard|listen|unlisten|notify|load|execute|deallocate|declare|fetch|move|close)$/u;
 const ANONYMOUS_BLOCK = /^do$/u;
 const SETTER_NAME = /^set_config$/u;
+/** The settings a literal-`true` setter may name: the withTenantTx context keys and three transaction-local timeouts. */
+const LOCAL_SETTING = /^(?:app\.[a-z_]+|statement_timeout|lock_timeout|idle_in_transaction_session_timeout)$/iu;
+/** The settings that change how PostgreSQL reads a string (PR54-SEC-01 (e)); refused wherever they are named. */
+const STRING_SYNTAX_SETTING = /standard_conforming_strings|backslash_quote/iu;
+/** Session advisory locks (held until the backend closes); the `_xact_` forms end with the transaction. */
+const SESSION_LOCK = /^pg_(?:try_)?advisory_(?:lock|unlock)(?:_shared|_all)?$/u;
 const SETTINGS_VIEW = /^pg_settings$/u;
 const UPDATE = /^update$/u;
 const TRUE = /^true$/u;
 const READ_ONLY_TRANSACTION = ['set', 'transaction', 'read', 'only'] as const;
+const NOT_LOCAL = 'the setting function without a literal true is_local';
+const NOT_LISTED = 'the setting function on a setting outside the transaction-local list';
 
 /** Thrown by the lexer only; `reason` names what could not be read (never statement text). */
 class Unreadable extends Error {
@@ -70,7 +91,7 @@ interface Read {
   readonly end: number;
 }
 
-/** A single-quoted string from its opening quote; `backslashEscapes` for `E'…'`. */
+/** A single-quoted string from its opening quote, quote continuations included; `backslashEscapes` for `E'…'`. */
 function readString(text: string, start: number, backslashEscapes: boolean): Read {
   let value = '';
   for (let i = start + 1; i < text.length; i += 1) {
@@ -78,10 +99,13 @@ function readString(text: string, start: number, backslashEscapes: boolean): Rea
     if (backslashEscapes && ch === '\\') {
       value += text.slice(i, i + 2);
       i += 1;
-    } else if (ch === "'") {
-      if (text.charAt(i + 1) !== "'") return { value, end: i + 1 };
+    } else if (ch === "'" && text.charAt(i + 1) === "'") {
       value += "'";
       i += 1;
+    } else if (ch === "'") {
+      CONTINUATION.lastIndex = i + 1;
+      if (!CONTINUATION.test(text)) return { value, end: i + 1 };
+      i = CONTINUATION.lastIndex - 1;
     } else value += ch;
   }
   throw new Unreadable('an unterminated string');
@@ -99,6 +123,13 @@ function readQuoted(text: string, start: number): Read {
     } else value += ch;
   }
   throw new Unreadable('an unterminated quoted identifier');
+}
+
+/** The index after a line comment that opens at `start` (it ends at the first LF or CR, or the end of the text). */
+function skipLineComment(text: string, start: number): number {
+  LINE_END.lastIndex = start;
+  const end = LINE_END.exec(text);
+  return end === null ? text.length : end.index + 1;
 }
 
 /** The index after a (nested) block comment that opens at `start`. */
@@ -157,10 +188,8 @@ function lex(text: string): SqlToken[] {
   while (i < text.length) {
     const ch = text.charAt(i);
     if (SPACE.test(ch)) i += 1;
-    else if (text.startsWith('--', i)) {
-      const end = text.indexOf('\n', i);
-      i = end === -1 ? text.length : end + 1;
-    } else if (text.startsWith('/*', i)) i = skipBlockComment(text, i);
+    else if (text.startsWith('--', i)) i = skipLineComment(text, i);
+    else if (text.startsWith('/*', i)) i = skipBlockComment(text, i);
     else if (ch === "'") {
       const string = readString(text, i, false);
       tokens.push({ kind: 'string', value: string.value });
@@ -169,6 +198,8 @@ function lex(text: string): SqlToken[] {
       const quoted = readQuoted(text, i);
       tokens.push({ kind: 'quoted', value: quoted.value });
       i = quoted.end;
+    } else if (NON_ASCII.test(ch)) {
+      throw new Unreadable('a character outside ASCII outside a string or comment');
     } else {
       const read = ch === '$' ? readDollar(text, i) : WORD_START.test(ch) ? readWord(text, i) : undefined;
       tokens.push(read?.token ?? { kind: 'punct', value: ch });
@@ -191,37 +222,60 @@ const isName = (token: SqlToken | undefined, name: RegExp): boolean =>
   (token?.kind === 'word' || token?.kind === 'quoted') && name.test(token.value);
 const isPunct = (token: SqlToken | undefined, value: string): boolean => token?.kind === 'punct' && token.value === value;
 
-/** The top-level argument token lists of the call whose `(` is at `open`; undefined when there is none or it is unbalanced. */
-function callArguments(tokens: readonly SqlToken[], open: number): SqlToken[][] | undefined {
-  if (!isPunct(tokens[open], '(')) return undefined;
-  const args: SqlToken[][] = [[]];
-  let depth = 1;
-  for (const token of tokens.slice(open + 1)) {
-    if (isPunct(token, '(')) depth += 1;
-    else if (isPunct(token, ')')) {
-      depth -= 1;
-      if (depth === 0) return args;
-    } else if (depth === 1 && isPunct(token, ',')) {
-      args.push([]);
-      continue;
-    }
-    args.at(-1)?.push(token);
-  }
-  return undefined;
+interface Parentheses {
+  /** The index of the matching `)` of each balanced `(`. */
+  readonly close: ReadonlyMap<number, number>;
+  /** The top-level commas of each `(`. */
+  readonly commas: ReadonlyMap<number, readonly number[]>;
 }
 
-/** The setting function unless transaction-local (three arguments, a literal `true` is_local); an UPDATE of pg_settings. */
-function sessionSetter(statement: readonly SqlToken[]): string | undefined {
+/** Every parenthesis pair of a statement in one pass (linear, PR54-SEC-06). */
+function parentheses(statement: readonly SqlToken[]): Parentheses {
+  const close = new Map<number, number>();
+  const commas = new Map<number, number[]>();
+  const open: number[] = [];
   for (const [index, token] of statement.entries()) {
-    if (!isName(token, SETTER_NAME)) continue;
-    const args = callArguments(statement, index + 1);
-    const local = args?.[2];
-    if (args?.length !== 3 || local?.length !== 1 || local[0]?.kind !== 'word' || !TRUE.test(local[0].value)) {
-      return 'the setting function without a literal true is_local';
+    if (isPunct(token, '(')) {
+      open.push(index);
+      commas.set(index, []);
+    } else if (isPunct(token, ')')) {
+      const start = open.pop();
+      if (start !== undefined) close.set(start, index);
+    } else if (isPunct(token, ',') && open.length > 0) commas.get(open.at(-1) ?? -1)?.push(index);
+  }
+  return { close, commas };
+}
+
+/** Why the setter call at `index` is refused: not three arguments, a listed literal name and a literal `true` is_local. */
+function refusedSetter(statement: readonly SqlToken[], index: number, pairs: Parentheses): string | undefined {
+  const open = index + 1;
+  const end = pairs.close.get(open);
+  const commas = pairs.commas.get(open);
+  if (end === undefined || commas?.length !== 2) return NOT_LOCAL;
+  const [first = 0, second = 0] = commas;
+  const local = statement[second + 1];
+  if (second + 2 !== end || local?.kind !== 'word' || !TRUE.test(local.value)) return NOT_LOCAL;
+  const name = statement[open + 1];
+  return first !== open + 2 || name?.kind !== 'string' || !LOCAL_SETTING.test(name.value) ? NOT_LISTED : undefined;
+}
+
+/** A setter or session lock anywhere: see the lint twin's `sessionSetter`; an UPDATE of pg_settings. */
+function sessionSetter(statement: readonly SqlToken[]): RawStatementRefusal | undefined {
+  let pairs: Parentheses | undefined;
+  for (const [index, token] of statement.entries()) {
+    if (isName(token, SESSION_LOCK)) return { form: 'session', detail: 'a session advisory lock' };
+    if (token.kind !== 'punct' && STRING_SYNTAX_SETTING.test(token.value)) {
+      return { form: 'session-setter', detail: 'a string-syntax setting' };
     }
+    if (!isName(token, SETTER_NAME)) continue;
+    pairs ??= parentheses(statement);
+    const refused = refusedSetter(statement, index, pairs);
+    if (refused !== undefined) return { form: 'session-setter', detail: refused };
   }
   const updates = statement.some((token) => token.kind === 'word' && UPDATE.test(token.value));
-  return updates && statement.some((token) => isName(token, SETTINGS_VIEW)) ? 'UPDATE pg_settings' : undefined;
+  return updates && statement.some((token) => isName(token, SETTINGS_VIEW))
+    ? { form: 'session-setter', detail: 'UPDATE pg_settings' }
+    : undefined;
 }
 
 const isReadOnlyTransaction = (statement: readonly SqlToken[]): boolean =>
@@ -237,8 +291,7 @@ function refusedOne(statement: readonly SqlToken[], options: RawStatementOptions
     return { form: 'session', detail: keyword.toUpperCase() };
   }
   if (ANONYMOUS_BLOCK.test(keyword)) return { form: 'anonymous-block', detail: 'DO' };
-  const setter = sessionSetter(statement);
-  return setter === undefined ? undefined : { form: 'session-setter', detail: setter };
+  return sessionSetter(statement);
 }
 
 /** Why a raw statement text is refused (every `;`-separated statement is checked), or undefined when it is allowed. */
@@ -258,12 +311,21 @@ export function refusedRawText(text: string, options: RawStatementOptions = {}):
 }
 
 /**
- * The guard's entry point: the strings of a tagged template, each `${…}` a bind parameter as Prisma sends it. A part
- * that is not a string (an invalid escape in a tagged template has no cooked value) makes the text unreadable.
+ * The text Prisma sends for a tagged template (`Sql#text` of @prisma/client-runtime-utils): the parts joined with
+ * `$1`, `$2`, … and nothing else. Spaces around the parameter would change what the lexer reads: `$q${v}$q$` is the
+ * dollar-quoted string `1` for PostgreSQL, but `$q $1 $q$` opens a dollar quote (PR54-SEC-01 (d)).
+ */
+export function prismaText(strings: readonly string[]): string {
+  return strings.reduce((text, part, index) => (index === 0 ? part : `${text}$${String(index)}${part}`), '');
+}
+
+/**
+ * The guard's entry point: the strings of a tagged template, rendered as Prisma sends them ({@link prismaText}). A
+ * part that is not a string (an invalid escape in a tagged template has no cooked value) makes the text unreadable.
  */
 export function refusedRawStatement(strings: readonly unknown[]): RawStatementRefusal | undefined {
   if (!strings.every((part): part is string => typeof part === 'string')) {
     return { form: 'unreadable', detail: 'a template part with an invalid escape' };
   }
-  return refusedRawText(strings.join(' $1 '));
+  return refusedRawText(prismaText(strings));
 }

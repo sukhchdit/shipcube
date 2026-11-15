@@ -2,10 +2,20 @@
  * Shared visitor for the local ESLint rules that inspect module specifiers: static imports, re-exports,
  * dynamic `import('x')`, `import x = require('x')` (PR44-SEC-11 (a)) and CommonJS-style loads (`require('x')`,
  * `module.require('x')` and every `createRequire` form, R1-m6, a static template key included, PR44-SEC-10).
- * Residual: a loader the syntax does not name (`Module._load`, refused as an import by no-restricted-imports);
- * platform/static-module-specifier confines `createRequire` itself (PR44-SEC-01) and reports every computed key on a
- * `node:module` value that is not a static string (`m[k]`, `m['create' + 'Require']`, `Reflect.get(m, k)`, PR44-SEC-10).
+ * Residual: a loader the syntax does not name (`Module._load`). A static import of it is refused by
+ * no-restricted-imports; platform/static-module-specifier confines `createRequire` itself (PR44-SEC-01) and bounds
+ * every other `node:module` value by {@link NODE_MODULE_ALLOWED} (a key outside it, or not a static string, is
+ * reported: `m.Module`, `m.register`, `m[k]`, `Reflect.get(m, k)`, PR44-SEC-10, PR54-SEC-03).
  */
+
+/**
+ * PR44-SEC-14 / PR54-SEC-03: the only `node:module` members application code may reach, in every form (the static
+ * import through no-restricted-imports in eslint.config.mjs, every other module value through
+ * platform/static-module-specifier). `createRequire` is itself confined to `createRequire(<url>).resolve('<literal>')`;
+ * `builtinModules` and `isBuiltin` are read-only lookups. `Module` (`Module._load`), `register` / `registerHooks` and
+ * `default` (the whole module again) load modules past every import control.
+ */
+export const NODE_MODULE_ALLOWED = Object.freeze(['createRequire', 'builtinModules', 'isBuiltin']);
 
 /**
  * @typedef {object} ModuleReference

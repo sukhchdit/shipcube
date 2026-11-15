@@ -540,6 +540,13 @@ const RULES: readonly Violation[] = [
         'runs inside',
       ],
       [
+        '[PR44-SEC-14] R1-n2 a member alias of a holder method (const add = deps.queue.add, module-level .bind), called bare',
+        'bad-holder-member-alias',
+        2,
+        0,
+        'runs inside',
+      ],
+      [
         '[PR44-SEC-14] import { promises } / { promises as tp } from node:timers / timers, then .setTimeout / .scheduler.wait',
         'bad-timers-promises-member',
         3,
@@ -899,6 +906,21 @@ const TENANT_DB: readonly Violation[] = [
     'platform/db-raw-sql',
     'A raw statement may not change the pooled session (SET)',
   ],
+  // PR54-SEC-01 / PR54-SEC-02 (a), code review R1-M1 / R1-m3 / R1-n3 (PR #54): the lexer reads as PostgreSQL does, the
+  // session forms widened, and the statement check in package sources.
+  [
+    '[PR54-SEC-01] platform/db-raw-sql: a CR-ended comment, a Unicode space before a dollar tag, a continued E string, $q${v}$q$, DECLARE, FETCH, a session advisory lock, a string-syntax setting',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-lexer-forms.ts`,
+    // The Unicode-space template is also unreadable to rawSystemTable (fails closed).
+    [...Array<string>(8).fill('platform/db-raw-sql'), 'platform/system-model-owner'],
+    '',
+  ],
+  [
+    '[PR54-SEC-04] platform/db-raw-sql: COMMIT in a package source (the statement check alone)',
+    'rules/db-raw-sql/packages/shared/src/bad-raw-package-statement.ts',
+    'platform/db-raw-sql',
+    'A raw statement may not end, nest or prepare the transaction (COMMIT)',
+  ],
   // D-ARCH-124 / PR32-SEC-07 (c) (TASK-020 part 020-D): a raw template names a SYSTEM table only from its owner's code.
   [
     '[D-ARCH-124] platform/system-model-owner: a quotes repository names outbox_events (plain, PUBLIC.-qualified upper case, quoted, DELETE)',
@@ -917,6 +939,12 @@ const TENANT_DB: readonly Violation[] = [
     `rules/system-model-owner/${API}/orders/repository/bad-raw-unreadable.ts`,
     ['platform/system-model-owner', 'platform/db-raw-sql', TENANT_CONTEXT],
     'Unicode-escape',
+  ],
+  [
+    '[PR54-SEC-01] platform/system-model-owner: audit_entries behind a CR-ended comment, a continued E string, $q${v}$q$; a Unicode space before a dollar tag (unreadable)',
+    `rules/system-model-owner/${API}/orders/repository/bad-raw-lexer-disguises.ts`,
+    [...Array<string>(4).fill('platform/system-model-owner'), 'platform/db-raw-sql'],
+    '',
   ],
   // PR19-SEC-01 / D-ARCH-080: SYSTEM delegates only in the module whose table-class manifest declares the table.
   [
@@ -1006,6 +1034,19 @@ const TENANT_DB: readonly Violation[] = [
         [],
       ],
       ["process.getBuiltinModule('module')[k]", 'bad-node-module-builtin-computed', 1, ['no-restricted-properties']],
+      // PR54-SEC-03 / code review R1-m1: every node:module value is bounded by NODE_MODULE_ALLOWED.
+      [
+        'PR54-SEC-03 node:module members outside the allow-list (.Module, register, registerHooks, default x2, inline .then, a rest, getBuiltinModule)',
+        'bad-node-module-members',
+        8,
+        ['no-restricted-properties'],
+      ],
+      [
+        "PR54-SEC-03 control: const { createRequire } = await import('node:module') stays one finding",
+        'bad-node-module-destructured-create-require',
+        1,
+        [],
+      ],
     ] as const
   ).map(([title, name, count, config]): Violation => [
     `[PR44-SEC-10] platform/static-module-specifier: ${title}`,
@@ -1039,6 +1080,12 @@ const TENANT_DB: readonly Violation[] = [
     `rules/builtin-loaders/${API}/orders/service/bad-process-loaders.ts`,
     Array<string>(6).fill('no-restricted-properties'),
     'load built-in or native modules',
+  ],
+  [
+    '[PR54-SEC-03] platform/static-module-specifier processMember: process[k], an alias, a default, a rest, Reflect / Object; binding property-only',
+    `rules/builtin-loaders/${API}/orders/service/bad-process-respellings.ts`,
+    [...Array<string>(8).fill('platform/static-module-specifier'), ...Array<string>(3).fill('no-restricted-properties')],
+    '',
   ],
   [
     '[PR44-SEC-14] no-restricted-properties: process.getBuiltinModule in packages/*/src',
