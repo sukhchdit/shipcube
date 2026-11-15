@@ -13,7 +13,7 @@ import { defaultPipelineSlots } from '../routing/pipeline.js';
 import { ANONYMOUS, readonlySet, setPrincipal } from '../routing/route-state.js';
 import type { RouteSlot } from '../routing/slot.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
-import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
+import { closeLoopbackServer, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import { authorise } from './authorise.js';
 
 // Each case composes createApp and makes a loopback request: the shared loopback budget (see tests/loopback.ts).
@@ -37,7 +37,7 @@ async function call(app: Express, path: string): Promise<Answer> {
     const code = text === '' ? undefined : (JSON.parse(text) as { code?: unknown }).code;
     return { status: response.status, code, cacheControl: response.headers.get('cache-control') };
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
 }
 
@@ -189,7 +189,7 @@ describe('[D-ARCH-110] permission gate: a signatureOnly permission is held by th
       const text = await response.text();
       return { status: response.status, code: text === '' ? undefined : (JSON.parse(text) as { code?: unknown }).code };
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeLoopbackServer(server);
     }
   };
 

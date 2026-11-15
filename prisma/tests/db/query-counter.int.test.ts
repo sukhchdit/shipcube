@@ -27,6 +27,12 @@ const context: TenantContext = {
 };
 
 const counter = createQueryCounter();
+/**
+ * Connection, statement, lock and idle budgets of this suite (W0-FLAKE, FU-PR34-1). The 5 s / 2 s values timed out when the
+ * host was loaded by parallel suites; no case here asserts a timeout, so a wide budget costs nothing but a hung query.
+ */
+const HOST_LOAD_DB_TIMEOUT_MS = 30_000;
+
 let db: PlatformPostgres;
 let client: PrismaClient;
 let counted: PrismaClient;
@@ -36,11 +42,16 @@ beforeAll(async () => {
   db = await PlatformPostgres.start();
   const database = await db.clone(await db.template({ migrated: true }));
   const { PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
-  client = createDatabaseClient(PrismaCtor, { connectionString: db.migratorUrl(database), poolMax: 3, applicationName: 'qc-it' });
+  client = createDatabaseClient(PrismaCtor, { connectionString: db.migratorUrl(database), poolMax: 3, connectionTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS, applicationName: 'qc-it' });
   counted = withQueryCounter(client, counter);
   runner = createWithTenantTx(
     counted,
-    { statementTimeoutMs: 5_000, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 15_000, poolConnectionTimeoutMs: 5_000 },
+    {
+      statementTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS,
+      lockTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS,
+      idleInTransactionTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS,
+      poolConnectionTimeoutMs: HOST_LOAD_DB_TIMEOUT_MS,
+    },
     {
       onSecurityEvent: () => undefined,
       countSessionContextLeak: () => undefined,

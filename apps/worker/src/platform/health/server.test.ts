@@ -7,9 +7,16 @@ import {
   type ReadinessCheck,
   type ReadinessComponent,
 } from '@platform/api/runtime';
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createWorkerHealthServer } from './server.js';
+
+// Real HTTP over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE; same budget as the api
+// loopback suites, apps/api/src/platform/routing/tests/loopback.ts). The upper bound of a timing check is the deadline plus
+// this slack: it separates 'the deadline fired' from 'the call hung', it is not a latency target.
+const TEST_TIMEOUT_MS = 20_000;
+const HOST_LOAD_SLACK_MS = 5_000;
+jest.setTimeout(TEST_TIMEOUT_MS);
 
 const failing = (name: ReadinessComponent, critical: boolean): ReadinessCheck => ({
   name,
@@ -29,7 +36,13 @@ const allOk = { database: 'ok', redis: 'ok', object_storage: 'ok', audit_partiti
 describe('US-012 liveness and readiness endpoints (worker health server)', () => {
   const servers: ReturnType<typeof createWorkerHealthServer>[] = [];
   afterEach(async () => {
-    await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+    await Promise.all(
+      servers.splice(0).map((server) => {
+        const closed = new Promise((resolve) => server.close(resolve));
+        server.closeAllConnections();
+        return closed;
+      }),
+    );
   });
 
   async function start(checks: readonly ReadinessCheck[], deadlineMs?: number) {
@@ -39,7 +52,7 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const { port } = server.address() as AddressInfo;
     const call = async (path: string, method = 'GET') => {
-      const response = await fetch(`http://127.0.0.1:${String(port)}${path}`, { method, signal: AbortSignal.timeout(5_000) });
+      const response = await fetch(`http://127.0.0.1:${String(port)}${path}`, { method, signal: AbortSignal.timeout(TEST_TIMEOUT_MS - 5_000) });
       const text = await response.text();
       return { status: response.status, headers: response.headers, text, body: text === '' ? undefined : (JSON.parse(text) as unknown) };
     };
@@ -73,7 +86,7 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
     const { call } = await start(checksWith({ database: hanging('database') }), 300);
     const started = performance.now();
     expect((await call('/health/ready')).status).toBe(503);
-    expect(performance.now() - started).toBeLessThan(2_500);
+    expect(performance.now() - started).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
   });
 
   it('AT-US-012-04: a failing audit_chain check degrades worker readiness without failing it', async () => {

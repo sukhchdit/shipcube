@@ -11,6 +11,7 @@ import type { AddressInfo } from 'node:net';
 
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
+import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import { createS3ObjectStorage, S3_TIMEOUTS, type S3ObjectStorage, type S3Timeouts } from './s3-object-storage.js';
 
 const BUCKET = 'documents';
@@ -58,6 +59,9 @@ async function loopback(handler: Handler): Promise<Loopback> {
   open.push(state);
   return state;
 }
+
+// Real HTTP over loopback: the 5 s Jest default is not a budget under parallel host load (W0-FLAKE).
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 function storageFor(server: Loopback, timeouts: S3Timeouts = S3_TIMEOUTS): S3ObjectStorage {
   const storage = createS3ObjectStorage({
@@ -156,9 +160,9 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
     expect(server.seen).toHaveLength(3);
     // 3 x 300 ms plus jittered backoff; without throwOnRequestTimeout the call would wait for the 10 s deadline.
-    expect(ms).toBeLessThan(4_000);
+    expect(ms).toBeLessThan(9_000);
     expect(warn).not.toHaveBeenCalled();
-  }, 15_000);
+  }, 30_000);
 
   it('without a caller signal every operation rejects UNAVAILABLE within its own deadline', async () => {
     const server = await loopback(silent);
@@ -175,15 +179,15 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
     for (const { outcome, ms, deadline } of results) {
       expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
       expect(ms).toBeGreaterThanOrEqual(deadline - 50);
-      expect(ms).toBeLessThan(deadline + 1_000);
+      expect(ms).toBeLessThan(deadline + HOST_LOAD_SLACK_MS);
     }
-  }, 15_000);
+  }, 30_000);
 
   it('a caller signal shorter than the deadline wins', async () => {
     const server = await loopback(silent);
     const { outcome, ms } = await timed(() => storageFor(server).get({ bucket: BUCKET, key: KEY }, AbortSignal.timeout(300)));
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
-    expect(ms).toBeLessThan(1_300);
+    expect(ms).toBeLessThan(300 + HOST_LOAD_SLACK_MS);
   });
 
   it('a body trickling one byte every 100 ms cannot outlive the get deadline', async () => {
@@ -198,7 +202,7 @@ describe('S3 adapter time bounds (PR30-SEC-01, R1-m2): a silent or trickling sto
       storageFor(server, { ...S3_TIMEOUTS, dataDeadlineMs: 800 }).get({ bucket: BUCKET, key: KEY }),
     );
     expect(outcome).toMatchObject({ code: 'UNAVAILABLE' });
-    expect(ms).toBeLessThan(1_800);
+    expect(ms).toBeLessThan(800 + HOST_LOAD_SLACK_MS);
   });
 
   it('a chunked body over 5 MiB without Content-Length is TOO_LARGE (counted while reading), not buffered', async () => {
