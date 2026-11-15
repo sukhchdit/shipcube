@@ -249,15 +249,21 @@ describe('audit DDL (rule 12) and the definer search path (rule 13)', () => {
       expect(lintBootstrap(scratch, { reviewers: [], today: '2026-11-13' })).toEqual([]);
     });
 
-    it('the approved audit files (10-audit.sql, 90-audit-ddl-guard.sql) are the only rule-12 findings without a listed reviewer, and none with it (TASK-021)', () => {
-      expect(lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-13' })).toEqual([]);
-      const unreviewed = lintBootstrap(bootstrapDir, { reviewers: [], today: '2026-11-13' }, 'bootstrap');
+    it('the approved audit files (10-audit.sql, 90-audit-ddl-guard.sql, 91-audit-actions-v2.sql) are the only rule-12 findings without a listed reviewer, and none with it (TASK-021, TASK-285)', () => {
+      // 2026-11-15 = the approval date of 91-audit-actions-v2.sql (TASK-285); 10 and 90 carry 2026-11-13.
+      expect(lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-15' })).toEqual([]);
+      const unreviewed = lintBootstrap(bootstrapDir, { reviewers: [], today: '2026-11-15' }, 'bootstrap');
       expect(unreviewed.map((finding) => [finding.file, finding.rule])).toEqual([
         [join('bootstrap', '10-audit.sql'), '12'],
         [join('bootstrap', '90-audit-ddl-guard.sql'), '12'],
+        [join('bootstrap', '91-audit-actions-v2.sql'), '12'],
       ]);
-      // An approval dated after "today" is refused for each audit file.
-      expect(rules(lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-12' }))).toEqual(['12', '12']);
+      // An approval dated after "today" is refused for each audit file: all three on 2026-11-12, only 91 on 2026-11-14.
+      expect(rules(lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-12' }))).toEqual(['12', '12', '12']);
+      const early = lintBootstrap(bootstrapDir, { reviewers: ['security-analyst'], today: '2026-11-14' }, 'bootstrap');
+      expect(early.map((finding) => [finding.file, finding.message])).toEqual([
+        [join('bootstrap', '91-audit-actions-v2.sql'), 'audit DDL approval date 2026-11-15 lies in the future'],
+      ]);
     });
   });
 
@@ -947,8 +953,9 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
 
 describe('the repository lanes', () => {
   it('[NT-DATA-004-b] prisma/migrations and prisma/bootstrap of this repository have no findings', () => {
-    // 2026-11-13 = the approval date of 10-audit.sql and 90-audit-ddl-guard.sql (TASK-021); main() uses the clock.
-    expect(lintRepository(repoRoot, '2026-11-13')).toEqual([]);
+    // 2026-11-15 = the latest approval date (91-audit-actions-v2.sql, TASK-285; 10 and 90 carry 2026-11-13, TASK-021);
+    // main() uses the clock.
+    expect(lintRepository(repoRoot, '2026-11-15')).toEqual([]);
     expect(main(['--no-validate'])).toBe(0);
   });
 

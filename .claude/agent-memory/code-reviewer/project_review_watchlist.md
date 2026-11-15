@@ -409,3 +409,13 @@ PR #23 (TASK-011 lane B heavy lane) r1 at f61e55d: CHANGES_REQUESTED (2026-11-13
 - OPEN: R1-m1 runner.ts:176-184 Cache-Control/foreign checks have no negative control (work: P6 1,748 problems); R1-m2 matrix never reaches authorise credential/actor gates, D-ARCH-110 title overclaims; R1-m3 seam retirement in no card (TASK-052/055/091/171/261/MFA/041 grep 0); R1-m4 observe() no per-request deadline, transport error aborts 900 s test unnamed (add to TASK-W0-FLAKE).
 - Merge: MC1 union with main after PR #39 (clean, tree b568ee6) + fresh lane-B evidence; MC2 security record; activation PR (D-ORCH-092) adds CODEOWNERS /tests/generated/rbac/.
 - r2 = delta: re-run scratch `review/PR-48-cr/probe-slots.mts` (tsx, swaps PipelineSlots, args: worktree + variant names) and `mutate-gen.mjs` (needs archive copy + junctions; unit lane only).
+
+## PR #52 (TASK-285 audit actions v2, 91-audit-actions-v2.sql) r1 AWN at a718dcd (2026-11-15)
+- Review: `docs/05-quality/reviews/PR-0052-TASK-285-code-review.md`. 10/14 mutants killed (K2 lookahead + P2 comment fixture survive; P3 equivalent; S4 no-SET-ROLE killed only in integration). Name 91- forced (runner + `bootstrap/added-out-of-order`); KEEP form safe (17-form probe, linear).
+- OPEN: R1-m1 contract enums still 18 (D-TASK285-02 CR in no card; ADR-0007 am.11 item 4 "already lists 20" false) -> TASK-073/api-designer AC line; R1-m2 existing-DB upgrade runs on EMPTY store (add pre-upgrade LOGIN row + chain continuity). NITs n1-n3.
+- Merge: security record approving blob 9945c349; do NOT merge main (.claude/agent-memory stales evidence); squash.
+
+## PR #53 (TASK-W0-FLAKE host-load timing) r1 CR at 8a48139 (2026-11-15)
+- Review: `docs/05-quality/reviews/PR-0053-W0-FLAKE-code-review.md`. TWO MAJORs, same root (deadline + 20 s slack): **M1** AT-US-012-03 (2.5 s AC) unpinned, router bound derived from READINESS_DEADLINE_MS itself (mutant R2 8 s/9 s survives head, killed by main); **M2** PR30-SEC-01 `bounded()` deadline x10 survives head (S1), main kills it. Fix = deterministic magnitude pins (static AC constants + spy AbortSignal.timeout), keep slack only for fired-vs-hung.
+- MINORs: m1 heartbeat over-subtracts on Windows (-36 % idle) and subtracts own sync work entirely; m2 180 s x hang vs lane A 25-min job -> unnamed cancel; fetchOnce needs request deadline. NITs: fetchOnce ignores signal/sends chunked/sends after reject; worker slowloris 5 s unpinned; PR #48 R1-m4 unrouted.
+- r2 = delta: re-run scratch `pr53/mut.mjs` (archive copy + junction; HEAD vs base test swap; rows C0/R1/R2/S1/H1) + `hb.mts` + `fo.mts` probes; worker suite resolves @platform/api via worktree symlink (mutate the worktree-independent way or skip).
