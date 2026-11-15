@@ -1,0 +1,32 @@
+name: fixture
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+jobs:
+  scans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Lane scope and proofs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node "$GATE_LANE_SCOPE" --lookup
+  ci-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Aggregate lane A
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node "$GATE_LANE_SCOPE" --gate

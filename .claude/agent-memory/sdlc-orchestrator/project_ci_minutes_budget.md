@@ -10,7 +10,8 @@ Hosted CI runs on the free 2,000 Actions minutes/month with a $0 spend limit (CL
 **Why:** D-ORCH-077/078 and D-ARCH-126..129 (ADR-0023 am. L, rulings/wave-0-ci-minutes.md). Paid minutes or making the repo public are the user's choice, not the run's.
 
 **How to apply:**
-- P1: merge `main` into a PR branch only when GitHub says not mergeable or main moved under lockfile/prisma/tools/ci/tools/quality/.github/.npmrc/.semgrep/.gitleaks.toml; otherwise squash directly and run a post-merge gate (D-ORCH-042).
+- P1 (refined D-ORCH-102): merge `main` into a PR branch only when GitHub says not mergeable, main changed a file the PR also changes, or main changed the evidence manifest/verifier so the PR's credited run would be rejected; a tooling-path move with no overlap does not need a union — squash and run a post-merge gate (D-ORCH-042). EXCEPTION (D-ORCH-103): if main changed lane A's own bootstrap (`.github/workflows/**`, the `tools/ci/**` files the workflow loads) since the PR's merge base, lane A cannot start (it loads tooling from the merge base) — union is required until TASK-286's `TOOLS_REF=HEAD^1` lands.
+- Records ride the next code push when one is coming (commit locally, don't push docs alone); the first live light run (PR #46, 2026-11-15) proved docs pushes inherit the code proof.
 - P2: one docs push per review round (record + evidence together); never push docs while the PR's full run is in progress.
 - P3: Dependabot PRs — merge or `@dependabot ignore`, don't close (closed groups get recreated).
 - P4: run `ci:minutes --forecast` every Monday and at wave exits; record in STATUS.

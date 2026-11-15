@@ -44,10 +44,20 @@ const repoRoot = findRepoRoot();
 const fixtureDir = join(repoRoot, 'tools', 'ci', 'fixtures', 'workflow-policy');
 const script = join(repoRoot, 'tools', 'ci', 'check-workflow-policy.mjs');
 
-/** Fixtures named `ci-*.yml` are checked as `ci.yml` (the AT-US-005-04/-05 rules apply to ci.yml only). */
+/**
+ * Fixtures named `ci-*.yml`, `lane-c-*.yml` and `nightly-*.yml` are checked as `ci.yml`, `lane-c.yml` and `nightly.yml`
+ * (the AT-US-005-04/-05 no-release rules, the dispatch-only rule and the Playwright install scope depend on the name).
+ */
+function checkedAs(fixture: string): string {
+  if (fixture.startsWith('ci-')) return 'ci.yml';
+  if (fixture.startsWith('lane-c-')) return 'lane-c.yml';
+  if (fixture.startsWith('nightly-')) return 'nightly.yml';
+  return fixture;
+}
+
 function rulesFor(fixture: string): string[] {
   const text = readFileSync(join(fixtureDir, fixture), 'utf8');
-  return checkWorkflow(text, fixture.startsWith('ci-') ? 'ci.yml' : fixture).map((finding) => finding.rule);
+  return checkWorkflow(text, checkedAs(fixture)).map((finding) => finding.rule);
 }
 
 describe('check-workflow-policy: negative fixtures', () => {
@@ -90,6 +100,35 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['AT-US-005-04: npm publish in ci.yml fails', 'ci-npm-publish.yml', 'ci-no-release'],
     ['AT-US-005-05: terraform apply in ci.yml fails', 'ci-terraform-apply.yml', 'ci-no-release'],
     ['AT-US-005-05: assuming an AWS role in ci.yml fails', 'ci-aws-role.yml', 'ci-no-release'],
+    ['D-ARCH-010 item 4: a schedule on lane-c.yml fails (dispatch only, hosted minutes)', 'lane-c-schedule.yml', 'dispatch-only'],
+    ['D-ARCH-010 item 4: a push trigger on nightly.yml fails (dispatch only)', 'nightly-push.yml', 'dispatch-only'],
+    ['AT-US-005-04: docker push in lane-c.yml fails (lane C never pushes)', 'lane-c-docker-push.yml', 'ci-no-release'],
+    ['AT-US-005-05: terraform apply through "$TERRAFORM_IMAGE" in nightly.yml fails', 'nightly-terraform-apply.yml', 'ci-no-release'],
+    ['PR4-SEC-08: a Playwright browser install in ci.yml fails (lane-c.yml only)', 'ci-playwright-install.yml', 'playwright-install'],
+    [
+      'PR4-SEC-08: DEPS_REBUILD_PLAYWRIGHT in a nightly.yml job env fails (lane-c.yml only)',
+      'nightly-playwright-env.yml',
+      'playwright-install',
+    ],
+    ['[review N6] id-token: write in nightly.yml fails (no-release workflows)', 'nightly-id-token.yml', 'ci-no-release'],
+    [
+      '[PR46-SEC-02] [review m3] npm_config_playwright_download_host in a job env fails (the npm channel Playwright reads)',
+      'npm-config-playwright-host.yml',
+      'forbidden-env',
+    ],
+    [
+      '[PR46-SEC-07] a repository secret in a lane-c.yml job fails (no-release workflows use GITHUB_TOKEN only)',
+      'lane-c-npm-token.yml',
+      'pr-secrets',
+    ],
+    ['[RR-8 (i)] GH_TOKEN in a job env fails (token on lane-scope steps only)', 'ci-gh-token-job-env.yml', 'gh-token'],
+    ['[RR-8 (i)] GH_TOKEN on a scans step that does not run "$GATE_LANE_SCOPE" fails', 'ci-gh-token-other-step.yml', 'gh-token'],
+    ['[RR-8 (ii)] actions: read on fast-lane fails (only scans and ci-gate)', 'ci-actions-read-fast-lane.yml', 'permissions'],
+    [
+      '[RR-8 (ii)] [R2-n1 P10] top-level actions: read fails (never for every job of a workflow)',
+      'ci-actions-read-top-level.yml',
+      'permissions',
+    ],
     ['every job needs timeout-minutes', 'missing-timeout.yml', 'job-timeout'],
     ['docker run by tag (no digest) fails', 'docker-run-by-tag.yml', 'image-digest'],
     ['YAML outside the supported subset (anchor) fails closed', 'yaml-anchor.yml', 'yaml-subset'],
@@ -129,8 +168,12 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['valid.yml: pinned actions, read-only token, workflow env, npm audit signatures with the scope override'],
     ['carrier-sandbox-dispatch.yml: SEC-TC-51 positive control (workflow_dispatch + environment carrier-sandbox)'],
     ['ci-images-guarded.yml: AT-US-005-04 positive control (images job gated on workflow_dispatch)'],
+    ['lane-c-valid.yml: D-ARCH-010 / PR4-SEC-08 positive control (dispatch only, browser install and terraform validate in lane-c.yml)'],
     ['gitleaks-hardened.yml: PR10-SEC-01 positive control (.git-only mount, --ignore-gitleaks-allow, first-parent, no network)'],
     ['safe-expression.yml: PR10-SEC-07 positive control (github.sha, runner.*, steps.*.outputs.*)'],
+    [
+      'ci-gh-token-lane-scope.yml: RR-8 (i)-(iii) positive control (GH_TOKEN = github.token or secrets.GITHUB_TOKEN on lane-scope steps of scans and ci-gate, which hold actions: read; pr-secrets accepts both)',
+    ],
   ])('positive control %s', (title) => {
     const fixture = title.split(':')[0] ?? '';
     expect(rulesFor(fixture)).toEqual([]);
@@ -175,8 +218,17 @@ describe('check-workflow-policy: repository', () => {
     expect(checkWorkflow(guarded, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       expect.stringContaining('workflow policy gate step must be unconditional'),
     ]);
-    const ungated = ci.replace('needs: [fast-lane, scans]', 'needs: [fast-lane]');
-    expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual(['ci.yml ci-gate must need scans']);
+    const ungated = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, security-integration]');
+    expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
+      'ci.yml ci-gate must need scans',
+      'ci.yml job ci-gate needs must be exactly [fast-lane, scans, security-integration] (RR-5, PR46-SEC-01, RR-6)',
+    ]);
+    // ADR-0023 am. G item 5: the hosted security-integration job stays part of the lane A aggregate.
+    const noSecurity = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, scans]');
+    expect(checkWorkflow(noSecurity, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
+      'ci.yml ci-gate must need security-integration',
+      'ci.yml job ci-gate needs must be exactly [fast-lane, scans, security-integration] (RR-5, PR46-SEC-01, RR-6)',
+    ]);
     expect(CI_REQUIRED_GATES.length).toBeGreaterThanOrEqual(21);
     const root = mkdtempSync(join(tmpdir(), 'workflow-policy-'));
     try {

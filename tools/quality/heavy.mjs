@@ -335,9 +335,10 @@ export function jestArgs(runner, { testTimeoutMs, outputFile, coverageDir }) {
 
 /**
  * Expands the placeholders of a command runner: `{node}`, `{npm}` (two arguments: node + npm-cli.js), `{root}`,
- * `{junit}` (where a `junit` converter command writes its report), `{native}` (where the tool writes its native JSON).
+ * `{junit}` (where a `junit` converter command writes its report), `{native}` (where the tool writes its native JSON),
+ * `{base}` (the run's `--base` ref; gitleaks-full reads its config and baseline from it, D-SEC-PR45-01).
  * @param {readonly string[]} cmd
- * @param {{ node: string, npm: readonly string[], root: string, junit: string, native: string }} values
+ * @param {{ node: string, npm: readonly string[], root: string, junit: string, native: string, base?: string }} values
  * @returns {string[]}
  */
 export function expandCommand(cmd, values) {
@@ -349,7 +350,8 @@ export function expandCommand(cmd, values) {
             .replaceAll('{node}', values.node)
             .replaceAll('{root}', values.root)
             .replaceAll('{junit}', values.junit)
-            .replaceAll('{native}', values.native),
+            .replaceAll('{native}', values.native)
+            .replaceAll('{base}', values.base ?? DEFAULTS.base),
         ],
   );
 }
@@ -855,7 +857,7 @@ export function resolveOutBase(args, repoRoot) {
 
 /**
  * @param {{ id: string, runner: Runner | null, root: EvidenceRoot }} item
- * @param {{ repoRoot: string, work: string, testTimeoutMs: number, suiteTimeoutMs: number, scrub: string[] }} ctx
+ * @param {{ repoRoot: string, work: string, testTimeoutMs: number, suiteTimeoutMs: number, scrub: string[], base: string }} ctx
  * @returns {Promise<RunResult>}
  */
 async function runSuite(item, ctx) {
@@ -925,6 +927,7 @@ async function runSuite(item, ctx) {
     root: ctx.repoRoot,
     junit: junitPath,
     native: nativePath,
+    base: ctx.base,
   });
   const result = await runStreaming(/** @type {string} */ (command), args, { cwd: ctx.repoRoot, timeoutMs: ctx.suiteTimeoutMs });
   /** @type {JUnitCase[]} */
@@ -1062,7 +1065,14 @@ export async function main(argv) {
       }
       console.error(`quality:heavy: suite ${item.id}`);
       results.push(
-        await runSuite(item, { repoRoot, work, testTimeoutMs: args.testTimeoutMs, suiteTimeoutMs: args.suiteTimeoutMin * 60_000, scrub }),
+        await runSuite(item, {
+          repoRoot,
+          work,
+          testTimeoutMs: args.testTimeoutMs,
+          suiteTimeoutMs: args.suiteTimeoutMin * 60_000,
+          scrub,
+          base: args.base,
+        }),
       );
     }
     // US-006 merged gate (D-ORCH-047): once every suite ran, in the JUnit of merged_coverage.suite (unit: in every profile).

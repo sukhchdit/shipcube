@@ -1,0 +1,25 @@
+name: fixture
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        type: choice
+        options:
+          - wave-end
+          - release-candidate
+permissions:
+  contents: read
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+  TERRAFORM_IMAGE: docker.io/hashicorp/terraform:1.17.1@sha256:a5d5a5a892c98f60fcbfa81eac2a40fc19e7b3fa7719bccae10ff6111d22524a
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROFILE: ${{ inputs.profile }}
+    steps:
+      - run: npm run deps:rebuild -- "--playwright=webkit"
+      - run: docker run --rm --network none -v "$GITHUB_WORKSPACE:/src:ro" -w /src "$TERRAFORM_IMAGE" validate

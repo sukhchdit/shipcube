@@ -1,0 +1,437 @@
+# Lane C: hosted full lane, workflow_dispatch only (ADR-0023 amendments C and G items 5-6; D-ARCH-010 item 3;
+# TEST-STRATEGY sections 4.1, 13 and 15 item 3; TASK-015 part 015-B).
+#
+# - Dispatched by the orchestrator or devops-engineer at wave ends (profile wave-end; default 3 a month, ADR-0023 am. G
+#   item 5) and before G3, before G4 and per release candidate (profile release-candidate), on the SHA to judge:
+#   `gh workflow run lane-c.yml --ref main -f profile=wave-end -f since=<previous wave-end SHA>`. The run's ref is the
+#   code under test AND the workflow definition (no `ref` input: one SHA, no checkout of another commit).
+# - A separate file, not a ci.yml trigger: ci.yml's triggers are pinned to pull_request + push (CI_TRIGGERS; a new
+#   trigger needs check-evidence EVENTS on main first, PR #23 R2-n2), and lane A's gates stay untouched.
+# - Jobs: static (lane A non-incremental), integration (merged coverage of unit + integration + api with the
+#   repository thresholds), images (Compose stack and image assertions), e2e-stack (one shard per engine; COND-E2E-FF),
+#   iac (Terraform validate + Checkov; never applied), scans-full (gitleaks over the full history), inventory
+#   (ADR-0023 am. G item 6 cross-check against the committed lane B evidence) and lane-c-gate (aggregate).
+# - Spend (CLOUD_BUDGET_MONTHLY_USD = 0): GitHub-hosted runners on the free allowance only; nothing is pushed, published,
+#   deployed or applied; artifacts are summaries with short retention. `npm run ci:minutes` reports the month's usage
+#   and the guard level before a dispatch. Heavy jobs follow HEAVY_RUNNER_LABELS (the documented self-hosted switch).
+# - No secrets: GITHUB_TOKEN (read-only) is the only credential. tools/ci/check-workflow-policy.mjs enforces the same
+#   pinning, permission and script rules as for ci.yml, plus dispatch-only and no-release rules for this file.
+name: lane-c
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: wave-end (wave ends) or release-candidate (before G3, G4 and per release candidate)
+        type: choice
+        options:
+          - wave-end
+          - release-candidate
+        default: wave-end
+      since:
+        description: Cross-check the lane B evidence added since this commit SHA (empty = the newest lane B run)
+        type: string
+        default: ''
+      webkit_repeat_each:
+        description: WebKit --repeat-each (COND-E2E-FF needs 5 until qa-lead closes it)
+        type: choice
+        options:
+          - '5'
+          - '1'
+        default: '5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lane-c-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CHECKPOINT_DISABLE: '1'
+  SCARF_ANALYTICS: 'false'
+  ACTIONLINT_IMAGE: docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  # Checkov 3.4.3 (Apache-2.0, 2026-11-02; 7-day cooldown) and Terraform 1.17.1 (2026-10-28; BUSL-1.1 CLI, a build tool
+  # that is not distributed: platform.md OI-07), both by index digest.
+  CHECKOV_IMAGE: docker.io/bridgecrew/checkov:3.4.3@sha256:bfe9d70bb7f044aba49bd99675813445f106dee6072da583f51008cb667f3a63
+  TERRAFORM_IMAGE: docker.io/hashicorp/terraform:1.17.1@sha256:a5d5a5a892c98f60fcbfa81eac2a40fc19e7b3fa7719bccae10ff6111d22524a
+
+jobs:
+  static:
+    name: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Workflow policy and install flags
+        run: |
+          set -euo pipefail
+          node tools/ci/check-workflow-policy.mjs --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+          node tools/ci/check-install-flags.mjs --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Install (npm ci --ignore-scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Allow-listed install steps (deps:rebuild)
+        run: npm run deps:rebuild
+
+      - name: Lint (ESLint, Stylelint, suppressions)
+        # Type-aware ESLint (projectService) over the whole repository needs more than V8's default heap on the
+        # 7-8 GB hosted runner (about 2 GB: out of memory on PR #46's first fix-cycle run; it passes at 3 GB). A heap
+        # size only, no preload (node-options-preload); the lint script and its base-ref step list are unchanged.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: actionlint
+        run: docker run --rm --network none -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build (all workspaces and size-limit)
+        run: npm run build
+
+      - name: Build must not mutate the tree (git status --porcelain)
+        run: node tools/ci/check-porcelain.mjs --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
+
+  # Whole-repository coverage (US-006; TEST-STRATEGY section 8): one coverage map merged across unit, unit-dom,
+  # integration and api (+ generated while it has tests), Testcontainers on the runner's Docker, then the 85/75 and
+  # 95/95 gate. The per-project Jest reports feed the inventory job.
+  integration:
+    name: integration
+    runs-on: ${{ fromJSON(vars.HEAVY_RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install (npm ci --ignore-scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Allow-listed install steps (deps:rebuild)
+        run: npm run deps:rebuild
+
+      - name: Merged coverage (unit + integration + api) and the US-006 gate
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/coverage"
+          npm run test:coverage -- --out "$out" --test-timeout 60000
+          npm run coverage:gate -- --summary "$out/coverage-summary.json" --root "$GITHUB_WORKSPACE"
+          mkdir -p "$RUNNER_TEMP/lane-c/jest"
+          cp "$out"/.parts/*.jest.json "$RUNNER_TEMP/lane-c/jest/"
+          cp "$out/coverage-summary.json" "$RUNNER_TEMP/lane-c/coverage-summary.json"
+
+      - name: Upload the Jest reports and coverage summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lane-c-integration
+          path: ${{ runner.temp }}/lane-c
+          if-no-files-found: error
+          retention-days: 3
+
+  # Compose stack and image assertions (TASK-014's `npm run test:stack`: builds the images, runs `docker compose up`,
+  # asserts the hardened-image invariants). Until that script and compose.yaml exist on the dispatched SHA, wave-end
+  # reports the gap and release-candidate fails (a gate needs the images). Nothing is pushed (no GHCR: $0, D-ORCH-001).
+  images:
+    name: images
+    runs-on: ${{ fromJSON(vars.HEAVY_RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PROFILE: ${{ inputs.profile }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Is the Compose stack on this SHA?
+        id: stack
+        run: |
+          set -euo pipefail
+          if [ -f compose.yaml ] && grep -q '"test:stack"' package.json; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "$PROFILE" = "release-candidate" ]; then
+            echo "::error title=images::compose.yaml or the test:stack script is missing on this SHA; a release candidate needs the images (TASK-014)"
+            exit 1
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "### images: not run, no compose.yaml / test:stack on this SHA (TASK-014)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up Node from .node-version
+        if: steps.stack.outputs.present == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install (npm ci --ignore-scripts)
+        if: steps.stack.outputs.present == 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Allow-listed install steps (deps:rebuild)
+        if: steps.stack.outputs.present == 'true'
+        run: npm run deps:rebuild
+
+      - name: Compose stack and image assertions (npm run test:stack)
+        if: steps.stack.outputs.present == 'true'
+        run: npm run test:stack -- --ci
+
+  # COND-E2E-FF (D-ORCH-019/020; PR #4 R3-n6, R4-m1; PR4-SEC-08): one shard per engine on Linux, mobile and desktop
+  # projects, against the production builds the Playwright config serves. Browsers come only through deps:rebuild
+  # (which refuses download redirects); `--with-deps` (apt) runs only here. WebKit runs --repeat-each (default 5, so
+  # >= 10 runs of each test across its two projects); the config's CI globalTimeout turns a close hang into a clear
+  # failure. While COND-E2E-FF is open a flaky test (failed, then passed on the CI retry) fails the shard
+  # (--fail-on-flaky-tests; code review PR #46 m4): its JUnit has no <failure>, so inventory alone would not see it.
+  # Traces of failures are uploaded (1 day) and never committed.
+  e2e-stack:
+    name: e2e-stack (${{ matrix.engine }})
+    runs-on: ${{ fromJSON(vars.HEAVY_RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+    env:
+      ENGINE: ${{ matrix.engine }}
+      WEBKIT_REPEAT_EACH: ${{ inputs.webkit_repeat_each }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install (npm ci --ignore-scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Allow-listed install steps with the engine's browser (deps:rebuild --playwright)
+        run: npm run deps:rebuild -- "--playwright=$ENGINE"
+
+      - name: Build (the production builds the e2e suite serves)
+        run: npm run build
+
+      - name: Playwright (mobile and desktop projects)
+        env:
+          E2E_JUNIT_FILE: ${{ runner.temp }}/e2e/e2e-${{ matrix.engine }}.xml
+        run: |
+          set -euo pipefail
+          repeat=1
+          if [ "$ENGINE" = "webkit" ]; then
+            case "$WEBKIT_REPEAT_EACH" in 1|5) repeat="$WEBKIT_REPEAT_EACH" ;; *) echo "::error::webkit_repeat_each must be 1 or 5"; exit 2 ;; esac
+          fi
+          npm run test:e2e -- "--project=$ENGINE-mobile" "--project=$ENGINE-desktop" "--repeat-each=$repeat" --fail-on-flaky-tests
+
+      - name: Upload the JUnit report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lane-c-e2e-${{ matrix.engine }}
+          path: ${{ runner.temp }}/e2e
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload failure traces
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lane-c-e2e-traces-${{ matrix.engine }}
+          path: tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # IaC (ADR-0023 section 1 `iac`; ADR-0001): `terraform fmt -check` and `validate -backend=false` in every directory
+  # that holds *.tf, then Checkov over Terraform, Dockerfiles and these workflows. Validated only: no init against a
+  # backend, no plan, never apply (CLAUDE.md section 5; budget 0). Containers run without network except
+  # `terraform init -backend=false`, which downloads the pinned providers of the lock file.
+  iac:
+    name: iac
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Terraform fmt and validate (no backend)
+        run: |
+          set -euo pipefail
+          mapfile -t dirs < <(git ls-files -- '*.tf' | xargs -r -n1 dirname | sort -u)
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "### iac: no Terraform on this SHA (fmt/validate not run)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          docker run --rm --network none -v "$GITHUB_WORKSPACE:/src:ro" -w /src "$TERRAFORM_IMAGE" fmt -check -recursive -diff
+          for dir in "${dirs[@]}"; do
+            work="$RUNNER_TEMP/tf/$dir"
+            mkdir -p "$work"
+            cp -R "$dir/." "$work/"
+            docker run --rm -v "$work:/work" -w /work "$TERRAFORM_IMAGE" init -backend=false -input=false -lockfile=readonly
+            docker run --rm --network none -v "$work:/work" -w /work "$TERRAFORM_IMAGE" validate -no-color
+            echo "- terraform validate: \`$dir\` ok" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      # CKV_GHA_7 (workflow_dispatch inputs must be empty) is skipped with a reason: lane-c.yml and nightly.yml inputs
+      # select which checks run (choice values, passed through env and validated); no artefact is built or published
+      # from a dispatched run, which is what the SLSA rule protects. The lint/policy fixtures are deliberately bad
+      # Dockerfiles and workflows (negative tests), so their folders are skipped; every other finding fails the job.
+      - name: Checkov (Terraform, Dockerfiles, workflows)
+        run: |
+          set -euo pipefail
+          docker run --rm --network none -v "$GITHUB_WORKSPACE:/src:ro" -w /src "$CHECKOV_IMAGE" \
+            --directory /src --framework terraform dockerfile github_actions \
+            --skip-check CKV_GHA_7 --skip-path tools/ci/fixtures --skip-path tests/fixtures --skip-download --compact --quiet
+
+  # The gitleaks-full suite on the dispatched SHA: every commit reachable from it, merges diffed against their first
+  # parent (PR46-SEC-10), with the config and the PR25-SEC-01 baseline read from that SHA through git
+  # (tools/quality/gitleaks-full.mjs: no network, read-only .git mount, exact fingerprints validated before the scan).
+  # Node runs the repository's own script; no npm install.
+  scans-full:
+    name: scans-full
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node (literal version, no cache)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Gitleaks over the full history (gitleaks-full)
+        run: node tools/quality/gitleaks-full.mjs --root "$GITHUB_WORKSPACE" --ref "$GITHUB_SHA" --scan "$GITHUB_SHA" --report "$RUNNER_TEMP/gitleaks-full.json"
+
+  # ADR-0023 am. G item 6 / SEC-TC-48: inventory.json from the lane C Jest and Playwright reports, compared with the
+  # lane B evidence committed in the repository (`since` input: the wave's runs; empty: the newest run). A discrepancy
+  # fails the run. For release-candidate the orchestrator commits inventory.json and coverage-summary.json under
+  # docs/05-quality/tests/runs/ (TEST-STRATEGY section 15 item 3); this workflow has no write token.
+  inventory:
+    name: inventory
+    needs: [integration, e2e-stack]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      PROFILE: ${{ inputs.profile }}
+      SINCE: ${{ inputs.since }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node from .node-version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install (npm ci --ignore-scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Download the lane C reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: lane-c-*
+          path: ${{ runner.temp }}/reports
+
+      - name: Inventory cross-check
+        run: |
+          set -euo pipefail
+          reports="$RUNNER_TEMP/reports"
+          since=()
+          if [ -n "$SINCE" ]; then
+            if ! printf '%s' "$SINCE" | grep -Eq '^[0-9a-f]{7,40}$'; then echo "::error::since must be a commit SHA"; exit 2; fi
+            since=(--since "$SINCE")
+          fi
+          mkdir -p "$RUNNER_TEMP/e2e" "$RUNNER_TEMP/evidence"
+          find "$reports" -path '*lane-c-e2e-*' -name '*.xml' ! -path '*traces*' -exec cp {} "$RUNNER_TEMP/e2e/" \;
+          node tools/quality/inventory.mjs --root "$GITHUB_WORKSPACE" --jest "$reports/lane-c-integration/jest" --playwright "$RUNNER_TEMP/e2e" --sha "$GITHUB_SHA" "${since[@]}" --profile "$PROFILE" --out "$RUNNER_TEMP/evidence/inventory.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload inventory.json and coverage-summary.json
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lane-c-evidence
+          path: |
+            ${{ runner.temp }}/evidence/inventory.json
+            ${{ runner.temp }}/reports/lane-c-integration/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+  lane-c-gate:
+    name: lane-c-gate
+    if: ${{ !cancelled() }}
+    needs: [static, integration, images, e2e-stack, iac, scans-full, inventory]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Aggregate lane C
+        env:
+          RESULTS: ${{ needs.static.result }} ${{ needs.integration.result }} ${{ needs.images.result }} ${{ needs.e2e-stack.result }} ${{ needs.iac.result }} ${{ needs.scans-full.result }} ${{ needs.inventory.result }}
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          echo "profile=$PROFILE results: $RESULTS"
+          read -r -a results <<< "$RESULTS"
+          for result in "${results[@]}"; do
+            if [ "$result" != "success" ]; then
+              echo "Lane C ($PROFILE) is not green: $RESULTS" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+          echo "Lane C ($PROFILE) green." >> "$GITHUB_STEP_SUMMARY"

@@ -50,3 +50,4 @@
 - [P5 PR-0048 RBAC matrix](project_p5_pr48_rbac_matrix.md) — TASK-027 R1 @a4f2d51 PASS_W_F-U; LOW 01-04 (foreign compare, CODEOWNERS, oracle export, 401 vs A-078); T-32 owner TASK-060; oracle kit
 - [P5 PR-0042 round 3](project_p5_pr42_r3.md) — @96bd37a PASS_W_F-U; 13/14/16 closed; new MED 17 deferred-start write (H2 fix), LOW 19, INFO 18 lint env; round-4 triggers
 - [P5 PR-0052/0053](project_p5_pr52_pr53.md) — #52 PASS_W_F-U, rule-12 91 blob 9945c349, LOW KEEP bypass; #53 PASS_W_COND C1 S3 magnitude pin; heartbeat facts
+- [P5 PR-0046 merge-only](project_p5_pr46_mo.md) — @0230e50 union #39/#48 PASS_W_F-U; INFO 17: event base.sha = MERGE BASE, not main tip; live-binding prediction; 24 h deadline

@@ -13,6 +13,9 @@ import { defineConfig, devices } from '@playwright/test';
 import { ADMIN_BASE_URL, ADMIN_PORT, WEB_BASE_URL, WEB_PORT } from './support/servers.js';
 
 const CI = process.env['CI'] !== undefined;
+/** Whole-run cap in CI (lane C shards run one engine; WebKit with --repeat-each=5). */
+const GLOBAL_TIMEOUT_MS = 20 * 60_000;
+const JUNIT_FILE = process.env['E2E_JUNIT_FILE'] === '' ? undefined : process.env['E2E_JUNIT_FILE'];
 
 const MOBILE_VIEWPORT = { width: 360, height: 780 };
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 };
@@ -24,7 +27,13 @@ export default defineConfig({
   forbidOnly: CI,
   // Lanes B and C retry once to detect flakiness only (TEST-STRATEGY §11); local runs never retry.
   retries: CI ? 1 : 0,
-  reporter: CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  // PR #4 R3-n6 (COND-E2E-FF): a run-wide cap in CI, so a browser that hangs on close (seen with WebKit) fails the job
+  // with Playwright's 'Timed out waiting ... for the test suite to run' instead of running into the job timeout.
+  globalTimeout: CI ? GLOBAL_TIMEOUT_MS : 0,
+  // Lane C writes a JUnit report per shard when E2E_JUNIT_FILE is set (tools/quality/inventory.mjs reads it).
+  reporter: CI
+    ? [['list'], ['html', { open: 'never' }], ...(JUNIT_FILE === undefined ? [] : [['junit', { outputFile: JUNIT_FILE }] as const])]
+    : 'list',
   use: {
     baseURL: WEB_BASE_URL,
     trace: 'retain-on-failure',
