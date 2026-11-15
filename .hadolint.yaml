@@ -1,0 +1,14 @@
+# hadolint configuration (TASK-014; platform.md §3.4 "Dockerfile lint"). hadolint runs as a digest-pinned container
+# (PD-09):
+#   docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" \
+#     hadolint/hadolint:v2.15.0@sha256:78cefa24d67e95cac4cdc388652068d0be545bd2926fcbec6f95c1a751d5da32 \
+#     hadolint - < apps/api/Dockerfile
+# The project rules (digest pins, non-root, HEALTHCHECK, install flags, explicit COPY, secret names) are enforced by
+# tools/ci/check-dockerfiles.mjs and tools/ci/check-install-flags.mjs; hadolint covers generic Dockerfile and shell lint.
+failure-threshold: info
+format: tty
+# Base images come only from Docker Hub official/verified namespaces (node, debian, nginxinc).
+trustedRegistries:
+  - docker.io
+# Every base image is pinned by digest; hadolint's tag-pin rule is satisfied by name:tag@sha256.
+strict-labels: false

@@ -6,7 +6,8 @@
 # - typescript semver-major is ignored: ADR-0001 pins TypeScript ~6.0.3 and defers TypeScript 7 (tsgo) until the Jest/ESLint
 #   toolchain peers allow it. Moving to 7 is a reviewed task PR with its own superseding ADR, not an automated bump. Minor and
 #   patch updates still flow through the npm-minor-and-patch group. Other majors stay visible for review on purpose.
-# - docker and terraform ecosystems are added with the first Dockerfile/infra code (TASK-014, TASK-017).
+# - docker (every image Dockerfile) and docker-compose (compose*.yaml) since TASK-014 (PR #39 R2, PR39-SEC-06); the
+#   terraform ecosystem is added with the first infra code (TASK-017).
 version: 2
 updates:
   - package-ecosystem: npm
@@ -38,3 +39,35 @@ updates:
         patterns: ['*']
     commit-message:
       prefix: 'ci(deps)'
+
+  # Base images of the Dockerfiles (TASK-014; PR #39 R2, PR39-SEC-06). D-ARCH-116 rule 3: the node:<version>-<codename>-slim
+  # build base and the debian:<codename>-slim runtime base must move together (check-dockerfiles rule runtime-codename),
+  # so ONE group with patterns ['*'] proposes the node and debian pin bumps of D-TASK014-02 in a single PR.
+  # Confirm on the first run that a digest-only bump of debian:trixie-slim (same tag, new digest) is proposed. Fallback
+  # if it is not: a monthly lane B 'docker buildx imagetools inspect' digest comparison (follow-up, not built here).
+  - package-ecosystem: docker
+    directories: ['/apps/api', '/apps/worker', '/apps/web', '/apps/admin', '/prisma']
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    groups:
+      docker-images:
+        patterns: ['*']
+    commit-message:
+      prefix: 'build(deps)'
+
+  # Service images pinned in compose*.yaml (postgres, valkey, rustfs, aws-cli, mailpit): one grouped PR per month.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    groups:
+      compose-images:
+        patterns: ['*']
+    commit-message:
+      prefix: 'build(deps)'

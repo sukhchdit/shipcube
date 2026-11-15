@@ -33,8 +33,8 @@ export function keysNotHeldBy(env: EnvInput, service: Service): readonly string[
 
 /**
  * Start-up issues for keys `service` does not hold: refused in staging and production. In local and test the
- * keys are reported to the caller as warnings instead (see `loadRuntimeConfigOrExit`), because `compose.env` is
- * one file shared by every service until TASK-014 splits the per-service environments.
+ * keys are reported to the caller as warnings instead (see `loadRuntimeConfigOrExit`), because a developer may run
+ * `npm run dev:*` against one shared environment; Compose itself passes per-service env files since TASK-014.
  */
 export function holderIssues(env: EnvInput, service: Service, appEnv: AppEnv): readonly ConfigIssue[] {
   if (!isHardenedAppEnv(appEnv)) return [];

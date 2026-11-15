@@ -76,3 +76,5 @@ Write memory or markdown edits as a .cjs file with the Write tool. An inline `no
 - `pkill` is denied by the auto-mode classifier; rely on `timeout`.
 
 **String-replace mutants (PR #45, 2026-11-14):** a replacement STRING containing `$'` (for example TOML `'''…$'''`) expands to "text after match" and silently produces a garbage mutant that some unrelated pin catches. Always use a function replacer (`s.replace(x, () => "…")`). Also, Bash heredocs written through the tool lost `\` escapes: write probe scripts with the Write tool.
+
+**Loopback-heavy suites in a %TEMP% scratch copy (PR #48, 2026-11-15):** ran ~100x slower per HTTP request (1-2 s) and failed with ECONNRESET; unusable for mutants of HTTP suites. Use a tsx probe in the scratchpad that imports worktree modules by absolute `pathToFileURL` (with `NODE_OPTIONS=--conditions=@platform/source`, run `node <wt>/node_modules/tsx/dist/cli.mjs`) and swaps slots/functions in-process; unit-only mutants still work in the copy.

@@ -261,7 +261,8 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
   it('D-ORCH-027: Dependabot ignores TypeScript semver-major (ADR-0001 pin ~6.0.3, TS 7 deferred) and keeps the cooldown', () => {
     const dependabot = read('.github', 'dependabot.yml');
     expect(dependabot).toMatch(/- dependency-name: typescript\n\s+update-types: \['version-update:semver-major'\]/);
-    expect(dependabot.match(/cooldown:\n\s+default-days: 7/g)).toHaveLength(2);
+    // npm, github-actions, docker and docker-compose (PR #39 R2): one 7-day cooldown per ecosystem.
+    expect(dependabot.match(/cooldown:\n\s+default-days: 7/g)).toHaveLength(4);
   });
 
   it('[PR25-SEC-02] Dependabot, parsed: per ecosystem the ignore list, cooldown, groups, limit and schedule are exact (M8, M9)', () => {
@@ -273,7 +274,7 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
         .filter(isMap)
         .map((u) => [typeof u['package-ecosystem'] === 'string' ? u['package-ecosystem'] : '', u]),
     );
-    expect([...byEcosystem.keys()]).toEqual(['npm', 'github-actions']);
+    expect([...byEcosystem.keys()]).toEqual(['npm', 'github-actions', 'docker', 'docker-compose']);
     expect(byEcosystem.get('npm')).toEqual({
       'package-ecosystem': 'npm',
       directory: '/',
@@ -292,6 +293,26 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       'open-pull-requests-limit': '2',
       groups: { 'github-actions': { patterns: ['*'] } },
       'commit-message': { prefix: 'ci(deps)' },
+    });
+    // PR #39 R2, PR39-SEC-06: the base images of every image Dockerfile in ONE group, so the node build base and the
+    // debian runtime base (D-TASK014-02, D-ARCH-116 rule 3) are bumped in the same PR; compose service images likewise.
+    expect(byEcosystem.get('docker')).toEqual({
+      'package-ecosystem': 'docker',
+      directories: ['/apps/api', '/apps/worker', '/apps/web', '/apps/admin', '/prisma'],
+      schedule: { interval: 'monthly' },
+      cooldown: { 'default-days': '7' },
+      'open-pull-requests-limit': '2',
+      groups: { 'docker-images': { patterns: ['*'] } },
+      'commit-message': { prefix: 'build(deps)' },
+    });
+    expect(byEcosystem.get('docker-compose')).toEqual({
+      'package-ecosystem': 'docker-compose',
+      directory: '/',
+      schedule: { interval: 'monthly' },
+      cooldown: { 'default-days': '7' },
+      'open-pull-requests-limit': '2',
+      groups: { 'compose-images': { patterns: ['*'] } },
+      'commit-message': { prefix: 'build(deps)' },
     });
   });
 

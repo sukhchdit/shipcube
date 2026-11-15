@@ -1,8 +1,8 @@
 # Nginx server for apps/admin (platform.md §3.3, ADR-0026 §1 and amendment 5). TASK-004 scaffold.
 #
-# Template for the nginx image's envsubst step (/etc/nginx/templates/*.template -> /etc/nginx/conf.d/*.conf). The
-# only placeholder is ${NGINX_PORT} (8080 in nginx-unprivileged). The image substitutes defined environment variables
-# only, so the nginx runtime variables below ($uri, ...) pass through unchanged. No secrets.
+# Template rendered once at image build time by apps/admin/Dockerfile (TASK-014) into the root-owned
+# /etc/nginx/conf.d/admin.conf. The only placeholder is ${NGINX_PORT} (8080 in nginx-unprivileged); the render
+# replaces that one name only, so the nginx runtime variables below ($uri, ...) pass through unchanged. No secrets.
 #
 # The admin app is a pure SPA (REQ-ADMIN-001): the document root holds `apps/admin/build/client/`, i.e. the SPA
 # fallback /index.html (root HydrateFallback only) and the content-hashed /assets/*. Every route, `/` included, is
@@ -22,8 +22,8 @@ map "$status:$uri" $admin_cache_control {
 }
 
 server {
-    # default_server: this block answers every request even if the image still carries the stock conf.d/default.conf
-    # (PR4-SEC-02); TASK-014 removes that file.
+    # default_server: answers requests whose Host matches no server_name; TASK-014 deletes the stock default.conf, which
+    # would still take Host: localhost and IPv6 (PR4-SEC-02, PR4-SEC-12).
     listen ${NGINX_PORT} default_server;
     server_name _;
     server_tokens off;

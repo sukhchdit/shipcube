@@ -1,0 +1,50 @@
+# Docker build-context hygiene (TASK-014; WAVE-00 sheet line 543: PR27-SEC-01, PR28-SEC-03 item 6, PR30-SEC-08 (b),
+# D-ARCH-100 item 3; platform.md §3.2 rules list). Docker semantics: a pattern anchors at the context root, `**`
+# matches any number of directories (zero included), `!` re-includes, and the last matching line wins. A bare `tests`
+# would only hide the root tests/ folder, so test trees are excluded at every depth. Every Dockerfile also copies
+# explicit paths only; tools/ci/check-dockerignore.test.ts proves both with an in-house matcher.
+#
+# `.npmrc` is deliberately NOT listed: every install stage copies it with the manifests (SEC-P3-04).
+# `prisma/client/tsconfig.json` must stay visible to the api/worker build stage (D-ARCH-105, TASK-020 part 020-B).
+
+# Test code, spikes and fixtures, at every depth.
+**/tests
+**/spikes
+**/fixtures
+**/__fixtures__
+**/*.test.ts
+**/*.test.tsx
+**/*.test.js
+**/*.test.mjs
+
+# Repository metadata, agent files and environment files (never in an image).
+.git
+.github
+.claude
+.env*
+**/.env*
+# TASK-014 round 2: the local-only Compose environment and stack configuration never enter a build context.
+compose.env
+compose*.yaml
+infra/local
+
+# Host dependencies and build output: images install and build from the lockfile themselves.
+node_modules
+**/node_modules
+coverage
+**/coverage
+**/dist
+**/build
+**/.react-router
+**/*.tsbuildinfo
+prisma/generated
+
+# Key material.
+*.pem
+*.key
+**/*.pem
+**/*.key
+
+# Documentation, except the API contract that the api image serves (D-TASK017-01 (7), D-ARCH-084).
+docs
+!docs/03-architecture/api/openapi.yaml

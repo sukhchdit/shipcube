@@ -1676,6 +1676,23 @@ export const REQUIRED_CODEOWNED_PATHS = Object.freeze([
   'tests/api/helpers/cache-control.ts',
   'tests/api/helpers/contract-validator.ts',
   'tests/contract-stubs/',
+  // PR39-SEC-05: images, compose and infrastructure (prisma/Dockerfile is covered by prisma/), and the start-up guards
+  // every container entrypoint and the config loader run before serving.
+  'apps/*/Dockerfile',
+  '.dockerignore',
+  '.hadolint.yaml',
+  'compose*.yaml',
+  'compose.env',
+  'infra/',
+  'tools/docker/',
+  'tools/compose/',
+  'packages/config/src/entry-preflight.ts',
+  'packages/config/src/entry-preflight-cli.ts',
+  'packages/config/src/node-options.ts',
+  'packages/config/src/db-tls.ts',
+  'packages/config/src/tooling-env.ts',
+  'packages/config/src/guards.ts',
+  'packages/config/src/environment.ts',
   // PR43-SEC-04: the O3 oracle (the RLS generator and its executable API cases) and the route enumeration source.
   'tests/generated/rls/',
   'tests/generated/api-mounts.ts',

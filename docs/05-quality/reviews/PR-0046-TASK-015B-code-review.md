@@ -288,3 +288,123 @@ Across PRs, no: R2-M1. The time-dependent and base-movement residuals (ruling §
 3. Fresh lane B evidence if any code changes. Lane A on the exact final head: fast-lane, scans with the security delta record, `security-integration` (or a verified security proof that satisfies the R2-M1 binding) and ci-gate `MERGE-READY`.
 4. A security-analyst delta record naming the final head.
 5. Round 3 = delta. Re-run `review/PR-46-cr/mut2.mjs` (paths before `--selectProjects`; add the R2-M1 binding mutants: head-branch check dropped, PR-count check dropped, `base_ref_changed` check dropped). Expect L10/L10b to be killed.
+
+# Round 3 (head 4bbce92)
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-M1 is closed. Proofs are now bound to THIS pull request into main: the head branch must have exactly one PR
+         (state all), runs must be on that branch in this repository, list exactly this PR with base main, and be
+         created after the last base_ref_changed; every failed or ambiguous call means no proof. The `branches: [main]`
+         trigger, `--head-ref` (env only) and `pull-requests: read` are policy-pinned. 41 of 42 new binding mutants are
+         killed (survivor B27 is a fail-closed null-repo case). R2-m1 (L10/L10b) and every R2-n1 pin are killed. Both
+         merges are pure; one heap line, main's comment, no spikes exemption. No BLOCKER/MAJOR/MINOR open in the delta.
+```
+
+| Field | Value |
+|---|---|
+| Head reviewed | `4bbce92ff4d90299ad6c3c547e824dfb410c4d8f` (code head `0f17495`; `6a845d6` lane B evidence; `4bbce92` docs-only union with `5d2c102`) |
+| Delta | `ad30316..4bbce92`: fix commits `22e9ea3` (binding, R2-m1, R2-n1, CI-CD.md) and `0f17495` (`scans` `pull-requests: read`); merges `97bb61c` (main incl. PR #42 `a082560`) and `4bbce92` (docs); evidence `6a845d6` |
+| Reviewer | code-reviewer (round 3), 2026-11-15 |
+
+## R3.1 Verification performed
+
+The dispatch allowed light commands only, with no Docker and no workflow triggers.
+
+| Check | Result |
+|---|---|
+| Changed suites on the head (paths positionally, before `--selectProjects unit`): `lane-scope`, `ci-policy`, `check-workflow-policy` | 3 suites, **330 passed**. `lane-scope.test.ts` = **90** (was 57). |
+| Regression: the other 015-B tool suites (`security-paths`, `security-integration`, `ci-minutes`, `lane-c-policy`, `inventory`, `gitleaks-full`, `heavy`, `rebuild-playwright`) | 8 suites, **120 passed**. None of these modules changed since `6e94ba4` (`git diff --stat 6e94ba4 4bbce92 -- tools/`), so their r2 mutant results stand. |
+| Prettier on the changed files (`lane-scope.{mjs,test.ts}`, policy `.mjs`/tests, `ci.yml`, `CI-CD.md`, the P10 fixture) | clean |
+| Workflow policy CLI on an unmutated copy of `4bbce92` | exit 0 |
+| Base-ref `check-evidence` (`git archive origin/main tools/quality`; `--event pull_request --base <merge-base> --head HEAD`) | **PASS**: run `20261115T0609Z_0f17495` accepted (unit 5,217 / 2 skipped, integration 301, api 128, catalog 102, **rls-cross-tenant 126**, packages/audit coverage gate cases present; merged 98.96 % / 96.84 %). No non-docs file changed after `0f17495` (`git diff --name-only 0f17495 4bbce92 -- . ':!docs' ':!.claude'` is empty). |
+| Lane A run 43687170281 (read-only `gh run view --log`) | `head_sha` = `4bbce92`, `pull_request`. fast-lane success, every step success (full). scans red only at "Security-owned paths need a review record". security-integration skipped (`record_ok=false`, so not due). ci-gate `BLOCKED: scans failure; security-integration pending (record missing)`. The lane-scope step env shows `HEAD_REF: feat/TASK-015-b-lane-c-nightly`, and the command uses `--head-ref "$HEAD_REF"`. Outputs: `identical` = 4bbce92 6a845d6 0f17495, `code_proof=` (no completed run on those SHAs, so **the binding calls did not run live**: R3-n2). The PR rollup is the same. |
+| Real API shapes (read-only `gh api` on this repository) | Run 43609726745: `head_branch` = the PR branch, `head_repository.full_name` = `sukhchdit/shipcube`, `pull_requests` = `[#46, base main, base/head repo by API url]`, which is exactly what `sameRepo`/`isThisPullRequest` parse. `pulls?state=all&head=sukhchdit%3Afeat%2FTASK-015-b-lane-c-nightly` returns exactly #46 (open, base main, same repo). Issue events of #46: 10 `referenced`, no `base_ref_changed`. Repository is private. |
+| Mutation run: scratch copy of `4bbce92` (`git archive`, node_modules junction, `git init`; script `review/PR-46-cr/mut3.mjs` = r2 `mut2.mjs` + 42 new; one Jest run per mutant; `ci.yml` mutants also run the real policy CLI) | **95 mutants: 93 killed, 2 survived** (B27 = R3-n1; W12 safety-equivalent as in r2). The binding area: 41 of 42 killed (table R3.4). Unmutated copy: 330/330 and policy exit 0. |
+| Union purity (`git merge-tree --write-tree P1 P2` vs the merge) | `97bb61c`: conflicts only in `ci.yml`, and the merge differs from the conflicted tree only in that hunk: the branch's 3 comment lines and the markers are dropped, main's comment kept, ONE `env: NODE_OPTIONS: --max-old-space-size=4096`. `4bbce92`: clean, `git diff <tree> 4bbce92` empty. `origin/main` moved since only under `docs/` (`1d24416`). |
+| (d) Union with #42 content | `grep -c max-old-space-size ci.yml` = 1, with main's comment. `eslint.config.mjs` vs `origin/main`: only the 3-line `prisma/tests/spikes/spk03-rls-tx.int.test.ts` exemption removed (the C-1 deletion); `grep -c spikes eslint.config.mjs` = 0. |
+| Forward union with PR #39 (head `b66c026`, D-ORCH-093 merges it first) | `git merge-tree --write-tree 4bbce92 b66c026` is clean. The result keeps one heap line, `branches: [main]` (both triggers), `HEAD_REF` env + `--head-ref "$HEAD_REF"`, `pull-requests: read`, `CI_PULL_REQUEST_BRANCHES` and the `scans` pin. **Update during this review:** #39 merged as `3f58935`, and `origin/main` is now `e1768ea`. `git merge-tree --write-tree origin/main 4bbce92` is also clean and keeps the same pins and one heap line. This must be re-proved on the real merge commit. |
+
+**Not re-run:** typecheck, build, full `test:unit`, lint, coverage, actionlint, lane B. For these I relied on lane A run 43687170281 (fast-lane full, every step green on `4bbce92`) and the base-ref-verified lane B run `20261115T0609Z_0f17495`.
+
+## R3.2 Verification of R2-M1 (proof binding), item by item
+
+| Requirement | Where | Verdict |
+|---|---|---|
+| Head branch in this repository with exactly one PR (`state=all`) into main | `proofBinding` `lane-scope.mjs:479-490`: `pulls?state=all&head=<owner>:<head_ref>`, `length !== 1 \|\| !isThisPullRequest(...)` returns a problem; `isThisPullRequest` checks number, `base.ref === 'main'`, base repo, head ref and head repo | **Met.** B09-B12, B16, B20-B21, B25 killed. `state=all` is load-bearing: GitHub fills a run's `pull_requests` from the PRs open NOW for its head branch, so a closed stacked PR into `weak` disappears from the run; only the `state=all` count still sees it (B12 killed by the exact-path fake). |
+| The run's `pull_requests` lists exactly this PR with base main | `runBindingProblem` `:512-523` | **Met.** Head branch, head repository, list length, PR identity, creation time: B01-B08, B19, B24, B24b killed. |
+| Created after the last `base_ref_changed` | `proofBinding` events loop (`:492-503`, all pages within MAX_API_CALLS); `created <= since` refuses the equal second | **Met.** B13, B14 (boundary), B15 (paging), B17, B18 killed. |
+| Empty, ambiguous or failed calls = no proof | lazy binding, read once before any jobs call; a binding problem `break`s the whole lookup (`:563-567`) | **Met.** B16, B17, B26 killed. Every binding test also asserts that no `/jobs` call was made. |
+| `on.pull_request.branches: [main]` pinned | `laneScopeFindings` (`CI_PULL_REQUEST_BRANCHES`, exact list, no `branches-ignore`); ci-policy cases drop, widen, glob and `branches-ignore` | **Met.** WB1-WB3 killed by the real policy CLI AND ci-policy. PB1, PB2 killed. |
+| CLI plumbing | `--pr`/`--head-ref` reach `lookupProofs`; `--gate` refuses `--head-ref` | **Met.** B22, B23, B28 killed. |
+
+**D-TASK015-65 (no `base.sha` ancestry check): accepted.** No run field records the base commit the run's merge ref was built from. `pull_requests[].base.sha` is derived from current PR state, so an ancestry check on it would prove nothing about the run. The sound control is the one implemented. If the PR never had `base_ref_changed`, its base was `main` for every run. Otherwise only runs created after the last change count, and the base since then is the current one, which the `pulls` entry shows is `main`. What remains is the ruling §3 base-movement residual (a run against an older `main`), which is already accepted. The two dependencies on GitHub behaviour are in R3-n3.
+
+**Attack re-play (r2 scenarios):**
+- (i) Stacked PR B `<A's branch> → weak`, open or closed: the head branch has 2 PRs (state all), so no binding and no proof for A at all. This is fail-closed DoS only, and the remedy is a fresh branch.
+- (ii) PR B from another branch on the same commit: `another head branch`.
+- (iii) Retarget `weak` and back: runs at or before the last `base_ref_changed` are refused.
+- (iv) Fork: `head_repository` differs, or `pull_requests` is empty.
+- (v) Head-controlled `ci.yml` on THIS PR into main: unchanged pre-existing model. The head workflow is a security-owned path, so it needs the record and policy.
+
+The proof now carries the same trust as this PR's own earlier run, which is the r2 bar.
+
+## R3.3 Findings
+
+| ID | Sev | Location | Issue | Required fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `tools/ci/lane-scope.mjs:454` (`sameRepo`) | **Mutant B27 survives.** `if (!isRecord(repoJson)) return false` → `return true` passes all 90 tests: no case has a `null`/missing `repo` (GitHub returns `head.repo: null` for a PR whose fork was deleted). The current code fails closed, and the PR number, head-ref and base-ref checks still apply, so this is not exploitable. | One `it.each` row: `prEntry({ headRepo: null })` (and a `pulls` item with `head.repo: null`) refused. |
+| R3-n2 | NIT (merge-path check) | lane A, first light push | **The binding calls have not run live yet.** In run 43687170281 no completed run existed on 6a845d6/0f17495, so `pulls` and `issues/46/events` were never called with the job token. If `pull-requests: read` did not cover issue events on this private repository, every docs push would fail closed: `no code proof`, so close and reopen the PR (cost only, not safety). GitHub documents issue-event reads as allowed with either Issues or Pull requests read. | On the security-record push, confirm in the `scans` summary that `code_proof = 43687170281:4bbce92` (or read the binding note). If it shows `events of PR 46: gh api exit …`, add `issues: read` to `scans` (pin it), or close and reopen. Record the outcome in the PR comment. |
+| R3-n3 | INFO (security record) | binding design | **The retarget control depends on two GitHub behaviours.** (1) `base_ref_changed` must be present in the issue events API. It is a documented issue-event type, but no retarget has happened on this repository to observe it. (2) The events API must be consistent when the next push's scans job reads it. A writer who retargets to `weak`, pushes, retargets back and pushes a docs commit within the API lag could slip the cutoff. That needs a deliberate retarget (D-ORCH-090 forbids it) and is in the trusted-agent class. | Add to the security record's §3 residual list beside the base-movement residual. No code change. |
+
+**Closed from round 2:**
+- **R2-M1:** closed (R3.2).
+- **R2-m1:** closed (`[R2-m1]` describe: exact `runs/77/attempts/2/jobs`, skipped `Unit tests` BLOCKED, unidentifiable run and API failure BLOCKED; L10 and L10b killed).
+- **R2-n1:** closed (L1, L12, L14, L20, L21, L27 and P10 killed; P10 via the `ci-actions-read-top-level.yml` fixture).
+- **R2-n2:** accepted residual (D-TASK015-69).
+- **R2-m2:** still routed to principal-architect (SHEET-FOLD-8). D-TASK015-59 is not adopted. Owner and due point unchanged.
+
+## R3.4 Mutation results (copy of `4bbce92`)
+
+| Area | Killed | Survived |
+|---|---|---|
+| R2-M1 binding, `lane-scope.mjs` (29) | B01–B26, B24b, B28. Covered: head branch, head repository, list length, PR identity, base ref and repo, entry head ref and repo, `pulls` count / identity / `state=all`, cutoff dropped / boundary `<=`→`<`, events paging, pulls or events failure treated as bound, event without time skipped, run without time, branch-regex bypass, PR-number bypass, CLI `--pr`/`--head-ref` plumbing, `sameRepo` url/full_name → true or suffix-only, binding problem not fatal, `--gate --head-ref` accepted | **B27** (`sameRepo` non-object → true; R3-n1) |
+| ci.yml binding pins (10; real policy CLI AND ci-policy) | WB1 filter dropped, WB2 widened, WB3 `branches-ignore`, WB4 literal `HEAD_REF`, WB5 `--head-ref` dropped, WB6 `${{ github.head_ref }}` inlined in `run:`, WB7 `pull-requests: read` dropped, WB8 `write`, WB9 granted to ci-gate, WB10 extra `issues: read` | – |
+| policy code (3) | PB1 trigger-filter check off, PB2 `branches-ignore` check off, PB3 `scans` permission pin reverted | – |
+| lane-scope r2 set (35) | L1–L16, L18–L33, L35, L36, **L10, L10b** (R2-m1) and **L1, L12, L14, L20, L21, L27** (R2-n1) | – |
+| policy r2 set (6) | P5–P10 (**P10**, R2-n1) | – |
+| ci.yml r2 set (12; W10 re-anchored on `--head-ref`) | W1–W11 | W12 (safety-equivalent, as ruled in r2) |
+| **Total** | **93 of 95** (the binding area: 41 of 42) | B27, W12 |
+
+Not re-run: the r1/lockfile groups (S, I, G, V, M, R, H, X-*, K1–K8). Their modules are byte-identical to `6e94ba4` (the r2 table, all killed), and their suites pass 120/120 on the head. The WB/PB mutants ran twice (the prefix filters overlap), and both runs killed them.
+
+## R3.5 Rulings and dispatch items
+
+- **(a) R2-M1:** fixed (R3.2). D-TASK015-65 accepted.
+- **(b) D-TASK015-66, `scans` `pull-requests: read`:**
+  - **Needed:** the `pulls` list requires the Pull requests read scope on a private repository, and the issue-events read is covered by it.
+  - **Pinned:** `PINNED_JOB_PERMISSIONS.scans` is an exact map. Dropping it (WB7), `write` (WB8), adding `issues: read` (WB10), granting it to ci-gate (WB9) and the policy constant (PB3) are all killed.
+  - **Minimal:** read only, on `scans` only. The token reaches only the lane-scope step as `GH_TOKEN` (policy rule gh-token), and every checkout has `persist-credentials: false`. ci-gate correctly does not get it, because it reads only its own run.
+  - The security view is separate.
+- **(c):** R2-m1 and the R2-n1 pins are killed (R3.4).
+- **(d) Union with #42:** pure (R3.1). ONE Lint heap `env:`, main's comment (D-TASK015-67 accepted), no spikes exemption.
+- **(e) `--head-ref "$HEAD_REF"`:**
+  - The value goes through step env only (`HEAD_REF: ${{ github.head_ref }}`), and the run line references the double-quoted shell variable. Bash does not re-evaluate a variable's contents, so `$(...)`, backticks or `;` in a branch name stay literal.
+  - The pins are `LANE_SCOPE_RUN` (exact), `LANE_SCOPE_ENV` (exact) and the `untrusted-expression` rule, which forbids `${{ github.head_ref }}` inside `run:`. WB4 (literal value), WB5 (dropped) and WB6 (inlined `${{ github.head_ref }}` in `run:`) are all killed by the real policy CLI.
+  - In `lane-scope.mjs` the branch name passes the `BRANCH` allow-list regex and `encodeURIComponent` before it reaches the `gh api` path, and `gh` is spawned with an argv array (no shell).
+  - The name never reaches `$GITHUB_OUTPUT`. Binding problem strings do not echo it, and summary notes go through `safe()`.
+  - No other `github.head_ref` use exists in the workflows.
+- **(f) Regressions:** none found. 90/90 lane-scope, 330/330 changed suites, 120/120 other 015-B suites, policy exit 0, evidence PASS, fast-lane full green on `4bbce92`.
+
+## R3.6 SECURITY-FLAGS (for security-analyst)
+
+1. R3-n3: the retarget cutoff relies on `base_ref_changed` in the issue events API and on its consistency at read time. Add it to the residual list.
+2. R3-n2: `pull-requests: read` is the only scope behind the binding. A permission gap fails closed. The first live exercise is the security-record push.
+3. Carried: R2-m2 (`devOptional`), the PR46-SEC-11/12 routing to TASK-286 (a ci-gate proof re-read will need the same binding), and the R2.6 INFO items.
+
+## R3.7 Merge conditions
+
+1. A security-analyst record naming the final head. That push is a docs push and the binding's first live exercise: the `scans` summary must show a code proof bound to run 43687170281, or the PR is closed and reopened for a full run (R3-n2). `security-integration` then runs once (security paths, record present, no security proof). ci-gate must be `MERGE-READY` on the exact final head.
+2. D-ORCH-093: PR #39 has now merged (`3f58935`). #46 must union `main` (≥ `3f58935`), then get a delta/merge-only check: one heap line; `CI_PULL_REQUEST_BRANCHES`, `LANE_SCOPE_RUN/ENV`, the `PINNED_JOB_PERMISSIONS.scans` pin and the trigger filter intact; `check-workflow-policy` at the base ref exit 0. The union brings non-docs files from #39 (`tools/ci`, `tools/deps`, `jest.config.ts`, `package.json`), so fresh lane B evidence is needed on the union head, and the lane A full run on it is a code push. The preview merge-trees with `b66c026` and with `e1768ea` are clean and keep every pin. Do the security-record push (condition 1) on the union head, so the binding's first live exercise also certifies the final tree.
+3. R3-n1 is optional (one test row). R3-n3 goes into the security record. R2-m2 stays with principal-architect.
+4. Squash merge per D-ORCH-012/013.

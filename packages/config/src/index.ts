@@ -13,9 +13,28 @@ export {
   TLS_REJECT_UNAUTHORIZED_KEY,
 } from './environment.js';
 export type { AppEnv, NodeEnv, Service } from './environment.js';
+export {
+  DATABASE_CA_DIRECTORIES,
+  databaseConnectionSettings,
+  DatabaseConfigError,
+  MAX_ROOT_CERTIFICATE_BYTES,
+  readRootCertificate,
+  tlsConfig,
+  withoutQuery,
+} from './db-tls.js';
+export type { DatabaseConnectionSettings, DatabaseSsl, DatabaseSslNegotiation, DatabaseTlsConfig } from './db-tls.js';
 export { ConfigValidationError, formatConfigError } from './errors.js';
 export type { ConfigIssue, ConfigIssueCode } from './errors.js';
-export { GUARDS, isInspectorOption, nodeOptionTokens, runGuards, RUNTIME_DATABASE_URL_PARAMS } from './guards.js';
+export {
+  DATABASE_SSLMODES,
+  GUARDS,
+  hasOnlyRuntimeDatabaseUrlParams,
+  hasValidDatabaseUrlParamValues,
+  isInspectorOption,
+  nodeOptionTokens,
+  runGuards,
+  RUNTIME_DATABASE_URL_PARAMS,
+} from './guards.js';
 export type { Guard, GuardInput } from './guards.js';
 export {
   createFileSecretProvider,
@@ -81,5 +100,6 @@ export {
 } from './secret-refs.js';
 export type { ResolvedSecretContext, ResolveSecretRefsOptions, SecretProvider, SecretProviderKind, SecretRef } from './secret-refs.js';
 export { REDACTED, Secret } from './secret.js';
+export { checkToolingEnv, formatToolingIssues } from './tooling-env.js';
 export { TOOLING_CONFIG_KEYS, TOOLING_KEY_NAMES } from './tooling-keys.js';
 export type { ToolingKeySpec } from './tooling-keys.js';

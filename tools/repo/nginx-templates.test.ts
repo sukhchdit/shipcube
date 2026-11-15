@@ -84,6 +84,41 @@ describe('Nginx templates (TASK-004, platform.md §3.3)', () => {
     expect(acceptLanguageLocale(header)).toBe(locale);
   });
 
+  it.each([
+    ['web', web],
+    ['admin', admin],
+  ])('%s: the default_server comment names the stock default.conf that TASK-014 deletes (sheet line 537)', (_app, template) => {
+    const comments = template
+      .split(/\r?\n/)
+      .filter((line) => /^\s*#/.test(line))
+      .map((line) => line.replace(/^\s*#\s?/, ''))
+      .join(' ');
+    expect(comments).toContain(
+      'answers requests whose Host matches no server_name; TASK-014 deletes the stock default.conf, which would still take Host: localhost and IPv6',
+    );
+    expect(comments).not.toContain('answers every request even if the image still carries');
+  });
+
+  it.each(['web', 'admin'])(
+    '%s Dockerfile: stock config and html removed before the template, only build/client copied (TASK-014)',
+    (app) => {
+      const dockerfile = readFileSync(join(repoRoot, 'apps', app, 'Dockerfile'), 'utf8');
+      const at = (needle: string) => dockerfile.indexOf(needle);
+      expect(at('rm -f /etc/nginx/conf.d/default.conf')).toBeGreaterThan(-1);
+      expect(at('rm -rf /usr/share/nginx/html/*')).toBeGreaterThan(-1);
+      expect(at('rm -f /etc/nginx/conf.d/default.conf')).toBeLessThan(at(`COPY infra/nginx/${app}.conf.template`));
+      expect(at('rm -rf /usr/share/nginx/html/*')).toBeLessThan(at('/build/client/ /usr/share/nginx/html/'));
+      expect(dockerfile).toContain(`COPY --from=build /app/apps/${app}/build/client/ /usr/share/nginx/html/`);
+      const instructions = dockerfile.split(/\r?\n/).filter((line) => !/^\s*#/.test(line));
+      expect(instructions.filter((line) => line.includes('build/server'))).toEqual([]);
+      // Rendered for the one placeholder the image fixes (8080); an unrendered placeholder fails the build.
+      expect(dockerfile).toContain('sed "s/[\\$]{NGINX_PORT}/8080/g"');
+      expect(dockerfile).toContain('grep -qF "\\${"');
+      expect(dockerfile).toMatch(/^USER 101$/m);
+      expect(dockerfile).toContain('CMD ["wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]');
+    },
+  );
+
   it('admin: SPA fallback for every route, never indexed', () => {
     expect(admin).toContain('try_files $uri /index.html;');
     expect(admin).toContain('add_header X-Robots-Tag "noindex, nofollow" always;');

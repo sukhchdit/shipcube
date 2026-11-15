@@ -44,5 +44,8 @@
 - [P5 PR-0044 round 2](project_p5_pr44_r2.md) — @d943ef7 PASS_W_F-U; 01-04 closed; LOW 10 template createRequire key, 13 AppError cause to stderr; INFO 11/12/14; union list R2.8
 - [P5 PR-0046 015-B lane C](project_p5_pr46_015b_lane_c.md) — R1 @12ea6a6 PASS_W_F-U; PR33-SEC-08 closed; LOW 01 supply-chain order, 02 npm_config_ Playwright redirect, 03-05; D-ORCH-077 delta round owed
 - [P5 PR-0046 round 2](project_p5_pr46_r2.md) — @ad30316 PASS_W_F-U; 01/02/03/06 closed; new LOW 11 audit, 12 scans GATE_LANE_SCOPE, 13 cross-base proof; CODEOWNERS ruling; #42/#39 unions
+- [P5 PR-0046 round 3](project_p5_pr46_r3.md) — @4bbce92 PASS_W_F-U; 13 closed (binding); INFO 15/16; #39 union + MO owed; GitHub pull_requests/events facts
 - [P5 PR-0047 rls activation](project_p5_pr47_rls_activation.md) — R1 @be8780b PASS_W_F-U; D-SEC-PR47-01 SEC-TC-74 to required before TASK-037; LOW 01/02 (heavy --base), INFO 03
+- [P5 PR-0039 merge-only](project_p5_pr39_mo.md) — @ea1e010 union with #42 PASS_W_F-U; new INFO 14 tooling test-only closure; #46 second-merger list; symlink-777 find gotcha
+- [P5 PR-0048 RBAC matrix](project_p5_pr48_rbac_matrix.md) — TASK-027 R1 @a4f2d51 PASS_W_F-U; LOW 01-04 (foreign compare, CODEOWNERS, oracle export, 401 vs A-078); T-32 owner TASK-060; oracle kit
 - [P5 PR-0042 round 3](project_p5_pr42_r3.md) — @96bd37a PASS_W_F-U; 13/14/16 closed; new MED 17 deferred-start write (H2 fix), LOW 19, INFO 18 lint env; round-4 triggers
