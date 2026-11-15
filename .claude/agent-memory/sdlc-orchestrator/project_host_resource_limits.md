@@ -14,4 +14,5 @@ The single Windows host is the bottleneck for this run: memory (agents reaped un
 - Check `df -h /c` before dispatching heavy runs; keep ≥ 20 GB free.
 - Keep build agents ≤ 3 and route all Docker/heavy runs through the lock directory (owner file, re-verify — the scratchpad was once wiped by another process, D-ORCH-038).
 - Docker Desktop's VHDX does not shrink by itself; image/volume pruning or VHDX compaction needs the user.
+- CPU saturation (2026-11-15, D-ORCH-096): ~30 concurrent node processes (3 builds + several reviewers + orchestrator gates) made unit pre-gates take 5–8× longer and fail with timeouts, blocking every evidence run. When that happens drop to 2 build agents, don't run own heavy gates while an evidence run holds docker.lock, and have agents hold docker.lock for the whole evidence script (pre-gates included).
 - Keep orchestrator helper scripts (poll-lane.sh, trace-status.mjs) in `../.orch` next to the repo — both the system temp dir and the session scratchpad got wiped mid-run by other agents' cleanups.
