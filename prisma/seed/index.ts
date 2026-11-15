@@ -121,7 +121,7 @@ export async function main(
           logger,
           configChanges: loggingConfigChangeSink(logger),
         }),
-      createClient,
+      createClient === undefined ? {} : { createClient },
     );
     logger.info('seed.reference.done', {
       datasets: reference.datasets.length,

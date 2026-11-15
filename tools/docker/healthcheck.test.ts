@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type RequestListener, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
@@ -58,8 +59,17 @@ describe('image healthcheck probe (TASK-014)', () => {
       api: { portVariable: 'APP_PORT', defaultPort: 3000 },
       worker: { portVariable: 'APP_HEALTH_PORT', defaultPort: 9464 },
     });
-    // Importing the module ran no probe (the entry point is guarded by import.meta.main).
-    expect(process.exitCode ?? 0).toBe(0);
+    // Importing the module ran no probe (the entry point is guarded by import.meta.main). Checked in a fresh process: the
+    // exit code of this one is shared with every earlier test file when Jest runs in band (W0-FLAKE, D-ORCH-097).
+    const imported = runNode(
+      [
+        '--input-type=module',
+        '--eval',
+        `await import(${JSON.stringify(pathToFileURL(SCRIPT).href)}); await new Promise((resolve) => setTimeout(resolve, 300)); process.stdout.write('exit=' + String(process.exitCode ?? 0));`,
+      ],
+      { cwd: repoRoot },
+    );
+    expect(imported).toMatchObject({ status: 0, stdout: 'exit=0' });
   });
 
   it('is healthy on 200 from GET /health/ready and prints nothing', async () => {
