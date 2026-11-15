@@ -110,7 +110,18 @@ export interface RouteResult {
 export interface RouteTransport {
   readonly ip: string;
   readonly userAgent: string;
+  /** `X-Client-App` as sent ('' when absent); informational only, the audit source app (ADR-0007 §Capture). */
+  readonly clientApp: string;
+  /** The matched route TEMPLATE (`/api/v1/shipments/:shipmentId`), never the concrete URL (audit `route`). */
+  readonly routeTemplate: string;
 }
+
+/**
+ * The entity-ID resolver of an audited route (REQ-AUDIT-006, US-086; TASK-029): the id of the entity the request acted
+ * on, read from the validated input or the handler's result (`undefined` before the handler ran: a denial). The capture
+ * middleware records it only when it is a well-formed id, `null` otherwise (PR42-SEC-15).
+ */
+export type AuditEntityIdResolver = (ctx: RouteRequestContext, result: RouteResult | undefined) => unknown;
 
 /**
  * What every phase reads about the request (ADR-0003 amendment 2026-11-13): the descriptor, the validated input, the
@@ -211,6 +222,12 @@ type RouteDeclaration = RoutePermission & {
   /** Express path relative to the mount (`/shipments/:shipmentId`); literal segments and `:name` parameters only. */
   readonly path: string;
   readonly audit: AuditDescriptor;
+  /**
+   * The entity-ID resolver of the audit descriptor (REQ-AUDIT-006). Optional where the capture middleware can derive it
+   * (CREATE: the result body's `id`; a path parameter named `<entity>Id`; a list view has none); an audited route
+   * without one fails to mount (platform/audit/descriptor-runtime.ts).
+   */
+  readonly auditEntityId?: AuditEntityIdResolver;
   readonly schema: RouteSchemas;
   readonly rateLimit: RateLimitClass;
   /** `x-rate-limit-route`: the route-specific limit text of the contract, when it has one. */
@@ -320,6 +337,14 @@ function auditProblems(descriptor: AuditDescriptor | undefined): string[] {
     if (audit.sensitivity !== 'NONE' || audit.entity !== null) problems.push('audit action NONE has sensitivity NONE and entity null');
   } else if (audit.sensitivity === 'NONE') problems.push(`audit action ${String(audit.action)} cannot have sensitivity NONE`);
   return problems;
+}
+
+/** `auditEntityId` is a function, and only on an audited route (TASK-029). */
+function auditResolverProblems(spec: CheckedSpec): string[] {
+  const resolver: unknown = spec.auditEntityId;
+  if (resolver === undefined) return [];
+  if (typeof resolver !== 'function') return ['auditEntityId is not a function'];
+  return (spec.audit as AuditDescriptor | undefined)?.action === 'NONE' ? ['auditEntityId is only allowed on an audited route'] : [];
 }
 
 /** The parts of Joi's `describe()` output the closed-schema walk reads. */
@@ -592,7 +617,7 @@ export function routeDefinitionProblems<L, C>(declared: RouteSpec<L, C>): string
   const problems: string[] = [];
   if (!OPERATION_ID.test(String(spec.operationId))) problems.push('operationId must be camelCase');
   if (!isOneOf(ROUTE_METHODS, spec.method)) problems.push(`method "${String(spec.method)}" is not one of ${ROUTE_METHODS.join(', ')}`);
-  problems.push(...pathProblems(spec.path), ...permissionProblems(spec), ...auditProblems(spec.audit));
+  problems.push(...pathProblems(spec.path), ...permissionProblems(spec), ...auditProblems(spec.audit), ...auditResolverProblems(spec));
   if (!isOneOf(RATE_LIMIT_CLASSES, spec.rateLimit)) problems.push(`rateLimit "${String(spec.rateLimit)}" is not a class`);
   if (!isOneOf(IDEMPOTENCY_MODES, spec.idempotency)) problems.push(`idempotency "${String(spec.idempotency)}" is not a mode`);
   if (!isOneOf(ROUTE_TENANCIES, spec.tenancy)) problems.push(`tenancy "${String(spec.tenancy)}" is unknown`);

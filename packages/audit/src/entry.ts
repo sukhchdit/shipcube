@@ -477,6 +477,24 @@ function routeTemplate(value: unknown): string | null {
   return value;
 }
 
+/*
+ * Shape predicates for callers that build entries from request data (PR42-SEC-15, D-TASK025-27): the capture hook
+ * passes a value only when the writer would accept it and `null` otherwise, so a client-shaped path parameter, user
+ * agent or template can never turn the entry into a 500 refusal.
+ */
+/** True for a value `entityId` accepts (an id, code or number; no `@`, `+`, space, `/`, `?`). */
+export const isAuditEntityId = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID.test(value);
+/** True for a value `origin.uaParsed` accepts (browser family + major / OS family, ≤ 120 characters). */
+export const isAuditUaParsed = (value: unknown): value is string => typeof value === 'string' && UA_PARSED.test(value);
+/** True for a value `origin.route` accepts (a route template, never a concrete URL). */
+export function isAuditRouteTemplate(value: unknown): value is string {
+  try {
+    return routeTemplate(value) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** A clear-text column in its shape (PR42-SEC-04), after the storable-text checks. */
 function shaped(value: unknown, field: string, max: number, pattern: RegExp): string | null {
   const text = optionalText(value, field, max);

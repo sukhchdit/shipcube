@@ -9,16 +9,17 @@
  * handler bypassed `defineRoute`.
  */
 import { findRouteBindingViolations, type RouteBindingViolation } from '@platform/authz';
+import type { Config } from '@platform/config';
 import type { NextFunction, Request, RequestHandler, Response, Router } from 'express';
 
 import { authenticate } from '../authn/authenticate.js';
-import { authorise } from '../authz/authorise.js';
+import { authoriseSlot } from '../authz/authorise.js';
 import { etag } from '../etag/etag.js';
 import { idempotency } from '../idempotency/idempotency.js';
 import { deprecationHeaderValues } from '../openapi/deprecation.js';
 import { mfaGate } from '../mfa/mfa-gate.js';
 import { routeRateLimit } from '../rate-limit/limits.js';
-import { type ExecuteOptions, executeSlot } from '../tx/execute.js';
+import { createAuditCapture, type ExecuteOptions, executeSlot } from '../tx/execute.js';
 import { validate } from '../validate/slot.js';
 import { isDefinedRoute, type RouteDescriptor } from './define-route.js';
 import { registerRouteHandler } from './route-registry.js';
@@ -41,17 +42,29 @@ export type RoutePipelineStep = (typeof ROUTE_PIPELINE)[number];
 
 export type PipelineSlots = Readonly<Record<Exclude<RoutePipelineStep, 'context'>, RouteSlot>>;
 
-/** The production slots; `execute` needs the runtime's tenant-transaction runner. */
-export function defaultPipelineSlots(options: ExecuteOptions): PipelineSlots {
+export interface PipelineOptions extends ExecuteOptions {
+  /**
+   * The validated configuration of the audit capture (TASK-029): with it, the tx slot captures every audited route and
+   * the authorisation slot audits denials, through one writer whose head-row lock waits `DB_AUDIT_LOCK_TIMEOUT_MS`.
+   */
+  readonly auditConfig?: Pick<Config, 'DB_AUDIT_LOCK_TIMEOUT_MS'>;
+}
+
+/** The production slots; `execute` needs the runtime's tenant-transaction runner, the capture the audit config. */
+export function defaultPipelineSlots(options: PipelineOptions): PipelineSlots {
+  const { auditConfig, ...execute } = options;
+  const capture =
+    options.capture ?? (auditConfig === undefined ? undefined : createAuditCapture({ config: auditConfig, tenantTx: options.tenantTx }));
+  const withCapture = capture === undefined ? {} : { capture };
   return {
     authenticate,
     mfaGate,
-    authorise,
+    authorise: authoriseSlot(withCapture),
     rateLimit: routeRateLimit,
     validate,
     idempotency,
     etag,
-    execute: executeSlot(options),
+    execute: executeSlot({ ...execute, ...withCapture }),
   };
 }
 

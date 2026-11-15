@@ -5,7 +5,10 @@
  *  2. `call` (optional) with no transaction, no database handle and an AbortSignal (request deadline, client gone). The
  *     deadline is ENFORCED (D-ORCH-069): the slot stops waiting when the signal aborts and answers a retryable 503
  *     (`Retry-After`), whether or not `call` honours the signal; a client already gone skips `call`;
- *  3. `handler` plus the audit hook in ONE `withTenantTx`, the only write transaction, committed;
+ *  3. `handler` plus the audit hook in ONE `withTenantTx`, the only write transaction, committed (the hook records
+ *     the route's entry and runs the transaction's one audit flush as its last database work, TASK-029);
+ *  3a. a VIEW / DOWNLOAD route's entry in its own short transaction, before anything is sent (fail closed for
+ *     SENSITIVE, 503 AUDIT_UNAVAILABLE); after a failed step 3 of a mutating route, its FAILED entry (best effort);
  *  4. send the handler's result (a stream result is completed here, after COMMIT, under the same signal and deadline;
  *     TASK-044 owns its framing);
  *  5. `afterCommit` (optional), scheduled once the write committed (also when sending or the stream fails afterwards),
@@ -22,7 +25,7 @@
 import { ANONYMOUS_ACTOR_ID, AppError, SYSTEM_ACTOR_ID } from '@platform/shared';
 import type { Request, Response } from 'express';
 
-import { type AuditHook, captureAudit } from '../audit/capture.js';
+import { type AuditCapture, type AuditHook, type MountedAudit, NOT_AUDITED, withoutCapture } from '../audit/capture.js';
 import { requestContextOf } from '../context/request-context.js';
 import type { TenantContext, TenantTxRunner } from '../db/index.js';
 import type {
@@ -39,6 +42,9 @@ import { inputOf, isPrivateResponse, principalOf, PRIVATE_CACHE_CONTROL, routeTe
 import type { RouteSlot } from '../routing/slot.js';
 import { abortable } from './abortable.js';
 import type { AfterCommitQueue } from './after-commit.js';
+
+/** The capture factory, for the composition (routing/pipeline.ts): the tx slot is the one importer of capture.ts. */
+export { type AuditCapture, type AuditCaptureOptions, createAuditCapture } from '../audit/capture.js';
 
 /**
  * The request deadline of the `call` phase and of a stream (D-ARCH-106 (4), D-ORCH-069): armed when `call` (or, without
@@ -58,6 +64,12 @@ export interface ExecuteOptions {
    * last line of defence.
    */
   readonly tenantTx: TenantTxRunner<unknown> | undefined;
+  /**
+   * The audit capture (TASK-029; createApp builds it from `DB_AUDIT_LOCK_TIMEOUT_MS`). Without it an audited route is
+   * refused when it is mounted (`withoutCapture`, PR32-SEC-03).
+   */
+  readonly capture?: AuditCapture;
+  /** Test seam: replaces the in-transaction audit hook of every route (the capture's other steps stay off). */
   readonly audit?: AuditHook;
   /**
    * Runs the `afterCommit` phases and drains them at shutdown (createApp passes the process's queue). Required by a
@@ -192,15 +204,20 @@ function requestLifetime(res: Response, deadlineMs: number): RequestLifetime {
 }
 
 /** The frozen transport view a handler may read (PR32-SEC-05 (c), PR #32 n4): never the live request or response. */
-export function transportOf(req: Request): RouteTransport {
-  return Object.freeze({ ip: req.ip ?? '', userAgent: req.get('user-agent') ?? '' });
+export function transportOf(req: Request, routeTemplate = ''): RouteTransport {
+  return Object.freeze({
+    ip: req.ip ?? '',
+    userAgent: req.get('user-agent') ?? '',
+    clientApp: req.get('x-client-app') ?? '',
+    routeTemplate,
+  });
 }
 
 interface Phases {
   readonly route: RouteDescriptor;
   readonly request: RouteRequestContext;
   readonly options: ExecuteOptions;
-  readonly audit: AuditHook;
+  readonly audit: MountedAudit;
   readonly lifetime: RequestLifetime;
 }
 
@@ -215,7 +232,7 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     if (result.stream !== undefined && result.body !== undefined) {
       throw new RouteResultError(route.operationId, 'a stream result has no body');
     }
-    await audit(ctx, result);
+    await audit.inTransaction(ctx, result);
     return result;
   };
   const none: PhaseResults<unknown, unknown> = Object.freeze({ loaded: undefined, called: undefined });
@@ -235,13 +252,29 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     signal.throwIfAborted();
     called = await abortable(call(Object.freeze({ ...request, signal }), loaded as never), signal);
   }
-  return runner.withTenantTx(tenant, (db) => write(db, Object.freeze({ loaded, called })));
+  let result: RouteResult;
+  try {
+    result = await runner.withTenantTx(tenant, (db) => write(db, Object.freeze({ loaded, called })));
+  } catch (error) {
+    // REQ-AUDIT-010: the business transaction rolled back; its FAILED entry goes in a transaction of its own.
+    await audit.afterFailure(request, error, tenant);
+    throw error;
+  }
+  // The result set is fixed and nothing is sent yet: a VIEW / DOWNLOAD entry is written now (REQ-AUDIT-005).
+  await audit.afterCommit(request, result, tenant);
+  return result;
 }
 
 export function executeSlot(options: ExecuteOptions): RouteSlot {
   return (route) => {
-    // Chosen at mount time: the audit stub refuses an audited route before it can be served (PR32-SEC-03).
-    const audit = options.audit ?? captureAudit(route);
+    // Compiled at mount time: an incomplete descriptor, or an audited route without a capture, is refused before it can
+    // be served (AT-US-086-02, PR32-SEC-03).
+    const audit: MountedAudit =
+      options.audit !== undefined
+        ? { ...NOT_AUDITED, inTransaction: options.audit }
+        : options.capture === undefined
+          ? withoutCapture(route)
+          : options.capture.mount(route);
     const queue = options.afterCommit;
     if (route.afterCommit !== undefined && queue === undefined) throw new AfterCommitNotWiredError(route.operationId);
     const deadlineMs = options.callDeadlineMs ?? CALL_DEADLINE_MS;
@@ -252,7 +285,7 @@ export function executeSlot(options: ExecuteOptions): RouteSlot {
         input: inputOf(res),
         principal: principalOf(res),
         correlationId,
-        transport: transportOf(req),
+        transport: transportOf(req, routeTemplateOf(res) ?? route.path),
       });
       const lifetime = requestLifetime(res, deadlineMs);
       try {
