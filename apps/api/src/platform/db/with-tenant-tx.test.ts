@@ -43,6 +43,8 @@ class FakeTx {
     return Promise.resolve((this.prev === undefined ? [] : [this.prev]) as T);
   }
   $executeRaw(strings: TemplateStringsArray): Promise<number> {
+    // A statement marked slow answers a macrotask later, like a real round trip (PR42-SEC-17 statement tracking).
+    if (strings.join('').includes('slow')) return new Promise((resolve) => setTimeout(() => resolve(strings.length), 10));
     return Promise.resolve(strings.length);
   }
   $transaction(): Promise<string> {
@@ -642,7 +644,7 @@ describe('[PR42-SEC-02] rollback-only latch: a swallowed audit refusal never com
     actor: { type: 'USER', userId: ACTOR },
     origin: { sourceApp: 'web', correlationId: 'corr-0001-latch' },
   };
-  const store = (append: AuditStore['append']): AuditStore => ({ append, insertVaultRows: () => Promise.resolve([]) });
+  const store = (appendBatch: AuditStore['appendBatch']): AuditStore => ({ appendBatch, insertVaultRows: () => Promise.resolve([]) });
 
   /** The fake client, recording whether each transaction committed (callback resolved) or rolled back (it threw). */
   function recordingSetup() {
@@ -770,12 +772,12 @@ describe('[PR42-SEC-13] a write the callback starts but does not await never let
     const runner = createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client });
     /** A store whose append issues two statements on the handed transaction, each recorded once it answered. */
     const store: AuditStore = {
-      async append(db) {
+      async appendBatch(db) {
         await db.$queryRaw`SELECT 1`;
         events.push('statement 1');
         await db.$executeRaw`SELECT 2`;
         events.push('statement 2');
-        return APPENDED;
+        return [APPENDED];
       },
       insertVaultRows: () => Promise.resolve([]),
     };
@@ -840,7 +842,7 @@ describe('[PR42-SEC-13] a write the callback starts but does not await never let
   it('L8d: a detached append failing after its first statement rolls back and answers the audit failure', async () => {
     const { runner, events } = setup();
     const failing: AuditStore = {
-      async append(db) {
+      async appendBatch(db) {
         await db.$queryRaw`SELECT 1`;
         events.push('statement 1');
         await later(5);
@@ -882,5 +884,207 @@ describe('[PR42-SEC-13] a write the callback starts but does not await never let
     });
     await expect(writer.write(kept as TenantDb<FakeTx>, PLAIN_ENTRY)).rejects.toThrow('TENANT_TX_CLOSED');
     expect(events).toEqual(['commit']);
+  });
+});
+
+describe('[PR42-SEC-17] a write whose START the callback deferred still completes before COMMIT, or the transaction rolls back', () => {
+  const ENTRY: AuditEntryInput = {
+    action: 'CREATE',
+    outcome: 'SUCCESS',
+    entityName: 'address',
+    entityId: 'a-3',
+    orgId: ORG,
+    actor: { type: 'USER', userId: ACTOR },
+    origin: { sourceApp: 'web', correlationId: 'corr-0003-deferred' },
+  };
+  const APPENDED: AppendedEntry = { id: 'e-2', streamId: ORG, streamSeq: 1, occurredAt: '', prevHash: '', entryHash: '' };
+  const ticks = async (hops: number): Promise<void> => {
+    for (let hop = 0; hop < hops; hop += 1) await Promise.resolve();
+  };
+
+  /** Like the PR42-SEC-13 setup: `events` records the business statement, the store's append and COMMIT / ROLLBACK. */
+  function setup(appendFails = false) {
+    const fake = fakeClient();
+    const events: string[] = [];
+    const client = {
+      ...fake.client,
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>, txOptions?: { maxWait?: number; timeout?: number }): Promise<R> {
+        try {
+          const result = await fake.client.$transaction(fn, txOptions);
+          events.push('commit');
+          return result;
+        } catch (error) {
+          events.push('rollback');
+          throw error;
+        }
+      },
+    };
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client });
+    const store: AuditStore = {
+      async appendBatch(db) {
+        await db.$executeRaw`SELECT 'append'`;
+        if (appendFails) throw new AuditWriteError('HEAD_MOVED');
+        events.push('entry');
+        return [APPENDED];
+      },
+      insertVaultRows: () => Promise.resolve([]),
+    };
+    const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
+    const business = async (db: TenantDb<FakeTx>): Promise<void> => {
+      await db.$executeRaw`SELECT 'slow business'`;
+      events.push('business');
+    };
+    return { runner, events, writer, business };
+  }
+
+  it.each([1, 2, 8, 50])('K%i: a write chained %i microtask hops behind the callback commits only with its entry', async (hops) => {
+    const { runner, events, writer } = setup();
+    await runner.withTenantTx(ctx(), (db) => {
+      void ticks(hops).then(() => writer.write(db, ENTRY).catch(() => undefined));
+      return Promise.resolve('ok');
+    });
+    expect(events).toEqual(['entry', 'commit']);
+  });
+
+  it('B1: a detached business statement with the write chained after it: business, entry, COMMIT', async () => {
+    const { runner, events, writer, business } = setup();
+    await runner.withTenantTx(ctx(), (db) => {
+      void business(db).then(() => writer.write(db, ENTRY).catch(() => undefined));
+      return Promise.resolve('ok');
+    });
+    expect(events).toEqual(['business', 'entry', 'commit']);
+  });
+
+  it('B3: the detached "read the before-image, then write" block commits only together with its entry', async () => {
+    const { runner, events, writer } = setup();
+    await runner.withTenantTx(ctx(), (db) => {
+      void (async () => {
+        await db.$executeRaw`SELECT 'slow before image'`;
+        await writer.write(db, ENTRY);
+      })().catch(() => undefined);
+      return Promise.resolve('ok');
+    });
+    expect(events).toEqual(['entry', 'commit']);
+  });
+
+  it('B3 with a failing append: the deferred write marks the latch before COMMIT, so the transaction rolls back (500)', async () => {
+    const { runner, events, writer, business } = setup(true);
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        void (async () => {
+          await business(db);
+          await writer.write(db, ENTRY);
+        })().catch(() => undefined);
+        return Promise.resolve('ok');
+      }),
+    );
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(events).toEqual(['business', 'rollback']);
+  });
+
+  it('T0 (documented residual): a write started from a timer runs after COMMIT and is refused (TENANT_TX_CLOSED), never committed', async () => {
+    const { runner, events, writer } = setup();
+    const late: Promise<unknown>[] = [];
+    await runner.withTenantTx(ctx(), (db) => {
+      setTimeout(() => void late.push(writer.write(db, ENTRY).catch((failure: unknown) => failure)), 20);
+      return Promise.resolve('ok');
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await expect(Promise.all(late)).resolves.toEqual([expect.objectContaining({ reason: 'TENANT_TX_CLOSED' })]);
+    // the residual: the transaction committed without the entry; the writer JSDoc forbids timer-started writes and
+    // TASK-033's audit-completeness suite is the backstop (PR42-SEC-17 verification: "T0 documented as outside")
+    expect(events).toEqual(['commit']);
+  });
+});
+
+describe('[D-ARCH-122] I3 and the stream check through the real TenantDb and withTenantTx', () => {
+  const ENTRY: AuditEntryInput = {
+    action: 'UPDATE',
+    outcome: 'SUCCESS',
+    entityName: 'address',
+    entityId: 'a-4',
+    orgId: ORG,
+    actor: { type: 'USER', userId: ACTOR },
+    origin: { sourceApp: 'web', correlationId: 'corr-0004-flush' },
+  };
+
+  function setup() {
+    const fake = fakeClient();
+    const outcomes: string[] = [];
+    const client = {
+      ...fake.client,
+      async $transaction<R>(fn: (inner: FakeTx) => Promise<R>, txOptions?: { maxWait?: number; timeout?: number }): Promise<R> {
+        try {
+          const result = await fake.client.$transaction(fn, txOptions);
+          outcomes.push('commit');
+          return result;
+        } catch (error) {
+          outcomes.push('rollback');
+          throw error;
+        }
+      },
+    };
+    const { deps } = fakeDeps();
+    const runner = createWithTenantTx(client, OPTIONS, { ...deps, scopeClient: () => client });
+    const batches: number[] = [];
+    const store: AuditStore = {
+      appendBatch: (_db, rows) => {
+        batches.push(rows.length);
+        return Promise.resolve(
+          rows.map((row) => ({ id: row.id, streamId: row.streamId, streamSeq: 1, occurredAt: '', prevHash: '', entryHash: '' })),
+        );
+      },
+      insertVaultRows: () => Promise.resolve([]),
+    };
+    return { runner, outcomes, batches, writer: createAuditWriter({ store, lockTimeoutMs: 250 }) };
+  }
+
+  it('[I3] entries recorded but never flushed fail the transaction with 500 AUDIT_WRITE_FAILED and roll it back', async () => {
+    const { runner, outcomes, batches, writer } = setup();
+    const error = await caught(
+      runner.withTenantTx(ctx(), (db) => {
+        writer.record(db, ENTRY);
+        return Promise.resolve('business change done');
+      }),
+    );
+    expect(error).toBeInstanceOf(DbError);
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED', reason: 'AUDIT_WRITE_FAILED' });
+    expect(outcomes).toEqual(['rollback']);
+    expect(batches).toEqual([]);
+  });
+
+  it('two records and one flush commit in one batch; the buffer is per transaction', async () => {
+    const { runner, outcomes, batches, writer } = setup();
+    for (let run = 0; run < 2; run += 1) {
+      await runner.withTenantTx(ctx(), async (db) => {
+        writer.record(db, ENTRY);
+        writer.record(db, { ...ENTRY, entityId: 'a-5' });
+        await writer.flush(db);
+        return 'ok';
+      });
+    }
+    expect(batches).toEqual([2, 2]);
+    expect(outcomes).toEqual(['commit', 'commit']);
+  });
+
+  it('[STREAM_MISMATCH] contextOrgId is the validated organisation of the transaction; an entry of another organisation rolls back', async () => {
+    const { runner, outcomes, writer } = setup();
+    const other = randomUUID();
+    const seen: string[] = [];
+    const error = await caught(
+      runner.withTenantTx(ctx({ orgId: other.toUpperCase() }), (db) => {
+        seen.push(db.contextOrgId());
+        try {
+          writer.record(db, ENTRY);
+        } catch {
+          // swallowed on purpose: the latch still rolls the transaction back (PR42-SEC-02)
+        }
+        return Promise.resolve('ok');
+      }),
+    );
+    expect(seen).toEqual([other]);
+    expect(error).toMatchObject({ status: 500, code: 'AUDIT_WRITE_FAILED' });
+    expect(outcomes).toEqual(['rollback']);
   });
 });

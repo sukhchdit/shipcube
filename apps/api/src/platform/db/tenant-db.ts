@@ -68,19 +68,29 @@ export type TenantDb<TTx> = Omit<TTx, (typeof TENANT_DB_OMITTED)[number] | Syste
  *    idempotent (the first failure wins).
  *  - `track`: starts `work` and registers it as in flight on the transaction; `withTenantTx` awaits every tracked
  *    work that is still running when the callback returns (`TenantDbHandle.settle`) before it reads the latch and
- *    commits. A write the callback started but did not await (`void writer.write(…)`, `writer.write(…).catch(log)`)
- *    therefore either completes inside the transaction or marks it rollback-only; it never lets the business change
- *    commit without its entry. Feature code calling it can only delay the commit, bounded by the transaction timeout.
- *    Work started after settling began is awaited too; work never registered here (any other detached promise) is not.
- * Both are refused once the transaction settled (`TENANT_TX_CLOSED`), `track` before `work` is started.
+ *    commits. A write the callback started but did not await (`writer.write(…).catch(log)`; the writer's promises are
+ *    already handled, PR42-SEC-19) therefore either completes inside the transaction or marks it rollback-only; it
+ *    never lets the business change commit without its entry. Feature code calling it can only delay the commit,
+ *    bounded by the transaction timeout. Work started after settling began is awaited too. PR42-SEC-17: every statement
+ *    the guard starts is registered the same way, and `settle` also waits one `setImmediate` turn after the in-flight
+ *    set drains and loops until a turn adds nothing, so a write whose START the callback deferred (behind a pending
+ *    promise, a detached statement, a "read, then write" block) still starts and completes before COMMIT. A start
+ *    deferred to a TIMER is not seen (residual, documented on the writer; TASK-033's completeness suite backs it).
+ *  - `beforeCommit` (D-ARCH-122 I3): registers a check that `withTenantTx` runs after settling and before it reads the
+ *    latch; an `Error` from any check fails the transaction (the writer's "recorded entries were flushed").
+ *  - `contextOrgId`: the validated `app.org_id` of the transaction (lower-case UUID, or '' for none), the writer's
+ *    stream check (D-ARCH-122 STREAM_MISMATCH). Read-only information the caller already holds.
+ * All are refused once the transaction settled (`TENANT_TX_CLOSED`), `track` before `work` is started.
  */
 export interface TenantDbLatch {
   markRollbackOnly(failure: Error): void;
   track<T>(work: () => Promise<T>): Promise<T>;
+  beforeCommit(check: () => Error | undefined): void;
+  contextOrgId(): string;
 }
 
 /** The guard-provided top-level members of {@link TenantDbLatch} (not Prisma members). */
-export const TENANT_DB_LATCH_MEMBERS = ['markRollbackOnly', 'track'] as const;
+export const TENANT_DB_LATCH_MEMBERS = ['markRollbackOnly', 'track', 'beforeCommit', 'contextOrgId'] as const;
 const LATCH_MEMBERS: ReadonlySet<string> = new Set(TENANT_DB_LATCH_MEMBERS);
 declare const TENANT_DB_CLIENT: unique symbol;
 
@@ -148,16 +158,26 @@ export interface TenantDbHandle<TTx> {
   /** The first failure marked through {@link TenantDbLatch.markRollbackOnly}, if any (PR42-SEC-02). */
   readonly rollbackOnly: () => Error | undefined;
   /**
-   * Resolves once no work registered through {@link TenantDbLatch.track} is in flight, including work started while
-   * settling (PR42-SEC-13). Never rejects: a failed tracked write has already marked the latch.
+   * Resolves once no work registered through {@link TenantDbLatch.track} and no statement the guard started is in
+   * flight, including work started while settling (PR42-SEC-13), and one `setImmediate` turn started nothing new
+   * (PR42-SEC-17). Never rejects: a failed tracked write has already marked the latch.
    */
   readonly settle: () => Promise<void>;
+  /** The first `Error` returned by a {@link TenantDbLatch.beforeCommit} check, in registration order (D-ARCH-122 I3). */
+  readonly beforeCommitFailure: () => Error | undefined;
+}
+
+export interface TenantDbOptions {
+  /** The validated `app.org_id` of the transaction (lower-case UUID, or '' for none); `contextOrgId()` returns it. */
+  readonly orgId?: string;
 }
 
 type AnyFunction = (...args: unknown[]) => unknown;
 
 interface GuardState {
   closed: boolean;
+  /** PR42-SEC-17: registers a statement the guard started, so `settle` waits for it. */
+  readonly onStart: (started: Promise<unknown>) => void;
 }
 
 /** One guard level: the keys it exposes and how an exposed key's value is produced (computed once, then cached). */
@@ -311,9 +331,13 @@ function guardResult(result: unknown, state: GuardState): unknown {
   let started: Promise<unknown> | undefined;
   const settle = (): Promise<unknown> => {
     if (state.closed) return Promise.reject(closedError());
-    started ??= new Promise((resolve, reject) => {
-      Reflect.apply(then, result, [resolve, reject]);
-    });
+    if (started === undefined) {
+      started = new Promise((resolve, reject) => {
+        Reflect.apply(then, result, [resolve, reject]);
+      });
+      // PR42-SEC-17: a statement the callback started (also one it did not await) is in flight until it settles.
+      state.onStart(started);
+    }
     return started;
   };
   const members = {
@@ -417,8 +441,15 @@ function systemGuard(tx: object, systemModels: ReadonlySet<string>, state: Guard
 }
 
 /** Wraps a transaction client in the run-time `TenantDb` guard. */
-export function createTenantDb<TTx extends object>(tx: TTx): TenantDbHandle<TTx> {
-  const state: GuardState = { closed: false };
+export function createTenantDb<TTx extends object>(tx: TTx, options: TenantDbOptions = {}): TenantDbHandle<TTx> {
+  const inFlight = new Set<Promise<void>>();
+  const register = (started: Promise<unknown>): void => {
+    const settled = started.then(ignore, ignore);
+    inFlight.add(settled);
+    void settled.then(() => inFlight.delete(settled));
+  };
+  const state: GuardState = { closed: false, onStart: register };
+  const orgId = options.orgId ?? '';
   const allModels = [...modelDelegateNames(tx)];
   const models: ReadonlySet<string> = new Set(allModels.filter((name) => !SYSTEM_MODEL_SET.has(name)));
   const systemModels: ReadonlySet<string> = new Set(allModels.filter((name) => SYSTEM_MODEL_SET.has(name)));
@@ -427,21 +458,41 @@ export function createTenantDb<TTx extends object>(tx: TTx): TenantDbHandle<TTx>
     if (state.closed) throw closedError();
     rollbackOnly ??= failure instanceof Error ? failure : new TypeError('markRollbackOnly expects an Error');
   };
-  const inFlight = new Set<Promise<void>>();
   const track = <T>(work: () => Promise<T>): Promise<T> => {
     if (state.closed) throw closedError();
     if (typeof work !== 'function') throw new TypeError('track expects a function that starts the work');
     const started = Promise.resolve(work());
-    const settled = started.then(ignore, ignore);
-    inFlight.add(settled);
-    void settled.then(() => inFlight.delete(settled));
+    register(started);
     return started;
   };
   const settle = async (): Promise<void> => {
-    // Each round awaits a snapshot; a tracked work may start another (or one may start while waiting), so loop.
-    while (inFlight.size > 0) await Promise.all([...inFlight]);
+    for (;;) {
+      // Each round awaits a snapshot; a tracked work may start another (or one may start while waiting), so loop.
+      while (inFlight.size > 0) await Promise.all([...inFlight]);
+      // PR42-SEC-17: continuations queued behind what just settled run before this macrotask turn, so a write whose
+      // start was deferred by microtask hops is registered (and awaited above) instead of being refused after COMMIT.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (inFlight.size === 0) return;
+    }
   };
-  const latch: Readonly<Record<string, unknown>> = { markRollbackOnly, track };
+  const checks: Array<() => Error | undefined> = [];
+  const beforeCommit = (check: () => Error | undefined): void => {
+    if (state.closed) throw closedError();
+    if (typeof check !== 'function') throw new TypeError('beforeCommit expects a function');
+    checks.push(check);
+  };
+  const beforeCommitFailure = (): Error | undefined => {
+    for (const check of checks) {
+      const failure = check();
+      if (failure !== undefined) return failure;
+    }
+    return undefined;
+  };
+  const contextOrgId = (): string => {
+    if (state.closed) throw closedError();
+    return orgId;
+  };
+  const latch: Readonly<Record<string, unknown>> = { markRollbackOnly, track, beforeCommit, contextOrgId };
   const isTxMember = (key: string): boolean => (models.has(key) || RAW_MEMBERS.has(key)) && Reflect.has(tx, key);
   const isAllowed = (key: string): boolean => LATCH_MEMBERS.has(key) || isTxMember(key);
   const db = guard(
@@ -465,5 +516,6 @@ export function createTenantDb<TTx extends object>(tx: TTx): TenantDbHandle<TTx>
     },
     rollbackOnly: () => rollbackOnly,
     settle,
+    beforeCommitFailure,
   };
 }

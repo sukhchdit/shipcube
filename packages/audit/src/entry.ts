@@ -154,6 +154,10 @@ export interface PrepareOptions {
 
 /** A validated entry waiting for the tokens of its personal values. */
 export interface PreparedEntry {
+  /** The validated organisation (lower-case UUID), or `null` for none (SYSTEM shard); the writer's stream check. */
+  readonly orgId: string | null;
+  /** The validated `user_id` column (the USER / API_KEY user, the SYSTEM actor of a job, else `null`). */
+  readonly userId: string | null;
   /** Every personal value of the entry, in the order {@link complete} expects their tokens. */
   readonly piiValues: readonly PiiValue[];
   /** The row with the tokens substituted (tokens in `piiValues` order). */
@@ -555,6 +559,8 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
   const piiValues = Object.freeze([...state.pii]);
 
   return {
+    orgId,
+    userId: actor.userId,
     piiValues,
     complete(tokens: readonly string[]): AuditRowDraft {
       if (tokens.length !== piiValues.length) throw new AuditWriteError('TOKENISER_FAILED');

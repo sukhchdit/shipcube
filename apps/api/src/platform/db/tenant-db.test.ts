@@ -141,7 +141,7 @@ export type TenantDbOmitsMembers = [
 
 const read = (value: unknown, key: PropertyKey): unknown => (value as Record<PropertyKey, unknown>)[key];
 /** The guard-provided latch members (PR42-SEC-02, PR42-SEC-13) are the only non-Prisma members, always last. */
-const EXPOSED = ['shipment', 'ledgerEntry', '$queryRaw', '$executeRaw', 'markRollbackOnly', 'track'];
+const EXPOSED = ['shipment', 'ledgerEntry', '$queryRaw', '$executeRaw', 'markRollbackOnly', 'track', 'beforeCommit', 'contextOrgId'];
 const RESULT_KEYS = ['then', 'catch', 'finally', Symbol.toStringTag];
 const CLOSED = 'Database error: TENANT_TX_CLOSED';
 /** The settled outcome of a thenable: `ok:<value>` or the rejection's message. */
@@ -383,7 +383,7 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect([...modelDelegateNames({ _runtimeDataModel: { models: null } })]).toEqual([]);
     const { db } = createTenantDb({ shipment: new FakeDelegate(), $queryRaw: (): number => 1 });
     expect(() => read(db, 'shipment')).toThrow(new TenantDbAccessError('shipment'));
-    expect(Reflect.ownKeys(db)).toEqual(['$queryRaw', 'markRollbackOnly', 'track']);
+    expect(Reflect.ownKeys(db)).toEqual(['$queryRaw', 'markRollbackOnly', 'track', 'beforeCommit', 'contextOrgId']);
     // A data-model name whose property is not an object is refused (fail closed).
     const ghost = createTenantDb({ _runtimeDataModel: { models: { Ghost: {} } }, ghost: 5 }).db;
     expect(() => read(ghost, 'ghost')).toThrow(new TenantDbAccessError('ghost'));
@@ -445,7 +445,7 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     const tx = new FakeTx();
     const handle = createTenantDb(tx);
     expect('track' in tx).toBe(false);
-    expect(TENANT_DB_LATCH_MEMBERS).toEqual(['markRollbackOnly', 'track']);
+    expect(TENANT_DB_LATCH_MEMBERS).toEqual(['markRollbackOnly', 'track', 'beforeCommit', 'contextOrgId']);
     expect(Object.getOwnPropertyDescriptor(handle.db, 'track')).toMatchObject({ writable: false, enumerable: true });
     expect(() => {
       (handle.db as unknown as Record<string, unknown>)['track'] = (): void => undefined;
@@ -535,5 +535,45 @@ describe('TenantDb run-time guard (ADR-0005 am.10 item 1; PR #11 M1, PR11-SEC-01
     expect(read(handle.db, 'then')).toBeUndefined();
     expect(inspect(shipment)).toBe('[Object: null prototype] {}');
     expect(typeof query).toBe('function');
+  });
+});
+
+describe('[D-ARCH-122] beforeCommit and contextOrgId latch members (the audit writer port)', () => {
+  it('contextOrgId returns the validated organisation of the handle ("" by default) and closes with the transaction', () => {
+    const handle = createTenantDb(new FakeTx(), { orgId: '019a7c3e-0000-7000-8000-0000000000aa' });
+    expect(handle.db.contextOrgId()).toBe('019a7c3e-0000-7000-8000-0000000000aa');
+    expect(createTenantDb(new FakeTx()).db.contextOrgId()).toBe('');
+    const read = handle.db.contextOrgId;
+    handle.revoke();
+    expect(() => read()).toThrow(CLOSED);
+  });
+
+  it('beforeCommit checks run in registration order and the first Error wins; none registered means no failure', () => {
+    const handle = createTenantDb(new FakeTx());
+    expect(handle.beforeCommitFailure()).toBeUndefined();
+    const first = new Error('first');
+    const ran: string[] = [];
+    handle.db.beforeCommit(() => {
+      ran.push('a');
+      return undefined;
+    });
+    handle.db.beforeCommit(() => {
+      ran.push('b');
+      return first;
+    });
+    handle.db.beforeCommit(() => {
+      ran.push('c');
+      return new Error('later');
+    });
+    expect(handle.beforeCommitFailure()).toBe(first);
+    expect(ran).toEqual(['a', 'b']);
+  });
+
+  it('beforeCommit refuses a non-function and is refused once the transaction settled', () => {
+    const handle = createTenantDb(new FakeTx());
+    expect(() => (handle.db.beforeCommit as (check: unknown) => void)('nope')).toThrow(TypeError);
+    const register = handle.db.beforeCommit;
+    handle.revoke();
+    expect(() => register(() => undefined)).toThrow(CLOSED);
   });
 });

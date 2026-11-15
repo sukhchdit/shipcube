@@ -427,16 +427,20 @@ export function createWithTenantTx<TTx extends RawQueryClient>(
           const prev = await setTenantContext(tx, values);
           if (hasLeakedContext(prev)) throw reportLeak(correlationId);
           if (call?.readOnly === true) await tx.$queryRaw`SET TRANSACTION READ ONLY`;
-          const handle = createTenantDb(tx);
+          const handle = createTenantDb(tx, { orgId: values[0] });
           try {
             const result = await fn(handle.db);
-            // PR42-SEC-13: an audit write the callback started but did not await finishes (or marks the latch) here,
-            // inside the transaction, before the latch is read; otherwise the business change could commit without it.
+            // PR42-SEC-13/-17: an audit write the callback started, or deferred by microtask hops, but did not await
+            // finishes (or marks the latch) here, inside the transaction, before the latch is read; otherwise the
+            // business change could commit without it.
             await handle.settle();
             // PR42-SEC-02: a failure marked rollback-only (an audit refusal the callback caught and swallowed) is thrown
             // here, so Prisma rolls back and `mapped` answers it; the business change never commits without its entry.
             const latched = handle.rollbackOnly();
             if (latched !== undefined) throw latched;
+            // D-ARCH-122 I3: an entry recorded but never flushed fails the transaction too (fail closed, O4).
+            const unflushed = handle.beforeCommitFailure();
+            if (unflushed !== undefined) throw unflushed;
             return result;
           } finally {
             handle.revoke();

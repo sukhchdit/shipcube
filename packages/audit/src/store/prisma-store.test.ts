@@ -6,7 +6,14 @@ import { describe, expect, it } from '@jest/globals';
 import { type AuditRowDraft, computeEntryHash, ZERO_HASH_HEX } from '../entry-hash.js';
 import { AuditWriteError } from '../errors.js';
 import { fakeSql, headRow, type RecordedStatement } from '../tests/fake-sql.js';
-import { createPrismaAuditStore, type VaultRow } from './prisma-store.js';
+import {
+  type AppendedEntry,
+  type AppendOptions,
+  type AuditSqlPort,
+  type AuditStore,
+  createPrismaAuditStore,
+  type VaultRow,
+} from './prisma-store.js';
 
 const ORG = '019a7c3e-0000-7000-8000-0000000000aa';
 const ACTOR = '019a7c3e-0000-7000-8000-0000000000bb';
@@ -48,6 +55,12 @@ const ROW: AuditRowDraft = {
 const OPTIONS = { lockTimeoutMs: 250, actorStamp: ACTOR };
 const PREV = 'ab'.repeat(32);
 
+/** One row through the batch API (the single-entry case of D-ARCH-122). */
+async function appendOne(store: AuditStore, sql: AuditSqlPort, row: AuditRowDraft, options: AppendOptions): Promise<AppendedEntry> {
+  const [appended] = await store.appendBatch(sql, [row], options);
+  return appended as AppendedEntry;
+}
+
 const kinds = (statements: readonly RecordedStatement[]): string[] =>
   statements.map((statement) => {
     if (statement.text.includes('FOR UPDATE OF h')) return 'lock';
@@ -61,7 +74,7 @@ const kinds = (statements: readonly RecordedStatement[]): string[] =>
 describe('[US-088] audit store statement sequence (data-model §5.4 as rewritten, ADR-0007 am. 10 item 1)', () => {
   it('existing stream: lock (with the audit lock_timeout) -> in-process hash -> ONE append-and-advance statement', async () => {
     const sql = fakeSql(headRow(41, PREV, '1763000000123455', '1763000000123000'), 1);
-    const appended = await createPrismaAuditStore().append(sql, ROW, OPTIONS);
+    const appended = await appendOne(createPrismaAuditStore(), sql, ROW, OPTIONS);
     expect(kinds(sql.statements)).toEqual(['lock', 'append']);
 
     const [lock, append] = sql.statements as [RecordedStatement, RecordedStatement];
@@ -82,15 +95,17 @@ describe('[US-088] audit store statement sequence (data-model §5.4 as rewritten
     expect(append.text).not.toMatch(/RETURNING/i);
     expect(append.text).toContain('UPDATE public.audit_stream_heads');
     expect(append.text).toMatch(/WHERE stream_id = \$\d+::uuid AND entry_count = \$\d+::bigint$/);
-    expect(append.values).toContain(41); // entry_count = seq - 1
-    expect(append.values).toContain(42);
-    expect(append.values).toContain(JSON.stringify({ city: 'Pune' }));
-    expect(append.values).toContain(appended.entryHash);
+    expect(append.values.at(-1)).toBe('41'); // WHERE entry_count = seq - 1
+    expect(append.values).toContainEqual(['42']); // stream_seq of the one row
+    expect(append.values).toContain('42'); // the head advances to it
+    expect(append.values).toContainEqual([JSON.stringify({ city: 'Pune' })]);
+    expect(append.values).toContainEqual([appended.entryHash]);
+    expect(append.values).toContainEqual([JSON.stringify(['Owner'])]); // actor_roles as one JSON array text per row
   });
 
   it('first entry of a stream: lock finds no head -> create it (zero hash in bytea form) -> lock again -> append', async () => {
     const sql = fakeSql([], 1, headRow(0), 1);
-    const appended = await createPrismaAuditStore().append(sql, ROW, OPTIONS);
+    const appended = await appendOne(createPrismaAuditStore(), sql, ROW, OPTIONS);
     expect(kinds(sql.statements)).toEqual(['lock', 'create-head', 'lock', 'append']);
     const create = sql.statements[1] as RecordedStatement;
     expect(create.text).toContain("pg_catalog.decode(pg_catalog.repeat('00', 32), 'hex')");
@@ -102,16 +117,16 @@ describe('[US-088] audit store statement sequence (data-model §5.4 as rewritten
 
   it('an injected hasher computes the entry hash (TASK-030 seam)', async () => {
     const sql = fakeSql(headRow(0), 1);
-    const appended = await createPrismaAuditStore({ hash: () => 'cd'.repeat(32) }).append(sql, ROW, OPTIONS);
+    const appended = await appendOne(createPrismaAuditStore({ hash: () => 'cd'.repeat(32) }), sql, ROW, OPTIONS);
     expect(appended.entryHash).toBe('cd'.repeat(32));
   });
 
   it('head moved under the lock (expectAffected(1) mismatch) -> HEAD_MOVED; head still missing -> HEAD_MISSING', async () => {
-    await expect(createPrismaAuditStore().append(fakeSql(headRow(3), 0), ROW, OPTIONS)).rejects.toMatchObject({
+    await expect(appendOne(createPrismaAuditStore(), fakeSql(headRow(3), 0), ROW, OPTIONS)).rejects.toMatchObject({
       kind: 'HEAD_MOVED',
       status: 500,
     });
-    await expect(createPrismaAuditStore().append(fakeSql([], 0, []), ROW, OPTIONS)).rejects.toMatchObject({ kind: 'HEAD_MISSING' });
+    await expect(appendOne(createPrismaAuditStore(), fakeSql([], 0, []), ROW, OPTIONS)).rejects.toMatchObject({ kind: 'HEAD_MISSING' });
   });
 
   it.each([
@@ -120,20 +135,81 @@ describe('[US-088] audit store statement sequence (data-model §5.4 as rewritten
     ['now_us', [{ entry_count: '1', head_hash: PREV, head_us: null, now_us: 'x' }]],
     ['head_us', [{ entry_count: '1', head_hash: PREV, head_us: '1.5', now_us: '1' }]],
   ])('an impossible head row (%s) is an integrity failure', async (_field, head) => {
-    await expect(createPrismaAuditStore().append(fakeSql(head), ROW, OPTIONS)).rejects.toBeInstanceOf(AuditWriteError);
+    await expect(appendOne(createPrismaAuditStore(), fakeSql(head), ROW, OPTIONS)).rejects.toBeInstanceOf(AuditWriteError);
   });
 
   it('refuses a lock timeout outside 1..60000 ms before any statement', async () => {
     const sql = fakeSql();
     for (const lockTimeoutMs of [0, 1.5, 60_001]) {
-      await expect(createPrismaAuditStore().append(sql, ROW, { ...OPTIONS, lockTimeoutMs })).rejects.toThrow(RangeError);
+      await expect(appendOne(createPrismaAuditStore(), sql, ROW, { ...OPTIONS, lockTimeoutMs })).rejects.toThrow(RangeError);
     }
     expect(sql.statements).toHaveLength(0);
   });
 
   it('statement errors propagate unchanged (the writer classifies them)', async () => {
     const failure = new Error('driver');
-    await expect(createPrismaAuditStore().append(fakeSql(failure), ROW, OPTIONS)).rejects.toBe(failure);
+    await expect(appendOne(createPrismaAuditStore(), fakeSql(failure), ROW, OPTIONS)).rejects.toBe(failure);
+  });
+});
+
+describe('[D-ARCH-122] one flush: head locks in ascending stream order, then ONE append statement per stream', () => {
+  const ORG_A = '019a7c3e-0000-7000-8000-00000000000a';
+  const ORG_B = '019a7c3e-0000-7000-8000-00000000000b';
+  const row = (id: string, streamId: string, entityId: string): AuditRowDraft => ({ ...ROW, id, streamId, orgId: streamId, entityId });
+
+  it('two entries on one stream: one lock, one append with consecutive seq and hashes chained in memory, head advanced by 2', async () => {
+    const first = row('019a7c3e-0000-7000-8000-000000000011', ORG_A, 'a-1');
+    const second = row('019a7c3e-0000-7000-8000-000000000012', ORG_A, 'a-2');
+    const sql = fakeSql(headRow(7, PREV, '1763000000123000', '1763000000123000'), 1);
+    const appended = await createPrismaAuditStore().appendBatch(sql, [first, second], OPTIONS);
+    expect(kinds(sql.statements)).toEqual(['lock', 'append']);
+
+    const p1 = { streamSeq: 8, occurredAtMicros: 1_763_000_000_123_001n };
+    const p2 = { streamSeq: 9, occurredAtMicros: 1_763_000_000_123_002n };
+    const h1 = computeEntryHash(first, p1, PREV);
+    const h2 = computeEntryHash(second, p2, h1);
+    expect(appended).toEqual([
+      { id: first.id, streamId: ORG_A, streamSeq: 8, occurredAt: '2025-11-13T02:13:20.123001Z', prevHash: PREV, entryHash: h1 },
+      { id: second.id, streamId: ORG_A, streamSeq: 9, occurredAt: '2025-11-13T02:13:20.123002Z', prevHash: h1, entryHash: h2 },
+    ]);
+    const append = sql.statements[1] as RecordedStatement;
+    expect(append.text).toContain('FROM unnest(');
+    expect(append.values[0]).toBe(ORG_A); // the stream of the batch, bound once
+    expect(append.values).toContainEqual([first.id, second.id]);
+    expect(append.values).toContainEqual(['8', '9']);
+    expect(append.values).toContainEqual([PREV, h1]);
+    expect(append.values).toContainEqual([h1, h2]);
+    // the head moves from the count read under the lock to the last entry: entry_count 9, head hash h2, WHERE count = 7
+    expect(append.values.slice(-7)).toEqual(['9', second.id, '2025-11-13T02:13:20.123002Z', h2, ACTOR, ORG_A, '7']);
+  });
+
+  it('two streams recorded B then A: both heads are locked in ascending stream_id order before the first append', async () => {
+    const onB = row('019a7c3e-0000-7000-8000-000000000021', ORG_B, 'b-1');
+    const onA = row('019a7c3e-0000-7000-8000-000000000022', ORG_A, 'a-1');
+    const sql = fakeSql(headRow(1), [], 1, headRow(0), 1, 1);
+    const appended = await createPrismaAuditStore().appendBatch(sql, [onB, onA], OPTIONS);
+    expect(kinds(sql.statements)).toEqual(['lock', 'lock', 'create-head', 'lock', 'append', 'append']);
+    const streamOf = (statement: RecordedStatement): unknown =>
+      statement.text.includes('FOR UPDATE OF h') ? statement.values[1] : statement.values[0];
+    expect(sql.statements.map(streamOf)).toEqual([ORG_A, ORG_B, ORG_B, ORG_B, ORG_A, ORG_B]);
+    // results in input order, each on its own stream
+    expect(appended.map((entry) => [entry.id, entry.streamId, entry.streamSeq])).toEqual([
+      [onB.id, ORG_B, 1],
+      [onA.id, ORG_A, 2],
+    ]);
+  });
+
+  it('a moved head on the second stream fails the whole flush (HEAD_MOVED) after the first append', async () => {
+    const sql = fakeSql(headRow(0), headRow(0), 1, 0);
+    const rows = [row('019a7c3e-0000-7000-8000-000000000031', ORG_A, 'a-1'), row('019a7c3e-0000-7000-8000-000000000032', ORG_B, 'b-1')];
+    await expect(createPrismaAuditStore().appendBatch(sql, rows, OPTIONS)).rejects.toMatchObject({ kind: 'HEAD_MOVED' });
+    expect(kinds(sql.statements)).toEqual(['lock', 'lock', 'append', 'append']);
+  });
+
+  it('nothing to append sends nothing', async () => {
+    const sql = fakeSql();
+    await expect(createPrismaAuditStore().appendBatch(sql, [], OPTIONS)).resolves.toEqual([]);
+    expect(sql.statements).toHaveLength(0);
   });
 });
 

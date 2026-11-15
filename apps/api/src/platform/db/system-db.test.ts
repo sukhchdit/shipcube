@@ -46,7 +46,7 @@ describe('SYSTEM-model access control (PR19-SEC-01, D-ARCH-080)', () => {
     expect(() => read(db, 'referenceDatasetVersion')).toThrow(new TenantDbAccessError('referenceDatasetVersion', SYSTEM_MODEL_HINT));
     expect(SYSTEM_MODEL_HINT).toContain('systemDelegates(tx)');
     expect('referenceDatasetVersion' in db).toBe(false);
-    expect(Reflect.ownKeys(db)).toEqual(['shipment', 'role', '$queryRaw', 'markRollbackOnly', 'track']);
+    expect(Reflect.ownKeys(db)).toEqual(['shipment', 'role', '$queryRaw', 'markRollbackOnly', 'track', 'beforeCommit', 'contextOrgId']);
     // GLOBAL catalogue delegates stay in TenantDb (read-only by grant).
     expect(db.role.findMany()).toBe('rows:roles');
   });
