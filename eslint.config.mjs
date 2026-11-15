@@ -474,7 +474,8 @@ const BOUNDARIES_POLICIES = [
   //     specifier; platform/prisma-client-construction reports a value or whole-module load of the client in every form
   //     (import(), a no-substitution template literal included, `import x = require()` and every require form, a
   //     variable holding createRequire included), apps/worker/src/platform/db included. no-restricted-imports and
-  //     no-restricted-properties refuse Module, register and process.getBuiltinModule (PR44-SEC-14). The CODEOWNERS line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
+  //     no-restricted-properties refuse Module, register and process.getBuiltinModule (PR44-SEC-14). The CODEOWNERS
+  //     line for apps/worker/src/platform/db/ (D-TASK020-43) remains.
   {
     disallow: { to: toLayer('prisma-generated'), dependency: { kind: 'value' } },
     message: PRISMA_GENERATED_VALUE_MESSAGE,
