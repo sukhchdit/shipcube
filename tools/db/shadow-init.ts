@@ -18,7 +18,9 @@
  *              migrator owns the shadow database and may create trusted extensions, A16); CREATE TABLE, CREATE [UNIQUE]
  *              INDEX, CREATE [OR REPLACE] FUNCTION (not an event-trigger function), CREATE [CONSTRAINT] TRIGGER,
  *              CREATE POLICY, `ALTER TABLE <t> ENABLE [ALWAYS|REPLICA] TRIGGER <n>`, `ALTER TABLE <t> ENABLE|FORCE ROW
- *              LEVEL SECURITY`, COMMENT ON, and `SELECT <schema>.<function>(<args>)` (the first ensure_audit_partitions
+ *              LEVEL SECURITY`, the CHECK replacement `ALTER TABLE <t> DROP CONSTRAINT [IF EXISTS] <c>, ADD CONSTRAINT
+ *              <c> CHECK (…)` (same name, one statement; 91-audit-actions-v2.sql, TASK-285), COMMENT ON, and
+ *              `SELECT <schema>.<function>(<args>)` (the first ensure_audit_partitions
  *              call, so the shadow holds partitions as a real database does).
  *   stripped   (needs a role or privilege the migrator lacks, or is not diffed): CREATE/ALTER/DROP ROLE|USER|GROUP and a
  *              DO block that only creates roles; SET [SESSION|LOCAL] ROLE, RESET ROLE; a single-action `ALTER … OWNER
@@ -148,6 +150,12 @@ const KEEP: readonly RegExp[] = [
   /^create policy /,
   new RegExp(`^alter table (?:only )?${QNAME} enable (?:always |replica )?trigger ${NAME}$`),
   new RegExp(`^alter table (?:only )?${QNAME} (?:enable|force) row level security$`),
+  // A CHECK replaced under the same name in one statement (91-audit-actions-v2.sql, TASK-285); no third action (no
+  // `), <action>` after the CHECK), no NOT VALID / NO INHERIT tail, so the shadow ends with the constraint a real
+  // database holds.
+  new RegExp(
+    `^alter table (?:only )?${QNAME} drop constraint (?:if exists )?(${NAME}) ?, ?add constraint \\1 check ?\\((?:(?!\\) ?, ?[a-z])[^;])*\\)$`,
+  ),
   /^comment on (?:table|column|function|index|schema|type) /,
   new RegExp(`^select ${NAME} ?\\. ?${NAME} ?\\([^()]*\\)$`),
 ];

@@ -267,6 +267,8 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ],
   ck_audit_chain_verifications__run_kind: ['FULL', 'INCREMENTAL'],
   ck_audit_chain_verifications__status: ['ERROR', 'FAILED', 'PASSED', 'RUNNING'],
+  // The 20 REQ-AUDIT-002 actions after 91-audit-actions-v2.sql (TASK-285, D-ARCH-119); equality with the packages/audit
+  // AUDIT_ENTRY_ACTIONS list (which prisma/tests/catalog may not import) is prisma/tests/audit/audit-actions-v2.int.test.ts.
   ck_audit_entries__action: [
     'ACCOUNT_LOCKED',
     'API_KEY_USE',
@@ -280,8 +282,10 @@ const ENUM_CHECKS: Record<string, string[]> = {
     'LOGOUT',
     'MFA_ENROLLED',
     'MFA_FAILED',
+    'MFA_RECOVERY_USED',
     'ON_BEHALF_ACTION',
     'PERMISSION_DENIED',
+    'SESSION_REVOKED',
     'STATE_TRANSITION',
     'TOKEN_REUSE_DETECTED',
     'UPDATE',

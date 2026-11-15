@@ -17,8 +17,11 @@ import { APP_ROLE, MIGRATOR, PlatformPostgres, SUPERUSER } from '../harness/post
 const FILES = readdirSync(DEFAULT_BOOTSTRAP_DIR)
   .filter((name) => name.endsWith('.sql'))
   .sort();
-/** Audit-store files (TASK-021): plain CREATE, applied exactly once through the ledger (PR12-SEC-03). */
-const AUDIT_FILES = ['10-audit.sql', '90-audit-ddl-guard.sql'];
+/**
+ * Audit-store files: 10 and 90 (TASK-021) are plain CREATE, applied exactly once through the ledger (PR12-SEC-03); 91
+ * (TASK-285) alters the table 10 creates, so it leaves the lane together with 10.
+ */
+const AUDIT_FILES = ['10-audit.sql', '90-audit-ddl-guard.sql', '91-audit-actions-v2.sql'];
 
 let db: PlatformPostgres;
 const work: string[] = [];
@@ -112,6 +115,9 @@ describe('bootstrap runner (data-model §8.1)', () => {
   it('[PR12-SEC-03] applies the audit files exactly once: without their ledger row a re-run fails closed and rolls back', async () => {
     await db.createDatabase('once_db');
     await db.bootstrap('once_db');
+    // 91-audit-actions-v2.sql (TASK-285) sorts last and is idempotent (DROP CONSTRAINT IF EXISTS + ADD): its ledger row
+    // goes first so that the runner reaches 90 and 10 instead of refusing them as sorting before an applied file.
+    await query('once_db', `DELETE FROM ${LEDGER_TABLE} WHERE file_name = '91-audit-actions-v2.sql'`);
     await query('once_db', `DELETE FROM ${LEDGER_TABLE} WHERE file_name = '90-audit-ddl-guard.sql'`);
     await expect(db.bootstrap('once_db')).rejects.toThrow(/90-audit-ddl-guard\.sql failed: .*already exists.*\(SQLSTATE 42723\)/);
     await query('once_db', `DELETE FROM ${LEDGER_TABLE} WHERE file_name = '10-audit.sql'`);
@@ -123,6 +129,8 @@ describe('bootstrap runner (data-model §8.1)', () => {
   it('[PR12-SEC-03] a platform.audit_ddl_guard() planted by the migrator before 90-audit-ddl-guard.sql fails the lane', async () => {
     const lane = laneCopy();
     rmSync(join(lane, '90-audit-ddl-guard.sql'));
+    // 91 sorts after 90: applied here, it would make the runner refuse 90 as sorting before an applied file (TASK-285).
+    rmSync(join(lane, '91-audit-actions-v2.sql'));
     await db.createDatabase('plant_db');
     await db.bootstrap('plant_db', lane);
     await asRole(
@@ -153,9 +161,7 @@ describe('bootstrap runner (data-model §8.1)', () => {
     await db.createDatabase('order2_db');
     await db.bootstrap('order2_db', lane);
     writeFileSync(join(lane, '00-zz-late.sql'), 'SET search_path = pg_catalog, pg_temp;\n');
-    await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(
-      /00-zz-late\.sql sorts before the already applied (?:01|02|10|90)-[a-z-]+\.sql/,
-    );
+    await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(/00-zz-late\.sql sorts before the already applied \d{2}-[a-z0-9-]+\.sql/);
     rmSync(join(lane, '00-zz-late.sql'));
     rmSync(join(lane, '01-schemas.sql'));
     await expect(db.bootstrap('order2_db', lane)).rejects.toThrow(/missing from the lane: 01-schemas\.sql/);

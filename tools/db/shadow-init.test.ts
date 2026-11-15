@@ -107,6 +107,14 @@ describe('the rendering rules', () => {
     ['a trigger', 'CREATE TRIGGER trg_x BEFORE UPDATE ON public.audit_x FOR EACH ROW EXECUTE FUNCTION platform.f();'],
     ['ENABLE ALWAYS TRIGGER', 'ALTER TABLE public.audit_x ENABLE ALWAYS TRIGGER trg_x;'],
     ['ENABLE / FORCE ROW LEVEL SECURITY', 'ALTER TABLE public.audit_x FORCE ROW LEVEL SECURITY;'],
+    [
+      'a CHECK replaced under the same name in one statement (TASK-285)',
+      "ALTER TABLE public.audit_x\n  DROP CONSTRAINT IF EXISTS ck_x__note,\n  ADD CONSTRAINT ck_x__note CHECK (note IN ('A','B', 'C'));",
+    ],
+    [
+      'the same without IF EXISTS',
+      "ALTER TABLE ONLY public.audit_x DROP CONSTRAINT ck_x__note,ADD CONSTRAINT ck_x__note CHECK(note <> '');",
+    ],
     ['a policy', 'CREATE POLICY p ON public.audit_x FOR SELECT TO platform_app USING (true);'],
     ['a comment', "COMMENT ON TABLE public.audit_x IS 'x';"],
     ['the first ensure_audit_partitions call', 'SELECT platform.ensure_audit_partitions(3);'],
@@ -119,6 +127,32 @@ describe('the rendering rules', () => {
   it.each([
     ['an unknown statement form', 'DELETE FROM public.audit_x;', /statement form not recognised/],
     ['ALTER TABLE beyond the trigger/RLS forms', 'ALTER TABLE public.audit_x ADD COLUMN y int;', /statement form not recognised/],
+    ['a DROP CONSTRAINT alone', 'ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note;', /statement form not recognised/],
+    [
+      'an ADD CONSTRAINT alone',
+      "ALTER TABLE public.audit_x ADD CONSTRAINT ck_x__note CHECK (note <> '');",
+      /statement form not recognised/,
+    ],
+    [
+      'a CHECK replaced under another name',
+      "ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__other CHECK (note <> '');",
+      /statement form not recognised/,
+    ],
+    [
+      'a replacement CHECK marked NOT VALID',
+      "ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__note CHECK (note <> '') NOT VALID;",
+      /statement form not recognised/,
+    ],
+    [
+      'a replacement CHECK followed by another action',
+      "ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__note CHECK (note <> ''), ADD COLUMN y int;",
+      /statement form not recognised/,
+    ],
+    [
+      'a replacement that is a foreign key',
+      'ALTER TABLE public.audit_x DROP CONSTRAINT fk_x, ADD CONSTRAINT fk_x FOREIGN KEY (id) REFERENCES public.y (id);',
+      /statement form not recognised/,
+    ],
     ['another SET', "SET lock_timeout = '1s';", /statement form not recognised/],
     ['a CREATE SCHEMA without IF NOT EXISTS', 'CREATE SCHEMA platform;', /statement form not recognised/],
     ['REASSIGN OWNED', 'REASSIGN OWNED BY platform_migrator TO platform_audit_owner;', /statement form not recognised/],
@@ -153,7 +187,9 @@ describe('the rendering of the real bootstrap lane', () => {
   it('reads every prisma/bootstrap/*.sql file in name order (the runner order), audit files included', () => {
     const names = lane.map((entry) => entry.name);
     expect(names).toEqual([...names].sort());
-    expect(names).toEqual(expect.arrayContaining(['00-roles.sql', '01-schemas.sql', '10-audit.sql', '90-audit-ddl-guard.sql']));
+    expect(names).toEqual(
+      expect.arrayContaining(['00-roles.sql', '01-schemas.sql', '10-audit.sql', '90-audit-ddl-guard.sql', '91-audit-actions-v2.sql']),
+    );
     expect(shadowInitSql(BOOTSTRAP_DIR)).toBe(rendering.sql);
   });
 
@@ -190,6 +226,16 @@ describe('the rendering of the real bootstrap lane', () => {
     }
     expect(codes.filter((text) => text.startsWith('create trigger ')).length).toBeGreaterThanOrEqual(8);
     expect(codes).toContain('select platform.ensure_audit_partitions(3)');
+  });
+
+  it('keeps the action CHECK widening of 91-audit-actions-v2.sql after the first partition call (TASK-285)', () => {
+    const widening = codes.findIndex((text) =>
+      text.startsWith(
+        'alter table public.audit_entries drop constraint if exists ck_audit_entries__action, add constraint ck_audit_entries__action check (action in (',
+      ),
+    );
+    expect(widening).toBeGreaterThan(codes.indexOf('select platform.ensure_audit_partitions(3)'));
+    expect(statements[widening]).toContain("'MFA_RECOVERY_USED','SESSION_REVOKED'");
   });
 
   it('[SPK-08 F-03] holds no role, SET ROLE, OWNER TO, AUTHORIZATION, GRANT/REVOKE, default privileges, ALTER DATABASE, event trigger, guard function or psql variable', () => {
