@@ -113,3 +113,86 @@ Merge conditions after r2: a security record naming the final head (`scans` is r
 
 - PR30-SEC-01 (S3 time bounds) lost its magnitude pin in this PR (R1-M2). Please confirm the fix restores it.
 - `prisma/seed/index.ts` gains an optional driver-factory seam on the exported `main`. The CLI passes nothing (V9). Confirm this is acceptable on a security-owned path.
+
+---
+
+# Round 2 (head 69a0d75)
+
+| Field | Value |
+|---|---|
+| Head / code | `69a0d75` (evidence only) / `b5dc741` |
+| Delta since r1 (`8a48139`) | `ab9c6c8` (security record, branch-only) → `fbf438b` (fix: pins, shared timing, fetchOnce) → `4cd83fe` (merge of main `dbfb1bd`) → `b5dc741` (healthcheck seam and pins) → `69a0d75` (evidence `20261115T1620Z_b5dc741` PASS) |
+| Reviewer | code-reviewer · 2026-11-15 · round 2 (delta check) |
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: R1-M1 and R1-M2 are closed. Every requested mutant (R1, R2, R2w, R3, W10, S1, x2, caller-signal drop, H1-H3)
+         dies on HEAD in a worktree-independent copy. fetchOnce, the jitter threshold and the healthcheck seam are correct.
+         NEW BLOCKER: the `@platform/api/test-support/timing` export breaks the worker image build. The image preflight
+         imports every exported entry of @platform/api, and prune-dist has removed `tests/` from dist (reproduced).
+```
+
+## R2.1 Verification I performed myself
+
+| # | Check | Result |
+|---|---|---|
+| V1 | `git log`/`diff 8a48139..69a0d75` | Code delta: 8 files (`apps/api/package.json`, `routing/tests/{timing,loopback,loopback.test}.ts`, `router.test.ts`, `s3-object-storage.http.test.ts`, worker `server.test.ts`, `tools/docker/healthcheck.{mjs,test.ts}`). The merge `4cd83fe` brings only main's `dbfb1bd` delta: memory, reviews, PR #52 audit files and evidence. It touches no PR file. |
+| V2 | **Mutants**, own script `scratchpad/pr53/mut-r2.mjs` on a fresh `git archive 69a0d75` copy. Unlike r1, `node_modules/@platform/*` is junctioned to the **copy's** workspaces, so the worker suite really sees the mutated `readiness.ts`. `prisma/generated` is junctioned in. | C0 control 69/69 pass. **Killed:** R1 (api overall ×20), R2 (8 s/9 s, api), R2w (8 s/9 s, worker), R3 (per-check ×10), W10 (worker deadline ×10), S1 (`bounded()` ×10), S2 (×2), S3 (`bounded()` drops the caller signal; killed after 125 s), H1 (entry unguarded), H2 (probe `setTimeout` ×10), H3 (`BUDGET_MS` 5000). **Survives:** H4 (`main()` default budget 20 s) → R2-n2. The developer's earlier `mut2-out.txt` W10 row matches mine. |
+| V3 | Recorder values | Readiness: exactly one 2_250 and N×2_000 arms, max ≤ 2_500. Overall-deadline case: one 100 and N×60_000. Worker: one 300 and N×2_000; default case one `READINESS_DEADLINE_MS`. S3: 3×800 + 2×400, max ≤ 800; trickle one 800; caller case one 120_000 (the 300 is the test's own call, see R2-n1). The healthcheck `setTimeout` spy sees one 200. |
+| V4 | fetchOnce probe (`fo2.mts`, tsx against the worktree source) | Default arms 60_000. Body sizes: `Uint8Array` gives `content-length: 3`; `''` gives 0; `'é€'` gives 5 (byte length, not string length). No `transfer-encoding` in any case. `URLSearchParams`, `Blob` and `ArrayBuffer` are refused with a TypeError and **0 requests sent**. `AbortSignal.abort()` gives AbortError and **0 sent**. A server that never answers gives `FetchOnceTimeoutError: fetchOnce: no response from DELETE /h within 250 ms` at 254 ms. A body that stalls after the headers also gives `FetchOnceTimeoutError` (instanceof true). A mid-body abort rejects with the caller's reason. |
+| V5 | Heartbeat re-probe (r1 V7) | Idle 2,250 ms timer: `workMs` 2,261 = `ms` (r1: 1,440, −36 %). Async 8 s hang: `workMs` 8,013 (r1: 5,100). 6 s of sync work: `workMs` 20. This is still subtracted, but it is now documented in the module JSDoc and in `timeOperation`'s JSDoc, with "use `performance.now()` directly" for CPU-bound, ReDoS and scaling checks. |
+| V6 | `timeOperation` users (grep) | 6 call sites. All are async deadline waits: readiness ×3, the S3 `timed()` helper and the helper's own tests. None is CPU-bound, ReDoS or scaling. |
+| V7 | Changed suites in the worktree, positional, `--maxWorkers=2` (router, loopback, s3 http, worker server, healthcheck, preflight, prune-dist) | 7 suites, **144 passed**. |
+| V8 | `prettier --check` and `eslint --max-warnings 0` on the 9 changed files; `tsc -p apps/{api,worker} --noEmit` | All clean. |
+| V9 | **Is the subpath export confined? (focus b)** Typed lint probes via `--stdin-filename` on existing files | A worker production file importing `@platform/api/test-support/timing` fails lint: `boundaries/dependencies` "apps/worker imports apps/api only through @platform/api/runtime…". A `packages/*` import fails 3 rules. An api production file importing `../routing/tests/timing.js` is lint-clean. That gap predates this PR (same as `loopback.ts`). Fail-closed: prune-dist deletes `tests/` from the image. **But the export itself is NOT image-safe → R2-B1.** |
+| V10 | **Image preflight reproduction** (no Docker): the real `tools/docker/preflight.mjs` run on a minimal image layout. The layout has `/apps/worker/{package.json,dist/main.js}` and `node_modules/@platform/api` junctioned to `apps/api` (manifest from the ref; `dist/` as prune-dist leaves it, without `tests/`), and the worker manifest is reduced to the `@platform/api` dependency. | **HEAD manifest:** `{"event":"preflight.failed","error":"PreflightError","reason":"cannot load @platform/api/test-support/timing"}`, exit 1. **Base (`dbfb1bd`) manifest:** `[preflight] ok: … entry points @platform/api/runtime`, exit 0. `preflight.mjs`, `prune-dist.mjs` and both Dockerfiles are unchanged by the PR. |
+| V11 | Healthcheck seam (focus d) | The CLI still calls `main(process.argv.slice(2))`. `options = {}` passes to `probeReady(port, {})`, so the defaults are host `127.0.0.1`, `READY_PATH` and `BUDGET_MS`. That is byte-for-byte the old `probeReady(port)`, so production is unchanged. The 200 ms case pins the armed budget (H2 killed) and keeps an exact lower bound (≥ 150 ms). The dropped wall-clock `< 1500` is replaced by the spy, and a hang still fails at the 180 s Jest budget. |
+| V12 | Assertions (focus e) | `.skip`, `.only`, `retryTimes` and `todo`: none in the delta. No upper bound loosened since r1. Every r1-weakened bound now has a deterministic pin next to it. One new live assertion is itself load-sensitive (R2-m1). |
+| V13 | **Union (focus f)** with current `origin/main` `37275f9` | MB = `dbfb1bd`. The PR changes 39 files and main 108. **Overlap: none.** Main's delta: workflows, `tools/ci`, `tools/quality`, `tools/deps`, docs, evidence, plus `jest.config.ts` (one comment line), `package.json` (`ci:minutes` script) and `eslint.config.mjs` (3 deletions). No lock change. `git merge-tree --write-tree 69a0d75 origin/main` is clean (tree `bfc1ba3`). |
+| V14 | CI on 69a0d75 (run 43736296983) | `fast-lane`, `scans` and `ci-gate` are **red before any check ran**. They fail with `MODULE_NOT_FOUND …/tools/ci/lane-scope.mjs` and `…/security-paths.mjs` → O-1. **No hosted lane A result exists for this head.** |
+| Not re-run | full lint, typecheck, unit and build; integration and api projects; the flake table | Per the brief. I relied on evidence `20261115T1620Z_b5dc741` (PASS: unit 5,680, api 128, integration 333/1 skip, rls 126). That evidence contains **no image build**, and neither does lane A. That is why V10 was needed. |
+
+## R2.2 Findings
+
+| ID | Severity | Location | Issue | Required fix |
+|---|---|---|---|---|
+| R2-B1 | **BLOCKER** | `apps/api/package.json:9-13` (new `"./test-support/timing"` export); consumed by `apps/worker/Dockerfile:126` `RUN node /app/preflight.mjs /app/apps/worker/dist` | **The worker image no longer builds.** In the image, the preflight (`tools/docker/preflight.mjs` `platformEntryPoints`) imports every non-wildcard export of every `@platform/*` dependency of the app. Only `./testing` is skipped (`SKIPPED_EXPORTS`). `apps/worker` depends on `@platform/api`, so the preflight resolves `@platform/api/test-support/timing` to `/app/apps/api/dist/platform/routing/tests/timing.js`. prune-dist (`apps/worker/Dockerfile:59`) has already deleted every `tests/` directory there, so `docker build` fails with `cannot load @platform/api/test-support/timing` (V10, reproduced with the real preflight; the base manifest passes). That breaks `docker compose up` (the worker service) and the lane C images job. Neither lane A nor the lane B evidence builds images, so the PR would merge green and break main. | Remove the export. Either (a) **rename the subpath to `./testing`**, the established test-helper convention (`@platform/config/testing`) that the preflight already skips, or (b) move `timing.ts` to `tools/test-support/` (the r1 suggestion) and import it relatively from both app test files, with no package export. Add a regression check that needs no Docker: in `tools/docker/preflight.test.ts`, for the real `apps/worker/package.json` and `apps/api/package.json`, assert that every `platformEntryPoints()` entry's `default` target survives `shouldRemove` from `prune-dist.mjs` (or pin the exact entry list). Re-run V10 on the fixed manifest. |
+| R2-m1 | MINOR | `apps/api/src/platform/routing/tests/loopback.test.ts:84-89` | **A new load-sensitive assertion in the flake-fix PR.** "an asynchronous wait is not hidden" asserts `workMs >= ms - HEARTBEAT_JITTER_MS`. Any real host stall over 50 ms during the 600 ms wait is subtracted **by design**: the next case proves it with a 400 ms block. So the case fails exactly when the host is saturated, which is the W0-FLAKE condition. It passed in the evidence run, but that shows the host was quiet in that window, not that the case is load-proof. | Test the jitter threshold deterministically. Either inject `now` and a scheduler into `timeOperation`, or export the pure booking step and feed it synthetic tick lateness (30 ms → 0 booked, 51 ms → 51 booked). Keep the live case to load-proof facts only: `ms >= 550` and `workMs <= ms`. |
+| R2-n1 | NIT | `apps/api/src/platform/storage/s3-object-storage.http.test.ts:222-239` | In the caller-signal case, `filter(ms === 300)` counts the **test's own** `AbortSignal.timeout(300)`, which is created inside the recorder window as an argument to `get`. As a production pin it is vacuous. The case still kills a dropped caller signal through the `workMs` bound (mutant S3), but only after the full 120 s. | Create the caller signal before `recordAbortTimeouts()` and assert that the recorder saw exactly `[LONG_REQUEST_MS]`. |
+| R2-n2 | NIT | `tools/docker/healthcheck.test.ts:97`; `tools/docker/healthcheck.mjs:81-88` | (a) `jest.spyOn(globalThis, 'setTimeout')` is never restored, and the Jest config has no `restoreMocks`. It calls through, so the leak is harmless, but it is unlike the `try/finally` discipline of `recordAbortTimeouts`. (b) **H4 survives:** no case pins that `main()` without options arms `BUDGET_MS`. The base tests did not pin it either, but the new seam makes it a one-token regression. (c) `main` forwards the whole `options` object, so `host` and `path` reach `probeReady` despite the `{ budgetMs? }` JSDoc. | (a) `mockRestore()` in a `finally`. (b) One case: `main(['api'], { APP_PORT: <never-answering> })` with the spy, expecting one 2000 arm. (c) Forward `options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }`. |
+
+**O-1 (orchestrator, not a PR defect).** Lane A on `69a0d75` fails in the PR #46 gate bootstrap. `RANGE_BASE` = `github.event.pull_request.base.sha` was **stale** (`dbfb1bd`, although main already had `e6b1b3d`/`3e2da8b`). The fallback archives `tools/ci` from `RANGE_HEAD`. Neither commit has `lane-scope.mjs` or `security-paths.mjs`, while the test-merge checkout in `$GITHUB_WORKSPACE` does. This contradicts the D-ORCH-102 premise ("the PR's next lane A run uses the test-merge workflow"): every PR branched before PR #46 will crash this way. For #53, carry a union with `origin/main` in the R2-B1 fix push (the union is pure, V13). Route a fallback fix to devops as a PR #46 follow-up: archive from the merge checkout, or from `origin/<base_ref>`.
+
+## R2.3 Round-1 closure
+
+| r1 item | Status | Evidence |
+|---|---|---|
+| R1-M1 AT-US-012-03 | **Closed** | Static AC pin (2_000 / ≤ 2_500) in the api and worker suites, plus the recorder wiring pins. R1, R2, R2w, R3 and W10 are killed (V2). |
+| R1-M2 PR30-SEC-01 | **Closed** | 3×800 + 2×400 with max ≤ 800; trickle 800; caller case 120 s. S1, S2 and S3 are killed (V2). Exact lower bounds are kept. |
+| R1-m1 heartbeat | **Closed** | 50 ms threshold. Idle is exact and an async hang is no longer under-reported (V5). The JSDoc is corrected (sync work is subtracted; CPU-bound, ReDoS and scaling checks must not use it). There is one shared helper and the worker copy is gone. Its sharing mechanism causes R2-B1, and its own test causes R2-m1. |
+| R1-m2 fetchOnce deadline | **Closed** | 60 s, `FetchOnceTimeoutError` naming the method and path (V4). |
+| R1-n1 fetchOnce edges | **Closed** | (a) signal honoured, pre-aborted sends nothing; (b) `Content-Length` (byte length); (c) refused before sending; (d) IPv6 brackets stripped. |
+| R1-n2 slowloris pin | **Closed** | `expect([headersTimeout, requestTimeout]).toEqual([5_000, 5_000])` before the override. |
+| R1-n3 PR #48 R1-m4 | **Routed** | D-ORCH-099 → TASK-W0-FLAKE-2. |
+| R1-n4 `runNode` sync | n/a | No action required. |
+
+## R2.4 Merge conditions and round 3
+
+1. Fix R2-B1, add the no-Docker regression check, and re-run V10 on the fixed manifest. R2-m1 should go in the same push (it is one test file). The NITs are optional.
+2. Merge `origin/main` in the same push (O-1). Prove it with a clean `merge-tree` and no overlap.
+3. Fresh lane B evidence bound to the final code sha. Any code push stales `b5dc741`.
+4. Hosted lane A **green** on the final head (V14: there is none today).
+5. A security record naming the final head (D-SEC-PR53-01 C2). Squash.
+
+Round 3 is a delta check: R2-B1 by reproduction, the regression check by mutant (re-add a pruned-path export and the check must fail), R2-m1, then the `mut-r2.mjs` rows again on a fresh copy.
+
+## R2.5 Good patterns worth keeping
+
+- `recordAbortTimeouts` turns "the deadline is X" into a deterministic assertion that holds under any host load. It is the right tool, and it is now tested itself (it records, calls through and restores).
+- The deadline and hang paths are tested in the helper's own suite (`loopback.test.ts`). The helpers decide whether product tests pass, so they need their own tests.
+- The healthcheck seam is minimal, and the CLI is untouched.
+
+## R2.6 Security flags (for security-analyst)
+
+- R2-B1 is not a vulnerability, but it concerns an image-shipped manifest. Today, adding an `exports` entry to `@platform/api` silently changes what the image preflight imports. Please confirm the fix keeps test-only helpers out of every export the preflight loads.
+- PR30-SEC-01 / PR53-SEC-04 magnitude pin: restored and verified by mutants S1, S2 and S3 (C1 closed from the code side).
