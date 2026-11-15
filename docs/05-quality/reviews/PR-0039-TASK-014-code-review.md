@@ -124,3 +124,157 @@ An alternative for the architect: a digest-pinned distroless Node 24 / Debian 13
 4. Merge main (docs-only delta), then squash.
 
 Round 2 is a delta check: the R1-M1 diff, the stack re-run statement, and whichever MINORs were taken in-branch.
+
+---
+
+# Round 2 (head c85d5e5)
+
+- **Head reviewed:** `c85d5e56` (code `4d87301`, evidence commit `c85d5e5`). Delta since round 1 (`894c72e`): 11 branch commits (`ace8c27` security record, `def2b9b`, `4a3a0d6`, `2aabee0`, `a31f94b`, `8a31d1f`, `dd7a2dd`, `a9a53e1`, `756d505`, `7edcd08`, `32d8ca8`), 4 evidence commits, and 11 merges of main (PRs #40, #43, #44, #45, #47 and docs).
+- **Inputs:** PR body (fix cycle 1 and the round-2 push section, D-TASK014-18..25) and its 3 comments; `rulings/wave-0-task-014-rulings.md` R1–R6; security record r1 (C1/C2, PR39-SEC-01..10); evidence `20261114T1449Z_4d87301`; lane A run 43612304410.
+- **Reviewer:** code-reviewer, 2026-11-14
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1 / C1 is closed: the find pins */routing/tests* and */dist/*/tests/* (outside node_modules), and
+  prune-dist has the routing rows plus an on-disk case. Architect R1-R6 and R1-m1/m2/m4 and R1-n2/n3/n5/n6/n7/n9 are met.
+  The exit-78 move into installProcessErrorHandlers is correct, unit-tested in process, and composes with PR #44's
+  startApi. Every merge is a pure union. 4 new NITs; no BLOCKER, MAJOR or MINOR.
+FINDINGS: 0 BLOCKER, 0 MAJOR, 0 MINOR, 4 NIT (R2-n1..n4), plus 2 carried NITs (R1-n1 routed, R1-n4 needs an owner)
+GOOD: the exit-78 mapping lives in the one handler both entry points already install, so the entry points stay equal
+  to main. The preflight argv rule is an allow-list (exactly one dist/*.js), not a deny-list of flags. Per-line
+  CODEOWNERS mutation tests. prune-deps stops following optional peers, so typescript no longer arrives through prisma.
+  Size WARN is visible on every run without loosening the gate.
+SECURITY-FLAGS: none new. The env channels outside the preflight (LD_PRELOAD, OPENSSL_CONF, NODE_V8_COVERAGE,
+  NODE_REDIRECT_WARNINGS) are in the same operator-controls-the-task-definition class as R1-m1. FYI only, for the
+  security delta round. NODE_DEBUG is already refused by loadConfig.
+```
+
+## R2.1 What I verified myself
+
+| Check | Result |
+|---|---|
+| Branch state | `git log origin/main..c85d5e5`. Main moved after the last union (`d753027`) with docs and `.claude/` files only (`git diff --name-only d753027 origin/main` has no other path). gh reports MERGEABLE. |
+| Lane A run 43612304410 on `c85d5e5` | fast-lane: success, with every step green (lint ran with the 4 GB heap; the evidence check passed). scans: only "Security-owned paths need a review record" failed, which is expected because the r1 record names `894c72e`. ci-gate: red only as the aggregate. |
+| Targeted unit files on the head (path before `--selectProjects unit`) | Batch 1: config-exit, process-errors, entry-preflight, tooling-env, prune-dist, entrypoint: **192/192**, including the 3 spawned `main.ts` cases. Batch 2: check-dockerfiles, sec-static, check-workflow-policy, jest-projects, prune-deps, tooling-closure, scan-image-secrets: **347/347**. |
+| Jest project membership on the union | `--listTests` per project, with and without `JEST_STACK=1`: unit 208, unit-dom 12, integration 31, api 7, generated 1. The lists are byte-identical with and without the flag. `stack` exists only with the flag and holds exactly the 2 `tests/compose/*.stack.test.ts` files. **0 files in two projects.** `merged_coverage` has no `stack`, and `tools/quality/` equals main. |
+| Merges since r1 (11) | `git merge-tree --write-tree P1 P2` vs the merge commit: **9 clean merges with an empty diff**. The 2 conflicted merges (`7845a76`, `399f8b8`) differ only in the hand resolution in `check-workflow-policy.{mjs,test.ts}`. `git show --cc`: `REQUIRED_CODEOWNED_PATHS` keeps the PR39-SEC-05 block (15 entries), the PR40-SEC-01 `.gitattributes` pair and the PR43-SEC-04 pair. The test file keeps both describe blocks whole (PR39-SEC-05: 15 required + 15 mutation + prisma/Dockerfile + 22 owned-path rows; PR43-SEC-04: 2 + 2 + sibling-folder case). |
+| Entry points equal main | `git diff --quiet origin/main c85d5e5` for `apps/api/src/main.ts`, `apps/worker/src/main.ts`, `apps/api/src/platform/runtime/index.ts` and `apps/api/src/start-api.ts`: all equal. |
+| Evidence `20261114T1449Z_4d87301` | summary.md: sha 4d87301, profile pr, **PASS**. api 124, catalog-c1-c14 102, integration 298 (1 skipped), **rls-cross-tenant 126**, unit 5369 (2 skipped), 0 failures. Merged coverage 98.86 % lines / 96.47 % branches; US-006 merged gate PASS. |
+| Find probe (scratchpad, GNU find, the PR's exact predicate) | It matches `dist/platform/x/tests/b.js` and does not match `node_modules/p/dist/a/tests/c.js`, as intended. It also does not match `apps/api/dist/tests/a.js` or `packages/config/src/foo.test.ts` (R2-n1). |
+| PR #42 / PR #46 merge-tree against `c85d5e5` | #42: conflicts in `packages/config/src/values.test.ts` (`GUARDS.length` 14 vs 13; main has 12) and `ci.yml`, where only the comment conflicts and the env line appears once. #46: `ci.yml` only, where only the comment conflicts and there is one `--max-old-space-size=4096`. |
+| Not run (dispatch constraint) | No image builds, no stack suite, no full suites. I relied on the PR's stack result: 54/54 on `ee17098`, where `4d87301` differs outside docs only in `ci.yml` and `required-suites.json`, neither of which any image build reads. I also relied on the evidence above and on lane A. |
+
+## R2.2 Verification items
+
+**(a) R1-M1 / C1.** Closed.
+- `tests/compose/images.stack.test.ts:252-266` adds `-path '*/routing/tests*'` and `( -path '*/dist/*/tests/*' ! -path '*/node_modules/*' )`.
+- The node_modules exclusion is commented and justified by ruling §4.3 (f).
+- `tools/docker/prune-dist.test.ts` gains two table rows:
+  - `platform/routing/tests` is a directory, and it is removed;
+  - `…/tests/fixture-route.js` alone is kept by the file rule, which proves that the directory rule is the one doing the work.
+- An on-disk case shows that `fixture-route.js`, its `.map` and `loopback.js` go with their directory while `define-route.js` stays (`prune` returns 1).
+- The stack result `[sheet line 543] × 5` is green on `ee17098`.
+
+**(b) Architect requirements.**
+- **R1 (D-ARCH-117), met.**
+  - Install and prune:
+    - The install is `npm ci --include=dev --workspace=prisma`, with no root.
+    - `tsx` is in `prisma` devDependencies.
+    - `prune-deps --dev --leaf …` keeps the workspace's production closure plus its own devDependencies' closure.
+    - Optional peers are no longer edges.
+    - The api/worker closures are unchanged (252/252 and 274/274 per the PR). The unit test pins that `typescript`, `@eslint/js` and a react peer are removed.
+  - Stack assertions:
+    - `node_modules/typescript` is absent in **every** image (`:274-287`, 5 cases green).
+    - The tooling dev list (25 names, `:289-319`) and 0 PEM private-key files (`:320-340`) are asserted.
+    - Tooling is now **327.9 MiB** (was 588.8).
+- **R2, met.** `.github/dependabot.yml` has `docker` (5 directories) and `docker-compose` (`/`), each monthly with a 7-day cooldown, a limit of 2, one `['*']` group and the `build(deps)` prefix. Both are pinned exactly by the parsed `sec-static.test.ts` case, and the cooldown count is 4. The first-run checks (a digest-only `debian` bump; whether `compose.debug.yaml` is picked up) are recorded as non-blocking follow-ups, as the ruling allows.
+- **R3, met.** `check-dockerfiles`:
+  - `runtime-codename` covers (a) codename parity, with a FROM that has no readable codename as a finding; (b) byte-identical node and debian FROMs across all scanned files; (c) a debian stage takes exactly `/usr/local/bin/node` from the node stage, with no `RUN --mount from=`.
+  - `entrypoint` covers the last ENTRYPOINT plus the `--chmod=0555` copy.
+  - Each branch has a negative test, all green.
+- **R4, met.** `--use-openssl-ca` is gone from `ALLOWED_NODE_OPTION_NAMES`. `--unhandled-rejections` is limited to `strict`/`throw` (`CONSTRAINED_NODE_OPTION_VALUES`). "No system CA store" is stated in `entrypoint.sh`, in the Dockerfiles and in the allow-list JSDoc.
+- **R5, met.** The size case prints the share and writes `[stack] WARN <image> at P % of its budget` to stderr at ≥ 90 %, while failing only above 100 % (`:193-208`). The PR body quotes api 92.1 % and worker 98.7 %. Tooling is reported, not gated.
+- **R6, done in this PR.** The tooling final stage is `debian:trixie-slim` plus the node binary. The D-TASK014-13 V8-header allow-list entry is deleted, and a unit test pins that every Node final stage is debian.
+
+**(c) R1-m1 / SEC-02 preflight.** Closed.
+- **(a) argv.**
+  - `entrypoint.sh` passes `-- "$@"`, and `argvAfterSeparator` takes everything after the first `--`.
+  - Hardened means exactly one argument matching `^dist/[A-Za-z0-9_][A-Za-z0-9/_.-]*\.js$`, no leading `-`, and no `..` segment. Otherwise the issue key is `CMD` only and the exit is 78.
+  - A user CMD that itself starts with `--` has length 2 and is refused.
+  - `PREFLIGHT_NODE_OPTIONS` is always overwritten by the entrypoint (`"${NODE_OPTIONS-}"`) and unset before `exec`, so a task definition cannot pre-seed a benign value.
+  - The stack row `[R1-m1] [PR39-SEC-02 (a)]` (api and worker → 78) is green.
+- **(b) ECS second signal.** `isHardenedPreflightEnv` returns false only for local/test **and** no non-empty `ECS_CONTAINER_METADATA_URI[_V4]`. `checkToolingEnv` runs `localAppEnvOnEcsGuard` with the same `presentEcsMetadataKeys`.
+- **(c) Trust store.**
+  - `NODE_EXTRA_CA_CERTS` must equal `RDS_CA_BUNDLE_PATH`; an empty value is refused.
+  - `SSL_CERT_FILE` and `SSL_CERT_DIR` are refused when present, even empty.
+  - `NODE_TLS_REJECT_UNAUTHORIZED` must be unset or `1`.
+- **`PG*` in tooling.** `checkToolingEnv` refuses every `PG*` name, even empty, when hardened (rule `pg.environment`). The `check-tooling-env.test.ts` CLI cases are green.
+
+**(d) D-TASK014-24.** Correct.
+- **Handler.** `installProcessErrorHandlers` (`process-errors.ts`) computes `configErrorVariable(thrown)`.
+  - For a `DatabaseConfigError` it gives `DATABASE_URL`; for a `TenantTxConfigError` it gives `.variable` (`PGOPTIONS`, or the default `DB_TX_*`). Either way it writes one `runtime.config_rejected` line at `error` with `{ variable, error: name, exitCode: 78 }` (no message, path or stack) and requests exit 78.
+  - Anything else keeps the fatal line and exit 1.
+  - The exit is requested once, with the first error's code. A logger throw still requests the exit, inside `finally`.
+- **Throw sites.** `DatabaseConfigError` comes only from pool-settings and TLS construction (`client.ts`, `db-tls.ts`). `TenantTxConfigError` comes only from `tenantTxOptionsFrom`/`assertNoSessionOptions`. All of these are start-up paths, so mapping every *uncaught* instance to 78 does not misclassify a run-time crash.
+- **In-process tests.** `config-exit.test.ts` has 4 handler cases:
+  - DATABASE_URL named without the path;
+  - PGOPTIONS named without the value;
+  - the first error decides, in both orders;
+  - a logger throw still exits 78.
+- **Spawned tests.** The 3 child-process cases (api and worker PGOPTIONS, api sslrootcert) run the real `main.ts` and are green locally and in evidence.
+- **Composition with PR #44.** `startApi` installs the handlers (`start-api.ts:98`) before `deps.createRuntimeServices` (`:100`). A synchronous throw there rejects `startApi`. `main.ts` passes the rejection to `raiseStartupError`, which re-throws it in a microtask as an uncaught exception, and the handler maps it to 78. This is the path the spawned api cases execute.
+- **Worker.** The worker calls `createRuntimeServices` at top-level await after installing the handlers. Node reports the rejected module evaluation through `uncaughtException`, and the spawned worker PGOPTIONS case proves it.
+- **Preflight CLI in-process test.** `entry-preflight.test.ts` imports the CLI with a hardened `process.env` and `argv = [... '--', 'dist/main.js']`, expects `exitCode` 0 and restores the globals in `finally`. It proves the `--` split in process. The refusal path is covered only by the spawned cases (R2-n3).
+
+**(e) D-TASK014-25.** Accepted.
+- The change is a step-level `env: NODE_OPTIONS: --max-old-space-size=4096` on the Lint step only. The `npm run lint` line is unchanged, so the PR17-SEC-04 step matcher still holds, and `check-workflow-policy` passes on the head (lane A green).
+- The env line is **byte-identical** to PR #42 (`96bd37a`) and PR #46 (`ad30316`). Each merge-tree shows a comment-only conflict and a single env line.
+- **Union rule:** whichever merges second keeps ONE comment block and ONE `NODE_OPTIONS` line on the Lint step.
+
+**(f) Unions pure.** Yes (R2.1).
+- `check-workflow-policy` keeps the PR39-SEC-05 and PR43-SEC-04 blocks whole, plus PR40-SEC-01.
+- No file is in two Jest projects.
+- `package.json` keeps `test:coverage` (PR #40) and `test:stack`. The unit ignore `\.(int|api|stack)\.test\.ts$` and the `JEST_STACK` spread stay.
+
+**(g) Docs drift (R1-m3).** It is still routed and not touched in this PR.
+- DECISIONS.md routes the residual path drift and the "300 MB" wording (D-ARCH-116..118 acceptance and the PR #39 r1 entries) to TASK-282 / the architect.
+- The CLAUDE.md §2 run-locally note is also routed ("the human is told").
+- The branch's DECISIONS.md and STATUS.md equal the main it last merged (`d753027`).
+
+## R2.3 Findings (round 2)
+
+| ID | Severity | File:line | Issue | Fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `tests/compose/images.stack.test.ts:252-266` | The generic arm `*/dist/*/tests/*` needs at least one segment between `dist/` and `tests/`, so a `dist/tests/…` directly under a dist root is not matched (scratchpad probe). Separately, the tooling image ships `packages/{shared,authz,config}/src` and `prisma/seed` as sources, yet the find asserts `*.test.js` only; `*.test.ts` absence rests on `.dockerignore` (pinned by `check-dockerignore.test.ts`). Risk is nil today: `.dockerignore` `**/tests` and `**/*.test.ts`, the prune-dist directory rule and the preflight `cleanTree` all hold. | Add `-path '*/dist/tests/*'` to the node_modules-excluded group and `-name '*.test.ts'` to the find; re-run with the next stack run (activation PR or `imgheadroom`). |
+| R2-n2 | NIT | `apps/api/src/platform/db/config-exit.ts:1-8`; `apps/api/src/start-api.ts:97,99,166-168`; `apps/worker/src/main.ts:28` | Comments are stale after D-TASK014-24. `config-exit.ts` says "both entry points call `createRuntimeServices` at the top level", but the api now calls it inside `startApi`, and the rejection is re-raised by `raiseStartupError`. The other three files say "fatal line … then exit 1", while config errors now exit 78. The entry files were deliberately left equal to main. | Route to 020-D, or to whoever next touches `start-api.ts`/`main.ts`. All these paths are under `/apps/api/src/platform/` or entry points that are security-owned, so an in-PR fix would cost a new record and evidence. Do not reopen the PR for it. |
+| R2-n3 | NIT | `packages/config/src/entry-preflight.test.ts:289-303` | The in-process CLI case is positive-only. A mutant that hard-codes `process.exitCode = 0` survives in process; the spawned cases kill it. | Optional: add `argv = [..., 'entry-preflight-cli.js']` (no `--`) and expect 78. The module cache means this needs `jest.isolateModulesAsync`, or a second import with a query string. |
+| R2-n4 | NIT | PR body "Sheet line → test" table | No row for sheet line 545 (D-ARCH-115). R1-M1 asked for it; the fix-cycle table does cover it. | Add a row "545 D-ARCH-115 → `images.stack` `[sheet line 543]` find (routing/tests, dist/*/tests); `prune-dist.test.ts` routing rows" to the body. Body only, no commit. |
+| R1-n4 (carried) | NIT | `packages/config/src/guards.ts` vs `db-tls.ts` | Not taken: PR #42 also edits `guards.ts`. "Follow-up" has no owner. | The orchestrator names an owner (the senior-developer follow-up after PR #42 merges, or TASK-089) in STATUS ROUTED. |
+| R1-n1 (carried) | NIT | `tools/docker/entrypoint.sh` | `--enable-source-maps` is always on. Routed to the perf task. | No action here. |
+
+All round-1 items are closed or routed: R1-M1, R1-m1, R1-m2, R1-m4 (for merge), R1-n2, R1-n3, R1-n5, R1-n6, R1-n7, R1-n8 (via C2) and R1-n9 are fixed. R1-m3 is routed (TASK-282 / architect). R1-n1 and R1-n4 are carried as above.
+
+## R2.4 Union notes (whichever merges second)
+
+**PR #42 (TASK-025):**
+1. `packages/config/src/values.test.ts:213`: `expect(GUARDS.length).toBe(15)`. Main has 12; #39 adds 2 and #42 adds 1.
+2. `apps/api/src/platform/db/with-tenant-tx.ts`: the auto-merge keeps `'PGOPTIONS'` as the second argument of the session-options refusal. Keep it, because without it the exit-78 line would name `DB_TX_*`.
+   - #42's admission refusal (`admission.waitMs must not exceed maxWaitMs`, merged-tree line ≈304) should pass `'DB_TENANT_ADMISSION_WAIT_MS'` as `variable`, so that `runtime.config_rejected` names the right key.
+   - Add the matching `configErrorVariable` row to `config-exit.test.ts`.
+3. The images already ship `packages/audit`: `apps/api/Dockerfile:23,53,60,110-111` (and the worker equivalents). Keep these lines.
+   - #42 adds `@platform/audit` to the api and worker `package.json`, and code to `packages/audit/dist`.
+   - The worker is at **98.7 %** of its budget, so the second merger must re-run `npm run test:stack` (at least the size cases, `[sheet line 543]` and the preflight cases) on the union and quote the shares.
+4. `.github/workflows/ci.yml`: one comment block and one `NODE_OPTIONS: --max-old-space-size=4096` line on the Lint step.
+
+**PR #46 (TASK-015 015-B, ci.yml rewrite):**
+- Keep the Lint step's `run: npm run lint` byte-identical (the PR17-SEC-04 matcher) and one heap env line.
+- Re-run `check-workflow-policy` on both the head and the base copy.
+
+**PR #45 retirement (its m3):** when #39 squash-merges, `dd7a2dd` never reaches main. The commit-bound gitleaks entry is then dead and should be retired, with its description pin updated.
+
+## R2.5 Merge conditions
+
+1. **A security-analyst round-2 record naming `c85d5e5` (or later)**, so that the scans step turns green. This is the only red lane A step.
+2. No further code change is needed for this verdict. R2-n1..n4 are optional, or routed as stated. A change to any owned path would need a new record and evidence.
+3. If main gains a non-docs change before merge: merge it, then fresh lane B evidence and a stack re-run if any image input changed. Otherwise merge as is.
+4. **Squash.** Intermediate commits such as `dd7a2dd` must not reach main (PR #45).

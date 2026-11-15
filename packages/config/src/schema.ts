@@ -189,6 +189,31 @@ export const DB_TX_TIMEOUT_BOUNDS = Object.freeze({
 });
 const txTimeout = (key: keyof typeof DB_TX_TIMEOUT_BOUNDS): Typed<number> =>
   t.int(DB_TX_TIMEOUT_BOUNDS[key].min, DB_TX_TIMEOUT_BOUNDS[key].max);
+/**
+ * Per-tenant admission bulkhead of `withTenantTx` (ADR-0007 am. 10 item 3, D-ARCH-086, data-model §7.7): at most
+ * `DB_TENANT_MAX_CONCURRENT_TX` concurrent transactions per organisation per process. The key has no schema default
+ * because its default depends on `DB_POOL_MAX` (a `DefaultFor` sees only APP_ENV and the service): unset means
+ * {@link defaultTenantMaxConcurrentTx} of the loaded pool size, applied by apps/api `tenantTxOptionsFromConfig`. A set
+ * value above `DB_POOL_MAX` is refused by the `databaseGuard`.
+ */
+export const DB_TENANT_MAX_CONCURRENT_TX_FLOOR = 2;
+/** The default admission cap for a pool of `poolMax` connections: `max(2, floor(poolMax / 2))`. */
+export const defaultTenantMaxConcurrentTx = (poolMax: number): number =>
+  Math.max(DB_TENANT_MAX_CONCURRENT_TX_FLOOR, Math.floor(poolMax / 2));
+export const DB_TENANT_ADMISSION_WAIT_MS_DEFAULT = 250;
+/**
+ * Upper bound of `DB_TENANT_ADMISSION_WAIT_MS`: the tenant-transaction `maxWait` (apps/api `DEFAULT_MAX_WAIT_MS`, a code
+ * constant, not a key). The runner refuses a longer admission wait at boot; refusing it here makes it a configuration
+ * error at load (exit 78). apps/api pins the parity with the constant.
+ */
+export const DB_TENANT_ADMISSION_WAIT_MS_MAX = 2_000;
+/**
+ * Transaction-local `lock_timeout` of the audit insert (ADR-0007 am. 10 item 2; TASK-025), strictly below
+ * `DB_TX_LOCK_TIMEOUT_MS` (the `databaseGuard` refuses anything else), so an audit lock wait fails first and maps to
+ * AUDIT_LOCK_TIMEOUT.
+ */
+export const DB_AUDIT_LOCK_TIMEOUT_MS_DEFAULT = 250;
+export const DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS = Object.freeze({ min: 1, max: DB_TX_TIMEOUT_BOUNDS.DB_TX_LOCK_TIMEOUT_MS.max - 1 });
 
 const MINUTE = 60;
 const HOUR = 3_600;
@@ -287,6 +312,18 @@ export const CONFIG_SCHEMA = {
     txTimeout('DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS'),
     DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS_DEFAULT,
     { description: 'Transaction-local idle_in_transaction_session_timeout (ms) set by withTenantTx.' },
+  ),
+  // Per-tenant admission bulkhead of withTenantTx (D-ARCH-086, data-model §7.7) and the audit insert lock wait.
+  DB_TENANT_MAX_CONCURRENT_TX: optional(t.int(1, DB_POOL_MAX_LIMIT), {
+    description: 'Concurrent tenant transactions per organisation per process (≤ DB_POOL_MAX); unset: max(2, DB_POOL_MAX / 2).',
+  }),
+  DB_TENANT_ADMISSION_WAIT_MS: withDefault(t.int(1, DB_TENANT_ADMISSION_WAIT_MS_MAX), DB_TENANT_ADMISSION_WAIT_MS_DEFAULT, {
+    description: 'Milliseconds a tenant transaction waits for admission before a retryable 503 (≤ the 2 000 ms maxWait).',
+  }),
+  DB_AUDIT_LOCK_TIMEOUT_MS: withDefault(
+    t.int(DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS.min, DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS.max),
+    DB_AUDIT_LOCK_TIMEOUT_MS_DEFAULT,
+    { description: 'Transaction-local lock_timeout (ms) of the audit insert; must be below DB_TX_LOCK_TIMEOUT_MS.' },
   ),
 
   // Valkey (REDIS_*)

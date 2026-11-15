@@ -130,6 +130,14 @@ const AUDIT_WRITER_ALLOW_LIST = [
   'apps/api/src/modules/shipments/service/**', // the state machine writes STATE_TRANSITION entries
 ];
 /**
+ * The write-capable value exports of `@platform/audit` (option `writerExports` of `platform/audit-writer-allowlist`;
+ * PR #42 R1-M1, PR42-SEC-06): the writer, the store (append and vault insert on a handed transaction, without the
+ * entry contract) and the entry assembler. Pure helpers (hash, canonical form, vocabularies) and types stay importable.
+ */
+const AUDIT_WRITER_EXPORTS = ['AuditWriter', 'createAuditWriter', 'writeAuditEntry', 'createPrismaAuditStore', 'prepareEntry'];
+const AUDIT_COMPOSITION_MESSAGE =
+  'REQ-AUDIT-001: apps/api/src/platform/audit composes the audit writer; api code outside the audit-writer allow-list imports only its types (the tx slot mounts capture.ts) (PR #42 R2-M1).';
+/**
  * Non-repository files planned to use Prisma, by exact path (narrow): the audit store (ADR-0007, TASK-025) and the
  * transactional outbox writer (TASK-043). Anything else beside them still goes through a repository.
  */
@@ -152,8 +160,11 @@ const PRISMA_CLIENT_HOMES = [
  * transaction (the audit hook, the outbox writer, the audit store). Test files are outside the rule's block.
  */
 const TENANT_TX_FILES = ['apps/api/src/platform/audit/**', 'apps/api/src/platform/outbox/writer.ts', 'packages/audit/src/store/**'];
-/** T-83 R6 (option `txHandleTypes`): a function with a parameter of one of these types runs inside the transaction. */
-const TENANT_TX_HANDLE_TYPES = ['TenantDb', 'AppDb', 'AppTransactionClient'];
+/**
+ * T-83 R6 (option `txHandleTypes`): a function with a parameter of one of these types runs inside the transaction.
+ * `AuditSqlPort` is the audit writer's and the tokeniser's structural view of it (PR42-SEC-07).
+ */
+const TENANT_TX_HANDLE_TYPES = ['TenantDb', 'AppDb', 'AppTransactionClient', 'AuditSqlPort'];
 /**
  * `platform/system-model-owner` (PR19-SEC-01, D-ARCH-080): table-class manifest module -> the code that owns its
  * SYSTEM tables. A manifest module without an entry owns `apps/*\/src/modules/<module>/**` (e.g. `identity` for
@@ -208,6 +219,11 @@ const TENANT_CONTEXT_EXEMPTIONS = [
   { files: ['tools/db/lint-migrations.test.ts', 'tools/db/tenant-key-forms.test.ts'], allow: ALL_CONTEXT_FORMS },
   // pg_dump's own preamble `set_config('search_path', '', false)`, asserted verbatim (no tenant key; not a session form).
   { files: ['tools/db/up-down-up.test.ts'], allow: ['setter'] },
+  // The audit head-row lock statement sets the transaction-local audit `lock_timeout` in its MATERIALIZED CTE
+  // (ADR-0007 am. 10 item 2, data-model §5.4 statement 2; TASK-025). Literal non-app key, is_local true. The store's
+  // unit test pins it with the rule's own pattern (PR #42 R1-m1, PR42-SEC-05): exactly one case-insensitive
+  // `set_config` in the comment-stripped file, and that one is the exact `lock_timeout` setter. No tenant key, no read.
+  { files: ['packages/audit/src/store/prisma-store.ts'], allow: ['setter'] },
 ];
 /** Domain code in which non-null assertions are forbidden (NFR-MAINT-002). */
 const DOMAIN_CODE = ['packages/{pricing,audit,authz,carriers}/src/**/*.ts', 'apps/api/src/modules/*/service/**/*.ts'];
@@ -269,6 +285,13 @@ const BOUNDARIES_FILES = [
   { pattern: `${MODULE}/**`, category: 'api-module', capture: ['module'] },
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
+  { pattern: 'packages/audit/**', category: 'package-audit' },
+  // The api-side audit composition (writer factory, capture hook) and the allow-listed importers of the audit writer:
+  // the resolved-file arm of REQ-AUDIT-001 (PR #42 R2-M1, PR42-SEC-16; policy below).
+  { pattern: 'apps/api/src/platform/audit/**', category: 'api-platform-audit' },
+  { pattern: 'apps/api/src/platform/audit/capture.ts', category: 'api-audit-capture' },
+  { pattern: 'apps/api/src/platform/tx/**', category: 'api-tx-slot' },
+  ...AUDIT_WRITER_ALLOW_LIST.map((pattern) => ({ pattern, category: 'audit-writer-caller' })),
   // The server-only logging subpath of @platform/shared (Pino; TASK-010, PR #20 M1): the resolved-file arm of its guard.
   { pattern: SHARED_LOGGING, category: 'shared-logging' },
   { pattern: DB_PLATFORM, category: 'db-platform' },
@@ -280,6 +303,8 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/*/src/platform/db/query-counter.ts', category: 'db-test-seam' },
   { pattern: PLANNED_PRISMA_FILES, category: 'db-platform' },
   { pattern: 'prisma/tests/**', category: 'prisma-tests' },
+  // The audit store suites (TASK-025): the one prisma/tests folder that may import @platform/audit (policy below).
+  { pattern: 'prisma/tests/audit/**', category: 'prisma-tests-audit' },
   // The seed framework (TASK-023): prisma/tests/seed exercises it (D-ORCH-015 reconciliation, PR #13 code review m6).
   { pattern: 'prisma/seed/**', category: 'prisma-seed' },
   { pattern: 'tools/test-support/**', category: 'test-support' },
@@ -448,6 +473,9 @@ const BOUNDARIES_POLICIES = [
       to: toLayer('tools-db', 'test-support', 'tools-authz', 'db-platform-core', 'prisma-generated', 'prisma-seed', 'prisma-tests'),
     },
   },
+  // TASK-025: prisma/tests/audit exercises the audit store (packages/audit/src/store, database code that joins the
+  // business transaction) against the real bootstrap lane, so it may import @platform/audit, and only that package.
+  { from: { file: { categories: 'prisma-tests-audit' } }, allow: { to: toLayer('package-audit') } },
 
   // --- The bcrypt family is confined to the PasswordHasher implementation (D-ARCH-042, ADR-0006 am. 16): import,
   //     export-from, import(), require, module.require and createRequire(...)(...) (see the additional dependency
@@ -556,6 +584,19 @@ const BOUNDARIES_POLICIES = [
   //     root, so no other packages/shared module may import or re-export the logging module or Pino. The logging
   //     folder itself may import the rest of packages/shared (correlation, errors).
   { from: IMPORTER_SHARED_OUTSIDE_LOGGING, disallow: SERVER_LOGGING_TARGETS, message: SHARED_ROOT_LOGGING_MESSAGE },
+
+  // --- The api-side audit composition (REQ-AUDIT-001; PR #42 R2-M1, PR42-SEC-16). apps/api/src/platform/audit is in the
+  //     audit-writer allow-list (it composes the writer over the store), so `platform/audit-writer-allowlist` is off in
+  //     it and cannot see what it hands out. Judged on the RESOLVED file, so no spelling gets past (`./`, `..`,
+  //     `platform/./audit`, a re-export, `import()`): api code outside the allow-list, tests excepted, value-imports
+  //     nothing from that folder; its types stay importable. The one exception is the request pipeline's tx slot,
+  //     which mounts the capture hook (capture.ts) and nothing else from it. Last matching policy decides.
+  {
+    from: { file: { categories: { anyOf: ['app'], noneOf: ['test', 'audit-writer-caller'] }, captured: { app: 'api' } } },
+    disallow: { to: toLayer('api-platform-audit'), dependency: { kind: 'value' } },
+    message: AUDIT_COMPOSITION_MESSAGE,
+  },
+  { from: { file: { categories: { anyOf: ['api-tx-slot'], noneOf: ['test'] } } }, allow: { to: toLayer('api-audit-capture') } },
 
   // --- The Prisma query counter is a test seam (NFR-PERF-006, D-TASK276-03; PR34-SEC-01): only test files (including
   //     module and app `tests/` folders, i.e. the API test app builder) and prisma/tests import it, so the production
@@ -839,7 +880,7 @@ export default defineConfig([
       'platform/money-arith': 'error',
       'platform/no-tofixed-tolocalestring': 'error',
       'platform/no-innerhtml': 'error',
-      'platform/audit-writer-allowlist': 'error',
+      'platform/audit-writer-allowlist': ['error', { writerExports: AUDIT_WRITER_EXPORTS }],
     },
   },
   {
