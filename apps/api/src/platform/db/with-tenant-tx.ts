@@ -277,9 +277,10 @@ export async function findSessionContext(db: RawQueryClient): Promise<string[]> 
   return rows.map((row) => row.name);
 }
 
-function positiveInt(name: string, value: unknown): number {
+/** `variable` is the configuration key the exit-78 line names (`TenantTxConfigError` default `DB_TX_*`). */
+function positiveInt(name: string, value: unknown, variable?: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw new TenantTxConfigError(`${name} must be a positive integer (ms)`);
+    throw new TenantTxConfigError(`${name} must be a positive integer (ms)`, variable);
   }
   return value;
 }
@@ -297,11 +298,16 @@ export function resolveTransactionOptions(options: WithTenantTxOptions): Transac
   return { maxWait, timeout };
 }
 
-/** Validates the admission options against the resolved transaction `maxWait` (D-ARCH-086). */
+/**
+ * Validates the admission options against the resolved transaction `maxWait` (D-ARCH-086). The refusals name the
+ * `DB_TENANT_*` key they come from, so `runtime.config_rejected` does not report `DB_TX_*` (PR #39 R2.4 item 2).
+ */
 export function resolveAdmissionOptions(admission: TenantAdmissionOptions, maxWait: number): TenantAdmissionOptions {
-  const maxConcurrentTx = positiveInt('admission.maxConcurrentTx', admission.maxConcurrentTx);
-  const waitMs = positiveInt('admission.waitMs', admission.waitMs);
-  if (waitMs > maxWait) throw new TenantTxConfigError('admission.waitMs must not exceed maxWaitMs');
+  const maxConcurrentTx = positiveInt('admission.maxConcurrentTx', admission.maxConcurrentTx, 'DB_TENANT_MAX_CONCURRENT_TX');
+  const waitMs = positiveInt('admission.waitMs', admission.waitMs, 'DB_TENANT_ADMISSION_WAIT_MS');
+  if (waitMs > maxWait) {
+    throw new TenantTxConfigError('admission.waitMs must not exceed maxWaitMs', 'DB_TENANT_ADMISSION_WAIT_MS');
+  }
   return { maxConcurrentTx, waitMs };
 }
 

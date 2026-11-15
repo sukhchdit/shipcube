@@ -13,10 +13,23 @@ import { CONFIG_EXIT_CODE, CONFIG_KEY_NAMES } from '@platform/config';
 import { createTestEnv } from '@platform/config/testing';
 
 import { DatabaseConfigError, toPoolConfig } from './client.js';
-import { assertNoSessionOptions, TenantTxConfigError } from './with-tenant-tx.js';
+import {
+  assertNoSessionOptions,
+  resolveAdmissionOptions,
+  resolveTransactionOptions,
+  TenantTxConfigError,
+  type WithTenantTxOptions,
+} from './with-tenant-tx.js';
 import { createRuntimeLog } from '../runtime/log.js';
 import { installProcessErrorHandlers } from '../runtime/process-errors.js';
 import { configErrorVariable } from './config-exit.js';
+
+const TX_OPTIONS: WithTenantTxOptions = {
+  statementTimeoutMs: 5_000,
+  lockTimeoutMs: 2_000,
+  idleInTransactionTimeoutMs: 10_000,
+  poolConnectionTimeoutMs: 5_000,
+};
 
 const captured = (fn: () => unknown): unknown => {
   try {
@@ -43,6 +56,18 @@ describe('configErrorVariable', () => {
   it('names PGOPTIONS for the session-options refusal and DB_TX_* for the other TenantTxConfigErrors', () => {
     expect(configErrorVariable(captured(() => assertNoSessionOptions({ PGOPTIONS: '-c x=y' })))).toBe('PGOPTIONS');
     expect(configErrorVariable(new TenantTxConfigError('timeoutMs must be at least statementTimeoutMs'))).toBe('DB_TX_*');
+    expect(configErrorVariable(captured(() => resolveTransactionOptions({ ...TX_OPTIONS, lockTimeoutMs: 0 })))).toBe('DB_TX_*');
+  });
+
+  it.each([
+    ['an admission wait above maxWaitMs', { maxConcurrentTx: 2, waitMs: 1_001 }, 'DB_TENANT_ADMISSION_WAIT_MS'],
+    ['a non-positive admission wait', { maxConcurrentTx: 2, waitMs: 0 }, 'DB_TENANT_ADMISSION_WAIT_MS'],
+    ['a non-integer concurrency', { maxConcurrentTx: 1.5, waitMs: 500 }, 'DB_TENANT_MAX_CONCURRENT_TX'],
+    ['a zero concurrency', { maxConcurrentTx: 0, waitMs: 500 }, 'DB_TENANT_MAX_CONCURRENT_TX'],
+  ])('names the DB_TENANT_* key for %s, never DB_TX_* (PR #39 code review R2.4 item 2)', (_case, admission, variable) => {
+    const error = captured(() => resolveAdmissionOptions(admission, 1_000));
+    expect(error).toBeInstanceOf(TenantTxConfigError);
+    expect(configErrorVariable(error)).toBe(variable);
   });
 
   it('returns undefined for any other error', () => {
@@ -91,6 +116,24 @@ describe('installProcessErrorHandlers with a runtime configuration error (D-TASK
       expect.objectContaining({ event: 'runtime.config_rejected', variable: 'PGOPTIONS', error: 'TenantTxConfigError' }),
     ]);
     expect(JSON.stringify(lines())).not.toContain('424242');
+    expect(exits).toEqual([CONFIG_EXIT_CODE]);
+  });
+
+  it('an admission refusal logs runtime.config_rejected naming DB_TENANT_ADMISSION_WAIT_MS, exit 78', () => {
+    const { source, lines, exits } = setup();
+    source.emit(
+      'uncaughtException',
+      captured(() => resolveAdmissionOptions({ maxConcurrentTx: 2, waitMs: 9_999 }, 1_000)),
+      'uncaughtException',
+    );
+    expect(lines()).toEqual([
+      expect.objectContaining({
+        event: 'runtime.config_rejected',
+        variable: 'DB_TENANT_ADMISSION_WAIT_MS',
+        error: 'TenantTxConfigError',
+        exitCode: CONFIG_EXIT_CODE,
+      }),
+    ]);
     expect(exits).toEqual([CONFIG_EXIT_CODE]);
   });
 
