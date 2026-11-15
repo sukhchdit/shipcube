@@ -23,4 +23,9 @@ TASK-027: pure generator in packages/authz/src/generator plus a loopback suite i
 - **The scratchpad was wiped again, wave0 included.** Lock scripts must `mkdir -p` wave0 before `mkdir docker.lock`.
 - **Commit-message traps:** a commitlint subject starting with an acronym ("RBAC ...") fails subject-case; start with a verb. Heredocs drop `\n` escapes inside JS strings, so use the Write and Edit tools.
 
+**Resume after the network outage (2026-11-15, PR #48):**
+- **Check the merge base before obeying a brief's "merge needed".** The brief asked for a merge for PR #42, but `git merge-base --is-ancestor a082560 HEAD` showed it was already in. Only a docs-only main merge was needed so that STATUS/DECISIONS equal main.
+- **Two heavy runs at the same head failed on host load before a PASS.** Each needed a new worktree. The flakes were a spawnSync ETIMEDOUT in a `tools/lint/negative-fixtures` beforeAll hook (333 failures from one hook), and the `s3-object-storage.http` deadline assertion (10 s against 1.8 s). Isolated re-runs passed. Budget about 3 evidence worktrees per PR.
+- **A docs-only main merge after the evidence commit is safe:** check-evidence still accepts the run.
+
 Related: [[task024-rls-generator]], [[lane-b-evidence-run]], [[pr43-fc1]], [[p5-dispatch]]
