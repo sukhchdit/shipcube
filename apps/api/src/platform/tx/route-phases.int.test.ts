@@ -145,6 +145,40 @@ const lexerFormRoutes = LEXER_FORMS.map(({ path, id, send }) =>
     },
   }),
 );
+/** The session advisory-lock key of SESSION_FORMS (pg_locks: classid 0, objid = the key). */
+const ADVISORY_KEY = 5454;
+/**
+ * PR54-SEC-02 (a), code review R1-m3 (PR #54): session state that outlives the transaction on the pooled backend, a
+ * cursor declared WITH HOLD and a session advisory lock. Admitted, either would let the load finish and the call and
+ * handler run; the control case below shows that PostgreSQL 18 keeps both after COMMIT.
+ */
+const SESSION_FORMS = [
+  {
+    path: '/fixtures/load-cursor-with-hold',
+    id: 7,
+    send: (db: AppDb) => db.$executeRaw`DECLARE leak CURSOR WITH HOLD FOR SELECT id FROM public.phase_probe`,
+  },
+  { path: '/fixtures/load-advisory-lock', id: 8, send: (db: AppDb) => db.$queryRaw`SELECT pg_advisory_lock(5454)` },
+] as const;
+const sessionFormRoutes = SESSION_FORMS.map(({ path, id, send }) =>
+  fixtureRoute({
+    ...GUEST,
+    operationId: `probeLoadSession${String(id)}`,
+    path,
+    load: async ({ db }) => {
+      await send(db as AppDb);
+      return 'loaded';
+    },
+    call: () => {
+      ranPhases.push('call');
+      return 'called';
+    },
+    handler: () => {
+      ranPhases.push('handler');
+      return { status: 200, body: {} };
+    },
+  }),
+);
 const accessModes = fixtureRoute({
   ...GUEST,
   operationId: 'probeAccessModes',
@@ -212,7 +246,16 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
       modules: [
         {
           name: 'fixtures',
-          routes: [writeInLoad, commitInLoad, ...lexerFormRoutes, accessModes, holdsAcrossCall, holdsBriefly, withCall],
+          routes: [
+            writeInLoad,
+            commitInLoad,
+            ...lexerFormRoutes,
+            ...sessionFormRoutes,
+            accessModes,
+            holdsAcrossCall,
+            holdsBriefly,
+            withCall,
+          ],
         },
       ],
       tenantTx: runtime.tenantTx,
@@ -308,6 +351,51 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
       }
     } finally {
       await admin.end();
+    }
+  });
+
+  it.each(SESSION_FORMS.map(({ path }) => [path] as const))(
+    '[PR54-SEC-02] %s: session state that outlives the transaction is refused before the server; call and handler never run',
+    async (path) => {
+      const response = await fetch(`${base}${path}`, { method: 'POST' });
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(response.headers.get('content-type')).toMatch(/^application\/problem\+json/u);
+      expect(ranPhases).toEqual([]);
+      const admin = new pg.Client({ connectionString: container.getConnectionUri() });
+      await admin.connect();
+      try {
+        // A session advisory lock that reached the server would still be held by the pooled backend.
+        const { rows } = await admin.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' AND objid = $1",
+          [ADVISORY_KEY],
+        );
+        expect(rows).toEqual([{ n: 0 }]);
+      } finally {
+        await admin.end();
+      }
+    },
+  );
+
+  it('[PR54-SEC-02] control: PostgreSQL 18 keeps a WITH HOLD cursor and a session advisory lock after COMMIT', async () => {
+    const admin = new pg.Client({ connectionString: container.getConnectionUri() });
+    const observer = new pg.Client({ connectionString: container.getConnectionUri() });
+    await admin.connect();
+    await observer.connect();
+    try {
+      await admin.query('BEGIN');
+      await admin.query('DECLARE held CURSOR WITH HOLD FOR SELECT 1 AS v');
+      await admin.query('SELECT pg_advisory_lock($1::bigint)', [ADVISORY_KEY]);
+      await admin.query('COMMIT');
+      expect((await admin.query<{ v: number }>('FETCH ALL FROM held')).rows).toEqual([{ v: 1 }]);
+      const { rows } = await observer.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' AND objid = $1 AND granted",
+        [ADVISORY_KEY],
+      );
+      expect(rows).toEqual([{ n: 1 }]);
+    } finally {
+      await admin.query('CLOSE ALL');
+      await admin.query('SELECT pg_advisory_unlock_all()');
+      await Promise.all([admin.end(), observer.end()]);
     }
   });
 
