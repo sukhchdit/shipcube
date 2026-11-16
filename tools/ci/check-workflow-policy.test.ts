@@ -224,8 +224,8 @@ describe('check-workflow-policy: repository', () => {
     }
   });
 
-  it('PR10-SEC-07 required-gates: the repository ci.yml keeps every gate; dropping or guarding one fails; ci.yml must exist', () => {
-    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+  it('PR10-SEC-07 required-gates (stage 1, kept accepted by TASK-286; the stage-2 pins are in ci-policy-stage-2.test.ts): the workflow keeps every gate; dropping or guarding one fails; ci.yml must exist', () => {
+    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
     expect(checkWorkflow(ci, 'ci.yml', { requiredGates: true })).toEqual([]);
     const dropped = ci.replace('"$GITLEAKS_IMAGE" git /repo', '"$GITLEAKS_IMAGE" version');
     expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.rule)).toContain('required-gates');
@@ -256,7 +256,7 @@ describe('check-workflow-policy: repository', () => {
   });
 
   describe('D-ORCH-018 / PR17-SEC-03: the base-ref lint fixture step is a pinned required gate; the mode variable lives on that step only', () => {
-    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
     const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
     const modeEntry = '        env:\n          LINT_FIXTURE_MODE: no-weakening\n';
     const guard = "        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'\n" + modeEntry;
@@ -423,7 +423,7 @@ describe('check-workflow-policy: repository', () => {
   });
 
   describe('[PR23-SEC-06] lane B evidence step pin (D-SEC-PR23-02 (2), D-ORCH-032 (1), R2-n2, R2-n3)', () => {
-    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
     const baseLine =
       'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"';
     const stepName = '      - name: Lane B evidence (quality:check-evidence)\n';
@@ -540,7 +540,7 @@ describe('check-workflow-policy: repository', () => {
   });
 
   describe('[PR #33 R1-m2] [PR33-SEC-03] porcelain and openapi-breaking pins: exact command, no step env, fixed position', () => {
-    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
     const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
     const swap = (text: string, from: string, to: string): string => {
       expect(text.split(from)).toHaveLength(2);

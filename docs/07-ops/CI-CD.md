@@ -10,7 +10,7 @@ section 2 PATH prefix on the Windows host. Nothing in this pipeline deploys, pus
 
 | Lane | Where | Trigger | What | Verdict |
 |---|---|---|---|---|
-| A (fast lane) | `.github/workflows/ci.yml`, hosted | non-draft pull request into `main`; push to `main` only with `CI_MAIN_FAST_LANE=true` | `fast-lane` (base-ref gates, install, lint, format, typecheck, unit, build, lane B evidence check; light mode on a docs-only push), `scans` (lane scope and proofs, gitleaks range, Semgrep, oasdiff, security record), `security-integration` (once per code tree on merge-candidate heads that change a security-critical path) | `ci-gate` (`MERGE-READY` or `BLOCKED: <reasons>`) |
+| A (fast lane) | `.github/workflows/ci.yml`, hosted | non-draft pull request into `main`; push to `main` only with `CI_MAIN_FAST_LANE=true` | `fast-lane` (tested-base gate tooling, lane scope and proofs, base-ref gates, install, signatures and audit, lint, format, typecheck, unit, build, lane B evidence check; light mode on a docs-only push), `security-integration` (once per code tree on merge-candidate heads that change a security-critical path) | `ci-gate` (lane scope recomputed and compared, gitleaks range, Semgrep, oasdiff, security record; `MERGE-READY` or `BLOCKED: <reasons>`) |
 | B (heavy lane) | developer host, Docker Desktop | `npm run quality:heavy -- --profile pr\|wave\|gate` | integration, API, generated suites, merged coverage gate, and every other active suite of `tools/quality/required-suites.json` | committed `docs/05-quality/*/runs/<stamp>_<sha7>/summary.json`, checked by lane A |
 | C (full lane) | `.github/workflows/lane-c.yml`, hosted | `workflow_dispatch` only | static, integration (merged coverage, US-006 gate), images, e2e-stack (one shard per engine), iac, scans-full, inventory | `lane-c-gate` |
 | nightly | `.github/workflows/nightly.yml`, hosted | `workflow_dispatch` only (no schedule) | dependency freshness report, gitleaks over the full history | job conclusions |
@@ -23,16 +23,16 @@ manifest's `tooling_inputs`, `.claude/**` minus `.claude/settings.json`, `*.md` 
 only) runs `fast-lane` in **light** mode: the `env.CODE` steps (supply-chain gates, lint, format, type-check, unit, build)
 are skipped and inherited from a **code proof**, a completed pull-request run on a commit whose tree differs from the
 head only in docs, whose code steps and gitleaks/Semgrep/oasdiff steps concluded `success` (jobs API, read with
-`actions: read` by `scans` and `ci-gate`, token on the lane-scope steps only). A proof run must be a run of **this**
+`actions: read` by `fast-lane`'s classify step and `ci-gate`, token on the lane-scope steps only). A proof run must be a run of **this**
 pull request into `main` (code review PR #46 R2-M1, PR46-SEC-13): its head branch is the PR's (`--head-ref`), the head
 branch has exactly one pull request (this one, into `main`), the run lists exactly this PR with base `main`, and it was
 created after the PR's last `base_ref_changed` event. An empty or ambiguous `pull_requests` list (a fork, a stacked PR)
 is no proof, and lane A runs only for pull requests into `main` (`on.pull_request.branches: [main]`, policy-pinned).
 **Never retarget a PR** (D-ORCH-090): a retarget voids every earlier proof and record and needs a full run; close the PR
 and reopen it from a fresh branch instead, and never open a second PR from a branch. When a docs push finds no proof
-(`ci-gate`: `no code proof for this tree`; the `scans` summary names the binding problem), closing and reopening the PR
+(`ci-gate`: `no code proof for this tree`; the lane-scope summary names the binding problem), closing and reopening the PR
 runs the full lane on the same head (a `reopened` event has no push range, so the PR range decides). The binding needs
-`pull-requests: read` on `scans` (policy-pinned). Every other gate runs on the exact head.
+`pull-requests: read` on `fast-lane` and `ci-gate` (policy-pinned). Every other gate runs on the exact head.
 `ci-gate` is red when a code push ran light or skipped a code step, when a docs push has no proof, or when a
 classification output is empty. Pull-request runs queue (`cancel-in-progress: false`), so a full run is never
 cancelled by a later docs push. GitHub keeps one pending run per PR and replaces it on the next push,
@@ -42,10 +42,11 @@ then re-run the docs run).
 
 ### Stage 2: the folded topology (amendment L item 3, D-ARCH-128, TASK-286)
 
-The base-ref policy changes the lane A job graph in two steps, policy first. The **policy PR** teaches
+The base-ref policy changed the lane A job graph in two steps, policy first. The **policy PR** taught
 `check-workflow-policy.mjs` and `lane-scope.mjs` the stage-2 topology next to stage 1: a ci.yml with a `scans` job is
-held to the stage-1 pins, one without it to the stage-2 pins, each in full (no mixture passes). The **workflow PR** then
-installs `tools/ci/fixtures/stage-2/ci.yml` as `ci.yml`. In stage 2:
+held to the stage-1 pins, one without it to the stage-2 pins, each in full (no mixture passes). The **workflow PR**
+installed the stage-2 `ci.yml`; the stage-1 workflow stays as `tools/ci/fixtures/stage-1/ci.yml` for the stage-1 pin
+tests until its pins are retired. In stage 2:
 
 - `fast-lane` takes its gate tooling from the **tested base** `TOOLS_REF`: on a pull request the first parent of
   GitHub's test merge (`HEAD^1`, the current `main`; `HEAD^2` must be the PR head and the event's base an ancestor),

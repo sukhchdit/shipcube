@@ -32,7 +32,11 @@ import {
 import type { Api, GateInput, ProofSteps } from './lane-scope.mjs';
 
 const repoRoot = findRepoRoot();
-const ciText = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+/**
+ * The stage-1 workflow these stage-1 cases (a `scans` job) are written against; since TASK-286 the committed ci.yml is
+ * stage 2 (lane-scope-stage-2.test.ts), and lane-scope.mjs keeps both topologies (D-ARCH-128, two-step).
+ */
+const ciText = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
 const temps: string[] = [];
 afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
@@ -812,9 +816,12 @@ describe('lane-scope CLI', () => {
       SECURITY_INTEGRATION_DUE: 'false',
     };
     const api: Api = () => ({ ok: false, problem: 'not called' });
-    expect(main(['--gate', '--root', repoRoot], { env, api })).toBe(0);
-    expect(main(['--gate', '--root', repoRoot], { env: { ...env, CODE_PROOF: '' }, api })).toBe(1);
-    expect(main(['--gate', '--root', repoRoot], { env: { ...env, SECURITY_PATHS: '' }, api })).toBe(1);
+    // A checkout whose ci.yml is the stage-1 workflow (the gate takes the rules of the checked-out topology).
+    const { root } = repo();
+    commit(root, { '.github/workflows/ci.yml': ciText }, 'stage-1 ci');
+    expect(main(['--gate', '--root', root], { env, api })).toBe(0);
+    expect(main(['--gate', '--root', root], { env: { ...env, CODE_PROOF: '' }, api })).toBe(1);
+    expect(main(['--gate', '--root', root], { env: { ...env, SECURITY_PATHS: '' }, api })).toBe(1);
   });
 });
 

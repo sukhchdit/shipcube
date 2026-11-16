@@ -1,9 +1,9 @@
 /**
  * Stage 2 of ADR-0023 amendment L item 3 (D-ARCH-128; ruling rulings/wave-0-ci-minutes.md section 3 (4), section 5
- * TASK-286): the base-ref policy accepts the folded topology, `tools/ci/fixtures/stage-2/ci.yml` (the workflow the
- * second, workflow PR installs as .github/workflows/ci.yml), holds it to its own pins in full, and kills every mutant of
- * those pins; the routed security items PR46-SEC-11/-12/-15/-17 and PR42-SEC-18 are pinned with it. The stage-1
- * ci.yml keeps passing under the same checker (ci-policy.test.ts), and no mixture of the two passes.
+ * TASK-286): the base-ref policy accepts the folded topology, the committed `.github/workflows/ci.yml` since the workflow
+ * PR, holds it to its own pins in full, and kills every mutant of those pins; the routed security items
+ * PR46-SEC-11/-12/-15/-17 and PR42-SEC-18 are pinned with it. The stage-1 workflow (`tools/ci/fixtures/stage-1/ci.yml`)
+ * keeps passing under the same checker (ci-policy.test.ts), and no mixture of the two passes.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,8 +26,8 @@ import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 import type { YamlMap, YamlNode } from './yaml-subset.mjs';
 
 const repoRoot = findRepoRoot();
-const stage2 = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-2', 'ci.yml'), 'utf8');
-const stage1 = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+const stage2 = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+const stage1 = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
 function map(node: YamlNode | undefined, what: string): YamlMap {
   if (!isMap(node)) throw new Error(`${what} is not a mapping`);
   return node;
@@ -43,7 +43,7 @@ const swap = (from: string, to: string) => {
 };
 
 describe('[TASK-286] [D-ARCH-128] stage-2 topology accepted by the base-ref policy (two-step, policy first)', () => {
-  it('the stage-2 fixture passes with 0 findings, and so does the live stage-1 ci.yml (both topologies, each in full)', () => {
+  it('the committed stage-2 ci.yml passes with 0 findings, and so does the stage-1 workflow (both topologies, each in full)', () => {
     expect(findingsOf(stage2)).toEqual([]);
     expect(findingsOf(stage1)).toEqual([]);
     expect(TOPOLOGIES).toEqual(['stage-1', 'stage-2']);
@@ -446,7 +446,7 @@ describe('[TASK-286] the stage-2 pins kill every mutant (PR46-SEC-11/-12/-15/-17
     expect(findings.some((finding) => finding.startsWith(`${rule}:`))).toBe(true);
   });
 
-  it('[mixture] the live stage-1 ci.yml without its scans job is held to the stage-2 pins and fails', () => {
+  it('[mixture] the stage-1 workflow without its scans job is held to the stage-2 pins and fails', () => {
     const start = stage1.indexOf('  scans:\n');
     const end = stage1.indexOf('  # ADR-0023 am. G item 5 as amended by am. L item 2');
     expect(start).toBeGreaterThan(0);

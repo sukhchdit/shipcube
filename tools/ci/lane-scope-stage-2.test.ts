@@ -34,8 +34,8 @@ import {
 import type { Api, GateInputStage2, ProofSteps } from './lane-scope.mjs';
 
 const repoRoot = findRepoRoot();
-const stage2Text = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-2', 'ci.yml'), 'utf8');
-const stage1Text = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+const stage2Text = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+const stage1Text = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
 const temps: string[] = [];
 afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
