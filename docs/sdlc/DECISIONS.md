@@ -2638,3 +2638,16 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **TASK-030:** "a tenant tx refuses an org-less entry (PR56-SEC-06)".
   - **TASK-287:** "retire the stage-1 ci topology (PR #55 R1-m2)".
 - **Reversibility:** High.
+
+### D-SEC-PR54-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #54 (TASK-020 020-D) security r2 = PASS_WITH_CONDITIONS at `a6fc0a3` (record `85cf474`)
+- **Decision:** 0 Critical/High/Medium.
+  - **C1 and C2** are closed for every named spelling in both lexer copies. **PR54-SEC-03, -04 (code) and -06** are closed. D-TASK020-95..98 are accepted.
+  - **Declining F5 is acceptable:** F5 would not have stopped this round's paths, and `ALTER ROLE` at run time is covered by `no-alter-role-sql` and the session-integrity monitor.
+  - **New: PR54-SEC-07 (LOW, CWE-184) = code-review R2-m1 → condition C3, fixed in this PR.** `query_to_xml`/`ts_stat`-family dynamic SQL reaches COMMIT on PG 18.6 (two-call `standard_conforming_strings` trick) and leaks session `search_path` and advisory locks. Refuse the five names plus `pg_notify` (PR54-SEC-08, INFO) in both copies.
+  - **Follow-ups:** PR54-SEC-02 (b)(c) before TASK-073's first raw statement; PR54-SEC-04 CODEOWNERS with 015-C; PR54-SEC-05 optional.
+- **Process note:** a probe script briefly put a throwaway container password on a `docker run` command line. It was never printed and the container was removed. Reminder to agents: pass container secrets via env only (CLAUDE.md §5 Secrets).
+- **Reversibility:** High.
+
+### D-ORCH-110 · 2026-11-17 · sdlc-orchestrator · PR #54 fix cycle 2/3 dispatched for C3
+- **Decision:** fix cycle 2/3 for C3 + R2-n1 rows; then code-review and security delta round 3 limited to the two lexer copies, the corpus and the tests; then merge.
+- **Reversibility:** High.
