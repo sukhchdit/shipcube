@@ -338,3 +338,193 @@ PR44-SEC-10 is **closed**: template-literal and computed keys on a `node:module`
 | Field | Value |
 |---|---|
 | **Verdict** | **PASS_WITH_CONDITIONS.** 0 Critical, 0 High, 0 Medium; LOW PR54-SEC-01 (C1), PR54-SEC-02 ((a) = C2), PR54-SEC-03; INFO PR54-SEC-04, -05, -06. C1 and C2 are due in the fix cycle that code review R1-M1 requires, verified by a security delta round 2 on the fix head with fresh lane-B evidence |
+
+# Round 2 (delta `3efa2df..a6fc0a3`)
+
+| Field | Value |
+|---|---|
+| Delta | Fix cycle 1: code commits `485dcbb` (both twins, the corpus, the lint rules and fixtures) and `46ed1e4` (the C2 PostgreSQL 18 case); merge of `main` `c6c4961` (PR #53; `git show --remerge-diff c6c4961` is empty); evidence commit `f00cf5b` (8 added files under one run directory); code-review record `a6fc0a3` (docs only, `docs/05-quality/reviews/PR-0054-TASK-020D-code-review.md`). `origin/main` was `1128792` when this round was written; since `c6c4961` it moved by `DECISIONS.md` and `STATUS.md` only |
+| Head | a6fc0a3b2ab0194d5be2e125bbda81c0f1ec2e50 |
+| Code head | `c6c4961` (`git diff --name-only c6c4961 a6fc0a3` = the run directory and the code-review record) |
+| Lane A evidence | Run 43807291356 on `f00cf5b`. **fast-lane `success`**, every step ran: workflow policy, install flags, released migrations, lockfile, cooldown, licences, signatures, audit, "Lane B evidence" (run `20261116T0440Z_c6c4961` accepted), commitlint, lint, format, actionlint, type-check, unit, the base-ref negative fixtures against the head configs, build. **scans**: Gitleaks (PR commit range), Semgrep and oasdiff `success`; the only red step is "Security-owned paths need a review record", and `ci-gate` is red only as the aggregate. `a6fc0a3` is docs-only |
+| Lane B evidence | `20261116T0440Z_c6c4961`, profile `pr`, verdict PASS: api 128, catalog-c1-c14 102, integration 322 (316 at round 1, so the 6 new PostgreSQL 18 cases ran), rls-cross-tenant 126, unit 6286 (2 skipped), 0 failures; merged coverage 99.02 % lines / 97.02 % branches; US-006 merged gate PASS |
+| Owned paths changed | 63 (main's `check-security-owned-paths.mjs`, base `origin/main`) |
+| Binding items checked | D-SEC-PR54-01 conditions C1 (PR54-SEC-01 (a)-(e)) and C2 (PR54-SEC-02 (a)); PR54-SEC-03, -04, -06; D-TASK020-95..98; code review round 2 (`a6fc0a3`): R2-m1 (ruling requested), R2-n1, R2-n2 |
+| Reviewer / date | security-analyst, 2026-11-17, round 2 (delta). Probes ran in the session scratchpad on `git show` copies of both twins at `f00cf5b` and at `3efa2df` (the positive control), type-stripped for the run-time twin, and on a `git archive` of the head's `apps packages prisma tests tools`. One short PostgreSQL 18.6 container (the integration suites' pinned digest, loopback port, random credentials never printed) ran as a non-superuser role without TEMPORARY and was removed. In the PR worktree I ran read-only git and a fetch, fast-forwarded it to `a6fc0a3`, and wrote and committed only this file. Line numbers come from single-file reads at `a6fc0a3` |
+
+## R2.1 Summary
+
+C1 and C2 are closed for every form that names the refused construct, in both twins. All 21 round-1 bypass rows now fail closed on both twins, while the same rows on the `3efa2df` copies are still admitted. The twins agree with each other on all 57 probe rows. I re-read PostgreSQL 18's `scan.l` rule by rule for what the delta changed: `space`, `newline`, `quotecontinue`, `xqs` entered from `xb`/`xh`/`xq`/`xe`/`xus`, `xqdouble` only in `xq`/`xe`/`xus`, nested `xcstart` with `yyless(2)`, the `dolqdelim` and `dolqfailed` rescans, `param`, `integer_junk`. Across 23 new hunt shapes I found no remaining lexer differential that fails open. Every shape either reads the same in both, or PostgreSQL rejects the whole string. The code review reached the same result independently: 55 PGlite probes and a 300,000-text twin fuzz. PR54-SEC-03 and PR54-SEC-06 are closed, and the PR54-SEC-04 scope and header items are closed.
+
+What remains is the stated residual "SQL text inside a string literal" (corpus line 38). Code review R2-m1 showed that it carries the session setter and the session advisory lock. On PostgreSQL 18.6 it also carries **`COMMIT`**. One raw call changes `standard_conforming_strings` for the rest of the transaction: the name is split inside a `query_to_xml` string, so no token holds the refused name. The next raw call then hides `COMMIT` in a string that the twins read with the setting on. A row the callback inserted survived the rollback (§R2.4, X1). That reopens the impact C1 (e) closed: a business write separated from its audit entry, against O4. The fix is two lines per twin and is validated: 0 of 155 real raw templates change verdict. So I rule R2-m1 **fixed in this PR** as condition C3 (PR54-SEC-07). `pg_notify` (R2-n2) goes into the same change (PR54-SEC-08).
+
+Declining F5 (the first-keyword allow-list) is **accepted** (§R2.5). None of the remaining paths is a first-keyword problem, so F5 would not have closed X1-X5.
+
+Findings this round: 0 Critical, 0 High, 0 Medium, 1 LOW (PR54-SEC-07, C3), 1 INFO (PR54-SEC-08).
+
+**Verdict: PASS_WITH_CONDITIONS** (C3 before merge; round 3 is a delta of the twins and the corpus with fresh lane-B evidence).
+
+## R2.2 Method
+
+1. Read the delta `3efa2df..f00cf5b` of both twins, `db-raw-sql.mjs`, `system-model-owner.mjs`, `module-sources.mjs`, `static-module-specifier.mjs` (the PR54-SEC-03 part), `no-external-calls-in-tenant-tx.mjs`, the `eslint.config.mjs` diff, the corpus, the new fixtures and the `route-phases.int.test.ts` cases. Also read D-TASK020-95..98 and the code review round 2.
+2. **scan.l facts** from `REL_18_STABLE` `src/backend/parser/scan.l`, fetched for this round (the rules listed in §R2.1).
+3. **Twin probe** (`twins.mjs`): both twins at the head and at `3efa2df` through their real entry points (`refusedRawStatement(frozen strings)` and `refusedStatement(templateText(strings))`). It covered 57 rows: 5 controls, 29 round-1 bypass and C2 rows, and 23 new hunt shapes. The hunt shapes were B/X strings with doubled quotes, `/*/`, `/**/` and nested comments inside comments, `$1$q$`, `a$q$`, `'a'e'…'`, `$e'…'`, VT/FF, NUL, non-ASCII and astral characters after an `E` backslash, the dynamic-SQL executors, `pg_notify`, `CREATE TEMP`, `SELECT INTO TEMP`, and `EXPLAIN ANALYZE DECLARE`. Special characters were built at run time.
+4. **PostgreSQL 18.6 probe** (`pgprobe.mjs`). Each text is first passed through the head run-time twin. If admitted, it is sent with the simple protocol and no values, which is what Prisma's raw calls send through adapter-pg when nothing is bound (round-1 fact). The caller is a role with CONNECT only (`REVOKE ALL ON DATABASE … FROM PUBLIC`, as `00-roles.sql:51`) and role default `search_path = pg_catalog, public`.
+   - COMMIT rows: insert, then send the texts, then ROLLBACK, then count.
+   - Session rows: commit normally, then read the same backend.
+5. **Linear time** (`timing.mjs`) at 2,000, 8,000 and 32,000 units over five shapes, head against `3efa2df`.
+6. **Fix validation** (`fixcheck.mjs`). One exact-string patch on a scratch copy of the head lint twin, run over the shared corpus (132 entries), every tagged `$queryRaw` / `$executeRaw` template of the head tree (155 templates in 1,027 files, production and tests, parsed with `typescript-estree`), and the round-2 shapes.
+7. Evidence: the lane A step list (`gh run view --json jobs`), the run's `summary.md`, the PR body's gate table, and a count-only host-fragment scan with a positive control. Then the record simulation (§R2.10).
+
+## R2.3 Round-1 items
+
+| Item | Status | Evidence |
+|---|---|---|
+| C1 (a) `--` ends at CR | **Closed** | `LINE_END = /[\n\r]/gu` in both twins (`raw-sql-lexer.mjs:45`, `raw-statement.ts:56`). P1, P1b, P3: head refuses with both twins, `3efa2df` admits. The CR row is in `route-phases.int` with a PostgreSQL commit control; dev mutant log 2/2 killed |
+| C1 (b) Unicode white space | **Closed** | `SPACE = /[ \t\n\r\f\v]/u`; non-ASCII outside a string, quoted identifier or comment is `unreadable`; dollar tags are ASCII only (D-TASK020-95, accepted: stricter than PostgreSQL, and no ASCII identifier boundary differs from `ident_start` / `ident_cont`). NBSP, BOM, U+3000 and U+2028 rows: `unreadable` |
+| C1 (c) quote continuation | **Closed** | `CONTINUATION` (`raw-sql-lexer.mjs:50`, `raw-statement.ts:58`) is language-equal to scan.l `{whitespace_with_newline}{quote}`: `non_newline_whitespace*` reduces to `[ \t\f\v]*(--[^\n\r]*)?`, then `special_whitespace*`, with no block comments. It is applied after every unpaired closing quote of every quote state, including B, X, N and U&, and it keeps the mode. P2, P2c, P2d and U& continuation: refused. Linear: §R2.6 |
+| C1 (d) Prisma rendering | **Closed** | `templateText` and `prismaText` both produce `part$1part$2…`. P4, P4b and P5 (template rows): refused; template-level corpus rows in both suites |
+| C1 (e) string-syntax settings | **Closed for every form that names the setting.** The dynamic-SQL route is PR54-SEC-07 | Literal-name allow-list for the literal-`true` setter, and `standard_conforming_strings` / `backslash_quote` in any token (D-TASK020-96). Rows P6, P6b-f refused, including `ALTER ROLE … SET`, `UPDATE pg_settings`, a concatenated name, and mixed case. X1 shows the split name inside `query_to_xml` |
+| C2 cursors and session advisory locks | **Closed for the literal spellings.** The dynamic-SQL route is PR54-SEC-07 | `declare` / `fetch` / `move` / `close` in `SESSION`; `SESSION_LOCK` anywhere (word or quoted, qualified, case-folded); `_xact_` stays legal (K6). PostgreSQL 18 case (D-TASK020-97, accepted): if the guard admitted the text, the load would finish and the call phase would run, and the control proves PostgreSQL keeps both forms after COMMIT, so the assertion is not vacuous |
+| PR54-SEC-02 (b) readers, (c) runtime `ALTER` | Open, follow-up (unchanged due point) | The SQL-executing members of (b) move to PR54-SEC-07 (C3). The readers that build their own query (`table_to_xml*`, `schema_to_xml*`, `database_to_xml*`, `cursor_to_xml*`) and `alter` as a run-time first keyword stay due before TASK-073's first raw statement |
+| PR54-SEC-03 loaders | **Closed** | `NODE_MODULE_ALLOWED` is shared by `no-restricted-imports` and `static-module-specifier`; `processMember` covers the respellings; `binding` / `_linkedBinding` are matched on any object. The new fixtures `bad-node-module-members.ts`, `bad-process-respellings.ts` and `ok-node-module-allowed.ts` cover M7, M10, M14, M17-M19 and M22-M26 plus allowed controls. Lane A lint and negative fixtures are green, and the code review probed the same forms with the full config (R2.1). I did not re-run ESLint |
+| PR54-SEC-04 | **Closed** in code and headers (`only: ['statement']` on `packages/*/src`; D-ARCH-131 corrected the "Why") | CODEOWNERS for the corpus and `start-api.ts` stays with devops 015-C |
+| PR54-SEC-05 | INFO, unchanged | Optional hardening at the next `with-tenant-tx.ts` edit. X2 and X3 are further reasons to pin `search_path` transaction-locally |
+| PR54-SEC-06 | **Closed** | §R2.6 |
+
+## R2.4 Findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner |
+|---|---|---|---|---|---|---|
+| PR54-SEC-07 | The stated "SQL text in a string" residual carries every refused form except a direct `COMMIT`. `query_to_xml`, `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat` and `ts_rewrite` run SQL text through SPI. On PostgreSQL 18.6, through texts both twins admit: a transaction-local `standard_conforming_strings = off` (split name) followed by a second raw call COMMITTED a rolled-back row; a session `search_path` survived COMMIT (two executors); and a session advisory lock stayed held. This is code review R2-m1, widened by the COMMIT route | LOW | CWE-184 | A04 | `tools/eslint-rules/raw-sql-lexer.mjs:265, 339-360`; `apps/api/src/platform/db/raw-statement.ts:74, 263-279`; corpus residual row `raw-statement-corpus.json:38` | senior-developer, **C3**, this PR |
+| PR54-SEC-08 | `NOTIFY` is refused as a first keyword, but its function form `pg_notify(…)` is admitted and delivers to a listener (X5). This is a consistency gap; NOTIFY is not pooled-session state (= code review R2-n2) | INFO | CWE-184 | A04 | `SESSION` (`raw-sql-lexer.mjs:253`, `raw-statement.ts:66`) | senior-developer, same change as C3 |
+
+### PR54-SEC-07 (LOW): the dynamic-SQL executors
+
+**Probe** (PostgreSQL 18.6; every text is ADMITTED by both head twins; role without TEMPORARY):
+
+| Row | Text(s) | Server effect |
+|---|---|---|
+| X0 control | `` SELECT 'x\' ; ' ; COMMIT ; SELECT ' -- ' `` alone (setting on) | syntax error 42601, row rolled back |
+| X1 | `SELECT query_to_xml('select set_config(''standard_'' \|\| ''conforming_strings'', ''off'', true)', true, false, '')`, then the X0 text as a second call in the same transaction | **row committed despite ROLLBACK** |
+| X2 | `SELECT query_to_xml('select set_config(''search_path'', ''public, pg_catalog'', false)', true, false, '')` | **session `search_path` changed after COMMIT** (`pg_catalog, public` became `public, pg_catalog`) |
+| X3 | `SELECT * FROM ts_stat('select set_config(''search_path'', ''public'', false)::tsvector')` | **session `search_path` changed after COMMIT** |
+| X4 | `SELECT query_to_xml('select pg_advisory_lock(5454)', true, false, '')` | **session advisory lock held after COMMIT** (`pg_locks`, granted) |
+| X5 | `SELECT pg_notify('changes', 'x')` (control: `NOTIFY changes, 'x'` is refused) | notification delivered (PR54-SEC-08) |
+| X6, X7 | `CREATE TEMP TABLE …`, `SELECT … INTO TEMP …` | server refused 42501 (no TEMPORARY: the cross-request temp-table and `pg_temp` function routes are closed by `00-roles.sql:51`, not by the guard) |
+
+**Why X1 works.** The simple protocol parses the whole text of one call before running it. So a setting changed inside a call affects only the next raw call of the transaction: round 1's P6, now reached without naming the setting. SPI rejects a direct `COMMIT` in these executors, which is what the code review saw, but the setting route does not need one. The executors run with `read_only = true`, which admits a `SELECT` of a volatile function. The probe ran without Prisma: the guard verdict is a pure function of the strings, and Prisma sends this text unchanged (round-1 fact).
+
+**Exploitability and impact.** The impact is the PR44-SEC-05 impact, as for round 1's (e) and C2: a write separated from its audit entry (O4), session state carried across requests on the pool, and a lock held across requests. The likelihood is low and deliberate: the template must name an XML or text-search executor and carry SQL in a string, which a reviewer sees. So the rating is LOW, the same class and reasoning as round 1. I make it a condition because it reopens two of this PR's own conditions, the fix is two lines per twin, and the code review also prefers the fix (R2-m1).
+
+**Remediation (both twins), validated.** One exact-string patch on a scratch copy of the head lint twin:
+```js
+const DYNAMIC_SQL = /^(?:query_to_xml|query_to_xmlschema|query_to_xml_and_xmlschema|ts_stat|ts_rewrite|pg_notify)$/u;
+// in sessionSetter, next to SESSION_LOCK:
+if (isName(token, DYNAMIC_SQL)) return { form: 'session', detail: 'a function that runs SQL text' };
+```
+Results of the patched copy:
+- **Corpus:** 1 of 132 entries changes verdict, the intended one: the line-38 residual `query_to_xml('select 1', …)` goes from `ok` to `session`.
+- **Real templates:** 0 of the 155 templates in the head tree change verdict.
+- **Probe shapes:** every round-2 shape is refused, including the quoted, `pg_catalog.`-qualified and upper-case spellings.
+- **Controls:** `ts_rank(v, q)` stays `ok`.
+
+For PR54-SEC-08, dropping `notify` from `SESSION` with a one-line reason is equally acceptable (code review R2-n2).
+
+The list follows migration-lint rule 16 (PR43-SEC-06 (b)). I did not run a catalog-wide audit of built-ins that call SPI. If an extension with SQL-text functions is ever installed (`dblink`, `tablefunc` `crosstab`, `xml2` `xpath_table`), its names join this list. Today only `pg_trgm`, `btree_gin` and `btree_gist` are installed (`01-schemas.sql:22-24`).
+
+**Verification tests.**
+- Corpus rows (refused) for each of the six names: plain, quoted and `pg_catalog.`-qualified.
+- The X1 pair as two rows: the first call is refused, so the second is never reached.
+- The line-38 row turned into a refusal, with the corpus `$comment` and both twin headers stating what the residual still covers: function bodies, plus the readers listed in PR54-SEC-02 (b).
+- A mutant that removes the new check must fail a test in each suite.
+- Recommended, not required: add `SELECT query_to_xml('select pg_advisory_lock(5454)', true, false, '')` as a third `SESSION_FORMS` row in `route-phases.int.test.ts`. It reuses the `pg_locks` assertion.
+- Take code review R2-n1's two setter rows in the same change.
+
+## R2.5 Rulings
+
+| Item | Ruling |
+|---|---|
+| **R2-m1** (code review) | **Fix in this PR**: condition C3 = PR54-SEC-07, plus PR54-SEC-08 in the same change. Not accepted as a routed residual. On PostgreSQL 18 it reaches `COMMIT` (X1), which the code review's PGlite run did not show. The fix is validated with zero collateral, and the due point "before TASK-073's first raw statement" is not a hard gate for raw SQL that lands earlier |
+| **F5 not taken** (D-TASK020-96) | **Accepted.** In round 1, F5 was the preferred way to satisfy C1 (e) and C2 in one step, never a requirement. The targeted forms satisfy both. F5 would not have closed X1-X5, because every one starts with `SELECT`. One statement per call would not stop X1 either, because X1 uses two calls. What F5 still adds is defence in depth against unknown first keywords, and its only concrete catch today is PR54-SEC-02 (c), `ALTER ROLE CURRENT_USER SET`. That is reported by the lint (`no-alter-role-sql`) and seen by the integrity monitor, and `alter` as a run-time first keyword stays a follow-up before TASK-073 |
+| D-TASK020-95 | Accepted (§R2.3) |
+| D-TASK020-96 | Accepted with C3. The allow-list is anchored and single-token. R2-n1's rows pin both properties |
+| D-TASK020-97 | Accepted (§R2.3) |
+| D-TASK020-98 | Accepted. The remerge-diff is empty, and the evidence is bound to the merge |
+
+## R2.6 Linear time (PR54-SEC-06)
+
+| Shape (lint / run-time twin, ms) | `3efa2df`, n = 32,000 | head, n = 2,000 / 8,000 / 32,000 |
+|---|---|---|
+| nested setter calls (719 KiB) | 46,117 / 66,673 | 7/11, 12/17, 48/56 |
+| `'a'` followed by a run of dashes | 0 / 0 | 0 / 0 at every size |
+| 32,000 continued strings (125 KiB) | 5 / 5 | 1 / 2 |
+| comment lines after a quote (156 KiB) | 3 / 3 | 3 / 3 |
+| unclosed continuations `'a'<LF>  -` repeated (219 KiB) | 6 / 6 | 21 / 10 |
+
+**Closed.** `parentheses()` is a single pass. Each continuation attempt scans only the white space and comments that the main loop then skips, so the work is at most twice linear.
+
+## R2.7 Evidence and evidence hygiene
+
+- **Lane B `20261116T0440Z_c6c4961`**: bound to `c6c4961`. `f00cf5b` (parent `c6c4961`) adds only the 8 run files, and `a6fc0a3` adds only the code-review record. Lane A's "Lane B evidence" step accepted the run.
+- **D-SEC-PR23-02**: the PR's gate table carries both statements verbatim: "`npm ci --ignore-scripts` + `npm run deps:rebuild` ran first" and "`.git/info/exclude` is empty" (0 bytes, logged before the run). The PR is not a lockfile PR.
+- The earlier FAIL runs at `485dcbb` (host-load flakes, D-TASK020-98 triage) are not committed, which is correct.
+- **Host-fragment scan** (count-only; needles computed at run time: user name, its 8.3 stem, home and temp dir in both slash forms, the MSYS home form, host name, git e-mail). Results:
+  - **0** in the diffs of `485dcbb`, `46ed1e4` and `f00cf5b` (the run directory);
+  - **0** in the first-parent commit messages of the delta;
+  - the positive control counted 3.
+- **C3 changes owned paths**, so it voids this record (§R2.10, S2). Round 3 needs fresh lane-B evidence carrying the same statements.
+
+## R2.8 Alignment with the code review (round 2, `a6fc0a3`, APPROVED_WITH_NITS)
+
+| Code review | This record |
+|---|---|
+| R2.3 closure table (R1-M1, C1, C2 for literal spellings, R1-m1..m3, R1-n1..n5, PR54-SEC-06) | Agreed (§R2.3); my PostgreSQL 18.6 probe and the `3efa2df` control agree with its PGlite results |
+| R2-m1 (dynamic-SQL residual reaches C2 and the setter; "COMMIT cannot get through") | PR54-SEC-07, ruled **fix now** (C3). On PostgreSQL 18, COMMIT does get through, in two calls via `standard_conforming_strings` (X1) |
+| R2-n1 (setter allow-list mutants survive) | Agreed; take the two rows with C3 |
+| R2-n2 (`pg_notify`) | PR54-SEC-08 (INFO), same change; either fix form is acceptable |
+| R2.4 rulings on D-TASK020-95..98; F5 "the security-analyst's call" | Agreed; F5 decline accepted (§R2.5) |
+| R2.5 item 2 (if R2-m1 is fixed: delta round 3 with fresh lane B) | Agreed |
+
+## R2.9 Conditions and routing
+
+**Condition C3 (PASS_WITH_CONDITIONS), before this PR merges:** PR54-SEC-07 in both twins: the six names as an anywhere-form, with `pg_notify` either refused or `notify` dropped from `SESSION` with a reason. Also the corpus rows, the line-38 residual turned into a refusal, the header and corpus residual text, a mutant per twin, and R2-n1's two rows (§R2.4). Then fresh lane-B evidence, a code-review delta round 3 and a security delta round 3 limited to the twins, the corpus and the tests.
+
+**Follow-ups (unchanged owners):**
+- PR54-SEC-02 (b): the readers `table_to_xml*`, `schema_to_xml*`, `database_to_xml*`, `cursor_to_xml*`.
+- PR54-SEC-02 (c): `alter` as a run-time first keyword. Due with (b), before TASK-073's first raw statement.
+- PR54-SEC-04: CODEOWNERS with devops 015-C.
+- PR54-SEC-05: optional, at the next `with-tenant-tx.ts` edit.
+
+**Merge rules:** C3 voids this record because it changes owned paths, so round 3 is required. A docs-only commit or a docs-only merge of `main` keeps the record. A `main` change to one of the 63 owned paths that this PR also changes voids it.
+
+**Proposed decision text, for the orchestrator to log.** **D-SEC-PR54-02 · 2026-11-17 · security-analyst · PR #54 (020-D) round 2 at `a6fc0a3`: PASS_WITH_CONDITIONS**
+- **Decision.** C1 and C2 are closed for every form that names the refused construct. The 21 round-1 bypass rows fail closed in both twins, and PostgreSQL 18 `scan.l` was re-checked. No fail-open lexer differential remains across 23 new shapes. PR54-SEC-03, -04 (code and headers) and -06 are closed. D-TASK020-95..98 are accepted, and declining F5 is accepted (F5 would not close the remaining paths).
+- **New finding PR54-SEC-07 (LOW, CWE-184, = code R2-m1 widened).** `query_to_xml*`, `ts_stat` and `ts_rewrite` run SQL text and carry the refused forms. On PostgreSQL 18.6 they produced a rolled-back row that was COMMITTED (via a split `standard_conforming_strings` name and a second call), a session `search_path` that survived COMMIT, and a session advisory lock still held.
+- **New finding PR54-SEC-08 (INFO, = R2-n2).** `pg_notify` is admitted while `NOTIFY` is refused.
+- **Ruling on R2-m1: fix in this PR**, as condition C3. Refuse the six names anywhere in both twins (or drop `notify` from `SESSION`), turn the corpus residual row into a refusal, and add mutants plus R2-n1's rows. The fix is validated: 1 intended corpus change, 0 of 155 real templates change verdict. Then fresh lane B, code r3 and security r3 as delta rounds.
+- **Follow-ups:** PR54-SEC-02 (b) readers and (c) runtime `ALTER`, before TASK-073's first raw statement; PR54-SEC-04 CODEOWNERS with 015-C; PR54-SEC-05 optional.
+- **Reversibility:** High.
+
+## R2.10 Record simulation
+
+`record-sim.mjs` ran `main`'s `tools/ci/check-security-owned-paths.mjs` on plumbing scenario commits, with `--base origin/main --pr 54 --json` and `origin/main` = `1128792`, in a sparse `git clone --shared`. Nothing was pushed from the simulation. The candidate is LF with 0 CR bytes. Its round-2 part has exactly one table row whose first cell starts with `Head` (the full SHA of `a6fc0a3`), and the file's last line is the round-2 `Verdict` row.
+
+| Scenario | Checker | Expected |
+|---|---|---|
+| S0 control: the head without the round-2 section (round-1 record only, naming `3efa2df`) | missing | missing |
+| S1 this record committed on `a6fc0a3` | pass | pass |
+| S2 S1 + an owned change (`tools/eslint-rules/raw-sql-lexer.mjs`) | missing | missing |
+| S3 S1 + a docs-only commit (`docs/sdlc/STATUS.md`) | pass | pass |
+| S4 S1 + a merge of `origin/main` `1128792` (`DECISIONS.md` only since `ba60aa7`) | pass | pass |
+| S5 the round-2 Verdict cell set to FAIL | missing | missing |
+| S6 the round-2 Head row naming `3efa2df` (owned paths changed after it) | missing | missing |
+| S7 the round-2 Head row naming a commit outside the range | missing | missing |
+| S8 only a record named for another PR | missing | missing |
+| S9 the round-2 Verdict row removed (the round-1 Verdict row is then last; procedural, PR10-SEC-04) | pass | pass |
+
+10 of 10 as expected. A count-only scan of the round-2 text found 0 host fragments and 0 secret shapes (positive control counted).
+
+| Field | Value |
+|---|---|
+| **Verdict** | **PASS_WITH_CONDITIONS.** Round 2 at `a6fc0a3`: 0 Critical, 0 High, 0 Medium. C1 and C2 closed for every named form; PR54-SEC-03, -04 (code), -06 closed; F5 decline accepted. New LOW PR54-SEC-07 (dynamic-SQL executors reach COMMIT, session setters and session advisory locks on PostgreSQL 18) is condition **C3, fixed in this PR** (ruling on code review R2-m1), with INFO PR54-SEC-08 (`pg_notify`) in the same change; then fresh lane-B evidence and delta rounds 3 |
