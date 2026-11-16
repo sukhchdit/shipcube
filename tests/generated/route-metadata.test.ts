@@ -5,7 +5,7 @@
  */
 import type { AddressInfo } from 'node:net';
 
-import { beforeAll, describe, expect, it } from '@jest/globals';
+import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { type BoundRoute, findRouteBindingViolations, formatRouteAuth, type RouteAuth } from '@platform/authz';
 import { CREDENTIAL_HEADER_NAMES, ERROR_CATALOGUE, REFRESH_COOKIE_NAMES } from '@platform/shared';
 import type { Express } from 'express';
@@ -34,6 +34,9 @@ import {
   TRANSACTION_NONE_OPERATIONS,
   transactionProblems,
 } from './route-metadata.js';
+
+// Composes the app (a cold module graph) and answers real requests: the 5 s Jest default timed out under parallel host load (W0-FLAKE, D-ORCH-097).
+jest.setTimeout(60_000);
 
 type Loose = Readonly<Record<string, unknown>>;
 

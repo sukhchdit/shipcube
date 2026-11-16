@@ -67,7 +67,8 @@ tests until its pins are retired. In stage 2:
 
 Selected by the base-ref lane scope when the PR range changes `packages/authz/**`, `packages/audit/**`,
 `packages/config/**`, `prisma/**`, `apps/api/src/platform/**`, `apps/api/src/modules/identity/**` or makes a
-production-closure `package-lock.json` change (dev-only bumps do not select; a new or unparseable lockfile does),
+production-closure `package-lock.json` change (an entry without `dev: true`, so a `devOptional` Prisma CLI or engines
+bump selects, D-ARCH-133; dev-only bumps do not select; a new or unparseable lockfile does),
 **and** the head is a merge candidate (security record check `pass` or `not-required`), **and** no
 `security-integration` success exists on a code-identical commit. It runs after `fast-lane` succeeded (the supply-chain
 gates passed on this tree), every `active` suite of the base manifest's `security_integration_suites` with its lane B

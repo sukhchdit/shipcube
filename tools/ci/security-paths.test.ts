@@ -155,6 +155,12 @@ const lock = (packages: Record<string, Entry>, version = 3): string =>
 const root0: Entry = { name: 'platform', version: '0.0.0', engines: { node: '>=24' } };
 const devJest = (version: string): Entry => ({ version, resolved: `https://registry.npmjs.org/jest/-/jest-${version}.tgz`, dev: true });
 const pg = (version: string): Entry => ({ version, resolved: `https://registry.npmjs.org/pg/-/pg-${version}.tgz` });
+/** The Prisma CLI as npm records it: a dev dependency that is also an optional dependency of a production package. */
+const prismaCli = (version: string): Entry => ({
+  version,
+  resolved: `https://registry.npmjs.org/prisma/-/prisma-${version}.tgz`,
+  devOptional: true,
+});
 const basePackages = { '': root0, 'node_modules/jest': devJest('30.0.0'), 'node_modules/pg': pg('8.16.0') };
 const LOCK = 'package-lock.json';
 
@@ -165,10 +171,10 @@ describe('security-paths: package-lock.json production-closure rule (ADR-0023 am
       selected: false,
       reason: 'package-lock.json: dev-only change (1 entries)',
     });
-    // Added and removed dev-only entries, devOptional, and key order alone.
+    // Added and removed dev-only entries and key order alone.
     const reordered = lock({ 'node_modules/pg': pg('8.16.0'), '': root0, 'node_modules/jest': devJest('30.0.0') });
     expect(lockfileChange(base, reordered)).toMatchObject({ selected: false, reason: 'package-lock.json: dev-only change (0 entries)' });
-    const devAdded = lock({ ...basePackages, 'node_modules/eslint': { version: '10.0.0', devOptional: true } });
+    const devAdded = lock({ ...basePackages, 'node_modules/eslint': { version: '10.0.0', dev: true } });
     expect(lockfileChange(base, devAdded).selected).toBe(false);
     const devRemoved = lock({ '': root0, 'node_modules/pg': pg('8.16.0') });
     expect(lockfileChange(base, devRemoved).selected).toBe(false);
@@ -201,6 +207,25 @@ describe('security-paths: package-lock.json production-closure rule (ADR-0023 am
     expect(lockfileChange(base, 'null').selected).toBe(true);
   });
 
+  it('[D-ARCH-133] [PR #46 R2-m2] devOptional is production closure: a devOptional-only Prisma CLI bump selects, a dev-only bump does not', () => {
+    const withCli = { ...basePackages, 'node_modules/prisma': prismaCli('7.10.0') };
+    expect(lockfileChange(lock(withCli), lock({ ...withCli, 'node_modules/prisma': prismaCli('7.10.1') }))).toEqual({
+      selected: true,
+      reason: 'package-lock.json: production-closure change (node_modules/prisma)',
+    });
+    // Added or removed devOptional entries select too (an engine package appearing changes what the harness runs).
+    expect(lockfileChange(lock(basePackages), lock(withCli)).selected).toBe(true);
+    expect(lockfileChange(lock(withCli), lock(basePackages)).selected).toBe(true);
+    // dev -> devOptional (a dev package becomes an optional dependency of a production one) selects.
+    const devCli = { ...basePackages, 'node_modules/prisma': { ...prismaCli('7.10.0'), devOptional: undefined, dev: true } };
+    expect(lockfileChange(lock(devCli), lock(withCli)).selected).toBe(true);
+    // The dev-only control next to the unchanged devOptional entry.
+    expect(lockfileChange(lock(withCli), lock({ ...withCli, 'node_modules/jest': devJest('30.0.1') }))).toEqual({
+      selected: false,
+      reason: 'package-lock.json: dev-only change (1 entries)',
+    });
+  });
+
   it('classifyRange reads both lockfiles from git objects: dev-only bump false, pg patch true, root engines true, corrupt true, new true, dev->prod true', () => {
     const base = { [LOCK]: lock(basePackages) };
     const cases: Array<[string, Record<string, string>, Record<string, string | null>, boolean]> = [
@@ -211,6 +236,12 @@ describe('security-paths: package-lock.json production-closure rule (ADR-0023 am
       ['new lockfile', {}, { [LOCK]: lock(basePackages) }, true],
       ['deleted lockfile', base, { [LOCK]: null }, true],
       ['dev -> prod', base, { [LOCK]: lock({ ...basePackages, 'node_modules/jest': { version: '30.0.0' } }) }, true],
+      [
+        'devOptional Prisma CLI bump (D-ARCH-133)',
+        { [LOCK]: lock({ ...basePackages, 'node_modules/prisma': prismaCli('7.10.0') }) },
+        { [LOCK]: lock({ ...basePackages, 'node_modules/prisma': prismaCli('7.10.1') }) },
+        true,
+      ],
     ];
     for (const [label, files, edit, selected] of cases) {
       const repo = repoChange(files, edit);
