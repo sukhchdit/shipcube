@@ -2561,3 +2561,22 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **D-TASK286-04:** D-ARCH-133 implemented in `security-paths.mjs`; the optional D-TASK015-59 refinement is deferred (LOW, devops-engineer).
 - **D-TASK286-05:** superseded FAIL lane-B runs (unit timeouts under host load, pre-#53) are not committed; a clean PASS replaces them (20261116T0422Z_71d2980).
 - **Reversibility:** High.
+
+### D-TASK029-01..15 · 2026-11-16 · senior-developer (recorded by orchestrator) · TASK-029 automatic audit capture (PR #56)
+- **01** Capture lives in `apps/api/src/platform/audit/capture.ts` (`createAuditCapture` → `mount`/`denied`), not the sheet's `audit-middleware.ts`; the tx slot is its only value importer; pipeline.ts gets the factory via a re-export from `execute.ts`.
+- **02** `auditEntityId` on `defineRoute` is optional. Default: CREATE → result `id`; a `:<entity>Id` path parameter; none for a list VIEW. Anything else fails to mount, naming method and path.
+- **03** Write actions: `record` + the transaction's one `flush`, as the last work in the handler tx. VIEW/DOWNLOAD: their own short tx after COMMIT and before send; SENSITIVE fails closed (503 `AUDIT_UNAVAILABLE`, Retry-After 1); NORMAL is best effort.
+- **04** A *returned* 409/422/5xx commits a FAILED entry in the handler tx; other returned 4xx write no entry.
+- **05** LOGIN, LOGOUT, MFA_ENROLLED and STATE_TRANSITION are refused at mount until their domain recorder exists.
+- **06** PERMISSION_DENIED is written in its own tx before the 403; a failed write answers 500/503, never a silent 403; no entity id; 401s are not audited.
+- **07** Client-shaped columns are kept only in the writer's shape, otherwise null (PR42-SEC-15 a/b); NUL and lone surrogates → 400 at the JSON boundary (SEC-15 c).
+- **08** STREAM_MISMATCH: a tenant entry must match the tx org; an org-less tx accepts only the SYSTEM shard; I3 via the `beforeCommit` port; one writer per process.
+- **09** PR42-SEC-17 uses H2 (statement tracking + `setImmediate` settle loop); timer-started writes are a documented residual, backstopped by TASK-033.
+- **10** PR42-SEC-19: `write`/`flush` return already-handled promises.
+- **11** `AUDIT_NONE_ROUTES` is pinned both ways against the contract's NONE operations.
+- **12** The list filter summary has sorted keys, all values tokenised as PERSONAL; `result_count` comes from the `data` array, otherwise null.
+- **13** `source_app` = `X-Client-App` when web|admin, otherwise `api`.
+- **14** FAILED entries also cover `load`/`call` phase failures (REQ-AUDIT-010); none when the audit path or the admission bulkhead itself failed.
+- **15** The branch keeps its dispatched name (`…-automatic-audit-capture`), not the sheet's.
+- **Follow-up (MEDIUM, latent) → TASK-028:** production `startApi` composition has no tokeniser/ipIndex/UA parser, so any audited route or PERMISSION_DENIED in a deployed process fails closed with 500 `TOKENISER_UNAVAILABLE`. Wire them through `AppDependencies` into `createAuditCapture` before the first audited module route; the UA parser owner to be confirmed by TASK-028. Other follow-ups: TASK-031 (old/new diffs, reason), TASK-030 (per-stream CTE), TASK-033 (T0 residual backstop), TASK-047 (SEC-17/19 on the job port), qa-lead (activate the audit-generator suite; move SEC-TC-74 to required_cases).
+- **Reversibility:** High.
