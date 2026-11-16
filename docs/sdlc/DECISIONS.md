@@ -2613,3 +2613,28 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **PR #54:** code r2 APPROVED_WITH_NITS (R2-m1: `query_to_xml`/`ts_stat`-family dynamic SQL lets session state escape; ruling delegated to the security delta).
 - **Interruptions:** two usage-limit stops and one network drop; agents were resumed in place, not re-dispatched.
 - **Reversibility:** High.
+
+### D-SEC-PR56-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #56 (TASK-029) security r1 = PASS_WITH_FOLLOW-UPS at `4b02531`
+- **Decision:** 0 Critical/High open; 3 MEDIUM, 4 LOW, 2 INFO, all latent (`moduleRegistry` is empty).
+  - **Closed:** PR42-SEC-15 (a)(b)(c-JSON), PR42-SEC-17 (T0 residual), PR42-SEC-19, R3-n1.
+  - **TASK-028 deferral accepted on two conditions:** (1) the tokeniser/ipIndex/UA-parser wiring merges before or with the first PR that registers an audited or catalogued-permission route in `moduleRegistry` (TASK-026 is the likely first); (2) a mount- or boot-time refusal of such routes when the capture has no tokeniser.
+  - **T-39 denial budget** (SEC-03, MEDIUM) → TASK-041, before the first route with a catalogued permission ships.
+  - Routes declaring `x-audit.additional[]` are refused at mount until a recorder exists (SEC-04).
+  - **Other owners:** SEC-05/07 and code-review R1-m5 → TASK-052; SEC-06 → TASK-030.
+- **Reversibility:** High.
+
+### D-TASK029-16 · 2026-11-17 · sdlc-orchestrator · Supersedes D-TASK029-04 (PR #56 code R1-M1 = PR56-SEC-09)
+- **Decision:** any status ≥ 400 that a handler *returns* rolls back the handler transaction; 409/422/5xx write the FAILED entry in its own transaction (ADR-0007 §Capture and REQ-AUDIT-010 as written); returned 400/403/404 commit nothing and write nothing.
+- **Why:** the old rule committed handler writes with no entry, or under a FAILED entry an auditor reads as "nothing changed", and re-executed on retry after a returned 5xx (ADR-0014). Following the existing ADR needs no architect ruling.
+- **Alternatives rejected:** an architect ruling accepting the commit (contradicts O4 audit completeness).
+- **Reversibility:** High.
+
+### D-ORCH-109 · 2026-11-17 · sdlc-orchestrator · PR #56 fix cycle 1/3 dispatched; pending card lines for the next sheet fold
+- **Fix cycle 1/3:** carries R1-M1/SEC-09 (per D-TASK029-16), R1-m2/SEC-01, SEC-02, SEC-04, R1-m1 mount refusal, R1-m4, R1-m6, R1-m7.
+- **Card lines** (applied by principal-architect at the next sheet fold; until then this entry is the owning record):
+  - **TASK-028:** "wire tokeniser, ipIndex and UA parser through `AppDependencies` into `createAuditCapture`; due before or with the first `moduleRegistry` audited route" (D-SEC-PR56-01 condition 1).
+  - **TASK-041:** "T-39 per-actor denial budget with aggregated entry".
+  - **TASK-052:** "USER entries carry roles and session id (REQ-AUDIT-002); `source_app=admin` only from operator sessions".
+  - **TASK-030:** "a tenant tx refuses an org-less entry (PR56-SEC-06)".
+  - **TASK-287:** "retire the stage-1 ci topology (PR #55 R1-m2)".
+- **Reversibility:** High.
