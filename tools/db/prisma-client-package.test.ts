@@ -10,7 +10,7 @@ import { join } from 'node:path';
 
 import { beforeAll, describe, expect, it } from '@jest/globals';
 
-import { PRISMA_TREE_LOCK, withFileLock } from '../test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withFileLock, withReadLock } from '../test-support/fs-lock.js';
 import { findRepoRoot, runNode } from '../test-support/process.js';
 
 const ROOT = findRepoRoot();
@@ -115,7 +115,7 @@ describe('run-time resolution without conditions (D-ARCH-102 (2), (4): what the 
     expect({ status: built.status, stdout: built.stdout }).toEqual({ status: 0, stdout: '' });
   }, 300_000);
 
-  it('plain node in apps/api resolves @platform/prisma/client to prisma/dist/client/client.js and reaches the driver', () => {
+  it('plain node in apps/api resolves @platform/prisma/client to prisma/dist/client/client.js and reaches the driver', async () => {
     const script = [
       "const url = import.meta.resolve('@platform/prisma/client');",
       "const { PrismaClient } = await import('@platform/prisma/client');",
@@ -128,14 +128,19 @@ describe('run-time resolution without conditions (D-ARCH-102 (2), (4): what the 
       'await client.$disconnect();',
       'console.log(JSON.stringify({ url, name }));',
     ].join('\n');
-    const result = runNode(['--input-type=module'], {
-      cwd: join(ROOT, 'apps', 'api'),
-      input: script,
-      env: { ...process.env, NODE_OPTIONS: '' },
-    });
+    // The child loads the generated runtime, and on its first query the query compiler, while a parallel suite may
+    // regenerate the tree: it runs under the prisma-tree read lock (TASK-288; run 20261115T1909Z failed here with `Error`
+    // instead of PrismaClientKnownRequestError).
+    const result = await withReadLock(PRISMA_TREE_LOCK, () =>
+      runNode(['--input-type=module'], {
+        cwd: join(ROOT, 'apps', 'api'),
+        input: script,
+        env: { ...process.env, NODE_OPTIONS: '' },
+      }),
+    );
     expect(result.status).toBe(0);
     const outcome = JSON.parse(result.stdout.trim()) as { url: string; name: string };
     expect(outcome.url.replace(/\\/gu, '/')).toMatch(/\/prisma\/dist\/client\/client\.js$/u);
     expect(outcome.name).toBe('PrismaClientKnownRequestError');
-  });
+  }, 300_000); // the read lock waits out a parallel regeneration (deps:rebuild <= 36 s); a hang detector, as in beforeAll
 });
