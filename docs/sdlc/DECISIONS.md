@@ -2588,3 +2588,28 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **98** Main (PR #53) was merged before retaking evidence instead of a third blind rerun.
 - **Flake triage (closes the D-ORCH-107 question):** the 485dcbb FAILs were not regressions (all 9 suites pass in isolation, 232/232). Causes: Jest 5 s timeouts under CPU saturation (fixed by #53, now merged in); Windows 0xC0000142 child-process start failures under load (host capacity; addressed by serializing heavy runs); a `prisma/generated` reader race in `prisma-client-package.test.ts` → TASK-288.
 - **Reversibility:** High.
+
+### D-SEC-PR55-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #55 (TASK-286 policy PR) security r1 = PASS_WITH_CONDITIONS
+- **Decision:** round 1 at `5645b9b` (record pushed on `1c729d9`) = PASS_WITH_CONDITIONS: 0 Critical/High/Medium, 4 LOW, 6 INFO.
+  - **Closed:** PR46-SEC-17, PR42-SEC-18, D-ARCH-133, the Dependabot npm limit.
+  - **Closed in the stage-2 policy:** PR46-SEC-11. **Closed for job scopes:** PR46-SEC-15. **Partly closed:** PR46-SEC-12. **Not yet closed:** PR46-SEC-16.
+  - **C1** (PR55-SEC-01 env pins / BASH_ENV refusal; PR55-SEC-02 = code-review R1-m1 widened; PR55-SEC-09 = R1-m3) and **C2** (PR55-SEC-03 = R1-M1 widened) are due in the R1-M1 fix cycle. The fix head needs a security delta round.
+  - PR46-SEC-11/-16/-17 and the stage-2 parts of -12 take effect only when the workflow PR installs stage 2. Until then the 24 h proof-age rule, P1 and D-ORCH-103 P1 (c) stay; afterwards the 24 h rule still applies to any stage-1 `ci.yml`.
+- **Reversibility:** High.
+
+### D-TASK286-06 · 2026-11-17 · sdlc-orchestrator (security-acknowledged) · PR46-SEC-16 proof-void set
+- **Decision:** a proof is void when the tested base changed, after the proof run was created, any of:
+  - a lane A input;
+  - a path the PR itself changes (P1 (b));
+  - the lint-control directories (`tools/eslint-rules`, `tools/lint`, `tools/test-support`, `tests/fixtures/{lint,semgrep}`);
+  - `tools/deps/**`.
+- **Why:** code-review R1-M1 / PR55-SEC-03: the narrower set let a docs-only push inherit a proof for an untested combined tree. Moves on main to files the PR does not touch stay with the D-ORCH-042 post-merge gate (the card's literal "any non-docs commit" is not required, per security).
+- **Accepted residuals:** INFO-04 (committer-time dating) and INFO-06 (fast-lane `actions: read` and `pull-requests: read` while running head code; read-only, a D-ARCH-128 trade-off).
+- **Reversibility:** High.
+
+### D-ORCH-108 · 2026-11-17 · sdlc-orchestrator · Review outcomes batch
+- **PR #55:** code r1 CHANGES_REQUESTED (R1-M1 + 4 MINOR) and security r1 PASS_WITH_CONDITIONS → fix cycle 1/3 dispatched to devops-engineer.
+- **PR #56:** code r1 CHANGES_REQUESTED. R1-M1: a returned status ≥ 400 commits the handler tx, contradicting ADR-0007 §Capture / REQ-AUDIT-010, so D-TASK029-04 is not accepted as is. Fix cycle waits for the security r1 verdict.
+- **PR #54:** code r2 APPROVED_WITH_NITS (R2-m1: `query_to_xml`/`ts_stat`-family dynamic SQL lets session state escape; ruling delegated to the security delta).
+- **Interruptions:** two usage-limit stops and one network drop; agents were resumed in place, not re-dispatched.
+- **Reversibility:** High.
