@@ -2553,3 +2553,11 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Why:** concurrent heavy runs on one host produced the non-reproducing failures; MAX_PARALLEL_DEVELOPERS = 4 still holds.
 - **Alternatives rejected:** rerunning lane B blindly (does not separate a flake from a regression); counting the flaky FAILs as a fix cycle.
 - **Reversibility:** High.
+
+### D-TASK286-01..05 · 2026-11-16 · devops-engineer (recorded by orchestrator) · TASK-286 split and implementation choices
+- **D-TASK286-01:** two PRs: the policy PR (#55) first, then the workflow PR (`ci/TASK-286-cigatefold-workflow` @ed3e58f, opened after #55 merges because main's policy tooling reports 4 `required-gates` findings against the stage-2 `ci.yml`). The stage-1 pins stay accepted beside stage 2 until a follow-up retires them; the stage-1 workflow is kept as `tools/ci/fixtures/stage-1/ci.yml`.
+- **D-TASK286-02:** `TOOLS_REF` = the pushed range's base on a push; `HEAD^1` of the test merge on a PR, verified against `HEAD^2` and the event base.
+- **D-TASK286-03:** Install stays unconditional in stage 2 (the evidence verifier, signatures and audit read the installed tree; PR46-SEC-11 overrides "install CODE-gated" in am. L item 3).
+- **D-TASK286-04:** D-ARCH-133 implemented in `security-paths.mjs`; the optional D-TASK015-59 refinement is deferred (LOW, devops-engineer).
+- **D-TASK286-05:** superseded FAIL lane-B runs (unit timeouts under host load, pre-#53) are not committed; a clean PASS replaces them (20261116T0422Z_71d2980).
+- **Reversibility:** High.
