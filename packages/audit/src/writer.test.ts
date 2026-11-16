@@ -465,9 +465,7 @@ describe('[D-ARCH-122] record + ONE flush per transaction (ADR-0007 am. 11 item 
     const { store, calls } = recordingStore();
     const writer = createAuditWriter({ store, lockTimeoutMs: 250 });
     const sql = tx();
-    expect(() => writer.record(sql, { ...CREATE, outcome: 'OK' as 'SUCCESS' })).toThrow(
-      expect.objectContaining({ kind: 'INVALID_ENTRY' }),
-    );
+    expect(() => writer.record(sql, { ...CREATE, outcome: 'OK' as 'SUCCESS' })).toThrow(expect.objectContaining({ kind: 'INVALID_ENTRY' }));
     expect(sql.marked).toHaveLength(1);
     await writer.flush(sql);
     expect(calls).toHaveLength(0);
