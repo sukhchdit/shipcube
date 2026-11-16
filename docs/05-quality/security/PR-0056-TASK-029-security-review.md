@@ -8,28 +8,29 @@
 | Owned paths changed | 33: `apps/api/src/platform/audit/{capture,descriptor-runtime}.ts` and their tests, `platform/audit/writer.test.ts`, `platform/authz/authorise.ts`, `platform/db/{tenant-db,with-tenant-tx}.ts` and tests (+ `system-db.test.ts`), `platform/http/json-body.ts` and two tests, `platform/routing/{define-route,pipeline}.ts`, `pipeline-guards.test.ts`, `platform/tx/execute.ts`, `packages/audit/src/{entry,errors,index,writer}.ts`, `store/prisma-store.ts` and tests, `tests/fake-sql.ts`, `prisma/tests/audit/{audit-actions-v2,audit-capture-flush,audit-writer}.int.test.ts`, `prisma/tests/rls/tenant-db.real-client.test.ts`, the lint fixture `ok-two-hop-writer-reexport.ts`, `tools/lint/audit-capture-boundary.test.ts` |
 | Unowned paths changed | `apps/api/src/app.ts`, `apps/api/src/start-api.ts`, `packages/shared/src/errors/catalogue/audit.ts`, `tests/generated/audit-descriptors.test.ts`, and the run directory `docs/05-quality/tests/runs/20261116T0436Z_8b854ce/` (8 files). All read; `app.ts` and `start-api.ts` are part of the TASK-028 deferral assessment (§6.5) |
 | Binding items checked | PR42-SEC-15 (a)-(c), PR42-SEC-17, PR42-SEC-19 (PR #42 record, routed by D-TASK025-27); code review PR #42 R3-n1/R3-n2; D-ARCH-106, D-ARCH-122 (ADR-0007 am. 11 item 3, data-model §5.4), D-ARCH-125; REQ-AUDIT-001/004/005/006/010; threat model T-39, T-69, T-83, T-85, T-86, T-107; SEC-P3-28, SEC-P3-32 (`x-audit.additional`); D-TASK029-01..15 and its TASK-028 follow-up |
-| Reviewer / date | security-analyst, round 1, 2026-11-16 to 2026-11-17. Git object reads and the owned-path computation ran in the main checkout. In the PR worktree I ran only read-only probes (an in-memory ESLint `lintText` against its real `eslint.config.mjs`, and type-stripped Node probes that import its sources; nothing written), then wrote and committed this file. No Jest, no Docker, no PostgreSQL this round. Line numbers come from single-file reads at `4b02531`. No code-review record for PR #56 was on `main` when this round was written |
+| Reviewer / date | security-analyst, round 1, 2026-11-16 to 2026-11-17. Git object reads and the owned-path computation ran in the main checkout. In the PR worktree I ran only read-only probes (an in-memory ESLint `lintText` against its real `eslint.config.mjs`, and type-stripped Node probes that import its sources; nothing written), then wrote and committed this file. No Jest, no Docker, no PostgreSQL this round. Line numbers come from single-file reads at `4b02531`. The code-review twin `docs/05-quality/reviews/PR-0056-TASK-029-code-review.md` (CHANGES_REQUESTED, one MAJOR) landed on this branch as `f376377` (docs only) during this round; I read it after my first commit (`38aaef9`) and added §8a, PR56-SEC-09 (= its R1-M1) and the updated counts in a docs-only follow-up commit |
 
 ## 1. Summary
 
 The PR turns the audit stub into descriptor-driven capture. Mutations record their entry and run the transaction's one flush as the last database work of the handler transaction. VIEW and DOWNLOAD entries are written in their own short transaction after COMMIT and before anything is sent; a SENSITIVE one fails closed with 503 `AUDIT_UNAVAILABLE`. A 403 `AUTHZ_DENIED` is preceded by a PERMISSION_DENIED entry in its own transaction, and a failure to write it answers 500/503. FAILED entries cover 409/422/5xx of authenticated mutations. The writer gains `record`/`flush` with the D-ARCH-122 invariants and the STREAM_MISMATCH check; the tenant transaction gains statement tracking and the settle loop (PR42-SEC-17 H2); the JSON boundary refuses NUL and lone surrogates (PR42-SEC-15 (c)).
 
-The integrity core holds. A mutation cannot commit without its entry: the flush is awaited in the transaction, the latch, I2 and I3 fail the transaction, and deferred starts are settled (only timer starts escape, as documented). Entries take the actor, organisation, correlation id and IP from the server-side principal and request context; client-shaped columns are null unless they match the writer's shape. The writer refuses a tenant entry whose organisation differs from the transaction's. Personal values (IP, user agent, filter values) are tokenised. No new path writes a header or query value to a log.
+The integrity core holds. A mutation whose handler returns 2xx cannot commit without its entry: the flush is awaited in the transaction, the latch, I2 and I3 fail the transaction, and deferred starts are settled (only timer starts escape, as documented). A *returned* non-2xx result is the exception (PR56-SEC-09, the code review's R1-M1). Entries take the actor, organisation, correlation id and IP from the server-side principal and request context; client-shaped columns are null unless they match the writer's shape. The writer refuses a tenant entry whose organisation differs from the transaction's. Personal values (IP, user agent, filter values) are tokenised. No new path writes a header or query value to a log.
 
 The claimed closures hold: PR42-SEC-15 (a)(b)(c), PR42-SEC-17 (with its documented timer residual), PR42-SEC-19 and R3-n1. The R3-n2 tripwire exists but is blind to the one re-export that does exist.
 
 Findings, all latent today because the production module registry is empty:
 - **PR56-SEC-01 (MEDIUM):** a filter value that the writer refuses (NUL via `%00`, an empty string, more than 8,192 characters) silently drops the VIEW entry of a NORMAL list. The response is still released. The same value makes a SENSITIVE list answer 503. This is the PR42-SEC-15 class again, now arriving through the query string.
 - **PR56-SEC-03 (MEDIUM):** every 403 now costs a tenant transaction and a stream-head lock, before any per-actor rate limit. T-39's aggregation mitigation is not built.
+- **PR56-SEC-09 (MEDIUM, = code review R1-M1):** a handler's *returned* non-2xx status commits its writes. A returned 400/403/404 (or an anonymous 409/422/5xx) commits with no entry. A returned 409/422/5xx commits a change that persisted under an entry that says FAILED.
 - **PR56-SEC-02 (LOW):** `createAuditCapture` is re-exported from the tx slot. Any api module can import it lint-clean and append entries with an arbitrary actor.
 - **PR56-SEC-04 (LOW):** `x-audit.additional[]` is ignored, so the SEC-P3-32 and SEC-P3-28 second entries have no writer.
 - **PR56-SEC-05 (LOW):** `source_app` is client-asserted.
 - **PR56-SEC-08 (LOW):** the TASK-028 deferral. Accepted, with two conditions.
 - **INFO:** 06 (stream-check asymmetry) and 07 (no target organisation, roles or session on entries).
 
-Findings: 0 Critical, 0 High, 2 Medium, 4 Low, 2 Info.
+Findings: 0 Critical, 0 High, 3 Medium, 4 Low, 2 Info.
 
-**Verdict: PASS_WITH_FOLLOW-UPS.**
+**Verdict: PASS_WITH_FOLLOW-UPS.** The code review's CHANGES_REQUESTED forces a fix cycle. That cycle should carry PR56-SEC-09 with R1-M1, and preferably 01, 02 and 04. Any push to an owned path then needs a delta round 2.
 
 ## 2. Method
 
@@ -53,6 +54,7 @@ Findings: 0 Critical, 0 High, 2 Medium, 4 Low, 2 Info.
 | PR56-SEC-06 | STREAM_MISMATCH accepts an organisation-less (SYSTEM shard) entry inside a tenant transaction | INFO | CWE-284 | A01:2021 | `packages/audit/src/writer.ts:156` | TASK-030 (moves the stream code) |
 | PR56-SEC-07 | Entries carry no `target_org_id`, roles or session; `operator-cross-tenant` routes mount without a target-organisation resolver | INFO | CWE-778 | A09:2021 | `descriptor-runtime.ts:176-205` | TASK-052 (roles, session); the admin-slice tasks (target organisation) |
 | PR56-SEC-08 | Production composition: capture without tokeniser, IP index and UA parser, so every audited route and every 403 answers 500 (TASK-028 deferral) | LOW | CWE-703 | A05:2021 | `apps/api/src/start-api.ts:116`; `routing/pipeline.ts:57` | TASK-028; boot assertion (§4.8). **Deferral accepted** with conditions |
+| PR56-SEC-09 | A returned (not thrown) non-2xx result commits the handler's writes: no entry for 400/403/404 and for anonymous 409/422/5xx; a FAILED entry for a change that persisted (= code review R1-M1) | MEDIUM | CWE-778 | A09:2021 | `apps/api/src/platform/audit/capture.ts:89-107`; `tx/execute.ts:226-236`; `descriptor-runtime.ts:211-213` | senior-developer: this PR's fix cycle, with R1-M1 and the principal-architect ruling on D-TASK029-04 |
 
 ## 4. Finding details
 
@@ -191,6 +193,23 @@ Findings: 0 Critical, 0 High, 2 Medium, 4 Low, 2 Info.
     2. Add a boot assertion next to `assertPipelineReady`: `startApi` refuses to start when a mounted route is audited and the capture has no tokeniser or IP index. This turns "500 on every audited request, feeding ROLLBACK_TRIGGERS" into a start-up failure that the compose smoke test catches.
 - Impact on availability only, latent: **LOW**.
 
+### PR56-SEC-09 (MEDIUM, = code review R1-M1): a returned non-2xx result commits without a matching entry
+
+- **Description.** The tx slot's `write` (`execute.ts:226-236`) returns the handler's result, and the transaction commits whatever the status. The audit hook (`capture.ts:89-107`) records:
+  - SUCCESS below 400;
+  - FAILED for 409/422/5xx, and only when the principal is authenticated and the method mutating (`descriptor-runtime.ts:211-213`);
+  - nothing otherwise.
+
+  A handler that writes and then *returns* 400, 403 or 404 therefore commits its writes with no entry. So does an anonymous mutation that returns 409/422/5xx. A returned 409/422/5xx of an authenticated user commits the change under an entry whose outcome says FAILED, without the diff. ADR-0007 §Capture and REQ-AUDIT-010 write FAILED in a separate transaction *because the business transaction rolled back*. D-TASK029-04 departs from that without a principal-architect ruling.
+- **Exploitability / impact.** It takes a handler that writes and then returns a non-recorded status. That is a plausible shape ("insert the child, then answer 404 for a missing parent", a partial upsert, a guest route answering 409). Once such a handler exists, any client can trigger it at will, and the business change persists with no trail entry or with a misleading one. This breaks O4 and REQ-AUDIT-004, and US-086's "feature code never has to remember to audit". No such handler exists yet. Impact H × likelihood L gives **MEDIUM**, the rating PR42-SEC-13 had for the same effect.
+- **Remediation.** Concur with the code review. Preferred: roll back the handler transaction for every returned status of 400 or more, and write FAILED (409/422/5xx) in its own transaction as the ADR says. Alternative: keep commit-on-return, but let the TenantDb guard count write statements; a returned status that records no entry after a write becomes 500 and rolls back. Either way, a principal-architect ruling settles D-TASK029-04.
+- **Verification.** Api tests:
+  - a handler writes and returns 404: no business row (or 500), never "committed without an entry";
+  - a returned 409 or 500: business row absent, FAILED entry present in its own transaction;
+  - an anonymous mutating route that writes and returns 409: no business row.
+
+  A mutant that commits on return must fail these.
+
 ## 5. Claimed closures
 
 | Item | Status | Evidence |
@@ -223,7 +242,7 @@ Findings: 0 Critical, 0 High, 2 Medium, 4 Low, 2 Info.
 
 ## 7. Decisions D-TASK029-01..15
 
-Concur with all. Notes:
+Concur with all except 04 (PR56-SEC-09, = code review R1-M1: a principal-architect ruling is needed). Notes:
 - 03: NORMAL best effort, with PR56-SEC-01 as the client-steerable residual.
 - 06: concur, but T-39's aggregation is owed (PR56-SEC-03).
 - 08: one-sided (PR56-SEC-06).
@@ -247,6 +266,21 @@ These are proposed for the orchestrator to log as **D-SEC-PR56-01**:
 | TASK-052 | PR56-SEC-05 session-bound client app; PR56-SEC-07 roles and session | With the authenticators |
 | TASK-030 | PR56-SEC-06 one-sided stream check | With the move into `chain/**` |
 | TASK-033 / qa-lead | Generator cases for 01 and 04; activate the audit-generator suite (the T0 backstop of PR42-SEC-17) | Before G3 |
+| senior-developer + principal-architect (this PR's fix cycle) | PR56-SEC-09 with code review R1-M1 and the D-TASK029-04 ruling | Before merge (the code review's MAJOR) |
+
+## 8a. Code-review twin (`f376377`, CHANGES_REQUESTED)
+
+| Code review | Security view |
+|---|---|
+| R1-M1 (MAJOR) returned non-2xx commits | = **PR56-SEC-09 (MEDIUM)**; concur with the fix options |
+| R1-m1 production composition lacks tokeniser | = PR56-SEC-08. Concur with the AC line on the owning card. A mount-time refusal (capture without a tokeniser refuses audited and permission-gated routes) satisfies my condition 2 as well as a boot assertion |
+| R1-m2 query-string NUL in the filter summary | = **PR56-SEC-01**. I rate it MEDIUM rather than MINOR, because the NORMAL case is an audit suppression the client chooses, not only a 5xx |
+| R1-m3 denial before the rate limiter ("security-analyst to rate") | = **PR56-SEC-03, MEDIUM** (threat model T-39). Choice recorded: a per-actor denial budget with an aggregated entry, owned by TASK-041. Do not move the denial write after `rateLimit` alone, because the per-class limit would then count denied requests against legitimate traffic of the same class |
+| R1-m4 `afterFailure` under congestion | Concur; LOW security weight (an availability amplification under pool exhaustion: a second transaction per failed request). Add `TRANSACTION_UNAVAILABLE`, `STATEMENT_TIMEOUT` and `LOCK_TIMEOUT` to the exclusion set, skip aborted requests, and bound the write by the request deadline |
+| R1-m5 no roles / session on entries | = PR56-SEC-07 (INFO) |
+| R1-m6 VIEW handlers run read-write | Concur; the same class as PR56-SEC-09 (a write without its entry). `readOnly: true` for `view`/`list` mode closes it |
+| R1-m7 survivors; silent catches | Concur. The class-only log line in both catches is also part of PR56-SEC-01's remediation (count dropped views) |
+| R1-n1..n5 | No security weight; R1-n2 (head-row stamp from the first entry) is metadata only |
 
 ## 9. Record check
 
@@ -254,5 +288,5 @@ Before committing, main's `tools/ci/check-security-owned-paths.mjs` without this
 
 | Field | Value |
 |---|---|
-| Critical / High / Medium / Low / Info | 0 / 0 / 2 / 4 / 2 |
-| Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical or High open. The two MEDIUMs are latent (empty production module registry) and have owners and due points; the TASK-028 deferral is accepted with conditions |
+| Critical / High / Medium / Low / Info | 0 / 0 / 3 / 4 / 2 |
+| Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical or High open. The three MEDIUMs are latent (empty production module registry) and have owners and due points; PR56-SEC-09 rides the fix cycle that the code review's MAJOR forces; the TASK-028 deferral is accepted with conditions |
