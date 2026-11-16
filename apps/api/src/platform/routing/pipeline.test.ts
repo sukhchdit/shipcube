@@ -3,7 +3,7 @@
 // problem answer, the route template and the boot checks. Real createApp over loopback; no database.
 import type { AddressInfo } from 'node:net';
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import Joi from 'joi';
 
@@ -27,6 +27,10 @@ import {
 import { RequestContextError, tenantContextOf } from '../tx/execute.js';
 import { ANONYMOUS, routeTemplateOf, setPrincipal } from './route-state.js';
 import { fixtureRoute } from './tests/fixture-route.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from './tests/loopback.js';
+
+// Real createApp over loopback: the 5 s Jest default timed out under parallel host load (W0-FLAKE, PR #38 R1-n1).
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 const silent = { info: () => undefined, debug: () => undefined, error: () => undefined };
 
@@ -34,10 +38,10 @@ async function call(app: Express, path: string, init: RequestInit = {}): Promise
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
+    const response = await fetchOnce(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
     return { status: response.status, headers: response.headers, body: await response.text() };
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
 }
 

@@ -10,7 +10,7 @@ import { AppError } from '@platform/shared';
 import { createApp } from '../../app.js';
 import { PRIVATE_CACHE_CONTROL } from '../routing/route-state.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
-import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import { AUTHENTICATED_CACHE_CONTROL } from './authenticate.js';
 
 // Each case composes createApp and makes a loopback request: the shared loopback budget (see tests/loopback.ts).
@@ -31,7 +31,7 @@ async function probe(spec: Partial<FixtureRouteSpec>, headers: Record<string, st
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/probe`, { headers });
+    const response = await fetchOnce(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/probe`, { headers });
     const text = await response.text();
     return {
       status: response.status,
@@ -39,7 +39,7 @@ async function probe(spec: Partial<FixtureRouteSpec>, headers: Record<string, st
       cacheControl: response.headers.get('cache-control'),
     };
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
 }
 
