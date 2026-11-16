@@ -25,6 +25,12 @@
  *    literal in the same mode (`xqs` in scan.l), so `E'a'<LF>'\' …'` keeps its backslash escapes. The continuation
  *    pattern is unambiguous (linear time; the obvious one is exponential in a run of dashes, PR54-SEC-06);
  *  - a template is rendered as Prisma's `Sql#text` renders it: the parts joined with `$1`, `$2`, … and no spaces.
+ * SQL text inside a string is not read, so the functions that run SQL given as text (`query_to_xml`,
+ * `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite`) are refused wherever they are named
+ * (PR54-SEC-07). Residuals (pinned in the corpus): a function or procedure whose BODY commits or sets (bootstrap and
+ * migration DDL; the runtime roles cannot create functions), and the readers that build their own query from a name,
+ * `table_to_xml*`, `schema_to_xml*`, `database_to_xml*` and `cursor_to_xml*` (PR54-SEC-02 (b), due before TASK-073's
+ * first raw statement).
  * Name and keyword comparisons use regular-expression literals, so this module carries none of the text that
  * `platform/tenant-context-sql` refuses in string literals.
  */
@@ -263,6 +269,14 @@ const LOCAL_SETTING = /^(?:app\.[a-z_]+|statement_timeout|lock_timeout|idle_in_t
 const STRING_SYNTAX_SETTING = /standard_conforming_strings|backslash_quote/iu;
 /** Session advisory locks (held until the backend closes); the `_xact_` forms end with the transaction. */
 const SESSION_LOCK = /^pg_(?:try_)?advisory_(?:lock|unlock)(?:_shared|_all)?$/u;
+/**
+ * Functions that run SQL given as text (PR54-SEC-07, code review R2-m1 of PR #54; migration-lint rule 16 parity). The
+ * text is a string the lexer does not read, so it can carry a session setter, a session advisory lock, or a split
+ * string-syntax setting that hides a `COMMIT` in the next raw call. Refused anywhere, in any case.
+ */
+const DYNAMIC_SQL = /^(?:query_to_xml|query_to_xmlschema|query_to_xml_and_xmlschema|ts_stat|ts_rewrite)$/iu;
+/** The function form of `NOTIFY`, refused as the keyword is (PR54-SEC-08, code review R2-n2). */
+const NOTIFY_FUNCTION = /^pg_notify$/iu;
 const SETTINGS_VIEW = /^pg_settings$/u;
 const UPDATE = /^update$/u;
 const TRUE = /^true$/u;
@@ -342,6 +356,8 @@ function sessionSetter(statement) {
   for (let i = 0; i < statement.length; i += 1) {
     const token = statement[i];
     if (isName(token, SESSION_LOCK)) return { form: 'session', detail: 'a session advisory lock' };
+    if (isName(token, DYNAMIC_SQL)) return { form: 'session', detail: 'a function that runs SQL text' };
+    if (isName(token, NOTIFY_FUNCTION)) return { form: 'session', detail: 'the notify function' };
     if (token !== undefined && token.kind !== 'punct' && STRING_SYNTAX_SETTING.test(token.value)) {
       return { form: 'session-setter', detail: 'a string-syntax setting' };
     }
@@ -366,7 +382,8 @@ function sessionSetter(statement) {
  *    `BEGIN`, `START`, `SAVEPOINT`, `RELEASE`, `PREPARE`);
  *  - `session`: a first keyword that changes the pooled session (`SET` in any form, `RESET`, `DISCARD`, `LISTEN`,
  *    `UNLISTEN`, `NOTIFY`, `LOAD`, `EXECUTE`, `DEALLOCATE`, and the cursor statements `DECLARE`, `FETCH`, `MOVE`,
- *    `CLOSE`); a session advisory lock function anywhere; `allowReadOnlyTransaction` admits exactly
+ *    `CLOSE`); anywhere, a session advisory lock function, a function that runs SQL text (PR54-SEC-07) or the
+ *    notify function (PR54-SEC-08); `allowReadOnlyTransaction` admits exactly
  *    `SET TRANSACTION READ ONLY` (withTenantTx's read-only `load`; it can only restrict);
  *  - `anonymous-block`: `DO` (its body can build any of the above from concatenated text, D-SEC-PR42-02);
  *  - `session-setter`: see {@link sessionSetter};

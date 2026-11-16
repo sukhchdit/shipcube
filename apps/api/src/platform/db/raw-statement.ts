@@ -22,8 +22,14 @@
  * text is rendered exactly as Prisma's `Sql#text` renders it (`$1`, `$2`, … with no spaces).
  * Name and keyword comparisons use regular-expression literals, so this file carries none of the text that
  * `platform/tenant-context-sql` refuses in string literals.
- * Residual (pinned in the corpus): a function or procedure whose BODY commits or sets; function bodies are
- * bootstrap/migration DDL, owned by that lane, and the runtime roles cannot create functions.
+ * SQL text inside a string is not read, so the functions that run SQL given as text (`query_to_xml`,
+ * `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite`) are refused wherever they are named:
+ * their text can carry a session setter, a session advisory lock, or a split string-syntax setting that hides a
+ * `COMMIT` in the next raw call (PR54-SEC-07). `pg_notify` is refused as `NOTIFY` is (PR54-SEC-08).
+ * Residuals (pinned in the corpus): a function or procedure whose BODY commits or sets (function bodies are
+ * bootstrap/migration DDL, owned by that lane, and the runtime roles cannot create functions); and the readers that
+ * build their own query from a name, `table_to_xml*`, `schema_to_xml*`, `database_to_xml*` and `cursor_to_xml*`
+ * (PR54-SEC-02 (b), due before TASK-073's first raw statement).
  */
 
 type TokenKind = 'word' | 'quoted' | 'string' | 'param' | 'punct';
@@ -72,6 +78,10 @@ const LOCAL_SETTING = /^(?:app\.[a-z_]+|statement_timeout|lock_timeout|idle_in_t
 const STRING_SYNTAX_SETTING = /standard_conforming_strings|backslash_quote/iu;
 /** Session advisory locks (held until the backend closes); the `_xact_` forms end with the transaction. */
 const SESSION_LOCK = /^pg_(?:try_)?advisory_(?:lock|unlock)(?:_shared|_all)?$/u;
+/** Functions that run SQL given as text (PR54-SEC-07); refused anywhere, in any case. */
+const DYNAMIC_SQL = /^(?:query_to_xml|query_to_xmlschema|query_to_xml_and_xmlschema|ts_stat|ts_rewrite)$/iu;
+/** The function form of `NOTIFY` (PR54-SEC-08). */
+const NOTIFY_FUNCTION = /^pg_notify$/iu;
 const SETTINGS_VIEW = /^pg_settings$/u;
 const UPDATE = /^update$/u;
 const TRUE = /^true$/u;
@@ -259,11 +269,16 @@ function refusedSetter(statement: readonly SqlToken[], index: number, pairs: Par
   return first !== open + 2 || name?.kind !== 'string' || !LOCAL_SETTING.test(name.value) ? NOT_LISTED : undefined;
 }
 
-/** A setter or session lock anywhere: see the lint twin's `sessionSetter`; an UPDATE of pg_settings. */
+/**
+ * A setter, session lock, function that runs SQL text or notify function anywhere: see the lint twin's
+ * `sessionSetter`; an UPDATE of pg_settings.
+ */
 function sessionSetter(statement: readonly SqlToken[]): RawStatementRefusal | undefined {
   let pairs: Parentheses | undefined;
   for (const [index, token] of statement.entries()) {
     if (isName(token, SESSION_LOCK)) return { form: 'session', detail: 'a session advisory lock' };
+    if (isName(token, DYNAMIC_SQL)) return { form: 'session', detail: 'a function that runs SQL text' };
+    if (isName(token, NOTIFY_FUNCTION)) return { form: 'session', detail: 'the notify function' };
     if (token.kind !== 'punct' && STRING_SYNTAX_SETTING.test(token.value)) {
       return { form: 'session-setter', detail: 'a string-syntax setting' };
     }

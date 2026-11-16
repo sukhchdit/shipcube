@@ -34,7 +34,9 @@
  *  - PR44-SEC-05 (TASK-020 part 020-D): a tagged `$queryRaw` / `$executeRaw` template whose statement ends, nests or
  *    prepares the transaction (`COMMIT`, `ROLLBACK`, `END`, `BEGIN`, `SAVEPOINT`, …), changes the pooled session
  *    (`SET` in any form, `RESET`, `DISCARD`, `LISTEN`, `NOTIFY`, `EXECUTE`, the cursor statements `DECLARE` /
- *    `FETCH` / `MOVE` / `CLOSE`, a session advisory lock, PR54-SEC-02 (a)), is an anonymous `DO` block, calls the
+ *    `FETCH` / `MOVE` / `CLOSE`, a session advisory lock, PR54-SEC-02 (a); `pg_notify`, PR54-SEC-08), names a
+ *    function that runs SQL given as text (`query_to_xml*`, `ts_stat`, `ts_rewrite`, PR54-SEC-07), is an anonymous
+ *    `DO` block, calls the
  *    setting function other than transaction-local (a literal `true` is_local and a literal name on the
  *    transaction-local list), names a string-syntax setting (PR54-SEC-01 (e)) or updates `pg_settings`
  *    (D-SEC-PR42-02), or cannot be read (fail closed; a character outside ASCII outside a string or comment
@@ -43,9 +45,11 @@
  *    exactly `SET TRANSACTION READ ONLY` (withTenantTx only, eslint.config.mjs). Option `only: ['statement']` runs
  *    this check alone: package sources (packages/*\/src, code review R1-n3 of PR #54), where the rest of the rule
  *    applies only to the planned Prisma files.
- *    Residual (pinned in tools/lint/raw-sql-lexer.test.ts): a function or procedure whose BODY does any of this
- *    (`SELECT f()`) is invisible here; function bodies are bootstrap/migration DDL, owned by that lane's linter and
- *    review, and application roles cannot create functions.
+ *    Residuals (pinned in the shared corpus): a function or procedure whose BODY does any of this (`SELECT f()`) is
+ *    invisible here; function bodies are bootstrap/migration DDL, owned by that lane's linter and review, and
+ *    application roles cannot create functions. The readers that build their own query from a name
+ *    (`table_to_xml*`, `schema_to_xml*`, `database_to_xml*`, `cursor_to_xml*`) are PR54-SEC-02 (b), due before
+ *    TASK-073's first raw statement.
  * Legal: tagged `` Prisma.sql`… ${v}` `` fragments, `Prisma.join(ids)`, `Prisma.join(ids, ', ')`, tagged
  * `` db.$queryRaw`…` ``. Scoped by eslint.config.mjs; tests are excluded there (they assert that the Proxy refuses
  * these shapes).

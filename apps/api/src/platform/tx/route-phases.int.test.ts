@@ -149,8 +149,9 @@ const lexerFormRoutes = LEXER_FORMS.map(({ path, id, send }) =>
 const ADVISORY_KEY = 5454;
 /**
  * PR54-SEC-02 (a), code review R1-m3 (PR #54): session state that outlives the transaction on the pooled backend, a
- * cursor declared WITH HOLD and a session advisory lock. Admitted, either would let the load finish and the call and
- * handler run; the control case below shows that PostgreSQL 18 keeps both after COMMIT.
+ * cursor declared WITH HOLD and a session advisory lock, named directly or in SQL text (PR54-SEC-07). Admitted, any of
+ * them would let the load finish and the call and handler run; the control case below shows that PostgreSQL 18 keeps
+ * the cursor and the lock after COMMIT.
  */
 const SESSION_FORMS = [
   {
@@ -159,6 +160,12 @@ const SESSION_FORMS = [
     send: (db: AppDb) => db.$executeRaw`DECLARE leak CURSOR WITH HOLD FOR SELECT id FROM public.phase_probe`,
   },
   { path: '/fixtures/load-advisory-lock', id: 8, send: (db: AppDb) => db.$queryRaw`SELECT pg_advisory_lock(5454)` },
+  // PR54-SEC-07 (code review R2-m1): the same lock carried in SQL text that a function runs.
+  {
+    path: '/fixtures/load-dynamic-sql-lock',
+    id: 9,
+    send: (db: AppDb) => db.$queryRaw`SELECT query_to_xml('select pg_advisory_lock(5454)', true, false, '')`,
+  },
 ] as const;
 const sessionFormRoutes = SESSION_FORMS.map(({ path, id, send }) =>
   fixtureRoute({
@@ -376,7 +383,7 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
     },
   );
 
-  it('[PR54-SEC-02] control: PostgreSQL 18 keeps a WITH HOLD cursor and a session advisory lock after COMMIT', async () => {
+  it('[PR54-SEC-02] [PR54-SEC-07] control: PostgreSQL 18 keeps a WITH HOLD cursor and a session advisory lock (direct or through query_to_xml) after COMMIT', async () => {
     const admin = new pg.Client({ connectionString: container.getConnectionUri() });
     const observer = new pg.Client({ connectionString: container.getConnectionUri() });
     await admin.connect();
@@ -392,6 +399,16 @@ describe('[D-ARCH-106] route I/O phases on PostgreSQL 18 as platform_app (TASK-0
         [ADVISORY_KEY],
       );
       expect(rows).toEqual([{ n: 1 }]);
+      // PR54-SEC-07: the lock taken by SQL text that query_to_xml runs, in a read-only transaction, outlives it too.
+      await admin.query('SELECT pg_advisory_unlock_all()');
+      await admin.query('BEGIN READ ONLY');
+      await admin.query("SELECT query_to_xml('select pg_advisory_lock(5454)', true, false, '')");
+      await admin.query('COMMIT');
+      const dynamic = await observer.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' AND objid = $1 AND granted",
+        [ADVISORY_KEY],
+      );
+      expect(dynamic.rows).toEqual([{ n: 1 }]);
     } finally {
       await admin.query('CLOSE ALL');
       await admin.query('SELECT pg_advisory_unlock_all()');

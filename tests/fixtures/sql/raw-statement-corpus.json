@@ -1,5 +1,5 @@
 {
-  "$comment": "PR44-SEC-05 (TASK-020 part 020-D): the shared corpus of the two raw-statement classifiers, the lint twin tools/eslint-rules/raw-sql-lexer.mjs (tools/lint/raw-sql-lexer.test.ts) and the TenantDb run-time guard apps/api/src/platform/db/raw-statement.ts (raw-statement.test.ts). Each case is one statement text as Prisma sends it (a template's ${...} values are $n). verdict: ok or the refused form. templates: the strings of a tagged template (PR54-SEC-01 (d)), which the TenantDb twin renders as Prisma does and the lint twin through templateText. 'residual' cases are ALLOWED by both classifiers on purpose and say why.",
+  "$comment": "PR44-SEC-05 (TASK-020 part 020-D): the shared corpus of the two raw-statement classifiers, the lint twin tools/eslint-rules/raw-sql-lexer.mjs (tools/lint/raw-sql-lexer.test.ts) and the TenantDb run-time guard apps/api/src/platform/db/raw-statement.ts (raw-statement.test.ts). Each case is one statement text as Prisma sends it (a template's ${...} values are $n). verdict: ok or the refused form. templates: the strings of a tagged template (PR54-SEC-01 (d)), which the TenantDb twin renders as Prisma does and the lint twin through templateText. 'residual' cases are ALLOWED by both classifiers on purpose and say why. SQL text inside a string literal is not read, so the functions that run SQL given as text (query_to_xml, query_to_xmlschema, query_to_xml_and_xmlschema, ts_stat, ts_rewrite) are refused by name (PR54-SEC-07), and pg_notify with NOTIFY (PR54-SEC-08). Residuals: function and procedure bodies, and the readers that build their own query from a name (table_to_xml*, schema_to_xml*, database_to_xml*, cursor_to_xml*: PR54-SEC-02 (b), due before TASK-073's first raw statement).",
   "cases": [
     { "sql": "SELECT 1", "verdict": "ok" },
     { "sql": "", "verdict": "ok" },
@@ -36,8 +36,160 @@
     },
     {
       "sql": "SELECT query_to_xml('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 (code review R2-m1): a function that runs SQL given as text"
+    },
+    { "sql": "SELECT \"query_to_xml\"('select 1', true, false, '')", "verdict": "session", "detail": "a function that runs SQL text" },
+    {
+      "sql": "SELECT pg_catalog.query_to_xml('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT PG_CATALOG.QUERY_TO_XML('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT query_to_xmlschema('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 (code review R2-m1): a function that runs SQL given as text"
+    },
+    {
+      "sql": "SELECT \"query_to_xmlschema\"('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT pg_catalog.query_to_xmlschema('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT PG_CATALOG.QUERY_TO_XMLSCHEMA('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT query_to_xml_and_xmlschema('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 (code review R2-m1): a function that runs SQL given as text"
+    },
+    {
+      "sql": "SELECT \"query_to_xml_and_xmlschema\"('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT pg_catalog.query_to_xml_and_xmlschema('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT PG_CATALOG.QUERY_TO_XML_AND_XMLSCHEMA('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT ts_stat('select v from docs')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 (code review R2-m1): a function that runs SQL given as text"
+    },
+    { "sql": "SELECT \"ts_stat\"('select v from docs')", "verdict": "session", "detail": "a function that runs SQL text" },
+    { "sql": "SELECT pg_catalog.ts_stat('select v from docs')", "verdict": "session", "detail": "a function that runs SQL text" },
+    { "sql": "SELECT PG_CATALOG.TS_STAT('select v from docs')", "verdict": "session", "detail": "a function that runs SQL text" },
+    {
+      "sql": "SELECT ts_rewrite('a & b'::tsquery, 'select t, s from aliases')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 (code review R2-m1): a function that runs SQL given as text"
+    },
+    {
+      "sql": "SELECT \"ts_rewrite\"('a & b'::tsquery, 'select t, s from aliases')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT pg_catalog.ts_rewrite('a & b'::tsquery, 'select t, s from aliases')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT PG_CATALOG.TS_REWRITE('a & b'::tsquery, 'select t, s from aliases')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT pg_notify('changes', 'x')",
+      "verdict": "session",
+      "detail": "the notify function",
+      "note": "PR54-SEC-08 (code review R2-n2): NOTIFY in its function form"
+    },
+    { "sql": "SELECT \"pg_notify\"('changes', 'x')", "verdict": "session", "detail": "the notify function" },
+    { "sql": "SELECT pg_catalog.pg_notify('changes', 'x')", "verdict": "session", "detail": "the notify function" },
+    { "sql": "SELECT PG_CATALOG.PG_NOTIFY('changes', 'x')", "verdict": "session", "detail": "the notify function" },
+    {
+      "sql": "SELECT \"QUERY_TO_XML\"('select 1', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "quoted upper case names no PostgreSQL function; refused anyway (fail closed)"
+    },
+    {
+      "sql": "SELECT * FROM orders o, LATERAL pg_catalog.\"ts_stat\"('select v from docs') s",
+      "verdict": "session",
+      "detail": "a function that runs SQL text"
+    },
+    {
+      "sql": "SELECT query_to_xml('select pg_advisory_lock(5454)', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 X4: a session advisory lock that outlives COMMIT"
+    },
+    {
+      "sql": "SELECT query_to_xml('select set_config(''search_path'', ''pg_catalog'', false)', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 X2: a session search_path that outlives COMMIT"
+    },
+    {
+      "sql": "SELECT * FROM ts_stat('select set_config(''search_path'', ''public'', false)::tsvector')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 X3"
+    },
+    {
+      "sql": "SELECT query_to_xml('select set_config(''standard_'' || ''conforming_strings'', ''off'', true)', true, false, '')",
+      "verdict": "session",
+      "detail": "a function that runs SQL text",
+      "note": "PR54-SEC-07 X1, first call: the setting name split inside the SQL text"
+    },
+    {
+      "sql": "SELECT 'x\\' ; ' ; COMMIT ; SELECT ' -- '",
       "verdict": "ok",
-      "note": "residual: SQL text inside a string literal is not read (the same for rawSystemTable)"
+      "note": "PR54-SEC-07 X1, second call: read with standard_conforming_strings on (PostgreSQL rejects it there); it hides a COMMIT only after the first call, which is refused"
+    },
+    { "sql": "SELECT ts_rank(v, q) FROM docs", "verdict": "ok", "note": "control: a text-search function that runs no SQL text" },
+    {
+      "sql": "SELECT table_to_xml('orders', true, false, '')",
+      "verdict": "ok",
+      "note": "residual PR54-SEC-02 (b): table_to_xml*, schema_to_xml*, database_to_xml* and cursor_to_xml* build their own query from a name; due before TASK-073 first raw statement"
+    },
+    { "sql": "SELECT database_to_xml(true, true, '')", "verdict": "ok", "note": "residual PR54-SEC-02 (b)" },
+    {
+      "sql": "SELECT set_config('lock_timeout' || '', $1, true)",
+      "verdict": "session-setter",
+      "detail": "the setting function on a setting outside the transaction-local list",
+      "note": "code review R2-n1 (a): the name must be one plain literal"
+    },
+    {
+      "sql": "SELECT set_config('my.app.key', $1, true)",
+      "verdict": "session-setter",
+      "detail": "the setting function on a setting outside the transaction-local list",
+      "note": "code review R2-n1 (b): the transaction-local list is anchored"
     },
 
     { "sql": "COMMIT", "verdict": "transaction-control" },
@@ -202,6 +354,11 @@
     { "sql": "SELECT pg_try_advisory_xact_lock_shared($1)", "verdict": "ok" }
   ],
   "templates": [
+    {
+      "strings": ["SELECT query_to_xml('select pg_advisory_lock(' || ", "::text || ')', true, false, '')"],
+      "verdict": "session",
+      "note": "PR54-SEC-07: the SQL text built around a bound value"
+    },
     { "strings": ["SELECT * FROM orders WHERE id = ", " AND status = ", ""], "verdict": "ok" },
     { "strings": ["SELECT ", "; COMMIT"], "verdict": "transaction-control" },
     {
