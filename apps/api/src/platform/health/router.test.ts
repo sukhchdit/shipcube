@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
 import request from 'supertest';
 
@@ -7,6 +7,8 @@ import {
   type PendableComponent,
   pendingCheck,
   READINESS_CACHE_TTL_MS,
+  READINESS_CHECK_TIMEOUT_MS,
+  READINESS_DEADLINE_MS,
   READINESS_COMPONENTS,
   type ReadinessBody,
   type ReadinessCheck,
@@ -14,7 +16,12 @@ import {
   type ReadinessOptions,
 } from '../runtime/readiness.js';
 import { defaultPipelineSlots, mountRoutes } from '../routing/pipeline.js';
+import { HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, timeOperation } from '../routing/tests/loopback.js';
+import { recordAbortTimeouts } from '../routing/tests/timing.js';
 import { healthRoutes } from './router.js';
+
+// Every case makes real HTTP requests; the 5 s Jest default timed out under parallel host load (W0-FLAKE).
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 const critical = (name: ReadinessComponent): boolean => name !== 'audit_chain';
 
@@ -93,21 +100,43 @@ describe('US-012 liveness and readiness endpoints (api)', () => {
     expect((await request(app).get('/health/live')).status).toBe(200);
   });
 
-  it('AT-US-012-03: a dependency that does not answer is bounded (per-check timeout and overall deadline)', async () => {
-    const { app } = appWith(checksWith({ database: hanging('database') }));
-    const started = performance.now();
-    const ready = await request(app).get('/health/ready');
-    expect(performance.now() - started).toBeLessThan(2_500);
-    expect(ready.status).toBe(503);
-    expect(bodyOf(ready).components).toEqual({ ...allOk, database: 'unavailable' });
+  it('AT-US-012-03: the readiness bounds are the AC values (2 s per check, whole response within 2.5 s)', () => {
+    expect(READINESS_CHECK_TIMEOUT_MS).toBe(2_000);
+    expect(READINESS_DEADLINE_MS).toBeLessThanOrEqual(2_500);
+    expect(READINESS_CHECK_TIMEOUT_MS).toBeLessThan(READINESS_DEADLINE_MS);
+  });
+
+  it('AT-US-012-03: a dependency that does not answer is bounded (per-check timeout and overall deadline reach the timers)', async () => {
+    const timers = recordAbortTimeouts();
+    try {
+      const { app } = appWith(checksWith({ database: hanging('database') }));
+      const { value: ready, workMs } = await timeOperation(() => request(app).get('/health/ready'));
+      // Magnitude, deterministic: the configured values are what the timers get, so a 10x deadline cannot pass.
+      expect(timers.calls.filter((ms) => ms === READINESS_DEADLINE_MS)).toHaveLength(1);
+      expect(timers.calls.filter((ms) => ms === READINESS_CHECK_TIMEOUT_MS)).toHaveLength(READINESS_COMPONENTS.length);
+      expect(Math.max(...timers.calls)).toBeLessThanOrEqual(2_500);
+      // Fired, not hung: the slack only tells a fired deadline from a hang, it is not the magnitude pin.
+      expect(workMs).toBeLessThan(READINESS_DEADLINE_MS + HOST_LOAD_SLACK_MS);
+      expect(ready.status).toBe(503);
+      expect(bodyOf(ready).components).toEqual({ ...allOk, database: 'unavailable' });
+    } finally {
+      timers.restore();
+    }
   });
 
   it('AT-US-012-03: the overall deadline bounds checks even when the per-check timeout is longer', async () => {
-    const { app } = appWith(checksWith({ redis: hanging('redis') }), { checkTimeoutMs: 60_000, deadlineMs: 100 });
-    const started = performance.now();
-    const ready = await request(app).get('/health/ready');
-    expect(performance.now() - started).toBeLessThan(1_000);
-    expect(bodyOf(ready).components.redis).toBe('unavailable');
+    const timers = recordAbortTimeouts();
+    try {
+      const { app } = appWith(checksWith({ redis: hanging('redis') }), { checkTimeoutMs: 60_000, deadlineMs: 100 });
+      const { value: ready, workMs } = await timeOperation(() => request(app).get('/health/ready'));
+      // The configured 100 ms deadline is what the timer gets (a deadline x20 would arm 2 000 ms).
+      expect(timers.calls.filter((ms) => ms === 100)).toHaveLength(1);
+      expect(timers.calls.filter((ms) => ms === 60_000)).toHaveLength(READINESS_COMPONENTS.length);
+      expect(workMs).toBeLessThan(100 + HOST_LOAD_SLACK_MS);
+      expect(bodyOf(ready).components.redis).toBe('unavailable');
+    } finally {
+      timers.restore();
+    }
   });
 
   it('AT-US-012-04: a failing audit_chain check reports degraded and readiness stays 200', async () => {

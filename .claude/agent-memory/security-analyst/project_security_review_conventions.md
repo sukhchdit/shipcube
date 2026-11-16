@@ -183,4 +183,13 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 
 - **Widened timing bounds: check magnitude, not only "fired versus hung" (PR-0053).** A bound moved from `deadline + 1 s` to `deadline + slack` can still catch a deadline that never fires while letting a deadline ×10 pass. For each widened upper bound, ask what a ×2 and ×10 mutant of the production constant's *use* does, and whether the constant's value AND its application are pinned elsewhere (a spy on `AbortSignal.timeout` pins the use). I missed this in R1 and the code twin caught it.
 
-Related: [[project-p3-security-conditions]], [[project-p5-pr40-covhook]], [[project-p5-pr34-pr35-harness-traceability]], [[project-p5-wave0-supply-chain]], [[project-p5-pr28-w0act1]], [[project-p5-pr31-staleness-scrub]], [[project-p5-pr33-lane-a-hardening]], [[project-p5-pr32-route-pipeline]], [[project-p5-pr20-logging]]
+- **SQL lexer controls: probe against the server, not only the corpus (PR-0054).** The checklist that found five fail-open differentials in twin lexers that agreed with each other on 200,000 fuzz texts (from `REL_18_STABLE` `scan.l`):
+  - `--` ends at CR as well as LF;
+  - PG white space is only `[ \t\n\r\f\v]`, so NBSP before `$q$` is an identifier;
+  - an `E'..'` string continued across a newline keeps its escapes;
+  - the tool's own rendering of `${}` must equal Prisma `Sql#text` (`$1`, no spaces);
+  - a transaction-local `standard_conforming_strings=off`.
+
+  Prove each with a real Prisma 7 transaction wrapped in the PR's guard on a pinned PG container: a committed row after a rollback, or a session value that survives on a `max: 1` pool. Validate a fix over every real template of the tree (typescript-estree walk), and ReDoS-probe any continuation regex.
+
+Related: [[project-p3-security-conditions]], [[project-p5-pr54-020d]], [[project-p5-pr40-covhook]], [[project-p5-pr34-pr35-harness-traceability]], [[project-p5-wave0-supply-chain]], [[project-p5-pr28-w0act1]], [[project-p5-pr31-staleness-scrub]], [[project-p5-pr33-lane-a-hardening]], [[project-p5-pr32-route-pipeline]], [[project-p5-pr20-logging]]
