@@ -237,9 +237,13 @@ const routes: RouteDescriptor[] = [
     schema: { params: Joi.object({ addressId: Joi.string().required() }) },
     load: async (ctx) => {
       await (ctx.db as FakeTx).$queryRaw`SELECT before image`;
+      if (ctx.input.params['addressId'] === 'stale') throw new AppError('CONFLICT');
       return 'loaded';
     },
-    call: () => 'called',
+    call: (ctx) => {
+      if (ctx.input.params['addressId'] === 'carrier-down') throw new Error('carrier unreachable');
+      return 'called';
+    },
     handler: async (ctx) => {
       await insertBusiness(ctx.db, String(ctx.input.params['addressId']));
       return { status: 200, body: { ok: true } };
@@ -484,6 +488,21 @@ describe('[REQ-AUDIT-010] results returned (not thrown) by the handler', () => {
     expect(businessRows()).toEqual([]);
     expect(entries()).toEqual([
       expect.objectContaining({ outcome: 'FAILED', entityId: 'a-5', details: { status: 500, code: 'INTERNAL_ERROR' } }),
+    ]);
+  });
+
+  it('[REQ-AUDIT-010] a mutation that fails in its load (409) or call (500) phase gets its FAILED entry in a transaction of its own', async () => {
+    expect((await send('PUT', '/api/v1/address-book/stale/import')).status).toBe(409);
+    expect((await send('PUT', '/api/v1/address-book/carrier-down/import')).status).toBe(500);
+    expect(businessRows()).toEqual([]);
+    expect(entries()).toEqual([
+      expect.objectContaining({ action: 'UPDATE', outcome: 'FAILED', entityId: 'stale', details: { status: 409, code: 'CONFLICT' } }),
+      expect.objectContaining({
+        action: 'UPDATE',
+        outcome: 'FAILED',
+        entityId: 'carrier-down',
+        details: { status: 500, code: 'INTERNAL_ERROR' },
+      }),
     ]);
   });
 

@@ -8,7 +8,7 @@
  *  3. `handler` plus the audit hook in ONE `withTenantTx`, the only write transaction, committed (the hook records
  *     the route's entry and runs the transaction's one audit flush as its last database work, TASK-029);
  *  3a. a VIEW / DOWNLOAD route's entry in its own short transaction, before anything is sent (fail closed for
- *     SENSITIVE, 503 AUDIT_UNAVAILABLE); after a failed step 3 of a mutating route, its FAILED entry (best effort);
+ *     SENSITIVE, 503 AUDIT_UNAVAILABLE); after a failed step 1, 2 or 3 of a mutating route, its FAILED entry (best effort);
  *  4. send the handler's result (a stream result is completed here, after COMMIT, under the same signal and deadline;
  *     TASK-044 owns its framing);
  *  5. `afterCommit` (optional), scheduled once the write committed (also when sending or the stream fails afterwards),
@@ -241,22 +241,23 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
   const runner = options.tenantTx;
   const tenant = tenantContextOf(request.principal, request.correlationId);
   const { load, call } = route;
-  const loaded =
-    load === undefined
-      ? undefined
-      : await runner.withTenantTx(tenant, async (db) => await load(Object.freeze({ ...request, db })), { readOnly: true });
-  let called: unknown;
-  if (call !== undefined) {
-    const signal = lifetime.signal();
-    // A client already gone (during load, authn or validation) gets no external effect and no write (PR #44 R1-m1).
-    signal.throwIfAborted();
-    called = await abortable(call(Object.freeze({ ...request, signal }), loaded as never), signal);
-  }
   let result: RouteResult;
   try {
+    const loaded =
+      load === undefined
+        ? undefined
+        : await runner.withTenantTx(tenant, async (db) => await load(Object.freeze({ ...request, db })), { readOnly: true });
+    let called: unknown;
+    if (call !== undefined) {
+      const signal = lifetime.signal();
+      // A client already gone (during load, authn or validation) gets no external effect and no write (PR #44 R1-m1).
+      signal.throwIfAborted();
+      called = await abortable(call(Object.freeze({ ...request, signal }), loaded as never), signal);
+    }
     result = await runner.withTenantTx(tenant, (db) => write(db, Object.freeze({ loaded, called })));
   } catch (error) {
-    // REQ-AUDIT-010: the business transaction rolled back; its FAILED entry goes in a transaction of its own.
+    // REQ-AUDIT-010: the request failed after authorisation (in load, call or the handler transaction, which rolled
+    // back); its FAILED entry goes in a transaction of its own.
     await audit.afterFailure(request, error, tenant);
     throw error;
   }
