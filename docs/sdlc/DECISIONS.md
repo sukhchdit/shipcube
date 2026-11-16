@@ -2580,3 +2580,11 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **15** The branch keeps its dispatched name (`…-automatic-audit-capture`), not the sheet's.
 - **Follow-up (MEDIUM, latent) → TASK-028:** production `startApi` composition has no tokeniser/ipIndex/UA parser, so any audited route or PERMISSION_DENIED in a deployed process fails closed with 500 `TOKENISER_UNAVAILABLE`. Wire them through `AppDependencies` into `createAuditCapture` before the first audited module route; the UA parser owner to be confirmed by TASK-028. Other follow-ups: TASK-031 (old/new diffs, reason), TASK-030 (per-stream CTE), TASK-033 (T0 residual backstop), TASK-047 (SEC-17/19 on the job port), qa-lead (activate the audit-generator suite; move SEC-TC-74 to required_cases).
 - **Reversibility:** High.
+
+### D-TASK020-95..98 · 2026-11-16 · senior-developer (recorded by orchestrator) · TASK-020 020-D fix cycle 1 (PR #54 @f00cf5b)
+- **95** C1 (b): instead of copying PostgreSQL's byte rules, any non-ASCII character outside a string, quoted identifier or comment makes the text `unreadable` (fail closed); dollar tags are ASCII only (R1-M1's alternative). Application SQL is ASCII.
+- **96** C1 (e): a literal-name allow-list for the literal-`true` setter (`app.*`, `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`); `standard_conforming_strings`/`backslash_quote` refused anywhere. The security record's preferred first-keyword allow-list (F5) is not taken this cycle (r2 security rules on it); PR54-SEC-02 (b)(c) remain follow-ups due before TASK-073's first raw statement.
+- **97** The C2 PostgreSQL case proves refusal via "call and handler never ran" + a `pg_locks` probe (the `load` tx is read-only, so a row count is not possible); cursor absence rests on the TenantDb unit test.
+- **98** Main (PR #53) was merged before retaking evidence instead of a third blind rerun.
+- **Flake triage (closes the D-ORCH-107 question):** the 485dcbb FAILs were not regressions (all 9 suites pass in isolation, 232/232). Causes: Jest 5 s timeouts under CPU saturation (fixed by #53, now merged in); Windows 0xC0000142 child-process start failures under load (host capacity; addressed by serializing heavy runs); a `prisma/generated` reader race in `prisma-client-package.test.ts` → TASK-288.
+- **Reversibility:** High.
