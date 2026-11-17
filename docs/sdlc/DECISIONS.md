@@ -3100,3 +3100,23 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **New INFO PR60-SEC-06:** `fillPath` in `tests/generated/rbac/runner.ts` does not fill Express 5 `*name` wildcards that org-scope now enumerates, so a wildcard tenant route's SEC-TC-01 case would be vacuous (none exist today). → TASK-060: a shared regex, or the R-03 rule refuses `*orgId` on tenant routes.
   - **Still open:** PR60-SEC-01 (TASK-283 before TASK-060; the edge is pending the next fold), -03/-04 (TASK-052/055), -05 (TASK-283).
 - **Reversibility:** High.
+
+### D-ORCH-COORD-02 · 2026-11-17 · sdlc-orchestrator (session B) · Late duplicate PR #61 security pass r1b: two new items for session A's fix cycle 1
+- **Verdict:** session B's security pass r1b came back PASS_WITH_FOLLOW-UPS at `e526b11` and agrees with D-SEC-PR61-01 on PR61-SEC-01..08. It adds two items (proposed **D-SEC-PR61-02**):
+  - **PR61-SEC-09 (LOW, CWE-212):** secrets inside personal values reach the vault.
+    - **Where:** `redact.ts:68`, `:86-89`; `entry.ts:578-581`. `redactRecord` tokenises a non-string PERSONAL or SENSITIVE_PERSONAL value whole, as `JSON.stringify(value)`, checking only the whole text for secrets. The entry's `reason` is tokenised without the secret check.
+    - **Probe:** `{password}`, `{api_key}` and a nested Bearer value were all vaulted.
+    - **Fix:** `JSON.stringify(redactSecrets(value))`, plus `isSecretText` on `reason`.
+    - **Owner:** fix cycle 1, otherwise before TASK-031.
+  - **PR61-SEC-10 (INFO, CWE-693):** C10 checks only that each §10.4 ciphertext/HMAC column has its key-id sibling, not its class.
+    - **Where:** `tools/db/classification.ts:119-132`, `:159-163`.
+    - **Fix:** pin the data-model class for each `KEY_ID_SIBLINGS` row.
+    - **Owner:** fix cycle 1 if cheap, otherwise principal-architect amends data-model §4.6 and names the carrying task.
+- **Additions to PR61-SEC-01:**
+  - The audit denylist misses 14 of the platform's own credential names that the log redactor catches: `__Host-*`, `X-Reauth-Proof`, `manual_key`, `privateJwk`, `jwk`, `code_verifier`, `proof`, `sid`, `session`.
+  - Neither redactor catches `cc_number`, `ccNumber`, `codes`, `mfa_seed`, `pw`, `whsec` or `csrf`; add them to the test corpus.
+  - The scheme-word rule needs a token-shaped credential after `Basic`/`Bearer`, to avoid over-redaction (code R1-m3 (a)).
+  - AT-US-091-02 draws its keys from the module's own `SECRET_KEY_EXAMPLES`, so it cannot find a spelling gap.
+- **Record:** `../.orch/records/PR-0061/PR-0061-TASK-028-security-review.md` is the `18cd325` record verbatim plus a "Round 1b" section with its own Head (`e526b11`) and Verdict rows; it passes main's checker in simulation. Session A may file it or discard it; the merge path does not change.
+- **Next:** the delta round after fix cycle 1 re-runs probes P2/P2b/P3 and lint probe P4. Probe scripts are in session B's scratchpad `review/PR-61-sec/probes/`.
+- **Reversibility:** High.
