@@ -2682,3 +2682,13 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Decision:** at most two review agents run concurrently. PR #56's r2 code and security delta at `9746b2f` are queued behind PR #55's r2 pair.
 - **Why:** the session hit the 5-hour usage limit three times on 2026-11-16/17 with 6–7 concurrent agents; each stop costs a resume round.
 - **Reversibility:** High.
+
+### D-SEC-PR55-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #55 security delta r2 at `72dcf5b` = PASS_WITH_FOLLOW-UPS (record `fc31652`)
+- **Decision:**
+  - **C1 closed:** PR55-SEC-01, -02, -09 and -08 (a).
+  - **C2 closed:** PR55-SEC-03, with the void set as D-TASK286-06a.
+  - The live stage-1 `ci.yml` is covered for PR55-SEC-01 as filed.
+  - **New PR55-SEC-11 (LOW, follow-up):** the stage-1 workflow env is a deny-list, so `DOCKER_HOST`, `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `GIT_CONFIG_*` and `NPM_CONFIG_SCRIPT_SHELL` pass, and the stage-1 scans steps stay pattern-pinned. Fix: an exact-keys line for stage 1 in the TASK-286 workflow PR if cheap, else with the TASK-287 retirement; the lane-c/nightly deny-list goes with 015-C.
+  - **Open INFO:** 04 and 06 accepted; 05 and 10 → TASK-287; 07 → orchestrator.
+  - **Merge:** on MERGE-READY for the exact final head plus code-review approval, by **2026-11-18T02:31Z** (24 h rule) or after a fresh full run, with P1 re-checked. The workflow PR must install the new fixture blob (`4597259`).
+- **Reversibility:** High.
