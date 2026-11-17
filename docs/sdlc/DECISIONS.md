@@ -3005,3 +3005,12 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **TASK-288 complete.** TASK-291 now waits only on TASK-289 (PR #60). TASK-291 also inherits code-review R3-n1 (bounded EBUSY hook) and R3-n3 (orphaned IDLE children).
 - **Host hygiene:** reviewer hang mutants may have left idle `node -e setInterval` processes. Agents were denied process listing by the classifier and did not work around it; cleanup is offered to the user.
 - **Reversibility:** Medium (merged; revertible).
+
+### D-ORCH-125 · 2026-11-17 · sdlc-orchestrator · Lane-B runs move to a serial orchestrator queue (host memory)
+- **Decision:** agents no longer start `quality:heavy`. They prepare a clean detached evidence worktree at their final head and report it; the orchestrator runs lane B serially (one at a time, waiting for 0 testcontainers and ≥ 7 GB free) and hands each stamp back to the owning agent, which commits the evidence and makes its single push.
+- **First queue:** PR #60 fc1 (`f2a7411`), TASK-028 (`e526b11`), TASK-290 (`ba921da`).
+- **Why:** with 4 developers plus reviewers on one 32 GB Windows host, concurrent heavy runs caused Testcontainers losses (P1001), build-prerender timeouts and loopback flakes, and Claude Code's low-memory reaper killed three agents' runs. Every affected PR passed its local gates.
+- **Also recorded:**
+  - **D-TASK289-13:** problem-member `instance` is compared, not volatile (narrows D-TASK289-02).
+  - **TASK-028** decisions D-TASK028-01..10 and **TASK-290** decisions D-TASK290-01..06 are proposed in their handoffs and will be logged when their PRs open.
+- **Reversibility:** High.
