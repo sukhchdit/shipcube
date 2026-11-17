@@ -2961,3 +2961,19 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Correction note:** PR56-SEC-14, listed under TASK-040 in the D-ARCH-143 title, was closed in PR #56 by D-TASK029-25a; the card and the rulings doc already say so.
 - **Commit hygiene:** orchestrator commit `e1cbf53` swept in the architect's then-uncommitted D-ARCH-139..147 (verified identical to intent). Rule: before committing DECISIONS.md, check `git status -s docs/sdlc`; if it is dirty from another agent's in-flight work, wait.
 - **Reversibility:** High.
+
+### D-SEC-PR60-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #60 (TASK-289) security r1 = PASS_WITH_FOLLOW-UPS at `df31b32` (record `cb3bf8d`)
+- **Decision:** 0 Critical/High/Medium; 1 LOW, 4 INFO.
+  - **Closed:** PR48-SEC-01; PR48-SEC-03 for every direct import form (22 forms linted); PR48-SEC-05 items 1 and 3 (a); PR48-SEC-08. Matrix regeneration: all 4,921 base cells identical.
+  - **PR60-SEC-01 (LOW, CWE-693):** a helper in `test/` or `__tests__/` under `apps/*/src` or `packages/*/src` can launder the oracle into production, and both folders ship in the image. → TASK-283 (D-ARCH-136 (b) boundaries arm, plus a laundering fixture and the `test`/`__tests__` prune). **Merge prerequisite: TASK-283 before TASK-060** (edge to be added at the next sheet fold; until then this entry is the owning record).
+  - **INFO:**
+    - PR60-SEC-02 (= code R1-m1) → PR #60 fc1;
+    - PR60-SEC-03 → TASK-052 tripwire;
+    - PR60-SEC-04 (combined declared+foreign rows) → TASK-052/055;
+    - PR60-SEC-05 (`./matrix` ships in the images) → TASK-283 (`SKIPPED_EXPORTS` or rename to `./testing`).
+  - The reviewer's flag (b) (dynamic import in `prisma/seed`/`tools`) is accepted.
+- **Reversibility:** High.
+
+### D-ORCH-122 · 2026-11-17 · sdlc-orchestrator · PR #60 fix cycle 1/3 (test-only) doubles as the stage-2 code proof
+- **Decision:** PR #60's branch predates PR #59, so it needs one fresh full stage-2 run anyway. Fix cycle 1 takes R1-m1/SEC-02, R1-n2, R1-n4, R1-n6 (plus n1/n5 if cheap) in that single code push (D-ORCH-119). Then a narrow r2 from both reviewers.
+- **Reversibility:** High.
