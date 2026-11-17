@@ -2796,3 +2796,11 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **26** The FAILED skip is identity-based: only the request's own disconnect abort instance is skipped; deadline aborts and every other failure write FAILED (closes PR56-SEC-11). `RouteReturnedError.result` is a private field.
 - **Flake seen:** loopback "other side closed" in `tests/generated/rls/api-cases.test.ts` under load → W0-FLAKE-3 (D-ORCH-113 scope (d)).
 - **Reversibility:** High.
+
+### D-SEC-PR56-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #56 security deltas r2 (@9746b2f, record f204bb2) and r3 (@0ecd317, record b5f2d9f) → PASS_WITH_FOLLOW-UPS
+- **Decision:**
+  - **r2:** SEC-09/01/02/04/08 closed; new C1 = PR56-SEC-10 (MEDIUM) and PR56-SEC-11 (LOW).
+  - **r3:** C1 and SEC-11 closed (A1–A8 re-run; the deadline-then-disconnect case still writes FAILED); the private `result` field is verified non-leaking. **From security, the PR can merge.**
+  - **New PR56-SEC-14 (INFO):** a `transaction:'none'` route returning ≥ 400 still schedules afterCommit, which contradicts the `define-route.ts:211` JSDoc. → Next PR touching `tx/execute.ts`, unless code review r2 takes it here.
+  - **Open with owners:** SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next eslint.config PR), SEC-13 (TASK-033).
+- **Reversibility:** High.
