@@ -2871,3 +2871,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - TASK-052: the tripwire compares `STUBBED_CREDENTIAL_KINDS` with the mounted authenticators.
 - **Lane A:** the first run failed commitlint on the PR title; the title was fixed and the PR closed/reopened (no new commit). This counts against the push budget as one extra run.
 - **Reversibility:** High.
+
+### D-SEC-PR57-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #57 security delta r2 = PASS_WITH_FOLLOW-UPS at `4f1fbd5` (record `b53d254`)
+- **Decision:**
+  - SEC-01 and SEC-04 are closed. SEC-03 is closed with residuals accepted (the put-back window; the owner write is not `wx`).
+  - **C1 independently verified:** run 20261117T0646Z_4f1fbd5 with JUnit hashes checked.
+  - **New PR57-SEC-05 (INFO, CWE-835) = code-review r2 R2-m1 (MINOR):** a failed stale takeover hot-spins the writer past its deadline. It is a regression from fc1. Both reviewers recommend fixing it here.
+  - SEC-02 is unchanged (TASK-287). TASK-287 note: exclude `node_modules/.cache/shipqube-test-locks/` from any CI cache.
+- **Reversibility:** High.
+
+### D-ORCH-120 · 2026-11-17 · sdlc-orchestrator · PR #57 fix cycle 2/3 (R2-m1 = PR57-SEC-05); PR #60 security r1 dispatched
+- **PR #57 code review r2** (record `5891125`) = APPROVED_WITH_NITS. R2-m1 = PR57-SEC-05 is fixed in fix cycle 2, together with n1–n4. C1 is repeated at the new head (fs-lock gates client loading). Then a narrow r3 from both reviewers.
+- **Push-budget note:** the two r2 records landed as two pushes (`5891125`, then `b53d254`), so the reviewers did not combine. Going forward, the second reviewer stacks on the first only if the first has not pushed yet; otherwise it waits for the orchestrator's go.
+- **PR #60:** security r1 dispatched; code review r1 follows when the code-review slot frees.
+- **Reversibility:** High.
