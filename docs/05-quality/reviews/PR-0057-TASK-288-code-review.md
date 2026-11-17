@@ -132,3 +132,119 @@ In the first sequential pass the shim order case also failed under M4 and M11. R
 - R1-m1: the lock's mutual exclusion can be broken by a take-over race (test integrity, CWE-367 TOCTOU). Test-only, no production path.
 - The `.cjs` shim is reachable only through `jest.config.ts` (`moduleNameMapper`). No production path resolves it; images prune `tools/`. Please confirm.
 - `jest.config.ts` is a full-trigger and security-owned path: the skipped `security-integration` job needs a ruling (§4).
+
+---
+
+# Round 2 (delta): fix cycle 1
+
+Head reviewed: `4f1fbd5` (full SHA `4f1fbd561cf8845c350c4e8691d2a030bbed3bab`). Code commits: `67055a3` (fix cycle 1) and `a67db34` (put-back pin). `4f1fbd5` is lane B evidence only, and `30ca878` is the security record r1. Delta reviewed: `git diff d44e022 4f1fbd5`, which changes only `tools/test-support/fs-lock.ts`, `fs-lock.test.ts` and `lock-children.ts` (plus the evidence and the security record).
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: All four r1 MINORs are fixed and pinned. M1 and M5 are now killed: 11 of my 12 r1 mutants die, and M12
+  survives as before (it is the wall-clock case, which D-SEC-PR53-02 excludes). Of 17 new mutants against the fix-cycle
+  code, 12 die, 3 are equivalent and 2 are unpinned branches (NITs). The tombstone take-over removes the r1 failure, where
+  a live lock was destroyed silently: the worst case is now a loud LostTestLockError, plus a microsecond put-back window
+  (R2-n3). One new MINOR: when a stale lock cannot be renamed (Windows EPERM/EBUSY), `withFileLock` spins synchronously
+  with no deadline. I reproduced 24 s at 100 % CPU with zero event-loop ticks against a 2 s deadline. The fix is two lines.
+```
+
+## R2.1 What I verified myself
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` on `4f1fbd5` | exit 0 |
+| ESLint `--max-warnings 0` on the 3 changed files | exit 0 |
+| Prettier `--check` on the 3 changed files | clean |
+| Full `unit` project on `4f1fbd5` | **234 / 234 suites, 5,903 passed, 2 skipped, 0 failed** (181 s) |
+| `fs-lock.test.ts` + `prisma-client-locked.test.ts` in a scratch copy (baseline) | 32 / 32 |
+| Lane A run 44016220270 on `4f1fbd5` | fast-lane **success**. `scans` fails only on the security-record step (the r1 record is not on the head), so `ci-gate` fails. `security-integration` was skipped; security r1 replaces it with condition C1, a local run. |
+| Lane B `20261117T0349Z_a67db34` | bound to the code head `a67db34`; I did not re-run it |
+| PR body | updated: the fix-cycle table, R1-n5 corrected, and R1-n4/n6 explicitly left |
+
+## R2.2 Mutation testing (scratch copy of `4f1fbd5`, `node_modules` junction)
+
+| # | Mutant | Result |
+|---|---|---|
+| M1 | drop the writer recheck after registration | **killed** ([R1-m4 (a)] via the `afterRegister` seam) |
+| M2 | writer does not wait for readers | killed (5) |
+| M3 | reader ignores writers | killed (10) |
+| M4 | no re-entrancy for a reader in the writer's process | killed |
+| M5 | writer counts its own process's readers | **killed** ([R1-m4 (b)]) |
+| M6 / M7 | dead registration kept / counted live | killed / killed |
+| M8 | reader does not take over a stale writer | killed (3) |
+| M9 | release is a no-op | killed (5) |
+| M10 | shim without the lock | killed |
+| M11 | ownerless directory always stale | killed |
+| M12 | sync deadline overshoot | survives (wall-clock; accepted in r1) |
+| N1 | take-over removes the tombstone without checking its owner | killed (put-back case) |
+| N2 | no put-back (the caught live lock is removed) | killed (put-back case) |
+| N3 | drop `assertOwned` after the reader wait | **survives** (R2-n1) |
+| N4 | drop `assertOwned` after `fn` | killed |
+| N5 | `finally` deletes a lock it lost | killed |
+| N6 | ownerless directory never stale | killed |
+| N7 | registration regex loosened to `^(\d+)-` | killed (junk case) |
+| N8 | junk entries deleted | killed (junk case) |
+| N9 | link refusal removed | killed |
+| N10 | lock root back in the OS temp directory | killed |
+| N11 | WRITER child without dead-owner take-over | killed |
+| N12 | `start()` readiness deadline never fires | killed. My first form did not compile; the valid form, a 2e9 ms timer, is killed. |
+| N13 | `isStale` without `pid !== process.pid` | survives, equivalent: its own pid is always alive |
+| N14 | empty readers directory kept | killed |
+| N15 | reader skips the "readers directory vanished" retry | killed (link case) |
+| N16 | registration-write ENOENT throws instead of retrying | **survives** (R2-n2) |
+| N17 | pid parsed with `split('-')` instead of the regex group | survives, equivalent once the strict regex matched |
+
+## R2.3 Windows rename semantics for the tombstone (probes: `rename-probe*.cjs`, `spin-probe.mts` in my scratchpad)
+
+| Probe | Result |
+|---|---|
+| Rename the lock directory while another process holds an fd on `owner` | **EPERM** |
+| Rename it while it is another process's cwd | **EBUSY** |
+| Take-over rename while 3 processes read `dir/owner` in a tight loop (4 s) | **1,666 of 1,921 fail EPERM**. With a 1 ms pause between reads, 15 of 1,447 fail. Each failure is transient and clears on retry. |
+| Put-back rename (`tomb` → the original, now absent, name; nobody reads the private tomb) | 1,687 of 1,687 succeed |
+| Put-back onto a re-created directory, empty or non-empty | **EPERM** on Windows; the code then removes the tomb. On POSIX, `rename` onto an **empty** directory replaces it (see R2-n3). |
+| Stale dead-owner lock that cannot be renamed (another process's cwd), reader `withReadLockSync(…, 2000)` | throws the named timeout at 2,010 ms. The reader path is correct. |
+| Same lock, writer `withFileLock(…, 2000)` | **spun 24 s** with **0** event-loop ticks and entered only when the watchdog killed the cwd holder (R2-m1) |
+
+So `renameSync` failure is common on Windows, and the code's choice to treat EPERM/EBUSY/EACCES as "in use, retry" is right. Only the writer's retry loop is wrong.
+
+## R2.4 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `tools/test-support/fs-lock.ts:283-286` | **Writer hot-spins past its deadline when a take-over fails.** `if (isStale(dir, owner)) { takeOverStale(dir, owner); continue; }` neither sleeps nor checks the deadline. `takeOverStale` returns silently on EPERM/EBUSY/EACCES (`:113`), so the loop runs `mkdir`, then `readOwnerText`, then `rename` with no `await`. The Jest test timeout cannot fire, and the spinner's own owner reads make other takers' renames fail too (R2.3). It is transient under normal contention and unbounded while anything keeps a handle in the directory (reproduced: 24 s against a 2 s deadline). r1 used `rmSync`, which threw on the same condition, so this is a regression introduced by the fix. | After `takeOverStale`, `continue` only if the directory is gone (`lstat` ENOENT). Otherwise fall through to the deadline check and the `POLL_MS` sleep. Pin it with a case where the stale lock cannot be renamed: on Windows an idle child with `cwd` set to the lock directory; on POSIX use a seam, e.g. an optional `rename` hook on `takeOverStale`. The case expects the named timeout error. |
+| R2-n1 | NIT | `tools/test-support/fs-lock.ts:299` | `assertOwned(dir, 'while waiting for readers')` is unpinned (N3 survives). The after-`fn` check still fails the run, but only after `fn` has run on a lost lock. | Add a case where a READER child holds for 400 ms; while the writer waits for it, the test replaces the lock with an idle child's owner. Expect `LostTestLockError` and that `fn` never ran. |
+| R2-n2 | NIT | `tools/test-support/fs-lock.ts:204` | The ENOENT retry when the readers directory disappears between the check and the write is unpinned (N16 survives). | Optional: a `beforeWrite` hook on the existing `ReaderHooks` seam that removes the directory. |
+| R2-n3 | NIT (residual) | `tools/test-support/fs-lock.ts:102-125`, JSDoc `:11-15` | **Narrowed, not closed.** (i) Between the two renames, a live lock that was caught by mistake is invisible: a reader can register and enter, and if the put-back then succeeds, nobody notices. (ii) On POSIX, a put-back onto an *empty* re-created directory replaces it. The new writer then writes its owner into the restored directory, and the old writer gets `LostTestLockError` (loud). (iii) An ownerless judgement (`seen === undefined`) that catches a fresh writer between its `mkdir` and its owner write removes that directory, and that writer's owner write fails with a bare ENOENT. All three need a stale lock, two concurrent takers and a deschedule inside a microsecond window. | Document the residual in the JSDoc ("take-over narrows the race to the put-back window; a lost lock is reported, a reader in that window is not"). If it ever matters: serialise takers with a short-lived `${dir}.takeover` mutex and re-read the owner under it, so no rename is needed. |
+| R2-n4 | NIT | `tools/test-support/fs-lock.ts:7-8`, `:63-65` | The lock root follows `node_modules`. A checkout whose `node_modules` is a junction into another checkout (reviewer scratch copies, or any evidence worktree built that way) shares that checkout's locks while it has its own `prisma/generated`. This is safe, it only over-serialises, but "worktrees do not block each other" holds only for worktrees with their own `node_modules`. | Qualify the JSDoc sentence. |
+
+## R2.5 Round 1 closure
+
+| r1 item | Status |
+|---|---|
+| R1-m1 take-over TOCTOU | **Closed (narrowed).** The tombstone with owner verification plus put-back replaces blind removal. The writer re-checks `owner === pid` twice and never deletes a lost lock. Residual: R2-n3. Pinned by N1, N2, N4 and N5. |
+| R1-m2 registration names | **Closed.** Names are `<pid>-<uuid>` with a strict regex, and junk is ignored, not deleted. The two-instance case runs the probe I filed (`isolateModulesAsync` × 2) and stays green. |
+| R1-m3 WRITER take-over / `start()` deadline | **Closed.** Pinned by N11 and N12. The stale-lock scenario I reproduced in r1 is now a case. |
+| R1-m4 M1 / M5 survivors | **Closed.** Both are killed through the `tryRegisterReader` hook and the read-then-write case. |
+| R1-n1 JSDoc path | Closed (`:226`). |
+| R1-n2 `isPid` | Closed. The JSDoc is corrected; `withFileLock` now goes through `isStale`. |
+| R1-n3 liveness | **Closed.** Blocking registrations are named in the timeout error, and an ownerless directory goes stale after `OWNERLESS_STALE_MS` = 30 s (mtime), pinned by M11 and N6. Pid-reuse waits remain a documented liveness residual. |
+| R1-n4 shim target hard-coded | Deferred to the next touch (PR body). **Accepted.** |
+| R1-n5 PR body | Closed. |
+| R1-n6 per-process re-entrancy / `prisma/tests` pseudo-readers | The JSDoc now states the rule (`:26-28`, including the `workerThreads` note). The pseudo-reader move is deferred to the next touch. **Accepted.** |
+| PR57-SEC-01 (security r1): lock in the shared temp directory, link-following cleanup | Lock root moved to `<checkout>/node_modules/.cache/shipqube-test-locks` (mode 0o700). `lstat` refuses a readers path that is a link or not a directory, before any read or delete. Pinned by N9 and N10. Final ruling: security-analyst (delta running). |
+
+## R2.6 Merge conditions (replace §6)
+
+1. The security delta record on the merge head; the record step in `scans` fails until it lands. Security r1 condition C1 (a local `integration`, `catalog-c1-c14` and `rls-cross-tenant` run at the merge head) stays with the security record.
+2. R2-m1: fix it in this PR (two lines plus one case), or record the routing in DECISIONS.md. **Recommendation:** fix it here, because it is a regression of this fix cycle and it defeats a deadline the JSDoc promises. A fix needs a new lane A run and lane B evidence.
+3. The P1 check at merge (unchanged from §6.3).
+
+Full `unit` project on `4f1fbd5` (my run): **234 / 234 suites, 5,903 passed, 2 skipped, 0 failed** (181 s).
+
+## R2.7 Good patterns worth keeping
+
+- The seams (`tryRegisterReader` hooks, `takeOverStale`) are exported "for the lock tests only" and documented as such. They turn a race that only showed up under stress into deterministic cases.
+- `LostTestLockError` and `LockChildTimeoutError` both name the lock, so a failure explains itself.
+- Junk in the readers directory is ignored rather than deleted, which is the right default for a directory another process could write.
