@@ -15,8 +15,11 @@
  * suites prove. Only a production-closure change selects (ADR-0023 am. L item 2 (b), D-ARCH-127; ruling
  * wave-0-ci-minutes section 3 (3)): the merge-base and head lockfiles are parsed from git objects and their `packages`
  * entries compared; an added, removed or changed entry selects when it is the root entry `""` or is not dev-only on
- * every side where it exists (`dev: true` or `devOptional: true`), so a dev -> prod move selects. Dev-only bumps (Jest,
- * ESLint, TypeScript, Prettier, ...) change nothing the suites prove; lanes B and C still run them. A lockfile that is
+ * every side where it exists, so a dev -> prod move selects. Dev-only means `dev: true` and nothing else: a
+ * `devOptional: true` entry is a dev dependency that is ALSO an optional dependency of a production package (the Prisma
+ * CLI, `@prisma/engines`, `@prisma/config`, whose CLI the integration harness uses to apply the migrations the suites
+ * prove), so it counts as production closure (D-ARCH-133, ADR-0023 am. M item 1; PR #46 code review R2-m2; TASK-286).
+ * Dev-only bumps (Jest, ESLint, TypeScript, Prettier, ...) change nothing the suites prove; lanes B and C still run them. A lockfile that is
  * new, deleted, not JSON or has no `packages` object, or a git error, selects (fail closed).
  *
  * Fail closed toward running the job: an unknown range (no base commit, a base that is not in the clone) or a git
@@ -202,12 +205,13 @@ function canonical(value) {
 
 /**
  * @param {unknown} entry
- * @returns {boolean} true for a `packages` entry flagged `dev: true` or `devOptional: true`
+ * @returns {boolean} true for a `packages` entry flagged `dev: true`; a `devOptional: true` entry is production closure
+ *   (D-ARCH-133: an optional dependency of a production package, e.g. the Prisma CLI the integration harness runs)
  */
 function devOnly(entry) {
   if (entry === null || typeof entry !== 'object') return false;
   const record = /** @type {Record<string, unknown>} */ (entry);
-  return record['dev'] === true || record['devOptional'] === true;
+  return record['dev'] === true;
 }
 
 /**

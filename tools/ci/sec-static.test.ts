@@ -280,7 +280,8 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       directory: '/',
       schedule: { interval: 'monthly' },
       cooldown: { 'default-days': '7' },
-      'open-pull-requests-limit': '3',
+      // D-ORCH-078 P3 (TASK-286): one open npm group PR at a time.
+      'open-pull-requests-limit': '1',
       ignore: [{ 'dependency-name': '@platform/*' }, { 'dependency-name': 'typescript', 'update-types': ['version-update:semver-major'] }],
       groups: { 'npm-minor-and-patch': { 'update-types': ['minor', 'patch'] } },
       'commit-message': { prefix: 'chore(deps)' },

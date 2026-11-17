@@ -123,7 +123,22 @@ describe('check-workflow-policy: negative fixtures', () => {
     ],
     ['[RR-8 (i)] GH_TOKEN in a job env fails (token on lane-scope steps only)', 'ci-gh-token-job-env.yml', 'gh-token'],
     ['[RR-8 (i)] GH_TOKEN on a scans step that does not run "$GATE_LANE_SCOPE" fails', 'ci-gh-token-other-step.yml', 'gh-token'],
-    ['[RR-8 (ii)] actions: read on fast-lane fails (only scans and ci-gate)', 'ci-actions-read-fast-lane.yml', 'permissions'],
+    ['[RR-8 (ii)] stage 1: actions: read on fast-lane fails (only scans and ci-gate)', 'ci-actions-read-fast-lane.yml', 'permissions'],
+    [
+      '[RR-8 (ii)] [TASK-286] stage 2: actions: read on security-integration fails (only fast-lane and ci-gate)',
+      'ci-actions-read-security-integration.yml',
+      'permissions',
+    ],
+    ['[PR46-SEC-15] Y19: top-level pull-requests: read fails', 'ci-pull-requests-read-top-level.yml', 'permissions'],
+    [
+      '[PR46-SEC-15] stage 1: pull-requests: read on ci-gate fails (only scans)',
+      'ci-pull-requests-read-ci-gate-stage-1.yml',
+      'permissions',
+    ],
+    ['[PR46-SEC-15] Y21: pull-requests: read on a lane-c.yml job fails', 'lane-c-pull-requests-read.yml', 'permissions'],
+    ['[PR42-SEC-18] N6: an expression-valued NODE_OPTIONS fails', 'node-options-expression.yml', 'node-options-preload'],
+    ['[PR42-SEC-18] N7: BASH_ENV beside the heap line on a lint step fails', 'lint-env-bash-env.yml', 'lint-env'],
+    ['[PR42-SEC-18] a lane-c.yml lint step without the pinned heap env fails', 'lane-c-lint-env-missing.yml', 'lint-env'],
     [
       '[RR-8 (ii)] [R2-n1 P10] top-level actions: read fails (never for every job of a workflow)',
       'ci-actions-read-top-level.yml',
