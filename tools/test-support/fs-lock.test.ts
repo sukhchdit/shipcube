@@ -14,6 +14,7 @@ import {
   acquireReadLockSync,
   lockPath,
   lockRoot,
+  lockTestHooks,
   LostTestLockError,
   OWNERLESS_STALE_MS,
   readersPath,
@@ -367,5 +368,115 @@ describe('PR #57 fix cycle 1: lock location, registrations, take-over and the un
     await expect(started).rejects.toThrow(LockChildTimeoutError);
     await expect(started).rejects.toThrow(`lock child could not take ${lockPath(name)} within 500 ms`);
     rmSync(lockPath(name), { recursive: true, force: true });
+  });
+});
+
+describe('PR #57 fix cycle 2: a failed take-over waits and keeps its deadline; the unpinned retry and ownership branches', () => {
+  const own = (name: string, pid: number): void => {
+    mkdirSync(lockPath(name));
+    writeFileSync(join(lockPath(name), 'owner'), String(pid));
+  };
+  /** Counts event-loop ticks while it runs: a writer that hot-spins synchronously never lets one through. */
+  async function withTicks<T>(work: () => Promise<T>): Promise<{ settled: PromiseSettledResult<T>; ticks: number }> {
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+    }, 20);
+    try {
+      const [settled] = await Promise.allSettled([work()]);
+      return { settled, ticks };
+    } finally {
+      clearInterval(timer);
+    }
+  }
+
+  it('[R2-m1 / PR57-SEC-05] a stale lock that cannot be renamed (EBUSY) makes the writer wait and reject on its deadline, yielding', async () => {
+    const name = freshName();
+    own(name, await deadPid());
+    const original = lockTestHooks.rename;
+    lockTestHooks.rename = () => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked, rename'), { code: 'EBUSY' });
+    };
+    try {
+      const { settled, ticks } = await withTicks(() => withFileLock(name, () => 'ran', 1_000));
+
+      expect(settled.status).toBe('rejected');
+      expect(String((settled as PromiseRejectedResult).reason)).toContain(
+        `timed out after 1000 ms waiting for test lock ${lockPath(name)}`,
+      );
+      expect(ticks).toBeGreaterThan(0);
+    } finally {
+      lockTestHooks.rename = original;
+    }
+    expect(takeOverStale(lockPath(name), readFileSync(join(lockPath(name), 'owner'), 'utf8'))).toBe(true); // control: a free rename takes it
+  });
+
+  it('[R2-m1] takeOverStale reports whether it took the directory', async () => {
+    const name = freshName();
+    own(name, await deadPid());
+    const seen = readFileSync(join(lockPath(name), 'owner'), 'utf8');
+    const original = lockTestHooks.rename;
+    lockTestHooks.rename = () => {
+      throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+    };
+    try {
+      expect(takeOverStale(lockPath(name), seen)).toBe(false);
+    } finally {
+      lockTestHooks.rename = original;
+    }
+    expect(takeOverStale(lockPath(name), seen)).toBe(true);
+    expect(existsSync(lockPath(name))).toBe(false);
+  });
+
+  if (process.platform === 'win32') {
+    it('[R2-m1 / PR57-SEC-05] Windows: a stale lock that is a live process cwd cannot be renamed; the writer rejects on its deadline', async () => {
+      const name = freshName();
+      own(name, await deadPid());
+      await children.idleStarted(lockPath(name));
+
+      const { settled, ticks } = await withTicks(() => withFileLock(name, () => 'ran', 1_000));
+
+      expect(settled.status).toBe('rejected');
+      expect(String((settled as PromiseRejectedResult).reason)).toContain(
+        `timed out after 1000 ms waiting for test lock ${lockPath(name)}`,
+      );
+      expect(ticks).toBeGreaterThan(0);
+    });
+  }
+
+  it('[R2-n1] a writer whose lock is taken while it waits for readers fails before fn runs', async () => {
+    const name = freshName();
+    const { ready, released } = children.markers();
+    await children.start(READER, [readersPath(name), ready, released, '60000'], ready);
+    let fnRan = false;
+
+    const writing = withFileLock(
+      name,
+      () => {
+        fnRan = true;
+        return 'ran';
+      },
+      30_000,
+    );
+    // The writer now holds its directory and waits for the live reader: steal the lock, then let the reader go.
+    while (readFileSync(join(lockPath(name), 'owner'), { encoding: 'utf8', flag: 'r' }) !== String(process.pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    rmSync(lockPath(name), { recursive: true, force: true });
+    own(name, children.idle());
+    children.killAll(); // the reader dies; its registration is removed and the reader wait ends
+
+    await expect(writing).rejects.toThrow(LostTestLockError);
+    expect(fnRan).toBe(false);
+    rmSync(lockPath(name), { recursive: true, force: true });
+  });
+
+  it('[R2-n2] a readers directory that disappears right before the registration write is a retry, not a crash', () => {
+    const name = freshName();
+
+    const release = tryRegisterReader(name, { beforeWrite: () => rmSync(readersPath(name), { recursive: true, force: true }) });
+
+    expect(release).toBeUndefined();
+    expect(withReadLockSync(name, () => 'entered', 5_000)).toBe('entered');
   });
 });

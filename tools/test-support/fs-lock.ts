@@ -5,14 +5,26 @@
  * Testcontainers harness runs the Prisma CLI.
  *
  * Location (PR57-SEC-01): every lock lives under `<checkout>/node_modules/.cache/shipqube-test-locks/`, never in the
- * shared temp directory, so no other user can plant a link at a predictable path; worktrees do not block each other.
+ * shared temp directory, so no other user can plant a link at a predictable path. The root follows `node_modules`: worktrees
+ * with their own `node_modules` do not block each other, while a checkout whose `node_modules` is a junction into another
+ * checkout shares that checkout's locks (safe, it only over-serialises; PR #57 R2-n4).
  *
  * Writers ({@link withFileLock}) are exclusive. A directory is the lock (mkdir is atomic on NTFS and POSIX); it holds the
  * owner's pid. A lock whose owner process is gone, or that has had no owner file for {@link OWNERLESS_STALE_MS}, is taken
  * over atomically: it is renamed to a unique tombstone first, and only if the tombstone still holds the owner that was
  * judged dead is it removed (PR #57 R1-m1, PR57-SEC-03); otherwise it is put back. A writer re-checks that it still owns
  * its directory after the reader wait and after its work, fails with {@link LostTestLockError} if it does not, and never
- * removes a directory it no longer owns.
+ * removes a directory it no longer owns. A take-over that cannot rename (Windows EPERM/EBUSY while another process holds a
+ * handle or its cwd in the directory) leaves the lock in place, and the taker waits and keeps its deadline (PR #57 R2-m1,
+ * PR57-SEC-05). The owner file is created exclusively, so a writer never overwrites another writer's owner.
+ *
+ * Residual windows (PR #57 R2-n3, PR57-SEC-03 accepted): take-over narrows the race, it does not close it. All need a stale
+ * lock, two concurrent takers and a deschedule inside a microsecond window: (i) between the two renames of a put-back, the
+ * caught live lock is invisible, so a reader can enter while its writer works, and nobody notices; (ii) on POSIX a put-back
+ * onto an empty re-created directory replaces it, and the writer that re-created it later fails with LostTestLockError;
+ * (iii) an ownerless judgement that catches a fresh writer between its mkdir and its owner write removes that directory, and
+ * that writer's owner write fails with ENOENT. A lost lock is reported; a reader in window (i) is not. If it ever matters:
+ * serialise takers with a short-lived `<dir>.takeover` mutex and re-read the owner under it, so no rename is needed.
  *
  * Readers ({@link withReadLock}, {@link withReadLockSync}; TASK-288, D-ORCH-083, D-ORCH-098 residual) share the lock
  * among themselves and exclude writers: a suite that loads the generated client must never see a half-written tree. A
@@ -99,29 +111,35 @@ function isStale(dir: string, owner: string | undefined): boolean {
   }
 }
 
+/** Test seam: the rename used by {@link takeOverStale} (a failing rename on any platform). Never set outside lock tests. */
+export const lockTestHooks: { rename: (from: string, to: string) => void } = { rename: renameSync };
+
 /**
  * Removes the stale writer directory `dir` that was judged stale while its owner read `seen`. The directory is renamed to a
  * unique tombstone first; only the process whose rename succeeds goes on, and if the tombstone holds another owner than
  * `seen`, a live lock was caught (a writer re-created it meanwhile): it is put back, and nothing is removed. Exported for the
- * lock tests only (the put-back branch).
+ * lock tests only (the put-back branch). Returns true only when the stale directory is gone from `dir` (removed); false when
+ * the rename failed (someone else moved it, or it is in use) or a live lock was put back, so a caller must wait before it
+ * retries (PR #57 R2-m1, PR57-SEC-05).
  */
-export function takeOverStale(dir: string, seen: string | undefined): void {
+export function takeOverStale(dir: string, seen: string | undefined): boolean {
   const tomb = `${dir}.stale-${randomUUID()}`;
   try {
-    renameSync(dir, tomb);
+    lockTestHooks.rename(dir, tomb);
   } catch (error) {
-    if (isCode(error, 'ENOENT', 'EPERM', 'EBUSY', 'EACCES', 'EEXIST', 'ENOTEMPTY')) return; // someone else moved it, or it is in use
+    if (isCode(error, 'ENOENT', 'EPERM', 'EBUSY', 'EACCES', 'EEXIST', 'ENOTEMPTY')) return false; // moved by someone else, or in use
     throw error;
   }
   if (readOwnerText(tomb) === seen) {
     rmSync(tomb, { recursive: true, force: true });
-    return;
+    return true;
   }
   try {
-    renameSync(tomb, dir); // a live lock: give it back (its writer re-checks ownership and fails loudly if this fails)
+    lockTestHooks.rename(tomb, dir); // a live lock: give it back (its writer re-checks ownership and fails loudly if this fails)
   } catch {
     rmSync(tomb, { recursive: true, force: true });
   }
+  return false;
 }
 
 /**
@@ -178,8 +196,11 @@ function foreignReaders(name: string): string[] {
   });
 }
 
-/** Test seam of {@link tryRegisterReader}: runs between the registration and the writer re-check. */
+/** Test seams of {@link tryRegisterReader}. */
 export interface ReaderHooks {
+  /** Runs right before the registration file is written (PR #57 R2-n2: the ENOENT retry). */
+  readonly beforeWrite?: () => void;
+  /** Runs between the registration and the writer re-check (PR #57 R1-m4: writers win ties). */
   readonly afterRegister?: () => void;
 }
 
@@ -198,6 +219,7 @@ export function tryRegisterReader(name: string, hooks: ReaderHooks = {}): (() =>
   }
   if (plainReadersDir(name) === undefined) return undefined; // removed by a finishing writer meanwhile: retry
   const mine = join(dir, `${String(process.pid)}-${randomUUID()}`);
+  hooks.beforeWrite?.();
   try {
     writeFileSync(mine, '', { flag: 'wx' });
   } catch (error) {
@@ -275,15 +297,12 @@ export async function withFileLock<T>(name: string, fn: () => Promise<T> | T, ti
   for (;;) {
     try {
       mkdirSync(dir);
-      writeFileSync(join(dir, 'owner'), String(process.pid));
+      writeFileSync(join(dir, 'owner'), String(process.pid), { flag: 'wx' }); // EEXIST: someone else owns it now
       break;
     } catch (error) {
       if (!isCode(error, 'EEXIST')) throw error;
       const owner = readOwnerText(dir);
-      if (isStale(dir, owner)) {
-        takeOverStale(dir, owner);
-        continue;
-      }
+      if (isStale(dir, owner) && takeOverStale(dir, owner)) continue;
       if (Date.now() > deadline) throw new Error(`timed out after ${String(timeoutMs)} ms waiting for test lock ${dir}`, { cause: error });
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }

@@ -30,7 +30,7 @@ for (;;) {
     sleep(50);
   }
 }
-fs.writeFileSync(path.join(dir, 'owner'), String(process.pid));
+fs.writeFileSync(path.join(dir, 'owner'), String(process.pid), { flag: 'wx' });
 if (file) fs.writeFileSync(file, half);
 fs.writeFileSync(ready, '');
 sleep(Number(holdMs));
@@ -109,11 +109,39 @@ export class LockChildren {
     });
   }
 
-  /** Starts a process that only stays alive and returns its pid (killed by {@link killAll}). */
-  idle(): number {
-    const child = spawn(process.execPath, ['-e', IDLE], { stdio: 'ignore', windowsHide: true });
+  /**
+   * Starts a process that only stays alive and returns its pid (killed by {@link killAll}). With `cwd`, the process runs in
+   * that directory (on Windows a directory that is a live process's cwd cannot be renamed).
+   */
+  idle(cwd?: string): number {
+    const child = spawn(process.execPath, ['-e', IDLE], { stdio: 'ignore', windowsHide: true, ...(cwd === undefined ? {} : { cwd }) });
     this.children.push(child);
     if (child.pid === undefined) throw new Error('idle: the child got no pid');
+    return child.pid;
+  }
+
+  /**
+   * Like {@link idle}, but runs in `cwd` and resolves only once the child is running (it writes a marker from inside). On
+   * Windows the directory is then in use as its cwd; the `spawn` event alone fires before that (PR #57 fix cycle 2).
+   */
+  async idleStarted(cwd: string): Promise<number> {
+    const { ready } = this.markers();
+    const script = `require('node:fs').writeFileSync(process.argv[1], ''); ${IDLE}`;
+    const child = spawn(process.execPath, ['-e', script, '--', ready], { stdio: 'ignore', windowsHide: true, cwd });
+    this.children.push(child);
+    await new Promise<void>((resolve, reject) => {
+      const poll = setInterval(() => {
+        if (existsSync(ready)) {
+          clearInterval(poll);
+          resolve();
+        }
+      }, 10);
+      child.once('exit', (code) => {
+        clearInterval(poll);
+        reject(new Error(`idle child exited ${String(code)} before it was ready`));
+      });
+    });
+    if (child.pid === undefined) throw new Error('idleStarted: the child got no pid');
     return child.pid;
   }
 
