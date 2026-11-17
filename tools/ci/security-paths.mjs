@@ -37,7 +37,12 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-/** ADR-0023 amendment G item 5 trigger paths, plus the lockfile (see the header). */
+/**
+ * ADR-0023 amendment G item 5 trigger paths, plus the lockfile (see the header), plus the security suites' own code paths
+ * (PR57-SEC-02, D-SEC-PR57-01, TASK-287): the Jest config and test support every suite loads, the DB tooling and engine
+ * pin the harness applies migrations with, and the generated RLS cases and API mounts the suites run. Their own unit
+ * tests and fixtures are excluded (`!`), so a test-only change there does not select the job.
+ */
 export const SECURITY_INTEGRATION_PATHS = Object.freeze([
   'packages/authz/**',
   'packages/audit/**',
@@ -46,6 +51,16 @@ export const SECURITY_INTEGRATION_PATHS = Object.freeze([
   'apps/api/src/platform/**',
   'apps/api/src/modules/identity/**',
   'package-lock.json',
+  'jest.config.ts',
+  'tools/test-support/**',
+  'tools/db/**',
+  'tools/deps/**',
+  'tests/generated/rls/**',
+  'tests/generated/api-mounts.ts',
+  '!tools/test-support/**/*.test.ts',
+  '!tools/db/**/*.test.ts',
+  '!tools/db/fixtures/**',
+  '!tools/deps/**/*.test.ts',
 ]);
 
 /** The lockfile that the production-closure rule reads (ruling section 3 (3)). */

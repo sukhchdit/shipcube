@@ -75,7 +75,10 @@ tests until its pins are retired. In stage 2:
 ### security-integration (lane A, amendment G item 5 as amended by L item 2)
 
 Selected by the base-ref lane scope when the PR range changes `packages/authz/**`, `packages/audit/**`,
-`packages/config/**`, `prisma/**`, `apps/api/src/platform/**`, `apps/api/src/modules/identity/**` or makes a
+`packages/config/**`, `prisma/**`, `apps/api/src/platform/**`, `apps/api/src/modules/identity/**`, the suites' own
+code paths `jest.config.ts`, `tools/test-support/**`, `tools/db/**`, `tools/deps/**`, `tests/generated/rls/**` and
+`tests/generated/api-mounts.ts` (their `*.test.ts` files and `tools/db/fixtures/**` excluded; PR57-SEC-02,
+D-SEC-PR57-01, about 20-30 extra job-min a month) or makes a
 production-closure `package-lock.json` change (an entry without `dev: true`, so a `devOptional` Prisma CLI or engines
 bump selects, D-ARCH-133; dev-only bumps do not select; a new or unparseable lockfile does),
 **and** the head is a merge candidate (security record check `pass` or `not-required`), **and** no
@@ -147,8 +150,12 @@ aggregation steps, found by gate position and exact text, PR55-SEC-09), the only
 stage 2 every fast-lane gate from the classify step to the lane B evidence step (workflow policy, install flags,
 migration immutability, lockfile, dependency age, install, licences, signatures, audit) and `ci-gate`'s gitleaks,
 Semgrep and record steps are exact, contiguous and carry no step env; `fast-lane` and `security-integration` use only
-`actions/checkout`, `actions/setup-node` and `actions/cache`; the workflow env has exactly the install settings and the
-four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
+`actions/checkout`, `actions/setup-node` and `actions/cache`, each with exactly its pinned `with:` map (checkout:
+`fetch-depth: 0`, `persist-credentials: false`, no `ref`/`repository`; setup-node and the engine cache as in ci.yml;
+the same for `ci-gate`), so no input can choose the tree, and so the tested base, that judges a PR (PR59-SEC-01). On a
+runner `lane-scope.mjs` (tested-base tooling) also exits 2 unless `HEAD` is the event commit `GITHUB_SHA`, and the
+tooling steps may carry the same check in bash (V2 of the tested-base lines; the policy accepts V1 and V2 until ci.yml
+switches, TASK-287). The workflow env has exactly the install settings and the four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
 a lexical tripwire for the head-code steps, which are not exact). In every workflow, at every level: no
 `BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
 `IFS`, `BASH_FUNC_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_<n>`/`VALUE_<n>`, `GIT_EXTERNAL_DIFF`, `HOME`,

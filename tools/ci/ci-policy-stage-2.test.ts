@@ -12,9 +12,13 @@ import { describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../test-support/process.js';
 import {
+  CHECKOUT_IS_EVENT_SHA,
   CI_GATE_RUN_TESTED_BASE,
   CI_GATE_STEPS_STAGE_2,
+  CI_GATE_TOOLING_SCRIPT_TESTED_BASE,
+  CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2,
   CLASSIFY_RUN,
+  FAST_LANE_TOOLING_SCRIPT_V2,
   LANE_SCOPE_RUN_TESTED_BASE,
   TOPOLOGIES,
   checkWorkflow,
@@ -773,5 +777,92 @@ describe('[PR #55 r2] PR55-SEC-11, R2-n1, R2-n2, R2-n4: the follow-ups taken int
         expect.arrayContaining([expect.stringMatching(/^required-gates: ci\.yml workflow env must have exactly the keys/u)]),
       );
     }
+  });
+});
+
+describe('[PR59-SEC-01] [TASK-287] checkout, setup-node and cache inputs are pinned; the V2 tested-base check is accepted (policy first)', () => {
+  const pin = (name: string, action: string) => `      - name: ${name}\n        uses: ${action}`;
+  const fastCheckout = pin('Checkout (full history for the base ref and the PR commit range)', 'actions/checkout@');
+  const siCheckout = pin('Checkout (full history for the tested-base manifests)', 'actions/checkout@');
+  const gateCheckout = pin('Checkout (full history for the tested base and the PR commit range)', 'actions/checkout@');
+  const checkoutWith = '        with:\n          fetch-depth: 0\n          persist-credentials: false\n';
+  /** The block from a step's name line through its with: map (exactly one occurrence in ci.yml). */
+  const block = (head: string, withMap: string) => {
+    const start = stage2.indexOf(head);
+    expect(start).toBeGreaterThan(0);
+    const end = stage2.indexOf(withMap, start) + withMap.length;
+    return stage2.slice(start, end);
+  };
+  const eventCheck = CHECKOUT_IS_EVENT_SHA.map((line) => `          ${line}`).join('\n');
+  const fastOpen = '          set -euo pipefail\n          tools_ref=""\n';
+  const gateOpen = '          mkdir -p "$gates/base" "$gates/head"\n          tools_ref=""\n';
+  const v2 = stage2
+    .replace(fastOpen, () => `          set -euo pipefail\n${eventCheck}\n          tools_ref=""\n`)
+    .replace(gateOpen, () => `          mkdir -p "$gates/base" "$gates/head"\n${eventCheck}\n          tools_ref=""\n`);
+
+  it('V1 (the live ci.yml) and V2 (the event-commit check in both tooling steps) both pass; nothing else does', () => {
+    expect(stage2.split(fastOpen)).toHaveLength(2);
+    expect(stage2.split(gateOpen)).toHaveLength(2);
+    expect(v2).not.toBe(stage2);
+    expect(findingsOf(stage2)).toEqual([]);
+    expect(findingsOf(v2)).toEqual([]);
+    expect(FAST_LANE_TOOLING_SCRIPT_V2.slice(1, 1 + CHECKOUT_IS_EVENT_SHA.length)).toEqual([...CHECKOUT_IS_EVENT_SHA]);
+    expect(CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2).toHaveLength(CI_GATE_TOOLING_SCRIPT_TESTED_BASE.length + CHECKOUT_IS_EVENT_SHA.length);
+    // A V2 whose check does not fail the step, or a mixture of the two halves, is neither V1 nor V2.
+    const exitZero = v2.split('  exit 1\n          fi\n          tools_ref=""').join('  exit 0\n          fi\n          tools_ref=""');
+    expect(exitZero).not.toBe(v2);
+    expect(findingsOf(exitZero).some((finding) => finding.startsWith('required-gates:'))).toBe(true);
+  });
+
+  it.each<[string, string, string]>([
+    [
+      'fast-lane checkout ref: the PR head (a tested base of its choosing)',
+      fastCheckout,
+      '          ref: ${{ github.event.pull_request.head.sha }}\n',
+    ],
+    ['ci-gate checkout repository: another repository', gateCheckout, '          repository: someone/else\n'],
+    ['security-integration checkout persist-credentials: true', siCheckout, ''],
+    ['fast-lane checkout fetch-depth: 1', fastCheckout, ''],
+  ])('%s', (title, head, extra) => {
+    const original = block(head, checkoutWith);
+    let mutated = original;
+    if (extra !== '') mutated = original + extra;
+    else if (title.includes('persist-credentials')) mutated = original.replace('persist-credentials: false', 'persist-credentials: true');
+    else mutated = original.replace('fetch-depth: 0', 'fetch-depth: 1');
+    expect(mutated).not.toBe(original);
+    const findings = findingsOf(stage2.replace(original, () => mutated));
+    expect(findings).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^required-gates: .*actions\/checkout with: must be exactly .*PR59-SEC-01/u)]),
+    );
+  });
+
+  it('setup-node and the engine cache inputs are pinned per job; an unlisted action is refused', () => {
+    const fastSetup = block(
+      pin('Set up Node from .node-version', 'actions/setup-node@'),
+      '          cache-dependency-path: package-lock.json\n',
+    );
+    const noCache = stage2.replace(fastSetup, () => fastSetup.replace('          cache: npm\n', ''));
+    expect(findingsOf(noCache)).toEqual(expect.arrayContaining([expect.stringMatching(/actions\/setup-node with: must be exactly/u)]));
+    const gateSetup = block(pin('Set up Node (literal version, no cache)', 'actions/setup-node@'), "          node-version: '24'\n");
+    const gateNode = stage2.replace(gateSetup, () => gateSetup.replace("node-version: '24'", "node-version: '22'"));
+    expect(findingsOf(gateNode)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/ci-gate actions\/setup-node with: must be exactly/u)]),
+    );
+    const key = '          key: prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}\n';
+    expect(stage2.split(key)).toHaveLength(3);
+    const poisoned = stage2.replace(key, () => '          key: prisma-engines-${{ github.head_ref }}\n');
+    expect(findingsOf(poisoned)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/fast-lane actions\/cache with: must be exactly/u)]),
+    );
+    const build = "      - name: Build\n        if: env.CODE == 'true'\n        run: npm run build\n";
+    expect(stage2.split(build)).toHaveLength(2);
+    const upload = stage2.replace(
+      build,
+      () =>
+        `${build}\n      - name: Upload\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          path: dist\n`,
+    );
+    expect(findingsOf(upload)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/fast-lane may not use actions\/upload-artifact \(PR59-SEC-01/u)]),
+    );
   });
 });

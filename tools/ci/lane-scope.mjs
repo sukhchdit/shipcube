@@ -1140,6 +1140,25 @@ export function gate({ root, env, api }) {
 }
 
 /**
+ * PR59-SEC-01 (TASK-287): on a GitHub runner the checkout must be the commit the event names (GITHUB_SHA, a runner
+ * variable no workflow env may set: reserved-env). A checkout `ref:` or `repository:` input would otherwise choose
+ * the test merge, and so the tested base HEAD^1, that judges the PR. Off a runner (tests, a developer host) there is
+ * no event commit and nothing is checked.
+ * @param {string} root
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string} the problem, or '' when the checkout is the event commit (or not on a runner)
+ */
+export function checkoutProblem(root, env) {
+  if ((env.GITHUB_ACTIONS ?? '').trim() !== 'true') return '';
+  const sha = (env.GITHUB_SHA ?? '').trim();
+  if (!FULL_SHA.test(sha)) return 'GITHUB_SHA is not a full commit SHA';
+  const head = git(root, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  if (!head.ok) return 'HEAD is not readable';
+  if (head.stdout.trim() !== sha) return 'the checkout is not the event commit GITHUB_SHA';
+  return '';
+}
+
+/**
  * @param {readonly string[]} argv
  * @param {{ env?: NodeJS.ProcessEnv, api?: Api }} [deps]
  * @returns {number}
@@ -1155,6 +1174,11 @@ export function main(argv, deps = {}) {
   const api = deps.api ?? ghApi({ env });
   const root = values['--root'] ?? '.';
   const summary = values['--summary'];
+  const checkout = checkoutProblem(root, env);
+  if (checkout !== '') {
+    console.error(`lane-scope: ${checkout} (fail closed, PR59-SEC-01)`);
+    return 2;
+  }
 
   if (flags.has('--gate')) {
     const verdict = gate({ root, env, api });

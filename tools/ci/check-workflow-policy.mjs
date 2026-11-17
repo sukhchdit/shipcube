@@ -636,6 +636,17 @@ export const TESTED_BASE_SCRIPT = Object.freeze([
   '  tools_ref="$RANGE_BASE"',
   'fi',
 ]);
+/**
+ * PR59-SEC-01 item 2 (TASK-287, policy first): the checkout must be GITHUB_SHA, the commit the event names, so no
+ * checkout input can make HEAD^1 a tested base of the PR's choosing. V2 = these lines, then TESTED_BASE_SCRIPT. The
+ * policy accepts V1 and V2 while ci.yml moves (the next TASK-287 PR switches ci.yml to V2 and drops V1).
+ */
+export const CHECKOUT_IS_EVENT_SHA = Object.freeze([
+  'if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then',
+  '  echo "::error title=Tested base::the checkout is not the event commit GITHUB_SHA (fail closed, PR59-SEC-01)"',
+  '  exit 1',
+  'fi',
+]);
 /** fast-lane's tooling step (PR46-SEC-12, PR33-SEC-09): every GATE_* and TOOLS_REF come from here, before any head code. */
 export const FAST_LANE_TOOLING_SCRIPT = Object.freeze([
   'set -euo pipefail',
@@ -712,6 +723,59 @@ export const CI_GATE_TOOLING_SCRIPT_TESTED_BASE = Object.freeze([
   'done',
   'echo "TOOLS_REF=$tools_ref" >> "$GITHUB_ENV"',
 ]);
+/**
+ * The two tooling scripts with CHECKOUT_IS_EVENT_SHA in front of the tested-base lines (PR59-SEC-01 item 2, V2).
+ * @param {readonly string[]} script
+ */
+const withEventShaCheck = (script) => {
+  const at = script.indexOf(TESTED_BASE_SCRIPT[0] ?? '');
+  return Object.freeze([...script.slice(0, at), ...CHECKOUT_IS_EVENT_SHA, ...script.slice(at)]);
+};
+export const FAST_LANE_TOOLING_SCRIPT_V2 = withEventShaCheck(FAST_LANE_TOOLING_SCRIPT);
+export const CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2 = withEventShaCheck(CI_GATE_TOOLING_SCRIPT_TESTED_BASE);
+
+/**
+ * A `problems` check accepting exactly one of several pinned scripts (a policy-first switch: the current text and the
+ * next one, never anything else).
+ * @param {readonly (readonly string[])[]} alternatives
+ * @returns {(script: string) => string[]}
+ */
+export function pinnedScriptAlternativesProblems(alternatives) {
+  return (script) => {
+    const results = alternatives.map((expected) => pinnedScriptProblems(expected)(script));
+    return results.some((problems) => problems.length === 0) ? [] : (results[0] ?? []);
+  };
+}
+
+/**
+ * PR59-SEC-01 item 1 (TASK-287): the `with:` inputs of every action step of the stage-2 jobs, exactly. A `ref:` or
+ * `repository:` would let a ci.yml PR choose the tree, and so the tested base, that judges it; `persist-credentials`,
+ * `submodules`, `path`, `fetch-depth` and the cache inputs change what the pinned steps read. Keyed by job, then
+ * by action (owner/name).
+ */
+const CHECKOUT_WITH = Object.freeze({ 'fetch-depth': '0', 'persist-credentials': 'false' });
+const SETUP_NODE_LOCKED_WITH = Object.freeze({
+  'node-version-file': '.node-version',
+  cache: 'npm',
+  'cache-dependency-path': 'package-lock.json',
+});
+const ENGINE_CACHE_WITH = Object.freeze({
+  path: 'node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x',
+  key: 'prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}',
+});
+export const STAGE_2_ACTION_INPUTS = Object.freeze({
+  'fast-lane': Object.freeze({
+    'actions/checkout': CHECKOUT_WITH,
+    'actions/setup-node': SETUP_NODE_LOCKED_WITH,
+    'actions/cache': ENGINE_CACHE_WITH,
+  }),
+  'security-integration': Object.freeze({
+    'actions/checkout': CHECKOUT_WITH,
+    'actions/setup-node': SETUP_NODE_LOCKED_WITH,
+    'actions/cache': ENGINE_CACHE_WITH,
+  }),
+  'ci-gate': Object.freeze({ 'actions/checkout': CHECKOUT_WITH, 'actions/setup-node': Object.freeze({ 'node-version': '24' }) }),
+});
 /** fast-lane's classify step (D-ARCH-128): the lane scope with the proof lookup, before any head code; exact. */
 export const CLASSIFY_RUN =
   'node "${GATE_LANE_SCOPE:?}" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$GITHUB_EVENT_NAME" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --tools-ref "$TOOLS_REF" --lookup --env "$GITHUB_ENV" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"';
@@ -1045,7 +1109,7 @@ export const CI_REQUIRED_GATES_STAGE_2 = Object.freeze(
       run: /echo "TOOLS_REF=\$tools_ref" >> "\$GITHUB_ENV"/,
       ifs: [],
       env: {},
-      problems: pinnedScriptProblems(FAST_LANE_TOOLING_SCRIPT),
+      problems: pinnedScriptAlternativesProblems([FAST_LANE_TOOLING_SCRIPT, FAST_LANE_TOOLING_SCRIPT_V2]),
     },
     {
       job: 'fast-lane',
@@ -1203,7 +1267,7 @@ export const CI_REQUIRED_GATES_STAGE_2 = Object.freeze(
       run: /echo "TOOLS_REF=\$tools_ref" >> "\$GITHUB_ENV"/,
       ifs: [],
       env: {},
-      problems: pinnedScriptProblems(CI_GATE_TOOLING_SCRIPT_TESTED_BASE),
+      problems: pinnedScriptAlternativesProblems([CI_GATE_TOOLING_SCRIPT_TESTED_BASE, CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2]),
     },
     {
       job: 'ci-gate',
@@ -2267,6 +2331,37 @@ export function stage2Findings(doc) {
           'steps',
           String(index),
           'uses',
+        ]);
+    }
+  }
+  // PR59-SEC-01 item 1: every action step of the three jobs takes exactly its pinned inputs (and no action outside the map).
+  for (const [jobId, job] of /** @type {const} */ ([
+    ['fast-lane', fastLane],
+    ['security-integration', securityIntegration],
+    ['ci-gate', ciGate],
+  ])) {
+    const inputs = /** @type {Record<string, Readonly<Record<string, string>>>} */ (STAGE_2_ACTION_INPUTS[jobId]);
+    for (const [index, node] of stepsOf(job).entries()) {
+      const step = asMap(node) ?? {};
+      const uses = asString(step.uses);
+      if (uses === undefined) continue;
+      const action = uses.split('@')[0] ?? '';
+      const expected = Object.hasOwn(inputs, action) ? inputs[action] : undefined;
+      if (expected === undefined)
+        add(`ci.yml ${jobId} may not use ${action} (PR59-SEC-01: only ${Object.keys(inputs).join(', ')})`, [
+          'jobs',
+          jobId,
+          'steps',
+          String(index),
+          'uses',
+        ]);
+      else if (!sameMap(step.with, expected))
+        add(`ci.yml ${jobId} ${action} with: must be exactly ${showMap(expected)} (PR59-SEC-01)`, [
+          'jobs',
+          jobId,
+          'steps',
+          String(index),
+          'with',
         ]);
     }
   }

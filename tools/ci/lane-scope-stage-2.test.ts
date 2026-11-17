@@ -13,12 +13,18 @@ import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../test-support/process.js';
-import { CI_GATE_TOOLING_SCRIPT_TESTED_BASE, FAST_LANE_TOOLING_SCRIPT } from './check-workflow-policy.mjs';
+import {
+  CI_GATE_TOOLING_SCRIPT_TESTED_BASE,
+  CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2,
+  FAST_LANE_TOOLING_SCRIPT,
+  FAST_LANE_TOOLING_SCRIPT_V2,
+} from './check-workflow-policy.mjs';
 import {
   CLASSIFICATION_KEYS,
   MAX_BASE_COMMITS,
   baseChangedAt,
   checkedOutTopology,
+  checkoutProblem,
   classify,
   fastLaneProblems,
   formatClassification,
@@ -838,5 +844,37 @@ describe('[R1-n1] lint_controls end to end: the classify output, the env line an
     expect(verdict(base).reasons).toEqual(['code gates skipped on a code push (Lint negative fixtures: skipped)']);
     expect(verdict({ ...base, lint_controls: 'false' })).toEqual({ ready: true, reasons: [] });
     expect(seen).toEqual([true, false]);
+  });
+});
+
+describe('[PR59-SEC-01] [TASK-287] on a runner the checkout is the event commit GITHUB_SHA', () => {
+  it('checkoutProblem: off a runner nothing is checked; on a runner HEAD must be the full GITHUB_SHA', () => {
+    const { root, merge, m1 } = sharedPr();
+    expect(checkoutProblem(root, {})).toBe('');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'false', GITHUB_SHA: m1 })).toBe('');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true', GITHUB_SHA: merge })).toBe('');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true', GITHUB_SHA: m1 })).toContain('not the event commit');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true', GITHUB_SHA: merge.slice(0, 7) })).toContain('full commit SHA');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true' })).toContain('full commit SHA');
+  });
+
+  it('the CLI exits 2 (fail closed) in classify and --gate mode when the checkout is not GITHUB_SHA', () => {
+    const { root, m0, f1, m1, merge } = sharedPr();
+    const api: Api = () => ({ ok: false, problem: 'none' });
+    const args = ['--root', root, '--base', m0, '--head', f1, '--pr', '53', '--head-ref', 'test/x', '--tools-ref', m1, '--lookup'];
+    expect(main(args, { env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: m1 }, api })).toBe(2);
+    expect(main(args, { env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: merge }, api })).toBe(0);
+    expect(main(['--gate', '--root', root], { env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: m1 }, api })).toBe(2);
+  });
+
+  it('the V2 tooling scripts fail the step when HEAD is not GITHUB_SHA and behave as V1 otherwise', () => {
+    const { root, m0, f1, m1, merge } = sharedPr();
+    for (const script of [FAST_LANE_TOOLING_SCRIPT_V2, CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2]) {
+      const ok = runStep(root, script, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1, GITHUB_SHA: merge });
+      expect([ok.status, ok.env.TOOLS_REF]).toEqual([0, m1]);
+      const bad = runStep(root, script, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1, GITHUB_SHA: m1 });
+      expect(bad.status).toBe(1);
+      expect(bad.env.TOOLS_REF).toBeUndefined();
+    }
   });
 });
