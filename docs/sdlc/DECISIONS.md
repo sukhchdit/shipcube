@@ -2707,3 +2707,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Stress proof:** 20/20 green under load with regeneration mid-run (was 15/20).
 - **Security-analyst to rule:** `security-integration` was skipped because `jest.config.ts`, `tools/test-support/**`, `tools/db/**` and `tools/deps/**` are not `security_critical_paths`.
 - **Reversibility:** High.
+
+### D-ORCH-112 · 2026-11-17 · sdlc-orchestrator · PR #55 (TASK-286 policy PR) merged; workflow PR dispatched; PR #56 fix cycle 2
+- **PR #55** squash-merged as `11e2158`.
+  - **Head:** `8805678`. Code r2 APPROVED_WITH_NITS; security delta r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR55-02).
+  - **CI:** lane A run 44006928087 on the head (ci-gate success); lane B 20261117T0212Z_764b75f.
+  - **P1 re-checked:** main changed only `docs/sdlc/*` since merge base 617f378, with no overlap. Merged inside the 24 h window.
+- **TASK-286 workflow PR** dispatched to devops-engineer. It also takes PR55-SEC-11 (stage-1 exact env keys) and code-review R2-n1..n4. Due in November.
+- **PR #56 security delta r2** at `9746b2f` = PASS_WITH_CONDITIONS (record `f204bb2`).
+  - **C1 = PR56-SEC-10 (MEDIUM, CWE-696):** `afterCommit` is scheduled for rolled-back returned results.
+  - **PR56-SEC-11 (LOW):** the client-gone skip drops required FAILED entries.
+  - Both go to fix cycle 2/3, before the code review r2, which then reviews `9746b2f..fc2` in one pass.
+  - **Routed:** PR56-SEC-12 (INFO, re-export/alias lint gaps) → the next `eslint.config.mjs` PR; PR56-SEC-13 (INFO, a handler-raised 403 gets no DENIED entry) → TASK-033.
+  - SEC-09, -01, -02, -04 and -08 are closed.
+- **Reversibility:** Medium (a merged PR is revertible by a revert commit).
