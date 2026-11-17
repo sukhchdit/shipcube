@@ -3170,3 +3170,25 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Also routed to PR #61 fix cycle 1:** PR61-SEC-09 and PR61-SEC-10 from session B's duplicate pass (D-ORCH-COORD-02).
 - **Housekeeping:** the architect's commit subject is 107 chars (> 100 commitlint). It is a main docs commit, not checked by PR commitlint, so it is noted, not rewritten.
 - **Reversibility:** High.
+
+### D-TASK028-11..17 · 2026-11-17 · backend-developer (recorded by orchestrator) · PR #61 fix cycle 1 (local head `d54880a`, not pushed until lane B)
+- **11** Audit values use a new log export `hasCredentialShape`, not `redactString`: the log's keyword-in-word rule would erase business values such as `session:manage`. Log behaviour is unchanged.
+- **12** Single-credential schemes need a token68 credential of 8+ chars, so "Basic plan" stays readable.
+- **13** A credential-shaped object key becomes `[REDACTED_KEY]#n`.
+- **14** `mfa_challenges.ip_prefix_hmac` and `carrier_accounts.credentials_ciphertext` (no data-model class) are pinned SECRET in C10.
+- **15** `codes` is a secret word; over-redaction is accepted.
+- **16** Lint: tokeniser/privacy exports only in `apps/api/src/start-api.ts`; `decryptVaultValue`/`auditKeyOf` only in `apps/api/src/modules/audit/**` (TASK-073) and packages/audit.
+- **17** Malformed audit keys exit 78 (`api.audit_keys_rejected`).
+- **Confirmed and fixed** from session B's duplicate review: vault subject-insert lock order (sorted), `authenticate` seam refused in `live` mode, HeadlessChrome → null.
+- **Not taken / routed:** dup R1-m3 (safe over-redaction), dup R1-m4, dup R1-n4 → TASK-031, dup R1-n6 → qa-lead, dup R1-n8 → TASK-049/052, code R1-n3 later. SEC-04 CODEOWNERS (devops) also covers `packages/shared/src/logging/string-redaction.ts`.
+- **Reversibility:** High.
+
+### D-ORCH-130 · 2026-11-17 · sdlc-orchestrator · Lane-B queue paused by host memory; three items waiting
+- **Decision:** the queue wrapper was reaped for low memory at 14:29Z (4.6 GB free of 32). Per the reaper notice it is not restarted without the user's go-ahead.
+- **Waiting items:**
+  - TASK-290 (`ba921da`, EV2; a possibly orphaned run may still finish there);
+  - TASK-287A / PR #62 (`5d86412`; the first lane A failed on a runner-only test gap, fixed locally, so the evidence is stale);
+  - TASK-028 / PR #61 fix cycle 1 (`d54880a`).
+- **Shared lock:** `../.orch/docker.lock` is still owned by the reaped queue run; left in place until the orphan state is known.
+- **User asked:** free memory (close session B, stray node processes) and confirm the restart.
+- **Reversibility:** High.
