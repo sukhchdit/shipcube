@@ -134,3 +134,109 @@ The same Semgrep/record/gitleaks mutants of the live stage-1 `ci.yml` also give 
 4. INFO: stage 2 grants `actions: read` and `pull-requests: read` at job level to fast-lane, which runs head code. The token is passed only to the classify step, but on hosted runners head code with sudo can read the runner worker's memory, so the job token's read scopes are reachable (fast-lane held `contents: read` only before). Read-only on a repository the writer can read; record as an accepted residual.
 5. R1-n3: committer-date base dating (no branch protection; a direct or non-squash push to `main` dates a change before it landed).
 6. R1-m2: the stage-1 topology (CODE-gated audit and signatures) stays accepted with no retirement owner; the 24 h proof-age interim rule should stay in force for any stage-1 `ci.yml` until then.
+
+---
+
+# Round 2 (delta review of fix cycle 1)
+
+Head reviewed: `72dcf5b` (full SHA `72dcf5b8f8dcb4cdfe4fc71e0c75929f5bc72362`).
+- `91d8070` is the fix-cycle-1 code commit.
+- `764b75f` merges main `617f378`.
+- `72dcf5b` adds lane B evidence `20261117T0212Z_764b75f` only.
+
+Delta: `git diff 2fe721e 91d8070`, 7 files: `lane-scope.mjs`, `check-workflow-policy.mjs`, both stage-2 test files, the fixture comment, CI-CD.md and the PR #55 security record.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every r1 finding is closed, routed or withdrawn. The void set now covers P1 (b) and the lint controls
+  (D-TASK286-06/06a). ci-gate's three scan steps and every pre-head-code fast-lane gate are exact, with no step env.
+  The token is bound to three steps by gate position, and the CLI wiring is tested end to end. All 12 r1 policy probes
+  and both token probes now give findings. 21 of my 27 r2 mutants are killed; the 6 survivors are equivalent,
+  redundant or cosmetic. No BLOCKER, MAJOR or MINOR remains. Four NITs, on the new preload-env/env-expression rules
+  and on the docs.
+```
+
+## R2.1 What I verified myself
+
+| Check | Result |
+|---|---|
+| `git show --remerge-diff 764b75f` | Empty: a clean auto-merge with no hand resolution. `git diff --name-only 91d8070 764b75f` lists only `docs/sdlc/DECISIONS.md` and `docs/sdlc/STATUS.md`; `764b75f..72dcf5b` is the evidence directory only. `origin/main` has since gained `82dcba6` (DECISIONS.md only), so no union is needed |
+| `jest tools/ci --selectProjects unit` on `72dcf5b` | 30 suites, **1198 / 1198** pass (r1: 1142) |
+| Prettier on the changed non-evidence files | clean |
+| Head `check-workflow-policy.mjs --root .` (ci.yml, lane-c.yml, nightly.yml) | exit 0: the new `preload-env` and `env-expression` rules give no false positive on the live workflows |
+| Fixture vs `ci.yml` on `origin/ci/TASK-286-cigatefold-workflow` (`5f76ef3`) | byte-identical. `tools/ci/fixtures/stage-1/ci.yml` exists on that branch (also at `03a281a`) |
+| Lane A run 44003648755 on `72dcf5b` | fast-lane **success**: every step ran except the two LINT_CONTROLS steps, which were correctly skipped. Every scan step succeeded. Only the record step fails, so that is the only reason ci-gate is red |
+| r1 policy probes (`policy-probe.mjs`) M01-M12 | **Every mutant is now a finding** (`required-gates` "the run: must be exactly ..."; M07 "install gate step must be unconditional"). Control: 0 |
+| r1 token probes (`token-probe.mjs`) T1, T2 | one `gh-token` finding each (r1: 0) |
+| r1 lint-env probe | Unchanged (R1-n2 was ruled as wording). V5, a job-level `BASH_ENV`, is now refused by `preload-env` |
+| New: `preload-probe.mjs` (27 cases, `lane-c.yml` shape) | see R2.3 |
+
+**Mutants.** `mut2.mjs` ran in a fresh `git archive 72dcf5b` copy. Lane-scope rows run `lane-scope-stage-2.test.ts`; policy rows run the three policy suites.
+
+| Rows | Result |
+|---|---|
+| r1 survivors: L19 (`main()` SEC-16 wiring), L20 (proof steps from the PR head), L22, L24, L30 (lint controls) | **All killed.** Closes R1-m4, R1-n6 and R1-n1 |
+| N01 prPaths ignored; N02 unknown PR range accepted; N03 `main()` drops prPaths; N08 `tools/deps` out of the set | killed |
+| N05-N07: a skipped lint-control step accepted in the gate rule, the proof lookup or the CLI | killed |
+| N10 token step position unchecked; N13 `STAGE_2_USES` off; N14 workflow env keys off; N15 `env-expression` off; N17 `BASH_FUNC_` prefix off | killed |
+| N18-N21: the gitleaks, record, Semgrep and audit exact pins off | killed |
+| P10 (security-integration added to the stage-2 token jobs) | Survives, but is now **equivalent**: in stage 2, `allowed()` needs a step in `tokenSteps`, which has no security-integration entry. P11 is dead code in stage 2 for the same reason |
+| N04 (the `LINT_CONTROL_PATHS` check in `proofBasePath`) | Survives, **redundant**: every alternative of that regex is either a root file or already under `PROOF_BASE_DIRS` |
+| N11, N12 (the token step's exact-run and id checks) | Survive, **redundant** in the composed policy: `required-gates` already pins the same step's exact run and id |
+| N09 (`tests/fixtures/**` out of the set) | Survives: only `tests/fixtures/{lint,semgrep}` rows exist, and LINT_CONTROL_PATHS still covers those (R2-n4) |
+| N16 (`preload-env` made case-sensitive) | Survives: no lower-case row (R2-n4). Cosmetic on Linux runners, where `bash_env` is not `BASH_ENV` |
+
+## R2.2 Round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed** | The void set is now: lane A inputs; every path the PR range changes, docs included; `tools/{deps,eslint-rules,stylelint-rules,lint,test-support}/**`; `tests/fixtures/**`; LINT_CONTROL_PATHS. An unknown PR range gives no proof. D-TASK286-06 (security-acknowledged) and D-TASK286-06a record it; semantic conflicts are left to the D-ORCH-042 post-merge gate. Tests: the CLI rows V3, V4, V5, package, docs and none, and the P1 (b) `baseChangedAt` case; N01-N03 and N08 killed. Cost check: the open PR ranges (#54, #56 and this one) touch no `docs/sdlc` file, so the orchestrator's DECISIONS/STATUS commits on main do not void their proofs |
+| R1-m1 | **Closed** | Exact `run:` and `env: {}` for gitleaks, Semgrep and the record step, and for every fast-lane gate from classify to the evidence step (a contiguous `after` chain). Workflow env pinned to exact keys; `STAGE_2_USES` added. The code comment and CI-CD.md now call the `GITHUB_ENV` check a tripwire for the head-code steps |
+| R1-m2 | **Routed** | D-TASK286-01a adds a TASK-287 card line for the stage-1 retirement (PR55-SEC-10), and the 24 h proof-age rule applies to any stage-1 `ci.yml` until then. The orchestrator folds the line. Accepted |
+| R1-m3 | **Closed** | `tokenSteps` allows the token only on fast-lane's classify step (matched by gate position, exact `CLASSIFY_RUN` and id `classify`) and on ci-gate's lane-scope and aggregation steps. T1 and T2 are findings; N10 killed |
+| R1-m4 | **Closed** | The `[R1-m4] [R1-n6]` CLI describe; L19 killed |
+| R1-n1 | **Closed** | `fastLaneProblems(..., lintControls)` is used in rule (b) and in the proof lookup; L22, L24, L30 and N05-N07 killed |
+| R1-n2 | Ruled as wording | CI-CD.md now says "a step whose run is exactly `npm run lint`". One stale header line remains (R2-n3) |
+| R1-n3 | Accepted residual | INFO-04 in D-TASK286-06. CI-CD.md tells anyone pushing to main to push right after committing |
+| R1-n4 | **Withdrawn** | My r1 check was wrong: `tools/ci/fixtures/stage-1/ci.yml` is on the workflow branch (`03a281a`), and D-TASK286-01a says where |
+| R1-n5 | **Closed** | Install has `ifs: []` and an exact run; M07 is a finding |
+| R1-n6 | **Closed** | L20 killed |
+
+## R2.3 New rules: `preload-env` and `env-expression` (false positives and negatives)
+
+`preload-probe.mjs` against the head checker:
+- **Correctly refused:**
+  - `BASH_ENV` at step, job, workflow, `container.env` and `services.*.env` level, in lower case too;
+  - `PATH`, `LD_PRELOAD`, `NODE_PATH` and `BASH_FUNC_npm%%`;
+  - `env: ${{ fromJSON(...) }}` at step and job level;
+  - `NODE_OPTIONS: ${{ inputs.o }}` (`node-options-preload`).
+- **No false positive on:** `ENVIRONMENT`, `APP_ENV`, `PATH_PREFIX`, `NODE_ENV`, `TZ`, `LANG`, an expression-valued `DATABASE_URL`, or the three live workflows.
+- **One false positive, failing closed:** an empty `env:` gives `env-expression` (R2-n2).
+- **False negatives:** git and npm configuration variables that also run code before or inside a step:
+  - `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` (they can set `core.fsmonitor` or `core.hooksPath`);
+  - `GIT_EXTERNAL_DIFF`;
+  - `HOME` and `XDG_CONFIG_HOME` (they redirect `.gitconfig` and `.npmrc`);
+  - `NPM_CONFIG_SCRIPT_SHELL`, `NPM_CONFIG_USERCONFIG` and `npm_config_node_options`.
+
+  None of them can be set anywhere that matters in the stage-2 `ci.yml`: the workflow env keys, the job env, and the step env of every pre-head-code and ci-gate step are all exact. The exposure is:
+  - the live stage-1 `ci.yml` until TASK-287 retires it, because its workflow env is not key-pinned and reaches `scans` and `ci-gate`, which run git and the base tools;
+  - `lane-c.yml` and `nightly.yml`, which run head code anyway.
+
+  See R2-n1.
+
+## R2.4 New findings (all NIT)
+
+| ID | Severity | File:line | Issue | Suggested fix |
+|---|---|---|---|---|
+| R2-n1 | NIT (security flag) | `tools/ci/check-workflow-policy.mjs:137-150` (`PRELOAD_ENV`) | The list misses the git and npm configuration variables in R2.3, which run code the same way the listed ones do. Only the stage-1 `ci.yml` and the dispatch workflows are exposed. | Add `GIT_CONFIG_PARAMETERS`, a pattern for `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_EXTERNAL_DIFF`, `HOME`, `XDG_CONFIG_HOME`, and `NPM_CONFIG_SCRIPT_SHELL` / `USERCONFIG` / `GLOBALCONFIG` / `NODE_OPTIONS` in any case. The gitleaks `docker run -e GIT_CONFIG_*` arguments are not an env map, so this adds no false positive there. Alternatively, record them as a stage-1 residual for TASK-287. |
+| R2-n2 | NIT | `check-workflow-policy.mjs:1603` | An empty `env:` (null in GitHub's parser) is refused as `env-expression`. It fails closed and is cosmetic. | Treat an empty scalar like an absent map. |
+| R2-n3 | NIT | `docs/07-ops/CI-CD.md:65`, `:151`; `check-workflow-policy.mjs:32` | (a) After a void proof the doc says "push again or close and reopen the PR". Another docs push is still light and still BLOCKED; only a code push or a reopen runs the full lane. (b) "`LD_*`" overclaims: the code lists only `LD_PRELOAD`, `LD_LIBRARY_PATH` and `LD_AUDIT`. (c) The rule header still says "every `npm run lint` step, in any workflow". | Reword the three lines. |
+| R2-n4 | NIT | `lane-scope-stage-2.test.ts` (`proofBasePath` table); the preload rows | N09 and N16 survive. There is no row for a non-lint `tests/fixtures/**` path (e.g. `tests/fixtures/sql/raw-statement-corpus.json`, which unit suites read), and none for a lower-case preload name. | Add one row each. |
+
+## R2.5 Merge conditions
+
+1. A security delta record `docs/05-quality/security/PR-0055-*.md` naming the final head. The existing record names an earlier head, so lane A's record step stays red until the new one lands.
+2. Lane B evidence `20261117T0212Z_764b75f` is bound to the current code, and this review commit is docs-only. If any R2 NIT is fixed in code, take fresh evidence.
+3. The orchestrator folds the TASK-287 card line (D-TASK286-01a).
+4. The policy PR merges before the workflow PR. The workflow PR (`5f76ef3`, `ci.yml` == fixture) gets its own review.
+5. Squash merge.
