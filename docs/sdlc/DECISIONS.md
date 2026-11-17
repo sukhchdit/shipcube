@@ -2721,3 +2721,19 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Routed:** PR56-SEC-12 (INFO, re-export/alias lint gaps) → the next `eslint.config.mjs` PR; PR56-SEC-13 (INFO, a handler-raised 403 gets no DENIED entry) → TASK-033.
   - SEC-09, -01, -02, -04 and -08 are closed.
 - **Reversibility:** Medium (a merged PR is revertible by a revert commit).
+
+### D-TASK020-99..100 · 2026-11-17 · senior-developer (recorded by orchestrator) · PR #54 fix cycle 2 (@cc95e38)
+- **99** `DYNAMIC_SQL` (`query_to_xml`, `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite`) and `NOTIFY_FUNCTION` (`pg_notify`) are refused anywhere, case-insensitively. A quoted upper-case name that PostgreSQL would not resolve is refused too (fail closed). Both use the `session` form; 0 of 155 real templates change verdict.
+- **100** The `execute-phases` R1-M1 deadline cases pin the configured 50 ms via a `setTimeout` spy (armed exactly once) plus `timeOperation`, instead of a `< 2 s` wall-clock bound (D-SEC-PR53-02); `request()` uses `fetchOnce`/`closeLoopbackServer`. Closes the TASK-288 S3 routing (D-TASK288-08).
+- **Host flakes seen (not committed):**
+  - React Router prerender of `/en/` hit its 10 s `AbortSignal.timeout` under host load (build INVALID ×2) → W0-FLAKE-3 together with `route-metadata.test.ts`;
+  - a Testcontainers Postgres was lost mid-run (P1001) → host capacity.
+- **Reversibility:** High.
+
+### D-ORCH-113 · 2026-11-17 · sdlc-orchestrator · W0-FLAKE-3 scope (carded at the next sheet fold)
+- **Decision:** W0-FLAKE-3 covers:
+  - (a) `tests/generated/route-metadata.test.ts` [assertion 10] pooled `fetch`;
+  - (b) the web `prerender` request timeout/retry under host load;
+  - (c) PR #57 code-review routings, if not fixed in its fix cycle.
+- **Owner:** test-engineer; batch 0.12 or the next free slot.
+- **Reversibility:** High.
