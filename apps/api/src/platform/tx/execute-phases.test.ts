@@ -318,6 +318,22 @@ describe('[D-ARCH-106 (4)] tx slot phase order (TASK-020 part 020-C (b), (c))', 
     await eventually(events, 'afterCommit');
     expect(events).toEqual(['handler db=undefined', 'audit db=undefined', 'send', 'afterCommit']);
   });
+
+  it('[PR56-SEC-14] a transaction none route that returns 400 or more schedules no afterCommit (one rule with tenant routes)', async () => {
+    const events: string[] = [];
+    const route = fixtureRoute({
+      operationId: 'pingThing',
+      path: '/ping',
+      handler: () => ({ status: 503, body: { code: 'SERVICE_UNAVAILABLE' } }),
+      afterCommit: () => {
+        events.push('afterCommit');
+      },
+    });
+    const response = await request(appWith(route, fakeRunner(events), events), '/api/v1/ping');
+    expect(response.status).toBe(503);
+    await delay(50);
+    expect(events).toEqual(['audit db=undefined', 'send']);
+  });
 });
 
 describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and handler, frozen transport everywhere', () => {
@@ -877,6 +893,8 @@ describe('[D-TASK029-16] [R1-m4] returned failures and the FAILED entry in the t
     const waited = Date.now() - started;
     expect(response.status).toBe(409);
     expect(waited).toBeGreaterThanOrEqual(FAILED_ENTRY_WAIT_MS - 50);
+    // Magnitude pinned independently of the constant (code review R2-n1): the budget D-TASK029-22 states.
+    expect(FAILED_ENTRY_WAIT_MS).toBe(1_000);
     expect(events).toEqual(['begin:rw', 'rollback', 'failed-entry AppError']);
   });
 

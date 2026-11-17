@@ -264,8 +264,12 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     return result;
   };
   const none: PhaseResults<unknown, unknown> = Object.freeze({ loaded: undefined, called: undefined });
-  // No transaction to roll back: the result stands as returned, and afterCommit runs after the response as before.
-  if (route.transaction === 'none') return { result: await write(undefined, none), committed: true };
+  // No transaction to roll back: the result is sent as returned; one rule with the tenant routes for afterCommit, which
+  // runs after a result below 400 only (code review R2-n2, PR56-SEC-14).
+  if (route.transaction === 'none') {
+    const result = await write(undefined, none);
+    return { result, committed: result.status < 400 };
+  }
   if (options.tenantTx === undefined) throw new AppError('SERVICE_UNAVAILABLE', { cause: new Error('no tenant transaction runner') });
   const runner = options.tenantTx;
   const tenant = tenantContextOf(request.principal, request.correlationId);
@@ -302,7 +306,9 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
  * The FAILED entry of a failed request (R1-m4): none when the failure IS the client's disconnect (the slot's own abort
  * of `call`, or of a call skipped because the client had gone: no business outcome to record). Any other failure is
  * recorded even when the client has gone meanwhile, so a client cannot suppress its FAILED entry by disconnecting
- * (PR56-SEC-11, REQ-AUDIT-010). The answer waits at most {@link FAILED_ENTRY_WAIT_MS} for it. `afterFailure` resolves always (it reports an unwritten entry itself), so the only rejection here is the end
+ * (PR56-SEC-11, REQ-AUDIT-010). The answer waits at most {@link FAILED_ENTRY_WAIT_MS} for it; a write still running
+ * after that wait is detached and, unlike the afterCommit queue, not drained at shutdown (best effort by design; the
+ * business change it describes was rolled back; code review R2-n4). `afterFailure` resolves always (it reports an unwritten entry itself), so the only rejection here is the end
  * of the wait, after which the write finishes or rolls back in its own transaction.
  */
 async function recordFailure(

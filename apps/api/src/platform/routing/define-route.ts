@@ -209,9 +209,10 @@ export interface AfterCommitContext extends RouteRequestContext {
 /**
  * `afterCommit(ctx, result)`: after COMMIT and after the response was written (also when sending or a stream failed
  * after COMMIT), with no transaction and no database handle. Never for a request whose write did not commit: a thrown
- * error or a returned status of 400 or more rolls the handler transaction back and schedules nothing (PR56-SEC-10). Best effort, in-process and bounded (durable work is an
- * outbox event): a throw is logged as `api.after_commit_failed` and never changes the response; work above the queue
- * cap is dropped (`api.after_commit_dropped`); pending work is drained at shutdown.
+ * error, or a returned status of 400 or more (which rolls the handler transaction back; on a `transaction: 'none'`
+ * route the same rule applies), schedules nothing (PR56-SEC-10, PR56-SEC-14). Best effort, in-process and bounded
+ * (durable work is an outbox event): a throw is logged as `api.after_commit_failed` and never changes the response;
+ * work above the queue cap is dropped (`api.after_commit_dropped`); pending work is drained at shutdown.
  */
 export type RouteAfterCommit = (ctx: AfterCommitContext, result: RouteResult) => Promise<void> | void;
 
