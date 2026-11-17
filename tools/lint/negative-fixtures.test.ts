@@ -1758,6 +1758,14 @@ describe('repository probes: workspace imports resolved to repository files (ADR
     expectClean(report.probes, 'tests/generated/rbac/lint-probe-ok-oracle.ts');
   });
 
+  // PR #60 R1-n6: the positive fixtures of the oracle confinement, named so `-t PR48-SEC-03` shows the exemptions too.
+  it.each([
+    ['the generator folder imports its own modules (self-exemption)', `${AUTHZ_MATRIX_ROOT}/packages/authz/src/generator/ok-document.ts`],
+    ['the generated RBAC suite imports @platform/authz/matrix', `${AUTHZ_MATRIX_ROOT}/tests/generated/rbac/ok-runner.ts`],
+  ])('[PR48-SEC-03] allowed fixture: %s', (_title, file) => {
+    expectClean(report.eslint, file);
+  });
+
   it('[PR #21 R1-m4] allowed: an API contract test imports apps/api/src by relative path', () => {
     expectClean(report.probes, 'tests/api/lint-probe-ok-apps-api.api.test.ts');
   });

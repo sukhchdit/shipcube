@@ -24,6 +24,7 @@ describe('[PR48-SEC-03] the matrix oracle is a test-only subpath', () => {
       'ROUTE_MATRIX_COMMAND',
       'ROUTE_MATRIX_PATH',
       'SIGNATURE_HEADER_NAMES',
+      'UNPRESENTED_CREDENTIAL_HEADERS',
       'appliesTo',
       'expectCell',
       'generateMatrix',

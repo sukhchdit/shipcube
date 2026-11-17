@@ -18,6 +18,7 @@ import {
   SIGNATURE_HEADER_NAMES,
   signatureHeaderId,
   signatureOnlyOf,
+  UNPRESENTED_CREDENTIAL_HEADERS,
   verifiedId,
 } from './matrix.js';
 
@@ -96,10 +97,50 @@ describe('matrix callers (the columns)', () => {
     expect(presented).toEqual([...SIGNATURE_HEADER_NAMES]);
   });
 
-  it('PR48-SEC-08 every credential kind of ROUTE_AUTHS (anonymous aside) is presented by some caller, so a new kind cannot go untested', () => {
-    const kinds = new Set<string>(matrixCallers(ROLES).map(presentedKind));
-    expect(ROUTE_AUTHS.filter((kind) => kind !== 'anonymous' && !kinds.has(kind))).toEqual([]);
+  it('PR #60 R1-m1 / PR60-SEC-02 every credential header is presented by some caller or excluded with its owner; the non-signature partition is pinned', () => {
+    // The header each presentable kind is read from (packages/shared http/credentials.ts READERS); a signature-header
+    // caller presents its own header. The synthetic signature header of the seam is not a credential header.
+    const KIND_HEADER: Readonly<Record<string, string>> = {
+      session: 'authorization',
+      'refresh-cookie': 'cookie',
+      'quote-token': 'x-quote-token',
+    };
+    const presented = new Set(
+      matrixCallers(ROLES).flatMap((c) => {
+        if (c.kind === 'signature-header') return [c.header];
+        const header = KIND_HEADER[presentedKind(c)];
+        return header === undefined ? [] : [header];
+      }),
+    );
+    expect(UNPRESENTED_CREDENTIAL_HEADERS).toEqual({ 'x-csrf-token': 'TASK-048', 'x-reauth-proof': 'TASK-187' });
+    // Total: a new credential header (a provider header without the `-signature` suffix included) fails here.
+    expect(CREDENTIAL_HEADER_NAMES.filter((name) => !presented.has(name) && !(name in UNPRESENTED_CREDENTIAL_HEADERS))).toEqual([]);
+    expect(CREDENTIAL_HEADER_NAMES.filter((name) => !SIGNATURE_HEADER_NAMES.includes(name))).toEqual([
+      'authorization',
+      'cookie',
+      'x-csrf-token',
+      'x-reauth-proof',
+      'x-quote-token',
+    ]);
+    // Control: the check names a credential header no caller presents and nothing excludes.
+    const grown = [...CREDENTIAL_HEADER_NAMES, 'x-hub-signature-256'];
+    expect(grown.filter((name) => !presented.has(name) && !(name in UNPRESENTED_CREDENTIAL_HEADERS))).toEqual(['x-hub-signature-256']);
+  });
+
+  it('PR48-SEC-08 every credential kind of ROUTE_AUTHS (anonymous aside) is presented by a caller that applies to a route declaring it (PR #60 R1-n1)', () => {
+    const declaring = (kind: string): MatrixRoute => route({ auth: [kind] });
+    const presentedWhereDeclared = (callers: readonly MatrixCaller[], kind: string): boolean =>
+      callers.some((c) => presentedKind(c) === kind && appliesTo(c, declaring(kind)));
+    const all = matrixCallers(ROLES);
+    expect(ROUTE_AUTHS.filter((kind) => kind !== 'anonymous' && !presentedWhereDeclared(all, kind))).toEqual([]);
     expect(ROUTE_AUTHS.length).toBeGreaterThan(1);
+    // Control (code review mutant G5): without the synthetic signatures only the foreign headers present `signature`.
+    expect(
+      presentedWhereDeclared(
+        all.filter((c) => c.kind !== 'signature'),
+        'signature',
+      ),
+    ).toBe(false);
   });
 
   it('each caller presents its kind; signature callers apply only to routes that accept a signature', () => {

@@ -81,12 +81,24 @@ export type MatrixCaller =
   | { readonly id: string; readonly kind: 'signature-header'; readonly header: string };
 
 /**
- * The real provider signature headers (Stripe, the mock gateway, the carrier push): the webhook signature names of
- * `CREDENTIAL_HEADER_NAMES` (D-ARCH-113 (1)), so a new provider header gets its foreign column without an edit here.
+ * The real provider signature headers (Stripe, the mock gateway, the carrier push): the names of
+ * `CREDENTIAL_HEADER_NAMES` (D-ARCH-113 (1)) that end in `-signature`. A new provider header WITH that suffix gets its
+ * foreign column without an edit here; one without it (`x-hub-signature-256`, `x-<carrier>-hmac`) fails the totality
+ * test of matrix.test.ts until it gets a column or an entry in `UNPRESENTED_CREDENTIAL_HEADERS` (PR #60 R1-m1).
  */
 export const SIGNATURE_HEADER_NAMES: readonly string[] = Object.freeze(
   CREDENTIAL_HEADER_NAMES.filter((name) => name.endsWith('-signature')),
 );
+
+/**
+ * The credential headers no matrix caller presents yet, each with the task that adds its foreign column and generator
+ * rule (PR60-SEC-02): the CSRF token and the re-authentication proof are proofs, not `ROUTE_AUTHS` kinds. Every other
+ * `CREDENTIAL_HEADER_NAMES` entry must be presented by some caller (matrix.test.ts).
+ */
+export const UNPRESENTED_CREDENTIAL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'x-csrf-token': 'TASK-048',
+  'x-reauth-proof': 'TASK-187',
+});
 
 /** The column id of the caller presenting the real signature header `name`. */
 export const signatureHeaderId = (name: string): string => `signature-header:${name}`;

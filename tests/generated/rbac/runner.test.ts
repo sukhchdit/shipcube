@@ -166,7 +166,7 @@ beforeEach(() => {
 const cookieOf = (req: IncomingMessage): string => req.headers.cookie ?? '';
 
 describe('the RBAC matrix runner over a fake server (R1-m1, PR48-SEC-01)', () => {
-  it('a conformant row passes although the volatile parts differ on every request (date, x-correlation-id, content-length, problem instance and correlation_id)', async () => {
+  it('a conformant row passes although the volatile parts differ on every request (date, x-correlation-id, content-length, problem correlation_id)', async () => {
     expect([...VOLATILE_HEADERS].sort()).toEqual([
       'connection',
       'content-length',
@@ -175,9 +175,37 @@ describe('the RBAC matrix runner over a fake server (R1-m1, PR48-SEC-01)', () =>
       'transfer-encoding',
       'x-correlation-id',
     ]);
-    expect(VOLATILE_PROBLEM_MEMBERS).toEqual(['instance', 'correlation_id']);
+    expect(VOLATILE_PROBLEM_MEMBERS).toEqual(['correlation_id']);
     expect(await runRow(origin, SESSION_TARGET, SESSION_ROW, CALLERS)).toEqual([]);
     expect(await runRow(origin, OPEN_TARGET, OPEN_ROW, CALLERS)).toEqual([]);
+  });
+
+  it('PR #60 R1-n4: the problem `instance` is compared (the same request path for the reference and every cell), so a foreign credential that changes it is named', async () => {
+    bend = ({ req, res }) => {
+      if (cookieOf(req) === '') return false;
+      problem(res, String(req.url), 401, 'AUTH_REQUIRED', { instance: '/api/v1/session/refresh' });
+      return true;
+    };
+    expect(await runRow(origin, SESSION_TARGET, SESSION_ROW, CALLERS)).toEqual([
+      "getThing x refresh-cookie:valid: a credential outside the route's set changed the response (body)",
+      "getThing x refresh-cookie:unknown: a credential outside the route's set changed the response (body)",
+    ]);
+  });
+
+  it('PR #60 R1-n2: repeated Set-Cookie headers are joined, so a clearing cookie added before the reference one (same last value) is named', async () => {
+    bend = ({ req, res }) => {
+      // Every response sets a consent cookie; the web refresh cookie also gets a clearing Set-Cookie before it.
+      res.setHeader(
+        'set-cookie',
+        cookieOf(req).startsWith('__Host-rt_web=')
+          ? ['__Host-rt_web=; Max-Age=0; Path=/; Secure; HttpOnly', 'consent=1; Path=/']
+          : ['consent=1; Path=/'],
+      );
+      return false;
+    };
+    expect(await runRow(origin, SESSION_TARGET, SESSION_ROW, CALLERS)).toEqual([
+      "getThing x refresh-cookie:valid: a credential outside the route's set changed the response (header set-cookie)",
+    ]);
   });
 
   it("a body-derived ETag (Express's weak hash of exactly the body) is volatile with the body; any other ETag a foreign credential adds is named", async () => {

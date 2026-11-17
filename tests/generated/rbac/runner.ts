@@ -73,8 +73,12 @@ export const VOLATILE_HEADERS: ReadonlySet<string> = new Set([
   'content-length',
   'transfer-encoding',
 ]);
-/** Problem members that differ between two identical requests: the per-request correlation id and the request echo. */
-export const VOLATILE_PROBLEM_MEMBERS: readonly string[] = Object.freeze(['instance', 'correlation_id']);
+/**
+ * Problem members that differ between two identical requests: the per-request correlation id only. `instance` is the
+ * request path (apps/api platform/errors/problem.ts), the same for the `none` reference and every cell of a row, so it
+ * is compared (PR #60 code review R1-n4; the PR48-SEC-01 record listed it as volatile, which was wider than needed).
+ */
+export const VOLATILE_PROBLEM_MEMBERS: readonly string[] = Object.freeze(['correlation_id']);
 
 /**
  * Express's default weak ETag of `body` (the `etag` package: the byte length in hex and the first 27 base64 characters

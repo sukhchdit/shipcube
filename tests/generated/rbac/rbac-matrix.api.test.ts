@@ -28,6 +28,7 @@ import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { PERMISSION_DEFINITIONS, ROLES, ROUTE_AUTHS } from '@platform/authz';
 import {
+  appliesTo,
   expectCell,
   FIXED_CALLERS,
   generateMatrix,
@@ -387,11 +388,15 @@ describe('D-ARCH-107/109/110 (ADR-0008 am. 4 and 5) credential kinds, foreign cr
     expect((await run(publicSigned, FIXED_CALLERS.signatureLacks)).status).toBe(204);
   });
 
-  it('D-ARCH-134 the still-stubbed credential kinds: every kind but anonymous is resolved by the seam today, each presented by some caller (the list TASK-052 compares with the mounted authenticators)', () => {
+  it('D-ARCH-134 the still-stubbed credential kinds: every kind but anonymous is resolved by the seam today, each presented by a caller on a route declaring it (the list TASK-052 compares with the mounted authenticators)', () => {
     expect(STUBBED_CREDENTIAL_KINDS).toEqual(['session', 'refresh-cookie', 'quote-token', 'signature']);
     expect(ROUTE_AUTHS.filter((kind) => kind !== 'anonymous')).toEqual([...STUBBED_CREDENTIAL_KINDS]);
-    const presented = new Set<string>([...CALLERS.values()].map(presentedKind));
-    expect(STUBBED_CREDENTIAL_KINDS.filter((kind) => !presented.has(kind))).toEqual([]);
+    // PR #60 R1-n1: a foreign signature header presents `signature` too, but never where a route declares it.
+    const declaredBy = (kind: string): boolean =>
+      contractMatrix.rows.some(
+        (row) => row.route.auth.includes(kind) && [...CALLERS.values()].some((c) => presentedKind(c) === kind && appliesTo(c, row.route)),
+      );
+    expect(STUBBED_CREDENTIAL_KINDS.filter((kind) => !declaredBy(kind))).toEqual([]);
   });
 
   it('REQ-AUTH-018 staff before TOTP: a staff session is 403 on a route without x-mfa-gate-exempt and passes the gate on an exempt one', async () => {

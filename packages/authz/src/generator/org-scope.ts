@@ -14,11 +14,12 @@ export const ORG_PATH_PARAMETER = 'orgId';
 /**
  * A `:name` (Express) or `{name}` (OpenAPI) parameter anywhere in a segment, so `/x/:orgId.json` and `/x/{orgId}.csv`
  * name `orgId` too (PR #48 code review R1-n1, PR48-SEC-05 item 3: a whole-segment match let SEC-TC-01 fail open for
- * that shape). The name is an identifier (`[A-Za-z_]\w*`), so `.json`, `-` and the next `:` end it.
+ * that shape). An Express 5 wildcard (`*name`) binds `req.params.name` as well (PR #60 R1-n5). The name is an
+ * identifier (`[A-Za-z_]\w*`), so `.json`, `-` and the next `:` end it.
  */
-const PATH_PARAMETER = /:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\}/g;
+const PATH_PARAMETER = /[:*]([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\}/g;
 
-/** The parameter names of an Express (`:id`) or OpenAPI (`{id}`) path, in order, inside a segment included. */
+/** The parameter names of an Express (`:id`, `*id`) or OpenAPI (`{id}`) path, in order, inside a segment included. */
 export const pathParameterNames = (path: string): string[] =>
   [...path.matchAll(PATH_PARAMETER)].map((match) => String(match[1] ?? match[2]));
 

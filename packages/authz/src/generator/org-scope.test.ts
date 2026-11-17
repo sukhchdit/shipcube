@@ -42,6 +42,14 @@ describe('[SEC-TC-01] org-scoped routes and their cases', () => {
     ).toEqual(['exportOrganisation', 'exportOrganisationCsv']);
   });
 
+  it('PR #60 R1-n5: an Express 5 wildcard parameter (/files/*orgId) binds req.params.orgId too, so it is enumerated', () => {
+    expect(pathParameterNames('/files/*orgId')).toEqual(['orgId']);
+    expect(pathParameterNames('/files{/*path}/:orgId')).toEqual(['path', 'orgId']);
+    expect(orgScopedRoutes([route('getOrganisationFiles', '/organisations/files/*orgId', 'org:read')]).map((r) => r.operationId)).toEqual([
+      'getOrganisationFiles',
+    ]);
+  });
+
   it('covers tenant routes with an orgId parameter only (operator cross-tenant routes name the organisation by design)', () => {
     const routes = [
       route('getOrganisation', '/organisations/{orgId}', 'org:read'),

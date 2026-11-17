@@ -22,6 +22,7 @@ export {
   SIGNATURE_HEADER_NAMES,
   signatureHeaderId,
   signatureOnlyOf,
+  UNPRESENTED_CREDENTIAL_HEADERS,
   verifiedId,
 } from './matrix.js';
 export {
