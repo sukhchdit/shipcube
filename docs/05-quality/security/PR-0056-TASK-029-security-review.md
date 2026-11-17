@@ -510,3 +510,49 @@ Before this section, main's `tools/ci/check-security-owned-paths.mjs` with `--ba
 |---|---|
 | Round 3 Critical / High / Medium / Low / Info | 0 / 0 / 0 / 0 / 1 (new). Closed: C1 = PR56-SEC-10, PR56-SEC-11. Still open from earlier rounds, all carded: PR56-SEC-03 (MEDIUM), -05 (LOW), -06, -07, -12, -13 (INFO) |
 | Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical or High open; condition C1 is met. The open items have owners in D-ORCH-109 and §R2.6 |
+
+---
+
+# Delta round 4 (merge of `main`, PR56-SEC-14 and NITs)
+
+| Field | Value |
+|---|---|
+| Head | e81d0c9909715f86a973db82c22c03156997d450 |
+| Range | `b5f2d9f..74ffacb`, made of five commits: <ul><li>`191c38b`: code review r2, docs.</li><li>`4e7f696`: merge of `main` `0309d71` (PR #54 `44637dd`, PR #55 `11e2158`).</li><li>`e81d0c9`: code, `transaction: 'none'` afterCommit rule, `FAILED_ENTRY_WAIT_MS` pin, JSDoc.</li><li>`081684b`: evidence only.</li><li>`74ffacb`: code review r3, APPROVED_WITH_NITS.</li></ul>The commits after `e81d0c9` are docs-only, so this record names `e81d0c9`. The PR's merge base is now `0309d71`; `main` was `f81e56a` when this round was written |
+| Lane A evidence | Run 44037544174 on `081684b`: **fast-lane `success`** (Lane B evidence, lint, type-check, unit, base-ref negative fixtures). Since PR #55 the record step runs in the `ci-gate` job; on run 44040977441 (`74ffacb`) it is the only failing step. Main's checker with `--base 0309d71`: the round 3 head `0ecd317` is voided by `tenant-db.ts`, `tenant-db.test.ts`, `define-route.ts`, `execute.ts` and `execute-phases.test.ts` |
+| Lane B evidence | Run `20261117T0701Z_e81d0c9`: api 173, catalog 102, **integration 331** (the audit suites, including "one flush per transaction on PostgreSQL 18", I3 and STREAM_MISMATCH, through the real `withTenantTx`), rls 126, unit 6,719 (2 skipped), 0 failures |
+| Reviewer / date | security-analyst, round 4, 2026-11-17. In the PR worktree, at `74ffacb`, I ran only read-only probes, then appended and committed this section (one push, D-ORCH-119). Line numbers come from single-file reads at `e81d0c9` |
+
+## R4.1 Result
+
+The merge is a pure union and weakens no closed item.
+- `git merge-tree --write-tree 191c38b 0309d71` gives `51fb11f`, which equals the tree of `4e7f696`.
+- The PR and `main` both changed five paths: `tenant-db.ts`, `tenant-db.test.ts`, `execute-phases.test.ts`, `start-api.ts` and `eslint.config.mjs`. All five merged without a manual resolution.
+
+`e81d0c9` closes **PR56-SEC-14**: a `transaction: 'none'` route now counts as committed only below 400 (`execute.ts:269-272`; D-TASK029-25a). `FAILED_ENTRY_WAIT_MS` is pinned at 1,000 ms (`:62`). The JSDoc now matches the behaviour.
+
+The audit store's six statement shapes pass PR #54's raw-statement guard, and the guard still refuses the forms it is meant to refuse (§R4.2).
+
+No new finding. Still open, all carded (D-ORCH-109, §R2.6): PR56-SEC-03 (MEDIUM, TASK-041), -05 (LOW), -06, -07, -12, -13 (INFO).
+
+**Verdict: PASS_WITH_FOLLOW-UPS.**
+
+## R4.2 Checks
+
+| Check | Result |
+|---|---|
+| `tenant-db.ts` union (PR #54 guard beside PR42-SEC-17 tracking) | Both are present. `refusedRawStatement(strings)` runs in `taggedOnly` (`tenant-db.ts:421`) and throws `TenantDbAccessError` before Prisma is called. A refused statement therefore never starts, and there is nothing to track. Every statement that does start is still registered (`state.onStart(started)`, `:340`), and `settle` still loops on a `setImmediate` turn (`:482`). `beforeCommitFailure` (I3) and `contextOrgId` (STREAM_MISMATCH) are unchanged (`:492-527`). The lane B unit titles `[PR42-SEC-17]` K1…B3, T0 pass on the merged code |
+| Audit store SQL under PR #54's guard | **Probe P7**: the real writer and store at `e81d0c9`, run through the merged head's real `createTenantDb`, recorded and flushed two entries with a tokeniser that uses the store's vault statements. These six statements all passed the guard, and the latch stayed clear: vault `INSERT … ON CONFLICT DO NOTHING`, the token lookup, the head lock `WITH lt AS MATERIALIZED (SELECT pg_catalog.set_config('lock_timeout', $1, true)) … FOR UPDATE OF h` (twice), the head create (statement 2b) and the multi-row append CTE. Controls through the same handle, each refused before reaching the transaction: `COMMIT`, `set_config('lock_timeout', $1, false)`, `SET lock_timeout = 0`. A control that must be accepted, the store's transaction-local `set_config(…, true)`, reached the transaction. Integration 331/331 covers the same statements against PostgreSQL 18 |
+| PR56-SEC-09 / -10 / -11 on the merged head | **P5 re-run (A0–A10)**, all as in round 3, except that A9 is now closed: <ul><li>A1–A4: returned failures roll back and schedule no `afterCommit`.</li><li>A5: a FAILED entry is written after the client disconnects.</li><li>A6: no FAILED entry when the failure is the disconnect.</li><li>A7, A8: the deadline writes FAILED (503).</li><li>**A9: a `none` route returning 400 no longer runs `afterCommit`.**</li><li>A10: none after a throw.</li><li>A0: the 201 control runs it once.</li></ul>N0–N3, S1 and V1 are unchanged (filter values recorded, SENSITIVE `%00` gives 200 with its entry, VIEW transaction read-only) |
+| PR56-SEC-02 under the merged `eslint.config.mjs` | **P1' re-run**: C1 (module → `capture.ts`), C2 (another `platform/routing` file → `capture.ts`) and C3 (module → `@platform/audit` writer) are reported, as before. The union kept the `api-pipeline-composition` policy and its order. Y1–Y3 are unchanged (PR56-SEC-12, INFO) |
+| PR56-SEC-08 composition | `start-api.ts:117` still passes `auditConfig: config`. The mount refusals without a tokeniser are unchanged (the files were not touched by the merge) |
+| `FAILED_ENTRY_WAIT_MS` pin and JSDoc | The value is 1,000 (`execute.ts:62`) and is pinned by test. The `recordFailure` JSDoc now states the residual I noted in §R2.5 (a write still running after the wait is detached and not drained at shutdown) |
+
+## R4.3 Record check
+
+Before this section, main's `tools/ci/check-security-owned-paths.mjs` with `--base 0309d71 --head 74ffacb --pr 56` against the worktree failed: every Head row was voided. With this section committed, the newest Head row names `e81d0c9`, and only docs follow it. Any later push to one of the 36 owned paths voids it. A merge of `main` voids it only if `main` changed one of them.
+
+| Field | Value |
+|---|---|
+| Round 4 Critical / High / Medium / Low / Info | 0 / 0 / 0 / 0 / 0 (new). Closed: PR56-SEC-14. Still open, all carded: PR56-SEC-03 (MEDIUM), -05 (LOW), -06, -07, -12, -13 (INFO) |
+| Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical or High open; the merge of `main` is a pure union and weakens no closed item. From security, the PR may merge at this head |
