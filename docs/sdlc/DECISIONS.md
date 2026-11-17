@@ -2651,3 +2651,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 ### D-ORCH-110 · 2026-11-17 · sdlc-orchestrator · PR #54 fix cycle 2/3 dispatched for C3
 - **Decision:** fix cycle 2/3 for C3 + R2-n1 rows; then code-review and security delta round 3 limited to the two lexer copies, the corpus and the tests; then merge.
 - **Reversibility:** High.
+
+### D-TASK286-06a · 2026-11-17 · sdlc-orchestrator · D-TASK286-06 widened to the implemented set (PR #55 fc1 @72dcf5b)
+- **Decision:** the proof-void set is:
+  - lane A inputs;
+  - **every** path the PR range changes, docs included, because format:check covers Markdown;
+  - `tools/deps/**`, `tools/eslint-rules/**`, `tools/stylelint-rules/**`, `tools/lint/**`, `tools/test-support/**`, `tests/fixtures/**` and `LINT_CONTROL_PATHS` (incl. `.semgrep`).
+  - An unknown (null) range yields no proof.
+- **Why:** the implementation is a superset of D-TASK286-06 and is the safer choice; the cost is more `BLOCKED: no code proof` re-pushes (TASK-287 option: run full instead of blocking).
+- **Reversibility:** High.
+
+### D-TASK286-01a · 2026-11-17 · sdlc-orchestrator · D-TASK286-01 corrected (PR #55 R1-m2/R1-n4)
+- **Decision:** the stage-1 pins stay accepted beside stage 2 until TASK-287 retires them; until then the 24 h proof-age rule applies to any stage-1 `ci.yml`. The stage-1 workflow is kept as `tools/ci/fixtures/stage-1/ci.yml` on the workflow branch (`ci/TASK-286-cigatefold-workflow`, from 03a281a), not on the policy branch.
+- **TASK-287 card line (added to D-ORCH-109's pending fold list):** "STAGE-1 RETIREMENT (PR #55 R1-m2, PR55-SEC-10; due in TASK-287's first `ci-workflows` change after the TASK-286 workflow PR is on main): remove `CI_REQUIRED_GATES` (stage 1), `laneScopeFindings`, the stage-1 branches of `topologyOf`/`requiredGatesFor`/`tokenFindings`/`gate()`/`proofSteps` and `tools/ci/fixtures/stage-1/ci.yml` with its tests, so a `ci.yml` that restores a `scans` job is a `required-gates` finding; until then the PR46-SEC-11 24 h proof-age rule applies to any stage-1 `ci.yml`. Also PR55-SEC-05 (rule (g) compares the separate fast-lane outputs) and the optional run-full-instead-of-block for docs pushes without a proof."
+- **Reversibility:** High.
