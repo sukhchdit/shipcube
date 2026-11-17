@@ -290,3 +290,152 @@ Before committing, main's `tools/ci/check-security-owned-paths.mjs` without this
 |---|---|
 | Critical / High / Medium / Low / Info | 0 / 0 / 3 / 4 / 2 |
 | Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical or High open. The three MEDIUMs are latent (empty production module registry) and have owners and due points; PR56-SEC-09 rides the fix cycle that the code review's MAJOR forces; the TASK-028 deferral is accepted with conditions |
+
+---
+
+# Delta round 2 (fix cycle 1)
+
+| Field | Value |
+|---|---|
+| Head | 9746b2f7bf9c07179b8089c84aba0092d2adf656 |
+| Range | `4b02531..9746b2f`: `f750cc4` (code: "roll back returned failures, harden audit capture") and `9746b2f` (evidence only). Docs-only commits in between: `f376377` (code review r1), `38aaef9` and `66a59a8` (this record). `main` was `309fb69` when this round was written; since the merge base it moved by docs and agent notes only |
+| Lane A evidence | Run 44004034694 on `9746b2f`. **fast-lane `success`**: Lane B evidence, lint, type-check, unit, build. **scans**: "Gitleaks (PR commit range)" `success`. The only red step is "Security-owned paths need a review record": the round 1 head `4b02531` no longer binds, because 12 owned paths changed after it |
+| Lane B evidence | Run `20261117T0220Z_f750cc4`: api 173, catalog 102, integration 323, rls 126, unit 6,052 (2 skipped), 0 failures. Merged coverage: lines 99.04 %, branches 96.98 % |
+| Owned paths | 36 net, against the merge base `28c41ed`. Changed in this delta (12): `apps/api/src/platform/audit/{capture,descriptor-runtime}.ts` and `{capture.api,descriptor-runtime,audit-failure.api}.test.ts`, `platform/authz/authorise.ts`, `platform/routing/{define-route,pipeline}.ts`, `platform/tx/execute.ts`, `platform/tx/execute-phases.test.ts`, `eslint.config.mjs`, `tools/lint/audit-capture-boundary.test.ts`. Unowned in the delta: `apps/api/src/app.ts` (passes the capture log) and the run directory |
+| Binding items | D-TASK029-16 (supersedes -04); D-TASK029-17..24; D-ORCH-109 (fix-cycle scope and card lines for TASK-028/041/052/030); code review r1 (`f376377`) R1-M1, R1-m1..m7; this record's round 1 |
+| Reviewer / date | security-analyst, round 2, 2026-11-17. The method constraints are those of round 1. In the PR worktree, already at `9746b2f`, I ran only read-only probes, then appended and committed this section. No code-review round 2 was on `main` or the branch when this was written. Line numbers come from single-file reads at `f750cc4` |
+
+## R2.1 Summary
+
+The fix cycle does what D-TASK029-16 and the round 1 findings asked:
+- **Returned failures.** A returned status of 400 or more now rolls the handler transaction back. 409, 422 and 5xx write FAILED in a transaction of their own; 400, 403 and 404 write nothing.
+- **SEC-01.** The filter summary can no longer be refused because of a value the client chose.
+- **SEC-02.** The capture factory is composed only in `routing/pipeline.ts`.
+- **SEC-04, SEC-08.** `additional[]` routes, and routes that need a tokeniser the composition lacks, are refused at mount.
+- **Code review items.** VIEW handlers run read-only (R1-m6). The new log events carry class-only fields (R1-m7).
+
+Every round 1 probe that showed a gap now shows it closed. PR56-SEC-01, -02, -04 and -09 are closed. -08 is closed: condition 2 is in the code, and condition 1 is the D-ORCH-109 card line.
+
+The rollback change opens one regression. `executeSlot` still schedules the route's `afterCommit` phase for a returned result that has just been rolled back (**PR56-SEC-10, MEDIUM, CWE-696**). The probe ran it after a returned 409, 404 and 500, each time with no committed business row, and also when the client had already gone. That breaks the documented contract "scheduled once the write committed" (D-ARCH-106 (5)), on which external effects such as mail, jobs and later carrier or payment calls rely. The fix is one flag and a test, so it is a merge condition (**C1**).
+
+Smaller items:
+- **PR56-SEC-11 (LOW).** The R1-m4 "client went away" skip makes FAILED entries client-suppressible. I concurred with that skip in round 1 and revise that position here.
+- **PR56-SEC-12 (INFO).** The R3-n2 scan sees only `export … from`.
+- **PR56-SEC-13 (INFO).** A 403 thrown or returned by a handler gets no DENIED entry.
+
+The RouteReturnedError path does not leak the body or headers anywhere else, and the FAILED write cannot race the rolled-back transaction (§R2.5).
+
+Round 2 findings: 0 Critical, 0 High, 1 Medium, 1 Low, 2 Info. Still open from round 1: PR56-SEC-03 (MEDIUM), PR56-SEC-05 (LOW), PR56-SEC-06 and -07 (INFO), each with a card line in D-ORCH-109.
+
+**Verdict: PASS_WITH_CONDITIONS.** C1: PR56-SEC-10 fixed in this PR, verified in a delta round 3 limited to `tx/execute.ts` and its tests.
+
+## R2.2 Method
+
+1. Read the delta `4b02531..f750cc4`, D-TASK029-16..24, D-ORCH-109 and the code review r1. Read Prisma 7.10's `_transactionWithCallback` in the worktree's `@prisma/client` runtime: it awaits ROLLBACK and then rethrows the callback's own error.
+2. **P5, runtime, through the REAL composition.** The probe uses the worktree's `createApp`, `defaultPipelineSlots` (with a signed-in `authenticate` slot), `createWithTenantTx` (TenantDb guard, latch, settle), `createAuditCapture` with a log seam, the writer and `createAfterCommitQueue`. The transaction client is fake and keeps a transaction's statements only when it commits; the tokeniser and store write their work as statements. Each request goes over loopback with `Connection: close`. Cases:
+   - A0: control, 201.
+   - A1–A3: the handler writes, then returns 409 / 404 / 500.
+   - A4: as A1, with a failing FAILED write.
+   - A5: a raw socket destroyed 50 ms after the request, with the handler returning 409 at 300 ms.
+   - N0–N3 and S1 over HTTP (the round 1 filter cases).
+   - V1: the VIEW handler transaction.
+3. **P6, mount.** M1–M6: a full capture and a capture without a tokeniser, against an audited route, an `additional[]` route, and the authorisation slot for a catalogued permission and for `authenticated`. Also the P3 re-run (is `createAuditCapture` still exported by `tx/execute.ts`?) and the head scan regex against three re-export spellings (S1–S3).
+4. **P1' lint** (head `eslint.config.mjs`, `lintText`): controls C1–C3, the old X1 spelling, and three composition-level imports from a feature module (Y1–Y3).
+5. Evidence: the lane A step list and the lane B summary. Record check before and after the commit (§R2.7).
+
+## R2.3 Round 1 findings and code-review items
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR56-SEC-09 (= R1-M1) returned non-2xx commits | **Closed** | P5. A1 (returned 409): business rows 0, one rollback, one FAILED entry in its own transaction, body and `x-probe` header sent as returned. A2 (404): business 0, rollback, no entry. A3 (500): business 0, rollback, FAILED. A4: FAILED write fails, the client still gets the original 409, and `audit.failed_unrecorded` is logged. ADR-0014 / D-TASK029-17: a returned 5xx leaves no completion, so a retry re-executes, as the ADR intends for 5xx. The 4xx replay completion must be stored outside the rolled-back transaction; that is TASK-040, and the idempotency slot still refuses `required`/`optional` routes at mount, so nothing is exposed meanwhile |
+| PR56-SEC-01 (= R1-m2) filter values | **Closed** | P5 over HTTP. N0 `q=abc`, N1 `q=%00`, N2 `q=` and N3 (9,000 characters) each answer 200 with exactly one VIEW entry. S1 (SENSITIVE, `%00`) answers 200 with its entry, where round 1 gave 503. `filterText` (`descriptor-runtime.ts:169`) JSON-encodes an empty or NUL value and caps at `MAX_FILTER_TEXT` = 1,024 code points with an ellipsis. Every output is non-empty, NUL-free and at most 2,049 code units, inside the writer's bounds. A NORMAL view the writer still refuses is now logged (`audit.view_unrecorded`, class-only) |
+| PR56-SEC-02 tx-slot re-export | **Closed**; residual INFO PR56-SEC-12 | P3 re-run: `createAuditCapture` exported by `tx/execute.ts` is `undefined`. P1' controls: C1 (module → `capture.ts`) and C2 (another `platform/routing` file → `capture.ts`) are reported, so the exact-file category `api-pipeline-composition` (`eslint.config.mjs:295, 603`) does not open the folder; C3 is reported. The source scan now covers `platform/tx/**` and `pipeline.ts` and has a mutant for the round 1 spelling |
+| PR56-SEC-04 `additional[]` | **Closed** | P6 M2: refused with `SlotNotImplementedError` (`descriptor-runtime.ts:130-138`), while M1 (the same route without `additional`) mounts |
+| PR56-SEC-08 TASK-028 deferral | **Closed**; both conditions carried | Condition 2 is in code. P6 M3: a capture without a tokeniser refuses an audited route. M4: it refuses a route with a catalogued permission at the authorisation slot (`authorise.ts:93-98`, `capture.ts:151, 216`). M5: it still mounts `authenticated` (which can only answer 401). M6: a full capture mounts. Condition 1 is the D-ORCH-109 card line on TASK-028. A missing IP index or UA parser leaves `ip_hash` / `ua_parsed` null (D-TASK029-21, `entry.ts:444-445`); acceptable, because the IP itself is still tokenised |
+| PR56-SEC-03 denials before the limiter (T-39) | Open, MEDIUM | D-ORCH-109 card line on TASK-041; unchanged code |
+| PR56-SEC-05 / -06 / -07 | Open, LOW / INFO / INFO | D-ORCH-109 card lines on TASK-052 and TASK-030; unchanged code |
+| R1-m4 skip set and 1 s wait | **Implemented**; new LOW PR56-SEC-11 for the "client gone" part | `NO_FAILED_ENTRY` (`capture.ts:115`) adds `TRANSACTION_UNAVAILABLE`, `STATEMENT_TIMEOUT` and `LOCK_TIMEOUT`. `recordFailure` (`execute.ts:294-310`) waits at most `FAILED_ENTRY_WAIT_MS` = 1,000 ms; the write then continues in its own transaction. `afterFailure` never rejects, so the detached write raises no unhandled rejection |
+| R1-m6 read-only VIEW transactions | **Verified** | P5 V1: the VIEW handler's transaction issues `SET TRANSACTION READ ONLY` (`execute.ts`, `readOnlyHandler`). PostgreSQL refuses a later switch to read-write once a query has run, and a write fails with 25006, so it fails closed (500). Side effect: a DOWNLOAD that must write needs a write action or a recording seam |
+| R1-m7 log events | **Verified, no values** | P5 logs: `audit.failed_unrecorded` with keys `code`, `errorClass`, `operationId`, `reason` only. `audit.view_unrecorded` uses the same `failureFields` (`capture.ts:128`); `audit.entity_id_unresolved` carries `operationId` and `action`. No request value, header, body or query text is logged |
+
+## R2.4 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner / due |
+|---|---|---|---|---|---|---|
+| PR56-SEC-10 | `afterCommit` is scheduled for a returned result whose handler transaction was rolled back | MEDIUM | CWE-696 | A04:2021 | `apps/api/src/platform/tx/execute.ts:280` (`return error.result`), `:336-347` (`executeSlot` schedules in `finally`) | senior-developer: **this PR, condition C1** |
+| PR56-SEC-11 | A client that disconnects before its failed mutation answers suppresses the FAILED entry | LOW | CWE-778 | A09:2021 | `apps/api/src/platform/tx/execute.ts:301` | senior-developer: with C1 (same function), else TASK-033 |
+| PR56-SEC-12 | The R3-n2 source scan sees only `export … from`; import-then-export and aliases are invisible; composition-level imports stay lint-clean from modules | INFO | CWE-1061 | A04:2021 | `tools/lint/audit-capture-boundary.test.ts:201`; `eslint.config.mjs:591-605` | Next PR touching `eslint.config.mjs` |
+| PR56-SEC-13 | A 403 thrown or returned by a handler (object-level authorisation) writes no DENIED entry | INFO | CWE-778 | A09:2021 | `apps/api/src/platform/audit/descriptor-runtime.ts` `failedOutcomeApplies`; `capture.ts` `afterFailure` | TASK-033 generator case; the first module with an object-level 403 |
+
+### PR56-SEC-10 (MEDIUM): `afterCommit` runs after a rollback
+
+- **Description.** `run` catches the `RouteReturnedError` that rolled the handler transaction back and returns `error.result` (`execute.ts:280`). `executeSlot` cannot tell that result from a committed one. Its `finally` block (`:342-346`, commented "Committed from here on") schedules `route.afterCommit` with it.
+- **Probe P5.** `afterCommit` ran for:
+  - `ret409 409`, `ret404 404` and `ret500 500` (A1–A3), each with 0 committed business rows;
+  - the A4 repeat;
+  - `slow409 409` (A5), whose client had already disconnected.
+
+  The A0 control `ok201 201` is the only run that followed a commit.
+- **Exploitability / impact.** D-ARCH-106 (5) and the tx-slot header define `afterCommit` as "scheduled once the write committed". That phase is where external effects go: mail, job enqueueing, and later carrier and payment calls. A route that declares `afterCommit` and whose handler returns 409/422/5xx (or 404) after starting its work now triggers the effect for a change that does not exist, such as a confirmation for a booking that rolled back. The CLAUDE.md guardrails ("captured payments without a booked shipment", duplicate labels) are of this shape. Before this cycle a returned failure committed, so the schedule was at least consistent; the rollback made it wrong. No route with `afterCommit` is registered yet. Impact H × likelihood L gives **MEDIUM**.
+- **Remediation.** Carry the commit outcome out of `run` and schedule only after a commit:
+
+  ```ts
+  // execute.ts, run(): a returned failure was rolled back
+  if (error instanceof RouteReturnedError) return { result: error.result, committed: false };
+  // ... normal path and transaction: 'none' routes: { result, committed: true }
+
+  // executeSlot(): send as before, schedule only after a commit
+  const { result, committed } = await run({ route, request, options, audit, lifetime });
+  // finally:
+  if (committed && afterCommit !== undefined && queue !== undefined) queue.schedule(/* as before */);
+  ```
+
+  Fix the "Committed from here on" comment, and the define-route JSDoc of `afterCommit`.
+- **Verification.** Extend `execute-phases.test.ts`: a route with `afterCommit` whose handler returns 409, 404 and 500 shows `rollback`, `send` and **no** `afterCommit` event. The 201 control still runs it. A `transaction: 'none'` route still runs it after the response. A mutant that drops the `committed` check must fail.
+
+### PR56-SEC-11 (LOW): FAILED entries are suppressible by disconnecting
+
+- **Description.** `recordFailure` returns early when `lifetime.clientGone()` (`execute.ts:301`), whatever the failure was. A client that closes its socket while its mutation runs gets no FAILED entry for the 409/422/5xx it caused. In probe P5 A5 the socket was destroyed at 50 ms and the handler returned 409 at 300 ms: rollback, no entry. REQ-AUDIT-010 says the system "shall write" FAILED for these. Code review R1-m4 proposed the skip and I concurred in round 1 (§8a). On reflection the skip should apply only when the failure *is* the disconnect.
+- **Impact.** Failed attempts (state-machine probing, conflicting edits, provoked 5xx) leave no trail at the client's choice. Nothing persisted, and 403 denials are unaffected. Impact L × likelihood H gives **LOW**. Self-induced `LOCK_TIMEOUT`/`STATEMENT_TIMEOUT` (now also skipped) are a weaker variant of the same, accepted for the congestion rationale.
+- **Remediation.** Skip only when the error is the slot's own disconnect abort, for example `lifetime.clientGone() && isDisconnectAbort(error)`, where the abort reason is the `unavailable('client closed the request')` instance. Otherwise write the entry (still bounded by the 1 s wait).
+- **Verification.** The A5 shape (client gone, handler 409) writes one FAILED entry. A request whose `call` was skipped because the client had gone still writes none.
+
+### PR56-SEC-12 (INFO): the R3-n2 scan and composition-level imports
+
+- **Scan.** The head regex (`audit-capture-boundary.test.ts:201`) sees S1 (`export { createAuditCapture } from '…'`). It does not see S2 (`import { createAuditCapture } from '…'; export { createAuditCapture };`) or S3 (`export const makeCapture = createAuditCapture;`). The resolved-file policy does not follow a binding either, so an importer allowed to take `capture.ts` could still hand the factory on. Add an export-side check: every `export` of an importer allowed to take `capture.ts`, whose local binding comes from `../audit/…`, is an offender. Add S2 and S3 as mutants.
+- **Lint.** Y1 (module → `routing/pipeline.js` `defaultPipelineSlots`), Y2 (namespace) and Y3 (module → `platform/db/with-tenant-tx.js` `createWithTenantTx`) are lint-clean. Building a forging path from them needs a transaction runner over the application's Prisma client, the pipeline slots and a hand-built Express request/response with `setPrincipal`. That is far beyond an accidental import, and older than this PR (the db composition). A policy that feature modules do not value-import `platform/routing/pipeline.ts` or the `platform/db` composition files would close it.
+
+### PR56-SEC-13 (INFO): handler-level 403s are not audited as DENIED
+
+DR-A10 defines DENIED as "rejected by authorisation or by a security control". Only the authorisation slot writes PERMISSION_DENIED. A 403 that a handler throws or returns (an object-level check in a service) gets no entry: `failedOutcomeApplies` covers 409/422/5xx only, and a returned 403 now rolls back silently. This was already true at the round 1 head and I missed it there. Most object-level refusals answer 404 (no enumeration), so this is an INFO. When the first module refuses with 403 inside a handler, give the capture a DENIED path for `AUTHZ_DENIED` thrown or returned after authorisation, and add a TASK-033 generator case.
+
+## R2.5 Regression hunt (rollback change)
+
+| Question | Result |
+|---|---|
+| Can the FAILED write race the rolled-back transaction? | No. Prisma 7.10 `_transactionWithCallback` catches the callback's error, awaits ROLLBACK and then rethrows the same error instance (read in the worktree's runtime). `withTenantTx` rejects only after that and the admission release. `recordFailure` starts afterwards (P5 A1 order: rollback, then the FAILED transaction commits) |
+| Does `RouteReturnedError` leak the body or headers? | No new exposure. `run` catches it and returns the handler's own result, the same body and headers a returned result had at round 1; the client sees nothing more (A1 sends the handler's body and `x-probe` header unchanged). It never reaches the problem handler or a logger: `withTenantTx.mapped` passes non-database errors through unchanged, and the Prisma rethrow keeps `instanceof`. Optional hardening: hold `result` in a non-enumerable property, so that a future wrapper that lets the error escape cannot serialise a body into a log |
+| `afterCommit` after a rollback | **PR56-SEC-10** |
+| FAILED skipped for a gone client | **PR56-SEC-11** |
+| The detached FAILED write after the 1 s wait | It continues in its own transaction after the response. It is not part of the shutdown drain, so a process stopping within that second can lose it, and a fast client retry can be recorded before it. No integrity effect, because the business change rolled back. Note only |
+| Read-only VIEW transactions | Fail closed (25006). No bypass: switching back to read-write after the first query is refused by PostgreSQL, and the guard refuses raw setters (020-D) |
+| Mount refusals | Fail closed at boot (P6). The authorisation-slot refusal also covers NONE routes with a catalogued permission (M4), which is what a 403 needs |
+
+## R2.6 Follow-ups
+
+| Owner | Items | Due |
+|---|---|---|
+| senior-developer (this PR, fix cycle 2) | **C1 PR56-SEC-10** with its tests; PR56-SEC-11 (same function); optional `RouteReturnedError.result` hardening | Before merge (C1); 11 with C1 if taken, else TASK-033 |
+| security-analyst | Delta round 3: `tx/execute.ts` and its tests; P5 A1–A5 re-run (`afterCommit` absent after a rollback, present after 201); the record check | After fix cycle 2 |
+| Next PR touching `eslint.config.mjs` | PR56-SEC-12 scan and policy | That PR |
+| TASK-033 | PR56-SEC-13 case; the timer residual of PR42-SEC-17; filter cases of PR56-SEC-01 | Before G3 |
+| TASK-041 / TASK-052 / TASK-030 | PR56-SEC-03 / -05 and -07 / -06, per the D-ORCH-109 card lines | As carded |
+
+## R2.7 Record check
+
+Before this section, main's `tools/ci/check-security-owned-paths.mjs` with `--base 28c41ed --head 9746b2f --pr 56` against the worktree failed, as lane A did: the record named `4b02531`, and 12 owned paths changed after it. With this section committed, the newest Head row names `9746b2f`; the round 1 row only adds a note. Any later push to an owned path voids it.
+
+| Field | Value |
+|---|---|
+| Round 2 Critical / High / Medium / Low / Info | 0 / 0 / 1 / 1 / 2 (new); open from round 1: 1 Medium, 1 Low, 2 Info |
+| Verdict | **PASS_WITH_CONDITIONS.** No Critical or High open. C1: PR56-SEC-10 (`afterCommit` scheduled after a rolled-back returned result) is fixed in this PR and verified in a delta round 3 before merge. PR56-SEC-01, -02, -04, -08 and -09 are closed |
