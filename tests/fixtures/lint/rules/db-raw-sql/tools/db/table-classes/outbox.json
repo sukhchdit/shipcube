@@ -1,0 +1,5 @@
+{
+  "$comment": "Miniature manifest of the platform/db-raw-sql fixture root: platform/system-model-owner reads the manifests for every raw template (D-ARCH-124) and fails closed without them.",
+  "module": "outbox",
+  "tables": [{ "name": "outbox_events", "class": "SYSTEM" }]
+}

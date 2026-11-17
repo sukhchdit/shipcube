@@ -30,11 +30,31 @@
  *    of a tagged template (an alias `const q = db.$queryRaw`, `Reflect.apply(db.$queryRaw, …)`, a destructured key);
  *  - a computed member of a database handle (`db[k]`, `tx[name]`; by name, see `isDbHandle`), which hides the member;
  *  - `SET LOCAL` in source text (it cannot take a bind parameter, 42601; settings go through the transaction-local
- *    setter in withTenantTx).
+ *    setter in withTenantTx);
+ *  - PR44-SEC-05 (TASK-020 part 020-D): a tagged `$queryRaw` / `$executeRaw` template whose statement ends, nests or
+ *    prepares the transaction (`COMMIT`, `ROLLBACK`, `END`, `BEGIN`, `SAVEPOINT`, …), changes the pooled session
+ *    (`SET` in any form, `RESET`, `DISCARD`, `LISTEN`, `NOTIFY`, `EXECUTE`, the cursor statements `DECLARE` /
+ *    `FETCH` / `MOVE` / `CLOSE`, a session advisory lock, PR54-SEC-02 (a); `pg_notify`, PR54-SEC-08), names a
+ *    function that runs SQL given as text (`query_to_xml*`, `ts_stat`, `ts_rewrite`, PR54-SEC-07), is an anonymous
+ *    `DO` block, calls the
+ *    setting function other than transaction-local (a literal `true` is_local and a literal name on the
+ *    transaction-local list), names a string-syntax setting (PR54-SEC-01 (e)) or updates `pg_settings`
+ *    (D-SEC-PR42-02), or cannot be read (fail closed; a character outside ASCII outside a string or comment
+ *    included, PR54-SEC-01 (b)). Classified by ./raw-sql-lexer.mjs, the twin of the `TenantDb`
+ *    run-time guard (apps/api/src/platform/db/raw-statement.ts). Option `allow: ['read-only-transaction']` admits
+ *    exactly `SET TRANSACTION READ ONLY` (withTenantTx only, eslint.config.mjs). Option `only: ['statement']` runs
+ *    this check alone: package sources (packages/*\/src, code review R1-n3 of PR #54), where the rest of the rule
+ *    applies only to the planned Prisma files.
+ *    Residuals (pinned in the shared corpus): a function or procedure whose BODY does any of this (`SELECT f()`) is
+ *    invisible here; function bodies are bootstrap/migration DDL, owned by that lane's linter and review, and
+ *    application roles cannot create functions. The readers that build their own query from a name
+ *    (`table_to_xml*`, `schema_to_xml*`, `database_to_xml*`, `cursor_to_xml*`) are PR54-SEC-02 (b), due before
+ *    TASK-073's first raw statement.
  * Legal: tagged `` Prisma.sql`… ${v}` `` fragments, `Prisma.join(ids)`, `Prisma.join(ids, ', ')`, tagged
  * `` db.$queryRaw`…` ``. Scoped by eslint.config.mjs; tests are excluded there (they assert that the Proxy refuses
  * these shapes).
  */
+import { refusedStatement, templateText } from './raw-sql-lexer.mjs';
 import { stringTextVisitor } from './string-literals.mjs';
 
 /** Members that interpolate SQL text. */
@@ -46,6 +66,14 @@ const ESCAPE_MEMBERS = new Map([
   ['requestTransaction', 'requestTransaction'],
 ]);
 const TAGGED_ONLY = new Set(['$queryRaw', '$executeRaw']);
+/** `rawStatement` wording per refused form of ./raw-sql-lexer.mjs. */
+const RAW_STATEMENT_WHAT = {
+  'transaction-control': 'end, nest or prepare the transaction',
+  session: 'change the pooled session',
+  'anonymous-block': 'be an anonymous DO block',
+  'session-setter': 'set a setting beyond the transaction',
+  unreadable: 'be unreadable to the lint',
+};
 /** Names of database handles for the `db[k]` check (see `isDbHandle`). */
 const DB_HANDLE_NAME = /^(?:db|tx|prisma|client)$|(?:Db|Tx|Client|Prisma)$/u;
 const SET_LOCAL = /\bset\s+local\b/iu;
@@ -132,8 +160,19 @@ export default {
     docs: {
       description: 'Forbid unsafe raw-SQL shapes, the escapes from the tenant transaction and SET LOCAL text in application database code.',
     },
-    schema: [],
+    schema: [
+      {
+        type: 'object',
+        properties: {
+          allow: { type: 'array', items: { enum: ['read-only-transaction'] }, uniqueItems: true },
+          only: { type: 'array', items: { enum: ['statement'] }, uniqueItems: true },
+        },
+        additionalProperties: false,
+      },
+    ],
     messages: {
+      rawStatement:
+        "A raw statement may not {{what}} ({{detail}}): the tenant transaction's commit, its read-only mode and the pooled session belong to withTenantTx; the TenantDb guard refuses it at run time too (PR44-SEC-05).",
       unsafeMember:
         "'{{name}}' interpolates SQL: use the tagged $executeRaw/$queryRaw templates (bind parameters) (ADR-0005 am. 10 item 4).",
       parent:
@@ -172,6 +211,9 @@ export default {
   },
   create(context) {
     const { sourceCode } = context;
+    const options = /** @type {{ allow?: string[]; only?: string[] } | undefined} */ (context.options[0]);
+    const allowReadOnlyTransaction = (options?.allow ?? []).includes('read-only-transaction');
+    const statementOnly = (options?.only ?? []).includes('statement');
     /** One finding per node, whichever path reaches it first. */
     const reported = new Set();
     /** Variables bound (directly or derived) to the Prisma client or one of its helpers. */
@@ -459,8 +501,28 @@ export default {
     const strings = stringTextVisitor((node, text) => {
       if (SET_LOCAL.test(text)) context.report({ node, messageId: 'setLocal' });
     });
+    /** @param {import('estree').TaggedTemplateExpression} node */
+    const checkStatement = (node) => {
+      /** @type {import('estree').Node} */
+      let tag = node.tag;
+      while (WRAPPERS.has(tag.type)) tag = /** @type {import('estree').Node & { expression: import('estree').Node }} */ (tag).expression;
+      const name =
+        tag.type === 'Identifier' ? tag.name : tag.type === 'MemberExpression' ? staticKey(tag.property, tag.computed) : undefined;
+      if (name === undefined || !TAGGED_ONLY.has(name)) return;
+      const text = templateText(node.quasi.quasis.map((quasi) => quasi.value.cooked));
+      /** @type {import('./raw-sql-lexer.mjs').Refusal | undefined} */
+      const refusal =
+        text === undefined
+          ? { form: 'unreadable', detail: 'a template part with an invalid escape' }
+          : refusedStatement(text, { allowReadOnlyTransaction });
+      if (refusal !== undefined) report(node.quasi, 'rawStatement', { what: RAW_STATEMENT_WHAT[refusal.form], detail: refusal.detail });
+    };
+
+    // Code review R1-n3 (PR #54): `only: ['statement']` runs the PR44-SEC-05 statement check alone (packages/*/src).
+    if (statementOnly) return { TaggedTemplateExpression: checkStatement };
     return {
       ...strings,
+      TaggedTemplateExpression: checkStatement,
       Program(program) {
         // Imports first, so a later finding on the same node (the belt-and-braces checks) is not reported twice.
         for (const statement of program.body) {

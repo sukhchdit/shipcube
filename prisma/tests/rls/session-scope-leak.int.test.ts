@@ -44,6 +44,14 @@ ALTER TABLE public.rls_leak_shipments FORCE ROW LEVEL SECURITY;
 CREATE POLICY p_rls_leak_shipments__tenant ON public.rls_leak_shipments FOR ALL TO platform_app
   USING (org_id = platform.app_org_id()) WITH CHECK (org_id = platform.app_org_id());
 GRANT SELECT ON public.rls_leak_shipments TO platform_app;
+-- A function whose BODY sets the value session-level: the TenantDb raw guard's stated residual (PR44-SEC-05; the
+-- runtime roles cannot create functions, so the migrator creates it here).
+CREATE FUNCTION public.rls_leak_plant(org uuid) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM set_config('app.org_id', org::text, false);
+END
+$$;
+GRANT EXECUTE ON FUNCTION public.rls_leak_plant(uuid) TO platform_app;
 `;
 
 let db: PlatformPostgres;
@@ -229,9 +237,19 @@ describe('PR11-SEC-09 items 1-4: the composition root (platform/db/runtime.ts) w
       await expect(runtime.readinessCheck.check(signal())).resolves.toBeUndefined();
       expect((await tenantTx.withTenantTx(tenant(ORG_A), probe)).rows).toEqual([ORG_A, ORG_A]);
 
-      // A callback that bypasses the lint plants a session-level value on the one pooled backend (F-04 hazard).
+      // A callback that bypasses the lint: the TenantDb raw guard refuses the session-level setter before Prisma is
+      // called (PR44-SEC-05, TASK-020 part 020-D), so nothing reaches the backend ...
+      await expect(
+        tenantTx.withTenantTx(tenant(ORG_A), async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.org_id', ${ORG_A}, false)`;
+        }),
+      ).rejects.toThrow('session-setter statement');
+      expect(runtime.sessionContextLeaks()).toBe(0);
+      expect((await tenantTx.withTenantTx(tenant(ORG_B), probe)).rows).toEqual([ORG_B]);
+      // ... but a function whose body sets the value is the guard's stated residual, and it plants a session-level
+      // value on the one pooled backend (F-04 hazard). The detector below is the backstop for it.
       await tenantTx.withTenantTx(tenant(ORG_A), async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.org_id', ${ORG_A}, false)`;
+        await tx.$executeRaw`SELECT public.rls_leak_plant(${ORG_A}::uuid)`;
       });
       const error = await rejection(tenantTx.withTenantTx({ ...tenant(ORG_B), correlationId: 'rls-leak-runtime' }, probe));
       expect(error).toMatchObject({ reason: 'DB_SESSION_CONTEXT_LEAK', securityEvent: 'db_session_context_leak' });

@@ -94,7 +94,8 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
   });
   // Every exit after a log line lets the line reach stdout first (R2-n7, R3-n1).
   const exit = exitAfterFlush({ stream: deps.stdout, exit: deps.exitProcess });
-  // Uncaught exceptions and unhandled rejections: one redacted fatal line, flushed, then exit 1 (PR20-SEC-06).
+  // Uncaught exceptions and unhandled rejections: one redacted line, flushed, then the exit code that
+  // installProcessErrorHandlers chooses for the error (PR20-SEC-06).
   installProcessErrorHandlers({ log, exit, source: deps.processEvents });
   // A StorageConfigError thrown here reaches the handlers above as one redacted fatal line (PR30-SEC-11).
   const services = deps.createRuntimeServices(config, 'api', log, secrets);
@@ -166,7 +167,8 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
 /**
  * main.ts's rejection policy: a startApi rejection is re-raised as an uncaught exception, as the rejection of the
  * former top-level-await entry point was. The process error handlers startApi installed report it as one redacted
- * fatal line and exit 1 (PR20-SEC-06, PR30-SEC-11). `schedule` is a test seam (default queueMicrotask).
+ * line and exit with the code they choose for the error (PR20-SEC-06, PR30-SEC-11). `schedule` is a test seam
+ * (default queueMicrotask).
  */
 export function raiseStartupError(error: unknown, schedule: (task: () => void) => void = queueMicrotask): void {
   schedule(() => {
