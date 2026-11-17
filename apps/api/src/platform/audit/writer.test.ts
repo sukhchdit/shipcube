@@ -34,6 +34,8 @@ function port(): AuditSqlPort & { readonly bound: unknown[][] } {
       throw new Error('not expected');
     },
     track: (work) => work(),
+    beforeCommit: () => undefined,
+    contextOrgId: () => ORG,
   };
 }
 
@@ -47,9 +49,11 @@ describe('[PR #42 R1-n5] the composed writer takes DB_AUDIT_LOCK_TIMEOUT_MS from
   it('a supplied store and the other options pass through; the lock timeout still comes from the configuration', async () => {
     const calls: Array<{ readonly id: string; readonly lockTimeoutMs: number }> = [];
     const store: AuditStore = {
-      append: (_db, row, options) => {
-        calls.push({ id: row.id, lockTimeoutMs: options.lockTimeoutMs });
-        return Promise.resolve({ id: row.id, streamId: row.streamId, streamSeq: 1, occurredAt: 'x', prevHash: '', entryHash: '' });
+      appendBatch: (_db, rows, options) => {
+        for (const row of rows) calls.push({ id: row.id, lockTimeoutMs: options.lockTimeoutMs });
+        return Promise.resolve(
+          rows.map((row) => ({ id: row.id, streamId: row.streamId, streamSeq: 1, occurredAt: 'x', prevHash: '', entryHash: '' })),
+        );
       },
       insertVaultRows: () => Promise.reject(new Error('not used')),
     };

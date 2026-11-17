@@ -331,6 +331,8 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/api/src/platform/audit/**', category: 'api-platform-audit' },
   { pattern: 'apps/api/src/platform/audit/capture.ts', category: 'api-audit-capture' },
   { pattern: 'apps/api/src/platform/tx/**', category: 'api-tx-slot' },
+  // The pipeline composition builds the one capture (PR56-SEC-02: the tx slot no longer re-exports the factory).
+  { pattern: 'apps/api/src/platform/routing/pipeline.ts', category: 'api-pipeline-composition' },
   ...AUDIT_WRITER_ALLOW_LIST.map((pattern) => ({ pattern, category: 'audit-writer-caller' })),
   // The server-only logging subpath of @platform/shared (Pino; TASK-010, PR #20 M1): the resolved-file arm of its guard.
   { pattern: SHARED_LOGGING, category: 'shared-logging' },
@@ -636,14 +638,18 @@ const BOUNDARIES_POLICIES = [
   //     audit-writer allow-list (it composes the writer over the store), so `platform/audit-writer-allowlist` is off in
   //     it and cannot see what it hands out. Judged on the RESOLVED file, so no spelling gets past (`./`, `..`,
   //     `platform/./audit`, a re-export, `import()`): api code outside the allow-list, tests excepted, value-imports
-  //     nothing from that folder; its types stay importable. The one exception is the request pipeline's tx slot,
-  //     which mounts the capture hook (capture.ts) and nothing else from it. Last matching policy decides.
+  //     nothing from that folder; its types stay importable. The exceptions are the request pipeline's tx slot, which
+  //     mounts the capture hook (capture.ts), and the pipeline composition (routing/pipeline.ts), which builds it; both
+  //     take capture.ts and nothing else from the folder (PR56-SEC-02). Last matching policy decides.
   {
     from: { file: { categories: { anyOf: ['app'], noneOf: ['test', 'audit-writer-caller'] }, captured: { app: 'api' } } },
     disallow: { to: toLayer('api-platform-audit'), dependency: { kind: 'value' } },
     message: AUDIT_COMPOSITION_MESSAGE,
   },
-  { from: { file: { categories: { anyOf: ['api-tx-slot'], noneOf: ['test'] } } }, allow: { to: toLayer('api-audit-capture') } },
+  {
+    from: { file: { categories: { anyOf: ['api-tx-slot', 'api-pipeline-composition'], noneOf: ['test'] } } },
+    allow: { to: toLayer('api-audit-capture') },
+  },
 
   // --- The Prisma query counter is a test seam (NFR-PERF-006, D-TASK276-03; PR34-SEC-01): only test files (including
   //     module and app `tests/` folders, i.e. the API test app builder) and prisma/tests import it, so the production

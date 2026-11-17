@@ -107,10 +107,12 @@ describe('[PR32-SEC-03] slot stubs refuse at mount what they cannot honour (cond
       ...extra,
     });
 
-  it('the audit stub refuses an audited route, naming TASK-029; an injected audit hook (TASK-029) mounts it', () => {
+  it('without a configured capture an audited route is refused, naming TASK-029; an injected audit hook mounts it', () => {
     const route = tenantRoute({ audit: { action: 'CREATE', entity: 'thing', sensitivity: 'NORMAL', reasonRequired: false } });
     expect(() => appWith([route])).toThrow(SlotNotImplementedError);
-    expect(() => appWith([route])).toThrow(/audit slot stub cannot honour audit action CREATE on createThing; TASK-029/);
+    expect(() => appWith([route])).toThrow(
+      /audit slot stub cannot honour audit action CREATE on createThing; a configured audit capture \(TASK-029\)/,
+    );
     const execute = executeSlot({ tenantTx: runner, audit: () => Promise.resolve() });
     expect(() => appWith([route], { ...defaultPipelineSlots({ tenantTx: runner }), execute })).not.toThrow();
   });
@@ -215,7 +217,7 @@ describe('[PR #32 m2] [PR32-SEC-05 (a)/(b)] composition invariants live in creat
 });
 
 describe('[PR32-SEC-05 (c)] [PR #32 n4] handlers see a frozen transport view, never the live request', () => {
-  it('passes ip and user agent only', async () => {
+  it('passes ip, user agent, X-Client-App and the route template only', async () => {
     let seen: unknown;
     const route = fixtureRoute({
       operationId: 'getThing',
@@ -225,10 +227,15 @@ describe('[PR32-SEC-05 (c)] [PR #32 n4] handlers see a frozen transport view, ne
         return { status: 204 };
       },
     });
-    await call(appWith([route]), '/api/v1/thing', { headers: { 'User-Agent': 'probe/1.0' } });
+    await call(appWith([route]), '/api/v1/thing', { headers: { 'User-Agent': 'probe/1.0', 'X-Client-App': 'web' } });
     const ctx = seen as Record<string, unknown>;
     expect(ctx).not.toHaveProperty('req');
-    expect(ctx['transport']).toEqual({ ip: expect.stringContaining('127.0.0.1'), userAgent: 'probe/1.0' });
+    expect(ctx['transport']).toEqual({
+      ip: expect.stringContaining('127.0.0.1'),
+      userAgent: 'probe/1.0',
+      clientApp: 'web',
+      routeTemplate: '/api/v1/thing',
+    });
     expect(Object.isFrozen(ctx['transport'])).toBe(true);
   });
 });

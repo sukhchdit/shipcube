@@ -281,7 +281,7 @@ describe('[AT-US-087-07] a fresh database: the lane applies 91-audit-actions-v2.
     const valid = prepareEntry(entry(org, 'SESSION_REVOKED'), { id: forgedId, systemShard: 0 }).complete([]);
     const forged = { ...valid, action: 'FOO' } as unknown as AuditRowDraft;
     const error = await rejection(
-      fresh.runner.withTenantTx(tenant(org), (db) => store.append(db, forged, { lockTimeoutMs: LOCK_TIMEOUT_MS, actorStamp: USER })),
+      fresh.runner.withTenantTx(tenant(org), (db) => store.appendBatch(db, [forged], { lockTimeoutMs: LOCK_TIMEOUT_MS, actorStamp: USER })),
     );
     expect(error).toBeInstanceOf(DbError);
     expect(error).toMatchObject({ status: 500, sqlState: '23514' });

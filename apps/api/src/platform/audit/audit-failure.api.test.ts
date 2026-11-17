@@ -18,6 +18,7 @@ import { auditDbErrorMapping, createWithTenantTx } from '../db/with-tenant-tx.js
 import { defaultPipelineSlots } from '../routing/pipeline.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { createRuntimeLog } from '../runtime/log.js';
+import { executeSlot } from '../tx/execute.js';
 import type { AuditHook } from './capture.js';
 
 /** A transaction client that answers the context statement with a clean session (no database). */
@@ -73,7 +74,8 @@ beforeAll(async () => {
     modules: [{ name: 'fixtures', routes: [route] }],
     tenantTx: runner,
     logger: createRuntimeLog('api', { write: () => true }),
-    pipeline: defaultPipelineSlots({ tenantTx: runner, audit: hook }),
+    // The tx slot's audit seam is not a pipeline option (PR #56 security review §6): this suite builds the slot itself.
+    pipeline: { ...defaultPipelineSlots({ tenantTx: runner }), execute: executeSlot({ tenantTx: runner, audit: hook }) },
   });
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));

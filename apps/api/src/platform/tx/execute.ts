@@ -5,7 +5,13 @@
  *  2. `call` (optional) with no transaction, no database handle and an AbortSignal (request deadline, client gone). The
  *     deadline is ENFORCED (D-ORCH-069): the slot stops waiting when the signal aborts and answers a retryable 503
  *     (`Retry-After`), whether or not `call` honours the signal; a client already gone skips `call`;
- *  3. `handler` plus the audit hook in ONE `withTenantTx`, the only write transaction, committed;
+ *  3. `handler` plus the audit hook in ONE `withTenantTx`, the only write transaction, committed (the hook records
+ *     the route's entry and runs the transaction's one audit flush as its last database work, TASK-029). A returned
+ *     status of 400 or more rolls it back and is sent as returned (D-TASK029-16); a VIEW / DOWNLOAD route's handler
+ *     transaction is read-only (R1-m6);
+ *  3a. a VIEW / DOWNLOAD route's entry in its own short transaction, before anything is sent (fail closed for
+ *     SENSITIVE, 503 AUDIT_UNAVAILABLE); after a failed step 1, 2 or 3 of a mutating route, its FAILED entry (best
+ *     effort, at most FAILED_ENTRY_WAIT_MS, none when the failure is the client's disconnect);
  *  4. send the handler's result (a stream result is completed here, after COMMIT, under the same signal and deadline;
  *     TASK-044 owns its framing);
  *  5. `afterCommit` (optional), scheduled once the write committed (also when sending or the stream fails afterwards),
@@ -22,22 +28,23 @@
 import { ANONYMOUS_ACTOR_ID, AppError, SYSTEM_ACTOR_ID } from '@platform/shared';
 import type { Request, Response } from 'express';
 
-import { type AuditHook, captureAudit } from '../audit/capture.js';
+import { type AuditCapture, type AuditHook, type MountedAudit, NOT_AUDITED, withoutCapture } from '../audit/capture.js';
 import { requestContextOf } from '../context/request-context.js';
 import type { TenantContext, TenantTxRunner } from '../db/index.js';
-import type {
-  PhaseResults,
-  Principal,
-  RouteContext,
-  RouteDescriptor,
-  RouteRequestContext,
-  RouteResult,
-  RouteStream,
-  RouteTransport,
+import {
+  type PhaseResults,
+  type Principal,
+  type RouteContext,
+  type RouteDescriptor,
+  type RouteRequestContext,
+  type RouteResult,
+  RouteReturnedError,
+  type RouteStream,
+  type RouteTransport,
 } from '../routing/define-route.js';
 import { inputOf, isPrivateResponse, principalOf, PRIVATE_CACHE_CONTROL, routeTemplateOf } from '../routing/route-state.js';
 import type { RouteSlot } from '../routing/slot.js';
-import { abortable } from './abortable.js';
+import { abortable, deadline } from './abortable.js';
 import type { AfterCommitQueue } from './after-commit.js';
 
 /**
@@ -47,6 +54,12 @@ import type { AfterCommitQueue } from './after-commit.js';
  * external clients keep their own, shorter timeouts (ADR-0011, TASK-113).
  */
 export const CALL_DEADLINE_MS = 20_000;
+
+/**
+ * How long the slot waits for the best-effort FAILED entry of a failed request before it answers the failure (R1-m4):
+ * the write goes on in its own transaction, but a slow one never holds the error response.
+ */
+export const FAILED_ENTRY_WAIT_MS = 1_000;
 
 /** `Retry-After` of the 503 a deadline or an early disconnect answers (the request may simply be repeated). */
 export const DEADLINE_RETRY_AFTER_SECONDS = 1;
@@ -58,6 +71,12 @@ export interface ExecuteOptions {
    * last line of defence.
    */
   readonly tenantTx: TenantTxRunner<unknown> | undefined;
+  /**
+   * The audit capture (TASK-029; createApp builds it from `DB_AUDIT_LOCK_TIMEOUT_MS`). Without it an audited route is
+   * refused when it is mounted (`withoutCapture`, PR32-SEC-03).
+   */
+  readonly capture?: AuditCapture;
+  /** Test seam: replaces the in-transaction audit hook of every route (the capture's other steps stay off). */
   readonly audit?: AuditHook;
   /**
    * Runs the `afterCommit` phases and drains them at shutdown (createApp passes the process's queue). Required by a
@@ -158,6 +177,11 @@ function unavailable(why: string): AppError {
 interface RequestLifetime {
   /** The request signal; the first read arms the deadline (`call`, or the stream of a route without `call`). */
   readonly signal: () => AbortSignal;
+  /**
+   * `error` is this request's own disconnect abort (the client closed the connection before the response finished,
+   * and that abort, not another failure, ended the request): it gets no FAILED entry (R1-m4, PR56-SEC-11).
+   */
+  readonly isDisconnect: (error: unknown) => boolean;
   readonly release: () => void;
 }
 
@@ -170,8 +194,11 @@ function requestLifetime(res: Response, deadlineMs: number): RequestLifetime {
   const abort = (why: string): void => {
     if (!controller.signal.aborted) controller.abort(unavailable(why));
   };
+  let disconnect: AppError | undefined;
   const onClose = (): void => {
-    if (!res.writableFinished) abort('client closed the request');
+    if (res.writableFinished || controller.signal.aborted) return;
+    disconnect = unavailable('client closed the request');
+    controller.abort(disconnect);
   };
   if (res.closed || res.destroyed) onClose();
   else res.once('close', onClose);
@@ -184,6 +211,7 @@ function requestLifetime(res: Response, deadlineMs: number): RequestLifetime {
       }
       return controller.signal;
     },
+    isDisconnect: (error) => disconnect !== undefined && error === disconnect,
     release: () => {
       clearTimeout(timer);
       res.off('close', onClose);
@@ -192,20 +220,34 @@ function requestLifetime(res: Response, deadlineMs: number): RequestLifetime {
 }
 
 /** The frozen transport view a handler may read (PR32-SEC-05 (c), PR #32 n4): never the live request or response. */
-export function transportOf(req: Request): RouteTransport {
-  return Object.freeze({ ip: req.ip ?? '', userAgent: req.get('user-agent') ?? '' });
+export function transportOf(req: Request, routeTemplate = ''): RouteTransport {
+  return Object.freeze({
+    ip: req.ip ?? '',
+    userAgent: req.get('user-agent') ?? '',
+    clientApp: req.get('x-client-app') ?? '',
+    routeTemplate,
+  });
 }
 
 interface Phases {
   readonly route: RouteDescriptor;
   readonly request: RouteRequestContext;
   readonly options: ExecuteOptions;
-  readonly audit: AuditHook;
+  readonly audit: MountedAudit;
   readonly lifetime: RequestLifetime;
 }
 
+/**
+ * What steps 1-3 produced: the result to send, and whether the write committed. Only a committed result schedules
+ * `afterCommit` (D-ARCH-106 (5)); a returned failure was rolled back (D-TASK029-16, PR56-SEC-10).
+ */
+interface RunOutcome {
+  readonly result: RouteResult;
+  readonly committed: boolean;
+}
+
 /** Steps 1-3 for a tenant route; `transaction: 'none'` runs the handler (and its audit hook) without a transaction. */
-async function run({ route, request, options, audit, lifetime }: Phases): Promise<RouteResult> {
+async function run({ route, request, options, audit, lifetime }: Phases): Promise<RunOutcome> {
   const write = async (db: unknown, phases: PhaseResults<unknown, unknown>): Promise<RouteResult> => {
     const ctx: RouteContext = Object.freeze({ ...request, db });
     // The descriptor erases the phase result types; this is the one place that hands them on (define-route.ts).
@@ -215,33 +257,88 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     if (result.stream !== undefined && result.body !== undefined) {
       throw new RouteResultError(route.operationId, 'a stream result has no body');
     }
-    await audit(ctx, result);
+    // D-TASK029-16 (ADR-0007 §Capture, REQ-AUDIT-010): a returned status of 400 or more commits nothing; the result is
+    // sent as returned, and a 409, 422 or 5xx gets its FAILED entry in a transaction of its own.
+    if (result.status >= 400 && db !== undefined) throw new RouteReturnedError(result);
+    await audit.inTransaction(ctx, result);
     return result;
   };
   const none: PhaseResults<unknown, unknown> = Object.freeze({ loaded: undefined, called: undefined });
-  if (route.transaction === 'none') return write(undefined, none);
+  // No transaction to roll back: the result is sent as returned; one rule with the tenant routes for afterCommit, which
+  // runs after a result below 400 only (code review R2-n2, PR56-SEC-14).
+  if (route.transaction === 'none') {
+    const result = await write(undefined, none);
+    return { result, committed: result.status < 400 };
+  }
   if (options.tenantTx === undefined) throw new AppError('SERVICE_UNAVAILABLE', { cause: new Error('no tenant transaction runner') });
   const runner = options.tenantTx;
   const tenant = tenantContextOf(request.principal, request.correlationId);
   const { load, call } = route;
-  const loaded =
-    load === undefined
-      ? undefined
-      : await runner.withTenantTx(tenant, async (db) => await load(Object.freeze({ ...request, db })), { readOnly: true });
-  let called: unknown;
-  if (call !== undefined) {
-    const signal = lifetime.signal();
-    // A client already gone (during load, authn or validation) gets no external effect and no write (PR #44 R1-m1).
-    signal.throwIfAborted();
-    called = await abortable(call(Object.freeze({ ...request, signal }), loaded as never), signal);
+  let result: RouteResult;
+  try {
+    const loaded =
+      load === undefined
+        ? undefined
+        : await runner.withTenantTx(tenant, async (db) => await load(Object.freeze({ ...request, db })), { readOnly: true });
+    let called: unknown;
+    if (call !== undefined) {
+      const signal = lifetime.signal();
+      // A client already gone (during load, authn or validation) gets no external effect and no write (PR #44 R1-m1).
+      signal.throwIfAborted();
+      called = await abortable(call(Object.freeze({ ...request, signal }), loaded as never), signal);
+    }
+    // R1-m6: a VIEW / DOWNLOAD handler records nothing in its transaction, so it may write nothing either.
+    const handlerTx = audit.readOnlyHandler ? { readOnly: true } : undefined;
+    result = await runner.withTenantTx(tenant, (db) => write(db, Object.freeze({ loaded, called })), handlerTx);
+  } catch (error) {
+    // REQ-AUDIT-010: the request failed after authorisation (in load, call or the handler transaction, which rolled
+    // back); its FAILED entry goes in a transaction of its own.
+    await recordFailure(audit, request, error, tenant, lifetime);
+    if (error instanceof RouteReturnedError) return { result: error.result, committed: false };
+    throw error;
   }
-  return runner.withTenantTx(tenant, (db) => write(db, Object.freeze({ loaded, called })));
+  // The result set is fixed and nothing is sent yet: a VIEW / DOWNLOAD entry is written now (REQ-AUDIT-005).
+  await audit.afterCommit(request, result, tenant);
+  return { result, committed: true };
+}
+
+/**
+ * The FAILED entry of a failed request (R1-m4): none when the failure IS the client's disconnect (the slot's own abort
+ * of `call`, or of a call skipped because the client had gone: no business outcome to record). Any other failure is
+ * recorded even when the client has gone meanwhile, so a client cannot suppress its FAILED entry by disconnecting
+ * (PR56-SEC-11, REQ-AUDIT-010). The answer waits at most {@link FAILED_ENTRY_WAIT_MS} for it; a write still running
+ * after that wait is detached and, unlike the afterCommit queue, not drained at shutdown (best effort by design; the
+ * business change it describes was rolled back; code review R2-n4). `afterFailure` resolves always (it reports an unwritten entry itself), so the only rejection here is the end
+ * of the wait, after which the write finishes or rolls back in its own transaction.
+ */
+async function recordFailure(
+  audit: MountedAudit,
+  request: RouteRequestContext,
+  error: unknown,
+  tenant: TenantContext,
+  lifetime: RequestLifetime,
+): Promise<void> {
+  if (lifetime.isDisconnect(error)) return;
+  const wait = deadline(FAILED_ENTRY_WAIT_MS, () => new Error('FAILED entry wait elapsed'));
+  try {
+    await abortable(audit.afterFailure(request, error, tenant), wait.signal);
+  } catch {
+    // The wait elapsed: the response no longer waits for the best-effort entry (see above).
+  } finally {
+    wait.clear();
+  }
 }
 
 export function executeSlot(options: ExecuteOptions): RouteSlot {
   return (route) => {
-    // Chosen at mount time: the audit stub refuses an audited route before it can be served (PR32-SEC-03).
-    const audit = options.audit ?? captureAudit(route);
+    // Compiled at mount time: an incomplete descriptor, or an audited route without a capture, is refused before it can
+    // be served (AT-US-086-02, PR32-SEC-03).
+    const audit: MountedAudit =
+      options.audit !== undefined
+        ? { ...NOT_AUDITED, inTransaction: options.audit }
+        : options.capture === undefined
+          ? withoutCapture(route)
+          : options.capture.mount(route);
     const queue = options.afterCommit;
     if (route.afterCommit !== undefined && queue === undefined) throw new AfterCommitNotWiredError(route.operationId);
     const deadlineMs = options.callDeadlineMs ?? CALL_DEADLINE_MS;
@@ -252,18 +349,19 @@ export function executeSlot(options: ExecuteOptions): RouteSlot {
         input: inputOf(res),
         principal: principalOf(res),
         correlationId,
-        transport: transportOf(req),
+        transport: transportOf(req, routeTemplateOf(res) ?? route.path),
       });
       const lifetime = requestLifetime(res, deadlineMs);
       try {
-        const result = await run({ route, request, options, audit, lifetime });
-        // Committed from here on: afterCommit runs even when sending or the stream fails (PR #44 R1-n4).
+        const { result, committed } = await run({ route, request, options, audit, lifetime });
+        // After a commit, afterCommit runs even when sending or the stream fails (PR #44 R1-n4); a returned failure
+        // was rolled back, so nothing is scheduled for it (PR56-SEC-10).
         try {
           send(res, result);
           if (result.stream !== undefined) await completeStream(res, result.stream, lifetime.signal());
         } finally {
           const afterCommit = route.afterCommit;
-          if (afterCommit !== undefined && queue !== undefined) {
+          if (committed && afterCommit !== undefined && queue !== undefined) {
             const label = { route: routeTemplateOf(res) ?? route.path, operationId: route.operationId, correlationId };
             queue.schedule((signal) => afterCommit(Object.freeze({ ...request, signal }), result), label);
           }
