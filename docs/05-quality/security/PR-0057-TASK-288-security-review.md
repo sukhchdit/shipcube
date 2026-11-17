@@ -341,3 +341,152 @@ Exactly one table row has a first cell starting with `Head`, and exactly one has
 | Conditions | C1: `integration`, `catalog-c1-c14` and `rls-cross-tenant` green at this code tree before merge (§7) |
 | Follow-ups | PR57-SEC-01/-03/-04 → this PR's fix cycle or W0-FLAKE-3; PR57-SEC-02 → principal-architect + TASK-287 (§6); PR46-SEC-08 remainder stays open |
 | Verdict | **PASS_WITH_CONDITIONS.** The reader lock, the shim and the lock tests are test-only. The shim's require paths are static, and production code cannot import it lint-clean. Child processes run without a shell. The D-SEC-PR53-02 rules hold, and PR53-SEC-01..03 stay closed. The temp-directory cleanup follows links (LOW, same-user or non-default POSIX only), and the stale take-over races (INFO, fail closed). Because the hosted job cannot run for these paths, the security suites must be run once at this code tree (C1). No Critical or High finding is open for this change |
+
+---
+
+## Delta round 2 (fix cycle 1)
+
+| Field | Value |
+|---|---|
+| Round | 2, delta. Reviews `4c3d13a..4f1fbd5`, which is fix cycle 1 (D-ORCH-114, D-TASK288-09..15). That range holds `67055a3` and `a67db34` (code) and `4f1fbd5` (lane B evidence `20261117T0349Z_a67db34` only). The code review r2 runs in parallel |
+| Head | 4f1fbd561cf8845c350c4e8691d2a030bbed3bab |
+| Owned paths changed since round 1 | 3: `tools/test-support/fs-lock.ts`, `tools/test-support/fs-lock.test.ts`, `tools/test-support/lock-children.ts`. The other 5 owned paths are byte-identical to `4c3d13a` |
+| Lane A evidence | Run 44016220270 on `4f1fbd5`. `fast-lane` **success** in full mode, every step green: lint, the porcelain checks, type-check, unit, build and "Lane B evidence". `scans`: Gitleaks, Semgrep and oasdiff **success**; the only red step is the record step, which this round answers. `security-integration` was skipped because the classifier returned `false` (PR57-SEC-02, unchanged) |
+| Lane B evidence | `20261117T0349Z_a67db34`, profile `pr`: `git_sha` `a67db34`, `git_dirty` false, `build_clean` true, no environment overrides, verdict PASS. `unit` ran 5,969 tests with 0 failures, 0 errors and 2 skipped |
+| C1 evidence | Restricted run `20261117T0646Z_4f1fbd5`, written outside the repository and not committed. I verified it myself, see §R2.3 |
+| Reviewer / date | security-analyst, 2026-11-17, round 2. I ran the probes on a type-stripped copy of the head `fs-lock.ts` under a private probe checkout root, so no real lock of any checkout was touched. The mutants ran on a `git archive` extract whose `node_modules` holds junctions to the PR worktree's top-level entries, with `.cache` excluded. Those junctions were unlinked before the extract was removed, and the worktree still has 748 entries. One read-only `ESLint#lintText` run used the PR worktree's configuration. In the worktree I ran only read-only git commands. A `git fetch` showed no code review r2 record yet, so this section was committed directly on `4f1fbd5` and pushed once (D-ORCH-119) |
+
+### R2.1 What changed
+
+- **Lock location and links:**
+  - The lock root is now `<checkout>/node_modules/.cache/shipqube-test-locks`, created with mode `0700` (`fs-lock.ts:63-72`).
+  - `plainReadersDir` runs `lstat` on the readers path. It refuses a link or anything that is not a directory, before reading or removing anything (`:151-162`).
+- **Take-over:**
+  - Take-over is now a tombstone rename. The tombstone is removed only if it still holds the owner text that was judged dead; otherwise it is put back (`takeOverStale`, `:108-125`).
+  - A writer re-checks that it still owns the lock after the reader wait and after `fn`. If not, it throws `LostTestLockError`. It removes its directory only while it still owns it (`:265-313`).
+- **Registrations:** names are now `<pid>-<uuid>` and must match `^([1-9]\d*)-<uuid>$` exactly. Other entries are ignored and never deleted (`:41`, `:165-179`). A writer removes an empty readers directory when it lets go.
+- **Ownerless directories:** a writer directory with no owner file for more than 30 s is stale (`:92-100`).
+- **Test seams:** `tryRegisterReader` and `takeOverStale` are exported as test-only seams.
+- **`lock-children.ts`:** the WRITER child now takes over a dead lock, `start()` has a 60 s named deadline, and there is a new `idle()` helper.
+- **Production code:** none changed. The shim, `jest.config.ts` and the other owned files are unchanged.
+
+### R2.2 Probes: round 1 versus round 2
+
+Both rounds ran the same scenario set: `probe2.mjs` this round, `probe.mjs` and `p4.mjs` in round 1. The round-1 results are the positive control.
+
+| Probe | Round 1 (`4c3d13a`) | Round 2 (`4f1fbd5`) |
+|---|---|---|
+| L0 location | `os.tmpdir()` | under the probe checkout; not under `os.tmpdir()` |
+| P1a/P1b fresh ownerless writer directory | writer and reader wait | writer and reader wait (same) |
+| P1c ownerless directory older than 30 s | waits forever | taken over, writer runs, no tombstone left |
+| P2 reader, dead-owner read then a live W2 re-creates the lock | **BYPASS** (W2's lock removed, reader entered) | refused at its deadline; W2's lock intact; no tombstone |
+| P2 writer, same interleaving | (pre-existing writer race) | refused at its deadline; W2's lock intact |
+| P2c control, live owner | refused | refused |
+| P2t a second reader during the put-back window | not applicable | **entered**; W2's lock was put back afterwards (residual, §R2.4) |
+| P2x a third writer takes the path during the put-back | not applicable | W2 throws `LostTestLockError` after its `fn`; W3's lock intact |
+| P1e a writer starved between `mkdir` and its owner write resumes after a take-over | not applicable | the new writer's `fn` ran, then `LostTestLockError`; the starved writer now owns the lock (residual, §R2.4) |
+| P3a-d junk entries (`desktop.ini`, `0-1`, `-1`, `Infinity-1`) | writer blocked until its deadline | writer runs; entries kept |
+| P3e `0x7FFFFFF0-1` | deleted as a "dead pid" | ignored, kept |
+| P3f `123-<UPPER-CASE UUID>` | (n/a) | ignored, kept |
+| P3g dead `<pid>-<uuid>` registration | (n/a) | removed; empty readers directory removed |
+| P3h live foreign registration | (n/a) | writer blocked; the timeout message ends with the registration's name |
+| P4 stale registration with this process's pid | **`EEXIST`** | reader enters |
+| P4b two module instances nest read locks | (code review R1-m2: `EEXIST`) | enters |
+| P5a readers path is a junction to a victim directory (3 victim files, one named `<dead pid>-<uuid>`) | **both victim files deleted**, writer ran | writer throws "refusing test lock readers path …"; **3/3 victims kept**. The writer's `finally` `rmdirSync` then unlinked the junction (link only; the target kept its 3 files), so a later reader made a plain directory and entered. The PR's own case runs the reader first and pins its refusal |
+| P5b the whole lock root is a junction (needs write access inside the checkout, so same user only) | (n/a) | locks work; **3/3 loose victim files kept**; only the lock's own `<name>.readers` was created in the target |
+| P6 writer path is a junction, dead owner | link removed, canary kept | tombstone rename of the link; link removed, **canary kept**, no tombstone |
+| P7 stale writer directory that cannot be renamed (a live process has its cwd inside it: `rename` → `EBUSY`) | (round 1: `rmSync` throws, writer fails loudly) | **writer with a 1.5 s deadline never returns; killed by the 12 s watchdog**; reader times out at 1,510 ms (PR57-SEC-05) |
+
+**Lint probe**, re-run on the head (the shim and `eslint.config.mjs` are unchanged in this range). The results are unchanged:
+
+- S1 to S5 (production code importing the shim or `fs-lock`): 1 error each, `import-x/no-relative-packages`.
+- Positive control: 2 errors.
+
+**Mutants of the security fixes**, run against the PR's own `fs-lock.test.ts` on a `git archive` extract of the head. The control ran 29 of 29 passed, and every mutant was killed by exactly one case:
+
+| Mutant | Killing case |
+|---|---|
+| MA: no link refusal | `[PR57-SEC-01] a readers path that is a link is refused …` |
+| MA2: lock root outside the checkout | `[PR57-SEC-01] every lock lives under the checkout …` |
+| MB: take-over deletes whatever it caught | `[R1-m1 / PR57-SEC-03] a take-over that catches a live lock … puts it back` |
+| MC: unknown entries count as live readers | `[PR57-SEC-04] entries that are not <pid>-<uuid> registrations …` |
+| MD: unknown entries deleted | `[PR57-SEC-04] entries that are not <pid>-<uuid> registrations …` |
+| ME: no ownership re-check after `fn` | `[R1-m1 / PR57-SEC-03] a writer whose lock was taken over fails loudly …` |
+| MF: `finally` removes a lost lock | `[R1-m1 / PR57-SEC-03] a writer whose lock was taken over fails loudly …` |
+
+**Other checks.**
+- A count-only host-fragment scan with a positive control covered the 4 new evidence files, `fs-lock.ts`, `fs-lock.test.ts` and `lock-children.ts`. It found 0 for every needle.
+- `node_modules` is git-ignored (`.gitignore:2`) and docker-ignored (`.dockerignore:32-33`), so the lock root never reaches a commit, a porcelain check or a build context. Lane A's "Lint/Build must not mutate the tree" steps were green.
+- `lock-children.ts` still spawns `node -e <constant script>` with no shell. The new `idle()` child runs a constant script with no arguments.
+
+### R2.3 C1 (verified)
+
+`summary.json` of `20261117T0646Z_4f1fbd5`:
+- `git_sha` `4f1fbd561cf8845c350c4e8691d2a030bbed3bab`, `git_dirty` false, `build_clean` true, no environment overrides;
+- the pinned Testcontainers digests are the same as in the round-1 evidence;
+- verdict INVALID, with the single reason "restricted run (--suites integration,catalog-c1-c14,rls-cross-tenant)". That is expected for a restricted run.
+
+Per suite, the JUnit hash matches `report_sha256`, and the counts match both the summary and the `<testcase>` elements:
+
+| Suite | Tests | Failures | Errors | Skipped |
+|---|---|---|---|---|
+| `catalog-c1-c14` | 102 | 0 | 0 | 0 |
+| `integration` | 315 | 0 | 0 | 0 |
+| `rls-cross-tenant` | 126 | 0 | 0 | 0 |
+
+The code tree is `a67db34`'s (`4f1fbd5` adds only the run directory). **C1 is met.**
+
+### R2.4 Round-1 items and the new one
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR57-SEC-01 (LOW) | **Closed** | The root is now in the checkout (L0). The link refusal held in P5a (victims kept) and P5b (a root junction touches no file but the lock's own). P6: the writer path is still link-safe. MA and MA2 are killed |
+| PR57-SEC-03 (INFO) | **Closed, residual accepted** | A take-over can no longer delete a live lock: P2 shows no bypass in either role, P2x makes the losing writer fail loudly, and MB, ME and MF are killed. What remains needs a stale lock plus at least two contenders, and it fails loudly or fails a load: **(a)** a reader that tries during the two-rename put-back window can enter while the put-back lock's writer works (P2t); **(b)** the owner write at `fs-lock.ts:278` is not exclusive, so a writer starved more than 30 s between `mkdir` and that write overwrites the owner of a lock re-created meanwhile, and the other writer learns it only after its `fn` (P1e). Optional hardening for the next touch: `writeFileSync(join(dir, 'owner'), String(process.pid), { flag: 'wx' })` (an `EEXIST` then falls into the existing contention branch), and the same in the WRITER child |
+| PR57-SEC-04 (INFO) | **Closed** | P3a-g, P4, P4b; MC and MD killed. A registration whose pid now belongs to an unrelated live process still makes writers wait until the deadline. The message names it (P3h), and I accept that as liveness only |
+| PR57-SEC-02 (LOW) | Open, routed (D-SEC-PR57-01: principal-architect + TASK-287) | Not in scope of this PR. Note for TASK-287: if it adds a `node_modules` cache to lane A, exclude `node_modules/.cache/shipqube-test-locks/`. Restored lock directories carry another runner's pids, which can match live processes on the new runner and stall writers until their deadline |
+| C1 | **Met** | §R2.3 |
+| **PR57-SEC-05 (INFO, new)** | Open → next touch of `fs-lock.ts` (W0-FLAKE-3), or this PR if another fix cycle opens | See below |
+
+**PR57-SEC-05 (INFO): the writer's stale branch loops with no deadline and no wait.**
+- **CWE-835, OWASP A04.**
+- **Where:** `fs-lock.ts:282-286`.
+- **What:** `withFileLock` calls `takeOverStale` and then `continue`s straight back to `mkdirSync`. When the rename fails with one of the swallowed codes (`EPERM`, `EBUSY`, `EACCES`, …), the directory is still there and still stale, so the loop spins synchronously. The deadline check at `:287` and the `await` are never reached.
+- **Evidence:** P7, with a directory that is the cwd of a live process (`rename` → `EBUSY` on Windows). The writer with a 1.5 s deadline gave no result within 12 s. Because the loop never yields, Jest's per-test timeout cannot fire either, and the worker hangs until the lane's job timeout. The reader path honours its deadline (1,510 ms).
+- **How this regressed:** round 1's `rmSync` would have thrown `EBUSY` and failed loudly.
+- **Impact:** test-run liveness only, never a silent pass. In practice it is a short CPU spin while an indexer or antivirus holds a handle; a persistent hang needs a process parked inside the lock directory.
+- **Fix:** make `takeOverStale` return whether it removed or moved the directory, and `continue` only on `true`. Otherwise fall through to the deadline check and the `await` sleep:
+
+  ```ts
+  if (isStale(dir, owner) && takeOverStale(dir, owner)) continue;
+  ```
+
+- **Verification:** P7 must make the writer throw at about its deadline. A case can model it by passing an `afterAway`-style seam or a rename stub that throws `EBUSY`.
+
+### R2.5 Merge prerequisites
+
+- **Main has moved** to `ec05370`; PR #54 merged (`eslint.config.mjs`, `apps/api/src/platform/**`, `prisma/tests/rls/session-scope-leak.int.test.ts`). None of those paths is owned by this PR, and none of them changes `fs-lock` usage. A union with `main` would therefore not void this record. The combined tree is proven by the post-merge run on `main` as usual. C1 need not be repeated unless this PR's own code changes.
+- **Any later push to one of the 8 owned paths voids this record.**
+
+### R2.6 Record simulation
+
+The same harness as §8 was used: a sparse `git clone --shared`, plumbing scenario commits, and `main`'s checker with `--pr 57 --json`. The full record (round 1 plus this section) was committed on top of `4f1fbd5`. All 6 scenarios came out as expected, and the checker reported 8 owned paths in each:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| T0 the branch tip with the round-1 record only | missing | missing, exit 1 (the record names `4c3d13a`, and the 3 lock files changed after it) |
+| T1 full record, base `origin/main` | pass | pass, exit 0, satisfied at `4f1fbd5`. The round-1 Head row only adds a note |
+| T1b the same, base = merge base `8984b16` | pass | pass, exit 0 |
+| T2 T1 plus an edit of `tools/test-support/fs-lock.ts` | missing | missing, exit 1 |
+| T3 T1 plus a docs-only commit (the code review r2 record on top) | pass | pass, exit 0 |
+| T4 the round-2 Verdict cell set to `FAIL` | missing | missing, exit 1 (the last Verdict row decides) |
+
+Two table rows have a first cell starting with `Head`: round 1's (`4c3d13a`) and this round's (`4f1fbd5`). The last row whose first cell is `Verdict` is this round's. The file is LF, and its first 343 lines (the whole round-1 text) are byte-identical to the round-1 blob.
+
+### R2.7 Verdict (delta round 2)
+
+| Field | Value |
+|---|---|
+| Findings | 0 Critical, 0 High, 0 Medium. Closed: PR57-SEC-01 (LOW), PR57-SEC-03 (INFO, residual accepted), PR57-SEC-04 (INFO). Open: PR57-SEC-02 (LOW, routed); PR57-SEC-05 (INFO, new) |
+| Conditions | None open. C1 is met and verified (§R2.3) |
+| Follow-ups | PR57-SEC-05 and the optional `wx` owner write → next touch of `fs-lock.ts` (W0-FLAKE-3), or this PR if another fix cycle opens. PR57-SEC-02 → principal-architect + TASK-287, with the lock-cache exclusion note. Merge: no push to an owned path after this record |
+| Verdict | **PASS_WITH_FOLLOW-UPS.** The locks now live in the checkout and links are refused before anything is read or removed: 3 of 3 victim files survive the round-1 junction attack. The take-over can no longer delete a live lock. Registrations are strict, and junk entries are ignored. The seven security-fix mutants are killed, and the security suites ran green at this code tree (C1). What remains (PR57-SEC-05 and the two take-over residuals) is test-run liveness, never a silent pass. No Critical or High finding is open for this change |
