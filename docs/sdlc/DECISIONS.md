@@ -2977,3 +2977,13 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 ### D-ORCH-122 · 2026-11-17 · sdlc-orchestrator · PR #60 fix cycle 1/3 (test-only) doubles as the stage-2 code proof
 - **Decision:** PR #60's branch predates PR #59, so it needs one fresh full stage-2 run anyway. Fix cycle 1 takes R1-m1/SEC-02, R1-n2, R1-n4, R1-n6 (plus n1/n5 if cheap) in that single code push (D-ORCH-119). Then a narrow r2 from both reviewers.
 - **Reversibility:** High.
+
+### D-ORCH-123 · 2026-11-17 · sdlc-orchestrator · PR #56 merged (TASK-029 complete); dispatch gates reopened
+- **PR #56** squash-merged as `27f0189`.
+  - **Head:** `99f3025`. Code review r3 APPROVED_WITH_NITS (R3-n1/n2 to the next touch); security delta r4 PASS_WITH_FOLLOW-UPS (record binds `e81d0c9`).
+  - **CI:** lane A 44041632167 all green incl. security-integration, MERGE-READY; lane B 20261117T0701Z_e81d0c9.
+  - **P1:** no overlap. **Fix cycles:** 2/3 plus one merge-main integration cycle.
+- **TASK-029 complete.** Unblocks TASK-033/040, and frees the `api-tenant-db`/`api-tx-execute`/`lint` locks for TASK-028, TASK-030, TASK-040 and TASK-284 (D-ARCH-147).
+- **PR #60:** must merge main (shared `eslint.config.mjs`) inside its current fix cycle.
+- **Open security items from PR #56** stay with their cards: SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next `eslint.config.mjs` PR), SEC-13 (TASK-033/060).
+- **Reversibility:** Medium (merged; revertible).
