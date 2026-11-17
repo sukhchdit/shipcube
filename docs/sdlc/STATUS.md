@@ -1,7 +1,9 @@
 # SDLC Status
-- **Product:** the Platform (multi-carrier shipping platform, repo `sukhchdit/shipcube`)    **Updated:** 2026-11-16
+- **Product:** the Platform (multi-carrier shipping platform, repo `sukhchdit/shipcube`)    **Updated:** 2026-11-17 (resume D-ORCH-126)
 - **Run scope:** M0 Foundation + M1 Customer MVP (brief §12). M2–M5 = backlog.
-- **Current phase:** P5 Build — Wave 0 (Foundation): 28 of 45 tasks merged (partials in that count: TASK-015 015-A + merged-coverage hook; TASK-020 A–C merged, 020-D follow-up open)    **State:** IN_PROGRESS
+- **Current phase:** P5 Build — Wave 0 (Foundation) closing + Wave 1 batch 1.1 started: Wave 0 = 31 of 46 tasks merged (TASK-020 complete incl. 020-D; TASK-015 partial: 015-A, 015-B, coverage hook merged, 015-C open)    **State:** IN_PROGRESS
+- **Human priority (D-ORCH-126):** demo users real (TASK-089: 14 open tasks on its closure) → staff + customer sign-in screens (TASK-071/072: 39) → M0 exit demo (TASK-121: 62). Longest chain TASK-035 → 039 → 043 → 049 → 052.
+- **Lane-B lock:** `../.orch/docker.lock` (stable path; D-ORCH-126).
 
 ## Phase / Task list
 | # | Phase | Owner | State | Notes |
@@ -54,8 +56,13 @@
 | 0.x | TASK-015 part 015-B: lane C, nightly, security-integration + C-1, ci:minutes, SPK-07, COND-E2E-FF (local), gitleaks-full runner + CI-minutes stage 1 (PR #46) | devops-engineer | merged e6b1b3d (PR #46 squash @30e593b) | ✅ | ✅ r3 APPROVED_WITH_NITS | ✅ merge-only PASS_WITH_FOLLOW-UPS (0230e50; D-SEC-PR46-04) | ✅ evidence 20261115T1431Z_f981713; first live light run 43734988926 ✅ (proof inherited) | ✅ merged; 015-C remains; TASK-286 ▶ |
 | 0.x | TASK-286 cigatefold: CI-minutes stage 2 (scans → ci-gate fold, code-gated steps) + PR46-SEC-11/12/15/16/17, PR42-SEC-18 (D-ARCH-128, D-ORCH-100) | devops-engineer | policy PR #55 merged 11e2158; workflow PR #59 merged 29318c3 — TASK-286 complete | ✅ policy | ✅ r2 AWN | ✅ r2 PWF | ✅ evidence 20261116T0422Z_71d2980; lane A 43805155599 (gate waits on sec record) | must land in November |
 | 0.8 | TASK-029 automatic audit capture (+ D-ARCH-122 writeAll, PR42-SEC-17/19, R3-m1/n1, D-TASK025-27 boundary rules) | senior-developer → backend-developer (opus) | merged 27f0189 (PR #56 squash @99f3025) | ✅ | ✅ r3 AWN | ✅ r4 PWF | ✅ evidence 20261116T0436Z_8b854ce (audit 100 %); lane A 43806951976 (gate waits on sec record) | fc 0; TASK-028 wiring follow-up; unblocks TASK-033/040 |
-| 0.12 | TASK-290 rlsfu (= TASK-024-F): PR43-SEC-11 splitter, R2-n1/n3, PR52-SEC-01 KEEP fix | senior-developer → database-engineer (opus) | – | ⏳ queued (prereq of TASK-037) | – | – | – | |
-| 0.12 | TASK-289 rbacfu (= TASK-027-F): PR48-SEC-01/03, R1-m1/m2/m4, n1/n3 | backend-developer (opus) | PR #60 @df31b32 | ✅ evidence 20261117T0440Z_1353e78; lane A 44035635054; reviews queued | – | – | – | |
+| 0.12 | TASK-290 rlsfu (= TASK-024-F): PR43-SEC-11 splitter, R2-n1/n3, PR52-SEC-01 KEEP fix | senior-developer → database-engineer (opus) | feat/TASK-290-task-024-f-sql-splitter @ba921da (unpushed) | ✅ | – | – | lane B re-run by orchestrator (1223Z env fail, 1314Z inventory-test pollution; D-ORCH-126) | | 0 | prereq of TASK-037 merge |
+| 0.12 | TASK-289 rbacfu (= TASK-027-F): PR48-SEC-01/03, R1-m1/m2/m4, n1/n3 | backend-developer (opus) | PR #60 @c912a0a (code f2a7411) | ✅ fc1 | r1 AWN; r2 ▶ | r1 PWF (D-SEC-PR60-01); delta r2 ▶ | ✅ evidence 20261117T1247Z_f2a7411; lane A 44093161786 fast-lane ✅ (gate waits on record) | | 1 | |
+| 0.8 | TASK-028 audit redaction + classification registry + capture composition (D-ARCH-141) | senior-developer → backend-developer | PR #61 @57faf1f (code e526b11) | ✅ | r1 ▶ | r1 ▶ | ✅ evidence 20261117T1302Z_e526b11; lane A 44093229169 fast-lane ✅ (gate waits on record) | | 0 | critical path → TASK-049 |
+| 0.12 | TASK-287 part 287-A policy PR (D-ARCH-140) | devops-engineer | ci/TASK-287A-policy @a85234a (pushed, no PR) | ✅ | – | – | lane B queued (orchestrator) | | 0 | |
+| 1.1 | TASK-035 named BullMQ queues + DLQ + payload v2 + worker entry point | senior-developer → backend-developer | – | ▶ | – | – | – | | 0 | critical path |
+| 1.1 | TASK-036 error catalogue + validation error format | senior-developer → backend-developer | – | ▶ | – | – | – | | 0 | critical path |
+| 1.1 | TASK-037 organisation types, operator org, personal org, memberships (DR-A14 RLS) | senior-developer → backend/database (opus) | – | ▶ | – | – | – | | 0 | critical path; merges after TASK-290 |
 | 0.13 | TASK-291 flake3 (= W0-FLAKE-3; D-ARCH-146): one loopback transport, pooled-fetch ratchet, PR #57 R1-n4/n6 | test-engineer (opus) | – | ⏳ queued (deps TASK-288, TASK-289) | – | – | – | |
 | 0.12 | TASK-288 flake2 (= W0-FLAKE-2): prisma/generated reader lock | test-engineer (opus) | merged (PR #57 squash @af219c6) | ✅ code r3 AWN; security r3 PWF; C1 verified | – | – | – | |
 | 0.x | TASK-W0-FLAKE: deterministic timing under host load (PR #53) | test-engineer | merged ae1e38b (PR #53 squash @8fe8bfb; fc1 + fc2 + union) | ✅ | ✅ r3 APPROVED_WITH_NITS (378af72) | ✅ delta r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR53-02) | ✅ evidence 20261115T1711Z_60a1659; lane A ✅ run 43745472339 (security-integration ran) | ✅ merged; follow-up TASK-W0-FLAKE-2: prisma/generated reader lock, PR #48 R1-m4 observe() deadline, PR53-SEC-05/06 (or TASK-283) |
