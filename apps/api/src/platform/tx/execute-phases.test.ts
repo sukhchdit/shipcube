@@ -22,7 +22,7 @@ import type {
 } from '../routing/define-route.js';
 import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js';
 import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-route.js';
-import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
+import { closeLoopbackServer, fetchOnce, HOST_LOAD_SLACK_MS, LOOPBACK_TEST_TIMEOUT_MS, timeOperation } from '../routing/tests/loopback.js';
 import { DRAIN_TIMEOUT_MS } from '../runtime/shutdown.js';
 import { AFTER_COMMIT_FAILED_EVENT, createAfterCommitQueue } from './after-commit.js';
 import { AfterCommitNotWiredError, CALL_DEADLINE_MS, DEADLINE_RETRY_AFTER_SECONDS, executeSlot, type ExecuteOptions } from './execute.js';
@@ -117,15 +117,29 @@ function appWith(route: RouteDescriptor, runner: FakeRunner, events: string[], o
   });
 }
 
+/** One request on a fresh socket (`fetchOnce`, PR #53 W0-FLAKE); the server and every socket on it are closed after. */
 async function request(app: Express, path: string, init: RequestInit = {}): Promise<{ status: number; headers: Headers; body: string }> {
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
+    const response = await fetchOnce(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}${path}`, init);
     return { status: response.status, headers: response.headers, body: await response.text() };
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
+}
+
+/**
+ * Records the delay of every global `setTimeout` armed while installed and calls through, so a case can pin the
+ * configured `callDeadlineMs` deterministically (it is what the execute slot's deadline timer gets) instead of by a
+ * wall-clock upper bound that a loaded host breaks (D-SEC-PR53-02; TASK-288 found 10-20 s against `< 2_000`).
+ */
+function recordTimeouts(): { delays(): number[]; restore(): void } {
+  const spy = jest.spyOn(globalThis, 'setTimeout');
+  return {
+    delays: () => spy.mock.calls.map(([, ms]) => Number(ms ?? 0)),
+    restore: () => spy.mockRestore(),
+  };
 }
 
 /** Resolves once `events` holds `event` (afterCommit runs after the response, so the client may see it first). */
@@ -359,17 +373,22 @@ describe('[D-ARCH-106 (4)] phase contexts: no database handle outside load and h
         return { status: 200 };
       },
     });
-    const started = Date.now();
-    const response = await request(appWith(route, fakeRunner(events), events, { callDeadlineMs: 50 }), '/api/v1/things', {
-      method: 'POST',
-    });
-    const elapsed = Date.now() - started;
-    expect([response.status, response.headers.get('retry-after'), (JSON.parse(response.body) as { code: string }).code]).toEqual([
-      503,
-      '1',
-      'SERVICE_UNAVAILABLE',
-    ]);
-    expect(elapsed).toBeLessThan(2_000);
+    const timers = recordTimeouts();
+    try {
+      const app = appWith(route, fakeRunner(events), events, { callDeadlineMs: 50 });
+      const { value: response, workMs } = await timeOperation(() => request(app, '/api/v1/things', { method: 'POST' }));
+      expect([response.status, response.headers.get('retry-after'), (JSON.parse(response.body) as { code: string }).code]).toEqual([
+        503,
+        '1',
+        'SERVICE_UNAVAILABLE',
+      ]);
+      // Magnitude, deterministic: the configured 50 ms is what the deadline timer gets (the default would arm 20 s).
+      expect(timers.delays().filter((ms) => ms === 50)).toHaveLength(1);
+      // Fired, not hung (the call never settles, so only the deadline can answer): slack, not a latency target.
+      expect(workMs).toBeLessThan(50 + HOST_LOAD_SLACK_MS);
+    } finally {
+      timers.restore();
+    }
     await delay(20);
     expect(events).toEqual(['begin:ro', 'commit', 'call', 'send']);
   });
@@ -604,12 +623,12 @@ describe('[D-ARCH-086] [D-ARCH-106 (4)] no admission permit or connection is hel
     try {
       const url = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/things`;
       const statuses = await Promise.all(
-        [fetch(url, { method: 'POST' }), fetch(url, { method: 'POST' })].map(async (r) => (await r).status),
+        [fetchOnce(url, { method: 'POST' }), fetchOnce(url, { method: 'POST' })].map(async (r) => (await r).status),
       );
       expect(statuses).toEqual([200, 200]);
       expect(events).not.toContain('refused');
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeLoopbackServer(server);
     }
   });
 
@@ -635,13 +654,13 @@ describe('[D-ARCH-086] [D-ARCH-106 (4)] no admission permit or connection is hel
     await new Promise<void>((resolve) => server.once('listening', resolve));
     try {
       const url = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/things`;
-      const first = fetch(url, { method: 'POST' });
+      const first = fetchOnce(url, { method: 'POST' });
       await entered;
-      const second = await fetch(url, { method: 'POST' });
+      const second = await fetchOnce(url, { method: 'POST' });
       release();
       expect([(await first).status, second.status, second.headers.get('retry-after')]).toEqual([200, 503, '1']);
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeLoopbackServer(server);
     }
   });
 
@@ -763,14 +782,22 @@ describe('[TASK-020 part 020-C (f)] the stream hook: a stream result is complete
         events.push('afterCommit');
       },
     });
-    const started = Date.now();
-    const outcome = await request(appWith(route, fakeRunner(events), events, { callDeadlineMs: 50 }), '/api/v1/things', {
-      method: 'POST',
-    }).then(
-      () => 'completed',
-      () => 'terminated',
-    );
-    expect([outcome, Date.now() - started < 2_000]).toEqual(['terminated', true]);
+    const timers = recordTimeouts();
+    try {
+      const app = appWith(route, fakeRunner(events), events, { callDeadlineMs: 50 });
+      const { value: outcome, workMs } = await timeOperation(() =>
+        request(app, '/api/v1/things', { method: 'POST' }).then(
+          () => 'completed',
+          () => 'terminated',
+        ),
+      );
+      expect(outcome).toBe('terminated');
+      // Magnitude, deterministic (the configured 50 ms reaches the deadline timer); fired, not hung (slack only).
+      expect(timers.delays().filter((ms) => ms === 50)).toHaveLength(1);
+      expect(workMs).toBeLessThan(50 + HOST_LOAD_SLACK_MS);
+    } finally {
+      timers.restore();
+    }
     await eventually(events, 'afterCommit');
     expect(events).toEqual(['begin:rw', 'audit db=write-db', 'commit', 'afterCommit']);
   });
