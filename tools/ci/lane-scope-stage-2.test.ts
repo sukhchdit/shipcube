@@ -166,7 +166,7 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
   });
 
   it('fast-lane: the pinned tooling step takes every gate tool from HEAD^1 (current main) and sets TOOLS_REF; the classify command then runs', () => {
-    const { root, m0, f1, m1 } = sharedPr();
+    const { root, m0, f1, m1, merge } = sharedPr();
     const step = runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1 });
     expect(step.stderr).toBe('');
     expect(step.status).toBe(0);
@@ -187,7 +187,15 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
         ...['--root', root, '--base', m0, '--head', f1, '--before', '', '--event', 'pull_request', '--pr', '53', '--head-ref', 'test/x'],
         ...['--tools-ref', m1, '--lookup', '--env', envFile, '--output', out],
       ],
-      { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 60_000, env: { ...process.env, GITHUB_REPOSITORY: '', GH_TOKEN: '' } },
+      {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 60_000,
+        // As on the runner (PR59-SEC-01): the event commit is the fixture's test merge, whatever this host's own
+        // GITHUB_ACTIONS / GITHUB_SHA are (lane A runs this suite on a runner with its own GITHUB_SHA).
+        env: { ...process.env, GITHUB_REPOSITORY: '', GH_TOKEN: '', GITHUB_ACTIONS: 'true', GITHUB_SHA: merge },
+      },
     );
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
