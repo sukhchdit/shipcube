@@ -13,9 +13,9 @@
  *     AAD = UTF-8(JCS(["audit_pii_vault", "ciphertext", token, ciphertext_key_id])), so a ciphertext copied to another
  *     row or read under another key version fails authentication (T-89);
  *  3. `AuditStore.insertVaultRows`: one multi-row INSERT and one token lookup (prisma-store.ts statements 1, 1b).
- * A value whose subject is unknown (an anonymous client's IP, a list filter) belongs to the UNATTRIBUTED subject, the
- * reserved ANONYMOUS actor (data-model §1.6; D-TASK028-04): `subject_id` is NOT NULL, and such values have no person
- * to erase them for; retention removes them.
+ * A value whose subject is unknown (an anonymous client's IP and user agent) belongs to the UNATTRIBUTED subject of its
+ * UTC month (D-ARCH-149, amending D-TASK028-04): `subject_id` is NOT NULL and such values have no person, and a subject
+ * per month makes retention the existing erase-by-subject statement (EPIC-B-413 erases a month 12 months after it ends).
  *
  * Vault rows and subjects are stamped `created_by = updated_by =` the SYSTEM actor: the platform writes them, on
  * behalf of whichever entry carries the value.
@@ -36,8 +36,17 @@ export interface AuditKey {
   readonly key: Uint8Array;
 }
 
-/** Owner of a personal value without a known person (data-model §1.6 ANONYMOUS actor; D-TASK028-04). */
-export const UNATTRIBUTED_SUBJECT: DataSubjectRef = Object.freeze({ kind: 'USER', refId: ANONYMOUS_ACTOR_ID });
+/**
+ * The owner of a personal value without a known person, at `at` (ms since the epoch; D-ARCH-149): the ANONYMOUS actor
+ * id (data-model §1.6) with its first 12 hex digits set to the start of the UTC month in ms, zero-padded
+ * (November 2026: `01a19467-e800-7000-8000-000000000002`). One subject per month, so a month is erased as a whole.
+ */
+export function unattributedSubject(at: number): DataSubjectRef {
+  const day = new Date(at);
+  const month = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1).toString(16).padStart(12, '0');
+  const rest = ANONYMOUS_ACTOR_ID.slice(13);
+  return Object.freeze({ kind: 'USER', refId: `${month.slice(0, 8)}-${month.slice(8, 12)}${rest}` });
+}
 
 const KEY_ID = /^[a-z][a-z0-9-]*-v[0-9]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -139,6 +148,8 @@ export interface VaultTokeniserOptions {
   readonly store?: Pick<AuditStore, 'insertVaultRows'>;
   /** UUIDv7 factory for proposed tokens and subject ids; injectable for tests. */
   readonly newId?: () => string;
+  /** The clock of the unattributed subject (ms since the epoch); read once per `tokenise` call. Default `Date.now`. */
+  readonly now?: () => number;
 }
 
 /** The writer's `PiiTokeniser` over the encrypted vault (see the header). */
@@ -147,11 +158,13 @@ export function createVaultTokeniser(options: VaultTokeniserOptions): PiiTokenis
   checkKey(options.hmacKey, 'AUDIT vault HMAC', MIN_HMAC_KEY_BYTES, false);
   const store = options.store ?? createPrismaAuditStore();
   const newId = options.newId ?? uuidv7;
+  const now = options.now ?? Date.now;
   const { vaultKey, hmacKey } = options;
 
   async function tokenise(db: AuditSqlPort, values: readonly PiiValue[]): Promise<readonly string[]> {
     if (values.length === 0) return [];
-    const owners = values.map((value) => value.subject ?? UNATTRIBUTED_SUBJECT);
+    const unattributed = unattributedSubject(now());
+    const owners = values.map((value) => value.subject ?? unattributed);
     const distinct = [...new Map(owners.map((subject) => [subjectKey(subject), subject])).values()];
     const subjectIds = await resolveSubjects(db, distinct, newId);
     const rows: VaultRow[] = values.map((value, index) => {

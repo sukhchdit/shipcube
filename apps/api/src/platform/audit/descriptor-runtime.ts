@@ -26,6 +26,7 @@ import {
   type AuditOutcome,
   type AuditSourceApp,
   type AuditValue,
+  type DataSubjectRef,
   canonicalIp,
   isAuditEntityId,
   isAuditRouteTemplate,
@@ -174,12 +175,16 @@ export function filterText(value: unknown): string {
   return points.length <= MAX_FILTER_TEXT ? text : `${points.slice(0, MAX_FILTER_TEXT - 1).join('')}${ELLIPSIS}`;
 }
 
-/** A list view's filter summary (DR-A13): the validated query, every value tokenised (data-model §3.4 `details`). */
-function filterSummary(query: Readonly<Record<string, unknown>>): AuditValue {
+/**
+ * A list view's filter summary (DR-A13): the validated query, every value tokenised (data-model §3.4 `details`). The
+ * values belong to `subject`: the searching actor for an authenticated request (a search term is the searcher's
+ * activity), else null, which the tokeniser files under the unattributed subject of the month (D-ARCH-149).
+ */
+function filterSummary(query: Readonly<Record<string, unknown>>, subject: DataSubjectRef | null): AuditValue {
   const summary: Record<string, AuditValue> = {};
   for (const [key, value] of Object.entries(query).sort(([a], [b]) => (a < b ? -1 : 1))) {
     if (value === undefined) continue;
-    summary[key] = pii({ entityName: 'audit_entry', field: 'filter', classification: 'PERSONAL', value: filterText(value), subject: null });
+    summary[key] = pii({ entityName: 'audit_entry', field: 'filter', classification: 'PERSONAL', value: filterText(value), subject });
   }
   return summary;
 }
@@ -201,6 +206,10 @@ export interface EntryContext {
   readonly parseUserAgent?: UserAgentParser | undefined;
 }
 
+/** The owner of an authenticated request's filter values: the actor's data subject (D-ARCH-149), else none. */
+const filterSubject = (principal: RouteRequestContext['principal']): DataSubjectRef | null =>
+  principal.authenticated ? { kind: 'USER', refId: principal.actorId } : null;
+
 /** The complete entry of one request (personal values marked; client-shaped columns null unless valid). */
 export function entryFor(context: EntryContext): AuditEntryInput {
   const { compiled, request, result, action, outcome } = context;
@@ -210,7 +219,7 @@ export function entryFor(context: EntryContext): AuditEntryInput {
   const parsed = userAgent === null || context.parseUserAgent === undefined ? null : context.parseUserAgent(userAgent);
   const list: Record<string, AuditValue> =
     compiled.mode === 'list' && result !== undefined
-      ? { filter: filterSummary(request.input.query), result_count: resultCount(result) }
+      ? { filter: filterSummary(request.input.query, filterSubject(principal)), result_count: resultCount(result) }
       : {};
   const details = { ...list, ...context.details };
   return {

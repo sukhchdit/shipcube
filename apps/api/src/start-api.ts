@@ -120,7 +120,15 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
   const health = healthRoutes({ probe: services.probe });
   // The routes' afterCommit work (ADR-0003 amendment 2026-11-13): drained by the shutdown sequence below.
   const afterCommit = createAfterCommitQueue(log);
-  const auditPrivacy = auditPrivacyFrom(config);
+  let auditPrivacy: AuditPrivacy | undefined;
+  try {
+    auditPrivacy = auditPrivacyFrom(config);
+  } catch (error) {
+    // A malformed audit key is a rejected configuration: exit 78 like every other composition refusal, with a
+    // class-only line (no key material; PR #61 dup-review R1-n3).
+    log.error('api.audit_keys_rejected', { error: error instanceof Error ? error.name : 'non-error' });
+    return deps.exitProcess(CONFIG_EXIT_CODE);
+  }
   let app: ApiListener;
   try {
     // createApp runs the boot checks (TASK-020, PR32-SEC-05 (b)): routes declared with defineRoute, the runner for

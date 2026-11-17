@@ -421,7 +421,7 @@ describe('[D-ORCH-073] API_PROCESS: main.ts runs with the real process', () => {
 /** A configuration key version (the shape `@platform/config` parses), with fresh random material. */
 const keyVersion = (keyId: string, bytes = 32) => {
   const material = new Uint8Array(randomBytes(bytes));
-  return { keyId, purpose: keyId.replace(/-vd+$/, ''), version: 1, localOnly: false, material: { reveal: () => material.slice() } };
+  return { keyId, purpose: keyId.replace(/-v\d+$/, ''), version: 1, localOnly: false, material: { reveal: () => material.slice() } };
 };
 const AUDIT_KEYS = {
   AUDIT_VAULT_KEY: keyVersion('vault-v1'),
@@ -451,9 +451,11 @@ describe('[D-SEC-PR56-01] [D-ARCH-141] startApi composes the audit privacy depen
     expect(auditPrivacyFrom({ ...AUDIT_KEYS, AUDIT_INDEX_KEY: undefined } as unknown as Config)).toBeUndefined();
   });
 
-  it('a malformed key fails fast before anything listens (startApi rejects, main.ts re-raises)', async () => {
+  it('[dup-review R1-n3] a malformed key exits 78 with a class-only line before anything is composed or listens', async () => {
     const h = harness({ config: { ...AUDIT_KEYS, AUDIT_VAULT_KEY: keyVersion('vault-v1', 16) } });
-    await expect(startApi(h.deps)).rejects.toThrow('AUDIT vault key must be 32 bytes');
-    expect(h.calls).toEqual(['loadConfig api', 'createRuntimeServices api']);
+    await startApi(h.deps);
+    expect(h.calls).toEqual(['loadConfig api', 'createRuntimeServices api', 'exit 78']);
+    expect(h.lines()).toEqual([expect.objectContaining({ level: 'error', event: 'api.audit_keys_rejected', error: 'RangeError' })]);
+    expect(JSON.stringify(h.lines())).not.toContain('vault-v1');
   });
 });

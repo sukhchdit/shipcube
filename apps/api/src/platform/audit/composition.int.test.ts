@@ -300,7 +300,7 @@ describe('[D-SEC-PR56-01] [D-ARCH-141] the production composition audits with th
   );
 
   it(
-    '[REQ-AUDIT-010] a 403 writes exactly one PERMISSION_DENIED entry with vault tokens, ip_hash and ua_parsed',
+    '[REQ-AUDIT-010] [SEC-TC-19] a 403 writes exactly one PERMISSION_DENIED entry with vault tokens, ip_hash and ua_parsed',
     async () => {
       const response = await fetchOnce(urlOf(started.server, '/api/v1/fixtures/address-book'), {
         method: 'POST',
@@ -331,7 +331,10 @@ describe('[D-SEC-PR56-01] [D-ARCH-141] the production composition audits with th
       const indexKey = auditKeyOf(config.AUDIT_INDEX_KEY as NonNullable<Config['AUDIT_INDEX_KEY']>);
       expect(entry.ip_hash?.equals(createHmac('sha256', indexKey.key).update('127.0.0.1', 'utf8').digest())).toBe(true);
       // No personal value in clear anywhere in the row.
+      // SEC-TC-19 (the stored half; the [ERASED] viewer half is TASK-073): neither raw value is in the row, the clear
+      // network (ip_coarse 127.0.0.0) aside.
       expect(JSON.stringify(entry)).not.toContain(FIREFOX);
+      expect(JSON.stringify({ ...entry, ip_coarse: null })).not.toContain('127.0.0.1');
     },
     LOOPBACK_TEST_TIMEOUT_MS,
   );

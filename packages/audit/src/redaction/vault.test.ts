@@ -13,7 +13,7 @@ import { AuditWriteError } from '../errors.js';
 import { PiiValue } from '../entry.js';
 import { type VaultRow } from '../store/prisma-store.js';
 import { fakeSql, type RecordedStatement } from '../tests/fake-sql.js';
-import { createIpIndex, createVaultTokeniser, decryptVaultValue, UNATTRIBUTED_SUBJECT, type AuditKey } from './vault.js';
+import { createIpIndex, createVaultTokeniser, decryptVaultValue, unattributedSubject, type AuditKey } from './vault.js';
 
 const VAULT_KEY: AuditKey = { keyId: 'vault-v1', key: new Uint8Array(randomBytes(32)) };
 const HMAC_KEY: AuditKey = { keyId: 'vault-hmac-v1', key: new Uint8Array(randomBytes(32)) };
@@ -115,14 +115,31 @@ describe('[ADR-0007] createVaultTokeniser: one subject lookup, one vault batch, 
     expect(Buffer.from(rows[0]?.ciphertext ?? []).equals(Buffer.from(rows[1]?.ciphertext ?? []))).toBe(false);
   });
 
-  it('a value without a known subject belongs to the unattributed subject (the ANONYMOUS actor)', async () => {
-    expect(UNATTRIBUTED_SUBJECT).toEqual({ kind: 'USER', refId: ANONYMOUS_ACTOR_ID });
+  it('[D-ARCH-149] a value without a known subject belongs to the unattributed subject of its UTC month', async () => {
+    const november = 1794913200000; // 2026-11-17T11:00Z
+    const anonymousNovember = '01a19467-e800-7000-8000-000000000002';
+    expect(unattributedSubject(november)).toEqual({ kind: 'USER', refId: anonymousNovember });
+    // The first and the last instant of the month share the subject; December has its own; the tail is the actor id.
+    expect(unattributedSubject(Date.UTC(2026, 10, 1)).refId).toBe(anonymousNovember);
+    expect(unattributedSubject(Date.UTC(2026, 10, 30, 23, 59, 59, 999)).refId).toBe(anonymousNovember);
+    expect(unattributedSubject(Date.UTC(2026, 11, 1)).refId).not.toBe(anonymousNovember);
+    expect(unattributedSubject(november).refId.slice(13)).toBe(ANONYMOUS_ACTOR_ID.slice(13));
     const { calls, store } = capturingStore();
-    const tokeniser = createVaultTokeniser({ vaultKey: VAULT_KEY, hmacKey: HMAC_KEY, store, newId });
-    const db = fakeSql(lookup({ [`USER:${ANONYMOUS_ACTOR_ID}`]: ANON_SUBJECT_ID }));
-    await tokeniser.tokenise(db, [value('filter', 'Pune', null)]);
-    expect(db.statements[0]?.values).toEqual([['USER'], [ANONYMOUS_ACTOR_ID]]);
-    expect(calls[0]?.rows[0]?.subjectId).toBe(ANON_SUBJECT_ID);
+    let reads = 0;
+    const now = (): number => {
+      reads += 1;
+      return november;
+    };
+    const tokeniser = createVaultTokeniser({ vaultKey: VAULT_KEY, hmacKey: HMAC_KEY, store, newId, now });
+    const db = fakeSql(lookup({ [`USER:${anonymousNovember}`]: ANON_SUBJECT_ID, [`USER:${USER}`]: SUBJECT_ID }));
+    await tokeniser.tokenise(db, [value('filter', 'Pune', null), value('ip', '203.0.113.7', null), value('name', 'Jane')]);
+    // One subject for the two unattributed values; a value that names its subject keeps it; the clock is read once.
+    expect(db.statements[0]?.values).toEqual([
+      ['USER', 'USER'],
+      [anonymousNovember, USER],
+    ]);
+    expect(calls[0]?.rows.map((row) => row.subjectId)).toEqual([ANON_SUBJECT_ID, ANON_SUBJECT_ID, SUBJECT_ID]);
+    expect(reads).toBe(1);
   });
 
   it('a missing subject is inserted (ON CONFLICT DO NOTHING) and looked up again: three statements', async () => {

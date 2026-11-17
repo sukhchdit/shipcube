@@ -86,7 +86,7 @@ export {
   createIpIndex,
   createVaultTokeniser,
   decryptVaultValue,
-  UNATTRIBUTED_SUBJECT,
+  unattributedSubject,
   type AuditKey,
   type VaultTokeniserOptions,
 } from './redaction/vault.js';

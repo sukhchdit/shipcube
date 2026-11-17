@@ -100,7 +100,9 @@ export interface AppDependencies {
   /**
    * Test seam: replaces ONLY the authentication slot of the default pipeline (the rest, the audit capture included, is
    * still composed from these dependencies), so a test can drive the production composition to a 403 before the
-   * session authenticator (TASK-052) exists. startApi never sets it; with `pipeline` it is ignored.
+   * session authenticator (TASK-052) exists. startApi never sets it; with `pipeline` it is ignored; createApp refuses
+   * it in `live` mode (AuthenticateSeamError). Retired with TASK-052 (the real authenticator replaces the stub).
+   * @internal
    */
   readonly authenticate?: RouteSlot;
 }
@@ -110,7 +112,16 @@ export interface AppDependencies {
  * `defineRoute` (`mountRoutes` refuses others), every tenant-transaction route has the runner, the route bindings hold
  * for this mode (PR8-SEC-05), and every slot stub can honour the metadata (`SlotNotImplementedError`, PR32-SEC-03).
  */
+/** A live composition that replaces the authentication slot (PR #61 dup-review R1-m6): refused at boot. */
+export class AuthenticateSeamError extends Error {
+  constructor() {
+    super('the authentication test seam (AppDependencies.authenticate) is refused in live mode');
+    this.name = 'AuthenticateSeamError';
+  }
+}
+
 function assertBootable(deps: AppDependencies, routes: readonly RouteDescriptor[]): void {
+  if (deps.authenticate !== undefined && deps.apiMode === 'live') throw new AuthenticateSeamError();
   if (deps.pipeline === undefined) assertPipelineReady(routes, deps.tenantTx);
   assertRouteBindings(routes, { production: deps.apiMode === 'live' });
 }

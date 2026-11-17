@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from '@jest/globals';
 import { createAuditPrivacy } from '@platform/audit';
 
-import { createApp, type AppDependencies } from '../../app.js';
+import { AuthenticateSeamError, createApp, type AppDependencies } from '../../app.js';
 import type { TenantTxRunner } from '../db/index.js';
 import { defineRoute, type RouteDescriptor } from './define-route.js';
 import { defaultPipelineSlots } from './pipeline.js';
@@ -80,5 +80,11 @@ describe('[D-SEC-PR56-01] [D-ARCH-141] createApp composes the capture with the p
     expect(mounted).toEqual(['createAddress']);
     // The capture behind it is the composed one: without privacy the seam does not make the route mountable.
     expect(() => createApp({ ...base, authenticate })).toThrow(/an audit tokeniser in the composition \(TASK-028\)/);
+  });
+
+  it('[dup-review R1-m6] the authenticate seam is refused in live mode, whatever else the composition holds', () => {
+    const authenticate: RouteSlot = () => (_req, _res, next) => next();
+    expect(() => createApp({ ...base, auditPrivacy: privacy, authenticate, apiMode: 'live' })).toThrow(AuthenticateSeamError);
+    expect(() => createApp({ ...base, auditPrivacy: privacy, apiMode: 'live' })).not.toThrow();
   });
 });
