@@ -21,7 +21,7 @@
  *    returned by the handler) gets its entry in a separate transaction, because the business one rolled back; best
  *    effort and logged when unwritten (`audit.failed_unrecorded`). Never after a failure of the audit path, the
  *    admission bulkhead, the pool or a statement / lock timeout: a second transaction would only add load to what just
- *    failed (R1-m4); the tx slot also skips it for a client that went away and bounds the wait for it.
+ *    failed (R1-m4); the tx slot also skips it when the failure is the client's disconnect and bounds the wait.
  *  - DENIED: a 403 AUTHZ_DENIED gets one PERMISSION_DENIED entry with the required permission, in its own transaction
  *    (REQ-AUDIT-010, REQ-RBAC-007); a failure to write it answers that failure (500 / 503), never a silent 403.
  * Every entry carries personal values (the IP, the user agent), so a capture without a tokeniser refuses, at MOUNT

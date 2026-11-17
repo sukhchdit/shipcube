@@ -11,7 +11,7 @@
  *     transaction is read-only (R1-m6);
  *  3a. a VIEW / DOWNLOAD route's entry in its own short transaction, before anything is sent (fail closed for
  *     SENSITIVE, 503 AUDIT_UNAVAILABLE); after a failed step 1, 2 or 3 of a mutating route, its FAILED entry (best
- *     effort, at most FAILED_ENTRY_WAIT_MS, none for a client that went away);
+ *     effort, at most FAILED_ENTRY_WAIT_MS, none when the failure is the client's disconnect);
  *  4. send the handler's result (a stream result is completed here, after COMMIT, under the same signal and deadline;
  *     TASK-044 owns its framing);
  *  5. `afterCommit` (optional), scheduled once the write committed (also when sending or the stream fails afterwards),
@@ -177,8 +177,11 @@ function unavailable(why: string): AppError {
 interface RequestLifetime {
   /** The request signal; the first read arms the deadline (`call`, or the stream of a route without `call`). */
   readonly signal: () => AbortSignal;
-  /** The client closed the connection before the response finished (its failure gets no FAILED entry, R1-m4). */
-  readonly clientGone: () => boolean;
+  /**
+   * `error` is this request's own disconnect abort (the client closed the connection before the response finished,
+   * and that abort, not another failure, ended the request): it gets no FAILED entry (R1-m4, PR56-SEC-11).
+   */
+  readonly isDisconnect: (error: unknown) => boolean;
   readonly release: () => void;
 }
 
@@ -191,11 +194,11 @@ function requestLifetime(res: Response, deadlineMs: number): RequestLifetime {
   const abort = (why: string): void => {
     if (!controller.signal.aborted) controller.abort(unavailable(why));
   };
-  let gone = false;
+  let disconnect: AppError | undefined;
   const onClose = (): void => {
-    if (res.writableFinished) return;
-    gone = true;
-    abort('client closed the request');
+    if (res.writableFinished || controller.signal.aborted) return;
+    disconnect = unavailable('client closed the request');
+    controller.abort(disconnect);
   };
   if (res.closed || res.destroyed) onClose();
   else res.once('close', onClose);
@@ -208,7 +211,7 @@ function requestLifetime(res: Response, deadlineMs: number): RequestLifetime {
       }
       return controller.signal;
     },
-    clientGone: () => gone,
+    isDisconnect: (error) => disconnect !== undefined && error === disconnect,
     release: () => {
       clearTimeout(timer);
       res.off('close', onClose);
@@ -234,8 +237,17 @@ interface Phases {
   readonly lifetime: RequestLifetime;
 }
 
+/**
+ * What steps 1-3 produced: the result to send, and whether the write committed. Only a committed result schedules
+ * `afterCommit` (D-ARCH-106 (5)); a returned failure was rolled back (D-TASK029-16, PR56-SEC-10).
+ */
+interface RunOutcome {
+  readonly result: RouteResult;
+  readonly committed: boolean;
+}
+
 /** Steps 1-3 for a tenant route; `transaction: 'none'` runs the handler (and its audit hook) without a transaction. */
-async function run({ route, request, options, audit, lifetime }: Phases): Promise<RouteResult> {
+async function run({ route, request, options, audit, lifetime }: Phases): Promise<RunOutcome> {
   const write = async (db: unknown, phases: PhaseResults<unknown, unknown>): Promise<RouteResult> => {
     const ctx: RouteContext = Object.freeze({ ...request, db });
     // The descriptor erases the phase result types; this is the one place that hands them on (define-route.ts).
@@ -252,7 +264,8 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     return result;
   };
   const none: PhaseResults<unknown, unknown> = Object.freeze({ loaded: undefined, called: undefined });
-  if (route.transaction === 'none') return write(undefined, none);
+  // No transaction to roll back: the result stands as returned, and afterCommit runs after the response as before.
+  if (route.transaction === 'none') return { result: await write(undefined, none), committed: true };
   if (options.tenantTx === undefined) throw new AppError('SERVICE_UNAVAILABLE', { cause: new Error('no tenant transaction runner') });
   const runner = options.tenantTx;
   const tenant = tenantContextOf(request.principal, request.correlationId);
@@ -277,18 +290,19 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     // REQ-AUDIT-010: the request failed after authorisation (in load, call or the handler transaction, which rolled
     // back); its FAILED entry goes in a transaction of its own.
     await recordFailure(audit, request, error, tenant, lifetime);
-    if (error instanceof RouteReturnedError) return error.result;
+    if (error instanceof RouteReturnedError) return { result: error.result, committed: false };
     throw error;
   }
   // The result set is fixed and nothing is sent yet: a VIEW / DOWNLOAD entry is written now (REQ-AUDIT-005).
   await audit.afterCommit(request, result, tenant);
-  return result;
+  return { result, committed: true };
 }
 
 /**
- * The FAILED entry of a failed request (R1-m4): none for a client that went away (nobody reads the answer, and the
- * failure is the disconnect, not the business outcome), and the answer waits at most {@link FAILED_ENTRY_WAIT_MS} for
- * it. `afterFailure` resolves always (it reports an unwritten entry itself), so the only rejection here is the end
+ * The FAILED entry of a failed request (R1-m4): none when the failure IS the client's disconnect (the slot's own abort
+ * of `call`, or of a call skipped because the client had gone: no business outcome to record). Any other failure is
+ * recorded even when the client has gone meanwhile, so a client cannot suppress its FAILED entry by disconnecting
+ * (PR56-SEC-11, REQ-AUDIT-010). The answer waits at most {@link FAILED_ENTRY_WAIT_MS} for it. `afterFailure` resolves always (it reports an unwritten entry itself), so the only rejection here is the end
  * of the wait, after which the write finishes or rolls back in its own transaction.
  */
 async function recordFailure(
@@ -298,7 +312,7 @@ async function recordFailure(
   tenant: TenantContext,
   lifetime: RequestLifetime,
 ): Promise<void> {
-  if (lifetime.clientGone()) return;
+  if (lifetime.isDisconnect(error)) return;
   const wait = deadline(FAILED_ENTRY_WAIT_MS, () => new Error('FAILED entry wait elapsed'));
   try {
     await abortable(audit.afterFailure(request, error, tenant), wait.signal);
@@ -333,14 +347,15 @@ export function executeSlot(options: ExecuteOptions): RouteSlot {
       });
       const lifetime = requestLifetime(res, deadlineMs);
       try {
-        const result = await run({ route, request, options, audit, lifetime });
-        // Committed from here on: afterCommit runs even when sending or the stream fails (PR #44 R1-n4).
+        const { result, committed } = await run({ route, request, options, audit, lifetime });
+        // After a commit, afterCommit runs even when sending or the stream fails (PR #44 R1-n4); a returned failure
+        // was rolled back, so nothing is scheduled for it (PR56-SEC-10).
         try {
           send(res, result);
           if (result.stream !== undefined) await completeStream(res, result.stream, lifetime.signal());
         } finally {
           const afterCommit = route.afterCommit;
-          if (afterCommit !== undefined && queue !== undefined) {
+          if (committed && afterCommit !== undefined && queue !== undefined) {
             const label = { route: routeTemplateOf(res) ?? route.path, operationId: route.operationId, correlationId };
             queue.schedule((signal) => afterCommit(Object.freeze({ ...request, signal }), result), label);
           }

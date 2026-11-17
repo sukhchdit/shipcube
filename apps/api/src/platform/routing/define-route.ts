@@ -112,9 +112,17 @@ export interface RouteResult {
  * handler returned it. The audit capture writes the FAILED entry of a 409, 422 or 5xx in a transaction of its own.
  */
 export class RouteReturnedError extends Error {
-  constructor(readonly result: RouteResult) {
+  /** Private, so the body and headers never serialise with the error if a future wrapper lets it escape into a log. */
+  readonly #result: RouteResult;
+
+  constructor(result: RouteResult) {
     super(`the handler returned ${String(result.status)}`);
     this.name = 'RouteReturnedError';
+    this.#result = result;
+  }
+
+  get result(): RouteResult {
+    return this.#result;
   }
 }
 
@@ -200,7 +208,8 @@ export interface AfterCommitContext extends RouteRequestContext {
 
 /**
  * `afterCommit(ctx, result)`: after COMMIT and after the response was written (also when sending or a stream failed
- * after COMMIT), with no transaction and no database handle. Best effort, in-process and bounded (durable work is an
+ * after COMMIT), with no transaction and no database handle. Never for a request whose write did not commit: a thrown
+ * error or a returned status of 400 or more rolls the handler transaction back and schedules nothing (PR56-SEC-10). Best effort, in-process and bounded (durable work is an
  * outbox event): a throw is logged as `api.after_commit_failed` and never changes the response; work above the queue
  * cap is dropped (`api.after_commit_dropped`); pending work is drained at shutdown.
  */

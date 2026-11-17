@@ -780,7 +780,7 @@ describe('[D-TASK029-16] [R1-m4] returned failures and the FAILED entry in the t
     expect(events).toEqual(['begin:rw', 'rollback', 'failed-entry AppError']);
   });
 
-  it('a client that disconnected gets no FAILED entry (the failure is the disconnect)', async () => {
+  it('[PR56-SEC-11] a call aborted by the client disconnect gets no FAILED entry (the failure is the disconnect)', async () => {
     const events: string[] = [];
     let entered: () => void = () => undefined;
     const inCall = new Promise<void>((resolve) => {
@@ -819,5 +819,89 @@ describe('[D-TASK029-16] [R1-m4] returned failures and the FAILED entry in the t
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it('[PR56-SEC-11] a handler that returns 409 after the client disconnected still gets its FAILED entry (REQ-AUDIT-010)', async () => {
+    const events: string[] = [];
+    let entered: () => void = () => undefined;
+    const inHandler = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const route = phased({
+      handler: async () => {
+        entered();
+        await held;
+        return { status: 409, body: { code: 'CONFLICT' } };
+      },
+    });
+    const server = appCapturing(route, events).listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    try {
+      const controller = new AbortController();
+      const pending = fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/things`, {
+        method: 'POST',
+        signal: controller.signal,
+      }).catch((error: unknown) => error);
+      await inHandler;
+      controller.abort();
+      await pending;
+      await delay(100); // the server sees the socket close while the handler is still held
+      release();
+      await eventually(events, 'failed-entry RouteReturnedError');
+      expect(events).toEqual(['begin:rw', 'rollback', 'failed-entry RouteReturnedError']);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('[PR56-SEC-10] afterCommit runs only after a commit', () => {
+  const routeReturning = (status: number, events: string[]): RouteDescriptor =>
+    phased({
+      handler: () => ({ status, body: { status } }),
+      afterCommit: () => {
+        events.push('afterCommit');
+      },
+    });
+
+  it.each([409, 404, 500])('a returned %i rolls back, is sent, and schedules no afterCommit', async (status) => {
+    const events: string[] = [];
+    const response = await request(appWith(routeReturning(status, events), fakeRunner(events), events), '/api/v1/things', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(status);
+    await delay(50);
+    expect(events).toEqual(['begin:rw', 'rollback', 'send']);
+  });
+
+  it('control: a returned 201 commits and runs afterCommit exactly once', async () => {
+    const events: string[] = [];
+    const response = await request(appWith(routeReturning(201, events), fakeRunner(events), events), '/api/v1/things', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(201);
+    await eventually(events, 'afterCommit');
+    await delay(50);
+    expect(events).toEqual(['begin:rw', 'audit db=write-db', 'commit', 'send', 'afterCommit']);
+  });
+
+  it('a thrown error rolls back and schedules no afterCommit', async () => {
+    const events: string[] = [];
+    const route = phased({
+      handler: () => {
+        throw new AppError('CONFLICT');
+      },
+      afterCommit: () => {
+        events.push('afterCommit');
+      },
+    });
+    expect((await request(appWith(route, fakeRunner(events), events), '/api/v1/things', { method: 'POST' })).status).toBe(409);
+    await delay(50);
+    expect(events).toEqual(['begin:rw', 'rollback', 'send']);
   });
 });
