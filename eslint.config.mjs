@@ -59,10 +59,21 @@ const S3_SDK_IMPORT_PATTERN = {
   message: `only ${S3_SEAM} imports the AWS SDK, the SigV4 signer or aws-sdk: everything else uses the ObjectStorage port (D-ARCH-097, PR30-SEC-08).`,
 };
 /**
+ * The RBAC matrix generator is the US-071 test oracle (PR48-SEC-03, TASK-289): it restates the authenticate -> MFA gate
+ * -> authorise rules independently, so a production slot that reused it would make the matrix confirm itself. It lives
+ * on the test-only subpath `@platform/authz/matrix` (packages/authz/src/generator); test files import it, application
+ * and package code never do (this specifier pattern, plus the boundaries resolved-file arm below for any spelling).
+ */
+const AUTHZ_MATRIX_ORACLE = 'packages/authz/src/generator/**';
+const AUTHZ_MATRIX_SPECIFIERS = ['@platform/authz/matrix', '@platform/authz/matrix/**'];
+const AUTHZ_MATRIX_MESSAGE =
+  'the RBAC matrix generator (@platform/authz/matrix, packages/authz/src/generator) is the US-071 test oracle: only tests import it; production code that reused it would make the matrix confirm itself (PR48-SEC-03).';
+const AUTHZ_MATRIX_IMPORT_PATTERN = { regex: '^@platform/authz/matrix(?:/.*)?$', message: AUTHZ_MATRIX_MESSAGE };
+/**
  * Every `no-restricted-imports` pattern of the repository. Flat config replaces (does not merge) rule options, so a
  * file-scoped block re-declares the rule from this list minus its own exception, never `'off'`.
  */
-const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATTERN, S3_SDK_IMPORT_PATTERN];
+const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATTERN, S3_SDK_IMPORT_PATTERN, AUTHZ_MATRIX_IMPORT_PATTERN];
 /**
  * Built-in loaders outside every import control (PR44-SEC-14, TASK-020 part 020-D): from `node:module` only
  * `createRequire` (itself confined by platform/static-module-specifier) and the two read-only lookups `builtinModules`
@@ -326,6 +337,8 @@ const BOUNDARIES_FILES = [
   { pattern: 'apps/*/**', category: 'app', capture: ['app'] },
   { pattern: 'packages/*/**', category: 'package', capture: ['pkg'] },
   { pattern: 'packages/audit/**', category: 'package-audit' },
+  // The RBAC matrix oracle (PR48-SEC-03): the resolved-file arm of its confinement (policy below).
+  { pattern: AUTHZ_MATRIX_ORACLE, category: 'authz-matrix-oracle' },
   // The api-side audit composition (writer factory, capture hook) and the allow-listed importers of the audit writer:
   // the resolved-file arm of REQ-AUDIT-001 (PR #42 R2-M1, PR42-SEC-16; policy below).
   { pattern: 'apps/api/src/platform/audit/**', category: 'api-platform-audit' },
@@ -661,6 +674,16 @@ const BOUNDARIES_POLICIES = [
       'platform/db/query-counter.ts is a test seam: only tests and prisma/tests import it; production code never mounts it (NFR-PERF-006, PR34-SEC-01).',
   },
   { from: { file: { categories: { anyOf: ['test', 'prisma-tests'] } } }, allow: { to: toLayer('db-test-seam') } },
+
+  // --- The RBAC matrix generator is a test oracle (PR48-SEC-03, TASK-289): application and package code (tests and the
+  //     generator folder itself excepted) imports nothing that resolves into packages/authz/src/generator, whatever the
+  //     spelling (the subpath, a relative path, a re-export, import()), nor the @platform/authz/matrix specifier. The
+  //     static-import twin is no-restricted-imports (AUTHZ_MATRIX_IMPORT_PATTERN). Last, so no broader allow re-opens it.
+  {
+    from: { file: { categories: { anyOf: ['app', 'package'], noneOf: ['test', 'authz-matrix-oracle'] } } },
+    disallow: [{ to: toLayer('authz-matrix-oracle') }, { dependency: { source: AUTHZ_MATRIX_SPECIFIERS } }],
+    message: AUTHZ_MATRIX_MESSAGE,
+  },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1064,6 +1087,13 @@ export default defineConfig([
     ignores: TEST_FILES,
     plugins: { platform },
     rules: { 'platform/expect-affected': 'warn' },
+  },
+  {
+    // PR48-SEC-03: tests (tests/generated/rbac and the generator's own tests) import the RBAC matrix oracle; every other
+    // restricted pattern stays (re-declared, never 'off'). Before the exceptions below, which keep the oracle pattern
+    // for their files (none of them needs the oracle).
+    files: TEST_FILES,
+    rules: { 'no-restricted-imports': restrictedImportsExcept(AUTHZ_MATRIX_IMPORT_PATTERN) },
   },
   {
     // The hasher keeps every other restricted pattern (re-declared from the shared list, never 'off').

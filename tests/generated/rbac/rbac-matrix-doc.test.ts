@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { ROUTE_MATRIX_COMMAND, ROUTE_MATRIX_PATH } from '@platform/authz';
+import { ROUTE_MATRIX_COMMAND, ROUTE_MATRIX_PATH } from '@platform/authz/matrix';
 
 import { REPO_ROOT } from '../../../tools/openapi/contract.js';
 import { main, renderCommittedMatrix } from './write-matrix.js';

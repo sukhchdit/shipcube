@@ -1324,8 +1324,34 @@ const AUDIT_COMPOSITION: readonly Violation[] = [
   AUDIT_COMPOSITION_MESSAGE,
 ]);
 
+/**
+ * PR48-SEC-03 (TASK-289): the RBAC matrix generator (@platform/authz/matrix, packages/authz/src/generator) is the US-071
+ * test oracle. A static import of the subpath is caught by no-restricted-imports and the boundaries specifier arm; a
+ * relative path, a re-export and import() by the boundaries arms (resolved file, specifier). The generated suite
+ * (tests/generated/rbac/ok-runner.ts) and the generator folder itself (generator/ok-document.ts) stay clean.
+ */
+const AUTHZ_MATRIX_ROOT = 'layering/authz-matrix-oracle';
+const AUTHZ_MATRIX_MESSAGE = 'the RBAC matrix generator (@platform/authz/matrix, packages/authz/src/generator) is the US-071 test oracle';
+const AUTHZ_MATRIX_ORACLE: readonly Violation[] = (
+  [
+    [
+      'production authorise imports the @platform/authz/matrix subpath',
+      'apps/api/src/platform/authz/bad-oracle-specifier.ts',
+      ['no-restricted-imports', BOUNDARIES],
+    ],
+    [
+      'production authorise imports the generator by relative path (resolved file)',
+      'apps/api/src/platform/authz/bad-oracle-resolved.ts',
+      BOUNDARIES,
+    ],
+    ['production authorise loads the subpath with import()', 'apps/api/src/platform/authz/bad-oracle-dynamic.ts', BOUNDARIES],
+    ['the @platform/authz package re-exports the generator (resolved file)', 'packages/authz/src/bad-oracle-reexport.ts', BOUNDARIES],
+  ] as const
+).map(([title, file, ruleId]): Violation => [`[PR48-SEC-03] ${title}`, `${AUTHZ_MATRIX_ROOT}/${file}`, ruleId, AUTHZ_MATRIX_MESSAGE]);
+
 const ESLINT_VIOLATIONS = [
   ...LAYERING,
+  ...AUTHZ_MATRIX_ORACLE,
   ...AUDIT_COMPOSITION,
   ...SHARED_LOGGING,
   ...ANY_SUPPRESSION,
@@ -1707,6 +1733,37 @@ describe('repository probes: workspace imports resolved to repository files (ADR
 
   it('allowed: apps/web imports @platform/shared and @platform/ui (resolved, no-unresolved on)', () => {
     expectClean(report.probes, 'apps/web/app/routes/lint-probe-ok-shared-ui.ts');
+  });
+
+  it.each([
+    [
+      'production authorise.ts imports { expectCell, generateMatrix }',
+      'apps/api/src/platform/authz/authorise.ts',
+      ['no-restricted-imports', BOUNDARIES],
+    ],
+    [
+      'an authz platform file imports the oracle as a namespace',
+      'apps/api/src/platform/authz/lint-probe-bad-oracle-namespace.ts',
+      ['no-restricted-imports', BOUNDARIES],
+    ],
+    ['a module service loads it with import()', `${API}/shipments/service/lint-probe-bad-oracle-dynamic.ts`, [BOUNDARIES]],
+    ['the @platform/authz package re-exports the generator entry', 'packages/authz/src/lint-probe-bad-oracle-reexport.ts', [BOUNDARIES]],
+  ])('[PR48-SEC-03] the RBAC matrix oracle (resolved to packages/authz/src/generator): %s fails', (_title, path, rules) => {
+    const findings = findingsOf(report.probes, path);
+    expect([...new Set(findings.map((finding) => finding.ruleId))].sort()).toEqual([...rules].sort());
+    for (const finding of findings) expect(finding.message).toContain(AUTHZ_MATRIX_MESSAGE);
+  });
+
+  it('[PR48-SEC-03] allowed: the generated RBAC suite imports @platform/authz/matrix', () => {
+    expectClean(report.probes, 'tests/generated/rbac/lint-probe-ok-oracle.ts');
+  });
+
+  // PR #60 R1-n6: the positive fixtures of the oracle confinement, named so `-t PR48-SEC-03` shows the exemptions too.
+  it.each([
+    ['the generator folder imports its own modules (self-exemption)', `${AUTHZ_MATRIX_ROOT}/packages/authz/src/generator/ok-document.ts`],
+    ['the generated RBAC suite imports @platform/authz/matrix', `${AUTHZ_MATRIX_ROOT}/tests/generated/rbac/ok-runner.ts`],
+  ])('[PR48-SEC-03] allowed fixture: %s', (_title, file) => {
+    expectClean(report.eslint, file);
   });
 
   it('[PR #21 R1-m4] allowed: an API contract test imports apps/api/src by relative path', () => {

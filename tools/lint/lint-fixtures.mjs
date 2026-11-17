@@ -309,6 +309,18 @@ const REPO_PROBES = {
   'apps/api/src/platform/db/lint-probe-bad-raw-reexport.ts': "export { Prisma } from '@platform/prisma/client';\n",
   'apps/api/src/platform/db/lint-probe-bad-raw-sql-alias.ts':
     "import { Prisma } from '@platform/prisma/client';\n\nconst tag = Prisma.sql;\n\nexport const probe = (s: string): unknown => tag([s]);\n",
+  // PR48-SEC-03 (TASK-289; the record's probe C): the RBAC matrix oracle @platform/authz/matrix resolves to
+  // packages/authz/src/generator; production authorise, a module service and the package entry may not import it in any
+  // form, the generated suite may. Linted at the authorise path in memory (the file on disk is not read or changed).
+  'apps/api/src/platform/authz/authorise.ts':
+    "import { expectCell, generateMatrix } from '@platform/authz/matrix';\n\nexport const probe = (): unknown => [expectCell, generateMatrix];\n",
+  'apps/api/src/platform/authz/lint-probe-bad-oracle-namespace.ts':
+    "import * as oracle from '@platform/authz/matrix';\n\nexport const probe = (): unknown => oracle;\n",
+  'apps/api/src/modules/shipments/service/lint-probe-bad-oracle-dynamic.ts':
+    "export const probe = (): Promise<unknown> => import('@platform/authz/matrix');\n",
+  'packages/authz/src/lint-probe-bad-oracle-reexport.ts': "export { expectCell } from './generator/index.js';\n",
+  'tests/generated/rbac/lint-probe-ok-oracle.ts':
+    "import { expectCell } from '@platform/authz/matrix';\n\nexport const probe = (): unknown => expectCell;\n",
   'apps/api/src/platform/db/lint-probe-ok-raw-fragments.ts':
     "import { Prisma } from '@platform/prisma/client';\n\nexport const probe = (ids: readonly string[], v: string): unknown => [Prisma.sql`a = ${v}`, Prisma.join(ids, ', ')];\n",
 };

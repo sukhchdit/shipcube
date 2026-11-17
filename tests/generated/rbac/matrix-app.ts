@@ -1,13 +1,22 @@
 /**
- * The app the rbac-matrix suite calls (US-071; TASK-027): `createApp` with the production slots for authentication
- * fallback, MFA gate and authorisation, and three test seams around them.
+ * The app the rbac-matrix suite calls (US-071; TASK-027, TASK-289): `createApp` with the production slots for
+ * authentication fallback, MFA gate and authorisation, and three test seams around them.
  *
  *  - `matrixAuthenticate`: the authenticators that verify a bearer, a refresh cookie, a guest token or a provider
  *    signature do not exist yet (TASK-052/055/091/171/261; the stub verifies nothing). This slot resolves the matrix's
- *    synthetic test credentials (`callerHeaders`) to principals, and only for the kinds the route DECLARES
- *    (`presentedKinds(headers, route.auth)`, D-ARCH-109): a foreign credential is never read. Every other request (no
- *    declared credential, or one that does not resolve: the expired bearer, the unknown cookie or token) goes to the
- *    production `authenticate` stub, which gives the anonymous principal or 401 `AUTH_REQUIRED` exactly as in production.
+ *    synthetic test credentials (`callerHeaders`) to principals, only for the kinds in `STUBBED_CREDENTIAL_KINDS` and
+ *    only for the kinds the route DECLARES (`presentedKinds(headers, route.auth)`, D-ARCH-109): a foreign credential is
+ *    never read. Every other request (no declared credential, or one that does not resolve: the expired bearer, the
+ *    unknown cookie or token) goes to the production `authenticate` stub, which gives the anonymous principal or 401
+ *    `AUTH_REQUIRED` exactly as in production.
+ *
+ * What the matrix therefore proves (truth in labelling; PR #48 code review R1-m2, PR48-SEC-05/06, D-ARCH-134): the
+ * credential-kind selection (`presentedKinds`, D-ARCH-109), the production authenticate stub, the production MFA gate
+ * for pending staff, and the PERMISSION gate of the production `authorise`. It does NOT prove the authenticators (they
+ * do not exist; the seam stands in for them), and it does not reach the credential and actor gates of `authorise`
+ * (a principal of an undeclared kind, a non-signature principal on a signature-only permission, an actor check): the
+ * seam never builds such a principal, so those gates stay proven by apps/api platform/authz/authorise.test.ts until
+ * each kind's seam retires with its authenticator task (TASK-052/055/091/171/261, TASK-067 for `+mfa`).
  *  - `matrixMfaGate`: a staff principal created for a `<ROLE>+mfa` column stands for a verified second factor, which
  *    no principal can carry until the MFA task lands; it passes, every other principal meets the production `mfaGate`
  *    (staff before TOTP: 403).
@@ -20,7 +29,8 @@
  * seams, with a runner whose database handle throws on first use: a route must refuse a foreign `{orgId}` with 404
  * before any query (ADR-0005 am. 3).
  */
-import { type MatrixCaller, verifiedId } from '@platform/authz';
+import type { RouteAuth } from '@platform/authz';
+import { type MatrixCaller, verifiedId } from '@platform/authz/matrix';
 import { presentedKinds, REFRESH_COOKIE_NAMES } from '@platform/shared';
 import type { Express, NextFunction, Request, Response } from 'express';
 
@@ -52,6 +62,21 @@ export const REACHED_VALUE = 'authorised';
 export const PUBLIC_CACHE_CONTROL = 'public, max-age=60';
 /** Test-only signature header, read only on routes that declare `signature`. */
 export const SIGNATURE_HEADER = 'x-rbac-matrix-signature';
+/** The value a `signature-header:<name>` caller presents in the real provider header `<name>` (PR48-SEC-01). */
+export const FOREIGN_SIGNATURE_VALUE = 't=0,v1=0';
+
+/**
+ * The credential kinds the seam still resolves in place of a real authenticator (the still-stubbed list, D-ARCH-134).
+ * Each authenticator task deletes its kind here and its branch of `resolvePrincipal`, and presents a real test
+ * credential through the real slot; TASK-052's tripwire fails when a kind is both listed here and mounted by createApp.
+ * `resolvePrincipal` reads this list, so a kind removed here is no longer resolved by the seam.
+ */
+export const STUBBED_CREDENTIAL_KINDS: readonly Exclude<RouteAuth, 'anonymous'>[] = Object.freeze([
+  'session',
+  'refresh-cookie',
+  'quote-token',
+  'signature',
+]);
 
 /** Synthetic test credentials: matrix labels, never secrets (nothing verifies them but this file). */
 const TOKEN_PREFIX = 'rbac-matrix.';
@@ -66,6 +91,12 @@ export const MATRIX_ORGS = {
   FOREIGN: stableUuid('rbac-matrix:org:customer-b'),
 } as const;
 
+/**
+ * The refresh cookie name a caller presents: the web cookie for the valid one, the admin cookie for the unknown one,
+ * so both names are presented as a foreign credential on every route outside `[refresh-cookie]` (PR #48 R1-n2).
+ */
+export const refreshCookieName = (valid: boolean): string => String(REFRESH_COOKIE_NAMES[valid ? 0 : 1]);
+
 /** The request headers that present `caller`'s credential (none for `none`). */
 export function callerHeaders(caller: MatrixCaller): Record<string, string> {
   switch (caller.kind) {
@@ -75,9 +106,11 @@ export function callerHeaders(caller: MatrixCaller): Record<string, string> {
       return { authorization: `Bearer ${TOKEN_PREFIX}${caller.id}` };
     case 'signature':
       return { [SIGNATURE_HEADER]: caller.holds ? 'holds' : 'lacks' };
+    case 'signature-header':
+      return { [caller.header]: FOREIGN_SIGNATURE_VALUE };
     case 'credential':
       if (caller.credential === 'session') return { authorization: `Bearer ${TOKEN_PREFIX}expired` };
-      if (caller.credential === 'refresh-cookie') return { cookie: `${String(REFRESH_COOKIE_NAMES[0])}=${caller.valid ? VALID : UNKNOWN}` };
+      if (caller.credential === 'refresh-cookie') return { cookie: `${refreshCookieName(caller.valid)}=${caller.valid ? VALID : UNKNOWN}` };
       return { 'x-quote-token': caller.valid ? VALID : UNKNOWN };
   }
 }
@@ -116,13 +149,23 @@ const header = (req: Request, name: string): string | undefined => {
   return typeof value === 'string' ? value : undefined;
 };
 
-/** The principal of the one declared test credential the request presents, or undefined (the stub decides). */
+/** `kind` is declared by the route and still stubbed (no real authenticator yet). */
+const seamed = (route: RouteDescriptor, kind: Exclude<RouteAuth, 'anonymous'>): boolean =>
+  route.auth.includes(kind) && STUBBED_CREDENTIAL_KINDS.includes(kind);
+
+/**
+ * The principal of the one declared, still-stubbed test credential the request presents, or undefined (the
+ * production stub decides). Only declared kinds: the seam can never build a principal of a kind outside `route.auth`.
+ */
 function resolvePrincipal(route: RouteDescriptor, req: Request, principals: MatrixPrincipals): Principal | undefined {
   const [kind] = presentedKinds(req.headers, route.auth);
-  if (kind === 'session') return principals.byToken.get(header(req, 'authorization') ?? '');
-  if (kind === 'refresh-cookie') return header(req, 'cookie')?.endsWith(`=${VALID}`) === true ? REFRESH : undefined;
-  if (kind === 'quote-token') return header(req, 'x-quote-token') === VALID ? GUEST : undefined;
-  const signature = route.auth.includes('signature') ? header(req, SIGNATURE_HEADER) : undefined;
+  if (kind !== undefined) {
+    if (!seamed(route, kind)) return undefined;
+    if (kind === 'session') return principals.byToken.get(header(req, 'authorization') ?? '');
+    if (kind === 'refresh-cookie') return header(req, 'cookie')?.endsWith(`=${VALID}`) === true ? REFRESH : undefined;
+    return header(req, 'x-quote-token') === VALID ? GUEST : undefined;
+  }
+  const signature = seamed(route, 'signature') ? header(req, SIGNATURE_HEADER) : undefined;
   if (signature === undefined) return undefined;
   return Object.freeze({
     ...ANONYMOUS,

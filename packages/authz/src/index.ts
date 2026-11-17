@@ -1,5 +1,7 @@
 // Public entry point of @platform/authz: permission catalogue, role seed, build-time guards, the authorisation
-// decision and the generators of the role-permission matrix document and the seed migration (ADR-0008).
+// decision and the generators of the role-permission matrix document and the seed migration (ADR-0008). The RBAC
+// route-matrix generator (the US-071 test oracle) is NOT exported here: it is the test-only subpath
+// @platform/authz/matrix (src/generator/index.ts; PR48-SEC-03, TASK-289).
 export {
   AUDITOR_NON_READ_PERMISSIONS,
   CATEGORY_EXCEPTIONS,
@@ -77,36 +79,4 @@ export {
   UnknownRoutePermissionError,
 } from './routes.js';
 export { AUTHZ_GENERATE_COMMAND, MATRIX_DOC_PATH, renderRolePermissionMatrix } from './matrix-doc.js';
-export {
-  appliesTo,
-  type CellOutcome,
-  expectCell,
-  FIXED_CALLERS,
-  generateMatrix,
-  type MatrixCaller,
-  type MatrixCell,
-  type MatrixRoute,
-  type MatrixRow,
-  type MatrixSource,
-  matrixCallers,
-  presentedKind,
-  type PresentedKind,
-  REFUSALS,
-  type RouteMatrix,
-  signatureOnlyOf,
-  verifiedId,
-} from './generator/matrix.js';
-export {
-  CELL_SYMBOLS,
-  type CommittedMatrix,
-  type CommittedRow,
-  type DriftOptions,
-  matrixDrift,
-  NOT_APPLICABLE,
-  parseRouteMatrix,
-  renderRouteMatrix,
-  ROUTE_MATRIX_COMMAND,
-  ROUTE_MATRIX_PATH,
-} from './generator/document.js';
-export { type OrgMismatchCase, orgMismatchCases, orgScopedRoutes, ORG_PATH_PARAMETER, pathParameterNames } from './generator/org-scope.js';
 export { linkKey, renderSeedMigration, SYSTEM_ACTOR_ID, type SeedIdFactory, type SeedIdKind, type SeedMigration } from './seed-sql.js';

@@ -6,7 +6,8 @@
  * exists). The metadata comes from `contractBoundRoutes` (route-metadata.ts), the reading the build-time route test
  * already compares with every mounted descriptor, plus `x-mfa-gate-exempt`.
  */
-import { isRouteMarker, type MatrixRoute } from '@platform/authz';
+import { isRouteMarker } from '@platform/authz';
+import type { MatrixRoute } from '@platform/authz/matrix';
 import Joi from 'joi';
 
 import { API_PREFIX } from '../../../apps/api/src/app.js';

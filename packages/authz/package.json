@@ -4,12 +4,17 @@
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
-  "description": "Permission catalogue, role seeds, policy checks and the RBAC matrix generator (ADR-0008).",
+  "description": "Permission catalogue, role seeds, policy checks and, on the test-only ./matrix subpath, the RBAC matrix generator (ADR-0008).",
   "exports": {
     ".": {
       "@platform/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./matrix": {
+      "@platform/source": "./src/generator/index.ts",
+      "types": "./dist/generator/index.d.ts",
+      "default": "./dist/generator/index.js"
     }
   },
   "scripts": {
