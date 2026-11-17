@@ -3157,3 +3157,16 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - The registry holds no PERSONAL column yet, so the tripwire has to exist before the first one merges.
 - **Alternatives rejected:** moving the registry to `packages/audit` (a cycle, or a second copy for the logger); a run-time union (above); TASK-031 as the owner (S, sonnet, and Wave 1 tables may merge first).
 - **Reversibility:** High.
+
+### D-ORCH-129 · 2026-11-17 · sdlc-orchestrator · D-ARCH-148..150 accepted; retention default applied
+- **Decision:** the architect rulings D-ARCH-148..150 (`e85a5bc`) are accepted and their code parts are added to PR #61 fix cycle 1.
+  - **Token columns:** INTERNAL.
+  - **Filter values:** the actor's subject.
+  - **Unattributed values:** a monthly unattributed subject.
+  - **Classification registry:** stays in `packages/shared`.
+  - **Pino:** a log-coverage build test.
+- **Retention of monthly unattributed subjects:** the principal-architect's proposed 12 months after month end is applied as the **default** under CLAUDE.md §4 (no human answer needed to proceed). It is logged here and in ASSUMPTIONS for product-manager confirmation at the next PM touch. The implementation is EPIC-B-413 (M4), a G4 precondition for production; nothing is due in Run 1.
+- **Knock-on (D-ARCH-150 item 9):** table PRs merging after PR #61 must pass the log-coverage test; batch 1.1 (TASK-035/036/037) is notified when its PRs appear.
+- **Also routed to PR #61 fix cycle 1:** PR61-SEC-09 and PR61-SEC-10 from session B's duplicate pass (D-ORCH-COORD-02).
+- **Housekeeping:** the architect's commit subject is 107 chars (> 100 commitlint). It is a main docs commit, not checked by PR commitlint, so it is noted, not rewritten.
+- **Reversibility:** High.
