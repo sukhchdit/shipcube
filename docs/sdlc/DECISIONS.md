@@ -2948,3 +2948,16 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Main's later PR #59 does not overlap.
   - **Next:** a narrow merge delta from security and code review (queued behind PR #60's pair, D-ORCH-111).
 - **Reversibility:** High.
+
+### D-ORCH-121 · 2026-11-17 · sdlc-orchestrator · SHEET-FOLD-9 accepted (D-ARCH-139..147, commit 41838dc); commit hygiene
+- **Decision:** SHEET-FOLD-9 is accepted. The generator reports 291 tasks, 0 errors, 0 warnings; Wave 0 is 46 tasks in 13 batches; the new late task is TASK-291 `flake3` (batch 0.13).
+  - **Standing dispatch rule (D-ARCH-147):** no task starts while an in-flight task of any batch holds one of its locks. With PR #56 open, TASK-284, TASK-030 and TASK-040 are held. TASK-028 starts after PR #56 merges.
+  - **Known overlap:** PR #56 and PR #60 both hold `lint`; whichever merges second needs a P1 re-test.
+  - **Action after 287-A merges:** re-run `gen.mjs --write`; TASK-015/034/211/290 gain the DoD line.
+- **Open items for later dispatch gates:**
+  - security-analyst confirms the T-39 aggregated-entry shape before TASK-041;
+  - an architect ruling on the capture seam before TASK-031;
+  - `.npmrc` and `apps/worker/src/platform/**` on the trigger list stay with security-analyst.
+- **Correction note:** PR56-SEC-14, listed under TASK-040 in the D-ARCH-143 title, was closed in PR #56 by D-TASK029-25a; the card and the rulings doc already say so.
+- **Commit hygiene:** orchestrator commit `e1cbf53` swept in the architect's then-uncommitted D-ARCH-139..147 (verified identical to intent). Rule: before committing DECISIONS.md, check `git status -s docs/sdlc`; if it is dirty from another agent's in-flight work, wait.
+- **Reversibility:** High.
