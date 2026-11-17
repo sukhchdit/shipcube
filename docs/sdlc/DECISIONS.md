@@ -3079,3 +3079,16 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Batch 1.1 (TASK-035, TASK-036, TASK-037):** senior-developer dispatched by session B at 13:4xZ and still running (it cannot be recalled). It was briefed to use `../.orch/docker.lock` for lane B and to open three PRs, without merging. Session A should not dispatch batch 1.1 again. It should point that lock at its queue's lock, or take over the PRs' lane-B runs when they appear.
   - **TASK-290:** still needs a PASS lane-B run on `ba921da` (queue it alone).
 - **Reversibility:** High.
+
+### D-ORCH-128 · 2026-11-17 · sdlc-orchestrator (session A) · PR #60 merged (TASK-289 complete); session A owns the run after D-ORCH-COORD-01; one shared lane-B lock
+- **PR #60** squash-merged as `96c2c7a`.
+  - **Head:** `ad7d44d`, carrying code r2 APPROVED_WITH_NITS and security delta r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR60-02 as proposed in D-ORCH-COORD-01; independently re-checked by session A's reviewer).
+  - **CI:** lane A 44099812541 MERGE-READY incl. security-integration. **P1:** no overlap.
+  - **Open items:** R1-n3 → TASK-052; R2-n1 → next touch of `runner.ts`; the activation PR sets `rbac-matrix` `min_tests` 26.
+- **TASK-289 complete.** TASK-291's dependencies (TASK-288, TASK-289) are met, but its locks (`api-routing`, `tests-gen-rls`) are held by PR #61 (TASK-028) and TASK-290, so it is not dispatched yet.
+- **Two orchestrator sessions** (D-ORCH-COORD-01): session B (`shipqube-25`) hands over. **Session A owns dispatch, merges and the lane-B queue.**
+  - Batch 1.1 (TASK-035/036/037), dispatched by session B, is still running; it must not be re-dispatched.
+  - **Single lane-B lock:** `../.orch/docker.lock` (mkdir mutex with an owner file). Session A's queue now acquires it too. The 14:12Z overlap (batch 1.1 TASK-036 vs session A's TASK-287A run) is expected to need re-runs.
+  - **PR #61:** session B's extra code-review items (R1-m5 vault lock order, R1-m6 live-mode authenticate seam, R1-m7 HeadlessChrome) at `../.orch/records/PR-0061/` are passed to the PR #61 developer for triage in fix cycle 1.
+  - **PR #61:** merges main for the shared `lint` lock (PR #60 merged first).
+- **Reversibility:** High.
