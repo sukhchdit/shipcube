@@ -486,3 +486,205 @@ Row counts in this file: one `Head` row and one `Verdict` row.
 | Field | Value |
 |---|---|
 | Verdict | **PASS_WITH_CONDITIONS.** No Critical, High or Medium finding. C1 (PR55-SEC-01, -02, -09) and C2 (PR55-SEC-03) are due in the code review's R1-M1 fix cycle, verified by a delta round on the fix head. |
+
+---
+
+## Delta round 2 (fix cycle 1, head `72dcf5b`)
+
+| Field | Value |
+|---|---|
+| Round | 2: the delta round over fix cycle 1 (D-ORCH-108), verifying conditions C1 and C2 of round 1 |
+| Head | 72dcf5b8f8dcb4cdfe4fc71e0c75929f5bc72362 |
+| Commits since round 1 | `1c729d9` (the round-1 record), `91d8070` (`fix(ci): PR #55 fix cycle 1`: `check-workflow-policy.mjs`, `lane-scope.mjs`, the stage-2 fixture comment, both stage-2 test files, `CI-CD.md`), `764b75f` (merge of `main` at `617f378`), `72dcf5b` (lane B evidence `20261117T0212Z_764b75f` only). The merge is pure: its tree `70cfcfa` equals `git merge-tree 91d8070 617f378`, and `main`'s side brought `docs/sdlc/DECISIONS.md` and `docs/sdlc/STATUS.md` only. New merge base `617f378`; `main` was `82dcba6` (docs only since) when this round was written |
+| Lane A evidence | Run 44003648755 on `72dcf5b`, created 2026-11-17T02:31:42Z (stage 1, `main`'s workflow and tooling). **fast-lane `success`**; the only skipped steps are the two LINT_CONTROLS-gated ones (no lint control in the PR range). **scans**: every scan step `success`; the only red step is the record step. `ci-gate` is red only as the aggregate. Lane B `20261117T0212Z_764b75f` PASS, accepted by the base-ref verifier in that run |
+| Owned paths changed since round 1 | 5 (all in `91d8070`): `tools/ci/check-workflow-policy.mjs`, `tools/ci/lane-scope.mjs`, `tools/ci/fixtures/stage-2/ci.yml` (one comment line; blob `a35e5a3` became `4597259`), `tools/ci/ci-policy-stage-2.test.ts`, `tools/ci/lane-scope-stage-2.test.ts`. The PR's owned set is still 18 paths |
+| Reviewer / date | security-analyst, 2026-11-17, delta round 2. Read-only apart from this section. Probes ran in the session scratchpad on `git archive` extracts of `72dcf5b` (fix head) and `5645b9b` (round-1 head, the differential control), and on plumbing commits in a shared clone. No install, Jest, Docker or GitHub run. In the PR worktree I only appended this section and ran the commit and push. Line numbers come from single-file reads at `72dcf5b`. Decisions read: D-SEC-PR55-01, D-TASK286-06, D-TASK286-06a, D-TASK286-01a, D-ORCH-108 |
+
+### R2.1 Summary
+
+Fix cycle 1 closes both conditions.
+- **C1 is closed:**
+  - **PR55-SEC-01.** `preload-env` (`BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_*`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS`, `BASH_FUNC_*`, case-insensitive) and `env-expression` apply at every level of every workflow. `env: {}` is pinned on the gitleaks, Semgrep and record gates in both topologies, and the stage-2 workflow env is an exact key set.
+  - **PR55-SEC-02.** Every stage-2 step from the classify step to the lane B evidence step is exact, carries no env and directly follows the previous one. So are `ci-gate`'s three scan steps, and `uses:` in fast-lane and security-integration is limited to checkout, setup-node and cache.
+  - **PR55-SEC-09.** `GH_TOKEN` is bound to the classify step and to `ci-gate`'s lane-scope and aggregation steps, by gate position, exact run and id.
+  - **08 (a).** The install is pinned unconditional.
+- **C2 is closed (PR55-SEC-03).** The void set covers every path the PR changes (docs included), the lint controls, `tools/deps/**` and `tests/fixtures/**`, and an unknown range gives no proof. This is a superset of my round-1 ruling (D-TASK286-06a).
+
+Every mutant that passed in round 1 is now refused, and the same mutants pass the round-1 checker, which is the differential control. The live stage-1 `ci.yml`, `lane-c.yml`, `nightly.yml` and the stage-2 fixture each give 0 findings under the fix head.
+
+**Stage 1 (live today) is covered for PR55-SEC-01 as filed.** F9 (step `BASH_ENV` on the scans record step), F10 and F11 (workflow `BASH_ENV`, `LD_PRELOAD`) and E4 (a map-level expression on the live unit step) are refused.
+
+Stage 1 is not covered in two respects (R2.4):
+- Its workflow env is a deny-list, not an exact key set. Workflow-level `DOCKER_HOST`, `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `GIT_CONFIG_*` and `NPM_CONFIG_SCRIPT_SHELL` still reach every scans step; `DOCKER_HOST` moves the gitleaks and Semgrep containers to another daemon, which is a masked scan.
+- The stage-1 scans steps are still pattern-pinned, so `|| true` and `--exit-code 0` pass.
+
+Both need an owned `ci.yml` edit, exist only while stage 1 is live, and the first is fixed by one line, because the live `ci.yml` already has exactly the stage-2 key set. New **PR55-SEC-11 (LOW)**, a follow-up and not a condition.
+
+Findings now open: 0 Critical, 0 High, 0 Medium, 1 LOW (PR55-SEC-11), 5 INFO (04, 05, 06, 07, 10). 01, 02, 03, 08 and 09 are closed.
+
+**Verdict round 2: PASS_WITH_FOLLOW-UPS.**
+
+### R2.2 Method
+
+1. Read `git diff 1c729d9 91d8070` in full: the policy (410-line diff), `lane-scope.mjs`, the fixture and the two test files. Checked the merge purity (above) and the new decisions.
+2. **Topology controls.** The head checker on the live stage-1 `ci.yml`, `lane-c.yml` and `nightly.yml` gives 0 findings; on the stage-2 fixture, 0.
+3. **Round-1 mutant matrix re-run** (`mut.mjs` to `mut6.mjs`, unchanged) on the fix head, with the round-1 head `5645b9b` beside it where the script runs both.
+4. **New residual probes** (`mut7.mjs`, Y1-Y13): workflow-level env names outside the deny-list in both topologies, stage-1 in-step masking, token-rule variants, container and job env, flow mappings.
+5. **Lane-scope probe** (`lsprobe2.mjs`): the round-1 T1-T9 and V0-V7, plus V8 (main edits a file the PR also changes), V9 (the same for a docs file), V10 (`tests/fixtures/semgrep/**` only) and V11 (`tools/stylelint-rules/**` only). Run on the fix head and on `5645b9b`.
+6. **Shell re-check.** The `BASH_ENV` mechanism still masks a step (exit 0, gate never ran, one `$GITHUB_ENV` line written); the control exits 1. So refusing it in policy is what matters.
+7. Read the unit-test coverage of the new null-range rule (`lane-scope-stage-2.test.ts:469-476`), the lane A step list, and the workflow-env key sets of every workflow (`wfkeys.mjs`).
+8. Record simulation (R2.8).
+
+### R2.3 Conditions and findings after round 2
+
+| ID | Round 1 | Fix (`72dcf5b`) | Round 2 status | Evidence |
+|---|---|---|---|---|
+| C1: PR55-SEC-01 | LOW, condition | `PRELOAD_ENV` and `preload-env` (`check-workflow-policy.mjs:137`, `:1349`), `env-expression` (`:1605`), `env: {}` on the scan gates of both topologies (`:854-857` and stage 2), exact stage-2 workflow env keys (`:2201`) | **Closed** for stage 2; stage-1 residual in PR55-SEC-11 | F1-F12, E1-E5, N2, N8, N11, Y4, Y5, Y11, Y12 refused; `5645b9b` gave 0 for E1-E5 and F1-F4, F6-F9 |
+| C1: PR55-SEC-02 | LOW, condition | Exact `run:` constants for workflow policy, install flags, migration immutability, lockfile, dependency age, install, licences, signatures, audit, gitleaks, Semgrep and record, each with `env: {}`; an `after` chain from the classify step to the evidence step; `STAGE_2_USES` (`:1003`) | **Closed** for stage 2; stage-1 scans masking in PR55-SEC-11 | A3, A4, A7, A8, B4, B10, R1-R4 refused |
+| C1: PR55-SEC-09 | LOW, condition | `tokenSteps` (`:2400`): the classify step, and `ci-gate`'s lane scope and aggregate, each matched by gate index, exact run and id | **Closed** | T1, Y9 (the code review's position), Y10 (a classify duplicate after head code) and P6, P7 give `gh-token` |
+| C1: 08 (a) | INFO | Install `ifs: []` and exact | **Closed** | A3 refused |
+| C2: PR55-SEC-03 | LOW, condition | `PROOF_BASE_DIRS` widened (`lane-scope.mjs:127`), `LINT_CONTROL_PATHS`, the PR's own paths (`:468`), null range gives no proof (`:488`), CLI wiring passes `result.prPaths` | **Closed** | V3, V4, V8-V11 give no proof on the fix head and a proof on `5645b9b`; controls V0, V2 keep the proof, V1, V6 void it; V5 keeps it as ruled |
+| PR55-SEC-04 | INFO | Accepted residual (D-TASK286-06) | Open, accepted | V7 still gives a proof |
+| PR55-SEC-05 | INFO | Routed to TASK-287 (D-TASK286-01a card line) | Open, routed | - |
+| PR55-SEC-06 | INFO | Accepted residual (D-TASK286-06); `CI-CD.md` now says "the only fast-lane step whose env holds the token" | Open, accepted | - |
+| PR55-SEC-07 | INFO | Procedure | Open (orchestrator) | - |
+| PR55-SEC-08 | INFO | (a) closed. (b) superseded: `preload-env` now refuses `BASH_ENV` beside any lint spelling (N8, N11), and the exact-text lint rule only affects lane C wording. (c) is the Dependabot backlog | **Closed** as a finding; (c) stays an orchestrator item | - |
+| PR55-SEC-10 | INFO | TASK-287 retirement card line; the 24-hour rule applies to any stage-1 `ci.yml` (D-TASK286-01a) | Open, routed | - |
+
+The round-1 note that the workflow PR's `ci.yml` is blob `a35e5a3` no longer holds: the fixture is now `4597259` (one comment line). The workflow PR must install the new blob, and its review checks that.
+
+### R2.4 Ruling: is stage 1 (live today) fully covered?
+
+**Yes for PR55-SEC-01 as filed. No for two neighbouring channels, which become PR55-SEC-11 (LOW, follow-up).**
+
+Covered in the live stage-1 `ci.yml`:
+- `preload-env` and `env-expression` run on every workflow at every level, whatever the topology.
+- The stage-1 gitleaks, Semgrep and record gates now carry `env: {}`.
+- F9 (`BASH_ENV` on the scans record step), E4 (a map-level expression on the live unit step), F10 and F11 (workflow-level `BASH_ENV`, `LD_PRELOAD`), Y4 (lower-case `path`) and Y5 (`BASH_FUNC_node%%`) are each refused under the stage-1 topology.
+
+Not covered in stage 1, all with 0 findings:
+- Y1-s1: workflow-level `DOCKER_HOST: tcp://<host>:2375`;
+- Y2-s1: `ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'`;
+- Y3-s1: `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`;
+- Y6-s1: `NPM_CONFIG_SCRIPT_SHELL`;
+- Y7-s1: `|| true` after the scans Semgrep step;
+- Y8-s1: gitleaks `--exit-code 0`.
+
+The same names give a finding in stage 2, because its workflow env is an exact key set (Y1-s2 to Y6-s2).
+
+### PR55-SEC-11: stage-1 workflow env and scans steps (LOW, follow-up)
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner |
+|---|---|---|---|---|---|---|
+| PR55-SEC-11 | While stage 1 is live, its workflow env is held only to the deny-list (no exact key set), so `DOCKER_HOST`, `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `GIT_CONFIG_*` and `NPM_CONFIG_SCRIPT_SHELL` reach every scans step; the stage-1 scans gates remain pattern-pinned (`\|\| true`, `--exit-code 0` pass) | LOW | CWE-693, CWE-184 | A08 | `tools/ci/check-workflow-policy.mjs:2201` (exact keys in `stage2Findings` only; `laneScopeFindings` at `:2082` has none), `:855-857` (stage-1 scan gates, `run:` patterns); the live `.github/workflows/ci.yml` workflow env | devops-engineer: the exact-keys line in the TASK-286 workflow PR if cheap, else with the TASK-287 stage-1 retirement; the deny-list extension for `lane-c.yml`/`nightly.yml` with 015-C |
+
+**Description.**
+- `DOCKER_HOST` points the docker CLI of the gitleaks and Semgrep steps at another daemon, which returns whatever exit code it likes. That masks the scan without touching the pinned command.
+- `ACTIONS_ALLOW_UNSECURE_COMMANDS` re-enables the `::set-env` and `::add-path` log commands, so tool output that echoes head content could set env or `PATH` for later scans steps.
+- `GIT_CONFIG_*` injects git configuration into every git command of the scans job.
+- The in-step masking of the scans gates is the pre-existing PR #10 R2-m2 class that the code review also noted.
+
+None of this applies to stage 2: its workflow env, job env and every `ci-gate` step env are exact.
+
+**Exploitability and impact.**
+- It needs an owned `ci.yml` edit and a review miss, and only while stage 1 is live, which is until the workflow PR merges and TASK-287 retires stage 1.
+- The impact is a masked scan in the merge-deciding job. H × L, rated LOW like PR17-SEC-08 and PR46-SEC-03.
+
+**Remediation (code level).**
+1. In `laneScopeFindings`, apply the same workflow-env exact-key check as `stage2Findings:2197-2201`. The live `ci.yml` already has exactly those 7 keys (`wfkeys.mjs`), so the change produces 0 findings today.
+2. For `lane-c.yml` and `nightly.yml`, which run docker and git too, add `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `GIT_CONFIG_COUNT` plus the `^GIT_CONFIG_(KEY|VALUE)_` pattern, `GIT_EXEC_PATH`, and `^NPM_CONFIG_SCRIPT_SHELL$` (any case) to `PRELOAD_ENV`, or give those workflows exact key sets.
+3. The stage-1 in-step masking ends with the stage-1 retirement (D-TASK286-01a); no separate fix.
+
+**Verification.** Y1-s1, Y2-s1, Y3-s1 and Y6-s1 give findings; C1 stays at 0.
+
+### R2.5 Probe results (fix head `72dcf5b`; the second column is the round-1 head `5645b9b` where it was run)
+
+| Set | Cases | Fix head | Round-1 head |
+|---|---|---|---|
+| Controls | C0 (stage-2 fixture), C1 (live stage-1 `ci.yml`), C2 (`lane-c.yml`) | 0 each | 0 each |
+| Round-1 bypasses (all 0 in round 1) | A3, A4, A7, A8, B4, B10, R1-R4 | refused (`required-gates`) | 0 |
+| Env channels | E1, E2, E4, E5 (map-level expression), F4 | `env-expression` | 0 |
+| Env channels | F1-F3, F6-F12 (`BASH_ENV`, `PATH`, `ENV`, `LD_PRELOAD` at step and workflow level, `ci-gate` and fast-lane) | `preload-env` (plus `required-gates` on pinned steps) | 0 |
+| Lane C | N8, N11 (`BASH_ENV` beside a respelled lint) | `preload-env` | 0 |
+| Token | T1, Y9, Y10 | `gh-token` | T1 0 |
+| Token | T2, P6, P7 (controls) | `gh-token` | `gh-token` |
+| Unchanged pins | A1, A2, A5, A6, B1-B3, B5-B9, B11-B15, P1-P5, P8, P9, N1-N7, N9, E3, E6, F5 | refused as in round 1 | refused |
+| Fail-closed parses | P4 (malformed), P10 (`Pull-Requests:`, GitHub refuses the key), Y13 (flow mapping: `yaml-subset`) | as in round 1 / refused | - |
+| Stage-1 residual | Y1-s1, Y2-s1, Y3-s1, Y6-s1, Y7-s1, Y8-s1 | **0** (PR55-SEC-11) | - |
+| Stage-2 counterpart | Y1-s2 to Y6-s2 | `required-gates` (exact keys), plus `preload-env` for Y4, Y5 | - |
+| Container and job env | Y11 (container `BASH_ENV`), Y12 (job env expression) | `preload-env`, `env-expression` | - |
+
+Lane scope (`lsprobe2.mjs`). T1-T9 are identical to round 1 (wrong tested base exits 2, the right one gives a proof).
+
+| ID | `main` change after the proof run | Fix head | Round-1 head |
+|---|---|---|---|
+| V0 | none (control) | proof | proof |
+| V1 | `.github/**` | no proof | no proof |
+| V2 | `.github/**`, before the run | proof | proof |
+| V3 | `tools/eslint-rules/**` only | **no proof** | proof |
+| V4 | `tools/deps/prisma-engines.json` only | **no proof** | proof |
+| V5 | `apps/**` file the PR does not change | proof (as ruled) | proof |
+| V6 | API contract | no proof | no proof |
+| V7 | `.github/**` committed before, landed after | proof (accepted residual 04) | proof |
+| V8 | a file the PR also changes (P1 (b)) | **no proof** | proof |
+| V9 | a docs file the PR also changes | **no proof** | proof |
+| V10 | `tests/fixtures/semgrep/**` only | **no proof** | proof |
+| V11 | `tools/stylelint-rules/**` only | **no proof** | proof |
+
+### R2.6 Claimed closures after round 2
+
+| Item | Status | Live when #55 merges? |
+|---|---|---|
+| PR46-SEC-11 | **Closed in the stage-2 policy** (audit and signatures exact, unconditional, in the after-chain) | No: the 24-hour proof-age rule stays until the workflow PR merges, and then applies to any stage-1 `ci.yml` (D-TASK286-01a) |
+| PR46-SEC-12 | **Closed for stage 2**; stage-1 residual in PR55-SEC-11 | Stage-1 part yes; stage-2 part with the workflow PR |
+| PR46-SEC-15 | **Closed** (job scopes and the step-bound token rule); INFO 06 accepted | Yes (stage 1) |
+| PR46-SEC-16 | **Closed** (void set as D-TASK286-06a); INFO 04 accepted, 07 procedural | No: P1 stays procedural until the workflow PR merges |
+| PR46-SEC-17 | **Closed** | No: with the workflow PR; D-ORCH-103 P1 (c) stays until then |
+| PR42-SEC-18, D-ARCH-133, Dependabot limit | **Closed / done** (unchanged) | Yes |
+| PR17-SEC-08 | **Item 1 closed** (`preload-env` everywhere). Its remaining scope: the names in PR55-SEC-11 item 2 (015-C), and the `$GITHUB_ENV`/`$GITHUB_PATH` writer allow-list (item 2) for non-exact steps (accepted tripwire) | Yes |
+
+### R2.7 Merge prerequisites for #55
+
+- **Record push.** The next push (this record) is docs-only, giving a light stage-1 run. Predicted outcome:
+  - identical = the record commit, `72dcf5b`, `764b75f`;
+  - `code_proof=44003648755:72dcf5b…`;
+  - `security_paths=false`, so no security-integration;
+  - MERGE-READY if the record check passes.
+- **Code review.** The code reviewer's round 2 must approve as well.
+- **24-hour rule.** Proof run 44003648755 was created at 2026-11-17T02:31:42Z, so merge by 2026-11-18T02:31Z, or after a fresh full run.
+- **P1.** `main` moved docs-only since the merge base `617f378` (`82dcba6`). Re-check at merge time.
+- **Workflow PR.** After the merge, the workflow PR merges `main` in and installs fixture blob `4597259`. Its review covers the union and PR55-SEC-11 item 1 if it rides there.
+
+### R2.8 Record simulation
+
+Both the merge-base checker (`617f378`) and the head checker ran on this file, appended and committed on `72dcf5b`, with `--base 617f378 --pr 55 --json`, in a sparse shared clone. The two checkers agree on every scenario (R2.8 table).
+
+### R2.9 Proposed decision text (for the orchestrator to log)
+
+**D-SEC-PR55-02 · 2026-11-17 · security-analyst · PR #55 security delta round 2 at `72dcf5b`.**
+
+- **Decision:**
+  - **PASS_WITH_FOLLOW-UPS.**
+  - **C1 closed:** PR55-SEC-01 (`preload-env`, `env-expression`, `env: {}`, exact stage-2 workflow env), PR55-SEC-02 (exact pre-head and `ci-gate` scan pins, `STAGE_2_USES`), PR55-SEC-09 (step-bound token), 08 (a) (install pinned).
+  - **C2 closed:** PR55-SEC-03 (void set per D-TASK286-06a; differential V3, V4, V8-V11).
+  - **Stage 1 live today:** covered for PR55-SEC-01 as filed (F9, E4, F10, F11 refused). New **PR55-SEC-11 (LOW, follow-up):** stage 1's workflow env is a deny-list, so `DOCKER_HOST`, `ACTIONS_ALLOW_UNSECURE_COMMANDS`, `GIT_CONFIG_*` and `NPM_CONFIG_SCRIPT_SHELL` pass, and its scans steps stay pattern-pinned. Fix: apply the exact workflow-env key check to stage 1 (0 findings on the live file) in the workflow PR if cheap, else with the TASK-287 retirement; extend the deny-list for `lane-c`/`nightly` with 015-C.
+  - **Open INFO:** 04, 06 (accepted), 05, 10 (TASK-287), 07 (orchestrator).
+  - **Merge:** on MERGE-READY for the exact final head, with the code review's approval, by 2026-11-18T02:31Z (24-hour rule from run 44003648755), with P1 re-checked.
+- **Reversibility:** High.
+
+R2.8 table (simulation scenarios; one row per scenario):
+
+| ID | Scenario | Result (both checkers) |
+|---|---|---|
+| S1 | This file (round 1 plus this section) committed on `72dcf5b` | pass, owned 18, satisfied by `72dcf5b`; a note that the round-1 row `5645b9b` has owned changes after it |
+| S0 | The round-1 record alone on `72dcf5b` (control) | missing (`5645b9b` has owned changes after it) |
+| S2 | This section without its Verdict row | pass: the round-1 Verdict row is then the last one, so every round must append its own (procedural, PR10-SEC-04) |
+| S3 | This section's `Head` row naming `1c729d9` (before the fix) | missing |
+| S4 | An owned path (`tools/ci/lane-scope.mjs`) edited after this record | missing |
+| S5 | A docs-only commit after this record | pass |
+
+`Head` rows in the file: two (round 1, round 2); `Verdict` rows: two, the last one below.
+
+| Field | Value |
+|---|---|
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 at `72dcf5b`: conditions C1 and C2 are closed; no Critical, High or Medium finding is open. Open: PR55-SEC-11 (LOW, follow-up) and INFO 04, 05, 06, 07, 10. |
