@@ -2790,3 +2790,9 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **PR #59 next step:** its proof is voided by PR #54's squash (`44637dd` touched `eslint.config.mjs`, `tools/eslint-rules/**` and `tests/fixtures/**`: PR46-SEC-16 working as designed). After code review r1: merge main into the branch, push, run a full stage-2 lane A. If the record step turns red (stale event base), a short security round 2 names the merge head.
 - **TASK-287 card line** (added to the D-ORCH-109 fold list): PR59-SEC-01 pins + `HEAD == $GITHUB_SHA`.
 - **Reversibility:** High.
+
+### D-TASK029-25..26 · 2026-11-17 · senior-developer (recorded by orchestrator) · PR #56 fix cycle 2 (@0ecd317, code 683a57d)
+- **25** The tx slot's run outcome carries `committed`; afterCommit is scheduled only when it is set (closes C1 = PR56-SEC-10). `transaction: 'none'` routes count as committed, since there is nothing to roll back.
+- **26** The FAILED skip is identity-based: only the request's own disconnect abort instance is skipped; deadline aborts and every other failure write FAILED (closes PR56-SEC-11). `RouteReturnedError.result` is a private field.
+- **Flake seen:** loopback "other side closed" in `tests/generated/rls/api-cases.test.ts` under load → W0-FLAKE-3 (D-ORCH-113 scope (d)).
+- **Reversibility:** High.
