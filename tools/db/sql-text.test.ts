@@ -15,6 +15,7 @@ import {
   substituteVariables,
   tokenize,
 } from './sql-text.js';
+import { ATOMIC_BODY_CASES, HOSTILE_TAIL, HOSTILE_TAIL_STATEMENTS, caseText } from './atomic-body-cases.js';
 
 describe('SQL text helpers (bootstrap runner, migration linter)', () => {
   it('substitutes psql-style variables as a literal or an identifier, and only outside quotes, comments and bodies', () => {
@@ -155,6 +156,96 @@ describe('SQL text helpers (bootstrap runner, migration linter)', () => {
     expect(() => splitStatements(open)).toThrow(SqlLexError);
     expect(() => splitStatements(open)).toThrow(/unbalanced BEGIN ATOMIC block/);
     expect(() => splitStatements(`${open.replace('SELECT 1;', 'SELECT CASE WHEN true THEN 1 END;')} END`)).not.toThrow();
+  });
+
+  it.each(ATOMIC_BODY_CASES.map((entry) => [entry.shape, entry] as const))(
+    '[PR43-SEC-11] splitStatements: %s — the routine is one statement, and every hostile statement after it stays split (a later top-level END resynchronises nothing)',
+    (_shape, entry) => {
+      expect(splitStatements(caseText(entry))).toEqual([entry.routine, ...HOSTILE_TAIL_STATEMENTS]);
+    },
+  );
+
+  it('[PR43-SEC-11] splitStatements: the case table covers the four PR43-SEC-11 label shapes, the R2-n1 parenthesised labels and the paren gate', () => {
+    const routines = ATOMIC_BODY_CASES.map((entry) => entry.routine).join('\n');
+    for (const shape of [
+      'SELECT 1 AS case;',
+      'SELECT t.case FROM',
+      'SELECT 1 case;',
+      'SELECT begin atomic FROM',
+      'xmlattributes(1 AS case)',
+      'abs(t.end)',
+      '(begin atomic)',
+    ]) {
+      expect(routines).toContain(shape);
+    }
+    expect(HOSTILE_TAIL_STATEMENTS).toEqual([
+      expect.stringMatching(/^GRANT TRUNCATE /),
+      expect.stringMatching(/^DROP TABLE /),
+      expect.stringMatching(/^SET lock_timeout /),
+      'END',
+    ]);
+  });
+
+  it('[PR43-SEC-11] splitStatements: a nested BEGIN ATOMIC opens a block only in a body statement that starts with the routine head', () => {
+    const nested =
+      'CREATE OR REPLACE PROCEDURE public.p() LANGUAGE sql BEGIN ATOMIC CREATE OR REPLACE FUNCTION public.g() RETURNS int LANGUAGE sql BEGIN /* c */ ATOMIC SELECT 1; END; SELECT 2; END';
+    expect(splitStatements(`${nested}; ${HOSTILE_TAIL}`)).toEqual([nested.replace('/* c */', ' '), ...HOSTILE_TAIL_STATEMENTS]);
+    // The same words in a body statement that is not a routine definition open nothing (the alias shape, in parentheses).
+    const alias =
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT (SELECT begin atomic FROM (VALUES (1)) v(begin)); END';
+    expect(splitStatements(`${alias}; ${HOSTILE_TAIL}`)).toEqual([alias, ...HOSTILE_TAIL_STATEMENTS]);
+  });
+
+  it.each([
+    [
+      'END WORK closing a body (PostgreSQL: syntax error at WORK)',
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END WORK; GRANT ALL ON public.t TO platform_app; END;',
+      /must end the routine statement/,
+    ],
+    [
+      'a routine option after the END',
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END LANGUAGE sql; DROP TABLE public.t;',
+      /must end the routine statement/,
+    ],
+    [
+      'a statement after the END without a semicolon',
+      "CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END SET lock_timeout = '10s';",
+      /must end the routine statement/,
+    ],
+    [
+      'a string after the END',
+      "CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END 'x';",
+      /must end the routine statement/,
+    ],
+    [
+      'a nested routine END not followed by a semicolon',
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC CREATE FUNCTION public.g() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END SELECT 2; END;',
+      /must end the routine statement/,
+    ],
+    [
+      'a body semicolon inside parentheses',
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT (1; END; GRANT ALL ON public.t TO platform_app; SELECT 1); END;',
+      /unbalanced parentheses in a BEGIN ATOMIC body statement/,
+    ],
+    [
+      'the text ending inside a nested block',
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC CREATE FUNCTION public.g() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1;',
+      /ends inside a routine body \(2 open\)/,
+    ],
+    [
+      'the text ending after a nested END',
+      'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC CREATE FUNCTION public.g() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END;',
+      /ends inside a routine body \(1 open\)/,
+    ],
+  ])('[PR43-SEC-11] splitStatements fails closed (rule L): %s', (_shape, sql, message) => {
+    expect(() => splitStatements(sql)).toThrow(SqlLexError);
+    expect(() => splitStatements(sql)).toThrow(message);
+  });
+
+  it('[PR43-SEC-11] splitStatements: the END that closes a top-level block may end the text, and comments may sit before its semicolon', () => {
+    const routine = 'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END';
+    expect(splitStatements(routine)).toEqual([routine]);
+    expect(splitStatements(`${routine} -- done\n /* x */ ; SELECT 2`)).toEqual([routine, 'SELECT 2']);
   });
 
   it('[PR43-SEC-06 c] containsEscapeString fails closed beyond MAX_NESTED_SQL_DEPTH: a string still present at the cap counts', () => {

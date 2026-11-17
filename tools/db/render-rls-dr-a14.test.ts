@@ -1,7 +1,7 @@
 /**
- * DR-A14 named policy sets and the standard-columns guard rendering (data-model §4.3 "Special policies of DR-A14" and
- * §7.6 "Database guard", both as amended 2026-11-13; PR11-SEC-10 requirements 1-5, PR26-SEC-03; D-ARCH-072, D-ARCH-091;
- * TASK-024). The byte-for-byte check reads the SQL block of data-model §4.3 itself, so the templates and the reviewed
+ * DR-A14 named policy sets and the standard-columns guard rendering (data-model §4.3 "Special policies of DR-A14" as
+ * amended 2026-11-14 (users fence, D-ARCH-123) and §7.6 "Database guard" as amended 2026-11-13; PR11-SEC-10
+ * requirements 1-5, PR26-SEC-03; D-ARCH-072, D-ARCH-091; TASK-024). The byte-for-byte check reads the SQL block of data-model §4.3 itself, so the templates and the reviewed
  * design text cannot drift apart silently.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -65,7 +65,7 @@ function designSql(): string {
   return block;
 }
 
-describe('DR-A14 policy sets (data-model §4.3 as amended 2026-11-13; PR11-SEC-10; D-ARCH-072)', () => {
+describe('DR-A14 policy sets (data-model §4.3 as amended 2026-11-14 (D-ARCH-123); PR11-SEC-10; D-ARCH-072)', () => {
   it('PR11-SEC-10 req. 1-2: the rendered users, memberships and organisations policies equal the data-model §4.3 SQL byte for byte (whitespace normalised)', () => {
     const design = policies(designSql());
     const rendered = [USERS, MEMBERSHIPS, ORGANISATIONS].flatMap((entry) =>
