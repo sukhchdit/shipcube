@@ -69,3 +69,24 @@ export {
   type VaultRow,
 } from './store/prisma-store.js';
 export { createAuditWriter, type AuditWriter, type AuditWriterOptions, type PiiTokeniser } from './writer.js';
+// Redaction, classification-driven tokenisation, the vault tokeniser, the IP index and the user-agent parser
+// (REQ-AUDIT-008/009, NFR-PRIV-002; TASK-028).
+export { isSecretKey, isSecretText, keyWords, REDACTED, SECRET_KEY_EXAMPLES } from './redaction/denylist.js';
+export { auditKeyOf, createAuditPrivacy, type AuditKeyVersion, type AuditPrivacy, type AuditPrivacyKeys } from './redaction/privacy.js';
+export { columnName, redactRecord, redactSecrets, UnclassifiedFieldError, type RedactRecordOptions } from './redaction/redact.js';
+export {
+  BROWSER_FAMILIES,
+  MAX_USER_AGENT_SCAN,
+  OS_FAMILIES,
+  parseUserAgent,
+  scanUserAgent,
+  type UserAgentScan,
+} from './redaction/user-agent.js';
+export {
+  createIpIndex,
+  createVaultTokeniser,
+  decryptVaultValue,
+  UNATTRIBUTED_SUBJECT,
+  type AuditKey,
+  type VaultTokeniserOptions,
+} from './redaction/vault.js';

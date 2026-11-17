@@ -49,3 +49,18 @@ export {
   type AuditDescriptor,
   type AuditSensitivity,
 } from './audit/descriptor.js';
+// Field classification registry (REQ-AUDIT-009, NFR-PRIV-003; TASK-028): the audit redaction, the prisma/schema
+// completeness check and catalog C10 read it.
+export {
+  CLASSIFICATION_REGISTRY,
+  CLASSIFICATION_TAGS,
+  classificationOf,
+  FIELD_CLASSIFICATIONS,
+  isFieldClassification,
+  registeredColumns,
+  staleClassifications,
+  unclassifiedColumns,
+  type ClassificationRegistry,
+  type FieldClassification,
+  type SchemaColumn,
+} from './classification/registry.js';

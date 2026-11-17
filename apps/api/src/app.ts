@@ -10,6 +10,7 @@
 // `routes` so OPTIONS and 405 answer for it like for every other path (PR #21 N5). The drift and route-metadata
 // checks walk this composed stack and exclude only DOCS_PATH (api/README.md §15); a limiter, CORS or Helmet layer
 // mounted under a path would fail them by design (D-ORCH-024 (3), (5)).
+import type { AuditPrivacy } from '@platform/audit';
 import type { Config } from '@platform/config';
 import express, { type Express } from 'express';
 
@@ -32,6 +33,7 @@ import {
   mountRoutes,
   type PipelineSlots,
 } from './platform/routing/pipeline.js';
+import type { RouteSlot } from './platform/routing/slot.js';
 import { createRuntimeLog } from './platform/runtime/log.js';
 import { type AfterCommitQueue, createAfterCommitQueue } from './platform/tx/after-commit.js';
 
@@ -88,6 +90,19 @@ export interface AppDependencies {
    * captured and denials audited. Absent (tests), an audited route is refused when it is mounted.
    */
   readonly auditConfig?: Pick<Config, 'DB_AUDIT_LOCK_TIMEOUT_MS'>;
+  /**
+   * The capture's vault tokeniser, `ip_hash` index and user-agent parser (`createAuditPrivacy` over AUDIT_VAULT_KEY,
+   * AUDIT_VAULT_HMAC_KEY and AUDIT_INDEX_KEY; startApi builds it; D-SEC-PR56-01 condition 1, D-ARCH-141; TASK-028).
+   * Used only with `auditConfig`. Absent, the capture refuses every audited route and every route that can answer 403
+   * when it is mounted (D-TASK029-21).
+   */
+  readonly auditPrivacy?: AuditPrivacy;
+  /**
+   * Test seam: replaces ONLY the authentication slot of the default pipeline (the rest, the audit capture included, is
+   * still composed from these dependencies), so a test can drive the production composition to a 403 before the
+   * session authenticator (TASK-052) exists. startApi never sets it; with `pipeline` it is ignored.
+   */
+  readonly authenticate?: RouteSlot;
 }
 
 /**
@@ -100,19 +115,29 @@ function assertBootable(deps: AppDependencies, routes: readonly RouteDescriptor[
   assertRouteBindings(routes, { production: deps.apiMode === 'live' });
 }
 
+/** The production slots over these dependencies (the capture gets the audit config and the privacy dependencies). */
+function defaultSlots(deps: AppDependencies, afterCommit: AfterCommitQueue, logger: AppLogger): PipelineSlots {
+  const slots = defaultPipelineSlots({
+    tenantTx: deps.tenantTx,
+    afterCommit,
+    ...(deps.auditConfig === undefined
+      ? {}
+      : {
+          auditConfig: deps.auditConfig,
+          auditLog: logger,
+          ...(deps.auditPrivacy === undefined ? {} : { auditPrivacy: deps.auditPrivacy }),
+        }),
+  });
+  return deps.authenticate === undefined ? slots : { ...slots, authenticate: deps.authenticate };
+}
+
 export function createApp(deps: AppDependencies): Express {
   const moduleRoutes = deps.modules.flatMap((module) => module.routes);
   assertBootable(deps, [...deps.health, ...moduleRoutes]);
   const app = express();
   const logger = deps.logger ?? createRuntimeLog('api', process.stdout, { context: requestLogContext });
   const afterCommit = deps.afterCommit ?? createAfterCommitQueue(logger);
-  const slots =
-    deps.pipeline ??
-    defaultPipelineSlots({
-      tenantTx: deps.tenantTx,
-      afterCommit,
-      ...(deps.auditConfig === undefined ? {} : { auditConfig: deps.auditConfig, auditLog: logger }),
-    });
+  const slots = deps.pipeline ?? defaultSlots(deps, afterCommit, logger);
 
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));
   app.use(requestLogger(logger));

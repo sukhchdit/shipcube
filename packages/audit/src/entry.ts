@@ -11,6 +11,10 @@
  * value therefore never reaches `audit_entries` or the chain in clear (ADR-0007 am. 2).
  *
  * Every refusal is `AuditWriteError` INVALID_ENTRY naming the field path, never its value.
+ *
+ * Redaction before hashing (REQ-AUDIT-008, AT-US-091-05; TASK-028): while the JSON values are snapshotted, every
+ * non-null value under a denylisted key (redaction/denylist.ts) and every secret-shaped text becomes `[REDACTED]`, so
+ * the chain hashes the redacted content and the secret never reaches the row, whatever the caller passed.
  */
 import { ANONYMOUS_ACTOR_ID, isCorrelationId, SYSTEM_ACTOR_ID } from '@platform/shared';
 
@@ -28,6 +32,7 @@ import {
 import { type AuditRowDraft, HASH_VERSION, type JsonValue } from './entry-hash.js';
 import { AuditWriteError } from './errors.js';
 import { canonicalIp, coarseNetwork } from './network.js';
+import { isSecretKey, isSecretText, REDACTED } from './redaction/denylist.js';
 
 /** The natural person a personal value belongs to (`data_subjects`, ADR-0007 §Privacy erasure). */
 export interface DataSubjectRef {
@@ -322,9 +327,11 @@ function collect(value: unknown, path: string, depth: number, state: WalkState):
     if (!Number.isFinite(value)) throw invalid(path);
     return value;
   }
-  if (typeof value === 'string') return storable(value, path);
+  // REQ-AUDIT-008 (TASK-028): a secret-shaped text is redacted before anything is hashed or stored.
+  if (typeof value === 'string') return isSecretText(value) ? REDACTED : storable(value, path);
   if (value instanceof PiiValue) {
     const copy = copyPiiValue(value, path);
+    if (isSecretText(copy.value)) return REDACTED;
     state.pii.push(copy);
     return copy;
   }
@@ -344,7 +351,10 @@ function collect(value: unknown, path: string, depth: number, state: WalkState):
   keys.forEach(([key, original], index) => {
     // A forged token marker, or two keys that normalise to the same text, is refused.
     if (key === PII_MARKER || (index > 0 && keys[index - 1]?.[0] === key)) throw invalid(path);
-    defineMember(out, key, collect(record[original], memberPath(path, key, depth), depth + 1, state));
+    // REQ-AUDIT-008 (TASK-028): a value under a denylisted key is never read further; it becomes [REDACTED] (DR-A09).
+    const member = record[original];
+    const redacted = member !== null && member !== undefined && isSecretKey(key);
+    defineMember(out, key, redacted ? REDACTED : collect(member, memberPath(path, key, depth), depth + 1, state));
   });
   return Object.freeze(out);
 }

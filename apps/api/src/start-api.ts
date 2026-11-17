@@ -3,6 +3,7 @@
 // the listener and graceful shutdown. The process seams (configuration loader, stdout, process.exit, the process
 // events, the service and app factories, the module registry) are injectable so the whole sequence runs under test;
 // main.ts passes none, so production always gets API_PROCESS. No top-level await: main.ts stays importable.
+import { type AuditPrivacy, createAuditPrivacy } from '@platform/audit';
 import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit, type Config, type RuntimeConfig, type Secret } from '@platform/config';
 
 import { createApp, type AppDependencies, type ModuleRegistration } from './app.js';
@@ -66,6 +67,21 @@ export interface StartApiDependencies {
   readonly modules: readonly ModuleRegistration[];
 }
 
+/**
+ * The audit capture's privacy dependencies from the validated configuration (D-SEC-PR56-01 condition 1, D-ARCH-141;
+ * TASK-028): the vault tokeniser (AUDIT_VAULT_KEY, AUDIT_VAULT_HMAC_KEY), the `ip_hash` index (AUDIT_INDEX_KEY) and the
+ * in-house user-agent parser. All three keys are required for the API (ADR-0018 register), so a loaded configuration
+ * always has them; without one (a partial test configuration) the capture keeps refusing audited and deniable routes
+ * at mount (D-TASK029-21). A malformed key throws here, before anything listens.
+ */
+export function auditPrivacyFrom(
+  config: Pick<Config, 'AUDIT_VAULT_KEY' | 'AUDIT_VAULT_HMAC_KEY' | 'AUDIT_INDEX_KEY'>,
+): AuditPrivacy | undefined {
+  const { AUDIT_VAULT_KEY: vaultKey, AUDIT_VAULT_HMAC_KEY: vaultHmacKey, AUDIT_INDEX_KEY: indexKey } = config;
+  if (vaultKey === undefined || vaultHmacKey === undefined || indexKey === undefined) return undefined;
+  return createAuditPrivacy({ vaultKey, vaultHmacKey, indexKey });
+}
+
 /** The production process: what main.ts runs with. */
 export const API_PROCESS: StartApiDependencies = {
   loadConfig: loadRuntimeConfigOrExit,
@@ -104,6 +120,7 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
   const health = healthRoutes({ probe: services.probe });
   // The routes' afterCommit work (ADR-0003 amendment 2026-11-13): drained by the shutdown sequence below.
   const afterCommit = createAfterCommitQueue(log);
+  const auditPrivacy = auditPrivacyFrom(config);
   let app: ApiListener;
   try {
     // createApp runs the boot checks (TASK-020, PR32-SEC-05 (b)): routes declared with defineRoute, the runner for
@@ -115,6 +132,7 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
       tenantTx: services.tenantTx,
       afterCommit,
       auditConfig: config,
+      ...(auditPrivacy === undefined ? {} : { auditPrivacy }),
       apiMode: resolveApiMode(config.APP_ENV),
       ...(docs === undefined ? {} : { docs }),
       logger: log,
