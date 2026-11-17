@@ -197,7 +197,7 @@ jobs:
           node "${GATE_CHECK_DEP_AGE:?}" --fetch --out "$RUNNER_TEMP/registry-times.json" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE"
           node "${GATE_CHECK_DEP_AGE:?}" --times "$RUNNER_TEMP/registry-times.json" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --summary "$GITHUB_STEP_SUMMARY"
 
-      # Unconditional although the policy allows env.CODE (D-ARCH-128): the base-ref evidence verifier loads the locked
+      # Unconditional, pinned so by the policy (D-TASK286-03, PR #55 R1-n5): the base-ref evidence verifier loads the locked
       # Ajv from node_modules, and signatures and the advisory audit read the installed tree on every push (PR46-SEC-11).
       - name: Install (npm ci --ignore-scripts)
         run: npm ci --ignore-scripts --no-audit --no-fund

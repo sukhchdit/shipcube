@@ -70,12 +70,12 @@ describe('[TASK-286] [D-ARCH-128] stage-2 topology accepted by the base-ref poli
     expect(requiredGatesFor(parseYamlSubset(stage2).value).filter((gate) => gate.job === 'scans')).toEqual([]);
   });
 
-  it('commitlint, actionlint and the install may be CODE-gated; signatures and the advisory audit are unconditional (PR46-SEC-11)', () => {
+  it('commitlint and actionlint are CODE-gated; the install, signatures and the advisory audit are unconditional (PR46-SEC-11, D-TASK286-03, R1-n5)', () => {
     const gates = requiredGatesFor(parseYamlSubset(stage2).value);
     const ifsOf = (gate: string) => gates.find((candidate) => candidate.job === 'fast-lane' && candidate.gate === gate)?.ifs;
     expect(ifsOf('commitlint')).toEqual(["env.CODE == 'true'"]);
     expect(ifsOf('actionlint')).toEqual(["env.CODE == 'true'"]);
-    expect(ifsOf('install')).toEqual(["env.CODE == 'true'"]);
+    expect(ifsOf('install')).toEqual([]);
     expect(ifsOf('registry signatures')).toEqual([]);
     expect(ifsOf('vulnerability audit')).toEqual([]);
     const fastLaneSteps = stepsOf(jobsOf(stage2), 'fast-lane');
@@ -88,7 +88,7 @@ describe('[TASK-286] [D-ARCH-128] stage-2 topology accepted by the base-ref poli
     expect(step(/^Vulnerability audit/)?.if).toBeUndefined();
   });
 
-  it('proof step names come from the topology: CODE-gated fast-lane steps (commitlint, actionlint, install) and the scans in ci-gate', () => {
+  it('proof step names come from the topology: CODE-gated fast-lane steps (commitlint, actionlint) and the scans in ci-gate', () => {
     const steps = proofSteps(stage2);
     if ('problem' in steps) throw new Error(steps.problem);
     expect(steps.scansJob).toBe('ci-gate');
@@ -100,13 +100,14 @@ describe('[TASK-286] [D-ARCH-128] stage-2 topology accepted by the base-ref poli
     const names = steps.fastLane.map((step) => step.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        'Install (npm ci --ignore-scripts)',
         'Commit messages (commitlint; PR title = squash subject, pushed range on main)',
         'actionlint',
         'Unit tests',
         'Build',
       ]),
     );
+    // The install is unconditional (D-TASK286-03, R1-n5): a successful fast-lane job ran it, a CODE step it is not.
+    expect(names).not.toContain('Install (npm ci --ignore-scripts)');
     expect(names).not.toContain('Registry signatures and provenance (PR1-SEC-12)');
     expect(names).not.toContain('Vulnerability audit (npm audit + osv-scanner)');
     const stage1Steps = proofSteps(stage1);
@@ -508,5 +509,218 @@ describe('[PR46-SEC-12] [TASK-286] stage 1 while it is live: the scans tooling s
     const to =
       '      - name: Semgrep (rules, .semgrepignore and .gitignore from the base ref; --disable-nosem)\n        run: echo "GATES_DIR=/tmp" >> "$GITHUB_ENV" && node "$GATE_RUN_SEMGREP"';
     expect(findingsOf(swap1(from, to)).some((finding) => finding.startsWith('gate-env:'))).toBe(true);
+  });
+});
+
+describe('[PR #55 r1] [C1] PR55-SEC-01/-02/-09, R1-m1, R1-m3, R1-n5: the review probes are findings now', () => {
+  const laneC = readFileSync(join(repoRoot, '.github', 'workflows', 'lane-c.yml'), 'utf8');
+  const semgrepRun =
+    '        run: node "${GATE_RUN_SEMGREP:?}" --root "$GITHUB_WORKSPACE" --rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR" --summary "$GITHUB_STEP_SUMMARY"\n';
+  const auditGate =
+    '          node "${GATE_CHECK_AUDIT:?}" --root "$GITHUB_WORKSPACE" --npm-audit "$RUNNER_TEMP/npm-audit.json" --osv "$RUNNER_TEMP/osv.json" --summary "$GITHUB_STEP_SUMMARY"\n';
+  const policyStep =
+    '      - name: Workflow policy\n        run: node "${GATE_CHECK_WORKFLOW_POLICY:?}" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"\n';
+  const installFlags = '        run: node "${GATE_CHECK_INSTALL_FLAGS:?}" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"\n';
+  const gitleaksName = '      - name: Gitleaks (PR commit range)\n        run: |\n';
+  const recordName = '      - name: Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)\n        run: |\n';
+  const semgrepIf =
+    "        if: steps.lane-scope.outputs.code_changed != 'false' || steps.lane-scope.outputs.code_proof == ''\n" + semgrepRun;
+  const buildPorcelain =
+    '      - name: Build must not mutate the tree (git status --porcelain)\n        if: env.CODE == \'true\'\n        run: node "${GATE_CHECK_PORCELAIN:?}" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"\n';
+  const lateStep = (body: string) => `${buildPorcelain}\n      - name: Late step\n${body}`;
+  const workflowEnv = "  NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n  CHECKPOINT_DISABLE: '1'\n";
+
+  it.each<[string, string, string, string]>([
+    // PR55-SEC-02 / R1-m1: ci-gate's scans are exact.
+    ['R1 Semgrep || true', semgrepRun, semgrepRun.replace('\n', ' || true\n'), 'required-gates'],
+    ['R2 gitleaks --exit-code 0', '--redact --no-banner --exit-code 1', '--redact --no-banner --exit-code 0', 'required-gates'],
+    [
+      'R3 the record step forced to --report-only',
+      '          if [ "$RECORD_MODE" = "report-only" ]; then mode=(--report-only); fi\n          if [ "$EVENT"',
+      '          mode=(--report-only)\n          if [ "$EVENT"',
+      'required-gates',
+    ],
+    [
+      'R4 Semgrep as a block that re-points GATE_LANE_SCOPE through an indirect $GITHUB_ENV write (X4 in-step)',
+      semgrepRun,
+      '        run: |\n          v=GITHUB_; v="${v}EN""V"; echo "GATE_LANE_SCOPE=/tmp/x.mjs" >> "${!v}"\n' +
+        semgrepRun.replace('        run: ', '          '),
+      'required-gates',
+    ],
+    ['R5 ; exit 0 after the workflow policy', policyStep, policyStep.replace(/"\n$/u, '"; exit 0\n'), 'required-gates'],
+    // PR55-SEC-02 item 2/3: fast-lane's gates before head code are exact.
+    ['A4b check-audit || true', auditGate, auditGate.replace('\n', ' || true\n'), 'required-gates'],
+    [
+      'A7 check-audit replaced by --version; exit 0',
+      auditGate,
+      '          node "${GATE_CHECK_AUDIT:?}" --version; exit 0\n',
+      'required-gates',
+    ],
+    [
+      'A8 signatures ; true',
+      '        run: npm audit signatures --@platform:registry=https://registry.npmjs.org/\n',
+      '        run: npm audit signatures --@platform:registry=https://registry.npmjs.org/; true\n',
+      'required-gates',
+    ],
+    [
+      'B4 an indirect $GITHUB_ENV write in the install-flags step',
+      installFlags,
+      `        run: |\n          x=GITHUB_ENV; echo "CODE=false" >> "\${!x}"\n${installFlags.replace('        run: ', '          ')}`,
+      'required-gates',
+    ],
+    [
+      'B10 an exporting action between classify and the policy step',
+      policyStep,
+      "      - name: Export\n        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1\n        with:\n          script: core.exportVariable('CODE', 'false')\n\n" +
+        policyStep,
+      'required-gates',
+    ],
+    [
+      'B12 a run step between classify and the policy step (the pre-head-code chain is contiguous)',
+      policyStep,
+      '      - name: Note\n        run: echo "between classify and the gates"\n\n' + policyStep,
+      'required-gates',
+    ],
+    [
+      'B11 an exporting action after the build (uses allow-list)',
+      buildPorcelain,
+      lateStep(
+        "        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1\n        with:\n          script: core.exportVariable('X', '1')\n",
+      ),
+      'required-gates',
+    ],
+    // R1-n5 / PR55-SEC-08 (a): the install is unconditional.
+    [
+      'A3 the install CODE-gated',
+      '(PR46-SEC-11).\n      - name: Install (npm ci --ignore-scripts)\n        run:',
+      "(PR46-SEC-11).\n      - name: Install (npm ci --ignore-scripts)\n        if: env.CODE == 'true'\n        run:",
+      'required-gates',
+    ],
+    // PR55-SEC-01: env into the scans and the gates (preload variables, expression maps, step env).
+    [
+      'F1 BASH_ENV on gitleaks',
+      gitleaksName,
+      gitleaksName.replace('        run: |\n', '        env:\n          BASH_ENV: docs/x.sh\n        run: |\n'),
+      'preload-env',
+    ],
+    [
+      'F2 BASH_ENV on Semgrep',
+      semgrepIf,
+      semgrepIf.replace('        run: ', '        env:\n          BASH_ENV: docs/x.sh\n        run: '),
+      'preload-env',
+    ],
+    [
+      'F3 BASH_ENV on the record step',
+      recordName,
+      recordName.replace('        run: |\n', '        env:\n          BASH_ENV: docs/x.sh\n        run: |\n'),
+      'preload-env',
+    ],
+    [
+      'F3b a harmless-looking step env on the record step (RECORD_MODE)',
+      recordName,
+      recordName.replace('        run: |\n', '        env:\n          RECORD_MODE: report-only\n        run: |\n'),
+      'required-gates',
+    ],
+    [
+      'F4 an expression env map on the record step',
+      recordName,
+      recordName.replace('        run: |\n', '        env: ${{ fromJSON(github.event.pull_request.title) }}\n        run: |\n'),
+      'env-expression',
+    ],
+    [
+      'F6 BASH_ENV on the workflow policy',
+      policyStep,
+      policyStep.replace('        run: ', '        env:\n          BASH_ENV: docs/x.sh\n        run: '),
+      'preload-env',
+    ],
+    [
+      'F7 BASH_ENV on the audit',
+      '      - name: Vulnerability audit (npm audit + osv-scanner)\n        run: |\n',
+      '      - name: Vulnerability audit (npm audit + osv-scanner)\n        env:\n          BASH_ENV: docs/x.sh\n        run: |\n',
+      'preload-env',
+    ],
+    [
+      'F8 PATH into the workspace on Semgrep',
+      semgrepIf,
+      semgrepIf.replace('        run: ', '        env:\n          PATH: /home/runner/work/x/x/docs:/usr/bin\n        run: '),
+      'preload-env',
+    ],
+    ['F10 workflow-level BASH_ENV', workflowEnv, `${workflowEnv}  BASH_ENV: docs/x.sh\n`, 'preload-env'],
+    ['F11 workflow-level LD_PRELOAD', workflowEnv, `${workflowEnv}  LD_PRELOAD: docs/x.so\n`, 'preload-env'],
+    ['F11b a function export at workflow level', workflowEnv, `${workflowEnv}  BASH_FUNC_node%%: '() { true; }'\n`, 'preload-env'],
+    [
+      'F12 ENV on gitleaks',
+      gitleaksName,
+      gitleaksName.replace('        run: |\n', '        env:\n          ENV: docs/x.sh\n        run: |\n'),
+      'preload-env',
+    ],
+    ['F13 an extra workflow-level env key', workflowEnv, `${workflowEnv}  RECORD_MODE: report-only\n`, 'required-gates'],
+    [
+      'E1 an expression env map on the unit tests',
+      "      - name: Unit tests\n        if: env.CODE == 'true'\n        run: npm run test:unit\n",
+      "      - name: Unit tests\n        if: env.CODE == 'true'\n        env: ${{ fromJSON(github.event.pull_request.title) }}\n        run: npm run test:unit\n",
+      'env-expression',
+    ],
+    [
+      'E2 an expression env map at fast-lane job level',
+      "    env:\n      # PR1-SEC-03 (c): job level as well, so an out-of-graph nested install inherits it.\n      NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n",
+      '    env: ${{ fromJSON(github.event.pull_request.body) }}\n    x-unused:\n',
+      'env-expression',
+    ],
+    // PR55-SEC-09 / R1-m3: the token is bound to the classify, lane-scope and aggregation steps.
+    [
+      'T1 (P11) the token on a fast-lane step after head code that names the lane-scope tool',
+      buildPorcelain,
+      lateStep('        env:\n          GH_TOKEN: ${{ github.token }}\n        run: node "${GATE_LANE_SCOPE:?}" --help; npm run build\n'),
+      'gh-token',
+    ],
+    [
+      'T1b the same step with exactly the classify command',
+      buildPorcelain,
+      lateStep(`        env:\n          GH_TOKEN: \${{ github.token }}\n        run: ${CLASSIFY_RUN}\n`),
+      'gh-token',
+    ],
+    [
+      'P10 the token on a security-integration step that names the lane-scope tool',
+      '      - name: Allow-listed install steps (deps:rebuild)\n        run: npm run deps:rebuild\n\n      # The manifest',
+      '      - name: Allow-listed install steps (deps:rebuild)\n        run: npm run deps:rebuild\n\n      - name: Lookup\n        env:\n          GH_TOKEN: ${{ github.token }}\n        run: node "${GATE_LANE_SCOPE:?}" --help\n\n      # The manifest',
+      'gh-token',
+    ],
+    [
+      'T1c the token on a second step with id classify and the classify command (bound to the gate position)',
+      buildPorcelain,
+      lateStep(`        id: classify\n        env:\n          GH_TOKEN: \${{ github.token }}\n        run: ${CLASSIFY_RUN}\n`),
+      'gh-token',
+    ],
+  ])('%s', (_title, from, to, rule) => {
+    const findings = findingsOf(swap(from, to));
+    expect(findings.some((finding) => finding.startsWith(`${rule}:`))).toBe(true);
+  });
+
+  it('the preload and expression-map rules apply to the live stage-1 ci.yml and to lane-c.yml as well (F9, E4, E5)', () => {
+    const record1 = '      - name: Security-owned paths need a review record (PR5-SEC-04, PR10-SEC-04)\n        run: |\n';
+    expect(stage1.split(record1)).toHaveLength(2);
+    const f9 = stage1.replace(
+      record1,
+      record1.replace('        run: |\n', '        env:\n          BASH_ENV: docs/x.sh\n        run: |\n'),
+    );
+    expect(findingsOf(f9)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^preload-env:/u), expect.stringMatching(/^required-gates:/u)]),
+    );
+    const unit1 = "      - name: Unit tests\n        if: env.CODE == 'true'\n        run: npm run test:unit\n";
+    expect(stage1.split(unit1)).toHaveLength(2);
+    const e4 = stage1.replace(
+      unit1,
+      unit1.replace('        run:', '        env: ${{ fromJSON(github.event.pull_request.title) }}\n        run:'),
+    );
+    expect(findingsOf(e4).some((finding) => finding.startsWith('env-expression:'))).toBe(true);
+    const install = '      - name: Install (npm ci --ignore-scripts)\n        run: npm ci --ignore-scripts --no-audit --no-fund\n';
+    expect(laneC.split(install).length).toBeGreaterThan(1);
+    const laneFindings = (text: string) => checkWorkflow(text, 'lane-c.yml').map((f) => `${f.rule}: ${f.message}`);
+    expect(laneFindings(laneC)).toEqual([]);
+    const e5 = laneC.replace(install, install.replace('        run:', '        env: ${{ fromJSON(inputs.x) }}\n        run:'));
+    expect(laneFindings(e5).some((finding) => finding.startsWith('env-expression:'))).toBe(true);
+    const bash = laneC.replace(install, install.replace('        run:', '        env:\n          BASH_ENV: docs/x.sh\n        run:'));
+    expect(laneFindings(bash).some((finding) => finding.startsWith('preload-env:'))).toBe(true);
   });
 });

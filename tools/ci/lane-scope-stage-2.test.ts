@@ -19,6 +19,8 @@ import {
   MAX_BASE_COMMITS,
   baseChangedAt,
   checkedOutTopology,
+  classify,
+  fastLaneProblems,
   formatClassification,
   gate,
   gateVerdictStage2,
@@ -327,9 +329,26 @@ describe('[PR46-SEC-16] a proof is void when the tested base changed a lane A in
     ['docs/05-quality/tests/gherkin-test-map.md', true],
     ['docs/05-quality/security/PR-0053-x.md', false],
     ['.claude/agent-memory/x.md', false],
-    ['apps/api/src/a.ts', false],
+    // PR #55 R1-M1 / PR55-SEC-03 (D-TASK286-06): the lint controls and tools/deps are lane A inputs too.
+    ['tools/eslint-rules/no-raw-sql.mjs', true],
+    ['tools/stylelint-rules/x.mjs', true],
+    ['tools/lint/lint-fixtures.mjs', true],
+    ['tools/test-support/process.ts', true],
+    ['tests/fixtures/lint/bad-raw-any.ts', true],
+    ['tests/fixtures/semgrep/x.ts', true],
+    ['tools/deps/prisma-engines.json', true],
+    // An application file the PR does not change: a disjoint semantic conflict is the D-ORCH-042 post-merge gate's.
+    ['apps/api/src/other.ts', false],
   ])('%s -> %s', (path, expected) => {
     expect(proofBasePath(path, INPUTS)).toBe(expected);
+  });
+
+  it('[R1-M1] [PR55-SEC-03] P1 (b): any path the PR range itself changes is a lane A input of this proof, docs included', () => {
+    const own = new Set(['apps/api/src/a.ts', 'docs/07-ops/CI-CD.md']);
+    expect(proofBasePath('apps/api/src/a.ts', INPUTS, own)).toBe(true);
+    expect(proofBasePath('docs/07-ops/CI-CD.md', INPUTS, own)).toBe(true);
+    expect(proofBasePath('apps/api/src/b.ts', INPUTS, own)).toBe(false);
+    expect(proofBasePath('docs/07-ops/DEPLOYMENT.md', INPUTS, own)).toBe(false);
   });
 
   /** main with a docs commit at 10:00 and, optionally, a lane A input change at 12:00 (committer dates). */
@@ -445,6 +464,31 @@ describe('[PR46-SEC-16] a proof is void when the tested base changed a lane A in
     expect(lookup('2026-11-14T12:30:00Z', baseChangedAt(changed.root, changed.tip, INPUTS)).codeProof).toBe(`11:${SHA}`);
     // The change at the same second as the run creation voids it (at or before).
     expect(lookup('2026-11-14T12:00:00Z', baseChangedAt(changed.root, changed.tip, INPUTS)).codeProof).toBe('');
+  });
+
+  it('[R1-M1] baseChangedAt dates a main commit on a path the PR changes (P1 (b)); another app file does not; an unknown range gives null', () => {
+    const app = mainHistory({ 'apps/api/src/a.ts': 'export const a = 3;\n' });
+    const changeAt = Date.parse('2026-11-14T12:00:00Z');
+    const rootAt = Date.parse('2026-11-14T08:00:00Z');
+    expect(baseChangedAt(app.root, app.tip, INPUTS, MAX_BASE_COMMITS, ['apps/api/src/a.ts', 'docs/z.md'])).toBe(changeAt);
+    expect(baseChangedAt(app.root, app.tip, INPUTS, MAX_BASE_COMMITS, ['apps/api/src/b.ts'])).toBe(rootAt);
+    expect(baseChangedAt(app.root, app.tip, INPUTS)).toBe(rootAt);
+    expect(baseChangedAt(app.root, app.tip, INPUTS, MAX_BASE_COMMITS, null)).toBeNull();
+    const created = '2026-11-14T11:00:00Z';
+    expect(lookup(created, baseChangedAt(app.root, app.tip, INPUTS, MAX_BASE_COMMITS, ['apps/api/src/a.ts'])).codeProof).toBe('');
+    // V5 (accepted by the C2 ruling): main changed an app file the PR does not change: the proof stands.
+    expect(lookup(created, baseChangedAt(app.root, app.tip, INPUTS, MAX_BASE_COMMITS, ['apps/api/src/b.ts'])).codeProof).toBe(`11:${SHA}`);
+  });
+
+  it.each([
+    ['V3 a lint rule source', { 'tools/eslint-rules/no-raw-sql.mjs': 'export default {};\n' }],
+    ['V3b a lint fixture', { 'tests/fixtures/lint/x.ts': 'export {};\n' }],
+    ['V4 the schema-engine pin', { 'tools/deps/prisma-engines.json': '{}\n' }],
+  ])('[PR55-SEC-03] %s changed on main after the proof run: no proof', (_title, change) => {
+    const base = mainHistory(change);
+    const voided = lookup('2026-11-14T11:00:00Z', baseChangedAt(base.root, base.tip, INPUTS, MAX_BASE_COMMITS, ['apps/api/src/a.ts']));
+    expect(voided.codeProof).toBe('');
+    expect(voided.notes.join('\n')).toContain('tested an older base');
   });
 
   it('an unreadable tested-base history gives no proof at all; stage 1 (undefined) does not check', () => {
@@ -567,5 +611,230 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
     expect(checkedOutTopology(root)).toBe('stage-1');
     // The stage-1 rules read the scans outputs, which the stage-2 env does not carry: classification missing.
     expect(gate({ root, env: stage2Env, api: none }).reasons).toContain('classification missing');
+  });
+});
+
+describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end to end (main() wiring of PR46-SEC-16)', () => {
+  const A_LINES = (first: string, last: string) => `${first}\nexport const x2 = 2;\nexport const x3 = 3;\nexport const x4 = 4;\n${last}\n`;
+  const D = (hour: string) => `2026-11-14T${hour}:00Z`;
+  /**
+   * main M0 (no tools, no ci.yml) -> the PR (F1: code on line 1 of a.ts at 09:00, F2: a docs commit at 10:00, the push)
+   * and main M1 (tools + the stage-2 ci.yml, 09:30); the proof run of F1 is created at 11:00; each variant adds one main
+   * commit at 12:00 and the checkout is GitHub's test merge of F2 into that main. F1 and F2 carry no ci.yml, so the
+   * proof's step names can only come from the test merge (R1-n6, mutant L20).
+   */
+  const made = new Map<boolean, { root: string; m0: string; f1: string; f2: string; m1: string }>();
+  /** lint: the PR's code commit also touches a lint control (tools/lint), so lint_controls=true (R1-n1). */
+  const repo = (lint = false) => {
+    const cached = made.get(lint);
+    if (cached !== undefined) return cached;
+    const root = tempDir('lane-scope-cli-');
+    git(root, ['init', '-q', '-b', 'main']);
+    const m0 = commit(
+      root,
+      {
+        'README.md': 'base\n',
+        'apps/api/src/a.ts': A_LINES('export const x1 = 1;', 'export const x5 = 5;'),
+        'apps/api/src/b.ts': 'export const b = 1;\n',
+        'tools/quality/required-suites.json': MANIFEST,
+      },
+      'base',
+      D('08:00'),
+    );
+    git(root, ['checkout', '-q', '-b', 'feat/x']);
+    const code = { 'apps/api/src/a.ts': A_LINES('export const x1 = 10;', 'export const x5 = 5;') };
+    const f1 = commit(root, lint ? { ...code, 'tools/lint/x.mjs': 'export {};\n' } : code, 'code', D('09:00'));
+    const f2 = commit(root, { 'docs/notes/x.md': 'note\n' }, 'docs', D('10:00'));
+    git(root, ['checkout', '-q', 'main']);
+    const m1 = commit(root, { ...toolsCi(), '.github/workflows/ci.yml': stage2Text }, 'tools', D('09:30'));
+    const result = { root, m0, f1, f2, m1 };
+    made.set(lint, result);
+    return result;
+  };
+  /** The test merge of F2 into M1 plus one main commit (or none), checked out; returns the tested base. */
+  function testMerge(change: Record<string, string> | undefined, name: string, lint: boolean): string {
+    const { root, m1, f2 } = repo(lint);
+    git(root, ['checkout', '-q', '-B', `main-${name}`, m1]);
+    const tip = change === undefined ? m1 : commit(root, change, `main ${name}`, D('12:00'));
+    git(root, ['checkout', '-q', '--detach', tip]);
+    git(root, ['merge', '-q', '--no-ff', '--no-edit', f2]);
+    return tip;
+  }
+  const PROOF_RUN = 11;
+  const jobsOfProof = () => {
+    const steps = proofSteps(stage2Text) as ProofSteps;
+    return {
+      jobs: [
+        {
+          name: 'fast-lane',
+          status: 'completed',
+          conclusion: 'success',
+          steps: steps.fastLane.map((s) => ({ name: s.name, conclusion: s.mayBeSkipped ? 'skipped' : 'success' })),
+        },
+        {
+          name: 'ci-gate',
+          status: 'completed',
+          conclusion: 'success',
+          steps: steps.scans.map((name) => ({ name, conclusion: 'success' })),
+        },
+        { name: 'security-integration', status: 'completed', conclusion: 'skipped', steps: [] },
+      ],
+    };
+  };
+  /** A runs API with one completed proof run of F1 (this PR into main, created 11:00), whose steps all passed. */
+  const apiFor =
+    (f1: string): Api =>
+    (path) => {
+      if (path.startsWith('repos/o/r/actions/workflows/ci.yml/runs?head_sha=')) {
+        const sha = /head_sha=([0-9a-f]{40})/u.exec(path)?.[1] ?? '';
+        if (sha !== f1) return { ok: true, json: { workflow_runs: [] } };
+        const pullRequest = {
+          number: 53,
+          base: { ref: 'main', repo: { url: 'https://api.github.com/repos/o/r' } },
+          head: { ref: 'feat/x', repo: { url: 'https://api.github.com/repos/o/r' } },
+        };
+        const proof = {
+          id: PROOF_RUN,
+          head_sha: f1,
+          head_branch: 'feat/x',
+          head_repository: { full_name: 'o/r' },
+          event: 'pull_request',
+          status: 'completed',
+          conclusion: 'success',
+          created_at: D('11:00'),
+          path: '.github/workflows/ci.yml',
+          pull_requests: [pullRequest],
+        };
+        return { ok: true, json: { workflow_runs: [proof] } };
+      }
+      if (path === `repos/o/r/actions/runs/${String(PROOF_RUN)}/jobs?per_page=100`) return { ok: true, json: jobsOfProof() };
+      if (path.startsWith('repos/o/r/pulls?'))
+        return {
+          ok: true,
+          json: [{ number: 53, base: { ref: 'main', repo: { full_name: 'o/r' } }, head: { ref: 'feat/x', repo: { full_name: 'o/r' } } }],
+        };
+      if (path.startsWith('repos/o/r/issues/53/events')) return { ok: true, json: [] };
+      return { ok: false, problem: `unexpected ${path}` };
+    };
+  function run(change: Record<string, string> | undefined, name: string, lint = false) {
+    const { root, m0, f1, f2 } = repo(lint);
+    const api = apiFor(f1);
+    const tip = testMerge(change, name, lint);
+    const dir = tempDir('lane-scope-cli-out-');
+    const out = join(dir, 'out');
+    const summary = join(dir, 'summary.md');
+    const args = ['--root', root, '--base', m0, '--head', f2, '--before', f1, '--event', 'pull_request', '--pr', '53'];
+    const status = main([...args, '--head-ref', 'feat/x', '--tools-ref', tip, '--lookup', '--output', out, '--summary', summary], {
+      env: { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '99' },
+      api,
+    });
+    const outputs = Object.fromEntries(
+      readFileSync(out, 'utf8')
+        .split('\n')
+        .filter((line) => line.includes('='))
+        .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+    );
+    return { status, outputs, summary: readFileSync(summary, 'utf8'), f1 };
+  }
+
+  it.each<[string, string, Record<string, string> | undefined, boolean]>([
+    ['no main commit since the proof run (control)', 'none', undefined, true],
+    ['a docs commit on main (control)', 'docs', { 'docs/y.md': 'y\n' }, true],
+    ['a package.json commit on main (lane A input)', 'package', { 'package.json': '{"name":"x"}\n' }, false],
+    [
+      'P1 (b): main edits another line of a file the PR changes',
+      'p1b',
+      { 'apps/api/src/a.ts': A_LINES('export const x1 = 1;', 'export const x5 = 50;') },
+      false,
+    ],
+    ['V5: main edits an app file the PR does not change', 'v5', { 'apps/api/src/b.ts': 'export const b = 2;\n' }, true],
+    ['V3: main edits a lint rule source', 'v3', { 'tools/eslint-rules/x.mjs': 'export default {};\n' }, false],
+    ['V4: main edits the schema-engine pin', 'v4', { 'tools/deps/prisma-engines.json': '{}\n' }, false],
+  ])('%s', (_title, name, change, kept) => {
+    const result = run(change, name);
+    expect(result.status).toBe(0);
+    expect(result.outputs.mode).toBe('light');
+    expect(result.outputs.code_proof).toBe(kept ? `${String(PROOF_RUN)}:${result.f1}` : '');
+    if (kept) expect(result.summary).not.toContain('tested an older base');
+    else expect(result.summary).toContain('tested an older base');
+  });
+
+  it('[R1-n1] a PR range touching a lint control: a proof whose lint-fixture step was skipped is no proof', () => {
+    const result = run(undefined, 'lint', true);
+    expect(result.status).toBe(0);
+    expect(result.outputs.lint_controls).toBe('true');
+    expect(result.outputs.code_proof).toBe('');
+    expect(result.summary).toContain('is not a code proof');
+    expect(result.summary).toContain(': skipped');
+  });
+});
+
+describe('[R1-n1] lint_controls end to end: the classify output, the env line and the gate rule', () => {
+  it('a PR range touching a lint control writes LINT_CONTROLS=true and lint_controls=true; an unknown range is true', () => {
+    const { root, m0, f1, m1 } = stalePr();
+    git(root, ['checkout', '-q', 'feat']);
+    const f2 = commit(root, { 'tools/lint/x.mjs': 'export {};\n' }, 'lint control');
+    git(root, ['checkout', '-q', '--detach', m1]);
+    git(root, ['merge', '-q', '--no-ff', '--no-edit', f2]);
+    const dir = tempDir('lane-scope-lint-');
+    const out = join(dir, 'out');
+    const envFile = join(dir, 'env');
+    const args = ['--root', root, '--base', m0, '--head', f2, '--before', f1, '--pr', '53', '--head-ref', 'feat/x', '--tools-ref', m1];
+    expect(main([...args, '--lookup', '--env', envFile, '--output', out], { env: {}, api: () => ({ ok: false, problem: 'none' }) })).toBe(
+      0,
+    );
+    expect(readFileSync(envFile, 'utf8')).toBe('CODE=true\nLINT_CONTROLS=true\n');
+    expect(readFileSync(out, 'utf8')).toContain('classification=mode=full,code_changed=true,pr_docs_only=false,lint_controls=true,');
+    expect(classify({ root, base: 'f'.repeat(40), head: f2 }).lintControls).toBe(true);
+    expect(classify({ root, base: m0, head: f1 }).lintControls).toBe(false);
+  });
+
+  it('a skipped LINT_CONTROLS step is accepted only when the verified classification says lint_controls=false', () => {
+    const steps = proofSteps(stage2Text) as ProofSteps;
+    const skippable = steps.fastLane.filter((s) => s.mayBeSkipped);
+    expect(skippable.length).toBeGreaterThan(0);
+    const jobs = {
+      jobs: [
+        {
+          name: 'fast-lane',
+          status: 'completed',
+          conclusion: 'success',
+          steps: steps.fastLane.map((s) => ({ name: s.name, conclusion: s.mayBeSkipped ? 'skipped' : 'success' })),
+        },
+      ],
+    };
+    expect(fastLaneProblems(jobs, steps.fastLane)).toEqual([]);
+    expect(fastLaneProblems(jobs, steps.fastLane, true)).toEqual(skippable.map((s) => `${s.name}: skipped`));
+  });
+
+  it('gateVerdictStage2 passes the verified lint_controls to the code-step check of this run', () => {
+    const base = {
+      mode: 'full',
+      code_changed: 'true',
+      pr_docs_only: 'false',
+      lint_controls: 'true',
+      security_paths: 'false',
+      record_ok: 'true',
+      code_proof: '',
+      security_proof: '',
+      security_integration_due: 'false',
+      tools_ref: 'd'.repeat(40),
+    };
+    const seen: Array<boolean | undefined> = [];
+    const verdict = (values: typeof base) =>
+      gateVerdictStage2({
+        event: 'pull_request',
+        fastLane: 'success',
+        securityIntegration: 'skipped',
+        classification: formatClassification(values),
+        fastLaneClassification: formatClassification(values),
+        thisRunCodeProblems: (lintControls) => {
+          seen.push(lintControls);
+          return lintControls === true ? ['Lint negative fixtures: skipped'] : [];
+        },
+      });
+    expect(verdict(base).reasons).toEqual(['code gates skipped on a code push (Lint negative fixtures: skipped)']);
+    expect(verdict({ ...base, lint_controls: 'false' })).toEqual({ ready: true, reasons: [] });
+    expect(seen).toEqual([true, false]);
   });
 });

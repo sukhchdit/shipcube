@@ -52,11 +52,19 @@ installs `tools/ci/fixtures/stage-2/ci.yml` as `ci.yml`. In stage 2:
   on a push the pushed range's base (PR46-SEC-17). A PR whose merge base predates a tool (PR #53, D-ORCH-103) therefore
   starts lane A without a union. The lane B evidence verifier, the lint fixtures and the `security-integration`
   manifests come from `TOOLS_REF` too.
-- `fast-lane`'s classify step (the only step with the token, before any head code) classifies the push and looks up
-  the proofs; a proof is void when the tested base changed a lane A input (P1 directories, root non-Markdown files,
-  the manifest's `tooling_inputs`) after the proof run was created (PR46-SEC-16). Commitlint, actionlint and the
-  head-code checks run only on a code push; registry signatures and the advisory audit run on **every** push
-  (PR46-SEC-11).
+- `fast-lane`'s classify step (the only fast-lane step whose env holds the token, before any head code; the job's
+  `actions: read` and `pull-requests: read` scopes are an accepted D-ARCH-128 trade-off, PR55-SEC-06) classifies the
+  push and looks up the proofs. A proof is void when, after the proof run was created, the tested base gained a
+  first-parent commit touching a lane A input: `.github`, `prisma`, `tools/ci`, `tools/quality`, `tools/deps`, the
+  lint controls (`tools/eslint-rules`, `tools/stylelint-rules`, `tools/lint`, `tools/test-support`,
+  `tests/fixtures`, `.semgrep`), root non-Markdown files, the manifest's `tooling_inputs`, **or any path the PR itself
+  changes** (P1 (b); PR46-SEC-16 as widened by PR55-SEC-03, D-TASK286-06). A semantic conflict between files that only
+  one side changed, outside that set, is left to the D-ORCH-042 post-merge gate. A base change is dated by its
+  committer time: a squash merge lands with its landing time, so push `main` commits that touch these paths right
+  after creating them (PR55-SEC-04 residual). A void proof turns a docs push into `ci-gate: BLOCKED: no code proof`;
+  push again or close and reopen the PR. Commitlint, actionlint and the head-code checks run only on a code push; the
+  install, registry signatures and the advisory audit run on **every** push (PR46-SEC-11, D-TASK286-03), and when the
+  PR range touches a lint control the lint-fixture steps must have succeeded in this run or the proof (R1-n1).
 - `security-integration` needs `fast-lane` only. `ci-gate` is last and holds the former `scans` steps: it recomputes
   the classification with the tested base's `lane-scope.mjs`, re-reads the proofs under the same binding, runs
   gitleaks and the record check on every head and Semgrep/oasdiff unless a docs push has a code proof, and is red when
@@ -129,12 +137,21 @@ checklist (P4). The measured figures and the forecast are in [SPK-07](../04-plan
 
 `tools/ci/check-workflow-policy.mjs` (lane A, from the base ref) checks every workflow: actions pinned by commit SHA,
 container tools by digest, read-only top-level permissions, no privileged triggers, no secrets in pull-request jobs,
-fail-closed jobs and steps; the GitHub token only as `GH_TOKEN` on the lane-scope steps (stage 1: of `scans` and
-`ci-gate`; stage 2: of `fast-lane`'s classify step and `ci-gate`), the only jobs that hold `actions: read` and
+fail-closed jobs and steps; the GitHub token only as `GH_TOKEN` on the lane-scope steps (stage 1: a step of `scans` or
+`ci-gate` that runs the lane-scope tool; stage 2: exactly `fast-lane`'s classify step and `ci-gate`'s lane-scope and
+aggregation steps, found by gate position and exact text, PR55-SEC-09), the only jobs that hold `actions: read` and
 `pull-requests: read` (never at workflow level, never in another workflow; PR46-SEC-15); the tooling, lane-scope,
-`security-integration` and `ci-gate` steps pinned to exact text, gate tools called as `"${GATE_*:?}"` in stage 2, and
-`$GITHUB_ENV` written only by the pinned tooling and classify steps (PR46-SEC-12); every `npm run lint` step with exactly
-`NODE_OPTIONS: --max-old-space-size=4096` and no `${{ }}` in any `NODE_OPTIONS` (PR42-SEC-18). On top of that:
+`security-integration` and `ci-gate` steps pinned to exact text, gate tools called as `"${GATE_*:?}"` in stage 2. In
+stage 2 every fast-lane gate from the classify step to the lane B evidence step (workflow policy, install flags,
+migration immutability, lockfile, dependency age, install, licences, signatures, audit) and `ci-gate`'s gitleaks,
+Semgrep and record steps are exact, contiguous and carry no step env; `fast-lane` and `security-integration` use only
+`actions/checkout`, `actions/setup-node` and `actions/cache`; the workflow env has exactly the install settings and the
+four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
+a lexical tripwire for the head-code steps, which are not exact). In every workflow, at every level: no
+`BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_*`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS` or `BASH_FUNC_*` entry
+(`preload-env`), and every `env:` is a mapping, never an expression (`env-expression`) (PR55-SEC-01). A step whose
+`run:` is exactly `npm run lint` must have exactly `NODE_OPTIONS: --max-old-space-size=4096`, and no `NODE_OPTIONS`
+holds `${{ }}` (PR42-SEC-18; other spellings of the lint script are not matched, PR #55 R1-n2). On top of that:
 `lane-c.yml` and `nightly.yml` are `workflow_dispatch` only; ci.yml,
 lane-c.yml and nightly.yml never publish, push, apply or assume a cloud role; Playwright browsers (and apt through
 `--with-deps`) are installed only in lane-c.yml, and only through `npm run deps:rebuild`, which refuses Playwright and
