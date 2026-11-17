@@ -81,3 +81,96 @@ Survived (3), see R1-m7: **C3** `|| isAuditPathFailure(error)` removed (the AUDI
 5. Fresh lane B evidence if any code changes; do not merge main commits that only touch `.claude/agent-memory`; squash.
 
 r2 = delta: re-run `review/PR-56-cr/mutate.mjs` (C3/C6/C7 must die) plus mutants for whatever R1-M1 adds, and the `%00` query probe (`probe-nul.mts`).
+
+---
+
+# Round 2
+
+Head reviewed: `b5f2d9f` (full SHA `b5f2d9fd8b8c610a254e80008e79aecb627588be`; security r3 record, docs only). Code heads `f750cc4` (fix cycle 1) and `683a57d` (fix cycle 2); `git diff --stat 683a57d b5f2d9f` = evidence and the security record only. Delta reviewed: `4b02531..b5f2d9f`. Decisions checked: D-TASK029-16 (supersedes -04), D-TASK029-17..26, D-ORCH-109 card lines (all on origin/main).
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1 is fixed as the ADR is written: a returned status >= 400 is thrown inside the handler transaction as
+  RouteReturnedError, rolls back, is sent as returned, and 409/422/5xx get FAILED in their own transaction; afterCommit
+  runs only after a commit. Every r1 MINOR is fixed or routed with an owner. 30 of 32 new mutants die (C3/C6/C7 now
+  killed); one magnitude survivor and one equivalent. One MINOR (TASK-040 card line), four NITs incl. the PR56-SEC-14 ruling.
+```
+
+## R2.1 What I verified myself
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` at b5f2d9f | exit 0 |
+| `npm run lint` | exit 0 (6 suppressions, 0 findings) |
+| Prettier `--check` on the changed non-evidence files of `4b02531..b5f2d9f` | clean |
+| Targeted unit + api (packages/audit, all of apps/api/src/platform, tests/generated/audit-descriptors, tools/lint/audit-capture-boundary), `--maxWorkers=2` | 62 suites, 1,388 / 1,388 pass |
+| Same set at the default worker count on a contended host | 25 failures in 7 suites with 200-415 s suite durations (problem-handler, logging, serve, runtime-seams, json-body-text, audit-failure, execute-phases), all loopback suites incl. files this PR does not touch; each failing file passes alone (R2-n3) |
+| Lane B `20261117T0335Z_683a57d` | PASS; api 173, integration 323, unit 6,058; merged 99.04 % / 96.98 % |
+| Lane A at the head (run 44014221230, b5f2d9f) | fast-lane, scans, **security-integration** and ci-gate all SUCCESS. Lint, type-check and unit are SKIPPED on this docs-only head (proof from the code head), so the re-runs above are the independent check. Run 44012999702 (0ecd317) was the record-wait failure only |
+| `probe-nul.mts` against 683a57d | `?city=%00Pune` and `?city=` now pass the filter summary (the only refusal left is the probe's own fake entry id, the same control result as r1) |
+
+### R2.1.1 Mutation run (`review/PR-56-cr/mutate2.mjs` over an archive of 683a57d, 32 mutants)
+
+- **r1 survivors, re-anchored: all killed.** C3 (congestion skip removed), C6 (denial records `route.permission`), C7 (`afterFailure` rethrows).
+- **Rollback (R1-M1): all killed.**
+  - R1: rollback removed.
+  - R2: threshold moved to 500.
+  - R3: a returned failure marked `committed: true`.
+  - R4: `committed` ignored when scheduling afterCommit.
+  - R5: a returned failure rethrown instead of sent.
+  - R6: FAILED details for a returned result carry a code.
+- **Disconnect identity and wait: four of six killed.**
+  - Killed:
+    - K1: any abort counts as a disconnect.
+    - K2: the disconnect skip removed.
+    - K3: the wait unbounded.
+    - K6, K7, K8: each congestion reason dropped from the skip set.
+  - **K4 survives** (R2-n1): `FAILED_ENTRY_WAIT_MS` raised from 1,000 to 10,000. The test asserts only `waited >= FAILED_ENTRY_WAIT_MS - 50`, a bound derived from the constant under test, so it moves with the regression.
+  - **K5 is equivalent:** after a deadline abort, a later close no longer sets `disconnect`. Removing that guard creates a new error object that is never the thrown one, so `isDisconnect` stays false.
+- **Read-only views, mount refusal, filter text, log lines: all killed.**
+  - V1, V2: read-only view handler.
+  - M1 to M4: mount refusal without a tokeniser, `mountDenials` not called, `canDeny` on dual-mode public routes, `additional[]` refusal.
+  - F1 to F3: NUL, empty value, truncation.
+  - L1, L2: `audit.view_unrecorded` and `audit.entity_id_unresolved` lines.
+- **r1 spot rows still killed:** W1, C1, A2, E1.
+
+## R2.2 Closure of round-1 findings
+
+| r1 | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed** (D-TASK029-16, -17, -25) | `execute.ts` throws `RouteReturnedError` for a returned status >= 400 inside the handler tx; `recordFailure` writes FAILED for 409/422/5xx in its own tx; `RunOutcome.committed` gates afterCommit; tests `[R1-M1] [PR56-SEC-09]` (409, 404/400/403, returned 500 + idempotency, anonymous 409) and `[PR56-SEC-10]`; R1-R6 killed. Follows ADR-0007 §Capture / REQ-AUDIT-010 as written, so no architect ruling is needed. |
+| R1-m1 | **Closed** (D-TASK029-21, D-ORCH-109 TASK-028 line) | `requireTokeniser` at mount for audited routes; `mountDenials` from the authorise slot for every route that can answer 403 (`canDeny`); M1-M3 killed. |
+| R1-m2 | **Closed** (D-TASK029-18) | `filterText`: empty/NUL values JSON-encoded, cut at `MAX_FILTER_TEXT` 1,024 code points without splitting a pair; probe and F1-F3. Sanitising instead of a 400 at the query boundary is accepted: the entry can no longer be dropped or failed by a client-chosen value, which was the finding. |
+| R1-m3 | **Routed** | TASK-041 card line in D-ORCH-109 (per-actor denial budget, aggregated entry). Security owns the rating. |
+| R1-m4 | **Closed** (D-TASK029-22, -26) | Skip set adds TRANSACTION_UNAVAILABLE, STATEMENT_TIMEOUT, LOCK_TIMEOUT (K6-K8 killed); the response waits at most `FAILED_ENTRY_WAIT_MS` (K3 killed; magnitude R2-n1); the disconnect skip is identity-based, so a deadline abort or a returned 409 after the client left still writes FAILED (K1, K2 killed). |
+| R1-m5 | **Routed** | TASK-052 card line in D-ORCH-109. |
+| R1-m6 | **Closed** (D-TASK029-23) | `readOnlyHandler` for view/list mode; V1/V2 killed. |
+| R1-m7 | **Closed** (D-TASK029-24) | C3/C6/C7 killed; `audit.view_unrecorded`, `audit.failed_unrecorded`, `audit.entity_id_unresolved` with class-only fields (L1/L2 killed). |
+| R1-n1 | **Closed** | `server.keepAliveTimeout = 120_000` in `capture.api.test.ts`. |
+| R1-n2, R1-n3 | **Not taken, accepted** | Metadata-only stamp; the `setImmediate` turn is noted for the TASK-030 performance budget (D-TASK029 "Not taken"). |
+| R1-n4 | **Closed** | `audit.entity_id_unresolved` (L2 killed). |
+| R1-n5 | Open, orchestrator fold | Sheet still names `audit-middleware.ts`; no code impact. |
+
+Also new and good in the delta: `x-audit.additional[]` routes refused at mount until a recording seam exists (PR56-SEC-04, M4 killed); `pipeline.ts` as the single composition point with an exact-file boundaries category, and the tx slot no longer re-exports the factory (PR56-SEC-02); the `audit` test seam removed from `PipelineOptions`; `RouteReturnedError.result` held in a private field.
+
+## R2.3 New findings
+
+| ID | Severity | Location | Issue | Fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | D-TASK029-17; D-ORCH-109 fold list | Because a returned 4xx now rolls back, ADR-0014's "store 2xx/4xx response" can no longer complete inside the handler transaction. D-TASK029-17 routes this to TASK-040, but D-ORCH-109's card-line list, which is what the next sheet fold applies, has no TASK-040 entry. Latent: the idempotency slot still refuses every `required`/`optional` route. | Add to the D-ORCH-109 fold list: "TASK-040: store the 4xx idempotency completion outside the rolled-back handler transaction; a returned 5xx leaves no completion (D-TASK029-16/17)". Not merge-blocking. |
+| R2-n1 | NIT | `apps/api/src/platform/tx/execute-phases.test.ts:768-779` | Mutant K4 survives: raising `FAILED_ENTRY_WAIT_MS` tenfold passes. The only bound is derived from the constant itself (the PR #53 magnitude pattern). | `expect(FAILED_ENTRY_WAIT_MS).toBe(1_000)` (or `<=` the budget D-TASK029-22 states) next to the timing test. |
+| R2-n2 | NIT (**PR56-SEC-14 ruling**) | `execute.ts` (`transaction === 'none'` returns `committed: true`), `define-route.ts:209-215` | A `transaction: 'none'` route that returns >= 400 still schedules `afterCommit`, while the JSDoc says "Never for a request whose write did not commit: … a returned status of 400 or more … schedules nothing". **Ruling: a NIT to fix in this PR if another commit lands anyway, otherwise with the next change to `execute.ts` (TASK-040).** No impact today: `none` is restricted to public NONE-audit routes, and no current `none` route has `afterCommit`. Prefer `committed: result.status < 400` for `none` routes, so the contract stays one rule; amending the JSDoc to carve out `none` (D-TASK029-25 wording) is acceptable. Same edit: rewrap the over-long JSDoc line at define-route.ts:211. | as stated |
+| R2-n3 | NIT | loopback api suites | Under host contention (default workers, 200-415 s suites) 25 loopback tests in 7 suites failed, including unchanged files and `audit-failure.api.test.ts`; all pass at `--maxWorkers=2` and alone. The same W0-FLAKE class D-TASK029-25 recorded for `rls/api-cases.test.ts`. | Add these suites to the W0-FLAKE-3 scope (D-ORCH-113 (d)); no change in this PR. |
+| R2-n4 | NIT | `execute.ts` `recordFailure` | After the 1 s wait elapses, the FAILED write continues detached and is not drained at shutdown (the afterCommit queue is). Best effort by design. | Note it in the JSDoc, or run it through the afterCommit queue's drain. |
+
+## R2.4 Rulings on D-TASK029-16..26
+
+- Accepted: 16 (supersedes 04), 17 (with R2-m1 routing), 18, 19, 20, 21, 22, 23, 24, 25 (with R2-n2), 26.
+- "Not taken" for R1-n2 and R1-n3 accepted.
+
+## R2.5 Merge conditions
+
+1. The security r3 record is on the head and lane A run 44014221230 is green at b5f2d9f, including `security-integration`: **met**.
+2. The R2-m1 TASK-040 line goes into the D-ORCH-109 fold list. This is an orchestrator docs action on main and does not block the merge.
+3. The NITs are optional. If R2-n1 or R2-n2 is fixed in this PR, take fresh lane B evidence and re-run `mutate2.mjs` rows K4 and R4.
+4. Squash. Do not merge main commits that only touch `.claude/agent-memory`.
