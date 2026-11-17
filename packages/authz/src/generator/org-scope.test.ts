@@ -1,4 +1,4 @@
-/** SEC-TC-01 org-scope cases of the RBAC matrix (T-32, AC-06; ADR-0005 am. 3; TASK-027). */
+/** SEC-TC-01 org-scope cases of the RBAC matrix (T-32, AC-06; ADR-0005 am. 3; TASK-027, TASK-289). */
 import { describe, expect, it } from '@jest/globals';
 
 import { PERMISSION_DEFINITIONS } from '../permissions/index.js';
@@ -26,6 +26,28 @@ describe('[SEC-TC-01] org-scoped routes and their cases', () => {
     expect(pathParameterNames('/organisations/{orgId}/members/:membershipId')).toEqual(['orgId', 'membershipId']);
     expect(pathParameterNames('/me')).toEqual([]);
     expect(ORG_PATH_PARAMETER).toBe('orgId');
+  });
+
+  it('PR #48 R1-n1 / PR48-SEC-05 item 3: a parameter inside a segment is enumerated too (/x/:orgId.json, /x/{orgId}.csv)', () => {
+    expect(pathParameterNames('/organisations/:orgId.json')).toEqual(['orgId']);
+    expect(pathParameterNames('/organisations/{orgId}.csv')).toEqual(['orgId']);
+    expect(pathParameterNames('/reports/:from-:to/org-{orgId}')).toEqual(['from', 'to', 'orgId']);
+    expect(pathParameterNames('/exports/x:orgId')).toEqual(['orgId']);
+    expect(
+      orgScopedRoutes([
+        route('exportOrganisation', '/organisations/:orgId.json', 'org:read'),
+        route('exportOrganisationCsv', '/organisations/{orgId}.csv', 'org:read'),
+        route('getOrganisationById', '/organisations/:orgIdentifier', 'org:read'),
+      ]).map((r) => r.operationId),
+    ).toEqual(['exportOrganisation', 'exportOrganisationCsv']);
+  });
+
+  it('PR #60 R1-n5: an Express 5 wildcard parameter (/files/*orgId) binds req.params.orgId too, so it is enumerated', () => {
+    expect(pathParameterNames('/files/*orgId')).toEqual(['orgId']);
+    expect(pathParameterNames('/files{/*path}/:orgId')).toEqual(['path', 'orgId']);
+    expect(orgScopedRoutes([route('getOrganisationFiles', '/organisations/files/*orgId', 'org:read')]).map((r) => r.operationId)).toEqual([
+      'getOrganisationFiles',
+    ]);
   });
 
   it('covers tenant routes with an orgId parameter only (operator cross-tenant routes name the organisation by design)', () => {

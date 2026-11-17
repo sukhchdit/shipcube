@@ -2987,3 +2987,186 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **PR #60:** must merge main (shared `eslint.config.mjs`) inside its current fix cycle.
 - **Open security items from PR #56** stay with their cards: SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next `eslint.config.mjs` PR), SEC-13 (TASK-033/060).
 - **Reversibility:** Medium (merged; revertible).
+
+### D-TASK288-16..20 · 2026-11-17 · test-engineer (recorded by orchestrator) · PR #57 fix cycle 2 (@a5f94b0, code bfe5235)
+- **16** `takeOverStale` returns boolean; only a successful takeover retries immediately, everything else keeps the deadline and the poll sleep (closes R2-m1 = PR57-SEC-05). `lockTestHooks.rename` is a test-only seam.
+- **17** The Windows real-cwd case is registered on win32 only (no skipped test on Linux); the rename seam covers every platform.
+- **18** `LockChildren.idleStarted` waits for a marker the child writes; the `spawn` event is not enough on Windows.
+- **19** The owner file is created with `wx` in both writer paths: race-only hardening, unpinned.
+- **20** C1 rerun at `a5f94b0` (20261117T1051Z) is green; the first attempt failed only on the network drop (prisma engine re-download) and is not counted.
+- **Follow-up → TASK-291:** `prisma-engines.int.test.ts` should restore or keep the verified engine when the download fails.
+- **Reversibility:** High.
+
+### D-ORCH-124 · 2026-11-17 · sdlc-orchestrator · PR #57 merged (TASK-288 complete)
+- **PR #57** squash-merged.
+  - **Head:** `af219c6`. Code r3 APPROVED_WITH_NITS (`c8cc4f2`; R3-n1..n3 → next touch / TASK-291); security delta r3 PASS_WITH_FOLLOW-UPS (`af219c6`; D-SEC-PR57-03: PR57-SEC-05 and the SEC-03 residual (b) closed, C1 verified at `a5f94b0`).
+  - **CI:** lane A 44075846731 MERGE-READY (security-integration skipped by design; C1 local run in its place per D-SEC-PR57-01); lane B 20261117T0739Z_bfe5235.
+  - **P1:** no overlap. **Fix cycles:** 2/3.
+- **TASK-288 complete.** TASK-291 now waits only on TASK-289 (PR #60). TASK-291 also inherits code-review R3-n1 (bounded EBUSY hook) and R3-n3 (orphaned IDLE children).
+- **Host hygiene:** reviewer hang mutants may have left idle `node -e setInterval` processes. Agents were denied process listing by the classifier and did not work around it; cleanup is offered to the user.
+- **Reversibility:** Medium (merged; revertible).
+
+### D-ORCH-125 · 2026-11-17 · sdlc-orchestrator · Lane-B runs move to a serial orchestrator queue (host memory)
+- **Decision:** agents no longer start `quality:heavy`. They prepare a clean detached evidence worktree at their final head and report it; the orchestrator runs lane B serially (one at a time, waiting for 0 testcontainers and ≥ 7 GB free) and hands each stamp back to the owning agent, which commits the evidence and makes its single push.
+- **First queue:** PR #60 fc1 (`f2a7411`), TASK-028 (`e526b11`), TASK-290 (`ba921da`).
+- **Why:** with 4 developers plus reviewers on one 32 GB Windows host, concurrent heavy runs caused Testcontainers losses (P1001), build-prerender timeouts and loopback flakes, and Claude Code's low-memory reaper killed three agents' runs. Every affected PR passed its local gates.
+- **Also recorded:**
+  - **D-TASK289-13:** problem-member `instance` is compared, not volatile (narrows D-TASK289-02).
+  - **TASK-028** decisions D-TASK028-01..10 and **TASK-290** decisions D-TASK290-01..06 are proposed in their handoffs and will be logged when their PRs open.
+- **Reversibility:** High.
+
+### D-ORCH-126 · 2026-11-17 · sdlc-orchestrator · Lane-B queue results; PR #60 fc1 pushed; PR #61 (TASK-028) opened
+- **Serial queue (D-ORCH-125), first batch:** 20261117T1247Z_f2a7411 (PR #60) PASS in 15 min; 20261117T1302Z_e526b11 (TASK-028) PASS in 12 min; 20261117T1314Z_ba921da (TASK-290) FAIL on 1 unit case (`tools/quality/inventory.test.ts`; the run was alone, so a likely genuine interaction, now being diagnosed by the developer). TASK-287A (`a85234a`) is running. Serial runs are fast and clean, confirming the contention diagnosis.
+- **PR #60** (fix cycle 1): one push to `c912a0a` (fixes `b66f450`, merge of main `f2a7411` with an empty remerge-diff, evidence). Lane A 44093161786: fast-lane green, record step red as expected. **D-TASK289-13:** problem `instance` is compared. Narrow r2 queued behind PR #61's reviews.
+- **PR #61** (TASK-028, head `57faf1f`): one push, P1 clean against main `732ad20`. Code r1 and security r1 dispatched. Open point: its evidence base predates PR #57's `fs-lock.ts` change, which the C10 harness reaches. If CI voids the proof or a reviewer requires it, re-queue lane B on the merged tree before merge. **D-TASK028-01..10** are as listed in the PR #61 body.
+- **Reversibility:** High.
+
+### D-ORCH-126 · 2026-11-17 · sdlc-orchestrator · Resume (/sdlc-resume, no new human input); priority = critical path to demo users (TASK-089) then sign-in; stable docker.lock; batch 1.1 dispatched
+- **Resume state:** P5 Wave 0; main `732ad20`. In flight: PR #60 (TASK-289 fc1, evidence 20261117T1247Z_f2a7411 PASS, head `c912a0a`, lane A running), PR #61 (TASK-028 r1-ready, evidence 20261117T1302Z_e526b11 PASS, head `57faf1f`, lane A running), TASK-290 (`ba921da`, unpushed), TASK-287 part 287-A (`a85234a`, pushed, no PR, no evidence yet).
+- **Human priority (recorded from the resume brief):** every user type should be able to sign in and use the app with seeded demo data. Within the DAG and gates: open closure of TASK-089 = 14 tasks (TASK-028, 035, 036, 037, 039, 040, 041, 043, 049, 075, 076, 079, 080, 089); adding staff + customer sign-in screens (TASK-071/072) = 39 tasks; M0 exit demo TASK-121 = 62 tasks. Longest chain: TASK-035 → 039 → 043 → 049 → 052. Wave 2 tasks on the closure (TASK-075/076/079/080) may start ahead of the rest of Wave 1 because their dependencies are merged and their locks are free; no dependency, lock or gate is reordered.
+- **TASK-290 evidence 1223Z/1314Z FAIL diagnosed:** 1223Z was an environment failure (unit and rls `error`); 1314Z failed one test, `tools/quality/inventory.test.ts` "a lane C run that ran none of the reference unit tests…", because the test reads the newest run directory in the working tree, which was the failed 1223Z run. Not a TASK-290 defect. Both runs moved out of the tree (`../.orch/failed-runs/`, never committed); lane B re-run by the orchestrator. Follow-up (test isolation, the test must use a fixture runs root) → TASK-291 (`quality-tools` lock).
+- **docker.lock moves to a stable path** `../.orch/docker.lock` (next to the repo). The previous location in the session scratchpad changes per session and has been wiped twice (D-ORCH-038). Every agent brief names it.
+- **Host:** disk 17 GB free (< 20 GB floor): `node_modules` removed from merged worktrees (TASK-015, 020D, 027, 029/-ev, 286/-ev5/-wf, 288/-ev, W0ACT1). `.claude/worktrees/agent-*` (5 clean, old agent worktrees, no node_modules) and the untracked agent-memory files are kept (not scratch to discard; agent memory is committed with the next orchestrator docs commit).
+- **CI minutes:** `npm run ci:minutes -- --forecast` fails intermittently on a jobs query (`gh api …/runs/<id>/jobs failed:` with an empty message) while the same call succeeds alone (rate limit 4,723/5,000) → devops, TASK-287 (or 015-C): retry with backoff, report the failing run instead of aborting. Push discipline unchanged (one code push per round, D-ORCH-119 O3).
+- **Dispatched:** senior-developer, Wave 1 batch 1.1 (TASK-035, TASK-036, TASK-037; ≤ 3 specialists; TASK-037 merges after TASK-290).
+- **Reversibility:** High.
+
+### D-SEC-PR61-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #61 (TASK-028) security r1 = PASS_WITH_FOLLOW-UPS at `57faf1f` (record `18cd325`)
+- **Decision:** 0 Critical/High; 1 MEDIUM, 3 LOW, 4 INFO. **Closed:** D-SEC-PR56-01 condition 1 (effective at merge), PR56-SEC-08, PR8-SEC-10 (classification).
+  - **Sound:** the vault AAD and nonces; the `local-only-*` gate; the UA parser (300k fuzz, step bound ≤ 547, no regex); the authenticate seam is unreachable; no PII in logs; C10 green both ways.
+- **PR61-SEC-01 (MEDIUM, CWE-212):** the audit secret denylist is far weaker than the platform log matcher (53/64 key spellings and 15/15 credential shapes leak into the row draft). Latent (no free-form writer today). Fix: union with `isSensitiveKey` and its value shapes, record pairing, and a generated-spelling test → **PR #61 fix cycle**, else before TASK-031/052/047.
+- **PR61-SEC-02 (LOW):** add the vault and privacy exports to `AUDIT_WRITER_EXPORTS`, with `start-api.ts` allow-listed by exact file (needs the `lint` lock; PR #60 holds it).
+- **PR61-SEC-03 (LOW):** values under the ANONYMOUS subject are unerasable and have no vault retention → principal-architect ruling (D-TASK028-04).
+- **PR61-SEC-04 (LOW):** CODEOWNERS for `packages/shared/src/classification/`, `apps/api/src/{app,start-api}.ts` and `packages/config/src/placeholders.ts` → devops (the PR48-SEC-02 activation PR).
+- **INFO:** 05 `entity_id` accepts JWS shapes; 06 IPv6 not normalised (RFC 5952) before `ip_hash`; 07 token columns classed INT vs data-model "PER (token)"; 08 IPv4 enumeration of `ip_hash` until key destruction (ADR-0018).
+- **Correction to D-ORCH-126:** D-TASK028-01..10 are in the TASK-028 handoff, not the PR body, so they are logged below.
+- **Reversibility:** High.
+
+### D-TASK028-01..10 · 2026-11-17 · backend-developer (recorded by orchestrator) · TASK-028 (PR #61)
+- **01** The registry is keyed by table and column; non-public tables are registered as `<schema>.<table>`.
+- **02** C10 is two-way (an unclassified live column fails; a stale registry entry fails); partitions are excluded.
+- **03** `audit_entries.ip_token`/`user_agent_token`/`reason_token` are classed INTERNAL, as pseudonymous vault references (see PR61 INFO-07).
+- **04** A subjectless personal value is stored under the reserved ANONYMOUS-actor data subject (see PR61-SEC-03).
+- **05** The writer applies the secret denylist in the snapshot, word-based, with credential-shape redaction (see PR61-SEC-01).
+- **06** `local-only-*` keys derive as SHA-256(domain ‖ key_id ‖ marker); markers are refused in staging/production.
+- **07** `AppDependencies.authenticate` is a test-only seam that startApi never sets.
+- **08** The composition int test bootstraps via the `db:bootstrap` CLI.
+- **09** `createAuditPrivacy`/`createVaultTokeniser` are exported from @platform/audit (see PR61-SEC-02).
+- **10** The UA family table is closed (15 clients, 6 OS families).
+- **Reversibility:** High.
+
+### D-ORCH-127 · 2026-11-17 · sdlc-orchestrator · PR #61 fix cycle 1; lane-B queue hardened; host rules for reviewers
+- **PR #61** code review r1 (`14cdeed`) = CHANGES_REQUESTED.
+  - **MAJOR:** R1-M1 (= PR61-SEC-01) secret denylist word-splitting and coverage; R1-M2 (= PR61-SEC-02) vault/privacy exports outside the writer allow-list. The code scale keeps both MAJOR because the store is immutable (PR #42 R1-M1 precedent).
+  - **Fix cycle 1/3** is dispatched with M1, M2, m1, m4, m5 and INFO-05/06.
+  - **Routed:** m2 (AT-US-091-06 viewer half → TASK-073). m3/PR61-SEC-03/INFO-07 → principal-architect ruling (dispatched).
+  - **Lint lock:** M2 touches `eslint.config.mjs`, which PR #60 also holds. Second to merge merges main and retests (D-ORCH-121).
+- The **PR #57 fs-lock combination** needs no lane-B rerun (code reviewer analysis: C10 reaches the lock only via the unchanged harness; lane A on the merged head is enough). Closes the D-ORCH-126 open point.
+- **Lane-B queue hardening:**
+  - **Leftover runs:** an untracked run dir left by an earlier run (one reported as reaped but still alive) became `inventory.mjs`'s newest-only reference and failed TASK-290's run deterministically (D-TASK290 diagnosis). The queue script now moves untracked run dirs aside before each run.
+  - **Build retry:** the web `prerender` 10 s timeout under host load made a run INVALID. The queue allows one bounded retry on a build-INVALID, per D-ARCH-146.
+  - **Follow-ups → TASK-291 / quality-tools owner:** heavy.mjs pre-flight refuses untracked run dirs; inventory references tracked runs only.
+- **Host rule for reviewers:** targeted tests only, with `--maxWorkers=2`; no full unit, containers or heavy while the queue is busy. A TASK-287A run whose unit took 32 min instead of about 3 failed on the known `rls/api-cases` pooled-fetch flake (TASK-291) and was re-queued.
+- **Reversibility:** High.
+
+### D-ORCH-COORD-01 · 2026-11-17 · sdlc-orchestrator (resume session B) · Two orchestrator sessions found running on one working tree; session B stops dispatching and hands its in-flight items to the owning session
+- **Finding:** a second orchestrator session (session A: D-ORCH-126 "Lane-B queue results", D-ORCH-127, its own lane-B queue script) is running the same pipeline in this checkout. Session B (resume brief; entry "D-ORCH-126 · Resume…", referred to as **D-ORCH-126a** because of the duplicate ID) started at 13:33Z without seeing it.
+- **Effects:**
+  - Duplicate PR #61 r1 reviews. Session B's independent code review (CHANGES_REQUESTED, same two MAJORs as `14cdeed`, plus R1-m5 deadlock order in `vault.ts:104-123`, R1-m6 live-mode `authenticate` seam, R1-m7 `HeadlessChrome` guess, n1..n8) is at `../.orch/records/PR-0061/PR-0061-TASK-028-code-review.md`. Not filed; session A decides whether to merge its extra items into fix cycle 1. Session B's PR #61 security r1 duplicate may still be running; its record will land in `../.orch/records/PR-0061/`.
+  - Two lane-B runs at once: session B's TASK-290 re-run `20261117T1333Z_ba921da` overlapped session A's TASK-287A run and FAILED (integration 9, unit 4; integration took 1,392 s vs 433 s alone). It is contention, not a verdict on TASK-290. The run dir is parked at `../.orch/failed-runs/` (never committed). Session B's lock `../.orch/docker.lock` is not the one session A's queue uses: **one lock path must be chosen by the owning session** and named in every brief.
+- **Handed to session A (owner):**
+  - **PR #60 (TASK-289):** code r2 APPROVED_WITH_NITS (R2-n1 NIT `tests/generated/rbac/runner.ts:101-106` shared regex → next touch; R1-n3 → TASK-052) and security delta r2 PASS_WITH_FOLLOW-UPS (proposed **D-SEC-PR60-02**: 0 new findings, PR60-SEC-02 closed, merge `f2a7411` a pure union, PR56-SEC-12 re-pointed to TASK-283). Both records are pushed on the branch as `ad7d44d` (security record blob `16df5e3`, head row `c912a0a`). Merge when ci-gate + security-integration are green on `ad7d44d`. Merge condition from code review: the activation PR sets `rbac-matrix` `min_tests` to 26.
+  - **Batch 1.1 (TASK-035, TASK-036, TASK-037):** senior-developer dispatched by session B at 13:4xZ and still running (it cannot be recalled). It was briefed to use `../.orch/docker.lock` for lane B and to open three PRs, without merging. Session A should not dispatch batch 1.1 again. It should point that lock at its queue's lock, or take over the PRs' lane-B runs when they appear.
+  - **TASK-290:** still needs a PASS lane-B run on `ba921da` (queue it alone).
+- **Reversibility:** High.
+
+### D-ORCH-128 · 2026-11-17 · sdlc-orchestrator (session A) · PR #60 merged (TASK-289 complete); session A owns the run after D-ORCH-COORD-01; one shared lane-B lock
+- **PR #60** squash-merged as `96c2c7a`.
+  - **Head:** `ad7d44d`, carrying code r2 APPROVED_WITH_NITS and security delta r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR60-02 as proposed in D-ORCH-COORD-01; independently re-checked by session A's reviewer).
+  - **CI:** lane A 44099812541 MERGE-READY incl. security-integration. **P1:** no overlap.
+  - **Open items:** R1-n3 → TASK-052; R2-n1 → next touch of `runner.ts`; the activation PR sets `rbac-matrix` `min_tests` 26.
+- **TASK-289 complete.** TASK-291's dependencies (TASK-288, TASK-289) are met, but its locks (`api-routing`, `tests-gen-rls`) are held by PR #61 (TASK-028) and TASK-290, so it is not dispatched yet.
+- **Two orchestrator sessions** (D-ORCH-COORD-01): session B (`shipqube-25`) hands over. **Session A owns dispatch, merges and the lane-B queue.**
+  - Batch 1.1 (TASK-035/036/037), dispatched by session B, is still running; it must not be re-dispatched.
+  - **Single lane-B lock:** `../.orch/docker.lock` (mkdir mutex with an owner file). Session A's queue now acquires it too. The 14:12Z overlap (batch 1.1 TASK-036 vs session A's TASK-287A run) is expected to need re-runs.
+  - **PR #61:** session B's extra code-review items (R1-m5 vault lock order, R1-m6 live-mode authenticate seam, R1-m7 HeadlessChrome) at `../.orch/records/PR-0061/` are passed to the PR #61 developer for triage in fix cycle 1.
+  - **PR #61:** merges main for the shared `lint` lock (PR #60 merged first).
+- **Reversibility:** High.
+
+### D-SEC-PR60-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #60 security delta r2 = PASS_WITH_FOLLOW-UPS (record in `ad7d44d`, head row `c912a0a`), confirmed by an independent duplicate check
+- **Decision:**
+  - The merge `f2a7411` is a pure union. On the merged config, all 25 oracle import forms are refused (22 from r1 + 3 through PR #56's files).
+  - PR60-SEC-02 is closed.
+  - **New INFO PR60-SEC-06:** `fillPath` in `tests/generated/rbac/runner.ts` does not fill Express 5 `*name` wildcards that org-scope now enumerates, so a wildcard tenant route's SEC-TC-01 case would be vacuous (none exist today). → TASK-060: a shared regex, or the R-03 rule refuses `*orgId` on tenant routes.
+  - **Still open:** PR60-SEC-01 (TASK-283 before TASK-060; the edge is pending the next fold), -03/-04 (TASK-052/055), -05 (TASK-283).
+- **Reversibility:** High.
+
+### D-ORCH-COORD-02 · 2026-11-17 · sdlc-orchestrator (session B) · Late duplicate PR #61 security pass r1b: two new items for session A's fix cycle 1
+- **Verdict:** session B's security pass r1b came back PASS_WITH_FOLLOW-UPS at `e526b11` and agrees with D-SEC-PR61-01 on PR61-SEC-01..08. It adds two items (proposed **D-SEC-PR61-02**):
+  - **PR61-SEC-09 (LOW, CWE-212):** secrets inside personal values reach the vault.
+    - **Where:** `redact.ts:68`, `:86-89`; `entry.ts:578-581`. `redactRecord` tokenises a non-string PERSONAL or SENSITIVE_PERSONAL value whole, as `JSON.stringify(value)`, checking only the whole text for secrets. The entry's `reason` is tokenised without the secret check.
+    - **Probe:** `{password}`, `{api_key}` and a nested Bearer value were all vaulted.
+    - **Fix:** `JSON.stringify(redactSecrets(value))`, plus `isSecretText` on `reason`.
+    - **Owner:** fix cycle 1, otherwise before TASK-031.
+  - **PR61-SEC-10 (INFO, CWE-693):** C10 checks only that each §10.4 ciphertext/HMAC column has its key-id sibling, not its class.
+    - **Where:** `tools/db/classification.ts:119-132`, `:159-163`.
+    - **Fix:** pin the data-model class for each `KEY_ID_SIBLINGS` row.
+    - **Owner:** fix cycle 1 if cheap, otherwise principal-architect amends data-model §4.6 and names the carrying task.
+- **Additions to PR61-SEC-01:**
+  - The audit denylist misses 14 of the platform's own credential names that the log redactor catches: `__Host-*`, `X-Reauth-Proof`, `manual_key`, `privateJwk`, `jwk`, `code_verifier`, `proof`, `sid`, `session`.
+  - Neither redactor catches `cc_number`, `ccNumber`, `codes`, `mfa_seed`, `pw`, `whsec` or `csrf`; add them to the test corpus.
+  - The scheme-word rule needs a token-shaped credential after `Basic`/`Bearer`, to avoid over-redaction (code R1-m3 (a)).
+  - AT-US-091-02 draws its keys from the module's own `SECRET_KEY_EXAMPLES`, so it cannot find a spelling gap.
+- **Record:** `../.orch/records/PR-0061/PR-0061-TASK-028-security-review.md` is the `18cd325` record verbatim plus a "Round 1b" section with its own Head (`e526b11`) and Verdict rows; it passes main's checker in simulation. Session A may file it or discard it; the merge path does not change.
+- **Next:** the delta round after fix cycle 1 re-runs probes P2/P2b/P3 and lint probe P4. Probe scripts are in session B's scratchpad `review/PR-61-sec/probes/`.
+- **Reversibility:** High.
+
+### D-ARCH-148 · 2026-11-17 · principal-architect · PR #61 R1-m3 (a) / PR61-SEC-07 / D-TASK028-03: the vault token columns `audit_entries.ip_token`, `user_agent_token` and `reason_token` are INTERNAL — the code is right; data-model §3.4 amended from "PER (token)" to "INT (token)"
+- **Decision:** as titled. "PER (token)" was a note on what the token stands for, not a registry class. A vault token, in a `*_token` column or as `{"$pii": …}` inside `old_value`, `new_value` and `details`, is an opaque UUIDv7 reference. The PERSONAL value exists in `audit_pii_vault` only, and the token resolves only through the vault under `audit:read`. Catalog C10 keeps its wording and gets no exception for `audit_entries`.
+- **Code (PR #61 fix cycle 1):** a comment only. The header of `packages/shared/src/classification/registry.ts` cites D-ARCH-148 and data-model §3.4 as amended.
+- **Why:** ADR-0007 rests on "the chain hashes the token, never the value" and "archived partitions contain no personal data"; a PERSONAL class would contradict both and would ask the redaction to tokenise a token. §3.4 already classes the JSON columns that carry the same tokens `INT (tokenised)`, and C10 lists no exception for `audit_entries`.
+- **Alternatives rejected:** PERSONAL plus three C10 exceptions (the exception list would then cover the table the SYSTEM rule exists for); a sixth class `TOKEN` (REQ-AUDIT-009 has five, and no handling would differ from INTERNAL).
+- **Reversibility:** High.
+
+### D-ARCH-149 · 2026-11-17 · principal-architect · PR61-SEC-03 / PR #61 R1-m3 (b) — D-TASK028-04 amended: filter values of an authenticated list request belong to the actor's data subject; a value without a known person belongs to the unattributed subject of its UTC month, not to one permanent ANONYMOUS subject; each month is erased 12 months after it ends by the EPIC-B-413 retention job; two code changes in the PR #61 fix cycle
+- **Decision:** as titled (ADR-0007 amendment 13 items 4–6; data-model §1.6, §3.4 `data_subjects`, §5.7, §10.5).
+- **Code (PR #61 fix cycle 1), exactly two changes:**
+  1. `apps/api/src/platform/audit/descriptor-runtime.ts`: `filterSummary(query, subject)`, called with `principal.authenticated ? { kind: 'USER', refId: principal.actorId } : null`. Unit: `entryFor` on an authenticated list request yields filter values owned by the actor; on an anonymous one, `subject: null`. The fix cycle holds `api-audit-mw` for this file (free: TASK-052 and TASK-060 are not in flight).
+  2. `packages/audit/src/redaction/vault.ts`: the constant `UNATTRIBUTED_SUBJECT` becomes `unattributedSubject(at)` = `{ kind: 'USER', refId }`, where `refId` is the ANONYMOUS actor id with its first 12 hex digits set to `Date.UTC(year, month, 1)` in hex, zero-padded (November 2026: `01a19467-e800-7000-8000-000000000002`). `VaultTokeniserOptions.now` (default `Date.now`) is read once per `tokenise` call, and the export in `index.ts` follows. Unit: the November id above, a different id for December, one subject for two values of one call, a value that names its subject unchanged. No DDL and no migration. At a month's first instants, concurrent writers wait on one `ON CONFLICT DO NOTHING` insert for the length of one transaction, as for any new subject today; the insert-order item of the fix-cycle triage (session B R1-m5), if taken, covers this subject too.
+- **Retention:** kept in this run (no retention job; `platform_erasure` is unused; synthetic data only). For production, the subject of month M is erased with the existing erase-by-subject statement once M ended 12 months ago, and the viewer shows `[ERASED]`. The period is a proposed default; product-manager confirms it with the retention schedule.
+- **Owners:**
+  - items 1–2: TASK-028;
+  - the retention job, "no revival" (the tokeniser stores nothing for a subject whose `erased_at` is set) and erasure by value (`value_hmac` does not depend on the subject): EPIC-B-413 Privacy workflows (M4), a G4 precondition for a production release; no Run-1 task;
+  - `API_KEY` actors: EPIC-B-303 (M3) — the key's owning user, otherwise the month subject;
+  - PR61-SEC-08: destroying the retired `AUDIT_INDEX_KEY` version (ADR-0018: 90 days after the yearly rotation) is a step of the M5 rotation runbook and bounds `ip_hash` enumeration at about 15 months.
+- **Why:** the vault's unique key `(subject_id, entity_name, field, value_hmac)` reuses a token for a repeated value. Under one permanent subject the age of a row is the first sighting of the value, so an age-based delete would erase an address used yesterday, or need a scan of every entry. A subject per month makes retention the existing statement. A search term is the searcher's activity, and over-erasing a third party's name is the safe direction.
+- **Alternatives rejected:** one ANONYMOUS subject plus a job that finds unreferenced tokens (they sit in two unindexed columns and inside `details`); a new `data_subjects.kind` (bootstrap-lane DDL and a late task, for a label); no raw IP or user agent for anonymous actors (failed sign-ins lose the exact address); attributing filter values to the person searched for (unknown at capture).
+- **Reversibility:** High until production data exists; the reserved ids are load-bearing after that.
+
+### D-ARCH-150 · 2026-11-17 · principal-architect · PR #61 R1-m3 (c): the classification registry stays in `packages/shared/src/classification` (ADR-0007 amendment 13, no code move); "feeds the Pino redaction list" becomes a build-time coverage test of the log matcher, added in the PR #61 fix cycle
+- **Decision:** as titled. ADR-0017 §1, data-model §1.2 and §10.4, nfr-strategy PRIV-001/003 and NT-PRIV-001-c follow.
+- **Code (PR #61 fix cycle 1), one test file and no production code:** `packages/shared/src/classification/log-coverage.test.ts`.
+  - For every `registeredColumns()` entry classed PERSONAL, SENSITIVE_PERSONAL or SECRET, `redactValue({ [column]: 'probe' })[column]` (from `../logging/redaction.js`) is `REDACTED` or `OMITTED`.
+  - Exceptions are an exact `table.column → reason` map in the test file, checked both ways: each names a registered column of those classes that the matcher does not cover.
+  - First entries: `audit_pii_vault.value_hmac` and `audit_pii_vault.ciphertext` (bytea; the test asserts that a `Uint8Array` under the key is written as `[Binary]`).
+  - One planted registry proves that the failure names `table.column`.
+- **Later tasks:** a task whose new column fails the test adds a key to `packages/shared/src/logging/string-redaction.ts` or a reasoned exception. The Wave 1 identity tables meet it first: `time_zone`, `user_agent_raw` and `ip_prefix_last` are PERSONAL in the data model and, read against the matcher's key lists (not run), unmatched today.
+- **Why:**
+  - The log redaction lives in `packages/shared/src/logging`, and `@platform/audit` depends on `@platform/shared`, so a registry in `packages/audit` could not reach the logger without a cycle. `tools/db`, catalog C10 and the masking job read it too, and the TASK-028 card already names the path.
+  - A list generated at run time is rejected because a column name is unique within its table and a log key is global: `description`, `label`, `city` and `time_zone` are PERSONAL columns and would be redacted in every log line. ADR-0017 already says "test enforces".
+  - The registry holds no PERSONAL column yet, so the tripwire has to exist before the first one merges.
+- **Alternatives rejected:** moving the registry to `packages/audit` (a cycle, or a second copy for the logger); a run-time union (above); TASK-031 as the owner (S, sonnet, and Wave 1 tables may merge first).
+- **Reversibility:** High.
+
+### D-ORCH-129 · 2026-11-17 · sdlc-orchestrator · D-ARCH-148..150 accepted; retention default applied
+- **Decision:** the architect rulings D-ARCH-148..150 (`e85a5bc`) are accepted and their code parts are added to PR #61 fix cycle 1.
+  - **Token columns:** INTERNAL.
+  - **Filter values:** the actor's subject.
+  - **Unattributed values:** a monthly unattributed subject.
+  - **Classification registry:** stays in `packages/shared`.
+  - **Pino:** a log-coverage build test.
+- **Retention of monthly unattributed subjects:** the principal-architect's proposed 12 months after month end is applied as the **default** under CLAUDE.md §4 (no human answer needed to proceed). It is logged here and in ASSUMPTIONS for product-manager confirmation at the next PM touch. The implementation is EPIC-B-413 (M4), a G4 precondition for production; nothing is due in Run 1.
+- **Knock-on (D-ARCH-150 item 9):** table PRs merging after PR #61 must pass the log-coverage test; batch 1.1 (TASK-035/036/037) is notified when its PRs appear.
+- **Also routed to PR #61 fix cycle 1:** PR61-SEC-09 and PR61-SEC-10 from session B's duplicate pass (D-ORCH-COORD-02).
+- **Housekeeping:** the architect's commit subject is 107 chars (> 100 commitlint). It is a main docs commit, not checked by PR commitlint, so it is noted, not rewritten.
+- **Reversibility:** High.

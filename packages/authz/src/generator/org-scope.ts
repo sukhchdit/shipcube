@@ -1,6 +1,6 @@
 /**
  * The `{orgId}` confused-deputy variant of the RBAC matrix (SEC-TC-01; threat model T-32, AC-06; ADR-0005 am. 3; api
- * README §3 "Tenancy in paths"; TASK-027). Pure. Tenant scope comes from the access token's active organisation, never
+ * README §3 "Tenancy in paths"; TASK-027, TASK-289). Pure. Tenant scope comes from the access token's active organisation, never
  * from the path: on every `tenant` route with an `orgId` path parameter, a caller the matrix ALLOWS in its active
  * organisation A who names organisation B in the path gets 404 `NOT_FOUND` (the answer to a missing resource) and no
  * data of B, before any query. The generator picks that caller from the matrix itself, so the case isolates the path
@@ -11,9 +11,15 @@ import { type MatrixCaller, type MatrixRoute, type RouteMatrix } from './matrix.
 /** The path parameter that names an organisation (api/README §3). */
 export const ORG_PATH_PARAMETER = 'orgId';
 
-const PATH_PARAMETER = /(?:^|\/)(?::([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})(?=\/|$)/g;
+/**
+ * A `:name` (Express) or `{name}` (OpenAPI) parameter anywhere in a segment, so `/x/:orgId.json` and `/x/{orgId}.csv`
+ * name `orgId` too (PR #48 code review R1-n1, PR48-SEC-05 item 3: a whole-segment match let SEC-TC-01 fail open for
+ * that shape). An Express 5 wildcard (`*name`) binds `req.params.name` as well (PR #60 R1-n5). The name is an
+ * identifier (`[A-Za-z_]\w*`), so `.json`, `-` and the next `:` end it.
+ */
+const PATH_PARAMETER = /[:*]([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\}/g;
 
-/** The parameter names of an Express (`:id`) or OpenAPI (`{id}`) path, in order. */
+/** The parameter names of an Express (`:id`, `*id`) or OpenAPI (`{id}`) path, in order, inside a segment included. */
 export const pathParameterNames = (path: string): string[] =>
   [...path.matchAll(PATH_PARAMETER)].map((match) => String(match[1] ?? match[2]));
 

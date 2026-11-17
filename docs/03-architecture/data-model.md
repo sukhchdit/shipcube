@@ -52,7 +52,9 @@ Conventions in this document: requirement IDs (`REQ-*`), domain rules (`DR-*`), 
 
 ### 1.2 Column classification vocabulary (classification registry)
 
-Every column has exactly one classification, used by the field classification registry in `packages/audit` (build-time test, REQ-AUDIT-009, NFR-PRIV-003), Pino redaction (REQ-PLAT-012, NFR-PRIV-001) and the audit PII tokeniser (ADR-0007).
+Every column has exactly one classification, used by the field classification registry in `packages/shared/src/classification` (build-time test, REQ-AUDIT-009, NFR-PRIV-003), Pino redaction (REQ-PLAT-012, NFR-PRIV-001) and the audit PII tokeniser (ADR-0007).
+
+*Amended 2026-11-17 (A29; ADR-0007 amendment 13; D-ARCH-148, D-ARCH-150):* the registry home was `packages/audit`. The log redaction is tied to the registry by a build-time coverage test: a `PER`, `SPER` or `SEC` column whose name the log matcher does not redact fails the build, unless it holds a reasoned exception. A vault token, in a `*_token` column or as `{"$pii": …}`, is `INT`: the `PER` value exists in `audit_pii_vault` only.
 
 | Tag | Meaning | Audit value handling | Log handling |
 |---|---|---|---|
@@ -160,6 +162,7 @@ The documented list of non-RLS tables (GLOBAL + SYSTEM) is the allow-list of the
 |---|---|---|
 | SYSTEM actor | `00000000-0000-7000-8000-000000000001` | `created_by`/`updated_by` and audit `user_id` for seed and system jobs (REQ-RLS-009); seeded `users` row with `is_system = true`, no credentials |
 | ANONYMOUS actor | `00000000-0000-7000-8000-000000000002` | `created_by` of guest quotes and anonymous consent records (REQ-AUDIT-011) |
+| Unattributed data subjects (added 2026-11-17, A29, D-ARCH-149) | The ANONYMOUS actor id with its first 12 hex digits (the 48-bit UUIDv7 timestamp) set to the Unix milliseconds of the first instant of a UTC month; November 2026 = `01a19467-e800-7000-8000-000000000002` | `data_subjects.ref_id` (`kind = 'USER'`) that owns the audit vault values without a known person, one subject per month (§3.4, §5.7; ADR-0007 amendment 13 items 4–5). Not a `users` row |
 | SYSTEM audit stream shards | `00000000-0000-0000-0000-0000000000NN`, `NN` = `00`…`0f` | `stream_id` of entries without an organisation, shard = `hash(correlation_id) mod 16` (ADR-0007 amendment 1); shard `00` (the nil UUID) also carries the hourly checkpoint (amended 2026-11-12, SEC-P3-03; was nightly) |
 
 Both actor IDs are syntactically valid UUIDv7 (version nibble 7, variant 10, timestamp 0) so the NFR-DATA-002 key test passes.
@@ -1336,11 +1339,11 @@ ADR-0007, REQ-AUDIT-002/003/004/007/008/009/010/011/012/014/016/017/018, DR-A09.
 | `job_name` | `text` | Y | required when `actor_type = 'SYSTEM_JOB'` (`CHECK`) | INT |
 | `actor_roles` | `text[]` | N | `DEFAULT '{}'`; role keys at the time | INT |
 | `session_id` | `uuid` | Y | | INT |
-| `ip_token` | `uuid` | Y | PII-vault token of the client IP (ADR-0007 amendment 2) | PER (token) |
+| `ip_token` | `uuid` | Y | PII-vault token of the client IP (ADR-0007 amendment 2) | INT (token) |
 | `ip_hash` | `bytea` | Y | HMAC-SHA256(`AUDIT_INDEX_KEY`, IP) for the viewer's IP equality filter | INT |
 | `ip_hash_key_id` | `text` | Y | `<purpose>-v<n>` of `AUDIT_INDEX_KEY`; `ck_audit_entries__ip_hash_key CHECK ((ip_hash IS NULL) = (ip_hash_key_id IS NULL))`. Part of the hashed canonical object like every other column. During a rotation, the viewer's IP filter computes the HMAC under each live key and queries `ip_hash = ANY($hashes)` (amended 2026-11-12, SEC-P3-08 item 1) | INT |
 | `ip_coarse` | `inet` | Y | /24 (IPv4) or /48 (IPv6) network, in clear (not personal data at that granularity, ADR-0007 amendment 2) | INT |
-| `user_agent_token` | `uuid` | Y | PII-vault token of the raw UA string (ADR-0007 amendment 2) | PER (token) |
+| `user_agent_token` | `uuid` | Y | PII-vault token of the raw UA string (ADR-0007 amendment 2) | INT (token) |
 | `ua_parsed` | `text` | Y | browser family + major version / OS family only (e.g. `Firefox 146 / Windows`) | INT |
 | `source_app` | `text` | N | CHECK `source_app` | INT |
 | `correlation_id` | `text` | N | `CHECK (correlation_id ~ '^[A-Za-z0-9-]{8,64}$')` | INT |
@@ -1348,7 +1351,7 @@ ADR-0007, REQ-AUDIT-002/003/004/007/008/009/010/011/012/014/016/017/018, DR-A09.
 | `entity_name` | `text` | N | `CHECK (entity_name ~ '^[a-z][a-z0-9_]*$')` | INT |
 | `entity_id` | `text` | Y | NULL for list views | INT |
 | `outcome` | `text` | N | CHECK `audit_outcome` | INT |
-| `reason_token` | `uuid` | Y | PII-vault token of the typed reason (REQ-AUDIT-025, ≤ 500 chars; ADR-0007 amendment 2) | PER (token) |
+| `reason_token` | `uuid` | Y | PII-vault token of the typed reason (REQ-AUDIT-025, ≤ 500 chars; ADR-0007 amendment 2) | INT (token) |
 | `reauth_proof_id` | `uuid` | Y | seam for the M2 signature record (§4.9 Part 11) | INT |
 | `signature_meaning` | `text` | Y | seam (M2) | INT |
 | `http_method` | `text` | Y | | INT |
@@ -1363,6 +1366,8 @@ ADR-0007, REQ-AUDIT-002/003/004/007/008/009/010/011/012/014/016/017/018, DR-A09.
 Keys and constraints: `PRIMARY KEY (occurred_at, id)`; `UNIQUE (entry_hash, occurred_at)` — PostgreSQL requires the partition key in every unique constraint of a partitioned table, so ADR-0007's "`entry_hash` UNIQUE" is enforced per partition and global uniqueness of `entry_hash` and `(stream_id, stream_seq)` is asserted by the verifier (OI-05).
 
 Amended 2026-11-12 (SEC-P3-03, SEC-P3-08): added `ip_hash_key_id`. The table, every partition and every other audit-module table are owned by **`platform_audit_owner`** and created or altered only in the bootstrap lane (§4.4, §5, §8.3). `platform_migrator` owns none of them.
+
+Amended 2026-11-17 (A29; D-ARCH-148; PR #61 code review R1-m3 (a), PR61-SEC-07; D-TASK028-03): `ip_token`, `user_agent_token` and `reason_token` are `INT (token)`; the cells read `PER (token)` before. That was a note on what the token stands for, not a registry class. The token is an opaque UUIDv7 reference, like the `{"$pii": …}` tokens in `old_value`, `new_value` and `details`; it resolves only through the vault, under `audit:read`. Catalog C10 keeps its wording and needs no exception for `audit_entries`.
 
 | AP | Query (all carry a mandatory `occurred_at` range ≤ 31 days, REQ-AUDIT-019) | Index (created on the parent, propagated to every partition) |
 |---|---|---|
@@ -1460,6 +1465,8 @@ Amended 2026-11-12 (SEC-P3-08 item 1): `key_id` was renamed to `ciphertext_key_i
 #### `data_subjects` · SYSTEM · SD: no · insert-only (+ `erased_at`)
 
 Columns: STD; `kind text N CHECK (kind IN ('USER','CONTACT'))`; `ref_id uuid N` (user id, or `shipment_parties.id` / `address_book_entries.id` / `invitations.id` for contacts); `erased_at timestamptz Y` (M4/M5). `ux_data_subjects__kind_ref ON (kind, ref_id)`.
+
+Amended 2026-11-17 (A29; D-ARCH-149; PR61-SEC-03; amends D-TASK028-04): `kind = 'USER'` also carries the **unattributed subjects**, one per UTC month, whose `ref_id` is the reserved id of §1.6. A personal value without a known person (an anonymous client's IP, user agent and filter values) belongs to the subject of the month in which it is tokenised; nothing is stored under the ANONYMOUS actor id itself. The filter values of an authenticated list request belong to the actor's own subject. Retention of the unattributed subjects: §5.7 and §10.5.
 
 ### 3.5 Platform module
 
@@ -3665,6 +3672,11 @@ ALTER FUNCTION platform.audit_vault_guard() OWNER TO platform_audit_owner;
 
 Erasure (M4/M5, A-045): `DELETE FROM audit_pii_vault WHERE subject_id = $1` by `platform_erasure`, then `data_subjects.erased_at = now()`; the viewer renders `[ERASED]` for tokens without a vault row. Because the chain hashes tokens, never values, no entry hash changes and archived partitions contain no personal data. Values classified `SECRET` never reach the vault (`[REDACTED]`, REQ-AUDIT-008).
 
+Amended 2026-11-17 (A29; D-ARCH-149; ADR-0007 amendment 13 item 5), all three owned by EPIC-B-413 (M4), none by a Run-1 task:
+- **Retention of unattributed values.** The retention job erases the unattributed subject of month M (§1.6) with the statement above once M ended 12 months ago (§10.5). `ux_audit_pii_vault__subject_field_value` reuses a token for a repeated value, so only a subject per month gives a row an age that a delete can use.
+- **No revival.** For a subject whose `erased_at` is set the tokeniser stores no vault row and returns a token that resolves to nothing, so the viewer shows `[ERASED]`.
+- **Erasure by value.** `value_hmac` does not depend on the subject. The job can delete the rows that hold an erased contact's identifiers in other users' filter values (`entity_name = 'audit_entry' AND field = 'filter'`), for the `AUDIT_VAULT_HMAC_KEY` versions that still exist; it needs its own index, an expand step of that epic.
+
 
 ---
 
@@ -4297,7 +4309,7 @@ Peak write rates at design load: ≈ 20 quote inserts/s (≈ 180 option rows/s),
 
 | Control | Design | Source |
 |---|---|---|
-| Classification | Every column tagged (§3); the registry in `packages/audit` drives audit tokenisation, Pino redaction and the C10 test | REQ-AUDIT-009, NFR-PRIV-001/003 |
+| Classification | Every column tagged (§3); the registry in `packages/shared/src/classification` drives audit tokenisation and the C10 test, and a build-time coverage test ties the log redaction to it (amended 2026-11-17, A29; was "the registry in `packages/audit` drives … Pino redaction") | REQ-AUDIT-009, NFR-PRIV-001/003 |
 | Encryption at rest | RDS/EBS/S3/ElastiCache encryption (M5); field-level AES-256-GCM envelope encryption for `mfa_totp.secret_ciphertext`, `shipment_party_identifiers.value_ciphertext`, `audit_pii_vault.ciphertext`, `idempotency_keys.response_body` and the outbox `payload.token_enc` (key per purpose and environment from env/KMS; sibling `<col>_key_id` and AAD per the amendment below); partner carrier credentials (M3) use per-tenant KMS data keys | product brief §4.3/§4.11/§4.12, ADR-0006/0007/0018 |
 | Hashing | All tokens SHA-256 (256-bit randomness); passwords bcrypt ≥ 12; recovery codes HMAC-SHA256 under `RECOVERY_KEY` (ADR-0006; amended 2026-11-12, was "bcrypt"); identifiers used for lookups without disclosure are HMAC-SHA256 with per-purpose, per-environment keys (`login_attempt_counters`, `audit_entries.ip_hash`, vault dedupe, `mfa_challenges.ip_prefix_hmac`, `mfa_enrolment_codes.code_hmac`, public tracking hashes), each with a sibling `<col>_key_id` | DR-A01/A02, ADR-0018 |
 | Secrets | No secret values in any column; carrier accounts hold `secret_ref` names only (CHECK pattern) | REQ-CARR-015, CLAUDE.md §5 |
@@ -4350,6 +4362,7 @@ Retention periods are data in the compliance packs (`RETENTION` section, NFR-PRI
 | Drafts | CANCELLED after 30 days idle (REQ-ACCT-004); rows kept | anonymise after pack period |
 | Shipments, orders, payments, documents | kept | per pack (tax/accounting periods, e.g. 6–10 years) |
 | Audit entries | kept; partitions never dropped or detached (REQ-AUDIT-018) | archive closed partitions to S3 Object Lock at M5; DB retention per pack |
+| Audit vault values without a known person (unattributed month subjects, §1.6; added 2026-11-17, A29) | kept (no retention job in this run) | erase each month's subject 12 months after the month ends (§5.7; EPIC-B-413; a G4 precondition for a production release) |
 | Notification log | kept | 2 years |
 
 ### 10.6 Open issues for principal-architect
@@ -4455,6 +4468,7 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A16 | batch 0.2 rulings (SEC-P3-34 items 1–3, 5; SEC-P3-37 items 1, 4; `rulings/batch-0.2-rulings.md`; D-ARCH-045..049) | **Database ownership.** The migrator does not own the database (SEC-P3-34 item 5 adopted, the review's *recommended* option); it holds `CONNECT` and `USAGE, CREATE` on both schemas. Extensions move to `01-schemas.sql` as the bootstrap role; the shadow-init rendering keeps them. Items 1–3 (role-in-database `search_path`, harness `options=-c search_path`, `pg_db_role_setting` assertion) are implemented in TASK-003, not deferred to M5. **Default privileges.** The per-schema `REVOKE` forms were PostgreSQL no-ops; the global `FOR ROLE … REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` form is used for the three creating roles, the `TABLES` line is dropped (no built-in PUBLIC grant on tables), and C5/C11/C13 gain `pg_default_acl`, `pg_database.datdba` and `pg_db_role_setting` assertions. **Reversibility driver.** §8.4 step 2 sets `_prisma_migrations.rolled_back_at` directly (test/dev only) because `migrate resolve --rolled-back` is defined for failed migrations only (P3012). **Files.** `00-roles.sql`/`01-schemas.sql` are the names; the `infra/compose/postgres/initdb` path is withdrawn. **Linter.** Rule 12 made precise, rule 14 added, rules 3–9/11/14 owned by TASK-016 (SEC-TC-33, NT-AVAIL-003-a) | §4.4, §4.6 C5/C11/C13, §7.3, §8.1, §8.3, §8.4, §8.6 |
 | A27 | Wave-0 sheet-fold-7 rulings (PR #42 security review PR42-SEC-01/-08, code review R1-m4/-m5; PR #43 security review PR43-SEC-09 (a); D-TASK025-03; `rulings/wave-0-sheet-fold-7.md`; ADR-0007 amendment 11; D-ARCH-119..123; product-manager D-067) | **Admission classes (§7.7).** Organisation-less transactions are admitted as `auth`, `guest:<hash>` or `public` under one anonymous ceiling with `auth`/guest reserves; bounds keep the bulkhead on (cap ≤ half the pool, audit lock timeout ≤ min(2000, statement timeout − 1), pool ≥ 4 outside local/test). **One flush per transaction (§5.4).** Several recorded entries are flushed once: vault first, head locks in ascending `stream_id` order, one CTE per stream inserting N entries. **Action vocabulary.** `ck_audit_entries__action` widens to the 20 REQ-AUDIT-002 values in the new bootstrap file `11-audit-actions-v2.sql` (OI-07 closed). **Invitations (§1.7, `memberships`, `invitations`, §4.3).** No `INVITED` membership is written in M0/M1; the `invitations` row is the pending state; acceptance inserts the membership as `ACTIVE`; the `dr-a14-users` positive list is `('ACTIVE','SUSPENDED')` | §1.7, §4.3, `memberships`, `invitations`, §5.4, §7.7, §10.6 OI-07 |
 | A28 | Wave-0 sheet-fold-8 rulings (PR #52 TASK-285 D-TASK285-01/02, code review R1-m1/m2, PR52-SEC-01; PR #43 D-TASK024-13, PR43-SEC-06/-11; `rulings/wave-0-sheet-fold-8.md`; ADR-0007 amendment 12; D-ARCH-135) | **Audit actions (§1.7):** 20 values; the widening file is `91-audit-actions-v2.sql` (`9N` numbering after the guard). **§8.3:** rules 18, 19, 20 and L written down; the PR43-SEC-11 residual and its owner TASK-290; the PR52-SEC-01 shadow-init KEEP fix with the same owner, a prerequisite of every later bootstrap file. The contract enums gain the two actions with TASK-073. |
+| A29 | PR #61 / TASK-028 rulings (code review R1-m3 (a)–(c), PR61-SEC-03/-07, D-TASK028-01/03/04; ADR-0007 amendment 13; D-ARCH-148..150) | **§3.4:** the three vault token columns of `audit_entries` are `INT (token)`; C10 unchanged. **§1.2, §10.4:** the registry lives in `packages/shared/src/classification`; the log redaction is tied to it by a coverage test. **§1.6, §3.4 `data_subjects`, §5.7, §10.5:** unattributed data subjects, one per UTC month, erased 12 months after the month ends by the EPIC-B-413 retention job; no revival of an erased subject; erasure by value. |
 | A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:

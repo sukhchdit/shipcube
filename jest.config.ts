@@ -47,6 +47,14 @@ export const MODULE_PATH_IGNORE_PATTERNS = ['<rootDir>/.*/dist/', '<rootDir>/.*/
 // NodeNext sources import siblings as `./x.js`; map them back to the `.ts` file.
 const JS_EXTENSION_MAPPER = { '^(\\.{1,2}/.*)\\.js$': '$1' };
 
+/**
+ * `@platform/prisma/client` loads under the prisma-tree read lock in every project (TASK-288 = TASK-W0-FLAKE-2,
+ * D-ORCH-083): a suite that imports the generated client, directly or through apps/api, waits while a parallel
+ * `deps:rebuild` / `prisma generate` rewrites prisma/generated. The shim is a pass-through to the `@platform/source`
+ * target (tools/db/prisma-client-locked.test.ts pins both).
+ */
+const PRISMA_CLIENT_MAPPER = { '^@platform/prisma/client$': '<rootDir>/tools/db/prisma-client-locked.cjs' };
+
 const common: ProjectConfig = {
   rootDir: '.',
   // Explicit roots: patterns like '<rootDir>/{a,b}/**' match nothing on Windows (SPK-01).
@@ -56,7 +64,7 @@ const common: ProjectConfig = {
     customExportConditions: ['@platform/source', 'node', 'node-addons'],
   },
   transform: { '^.+\\.(t|j)sx?$': ['@swc/jest', SWC_JEST_OPTIONS] },
-  moduleNameMapper: JS_EXTENSION_MAPPER,
+  moduleNameMapper: { ...PRISMA_CLIENT_MAPPER, ...JS_EXTENSION_MAPPER },
   // /__mocks__/ (PR4-SEC-11, PR17-SEC-09): suites mock with jest.mock(name, factory) only. Without this pattern Jest 30
   // would serve ANY <roots>/**/__mocks__/<pkg>.js as <pkg> for a bare require in EVERY suite, so an unowned file could
   // replace @platform/authz or pg in the RBAC, audit and RLS suites. The jest-manual-mocks repository rule also rejects
@@ -118,7 +126,7 @@ const config: Config = {
       testMatch: ['**/*.test.tsx'],
       testPathIgnorePatterns: [...IGNORED_PATHS, '\\.(int|api)\\.test\\.tsx$', '/tests/e2e/'],
       setupFilesAfterEnv: ['<rootDir>/tools/test-dom/dom-setup.ts'],
-      moduleNameMapper: { ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-dom/style-stub.ts' },
+      moduleNameMapper: { ...PRISMA_CLIENT_MAPPER, ...JS_EXTENSION_MAPPER, '\\.css$': '<rootDir>/tools/test-dom/style-stub.ts' },
     },
     {
       ...common,

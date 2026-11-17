@@ -1,6 +1,6 @@
 /**
  * RBAC matrix generator (US-071, REQ-RBAC-011, NFR-SEC-011, NFR-TENANT-002; T-QA-04; ADR-0008 am. 4 and 5; D-ARCH-107,
- * D-ARCH-109, D-ARCH-110; TASK-027). Pure: no I/O. Input: the routes (route metadata, read from the `defineRoute`
+ * D-ARCH-109, D-ARCH-110; TASK-027, TASK-289). Pure: no I/O. Input: the routes (route metadata, read from the `defineRoute`
  * descriptors or from openapi.yaml), the seeded roles (`ROLES`, the single source of the seed migration) and the
  * permission catalogue. Output: one cell per route x caller with the outcome the pipeline must produce.
  *
@@ -14,12 +14,14 @@
  *  - invalid or non-session credentials: an expired bearer, a valid and an unknown refresh cookie, a valid and an
  *    unknown guest quote token;
  *  - on `[signature]` routes only (a signature is never presented through a header a non-signature route reads): a
- *    provider signature whose principal holds the route's permission, and one that does not (D-ARCH-110).
+ *    provider signature whose principal holds the route's permission, and one that does not (D-ARCH-110);
+ *  - on every route WITHOUT `signature` in its set: one caller per real provider signature header
+ *    (`signature-header:<name>`, presenting `<name>: t=0,v1=0`; PR48-SEC-01), a foreign credential there.
  *
  * The rules, in pipeline order (authenticate -> MFA gate -> authorise; apps/api platform/routing/pipeline.ts):
  *  1. D-ARCH-109: a credential of a kind outside the route's `auth` set is never read, so the cell equals the
- *     no-credential cell (status, code and `Cache-Control`); with no declared credential, a set containing `anonymous`
- *     gives the anonymous principal, any other set 401 `AUTH_REQUIRED`;
+ *     no-credential cell (the whole response but its volatile parts, PR48-SEC-01: the runner compares them); with no
+ *     declared credential, a set containing `anonymous` gives the anonymous principal, any other set 401 `AUTH_REQUIRED`;
  *  2. a declared credential that does not verify (expired bearer, unknown cookie or token) is 401, never 403;
  *  3. MFA gate: a staff principal (OPERATOR scope) without a verified factor is 403 `AUTHZ_DENIED` unless the route
  *     declares `mfaGateExempt`;
@@ -30,6 +32,8 @@
  * A response is private (`Cache-Control: private, no-store`, SEC-TC-29) when the set has no `anonymous` member or the
  * request presented a credential of a declared kind.
  */
+import { CREDENTIAL_HEADER_NAMES } from '@platform/shared';
+
 import type { PermissionDefinition } from '../permissions/index.js';
 import type { RoleDefinition, RoleScope } from '../roles.js';
 
@@ -72,7 +76,32 @@ export type MatrixCaller =
       readonly credential: 'session' | 'refresh-cookie' | 'quote-token';
       readonly valid: boolean;
     }
-  | { readonly id: string; readonly kind: 'signature'; readonly holds: boolean };
+  | { readonly id: string; readonly kind: 'signature'; readonly holds: boolean }
+  /** A real provider signature header (PR48-SEC-01): presented only where the route does not declare `signature`. */
+  | { readonly id: string; readonly kind: 'signature-header'; readonly header: string };
+
+/**
+ * The real provider signature headers (Stripe, the mock gateway, the carrier push): the names of
+ * `CREDENTIAL_HEADER_NAMES` (D-ARCH-113 (1)) that end in `-signature`. A new provider header WITH that suffix gets its
+ * foreign column without an edit here; one without it (`x-hub-signature-256`, `x-<carrier>-hmac`) fails the totality
+ * test of matrix.test.ts until it gets a column or an entry in `UNPRESENTED_CREDENTIAL_HEADERS` (PR #60 R1-m1).
+ */
+export const SIGNATURE_HEADER_NAMES: readonly string[] = Object.freeze(
+  CREDENTIAL_HEADER_NAMES.filter((name) => name.endsWith('-signature')),
+);
+
+/**
+ * The credential headers no matrix caller presents yet, each with the task that adds its foreign column and generator
+ * rule (PR60-SEC-02): the CSRF token and the re-authentication proof are proofs, not `ROUTE_AUTHS` kinds. Every other
+ * `CREDENTIAL_HEADER_NAMES` entry must be presented by some caller (matrix.test.ts).
+ */
+export const UNPRESENTED_CREDENTIAL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'x-csrf-token': 'TASK-048',
+  'x-reauth-proof': 'TASK-187',
+});
+
+/** The column id of the caller presenting the real signature header `name`. */
+export const signatureHeaderId = (name: string): string => `signature-header:${name}`;
 
 /** Ids of the fixed (non-role) callers. */
 export const FIXED_CALLERS = {
@@ -123,7 +152,10 @@ export interface MatrixSource {
   readonly catalogue: readonly PermissionDefinition[];
 }
 
-/** Every column: `none`, the roles (seed order), the verified staff variants, the fixed credentials, the signatures. */
+/**
+ * Every column: `none`, the roles (seed order), the verified staff variants, the fixed credentials, the signatures,
+ * the real signature headers.
+ */
 export function matrixCallers(roles: readonly RoleDefinition<string, string>[]): MatrixCaller[] {
   const role = (definition: RoleDefinition<string, string>, factor: 'pending' | 'verified' | 'n/a', id: string): MatrixCaller => ({
     id,
@@ -145,6 +177,7 @@ export function matrixCallers(roles: readonly RoleDefinition<string, string>[]):
     { id: FIXED_CALLERS.unknownGuestToken, kind: 'credential', credential: 'quote-token', valid: false },
     { id: FIXED_CALLERS.signatureHolds, kind: 'signature', holds: true },
     { id: FIXED_CALLERS.signatureLacks, kind: 'signature', holds: false },
+    ...SIGNATURE_HEADER_NAMES.map((header): MatrixCaller => ({ id: signatureHeaderId(header), kind: 'signature-header', header })),
   ];
 }
 
@@ -158,13 +191,20 @@ export function presentedKind(caller: MatrixCaller): PresentedKind {
     case 'credential':
       return caller.credential;
     case 'signature':
+    case 'signature-header':
       return 'signature';
   }
 }
 
-/** Signature callers exist only on routes that accept a signature (no header of another route carries one). */
-export const appliesTo = (caller: MatrixCaller, route: MatrixRoute): boolean =>
-  caller.kind !== 'signature' || route.auth.includes('signature');
+/**
+ * The synthetic signature callers exist only on routes that accept a signature (no header of another route carries
+ * one); the real signature headers exactly on the other routes, where they are foreign (PR48-SEC-01).
+ */
+export function appliesTo(caller: MatrixCaller, route: MatrixRoute): boolean {
+  if (caller.kind === 'signature') return route.auth.includes('signature');
+  if (caller.kind === 'signature-header') return !route.auth.includes('signature');
+  return true;
+}
 
 /** The principal the pipeline builds for a verified credential (only what the gates read). */
 interface GatePrincipal {
@@ -195,7 +235,7 @@ function permissionGate(route: MatrixRoute, principal: GatePrincipal, signatureO
 }
 
 /** The principal of a declared, verifying credential. */
-function principalOf(caller: Exclude<MatrixCaller, { kind: 'none' }>, route: MatrixRoute): GatePrincipal {
+function principalOf(caller: Exclude<MatrixCaller, { kind: 'none' | 'signature-header' }>, route: MatrixRoute): GatePrincipal {
   switch (caller.kind) {
     case 'role':
       return { credential: 'session', authenticated: true, staffPending: caller.factor === 'pending', held: caller.grants };
@@ -223,7 +263,8 @@ export function expectCell(route: MatrixRoute, caller: MatrixCaller, signatureOn
     foreign: kind !== 'none' && !declared,
   });
   if (caller.kind === 'none' || !declared) return cell(anonymousAllowed ? permissionGate(route, ANONYMOUS, signatureOnly) : 'deny-401');
-  if (caller.kind === 'credential' && !caller.valid) return cell('deny-401');
+  // Rule 2; a real signature header is declared only on a signature route, which `appliesTo` never pairs with it.
+  if ((caller.kind === 'credential' && !caller.valid) || caller.kind === 'signature-header') return cell('deny-401');
   const principal = principalOf(caller, route);
   if (principal.staffPending && route.mfaGateExempt !== true) return cell('deny-403-mfa');
   return cell(permissionGate(route, principal, signatureOnly));
