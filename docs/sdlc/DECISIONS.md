@@ -2987,3 +2987,12 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **PR #60:** must merge main (shared `eslint.config.mjs`) inside its current fix cycle.
 - **Open security items from PR #56** stay with their cards: SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next `eslint.config.mjs` PR), SEC-13 (TASK-033/060).
 - **Reversibility:** Medium (merged; revertible).
+
+### D-TASK288-16..20 · 2026-11-17 · test-engineer (recorded by orchestrator) · PR #57 fix cycle 2 (@a5f94b0, code bfe5235)
+- **16** `takeOverStale` returns boolean; only a successful takeover retries immediately, everything else keeps the deadline and the poll sleep (closes R2-m1 = PR57-SEC-05). `lockTestHooks.rename` is a test-only seam.
+- **17** The Windows real-cwd case is registered on win32 only (no skipped test on Linux); the rename seam covers every platform.
+- **18** `LockChildren.idleStarted` waits for a marker the child writes; the `spawn` event is not enough on Windows.
+- **19** The owner file is created with `wx` in both writer paths: race-only hardening, unpinned.
+- **20** C1 rerun at `a5f94b0` (20261117T1051Z) is green; the first attempt failed only on the network drop (prisma engine re-download) and is not counted.
+- **Follow-up → TASK-291:** `prisma-engines.int.test.ts` should restore or keep the verified engine when the download fails.
+- **Reversibility:** High.
