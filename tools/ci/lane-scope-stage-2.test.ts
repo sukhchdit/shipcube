@@ -336,6 +336,8 @@ describe('[PR46-SEC-16] a proof is void when the tested base changed a lane A in
     ['tools/test-support/process.ts', true],
     ['tests/fixtures/lint/bad-raw-any.ts', true],
     ['tests/fixtures/semgrep/x.ts', true],
+    // PR #55 R2-n4 (N09): a non-lint fixture the unit suites read is in the set through tests/fixtures/**.
+    ['tests/fixtures/sql/raw-statement-corpus.json', true],
     ['tools/deps/prisma-engines.json', true],
     // An application file the PR does not change: a disjoint semantic conflict is the D-ORCH-042 post-merge gate's.
     ['apps/api/src/other.ts', false],

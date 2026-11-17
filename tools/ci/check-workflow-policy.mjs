@@ -29,7 +29,8 @@
  *                         npm command alias (npm-command.mjs; review M1).
  *   node-options-preload  NODE_OPTIONS with --require/-r/--import/--loader/--experimental-loader/--env-file, or with a
  *                         ${{ }} expression (PR42-SEC-18).
- *   lint-env              every `npm run lint` step, in any workflow, sets exactly LINT_ENV (PR42-SEC-18).
+ *   lint-env              a step whose run: is exactly `npm run lint`, in any workflow, sets exactly LINT_ENV (PR42-SEC-18;
+ *                         other spellings of the lint script are not matched, PR #55 R1-n2).
  *   tls-verify-disabled   NODE_TLS_REJECT_UNAUTHORIZED=0.
  *   platform-registry     `--@platform:registry=` anywhere but on `npm audit signatures`; any npm_config_@platform:registry env.
  *   audit-signatures-masked  `npm audit signatures … || …`.
@@ -130,9 +131,13 @@ export const FORBIDDEN_ENV = Object.freeze([
 /**
  * Variables that make bash, the dynamic loader or Node run or find code before a step's own command (PR55-SEC-01,
  * PR17-SEC-08 item 1): BASH_ENV and ENV are sourced by bash before the script, PATH and NODE_PATH re-point commands and
- * modules, LD_* inject shared objects, SHELLOPTS/BASHOPTS/PS4/IFS change how the pinned script runs, BASH_FUNC_* export
- * functions that shadow commands. Refused at workflow, job, step, container and service level in every workflow
- * (case-insensitive, fail closed).
+ * modules, LD_PRELOAD/LD_LIBRARY_PATH/LD_AUDIT inject shared objects, SHELLOPTS/BASHOPTS/PS4/IFS change how the pinned
+ * script runs, BASH_FUNC_* export functions that shadow commands. PR #55 code review R2-n1: git and npm read
+ * configuration that runs code the same way: GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT/KEY_<n>/VALUE_<n> (core.pager,
+ * core.fsmonitor, diff.external), GIT_EXTERNAL_DIFF, HOME and XDG_CONFIG_HOME (where ~/.gitconfig and ~/.npmrc are
+ * found), and npm's script-shell, userconfig, globalconfig and node-options settings. Refused at workflow, job, step,
+ * container and service level in every workflow (case-insensitive, fail closed). The gitleaks `docker run -e
+ * GIT_CONFIG_*` arguments are container arguments, not an env map, so they are unaffected.
  */
 export const PRELOAD_ENV = Object.freeze([
   'BASH_ENV',
@@ -146,8 +151,17 @@ export const PRELOAD_ENV = Object.freeze([
   'BASHOPTS',
   'PS4',
   'IFS',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'GIT_EXTERNAL_DIFF',
+  'HOME',
+  'XDG_CONFIG_HOME',
+  'NPM_CONFIG_SCRIPT_SHELL',
+  'NPM_CONFIG_USERCONFIG',
+  'NPM_CONFIG_GLOBALCONFIG',
+  'NPM_CONFIG_NODE_OPTIONS',
 ]);
-const PRELOAD_ENV_PREFIX = /^BASH_FUNC_/iu;
+const PRELOAD_ENV_PREFIX = /^(?:BASH_FUNC_|GIT_CONFIG_(?:KEY|VALUE)_\d+$)/iu;
 
 /**
  * Playwright browser download redirects (PR4-SEC-08; PR46-SEC-02, code review PR #46 m3): PLAYWRIGHT_DOWNLOAD_HOST and
@@ -1600,7 +1614,8 @@ export function checkWorkflow(text, fileName, options = {}) {
     if (workflowEnv[name] !== value) add('workflow-env', `workflow-level env ${name}: "${value}" is required (D-ARCH-044)`, ['env']);
   }
   const checkEnvMap = (/** @type {YamlNode | undefined} */ node, /** @type {string[]} */ path) => {
-    if (node !== undefined && node !== null && !isMap(node)) {
+    // PR #55 R2-n2: an empty `env:` (null in GitHub's parser) is an absent map.
+    if (node !== undefined && node !== null && node !== '' && !isMap(node)) {
       add(
         'env-expression',
         'an env: must be a mapping of literal names (an expression could add BASH_ENV, NODE_OPTIONS or a gate location; PR55-SEC-01)',
@@ -2085,6 +2100,9 @@ export function laneScopeFindings(doc) {
   const add = (/** @type {string} */ message, /** @type {string[]} */ path) => out.push({ rule: 'required-gates', message, path });
   const jobs = asMap(doc.jobs) ?? {};
   out.push(...triggerAndConcurrencyFindings(doc));
+  // PR55-SEC-11: stage 1 too, while it is accepted (DOCKER_HOST, ACTIONS_ALLOW_UNSECURE_COMMANDS and the like would
+  // reach every scans step through the workflow env).
+  out.push(...workflowEnvKeyFindings(doc));
   for (const [jobId, expected] of Object.entries(PINNED_JOB_PERMISSIONS)) {
     if (!sameMap(asMap(jobs[jobId])?.permissions, expected))
       add(`ci.yml job ${jobId} permissions must be exactly ${showMap(expected)} (RR-4, RR-6, RR-8 (ii))`, ['jobs', jobId, 'permissions']);
@@ -2192,13 +2210,7 @@ export function stage2Findings(doc) {
   const add = (/** @type {string} */ message, /** @type {string[]} */ path) => out.push({ rule: 'required-gates', message, path });
   const jobs = asMap(doc.jobs) ?? {};
   out.push(...triggerAndConcurrencyFindings(doc));
-  // PR55-SEC-01 item 3: the workflow env is exactly the required install settings and the four digest-pinned images
-  // (their values are checked by workflow-env, image-digest and the OASDIFF_IMAGE pin); a workflow-level entry reaches
-  // every step, ci-gate's included.
-  const workflowEnvKeys = Object.keys(asMap(doc.env) ?? {}).sort();
-  const expectedWorkflowEnvKeys = [...Object.keys(REQUIRED_WORKFLOW_ENV), ...STAGE_2_WORKFLOW_IMAGES].sort();
-  if (workflowEnvKeys.join(',') !== expectedWorkflowEnvKeys.join(','))
-    add(`ci.yml workflow env must have exactly the keys ${expectedWorkflowEnvKeys.join(', ')} (PR55-SEC-01)`, ['env']);
+  out.push(...workflowEnvKeyFindings(doc));
   for (const [jobId, expected] of Object.entries(PINNED_JOB_PERMISSIONS_STAGE_2)) {
     if (!sameMap(asMap(jobs[jobId])?.permissions, expected))
       add(`ci.yml job ${jobId} permissions must be exactly ${showMap(expected)} (D-ARCH-128, PR46-SEC-15)`, ['jobs', jobId, 'permissions']);
@@ -2344,6 +2356,26 @@ export function stage2Findings(doc) {
     }
   }
   return out;
+}
+
+/**
+ * PR55-SEC-01 item 3 and PR55-SEC-11: the ci.yml workflow env is exactly the required install settings and the four
+ * digest-pinned images, in both topologies (their values are checked by workflow-env, image-digest and the
+ * OASDIFF_IMAGE pin); a workflow-level entry reaches every step, the scans and ci-gate included.
+ * @param {YamlMap} doc
+ * @returns {{ rule: string, message: string, path: string[] }[]}
+ */
+function workflowEnvKeyFindings(doc) {
+  const keys = Object.keys(asMap(doc.env) ?? {}).sort();
+  const expected = [...Object.keys(REQUIRED_WORKFLOW_ENV), ...STAGE_2_WORKFLOW_IMAGES].sort();
+  if (keys.join(',') === expected.join(',')) return [];
+  return [
+    {
+      rule: 'required-gates',
+      message: `ci.yml workflow env must have exactly the keys ${expected.join(', ')} (PR55-SEC-01, PR55-SEC-11)`,
+      path: ['env'],
+    },
+  ];
 }
 
 /**

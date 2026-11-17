@@ -724,3 +724,54 @@ describe('[PR #55 r1] [C1] PR55-SEC-01/-02/-09, R1-m1, R1-m3, R1-n5: the review 
     expect(laneFindings(bash).some((finding) => finding.startsWith('preload-env:'))).toBe(true);
   });
 });
+
+describe('[PR #55 r2] PR55-SEC-11, R2-n1, R2-n2, R2-n4: the follow-ups taken into the workflow PR', () => {
+  const laneC = readFileSync(join(repoRoot, '.github', 'workflows', 'lane-c.yml'), 'utf8');
+  const install = '      - name: Install (npm ci --ignore-scripts)\n        run: npm ci --ignore-scripts --no-audit --no-fund\n';
+  const laneFindings = (text: string) => checkWorkflow(text, 'lane-c.yml').map((f) => `${f.rule}: ${f.message}`);
+  const withStepEnv = (body: string) => laneC.replace(install, install.replace('        run:', `        env:\n${body}        run:`));
+
+  it.each([
+    'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT',
+    'GIT_CONFIG_KEY_0',
+    'GIT_CONFIG_VALUE_12',
+    'GIT_EXTERNAL_DIFF',
+    'HOME',
+    'XDG_CONFIG_HOME',
+    'NPM_CONFIG_SCRIPT_SHELL',
+    'npm_config_script_shell',
+    'NPM_CONFIG_USERCONFIG',
+    'npm_config_globalconfig',
+    'npm_config_node_options',
+    // R2-n4: a lower-case spelling of an original entry (N16).
+    'bash_env',
+  ])('[R2-n1] %s at step level of lane-c.yml is preload-env', (name) => {
+    expect(laneC.split(install).length).toBeGreaterThan(1);
+    expect(laneFindings(withStepEnv(`          ${name}: docs/x\n`)).some((finding) => finding.startsWith('preload-env:'))).toBe(true);
+  });
+
+  it('[R2-n1] controls: NODE_OPTIONS (the lint heap) and a GIT_CONFIG_ name that is not KEY/VALUE_<n> are not preload-env', () => {
+    const findings = laneFindings(withStepEnv("          NODE_OPTIONS: --max-old-space-size=4096\n          GIT_CONFIG_NOSYSTEM: '1'\n"));
+    expect(findings.filter((finding) => finding.startsWith('preload-env:'))).toEqual([]);
+  });
+
+  it('[R2-n2] an empty env: is an absent map (no env-expression)', () => {
+    expect(laneFindings(laneC)).toEqual([]);
+    const empty = laneC.replace(install, install.replace('        run:', '        env:\n        run:'));
+    expect(empty).not.toBe(laneC);
+    expect(laneFindings(empty)).toEqual([]);
+  });
+
+  it('[PR55-SEC-11] the stage-1 workflow env is held to the exact key set too', () => {
+    const workflowEnv = "  NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n  CHECKPOINT_DISABLE: '1'\n";
+    expect(stage1.split(workflowEnv)).toHaveLength(2);
+    expect(findingsOf(stage1)).toEqual([]);
+    for (const extra of ['DOCKER_HOST: tcp://evil:2375', "ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'"]) {
+      const mutated = stage1.replace(workflowEnv, `${workflowEnv}  ${extra}\n`);
+      expect(findingsOf(mutated)).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^required-gates: ci\.yml workflow env must have exactly the keys/u)]),
+      );
+    }
+  });
+});

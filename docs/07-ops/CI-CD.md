@@ -63,7 +63,8 @@ tests until its pins are retired. In stage 2:
   one side changed, outside that set, is left to the D-ORCH-042 post-merge gate. A base change is dated by its
   committer time: a squash merge lands with its landing time, so push `main` commits that touch these paths right
   after creating them (PR55-SEC-04 residual). A void proof turns a docs push into `ci-gate: BLOCKED: no code proof`;
-  push again or close and reopen the PR. Commitlint, actionlint and the head-code checks run only on a code push; the
+  another docs push is still light and stays BLOCKED, so push a code change or close and reopen the PR (a reopen runs
+  the full lane on the same head). Commitlint, actionlint and the head-code checks run only on a code push; the
   install, registry signatures and the advisory audit run on **every** push (PR46-SEC-11, D-TASK286-03), and when the
   PR range touches a lint control the lint-fixture steps must have succeeded in this run or the proof (R1-n1).
 - `security-integration` needs `fast-lane` only. `ci-gate` is last and holds the former `scans` steps: it recomputes
@@ -149,8 +150,12 @@ Semgrep and record steps are exact, contiguous and carry no step env; `fast-lane
 `actions/checkout`, `actions/setup-node` and `actions/cache`; the workflow env has exactly the install settings and the
 four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
 a lexical tripwire for the head-code steps, which are not exact). In every workflow, at every level: no
-`BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_*`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS` or `BASH_FUNC_*` entry
-(`preload-env`), and every `env:` is a mapping, never an expression (`env-expression`) (PR55-SEC-01). A step whose
+`BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
+`IFS`, `BASH_FUNC_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_<n>`/`VALUE_<n>`, `GIT_EXTERNAL_DIFF`, `HOME`,
+`XDG_CONFIG_HOME` or `NPM_CONFIG_SCRIPT_SHELL`/`USERCONFIG`/`GLOBALCONFIG`/`NODE_OPTIONS` entry, in any case
+(`preload-env`; PR55-SEC-01, PR #55 R2-n1), and every non-empty `env:` is a mapping, never an expression
+(`env-expression`). The ci.yml workflow env has exactly the install settings and the four image pins in both topologies
+(PR55-SEC-11). A step whose
 `run:` is exactly `npm run lint` must have exactly `NODE_OPTIONS: --max-old-space-size=4096`, and no `NODE_OPTIONS`
 holds `${{ }}` (PR42-SEC-18; other spellings of the lint script are not matched, PR #55 R1-n2). On top of that:
 `lane-c.yml` and `nightly.yml` are `workflow_dispatch` only; ci.yml,
