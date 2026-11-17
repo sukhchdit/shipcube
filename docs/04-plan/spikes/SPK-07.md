@@ -242,6 +242,30 @@ minutes = job duration rounded up (jobs API, `started_at` to `completed_at`).
   - the human levers are offered, as D-ORCH-100 already does.
 - O1 is the structural fix for December onward. O4b and a cheaper `security-integration` go to principal-architect only if O1 + O3 measure above 72 % once the six suites are active.
 
+**First stage-2 docs pushes after #59 (post-merge check of D-ORCH-119; jobs API, 2026-11-17).**
+
+| Run | Kind | `fast-lane` | `ci-gate` | Billed |
+|---|---|---|---|---|
+| 44040977441 (TASK-029) | docs push **with** a proof (Semgrep and oasdiff skipped) | 131 s → 3 | 58 s → 1 | **4** |
+| 44037427119, 44037524886 (TASK-288), 44041197675 (TASK-289) | docs push, no proof (Semgrep ran) | 80–94 s → 2 | 52–65 s → 1–2 | 3–4 |
+
+The first real docs push with a proof billed 4, not the derived 3. Its light fast-lane took 131 s (install,
+signatures and audit vary with the registry), and ci-gate without Semgrep billed 1, as derived. Use 3.5 per docs push,
+as in the re-forecast above, until more runs are in.
+
+**Run-full instead of BLOCKED (D-TASK286-06a option; TASK-287 part 287-A).** The decision is narrowed by these figures.
+
+| Case | BLOCKED (old) | Run full at once |
+|---|---|---|
+| Every proof candidate was **voided by the tested base** (PR46-SEC-16): the code must run on the new base before the merge | light 3–4 + the re-push or reopen 8–10 = 11–14, plus a round trip | **8–10** |
+| No candidate: the code run is pending, or its fast-lane or scans were red | 3–4 (the next code push is needed anyway) | 8–10, usually wasted |
+
+TASK-287 takes the option only for the first case. `lookupProofs` reports `voidedByBase`, and only then does the classify
+step set `code_changed=true` / `mode=full`. `push_scope` stays `docs`, so the summary still shows a docs push.
+
+**Live forecast** (`ci:minutes --forecast`, 2026-11-17T07:31Z): 1,269 billed (63.5 %), 77.8 min/day, forecast
+2,334 (116.7 %).
+
 ## 7. Lane C and nightly (built; first run after merge)
 
 `lane-c.yml` (dispatch-only): `static`, `integration` (merged coverage across unit, unit-dom, integration, api and the

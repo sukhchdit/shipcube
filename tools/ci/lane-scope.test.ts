@@ -12,13 +12,13 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../test-support/process.js';
 import {
-  GATE_OUTPUTS,
   allDocs,
   classify,
   docsOnlyPath,
   fastLaneProblems,
-  gateInputFromEnv,
-  gateVerdict,
+  formatClassification,
+  gateInputStage2FromEnv,
+  gateVerdictStage2,
   ghApi,
   lookupProofs,
   main,
@@ -29,14 +29,15 @@ import {
   runBindingProblem,
   scansProblems,
 } from './lane-scope.mjs';
-import type { Api, GateInput, ProofSteps } from './lane-scope.mjs';
+import type { Api, ProofSteps } from './lane-scope.mjs';
 
 const repoRoot = findRepoRoot();
 /**
  * The stage-1 workflow these stage-1 cases (a `scans` job) are written against; since TASK-286 the committed ci.yml is
  * stage 2 (lane-scope-stage-2.test.ts), and lane-scope.mjs keeps both topologies (D-ARCH-128, two-step).
  */
-const ciText = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
+/** The committed ci.yml (one topology since TASK-287 part 287-A retired stage 1). */
+const ciText = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
 const temps: string[] = [];
 afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
@@ -251,17 +252,18 @@ describe('lane-scope: push scope, PR scope and the code-identical set (RR-1)', (
 });
 
 describe('lane-scope: proof steps from ci.yml and CI_REQUIRED_GATES', () => {
-  it('the committed ci.yml yields the CODE-gated fast-lane steps (lint fixtures may be skipped) and the three scans steps', () => {
+  it('the committed ci.yml yields the CODE-gated fast-lane steps (lint fixtures may be skipped) and the three ci-gate scans steps', () => {
     const steps = proofSteps(ciText);
     if ('problem' in steps) throw new Error(steps.problem);
+    expect(steps.scansJob).toBe('ci-gate');
     expect(steps.fastLane.map((step) => step.name)).toEqual([
       'Lockfile provenance and delta',
       'Release cooldown and freshness',
       'Licences',
-      'Registry signatures and provenance (PR1-SEC-12)',
-      'Vulnerability audit (npm audit + osv-scanner)',
       'Lint (ESLint, Stylelint, suppressions)',
       'Format check',
+      'Commit messages (commitlint; PR title = squash subject, pushed range on main)',
+      'actionlint',
       'Type-check',
       'Unit tests',
       'Lint negative fixtures from the base ref against the head configs (PR2-SEC-08)',
@@ -305,7 +307,7 @@ function jobsOf(options: {
   const code = options.code ?? 'success';
   const fast = options.fastLane ?? 'success';
   return {
-    total_count: 4,
+    total_count: 3,
     jobs: [
       {
         name: 'fast-lane',
@@ -318,7 +320,7 @@ function jobsOf(options: {
         ],
       },
       {
-        name: 'scans',
+        name: 'ci-gate',
         status: 'completed',
         conclusion: 'failure',
         steps: [
@@ -327,7 +329,6 @@ function jobsOf(options: {
         ],
       },
       { name: 'security-integration', status: 'completed', conclusion: options.si ?? 'skipped', steps: [] },
-      { name: 'ci-gate', status: 'completed', conclusion: 'failure', steps: [] },
     ],
   };
 }
@@ -614,117 +615,6 @@ describe('lane-scope: proof selection against the jobs API (D-ARCH-126/127)', ()
   });
 });
 
-function gate(overrides: Partial<GateInput> & { outputs?: Record<string, string> }, codeProblems: string[] = []) {
-  const outputs = {
-    code_changed: 'true',
-    pr_docs_only: 'false',
-    code_proof: '',
-    security_proof: '',
-    record_ok: 'true',
-    security_paths: 'false',
-    security_integration_due: 'false',
-    ...overrides.outputs,
-  };
-  return gateVerdict({
-    event: 'pull_request',
-    fastLane: 'success',
-    fastLaneMode: 'full',
-    scans: 'success',
-    securityIntegration: 'skipped',
-    thisRunCodeProblems: () => codeProblems,
-    ...overrides,
-    outputs,
-  });
-}
-
-describe('lane-scope --gate: ci-gate rules (a)-(f) (RR-6)', () => {
-  it('a green full code push without security paths is MERGE-READY', () => {
-    expect(gate({})).toEqual({ ready: true, reasons: [] });
-  });
-
-  it('(a) fast-lane not success; a draft PR (skipped) is not green', () => {
-    expect(gate({ fastLane: 'failure' }).reasons).toEqual(['fast-lane failure']);
-    expect(gate({ fastLane: 'skipped' }).reasons).toEqual(['fast-lane skipped (a draft PR is not gated: mark it ready for review)']);
-  });
-
-  it('(b) a code push that ran light, or whose CODE-gated steps did not all succeed, is red; a docs push that ran full disagrees', () => {
-    expect(gate({ fastLaneMode: 'light' }).reasons).toEqual(['code gates skipped on a code push']);
-    expect(gate({}, ['Unit tests: skipped']).reasons).toEqual(['code gates skipped on a code push (Unit tests: skipped)']);
-    expect(gate({ fastLaneMode: 'full', outputs: { code_changed: 'false', code_proof: `1:${PREV}` } }).reasons).toEqual([
-      'fast-lane mode disagrees with the classification',
-    ]);
-  });
-
-  it('(c) a docs push of a PR with code changes needs a code proof; a docs-only PR does not', () => {
-    expect(gate({ fastLaneMode: 'light', outputs: { code_changed: 'false' } }).reasons).toEqual(['no code proof for this tree']);
-    expect(gate({ fastLaneMode: 'light', outputs: { code_changed: 'false', code_proof: `9:${PREV}` } }).ready).toBe(true);
-    expect(gate({ fastLaneMode: 'light', outputs: { code_changed: 'false', pr_docs_only: 'true' } }).ready).toBe(true);
-  });
-
-  it('(d) scans not success (a missing record) is red', () => {
-    expect(gate({ scans: 'failure' }).reasons).toEqual(['scans failure']);
-  });
-
-  it('(e) security paths need security-integration success in this run or a security proof; pending and red reasons are enumerated', () => {
-    const sec = { security_paths: 'true' };
-    expect(gate({ securityIntegration: 'success', outputs: sec }).ready).toBe(true);
-    expect(gate({ outputs: { ...sec, security_proof: `5:${PREV}` } }).ready).toBe(true);
-    expect(gate({ outputs: { ...sec, record_ok: 'false' } }).reasons).toEqual(['security-integration pending (record missing)']);
-    expect(gate({ outputs: { ...sec, security_integration_due: 'true' } }).reasons).toEqual(['security-integration pending (not run)']);
-    expect(gate({ securityIntegration: 'failure', outputs: sec }).reasons).toEqual(['security-integration red']);
-    expect(gate({ securityIntegration: 'cancelled', outputs: sec }).reasons).toEqual(['security-integration red']);
-  });
-
-  it('(f) any empty or malformed output is "classification missing" (fail closed)', () => {
-    for (const key of GATE_OUTPUTS) expect(gate({ outputs: { [key]: '' } }).reasons).toContain('classification missing');
-    expect(gate({ fastLaneMode: '' }).reasons).toContain('classification missing');
-    expect(gate({ outputs: { code_proof: 'yes' } }).reasons).toContain('classification missing');
-    expect(gate({ outputs: { security_proof: `1:${'a'.repeat(39)}` } }).reasons).toContain('classification missing');
-    expect(gate({ outputs: { security_paths: 'TRUE' } }).reasons).toContain('classification missing');
-  });
-
-  it('a push to main (CI_MAIN_FAST_LANE) needs (a), (b) and (d) only: no proof, no security-integration', () => {
-    expect(
-      gateVerdict({
-        event: 'push',
-        fastLane: 'success',
-        fastLaneMode: 'full',
-        scans: 'success',
-        securityIntegration: 'skipped',
-        outputs: {
-          code_changed: 'true',
-          pr_docs_only: 'false',
-          code_proof: '',
-          security_proof: '',
-          record_ok: 'false',
-          security_paths: 'true',
-          security_integration_due: 'false',
-        },
-        thisRunCodeProblems: () => [],
-      }).ready,
-    ).toBe(true);
-    expect(
-      gateVerdict({
-        event: 'push',
-        fastLane: 'success',
-        fastLaneMode: 'light',
-        scans: 'success',
-        securityIntegration: 'skipped',
-        outputs: {
-          code_changed: 'false',
-          pr_docs_only: 'true',
-          code_proof: '',
-          security_proof: '',
-          record_ok: 'false',
-          security_paths: 'false',
-          security_integration_due: 'false',
-        },
-        thisRunCodeProblems: () => [],
-      }).reasons,
-    ).toEqual(['code gates skipped on a code push']);
-  });
-});
-
 describe('lane-scope CLI', () => {
   it('usage errors exit 2', () => {
     expect(parseArgs(['--root'])).toMatchObject({ error: expect.any(String) });
@@ -739,109 +629,66 @@ describe('lane-scope CLI', () => {
       error: expect.stringContaining('--head-ref'),
     });
     expect(main(['--bogus'])).toBe(2);
-  });
-
-  /** A PR with a code commit, docs, the real ci.yml and more docs: the ci.yml commit is the code-identical proof commit. */
-  function cliRepo() {
-    const { root, base } = repo();
-    const code = commit(root, { 'prisma/schema.prisma': 'model A { id Int @id }\n' }, 'code');
-    const docs = commit(root, { 'docs/y.md': 'y\n' }, 'docs');
-    write(root, '.github/workflows/ci.yml', ciText);
-    git(root, ['add', '-A']);
-    git(root, ['commit', '-q', '-m', 'ci']);
-    const ci = git(root, ['rev-parse', 'HEAD']);
-    const head = commit(root, { 'docs/z.md': 'z\n' }, 'docs 2');
-    expect(code).not.toBe(docs);
-    return { root, base, ci, head };
-  }
-  const cliEnv = { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '42' };
-
-  it('writes key=value outputs; --lookup adds the proofs and security_integration_due from the fake API', () => {
-    const { root, base, ci, head } = cliRepo();
-    const output = join(root, 'out.txt');
-    const api = fakeApi({ [ci]: [run(41, ci)] }, { 41: jobsOf({}) });
-    const args = ['--root', root, '--base', base, '--head', head, '--before', ci, '--pr', PR, '--head-ref', HEAD_REF, '--lookup'];
-    expect(main([...args, '--output', output], { env: cliEnv, api })).toBe(0);
-    const lines = readFileSync(output, 'utf8').trim().split('\n');
-    expect(lines).toEqual([
-      'push_scope=docs',
-      'code_changed=false',
-      'mode=light',
-      'pr_docs_only=false',
-      `identical=${head} ${ci}`,
-      'security_paths=true',
-      'record_ok=true',
-      `code_proof=41:${ci}`,
-      'security_proof=',
-      'security_integration_due=true',
-    ]);
-  });
-
-  it('[R2-M1] --pr and --head-ref reach the binding (a run of another branch is no proof); [R2-n1 L14] no record, not due', () => {
-    const { root, base, ci, head } = cliRepo();
-    const api = fakeApi({ [ci]: [run(41, ci)] }, { 41: jobsOf({ si: 'success' }) });
-    const args = ['--root', root, '--base', base, '--head', head, '--before', ci, '--lookup'];
-    const other = join(root, 'other.txt');
-    expect(main([...args, '--pr', PR, '--head-ref', 'feat/other', '--output', other], { env: cliEnv, api })).toBe(0);
-    expect(readFileSync(other, 'utf8').trim().split('\n').slice(-3)).toEqual([
-      'code_proof=',
-      'security_proof=',
-      'security_integration_due=true',
-    ]);
-    // Without --pr the record is not evaluated (record_ok=false): security-integration is not due although no proof exists.
-    const unbound = join(root, 'unbound.txt');
-    expect(main([...args, '--head-ref', HEAD_REF, '--output', unbound], { env: cliEnv, api })).toBe(0);
-    expect(readFileSync(unbound, 'utf8').trim().split('\n').slice(-5)).toEqual([
-      'security_paths=true',
-      'record_ok=false',
-      'code_proof=',
-      'security_proof=',
-      'security_integration_due=false',
-    ]);
+    // TASK-287 part 287-A: the stage-1 classify call (no --tools-ref) is retired.
+    expect(parseArgs(['--root', '.', '--base', 'x', '--head', 'y', '--lookup'])).toMatchObject({
+      error: expect.stringContaining('--tools-ref is required'),
+    });
+    expect(main(['--root', '.', '--base', 'x', '--head', 'y', '--lookup'], { env: {}, api: () => ({ ok: false, problem: 'none' }) })).toBe(
+      2,
+    );
   });
 
   it('--gate reads the step env and exits 0 on MERGE-READY, 1 on BLOCKED', () => {
+    const light = formatClassification({
+      mode: 'light',
+      code_changed: 'false',
+      pr_docs_only: 'false',
+      lint_controls: 'false',
+      security_paths: 'false',
+      record_ok: 'true',
+      code_proof: `7:${PREV}`,
+      security_proof: '',
+      security_integration_due: 'false',
+      tools_ref: HEAD,
+    });
     const env = {
       GITHUB_EVENT_NAME: 'pull_request',
       FAST_LANE: 'success',
-      FAST_LANE_MODE: 'light',
-      SCANS: 'success',
       SECURITY_INTEGRATION: 'skipped',
-      CODE_CHANGED: 'false',
-      PR_DOCS_ONLY: 'false',
-      CODE_PROOF: `7:${PREV}`,
-      SECURITY_PROOF: '',
-      RECORD_OK: 'true',
-      SECURITY_PATHS: 'false',
-      SECURITY_INTEGRATION_DUE: 'false',
+      CLASSIFICATION: light,
+      FAST_LANE_CLASSIFICATION: light,
     };
     const api: Api = () => ({ ok: false, problem: 'not called' });
-    // A checkout whose ci.yml is the stage-1 workflow (the gate takes the rules of the checked-out topology).
     const { root } = repo();
-    commit(root, { '.github/workflows/ci.yml': ciText }, 'stage-1 ci');
+    commit(root, { '.github/workflows/ci.yml': ciText }, 'ci');
     expect(main(['--gate', '--root', root], { env, api })).toBe(0);
-    expect(main(['--gate', '--root', root], { env: { ...env, CODE_PROOF: '' }, api })).toBe(1);
-    expect(main(['--gate', '--root', root], { env: { ...env, SECURITY_PATHS: '' }, api })).toBe(1);
+    expect(main(['--gate', '--root', root], { env: { ...env, FAST_LANE_CLASSIFICATION: '' }, api })).toBe(1);
+    expect(main(['--gate', '--root', root], { env: { ...env, CLASSIFICATION: '' }, api })).toBe(1);
   });
 });
 
-describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions (gateInputFromEnv)', () => {
+describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions (gateInputStage2FromEnv)', () => {
+  const full = formatClassification({
+    mode: 'full',
+    code_changed: 'true',
+    pr_docs_only: 'false',
+    lint_controls: 'false',
+    security_paths: 'false',
+    record_ok: 'true',
+    code_proof: '',
+    security_proof: '',
+    security_integration_due: 'false',
+    tools_ref: HEAD,
+  });
   const gateEnv = {
     GITHUB_EVENT_NAME: 'pull_request',
     GITHUB_REPOSITORY: 'o/r',
     GITHUB_RUN_ID: '77',
     GITHUB_RUN_ATTEMPT: '2',
     FAST_LANE: 'success',
-    FAST_LANE_MODE: 'full',
-    SCANS: 'success',
     SECURITY_INTEGRATION: 'skipped',
-    CODE_CHANGED: 'true',
-    PR_DOCS_ONLY: 'false',
-    CODE_PROOF: '',
-    SECURITY_PROOF: '',
-    RECORD_OK: 'true',
-    SECURITY_PATHS: 'false',
-    SECURITY_INTEGRATION_DUE: 'false',
+    CLASSIFICATION: full,
+    FAST_LANE_CLASSIFICATION: full,
   };
   /** A clone whose HEAD has the real ci.yml (the step names ci-gate requires come from it). */
   function ciRoot(): string {
@@ -863,10 +710,10 @@ describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions
   it('reads exactly runs/<id>/attempts/<attempt>/jobs: every CODE-gated step success is MERGE-READY', () => {
     const root = ciRoot();
     const api = attemptApi(jobsOf({}));
-    const input = gateInputFromEnv({ root, env: gateEnv, api });
+    const input = gateInputStage2FromEnv({ root, env: gateEnv, api });
     expect(input.thisRunCodeProblems()).toEqual([]);
     expect(api.calls).toEqual([ATTEMPT_PATH]);
-    expect(gateVerdict(gateInputFromEnv({ root, env: gateEnv, api }))).toEqual({ ready: true, reasons: [] });
+    expect(gateVerdictStage2(gateInputStage2FromEnv({ root, env: gateEnv, api }))).toEqual({ ready: true, reasons: [] });
   });
 
   it('a skipped CODE-gated step in this run (head code rewrote CODE through $GITHUB_ENV) is BLOCKED', () => {
@@ -875,7 +722,7 @@ describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions
     const unit = (jobs.jobs[0] as { steps: { name: string; conclusion: string }[] }).steps.find((step) => step.name === 'Unit tests');
     if (unit === undefined) throw new Error('no Unit tests step');
     unit.conclusion = 'skipped';
-    const verdict = gateVerdict(gateInputFromEnv({ root, env: gateEnv, api: attemptApi(jobs) }));
+    const verdict = gateVerdictStage2(gateInputStage2FromEnv({ root, env: gateEnv, api: attemptApi(jobs) }));
     expect(verdict).toEqual({ ready: false, reasons: ['code gates skipped on a code push (Unit tests: skipped)'] });
   });
 
@@ -883,12 +730,12 @@ describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions
     const root = ciRoot();
     const noRunId = { ...gateEnv, GITHUB_RUN_ID: '' };
     const api = attemptApi(jobsOf({}));
-    expect(gateVerdict(gateInputFromEnv({ root, env: noRunId, api })).reasons).toEqual([
+    expect(gateVerdictStage2(gateInputStage2FromEnv({ root, env: noRunId, api })).reasons).toEqual([
       'code gates skipped on a code push (this run is not identifiable (GITHUB_REPOSITORY, GITHUB_RUN_ID))',
     ]);
     expect(api.calls).toEqual([]);
     const failing: Api = () => ({ ok: false, problem: 'HTTP 502' });
-    expect(gateVerdict(gateInputFromEnv({ root, env: gateEnv, api: failing })).reasons).toEqual([
+    expect(gateVerdictStage2(gateInputStage2FromEnv({ root, env: gateEnv, api: failing })).reasons).toEqual([
       'code gates skipped on a code push (jobs API: HTTP 502)',
     ]);
   });

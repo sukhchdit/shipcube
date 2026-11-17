@@ -8,7 +8,7 @@ env:
   CHECKPOINT_DISABLE: '1'
   SCARF_ANALYTICS: 'false'
 jobs:
-  scans:
+  ci-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -13,14 +13,14 @@ import { findRepoRoot, runNode } from '../test-support/process.js';
 import { FORBIDDEN_ENGINE_ENV } from '../deps/prisma-engines.mjs';
 import { LINT_FIXTURE_MODE_ENV as LINT_FIXTURE_MODE_SUITE_ENV } from '../lint/fixture-expectations.mjs';
 import {
-  BASE_LINT_FIXTURES_SCRIPT,
-  CI_REQUIRED_GATES,
+  BASE_LINT_FIXTURES_SCRIPT_TESTED_BASE,
+  CI_REQUIRED_GATES_STAGE_2,
   CI_TRIGGERS,
   FORBIDDEN_ENV,
-  LANE_B_EVIDENCE_SCRIPT,
+  LANE_B_EVIDENCE_SCRIPT_TESTED_BASE,
   LINT_FIXTURE_MODE_ENV,
-  OPENAPI_BREAKING_RUN,
-  PORCELAIN_RUN,
+  OPENAPI_BREAKING_RUN_STAGE_2,
+  PORCELAIN_RUN_STAGE_2,
   REQUIRED_CODEOWNED_PATHS,
   checkCodeowners,
   checkJestManualMocks,
@@ -122,19 +122,13 @@ describe('check-workflow-policy: negative fixtures', () => {
       'pr-secrets',
     ],
     ['[RR-8 (i)] GH_TOKEN in a job env fails (token on lane-scope steps only)', 'ci-gh-token-job-env.yml', 'gh-token'],
-    ['[RR-8 (i)] GH_TOKEN on a scans step that does not run "$GATE_LANE_SCOPE" fails', 'ci-gh-token-other-step.yml', 'gh-token'],
-    ['[RR-8 (ii)] stage 1: actions: read on fast-lane fails (only scans and ci-gate)', 'ci-actions-read-fast-lane.yml', 'permissions'],
+    ['[RR-8 (i)] GH_TOKEN on a ci-gate step that is not a pinned token step fails', 'ci-gh-token-other-step.yml', 'gh-token'],
     [
       '[RR-8 (ii)] [TASK-286] stage 2: actions: read on security-integration fails (only fast-lane and ci-gate)',
       'ci-actions-read-security-integration.yml',
       'permissions',
     ],
     ['[PR46-SEC-15] Y19: top-level pull-requests: read fails', 'ci-pull-requests-read-top-level.yml', 'permissions'],
-    [
-      '[PR46-SEC-15] stage 1: pull-requests: read on ci-gate fails (only scans)',
-      'ci-pull-requests-read-ci-gate-stage-1.yml',
-      'permissions',
-    ],
     ['[PR46-SEC-15] Y21: pull-requests: read on a lane-c.yml job fails', 'lane-c-pull-requests-read.yml', 'permissions'],
     ['[PR42-SEC-18] N6: an expression-valued NODE_OPTIONS fails', 'node-options-expression.yml', 'node-options-preload'],
     ['[PR42-SEC-18] N7: BASH_ENV beside the heap line on a lint step fails', 'lint-env-bash-env.yml', 'lint-env'],
@@ -166,9 +160,9 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['PR10-SEC-07: the PR body interpolated into github-script fails', 'untrusted-expression-github-script.yml', 'untrusted-expression'],
     ['PR10-SEC-07: on: issue_comment is rejected', 'issue-comment-trigger.yml', 'forbidden-trigger'],
     ['PR10-SEC-07: on: pull_request_review is rejected', 'pull-request-review-trigger.yml', 'forbidden-trigger'],
-    ['PR10-SEC-02: npm in ci.yml job scans fails', 'ci-scans-npm.yml', 'scans-isolation'],
-    ['PR10-SEC-02: a workspace script in ci.yml job scans fails', 'ci-scans-workspace-script.yml', 'scans-isolation'],
-    ['PR10-SEC-02: setup-node with cache/.node-version in ci.yml job scans fails', 'ci-scans-setup-node-cache.yml', 'scans-isolation'],
+    ['PR10-SEC-02: npm in ci.yml job ci-gate (the folded scans) fails', 'ci-scans-npm.yml', 'scans-isolation'],
+    ['PR10-SEC-02: a workspace script in ci.yml job ci-gate fails', 'ci-scans-workspace-script.yml', 'scans-isolation'],
+    ['PR10-SEC-02: setup-node with cache/.node-version in ci.yml job ci-gate fails', 'ci-scans-setup-node-cache.yml', 'scans-isolation'],
     [
       'D-ORCH-018: LINT_FIXTURE_MODE in a job env fails (the head unit-test run stays exact)',
       'lint-fixture-mode-job-env.yml',
@@ -187,7 +181,7 @@ describe('check-workflow-policy: negative fixtures', () => {
     ['gitleaks-hardened.yml: PR10-SEC-01 positive control (.git-only mount, --ignore-gitleaks-allow, first-parent, no network)'],
     ['safe-expression.yml: PR10-SEC-07 positive control (github.sha, runner.*, steps.*.outputs.*)'],
     [
-      'ci-gh-token-lane-scope.yml: RR-8 (i)-(iii) positive control (GH_TOKEN = github.token or secrets.GITHUB_TOKEN on lane-scope steps of scans and ci-gate, which hold actions: read; pr-secrets accepts both)',
+      'ci-gh-token-lane-scope.yml: RR-8 (i)-(iii) positive control (GH_TOKEN = github.token or secrets.GITHUB_TOKEN on the exact classify, lane-scope and aggregation steps of fast-lane and ci-gate, which hold actions: read; pr-secrets accepts both)',
     ],
   ])('positive control %s', (title) => {
     const fixture = title.split(':')[0] ?? '';
@@ -224,8 +218,8 @@ describe('check-workflow-policy: repository', () => {
     }
   });
 
-  it('PR10-SEC-07 required-gates (stage 1, kept accepted by TASK-286; the stage-2 pins are in ci-policy-stage-2.test.ts): the workflow keeps every gate; dropping or guarding one fails; ci.yml must exist', () => {
-    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
+  it('PR10-SEC-07 required-gates (the committed stage-2 ci.yml; stage 1 retired by TASK-287 part 287-A): the workflow keeps every gate; dropping or guarding one fails; ci.yml must exist', () => {
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(checkWorkflow(ci, 'ci.yml', { requiredGates: true })).toEqual([]);
     const dropped = ci.replace('"$GITLEAKS_IMAGE" git /repo', '"$GITLEAKS_IMAGE" version');
     expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.rule)).toContain('required-gates');
@@ -233,18 +227,14 @@ describe('check-workflow-policy: repository', () => {
     expect(checkWorkflow(guarded, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       expect.stringContaining('workflow policy gate step must be unconditional'),
     ]);
-    const ungated = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, security-integration]');
-    expect(checkWorkflow(ungated, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
-      'ci.yml ci-gate must need scans',
-      'ci.yml job ci-gate needs must be exactly [fast-lane, scans, security-integration] (RR-5, PR46-SEC-01, RR-6)',
-    ]);
     // ADR-0023 am. G item 5: the hosted security-integration job stays part of the lane A aggregate.
-    const noSecurity = ci.replace('needs: [fast-lane, scans, security-integration]', 'needs: [fast-lane, scans]');
+    expect(ci.split('needs: [fast-lane, security-integration]')).toHaveLength(2);
+    const noSecurity = ci.replace('needs: [fast-lane, security-integration]', 'needs: [fast-lane]');
     expect(checkWorkflow(noSecurity, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       'ci.yml ci-gate must need security-integration',
-      'ci.yml job ci-gate needs must be exactly [fast-lane, scans, security-integration] (RR-5, PR46-SEC-01, RR-6)',
+      'ci.yml job ci-gate needs must be exactly [fast-lane, security-integration] (D-ARCH-128)',
     ]);
-    expect(CI_REQUIRED_GATES.length).toBeGreaterThanOrEqual(21);
+    expect(CI_REQUIRED_GATES_STAGE_2.length).toBeGreaterThanOrEqual(21);
     const root = mkdtempSync(join(tmpdir(), 'workflow-policy-'));
     try {
       mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
@@ -256,10 +246,13 @@ describe('check-workflow-policy: repository', () => {
   });
 
   describe('D-ORCH-018 / PR17-SEC-03: the base-ref lint fixture step is a pinned required gate; the mode variable lives on that step only', () => {
-    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
     const modeEntry = '        env:\n          LINT_FIXTURE_MODE: no-weakening\n';
-    const guard = "        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'\n" + modeEntry;
+    const modeLine = '          LINT_FIXTURE_MODE: no-weakening\n';
+    // Stage 2 (PR46-SEC-17): the step env also carries the tested base from the classify step.
+    const toolsRefEntry = '          TOOLS_REF: ${{ steps.classify.outputs.tools_ref }}\n';
+    const guard = "        if: env.CODE == 'true' && env.LINT_CONTROLS == 'true'\n" + modeEntry + toolsRefEntry;
     const jest = '          node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/jest/bin/jest.js \\\n';
     const jestArgs = '            --config "$config" --runTestsByPath "$suite" || status=$?\n';
     const mustSet = 'required-gates: ci.yml base-ref lint negative fixtures gate step must set env LINT_FIXTURE_MODE: no-weakening';
@@ -276,7 +269,7 @@ describe('check-workflow-policy: repository', () => {
       expect(ci.split(jest + jestArgs)).toHaveLength(2);
       const run = ci.slice(ci.indexOf('          set -euo pipefail\n          suite=tools/lint/negative-fixtures.test.ts'));
       expect(commandLines(run.slice(0, run.indexOf('\n\n'))).map((line) => line.replace(/^ {10}/u, ''))).toEqual([
-        ...BASE_LINT_FIXTURES_SCRIPT,
+        ...BASE_LINT_FIXTURES_SCRIPT_TESTED_BASE,
       ]);
       expect(messages(replaceOnce(ci, jest, `          # a reworded comment\n\n${jest}`))).toEqual([]);
       // After a line continuation bash joins the next line to the command, so it is not skipped there.
@@ -310,7 +303,7 @@ describe('check-workflow-policy: repository', () => {
       }
       const tail = '          exit "$status"\n';
       expect(messages(replaceOnce(ci, tail, '          exit 0\n'))).toEqual(notTheGate);
-      expect(messages(replaceOnce(ci, '          git checkout "$RANGE_BASE" -- "${base_paths[@]}"\n', '          true\n'))).toEqual(
+      expect(messages(replaceOnce(ci, '          git checkout "$TOOLS_REF" -- "${base_paths[@]}"\n', '          true\n'))).toEqual(
         notTheGate,
       );
       expect(messages(replaceOnce(ci, jest, `          git checkout HEAD -- tools/lint/fixture-expectations.mjs\n${jest}`))).toEqual(
@@ -326,15 +319,16 @@ describe('check-workflow-policy: repository', () => {
         'required-gates: ci.yml base-ref lint negative fixtures gate step must not set working-directory',
       ]);
       expect(messages(replaceOnce(ci, guard, `${guard}          RANGE_BASE: HEAD\n`))).toEqual([
-        'required-gates: ci.yml base-ref lint negative fixtures gate step must set no env but LINT_FIXTURE_MODE (found RANGE_BASE)',
+        'required-gates: ci.yml base-ref lint negative fixtures gate step must set no env but LINT_FIXTURE_MODE, TOOLS_REF (found RANGE_BASE)',
       ]);
       expect(messages(replaceOnce(ci, '  fast-lane:\n', "  fast-lane:\n    defaults:\n      run:\n        shell: 'true {0}'\n"))).toEqual([
         'required-gates: ci.yml job fast-lane must not set defaults.run (it would change how its gate steps run)',
+        'required-gates: ci.yml job fast-lane must not set defaults (pinned job shape)',
       ]);
       expect(messages(replaceOnce(ci, '\njobs:\n', '\ndefaults:\n  run:\n    working-directory: apps\njobs:\n'))).toEqual([
         'required-gates: ci.yml must not set defaults.run (it would change how every gate step runs)',
       ]);
-      expect(messages(ci.replace(modeEntry, ''))).toEqual([mustSet]);
+      expect(messages(ci.replace(modeLine, ''))).toEqual([mustSet]);
       expect(messages(ci.replace(modeEntry, modeEntry.replace('no-weakening', 'exact')))).toEqual([mustSet]);
       expect(messages(ci.replace(guard, guard.replace("LINT_CONTROLS == 'true'", "LINT_CONTROLS == 'never'")))).toEqual([
         expect.stringContaining('base-ref lint negative fixtures gate step must be guarded only by'),
@@ -351,10 +345,13 @@ describe('check-workflow-policy: repository', () => {
         'echo LINT_FIX\\\n            TURE_MODE=exact >> "$GITHUB_ENV"',
       ]) {
         const text = replaceOnce(ci, unitTests, `        run: |\n          ${write}\n          npm run test:unit\n`);
-        expect([write, messages(text)]).toEqual([
+        // A $GITHUB_ENV write in a fast-lane step is also the stage-2 gate-env tripwire (PR46-SEC-12).
+        const found = messages(text);
+        expect([write, found.filter((message) => !message.startsWith('gate-env:'))]).toEqual([
           write,
           [onlyHere, 'required-gates: ci.yml job fast-lane must keep the unit tests gate step'].sort(),
         ]);
+        expect(found.some((message) => message.startsWith('gate-env:'))).toBe(write.includes('GITHUB_ENV'));
       }
       expect(
         mentionsOf({ a: ['x', { LINT_FIXTURE_MODE: 'y' }], b: 'LINT_FIXTURE_MODE=1', c: 'LINT_FIX"TURE_MODE' }, 'LINT_FIXTURE_MODE'),
@@ -423,7 +420,7 @@ describe('check-workflow-policy: repository', () => {
   });
 
   describe('[PR23-SEC-06] lane B evidence step pin (D-SEC-PR23-02 (2), D-ORCH-032 (1), R2-n2, R2-n3)', () => {
-    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     const baseLine =
       'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"';
     const stepName = '      - name: Lane B evidence (quality:check-evidence)\n';
@@ -434,9 +431,9 @@ describe('check-workflow-policy: repository', () => {
     };
     const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
 
-    it('[PR23-SEC-06] the committed step passes and equals LANE_B_EVIDENCE_SCRIPT', () => {
+    it('[PR23-SEC-06] the committed step passes and equals LANE_B_EVIDENCE_SCRIPT_TESTED_BASE', () => {
       expect(messages(ci)).toEqual([]);
-      expect(laneBEvidenceProblems(LANE_B_EVIDENCE_SCRIPT.join('\n'))).toEqual([]);
+      expect(laneBEvidenceProblems(LANE_B_EVIDENCE_SCRIPT_TESTED_BASE.join('\n'))).toEqual([]);
     });
 
     it.each<[string, () => string, string]>([
@@ -482,8 +479,8 @@ describe('check-workflow-policy: repository', () => {
       ],
       [
         'step env key',
-        () => swap(stepName, `${stepName}        env:\n          GITHUB_EVENT_NAME: push\n`),
-        'must set no env but  (found GITHUB_EVENT_NAME)',
+        () => swap(`${stepName}        env:\n`, `${stepName}        env:\n          GITHUB_EVENT_NAME: push\n`),
+        'must set no env but TOOLS_REF (found GITHUB_EVENT_NAME)',
       ],
       [
         'job env key',
@@ -498,9 +495,9 @@ describe('check-workflow-policy: repository', () => {
       [
         'no-base branch exits 0 on pull_request',
         () => swap(pushGuard, '            if true; then\n'),
-        'must be exactly LANE_B_EVIDENCE_SCRIPT',
+        'must be exactly LANE_B_EVIDENCE_SCRIPT_TESTED_BASE',
       ],
-      ['verifier made non-fatal', () => swap(baseLine, `${baseLine} || true`), 'must be exactly LANE_B_EVIDENCE_SCRIPT'],
+      ['verifier made non-fatal', () => swap(baseLine, `${baseLine} || true`), 'must be exactly LANE_B_EVIDENCE_SCRIPT_TESTED_BASE'],
       [
         'merge_group trigger added (R2-n2)',
         () => swap('\non:\n', '\non:\n  merge_group:\n'),
@@ -532,7 +529,7 @@ describe('check-workflow-policy: repository', () => {
           expect(found).toEqual(
             expect.arrayContaining([
               expect.stringContaining('lane B evidence gate step: non-ASCII character U+00A0'),
-              expect.stringContaining('must be exactly LANE_B_EVIDENCE_SCRIPT'),
+              expect.stringContaining('must be exactly LANE_B_EVIDENCE_SCRIPT_TESTED_BASE'),
             ]),
           );
       },
@@ -540,17 +537,17 @@ describe('check-workflow-policy: repository', () => {
   });
 
   describe('[PR #33 R1-m2] [PR33-SEC-03] porcelain and openapi-breaking pins: exact command, no step env, fixed position', () => {
-    const ci = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     const messages = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
     const swap = (text: string, from: string, to: string): string => {
       expect(text.split(from)).toHaveLength(2);
       return text.replace(from, () => to);
     };
-    const oasRun = `        run: ${OPENAPI_BREAKING_RUN}\n`;
+    const oasRun = `        run: ${OPENAPI_BREAKING_RUN_STAGE_2}\n`;
     const oasName = '      - name: OpenAPI breaking changes against the latest release tag (oasdiff, NFR-MAINT-004)\n';
-    const afterLintStep = `      - name: Lint must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN}\n\n`;
-    const afterLintRun = `      - name: Lint must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN}\n`;
-    const afterBuildRun = `      - name: Build must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN}\n`;
+    const afterLintStep = `      - name: Lint must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN_STAGE_2}\n\n`;
+    const afterLintRun = `      - name: Lint must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN_STAGE_2}\n`;
+    const afterBuildRun = `      - name: Build must not mutate the tree (git status --porcelain)\n        if: env.CODE == 'true'\n        run: ${PORCELAIN_RUN_STAGE_2}\n`;
     const lintStep = '      - name: Lint (ESLint, Stylelint, suppressions)\n';
     const semgrepSelfTest = '      - name: Semgrep rule self-test (when rules or their fixtures change)\n';
     const otherDigest = `docker.io/tufin/oasdiff:v1.37.0@sha256:${'b'.repeat(64)}`;
@@ -560,8 +557,8 @@ describe('check-workflow-policy: repository', () => {
       expect(ci.split(oasRun)).toHaveLength(2);
       expect(ci.split(afterLintRun)).toHaveLength(2);
       expect(ci.split(afterBuildRun)).toHaveLength(2);
-      expect(exactRunProblems(PORCELAIN_RUN)(`${PORCELAIN_RUN}\n`)).toEqual([]);
-      expect(exactRunProblems(PORCELAIN_RUN)(`# why\n${PORCELAIN_RUN}\n\n`)).toEqual([]);
+      expect(exactRunProblems(PORCELAIN_RUN_STAGE_2)(`${PORCELAIN_RUN_STAGE_2}\n`)).toEqual([]);
+      expect(exactRunProblems(PORCELAIN_RUN_STAGE_2)(`# why\n${PORCELAIN_RUN_STAGE_2}\n\n`)).toEqual([]);
     });
 
     it.each<[string, () => string, string]>([
@@ -592,7 +589,7 @@ describe('check-workflow-policy: repository', () => {
       ],
       [
         'openapi: second line exit 0',
-        () => swap(ci, oasRun, `        run: |\n          ${OPENAPI_BREAKING_RUN}\n          exit 0\n`),
+        () => swap(ci, oasRun, `        run: |\n          ${OPENAPI_BREAKING_RUN_STAGE_2}\n          exit 0\n`),
         'openapi-breaking gate step: the run: must be exactly',
       ],
       [
@@ -625,18 +622,18 @@ describe('check-workflow-policy: repository', () => {
         () =>
           swap(
             ci,
-            '      PR_NUMBER: ${{ github.event.pull_request.number }}\n',
-            `      PR_NUMBER: \${{ github.event.pull_request.number }}\n      OASDIFF_IMAGE: ${OASDIFF_IMAGE}\n`,
+            '      EVENT: ${{ github.event_name }}\n      PR_NUMBER: ${{ github.event.pull_request.number }}\n',
+            `      EVENT: \${{ github.event_name }}\n      PR_NUMBER: \${{ github.event.pull_request.number }}\n      OASDIFF_IMAGE: ${OASDIFF_IMAGE}\n`,
           ),
-        'ci.yml job scans must not set OASDIFF_IMAGE',
+        'ci.yml job ci-gate must not set OASDIFF_IMAGE',
       ],
       [
         'openapi: job env GATES_DIR',
         () =>
           swap(
             ci,
-            '      PR_NUMBER: ${{ github.event.pull_request.number }}\n',
-            '      PR_NUMBER: ${{ github.event.pull_request.number }}\n      GATES_DIR: /tmp/x\n',
+            '      EVENT: ${{ github.event_name }}\n      PR_NUMBER: ${{ github.event.pull_request.number }}\n',
+            '      EVENT: ${{ github.event_name }}\n      PR_NUMBER: ${{ github.event.pull_request.number }}\n      GATES_DIR: /tmp/x\n',
           ),
         'gate-env: GATES_DIR locates gate tooling',
       ],
@@ -680,8 +677,8 @@ describe('check-workflow-policy: repository', () => {
         () =>
           swap(
             ci,
-            '          git checkout "$RANGE_BASE" -- "${base_paths[@]}"\n',
-            '          \u00a0# || exit 0\n          git checkout "$RANGE_BASE" -- "${base_paths[@]}"\n',
+            '          git checkout "$TOOLS_REF" -- "${base_paths[@]}"\n',
+            '          \u00a0# || exit 0\n          git checkout "$TOOLS_REF" -- "${base_paths[@]}"\n',
           ),
         'must keep the base-ref lint negative fixtures gate step',
       ],

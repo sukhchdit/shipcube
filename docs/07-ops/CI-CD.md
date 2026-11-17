@@ -45,8 +45,9 @@ then re-run the docs run).
 The base-ref policy changed the lane A job graph in two steps, policy first. The **policy PR** taught
 `check-workflow-policy.mjs` and `lane-scope.mjs` the stage-2 topology next to stage 1: a ci.yml with a `scans` job is
 held to the stage-1 pins, one without it to the stage-2 pins, each in full (no mixture passes). The **workflow PR**
-installed the stage-2 `ci.yml`; the stage-1 workflow stays as `tools/ci/fixtures/stage-1/ci.yml` for the stage-1 pin
-tests until its pins are retired. In stage 2:
+installed the stage-2 `ci.yml`. TASK-287 part 287-A retired the stage-1 topology (PR55-SEC-10, D-TASK286-01a,
+D-ARCH-140): the stage-1 pins, gate rules, classify call and fixture are gone, and a `ci.yml` that restores a `scans`
+job is a `required-gates` finding. In stage 2:
 
 - `fast-lane` takes its gate tooling from the **tested base** `TOOLS_REF`: on a pull request the first parent of
   GitHub's test merge (`HEAD^1`, the current `main`; `HEAD^2` must be the PR head and the event's base an ancestor),
@@ -62,15 +63,21 @@ tests until its pins are retired. In stage 2:
   changes** (P1 (b); PR46-SEC-16 as widened by PR55-SEC-03, D-TASK286-06). A semantic conflict between files that only
   one side changed, outside that set, is left to the D-ORCH-042 post-merge gate. A base change is dated by its
   committer time: a squash merge lands with its landing time, so push `main` commits that touch these paths right
-  after creating them (PR55-SEC-04 residual). A void proof turns a docs push into `ci-gate: BLOCKED: no code proof`;
-  another docs push is still light and stays BLOCKED, so push a code change or close and reopen the PR (a reopen runs
-  the full lane on the same head). Commitlint, actionlint and the head-code checks run only on a code push; the
+  after creating them (PR55-SEC-04 residual). Since TASK-287 a docs push of a PR with code changes whose proof
+  candidates were all **voided by the tested base** runs the full lane at once (`code_changed=true`, `mode=full`,
+  `push_scope` stays `docs`): the code must run on the new base before the merge anyway, and the full run (about 8-10
+  billed minutes) is cheaper than the blocked light run (3-4) plus that re-push (SPK-07 section 6.1; D-TASK286-06a
+  option). With no candidate at all (the code run is pending or red) the push stays light and ends
+  `BLOCKED: no code proof`; push a code change or close and reopen the PR. Commitlint, actionlint and the head-code checks run only on a code push; the
   install, registry signatures and the advisory audit run on **every** push (PR46-SEC-11, D-TASK286-03), and when the
   PR range touches a lint control the lint-fixture steps must have succeeded in this run or the proof (R1-n1).
 - `security-integration` needs `fast-lane` only. `ci-gate` is last and holds the former `scans` steps: it recomputes
   the classification with the tested base's `lane-scope.mjs`, re-reads the proofs under the same binding, runs
   gitleaks and the record check on every head and Semgrep/oasdiff unless a docs push has a code proof, and is red when
-  its classification differs from `fast-lane`'s (PR46-SEC-12). Expected bill: docs push 2 minutes, code push about 6.
+  its classification differs from `fast-lane`'s (PR46-SEC-12). When the aggregation step carries fast-lane's separate
+  outputs (`FAST_LANE_MODE`, `FAST_LANE_CODE_PROOF`, `FAST_LANE_SECURITY_INTEGRATION_DUE`, `FAST_LANE_TOOLS_REF`; the
+  policy accepts them with exactly these values since TASK-287 part 287-A) each must equal ci-gate's own value
+  (PR55-SEC-05). Measured bill: code push 8-10 billed minutes, docs push with a proof about 3 (SPK-07 section 6.1).
 
 ### security-integration (lane A, amendment G item 5 as amended by L item 2)
 

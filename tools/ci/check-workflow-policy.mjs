@@ -12,14 +12,12 @@
  *                         triggers; PR10-SEC-07).
  *   permissions           top-level `permissions` present and read-only (`{}` or scopes set to read/none); job-level
  *                         `write` only for the (workflow, job, scope) triples in JOB_WRITE_ALLOWLIST; `actions:` (other
- *                         than none) never at workflow level and only on ACTIONS_READ_JOBS (ci.yml scans and ci-gate,
- *                         the no-head-code proof lookups; RR-8 (ii)); `pull-requests:` likewise, only on ci.yml scans
- *                         (PR46-SEC-15). In the stage-2 topology (TASK-286) both only on fast-lane and ci-gate.
+ *                         than none) never at workflow level and only on ACTIONS_READ_JOBS (ci.yml fast-lane and
+ *                         ci-gate, the proof lookups; RR-8 (ii), D-ARCH-128); `pull-requests:` likewise (PR46-SEC-15).
  *   gh-token              a token reference (`github.token`, `secrets.GITHUB_TOKEN`, GH_TOKEN, GITHUB_TOKEN) appears
- *                         only as the `GH_TOKEN` step env entry of a ci.yml scans/ci-gate step whose `run:` invokes
- *                         "$GATE_LANE_SCOPE"; never at workflow or job level, never in fast-lane or security-integration
- *                         (ADR-0023 am. L; RR-8 (i)). Stage 2: only on fast-lane's classify step and ci-gate's
- *                         lane-scope and aggregation steps, which invoke "${GATE_LANE_SCOPE:?}" (lane-scope steps only).
+ *                         only as the `GH_TOKEN` step env entry of fast-lane's classify step or ci-gate's lane-scope and
+ *                         aggregation steps, found by gate position and exact text (RR-8 (i), PR55-SEC-09); never at
+ *                         workflow or job level, never in security-integration.
  *   workflow-env          NPM_CONFIG_IGNORE_SCRIPTS="true", CHECKPOINT_DISABLE="1", SCARF_ANALYTICS="false" at workflow level.
  *   forbidden-env         Prisma engine redirects (FORBIDDEN_ENV) and PLAYWRIGHT_*DOWNLOAD_HOST (any case, also as
  *                         npm_config_* / npm_package_config_*; PR46-SEC-02) in any env map or run script.
@@ -58,29 +56,16 @@
  *   scans-isolation       ci.yml jobs `scans` and `ci-gate` run no npm, nothing from node_modules or the workspace, no
  *                         local action and no setup-node cache, so no head-controlled code shares their runner or their
  *                         actions: read token (PR10-SEC-02; RR-6).
- *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES in its job, unconditional or with its listed
- *                         `if:` and exactly its listed `env:`, with no `shell:`/`working-directory:` on the step and no
- *                         `defaults.run` on the workflow or the gate's job, and `ci-gate` needs `fast-lane`, `scans`
- *                         and `security-integration`
- *                         (PR10-SEC-07, PR17-SEC-03). The base-ref lint fixture step's commands are pinned line by line
- *                         (BASE_LINT_FIXTURES_SCRIPT, an allow-list), as is the lane B evidence step; the porcelain and
- *                         openapi-breaking gates are pinned to one exact command line with no step env, each porcelain
- *                         gate directly after the step it guards, and OASDIFF_IMAGE is the openapi-breaking.mjs pin, set
- *                         at workflow level only (PR #33 R1-m2, PR33-SEC-03 (i)); pinned scripts are pure ASCII
- *                         (PR33-SEC-01). The other gates are matched by pattern (and by step name where two gates share
- *                         a command: the post-lint and post-build porcelain gates). ADR-0023 am. L stage 1 (RR-4..RR-7,
- *                         PR46-SEC-01/-03; laneScopeFindings): the lane-scope step (exact command and env, id, before
- *                         gitleaks), the security-integration suites step (SECURITY_INTEGRATION_SCRIPT), ci-gate's tooling
- *                         and aggregation steps (exact; aggregation last), the pinned jobs' `if:`, `needs`, permissions,
- *                         job env and outputs, the pull-request concurrency (cancel-in-progress: false), and the
- *                         pull-request base filter `branches: [main]` (CI_PULL_REQUEST_BRANCHES; R2-M1, PR46-SEC-13);
- *                         since TASK-286 also the scans tooling step (SCANS_TOOLING_SCRIPT) with security paths and
- *                         lane scope directly after it, nothing but checkout/setup-node before it and no other scans
- *                         step writing $GITHUB_ENV (PR46-SEC-12). A ci.yml without a `scans` job is the stage-2 topology
- *                         (ADR-0023 am. L item 3, D-ARCH-128; topologyOf) and is held instead to
- *                         CI_REQUIRED_GATES_STAGE_2 and stage2Findings: the tested-base tooling steps, the classify step
- *                         and every gate tool as "${GATE_*:?}", ci-gate exactly its pinned steps, the jobs' shape and
- *                         $GITHUB_ENV written only by the pinned steps (PR46-SEC-11/-12/-15/-17, PR42-SEC-18).
+ *   required-gates        ci.yml keeps every gate step of CI_REQUIRED_GATES_STAGE_2 in its job, unconditional or with its
+ *                         listed `if:` and exactly its listed `env:`, with no `shell:`/`working-directory:` on the step
+ *                         and no `defaults.run` on the workflow or the gate's job (PR10-SEC-07, PR17-SEC-03); pinned
+ *                         steps are exact and pure ASCII (PR33-SEC-01); OASDIFF_IMAGE is the openapi-breaking.mjs pin, set
+ *                         at workflow level only (PR33-SEC-03 (i)). stage2Findings (ADR-0023 am. L item 3, D-ARCH-128):
+ *                         the tested-base tooling and classify steps, every gate tool as "${GATE_*:?}", ci-gate exactly
+ *                         its pinned steps, the jobs' shape, permissions, env, outputs and action inputs, $GITHUB_ENV
+ *                         written only by the pinned steps (PR46-SEC-11/-12/-15/-17, PR42-SEC-18, PR55-SEC-01/-02,
+ *                         PR59-SEC-01). The stage-1 topology (a `scans` job) is retired (TASK-287 part 287-A, PR55-SEC-10,
+ *                         D-TASK286-01a, D-ARCH-140): a ci.yml with a `scans` job is a finding.
  *   gate-env              no `env:` entry named GATE_* or GATES_* anywhere: gate locations come only from the base-ref
  *                         gate-tooling steps through $GITHUB_ENV.
  *   lint-fixture-mode     LINT_FIXTURE_MODE appears nowhere but in the `env:` of ci.yml's base-ref lint fixture step
@@ -288,19 +273,6 @@ export function nonAsciiProblem(script) {
   return `non-ASCII character U+${code} in a pinned run: (pinned scripts are pure ASCII; PR33-SEC-01)`;
 }
 
-/** Matches a `run:` whose command lines are exactly BASE_LINT_FIXTURES_SCRIPT, in pure ASCII. */
-const BASE_LINT_FIXTURES_RUN = Object.freeze({
-  /** @param {string} script */
-  test: (script) => {
-    const lines = commandLines(script);
-    return (
-      nonAsciiProblem(script) === null &&
-      lines.length === BASE_LINT_FIXTURES_SCRIPT.length &&
-      lines.every((line, index) => line === BASE_LINT_FIXTURES_SCRIPT[index])
-    );
-  },
-});
-
 /** The porcelain gates' exact `run:` (post-lint and post-build; PR4-SEC-13 item 1, PR #33 R1-m2). */
 export const PORCELAIN_RUN = 'node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"';
 /** The openapi-breaking gate's exact `run:` (NFR-MAINT-004; PR #33 R1-m2, PR33-SEC-03 (i)). */
@@ -325,35 +297,6 @@ export function exactRunProblems(expected) {
   };
 }
 
-/**
- * The lane B evidence step (PR23-SEC-06 as amended by D-SEC-PR23-02 (2); D-ORCH-032 (1); PR #23 code review R2-n3), as
- * command lines, pinned exactly: the verifier, its lib and the manifest come only from the base ref; the event is
- * always `"$GITHUB_EVENT_NAME"` (never a literal, never re-assigned); there is no head-copy bootstrap and no
- * `--report-only`; a missing base fails closed on every event but push (where the verifier skips itself anyway), and a
- * base without the verifier fails closed with a message that says to merge main (D-ORCH-032).
- */
-export const LANE_B_EVIDENCE_SCRIPT = Object.freeze([
-  'set -euo pipefail',
-  'quality="$RUNNER_TEMP/quality"',
-  'mkdir -p "$quality/base"',
-  'if [ -z "$RANGE_BASE" ] || [ "$RANGE_BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then',
-  '  if [ "$GITHUB_EVENT_NAME" = "push" ]; then',
-  '    echo "### Lane B evidence (quality:check-evidence): not run, the pushed range has no base commit (push skips the check)" >> "$GITHUB_STEP_SUMMARY"',
-  '    exit 0',
-  '  fi',
-  '  echo "::error title=Lane B evidence::the range has no base commit; the verifier runs only from the base ref (fail closed, PR23-SEC-06)"',
-  '  exit 1',
-  'fi',
-  'if ! git cat-file -e "$RANGE_BASE:tools/quality/check-evidence.mjs" 2>/dev/null; then',
-  '  echo "::error title=Lane B evidence::the base commit has no tools/quality/check-evidence.mjs: this branch predates the verifier. Merge main into the branch and push again (D-ORCH-032); the head copy is never trusted."',
-  '  echo "### Lane B evidence (quality:check-evidence): FAIL, the base commit predates the verifier; merge main into the branch (D-ORCH-032)" >> "$GITHUB_STEP_SUMMARY"',
-  '  exit 1',
-  'fi',
-  'git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"',
-  'node "$quality/base/tools/quality/check-evidence.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --event "$GITHUB_EVENT_NAME" --summary "$GITHUB_STEP_SUMMARY"',
-]);
-
-/** Events lane A runs on; each must be an `EVENTS` value of tools/quality/check-evidence.mjs (PR #23 R2-n2). */
 export const CI_TRIGGERS = Object.freeze(['pull_request', 'push']);
 
 /**
@@ -362,7 +305,7 @@ export const CI_TRIGGERS = Object.freeze(['pull_request', 'push']);
  * @param {readonly string[]} [expected] the pinned script (stage 2: LANE_B_EVIDENCE_SCRIPT_TESTED_BASE)
  * @returns {string[]}
  */
-export function laneBEvidenceProblems(script, expected = LANE_B_EVIDENCE_SCRIPT) {
+export function laneBEvidenceProblems(script, expected = LANE_B_EVIDENCE_SCRIPT_TESTED_BASE) {
   const lines = commandLines(script);
   /** @type {string[]} */
   const out = [];
@@ -379,7 +322,7 @@ export function laneBEvidenceProblems(script, expected = LANE_B_EVIDENCE_SCRIPT)
   if (lines.length !== expected.length || lines.some((line, index) => line !== expected[index])) {
     const index = expected.findIndex((line, i) => lines[i] !== line);
     out.push(
-      `the run: must be exactly ${expected === LANE_B_EVIDENCE_SCRIPT ? 'LANE_B_EVIDENCE_SCRIPT' : 'the pinned evidence script'} (first difference at command line ${String((index === -1 ? expected.length : index) + 1)})`,
+      `the run: must be exactly ${expected === LANE_B_EVIDENCE_SCRIPT_TESTED_BASE ? 'LANE_B_EVIDENCE_SCRIPT_TESTED_BASE' : 'the pinned evidence script'} (first difference at command line ${String((index === -1 ? expected.length : index) + 1)})`,
     );
   }
   return out;
@@ -411,15 +354,13 @@ export function pinnedScriptProblems(expected) {
 }
 
 /*
- * ADR-0023 amendment L (D-ARCH-126/127; ruling rulings/wave-0-ci-minutes.md section 4 RR-4..RR-8; PR46-SEC-01/-03;
- * code review PR #46 m1). Stage 1 pins: the lane-scope step of `scans`, the `security-integration` job, `ci-gate` and the
- * pull-request concurrency are held to exact text here (base ref), so a PR cannot narrow its own selection, accept a
- * failed or skipped job, run the suites from head manifests, mask a step or reach the token from head code. Step `if:`s
- * of the other gates and the `ci-gate` needs list change only in the stage-2 policy PR (TASK-286, two-step).
+ * ADR-0023 amendment L (D-ARCH-126/127/128; ruling rulings/wave-0-ci-minutes.md section 4 RR-4..RR-8; PR46-SEC-01/-03/
+ * -11/-12/-15/-17; TASK-286) as amended by am. N items 3-5 (D-ARCH-140; TASK-287 part 287-A): ci.yml has one job
+ * topology, the folded stage 2 (fast-lane, security-integration, ci-gate). The stage-1 topology (a `scans` job) is
+ * retired (PR #55 R1-m2, PR55-SEC-10, D-TASK286-01a): a ci.yml that restores a `scans` job is a required-gates finding,
+ * so no PR can bring back CODE-gated signatures and audit or the pattern-pinned stage-1 scans.
  */
-/** The lane-scope step of job `scans` (RR-4): exact command; GH_TOKEN and RANGE_BEFORE are its only step env. */
-export const LANE_SCOPE_RUN =
-  'node "$GATE_LANE_SCOPE" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"';
+/** ci-gate's lane-scope step env (RR-4): GH_TOKEN, RANGE_BEFORE and HEAD_REF, nothing else. */
 export const LANE_SCOPE_ENV = Object.freeze({
   GH_TOKEN: '${{ github.token }}',
   RANGE_BEFORE: '${{ github.event.before }}',
@@ -431,48 +372,19 @@ export const LANE_SCOPE_ENV = Object.freeze({
  * exists to be adopted as a proof (lane-scope.mjs PROOF_BASE_REF binds the lookup as well).
  */
 export const CI_PULL_REQUEST_BRANCHES = Object.freeze(['main']);
-/** The step id the `scans` outputs read (RR-4). */
+/** The id of ci-gate's lane-scope step (its outputs gate Semgrep/oasdiff and feed the aggregation). */
 export const LANE_SCOPE_STEP_ID = 'lane-scope';
-/** Job `scans` outputs: one source, the base-ref lane-scope step (RR-4). */
-export const SCANS_OUTPUTS = Object.freeze(
-  Object.fromEntries(
-    ['code_changed', 'pr_docs_only', 'code_proof', 'security_proof', 'record_ok', 'security_paths', 'security_integration_due'].map(
-      (key) => [key, `\${{ steps.${LANE_SCOPE_STEP_ID}.outputs.${key} }}`],
-    ),
-  ),
-);
-/** Job `fast-lane` outputs: the mode its classify step chose (ci-gate compares it with the scans classification). */
-export const FAST_LANE_OUTPUTS = Object.freeze({ mode: '${{ steps.classify.outputs.mode }}' });
-/** Job-level env of the pinned jobs: the range and event inputs the pinned commands read. */
-export const PINNED_JOB_ENV = Object.freeze({
-  scans: Object.freeze({
-    RANGE_BASE: '${{ github.event.pull_request.base.sha || github.event.before }}',
-    RANGE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
-    EVENT: '${{ github.event_name }}',
-    PR_NUMBER: '${{ github.event.pull_request.number }}',
-  }),
-  'security-integration': Object.freeze({ NPM_CONFIG_IGNORE_SCRIPTS: 'true', RANGE_BASE: '${{ github.event.pull_request.base.sha }}' }),
-  'ci-gate': Object.freeze({
-    RANGE_BASE: '${{ github.event.pull_request.base.sha || github.event.before }}',
-    RANGE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
-  }),
-});
-/** Job-level permissions of the pinned jobs (RR-4, RR-6, RR-8 (ii)). */
-export const PINNED_JOB_PERMISSIONS = Object.freeze({
-  'fast-lane': Object.freeze({ contents: 'read' }),
-  // pull-requests: read for the proof binding's pulls and issue-events calls (R2-M1, PR46-SEC-13).
-  scans: Object.freeze({ contents: 'read', actions: 'read', 'pull-requests': 'read' }),
-  'security-integration': Object.freeze({ contents: 'read' }),
-  'ci-gate': Object.freeze({ contents: 'read', actions: 'read' }),
+/** ci-gate's job env: the range and event inputs its pinned commands read. */
+const RANGE_JOB_ENV = Object.freeze({
+  RANGE_BASE: '${{ github.event.pull_request.base.sha || github.event.before }}',
+  RANGE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
+  EVENT: '${{ github.event_name }}',
+  PR_NUMBER: '${{ github.event.pull_request.number }}',
 });
 /**
- * RR-5 + PR46-SEC-01: once per code tree on merge-candidate heads, and only after fast-lane succeeded with the lane A
- * supply-chain gates passed on this code tree (full mode here, or the proof run of a light run).
+ * The security-integration suites step template (manifests from the base, no head-copy branch, no extra flag such as
+ * --dry-run); SECURITY_INTEGRATION_SCRIPT_TESTED_BASE is the pinned form, reading the tested base (PR46-SEC-17).
  */
-export const SECURITY_INTEGRATION_IF =
-  "${{ !cancelled() && github.event_name == 'pull_request' && needs.scans.outputs.security_integration_due == 'true' && needs.fast-lane.result == 'success' && (needs.fast-lane.outputs.mode == 'full' || needs.scans.outputs.code_proof != '') }}";
-export const SECURITY_INTEGRATION_NEEDS = Object.freeze(['scans', 'fast-lane']);
-/** The suites step: base-ref manifests only (no head-copy branch), then the runner with no extra flag (no --dry-run). */
 export const SECURITY_INTEGRATION_SCRIPT = Object.freeze([
   'set -euo pipefail',
   'manifests="$RUNNER_TEMP/security-manifests"',
@@ -487,136 +399,22 @@ export const SECURITY_INTEGRATION_SCRIPT = Object.freeze([
   'node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"',
 ]);
 export const CI_GATE_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}";
-export const CI_GATE_NEEDS = Object.freeze(['fast-lane', 'scans', 'security-integration']);
-/** ci-gate's tooling step: the base ref's tools/ci (head git objects only while the base lacks lane-scope.mjs). */
-export const CI_GATE_TOOLING_SCRIPT = Object.freeze([
-  'set -euo pipefail',
-  'gates="$RUNNER_TEMP/gates"',
-  'mkdir -p "$gates"',
-  'if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE:tools/ci/lane-scope.mjs" 2>/dev/null; then',
-  '  git archive "$RANGE_BASE" tools/ci | tar -x -C "$gates"',
-  '  echo "Gate tool tools/ci/lane-scope.mjs: base ref." >> "$GITHUB_STEP_SUMMARY"',
-  'else',
-  '  git archive "$RANGE_HEAD" tools/ci | tar -x -C "$gates"',
-  '  echo "Gate tool tools/ci/lane-scope.mjs: head (bootstrap: not on the base ref yet)." >> "$GITHUB_STEP_SUMMARY"',
-  'fi',
-  'echo "GATE_LANE_SCOPE=$gates/tools/ci/lane-scope.mjs" >> "$GITHUB_ENV"',
-]);
-/**
- * PR46-SEC-12 item 1 for the stage-1 topology while it is still live (TASK-286 policy PR; stage 2 replaces it): the
- * `scans` tooling step that writes every GATE_* of the job, exactly; the security-paths step directly after it and the
- * lane-scope step directly after that, so no step can re-point $GATE_LANE_SCOPE in between (X3, X4).
- */
-export const SCANS_TOOLING_SCRIPT = Object.freeze([
-  'set -euo pipefail',
-  'gates="$RUNNER_TEMP/gates"',
-  'mkdir -p "$gates/base" "$gates/head"',
-  'base_ok=false',
-  'if [ -n "$RANGE_BASE" ] && [ "$RANGE_BASE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$RANGE_BASE^{commit}" 2>/dev/null; then base_ok=true; fi',
-  '{',
-  '  echo "## Lane A (scans)"',
-  '  echo',
-  '  echo "| Gate input | From |"',
-  '  echo "|---|---|"',
-  '} >> "$GITHUB_STEP_SUMMARY"',
-  'for path in tools/ci .semgrep .gitleaks.toml .semgrepignore .gitignore; do',
-  '  if [ "$base_ok" = true ] && git cat-file -e "$RANGE_BASE:$path" 2>/dev/null; then',
-  '    git archive "$RANGE_BASE" "$path" | tar -x -C "$gates/base"',
-  '    echo "| \\`$path\\` | base ref |" >> "$GITHUB_STEP_SUMMARY"',
-  '  elif git cat-file -e "$RANGE_HEAD:$path" 2>/dev/null; then',
-  '    git archive "$RANGE_HEAD" "$path" | tar -x -C "$gates/base"',
-  '    echo "| \\`$path\\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"',
-  '  fi',
-  'done',
-  'if [ "$base_ok" = true ] && git cat-file -e "$RANGE_BASE:tools/ci/check-security-owned-paths.mjs" 2>/dev/null; then',
-  '  echo "RECORD_MODE=enforce" >> "$GITHUB_ENV"',
-  'else',
-  '  echo "RECORD_MODE=report-only" >> "$GITHUB_ENV"',
-  'fi',
-  'echo "GATES_DIR=$gates/base" >> "$GITHUB_ENV"',
-  'for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths lane-scope; do',
-  '  var="GATE_$(echo "$tool" | tr \'a-z-\' \'A-Z_\')"',
-  '  if [ -f "$gates/base/tools/ci/$tool.mjs" ]; then',
-  '    echo "$var=$gates/base/tools/ci/$tool.mjs" >> "$GITHUB_ENV"',
-  '  else',
-  '    [ -d "$gates/head/tools/ci" ] || git archive "$RANGE_HEAD" tools/ci | tar -x -C "$gates/head"',
-  '    echo "$var=$gates/head/tools/ci/$tool.mjs" >> "$GITHUB_ENV"',
-  '    echo "| \\`tools/ci/$tool.mjs\\` | head (bootstrap: not on the base ref yet) |" >> "$GITHUB_STEP_SUMMARY"',
-  '  fi',
-  'done',
-]);
-/** The stage-1 security-paths step (selects security-integration through lane-scope; RR-4). */
-export const SECURITY_PATHS_RUN =
-  'node "$GATE_SECURITY_PATHS" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"';
-/** ci-gate's aggregation (RR-6 rules (a)-(f) in the base-ref lane-scope.mjs --gate). */
-export const CI_GATE_RUN = 'node "$GATE_LANE_SCOPE" --gate --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"';
-export const CI_GATE_ENV = Object.freeze({
-  GH_TOKEN: '${{ github.token }}',
-  FAST_LANE: '${{ needs.fast-lane.result }}',
-  FAST_LANE_MODE: '${{ needs.fast-lane.outputs.mode }}',
-  SCANS: '${{ needs.scans.result }}',
-  SECURITY_INTEGRATION: '${{ needs.security-integration.result }}',
-  CODE_CHANGED: '${{ needs.scans.outputs.code_changed }}',
-  PR_DOCS_ONLY: '${{ needs.scans.outputs.pr_docs_only }}',
-  CODE_PROOF: '${{ needs.scans.outputs.code_proof }}',
-  SECURITY_PROOF: '${{ needs.scans.outputs.security_proof }}',
-  RECORD_OK: '${{ needs.scans.outputs.record_ok }}',
-  SECURITY_PATHS: '${{ needs.scans.outputs.security_paths }}',
-  SECURITY_INTEGRATION_DUE: '${{ needs.scans.outputs.security_integration_due }}',
-});
 /** RR-7: pull-request runs queue per PR; a running full run is never cancelled (its proof serves a later docs push). */
 export const CI_CONCURRENCY = Object.freeze({
   group: '${{ github.event.pull_request.number || github.sha }}',
   'cancel-in-progress': 'false',
 });
-/** Jobs that may hold `actions:` (read), as `<workflow file>:<job id>`: the no-head-code lookup jobs (RR-8 (ii)). */
-export const ACTIONS_READ_JOBS = Object.freeze(['ci.yml:scans', 'ci.yml:ci-gate']);
+/** Jobs that may hold `actions:` (read), as `<workflow file>:<job id>`: the two proof lookups (RR-8 (ii), D-ARCH-128). */
+export const ACTIONS_READ_JOBS = Object.freeze(['ci.yml:fast-lane', 'ci.yml:ci-gate']);
+/** PR46-SEC-15: jobs that may hold `pull-requests:` (read): the same two lookups (the proof binding). */
+export const PULL_REQUESTS_READ_JOBS = Object.freeze(['ci.yml:fast-lane', 'ci.yml:ci-gate']);
 /**
- * RR-8 (i) `gh-token`: a token reference (`github.token`, `secrets.GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`) may appear
- * only as the `GH_TOKEN` env entry of a ci.yml step in these jobs whose `run:` invokes "$GATE_LANE_SCOPE".
+ * RR-8 (i) `gh-token`: the jobs with token steps; within them only the pinned classify, lane-scope and aggregation
+ * steps (tokenFindings; PR55-SEC-09).
  */
-export const TOKEN_JOBS = Object.freeze(['scans', 'ci-gate']);
-/** PR46-SEC-15: jobs that may hold `pull-requests:` (read) in the stage-1 topology (the proof binding of `scans`). */
-export const PULL_REQUESTS_READ_JOBS = Object.freeze(['ci.yml:scans']);
-
-/*
- * ADR-0023 amendment L item 3 (D-ARCH-128; ruling rulings/wave-0-ci-minutes.md section 3 (4) and section 5 TASK-286):
- * stage 2 folds `scans` into `ci-gate`, makes `security-integration` need `fast-lane` only, gates commitlint and actionlint
- * on env.CODE (the install stays unconditional, D-TASK286-03) and runs Semgrep and oasdiff unless a docs-only push has a code proof. The change is two
- * steps because this file runs from the base ref: this policy first accepts BOTH topologies, each held to its own pins
- * in full (a ci.yml with a `scans` job is stage 1, without one stage 2; no mixture passes), then the workflow PR
- * switches ci.yml; the stage-1 pins stay until TASK-287 retires them (PR #55 R1-m2, proposed card line; until then the
- * 24 h proof-age rule applies to any stage-1 ci.yml). Stage 2 also carries the routed security
- * items: the tested base TOOLS_REF = HEAD^1 for every base-ref extraction (PR46-SEC-17), pinned tooling steps and
- * "${GATE_*:?}" (PR46-SEC-12, PR33-SEC-09), the classification recomputed in ci-gate (PR46-SEC-12), `pull-requests:`
- * confined like `actions:` (PR46-SEC-15), registry signatures and the advisory audit on every push, a light one too
- * (PR46-SEC-11), and the Lint step env pinned (PR42-SEC-18).
- */
-/** The job topology of a parsed ci.yml: `stage-1` while it has a `scans` job, else `stage-2`. */
-export const TOPOLOGIES = Object.freeze(['stage-1', 'stage-2']);
-/**
- * @param {YamlNode | undefined | null} doc a parsed ci.yml
- * @returns {'stage-1' | 'stage-2'}
- */
-export function topologyOf(doc) {
-  const jobs = isMap(doc ?? undefined) ? asMap(/** @type {YamlMap} */ (doc).jobs) : undefined;
-  return jobs !== undefined && Object.hasOwn(jobs, 'scans') ? 'stage-1' : 'stage-2';
-}
-/** Per topology: jobs that may hold `actions:` / `pull-requests:` (read) and jobs whose lane-scope steps get the token. */
-export const ACTIONS_READ_JOBS_BY_TOPOLOGY = Object.freeze({
-  'stage-1': ACTIONS_READ_JOBS,
-  'stage-2': Object.freeze(['ci.yml:fast-lane', 'ci.yml:ci-gate']),
-});
-export const PULL_REQUESTS_READ_JOBS_BY_TOPOLOGY = Object.freeze({
-  'stage-1': PULL_REQUESTS_READ_JOBS,
-  'stage-2': Object.freeze(['ci.yml:fast-lane', 'ci.yml:ci-gate']),
-});
-export const TOKEN_JOBS_BY_TOPOLOGY = Object.freeze({ 'stage-1': TOKEN_JOBS, 'stage-2': Object.freeze(['fast-lane', 'ci-gate']) });
-/** How a token step invokes the lane-scope tool: stage 1 `"$GATE_LANE_SCOPE"`, stage 2 only `"${GATE_LANE_SCOPE:?}"`. */
-const LANE_SCOPE_INVOCATION = Object.freeze({
-  'stage-1': /"\$GATE_LANE_SCOPE"|"\$\{GATE_LANE_SCOPE:\?\}"/u,
-  'stage-2': /"\$\{GATE_LANE_SCOPE:\?\}"/u,
-});
+export const TOKEN_JOBS = Object.freeze(['fast-lane', 'ci-gate']);
+/** The retired stage-1 job (PR55-SEC-10): its presence in ci.yml is a required-gates finding. */
+export const RETIRED_SCANS_JOB = 'scans';
 
 /**
  * PR46-SEC-17: the tested base. On pull requests TOOLS_REF = HEAD^1, the first parent of GitHub's test merge (the
@@ -798,7 +596,22 @@ export const CI_GATE_ENV_TESTED_BASE = Object.freeze({
   SECURITY_INTEGRATION: '${{ needs.security-integration.result }}',
   CLASSIFICATION: `\${{ steps.${LANE_SCOPE_STEP_ID}.outputs.classification }}`,
 });
-/** The lane B evidence step from the tested base (PR46-SEC-17; otherwise LANE_B_EVIDENCE_SCRIPT's rules). */
+/**
+ * PR55-SEC-05 (TASK-287 part 287-A, policy first): fast-lane's separate outputs that steer security-integration, passed
+ * into the aggregation so the gate compares each with its own classification (lane-scope FAST_LANE_OUTPUT_ENV).
+ */
+export const CI_GATE_ENV_FAST_LANE_OUTPUTS = Object.freeze({
+  FAST_LANE_MODE: '${{ needs.fast-lane.outputs.mode }}',
+  FAST_LANE_CODE_PROOF: '${{ needs.fast-lane.outputs.code_proof }}',
+  FAST_LANE_SECURITY_INTEGRATION_DUE: '${{ needs.fast-lane.outputs.security_integration_due }}',
+  FAST_LANE_TOOLS_REF: '${{ needs.fast-lane.outputs.tools_ref }}',
+});
+/**
+ * The lane B evidence step (PR23-SEC-06 as amended by D-SEC-PR23-02 (2); D-ORCH-032 (1); PR #23 code review R2-n3;
+ * PR46-SEC-17), as command lines, pinned exactly: the verifier, its lib and the manifest come only from the tested base;
+ * the event is always `"$GITHUB_EVENT_NAME"` (never a literal, never re-assigned); there is no head-copy bootstrap and
+ * no `--report-only`; a missing base fails closed on every event but push (where the verifier skips itself anyway).
+ */
 export const LANE_B_EVIDENCE_SCRIPT_TESTED_BASE = Object.freeze([
   'set -euo pipefail',
   'quality="$RUNNER_TEMP/quality"',
@@ -856,7 +669,7 @@ export const PINNED_JOB_ENV_STAGE_2 = Object.freeze({
     RANGE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}',
   }),
   'security-integration': Object.freeze({ NPM_CONFIG_IGNORE_SCRIPTS: 'true' }),
-  'ci-gate': PINNED_JOB_ENV.scans,
+  'ci-gate': RANGE_JOB_ENV,
 });
 export const PINNED_JOB_PERMISSIONS_STAGE_2 = Object.freeze({
   'fast-lane': Object.freeze({ contents: 'read', actions: 'read', 'pull-requests': 'read' }),
@@ -879,144 +692,11 @@ const TOKEN_VALUES = Object.freeze(['${{ github.token }}', '${{ secrets.GITHUB_T
 /**
  * `after`: the gate whose step must come directly before this one in the same job (PR #33 R1-m2).
  * @typedef {{ job: string, gate: string, name?: RegExp, run: { test: (script: string) => boolean }, ifs: readonly string[],
- *   env?: Record<string, string>, problems?: (script: string) => string[], after?: string }} RequiredGate
+ *   env?: Record<string, string>, envOptional?: Record<string, string>, problems?: (script: string) => string[],
+ *   after?: string }} RequiredGate
+ * `envOptional`: step env entries the gate may carry in addition to `env`, each with exactly this value (a
+ * policy-first step: the next workflow PR adds them and the policy then moves them into `env`).
  */
-export const CI_REQUIRED_GATES = Object.freeze(
-  /** @type {RequiredGate[]} */ ([
-    { job: 'fast-lane', gate: 'workflow policy', run: /node "\$GATE_CHECK_WORKFLOW_POLICY"/, ifs: [] },
-    { job: 'fast-lane', gate: 'install flags', run: /node "\$GATE_CHECK_INSTALL_FLAGS"/, ifs: [] },
-    { job: 'fast-lane', gate: 'migration immutability', run: /node "\$GATE_CHECK_MIGRATION_IMMUTABILITY"/, ifs: [] },
-    { job: 'fast-lane', gate: 'lockfile', run: /node "\$GATE_CHECK_LOCKFILE"/, ifs: ["env.CODE == 'true'"] },
-    { job: 'fast-lane', gate: 'dependency age', run: /node "\$GATE_CHECK_DEP_AGE"/, ifs: ["env.CODE == 'true'"] },
-    { job: 'fast-lane', gate: 'install', run: /^npm ci --ignore-scripts\b/, ifs: [] },
-    { job: 'fast-lane', gate: 'licences', run: /node "\$GATE_LICENCE_CHECK"/, ifs: ["env.CODE == 'true'"] },
-    { job: 'fast-lane', gate: 'registry signatures', run: /npm audit signatures\b/, ifs: ["env.CODE == 'true'"] },
-    { job: 'fast-lane', gate: 'vulnerability audit', run: /node "\$GATE_CHECK_AUDIT"/, ifs: ["env.CODE == 'true'"] },
-    // PR42-SEC-18: the Lint step env is pinned exactly (a heap size only).
-    { job: 'fast-lane', gate: 'lint', run: /^npm run lint$/, ifs: ["env.CODE == 'true'"], env: LINT_ENV },
-    { job: 'fast-lane', gate: 'format', run: /^npm run format:check$/, ifs: ["env.CODE == 'true'"] },
-    { job: 'fast-lane', gate: 'commitlint', run: /npm exec --no -- commitlint\b/, ifs: [] },
-    { job: 'fast-lane', gate: 'actionlint', run: /"\$ACTIONLINT_IMAGE"/, ifs: [] },
-    { job: 'fast-lane', gate: 'type-check', run: /^npm run typecheck$/, ifs: ["env.CODE == 'true'"] },
-    { job: 'fast-lane', gate: 'unit tests', run: /^npm run test:unit$/, ifs: ["env.CODE == 'true'"] },
-    {
-      job: 'fast-lane',
-      gate: 'base-ref lint negative fixtures',
-      run: BASE_LINT_FIXTURES_RUN,
-      ifs: ["env.CODE == 'true' && env.LINT_CONTROLS == 'true'"],
-      env: { [LINT_FIXTURE_MODE_ENV]: 'no-weakening' },
-    },
-    { job: 'fast-lane', gate: 'build', run: /^npm run build$/, ifs: ["env.CODE == 'true'"] },
-    // Two porcelain gates run the same command, so each is found by its step name too (PR4-SEC-13 item 1). Both are
-    // held to the exact command with no step env, and each must directly follow the step it guards (PR #33 R1-m2).
-    {
-      job: 'fast-lane',
-      gate: 'porcelain after lint',
-      name: /^Lint must not mutate the tree\b/,
-      run: /node "\$GATE_CHECK_PORCELAIN"/,
-      ifs: ["env.CODE == 'true'"],
-      env: {},
-      problems: exactRunProblems(PORCELAIN_RUN),
-      after: 'lint',
-    },
-    {
-      job: 'fast-lane',
-      gate: 'porcelain',
-      name: /^Build must not mutate the tree\b/,
-      run: /node "\$GATE_CHECK_PORCELAIN"/,
-      ifs: ["env.CODE == 'true'"],
-      env: {},
-      problems: exactRunProblems(PORCELAIN_RUN),
-      after: 'build',
-    },
-    // PR55-SEC-01 item 3: no step env on the scans (a BASH_ENV or PATH entry would run head code inside the scans job).
-    { job: 'scans', gate: 'gitleaks', run: /"\$GITLEAKS_IMAGE" git \/repo --config \/config\/gitleaks\.toml /, ifs: [], env: {} },
-    { job: 'scans', gate: 'semgrep', run: /node "\$GATE_RUN_SEMGREP"/, ifs: [], env: {} },
-    { job: 'scans', gate: 'security-owned paths record', run: /node "\$GATE_CHECK_SECURITY_OWNED_PATHS"/, ifs: [], env: {} },
-    // NFR-MAINT-004, PR #21 R1-m6: the contract against the latest release tag (oasdiff, digest-pinned). Exact command,
-    // no step env (a step `GATE_OPENAPI_BREAKING` or `OASDIFF_IMAGE` would swap the script or the image; PR33-SEC-03 (i)).
-    {
-      job: 'scans',
-      gate: 'openapi-breaking',
-      run: /node "\$GATE_OPENAPI_BREAKING"/,
-      ifs: [],
-      env: {},
-      problems: exactRunProblems(OPENAPI_BREAKING_RUN),
-    },
-    // PR23-SEC-06 / D-SEC-PR23-02 (2) / D-ORCH-032 (1) / R2-n3: the step is found by name and verifier path, then held to
-    // LANE_B_EVIDENCE_SCRIPT line by line, with no step env at all.
-    {
-      job: 'fast-lane',
-      gate: 'lane B evidence',
-      name: /^Lane B evidence\b/,
-      run: LANE_B_EVIDENCE_RUN,
-      ifs: [],
-      env: {},
-      problems: laneBEvidenceProblems,
-    },
-    // ADR-0023 am. L (D-ARCH-126/127; RR-4, RR-6; PR46-SEC-03, code review PR #46 m1): the classifier and proof lookup,
-    // the security-integration suites step and ci-gate's aggregation are held to exact text, with exact step env.
-    // PR46-SEC-12 item 1 (TASK-286, stage 1 while live): the scans tooling step, then security paths, then lane scope.
-    {
-      job: 'scans',
-      gate: 'scans tooling',
-      name: /^Gate tooling and scan configuration from the base ref\b/,
-      run: /echo "GATES_DIR=\$gates\/base" >> "\$GITHUB_ENV"/,
-      ifs: [],
-      env: {},
-      problems: pinnedScriptProblems(SCANS_TOOLING_SCRIPT),
-    },
-    {
-      job: 'scans',
-      gate: 'security paths',
-      name: /^Security-critical paths\b/,
-      run: /node "\$GATE_SECURITY_PATHS"/,
-      ifs: [],
-      env: {},
-      problems: exactRunProblems(SECURITY_PATHS_RUN),
-      after: 'scans tooling',
-    },
-    {
-      job: 'scans',
-      gate: 'lane scope',
-      name: /^Lane scope and proofs\b/,
-      run: /node "\$GATE_LANE_SCOPE"/,
-      ifs: [],
-      env: LANE_SCOPE_ENV,
-      problems: exactRunProblems(LANE_SCOPE_RUN),
-      after: 'security paths',
-    },
-    {
-      job: 'security-integration',
-      gate: 'security integration suites',
-      name: /^Security integration suites\b/,
-      run: /tools\/ci\/security-integration\.mjs/,
-      ifs: [],
-      env: {},
-      problems: pinnedScriptProblems(SECURITY_INTEGRATION_SCRIPT),
-    },
-    {
-      job: 'ci-gate',
-      gate: 'ci-gate tooling',
-      name: /^Gate tooling from the base ref \(lane-scope\)/,
-      run: /GATE_LANE_SCOPE=/,
-      ifs: [],
-      env: {},
-      problems: pinnedScriptProblems(CI_GATE_TOOLING_SCRIPT),
-    },
-    {
-      job: 'ci-gate',
-      gate: 'ci-gate aggregate',
-      name: /^Aggregate lane A\b/,
-      run: /node "\$GATE_LANE_SCOPE" --gate\b/,
-      ifs: [],
-      env: CI_GATE_ENV,
-      problems: exactRunProblems(CI_GATE_RUN),
-      after: 'ci-gate tooling',
-    },
-  ]),
-);
-
 /**
  * `node "${<name>:?}"` as a pattern (PR33-SEC-09: an unset gate location fails the step instead of running nothing).
  * @param {string} name
@@ -1318,18 +998,19 @@ export const CI_REQUIRED_GATES_STAGE_2 = Object.freeze(
       run: /node "\$\{GATE_LANE_SCOPE:\?\}" --gate\b/,
       ifs: [],
       env: CI_GATE_ENV_TESTED_BASE,
+      envOptional: CI_GATE_ENV_FAST_LANE_OUTPUTS,
       problems: exactRunProblems(CI_GATE_RUN_TESTED_BASE),
     },
   ]),
 );
 
 /**
- * The required gates for a parsed ci.yml's topology (lane-scope.mjs maps them to step names for the jobs API).
- * @param {YamlNode | undefined | null} doc
+ * The required gates of ci.yml (lane-scope.mjs maps them to step names for the jobs API). One topology since the stage-1
+ * retirement (TASK-287 part 287-A).
  * @returns {readonly RequiredGate[]}
  */
-export function requiredGatesFor(doc) {
-  return topologyOf(doc) === 'stage-1' ? CI_REQUIRED_GATES : CI_REQUIRED_GATES_STAGE_2;
+export function requiredGatesFor() {
+  return CI_REQUIRED_GATES_STAGE_2;
 }
 /** ci-gate's steps after checkout and setup-node in stage 2, in this order and nothing else (PR46-SEC-12 item 1). */
 export const CI_GATE_STEPS_STAGE_2 = Object.freeze([
@@ -1341,8 +1022,8 @@ export const CI_GATE_STEPS_STAGE_2 = Object.freeze([
   'security-owned paths record',
   'ci-gate aggregate',
 ]);
-/** The job holding the scans (gitleaks, Semgrep, oasdiff, record) in each topology. */
-export const SCANS_JOB_BY_TOPOLOGY = Object.freeze({ 'stage-1': 'scans', 'stage-2': 'ci-gate' });
+/** The job holding the scans (gitleaks, Semgrep, oasdiff, record). */
+export const SCANS_JOB = 'ci-gate';
 
 const GITLEAKS_RUN = /\$\{?GITLEAKS_IMAGE\b|gitleaks\/gitleaks[:@]/;
 const VOLUME = /(?:^|\s)(?:-v|--volume)(?:\s+|=)["']?([^"'\s]+)/g;
@@ -1637,12 +1318,11 @@ export function checkWorkflow(text, fileName, options = {}) {
   const mayInstallBrowsers = PLAYWRIGHT_INSTALL_WORKFLOWS.includes(fileName);
   const triggers = triggersOf(doc.on);
   const prTriggered = triggers.has('pull_request') || triggers.has('pull_request_target');
-  // D-ARCH-128: the read scopes and token steps a ci.yml may hold depend on its job topology; other workflows hold none.
-  const topology = isCi ? topologyOf(doc) : undefined;
+  // D-ARCH-128: the read scopes and token steps only ci.yml may hold; other workflows hold none.
   /** @type {readonly string[]} */
-  const actionsJobs = topology === undefined ? [] : ACTIONS_READ_JOBS_BY_TOPOLOGY[topology];
+  const actionsJobs = isCi ? ACTIONS_READ_JOBS : [];
   /** @type {readonly string[]} */
-  const pullRequestsJobs = topology === undefined ? [] : PULL_REQUESTS_READ_JOBS_BY_TOPOLOGY[topology];
+  const pullRequestsJobs = isCi ? PULL_REQUESTS_READ_JOBS : [];
 
   for (const event of FORBIDDEN_TRIGGERS) {
     if (triggers.has(event))
@@ -1670,7 +1350,7 @@ export function checkWorkflow(text, fileName, options = {}) {
         );
     }
   }
-  for (const f of tokenFindings(doc, isCi, topology)) add(f.rule, f.message, f.path);
+  for (const f of tokenFindings(doc, isCi)) add(f.rule, f.message, f.path);
 
   // workflow-level env
   const workflowEnv = asMap(doc.env) ?? {};
@@ -1834,8 +1514,8 @@ export function checkWorkflow(text, fileName, options = {}) {
       if (script !== undefined) {
         for (const f of untrustedExpressionFindings(script, 'with.script')) add(f.rule, f.message, [...stepPath, 'with', 'script']);
       }
-      // ci-gate holds actions: read and runs the base-ref lane-scope, so it is isolated like scans (RR-6).
-      if (isCi && (jobId === 'ci-gate' || (topology === 'stage-1' && jobId === 'scans'))) {
+      // ci-gate holds actions: read and runs the tested-base lane-scope and the scans, so it is isolated (RR-6).
+      if (isCi && jobId === 'ci-gate') {
         for (const message of scansStepViolations(step)) add('scans-isolation', message.replace('job scans', `job ${jobId}`), stepPath);
       }
       if (noRelease && /^aws-actions\/configure-aws-credentials@/.test(uses))
@@ -1877,10 +1557,8 @@ export function checkWorkflow(text, fileName, options = {}) {
     }
   }
   if (options.requiredGates === true) {
-    const gates = requiredGatesFor(doc);
-    const needs = topology === 'stage-1' ? CI_GATE_NEEDS : CI_GATE_NEEDS_STAGE_2;
-    for (const f of requiredGateFindings(jobs, doc.defaults, triggers, doc.env ?? {}, gates, needs)) add(f.rule, f.message, f.path);
-    for (const f of topology === 'stage-1' ? laneScopeFindings(doc) : stage2Findings(doc)) add(f.rule, f.message, f.path);
+    for (const f of requiredGateFindings(jobs, doc.defaults, triggers, doc.env ?? {})) add(f.rule, f.message, f.path);
+    for (const f of stage2Findings(doc)) add(f.rule, f.message, f.path);
     // PR33-SEC-01: outside comment lines ci.yml is pure ASCII. The YAML subset trims Unicode blanks that GitHub's parser
     // keeps (and bash does not treat as blanks), so a non-ASCII character in a key, value or run: line is refused.
     for (const [index, line] of rawLines.entries()) {
@@ -1948,7 +1626,7 @@ export function mentionsOf(node, name, path = []) {
 
 /**
  * True for the one allowed mention of LINT_FIXTURE_MODE: the `env:` key of ci.yml's base-ref lint fixture step
- * (jobs.fast-lane.steps.<n>.env.LINT_FIXTURE_MODE, the step whose `run:` is BASE_LINT_FIXTURES_RUN).
+ * (jobs.fast-lane.steps.<n>.env.LINT_FIXTURE_MODE, the step whose `run:` is BASE_LINT_FIXTURES_RUN_TESTED_BASE).
  * @param {YamlMap} jobs
  * @param {string[]} path
  */
@@ -1959,7 +1637,7 @@ function isBaseLintFixtureModeEntry(jobs, path) {
   const list = asMap(jobs['fast-lane'])?.steps;
   const step = Array.isArray(list) ? asMap(list[Number(index)]) : undefined;
   const run = asString(step?.run) ?? '';
-  return BASE_LINT_FIXTURES_RUN.test(run) || BASE_LINT_FIXTURES_RUN_TESTED_BASE.test(run);
+  return BASE_LINT_FIXTURES_RUN_TESTED_BASE.test(run);
 }
 
 /**
@@ -1985,8 +1663,8 @@ const GATE_STEP_OVERRIDES = Object.freeze(['shell', 'working-directory']);
  * @param {YamlNode} [workflowDefaults] the workflow-level `defaults:`
  * @param {Set<string>} [triggers] the workflow's `on:` events (checked against CI_TRIGGERS when given)
  * @param {YamlNode} [workflowEnv] the workflow-level `env:` (OASDIFF_IMAGE is checked when given)
- * @param {readonly RequiredGate[]} [gates] the topology's required gates (default: stage 1)
- * @param {readonly string[]} [ciGateNeeds] jobs `ci-gate` must need (default: stage 1)
+ * @param {readonly RequiredGate[]} [gates] the required gates (default: CI_REQUIRED_GATES_STAGE_2)
+ * @param {readonly string[]} [ciGateNeeds] jobs `ci-gate` must need (default: CI_GATE_NEEDS_STAGE_2)
  * @returns {{ rule: string, message: string, path: string[] }[]}
  */
 export function requiredGateFindings(
@@ -1994,8 +1672,8 @@ export function requiredGateFindings(
   workflowDefaults,
   triggers,
   workflowEnv,
-  gates = CI_REQUIRED_GATES,
-  ciGateNeeds = CI_GATE_NEEDS,
+  gates = CI_REQUIRED_GATES_STAGE_2,
+  ciGateNeeds = CI_GATE_NEEDS_STAGE_2,
 ) {
   /** @type {{ rule: string, message: string, path: string[] }[]} */
   const out = [];
@@ -2101,7 +1779,16 @@ export function requiredGateFindings(
           });
         }
       }
-      for (const name of Object.keys(env).filter((key) => !Object.hasOwn(gateEnv, key))) {
+      const optional = gate.envOptional ?? {};
+      for (const [name, value] of Object.entries(optional)) {
+        if (Object.hasOwn(env, name) && env[name] !== value)
+          out.push({
+            rule: 'required-gates',
+            message: `ci.yml ${gate.gate} gate step env ${name} must be ${value}`,
+            path: ['jobs', gate.job, 'steps', String(index), 'env', name],
+          });
+      }
+      for (const name of Object.keys(env).filter((key) => !Object.hasOwn(gateEnv, key) && !Object.hasOwn(optional, key))) {
         out.push({
           rule: 'required-gates',
           message: `ci.yml ${gate.gate} gate step must set no env but ${Object.keys(gateEnv).join(', ')} (found ${name})`,
@@ -2121,7 +1808,7 @@ export function requiredGateFindings(
           path: ['on', trigger],
         });
   }
-  // RR-8 (iv): the step `if:`s above and this needs list change with the topology only (TASK-286, two-step).
+  // RR-8 (iv): the step `if:`s above and this needs list are part of the pinned topology.
   const needs = asMap(jobs['ci-gate'])?.needs;
   const needList = Array.isArray(needs) ? needs : typeof needs === 'string' ? [needs] : [];
   for (const job of ciGateNeeds) {
@@ -2152,115 +1839,13 @@ const showMap = (map) =>
     .map(([key, value]) => `${key}: ${value}`)
     .join(', ')} }`;
 
-/**
- * Stage-1 pins of ADR-0023 amendment L for ci.yml (see the constants above): concurrency, the pinned jobs' `if:`, `needs`,
- * permissions, job env and outputs, the lane-scope step's id and position, and ci-gate's last step.
- * @param {YamlMap} doc the parsed ci.yml
- * @returns {{ rule: string, message: string, path: string[] }[]}
- */
-export function laneScopeFindings(doc) {
-  /** @type {{ rule: string, message: string, path: string[] }[]} */
-  const out = [];
-  const add = (/** @type {string} */ message, /** @type {string[]} */ path) => out.push({ rule: 'required-gates', message, path });
-  const jobs = asMap(doc.jobs) ?? {};
-  out.push(...triggerAndConcurrencyFindings(doc));
-  // PR55-SEC-11: stage 1 too, while it is accepted (DOCKER_HOST, ACTIONS_ALLOW_UNSECURE_COMMANDS and the like would
-  // reach every scans step through the workflow env).
-  out.push(...workflowEnvKeyFindings(doc));
-  for (const [jobId, expected] of Object.entries(PINNED_JOB_PERMISSIONS)) {
-    if (!sameMap(asMap(jobs[jobId])?.permissions, expected))
-      add(`ci.yml job ${jobId} permissions must be exactly ${showMap(expected)} (RR-4, RR-6, RR-8 (ii))`, ['jobs', jobId, 'permissions']);
-  }
-  for (const [jobId, expected] of Object.entries(PINNED_JOB_ENV)) {
-    if (!sameMap(asMap(jobs[jobId])?.env, expected))
-      add(`ci.yml job ${jobId} env must be exactly ${showMap(expected)} (the pinned commands read these inputs)`, ['jobs', jobId, 'env']);
-  }
-  if (!sameMap(asMap(jobs.scans)?.outputs, SCANS_OUTPUTS))
-    add(`ci.yml job scans outputs must be exactly the lane-scope step's outputs (${Object.keys(SCANS_OUTPUTS).join(', ')}; RR-4)`, [
-      'jobs',
-      'scans',
-      'outputs',
-    ]);
-  if (!sameMap(asMap(jobs['fast-lane'])?.outputs, FAST_LANE_OUTPUTS))
-    add(`ci.yml job fast-lane outputs must be exactly ${showMap(FAST_LANE_OUTPUTS)} (D-ARCH-126)`, ['jobs', 'fast-lane', 'outputs']);
-  const securityIntegration = asMap(jobs['security-integration']) ?? {};
-  if (asString(securityIntegration.if) !== SECURITY_INTEGRATION_IF)
-    add(`ci.yml security-integration if: must be exactly ${SECURITY_INTEGRATION_IF} (RR-5, PR46-SEC-01)`, [
-      'jobs',
-      'security-integration',
-      'if',
-    ]);
-  const ciGate = asMap(jobs['ci-gate']) ?? {};
-  if (asString(ciGate.if) !== CI_GATE_IF) add(`ci.yml ci-gate if: must be exactly ${CI_GATE_IF}`, ['jobs', 'ci-gate', 'if']);
-  for (const [jobId, job, expected] of /** @type {const} */ ([
-    ['security-integration', securityIntegration, SECURITY_INTEGRATION_NEEDS],
-    ['ci-gate', ciGate, CI_GATE_NEEDS],
-  ])) {
-    const list = asList(job.needs);
-    if (list.length !== expected.length || !expected.every((need) => list.includes(need)))
-      add(`ci.yml job ${jobId} needs must be exactly [${expected.join(', ')}] (RR-5, PR46-SEC-01, RR-6)`, ['jobs', jobId, 'needs']);
-  }
-  for (const [jobId, job] of /** @type {const} */ ([
-    ['security-integration', securityIntegration],
-    ['ci-gate', ciGate],
-  ])) {
-    for (const key of ['defaults', 'container', 'services', 'strategy', 'continue-on-error'])
-      if (job[key] !== undefined) add(`ci.yml job ${jobId} must not set ${key} (pinned job shape)`, ['jobs', jobId, key]);
-  }
-  const ciGateSteps = Array.isArray(ciGate.steps) ? ciGate.steps : [];
-  const last = asMap(ciGateSteps.at(-1));
-  if (!/^Aggregate lane A\b/u.test((asString(last?.name) ?? '').trim()) || asString(last?.if) !== undefined)
-    add('ci.yml ci-gate must end with its unconditional "Aggregate lane A" step (RR-6)', ['jobs', 'ci-gate', 'steps']);
-  const scansSteps = Array.isArray(asMap(jobs.scans)?.steps) ? /** @type {YamlNode[]} */ (asMap(jobs.scans)?.steps) : [];
-  const laneGate = CI_REQUIRED_GATES.find((gate) => gate.gate === 'lane scope');
-  const gitleaksGate = CI_REQUIRED_GATES.find((gate) => gate.gate === 'gitleaks');
-  const laneIndex = laneGate === undefined ? -1 : gateStepIndex(scansSteps, laneGate);
-  const gitleaksIndex = gitleaksGate === undefined ? -1 : gateStepIndex(scansSteps, gitleaksGate);
-  if (laneIndex !== -1) {
-    if (asString(asMap(scansSteps[laneIndex])?.id) !== LANE_SCOPE_STEP_ID)
-      add(`ci.yml lane scope step must have id ${LANE_SCOPE_STEP_ID} (the scans outputs read it)`, [
-        'jobs',
-        'scans',
-        'steps',
-        String(laneIndex),
-      ]);
-    if (gitleaksIndex !== -1 && laneIndex > gitleaksIndex)
-      add('ci.yml lane scope step must run before the gitleaks step (a red scan must not hide the classification)', [
-        'jobs',
-        'scans',
-        'steps',
-        String(laneIndex),
-      ]);
-  }
-  // PR46-SEC-12 item 1 (stage 1 while live): nothing but checkout and setup-node before the scans tooling step, and no
-  // other scans step mentions $GITHUB_ENV (X3/X4: no step can re-point a gate location before or after it).
-  const toolingGate = CI_REQUIRED_GATES.find((gate) => gate.job === 'scans' && gate.gate === 'scans tooling');
-  const toolingIndex = toolingGate === undefined ? -1 : gateStepIndex(scansSteps, toolingGate);
-  for (const [index, node] of scansSteps.entries()) {
-    const step = asMap(node) ?? {};
-    if (toolingIndex !== -1 && index < toolingIndex && (step.run !== undefined || !PRE_TOOLING_USES.test(asString(step.uses) ?? '')))
-      add('ci.yml scans: only actions/checkout and actions/setup-node may run before the scans tooling step (PR46-SEC-12)', [
-        'jobs',
-        'scans',
-        'steps',
-        String(index),
-      ]);
-    if (index !== toolingIndex && /GITHUB_ENV/u.test(asString(step.run) ?? ''))
-      out.push({
-        rule: 'gate-env',
-        message: `ci.yml scans step ${String(index)} mentions GITHUB_ENV; only the pinned scans tooling step writes it (PR46-SEC-12)`,
-        path: ['jobs', 'scans', 'steps', String(index), 'run'],
-      });
-  }
-  return out;
-}
-
 /** Actions a job may use before its tooling step (no head code and no run: before the gate locations are set). */
 const PRE_TOOLING_USES = /^actions\/(?:checkout|setup-node)@/u;
 
 /**
- * Stage-2 pins of ADR-0023 amendment L item 3 for ci.yml (D-ARCH-128; PR46-SEC-11/12/15/17): the same trigger, concurrency
- * and job-shape pins as stage 1 for fast-lane, security-integration and ci-gate (permissions, env, outputs, if:, needs);
+ * Stage-2 pins of ADR-0023 amendment L item 3 for ci.yml (D-ARCH-128; PR46-SEC-11/12/15/17): no retired `scans` job; the
+ * trigger, concurrency and job-shape pins for fast-lane, security-integration and ci-gate (permissions, env, outputs,
+ * if:, needs, action inputs);
  * the tooling step first in fast-lane and ci-gate (only checkout and setup-node before it) and the lane-scope steps with
  * their ids right after it; gitleaks after ci-gate's lane scope; ci-gate's unconditional aggregation last; and
  * $GITHUB_ENV written only by the tooling and classify steps (gate locations, TOOLS_REF, CODE, LINT_CONTROLS), and
@@ -2273,6 +1858,12 @@ export function stage2Findings(doc) {
   const out = [];
   const add = (/** @type {string} */ message, /** @type {string[]} */ path) => out.push({ rule: 'required-gates', message, path });
   const jobs = asMap(doc.jobs) ?? {};
+  // PR55-SEC-10 (TASK-287 part 287-A): the stage-1 topology is retired; a `scans` job would bring back its weaker pins.
+  if (Object.hasOwn(jobs, RETIRED_SCANS_JOB))
+    add('ci.yml must not have a scans job: the stage-1 topology is retired (PR55-SEC-10, D-TASK286-01a, TASK-287)', [
+      'jobs',
+      RETIRED_SCANS_JOB,
+    ]);
   out.push(...triggerAndConcurrencyFindings(doc));
   out.push(...workflowEnvKeyFindings(doc));
   for (const [jobId, expected] of Object.entries(PINNED_JOB_PERMISSIONS_STAGE_2)) {
@@ -2512,12 +2103,10 @@ function triggerAndConcurrencyFindings(doc) {
  * RR-8 (i) `gh-token` findings for one workflow: every token reference outside the allowed GH_TOKEN step env entries.
  * @param {YamlMap} doc
  * @param {boolean} isCi
- * @param {'stage-1' | 'stage-2'} [topology] ci.yml's topology (default: from doc)
  * @returns {{ rule: string, message: string, path: string[] }[]}
  */
-export function tokenFindings(doc, isCi, topology = topologyOf(doc)) {
-  const tokenJobs = TOKEN_JOBS_BY_TOPOLOGY[topology];
-  const invocation = LANE_SCOPE_INVOCATION[topology];
+export function tokenFindings(doc, isCi) {
+  const tokenJobs = TOKEN_JOBS;
   /**
    * PR55-SEC-09 (= PR #55 code review R1-m3): in stage 2 the token is bound to steps, not to a mention of the tool:
    * fast-lane's classify step (id classify, exactly CLASSIFY_RUN) and ci-gate's lane-scope and aggregation steps
@@ -2562,7 +2151,6 @@ export function tokenFindings(doc, isCi, topology = topologyOf(doc)) {
     const step = Array.isArray(list) ? asMap(list[Number(index)]) : undefined;
     const value = asString(asMap(step?.env)?.GH_TOKEN) ?? '';
     if (!TOKEN_VALUES.includes(value)) return false;
-    if (topology === 'stage-1') return invocation.test(asString(step?.run) ?? '');
     const position = Number(index);
     return (tokenSteps.get(jobId ?? '') ?? []).some((allowedStep) => {
       const gate = CI_REQUIRED_GATES_STAGE_2.find((candidate) => candidate.job === jobId && candidate.gate === allowedStep.gate);
@@ -2586,7 +2174,7 @@ export function tokenFindings(doc, isCi, topology = topologyOf(doc)) {
     })
     .map((path) => ({
       rule: 'gh-token',
-      message: `a token reference is allowed only as the GH_TOKEN env entry (${TOKEN_VALUES.join(' or ')}) of ${topology === 'stage-1' ? `a ci.yml ${tokenJobs.join('/')} step that runs "$GATE_LANE_SCOPE"` : "fast-lane's classify step or ci-gate's lane-scope and aggregation steps (exact, PR55-SEC-09)"} (RR-8 (i)); found at ${path.join('.')}`,
+      message: `a token reference is allowed only as the GH_TOKEN env entry (${TOKEN_VALUES.join(' or ')}) of fast-lane's classify step or ci-gate's lane-scope and aggregation steps (exact, PR55-SEC-09; RR-8 (i)); found at ${path.join('.')}`,
       path,
     }));
 }

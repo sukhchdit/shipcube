@@ -60,7 +60,7 @@ describe('security-paths: classification', () => {
       // PR57-SEC-02 (D-SEC-PR57-01): the security suites' own code paths.
       'jest.config.ts',
       'tools/test-support/process.ts',
-      'tools/test-support/db/lock.ts',
+      'tools/test-support/fs-lock.ts',
       'tools/db/lint-migrations.ts',
       'tools/db/table-classes/audit.json',
       'tools/deps/prisma-engines.json',
@@ -79,9 +79,13 @@ describe('security-paths: classification', () => {
       'package.json',
       // PR57-SEC-02 exclusions: the tools' own unit tests and DB fixtures; neighbours that are not suite code.
       'tools/test-support/process.test.ts',
+      'tools/test-support/fs-lock.test.ts',
       'tools/db/lint-migrations.test.ts',
       'tools/db/fixtures/migrations/bad.sql',
+      'tools/db/fixtures/lint/bad-raw.sql',
       'tools/deps/prisma-engines.test.ts',
+      'tools/deps/ignore-scripts.test.ts',
+      'tools/ci/lane-scope.mjs',
       'tests/generated/rbac/matrix-app.ts',
       'tests/generated/api-mounts.test.ts',
       'jest.config.base.ts',
