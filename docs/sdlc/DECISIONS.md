@@ -2804,3 +2804,13 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **New PR56-SEC-14 (INFO):** a `transaction:'none'` route returning ≥ 400 still schedules afterCommit, which contradicts the `define-route.ts:211` JSDoc. → Next PR touching `tx/execute.ts`, unless code review r2 takes it here.
   - **Open with owners:** SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next eslint.config PR), SEC-13 (TASK-033).
 - **Reversibility:** High.
+
+### D-ORCH-117 · 2026-11-17 · sdlc-orchestrator · PR #59 code r1 APPROVED_WITH_NITS; CI-minutes forecast risk raised
+- **Decision:** PR #59 code review r1 (record `29a748c`) = APPROVED_WITH_NITS. Live stage-2 behaviour is verified: proof binding, the PR46-SEC-16 void rule and rule (g) all ran live.
+- **R1-m1 (MINOR) → risk R-CI-MIN:** measured stage-2 costs are a code push = **10 billed min** (plan 5.9) and a docs push without proof = **4** (plan 2). The Budget v2 forecast becomes about **2,400 min/month, over the 2,000 free minutes** (CLOUD_BUDGET 0).
+  - **Action:** devops-engineer records the measured runs in SPK-07 §6 and re-forecasts with costed options (TASK-287 incremental lane, round-up avoidance, fewer pushes, D-ARCH-129 guards) in the #59 merge-main push.
+  - **Follow-up:** the orchestrator takes the recommendation to principal-architect if it changes ADR-0023/D-ARCH-128/129.
+  - **Interim spend guard:** at most two review/fix pushes per PR cycle; batch docs-only commits; no speculative re-runs.
+- **R1-n1:** squash #59 with an explicit `--body` (commit `03a281a`'s message is wrong about the install gate).
+- **Merge path:** merge main (new code proof) → merge-only security delta → MERGE-READY → squash. Post-merge, every open PR runs full once (stage-1 proofs do not count).
+- **Reversibility:** High.

@@ -125,6 +125,7 @@ _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuati
 1. **Scope size.** M0+M1 is very large for one run. Mitigation: strict Must/Should prioritisation in P1, small waves, escalation-ladder re-scoping.
 2. **Carrier API drift.** No live sandbox access. Mitigation: verify docs at implementation time, contract suite, opt-in live runs.
 3. **Windows host.** Tooling must be cross-platform (Node scripts, no bash-only, LF endings enforced).
+4. **CI minutes over the free tier (R-CI-MIN, D-ORCH-117).** Measured stage-2 code push = 10 billed min (plan 5.9); forecast about 2,400 min/month vs 2,000 free at CLOUD_BUDGET 0. Mitigation: devops re-forecast with costed options in SPK-07 §6; TASK-287 incremental lane; interim push discipline.
 4. **Testcontainers on Docker Desktop.** Integration tests depend on Docker availability in CI and locally.
 5. **Host memory pressure.** ~4 GB free; Claude Code reaped 3 background gate runs. Mitigation: one heavy command at a time host-wide, ≤ 3 concurrent build agents, post-merge verification by tree-equality with the gated PR head when a rerun is reaped (D-ORCH-010).
 
