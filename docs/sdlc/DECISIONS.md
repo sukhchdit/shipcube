@@ -2692,3 +2692,18 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Open INFO:** 04 and 06 accepted; 05 and 10 → TASK-287; 07 → orchestrator.
   - **Merge:** on MERGE-READY for the exact final head plus code-review approval, by **2026-11-18T02:31Z** (24 h rule) or after a fresh full run, with P1 re-checked. The workflow PR must install the new fixture blob (`4597259`).
 - **Reversibility:** High.
+
+### D-TASK288-01..08 · 2026-11-17 · test-engineer (recorded by orchestrator) · TASK-288 flake2 (PR #57 @4c3d13a)
+- **01** The reader lock is a `moduleNameMapper` shim (`tools/db/prisma-client-locked.cjs`) in every Jest project, `unit-dom` included. It locks at resolve time, so only suites that load the client pay for it.
+- **02** Readers-directory read/write lock: writers win ties, and `withFileLock` waits for live foreign readers.
+- **03 (corrects the D-TASK020-98 triage)** The ev9 `prisma-client-package` failure was a pg connect-timer race (`connectionTimeoutMillis: 2000` beat loopback ECONNREFUSED under CPU starvation), not the tree race. The timer was removed; the probe takes no read lock.
+- **04** PR53-SEC-01..03 are recorded closed by the PR #53 record; no code change.
+- **05** Branch `test/TASK-288-flake2` as dispatched.
+- **06** The new tests live in the existing `unit` suite; the `min_tests` ratchet stays with qa-lead.
+- **07** The `deps:rebuild` duration is measured inside the lock; the budget is unchanged.
+- **08** Residual pooled-fetch suites are routed out (they sit outside this PR's locks):
+  - `execute-phases.test.ts` → PR #54 fc2 (that file is already in its diff);
+  - `tests/generated/route-metadata.test.ts` [assertion 10] → W0-FLAKE-3, to be carded at the next sheet fold.
+- **Stress proof:** 20/20 green under load with regeneration mid-run (was 15/20).
+- **Security-analyst to rule:** `security-integration` was skipped because `jest.config.ts`, `tools/test-support/**`, `tools/db/**` and `tools/deps/**` are not `security_critical_paths`.
+- **Reversibility:** High.
