@@ -61,9 +61,10 @@
  *                 push the range base or empty. DOCS_ONLY_PATHS reads its manifest's tooling_inputs, and the proof's
  *                 step names come from the checked-out test merge's ci.yml (the workflow this run executes).
  *                 PR46-SEC-16: a proof run created at or before the tested base's newest first-parent commit touching a
- *                 proofBasePath (PROOF_BASE_DIRS, every root-level non-Markdown file, the manifest's tooling_inputs) is no
- *                 proof, since it merged an older base on a path every lane A result depends on; an unreadable history
- *                 gives no proof at all. Outputs add `lint_controls` (LINT_CONTROL_PATHS over the PR range; an unknown
+ *                 proofBasePath (PROOF_BASE_DIRS, the lint controls, every root-level non-Markdown file, the manifest's
+ *                 tooling_inputs, and every path the PR range itself changes: P1 (b), D-TASK286-06) is no proof, since
+ *                 it merged an older base on a path the lane A result depends on; an unreadable history or an unknown
+ *                 PR range gives no proof at all. Outputs add `lint_controls` (LINT_CONTROL_PATHS over the PR range; an unknown
  *                 range is true), `tools_ref` and `classification` (CLASSIFICATION_KEYS in order, `key=value`, `,`).
  *   --env <file>  appends CODE and LINT_CONTROLS (fast-lane's step conditions) to $GITHUB_ENV.
  *   --gate        when the checked-out ci.yml has the stage-2 topology: CLASSIFICATION (ci-gate's own lane-scope step)
@@ -113,13 +114,29 @@ export const PROOF_SCANS_GATES = Object.freeze(['gitleaks', 'semgrep', 'openapi-
 /** Proof runs are runs against this base branch only (R2-M1, PR46-SEC-13; ci.yml `on.pull_request.branches`). */
 export const PROOF_BASE_REF = 'main';
 /**
- * PR46-SEC-16: the tested-base paths a proof depends on. The P1 directories of D-ORCH-078 (`package-lock.json`,
- * `.npmrc` and `.gitleaks.toml` are root files) plus every root-level file that is not Markdown (package.json, the
- * lint/format/type/test configs, .node-version) and the tested base's manifest `tooling_inputs`. A tested-base
- * first-parent commit touching one, made at or after a proof run's creation, voids that proof: the proof run merged an
- * older base on a path every lane A result depends on.
+ * PR46-SEC-16 (as widened by PR #55 R1-M1 / PR55-SEC-03, D-TASK286-06): the tested-base paths a proof depends on. The
+ * P1 (c) directories of D-ORCH-078 (`package-lock.json`, `.npmrc` and `.gitleaks.toml` are root files), the lint
+ * controls (the rule sources, the lint and Semgrep fixtures, the test support the fixture suite runs; LINT_CONTROL_PATHS
+ * is covered as well), `tools/deps/**` (the engine pin and npm CLI checks), every root-level file that is not Markdown
+ * (package.json, the lint/format/type/test configs, .node-version) and the tested base's manifest `tooling_inputs`;
+ * plus P1 (b): every path the PR range itself changes (see proofBasePath). A tested-base first-parent commit touching
+ * one, made at or after a proof run's creation, voids that proof: the proof run merged an older base on a path the lane
+ * A result depends on. A semantic conflict between files that only one side changed, outside these paths, is left to
+ * the D-ORCH-042 post-merge gate (as P1, D-ORCH-102, already accepts).
  */
-export const PROOF_BASE_DIRS = Object.freeze(['.github/**', 'prisma/**', 'tools/ci/**', 'tools/quality/**', '.semgrep/**']);
+export const PROOF_BASE_DIRS = Object.freeze([
+  '.github/**',
+  'prisma/**',
+  'tools/ci/**',
+  'tools/quality/**',
+  'tools/deps/**',
+  'tools/eslint-rules/**',
+  'tools/stylelint-rules/**',
+  'tools/lint/**',
+  'tools/test-support/**',
+  'tests/fixtures/**',
+  '.semgrep/**',
+]);
 /** First-parent commits of the tested base read for PROOF_BASE_DIRS (older changes date every possible proof). */
 export const MAX_BASE_COMMITS = 500;
 /** Lint controls (the base-ref fixture suite and the Semgrep self-test run when the PR range touches one). */
@@ -265,6 +282,7 @@ export function allDocs(changes, inputs) {
  * @property {boolean} recordOk
  * @property {string} recordReason
  * @property {boolean} lintControls the PR range touches LINT_CONTROL_PATHS (an unknown range: true)
+ * @property {string[] | null} prPaths the PR range's changed paths (null: the range is unknown); PR46-SEC-16 P1 (b)
  */
 
 /**
@@ -277,6 +295,8 @@ export function classify({ root, base, head, before = '', event = 'pull_request'
   const headSha = resolveCommit(root, head);
   const inputs = toolingInputs(root, manifestRef === '' ? baseSha : resolveCommit(root, manifestRef));
   let lintControls = true;
+  /** @type {string[] | null} */
+  let prPaths = null;
   const inputsNote = inputs === null ? ' (no base-ref manifest: docs/** counts as code)' : '';
 
   /** @type {{ prDocsOnly: boolean, prReason: string }} */
@@ -285,7 +305,10 @@ export function classify({ root, base, head, before = '', event = 'pull_request'
     const changes = treeChanges(root, baseSha, headSha, { mergeBase: true });
     if (changes === null) pr_ = { prDocsOnly: false, prReason: 'git diff of the PR range failed (code)' };
     else if (changes.length === 0) pr_ = { prDocsOnly: false, prReason: 'the PR range changes nothing (code)' };
-    if (changes !== null) lintControls = changes.some((change) => LINT_CONTROL_PATHS.test(change.path));
+    if (changes !== null) {
+      lintControls = changes.some((change) => LINT_CONTROL_PATHS.test(change.path));
+      prPaths = changes.map((change) => change.path);
+    }
     if (changes !== null && changes.length > 0) {
       const docs = allDocs(changes, inputs);
       pr_ = {
@@ -351,6 +374,7 @@ export function classify({ root, base, head, before = '', event = 'pull_request'
     recordOk,
     recordReason,
     lintControls,
+    prPaths,
   };
 }
 
@@ -437,10 +461,14 @@ export function proofSteps(workflowText, gates) {
  * PR46-SEC-16 membership: a path whose change on the tested base voids older proofs (see PROOF_BASE_DIRS).
  * @param {string} path
  * @param {readonly string[] | null} inputs the tested base's manifest tooling_inputs (null: none readable)
+ * @param {ReadonlySet<string>} [prPaths] P1 (b): the paths the PR range changes (any of them, docs included: the
+ *   merged file is what format:check and the head-code checks of the proof never saw)
  */
-export function proofBasePath(path, inputs) {
+export function proofBasePath(path, inputs, prPaths) {
+  if (prPaths?.has(path) === true) return true;
   if (!path.includes('/')) return !path.endsWith('.md');
   if (PROOF_BASE_DIRS.some((glob) => matchGlob(path, glob))) return true;
+  if (LINT_CONTROL_PATHS.test(path)) return true;
   return (inputs ?? []).some((glob) => matchGlob(path, glob.replace(/^!/u, '')));
 }
 
@@ -452,9 +480,13 @@ export function proofBasePath(path, inputs) {
  * @param {string} toolsRef full SHA
  * @param {readonly string[] | null} inputs
  * @param {number} [maxCommits] the history window (MAX_BASE_COMMITS)
+ * @param {readonly string[] | null} [prPaths] P1 (b): the PR range's changed paths (null: the range is unknown, so no
+ *   proof at all, fail closed; omitted: only the lane A inputs)
  * @returns {number | null}
  */
-export function baseChangedAt(root, toolsRef, inputs, maxCommits = MAX_BASE_COMMITS) {
+export function baseChangedAt(root, toolsRef, inputs, maxCommits = MAX_BASE_COMMITS, prPaths) {
+  if (prPaths === null) return null;
+  const own = new Set(prPaths ?? []);
   const log = git(root, [
     'log',
     '--first-parent',
@@ -475,7 +507,7 @@ export function baseChangedAt(root, toolsRef, inputs, maxCommits = MAX_BASE_COMM
     if (!/^\d{1,12}$/u.test(stamp.trim()) || !Number.isFinite(at)) return null;
     count += 1;
     last = at;
-    if (paths.some((path) => path !== '' && proofBasePath(path, inputs))) return at;
+    if (paths.some((path) => path !== '' && proofBasePath(path, inputs, own))) return at;
   }
   return count >= maxCommits ? last : 0;
 }
@@ -529,9 +561,11 @@ function oneJob(jobsJson, name) {
  * Problems that keep a run's `fast-lane` job from proving the code (empty = the job is a proof).
  * @param {unknown} jobsJson
  * @param {readonly RequiredStep[]} required
+ * @param {boolean} [lintControls] stage 2 (PR #55 R1-n1): the verified classification says the PR range touches a lint
+ *   control, so the LINT_CONTROLS-gated steps must have run and succeeded (a skip is not accepted then)
  * @returns {string[]}
  */
-export function fastLaneProblems(jobsJson, required) {
+export function fastLaneProblems(jobsJson, required, lintControls = false) {
   const job = oneJob(jobsJson, 'fast-lane');
   if (typeof job === 'string') return [job];
   if (job.status !== 'completed' || job.conclusion !== 'success') return [`fast-lane ${String(job.conclusion ?? job.status)}`];
@@ -541,7 +575,7 @@ export function fastLaneProblems(jobsJson, required) {
   for (const { name, mayBeSkipped } of required) {
     const matches = steps.filter((step) => step.name === name);
     const conclusion = matches.length === 1 ? String(matches[0]?.conclusion) : matches.length === 0 ? 'missing' : 'ambiguous';
-    if (!(conclusion === 'success' || (mayBeSkipped && conclusion === 'skipped'))) out.push(`${name}: ${conclusion}`);
+    if (!(conclusion === 'success' || (mayBeSkipped && !lintControls && conclusion === 'skipped'))) out.push(`${name}: ${conclusion}`);
   }
   return out;
 }
@@ -666,10 +700,21 @@ export function runBindingProblem(run, binding) {
  * commit on a proofBasePath (0: none); a run created at or before it is no proof; null (unknown) gives no proof at all;
  * undefined (stage 1) does not check.
  * @param {{ api: Api, repo: string, identical: readonly string[], steps: ProofSteps, currentRunId?: string, pr?: string,
- *   headRef?: string, baseChangedAt?: number | null | undefined }} input
+ *   headRef?: string, baseChangedAt?: number | null | undefined, lintControls?: boolean }} input
+ *   lintControls: stage 2, the PR range touches a lint control, so a proof's LINT_CONTROLS steps must have succeeded
  * @returns {{ codeProof: string, securityProof: string, notes: string[] }}
  */
-export function lookupProofs({ api, repo, identical, steps, currentRunId = '', pr = '', headRef = '', baseChangedAt }) {
+export function lookupProofs({
+  api,
+  repo,
+  identical,
+  steps,
+  currentRunId = '',
+  pr = '',
+  headRef = '',
+  baseChangedAt,
+  lintControls = false,
+}) {
   /** @type {string[]} */
   const notes = [];
   let codeProof = '';
@@ -729,7 +774,10 @@ export function lookupProofs({ api, repo, identical, steps, currentRunId = '', p
         continue;
       }
       if (codeProof === '') {
-        const problems = [...fastLaneProblems(jobs.json, steps.fastLane), ...scansProblems(jobs.json, steps.scans, steps.scansJob)];
+        const problems = [
+          ...fastLaneProblems(jobs.json, steps.fastLane, lintControls),
+          ...scansProblems(jobs.json, steps.scans, steps.scansJob),
+        ];
         if (problems.length === 0) codeProof = `${String(run.id)}:${sha}`;
         else notes.push(`run ${String(run.id)} (${sha.slice(0, 7)}) is not a code proof: ${problems.slice(0, 3).join('; ')}`);
       }
@@ -886,7 +934,8 @@ export function parseClassification(text) {
  * @property {string} securityIntegration needs.security-integration.result
  * @property {string} classification ci-gate's own lane-scope classification (steps.lane-scope.outputs.classification)
  * @property {string} fastLaneClassification needs.fast-lane.outputs.classification
- * @property {() => string[]} thisRunCodeProblems problems of this run's CODE-gated fast-lane steps (jobs API)
+ * @property {(lintControls?: boolean) => string[]} thisRunCodeProblems problems of this run's CODE-gated fast-lane steps
+ *   (jobs API); with lintControls the LINT_CONTROLS-gated steps must have succeeded too (PR #55 R1-n1)
  */
 
 /**
@@ -918,7 +967,7 @@ export function gateVerdictStage2(input) {
     if (!pr || own.code_changed === 'true') {
       if (own.mode !== 'full') reasons.push('code gates skipped on a code push');
       else if (input.fastLane === 'success') {
-        const problems = input.thisRunCodeProblems();
+        const problems = input.thisRunCodeProblems(own.lint_controls === 'true');
         if (problems.length > 0) reasons.push(`code gates skipped on a code push (${problems.slice(0, 3).join('; ')})`);
       }
     }
@@ -938,9 +987,10 @@ export function gateVerdictStage2(input) {
 /**
  * This run's CODE-gated fast-lane step problems (rule (b)), from the jobs API and the checked-out ci.yml's gates.
  * @param {{ root: string, get: (name: string) => string, api: Api }} input
+ * @param {boolean} [lintControls] the verified classification's lint_controls (PR #55 R1-n1)
  * @returns {string[]}
  */
-function thisRunCodeProblems({ root, get, api }) {
+function thisRunCodeProblems({ root, get, api }, lintControls = false) {
   const repo = get('GITHUB_REPOSITORY');
   const runId = get('GITHUB_RUN_ID');
   const attempt = get('GITHUB_RUN_ATTEMPT') || '1';
@@ -952,7 +1002,7 @@ function thisRunCodeProblems({ root, get, api }) {
   if ('problem' in steps) return [steps.problem];
   const jobs = api(`repos/${repo}/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=100`);
   if (!jobs.ok) return [`jobs API: ${jobs.problem}`];
-  return fastLaneProblems(jobs.json, steps.fastLane);
+  return fastLaneProblems(jobs.json, steps.fastLane, lintControls);
 }
 
 /**
@@ -983,7 +1033,7 @@ export function gateInputStage2FromEnv({ root, env, api }) {
     securityIntegration: get('SECURITY_INTEGRATION'),
     classification: get('CLASSIFICATION'),
     fastLaneClassification: get('FAST_LANE_CLASSIFICATION'),
-    thisRunCodeProblems: () => thisRunCodeProblems({ root, get, api }),
+    thisRunCodeProblems: (lintControls = false) => thisRunCodeProblems({ root, get, api }, lintControls),
   };
 }
 
@@ -1171,7 +1221,10 @@ export function main(argv, deps = {}) {
           currentRunId: (env.GITHUB_RUN_ID ?? '').trim(),
           pr: values['--pr'] ?? '',
           headRef: values['--head-ref'] ?? '',
-          baseChangedAt: stage2 ? baseChangedAt(root, toolsRef, toolingInputs(root, toolsRef)) : undefined,
+          baseChangedAt: stage2
+            ? baseChangedAt(root, toolsRef, toolingInputs(root, toolsRef), MAX_BASE_COMMITS, result.prPaths)
+            : undefined,
+          lintControls: stage2 && result.lintControls,
         });
         codeProof = found.codeProof;
         securityProof = found.securityProof;

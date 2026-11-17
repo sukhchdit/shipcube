@@ -2553,3 +2553,101 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Why:** concurrent heavy runs on one host produced the non-reproducing failures; MAX_PARALLEL_DEVELOPERS = 4 still holds.
 - **Alternatives rejected:** rerunning lane B blindly (does not separate a flake from a regression); counting the flaky FAILs as a fix cycle.
 - **Reversibility:** High.
+
+### D-TASK286-01..05 · 2026-11-16 · devops-engineer (recorded by orchestrator) · TASK-286 split and implementation choices
+- **D-TASK286-01:** two PRs: the policy PR (#55) first, then the workflow PR (`ci/TASK-286-cigatefold-workflow` @ed3e58f, opened after #55 merges because main's policy tooling reports 4 `required-gates` findings against the stage-2 `ci.yml`). The stage-1 pins stay accepted beside stage 2 until a follow-up retires them; the stage-1 workflow is kept as `tools/ci/fixtures/stage-1/ci.yml`.
+- **D-TASK286-02:** `TOOLS_REF` = the pushed range's base on a push; `HEAD^1` of the test merge on a PR, verified against `HEAD^2` and the event base.
+- **D-TASK286-03:** Install stays unconditional in stage 2 (the evidence verifier, signatures and audit read the installed tree; PR46-SEC-11 overrides "install CODE-gated" in am. L item 3).
+- **D-TASK286-04:** D-ARCH-133 implemented in `security-paths.mjs`; the optional D-TASK015-59 refinement is deferred (LOW, devops-engineer).
+- **D-TASK286-05:** superseded FAIL lane-B runs (unit timeouts under host load, pre-#53) are not committed; a clean PASS replaces them (20261116T0422Z_71d2980).
+- **Reversibility:** High.
+
+### D-TASK029-01..15 · 2026-11-16 · senior-developer (recorded by orchestrator) · TASK-029 automatic audit capture (PR #56)
+- **01** Capture lives in `apps/api/src/platform/audit/capture.ts` (`createAuditCapture` → `mount`/`denied`), not the sheet's `audit-middleware.ts`; the tx slot is its only value importer; pipeline.ts gets the factory via a re-export from `execute.ts`.
+- **02** `auditEntityId` on `defineRoute` is optional. Default: CREATE → result `id`; a `:<entity>Id` path parameter; none for a list VIEW. Anything else fails to mount, naming method and path.
+- **03** Write actions: `record` + the transaction's one `flush`, as the last work in the handler tx. VIEW/DOWNLOAD: their own short tx after COMMIT and before send; SENSITIVE fails closed (503 `AUDIT_UNAVAILABLE`, Retry-After 1); NORMAL is best effort.
+- **04** A *returned* 409/422/5xx commits a FAILED entry in the handler tx; other returned 4xx write no entry.
+- **05** LOGIN, LOGOUT, MFA_ENROLLED and STATE_TRANSITION are refused at mount until their domain recorder exists.
+- **06** PERMISSION_DENIED is written in its own tx before the 403; a failed write answers 500/503, never a silent 403; no entity id; 401s are not audited.
+- **07** Client-shaped columns are kept only in the writer's shape, otherwise null (PR42-SEC-15 a/b); NUL and lone surrogates → 400 at the JSON boundary (SEC-15 c).
+- **08** STREAM_MISMATCH: a tenant entry must match the tx org; an org-less tx accepts only the SYSTEM shard; I3 via the `beforeCommit` port; one writer per process.
+- **09** PR42-SEC-17 uses H2 (statement tracking + `setImmediate` settle loop); timer-started writes are a documented residual, backstopped by TASK-033.
+- **10** PR42-SEC-19: `write`/`flush` return already-handled promises.
+- **11** `AUDIT_NONE_ROUTES` is pinned both ways against the contract's NONE operations.
+- **12** The list filter summary has sorted keys, all values tokenised as PERSONAL; `result_count` comes from the `data` array, otherwise null.
+- **13** `source_app` = `X-Client-App` when web|admin, otherwise `api`.
+- **14** FAILED entries also cover `load`/`call` phase failures (REQ-AUDIT-010); none when the audit path or the admission bulkhead itself failed.
+- **15** The branch keeps its dispatched name (`…-automatic-audit-capture`), not the sheet's.
+- **Follow-up (MEDIUM, latent) → TASK-028:** production `startApi` composition has no tokeniser/ipIndex/UA parser, so any audited route or PERMISSION_DENIED in a deployed process fails closed with 500 `TOKENISER_UNAVAILABLE`. Wire them through `AppDependencies` into `createAuditCapture` before the first audited module route; the UA parser owner to be confirmed by TASK-028. Other follow-ups: TASK-031 (old/new diffs, reason), TASK-030 (per-stream CTE), TASK-033 (T0 residual backstop), TASK-047 (SEC-17/19 on the job port), qa-lead (activate the audit-generator suite; move SEC-TC-74 to required_cases).
+- **Reversibility:** High.
+
+### D-TASK020-95..98 · 2026-11-16 · senior-developer (recorded by orchestrator) · TASK-020 020-D fix cycle 1 (PR #54 @f00cf5b)
+- **95** C1 (b): instead of copying PostgreSQL's byte rules, any non-ASCII character outside a string, quoted identifier or comment makes the text `unreadable` (fail closed); dollar tags are ASCII only (R1-M1's alternative). Application SQL is ASCII.
+- **96** C1 (e): a literal-name allow-list for the literal-`true` setter (`app.*`, `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`); `standard_conforming_strings`/`backslash_quote` refused anywhere. The security record's preferred first-keyword allow-list (F5) is not taken this cycle (r2 security rules on it); PR54-SEC-02 (b)(c) remain follow-ups due before TASK-073's first raw statement.
+- **97** The C2 PostgreSQL case proves refusal via "call and handler never ran" + a `pg_locks` probe (the `load` tx is read-only, so a row count is not possible); cursor absence rests on the TenantDb unit test.
+- **98** Main (PR #53) was merged before retaking evidence instead of a third blind rerun.
+- **Flake triage (closes the D-ORCH-107 question):** the 485dcbb FAILs were not regressions (all 9 suites pass in isolation, 232/232). Causes: Jest 5 s timeouts under CPU saturation (fixed by #53, now merged in); Windows 0xC0000142 child-process start failures under load (host capacity; addressed by serializing heavy runs); a `prisma/generated` reader race in `prisma-client-package.test.ts` → TASK-288.
+- **Reversibility:** High.
+
+### D-SEC-PR55-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #55 (TASK-286 policy PR) security r1 = PASS_WITH_CONDITIONS
+- **Decision:** round 1 at `5645b9b` (record pushed on `1c729d9`) = PASS_WITH_CONDITIONS: 0 Critical/High/Medium, 4 LOW, 6 INFO.
+  - **Closed:** PR46-SEC-17, PR42-SEC-18, D-ARCH-133, the Dependabot npm limit.
+  - **Closed in the stage-2 policy:** PR46-SEC-11. **Closed for job scopes:** PR46-SEC-15. **Partly closed:** PR46-SEC-12. **Not yet closed:** PR46-SEC-16.
+  - **C1** (PR55-SEC-01 env pins / BASH_ENV refusal; PR55-SEC-02 = code-review R1-m1 widened; PR55-SEC-09 = R1-m3) and **C2** (PR55-SEC-03 = R1-M1 widened) are due in the R1-M1 fix cycle. The fix head needs a security delta round.
+  - PR46-SEC-11/-16/-17 and the stage-2 parts of -12 take effect only when the workflow PR installs stage 2. Until then the 24 h proof-age rule, P1 and D-ORCH-103 P1 (c) stay; afterwards the 24 h rule still applies to any stage-1 `ci.yml`.
+- **Reversibility:** High.
+
+### D-TASK286-06 · 2026-11-17 · sdlc-orchestrator (security-acknowledged) · PR46-SEC-16 proof-void set
+- **Decision:** a proof is void when the tested base changed, after the proof run was created, any of:
+  - a lane A input;
+  - a path the PR itself changes (P1 (b));
+  - the lint-control directories (`tools/eslint-rules`, `tools/lint`, `tools/test-support`, `tests/fixtures/{lint,semgrep}`);
+  - `tools/deps/**`.
+- **Why:** code-review R1-M1 / PR55-SEC-03: the narrower set let a docs-only push inherit a proof for an untested combined tree. Moves on main to files the PR does not touch stay with the D-ORCH-042 post-merge gate (the card's literal "any non-docs commit" is not required, per security).
+- **Accepted residuals:** INFO-04 (committer-time dating) and INFO-06 (fast-lane `actions: read` and `pull-requests: read` while running head code; read-only, a D-ARCH-128 trade-off).
+- **Reversibility:** High.
+
+### D-ORCH-108 · 2026-11-17 · sdlc-orchestrator · Review outcomes batch
+- **PR #55:** code r1 CHANGES_REQUESTED (R1-M1 + 4 MINOR) and security r1 PASS_WITH_CONDITIONS → fix cycle 1/3 dispatched to devops-engineer.
+- **PR #56:** code r1 CHANGES_REQUESTED. R1-M1: a returned status ≥ 400 commits the handler tx, contradicting ADR-0007 §Capture / REQ-AUDIT-010, so D-TASK029-04 is not accepted as is. Fix cycle waits for the security r1 verdict.
+- **PR #54:** code r2 APPROVED_WITH_NITS (R2-m1: `query_to_xml`/`ts_stat`-family dynamic SQL lets session state escape; ruling delegated to the security delta).
+- **Interruptions:** two usage-limit stops and one network drop; agents were resumed in place, not re-dispatched.
+- **Reversibility:** High.
+
+### D-SEC-PR56-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #56 (TASK-029) security r1 = PASS_WITH_FOLLOW-UPS at `4b02531`
+- **Decision:** 0 Critical/High open; 3 MEDIUM, 4 LOW, 2 INFO, all latent (`moduleRegistry` is empty).
+  - **Closed:** PR42-SEC-15 (a)(b)(c-JSON), PR42-SEC-17 (T0 residual), PR42-SEC-19, R3-n1.
+  - **TASK-028 deferral accepted on two conditions:** (1) the tokeniser/ipIndex/UA-parser wiring merges before or with the first PR that registers an audited or catalogued-permission route in `moduleRegistry` (TASK-026 is the likely first); (2) a mount- or boot-time refusal of such routes when the capture has no tokeniser.
+  - **T-39 denial budget** (SEC-03, MEDIUM) → TASK-041, before the first route with a catalogued permission ships.
+  - Routes declaring `x-audit.additional[]` are refused at mount until a recorder exists (SEC-04).
+  - **Other owners:** SEC-05/07 and code-review R1-m5 → TASK-052; SEC-06 → TASK-030.
+- **Reversibility:** High.
+
+### D-TASK029-16 · 2026-11-17 · sdlc-orchestrator · Supersedes D-TASK029-04 (PR #56 code R1-M1 = PR56-SEC-09)
+- **Decision:** any status ≥ 400 that a handler *returns* rolls back the handler transaction; 409/422/5xx write the FAILED entry in its own transaction (ADR-0007 §Capture and REQ-AUDIT-010 as written); returned 400/403/404 commit nothing and write nothing.
+- **Why:** the old rule committed handler writes with no entry, or under a FAILED entry an auditor reads as "nothing changed", and re-executed on retry after a returned 5xx (ADR-0014). Following the existing ADR needs no architect ruling.
+- **Alternatives rejected:** an architect ruling accepting the commit (contradicts O4 audit completeness).
+- **Reversibility:** High.
+
+### D-ORCH-109 · 2026-11-17 · sdlc-orchestrator · PR #56 fix cycle 1/3 dispatched; pending card lines for the next sheet fold
+- **Fix cycle 1/3:** carries R1-M1/SEC-09 (per D-TASK029-16), R1-m2/SEC-01, SEC-02, SEC-04, R1-m1 mount refusal, R1-m4, R1-m6, R1-m7.
+- **Card lines** (applied by principal-architect at the next sheet fold; until then this entry is the owning record):
+  - **TASK-028:** "wire tokeniser, ipIndex and UA parser through `AppDependencies` into `createAuditCapture`; due before or with the first `moduleRegistry` audited route" (D-SEC-PR56-01 condition 1).
+  - **TASK-041:** "T-39 per-actor denial budget with aggregated entry".
+  - **TASK-052:** "USER entries carry roles and session id (REQ-AUDIT-002); `source_app=admin` only from operator sessions".
+  - **TASK-030:** "a tenant tx refuses an org-less entry (PR56-SEC-06)".
+  - **TASK-287:** "retire the stage-1 ci topology (PR #55 R1-m2)".
+- **Reversibility:** High.
+
+### D-SEC-PR54-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #54 (TASK-020 020-D) security r2 = PASS_WITH_CONDITIONS at `a6fc0a3` (record `85cf474`)
+- **Decision:** 0 Critical/High/Medium.
+  - **C1 and C2** are closed for every named spelling in both lexer copies. **PR54-SEC-03, -04 (code) and -06** are closed. D-TASK020-95..98 are accepted.
+  - **Declining F5 is acceptable:** F5 would not have stopped this round's paths, and `ALTER ROLE` at run time is covered by `no-alter-role-sql` and the session-integrity monitor.
+  - **New: PR54-SEC-07 (LOW, CWE-184) = code-review R2-m1 → condition C3, fixed in this PR.** `query_to_xml`/`ts_stat`-family dynamic SQL reaches COMMIT on PG 18.6 (two-call `standard_conforming_strings` trick) and leaks session `search_path` and advisory locks. Refuse the five names plus `pg_notify` (PR54-SEC-08, INFO) in both copies.
+  - **Follow-ups:** PR54-SEC-02 (b)(c) before TASK-073's first raw statement; PR54-SEC-04 CODEOWNERS with 015-C; PR54-SEC-05 optional.
+- **Process note:** a probe script briefly put a throwaway container password on a `docker run` command line. It was never printed and the container was removed. Reminder to agents: pass container secrets via env only (CLAUDE.md §5 Secrets).
+- **Reversibility:** High.
+
+### D-ORCH-110 · 2026-11-17 · sdlc-orchestrator · PR #54 fix cycle 2/3 dispatched for C3
+- **Decision:** fix cycle 2/3 for C3 + R2-n1 rows; then code-review and security delta round 3 limited to the two lexer copies, the corpus and the tests; then merge.
+- **Reversibility:** High.
