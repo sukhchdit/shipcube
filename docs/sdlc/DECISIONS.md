@@ -3030,3 +3030,27 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **CI minutes:** `npm run ci:minutes -- --forecast` fails intermittently on a jobs query (`gh api …/runs/<id>/jobs failed:` with an empty message) while the same call succeeds alone (rate limit 4,723/5,000) → devops, TASK-287 (or 015-C): retry with backoff, report the failing run instead of aborting. Push discipline unchanged (one code push per round, D-ORCH-119 O3).
 - **Dispatched:** senior-developer, Wave 1 batch 1.1 (TASK-035, TASK-036, TASK-037; ≤ 3 specialists; TASK-037 merges after TASK-290).
 - **Reversibility:** High.
+
+### D-SEC-PR61-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #61 (TASK-028) security r1 = PASS_WITH_FOLLOW-UPS at `57faf1f` (record `18cd325`)
+- **Decision:** 0 Critical/High; 1 MEDIUM, 3 LOW, 4 INFO. **Closed:** D-SEC-PR56-01 condition 1 (effective at merge), PR56-SEC-08, PR8-SEC-10 (classification).
+  - **Sound:** the vault AAD and nonces; the `local-only-*` gate; the UA parser (300k fuzz, step bound ≤ 547, no regex); the authenticate seam is unreachable; no PII in logs; C10 green both ways.
+- **PR61-SEC-01 (MEDIUM, CWE-212):** the audit secret denylist is far weaker than the platform log matcher (53/64 key spellings and 15/15 credential shapes leak into the row draft). Latent (no free-form writer today). Fix: union with `isSensitiveKey` and its value shapes, record pairing, and a generated-spelling test → **PR #61 fix cycle**, else before TASK-031/052/047.
+- **PR61-SEC-02 (LOW):** add the vault and privacy exports to `AUDIT_WRITER_EXPORTS`, with `start-api.ts` allow-listed by exact file (needs the `lint` lock; PR #60 holds it).
+- **PR61-SEC-03 (LOW):** values under the ANONYMOUS subject are unerasable and have no vault retention → principal-architect ruling (D-TASK028-04).
+- **PR61-SEC-04 (LOW):** CODEOWNERS for `packages/shared/src/classification/`, `apps/api/src/{app,start-api}.ts` and `packages/config/src/placeholders.ts` → devops (the PR48-SEC-02 activation PR).
+- **INFO:** 05 `entity_id` accepts JWS shapes; 06 IPv6 not normalised (RFC 5952) before `ip_hash`; 07 token columns classed INT vs data-model "PER (token)"; 08 IPv4 enumeration of `ip_hash` until key destruction (ADR-0018).
+- **Correction to D-ORCH-126:** D-TASK028-01..10 are in the TASK-028 handoff, not the PR body, so they are logged below.
+- **Reversibility:** High.
+
+### D-TASK028-01..10 · 2026-11-17 · backend-developer (recorded by orchestrator) · TASK-028 (PR #61)
+- **01** The registry is keyed by table and column; non-public tables are registered as `<schema>.<table>`.
+- **02** C10 is two-way (an unclassified live column fails; a stale registry entry fails); partitions are excluded.
+- **03** `audit_entries.ip_token`/`user_agent_token`/`reason_token` are classed INTERNAL, as pseudonymous vault references (see PR61 INFO-07).
+- **04** A subjectless personal value is stored under the reserved ANONYMOUS-actor data subject (see PR61-SEC-03).
+- **05** The writer applies the secret denylist in the snapshot, word-based, with credential-shape redaction (see PR61-SEC-01).
+- **06** `local-only-*` keys derive as SHA-256(domain ‖ key_id ‖ marker); markers are refused in staging/production.
+- **07** `AppDependencies.authenticate` is a test-only seam that startApi never sets.
+- **08** The composition int test bootstraps via the `db:bootstrap` CLI.
+- **09** `createAuditPrivacy`/`createVaultTokeniser` are exported from @platform/audit (see PR61-SEC-02).
+- **10** The UA family table is closed (15 clients, 6 OS families).
+- **Reversibility:** High.
