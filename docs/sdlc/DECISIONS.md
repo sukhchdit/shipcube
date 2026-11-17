@@ -2833,3 +2833,22 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **15** **C1 is met** at `4f1fbd5`: restricted run 20261117T0646Z_4f1fbd5 (not committed) gave catalog-c1-c14 102, integration 315 and rls-cross-tenant 126, all with 0 failures/errors/skips. Two earlier attempts failed only on Docker networking (P1001, "port not bound") and are not counted → W0-FLAKE-3 infra note.
 - **Not done:** R1-n4 and R1-n6 go to the next touch of those files.
 - **Reversibility:** High.
+
+### D-ORCH-119 · 2026-11-17 · sdlc-orchestrator · PR #59 merged (TASK-286 complete); CI-minutes push budget (O3) adopted; TASK-287 (O1) dispatched
+- **PR #59** squash-merged as `29318c3`, with an explicit body (code R1-n1).
+  - **Head:** `04965cd`. Code r1 APPROVED_WITH_NITS; security r1 PASS_WITH_FOLLOW-UPS. The record check passed at the merge head (only main and docs changed after `055083b`), satisfying D-ORCH-116.
+  - **CI:** lane A 44035673053 MERGE-READY (full stage-2 run, 8 billed min); lane B 20261117T0647Z_302576c.
+  - **P1:** main changed only `docs/sdlc/DECISIONS.md` since the merge base.
+  - **Stage 2 is live.** The interim rules per D-SEC-PR59-01 apply.
+- **R-CI-MIN (HIGH for November):** the live forecast is 2,279 billed min (114 %), crossing 100 % around 11-27; the remaining days must average ≤ 55/day. The measured Budget v2 month is 2,471 (124 %) (SPK-07 §6.1).
+- **Adopted, O3 push budget (effective now; binding on every agent):**
+  - per review round, at most **one code push + one combined record push** (reviewers batch their records; the developer pushes code once per fix cycle);
+  - every code push follows a local `npm run lint && npm run typecheck && npm run test:unit`;
+  - no main unions without a P1 cause; no CI re-runs;
+  - daily `ci:minutes --forecast` against a **45 billed min/day** guard.
+- **Next steps:**
+  - **O1** = TASK-287 (incremental fast lane plus the PR59-SEC-01 pins, stage-1 retirement and the PR57-SEC-02 trigger table) is dispatched to devops-engineer.
+  - If the forecast still crosses 100 %: **O5** (drop the reserved November wave-end), then the human levers.
+  - **O2a/O4a/O4b** need an architect ruling and are not taken now.
+- **Optional human levers** (not an agent decision; offered per D-ORCH-100): make the repo public, set an Actions spending limit > $0, or add a self-hosted runner.
+- **Reversibility:** High.
