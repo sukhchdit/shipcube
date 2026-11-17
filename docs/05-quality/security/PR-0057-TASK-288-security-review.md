@@ -490,3 +490,111 @@ Two table rows have a first cell starting with `Head`: round 1's (`4c3d13a`) and
 | Conditions | None open. C1 is met and verified (§R2.3) |
 | Follow-ups | PR57-SEC-05 and the optional `wx` owner write → next touch of `fs-lock.ts` (W0-FLAKE-3), or this PR if another fix cycle opens. PR57-SEC-02 → principal-architect + TASK-287, with the lock-cache exclusion note. Merge: no push to an owned path after this record |
 | Verdict | **PASS_WITH_FOLLOW-UPS.** The locks now live in the checkout and links are refused before anything is read or removed: 3 of 3 victim files survive the round-1 junction attack. The take-over can no longer delete a live lock. Registrations are strict, and junk entries are ignored. The seven security-fix mutants are killed, and the security suites ran green at this code tree (C1). What remains (PR57-SEC-05 and the two take-over residuals) is test-run liveness, never a silent pass. No Critical or High finding is open for this change |
+
+---
+
+## Delta round 3 (fix cycle 2, narrow)
+
+| Field | Value |
+|---|---|
+| Round | 3, narrow delta. Reviews `b53d254..a5f94b0`: `5891125` (code review r2, docs only), `bfe5235` (code), `a5f94b0` (lane B evidence `20261117T0739Z_bfe5235` only). Scope: `fs-lock.ts`, `fs-lock.test.ts` and `lock-children.ts`, the only owned paths changed since round 2. The other 5 owned paths are byte-identical to `4c3d13a` |
+| Head | a5f94b0616bcb8832fb959df5ea81b1dc61c9e04 |
+| Lane A evidence | Run 44070813630 on `a5f94b0`. This is the stage-2 workflow, where the scans run inside `ci-gate`. `fast-lane` **success**. In `ci-gate`, Gitleaks, Semgrep and oasdiff are **success**; the only red step is the record step, which this round answers. `security-integration` was skipped (classifier `false`, PR57-SEC-02 unchanged) |
+| Lane B evidence | `20261117T0739Z_bfe5235`, profile `pr`: `git_sha` `bfe5235`, `git_dirty` false, `build_clean` true, verdict PASS. `unit` ran 5,974 tests with 0 failures, 0 errors and 2 skipped |
+| Code review twin | Round 3 `c8cc4f2` (local, pushed with this record): **APPROVED_WITH_NITS**. Its R3a/R3b equal my N1/N2 (killed by a hang) and its R3d equals my N3 (survives, race-only). Its R3-n1 (the hang-only kill), R3-n2 (JSDoc residual (ii) outdated by `wx`) and R3-n3 (orphaned `IDLE` children) are NITs that I agree with. None is a security finding |
+| C1 evidence | Restricted run `20261117T1051Z_a5f94b0`, written outside the repository and not committed. I verified it myself, see §R3.3 |
+| Reviewer / date | security-analyst, 2026-11-17, round 3. The probes ran on type-stripped copies of the round-2 and round-3 `fs-lock.ts` under private probe roots; the round-2 copy is the positive control. The mutants ran on a `git archive` extract with a `node_modules` of junctions to the PR worktree's entries (`.cache` excluded). The junctions were unlinked before the extract was removed. In the PR worktree I ran only read-only git commands, then committed this section on top of the code review's local r3 commit `c8cc4f2` and pushed once, carrying both records (D-ORCH-119) |
+
+### R3.1 What changed
+
+- **`withFileLock` (PR57-SEC-05):**
+  - `takeOverStale` now returns a boolean.
+  - `withFileLock` retries at once only after a successful take-over: `if (isStale(dir, owner) && takeOverStale(dir, owner)) continue;` (`fs-lock.ts:305`). A failed rename falls through to the deadline check and the poll sleep.
+- **Rename seam:** the renames go through `lockTestHooks.rename`, a test-only seam that is restored in `finally` by both cases that set it.
+- **Owner file is exclusive:** it is created with `{ flag: 'wx' }` in `withFileLock` (`:300`) and in the WRITER child (`lock-children.ts:33`).
+- **New registration seam:** `ReaderHooks.beforeWrite`, a test-only seam.
+- **`LockChildren.idleStarted(cwd)`:** a child that writes a marker from inside its cwd, used by the Windows real-cwd case.
+- **New cases:** EBUSY through the seam; `takeOverStale` returning false or true; the Windows real-cwd case (registered on win32 only); a lock lost during the reader wait fails before `fn`; the `ENOENT` retry of a registration.
+- **JSDoc:** the take-over residuals (i) to (iii) are now documented.
+
+### R3.2 Probes: round-2 copy versus round-3 copy
+
+Both copies ran the same `probe3.mjs`.
+
+| Probe | Round 2 (`4f1fbd5`) | Round 3 (`a5f94b0`) |
+|---|---|---|
+| **P7** stale writer directory that is a live process's cwd (`rename` → `EBUSY`); writer deadline 1.5 s, child with a 12 s watchdog | **no result after 12 s** (synchronous spin) | throws "timed out after 1500 ms …" at 1,673 ms. A 20 ms interval ticked 52 times meanwhile, so the event loop kept turning. The stale lock is left in place |
+| **P1w** writer W1 descheduled between its `mkdir` and its owner write; W2 takes the directory over and re-creates the lock (a hook after `mkdir`) | **BYPASS**: W1's owner write overwrote W2's owner, W1 ran its `fn`, and its `finally` removed W2's lock | W1's owner write fails `EEXIST`, so W1 waits and times out at its deadline; **W2's lock is intact** |
+| P2 reader / writer take-over race (round-2 regression) | refused, W2 intact | refused, W2 intact, no tombstone |
+| P2x the put-back fails because W3 took the path | `LostTestLockError`, W3 intact | the same |
+| P3 junk readers entry | ignored, kept | the same |
+| P5 readers path is a junction to a victim directory | reader and writer refused, 2/2 victims kept | the same |
+| P6 writer path is a junction, dead owner | link removed, canary kept | the same |
+
+**Mutants**, run against the PR's own `fs-lock.test.ts` on a `git archive` extract of `a5f94b0`:
+
+The control passed 34 of 34.
+
+| Mutant | Result |
+|---|---|
+| N1: restore the round-2 loop (`if (isStale) { takeOverStale(); continue; }`) | **killed by hang.** The EBUSY seam case spins synchronously, Jest's own timeout cannot fire, and my 400 s outer limit ended the run. This matches code review R3a and its NIT R3-n1 |
+| N2: `takeOverStale` returns `true` after a failed rename | **killed by hang** (same shape; code review R3b) |
+| N3: owner write without `wx` | **survives**: the suite has no case for it; race-only, as stated in D-TASK288-19 (code review R3d). P1w above is the behavioural evidence |
+
+### R3.3 C1 (verified)
+
+`summary.json` of `20261117T1051Z_a5f94b0`:
+- `git_sha` `a5f94b0616bcb8832fb959df5ea81b1dc61c9e04`, `git_dirty` false, `build_clean` true, no environment overrides;
+- the pinned Testcontainers digests are the same as before;
+- verdict INVALID, only because the run is restricted.
+
+Per suite, the JUnit hash matches `report_sha256`, and the counts match both the summary and the `<testcase>` elements:
+
+| Suite | Tests | Failures | Errors | Skipped |
+|---|---|---|---|---|
+| `catalog-c1-c14` | 102 | 0 | 0 | 0 |
+| `integration` | 315 | 0 | 0 | 0 |
+| `rls-cross-tenant` | 126 | 0 | 0 | 0 |
+
+`a5f94b0` adds only the run directory to `bfe5235`. The first attempt failed on a network drop while the Prisma engine was being re-downloaded. That attempt is recorded in D-TASK288-20, not counted, and routed to TASK-291. **C1 is met at the final code tree.**
+
+### R3.4 Items
+
+| Item | Status | Evidence |
+|---|---|---|
+| PR57-SEC-05 (INFO) | **Closed** | P7 (round-2 spin → round-3 throws at the deadline while yielding); N1 and N2 killed (by hang) |
+| PR57-SEC-03 residual (b): non-exclusive owner write | **Closed** | P1w, a bypass on the round-2 copy and none on round 3. N3 survives the suite (unpinned, as declared); I accept that for a race-only hardening of test infrastructure. The remaining residuals, (i) the put-back window and (iii) an ownerless judgement of a fresh writer, which then fails `ENOENT`, are documented in the module JSDoc and stay accepted. Both need a stale lock plus two takers in a microsecond window. Neither causes a silent pass: (iii) fails loudly, and (i) at worst fails a load |
+| PR57-SEC-01, -04 | Closed (round 2); unchanged | P5, P6, P3 regression rows |
+| PR57-SEC-02 (LOW) | Open, routed (D-SEC-PR57-01: principal-architect + TASK-287) | The cache-exclusion note is carried by D-ARCH for 287-C (`node_modules/.cache/shipqube-test-locks/` excluded) |
+| C1 | **Met** | §R3.3 |
+
+**No new finding.** The new export `lockTestHooks` is a mutable seam in `tools/test-support`. Production code cannot import it: `import-x/no-relative-packages` refuses it, as in the round-2 lint probe, and no image carries `tools/`. It can only make a take-over fail or misbehave inside a test, and both cases that set it restore it in `finally`.
+
+### R3.5 Merge prerequisites
+
+- **Main has moved** to `466d2c4` (PR #56 and the sheet fold 9 among others). None of the 8 owned paths changed there, and `tools/ci/check-security-owned-paths.mjs` is unchanged. A union with `main` does not void this record.
+- **Any further push to an owned path voids it.**
+
+### R3.6 Record simulation
+
+The full record (rounds 1 to 3) was committed on top of the code review r3 commit `c8cc4f2`, using the same harness as §8 and §R2.6 with `main`'s checker, `--pr 57 --json`. All 6 scenarios came out as expected, and the checker reported 8 owned paths in each:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| T0 the branch tip (`c8cc4f2`) with the round-1 and round-2 record only | missing | missing, exit 1 (the newest Head row, `4f1fbd5`, is followed by changes to the 3 lock files) |
+| T1 full record, base `origin/main` | pass | pass, exit 0, satisfied at `a5f94b0`. The older Head rows only add notes |
+| T1b the same, base = merge base `8984b16` | pass | pass, exit 0 |
+| T2 T1 plus an edit of `tools/test-support/fs-lock.ts` | missing | missing, exit 1 |
+| T3 T1 plus a docs-only commit | pass | pass, exit 0 |
+| T4 the round-3 Verdict cell set to `FAIL` | missing | missing, exit 1 |
+
+Three table rows have a first cell starting with `Head` (`4c3d13a`, `4f1fbd5`, `a5f94b0`). The last row whose first cell is `Verdict` is this round's. The file is LF, and the round-1 and round-2 text is byte-identical to the `b53d254` blob.
+
+### R3.7 Verdict (delta round 3)
+
+| Field | Value |
+|---|---|
+| Findings | 0 Critical, 0 High, 0 Medium. Closed this round: PR57-SEC-05 (INFO), PR57-SEC-03 residual (b). Still open: PR57-SEC-02 (LOW, routed); PR57-SEC-03 residuals (i) and (iii) (accepted, documented) |
+| Conditions | None open. C1 is met at `a5f94b0` (§R3.3) |
+| Follow-ups | PR57-SEC-02 → principal-architect + TASK-287. Merge: no push to an owned path after this record |
+| Verdict | **PASS_WITH_FOLLOW-UPS.** A take-over that cannot rename now keeps its deadline and yields (the round-2 spin is gone), and the exclusive owner write stops a starved writer from overwriting a re-created lock. Every round-2 security property still holds, and the security suites are green at this code tree. No Critical or High finding is open for this change |
