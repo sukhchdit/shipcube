@@ -2665,3 +2665,20 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Decision:** the stage-1 pins stay accepted beside stage 2 until TASK-287 retires them; until then the 24 h proof-age rule applies to any stage-1 `ci.yml`. The stage-1 workflow is kept as `tools/ci/fixtures/stage-1/ci.yml` on the workflow branch (`ci/TASK-286-cigatefold-workflow`, from 03a281a), not on the policy branch.
 - **TASK-287 card line (added to D-ORCH-109's pending fold list):** "STAGE-1 RETIREMENT (PR #55 R1-m2, PR55-SEC-10; due in TASK-287's first `ci-workflows` change after the TASK-286 workflow PR is on main): remove `CI_REQUIRED_GATES` (stage 1), `laneScopeFindings`, the stage-1 branches of `topologyOf`/`requiredGatesFor`/`tokenFindings`/`gate()`/`proofSteps` and `tools/ci/fixtures/stage-1/ci.yml` with its tests, so a `ci.yml` that restores a `scans` job is a `required-gates` finding; until then the PR46-SEC-11 24 h proof-age rule applies to any stage-1 `ci.yml`. Also PR55-SEC-05 (rule (g) compares the separate fast-lane outputs) and the optional run-full-instead-of-block for docs pushes without a proof."
 - **Reversibility:** High.
+
+### D-TASK029-17..24 · 2026-11-17 · senior-developer (recorded by orchestrator) · PR #56 fix cycle 1 (@9746b2f, code f750cc4)
+- **17** D-TASK029-16 is implemented through `RouteReturnedError` (in `define-route.ts`), thrown inside the handler tx for a returned status ≥ 400. FAILED details are `{status}` only. A returned 5xx leaves no idempotency completion, so a retry re-executes (ADR-0014). **→ TASK-040:** store the 4xx idempotency completion outside the rolled-back handler tx.
+- **18** SEC-01 is fixed by sanitising the filter summary, not by refusing at the boundary: empty or NUL values are stored JSON-encoded; `MAX_FILTER_TEXT` = 1,024 code points with an ellipsis. A NORMAL list is never served without its entry for a client-chosen value.
+- **19** Routes with `x-audit.additional[]` (`createQuoteShare`, `checkoutOrder`) are refused at mount until a recording seam exists.
+- **20** SEC-02: `pipeline.ts` is the single capture composition point (exact-file lint category `api-pipeline-composition`); the R3-n2 scan covers `platform/tx/**` and `pipeline.ts`.
+- **21** A tokeniser is required at mount for audited routes and for routes that can answer 403 (both errors name TASK-028); a missing UA parser or IP index leaves `ua_parsed`/`ip_hash` null.
+- **22** No FAILED write after TRANSACTION_UNAVAILABLE, STATEMENT_TIMEOUT or LOCK_TIMEOUT, or when the client went away; the response waits at most 1 s (`FAILED_ENTRY_WAIT_MS`) for the FAILED write.
+- **23** VIEW/DOWNLOAD handler txs are read-only.
+- **24** Capture log events `audit.view_unrecorded`, `audit.failed_unrecorded` and `audit.entity_id_unresolved`, with class-only fields (no values).
+- **Not taken:** NITs R1-n2 (head-row stamp, metadata only) and R1-n3 (a `setImmediate` turn before COMMIT → note for the TASK-030 performance budget).
+- **Reversibility:** High.
+
+### D-ORCH-111 · 2026-11-17 · sdlc-orchestrator · Review pacing under usage limits
+- **Decision:** at most two review agents run concurrently. PR #56's r2 code and security delta at `9746b2f` are queued behind PR #55's r2 pair.
+- **Why:** the session hit the 5-hour usage limit three times on 2026-11-16/17 with 6–7 concurrent agents; each stop costs a resume round.
+- **Reversibility:** High.
