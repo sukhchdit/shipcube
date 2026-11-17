@@ -439,3 +439,74 @@ Before this section, main's `tools/ci/check-security-owned-paths.mjs` with `--ba
 |---|---|
 | Round 2 Critical / High / Medium / Low / Info | 0 / 0 / 1 / 1 / 2 (new); open from round 1: 1 Medium, 1 Low, 2 Info |
 | Verdict | **PASS_WITH_CONDITIONS.** No Critical or High open. C1: PR56-SEC-10 (`afterCommit` scheduled after a rolled-back returned result) is fixed in this PR and verified in a delta round 3 before merge. PR56-SEC-01, -02, -04, -08 and -09 are closed |
+
+---
+
+# Delta round 3 (fix cycle 2)
+
+| Field | Value |
+|---|---|
+| Head | 0ecd3178e31435b3c388fbed3be13d6b5d3de0f0 |
+| Range | `f204bb2..0ecd317`: `683a57d` (code: "afterCommit only after a commit; disconnect-only FAILED skip") and `0ecd317` (evidence only). Code paths changed: `apps/api/src/platform/tx/execute.ts`, `execute-phases.test.ts`, `routing/define-route.ts` (`RouteReturnedError`, `afterCommit` JSDoc), `audit/capture.ts` (header comment only). `main` was `31244ac` when this round was written |
+| Lane A evidence | Run 44012999702 on `0ecd317`. **fast-lane `success`**: Lane B evidence, lint, type-check, unit. **scans**: Gitleaks `success`. The only red step is "Security-owned paths need a review record": the round 2 head `9746b2f` no longer binds, because owned paths changed after it |
+| Lane B evidence | Run `20261117T0335Z_683a57d`: api 173, catalog 102, integration 323, rls 126, unit 6,058 (2 skipped), 0 failures. New unit titles: `[PR56-SEC-10]` returned 409, 404 and 500 schedule no `afterCommit`; a 201 control runs it exactly once; a thrown error schedules none. `[PR56-SEC-11]` a disconnect-aborted `call` writes no FAILED; a 409 returned after a disconnect still writes FAILED |
+| Scope and binding | Limited to the files above. D-TASK029-25..26; condition C1 and PR56-SEC-11 of round 2 |
+| Reviewer / date | security-analyst, round 3, 2026-11-17. In the PR worktree, already at `0ecd317`, I ran only read-only probes, then appended and committed this section. Line numbers come from single-file reads at `683a57d` |
+
+## R3.1 Result
+
+**C1 (PR56-SEC-10) is closed.** `run` now returns `{ result, committed }` (`execute.ts:268, 293, 298`), and `executeSlot` schedules `afterCommit` only when `committed` is set (`:358`).
+
+**PR56-SEC-11 is closed.** `recordFailure` skips the FAILED entry only when the error *is* this request's own disconnect abort instance (`:198-214, 315`). A deadline abort, a returned failure and every other error write FAILED even after the client has gone.
+
+`RouteReturnedError.result` is now a private field behind a getter.
+
+One INFO, **PR56-SEC-14**, records that a `transaction: 'none'` route still schedules `afterCommit` after a *returned* status of 400 or more. This is as D-TASK029-25 decides (nothing to roll back), but the new `afterCommit` JSDoc says such a result "schedules nothing". No security weight today.
+
+No Critical, High, Medium or Low finding is open from this round. The round 1 items that the D-ORCH-109 card lines carry are unchanged: PR56-SEC-03 (MEDIUM, TASK-041), -05 (LOW), -06 and -07 (INFO), -12 and -13 (INFO).
+
+**Verdict: PASS_WITH_FOLLOW-UPS.**
+
+## R3.2 Probe P5, re-run on `0ecd317`
+
+Same harness as round 2, with the call deadline set to 300 ms and three new routes: a `call` phase of 1 s that honours its signal, a `transaction: 'none'` route that returns 400, and one that throws.
+
+| Case | Round 2 (`9746b2f`) | Round 3 (`0ecd317`) |
+|---|---|---|
+| A0 control, 201 | committed, SUCCESS, `afterCommit` ran | same |
+| A1 handler writes, returns 409 | rollback, FAILED, **`afterCommit` ran** | rollback, FAILED `{status:409}`, **no `afterCommit`** |
+| A2 returns 404 | rollback, no entry, **`afterCommit` ran** | rollback, no entry, **no `afterCommit`** |
+| A3 returns 500 | rollback, FAILED, **`afterCommit` ran** | rollback, FAILED, **no `afterCommit`** |
+| A4 409, FAILED write fails | 409 sent, `audit.failed_unrecorded`, **`afterCommit` ran** | same, **no `afterCommit`** |
+| A5 client destroys the socket at 50 ms, handler returns 409 at 300 ms | rollback, **no FAILED**, **`afterCommit` ran** | rollback, **FAILED `{status:409}` written**, no `afterCommit` |
+| A6 client destroys the socket at 50 ms during the `call` (deadline 300 ms) | not run | no business row, **no FAILED** (the failure is the disconnect), no `afterCommit` |
+| A7 deadline (300 ms) fires, client stays | not run | 503, **FAILED `{code:SERVICE_UNAVAILABLE, status:503}`**, no `afterCommit` |
+| A8 deadline at 300 ms, then disconnect at 500 ms | not run | 503 sent, **FAILED written**: the disconnect after an abort does not replace the abort reason (`onClose` returns when the signal is already aborted) |
+| A9 `transaction: 'none'` route returns 400 | not run | 400, **`afterCommit` ran** (PR56-SEC-14) |
+| A10 `transaction: 'none'` route throws | not run | 500, no `afterCommit` |
+| N0–N3, S1, V1 (round 2 regressions) | closed | unchanged: one VIEW entry each, the SENSITIVE `%00` case 200 with its entry, read-only VIEW transaction |
+
+**Identity of the disconnect abort.**
+- `abortable` rejects with `signal.reason` (`abortable.ts:15`), and `call` sees the same `signal`, so a `call` that rejects because of the disconnect reports the same instance (A6).
+- A handler that runs after the client left reports its own error (A5), and the deadline uses a different `unavailable(...)` instance (A7, A8).
+- So the skip set is exactly "the request ended because the client left". A client can no longer suppress the FAILED entry of a business failure by disconnecting.
+
+**`RouteReturnedError`.** For a sentinel body and header, the getter returns the result. `util.inspect` (`showHidden`, depth 10), `JSON.stringify` of the error and of `{ err }`, `String(error)` and `Object.keys` show neither value. A line from the platform runtime logger with the error attached did not contain the sentinel either.
+
+## R3.3 Finding
+
+### PR56-SEC-14 (INFO, CWE-696, A04:2021): a `none` route's returned failure still schedules `afterCommit`
+
+- **Behaviour.** `execute.ts:268` returns `committed: true` for every result of a `transaction: 'none'` route, so a returned 400 schedules `afterCommit` (A9). A thrown error does not (A10).
+- **Decision versus documentation.** D-TASK029-25 decides this ("nothing to roll back"). However, the new JSDoc of `afterCommit` (`define-route.ts:211`) says "a returned status of 400 or more … schedules nothing" without restricting that to tenant routes.
+- **Why INFO.** `none` routes are public, carry audit action NONE and hold no transaction, and their only behaviour before this PR was the same. No such route with `afterCommit` exists.
+- **Fix.** Either `committed: result.status < 400` for `none` routes (then "a failure schedules nothing" holds everywhere), or narrow the JSDoc to tenant routes. Pin the choice with an `execute-phases` case. Owner: the next PR touching `tx/execute.ts`.
+
+## R3.4 Record check
+
+Before this section, main's `tools/ci/check-security-owned-paths.mjs` with `--base 28c41ed --head 0ecd317 --pr 56` against the worktree failed, as lane A did. With this section committed, the newest Head row names `0ecd317`. Any later push to an owned path voids it; a merge of `main` voids it only if `main` changed one of the 36 owned paths.
+
+| Field | Value |
+|---|---|
+| Round 3 Critical / High / Medium / Low / Info | 0 / 0 / 0 / 0 / 1 (new). Closed: C1 = PR56-SEC-10, PR56-SEC-11. Still open from earlier rounds, all carded: PR56-SEC-03 (MEDIUM), -05 (LOW), -06, -07, -12, -13 (INFO) |
+| Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical or High open; condition C1 is met. The open items have owners in D-ORCH-109 and §R2.6 |
