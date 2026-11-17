@@ -3192,3 +3192,46 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Shared lock:** `../.orch/docker.lock` is still owned by the reaped queue run; left in place until the orphan state is known.
 - **User asked:** free memory (close session B, stray node processes) and confirm the restart.
 - **Reversibility:** High.
+
+### D-ORCH-COORD-03 · 2026-11-17 · sdlc-orchestrator (session B) · Batch 1.1 handed to session A: PRs #63 (TASK-036), #64 (TASK-035), #65 (TASK-037) open, no evidence yet
+- **State:** session B's senior-developer finished. It has stopped and is not running further heavy work; it started no new heavy runs after session A's instruction.
+- **PR #63, TASK-036:** head `fcdb7ac`, lane A 44104641784.
+  - One lane-B run, `20261117T1412Z_fc14eab`, failed. It overlapped another heavy run, so treat it as contention-suspect: `rls/api-cases` ECONNRESET (the TASK-291 flake class).
+  - The diff-coverage failure from that run is fixed before the push.
+  - The failed run dir is at `../failed-runs-b11/`.
+- **PR #64, TASK-035:** head `90ef83f`, lane A 44105548507. `consumer.int.test.ts` has never run.
+- **PR #65, TASK-037:** head `d3c2c16`, lane A 44109257822. `organisations.int.test.ts` has never run.
+  - **Merges after TASK-290:** merge main into the branch first, then run lane B.
+  - **Merge condition:** security signs off the rendered DR-A14 policies and the std-columns guard.
+- **Lane A on all three:** red only on the missing lane-B evidence and the missing security record. All three PRs touch security-owned paths, and no locked hot file was edited.
+- **Ready for session A's lane-B queue:** each task worktree `../Shipqube-TASK-0{35,36,37}` is clean and detached at its PR head, with `npm ci` and `deps:rebuild` done.
+- **Decisions proposed by the developer (session A to log or adjust):**
+  - **D-TASK035-01..06:**
+    - 01: dead-letter queues are named `<queue>-dead` (BullMQ 6 refuses `:` in a queue name).
+    - 02: job ids are `<kind>.<id>[.<step>]`.
+    - 03: `joi` becomes a dependency of `@platform/shared`, exposed only through the queues subpath.
+    - 04: per-queue concurrency is a constant for now.
+    - 05: `audit-maintenance` and `housekeeping` accept no payload kind until TASK-039 defines one.
+    - 06: a stalled job stays in the failed set without a dead-letter record.
+  - **D-TASK036-01..03:**
+    - 01: Part B codes go into per-module catalogue files.
+    - 02: `routeErrors` is a module export collected by the generated registry; `app.ts` is untouched.
+    - 03: `api:check-errors` is realised as a parity test.
+  - **D-TASK037-01..07:**
+    - 01: TASK-037 creates `users` with the dr-a14-users policy set (`identity-core` was free), so TASK-049 adds only credential and session tables.
+    - 02: no `on_behalf_of_org_id` column on these tables.
+    - 03: the reserved users are inserted before ENABLE + FORCE.
+    - 04: AT-US-061-01 (operator organisation from the seed) is re-routed to TASK-089.
+    - 05: Organisation and User are tenant-key models in the std-columns extension.
+    - 06: `app_is_operator()` is created after the tables and before the RLS blocks, because the template order cannot be executed.
+    - 07: domain refusals are `OrganisationRuleError` carrying the catalogue code.
+- **Needs routing by session A:**
+  1. **Architect and PM:** how the operator organisation is created in production, since the reference seed cannot write RLS tables (from D-TASK037-04).
+  2. **Contract change request to api-designer:** `OrganisationCreateRequest` is closed and has no `type`, so AT-US-061-02 gets 400 `UNKNOWN_FIELD`, not 422 `ORG_TYPE_NOT_ALLOWED`.
+  3. **Deferred to the route tasks TASK-224/231:** AT-US-061-04/05 and AT-US-062-05/06.
+  4. **Merge order:**
+     - If PR #61 merges first, C10 needs classifications for the TASK-037 columns.
+     - TASK-035 changes `package-lock.json`; the second lock-touching PR to merge regenerates it.
+     - After TASK-037, the generated RLS fixtures may need the new NOT NULL and foreign-key columns (TASK-290 lock owner).
+- **Session B dispatches nothing further.**
+- **Reversibility:** High.
