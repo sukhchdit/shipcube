@@ -2737,3 +2737,23 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - (c) PR #57 code-review routings, if not fixed in its fix cycle.
 - **Owner:** test-engineer; batch 0.12 or the next free slot.
 - **Reversibility:** High.
+
+### D-SEC-PR57-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #57 (TASK-288) security r1 = PASS_WITH_CONDITIONS at `4c3d13a` (record `30ca878`)
+- **Decision:** 0 Critical/High/Medium; 2 LOW, 2 INFO.
+  - **PR57-SEC-01** (LOW, CWE-59/377): dead-reader cleanup follows a junction at a predictable `%TEMP%` path.
+  - **PR57-SEC-02** (LOW): the `security-integration` trigger list misses the security suites' code paths.
+  - **PR57-SEC-03** (INFO, = code-review R1-m1): stale-lock TOCTOU.
+  - **PR57-SEC-04** (INFO): junk/EEXIST reader entries.
+  - **C1 (merge prerequisite):** a restricted lane-B run of integration, catalog-c1-c14 and rls-cross-tenant at the final head, all green with 0 failures/errors/skips (rls ≥ 126, catalog ≥ 14), logged here and not committed. The shim has no production reach (lint refuses the import; no image copies it).
+- **Trigger-list ruling (PR57-SEC-02, escalates PR46-SEC-08):**
+  - **Add to `SECURITY_INTEGRATION_PATHS`:** `jest.config.ts`, `tools/test-support/**`, `tools/db/**`, `tools/deps/**`, `tests/generated/rls/**` and `tests/generated/api-mounts.ts`.
+  - **Exclusions:** `!tools/test-support/**/*.test.ts`, `!tools/db/**/*.test.ts`, `!tools/db/fixtures/**`, `!tools/deps/**/*.test.ts`.
+  - **Cost:** about 20–30 extra job-min/month.
+  - **Owners:** principal-architect amends the ADR-0023 am. G item 5 / am. L item 2 (a) trigger text, with card DoD "security-integration runs" generated from the trigger list (next sheet fold); devops-engineer implements it in TASK-287 (`security-paths.mjs` + test).
+- **Reversibility:** High.
+
+### D-ORCH-114 · 2026-11-17 · sdlc-orchestrator · PR #57 fix cycle 1/3; PR #54 security delta r3 dispatched
+- **PR #57 fc1:** code-review R1-m1 (detection form at minimum), R1-m2, R1-m3, R1-m4, PR57-SEC-01 and the SEC-04 strict names, plus C1 at the fix head. Then a code-review delta and a security delta, since owned paths change.
+- **Pending card lines:** TASK-287 gets the PR57-SEC-02 path table, added to the D-ORCH-109 list.
+- **PR #54:** the security delta r3 runs in parallel with code review r3 on `cc95e38`.
+- **Reversibility:** High.
