@@ -114,7 +114,9 @@ ON CONFLICT (kind, ref_id) DO NOTHING`;
 /** Subject key -> `data_subjects.id` for every distinct subject of the batch. */
 async function resolveSubjects(db: AuditSqlPort, subjects: readonly DataSubjectRef[], newId: () => string): Promise<Map<string, string>> {
   let ids = await lookupSubjects(db, subjects);
-  const missing = subjects.filter((_subject, index) => ids[index] === undefined);
+  // Inserted in (kind, ref_id) order (PR #61 dup-review R1-m5): an ON CONFLICT insert waits for a concurrent inserter of
+  // the same key, so two transactions creating the same subjects in opposite orders would deadlock.
+  const missing = subjects.filter((_subject, index) => ids[index] === undefined).sort((a, b) => (subjectKey(a) < subjectKey(b) ? -1 : 1));
   if (missing.length > 0) {
     await insertSubjects(db, missing, newId);
     ids = await lookupSubjects(db, subjects);

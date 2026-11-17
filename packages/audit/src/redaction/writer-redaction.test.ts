@@ -8,7 +8,9 @@ import fc from 'fast-check';
 
 import { type AuditEntryInput, PiiValue, prepareEntry } from '../entry.js';
 import { computeEntryHash } from '../entry-hash.js';
-import { REDACTED, SECRET_KEY_EXAMPLES } from './denylist.js';
+import { AuditWriteError } from '../errors.js';
+import { REDACTED, REDACTED_KEY, SECRET_KEY_EXAMPLES } from './denylist.js';
+import { REQUIRED_SECRET_STEMS, REQUIRED_SECRET_WORDS, stemSpellings, wordSpellings } from './tests/spellings.js';
 
 const ORG = '0190c3a4-5b6c-7d8e-9f00-aabbccddeeff';
 const USER = '0190c3a4-5b6c-7d8e-9f00-112233445566';
@@ -61,11 +63,18 @@ describe('[AT-US-091-01] the writer stores [REDACTED] for each denylisted value'
   });
 });
 
+/** Generated spellings of every word and stem (PR #61 R1-M1), plus the examples. */
+const SPELLINGS = [
+  ...REQUIRED_SECRET_WORDS.flatMap(wordSpellings),
+  ...REQUIRED_SECRET_STEMS.flatMap(stemSpellings),
+  ...SECRET_KEY_EXAMPLES,
+];
+
 describe('[AT-US-091-02] property: denylisted keys at random depth never persist their raw value (writer row)', () => {
-  it('holds for every key of the denylist examples', () => {
+  it('holds for generated spellings of every word and stem of the denylist', () => {
     const path = fc.array(fc.constantFrom('a', 'b', 'items', 'meta'), { maxLength: 6 });
     fc.assert(
-      fc.property(fc.constantFrom(...SECRET_KEY_EXAMPLES), path, fc.constantFrom('oldValue', 'newValue', 'details'), (key, keys, slot) => {
+      fc.property(fc.constantFrom(...SPELLINGS), path, fc.constantFrom('oldValue', 'newValue', 'details'), (key, keys, slot) => {
         let value: Record<string, unknown> = { [key]: SENTINEL, keep: 'visible' };
         for (const step of [...keys].reverse()) value = step === 'items' ? { items: [value] } : { [step]: value };
         const { row: stored } = row(entry({ [slot]: value }));
@@ -89,5 +98,69 @@ describe('[AT-US-091-05] redaction happens before hashing', () => {
     expect(hash(otherSecret)).toBe(hash(raw));
     // Control: a non-secret change does change the hash.
     expect(hash(row(entry({ newValue: { password: REDACTED, city: 'Delhi' } })).row)).not.toBe(hash(raw));
+  });
+});
+
+/**
+ * A PEM private-key block built at run time from parts, so no private-key literal sits in the source or its history
+ * (the gitleaks `private-key` rule, PR33-SEC-08). `kind` is `` or e.g. `EC ` / `RSA `.
+ */
+const pemBlock = (kind: string, body: string): string =>
+  `${['-----BEGIN', `${kind}PRIVATE`, 'KEY-----'].join(' ')}\n${body}\n${['-----END', `${kind}PRIVATE`, 'KEY-----'].join(' ')}`;
+
+describe('[PR61-SEC-01] [PR61 R1-m1] the writer row: value shapes, record shapes and credential keys', () => {
+  it.each([
+    `Bearer\t${SENTINEL}`,
+    `  Bearer ${SENTINEL}`,
+    `see Authorization: Bearer ${SENTINEL}`,
+    `DPoP ${SENTINEL}`,
+    `https://app.example.test/invite?token=${SENTINEL}`,
+    `sk_live_${SENTINEL}`,
+    `otpauth://totp/x?secret=${SENTINEL}`,
+    pemBlock('RSA ', SENTINEL),
+  ])('a credential-shaped value under an innocuous key: %s', (text) => {
+    const { row: stored } = row(entry({ details: { note: text, items: [text] } }));
+    expect(stored.details).toEqual({ items: [REDACTED], note: REDACTED });
+  });
+
+  it('record shapes and credential keys reach the row redacted', () => {
+    const { row: stored } = row(
+      entry({
+        newValue: {
+          headers: [{ name: 'X-Api-Key', value: SENTINEL }, ['X-Reauth-Proof', SENTINEL]],
+          setting: { key: 'refresh_token', value: SENTINEL },
+          whsec_A1b2C3d4E5f6: 'x',
+        },
+      }),
+    );
+    expect(stored.newValue).toEqual({
+      headers: [{ name: 'X-Api-Key', value: REDACTED }, ['X-Reauth-Proof', REDACTED]],
+      setting: { key: 'refresh_token', value: REDACTED },
+      [`${REDACTED_KEY}#1`]: REDACTED,
+    });
+    expect(JSON.stringify(stored)).not.toContain(SENTINEL);
+  });
+
+  it('[dup-review R1-n5] a value under a secret key is never read: a non-JSON value there is stored as [REDACTED], not refused', () => {
+    const { row: stored } = row(entry({ details: { password: new Date(0), token: (): number => 1, secret: Symbol('x') } as never }));
+    expect(stored.details).toEqual({ password: REDACTED, secret: REDACTED, token: REDACTED });
+  });
+});
+
+describe('[PR61-SEC-05] the clear-text entity_id never holds a credential', () => {
+  it('a JWS-shaped entity id is refused (INVALID_ENTRY entityId); an ordinary id is kept', () => {
+    const jws = `eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.${SENTINEL}`;
+    expect(() => row({ ...entry({}), entityId: jws })).toThrow(AuditWriteError);
+    expect(() => row({ ...entry({}), entityId: `sk_live_${SENTINEL}` })).toThrow(AuditWriteError);
+    expect(row({ ...entry({}), entityId: 'shp_01J9ZQ' }).row.entityId).toBe('shp_01J9ZQ');
+  });
+});
+
+describe('[PR61-SEC-09] a credential typed into the reason is tokenised as the marker', () => {
+  it('the reason value handed to the tokeniser is [REDACTED]; an ordinary reason is kept', () => {
+    const secret = prepareEntry({ ...entry({}), reason: `Bearer ${SENTINEL}0123456789` }, { id: ID, systemShard: 0 });
+    expect(secret.piiValues.map((value) => [value.field, value.value])).toEqual([['reason', REDACTED]]);
+    const plain = prepareEntry({ ...entry({}), reason: 'customer asked by phone' }, { id: ID, systemShard: 0 });
+    expect(plain.piiValues.map((value) => value.value)).toEqual(['customer asked by phone']);
   });
 });

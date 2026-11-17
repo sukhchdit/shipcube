@@ -32,7 +32,7 @@ import {
 import { type AuditRowDraft, HASH_VERSION, type JsonValue } from './entry-hash.js';
 import { AuditWriteError } from './errors.js';
 import { canonicalIp, coarseNetwork } from './network.js';
-import { isSecretKey, isSecretText, REDACTED } from './redaction/denylist.js';
+import { isSecretKey, isSecretPair, isSecretText, pairedSecretMembers, REDACTED, REDACTED_KEY } from './redaction/denylist.js';
 
 /** The natural person a personal value belongs to (`data_subjects`, ADR-0007 §Privacy erasure). */
 export interface DataSubjectRef {
@@ -336,10 +336,15 @@ function collect(value: unknown, path: string, depth: number, state: WalkState):
     return copy;
   }
   if (Array.isArray(value)) {
-    const items: readonly unknown[] = value;
-    const length = items.length;
-    const out: AuditValue[] = [];
-    for (let index = 0; index < length; index += 1) out.push(collect(items[index], `${path}[${String(index)}]`, depth + 1, state));
+    const source: readonly unknown[] = value;
+    const length = source.length;
+    // Each element is read once; a `[<secret name>, value]` pair redacts its value (PR #61 R1-M1).
+    const items: unknown[] = [];
+    for (let index = 0; index < length; index += 1) items.push(source[index]);
+    const pair = isSecretPair(items);
+    const out: AuditValue[] = items.map((item, index) =>
+      pair && index === 1 && item !== null ? REDACTED : collect(item, `${path}[${String(index)}]`, depth + 1, state),
+    );
     return Object.freeze(out);
   }
   if (typeof value !== 'object' || !isPlainObject(value)) throw invalid(path);
@@ -347,14 +352,20 @@ function collect(value: unknown, path: string, depth: number, state: WalkState):
   const keys = Object.keys(record)
     .map((key): readonly [string, string] => [storable(key, path), key])
     .sort(byCodeUnits);
+  // Each member is read once (PR42-SEC-03); the redaction decisions below use these reads only.
+  const members = new Map<string, unknown>(keys.map(([key, original]) => [key, record[original]]));
+  const paired = new Set(pairedSecretMembers(Object.fromEntries(members)));
   const out = {};
-  keys.forEach(([key, original], index) => {
+  let hiddenKeys = 0;
+  keys.forEach(([key], index) => {
     // A forged token marker, or two keys that normalise to the same text, is refused.
     if (key === PII_MARKER || (index > 0 && keys[index - 1]?.[0] === key)) throw invalid(path);
-    // REQ-AUDIT-008 (TASK-028): a value under a denylisted key is never read further; it becomes [REDACTED] (DR-A09).
-    const member = record[original];
-    const redacted = member !== null && member !== undefined && isSecretKey(key);
-    defineMember(out, key, redacted ? REDACTED : collect(member, memberPath(path, key, depth), depth + 1, state));
+    // REQ-AUDIT-008 (TASK-028, PR #61 R1-M1): a value under a denylisted key, or the value member of a record naming a
+    // secret, is never read further; it becomes [REDACTED] (DR-A09). A credential-shaped key is itself replaced.
+    const member = members.get(key);
+    const redacted = member !== null && member !== undefined && (isSecretKey(key) || paired.has(key));
+    const stored = isSecretText(key) ? `${REDACTED_KEY}#${String((hiddenKeys += 1))}` : key;
+    defineMember(out, stored, redacted ? REDACTED : collect(member, memberPath(path, stored, depth), depth + 1, state));
   });
   return Object.freeze(out);
 }
@@ -493,7 +504,8 @@ function routeTemplate(value: unknown): string | null {
  * agent or template can never turn the entry into a 500 refusal.
  */
 /** True for a value `entityId` accepts (an id, code or number; no `@`, `+`, space, `/`, `?`). */
-export const isAuditEntityId = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID.test(value);
+export const isAuditEntityId = (value: unknown): value is string =>
+  typeof value === 'string' && ENTITY_ID.test(value) && !isSecretText(value);
 /** True for a value `origin.uaParsed` accepts (browser family + major / OS family, ≤ 120 characters). */
 export const isAuditUaParsed = (value: unknown): value is string => typeof value === 'string' && UA_PARSED.test(value);
 /** True for a value `origin.route` accepts (a route template, never a concrete URL). */
@@ -528,6 +540,8 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
   if (DENIED_ONLY_ACTIONS.has(action) && outcome !== 'DENIED') throw invalid('outcome');
   const entityName = matching(input.entityName, NAME, 'entityName');
   const entityId = shaped(input.entityId, 'entityId', MAX_ENTITY_ID_LENGTH, ENTITY_ID);
+  // PR61-SEC-05: the clear-text, hashed entity_id never holds a credential (a JWS or token taken from a path or body).
+  if (entityId !== null && isSecretText(entityId)) throw invalid('entityId');
   const orgId = organisation(input.orgId, 'orgId');
   const targetOrgId = organisation(input.targetOrgId, 'targetOrgId');
   const actor = actorColumns(input.actor);
@@ -559,7 +573,9 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
   const httpMethod = rawMethod === undefined || rawMethod === null ? null : String(rawMethod);
   if (httpMethod !== null && !HTTP_METHODS.has(httpMethod)) throw invalid('origin.httpMethod');
   const route = routeTemplate(rawRoute);
-  const reason = optionalText(input.reason, 'reason', MAX_REASON_LENGTH);
+  const reasonText = optionalText(input.reason, 'reason', MAX_REASON_LENGTH);
+  // PR61-SEC-09: a credential typed into the reason is tokenised as the marker, never as itself.
+  const reason = reasonText !== null && isSecretText(reasonText) ? REDACTED : reasonText;
 
   const absent = (value: AuditValue | undefined): boolean => value === undefined || value === null;
   if (action === 'STATE_TRANSITION' && (absent(oldValue) || absent(newValue))) {

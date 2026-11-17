@@ -14,7 +14,7 @@
 import { type ClassificationRegistry, CLASSIFICATION_REGISTRY, classificationOf, type FieldClassification } from '@platform/shared';
 
 import { type AuditValue, type DataSubjectRef, pii, PiiValue } from '../entry.js';
-import { isSecretKey, isSecretText, REDACTED } from './denylist.js';
+import { isSecretKey, isSecretPair, isSecretText, pairedSecretMembers, REDACTED, REDACTED_KEY } from './denylist.js';
 
 /** An audited entity's field without a classification entry (REQ-AUDIT-009: fail closed, never store it unclassified). */
 export class UnclassifiedFieldError extends Error {
@@ -45,11 +45,20 @@ export function redactSecrets(value: unknown): unknown {
   if (typeof value === 'string') return isSecretText(value) ? REDACTED : value;
   if (value instanceof PiiValue) return isSecretText(value.value) ? REDACTED : value;
   if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return (value as readonly unknown[]).map((item) => redactSecrets(item));
+  if (Array.isArray(value)) {
+    const items: readonly unknown[] = value;
+    const pair = isSecretPair(items);
+    return items.map((item, index) => (pair && index === 1 && item !== null ? REDACTED : redactSecrets(item)));
+  }
   if (!isPlainObject(value)) return value;
+  const entries = Object.entries(value);
+  const paired = new Set(pairedSecretMembers(Object.fromEntries(entries)));
   const out: Record<string, unknown> = {};
-  for (const [key, member] of Object.entries(value))
-    define(out, key, member !== null && isSecretKey(key) ? REDACTED : redactSecrets(member));
+  let hiddenKeys = 0;
+  for (const [key, member] of entries) {
+    const stored = isSecretText(key) ? `${REDACTED_KEY}#${String((hiddenKeys += 1))}` : key;
+    define(out, stored, member !== null && (isSecretKey(key) || paired.has(key)) ? REDACTED : redactSecrets(member));
+  }
   return out;
 }
 
@@ -64,8 +73,11 @@ export function columnName(field: string): string {
   return out;
 }
 
-/** The text a personal value is tokenised as: strings as they are, anything else as its JSON text. */
-const personalText = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
+/**
+ * The text a personal value is tokenised as: a string as it is, anything else as the JSON text of its secret-redacted
+ * copy, so a secret nested in a personal object never reaches the vault (PR61-SEC-09).
+ */
+const personalText = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(redactSecrets(value)));
 
 export interface RedactRecordOptions {
   /** Whose personal data the record holds (the user, or the contact row); null when unknown. */
@@ -91,8 +103,11 @@ function redactField(
 }
 
 /**
- * The audit value of one row of `entity` (a table of the registry): each field classified, redacted and marked
- * (AT-US-091-01/-03). Throws {@link UnclassifiedFieldError} for a field the registry does not know.
+ * The audit value of one row of `entity`: a TABLE name of the registry (`address_book_entries`), not the route
+ * descriptor's audit entity (`address`); the diff builder (TASK-031) maps one to the other, and a wrong name fails
+ * closed with {@link UnclassifiedFieldError}. Keys are camelCase fields or snake_case columns (`passwordHash` ->
+ * `password_hash`). Each field is classified, redacted and marked (AT-US-091-01/-03). Throws
+ * {@link UnclassifiedFieldError} for a field the registry does not know.
  */
 export function redactRecord(entity: string, record: Readonly<Record<string, unknown>>, options: RedactRecordOptions): AuditValue {
   const registry = options.registry ?? CLASSIFICATION_REGISTRY;

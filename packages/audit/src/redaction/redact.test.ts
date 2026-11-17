@@ -8,61 +8,9 @@ import type { ClassificationRegistry } from '@platform/shared';
 import fc from 'fast-check';
 
 import { PiiValue } from '../entry.js';
-import { isSecretKey, isSecretText, REDACTED, SECRET_KEY_EXAMPLES } from './denylist.js';
+import { REDACTED, REDACTED_KEY, SECRET_KEY_EXAMPLES } from './denylist.js';
 import { redactRecord, redactSecrets, UnclassifiedFieldError } from './redact.js';
-
-describe('[REQ-AUDIT-008] the key denylist', () => {
-  it.each(SECRET_KEY_EXAMPLES)('"%s" is a secret key', (key) => {
-    expect(isSecretKey(key)).toBe(true);
-  });
-
-  it.each([
-    'city',
-    'country_code',
-    'postcode',
-    'email',
-    'status',
-    'required_permission',
-    'result_count',
-    'filter',
-    'code',
-    'description',
-    'company',
-    'session_id',
-    'ip_coarse',
-    '',
-  ])('"%s" is not a secret key', (key) => {
-    expect(isSecretKey(key)).toBe(false);
-  });
-
-  it('matches words in snake, camel, kebab and header spellings, case-insensitively', () => {
-    for (const key of [
-      'passwordHash',
-      'PASSWORD_HASH',
-      'x-api-key',
-      'X-Api-Key',
-      'Set-Cookie',
-      'refreshToken',
-      'totpSecret',
-      'cardNumber',
-    ]) {
-      expect(isSecretKey(key)).toBe(true);
-    }
-  });
-
-  it('flags authorisation-shaped values whatever their key', () => {
-    for (const value of [
-      'Bearer abc.def',
-      'bearer x',
-      'Basic dXNlcjpwYXNz',
-      'Digest username="a"',
-      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig',
-    ]) {
-      expect(isSecretText(value)).toBe(true);
-    }
-    for (const value of ['Pune', 'Bearer', 'eyJ', 'basically fine', '']) expect(isSecretText(value)).toBe(false);
-  });
-});
+import { REQUIRED_SECRET_STEMS, REQUIRED_SECRET_WORDS, stemSpellings, wordSpellings } from './tests/spellings.js';
 
 describe('[AT-US-091-01] denylisted keys redacted (redactSecrets)', () => {
   it('a password change, TOTP secret, recovery codes, API token and Authorization header become [REDACTED]', () => {
@@ -80,6 +28,19 @@ describe('[AT-US-091-01] denylisted keys redacted (redactSecrets)', () => {
       recovery_codes: REDACTED,
       api_token: REDACTED,
       headers: { Authorization: REDACTED, accept: 'application/json' },
+      city: 'Pune',
+    });
+  });
+
+  it('[PR61-SEC-01] record shapes: a { name, value } header, a [name, value] pair and a credential used as a key', () => {
+    expect(redactSecrets({ headers: [{ name: 'X-Api-Key', value: SENTINEL }, ['Authorization', SENTINEL], ['accept', 'json']] })).toEqual({
+      headers: [{ name: 'X-Api-Key', value: REDACTED }, ['Authorization', REDACTED], ['accept', 'json']],
+    });
+    expect(redactSecrets({ key: 'refresh_token', value: SENTINEL })).toEqual({ key: 'refresh_token', value: REDACTED });
+    expect(redactSecrets({ sk_live_A1b2C3d4E5f6: 1, whsec_A1b2C3d4E5f6: 2, city: 'Pune' })).toEqual({
+      [`${REDACTED_KEY}#1`]: 1,
+      // `whsec` is itself a secret word: the key is hidden and its value redacted.
+      [`${REDACTED_KEY}#2`]: REDACTED,
       city: 'Pune',
     });
   });
@@ -125,9 +86,16 @@ describe('[AT-US-091-02] property: each denylisted key at random depth, no raw v
     return { ...(value as Record<string, unknown>), [key]: plant((value as Record<string, unknown>)[key], secretKey, rest) };
   }
 
-  it('for every key of the denylist examples', () => {
+  /** Generated spellings of every word and stem, plus the examples (PR #61 R1-M1: no hand-picked list alone). */
+  const SPELLINGS = [
+    ...REQUIRED_SECRET_WORDS.flatMap(wordSpellings),
+    ...REQUIRED_SECRET_STEMS.flatMap(stemSpellings),
+    ...SECRET_KEY_EXAMPLES,
+  ];
+
+  it('for generated spellings of every word and stem of the denylist', () => {
     fc.assert(
-      fc.property(tree, fc.constantFrom(...SECRET_KEY_EXAMPLES), fc.array(fc.nat(8), { maxLength: 6 }), (value, secretKey, path) => {
+      fc.property(tree, fc.constantFrom(...SPELLINGS), fc.array(fc.nat(8), { maxLength: 6 }), (value, secretKey, path) => {
         const redacted = redactSecrets(plant(value, secretKey, path));
         expect(JSON.stringify(redacted)).not.toContain(SENTINEL);
         expect(JSON.stringify(redacted)).toContain(REDACTED);
@@ -209,9 +177,15 @@ describe('[AT-US-091-03] classification tags from the registry (redactRecord)', 
 
 describe('redaction edge cases (branch coverage of the walks)', () => {
   it('redactSecrets: loose secret text, a credential inside a personal value, scalars and non-plain objects', () => {
-    const credential = new PiiValue({ entityName: 'user', field: 'note', classification: 'PERSONAL', value: 'Bearer abc', subject: null });
+    const credential = new PiiValue({
+      entityName: 'user',
+      field: 'note',
+      classification: 'PERSONAL',
+      value: 'Bearer abcdefgh1',
+      subject: null,
+    });
     const when = new Date(0);
-    expect(redactSecrets(['Bearer abc', credential, 7, true, undefined])).toEqual([REDACTED, REDACTED, 7, true, undefined]);
+    expect(redactSecrets(['Bearer abcdefgh1', credential, 7, true, undefined])).toEqual([REDACTED, REDACTED, 7, true, undefined]);
     // A non-plain object is returned as it is; the writer refuses it (INVALID_ENTRY) when it validates the entry.
     expect(redactSecrets({ when })).toEqual({ when });
     expect(redactSecrets(Object.assign(Object.create(null) as object, { secret: 'x' }))).toEqual({ secret: REDACTED });
@@ -223,5 +197,23 @@ describe('redaction edge cases (branch coverage of the walks)', () => {
       email: REDACTED,
       display_name: null,
     });
+  });
+});
+
+describe('[PR61-SEC-09] secrets inside personal values never reach the vault', () => {
+  const registry: ClassificationRegistry = { contacts: { profile: 'PERSONAL', notes: 'SENSITIVE_PERSONAL' } };
+
+  it.each([
+    ['a password member', { name: 'Jane', password: SENTINEL }],
+    ['an api_key member', { name: 'Jane', api_key: SENTINEL }],
+    ['a nested Bearer value', { name: 'Jane', extra: { note: `Bearer ${SENTINEL}0123456789` } }],
+    ['a { name, value } header pair', { headers: [{ name: 'X-Api-Key', value: SENTINEL }] }],
+  ])('%s: the tokenised text is the redacted JSON', (_label, profile) => {
+    const out = redactRecord('contacts', { profile, notes: [profile] }, { subject: null, registry }) as Record<string, PiiValue>;
+    for (const field of ['profile', 'notes']) {
+      expect(out[field]).toBeInstanceOf(PiiValue);
+      expect(out[field]?.value).not.toContain(SENTINEL);
+      expect(out[field]?.value).toContain(REDACTED);
+    }
   });
 });

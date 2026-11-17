@@ -25,6 +25,7 @@ import {
 
 export {
   escapeLineBreakers,
+  hasCredentialShape,
   isOmittedKey,
   isPiiKey,
   isSensitiveChildKey,

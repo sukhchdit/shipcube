@@ -137,10 +137,47 @@ describe('[C10] c10Findings on planted data (data-model §4.6)', () => {
   });
 
   it('the key-id list names the §10.4 columns of the live audit store', () => {
-    expect(KEY_ID_SIBLINGS).toContainEqual(['audit_pii_vault', 'ciphertext', 'ciphertext_key_id']);
-    expect(KEY_ID_SIBLINGS).toContainEqual(['audit_pii_vault', 'value_hmac', 'value_hmac_key_id']);
-    expect(KEY_ID_SIBLINGS).toContainEqual(['audit_entries', 'ip_hash', 'ip_hash_key_id']);
+    expect(KEY_ID_SIBLINGS).toContainEqual(['audit_pii_vault', 'ciphertext', 'ciphertext_key_id', 'SECRET']);
+    expect(KEY_ID_SIBLINGS).toContainEqual(['audit_pii_vault', 'value_hmac', 'value_hmac_key_id', 'SECRET']);
+    expect(KEY_ID_SIBLINGS).toContainEqual(['audit_entries', 'ip_hash', 'ip_hash_key_id', 'INTERNAL']);
     expect(registryTableName('platform', 'jobs')).toBe('platform.jobs');
     expect(Object.keys(CLASSIFICATION_REGISTRY).every((name) => !name.startsWith('public.'))).toBe(true);
+  });
+});
+
+describe('[PR61-SEC-10] C10 pins the data-model class of each §10.4 column', () => {
+  it('a §10.4 column classified other than the data model says is a finding', () => {
+    const columns = [
+      { schema: 'public', table: 'audit_pii_vault', column: 'ciphertext' },
+      { schema: 'public', table: 'audit_pii_vault', column: 'ciphertext_key_id' },
+    ];
+    const registry = { audit_pii_vault: { ciphertext: 'INTERNAL', ciphertext_key_id: 'INTERNAL' } } as const;
+    expect(c10Findings({ columns, tableClasses: [], registry })).toEqual([
+      'audit_pii_vault.ciphertext: classified INTERNAL, data-model §3 says SECRET (PR61-SEC-10)',
+    ]);
+  });
+
+  it('the live registry agrees with every pinned class it holds', () => {
+    for (const [table, column, , expected] of KEY_ID_SIBLINGS) {
+      const actual = classificationOf(table, column);
+      if (actual !== undefined) expect([`${table}.${column}`, actual]).toEqual([`${table}.${column}`, expected]);
+    }
+  });
+});
+
+describe('[PR61 R1-n2] [dup-review R1-n7] the Prisma reader: @@schema and // inside strings', () => {
+  it('keys a model of another schema as <schema>.<table>; a // inside a string does not cut the line', () => {
+    const text = [
+      'model Job {',
+      '  id   String @id',
+      '  hook String @default("https://example.test/hook") @map("hook_url") // trailing comment',
+      '  @@map("jobs")',
+      '  @@schema("platform")',
+      '}',
+    ].join('\n');
+    expect(schemaColumnsOf([text])).toEqual([
+      { table: 'platform.jobs', column: 'id' },
+      { table: 'platform.jobs', column: 'hook_url' },
+    ]);
   });
 });

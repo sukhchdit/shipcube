@@ -7,15 +7,18 @@
  *  - Only the first {@link MAX_USER_AGENT_SCAN} characters are read; the raw header is PERSONAL and reaches the entry
  *    only as a vault token.
  *  - One pass, no regular expression: every character is visited once and every word is classified once by an exact
- *    lookup in a closed table, so the work is at most 2 x 512 steps whatever the input ({@link scanUserAgent} counts
- *    them; the unit test asserts the exact count for adversarial inputs).
+ *    lookup in a closed table. {@link scanUserAgent} counts one step per character visited plus, per word, one step and
+ *    one per character the classification reads (its `indexOf` / `slice` work), so a super-linear classification would
+ *    move the count; the work is at most 3 x 512 steps and the unit test asserts literal counts for adversarial inputs.
  *  - The output is assembled from the closed family tables and ASCII digits only: no character of the header other
  *    than the major version's digits can reach the INT column, so a crafted header cannot place free text there.
  *
  * Words are separated by space, `;`, `,`, `(` and `)`. A word `Name/Version` outside or inside a comment is a product
  * token; a word inside a parenthesised comment is also an OS marker. The browser is the highest-ranked product found
  * (Edge, Opera and Samsung Internet carry a `Chrome` token too; Chrome carries `Safari`), the OS the highest-ranked
- * marker (Android carries `Linux`, iOS carries `Mac OS X`). An unknown client is `null`, never a guess.
+ * marker (Android carries `Linux`, iOS carries `Mac OS X`). Safari counts only with its `Version/` token: every
+ * WebKit or Blink client carries `Safari/`, so without it an unlisted client (`HeadlessChrome`) would be guessed as
+ * Safari (PR #61 dup-review R1-m7). An unknown client is `null`, never a guess.
  */
 
 /** Characters of the header the parser reads. */
@@ -97,7 +100,7 @@ function majorOf(version: string): string | null {
 export interface UserAgentScan {
   /** `Family major / OS`, `Family major`, `Family / OS`, `Family`, or null. */
   readonly parsed: string | null;
-  /** Characters visited + words classified (the exact work measure; at most 2 x 512). */
+  /** Characters visited + per word (1 + its length) (the exact work measure; at most 3 x 512). */
   readonly steps: number;
   /** Non-empty words classified. */
   readonly words: number;
@@ -107,6 +110,7 @@ interface Found {
   browser: Product | undefined;
   browserVersion: string;
   safariVersion: string;
+  sawVersion: boolean;
   os: readonly [string, number] | undefined;
 }
 
@@ -116,7 +120,10 @@ function classify(word: string, inComment: boolean, found: Found): void {
   if (slash > 0) {
     const name = word.slice(0, slash);
     const version = word.slice(slash + 1);
-    if (name === 'Version') found.safariVersion = version;
+    if (name === 'Version') {
+      found.safariVersion = version;
+      found.sawVersion = true;
+    }
     const candidate = PRODUCTS.get(name);
     if (candidate !== undefined && (found.browser === undefined || candidate.rank < found.browser.rank)) {
       found.browser = candidate;
@@ -130,7 +137,7 @@ function classify(word: string, inComment: boolean, found: Found): void {
 
 function assemble(found: Found): string | null {
   const { browser } = found;
-  if (browser === undefined) return null;
+  if (browser === undefined || (browser.versionFromVersionToken === true && !found.sawVersion)) return null;
   const major = majorOf(browser.versionFromVersionToken === true ? found.safariVersion : found.browserVersion);
   const name = major === null ? browser.family : `${browser.family} ${major}`;
   return found.os === undefined ? name : `${name} / ${found.os[0]}`;
@@ -139,14 +146,15 @@ function assemble(found: Found): string | null {
 /** Parses a header and reports the work done (the unit test's exact step bound). */
 export function scanUserAgent(header: string): UserAgentScan {
   const input = header.length > MAX_USER_AGENT_SCAN ? header.slice(0, MAX_USER_AGENT_SCAN) : header;
-  const found: Found = { browser: undefined, browserVersion: '', safariVersion: '', os: undefined };
+  const found: Found = { browser: undefined, browserVersion: '', safariVersion: '', sawVersion: false, os: undefined };
   let steps = 0;
   let words = 0;
   let depth = 0;
   let start = 0;
   const close = (end: number): void => {
     if (end <= start) return;
-    steps += 1;
+    // One step for the word and one per character its classification reads (slice, indexOf).
+    steps += 1 + (end - start);
     words += 1;
     classify(input.slice(start, end), depth > 0, found);
   };

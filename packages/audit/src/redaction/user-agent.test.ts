@@ -90,25 +90,29 @@ describe('[D-ARCH-141] parseUserAgent: browser family + major / OS family', () =
 });
 
 describe('[D-SEC-PR53-02] scanUserAgent: linear work with an exact step bound (never a wall-clock bound)', () => {
-  it('a step is one character visited or one word classified; the work of a value is exact', () => {
-    // 11 characters, 2 words (`curl/8.11.1` is one word, the end of the input closes it): 11 + 1.
-    expect(scanUserAgent('curl/8.11.1').steps).toBe(12);
-    expect(scanUserAgent('a b').steps).toBe(3 + 2);
+  it('a step is one character visited, plus per word one step and one per character its classification reads', () => {
+    // 11 characters; one word of 11 characters: 11 + (1 + 11).
+    expect(scanUserAgent('curl/8.11.1').steps).toBe(23);
+    // 3 characters; two words of one character: 3 + 2 x (1 + 1).
+    expect(scanUserAgent('a b').steps).toBe(7);
     expect(scanUserAgent('').steps).toBe(0);
   });
 
   it.each([
-    ['512 separators (every character closes an empty word)', '('.repeat(512)],
-    ['512 alternating word characters and separators', 'a;'.repeat(256)],
-    ['512 characters of one slash-heavy word', '/'.repeat(512)],
-    ['nested comments 256 deep', `${'('.repeat(256)}${')'.repeat(256)}`],
-    ['a repeated product token', 'Firefox/1 '.repeat(52).slice(0, 512)],
-  ])('adversarial 512-character input: %s', (_label, header) => {
+    // No word: the 512 characters only.
+    ['512 separators (every character closes an empty word)', '('.repeat(512), 512],
+    // 256 one-character words: 512 + 256 x 2.
+    ['512 alternating word characters and separators', 'a;'.repeat(256), 1024],
+    // One word of 512 characters: 512 + 1 + 512.
+    ['512 characters of one slash-heavy word', '/'.repeat(512), 1025],
+    ['nested comments 256 deep', `${'('.repeat(256)}${')'.repeat(256)}`, 512],
+    // 51 words of 9 characters and a trailing "Fi": 512 + 51 x 10 + 3.
+    ['a repeated product token', 'Firefox/1 '.repeat(52).slice(0, 512), 1025],
+  ])('adversarial 512-character input: %s', (_label, header, expected) => {
     expect(header).toHaveLength(MAX_USER_AGENT_SCAN);
-    const { steps, words } = scanUserAgent(header);
-    // Exact: one step per character plus one per non-empty word; the bound is 2 x 512.
-    expect(steps).toBe(MAX_USER_AGENT_SCAN + words);
-    expect(steps).toBeLessThanOrEqual(2 * MAX_USER_AGENT_SCAN);
+    const { steps } = scanUserAgent(header);
+    expect(steps).toBe(expected);
+    expect(steps).toBeLessThanOrEqual(3 * MAX_USER_AGENT_SCAN);
   });
 
   it('a longer header does no more work than its first 512 characters', () => {
@@ -116,15 +120,27 @@ describe('[D-SEC-PR53-02] scanUserAgent: linear work with an exact step bound (n
     expect(scanUserAgent(long).steps).toBe(scanUserAgent(long.slice(0, MAX_USER_AGENT_SCAN)).steps);
   });
 
-  it('the step count never exceeds 2 x min(length, 512) for any input (property)', () => {
+  it('the step count stays within [min(length, 512), 3 x min(length, 512)] for any input (property)', () => {
     fc.assert(
       fc.property(fc.string({ maxLength: 1_200, unit: 'binary' }), (header) => {
         const { steps, words } = scanUserAgent(header);
         const visited = Math.min(header.length, MAX_USER_AGENT_SCAN);
-        expect(steps).toBe(visited + words);
-        expect(steps).toBeLessThanOrEqual(2 * visited);
+        expect(steps).toBeGreaterThanOrEqual(visited + 2 * words);
+        expect(steps).toBeLessThanOrEqual(3 * visited);
       }),
       { numRuns: 300 },
     );
+  });
+});
+
+describe('[PR61 R1-n5] [dup-review R1-m7] closed-table decisions pinned', () => {
+  it('an unlisted WebKit/Blink client with a Safari/ token but no Version/ token is null, never a Safari guess', () => {
+    const headless = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.0.0 Safari/537.36';
+    expect(parseUserAgent(headless)).toBeNull();
+  });
+
+  it('OS markers count only inside a comment; a comma separates words', () => {
+    expect(parseUserAgent('Firefox/146 Windows')).toBe('Firefox 146');
+    expect(parseUserAgent('(Windows,x64) Firefox/146')).toBe('Firefox 146 / Windows');
   });
 });

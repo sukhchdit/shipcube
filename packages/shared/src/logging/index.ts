@@ -13,6 +13,7 @@ export {
   BINARY,
   CIRCULAR,
   escapeLineBreakers,
+  hasCredentialShape,
   isOmittedKey,
   isPiiKey,
   isSensitiveChildKey,

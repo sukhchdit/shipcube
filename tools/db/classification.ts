@@ -17,12 +17,16 @@ import {
   type ClassificationRegistry,
   CLASSIFICATION_REGISTRY,
   classificationOf,
+  type FieldClassification,
   type SchemaColumn,
   staleClassifications,
   unclassifiedColumns,
 } from '@platform/shared';
 
 import type { TableClassEntry } from './table-classes.js';
+
+/** The registry key of a live table: the bare name in `public`, `<schema>.<table>` elsewhere. */
+export const registryTableName = (schema: string, table: string): string => (schema === 'public' ? table : `${schema}.${table}`);
 
 /** Prisma's scalar types; any other field type is a model (a relation field, no column) unless it is an enum. */
 const PRISMA_SCALARS: ReadonlySet<string> = new Set([
@@ -40,6 +44,18 @@ const BLOCK_START = /^(model|enum|view|type)\s+([A-Za-z][A-Za-z0-9_]*)\s*\{\s*$/
 const FIELD = /^([A-Za-z][A-Za-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_]*)(?:\("[^"]*"\))?(\[\])?(\?)?(\s.*)?$/;
 const MAP = /@map\(\s*(?:name:\s*)?"([^"]+)"/;
 const TABLE_MAP = /^@@map\(\s*(?:name:\s*)?"([^"]+)"/;
+const TABLE_SCHEMA = /^@@schema\(\s*"([^"]+)"/;
+
+/** The line without its `//` comment; a `//` inside a double-quoted string (`@default("https://x")`) is kept (R1-n7). */
+function withoutComment(line: string): string {
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line.charAt(index);
+    if (char === '"' && line.charAt(index - 1) !== '\\') quoted = !quoted;
+    else if (!quoted && char === '/' && line.charAt(index + 1) === '/') return line.slice(0, index);
+  }
+  return line;
+}
 
 interface Block {
   readonly kind: string;
@@ -52,7 +68,7 @@ function blocksOf(text: string): Block[] {
   const blocks: Block[] = [];
   let current: { kind: string; name: string; lines: string[] } | undefined;
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/\/\/.*$/, '').trim();
+    const line = withoutComment(raw).trim();
     if (current === undefined) {
       const start = BLOCK_START.exec(line);
       if (start !== null) current = { kind: start[1] as string, name: start[2] as string, lines: [] };
@@ -73,7 +89,11 @@ export function schemaColumnsOf(texts: readonly string[]): SchemaColumn[] {
   const columns: SchemaColumn[] = [];
   for (const block of blocks.filter((candidate) => candidate.kind === 'model')) {
     const tableLine = block.lines.find((line) => TABLE_MAP.test(line));
-    const table = tableLine === undefined ? block.name : (TABLE_MAP.exec(tableLine)?.[1] as string);
+    const schemaLine = block.lines.find((line) => TABLE_SCHEMA.test(line));
+    const bare = tableLine === undefined ? block.name : (TABLE_MAP.exec(tableLine)?.[1] as string);
+    // A model in another schema (`@@schema("platform")`) is registered as `platform.<table>`, as C10 keys it (R1-n2).
+    const schema = schemaLine === undefined ? 'public' : (TABLE_SCHEMA.exec(schemaLine)?.[1] as string);
+    const table = registryTableName(schema, bare);
     for (const line of block.lines) {
       if (line.startsWith('@@')) continue;
       const field = FIELD.exec(line);
@@ -95,9 +115,6 @@ export function prismaSchemaColumns(dir: string): SchemaColumn[] {
   return schemaColumnsOf(files.map((name) => readFileSync(join(dir, name), 'utf8')));
 }
 
-/** The registry key of a live table: the bare name in `public`, `<schema>.<table>` elsewhere. */
-export const registryTableName = (schema: string, table: string): string => (schema === 'public' ? table : `${schema}.${table}`);
-
 /** One row of `information_schema.columns` (partitions excluded by the caller). */
 export interface LiveColumn {
   readonly schema: string;
@@ -113,23 +130,27 @@ export const SYSTEM_PII_EXCEPTIONS: ReadonlySet<string> = new Set(['idempotency_
 
 /**
  * The ciphertext and HMAC lookup columns of data-model §10.4 (amendment SEC-P3-08 item 1) with their sibling key-id
- * column. Not listed: the outbox `payload.token_enc` (a JSON member, its sibling is a JSON member) and the reserved
- * `user_credentials.pepper_key_id` (SEC-P3-16 backlog).
+ * column and their data-model §3 class (PR61-SEC-10: C10 pins the class as well as the sibling). The class is the
+ * column's `Class` in data-model §3; `mfa_challenges.ip_prefix_hmac` and the M3-seam
+ * `carrier_accounts.credentials_ciphertext` carry none there and are pinned SECRET (a keyed lookup HMAC and partner
+ * credentials; the safe direction). Not listed: the outbox `payload.token_enc` (a JSON member, its sibling is a JSON
+ * member) and the reserved `user_credentials.pepper_key_id` (SEC-P3-16 backlog).
  */
-export const KEY_ID_SIBLINGS: readonly (readonly [table: string, column: string, sibling: string])[] = Object.freeze([
-  ['mfa_totp', 'secret_ciphertext', 'secret_ciphertext_key_id'],
-  ['mfa_recovery_codes', 'code_hmac', 'code_hmac_key_id'],
-  ['mfa_challenges', 'ip_prefix_hmac', 'ip_prefix_hmac_key_id'],
-  ['mfa_enrolment_codes', 'code_hmac', 'code_hmac_key_id'],
-  ['login_attempt_counters', 'identifier_hmac', 'identifier_hmac_key_id'],
-  ['audit_pii_vault', 'ciphertext', 'ciphertext_key_id'],
-  ['audit_pii_vault', 'value_hmac', 'value_hmac_key_id'],
-  ['audit_entries', 'ip_hash', 'ip_hash_key_id'],
-  ['tracking_index', 'customer_ref_postcode_hmac', 'customer_ref_postcode_hmac_key_id'],
-  ['idempotency_keys', 'response_body', 'response_body_key_id'],
-  ['shipment_party_identifiers', 'value_ciphertext', 'value_ciphertext_key_id'],
-  ['carrier_accounts', 'credentials_ciphertext', 'credentials_ciphertext_key_id'],
-]);
+export const KEY_ID_SIBLINGS: readonly (readonly [table: string, column: string, sibling: string, classification: FieldClassification])[] =
+  Object.freeze([
+    ['mfa_totp', 'secret_ciphertext', 'secret_ciphertext_key_id', 'SECRET'],
+    ['mfa_recovery_codes', 'code_hmac', 'code_hmac_key_id', 'SECRET'],
+    ['mfa_challenges', 'ip_prefix_hmac', 'ip_prefix_hmac_key_id', 'SECRET'],
+    ['mfa_enrolment_codes', 'code_hmac', 'code_hmac_key_id', 'SECRET'],
+    ['login_attempt_counters', 'identifier_hmac', 'identifier_hmac_key_id', 'SECRET'],
+    ['audit_pii_vault', 'ciphertext', 'ciphertext_key_id', 'SECRET'],
+    ['audit_pii_vault', 'value_hmac', 'value_hmac_key_id', 'SECRET'],
+    ['audit_entries', 'ip_hash', 'ip_hash_key_id', 'INTERNAL'],
+    ['tracking_index', 'customer_ref_postcode_hmac', 'customer_ref_postcode_hmac_key_id', 'INTERNAL'],
+    ['idempotency_keys', 'response_body', 'response_body_key_id', 'PERSONAL'],
+    ['shipment_party_identifiers', 'value_ciphertext', 'value_ciphertext_key_id', 'SENSITIVE_PERSONAL'],
+    ['carrier_accounts', 'credentials_ciphertext', 'credentials_ciphertext_key_id', 'SECRET'],
+  ]);
 
 const isPersonal = (classification: string | undefined): boolean =>
   classification === 'PERSONAL' || classification === 'SENSITIVE_PERSONAL';
@@ -156,9 +177,12 @@ export function c10Findings(input: C10Input): string[] {
     if (SYSTEM_PII_EXCEPTIONS.has(`${table}.${column}`) || SYSTEM_PII_EXCEPTIONS.has(`${table}.*`)) continue;
     findings.push(`${table}.${column}: PERSONAL / SENSITIVE_PERSONAL column in a SYSTEM table`);
   }
-  for (const [table, column, sibling] of KEY_ID_SIBLINGS) {
-    if (present.has(`${table}.${column}`) && !present.has(`${table}.${sibling}`)) {
-      findings.push(`${table}.${column}: no sibling key-id column ${sibling} (data-model §10.4)`);
+  for (const [table, column, sibling, expected] of KEY_ID_SIBLINGS) {
+    if (!present.has(`${table}.${column}`)) continue;
+    if (!present.has(`${table}.${sibling}`)) findings.push(`${table}.${column}: no sibling key-id column ${sibling} (data-model §10.4)`);
+    const actual = classificationOf(table, column, registry);
+    if (actual !== undefined && actual !== expected) {
+      findings.push(`${table}.${column}: classified ${actual}, data-model §3 says ${expected} (PR61-SEC-10)`);
     }
   }
   return findings.sort();

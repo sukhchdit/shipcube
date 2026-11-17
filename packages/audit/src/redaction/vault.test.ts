@@ -4,7 +4,7 @@
  * (table, column, token, key id) AAD, the keyed dedupe HMAC and one vault batch per flush. The database side is
  * apps/api/src/platform/audit/composition.int.test.ts.
  */
-import { createHmac, randomBytes } from 'node:crypto';
+import { createDecipheriv, createHmac, randomBytes } from 'node:crypto';
 
 import { describe, expect, it } from '@jest/globals';
 import { ANONYMOUS_ACTOR_ID, SYSTEM_ACTOR_ID } from '@platform/shared';
@@ -191,5 +191,65 @@ describe('[ADR-0007 am. 2] createIpIndex: HMAC-SHA256 under AUDIT_INDEX_KEY', ()
   it('refuses a short key or a malformed key id', () => {
     expect(() => createIpIndex({ keyId: 'audit-index-v1', key: new Uint8Array(4) })).toThrow('at least 32 bytes');
     expect(() => createIpIndex({ keyId: 'audit-index', key: INDEX_KEY.key })).toThrow('key id');
+  });
+});
+
+describe('[PR61 R1-m4] vault format, nonce and key pinned independently of the implementation', () => {
+  /** Encrypts two values and returns their rows (fake store). */
+  async function twoRows(): Promise<readonly VaultRow[]> {
+    const { calls, store } = capturingStore();
+    const tokeniser = createVaultTokeniser({ vaultKey: VAULT_KEY, hmacKey: HMAC_KEY, store, newId });
+    await tokeniser.tokenise(fakeSql(lookup({ [`USER:${USER}`]: SUBJECT_ID })), [value('ip', 'same'), value('ip', 'same')]);
+    return calls[0]?.rows ?? [];
+  }
+
+  it('[SEC-TC-49] known-answer AAD: a row decrypts with node:crypto and the literal JCS AAD, and with nothing else', async () => {
+    const [row] = await twoRows();
+    if (row === undefined) throw new Error('row expected');
+    const data = Buffer.from(row.ciphertext);
+    const decrypt = (aad: string): string => {
+      const decipher = createDecipheriv('aes-256-gcm', VAULT_KEY.key, data.subarray(0, 12), { authTagLength: 16 });
+      decipher.setAAD(Buffer.from(aad, 'utf8'));
+      decipher.setAuthTag(data.subarray(data.length - 16));
+      return Buffer.concat([decipher.update(data.subarray(12, data.length - 16)), decipher.final()]).toString('utf8');
+    };
+    expect(decrypt(`["audit_pii_vault","ciphertext","${row.token}","vault-v1"]`)).toBe('same');
+    expect(() => decrypt(`["audit_pii_vault","ciphertext","${row.token}","vault-v2"]`)).toThrow();
+    expect(() => decrypt(`["audit_pii_vault","value","${row.token}","vault-v1"]`)).toThrow();
+    expect(() => decrypt(`["audit_pii_vault","ciphertext","${row.token}"]`)).toThrow();
+  });
+
+  it('every encryption draws a fresh 96-bit nonce (the first 12 bytes differ)', async () => {
+    const [first, second] = await twoRows();
+    const nonce = (row: VaultRow | undefined) => Buffer.from(row?.ciphertext ?? []).subarray(0, 12);
+    expect(nonce(first)).toHaveLength(12);
+    expect(nonce(first).equals(nonce(second))).toBe(false);
+  });
+
+  it('an AES key of 33 bytes is refused at construction (exactly 32)', () => {
+    expect(() => createVaultTokeniser({ vaultKey: { keyId: 'vault-v1', key: new Uint8Array(33) }, hmacKey: HMAC_KEY })).toThrow(
+      'AUDIT vault key must be 32 bytes',
+    );
+  });
+});
+
+describe('[PR61 dup-review R1-m5] missing subjects are inserted in (kind, ref_id) order (no lock-order deadlock)', () => {
+  it('sorts the INSERT batch whatever the first-seen order of the values', async () => {
+    const { store } = capturingStore();
+    const tokeniser = createVaultTokeniser({ vaultKey: VAULT_KEY, hmacKey: HMAC_KEY, store, newId });
+    const later = '0190c3a4-5b6c-7d8e-9f00-ffffffffffff';
+    const earlier = '0190c3a4-5b6c-7d8e-9f00-000000000aaa';
+    const known = { [`USER:${later}`]: SUBJECT_ID, [`USER:${earlier}`]: CONTACT_SUBJECT_ID, [`CONTACT:${CONTACT}`]: ANON_SUBJECT_ID };
+    const db = fakeSql(lookup({}), 1, lookup(known));
+    await tokeniser.tokenise(db, [
+      value('ip', 'a', { kind: 'USER', refId: later }),
+      value('ip', 'b', { kind: 'USER', refId: earlier }),
+      value('name', 'c', { kind: 'CONTACT', refId: CONTACT }),
+    ]);
+    const insert = db.statements[1];
+    expect(insert?.values.slice(3)).toEqual([
+      ['CONTACT', 'USER', 'USER'],
+      [CONTACT, earlier, later],
+    ]);
   });
 });

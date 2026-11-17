@@ -13,8 +13,9 @@
  *
  * Vault token columns (`audit_entries.ip_token`, `user_agent_token`, `reason_token`) are INTERNAL: they hold a
  * pseudonymous reference whose PERSONAL value lives (encrypted) in `audit_pii_vault` and disappears with erasure, so
- * the SYSTEM-no-PII rule of C10 holds for the entry table as written (D-TASK028-03). `old_value` / `new_value` /
- * `details` are INTERNAL after redaction and tokenisation (data-model §3.4).
+ * the SYSTEM-no-PII rule of C10 holds for the entry table as written (D-TASK028-03; ruled by D-ARCH-148, which amends
+ * data-model §3.4 from "PER (token)" to "INT (token)"). `old_value` / `new_value` / `details` are INTERNAL after
+ * redaction and tokenisation (data-model §3.4).
  */
 
 /** The REQ-AUDIT-009 classes, in increasing sensitivity. */
