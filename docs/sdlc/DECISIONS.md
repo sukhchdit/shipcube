@@ -3014,3 +3014,9 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **D-TASK289-13:** problem-member `instance` is compared, not volatile (narrows D-TASK289-02).
   - **TASK-028** decisions D-TASK028-01..10 and **TASK-290** decisions D-TASK290-01..06 are proposed in their handoffs and will be logged when their PRs open.
 - **Reversibility:** High.
+
+### D-ORCH-126 · 2026-11-17 · sdlc-orchestrator · Lane-B queue results; PR #60 fc1 pushed; PR #61 (TASK-028) opened
+- **Serial queue (D-ORCH-125), first batch:** 20261117T1247Z_f2a7411 (PR #60) PASS in 15 min; 20261117T1302Z_e526b11 (TASK-028) PASS in 12 min; 20261117T1314Z_ba921da (TASK-290) FAIL on 1 unit case (`tools/quality/inventory.test.ts`; the run was alone, so a likely genuine interaction, now being diagnosed by the developer). TASK-287A (`a85234a`) is running. Serial runs are fast and clean, confirming the contention diagnosis.
+- **PR #60** (fix cycle 1): one push to `c912a0a` (fixes `b66f450`, merge of main `f2a7411` with an empty remerge-diff, evidence). Lane A 44093161786: fast-lane green, record step red as expected. **D-TASK289-13:** problem `instance` is compared. Narrow r2 queued behind PR #61's reviews.
+- **PR #61** (TASK-028, head `57faf1f`): one push, P1 clean against main `732ad20`. Code r1 and security r1 dispatched. Open point: its evidence base predates PR #57's `fs-lock.ts` change, which the C10 harness reaches. If CI voids the proof or a reviewer requires it, re-queue lane B on the merged tree before merge. **D-TASK028-01..10** are as listed in the PR #61 body.
+- **Reversibility:** High.
