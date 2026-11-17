@@ -2822,3 +2822,14 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Not counted as a fix cycle:** the findings are approved; this is integration.
 - **Lesson:** when two in-flight PRs touch the same files, merge order creates a P1 re-test. Locks in the plan should cover `tenant-db`/`execute` (note for the sheet fold).
 - **Reversibility:** High.
+
+### D-TASK288-09..15 · 2026-11-17 · test-engineer (recorded by orchestrator) · PR #57 fix cycle 1 (@4f1fbd5, code a67db34)
+- **09** The lock root is `<checkout>/node_modules/.cache/shipqube-test-locks` (mode 0700), plus an `lstat` link refusal (PR57-SEC-01). Test locks are also no longer exposed to temp cleanup.
+- **10** Registrations are `<pid>-<uuid>` (no threadId; Jest workerThreads is unused); re-entrancy stays per process.
+- **11** Unknown readers-dir entries are ignored, never deleted.
+- **12** R1-m1/SEC-03: tombstone takeover with put-back, plus writer ownership re-checks (`LostTestLockError`), and no finally-delete of a lost lock.
+- **13** An ownerless writer dir older than 30 s is stale.
+- **14** `tryRegisterReader`/`takeOverStale` are exported as test-only seams.
+- **15** **C1 is met** at `4f1fbd5`: restricted run 20261117T0646Z_4f1fbd5 (not committed) gave catalog-c1-c14 102, integration 315 and rls-cross-tenant 126, all with 0 failures/errors/skips. Two earlier attempts failed only on Docker networking (P1001, "port not bound") and are not counted → W0-FLAKE-3 infra note.
+- **Not done:** R1-n4 and R1-n6 go to the next touch of those files.
+- **Reversibility:** High.
