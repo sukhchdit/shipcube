@@ -178,9 +178,13 @@ describe('deps:rebuild allow-list (ADR-0023 am. F, R-ARCH-20)', () => {
     // mode against the engine verified by the preceding `npm run deps:rebuild`, and `prisma generate` regenerates
     // the client. R2-n5: the duration is asserted against UNIT_REAL_RUN_BUDGET_MS. The engine fetch from an empty
     // directory (network) is the integration test tools/deps/prisma-engines.int.test.ts.
-    const started = Date.now();
-    const result = await withFileLock(PRISMA_TREE_LOCK, () => runNode([rebuildScript], { cwd: repoRoot, env: rebuildEnv() }));
-    const elapsed = Date.now() - started;
+    // The clock runs inside the lock (TASK-288): the budget is for the rebuild, not for waiting on other writers or on the
+    // readers of the generated client that the lock now also waits for.
+    const { result, elapsed } = await withFileLock(PRISMA_TREE_LOCK, () => {
+      const started = Date.now();
+      const run = runNode([rebuildScript], { cwd: repoRoot, env: rebuildEnv() });
+      return { result: run, elapsed: Date.now() - started };
+    });
     expect(result.status).toBe(0);
     const reported = result.stdout.split(/\r?\n/).filter((line) => /^\[deps:rebuild\] [\w-]+: (run|skip) /.test(line));
     expect(reported.map((line) => /^\[deps:rebuild\] ([\w-]+): (run|skip) /.exec(line)?.slice(1, 3))).toEqual([
