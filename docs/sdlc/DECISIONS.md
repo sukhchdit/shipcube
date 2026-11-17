@@ -2996,3 +2996,12 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **20** C1 rerun at `a5f94b0` (20261117T1051Z) is green; the first attempt failed only on the network drop (prisma engine re-download) and is not counted.
 - **Follow-up → TASK-291:** `prisma-engines.int.test.ts` should restore or keep the verified engine when the download fails.
 - **Reversibility:** High.
+
+### D-ORCH-124 · 2026-11-17 · sdlc-orchestrator · PR #57 merged (TASK-288 complete)
+- **PR #57** squash-merged.
+  - **Head:** `af219c6`. Code r3 APPROVED_WITH_NITS (`c8cc4f2`; R3-n1..n3 → next touch / TASK-291); security delta r3 PASS_WITH_FOLLOW-UPS (`af219c6`; D-SEC-PR57-03: PR57-SEC-05 and the SEC-03 residual (b) closed, C1 verified at `a5f94b0`).
+  - **CI:** lane A 44075846731 MERGE-READY (security-integration skipped by design; C1 local run in its place per D-SEC-PR57-01); lane B 20261117T0739Z_bfe5235.
+  - **P1:** no overlap. **Fix cycles:** 2/3.
+- **TASK-288 complete.** TASK-291 now waits only on TASK-289 (PR #60). TASK-291 also inherits code-review R3-n1 (bounded EBUSY hook) and R3-n3 (orphaned IDLE children).
+- **Host hygiene:** reviewer hang mutants may have left idle `node -e setInterval` processes. Agents were denied process listing by the classifier and did not work around it; cleanup is offered to the user.
+- **Reversibility:** Medium (merged; revertible).
