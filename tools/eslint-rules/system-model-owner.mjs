@@ -19,7 +19,25 @@
  *  - `reexport`: re-exporting the accessor or the port module;
  *  - `port`: importing `platform/db/system-port` (the private link between a handle and its SYSTEM guard; only
  *    tenant-db.ts and system-db.ts, which this rule does not lint, may import it);
- *  - `manifest`: the manifests or the schema cannot be read (fail closed, reported on the accessor import).
+ *  - `manifest`: the manifests or the schema cannot be read (fail closed, reported on the accessor import or the raw
+ *    template);
+ *  - `rawSystemTable` (D-ARCH-124, PR32-SEC-07 (c); TASK-020 part 020-D): a tagged `$queryRaw` / `$executeRaw`
+ *    template that names a SYSTEM table of the manifests, in a file outside the owner globs of the declaring module.
+ *    SYSTEM tables have no RLS and one runtime role, so this is the only control on module raw SQL that reaches them.
+ *    The template is read by ./raw-sql-lexer.mjs: every unquoted identifier (lower-cased, so `public.`-qualified and
+ *    upper-case spellings count) and every quoted identifier outside string literals and comments; a monthly partition
+ *    `<table>_YYYY_MM` (audit_entries_2026_11) counts as its table. `platform/db-raw-sql` refuses non-literal SQL,
+ *    and the TenantDb run-time guard refuses every interpolated Sql fragment (a tagged `Prisma.sql` fragment is
+ *    lint-legal, PR54-SEC-04), so the static template text is the whole statement. The text is rendered and read as
+ *    PostgreSQL reads it (./raw-sql-lexer.mjs, PR54-SEC-01). Reported once per table and template;
+ *  - `rawUnreadable`: a raw template the lexer cannot read (a Unicode-escape identifier, an unterminated string or
+ *    comment, a character outside ASCII outside a string or comment, an invalid escape): it could spell any table
+ *    name, so it fails closed.
+ *    Residuals (code review R1-n5, PR54-SEC-02 (b), routed to TASK-073): a table name inside a string literal that
+ *    SQL executes (`query_to_xml('select … from t', …)`) or concatenates, a table NAME in a string cast to
+ *    `regclass` (`table_to_xml('audit_entries'::regclass, …)`, `table_to_xmlschema`), and readers that name no table
+ *    (`database_to_xml`, `schema_to_xml`); `platform/db-raw-sql` refuses `DO` blocks, and such functions are a
+ *    review item.
  * A specifier is a string literal or a no-substitution template literal; `require`, `module.require` and
  * `createRequire(url)(…)` count as loads (PR32-SEC-07 (a)). A computed specifier (`import(where)`) is reported by
  * `platform/static-module-specifier`, which runs on the same files.
@@ -32,6 +50,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 
 import { isRequireCall, staticSpecifier } from './module-sources.mjs';
 import { globPattern, relativeFile } from './path-glob.mjs';
+import { identifiersOf, lexSql, templateText } from './raw-sql-lexer.mjs';
 
 /** Module specifiers of the accessor: the api file, the worker twin, the runtime entry (once it re-exports it). */
 const ACCESSOR_SOURCE = /(?:^|\/)platform\/db\/system-db(?:\.[cm]?[jt]s)?$|^@platform\/api\/runtime$/u;
@@ -43,6 +62,10 @@ const DEFAULT_SCHEMA_DIR = 'prisma/schema';
 const MODEL_BLOCK = /^model\s+([A-Za-z][A-Za-z0-9_]*)\s*\{([^}]*)\}/gmu;
 const MAP_ATTRIBUTE = /@@map\(\s*(?:name:\s*)?"([^"]+)"\s*\)/u;
 const WRAPPERS = new Set(['AwaitExpression', 'ChainExpression', 'TSAsExpression', 'TSNonNullExpression', 'TSSatisfiesExpression']);
+/** The raw members whose tagged templates are read for SYSTEM table names (D-ARCH-124). */
+const RAW_MEMBERS = new Set(['$queryRaw', '$executeRaw']);
+/** A monthly partition of a table: `<table>_YYYY_MM`. */
+const MONTHLY_PARTITION = /^(.+)_\d{4}_\d{2}$/u;
 
 /**
  * @typedef {{ table: string; module: string }} SystemModel
@@ -62,11 +85,11 @@ export function parseSchemaModels(text) {
 const delegateName = (name) => name.charAt(0).toLowerCase() + name.slice(1);
 
 /**
- * SYSTEM tables -> declaring module, from every `*.json` manifest of `dir`.
+ * SYSTEM tables -> declaring module, from every `*.json` manifest of `dir`. Exported for tools/lint/system-models.test.ts.
  * @param {string} dir
  * @returns {Map<string, string>}
  */
-function systemTables(dir) {
+export function systemTables(dir) {
   /** @type {Map<string, string>} */
   const tables = new Map();
   for (const file of readdirSync(dir).filter((name) => name.endsWith('.json'))) {
@@ -121,6 +144,38 @@ function cachedModels(root, dirs) {
     CACHE.set(key, models);
   }
   return models;
+}
+
+/** @type {Map<string, ReadonlyMap<string, string> | Error>} SYSTEM table -> module, cached per manifest directory */
+const TABLE_CACHE = new Map();
+
+/** @param {string} dir absolute manifest directory */
+function cachedTables(dir) {
+  let tables = TABLE_CACHE.get(dir);
+  if (tables === undefined) {
+    try {
+      tables = systemTables(dir);
+    } catch (error) {
+      tables = error instanceof Error ? error : new Error(String(error));
+    }
+    TABLE_CACHE.set(dir, tables);
+  }
+  return tables;
+}
+
+/**
+ * The SYSTEM tables a raw statement names (D-ARCH-124), each once, in order of first mention.
+ * @param {readonly string[]} identifiers
+ * @param {ReadonlyMap<string, string>} tables
+ * @returns {string[]}
+ */
+export function namedSystemTables(identifiers, tables) {
+  const named = new Set();
+  for (const identifier of identifiers) {
+    const table = tables.has(identifier) ? identifier : MONTHLY_PARTITION.exec(identifier)?.[1];
+    if (table !== undefined && tables.has(table)) named.add(table);
+  }
+  return [...named];
 }
 
 /**
@@ -178,6 +233,10 @@ export default {
       port: 'platform/db/system-port is private to platform/db (tenant-db.ts and system-db.ts): use systemDelegates(tx) (D-ARCH-080).',
       manifest:
         'platform/system-model-owner cannot read the table-class manifests or the Prisma schema ({{reason}}): fix them; the rule fails closed.',
+      rawSystemTable:
+        "This raw statement names the SYSTEM table {{table}}, declared by the '{{module}}' table-class manifest: only that module's code may reach it (SYSTEM tables have no RLS; D-ARCH-124, PR32-SEC-07).",
+      rawUnreadable:
+        'platform/system-model-owner cannot read this raw statement ({{reason}}), so it cannot tell which SYSTEM tables it names: write plain identifiers (D-ARCH-124).',
     },
   },
   create(context) {
@@ -289,7 +348,36 @@ export default {
     /** @param {import('estree').Node} node */
     const dynamicLoad = (node) => context.report({ node, messageId: 'untracked' });
 
+    /**
+     * D-ARCH-124: a tagged `$queryRaw` / `$executeRaw` template names SYSTEM tables only from their owner's code.
+     * @param {import('estree').TaggedTemplateExpression} node
+     */
+    const rawTemplate = (node) => {
+      /** @type {import('estree').Node} */
+      let tag = node.tag;
+      while (WRAPPERS.has(tag.type)) tag = /** @type {import('estree').Node & { expression: import('estree').Node }} */ (tag).expression;
+      const name =
+        tag.type === 'Identifier' ? tag.name : tag.type === 'MemberExpression' ? staticKey(tag.property, tag.computed) : undefined;
+      if (name === undefined || !RAW_MEMBERS.has(name)) return;
+      const tables = cachedTables(resolve(root, options?.manifestDir ?? DEFAULT_MANIFEST_DIR));
+      if (tables instanceof Error) {
+        context.report({ node: node.quasi, messageId: 'manifest', data: { reason: tables.message } });
+        return;
+      }
+      const text = templateText(node.quasi.quasis.map((quasi) => quasi.value.cooked));
+      const lexed = text === undefined ? { tokens: [], unreadable: 'a template part with an invalid escape' } : lexSql(text);
+      if (lexed.unreadable !== undefined) {
+        context.report({ node: node.quasi, messageId: 'rawUnreadable', data: { reason: lexed.unreadable } });
+        return;
+      }
+      for (const table of namedSystemTables(identifiersOf(lexed.tokens), tables)) {
+        const module = tables.get(table) ?? '';
+        if (!ownedHere(module)) context.report({ node: node.quasi, messageId: 'rawSystemTable', data: { table, module } });
+      }
+    };
+
     return {
+      TaggedTemplateExpression: rawTemplate,
       ImportDeclaration: importDeclaration,
       ExportNamedDeclaration: reexport,
       ExportAllDeclaration: reexport,

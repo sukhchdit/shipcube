@@ -38,6 +38,7 @@
  * (data-model §7.2); the composition root instantiates it as `TenantDb<Prisma.TransactionClient>`.
  */
 import { DbError, dbErrorMapping } from './map-db-error.js';
+import { refusedRawStatement } from './raw-statement.js';
 import { SYSTEM_MODELS, type SystemModelName } from './system-models.js';
 import { registerSystemPort } from './system-port.js';
 
@@ -379,8 +380,13 @@ function delegateOf(tx: object, key: string, label: string, state: GuardState): 
  *    `Prisma.join`, `new Prisma.Sql`) would interpolate. The guard cannot tell a reviewed fragment from `raw(input)`,
  *    so ALL fragments are refused. Write one template per statement shape and bind lists as arrays, e.g.
  *    `` WHERE id = ANY(${ids}::uuid[]) ``.
- * Both checks throw `TenantDbAccessError` before Prisma is called. The `platform/db-raw-sql` lint reports the same
- * shapes at build time.
+ *  - PR44-SEC-05 (TASK-020 part 020-D): the statement may not end, nest or prepare the transaction (`COMMIT`,
+ *    `ROLLBACK`, `END`, `SAVEPOINT`, …), change the pooled session (`SET` in any form, `RESET`, `DISCARD`, …), be an
+ *    anonymous `DO` block, set a setting beyond the transaction, or be unreadable (`refusedRawStatement`,
+ *    ./raw-statement.ts). A `COMMIT` sent from `load` would end its read-only transaction and run the rest in
+ *    autocommit without the tenant context; a session `SET` would outlive the request on the pooled connection.
+ * Every check throws `TenantDbAccessError` before Prisma is called, so nothing reaches the server. The
+ * `platform/db-raw-sql` lint reports the same shapes at build time.
  */
 const taggedOnly =
   (key: string) =>
@@ -388,6 +394,8 @@ const taggedOnly =
     const [strings, ...values] = args;
     if (!isTemplateStringsArray(strings)) throw new TenantDbAccessError(`${key} called without a tagged template`);
     if (values.some(isSqlFragment)) throw new TenantDbAccessError(`${key} with an interpolated Sql fragment`);
+    const refusal = refusedRawStatement(strings);
+    if (refusal !== undefined) throw new TenantDbAccessError(`${key} with a ${refusal.form} statement (${refusal.detail})`);
   };
 
 function rawMember(tx: object, key: string, state: GuardState): unknown {

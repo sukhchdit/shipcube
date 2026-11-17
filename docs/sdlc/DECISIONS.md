@@ -2721,3 +2721,96 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Routed:** PR56-SEC-12 (INFO, re-export/alias lint gaps) → the next `eslint.config.mjs` PR; PR56-SEC-13 (INFO, a handler-raised 403 gets no DENIED entry) → TASK-033.
   - SEC-09, -01, -02, -04 and -08 are closed.
 - **Reversibility:** Medium (a merged PR is revertible by a revert commit).
+
+### D-TASK020-99..100 · 2026-11-17 · senior-developer (recorded by orchestrator) · PR #54 fix cycle 2 (@cc95e38)
+- **99** `DYNAMIC_SQL` (`query_to_xml`, `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite`) and `NOTIFY_FUNCTION` (`pg_notify`) are refused anywhere, case-insensitively. A quoted upper-case name that PostgreSQL would not resolve is refused too (fail closed). Both use the `session` form; 0 of 155 real templates change verdict.
+- **100** The `execute-phases` R1-M1 deadline cases pin the configured 50 ms via a `setTimeout` spy (armed exactly once) plus `timeOperation`, instead of a `< 2 s` wall-clock bound (D-SEC-PR53-02); `request()` uses `fetchOnce`/`closeLoopbackServer`. Closes the TASK-288 S3 routing (D-TASK288-08).
+- **Host flakes seen (not committed):**
+  - React Router prerender of `/en/` hit its 10 s `AbortSignal.timeout` under host load (build INVALID ×2) → W0-FLAKE-3 together with `route-metadata.test.ts`;
+  - a Testcontainers Postgres was lost mid-run (P1001) → host capacity.
+- **Reversibility:** High.
+
+### D-ORCH-113 · 2026-11-17 · sdlc-orchestrator · W0-FLAKE-3 scope (carded at the next sheet fold)
+- **Decision:** W0-FLAKE-3 covers:
+  - (a) `tests/generated/route-metadata.test.ts` [assertion 10] pooled `fetch`;
+  - (b) the web `prerender` request timeout/retry under host load;
+  - (c) PR #57 code-review routings, if not fixed in its fix cycle.
+- **Owner:** test-engineer; batch 0.12 or the next free slot.
+- **Reversibility:** High.
+
+### D-SEC-PR57-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #57 (TASK-288) security r1 = PASS_WITH_CONDITIONS at `4c3d13a` (record `30ca878`)
+- **Decision:** 0 Critical/High/Medium; 2 LOW, 2 INFO.
+  - **PR57-SEC-01** (LOW, CWE-59/377): dead-reader cleanup follows a junction at a predictable `%TEMP%` path.
+  - **PR57-SEC-02** (LOW): the `security-integration` trigger list misses the security suites' code paths.
+  - **PR57-SEC-03** (INFO, = code-review R1-m1): stale-lock TOCTOU.
+  - **PR57-SEC-04** (INFO): junk/EEXIST reader entries.
+  - **C1 (merge prerequisite):** a restricted lane-B run of integration, catalog-c1-c14 and rls-cross-tenant at the final head, all green with 0 failures/errors/skips (rls ≥ 126, catalog ≥ 14), logged here and not committed. The shim has no production reach (lint refuses the import; no image copies it).
+- **Trigger-list ruling (PR57-SEC-02, escalates PR46-SEC-08):**
+  - **Add to `SECURITY_INTEGRATION_PATHS`:** `jest.config.ts`, `tools/test-support/**`, `tools/db/**`, `tools/deps/**`, `tests/generated/rls/**` and `tests/generated/api-mounts.ts`.
+  - **Exclusions:** `!tools/test-support/**/*.test.ts`, `!tools/db/**/*.test.ts`, `!tools/db/fixtures/**`, `!tools/deps/**/*.test.ts`.
+  - **Cost:** about 20–30 extra job-min/month.
+  - **Owners:** principal-architect amends the ADR-0023 am. G item 5 / am. L item 2 (a) trigger text, with card DoD "security-integration runs" generated from the trigger list (next sheet fold); devops-engineer implements it in TASK-287 (`security-paths.mjs` + test).
+- **Reversibility:** High.
+
+### D-ORCH-114 · 2026-11-17 · sdlc-orchestrator · PR #57 fix cycle 1/3; PR #54 security delta r3 dispatched
+- **PR #57 fc1:** code-review R1-m1 (detection form at minimum), R1-m2, R1-m3, R1-m4, PR57-SEC-01 and the SEC-04 strict names, plus C1 at the fix head. Then a code-review delta and a security delta, since owned paths change.
+- **Pending card lines:** TASK-287 gets the PR57-SEC-02 path table, added to the D-ORCH-109 list.
+- **PR #54:** the security delta r3 runs in parallel with code review r3 on `cc95e38`.
+- **Reversibility:** High.
+
+### D-SEC-PR54-03 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #54 security r3 = PASS_WITH_FOLLOW-UPS at `07cf78a` (record `d4380fd`)
+- **Decision:** C3 (PR54-SEC-07) and PR54-SEC-08 are closed; no new finding. On PG 18.6, X1–X5 are refused by the guard while every server effect still reproduces (the refusals are real). 14/14 mutants are killed; of 156 templates, only the intended new row changes verdict.
+- **Follow-ups (owners unchanged):** PR54-SEC-02 (b)(c) before TASK-073's first raw statement; PR54-SEC-04 with 015-C; any future SQL-text extension (`dblink`, `crosstab`, `xpath_table`) joins `DYNAMIC_SQL`.
+- **Reversibility:** High.
+
+### D-ORCH-115 · 2026-11-17 · sdlc-orchestrator · PR #54 merged (TASK-020 complete); PR #59 in review; TASK-289 dispatched
+- **PR #54** (TASK-020 020-D) squash-merged as `44637dd`.
+  - **Head:** `d4380fd`. Code r3 APPROVED_WITH_NITS (R3-n1 optional, not taken); security r3 PASS_WITH_FOLLOW-UPS.
+  - **CI:** lane A 44011917724 all green incl. security-integration; lane B 20261117T0302Z_d716f7b.
+  - **P1:** no overlap with main. **Fix cycles:** 2/3.
+  - **TASK-020 A–D complete.**
+- **TASK-286 workflow PR #59** (head `055083b`; lane B 20261117T0317Z_daa9a7e; first stage-2 lane A run 44011154025) → code review r1 and security r1 dispatched. It also carries PR55-SEC-11 and code-review R2-n1..n4. Due in November.
+- **TASK-289 `rbacfu`** dispatched now that the `lint` lock is free (TASK-052/060 depend on it).
+- **Reversibility:** Medium (merged; revertible).
+
+### D-SEC-PR59-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #59 (TASK-286 workflow PR) security r1 = PASS_WITH_FOLLOW-UPS at `055083b` (record `2d6818b`)
+- **Decision:** 0 Critical/High/Medium; 1 LOW, 1 INFO.
+  - **Verified:** live `ci.yml` = reviewed fixture `4597259`; stage-1 fixture = main's `ci.yml` `84ba61b`; merge `7abdb03` clean. PR55-SEC-11 item 1 is closed; R2-n1/R2-n2 are verified.
+  - **PR59-SEC-01 (LOW):** checkout and setup-node `with:` inputs are unpinned, so a HEAD-changing edit could choose its own tested base. → TASK-287, **before any other `.github/workflows/**` PR merges**. Fix: pin the `with:` maps; then `HEAD == $GITHUB_SHA` in `TESTED_BASE_SCRIPT` (policy first).
+  - **PR59-SEC-02 (INFO):** lane-c/nightly deny-list gaps → 015-C.
+- **Interim rules once #59 is live:**
+  - The 24 h proof-age rule ends when the final lane A run before a merge was a stage-2 run.
+  - The D-ORCH-103 P1 (c) widening ends for stage-2 runs.
+  - P1 is mechanical for inherited proofs and procedural at merge time (diff the ci-gate tested base against `origin/main`, filtered by the void set and the PR's own paths).
+  - All three stay for stage-1 runs.
+- **Reversibility:** High.
+
+### D-ORCH-116 · 2026-11-17 · sdlc-orchestrator · Standing merge rule: record names head for workflow PRs (PR59-SEC-01 control)
+- **Decision:** until TASK-287 closes PR59-SEC-01, the orchestrator merges a PR that changes `.github/workflows/**` only after checking that a security record on the branch names the PR's code head. ci-gate success alone is not sufficient.
+- **PR #59 next step:** its proof is voided by PR #54's squash (`44637dd` touched `eslint.config.mjs`, `tools/eslint-rules/**` and `tests/fixtures/**`: PR46-SEC-16 working as designed). After code review r1: merge main into the branch, push, run a full stage-2 lane A. If the record step turns red (stale event base), a short security round 2 names the merge head.
+- **TASK-287 card line** (added to the D-ORCH-109 fold list): PR59-SEC-01 pins + `HEAD == $GITHUB_SHA`.
+- **Reversibility:** High.
+
+### D-TASK029-25..26 · 2026-11-17 · senior-developer (recorded by orchestrator) · PR #56 fix cycle 2 (@0ecd317, code 683a57d)
+- **25** The tx slot's run outcome carries `committed`; afterCommit is scheduled only when it is set (closes C1 = PR56-SEC-10). `transaction: 'none'` routes count as committed, since there is nothing to roll back.
+- **26** The FAILED skip is identity-based: only the request's own disconnect abort instance is skipped; deadline aborts and every other failure write FAILED (closes PR56-SEC-11). `RouteReturnedError.result` is a private field.
+- **Flake seen:** loopback "other side closed" in `tests/generated/rls/api-cases.test.ts` under load → W0-FLAKE-3 (D-ORCH-113 scope (d)).
+- **Reversibility:** High.
+
+### D-SEC-PR56-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #56 security deltas r2 (@9746b2f, record f204bb2) and r3 (@0ecd317, record b5f2d9f) → PASS_WITH_FOLLOW-UPS
+- **Decision:**
+  - **r2:** SEC-09/01/02/04/08 closed; new C1 = PR56-SEC-10 (MEDIUM) and PR56-SEC-11 (LOW).
+  - **r3:** C1 and SEC-11 closed (A1–A8 re-run; the deadline-then-disconnect case still writes FAILED); the private `result` field is verified non-leaking. **From security, the PR can merge.**
+  - **New PR56-SEC-14 (INFO):** a `transaction:'none'` route returning ≥ 400 still schedules afterCommit, which contradicts the `define-route.ts:211` JSDoc. → Next PR touching `tx/execute.ts`, unless code review r2 takes it here.
+  - **Open with owners:** SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next eslint.config PR), SEC-13 (TASK-033).
+- **Reversibility:** High.
+
+### D-ORCH-117 · 2026-11-17 · sdlc-orchestrator · PR #59 code r1 APPROVED_WITH_NITS; CI-minutes forecast risk raised
+- **Decision:** PR #59 code review r1 (record `29a748c`) = APPROVED_WITH_NITS. Live stage-2 behaviour is verified: proof binding, the PR46-SEC-16 void rule and rule (g) all ran live.
+- **R1-m1 (MINOR) → risk R-CI-MIN:** measured stage-2 costs are a code push = **10 billed min** (plan 5.9) and a docs push without proof = **4** (plan 2). The Budget v2 forecast becomes about **2,400 min/month, over the 2,000 free minutes** (CLOUD_BUDGET 0).
+  - **Action:** devops-engineer records the measured runs in SPK-07 §6 and re-forecasts with costed options (TASK-287 incremental lane, round-up avoidance, fewer pushes, D-ARCH-129 guards) in the #59 merge-main push.
+  - **Follow-up:** the orchestrator takes the recommendation to principal-architect if it changes ADR-0023/D-ARCH-128/129.
+  - **Interim spend guard:** at most two review/fix pushes per PR cycle; batch docs-only commits; no speculative re-runs.
+- **R1-n1:** squash #59 with an explicit `--body` (commit `03a281a`'s message is wrong about the install gate).
+- **Merge path:** merge main (new code proof) → merge-only security delta → MERGE-READY → squash. Post-merge, every open PR runs full once (stage-1 proofs do not count).
+- **Reversibility:** High.

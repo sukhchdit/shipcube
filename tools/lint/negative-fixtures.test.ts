@@ -513,6 +513,60 @@ const RULES: readonly Violation[] = [
     [...Array<string>(8).fill(TENANT_TX_IO), ...Array<string>(8).fill(OUTBOUND_HTTP)],
     '',
   ],
+  // Code review R2-m3 / R2-n3, PR44-SEC-11 (b) and PR44-SEC-14 (020-D): holder aliases in any enclosing scope (the
+  // module-level forms crashed the rule), destructured holder methods, and the remaining timer forms.
+  ...(
+    [
+      [
+        '[PR44-SEC-11] R2-m3 a module-level const alias of a holder chain (no crash, reported)',
+        'bad-holder-module-alias',
+        1,
+        0,
+        'runs inside',
+      ],
+      [
+        '[PR44-SEC-11] R2-m3 a module-level destructuring alias of a names key (no crash, reported)',
+        'bad-holder-module-destructure',
+        1,
+        0,
+        'runs inside',
+      ],
+      ['[PR44-SEC-14] R2-n3 a holder alias declared in the enclosing DI factory function', 'bad-holder-factory-alias', 1, 0, 'runs inside'],
+      [
+        '[PR44-SEC-14] R2-n3 a method destructured from a holder chain, flat and nested, called bare',
+        'bad-holder-destructured-method',
+        2,
+        0,
+        'runs inside',
+      ],
+      [
+        '[PR44-SEC-14] R1-n2 a member alias of a holder method (const add = deps.queue.add, module-level .bind), called bare',
+        'bad-holder-member-alias',
+        2,
+        0,
+        'runs inside',
+      ],
+      [
+        '[PR44-SEC-14] import { promises } / { promises as tp } from node:timers / timers, then .setTimeout / .scheduler.wait',
+        'bad-timers-promises-member',
+        3,
+        1,
+        '',
+      ],
+      [
+        '[PR44-SEC-14] a literal import() of node:timers/promises, timers/promises and `node:timers`, and a const holding one',
+        'bad-timers-dynamic-import',
+        4,
+        1,
+        '',
+      ],
+    ] as const
+  ).map(([title, name, count, nodePath, message]): Violation => [
+    `${TENANT_TX_IO}: ${title}`,
+    `rules/no-external-calls-in-tenant-tx/${API}/orders/service/${name}.ts`,
+    [...Array<string>(count).fill(TENANT_TX_IO), ...Array<string>(nodePath).fill('platform/node-path-only')],
+    message,
+  ]),
   [
     `[PR32-SEC-01] [D-ARCH-106] ${TENANT_TX_IO}: R5 a function in a txFiles file (apps/api/src/platform/audit/)`,
     'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/audit/bad-audit-hook.ts',
@@ -827,6 +881,71 @@ const TENANT_DB: readonly Violation[] = [
     'platform/db-raw-sql',
     'A computed member of a database handle',
   ],
+  // PR44-SEC-05 (TASK-020 part 020-D): transaction-control, session and setter statements in a tagged raw template.
+  [
+    '[PR44-SEC-05] platform/db-raw-sql: COMMIT, ROLLBACK, END, a second statement, SAVEPOINT, BEGIN, PREPARE TRANSACTION',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-transaction-control.ts`,
+    Array<string>(7).fill('platform/db-raw-sql'),
+    'A raw statement may not end, nest or prepare the transaction',
+  ],
+  [
+    '[PR44-SEC-05] platform/db-raw-sql: SET search_path, SET SESSION CHARACTERISTICS, RESET ALL, DISCARD ALL, LISTEN, NOTIFY, SET TRANSACTION READ ONLY',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-session.ts`,
+    Array<string>(7).fill('platform/db-raw-sql'),
+    'A raw statement may not change the pooled session',
+  ],
+  [
+    '[PR44-SEC-05] [D-SEC-PR42-02] platform/db-raw-sql: UPDATE pg_settings, a DO block with a concatenated setter, a non-literal is_local',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-setters.ts`,
+    [...Array<string>(3).fill('platform/db-raw-sql'), TENANT_CONTEXT],
+    '',
+  ],
+  [
+    '[PR44-SEC-05] platform/db-raw-sql: the withTenantTx exemption admits SET TRANSACTION READ ONLY only (READ WRITE in the same file fails)',
+    'rules/db-raw-sql/apps/api/src/platform/db/with-tenant-tx.ts',
+    'platform/db-raw-sql',
+    'A raw statement may not change the pooled session (SET)',
+  ],
+  // PR54-SEC-01 / PR54-SEC-02 (a), code review R1-M1 / R1-m3 / R1-n3 (PR #54): the lexer reads as PostgreSQL does, the
+  // session forms widened, and the statement check in package sources.
+  [
+    '[PR54-SEC-01] platform/db-raw-sql: a CR-ended comment, a Unicode space before a dollar tag, a continued E string, $q${v}$q$, DECLARE, FETCH, a session advisory lock, a string-syntax setting',
+    `rules/db-raw-sql/${API}/orders/repository/bad-raw-lexer-forms.ts`,
+    // The Unicode-space template is also unreadable to rawSystemTable (fails closed).
+    [...Array<string>(8).fill('platform/db-raw-sql'), 'platform/system-model-owner'],
+    '',
+  ],
+  [
+    '[PR54-SEC-04] platform/db-raw-sql: COMMIT in a package source (the statement check alone)',
+    'rules/db-raw-sql/packages/shared/src/bad-raw-package-statement.ts',
+    'platform/db-raw-sql',
+    'A raw statement may not end, nest or prepare the transaction (COMMIT)',
+  ],
+  // D-ARCH-124 / PR32-SEC-07 (c) (TASK-020 part 020-D): a raw template names a SYSTEM table only from its owner's code.
+  [
+    '[D-ARCH-124] platform/system-model-owner: a quotes repository names outbox_events (plain, PUBLIC.-qualified upper case, quoted, DELETE)',
+    `rules/system-model-owner/${API}/quotes/repository/bad-raw-outbox-events.ts`,
+    Array<string>(4).fill('platform/system-model-owner'),
+    "names the SYSTEM table outbox_events, declared by the 'outbox' table-class manifest",
+  ],
+  [
+    '[D-ARCH-124] platform/system-model-owner: a module repository names audit_entries (a monthly partition) and audit_pii_vault',
+    `rules/system-model-owner/${API}/orders/repository/bad-raw-audit-entries.ts`,
+    Array<string>(3).fill('platform/system-model-owner'),
+    "declared by the 'audit' table-class manifest",
+  ],
+  [
+    '[D-ARCH-124] platform/system-model-owner: a Unicode-escape identifier makes the raw template unreadable (fails closed)',
+    `rules/system-model-owner/${API}/orders/repository/bad-raw-unreadable.ts`,
+    ['platform/system-model-owner', 'platform/db-raw-sql', TENANT_CONTEXT],
+    'Unicode-escape',
+  ],
+  [
+    '[PR54-SEC-01] platform/system-model-owner: audit_entries behind a CR-ended comment, a continued E string, $q${v}$q$; a Unicode space before a dollar tag (unreadable)',
+    `rules/system-model-owner/${API}/orders/repository/bad-raw-lexer-disguises.ts`,
+    [...Array<string>(4).fill('platform/system-model-owner'), 'platform/db-raw-sql'],
+    '',
+  ],
   // PR19-SEC-01 / D-ARCH-080: SYSTEM delegates only in the module whose table-class manifest declares the table.
   [
     '[PR19-SEC-01] platform/system-model-owner: a module repository touching the outbox delegate outside the allow-list',
@@ -876,8 +995,8 @@ const TENANT_DB: readonly Violation[] = [
   [
     '[D-ARCH-111] platform/static-module-specifier: an import alias of createRequire (direct and kept in a variable) and a namespace member',
     `rules/system-model-owner/${API}/orders/service/bad-create-require-alias.ts`,
-    // Three computed loads, plus (PR44-SEC-01) three createRequire uses.
-    Array<string>(6).fill('platform/static-module-specifier'),
+    // Three computed loads, plus (PR44-SEC-01) three createRequire uses, plus (PR44-SEC-14) the namespace import.
+    [...Array<string>(6).fill('platform/static-module-specifier'), 'no-restricted-imports'],
     'the import controls',
   ],
   // PR44-SEC-01: createRequire is legal only as createRequire(<url>).resolve(<literal>) (static-module-specifier `loader`).
@@ -890,8 +1009,9 @@ const TENANT_DB: readonly Violation[] = [
   [
     '[PR44-SEC-01] platform/static-module-specifier: createRequire aliased, passed, returned, destructured, via import() and getBuiltinModule, a computed resolve',
     `rules/system-model-owner/${API}/orders/service/bad-create-require-escapes.ts`,
-    Array<string>(7).fill('platform/static-module-specifier'),
-    'uses createRequire other than as createRequire(<url>).resolve',
+    // PR44-SEC-14 (020-D): plus the namespace import (no-restricted-imports) and process.getBuiltinModule (no-restricted-properties).
+    [...Array<string>(7).fill('platform/static-module-specifier'), 'no-restricted-imports', 'no-restricted-properties'],
+    'the import controls',
   ],
   [
     '[PR44-SEC-01] platform/static-module-specifier: re-exporting createRequire from node:module',
@@ -899,7 +1019,80 @@ const TENANT_DB: readonly Violation[] = [
     'platform/static-module-specifier',
     'uses createRequire other than as createRequire(<url>).resolve',
   ],
+  // PR44-SEC-10 / code review R2-m2 (020-D): the node:module value fails closed; a computed key that is not a static
+  // string, and every use of the dynamic import other than a static member read, is a `loader` finding.
+  ...(
+    [
+      ['a computed member nm[k] of the namespace import', 'bad-node-module-computed-key', 1, ['no-restricted-imports']],
+      ['a computed destructuring key const { [k]: v } = nm', 'bad-node-module-computed-destructure', 1, ['no-restricted-imports']],
+      ["Reflect.get(await import('node:module'), k) (D-TASK020-59)", 'bad-node-module-reflect-get', 1, []],
+      ["a two-hop alias of await import('node:module'), then its createRequire", 'bad-node-module-import-alias', 2, []],
+      [
+        "import('node:module').then(...) handing the module on (parameter passed, non-inline callback)",
+        'bad-node-module-import-then',
+        2,
+        [],
+      ],
+      ["process.getBuiltinModule('module')[k]", 'bad-node-module-builtin-computed', 1, ['no-restricted-properties']],
+      // PR54-SEC-03 / code review R1-m1: every node:module value is bounded by NODE_MODULE_ALLOWED.
+      [
+        'PR54-SEC-03 node:module members outside the allow-list (.Module, register, registerHooks, default x2, inline .then, a rest, getBuiltinModule)',
+        'bad-node-module-members',
+        8,
+        ['no-restricted-properties'],
+      ],
+      [
+        "PR54-SEC-03 control: const { createRequire } = await import('node:module') stays one finding",
+        'bad-node-module-destructured-create-require',
+        1,
+        [],
+      ],
+    ] as const
+  ).map(([title, name, count, config]): Violation => [
+    `[PR44-SEC-10] platform/static-module-specifier: ${title}`,
+    `rules/system-model-owner/${API}/orders/service/${name}.ts`,
+    [...Array<string>(count).fill('platform/static-module-specifier'), ...config],
+    '',
+  ]),
+  // PR44-SEC-11 (a) (020-D): reads of `import x = ...` bindings no longer crash platform/static-module-specifier (or T-83).
+  [
+    "[PR44-SEC-11] import pg = require('pg') read in a module service lints (boundaries sees the driver load)",
+    `rules/system-model-owner/${API}/orders/service/bad-import-equals-require.ts`,
+    ['@typescript-eslint/no-require-imports', BOUNDARIES],
+    '',
+  ],
+  [
+    '[PR44-SEC-11] import X = NS.y read in a module service lints (no loader, no module load)',
+    `rules/system-model-owner/${API}/orders/service/bad-import-equals-namespace.ts`,
+    '@typescript-eslint/no-namespace',
+    '',
+  ],
   ['[D-ARCH-111] no-eval: eval(code) in apps/api/src', `rules/no-eval/${API}/orders/service/bad-eval.ts`, 'no-eval', 'eval'],
+  // PR44-SEC-14 (TASK-020 part 020-D): built-in loaders outside every import control.
+  [
+    '[PR44-SEC-14] no-restricted-imports: Module, register, the default and a namespace import of node:module, getBuiltinModule from node:process',
+    `rules/builtin-loaders/${API}/orders/service/bad-node-module-imports.ts`,
+    [...Array<string>(5).fill('no-restricted-imports'), 'platform/node-path-only'],
+    '',
+  ],
+  [
+    '[PR44-SEC-14] no-restricted-properties: process.getBuiltinModule (direct, globalThis.process, destructured), binding, _linkedBinding, dlopen',
+    `rules/builtin-loaders/${API}/orders/service/bad-process-loaders.ts`,
+    Array<string>(6).fill('no-restricted-properties'),
+    'load built-in or native modules',
+  ],
+  [
+    '[PR54-SEC-03] platform/static-module-specifier processMember: process[k], an alias, a default, a rest, Reflect / Object; binding property-only',
+    `rules/builtin-loaders/${API}/orders/service/bad-process-respellings.ts`,
+    [...Array<string>(8).fill('platform/static-module-specifier'), ...Array<string>(3).fill('no-restricted-properties')],
+    '',
+  ],
+  [
+    '[PR44-SEC-14] no-restricted-properties: process.getBuiltinModule in packages/*/src',
+    'rules/builtin-loaders/packages/shared/src/bad-timers-builtin.ts',
+    'no-restricted-properties',
+    'load built-in or native modules',
+  ],
   // R2-m2 / PR11-SEC-15 g: the quoted and spaced GUC names of the shared form list.
   [
     'platform/tenant-context-sql: SET of a double-quoted namespace and key in a repository (R2-m2)',
@@ -976,8 +1169,13 @@ const TENANT_DB: readonly Violation[] = [
   ).map(([title, name, count]): Violation => [
     `[PR44-SEC-01] platform/prisma-client-construction: ${title}`,
     `rules/prisma-client-construction/${API}/orders/repository/${name}.ts`,
-    ['platform/static-module-specifier', ...Array<string>(count).fill(CLIENT_CONSTRUCTION)],
-    'PR44-SEC-01',
+    [
+      'platform/static-module-specifier',
+      ...Array<string>(count).fill(CLIENT_CONSTRUCTION),
+      // PR44-SEC-14 (020-D): a namespace or default import of node:module is refused by no-restricted-imports too.
+      ...(/-(?:namespace|default)$/u.test(name) ? ['no-restricted-imports'] : []),
+    ],
+    'PR44-SEC-',
   ]),
   [
     '[PR44-SEC-01] platform/prisma-client-construction: a second apps/api/src/platform/db file takes the client namespace',
@@ -996,6 +1194,25 @@ const TENANT_DB: readonly Violation[] = [
     'rules/prisma-client-construction/apps/worker/src/platform/db/bad-require-variable.ts',
     ['platform/static-module-specifier', CLIENT_CONSTRUCTION],
     'PR44-SEC-01',
+  ],
+  // PR44-SEC-10 / code review R2-m2 p9 and p15 (020-D): a template-literal key names createRequire; the loader is
+  // seen, so the client load is too (plus no-restricted-imports on the namespace import).
+  ...(
+    [
+      ['p9: nm[`createRequire`](u)(G)', 'bad-template-key-call'],
+      ['p15: const { [`createRequire`]: make } = nm; make(u)(G)', 'bad-template-key-destructure'],
+    ] as const
+  ).map(([title, name]): Violation => [
+    `[PR44-SEC-10] platform/prisma-client-construction: the worker platform/db loads the client through ${title}`,
+    `rules/prisma-client-construction/apps/worker/src/platform/db/${name}.ts`,
+    ['no-restricted-imports', 'platform/static-module-specifier', CLIENT_CONSTRUCTION],
+    '',
+  ]),
+  [
+    "[PR44-SEC-11] platform/prisma-client-construction: import x = require('@platform/prisma/client') is a require-style load",
+    'rules/prisma-client-construction/apps/worker/src/platform/db/bad-import-equals.ts',
+    ['@typescript-eslint/no-require-imports', CLIENT_CONSTRUCTION],
+    '',
   ],
   [
     'a repository imports the root database client (ADR-0005 am. 10 item 2, PR2-SEC-05)',
@@ -1351,12 +1568,29 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       `rules/system-model-owner/${API}/orders/service/ok-literal-import.ts`,
     ],
     [
-      '[PR44-SEC-01] createRequire(u).resolve(literal) (the openapi/serve.ts shape, direct and namespaced) and typeof createRequire',
+      '[PR44-SEC-01] createRequire(u).resolve(literal) (the openapi/serve.ts shape) and typeof createRequire',
       `rules/system-model-owner/${API}/orders/service/ok-create-require-resolve.ts`,
     ],
     [
       '[PR32-SEC-07] platform/db/system-db.ts (the accessor home) is exempt from system-model-owner',
       'rules/system-model-owner/apps/api/src/platform/db/system-db.ts',
+    ],
+    [
+      '[D-ARCH-124] the outbox writer names outbox_events in raw SQL',
+      'rules/system-model-owner/apps/api/src/platform/outbox/ok-raw-writer.ts',
+    ],
+    ['[D-ARCH-124] the audit store names audit_entries in raw SQL', 'rules/system-model-owner/packages/audit/src/store/ok-raw-store.ts'],
+    [
+      '[D-ARCH-124] the api audit module (TASK-073 viewer) names an audit_entries partition in raw SQL',
+      `rules/system-model-owner/${API}/audit/repository/ok-raw-viewer.ts`,
+    ],
+    [
+      '[D-ARCH-124] SYSTEM table names in comments, strings, longer names and other-case quoted identifiers are not mentions',
+      `rules/system-model-owner/${API}/orders/repository/ok-raw-mentions.ts`,
+    ],
+    [
+      '[PR44-SEC-05] raw statements that only contain the keywords (quoted column, string, comment, UPDATE … SET, WITH)',
+      `rules/db-raw-sql/${API}/orders/repository/ok-raw-statements.ts`,
     ],
     ['i18next/no-literal-string: literals in a *.test.tsx file', 'react/apps/web/app/routes/ok-heading.test.tsx'],
     [

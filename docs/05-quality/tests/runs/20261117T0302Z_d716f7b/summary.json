@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "lane": "B",
+  "profile": "pr",
+  "git_sha": "d716f7b8f2138973b96d6f6f9b1e6f93d3947599",
+  "git_dirty": false,
+  "build_clean": true,
+  "stamp": "20261117T0302Z",
+  "generated_at": "2026-11-17T03:21:12Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300 (win32)",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i9-11950H @ 2.60GHz",
+    "cores": 16,
+    "ram_gb": 31.7,
+    "docker_version": "29.8.0",
+    "node_version": "v24.22.3",
+    "npm_version": "11.19.1"
+  },
+  "lockfile_sha256": "131213578ad188246f1c73d03efcdbcd7f190beb4395ff93a501897999c59df2",
+  "manifest_sha256": "c27f382e38a77d1b263c481d693cde155f5eedb70df5b68ca1b455f02de421d5",
+  "testcontainers_images": [
+    {
+      "image": "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "digest": "sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+    },
+    {
+      "image": "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a",
+      "digest": "sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+    }
+  ],
+  "env_overrides": [],
+  "suites": [
+    {
+      "name": "api",
+      "status": "passed",
+      "tests": 128,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 16.3,
+      "report": "api.junit.xml",
+      "report_sha256": "395ebb7464e342d6645338d3d96c1785d84b7fbfee43b2cea043fb730f252fbf"
+    },
+    {
+      "name": "catalog-c1-c14",
+      "status": "passed",
+      "tests": 102,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 32.2,
+      "report": "catalog-c1-c14.junit.xml",
+      "report_sha256": "85f0aa0766adf3f968f101b51802e19d5da8e95de5a8f5437cd2a43cd5de6ffc"
+    },
+    {
+      "name": "integration",
+      "status": "passed",
+      "tests": 323,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 729.7,
+      "report": "integration.junit.xml",
+      "report_sha256": "c62712a507c7c24e4b7a3ec0305b6ae417e4831451e969d213cdec23edf77aae"
+    },
+    {
+      "name": "rls-cross-tenant",
+      "status": "passed",
+      "tests": 126,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 9.2,
+      "report": "rls-cross-tenant.junit.xml",
+      "report_sha256": "1099f0aae29245673ecd6261058e16c8a57a544fd30922876e739a9db18a885e"
+    },
+    {
+      "name": "unit",
+      "status": "passed",
+      "tests": 6422,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "duration_s": 319.1,
+      "report": "unit.junit.xml",
+      "report_sha256": "5a701d45d5ef769284bd7ec9fcfbcbb9cce43838dc1fb6aa827b9edbb8cb9e3d"
+    }
+  ],
+  "attachments": [
+    {
+      "file": "coverage-summary.json",
+      "sha256": "859baed4da490dd2e115005aeb4a4e6882ff35f293c9a10f29b6e11d9f2177ea"
+    }
+  ],
+  "coverage": {
+    "line": 99.02,
+    "branch": 97.05,
+    "per_package": {
+      "apps/admin": {
+        "line": 93.43,
+        "branch": 98.41
+      },
+      "apps/api": {
+        "line": 99.4,
+        "branch": 97.2
+      },
+      "apps/web": {
+        "line": 95.85,
+        "branch": 96.7
+      },
+      "apps/worker": {
+        "line": 70.56,
+        "branch": 93.94
+      },
+      "packages/audit": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/authz": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/config": {
+        "line": 99.91,
+        "branch": 96.89
+      },
+      "packages/shared": {
+        "line": 98.66,
+        "branch": 93.35
+      },
+      "packages/ui": {
+        "line": 100,
+        "branch": 100
+      },
+      "prisma": {
+        "line": 99.14,
+        "branch": 96.28
+      }
+    }
+  },
+  "jest_args": [
+    "api: -i --testTimeout=30000",
+    "catalog-c1-c14: -i --testTimeout=30000",
+    "integration: -i --testTimeout=30000",
+    "rls-cross-tenant: -i --testTimeout=30000"
+  ],
+  "verdict": "PASS",
+  "invalid_reasons": []
+}
