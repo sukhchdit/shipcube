@@ -219,3 +219,115 @@ A simulation with `main`'s `tools/ci/check-security-owned-paths.mjs` (`--base` =
 | Findings | 0 Critical, 0 High, 0 Medium, 1 LOW (PR60-SEC-01), 4 INFO (PR60-SEC-02 to -05) |
 | Follow-ups | PR60-SEC-01: TASK-283 (or this PR), before TASK-060 merges. PR60-SEC-02: R1-m1's assertion at the next generator touch; columns with TASK-048/TASK-187. PR60-SEC-03: TASK-052. PR60-SEC-04: TASK-052/TASK-055. PR60-SEC-05: TASK-283. Still open from PR #48: PR48-SEC-02 (activation PR), -04 (TASK-091), -06 (seam tasks), -07 (first `API_CASES` entry) |
 | Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding. PR48-SEC-01, -03 (direct forms), -05 items 1 and 3 (a) and -08 are closed; PR60-SEC-01 (LOW) is due before TASK-060 merges. |
+
+---
+
+# Delta round 2 (fix cycle 1 and the merge of `main`)
+
+| Field | Value |
+|---|---|
+| Head | c912a0af7b7321eea09a528062c3ecafa950b2c7 |
+| Range | `df31b32..c912a0a`. First-parent commits: <ul><li>`89c24d8`: code review r1, docs.</li><li>`cb3bf8d`: this record, round 1.</li><li>`b66f450`: fix cycle 1. Tests, JSDoc and one exported constant: R1-m1 (= PR60-SEC-02), R1-n1, R1-n2, R1-n4, R1-n5, R1-n6.</li><li>`f2a7411`: merge of `main` at `d173d8f`. This brings PR #56 (`27f0189`) and PR #59 (`29318c3`).</li><li>`c912a0a`: lane B evidence only.</li></ul>The code head is `f2a7411`. This round names `c912a0a`, the pushed head; only this record follows it. The PR's merge base is now `d173d8f`, the `RANGE_BASE` of run 44093161786. `main` is `80dce9e`. Its changes since `d173d8f` (PR #57 `7db21b7`, plus docs) touch none of the PR's 46 net paths, and `git merge-tree` with it is clean |
+| Lane A evidence | Run 44093161786 on `c912a0a` (`pull_request`, stage-2 `ci.yml`, tested base `732ad20`). **fast-lane `success`**: the lane B evidence check, commitlint, lint, the porcelain check, actionlint, type-check, unit, the negative lint fixtures from the base ref, and the Semgrep rule self-test. **ci-gate**: Gitleaks and Semgrep are `success`. The only red step is the record check: "names df31b32, but eslint.config.mjs, packages/authz/src/generator/entry.test.ts, … changed after it". Both fix cycle 1 and `main`'s `eslint.config.mjs` hunk void the round 1 Head row. security-integration was skipped because the record step failed. It is due on the record-push run and must succeed (D-ARCH-021) |
+| Lane B evidence | `20261117T1247Z_f2a7411` PASS: profile `pr`, `git_dirty` false, `build_clean` true, and the lockfile SHA-256 equals the head's `package-lock.json`. Results: api 173, catalog-c1-c14 102, integration 331, rls-cross-tenant 126, unit 6,763 (2 skipped), 0 failures. Merged coverage: lines 99.06 %, branches 97.09 %. The unit JUnit holds the new cases: the PR60-SEC-02 totality test, the R1-n1 PR48-SEC-08 test, the R1-n5 wildcard test, the R1-n2 and R1-n4 fake-server tests, and the two `[PR48-SEC-03] allowed fixture` cases. `rbac-matrix` is still `planned`, so `rbac-matrix.api.test.ts` (the D-ARCH-134 test change) runs in the merged-coverage step of the `generated` project, where a failure fails lane B |
+| Reviewer / date | security-analyst, round 2, 2026-11-17. Read-only. <ul><li>Git object reads ran in the main checkout.</li><li>The lint probes ran `ESLint#lintText` with the head's real `eslint.config.mjs` from the PR worktree. The worktree was clean at `c912a0a`, and nothing was written there.</li><li>The mutation probe imported the worktree's real generator sources read-only, through a resolve/load hook that applied each mutation in memory.</li><li>No install, Jest, Docker or GitHub write.</li></ul>This section was written outside the repository for the orchestrator to commit |
+
+## R2.1 Summary
+
+- **PR60-SEC-02 (INFO): closed.**
+  - `UNPRESENTED_CREDENTIAL_HEADERS` (`matrix.ts`) names the two proof headers with their owners: `x-csrf-token` → TASK-048 and `x-reauth-proof` → TASK-187. The list is pinned by value.
+  - The new test requires every `CREDENTIAL_HEADER_NAMES` entry to be presented by some caller or to be on that list. It also pins the non-signature partition by value.
+  - A provider header without the `-signature` suffix now fails the build until it gets a column or an owned exclusion.
+  - My mutation probe (§R2.2) kills all nine mutants.
+- **The other fix-cycle items** are test and JSDoc changes. They strengthen the matrix and weaken nothing:
+  - R1-n1: PR48-SEC-08 in its strong form. The code review's mutant G5 is now a control.
+  - R1-n2: the join of repeated `Set-Cookie` headers is pinned.
+  - R1-n4: `instance` is compared (D-TASK289-13).
+  - R1-n5: SEC-TC-01 enumerates Express 5 `*name` wildcards.
+  - R1-n6: the oracle's positive fixtures are named under `-t PR48-SEC-03`.
+- **The merge of `main` is a pure union.**
+  - `git merge-tree --write-tree b66f450 d173d8f` gives `6d1f1cb`, which is the tree of `f2a7411`, and the remerge diff is empty.
+  - Only one path changed on both sides: `eslint.config.mjs`. This PR added the oracle policy, and PR #56 added the `api-pipeline-composition` category.
+  - The oracle policy is still last. All 22 import forms from round 1 are still refused, and so are 6 new forms from the files PR #56 changed (§R2.3).
+- **No cell changed.** The delta does not touch `rbac-route-matrix.md` or `openapi.yaml`, and the drift test ran green in fast-lane.
+- **PR60-SEC-01 (LOW) is unchanged.** L1–L4 are still lint-clean on the merged config. Its owner and due point stand: TASK-283, before TASK-060 merges. PR60-SEC-03, -04 and -05 are unchanged.
+
+New findings: none.
+
+**Verdict: PASS_WITH_FOLLOW-UPS.**
+
+## R2.2 PR60-SEC-02: verification
+
+**Read.**
+- `UNPRESENTED_CREDENTIAL_HEADERS` in `matrix.ts` is frozen and exported through `@platform/authz/matrix` only. `entry.test.ts` adds it to the oracle names that `@platform/authz` must not export (23 now).
+- The test's `KIND_HEADER` (session → `authorization`, refresh-cookie → `cookie`, quote-token → `x-quote-token`) equals the stub's `READERS` (`packages/shared/src/http/credentials.ts`). It also equals the wire headers of `callerHeaders` (`tests/generated/rbac/matrix-app.ts`).
+- In round 1 I suggested computing the set from `callerHeaders`. The test uses a model instead, because a package cannot import `tests/`. The declared cells of the API matrix tie that model to the wire: a caller whose header `READERS` does not read could not produce its `Y` cells.
+
+**Mutation probe.** It evaluates the test's three assertions and the neighbouring pins over the worktree's real `matrix.ts`, `roles.ts`, `routes.ts` and `credentials.ts`, with one in-memory mutation per child process.
+
+| Mutant | Killed by |
+|---|---|
+| M0: no mutation | (all pass) |
+| M1: `x-hub-signature-256` added to `CREDENTIAL_HEADER_NAMES` | the totality check (which names it) and the partition pin |
+| M2: `paypal-transmission-sig` added | totality, partition pin |
+| M3: `x-api-key` added (a header no kind reads) | totality, partition pin |
+| M4: `x-github-signature` added (with the suffix) | It gets its own foreign column. The signature-name pin and the caller count (37) fail |
+| M5: `constructor` added | Totality passes, because the `in` operator sees `Object.prototype`. The partition pin fails, so there is no gap |
+| M6: `x-quote-token` silently added to the exclusion list | the exclusion pin |
+| M7: the CSRF exclusion removed | the exclusion pin, totality |
+| M8: no `signature-header` callers | totality (it names the 3 signature headers), caller count |
+| M9: the credential callers present nothing | totality (`cookie`, `x-quote-token`), the R1-n1 test |
+
+The proof-header columns (the second half of PR60-SEC-02) stay with TASK-048 and TASK-187. The code now names those owners next to the list that forces the columns.
+
+## R2.3 Other fix-cycle items and the merge
+
+| Item | Check | Result |
+|---|---|---|
+| R1-n1, PR48-SEC-08 strong form | `matrix.test.ts` requires each non-anonymous `ROUTE_AUTHS` kind to be presented by a caller that `appliesTo` a route declaring it. Mutant G5 (no synthetic signatures) is a control that must fail. `rbac-matrix.api.test.ts` uses the same form over `contractMatrix.rows` | Strengthens the check. It also catches my probe's M9 |
+| R1-n4, `instance` compared | `instanceOf(req.originalUrl)` drops the query and caps the length (`problem.ts:34-38`). `runRow` observes the `none` reference and every cell on the same `target`, so the member is equal unless a credential changes it. `VOLATILE_PROBLEM_MEMBERS` is now `['correlation_id']`, pinned. The org case still drops `instance`, because its paths differ by design (`runner.ts:286-290`) | The volatile set is strictly narrower. This closes the "H3 changed `instance`" residual of r1 §5.1 |
+| R1-n2, repeated `Set-Cookie` | The join (`runner.ts:160`) is now pinned by a fake-server case that puts a clearing cookie before the reference one | Test only |
+| R1-n5, Express 5 wildcards | `PATH_PARAMETER` now also matches `*name` wildcards. It is linear and runs on route paths only, never on request input. Over-matching only adds SEC-TC-01 cases, which is fail-safe | Closes the r1 §5.3 note on `*name` |
+| R1-n6 | Two named positive fixtures | Test only |
+| Merge purity | <ul><li>`merge-tree` equals the commit tree, and the remerge diff is empty.</li><li>The merge's path set (`d173d8f..f2a7411`) equals the PR's net change (`c2b74c1..b66f450`).</li><li>Every path except `eslint.config.mjs` has `b66f450`'s blob.</li><li>Each side's `eslint.config.mjs` change is line-identical to that side's own diff: this PR's 34 lines, and PR #56's category and policy.</li></ul> | Pure union |
+| Oracle confinement on the merged config | Lint probe, 38 cases. <ul><li>P1–P22 behave as in round 1.</li><li>New M1–M6 are all refused with the oracle message: `routing/pipeline.ts`, which is now also `api-pipeline-composition` (static, relative `.js`, `import()`); a `tx/execute.ts` re-export; `audit/capture.ts` relative into the generator; `authorise.ts` `createRequire`. The category list accumulates, and the oracle policy stays last (`eslint.config.mjs:683`).</li><li>Controls M7 (`pipeline.ts` → `capture.ts`, allowed) and M8 (a non-allow-listed module → `capture.ts`, refused) show that PR #56's guard is intact.</li><li>C1–C4 behave as in round 1.</li></ul> | No regression. L1–L4 are still clean, so PR60-SEC-01 is unchanged |
+| PR #56's `authorise` change | The matrix composes `authorise` = `authoriseSlot()`, with no capture. The decision path is shared with `authoriseSlot({ capture })`: `catalogueRefusal`, the public `permissionAuthenticated` gate, and the credential and actor gates. The capture only writes a PERMISSION_DENIED entry before the same 403, or answers the write failure. A matrix decision therefore holds for production. The audited-denial path belongs to PR #56 (`capture.api.test.ts`, `audit-failure.api.test.ts`) | No effect on what the matrix claims |
+| Secrets and scans | Gitleaks and Semgrep `success` on the range (run 44093161786). The delta is tests, JSDoc and one exported constant | Clean |
+
+**Routing note on PR56-SEC-12** (INFO; D-ORCH-123 gives its owner as "next PR touching `eslint.config.mjs`"):
+- PR #60 does change `eslint.config.mjs`, but that edit predates this routing, and fix cycle 1 did not edit the file.
+- PR56-SEC-12 is outside TASK-289's scope, so this PR does not take it.
+- The next lint-lock holder that edits the audit composition policies should carry it; TASK-283 is the planned one. The orchestrator should record this.
+
+## R2.4 Record check
+
+**Simulation setup.**
+- Checker: `main`'s `tools/ci/check-security-owned-paths.mjs` from the tested base `732ad20` (unchanged at `80dce9e`), run with `--pr 60 --json` and `--base d173d8f` unless the row says otherwise.
+- Scenario commits are plumbing commits in a scratch `git clone --shared` of the main repository, so no object or ref was written to the repository. Each was checked out sparsely there (`.github/`, `docs/05-quality/security/`), because the checker reads records from the work tree.
+- The record text is this file with LF line ends. It holds one round 2 `Head` row and ends with the round 2 `Verdict` row.
+- `.github/CODEOWNERS` is the same at `d173d8f`, `c912a0a` and `80dce9e`, and 20 owned paths are changed.
+
+| Scenario | Result | Expected |
+|---|---|---|
+| S0: the pushed head `c912a0a` with the round 1 record only | `missing`: "names df31b32, but eslint.config.mjs, … changed after it" (reproduces run 44093161786) | missing |
+| S1: this record on top of `c912a0a` | `pass` (satisfied by `c912a0a`) | pass |
+| S1b: S1 with `--base 80dce9e` (`main` now) | `pass` (`c912a0a`) | pass |
+| S2: the round 2 Verdict row says FAIL | `missing` ("verdict FAIL is not one of …") | missing |
+| S3: S1, then an owned edit (`generator/matrix.ts`) | `missing` ("names c912a0a, but packages/authz/src/generator/matrix.ts changed after it") | missing |
+| S4: S1, then an unowned docs edit | `pass` | pass |
+| S5: the round 2 Head row names `b66f450` (fix cycle 1, before the merge) | `missing` ("names b66f450, but eslint.config.mjs changed after it"): the merge brought `main`'s hunk of an owned path that this PR also changes | missing |
+| S6: the round 2 Head row names `f2a7411` (the merge) | `pass` (`f2a7411`) | pass |
+| S7: S1, then an edit to `tests/generated/rbac/runner.ts` | `pass`. The file is still unowned (PR48-SEC-02, activation PR) | pass |
+| S8: S1 checked as PR 61 | `missing` ("no record named …PR-0061-*.md") | missing |
+| S9: S1, then a clean merge of `main` `80dce9e` (`--base 80dce9e`) | `pass` (`c912a0a`) | pass |
+| S10: S1, then an `eslint.config.mjs` edit | `missing` ("names c912a0a, but eslint.config.mjs changed after it") | missing |
+
+**What voids this record.**
+- Any later push to one of the 20 owned paths voids it.
+- So does a merge of `main` that brings a change to one of them: today that means `eslint.config.mjs` or `packages/authz/**`, for example TASK-283 (the next `lint` lock holder) if it merged first. The open branches of PR #61 (TASK-028) and TASK-287A change none of the 20 paths.
+- Docs and evidence commits do not void it. A merge of `main` at `80dce9e` does not void it either.
+
+| Field | Value |
+|---|---|
+| Round 2 Critical / High / Medium / Low / Info | 0 / 0 / 0 / 0 / 0 new. Closed: PR60-SEC-02. Open: PR60-SEC-01 (LOW; TASK-283, before TASK-060 merges), PR60-SEC-03 (TASK-052), -04 (TASK-052, TASK-055), -05 (TASK-283). From PR #48: -02 (activation PR), -04 (TASK-091), -06, -07 |
+| Verdict | **PASS_WITH_FOLLOW-UPS.** No Critical, High or Medium finding is open. PR60-SEC-02 is closed, and the merge of `main` is a pure union that weakens no closed item. From security, the PR may merge at this head |
