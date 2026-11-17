@@ -121,3 +121,167 @@ Not re-run: lint, typecheck, build, the full unit and integration suites, covera
 - Integration proof on real PostgreSQL that the guard acts before the server: phases never run, and the count query is 0.
 - D-TASK020-94: the guard's own residual becomes the planting route, so the backstop detector keeps a live end-to-end test.
 - Turning the R2-m3 crash into a report, failing closed, rather than silently skipping.
+
+# Round 2 (head f00cf5b)
+
+Reviewer: code-reviewer (principal engineer), round 2, delta review. Head reviewed: `f00cf5b` (full SHA `f00cf5bd1e2af009ed189788e653203003a7e181`). Delta `3efa2df..f00cf5b`: code commits `485dcbb` (fix cycle 1) and `46ed1e4` (the C2 PostgreSQL case), merge `c6c4961` (main with PR #53), and the evidence commit `f00cf5b`.
+- `git show --remerge-diff c6c4961` is empty, so the merge is a clean union.
+- `git diff --name-only c6c4961 f00cf5b` lists only the evidence directory `20261116T0440Z_c6c4961`.
+- `origin/main` has since moved by `DECISIONS.md` and `STATUS.md` only (`04bb7a2..ba60aa7`), and `git merge-tree --write-tree origin/main f00cf5b` is clean.
+
+Rulings checked: r1 findings R1-M1, R1-m1..m3, R1-n1..n6; security conditions C1 (PR54-SEC-01 (a)-(e)) and C2 (PR54-SEC-02 (a)); PR54-SEC-03, -04 (scope), -06; D-TASK020-95..98 (DECISIONS.md on main).
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1 and C1 (a)-(e) are closed in both twins, which still agree (0 differences on 300 000 fuzzed texts and
+  templates). Every r1 bypass and every new probe (dollar quoting, nested comments, E/B/X/N/U& strings, quote
+  continuation, quoted identifiers) is refused or errors on PostgreSQL. C2 and R1-m1..m3 are closed, and 40 of my 42
+  mutants are killed. ONE MINOR (security flag): the stated "SQL text inside a string" residual also carries the C2
+  forms. query_to_xml / ts_stat run a session advisory lock or a session setter that survives COMMIT.
+```
+
+## R2.1 What I verified myself
+
+Method:
+- The review worktree, read-only (`git status` clean).
+- Node 24 tsx and ESLint `lintText` probes from the scratchpad, with the full repository config and type checking disabled.
+- PGlite 0.4.3 (PostgreSQL 17.5 WASM) from the worktree's node_modules.
+
+No Docker, no installs.
+
+| Check | Result |
+|---|---|
+| Targeted units: raw-statement, raw-sql-lexer, tenant-db, execute-phases (`--maxWorkers=2`) | 370 / 370 pass (4.4 s) |
+| `tools/lint/negative-fixtures.test.ts` | 372 / 372 pass (26.2 s) |
+| Prettier `--check` on every changed non-evidence file in `3efa2df..c6c4961` | clean |
+| Twin equality: differential fuzz of `refusedStatement` vs `refusedRawText` over a 47-token alphabet, both allowance settings. The alphabet: quotes, `$q$`, `$$`, `$1`, `--`, `/*`, `*/`, CR, LF, VT, NBSP, U+2028, a lone surrogate, `E'`/`b'`/`U&'`/`U&"`, backslash, keywords, `set_config`, the lock and string-syntax names. Also `templateText` vs `prismaText` | 300 000 texts, **0 differences** (verdict, form and detail) |
+| R1-M1 reproduction (the r1 texts) | All refused by both twins: CR -> `transaction-control` / `session`; NBSP, U+FEFF, U+3000, U+2028 -> `unreadable` |
+| New bypass hunt on PGlite inside `BEGIN`: 55 probes. Dollar quoting: case-different tag, `a$q$`, `$1$q$`, `1$q$`, `$$$`. Nested comments: `/*/`, `/**/`, `/* **/`, `/*/**/`, operator-adjacent `+/*`, `*/*`, `-/* */-`. E strings: `\\`, `\x27`, `\'`. Continuation via VT, FF, `--x\r`, `--\r--\r`, a block comment, after U&/B/X/N strings. Junk prefixes: `1e'`, `0x1e'`, `x.e'`, `_e'`. Quoted identifiers with `""`, `U&"`, NBSP. A comment ended by U+2028 or U+0085. NUL | For every text both twins ALLOW, PostgreSQL either runs it without ending the transaction (txid unchanged, `search_path` unchanged) or rejects the whole string (syntax error, trailing junk, or `invalid message format` for NUL). **No fail-open lexer differential found.** The only allowed texts that leave session state are the R2-m1 functions |
+| Full-config lint probes (virtual files in `modules/quotes/{repository,service}` and `packages/shared/src`) | R1-M1 escape forms (`\r`, ` `), the CR `rawSystemTable` disguise, the continuation and `$q${v}$q$` templates, `pg_advisory_lock`, `DECLARE … WITH HOLD`, `COMMIT` in a package: all reported. R1-m1 / PR54-SEC-03: `.Module._load`, `m.register`, `{ default: M }`, `m[k]`, `.then(({ registerHooks }) …)`, `import('module').Module`, `process[k]`, `Reflect.get(process, k)`, `const p = process`, `globalThis.process.binding`: all reported. Controls `(await import('node:module')).isBuiltin`, `const { env } = process`, `process.env[k]` stay clean. `f(process)` and `(globalThis as …)['process'][k]` are clean, as stated in the residuals |
+| Mutants of my own (21 per twin, scored on what the shared corpus asserts: verdict, detail, templates, read-only allowance) | **40 / 42 killed**. Killed: LF-only comment end, `\s`, non-ASCII as punctuation, no continuation, continuation drops E mode, continuation without comments, CR-less continuation, spaced template join, `declare` dropped, lock check off, `_shared` dropped, any setting name, string-syntax off or words only, case-sensitive list, E escapes off, flat comments, only the first setter call, non-ASCII dollar tags. Survivors: R2-n1 |
+| Evidence `20261116T0440Z_c6c4961` (summary.md) | PASS. unit 6286 (2 skipped), integration 322, api 128, catalog 102, rls 126/0/0. Merged coverage 99.02 % lines / 97.02 % branches. Bound to `c6c4961`; the head commit after it is evidence-only |
+| CI on `f00cf5b` (`gh pr checks 54`, run 43807291356) | fast-lane **pass**. scans **fail** and ci-gate fails, waiting only on the round-2 security record |
+
+Not re-run by me: lint, typecheck and build of the whole repository, the full unit and integration suites, coverage, and the new PostgreSQL 18 cases in `route-phases.int.test.ts`. I relied on lane B (integration 322, up from 316, so the 6 new cases ran) and on fast-lane.
+
+## R2.2 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR (security flag) | `tools/eslint-rules/raw-sql-lexer.mjs:339-360` and `apps/api/src/platform/db/raw-statement.ts:263-279` (`sessionSetter`); residual text `raw-statement.ts:25-26`, `db-raw-sql.mjs:46-49`; corpus row `raw-statement-corpus.json:38-40` | **The stated "SQL text inside a string" residual reaches the C2 forms and the session setter, but no header says so.** `query_to_xml`, `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat` and `ts_rewrite` execute a query given as text, through SPI. Both twins allow all of them, and the lint is clean too (probed in a repository file). On PGlite inside `BEGIN … COMMIT`: `SELECT query_to_xml('select set_config(''search_path'', ''pg_catalog'', false)', true, false, '')` leaves `search_path = pg_catalog` on the session after COMMIT. `SELECT * FROM ts_stat('select to_tsvector(set_config(''search_path'', ''pg_temp'', false))')` does the same. `SELECT query_to_xml('select pg_advisory_lock(77)', …)` (also `query_to_xml_and_xmlschema`) leaves the session advisory lock held after COMMIT, and after ROLLBACK too. So C2's "session advisory locks refused", and the PR44-SEC-05 session-setter form, hold only for the literal spellings. COMMIT itself cannot get through this route: SPI refuses it (`invalid query`). The corpus pins `query_to_xml('select 1', …)` as a residual about reading, and the WAVE-00 card lists "SQL text inside a string that a function executes" as stated (D-TASK020-81). Neither twin header names the consequence, a cross-request lock or setting leak on the pool, and the leak detector watches only the four `app.*` keys (PR54-SEC-05). Same deliberate-author class as PR54-SEC-02 (b), so not MAJOR. | Preferred, because it is cheap and fails closed: refuse the dynamic-SQL function names as an anywhere-form in both twins (`query_to_xml`, `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite`; the migration linter's rule 16 list, PR43-SEC-06 (b)). Add corpus rows for the lock and setter forms, and turn the current residual row into a refusal. Alternative, at the security-analyst's choice: state the lock and setter reach in both twin headers and in the corpus note, and route it with PR54-SEC-02 (b) (due before TASK-073's first raw statement). |
+| R2-n1 | NIT | `raw-sql-lexer.mjs:326`, `raw-statement.ts:259` (`first !== open + 2`); `LOCAL_SETTING` anchors (`:261` / `:70`) | Two mutants of the new setter allow-list survive the corpus in both twins: (a) dropping the single-token name check (`first !== open + 2`), and (b) un-anchoring `LOCAL_SETTING`. Today they are near-equivalent, because no dangerous setting name contains a listed one. Still, nothing pins either property, and both guard the C1 (e) decision. | Add `SELECT set_config('lock_timeout' \|\| '', $1, true)` -> `session-setter` and `SELECT set_config('my.app.key', $1, true)` -> `session-setter`. |
+| R2-n2 | NIT | `SESSION` in both twins (`notify`) | `NOTIFY` is refused as a first keyword, but its function form `pg_notify('c', 'x')` is allowed (probed). NOTIFY is queued until commit and is not session state, so this is a consistency point, not a leak. | Either drop `notify` from `SESSION` with a one-line reason, or refuse `pg_notify` as an anywhere-form. Only `listen` and `unlisten` are session state. |
+
+## R2.3 r1 and security closure
+
+| Item | Status | Evidence |
+|---|---|---|
+| R1-M1 / C1 (a) CR comment end, (b) Unicode spaces | **Closed** | `LINE_END = /[\n\r]/`, `SPACE = [ \t\n\r\f\v]`, non-ASCII outside literals is `unreadable` (D-TASK020-95). Corpus and template rows; mutants L1/L2/L3 killed in both twins; lint probes reported; PG 18 case for CR in `route-phases.int` with a commit control |
+| C1 (c) E-string continuation | **Closed** | `CONTINUATION` matches scan.l `quotecontinue` (horizontal space, an optional `--` comment, a newline, then `special_whitespace*`) and keeps the mode. Mutants L4/L5/L6/L20 killed. The regex is unambiguous: one continuation attempt scans only white space and comments that the main loop then skips, so the time is linear. PG 18 case plus control |
+| C1 (d) Prisma `$n` rendering | **Closed** | `templateText` and `prismaText` both produce `part$1part$2…`, equal on all fuzzed splits. `$q${v}$q$` templates are refused; mutant L7 killed |
+| C1 (e) string-syntax settings | **Closed** | Literal-name allow-list for the literal-`true` setter (D-TASK020-96). `standard_conforming_strings` / `backslash_quote` are refused in any token, strings included. Mutants L11/L13/L14/L15 killed (R2-n1 for the two near-equivalents) |
+| C2 / R1-m3 cursors and session advisory locks | **Closed for literal spellings** | `declare/fetch/move/close` in `SESSION`; `SESSION_LOCK` anywhere (word or quoted, `pg_catalog.`-qualified, case-folded); `_xact_` forms stay allowed. PG 18 case: 5xx problem, call and handler never run, `pg_locks` count 0, with a control proving that PG keeps both after COMMIT (D-TASK020-97, accepted). Dynamic-SQL reach: R2-m1 |
+| R1-m1 / PR54-SEC-03 | **Closed** | `NODE_MODULE_ALLOWED` is shared by `no-restricted-imports` and `static-module-specifier`. Every member, destructuring key or rest element outside it is `loader`. `processMember` covers computed keys, Reflect/Object arguments and aliases. `binding` / `_linkedBinding` are matched on any object. Residuals are stated (TASK-113). D-TASK020-86 is now accurate |
+| R1-m2 | **Closed** | Second-setter, `EXPLAIN ANALYZE UPDATE pg_settings` and nested-comment rows; mutants L18/L19 killed |
+| R1-n1 | **Closed** | `execute-phases.test.ts` awaits the server-side `close` and the execute slot's end instead of `delay(100/200)` |
+| R1-n2 | **Closed** | `isHolderMember` covers `const add = deps.queue.add` and `.bind(deps.queue)` (fixture `bad-holder-member-alias.ts`); `.call` / `.apply` and a second alias are stated in Limits |
+| R1-n3 / PR54-SEC-04 scope | **Closed** | `only: ['statement']` on `packages/*/src` (probe: `COMMIT` in `packages/shared/src` is reported); the headers now say the TenantDb guard, not the lint, refuses `Prisma.sql` fragments |
+| R1-n4 | **Closed** | `tenant-db.test.ts` sends `SET TRANSACTION READ ONLY` through TenantDb and expects a refusal (B5 is killed) |
+| R1-n5 | **Closed** | `regclass` strings and `database_to_xml` / `schema_to_xml` named in the `system-model-owner` residual, routed to TASK-073 |
+| R1-n6 | **Routed** | The WAVE-00 020-D card now sends the worker `main.ts` comment to TASK-035 (D-ARCH-136) |
+| PR54-SEC-06 | **Closed** | `parentheses()` is a single pass with a stack. Corpus `linearTime` uses 50 000 nested setters (< 10 s bound; both suites pass in seconds) |
+
+## R2.4 Deviation rulings (D-TASK020-95..98)
+
+| Decision | Ruling |
+|---|---|
+| 95 non-ASCII outside literals is `unreadable`; ASCII dollar tags | Accepted. It is stricter than PostgreSQL. My probes show that PostgreSQL agrees on comment content: U+2028 and U+0085 do not end a `--` comment there either |
+| 96 literal-name allow-list for the `true` setter; string-syntax names refused anywhere; first-keyword allow-list (F5) not taken | Accepted. Whether to take F5 is the security-analyst's call. R2-m1 is the cheapest step in that direction |
+| 97 C2 proof via `pg_locks` plus "call and handler never ran"; cursor absence rests on the unit test | Accepted. A read-only `load` cannot carry a row-count proof, and the control shows the probe would see a leaked lock |
+| 98 main merged before retaking evidence | Accepted. The remerge diff is empty, and the evidence is bound to the merge |
+
+## R2.5 Merge conditions
+
+1. A security round-2 record `docs/05-quality/security/PR-0054-*.md` naming the final head. It must rule on R2-m1 (refuse now, or state and route with PR54-SEC-02 (b)). Until then scans and ci-gate stay red. This review commit is docs-only (`docs/05-quality/reviews/`), so it does not touch the code bound by lane B evidence `20261116T0440Z_c6c4961`.
+2. If R2-m1 is fixed in this PR, round 3 is a delta check of the twins and the corpus only, and needs fresh lane B evidence (the lexer is on the unit, api and integration paths).
+3. No further `main` merge that changes an owned path. Squash merge.
+
+## R2.6 Good patterns worth keeping
+
+- The fail-closed choice for non-ASCII outside literals, rather than mirroring PostgreSQL's byte and encoding rules, makes a whole class of differentials unreachable.
+- Template-level corpus rows that both twins render. They pin the Prisma rendering, which was the subtle (d) bypass.
+- PostgreSQL controls next to the refusal cases. They prove the refused text really would commit or keep the lock, so the refusal test cannot pass vacuously.
+- One allow-list constant (`NODE_MODULE_ALLOWED`) shared by configuration and rule.
+
+# Round 3 (head cc95e38)
+
+Reviewer: code-reviewer (principal engineer), round 3, narrow delta review.
+
+Head reviewed: `cc95e38` (full SHA `cc95e38bfbd8d36df9248e1ba9e3cf2187d051a9`).
+
+Delta `85cf474..cc95e38`:
+- `e9dd29b`: C3 = R2-m1 = PR54-SEC-07, plus PR54-SEC-08 and R2-n1.
+- `d716f7b`: the TASK-288 S3 flake in `execute-phases.test.ts`.
+- `cc95e38`: the evidence commit.
+
+Commits after round 2 (`a6fc0a3..85cf474`): only the security round 2 record.
+
+Main merge state:
+- `git merge-tree --write-tree origin/main cc95e38` is clean.
+- `origin/main` now includes PR #55 (`11e2158`, `.github/dependabot.yml` and `tools/ci/**`). No file overlaps this PR's delta from the merge base.
+
+Decisions checked: D-TASK020-99 and D-TASK020-100.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-m1 (PR54-SEC-07), R2-n1 and R2-n2 (PR54-SEC-08) are closed in both twins, which still agree (0 differences on
+  300 000 fuzzed texts with the new names in the alphabet). 56 of 56 mutants are killed: the 42 from round 2, including
+  both round 2 survivors, and 14 new ones on DYNAMIC_SQL / pg_notify. The deadline-test change keeps the magnitude pinned
+  deterministically: the execute slot's "ignores callDeadlineMs" mutant fails both cases. One NIT, no new MINOR.
+```
+
+## R3.1 What I verified myself
+
+Same method as round 2: the worktree, tsx and PGlite probes from the scratchpad, no Docker.
+
+| Check | Result |
+|---|---|
+| Targeted units: raw-statement, raw-sql-lexer, tenant-db, execute-phases (`--maxWorkers=2`) | 506 / 506 pass (6.6 s) |
+| Prettier `--check` on the 6 changed files | clean |
+| Twin equality: `fuzz.mts` | **0 differences** in verdict, form and detail on 300 000 texts. The alphabet now also has `query_to_xml`, `TS_STAT`, `"ts_rewrite"` and `pg_notify`. `templateText` and `prismaText` agree |
+| R2-m1 reproduction (`dyn.mts`: the seven round 2 PGlite texts) | All `session` / `session` in both twins: the `query_to_xml` setter, the lock, `commit`, `query_to_xmlschema`, `query_to_xml_and_xmlschema`, `ts_stat`, `ts_rewrite` |
+| Mutants (`mut.mts`), scored on the shared corpus | **56 / 56 killed**. The 42 from round 2 are killed, including round 2 survivors L12/R12 (the single-token name check, killed by `'lock_timeout' \|\| ''`) and L16/R16 (`LOCAL_SETTING` anchors, killed by `'my.app.key'`). The 14 new ones per twin: DYNAMIC_SQL off; drops `ts_stat`, `query_to_xmlschema` or `query_to_xml_and_xmlschema`; words only (killed by quoted `"query_to_xml"`); case-sensitive (killed by `"QUERY_TO_XML"`); `pg_notify` off |
+| Deadline mutant: `execute.ts:247`, `options.callDeadlineMs ?? CALL_DEADLINE_MS` -> `CALL_DEADLINE_MS`, temporary in the worktree and then restored (`git status` clean) | **Killed**: 2 failed (the call case and the stream case), 3 passed in the `never settles\|stream` subset |
+| Real code that names the new functions | `grep` over `apps`, `packages` and `prisma` (non-test `.ts` / `.sql`): only the twin itself. This is consistent with the claim that 0 of 155 real templates changed verdict; I did not re-count the 155 |
+| Evidence `20261117T0302Z_d716f7b` | PASS. unit 6422 (2 skipped), integration 323 (322 + the new `load-dynamic-sql-lock` row), api 128, catalog 102, rls 126. Merged coverage 99.02 % lines / 97.05 % branches. Bound to `d716f7b`; `cc95e38` is evidence-only |
+| CI on `cc95e38` (run 44009817933) | fast-lane **pass**. scans and ci-gate fail, waiting on the security record for the head |
+
+Not re-run by me: full lint, typecheck, build, the full suites, and the PG 18 integration row. I relied on lane B and fast-lane for those.
+
+## R3.2 Closure
+
+| Item | Status | Evidence |
+|---|---|---|
+| R2-m1 = PR54-SEC-07 (C3) | **Closed** | `DYNAMIC_SQL` is an anywhere-form `session` refusal in both twins. It matches words and quoted names, case-insensitively (D-TASK020-99: fail closed; a quoted upper-case name is a different function to PostgreSQL, so refusing it costs nothing). Corpus rows cover 4 spellings. There is a PG 18 route row (`load-dynamic-sql-lock`: refused, call and handler never run, `pg_locks` 0) and a control proving that PostgreSQL keeps a lock taken through `query_to_xml` in a READ ONLY transaction after COMMIT. Both headers and `db-raw-sql.mjs` now state the leftover risk precisely: function bodies, and the name-driven readers `table_to_xml*` / `schema_to_xml*` / `database_to_xml*` / `cursor_to_xml*` (PR54-SEC-02 (b), before TASK-073). I know of no other built-in in PostgreSQL 17/18 that runs SQL text and is callable by the runtime roles. `dblink` is not installed, `COPY … PROGRAM` needs superuser, and `PREPARE` / `EXECUTE` / `DO` are already refused |
+| R2-n1 | **Closed** | Rows `SELECT set_config('lock_timeout' \|\| '', $1, true)` and `SELECT set_config('my.app.key', $1, true)` are both `session-setter`. They kill L12/R12 and L16/R16 |
+| R2-n2 = PR54-SEC-08 | **Closed** (refuse option) | `pg_notify` is refused anywhere in both twins, consistent with the `NOTIFY` keyword. Mutant killed |
+| TASK-288 S3 deadline cases (D-TASK020-100) | **Accepted, coverage not weakened in substance** | The `< 2_000` wall-clock bound is replaced by two checks. First, a `setTimeout` spy asserts that exactly one timer is armed with the configured 50 ms, and `execute.ts:182` arms the deadline with global `setTimeout`. Second, `timeOperation` `workMs < 50 + HOST_LOAD_SLACK_MS` shows the deadline fired rather than hung. This is a timer check, not CPU-bound, so D-SEC-PR53-02 allows `timeOperation`. `request()` and the two bulkhead cases now use `fetchOnce` and `closeLoopbackServer` (the PR #53 pattern) |
+
+## R3.3 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `apps/api/src/platform/tx/execute-phases.test.ts` (both R1-M1 deadline cases) | `HOST_LOAD_SLACK_MS` (20 000) equals `CALL_DEADLINE_MS` (20 000). So the `workMs` bound cannot tell "the 50 ms deadline answered" from "a 20 s timer answered", and only the spy carries the magnitude. A mutant that arms the 50 ms timer but answers through a second, later timer passes, for example `setTimeout(() => setTimeout(abort, 15_000), deadlineMs)`. This is contrived, and today's code has one timer, hence a NIT. | Optional: also assert that the spy saw no timer of `CALL_DEADLINE_MS`, or that the 50 ms timer's callback is the one that ends the request (for example, invoke the recorded callback and assert the 503 with fake timers). Otherwise state that the spy is the magnitude pin in the case comment, which it partly does already. |
+
+## R3.4 Deviation rulings
+
+| Decision | Ruling |
+|---|---|
+| 99 DYNAMIC_SQL case-insensitive, refused anywhere, `session` form | Accepted (fail closed; mutants L26/R26 pin the case-insensitivity) |
+| 100 setTimeout spy + `timeOperation` slack replaces the wall-clock bound | Accepted (deadline mutant killed; R3-n1 optional) |
+
+## R3.5 Merge conditions
+
+1. A security record naming the final head, which is this review commit's head (docs-only on top of `cc95e38`). Until then scans and ci-gate stay red.
+2. Main now carries PR #55 (`tools/ci/**`, `.github/dependabot.yml`). It is disjoint from this PR and `merge-tree` is clean. Whether the tested-base rule that PR #55 introduces needs a `main` merge and a lane A rerun before merging is the orchestrator's call; this review needs no new code round for it. If `main` is merged, a docs-only or disjoint-tooling union keeps this verdict. Prove it with an empty `--remerge-diff`.
+3. Squash merge.
