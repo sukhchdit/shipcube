@@ -2,15 +2,29 @@
 // The writer side (`withFileLock`) predates this task and now also waits for readers of other processes. Every concurrent
 // party is a real child process (tools/test-support/lock-children.ts); assertions are about ORDER, never elapsed time.
 // The `@platform/prisma/client` shim on top of this lock is tested in tools/db/prisma-client-locked.test.ts.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterAll, afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { acquireReadLockSync, lockPath, readersPath, withFileLock, withReadLock, withReadLockSync } from './fs-lock.js';
-import { deadPid, LockChildren, READER, WRITER } from './lock-children.js';
+import {
+  acquireReadLockSync,
+  lockPath,
+  lockRoot,
+  LostTestLockError,
+  OWNERLESS_STALE_MS,
+  readersPath,
+  tryRegisterReader,
+  withFileLock,
+  withReadLock,
+  withReadLockSync,
+} from './fs-lock.js';
+import type * as FsLockModule from './fs-lock.js';
+import { deadPid, LockChildren, LockChildTimeoutError, READER, WRITER } from './lock-children.js';
+import { findRepoRoot } from './process.js';
 
 // Each case waits for a child process to start (hundreds of ms on a loaded host); this is a hang detector only.
 jest.setTimeout(120_000);
@@ -26,6 +40,7 @@ const freshName = (): string => {
   names.push(name);
   return name;
 };
+type FsLock = typeof FsLockModule;
 const registrations = (name: string): string[] => (existsSync(readersPath(name)) ? readdirSync(readersPath(name)) : []);
 
 afterEach(() => children.killAll());
@@ -117,7 +132,7 @@ describe('test lock: readers against a writer of another process (D-ORCH-083, D-
   it('a reader registration left by a dead process does not block the writer and is removed', async () => {
     const name = freshName();
     mkdirSync(readersPath(name), { recursive: true });
-    const stale = join(readersPath(name), `${String(await deadPid())}-0`);
+    const stale = join(readersPath(name), `${String(await deadPid())}-${randomUUID()}`);
     writeFileSync(stale, '');
 
     await expect(withFileLock(name, () => 'ran', 5_000)).resolves.toBe('ran');
@@ -181,5 +196,163 @@ describe('the D-ORCH-083 race: a module read while it is being regenerated', () 
 
     expect(loaded.generated).toBe('full');
     expect(existsSync(released)).toBe(true);
+  });
+});
+
+describe('PR #57 fix cycle 1: lock location, registrations, take-over and the unpinned branches', () => {
+  const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const tombstones = (name: string): string[] => readdirSync(lockRoot()).filter((entry) => entry.startsWith(`${name}.stale-`));
+  const own = (name: string, pid: number): void => {
+    mkdirSync(lockPath(name));
+    writeFileSync(join(lockPath(name), 'owner'), String(pid));
+  };
+
+  it('[PR57-SEC-01] every lock lives under the checkout, never in the shared temp directory', () => {
+    const name = freshName();
+
+    expect(lockRoot()).toBe(join(findRepoRoot(), 'node_modules', '.cache', 'shipqube-test-locks'));
+    expect(dirname(lockPath(name))).toBe(lockRoot());
+    expect(dirname(readersPath(name))).toBe(lockRoot());
+  });
+
+  it('[PR57-SEC-01] a readers path that is a link is refused before anything behind it is removed', async () => {
+    const name = freshName();
+    const target = mkdtempSync(join(scratch, 'victim-'));
+    const victim = join(target, `${String(await deadPid())}-${randomUUID()}`);
+    writeFileSync(victim, 'keep');
+    symlinkSync(target, readersPath(name), process.platform === 'win32' ? 'junction' : 'dir');
+
+    expect(() => acquireReadLockSync(name, 2_000)).toThrow(`refusing test lock readers path ${readersPath(name)}`);
+    await expect(withFileLock(name, () => 'ran', 2_000)).rejects.toThrow(`refusing test lock readers path ${readersPath(name)}`);
+    expect(readFileSync(victim, 'utf8')).toBe('keep');
+  });
+
+  it('[R1-m2] a registration is named <pid>-<uuid>', () => {
+    const name = freshName();
+    let seen: string[] = [];
+
+    withReadLockSync(name, () => {
+      seen = registrations(name);
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(new RegExp(`^${String(process.pid)}-${UUID}$`, 'u'));
+  });
+
+  it('[R1-m2] two module instances of the lock nest read locks on one name without a name collision', async () => {
+    const name = freshName();
+    const instances: FsLock[] = [];
+    for (let i = 0; i < 2; i += 1) {
+      await jest.isolateModulesAsync(async () => {
+        instances.push(await import('./fs-lock.js'));
+      });
+    }
+    const [a, b] = instances as [FsLock, FsLock];
+
+    const value = await a.withReadLock(name, () => b.withReadLockSync(name, () => registrations(name).length, 2_000), 2_000);
+
+    expect(value).toBe(2);
+    expect(registrations(name)).toEqual([]);
+  });
+
+  it('[PR57-SEC-04] entries that are not <pid>-<uuid> registrations neither block a writer nor get removed', async () => {
+    const name = freshName();
+    mkdirSync(readersPath(name), { recursive: true });
+    const junk = ['desktop.ini', '0-1', '-1', 'Infinity-1', `${String(children.idle())}-1`, `${String(process.pid + 1)}-0`];
+    for (const entry of junk) writeFileSync(join(readersPath(name), entry), '');
+
+    await expect(withFileLock(name, () => 'ran', 5_000)).resolves.toBe('ran');
+    expect(registrations(name).sort()).toEqual([...junk].sort());
+  });
+
+  it('[PR57-SEC-04] a writer removes the empty readers directory when it lets go', async () => {
+    const name = freshName();
+    withReadLockSync(name, () => undefined);
+    expect(existsSync(readersPath(name))).toBe(true);
+
+    await withFileLock(name, () => undefined, 5_000);
+
+    expect(existsSync(readersPath(name))).toBe(false);
+  });
+
+  it('[R1-n3] the readers-timeout error names the registrations that blocked the writer', async () => {
+    const name = freshName();
+    const { ready, released } = children.markers();
+    await children.start(READER, [readersPath(name), ready, released, '60000'], ready);
+
+    await expect(withFileLock(name, () => 'ran', 300)).rejects.toThrow(new RegExp(`: \\d+-${UUID}$`, 'u'));
+  });
+
+  it('[R1-m4 (a)] writers win ties: a writer that appears right after the registration makes the reader back off', () => {
+    const name = freshName();
+    const writer = children.idle();
+
+    const release = tryRegisterReader(name, { afterRegister: () => own(name, writer) });
+
+    expect(release).toBeUndefined();
+    expect(registrations(name)).toEqual([]);
+    rmSync(lockPath(name), { recursive: true, force: true });
+  });
+
+  it('[R1-m4 (b)] a writer ignores its own process readers: read-then-write in one process does not deadlock', async () => {
+    const name = freshName();
+
+    await expect(withReadLock(name, () => withFileLock(name, () => 'ran', 2_000), 2_000)).resolves.toBe('ran');
+  });
+
+  it('[R1-m1 / PR57-SEC-03] a writer whose lock was taken over fails loudly and leaves the new owner its lock', async () => {
+    const name = freshName();
+    const thief = children.idle();
+    const steal = (): string => {
+      // What a lost take-over race leaves: the directory now belongs to another live process.
+      rmSync(lockPath(name), { recursive: true, force: true });
+      own(name, thief);
+      return 'ran';
+    };
+
+    await expect(withFileLock(name, steal, 5_000)).rejects.toThrow(LostTestLockError);
+    expect(readFileSync(join(lockPath(name), 'owner'), 'utf8')).toBe(String(thief));
+    rmSync(lockPath(name), { recursive: true, force: true });
+  });
+
+  it('[R1-m1 / PR57-SEC-03] a dead-owner take-over by a writer or a reader leaves no tombstone behind', async () => {
+    const name = freshName();
+    own(name, await deadPid());
+    await expect(withFileLock(name, () => 'in', 5_000)).resolves.toBe('in');
+    own(name, await deadPid());
+    expect(withReadLockSync(name, () => 'in', 5_000)).toBe('in');
+
+    expect(tombstones(name)).toEqual([]);
+    expect(existsSync(lockPath(name))).toBe(false);
+  });
+
+  it('[R1-n3] an ownerless writer directory blocks while fresh and is taken over once it is stale', () => {
+    const name = freshName();
+    mkdirSync(lockPath(name));
+
+    expect(() => acquireReadLockSync(name, 300)).toThrow(`waiting for read lock ${lockPath(name)}`);
+    const old = new Date(Date.now() - OWNERLESS_STALE_MS - 60_000);
+    utimesSync(lockPath(name), old, old);
+    expect(withReadLockSync(name, () => 'entered', 5_000)).toBe('entered');
+  });
+
+  it('[R1-m3] the WRITER child takes over a lock left by a dead process', async () => {
+    const name = freshName();
+    own(name, await deadPid());
+    const { ready, released } = children.markers();
+
+    await expect(children.start(WRITER, [lockPath(name), ready, released, '100'], ready, 30_000)).resolves.toBeUndefined();
+  });
+
+  it('[R1-m3] a lock child that cannot get ready fails with a named error instead of the Jest timeout', async () => {
+    const name = freshName();
+    own(name, children.idle());
+    const { ready, released } = children.markers();
+
+    const started = children.start(WRITER, [lockPath(name), ready, released, '100'], ready, 500);
+
+    await expect(started).rejects.toThrow(LockChildTimeoutError);
+    await expect(started).rejects.toThrow(`lock child could not take ${lockPath(name)} within 500 ms`);
+    rmSync(lockPath(name), { recursive: true, force: true });
   });
 });
