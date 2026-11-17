@@ -113,3 +113,129 @@ describe('AppError', () => {
     expect(error.toJSON().errors).toHaveLength(MAX_VALIDATION_ISSUES);
   });
 });
+
+/**
+ * DR-A26 (REQUIREMENTS.md): the core catalogue with its statuses, copied here verbatim so a change of a published
+ * status, or the loss of a core code, fails this suite (AT-US-036-05). Never edit an entry: add new codes only.
+ */
+const DR_A26: Readonly<Record<string, number>> = {
+  VALIDATION_ERROR: 400,
+  MALFORMED_REQUEST: 400,
+  INVALID_CURSOR: 400,
+  INVALID_FILTER: 400,
+  INVALID_SORT: 400,
+  IDEMPOTENCY_KEY_REQUIRED: 400,
+  TOKEN_INVALID: 400,
+  AUTH_REQUIRED: 401,
+  ACCESS_TOKEN_EXPIRED: 401,
+  INVALID_CREDENTIALS: 401,
+  MFA_REQUIRED: 401,
+  MFA_INVALID: 401,
+  SESSION_REVOKED: 401,
+  REAUTH_REQUIRED: 401,
+  AUTHZ_DENIED: 403,
+  MFA_ENROLMENT_REQUIRED: 403,
+  CSRF_REJECTED: 403,
+  INVITATION_EMAIL_MISMATCH: 403,
+  NOT_FOUND: 404,
+  METHOD_NOT_ALLOWED: 405,
+  CONFLICT: 409,
+  IDEMPOTENCY_IN_PROGRESS: 409,
+  ALREADY_MEMBER: 409,
+  QUOTE_ALREADY_CLAIMED: 409,
+  TOKEN_EXPIRED: 410,
+  DOWNLOAD_EXPIRED: 410,
+  CONCURRENCY_CONFLICT: 412,
+  PAYLOAD_TOO_LARGE: 413,
+  UNSUPPORTED_MEDIA_TYPE: 415,
+  IDEMPOTENCY_KEY_REUSED: 422,
+  LAST_OWNER: 422,
+  LIMIT_EXCEEDED: 422,
+  REASON_REQUIRED: 422,
+  ROLE_NOT_ALLOWED_FOR_ORG_TYPE: 422,
+  ORG_TYPE_RESTRICTION: 422,
+  COUNTRY_NOT_SUPPORTED: 422,
+  PRECONDITION_REQUIRED: 428,
+  RATE_LIMITED: 429,
+  ACCOUNT_DELAYED: 429,
+  ACCOUNT_LOCKED: 429,
+  MFA_LOCKED: 429,
+  INTERNAL_ERROR: 500,
+  AUDIT_WRITE_FAILED: 500,
+  SERVICE_UNAVAILABLE: 503,
+  AUDIT_UNAVAILABLE: 503,
+};
+
+/**
+ * Every code published by this catalogue, with its status (DR-A26 plus the api/README.md §11 Part B codes). A code may
+ * be ADDED here together with its catalogue entry; changing or removing a line is a breaking change (REQ-API-005,
+ * api/README.md §18), so the test below fails on it.
+ */
+const PUBLISHED: Readonly<Record<string, number>> = {
+  ...DR_A26,
+  CARD_DATA_NOT_ACCEPTED: 400,
+  MOCK_SCENARIO_INVALID: 400,
+  PAYMENT_METHOD_NOT_AVAILABLE: 400,
+  WEBHOOK_SIGNATURE_INVALID: 400,
+  SESSION_EXPIRED: 401,
+  EMAIL_NOT_VERIFIED: 403,
+  MFA_ENROLMENT_CODE_REQUIRED: 403,
+  TRACKING_NOT_FOUND: 404,
+  ACCOUNT_HAS_ACTIVE_SHIPMENTS: 409,
+  AMOUNT_MISMATCH: 409,
+  ILLEGAL_STATE_TRANSITION: 409,
+  PICKUP_ALREADY_SCHEDULED: 409,
+  QUOTE_EXPIRED: 409,
+  SHIPMENT_NOT_CANCELLABLE: 409,
+  DOCUMENT_VOIDED: 410,
+  ADDRESS_COUNTRY_MISMATCH: 422,
+  AMOUNT_BELOW_MINIMUM: 422,
+  COMMODITY_CODE_FORMAT: 422,
+  COUPON_EXHAUSTED: 422,
+  COUPON_EXPIRED: 422,
+  COUPON_INVALID: 422,
+  COVER_VALUE_EXCEEDS_MAXIMUM: 422,
+  CUSTOMS_CURRENCY_MIXED: 422,
+  CUSTOMS_WEIGHT_EXCEEDS_PACKAGE: 422,
+  DG_ATTESTATION_REQUIRED: 422,
+  FX_RATE_UNAVAILABLE: 422,
+  ITEM_PROHIBITED: 422,
+  ORDER_CURRENCY_MISMATCH: 422,
+  ORG_TYPE_NOT_ALLOWED: 422,
+  PICKUP_DATE_INVALID: 422,
+  PICKUP_WINDOW_INVALID: 422,
+  PAYMENT_ATTEMPTS_EXCEEDED: 429,
+  DOCUMENT_INTEGRITY_FAILURE: 500,
+  GATEWAY_UNAVAILABLE: 503,
+};
+
+/** The published codes whose status differs from the catalogue, or that the catalogue lost; [] when stable. */
+function publishedDrift(
+  published: Readonly<Record<string, number>>,
+  catalogue: Readonly<Record<string, { readonly status: number }>>,
+): string[] {
+  return Object.entries(published).flatMap(([code, status]) => {
+    const entry = catalogue[code];
+    if (entry === undefined) return [`${code} was published with ${String(status)} and is missing from the catalogue`];
+    return entry.status === status ? [] : [`${code} was published with ${String(status)} and is now ${String(entry.status)}`];
+  });
+}
+
+describe('catalogue completeness and stability (US-036, DR-A26, REQ-API-005)', () => {
+  it('[AT-US-036-05] every DR-A26 code is present with its DR-A26 status', () => {
+    expect(publishedDrift(DR_A26, ERROR_CATALOGUE)).toEqual([]);
+    expect(Object.keys(DR_A26)).toHaveLength(45);
+  });
+
+  it('[AT-US-036-05] every published code keeps its status; the catalogue publishes nothing unpinned', () => {
+    expect(publishedDrift(PUBLISHED, ERROR_CATALOGUE)).toEqual([]);
+    expect(Object.keys(ERROR_CATALOGUE).sort()).toEqual(Object.keys(PUBLISHED).sort());
+  });
+
+  it("[AT-US-036-05] a test fails when a published code's status changes, naming the code and both statuses", () => {
+    const changed = { ...ERROR_CATALOGUE, CONFLICT: { status: 422, title: 'Conflict' } };
+    expect(publishedDrift(PUBLISHED, changed)).toEqual(['CONFLICT was published with 409 and is now 422']);
+    const lost = Object.fromEntries(Object.entries(ERROR_CATALOGUE).filter(([code]) => code !== 'LAST_OWNER'));
+    expect(publishedDrift(DR_A26, lost)).toEqual(['LAST_OWNER was published with 422 and is missing from the catalogue']);
+  });
+});
