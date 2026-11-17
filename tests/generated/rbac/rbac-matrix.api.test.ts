@@ -1,16 +1,24 @@
 /**
  * Suite `rbac-matrix` (US-071 AT-US-071-01..05; REQ-RBAC-011; NFR-SEC-011, NFR-TENANT-002; SEC-TC-01; T-QA-04;
- * D-ARCH-107, D-ARCH-109, D-ARCH-110; TASK-027). The generator (`packages/authz/src/generator`) derives one cell per
- * route x caller from the route metadata and the seeded roles; this suite runs every cell over HTTP through `createApp`
- * with the production authenticate fallback, MFA gate and authorise slots (`matrix-app.ts` documents the three seams).
+ * D-ARCH-107, D-ARCH-109, D-ARCH-110; TASK-027, TASK-289). The generator (`@platform/authz/matrix`) derives one cell
+ * per route x caller from the route metadata and the seeded roles; this suite runs every cell over HTTP through
+ * `createApp` with the production authenticate stub, MFA gate and authorise slots behind the authentication seams of
+ * `matrix-app.ts`.
+ *
+ * What it proves (D-ARCH-134; PR #48 code review R1-m2): the credential-kind selection (`presentedKinds`, D-ARCH-109),
+ * the production authenticate stub, the MFA gate for pending staff and the permission gate of `authorise`, for every
+ * cell. Not the authenticators (the seams stand in for them until TASK-052/055/091/171/261 and TASK-067 retire them)
+ * and not the credential and actor gates of `authorise`, which the seams never reach (no principal of an undeclared
+ * kind is built): apps/api platform/authz/authorise.test.ts proves those.
  *
  * Two layers:
  *  - registry: every route the composed app mounts (health and the module registry), with its real descriptor;
  *  - contract: every operation of openapi.yaml as a contract-shaped descriptor, so each permission, credential set,
  *    dual-mode and signature route of the contract runs through the real slots before its module exists.
  * Plus the SEC-TC-01 org-scope cases, the committed matrix (AT-US-071-04/-05) and mutation controls showing that a
- * pipeline without its authorise or MFA step, or a stale expectation, fails. Deterministic: no clock, no randomness
- * (every id is derived from a label); nothing reaches a database.
+ * pipeline without its authorise or MFA step, a stale expectation, or a foreign credential that changes the response
+ * (S1-S4 of PR48-SEC-01) fails. Deterministic: no clock, no randomness (every id is derived from a label); nothing
+ * reaches a database.
  */
 import { readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
@@ -18,6 +26,7 @@ import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
+import { PERMISSION_DEFINITIONS, ROLES, ROUTE_AUTHS } from '@platform/authz';
 import {
   expectCell,
   FIXED_CALLERS,
@@ -29,15 +38,16 @@ import {
   orgMismatchCases,
   parseRouteMatrix,
   pathParameterNames,
-  PERMISSION_DEFINITIONS,
-  ROLES,
+  presentedKind,
   ROUTE_MATRIX_PATH,
   type RouteMatrix,
+  SIGNATURE_HEADER_NAMES,
+  signatureHeaderId,
   signatureOnlyOf,
   verifiedId,
-} from '@platform/authz';
+} from '@platform/authz/matrix';
 import { AppError } from '@platform/shared';
-import type { Express } from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
 import Joi from 'joi';
 
 import { API_PREFIX } from '../../../apps/api/src/app.js';
@@ -45,13 +55,23 @@ import { moduleRegistry } from '../../../apps/api/src/modules/index.generated.js
 import { healthRoutes } from '../../../apps/api/src/platform/health/router.js';
 import { defineRoute, type RouteContext, type RouteDescriptor } from '../../../apps/api/src/platform/routing/define-route.js';
 import type { PipelineSlots } from '../../../apps/api/src/platform/routing/pipeline.js';
+import { markCredentialsRead, markPrivateResponse } from '../../../apps/api/src/platform/routing/route-state.js';
 import { descriptorOf } from '../../../apps/api/src/platform/routing/route-registry.js';
+import { closeLoopbackServer } from '../../../apps/api/src/platform/routing/tests/loopback.js';
 import { REPO_ROOT, loadContract } from '../../../tools/openapi/contract.js';
 import { listMountedRoutes } from '../../../tools/openapi/drift.js';
 import { loadApiMounts } from '../api-mounts.js';
 import { registryCaseFindings } from '../rls/api-cases.js';
 import { contractDescriptor, type ContractRoute, contractRoutes } from './contract-routes.js';
-import { composeMatrixApp, matrixPrincipals, matrixSlots, orgScopeSlots, type MatrixPrincipals } from './matrix-app.js';
+import {
+  composeMatrixApp,
+  matrixAuthenticate,
+  matrixPrincipals,
+  matrixSlots,
+  orgScopeSlots,
+  STUBBED_CREDENTIAL_KINDS,
+  type MatrixPrincipals,
+} from './matrix-app.js';
 import { type MatrixTarget, observe, runOrgCase, runRow } from './runner.js';
 
 const SOURCE: MatrixSource = { roles: ROLES, catalogue: PERMISSION_DEFINITIONS };
@@ -63,9 +83,10 @@ const ROW_CONCURRENCY = 8;
 
 /**
  * Per-test and per-hook bounds (the LOOPBACK_TEST_TIMEOUT_MS rationale of apps/api platform/routing/tests/loopback.ts).
- * A row is about 31 loopback requests, the contract layer about 4,300. Alone they take about 0.3 s and 15 s; under
+ * A row is about 34 loopback requests, the contract layer about 4,700. Alone they take about 0.3 s and 15 s; under
  * parallel host load (flake loop 2026-11-14, runs 12-20) rows took over 5 s and the contract layer over 120 s, while
- * every result stayed correct. A hang still fails at the bound.
+ * every result stayed correct. These are hang detectors, never latency targets: one hung or reset request is named by
+ * the runner's per-request deadline (OBSERVE_DEADLINE_MS, runner.ts) long before them.
  */
 const MATRIX_TEST_TIMEOUT_MS = 120_000;
 const CONTRACT_LAYER_TIMEOUT_MS = 900_000;
@@ -105,26 +126,15 @@ interface Served {
   readonly server: Server;
 }
 
-/**
- * Loopback server for the matrix. The keep-alive timeout outlives the suite: with Node's 5 s default the server may
- * close an idle pooled socket just as fetch reuses it (ECONNRESET), which would be noise, not a matrix result.
- */
+/** Loopback server for the matrix; the runner sends every request with `fetchOnce` (a fresh socket, no pool). */
 async function listen(app: Express): Promise<Served> {
   const server = app.listen(0, '127.0.0.1');
-  server.keepAliveTimeout = 120_000;
   await new Promise<void>((done) => server.once('listening', () => done()));
   return { origin: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`, server };
 }
 
 const close = (served: Served | undefined): Promise<void> =>
-  new Promise<void>((done) => {
-    if (served === undefined) {
-      done();
-      return;
-    }
-    served.server.close(() => done());
-    served.server.closeAllConnections();
-  });
+  served === undefined ? Promise.resolve() : closeLoopbackServer(served.server);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Layers
@@ -214,7 +224,7 @@ describe('AT-US-071-01 registry layer: every mounted route x every seeded role (
   );
 });
 
-describe('AT-US-071-01 contract layer: every openapi.yaml operation x every seeded role through the real authenticate, MFA-gate and authorise slots', () => {
+describe('AT-US-071-01 contract layer: every openapi.yaml operation x every caller through presentedKinds, the authenticate stub (seamed credentials), the MFA gate and the authorise permission gate', () => {
   it('every contract operation is mounted once and has a row with a cell per applicable caller', () => {
     expect(contractTargets.map((entry) => entry.target.operationId).sort()).toEqual(
       CONTRACT.map((route) => route.matrix.operationId).sort(),
@@ -222,8 +232,9 @@ describe('AT-US-071-01 contract layer: every openapi.yaml operation x every seed
     expect(contractTargets.length).toBeGreaterThanOrEqual(133);
     const signatureRoutes = contractMatrix.rows.filter((row) => row.route.auth.includes('signature'));
     expect(signatureRoutes.length).toBeGreaterThan(0);
+    // A signature route has the two synthetic signatures and no real signature header; every other route the reverse.
     for (const row of contractMatrix.rows) {
-      expect(row.cells).toHaveLength(CALLERS.size - (row.route.auth.includes('signature') ? 0 : 2));
+      expect(row.cells).toHaveLength(CALLERS.size - (row.route.auth.includes('signature') ? SIGNATURE_HEADER_NAMES.length : 2));
     }
   });
 
@@ -303,6 +314,9 @@ describe('D-ARCH-107/109/110 (ADR-0008 am. 4 and 5) credential kinds, foreign cr
     expect(await run('listCountries', FIXED_CALLERS.expiredBearer)).toEqual(none);
     expect(await run('listCountries', FIXED_CALLERS.guest)).toEqual(none);
     expect(await run('listCountries', 'CUSTOMER_OWNER')).toEqual(none);
+    // PR #48 R1-n2 and PR48-SEC-01: the admin refresh cookie and every real provider signature header are foreign too.
+    expect(await run('listCountries', FIXED_CALLERS.unknownRefreshCookie)).toEqual(none);
+    for (const name of SIGNATURE_HEADER_NAMES) expect(await run('listCountries', signatureHeaderId(name))).toEqual(none);
   });
 
   it('D-ARCH-109 [session] + a refresh cookie only is 401 AUTH_REQUIRED (nothing consumed); [refresh-cookie] + an expired bearer only is 401', async () => {
@@ -348,7 +362,10 @@ describe('D-ARCH-107/109/110 (ADR-0008 am. 4 and 5) credential kinds, foreign cr
     expect((await run('getQuote', 'CUSTOMER_OWNER')).status).toBe(204);
   });
 
-  it('D-ARCH-110 [signature]: a signature principal holding the permission 200-class, without it 403; a session on the signature route 401; a signature principal on a session route 401', async () => {
+  // Truth in labelling (PR #48 R1-m2): the 401s of a session on the signature route and of a signature on a session
+  // route come from presentedKinds and the authenticate stub (the seam builds no principal of an undeclared kind);
+  // authorise's credential gate and its signature-credential check are proven by authorise.test.ts, not here.
+  it('D-ARCH-110 [signature]: a signature principal holding the permission 200-class, without it 403 (authorise permission gate); a session on the signature route and a signature header on a session route are foreign: 401 from the stub', async () => {
     const signed = firstOperation((route) => isSet(route, 'signature') && SIGNATURE_ONLY.has(route.permission));
     expect((await run(signed, FIXED_CALLERS.signatureHolds)).status).toBe(204);
     expect(await run(signed, FIXED_CALLERS.signatureLacks)).toEqual({
@@ -365,8 +382,16 @@ describe('D-ARCH-107/109/110 (ADR-0008 am. 4 and 5) credential kinds, foreign cr
       caller(FIXED_CALLERS.signatureHolds),
     );
     expect(observed.status).toBe(401);
+    expect(await run('getShipment', signatureHeaderId('stripe-signature'))).toEqual(await run('getShipment', FIXED_CALLERS.none));
     const publicSigned = firstOperation((route) => isSet(route, 'signature') && route.permission === 'public');
     expect((await run(publicSigned, FIXED_CALLERS.signatureLacks)).status).toBe(204);
+  });
+
+  it('D-ARCH-134 the still-stubbed credential kinds: every kind but anonymous is resolved by the seam today, each presented by some caller (the list TASK-052 compares with the mounted authenticators)', () => {
+    expect(STUBBED_CREDENTIAL_KINDS).toEqual(['session', 'refresh-cookie', 'quote-token', 'signature']);
+    expect(ROUTE_AUTHS.filter((kind) => kind !== 'anonymous')).toEqual([...STUBBED_CREDENTIAL_KINDS]);
+    const presented = new Set<string>([...CALLERS.values()].map(presentedKind));
+    expect(STUBBED_CREDENTIAL_KINDS.filter((kind) => !presented.has(kind))).toEqual([]);
   });
 
   it('REQ-AUTH-018 staff before TOTP: a staff session is 403 on a route without x-mfa-gate-exempt and passes the gate on an exempt one', async () => {
@@ -429,26 +454,37 @@ const ORG_FIXTURES: readonly RouteDescriptor[] = [
 
 describe('[SEC-TC-01] every route with {orgId}: active organisation != path organisation -> 404 NOT_FOUND, no data (T-32, AC-06)', () => {
   let orgServed: Served | undefined;
+  let fixtureMatrix: Served | undefined;
   let registryOrg: Served | undefined;
+  const fixtureApp = (slots: PipelineSlots): Express => composeMatrixApp([], [{ name: 'fixtures', routes: ORG_FIXTURES }], slots);
   const fixtureTargets = (): { readonly target: MatrixTarget; readonly route: MatrixRoute }[] =>
-    mountedTargets(composeMatrixApp([], [{ name: 'fixtures', routes: ORG_FIXTURES }], orgScopeSlots(PRINCIPALS)));
+    mountedTargets(fixtureApp(orgScopeSlots(PRINCIPALS)));
+  /** The authorisation app (route-reached control, PR48-SEC-05 item 1) and the org-scope app of one layer. */
+  const origins = (matrix: Served | undefined, orgScope: Served | undefined): { matrix: string; orgScope: string } => ({
+    matrix: String(matrix?.origin),
+    orgScope: String(orgScope?.origin),
+  });
 
   beforeAll(async () => {
-    orgServed = await listen(composeMatrixApp([], [{ name: 'fixtures', routes: ORG_FIXTURES }], orgScopeSlots(PRINCIPALS)));
+    orgServed = await listen(fixtureApp(orgScopeSlots(PRINCIPALS)));
+    fixtureMatrix = await listen(fixtureApp(matrixSlots(PRINCIPALS)));
     registryOrg = await listen(registryApp(orgScopeSlots(PRINCIPALS)));
   });
 
   afterAll(async () => {
     await close(orgServed);
+    await close(fixtureMatrix);
     await close(registryOrg);
   });
 
-  it('[SEC-TC-01] registry: every tenant route with {orgId} has a generated case and each answers 404 NOT_FOUND before any query', async () => {
+  it('[SEC-TC-01] registry: every tenant route with {orgId} has a generated case; each is reached with the own organisation and answers 404 NOT_FOUND for a foreign one before any query', async () => {
     const { cases, findings } = orgMismatchCases(REGISTRY_MATRIX);
     expect(findings).toEqual([]);
     const problems: string[] = [];
     for (const orgCase of cases) {
-      problems.push(...(await runOrgCase(String(registryOrg?.origin), targetOf(REGISTRY, orgCase.route.operationId), orgCase.caller)));
+      problems.push(
+        ...(await runOrgCase(origins(served.registry, registryOrg), targetOf(REGISTRY, orgCase.route.operationId), orgCase.caller)),
+      );
     }
     expect(problems).toEqual([]);
   });
@@ -466,7 +502,7 @@ describe('[SEC-TC-01] every route with {orgId}: active organisation != path orga
     expect(cases.every((orgCase) => orgCase.caller.scope === 'CUSTOMER')).toBe(true);
   });
 
-  it('[SEC-TC-01] fixture proof: a refusing route passes; a leaking route, a route that queries first and a 404 that echoes the id in a header are named', async () => {
+  it('[SEC-TC-01] fixture proof: a refusing route passes; a leaking route, a route that queries first, a 404 that echoes the id in a header and a target that is not reached are named', async () => {
     const matrix = generateMatrix(
       fixtureTargets().map((entry) => entry.route),
       SOURCE,
@@ -477,9 +513,16 @@ describe('[SEC-TC-01] every route with {orgId}: active organisation != path orga
     for (const orgCase of cases) {
       results.set(
         orgCase.route.operationId,
-        await runOrgCase(String(orgServed?.origin), targetOf(fixtureTargets(), orgCase.route.operationId), orgCase.caller),
+        await runOrgCase(origins(fixtureMatrix, orgServed), targetOf(fixtureTargets(), orgCase.route.operationId), orgCase.caller),
       );
     }
+    // Route-reached control (PR48-SEC-05 item 1): a target the app does not mount answers 404 NOT_FOUND for every
+    // orgId (the fallback), which the foreign-org checks alone would accept.
+    const scoped = targetOf(fixtureTargets(), 'probeOrgScoped');
+    const unmounted: MatrixTarget = { ...scoped, operationId: 'probeOrgUnmounted', path: scoped.path.replace('/organisations/', '/orgs/') };
+    expect(await runOrgCase(origins(fixtureMatrix, orgServed), unmounted, caller('CUSTOMER_OWNER'))).toEqual([
+      '[SEC-TC-01] probeOrgUnmounted x CUSTOMER_OWNER -> own {orgId}: the route was not reached (expected 204 with x-rbac-matrix, got 404 NOT_FOUND (Cache-Control "private, no-store"))',
+    ]);
     expect(results.get('probeOrgScoped')).toEqual([]);
     expect(results.get('probeOrgLeaky')).toEqual([
       '[SEC-TC-01] probeOrgLeaky x CUSTOMER_OWNER -> foreign {orgId}: expected 404 NOT_FOUND, got 200 (Cache-Control "private, no-store")',
@@ -593,5 +636,85 @@ describe('mutation controls: the matrix is not vacuous', () => {
       await close(noAuthorise);
       await close(noMfa);
     }
+  });
+
+  /**
+   * PR48-SEC-01 S1-S4 (record probe B), each an authenticator defect around a foreign credential that left status, code
+   * and Cache-Control alone and passed the PR #48 runner. The bend wraps the seamed authenticate slot of the real app.
+   */
+  type Bend = (route: RouteDescriptor, req: Request, res: Response, next: NextFunction) => boolean;
+  const bentApp = async (bend: Bend): Promise<Served> =>
+    listen(
+      contractApp({
+        ...matrixSlots(PRINCIPALS),
+        authenticate: (route) => {
+          const seamed = matrixAuthenticate(PRINCIPALS)(route);
+          return (req, res, next) => {
+            if (!bend(route, req, res, next)) seamed(req, res, next);
+          };
+        },
+      }),
+    );
+  const foreign = (route: RouteDescriptor, kind: string, req: Request, header: string): boolean =>
+    !route.auth.includes(kind as RouteDescriptor['auth'][number]) && req.headers[header] !== undefined;
+  const changed = (operationId: string, ids: readonly string[], what: string): string[] =>
+    ids.map((id) => `${operationId} x ${id}: a credential outside the route's set changed the response (${what})`);
+  const runBent = async (bend: Bend, operationId: string): Promise<string[]> => {
+    const app = await bentApp(bend);
+    try {
+      return await runRow(app.origin, targetOf(contractTargets, operationId), rowOf(contractMatrix, operationId), CALLERS);
+    } finally {
+      await close(app);
+    }
+  };
+  const REFRESH_COOKIES = [FIXED_CALLERS.refreshCookie, FIXED_CALLERS.unknownRefreshCookie];
+
+  it('PR48-SEC-01 S1 a foreign refresh cookie that makes the authenticator clear it (Set-Cookie) is named on every route outside [refresh-cookie]', async () => {
+    const bend: Bend = (route, req, res) => {
+      if (foreign(route, 'refresh-cookie', req, 'cookie'))
+        res.setHeader('set-cookie', '__Host-rt_web=; Max-Age=0; Path=/; Secure; HttpOnly');
+      return false;
+    };
+    expect(await runBent(bend, 'listCountries')).toEqual(changed('listCountries', REFRESH_COOKIES, 'header set-cookie'));
+    expect(await runBent(bend, 'getShipment')).toEqual(changed('getShipment', REFRESH_COOKIES, 'header set-cookie'));
+  });
+
+  it('PR48-SEC-01 S2 a foreign bearer that adds WWW-Authenticate (status unchanged) is named for every bearer caller', async () => {
+    const bend: Bend = (route, req, res) => {
+      if (foreign(route, 'session', req, 'authorization')) res.setHeader('www-authenticate', 'Bearer error="invalid_token"');
+      return false;
+    };
+    const bearers = rowOf(contractMatrix, 'listCountries')
+      .cells.map((cell) => cell.caller)
+      .filter((id) => presentedKind(caller(id)) === 'session');
+    expect(bearers).toHaveLength(ROLES.length + 8 + 1);
+    expect(await runBent(bend, 'listCountries')).toEqual(changed('listCountries', bearers, 'header www-authenticate'));
+  });
+
+  it('PR48-SEC-01 S3 a foreign refresh cookie that changes the 401 body on a [session] route (status, code and Cache-Control unchanged) is named', async () => {
+    const bend: Bend = (route, req, res, next) => {
+      if (!foreign(route, 'refresh-cookie', req, 'cookie') || route.auth.includes('anonymous')) return false;
+      markCredentialsRead(res);
+      markPrivateResponse(res);
+      next(new AppError('AUTH_REQUIRED', { detail: 'The refresh cookie has expired.' }));
+      return true;
+    };
+    expect(await runBent(bend, 'getShipment')).toEqual(changed('getShipment', REFRESH_COOKIES, 'body'));
+  });
+
+  it('PR48-SEC-01 S4 a real stripe-signature header read on every route (401) is named on an [anonymous] route', async () => {
+    const bend: Bend = (route, req, res, next) => {
+      if (!foreign(route, 'signature', req, 'stripe-signature')) return false;
+      markCredentialsRead(res);
+      markPrivateResponse(res);
+      next(new AppError('AUTH_REQUIRED'));
+      return true;
+    };
+    const stripe = signatureHeaderId('stripe-signature');
+    expect(await runBent(bend, 'listCountries')).toEqual([
+      `listCountries x ${stripe}: expected allowed, got 401 AUTH_REQUIRED (Cache-Control "private, no-store")`,
+      `listCountries x ${stripe}: Cache-Control "private, no-store", expected not "private, no-store"`,
+      ...changed('listCountries', [stripe], 'status 204 -> 401, header cache-control, header content-type, header x-rbac-matrix, body'),
+    ]);
   });
 });

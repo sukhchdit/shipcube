@@ -8,16 +8,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import {
-  CATALOGUE_VERSION,
-  generateMatrix,
-  matrixDrift,
-  parseRouteMatrix,
-  PERMISSION_DEFINITIONS,
-  renderRouteMatrix,
-  ROLES,
-  ROUTE_MATRIX_PATH,
-} from '@platform/authz';
+import { CATALOGUE_VERSION, PERMISSION_DEFINITIONS, ROLES } from '@platform/authz';
+import { generateMatrix, matrixDrift, parseRouteMatrix, renderRouteMatrix, ROUTE_MATRIX_PATH } from '@platform/authz/matrix';
 
 import { loadContract, REPO_ROOT } from '../../../tools/openapi/contract.js';
 import { contractRoutes } from './contract-routes.js';

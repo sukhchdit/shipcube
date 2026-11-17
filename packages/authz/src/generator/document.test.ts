@@ -57,24 +57,25 @@ describe('renderRouteMatrix', () => {
     expect(ROUTE_MATRIX_PATH).toBe('docs/03-architecture/generated/rbac-route-matrix.md');
     expect(TEXT).toContain('Catalogue version: **3**');
     expect(TEXT).toContain(
-      '| Operation | Route | Permission | Auth | none | OP_ADMIN | CU_VIEWER | OP_ADMIN+mfa | session:expired | refresh-cookie:valid | refresh-cookie:unknown | quote-token:valid | quote-token:unknown | signature:holds | signature:lacks |',
+      '| Operation | Route | Permission | Auth | none | OP_ADMIN | CU_VIEWER | OP_ADMIN+mfa | session:expired | refresh-cookie:valid | refresh-cookie:unknown | quote-token:valid | quote-token:unknown | signature:holds | signature:lacks | signature-header:stripe-signature | signature-header:x-mock-signature | signature-header:x-carrier-signature |',
     );
     expect(TEXT).toContain(
-      '| `getShipment` | `GET /api/v1/shipments/{shipmentId}` | `shipment:read` | session | 401 | MFA | Y | Y | 401 | 401 | 401 | 401 | 401 | - | - |',
+      '| `getShipment` | `GET /api/v1/shipments/{shipmentId}` | `shipment:read` | session | 401 | MFA | Y | Y | 401 | 401 | 401 | 401 | 401 | - | - | 401 | 401 | 401 |',
     );
+    expect(TEXT).toContain('each real provider signature header (`<name>: t=0,v1=0`), a foreign credential there');
     expect(TEXT).toContain(
       '| `getQuote` | `GET /api/v1/quotes/{quoteId}` | `public` / session: `quote:read` | session, quote-token | 401 | MFA | 403 |',
     );
     expect(TEXT).toContain('| `getMe` | `GET /api/v1/me` | `authenticated` (MFA-exempt) | session | 401 | Y | Y | Y |');
-    expect(TEXT).toContain('| 401 | 401 | Y | 403 |\n');
-    expect(TEXT.endsWith('4 operations x 11 callers.\n')).toBe(true);
+    expect(TEXT).toContain('| 401 | 401 | Y | 403 | - | - | - |\n');
+    expect(TEXT.endsWith('4 operations x 14 callers.\n')).toBe(true);
   });
 });
 
 describe('parseRouteMatrix', () => {
   it('reads the columns and rows back; text without the table reads as empty', () => {
     const parsed = parseRouteMatrix(TEXT);
-    expect(parsed.columns).toHaveLength(11);
+    expect(parsed.columns).toHaveLength(14);
     expect([...parsed.rows.keys()]).toEqual(['getShipment', 'getQuote', 'getMe', 'receiveStripeWebhook']);
     expect(parsed.rows.get('getShipment')?.cells.get('OP_ADMIN')).toBe('MFA');
     expect(parsed.rows.get('getShipment')?.metadata).toBe(
@@ -133,10 +134,13 @@ describe('[AT-US-071-04/-05] matrixDrift names what changed', () => {
     expect(matrixDrift(parseRouteMatrix(edited), MATRIX)).toEqual([
       'route GET /api/v1/me (getMe) x caller none: committed Y, generated 401',
     ]);
-    const truncated = TEXT.replace(/^(\| `receiveStripeWebhook` .*?) \| Y \| 403 \|$/mu, '$1 |');
+    const truncated = TEXT.replace(/^(\| `receiveStripeWebhook` .*?) \| Y \| 403 \| - \| - \| - \|$/mu, '$1 |');
     expect(matrixDrift(parseRouteMatrix(truncated), MATRIX)).toEqual([
       'route POST /api/v1/webhooks/stripe (receiveStripeWebhook) x caller signature:holds: committed , generated Y',
       'route POST /api/v1/webhooks/stripe (receiveStripeWebhook) x caller signature:lacks: committed , generated 403',
+      'route POST /api/v1/webhooks/stripe (receiveStripeWebhook) x caller signature-header:stripe-signature: committed , generated -',
+      'route POST /api/v1/webhooks/stripe (receiveStripeWebhook) x caller signature-header:x-mock-signature: committed , generated -',
+      'route POST /api/v1/webhooks/stripe (receiveStripeWebhook) x caller signature-header:x-carrier-signature: committed , generated -',
     ]);
   });
 });
