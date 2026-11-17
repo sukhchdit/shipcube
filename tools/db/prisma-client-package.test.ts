@@ -120,13 +120,19 @@ describe('run-time resolution without conditions (D-ARCH-102 (2), (4): what the 
       "const url = import.meta.resolve('@platform/prisma/client');",
       "const { PrismaClient } = await import('@platform/prisma/client');",
       "const { PrismaPg } = await import('@prisma/adapter-pg');",
-      // An unreachable host (port 1 on loopback): the error must come from the driver, through the compiled client.
-      "const adapter = new PrismaPg({ connectionString: 'postgresql://probe@127.0.0.1:1/probe', connectionTimeoutMillis: 2000 });",
+      // A refused connect (port 1 on loopback): the error must come from the driver, through the compiled client. No
+      // connectionTimeoutMillis (TASK-288): a 2 s pg connect timer raced the immediate ECONNREFUSED and won whenever the
+      // host starved this child for 2 s, failing as a plain Error "Connection terminated due to connection timeout" (runs
+      // 20261115T1909Z and the TASK-288 stress series). A refused loopback connect needs no timer; runNode bounds a hang.
+      "const adapter = new PrismaPg({ connectionString: 'postgresql://probe@127.0.0.1:1/probe' });",
       "const client = new PrismaClient({ adapter, errorFormat: 'minimal' });",
-      "let name = 'none';",
-      'try { await client.$queryRaw`SELECT 1`; } catch (error) { name = error.constructor.name; }',
+      "let name = 'none'; let detail = '';",
+      'try { await client.$queryRaw`SELECT 1`; } catch (error) {',
+      '  name = error.constructor.name;',
+      "  detail = [error.message, error.cause?.message, String(error.stack).split('\\n').slice(1, 6).join(' | ')].join(' || ');",
+      '}',
       'await client.$disconnect();',
-      'console.log(JSON.stringify({ url, name }));',
+      'console.log(JSON.stringify({ url, name, detail }));',
     ].join('\n');
     const result = runNode(['--input-type=module'], {
       cwd: join(ROOT, 'apps', 'api'),
@@ -134,8 +140,12 @@ describe('run-time resolution without conditions (D-ARCH-102 (2), (4): what the 
       env: { ...process.env, NODE_OPTIONS: '' },
     });
     expect(result.status).toBe(0);
-    const outcome = JSON.parse(result.stdout.trim()) as { url: string; name: string };
+    const outcome = JSON.parse(result.stdout.trim()) as { url: string; name: string; detail: string };
     expect(outcome.url.replace(/\\/gu, '/')).toMatch(/\/prisma\/dist\/client\/client\.js$/u);
-    expect(outcome.name).toBe('PrismaClientKnownRequestError');
+    // The detail (message, cause, stack head) is shown only when the class is wrong, so a failure names its cause.
+    expect({ name: outcome.name, detail: outcome.name === 'PrismaClientKnownRequestError' ? '' : outcome.detail }).toEqual({
+      name: 'PrismaClientKnownRequestError',
+      detail: '',
+    });
   });
 });
