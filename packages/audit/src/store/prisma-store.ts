@@ -1,6 +1,7 @@
 /**
- * The audit store: the SQL of data-model §5.4 (as rewritten 2026-11-13, ADR-0007 amendment 10; D-ARCH-085/087),
- * executed on the business transaction it is handed (REQ-AUDIT-004; TASK-025).
+ * The audit store: the SQL of data-model §5.4 (as rewritten 2026-11-13, ADR-0007 amendment 10; D-ARCH-085/087, amended
+ * 2026-11-14 by ADR-0007 amendment 11 item 3 / D-ARCH-122), executed on the business transaction it is handed
+ * (REQ-AUDIT-004; TASK-025, TASK-029).
  *
  * The store is typed on a STRUCTURAL port of the two tagged-template raw methods of `TenantDb` (D-ARCH-103 (5),
  * ADR-0003 amendment 2026-11-13): it constructs no client, imports neither Prisma nor `pg`, and so can only join the
@@ -8,23 +9,29 @@
  * tenant context and commit audit rows outside the business transaction. The writer API takes a TenantDb or a job
  * context, never a raw migrator connection: the migrator has no privilege on any audit table (D-ARCH-075).
  *
- * Statement sequence per entry (the vault statements only when the entry carries personal values):
- *   1.  one multi-row vault `INSERT … SELECT FROM unnest(…) ON CONFLICT DO NOTHING`             {@link insertVaultRows}
- *   1b. one token lookup as a SEPARATE statement (new snapshot: sees a concurrent winner's row)  {@link insertVaultRows}
- *   2.  head-row lock + head read + database clock in ONE statement, under the audit lock_timeout {@link lockHead}
+ * Statement sequence of ONE flush (D-ARCH-122: every entry the transaction recorded; the vault statements only when an
+ * entry carries personal values):
+ *   1.  one multi-row vault `INSERT … SELECT FROM unnest(…) ON CONFLICT DO NOTHING`, for ALL entries  {@link insertVaultRows}
+ *   1b. one token lookup as a SEPARATE statement (new snapshot: sees a concurrent winner's row)       {@link insertVaultRows}
+ *   2.  per stream, in ascending `stream_id` order: head-row lock + head read + database clock in ONE statement, under
+ *       the audit lock_timeout; every head lock before the first append                               {@link appendBatch}
  *   2b. only when (2) found no head (first entry of a stream): create it, then repeat (2)
- *   3.  the entry hash, in process (no statement)
- *   4.  ONE statement appends the entry and advances the head; expectAffected(1)                {@link appendEntry}
+ *   3.  the entry hashes, chained in process per stream (no statement)
+ *   4.  per stream, ONE statement appends that stream's N entries (consecutive `stream_seq`) and advances its head by N;
+ *       expectAffected(1)                                                                              {@link appendStream}
  *   5.  COMMIT, by the caller's transaction.
- * From lock grant to COMMIT inclusive that is two round trips (4 and 5); nothing else runs under the lock and no
- * other lock is taken after it (deadlock freedom: the audit append is the last database work of the transaction).
- * TASK-030 owns the proof of that budget (statement-sequence test, held-row timing, 50 parallel writers, the token
- * plan against a 100 k-row vault).
+ * For one stream (every M0/M1 flow: a tenant transaction writes its organisation's stream, an organisation-less one a
+ * SYSTEM shard) that is two round trips from lock grant to COMMIT inclusive (4 and 5), whatever N is; for k streams it
+ * is k lock round trips + k appends + COMMIT. The only locks taken after the first head lock are further head locks in
+ * ascending order (deadlock freedom: every writer locks in the same order, and the audit flush is the last database
+ * work of the transaction). TASK-030 moves these statements into `chain/**` and owns the proof of the budget
+ * (statement-sequence test, held-row timing, 50 parallel writers, the token plan against a 100 k-row vault).
  *
  * SQL rules (data-model §5.4 (a)-(f), §8.3): built-ins are `pg_catalog.`-qualified except multi-argument `unnest` and
  * `extract(… FROM …)` (keyword syntax); no `RETURNING` on the append; arrays and bytea travel as typed parameters
- * (`$n::uuid[]`; bytea arrays as hex `text[]` decoded in SQL, D-TASK025-12), never as `Prisma.join` / `Prisma.sql`
- * fragments, which `TenantDb` refuses; the zero hash is `decode(repeat('00', 32), 'hex')`, never a text expression (42804, D-ARCH-087).
+ * (`$n::uuid[]`; bytea as hex `text` decoded in SQL, D-TASK025-12; jsonb values as their JSON text), never as
+ * `Prisma.join` / `Prisma.sql` fragments, which `TenantDb` refuses; the zero hash is `decode(repeat('00', 32), 'hex')`,
+ * never a text expression (42804, D-ARCH-087).
  */
 import type { PiiClassification } from '../actions.js';
 import { type AuditRowDraft, type ChainPosition, computeEntryHash, formatMicros, nextOccurredAt } from '../entry-hash.js';
@@ -32,8 +39,8 @@ import { AuditWriteError } from '../errors.js';
 
 /**
  * The two raw methods of the business transaction's `TenantDb` (tagged templates only; every value is bound) and its
- * rollback-only latch. A `TenantDb<AppTransactionClient>` satisfies it structurally. A function taking this port runs
- * inside the transaction, so it is a T-83 root (PR42-SEC-07): no external I/O or sleeps in it.
+ * latch members. A `TenantDb<AppTransactionClient>` satisfies it structurally. A function taking this port runs inside
+ * the transaction, so it is a T-83 root (PR42-SEC-07): no external I/O or sleeps in it.
  */
 export interface AuditSqlPort {
   $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): PromiseLike<T>;
@@ -48,15 +55,27 @@ export interface AuditSqlPort {
    * Starts `work` and registers it as in flight on the enclosing transaction (PR42-SEC-13): the transaction owner
    * awaits every tracked work before it reads the latch and commits, so a write the callback did not await still
    * completes, or marks the transaction rollback-only, before COMMIT. Refused (it throws) once the transaction settled;
-   * `work` is then never started. The writer runs every `write()` through it.
+   * `work` is then never started. The writer runs every `write()` and `flush()` through it.
    */
   track<T>(work: () => Promise<T>): Promise<T>;
+  /**
+   * Registers a check the transaction owner runs after settling and before it reads the latch and commits
+   * (D-ARCH-122 I3): an `Error` returned by any check fails the transaction. The writer registers "recorded entries
+   * were flushed" on the first `record` of a transaction. Refused once the transaction settled.
+   */
+  beforeCommit(check: () => Error | undefined): void;
+  /**
+   * The validated organisation of the transaction (its tenant context): a lower-case UUID, or `''` for an
+   * organisation-less transaction (D-ARCH-122 stream check: `audit_entries` has no RLS, so this is the guard against
+   * a capture bug writing the stream of organisation B from a transaction of organisation A).
+   */
+  contextOrgId(): string;
 }
 
 export interface AppendOptions {
   /** `DB_AUDIT_LOCK_TIMEOUT_MS`: the head-row lock wait bound (default 250 ms, below `DB_TX_LOCK_TIMEOUT_MS`). */
   readonly lockTimeoutMs: number;
-  /** `created_by` / `updated_by` of the head row: the acting user, or the SYSTEM / ANONYMOUS actor. */
+  /** `created_by` / `updated_by` of the head rows: the acting user, or the SYSTEM / ANONYMOUS actor. */
   readonly actorStamp: string;
 }
 
@@ -90,8 +109,11 @@ export interface VaultRow {
 }
 
 export interface AuditStore {
-  /** Statements 2-4: allocates the chain position under the head-row lock and appends the entry. */
-  append(db: AuditSqlPort, row: AuditRowDraft, options: AppendOptions): Promise<AppendedEntry>;
+  /**
+   * Statements 2-4 for every row of one flush: locks the heads of all streams in ascending `stream_id` order, then
+   * appends each stream's rows with ONE statement. Returns the chain position of every row, in input order.
+   */
+  appendBatch(db: AuditSqlPort, rows: readonly AuditRowDraft[], options: AppendOptions): Promise<AppendedEntry[]>;
   /** Statements 1 and 1b: writes a batch of vault rows and returns the token of each, in input order. */
   insertVaultRows(db: AuditSqlPort, rows: readonly VaultRow[], actorStamp: string): Promise<string[]>;
 }
@@ -131,28 +153,98 @@ ON CONFLICT (stream_id) DO NOTHING`;
 
 const jsonOrNull = (value: unknown): string | null => (value === null ? null : JSON.stringify(value));
 
-/** Statement 4: append the entry and advance the head in one statement (no RETURNING). */
-function appendEntry(db: AuditSqlPort, row: AuditRowDraft, seq: number, occurredAt: string, prev: string, hash: string, actor: string) {
+/** One row of a stream batch with the chain position and hashes computed in process (step 3). */
+interface ChainedRow {
+  readonly row: AuditRowDraft;
+  readonly seq: number;
+  readonly occurredAt: string;
+  readonly prevHash: string;
+  readonly entryHash: string;
+}
+
+/** The bind arrays of one stream batch, one element per row, in `stream_seq` order. */
+function columns(batch: readonly ChainedRow[]) {
+  const of = <T>(pick: (row: AuditRowDraft) => T): T[] => batch.map(({ row }) => pick(row));
+  return {
+    ids: of((row) => row.id),
+    occurred: batch.map((entry) => entry.occurredAt),
+    seqs: batch.map((entry) => String(entry.seq)),
+    orgIds: of((row) => row.orgId),
+    targetOrgIds: of((row) => row.targetOrgId),
+    onBehalfOfOrgIds: of((row) => row.onBehalfOfOrgId),
+    actorTypes: of((row) => row.actorType),
+    userIds: of((row) => row.userId),
+    apiKeyIds: of((row) => row.apiKeyId),
+    jobNames: of((row) => row.jobName),
+    roles: of((row) => JSON.stringify([...row.actorRoles])),
+    sessionIds: of((row) => row.sessionId),
+    ipTokens: of((row) => row.ipToken),
+    ipHashes: of((row) => row.ipHash),
+    ipHashKeyIds: of((row) => row.ipHashKeyId),
+    ipCoarse: of((row) => row.ipCoarse),
+    userAgentTokens: of((row) => row.userAgentToken),
+    uaParsed: of((row) => row.uaParsed),
+    sourceApps: of((row) => row.sourceApp),
+    correlationIds: of((row) => row.correlationId),
+    actions: of((row) => row.action),
+    entityNames: of((row) => row.entityName),
+    entityIds: of((row) => row.entityId),
+    outcomes: of((row) => row.outcome),
+    reasonTokens: of((row) => row.reasonToken),
+    reauthProofIds: of((row) => row.reauthProofId),
+    signatureMeanings: of((row) => row.signatureMeaning),
+    httpMethods: of((row) => row.httpMethod),
+    routes: of((row) => row.route),
+    oldValues: of((row) => jsonOrNull(row.oldValue)),
+    newValues: of((row) => jsonOrNull(row.newValue)),
+    details: of((row) => jsonOrNull(row.details)),
+    piiTokenCounts: of((row) => String(row.piiTokenCount)),
+    hashVersions: of((row) => String(row.hashVersion)),
+    prevHashes: batch.map((entry) => entry.prevHash),
+    entryHashes: batch.map((entry) => entry.entryHash),
+  };
+}
+
+/**
+ * Statement 4: append one stream's entries and advance its head by N in one statement (no RETURNING). The head moves
+ * only from the count it had under the lock (`entry_count = first_seq - 1`), so a tampered head fails expectAffected(1).
+ * `actor_roles` travels as one JSON array text per row and is rebuilt in order (a `text[]` per row cannot be unnested).
+ */
+function appendStream(db: AuditSqlPort, streamId: string, batch: readonly ChainedRow[], actor: string): PromiseLike<number> {
+  const c = columns(batch);
+  const first = batch[0] as ChainedRow;
+  const last = batch[batch.length - 1] as ChainedRow;
   return db.$executeRaw`WITH appended AS (
   INSERT INTO public.audit_entries (id, occurred_at, stream_id, stream_seq, org_id, target_org_id, on_behalf_of_org_id,
          actor_type, user_id, api_key_id, job_name, actor_roles, session_id, ip_token, ip_hash, ip_hash_key_id, ip_coarse,
          user_agent_token, ua_parsed, source_app, correlation_id, action, entity_name, entity_id, outcome, reason_token,
          reauth_proof_id, signature_meaning, http_method, route, old_value, new_value, details, pii_token_count, hash_version,
          prev_hash, entry_hash)
-  VALUES (${row.id}::uuid, ${occurredAt}::timestamptz, ${row.streamId}::uuid, ${seq}::bigint, ${row.orgId}::uuid,
-          ${row.targetOrgId}::uuid, ${row.onBehalfOfOrgId}::uuid, ${row.actorType}, ${row.userId}::uuid, ${row.apiKeyId}::uuid,
-          ${row.jobName}, ${[...row.actorRoles]}::text[], ${row.sessionId}::uuid, ${row.ipToken}::uuid,
-          pg_catalog.decode(${row.ipHash}, 'hex'), ${row.ipHashKeyId}, ${row.ipCoarse}::inet, ${row.userAgentToken}::uuid,
-          ${row.uaParsed}, ${row.sourceApp}, ${row.correlationId}, ${row.action}, ${row.entityName}, ${row.entityId}, ${row.outcome},
-          ${row.reasonToken}::uuid, ${row.reauthProofId}::uuid, ${row.signatureMeaning}, ${row.httpMethod}, ${row.route},
-          ${jsonOrNull(row.oldValue)}::jsonb, ${jsonOrNull(row.newValue)}::jsonb, ${jsonOrNull(row.details)}::jsonb,
-          ${row.piiTokenCount}::integer, ${row.hashVersion}::smallint, pg_catalog.decode(${prev}, 'hex'),
-          pg_catalog.decode(${hash}, 'hex')))
+  SELECT e.id, e.occurred_at, ${streamId}::uuid, e.stream_seq, e.org_id, e.target_org_id, e.on_behalf_of_org_id, e.actor_type,
+         e.user_id, e.api_key_id, e.job_name,
+         ARRAY(SELECT r.role FROM pg_catalog.jsonb_array_elements_text(e.actor_roles) WITH ORDINALITY AS r(role, n) ORDER BY r.n),
+         e.session_id, e.ip_token, pg_catalog.decode(e.ip_hash, 'hex'), e.ip_hash_key_id, e.ip_coarse, e.user_agent_token,
+         e.ua_parsed, e.source_app, e.correlation_id, e.action, e.entity_name, e.entity_id, e.outcome, e.reason_token,
+         e.reauth_proof_id, e.signature_meaning, e.http_method, e.route, e.old_value, e.new_value, e.details, e.pii_token_count,
+         e.hash_version, pg_catalog.decode(e.prev_hash, 'hex'), pg_catalog.decode(e.entry_hash, 'hex')
+    FROM unnest(${c.ids}::uuid[], ${c.occurred}::timestamptz[], ${c.seqs}::bigint[], ${c.orgIds}::uuid[], ${c.targetOrgIds}::uuid[],
+                ${c.onBehalfOfOrgIds}::uuid[], ${c.actorTypes}::text[], ${c.userIds}::uuid[], ${c.apiKeyIds}::uuid[],
+                ${c.jobNames}::text[], ${c.roles}::jsonb[], ${c.sessionIds}::uuid[], ${c.ipTokens}::uuid[], ${c.ipHashes}::text[],
+                ${c.ipHashKeyIds}::text[], ${c.ipCoarse}::inet[], ${c.userAgentTokens}::uuid[], ${c.uaParsed}::text[],
+                ${c.sourceApps}::text[], ${c.correlationIds}::text[], ${c.actions}::text[], ${c.entityNames}::text[],
+                ${c.entityIds}::text[], ${c.outcomes}::text[], ${c.reasonTokens}::uuid[], ${c.reauthProofIds}::uuid[],
+                ${c.signatureMeanings}::text[], ${c.httpMethods}::text[], ${c.routes}::text[], ${c.oldValues}::jsonb[],
+                ${c.newValues}::jsonb[], ${c.details}::jsonb[], ${c.piiTokenCounts}::integer[], ${c.hashVersions}::smallint[],
+                ${c.prevHashes}::text[], ${c.entryHashes}::text[])
+         AS e(id, occurred_at, stream_seq, org_id, target_org_id, on_behalf_of_org_id, actor_type, user_id, api_key_id, job_name,
+              actor_roles, session_id, ip_token, ip_hash, ip_hash_key_id, ip_coarse, user_agent_token, ua_parsed, source_app,
+              correlation_id, action, entity_name, entity_id, outcome, reason_token, reauth_proof_id, signature_meaning,
+              http_method, route, old_value, new_value, details, pii_token_count, hash_version, prev_hash, entry_hash))
 UPDATE public.audit_stream_heads
-   SET entry_count = ${seq}::bigint, head_entry_id = ${row.id}::uuid, head_occurred_at = ${occurredAt}::timestamptz,
-       head_hash = pg_catalog.decode(${hash}, 'hex'), updated_at = pg_catalog.now(), updated_by = ${actor}::uuid,
-       version = version + 1
- WHERE stream_id = ${row.streamId}::uuid AND entry_count = ${seq - 1}::bigint`;
+   SET entry_count = ${String(last.seq)}::bigint, head_entry_id = ${last.row.id}::uuid,
+       head_occurred_at = ${last.occurredAt}::timestamptz, head_hash = pg_catalog.decode(${last.entryHash}, 'hex'),
+       updated_at = pg_catalog.now(), updated_by = ${actor}::uuid, version = version + 1
+ WHERE stream_id = ${streamId}::uuid AND entry_count = ${String(first.seq - 1)}::bigint`;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -160,13 +252,15 @@ const DIGITS = /^\d{1,18}$/;
 const MICROS = /^-?\d{1,20}$/;
 const HASH_HEX = /^[0-9a-f]{64}$/;
 
-/** Parses the head row; a shape the statement cannot produce is an integrity failure. */
-function parseHead(head: HeadRow): {
+interface ParsedHead {
   readonly entryCount: number;
   readonly headHash: string;
   readonly headMicros: bigint | null;
   readonly nowMicros: bigint;
-} {
+}
+
+/** Parses the head row; a shape the statement cannot produce is an integrity failure. */
+function parseHead(head: HeadRow): ParsedHead {
   if (!DIGITS.test(head.entry_count) || !HASH_HEX.test(head.head_hash) || !MICROS.test(head.now_us)) {
     throw new AuditWriteError('DATABASE_ERROR');
   }
@@ -182,6 +276,18 @@ function parseHead(head: HeadRow): {
 function lockTimeoutText(ms: number): string {
   if (!Number.isInteger(ms) || ms < 1 || ms > 60_000) throw new RangeError('lockTimeoutMs must be an integer in 1..60000');
   return String(ms);
+}
+
+/** The rows of a flush grouped by stream (input order kept inside a stream), streams in ascending `stream_id` order. */
+function streamsOf(rows: readonly AuditRowDraft[]): Array<readonly [string, AuditRowDraft[]]> {
+  const streams = new Map<string, AuditRowDraft[]>();
+  for (const row of rows) {
+    const batch = streams.get(row.streamId);
+    if (batch === undefined) streams.set(row.streamId, [row]);
+    else batch.push(row);
+  }
+  // Lower-case canonical UUID text sorts like its bytes (hex digits and hyphens at fixed positions; D-ARCH-122 (b)).
+  return [...streams].sort(([a], [b]) => (a < b ? -1 : 1));
 }
 
 function vaultBatch(rows: readonly VaultRow[]) {
@@ -211,27 +317,47 @@ export function createPrismaAuditStore(options: PrismaAuditStoreOptions = {}): A
    * same head, runs under the transaction's `DB_TX_LOCK_TIMEOUT_MS` (2 s), not the audit 250 ms; once per stream.
    * TASK-030 E2 covers 2b.
    */
-  async function lockedHead(db: AuditSqlPort, row: AuditRowDraft, timeout: string, actor: string): Promise<HeadRow> {
-    const [head] = await lockHead(db, row.streamId, timeout);
+  async function lockedHead(db: AuditSqlPort, streamId: string, timeout: string, actor: string): Promise<HeadRow> {
+    const [head] = await lockHead(db, streamId, timeout);
     if (head !== undefined) return head;
-    await createHead(db, row.streamId, actor);
-    const [created] = await lockHead(db, row.streamId, timeout);
+    await createHead(db, streamId, actor);
+    const [created] = await lockHead(db, streamId, timeout);
     if (created === undefined) throw new AuditWriteError('HEAD_MISSING');
     return created;
   }
 
-  async function append(db: AuditSqlPort, row: AuditRowDraft, appendOptions: AppendOptions): Promise<AppendedEntry> {
+  /** Step 3: positions and hashes of one stream's rows, chained in memory from the locked head. */
+  function chain(rows: readonly AuditRowDraft[], head: ParsedHead): ChainedRow[] {
+    let prevHash = head.headHash;
+    let prevMicros = head.headMicros;
+    return rows.map((row, index) => {
+      const position: ChainPosition = {
+        streamSeq: head.entryCount + 1 + index,
+        occurredAtMicros: nextOccurredAt(head.nowMicros, prevMicros),
+      };
+      const entryHash = hash(row, position, prevHash);
+      const chained = { row, seq: position.streamSeq, occurredAt: formatMicros(position.occurredAtMicros), prevHash, entryHash };
+      prevHash = entryHash;
+      prevMicros = position.occurredAtMicros;
+      return chained;
+    });
+  }
+
+  async function appendBatch(db: AuditSqlPort, rows: readonly AuditRowDraft[], appendOptions: AppendOptions): Promise<AppendedEntry[]> {
     const timeout = lockTimeoutText(appendOptions.lockTimeoutMs);
-    const head = parseHead(await lockedHead(db, row, timeout, appendOptions.actorStamp));
-    const position: ChainPosition = {
-      streamSeq: head.entryCount + 1,
-      occurredAtMicros: nextOccurredAt(head.nowMicros, head.headMicros),
-    };
-    const occurredAt = formatMicros(position.occurredAtMicros);
-    const entryHash = hash(row, position, head.headHash);
-    const affected = await appendEntry(db, row, position.streamSeq, occurredAt, head.headHash, entryHash, appendOptions.actorStamp);
-    if (affected !== 1) throw new AuditWriteError('HEAD_MOVED');
-    return { id: row.id, streamId: row.streamId, streamSeq: position.streamSeq, occurredAt, prevHash: head.headHash, entryHash };
+    const streams = streamsOf(rows);
+    // Every head lock, in ascending stream order, before the first append (D-ARCH-122 (b)): sequential on purpose.
+    const heads: ParsedHead[] = [];
+    for (const [streamId] of streams) heads.push(parseHead(await lockedHead(db, streamId, timeout, appendOptions.actorStamp)));
+    const appended = new Map<AuditRowDraft, AppendedEntry>();
+    for (const [index, [streamId, batch]] of streams.entries()) {
+      const chained = chain(batch, heads[index] as ParsedHead);
+      if ((await appendStream(db, streamId, chained, appendOptions.actorStamp)) !== 1) throw new AuditWriteError('HEAD_MOVED');
+      for (const { row, seq, occurredAt, prevHash, entryHash } of chained) {
+        appended.set(row, { id: row.id, streamId, streamSeq: seq, occurredAt, prevHash, entryHash });
+      }
+    }
+    return rows.map((row) => appended.get(row) as AppendedEntry);
   }
 
   async function insertVaultRows(db: AuditSqlPort, rows: readonly VaultRow[], actorStamp: string): Promise<string[]> {
@@ -262,5 +388,5 @@ ON CONFLICT (subject_id, entity_name, field, value_hmac) DO NOTHING`;
     return tokens as string[];
   }
 
-  return { append, insertVaultRows };
+  return { appendBatch, insertVaultRows };
 }

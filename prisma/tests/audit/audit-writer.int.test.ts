@@ -396,7 +396,7 @@ describe('[US-087] complete entry fields on PostgreSQL 18 (REQ-AUDIT-003/011)', 
     const valid = prepareEntry(createAddress(org, randomUUID()), { id: forgedId, systemShard: 0 }).complete([]);
     const forged = { ...valid, action: 'FOO' } as unknown as AuditRowDraft;
     const error = await rejection(
-      runner.withTenantTx(tenant(org), (db) => store.append(db, forged, { lockTimeoutMs: LOCK_TIMEOUT_MS, actorStamp: USER })),
+      runner.withTenantTx(tenant(org), (db) => store.appendBatch(db, [forged], { lockTimeoutMs: LOCK_TIMEOUT_MS, actorStamp: USER })),
     );
     expect(error).toBeInstanceOf(DbError);
     expect(error).toMatchObject({ status: 500, sqlState: '23514' });

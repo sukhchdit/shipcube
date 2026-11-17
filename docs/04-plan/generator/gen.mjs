@@ -2,9 +2,12 @@
 //   node docs/04-plan/generator/gen.mjs .           validate only (exit 1 on any violation)
 //   node docs/04-plan/generator/gen.mjs . --write   regenerate docs/04-plan/task-map.csv and tasks/WAVE-*.md
 // Reads the story files for REQ links, DC flags and scenario counts; task data lives in plan-data.mjs.
+// Also reads the `security-integration` trigger list from <repo>/tools/ci/security-paths.mjs (the classifier lane A runs from the
+// base ref): the card DoD line about the hosted job is derived from that list, never from a copy (ADR-0023 am. N item 2, D-ARCH-139).
 import fs from 'node:fs';
 import path from 'node:path';
-import { tasks as rawTasks, waves } from './plan-data.mjs';
+import { pathToFileURL } from 'node:url';
+import { tasks as rawTasks, waves, sharedFileLocks } from './plan-data.mjs';
 
 const REPO = process.argv[2];
 const OUT = path.join(REPO, 'docs/04-plan');
@@ -47,6 +50,37 @@ let seq = 0; for (const t of [...order.filter(t => !t.late), ...order.filter(t =
 const errors = [], warnings = [];
 if (byKey.size !== rawTasks.length) errors.push('duplicate keys');
 
+// ---------- planned paths of a card and the security-integration trigger list (sheet-fold 9)
+// A file entry is free text: notes in parentheses are dropped, brace groups expanded, and what remains is split into path tokens.
+const plannedPaths = entry => {
+  let s = entry;
+  for (let prev = ''; prev !== s;) { prev = s; s = s.replace(/\([^()]*\)/g, ' '); }
+  for (let prev = ''; prev !== s;) { prev = s; s = s.replace(/([\w.@<>*\/-]*)\{([^{}]*)\}([\w.@<>*\/-]*)/, (_, pre, body, post) => body.split(',').map(x => pre + x.trim().split(/\s+/)[0] + post).join(' ')); }
+  return s.split(/[\s,;:+]+/).map(x => x.replace(/^[`'"]+|[`'".]+$/g, '')).filter(x => x.includes('/') || /^[\w.-]+\.(ts|mjs|cjs|json|ya?ml)$/.test(x));
+};
+// The list is the classifier's own export (base-ref tooling), so a card never promises a run the classifier will not do (PR57-SEC-02).
+let triggerGlobs = [], globsMatch = () => false;
+try {
+  ({ SECURITY_INTEGRATION_PATHS: triggerGlobs, globsMatch } = await import(pathToFileURL(path.resolve(REPO, 'tools/ci/security-paths.mjs')).href));
+  if (!Array.isArray(triggerGlobs) || typeof globsMatch !== 'function') throw new Error('SECURITY_INTEGRATION_PATHS or globsMatch is not exported');
+} catch (e) { triggerGlobs = []; errors.push(`security-integration trigger list unreadable (tools/ci/security-paths.mjs): ${e.message}`); }
+const literalOf = g => g.slice(0, g.search(/[*<]/) === -1 ? g.length : g.search(/[*<]/));
+// Trigger globs that a card's planned files match: a concrete file is classified exactly like a changed path (exclusions included);
+// a folder matches when it lies under a trigger folder; a glob, placeholder or trailing-slash folder also when it covers one.
+const matchedTriggers = files => {
+  const positives = triggerGlobs.filter(g => !g.startsWith('!')), negatives = triggerGlobs.filter(g => g.startsWith('!'));
+  const hit = new Set();
+  for (const p of files.flatMap(plannedPaths)) {
+    const concrete = !/[*<>]/.test(p) && /\.[A-Za-z0-9]+$/.test(p);
+    for (const g of positives) {
+      if (concrete) { if (globsMatch(p, [g, ...negatives])) hit.add(g); continue; }
+      const P = literalOf(p), L = literalOf(g), dir = P.endsWith('/') ? P : `${P}/`, covers = /[*<]/.test(p) || p.endsWith('/');
+      if (dir.startsWith(L) || (covers && P !== '' && L.startsWith(dir))) hit.add(g);
+    }
+  }
+  return positives.filter(g => hit.has(g));
+};
+
 const slug = s => s.toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(w => w && !['and', 'the', 'a', 'of', 'with', 'to', 'in', 'on', 'for', 'via', 'by', 'from'].includes(w)).slice(0, 5).join('-');
 for (const t of order) {
   t.branch = `feat/${t.id}-${slug(t.t)}`;
@@ -76,6 +110,11 @@ for (const [b, ts] of batches) {
   if (ts.length > 4) errors.push(`batch ${b} has ${ts.length} tasks`);
   const seen = new Map();
   for (const t of ts) for (const l of t.lk) { if (seen.has(l)) errors.push(`batch ${b}: lock ${l} shared by ${seen.get(l)} and ${t.id}`); seen.set(l, t.id); }
+}
+// 1b. shared hot files (D-ORCH-118, D-ARCH-147): a card whose planned files name one holds its lock, so the batch check above and
+// the back-fill rule (PLAN.md §6 rule 3: locks are free) keep two in-flight PRs off the same file.
+for (const t of order) for (const p of t.f.flatMap(plannedPaths)) for (const s of sharedFileLocks) {
+  if (s.paths.some(x => p.startsWith(x)) && !t.lk.includes(s.lock)) errors.push(`${t.id}: planned file ${p} is a shared hot file and needs lock ${s.lock}`);
 }
 // 2. story coverage
 const owner = new Map(), partials = new Map();
@@ -114,8 +153,8 @@ const stats = {};
 for (const t of order) { const s = stats[t.w] ||= { n: 0, S: 0, M: 0, opus: 0, sonnet: 0, days: 0, batches: new Set(), dc: 0, spec: {} }; s.n++; s[t.c]++; s[t.m]++; s.days += W[t.c]; s.batches.add(t.b); if (t.dc) s.dc++; s.spec[t.sp] = (s.spec[t.sp] || 0) + 1; }
 const tot = { n: order.length, S: order.filter(t => t.c === 'S').length, M: order.filter(t => t.c === 'M').length, opus: order.filter(t => t.m === 'opus').length, days: order.reduce((a, t) => a + W[t.c], 0), batches: batches.size };
 const mustStories = [...stories.values()].filter(s => s.moscow === 'Must');
-const secPaths = /prisma|packages\/(authz|audit|config)|apps\/api\/src\/platform|modules\/identity/;
-const secTasks = order.filter(t => t.f.some(f => secPaths.test(f)));
+const secTriggers = new Map(order.map(t => [t.k, matchedTriggers(t.f)]));
+const secTasks = order.filter(t => secTriggers.get(t.k).length);
 
 console.log(JSON.stringify({ errors, warnings, pulled, tot, perWave: Object.fromEntries(Object.entries(stats).map(([w, s]) => [w, { ...s, batches: s.batches.size }])),
   stories: { total: stories.size, must: mustStories.length, mustMapped: mustStories.filter(s => owner.has(s.id)).length, dc: [...stories.values()].filter(s => s.dc).length },
@@ -157,6 +196,7 @@ for (const w of Object.keys(waves).map(Number)) {
   L.push('## Batches', '', '| Batch | Tasks (parallel) | Locks held |', '|---|---|---|');
   for (const b of [...s.batches].sort((a, b) => a - b)) { const bt = wt.filter(t => t.b === b); L.push(`| ${w}.${b} | ${bt.map(t => `${t.id} ${t.t.split(/ \(|: /)[0].trim()}`).join('<br>')} | ${bt.map(t => t.lk.join(', ')).join('<br>')} |`); }
   L.push('', 'Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).', '');
+  L.push(`Shared hot files (D-ORCH-118, D-ARCH-147): ${sharedFileLocks.map(s => `\`${s.lock}\` = ${s.paths.map(p => `\`${p}${p.endsWith('/') ? '**' : p.endsWith('.') ? '*' : ''}\``).join(', ')}`).join('; ')}. A card whose planned files name one of them holds that lock (the generator fails otherwise); a PR that needs such a file without holding the lock stops and asks the orchestrator for it first, so two in-flight PRs never edit the same shared file.`, '');
   L.push('## Task specifications', '');
   for (const t of wt) {
     L.push(`### ${t.id} — ${t.t}`, '');
@@ -179,7 +219,8 @@ for (const w of Object.keys(waves).map(Number)) {
     for (const s2 of t.allStories) { const st = stories.get(s2); const n = st.scen || 0; const ids = n ? `AT-${s2}-01 … AT-${s2}-${String(n).padStart(2, '0')}` : `AT-${s2}-*`; L.push(t.us.includes(s2) ? `- ${ids}: all ${n} scenarios of ${s2}, with the IDs in the test titles (TEST-STRATEGY §6; map \`docs/05-quality/tests/gherkin-test-map.md\`)` : `- Covers the scenarios of ${ids} that belong to its layer; ${s2} closes in ${(owner.get(s2) || []).map(o => o.id).join("/")}`); }
     L.push('');
     L.push('**DoD notes**', ...t.kind.map(k => `- ${dodByKind[k]}`), ...(t.dod || []).map(d => `- ${d}`));
-    if (t.f.some(f => secPaths.test(f))) L.push('- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).');
+    const trig = secTriggers.get(t.k);
+    if (trig.length) L.push(`- \`security-integration\` (ADR-0023 am. N items 1–2): the planned files match the trigger list (${trig.map(g => `\`${g}\``).join(', ')}), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (\`tools/ci/security-paths.mjs\`): when it selects, \`ci-gate\` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.`);
     L.push('- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.', '');
   }
   fs.writeFileSync(path.join(OUT, 'tasks', `WAVE-${String(w).padStart(2, '0')}.md`), L.join('\n'));

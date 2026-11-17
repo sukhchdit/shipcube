@@ -96,9 +96,9 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       '"$GITLEAKS_IMAGE"',
       '"$OSV_SCANNER_IMAGE"',
       'npm audit --json',
-      '"$GATE_CHECK_AUDIT"',
-      '"$GATE_LICENCE_CHECK"',
-      '"$GATE_RUN_SEMGREP"',
+      '"${GATE_CHECK_AUDIT:?}"',
+      '"${GATE_LICENCE_CHECK:?}"',
+      '"${GATE_RUN_SEMGREP:?}"',
     ]) {
       expect(ciText).toContain(gate);
     }

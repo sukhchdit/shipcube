@@ -10,6 +10,7 @@
 // `routes` so OPTIONS and 405 answer for it like for every other path (PR #21 N5). The drift and route-metadata
 // checks walk this composed stack and exclude only DOCS_PATH (api/README.md §15); a limiter, CORS or Helmet layer
 // mounted under a path would fail them by design (D-ORCH-024 (3), (5)).
+import type { Config } from '@platform/config';
 import express, { type Express } from 'express';
 
 import type { ApiMode } from './platform/context/api-mode.js';
@@ -82,6 +83,11 @@ export interface AppDependencies {
    * process's queue and drains it at shutdown; defaults to a queue over `logger` (tests).
    */
   readonly afterCommit?: AfterCommitQueue;
+  /**
+   * The validated configuration of the audit capture (TASK-029; startApi passes the process's): audited routes are
+   * captured and denials audited. Absent (tests), an audited route is refused when it is mounted.
+   */
+  readonly auditConfig?: Pick<Config, 'DB_AUDIT_LOCK_TIMEOUT_MS'>;
 }
 
 /**
@@ -100,7 +106,13 @@ export function createApp(deps: AppDependencies): Express {
   const app = express();
   const logger = deps.logger ?? createRuntimeLog('api', process.stdout, { context: requestLogContext });
   const afterCommit = deps.afterCommit ?? createAfterCommitQueue(logger);
-  const slots = deps.pipeline ?? defaultPipelineSlots({ tenantTx: deps.tenantTx, afterCommit });
+  const slots =
+    deps.pipeline ??
+    defaultPipelineSlots({
+      tenantTx: deps.tenantTx,
+      afterCommit,
+      ...(deps.auditConfig === undefined ? {} : { auditConfig: deps.auditConfig, auditLog: logger }),
+    });
 
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));
   app.use(requestLogger(logger));

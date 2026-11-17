@@ -2772,3 +2772,218 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **TASK-286 workflow PR #59** (head `055083b`; lane B 20261117T0317Z_daa9a7e; first stage-2 lane A run 44011154025) → code review r1 and security r1 dispatched. It also carries PR55-SEC-11 and code-review R2-n1..n4. Due in November.
 - **TASK-289 `rbacfu`** dispatched now that the `lint` lock is free (TASK-052/060 depend on it).
 - **Reversibility:** Medium (merged; revertible).
+
+### D-SEC-PR59-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #59 (TASK-286 workflow PR) security r1 = PASS_WITH_FOLLOW-UPS at `055083b` (record `2d6818b`)
+- **Decision:** 0 Critical/High/Medium; 1 LOW, 1 INFO.
+  - **Verified:** live `ci.yml` = reviewed fixture `4597259`; stage-1 fixture = main's `ci.yml` `84ba61b`; merge `7abdb03` clean. PR55-SEC-11 item 1 is closed; R2-n1/R2-n2 are verified.
+  - **PR59-SEC-01 (LOW):** checkout and setup-node `with:` inputs are unpinned, so a HEAD-changing edit could choose its own tested base. → TASK-287, **before any other `.github/workflows/**` PR merges**. Fix: pin the `with:` maps; then `HEAD == $GITHUB_SHA` in `TESTED_BASE_SCRIPT` (policy first).
+  - **PR59-SEC-02 (INFO):** lane-c/nightly deny-list gaps → 015-C.
+- **Interim rules once #59 is live:**
+  - The 24 h proof-age rule ends when the final lane A run before a merge was a stage-2 run.
+  - The D-ORCH-103 P1 (c) widening ends for stage-2 runs.
+  - P1 is mechanical for inherited proofs and procedural at merge time (diff the ci-gate tested base against `origin/main`, filtered by the void set and the PR's own paths).
+  - All three stay for stage-1 runs.
+- **Reversibility:** High.
+
+### D-ORCH-116 · 2026-11-17 · sdlc-orchestrator · Standing merge rule: record names head for workflow PRs (PR59-SEC-01 control)
+- **Decision:** until TASK-287 closes PR59-SEC-01, the orchestrator merges a PR that changes `.github/workflows/**` only after checking that a security record on the branch names the PR's code head. ci-gate success alone is not sufficient.
+- **PR #59 next step:** its proof is voided by PR #54's squash (`44637dd` touched `eslint.config.mjs`, `tools/eslint-rules/**` and `tests/fixtures/**`: PR46-SEC-16 working as designed). After code review r1: merge main into the branch, push, run a full stage-2 lane A. If the record step turns red (stale event base), a short security round 2 names the merge head.
+- **TASK-287 card line** (added to the D-ORCH-109 fold list): PR59-SEC-01 pins + `HEAD == $GITHUB_SHA`.
+- **Reversibility:** High.
+
+### D-TASK029-25..26 · 2026-11-17 · senior-developer (recorded by orchestrator) · PR #56 fix cycle 2 (@0ecd317, code 683a57d)
+- **25** The tx slot's run outcome carries `committed`; afterCommit is scheduled only when it is set (closes C1 = PR56-SEC-10). `transaction: 'none'` routes count as committed, since there is nothing to roll back.
+- **26** The FAILED skip is identity-based: only the request's own disconnect abort instance is skipped; deadline aborts and every other failure write FAILED (closes PR56-SEC-11). `RouteReturnedError.result` is a private field.
+- **Flake seen:** loopback "other side closed" in `tests/generated/rls/api-cases.test.ts` under load → W0-FLAKE-3 (D-ORCH-113 scope (d)).
+- **Reversibility:** High.
+
+### D-SEC-PR56-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #56 security deltas r2 (@9746b2f, record f204bb2) and r3 (@0ecd317, record b5f2d9f) → PASS_WITH_FOLLOW-UPS
+- **Decision:**
+  - **r2:** SEC-09/01/02/04/08 closed; new C1 = PR56-SEC-10 (MEDIUM) and PR56-SEC-11 (LOW).
+  - **r3:** C1 and SEC-11 closed (A1–A8 re-run; the deadline-then-disconnect case still writes FAILED); the private `result` field is verified non-leaking. **From security, the PR can merge.**
+  - **New PR56-SEC-14 (INFO):** a `transaction:'none'` route returning ≥ 400 still schedules afterCommit, which contradicts the `define-route.ts:211` JSDoc. → Next PR touching `tx/execute.ts`, unless code review r2 takes it here.
+  - **Open with owners:** SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next eslint.config PR), SEC-13 (TASK-033).
+- **Reversibility:** High.
+
+### D-ORCH-117 · 2026-11-17 · sdlc-orchestrator · PR #59 code r1 APPROVED_WITH_NITS; CI-minutes forecast risk raised
+- **Decision:** PR #59 code review r1 (record `29a748c`) = APPROVED_WITH_NITS. Live stage-2 behaviour is verified: proof binding, the PR46-SEC-16 void rule and rule (g) all ran live.
+- **R1-m1 (MINOR) → risk R-CI-MIN:** measured stage-2 costs are a code push = **10 billed min** (plan 5.9) and a docs push without proof = **4** (plan 2). The Budget v2 forecast becomes about **2,400 min/month, over the 2,000 free minutes** (CLOUD_BUDGET 0).
+  - **Action:** devops-engineer records the measured runs in SPK-07 §6 and re-forecasts with costed options (TASK-287 incremental lane, round-up avoidance, fewer pushes, D-ARCH-129 guards) in the #59 merge-main push.
+  - **Follow-up:** the orchestrator takes the recommendation to principal-architect if it changes ADR-0023/D-ARCH-128/129.
+  - **Interim spend guard:** at most two review/fix pushes per PR cycle; batch docs-only commits; no speculative re-runs.
+- **R1-n1:** squash #59 with an explicit `--body` (commit `03a281a`'s message is wrong about the install gate).
+- **Merge path:** merge main (new code proof) → merge-only security delta → MERGE-READY → squash. Post-merge, every open PR runs full once (stage-1 proofs do not count).
+- **Reversibility:** High.
+
+### D-ORCH-118 · 2026-11-17 · sdlc-orchestrator · PR #56 approved but held by P1; merge-main cycle (not a fix cycle)
+- **Decision:** PR #56 code review r2 (record `191c38b`) = APPROVED_WITH_NITS. R2-m1 (the TASK-040 card line for D-TASK029-17) is already in the SHEET-FOLD-9 brief. PR56-SEC-14 is ruled a NIT.
+- **The merge-time P1 check fails:** main's PR #54 changed 5 files PR #56 also changes (`tenant-db.ts`/test, `execute-phases.test.ts`, `start-api.ts`, `eslint.config.mjs`). merge-tree is clean, but the combined tree is untested.
+- **Next:** the developer merges main (taking R2-n1/n2 if cheap) and takes fresh lane B; then a merge-only security delta and a code-review remerge check; then squash.
+- **Not counted as a fix cycle:** the findings are approved; this is integration.
+- **Lesson:** when two in-flight PRs touch the same files, merge order creates a P1 re-test. Locks in the plan should cover `tenant-db`/`execute` (note for the sheet fold).
+- **Reversibility:** High.
+
+### D-TASK288-09..15 · 2026-11-17 · test-engineer (recorded by orchestrator) · PR #57 fix cycle 1 (@4f1fbd5, code a67db34)
+- **09** The lock root is `<checkout>/node_modules/.cache/shipqube-test-locks` (mode 0700), plus an `lstat` link refusal (PR57-SEC-01). Test locks are also no longer exposed to temp cleanup.
+- **10** Registrations are `<pid>-<uuid>` (no threadId; Jest workerThreads is unused); re-entrancy stays per process.
+- **11** Unknown readers-dir entries are ignored, never deleted.
+- **12** R1-m1/SEC-03: tombstone takeover with put-back, plus writer ownership re-checks (`LostTestLockError`), and no finally-delete of a lost lock.
+- **13** An ownerless writer dir older than 30 s is stale.
+- **14** `tryRegisterReader`/`takeOverStale` are exported as test-only seams.
+- **15** **C1 is met** at `4f1fbd5`: restricted run 20261117T0646Z_4f1fbd5 (not committed) gave catalog-c1-c14 102, integration 315 and rls-cross-tenant 126, all with 0 failures/errors/skips. Two earlier attempts failed only on Docker networking (P1001, "port not bound") and are not counted → W0-FLAKE-3 infra note.
+- **Not done:** R1-n4 and R1-n6 go to the next touch of those files.
+- **Reversibility:** High.
+
+### D-ORCH-119 · 2026-11-17 · sdlc-orchestrator · PR #59 merged (TASK-286 complete); CI-minutes push budget (O3) adopted; TASK-287 (O1) dispatched
+- **PR #59** squash-merged as `29318c3`, with an explicit body (code R1-n1).
+  - **Head:** `04965cd`. Code r1 APPROVED_WITH_NITS; security r1 PASS_WITH_FOLLOW-UPS. The record check passed at the merge head (only main and docs changed after `055083b`), satisfying D-ORCH-116.
+  - **CI:** lane A 44035673053 MERGE-READY (full stage-2 run, 8 billed min); lane B 20261117T0647Z_302576c.
+  - **P1:** main changed only `docs/sdlc/DECISIONS.md` since the merge base.
+  - **Stage 2 is live.** The interim rules per D-SEC-PR59-01 apply.
+- **R-CI-MIN (HIGH for November):** the live forecast is 2,279 billed min (114 %), crossing 100 % around 11-27; the remaining days must average ≤ 55/day. The measured Budget v2 month is 2,471 (124 %) (SPK-07 §6.1).
+- **Adopted, O3 push budget (effective now; binding on every agent):**
+  - per review round, at most **one code push + one combined record push** (reviewers batch their records; the developer pushes code once per fix cycle);
+  - every code push follows a local `npm run lint && npm run typecheck && npm run test:unit`;
+  - no main unions without a P1 cause; no CI re-runs;
+  - daily `ci:minutes --forecast` against a **45 billed min/day** guard.
+- **Next steps:**
+  - **O1** = TASK-287 (incremental fast lane plus the PR59-SEC-01 pins, stage-1 retirement and the PR57-SEC-02 trigger table) is dispatched to devops-engineer.
+  - If the forecast still crosses 100 %: **O5** (drop the reserved November wave-end), then the human levers.
+  - **O2a/O4a/O4b** need an architect ruling and are not taken now.
+- **Optional human levers** (not an agent decision; offered per D-ORCH-100): make the repo public, set an Actions spending limit > $0, or add a self-hosted runner.
+- **Reversibility:** High.
+
+### D-TASK289-01..12 · 2026-11-17 · backend-developer (recorded by orchestrator) · TASK-289 rbacfu (PR #60 @df31b32, code 1353e78)
+- **01** Branch `feat/TASK-289-rbac-matrix-follow-up` as dispatched.
+- **02** The volatile header set is a superset of the record's five, plus `transfer-encoding`. An ETag is dropped only when it equals Express's weak hash of the observed body (`weakBodyEtag`); any other ETag stays compared.
+- **03** R1-n2: the `refresh-cookie:unknown` caller presents `__Host-rt_admin` (no new column).
+- **04** `SIGNATURE_HEADER_NAMES` is derived from `CREDENTIAL_HEADER_NAMES` and pinned to 3.
+- **05** Observe deadline: 30 s per request. A transport failure stops its row (the 900 s layer bound holds); errors are named, with `cause` = the transport error; `causeOf` reads by shape (Jest realms).
+- **06** The runner uses `fetchOnce`/`closeLoopbackServer`.
+- **07** TEST_FILES may import `@platform/authz/matrix`.
+- **08** The boundaries policy has two arms: resolved path, and the specifier itself.
+- **09** `STUBBED_CREDENTIAL_KINDS` drives `resolvePrincipal` (credential kinds only).
+- **10** The route-reached control proves the route is mounted and authorised, not handler behaviour.
+- **11** In-segment parameters are enumerated (fail closed on Express 5 optional groups).
+- **12** PR48-SEC-08 is closed here.
+- **Follow-ups:**
+  - qa-lead: rbac-matrix `min_tests` 21 → 26, plus PR48-SEC-02 CODEOWNERS in the activation PR;
+  - TASK-052: the tripwire compares `STUBBED_CREDENTIAL_KINDS` with the mounted authenticators.
+- **Lane A:** the first run failed commitlint on the PR title; the title was fixed and the PR closed/reopened (no new commit). This counts against the push budget as one extra run.
+- **Reversibility:** High.
+
+### D-SEC-PR57-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #57 security delta r2 = PASS_WITH_FOLLOW-UPS at `4f1fbd5` (record `b53d254`)
+- **Decision:**
+  - SEC-01 and SEC-04 are closed. SEC-03 is closed with residuals accepted (the put-back window; the owner write is not `wx`).
+  - **C1 independently verified:** run 20261117T0646Z_4f1fbd5 with JUnit hashes checked.
+  - **New PR57-SEC-05 (INFO, CWE-835) = code-review r2 R2-m1 (MINOR):** a failed stale takeover hot-spins the writer past its deadline. It is a regression from fc1. Both reviewers recommend fixing it here.
+  - SEC-02 is unchanged (TASK-287). TASK-287 note: exclude `node_modules/.cache/shipqube-test-locks/` from any CI cache.
+- **Reversibility:** High.
+
+### D-ORCH-120 · 2026-11-17 · sdlc-orchestrator · PR #57 fix cycle 2/3 (R2-m1 = PR57-SEC-05); PR #60 security r1 dispatched
+- **PR #57 code review r2** (record `5891125`) = APPROVED_WITH_NITS. R2-m1 = PR57-SEC-05 is fixed in fix cycle 2, together with n1–n4. C1 is repeated at the new head (fs-lock gates client loading). Then a narrow r3 from both reviewers.
+- **Push-budget note:** the two r2 records landed as two pushes (`5891125`, then `b53d254`), so the reviewers did not combine. Going forward, the second reviewer stacks on the first only if the first has not pushed yet; otherwise it waits for the orchestrator's go.
+- **PR #60:** security r1 dispatched; code review r1 follows when the code-review slot frees.
+- **Reversibility:** High.
+
+### D-ARCH-139 · 2026-11-17 · principal-architect · PR57-SEC-02 / D-SEC-PR57-01 (ADR-0023 amendment N items 1–2): the `security-integration` trigger list gains `jest.config.ts`, `tools/test-support/**`, `tools/db/**`, `tools/deps/**`, `tests/generated/rls/**` and `tests/generated/api-mounts.ts` (test files and `tools/db/fixtures/**` excluded); each suite activation adds its roots; the card DoD line is generated from the classifier's list and is conditional on the classifier's verdict
+- **Decision:** as titled. The classifier change is TASK-287 part 287-A and takes effect for the PRs after it merges (base-ref rule); until then a restricted lane B run of the affected security suites is the merge condition for a PR that changes only the new paths (PR #57 condition C1). `gen.mjs` imports `SECURITY_INTEGRATION_PATHS` and `globsMatch` from `tools/ci/security-paths.mjs`, matches each card's planned paths (a concrete file exactly as a changed path, exclusions included) and writes a line that names the matched globs and states both outcomes. Cards carrying the line: 99 → 100 (TASK-007 and TASK-280 lose a false positive of the old pattern, TASK-006 and TASK-214 gain, TASK-291 is new); after part 287-A merges a generator re-run adds TASK-015, TASK-034, TASK-211 and TASK-290.
+- **Why:** the job runs the head's `jest.config.ts`, the harness, the oracle helpers and the dependency tooling, so a change there alters what the O3/O4 suites prove without selecting the hosted run (PR #57 was not selected). The TASK-288 card promised a run because it planned to touch `prisma/tests/harness`; the PR did not, and the PR body repeated the promise. A plan is not a diff.
+- **Alternatives rejected:** a copy of the list in plan data (drifts, and would promise runs the classifier does not yet do); the manifest's `security_critical_paths` as the trigger list (selects almost every Wave-0 PR); the unconditional wording with a better pattern.
+- **Reversibility:** High. No CI-minutes budget figure is decided (D-ORCH-117): the security record's estimate (about 20–30 job-minutes a month) is an input to the re-forecast.
+
+### D-ARCH-140 · 2026-11-17 · principal-architect · TASK-287 parts and card lines (ADR-0023 amendment N items 3–5): 287-A policy PR (PR59-SEC-01 `with:` pins and the policy half of `HEAD == $GITHUB_SHA`, stage-1 retirement, PR55-SEC-05, the trigger list), 287-B one-line workflow PR, 287-C incremental lane; 287-A and 287-B merge before any other `.github/workflows/**` PR; implemented readings of amendments L and M recorded
+- **Decision:** as titled. Until 287-B is on `main`, D-ORCH-116 (a security record on the branch names the code head) is the control for every workflow PR, 015-C and Dependabot actions bumps included. The 24-hour proof-age rule and the P1 (c) widening end for stage-2 runs and stay for stage-1 runs (D-SEC-PR59-01). Recorded readings: install unconditional in stage 2 (D-TASK286-03), the proof-void set as the "equivalent signal" of amendment M item 5 (D-TASK286-06a), `TOOLS_REF` (D-TASK286-02). CI caches of 287-C exclude `node_modules/.cache/shipqube-test-locks/` (D-SEC-PR57-02). The optional run-full-instead-of-block is left to the D-ORCH-117 re-forecast.
+- **Why:** PR59-SEC-01 is due before any other workflow PR merges and TASK-287's own incremental-lane change is such a PR, so the task needs an order; a policy pin must be on `main` (the tested base) before the workflow line it pins; the stage-1 pins let a `ci.yml` restore CODE-gated audit steps.
+- **Alternatives rejected:** one TASK-287 PR (a policy cannot pin a workflow change in the PR that introduces it); a separate late task for PR59-SEC-01 (same lock, owner and files).
+- **Reversibility:** High. TASK-287 was dispatched (D-ORCH-119) before this fold; the orchestrator relays the order.
+
+### D-ARCH-141 · 2026-11-17 · principal-architect · D-SEC-PR56-01 condition 1 / PR56-SEC-08: the audit-capture composition (tokeniser, IP index, user-agent parser into `createAuditCapture`) stays on TASK-028, which also owns the in-house user-agent parser; TASK-049 `register`, the first audited module route in sheet order, now depends on TASK-028
+- **Decision:** as titled. TASK-028 takes the `api-platform-core` and `api-routing` locks for `app.ts`, `start-api.ts` and `pipeline.ts`, with the precondition that PR #56 is on `main`. Acceptance: the production composition writes one `PERMISSION_DENIED` entry with resolvable tokens, `ip_hash` and `ua_parsed`. The mount refusal of D-TASK029-21 stays as the backstop. The parser is dependency-free (`ua-parser-js` 2.x is AGPL-3.0-or-later), linear-time, and assembles its output from a closed family table.
+- **Why:** condition 1 was an honour-system due point; `listCountries` (TASK-026) is public with audit `none`, so the first route that needs the tokeniser is TASK-049's, and the edge costs nothing (batch 0.8 before 1.4). `ua_parsed` is an INT column, so free text from a header must not reach it.
+- **Alternatives rejected:** a dependency edge TASK-028 ← TASK-029 (same batch 0.8; a precondition line instead); a library parser (licence).
+- **Reversibility:** High.
+
+### D-ARCH-142 · 2026-11-17 · principal-architect · T-39 / PR56-SEC-03: per-actor denial budget on TASK-041 — N individual `PERMISSION_DENIED` entries a minute (default 20), one aggregated entry at the crossing, then 429 `RATE_LIMITED` without a write; the suppressed count is carried into the first entry of a later window; in-memory fallback on a Valkey outage
+- **Decision:** as titled. Key = organisation (or `system`) and actor; the budget is taken in the authorise slot before `capture.denied` (TASK-041 takes `api-authz` and `api-routing`); D-TASK029-06 is unchanged. Due before the first route with a catalogued permission: TASK-049 already depends on TASK-041, and the orchestrator does not back-fill a permission-gated route task ahead of it.
+- **Why:** authorisation runs before the route limiter, so every denial costs a tenant transaction, vault statements and the stream-head lock; the budget bounds that to N+1 audit transactions a minute per actor. An entry that closes the window has no request to write it, and a job would need the worker audit port (TASK-047, later), so the aggregated entry is written at the crossing and the count follows lazily.
+- **Alternatives rejected:** moving the denial write after the route limiter (it counts by class and user, not by denial); a scheduled job that closes windows; unlimited denials with a longer lock timeout.
+- **Reversibility:** High. Security-analyst confirms the aggregated-entry shape against PR56-SEC-03; qa-lead the SEC-TC-15 wording.
+
+### D-ARCH-143 · 2026-11-17 · principal-architect · PR #56 (TASK-029) follow-through on the cards: TASK-052 (roles, session id, verified `source_app`), TASK-060 (target organisation on operator-cross-tenant routes, role keys from the live resolution, handler-raised 403 as DENIED), TASK-030 (a tenant transaction refuses an organisation-less entry), TASK-040 (4xx idempotency completion outside the rolled-back handler transaction; PR56-SEC-14), TASK-033 (T0 timer backstop, PR56-SEC-13 pin, PR56-SEC-01/04 cases), TASK-047 (PR42-SEC-17/19 on the job port), TASK-031 (capture seam open), TASK-073 (`source_app` label), TASK-029 (`capture.ts`, not `audit-middleware.ts`)
+- **Decision:** as titled. `source_app` comes from the verified `app` claim for a principal with a session; `admin` only when the claim says `admin` and the scope is OPERATOR; a request without a session may say `web` through `X-Client-App` and never `admin`. PR56-SEC-07's second half and the capture change of PR56-SEC-13 had no card owner: both go to TASK-060 (operator scope and 401/403 outcomes; ahead of TASK-073 by an existing edge). A returned 4xx is completed in its own transaction after the rollback; a 5xx leaves no completion.
+- **Why:** each item was owned only by a DECISIONS entry (D-ORCH-109, D-TASK029-17, D-SEC-PR56-01/-02); the access token carries `sid` and `app` and no roles (ADR-0006), so the session id and the client app can be verified and the role keys come from the permission resolution; security suites carry no skipped case, so PR56-SEC-13 is pinned as open and flipped by its owner.
+- **Not decided here:** the seam through which a handler hands old and new values, the reason and additional entries to the capture (TASK-031 line). A ruling is requested before TASK-031 is dispatched.
+- **Reversibility:** High.
+
+### D-ARCH-144 · 2026-11-17 · principal-architect · PR54-SEC-02 (b)(c) / D-SEC-PR54-03: owner TASK-030 `chain` — both raw-SQL lexer copies refuse the `table_to_xml`, `schema_to_xml`, `database_to_xml` and `cursor_to_xml` reader family anywhere and `alter` as a run-time first keyword; TASK-073 carries the merge-prerequisite line (existing edge TASK-073 ← TASK-030)
+- **Decision:** as titled. TASK-030 takes the `lint` and `api-tenant-db` locks for the two lexer copies and the corpus.
+- **Why:** the item is due before TASK-073's first raw statement and must not be done by a module task; TASK-030 is the next task that moves raw statements, is already a dependency of TASK-073 and merges long before it, so the prerequisite is generator-verified without a new PR (a dedicated late task would cost a full review cycle for a list of names while the CI-minutes forecast is over the allowance).
+- **Alternatives rejected:** a late task of its own (cost); TASK-284 (shares batch 0.11 with the `lint` holder TASK-283); TASK-073 itself (a module task editing the platform guard and its lint twin).
+- **Reversibility:** High.
+
+### D-ARCH-145 · 2026-11-17 · principal-architect · 015-C additions on TASK-015: the lane-c/nightly environment deny-list gaps of PR55-SEC-11 item 2 and PR59-SEC-02 (exact key sets preferred); PR54-SEC-04 CODEOWNERS re-confirmed on the fold-8 list; a 015-C PR merges after TASK-287 parts 287-A and 287-B or under D-ORCH-116
+- **Decision:** as titled.
+- **Why:** a deny-list misses names by construction (`GIT_CONFIG_GLOBAL`, `DOCKER_HOST`, `ACTIONS_ALLOW_UNSECURE_COMMANDS` and others still pass in `lane-c.yml` and `nightly.yml`); `ci.yml` is unaffected because it is an exact allow-list at every level.
+- **Reversibility:** High.
+
+### D-ARCH-146 · 2026-11-17 · principal-architect · Late task TASK-291 `flake3` (TASK-W0-FLAKE-3, D-ORCH-113) in the new batch 0.13: test-engineer, M, opus, locks `tests-harness` + `api-routing` + `tests-gen-rls` + `quality-tools`, depends on TASK-288 and TASK-289; one loopback transport and a pooled-fetch ratchet; the web prerender timeout is not configurable and the product build stays un-retried
+- **Decision:** as titled. Scope: `route-metadata.test.ts` and the RLS api-case runner move to `fetchOnce`/`closeLoopbackServer`; a shrink-only allow-list of test files that still use the pooled global `fetch` (no file of `tests/generated` on it; the api suites of PR #56 code review R2-n3 are converted by the next holder of their folder lock); PR #57 R1-n4 and R1-n6; the Testcontainers start note of D-TASK288-15. Prerender: React Router 8.5.1 passes only `prerender.concurrency`, so the task measures first, and the only allowed code control is a bounded, signature-keyed build retry in the lane B runner with no `summary.json` schema change.
+- **Why:** batch 0.12 is full; the flake class crosses folders and the suites are the O3/O4 runners; converting suites one by one without a tripwire let the pooled form return three times (execute-phases, route-metadata, RLS api-cases); a retry around the product build would hide a real prerender regression in the Docker and hosted builds.
+- **Alternatives rejected:** a sweep of every api suite in one PR (needs every platform slot lock and collides with each in-flight platform PR, D-ORCH-118); a wrapper or patch for the prerender plugin; `keepAliveTimeout` tuning per suite.
+- **Reversibility:** High (plan data).
+
+### D-ARCH-147 · 2026-11-17 · principal-architect · D-ORCH-118 lesson: shared hot files hold a lock — new locks `api-tenant-db` (`platform/db/tenant-db.*`, `with-tenant-tx.*`, `raw-statement.*`) and `api-tx-execute` (`platform/tx/**`); the existing `api-platform-core` (`app.ts`, `start-api.ts`, `main.ts`), `api-routing` (`pipeline.ts`) and `lint` (`eslint.config.mjs`) are mandatory for cards that name those files; the generator fails otherwise; plan regenerated: 291 tasks, 0 errors, 0 warnings
+- **Decision:** as titled. `sharedFileLocks` in `plan-data.mjs` is the table; `gen.mjs` checks every card's planned files against it and prints it in each WAVE file. Locks added: TASK-010 `api-platform-core`; TASK-016 `api-tenant-db`; TASK-028 `api-platform-core`, `api-routing`; TASK-029 `api-tenant-db`, `api-tx-execute`, `lint`; TASK-030 `lint`, `api-tenant-db`; TASK-040 `api-tx-execute`; TASK-041 `api-authz`, `api-routing`; TASK-052 `api-audit-mw`; TASK-060 `api-audit-mw`, `api-routing`; TASK-284 `api-tenant-db`, `api-tx-execute`, `api-routing` (its planned tx-slot path corrected to `platform/tx/execute.ts`). Dispatch rule: a task is dispatched only when none of its locks is held by an in-flight task of any batch; when the orchestrator overlaps two holders on purpose it plans the merge order and the P1 re-test up front. IDs, waves, batches, titles and branches of TASK-001..290 are unchanged; CSV diff: `refs` on 15 rows, `depends_on` on TASK-049 (← TASK-028), one new row TASK-291.
+- **Why:** PR #54 (TASK-020, batch 0.6) and PR #56 (TASK-029, batch 0.8) both edited `tenant-db.ts`, `execute-phases.test.ts`, `start-api.ts` and `eslint.config.mjs` with no lock in common, so the overlap surfaced only at the merge-time P1 check and cost a merge-main cycle. The in-batch lock check cannot see two in-flight tasks of different batches unless the lock names are on the cards.
+- **Alternatives rejected:** one lock for the whole `apps/api/src/platform` tree (serialises the platform wave); a hot-file check in CI (product tooling; a later option); no lock and a planned P1 re-test each time (what happened).
+- **Reversibility:** High (plan data and generator).
+
+### D-TASK029-25a · 2026-11-17 · sdlc-orchestrator · D-TASK029-25 amended for `transaction: 'none'` routes (PR #56 R2-n2 = PR56-SEC-14)
+- **Decision:** `transaction: 'none'` routes now report `committed: result.status < 400`. One rule for every route: a returned ≥ 400 schedules no afterCommit. R2-n1 (FAILED wait pinned at 1 s) and R2-n4 (JSDoc: a FAILED write that outlives the wait is not drained at shutdown) are also taken.
+- **PR #56 merge-main cycle** (head `081684b`, code `e81d0c9`):
+  - **Merge `4e7f696`:** the remerge-diff is empty (git auto-merged the 5 shared files).
+  - **Lane B:** 20261117T0701Z_e81d0c9 PASS. An earlier run failed on the network outage plus the `api-cases` flake.
+  - **Lane A:** 44037544174 fast-lane green; the record step is red, as expected.
+  - Main's later PR #59 does not overlap.
+  - **Next:** a narrow merge delta from security and code review (queued behind PR #60's pair, D-ORCH-111).
+- **Reversibility:** High.
+
+### D-ORCH-121 · 2026-11-17 · sdlc-orchestrator · SHEET-FOLD-9 accepted (D-ARCH-139..147, commit 41838dc); commit hygiene
+- **Decision:** SHEET-FOLD-9 is accepted. The generator reports 291 tasks, 0 errors, 0 warnings; Wave 0 is 46 tasks in 13 batches; the new late task is TASK-291 `flake3` (batch 0.13).
+  - **Standing dispatch rule (D-ARCH-147):** no task starts while an in-flight task of any batch holds one of its locks. With PR #56 open, TASK-284, TASK-030 and TASK-040 are held. TASK-028 starts after PR #56 merges.
+  - **Known overlap:** PR #56 and PR #60 both hold `lint`; whichever merges second needs a P1 re-test.
+  - **Action after 287-A merges:** re-run `gen.mjs --write`; TASK-015/034/211/290 gain the DoD line.
+- **Open items for later dispatch gates:**
+  - security-analyst confirms the T-39 aggregated-entry shape before TASK-041;
+  - an architect ruling on the capture seam before TASK-031;
+  - `.npmrc` and `apps/worker/src/platform/**` on the trigger list stay with security-analyst.
+- **Correction note:** PR56-SEC-14, listed under TASK-040 in the D-ARCH-143 title, was closed in PR #56 by D-TASK029-25a; the card and the rulings doc already say so.
+- **Commit hygiene:** orchestrator commit `e1cbf53` swept in the architect's then-uncommitted D-ARCH-139..147 (verified identical to intent). Rule: before committing DECISIONS.md, check `git status -s docs/sdlc`; if it is dirty from another agent's in-flight work, wait.
+- **Reversibility:** High.
+
+### D-SEC-PR60-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #60 (TASK-289) security r1 = PASS_WITH_FOLLOW-UPS at `df31b32` (record `cb3bf8d`)
+- **Decision:** 0 Critical/High/Medium; 1 LOW, 4 INFO.
+  - **Closed:** PR48-SEC-01; PR48-SEC-03 for every direct import form (22 forms linted); PR48-SEC-05 items 1 and 3 (a); PR48-SEC-08. Matrix regeneration: all 4,921 base cells identical.
+  - **PR60-SEC-01 (LOW, CWE-693):** a helper in `test/` or `__tests__/` under `apps/*/src` or `packages/*/src` can launder the oracle into production, and both folders ship in the image. → TASK-283 (D-ARCH-136 (b) boundaries arm, plus a laundering fixture and the `test`/`__tests__` prune). **Merge prerequisite: TASK-283 before TASK-060** (edge to be added at the next sheet fold; until then this entry is the owning record).
+  - **INFO:**
+    - PR60-SEC-02 (= code R1-m1) → PR #60 fc1;
+    - PR60-SEC-03 → TASK-052 tripwire;
+    - PR60-SEC-04 (combined declared+foreign rows) → TASK-052/055;
+    - PR60-SEC-05 (`./matrix` ships in the images) → TASK-283 (`SKIPPED_EXPORTS` or rename to `./testing`).
+  - The reviewer's flag (b) (dynamic import in `prisma/seed`/`tools`) is accepted.
+- **Reversibility:** High.
+
+### D-ORCH-122 · 2026-11-17 · sdlc-orchestrator · PR #60 fix cycle 1/3 (test-only) doubles as the stage-2 code proof
+- **Decision:** PR #60's branch predates PR #59, so it needs one fresh full stage-2 run anyway. Fix cycle 1 takes R1-m1/SEC-02, R1-n2, R1-n4, R1-n6 (plus n1/n5 if cheap) in that single code push (D-ORCH-119). Then a narrow r2 from both reviewers.
+- **Reversibility:** High.
+
+### D-ORCH-123 · 2026-11-17 · sdlc-orchestrator · PR #56 merged (TASK-029 complete); dispatch gates reopened
+- **PR #56** squash-merged as `27f0189`.
+  - **Head:** `99f3025`. Code review r3 APPROVED_WITH_NITS (R3-n1/n2 to the next touch); security delta r4 PASS_WITH_FOLLOW-UPS (record binds `e81d0c9`).
+  - **CI:** lane A 44041632167 all green incl. security-integration, MERGE-READY; lane B 20261117T0701Z_e81d0c9.
+  - **P1:** no overlap. **Fix cycles:** 2/3 plus one merge-main integration cycle.
+- **TASK-029 complete.** Unblocks TASK-033/040, and frees the `api-tenant-db`/`api-tx-execute`/`lint` locks for TASK-028, TASK-030, TASK-040 and TASK-284 (D-ARCH-147).
+- **PR #60:** must merge main (shared `eslint.config.mjs`) inside its current fix cycle.
+- **Open security items from PR #56** stay with their cards: SEC-03 (TASK-041), SEC-05/07 (TASK-052), SEC-06 (TASK-030), SEC-12 (next `eslint.config.mjs` PR), SEC-13 (TASK-033/060).
+- **Reversibility:** Medium (merged; revertible).

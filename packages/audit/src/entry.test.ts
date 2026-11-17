@@ -5,6 +5,9 @@ import fc from 'fast-check';
 import {
   type AuditEntryInput,
   type AuditValue,
+  isAuditEntityId,
+  isAuditRouteTemplate,
+  isAuditUaParsed,
   MAX_JSON_DEPTH,
   MAX_PII_VALUES,
   MAX_USER_AGENT_LENGTH,
@@ -659,5 +662,27 @@ describe('[PR #42 R1-n3] the INVALID_ENTRY field path carries no business keys b
     expect(error).toMatchObject({ kind: 'IP_INDEX_FAILED', reason: 'AUDIT_WRITE_FAILED' });
     expect(error.field).toBeUndefined();
     expect(auditErrorCause(error)).toBe(cause);
+  });
+});
+
+describe('[PR42-SEC-15] shape predicates for request-built entries (null unless valid)', () => {
+  it('isAuditEntityId accepts ids, codes and numbers; refuses e-mails, paths, query text and non-strings', () => {
+    for (const ok of ['019a7c3e-0000-7000-8000-000000000001', 'SHP-2026-0001', '42', 'a.b:c_d-e']) expect(isAuditEntityId(ok)).toBe(true);
+    for (const bad of ['a@b.example', 'a/b', 'a?b', 'a b', '', '-lead', 'x'.repeat(257), 42, null, undefined]) {
+      expect(isAuditEntityId(bad)).toBe(false);
+    }
+  });
+
+  it('isAuditUaParsed accepts a family / OS summary and refuses a raw user agent', () => {
+    expect(isAuditUaParsed('Firefox 146 / Windows')).toBe(true);
+    for (const bad of ['Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'a'.repeat(121), '', 7]) expect(isAuditUaParsed(bad)).toBe(false);
+  });
+
+  it('isAuditRouteTemplate accepts templates and refuses concrete URLs and non-strings', () => {
+    for (const ok of ['/', '/api/v1/addresses', '/api/v1/shipments/:shipmentId', '/shipments/{shipmentId}']) {
+      expect(isAuditRouteTemplate(ok)).toBe(true);
+    }
+    for (const bad of ['/api/v1/users/a@b.example', '/x?y=1', 'relative', '', null, undefined, 5])
+      expect(isAuditRouteTemplate(bad)).toBe(false);
   });
 });

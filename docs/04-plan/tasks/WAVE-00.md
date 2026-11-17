@@ -2,7 +2,7 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Priority band: **Foundation (DC enablers)**
 
-Tasks: **45** (S 14 / M 31; opus 28 / sonnet 17; demo-critical 21) in **12** batches of ≤ 4 parallel tasks. Estimated effort ≈ 114 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **46** (S 14 / M 32; opus 29 / sonnet 17; demo-critical 21) in **13** batches of ≤ 4 parallel tasks. Estimated effort ≈ 117 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Lane A green on main; lane B `wave` evidence; lane C `wave-end` run #1 green; SPK-01..08 findings recorded; generators (route metadata, RBAC matrix, RLS cross-tenant, audit + immutability) green on all existing routes; thin slice e2e green; dependency-auditor baseline (R-ARCH-12) requested.
 
@@ -15,17 +15,20 @@ Tasks: **45** (S 14 / M 31; opus 28 / sonnet 17; demo-critical 21) in **12** bat
 | 0.1 | TASK-001 SPK-01 toolchain spike and workspace foundation | root |
 | 0.2 | TASK-002 Lint, format and layering rules with negative fixtures<br>TASK-003 Prisma 7 + PostgreSQL 18 baseline<br>TASK-004 Web and admin app scaffolds<br>TASK-005 Typed, validated configuration and key/secret register | lint<br>prisma-core<br>web-core, admin-core, e2e-core<br>pkg-config |
 | 0.3 | TASK-006 API and worker runtime skeleton<br>TASK-007 CI lane A fast-lane workflow and supply-chain install hardening<br>TASK-008 SPK-03 spike<br>TASK-009 SPK-02 spike | api-platform-core, worker-platform-core<br>ci-workflows<br>spike-03<br>carriers-docs |
-| 0.4 | TASK-010 Structured, redacted logging with correlation IDs<br>TASK-011 Lane B local heavy lane and evidence integrity<br>TASK-012 SPK-08 spike<br>TASK-013 Typed permission catalogue, seeded roles via versioned migration, role-permission matrix document, privilege-escalation guard | logging<br>quality-tools<br>spike-08<br>pkg-authz |
-| 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls, prisma-core, pkg-config, lint<br>api-openapi, shared-api-types |
+| 0.4 | TASK-010 Structured, redacted logging with correlation IDs<br>TASK-011 Lane B local heavy lane and evidence integrity<br>TASK-012 SPK-08 spike<br>TASK-013 Typed permission catalogue, seeded roles via versioned migration, role-permission matrix document, privilege-escalation guard | logging, api-platform-core<br>quality-tools<br>spike-08<br>pkg-authz |
+| 0.5 | TASK-014 Hardened multi-stage images and Docker Compose skeleton<br>TASK-015 SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes<br>TASK-016 Row-level security foundations<br>TASK-017 Contract-first OpenAPI pipeline | infra-compose<br>ci-workflows<br>prisma-rls, prisma-core, pkg-config, lint, api-tenant-db<br>api-openapi, shared-api-types |
 | 0.6 | TASK-018 SPK-04 spike<br>TASK-019 SPK-05 spike<br>TASK-020 Mandatory route metadata<br>TASK-021 Audit store SQL | spike-04<br>api-storage<br>api-routing, pkg-authz, lint, prisma-core<br>prisma-bootstrap-audit |
 | 0.7 | TASK-022 SPK-06 spike<br>TASK-023 Idempotent reference and demo seed framework<br>TASK-024 Generated cross-tenant isolation test suite<br>TASK-025 Audit writer core | web-build-csp, web-core, admin-core, pkg-config, lint<br>prisma-seed<br>tests-gen-rls, prisma-rls, prisma-core<br>pkg-audit-core |
-| 0.8 | TASK-026 Walking-skeleton slice<br>TASK-027 RBAC matrix test generator<br>TASK-028 Audit redaction and field classification registry<br>TASK-029 Automatic audit capture driven by route descriptors | mod-admin-settings-reference, web-core, ui-api<br>tests-gen-rbac<br>pkg-audit-redaction<br>api-audit-mw |
-| 0.9 | TASK-030 Per-stream audit hash chain<br>TASK-031 Audit field-level diffs and no-op update suppression<br>TASK-032 Server-controlled standard columns, UTC time and on-behalf seam<br>TASK-276 Test harness | pkg-audit-chain<br>pkg-audit-diff<br>prisma-ext<br>tests-harness |
+| 0.8 | TASK-026 Walking-skeleton slice<br>TASK-027 RBAC matrix test generator<br>TASK-028 Audit redaction and field classification registry<br>TASK-029 Automatic audit capture driven by route descriptors | mod-admin-settings-reference, web-core, ui-api<br>tests-gen-rbac<br>pkg-audit-redaction, api-platform-core, api-routing<br>api-audit-mw, api-tenant-db, api-tx-execute, lint |
+| 0.9 | TASK-030 Per-stream audit hash chain<br>TASK-031 Audit field-level diffs and no-op update suppression<br>TASK-032 Server-controlled standard columns, UTC time and on-behalf seam<br>TASK-276 Test harness | pkg-audit-chain, lint, api-tenant-db<br>pkg-audit-diff<br>prisma-ext<br>tests-harness |
 | 0.10 | TASK-033 Audit test generator and immutability-per-role suite<br>TASK-034 Backup/restore rehearsal and zero-downtime migration probe tooling<br>TASK-277 Test-ID traceability tooling<br>TASK-278 Generated abuse suite | tests-gen-audit<br>db-tools-backup<br>quality-trace<br>tests-gen-abuse |
-| 0.11 | TASK-283 api/worker image headroom<br>TASK-284 Anonymous admission classes<br>TASK-285 Audit action vocabulary v2<br>TASK-286 CI-minutes stage 2 | infra-compose, lint<br>api-db-admission<br>prisma-bootstrap-audit<br>ci-workflows |
+| 0.11 | TASK-283 api/worker image headroom<br>TASK-284 Anonymous admission classes<br>TASK-285 Audit action vocabulary v2<br>TASK-286 CI-minutes stage 2 | infra-compose, lint<br>api-db-admission, api-tenant-db, api-tx-execute, api-routing<br>prisma-bootstrap-audit<br>ci-workflows |
 | 0.12 | TASK-287 Incremental fast lane<br>TASK-288 TASK-W0-FLAKE-2<br>TASK-289 TASK-027-F<br>TASK-290 TASK-024-F | ci-workflows<br>root, tests-harness<br>tests-gen-rbac, pkg-authz, lint<br>tests-gen-rls, prisma-core |
+| 0.13 | TASK-291 TASK-W0-FLAKE-3 | tests-harness, api-routing, tests-gen-rls, quality-tools |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
+
+Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platform/db/tenant-db.*`, `apps/api/src/platform/db/with-tenant-tx.*`, `apps/api/src/platform/db/raw-statement.*`; `api-tx-execute` = `apps/api/src/platform/tx/**`; `api-platform-core` = `apps/api/src/app.*`, `apps/api/src/start-api.*`, `apps/api/src/main.*`; `api-routing` = `apps/api/src/platform/routing/pipeline.*`; `lint` = `eslint.config.mjs`. A card whose planned files name one of them holds that lock (the generator fails otherwise); a PR that needs such a file without holding the lock stops and asks the orchestrator for it first, so two in-flight PRs never edit the same shared file.
 
 ## Task specifications
 
@@ -78,7 +81,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
 - Timebox 1 day; spike code under spikes/ is removed before merge, only the foundation and SPK-01.md remain
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/authz/**`, `packages/audit/**`, `packages/config/**`, `prisma/**`, `apps/api/src/modules/identity/**`, `package-lock.json`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-002 — Lint, format and layering rules with negative fixtures (ESLint 10 flat, boundaries, import-x, i18next, jsx-a11y, Stylelint, Prettier)
@@ -152,7 +155,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-004 — Web and admin app scaffolds (React Router 8 framework mode, Vite 8, Tailwind 4, Playwright + axe harness, size-limit)
@@ -219,7 +222,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
 - Security-critical path (packages/config/**): hosted security-integration job applies once it exists
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-006 — API and worker runtime skeleton: Express 5 bootstrap, RequestContext, AppError + problem+json handler, health endpoints, module registry
@@ -255,6 +258,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Job payload v2 (identifiers only), tenant context from `platform.job_context`, deterministic job IDs, retries + DLQ, idempotent effects verified by a duplicate-delivery test, metrics per queue.
 - Establishes the discovery-based module registry and per-module error catalogue (PLAN.md §5 rule 2)
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-007 — CI lane A fast-lane workflow and supply-chain install hardening (SPK-01 ubuntu half)
@@ -303,7 +307,6 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Workflow and tooling changes verified on their own PR; tooling invoked from the base ref; minute usage measured and recorded.
 - Lane A must be green on its own PR; dependency-auditor baseline run (R-ARCH-12) requested from security-analyst after merge
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-008 — SPK-03 spike: RLS with Prisma 7 interactive transactions and pooled connections
@@ -331,7 +334,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-009 — SPK-02 spike: carrier API documentation capture (DHL MyDHL, FedEx REST, UPS REST) into adapter READMEs
@@ -372,7 +375,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-006, TASK-005 |
-| Batch · locks | 0.4 · logging |
+| Batch · locks | 0.4 · logging, api-platform-core |
 | Branch | `feat/TASK-010-structured-redacted-logging-correlation-ids` |
 | Priority | Must |
 
@@ -394,7 +397,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-011 — Lane B local heavy lane and evidence integrity (quality:heavy, summary.json schema, check-evidence, required-suites manifest, prune)
@@ -458,7 +461,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-013 — Typed permission catalogue, seeded roles via versioned migration, role-permission matrix document, privilege-escalation guard
@@ -492,7 +495,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
 - 95 % coverage gate on packages/authz
 - Security-critical path: security-integration job
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/authz/**`, `prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-014 — Hardened multi-stage images and Docker Compose skeleton (bootstrap + migrate one-shots, Valkey ACL, RustFS, Mailpit, local edge)
@@ -551,7 +554,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`, `prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-015 — SPK-07 + lane C full lane, coverage and diff-coverage gates, security-integration job, ci:minutes
@@ -561,7 +564,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-006 (M0 Must) Coverage gate |
 | REQs | REQ-PLAT-008 |
 | NFRs | NFR-MAINT-004, NFR-OPS-003, NFR-QUAL-001, NFR-QUAL-002 |
-| Spikes / security / decisions | COND-E2E-FF, PR4-SEC-08, PR4-SEC-11, PR10-SEC-16, PR10-SEC-17, PR10-SEC-18, PR10-SEC-19, PR10-SEC-20, PR10-SEC-21, PR17-SEC-02, PR17-SEC-07, PR17-SEC-08, PR17-SEC-09, PR17-SEC-10, D-ORCH-019, D-ORCH-021, D-ARCH-079, SPK-07, D-ARCH-010, D-ARCH-021, R-ARCH-15, R-ARCH-19, PR11-SEC-08, D-TASK016-01, D-ARCH-074, D-ORCH-023, PR21-SEC-04, PR4-SEC-13, D-ARCH-084, PR31-SEC-01, PR31-SEC-02, PR31-SEC-03, PR31-SEC-05, PR31-M1, PR31-M2, PR31-M3, D-ORCH-038, D-SEC-PR31-01, PR24-SEC-04, PR26-SEC-07, PR30-SEC-08, D-ARCH-098, D-SEC-PR33-02, D-SEC-PR35-01, D-ORCH-047, D-SEC-PR40-01, D-ORCH-057, D-ARCH-115, D-ARCH-132, D-ARCH-137 |
+| Spikes / security / decisions | COND-E2E-FF, PR4-SEC-08, PR4-SEC-11, PR10-SEC-16, PR10-SEC-17, PR10-SEC-18, PR10-SEC-19, PR10-SEC-20, PR10-SEC-21, PR17-SEC-02, PR17-SEC-07, PR17-SEC-08, PR17-SEC-09, PR17-SEC-10, D-ORCH-019, D-ORCH-021, D-ARCH-079, SPK-07, D-ARCH-010, D-ARCH-021, R-ARCH-15, R-ARCH-19, PR11-SEC-08, D-TASK016-01, D-ARCH-074, D-ORCH-023, PR21-SEC-04, PR4-SEC-13, D-ARCH-084, PR31-SEC-01, PR31-SEC-02, PR31-SEC-03, PR31-SEC-05, PR31-M1, PR31-M2, PR31-M3, D-ORCH-038, D-SEC-PR31-01, PR24-SEC-04, PR26-SEC-07, PR30-SEC-08, D-ARCH-098, D-SEC-PR33-02, D-SEC-PR35-01, D-ORCH-047, D-SEC-PR40-01, D-ORCH-057, D-ARCH-115, D-ARCH-132, D-ARCH-137, PR55-SEC-11, PR59-SEC-02, D-SEC-PR55-02, D-SEC-PR59-01, D-ARCH-145 |
 | Specialist · model | devops-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-011, TASK-007 |
@@ -608,6 +611,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - PR33-SEC-05 AND PR33-SEC-07 (routed to 015-C by D-SEC-PR33-02, not on the sheet until D-ARCH-112; DUE before G3): CODEOWNERS and REQUIRED_CODEOWNED_PATHS gain /apps/*/react-router.config.ts, /apps/*/app/routes.ts and /tools/repo/ (the typegen-evaluated files and the new guard tests) with the usual mutation test; nonCanonicalNpmExec treats a dollar sign or a backtick among the words before the first -- as non-canonical (npm $x foo, npm ${V:-x} foo, npm $(echo x) foo) with fixtures
 - REVIEW REQUIREMENT FOR PR #40 (PR #40 code review R1-m3; D-SEC-PR40-01; D-ARCH-115; in flight, merge check only): the diff-coverage gate runs in lane B quality:heavy --profile pr (D-TASK015-27) while TEST-STRATEGY 8 row 1 says lane A diff gate / ci-gate; before PR #40 merges, or in the qa-lead manifest PR that follows it, qa-lead changes row 1 to lane B pr evidence (the coverage diff: cases in unit.junit.xml) or records the deviation as a D-QA decision, and adds one sentence that merged branch counts are a lower bound, so a small changed-line denominator can fail where one combined Jest run passes, the remedy being one combined run (the PR40-SEC-06 re-check before G3 uses the same comparison); the PR #40 body links the strategy change
 - 015-C CONSOLIDATED LIST (fold 8, D-ARCH-137; routed by D-ORCH-066/070/076/085/087/089/091/094/101/105 and the PR #40/#44/#45/#46/#47/#54 records; the 015-C dispatch brief is authoritative and this line is the backstop so that no routed item is lost; DUE before G3 unless stated): PR40-SEC-07/-08 (a source file name with a space or a git-quoted name is invisible to the diff gate: strip the TAB, refuse quoted targets, cross-check git diff --name-only -z; --glob-pathspecs or scrub GIT_LITERAL_PATHSPECS) with PR #40 R2-m1 (a)/(b) (coverage-merge header wording, counterexample fixtures, uncovered-count assertion) and R2-n1/n2; PR45-SEC-01 exact parsed-config pin of .gitleaks.toml with PR #45 R1-m1/m2/n2 (before the next .gitleaks.toml change); PR44-SEC-08 ratchet and parity tests plus start-api.ts, main.ts and app.ts under CODEOWNERS; PR46-SEC-04 (no-release and dispatch-only rules keyed on content, CKV_GHA_7 per workflow; before the release-pipeline task), PR46-SEC-05 (lane C static gains Semgrep, audit, osv, signatures, licence and lockfile gates; before the first release-candidate dispatch; it is also the PR46-SEC-11 post-merge backstop), PR46-SEC-07 remainder and PR46-SEC-02 item 3; PR47-SEC-02 (selection_base recorded in summary.json, a narrower --base refused by check-evidence) and PR #47 R1-n1/n2; the node-options-preload rule refusing a ${{ }} expression or --inspect as a NODE_OPTIONS value (D-ORCH-091); the Lint heap-line follow-ups (peak-memory warning near 80 %, one source or a policy pin once two workflow files carry it; D-ORCH-085); PR54-SEC-04 CODEOWNERS for tests/fixtures/sql/raw-statement-corpus.json and apps/api/src/start-api.ts; NOT 015-C: the CODEOWNERS lines for /apps/api/src/modules/identity/ and /packages/config/ (+ REQUIRED_CODEOWNED_PATHS) are a separate devops PR before the first identity-module code PR and at the latest at Wave-0 exit (D-SEC-PR46-02), and PR42-SEC-18, PR46-SEC-11/12/15/16/17 are TASK-286 (D-ORCH-101)
+- 015-C ADDITIONS (fold 9, D-ARCH-145; D-SEC-PR55-02, D-SEC-PR59-01, D-SEC-PR54-02/-03; the 015-C dispatch brief stays authoritative; DUE with 015-C and before the first release-candidate dispatch): (1) PR55-SEC-11 item 2 and PR59-SEC-02 — lane-c.yml and nightly.yml are held only to the PRELOAD_ENV deny-list, so these names still pass there (probes L1-L7 and L10 of the PR #59 record): GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM, GIT_DIR, GIT_EXEC_PATH, GIT_ALTERNATE_OBJECT_DIRECTORIES, DOCKER_HOST, DOCKER_CONFIG and ACTIONS_ALLOW_UNSECURE_COMMANDS, plus whatever of PR55-SEC-11 item 2 is still missing from PRELOAD_ENV on main at dispatch (DOCKER_CONTEXT; verify GIT_CONFIG_COUNT, the GIT_CONFIG_KEY_ and GIT_CONFIG_VALUE_ prefix pattern and NPM_CONFIG_SCRIPT_SHELL in any letter case); PREFERRED fix: both workflows get exact workflow-env and job-env key sets as ci.yml has (an allow-list cannot miss a name); otherwise the names join PRELOAD_ENV; the probes become findings and the live lane-c.yml and nightly.yml stay at 0 findings; optional in the same edit (PR #59 code review R1-n2): an LD_ prefix rule with a short allow-list; this closes the remaining names scope of PR17-SEC-08 item 1; (2) PR54-SEC-04 CODEOWNERS (tests/fixtures/sql/raw-statement-corpus.json and apps/api/src/start-api.ts) is already on the fold-8 list above and was re-confirmed by rounds 2 and 3 of the PR #54 record — same owner, no new text; (3) NOTE: D-SEC-PR59-01 section 5 names the nightly check-audit of PR46-SEC-05 (fold-8 list) as the scheduled audit backstop once the 24 h proof-age rule has ended for stage-2 runs; (4) ORDER: a 015-C PR changes .github/workflows/**, so it merges after TASK-287 parts 287-A and 287-B (PR59-SEC-01) or under the record-names-head rule of D-ORCH-116
 - AT-US-006-01 … AT-US-006-03: all 3 scenarios of US-006, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -625,7 +629,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Specialist · model | database-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-008, TASK-003 |
-| Batch · locks | 0.5 · prisma-rls, prisma-core, pkg-config, lint |
+| Batch · locks | 0.5 · prisma-rls, prisma-core, pkg-config, lint, api-tenant-db |
 | Branch | `feat/TASK-016-row-level-security-foundations-table` |
 | Priority | Must · demo-critical |
 
@@ -677,7 +681,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Security-critical path (prisma/**, apps/api/src/platform/**): security-integration job
 - Linter rules 3-9, 11 and 14 are the TASK-016 half of the migration-lint suite (D-ARCH-049); rules 1, 2, 10, 12, 13 and the contract-reversibility check came with TASK-003 and stay green
 - Merge order D-ORCH-014: this PR merges after PR #9 (TASK-006) and PR #10 (TASK-007) and is the reconciler; the orchestrator re-runs the gates on the final head incl. integration (Docker) and confirms a lane A check rollup on that exact SHA (code review §7 item 4)
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`, `prisma/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-017 — Contract-first OpenAPI pipeline: Redocly lint, generated types + drift check, response validation helper, Swagger UI
@@ -712,7 +716,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-018 — SPK-04 spike: audit write throughput micro-benchmark (300 rps mixed, audit on/off)
@@ -774,7 +778,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-020 — Mandatory route metadata (defineRoute) with build-time route test and request-pipeline order skeleton
@@ -838,7 +842,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/authz/**`, `prisma/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-021 — Audit store SQL (bootstrap lane): partitioned audit_entries, immutability triggers, platform_audit_owner, DDL event trigger, ensure_audit_partitions, search_path hardening
@@ -887,7 +891,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
 - Bootstrap file = guardrail scope: backup/restore rehearsal tooling applies from the backup task onward (empty DB in Wave 0)
 - SPK-08 §8.1 PORT-THEN-DELETE (PR #12 code review M3; D-TASK012-02 (1); due at this task merge, batch 0.6): this PR ports and deletes, IN THE SAME COMMIT, prisma/tests/spikes/spk08-audit-owner.int.test.ts (the SEC-TC-43 privilege list, the four planted-name guard cases F-05, the sql_drop cases incl. the audit-named index F-08, the SEC-TC-61 subset, the generated-window deploy F-01 and the shadow-rendering assertions incl. the F-02 negative control go into its C13/C14/SEC-TC-43 and shadow-init tests), prisma/tests/spikes/spk08/{10-audit,90-audit-ddl-guard}.sql (nothing ported: the real files are written from data-model §5.1-§5.3 as amended) and prisma/tests/spikes/spk08/prisma.config.ts (migrations.initShadowDb with the rendered lane and the generated tables.external window move into the root prisma.config.ts); the spk08 entry in TENANT_CONTEXT_EXEMPTIONS (eslint.config.mjs) is removed in the same commit and a unit tripwire asserts that every exempted file exists (PR #11 code review R3-n5); both spike suites bootstrap only the 0N-*.sql files, so the real audit files cannot turn them red before the port
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-022 — SPK-06 spike: hash-based CSP with React Router pre-rendering behind Nginx; Trusted Types evaluation
@@ -928,7 +932,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Time-boxed (S ≤ 0.5 day, M ≤ 1 day); findings in `docs/04-plan/spikes/SPK-0x.md` with GO or FALLBACK; a FALLBACK triggers a principal-architect ADR amendment request before dependent tasks start; throwaway code is not merged.
 - All strings in en/es/fr (no literals; ICU), six screen states where applicable, 360 px and 1280 px layouts, tokens only, axe 0 serious/critical in every state, keyboard path and visible focus, Playwright spec (Chromium on `pr`; three engines at wave end), `can()` gating for permissioned actions.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-023 — Idempotent reference and demo seed framework (db:seed, db:seed:demo, production refusal of defaults)
@@ -959,7 +963,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-024 — Generated cross-tenant isolation test suite (RLS generator)
@@ -1011,7 +1015,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-025 — Audit writer core: action/actor types, complete entry fields, same-transaction write and outcome semantics
@@ -1052,7 +1056,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
 - 95 % coverage gate on packages/audit; security-integration job
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`, `packages/config/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-026 — Walking-skeleton slice: seed countries/regions -> GET reference countries -> web page -> Playwright via Compose
@@ -1094,7 +1098,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
 - All strings in en/es/fr (no literals; ICU), six screen states where applicable, 360 px and 1280 px layouts, tokens only, axe 0 serious/critical in every state, keyboard path and visible focus, Playwright spec (Chromium on `pr`; three engines at wave end), `can()` gating for permissioned actions.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-027 — RBAC matrix test generator (route x role allow/deny from metadata and seeded roles)
@@ -1126,7 +1130,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/authz/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-028 — Audit redaction and field classification registry
@@ -1136,11 +1140,11 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-091 (M0 Must) Redaction and field classification |
 | REQs | REQ-AUDIT-008, REQ-AUDIT-009 |
 | NFRs | NFR-PRIV-002, NFR-PRIV-003 |
-| Spikes / security / decisions | PR8-SEC-10, D-ARCH-074 |
+| Spikes / security / decisions | PR8-SEC-10, D-ARCH-074, D-SEC-PR56-01, PR56-SEC-08, D-TASK029-21, D-ORCH-109, D-ARCH-141 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-025 |
-| Batch · locks | 0.8 · pkg-audit-redaction |
+| Batch · locks | 0.8 · pkg-audit-redaction, api-platform-core, api-routing |
 | Branch | `feat/TASK-028-audit-redaction-field-classification-registry` |
 | Priority | Must |
 
@@ -1149,16 +1153,20 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - packages/audit/src/redaction/**
 - tests: classification completeness check over prisma/schema
 - prisma/tests/catalog/c10-classification.int.test.ts (C10)
+- packages/audit/src/redaction/user-agent.ts (in-house parser for ua_parsed; no dependency)
+- apps/api/src/app.ts + apps/api/src/start-api.ts (AppDependencies carry the tokeniser, the IP index and the user-agent parser) and apps/api/src/platform/routing/pipeline.ts (defaultPipelineSlots passes them to createAuditCapture)
 
 **Acceptance tests to write**
 - All US-091 scenarios (SECRET removed, PERSONAL tokenised into the vault, 100 % PII columns classified)
 - Catalog C10 (data-model §4.6; PR #11 code review m4 deferral; D-ARCH-074): every column of every table in `public` and `platform` (information_schema.columns) has a classification-registry entry; SYSTEM tables carry no PER/SPER column except `idempotency_keys.response_body` and the encrypted vault; every ciphertext/HMAC column of data-model §10.4 has its `<col>_key_id` sibling — asserted in the catalog suite against the live schema, not only in the prisma/schema completeness check
 - PR8-SEC-10 (ADR-0008 am. 3 item 6, D-ARCH-069): the registry classifies every column of `permissions`, `roles` and `role_permissions` as INT except the four PUB text columns `permissions.description`, `permissions.category`, `roles.name_key`, `roles.description`; the completeness check over prisma/schema (authz.prisma included) fails on any unclassified column
+- AUDIT CAPTURE COMPOSITION (D-SEC-PR56-01 condition 1; PR56-SEC-08; PR #56 code review R1-m1; D-TASK029-21; D-ORCH-109; D-ARCH-141; PRECONDITION: PR #56 of TASK-029 is on main): startApi builds the PII tokeniser (the vault under AUDIT_VAULT_KEY), the IP index (HMAC-SHA256 under AUDIT_INDEX_KEY, audit_entries.ip_hash) and the user-agent parser and passes them through AppDependencies and defaultPipelineSlots into createAuditCapture — pipeline.ts stays the single capture composition point (D-TASK029-20); DUE before or with the first PR that registers an audited or permission-gated route in moduleRegistry: in sheet order that is TASK-049 register, which now DEPENDS on this task (the listCountries route of TASK-026 is public with audit none and mounts without a tokeniser); the mount refusal of D-TASK029-21 (a capture without a tokeniser refuses audited routes and routes that can answer 403) stays as the backstop and keeps its tests; acceptance: an integration test builds the PRODUCTION composition (startApi, no test injection of the capture), sends one request that is refused with 403 and reads back exactly one PERMISSION_DENIED entry whose ip_token and user_agent_token resolve in the vault, whose ip_hash is set and whose ua_parsed is the parsed family; a second case mounts one audited fixture route and finds its entry; a composition without the tokeniser still refuses to mount
+- USER-AGENT PARSER OWNER (D-TASK029-01..15 follow-up, where the owner was left to this task; D-ARCH-141): this task owns the parser, in packages/audit/src/redaction — in-house and dependency-free (ua-parser-js 2.x is AGPL-3.0-or-later, outside LICENSE_ALLOWLIST); output = browser family + major version / OS family only (data-model audit_entries.ua_parsed: INT, at most 120 characters, for example Firefox 146 / Windows), null for an unknown or empty value; the input is the raw header cut at 512 characters (the raw value is PERSONAL and is only tokenised); every pattern is linear-time (no nested quantifier) and a 512-character adversarial input is a unit case with an exact step bound, never a wall-clock bound (D-SEC-PR53-02); the output is assembled from a closed family table and digits only, so a crafted User-Agent cannot place free text into an INT column
 - AT-US-091-01 … AT-US-091-06: all 6 scenarios of US-091, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`, `prisma/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-029 — Automatic audit capture driven by route descriptors (middleware)
@@ -1168,17 +1176,18 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-086 **DC** (M0 Must) Automatic audit capture driven by route descriptors |
 | REQs | REQ-AUDIT-001, REQ-AUDIT-006 |
 | NFRs | NFR-AUDIT-001 |
-| Spikes / security / decisions | D-062, D-ARCH-084, SPK-04, D-ARCH-085, D-ARCH-086, D-ARCH-122, D-ARCH-125 |
+| Spikes / security / decisions | D-062, D-ARCH-084, SPK-04, D-ARCH-085, D-ARCH-086, D-ARCH-122, D-ARCH-125, D-TASK029-01, D-ORCH-118, D-ARCH-143, D-ARCH-147 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-025, TASK-020 |
-| Batch · locks | 0.8 · api-audit-mw |
+| Batch · locks | 0.8 · api-audit-mw, api-tenant-db, api-tx-execute, lint |
 | Branch | `feat/TASK-029-automatic-audit-capture-driven-route` |
 | Priority | Must · demo-critical |
 
 **Files / modules**
-- apps/api/src/platform/audit/{audit-middleware.ts, descriptor-runtime.ts}
-- eslint audit-writer allow-list entry
+- apps/api/src/platform/audit/{capture.ts, descriptor-runtime.ts} (capture.ts = createAuditCapture with mount and denied; the sheet named it audit-middleware.ts until fold 9: D-TASK029-01, PR #56 code review R1-n5)
+- eslint.config.mjs (audit-writer allow-list entry; exact-file category api-pipeline-composition, D-TASK029-20)
+- apps/api/src/platform/db/tenant-db.ts (statement tracking and the settle loop of PR42-SEC-17; the beforeCommit port of invariant I3) and apps/api/src/platform/tx/execute.ts (the audit hook as the last work of the handler transaction; the RouteReturnedError rollback; the committed flag) — shared hot files held through api-tenant-db and api-tx-execute (D-ORCH-118)
 
 **Acceptance tests to write**
 - All US-086 scenarios
@@ -1193,7 +1202,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-030 — Per-stream audit hash chain (JCS, head-row lock, stream heads) and SYSTEM shard key from a server-side id
@@ -1203,17 +1212,18 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-092 **DC** (M0 Must) Per-stream hash chain |
 | REQs | REQ-AUDIT-012 |
 | NFRs | NFR-AUDIT-003, NFR-AUDIT-005 |
-| Spikes / security / decisions | SPK-04, SEC-P3-17, R-ARCH-04, D-ORCH-031, D-ARCH-085, D-ARCH-087, D-ARCH-089, D-TASK025-04, D-ARCH-122 |
+| Spikes / security / decisions | SPK-04, SEC-P3-17, R-ARCH-04, D-ORCH-031, D-ARCH-085, D-ARCH-087, D-ARCH-089, D-TASK025-04, D-ARCH-122, PR56-SEC-06, PR54-SEC-02, D-SEC-PR54-03, D-SEC-PR56-01, D-ORCH-109, D-ARCH-143, D-ARCH-144 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-025, TASK-028, TASK-018 |
-| Batch · locks | 0.9 · pkg-audit-chain |
+| Batch · locks | 0.9 · pkg-audit-chain, lint, api-tenant-db |
 | Branch | `feat/TASK-030-per-stream-audit-hash-chain` |
 | Priority | Must · demo-critical |
 
 **Files / modules**
 - packages/audit/src/chain/{jcs.ts, hasher.ts, stream.ts, head-lock.ts}
 - packages/audit/test/chain/** (incl. statement-sequence.int.test.ts, lock-timeout.int.test.ts, token-plan.int.test.ts)
+- tools/eslint-rules/raw-sql-lexer.mjs + apps/api/src/platform/db/raw-statement.ts + tests/fixtures/sql/raw-statement-corpus.json (PR54-SEC-02 (b)(c): the reader family and run-time alter, in both lexer copies)
 
 **Acceptance tests to write**
 - All US-092 scenarios
@@ -1223,11 +1233,13 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - EXIT E3/E4 AND SQL RULES (am. 10 item 7): REQ-AUDIT-012 50 parallel writers on one stream -> 50 distinct predecessors, gap-free seq (kept); EXPLAIN (FORMAT JSON) of statement (2) against a >= 100k-row vault seeded in-test with generate_series shows an Index Scan or Index Only Scan on ux_audit_pii_vault__subject_field_value per key and no Seq Scan or Hash Join over the vault; multi-argument unnest and extract(epoch FROM ...) stay UNQUALIFIED (pg_catalog.unnest(a, b) = 42883; pg_catalog.extract(epoch FROM ...) = syntax error) and are the two recorded exceptions to the qualified-built-ins rule (data-model §8.3); arrays bound as typed parameters ($n::uuid[], $n::bytea[]) because TenantDb refuses Prisma.join / Prisma.sql; zero hash = 32-zero-byte parameter or decode(repeat(00, 32), hex), never text (42804, D-ARCH-087); microsecond timestamps read as ((extract(epoch FROM ts) * 1000000)::bigint)::text; informational micro-benchmark in the PR report (20 concurrent writers on one stream for 10 s on Testcontainers: lock-wait p50/p95 and round trips; no gate)
 - SPK-04 LIFECYCLE (D-ARCH-089): port the pinned chain vector of prisma/tests/spikes/spk04/chain.test.ts into packages/audit/test/chain (the hasher reproduces it, or the PR documents the difference and its reason) and DELETE prisma/tests/spikes/spk04/{canonical.ts, canonical.test.ts, chain.ts, chain.test.ts} in the same commit; the rest of the spk04 tree is TASK-280's
 - MOVE AND PROVE, NOT CREATE (D-TASK025-04 accepted by the PR #42 code review section 4; D-ARCH-122): statements 1/1b/2/2b/4, the per-stream multi-row CTE of TASK-029 and the hasher (SPK-04 pinned vector already reproduced in packages/audit/src/entry-hash.test.ts) exist in packages/audit/src/store/prisma-store.ts and entry-hash.ts; this task MOVES them into chain/** and PROVES them — E1 statement-sequence spy against the moved code for one entry, for N = 2 entries on one stream (one lock, one CTE, COMMIT) and for two streams (locks in ascending stream_id order before the first CTE); E2 held-row test incl. statement 2b (R1-n1: the create-head path waits under the 2 s transaction lock_timeout once per stream — covered or documented); E3; E4 EXPLAIN against the >= 100k-row vault for the shape the store actually binds (R1-n2: hex text[] decoded in SQL rather than $n::bytea[] — the PR #42 deviation to be recorded as D-TASK025-12 — the EXPLAIN tests that shape); the lifecycle step deletes the spike chain*/canonical* files; nothing already created is created again
+- A TENANT TRANSACTION REFUSES AN ORGANISATION-LESS ENTRY (PR56-SEC-06, INFO; D-SEC-PR56-01; D-ORCH-109; D-ARCH-143): the stream check that this task moves becomes two-sided — an entry with no organisation recorded inside a transaction whose app.org_id is set fails the transaction with 500 AUDIT_WRITE_FAILED kind STREAM_MISMATCH, unless the entry names a targetOrgId equal to the organisation of that transaction (the operator cross-tenant case, TASK-060); the two existing refusals (a tenant entry of another organisation; an organisation entry in an organisation-less transaction) keep their tests; one new unit case and one PostgreSQL case; NOTE for the round-trip budget record (PR #56 code review R1-n3): every withTenantTx now pays one setImmediate turn before COMMIT (the PR42-SEC-17 settle loop) — measure it in the E1 statement-sequence run and report it; skipping the turn when the callback started no statement is an edit of tenant-db.ts that this task may make only because it holds api-tenant-db, and only if the measurement breaks the budget
+- PR54-SEC-02 (b)(c) (LOW, CWE-488; D-SEC-PR54-02/-03; D-TASK020-96/-99; D-ARCH-144; DUE before the first raw statement of TASK-073, which depends on this task): in BOTH lexer copies (tools/eslint-rules/raw-sql-lexer.mjs and apps/api/src/platform/db/raw-statement.ts) the readers that build their own query — every function whose name starts with table_to_xml, schema_to_xml, database_to_xml or cursor_to_xml, the xmlschema and _and_xmlschema variants included — join DYNAMIC_SQL as an anywhere-form refused case-insensitively (a quoted upper-case spelling too, as D-TASK020-99), and alter becomes a refused first keyword at run time (ALTER ROLE CURRENT_USER SET reaches the guard today; the no-alter-role-sql lint and the session-integrity monitor stay); one corpus row per name in tests/fixtures/sql/raw-statement-corpus.json, one PostgreSQL 18 case showing table_to_xml over audit_entries refused before the server, and the template census of the PR #54 record repeated (expected: no real template changes verdict); a later SQL-text extension (dblink, crosstab, xpath_table) joins the same list (D-SEC-PR54-03); this part changes security-owned paths outside packages/audit and rides the one security record of this PR
 - AT-US-092-01 … AT-US-092-06: all 6 scenarios of US-092, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-031 — Audit field-level diffs and no-op update suppression
@@ -1237,7 +1249,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-090 (M0 Must) Field-level diffs and no-op updates |
 | REQs | REQ-AUDIT-007 |
 | NFRs | NFR-AUDIT-006 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-TASK029-19, D-ARCH-143 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-025 |
@@ -1250,11 +1262,12 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **Acceptance tests to write**
 - All US-090 scenarios
+- CAPTURE SEAM OPEN (D-TASK029-01..15 follow-up list; D-TASK029-19; found at fold 9, D-ARCH-143): the capture of TASK-029 writes no old and new values and no reason, and it refuses routes that declare x-audit additional entries; this task delivers the diff library of US-090 — the seam through which a handler hands the old and new values, the reason and the additional entries to the capture is NOT designed on this card: the orchestrator requests a principal-architect ruling on that seam before this task is dispatched, and the ruling names the task that wires it into apps/api/src/platform/audit
 - AT-US-090-01 … AT-US-090-06: all 6 scenarios of US-090, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-032 — Server-controlled standard columns, UTC time and on-behalf seam (Prisma client extension)
@@ -1284,7 +1297,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
 - Pure domain logic, no I/O in the domain layer; unit tests (+ fast-check properties where numeric/stateful); coverage on changed files ≥ 85/75 (95/95 in pricing/audit/authz).
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-276 — Test harness: generated Jest project, factories, fake-clock helpers, leakage scanner, sentinel set, Mock scenario helper, query counter
@@ -1315,7 +1328,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-033 — Audit test generator and immutability-per-role suite
@@ -1325,7 +1338,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | US-096 **DC** (M0 Must) Audit test generator<br>US-094 **DC** (M0 Must) Database-enforced immutability and its tests |
 | REQs | REQ-AUDIT-024, REQ-AUDIT-014, REQ-AUDIT-015 |
 | NFRs | NFR-AUDIT-001, NFR-AUDIT-002 |
-| Spikes / security / decisions | T-QA-04, SEC-TC-43, SEC-TC-61, PR12-SEC-01, PR12-SEC-02, D-SEC-PR12-01, D-ARCH-076, D-ARCH-079, D-ARCH-081, SPK-04, D-ARCH-085, D-ARCH-086, PR24-SEC-10, PR27-SEC-02, D-ARCH-099, D-ARCH-112, D-SEC-TM-01, D-ORCH-099, D-ARCH-135 |
+| Spikes / security / decisions | T-QA-04, SEC-TC-43, SEC-TC-61, PR12-SEC-01, PR12-SEC-02, D-SEC-PR12-01, D-ARCH-076, D-ARCH-079, D-ARCH-081, SPK-04, D-ARCH-085, D-ARCH-086, PR24-SEC-10, PR27-SEC-02, D-ARCH-099, D-ARCH-112, D-SEC-TM-01, D-ORCH-099, D-ARCH-135, PR42-SEC-17, PR56-SEC-13, PR56-SEC-01, PR56-SEC-04, D-TASK029-09, D-SEC-PR56-01, D-SEC-PR56-02, D-ARCH-143 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-029, TASK-030, TASK-027, TASK-021 |
@@ -1350,13 +1363,15 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - HEAVY.MJS ACCEPTS THE generated PROJECT (PR #34 code review R1-m4, PR34-SEC-04, PR34-SEC-05; D-ARCH-112; tools/quality is code-owned, so the PR carries a security record; DUE before the Wave-0-exit activation PR, the first time lane B runs a generated suite): this task is the last generated suite before that PR and the review named it as the owner, so it carries the edit unless an earlier PR already did: tools/quality/heavy.mjs adds generated to JEST_PROJECTS and to IN_BAND_PROJECTS (lane B passes -i and --testTimeout for the in-band projects, which is the working timeout lever because the project-level testTimeout of jest.config.ts is a no-op in Jest 30.5.2) with heavy.test.ts cases (a manifest suite with project generated validates, a misspelt project still fails); activation of the generated suites stays a manifest-only qa-lead PR after it; if this task merged without it, devops-engineer makes it in a small tools/quality PR before the activation PR
 - SEC-TC-72 (proposed ID, D-SEC-TM-01; qa-lead adopts it through required_cases_pending with checkpoint G3 and keeps the clone-database family apart from SEC-TC-43): the CIC LEFTOVER CASES above carry [SEC-TC-72] in their titles; lane B only, because they need template clone databases
 - PR #52 CODE REVIEW R1-m2 (D-ORCH-099; D-ARCH-135): the immutability suite proves the 91-audit-actions-v2.sql upgrade on a NON-EMPTY store — on a database that already applied 10-audit.sql and 90-audit-ddl-guard.sql one entry with a v1 action (LOGIN) exists for organisation X before the bootstrap lane applies 91; after it, that row is unchanged (action, entry_hash, prev_hash) and a SESSION_REVOKED entry for the same organisation gets stream_seq = 2 with prev_hash equal to the first entry hash (chain continuity across the DDL); lane B (template clone database); qa-lead assigns the SEC-TC id
+- T0 TIMER RESIDUAL BACKSTOP (PR42-SEC-17 residual; D-TASK029-09; D-SEC-PR56-01/-02; D-ARCH-143; before G3): the capture settles deferred audit starts through statement tracking and the setImmediate loop, but a write first started from a timer after the handler returned escapes it — this generator is the backstop: for every mutating route that exists the generated case asserts exactly one entry committed in the same transaction as the business change (entry and row visible together, or neither), and one negative fixture route that starts its audited write from a timer must FAIL the generated case; this activates the audit-generator suite (qa-lead moves SEC-TC-74 to required_cases with it)
+- HANDLER-RAISED 403 AND THE GENERATOR CASES OWED (PR56-SEC-13, INFO; PR56-SEC-01; PR56-SEC-04; D-SEC-PR56-01/-02; D-ARCH-143): (a) DR-A10 defines DENIED as rejected by authorisation or by a security control, but a 403 AUTHZ_DENIED thrown or returned by a handler after the authorisation slot writes no entry (a returned 403 rolls back silently): the generator gains a fixture route with an object-level 403 and a case titled [PR56-SEC-13 OPEN] that pins the current behaviour (no entry) — security suites carry no skipped case, so the capture change must flip it; the capture change itself (a DENIED path for AUTHZ_DENIED after authorisation) is TASK-060, not this task; (b) PR56-SEC-01: on a list route the filter values %00, empty and a 9 KiB value each answer 200 with exactly one VIEW entry (NORMAL and SENSITIVE variants); (c) PR56-SEC-04: a route declaring x-audit additional entries refuses to mount until the recording seam exists (TASK-031 line)
 - AT-US-096-01 … AT-US-096-07: all 7 scenarios of US-096, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-094-01 … AT-US-094-06: all 6 scenarios of US-094, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
 - Wave 0 exit: the M0 demo step "Generators pass" runs green on the routes that exist
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-034 — Backup/restore rehearsal and zero-downtime migration probe tooling (guardrail before data-changing migrations)
@@ -1481,7 +1496,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.
 - Images only: no application code; Dockerfiles and tools/docker are owned paths, so a security record is required (PR #39 precedent)
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-284 — Anonymous admission classes (auth reserve, per-guest keys, public) under one anonymous ceiling, and bounds that keep the tenant bulkhead on
@@ -1491,18 +1506,18 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-SEC-005, NFR-TENANT-001 |
-| Spikes / security / decisions | PR42-SEC-01, PR42-SEC-08, D-SEC-PR42-01, D-ORCH-064, D-ARCH-120, D-ARCH-121, R-ARCH-32 |
+| Spikes / security / decisions | PR42-SEC-01, PR42-SEC-08, D-SEC-PR42-01, D-ORCH-064, D-ARCH-120, D-ARCH-121, R-ARCH-32, D-ORCH-118, D-ARCH-147 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-025, TASK-020 |
-| Batch · locks | 0.11 · api-db-admission |
+| Batch · locks | 0.11 · api-db-admission, api-tenant-db, api-tx-execute, api-routing |
 | Branch | `feat/TASK-284-anonymous-admission-classes-under-one` |
 | Priority | Enabler |
 
 **Files / modules**
 - apps/api/src/platform/db/tenant-admission.ts (classes, ceiling, reserves, key kinds anon_auth | anon_guest | anon_public)
 - apps/api/src/platform/db/with-tenant-tx.ts (TenantContext.admissionClass; resolveAdmissionOptions takes the pool size)
-- apps/api/src/platform/routing/** tx slot (derives the class from route.rateLimit and the guest token hash)
+- apps/api/src/platform/tx/execute.ts (the tx slot: tenantContextOf derives the admission class from route.rateLimit and the guest token hash; the slot lives in platform/tx, not platform/routing — corrected at fold 9)
 - packages/config: DB_ANON_MAX_CONCURRENT_TX, DB_ANON_AUTH_RESERVE, DB_ANON_GUEST_RESERVE + databaseGuard bounds (+ .env.example placeholders; no pkg-config lock taken, D-ORCH-020 precedent)
 - tests/generated/route-metadata.ts (derived admission class vs x-rate-limit-class)
 
@@ -1515,7 +1530,8 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Security-critical path (apps/api/src/platform/db/**): security record required; security-analyst adds the T-xx / SEC-TC text for the anonymous flood in the next threat-model round (the record names it)
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- Shared hot files (D-ORCH-118; D-ARCH-147): with-tenant-tx.ts and platform/tx/execute.ts are held through api-tenant-db and api-tx-execute, and tests/generated/route-metadata.ts through api-routing — this task is not dispatched while another in-flight PR holds one of them (TASK-029 until PR #56 merges; later TASK-040 and TASK-030)
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-285 — Audit action vocabulary v2: bootstrap file widening ck_audit_entries__action with MFA_RECOVERY_USED and SESSION_REVOKED (REQ-AUDIT-002)
@@ -1549,7 +1565,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - Bootstrap-lane DDL (owned path prisma/bootstrap/**): security record required; no down.sql (bootstrap files have none; local rollback is db:reset); additive CHECK widening, not data-changing
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`, `prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-286 — CI-minutes stage 2: scans folded into ci-gate, CODE-gated commitlint/actionlint/install, proof re-read in ci-gate, audit and signatures on every push, TOOLS_REF bootstrap (policy PR first)
@@ -1601,7 +1617,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 | Stories (partial; completed by TASK-015) | US-006 (M0 Must) Coverage gate |
 | REQs | REQ-PLAT-008 |
 | NFRs | NFR-OPS-003 |
-| Spikes / security / decisions | D-ARCH-128, D-ORCH-078, SPK-07, D-ARCH-132, R-ARCH-15 |
+| Spikes / security / decisions | D-ARCH-128, D-ORCH-078, SPK-07, D-ARCH-132, R-ARCH-15, D-TASK286-01a, D-TASK286-06a, PR55-SEC-05, PR55-SEC-10, PR55-SEC-11, PR57-SEC-02, PR46-SEC-08, PR59-SEC-01, D-SEC-PR55-02, D-SEC-PR57-01, D-SEC-PR59-01, D-ORCH-109, D-ORCH-114, D-ORCH-116, D-ARCH-139, D-ARCH-140, D-SEC-PR57-02, D-ORCH-119 |
 | Specialist · model | devops-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-286 |
@@ -1616,17 +1632,25 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 - tools/ci/check-workflow-policy.mjs (+ test): full-trigger paths and the incremental steps pinned
 - tools/ci/lane-scope.mjs (+ test): full-trigger classification — package-lock.json, jest.config.*, tsconfig*.json, eslint.config.*, packages/shared/**, packages/config/**, docs/03-architecture/api/openapi.yaml, .github/** force the full run
 - tools/ci/{coverage-run.mjs, diff-coverage.mjs}: the changedSince scope equals the diff-coverage denominator
+- tools/ci/security-paths.mjs (+ test): SECURITY_INTEGRATION_PATHS widened per ADR-0023 am. N item 1
+- tools/ci/check-workflow-policy.mjs (+ tests) and tools/ci/lane-scope.mjs: the with: maps pinned, TESTED_BASE_SCRIPT with the HEAD == GITHUB_SHA line, the stage-1 branches and tools/ci/fixtures/stage-1/ci.yml removed
 
 **Acceptance tests to write**
 - ADR-0023 am. A incremental mode as re-stated by am. L item 3 (b) (D-ARCH-128): on a code push the unit project runs jest --changedSince=<range base> with the diff-coverage gate over the same changed set, ESLint runs with a restored cache, tsc -b reuses cached *.tsbuildinfo and only affected workspaces build; a full-trigger path forces the non-incremental run; full-mode fast-lane <= 3.5 billed minutes median, measured on the first ten runs and recorded in SPK-07 section 6
 - SAFETY: the changed set is computed by base-ref tooling from the push range (lane-scope), never by head code; a restored cache cannot skip a step whose inputs changed (cache keys include the lockfile hash and the config files); the policy pins the incremental steps and refuses --changedSince without the diff-coverage gate; an empty or unknown range runs full (fail closed)
 - MEASUREMENT: ci:minutes --forecast before and after; the steady-state target is about 64-72 % of the allowance with stage 2 and P1/P2 (ADR-0023 am. L item 4)
+- PART ORDER (D-ARCH-140; D-SEC-PR59-01; D-ORCH-116; this task was dispatched on 2026-11-17 as O1 of D-ORCH-119, before fold 9 — the STATUS row and the dispatch brief are authoritative for its state, and the orchestrator relays this order): 287-A is a POLICY PR (tools/ci only, no workflow file): PR59-SEC-01 item 1 and the policy half of item 2, the stage-1 retirement, PR55-SEC-05 and the trigger list — all three lines below; 287-B is the WORKFLOW PR that adds the HEAD == GITHUB_SHA line to ci.yml and nothing else; 287-C is the incremental fast lane of this card (its own policy-then-workflow pair). 287-A and 287-B are due BEFORE ANY OTHER PR that changes .github/workflows/** merges — 015-C, a Dependabot actions bump and 287-C included; until 287-B is on main the orchestrator merges a workflow PR only when a security record on the branch names its code head (D-ORCH-116): ci-gate success alone is not enough
+- PR59-SEC-01 (LOW, CWE-693 and CWE-345; D-SEC-PR59-01): (1) stage2Findings pins the with: maps exactly — every checkout { fetch-depth: 0, persist-credentials: false }; setup-node of fast-lane and security-integration { node-version-file: .node-version, cache: npm, cache-dependency-path: package-lock.json }; setup-node of ci-gate { node-version: 24 } — so ref:, repository:, path:, submodules:, persist-credentials: true and fetch-depth: 1 are required-gates findings (probes G1-G7 of the record); (2) two-step, policy first: TESTED_BASE_SCRIPT gains the check that git rev-parse HEAD equals GITHUB_SHA on pull_request runs, so a checkout that moves HEAD fails closed (the runner sets GITHUB_SHA and the policy refuses GITHUB_* in every env map); the live ci.yml stays at 0 findings after each step; (3) the merge checklist keeps the record-names-head rule for workflow PRs as a standing line
+- STAGE-1 RETIREMENT (PR #55 code review R1-m2; PR55-SEC-10; D-TASK286-01a; due in the first ci-workflows change of this task after the TASK-286 workflow PR is on main = part 287-A): remove CI_REQUIRED_GATES (stage 1), laneScopeFindings, the stage-1 branches of topologyOf / requiredGatesFor / tokenFindings / gate() / proofSteps and tools/ci/fixtures/stage-1/ci.yml with its tests, so a ci.yml that restores a scans job is a required-gates finding; until then the PR46-SEC-11 24 h proof-age rule applies to any stage-1 ci.yml and to any merge whose final lane A run was a stage-1 run (D-SEC-PR59-01 section 5); the stage-1 scans masking of PR55-SEC-11 item 3 ends with it; ALSO PR55-SEC-05 (INFO): rule (g) compares the separate fast-lane outputs — mode, code_proof, security_integration_due and tools_ref are passed into the aggregation and must equal the classification the gate computes itself (a differing tools_ref gives BLOCKED), or security-integration recomputes TOOLS_REF with the pinned TESTED_BASE_SCRIPT; OPTIONAL (D-TASK286-06a): a docs push that has no valid code proof runs the full lane instead of ending BLOCKED: no code proof — taken only if the measured cost is lower than the re-push it saves; the choice is recorded with the devops re-forecast of D-ORCH-117 and decides no budget figure on this card
+- SECURITY-INTEGRATION TRIGGER LIST (PR57-SEC-02, LOW, escalating PR46-SEC-08; D-SEC-PR57-01; D-ORCH-114; ADR-0023 am. N item 1; D-ARCH-139; in part 287-A): SECURITY_INTEGRATION_PATHS gains jest.config.ts, tools/test-support/**, tools/db/**, tools/deps/**, tests/generated/rls/** and tests/generated/api-mounts.ts with the exclusions !tools/test-support/**/*.test.ts, !tools/db/**/*.test.ts, !tools/db/fixtures/** and !tools/deps/**/*.test.ts (path-scoped negations: they cannot exclude a prisma/** or packages/** test); path corpus in security-paths.test.ts — selected: jest.config.ts, tools/test-support/fs-lock.ts, tools/db/table-classes/audit.json, tools/deps/prisma-engines.json, any path under tests/generated/rls, tests/generated/api-mounts.ts; not selected: tools/test-support/fs-lock.test.ts, a path under tools/db/fixtures/lint, tools/deps/ignore-scripts.test.ts, tools/ci/lane-scope.mjs; the parity test with the manifest copy stays green and the header comment (the left-out paths do not change what the suites exercise) is corrected; base-ref rule: the list takes effect for the PRs after it merges; the plan generator imports SECURITY_INTEGRATION_PATHS and globsMatch from this file to write the card DoD line (ADR-0023 am. N item 2) — keep both export names and the glob dialect, and after the merge the orchestrator re-runs gen.mjs --write so the cards follow the list; still open with PR46-SEC-08: .npmrc and apps/worker/src/platform/** (security-analyst to rule)
+- CACHE HYGIENE (D-SEC-PR57-02 note; D-TASK288-09): the test locks of TASK-288 live under node_modules/.cache/shipqube-test-locks, so every CI cache that this task introduces or keys (node_modules, ESLint, *.tsbuildinfo) excludes that directory — a restored stale lock would make a suite wait or take over a lock it does not own; one policy or workflow-test case pins the exclusion
 - Covers the scenarios of AT-US-006-01 … AT-US-006-03 that belong to its layer; US-006 closes in TASK-015
 
 **DoD notes**
 - Workflow and tooling changes verified on their own PR; tooling invoked from the base ref; minute usage measured and recorded.
 - Workflows and tools/ci are security-owned paths: a security record; the base-ref policy pins the change; no path of the full-trigger list is dropped without a principal-architect amendment
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- Three parts (287-A policy, 287-B one-line workflow change, 287-C incremental lane): each PR changes security-owned paths and needs its own record; this card decides no CI-minutes budget figure (D-ORCH-117)
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`, `package-lock.json`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-288 — TASK-W0-FLAKE-2: prisma/generated reader-side tree lock for static @platform/prisma/client importers in unit tests
@@ -1659,7 +1683,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
 - Test infrastructure only, no production code; jest.config.ts is a full-trigger path (a non-incremental lane A run); the root lock is taken for jest.config.ts
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-289 — TASK-027-F: RBAC matrix follow-up — whole-response foreign-credential comparison and signature-header callers, oracle subpath, observe() deadline, seam truth in labelling
@@ -1696,7 +1720,7 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - tests/generated/rbac is the O3 RBAC oracle and packages/authz a security-critical path: security record required; the regenerated matrix document is reviewed cell by cell (expected: only the signature-header foreign rows are new)
-- Touches a security-critical path: the hosted `security-integration` job runs on the PR and degraded mode never waives it (D-ARCH-021).
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/authz/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-290 — TASK-024-F: SQL splitter structural fix for BEGIN ATOMIC bodies, shadow-init KEEP balanced-parenthesis form, paren-gate fixture, stale describe title
@@ -1733,4 +1757,43 @@ Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registrie
 
 **DoD notes**
 - tools/db is a security-owned path (CODEOWNERS): security record required; no migration and no bootstrap file; the lint and splitter run in lane A, so a mutant that weakens them is a base-ref no-weakening finding
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-291 — TASK-W0-FLAKE-3: one-shot loopback transport for the generated suites and a pooled-fetch ratchet, web prerender under host load, PR #57 leftovers
+
+| Field | Value |
+|---|---|
+| Stories (completes) | — |
+| REQs | — (enabler; see refs) |
+| NFRs | NFR-MAINT-002 |
+| Spikes / security / decisions | D-ORCH-113, D-TASK288-08, D-TASK020-100, D-TASK029-25, D-SEC-PR53-02, D-SEC-PR57-01, D-ARCH-146, D-TASK288-15, D-TASK289-06 |
+| Specialist · model | test-engineer · opus |
+| Complexity | M |
+| Depends on | TASK-288, TASK-289 |
+| Batch · locks | 0.13 · tests-harness, api-routing, tests-gen-rls, quality-tools |
+| Branch | `feat/TASK-291-task-w0-flake-3-one` |
+| Priority | Enabler |
+
+> Scheduling note: Late task (fold 9, D-ARCH-146) in the new batch 0.13; the orchestrator tracks it under its alias TASK-W0-FLAKE-3.
+
+**Files / modules**
+- tests/generated/route-metadata.test.ts (five pooled fetch call sites, assertion 10 included) and apps/api/src/platform/routing/tests/loopback.ts (fetchOnce and closeLoopbackServer: the one transport)
+- tests/generated/rls/{api-cases.ts, api-cases.test.ts} (the runApiCase transport; the server close order)
+- a scan case in the generated project with a checked-in allow-list of the test files that still call the global fetch against a loopback server
+- tools/db/prisma-client-locked.test.ts + tools/db/prisma-client-locked.cjs (PR #57 R1-n4) and the eleven withFileLock importers under prisma/tests (PR #57 R1-n6; test files only)
+- tools/quality/heavy.mjs (+ test) only if the measurement of the prerender item calls for the bounded build retry
+
+**Acceptance tests to write**
+- ONE TRANSPORT FOR LOOPBACK SUITES (D-ORCH-113 (a) and (d); D-TASK288-08; D-TASK029-25/-26; D-ARCH-146): the global fetch keeps pooled keep-alive sockets, so under host load a suite either waits in server.close() or reuses a socket the server already closed (other side closed, ECONNRESET) — the W0-FLAKE class. Every loopback request of the files this task owns goes through fetchOnce and every loopback server is closed with closeLoopbackServer (apps/api/src/platform/routing/tests/loopback.ts: a fresh socket per request, Connection: close, a named per-request deadline): tests/generated/route-metadata.test.ts (all five call sites, assertion 10 included), tests/generated/rls/api-cases.ts (runApiCase, the runner of the rls-cross-tenant api cases — the whole-response comparison and its findings are unchanged, shown by the existing case set passing with identical counts) and api-cases.test.ts (closeAllConnections before the close is awaited); tests/generated/rbac/runner.ts is NOT touched here — TASK-289 (a dependency) already moved it to fetchOnce and closeLoopbackServer (D-TASK289-06); keepAliveTimeout tuning or a per-suite retry is not a substitute
+- RATCHET (PR #56 code review R2-n3: 25 loopback tests in 7 api suites failed under host contention; D-ARCH-146): one scan case in the generated project lists every test file under apps, packages, tests and tools that still calls the global fetch against a loopback server; the list is a checked-in allow-list that may only shrink (a new entry fails; a converted file must be removed) and holds NO file of tests/generated when this task merges; the api and worker loopback suites of R2-n3 stay on it, each with its folder lock named, and are converted by the next task that holds that lock — this task edits a suite outside its own locks only when no in-flight PR holds that folder (D-ORCH-118) and says so in the PR body
+- WEB PRERENDER UNDER HOST LOAD (D-ORCH-113 (b); D-TASK020-99/-100: react-router build aborted on the prerender request of /en/ after 10 s, lane B verdict INVALID twice): FACT — React Router 8.5.1 passes only prerender.concurrency to its build-time prerender; the per-request timeout (10 s) and retryCount (0) are internal defaults of @react-router/dev (dist/vite.js) and no key of react-router.config.ts reaches them. RULE — the product build stays ONE un-retried react-router build (workspace script, Dockerfiles, hosted lane A): no wrapper script, no patch, fork or overrides entry for the plugin, no change of the three prerendered paths. DELIVER — (1) a reproduction under the PR #53 load method that names the slow phase (preview-server start, server-bundle load or render) and the failure rate over 20 builds; (2) the lightest control that brings the lane B build under 1 %: an app-side or config-side cause is reported to the orchestrator with the measurement (apps/web is outside the locks of this task); otherwise a bounded retry in the lane B runner only — tools/quality/heavy.mjs repeats npm run build at most twice, ONLY when the output of the failed attempt carries the prerender request-timeout signature, build_clean is computed after the last attempt, a deterministic failure still fails three times, and the attempt count is printed in the run log and in summary.md; (3) no summary.json schema change in this task — a machine-readable attempt count is a qa-lead follow-up with a schema bump; when the measurement warrants neither form of (2) the outcome is the recorded procedural rule: an INVALID run with that signature is re-run once and is not a fix cycle
+- PR #57 LEFTOVERS (D-ORCH-113 (c); fix cycle 1 of PR #57 took R1-m1..m4, R1-n1..n3 and PR57-SEC-01/-03/-04): R1-n4 — prisma-client-locked.test.ts (and optionally the shim) reads the @platform/source target of the ./client export from prisma/package.json instead of hard-coding prisma/generated/prisma/client.ts; R1-n6 — the eleven withFileLock(PRISMA_TREE_LOCK, import of the generated client) pseudo-readers under prisma/tests take withReadLock, so they no longer serialise against each other and against every shim load (the per-process re-entrancy rule stays documented); a finding of a later PR #57 round that DECISIONS routes to W0-FLAKE-3 joins this line
+- MEASUREMENT AND STANDING RULES: 20/20 runs green under load for each converted suite and for the lock change (the PR #53 method: heartbeat-based upper bounds, exact lower bounds); no assertion on a wall-clock bound and no timeOperation in a CPU-bound, ReDoS, redaction-growth or scaling check (D-SEC-PR53-02); order-based and marker-based assertions with real child processes where a race is the subject
+- INFRA NOTE (D-TASK288-15; D-TASK020-99/-100): Testcontainers start failures under host load — P1001, port not bound, a container lost mid-run — are host capacity and never a product finding; this task records their rate in the 20-run measurement and may add a readiness wait with a named error to the harness start (prisma/tests/harness: wait for the mapped port before the first connection); a retry of a failed suite or a changed verdict rule is not in scope
+
+**DoD notes**
+- Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
+- Test infrastructure only, no production code; tests/generated/rls/** and the O3 and O4 runners are security-owned: a security record; the security-integration job is decided by the classifier on the PR diff (prisma/tests/** selects now; tests/generated/rls/** selects once TASK-287 part 287-A is on main) — if the classifier does not select while tests/generated/rls/** changed, the merge condition is the restricted lane B run of the PR #57 C1 precedent (integration, catalog-c1-c14 and rls-cross-tenant with 0 failures, 0 errors and 0 skipped)
+- Locks: four, because the flake class crosses folders; dispatched only when TASK-288 and TASK-289 have merged (dependencies), TASK-290 is not in flight (tests-gen-rls) and no in-flight PR holds api-routing or quality-tools
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.

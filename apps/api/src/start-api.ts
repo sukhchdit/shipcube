@@ -114,6 +114,7 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
       modules: deps.modules,
       tenantTx: services.tenantTx,
       afterCommit,
+      auditConfig: config,
       apiMode: resolveApiMode(config.APP_ENV),
       ...(docs === undefined ? {} : { docs }),
       logger: log,

@@ -20,6 +20,10 @@ export interface FakeSql extends AuditSqlPort {
   readonly marked: Error[];
   /** How many works were started through `track` (PR42-SEC-13). */
   readonly tracked: () => number;
+  /** Every check registered through `beforeCommit` (D-ARCH-122 I3), in registration order. */
+  readonly checks: Array<() => Error | undefined>;
+  /** What `contextOrgId()` answers ('' = an organisation-less transaction); settable per test. */
+  orgId: string;
 }
 
 const render = (strings: TemplateStringsArray): string =>
@@ -31,6 +35,7 @@ const render = (strings: TemplateStringsArray): string =>
 export function fakeSql(...script: Array<Answer | ((statement: RecordedStatement) => Answer)>): FakeSql {
   const statements: RecordedStatement[] = [];
   const marked: Error[] = [];
+  const checks: Array<() => Error | undefined> = [];
   let tracked = 0;
   const answer = (statement: RecordedStatement): Promise<unknown> => {
     statements.push(statement);
@@ -44,6 +49,14 @@ export function fakeSql(...script: Array<Answer | ((statement: RecordedStatement
     script,
     marked,
     tracked: () => tracked,
+    checks,
+    orgId: '',
+    beforeCommit(check: () => Error | undefined): void {
+      checks.push(check);
+    },
+    contextOrgId(): string {
+      return this.orgId;
+    },
     markRollbackOnly(failure: Error): void {
       marked.push(failure);
     },

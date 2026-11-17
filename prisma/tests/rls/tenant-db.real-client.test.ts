@@ -193,7 +193,17 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
     // the guard's own rollback-only latch (PR42-SEC-02; not a Prisma member).
     // referenceDatasetVersion (TASK-023's SYSTEM table) is NOT on TenantDb: SYSTEM models are reached only through
     // systemDelegates(tx) (PR19-SEC-01, D-ARCH-080; prisma/tests/rls/system-delegates.int.test.ts).
-    const exposed = ['permission', 'role', 'rolePermission', '$queryRaw', '$executeRaw', 'markRollbackOnly', 'track'];
+    const exposed = [
+      'permission',
+      'role',
+      'rolePermission',
+      '$queryRaw',
+      '$executeRaw',
+      'markRollbackOnly',
+      'track',
+      'beforeCommit',
+      'contextOrgId',
+    ];
     expect([...seen.surface.ownKeys].sort()).toEqual([...exposed].sort());
     expect(seen.surface).toMatchObject({ ownSymbols: 0, hasParent: false });
     expect([...seen.surface.spread].sort()).toEqual([...exposed].sort());

@@ -39,6 +39,12 @@ export type AuditFailureKind =
   | 'PARTITION_MISSING'
   /** SQLSTATE 55P03 while the writer ran. */
   | 'LOCK_TIMEOUT'
+  /** D-ARCH-122 I2: a `record` after the transaction's flush, or a second flush (a programming error). */
+  | 'WRITE_AFTER_FLUSH'
+  /** D-ARCH-122 I3: the transaction is about to commit with recorded entries that were never flushed. */
+  | 'UNFLUSHED_ENTRIES'
+  /** D-ARCH-122: a tenant entry's organisation is not the organisation of the transaction (`app.org_id`). */
+  | 'STREAM_MISMATCH'
   /** Any other database failure. */
   | 'DATABASE_ERROR';
 
