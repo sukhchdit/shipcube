@@ -3092,3 +3092,11 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **PR #61:** session B's extra code-review items (R1-m5 vault lock order, R1-m6 live-mode authenticate seam, R1-m7 HeadlessChrome) at `../.orch/records/PR-0061/` are passed to the PR #61 developer for triage in fix cycle 1.
   - **PR #61:** merges main for the shared `lint` lock (PR #60 merged first).
 - **Reversibility:** High.
+
+### D-SEC-PR60-02 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #60 security delta r2 = PASS_WITH_FOLLOW-UPS (record in `ad7d44d`, head row `c912a0a`), confirmed by an independent duplicate check
+- **Decision:**
+  - The merge `f2a7411` is a pure union. On the merged config, all 25 oracle import forms are refused (22 from r1 + 3 through PR #56's files).
+  - PR60-SEC-02 is closed.
+  - **New INFO PR60-SEC-06:** `fillPath` in `tests/generated/rbac/runner.ts` does not fill Express 5 `*name` wildcards that org-scope now enumerates, so a wildcard tenant route's SEC-TC-01 case would be vacuous (none exist today). → TASK-060: a shared regex, or the R-03 rule refuses `*orgId` on tenant routes.
+  - **Still open:** PR60-SEC-01 (TASK-283 before TASK-060; the edge is pending the next fold), -03/-04 (TASK-052/055), -05 (TASK-283).
+- **Reversibility:** High.
