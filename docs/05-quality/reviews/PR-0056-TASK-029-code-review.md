@@ -174,3 +174,69 @@ Also new and good in the delta: `x-audit.additional[]` routes refused at mount u
 2. The R2-m1 TASK-040 line goes into the D-ORCH-109 fold list. This is an orchestrator docs action on main and does not block the merge.
 3. The NITs are optional. If R2-n1 or R2-n2 is fixed in this PR, take fresh lane B evidence and re-run `mutate2.mjs` rows K4 and R4.
 4. Squash. Do not merge main commits that only touch `.claude/agent-memory`.
+
+---
+
+# Round 3 (merge delta)
+
+Head reviewed: `081684b` (full SHA `081684b7360109690b3e90d418e8a7f291886f04`; lane B evidence on top of code head `e81d0c9`). Delta: `191c38b..081684b` = merge `4e7f696` (origin/main at `0309d71`: PR #54 `44637dd`, PR #55 `11e2158`) plus `e81d0c9` (R2-n1, R2-n2 = PR56-SEC-14, R2-n4).
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The merge is a pure union. `git merge-tree --write-tree 191c38b 0309d71` gives tree 51fb11f, identical to 4e7f696.
+  Semantically, both sides of the five shared files survive, and PR #54's raw-statement guard passes the real audit
+  store SQL on PostgreSQL. e81d0c9 closes R2-n1, R2-n2 and R2-n4. D-ARCH-143 closes R2-m1 (TASK-040 card line) and R1-n5.
+  9 mutants: 8 killed. One NIT survivor: the 'none'-route threshold is pinned only with a 503.
+```
+
+## R3.1 What I verified
+
+| Check | Result |
+|---|---|
+| Merge purity | `git merge-tree --write-tree 191c38b 0309d71` = `51fb11f`; `git diff 51fb11f 4e7f696` is empty, so no hand resolution was made. Five files changed on both sides: `tenant-db.ts`, `tenant-db.test.ts`, `execute-phases.test.ts`, `start-api.ts`, `eslint.config.mjs`. |
+| `tenant-db.ts` union | PR #54's `refusedRawStatement` check sits in `taggedOnly` (line 421), which runs before Prisma is called. PR42-SEC-17's `state.onStart(started)` (line 340), the `setImmediate` settle loop (482), `beforeCommitFailure` and `contextOrgId` are all present. The two do not interact: the guard refuses at call time, and tracking registers at `then`. |
+| Tests from both sides survive | `it`/`describe` titles per side vs the merge: `tenant-db.test.ts` PR 29, main 26, merged 30; `execute-phases.test.ts` PR 38, main 29, merged 39. **0 titles missing from either side.** |
+| `start-api.ts`, `eslint.config.mjs` | main's exit-code comment edits and the PR's `auditConfig: config` are both present. The PR's `api-pipeline-composition` category and allow (lines 335, 650) sit beside main's `platform/db-raw-sql` arms. |
+| Audit store SQL under the merged raw guard | Lane B `20261117T0701Z_e81d0c9`: integration 331/331, 0 `<failure>`. Through the real `withTenantTx`/`TenantDb`, it runs `audit-capture-flush` 8, `audit-writer` 22, `audit-actions-v2` 12 and `audit-owner` 14, so the lock CTE with `set_config(..., true)` and the multi-row append pass PR #54's guard. |
+| `npm run typecheck`, `npm run lint` at 081684b | exit 0 / exit 0 |
+| Targeted unit + api (packages/audit, apps/api/src/platform, generated audit descriptors, audit-capture-boundary, **negative-fixtures**), `--maxWorkers=2` | 64 suites, 1,980/1,980 pass |
+| Lane A run 44037544174 (081684b) | fast-lane: lint, format, type-check, unit, base-ref negative fixtures and build all **ran and succeeded** (no skip trap). The only red is ci-gate "Security-owned paths need a review record" (waits on the security merge-delta record). |
+| Lane B `20261117T0701Z_e81d0c9` | PASS: api 173, catalog 102, integration 331, rls-cross-tenant 126, unit 6,719; merged 99.06 % / 97.08 % |
+
+### R3.1.1 Mutation run (`review/PR-56-cr/mutate3.mjs`, archive of e81d0c9, `--maxWorkers=2`)
+
+Killed (8):
+- **K4:** `FAILED_ENTRY_WAIT_MS` x10 (now pinned).
+- **R4:** `committed` ignored (also killed by the new `[PR56-SEC-14]` test).
+- **N1:** a 'none' route is always committed.
+- **R1:** rollback removed.
+- **T1:** no `setImmediate` turn.
+- **T2:** statements not tracked.
+- **G1:** PR #54's raw-statement refusal disabled; its `[PR44-SEC-05]` test still pins it in the union.
+- **X1:** I3 not enforced.
+
+**Survived (1): N2.** The 'none'-route threshold `status < 400` changed to `< 500`. The new test returns only 503, so a 'none' route returning 404 would still schedule `afterCommit` (R3-n1).
+
+## R3.2 Closure
+
+| Item | Status |
+|---|---|
+| R2-n1 (wait magnitude) | **Closed**: `expect(FAILED_ENTRY_WAIT_MS).toBe(1_000)`, K4 killed. |
+| R2-n2 = PR56-SEC-14 | **Closed** (D-TASK029-25a): a 'none' route has `committed: result.status < 400`; the afterCommit JSDoc states the one rule and is rewrapped; N1 is killed, but the 4xx half is unpinned (R3-n1). |
+| R2-n4 | **Closed**: the `recordFailure` JSDoc states that a write still running after the wait is detached and not drained. |
+| R2-m1 (TASK-040 4xx idempotency completion) | **Closed** by D-ARCH-143: the card line is on TASK-040; "a returned 4xx is completed in its own transaction after the rollback; a 5xx leaves no completion". |
+| R1-n5 (sheet file name) | **Closed** by D-ARCH-143 (TASK-029 `capture.ts`). |
+| R2-n3 (loopback flakes under contention) | Unchanged; W0-FLAKE-3 scope. |
+
+## R3.3 New findings
+
+| ID | Severity | Location | Issue | Fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `apps/api/src/platform/tx/execute-phases.test.ts` `[PR56-SEC-14]` | Only a 503 is tested, so mutant N2 (`< 500`) survives: a 'none' route returning 4xx would run `afterCommit` against the JSDoc. | Use `it.each([404, 503])`, or add a 404 row, with the next change to this file. Not merge-blocking. |
+| R3-n2 | NIT | `apps/api/src/platform/tx/execute.ts` `recordFailure` JSDoc | One line still runs past the print width; Prettier does not reflow comments. | Rewrap with the next edit. |
+
+## R3.4 Merge conditions
+
+1. The security merge-delta record is on the final head, and ci-gate goes green (its only red step today is the record).
+2. No code change after `e81d0c9`; if one lands, take fresh lane B evidence.
+3. Squash. Do not merge main commits that only touch `.claude/agent-memory`.
