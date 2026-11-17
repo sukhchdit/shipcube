@@ -72,3 +72,14 @@ export {
   type StoredObject,
 } from '../storage/object-storage.port.js';
 export { createShutdown, DRAIN_TIMEOUT_MS, RESOURCE_CLOSE_TIMEOUT_MS, type Closeable, type ShutdownOptions } from './shutdown.js';
+// The job producer (TASK-035): payload v2 on a named queue, correlation copied from the originating context. Used by
+// the worker's outbox relay (TASK-043); the api ACL user holds no `bull:*` keys.
+export {
+  createJobProducer,
+  JobProducerError,
+  type EnqueuedJob,
+  type EnqueueOptions,
+  type JobProducer,
+  type JobProducerOptions,
+  type ProducerQueue,
+} from '../queues/producer.js';

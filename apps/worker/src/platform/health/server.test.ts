@@ -47,9 +47,9 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
     );
   });
 
-  async function start(checks: readonly ReadinessCheck[], deadlineMs?: number) {
+  async function start(checks: readonly ReadinessCheck[], deadlineMs?: number, metrics?: () => Promise<string>) {
     const probe = createReadinessProbe(checks, deadlineMs === undefined ? {} : { deadlineMs });
-    const server = createWorkerHealthServer(probe);
+    const server = createWorkerHealthServer(probe, metrics);
     expect([server.headersTimeout, server.requestTimeout]).toEqual([5_000, 5_000]);
     // The production server drops a request whose headers take over 5 s (slowloris bound); a host stall that long reset the probe (W0-FLAKE). Widened on this test instance only.
     server.headersTimeout = TEST_TIMEOUT_MS;
@@ -64,7 +64,12 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
         signal: AbortSignal.timeout(TEST_TIMEOUT_MS - 5_000),
       });
       const text = await response.text();
-      return { status: response.status, headers: response.headers, text, body: text === '' ? undefined : (JSON.parse(text) as unknown) };
+      return {
+        status: response.status,
+        headers: response.headers,
+        text,
+        body: text === '' || !text.startsWith('{') ? undefined : (JSON.parse(text) as unknown),
+      };
     };
     return { call, probe };
   }
@@ -153,6 +158,31 @@ describe('US-012 liveness and readiness endpoints (worker health server)', () =>
     const head = await call('/health/ready?verbose=1', 'HEAD');
     expect(head.status).toBe(503);
     expect(head.text).toBe('');
+  });
+
+  it('[AT-US-009-05] GET /metrics answers the queue gauges as Prometheus text, uncached; other methods are 405', async () => {
+    const text = 'platform_queue_jobs{queue="booking",state="waiting"} 3\n';
+    const { call } = await start(checksWith(), undefined, () => Promise.resolve(text));
+    const response = await call('/metrics');
+    expect(response.status).toBe(200);
+    expect(response.text).toBe(text);
+    expect(response.headers.get('content-type')).toBe('text/plain; version=0.0.4; charset=utf-8');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await call('/metrics', 'HEAD')).text).toBe('');
+    const post = await call('/metrics', 'POST');
+    expect(post).toMatchObject({ status: 405, body: { status: 405 } });
+    expect(post.headers.get('allow')).toBe('GET, HEAD');
+  });
+
+  it('without a metrics source /metrics is a 404; a failing source is a value-free 503', async () => {
+    const { call } = await start(checksWith());
+    expect((await call('/metrics')).status).toBe(404);
+    const failingSource = await start(checksWith(), undefined, () =>
+      Promise.reject(new Error('connect ECONNREFUSED valkey.internal:6379')),
+    );
+    const failed = await failingSource.call('/metrics');
+    expect(failed.status).toBe(503);
+    expect(failed.text).not.toMatch(/ECONNREFUSED|valkey/);
   });
 
   it('[NFR-AVAIL-002] worker readiness answers 503 once draining', async () => {
