@@ -2814,3 +2814,11 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **R1-n1:** squash #59 with an explicit `--body` (commit `03a281a`'s message is wrong about the install gate).
 - **Merge path:** merge main (new code proof) → merge-only security delta → MERGE-READY → squash. Post-merge, every open PR runs full once (stage-1 proofs do not count).
 - **Reversibility:** High.
+
+### D-ORCH-118 · 2026-11-17 · sdlc-orchestrator · PR #56 approved but held by P1; merge-main cycle (not a fix cycle)
+- **Decision:** PR #56 code review r2 (record `191c38b`) = APPROVED_WITH_NITS. R2-m1 (the TASK-040 card line for D-TASK029-17) is already in the SHEET-FOLD-9 brief. PR56-SEC-14 is ruled a NIT.
+- **The merge-time P1 check fails:** main's PR #54 changed 5 files PR #56 also changes (`tenant-db.ts`/test, `execute-phases.test.ts`, `start-api.ts`, `eslint.config.mjs`). merge-tree is clean, but the combined tree is untested.
+- **Next:** the developer merges main (taking R2-n1/n2 if cheap) and takes fresh lane B; then a merge-only security delta and a code-review remerge check; then squash.
+- **Not counted as a fix cycle:** the findings are approved; this is integration.
+- **Lesson:** when two in-flight PRs touch the same files, merge order creates a P1 re-test. Locks in the plan should cover `tenant-db`/`execute` (note for the sheet fold).
+- **Reversibility:** High.
