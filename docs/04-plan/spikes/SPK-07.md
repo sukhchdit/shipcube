@@ -175,6 +175,73 @@ the next docs-only push of this PR (the security delta record), which inherits t
 billed minutes are recorded here when it has run (ruling estimate ≈ 60–70 s of `fast-lane` work, 1–2 billed minutes,
 ≈ 3.7 billed minutes for the whole run with `scans` and `ci-gate`).
 
+### 6.1 Stage 2 measured (TASK-286 workflow PR #59, 2026-11-17; PR #59 code review R1-m1)
+
+The first stage-2 runs bill far more than this section planned (5.9 per code push, 2 per docs push). Per-job billed
+minutes = job duration rounded up (jobs API, `started_at` to `completed_at`).
+
+| Run | Kind | `fast-lane` | `ci-gate` | Billed | Plan |
+|---|---|---|---|---|---|
+| 44011154025 (`055083b`) | code push, full | 422 s → 8 (unit 165 s, audit 64 s, lint 58 s, signatures 34 s, type-check 25 s, install 23 s, format 17 s) | 88 s → 2 (gitleaks 42 s, Semgrep 35 s) | **10** | 5.9 |
+| 44013660377 (`2d6818b`) | docs push, proof void (main gained a lint-control change, PR #54) | 78 s → 2 (signatures 23 s, audit 16 s, install 15 s, setup-node 9 s) | 86 s → 2 (Semgrep 38 s ran: no proof) | **4** | 2 |
+| docs push with a proof (derived from 44013660377) | docs push, light | 78 s → 2 | ≈ 46 s → 1 (Semgrep and oasdiff skipped) | **≈ 3** | 2 |
+| Stage 1, 40 pull-request runs since 2026-11-14 | full (unit ran), n = 16 | | | 8–12, **median 10** | 6.6 |
+| | light or failed early (unit skipped), n = 24 | | | 3–7, mostly 3–4 | 3.7 |
+
+**Why the plan missed.**
+- The 5.9 rested on the 2026-11-01..14 median of 6.6 per full run. Since then the unit suite has grown to 6,100+ tests (165 s on the runner), and the per-push audit and signatures that PR46-SEC-11 made unconditional cost about 100 s in a full run. So a stage-1 full run now also bills about 10.
+- Folding `scans` into `ci-gate` saves the separate scans job (1–2 billed). But `ci-gate` now carries gitleaks and Semgrep: about 88 s, so 2 billed. On a code push the fold is roughly neutral.
+- On a docs push, the light `fast-lane` runs install, signatures and audit on every push (PR46-SEC-11, D-TASK286-03) and lands just above the 60-second round-up (78 s → 2).
+- The widened PR46-SEC-16 void set (D-TASK286-06) turns more docs pushes into proof-less ones. Those cost 4 instead of 3, and need a further code push or a reopen.
+
+**Live month (`npm run ci:minutes -- --forecast`, 2026-11-17T04:38Z).**
+- Billed: 1,230 of 2,000 (61.5 %) after 16.2 days, 76 min/day. Forecast 2,279 (114 %).
+- Guard dates at this rate: 70 % on 11-19; 90 % on 11-24; 95 % on 11-26; **100 % on 11-27**.
+- At 100 % a private repository with a $0 spending limit (CLOUD_BUDGET_MONTHLY_USD 0) gets no further hosted runs. Lane A then stops and degraded mode (ADR-0023 am. C) applies, except for security-critical paths, which cannot merge.
+- To end November under 100 % the remaining 13.8 days must average **≤ 55 billed min/day** (≤ 48 for 95 %, ≤ 41 for 90 %): a 27–46 % cut from 76.
+
+**Budget v2 re-forecast (steady month; 143 code pushes, 132 docs pushes, 62 `security-integration` runs, lane C + nightly 83).**
+- Docs pushes are taken as half with a proof (3) and half without (4): 3.5.
+- The "suites now" column uses the `security-integration` cost measured today: 2 min a run, with only `catalog-c1-c14` and C-1 active.
+
+| Scenario | Code pushes | Docs pushes | `security-integration` (8 / now 2) | Lane C + nightly | Total, six suites | Total, suites now |
+|---|---|---|---|---|---|---|
+| Plan (this section, stage 2) | 143 × 5.9 = 844 | 132 × 2 = 264 | 496 / 124 | 83 | 1,687 (84 %) | 1,315 (66 %) |
+| **Stage 2 measured** | 143 × 10 = 1,430 | 132 × 3.5 = 462 | 496 / 124 | 83 | **2,471 (124 %)** | **2,099 (105 %)** |
+| Stage 1 at today's durations (comparison) | 143 × 10 = 1,430 | 132 × 3.7 = 488 | 496 / 124 | 83 | 2,497 (125 %) | 2,125 (106 %) |
+
+#### Options, costed against the "stage 2 measured" row
+
+| # | Option | Mechanism | Saves / month | Total (six suites / now) | When it acts | Ruling needed |
+|---|---|---|---|---|---|---|
+| O1 | TASK-287 incremental fast lane | Jest `--changedSince`/related tests, restored ESLint and `tsbuildinfo` caches: unit 165 → ≈ 45 s, lint 58 → ≈ 25 s, type-check 25 → ≈ 12 s; fast-lane 422 → ≈ 270 s = 5 billed; code push 10 → 7 | 143 × 3 = **429** | 2,042 (102 %) / 1,670 (84 %) | M task in batch 0.12, after #59: earliest about 11-24..28, so about 3 days of November (≈ 40 min); full effect in December | No (TASK-287 is planned; cache scope needs a security review) |
+| O2a | Light fast-lane under 60 s | Trim install, signatures and audit (78 → < 60 s; 54 s of it is the three PR46-SEC-11 steps): npm cache, a lighter signatures call | ≤ 132 × 1 = 132, uncertain (p90 would still round to 2) | 2,339 (117 %) / 1,967 (98 %) | Days, but it changes D-TASK286-03 / PR46-SEC-11 steps | Yes (security) |
+| O2b | Full fast-lane under 420 s | 422 s is 2 s over the 8-minute boundary; without O1 the margin is noise | 143 × 1 = 143, fragile | 2,328 (116 %) | — | — |
+| O2c | `ci-gate` under 60 s on code pushes | gitleaks 42 s is mostly the image pull, Semgrep 35 s; under 60 s together is not reachable on hosted runners without image caching | ≈ 0 | — | — | — |
+| O3 | Fewer pushes per PR | (a) both review records in one docs push per round (−40 docs pushes); (b) local `lint`/`typecheck`/`test:unit` before every code push, so red code pushes are not repeated (−28 code pushes; 83 of 123 runs were red on 11-01..14); (c) P1 unions only when needed (already mandatory) | (a) 140 + (b) 280 = **420** (plus ≈ 28 × 8 `security-integration` on selected PRs) | 2,051 (103 %) / 1,679 (84 %) | **Immediately** (process; also cuts November) | No (orchestrator procedure; extends D-ORCH-078 P1/P2 and D-ORCH-117) |
+| O4a | Docs pushes run no job | `paths-ignore` for docs on `pull_request`: no `ci-gate` on the record head, so the merge relies on the previous head's MERGE-READY plus a local base-ref record check; gitleaks of the record commit is lost | 132 × 3.5 = 462 | 2,009 (100 %) / 1,637 (82 %) | Days | Yes (breaks the exact-head merge rule D-ORCH-012/013 and PR59-SEC-01's record-names-head control) |
+| O4b | A single "docs gate" job for docs pushes with a valid proof | One job, no npm: tested-base tooling, proof lookup, gitleaks, record, aggregate (≈ 60–80 s → 2 billed); fast-lane skipped; a void proof still runs full | 132 × 1.5 = 198 | 2,273 (114 %) / 1,901 (95 %) | 1–2 weeks (topology change, policy PR first again) | Yes (D-ARCH-128 topology) |
+| O5 | D-ARCH-129 guard thresholds | Guards change no per-push cost; they can drop the reserved Wave-0-exit `wave-end` (−75) and nightly (−8). Lowering a threshold only brings degraded mode earlier | ≤ 83 | 2,388 (121 %) | Immediately | Architect (D-ARCH-129) |
+| — | Human levers (not agent decisions) | Public repository (unlimited hosted minutes), a spending limit above $0, or a self-hosted runner | all / partial | — | Immediately | Human (PLAN.md §8; CLOUD_BUDGET_MONTHLY_USD) |
+
+**Combined steady state.** O1 + O3:
+- Code: 115 × 7 = 805. Docs: 92 × 3.5 = 322. `security-integration`: 54 × 8 = 432. Lane C + nightly: 83.
+- Total **1,642 (82 %)** with six suites, **1,318 (66 %)** with today's suites.
+- This is the only combination that returns to the D-ARCH-129 band (64–72 %) without a ruling, and only once `security-integration` stays near today's cost.
+- With all six suites at 8 min, even O4b on top (92 docs pushes × 1.5 = another −138) only reaches 1,504 (75 %). That month also needs `security-integration` itself cheaper than the 8-minute estimate (suite selection within the job, option (b) of section 6).
+
+**Recommendation: O3, a push budget, adopted now; O1 (TASK-287) dispatched the day #59 merges.**
+- O3 is the only option that changes November and needs no ruling. Neither #59 (stage 2 is roughly cost-neutral at today's durations) nor O1 (earliest effect ≈ 11-25) can bring the remaining 13.8 days from 76 to ≤ 55 min/day.
+- Concrete budget for the rest of November:
+  - per PR review round, at most one code push and one combined record push (D-ORCH-117 already caps fix pushes at two);
+  - every code push follows a local `npm run lint && npm run typecheck && npm run test:unit` on the developer host;
+  - no unions without a P1 cause, and no re-runs;
+  - the orchestrator checks `npm run ci:minutes -- --forecast` daily against a **45 billed min/day** target, which ends November near 92 %.
+- If the forecast still crosses 100 %:
+  - O5 drops the reserved `wave-end` from November (−75);
+  - the human levers are offered, as D-ORCH-100 already does.
+- O1 is the structural fix for December onward. O4b and a cheaper `security-integration` go to principal-architect only if O1 + O3 measure above 72 % once the six suites are active.
+
 ## 7. Lane C and nightly (built; first run after merge)
 
 `lane-c.yml` (dispatch-only): `static`, `integration` (merged coverage across unit, unit-dom, integration, api and the

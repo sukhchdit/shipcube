@@ -196,7 +196,7 @@ describe('release tags and arguments', () => {
     const ci = readFileSync(join(findRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(ci).toContain(`  OASDIFF_IMAGE: ${OASDIFF_IMAGE}\n`);
     expect(ci).toContain(
-      '        run: node "$GATE_OPENAPI_BREAKING" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --image "$OASDIFF_IMAGE" --summary "$GITHUB_STEP_SUMMARY"\n',
+      '        run: node "${GATE_OPENAPI_BREAKING:?}" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --image "$OASDIFF_IMAGE" --summary "$GITHUB_STEP_SUMMARY"\n',
     );
   });
 

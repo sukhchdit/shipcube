@@ -3,7 +3,9 @@
  * SEC-TC-64, asserted over the committed `.github/workflows/ci.yml` (lane A) and the workflow policy checker.
  *
  * Lane A is the only hosted lane this task delivers. Lane C (workflow_dispatch: integration, images, e2e, iac) and the
- * coverage/contract-drift steps are TASK-015; the test titles say which part each test proves.
+ * coverage/contract-drift steps are TASK-015; the test titles say which part each test proves. Since TASK-286 (ADR-0023
+ * am. L item 3, D-ARCH-128) ci.yml has the stage-2 topology: the isolated scans are steps of `ci-gate`; the stage-1
+ * mutants below run against `tools/ci/fixtures/stage-1/ci.yml`, which the base-ref policy still holds to its pins.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,22 +15,32 @@ import { describe, expect, it } from '@jest/globals';
 import { findRepoRoot } from '../test-support/process.js';
 import {
   CI_GATE_ENV,
+  CI_GATE_ENV_TESTED_BASE,
   CI_GATE_RUN,
+  CI_GATE_RUN_TESTED_BASE,
+  CLASSIFY_ENV,
+  CLASSIFY_RUN,
+  FAST_LANE_OUTPUTS_STAGE_2,
+  LANE_B_EVIDENCE_SCRIPT_TESTED_BASE,
   LANE_SCOPE_ENV,
   LANE_SCOPE_RUN,
-  SCANS_OUTPUTS,
-  SECURITY_INTEGRATION_IF,
-  SECURITY_INTEGRATION_NEEDS,
-  SECURITY_INTEGRATION_SCRIPT,
+  LANE_SCOPE_RUN_TESTED_BASE,
+  SCANS_IF_STAGE_2,
+  SECURITY_INTEGRATION_IF_STAGE_2,
+  SECURITY_INTEGRATION_NEEDS_STAGE_2,
+  SECURITY_INTEGRATION_SCRIPT_TESTED_BASE,
   checkWorkflow,
   commandLines,
   laneBEvidenceProblems,
 } from './check-workflow-policy.mjs';
+import { LINT_CONTROL_PATHS } from './lane-scope.mjs';
 import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 import type { YamlMap, YamlNode } from './yaml-subset.mjs';
 
 const repoRoot = findRepoRoot();
 const ciText = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+/** The stage-1 workflow (before TASK-286), still accepted and pinned by the base-ref policy. */
+const stage1Text = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
 const parsed = parseYamlSubset(ciText).value ?? undefined;
 /** ci.yml without its comment lines (the header comment names what the file must NOT do). */
 const ciCode = ciText
@@ -53,11 +65,12 @@ const indexOf = (pattern: RegExp): number => {
   return index;
 };
 const triggers = map(ci.on, 'on');
-const scans = map(jobs.scans, 'scans');
-const scanSteps = (Array.isArray(scans.steps) ? scans.steps : []).map((step, index) => map(step, `scans step ${index}`));
+/** Stage 2 (D-ARCH-128): the isolated scans are steps of ci-gate. */
+const scans = map(jobs['ci-gate'], 'ci-gate');
+const scanSteps = (Array.isArray(scans.steps) ? scans.steps : []).map((step, index) => map(step, `ci-gate step ${index}`));
 const scanIndexOf = (pattern: RegExp): number => {
   const index = scanSteps.findIndex((step) => pattern.test(stepText(step)));
-  if (index < 0) throw new Error(`no scans step matches ${String(pattern)}`);
+  if (index < 0) throw new Error(`no ci-gate step matches ${String(pattern)}`);
   return index;
 };
 /** The arguments of the lane B verifier invocation (PR #23 R1-m2, R1-m3). */
@@ -67,14 +80,14 @@ const LANE_B_ARGS =
 const scanOrder = [/GITLEAKS_IMAGE/, /GATE_RUN_SEMGREP/, /GATE_CHECK_SECURITY_OWNED_PATHS/].map(scanIndexOf);
 
 describe('ci-policy: US-005 CI pipeline skeleton', () => {
-  it('AT-US-005-01: the PR fast lane runs install, lint/format, typecheck, unit and build in the documented order on ubuntu-24.04 with Node from .node-version; the security scans run in the parallel, isolated scans job that ci-gate needs (coverage and contract-drift steps join in TASK-015)', () => {
+  it('AT-US-005-01: the PR fast lane runs install, lint/format, typecheck, unit and build in the documented order on ubuntu-24.04 with Node from .node-version; the security scans run in ci-gate, the isolated last job (stage 2, D-ARCH-128; coverage and contract-drift steps join in TASK-015)', () => {
     expect(map(triggers.pull_request, 'pull_request').types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review']);
     expect(fastLane['runs-on']).toBe('ubuntu-24.04');
     expect(scans['runs-on']).toBe('ubuntu-24.04');
     const setupNode = steps.find((step) => str(step.uses).startsWith('actions/setup-node@'));
     expect(map(setupNode?.with, 'setup-node with')['node-version-file']).toBe('.node-version');
     const order = [
-      indexOf(/Classify changed paths/),
+      indexOf(/Classify changed paths and look up proofs/),
       indexOf(/npm ci --ignore-scripts/),
       indexOf(/npm run deps:rebuild/),
       indexOf(/npm run lint/),
@@ -86,9 +99,10 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       indexOf(/^Build must not mutate the tree/),
     ];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(order[0]).toBe(2); // checkout, setup-node, then the in-lane classifier (review m5 (a): no separate job)
+    // checkout, setup-node, the tested-base tooling, then the in-lane classifier (review m5 (a): no separate job)
+    expect(order[0]).toBe(3);
     expect(scanOrder).toEqual([...scanOrder].sort((a, b) => a - b));
-    expect(Object.keys(jobs)).toEqual(['fast-lane', 'scans', 'security-integration', 'ci-gate']);
+    expect(Object.keys(jobs)).toEqual(['fast-lane', 'security-integration', 'ci-gate']);
   });
 
   it('the lint step runs with a 4 GB heap and no other step env (type-aware ESLint exceeds the hosted runner default heap; a size only, never a preload)', () => {
@@ -103,7 +117,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     const afterBuild = indexOf(/^Build must not mutate the tree/);
     expect(afterLint).toBe(lint + 1);
     expect(afterLint).toBeLessThan(indexOf(/npm run typecheck/));
-    expect(str(steps[afterLint]?.run)).toBe('node "$GATE_CHECK_PORCELAIN" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"');
+    expect(str(steps[afterLint]?.run)).toBe('node "${GATE_CHECK_PORCELAIN:?}" --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"');
     expect(str(steps[afterLint]?.run)).toBe(str(steps[afterBuild]?.run));
     expect(str(steps[afterLint]?.if)).toBe("env.CODE == 'true'");
     // Mutation: dropping the post-lint step leaves the post-build gate alone, which required-gates reports.
@@ -114,14 +128,15 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     );
   });
 
-  it('[R1-m6] [PR #33 R1-M1] the scans job runs the openapi-breaking gate after Semgrep and before the record step (so its first real run is not hidden by a missing record), unconditionally, from the base-ref tool set', () => {
+  it('[R1-m6] [PR #33 R1-M1] [D-ARCH-128] ci-gate runs the openapi-breaking gate after Semgrep and before the record step (so its first real run is not hidden by a missing record), unless a docs push has a code proof, from the tested-base tool set', () => {
     const index = scanIndexOf(/GATE_OPENAPI_BREAKING/);
     expect(index).toBe(scanIndexOf(/GATE_RUN_SEMGREP/) + 1);
     expect(index + 1).toBe(scanIndexOf(/GATE_CHECK_SECURITY_OWNED_PATHS/));
-    expect(index + 2).toBe(scanSteps.length);
-    expect(scanSteps[index]?.if).toBeUndefined();
+    expect(index + 3).toBe(scanSteps.length);
+    expect(scanSteps[index]?.if).toBe(SCANS_IF_STAGE_2);
+    expect(scanSteps[scanIndexOf(/GATE_RUN_SEMGREP/)]?.if).toBe(SCANS_IF_STAGE_2);
     expect(scanSteps[index]?.env).toBeUndefined();
-    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking security-paths lane-scope; do/u);
+    expect(ciText).toMatch(/for tool in run-semgrep check-security-owned-paths openapi-breaking lane-scope; do/u);
     const dropped = ciText.replace(/--image "\$OASDIFF_IMAGE"/u, '');
     expect(checkWorkflow(dropped, 'ci.yml', { requiredGates: true }).map((f) => f.message)).toEqual([
       expect.stringContaining('ci.yml openapi-breaking gate step: the run: must be exactly'),
@@ -137,12 +152,12 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     }
   });
 
-  it('PR10-SEC-02: the scans job runs no npm, nothing from node_modules or the workspace, and takes a literal Node version without cache', () => {
+  it('PR10-SEC-02: ci-gate (with the folded scans) runs no npm, nothing from node_modules or the workspace, and takes a literal Node version without cache', () => {
     const text = scanSteps.map(stepText).join('\n');
     expect(text).not.toMatch(/(?:^|[\s;&|(])(?:npm|npx)\s/m);
     expect(text).not.toMatch(/node_modules/);
     expect(text).not.toMatch(/\$GITHUB_WORKSPACE\/[^"\s]*\.m?[jt]s/);
-    const setupNode = map(scanSteps.find((step) => str(step.uses).startsWith('actions/setup-node@'))?.with, 'scans setup-node with');
+    const setupNode = map(scanSteps.find((step) => str(step.uses).startsWith('actions/setup-node@'))?.with, 'ci-gate setup-node with');
     expect(setupNode).toEqual({ 'node-version': '24' });
     expect(checkWorkflow(ciText, 'ci.yml')).toEqual([]);
   });
@@ -157,8 +172,9 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(run).toContain('-v "$GATES_DIR/.gitleaks.toml:/config/gitleaks.toml:ro"');
   });
 
-  it('PR10-SEC-03 / review m3: Semgrep takes its rules, .semgrepignore and .gitignore from the base ref', () => {
-    const extract = str(scanSteps[scanIndexOf(/Gate tooling and scan configuration from the base ref/)]?.run);
+  it('PR10-SEC-03 / review m3 / PR46-SEC-17: Semgrep takes its rules, .semgrepignore and .gitignore from the tested base', () => {
+    const extract = str(scanSteps[scanIndexOf(/Gate tooling and scan configuration from the tested base/)]?.run);
+    expect(extract).toContain('git archive "$tools_ref" "$path" | tar -x -C "$gates/base"');
     expect(extract).toContain('for path in tools/ci .semgrep .gitleaks.toml .semgrepignore .gitignore; do');
     expect(str(scanSteps[scanIndexOf(/GATE_RUN_SEMGREP/)]?.run)).toContain('--rules-from "$GATES_DIR/.semgrep" --ignore-from "$GATES_DIR"');
   });
@@ -180,7 +196,11 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
       /\ngit checkout HEAD -- "\$suite" tests\/fixtures\/lint tools\/test-support tools\/lint\/lint-fixtures\.mjs \\\n\s+tools\/lint\/fixture-expectations\.mjs "\$config"\n/,
     );
     expect(run.trimEnd().endsWith('\nexit "$status"')).toBe(true);
-    expect(map(step?.env, 'base-ref lint fixture step env')).toEqual({ LINT_FIXTURE_MODE: 'no-weakening' });
+    expect(map(step?.env, 'base-ref lint fixture step env')).toEqual({
+      LINT_FIXTURE_MODE: 'no-weakening',
+      TOOLS_REF: '${{ steps.classify.outputs.tools_ref }}',
+    });
+    expect(run).toContain('git checkout "$TOOLS_REF" -- "${base_paths[@]}"');
     expect(run).not.toMatch(/--testNamePattern|--test-name-pattern|\s-t|--selectProjects/);
     // The base config runs the one suite, with no filter, swcrc lookup or cache the head could steer (review m2).
     const baseConfig = JSON.parse(readFileSync(join(repoRoot, 'tools', 'lint', 'jest.base-fixtures.config.json'), 'utf8')) as Record<
@@ -206,16 +226,16 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     for (const file of ['package.json', 'jest.config.ts']) {
       expect(readFileSync(join(repoRoot, file), 'utf8')).not.toContain('LINT_FIXTURE_MODE');
     }
-    const classify = str(steps[indexOf(/Classify changed paths/)]?.run);
-    expect(classify).toContain('jest\\.config\\.ts');
-    expect(classify).toContain('test-support');
-    expect(classify).toContain('git diff --name-only --no-renames "$RANGE_BASE...$RANGE_HEAD"');
-    // D-ARCH-126 / RR-3: CODE comes from the base-ref lane-scope (push range); .claude/settings.json is its DOCS_ONLY_PATHS exception.
-    expect(classify).toContain(
-      'node "$lane/tools/ci/lane-scope.mjs" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$GITHUB_EVENT_NAME"',
-    );
-    expect(classify).toContain('if grep -qx \'code_changed=false\' "$scope"; then');
-    expect(classify).not.toMatch(/GH_TOKEN|github.token|--lookup/u);
+    // D-ARCH-126 / D-ARCH-128: CODE and LINT_CONTROLS come from the tested base's lane-scope (push range; lint controls
+    // over the PR range, jest.config.ts and tools/test-support among them), written by the pinned classify step, which
+    // alone holds the token and runs before any head code.
+    const classify = steps[indexOf(/Classify changed paths and look up proofs/)];
+    expect(str(classify?.run)).toBe(CLASSIFY_RUN);
+    expect(map(classify?.env, 'classify env')).toEqual(CLASSIFY_ENV);
+    expect(classify?.id).toBe('classify');
+    for (const path of ['jest.config.ts', 'tools/test-support/process.ts', 'tests/fixtures/lint/x.ts', 'package.json'])
+      expect(LINT_CONTROL_PATHS.test(path)).toBe(true);
+    expect(LINT_CONTROL_PATHS.test('apps/api/package.json')).toBe(false);
   });
 
   it('AT-US-005-01: integration, images and e2e jobs are not scheduled for pull requests (D-ORCH-001); the one exception is security-integration (ADR-0023 am. G item 5)', () => {
@@ -223,35 +243,36 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     expect(ciText).not.toMatch(/npm run test:(?:integration|e2e)/);
   });
 
-  it('[ADR-0023 am. G item 5, am. L item 2] [RR-4] [RR-5] [PR46-SEC-01] security-integration: once per code tree on merge-candidate heads, after fast-lane and the supply-chain gates, base-ref manifests only, required by ci-gate (pinned exactly)', () => {
+  it('[ADR-0023 am. G item 5, am. L items 2-3] [RR-4] [RR-5] [PR46-SEC-01] [PR46-SEC-17] security-integration: once per code tree on merge-candidate heads, after fast-lane and the supply-chain gates, tested-base manifests only, required by ci-gate (pinned exactly)', () => {
     const job = map(jobs['security-integration'], 'security-integration');
-    expect(job.needs).toEqual([...SECURITY_INTEGRATION_NEEDS]);
-    expect(str(job.if)).toBe(SECURITY_INTEGRATION_IF);
+    expect(job.needs).toEqual([...SECURITY_INTEGRATION_NEEDS_STAGE_2]);
+    expect(str(job.if)).toBe(SECURITY_INTEGRATION_IF_STAGE_2);
     expect(map(job.permissions, 'permissions')).toEqual({ contents: 'read' });
-    expect(map(scans.outputs, 'scans outputs')).toEqual(SCANS_OUTPUTS);
-    expect(map(scans.permissions, 'scans permissions')).toEqual({ contents: 'read', actions: 'read', 'pull-requests': 'read' });
-    const lane = scanIndexOf(/GATE_LANE_SCOPE/);
+    expect(map(fastLane.outputs, 'fast-lane outputs')).toEqual(FAST_LANE_OUTPUTS_STAGE_2);
+    expect(map(fastLane.permissions, 'fast-lane permissions')).toEqual({ contents: 'read', actions: 'read', 'pull-requests': 'read' });
+    expect(map(scans.permissions, 'ci-gate permissions')).toEqual({ contents: 'read', actions: 'read', 'pull-requests': 'read' });
+    const lane = scanIndexOf(/GATE_LANE_SCOPE:\?\}" --root/);
     expect(lane).toBeLessThan(scanIndexOf(/GITLEAKS_IMAGE/));
     expect(scanSteps[lane]?.id).toBe('lane-scope');
-    expect(str(scanSteps[lane]?.run)).toBe(LANE_SCOPE_RUN);
+    expect(str(scanSteps[lane]?.run)).toBe(LANE_SCOPE_RUN_TESTED_BASE);
     expect(map(scanSteps[lane]?.env, 'lane scope env')).toEqual(LANE_SCOPE_ENV);
     const suites = (job.steps as YamlNode[])
       .map((step) => map(step, 'step'))
       .find((step) => /^Security integration suites/u.test(str(step.name)));
-    expect(commandLines(str(suites?.run))).toEqual([...SECURITY_INTEGRATION_SCRIPT]);
-    expect(map(jobs['fast-lane'], 'fast-lane').outputs).toEqual({ mode: '${{ steps.classify.outputs.mode }}' });
+    expect(commandLines(str(suites?.run))).toEqual([...SECURITY_INTEGRATION_SCRIPT_TESTED_BASE]);
+    expect(map(suites?.env, 'suites env')).toEqual({ TOOLS_REF: '${{ needs.fast-lane.outputs.tools_ref }}' });
   });
 
-  describe('[PR46-SEC-03] [review m1] the base-ref policy kills every security-integration / ci-gate mutant of both r1 reviews', () => {
+  describe('[PR46-SEC-03] [review m1] [TASK-286] the base-ref policy still kills every stage-1 security-integration / ci-gate mutant of both r1 reviews (tools/ci/fixtures/stage-1/ci.yml)', () => {
     const findingsOf = (text: string) => checkWorkflow(text, 'ci.yml', { requiredGates: true }).map((f) => `${f.rule}: ${f.message}`);
     const swap = (from: string, to: string) => {
-      expect(ciText.split(from)).toHaveLength(2);
-      return ciText.replace(from, () => to);
+      expect(stage1Text.split(from)).toHaveLength(2);
+      return stage1Text.replace(from, () => to);
     };
     const suitesLine =
       'node tools/ci/security-integration.mjs --root "$GITHUB_WORKSPACE" --manifest "$manifests/required-suites.json" --runners "$manifests/suite-runners.json" --out "$RUNNER_TEMP/security-integration" --summary "$GITHUB_STEP_SUMMARY"';
-    it('the committed ci.yml passes', () => {
-      expect(findingsOf(ciText)).toEqual([]);
+    it('the stage-1 workflow passes', () => {
+      expect(findingsOf(stage1Text)).toEqual([]);
     });
     it.each([
       ['W1 --dry-run appended to the suites step', suitesLine, `${suitesLine} --dry-run`, 'required-gates'],
@@ -385,7 +406,7 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     const push = map(triggers.push, 'push');
     expect(push.branches).toEqual(['main']);
     expect(push['paths-ignore']).toEqual(['docs/**', '.claude/**', '**/*.md']);
-    for (const job of [fastLane, scans]) expect(str(job.if)).toContain("vars.CI_MAIN_FAST_LANE == 'true'");
+    for (const job of [fastLane, scans]) expect(str(job.if)).toContain("vars.CI_MAIN_FAST_LANE == 'true'"); // scans = ci-gate
     expect(Object.keys(triggers)).not.toContain('schedule');
     expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
     // R2-M1 / PR46-SEC-13: pull requests into main only (CI_PULL_REQUEST_BRANCHES).
@@ -404,16 +425,20 @@ describe('ci-policy: US-005 CI pipeline skeleton', () => {
     const unit = indexOf(/npm run test:unit$/m);
     expect(indexOf(/npm run build/)).toBeGreaterThan(unit);
     const gate = map(jobs['ci-gate'], 'ci-gate');
-    expect(gate.needs).toEqual(['fast-lane', 'scans', 'security-integration']);
+    expect(gate.needs).toEqual(['fast-lane', 'security-integration']);
     expect(str(gate.if)).toBe("${{ !cancelled() && (github.event_name == 'pull_request' || vars.CI_MAIN_FAST_LANE == 'true') }}");
-    // RR-6: the aggregation is the base-ref lane-scope --gate (rules (a)-(f), unit-tested in lane-scope.test.ts).
+    // RR-6 / D-ARCH-128: the aggregation is the tested base's lane-scope --gate (rules (a)-(c), (e)-(g); lane-scope tests).
     const gateSteps = (gate.steps as YamlNode[]).map((step) => map(step, 'ci-gate step'));
     const aggregate = gateSteps.at(-1);
     expect(str(aggregate?.name)).toBe('Aggregate lane A');
-    expect(str(aggregate?.run)).toBe(CI_GATE_RUN);
-    expect(map(aggregate?.env, 'aggregate env')).toEqual(CI_GATE_ENV);
-    expect(map(gate.permissions, 'ci-gate permissions')).toEqual({ contents: 'read', actions: 'read' });
-    expect(gate['timeout-minutes']).toBe('3');
+    expect(str(aggregate?.run)).toBe(CI_GATE_RUN_TESTED_BASE);
+    expect(map(aggregate?.env, 'aggregate env')).toEqual(CI_GATE_ENV_TESTED_BASE);
+    expect(aggregate?.if).toBeUndefined();
+    expect(map(gate.permissions, 'ci-gate permissions')).toEqual({ contents: 'read', actions: 'read', 'pull-requests': 'read' });
+    expect(gate['timeout-minutes']).toBe('15');
+    // The stage-1 pins (CI_GATE_RUN / CI_GATE_ENV) are not used by the committed workflow any more.
+    expect(ciText).not.toContain(CI_GATE_RUN);
+    expect(Object.keys(CI_GATE_ENV)).toContain('SCANS');
   });
 
   it('AT-US-005-04 (lane A part): a pull request run pushes no image; the policy allows image pushes only in an `images` job gated on dispatch/main/tags (lane C images job: TASK-015)', () => {
@@ -467,9 +492,10 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
     expect(indexOf(/GATE_CHECK_DEP_AGE/)).toBeLessThan(install);
   });
 
-  it('SEC-TC-64 (CI part): gate tooling runs from the base ref when the base has it; tools run as `npm exec --no --`, never npx', () => {
-    const baseStep = steps[indexOf(/Gate tooling from the base ref/)];
-    expect(str(baseStep?.run)).toMatch(/git archive "\$RANGE_BASE"/);
+  it('SEC-TC-64 (CI part) / PR46-SEC-17 / PR33-SEC-09: gate tooling runs from the tested base (HEAD^1 of the test merge) when it has it, each gate as "${GATE_*:?}"; tools run as `npm exec --no --`, never npx', () => {
+    const baseStep = steps[indexOf(/Gate tooling from the tested base/)];
+    expect(str(baseStep?.run)).toMatch(/git archive "\$tools_ref" "\$path"/);
+    expect(str(baseStep?.run)).toContain('tools_ref=$(git rev-parse --verify --quiet "HEAD^1^{commit}" || true)');
     for (const tool of [
       'CHECK_WORKFLOW_POLICY',
       'CHECK_INSTALL_FLAGS',
@@ -481,20 +507,21 @@ describe('ci-policy: supply chain (SEC-TC-32, SEC-TC-45, SEC-TC-64 CI parts)', (
       'RUN_SEMGREP',
       'CHECK_SECURITY_OWNED_PATHS',
     ]) {
-      expect(ciText).toContain(`"$GATE_${tool}"`);
+      expect(ciText).toContain(`"\${GATE_${tool}:?}"`);
+      expect(ciText).not.toContain(`"$GATE_${tool}"`);
     }
     expect(ciText).not.toMatch(/(?:^|\s)npx\s/m);
     expect(ciText).toContain('npm exec --no -- commitlint');
   });
 
-  it('SEC-TC-48 (CI part, TASK-011; PR23-SEC-06): lane B evidence is verified only by the base-ref tools/quality, after npm ci and before any head code', () => {
+  it('SEC-TC-48 (CI part, TASK-011; PR23-SEC-06; PR46-SEC-17): lane B evidence is verified only by the tested base tools/quality, after npm ci and before any head code', () => {
     const index = indexOf(/Lane B evidence \(quality:check-evidence\)/);
     const run = str(steps[index]?.run);
     expect(steps[index]?.if).toBeUndefined();
-    expect(steps[index]?.env).toBeUndefined();
+    expect(map(steps[index]?.env, 'evidence env')).toEqual({ TOOLS_REF: '${{ steps.classify.outputs.tools_ref }}' });
     // The R2-n3 tripwire now lives in the base-ref checker (laneBEvidenceProblems); this head test only confirms it holds.
-    expect(laneBEvidenceProblems(run)).toEqual([]);
-    expect(run).toContain('git archive "$RANGE_BASE" tools/quality | tar -x -C "$quality/base"');
+    expect(laneBEvidenceProblems(run, LANE_B_EVIDENCE_SCRIPT_TESTED_BASE)).toEqual([]);
+    expect(run).toContain('git archive "$TOOLS_REF" tools/quality | tar -x -C "$quality/base"');
     expect(run).toContain(`node "$quality/base/tools/quality/check-evidence.mjs" ${LANE_B_ARGS}`);
     expect(run).not.toMatch(/--report-only|\$quality\/head|\|\| true/);
     expect(run.match(/--event "\$GITHUB_EVENT_NAME"/g)).toHaveLength(1);

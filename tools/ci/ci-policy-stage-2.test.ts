@@ -1,9 +1,9 @@
 /**
  * Stage 2 of ADR-0023 amendment L item 3 (D-ARCH-128; ruling rulings/wave-0-ci-minutes.md section 3 (4), section 5
- * TASK-286): the base-ref policy accepts the folded topology, `tools/ci/fixtures/stage-2/ci.yml` (the workflow the
- * second, workflow PR installs as .github/workflows/ci.yml), holds it to its own pins in full, and kills every mutant of
- * those pins; the routed security items PR46-SEC-11/-12/-15/-17 and PR42-SEC-18 are pinned with it. The stage-1
- * ci.yml keeps passing under the same checker (ci-policy.test.ts), and no mixture of the two passes.
+ * TASK-286): the base-ref policy accepts the folded topology, the committed `.github/workflows/ci.yml` since the workflow
+ * PR, holds it to its own pins in full, and kills every mutant of those pins; the routed security items
+ * PR46-SEC-11/-12/-15/-17 and PR42-SEC-18 are pinned with it. The stage-1 workflow (`tools/ci/fixtures/stage-1/ci.yml`)
+ * keeps passing under the same checker (ci-policy.test.ts), and no mixture of the two passes.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,8 +26,8 @@ import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 import type { YamlMap, YamlNode } from './yaml-subset.mjs';
 
 const repoRoot = findRepoRoot();
-const stage2 = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-2', 'ci.yml'), 'utf8');
-const stage1 = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+const stage2 = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+const stage1 = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
 function map(node: YamlNode | undefined, what: string): YamlMap {
   if (!isMap(node)) throw new Error(`${what} is not a mapping`);
   return node;
@@ -43,7 +43,7 @@ const swap = (from: string, to: string) => {
 };
 
 describe('[TASK-286] [D-ARCH-128] stage-2 topology accepted by the base-ref policy (two-step, policy first)', () => {
-  it('the stage-2 fixture passes with 0 findings, and so does the live stage-1 ci.yml (both topologies, each in full)', () => {
+  it('the committed stage-2 ci.yml passes with 0 findings, and so does the stage-1 workflow (both topologies, each in full)', () => {
     expect(findingsOf(stage2)).toEqual([]);
     expect(findingsOf(stage1)).toEqual([]);
     expect(TOPOLOGIES).toEqual(['stage-1', 'stage-2']);
@@ -447,7 +447,7 @@ describe('[TASK-286] the stage-2 pins kill every mutant (PR46-SEC-11/-12/-15/-17
     expect(findings.some((finding) => finding.startsWith(`${rule}:`))).toBe(true);
   });
 
-  it('[mixture] the live stage-1 ci.yml without its scans job is held to the stage-2 pins and fails', () => {
+  it('[mixture] the stage-1 workflow without its scans job is held to the stage-2 pins and fails', () => {
     const start = stage1.indexOf('  scans:\n');
     const end = stage1.indexOf('  # ADR-0023 am. G item 5 as amended by am. L item 2');
     expect(start).toBeGreaterThan(0);
@@ -722,5 +722,56 @@ describe('[PR #55 r1] [C1] PR55-SEC-01/-02/-09, R1-m1, R1-m3, R1-n5: the review 
     expect(laneFindings(e5).some((finding) => finding.startsWith('env-expression:'))).toBe(true);
     const bash = laneC.replace(install, install.replace('        run:', '        env:\n          BASH_ENV: docs/x.sh\n        run:'));
     expect(laneFindings(bash).some((finding) => finding.startsWith('preload-env:'))).toBe(true);
+  });
+});
+
+describe('[PR #55 r2] PR55-SEC-11, R2-n1, R2-n2, R2-n4: the follow-ups taken into the workflow PR', () => {
+  const laneC = readFileSync(join(repoRoot, '.github', 'workflows', 'lane-c.yml'), 'utf8');
+  const install = '      - name: Install (npm ci --ignore-scripts)\n        run: npm ci --ignore-scripts --no-audit --no-fund\n';
+  const laneFindings = (text: string) => checkWorkflow(text, 'lane-c.yml').map((f) => `${f.rule}: ${f.message}`);
+  const withStepEnv = (body: string) => laneC.replace(install, install.replace('        run:', `        env:\n${body}        run:`));
+
+  it.each([
+    'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT',
+    'GIT_CONFIG_KEY_0',
+    'GIT_CONFIG_VALUE_12',
+    'GIT_EXTERNAL_DIFF',
+    'HOME',
+    'XDG_CONFIG_HOME',
+    'NPM_CONFIG_SCRIPT_SHELL',
+    'npm_config_script_shell',
+    'NPM_CONFIG_USERCONFIG',
+    'npm_config_globalconfig',
+    'npm_config_node_options',
+    // R2-n4: a lower-case spelling of an original entry (N16).
+    'bash_env',
+  ])('[R2-n1] %s at step level of lane-c.yml is preload-env', (name) => {
+    expect(laneC.split(install).length).toBeGreaterThan(1);
+    expect(laneFindings(withStepEnv(`          ${name}: docs/x\n`)).some((finding) => finding.startsWith('preload-env:'))).toBe(true);
+  });
+
+  it('[R2-n1] controls: NODE_OPTIONS (the lint heap) and a GIT_CONFIG_ name that is not KEY/VALUE_<n> are not preload-env', () => {
+    const findings = laneFindings(withStepEnv("          NODE_OPTIONS: --max-old-space-size=4096\n          GIT_CONFIG_NOSYSTEM: '1'\n"));
+    expect(findings.filter((finding) => finding.startsWith('preload-env:'))).toEqual([]);
+  });
+
+  it('[R2-n2] an empty env: is an absent map (no env-expression)', () => {
+    expect(laneFindings(laneC)).toEqual([]);
+    const empty = laneC.replace(install, install.replace('        run:', '        env:\n        run:'));
+    expect(empty).not.toBe(laneC);
+    expect(laneFindings(empty)).toEqual([]);
+  });
+
+  it('[PR55-SEC-11] the stage-1 workflow env is held to the exact key set too', () => {
+    const workflowEnv = "  NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n  CHECKPOINT_DISABLE: '1'\n";
+    expect(stage1.split(workflowEnv)).toHaveLength(2);
+    expect(findingsOf(stage1)).toEqual([]);
+    for (const extra of ['DOCKER_HOST: tcp://evil:2375', "ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'"]) {
+      const mutated = stage1.replace(workflowEnv, `${workflowEnv}  ${extra}\n`);
+      expect(findingsOf(mutated)).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^required-gates: ci\.yml workflow env must have exactly the keys/u)]),
+      );
+    }
   });
 });
