@@ -154,6 +154,10 @@ export interface PrepareOptions {
 
 /** A validated entry waiting for the tokens of its personal values. */
 export interface PreparedEntry {
+  /** The validated organisation (lower-case UUID), or `null` for none (SYSTEM shard); the writer's stream check. */
+  readonly orgId: string | null;
+  /** The validated `user_id` column (the USER / API_KEY user, the SYSTEM actor of a job, else `null`). */
+  readonly userId: string | null;
   /** Every personal value of the entry, in the order {@link complete} expects their tokens. */
   readonly piiValues: readonly PiiValue[];
   /** The row with the tokens substituted (tokens in `piiValues` order). */
@@ -473,6 +477,24 @@ function routeTemplate(value: unknown): string | null {
   return value;
 }
 
+/*
+ * Shape predicates for callers that build entries from request data (PR42-SEC-15, D-TASK025-27): the capture hook
+ * passes a value only when the writer would accept it and `null` otherwise, so a client-shaped path parameter, user
+ * agent or template can never turn the entry into a 500 refusal.
+ */
+/** True for a value `entityId` accepts (an id, code or number; no `@`, `+`, space, `/`, `?`). */
+export const isAuditEntityId = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID.test(value);
+/** True for a value `origin.uaParsed` accepts (browser family + major / OS family, ≤ 120 characters). */
+export const isAuditUaParsed = (value: unknown): value is string => typeof value === 'string' && UA_PARSED.test(value);
+/** True for a value `origin.route` accepts (a route template, never a concrete URL). */
+export function isAuditRouteTemplate(value: unknown): value is string {
+  try {
+    return routeTemplate(value) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** A clear-text column in its shape (PR42-SEC-04), after the storable-text checks. */
 function shaped(value: unknown, field: string, max: number, pattern: RegExp): string | null {
   const text = optionalText(value, field, max);
@@ -555,6 +577,8 @@ export function prepareEntry(input: AuditEntryInput, options: PrepareOptions): P
   const piiValues = Object.freeze([...state.pii]);
 
   return {
+    orgId,
+    userId: actor.userId,
     piiValues,
     complete(tokens: readonly string[]): AuditRowDraft {
       if (tokens.length !== piiValues.length) throw new AuditWriteError('TOKENISER_FAILED');

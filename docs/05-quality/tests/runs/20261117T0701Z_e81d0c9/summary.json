@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "lane": "B",
+  "profile": "pr",
+  "git_sha": "e81d0c9909715f86a973db82c22c03156997d450",
+  "git_dirty": false,
+  "build_clean": true,
+  "stamp": "20261117T0701Z",
+  "generated_at": "2026-11-17T07:15:38Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300 (win32)",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i9-11950H @ 2.60GHz",
+    "cores": 16,
+    "ram_gb": 31.7,
+    "docker_version": "29.8.0",
+    "node_version": "v24.22.3",
+    "npm_version": "11.19.1"
+  },
+  "lockfile_sha256": "131213578ad188246f1c73d03efcdbcd7f190beb4395ff93a501897999c59df2",
+  "manifest_sha256": "c27f382e38a77d1b263c481d693cde155f5eedb70df5b68ca1b455f02de421d5",
+  "testcontainers_images": [
+    {
+      "image": "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "digest": "sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+    },
+    {
+      "image": "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a",
+      "digest": "sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+    }
+  ],
+  "env_overrides": [],
+  "suites": [
+    {
+      "name": "api",
+      "status": "passed",
+      "tests": 173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 17.9,
+      "report": "api.junit.xml",
+      "report_sha256": "5bb95d65cdce0e9a3269e77a8b065da76afe9d83ca74bba2dff6b9ff3cb0dda7"
+    },
+    {
+      "name": "catalog-c1-c14",
+      "status": "passed",
+      "tests": 102,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 36.8,
+      "report": "catalog-c1-c14.junit.xml",
+      "report_sha256": "29658889eadefdc94aee499707119c45da626eaecb85123568394e1131d7c237"
+    },
+    {
+      "name": "integration",
+      "status": "passed",
+      "tests": 331,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 481.9,
+      "report": "integration.junit.xml",
+      "report_sha256": "bebe46d33a83ce3a54e1a14dff1b0d3001cd3ff6dd3edc01cc48b3d45f4c37bd"
+    },
+    {
+      "name": "rls-cross-tenant",
+      "status": "passed",
+      "tests": 126,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 11.2,
+      "report": "rls-cross-tenant.junit.xml",
+      "report_sha256": "6e5c4b9c667eb771cca4948a9fa60ae81fc8dc4815c8f2a5484944c7c7845cc4"
+    },
+    {
+      "name": "unit",
+      "status": "passed",
+      "tests": 6719,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "duration_s": 279.7,
+      "report": "unit.junit.xml",
+      "report_sha256": "ec2ac3230004b41752ccb01152303298034316eb19b8d6be1d79d1214a837602"
+    }
+  ],
+  "attachments": [
+    {
+      "file": "coverage-summary.json",
+      "sha256": "2def51e33fce5afb716be273140bea898bc11c893a51de61c778b839522c429a"
+    }
+  ],
+  "coverage": {
+    "line": 99.06,
+    "branch": 97.08,
+    "per_package": {
+      "apps/admin": {
+        "line": 93.43,
+        "branch": 98.41
+      },
+      "apps/api": {
+        "line": 99.42,
+        "branch": 97.15
+      },
+      "apps/web": {
+        "line": 95.85,
+        "branch": 96.7
+      },
+      "apps/worker": {
+        "line": 70.56,
+        "branch": 93.94
+      },
+      "packages/audit": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/authz": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/config": {
+        "line": 99.91,
+        "branch": 96.89
+      },
+      "packages/shared": {
+        "line": 98.66,
+        "branch": 93.35
+      },
+      "packages/ui": {
+        "line": 100,
+        "branch": 100
+      },
+      "prisma": {
+        "line": 99.14,
+        "branch": 96.28
+      }
+    }
+  },
+  "jest_args": [
+    "api: -i --testTimeout=30000",
+    "catalog-c1-c14: -i --testTimeout=30000",
+    "integration: -i --testTimeout=30000",
+    "rls-cross-tenant: -i --testTimeout=30000"
+  ],
+  "verdict": "PASS",
+  "invalid_reasons": []
+}
