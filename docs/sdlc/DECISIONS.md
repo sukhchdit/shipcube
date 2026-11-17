@@ -2852,3 +2852,22 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **O2a/O4a/O4b** need an architect ruling and are not taken now.
 - **Optional human levers** (not an agent decision; offered per D-ORCH-100): make the repo public, set an Actions spending limit > $0, or add a self-hosted runner.
 - **Reversibility:** High.
+
+### D-TASK289-01..12 · 2026-11-17 · backend-developer (recorded by orchestrator) · TASK-289 rbacfu (PR #60 @df31b32, code 1353e78)
+- **01** Branch `feat/TASK-289-rbac-matrix-follow-up` as dispatched.
+- **02** The volatile header set is a superset of the record's five, plus `transfer-encoding`. An ETag is dropped only when it equals Express's weak hash of the observed body (`weakBodyEtag`); any other ETag stays compared.
+- **03** R1-n2: the `refresh-cookie:unknown` caller presents `__Host-rt_admin` (no new column).
+- **04** `SIGNATURE_HEADER_NAMES` is derived from `CREDENTIAL_HEADER_NAMES` and pinned to 3.
+- **05** Observe deadline: 30 s per request. A transport failure stops its row (the 900 s layer bound holds); errors are named, with `cause` = the transport error; `causeOf` reads by shape (Jest realms).
+- **06** The runner uses `fetchOnce`/`closeLoopbackServer`.
+- **07** TEST_FILES may import `@platform/authz/matrix`.
+- **08** The boundaries policy has two arms: resolved path, and the specifier itself.
+- **09** `STUBBED_CREDENTIAL_KINDS` drives `resolvePrincipal` (credential kinds only).
+- **10** The route-reached control proves the route is mounted and authorised, not handler behaviour.
+- **11** In-segment parameters are enumerated (fail closed on Express 5 optional groups).
+- **12** PR48-SEC-08 is closed here.
+- **Follow-ups:**
+  - qa-lead: rbac-matrix `min_tests` 21 → 26, plus PR48-SEC-02 CODEOWNERS in the activation PR;
+  - TASK-052: the tripwire compares `STUBBED_CREDENTIAL_KINDS` with the mounted authenticators.
+- **Lane A:** the first run failed commitlint on the PR title; the title was fixed and the PR closed/reopened (no new commit). This counts against the push budget as one extra run.
+- **Reversibility:** High.
