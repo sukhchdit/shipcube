@@ -76,9 +76,9 @@ Version 1.0 · 2026-11-12 · owner principal-architect · Draft for G2. Source o
 
 | NFR | Mechanism | ADR / design | Verification approach |
 |---|---|---|---|
-| PRIV-001 | Pino redaction paths generated from the classification registry + fixed secret keys; e-mail masking; request logs without bodies | ADR-0017 §1 | Sentinel unit tests on every logger path; e2e log grep |
+| PRIV-001 | Log key matcher (`packages/shared/src/logging`) tied to the classification registry by a build-time coverage test (ADR-0007 am. 13 item 2; was "redaction paths generated from the registry") + fixed secret keys; e-mail masking; request logs without bodies | ADR-0017 §1 | Sentinel unit tests on every logger path; e2e log grep |
 | PRIV-002 | `[REDACTED]` for SECRET before hashing; PERSONAL values tokenised to the vault; classification tag on every audited field | ADR-0007 | Audit tests with sentinel secrets per entity; classification coverage test |
-| PRIV-003 | Classification registry in `packages/audit` mapped to Prisma schema; build-time completeness test | ADR-0007, data-model.md | Schema-introspection test: 0 unclassified columns in tenant tables |
+| PRIV-003 | Classification registry in `packages/shared/src/classification` (ADR-0007 am. 13 item 1) mapped to Prisma schema; build-time completeness test | ADR-0007, data-model.md | Schema-introspection test: 0 unclassified columns in tenant tables |
 | PRIV-004 | Public tracking/shared quote projections with field allow-lists (DR-B31); notification log stores IDs/status only | ADR-0020 §5, api/openapi.yaml `PublicTracking` | Contract + snapshot tests on public endpoints; notification log inspection |
 | PRIV-005 | `consent_records` written for every banner decision; retention periods recorded per data category in compliance packs | ADR-0027 (flags), data-model.md compliance | API tests for consent; seed test for retention fields on 5 packs (PARTIAL: enforcement M4/M5) |
 
