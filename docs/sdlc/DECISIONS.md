@@ -3054,3 +3054,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **09** `createAuditPrivacy`/`createVaultTokeniser` are exported from @platform/audit (see PR61-SEC-02).
 - **10** The UA family table is closed (15 clients, 6 OS families).
 - **Reversibility:** High.
+
+### D-ORCH-127 · 2026-11-17 · sdlc-orchestrator · PR #61 fix cycle 1; lane-B queue hardened; host rules for reviewers
+- **PR #61** code review r1 (`14cdeed`) = CHANGES_REQUESTED.
+  - **MAJOR:** R1-M1 (= PR61-SEC-01) secret denylist word-splitting and coverage; R1-M2 (= PR61-SEC-02) vault/privacy exports outside the writer allow-list. The code scale keeps both MAJOR because the store is immutable (PR #42 R1-M1 precedent).
+  - **Fix cycle 1/3** is dispatched with M1, M2, m1, m4, m5 and INFO-05/06.
+  - **Routed:** m2 (AT-US-091-06 viewer half → TASK-073). m3/PR61-SEC-03/INFO-07 → principal-architect ruling (dispatched).
+  - **Lint lock:** M2 touches `eslint.config.mjs`, which PR #60 also holds. Second to merge merges main and retests (D-ORCH-121).
+- The **PR #57 fs-lock combination** needs no lane-B rerun (code reviewer analysis: C10 reaches the lock only via the unchanged harness; lane A on the merged head is enough). Closes the D-ORCH-126 open point.
+- **Lane-B queue hardening:**
+  - **Leftover runs:** an untracked run dir left by an earlier run (one reported as reaped but still alive) became `inventory.mjs`'s newest-only reference and failed TASK-290's run deterministically (D-TASK290 diagnosis). The queue script now moves untracked run dirs aside before each run.
+  - **Build retry:** the web `prerender` 10 s timeout under host load made a run INVALID. The queue allows one bounded retry on a build-INVALID, per D-ARCH-146.
+  - **Follow-ups → TASK-291 / quality-tools owner:** heavy.mjs pre-flight refuses untracked run dirs; inventory references tracked runs only.
+- **Host rule for reviewers:** targeted tests only, with `--maxWorkers=2`; no full unit, containers or heavy while the queue is busy. A TASK-287A run whose unit took 32 min instead of about 3 failed on the known `rls/api-cases` pooled-fetch flake (TASK-291) and was re-queued.
+- **Reversibility:** High.
