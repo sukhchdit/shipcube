@@ -2772,3 +2772,21 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **TASK-286 workflow PR #59** (head `055083b`; lane B 20261117T0317Z_daa9a7e; first stage-2 lane A run 44011154025) → code review r1 and security r1 dispatched. It also carries PR55-SEC-11 and code-review R2-n1..n4. Due in November.
 - **TASK-289 `rbacfu`** dispatched now that the `lint` lock is free (TASK-052/060 depend on it).
 - **Reversibility:** Medium (merged; revertible).
+
+### D-SEC-PR59-01 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #59 (TASK-286 workflow PR) security r1 = PASS_WITH_FOLLOW-UPS at `055083b` (record `2d6818b`)
+- **Decision:** 0 Critical/High/Medium; 1 LOW, 1 INFO.
+  - **Verified:** live `ci.yml` = reviewed fixture `4597259`; stage-1 fixture = main's `ci.yml` `84ba61b`; merge `7abdb03` clean. PR55-SEC-11 item 1 is closed; R2-n1/R2-n2 are verified.
+  - **PR59-SEC-01 (LOW):** checkout and setup-node `with:` inputs are unpinned, so a HEAD-changing edit could choose its own tested base. → TASK-287, **before any other `.github/workflows/**` PR merges**. Fix: pin the `with:` maps; then `HEAD == $GITHUB_SHA` in `TESTED_BASE_SCRIPT` (policy first).
+  - **PR59-SEC-02 (INFO):** lane-c/nightly deny-list gaps → 015-C.
+- **Interim rules once #59 is live:**
+  - The 24 h proof-age rule ends when the final lane A run before a merge was a stage-2 run.
+  - The D-ORCH-103 P1 (c) widening ends for stage-2 runs.
+  - P1 is mechanical for inherited proofs and procedural at merge time (diff the ci-gate tested base against `origin/main`, filtered by the void set and the PR's own paths).
+  - All three stay for stage-1 runs.
+- **Reversibility:** High.
+
+### D-ORCH-116 · 2026-11-17 · sdlc-orchestrator · Standing merge rule: record names head for workflow PRs (PR59-SEC-01 control)
+- **Decision:** until TASK-287 closes PR59-SEC-01, the orchestrator merges a PR that changes `.github/workflows/**` only after checking that a security record on the branch names the PR's code head. ci-gate success alone is not sufficient.
+- **PR #59 next step:** its proof is voided by PR #54's squash (`44637dd` touched `eslint.config.mjs`, `tools/eslint-rules/**` and `tests/fixtures/**`: PR46-SEC-16 working as designed). After code review r1: merge main into the branch, push, run a full stage-2 lane A. If the record step turns red (stale event base), a short security round 2 names the merge head.
+- **TASK-287 card line** (added to the D-ORCH-109 fold list): PR59-SEC-01 pins + `HEAD == $GITHUB_SHA`.
+- **Reversibility:** High.
