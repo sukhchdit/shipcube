@@ -13,6 +13,8 @@ import {
   type CompiledAudit,
   entryFor,
   failedOutcomeApplies,
+  filterText,
+  MAX_FILTER_TEXT,
   routeKey,
 } from './descriptor-runtime.js';
 
@@ -100,6 +102,43 @@ describe('[AT-US-086-02] an incomplete audit descriptor fails to mount, naming m
     for (const action of ['LOGIN', 'LOGOUT', 'MFA_ENROLLED', 'STATE_TRANSITION'] as const) {
       expect(() => compileAudit(route({ audit: audited(action, 'session') }))).toThrow(SlotNotImplementedError);
     }
+  });
+});
+
+describe('[PR56-SEC-04] a route with x-audit.additional entries is refused at mount until a recording seam exists', () => {
+  it('a non-empty additional[] throws naming the operation; an empty one compiles', () => {
+    const additional = [{ action: 'UPDATE', entity: 'quote_share', sensitivity: 'NORMAL', when: 'a previous share is revoked' }] as const;
+    const base = { action: 'CREATE', entity: 'address', sensitivity: 'NORMAL', reasonRequired: false } as const;
+    const withSecond = route({ audit: { ...base, additional } });
+    expect(() => compileAudit(withSecond)).toThrow(SlotNotImplementedError);
+    expect(() => compileAudit(withSecond)).toThrow(/x-audit.additional entries on probeRoute/);
+    expect(compiled(route({ audit: { ...base, additional: [] } })).mode).toBe('write');
+  });
+});
+
+describe('[PR56-SEC-01] filterText: every client-chosen filter value becomes text the writer accepts', () => {
+  const NUL = String.fromCharCode(0);
+  it.each<[string, unknown, string]>([
+    ['plain text as is', 'Pune', 'Pune'],
+    ['an empty string in its JSON form', '', '""'],
+    ['NUL in its JSON form (escaped)', `a${NUL}b`, JSON.stringify(`a${NUL}b`)],
+    ['a number as JSON', 37, '37'],
+    ['an array holding NUL as JSON (escaped)', [NUL], JSON.stringify([NUL])],
+    ['an empty array', [], '[]'],
+  ])('%s', (_label, value, expected) => {
+    const text = filterText(value);
+    expect(text).toBe(expected);
+    expect(text).not.toContain(NUL);
+    expect(text.length).toBeGreaterThan(0);
+  });
+
+  it('a long value is cut to MAX_FILTER_TEXT code points ending in an ellipsis, never splitting a surrogate pair', () => {
+    const astral = String.fromCodePoint(0x1f600);
+    const cut = filterText(astral.repeat(MAX_FILTER_TEXT + 5));
+    expect(Array.from(cut)).toHaveLength(MAX_FILTER_TEXT);
+    expect(cut.endsWith(String.fromCharCode(0x2026))).toBe(true);
+    expect(cut.startsWith(astral.repeat(MAX_FILTER_TEXT - 1))).toBe(true);
+    expect(filterText('x'.repeat(MAX_FILTER_TEXT))).toBe('x'.repeat(MAX_FILTER_TEXT));
   });
 });
 

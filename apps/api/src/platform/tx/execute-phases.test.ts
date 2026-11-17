@@ -25,7 +25,15 @@ import { fixtureRoute, type FixtureRouteSpec } from '../routing/tests/fixture-ro
 import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
 import { DRAIN_TIMEOUT_MS } from '../runtime/shutdown.js';
 import { AFTER_COMMIT_FAILED_EVENT, createAfterCommitQueue } from './after-commit.js';
-import { AfterCommitNotWiredError, CALL_DEADLINE_MS, DEADLINE_RETRY_AFTER_SECONDS, executeSlot, type ExecuteOptions } from './execute.js';
+import type { AuditCapture } from '../audit/capture.js';
+import {
+  AfterCommitNotWiredError,
+  CALL_DEADLINE_MS,
+  DEADLINE_RETRY_AFTER_SECONDS,
+  executeSlot,
+  type ExecuteOptions,
+  FAILED_ENTRY_WAIT_MS,
+} from './execute.js';
 
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
@@ -708,5 +716,108 @@ describe('afterCommit wiring', () => {
     const route = phased({ handler: () => ({ status: 204 }), afterCommit: () => undefined });
     expect(() => executeSlot({ tenantTx: fakeRunner([]) })(route)).toThrow(AfterCommitNotWiredError);
     expect(() => executeSlot({ tenantTx: fakeRunner([]), afterCommit: createAfterCommitQueue(silent) })(route)).not.toThrow();
+  });
+});
+
+describe('[D-TASK029-16] [R1-m4] returned failures and the FAILED entry in the tx slot', () => {
+  /** A capture double: records `failed-entry` (or hangs on it when `hang`), mounts every route as a write route. */
+  function captureRecording(events: string[], hang = false): AuditCapture {
+    return {
+      mount: () => ({
+        readOnlyHandler: false,
+        inTransaction: () => Promise.resolve(),
+        afterCommit: () => Promise.resolve(),
+        afterFailure: (_request, error) => {
+          events.push(`failed-entry ${error instanceof Error ? error.name : typeof error}`);
+          return hang ? new Promise<void>(() => undefined) : Promise.resolve();
+        },
+      }),
+      mountDenials: () => undefined,
+      denied: () => Promise.resolve(),
+    };
+  }
+
+  function appCapturing(route: RouteDescriptor, events: string[], hang = false): Express {
+    return createApp({
+      health: [],
+      modules: [{ name: 't', routes: [route] }],
+      logger: silent,
+      pipeline: {
+        ...defaultPipelineSlots({ tenantTx: undefined }),
+        execute: executeSlot({ tenantTx: fakeRunner(events), capture: captureRecording(events, hang) }),
+      },
+    });
+  }
+
+  it('a returned 404 rolls the handler transaction back and is sent as returned; the capture sees it as a failure', async () => {
+    const events: string[] = [];
+    const route = phased({ handler: () => ({ status: 404, body: { code: 'NOT_FOUND' }, headers: { 'x-probe': 'kept' } }) });
+    const response = await request(appCapturing(route, events), '/api/v1/things', { method: 'POST' });
+    expect([response.status, JSON.parse(response.body), response.headers.get('x-probe')]).toEqual([404, { code: 'NOT_FOUND' }, 'kept']);
+    expect(events).toEqual(['begin:rw', 'rollback', 'failed-entry RouteReturnedError']);
+  });
+
+  it('a returned 2xx still commits', async () => {
+    const events: string[] = [];
+    expect(
+      (await request(appCapturing(phased({ handler: () => ({ status: 201 }) }), events), '/api/v1/things', { method: 'POST' })).status,
+    ).toBe(201);
+    expect(events).toEqual(['begin:rw', 'commit']);
+  });
+
+  it('the FAILED entry is not awaited past FAILED_ENTRY_WAIT_MS: the original failure is answered', async () => {
+    const events: string[] = [];
+    const route = phased({
+      handler: () => {
+        throw new AppError('CONFLICT');
+      },
+    });
+    const started = Date.now();
+    const response = await request(appCapturing(route, events, true), '/api/v1/things', { method: 'POST' });
+    const waited = Date.now() - started;
+    expect(response.status).toBe(409);
+    expect(waited).toBeGreaterThanOrEqual(FAILED_ENTRY_WAIT_MS - 50);
+    expect(events).toEqual(['begin:rw', 'rollback', 'failed-entry AppError']);
+  });
+
+  it('a client that disconnected gets no FAILED entry (the failure is the disconnect)', async () => {
+    const events: string[] = [];
+    let entered: () => void = () => undefined;
+    const inCall = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const route = phased({
+      call: async () => {
+        entered();
+        await new Promise<void>(() => undefined);
+      },
+      handler: () => ({ status: 200 }),
+    });
+    const app = appCapturing(route, events);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    try {
+      const controller = new AbortController();
+      const pending = fetch(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1/things`, {
+        method: 'POST',
+        signal: controller.signal,
+      }).catch((error: unknown) => error);
+      await inCall;
+      controller.abort();
+      await pending;
+      await delay(200); // the abandoned call rejects with the client-gone reason; the slot then decides on the entry
+      expect(events).toEqual([]);
+      // control: the same failure without a disconnect is recorded
+      const control = await request(
+        appCapturing(phased({ call: () => Promise.reject(new AppError('CONFLICT')), handler: () => ({ status: 200 }) }), events),
+        '/api/v1/things',
+        { method: 'POST' },
+      );
+      expect(control.status).toBe(409);
+      expect(events).toEqual(['failed-entry AppError']);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

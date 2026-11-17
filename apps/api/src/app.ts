@@ -111,7 +111,7 @@ export function createApp(deps: AppDependencies): Express {
     defaultPipelineSlots({
       tenantTx: deps.tenantTx,
       afterCommit,
-      ...(deps.auditConfig === undefined ? {} : { auditConfig: deps.auditConfig }),
+      ...(deps.auditConfig === undefined ? {} : { auditConfig: deps.auditConfig, auditLog: logger }),
     });
 
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));

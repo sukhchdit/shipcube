@@ -93,7 +93,10 @@ export interface RouteStream {
   complete(sink: RouteStreamSink, signal: AbortSignal): Promise<void>;
 }
 
-/** The handler's response; the pipeline sends it after the transaction committed, so a rollback never sends 2xx. */
+/**
+ * The handler's response; the pipeline sends it after the transaction committed, so a rollback never sends 2xx. A status
+ * of 400 or more rolls the handler transaction back and is sent as returned (ADR-0007 §Capture; D-TASK029-16).
+ */
 export interface RouteResult {
   readonly status: number;
   /** JSON body; omit for 204/304 and for a stream result. */
@@ -101,6 +104,18 @@ export interface RouteResult {
   readonly headers?: Readonly<Record<string, string>>;
   /** A body completed after COMMIT (see `RouteStream`); exclusive with `body`. */
   readonly stream?: RouteStream;
+}
+
+/**
+ * A result the handler RETURNED with a status of 400 or more (ADR-0007 §Capture, REQ-AUDIT-010; D-TASK029-16): the tx
+ * slot throws it inside the handler transaction so that nothing the handler wrote commits, then sends `result` as the
+ * handler returned it. The audit capture writes the FAILED entry of a 409, 422 or 5xx in a transaction of its own.
+ */
+export class RouteReturnedError extends Error {
+  constructor(readonly result: RouteResult) {
+    super(`the handler returned ${String(result.status)}`);
+    this.name = 'RouteReturnedError';
+  }
 }
 
 /**

@@ -127,6 +127,16 @@ export function compileAudit(route: RouteDescriptor): CompiledAudit | undefined 
       'the domain module that records it (TASK-029 D-TASK029-05)',
     );
   }
+  // PR56-SEC-04: a conditional second entry (`x-audit.additional[]`, SEC-P3-28, SEC-P3-32) has no recording seam yet,
+  // so such a route would mount without it; refused until the seam exists (D-TASK029-19).
+  if ((route.audit.additional?.length ?? 0) > 0) {
+    throw new SlotNotImplementedError(
+      'audit',
+      route.operationId,
+      'x-audit.additional entries',
+      'a recording seam for conditional audit entries (PR56-SEC-04)',
+    );
+  }
   if (entity === null || !ENTITY_NAME.test(entity)) throw new AuditDescriptorError(route, 'an audited route names its entity');
   const idParam = `${camel(entity)}Id`;
   const base = { route, action, entityName: entity, sensitive: sensitivity === 'SENSITIVE' } as const;
@@ -144,13 +154,32 @@ const sourceAppOf = (clientApp: string): AuditSourceApp => (clientApp === 'web' 
 /** Parses a raw user agent into `Family major / OS`; the capture keeps its output only in the writer's shape. */
 export type UserAgentParser = (userAgent: string) => unknown;
 
+/** Code points kept of one filter value in the summary (well inside the writer's 8,192-code-unit personal value). */
+export const MAX_FILTER_TEXT = 1_024;
+const NUL = String.fromCharCode(0);
+const ELLIPSIS = String.fromCharCode(0x2026);
+
+/**
+ * One filter value as text the writer always accepts (PR56-SEC-01, code review R1-m2). The writer refuses an empty
+ * value, a NUL and more than 8,192 code units, and the client chooses the query, so a raw copy would let it drop a
+ * NORMAL list's VIEW entry (or fail a SENSITIVE list with 503) at will. An empty value, or one holding NUL, is kept in
+ * its JSON string form (quoted, NUL escaped); a longer one is cut to {@link MAX_FILTER_TEXT} code points ending in an
+ * ellipsis. Lone surrogates cannot come through the query parser, and the writer normalises them anyway.
+ */
+export function filterText(value: unknown): string {
+  // `JSON.stringify` answers undefined for a function or a symbol (never a validated query value): kept as "undefined".
+  const raw = typeof value === 'string' ? value : String(JSON.stringify(value));
+  const text = raw === '' || raw.includes(NUL) ? JSON.stringify(raw) : raw;
+  const points = Array.from(text);
+  return points.length <= MAX_FILTER_TEXT ? text : `${points.slice(0, MAX_FILTER_TEXT - 1).join('')}${ELLIPSIS}`;
+}
+
 /** A list view's filter summary (DR-A13): the validated query, every value tokenised (data-model §3.4 `details`). */
 function filterSummary(query: Readonly<Record<string, unknown>>): AuditValue {
   const summary: Record<string, AuditValue> = {};
   for (const [key, value] of Object.entries(query).sort(([a], [b]) => (a < b ? -1 : 1))) {
     if (value === undefined) continue;
-    const text = typeof value === 'string' ? value : JSON.stringify(value);
-    summary[key] = pii({ entityName: 'audit_entry', field: 'filter', classification: 'PERSONAL', value: text, subject: null });
+    summary[key] = pii({ entityName: 'audit_entry', field: 'filter', classification: 'PERSONAL', value: filterText(value), subject: null });
   }
   return summary;
 }

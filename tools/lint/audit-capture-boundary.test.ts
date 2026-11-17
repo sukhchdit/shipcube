@@ -1,10 +1,13 @@
 /**
  * The api-side audit composition boundary (REQ-AUDIT-001, ADR-0007; TASK-029, PR #42 code review R3-n1/R3-n2, story
  * scenario AT-US-086-03), probed with the repository's real eslint.config.mjs:
- *  - R3-n1: only the tx slot (apps/api/src/platform/tx) value-imports the capture hook (platform/audit/capture.ts);
- *    any other api module is reported with the composition message, and a type-only import passes;
+ *  - R3-n1: only the tx slot (apps/api/src/platform/tx) and the pipeline composition (platform/routing/pipeline.ts,
+ *    PR56-SEC-02) value-import the capture hook (platform/audit/capture.ts); any other api module, the rest of
+ *    platform/routing included, is reported with the composition message, and a type-only import passes;
  *  - R3-n2: a two-hop re-export through an allow-listed folder is not seen by the resolved-file policy (known residual
- *    D-TASK025-22), pinned as a tripwire, plus a source scan proving no such re-export exists in the repository today;
+ *    D-TASK025-22), pinned as a tripwire, plus a source scan proving no such re-export exists in the repository today,
+ *    over every allow-listed api folder AND every importer allowed to take capture.ts (PR56-SEC-02: the tx slot
+ *    re-exported the capture factory, which the folder-only scan did not see);
  *  - AT-US-086-03: `platform/audit-writer-allowlist` refuses the writer in a feature module and lets the allow-listed
  *    callers through.
  *
@@ -57,6 +60,8 @@ const REPO: ProbeGroup = {
     'apps/api/src/platform/routing/lint-probe-bad-capture.ts': valueImport('../audit/capture.js'),
     'apps/api/src/modules/orders/service/lint-probe-ok-capture-type.ts': typeImport('../../../platform/audit/capture.js'),
     'apps/api/src/platform/tx/lint-probe-ok-capture.ts': valueImport('../audit/capture.js'),
+    // PR56-SEC-02: the pipeline composition builds the capture (exact file; the rest of platform/routing is refused)
+    'apps/api/src/platform/routing/pipeline.ts': valueImport('../audit/capture.js'),
     // AT-US-086-03
     'apps/api/src/modules/orders/service/lint-probe-bad-writer.ts': WRITER_IMPORT,
     'apps/api/src/modules/identity/lint-probe-ok-writer.ts': WRITER_IMPORT,
@@ -157,6 +162,12 @@ describe('[R3-n1] only the tx slot value-imports the capture hook (apps/api/src/
   it('[R3-n1] control: the same value import from the tx slot (apps/api/src/platform/tx) is not reported', () => {
     expect(findingsOf(REPO, 'apps/api/src/platform/tx/lint-probe-ok-capture.ts').filter(({ ruleId }) => ruleId === BOUNDARIES)).toEqual([]);
   });
+
+  it('[PR56-SEC-02] the pipeline composition (platform/routing/pipeline.ts) may value-import capture.ts; it is an exact file', () => {
+    expect(findingsOf(REPO, 'apps/api/src/platform/routing/pipeline.ts').filter(({ ruleId }) => ruleId === BOUNDARIES)).toEqual([]);
+    // ...while another file of the same folder stays refused (the R3-n1 row above)
+    expect(compositionFindings(REPO, 'apps/api/src/platform/routing/lint-probe-bad-capture.ts')).toHaveLength(1);
+  });
 });
 
 describe('[R3-n2] two-hop re-exports of the audit composition', () => {
@@ -215,6 +226,24 @@ function apiAllowList(): string[] {
   return [...literal.matchAll(/'([^']+)'/gu)].map(([, glob = '']) => glob).filter((glob) => glob.startsWith('apps/api/'));
 }
 
+/**
+ * PR56-SEC-02: the importers allowed to take capture.ts outside the allow-list (the tx slot folder and the pipeline
+ * composition file), read from the `api-tx-slot` and `api-pipeline-composition` element patterns of eslint.config.mjs.
+ */
+function captureImporters(): string[] {
+  const config = readFileSync(join(repoRoot, 'eslint.config.mjs'), 'utf8');
+  const patterns = [...config.matchAll(/\{ pattern: '([^']+)', category: '(api-tx-slot|api-pipeline-composition)' \}/gu)].map(
+    ([, pattern = '']) => pattern,
+  );
+  if (patterns.length !== 2)
+    throw new Error(`expected the two capture importer patterns in eslint.config.mjs, found ${String(patterns.length)}`);
+  return patterns;
+}
+
+/** The non-test source files a pattern names: a folder glob (`dir/**`) or one file. */
+const sourcesOf = (pattern: string): string[] =>
+  pattern.endsWith('/**') ? listSources(join(repoRoot, ...pattern.slice(0, -3).split('/'))) : [join(repoRoot, ...pattern.split('/'))];
+
 describe('[R3-n2] source-scan tripwire: allow-listed api folders re-export nothing from platform/audit', () => {
   it('the scanner recognises value re-exports into platform/audit and ignores type-only ones and other targets', () => {
     const file = join(repoRoot, 'apps', 'api', 'src', 'platform', 'authz', 'x.ts');
@@ -248,6 +277,25 @@ describe('[R3-n2] source-scan tripwire: allow-listed api folders re-export nothi
         ),
       );
     expect(offenders).toEqual([]);
+  });
+
+  it('[PR56-SEC-02] the capture importers (tx slot, pipeline composition) re-export nothing from platform/audit', () => {
+    const importers = captureImporters();
+    expect(importers).toEqual(['apps/api/src/platform/tx/**', 'apps/api/src/platform/routing/pipeline.ts']);
+    const files = importers.flatMap(sourcesOf);
+    expect(files.length).toBeGreaterThan(1);
+    const offenders = files.flatMap((file) =>
+      auditReExports(file, readFileSync(file, 'utf8')).map(
+        (specifier) => `${relative(repoRoot, file).split(sep).join('/')} -> ${specifier}`,
+      ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('[PR56-SEC-02] mutant: the re-export PR #56 r1 found in tx/execute.ts is what the scan reports', () => {
+    const file = join(repoRoot, 'apps', 'api', 'src', 'platform', 'tx', 'execute.ts');
+    const mutant = `${readFileSync(file, 'utf8')}\nexport { type AuditCapture, type AuditCaptureOptions, createAuditCapture } from '../audit/capture.js';\n`;
+    expect(auditReExports(file, mutant)).toEqual(['../audit/capture.js']);
   });
 });
 

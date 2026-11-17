@@ -20,6 +20,8 @@ import type { NextFunction, Request, Response } from 'express';
 import Joi from 'joi';
 
 import { createApp } from '../../app.js';
+import { DbError } from '../db/index.js';
+import { dbErrorMapping } from '../db/map-db-error.js';
 import { createWithTenantTx } from '../db/with-tenant-tx.js';
 import { healthRoutes } from '../health/router.js';
 import { defineRoute, type Principal, type RouteDescriptor, type RouteSpec } from '../routing/define-route.js';
@@ -27,7 +29,8 @@ import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js
 import { ANONYMOUS, markPrivateResponse, readonlySet, setPrincipal } from '../routing/route-state.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { LOOPBACK_TEST_TIMEOUT_MS } from '../routing/tests/loopback.js';
-import { createAuditCapture } from '../tx/execute.js';
+import { createAuditCapture } from './capture.js';
+import { MAX_FILTER_TEXT } from './descriptor-runtime.js';
 
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
@@ -97,11 +100,19 @@ function runnerWith(admission?: { maxConcurrentTx: number; waitMs: number }) {
 
 /** Store double: appends by writing one statement into the handed transaction; optionally gated or failing. */
 let storeFailure: Error | undefined;
+/** When set, `storeFailure` fails only the next append (the later ones succeed). */
+let storeFailsOnce = false;
+let appendAttempts = 0;
 let storeGate: Promise<void> | undefined;
 const store: AuditStore = {
   appendBatch: async (db, rows) => {
+    appendAttempts += 1;
     if (storeGate !== undefined) await storeGate;
-    if (storeFailure !== undefined) throw storeFailure;
+    if (storeFailure !== undefined) {
+      const failure = storeFailure;
+      if (storeFailsOnce) storeFailure = undefined;
+      throw failure;
+    }
     await db.$executeRaw`AUDIT APPEND ${rows}`;
     return rows.map((row, index) => ({
       id: row.id,
@@ -158,6 +169,9 @@ const ADDRESS_ROUTE = {
 const route = (spec: Partial<RouteSpec> & Pick<RouteSpec, 'operationId' | 'method' | 'path' | 'audit' | 'handler'>): RouteDescriptor =>
   defineRoute({ ...ADDRESS_ROUTE, ...spec } as RouteSpec);
 
+/** When set, updateAddress fails with this congestion class instead of 409 (R1-m4). */
+let congestion: 'TRANSACTION_UNAVAILABLE' | 'STATEMENT_TIMEOUT' | 'LOCK_TIMEOUT' | undefined;
+
 const insertBusiness = async (db: unknown, id: string): Promise<void> => {
   await (db as FakeTx).$executeRaw`INSERT INTO business ${id}`;
 };
@@ -184,6 +198,7 @@ const routes: RouteDescriptor[] = [
     schema: { params: Joi.object({ addressId: Joi.string().required() }), body: Joi.object({ city: Joi.string().required() }) },
     handler: async (ctx) => {
       await insertBusiness(ctx.db, String(ctx.input.params['addressId']));
+      if (congestion !== undefined) throw new DbError(dbErrorMapping(503, congestion, { retryable: true }));
       throw new AppError('CONFLICT');
     },
   }),
@@ -193,7 +208,7 @@ const routes: RouteDescriptor[] = [
     path: '/address-book',
     permission: 'address_book:read',
     audit: { action: 'VIEW', entity: 'address', sensitivity: 'NORMAL', reasonRequired: false },
-    schema: { query: Joi.object({ city: Joi.string() }) },
+    schema: { query: Joi.object({ city: Joi.string().allow('') }) },
     handler: () => ({ status: 200, body: { data: Array.from({ length: 37 }, (_value, index) => ({ id: String(index) })) } }),
   }),
   route({
@@ -214,8 +229,11 @@ const routes: RouteDescriptor[] = [
     path: '/address-book/:addressId',
     audit: { action: 'DELETE', entity: 'address', sensitivity: 'NORMAL', reasonRequired: false },
     schema: { params: Joi.object({ addressId: Joi.string().required() }) },
-    // returned, not thrown: 409 commits as a FAILED entry in the same transaction, 404 commits nothing worth an entry
-    handler: (ctx) => ({ status: ctx.input.params['addressId'] === 'locked' ? 409 : 404, body: { code: 'X' } }),
+    // writes, then RETURNS (not throws) 409 or 404: either rolls the write back (D-TASK029-16)
+    handler: async (ctx) => {
+      await insertBusiness(ctx.db, String(ctx.input.params['addressId']));
+      return { status: ctx.input.params['addressId'] === 'locked' ? 409 : 404, body: { code: 'X' } };
+    },
   }),
   route({
     operationId: 'verifyAddress',
@@ -249,6 +267,46 @@ const routes: RouteDescriptor[] = [
       return { status: 200, body: { ok: true } };
     },
   }),
+  route({
+    operationId: 'chargeAddress',
+    method: 'post',
+    path: '/address-book/:addressId/charge',
+    audit: { action: 'UPDATE', entity: 'address', sensitivity: 'NORMAL', reasonRequired: false },
+    schema: { params: Joi.object({ addressId: Joi.string().required() }) },
+    // ADR-0014 shape: the business row and the idempotency completion in the handler transaction; the first attempt
+    // RETURNS 500, the retry succeeds.
+    handler: async (ctx) => {
+      const id = String(ctx.input.params['addressId']);
+      await insertBusiness(ctx.db, id);
+      await (ctx.db as FakeTx).$executeRaw`INSERT INTO idempotency ${id}`;
+      chargeAttempts += 1;
+      return chargeAttempts === 1 ? { status: 500, body: { code: 'INTERNAL_ERROR' } } : { status: 200, body: { charged: id } };
+    },
+  }),
+  route({
+    operationId: 'renameAddress',
+    method: 'patch',
+    path: '/address-book/:addressId/name',
+    audit: { action: 'CREATE', entity: 'address', sensitivity: 'NORMAL', reasonRequired: false },
+    schema: { params: Joi.object({ addressId: Joi.string().required() }) },
+    auditEntityId: () => undefined,
+    // a CREATE whose resolver finds no id (R1-n4)
+    handler: () => ({ status: 200, body: {} }),
+  }),
+  // A dual-mode route (anonymous or session; a session needs quote:create): R1-m7 C6 and the anonymous returned 409.
+  fixtureRoute({
+    operationId: 'createQuoteDraft',
+    method: 'post',
+    path: '/quote-drafts',
+    auth: ['anonymous', 'session'],
+    permissionAuthenticated: 'quote:create',
+    transaction: 'tenant',
+    audit: { action: 'CREATE', entity: 'quote', sensitivity: 'NORMAL', reasonRequired: false },
+    handler: async (ctx) => {
+      await insertBusiness(ctx.db, 'draft');
+      return { status: 409, body: { code: 'CONFLICT' } };
+    },
+  }),
   // REQ-AUDIT-006 closed-list routes (AT-US-086-06): NONE, never an entry.
   ...(
     [
@@ -262,6 +320,11 @@ const routes: RouteDescriptor[] = [
   ),
 ];
 
+let chargeAttempts = 0;
+/** What the capture reported (event, fields), class-only by contract. */
+const logged: [string, Readonly<Record<string, unknown>>][] = [];
+const captureLog = { error: (event: string, fields?: Readonly<Record<string, unknown>>) => void logged.push([event, fields ?? {}]) };
+
 let server: Server;
 let base: string;
 let runner = runnerWith();
@@ -273,6 +336,7 @@ function compose(admission?: { maxConcurrentTx: number; waitMs: number }) {
     tenantTx: runner,
     writer: { store, tokeniser },
     parseUserAgent,
+    log: captureLog,
   });
   return createApp({
     health: healthRoutes({ probe: { readiness: () => Promise.reject(new Error('not probed')) } } as never),
@@ -285,6 +349,7 @@ function compose(admission?: { maxConcurrentTx: number; waitMs: number }) {
 
 async function listen(admission?: { maxConcurrentTx: number; waitMs: number }): Promise<void> {
   server = compose(admission).listen(0, '127.0.0.1');
+  server.keepAliveTimeout = 120_000;
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
   base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
 }
@@ -311,7 +376,11 @@ beforeEach(() => {
   rolledBack = 0;
   tokenised.length = 0;
   storeFailure = undefined;
+  storeFailsOnce = false;
+  appendAttempts = 0;
   storeGate = undefined;
+  chargeAttempts = 0;
+  logged.length = 0;
   principal = session(SHIPPER, ['address_book:manage', 'address_book:read']);
 });
 
@@ -474,13 +543,49 @@ describe('[US-086] views, denials, NONE routes and failure outcomes', () => {
 });
 
 describe('[REQ-AUDIT-010] results returned (not thrown) by the handler', () => {
-  it('a returned 409 commits a FAILED entry in the handler transaction; a returned 404 commits no entry', async () => {
-    expect((await send('DELETE', '/api/v1/address-book/locked')).status).toBe(409);
-    expect((await send('DELETE', '/api/v1/address-book/gone')).status).toBe(404);
+  it('[R1-M1] [PR56-SEC-09] a returned 409 rolls the handler write back; its FAILED entry is written in a transaction of its own', async () => {
+    const res = await send('DELETE', '/api/v1/address-book/locked');
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ code: 'X' });
+    expect(businessRows()).toEqual([]);
+    expect(rolledBack).toBe(1);
+    // the one committed transaction is the FAILED entry alone
+    expect(committed).toHaveLength(1);
+    expect((committed[0] ?? []).every(isAudit)).toBe(true);
     expect(entries()).toEqual([
       expect.objectContaining({ action: 'DELETE', outcome: 'FAILED', entityId: 'locked', details: { status: 409 } }),
     ]);
-    expect(committed).toHaveLength(2);
+  });
+
+  it('[R1-M1] [PR56-SEC-09] a returned 404 (or 400 / 403) commits nothing and writes no entry; the result is sent as returned', async () => {
+    const res = await send('DELETE', '/api/v1/address-book/gone');
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ code: 'X' });
+    expect(committed).toEqual([]);
+    expect(rolledBack).toBe(1);
+    expect(appendAttempts).toBe(0);
+  });
+
+  it('[R1-M1] [ADR-0014] a returned 500 commits neither the business row nor the idempotency completion, so the retry re-executes once', async () => {
+    const committedOf = (prefix: string): unknown[] =>
+      committed.flat().flatMap((statement) => (statement.sql.startsWith(prefix) ? [statement.values[0]] : []));
+    expect((await send('POST', '/api/v1/address-book/c-1/charge')).status).toBe(500);
+    expect(businessRows()).toEqual([]);
+    expect(committedOf('INSERT INTO idempotency')).toEqual([]);
+    expect((await send('POST', '/api/v1/address-book/c-1/charge')).status).toBe(200);
+    expect(businessRows()).toEqual(['c-1']);
+    expect(committedOf('INSERT INTO idempotency')).toEqual(['c-1']);
+    expect(entries()).toEqual([
+      expect.objectContaining({ action: 'UPDATE', outcome: 'FAILED', entityId: 'c-1', details: { status: 500 } }),
+      expect.objectContaining({ action: 'UPDATE', outcome: 'SUCCESS', entityId: 'c-1' }),
+    ]);
+  });
+
+  it('[PR56-SEC-09] an anonymous mutation that writes and returns 409: no business row and no entry (FAILED is for authenticated requests)', async () => {
+    principal = ANONYMOUS;
+    expect((await send('POST', '/api/v1/quote-drafts')).status).toBe(409);
+    expect(businessRows()).toEqual([]);
+    expect(committed).toEqual([]);
   });
 
   it('an unexpected error (500) of an authenticated mutation: rolled back, FAILED entry with INTERNAL_ERROR in its own transaction', async () => {
@@ -532,15 +637,108 @@ describe('[REQ-AUDIT-010] results returned (not thrown) by the handler', () => {
   });
 });
 
+describe('[PR56-SEC-01] [R1-m2] a client-chosen filter value never drops or fails the VIEW entry of a list', () => {
+  it.each([
+    ['NUL (%00, the probe-nul case)', '?city=%00Pune', JSON.stringify(String.fromCharCode(0) + 'Pune')],
+    ['an empty value', '?city=', '""'],
+  ])('%s: 200 and exactly one VIEW entry whose filter value is the storable JSON form', async (_label, query, stored) => {
+    const res = await send('GET', `/api/v1/address-book${query}`);
+    expect(res.status).toBe(200);
+    expect(entries()).toEqual([
+      expect.objectContaining({ action: 'VIEW', outcome: 'SUCCESS', details: expect.objectContaining({ result_count: 37 }) }),
+    ]);
+    expect(tokenised.find((value) => value.field === 'filter')?.value).toBe(stored);
+    expect(logged).toEqual([]);
+  });
+
+  it('a 9 KiB value: 200 and one VIEW entry with the value cut to MAX_FILTER_TEXT code points', async () => {
+    const res = await send('GET', `/api/v1/address-book?city=${'x'.repeat(9 * 1024)}`);
+    expect(res.status).toBe(200);
+    expect(entries()).toHaveLength(1);
+    const kept = tokenised.find((value) => value.field === 'filter')?.value ?? '';
+    expect(Array.from(kept)).toHaveLength(MAX_FILTER_TEXT);
+    expect(kept.startsWith('x'.repeat(MAX_FILTER_TEXT - 1))).toBe(true);
+  });
+});
+
+describe('[R1-m6] a VIEW / DOWNLOAD handler runs in a read-only transaction', () => {
+  const readOnly = (statements: readonly Statement[]): boolean => statements.some((statement) => statement.sql.includes('READ ONLY'));
+
+  it('the list and detail handlers open their transaction read-only; a write route does not', async () => {
+    await send('GET', '/api/v1/address-book');
+    await send('GET', '/api/v1/address-book/a-1');
+    // per view: the handler transaction (read-only), then the entry's own transaction (read-write)
+    expect(committed.map(readOnly)).toEqual([true, false, true, false]);
+    committed.length = 0;
+    await send('POST', '/api/v1/address-book', { body: { city: 'Pune' } });
+    expect(committed.map(readOnly)).toEqual([false]);
+  });
+});
+
+describe('[R1-m7] denials, swallowed failures and their log lines', () => {
+  it('[C6] a dual-mode route denies a session without permissionAuthenticated and records THAT permission, not the public marker', async () => {
+    principal = session(VIEWER, ['address_book:read']);
+    expect((await send('POST', '/api/v1/quote-drafts')).status).toBe(403);
+    expect(entries()).toEqual([
+      expect.objectContaining({ action: 'PERMISSION_DENIED', outcome: 'DENIED', details: { required_permission: 'quote:create' } }),
+    ]);
+  });
+
+  it('[C7] a FAILED entry that cannot be written leaves the original 409 as the answer and is logged class-only', async () => {
+    storeFailure = new Error('store down');
+    const res = await send('PATCH', '/api/v1/address-book/a-9', { body: { city: 'Goa' } });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: 'CONFLICT' });
+    expect(appendAttempts).toBe(1);
+    expect(logged).toEqual([
+      [
+        'audit.failed_unrecorded',
+        { operationId: 'updateAddress', errorClass: 'DbError', code: 'AUDIT_WRITE_FAILED', reason: 'AUDIT_WRITE_FAILED' },
+      ],
+    ]);
+  });
+
+  it('a NORMAL view whose entry cannot be written is served and logged class-only (audit.view_unrecorded)', async () => {
+    storeFailure = new Error('store down');
+    expect((await send('GET', '/api/v1/address-book?city=Pune')).status).toBe(200);
+    expect(logged).toEqual([
+      [
+        'audit.view_unrecorded',
+        { operationId: 'listAddresses', errorClass: 'DbError', code: 'AUDIT_WRITE_FAILED', reason: 'AUDIT_WRITE_FAILED' },
+      ],
+    ]);
+    expect(JSON.stringify(logged)).not.toContain('Pune');
+  });
+
+  it('[R1-n4] a CREATE whose resolver finds no entity id records entity_id null and logs the route, class-only', async () => {
+    expect((await send('PATCH', '/api/v1/address-book/n-1/name')).status).toBe(200);
+    expect(entries()).toEqual([expect.objectContaining({ action: 'CREATE', entityId: null })]);
+    expect(logged).toEqual([['audit.entity_id_unresolved', { operationId: 'renameAddress', action: 'CREATE' }]]);
+  });
+
+  it('[R1-m4] after a pool, statement or lock timeout no FAILED entry is attempted', async () => {
+    for (const reason of ['TRANSACTION_UNAVAILABLE', 'STATEMENT_TIMEOUT', 'LOCK_TIMEOUT'] as const) {
+      congestion = reason;
+      expect((await send('PATCH', '/api/v1/address-book/a-9', { body: { city: 'Goa' } })).status).toBeGreaterThanOrEqual(500);
+    }
+    congestion = undefined;
+    expect(appendAttempts).toBe(0);
+    expect(entries()).toEqual([]);
+  });
+});
+
 describe('[ADR-0007 am. 10 item 2-3] 503 classes surface with Retry-After and roll the business change back', () => {
   it('AUDIT_LOCK_TIMEOUT: 503 SERVICE_UNAVAILABLE, Retry-After 1, no business row, and no FAILED entry (the audit path failed)', async () => {
     storeFailure = toAuditWriteError(Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' }));
+    // [C3] only this append fails: a FAILED attempt would now succeed, so its absence is the capture's decision
+    storeFailsOnce = true;
     const res = await send('POST', '/api/v1/address-book', { body: { city: 'Pune' } });
     expect(res.status).toBe(503);
     expect(res.body).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     expect(res.headers.get('retry-after')).toBe('1');
     expect(businessRows()).toEqual([]);
     expect(committed).toEqual([]);
+    expect(appendAttempts).toBe(1);
   });
 
   it('TENANT_CONCURRENCY_LIMIT: a request refused by the bulkhead while the stream is busy answers 503 with Retry-After and writes nothing', async () => {
@@ -617,14 +815,46 @@ describe('[PR #42 R1-n5] the capture takes DB_AUDIT_LOCK_TIMEOUT_MS from the con
     expect(locks).toEqual(['321']);
   });
 
-  it('createApp builds the capture from auditConfig: audited routes mount with it and are refused without it', () => {
+  it('createApp builds the capture from auditConfig; without one an audited route is refused when it is mounted', () => {
     const deps = {
       health: [],
-      modules: [{ name: 'addresses', routes }],
       tenantTx: lockingRunner([]),
       logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
     };
-    expect(() => createApp({ ...deps, auditConfig: { DB_AUDIT_LOCK_TIMEOUT_MS: 321 } })).not.toThrow();
-    expect(() => createApp(deps)).toThrow(/audit slot stub cannot honour audit action CREATE on createAddress/);
+    const closedList = routes.filter((candidate) => candidate.audit.action === 'NONE');
+    expect(() =>
+      createApp({ ...deps, modules: [{ name: 'reference', routes: closedList }], auditConfig: { DB_AUDIT_LOCK_TIMEOUT_MS: 321 } }),
+    ).not.toThrow();
+    expect(() => createApp({ ...deps, modules: [{ name: 'addresses', routes }] })).toThrow(
+      /audit slot stub cannot honour audit action CREATE on createAddress/,
+    );
+  });
+
+  it('[R1-m1] [PR56-SEC-08] a capture without a tokeniser refuses, at mount, audited routes and routes that can answer 403 (TASK-028)', () => {
+    const deps = {
+      health: [],
+      tenantTx: lockingRunner([]),
+      logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+      auditConfig: { DB_AUDIT_LOCK_TIMEOUT_MS: 321 },
+    };
+    const bare = createAuditCapture({ config: { DB_AUDIT_LOCK_TIMEOUT_MS: 321 }, tenantTx: undefined });
+    expect(() => bare.mount(routes[0] as RouteDescriptor)).toThrow(
+      /cannot honour audit action CREATE on createAddress; an audit tokeniser in the composition \(TASK-028\)/,
+    );
+    // through createApp the authorisation slot mounts first: the same route is refused for its denials
+    expect(() => createApp({ ...deps, modules: [{ name: 'addresses', routes: [routes[0] as RouteDescriptor] }] })).toThrow(
+      /cannot honour PERMISSION_DENIED entries on createAddress; an audit tokeniser in the composition \(TASK-028\)/,
+    );
+    const gatedNone = route({
+      operationId: 'listCountries',
+      method: 'get',
+      path: '/reference/countries',
+      permission: 'address_book:read',
+      audit: { action: 'NONE', entity: null, sensitivity: 'NONE', reasonRequired: false, justification: 'Reference data.' },
+      handler: () => ({ status: 204 }),
+    });
+    expect(() => createApp({ ...deps, modules: [{ name: 'reference', routes: [gatedNone] }] })).toThrow(
+      /cannot honour PERMISSION_DENIED entries on listCountries/,
+    );
   });
 });

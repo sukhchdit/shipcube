@@ -89,7 +89,13 @@ export function authoriseSlot(options: AuthoriseOptions = {}): RouteSlot {
   return (route) => authoriseRoute(route, options.capture);
 }
 
+/** A route whose authorisation can answer 403 AUTHZ_DENIED (`authenticated` and `public` alone never do). */
+const canDeny = (route: RouteDescriptor): boolean =>
+  route.permission === 'public' ? route.permissionAuthenticated !== undefined : route.permission !== 'authenticated';
+
 function authoriseRoute(route: RouteDescriptor, capture: AuditCapture | undefined) {
+  // Mount time (R1-m1, PR56-SEC-08 condition 2): a denial that could never be audited refuses the route.
+  if (capture !== undefined && canDeny(route)) capture.mountDenials(route);
   const anonymousAllowed = route.auth.includes('anonymous');
   return (req: Request, res: Response, next: NextFunction) => {
     const principal = principalOf(res);
