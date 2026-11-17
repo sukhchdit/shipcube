@@ -102,9 +102,10 @@ function isStale(dir: string, owner: string | undefined): boolean {
 /**
  * Removes the stale writer directory `dir` that was judged stale while its owner read `seen`. The directory is renamed to a
  * unique tombstone first; only the process whose rename succeeds goes on, and if the tombstone holds another owner than
- * `seen`, a live lock was caught (a writer re-created it meanwhile): it is put back, and nothing is removed.
+ * `seen`, a live lock was caught (a writer re-created it meanwhile): it is put back, and nothing is removed. Exported for the
+ * lock tests only (the put-back branch).
  */
-function takeOverStale(dir: string, seen: string | undefined): void {
+export function takeOverStale(dir: string, seen: string | undefined): void {
   const tomb = `${dir}.stale-${randomUUID()}`;
   try {
     renameSync(dir, tomb);

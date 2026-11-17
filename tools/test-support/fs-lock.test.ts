@@ -17,6 +17,7 @@ import {
   LostTestLockError,
   OWNERLESS_STALE_MS,
   readersPath,
+  takeOverStale,
   tryRegisterReader,
   withFileLock,
   withReadLock,
@@ -324,6 +325,18 @@ describe('PR #57 fix cycle 1: lock location, registrations, take-over and the un
 
     expect(tombstones(name)).toEqual([]);
     expect(existsSync(lockPath(name))).toBe(false);
+  });
+
+  it('[R1-m1 / PR57-SEC-03] a take-over that catches a live lock (re-created since it was judged stale) puts it back', async () => {
+    const name = freshName();
+    const live = children.idle();
+    own(name, live);
+
+    takeOverStale(lockPath(name), String(await deadPid()));
+
+    expect(readFileSync(join(lockPath(name), 'owner'), 'utf8')).toBe(String(live));
+    expect(tombstones(name)).toEqual([]);
+    rmSync(lockPath(name), { recursive: true, force: true });
   });
 
   it('[R1-n3] an ownerless writer directory blocks while fresh and is taken over once it is stale', () => {
