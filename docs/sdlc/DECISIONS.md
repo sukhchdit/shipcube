@@ -2757,3 +2757,18 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Pending card lines:** TASK-287 gets the PR57-SEC-02 path table, added to the D-ORCH-109 list.
 - **PR #54:** the security delta r3 runs in parallel with code review r3 on `cc95e38`.
 - **Reversibility:** High.
+
+### D-SEC-PR54-03 · 2026-11-17 · security-analyst (recorded by orchestrator) · PR #54 security r3 = PASS_WITH_FOLLOW-UPS at `07cf78a` (record `d4380fd`)
+- **Decision:** C3 (PR54-SEC-07) and PR54-SEC-08 are closed; no new finding. On PG 18.6, X1–X5 are refused by the guard while every server effect still reproduces (the refusals are real). 14/14 mutants are killed; of 156 templates, only the intended new row changes verdict.
+- **Follow-ups (owners unchanged):** PR54-SEC-02 (b)(c) before TASK-073's first raw statement; PR54-SEC-04 with 015-C; any future SQL-text extension (`dblink`, `crosstab`, `xpath_table`) joins `DYNAMIC_SQL`.
+- **Reversibility:** High.
+
+### D-ORCH-115 · 2026-11-17 · sdlc-orchestrator · PR #54 merged (TASK-020 complete); PR #59 in review; TASK-289 dispatched
+- **PR #54** (TASK-020 020-D) squash-merged as `44637dd`.
+  - **Head:** `d4380fd`. Code r3 APPROVED_WITH_NITS (R3-n1 optional, not taken); security r3 PASS_WITH_FOLLOW-UPS.
+  - **CI:** lane A 44011917724 all green incl. security-integration; lane B 20261117T0302Z_d716f7b.
+  - **P1:** no overlap with main. **Fix cycles:** 2/3.
+  - **TASK-020 A–D complete.**
+- **TASK-286 workflow PR #59** (head `055083b`; lane B 20261117T0317Z_daa9a7e; first stage-2 lane A run 44011154025) → code review r1 and security r1 dispatched. It also carries PR55-SEC-11 and code-review R2-n1..n4. Due in November.
+- **TASK-289 `rbacfu`** dispatched now that the `lint` lock is free (TASK-052/060 depend on it).
+- **Reversibility:** Medium (merged; revertible).
