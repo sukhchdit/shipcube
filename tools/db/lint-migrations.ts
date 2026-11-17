@@ -542,9 +542,9 @@ const REFUSED_OBJECTS = [/^create operator\b/, /^create (?:or replace )?rule\b/]
 const SET_CONFIG_ROLE = /\bset_config"? ?\( ?'+"?(?:role|session_authorization)"?'+ ?,/;
 /**
  * Rule 18 (F-04, D-ARCH-077, SPK-08): covering indexes (`INCLUDE`) a migration may drop only to re-create them WITH
- * `INCLUDE` in the same file. Every `INCLUDE` index of prisma/migrations belongs here (TASK-024: only this one).
+ * `INCLUDE` in the same file. Every `INCLUDE` index of prisma/migrations belongs here (TASK-024; TASK-037 AP-ORG-08).
  */
-export const COVERING_INDEX_TOLERANCE: readonly string[] = ['ix_role_permissions__role_id'];
+export const COVERING_INDEX_TOLERANCE: readonly string[] = ['ix_role_permissions__role_id', 'ix_memberships__user_status'];
 const CREATE_INDEX_NAMED = new RegExp(`^create (?:unique )?index (?:concurrently )?(?:if not exists )?(${IDENT}) on (?:only )?(${QNAME})`);
 const DROP_INDEX = /^drop index (?:concurrently )?(?:if exists )?(.+?)(?: cascade| restrict)?$/;
 

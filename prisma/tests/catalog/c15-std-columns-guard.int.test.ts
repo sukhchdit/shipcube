@@ -207,7 +207,8 @@ describe('catalog C15: standard-columns guard (D-ARCH-091; PR26-SEC-03)', () => 
       expect(guardShapeFindings(triggers)).toEqual([]);
       // PR43-SEC-05 (c): no enabled BEFORE INSERT/UPDATE ROW trigger sorts after a guard on its table.
       expect(await rows(client, AFTER_GUARD_SQL)).toEqual([]);
-      expect(scope).toEqual([]); // TASK-037 applies the guard to the first runtime-writable STD tables
+      // TASK-037 applied the guard to the first runtime-writable STD tables (the organisations and identity manifests).
+      expect(scope).toEqual(['invitations', 'membership_roles', 'memberships', 'organisations', 'users']);
       expect(READ_ONLY.length + AUDIT_TABLES.length).toBeGreaterThan(0);
     } finally {
       await client.end();

@@ -37,7 +37,9 @@ model Role {
   isSystem    Boolean  @default(true) @map("is_system")
   description String
 
-  permissions RolePermission[]
+  permissions     RolePermission[]
+  membershipRoles MembershipRole[]
+  invitations     Invitation[]
 
   @@unique([key], map: "ux_roles__key")
   @@index([scope], map: "ix_roles__scope")

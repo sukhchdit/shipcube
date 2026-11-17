@@ -48,3 +48,26 @@ platform_erasure SELECT public.audit_pii_vault
 platform_erasure DELETE public.audit_pii_vault
 platform_erasure SELECT public.data_subjects
 platform_erasure UPDATE public.data_subjects (erased_at, updated_at, updated_by, version)
+
+# organisations and users (TASK-037, migration 20261117000000_organisations_identity; data-model §3.1, §3.2, §4.4):
+# RLS tables, SELECT/INSERT/UPDATE for platform_app (never DELETE: soft delete and status history); SELECT for
+# platform_definer on the definerRead tables (the §4.5 functions and platform.app_is_operator()).
+platform_app SELECT public.users
+platform_app INSERT public.users
+platform_app UPDATE public.users
+platform_app SELECT public.organisations
+platform_app INSERT public.organisations
+platform_app UPDATE public.organisations
+platform_app SELECT public.memberships
+platform_app INSERT public.memberships
+platform_app UPDATE public.memberships
+platform_app SELECT public.membership_roles
+platform_app INSERT public.membership_roles
+platform_app UPDATE public.membership_roles
+platform_app SELECT public.invitations
+platform_app INSERT public.invitations
+platform_app UPDATE public.invitations
+platform_definer SELECT public.users
+platform_definer SELECT public.organisations
+platform_definer SELECT public.memberships
+platform_definer SELECT public.invitations

@@ -104,6 +104,24 @@ describe('AT-US-064-01 server sets the standard columns on create (unit)', () =>
     expect(out.data).not.toHaveProperty('updatedAt');
   });
 
+  it('[D-TASK037-05] a tenant-key model takes its id from the transaction: Organisation the org, User the actor; never a forged id', () => {
+    const catalogue = catalogueFromDataModel({
+      models: { Organisation: { fields: STD.map((name) => field(name)) }, User: { fields: STD.map((name) => field(name)) } },
+    });
+    const organisation = catalogue.get('Organisation');
+    const user = catalogue.get('User');
+    expect([organisation?.tenantKey, user?.tenantKey, model('Shipment').tenantKey]).toEqual(['org', 'actor', undefined]);
+    expect(stampArgs(organisation, 'create', { data: { displayName: 'A' } }, STAMP, NOW)).toMatchObject({
+      data: { id: ORG, createdBy: ACTOR },
+    });
+    expect(stampArgs(user, 'create', { data: { email: 'a@b.c' } }, STAMP, NOW)).toMatchObject({ data: { id: ACTOR, createdBy: ACTOR } });
+    // Without the context value the id is a fresh UUIDv7 (RLS then refuses the row: fail closed).
+    const anonymous = stampArgs(user, 'create', { data: {} }, { orgId: ORG, actorId: '' }, NOW) as { data: { id: string } };
+    const orgless = stampArgs(organisation, 'create', { data: {} }, { orgId: '', actorId: ACTOR }, NOW) as { data: { id: string } };
+    expect([anonymous.data.id, orgless.data.id].every((id) => id !== ACTOR && id !== ORG && isUuidV7(id))).toBe(true);
+    expect(thrown(() => stampArgs(organisation, 'create', { data: { id: ORG } }, STAMP, NOW))).toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
   it('createMany / createManyAndReturn stamp every row with a distinct, time-ordered id', () => {
     for (const operation of ['createMany', 'createManyAndReturn']) {
       const out = stampArgs(

@@ -324,8 +324,10 @@ async function committedTables(client: pg.Client, tables: readonly string[]): Pr
  * Inside the caller's transaction on a superuser session: as the migrator, plant minimal `memberships` /
  * `organisations` tables when the real ones are absent (TASK-037 creates them; R1-m3) and `platform.app_is_operator()`
  * from its template (lead decision 5), then the TENANT probe table with its leading-org_id index, seed rows (before
- * FORCE) and the RLS block rendered by tools/db/render-rls.ts. When a real table exists, the seed rows go in as the
- * superuser (RLS bypassed) through the same columns; TASK-037 extends the column list if its table needs more.
+ * FORCE) and the RLS block rendered by tools/db/render-rls.ts. When the real tables exist (TASK-037), the seed rows go
+ * in as the superuser (RLS bypassed) with every NOT NULL column, under `session_replication_role = replica` so the
+ * foreign keys to users and the standard-columns guard do not fire for these synthetic, rolled-back rows; the
+ * committed `platform.app_is_operator()` is used as it is.
  */
 async function plantProbe(client: pg.Client): Promise<string> {
   const committed = await committedTables(client, ['memberships', 'organisations']);
@@ -340,18 +342,36 @@ async function plantProbe(client: pg.Client): Promise<string> {
       CREATE TABLE public.organisations (id uuid PRIMARY KEY, type text NOT NULL);
       GRANT SELECT ON public.organisations TO platform_definer;`);
   }
-  if (committed.size > 0) await client.query('RESET ROLE');
-  await client.query(`
-    INSERT INTO public.organisations (id, type) VALUES ('${OPERATOR_ORG}', 'OPERATOR'), ('${ORG_A}', 'BUSINESS_CUSTOMER');
-    INSERT INTO public.memberships (id, org_id, user_id, status) VALUES
-      ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE'), ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE');`);
+  if (committed.size > 0) {
+    await client.query('RESET ROLE');
+    await client.query(`
+      SET LOCAL session_replication_role = replica;
+      INSERT INTO public.organisations (id, type, display_name, created_by, updated_by) VALUES
+        ('${OPERATOR_ORG}', 'OPERATOR', 'Operator', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}'),
+        ('${ORG_A}', 'BUSINESS_CUSTOMER', 'Org A', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}');
+      INSERT INTO public.memberships (id, org_id, user_id, status, created_by, updated_by) VALUES
+        ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}'),
+        ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}');
+      SET LOCAL session_replication_role = origin;`);
+  } else {
+    await client.query(`
+      INSERT INTO public.organisations (id, type) VALUES ('${OPERATOR_ORG}', 'OPERATOR'), ('${ORG_A}', 'BUSINESS_CUSTOMER');
+      INSERT INTO public.memberships (id, org_id, user_id, status) VALUES
+        ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE'), ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE');`);
+  }
   await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
   await client.query(`
     CREATE TABLE public.${PROBE} (id uuid PRIMARY KEY, org_id uuid NOT NULL, ref text NOT NULL);
     CREATE INDEX ix_${PROBE}__org_id ON public.${PROBE} (org_id);
     GRANT SELECT, INSERT, UPDATE ON public.${PROBE} TO platform_app;
     INSERT INTO public.${PROBE} (id, org_id, ref) VALUES ('${ROW_A}', '${ORG_A}', 'A1'), ('${ROW_B}', '${ORG_B}', 'B1');`);
-  await client.query(APP_IS_OPERATOR_TEMPLATE); // ends with RESET ROLE (to the session user)
+  // The template ends with RESET ROLE (to the session user); once TASK-037 committed the function it is used as it is.
+  const operatorFn = await rows<{ fn: string | null }>(
+    client,
+    "SELECT pg_catalog.to_regprocedure('platform.app_is_operator()')::text AS fn",
+  );
+  if (operatorFn[0]?.fn === null || operatorFn[0]?.fn === undefined) await client.query(APP_IS_OPERATOR_TEMPLATE);
+  else await client.query('RESET ROLE');
   await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
   const rendered = renderRls({ module: 'probe', name: PROBE, class: 'TENANT' });
   await client.query(rendered);
