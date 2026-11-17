@@ -248,3 +248,71 @@ Full `unit` project on `4f1fbd5` (my run): **234 / 234 suites, 5,903 passed, 2 s
 - The seams (`tryRegisterReader` hooks, `takeOverStale`) are exported "for the lock tests only" and documented as such. They turn a race that only showed up under stress into deterministic cases.
 - `LostTestLockError` and `LockChildTimeoutError` both name the lock, so a failure explains itself.
 - Junk in the readers directory is ignored rather than deleted, which is the right default for a directory another process could write.
+
+---
+
+# Round 3 (narrow delta): fix cycle 2
+
+Scope as dispatched: `tools/test-support/fs-lock.ts`, `fs-lock.test.ts` and `lock-children.ts` only. Delta: `git diff 5891125 a5f94b0`. Head `a5f94b0` (full SHA `a5f94b0616bcb8832fb959df5ea81b1dc61c9e04`); code `bfe5235`; `a5f94b0` adds lane B evidence only.
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-m1 is fixed. My hot-spin repro now rejects at 2,051 ms against a 2 s deadline with 18 event-loop ticks (r2:
+  24 s, 0 ticks). takeOverStale now returns a boolean, and the writer `continue`s only after a real take-over.
+  N3 and N16 are now killed. Of 7 delta mutants, 5 are killed; the 2 survivors are equivalent or race-only, as claimed.
+  The JSDoc closes R2-n3 and R2-n4. No BLOCKER, MAJOR or MINOR. Three NITs: the hot-spin pin kills only by hanging the
+  run, residual (ii) in the JSDoc is outdated now that the owner write uses `wx`, and idle children outlive a killed
+  Jest worker.
+```
+
+## R3.1 What I verified myself
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` on `a5f94b0` | exit 0 |
+| ESLint `--max-warnings 0` and Prettier `--check` on the 3 files | exit 0 / clean |
+| `fs-lock.test.ts` + `prisma-client-locked.test.ts` in a scratch copy of `a5f94b0` (baseline) | 37 / 37 (17 s) |
+| **Hot-spin repro** (`spin-probe.mts`: dead-owner lock whose directory is a live child's cwd, so rename gets EBUSY; `withFileLock(…, 2000)`) | **rejects with the named timeout at 2,051 ms; 18 event-loop ticks while waiting.** r2 head: spun 24 s with 0 ticks. The reader path is unchanged (2,012 ms). |
+| Lane A 44070813630 on `a5f94b0` | fast-lane **success**. `ci-gate` fails only on the security-record step; `security-integration` was skipped (C1 replaces it). |
+| Lane B `20261117T0739Z_bfe5235`, C1 rerun `20261117T1051Z_a5f94b0` | not re-run; relied on as reported |
+
+Not re-run in round 3: the full `unit` project. The delta is limited to the three lock files; their suite and the shim suite ran above.
+
+## R3.2 Mutants (`mutate3.cjs`; each row runs `fs-lock.test.ts` + `prisma-client-locked.test.ts` under an outer `timeout 240`)
+
+| # | Mutant | Result |
+|---|---|---|
+| R3a | the R2-m1 bug restored (`if (isStale) { takeOverStale(); continue; }`) | **killed by hang**: the suite never finishes and the outer timeout fires at 240 s (R3-n1) |
+| R3b | a failed rename returns `true` | **killed by hang** (same shape) |
+| R3c | a put-back returns `true` | survives, equivalent: the writer loops once more, `mkdir` gets EEXIST, the restored lock is live, so it waits; the reader path ignores the value |
+| N3 | drop `assertOwned` before `fn` | **killed** ([R2-n1]) |
+| N16 | registration-write ENOENT throws instead of retrying | **killed** ([R2-n2]) |
+| R3d | owner write without `wx` | survives (race-only, as the developer states) |
+| R3e | `beforeWrite` hook never called | killed ([R2-n2]) |
+
+The developer's statement holds: the old bug blocks Jest's own timeout, because the loop never yields. The kill therefore only shows up as a hung run.
+
+## R3.3 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `tools/test-support/fs-lock.test.ts:397`, `:419` | **The hot-spin pin kills only by hanging.** If the R2-m1 bug returns, the EBUSY hook throws forever, the writer spins synchronously, and lane A's unit job hangs until its job timeout with no message naming the case. | Make the hook give up after a bound: throw EBUSY for at most N calls (e.g. 1,000), then delegate to the real rename, and assert the call count stayed small. A yielding writer polls about deadline/`POLL_MS` ≈ 5 times; a spinner hits 1,000 in milliseconds. This is a magnitude check, not a wall-clock bound: a loaded host makes fewer calls, never more, so D-SEC-PR53-02 is respected. The mutant then fails in about 1 s instead of hanging the lane. |
+| R3-n2 | NIT | `tools/test-support/fs-lock.ts:23-24` (residual (ii)) | Since the owner file is created with `wx`, a POSIX put-back onto an empty re-created directory no longer leads to a `LostTestLockError`. The writer that re-created the directory gets EEXIST on its owner write, reads the restored live owner, and waits. The JSDoc still describes the old outcome. | Reword (ii): "…replaces it; the writer that re-created it then finds the restored owner on its exclusive owner write and waits." |
+| R3-n3 | NIT | `tools/test-support/lock-children.ts:56` | `IDLE` children (`setInterval` forever) outlive a Jest worker that is killed (an outer timeout, a lane job timeout, or Jest force-exit), because `killAll` runs only in `afterEach`. My two hang mutants were killed by `timeout`. They left 40 `t288-*` lock directories in the worktree's `node_modules/.cache/shipqube-test-locks` (I removed them; none was held). The idle grandchildren of those runs may still be alive: I could not list process command lines here, and 38 `node.exe` processes were running on the host. | Make `IDLE` exit when its parent goes away: spawn with an `'ipc'` channel and call `process.on('disconnect', () => process.exit(0))`, or poll `process.kill(process.ppid, 0)`. Alternatively give it a lifetime cap (`setTimeout(() => process.exit(0), 300_000)`). |
+
+## R3.4 Round 2 closure
+
+| r2 item | Status |
+|---|---|
+| R2-m1 writer hot-spin past its deadline | **Closed.** The repro is green, R3a/R3b are killed, and there is a cross-platform seam case plus a win32-only real-cwd case (`idleStarted` waits for the child's marker, so the directory is really in use). |
+| R2-n1 pre-`fn` ownership check | **Closed** (N3 killed; READER-child case with `fnRan === false`). |
+| R2-n2 ENOENT retry | **Closed** (N16 and R3e killed; `beforeWrite` seam). |
+| R2-n3 put-back window residual | **Closed** (JSDoc lists windows (i)-(iii) and the `.takeover` mutex escape hatch); see R3-n2 for wording. |
+| R2-n4 lock root follows `node_modules` | **Closed** (JSDoc). |
+| Owner file `wx` (new, unpinned) | Accepted. R3d survives because the path is race-only; it improves residual (ii) (R3-n2). |
+
+## R3.5 Merge conditions (replace R2.6)
+
+1. The security delta record on the merge head: `ci-gate`'s record step fails until it lands. Security r1 C1 is reported green at `20261117T1051Z_a5f94b0`; security-analyst confirms.
+2. The P1 check at merge (`jest.config.ts` and `tools/test-support/**` unchanged on `main` since the merge base).
+3. R3-n1..n3 are NITs, so the next touch is fine. If a fix cycle is opened for any other reason, R3-n1 is the one worth taking, because it stops a regression from hanging lane A.
