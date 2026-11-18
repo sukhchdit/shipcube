@@ -3486,3 +3486,33 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Code review r1 (`fdb33ee`):** R1-n2 is supported, with no separate finding. The optional `ck\_%` ⇒ `contype = 'c'` catalog assertion is a good C-series addition.
 - **Why:** these findings are bound to TASK-290 (D-ORCH-074, D-ARCH-135/137), and TASK-037 and every later bootstrap file wait on their closure.
 - **Reversibility:** High.
+
+### D-SECAUDIT-01 · 2026-11-18 · security-analyst · GHSA-fc5q-39xc-vjpf (picomatch ReDoS, High, no upstream fix, dev closure only): tracked by an 86-day audit waiver in PR #67, not a watch entry (record `docs/05-quality/security/PR-0067-audit-picomatch-waiver-security-review.md`, committed on main)
+- **Trigger:** GitHub reviewed the advisory on 2026-11-17 (picomatch `<= 4.0.7`, CVSS 7.5, CWE-1333). From then on, lane A's "Vulnerability audit" step fails on every PR; the first failure was run 44291101362 (PR #66).
+- **Decision:** add a waiver to `tools/ci/advisory-watchlist.json`: decision D-SECAUDIT-01, granted 2026-11-18, expires 2027-02-12 (86 of the 90 allowed days, aligned with the glob/minimatch watch reviews). On the expiry date the finding fails lane A again. PR #67 at `1f9c81f` (branch `chore/audit-watch-picomatch`, worktree `../Shipqube-audit-picomatch`) also adjusts `tools/ci/check-audit.test.ts`:
+  - it pins the waiver;
+  - it adds a test that the waiver passes until the due date and fails on it;
+  - its CLI tests run at the register's newest grant date, because the CLI refuses a waiver granted after `--now`.
+- **Security r1 = PASS_WITH_FOLLOW-UPS.** 0 Critical/High open for the change. PR67-SEC-01 is the advisory itself, rated LOW in context and waived.
+- **Why a waiver, not a watch entry:** `check-audit` reports a watch entry as a note and still fails a High (control: exit 1). Only a waiver tracks a High that has no fix (US-048 AT-US-048-07).
+- **Clarifies D-SEC-PR66-01 merge condition 2.** The PR-0066 record expected "a dated `audit/watched` entry", but that form cannot clear a High. The route is this waiver, and the "triaged repo-wide" half of the condition is met when PR #67 merges. The fully green lane A run on PR #66's final head is still owed by PR #66.
+- **Why the ID is not D-SEC-AUDIT-01:** the register's `DECISION_ID` (`^D-[A-Z0-9]+-\d+$`) accepts a single area segment. `D-SEC-AUDIT-01` would make the register invalid, and every PR's audit step would exit 2 (control C4; PR67-SEC-04).
+- **Why the waiver is acceptable under CLAUDE.md §5** (the "safe alternative" clause):
+  - **No fix exists.** 4.0.7 is the latest release, all 35 versions are in range, and the upstream fix PR is unmerged. npm's "fix available" is a `jest-util@26.6.2` downgrade (PR67-SEC-03).
+  - **Dev closure only.** `npm ls --omit=dev picomatch` is empty, all three lockfile tuples are `dev`, and no runtime image ships it.
+  - **Not reachable.** The exploit needs an attacker-supplied `+(*a)`-style pattern. Our globs are committed config only, and the probe in the record's §2.2 shows our patterns linear at 4,096 characters while the positive controls blow up at 24.
+  - **Every alternative is worse.** An override to an unreleased fork inside gate tooling, replacing the fixed-stack tools, and npm's downgrade were all rejected.
+- **Evidence:**
+  - Local `check-audit` matrix: R1 head 0 (waived), C1 main 1, C2 at the due date 1 (expired), C3 granted in the future 2, C4 bad ID 2, C5 watch-only 1.
+  - The test file passes 28/28; mutants M1 and M2 each turn 2 tests red.
+  - Lane A on #67 (run 44297523492) shows `check-audit: PASS` with the real npm audit and osv-scanner (`audit/waived … (npm audit + osv-scanner)`).
+  - Record simulation: S1 pass; C1-C4 fail as expected.
+- **Owed before merge:**
+  - lane B `unit` evidence (the change is outside the staleness allow-list);
+  - a code-review round (test code changed);
+  - a new `pull_request` event, so ci-gate reads this record from the merge ref.
+- **After merge:** open PRs pass the audit step at their next `pull_request` event. A re-run of an old run reuses its old merge ref and still fails.
+- **Follow-ups:**
+  - PR67-SEC-02 (LOW): the waiver is not bound to the dev closure. Add a `closure: "dev"` field enforced by `checkAudit`, or a unit test asserting that no waived package has a production tuple. Owner: devops-engineer via senior-developer, before the next waiver is added and at the latest by 2027-02-12.
+  - PR67-SEC-01: re-check on 2027-02-12, or earlier when picomatch ships a release outside the range. Then run `npm update picomatch` and remove the waiver in the same PR.
+- **Reversibility:** High. The waiver is one register entry, and it expires by itself.
