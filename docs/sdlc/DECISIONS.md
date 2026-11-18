@@ -3516,3 +3516,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - PR67-SEC-02 (LOW): the waiver is not bound to the dev closure. Add a `closure: "dev"` field enforced by `checkAudit`, or a unit test asserting that no waived package has a production tuple. Owner: devops-engineer via senior-developer, before the next waiver is added and at the latest by 2027-02-12.
   - PR67-SEC-01: re-check on 2027-02-12, or earlier when picomatch ships a release outside the range. Then run `npm update picomatch` and remove the waiver in the same PR.
 - **Reversibility:** High. The waiver is one register entry, and it expires by itself.
+
+### D-ORCH-133 · 2026-11-18 · sdlc-orchestrator (session A) · Lane-B results; queue stopped by the memory reaper again; push hold until PR #67
+- **Results since D-ORCH-132:**
+  - PR #63 (TASK-036) PASS `20261118T1201Z_fcdb7ac`.
+  - PR #62 (TASK-287A) failed twice on infrastructure (P1001; a 30 s test timeout with unit at 1,508 s under host load). Both runs moved to `../failed-runs-orphan/`.
+  - PR #61 (TASK-028) `20261118T1106Z_d54880a` failed on a real gitleaks-full finding (rule private-key in an unpushed fc1 test). The developer built the PEM header at run time and rebuilt its three never-pushed commits to `d51b42b` (backup branch `task028-fc1-pre-gitleaks-backup`).
+  - PR #64 (TASK-035) fc1 head `7ca95f4` failed on a gitleaks-full finding in its new test plus diff branch coverage 2/3 on `open-queue.ts`. The developer amended its one never-pushed commit to `266abb6` (backup branch `task035-fc1-pre-gitleaks-backup`). All consumer.int cases passed.
+- **Ruling on the local rewrites:** CLAUDE.md forbids force pushes and history rewrites to protect shared history. Rewriting commits that were never pushed changes no shared ref, needs no force push, and was the only fix short of a baseline exception (which needs security sign-off), because the full-history scan covers the whole ancestry. Accepted, with backups kept until merge. Agents must still never rewrite pushed commits.
+- **PR #67 (picomatch waiver, D-SECAUDIT-01):** code review APPROVED_WITH_NITS (`07ba909`); security PASS_WITH_FOLLOW-UPS (`a750c97`). Needs lane-B `unit` evidence, then one push.
+- **Push hold:** until PR #67 merges, every PR's lane A fails at the audit step. So no evidence or record pushes on #61–#66 until then (D-ORCH-119 minutes budget). The first push after #67 merges gives each PR a fresh `pull_request` event, so ci-gate reads the records now on main.
+- **Queue stopped:** at about 12:27Z Claude Code's low-memory reaper stopped every queue process (3.9 GB free). The PR #61 run that had started at 12:14Z left no run dir and no containers. `.orch/docker.lock` is left in place until the restart.
+  - Pending queue, in order: PR #67 (`Shipqube-audit-picomatch`, first, because it unblocks lane A), PR #64 (`Shipqube-TASK-035-fc1`), PR #61 (`Shipqube-TASK-028-evidence`), PR #62 (`Shipqube-TASK-287A-evidence`).
+  - It restarts only on the user's go-ahead.
+- **Reversibility:** High.
