@@ -3278,3 +3278,59 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - a delta round if a later commit changes `apps/api/src/platform/**`.
 - **Code review twin** (`0f3528e`, APPROVED_WITH_NITS): I support R1-m2 (the scan is blind to domain error classes, PR #65) and §4 item 3 (the shared root must not re-export `./queues`). No finding duplicates theirs.
 - **Reversibility:** High.
+
+### D-ARCH-151 · 2026-11-18 · principal-architect · Operator organisation: a reserved row of the TASK-037 migration, inserted before FORCE (D-ORCH-COORD-03 item 1; ADR-0005 amendment 12)
+- **Decision:**
+  - The migration that creates `organisations` inserts the one OPERATOR organisation next to the reserved users: id `00000000-0000-7000-8000-000000000010` (constant `OPERATOR_ORG_ID`), `display_name` `Operator`, the SYSTEM actor in `created_by` and `updated_by`, `ON CONFLICT ("id") DO NOTHING`. It comes after `ux_organisations__single_operator` and before `ENABLE` + `FORCE`. The header stays `data-changing: no`.
+  - No seed, job or operator step creates the organisation. The reference seed writes GLOBAL tables only. The demo seed (TASK-089) adds staff memberships to the reserved organisation and never creates or renames it. `seedId('org:operator')` is withdrawn.
+  - AT-US-061-01 stays on TASK-037. D-TASK037-04 (re-route to TASK-089) is superseded. D-TASK037-03 (reserved users in the migration) is confirmed.
+  - No fixture plants an OPERATOR organisation any more; a fixture adds a membership to `OPERATOR_ORG_ID`.
+- **Why:**
+  - After `FORCE` the migrator has no policy on `organisations`, and the demo seed never runs with `APP_ENV=production`. As designed, production had no operator organisation at all.
+  - `p_organisations__active` checks only `id = platform.app_org_id()`, and the creating service chooses that value. On an empty index the service rule was the only control against a `platform_app` session creating the first OPERATOR organisation and a membership in it. The reserved row occupies the unique index in every migrated database.
+  - It needs no new role, policy, definer write or credential.
+- **Alternatives rejected:**
+  - A privileged job after `migrate`: it needs the break-glass credential for routine work, a write-capable definer function, or a policy for the migrator (against ADR-0005 amendment 6 and ADR-0007 amendment 7).
+  - The demo seed or an admin flow as `platform_app`: it never runs in production, leaves the slot open until it runs, and needs one service path that creates OPERATOR, which REQ-ORG-001 excludes.
+  - A production command that creates the organisation with the first staff user: the same objections, plus an operational step that can be forgotten.
+- **Functional acceptance criteria:** unchanged, so product-manager was not brought in. The Then-clause of AT-US-061-01 holds as written. Wording for the next story edit: REQ-ORG-001 "(created by seed)" and the scenario title.
+- **Not verified here:** no test was run (host rule of D-ORCH-131). What PostgreSQL refuses is read from the policy and migration text of PR #65 at `d3c2c16`.
+- **Where:** ADR-0005 amendment 12 items 23 to 25; data-model §1.6, §3.2, §4.3, §8.3 rule 10, §9.1 to §9.3, A30; `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §2 (exact statement and the per-task list); cards TASK-037 and TASK-089.
+- **Reversibility:** High until PR #65 merges (one statement in an unmerged migration). After that the row is permanent: a later migration can neither add nor remove it, because the migrator cannot write the table.
+
+### D-ARCH-152 · 2026-11-18 · principal-architect · `createOrganisation`: the contract adds an optional `type`; the acceptance criteria stand (D-ORCH-COORD-03 item 2)
+- **Decision:**
+  - `OrganisationCreateRequest` gains the optional property `type`: the four organisation types, default `BUSINESS_CUSTOMER`. `OrganisationPatch` stays without it (400 `UNKNOWN_FIELD`, AT-US-061-03).
+  - Every value but `BUSINESS_CUSTOMER` is refused by the service with 422 `ORG_TYPE_NOT_ALLOWED` and audited with outcome `FAILED`. A value outside the enumeration is 400 `VALIDATION_ERROR`.
+  - The edit lands in the TASK-224 PR with the route, the Joi schema, the tests and the regenerated types (api/README §18 item 1). The exact YAML is in the rulings file §3.3 and is the approved change request.
+  - PR #65 needs no contract change. Its service already takes `type` and refuses everything but `BUSINESS_CUSTOMER`.
+- **Why:**
+  - The contract already describes `ORG_TYPE_NOT_ALLOWED` on `createOrganisation` and lists it on that operation only. A closed schema without `type` makes the code unreachable, so the schema is the defect.
+  - REQ-AUDIT-010 writes no audit entry for a 400. With the closed schema AT-US-061-05 (a `FAILED` entry for the refused attempt) fails as well as AT-US-061-02.
+  - One schema property changes, against three requirement artefacts on the other side.
+  - D-ARCH-151 makes it safe below the service: the database refuses OPERATOR (occupied unique index), INDIVIDUAL (`ck_organisations__personal_owner`) and PARTNER (the owner role link fails the role-scope trigger in the same transaction).
+- **Why not on `main` now:** `openapi.yaml` is a tooling input. A change makes the lane-B evidence of every open PR stale, and `types.gen.ts` must be regenerated in the same commit, which is product code. No route mounts the operation before TASK-224.
+- **Alternatives rejected:**
+  - Amend the criteria to 400 `UNKNOWN_FIELD`: REQ-ORG-001, AT-US-061-02 and AT-US-061-05 change, the refused attempt is no longer audited, and `ORG_TYPE_NOT_ALLOWED` becomes unreachable through the API.
+  - An enumeration with `BUSINESS_CUSTOMER` only: PARTNER would fail validation and be a 400 again.
+  - A contract-only PR now: stale evidence and CI minutes for an operation nothing mounts.
+- **Specialists:** api-designer and product-manager were not dispatched. The change is one property and one example, and no acceptance criterion changes.
+- **Open, not decided here (orchestrator to product-manager):** US-061 and US-062 are M0 Must and demo-critical, but their route-level scenarios now close in TASK-224 and TASK-231 (Wave 8, Should, cuttable). The cards still say TASK-037 completes both stories. Recommended default: record both as partial on TASK-037 and completed by TASK-224 and TASK-231, which makes those routes non-cuttable. Alternative: move the route-level scenarios to US-082 and US-085.
+- **Not verified here:** the YAML was not linted (host rule). TASK-224 runs `openapi:lint` and `openapi:types`.
+- **Where:** rulings file §3 and §4; cards TASK-224 (change request and the US-061 scenarios), TASK-037, TASK-231 (the US-062 scenarios of D-ORCH-131).
+- **Reversibility:** High until TASK-224 merges. After that, removing the property is a breaking contract change.
+
+### D-ARCH-153 · 2026-11-18 · principal-architect · First staff user in production: a one-shot audited command at M5, a G4 precondition for a production release (R-ARCH-33)
+- **Decision:**
+  - The first Super Admin in production is created by `ops:staff-bootstrap`, of the same family as `ops:staff-reactivate` (ADR-0006 amendment 14). It runs as `platform_app` through the identity and organisations services with a `SYSTEM_JOB` actor, as a pipeline task.
+  - It creates one user without credentials, an `ACTIVE` membership in `OPERATOR_ORG_ID` with `OPERATOR_SUPER_ADMIN`, and a `SET_PASSWORD` link. It refuses when the operator organisation already has a member, and it creates no organisation.
+  - It is not Run 1 work. It is a precondition of G4 for a production release (risks.md R-ARCH-33).
+  - TASK-089 exports its staff-provisioning function from the service layer so the command reuses it.
+- **Why:** D-ARCH-151 gives production the organisation but no member. The demo seed never runs there (REQ-DATA-001/002), and staff management is M2 (EPIC-B-207).
+- **Alternatives rejected:**
+  - The demo seed with `APP_ENV=production`: forbidden, and it would create demo customers.
+  - Manual SQL with the cluster-admin credential: it bypasses RLS, the standard-columns guard and the audit trail.
+  - Building the command now: there is no production target until M5.
+- **Routed:** product-manager places the backlog story (EPIC-B-207 or the M5 readiness epic).
+- **Where:** ADR-0005 amendment 12 item 26; risks.md R-ARCH-33; rulings file §2.4; card TASK-089.
+- **Reversibility:** High (design only; nothing is built).
