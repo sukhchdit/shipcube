@@ -47,7 +47,7 @@ function repoWith(changed: string[]): { root: string; base: string; head: string
 }
 
 describe('security-paths: classification', () => {
-  it('selects exactly the ADR-0023 am. G item 5 paths and the lockfile', () => {
+  it('selects exactly the ADR-0023 am. G item 5 paths, the lockfile and the PR57-SEC-02 suite code paths', () => {
     const selected = [
       'packages/authz/src/index.ts',
       'packages/audit/src/writer.ts',
@@ -57,6 +57,15 @@ describe('security-paths: classification', () => {
       'apps/api/src/platform/db/client.ts',
       'apps/api/src/modules/identity/service.ts',
       'package-lock.json',
+      // PR57-SEC-02 (D-SEC-PR57-01): the security suites' own code paths.
+      'jest.config.ts',
+      'tools/test-support/process.ts',
+      'tools/test-support/fs-lock.ts',
+      'tools/db/lint-migrations.ts',
+      'tools/db/table-classes/audit.json',
+      'tools/deps/prisma-engines.json',
+      'tests/generated/rls/api-cases.ts',
+      'tests/generated/api-mounts.ts',
     ];
     const notSelected = [
       'apps/web/app/root.tsx',
@@ -68,9 +77,27 @@ describe('security-paths: classification', () => {
       '.github/workflows/ci.yml',
       'apps/web/package-lock.json',
       'package.json',
+      // PR57-SEC-02 exclusions: the tools' own unit tests and DB fixtures; neighbours that are not suite code.
+      'tools/test-support/process.test.ts',
+      'tools/test-support/fs-lock.test.ts',
+      'tools/db/lint-migrations.test.ts',
+      'tools/db/fixtures/migrations/bad.sql',
+      'tools/db/fixtures/lint/bad-raw.sql',
+      'tools/deps/prisma-engines.test.ts',
+      'tools/deps/ignore-scripts.test.ts',
+      'tools/ci/lane-scope.mjs',
+      'tests/generated/rbac/matrix-app.ts',
+      'tests/generated/api-mounts.test.ts',
+      'jest.config.base.ts',
     ];
     expect(securityMatches([...selected, ...notSelected])).toEqual(selected);
-    expect(SECURITY_INTEGRATION_PATHS).toHaveLength(7);
+    expect(SECURITY_INTEGRATION_PATHS).toHaveLength(17);
+    expect(SECURITY_INTEGRATION_PATHS.filter((glob) => glob.startsWith('!'))).toEqual([
+      '!tools/test-support/**/*.test.ts',
+      '!tools/db/**/*.test.ts',
+      '!tools/db/fixtures/**',
+      '!tools/deps/**/*.test.ts',
+    ]);
   });
 
   it('the copied glob matcher agrees with tools/quality/lib/manifest.mjs on a path corpus', () => {

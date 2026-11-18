@@ -13,12 +13,18 @@ import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { findRepoRoot } from '../test-support/process.js';
-import { CI_GATE_TOOLING_SCRIPT_TESTED_BASE, FAST_LANE_TOOLING_SCRIPT } from './check-workflow-policy.mjs';
+import {
+  CI_GATE_TOOLING_SCRIPT_TESTED_BASE,
+  CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2,
+  FAST_LANE_TOOLING_SCRIPT,
+  FAST_LANE_TOOLING_SCRIPT_V2,
+} from './check-workflow-policy.mjs';
 import {
   CLASSIFICATION_KEYS,
   MAX_BASE_COMMITS,
   baseChangedAt,
-  checkedOutTopology,
+  FAST_LANE_OUTPUT_ENV,
+  checkoutProblem,
   classify,
   fastLaneProblems,
   formatClassification,
@@ -37,7 +43,6 @@ import type { Api, GateInputStage2, ProofSteps } from './lane-scope.mjs';
 
 const repoRoot = findRepoRoot();
 const stage2Text = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
-const stage1Text = readFileSync(join(repoRoot, 'tools', 'ci', 'fixtures', 'stage-1', 'ci.yml'), 'utf8');
 const temps: string[] = [];
 afterAll(() => temps.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
@@ -161,7 +166,7 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
   });
 
   it('fast-lane: the pinned tooling step takes every gate tool from HEAD^1 (current main) and sets TOOLS_REF; the classify command then runs', () => {
-    const { root, m0, f1, m1 } = sharedPr();
+    const { root, m0, f1, m1, merge } = sharedPr();
     const step = runStep(root, FAST_LANE_TOOLING_SCRIPT, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1 });
     expect(step.stderr).toBe('');
     expect(step.status).toBe(0);
@@ -182,7 +187,15 @@ describe('[PR46-SEC-17] [D-ORCH-103] the bootstrap: a PR whose merge base lacks 
         ...['--root', root, '--base', m0, '--head', f1, '--before', '', '--event', 'pull_request', '--pr', '53', '--head-ref', 'test/x'],
         ...['--tools-ref', m1, '--lookup', '--env', envFile, '--output', out],
       ],
-      { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 60_000, env: { ...process.env, GITHUB_REPOSITORY: '', GH_TOKEN: '' } },
+      {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 60_000,
+        // As on the runner (PR59-SEC-01): the event commit is the fixture's test merge, whatever this host's own
+        // GITHUB_ACTIONS / GITHUB_SHA are (lane A runs this suite on a runner with its own GITHUB_SHA).
+        env: { ...process.env, GITHUB_REPOSITORY: '', GH_TOKEN: '', GITHUB_ACTIONS: 'true', GITHUB_SHA: merge },
+      },
     );
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
@@ -257,12 +270,14 @@ describe('[D-ARCH-126] [PR46-SEC-17] the stage-2 classify CLI on a docs push', (
     return { status, outputs: readFileSync(out, 'utf8'), env: readFileSync(envFile, 'utf8') };
   };
 
-  it('a docs push runs light (CODE=false), with the classification naming the tested base', () => {
+  it('a docs push with no proof candidate at all (pending or red code) stays light and BLOCKED; the classification names the tested base', () => {
     const { root, m0, f1, f2, m2 } = docsPush('docs/notes/x.md');
     const args = ['--root', root, '--base', m0, '--head', f2, '--before', f1, '--pr', '53', '--head-ref', 'test/x', '--tools-ref', m2];
     const result = classifyCli(root, args);
     expect(result.status).toBe(0);
+    // The fake API answers nothing: no candidate run, so nothing was voided by the base (TASK-287 narrows run-full).
     expect(result.env).toBe('CODE=false\nLINT_CONTROLS=false\n');
+    expect(result.outputs).toContain('push_scope=docs\n');
     expect(result.outputs).toContain('mode=light\n');
     expect(result.outputs).toContain(`classification=mode=light,code_changed=false,pr_docs_only=false,lint_controls=false,`);
     expect(result.outputs).toContain(`,tools_ref=${m2}\n`);
@@ -274,6 +289,7 @@ describe('[D-ARCH-126] [PR46-SEC-17] the stage-2 classify CLI on a docs push', (
     const result = classifyCli(root, args);
     expect(result.status).toBe(0);
     expect(result.env).toBe('CODE=true\nLINT_CONTROLS=false\n');
+    expect(result.outputs).toContain('push_scope=code\n');
     expect(result.outputs).toContain('mode=full\n');
   });
 });
@@ -594,11 +610,10 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
     expect(verdict.reasons).toEqual(['code gates skipped on a code push (Unit tests: skipped)']);
   });
 
-  it('gate() takes the stage-2 rules when the checked-out ci.yml is stage 2, the stage-1 rules otherwise', () => {
+  it('gate() takes the stage-2 rules (stage 1 retired: no topology switch, TASK-287 part 287-A)', () => {
     const root = tempDir('lane-scope-gate-');
     git(root, ['init', '-q', '-b', 'main']);
     commit(root, { '.github/workflows/ci.yml': stage2Text }, 'stage 2');
-    expect(checkedOutTopology(root)).toBe('stage-2');
     const stage2Env = {
       GITHUB_EVENT_NAME: 'pull_request',
       FAST_LANE: 'success',
@@ -609,10 +624,46 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
     const none: Api = () => ({ ok: false, problem: 'not called' });
     expect(gate({ root, env: stage2Env, api: none })).toEqual({ ready: true, reasons: [] });
     expect(gate({ root, env: { ...stage2Env, FAST_LANE_CLASSIFICATION: '' }, api: none }).ready).toBe(false);
-    commit(root, { '.github/workflows/ci.yml': stage1Text }, 'stage 1');
-    expect(checkedOutTopology(root)).toBe('stage-1');
-    // The stage-1 rules read the scans outputs, which the stage-2 env does not carry: classification missing.
-    expect(gate({ root, env: stage2Env, api: none }).reasons).toContain('classification missing');
+  });
+
+  it('[PR55-SEC-05] the separate fast-lane outputs passed into the aggregation must equal the own classification', () => {
+    const root = tempDir('lane-scope-gate-');
+    git(root, ['init', '-q', '-b', 'main']);
+    commit(root, { '.github/workflows/ci.yml': stage2Text }, 'stage 2');
+    const none: Api = () => ({ ok: false, problem: 'not called' });
+    const base = {
+      GITHUB_EVENT_NAME: 'pull_request',
+      FAST_LANE: 'success',
+      SECURITY_INTEGRATION: 'success',
+      CLASSIFICATION: text,
+      FAST_LANE_CLASSIFICATION: text,
+    };
+    expect(FAST_LANE_OUTPUT_ENV).toEqual({
+      mode: 'FAST_LANE_MODE',
+      code_proof: 'FAST_LANE_CODE_PROOF',
+      security_integration_due: 'FAST_LANE_SECURITY_INTEGRATION_DUE',
+      tools_ref: 'FAST_LANE_TOOLS_REF',
+    });
+    const equal = {
+      FAST_LANE_MODE: values.mode,
+      FAST_LANE_CODE_PROOF: values.code_proof,
+      FAST_LANE_SECURITY_INTEGRATION_DUE: values.security_integration_due,
+      FAST_LANE_TOOLS_REF: values.tools_ref,
+    };
+    // Absent (the live ci.yml until the workflow half lands) and equal: MERGE-READY.
+    expect(gate({ root, env: base, api: none })).toEqual({ ready: true, reasons: [] });
+    expect(gate({ root, env: { ...base, ...equal }, api: none })).toEqual({ ready: true, reasons: [] });
+    // A differing tools_ref (security-integration would read other manifests) or any other differing output: BLOCKED.
+    expect(gate({ root, env: { ...base, ...equal, FAST_LANE_TOOLS_REF: 'e'.repeat(40) }, api: none }).reasons).toEqual([
+      'fast-lane outputs mismatch (tools_ref)',
+    ]);
+    expect(
+      gate({ root, env: { ...base, ...equal, FAST_LANE_MODE: 'full', FAST_LANE_SECURITY_INTEGRATION_DUE: 'false' }, api: none }).reasons,
+    ).toEqual(['fast-lane outputs mismatch (mode, security_integration_due)']);
+    // Present but empty is compared too (an expression that evaluates to nothing is not "absent").
+    expect(gate({ root, env: { ...base, FAST_LANE_CODE_PROOF: '' }, api: none }).reasons).toEqual([
+      'fast-lane outputs mismatch (code_proof)',
+    ]);
   });
 });
 
@@ -755,10 +806,16 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
   ])('%s', (_title, name, change, kept) => {
     const result = run(change, name);
     expect(result.status).toBe(0);
-    expect(result.outputs.mode).toBe('light');
+    // A kept proof runs light; a void one runs the full lane at once (TASK-287 run-full, D-TASK286-06a option).
+    expect(result.outputs.push_scope).toBe('docs');
+    expect(result.outputs.mode).toBe(kept ? 'light' : 'full');
+    expect(result.outputs.code_changed).toBe(kept ? 'false' : 'true');
     expect(result.outputs.code_proof).toBe(kept ? `${String(PROOF_RUN)}:${result.f1}` : '');
     if (kept) expect(result.summary).not.toContain('tested an older base');
-    else expect(result.summary).toContain('tested an older base');
+    else {
+      expect(result.summary).toContain('tested an older base');
+      expect(result.summary).toContain('the code proof was voided by the tested base: the full lane runs for this docs push');
+    }
   });
 
   it('[R1-n1] a PR range touching a lint control: a proof whose lint-fixture step was skipped is no proof', () => {
@@ -838,5 +895,37 @@ describe('[R1-n1] lint_controls end to end: the classify output, the env line an
     expect(verdict(base).reasons).toEqual(['code gates skipped on a code push (Lint negative fixtures: skipped)']);
     expect(verdict({ ...base, lint_controls: 'false' })).toEqual({ ready: true, reasons: [] });
     expect(seen).toEqual([true, false]);
+  });
+});
+
+describe('[PR59-SEC-01] [TASK-287] on a runner the checkout is the event commit GITHUB_SHA', () => {
+  it('checkoutProblem: off a runner nothing is checked; on a runner HEAD must be the full GITHUB_SHA', () => {
+    const { root, merge, m1 } = sharedPr();
+    expect(checkoutProblem(root, {})).toBe('');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'false', GITHUB_SHA: m1 })).toBe('');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true', GITHUB_SHA: merge })).toBe('');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true', GITHUB_SHA: m1 })).toContain('not the event commit');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true', GITHUB_SHA: merge.slice(0, 7) })).toContain('full commit SHA');
+    expect(checkoutProblem(root, { GITHUB_ACTIONS: 'true' })).toContain('full commit SHA');
+  });
+
+  it('the CLI exits 2 (fail closed) in classify and --gate mode when the checkout is not GITHUB_SHA', () => {
+    const { root, m0, f1, m1, merge } = sharedPr();
+    const api: Api = () => ({ ok: false, problem: 'none' });
+    const args = ['--root', root, '--base', m0, '--head', f1, '--pr', '53', '--head-ref', 'test/x', '--tools-ref', m1, '--lookup'];
+    expect(main(args, { env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: m1 }, api })).toBe(2);
+    expect(main(args, { env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: merge }, api })).toBe(0);
+    expect(main(['--gate', '--root', root], { env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: m1 }, api })).toBe(2);
+  });
+
+  it('the V2 tooling scripts fail the step when HEAD is not GITHUB_SHA and behave as V1 otherwise', () => {
+    const { root, m0, f1, m1, merge } = sharedPr();
+    for (const script of [FAST_LANE_TOOLING_SCRIPT_V2, CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2]) {
+      const ok = runStep(root, script, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1, GITHUB_SHA: merge });
+      expect([ok.status, ok.env.TOOLS_REF]).toEqual([0, m1]);
+      const bad = runStep(root, script, { GITHUB_EVENT_NAME: 'pull_request', RANGE_BASE: m0, RANGE_HEAD: f1, GITHUB_SHA: m1 });
+      expect(bad.status).toBe(1);
+      expect(bad.env.TOOLS_REF).toBeUndefined();
+    }
   });
 });

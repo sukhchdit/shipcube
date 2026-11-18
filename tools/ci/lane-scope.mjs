@@ -3,11 +3,12 @@
  * Lane scope, proof inheritance and the lane A gate (ADR-0023 amendment L items 1-2; D-ARCH-126/127; ruling
  * docs/03-architecture/rulings/wave-0-ci-minutes.md section 4 RR-1, RR-4, RR-6; TASK-015 part 015-B fix cycle 1).
  *
- * Base-ref gate tooling: ci.yml runs the BASE ref's copy of tools/ci (this file and the three it imports from the same
- * directory; in stage 2 the tested base's, PR46-SEC-17) and bootstraps it from the head's git objects only while the
- * base lacks it, with the summary saying so. It imports nothing but `node:` modules and siblings, runs `git` and (with
- * --lookup / --gate) the runner's `gh`, and never reads node_modules, so it may run in the no-head-code jobs `scans` and
- * `ci-gate`, and in stage 2 in fast-lane's classify step before any head code.
+ * Tested-base gate tooling: ci.yml runs the tested base's copy of tools/ci (this file and the siblings it imports;
+ * TOOLS_REF = HEAD^1 of the test merge on a pull request, PR46-SEC-17) and bootstraps it from the head's git objects
+ * only while the tested base lacks it, with the summary saying so. It imports nothing but `node:` modules and siblings,
+ * runs `git` and (with --lookup / --gate) the runner's `gh`, and never reads node_modules, so it runs in fast-lane's
+ * classify step before any head code and in the no-head-code job `ci-gate`. On a GitHub runner it first checks that
+ * the checkout is the event commit GITHUB_SHA (exit 2 otherwise; PR59-SEC-01, TASK-287).
  *
  * Classification (every mode):
  *   push_scope    `docs` when the PUSH range is docs-only, else `code`. The push range is `<before>..<head>` (a tree diff)
@@ -27,7 +28,12 @@
  * both sides are regular non-executable files (mode 100644 or absent; a symlink, submodule or executable is code), as
  * for the lane B staleness rule (PR28-SEC-03 item 3).
  *
- * --lookup (job `scans`; `GH_TOKEN` in that step's env only, `actions: read`): proofs read from the GitHub jobs API.
+ * --tools-ref <sha> (required; the stage-1 call without it is retired, TASK-287 part 287-A) with --lookup (fast-lane's
+ *   classify step and ci-gate's lane-scope step; `GH_TOKEN` in those steps' env only, `actions: read` and
+ *   `pull-requests: read` on those jobs): the tested base, verified here (on pull_request HEAD^1 = it, HEAD^2 = --head,
+ *   --base an ancestor of it; on a push the range base or empty; else exit 2, fail closed). DOCS_ONLY_PATHS reads its
+ *   manifest's tooling_inputs. Proofs are read from the GitHub jobs API with the step names of the checked-out test
+ *   merge's ci.yml (the workflow this run executes).
  *   Binding (code review PR #46 R2-M1 = PR46-SEC-13, D-ORCH-090): a proof run is a run of THIS pull request into
  *   PROOF_BASE_REF only. Before the first candidate's jobs are read, the head branch (`--head-ref`, `github.head_ref`)
  *   must have exactly one pull request (state all), this one (`--pr`), into `main` of this repository, and the PR's
@@ -35,43 +41,33 @@
  *   candidate run must be on that head branch in this repository and list exactly this PR with base `main`; an empty,
  *   longer or other `pull_requests` list (a fork, another PR, another base) is no proof. Any failed or malformed binding
  *   call gives no proof at all (fail closed: the full lane runs).
+ *   PR46-SEC-16: a proof run created at or before the tested base's newest first-parent commit touching a proofBasePath
+ *   (PROOF_BASE_DIRS, the lint controls, every root-level non-Markdown file, the manifest's tooling_inputs, and every
+ *   path the PR range itself changes: P1 (b), D-TASK286-06) is no proof; an unreadable history or an unknown PR range
+ *   gives no proof at all.
  *   code_proof      `<run_id>:<sha>` of a completed `ci.yml` pull_request run of this PR (bound as above; workflow
  *                   conclusion any) on a commit of `identical` whose `fast-lane` job concluded success with every
- *                   CODE-gated step of CI_REQUIRED_GATES concluded success (steps also gated by LINT_CONTROLS may be
- *                   skipped) and whose `scans` job's gitleaks, Semgrep and openapi-breaking steps concluded success;
- *                   else empty. Step conclusions, never the job colour: a light run is green with its code steps
- *                   skipped, so it is never a proof. Queued and in-progress runs (and this run) are not proofs.
+ *                   CODE-gated required step concluded success (steps also gated by LINT_CONTROLS may be skipped unless
+ *                   this PR range touches a lint control, R1-n1) and whose `ci-gate` gitleaks, Semgrep and
+ *                   openapi-breaking steps concluded success; else empty. Step conclusions, never the job colour.
  *   security_proof  `<run_id>:<sha>` of such a run whose `security-integration` job concluded success; else empty.
  *   security_integration_due  pull_request && security_paths && record_ok && security_proof == ''.
- *   A failed or unauthenticated API call yields no proof (fail closed: the gate is red, the job runs).
- *
- * --gate (job `ci-gate`'s aggregation step; `GH_TOKEN` in that step's env only): rules (a)-(f) of RR-6 over the needs
- * results and outputs passed in the step env (FAST_LANE, FAST_LANE_MODE, SCANS, SECURITY_INTEGRATION, CODE_CHANGED,
- * PR_DOCS_ONLY, CODE_PROOF, SECURITY_PROOF, RECORD_OK, SECURITY_PATHS, SECURITY_INTEGRATION_DUE) and this run's jobs:
- *   (a) fast-lane success; (b) a code push ran full and this run's CODE-gated required steps concluded success; a
- *   docs push that ran full disagrees with the classification; (c) a docs push of a PR with code changes has a
- *   code proof; (d) scans success; (e) security_paths → security-integration success in this run or a security proof;
- *   (f) an empty or malformed classification output is `classification missing`. Prints `MERGE-READY` (exit 0) or
- *   `BLOCKED: <reasons>` (exit 1). On push events (CI_MAIN_FAST_LANE) only (a), (b), (d) and (f) apply.
- *
- * Stage 2 (ADR-0023 am. L item 3, D-ARCH-128; TASK-286), selected by `--tools-ref` (which needs `--lookup`). The same
- * file serves both topologies while ci.yml moves (two-step, policy first); stage 1 behaves exactly as above.
- *   --tools-ref <sha>  the tested base (PR46-SEC-17): on pull_request the first parent of the checked-out test merge,
- *                 verified here (HEAD^1 = it, HEAD^2 = --head, --base an ancestor of it; else exit 2, fail closed); on a
- *                 push the range base or empty. DOCS_ONLY_PATHS reads its manifest's tooling_inputs, and the proof's
- *                 step names come from the checked-out test merge's ci.yml (the workflow this run executes).
- *                 PR46-SEC-16: a proof run created at or before the tested base's newest first-parent commit touching a
- *                 proofBasePath (PROOF_BASE_DIRS, the lint controls, every root-level non-Markdown file, the manifest's
- *                 tooling_inputs, and every path the PR range itself changes: P1 (b), D-TASK286-06) is no proof, since
- *                 it merged an older base on a path the lane A result depends on; an unreadable history or an unknown
- *                 PR range gives no proof at all. Outputs add `lint_controls` (LINT_CONTROL_PATHS over the PR range; an unknown
- *                 range is true), `tools_ref` and `classification` (CLASSIFICATION_KEYS in order, `key=value`, `,`).
+ *   A docs push of a PR with code changes whose proof candidates were all voided by the tested base runs the full lane
+ *   (code_changed=true, mode=full; push_scope stays docs) instead of ending BLOCKED (D-TASK286-06a option, TASK-287;
+ *   SPK-07 section 6.1); with no candidate at all (pending or red code) it stays light and BLOCKED.
+ *   Outputs add `lint_controls` (LINT_CONTROL_PATHS over the PR range; an unknown range is true), `tools_ref` and
+ *   `classification` (CLASSIFICATION_KEYS in order, `key=value`, `,`).
  *   --env <file>  appends CODE and LINT_CONTROLS (fast-lane's step conditions) to $GITHUB_ENV.
- *   --gate        when the checked-out ci.yml has the stage-2 topology: CLASSIFICATION (ci-gate's own lane-scope step)
- *                 and FAST_LANE_CLASSIFICATION (fast-lane's classify step) in the env; (a), (b), (c), (e), (f) as above
- *                 on ci-gate's own classification, and (g) the two are equal (PR46-SEC-12: fast-lane's outputs, which
- *                 steer its CODE steps and security-integration's if:, are never trusted alone). (d) is gone: the scans
- *                 are steps of ci-gate, so a red scan fails the job itself.
+ *
+ * --gate (ci-gate's aggregation step; `GH_TOKEN` in that step's env only): CLASSIFICATION (ci-gate's own lane-scope
+ * step) and FAST_LANE_CLASSIFICATION (fast-lane's classify step) in the env, plus this run's jobs:
+ *   (a) fast-lane success; (b) a code push ran full and this run's CODE-gated required steps concluded success;
+ *   (c) a docs push of a PR with code changes has a code proof; (e) security_paths -> security-integration success in
+ *   this run or a security proof; (f) an empty or malformed classification is `classification missing`; (g) the two
+ *   classifications are equal, and each of fast-lane's separate outputs passed in (FAST_LANE_OUTPUT_ENV:
+ *   FAST_LANE_MODE, FAST_LANE_CODE_PROOF, FAST_LANE_SECURITY_INTEGRATION_DUE, FAST_LANE_TOOLS_REF) equals ci-gate's own
+ *   value (PR46-SEC-12, PR55-SEC-05). A red scan fails the ci-gate job itself. Prints `MERGE-READY` (exit 0) or
+ *   `BLOCKED: <reasons>` (exit 1).
  *
  * CLI: node tools/ci/lane-scope.mjs --root <dir> --base <sha> --head <sha> [--before <sha>] [--event <name>]
  *        [--pr <n>] [--head-ref <branch>] [--tools-ref <sha>] [--lookup] [--env <$GITHUB_ENV>] [--output <$GITHUB_OUTPUT>]
@@ -84,7 +80,7 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { checkSecurityOwnedPaths } from './check-security-owned-paths.mjs';
-import { SCANS_JOB_BY_TOPOLOGY, gateStepIndex, requiredGatesFor, topologyOf } from './check-workflow-policy.mjs';
+import { SCANS_JOB, gateStepIndex, requiredGatesFor } from './check-workflow-policy.mjs';
 import { classifyRange, matchGlob } from './security-paths.mjs';
 import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 
@@ -94,8 +90,7 @@ import { isMap, parseYamlSubset } from './yaml-subset.mjs';
 /** @typedef {(path: string) => ApiResult} Api */
 /** @typedef {{ name: string, mayBeSkipped: boolean }} RequiredStep */
 /**
- * fastLane: the CODE-gated required steps; scans: the gitleaks/Semgrep/oasdiff step names in job `scansJob` (`scans` in
- * stage 1, `ci-gate` in stage 2; default `scans`).
+ * fastLane: the CODE-gated required steps; scans: the gitleaks/Semgrep/oasdiff step names in job `scansJob` (`ci-gate`).
  * @typedef {{ fastLane: RequiredStep[], scans: string[], scansJob?: string }} ProofSteps
  */
 
@@ -400,8 +395,8 @@ export function identicalSet(root, base, head, inputs) {
 }
 
 /**
- * The step names a code proof needs, from a ci.yml text and the required gates of its topology (this directory's copy
- * of check-workflow-policy.mjs: stage 1 with a `scans` job, stage 2 with the scans in `ci-gate`; D-ARCH-128).
+ * The step names a code proof needs, from a ci.yml text and the required gates (this directory's copy of
+ * check-workflow-policy.mjs: the scans are steps of `ci-gate`; D-ARCH-128).
  * @param {string} workflowText
  * @param {readonly RequiredGate[]} [gates] default: requiredGatesFor(the parsed workflow)
  * @returns {ProofSteps | { problem: string }}
@@ -414,8 +409,8 @@ export function proofSteps(workflowText, gates) {
     return { problem: `ci.yml does not parse: ${message(error)}` };
   }
   const root = doc ?? undefined;
-  const scansJob = SCANS_JOB_BY_TOPOLOGY[topologyOf(root)];
-  const required = gates ?? requiredGatesFor(root);
+  const scansJob = SCANS_JOB;
+  const required = gates ?? requiredGatesFor();
   const jobs = isMap(root) && isMap(root.jobs) ? root.jobs : {};
   /** @param {string} jobId */
   const stepsOf = (jobId) => {
@@ -581,14 +576,14 @@ export function fastLaneProblems(jobsJson, required, lintControls = false) {
 }
 
 /**
- * Problems that keep a run's scans (job `scans`, or `ci-gate` in stage 2) from proving the code (the job colour is
+ * Problems that keep a run's scans (steps of job `ci-gate`) from proving the code (the job colour is
  * ignored; the record step may fail).
  * @param {unknown} jobsJson
  * @param {readonly string[]} names
  * @param {string} [jobName]
  * @returns {string[]}
  */
-export function scansProblems(jobsJson, names, jobName = 'scans') {
+export function scansProblems(jobsJson, names, jobName = SCANS_JOB) {
   const job = oneJob(jobsJson, jobName);
   if (typeof job === 'string') return [job];
   if (job.status !== 'completed') return [`${jobName} ${String(job.status)}`];
@@ -702,7 +697,8 @@ export function runBindingProblem(run, binding) {
  * @param {{ api: Api, repo: string, identical: readonly string[], steps: ProofSteps, currentRunId?: string, pr?: string,
  *   headRef?: string, baseChangedAt?: number | null | undefined, lintControls?: boolean }} input
  *   lintControls: stage 2, the PR range touches a lint control, so a proof's LINT_CONTROLS steps must have succeeded
- * @returns {{ codeProof: string, securityProof: string, notes: string[] }}
+ * @returns {{ codeProof: string, securityProof: string, notes: string[], voidedByBase: boolean }} voidedByBase: a run of
+ *   this PR was refused only because the tested base changed a lane A input since (PR46-SEC-16)
  */
 export function lookupProofs({
   api,
@@ -720,7 +716,9 @@ export function lookupProofs({
   let codeProof = '';
   let securityProof = '';
   let calls = 0;
-  if (baseChangedAt === null) return { codeProof, securityProof, notes: ['no proof (the tested base history is unreadable, fail closed)'] };
+  let voidedByBase = false;
+  if (baseChangedAt === null)
+    return { codeProof, securityProof, notes: ['no proof (the tested base history is unreadable, fail closed)'], voidedByBase };
   const call = (/** @type {string} */ path) => {
     calls += 1;
     if (calls > MAX_API_CALLS) return /** @type {ApiResult} */ ({ ok: false, problem: `more than ${String(MAX_API_CALLS)} API calls` });
@@ -759,11 +757,12 @@ export function lookupProofs({
       const problem = runBindingProblem(run, binding);
       if (problem !== '')
         notes.push(`run ${String(run.id)} (${sha.slice(0, 7)}) is not a run of this PR into ${PROOF_BASE_REF}: ${problem}`);
-      else if (baseChangedAt !== undefined && Date.parse(String(run.created_at)) <= baseChangedAt)
+      else if (baseChangedAt !== undefined && Date.parse(String(run.created_at)) <= baseChangedAt) {
+        voidedByBase = true;
         notes.push(
           `run ${String(run.id)} (${sha.slice(0, 7)}) tested an older base: the tested base changed a lane A input since (PR46-SEC-16)`,
         );
-      else candidates.push(run);
+      } else candidates.push(run);
     }
     candidates.sort((a, b) => Number(b.id) - Number(a.id));
     for (const run of candidates) {
@@ -784,7 +783,7 @@ export function lookupProofs({
       if (securityProof === '' && securityIntegrationPassed(jobs.json)) securityProof = `${String(run.id)}:${sha}`;
     }
   }
-  return { codeProof, securityProof, notes };
+  return { codeProof, securityProof, notes, voidedByBase: voidedByBase && codeProof === '' };
 }
 
 /** Synchronous sleep (the CLI is synchronous; retries are rare and short). */
@@ -823,67 +822,18 @@ export function ghApi(options = {}) {
 }
 
 /**
- * @typedef {object} GateInput
- * @property {string} event GITHUB_EVENT_NAME
- * @property {string} fastLane needs.fast-lane.result
- * @property {string} fastLaneMode needs.fast-lane.outputs.mode
- * @property {string} scans needs.scans.result
- * @property {string} securityIntegration needs.security-integration.result
- * @property {Record<string, string>} outputs scans outputs: code_changed, pr_docs_only, code_proof, security_proof,
- *   record_ok, security_paths, security_integration_due
- * @property {() => string[]} thisRunCodeProblems problems of this run's CODE-gated fast-lane steps (jobs API)
+ * PR55-SEC-05 (TASK-287): fast-lane's outputs that steer security-integration (its if: and TOOLS_REF) besides the
+ * classification string rule (g) compares, with the aggregation env variable that carries each.
+ * @typedef {'mode' | 'code_proof' | 'security_integration_due' | 'tools_ref'} FastLaneOutput
  */
-
-/** The scans outputs ci-gate requires, and their domains. */
-export const GATE_OUTPUTS = Object.freeze(['code_changed', 'pr_docs_only', 'record_ok', 'security_paths', 'security_integration_due']);
-
-/**
- * Rules (a)-(f) of RR-6. Reasons are enumerated strings (the summary and the tests match them).
- * @param {GateInput} input
- * @returns {{ ready: boolean, reasons: string[] }}
- */
-export function gateVerdict(input) {
-  /** @type {string[]} */
-  const reasons = [];
-  const pr = input.event === 'pull_request';
-  const out = input.outputs;
-  // (f) fail closed on a missing or malformed classification.
-  const malformed =
-    GATE_OUTPUTS.some((key) => !BOOL.has(out[key] ?? '')) ||
-    !['full', 'light'].includes(input.fastLaneMode) ||
-    ![out.code_proof ?? '', out.security_proof ?? ''].every((proof) => proof === '' || PROOF.test(proof));
-  if (malformed) reasons.push('classification missing');
-  // (a)
-  if (input.fastLane !== 'success')
-    reasons.push(
-      input.fastLane === 'skipped'
-        ? 'fast-lane skipped (a draft PR is not gated: mark it ready for review)'
-        : `fast-lane ${input.fastLane || 'missing'}`,
-    );
-  // (d)
-  if (input.scans !== 'success') reasons.push(`scans ${input.scans || 'missing'}`);
-  if (!malformed) {
-    const codeChanged = !pr || out.code_changed === 'true';
-    // (b)
-    if (codeChanged) {
-      if (input.fastLaneMode !== 'full') reasons.push('code gates skipped on a code push');
-      else if (input.fastLane === 'success') {
-        const problems = input.thisRunCodeProblems();
-        if (problems.length > 0) reasons.push(`code gates skipped on a code push (${problems.slice(0, 3).join('; ')})`);
-      }
-    } else if (input.fastLaneMode !== 'light') reasons.push('fast-lane mode disagrees with the classification');
-    // (c)
-    if (pr && out.code_changed === 'false' && out.pr_docs_only === 'false' && (out.code_proof ?? '') === '')
-      reasons.push('no code proof for this tree');
-    // (e)
-    if (pr && out.security_paths === 'true' && input.securityIntegration !== 'success' && (out.security_proof ?? '') === '') {
-      if (input.securityIntegration === 'failure' || input.securityIntegration === 'cancelled') reasons.push('security-integration red');
-      else if (out.record_ok !== 'true') reasons.push('security-integration pending (record missing)');
-      else reasons.push('security-integration pending (not run)');
-    }
-  }
-  return { ready: reasons.length === 0, reasons };
-}
+export const FAST_LANE_OUTPUT_ENV = Object.freeze(
+  /** @type {Record<FastLaneOutput, string>} */ ({
+    mode: 'FAST_LANE_MODE',
+    code_proof: 'FAST_LANE_CODE_PROOF',
+    security_integration_due: 'FAST_LANE_SECURITY_INTEGRATION_DUE',
+    tools_ref: 'FAST_LANE_TOOLS_REF',
+  }),
+);
 
 /** Boolean members of the stage-2 classification. */
 const CLASSIFICATION_BOOLS = Object.freeze([
@@ -934,6 +884,9 @@ export function parseClassification(text) {
  * @property {string} securityIntegration needs.security-integration.result
  * @property {string} classification ci-gate's own lane-scope classification (steps.lane-scope.outputs.classification)
  * @property {string} fastLaneClassification needs.fast-lane.outputs.classification
+ * @property {Partial<Record<FastLaneOutput, string>>} [fastLaneOutputs] PR55-SEC-05: fast-lane's separate outputs (mode,
+ *   code_proof, security_integration_due, tools_ref) as passed into the aggregation step; each one present must equal
+ *   the classification ci-gate computes itself
  * @property {(lintControls?: boolean) => string[]} thisRunCodeProblems problems of this run's CODE-gated fast-lane steps
  *   (jobs API); with lintControls the LINT_CONTROLS-gated steps must have succeeded too (PR #55 R1-n1)
  */
@@ -941,7 +894,8 @@ export function parseClassification(text) {
 /**
  * Stage-2 rules (D-ARCH-128; PR46-SEC-12): (a), (b), (c), (e) and (f) of RR-6 over ci-gate's OWN classification, and
  * (g) fast-lane's classification equals it (fast-lane's outputs drive its CODE steps and security-integration's if:,
- * so they are never trusted alone). (d) is gone: the scans are steps of ci-gate, and a red scan fails the job itself.
+ * so they are never trusted alone), also for the separate outputs passed in (PR55-SEC-05). A red scan fails the ci-gate
+ * job itself.
  * @param {GateInputStage2} input
  * @returns {{ ready: boolean, reasons: string[] }}
  */
@@ -962,6 +916,13 @@ export function gateVerdictStage2(input) {
   // (g)
   if (own !== null && input.fastLaneClassification !== input.classification)
     reasons.push('classification mismatch (fast-lane and ci-gate disagree)');
+  // (g) for the separate outputs (PR55-SEC-05): each one passed in must equal ci-gate's own value.
+  if (own !== null) {
+    const differing = Object.entries(input.fastLaneOutputs ?? {})
+      .filter(([key, value]) => own[/** @type {FastLaneOutput} */ (key)] !== value)
+      .map(([key]) => key);
+    if (differing.length > 0) reasons.push(`fast-lane outputs mismatch (${differing.join(', ')})`);
+  }
   if (own !== null) {
     // (b)
     if (!pr || own.code_changed === 'true') {
@@ -1006,21 +967,6 @@ function thisRunCodeProblems({ root, get, api }, lintControls = false) {
 }
 
 /**
- * The job topology of the checked-out ci.yml (the workflow this run executes), or null when it is unreadable.
- * @param {string} root
- * @returns {'stage-1' | 'stage-2' | null}
- */
-export function checkedOutTopology(root) {
-  const shown = git(root, ['show', `HEAD:${WORKFLOW_PATH}`]);
-  if (!shown.ok) return null;
-  try {
-    return topologyOf(parseYamlSubset(shown.stdout).value);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Collects the stage-2 gate input from the aggregation step's env and the runner's variables.
  * @param {{ root: string, env: NodeJS.ProcessEnv, api: Api }} input
  * @returns {GateInputStage2}
@@ -1033,35 +979,12 @@ export function gateInputStage2FromEnv({ root, env, api }) {
     securityIntegration: get('SECURITY_INTEGRATION'),
     classification: get('CLASSIFICATION'),
     fastLaneClassification: get('FAST_LANE_CLASSIFICATION'),
+    fastLaneOutputs: Object.fromEntries(
+      Object.entries(FAST_LANE_OUTPUT_ENV)
+        .filter(([, name]) => env[name] !== undefined)
+        .map(([key, name]) => [key, get(name)]),
+    ),
     thisRunCodeProblems: (lintControls = false) => thisRunCodeProblems({ root, get, api }, lintControls),
-  };
-}
-
-/**
- * Collects the gate input from the environment (the aggregation step's env and the runner's variables).
- * @param {{ root: string, env: NodeJS.ProcessEnv, api: Api }} input
- * @returns {GateInput}
- */
-export function gateInputFromEnv({ root, env, api }) {
-  const get = (/** @type {string} */ name) => (env[name] ?? '').trim();
-  /** @type {Record<string, string>} */
-  const outputs = {
-    code_changed: get('CODE_CHANGED'),
-    pr_docs_only: get('PR_DOCS_ONLY'),
-    code_proof: get('CODE_PROOF'),
-    security_proof: get('SECURITY_PROOF'),
-    record_ok: get('RECORD_OK'),
-    security_paths: get('SECURITY_PATHS'),
-    security_integration_due: get('SECURITY_INTEGRATION_DUE'),
-  };
-  return {
-    event: get('GITHUB_EVENT_NAME'),
-    fastLane: get('FAST_LANE'),
-    fastLaneMode: get('FAST_LANE_MODE'),
-    scans: get('SCANS'),
-    securityIntegration: get('SECURITY_INTEGRATION'),
-    outputs,
-    thisRunCodeProblems: () => thisRunCodeProblems({ root, get, api }),
   };
 }
 
@@ -1123,20 +1046,39 @@ export function parseArgs(argv) {
   if (!['pull_request', 'push'].includes(event)) return { error: `--event must be pull_request or push (got ${event})` };
   const pr = values['--pr'] ?? '';
   if (pr !== '' && !PR_NUMBER.test(pr)) return { error: '--pr must be a pull request number' };
-  // Stage 2 (D-ARCH-128): the classification output is complete only with the proofs, so --tools-ref needs --lookup.
-  if (values['--tools-ref'] !== undefined && !flags.has('--lookup')) return { error: '--tools-ref needs --lookup (stage 2)' };
+  // D-ARCH-128: the classification is complete only with the tested base and the proofs; the stage-1 call without
+  // --tools-ref is retired (TASK-287 part 287-A).
+  if (values['--tools-ref'] === undefined) return { error: '--tools-ref is required (the stage-1 classify call is retired)' };
+  if (!flags.has('--lookup')) return { error: '--tools-ref needs --lookup (stage 2)' };
   return { values, flags };
 }
 
 /**
- * The gate (--gate): the stage-2 rules when the checked-out ci.yml has the stage-2 topology, else the stage-1 rules.
+ * The gate (--gate): the stage-2 rules (the stage-1 topology is retired, TASK-287 part 287-A).
  * @param {{ root: string, env: NodeJS.ProcessEnv, api: Api }} input
  * @returns {{ ready: boolean, reasons: string[] }}
  */
 export function gate({ root, env, api }) {
-  return checkedOutTopology(root) === 'stage-2'
-    ? gateVerdictStage2(gateInputStage2FromEnv({ root, env, api }))
-    : gateVerdict(gateInputFromEnv({ root, env, api }));
+  return gateVerdictStage2(gateInputStage2FromEnv({ root, env, api }));
+}
+
+/**
+ * PR59-SEC-01 (TASK-287): on a GitHub runner the checkout must be the commit the event names (GITHUB_SHA, a runner
+ * variable no workflow env may set: reserved-env). A checkout `ref:` or `repository:` input would otherwise choose
+ * the test merge, and so the tested base HEAD^1, that judges the PR. Off a runner (tests, a developer host) there is
+ * no event commit and nothing is checked.
+ * @param {string} root
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string} the problem, or '' when the checkout is the event commit (or not on a runner)
+ */
+export function checkoutProblem(root, env) {
+  if ((env.GITHUB_ACTIONS ?? '').trim() !== 'true') return '';
+  const sha = (env.GITHUB_SHA ?? '').trim();
+  if (!FULL_SHA.test(sha)) return 'GITHUB_SHA is not a full commit SHA';
+  const head = git(root, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  if (!head.ok) return 'HEAD is not readable';
+  if (head.stdout.trim() !== sha) return 'the checkout is not the event commit GITHUB_SHA';
+  return '';
 }
 
 /**
@@ -1155,6 +1097,11 @@ export function main(argv, deps = {}) {
   const api = deps.api ?? ghApi({ env });
   const root = values['--root'] ?? '.';
   const summary = values['--summary'];
+  const checkout = checkoutProblem(root, env);
+  if (checkout !== '') {
+    console.error(`lane-scope: ${checkout} (fail closed, PR59-SEC-01)`);
+    return 2;
+  }
 
   if (flags.has('--gate')) {
     const verdict = gate({ root, env, api });
@@ -1172,17 +1119,13 @@ export function main(argv, deps = {}) {
   const event = values['--event'] ?? 'pull_request';
   const base = values['--base'] ?? '';
   const head = values['--head'] ?? '';
-  // Stage 2 (PR46-SEC-17): the tested base, verified against the checkout before anything is classified.
-  const stage2 = values['--tools-ref'] !== undefined;
-  let toolsRef = '';
-  if (stage2) {
-    const tested = testedBase({ root, toolsRef: values['--tools-ref'] ?? '', base, head, event });
-    if ('problem' in tested) {
-      console.error(`lane-scope: ${tested.problem} (fail closed, PR46-SEC-17)`);
-      return 2;
-    }
-    toolsRef = tested.sha;
+  // PR46-SEC-17: the tested base, verified against the checkout before anything is classified.
+  const tested = testedBase({ root, toolsRef: values['--tools-ref'] ?? '', base, head, event });
+  if ('problem' in tested) {
+    console.error(`lane-scope: ${tested.problem} (fail closed, PR46-SEC-17)`);
+    return 2;
   }
+  const toolsRef = tested.sha;
   const result = classify({ root, base, head, before: values['--before'] ?? '', event, pr: values['--pr'] ?? '', manifestRef: toolsRef });
   /** @type {Record<string, string>} */
   const out = {
@@ -1194,23 +1137,21 @@ export function main(argv, deps = {}) {
     security_paths: String(result.securityPaths),
     record_ok: String(result.recordOk),
   };
-  if (stage2) out.lint_controls = String(result.lintControls);
+  out.lint_controls = String(result.lintControls);
   /** @type {string[]} */
   let notes = [];
   if (flags.has('--lookup')) {
     let codeProof = '';
     let securityProof = '';
+    let voidedByBase = false;
     const repo = (env.GITHUB_REPOSITORY ?? '').trim();
     if (event !== 'pull_request') notes.push('no lookup on a push event');
     else if (!REPO.test(repo)) notes.push('GITHUB_REPOSITORY is not set (no lookup)');
     else {
-      // Stage 1: the PR head's ci.yml. Stage 2: the checked-out test merge's (verified by testedBase), the workflow this
-      // run executes, whose required gates name the steps a proof run must have concluded.
-      const workflowRev = stage2 ? 'HEAD' : head.trim();
-      const shown = git(root, ['show', `${workflowRev}:${WORKFLOW_PATH}`]);
-      const steps = shown.ok
-        ? proofSteps(shown.stdout)
-        : { problem: `${WORKFLOW_PATH} is not readable at ${stage2 ? 'the test merge' : 'the head'}` };
+      // The checked-out test merge's ci.yml (verified by testedBase), the workflow this run executes, whose required
+      // gates name the steps a proof run must have concluded.
+      const shown = git(root, ['show', `HEAD:${WORKFLOW_PATH}`]);
+      const steps = shown.ok ? proofSteps(shown.stdout) : { problem: `${WORKFLOW_PATH} is not readable at the test merge` };
       if ('problem' in steps) notes.push(`no lookup: ${steps.problem}`);
       else {
         const found = lookupProofs({
@@ -1221,24 +1162,32 @@ export function main(argv, deps = {}) {
           currentRunId: (env.GITHUB_RUN_ID ?? '').trim(),
           pr: values['--pr'] ?? '',
           headRef: values['--head-ref'] ?? '',
-          baseChangedAt: stage2
-            ? baseChangedAt(root, toolsRef, toolingInputs(root, toolsRef), MAX_BASE_COMMITS, result.prPaths)
-            : undefined,
-          lintControls: stage2 && result.lintControls,
+          baseChangedAt: baseChangedAt(root, toolsRef, toolingInputs(root, toolsRef), MAX_BASE_COMMITS, result.prPaths),
+          lintControls: result.lintControls,
         });
         codeProof = found.codeProof;
         securityProof = found.securityProof;
+        voidedByBase = found.voidedByBase;
         notes = [...notes, ...found.notes];
       }
     }
     out.code_proof = codeProof;
     out.security_proof = securityProof;
+    // D-TASK286-06a option (TASK-287, SPK-07 section 6.1): a docs push of a PR with code changes whose only proof
+    // candidates were voided by the tested base (PR46-SEC-16) runs the full lane at once: the code must run on the new
+    // base before the merge anyway, and the full run alone (8-10 billed minutes) is cheaper than the blocked light run
+    // (3-4) plus that re-push. Without any candidate (the code run is pending or red) the push stays light and ends
+    // `BLOCKED: no code proof`, because a full run there would usually be wasted. Both lane-scope instances decide it the
+    // same way, and rule (g) compares them.
+    if (event === 'pull_request' && out.code_changed === 'false' && out.pr_docs_only === 'false' && codeProof === '' && voidedByBase) {
+      out.code_changed = 'true';
+      out.mode = 'full';
+      notes.push('the code proof was voided by the tested base: the full lane runs for this docs push (TASK-287)');
+    }
     out.security_integration_due = String(event === 'pull_request' && result.securityPaths && result.recordOk && securityProof === '');
   }
-  if (stage2) {
-    out.tools_ref = toolsRef;
-    out.classification = formatClassification(out);
-  }
+  out.tools_ref = toolsRef;
+  out.classification = formatClassification(out);
   const text = Object.entries(out)
     .map(([key, value]) => `${key}=${value}`)
     .join('\n');
@@ -1258,11 +1207,10 @@ export function main(argv, deps = {}) {
       `- security-critical paths: ${out.security_paths} (${safe(result.securityReason)})`,
       `- ${safe(result.recordReason)}`,
     ];
-    if (stage2)
-      lines.push(
-        `- tested base: ${toolsRef === '' ? 'none (a push without a base)' : `\`${toolsRef.slice(0, 7)}\``}`,
-        `- lint controls: ${out.lint_controls ?? 'true'}`,
-      );
+    lines.push(
+      `- tested base: ${toolsRef === '' ? 'none (a push without a base)' : `\`${toolsRef.slice(0, 7)}\``}`,
+      `- lint controls: ${out.lint_controls ?? 'true'}`,
+    );
     if (flags.has('--lookup')) {
       lines.push(
         `- code proof: ${out.code_proof === '' ? 'none' : `run ${safe(out.code_proof ?? '')}`}`,
