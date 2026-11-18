@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "lane": "B",
+  "profile": "pr",
+  "git_sha": "266abb689cbb17e453651c9d400c8ae70500a4c9",
+  "git_dirty": false,
+  "build_clean": true,
+  "stamp": "20261118T1229Z",
+  "generated_at": "2026-11-18T12:41:30Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300 (win32)",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i9-11950H @ 2.60GHz",
+    "cores": 16,
+    "ram_gb": 31.7,
+    "docker_version": "29.8.0",
+    "node_version": "v24.22.3",
+    "npm_version": "11.19.1"
+  },
+  "lockfile_sha256": "fbde1c5ddca0507511c1838953eaffa6c18b6578b2195b1778f394da61c7431e",
+  "manifest_sha256": "c27f382e38a77d1b263c481d693cde155f5eedb70df5b68ca1b455f02de421d5",
+  "testcontainers_images": [
+    {
+      "image": "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "digest": "sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+    },
+    {
+      "image": "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a",
+      "digest": "sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+    }
+  ],
+  "env_overrides": [],
+  "suites": [
+    {
+      "name": "api",
+      "status": "passed",
+      "tests": 173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 16.4,
+      "report": "api.junit.xml",
+      "report_sha256": "d2b182f8db5af6db51e0f5feb7769af2c268396e85a6638d89364a1dbb2b00a1"
+    },
+    {
+      "name": "catalog-c1-c14",
+      "status": "passed",
+      "tests": 102,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 35.9,
+      "report": "catalog-c1-c14.junit.xml",
+      "report_sha256": "340ae86a2cf9ae117e78ba91c0d526071786d9dc69befd20c246a021955f80ff"
+    },
+    {
+      "name": "integration",
+      "status": "passed",
+      "tests": 345,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 485.5,
+      "report": "integration.junit.xml",
+      "report_sha256": "666d4cbc7744ac6d8ea1639908fed2d1b4c26b6e91da7517a6964813cd44735c"
+    },
+    {
+      "name": "rls-cross-tenant",
+      "status": "passed",
+      "tests": 126,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 11.3,
+      "report": "rls-cross-tenant.junit.xml",
+      "report_sha256": "c930b66994a7722ddc8c45ce3a48b96e61550e941ed48a85f3358fcb781a652f"
+    },
+    {
+      "name": "unit",
+      "status": "passed",
+      "tests": 6847,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "duration_s": 187.5,
+      "report": "unit.junit.xml",
+      "report_sha256": "c7ee4aeb44787807e7a97cd7ce7467556f18db93af876c6f3ca56261072ae01c"
+    }
+  ],
+  "attachments": [
+    {
+      "file": "coverage-summary.json",
+      "sha256": "ceaffbfbb147fd27973dbc179888e55866336e357453f8e3757358dd2eed39a7"
+    }
+  ],
+  "coverage": {
+    "line": 99.38,
+    "branch": 96.42,
+    "per_package": {
+      "apps/admin": {
+        "line": 93.43,
+        "branch": 98.41
+      },
+      "apps/api": {
+        "line": 99.45,
+        "branch": 97.18
+      },
+      "apps/web": {
+        "line": 95.85,
+        "branch": 96.7
+      },
+      "apps/worker": {
+        "line": 99.89,
+        "branch": 94.3
+      },
+      "packages/audit": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/authz": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/config": {
+        "line": 99.91,
+        "branch": 93.77
+      },
+      "packages/shared": {
+        "line": 98.85,
+        "branch": 93.46
+      },
+      "packages/ui": {
+        "line": 100,
+        "branch": 100
+      },
+      "prisma": {
+        "line": 99.14,
+        "branch": 96.28
+      }
+    }
+  },
+  "jest_args": [
+    "api: -i --testTimeout=30000",
+    "catalog-c1-c14: -i --testTimeout=30000",
+    "integration: -i --testTimeout=30000",
+    "rls-cross-tenant: -i --testTimeout=30000"
+  ],
+  "verdict": "PASS",
+  "invalid_reasons": []
+}
