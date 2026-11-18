@@ -3666,3 +3666,40 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - These fail as missing: C1 (no record), C2 (last Verdict FAIL), C3 (Head row names a main commit), C4 (an owned change after the reviewed commit), C5 (the currently pushed head `1c4dc00`) and C6 (the same record filed under another PR number).
 - **Gitleaks hint:** the full `generic-api-key` emulation over the 24,138 added lines and over the record gives 0 findings; its positive control fires.
 - **Reversibility:** High.
+
+### D-ORCH-135 · 2026-11-18 · sdlc-orchestrator (session A) · PRs #66, #64, #63, #61 and #62 merged; close-reopen rule corrected; next dispatches
+- **Merged, each MERGE-READY on a full lane-A run, with P1 re-checked at merge (no file overlap with main, merge-tree clean):**
+  - #66 TASK-290 (`9874f6d`)
+  - #64 TASK-035 (`b9bd6e3`)
+  - #63 TASK-036 (`783522a`)
+  - #61 TASK-028 (`34c7381`)
+  - #62 TASK-287A (`7109563`)
+- **Backups:** the never-pushed backup branches `task028-fc1-pre-gitleaks-backup` and `task035-fc1-pre-gitleaks-backup` are deleted (D-SEC-PR64-02 condition 1).
+- **Correction to D-ORCH-134:** closing a PR, pushing, then reopening does not give a full run, because GitHub delivers the new commits as a `synchronize` event with `before` set to the old head (seen on #63, run 44310530948). The rule is:
+  - push first;
+  - if the run is light and blocked for lack of a code proof, close and reopen with no new commits (#63 run 44312659927, full and MERGE-READY).
+  - A code push needs neither step.
+- **PR #61 follow-ups:**
+  - Code review R2-m1 (TOKEN68 prose over-redaction) and PR61-SEC-11 (key=value credentials) are one predicate change → TASK-031.
+  - PR61-SEC-12 → TASK-041.
+  - R2-n2 → the first membership, role or POD task.
+  - R2-n4 (the AT-US-091-06 line on the TASK-073 card) → the next sheet fold.
+  - R2-n5 (the viewer re-export ban) → TASK-073.
+  - PR61-SEC-04 (CODEOWNERS also over `packages/shared/src/logging/string-redaction.ts`) → devops, with the PR48-SEC-02 activation PR.
+- **PR #62 follow-ups:**
+  - Code review R1-m1 (run-full fires when a non-voided run on the same code is red) and R1-m2 (port the push-event gate case) → 287-B, which edits the same files and goes next.
+  - PR62-SEC-02 (V2 only, FAST_LANE_* required) is a condition on 287-B.
+  - PR62-SEC-01 (exact action-step keys and action commit pins) → 287-C, policy first.
+  - PR62-SEC-03 → principal-architect at the next fold.
+  - R1-n1..n5 go to 287-B.
+  - The first lane-A run of any PR after `7109563` is watched as the first live run of the new tooling. If a step fails on "not the event commit" or "--tools-ref is required", revert #62; never bypass.
+- **PR #65 (TASK-037) fix cycle 1:**
+  - Done locally on branch `task-037-fc1` (head `fdfbbd8`) because of agent worktree isolation; the PR branch will be fast-forwarded by the orchestrator. Its half-made merge in `../Shipqube-TASK-037` was aborted.
+  - The `tests-gen-rls` lock is extended to TASK-037 for this cycle, to make the cross-tenant generator handle the new tables (lowercase synthetic text, valid roles for `membership_roles`/`invitations`, ACTIVE memberships) without dropping any probe.
+  - C10 classifications for the TASK-037 columns are added now that #61 is merged.
+  - D-TASK037-08..12 accepted (`MEMBERSHIP_STATUS_NOT_WRITABLE` internal-only, mapped to INTERNAL_ERROR; reserved id literal in `prisma/tests`; organisations override BUSINESS_CUSTOMER; TenantDb surface fix; branch note). The README §11 edit is acknowledged for api-designer at the next sheet fold.
+- **Next dispatches:**
+  - 287-B (devops) now: the D-ARCH-147 locks are free with #62 merged.
+  - A plan fold (senior-developer) for the D-PM-068 card and `gen.mjs` changes, `gen.mjs --write` after #62 (D-ARCH-139), and the pending sheet-fold items: TASK-036-F1, TASK-290-F, TASK-283 → TASK-060, PR60-SEC-06 → TASK-060, R2-n4.
+  - TASK-291 after #65 merges (the `tests-gen-rls` lock).
+- **Reversibility:** High.

@@ -8,25 +8,33 @@ env:
   CHECKPOINT_DISABLE: '1'
   SCARF_ANALYTICS: 'false'
 jobs:
-  scans:
+  fast-lane:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
-      - name: Lane scope and proofs
+      - name: Classify changed paths and look up proofs (D-ARCH-126/127)
+        id: classify
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node "$GATE_LANE_SCOPE" --lookup
+        run: node "${GATE_LANE_SCOPE:?}" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$GITHUB_EVENT_NAME" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --tools-ref "$TOOLS_REF" --lookup --env "$GITHUB_ENV" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
   ci-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
+      - name: Lane scope and proofs (D-ARCH-126/127)
+        id: lane-scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node "${GATE_LANE_SCOPE:?}" --root "$GITHUB_WORKSPACE" --base "$RANGE_BASE" --head "$RANGE_HEAD" --before "$RANGE_BEFORE" --event "$EVENT" --pr "$PR_NUMBER" --head-ref "$HEAD_REF" --tools-ref "$TOOLS_REF" --lookup --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Aggregate lane A
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node "$GATE_LANE_SCOPE" --gate
+        run: node "${GATE_LANE_SCOPE:?}" --gate --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"

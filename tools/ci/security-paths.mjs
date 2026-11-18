@@ -9,8 +9,11 @@
  * no node_modules in job `scans`: this file imports nothing but `node:` modules.
  *
  * Why not the manifest's broader `security_critical_paths` (which also lists tools/quality, tools/ci, .github and
- * .npmrc): those paths do not change what the Testcontainers suites exercise, and almost every Wave-0 PR touches them,
+ * .npmrc): tools/quality, tools/ci and .github have their own lane A gates (the base-ref policy, the evidence verifier,
+ * the record check) and do not change the code the Testcontainers suites run, and almost every Wave-0 PR touches them,
  * which would run the job on most PRs against a budget sized for about 15 a month (platform.md section 7.8, R-ARCH-19).
+ * The suites' own code paths do change what they exercise and are listed (PR57-SEC-02, ADR-0023 am. N item 1,
+ * D-ARCH-139); `.npmrc` and `apps/worker/src/platform/**` stay open with the security-analyst (PR46-SEC-08).
  * `package-lock.json` is added because a Prisma, adapter or `pg` bump changes the transaction and RLS behaviour those
  * suites prove. Only a production-closure change selects (ADR-0023 am. L item 2 (b), D-ARCH-127; ruling
  * wave-0-ci-minutes section 3 (3)): the merge-base and head lockfiles are parsed from git objects and their `packages`
@@ -37,7 +40,12 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-/** ADR-0023 amendment G item 5 trigger paths, plus the lockfile (see the header). */
+/**
+ * ADR-0023 amendment G item 5 trigger paths, plus the lockfile (see the header), plus the security suites' own code paths
+ * (PR57-SEC-02, D-SEC-PR57-01, TASK-287): the Jest config and test support every suite loads, the DB tooling and engine
+ * pin the harness applies migrations with, and the generated RLS cases and API mounts the suites run. Their own unit
+ * tests and fixtures are excluded (`!`), so a test-only change there does not select the job.
+ */
 export const SECURITY_INTEGRATION_PATHS = Object.freeze([
   'packages/authz/**',
   'packages/audit/**',
@@ -46,6 +54,16 @@ export const SECURITY_INTEGRATION_PATHS = Object.freeze([
   'apps/api/src/platform/**',
   'apps/api/src/modules/identity/**',
   'package-lock.json',
+  'jest.config.ts',
+  'tools/test-support/**',
+  'tools/db/**',
+  'tools/deps/**',
+  'tests/generated/rls/**',
+  'tests/generated/api-mounts.ts',
+  '!tools/test-support/**/*.test.ts',
+  '!tools/db/**/*.test.ts',
+  '!tools/db/fixtures/**',
+  '!tools/deps/**/*.test.ts',
 ]);
 
 /** The lockfile that the production-closure rule reads (ruling section 3 (3)). */
