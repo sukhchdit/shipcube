@@ -3346,3 +3346,95 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **INFO:** 06 forgery-signal gaps (case/nested spellings unflagged; an own `__proto__` key passes silently; uncapped issue list) → TASK-047 or this cycle; 07 resolve `job_context` in the consumer, check `job.id`/`job.name` against the payload, per-job deadline → TASK-047/039; 08 DLQ record reuses the job id (second failure unrecorded) → TASK-039; 10 DR-A25, EC-A38 and the US-010 Notes still describe payload v1 → product-manager; 11 no integration case runs with the ACL file → this cycle or TASK-039.
 - **Record simulation** (main's checker): S1 pass, S2-S5 controls missing as expected, S6 unowned change after the head passes; with the record on main, M-d/M-e pass and M-f/M-g fail as expected. The record counts from the next `pull_request` event on PR #64.
 - **Reversibility:** High.
+
+### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-071.
+- **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
+- **Decision:**
+  - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
+  - **Scenario ownership, US-062 (M0 Must, DC, 6 scenarios).** TASK-037: AT-US-062-01 to -04, and the change record that AT-US-062-06 asserts (old/new status and role-set diff; the `[AT-US-062-06]` unit test already in PR #65). TASK-231: AT-US-062-05 and AT-US-062-06 through the member routes. TASK-231 completes the story.
+  - **One clause added to the orchestrator's split: TASK-049 owns the creation clause of AT-US-062-06 at registration.** Registration is the one membership write R0 can perform. TASK-049 asserts one `membership` audit entry (new status ACTIVE, role set Owner) in the registration transaction, next to the user and organisation entries US-015 already asserts. TASK-049 depends on the unmerged TASK-037 and has no row in STATUS.md, so its card can take the line. The orchestrator may strike this clause; the R0 statement in PRD §7 then needs "except the audit entry of the registration membership".
+  - **Not cuttable.** TASK-224 and TASK-231 leave ladder rung 2. TASK-227 leaves it too for as long as TASK-231 depends on it (`members` → `invite`). TASK-235 (team screens, US-268 and US-269) stays cuttable.
+  - **Story tags unchanged.** US-061 and US-062 stay M0 Must DC. US-081 to US-085 stay M1 Should. What is protected is the six Must scenarios and the routes they run on: a Should scenario of US-081 to US-085 that blocks one of these tasks may still be deferred scenario by scenario, while the routes ship.
+  - **R0 (`v0.1.0-m0`).** Not blocked. The tag is cut with US-061 and US-062 recorded as partial in the dossier, naming the six scenarios. The other 111 M0 Must stories are complete at R0.
+  - **R1 / G3.** TASK-224 and TASK-231 are merged before the G3 evidence run. Default placement: with the Must band, before the Wave 7 exit. G3 accepts the two stories only with all eleven scenarios passing in `ac-trace.json`.
+  - **Fallback, agreed now.** If TASK-224 or TASK-231 is unmerged at the Wave 7 exit, product-manager applies rung 4: the six route-level scenarios move to US-082 and US-085 as appended scenarios, US-061 and US-062 keep what TASK-037 proves, and the tasks return to rung 2. That is the architect's named alternative. It gets its own entry if used.
+  - **No acceptance criterion changed.** No Gherkin line, scenario title, REQ, priority, milestone, DC tag or count changed (434 / 91 / 293 / DC 134).
+- **Why:**
+  - **The split is real, not a relabel.** Four US-061 scenarios need `createOrganisation` and `updateOrganisation`; two US-062 scenarios need the member routes. No M0 task mounts them. A card that says "TASK-037 completes US-061 and US-062" would let both stories read as Implemented with six scenarios unowned, which is the silent drop of D-061 and D-062.
+  - **Why not in R0.** TASK-231 depends on TASK-187 (Wave 7, the step-up of REQ-AUTH-025) and on TASK-227, which depends on TASK-169 (Wave 6). Pulling them into Waves 0 to 3 would move invitations, member management and step-up onto the M0 critical path. `createOrganisation` is `x-milestone: M1`. PRD §6.1 exercises none of the six scenarios, and R0 has no route on which a refused create, a type change or a role assignment could be attempted, so nothing R0 does is unproven. R0 has no gate.
+  - **Why before G3.** G3 judges Must stories, and both are Must. A refused `PARTNER` or `OPERATOR` create is a privilege probe that must be audited (D-ARCH-152), and it becomes reachable the moment the route exists.
+  - **Why TASK-227 follows.** AT-US-085-05 (inviting into an INDIVIDUAL organisation) needs the invite route, and member management without a way to add members is not a usable increment. Keeping the dependency costs one M task; removing it would split a Should story across two tasks for no user value.
+  - **Cost, stated.** About 9 developer-days of Should work (three M tasks, serial on the `mod-organisations` lock) are now due before G3, and PLAN.md §12 tier A loses 3 tasks and 5 stories (29 → 26 tasks, 37 → 32 stories, 70.5 → 61.5 developer-days of possible savings).
+- **Alternatives:**
+  - Move the route-level scenarios to US-082 and US-085 now (the architect's alternative). Not chosen by the orchestrator: it takes the privilege-probe audit out of the Must set. Kept as the fallback, because it costs no schedule.
+  - Keep "TASK-037 completes both stories" and rely on card notes. Rejected: traceability and the gate read the completes column.
+  - Pull TASK-224, TASK-227 and TASK-231 into M0. Rejected: it puts M1 step-up and invitations on the R0 critical path for scenarios the M0 demo never runs.
+  - Mount a minimal create route in M0 only to prove the refusals. Rejected: a route whose only job is to refuse adds attack surface and a contract change to R0 for no user.
+  - Drop the `members` → `invite` dependency so TASK-227 stays cuttable. Rejected as the default (see Why); senior-developer may still propose it.
+- **Applied in:** `docs/01-requirements/stories/EPIC-03-organisations-rbac-tenancy.md` (notes of US-061, US-062, US-082, US-085; no Gherkin change), `docs/sdlc/traceability.md` 1.7 (REQ-ORG-001, -003, -004 rows; REQ-ORG-002 unchanged), `docs/01-requirements/PRD.md` 1.12 (§7, §7.1, §11), `docs/01-requirements/ASSUMPTIONS.md` A-109.
+- **Not applied here, for senior-developer and principal-architect** (`docs/04-plan/generator/` and the generated plan files are theirs):
+  - `plan-data.mjs` card `orgs` (TASK-037): `us:['US-061','US-062']` becomes `us:[]` with `part:['US-061','US-062']`; the SCENARIO OWNERSHIP line cites D-PM-068 in place of "until product-manager records the delivery split".
+  - Card `orgswitch` (TASK-224): `us` gains `'US-061'`; the PLANNING FLAG sentence is replaced by "completes US-061 (D-PM-068); not cuttable; due before G3".
+  - Card `members` (TASK-231): `us` gains `'US-062'`; the PLANNING FLAG sentence is replaced the same way.
+  - Card `invite` (TASK-227): a note that it is not cuttable while `members` depends on it.
+  - Card `register` (TASK-049): `part` gains `'US-062'`, and one acceptance line: "[AT-US-062-06] (creation at registration; status and role-set changes in TASK-231): the registration transaction writes one audit entry for entity `membership` with new status ACTIVE and role set Owner".
+  - `gen.mjs` will fail as it stands. The wave rule allows an M0 Must DC story to complete in Waves 0 to 2 only, so US-061 and US-062 completing later is an error; it needs a recorded exception for these two stories that cites this entry. `cuttable` is `wave >= 8`, so the three tasks either move into Wave 7 after TASK-187 (preferred: Wave 7 exit is the G3-ready checkpoint) or carry an explicit override. `dc` is derived from the stories, so TASK-224 and TASK-231 would print "demo-critical"; they are not, the demo-critical part is TASK-037's.
+  - Wave texts and PLAN.md: the Wave 2 exit ("all 74 M0 DC stories merged"), the Wave 3 exit and the `v0.1.0-m0` checkpoint ("all 113 M0 Must merged") become 72 and 111 complete plus US-061 and US-062 partial; §12 tier A drops TASK-224, TASK-227, TASK-231 and US-081 to US-085.
+  - No dependency change is needed: TASK-224 → TASK-056 → TASK-037, and TASK-231 → TASK-227 → TASK-224.
+- **Reversibility:** High until TASK-224 merges (notes, three traceability rows, card lines). The fallback above is the reverse path.
+
+### D-PM-069 · 2026-11-18 · product-manager · REQ-ORG-001 wording: the operator organisation is a reserved row of the organisations migration, not a seeded row (D-ARCH-151)
+- **Decision:**
+  - REQ-ORG-001 "(created by seed)" becomes "(a reserved row of the schema migration that creates the `organisations` table, present in every migrated database before any seed runs)".
+  - Its note records: no seed, job, operator step, API or runtime role creates the organisation; the seeds neither create nor rename it; "operator" is decided by `type`, never by the reserved identifier; `createOrganisation` takes an optional `type` so a refused type is a 422 that is audited (D-ARCH-152); the organisation has no member until staff are provisioned (US-B-001 for production).
+  - The US-061 notes carry the same explanation. The title and the steps of US-061 scenario 1 ("Seed creates exactly one OPERATOR organisation") are **not** edited.
+  - REQUIREMENTS.md → 1.11. No ID, priority, milestone or count changed.
+- **Why:**
+  - After `FORCE ROW LEVEL SECURITY` the migrator has no policy on `organisations`, so the reference seed cannot write the row, and the demo seed never runs in production. Read literally, the old wording left production without an operator organisation.
+  - The Then-clause of AT-US-061-01 holds as written: exactly one `OPERATOR` organisation, and an identical row count after the second seed run.
+  - The scenario title is the key of AT-US-061-01 in `gherkin-test-map.md`, which the TASK-277 drift test compares with the story file. A title edit without a regenerated map turns that test red on `main` (the D-063 and D-064 convention: titles stay).
+- **Alternatives:**
+  - Reword the scenario title now, as the rulings suggested. Deferred to qa-lead's next map regeneration, in the same commit as the map; suggested title "The schema migration creates exactly one OPERATOR organisation".
+  - Leave REQ-ORG-001 and explain only in the story. Rejected: the requirement must be testable without the story, and "created by seed" is false.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` (REQ-ORG-001 row, version line), the US-061 notes, PRD 1.12 §11.
+- **Reversibility:** High (wording).
+
+### D-PM-070 · 2026-11-18 · product-manager · Backlog story US-B-001 for the first production staff user (`ops:staff-bootstrap`, D-ARCH-153, R-ARCH-33): M5, new epic EPIC-B-508, a G4 precondition for a production release
+- **Decision:**
+  - New M5 backlog epic **EPIC-B-508 Go-live bootstrap: first operator staff user**, and the story **US-B-001** with Gherkin acceptance criteria, in `docs/01-requirements/BACKLOG.md` 1.1. It is Won't (this run); at M5 it is Must and a precondition of G4 for a production release.
+  - The EPIC-B-207 row says that every later staff user is created there by an existing Super Admin and points to EPIC-B-508 for the first one.
+  - `US-B-NNN` is a new ID form for backlog stories written ahead of their milestone. They are outside the `US-NNN` series, the story counts, the Gherkin map and the plan generator, which read `stories/EPIC-*.md` only.
+  - The story takes the architecture as fixed (runtime role, `SYSTEM_JOB` actor, pipeline task, no `OPERATOR` organisation created, refusal once a member exists) and adds product defaults, logged as A-110: refusal on a membership in any status; an existing account with a password is never promoted; an operator e-mail domain allow-list; a pipeline run reference in the audit entries; a `FAILED` audit entry for a refused run; a personal organisation for the user per DR-A06.
+- **Why:**
+  - **M5, not EPIC-B-207 (M2).** The command is needed only where the demo seed cannot run, which is production, and a production target exists only from M5. EPIC-B-207 is the screen set an already signed-in Super Admin uses; it cannot create the first one. Filed under M2, the story would be planned a milestone before anything can exercise it and could be closed without a production rehearsal.
+  - **Its own epic.** None of EPIC-B-501 to -507 owns a one-shot identity command, and a G4 precondition is easier to track as a named row than as a line inside the delivery-pipeline epic.
+  - **Written now.** D-ARCH-151 creates the gap in this run. A story with acceptance criteria keeps R-ARCH-33 from depending on someone rereading a rulings file at M5.
+  - **The added defaults close two abuse paths the risk row does not name:** promoting an address an attacker registered first (the D-050 class), and re-running the command after staff were removed.
+- **Alternatives:**
+  - EPIC-B-207. Rejected (see Why).
+  - EPIC-B-502 (progressive delivery), because the command is a pipeline task. Rejected: the behaviour is identity and tenancy, the pipeline is only the runner.
+  - A Run 1 story. Rejected by D-ARCH-153: there is no production target, and staging uses the demo seed.
+  - A one-line backlog row without acceptance criteria. Rejected: the orchestrator asked for Gherkin, and the refusal rules are the substance.
+- **Open for M5 planning (defaults applied, A-110):** principal-architect confirms the personal-organisation reading of "creates no organisation"; security-analyst reviews the existing-account and allow-list rules; devops-engineer owns the pipeline task and its environment approval; the wrong-address recovery goes to the EPIC-B-507 break-glass runbook.
+- **Applied in:** `docs/01-requirements/BACKLOG.md` 1.1, `docs/01-requirements/ASSUMPTIONS.md` A-110, the REQ-ORG-001 note, PRD 1.12 §11.
+- **Reversibility:** High (backlog text; nothing is built).
+
+### D-ORCH-132 · 2026-11-18 · sdlc-orchestrator (session A) · Batch 1.1 review outcomes, PR #64 fix cycle 1, PR #66 opened, PR #65 plan, D-PM-068..070 accepted
+- **PR #63 (TASK-036):** code review APPROVED_WITH_NITS (`0f3528e`); security PASS_WITH_FOLLOW-UPS (`a70dc64`, D-SEC-PR63-01). No fix cycle. The MINOR findings are logged with owners instead of a new push, so the queued lane-B run on `fcdb7ac` stays valid:
+  - R1-m1 (API README still describes `api:check-errors`/`api:sync-errors`): api-designer doc change request at the next sheet fold, plus follow-up task TASK-036-F1 adding a README §11-table arm to the parity test.
+  - R1-m2 (uncatalogued-code scan cannot see domain error subclasses): PR #65's review requires `ErrorCode`-typed domain codes and a catalogue entry or an internal-only note for `MEMBERSHIP_STATUS_NOT_WRITABLE`; widening the scan is TASK-036-F1.
+  - R1-m3 (module `routeErrors` not tied to thrown codes): owned by the first task that adds a module `routes.ts`.
+  - PR63-SEC-01 items 1–3: before TASK-052 merges; item 4: the next holder of the `lint` lock. SEC-02..04 as routed in the record.
+  - Merge conditions: lane-B PASS on the final head and a lane-A run where lint, format, typecheck, unit and build actually run.
+- **PR #64 (TASK-035):** code review CHANGES_REQUESTED (R1-M1 MAJOR); security PASS_WITH_CONDITIONS with C1 = PR64-SEC-01 (Valkey password on stderr), held by the orchestrator because ci-gate cannot enforce it. Fix cycle 1 of 3 dispatched to backend-developer in `../Shipqube-TASK-035-fc1` (the worktree was moved there so the queue skips the stale `90ef83f`):
+  - In scope: R1-M1, R1-m1..m4, PR64-SEC-01/02/03/05, trivial NITs.
+  - Routed: SEC-04 retention → principal-architect (ADR-0013) and TASK-039; SEC-06/07 → TASK-047/TASK-039; SEC-08 → TASK-039; SEC-09 CODEOWNERS → devops with the PR48-SEC-02 activation PR; SEC-10 → product-manager; SEC-11 → TASK-039; R1-m5 → next `lint` lock holder; ADR-0013 §1/§2 spelling update → principal-architect.
+  - Lock order: whichever of Dependabot #58 and #64 merges second regenerates `package-lock.json` and re-runs the int suite.
+- **TASK-290:** lane-B PASS `20261118T1029Z_ba921da`; PR #66 opened at `9a14659` (code `ba921da` + evidence). Code and security r1 reviews dispatched; their records go onto the branch in one combined record push (D-ORCH-119).
+- **PR #62 (TASK-287A):** the run `20261118T1045Z_5d86412` failed on one int test with P1001 (container lost during host load: concurrent reviewers and developer). Infrastructure, not a regression; moved to `../failed-runs-orphan/` and re-queued.
+- **PR #65 (TASK-037):** D-ARCH-151..153 accepted. After PR #66 merges: merge main into the branch, apply the ruling-1 changes (reserved operator row, `OPERATOR_ORG_ID`, rewritten AT-US-061-02 test, fixtures), add `ErrorCode` typing per PR63 R1-m2, then lane B and reviews. The SEC-TC-06 control edit is sequenced after TASK-290 under the `tests-gen-rls` lock.
+- **D-PM-068..070 accepted with their defaults:** US-061/US-062 are partial on TASK-037 and completed by TASK-224/TASK-231 (non-cuttable; TASK-227 non-cuttable by dependency); the TASK-049 clause for AT-US-062-06 is kept; Wave 7 placement is preferred, final call to senior-developer at the next plan fold.
+  - The PM's Notes edit to `docs/01-requirements/stories/EPIC-03-…md` is a lane-B tooling input, so it is held as `../.orch/held/D-PM-068-EPIC-03-notes.patch` and lands with PR #65's merge-main cycle, so the open PRs' evidence stays valid.
+  - The card and `gen.mjs` changes listed in D-PM-068 go to senior-developer at the next plan fold, together with the pending sheet-fold items.
+- **Reversibility:** High.
