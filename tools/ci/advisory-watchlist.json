@@ -23,5 +23,14 @@
       "source": "PR2-SEC-06"
     }
   ],
-  "waivers": []
+  "waivers": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "No upstream fix: every published picomatch (<= 4.0.7, and 2.3.2 on 2.x) is affected; npm's suggested fix is a jest-util 26 downgrade. Dev-only (Jest, Vite, @react-router/dev via tinyglobby, Stylelint via micromatch, eslint-plugin-boundaries); npm ls --omit=dev is empty and no runtime image ships it. The ReDoS needs an attacker-supplied single-branch repeated extglob such as +(*a); our globs come from committed config only and none has that shape. Bump when a picomatch release fixes it; no overrides inside gate tooling.",
+      "decision": "D-SECAUDIT-01",
+      "granted": "2026-11-18",
+      "expires": "2027-02-12"
+    }
+  ]
 }

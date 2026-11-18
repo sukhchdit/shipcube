@@ -2,7 +2,8 @@
  * check-audit (TASK-007): US-048 / AT-US-048-06 (Critical/High fail in any closure), AT-US-048-07 (waiver with an
  * expiry; an expired waiver fails again), PR2-SEC-06 (watchlist), D-ARCH-003 rev 4 item 4 (a maintenance-excepted
  * package with a High/Critical advisory fails regardless). Fixtures are hand-written samples in the npm 11 audit
- * report v2 and osv-scanner v2 JSON formats; apart from the three PR2-SEC-06 GHSAs the advisories are synthetic.
+ * report v2 and osv-scanner v2 JSON formats; apart from the three PR2-SEC-06 GHSAs and the D-SECAUDIT-01 picomatch GHSA
+ * the advisories are synthetic.
  */
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,7 +73,28 @@ describe('gating', () => {
       'GHSA-gcqx-w48m-w2h4',
     ]);
     expect(committed.watch.map((w) => w.id).sort()).toEqual(['GHSA-3g3m-2fjr-6pw4', 'GHSA-g3hv-75wg-m249', 'GHSA-gcqx-w48m-w2h4']);
-    expect(committed.waivers).toEqual([]);
+    expect(committed.waivers.map((w) => [w.id, w.package, w.decision, w.granted, w.expires])).toEqual([
+      ['GHSA-fc5q-39xc-vjpf', 'picomatch', 'D-SECAUDIT-01', '2026-11-18', '2027-02-12'],
+    ]);
+  });
+
+  it('[D-SECAUDIT-01] the committed picomatch waiver passes the dev-only High until its due date, then fails it again', () => {
+    const picomatch = mergeAdvisories([
+      {
+        id: 'GHSA-fc5q-39xc-vjpf',
+        package: 'picomatch',
+        severity: 'high' as const,
+        title: 'picomatch vulnerable to ReDoS through single-branch repeated extglobs',
+        fixAvailable: true,
+        production: false,
+        sources: ['npm audit', 'osv-scanner'],
+      },
+    ]);
+    const open = checkAudit(picomatch, { ...committed, maintenance, now: new Date('2026-11-18T12:00:00Z') });
+    expect(open.findings).toEqual([]);
+    expect(open.notes.map((n) => n.message)).toContainEqual(expect.stringContaining('tracked by D-SECAUDIT-01, due 2027-02-12'));
+    const due = checkAudit(picomatch, { ...committed, maintenance, now: new Date('2027-02-12T00:00:00Z') });
+    expect(due.findings.map((f) => f.rule)).toEqual(['audit/waiver-expired']);
   });
 
   it('[AT-US-048-06] a High vulnerability with a fix (production) and a Critical (dev) fail; moderates in production are highlighted', () => {
@@ -169,9 +191,12 @@ describe('check-audit CLI', () => {
   copyFileSync(join(fixtures, 'lockfile.json'), join(temp, 'package-lock.json'));
   for (const file of ['advisory-watchlist.json', 'maintenance-exceptions.json'])
     copyFileSync(join(repoRoot, 'tools', 'ci', file), join(temp, 'tools', 'ci', file));
+  // The CLI refuses a register whose waiver is granted after --now (exit 2), so runs over the committed register use
+  // its newest grant date.
+  const cliNow = committed.waivers.map((w) => w.granted).reduce((a, b) => (b > a ? b : a), '2026-11-12');
 
   it('[PR2-SEC-06] exits 0 on the clean report plus osv minimatch only', () => {
-    const result = runNode([script, '--root', temp, '--npm-audit', join(fixtures, 'npm-audit.clean.json'), '--now', '2026-11-12'], {
+    const result = runNode([script, '--root', temp, '--npm-audit', join(fixtures, 'npm-audit.clean.json'), '--now', cliNow], {
       cwd: temp,
     });
     expect(result.stderr).toBe('');
@@ -181,17 +206,7 @@ describe('check-audit CLI', () => {
 
   it('[AT-US-048-06] exits 1 on High/Critical findings from npm audit and osv-scanner', () => {
     const result = runNode(
-      [
-        script,
-        '--root',
-        temp,
-        '--npm-audit',
-        join(fixtures, 'npm-audit.high.json'),
-        '--osv',
-        join(fixtures, 'osv.json'),
-        '--now',
-        '2026-11-12',
-      ],
+      [script, '--root', temp, '--npm-audit', join(fixtures, 'npm-audit.high.json'), '--osv', join(fixtures, 'osv.json'), '--now', cliNow],
       { cwd: temp },
     );
     expect(result.status).toBe(1);

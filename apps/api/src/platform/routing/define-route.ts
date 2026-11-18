@@ -19,7 +19,7 @@ import {
   type RouteMarker,
   type RouteTenancy,
 } from '@platform/authz';
-import { AUDIT_ACTIONS, AUDIT_SENSITIVITIES, type AuditDescriptor, CREDENTIAL_HEADER_NAMES } from '@platform/shared';
+import { AUDIT_ACTIONS, AUDIT_SENSITIVITIES, type AuditDescriptor, CREDENTIAL_HEADER_NAMES, type ErrorCode } from '@platform/shared';
 import Joi from 'joi';
 
 import type { TenantContext } from '../db/index.js';
@@ -47,6 +47,15 @@ export const RATE_LIMIT_CLASSES = [
 export type RateLimitClass = (typeof RATE_LIMIT_CLASSES)[number];
 
 /** The four request parts a route validates; an absent schema means the part must be empty. */
+/**
+ * The catalogue codes a module's services can throw, per operationId (api/README.md §15 assertion 6; D-TASK017-01 (3),
+ * D-ARCH-084; TASK-036). Every API module with routes exports one as `routeErrors` from its public `index.ts`; the
+ * generated module registry collects them (`moduleRouteErrors`), and the route-metadata test requires each list to be
+ * a subset of the operation's `x-error-codes` in openapi.yaml. Pipeline codes (AUTH_REQUIRED, AUTHZ_DENIED,
+ * VALIDATION_ERROR, RATE_LIMITED, ...) need not be listed: the contract test already requires them per operation.
+ */
+export type RouteErrors = Readonly<Record<string, readonly ErrorCode[]>>;
+
 export interface RouteSchemas {
   readonly params?: Joi.ObjectSchema;
   readonly query?: Joi.ObjectSchema;

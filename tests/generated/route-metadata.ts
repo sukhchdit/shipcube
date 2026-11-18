@@ -24,7 +24,7 @@ import {
 import { ERROR_CATALOGUE, isErrorCode } from '@platform/shared';
 import type Joi from 'joi';
 
-import type { RouteDescriptor, RouteSchemas } from '../../apps/api/src/platform/routing/define-route.js';
+import type { RouteDescriptor, RouteErrors, RouteSchemas } from '../../apps/api/src/platform/routing/define-route.js';
 import { type ContractOperation, type OpenApiDocument, listOperations } from '../../tools/openapi/contract.js';
 import { type MountedRoute, routeKey } from '../../tools/openapi/drift.js';
 
@@ -38,6 +38,7 @@ export type MetadataRule =
   | 'auth'
   | 'schema'
   | 'error-codes'
+  | 'route-errors'
   | 'one-time-secret'
   | 'permission-status'
   | 'reauth'
@@ -55,6 +56,11 @@ export interface MetadataInput {
   readonly descriptorOf: (handler: unknown) => RouteDescriptor | undefined;
   /** operationIds of the implemented-operations ledger. */
   readonly implemented: readonly string[];
+  /**
+   * Per module, the codes its services can throw per operation (`moduleRouteErrors` of the generated module registry;
+   * assertion 6, module half). Defaults to none.
+   */
+  readonly routeErrors?: Readonly<Record<string, RouteErrors>>;
 }
 
 /** ADR-0014 am. 1 and 4: routes returning a one-time secret are never idempotency-stored (SEC-TC-53). */
@@ -345,7 +351,10 @@ function extensionProblems(route: RouteDescriptor, op: ContractOperation): strin
     .map(([name, left, right]) => `${name} ${canonical(left)} in metadata, ${canonical(right)} in openapi.yaml`);
 }
 
-/** Assertion 6 (contract half): every `x-error-codes` entry is a catalogue code with a declared response status. */
+/**
+ * Assertion 6 (contract half; activated contract-wide by TASK-036, D-TASK017-01 (3)): every `x-error-codes` entry of
+ * every operation is a catalogue code with a declared response status.
+ */
 export function errorCodeProblems(op: ContractOperation): string[] {
   const codes = Array.isArray(op.operation['x-error-codes']) ? (op.operation['x-error-codes'] as unknown[]) : [];
   const statuses = new Set(Object.keys(op.operation.responses ?? {}));
@@ -355,6 +364,26 @@ export function errorCodeProblems(op: ContractOperation): string[] {
     return statuses.has(status) || statuses.has(`${status[0] ?? ''}XX`) || statuses.has('default')
       ? []
       : [`x-error-codes entry ${code} (${status}) has no ${status} response`];
+  });
+}
+
+/**
+ * Assertion 6 (module half): every code a module's services can throw for an operation (its `routeErrors`) is listed in
+ * that operation's `x-error-codes`, and the operation is one the API implements.
+ */
+export function routeErrorProblems(
+  module: string,
+  routeErrors: RouteErrors,
+  operations: readonly ContractOperation[],
+  implemented: readonly string[],
+): MetadataFinding[] {
+  return Object.entries(routeErrors).flatMap(([operationId, thrown]) => {
+    const route = `${module}.routeErrors.${operationId}`;
+    const finding = (message: string): MetadataFinding => ({ rule: 'route-errors', route, message: `${route}: ${message}` });
+    const op = operations.find((candidate) => candidate.operationId === operationId);
+    if (op === undefined || !implemented.includes(operationId)) return [finding('not an implemented openapi.yaml operation')];
+    const listed = Array.isArray(op.operation['x-error-codes']) ? (op.operation['x-error-codes'] as unknown[]) : [];
+    return thrown.filter((code) => !listed.includes(code)).map((code) => finding(`${operationId} can throw ${code} but does not list it`));
   });
 }
 
@@ -419,7 +448,7 @@ export function transactionProblems(route: RouteDescriptor): string[] {
 }
 
 /** Every finding; empty means the mounted routes, their metadata and the contract agree. */
-export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented }: MetadataInput): MetadataFinding[] {
+export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented, routeErrors = {} }: MetadataInput): MetadataFinding[] {
   const findings: MetadataFinding[] = [];
   const operations = listOperations(doc);
   const byKey = new Map(operations.map((op) => [routeKey(op.method, op.fullPath), op]));
@@ -445,7 +474,6 @@ export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented }: 
     add('extension', name, extensionProblems(route, op));
     add('auth', name, authProblems(route, op, doc));
     add('schema', name, schemaProblems(route, op, doc));
-    add('error-codes', name, errorCodeProblems(op));
     add('transaction', name, transactionProblems(route));
   }
   if (seen.size !== implemented.length || implemented.some((id) => !seen.has(id))) {
@@ -457,7 +485,9 @@ export function checkRouteMetadata({ doc, mounted, descriptorOf, implemented }: 
     const name = `${op.method} ${op.fullPath}`;
     add('permission-status', name, permissionStatusProblems(op));
     add('reauth', name, reauthProblems(op));
+    add('error-codes', name, errorCodeProblems(op));
   }
+  for (const [module, errors] of Object.entries(routeErrors)) findings.push(...routeErrorProblems(module, errors, operations, implemented));
   for (const id of ONE_TIME_SECRET_OPERATIONS) {
     const op = operations.find((candidate) => candidate.operationId === id);
     if (op === undefined) add('one-time-secret', id, ['operation is missing from openapi.yaml']);

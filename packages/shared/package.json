@@ -15,12 +15,18 @@
       "@platform/source": "./src/logging/index.ts",
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"
+    },
+    "./queues": {
+      "@platform/source": "./src/queues/index.ts",
+      "types": "./dist/queues/index.d.ts",
+      "default": "./dist/queues/index.js"
     }
   },
   "scripts": {
     "build": "tsc -b"
   },
   "dependencies": {
+    "joi": "^18.3.2",
     "pino": "^10.4.0",
     "uuid": "^14.0.3"
   }

@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { AuditRowDraft, AuditStore, PiiTokeniser, PiiValue } from '@platform/audit';
 import { toAuditWriteError } from '@platform/audit';
-import { AppError } from '@platform/shared';
+import { AppError, ERROR_CATALOGUE } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
 import Joi from 'joi';
 
@@ -493,6 +493,23 @@ describe('[US-086] views, denials, NONE routes and failure outcomes', () => {
         route: '/api/v1/address-book',
       }),
     ]);
+  });
+
+  it('[AT-US-036-06] a caller without the permission gets 403 AUTHZ_DENIED in the catalogue problem format, and a PERMISSION_DENIED entry with outcome DENIED', async () => {
+    principal = session(VIEWER, ['address_book:read']);
+    const res = await send('POST', '/api/v1/address-book', { body: { city: 'Pune' } });
+    expect(res.status).toBe(403);
+    expect(res.headers.get('content-type')).toMatch(/^application\/problem\+json(;|$)/);
+    expect(res.body).toEqual({
+      type: 'https://docs.platform.invalid/problems/AUTHZ_DENIED',
+      title: ERROR_CATALOGUE.AUTHZ_DENIED.title,
+      status: ERROR_CATALOGUE.AUTHZ_DENIED.status,
+      detail: expect.any(String),
+      instance: '/api/v1/address-book',
+      code: 'AUTHZ_DENIED',
+      correlation_id: expect.any(String),
+    });
+    expect(entries()).toEqual([expect.objectContaining({ action: 'PERMISSION_DENIED', outcome: 'DENIED', userId: VIEWER })]);
   });
 
   it('a denial whose entry cannot be written answers the audit failure, never a silent 403', async () => {

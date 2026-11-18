@@ -10,6 +10,7 @@ import {
   BOOTSTRAP_DIR,
   OWNERSHIP_GUARD,
   ShadowInitError,
+  isCheckReplacement,
   readBootstrapLane,
   renderShadowInit,
   shadowInitSql,
@@ -169,6 +170,103 @@ describe('the rendering rules', () => {
     ['a SELECT that is not one function call', 'SELECT platform.f(1) FROM public.audit_x;', /statement form not recognised/],
   ])('refuses %s (fail closed)', (_, sql, message) => {
     expect(refusal(sql)).toMatch(message);
+  });
+
+  /** The shared prefix of the PR52-SEC-01 probe table (security record PR #52 §4). */
+  const REPLACEMENT =
+    "ALTER TABLE public.audit_entries DROP CONSTRAINT IF EXISTS ck_audit_entries__action, ADD CONSTRAINT ck_audit_entries__action CHECK (action IN ('A','B'))";
+
+  it.each([
+    ['the bare replacement', `${REPLACEMENT};`],
+    [
+      'ONLY with tight commas and nested parentheses',
+      "ALTER TABLE ONLY public.audit_x DROP CONSTRAINT ck_x__note,ADD CONSTRAINT ck_x__note CHECK((note <> '') AND (length(note) < 9));",
+    ],
+    [
+      'a quoted identifier holding a parenthesis inside the CHECK',
+      `ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__note CHECK ("a)b" <> '' AND "(" IS NOT NULL);`,
+    ],
+    [
+      'a string literal holding a closing parenthesis and an action',
+      "ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__note CHECK (note <> '), add column y int');",
+    ],
+  ])('[PR52-SEC-01] keeps a same-name CHECK replacement whose CHECK ends the statement: %s', (_, sql) => {
+    const rendering = render(sql);
+    expect(splitStatements(rendering.sql).slice(1)).toEqual(splitStatements(PATH + sql));
+    expect(rendering.stripped).toEqual([]);
+  });
+
+  it.each([
+    // The controls of the PR #52 record (refused before and after).
+    ['control: a NOT VALID tail', `${REPLACEMENT} NOT VALID;`, /statement form not recognised/],
+    ['control: a second action', `${REPLACEMENT}, ADD COLUMN y int;`, /statement form not recognised/],
+    ['control: a commented second action', `${REPLACEMENT} /* c */ , DISABLE TRIGGER ALL;`, /statement form not recognised/],
+    [
+      'control: another constraint name',
+      "ALTER TABLE public.audit_entries DROP CONSTRAINT IF EXISTS ck_audit_entries__action, ADD CONSTRAINT ck_audit_entries__other CHECK (action IN ('A'));",
+      /statement form not recognised/,
+    ],
+    ['control: NOT VALID then OWNER TO', `${REPLACEMENT} NOT VALID, OWNER TO platform_app;`, /ownership clause/],
+    // The bypass shapes of PR52-SEC-01 (kept by the regex form; refused now).
+    [
+      'NOT VALID, DISABLE TRIGGER ALL, a second CHECK',
+      `${REPLACEMENT} NOT VALID, DISABLE TRIGGER ALL, ADD CONSTRAINT z CHECK (true);`,
+      /statement form not recognised/,
+    ],
+    [
+      'NO INHERIT, NO FORCE ROW LEVEL SECURITY, a second CHECK',
+      `${REPLACEMENT} NO INHERIT, NO FORCE ROW LEVEL SECURITY, ADD CONSTRAINT z CHECK (true);`,
+      /statement form not recognised/,
+    ],
+    [
+      'NOT ENFORCED, DISABLE ROW LEVEL SECURITY, a parenthesised default',
+      `${REPLACEMENT} NOT ENFORCED, DISABLE ROW LEVEL SECURITY, ALTER COLUMN action SET DEFAULT ('A');`,
+      /statement form not recognised/,
+    ],
+    [
+      'NOT VALID, a second DROP CONSTRAINT',
+      `${REPLACEMENT} NOT VALID, DROP CONSTRAINT ck_audit_entries__outcome, ADD CONSTRAINT z CHECK (true);`,
+      /statement form not recognised/,
+    ],
+    ['NOT VALID, ADD COLUMN with a CHECK', `${REPLACEMENT} NOT VALID, ADD COLUMN y int CHECK (y > 0);`, /statement form not recognised/],
+    [
+      'a primary key "replaced" by a CHECK of the same name',
+      'ALTER TABLE public.audit_entries DROP CONSTRAINT pk_audit_entries, ADD CONSTRAINT pk_audit_entries CHECK (true);',
+      /statement form not recognised/,
+    ],
+    [
+      'a unique constraint "replaced" by a CHECK of the same name',
+      'ALTER TABLE public.audit_entries DROP CONSTRAINT IF EXISTS ux_audit_entries__id, ADD CONSTRAINT ux_audit_entries__id CHECK (true);',
+      /statement form not recognised/,
+    ],
+    [
+      'a quoted CHECK name (statementCode folds its case)',
+      'ALTER TABLE public.audit_x DROP CONSTRAINT "CK_X", ADD CONSTRAINT "ck_x" CHECK (true);',
+      /statement form not recognised/,
+    ],
+    [
+      'a quoted identifier holding a parenthesis before an attribute and an action',
+      `ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__note CHECK ("a)b" <> '') NOT VALID, ADD COLUMN y int CHECK (y > 0);`,
+      /statement form not recognised/,
+    ],
+    [
+      'a quoted opening parenthesis that would hide an action from a scan without the quote skip',
+      `ALTER TABLE public.audit_x DROP CONSTRAINT ck_x__note, ADD CONSTRAINT ck_x__note CHECK ("(" <> '') NOT VALID, DISABLE TRIGGER ALL, ADD CONSTRAINT z CHECK (true));`,
+      /statement form not recognised/,
+    ],
+  ])('[PR52-SEC-01] refuses %s (fail closed)', (_, sql, message) => {
+    expect(refusal(sql)).toMatch(message);
+  });
+
+  it('[PR52-SEC-01] isCheckReplacement: the head alone, an unclosed CHECK and a statement that is not a replacement are no KEEP form', () => {
+    const head = 'alter table public.audit_x drop constraint ck_x, add constraint ck_x check (';
+    expect(isCheckReplacement(`${head}a > 0)`)).toBe(true);
+    expect(isCheckReplacement(head)).toBe(false);
+    expect(isCheckReplacement(`${head}(a > 0)`)).toBe(false);
+    expect(isCheckReplacement(`${head}"a > 0)`)).toBe(false);
+    expect(isCheckReplacement(`${head}a > 0) not valid`)).toBe(false);
+    expect(isCheckReplacement('alter table public.audit_x drop constraint ck_x, add constraint ck_xy check (a > 0)')).toBe(false);
+    expect(isCheckReplacement('alter table public.audit_x add constraint ck_x check (a > 0)')).toBe(false);
   });
 
   it('a refusal names the file and never echoes a string literal of the statement', () => {

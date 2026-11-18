@@ -3,12 +3,36 @@
 // fails when one is not listed here, when a code is duplicated, or when a code is not SCREAMING_SNAKE.
 import type { CatalogueEntry, ModuleCatalogue } from '../catalogue-entry.js';
 import { auditCatalogue } from './audit.js';
+import { carriersCatalogue } from './carriers.js';
+import { customsCatalogue } from './customs.js';
+import { documentsCatalogue } from './documents.js';
+import { identityCatalogue } from './identity.js';
+import { ordersCatalogue } from './orders.js';
+import { organisationsCatalogue } from './organisations.js';
+import { paymentsCatalogue } from './payments.js';
+import { pickupsCatalogue } from './pickups.js';
 import { platformCatalogue } from './platform.js';
+import { pricingCatalogue } from './pricing.js';
+import { quotesCatalogue } from './quotes.js';
+import { shipmentsCatalogue } from './shipments.js';
+import { trackingCatalogue } from './tracking.js';
 
 /** Module name (the catalogue file name) to that module's codes. */
 export const CATALOGUE_MODULES = {
   audit: auditCatalogue,
+  carriers: carriersCatalogue,
+  customs: customsCatalogue,
+  documents: documentsCatalogue,
+  identity: identityCatalogue,
+  orders: ordersCatalogue,
+  organisations: organisationsCatalogue,
+  payments: paymentsCatalogue,
+  pickups: pickupsCatalogue,
   platform: platformCatalogue,
+  pricing: pricingCatalogue,
+  quotes: quotesCatalogue,
+  shipments: shipmentsCatalogue,
+  tracking: trackingCatalogue,
 } as const satisfies Readonly<Record<string, ModuleCatalogue>>;
 
 type Modules = typeof CATALOGUE_MODULES;

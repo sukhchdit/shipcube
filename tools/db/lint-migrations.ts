@@ -73,8 +73,10 @@
  *       clause; a different predicate is "partial-index predicate changed: review required" (D-ARCH-077, SPK-08)
  *   20  `standard_conforming_strings` or `backslash_quote` named anywhere (SET, set_config, routine SET clauses,
  *       ALTER … SET; bodies and dynamic SQL included), in both lanes (PR43-SEC-06 a)
- *   L   a file (migration.sql, down.sql, a bootstrap file) that does not lex or ends inside a `BEGIN ATOMIC` block is
- *       reported and not linted further (fail closed; PR43-SEC-03)
+ *   L   a file (migration.sql, down.sql, a bootstrap file) that does not split into statements is reported and not
+ *       linted further (fail closed; PR43-SEC-03, PR43-SEC-11): it does not lex, ends inside a `BEGIN ATOMIC` block,
+ *       has anything but `;` after the END of a routine body, or a body `;` inside parentheses (sql-text.ts
+ *       splitStatements: the block boundaries follow PostgreSQL's grammar, so labels never move them)
  *   S   bootstrap lane: only the variables db_name, migrator_password and app_password, and every PASSWORD keyword in
  *       code is followed by :'migrator_password', :'app_password' or NULL (PR5-SEC-12)
  * Rules 2-11 and 14-19 apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
@@ -1246,9 +1248,10 @@ const escapeSettingMessage = (where: string): string =>
   `standard_conforming_strings / backslash_quote are refused in both lanes (they make backslash escapes live in plain strings, outside the E-string controls; PR43-SEC-06 a): ${where}`;
 
 /**
- * Rule L (PR43-SEC-03): splitStatements of `sql`, or undefined after a finding when the text does not lex (an
- * unterminated string, comment, identifier or dollar body) or ends inside a `BEGIN ATOMIC` block. Fail closed: such a
- * file is reported, never linted as one swallowed statement and never a crash.
+ * Rule L (PR43-SEC-03, PR43-SEC-11): splitStatements of `sql`, or undefined after a finding when the text does not
+ * lex (an unterminated string, comment, identifier or dollar body), ends inside a `BEGIN ATOMIC` block, has anything
+ * but `;` after the END of a routine body, or holds a body `;` inside parentheses. Fail closed: such a file is
+ * reported, never linted as one swallowed statement and never a crash.
  */
 function lexedStatements(sql: string, report: (message: string) => void): string[] | undefined {
   try {

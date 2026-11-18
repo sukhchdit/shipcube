@@ -881,6 +881,34 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
     ]);
   });
 
+  it('[PR43-SEC-11] labels case / end and the alias begin atomic inside a BEGIN ATOMIC body, the parenthesised labels and the paren gate hide nothing: every hostile statement after the routine is reported; text after a body END and a body semicolon in parentheses are rule L (atomic-body-labels)', () => {
+    const findings = lintCase('atomic-body-labels');
+    const RULE_11C = /^transaction control \(rule 11c\)/;
+    const GRANT = /^TRUNCATE, TRIGGER or REFERENCES to platform_app/;
+    const DROP = /^destructive statement outside a contract migration: "drop table public\.fixture_items"/;
+    const LOCK = /^the file leaves lock_timeout above the migrator role default/;
+    const expected: [string, string, RegExp][] = [
+      ['20261117000000_as_case_label', '11', RULE_11C],
+      ['20261117000000_as_case_label', '8', GRANT],
+      ['20261117000100_attr_case', '2', DROP],
+      ['20261117000100_attr_case', '11', RULE_11C],
+      ['20261117000200_bare_case_label', '11', RULE_11C],
+      ['20261117000200_bare_case_label', '11', LOCK],
+      ['20261117000300_begin_atomic_alias', '11', RULE_11C],
+      ['20261117000300_begin_atomic_alias', '8', GRANT],
+      ['20261117000400_parenthesised_labels', '2', DROP],
+      ['20261117000400_parenthesised_labels', '11', RULE_11C],
+      ['20261117000500_begin_atomic_param', '11', RULE_11C],
+      ['20261117000500_begin_atomic_param', '8', GRANT],
+      // Control: AS end and a bare end stay inside the routine (no spurious 11c for a stray END), the schema splits.
+      ['20261117000600_end_labels_control', '14', /"create schema fixture_after_end_labels"/],
+      ['20261117000700_end_not_last', 'L', /the END of a routine body must end the routine statement/],
+      ['20261117000800_paren_semicolon', 'L', /unbalanced parentheses in a BEGIN ATOMIC body statement/],
+    ];
+    expect(byFile(findings)).toEqual(expected.map(([migration, rule]) => [migration, 'migration.sql', rule]));
+    findings.forEach((finding, index) => expect(finding.message).toMatch((expected[index] as [string, string, RegExp])[2]));
+  });
+
   it('[PR #43 R1-m1] rule 11: a top-level setter in a materialized CTE or in VALUES raises lock_timeout; a later RESET clears it (lock-timeout-setter-cte-values)', () => {
     expect(byMigration(lintCase('lock-timeout-setter-cte-values'))).toEqual([
       ['20261114000000_with_materialized', '11'],

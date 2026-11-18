@@ -3170,3 +3170,426 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Also routed to PR #61 fix cycle 1:** PR61-SEC-09 and PR61-SEC-10 from session B's duplicate pass (D-ORCH-COORD-02).
 - **Housekeeping:** the architect's commit subject is 107 chars (> 100 commitlint). It is a main docs commit, not checked by PR commitlint, so it is noted, not rewritten.
 - **Reversibility:** High.
+
+### D-TASK028-11..17 · 2026-11-17 · backend-developer (recorded by orchestrator) · PR #61 fix cycle 1 (local head `d54880a`, not pushed until lane B)
+- **11** Audit values use a new log export `hasCredentialShape`, not `redactString`: the log's keyword-in-word rule would erase business values such as `session:manage`. Log behaviour is unchanged.
+- **12** Single-credential schemes need a token68 credential of 8+ chars, so "Basic plan" stays readable.
+- **13** A credential-shaped object key becomes `[REDACTED_KEY]#n`.
+- **14** `mfa_challenges.ip_prefix_hmac` and `carrier_accounts.credentials_ciphertext` (no data-model class) are pinned SECRET in C10.
+- **15** `codes` is a secret word; over-redaction is accepted.
+- **16** Lint: tokeniser/privacy exports only in `apps/api/src/start-api.ts`; `decryptVaultValue`/`auditKeyOf` only in `apps/api/src/modules/audit/**` (TASK-073) and packages/audit.
+- **17** Malformed audit keys exit 78 (`api.audit_keys_rejected`).
+- **Confirmed and fixed** from session B's duplicate review: vault subject-insert lock order (sorted), `authenticate` seam refused in `live` mode, HeadlessChrome → null.
+- **Not taken / routed:** dup R1-m3 (safe over-redaction), dup R1-m4, dup R1-n4 → TASK-031, dup R1-n6 → qa-lead, dup R1-n8 → TASK-049/052, code R1-n3 later. SEC-04 CODEOWNERS (devops) also covers `packages/shared/src/logging/string-redaction.ts`.
+- **Reversibility:** High.
+
+### D-ORCH-130 · 2026-11-17 · sdlc-orchestrator · Lane-B queue paused by host memory; three items waiting
+- **Decision:** the queue wrapper was reaped for low memory at 14:29Z (4.6 GB free of 32). Per the reaper notice it is not restarted without the user's go-ahead.
+- **Waiting items:**
+  - TASK-290 (`ba921da`, EV2; a possibly orphaned run may still finish there);
+  - TASK-287A / PR #62 (`5d86412`; the first lane A failed on a runner-only test gap, fixed locally, so the evidence is stale);
+  - TASK-028 / PR #61 fix cycle 1 (`d54880a`).
+- **Shared lock:** `../.orch/docker.lock` is still owned by the reaped queue run; left in place until the orphan state is known.
+- **User asked:** free memory (close session B, stray node processes) and confirm the restart.
+- **Reversibility:** High.
+
+### D-ORCH-COORD-03 · 2026-11-17 · sdlc-orchestrator (session B) · Batch 1.1 handed to session A: PRs #63 (TASK-036), #64 (TASK-035), #65 (TASK-037) open, no evidence yet
+- **State:** session B's senior-developer finished. It has stopped and is not running further heavy work; it started no new heavy runs after session A's instruction.
+- **PR #63, TASK-036:** head `fcdb7ac`, lane A 44104641784.
+  - One lane-B run, `20261117T1412Z_fc14eab`, failed. It overlapped another heavy run, so treat it as contention-suspect: `rls/api-cases` ECONNRESET (the TASK-291 flake class).
+  - The diff-coverage failure from that run is fixed before the push.
+  - The failed run dir is at `../failed-runs-b11/`.
+- **PR #64, TASK-035:** head `90ef83f`, lane A 44105548507. `consumer.int.test.ts` has never run.
+- **PR #65, TASK-037:** head `d3c2c16`, lane A 44109257822. `organisations.int.test.ts` has never run.
+  - **Merges after TASK-290:** merge main into the branch first, then run lane B.
+  - **Merge condition:** security signs off the rendered DR-A14 policies and the std-columns guard.
+- **Lane A on all three:** red only on the missing lane-B evidence and the missing security record. All three PRs touch security-owned paths, and no locked hot file was edited.
+- **Ready for session A's lane-B queue:** each task worktree `../Shipqube-TASK-0{35,36,37}` is clean and detached at its PR head, with `npm ci` and `deps:rebuild` done.
+- **Decisions proposed by the developer (session A to log or adjust):**
+  - **D-TASK035-01..06:**
+    - 01: dead-letter queues are named `<queue>-dead` (BullMQ 6 refuses `:` in a queue name).
+    - 02: job ids are `<kind>.<id>[.<step>]`.
+    - 03: `joi` becomes a dependency of `@platform/shared`, exposed only through the queues subpath.
+    - 04: per-queue concurrency is a constant for now.
+    - 05: `audit-maintenance` and `housekeeping` accept no payload kind until TASK-039 defines one.
+    - 06: a stalled job stays in the failed set without a dead-letter record.
+  - **D-TASK036-01..03:**
+    - 01: Part B codes go into per-module catalogue files.
+    - 02: `routeErrors` is a module export collected by the generated registry; `app.ts` is untouched.
+    - 03: `api:check-errors` is realised as a parity test.
+  - **D-TASK037-01..07:**
+    - 01: TASK-037 creates `users` with the dr-a14-users policy set (`identity-core` was free), so TASK-049 adds only credential and session tables.
+    - 02: no `on_behalf_of_org_id` column on these tables.
+    - 03: the reserved users are inserted before ENABLE + FORCE.
+    - 04: AT-US-061-01 (operator organisation from the seed) is re-routed to TASK-089.
+    - 05: Organisation and User are tenant-key models in the std-columns extension.
+    - 06: `app_is_operator()` is created after the tables and before the RLS blocks, because the template order cannot be executed.
+    - 07: domain refusals are `OrganisationRuleError` carrying the catalogue code.
+- **Needs routing by session A:**
+  1. **Architect and PM:** how the operator organisation is created in production, since the reference seed cannot write RLS tables (from D-TASK037-04).
+  2. **Contract change request to api-designer:** `OrganisationCreateRequest` is closed and has no `type`, so AT-US-061-02 gets 400 `UNKNOWN_FIELD`, not 422 `ORG_TYPE_NOT_ALLOWED`.
+  3. **Deferred to the route tasks TASK-224/231:** AT-US-061-04/05 and AT-US-062-05/06.
+  4. **Merge order:**
+     - If PR #61 merges first, C10 needs classifications for the TASK-037 columns.
+     - TASK-035 changes `package-lock.json`; the second lock-touching PR to merge regenerates it.
+     - After TASK-037, the generated RLS fixtures may need the new NOT NULL and foreign-key columns (TASK-290 lock owner).
+- **Session B dispatches nothing further.**
+- **Reversibility:** High.
+
+### D-ORCH-131 · 2026-11-18 · sdlc-orchestrator (session A) · Lane-B queue restarted; batch 1.1 accepted from session B; routing of COORD-03 items
+- **Queue restart:** free memory is 9.4 GB, no testcontainers are running, and the stale `.orch/docker.lock` is gone. The queue script was rebuilt after the scratchpad was cleared; same rules as D-ORCH-125 and D-ARCH-146.
+  - Order: TASK-290 (`ba921da`), TASK-287A / PR #62 (`5d86412`), TASK-028 / PR #61 (`d54880a`), TASK-036 / PR #63 (`fcdb7ac`), TASK-035 / PR #64 (`90ef83f`).
+  - TASK-037 / PR #65 waits for TASK-290 to merge, then main is merged into the branch and it joins the queue (COORD-03).
+- **Orphan run:** the reaped TASK-290 run `20261117T1429Z_ba921da` finished with verdict FAIL. Its rls-cross-tenant and unit suites ended in errors after the memory kill; integration (345) and api (173) passed. Treated as infrastructure, not a regression. The run dir is moved to `../failed-runs-orphan/` and is not used as evidence.
+- **Batch 1.1 accepted:** session A now owns PRs #63, #64 and #65. The developer's proposals D-TASK035-01..06, D-TASK036-01..03 and D-TASK037-01..07 are accepted as logged in D-ORCH-COORD-03, subject to code and security review.
+- **Routing:**
+  - COORD-03 items 1 (how the operator organisation is created in production) and 2 (`OrganisationCreateRequest` has no `type`, so AT-US-061-02 gets 400, not 422) go to principal-architect, who brings in api-designer and product-manager as needed.
+  - Item 3 (AT-US-061-04/05, AT-US-062-05/06) is deferred to TASK-224/231 as proposed.
+  - Item 4 (merge order) is applied by the orchestrator at merge time.
+- **Reviews:** code-reviewer and security-analyst r1 on PRs #63 and #64 start now. They do static review only while the queue runs: no test, typecheck or container runs (host rule after D-ORCH-130). PR #65 review waits for its merge-main cycle.
+- **Reversibility:** High.
+
+### D-SEC-PR63-01 · 2026-11-18 · security-analyst · PR #63 (TASK-036) security r1 = PASS_WITH_FOLLOW-UPS at `fcdb7ac` (record `docs/05-quality/security/PR-0063-TASK-036-security-review.md`, committed on main)
+- **Decision:** 0 Critical, High or Medium; 1 LOW, 3 INFO. Static review only (host rule of D-ORCH-131).
+  - **Sound:**
+    - The 5xx detail is generic by status, which covers both new 5xx codes, and the problem body is a closed key set.
+    - No internal-only code is published.
+    - No tenant-existence oracle:
+      - NOT_FOUND is indistinguishable, and a 403 is decided before any lookup.
+      - QUOTE_ALREADY_CLAIMED and INVITATION_EMAIL_MISMATCH need a token of at least 128 bits.
+      - INVALID_CREDENTIALS has one message.
+      - DR-A02 keeps counters for unknown identifiers.
+    - The client map refuses non-catalogue and prototype keys.
+    - Correlation id, logging and redaction are unchanged. Gitleaks and Semgrep are green.
+  - **Independent static parity:** the 79 catalogue codes equal the README §11 table, and equal the 78 openapi examples plus METHOD_NOT_ALLOWED. DR-A26 is 45/45.
+- **PR63-SEC-01 (LOW, CWE-204/CWE-209):** the 4xx `detail` is free text. Nothing fixes it for the indistinguishability codes (NOT_FOUND, INVALID_CREDENTIALS, TOKEN_INVALID, TRACKING_NOT_FOUND, COUPON_INVALID, ACCOUNT_DELAYED/LOCKED, AUTHZ_DENIED), and nothing keeps request or third-party data out of it. Latent: 0 of 20 production `AppError`s pass a detail.
+  - **Fix 1:** a `uniformDetail` catalogue flag that `buildProblem` and `AppError` honour, with sentinel tests. Due in this PR's fix cycle if one runs, else before TASK-052 merges.
+  - **Fix 2:** a literal-only `detail` lint selector, or a source-scan arm. Due with the next `lint` lock holder, before TASK-052 / TASK-227.
+- **PR63-SEC-02 (INFO, CWE-703):** `classifyDbError` accepts any catalogue code with a matching status, and the catalogue grows from 13 to 79 codes. Restrict it to `DB_PROBLEM_CODES` and add two forged cases → next touch of `platform/errors/classify.ts`.
+- **PR63-SEC-03 (INFO, CWE-393):** the staff MFA gate stub still answers AUTHZ_DENIED, but its stated reason (MFA_ENROLMENT_REQUIRED not catalogued) no longer holds → TASK-067. The AUTHZ_DENIED comment should also name the RLS write-rejection producer, at the next touch of `platform.ts`.
+- **PR63-SEC-04 (INFO, CWE-200):** conditions on the first task that adds problem extension members or a non-503 `Retry-After` → TASK-040/041/061/096/103:
+  - a closed per-code allow-list of extension members;
+  - the one-time `mfa_challenge_token` is never logged, audited or stored;
+  - `Retry-After` per code, in 1..3600.
+- **Record placement:** committed on main, because the PR worktree is reserved for the lane-B queue. ci-gate reads records from the merge ref, so the record counts from the next `pull_request` event (the evidence push), not from a re-run of 44104641784. Simulated: S1 and S3 pass, C0 to C5 fail as expected. The orchestrator may also add the file verbatim to the evidence commit.
+- **Merge conditions (security):**
+  - lane-B PASS on the final head;
+  - a lane-A run in which lint, format, type-check, unit and build execute;
+  - a delta round if a later commit changes `apps/api/src/platform/**`.
+- **Code review twin** (`0f3528e`, APPROVED_WITH_NITS): I support R1-m2 (the scan is blind to domain error classes, PR #65) and §4 item 3 (the shared root must not re-export `./queues`). No finding duplicates theirs.
+- **Reversibility:** High.
+
+### D-ARCH-151 · 2026-11-18 · principal-architect · Operator organisation: a reserved row of the TASK-037 migration, inserted before FORCE (D-ORCH-COORD-03 item 1; ADR-0005 amendment 12)
+- **Decision:**
+  - The migration that creates `organisations` inserts the one OPERATOR organisation next to the reserved users: id `00000000-0000-7000-8000-000000000010` (constant `OPERATOR_ORG_ID`), `display_name` `Operator`, the SYSTEM actor in `created_by` and `updated_by`, `ON CONFLICT ("id") DO NOTHING`. It comes after `ux_organisations__single_operator` and before `ENABLE` + `FORCE`. The header stays `data-changing: no`.
+  - No seed, job or operator step creates the organisation. The reference seed writes GLOBAL tables only. The demo seed (TASK-089) adds staff memberships to the reserved organisation and never creates or renames it. `seedId('org:operator')` is withdrawn.
+  - AT-US-061-01 stays on TASK-037. D-TASK037-04 (re-route to TASK-089) is superseded. D-TASK037-03 (reserved users in the migration) is confirmed.
+  - No fixture plants an OPERATOR organisation any more; a fixture adds a membership to `OPERATOR_ORG_ID`.
+- **Why:**
+  - After `FORCE` the migrator has no policy on `organisations`, and the demo seed never runs with `APP_ENV=production`. As designed, production had no operator organisation at all.
+  - `p_organisations__active` checks only `id = platform.app_org_id()`, and the creating service chooses that value. On an empty index the service rule was the only control against a `platform_app` session creating the first OPERATOR organisation and a membership in it. The reserved row occupies the unique index in every migrated database.
+  - It needs no new role, policy, definer write or credential.
+- **Alternatives rejected:**
+  - A privileged job after `migrate`: it needs the break-glass credential for routine work, a write-capable definer function, or a policy for the migrator (against ADR-0005 amendment 6 and ADR-0007 amendment 7).
+  - The demo seed or an admin flow as `platform_app`: it never runs in production, leaves the slot open until it runs, and needs one service path that creates OPERATOR, which REQ-ORG-001 excludes.
+  - A production command that creates the organisation with the first staff user: the same objections, plus an operational step that can be forgotten.
+- **Functional acceptance criteria:** unchanged, so product-manager was not brought in. The Then-clause of AT-US-061-01 holds as written. Wording for the next story edit: REQ-ORG-001 "(created by seed)" and the scenario title.
+- **Not verified here:** no test was run (host rule of D-ORCH-131). What PostgreSQL refuses is read from the policy and migration text of PR #65 at `d3c2c16`.
+- **Where:** ADR-0005 amendment 12 items 23 to 25; data-model §1.6, §3.2, §4.3, §8.3 rule 10, §9.1 to §9.3, A30; `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §2 (exact statement and the per-task list); cards TASK-037 and TASK-089.
+- **Reversibility:** High until PR #65 merges (one statement in an unmerged migration). After that the row is permanent: a later migration can neither add nor remove it, because the migrator cannot write the table.
+
+### D-ARCH-152 · 2026-11-18 · principal-architect · `createOrganisation`: the contract adds an optional `type`; the acceptance criteria stand (D-ORCH-COORD-03 item 2)
+- **Decision:**
+  - `OrganisationCreateRequest` gains the optional property `type`: the four organisation types, default `BUSINESS_CUSTOMER`. `OrganisationPatch` stays without it (400 `UNKNOWN_FIELD`, AT-US-061-03).
+  - Every value but `BUSINESS_CUSTOMER` is refused by the service with 422 `ORG_TYPE_NOT_ALLOWED` and audited with outcome `FAILED`. A value outside the enumeration is 400 `VALIDATION_ERROR`.
+  - The edit lands in the TASK-224 PR with the route, the Joi schema, the tests and the regenerated types (api/README §18 item 1). The exact YAML is in the rulings file §3.3 and is the approved change request.
+  - PR #65 needs no contract change. Its service already takes `type` and refuses everything but `BUSINESS_CUSTOMER`.
+- **Why:**
+  - The contract already describes `ORG_TYPE_NOT_ALLOWED` on `createOrganisation` and lists it on that operation only. A closed schema without `type` makes the code unreachable, so the schema is the defect.
+  - REQ-AUDIT-010 writes no audit entry for a 400. With the closed schema AT-US-061-05 (a `FAILED` entry for the refused attempt) fails as well as AT-US-061-02.
+  - One schema property changes, against three requirement artefacts on the other side.
+  - D-ARCH-151 makes it safe below the service: the database refuses OPERATOR (occupied unique index), INDIVIDUAL (`ck_organisations__personal_owner`) and PARTNER (the owner role link fails the role-scope trigger in the same transaction).
+- **Why not on `main` now:** `openapi.yaml` is a tooling input. A change makes the lane-B evidence of every open PR stale, and `types.gen.ts` must be regenerated in the same commit, which is product code. No route mounts the operation before TASK-224.
+- **Alternatives rejected:**
+  - Amend the criteria to 400 `UNKNOWN_FIELD`: REQ-ORG-001, AT-US-061-02 and AT-US-061-05 change, the refused attempt is no longer audited, and `ORG_TYPE_NOT_ALLOWED` becomes unreachable through the API.
+  - An enumeration with `BUSINESS_CUSTOMER` only: PARTNER would fail validation and be a 400 again.
+  - A contract-only PR now: stale evidence and CI minutes for an operation nothing mounts.
+- **Specialists:** api-designer and product-manager were not dispatched. The change is one property and one example, and no acceptance criterion changes.
+- **Open, not decided here (orchestrator to product-manager):** US-061 and US-062 are M0 Must and demo-critical, but their route-level scenarios now close in TASK-224 and TASK-231 (Wave 8, Should, cuttable). The cards still say TASK-037 completes both stories. Recommended default: record both as partial on TASK-037 and completed by TASK-224 and TASK-231, which makes those routes non-cuttable. Alternative: move the route-level scenarios to US-082 and US-085.
+- **Not verified here:** the YAML was not linted (host rule). TASK-224 runs `openapi:lint` and `openapi:types`.
+- **Where:** rulings file §3 and §4; cards TASK-224 (change request and the US-061 scenarios), TASK-037, TASK-231 (the US-062 scenarios of D-ORCH-131).
+- **Reversibility:** High until TASK-224 merges. After that, removing the property is a breaking contract change.
+
+### D-ARCH-153 · 2026-11-18 · principal-architect · First staff user in production: a one-shot audited command at M5, a G4 precondition for a production release (R-ARCH-33)
+- **Decision:**
+  - The first Super Admin in production is created by `ops:staff-bootstrap`, of the same family as `ops:staff-reactivate` (ADR-0006 amendment 14). It runs as `platform_app` through the identity and organisations services with a `SYSTEM_JOB` actor, as a pipeline task.
+  - It creates one user without credentials, an `ACTIVE` membership in `OPERATOR_ORG_ID` with `OPERATOR_SUPER_ADMIN`, and a `SET_PASSWORD` link. It refuses when the operator organisation already has a member, and it creates no organisation.
+  - It is not Run 1 work. It is a precondition of G4 for a production release (risks.md R-ARCH-33).
+  - TASK-089 exports its staff-provisioning function from the service layer so the command reuses it.
+- **Why:** D-ARCH-151 gives production the organisation but no member. The demo seed never runs there (REQ-DATA-001/002), and staff management is M2 (EPIC-B-207).
+- **Alternatives rejected:**
+  - The demo seed with `APP_ENV=production`: forbidden, and it would create demo customers.
+  - Manual SQL with the cluster-admin credential: it bypasses RLS, the standard-columns guard and the audit trail.
+  - Building the command now: there is no production target until M5.
+- **Routed:** product-manager places the backlog story (EPIC-B-207 or the M5 readiness epic).
+- **Where:** ADR-0005 amendment 12 item 26; risks.md R-ARCH-33; rulings file §2.4; card TASK-089.
+- **Reversibility:** High (design only; nothing is built).
+
+### D-SEC-PR64-01 · 2026-11-18 · security-analyst · PR #64 (TASK-035) security r1 = PASS_WITH_CONDITIONS at `90ef83f` (record `docs/05-quality/security/PR-0064-TASK-035-security-review.md`, committed on main)
+- **Decision:** 0 Critical/High; 2 MEDIUM, 4 LOW, 5 INFO. Static review plus light Node probes (host rule of D-ORCH-131; no install, Jest, Docker or worktree commands). Lane B has not run; this round does not replace it.
+  - **Sound:** tenant context is never read from the payload (closed Joi schema at both levels, `convert: false`; `org_id`/`actor_id` refused and flagged `job_context_mismatch`; processors get the validated clone; the job name selects nothing); the producer writes identifiers only and never generates a correlation id; the api ACL user has no `~bull:*`; the dead-letter record is deep-redacted and bounded; connection options come from `buildValkeyOptions` (pinned TLS, no URL); retries bounded and clamped; kindless queues fail closed.
+  - **Dependency:** `joi` ^18.3.2 in `@platform/shared` adds no package (already locked for api and config); BSD-3-Clause; past every joi and @hapi/hoek advisory; maintained. Off the browser-safe barrel.
+  - **D-TASK035-01..06:** no security objection (06 observed under PR64-SEC-08).
+- **PR64-SEC-01 (MEDIUM, CWE-532) = merge condition C1:** the 18 BullMQ `Queue` instances in `runtime.ts` (and the consumer-owned DLQ queue) have no `error` listener; on an AUTH refusal BullMQ `console.error`s the ioredis error, whose `command.args` carry `HELLO 3 AUTH worker <password>`. Probe: 97 cleartext copies on stderr in 3 s, 0 log lines; with a listener, 0. Fix: one `openQueue` factory that always attaches a class-only listener, a fake-RESP-server test and a source-scan test → **this PR**, then a security delta round. The fix touches only unowned files, so ci-gate stays green on this record: the orchestrator holds the merge until the delta round (sim S6).
+- **PR64-SEC-02 (MEDIUM, CWE-359, T-74):** BullMQ keeps raw `failedReason`, `stacktrace` and job `data` of failed jobs forever (`removeOnFail: false`), next to the redacted dead-letter copy; AT-US-009-04's sentinel stays in the failed set. Fix: rethrow a sanitised reason-only error, `job.updateData` the redacted data on PAYLOAD_INVALID, `stackTraceLimit: 0` → this PR's fix cycle, at the latest before TASK-039 registers a processor.
+- **LOW:** 03 no command timeout on the non-blocking queue connections, so `/metrics` and the DLQ write hang (separate `queue` profile, 2 s deadline on metrics) → this fix cycle; 04 unbounded failed-set and DLQ retention under `noeviction` (T-77) → principal-architect (ADR-0013 retention amendment) + TASK-039 housekeeping; 05 free-text `tracestate` (prefer dropping it from v2, else the linear W3C check in the record) → this fix cycle or before TASK-043; 09 CODEOWNERS lacks `apps/worker/src/platform/`, `apps/worker/src/{main,start-worker,processors}.ts`, `packages/shared/src/{queues,logging}/` → devops with the PR48-SEC-02 / PR61-SEC-04 activation PR.
+- **INFO:** 06 forgery-signal gaps (case/nested spellings unflagged; an own `__proto__` key passes silently; uncapped issue list) → TASK-047 or this cycle; 07 resolve `job_context` in the consumer, check `job.id`/`job.name` against the payload, per-job deadline → TASK-047/039; 08 DLQ record reuses the job id (second failure unrecorded) → TASK-039; 10 DR-A25, EC-A38 and the US-010 Notes still describe payload v1 → product-manager; 11 no integration case runs with the ACL file → this cycle or TASK-039.
+- **Record simulation** (main's checker): S1 pass, S2-S5 controls missing as expected, S6 unowned change after the head passes; with the record on main, M-d/M-e pass and M-f/M-g fail as expected. The record counts from the next `pull_request` event on PR #64.
+- **Reversibility:** High.
+
+### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-071.
+- **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
+- **Decision:**
+  - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
+  - **Scenario ownership, US-062 (M0 Must, DC, 6 scenarios).** TASK-037: AT-US-062-01 to -04, and the change record that AT-US-062-06 asserts (old/new status and role-set diff; the `[AT-US-062-06]` unit test already in PR #65). TASK-231: AT-US-062-05 and AT-US-062-06 through the member routes. TASK-231 completes the story.
+  - **One clause added to the orchestrator's split: TASK-049 owns the creation clause of AT-US-062-06 at registration.** Registration is the one membership write R0 can perform. TASK-049 asserts one `membership` audit entry (new status ACTIVE, role set Owner) in the registration transaction, next to the user and organisation entries US-015 already asserts. TASK-049 depends on the unmerged TASK-037 and has no row in STATUS.md, so its card can take the line. The orchestrator may strike this clause; the R0 statement in PRD §7 then needs "except the audit entry of the registration membership".
+  - **Not cuttable.** TASK-224 and TASK-231 leave ladder rung 2. TASK-227 leaves it too for as long as TASK-231 depends on it (`members` → `invite`). TASK-235 (team screens, US-268 and US-269) stays cuttable.
+  - **Story tags unchanged.** US-061 and US-062 stay M0 Must DC. US-081 to US-085 stay M1 Should. What is protected is the six Must scenarios and the routes they run on: a Should scenario of US-081 to US-085 that blocks one of these tasks may still be deferred scenario by scenario, while the routes ship.
+  - **R0 (`v0.1.0-m0`).** Not blocked. The tag is cut with US-061 and US-062 recorded as partial in the dossier, naming the six scenarios. The other 111 M0 Must stories are complete at R0.
+  - **R1 / G3.** TASK-224 and TASK-231 are merged before the G3 evidence run. Default placement: with the Must band, before the Wave 7 exit. G3 accepts the two stories only with all eleven scenarios passing in `ac-trace.json`.
+  - **Fallback, agreed now.** If TASK-224 or TASK-231 is unmerged at the Wave 7 exit, product-manager applies rung 4: the six route-level scenarios move to US-082 and US-085 as appended scenarios, US-061 and US-062 keep what TASK-037 proves, and the tasks return to rung 2. That is the architect's named alternative. It gets its own entry if used.
+  - **No acceptance criterion changed.** No Gherkin line, scenario title, REQ, priority, milestone, DC tag or count changed (434 / 91 / 293 / DC 134).
+- **Why:**
+  - **The split is real, not a relabel.** Four US-061 scenarios need `createOrganisation` and `updateOrganisation`; two US-062 scenarios need the member routes. No M0 task mounts them. A card that says "TASK-037 completes US-061 and US-062" would let both stories read as Implemented with six scenarios unowned, which is the silent drop of D-061 and D-062.
+  - **Why not in R0.** TASK-231 depends on TASK-187 (Wave 7, the step-up of REQ-AUTH-025) and on TASK-227, which depends on TASK-169 (Wave 6). Pulling them into Waves 0 to 3 would move invitations, member management and step-up onto the M0 critical path. `createOrganisation` is `x-milestone: M1`. PRD §6.1 exercises none of the six scenarios, and R0 has no route on which a refused create, a type change or a role assignment could be attempted, so nothing R0 does is unproven. R0 has no gate.
+  - **Why before G3.** G3 judges Must stories, and both are Must. A refused `PARTNER` or `OPERATOR` create is a privilege probe that must be audited (D-ARCH-152), and it becomes reachable the moment the route exists.
+  - **Why TASK-227 follows.** AT-US-085-05 (inviting into an INDIVIDUAL organisation) needs the invite route, and member management without a way to add members is not a usable increment. Keeping the dependency costs one M task; removing it would split a Should story across two tasks for no user value.
+  - **Cost, stated.** About 9 developer-days of Should work (three M tasks, serial on the `mod-organisations` lock) are now due before G3, and PLAN.md §12 tier A loses 3 tasks and 5 stories (29 → 26 tasks, 37 → 32 stories, 70.5 → 61.5 developer-days of possible savings).
+- **Alternatives:**
+  - Move the route-level scenarios to US-082 and US-085 now (the architect's alternative). Not chosen by the orchestrator: it takes the privilege-probe audit out of the Must set. Kept as the fallback, because it costs no schedule.
+  - Keep "TASK-037 completes both stories" and rely on card notes. Rejected: traceability and the gate read the completes column.
+  - Pull TASK-224, TASK-227 and TASK-231 into M0. Rejected: it puts M1 step-up and invitations on the R0 critical path for scenarios the M0 demo never runs.
+  - Mount a minimal create route in M0 only to prove the refusals. Rejected: a route whose only job is to refuse adds attack surface and a contract change to R0 for no user.
+  - Drop the `members` → `invite` dependency so TASK-227 stays cuttable. Rejected as the default (see Why); senior-developer may still propose it.
+- **Applied in:** `docs/01-requirements/stories/EPIC-03-organisations-rbac-tenancy.md` (notes of US-061, US-062, US-082, US-085; no Gherkin change), `docs/sdlc/traceability.md` 1.7 (REQ-ORG-001, -003, -004 rows; REQ-ORG-002 unchanged), `docs/01-requirements/PRD.md` 1.12 (§7, §7.1, §11), `docs/01-requirements/ASSUMPTIONS.md` A-109.
+- **Not applied here, for senior-developer and principal-architect** (`docs/04-plan/generator/` and the generated plan files are theirs):
+  - `plan-data.mjs` card `orgs` (TASK-037): `us:['US-061','US-062']` becomes `us:[]` with `part:['US-061','US-062']`; the SCENARIO OWNERSHIP line cites D-PM-068 in place of "until product-manager records the delivery split".
+  - Card `orgswitch` (TASK-224): `us` gains `'US-061'`; the PLANNING FLAG sentence is replaced by "completes US-061 (D-PM-068); not cuttable; due before G3".
+  - Card `members` (TASK-231): `us` gains `'US-062'`; the PLANNING FLAG sentence is replaced the same way.
+  - Card `invite` (TASK-227): a note that it is not cuttable while `members` depends on it.
+  - Card `register` (TASK-049): `part` gains `'US-062'`, and one acceptance line: "[AT-US-062-06] (creation at registration; status and role-set changes in TASK-231): the registration transaction writes one audit entry for entity `membership` with new status ACTIVE and role set Owner".
+  - `gen.mjs` will fail as it stands. The wave rule allows an M0 Must DC story to complete in Waves 0 to 2 only, so US-061 and US-062 completing later is an error; it needs a recorded exception for these two stories that cites this entry. `cuttable` is `wave >= 8`, so the three tasks either move into Wave 7 after TASK-187 (preferred: Wave 7 exit is the G3-ready checkpoint) or carry an explicit override. `dc` is derived from the stories, so TASK-224 and TASK-231 would print "demo-critical"; they are not, the demo-critical part is TASK-037's.
+  - Wave texts and PLAN.md: the Wave 2 exit ("all 74 M0 DC stories merged"), the Wave 3 exit and the `v0.1.0-m0` checkpoint ("all 113 M0 Must merged") become 72 and 111 complete plus US-061 and US-062 partial; §12 tier A drops TASK-224, TASK-227, TASK-231 and US-081 to US-085.
+  - No dependency change is needed: TASK-224 → TASK-056 → TASK-037, and TASK-231 → TASK-227 → TASK-224.
+- **Reversibility:** High until TASK-224 merges (notes, three traceability rows, card lines). The fallback above is the reverse path.
+
+### D-PM-069 · 2026-11-18 · product-manager · REQ-ORG-001 wording: the operator organisation is a reserved row of the organisations migration, not a seeded row (D-ARCH-151)
+- **Decision:**
+  - REQ-ORG-001 "(created by seed)" becomes "(a reserved row of the schema migration that creates the `organisations` table, present in every migrated database before any seed runs)".
+  - Its note records: no seed, job, operator step, API or runtime role creates the organisation; the seeds neither create nor rename it; "operator" is decided by `type`, never by the reserved identifier; `createOrganisation` takes an optional `type` so a refused type is a 422 that is audited (D-ARCH-152); the organisation has no member until staff are provisioned (US-B-001 for production).
+  - The US-061 notes carry the same explanation. The title and the steps of US-061 scenario 1 ("Seed creates exactly one OPERATOR organisation") are **not** edited.
+  - REQUIREMENTS.md → 1.11. No ID, priority, milestone or count changed.
+- **Why:**
+  - After `FORCE ROW LEVEL SECURITY` the migrator has no policy on `organisations`, so the reference seed cannot write the row, and the demo seed never runs in production. Read literally, the old wording left production without an operator organisation.
+  - The Then-clause of AT-US-061-01 holds as written: exactly one `OPERATOR` organisation, and an identical row count after the second seed run.
+  - The scenario title is the key of AT-US-061-01 in `gherkin-test-map.md`, which the TASK-277 drift test compares with the story file. A title edit without a regenerated map turns that test red on `main` (the D-063 and D-064 convention: titles stay).
+- **Alternatives:**
+  - Reword the scenario title now, as the rulings suggested. Deferred to qa-lead's next map regeneration, in the same commit as the map; suggested title "The schema migration creates exactly one OPERATOR organisation".
+  - Leave REQ-ORG-001 and explain only in the story. Rejected: the requirement must be testable without the story, and "created by seed" is false.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` (REQ-ORG-001 row, version line), the US-061 notes, PRD 1.12 §11.
+- **Reversibility:** High (wording).
+
+### D-PM-070 · 2026-11-18 · product-manager · Backlog story US-B-001 for the first production staff user (`ops:staff-bootstrap`, D-ARCH-153, R-ARCH-33): M5, new epic EPIC-B-508, a G4 precondition for a production release
+- **Decision:**
+  - New M5 backlog epic **EPIC-B-508 Go-live bootstrap: first operator staff user**, and the story **US-B-001** with Gherkin acceptance criteria, in `docs/01-requirements/BACKLOG.md` 1.1. It is Won't (this run); at M5 it is Must and a precondition of G4 for a production release.
+  - The EPIC-B-207 row says that every later staff user is created there by an existing Super Admin and points to EPIC-B-508 for the first one.
+  - `US-B-NNN` is a new ID form for backlog stories written ahead of their milestone. They are outside the `US-NNN` series, the story counts, the Gherkin map and the plan generator, which read `stories/EPIC-*.md` only.
+  - The story takes the architecture as fixed (runtime role, `SYSTEM_JOB` actor, pipeline task, no `OPERATOR` organisation created, refusal once a member exists) and adds product defaults, logged as A-110: refusal on a membership in any status; an existing account with a password is never promoted; an operator e-mail domain allow-list; a pipeline run reference in the audit entries; a `FAILED` audit entry for a refused run; a personal organisation for the user per DR-A06.
+- **Why:**
+  - **M5, not EPIC-B-207 (M2).** The command is needed only where the demo seed cannot run, which is production, and a production target exists only from M5. EPIC-B-207 is the screen set an already signed-in Super Admin uses; it cannot create the first one. Filed under M2, the story would be planned a milestone before anything can exercise it and could be closed without a production rehearsal.
+  - **Its own epic.** None of EPIC-B-501 to -507 owns a one-shot identity command, and a G4 precondition is easier to track as a named row than as a line inside the delivery-pipeline epic.
+  - **Written now.** D-ARCH-151 creates the gap in this run. A story with acceptance criteria keeps R-ARCH-33 from depending on someone rereading a rulings file at M5.
+  - **The added defaults close two abuse paths the risk row does not name:** promoting an address an attacker registered first (the D-050 class), and re-running the command after staff were removed.
+- **Alternatives:**
+  - EPIC-B-207. Rejected (see Why).
+  - EPIC-B-502 (progressive delivery), because the command is a pipeline task. Rejected: the behaviour is identity and tenancy, the pipeline is only the runner.
+  - A Run 1 story. Rejected by D-ARCH-153: there is no production target, and staging uses the demo seed.
+  - A one-line backlog row without acceptance criteria. Rejected: the orchestrator asked for Gherkin, and the refusal rules are the substance.
+- **Open for M5 planning (defaults applied, A-110):** principal-architect confirms the personal-organisation reading of "creates no organisation"; security-analyst reviews the existing-account and allow-list rules; devops-engineer owns the pipeline task and its environment approval; the wrong-address recovery goes to the EPIC-B-507 break-glass runbook.
+- **Applied in:** `docs/01-requirements/BACKLOG.md` 1.1, `docs/01-requirements/ASSUMPTIONS.md` A-110, the REQ-ORG-001 note, PRD 1.12 §11.
+- **Reversibility:** High (backlog text; nothing is built).
+
+### D-ORCH-132 · 2026-11-18 · sdlc-orchestrator (session A) · Batch 1.1 review outcomes, PR #64 fix cycle 1, PR #66 opened, PR #65 plan, D-PM-068..070 accepted
+- **PR #63 (TASK-036):** code review APPROVED_WITH_NITS (`0f3528e`); security PASS_WITH_FOLLOW-UPS (`a70dc64`, D-SEC-PR63-01). No fix cycle. The MINOR findings are logged with owners instead of a new push, so the queued lane-B run on `fcdb7ac` stays valid:
+  - R1-m1 (API README still describes `api:check-errors`/`api:sync-errors`): api-designer doc change request at the next sheet fold, plus follow-up task TASK-036-F1 adding a README §11-table arm to the parity test.
+  - R1-m2 (uncatalogued-code scan cannot see domain error subclasses): PR #65's review requires `ErrorCode`-typed domain codes and a catalogue entry or an internal-only note for `MEMBERSHIP_STATUS_NOT_WRITABLE`; widening the scan is TASK-036-F1.
+  - R1-m3 (module `routeErrors` not tied to thrown codes): owned by the first task that adds a module `routes.ts`.
+  - PR63-SEC-01 items 1–3: before TASK-052 merges; item 4: the next holder of the `lint` lock. SEC-02..04 as routed in the record.
+  - Merge conditions: lane-B PASS on the final head and a lane-A run where lint, format, typecheck, unit and build actually run.
+- **PR #64 (TASK-035):** code review CHANGES_REQUESTED (R1-M1 MAJOR); security PASS_WITH_CONDITIONS with C1 = PR64-SEC-01 (Valkey password on stderr), held by the orchestrator because ci-gate cannot enforce it. Fix cycle 1 of 3 dispatched to backend-developer in `../Shipqube-TASK-035-fc1` (the worktree was moved there so the queue skips the stale `90ef83f`):
+  - In scope: R1-M1, R1-m1..m4, PR64-SEC-01/02/03/05, trivial NITs.
+  - Routed: SEC-04 retention → principal-architect (ADR-0013) and TASK-039; SEC-06/07 → TASK-047/TASK-039; SEC-08 → TASK-039; SEC-09 CODEOWNERS → devops with the PR48-SEC-02 activation PR; SEC-10 → product-manager; SEC-11 → TASK-039; R1-m5 → next `lint` lock holder; ADR-0013 §1/§2 spelling update → principal-architect.
+  - Lock order: whichever of Dependabot #58 and #64 merges second regenerates `package-lock.json` and re-runs the int suite.
+- **TASK-290:** lane-B PASS `20261118T1029Z_ba921da`; PR #66 opened at `9a14659` (code `ba921da` + evidence). Code and security r1 reviews dispatched; their records go onto the branch in one combined record push (D-ORCH-119).
+- **PR #62 (TASK-287A):** the run `20261118T1045Z_5d86412` failed on one int test with P1001 (container lost during host load: concurrent reviewers and developer). Infrastructure, not a regression; moved to `../failed-runs-orphan/` and re-queued.
+- **PR #65 (TASK-037):** D-ARCH-151..153 accepted. After PR #66 merges: merge main into the branch, apply the ruling-1 changes (reserved operator row, `OPERATOR_ORG_ID`, rewritten AT-US-061-02 test, fixtures), add `ErrorCode` typing per PR63 R1-m2, then lane B and reviews. The SEC-TC-06 control edit is sequenced after TASK-290 under the `tests-gen-rls` lock.
+- **D-PM-068..070 accepted with their defaults:** US-061/US-062 are partial on TASK-037 and completed by TASK-224/TASK-231 (non-cuttable; TASK-227 non-cuttable by dependency); the TASK-049 clause for AT-US-062-06 is kept; Wave 7 placement is preferred, final call to senior-developer at the next plan fold.
+  - The PM's Notes edit to `docs/01-requirements/stories/EPIC-03-…md` is a lane-B tooling input, so it is held as `../.orch/held/D-PM-068-EPIC-03-notes.patch` and lands with PR #65's merge-main cycle, so the open PRs' evidence stays valid.
+  - The card and `gen.mjs` changes listed in D-PM-068 go to senior-developer at the next plan fold, together with the pending sheet-fold items.
+- **Reversibility:** High.
+
+### D-SEC-PR66-01 · 2026-11-18 · security-analyst · PR #66 (TASK-290) security r1 = PASS_WITH_FOLLOW-UPS at `9a14659` (record `docs/05-quality/security/PR-0066-TASK-290-security-review.md`, committed on main)
+- **Decision:** 0 Critical, High or Medium; 1 LOW, 1 INFO. Static review plus light Node probes (host rule of D-ORCH-131): no npm, Jest, Docker or worktree commands. PostgreSQL facts come from `REL_18_STABLE` `scan.l` and `gram.y`, read but not executed.
+  - **Sound:**
+    - The block layer of `splitStatements` matches `gram.y` exactly (`opt_routine_body`, `routine_body_stmt_list`, `toplevel_stmt`). It opens on `BEGIN ATOMIC` in a routine head at depth 0 and closes only on `END` as the first piece of a body statement. Where it is stricter than `main`, PostgreSQL raises a syntax error.
+    - The PR's 13-row case table splits as specified. 10 of 10 mutants of the new logic are killed by the PR's own rows.
+    - Of the 532 tracked `.sql` files, 525 split as on `main`; the other 7 differ by design.
+    - The shadow rendering of the real bootstrap lane is byte-identical to `main`'s, and it keeps the `91` statement. `lintRepository` gives 0 findings.
+    - No new dependency, secret or injection surface. Gitleaks and Semgrep are green.
+- **PR66-SEC-01 (LOW, CWE-436/CWE-693):** `tokenize` (unchanged by the PR) differs from `scan.l` in three ways:
+  - (a) a lone CR ends a `--` comment;
+  - (b) `é$a$` is an identifier, not a dollar quote;
+  - (c) `$é$` is a dollar tag.
+
+  Shapes (a) and (b) hide a `GRANT … TO platform_app` that PostgreSQL runs: the linter at the head gives 0 findings, against rule 8 for the control. Shape (c) fakes a `RESET ROLE` or an ENABLE + FORCE: rules 15 and 9 go silent.
+  - **Who sees the raw text.** `migrate deploy` passes it to PostgreSQL with comments kept: Prisma 7.10.1's engine sends `sqlparser` pieces, or the whole script, through `simple_query`. The bootstrap runner does the same. The shadow rendering drops the comment, so it diverges from the real lane.
+  - **Relation to the code review.** This is code review R1-m1, widened. One correction: the bootstrap runner keeps comments; it is the shadow rendering that drops them.
+  - **Exposure.** None of the three shapes occurs in the 532 files or in PR #65's migration.
+  - **Fix**, validated (all 532 token streams unchanged):
+    - a CR also ends `--`;
+    - use `isIdentifierChar` in the dollar rule;
+    - accept a non-ASCII dollar-tag alphabet;
+    - use the ASCII white-space class (R1-n1);
+    - optionally, refuse a lone CR.
+  - **Due:** this PR's fix cycle if one runs. Otherwise a `tools/db` follow-up (database-engineer), due before the next PR after #65 that adds or changes a migration or bootstrap file, and with any earlier change to `sql-text.ts`.
+- **PR66-SEC-02 (INFO, CWE-693):** "never runs as a migration step" holds for utility statements (0A000) only. DML in a body runs when the routine is called, and rule 10 does not see a routine created and called in the same file (probe: 0 findings).
+  - The wording goes to principal-architect at the next §8.3 edit.
+  - The call-site rule, or a stated limit next to rule 11's PR #24 R1-n7, goes to the next holder of the `tools/db` linter.
+- **Merge conditions (security):**
+  1. The record is visible to ci-gate. It is committed on main, so it counts from the next `pull_request` event. A records-only commit after `9a14659` keeps the binding.
+     - Simulated with main's checker: S1 to S5 pass, and C0 to C5 fail as expected.
+     - C2 first hit a `git` timeout under host load; re-run alone, it gave the expected refusal.
+  2. GHSA-fc5q-39xc-vjpf is triaged repo-wide (no patched version is listed). Then a lane-A run must execute every fast-lane step green, including lint, type-check, unit, build, check-evidence and the base-ref negative fixtures.
+  3. The security-integration job, which is due once `record_ok` is true, runs and passes.
+  4. Any change to one of the 27 owned paths after `9a14659` needs a delta round.
+- **Reversibility:** High.
+
+### D-SEC-PR66-02 · 2026-11-18 · security-analyst · PR43-SEC-11 and PR52-SEC-01 closed by TASK-290; card validation clause met; position on D-TASK290-01..06
+- **Decision:**
+  - **PR43-SEC-11 (D-SEC-PR43-05) is CLOSED at `9a14659`.** No counter remains for a top-level `END` to resynchronise. The four label shapes, each followed by hostile statements, split, and the hostile statements are linted.
+  - **PR52-SEC-01 (D-SEC-PR52-01 (2)) is CLOSED.** The KEEP form is a prefix match plus a balanced scan, under the same unquoted `ck_` name. Six bypass shapes and the PK "replacement" are refused. The lexer route to the same effect is tracked as PR66-SEC-01.
+  - **The TASK-290 card clause "structural fix validated on a scratch copy by security-analyst" is met.** The evidence is the 10 of 10 mutants, the 17 edge shapes and the 532-file corpus run (record §5.2-§5.4).
+  - **D-TASK290-01 to -06:** no security objection.
+    - Accepted: 01 (grammar-exact close instead of the CASE-depth sketch of the PR43-SEC-11 record), 02, 03, 04 and 06.
+    - 05: the wording of rules 18 and 19 matches the code; the rule-L limit wording is subject to PR66-SEC-02.
+  - **Code review r1 (`fdb33ee`):** R1-n2 is supported, with no separate finding. The optional `ck\_%` ⇒ `contype = 'c'` catalog assertion is a good C-series addition.
+- **Why:** these findings are bound to TASK-290 (D-ORCH-074, D-ARCH-135/137), and TASK-037 and every later bootstrap file wait on their closure.
+- **Reversibility:** High.
+
+### D-SECAUDIT-01 · 2026-11-18 · security-analyst · GHSA-fc5q-39xc-vjpf (picomatch ReDoS, High, no upstream fix, dev closure only): tracked by an 86-day audit waiver in PR #67, not a watch entry (record `docs/05-quality/security/PR-0067-audit-picomatch-waiver-security-review.md`, committed on main)
+- **Trigger:** GitHub reviewed the advisory on 2026-11-17 (picomatch `<= 4.0.7`, CVSS 7.5, CWE-1333). From then on, lane A's "Vulnerability audit" step fails on every PR; the first failure was run 44291101362 (PR #66).
+- **Decision:** add a waiver to `tools/ci/advisory-watchlist.json`: decision D-SECAUDIT-01, granted 2026-11-18, expires 2027-02-12 (86 of the 90 allowed days, aligned with the glob/minimatch watch reviews). On the expiry date the finding fails lane A again. PR #67 at `1f9c81f` (branch `chore/audit-watch-picomatch`, worktree `../Shipqube-audit-picomatch`) also adjusts `tools/ci/check-audit.test.ts`:
+  - it pins the waiver;
+  - it adds a test that the waiver passes until the due date and fails on it;
+  - its CLI tests run at the register's newest grant date, because the CLI refuses a waiver granted after `--now`.
+- **Security r1 = PASS_WITH_FOLLOW-UPS.** 0 Critical/High open for the change. PR67-SEC-01 is the advisory itself, rated LOW in context and waived.
+- **Why a waiver, not a watch entry:** `check-audit` reports a watch entry as a note and still fails a High (control: exit 1). Only a waiver tracks a High that has no fix (US-048 AT-US-048-07).
+- **Clarifies D-SEC-PR66-01 merge condition 2.** The PR-0066 record expected "a dated `audit/watched` entry", but that form cannot clear a High. The route is this waiver, and the "triaged repo-wide" half of the condition is met when PR #67 merges. The fully green lane A run on PR #66's final head is still owed by PR #66.
+- **Why the ID is not D-SEC-AUDIT-01:** the register's `DECISION_ID` (`^D-[A-Z0-9]+-\d+$`) accepts a single area segment. `D-SEC-AUDIT-01` would make the register invalid, and every PR's audit step would exit 2 (control C4; PR67-SEC-04).
+- **Why the waiver is acceptable under CLAUDE.md §5** (the "safe alternative" clause):
+  - **No fix exists.** 4.0.7 is the latest release, all 35 versions are in range, and the upstream fix PR is unmerged. npm's "fix available" is a `jest-util@26.6.2` downgrade (PR67-SEC-03).
+  - **Dev closure only.** `npm ls --omit=dev picomatch` is empty, all three lockfile tuples are `dev`, and no runtime image ships it.
+  - **Not reachable.** The exploit needs an attacker-supplied `+(*a)`-style pattern. Our globs are committed config only, and the probe in the record's §2.2 shows our patterns linear at 4,096 characters while the positive controls blow up at 24.
+  - **Every alternative is worse.** An override to an unreleased fork inside gate tooling, replacing the fixed-stack tools, and npm's downgrade were all rejected.
+- **Evidence:**
+  - Local `check-audit` matrix: R1 head 0 (waived), C1 main 1, C2 at the due date 1 (expired), C3 granted in the future 2, C4 bad ID 2, C5 watch-only 1.
+  - The test file passes 28/28; mutants M1 and M2 each turn 2 tests red.
+  - Lane A on #67 (run 44297523492) shows `check-audit: PASS` with the real npm audit and osv-scanner (`audit/waived … (npm audit + osv-scanner)`).
+  - Record simulation: S1 pass; C1-C4 fail as expected.
+- **Owed before merge:**
+  - lane B `unit` evidence (the change is outside the staleness allow-list);
+  - a code-review round (test code changed);
+  - a new `pull_request` event, so ci-gate reads this record from the merge ref.
+- **After merge:** open PRs pass the audit step at their next `pull_request` event. A re-run of an old run reuses its old merge ref and still fails.
+- **Follow-ups:**
+  - PR67-SEC-02 (LOW): the waiver is not bound to the dev closure. Add a `closure: "dev"` field enforced by `checkAudit`, or a unit test asserting that no waived package has a production tuple. Owner: devops-engineer via senior-developer, before the next waiver is added and at the latest by 2027-02-12.
+  - PR67-SEC-01: re-check on 2027-02-12, or earlier when picomatch ships a release outside the range. Then run `npm update picomatch` and remove the waiver in the same PR.
+- **Reversibility:** High. The waiver is one register entry, and it expires by itself.
+
+### D-ORCH-133 · 2026-11-18 · sdlc-orchestrator (session A) · Lane-B results; queue stopped by the memory reaper again; push hold until PR #67
+- **Results since D-ORCH-132:**
+  - PR #63 (TASK-036) PASS `20261118T1201Z_fcdb7ac`.
+  - PR #62 (TASK-287A) failed twice on infrastructure (P1001; a 30 s test timeout with unit at 1,508 s under host load). Both runs moved to `../failed-runs-orphan/`.
+  - PR #61 (TASK-028) `20261118T1106Z_d54880a` failed on a real gitleaks-full finding (rule private-key in an unpushed fc1 test). The developer built the PEM header at run time and rebuilt its three never-pushed commits to `d51b42b` (backup branch `task028-fc1-pre-gitleaks-backup`).
+  - PR #64 (TASK-035) fc1 head `7ca95f4` failed on a gitleaks-full finding in its new test plus diff branch coverage 2/3 on `open-queue.ts`. The developer amended its one never-pushed commit to `266abb6` (backup branch `task035-fc1-pre-gitleaks-backup`). All consumer.int cases passed.
+- **Ruling on the local rewrites:** CLAUDE.md forbids force pushes and history rewrites to protect shared history. Rewriting commits that were never pushed changes no shared ref, needs no force push, and was the only fix short of a baseline exception (which needs security sign-off), because the full-history scan covers the whole ancestry. Accepted, with backups kept until merge. Agents must still never rewrite pushed commits.
+- **PR #67 (picomatch waiver, D-SECAUDIT-01):** code review APPROVED_WITH_NITS (`07ba909`); security PASS_WITH_FOLLOW-UPS (`a750c97`). Needs lane-B `unit` evidence, then one push.
+- **Push hold:** until PR #67 merges, every PR's lane A fails at the audit step. So no evidence or record pushes on #61–#66 until then (D-ORCH-119 minutes budget). The first push after #67 merges gives each PR a fresh `pull_request` event, so ci-gate reads the records now on main.
+- **Queue stopped:** at about 12:27Z Claude Code's low-memory reaper stopped every queue process (3.9 GB free). The PR #61 run that had started at 12:14Z left no run dir and no containers. `.orch/docker.lock` is left in place until the restart.
+  - Pending queue, in order: PR #67 (`Shipqube-audit-picomatch`, first, because it unblocks lane A), PR #64 (`Shipqube-TASK-035-fc1`), PR #61 (`Shipqube-TASK-028-evidence`), PR #62 (`Shipqube-TASK-287A-evidence`).
+  - It restarts only on the user's go-ahead.
+- **Reversibility:** High.
+
+### D-ORCH-134 · 2026-11-18 · sdlc-orchestrator (session A) · PR #67 merged; full CI runs via close and reopen; TASK-290 decisions and PR #64/#66 routings
+- **PR #67 (picomatch waiver, D-SECAUDIT-01):** lane-B unit PASS `20261118T1242Z_1f9c81f`; evidence pushed as `9e8efc7`; full lane-A run 44309251941 MERGE-READY. Squash-merged as `591d0f5`. The dependency audit passes again on every PR.
+- **Getting a full run when no earlier run can serve as a code proof:**
+  - A docs-only push (evidence or records) runs lane A light, and ci-gate then needs a code proof: an earlier full run of the same code tree whose code-gated steps all passed.
+  - PRs whose only full runs failed for reasons outside their code (missing evidence at the first push, or the picomatch advisory) have no such run, and re-runs reuse the old merge ref.
+  - Rule: close and reopen the PR. lane-scope classifies a `reopened` event by the whole PR range (code), so the run is full on the current head. This is the designed path, not a bypass: every gate runs.
+  - When a docs push is also needed, close the PR first, push, then reopen, so the push does not spend a light run (D-ORCH-119).
+  - Applied to #67, #63 (evidence `74f4de2` pushed while closed) and #66 (records already on main, read through the merge ref).
+- **TASK-290 / PR #66:**
+  - D-TASK290-01..06 (in the PR body and the developer handoff) are accepted. 01 uses the grammar-exact close rule in place of the card's per-statement CASE depth; code-reviewer and security-analyst accepted it.
+  - New follow-up task **TASK-290-F (database-engineer, `tools/db` lock):** the tokenizer differs from the PostgreSQL lexer in three ways (a lone CR ends a `--` comment; `é$a$` is an identifier; non-ASCII dollar tags are valid); the whitespace class must be ASCII-only (R1-n1); and the `ck_`-is-CHECK JSDoc or catalog assertion (R1-n2). This covers code review R1-m1/R1-n1/R1-n2 and PR66-SEC-01. Due before the next migration or bootstrap PR after #65.
+  - PR66-SEC-02 (wording that swallowed body text "never runs") goes to principal-architect; a call-site rule or a stated limit goes to the TASK-290-F holder.
+  - Merge order: #66 before #65.
+- **PR #64 (TASK-035):** code review r2 APPROVED_WITH_NITS (`76d5e4e`); D-TASK035-07..13 accepted.
+  - R2-n5: the api producer's `Queue` must attach the same error listener (password-leak class PR64-SEC-01). Owner TASK-043. A lint rule for `new Queue(` goes to the next `lint` lock holder.
+  - R2-n3 (blank `tracestate` members) goes to TASK-043. R2-n1, R2-n2 and R2-n4 are optional, for the next touch.
+  - Push waits for the security delta round on `266abb6` (merge condition C1).
+- **Reversibility:** High.
+
+### D-SEC-PR64-02 · 2026-11-18 · security-analyst · PR #64 (TASK-035) security round 2 = PASS_WITH_FOLLOW-UPS at `266abb6`; merge condition C1 of D-SEC-PR64-01 discharged (record `docs/05-quality/security/PR-0064-TASK-035-security-review.md`, round 2 appended on main)
+- **Decision:** the delta `90ef83f..266abb6` (fix cycle 1, all 17 files unowned) closes PR64-SEC-01 (**C1 discharged**), -02, -03 and -05, and partly closes -08. There are no new Critical, High or Medium findings. The record binds to the code commit `266abb6`. The evidence-only tip `4eab6c2` (lane B `20261118T1229Z_266abb6` PASS) changes no owned path, so main's checker accepts it. Host rule: single-process Node probes on `git archive` extracts only, nothing run in the PR worktree.
+  - **PR64-SEC-01:** every worker `Queue` goes through `openQueue`, which attaches a class-only `error` listener. It is the only BullMQ `Queue` construction in `apps/*/src` and `packages/*/src`. Against an AUTH-refusing fake Valkey:
+
+    | Build | Password copies on stderr (3 s) |
+    |---|---|
+    | Head | 0 (124 class-only log lines) |
+    | Round 1 | 112 |
+    | Head without the factory listener | 113 |
+    | Head without the consumer's `Worker` listener | 12 |
+
+    The PR's test (a) kills both mutants.
+  - **PR64-SEC-02:** the head handler drives BullMQ 6.7.0's real `moveToFailed` over 17 scenarios. `failedReason` and `stacktrace` hold reason codes only, and `stacktrace` is `[]` under the production `stackTraceLimit: 0`. A refused payload's stored data is the redacted copy. The raw-rethrow mutant leaks into `failedReason`, and into `stacktrace` when `stackTraceLimit` is absent.
+  - **PR64-SEC-03:** `GET /metrics` answers 503 in about 2.02 s for every outage shape; round 1 gave no response within 6 s. After the first `ready`, the `queue` profile fails in 2 ms (drop) or at the 2 s command timeout (silent).
+  - **PR64-SEC-05:** W3C `tracestate` check, 0 differences over 300,000 fuzz strings against an independent ABNF reading, linear.
+- **New INFO:**
+  - **PR64-SEC-12:** gauge collections started before the queue connections were ever `ready` never settle. That costs about 31 KB per scrape, and each scrape releases 18 scripts on recovery. Fix: single-flight `metrics()`. Owner: TASK-039, or the next change to the worker metrics.
+  - **PR64-SEC-13:** the `openQueue` factory is the control, and test (b)'s lexical scan reaches today's code only (code review R2-n5, plus P8: subclass, parenthesised `new`, a second `Worker`). Condition on TASK-043: every `queueFor` queue comes from `openQueue` with the `queue` profile, or from an api-side factory with a class-only listener and its own refusal test. The import-level `bullmq` rule goes to the next `lint`-lock holder. This is consistent with D-ORCH-134 (R2-n5 → TASK-043).
+- **Gitleaks and D-ORCH-133:** the `7ca95f4` password-shaped literal is gone. Results:
+  - emulation of the fix diff and of the evidence diff: 0 findings;
+  - the old commit: 1 finding (positive control);
+  - lane-B `gitleaks-full`: green;
+  - remote refs: none contains `7ca95f4` or `266abb6`.
+
+  **I agree with the local-rewrite ruling**, under three conditions:
+  1. The `*-pre-gitleaks-backup` branches stay local, are never pushed, and are deleted after merge.
+  2. Before amending, check after a fetch that `git branch -r --contains <sha>` is empty.
+  3. A real secret is rotated, not only rewritten.
+- **Code review round 2 (`76d5e4e`):** R2-n2 is supported, because a profile swap silently reopens PR64-SEC-03 for dead-letter writes. On R2-n3: keep the strict `tracestate` check, and have TASK-043 drop an invalid one at the producer. R2-n4 and D-TASK035-07..13: no security objection.
+- **Remaining merge conditions (security):**
+  1. Push `4eab6c2` as is (PR #67 merged as `591d0f5`), with a full lane-A run through the D-ORCH-134 close and reopen path, every step green. ci-gate reads the record from the merge ref.
+  2. `security-integration` runs and passes.
+  3. Any later change on this PR to the 6 owned paths, `apps/worker/src/platform/{queues,health}/`, `start-worker.ts` or `packages/shared/src/queues/` needs a delta round. The orchestrator enforces this (PR64-SEC-09).
+  4. Whichever of #58 (bullmq 6.7.2) and #64 merges second re-runs `open-queue.test.ts` (a) and the PR64-SEC-02 int case in lane B.
+- **Routes unchanged:**
+  - PR64-SEC-04 → principal-architect and TASK-039;
+  - PR64-SEC-06 → TASK-047;
+  - PR64-SEC-07 → TASK-047 and TASK-039;
+  - PR64-SEC-08 (rest) and PR64-SEC-11 → TASK-039;
+  - PR64-SEC-09 → devops-engineer, activation PR; add `open-queue.ts` and `job-handler.ts`, which now carry the C1 and SEC-02 controls;
+  - PR64-SEC-10 → product-manager.
+- **Record simulation** (main's checker, simulated merge refs): 12 of 12 as expected: S1-S5 pass (S5: the round-2 head row binds alone at `266abb6`), C1-C6 fail as expected; F1: the round-1 record alone also passes, which is why C1 was held by the orchestrator.
+- **Reversibility:** High.
