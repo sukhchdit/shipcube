@@ -3549,3 +3549,47 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - R2-n3 (blank `tracestate` members) goes to TASK-043. R2-n1, R2-n2 and R2-n4 are optional, for the next touch.
   - Push waits for the security delta round on `266abb6` (merge condition C1).
 - **Reversibility:** High.
+
+### D-SEC-PR64-02 · 2026-11-18 · security-analyst · PR #64 (TASK-035) security round 2 = PASS_WITH_FOLLOW-UPS at `266abb6`; merge condition C1 of D-SEC-PR64-01 discharged (record `docs/05-quality/security/PR-0064-TASK-035-security-review.md`, round 2 appended on main)
+- **Decision:** the delta `90ef83f..266abb6` (fix cycle 1, all 17 files unowned) closes PR64-SEC-01 (**C1 discharged**), -02, -03 and -05, and partly closes -08. There are no new Critical, High or Medium findings. The record binds to the code commit `266abb6`. The evidence-only tip `4eab6c2` (lane B `20261118T1229Z_266abb6` PASS) changes no owned path, so main's checker accepts it. Host rule: single-process Node probes on `git archive` extracts only, nothing run in the PR worktree.
+  - **PR64-SEC-01:** every worker `Queue` goes through `openQueue`, which attaches a class-only `error` listener. It is the only BullMQ `Queue` construction in `apps/*/src` and `packages/*/src`. Against an AUTH-refusing fake Valkey:
+
+    | Build | Password copies on stderr (3 s) |
+    |---|---|
+    | Head | 0 (124 class-only log lines) |
+    | Round 1 | 112 |
+    | Head without the factory listener | 113 |
+    | Head without the consumer's `Worker` listener | 12 |
+
+    The PR's test (a) kills both mutants.
+  - **PR64-SEC-02:** the head handler drives BullMQ 6.7.0's real `moveToFailed` over 17 scenarios. `failedReason` and `stacktrace` hold reason codes only, and `stacktrace` is `[]` under the production `stackTraceLimit: 0`. A refused payload's stored data is the redacted copy. The raw-rethrow mutant leaks into `failedReason`, and into `stacktrace` when `stackTraceLimit` is absent.
+  - **PR64-SEC-03:** `GET /metrics` answers 503 in about 2.02 s for every outage shape; round 1 gave no response within 6 s. After the first `ready`, the `queue` profile fails in 2 ms (drop) or at the 2 s command timeout (silent).
+  - **PR64-SEC-05:** W3C `tracestate` check, 0 differences over 300,000 fuzz strings against an independent ABNF reading, linear.
+- **New INFO:**
+  - **PR64-SEC-12:** gauge collections started before the queue connections were ever `ready` never settle. That costs about 31 KB per scrape, and each scrape releases 18 scripts on recovery. Fix: single-flight `metrics()`. Owner: TASK-039, or the next change to the worker metrics.
+  - **PR64-SEC-13:** the `openQueue` factory is the control, and test (b)'s lexical scan reaches today's code only (code review R2-n5, plus P8: subclass, parenthesised `new`, a second `Worker`). Condition on TASK-043: every `queueFor` queue comes from `openQueue` with the `queue` profile, or from an api-side factory with a class-only listener and its own refusal test. The import-level `bullmq` rule goes to the next `lint`-lock holder. This is consistent with D-ORCH-134 (R2-n5 → TASK-043).
+- **Gitleaks and D-ORCH-133:** the `7ca95f4` password-shaped literal is gone. Results:
+  - emulation of the fix diff and of the evidence diff: 0 findings;
+  - the old commit: 1 finding (positive control);
+  - lane-B `gitleaks-full`: green;
+  - remote refs: none contains `7ca95f4` or `266abb6`.
+
+  **I agree with the local-rewrite ruling**, under three conditions:
+  1. The `*-pre-gitleaks-backup` branches stay local, are never pushed, and are deleted after merge.
+  2. Before amending, check after a fetch that `git branch -r --contains <sha>` is empty.
+  3. A real secret is rotated, not only rewritten.
+- **Code review round 2 (`76d5e4e`):** R2-n2 is supported, because a profile swap silently reopens PR64-SEC-03 for dead-letter writes. On R2-n3: keep the strict `tracestate` check, and have TASK-043 drop an invalid one at the producer. R2-n4 and D-TASK035-07..13: no security objection.
+- **Remaining merge conditions (security):**
+  1. Push `4eab6c2` as is (PR #67 merged as `591d0f5`), with a full lane-A run through the D-ORCH-134 close and reopen path, every step green. ci-gate reads the record from the merge ref.
+  2. `security-integration` runs and passes.
+  3. Any later change on this PR to the 6 owned paths, `apps/worker/src/platform/{queues,health}/`, `start-worker.ts` or `packages/shared/src/queues/` needs a delta round. The orchestrator enforces this (PR64-SEC-09).
+  4. Whichever of #58 (bullmq 6.7.2) and #64 merges second re-runs `open-queue.test.ts` (a) and the PR64-SEC-02 int case in lane B.
+- **Routes unchanged:**
+  - PR64-SEC-04 → principal-architect and TASK-039;
+  - PR64-SEC-06 → TASK-047;
+  - PR64-SEC-07 → TASK-047 and TASK-039;
+  - PR64-SEC-08 (rest) and PR64-SEC-11 → TASK-039;
+  - PR64-SEC-09 → devops-engineer, activation PR; add `open-queue.ts` and `job-handler.ts`, which now carry the C1 and SEC-02 controls;
+  - PR64-SEC-10 → product-manager.
+- **Record simulation** (main's checker, simulated merge refs): 12 of 12 as expected: S1-S5 pass (S5: the round-2 head row binds alone at `266abb6`), C1-C6 fail as expected; F1: the round-1 record alone also passes, which is why C1 was held by the orchestrator.
+- **Reversibility:** High.

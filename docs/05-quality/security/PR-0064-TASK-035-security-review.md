@@ -261,3 +261,180 @@ S6 matters for C1: the PR64-SEC-01 fix touches only unowned files (`runtime.ts`,
 | Field | Value |
 |---|---|
 | **Verdict** | **PASS_WITH_CONDITIONS.** 0 Critical, 0 High, 2 MEDIUM, 4 LOW, 5 INFO. C1 = PR64-SEC-01 fixed in this PR and verified by a security delta round before merge |
+
+# Round 2 (delta `90ef83f..266abb6`, fix cycle 1)
+
+| Field | Value |
+|---|---|
+| Delta | One code commit, `266abb6` `fix(worker): dead-letter id, queue error listener, sanitised failures, fail-fast queue profile (TASK-035)`: 17 files, +1027/-130, every one of them unowned (`apps/worker/src/platform/{queues,health}/**`, `apps/worker/src/start-worker.ts`, `packages/shared/src/queues/**`). It was amended locally from `7ca95f4` (never pushed; backup branch `task035-fc1-pre-gitleaks-backup`), see R2.6. The local branch tip `4eab6c2` adds only the lane-B evidence (8 files under `docs/05-quality/tests/runs/20261118T1229Z_266abb6/`). Nothing is pushed yet: `origin` and `refs/pull/64/head` are still `90ef83f` (D-ORCH-134: the push waits for this round). `origin/main` was `b651bea` when this round was written (PR #67 merged as `591d0f5`). Since the merge base `80dce9e` it changed `eslint.config.mjs`, `packages/authz/**`, `tests/generated/rbac/**`, `tests/fixtures/lint/**`, `tools/lint/**`, `tools/ci/advisory-watchlist.json`, `tools/ci/check-audit.test.ts` and docs, none of PR #64's paths. `git merge-tree --write-tree origin/main 4eab6c2` is clean |
+| Head | 266abb689cbb17e453651c9d400c8ae70500a4c9 |
+| Lane A evidence | None for this delta yet (not pushed). The record binds to the code commit `266abb6`; the evidence commit after it changes no owned path, so main's checker accepts the pushed tip `4eab6c2` (R2.9) |
+| Lane B evidence | `20261118T1229Z_266abb6`, profile `pr`, verdict PASS: api 173, catalog-c1-c14 102, integration 345 (all 14 `consumer.int.test.ts` cases), rls-cross-tenant 126, unit 6847 (2 skipped), 0 failures; merged coverage 99.38 % lines / 96.42 % branches; US-006 merged gate PASS. Both `gitleaks-full` cases (pinned image v8.30.1, full ancestry of `266abb6`) passed |
+| Owned paths changed | 6, unchanged from round 1 (main's checker in R2.9). `.github/CODEOWNERS` and `tools/ci/check-security-owned-paths.mjs` have not changed on `main` since `80dce9e` |
+| Binding items checked | D-SEC-PR64-01 condition C1 (PR64-SEC-01, tests (a) and (b) of §4); the fix-cycle follow-ups PR64-SEC-02, -03, -05 (D-ORCH-132 scope); D-ORCH-133 (local rewrite of never-pushed commits); D-TASK035-07..13; code review round 2 (`76d5e4e`, APPROVED_WITH_NITS) R2-n2, R2-n3, R2-n4, R2-n5 |
+| Reviewer / date | security-analyst, 2026-11-18, round 2 (delta). Host rule (heavy lane-B run on this machine): no npm, Jest, type-check, build or Docker. Single-process Node probes ran in the session scratchpad on `git archive` extracts of `266abb6` (head), `90ef83f` (round 1, positive control) and three mutants of the head, types stripped in transform mode, with `bullmq` 6.7.0, `ioredis` 6.0.0 and `joi` 18.3.2 from the main checkout's `node_modules` (the delta does not touch the lockfile). The fake Valkey servers listened on 127.0.0.1 only; every password was a random per-run value or a placeholder. Nothing was run in the PR worktree `Shipqube-TASK-035-fc1`, not even read-only git: SHAs were resolved in the main checkout, which shares its object store |
+
+## R2.1 Summary
+
+**C1 is discharged.** PR64-SEC-01 is fixed at `266abb6`. Every worker `Queue` is built by `openQueue` (`open-queue.ts:12-17`), which always attaches a listener that logs the error class only. Against a Valkey that refuses AUTH, the head writes 0 password copies to stderr in 3 s, with 124 class-only `worker.queue_error` lines across all 18 queue names. Under the same probe, round 1 writes 112 copies, and a mutant without the listener writes 113 (P2r2). The consumer's `Worker` listener is load-bearing too: removing it gives 12 copies, and test (a) catches that, because the consumer meets the same refusal. Across `apps/*/src` and `packages/*/src`, `open-queue.ts:13` is the only construction of a BullMQ `Queue`; the api producer takes an injected `queueFor`.
+
+**The fix-cycle follow-ups are closed:**
+- **PR64-SEC-02.** BullMQ now only sees a reason code. P4 drives the head's real handler into BullMQ 6.7.0's real `Job.prototype.moveToFailed` over 17 scenarios. `failedReason` and `stacktrace` never hold a sentinel. Under the production job options `stacktrace` is `[]`, and without them it holds only `<Name>: <CODE>`. The raw-rethrow mutant leaks into `failedReason`, and into `stacktrace` when `stackTraceLimit` is absent.
+- **PR64-SEC-03.** `GET /metrics` answers 503 after about 2.02 s in every outage shape. Round 1 never answered within 6 s. After the first `ready`, the `queue` profile fails at once (2 ms) or at the 2 s command timeout.
+- **PR64-SEC-05.** `tracestate` is validated against the W3C grammar in linear time. Over 300,000 fuzz strings it shows 0 differences from an independent character-level reading of the ABNF.
+
+**New:** two INFO items.
+- **PR64-SEC-12.** Gauge collections started before the queue connections were ever ready never settle. P6 measures about 31 KB per scrape, and on recovery they all fire at once as 18 scripts per scrape.
+- **PR64-SEC-13.** Test (b)'s lexical scan reaches today's code only (code review R2-n5), so a future `Queue`, `Worker` or producer queue must go through the factory. This becomes a TASK-043 condition.
+
+**Gitleaks:** the password-shaped literal of `7ca95f4` is gone from the rewritten commit and from the evidence commit (R2.6). I agree with D-ORCH-133.
+
+Open for the change: 0 Critical, 0 High, 0 Medium. LOW PR64-SEC-04 and -09 (routed in round 1). INFO PR64-SEC-06, -07, -08 (in part), -10, -11, -12 and -13.
+
+**Verdict: PASS_WITH_FOLLOW-UPS** at `266abb6`.
+
+## R2.2 Method
+
+1. Read `git diff 90ef83f 266abb6` in full (17 files), `git diff 7ca95f4 266abb6` (only `open-queue.test.ts`), the evidence diff `266abb6..4eab6c2` (8 files), and the head files in context: `open-queue.ts`, `job-handler.ts`, `consumer.ts`, `runtime.ts`, `connection.ts`, `errors.ts`, `dead-letter.ts`, `health/server.ts`, `start-worker.ts`, `payload-v2.ts`, `job-options.ts`, and the new and changed tests.
+2. BullMQ 6.7.0 and ioredis 6.0.0 paths the fix relies on:
+   - `QueueBase.emit` and its `console.error(err)` fallback (`queue-base.js:79-92`);
+   - `RedisConnection` blocking override (`redis-connection.js:113-121`) and `waitUntilReady` (`:180-235`). It resolves only on `ready` and rejects only on `end`, so with a never-giving-up retry strategy, `client` stays pending until the first `ready`;
+   - `Job.moveToFailed` and `updateStacktrace` (`job.js:473-523, 947-957`). `stackTraceLimit === 0` empties `stacktrace`;
+   - `Worker.handleFailed` (`worker.js:646-680`);
+   - ioredis `sendHandshake` and the RESP3 downgrade (`event_handler.js:89-200`).
+3. Probes (R2.4): P2r2 leak, P4 failed-set persistence, P5 fail-fast and `/metrics` deadline, P6 pending collections, P7 `tracestate`, P8 source-scan reach. Each has a positive control or mutant.
+4. Gitleaks: a full emulation of the v8.30.1 `generic-api-key` rule and an over-approximating all-rules scan over the added lines of `90ef83f..7ca95f4`, `90ef83f..266abb6` and `266abb6..4eab6c2`; the lane-B `gitleaks-full` JUnit; remote refs via `ls-remote` and `branch -r --contains`.
+5. Code review round 2 (`76d5e4e` on `main`), aligned in R2.7. Record simulation with main's checker (R2.9).
+
+## R2.3 Round-1 findings: status at `266abb6`
+
+| ID | Status | Evidence |
+|---|---|---|
+| PR64-SEC-01 (MEDIUM, C1) | **Closed. C1 discharged** | `openQueue` (`open-queue.ts:12-17`) is used by `runtime.ts:47-48` and by `consumer.ts:59` (the consumer-owned dead-letter queue). The consumer's `Worker` keeps its class-only listener (`consumer.ts:73`). P2r2: head 0 stderr copies, 0 stderr lines, 124 `worker.queue_error` lines whose only content field is the class (`ReplyError`), and 0 log lines with the sentinel. Controls: round 1 gives 112 copies (896 stderr lines); mutant M1 (listener removed from `openQueue`) gives 113; mutant M3 (the consumer's `Worker` listener removed) gives 12. Test (a) (`open-queue.test.ts:77-136`) asserts that the password crossed the wire, that `console.error` was never called, and that neither `console.error` nor `process.stderr.write` saw the password. Its spy serialises own properties (`command.args`), so M1 and M3 both fail it. Test (b) (`:166-179`) holds for every construction in today's tree; its reach is PR64-SEC-13. Lane B: all three `open-queue.test.ts` cases are green |
+| PR64-SEC-02 (MEDIUM) | **Closed** | `persistedFailure` (`job-handler.ts:74-79`) rethrows `TRANSIENT`, or a `NonRetryableError` named `UnrecoverableError` carrying only its reason, with `stack` = `name: message`. A refused payload's stored data is replaced by `redactValue(job.data)` (`:115-122`, after the record, before the throw). `jobOptions` sets `stackTraceLimit: 0` (`job-options.ts:45`, pinned in `packages/shared/src/queues/queues.test.ts:99`). P4 results: `failedReason` is always one of `TRANSIENT`, `VALIDATION_ERROR`, `UNRECOVERABLE` or `PAYLOAD_INVALID`. `stacktrace` is `[]` under the production options and `["<Name>: <CODE>"]` without them. 0 sentinels in `failedReason`, `stacktrace` or the thrown error across 17 scenarios: transient on attempts 1 and 5, `NonRetryableError` with text, BullMQ `UnrecoverableError` with text, a plain object named `UnrecoverableError`, a thrown string, a synchronous throw, each with and without `stackTraceLimit`, and three refused payloads. A refused payload's `token` value and its bearer value are gone from the stored data. The retry decision is unchanged: `delayed` for transient failures before the last attempt, `failed` at once for non-retryable ones. Mutant M2 (the raw error rethrown) puts the sentinels into `failedReason` in 12 of 14 processor scenarios (a thrown string has no message) and into `stacktrace` whenever `stackTraceLimit` is absent and the thrown value has a stack. So `stackTraceLimit: 0` works on its own as defence in depth. Lane B ran the int case on Valkey 8 (`consumer.int.test.ts`, "[PR64-SEC-02] … sanitised") and AT-US-009-04, which now asserts the failed-set hash. Residuals by design, accepted: the dead-letter record keeps the redacted, bounded message, so free text the redactor does not recognise survives there. In a refused payload, free text under an unrecognised key, and a key name, survive in the stored data and in the record (the redactor's scope; only a Redis writer or a producer bypass can create such a payload). If `updateData` fails, the raw data stays, the failure is logged (`worker.job_data_redact_failed`), and the refusal is still final |
+| PR64-SEC-03 (LOW) | **Closed** for `/metrics` and dead-letter writes after the first `ready`; residual is PR64-SEC-12 | Two profiles (`connection.ts:17-22`). `queue` keeps `buildValkeyOptions`' 2 s `commandTimeout` and `maxRetriesPerRequest: 1` and adds `enableOfflineQueue: false`. BullMQ does not override them for a `Queue`, because only blocking connections get `maxRetriesPerRequest: null`. `worker` (Workers only) is as before. `/metrics` races the collection against a 2 s deadline (`server.ts:23-31, 82`), and a rejection becomes a value-free 503. P5 against five fake shapes: head `GET /metrics` gives 503 in 2,024-2,030 ms for refuse, silent and closed-port, 2,026 ms for ready-then-silent and 18 ms for ready-then-drop. A direct `metrics()` call rejects in 2,016 ms (ready-then-silent, command timeout) and in 2 ms (ready-then-drop, no offline queue). Round 1: no response within 6 s in all five shapes. Before the first `ready`, `metrics()` stays pending in both rounds (BullMQ's `client` getter), which is PR64-SEC-12. The profile wiring at the call sites is not pinned (code review R2-n2, supported in R2.7) |
+| PR64-SEC-04 (LOW) | Open, unchanged | Still `removeOnFail: false`, and dead-letter records are never removed. principal-architect (ADR-0013 retention amendment), plus the TASK-039 housekeeping trim |
+| PR64-SEC-05 (LOW) | **Closed** | `isTracestate` (`payload-v2.ts:65-77`) is wired as a Joi `custom` rule (`:83`). P7 results. 24 grammar cases: 0 mismatches against both the head and the reference. 300,000 fuzz strings (half grammar-weighted, half random over 26 characters including CR, LF, NUL, U+2028, NBSP and DEL): 79,290 accepted, 0 differences. Scaling on six near-miss shapes: ratio 1.1-9.2 from 1k to 8k and 2.7-101 from 1k to 64k, which is linear; the slowest shape takes 2.2 ms at 64k. The cap is not a gate, because Joi runs the custom rule even when `max(512)` fails; still, a 1 MB value is refused in 0.5 ms. CR/LF is refused (`any.invalid`), and a well-formed list is accepted through the whole payload. Residual, accepted in round 1 as the alternative to dropping the field: the W3C value alphabet still admits free text such as `k=<local>@<domain>`. The check is stricter than W3C on empty members (code review R2-n3); see R2.7 |
+| PR64-SEC-06 (INFO) | Open, unchanged | P4 P3: an own `__proto__` key from `JSON.parse` still validates, and the processor runs. TASK-047, or the next change to `payload-v2.ts` |
+| PR64-SEC-07 (INFO) | Open, unchanged | TASK-047 (tenant context in the consumer), TASK-039 (job identity check, deadline) |
+| PR64-SEC-08 (INFO) | **Partly closed** (D-TASK035-07) | The record id is now `<job id>.dead.<attempts>` (`dead-letter.ts:24-26`), so a later final failure after an operator `retry()` writes its own record. Still open: after a `retry({ resetAttemptsMade })` the add is ignored while `worker.job_dead_lettered` is still logged, and a stalled-out job has no record. TASK-039 |
+| PR64-SEC-09 (LOW) | Open; the surface grew | The fix put the C1 control (`open-queue.ts`) and the PR64-SEC-02 control (`job-handler.ts`) into unowned files. A later PR could remove either without a security record, and the gate would stay green. The `/apps/worker/src/platform/` line proposed in §4 covers both. devops-engineer with the activation PR (PR48-SEC-02, PR61-SEC-04) |
+| PR64-SEC-10 (INFO) | Open, unchanged | product-manager |
+| PR64-SEC-11 (INFO) | Open, unchanged | The suite still runs Valkey without `--aclfile`. TASK-039 |
+
+## R2.4 Probes
+
+| Probe | What | Result |
+|---|---|---|
+| P2r2 leak | Real `createWorkerQueues` (18 `Queue`) plus `createQueueConsumer('booking')` with its own dead-letter queue, started, and 3 `metrics()` calls, against a fake RESP server answering `-WRONGPASS` to `HELLO`/`AUTH`. Child process, 3 s; fresh random sentinel per run; the parent counts copies in the child's real stdout and stderr | Head: 0 / 0 stderr lines / 124 class-only lines / 0 unhandled rejections. Round 1: 112 copies. M1 (no `openQueue` listener): 113. M3 (no `Worker` listener): 12. The password crossed the wire in every run (not vacuous) |
+| P4 failed set | Head `createJobHandler` on a fake job (`Object.create(Job.prototype)`), the thrown error fed to BullMQ's real `moveToFailed` over a capturing backend. Sinks: `failedReason`, `stacktrace`, stored data, record, log, thrown error. 17 scenarios | As in R2.3. M2 (raw rethrow) is the positive control |
+| P5 fail-fast | Head and round-1 composition with the real health server, `GET /metrics`, against refuse / silent / closed / ready-then-silent / ready-then-drop | As in R2.3. 0 unhandled rejections |
+| P6 pending | 0 / 100 / 1,000 / 2,000 `metrics()` calls before the first `ready`, heap after GC, then the fake starts accepting | Linear, about 31 KB per call (2,000 calls: 62,196 KiB; control 24 KiB). On recovery every call settles, with 18 script calls each (36,000 for 2,000): PR64-SEC-12 |
+| P7 tracestate | The head's `isTracestate` and the whole `validateJobPayload` | As in R2.3 |
+| P8 scan reach | Test (b)'s strip and regex over nine constructions | 2 of 2 controls caught. Missed: `new bullmq.Queue(`, `new Q(` (renamed import), `Reflect.construct(Queue, …)`, `new (Queue)(`, a subclass, a second `new Worker(` without a listener, and a `/*` inside a string literal that strips a later `new Queue(` (PR64-SEC-13) |
+| G gitleaks | Full `generic-api-key` emulation (regex, secret group, digit check, entropy > 3.5, rule and global allowlists; runtime-built positive control fires, negative control silent) and an all-rules over-approximation (222 rules, 220 compiled) over added lines | `90ef83f..7ca95f4`: 1 finding (the `PASSWORD` constant of `open-queue.test.ts`, 23 characters, entropy 4.23). `90ef83f..266abb6`: 0. `266abb6..4eab6c2` (13,250 added lines): 0. The over-approximation's hits are all `generic-api-key`, and the entropy, digit and allowlist steps clear them |
+
+## R2.5 New findings
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner |
+|---|---|---|---|---|---|---|
+| PR64-SEC-12 | Gauge collections started before the queue connections were ever `ready` never settle. Each scrape during a never-ready outage leaves about 31 KB and 18 queued scripts behind, and all of them fire together when Valkey comes back | INFO | CWE-400 | A04 | `runtime.ts:75`; `health/server.ts:23-31`; BullMQ `redis-connection.js:180-235` | TASK-039, or the next change to the worker's metrics (with the ADR-0017 am. 1 client alignment of the round-1 code-review note) |
+| PR64-SEC-13 | The PR64-SEC-01 control is pinned behaviourally for today's constructions only. Test (b) is lexical, so a renamed or namespace import, a subclass, `Reflect.construct`, a second `Worker`, or a producer queue built outside `apps/worker/src` would bring the stderr leak back without a red test | INFO | CWE-532 | A09 | `open-queue.test.ts:166-179`; future `queueFor` queues (TASK-043) | TASK-043 (condition); next holder of the `lint` lock (rule) |
+
+### PR64-SEC-12 (INFO): pending gauge collections before the first `ready`
+
+**Description.** `WorkerQueues.metrics()` runs 18 `getJobCounts` calls. Each awaits BullMQ's `client` getter, the connection's `initializing` promise. That promise settles only on the first `ready` (or on `end`, which the never-giving-up retry strategy never produces). The 2 s `/metrics` deadline bounds the HTTP response but not the work: every scrape during a never-ready outage, for example a worker started while Valkey refuses its rotated password, adds one pending collection. P6: about 31 KB of heap per scrape, linear (2,000 scrapes: 62 MB). On recovery, 18 scripts per scrape are sent together (36,000 for 2,000 scrapes).
+
+**Exploitability and impact.** The port is internal, and the scrape rate is the collector's. At one scrape every 15 s, an 8-hour never-ready outage costs about 60 MB and a burst of about 35,000 scripts. The readiness probe fails throughout the same outage (`readinessChecks` includes the Valkey check), so an orchestrator that replaces unready tasks bounds it; Compose does not. Availability only, internal trigger: INFO.
+
+**Remediation (code).** Single-flight the collection, so concurrent and repeated scrapes share one in-flight promise:
+
+```ts
+// runtime.ts
+let inflight: Promise<string> | undefined;
+// ...
+metrics() {
+  inflight ??= collectQueueMetrics(queues).then(renderQueueMetrics).finally(() => { inflight = undefined; });
+  return inflight;
+},
+```
+
+**Verification test.** Against a refusing fake (as `open-queue.test.ts` (a)), 100 `metrics()` calls leave one pending collection: the fake receives at most 18 scripts after it starts accepting, and every call settles with the same result.
+
+### PR64-SEC-13 (INFO): the factory is the control, and the scan only reaches today's code
+
+**Description.** Code review R2-n5 found that test (b) misses renamed and namespace imports and `Reflect.construct`, and that its `//` strip eats code after a URL string. P8 adds four more misses: `new (Queue)(`, a subclass, a second `new Worker(` (the scan does not list `Worker`, whose listener lives only in `consumer.ts`), and a `/*` inside a string. Each of these constructions reopens PR64-SEC-01 (M1 and M3 show the stderr leak for a `Queue` and a `Worker` without a listener). Today nothing escapes: `open-queue.ts:13` and `consumer.ts:64` are the only BullMQ emitter constructions in `apps/*/src` and `packages/*/src`. The first new ones are scheduled. TASK-043's outbox relay needs producer queues for `queueFor` (`producer.ts`), and code review R2-n5 notes that an api-side `Queue` would sit outside the worker scan.
+
+**Remediation.**
+- **TASK-043 (condition).** Every queue handed to `createJobProducer({ queueFor })` comes from `openQueue` with the `queue` profile. If the queue has to live under `apps/api`, it needs an equivalent factory with a class-only `error` listener and its own copy of test (a).
+- **Next `lint`-lock holder.** An import-level rule replaces the text scan. Use `no-restricted-imports` with `{ name: 'bullmq', importNames: ['Queue', 'Worker', 'QueueEvents', 'FlowProducer', 'QueueScheduler'] }` for `apps/**/src/**`, excepting `open-queue.ts` (`Queue`) and `consumer.ts` (`Worker`). Add a ban on a namespace or default import of `bullmq`.
+
+**Verification test.** Lint fixtures: a renamed import, a namespace import and a `Worker` import outside the two files are each refused, and the two files are clean. For TASK-043: the relay's queues pass the test (a) shape.
+
+## R2.6 Gitleaks and the local rewrite (D-ORCH-133)
+
+- **What lane B found.** At `7ca95f4`, `open-queue.test.ts` held the fake password as one string literal. This is a real `generic-api-key` finding for the full-history scan, although the value was never a credential. The G emulation reproduces it as 1 finding. At `266abb6` the test assembles the value from three string parts at run time (`open-queue.test.ts:19-20`). The fix diff gives 0 findings, the evidence diff gives 0, and the lane-B `gitleaks-full` cases (pinned image, ancestry of `266abb6`, 17-line baseline) passed.
+- **Never pushed.** After a fetch, no remote-tracking ref contains `7ca95f4` or `266abb6`. `ls-remote` shows the branch and `refs/pull/64/head` at `90ef83f`. No file at `4eab6c2` names `7ca95f4` or holds the old literal.
+- **Ruling: I agree with D-ORCH-133.** Amending a commit that no remote ref contains changes no shared history and needs no force push. The alternative is a `.gitleaksignore` fingerprint or an 18th baseline line, which would add a permanent suppression to the full-history gate for a fake value. That costs more review (D-SEC-PR45-01, PR25-SEC-01) and widens the gate. Three conditions apply:
+  1. The backup branch `task035-fc1-pre-gitleaks-backup` (and `task028-fc1-pre-gitleaks-backup`) stays local and is never pushed, because it carries the finding. Delete it once PR #64 merges.
+  2. Before amending, check after a fetch that `git branch -r --contains <sha>` is empty.
+  3. If a never-pushed commit carries a real secret, rewriting is not enough: the secret is rotated as well.
+
+## R2.7 Code review round 2 (`76d5e4e`, APPROVED_WITH_NITS): alignment
+
+- **R2-n2 (profile wiring unpinned): supported, with a security reason.** If `connection` and `queueConnection` were swapped, the `Queue`s would silently get the blocking profile (no timeout, offline queue). That reopens PR64-SEC-03 for dead-letter writes, while `/metrics` would still be bounded by the deadline. The one-line pins the code review suggests are enough.
+- **R2-n3 (`tracestate` stricter than W3C on empty members): keep the strict check.** If TASK-043 copies an inbound `tracestate`, the producer should drop an invalid one, as W3C says to discard on a parse failure, rather than relax the validator. Route to TASK-043.
+- **R2-n4 / D-TASK035-10 (BullMQ control-flow errors become TRANSIENT): no security objection.** It fails closed, and processors hold no token or worker handle.
+- **R2-n5 = PR64-SEC-13.** The TASK-043 half is now a security condition.
+- **D-TASK035-07..13: no security objection.**
+  - 07 partly closes PR64-SEC-08.
+  - 08 and 09 are the round-1 remediations of PR64-SEC-01 and -02.
+  - 11 is confirmed by P5.
+  - 13 (validate rather than drop `tracestate`) is within the round-1 remit.
+- **Note for the code review, not a finding.** `worker.queue_error` logs one line per refused reconnect per connection: 124 lines in 3 s in P2r2, and about 4 lines/s at the 5 s reconnect cap during a sustained refusal. Logging state changes, or the first error per queue and then a periodic count, would keep a long outage from flooding the log.
+
+## R2.8 Conditions and routing
+
+- **C1: discharged at `266abb6`.**
+- **Remaining merge conditions (security):**
+  1. Push `4eab6c2` as is (PR #67 merged as `591d0f5`, so the audit step passes again). Lane A must run in full, with every fast-lane step executed and green; under D-ORCH-134 that means the close and reopen path, because no earlier full run covers this code tree. ci-gate reads this record from the merge ref, at the first `pull_request` event (push or `reopened`) after the record is on `main`.
+  2. The `security-integration` job, due once `record_ok` is true, runs and passes.
+  3. A later commit on this PR that changes one of the 6 owned paths, or anything under `apps/worker/src/platform/{queues,health}/`, `apps/worker/src/start-worker.ts` or `packages/shared/src/queues/`, needs a security delta round. The orchestrator enforces this, because the gate sees only the 6 owned paths (PR64-SEC-09).
+  4. Lock order with Dependabot #58 (bullmq 6.7.2), per code review R2.6 item 3. Whichever of the two merges second re-runs, in lane B, `open-queue.test.ts` (a) and the PR64-SEC-02 int case. Both rest on BullMQ internals (the `QueueBase.emit` fallback, `updateStacktrace`).
+- **New routes:**
+  - PR64-SEC-12 → TASK-039, or the next change to the worker metrics.
+  - PR64-SEC-13 → TASK-043 (condition) and the next `lint`-lock holder.
+  - Code review R2-n3 → TASK-043 (drop an invalid `tracestate` at the producer).
+- **Unchanged routes:**
+  - PR64-SEC-04 → principal-architect and TASK-039.
+  - PR64-SEC-06 → TASK-047.
+  - PR64-SEC-07 → TASK-047 and TASK-039.
+  - PR64-SEC-08 (rest) → TASK-039.
+  - PR64-SEC-09 → devops-engineer, activation PR; add `open-queue.ts` and `job-handler.ts` to its list.
+  - PR64-SEC-10 → product-manager.
+  - PR64-SEC-11 → TASK-039.
+
+## R2.9 Record simulation
+
+Main's `tools/ci/check-security-owned-paths.mjs` ran on plumbing scenario commits in a `git clone --shared --no-checkout` of the main repository, with a sparse checkout of `.github/`, `docs/05-quality/security/` and `tools/ci/`. Each run used `--pr 64 --json`, against `origin/main` `b651bea`. The work tree was the simulated merge ref ("main + this record" merged with the PR tip, parents in GitHub's order) and `--head 4eab6c2` unless noted. The record had exactly two table rows whose first cell starts with `Head`: round 1 (`90ef83f`) and round 2 (`266abb6`, full SHA). Its last `Verdict` row is this round's. Nothing was written to the main repository or the PR worktree, and the clone was removed afterwards.
+
+| Scenario | Root / base / head | Expected | Result |
+|---|---|---|---|
+| S1 this record on `main`; merge ref with the tip | merge ref / `main` tip / `4eab6c2` | pass | **pass**, 6 owned (reported at `90ef83f`, the first head row that binds) |
+| S2 as S1, base = merge base `80dce9e` | merge ref / `80dce9e` / `4eab6c2` | pass | **pass** |
+| S3 as S1, head = the code commit (evidence not pushed) | merge ref / `main` tip / `266abb6` | pass | **pass** |
+| S4 S1 plus a docs-only commit after the tip | merge ref / `main` tip / docs commit | pass | **pass** |
+| S5 the round-2 head row alone (round-1 row renamed) | merge ref / `main` tip / `4eab6c2` | pass at `266abb6` | **pass at `266abb6`** |
+| C1 control: no PR-0064 record on `main` | | missing | missing ("no record named PR-0064-*.md") |
+| C2 control: this round's Verdict set to FAIL | | missing | missing ("verdict FAIL is not one of …") |
+| C3 control: `--pr 65` | | missing | missing |
+| C4 control: an owned path (`producer.ts`) changed after the tip | | missing | missing (both head rows: "… changed after it") |
+| C5 control: the round-2 head row alone, naming the never-pushed `7ca95f4` | | missing | missing ("names no commit of this PR") |
+| C6 control: the round-2 head row alone, owned change after the tip | | missing | missing |
+| F1 fact: the round-1 record only, as on `main` before this round | | pass at `90ef83f` | **pass at `90ef83f`** |
+
+12 of 12 as expected. The candidate is LF (0 CR bytes) and has 2 table rows whose first cell starts with `Head`; its last line is this round's `Verdict` row. F1 is why C1 had to be held by the orchestrator: the fix touched only unowned paths, so the round-1 record alone already satisfies the gate (PR64-SEC-09). S5 shows that the round-2 row binds on its own. The record counts from the first `pull_request` event after it is on `main` (the push of `4eab6c2`, or the `reopened` event of D-ORCH-134); a re-run of an older lane-A run reuses its old merge ref and does not see it.
+
+| Field | Value |
+|---|---|
+| **Verdict** | **PASS_WITH_FOLLOW-UPS.** Round 2 at `266abb6`: C1 (PR64-SEC-01) is discharged. PR64-SEC-02, -03 and -05 are closed under probing with positive controls, and PR64-SEC-08 is partly closed. 0 Critical, 0 High, 0 Medium open for the change. LOW PR64-SEC-04 and -09 and INFO PR64-SEC-06, -07, -08 (rest), -10, -11, -12 and -13 are routed. The evidence-only tip `4eab6c2` keeps the binding |
