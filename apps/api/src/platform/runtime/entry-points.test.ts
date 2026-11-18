@@ -1,10 +1,10 @@
 /**
  * Boot order of the two entry points (D-ARCH-104 (1)-(3), PR11-SEC-09 items 1 and 3; TASK-020 part 020-B), read as
- * source text: the worker's main.ts and the API's start-api.ts (its composition since D-ORCH-073; the API's main.ts
- * only calls startApi, pinned below). Each calls createRuntimeServices exactly once (one composition, no second
+ * source text: the worker's start-worker.ts and the API's start-api.ts (their compositions since D-ORCH-073 and
+ * D-ARCH-136 / TASK-035; each main.ts only starts its composition, pinned below). Each calls createRuntimeServices exactly once (one composition, no second
  * runner, no Prisma class passed in), awaits startup() (the fresh-connection probe is the first pool query) before it
- * listens or takes work, and the API hands the runtime's runner to createApp. start-api.test.ts runs the API sequence
- * with fakes.
+ * listens or takes work, and the API hands the runtime's runner to createApp. start-api.test.ts and start-worker.test.ts
+ * run the sequences with fakes.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ import { describe, expect, it } from '@jest/globals';
 
 const APPS = join(import.meta.dirname, '..', '..', '..', '..');
 /** The module that composes each process. */
-const COMPOSITION = { api: 'start-api.ts', worker: 'main.ts' } as const;
+const COMPOSITION = { api: 'start-api.ts', worker: 'start-worker.ts' } as const;
 const source = (app: 'api' | 'worker'): string => readFileSync(join(APPS, app, 'src', COMPOSITION[app]), 'utf8');
 const NO_PRISMA = /PrismaClient|@platform\/prisma|db\/generated\.js/u;
 
@@ -31,7 +31,7 @@ function only(text: string, needle: string): number {
 describe('[D-ARCH-104] entry-point boot order', () => {
   it.each([
     ['api', "deps.createRuntimeServices(config, 'api', log, secrets)", 'app.listen('],
-    ['worker', "createRuntimeServices(config, 'worker', log, secrets)", 'server.listen('],
+    ['worker', "deps.createRuntimeServices(config, 'worker', log, secrets)", 'server.listen('],
   ] as const)('%s: one composition, startup() awaited before it listens or takes work', (app, composition, listen) => {
     const text = source(app);
     const composed = only(text, composition);
@@ -43,11 +43,29 @@ describe('[D-ARCH-104] entry-point boot order', () => {
     expect(text).not.toMatch(NO_PRISMA);
   });
 
-  it('api: main.ts only starts startApi with the production process (no top-level await, no overrides)', () => {
-    const text = readFileSync(join(APPS, 'api', 'src', 'main.ts'), 'utf8');
-    const code = text.split('\n').filter((line) => line.trim() !== '' && !line.startsWith('//'));
-    expect(code).toEqual(["import { raiseStartupError, startApi } from './start-api.js';", 'startApi().catch(raiseStartupError);']);
-    expect(text).not.toMatch(NO_PRISMA);
+  it.each([
+    ['api', "import { raiseStartupError, startApi } from './start-api.js';", 'startApi().catch(raiseStartupError);'],
+    ['worker', "import { raiseStartupError, startWorker } from './start-worker.js';", 'startWorker().catch(raiseStartupError);'],
+  ] as const)(
+    '%s: main.ts only starts its composition with the production process (no top-level await, no overrides)',
+    (app, imported, started) => {
+      const text = readFileSync(join(APPS, app, 'src', 'main.ts'), 'utf8');
+      const code = text.split('\n').filter((line) => line.trim() !== '' && !line.startsWith('//'));
+      expect(code).toEqual([imported, started]);
+      expect(text).not.toMatch(NO_PRISMA);
+    },
+  );
+
+  it('worker: the consumers start taking jobs only after startup() and before the health server listens (TASK-035)', () => {
+    const text = source('worker');
+    const built = only(text, 'const queues = deps.createQueues(');
+    const started = only(text, 'await services.startup();');
+    const consuming = only(text, 'queues.start();');
+    expect([built < started, started < consuming, consuming < only(text, 'server.listen(')]).toEqual([true, true, true]);
+    // The shutdown drain waits for the active jobs before the listener closes; the queues close with the resources.
+    const drained = only(text, 'await queues.drain();');
+    expect(drained).toBeLessThan(only(text, 'server.close('));
+    only(text, "{ name: 'queues', close: () => queues.close() }");
   });
 
   it('api: createApp receives the runtime runner (the tx slot of every tenant route)', () => {
