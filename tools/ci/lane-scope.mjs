@@ -52,9 +52,10 @@
  *                   openapi-breaking steps concluded success; else empty. Step conclusions, never the job colour.
  *   security_proof  `<run_id>:<sha>` of such a run whose `security-integration` job concluded success; else empty.
  *   security_integration_due  pull_request && security_paths && record_ok && security_proof == ''.
- *   A docs push of a PR with code changes whose proof candidates were all voided by the tested base runs the full lane
- *   (code_changed=true, mode=full; push_scope stays docs) instead of ending BLOCKED (D-TASK286-06a option, TASK-287;
- *   SPK-07 section 6.1); with no candidate at all (pending or red code) it stays light and BLOCKED.
+ *   A docs push of a PR with code changes runs the full lane (code_changed=true, mode=full; push_scope stays docs)
+ *   instead of ending BLOCKED only when no bound run on its code survived the tested-base check and at least one voided
+ *   run would have been a proof (D-TASK286-06a option, TASK-287; PR #62 code review R1-m1; SPK-07 section 6.1); with no
+ *   candidate, a red candidate or a newer non-voided run it stays light and BLOCKED.
  *   Outputs add `lint_controls` (LINT_CONTROL_PATHS over the PR range; an unknown range is true), `tools_ref` and
  *   `classification` (CLASSIFICATION_KEYS in order, `key=value`, `,`).
  *   --env <file>  appends CODE and LINT_CONTROLS (fast-lane's step conditions) to $GITHUB_ENV.
@@ -693,12 +694,14 @@ export function runBindingProblem(run, binding) {
  * Proof lookup over the code-identical set (D-ARCH-126/127), bound to this pull request (R2-M1, PR46-SEC-13) and, in
  * stage 2, to the tested base (PR46-SEC-16): `baseChangedAt` is the time (ms) of the tested base's newest first-parent
  * commit on a proofBasePath (0: none); a run created at or before it is no proof; null (unknown) gives no proof at all;
- * undefined (stage 1) does not check.
+ * undefined (unit callers without a tested base) does not check.
  * @param {{ api: Api, repo: string, identical: readonly string[], steps: ProofSteps, currentRunId?: string, pr?: string,
  *   headRef?: string, baseChangedAt?: number | null | undefined, lintControls?: boolean }} input
  *   lintControls: stage 2, the PR range touches a lint control, so a proof's LINT_CONTROLS steps must have succeeded
- * @returns {{ codeProof: string, securityProof: string, notes: string[], voidedByBase: boolean }} voidedByBase: a run of
- *   this PR was refused only because the tested base changed a lane A input since (PR46-SEC-16)
+ * @returns {{ codeProof: string, securityProof: string, notes: string[], voidedByBase: boolean }} voidedByBase (PR #62
+ *   code review R1-m1): no proof was found, no bound run of this PR on the identical code was left once the tested-base
+ *   check (PR46-SEC-16) had voided the older ones, and at least one voided run WOULD have been a proof (its fast-lane and
+ *   scans steps passed); a red or a newer non-voided run leaves it false, so such a docs push stays light and BLOCKED
  */
 export function lookupProofs({
   api,
@@ -716,9 +719,18 @@ export function lookupProofs({
   let codeProof = '';
   let securityProof = '';
   let calls = 0;
-  let voidedByBase = false;
+  /** Bound runs of this PR refused only by the tested-base check, newest first after the loop. */
+  /** @type {{ run: Record<string, any>, sha: string }[]} */
+  const voided = [];
+  /** A bound, completed run of this PR on the identical code that the tested-base check did not void. */
+  let nonVoidedSeen = false;
   if (baseChangedAt === null)
-    return { codeProof, securityProof, notes: ['no proof (the tested base history is unreadable, fail closed)'], voidedByBase };
+    return {
+      codeProof,
+      securityProof,
+      notes: ['no proof (the tested base history is unreadable, fail closed)'],
+      voidedByBase: false,
+    };
   const call = (/** @type {string} */ path) => {
     calls += 1;
     if (calls > MAX_API_CALLS) return /** @type {ApiResult} */ ({ ok: false, problem: `more than ${String(MAX_API_CALLS)} API calls` });
@@ -758,12 +770,13 @@ export function lookupProofs({
       if (problem !== '')
         notes.push(`run ${String(run.id)} (${sha.slice(0, 7)}) is not a run of this PR into ${PROOF_BASE_REF}: ${problem}`);
       else if (baseChangedAt !== undefined && Date.parse(String(run.created_at)) <= baseChangedAt) {
-        voidedByBase = true;
+        voided.push({ run, sha });
         notes.push(
           `run ${String(run.id)} (${sha.slice(0, 7)}) tested an older base: the tested base changed a lane A input since (PR46-SEC-16)`,
         );
       } else candidates.push(run);
     }
+    if (candidates.length > 0) nonVoidedSeen = true;
     candidates.sort((a, b) => Number(b.id) - Number(a.id));
     for (const run of candidates) {
       if (codeProof !== '' && securityProof !== '') break;
@@ -783,7 +796,31 @@ export function lookupProofs({
       if (securityProof === '' && securityIntegrationPassed(jobs.json)) securityProof = `${String(run.id)}:${sha}`;
     }
   }
-  return { codeProof, securityProof, notes, voidedByBase: voidedByBase && codeProof === '' };
+  // R1-m1: only a voided run that would have been a proof makes the full run the cheaper path (SPK-07 section 6.1).
+  let voidedByBase = false;
+  if (codeProof === '' && !nonVoidedSeen && voided.length > 0) {
+    voided.sort((a, b) => Number(b.run.id) - Number(a.run.id));
+    for (const { run, sha } of voided) {
+      const jobs = call(`repos/${repo}/actions/runs/${String(run.id)}/jobs?per_page=100`);
+      if (!jobs.ok) {
+        notes.push(`jobs of voided run ${String(run.id)}: ${jobs.problem}`);
+        if (calls > MAX_API_CALLS) break;
+        continue;
+      }
+      const problems = [
+        ...fastLaneProblems(jobs.json, steps.fastLane, lintControls),
+        ...scansProblems(jobs.json, steps.scans, steps.scansJob),
+      ];
+      if (problems.length === 0) {
+        voidedByBase = true;
+        break;
+      }
+      notes.push(
+        `voided run ${String(run.id)} (${sha.slice(0, 7)}) would not have been a proof either: ${problems.slice(0, 3).join('; ')}`,
+      );
+    }
+  }
+  return { codeProof, securityProof, notes, voidedByBase };
 }
 
 /** Synchronous sleep (the CLI is synchronous; retries are rare and short). */

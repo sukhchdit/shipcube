@@ -124,10 +124,10 @@ describe('[TASK-286] the stage-2 pins kill every mutant (PR46-SEC-11/-12/-15/-17
   const tooling = 'tools_ref=$(git rev-parse --verify --quiet "HEAD^1^{commit}" || true)';
   const ciGateEnvFast = 'FAST_LANE_CLASSIFICATION: ${{ needs.fast-lane.outputs.classification }}';
   /** The openings of the two tested-base blocks (fast-lane's, ci-gate's), which make each mutant unambiguous. */
-  const fastLaneOpen =
-    '          set -euo pipefail\n          tools_ref=""\n          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then\n';
-  const ciGateOpen =
-    '          mkdir -p "$gates/base" "$gates/head"\n          tools_ref=""\n          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then\n';
+  /** The event-commit check both tooling steps carry since TASK-287 part 287-B (PR59-SEC-01, V2). */
+  const eventCheckLines = CHECKOUT_IS_EVENT_SHA.map((line) => `          ${line}\n`).join('');
+  const fastLaneOpen = `          set -euo pipefail\n${eventCheckLines}          tools_ref=""\n          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then\n`;
+  const ciGateOpen = `          mkdir -p "$gates/base" "$gates/head"\n${eventCheckLines}          tools_ref=""\n          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then\n`;
   const headCheck = `            ${tooling}\n            merged=$(git rev-parse --verify --quiet "HEAD^2^{commit}" || true)\n            if [ -z "$tools_ref" ] || [ "$merged" != "$RANGE_HEAD" ] || ! git merge-base`;
   it.each<[string, string, string, string]>([
     // PR46-SEC-17: the tested base.
@@ -699,7 +699,7 @@ describe('[PR #55 r2] PR55-SEC-11, R2-n1, R2-n2, R2-n4: the follow-ups taken int
   });
 });
 
-describe('[PR59-SEC-01] [TASK-287] checkout, setup-node and cache inputs are pinned; the V2 tested-base check is accepted (policy first)', () => {
+describe('[PR59-SEC-01] [PR62-SEC-02] [TASK-287] checkout, setup-node and cache inputs are pinned; the tooling steps carry the event-commit check (V2 only)', () => {
   const pin = (name: string, action: string) => `      - name: ${name}\n        uses: ${action}`;
   const fastCheckout = pin('Checkout (full history for the base ref and the PR commit range)', 'actions/checkout@');
   const siCheckout = pin('Checkout (full history for the tested-base manifests)', 'actions/checkout@');
@@ -713,23 +713,29 @@ describe('[PR59-SEC-01] [TASK-287] checkout, setup-node and cache inputs are pin
     return stage2.slice(start, end);
   };
   const eventCheck = CHECKOUT_IS_EVENT_SHA.map((line) => `          ${line}`).join('\n');
-  const fastOpen = '          set -euo pipefail\n          tools_ref=""\n';
-  const gateOpen = '          mkdir -p "$gates/base" "$gates/head"\n          tools_ref=""\n';
-  const v2 = stage2
-    .replace(fastOpen, () => `          set -euo pipefail\n${eventCheck}\n          tools_ref=""\n`)
-    .replace(gateOpen, () => `          mkdir -p "$gates/base" "$gates/head"\n${eventCheck}\n          tools_ref=""\n`);
+  const fastV2 = `          set -euo pipefail\n${eventCheck}\n          tools_ref=""\n`;
+  const gateV2 = `          mkdir -p "$gates/base" "$gates/head"\n${eventCheck}\n          tools_ref=""\n`;
 
-  it('V1 (the live ci.yml) and V2 (the event-commit check in both tooling steps) both pass; nothing else does', () => {
-    expect(stage2.split(fastOpen)).toHaveLength(2);
-    expect(stage2.split(gateOpen)).toHaveLength(2);
-    expect(v2).not.toBe(stage2);
+  it('the committed ci.yml carries V2 in both tooling steps and passes; V1 (no check) in either step is refused (PR62-SEC-02)', () => {
+    expect(stage2.split(fastV2)).toHaveLength(2);
+    expect(stage2.split(gateV2)).toHaveLength(2);
     expect(findingsOf(stage2)).toEqual([]);
-    expect(findingsOf(v2)).toEqual([]);
     expect(FAST_LANE_TOOLING_SCRIPT_V2.slice(1, 1 + CHECKOUT_IS_EVENT_SHA.length)).toEqual([...CHECKOUT_IS_EVENT_SHA]);
     expect(CI_GATE_TOOLING_SCRIPT_TESTED_BASE_V2).toHaveLength(CI_GATE_TOOLING_SCRIPT_TESTED_BASE.length + CHECKOUT_IS_EVENT_SHA.length);
-    // A V2 whose check does not fail the step, or a mixture of the two halves, is neither V1 nor V2.
-    const exitZero = v2.split('  exit 1\n          fi\n          tools_ref=""').join('  exit 0\n          fi\n          tools_ref=""');
-    expect(exitZero).not.toBe(v2);
+    const fastV1 = stage2.replace(fastV2, () => '          set -euo pipefail\n          tools_ref=""\n');
+    const gateV1 = stage2.replace(gateV2, () => '          mkdir -p "$gates/base" "$gates/head"\n          tools_ref=""\n');
+    for (const [label, text, job] of [
+      ['fast-lane V1', fastV1, 'gate tooling'],
+      ['ci-gate V1', gateV1, 'ci-gate tooling'],
+    ] as const) {
+      expect([label, findingsOf(text)]).toEqual([
+        label,
+        [expect.stringMatching(new RegExp(`^required-gates: ci\\.yml ${job} gate step: the run: must be exactly the pinned script`, 'u'))],
+      ]);
+    }
+    // A V2 whose check does not fail the step is refused too.
+    const exitZero = stage2.split('  exit 1\n          fi\n          tools_ref=""').join('  exit 0\n          fi\n          tools_ref=""');
+    expect(exitZero).not.toBe(stage2);
     expect(findingsOf(exitZero).some((finding) => finding.startsWith('required-gates:'))).toBe(true);
   });
 
@@ -742,6 +748,11 @@ describe('[PR59-SEC-01] [TASK-287] checkout, setup-node and cache inputs are pin
     ['ci-gate checkout repository: another repository', gateCheckout, '          repository: someone/else\n'],
     ['security-integration checkout persist-credentials: true', siCheckout, ''],
     ['fast-lane checkout fetch-depth: 1', fastCheckout, ''],
+    ['G3 fast-lane checkout repository: another repository', fastCheckout, '          repository: someone/else\n'],
+    ['G6 fast-lane checkout path: a subdirectory', fastCheckout, '          path: sub\n'],
+    ['security-integration checkout submodules: recursive', siCheckout, '          submodules: recursive\n'],
+    ['G7 security-integration checkout repository: another repository', siCheckout, '          repository: someone/else\n'],
+    ['ci-gate checkout path: a subdirectory', gateCheckout, '          path: sub\n'],
   ])('%s', (title, head, extra) => {
     const original = block(head, checkoutWith);
     let mutated = original;
@@ -786,34 +797,33 @@ describe('[PR59-SEC-01] [TASK-287] checkout, setup-node and cache inputs are pin
   });
 });
 
-describe('[PR55-SEC-05] [TASK-287 part 287-A] the aggregation may carry fast-lane separate outputs, each exactly (policy first)', () => {
-  const anchor = '          CLASSIFICATION: ${{ steps.lane-scope.outputs.classification }}\n';
-  const withOutputs = (entries: Record<string, string>) =>
-    stage2.replace(
-      anchor,
-      () =>
-        anchor +
-        Object.entries(entries)
-          .map(([key, value]) => `          ${key}: ${value}\n`)
-          .join(''),
-    );
+describe('[PR55-SEC-05] [PR62-SEC-02] [TASK-287 part 287-B] the aggregation carries the four fast-lane outputs, each exactly', () => {
+  const entries = Object.entries(CI_GATE_ENV_FAST_LANE_OUTPUTS).map(([key, value]) => `          ${key}: ${value}\n`);
 
-  it('without them (the live ci.yml) and with all four exact entries the policy passes', () => {
-    expect(stage2.split(anchor)).toHaveLength(2);
-    expect(findingsOf(withOutputs(CI_GATE_ENV_FAST_LANE_OUTPUTS))).toEqual([]);
+  it('the committed ci.yml carries all four with their exact values and passes', () => {
     expect(Object.keys(CI_GATE_ENV_FAST_LANE_OUTPUTS)).toEqual([
       'FAST_LANE_MODE',
       'FAST_LANE_CODE_PROOF',
       'FAST_LANE_SECURITY_INTEGRATION_DUE',
       'FAST_LANE_TOOLS_REF',
     ]);
+    for (const entry of entries) expect(stage2.split(entry)).toHaveLength(2);
+    expect(findingsOf(stage2)).toEqual([]);
+  });
+
+  it.each(Object.keys(CI_GATE_ENV_FAST_LANE_OUTPUTS))('dropping %s is a finding (required since 287-B)', (key) => {
+    const entry = entries.find((line) => line.startsWith(`          ${key}:`)) ?? '';
+    expect(findingsOf(stage2.replace(entry, ''))).toEqual([
+      `required-gates: ci.yml ci-gate aggregate gate step must set env ${key}: ${String((CI_GATE_ENV_FAST_LANE_OUTPUTS as Record<string, string>)[key])}`,
+    ]);
   });
 
   it('a wrong value (an output of another step or job) and an unlisted entry are findings', () => {
-    expect(findingsOf(withOutputs({ FAST_LANE_TOOLS_REF: '${{ steps.lane-scope.outputs.tools_ref }}' }))).toEqual([
-      'required-gates: ci.yml ci-gate aggregate gate step env FAST_LANE_TOOLS_REF must be ${{ needs.fast-lane.outputs.tools_ref }}',
+    const tools = entries.find((line) => line.startsWith('          FAST_LANE_TOOLS_REF:')) ?? '';
+    expect(findingsOf(stage2.replace(tools, '          FAST_LANE_TOOLS_REF: ${{ steps.lane-scope.outputs.tools_ref }}\n'))).toEqual([
+      'required-gates: ci.yml ci-gate aggregate gate step must set env FAST_LANE_TOOLS_REF: ${{ needs.fast-lane.outputs.tools_ref }}',
     ]);
-    expect(findingsOf(withOutputs({ FAST_LANE_EXTRA: '${{ needs.fast-lane.outputs.mode }}' }))).toEqual([
+    expect(findingsOf(stage2.replace(tools, `${tools}          FAST_LANE_EXTRA: \${{ needs.fast-lane.outputs.mode }}\n`))).toEqual([
       expect.stringContaining('required-gates: ci.yml ci-gate aggregate gate step must set no env but'),
     ]);
   });

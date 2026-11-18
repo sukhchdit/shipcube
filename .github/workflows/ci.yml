@@ -29,7 +29,7 @@
 #   (SEC-P3-31). A checker the tested base does not have yet is bootstrapped from the head's git objects and the job
 #   summary says so. A checker's CLI therefore changes in two steps: first accept the new argument, then use it.
 # - Every action is pinned by commit SHA and every container tool by image digest; tools/ci/check-workflow-policy.mjs
-#   enforces this file's rules for every workflow, and CI_REQUIRED_GATES keeps the gate steps below in place.
+#   enforces this file's rules for every workflow, and CI_REQUIRED_GATES_STAGE_2 keeps the gate steps below in place.
 name: ci
 
 on:
@@ -112,13 +112,18 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      # PR46-SEC-17 / PR46-SEC-12 (pinned line by line, FAST_LANE_TOOLING_SCRIPT): on pull requests the tested base is
-      # TOOLS_REF = HEAD^1, the first parent of GitHub's test merge (HEAD^2 must be the PR head and RANGE_BASE an ancestor
-      # of TOOLS_REF, else fail closed); on a push it is the pushed range's base. Every GATE_* location below comes only
+      # PR46-SEC-17 / PR46-SEC-12 (pinned line by line, FAST_LANE_TOOLING_SCRIPT_V2): the checkout must be the event commit
+      # GITHUB_SHA (PR59-SEC-01, TASK-287); on pull requests the tested base is TOOLS_REF = HEAD^1, the first parent of
+      # GitHub's test merge (HEAD^2 must be the PR head and RANGE_BASE an ancestor of TOOLS_REF, else fail closed); on a
+      # push it is the pushed range's base. Every GATE_* location below comes only
       # from this step; a tool the tested base lacks is extracted from the head's git objects, never the working tree.
       - name: Gate tooling from the tested base (SEC-P3-31, PR46-SEC-17)
         run: |
           set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            echo "::error title=Tested base::the checkout is not the event commit GITHUB_SHA (fail closed, PR59-SEC-01)"
+            exit 1
+          fi
           tools_ref=""
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             tools_ref=$(git rev-parse --verify --quiet "HEAD^1^{commit}" || true)
@@ -463,8 +468,9 @@ jobs:
   # Isolated scans folded into the gate (D-ARCH-128; RR-6; PR10-SEC-02): a fresh runner that never runs npm,
   # node_modules or a workspace script, so nothing the PR controls executes before these gates or reaches the token.
   # Gate scripts and their configuration come from the tested base (TOOLS_REF = HEAD^1 on pull requests, PR46-SEC-17;
-  # pinned line by line, PR46-SEC-12); while the tested base lacks one (bootstrap) the head copy is extracted with
-  # `git archive` and the summary says so. Every base-ref deciding gate runs on every exact head: gitleaks and the
+  # pinned line by line, PR46-SEC-12; the checkout must be GITHUB_SHA, PR59-SEC-01); while the tested base lacks one
+  # (bootstrap) the head copy is extracted with `git archive` and the summary says so. Every base-ref deciding gate
+  # runs on every exact head: gitleaks and the
   # security record unconditionally; Semgrep and oasdiff unless this is a docs-only push with a code proof (their
   # success is part of that proof). The lane-scope step recomputes the classification and re-reads the proofs with the
   # binding (PR46-SEC-12); the aggregation (last, unconditional) evaluates the gate rules and is red when fast-lane's
@@ -503,6 +509,10 @@ jobs:
           set -euo pipefail
           gates="$RUNNER_TEMP/gates"
           mkdir -p "$gates/base" "$gates/head"
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            echo "::error title=Tested base::the checkout is not the event commit GITHUB_SHA (fail closed, PR59-SEC-01)"
+            exit 1
+          fi
           tools_ref=""
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             tools_ref=$(git rev-parse --verify --quiet "HEAD^1^{commit}" || true)
@@ -615,4 +625,8 @@ jobs:
           FAST_LANE_CLASSIFICATION: ${{ needs.fast-lane.outputs.classification }}
           SECURITY_INTEGRATION: ${{ needs.security-integration.result }}
           CLASSIFICATION: ${{ steps.lane-scope.outputs.classification }}
+          FAST_LANE_MODE: ${{ needs.fast-lane.outputs.mode }}
+          FAST_LANE_CODE_PROOF: ${{ needs.fast-lane.outputs.code_proof }}
+          FAST_LANE_SECURITY_INTEGRATION_DUE: ${{ needs.fast-lane.outputs.security_integration_due }}
+          FAST_LANE_TOOLS_REF: ${{ needs.fast-lane.outputs.tools_ref }}
         run: node "${GATE_LANE_SCOPE:?}" --gate --root "$GITHUB_WORKSPACE" --summary "$GITHUB_STEP_SUMMARY"
