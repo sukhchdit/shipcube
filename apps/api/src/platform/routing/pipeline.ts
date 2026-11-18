@@ -8,6 +8,7 @@
  * a router, and it registers every mounted route (route-registry.ts), so the route-metadata test can prove that no
  * handler bypassed `defineRoute`.
  */
+import type { AuditPrivacy } from '@platform/audit';
 import { findRouteBindingViolations, type RouteBindingViolation } from '@platform/authz';
 import type { Config } from '@platform/config';
 import type { NextFunction, Request, RequestHandler, Response, Router } from 'express';
@@ -56,16 +57,33 @@ export interface PipelineOptions extends Omit<ExecuteOptions, 'audit'> {
   readonly auditConfig?: Pick<Config, 'DB_AUDIT_LOCK_TIMEOUT_MS'>;
   /** Where the capture reports an entry it could not write (class-only fields; createApp passes its logger). */
   readonly auditLog?: AuditCaptureLog;
+  /**
+   * The vault tokeniser, the `ip_hash` index and the user-agent parser (`createAuditPrivacy`, startApi; D-SEC-PR56-01
+   * condition 1, D-ARCH-141; TASK-028). Without them the capture refuses every audited route and every route that can
+   * answer 403 at mount (D-TASK029-21, the backstop).
+   */
+  readonly auditPrivacy?: AuditPrivacy;
 }
+
+/** The capture options that carry personal values: the writer's tokeniser and IP index, and the parser. */
+const privacyOptions = (privacy: AuditPrivacy | undefined) =>
+  privacy === undefined
+    ? {}
+    : { writer: { tokeniser: privacy.tokeniser, ipIndex: privacy.ipIndex }, parseUserAgent: privacy.parseUserAgent };
 
 /** The production slots; `execute` needs the runtime's tenant-transaction runner, the capture the audit config. */
 export function defaultPipelineSlots(options: PipelineOptions): PipelineSlots {
-  const { auditConfig, auditLog, ...execute } = options;
+  const { auditConfig, auditLog, auditPrivacy, ...execute } = options;
   const capture =
     options.capture ??
     (auditConfig === undefined
       ? undefined
-      : createAuditCapture({ config: auditConfig, tenantTx: options.tenantTx, ...(auditLog === undefined ? {} : { log: auditLog }) }));
+      : createAuditCapture({
+          config: auditConfig,
+          tenantTx: options.tenantTx,
+          ...(auditLog === undefined ? {} : { log: auditLog }),
+          ...privacyOptions(auditPrivacy),
+        }));
   const withCapture = capture === undefined ? {} : { capture };
   return {
     authenticate,

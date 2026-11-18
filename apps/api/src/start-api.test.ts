@@ -3,6 +3,7 @@
  * for the process seams: configuration, stdout, process.exit, the process events, the runtime services, createApp and
  * the listener. The real logger, flush-before-exit, process error handlers, afterCommit queue and shutdown sequence run.
  */
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +20,7 @@ import { createRuntimeServices, type RuntimeServices } from './platform/runtime/
 import { DRAIN_TIMEOUT_MS } from './platform/runtime/shutdown.js';
 import {
   API_PROCESS,
+  auditPrivacyFrom,
   raiseStartupError,
   SHUTDOWN_SIGNALS,
   startApi,
@@ -413,5 +415,47 @@ describe('[D-ORCH-073] API_PROCESS: main.ts runs with the real process', () => {
     } finally {
       exit.mockRestore();
     }
+  });
+});
+
+/** A configuration key version (the shape `@platform/config` parses), with fresh random material. */
+const keyVersion = (keyId: string, bytes = 32) => {
+  const material = new Uint8Array(randomBytes(bytes));
+  return { keyId, purpose: keyId.replace(/-v\d+$/, ''), version: 1, localOnly: false, material: { reveal: () => material.slice() } };
+};
+const AUDIT_KEYS = {
+  AUDIT_VAULT_KEY: keyVersion('vault-v1'),
+  AUDIT_VAULT_HMAC_KEY: keyVersion('vault-hmac-v1'),
+  AUDIT_INDEX_KEY: keyVersion('audit-index-v1'),
+};
+
+describe('[D-SEC-PR56-01] [D-ARCH-141] startApi composes the audit privacy dependencies (TASK-028)', () => {
+  it('passes the vault tokeniser, the IP index and the user-agent parser to createApp with the audit config', async () => {
+    const h = harness({ config: AUDIT_KEYS });
+    await startApi(h.deps);
+    const composed = h.composed();
+    expect(composed.auditConfig).toBe(h.config);
+    expect(typeof composed.auditPrivacy?.tokeniser.tokenise).toBe('function');
+    expect(composed.auditPrivacy?.ipIndex.keyId).toBe('audit-index-v1');
+    expect(composed.auditPrivacy?.parseUserAgent('Mozilla/5.0 (Windows NT 10.0) Gecko/20100101 Firefox/146.0')).toBe(
+      'Firefox 146 / Windows',
+    );
+    // The authentication test seam is never set by the production composition.
+    expect('authenticate' in composed).toBe(false);
+  });
+
+  it('a configuration without the keys composes no privacy dependencies (the capture then refuses at mount)', async () => {
+    const h = harness();
+    await startApi(h.deps);
+    expect('auditPrivacy' in h.composed()).toBe(false);
+    expect(auditPrivacyFrom({ ...AUDIT_KEYS, AUDIT_INDEX_KEY: undefined } as unknown as Config)).toBeUndefined();
+  });
+
+  it('[dup-review R1-n3] a malformed key exits 78 with a class-only line before anything is composed or listens', async () => {
+    const h = harness({ config: { ...AUDIT_KEYS, AUDIT_VAULT_KEY: keyVersion('vault-v1', 16) } });
+    await startApi(h.deps);
+    expect(h.calls).toEqual(['loadConfig api', 'createRuntimeServices api', 'exit 78']);
+    expect(h.lines()).toEqual([expect.objectContaining({ level: 'error', event: 'api.audit_keys_rejected', error: 'RangeError' })]);
+    expect(JSON.stringify(h.lines())).not.toContain('vault-v1');
   });
 });

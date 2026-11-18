@@ -178,11 +178,33 @@ const AUDIT_WRITER_ALLOW_LIST = [
   'apps/api/src/modules/shipments/service/**', // the state machine writes STATE_TRANSITION entries
 ];
 /**
+ * The vault-writing exports of `@platform/audit` (PR #61 R1-M2 / PR61-SEC-02; TASK-028): the tokeniser INSERTs
+ * `data_subjects` and `audit_pii_vault` rows on a handed transaction, and `createAuditPrivacy` returns it. Writer exports
+ * like the rest, except in the composition roots that build the capture's privacy dependencies (exact files).
+ */
+const AUDIT_PRIVACY_EXPORTS = ['createVaultTokeniser', 'createAuditPrivacy'];
+/** The composition roots that build the audit privacy dependencies (the worker's joins with TASK-047). */
+const AUDIT_PRIVACY_COMPOSITION_ROOTS = ['apps/api/src/start-api.ts'];
+/**
+ * The vault-decrypting exports (PR #61 R1-M2): ADR-0007 allows vault reads only as audited SENSITIVE views for
+ * `audit:read` holders, so only the audit viewer module (TASK-073) and packages/audit may import them; the writer
+ * allow-list may not. Tests are outside the rule.
+ */
+const AUDIT_VAULT_DECRYPT_EXPORTS = ['decryptVaultValue', 'auditKeyOf'];
+const AUDIT_VAULT_READERS = ['apps/api/src/modules/audit/**'];
+/**
  * The write-capable value exports of `@platform/audit` (option `writerExports` of `platform/audit-writer-allowlist`;
  * PR #42 R1-M1, PR42-SEC-06): the writer, the store (append and vault insert on a handed transaction, without the
  * entry contract) and the entry assembler. Pure helpers (hash, canonical form, vocabularies) and types stay importable.
  */
-const AUDIT_WRITER_EXPORTS = ['AuditWriter', 'createAuditWriter', 'writeAuditEntry', 'createPrismaAuditStore', 'prepareEntry'];
+const AUDIT_WRITER_EXPORTS = [
+  'AuditWriter',
+  'createAuditWriter',
+  'writeAuditEntry',
+  'createPrismaAuditStore',
+  'prepareEntry',
+  ...AUDIT_PRIVACY_EXPORTS,
+];
 const AUDIT_COMPOSITION_MESSAGE =
   'REQ-AUDIT-001: apps/api/src/platform/audit composes the audit writer; api code outside the audit-writer allow-list imports only its types (the tx slot mounts capture.ts) (PR #42 R2-M1).';
 /**
@@ -957,7 +979,7 @@ export default defineConfig([
       'platform/money-arith': 'error',
       'platform/no-tofixed-tolocalestring': 'error',
       'platform/no-innerhtml': 'error',
-      'platform/audit-writer-allowlist': ['error', { writerExports: AUDIT_WRITER_EXPORTS }],
+      'platform/audit-writer-allowlist': ['error', { writerExports: [...AUDIT_WRITER_EXPORTS, ...AUDIT_VAULT_DECRYPT_EXPORTS] }],
     },
   },
   {
@@ -1004,7 +1026,35 @@ export default defineConfig([
   { files: FORMAT_HELPERS, rules: { 'platform/no-tofixed-tolocalestring': 'off' } },
   { files: SANITISING_COMPONENT, rules: { 'platform/no-innerhtml': 'off' } },
   { files: OUTBOUND_CLIENT, rules: { 'platform/outbound-http-via-client': 'off' } },
-  { files: AUDIT_WRITER_ALLOW_LIST, rules: { 'platform/audit-writer-allowlist': 'off' } },
+  // The writer allow-list may write entries but not decrypt the vault (PR #61 R1-M2); packages/audit owns all of it.
+  {
+    files: AUDIT_WRITER_ALLOW_LIST,
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/audit-writer-allowlist': ['error', { writerExports: AUDIT_VAULT_DECRYPT_EXPORTS }] },
+  },
+  { files: ['packages/audit/**'], rules: { 'platform/audit-writer-allowlist': 'off' } },
+  // The composition roots build the privacy dependencies; every other writer and decrypt export stays refused there.
+  {
+    files: AUDIT_PRIVACY_COMPOSITION_ROOTS,
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: {
+      'platform/audit-writer-allowlist': [
+        'error',
+        {
+          writerExports: [...AUDIT_WRITER_EXPORTS.filter((name) => !AUDIT_PRIVACY_EXPORTS.includes(name)), ...AUDIT_VAULT_DECRYPT_EXPORTS],
+        },
+      ],
+    },
+  },
+  // The audit viewer (TASK-073) may decrypt the vault (an audited SENSITIVE view), and nothing else of the writer.
+  {
+    files: AUDIT_VAULT_READERS,
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/audit-writer-allowlist': ['error', { writerExports: AUDIT_WRITER_EXPORTS }] },
+  },
 
   // --- Tenant context and the database platform (ADR-0005 am. 10 items 1, 2, 4, 12, 15; PR2-SEC-05; TASK-016) ------
   {
