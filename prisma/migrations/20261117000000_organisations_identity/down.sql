@@ -1,7 +1,8 @@
 -- Reverts 20261117000000_organisations_identity (data-model.md §8.4). Prefix-idempotent (rule 17): every DROP carries
 -- IF EXISTS, so it also reverts a partially applied up. Tables first (their policies, triggers, indexes, grants and the
--- reserved users go with them), then the functions the policies and triggers named. app_is_operator() is owned by
--- platform_definer, so it is dropped inside the SET ROLE block the up used.
+-- reserved users and the reserved operator organisation of D-ARCH-151 go with them), then the functions the policies
+-- and triggers named. app_is_operator() is owned by platform_definer, so it is dropped inside the SET ROLE block the up
+-- used.
 DROP TABLE IF EXISTS "public"."membership_roles";
 DROP TABLE IF EXISTS "public"."memberships" CASCADE;
 DROP TABLE IF EXISTS "public"."invitations";

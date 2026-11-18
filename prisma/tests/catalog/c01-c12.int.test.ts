@@ -57,7 +57,12 @@ const SYSTEM_ACTOR = '00000000-0000-7000-8000-000000000001';
 
 const ORG_A = randomUUID();
 const ORG_B = randomUUID();
-const OPERATOR_ORG = randomUUID();
+/**
+ * The reserved operator organisation (D-ARCH-151; `OPERATOR_ORG_ID`, repeated because prisma/tests may not import
+ * @platform/shared). The committed migration inserts it, so no fixture plants an OPERATOR organisation any more: the
+ * probe only adds the operator membership to it.
+ */
+const OPERATOR_ORG = '00000000-0000-7000-8000-000000000010';
 const OPERATOR_USER = randomUUID();
 const CUSTOMER_USER = randomUUID();
 const ROW_A = randomUUID();
@@ -327,7 +332,8 @@ async function committedTables(client: pg.Client, tables: readonly string[]): Pr
  * FORCE) and the RLS block rendered by tools/db/render-rls.ts. When the real tables exist (TASK-037), the seed rows go
  * in as the superuser (RLS bypassed) with every NOT NULL column, under `session_replication_role = replica` so the
  * foreign keys to users and the standard-columns guard do not fire for these synthetic, rolled-back rows; the
- * committed `platform.app_is_operator()` is used as it is.
+ * committed `platform.app_is_operator()` is used as it is. The operator membership then goes into the reserved
+ * operator organisation of the migration (D-ARCH-151); no OPERATOR organisation is planted.
  */
 async function plantProbe(client: pg.Client): Promise<string> {
   const committed = await committedTables(client, ['memberships', 'organisations']);
@@ -347,7 +353,6 @@ async function plantProbe(client: pg.Client): Promise<string> {
     await client.query(`
       SET LOCAL session_replication_role = replica;
       INSERT INTO public.organisations (id, type, display_name, created_by, updated_by) VALUES
-        ('${OPERATOR_ORG}', 'OPERATOR', 'Operator', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}'),
         ('${ORG_A}', 'BUSINESS_CUSTOMER', 'Org A', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}');
       INSERT INTO public.memberships (id, org_id, user_id, status, created_by, updated_by) VALUES
         ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}'),

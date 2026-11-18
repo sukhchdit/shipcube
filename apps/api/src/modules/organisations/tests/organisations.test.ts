@@ -1,7 +1,11 @@
 // Organisations rules, service and repository without a database (US-061, US-062; TASK-037). The database backstops of
 // the same rules (CHECKs, unique indexes, triggers, RLS) are proven in organisations.int.test.ts.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from '@jest/globals';
 import { ROLES } from '@platform/authz';
+import { ERROR_CATALOGUE, isErrorCode, OPERATOR_ORG_ID, SYSTEM_ACTOR_ID } from '@platform/shared';
 
 import {
   assertCreatableOrgType,
@@ -11,15 +15,23 @@ import {
   createOrganisation,
   createOrganisationRepository,
   createPersonalOrganisation,
+  isOrganisationRefusalCode,
   isOrgType,
   membershipChange,
+  ORGANISATION_INTERNAL_CODES,
+  ORGANISATION_REFUSAL_CODES,
+  ORGANISATION_RULE_CODES,
   OrganisationNotFoundError,
   type OrganisationRepository,
   OrganisationRuleError,
+  organisationRuleProblemCode,
   type OrganisationsDb,
   personalOrganisationName,
   roleScopeForOrgType,
 } from '../index.js';
+
+const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..', '..');
+const MIGRATION = join(REPO_ROOT, 'prisma', 'migrations', '20261117000000_organisations_identity', 'migration.sql');
 
 const ORG = '0193a5b2-7c1e-7d4a-9f3b-0000000000a1';
 const USER = '0193a5b2-7c1e-7d4a-9f3b-0000000000b1';
@@ -99,6 +111,57 @@ describe('organisation rules (REQ-ORG-001..004)', () => {
     for (const status of ['INVITED', 'active', null]) {
       expect(() => assertWritableMembershipStatus(status)).toThrow(expect.objectContaining({ code: 'MEMBERSHIP_STATUS_NOT_WRITABLE' }));
     }
+  });
+
+  it('[PR63 R1-m2] refusal codes are catalogued 422s; MEMBERSHIP_STATUS_NOT_WRITABLE is internal-only and answers INTERNAL_ERROR', () => {
+    expect([...ORGANISATION_REFUSAL_CODES]).toEqual(['ORG_TYPE_NOT_ALLOWED', 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE']);
+    expect([...ORGANISATION_INTERNAL_CODES]).toEqual(['MEMBERSHIP_STATUS_NOT_WRITABLE']);
+    expect([...ORGANISATION_RULE_CODES]).toEqual([...ORGANISATION_REFUSAL_CODES, ...ORGANISATION_INTERNAL_CODES]);
+    for (const code of ORGANISATION_REFUSAL_CODES) {
+      expect([isErrorCode(code), ERROR_CATALOGUE[code].status, isOrganisationRefusalCode(code), organisationRuleProblemCode(code)]).toEqual(
+        [true, 422, true, code],
+      );
+    }
+    for (const code of ORGANISATION_INTERNAL_CODES) {
+      // Internal-only (api/README.md §11): never catalogued, so never published; a route answers the generic 500.
+      expect([isErrorCode(code), isOrganisationRefusalCode(code), organisationRuleProblemCode(code)]).toEqual([
+        false,
+        false,
+        'INTERNAL_ERROR',
+      ]);
+    }
+    const internalRow = readFileSync(join(REPO_ROOT, 'docs', '03-architecture', 'api', 'README.md'), 'utf8')
+      .split('\n')
+      .find((line) => line.startsWith('| Internal / start-up only |'));
+    for (const code of ORGANISATION_INTERNAL_CODES) expect(internalRow).toContain(`\`${code}\``);
+    const error = new OrganisationRuleError('MEMBERSHIP_STATUS_NOT_WRITABLE');
+    expect([error.name, error.code, error.message]).toEqual([
+      'OrganisationRuleError',
+      'MEMBERSHIP_STATUS_NOT_WRITABLE',
+      'MEMBERSHIP_STATUS_NOT_WRITABLE',
+    ]);
+  });
+
+  it('[D-ARCH-151] the reserved operator organisation row of the migration carries OPERATOR_ORG_ID, the SYSTEM actor and type OPERATOR', () => {
+    const sql = readFileSync(MIGRATION, 'utf8');
+    const inserts = [
+      ...sql.matchAll(/INSERT INTO "public"\."organisations" \(([^)]*)\)\s*VALUES \(([^)]*)\)\s*ON CONFLICT \("id"\) DO NOTHING;/g),
+    ];
+    expect(inserts).toHaveLength(1);
+    const [, columns = '', values = ''] = inserts[0] ?? [];
+    const names = columns.split(',').map((column) => column.trim().replaceAll('"', ''));
+    const literals = values.split(',').map((value) => value.trim().replace(/^'(.*)'$/s, '$1'));
+    expect(Object.fromEntries(names.map((name, index) => [name, literals[index]]))).toEqual({
+      id: OPERATOR_ORG_ID,
+      created_by: SYSTEM_ACTOR_ID,
+      updated_by: SYSTEM_ACTOR_ID,
+      type: 'OPERATOR',
+      display_name: 'Operator',
+    });
+    // Before ENABLE + FORCE (the migrator has no policy on organisations afterwards) and after the single-operator index.
+    const at = sql.indexOf(inserts[0]?.[0] ?? '');
+    expect(at).toBeGreaterThan(sql.indexOf('CREATE UNIQUE INDEX "ux_organisations__single_operator"'));
+    expect(at).toBeLessThan(sql.indexOf('ENABLE ROW LEVEL SECURITY'));
   });
 
   it('[AT-US-062-01] a personal organisation is named after the user (NFC, trimmed, at most 120 characters)', () => {

@@ -7,9 +7,11 @@
  *
  * Refusals are `OrganisationRuleError` with the catalogue code the route returns (ORG_TYPE_NOT_ALLOWED and
  * ROLE_NOT_ALLOWED_FOR_ORG_TYPE are 422 in the error catalogue, TASK-036); the routes that expose these operations
- * (createOrganisation TASK-224, updateMember TASK-231, register TASK-049) map it to the problem response.
+ * (createOrganisation TASK-224, updateMember TASK-231, register TASK-049) map it to the problem response through
+ * `organisationRuleProblemCode`. MEMBERSHIP_STATUS_NOT_WRITABLE is internal-only and answers 500 INTERNAL_ERROR.
  */
 import { isRoleKey, ROLES, type RoleKey, type RoleScope } from '@platform/authz';
+import type { ErrorCode } from '@platform/shared';
 
 export const ORG_TYPES = ['OPERATOR', 'BUSINESS_CUSTOMER', 'PARTNER', 'INDIVIDUAL'] as const;
 export type OrgType = (typeof ORG_TYPES)[number];
@@ -24,8 +26,25 @@ export const CREATABLE_ORG_TYPE: OrgType = 'BUSINESS_CUSTOMER';
 /** The role every personal organisation's owner holds (REQ-ORG-002). */
 export const PERSONAL_ORG_OWNER_ROLE: RoleKey = 'CUSTOMER_OWNER';
 
-export const ORGANISATION_RULE_CODES = ['ORG_TYPE_NOT_ALLOWED', 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE', 'MEMBERSHIP_STATUS_NOT_WRITABLE'] as const;
-export type OrganisationRuleCode = (typeof ORGANISATION_RULE_CODES)[number];
+/**
+ * Refusals a route returns as the problem response of the same code (422 in the error catalogue). Typed against
+ * `ErrorCode` (PR #63 code review R1-m2): a code that is not catalogued, or a typo, fails the type check here.
+ */
+export const ORGANISATION_REFUSAL_CODES = ['ORG_TYPE_NOT_ALLOWED', 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE'] as const satisfies readonly ErrorCode[];
+export type OrganisationRefusalCode = Extract<ErrorCode, (typeof ORGANISATION_REFUSAL_CODES)[number]>;
+
+/**
+ * Internal-only codes (api/README.md §11 "Internal / start-up only"; D-TASK037-08). MEMBERSHIP_STATUS_NOT_WRITABLE
+ * cannot be caused by a valid request: `MembershipPatch.status` is the closed enum ACTIVE | SUSPENDED (any other value
+ * is 400 VALIDATION_ERROR at the route), REMOVED is written only by `removeMember`, which takes no status, and INVITED
+ * is never written (D-ARCH-123). It therefore marks a programming error, never a client error, and surfaces as 500
+ * INTERNAL_ERROR (see {@link organisationRuleProblemCode}). It is not in the error catalogue on purpose.
+ */
+export const ORGANISATION_INTERNAL_CODES = ['MEMBERSHIP_STATUS_NOT_WRITABLE'] as const;
+export type OrganisationInternalCode = (typeof ORGANISATION_INTERNAL_CODES)[number];
+
+export const ORGANISATION_RULE_CODES = [...ORGANISATION_REFUSAL_CODES, ...ORGANISATION_INTERNAL_CODES] as const;
+export type OrganisationRuleCode = OrganisationRefusalCode | OrganisationInternalCode;
 
 export class OrganisationRuleError extends Error {
   override readonly name = 'OrganisationRuleError';
@@ -35,6 +54,19 @@ export class OrganisationRuleError extends Error {
     super(message);
     this.code = code;
   }
+}
+
+/** True for a refusal code a route returns as is; false for an internal-only code. */
+export function isOrganisationRefusalCode(code: OrganisationRuleCode): code is OrganisationRefusalCode {
+  return (ORGANISATION_REFUSAL_CODES as readonly string[]).includes(code);
+}
+
+/**
+ * The catalogue code a route answers for an `OrganisationRuleError`: the refusal code itself, or INTERNAL_ERROR for an
+ * internal-only code (generic 500 detail; the rule code goes to the log, never to the client).
+ */
+export function organisationRuleProblemCode(code: OrganisationRuleCode): ErrorCode {
+  return isOrganisationRefusalCode(code) ? code : 'INTERNAL_ERROR';
 }
 
 export function isOrgType(value: unknown): value is OrgType {

@@ -3,21 +3,33 @@
  * 004, DR-A05, DR-A06, DR-A14; data-model §3.1, §3.2, §4.3, §7.6; PR26-SEC-03/04, D-ARCH-123; SEC-TC-74). Every case
  * runs in a rolled-back transaction: synthetic fixture rows go in as the superuser with `session_replication_role =
  * replica` (no guard, no FK), the case itself as `platform_app` with the production context statement of withTenantTx,
- * so RLS, the standard-columns guard and the domain triggers decide exactly as at runtime.
+ * so RLS, the standard-columns guard and the domain triggers decide exactly as at runtime. The one OPERATOR
+ * organisation is the reserved row of the migration (D-ARCH-151): no case plants one.
  */
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
-import type pg from 'pg';
+import pg from 'pg';
 
 import { CONTEXT_STATEMENT_SQL } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
 import { findRepoRoot } from '../../../tools/test-support/process.js';
+import type { ConfigChangeSink, SeedLogger } from '../../seed/framework/contracts.js';
+import { runReferenceSeed } from '../../seed/framework/runner.js';
+import { REFERENCE_DATASETS, REFERENCE_STEPS } from '../../seed/reference/index.js';
 import { APP_ROLE, PlatformPostgres } from '../harness/postgres.js';
 
 const SYSTEM = '00000000-0000-7000-8000-000000000001';
 const ANONYMOUS = '00000000-0000-7000-8000-000000000002';
+/**
+ * The reserved operator organisation (D-ARCH-151). prisma/tests may not import @platform/shared, so the literal is
+ * repeated here; apps/api/src/modules/organisations/tests/organisations.test.ts proves the migration row equals
+ * `OPERATOR_ORG_ID`, and this suite proves the migrated row equals the migration row.
+ */
+const OPERATOR_ORG = '00000000-0000-7000-8000-000000000010';
+const SILENT: SeedLogger = { info: () => undefined, warn: () => undefined };
+const NO_CONFIG_SINK: ConfigChangeSink = { configChanged: () => Promise.resolve() };
 
 let db: PlatformPostgres;
 let database: string;
@@ -191,20 +203,89 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result.leftovers).toEqual([]);
   });
 
-  it('[AT-US-061-02] a second OPERATOR organisation is refused by ux_organisations__single_operator', async () => {
+  it('[AT-US-061-01] the migration creates exactly one OPERATOR organisation (reserved id, SYSTEM actor, version 1, no member); the reference seed run twice leaves it unchanged', async () => {
+    // Its own clone: the reference seed commits, and the other cases share `database`.
+    const seeded = await db.clone(await db.template({ migrated: true }));
+    const snapshot = async (): Promise<{ count: Row[]; operators: Row[]; members: Row[] }> => {
+      const client = await db.superuser(seeded);
+      try {
+        return {
+          count: await rows(client, 'SELECT count(*)::int AS n FROM public.organisations'),
+          operators: await rows(
+            client,
+            `SELECT id, type, display_name, created_by, updated_by, version, deleted_at, personal_owner_user_id, xmin::text AS xmin
+               FROM public.organisations WHERE type = 'OPERATOR'`,
+          ),
+          members: await rows(client, 'SELECT count(*)::int AS n FROM public.memberships WHERE org_id = $1', [OPERATOR_ORG]),
+        };
+      } finally {
+        await client.end();
+      }
+    };
+    const seed = async (): Promise<void> => {
+      const client = new pg.Client(db.migratorConnection(seeded));
+      await client.connect();
+      try {
+        await runReferenceSeed({
+          sql: client,
+          datasets: REFERENCE_DATASETS,
+          steps: REFERENCE_STEPS,
+          logger: SILENT,
+          configChanges: NO_CONFIG_SINK,
+        });
+      } finally {
+        await client.end();
+      }
+    };
+    const migrated = await snapshot();
+    await seed();
+    await seed();
+    const reseeded = await snapshot();
+    expect(migrated.operators).toEqual([
+      {
+        id: OPERATOR_ORG,
+        type: 'OPERATOR',
+        display_name: 'Operator',
+        created_by: SYSTEM,
+        updated_by: SYSTEM,
+        version: 1,
+        deleted_at: null,
+        personal_owner_user_id: null,
+        xmin: expect.any(String),
+      },
+    ]);
+    expect(migrated.members).toEqual([{ n: 0 }]);
+    // Unchanged by two seed runs: same row count and the same physical row (xmin), so the seed neither wrote nor
+    // re-created it.
+    expect(reseeded).toEqual(migrated);
+  });
+
+  it('[AT-US-061-02] with nothing planted, an OPERATOR organisation insert fails on ux_organisations__single_operator as platform_app and as the superuser', async () => {
     const result = await rolledBack(async (client) => {
-      await fixture(
+      const [org, actor] = [randomUUID(), randomUUID()];
+      // platform_app in the context of a fresh organisation id: RLS WITH CHECK (id = app_org_id()) admits the row, the
+      // occupied unique index refuses it (D-ARCH-151).
+      await asApp(client, org, actor);
+      const app = await outcome(
         client,
-        `INSERT INTO public.organisations (id, type, display_name, created_by, updated_by) VALUES ($1, 'OPERATOR', 'Operator', $2, $2)`,
-        [randomUUID(), SYSTEM],
+        `INSERT INTO public.organisations (id, type, display_name, created_by, updated_by) VALUES ($1, 'OPERATOR', 'Second', $2, $2)`,
+        [org, actor],
       );
-      return outcome(
+      // The superuser with triggers and foreign keys off (replica): only the unique index can refuse the row.
+      await asSuperuser(client);
+      await client.query('SET LOCAL session_replication_role = replica');
+      const superuser = await outcome(
         client,
         `INSERT INTO public.organisations (id, type, display_name, created_by, updated_by) VALUES ($1, 'OPERATOR', 'Second', $2, $2)`,
         [randomUUID(), SYSTEM],
       );
+      await client.query('SET LOCAL session_replication_role = origin');
+      const operators = await rows(client, `SELECT id FROM public.organisations WHERE type = 'OPERATOR'`);
+      return { app, superuser, operators };
     });
-    expect(result).toMatch(/^23505 .*ux_organisations__single_operator/);
+    expect(result.app).toMatch(/^23505 .*ux_organisations__single_operator/);
+    expect(result.superuser).toMatch(/^23505 .*ux_organisations__single_operator/);
+    expect(result.operators).toEqual([{ id: OPERATOR_ORG }]);
   });
 
   it('[AT-US-061-03] a direct SQL update of type is rejected by the database (trg_organisations__type_immutable)', async () => {

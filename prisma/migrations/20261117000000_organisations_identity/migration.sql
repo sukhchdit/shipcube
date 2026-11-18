@@ -207,6 +207,14 @@ VALUES ('00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-0000000
         'anonymous@reserved.invalid', 'Anonymous', 'ACTIVE', true)
 ON CONFLICT ("id") DO NOTHING;
 
+-- Reserved operator organisation (data-model §1.6, §3.2; DR-A06; ADR-0005 amendment 12; D-ARCH-151). The one OPERATOR
+-- organisation exists from this migration in every environment, so ux_organisations__single_operator is occupied and no
+-- runtime role can create another. Written before ENABLE + FORCE for the same reason as the reserved users.
+INSERT INTO "public"."organisations" ("id", "created_by", "updated_by", "type", "display_name")
+VALUES ('00000000-0000-7000-8000-000000000010', '00000000-0000-7000-8000-000000000001',
+        '00000000-0000-7000-8000-000000000001', 'OPERATOR', 'Operator')
+ON CONFLICT ("id") DO NOTHING;
+
 -- ---------------------------------------------------------------------------------------------------------------------
 -- platform.std_columns_guard() (prisma/sql/function-templates/std-columns-guard.sql, verbatim; PR26-SEC-03,
 -- D-ARCH-091): this is the first migration that creates a runtime-writable standard-column table.

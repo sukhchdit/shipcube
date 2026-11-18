@@ -13,6 +13,11 @@
  */
 import type { ApiCrossTenantCase } from './generator.js';
 
-export const ROW_OVERRIDES: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {};
+export const ROW_OVERRIDES: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  // D-ARCH-151: the one OPERATOR organisation is the reserved row of the migration and occupies
+  // ux_organisations__single_operator, so no fixture plants another (the first enum value of ck_organisations__type
+  // would be OPERATOR). BUSINESS_CUSTOMER also satisfies ck_organisations__personal_owner without an owner.
+  organisations: { type: 'BUSINESS_CUSTOMER' },
+};
 
 export const API_CASES: ReadonlyMap<string, ApiCrossTenantCase> = new Map<string, ApiCrossTenantCase>();

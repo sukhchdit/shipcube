@@ -35,3 +35,12 @@ export function uuidV7Timestamp(value: unknown): number | undefined {
 export const SYSTEM_ACTOR_ID = '00000000-0000-7000-8000-000000000001';
 /** `created_by` of rows written without an authenticated user: guest quotes, anonymous consent (REQ-AUDIT-011). */
 export const ANONYMOUS_ACTOR_ID = '00000000-0000-7000-8000-000000000002';
+
+/**
+ * The reserved OPERATOR organisation (data-model §1.6, §3.2; DR-A06; ADR-0005 amendment 12; D-ARCH-151). The migration
+ * that creates `organisations` inserts it before ENABLE + FORCE, so it exists in every migrated database and occupies
+ * `ux_organisations__single_operator`. No seed, job or API creates or renames it; seeds and fixtures add memberships to
+ * it. Code decides "operator" by `type = 'OPERATOR'`, never by this id. The values `…03` to `…0f` stay free for
+ * reserved actors.
+ */
+export const OPERATOR_ORG_ID = '00000000-0000-7000-8000-000000000010';

@@ -42,7 +42,8 @@
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** EPIC-01
 - **Linked REQs:** REQ-ORG-001
 - **As a** platform operator **I want** organisations to have an immutable type with exactly one `OPERATOR` organisation **so that** tenancy and role scoping cannot be subverted.
-- **Notes:** Partner onboarding is M3; no API creates `PARTNER` or a second `OPERATOR`. Invariants in DR-A06.
+- **Notes:** Partner onboarding is M3; no API creates `PARTNER` or a second `OPERATOR`. Invariants in DR-A06. The one `OPERATOR` organisation is a reserved row of the schema migration that creates `organisations` (D-ARCH-151, ADR-0005 amendment 12; REQ-ORG-001 as reworded by D-PM-069): it is present in every migrated database before any seed runs, and no seed, job, API or runtime role creates it. Scenario 1 keeps its title and steps, because the title is the key of AT-US-061-01 in `gherkin-test-map.md`; its outcome is met by the migration, and the reference seed run twice leaves the row and the row count unchanged. `createOrganisation` accepts an optional `type`, so a refused type is a 422 that is audited and not a 400 (D-ARCH-152); a `type` on update stays 400 `UNKNOWN_FIELD`.
+- **Delivery split (D-PM-068, 2026-11-18; D-ORCH-131, D-ARCH-151, D-ARCH-152):** the story stays M0 Must and demo-critical, but two tasks complete it, and it is Implemented only when both are merged. AT-US-061-01, the service and database halves of AT-US-061-02 and the database half of AT-US-061-03 → **TASK-037** (the part the PRD §6.1 demo needs). The response halves of AT-US-061-02 (POST with a refused type → 422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (PATCH with `type` → 400 `UNKNOWN_FIELD`), AT-US-061-04 and AT-US-061-05 → **TASK-224**, which mounts `createOrganisation` and `updateOrganisation` and completes the story. TASK-224 is therefore **not cuttable** and merges before G3. It is not needed for the `v0.1.0-m0` tag: R0 mounts no route that creates or updates an organisation (PRD §7).
 
 #### Acceptance criteria
 ```gherkin
@@ -72,6 +73,7 @@ Feature: Organisation types
 - **Linked REQs:** REQ-ORG-002, REQ-ORG-003, REQ-ORG-004
 - **As a** registering individual **I want** my own personal organisation and role-checked memberships **so that** I can book immediately and be added to other organisations later.
 - **Notes:** Membership statuses and transitions per DR-A05. Re-adding a removed member creates a new row.
+- **Delivery split (D-PM-068, 2026-11-18; D-ORCH-131):** the story stays M0 Must and demo-critical, but three tasks deliver it, and it is Implemented only when all three are merged. AT-US-062-01, -02, -03 and -04 → **TASK-037** (the part the PRD §6.1 demo needs), which also provides the change record that AT-US-062-06 asserts (old/new status and role-set diff). The creation clause of AT-US-062-06 for the one membership R0 can write, the Owner membership of a registration (one `membership` audit entry in the registration transaction) → **TASK-049**. AT-US-062-05 (permission denied on assigning roles) and the rest of AT-US-062-06 (a status or role-set change audited through the member routes) → **TASK-231**, which completes the story. TASK-231 is therefore **not cuttable** and merges before G3; TASK-227 is not cuttable either for as long as TASK-231 depends on it. Neither is needed for the `v0.1.0-m0` tag: R0 mounts no route that assigns a role or changes the status or role set of a membership (PRD §7).
 
 #### Acceptance criteria
 ```gherkin
@@ -665,7 +667,7 @@ Feature: Organisation switch
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-062, US-079
 - **Linked REQs:** REQ-ORG-008, REQ-ORG-009
 - **As a** business customer Owner **I want** to create my company organisation and keep its profile current **so that** shipments and invoices carry correct details.
-- **Notes:** Profile fields: display name 1–120 characters, legal name, country, address, contact email, phone E.164, tax references, default locale and currency. Owner-organisation cap 10 (ASSUMED).
+- **Notes:** Profile fields: display name 1–120 characters, legal name, country, address, contact email, phone E.164, tax references, default locale and currency. Owner-organisation cap 10 (ASSUMED). TASK-224, which delivers this story, also completes US-061 (M0 Must) and is not cuttable (D-PM-068). This story stays M1 Should: if one of its own scenarios blocks the task, that scenario is deferred and the two routes still ship.
 
 #### Acceptance criteria
 ```gherkin
@@ -793,7 +795,7 @@ Feature: Accept invitation
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** M · **Depends on:** US-062, US-068
 - **Linked REQs:** REQ-ORG-012, REQ-ORG-013, REQ-ORG-014
 - **As a** business Owner **I want** to change roles, suspend or remove members without ever orphaning the organisation **so that** access stays controlled.
-- **Notes:** EC-A15, EC-A17. Admin cannot modify an Owner. Individual organisations: no invites, one member. Role change, suspend and remove need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Reading the member list needs no step-up. The member list (`org:read`) contains `ACTIVE` and `SUSPENDED` memberships only; there are no `INVITED` members (reserved status, D-067). Pending invitations are a separate list keyed by invitee e-mail, shown next to the members only to holders of `org:member:invite` (US-083).
+- **Notes:** EC-A15, EC-A17. Admin cannot modify an Owner. Individual organisations: no invites, one member. Role change, suspend and remove need a session authenticated within the last 12 h or a re-authentication proof (`x-reauth-scope: org.member.manage`, `x-reauth-max-age: 43200`; D-046, REQ-AUTH-025, US-291). Reading the member list needs no step-up. The member list (`org:read`) contains `ACTIVE` and `SUSPENDED` memberships only; there are no `INVITED` members (reserved status, D-067). Pending invitations are a separate list keyed by invitee e-mail, shown next to the members only to holders of `org:member:invite` (US-083). TASK-231, which delivers this story, also completes US-062 (M0 Must) and is not cuttable (D-PM-068). This story stays M1 Should: if one of its own scenarios blocks the task, that scenario is deferred and the member routes still ship.
 
 #### Acceptance criteria
 ```gherkin

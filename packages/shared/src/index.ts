@@ -32,7 +32,7 @@ export {
   type ErrorCatalogue,
   type ErrorCode,
 } from './errors/catalogue/index.js';
-export { ANONYMOUS_ACTOR_ID, isUuidV7, SYSTEM_ACTOR_ID, uuidv7, uuidV7Timestamp } from './ids/uuidv7.js';
+export { ANONYMOUS_ACTOR_ID, isUuidV7, OPERATOR_ORG_ID, SYSTEM_ACTOR_ID, uuidv7, uuidV7Timestamp } from './ids/uuidv7.js';
 export {
   isServerControlledField,
   SERVER_CONTROLLED_FIELDS,

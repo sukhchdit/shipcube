@@ -27,7 +27,7 @@ import type { AddressInfo } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Config } from '@platform/config';
-import { AppError } from '@platform/shared';
+import { AppError, OPERATOR_ORG_ID } from '@platform/shared';
 import Joi from 'joi';
 import pg from 'pg';
 
@@ -430,15 +430,14 @@ describe('DR-A14 policy sets (PR11-SEC-10, D-ARCH-123): positive status lists, o
     expect(await visibleAs([membership(TENANT_B.org, TENANT_B.actor, 'ACTIVE', 4)], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
   });
 
-  it("[SEC-TC-06] R1-n5 positive control: a genuine operator (ACTIVE member of an OPERATOR organisation, OPERATOR scope) reads B's row and still cannot write it; the same actor in TENANT scope sees nothing", async () => {
+  it("[SEC-TC-06] R1-n5 positive control: a genuine operator (ACTIVE member of the OPERATOR organisation, OPERATOR scope) reads B's row and still cannot write it; the same actor in TENANT scope sees nothing", async () => {
     const plan = layers.probe.plans.get('rls_probe_parcels');
     if (plan === undefined) throw new Error('probe plan missing');
-    const operatorOrg = stableUuid('rls-generator:org-OPERATOR');
+    // The reserved operator organisation of the migration (D-ARCH-151): no fixture plants an OPERATOR organisation any
+    // more (the occupied ux_organisations__single_operator would refuse it); the control adds only the membership.
+    const operatorOrg = OPERATOR_ORG_ID;
     const operator = stableUuid('rls-generator:user-OPERATOR');
-    const planted: PlantedRow[] = [
-      ['organisations', { id: operatorOrg, type: 'OPERATOR' }],
-      membership(operatorOrg, operator, 'ACTIVE', 5),
-    ];
+    const planted: PlantedRow[] = [membership(operatorOrg, operator, 'ACTIVE', 5)];
     const byId = 'SELECT count(*)::int AS n FROM public.rls_probe_parcels WHERE id = $1';
     const asOperator = (client: pg.Client): Promise<void> => setContextValues(client, operatorOrg, operator, 'OPERATOR');
     expect(await asAppAfter(planted, asOperator, (client) => count(client, byId, [plan.rowB]))).toBe(1);
