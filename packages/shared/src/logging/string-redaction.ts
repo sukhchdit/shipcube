@@ -130,6 +130,8 @@ const PII_KEY_PARTS: readonly string[] = [
   'birthdate',
   'passport',
   'nationalid',
+  // users.time_zone is PERSONAL (data-model §3.1: an IANA zone is a location hint); D-ARCH-150 log coverage, TASK-037.
+  'timezone',
 ];
 
 /** Personal-data names that are substrings of common words (`tin` in destination, `zip` in gzip): exact only. */
