@@ -3530,3 +3530,22 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Pending queue, in order: PR #67 (`Shipqube-audit-picomatch`, first, because it unblocks lane A), PR #64 (`Shipqube-TASK-035-fc1`), PR #61 (`Shipqube-TASK-028-evidence`), PR #62 (`Shipqube-TASK-287A-evidence`).
   - It restarts only on the user's go-ahead.
 - **Reversibility:** High.
+
+### D-ORCH-134 · 2026-11-18 · sdlc-orchestrator (session A) · PR #67 merged; full CI runs via close and reopen; TASK-290 decisions and PR #64/#66 routings
+- **PR #67 (picomatch waiver, D-SECAUDIT-01):** lane-B unit PASS `20261118T1242Z_1f9c81f`; evidence pushed as `9e8efc7`; full lane-A run 44309251941 MERGE-READY. Squash-merged as `591d0f5`. The dependency audit passes again on every PR.
+- **Getting a full run when no earlier run can serve as a code proof:**
+  - A docs-only push (evidence or records) runs lane A light, and ci-gate then needs a code proof: an earlier full run of the same code tree whose code-gated steps all passed.
+  - PRs whose only full runs failed for reasons outside their code (missing evidence at the first push, or the picomatch advisory) have no such run, and re-runs reuse the old merge ref.
+  - Rule: close and reopen the PR. lane-scope classifies a `reopened` event by the whole PR range (code), so the run is full on the current head. This is the designed path, not a bypass: every gate runs.
+  - When a docs push is also needed, close the PR first, push, then reopen, so the push does not spend a light run (D-ORCH-119).
+  - Applied to #67, #63 (evidence `74f4de2` pushed while closed) and #66 (records already on main, read through the merge ref).
+- **TASK-290 / PR #66:**
+  - D-TASK290-01..06 (in the PR body and the developer handoff) are accepted. 01 uses the grammar-exact close rule in place of the card's per-statement CASE depth; code-reviewer and security-analyst accepted it.
+  - New follow-up task **TASK-290-F (database-engineer, `tools/db` lock):** the tokenizer differs from the PostgreSQL lexer in three ways (a lone CR ends a `--` comment; `é$a$` is an identifier; non-ASCII dollar tags are valid); the whitespace class must be ASCII-only (R1-n1); and the `ck_`-is-CHECK JSDoc or catalog assertion (R1-n2). This covers code review R1-m1/R1-n1/R1-n2 and PR66-SEC-01. Due before the next migration or bootstrap PR after #65.
+  - PR66-SEC-02 (wording that swallowed body text "never runs") goes to principal-architect; a call-site rule or a stated limit goes to the TASK-290-F holder.
+  - Merge order: #66 before #65.
+- **PR #64 (TASK-035):** code review r2 APPROVED_WITH_NITS (`76d5e4e`); D-TASK035-07..13 accepted.
+  - R2-n5: the api producer's `Queue` must attach the same error listener (password-leak class PR64-SEC-01). Owner TASK-043. A lint rule for `new Queue(` goes to the next `lint` lock holder.
+  - R2-n3 (blank `tracestate` members) goes to TASK-043. R2-n1, R2-n2 and R2-n4 are optional, for the next touch.
+  - Push waits for the security delta round on `266abb6` (merge condition C1).
+- **Reversibility:** High.
