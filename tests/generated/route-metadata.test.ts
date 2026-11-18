@@ -14,6 +14,7 @@ import Joi from 'joi';
 import { allowedMethods } from '../../apps/api/src/platform/http/fallback.js';
 import { defineRoute, type RouteDescriptor, type RouteSpec } from '../../apps/api/src/platform/routing/define-route.js';
 import { assertRouteBindings, ROUTE_PIPELINE, RouteBindingError } from '../../apps/api/src/platform/routing/pipeline.js';
+import { moduleRouteErrors } from '../../apps/api/src/modules/index.generated.js';
 import { descriptorOf } from '../../apps/api/src/platform/routing/route-registry.js';
 import { fixtureRoute } from '../../apps/api/src/platform/routing/tests/fixture-route.js';
 import { preparedSchemasOf } from '../../apps/api/src/platform/validate/slot.js';
@@ -29,6 +30,7 @@ import {
   type MetadataFinding,
   permissionStatusProblems,
   reauthProblems,
+  routeErrorProblems,
   schemaProblems,
   securityListsQuoteToken,
   TRANSACTION_NONE_OPERATIONS,
@@ -98,7 +100,13 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
   });
 
   const check = (target: ApiMounts = api, implemented: readonly string[] = ledger): MetadataFinding[] =>
-    checkRouteMetadata({ doc, mounted: listMountedRoutes(target.mounts, target.walk), descriptorOf, implemented });
+    checkRouteMetadata({
+      doc,
+      mounted: listMountedRoutes(target.mounts, target.walk),
+      descriptorOf,
+      implemented,
+      routeErrors: moduleRouteErrors,
+    });
   const withModule = (routes: readonly RouteDescriptor[]): ApiMounts =>
     loadApiMounts([{ name: 'fixture', routes }], metadataFixtureSlots());
 
@@ -112,16 +120,67 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
   it('[AT-US-067-01] a complete route (permission shipment:read, audit descriptor, schema) mounts and the build test passes', () => {
     const route = descriptorFor(doc, getShipment);
     expect(route.permission).toBe('shipment:read');
-    // getShipment's module codes (ACCESS_TOKEN_EXPIRED, RATE_LIMITED, ...) join the error catalogue with their modules
-    // (TASK-036 and later); the catalogue rule itself is proven on the mounted routes above and seeded below.
-    const findings = check(withModule([route]), [...ledger, 'getShipment']).filter((finding) => finding.rule !== 'error-codes');
-    expect(findings.map(formatMetadataFinding)).toEqual([]);
+    // The catalogue is complete since TASK-036, so getShipment's codes (ACCESS_TOKEN_EXPIRED, RATE_LIMITED, ...) pass too.
+    expect(check(withModule([route]), [...ledger, 'getShipment']).map(formatMetadataFinding)).toEqual([]);
   });
 
-  it('[assertion 6] a mounted route whose x-error-codes are not all catalogued is named', () => {
-    expect(check(withModule([descriptorFor(doc, getShipment)]), [...ledger, 'getShipment'])).toContainEqual(
-      expect.objectContaining({ rule: 'error-codes', message: expect.stringContaining('is not in the error catalogue') }),
-    );
+  it('[assertion 6] an operation whose x-error-codes are not all catalogued is named, mounted or not (D-TASK017-01 (3))', () => {
+    const seeded = structuredClone(doc);
+    const target = listOperations(seeded).find((op) => op.operationId === 'getShipment');
+    if (target === undefined) throw new Error('getShipment missing from openapi.yaml');
+    (target.operation as Record<string, unknown>)['x-error-codes'] = ['NOT_FOUND', 'MY_NEW_ERROR'];
+    const findings = checkRouteMetadata({
+      doc: seeded,
+      mounted: listMountedRoutes(api.mounts, api.walk),
+      descriptorOf,
+      implemented: ledger,
+    });
+    expect(findings.filter((finding) => finding.rule === 'error-codes').map((finding) => finding.message)).toEqual([
+      `${target.method} ${target.fullPath}: x-error-codes entry MY_NEW_ERROR is not in the error catalogue`,
+    ]);
+  });
+
+  it('[assertion 6] an x-error-codes entry whose status has no response is named', () => {
+    const seeded = structuredClone(doc);
+    const target = listOperations(seeded).find((op) => op.operationId === 'getShipment');
+    if (target === undefined) throw new Error('getShipment missing from openapi.yaml');
+    (target.operation as Record<string, unknown>)['x-error-codes'] = ['NOT_FOUND', 'PAYLOAD_TOO_LARGE'];
+    const findings = checkRouteMetadata({
+      doc: seeded,
+      mounted: listMountedRoutes(api.mounts, api.walk),
+      descriptorOf,
+      implemented: ledger,
+    });
+    expect(findings.filter((finding) => finding.rule === 'error-codes').map((finding) => finding.message)).toEqual([
+      `${target.method} ${target.fullPath}: x-error-codes entry PAYLOAD_TOO_LARGE (413) has no 413 response`,
+    ]);
+  });
+
+  it('[assertion 6] a module code its routeErrors can throw but the operation does not list is named (checkoutOrder form)', () => {
+    const operations = listOperations(doc);
+    expect(routeErrorProblems('shipments', { getShipment: ['NOT_FOUND'] }, operations, [...ledger, 'getShipment'])).toEqual([]);
+    expect(
+      routeErrorProblems('shipments', { getShipment: ['NOT_FOUND', 'AMOUNT_MISMATCH'] }, operations, [...ledger, 'getShipment']).map(
+        (finding) => finding.message,
+      ),
+    ).toEqual(['shipments.routeErrors.getShipment: getShipment can throw AMOUNT_MISMATCH but does not list it']);
+    expect(routeErrorProblems('shipments', { getShipment: [] }, operations, ledger).map((finding) => finding.message)).toEqual([
+      'shipments.routeErrors.getShipment: not an implemented openapi.yaml operation',
+    ]);
+    expect(routeErrorProblems('x', { noSuchOperation: [] }, operations, ['noSuchOperation'])).toHaveLength(1);
+  });
+
+  it('[assertion 6] the routeErrors of every registered module pass, through the composed check', () => {
+    const seeded = { shipments: { getShipment: ['AMOUNT_MISMATCH'] } } as const;
+    const findings = checkRouteMetadata({
+      doc,
+      mounted: listMountedRoutes(api.mounts, api.walk),
+      descriptorOf,
+      implemented: ledger,
+      routeErrors: seeded,
+    });
+    expect(findings.filter((finding) => finding.rule === 'route-errors')).toHaveLength(1);
+    expect(check().filter((finding) => finding.rule === 'route-errors')).toEqual([]);
   });
 
   it('[AT-US-067-02] a route lacking its permission, audit descriptor or schema is refused at start-up', () => {
