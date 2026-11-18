@@ -3438,3 +3438,51 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - The PM's Notes edit to `docs/01-requirements/stories/EPIC-03-…md` is a lane-B tooling input, so it is held as `../.orch/held/D-PM-068-EPIC-03-notes.patch` and lands with PR #65's merge-main cycle, so the open PRs' evidence stays valid.
   - The card and `gen.mjs` changes listed in D-PM-068 go to senior-developer at the next plan fold, together with the pending sheet-fold items.
 - **Reversibility:** High.
+
+### D-SEC-PR66-01 · 2026-11-18 · security-analyst · PR #66 (TASK-290) security r1 = PASS_WITH_FOLLOW-UPS at `9a14659` (record `docs/05-quality/security/PR-0066-TASK-290-security-review.md`, committed on main)
+- **Decision:** 0 Critical, High or Medium; 1 LOW, 1 INFO. Static review plus light Node probes (host rule of D-ORCH-131): no npm, Jest, Docker or worktree commands. PostgreSQL facts come from `REL_18_STABLE` `scan.l` and `gram.y`, read but not executed.
+  - **Sound:**
+    - The block layer of `splitStatements` matches `gram.y` exactly (`opt_routine_body`, `routine_body_stmt_list`, `toplevel_stmt`). It opens on `BEGIN ATOMIC` in a routine head at depth 0 and closes only on `END` as the first piece of a body statement. Where it is stricter than `main`, PostgreSQL raises a syntax error.
+    - The PR's 13-row case table splits as specified. 10 of 10 mutants of the new logic are killed by the PR's own rows.
+    - Of the 532 tracked `.sql` files, 525 split as on `main`; the other 7 differ by design.
+    - The shadow rendering of the real bootstrap lane is byte-identical to `main`'s, and it keeps the `91` statement. `lintRepository` gives 0 findings.
+    - No new dependency, secret or injection surface. Gitleaks and Semgrep are green.
+- **PR66-SEC-01 (LOW, CWE-436/CWE-693):** `tokenize` (unchanged by the PR) differs from `scan.l` in three ways:
+  - (a) a lone CR ends a `--` comment;
+  - (b) `é$a$` is an identifier, not a dollar quote;
+  - (c) `$é$` is a dollar tag.
+
+  Shapes (a) and (b) hide a `GRANT … TO platform_app` that PostgreSQL runs: the linter at the head gives 0 findings, against rule 8 for the control. Shape (c) fakes a `RESET ROLE` or an ENABLE + FORCE: rules 15 and 9 go silent.
+  - **Who sees the raw text.** `migrate deploy` passes it to PostgreSQL with comments kept: Prisma 7.10.1's engine sends `sqlparser` pieces, or the whole script, through `simple_query`. The bootstrap runner does the same. The shadow rendering drops the comment, so it diverges from the real lane.
+  - **Relation to the code review.** This is code review R1-m1, widened. One correction: the bootstrap runner keeps comments; it is the shadow rendering that drops them.
+  - **Exposure.** None of the three shapes occurs in the 532 files or in PR #65's migration.
+  - **Fix**, validated (all 532 token streams unchanged):
+    - a CR also ends `--`;
+    - use `isIdentifierChar` in the dollar rule;
+    - accept a non-ASCII dollar-tag alphabet;
+    - use the ASCII white-space class (R1-n1);
+    - optionally, refuse a lone CR.
+  - **Due:** this PR's fix cycle if one runs. Otherwise a `tools/db` follow-up (database-engineer), due before the next PR after #65 that adds or changes a migration or bootstrap file, and with any earlier change to `sql-text.ts`.
+- **PR66-SEC-02 (INFO, CWE-693):** "never runs as a migration step" holds for utility statements (0A000) only. DML in a body runs when the routine is called, and rule 10 does not see a routine created and called in the same file (probe: 0 findings).
+  - The wording goes to principal-architect at the next §8.3 edit.
+  - The call-site rule, or a stated limit next to rule 11's PR #24 R1-n7, goes to the next holder of the `tools/db` linter.
+- **Merge conditions (security):**
+  1. The record is visible to ci-gate. It is committed on main, so it counts from the next `pull_request` event. A records-only commit after `9a14659` keeps the binding.
+     - Simulated with main's checker: S1 to S5 pass, and C0 to C5 fail as expected.
+     - C2 first hit a `git` timeout under host load; re-run alone, it gave the expected refusal.
+  2. GHSA-fc5q-39xc-vjpf is triaged repo-wide (no patched version is listed). Then a lane-A run must execute every fast-lane step green, including lint, type-check, unit, build, check-evidence and the base-ref negative fixtures.
+  3. The security-integration job, which is due once `record_ok` is true, runs and passes.
+  4. Any change to one of the 27 owned paths after `9a14659` needs a delta round.
+- **Reversibility:** High.
+
+### D-SEC-PR66-02 · 2026-11-18 · security-analyst · PR43-SEC-11 and PR52-SEC-01 closed by TASK-290; card validation clause met; position on D-TASK290-01..06
+- **Decision:**
+  - **PR43-SEC-11 (D-SEC-PR43-05) is CLOSED at `9a14659`.** No counter remains for a top-level `END` to resynchronise. The four label shapes, each followed by hostile statements, split, and the hostile statements are linted.
+  - **PR52-SEC-01 (D-SEC-PR52-01 (2)) is CLOSED.** The KEEP form is a prefix match plus a balanced scan, under the same unquoted `ck_` name. Six bypass shapes and the PK "replacement" are refused. The lexer route to the same effect is tracked as PR66-SEC-01.
+  - **The TASK-290 card clause "structural fix validated on a scratch copy by security-analyst" is met.** The evidence is the 10 of 10 mutants, the 17 edge shapes and the 532-file corpus run (record §5.2-§5.4).
+  - **D-TASK290-01 to -06:** no security objection.
+    - Accepted: 01 (grammar-exact close instead of the CASE-depth sketch of the PR43-SEC-11 record), 02, 03, 04 and 06.
+    - 05: the wording of rules 18 and 19 matches the code; the rule-L limit wording is subject to PR66-SEC-02.
+  - **Code review r1 (`fdb33ee`):** R1-n2 is supported, with no separate finding. The optional `ck\_%` ⇒ `contype = 'c'` catalog assertion is a good C-series addition.
+- **Why:** these findings are bound to TASK-290 (D-ORCH-074, D-ARCH-135/137), and TASK-037 and every later bootstrap file wait on their closure.
+- **Reversibility:** High.
