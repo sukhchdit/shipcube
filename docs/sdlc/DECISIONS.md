@@ -3235,3 +3235,16 @@ Format: ID · date · who · decision · why · alternatives · reversibility
      - After TASK-037, the generated RLS fixtures may need the new NOT NULL and foreign-key columns (TASK-290 lock owner).
 - **Session B dispatches nothing further.**
 - **Reversibility:** High.
+
+### D-ORCH-131 · 2026-11-18 · sdlc-orchestrator (session A) · Lane-B queue restarted; batch 1.1 accepted from session B; routing of COORD-03 items
+- **Queue restart:** free memory is 9.4 GB, no testcontainers are running, and the stale `.orch/docker.lock` is gone. The queue script was rebuilt after the scratchpad was cleared; same rules as D-ORCH-125 and D-ARCH-146.
+  - Order: TASK-290 (`ba921da`), TASK-287A / PR #62 (`5d86412`), TASK-028 / PR #61 (`d54880a`), TASK-036 / PR #63 (`fcdb7ac`), TASK-035 / PR #64 (`90ef83f`).
+  - TASK-037 / PR #65 waits for TASK-290 to merge, then main is merged into the branch and it joins the queue (COORD-03).
+- **Orphan run:** the reaped TASK-290 run `20261117T1429Z_ba921da` finished with verdict FAIL. Its rls-cross-tenant and unit suites ended in errors after the memory kill; integration (345) and api (173) passed. Treated as infrastructure, not a regression. The run dir is moved to `../failed-runs-orphan/` and is not used as evidence.
+- **Batch 1.1 accepted:** session A now owns PRs #63, #64 and #65. The developer's proposals D-TASK035-01..06, D-TASK036-01..03 and D-TASK037-01..07 are accepted as logged in D-ORCH-COORD-03, subject to code and security review.
+- **Routing:**
+  - COORD-03 items 1 (how the operator organisation is created in production) and 2 (`OrganisationCreateRequest` has no `type`, so AT-US-061-02 gets 400, not 422) go to principal-architect, who brings in api-designer and product-manager as needed.
+  - Item 3 (AT-US-061-04/05, AT-US-062-05/06) is deferred to TASK-224/231 as proposed.
+  - Item 4 (merge order) is applied by the orchestrator at merge time.
+- **Reviews:** code-reviewer and security-analyst r1 on PRs #63 and #64 start now. They do static review only while the queue runs: no test, typecheck or container runs (host rule after D-ORCH-130). PR #65 review waits for its merge-main cycle.
+- **Reversibility:** High.
