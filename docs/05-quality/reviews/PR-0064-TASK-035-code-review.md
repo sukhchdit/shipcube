@@ -94,3 +94,81 @@ Also accepted: the custom `jittered-exponential` type in place of `exponential` 
 3. Security record on the head, then a green hosted `security-integration` run (`security_paths=true`, due once `record_ok`).
 4. Lock order: dependabot #58 bumps `bullmq` to 6.7.2 and touches `package-lock.json`. The second of #58 and #64 to merge regenerates the lock, and the int suite must re-run on the result, because the R1-M1, R1-m2 and V3 behaviour is version-pinned BullMQ source.
 5. Round 2 is a delta review of the fix commits.
+
+---
+
+# Round 2: delta review of fix cycle 1 (`90ef83f..266abb6`)
+
+| Field | Value |
+|---|---|
+| Delta | `266abb6` `fix(worker): dead-letter id, queue error listener, sanitised failures, fail-fast queue profile (TASK-035)`, 17 files, +1027/-130. The local head `4eab6c2` adds only the lane-B evidence (`docs/05-quality/tests/runs/20261118T1229Z_266abb6/`). |
+| Push state | Not pushed: origin is still at `90ef83f`. |
+| Reviewer | code-reviewer · 2026-11-18 · round 2 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every in-scope r1 finding is fixed and pinned by a test: the namespaced dead-letter id (R1-M1, with the
+         auto-id int case), the kindless/undefined payload (R1-m1), UnrecoverableError as final/UNRECOVERABLE (R1-m2),
+         settledFailure polling (R1-m3), two connection profiles plus a 2 s /metrics deadline (R1-m4) and the memoised
+         schema (R1-n1). The job-handler/open-queue split is a clear improvement. No BLOCKER, MAJOR or MINOR; five NITs.
+```
+
+## R2.1 Verification I performed myself
+
+Host rule (heavy lane-B run on this machine): static review only. I ran no npm, Jest, typecheck, lint, build or Docker. I read `git diff 90ef83f 266abb6` in full, plus the touched files in context, BullMQ 6.7.0 source in the worktree's `node_modules`, and the lane-B evidence committed in `4eab6c2`.
+
+| # | Check | Result |
+|---|---|---|
+| R2-V1 | Lane-B `summary.md` / JUnit at `266abb6` | PASS. integration 345/345, including all **14** `consumer.int.test.ts` cases with 0 failures and 0 skips. That covers the new R1-M1 auto-id case, PR64-SEC-02, R1-m2 and the corrected `job_context_mismatch` shape. unit 6847 (2 skipped, both pre-existing), including `job-handler.test.ts`, `open-queue.test.ts` (3 cases) and the new `/metrics` deadline case. Merged coverage is 99.38 % lines / 96.42 % branches. `consumer.ts`, `job-handler.ts`, `open-queue.ts`, `runtime.ts`, `connection.ts`, `dead-letter.ts` and `errors.ts` are all 100 %. |
+| R2-V2 | BullMQ `worker.js:647-670` (`handleFailed`), `job.js:445-455` (`shouldRetryJob`), `job.js:941-954` (`updateStacktrace`), `job.js:830-842` (`retry`) | `failedReason` is `err.message`, and `stacktrace` is emptied when `stackTraceLimit === 0`. The retry decision reads `instanceof UnrecoverableError \|\| name == 'UnrecoverableError'`, and `persistedFailure` keeps that. Control-flow errors are recognised by class/name (`DelayedError`, `WaitingError`, `WaitingChildrenError`) or by `message === RATE_LIMIT_ERROR`, so sanitising turns them into TRANSIENT (D-TASK035-10). `retry()` resets `attemptsMade` only with `resetAttemptsMade`, which matches the `deadLetterJobId` JSDoc. |
+| R2-V3 | `buildValkeyOptions` (`apps/api/src/platform/valkey/options.ts:94-125`) | The `queue` profile inherits `commandTimeout` 2 000, `maxRetriesPerRequest` 1, the jittered reconnect and `enableReadyCheck: false`, and adds `enableOfflineQueue: false`. The `worker` profile drops `commandTimeout` and sets `maxRetriesPerRequest: null`, as before. Both are pinned in `queues.test.ts`. |
+| R2-V4 | `origin/main` for `UNRECOVERABLE` | No collision with the #63 error catalogue or any other code. |
+
+## R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed** | `deadLetterJobId` (`dead-letter.ts:24-26`) returns `<id>.dead.<attempts>`, or `undefined` for a missing or empty id. It is never an integer, and a 3-part `:` id stays 3-part. Unit: `queues.test.ts` (`'7' -> '7.dead.1'`, `a:b:c`, determinism) and `job-handler.test.ts` `[R1-M1]`. Int: `[R1-M1] a forged job enqueued WITHOUT a custom id`. That case asserts an integer `job.id`, exactly one record readable at `<id>.dead.1`, the security event, and no `dead_letter_write_failed`. Green in lane B. |
+| R1-m1 | **Closed** | An empty `kinds` gives `Joi.any().required().custom(-> any.invalid)`, and the object itself is `.required()`. `queues.test.ts` `[R1-m1]` covers the kindless, kinded and `undefined` payloads on both kindless queues. `job-handler.test.ts` covers the kindless payload end to end. |
+| R1-m2 | **Closed** | `isUnrecoverable` mirrors BullMQ's predicate. `nonRetryableReason` maps it to `UNRECOVERABLE`, and the record keeps the class `UnrecoverableError`. Covered by unit tests (`errors`, `deadLetterRecord`, `job-handler`) and the int case (one call, a `failed` state, `failedReason` `UNRECOVERABLE`). |
+| R1-m3 | **Closed** | `settledFailure` polls the record(s) and the `failed` state in one predicate. It is used in -02, -04, the PR64-SEC-02 case, the R1-m2 case and the R1-M1 case. -05 now requires both gauges in one snapshot. Residual: R2-n1. |
+| R1-m4 | **Closed** | `/metrics` races `metrics()` against `METRICS_DEADLINE_MS` (2 s). The late rejection is consumed, the timer is cleared, and the response is a value-free 503. `server.test.ts` pins this with a never-settling source, a 100 ms deadline, a bounded `workMs` and a live server afterwards. Every `Queue` now uses the fail-fast `queue` profile, and only `Worker`s keep the blocking one. Residual: R2-n2. |
+| R1-n1 | **Closed** | A `WeakMap` memo per `QueueDefinition`, pinned by `builds the schema of a queue once`. |
+| R1-m5, R1-n2..n8 | Out of scope by decision, unchanged | R1-m5 is still routed to the next `lint`-lock holder. R1-n6 and R1-n8 remain open (see §R2.5). |
+
+## R2.3 New structure and the log-shape fix
+
+- **`job-handler.ts` extracted from `consumer.ts`: good.** The per-job logic now runs under unit test with fakes (`HandledJob`, `DeadLetterSink`), and `consumer.ts` is only `Worker` wiring. Behaviour is preserved: `recordFailure` still runs before the rethrow, and a failed record write is still logged by class only and never masks the error. The order record -> `redactStoredData` -> throw is crash-safe. A crash between the two steps redelivers the same attempt number, so the record add deduplicates on the same id and the redaction happens on the redelivery. A failed `updateData` cannot turn the refusal into a retry, and that is pinned.
+- **`persistedFailure`: correct.** It keeps the reason code only and sets `stack` to `name: message`. A non-retryable failure stays a `NonRetryableError` (name `UnrecoverableError`), so BullMQ's decision is unchanged. That is pinned at unit level (`instanceof UnrecoverableError`, no sentinel) and end to end (`failedReason` `TRANSIENT` / `PAYLOAD_INVALID` / `UNRECOVERABLE`, `stacktrace` `[]`, no sentinel in `JSON.stringify(job)`). The job-level `stackTraceLimit: 0` covers errors raised outside the wrapper.
+- **`openQueue` factory: good.** It attaches a listener that logs the class only. Test (a) is not vacuous: it asserts that the password did cross the wire to the refusing fake server. It also covers the consumer's `Worker` listener, because the consumer meets the same refusal. The source scan is a useful speed bump with limited reach (R2-n5).
+- **`isTracestate`: correct and linear.** Its patterns are anchored with bounded repetition, it has one `^` start, the trim is a loop and there is a member cap. The key and value classes match W3C level 1 (`chr`/`nblk-chr`, `tenant@system`). The scaling test uses best-of-7 against a 64x quadratic signal, which is robust. It is stricter than the spec on empty members (R2-n3).
+- **The `job_context_mismatch` assertion fix is correct.** `securityEvent` emits `event: '<name>'` with `event_type: 'security'` (`security-event.ts:4, 174`). The r1 int assertion on `'security.job_context_mismatch'` could never have matched, and it was latent only because the file had never run. Both the int test and the new unit test now assert the real shape, and lane B is green.
+
+## R2.4 Findings (round 2)
+
+| ID | Severity | File:line | Issue | Suggested fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `apps/worker/src/platform/queues/consumer.int.test.ts:255-272` | AT-US-009-03 still asserts `calls === 1` right after the record appears. A wrongful retry would come after `moveToFailed` plus the 10 ms backoff, so the assertion passes before that retry could happen. The test is not flaky; it is weak in the vacuous direction. The R1-m2 int case shows the stronger pattern. | Use `settledFailure` here too: the `failed` state is reached only when the failure was final, so `calls === 1` is then conclusive. |
+| R2-n2 | NIT | `runtime.ts:47-48, 58`; `consumer.ts:59, 66`; `start-worker.ts:82-83` | Which profile each client gets is unpinned. Swapping `connection` and `queueConnection` at any of these call sites passes every test: behaviour is identical while Valkey is up, and in `open-queue.test` (a) both profiles meet the same refusal. The profiles themselves are pinned; their wiring is not. | Add one cheap unit assertion on the built objects, for example that every `Queue` from `openQueue` in the runtime has `opts.connection.enableOfflineQueue === false` and the consumer's `worker.opts.connection.maxRetriesPerRequest === null`. A `createProductionQueues` variant can check the connection names `worker-consumers` / `worker-queues`. |
+| R2-n3 | NIT | `packages/shared/src/queues/payload-v2.ts:65-77` | `isTracestate` refuses empty and blank list members (`'a=b,,c=d'`, `'a=b,'`; pinned as refused in `queues.test.ts`). W3C Trace Context §3.3.1.1 allows them, yet the JSDoc says the check "follows the W3C grammar". The producer refuses the whole enqueue on an invalid payload (`producer.ts:79`). If TASK-043 copied a raw inbound `tracestate` (spec-valid with empty members) into `traceContext`, business work would fail on a telemetry field. Latent: no caller passes a trace context today. | Either skip blank members in `isTracestate` (still counting at most 32 non-empty members) and pin `'a=b,,c=d'` as accepted, or have the TASK-043 producer drop an invalid `tracestate` rather than refuse the job (W3C: discard on parse failure). Route to TASK-043 if not done here. |
+| R2-n4 | NIT | `apps/worker/src/platform/queues/job-handler.ts:37-38` (the `JobProcessor` JSDoc) | D-TASK035-10 makes BullMQ's control-flow errors unsupported. `persistedFailure` turns `DelayedError`, `WaitingError`, `WaitingChildrenError` and `RateLimitError` (recognised by message) into a TRANSIENT retry. The processor contract does not say so. The list should also include `WaitingError`, which BullMQ 6.7 checks too (R2-V2). | Add one sentence to the `JobProcessor` JSDoc: BullMQ control-flow errors are not supported and count as transient failures. |
+| R2-n5 | NIT | `apps/worker/src/platform/queues/open-queue.test.ts` (source scan) | The scan is lexical. It misses `import { Queue as Q }` / `new Q(`, `import * as bullmq` / `new bullmq.Queue(`, and `Reflect.construct`. Its `//.*$` comment strip also removes code after a `'redis://...'` string on the same line. Separately, the api-side producer queue (TASK-043) is outside the worker scan and has no `error` listener of its own, so the PR64-SEC-01 leak would recur there. | Acceptable as a speed bump. At the next `lint`-lock holder, a `no-restricted-imports`/`no-restricted-syntax` rule on `bullmq` `Queue` outside `open-queue.ts` reaches further. Route "api producer `Queue` gets a class-only `error` listener" to TASK-043. |
+
+## R2.5 Rulings on D-TASK035-07..13
+
+| Decision | Ruling |
+|---|---|
+| 07 dead-letter id `<job id>.dead.<attempts>` | **Accepted, preferred over the r1 suggestion `<id>.dead`.** It stays deterministic for a redelivered final attempt, because a stall does not increment `attemptsMade`. It also gives a later final failure after an operator `retry()` its own record, which closes the record-reuse half of PR64-SEC-08. The JSDoc correctly describes the `resetAttemptsMade` exception (R2-V2). An empty or missing id lets BullMQ assign the id. |
+| 08 `openQueue` factory + source scan | **Accepted.** It is the single construction point and has a non-vacuous AUTH-refusal test. The scan's reach and the api producer are covered in R2-n5. |
+| 09 sanitised persisted failures | **Accepted.** It is what PR64-SEC-02 asked for, and it is verified against BullMQ source (R2-V2) and end to end. Redacting stored data only for refused payloads is right: a validated payload is identifiers-only. The original error text survives only in the redacted, bounded dead-letter record and as a class name in the log. |
+| 10 `DelayedError` / `RateLimitError` / `WaitingChildrenError` unsupported | **Accepted.** Processors receive the payload and a `ProcessorJob` without a token or worker handle, so they cannot use these legitimately. Document it and include `WaitingError` (R2-n4). |
+| 11 two connection profiles | **Accepted.** The `queue` profile follows BullMQ's own guidance for non-blocking `Queue`s (fail fast, no offline queue), and only `Worker`s keep the blocking options. A dead-letter write during an outage now fails at once. It is logged, and the failed set remains the backstop, as designed in r1. Wiring is unpinned (R2-n2). R1-n8 (one connection per `Queue`) is still open, out of scope. |
+| 12 reason `UNRECOVERABLE` | **Accepted.** It is in `NON_RETRYABLE_REASONS` and does not collide with any code on main (R2-V4). |
+| 13 `tracestate` kept and W3C-validated; payload object `.required()` | **Accepted.** Security offered dropping `tracestate` or validating it; validating is within that remit. Linear time is shown. Strictness on empty members is R2-n3. The root `.required()` also closes a latent hole: a Joi object schema accepts `undefined` unless required, so `validateJobPayload(def, undefined)` used to return `ok: true` with an undefined payload. |
+
+## R2.6 Merge conditions
+
+1. Push `4eab6c2` (the code head is `266abb6`, and the evidence binds to it). Hosted lane A must be green on the pushed head, including `security-integration`, which is due once the security record exists (r1 V2).
+2. Security delta round on `266abb6` verifying C1 (PR64-SEC-01) and PR64-SEC-02/-03/-05. This review does not replace it.
+3. Lock order with dependabot #58 (bullmq 6.7.2, still open) is unchanged from r1 §6.4. The second of the two to merge regenerates the lock and re-runs the int suite, because R2-V2 is pinned to BullMQ 6.7.0 source.
+4. NITs R2-n1..n5 are optional. R2-n3 and the api half of R2-n5 are routed to TASK-043 if not taken here.
