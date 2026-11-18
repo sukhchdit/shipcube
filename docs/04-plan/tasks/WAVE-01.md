@@ -2,26 +2,27 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Priority band: **Must DC (+ non-DC enablers)**
 
-Tasks: **40** (S 7 / M 33; opus 17 / sonnet 23; demo-critical 33) in **10** batches of ≤ 4 parallel tasks. Estimated effort ≈ 109.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **41** (S 8 / M 33; opus 17 / sonnet 24; demo-critical 33) in **11** batches of ≤ 4 parallel tasks. Estimated effort ≈ 111 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Lane B `wave` evidence; staff and customer sign-in API + screens work in compose; generated suites green incl. new identity/org routes; lane C `wave-end` if within the monthly cap (priority tier 2, PLAN.md §8).
 
-**Stories completed in this wave (43):** US-009 (DC), US-010 (DC), US-011 (DC), US-015 (DC), US-016 (DC), US-017 (DC), US-018 (DC), US-020 (DC), US-023 (DC), US-024 (DC), US-025 (DC), US-030 (DC), US-031 (DC), US-036, US-037, US-038 (DC), US-040, US-042 (DC), US-044, US-052 (DC), US-053 (DC), US-061 (DC), US-062 (DC), US-063 (DC), US-068 (DC), US-070, US-076 (DC), US-078 (DC), US-080 (DC), US-087 (DC), US-101 (DC), US-103, US-104, US-106, US-107 (DC), US-108 (DC), US-110 (DC), US-115 (DC), US-116 (DC), US-117 (DC), US-274 (DC), US-276 (DC), US-284 (DC).
+**Stories completed in this wave (41):** US-009 (DC), US-010 (DC), US-011 (DC), US-015 (DC), US-016 (DC), US-017 (DC), US-018 (DC), US-020 (DC), US-023 (DC), US-024 (DC), US-025 (DC), US-030 (DC), US-031 (DC), US-036, US-037, US-038 (DC), US-040, US-042 (DC), US-044, US-052 (DC), US-053 (DC), US-063 (DC), US-068 (DC), US-070, US-076 (DC), US-078 (DC), US-080 (DC), US-087 (DC), US-101 (DC), US-103, US-104, US-106, US-107 (DC), US-108 (DC), US-110 (DC), US-115 (DC), US-116 (DC), US-117 (DC), US-274 (DC), US-276 (DC), US-284 (DC).
 
 ## Batches
 
 | Batch | Tasks (parallel) | Locks held |
 |---|---|---|
 | 1.1 | TASK-035 Named BullMQ queues with retries and dead-letter queues; job payload v2 validated at dequeue<br>TASK-036 Error catalogue and validation error format<br>TASK-037 Organisation types, single operator organisation, personal organisation and type-checked memberships<br>TASK-038 Design tokens | worker-queues<br>shared-errors<br>mod-organisations<br>ui-tokens |
-| 1.2 | TASK-039 Idempotent job processing<br>TASK-040 Idempotency keys<br>TASK-041 Valkey-backed rate limiting per class with RateLimit headers<br>TASK-042 Localisable strings, en/es/fr parity and ICU messages | worker-queues<br>api-idempotency, api-tx-execute<br>api-ratelimit, api-authz, api-routing<br>i18n-core |
+| 1.2 | TASK-039 Idempotent job processing<br>TASK-040 Idempotency keys<br>TASK-041 Valkey-backed rate limiting per class with RateLimit headers<br>TASK-042 Localisable strings, en/es/fr parity and ICU messages | worker-queues<br>api-idempotency, api-tx-execute<br>api-ratelimit, api-authz, api-routing, pkg-audit-redaction<br>i18n-core |
 | 1.3 | TASK-043 Transactional outbox writer and at-least-once relay<br>TASK-044 Server-sent events convention<br>TASK-045 Cursor pagination, filtering and sorting<br>TASK-046 Control sizing, interaction states and reduced motion | outbox<br>api-sse<br>api-pagination<br>ui-base |
-| 1.4 | TASK-047 Tenant context in worker jobs resolved from PostgreSQL<br>TASK-048 CSRF protection, CORS allow-list and Origin check on login/register/reset/verify<br>TASK-049 Register an account<br>TASK-050 Locale-aware formatting, time zones and collation helpers | worker-ctx<br>api-csrf<br>identity-core<br>i18n-format |
+| 1.4 | TASK-047 Tenant context in worker jobs resolved from PostgreSQL<br>TASK-048 CSRF protection, CORS allow-list and Origin check on login/register/reset/verify<br>TASK-049 Register an account<br>TASK-050 Locale-aware formatting, time zones and collation helpers | worker-ctx, worker-queues<br>api-csrf<br>identity-core<br>i18n-format |
 | 1.5 | TASK-051 Guest-capable tables and atomic claim<br>TASK-052 Sign in with email and password<br>TASK-053 Responsive layout primitives, no horizontal scroll, table-to-card pattern<br>TASK-054 Six screen states through shared components | prisma-rls<br>identity-core, api-audit-mw<br>ui-layout<br>ui-states |
 | 1.6 | TASK-055 Refresh cookie rotation, reuse detection and 30-day absolute cap<br>TASK-056 Active organisation context and GET /api/v1/me<br>TASK-057 TOTP enrolment and id-secret recovery codes<br>TASK-058 Inline form validation, error summary and semantic markup | identity-session<br>mod-organisations<br>identity-mfa<br>ui-forms |
-| 1.7 | TASK-059 Verify email address<br>TASK-060 Request pipeline order, 401/403 outcomes, live permission resolution<br>TASK-061 MFA challenge at sign-in<br>TASK-062 Locale resolution, persistence and system-message locale | identity-core<br>api-authz, api-audit-mw, api-routing<br>identity-mfa<br>fe-locale |
+| 1.7 | TASK-059 Verify email address<br>TASK-060 Request pipeline order, 401/403 outcomes, live permission resolution<br>TASK-061 MFA challenge at sign-in<br>TASK-062 Locale resolution, persistence and system-message locale | identity-core<br>api-authz, api-audit-mw, api-routing, tests-gen-rbac<br>identity-mfa<br>fe-locale |
 | 1.8 | TASK-063 Mandatory TOTP for operator members, e-mailed first-enrolment code outside local/test, 24 h deadline<br>TASK-064 Permission-aware UI helper can() and frontend route guard<br>TASK-065 Client token handling<br>TASK-066 Seed currencies and FX snapshots | identity-mfa<br>fe-authz<br>fe-session<br>prisma-seed |
 | 1.9 | TASK-067 Admin app route guard, staff-only admission, MFA gate and 30-minute sliding admin refresh<br>TASK-068 Customer web shell<br>TASK-069 Admin shell<br>TASK-070 Public read-only reference endpoints complete | identity-session, api-mfa-gate<br>web-shell<br>admin-shell<br>mod-admin-settings-reference |
-| 1.10 | TASK-071 Staff sign-in, MFA challenge and TOTP enrolment screens<br>TASK-072 Customer auth screens<br>TASK-073 Audit viewer API<br>TASK-074 Notification provider interface, Mailpit transport in non-production only, BullMQ send job with retries and DLQ | admin-auth<br>web-auth<br>mod-audit-viewer<br>mod-notifications |
+| 1.10 | TASK-071 Staff sign-in, MFA challenge and TOTP enrolment screens<br>TASK-072 Customer auth screens<br>TASK-073 Audit viewer API<br>TASK-074 Notification provider interface, Mailpit transport in non-production only, BullMQ send job with retries and DLQ | admin-auth<br>web-auth<br>mod-audit-viewer, lint<br>mod-notifications |
+| 1.11 | TASK-292 TASK-036-F1 | shared-errors |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
 
@@ -98,10 +99,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-061 **DC** (M0 Must) Organisation types and the single operator organisation<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
+| Stories (completes) | — |
+| Stories (partial; completed by TASK-224, TASK-231) | US-061 **DC** (M0 Must) Organisation types and the single operator organisation<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-001, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074, PR26-SEC-03, D-ARCH-091, D-SEC-PR26-01, D-SEC-TM-01, PR43-SEC-05, PR43-SEC-06, PR43-SEC-09, D-SEC-PR43-01, D-SEC-PR43-02, D-ARCH-123, D-ARCH-125, D-067, PR43-SEC-11, PR52-SEC-01, D-ARCH-137, D-ARCH-151, D-ARCH-152 |
+| Spikes / security / decisions | DR-A14, PR11-SEC-03, PR11-SEC-06, PR11-SEC-07, PR11-SEC-10, D-TASK016-01, D-ARCH-071, D-ARCH-072, D-ARCH-074, PR26-SEC-03, D-ARCH-091, D-SEC-PR26-01, D-SEC-TM-01, PR43-SEC-05, PR43-SEC-06, PR43-SEC-09, D-SEC-PR43-01, D-SEC-PR43-02, D-ARCH-123, D-ARCH-125, D-067, PR43-SEC-11, PR52-SEC-01, D-ARCH-137, D-ARCH-151, D-ARCH-152, D-PM-068 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-013, TASK-016, TASK-024, TASK-029, TASK-032 |
@@ -117,7 +119,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - apps/api/src/modules/organisations/{service,repository,policies,events,index}.ts
 
 **Acceptance tests to write**
-- All US-061 and US-062 scenarios
+- The US-061 and US-062 scenarios this task owns under the delivery split of D-PM-068 (SCENARIO OWNERSHIP below): both stories are partial here; US-061 completes in TASK-224 and US-062 in TASK-231 (Wave 7, not cuttable, due before G3)
 - PREREQUISITES CHECK before the first CREATE POLICY migration (D-ARCH-072, D-ARCH-074): TASK-024 has merged the DR-A14 templates and `policySet`, rule 9 renderer equality, the C3 derived set and the C11 converse; PR #11 (TASK-016) has merged the rule 16 operator-atom exemption (PR11-SEC-03 item 1), rule 11 session-form-only, rule 15 SET-ROLE-only and rule 9 grant-after-FORCE (PR11-SEC-07) — if any is missing this task reports BLOCKED naming the item; no local loosening of the linter, no inline disable, no hand-written policy
 - DR-A14 APPLICATION (data-model §4.3 as amended 2026-11-13; D-ARCH-072): the `organisations` and `memberships` RLS blocks are rendered by `tools/db/render-rls.ts` from the manifest entries (`policySet`) and pasted verbatim — `p_organisations__active` / `__member_read` (positive list `IN ('ACTIVE','SUSPENDED')`) / `__operator` / `__definer_read`, `p_memberships__tenant` / `__own_read` / `__operator` / `__definer_read`; migration order follows the prefix-safety principle (data-model §8.3): CREATE TABLE → ENABLE + FORCE → policies → GRANT (rule 9 b), then the `app_is_operator()` template inside one `SET ROLE platform_definer; … RESET ROLE;` block after both definer-read policies, preceded by `GRANT EXECUTE ON FUNCTION platform.app_actor_id() TO platform_definer` as the migrator (D-TASK016-01 decision 3 accepted, D-ARCH-071); `down.sql` is prefix-idempotent (rule 17) and the up-down-up prefix check passes
 - Catalog adaptation (PR #11 `plantProbe`, C11, C3): the probe no longer plants `memberships`/`organisations` nor renders `app_is_operator()` (the real objects exist); C11 expects `platform.app_actor_id()` EXECUTE for `platform_app`, `platform_migrator` AND `platform_definer`, and `platform.app_is_operator()` owned by `platform_definer`, SECURITY DEFINER, fixed search_path, EXECUTE for `platform_app` only; the C3 derived set includes the DR-A14 policies; `memberships` policies contain no subquery (recursion invariant); C2 special-cases `organisations` on `id`; C12 context probes (org A sees its organisation and memberships only; an actor sees own memberships across orgs; a customer with `app.actor_scope = OPERATOR` forced still sees nothing of org B because `app_is_operator()` is false)
@@ -128,15 +130,15 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - NO INVITED MEMBERSHIP (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a); data-model memberships and invitations notes of 2026-11-14): this task writes memberships only as ACTIVE (registration, personal organisation); the dr-a14-memberships set is unchanged; invitations is a TENANT table and the whole pending state of an invitation (TASK-227 creates no membership before acceptance); the membership_status CHECK keeps INVITED as a reserved value and a C12 probe asserts that no fixture or seed writes it
 - MERGE PREREQUISITE TASK-290 (TASK-024-F rlsfu; D-ORCH-074; D-ARCH-137): PR43-SEC-11 (inside a BEGIN ATOMIC body the splitter counts case and begin atomic labels as openers and a later top-level END resynchronises it, so a hostile statement after such a routine lints clean) is fixed by TASK-290 before this task merges, OR this task proves in its PR body that it adds no BEGIN ATOMIC routine and the reviewer records it; the PR52-SEC-01 shadow-init KEEP fix also lives in TASK-290 and is a merge prerequisite of any task that adds a prisma/bootstrap/*.sql file after PR #52 (D-ARCH-135)
 - RESERVED OPERATOR ORGANISATION (D-ARCH-151; ADR-0005 amendment 12 items 23 to 25; data-model 1.6, 3.2, 8.3 rule 10; rulings/wave-1-batch-1.1-rulings.md section 2; supersedes D-TASK037-04): the migration inserts the one OPERATOR organisation directly after the reserved users, that is after ux_organisations__single_operator and before the first ENABLE ROW LEVEL SECURITY - id 00000000-0000-7000-8000-000000000010, type OPERATOR, display_name Operator, the SYSTEM actor in created_by and updated_by, ON CONFLICT ("id") DO NOTHING (exact statement in the rulings file); the header stays data-changing: no; packages/shared/src/ids exports OPERATOR_ORG_ID next to the actor ids and one test compares the row with the constant; AT-US-061-01 STAYS ON THIS TASK (integration suite, migrated template): exactly one OPERATOR organisation, with the reserved id, the SYSTEM actor, version 1 and no membership, and the real reference seed run twice through runReferenceSeed leaves the organisations row count and the reserved row unchanged; AT-US-061-02 at the database is rewritten, because planting a first OPERATOR organisation now fails: with nothing planted, an INSERT of type OPERATOR as platform_app in the context of a fresh organisation id fails with 23505 on ux_organisations__single_operator, and so does the same INSERT as the superuser; no fixture plants an OPERATOR organisation any more - plantProbe (committed-table branch of prisma/tests/catalog/c01-c12.int.test.ts), the SEC-TC-06 positive control of tests/generated/rls/cross-tenant.int.test.ts (edited after main with TASK-290 is merged into the branch) and any other fixture insert the operator membership into OPERATOR_ORG_ID; the service keeps refusing every type but BUSINESS_CUSTOMER and gains no seed-only path that creates an OPERATOR organisation
-- SCENARIO OWNERSHIP (D-ORCH-COORD-03 item 3, D-ORCH-131; D-ARCH-152; this narrows the generated all-scenarios lines of this card until product-manager records the delivery split, rulings section 4): this task proves, under their IDs, AT-US-061-01, the service and database halves of AT-US-061-02 and the database half of AT-US-061-03; the response-level halves (422 ORG_TYPE_NOT_ALLOWED on POST, 400 UNKNOWN_FIELD on PATCH), AT-US-061-04 and AT-US-061-05 need the mounted createOrganisation and updateOrganisation routes and are on the TASK-224 card; AT-US-062-05 and AT-US-062-06 are on the TASK-231 card; this PR needs NO contract change (the type property of OrganisationCreateRequest lands with TASK-224, D-ARCH-152)
-- AT-US-061-01 … AT-US-061-05: all 5 scenarios of US-061, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-- AT-US-062-01 … AT-US-062-06: all 6 scenarios of US-062, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- SCENARIO OWNERSHIP (D-ORCH-COORD-03 item 3, D-ORCH-131; D-ARCH-152; delivery split recorded by product-manager in D-PM-068, which makes both stories partial here; rulings section 4): this task proves, under their IDs, AT-US-061-01, the service and database halves of AT-US-061-02 and the database half of AT-US-061-03; the response-level halves (422 ORG_TYPE_NOT_ALLOWED on POST, 400 UNKNOWN_FIELD on PATCH), AT-US-061-04 and AT-US-061-05 need the mounted createOrganisation and updateOrganisation routes and are on the TASK-224 card; of US-062 this task proves AT-US-062-01 to -04 and the change record that AT-US-062-06 asserts (old and new status and the role-set diff; the [AT-US-062-06] unit test), TASK-049 proves the creation clause of AT-US-062-06 at registration, and AT-US-062-05 and AT-US-062-06 through the member routes are on the TASK-231 card; this PR needs NO contract change (the type property of OrganisationCreateRequest lands with TASK-224, D-ARCH-152); at R0 (v0.1.0-m0) US-061 and US-062 are recorded as partial in the dossier, naming the six route-level scenarios, and this task carries their demo-critical part (D-PM-068)
+- Covers the scenarios of AT-US-061-01 … AT-US-061-05 that belong to its layer; US-061 closes in TASK-224
+- Covers the scenarios of AT-US-062-01 … AT-US-062-06 that belong to its layer; US-062 closes in TASK-231
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
 - memberships.user_id references users(id), which TASK-049 creates later (identity.prisma, lock identity-core): senior-developer decides at dispatch whether this task also creates the minimal `users` table of data-model §3.1 with its `dr-a14-users` policy set (then it takes lock identity-core for this batch) or TASK-049 adds the FK as NOT VALID + VALIDATE (rule 6); the decision is recorded in DECISIONS.md and the users policy set ships with whichever task creates the table
-- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`, `tools/db/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-038 — Design tokens (DTCG) compiled to Tailwind 4 theme, token lint
@@ -174,7 +176,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
 | REQs | REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-RES-004, NFR-SCALE-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-SEC-PR64-01, D-SEC-PR64-02, PR64-SEC-04, PR64-SEC-06, PR64-SEC-07, PR64-SEC-08, PR64-SEC-11, PR64-SEC-12, D-ORCH-132 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-035 |
@@ -185,9 +187,18 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Files / modules**
 - prisma/schema/platform.prisma + migration (job_executions)
 - apps/worker/src/platform/jobs/{idempotent-processor.ts, schedulers.ts}
+- apps/worker/src/platform/queues/** (retention bounds, job identity check and per-job deadline, dead-letter logging, single-flight metrics; PR #64 security record)
+- apps/worker/src/platform/queues/consumer.int.test.ts (ACL case)
 
 **Acceptance tests to write**
 - All US-010 scenarios (duplicate job id -> single effect; scheduler singleton across 2 workers)
+- PR64-SEC-04 (LOW, T-77; D-SEC-PR64-01/02): bounded retention under maxmemory-policy noeviction - failed jobs carry removeOnFail with an age bound once the dead-letter record exists, and the housekeeping of this task trims dead-letter records to an age and count bound; the bounds come from the ADR-0013 retention amendment of principal-architect (routed by D-ORCH-132), which the orchestrator confirms on main before dispatch; tests: a jobOptions pin for the bounded removeOnFail and an integration case where housekeeping trims records older than the bound and keeps newer ones; the PR body names the DLQ-depth and Valkey used_memory alarms (platform.md 8.5) for TASK-214
+- PR64-SEC-06 (INFO), shared with TASK-047 (whichever task first changes packages/shared/src/queues/payload-v2.ts closes it, and the other card line lapses): carriesTenantContext flags case and nested spellings (ORG_ID, OrgId, orgID, org-id, tenant_id, tenantId, organisation_id, organization_id, actorID, trace_context.org_id) as job_context_mismatch, an own __proto__ key from JSON.parse is refused and flagged instead of silently dropped by the Joi clone, and the issue list is capped
+- PR64-SEC-07 (INFO), job-identity half (the tenant-context half is TASK-047): the consumer refuses PAYLOAD_INVALID when job.id does not start with the payload kind and id (kind.id) or job.name differs from payload.kind, because job_executions.job_key is the job id while the action follows the payload id; ProcessorJob carries a per-job deadline (an AbortSignal) so a hung processor cannot hold a worker slot; processors registered here stay SYSTEM-scope until TASK-047
+- PR64-SEC-08 (INFO, the rest after D-TASK035-07): after retry({ resetAttemptsMade }) the dead-letter add is ignored while worker.job_dead_lettered is still logged - log only when the add created a record, or make the record id unique per final failure; a stalled-out job gets a worker.job_failed line and a dead-letter record, or the PR states why not
+- PR64-SEC-11 (INFO): one consumer integration case starts Valkey with infra/local/valkey/users.acl (credentials generated by the test, never repository values): the worker user processes a job end to end and a Queue.add as the api user fails with NOPERM
+- PR64-SEC-12 (INFO; D-SEC-PR64-02): the worker metrics() is single-flight - a scrape while a collection is pending joins it, so collections started before the queue connections were ever ready do not pile up (about 31 KB and 18 scripts per scrape on recovery today); a unit case with a never-ready connection shows one pending collection after N scrapes
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-010-01 … AT-US-010-07: all 7 scenarios of US-010, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -224,6 +235,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR19-SEC-01 CONSUMER (D-ARCH-080; FIRST writable SYSTEM model): idempotency_keys is reached only through the platform/idempotency port via systemDelegates(tx) (TASK-020 mechanism) — never from a module repository; the lint allow-list names apps/api/src/platform/idempotency/**; the port is the only writer and reader of the ciphertext response bodies
 - PRECONDITION (D-ARCH-104): TASK-020 part 020-B is merged (the runner and the AppDb types exist); the idempotency platform folder takes AppDb as a type and imports no value from the generated client
 - 4xx COMPLETION OUTSIDE THE ROLLED-BACK HANDLER TRANSACTION (D-TASK029-16/-17; PR #56 code review R1-M1 and R2-m1; PR56-SEC-09; ADR-0014 stores 2xx and 4xx responses; D-ARCH-143): since PR #56 a status of 400 or more that a handler RETURNS rolls the handler transaction back, so the idempotency completion can no longer ride that transaction — a returned 4xx is completed in its OWN short transaction after the rollback and before the response is sent, so a replay answers the stored 4xx without running the handler again; a returned or thrown 5xx leaves NO completion and releases the key, so a retry executes again (ADR-0014); a 2xx completes inside the handler transaction as before (atomic with the business change and its audit entry); order after a rollback: the FAILED audit entry of a 409 or 422 first, then the completion; a failed completion write answers the original status and releases the key (the retry runs a request that changed nothing); the completion transaction is admitted under the same tenant bulkhead; tests: a returned 409 replayed with the same key answers the stored 409 and the handler ran once; a returned 500 replayed runs the handler twice; a failed completion write leaves no row and no stuck key; KEEP (PR56-SEC-14 = code review R2-n2, closed in PR #56 by D-TASK029-25a): a transaction none route that returns 400 or more reports committed false and schedules no afterCommit — one rule for every route; the edits of this task to execute.ts keep that rule and its test
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-038-01 … AT-US-038-09: all 9 scenarios of US-038, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -240,11 +252,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-073) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
 | REQs | REQ-API-014, REQ-SEC-005, REQ-SEC-006, REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 |
 | NFRs | NFR-SEC-005 |
-| Spikes / security / decisions | PR21-SEC-01, D-ARCH-084, D-ARCH-125, PR48-SEC-06, D-TASK027-11, D-ARCH-134, T-39, SEC-TC-15, PR56-SEC-03, D-SEC-PR56-01, D-ORCH-109, D-ARCH-142 |
+| Spikes / security / decisions | PR21-SEC-01, D-ARCH-084, D-ARCH-125, PR48-SEC-06, D-TASK027-11, D-ARCH-134, T-39, SEC-TC-15, PR56-SEC-03, D-SEC-PR56-01, D-ORCH-109, D-ARCH-142, PR61-SEC-12, D-SEC-PR61-03, D-ORCH-135 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-036 |
-| Batch · locks | 1.2 · api-ratelimit, api-authz, api-routing |
+| Batch · locks | 1.2 · api-ratelimit, api-authz, api-routing, pkg-audit-redaction |
 | Branch | `feat/TASK-041-valkey-backed-rate-limiting-per` |
 | Priority | Must · demo-critical |
 
@@ -255,6 +267,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - packages/config rate-limit keys
 - apps/api/src/platform/rate-limit/denial-budget.ts (per-actor denial budget port: Valkey-backed, in-memory fallback)
 - apps/api/src/platform/authz/authorise.ts (refuse takes the budget before capture.denied) and apps/api/src/platform/routing/pipeline.ts (the budget is composed into the authorise slot)
+- packages/audit/src/network.ts (+ test): IPv4-mapped addresses unmapped from the parsed groups (PR61-SEC-12)
 
 **Acceptance tests to write**
 - All US-040 scenarios (429 problem+json, RateLimit-* headers, shared across 2 API replicas)
@@ -262,12 +275,13 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - AT-US-087-04 (D-ARCH-125; PR #42 code review R1-m5; ADR-0016 am. item 1; EC-A12): this task owns the trusted proxy chain — the Express trust-proxy setting is derived from TRUST_PROXY_HOPS (hops or CIDRs of the edge) in the api composition, so req.ip is the first untrusted hop; api test: a request whose X-Forwarded-For carries a forged leading address from an untrusted hop yields req.ip (and therefore the audit entry IP that TASK-029 copies and the step-0 limiter key) equal to the first untrusted hop, never the forged value; the local edge proxy in Compose counts as one trusted hop; US-087 is partial here
 - RBAC MATRIX SEAM (PR48-SEC-06; PR #48 code review R1-m3; D-TASK027-11; D-ARCH-134): when the step-0 per-IP limiter becomes real, the generated matrix (tests/generated/rbac) needs a seam to pass it — a createApp option reachable only from tests (no environment variable or configuration switch) plus a test that the production composition passes the real limiter; the seam is listed in the still-stubbed list of the matrix app (TASK-289) and retired like the credential seams when its owner lands
 - T-39 PER-ACTOR DENIAL BUDGET (threat-model T-39, MEDIUM; PR56-SEC-03 = PR #56 code review R1-m3; D-SEC-PR56-01; D-ORCH-109; D-ARCH-142; DUE before the first route with a catalogued permission is registered in moduleRegistry: TASK-049 depends on this task and every identity and organisation route task descends from TASK-049 (generator-verified); the route tasks of wave 2 and later that do not descend from it — TASK-087 quote, TASK-091 guestquote, TASK-092 saga and the like — start after batch 1.2 by wave order, and the orchestrator does not back-fill a route task with a catalogued permission ahead of this task): authorisation runs before the route limiter (DR-A08), so the authorise slot takes one unit of a per-actor budget BEFORE it writes PERMISSION_DENIED; key = the organisation id (or the literal system for an organisation-less principal), a colon and the actor id (an anonymous request answers 401, which is not audited, and stays with the step-0 per-IP limiter); window 60 s; AUTHZ_DENIAL_BUDGET_PER_MIN in packages/config (default 20, validated 1..600); (a) denials 1..N of a window are audited one by one and answer 403 as now (D-TASK029-06 unchanged: a failed write answers 500 or 503, never a silent 403); (b) denial N+1 writes ONE aggregated PERMISSION_DENIED entry (details: aggregated true, threshold, window_seconds, window_ends_at; no entity id) and answers 429 RATE_LIMITED with Retry-After = the rest of the window; (c) every further denial of the window writes nothing and answers 429; (d) the number suppressed is kept under a second key (TTL 24 h) and is written as details.suppressed_in_previous_window on the first audited denial of the same actor in a later window; a counter metric per rate class and the request log (status 429) carry it meanwhile — one actor therefore costs at most N+1 audit transactions a minute; Valkey outage: the budget falls back to an in-memory per-instance counter with an ERROR security event (the ADR-0016 item 8 rule for the auth class), never to unlimited writes; tests: [SEC-TC-15] N+2 denials in one window give N entries, one aggregated entry and two 429 answers, and the first denial of the next window carries suppressed_in_previous_window = 1; two API replicas share one budget; a store failure uses the fallback and logs the event; the k6 denied-flood case (p95 and 503 rate of the legitimate writes of the same tenant stay inside their budget while a Viewer floods) stays with qa-lead in the abuse suite; the aggregated-entry shape is for security-analyst to confirm against PR56-SEC-03 before dispatch
+- PR61-SEC-12 (INFO, CWE-1289; D-SEC-PR61-03; D-ORCH-135): network.ts unmaps an IPv4-mapped IPv6 address from its parsed groups, so every spelling (::ffff:a.b.c.d, ::ffff:7f00:1, the expanded 0:0:0:0:0:ffff:... forms, upper case) is coarsened as the IPv4 address it carries, for the audit IP index and for the trusted-proxy chain of this task; one test row per spelling
 - AT-US-040-01 … AT-US-040-17: all 17 scenarios of US-040, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-087-01 … AT-US-087-08 that belong to its layer; US-087 closes in TASK-073
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
-- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/config/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`packages/audit/**`, `packages/config/**`, `apps/api/src/platform/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-042 — Localisable strings, en/es/fr parity and ICU messages (i18next-icu), namespaces
@@ -307,7 +321,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-011 **DC** (M0 Must) Transactional outbox and at-least-once relay |
 | REQs | REQ-PLAT-016, REQ-PLAT-017 |
 | NFRs | NFR-RES-004, NFR-SCALE-002 |
-| Spikes / security / decisions | PR2-SEC-05, PR11-SEC-05, D-ARCH-074, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-084 |
+| Spikes / security / decisions | PR2-SEC-05, PR11-SEC-05, D-ARCH-074, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-084, D-SEC-PR64-02, PR64-SEC-13, D-ORCH-134 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-039, TASK-016 |
@@ -320,6 +334,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - apps/api/src/platform/outbox/writer.ts
 - apps/worker/src/processors/outbox-relay/**
 - packages/shared/src/events/<module>.ts (aggregated index)
+- apps/api/src/platform/queues/producer.ts (+ test): an invalid tracestate is dropped; producer queues from a factory with a class-only error listener (PR #64 R2-n3/R2-n5, PR64-SEC-13)
 
 **Acceptance tests to write**
 - All US-011 scenarios (event committed with the business row; relay crash -> redelivery, consumers idempotent)
@@ -327,6 +342,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - AT-US-008-03 outbox hop (D-062): `outbox_events.correlation_id` is set by the writer from the request context of the business transaction, and the relay copies that value into the `correlation_id` of the payload v2 job it enqueues — a correlation ID never changes between the row and the job (test: row value equals job payload value equals the originating X-Correlation-Id)
 - PR19-SEC-01 CONSUMER (D-ARCH-080): outbox_events is reached only through the platform/outbox port via systemDelegates(tx) — no module repository addresses it (the TASK-020 lint rule allow-lists apps/api/src/platform/outbox/** and the worker relay); the writer signature stays TenantDb-only as the line above requires
 - D-ARCH-106 (ADR-0005 am. 11 item 18): outbox.publish(db, event) inside the handler transaction is the sanctioned way to cause an effect after commit (notifications, saga steps, Valkey writes that must follow a commit such as session revocation); a positive T-83 fixture pins it (outbox is never added to the lint names option) and apps/api/src/platform/outbox/writer.ts is a whole-file T-83 root
+- PR #64 code review R2-n3 (D-ORCH-134; D-SEC-PR64-02 keeps the strict check): payload v2 refuses empty and blank tracestate list members that W3C Trace Context 3.3.1.1 allows, so the producer checks an inbound tracestate with the payload check and DROPS an invalid one (W3C: discard on parse failure), keeping traceparent, instead of refusing the enqueue; unit rows: a=b,,c=d and a=b, are dropped and the job is enqueued, a valid value is kept
+- PR #64 code review R2-n5 and PR64-SEC-13 (INFO; condition on this task, D-SEC-PR64-02): every queueFor queue of the api producer comes from the worker openQueue factory with the queue profile, or from an api-side factory that attaches a class-only error listener, with its own AUTH-refusal test against a fake RESP server (no password copy on stderr; the PR64-SEC-01 class) and a mutant without the listener turning it red; the import-level bullmq lint rule (no new Queue( outside a factory) belongs to the next lint-lock holder
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-011-01 … AT-US-011-06: all 6 scenarios of US-011, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -432,11 +450,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-078 **DC** (M0 Must) Tenant context in worker jobs |
 | REQs | REQ-RLS-008 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | SEC-P3-12, D-ARCH-025, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-086, D-ORCH-033, PR42-SEC-17, PR42-SEC-19, D-TASK029-09, D-TASK029-10, D-ARCH-143 |
+| Spikes / security / decisions | SEC-P3-12, D-ARCH-025, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-086, D-ORCH-033, PR42-SEC-17, PR42-SEC-19, D-TASK029-09, D-TASK029-10, D-ARCH-143, PR64-SEC-06, PR64-SEC-07, D-SEC-PR64-02, D-ORCH-132 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-043, TASK-016 |
-| Batch · locks | 1.4 · worker-ctx |
+| Batch · locks | 1.4 · worker-ctx, worker-queues |
 | Branch | `feat/TASK-047-tenant-context-worker-jobs-resolved` |
 | Priority | Must · demo-critical |
 
@@ -444,6 +462,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - prisma/migrations/<ts>_platform_job_context (SECURITY DEFINER, owner platform_definer, catalog C11)
 - apps/worker/src/platform/job-context.ts
 - apps/worker/src/platform/db/ (worker withTenantTx twin: per-tenant admission bulkhead inherited from TASK-025, D-ARCH-086)
+- apps/worker/src/platform/queues/consumer.ts and packages/shared/src/queues/payload-v2.ts (tenant context resolved before the processor; forgery-signal gaps; PR64-SEC-06/07)
 
 **Acceptance tests to write**
 - All US-078 scenarios
@@ -453,6 +472,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - ADMISSION BULKHEAD INHERITANCE (D-ARCH-086, D-ORCH-033 (4); data-model §7.7; TASK-025, batch 0.7, precedes this task): the worker withTenantTx twin admits at most DB_TENANT_MAX_CONCURRENT_TX concurrent job transactions per admission key per process BEFORE pool checkout, with the FIFO wait DB_TENANT_ADMISSION_WAIT_MS and queue depth 2 x cap — key rule as TASK-025 (the org_id resolved by platform.job_context; anonymous for an empty org id; operator for OPERATOR scope) — by reusing apps/api/src/platform/db/tenant-admission.ts (imported through the runtime door, or copied under a shared test that keeps both in lock-step; no second divergent implementation) and the TASK-025 configuration keys (no new keys); a rejection is the retryable 503 TENANT_CONCURRENCY_LIMIT, which surfaces to the BullMQ attempts and backoff policy (no new retry mechanism); test: with the cap at 2, three concurrent steps of one organisation make the third wait and then fail retryably while a step of another organisation completes (worker twin of the TASK-033 two-tenant scenario)
 - D-ARCH-103: the worker twin takes AppDb, AppTransactionClient and Prisma as types from @platform/api/runtime and builds no client and no second composition; precondition: TASK-020 part 020-B is merged
 - JOB PORT PARITY (PR42-SEC-17 and PR42-SEC-19, both routed to this task for the job port; D-TASK029-09/-10; found at fold 9, D-ARCH-143): the worker withTenantTx twin carries the same two rules as apps/api — an audit write whose start is deferred (microtask hops, after a detached statement) is settled before the commit decision (statement tracking and the setImmediate loop), and write and flush return already-handled promises so a voided audit write that fails is never an unhandled rejection that ends the process; one shared implementation through the runtime door, or a parity test that runs the same cases against both twins; a job whose audited write is first started from a timer is the documented residual and gets one negative case in the worker suite
+- PR64-SEC-07 (INFO), tenant-context half (D-SEC-PR64-01/02): the consumer resolves platform.job_context(kind, id) BEFORE the processor and hands it the resolved { orgId, actorType, actorId } and the tenant-transaction factory, so no processor can open a tenant transaction with an organisation of its own choosing; a processor that tries another organisation gets the RLS refusal (integration case)
+- PR64-SEC-06 (INFO), unless TASK-039 closed it first: the forgery-signal gaps of payload v2 (case and nested tenant-key spellings flagged as job_context_mismatch, an own __proto__ key refused and flagged, the issue list capped)
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-078-01 … AT-US-078-04: all 4 scenarios of US-078, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -500,9 +522,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Field | Value |
 |---|---|
 | Stories (completes) | US-015 **DC** (M0 Must) Register an account with a compliant password |
-| REQs | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003 |
+| Stories (partial; completed by TASK-231) | US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
+| REQs | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072, D-ORCH-039, PR43-SEC-01, D-SEC-PR43-01, D-ARCH-123, D-ARCH-125, D-SEC-PR56-01, D-ARCH-141 |
+| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072, D-ORCH-039, PR43-SEC-01, D-SEC-PR43-01, D-ARCH-123, D-ARCH-125, D-SEC-PR56-01, D-ARCH-141, D-PM-068, D-ORCH-132 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-037, TASK-041, TASK-029, TASK-043, TASK-040, TASK-028 |
@@ -526,7 +549,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - SEC-TC-14 (D-ORCH-039; threat model T-29; ADR-0006 am. 3 and 16; named on this sheet because the manifest parks it in required_cases_pending with this task as owner, checkpoint v0.1.0-m0): a unit test whose title carries [SEC-TC-14], run against the PasswordHasher port with the real pre-hash: two 100-byte passwords that share their first 72 bytes hash to distinct values and neither verifies against the hash of the other, while each verifies against its own (salted hashes differ even for equal input, so the cross-verify pair is the real assertion, and raw bcrypt over the bytes would make the pair collide); after this task merges qa-lead moves the ID from required_cases_pending back to unit.required_cases in the next activation PR
 - PR43-SEC-01 C2 REVIEW REQUIREMENT (D-SEC-PR43-01; PR #43 code review R1-M2; D-ARCH-125): if PR #43 merged with a registration-only API_CASES set, no tenant, user or guest route with a path parameter of this task merges before the executable cases of the TASK-027 line exist; a bare operationId string never satisfies the gate; the reviewer checks the generated case list for every route this task mounts
 - FIRST AUDITED MODULE ROUTE (D-SEC-PR56-01 condition 1; D-ARCH-141): this task registers the first audited route in moduleRegistry, so TASK-028 (tokeniser, IP index and user-agent parser wired into createAuditCapture) is a dependency; the route mounts in the production composition with no test-only tokeniser, and the T-39 denial budget of TASK-041 (already a dependency) is on main before any permission-gated route follows
+- [AT-US-062-06] (creation at registration; status and role-set changes in TASK-231; D-PM-068): the registration transaction writes one audit entry for entity `membership` with new status ACTIVE and role set Owner, next to the user and organisation entries US-015 already asserts
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
+- MERGE PREREQUISITE TASK-292 (= TASK-036-F1; PR #63 code review R1-m2; D-ORCH-132; D-SD-001): the error-catalogue scan sees domain error classes before this task, the first module after TASK-037 that adds them, merges
 - AT-US-015-01 … AT-US-015-12: all 12 scenarios of US-015, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-062-01 … AT-US-062-06 that belong to its layer; US-062 closes in TASK-231
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -587,11 +614,12 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-080 scenarios
 - ADR-0005 am. 10 item 11 / data-model §4.3 as widened 2026-11-12 (PR7-SEC-04, PR7-SEC-12 d; D-ARCH-065): the trigger raises GUEST_DECLAIM_FORBIDDEN (23514) when OLD.org_id IS NOT NULL AND NEW.org_id IS DISTINCT FROM OLD.org_id, and when NEW.guest_token_hash IS NOT NULL AND NEW.guest_token_hash IS DISTINCT FROM OLD.guest_token_hash; the four forbidden transitions (org -> NULL, org A -> org B, NULL -> hash, hash H1 -> H2) are each tested AS THE SUPERUSER so RLS is bypassed and the trigger alone is proven; the legitimate claim (NULL -> org with hash -> NULL) succeeds under the claim context; app.guest_token_hash is non-empty only on routes declaring `tenancy: guest` and on the claim operation (every other route binds the empty string)
 - ADR-0005 am. 10 item 15 (PR7-SEC-13): the claim repository uses `expectAffected(result, 1)` for its state-transition UPDATE and the unit test shows that 0 affected rows raises (the service then re-reads -> 200 / 409 per ADR-0005 §Guest rows)
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-080-01 … AT-US-080-07: all 7 scenarios of US-080, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
-- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`, `tools/db/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-052 — Sign in with email and password: ES256 access token, session, LOGIN audit, authenticator middleware
@@ -627,6 +655,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - ADMISSION CLASS auth (D-ARCH-120; ADR-0007 am. 11 item 1; TASK-284 admitcls is a dependency of this task): createSession declares rate class auth, so its transactions are admitted under the auth reserve and a public flood cannot refuse sign-in; api test (TASK-284 merged): 15 slow public-class requests in flight leave createSession answering non-503 at its normal rate
 - RBAC MATRIX SEAM RETIREMENT, bearer kind (PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task deletes the bearer branch of resolvePrincipal in tests/generated/rbac/matrix-app.ts and presents a real test credential (an ES256 access token minted with the test key) through the real authenticate slot, so every [session] row of the matrix runs the production authenticator; the committed matrix is regenerated and its drift test is green; TRIPWIRE: the matrix app exports the list of still-stubbed credential kinds (TASK-289) and a test compares it with the authenticators mounted by createApp — a kind that is both mounted and stubbed fails; MERGE PREREQUISITE: TASK-289 (TASK-027-F: PR48-SEC-01, R1-m1, R1-n2 foreign-credential comparison) has merged — a dependency edge added by D-ARCH-137, so this task is not dispatched before it
 - USER ENTRIES CARRY ROLES AND SESSION; source_app IS VERIFIED (REQ-AUDIT-002, AT-US-087-01; PR #56 code review R1-m5; PR56-SEC-07 first half; PR56-SEC-05; D-SEC-PR56-01; D-ORCH-109; D-ARCH-143): Principal gains sessionId (the verified sid claim) and roleKeys (the role keys from which the permission set of the request was resolved — the access token carries no roles, ADR-0006), and entryFor writes them to session_id and actor_roles on every USER entry, the LOGIN and PERMISSION_DENIED entries included; for a principal with a session source_app comes from the verified app claim of the access token and never from X-Client-App: web when the claim says web, admin ONLY when the claim says admin and the principal scope is OPERATOR, anything else api; a request without a session (anonymous, guest quote token, signature) may still say web through X-Client-App and never admin — that value is client-asserted and the viewer says so (TASK-073 line); tests: a tenant member sending X-Client-App: admin records web (the claim of its token), never admin; an operator session issued for the admin app records admin; a USER entry has a non-empty actor_roles and the session id of the token; fixtures that build a Principal by hand are updated in the same PR; TASK-060 keeps roleKeys in step when the live resolution replaces this one
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-017-01 … AT-US-017-06: all 6 scenarios of US-017, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -720,6 +749,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-ARCH-109 (ADR-0006 am. 17; ADR-0008 am. 5; PR32-SEC-16, code review R2-m4): the cookie authenticator reads __Host-rt_web and __Host-rt_admin only on routes whose auth set contains refresh-cookie (refreshSession, logoutSession, getCsrfToken); on every other route the cookie is not parsed, hashed or looked up, and a current, rotated, revoked or garbage cookie changes nothing: no 401, no family revocation, no TOKEN_REUSE_DETECTED, no security event, no change to Cache-Control; when both cookies arrive (Compose shares localhost across the web and admin ports) the one whose app matches the app of the request (host or edge virtual host, Origin must agree where the browser sends it) is read and the other is ignored unevaluated, and no match gives 401 AUTH_REQUIRED without touching token state; the two cookie names appear in exactly two modules, packages/shared/src/http/credentials.ts and the cookie module (a repository test greps for them); api tests: createSession, registerUser, createQuote, public tracking and listCountries with a stale cookie answer as without it, a [session] route with only a cookie is 401, and a rotated cookie sent to createSession revokes nothing
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the cookie authenticator learns that a refresh cookie is present only through presentedKinds(req.headers, route.auth), and parses the cookie header itself only after that, on the three refresh-cookie routes, to pick the one cookie by app (the TASK-055 D-ARCH-109 line); it builds the permissions of the refreshed principal with readonlySet; it calls markCredentialsRead(res) together with its decision for a current, rotated, revoked, expired or absent cookie alike; private, no-store on 401 SESSION_REVOKED, SESSION_EXPIRED and AUTH_REQUIRED comes from the descriptor test of the problem handler ([refresh-cookie] has no anonymous member, so every answer on the three routes is private whatever the authenticator marked); x-csrf-token is read by the csrf slot (TASK-048) and x-csrf-token, cookie and authorization are refused in schema.headers by 020-C (PR38-SEC-03), so no identity handler receives the cookie or the token; api tests: a reuse-detected cookie answers 401 private, no-store with the family revoked and markCredentialsRead called exactly once; a stale cookie plus a valid bearer on refreshSession takes the cookie path and the bearer is never parsed (spy)
 - RBAC MATRIX SEAM RETIREMENT, refresh-cookie kind (PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task deletes the refresh-cookie branch of resolvePrincipal in tests/generated/rbac/matrix-app.ts and presents real __Host-rt_web and __Host-rt_admin cookies (sessions created by the test) through the real cookie authenticator on the three refresh-cookie routes; the admin refresh cookie stays a foreign credential on every other route (TASK-289 rows); regenerated matrix, drift test green, still-stubbed-kinds tripwire of TASK-052 passes; PR48-SEC-01 must have merged (TASK-289) before this task merges (transitively enforced through TASK-052)
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-018-01 … AT-US-018-11: all 11 scenarios of US-018, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -777,6 +807,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-023 scenarios
 - SEC-TC-55 (recovery part): id-secret form, one HMAC compare per attempt, per-code salt
 - SEC-TC-12: recovery code is a single HMAC lookup; p95 isolation assertion kept
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-023-01 … AT-US-023-08: all 8 scenarios of US-023, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -851,17 +882,18 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-068 **DC** (M0 Must) Request pipeline order, 401/403 outcomes and live permission resolution<br>US-076 **DC** (M0 Must) Operator cross-tenant scope |
 | REQs | REQ-RBAC-006, REQ-RBAC-008, REQ-RLS-006 |
 | NFRs | NFR-SEC-011, NFR-TENANT-002 |
-| Spikes / security / decisions | PR8-SEC-07, T-32, PR48-SEC-03, PR48-SEC-05, PR48-SEC-06, D-SEC-PR48-01, D-ORCH-092, D-ARCH-134, D-ARCH-137, PR56-SEC-07, PR56-SEC-13, D-SEC-PR56-02, D-ARCH-143 |
+| Spikes / security / decisions | PR8-SEC-07, T-32, PR48-SEC-03, PR48-SEC-05, PR48-SEC-06, D-SEC-PR48-01, D-ORCH-092, D-ARCH-134, D-ARCH-137, PR56-SEC-07, PR56-SEC-13, D-SEC-PR56-02, D-ARCH-143, PR60-SEC-01, PR60-SEC-06, D-SEC-PR60-01, D-SEC-PR60-02, D-SD-001 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
-| Depends on | TASK-056, TASK-020, TASK-013, TASK-289 |
-| Batch · locks | 1.7 · api-authz, api-audit-mw, api-routing |
+| Depends on | TASK-056, TASK-020, TASK-013, TASK-289, TASK-283 |
+| Batch · locks | 1.7 · api-authz, api-audit-mw, api-routing, tests-gen-rbac |
 | Branch | `feat/TASK-060-request-pipeline-order-401-403` |
 | Priority | Must · demo-critical |
 
 **Files / modules**
 - apps/api/src/platform/authz/{authorise-mw.ts, permission-cache.ts, operator-scope.ts, effective-permissions.repository.ts}
 - apps/api/src/platform/audit/{capture.ts, descriptor-runtime.ts} + apps/api/src/platform/routing/define-route.ts (auditTargetOrgId on operator-cross-tenant routes with a mount refusal; a DENIED path for a handler-raised 403)
+- tests/generated/rbac/runner.ts (fillPath and Express 5 *name wildcards; PR60-SEC-06)
 
 **Acceptance tests to write**
 - All US-068 and US-076 scenarios
@@ -869,6 +901,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - T-32 OWNER CONFIRMED (D-ARCH-134; PR48-SEC-05 item 4 and PR #48 security record 5.7; D-SEC-PR48-01 (2); D-ORCH-092; threat-model T-32, AC-06, R-03; ADR-0005 cross-tenant 404): (a) a platform gate after the permission gate and before any slot that can query — for route.tenancy = tenant and a path parameter orgId, req.params.orgId !== principal.orgId raises AppError(NOT_FOUND) (404 before any query), compared with the token active organisation only, never with a membership list (US-081 switch-organisation must not weaken it); (b) the R-03 build rule: on tenant routes only the whole-segment path parameter orgId may name an organisation — defineRoute or the route-metadata test refuses organisationId, orgID, targetOrgId or an orgId inside a segment, so the matrix enumeration cannot miss a route; (c) the [SEC-TC-01] registry case of tests/generated/rbac becomes the acceptance test of this gate, with the route-reached positive control of PR48-SEC-05 item 1 (the same caller with its own organisation first, x-rbac-matrix: authorised) and an AC-06 variant once the principal carries more than one organisation; DUE before the first {orgId} route merges (wave 8; holds by batch order)
 - RBAC MATRIX AND LIVE PERMISSIONS (PR48-SEC-06; D-ARCH-134): role principals take permissions from ROLES through the matrix seam, so the matrix proves the gate on the seeded grants and not the live effective-permission query; when resolution goes live this task adds a seeded-database variant of the role columns (one row per role through the real resolver and the 5 s cache) or names the gap for G3 in its PR body; MERGE PREREQUISITE: TASK-289 (TASK-027-F) has moved the oracle to the @platform/authz/matrix subpath with the restricted-import and boundaries arm (PR48-SEC-03), so a production authorise cannot import the oracle — a dependency edge added by D-ARCH-137
 - OPERATOR ACTIONS NAME THE TARGET ORGANISATION; HANDLER-RAISED 403 IS DENIED (PR56-SEC-07 second half, which had no owner until fold 9; PR56-SEC-13; REQ-RLS-006, DR-A15, DR-A10; ADR-0005 operator cross-tenant scope; data-model audit_entries.target_org_id and scope_org_id; D-SEC-PR56-02; D-ARCH-143): (a) defineRoute gains auditTargetOrgId — a resolver over the VALIDATED request, like auditEntityId — for routes with tenancy operator-cross-tenant; the capture writes its value to target_org_id on the SUCCESS and FAILED entries of the request (a PERMISSION_DENIED entry is written before validation and carries none); an AUDITED operator-cross-tenant route that declares no resolver refuses to mount (fail closed, the D-TASK029-05/-21 pattern), and a route whose request names no single organisation declares a resolver that returns null; first consumer TASK-073 (already a dependent of this task); (b) the live effective-permission resolution also feeds Principal.roleKeys (TASK-052 line), so actor_roles follows a role change inside the 5 s cache window exactly as the permissions do; (c) a 403 AUTHZ_DENIED thrown or returned by a handler after the authorisation slot gets one PERMISSION_DENIED entry with outcome DENIED, written in its own transaction after the rollback (the T-39 denial budget of TASK-041 applies to it as well), and the [PR56-SEC-13 OPEN] pin of TASK-033 is flipped in this PR; tests: an operator read scoped to organisation B writes target_org_id = B and is found under scope_org_id = B; a fixture route without the resolver fails createApp naming method and path; a handler-raised 403 writes exactly one DENIED entry
+- MERGE PREREQUISITE TASK-283 (PR60-SEC-01, LOW, CWE-693; D-SEC-PR60-01; dependency edge added at the plan fold of D-SD-001): the D-ARCH-136 (b) boundaries arm that stops a helper in test/ or __tests__/ under apps/*/src or packages/*/src from laundering the RBAC oracle into production code, its laundering fixture and the test/__tests__ prune of the images are on main before this task starts
+- PR60-SEC-06 (INFO; D-SEC-PR60-02): fillPath in tests/generated/rbac/runner.ts does not fill Express 5 *name wildcards, which org-scope now enumerates, so the SEC-TC-01 case of a wildcard tenant route would be vacuous; either one shared path-parameter pattern serves org-scope and fillPath (wildcards filled), or the R-03 rule refuses *orgId on tenant routes; a fixture wildcard route shows the case is not vacuous (a mutant that skips the wildcard turns it red)
 - AT-US-068-01 … AT-US-068-06: all 6 scenarios of US-068, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-076-01 … AT-US-076-04: all 4 scenarios of US-076, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -1043,6 +1077,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-052 scenarios
 - PR #13 code review m4 (a) — first consumer of the Dataset contract extension for UUID foreign keys (prisma/README.md "Dataset contract limits"; prisma-seed lock): fx_snapshots rows reference parent ids generated per environment, so this task adds { fk: { column, table, naturalKey } } resolution (or deterministic seedId ids per data-model §9.3) to the seed framework with tests, honouring the HARD RULE never to list a column the runtime or a reviewer mutates
+- MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-052-01 … AT-US-052-07: all 7 scenarios of US-052, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1227,16 +1262,17 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-081, TASK-081) | US-097 **DC** (M0 Must) Audit viewer: filterable list<br>US-098 **DC** (M0 Must) Audit viewer: entry detail with diff, and audited viewing |
 | REQs | REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011, REQ-AUDIT-019, REQ-AUDIT-023, REQ-AUDIT-020, REQ-AUDIT-022 |
 | NFRs | NFR-AUDIT-001, NFR-PERF-006 |
-| Spikes / security / decisions | D-ARCH-125, D-TASK285-02, PR52-SEC-02, D-ORCH-099, D-ARCH-135, PR54-SEC-02, D-SEC-PR54-03, PR56-SEC-05, D-ARCH-143, D-ARCH-144 |
+| Spikes / security / decisions | D-ARCH-125, D-TASK285-02, PR52-SEC-02, D-ORCH-099, D-ARCH-135, PR54-SEC-02, D-SEC-PR54-03, PR56-SEC-05, D-ARCH-143, D-ARCH-144, D-ORCH-127, D-ORCH-135, D-SEC-PR61-03, D-SD-001 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-045, TASK-060, TASK-029, TASK-030, TASK-031 |
-| Batch · locks | 1.10 · mod-audit-viewer |
+| Batch · locks | 1.10 · mod-audit-viewer, lint |
 | Branch | `feat/TASK-073-audit-viewer-api-filterable-list` |
 | Priority | Must · demo-critical |
 
 **Files / modules**
 - apps/api/src/modules/audit/{routes,controller,service,repository,schemas}.ts
+- eslint.config.mjs (AUDIT_VAULT_READERS: modules/audit may import the decrypt pair but never re-exports it; PR #61 R2-n5)
 
 **Acceptance tests to write**
 - API scenarios of US-097 and US-098 (operator scope, filters by org + date, one VIEW entry per list request)
@@ -1244,6 +1280,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - OPENAPI AUDIT ACTION ENUMS (D-TASK285-02; PR #52 code review R1-m1; PR52-SEC-02; D-ORCH-099; D-ARCH-135): the contract enums AuditEntry.action, AuditEntrySummary.action and filter[action] list 18 actions; the api-designer change request adding MFA_RECOVERY_USED and SESSION_REVOKED lands WITH this task (the first consumer of the enums; openapi:types regenerated; the contract change is a change request to api-designer, not an in-task edit) and the compile-time gap pin of packages/audit/src/actions.test.ts flips to equality in the same PR; DUE before this task merges — D-ORCH-099 said before TASK-059/061 emit, corrected by D-ARCH-135: emission is DB-side (the CHECK of TASK-285) and no route exposes entries before this viewer; api test: an entry carrying each new action is read back through the viewer and validates against the contract
 - MERGE PREREQUISITE: PR54-SEC-02 (b)(c) (D-SEC-PR54-02/-03; D-ARCH-144): before this task adds its first raw statement both raw-SQL lexer copies refuse the table_to_xml, schema_to_xml, database_to_xml and cursor_to_xml reader family anywhere and alter as a run-time first keyword — owner TASK-030 chain, already a dependency of this task; the PR body cites the merge commit of that part; if TASK-030 merged without it (a recorded deviation) this task waits for the follow-up PR and does not add the names itself (a module task never edits the platform guard or its lint twin)
 - source_app IS LABELLED (PR56-SEC-05; D-ARCH-143): the viewer exposes source_app as verified for entries of principals with a session and as client-asserted for entries written without one (TASK-052 line); the contract field description says so — the wording rides the same api-designer change request as the two audit actions above — and the admin audit screen shows the label (a follow-up line for its UI task)
+- AT-US-091-06 viewer half (PR #61 code review R1-m2 routed by D-ORCH-127; R2-n4): with the ID in the test title, a Compliance Auditor viewing an entry that contains redacted fields sees [REDACTED], and no response of the audit viewer routes returns the raw value to any role; TASK-028 proved the capture half
+- PR #61 code review R2-n5 (D-ORCH-135; supported by D-SEC-PR61-03): the audit viewer module may import decryptVaultValue and auditKeyOf but never re-exports them; AUDIT_VAULT_READERS in eslint.config.mjs refuses a re-export of the decrypt pair from modules/audit (export-from and export-star forms, in the barrel-reexport-only style), with one lint fixture per form, so a relative import of a viewer re-export is no longer lint-clean
 - AT-US-087-01 … AT-US-087-08: all 8 scenarios of US-087, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-097-01 … AT-US-097-10 that belong to its layer; US-097 closes in TASK-081
 - Covers the scenarios of AT-US-098-01 … AT-US-098-08 that belong to its layer; US-098 closes in TASK-081
@@ -1281,4 +1319,34 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **DoD notes**
 - Job payload v2 (identifiers only), tenant context from `platform.job_context`, deterministic job IDs, retries + DLQ, idempotent effects verified by a duplicate-delivery test, metrics per queue.
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-292 — TASK-036-F1: error-catalogue parity test gains the README section 11 table arm and a domain-error-class code scan
+
+| Field | Value |
+|---|---|
+| Stories (completes) | — |
+| Stories (partial; completed by TASK-036) | US-036 (M0 Must) Error catalogue and validation error format |
+| REQs | REQ-API-005, REQ-API-006 |
+| NFRs | — |
+| Spikes / security / decisions | D-ORCH-132, D-SEC-PR63-01, D-TASK036-03, D-SD-001 |
+| Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
+| Complexity | S |
+| Depends on | TASK-036 |
+| Batch · locks | 1.11 · shared-errors |
+| Branch | `feat/TASK-292-task-036-f1-error-catalogue` |
+| Priority | Must |
+
+> Scheduling note: Late follow-up task (plan fold D-SD-001) in the new batch 1.11 because every Wave 1 batch holds 4 tasks (same reason as batch 0.11, D-ARCH-125); its only dependency, TASK-036, is merged, so it can be dispatched as soon as the shared-errors lock is free.
+
+**Files / modules**
+- tests/generated/error-catalogue.test.ts (README section 11 table arm; domain-error-class scan)
+
+**Acceptance tests to write**
+- PR #63 code review R1-m1 (D-ORCH-132; D-TASK036-03 was accepted provided R1-m1 is done): the parity test parses the section 11 table rows of docs/03-architecture/api/README.md (a row starting with a back-quoted CODE and a three-digit status) and compares the code and status set with ERROR_CATALOGUE in both directions, failing with the code named; a mutant that drops or re-statuses one table row turns it red; the arm passes on the README as it stands when the task starts (the README wording that still names npm run api:check-errors and api:sync-errors is the api-designer change request of D-ORCH-132, not this task)
+- PR #63 code review R1-m2, option (a) (D-ORCH-132): the uncatalogued-code scan also reads SCREAMING_SNAKE string literals passed to new <Name>Error( and to super( inside a class that extends Error or AppError under apps/*/src and packages/*/src, with an explicit allow-list for the README section 11 codes that are not HTTP problem codes (carrier, payment-failure and audit-reason namespaces, and internal-only codes such as MEMBERSHIP_STATUS_NOT_WRITABLE of D-TASK037-08); AT-US-036-04 is re-proven against a planted domain error class with MY_NEW_ERROR (the test fails naming the code), an allow-listed internal code passes, and the scan reports the files it read
+- Covers the scenarios of AT-US-036-01 … AT-US-036-06 that belong to its layer; US-036 closes in TASK-036
+
+**DoD notes**
+- Test-only change (no production code, no new dependency); the README itself is not edited here; DUE before TASK-049 merges (its card carries the merge-prerequisite line); PR63-SEC-01 (uniformDetail) is NOT in this task: it is due before TASK-052 as routed by D-ORCH-132
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.

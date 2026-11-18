@@ -4,7 +4,7 @@ Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Pr
 
 Tasks: **28** (S 7 / M 21; opus 13 / sonnet 15; demo-critical 0) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 73.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** All 113 M0 Must stories merged; M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
+**Exit check:** 111 of the 113 M0 Must stories complete and US-061 and US-062 partial (D-PM-068; the `v0.1.0-m0` dossier names their six open route-level scenarios); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
 
 **Stories completed in this wave (22):** US-019, US-021, US-022, US-039, US-041, US-043, US-045, US-046, US-047, US-069, US-079, US-089, US-093, US-102, US-105, US-113, US-120, US-123, US-125, US-204, US-205, US-292.
 

@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { tasks as rawTasks, waves, sharedFileLocks } from './plan-data.mjs';
+import { tasks as rawTasks, waves, sharedFileLocks, waveExceptions } from './plan-data.mjs';
 
 const REPO = process.argv[2];
 const OUT = path.join(REPO, 'docs/04-plan');
@@ -46,9 +46,14 @@ const order = [...rawTasks].map((t, i) => ({ us: [], part: [], x: [], nfr: [], d
 const byKey = new Map();
 // Late tasks (late:true) are numbered after every planned task in ARRAY order (append-only), not by (wave, batch): a late task may be
 // scheduled in any batch without moving an existing ID (D-ARCH-125, sheet-fold 7; TASK-276..282 keep their IDs because they are listed in that order).
-let seq = 0; for (const t of [...order.filter(t => !t.late), ...order.filter(t => t.late).sort((a, b) => a.i - b.i)]) { t.id = `TASK-${String(++seq).padStart(3, '0')}`; byKey.set(t.k, t); }
+// A planned task that is rescheduled keeps its ID through idAt:[wave, batch] = the slot it was numbered in; its card stays at its old
+// array position, so it also keeps its rank inside that slot (D-SD-001: TASK-224/227/231 moved from Wave 8 into Wave 7 by D-PM-068).
+const numW = t => (t.idAt ? t.idAt[0] : t.w), numB = t => (t.idAt ? t.idAt[1] : t.b);
+const numbering = [...order].sort((a, b) => numW(a) - numW(b) || numB(a) - numB(b) || a.i - b.i);
+let seq = 0; for (const t of [...numbering.filter(t => !t.late), ...numbering.filter(t => t.late).sort((a, b) => a.i - b.i)]) { t.id = `TASK-${String(++seq).padStart(3, '0')}`; byKey.set(t.k, t); }
 const errors = [], warnings = [];
 if (byKey.size !== rawTasks.length) errors.push('duplicate keys');
+for (const t of order) if (t.idAt && (t.late || !Array.isArray(t.idAt) || t.idAt.length !== 2)) errors.push(`${t.k}: idAt must be [wave, batch] on a planned (not late) task`);
 
 // ---------- planned paths of a card and the security-integration trigger list (sheet-fold 9)
 // A file entry is free text: notes in parentheses are dropped, brace groups expanded, and what remains is split into path tokens.
@@ -89,7 +94,9 @@ for (const t of order) {
   for (const s of t.allStories) if (!stories.has(s)) errors.push(`${t.id}: unknown story ${s}`);
   t.reqs = [...new Set(t.allStories.flatMap(s => stories.get(s)?.reqs || []))];
   t.nfrAll = [...new Set([...t.nfr, ...t.allStories.flatMap(s => stories.get(s)?.nfrs || [])])].sort();
-  t.dc = t.allStories.some(s => stories.get(s)?.dc);
+  // A delivery-split exception names the tasks that carry the demo-critical part of the story (dcBy); the others are not demo-critical
+  // through it (D-PM-068: TASK-037 is, TASK-224 and TASK-231 are not).
+  t.dc = t.allStories.some(s => stories.get(s)?.dc && (!waveExceptions?.[s] || waveExceptions[s].dcBy.includes(t.k)));
   const pri = t.allStories.map(s => stories.get(s)?.moscow);
   t.priority = pri.includes('Must') ? 'Must' : pri.includes('Should') ? 'Should' : pri.includes('Could') ? 'Could' : 'Enabler';
   t.batchId = `${t.w}.${t.b}`;
@@ -124,7 +131,14 @@ for (const s of stories.values()) {
   if ((owner.get(s.id) || []).length > 1) warnings.push(`${s.id} completed by ${owner.get(s.id).map(t => t.id).join(', ')}`);
 }
 // 3. wave placement policy
-const pulled = [];
+// A recorded delivery-split exception (waveExceptions in plan-data.mjs) lets a story complete later than its band, up to `through`,
+// only while every dcBy task holds the story as partial and stays inside the original band (the demo-critical part is not delayed).
+const pulled = [], exceptions = [];
+for (const [sid, e] of Object.entries(waveExceptions || {})) {
+  if (!stories.has(sid)) { errors.push(`wave exception for unknown story ${sid}`); continue; }
+  if (!/^D-[A-Z0-9]+-\d+$/.test(e.decision || '')) errors.push(`wave exception ${sid}: decision ID missing`);
+  if (!Array.isArray(e.dcBy) || !e.dcBy.length) errors.push(`wave exception ${sid}: dcBy is empty`);
+}
 for (const s of stories.values()) {
   const t = (owner.get(s.id) || [])[0]; if (!t) continue;
   const last = Math.max(...(owner.get(s.id)).map(x => x.w));
@@ -132,6 +146,16 @@ for (const s of stories.values()) {
   if (s.moscow === 'Must' && s.ms === 'M0') allowed = s.dc ? [0, 2] : [0, 3];
   else if (s.moscow === 'Must' && s.ms === 'M1') allowed = s.dc ? [0, 6] : [0, 7];
   else allowed = [0, 9];
+  const exc = waveExceptions?.[s.id];
+  if (exc) {
+    for (const k of exc.dcBy || []) {
+      const d = byKey.get(k);
+      if (!d) errors.push(`wave exception ${s.id}: unknown dcBy task ${k}`);
+      else if (!d.part.includes(s.id) || d.w > allowed[1]) errors.push(`wave exception ${s.id}: ${d.id} must hold the story as partial inside waves ${allowed}`);
+    }
+    exceptions.push(`${s.id} (${s.ms} ${s.moscow}${s.dc ? ' DC' : ''}) completes in wave ${last} (band ${allowed}, exception through ${exc.through}, ${exc.decision}); partial in ${(exc.dcBy || []).map(k => byKey.get(k)?.id).join(', ')}`);
+    allowed = [allowed[0], exc.through];
+  }
   if (last < allowed[0] || last > allowed[1]) errors.push(`${s.id} ${s.ms} ${s.moscow}${s.dc ? ' DC' : ''} completes in wave ${last}, allowed ${allowed}`);
   if (s.moscow !== 'Must' && last < 8) pulled.push(`${s.id} (${s.ms} ${s.moscow}) -> wave ${last}`);
   if (s.moscow === 'Must' && s.ms === 'M1' && last <= 3) pulled.push(`${s.id} (M1 Must${s.dc ? ' DC' : ''}) -> wave ${last} (M0)`);
@@ -156,7 +180,7 @@ const mustStories = [...stories.values()].filter(s => s.moscow === 'Must');
 const secTriggers = new Map(order.map(t => [t.k, matchedTriggers(t.f)]));
 const secTasks = order.filter(t => secTriggers.get(t.k).length);
 
-console.log(JSON.stringify({ errors, warnings, pulled, tot, perWave: Object.fromEntries(Object.entries(stats).map(([w, s]) => [w, { ...s, batches: s.batches.size }])),
+console.log(JSON.stringify({ errors, warnings, pulled, exceptions, tot, perWave: Object.fromEntries(Object.entries(stats).map(([w, s]) => [w, { ...s, batches: s.batches.size }])),
   stories: { total: stories.size, must: mustStories.length, mustMapped: mustStories.filter(s => owner.has(s.id)).length, dc: [...stories.values()].filter(s => s.dc).length },
   secCritical: { all: secTasks.length, must: secTasks.filter(t => t.w <= 7).length },
   cp: { all: [cpAll.len, cpAll.chain.map(t => t.id + ':' + t.k).join(' > ')], m0: [cpM0.len, cpM0.chain.map(t => t.id + ':' + t.k).join(' > ')], must: [cpMust.len, cpMust.chain.map(t => t.id + ':' + t.k).join(' > ')], mustDays: [cpMustD.len, cpMustD.chain.map(t => t.id).join(' > ')], m0Days: [cpM0D.len, cpM0D.chain.map(t => t.id).join(' > ')] } }, null, 1));
@@ -216,7 +240,12 @@ for (const w of Object.keys(waves).map(Number)) {
     if (t.pull) L.push(`> Scheduling note: ${t.pull}.`, '');
     L.push('**Files / modules**', ...t.f.map(f => `- ${f}`), '');
     L.push('**Acceptance tests to write**', ...t.a.map(a => `- ${a}`));
-    for (const s2 of t.allStories) { const st = stories.get(s2); const n = st.scen || 0; const ids = n ? `AT-${s2}-01 … AT-${s2}-${String(n).padStart(2, '0')}` : `AT-${s2}-*`; L.push(t.us.includes(s2) ? `- ${ids}: all ${n} scenarios of ${s2}, with the IDs in the test titles (TEST-STRATEGY §6; map \`docs/05-quality/tests/gherkin-test-map.md\`)` : `- Covers the scenarios of ${ids} that belong to its layer; ${s2} closes in ${(owner.get(s2) || []).map(o => o.id).join("/")}`); }
+    for (const s2 of t.allStories) {
+      const st = stories.get(s2); const n = st.scen || 0; const ids = n ? `AT-${s2}-01 … AT-${s2}-${String(n).padStart(2, '0')}` : `AT-${s2}-*`;
+      const exc = waveExceptions?.[s2], split = exc && t.us.includes(s2) ? (partials.get(s2) || []).map(p => p.id) : [];
+      if (split.length) L.push(`- ${ids}: ${s2} completes here under the delivery split of ${exc.decision}: this task proves the scenarios that the card lines above assign to it and ${split.join(', ')} the rest, with the IDs in the test titles; the story is accepted when all ${n} pass in \`ac-trace.json\` (TEST-STRATEGY §6; map \`docs/05-quality/tests/gherkin-test-map.md\`)`);
+      else L.push(t.us.includes(s2) ? `- ${ids}: all ${n} scenarios of ${s2}, with the IDs in the test titles (TEST-STRATEGY §6; map \`docs/05-quality/tests/gherkin-test-map.md\`)` : `- Covers the scenarios of ${ids} that belong to its layer; ${s2} closes in ${(owner.get(s2) || []).map(o => o.id).join("/")}`);
+    }
     L.push('');
     L.push('**DoD notes**', ...t.kind.map(k => `- ${dodByKind[k]}`), ...(t.dod || []).map(d => `- ${d}`));
     const trig = secTriggers.get(t.k);

@@ -1,12 +1,12 @@
-# WAVE-07 — M1 non-DC Must, NFR verification tasks and the M1 exit-demo journeys
+# WAVE-07 — M1 non-DC Must, NFR verification tasks, the M1 exit-demo journeys and the organisation routes that complete US-061 and US-062 (D-PM-068)
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M1** · Priority band: **Must non-DC**
 
-Tasks: **34** (S 13 / M 21; opus 8 / sonnet 26; demo-critical 0) in **9** batches of ≤ 4 parallel tasks. Estimated effort ≈ 82.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **37** (S 13 / M 24; opus 9 / sonnet 28; demo-critical 0) in **11** batches of ≤ 4 parallel tasks. Estimated effort ≈ 91.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** All 218 Must stories merged; M1 demo journey green; NFR tasks evidence committed; lane C `release-candidate` run; ready for P6 (G3).
+**Exit check:** All 218 Must stories merged, US-061 and US-062 included (TASK-224 and TASK-231; all eleven scenarios pass in `ac-trace.json`, otherwise product-manager applies the rung-4 fallback of D-PM-068); M1 demo journey green; NFR tasks evidence committed; lane C `release-candidate` run; ready for P6 (G3).
 
-**Stories completed in this wave (33):** US-013, US-027, US-055, US-112, US-136, US-137, US-141, US-143, US-146, US-151, US-152, US-157, US-167, US-168, US-176, US-177, US-183, US-184, US-187, US-206, US-226, US-236, US-237, US-243, US-244, US-245, US-249, US-256, US-257, US-281, US-285, US-291, US-293.
+**Stories completed in this wave (40):** US-013, US-027, US-055, US-061 (DC), US-062 (DC), US-081, US-082, US-083, US-084, US-085, US-112, US-136, US-137, US-141, US-143, US-146, US-151, US-152, US-157, US-167, US-168, US-176, US-177, US-183, US-184, US-187, US-206, US-226, US-236, US-237, US-243, US-244, US-245, US-249, US-256, US-257, US-281, US-285, US-291, US-293.
 
 > **★ CHECKPOINT G3-ready** — all Must stories merged; orchestrator hands over to P6 (qa-lead, security-analyst, performance-engineer) for G3 while Wave 8 continues.
 
@@ -22,7 +22,9 @@ Tasks: **34** (S 13 / M 21; opus 8 / sonnet 26; demo-critical 0) in **9** batche
 | 7.6 | TASK-206 Pricing property-based tests<br>TASK-207 Batch track calls per carrier account with backoff and pending handling<br>TASK-208 Mock carrier tracking scenarios on an injected clock<br>TASK-209 Drafts list, resume, delete and 30-day expiry | pkg-pricing-tests<br>mod-tracking-poll<br>pkg-carriers-mock<br>mod-shipments-drafts, web-account-drafts |
 | 7.7 | TASK-210 Rate-limit public tracking lookups<br>TASK-211 Tenant isolation on every account route<br>TASK-212 CI gate for template and variable parity across locales<br>TASK-213 Address only booking-organisation users | mod-tracking-public<br>tests-account-iso<br>notif-parity<br>mod-notifications |
 | 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs<br>infra-tf<br>tests-load<br>tests-web-perf |
-| 7.9 | TASK-218 M1 exit-demo journeys<br>TASK-282 Developer README and CONTRIBUTING | e2e-demo<br>docs-dev |
+| 7.9 | TASK-218 M1 exit-demo journeys<br>TASK-224 Switch active organisation; organisation profile and creating a business organisation<br>TASK-282 Developer README and CONTRIBUTING | e2e-demo<br>mod-organisations<br>docs-dev |
+| 7.10 | TASK-227 Invite members into a business organisation; accept an invitation | mod-organisations |
+| 7.11 | TASK-231 Manage members with last-Owner and individual-organisation safeguards | mod-organisations |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
 
@@ -753,6 +755,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`tests/generated/rls/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-212 — CI gate for template and variable parity across locales
@@ -949,6 +952,38 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
+### TASK-224 — Switch active organisation; organisation profile and creating a business organisation
+
+| Field | Value |
+|---|---|
+| Stories (completes) | US-081 (M1 Should) Switch active organisation<br>US-082 (M1 Should) Organisation profile and creating a business organisation<br>US-061 **DC** (M0 Must) Organisation types and the single operator organisation |
+| REQs | REQ-ORG-006, REQ-ORG-008, REQ-ORG-009, REQ-ORG-001 |
+| NFRs | — |
+| Spikes / security / decisions | D-028, D-ARCH-152, D-ORCH-131, D-PM-068, D-SD-001 |
+| Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
+| Complexity | M |
+| Depends on | TASK-056, TASK-100 |
+| Batch · locks | 7.9 · mod-organisations |
+| Branch | `feat/TASK-224-switch-active-organisation-organisation-profile` |
+| Priority | Must |
+
+> Scheduling note: Scheduled in Wave 7 batch 7.9 by D-PM-068 and D-SD-001: it completes the M0 Must story US-061, so it is Must-band work due before G3 and not cuttable; its own Should stories US-081 and US-082 ride with it (a Should scenario that blocks the task may be deferred scenario by scenario while the routes ship); the ID keeps its Wave 8 numbering (idAt).
+
+**Files / modules**
+- apps/api/src/modules/organisations/{switch,profile}/**
+
+**Acceptance tests to write**
+- All US-081 and US-082 scenarios
+- CONTRACT CHANGE FOR createOrganisation (D-ARCH-152: approved change request, exact YAML in rulings/wave-1-batch-1.1-rulings.md section 3.3, applied verbatim; api/README section 18 item 1: the contract changes in this PR, with the route): OrganisationCreateRequest gains the OPTIONAL property type - string, enum OPERATOR, BUSINESS_CUSTOMER, PARTNER, INDIVIDUAL, default BUSINESS_CUSTOMER; required and additionalProperties false do not change; OrganisationPatch stays without type; one more request example, type_refused; in api/README.md one line in the amendments list and the ORG_TYPE_NOT_ALLOWED row of section 11 reworded (a createOrganisation request for a type other than BUSINESS_CUSTOMER); npm run openapi:lint with 0 errors and npm run openapi:types, with the regenerated packages/shared/src/api/types.gen.ts in the same commit; the Joi schema mirrors the property (valid over the four values, default BUSINESS_CUSTOMER) and the handler passes the validated value to createOrganisation of TASK-037, which refuses everything but BUSINESS_CUSTOMER; the web form and its Zod schema never send type
+- US-061 SCENARIOS THAT NEED THE ROUTES (D-ORCH-COORD-03 item 3, D-ORCH-131; D-ARCH-152), with the IDs in the test titles: AT-US-061-02 at the response - POST with type PARTNER, OPERATOR and INDIVIDUAL each answers 422 ORG_TYPE_NOT_ALLOWED and the organisations row count is unchanged, a value outside the enum answers 400 VALIDATION_ERROR, a request without type creates a BUSINESS_CUSTOMER organisation; AT-US-061-03 at the response - PATCH with type answers 400 VALIDATION_ERROR with sub-code UNKNOWN_FIELD; AT-US-061-04 - an anonymous POST answers 401 AUTH_REQUIRED; AT-US-061-05 - the refused PARTNER attempt leaves one audit entry with outcome FAILED, action CREATE and entity organisation, written outside the rolled-back transaction (REQ-AUDIT-010 writes no entry for a 400, which is why type must pass the schema). COMPLETES US-061 (D-PM-068); not cuttable; due before G3. TASK-037 carries the demo-critical part (AT-US-061-01 and the service and database halves of AT-US-061-02/03); if this task is unmerged at the Wave 7 exit, product-manager applies the rung-4 fallback of D-PM-068 (the route-level scenarios move to US-082 as appended scenarios) and the task returns to ladder rung 2
+- AT-US-081-01 … AT-US-081-05: all 5 scenarios of US-081, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-082-01 … AT-US-082-07: all 7 scenarios of US-082, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-061-01 … AT-US-061-05: US-061 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037 the rest, with the IDs in the test titles; the story is accepted when all 5 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+
+**DoD notes**
+- Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
 ### TASK-282 — Developer README and CONTRIBUTING: verified command reference (install, build, typegen, db:generate, migrate, seed, test lanes, compose)
 
 | Field | Value |
@@ -975,4 +1010,69 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **DoD notes**
 - Documentation task: no product code; the drift-guard test is the only code and needs no security record unless it touches an owned path
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-227 — Invite members into a business organisation; accept an invitation
+
+| Field | Value |
+|---|---|
+| Stories (completes) | US-083 (M1 Should) Invite members into a business organisation<br>US-084 (M1 Should) Accept an invitation |
+| REQs | REQ-ORG-010, REQ-ORG-011 |
+| NFRs | — |
+| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067, D-PM-068, D-SD-001 |
+| Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
+| Complexity | M |
+| Depends on | TASK-224, TASK-169, TASK-187 |
+| Batch · locks | 7.10 · mod-organisations |
+| Branch | `feat/TASK-227-invite-members-into-business-organisation` |
+| Priority | Should |
+
+> Scheduling note: Scheduled in Wave 7 batch 7.10 by D-PM-068 and D-SD-001: not cuttable while TASK-231 depends on it; the ID keeps its Wave 8 numbering (idAt).
+
+**Files / modules**
+- apps/api/src/modules/organisations/invitations/**
+
+**Acceptance tests to write**
+- All US-083 and US-084 scenarios
+- INVITATION IS THE PENDING STATE (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a)): inviting writes only the invitations row (PENDING, token hash, expires_at, role, locale) and never a memberships row nor a lookup of the address against users; 409 ALREADY_MEMBER compares the lower-cased address with the ACTIVE or SUSPENDED members of the inviting organisation only; acceptance creates the membership directly as ACTIVE with created_by = the inviter and invitation_id set and marks the invitation ACCEPTED in one transaction (audit: CREATE membership + UPDATE invitation, no token value); the pending-invitation list is served to holders of org:member:invite only (not org:read); api tests: after an invite no memberships row exists for the address, an organisation member cannot read the users row of the invitee before acceptance (RLS probe) and can after it
+- NOT CUTTABLE WHILE TASK-231 DEPENDS ON IT (D-PM-068): member management needs the invite route (AT-US-085-05, inviting into an INDIVIDUAL organisation), so this task merges before G3 together with TASK-224 and TASK-231; US-083 and US-084 stay Should, and product-manager may defer one of their scenarios that blocks the task while the route ships; senior-developer may later propose dropping the members -> invite dependency (D-PM-068 alternatives), which would return this task to rung 2
+- AT-US-083-01 … AT-US-083-12: all 12 scenarios of US-083, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-084-01 … AT-US-084-08: all 8 scenarios of US-084, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+
+**DoD notes**
+- Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-231 — Manage members with last-Owner and individual-organisation safeguards
+
+| Field | Value |
+|---|---|
+| Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
+| REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
+| NFRs | NFR-SEC-011 |
+| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001 |
+| Specialist · model | backend-developer · opus |
+| Complexity | M |
+| Depends on | TASK-227, TASK-187 |
+| Batch · locks | 7.11 · mod-organisations |
+| Branch | `feat/TASK-231-manage-members-last-owner-individual` |
+| Priority | Must |
+
+> Scheduling note: Scheduled in Wave 7 batch 7.11 by D-PM-068 and D-SD-001: it completes the M0 Must story US-062, so it is Must-band work due before G3 and not cuttable; its own Should story US-085 rides with it; TASK-235 (team screens, US-268 and US-269) stays in Wave 8 and cuttable; the ID keeps its Wave 8 numbering (idAt).
+
+**Files / modules**
+- apps/api/src/modules/organisations/members/**
+- apps/api/src/modules/organisations/members/assign-rank.property.test.ts (ASSIGNABLE_BY vs grants, fast-check)
+
+**Acceptance tests to write**
+- All US-085 scenarios
+- PR8-SEC-06 consumer conditions (i)-(iv) (ADR-0008 am. 3 item 4; D-ARCH-069): a modify, suspend or remove passes `canAssignRole` for EVERY role the target member currently holds AND every role in the requested set (an Admin cannot act on an Owner+Viewer member through the Viewer role); `assignerRoleKeys` come from the actor ACTIVE membership in the TARGET organisation, read from the database, never from the token; the rank check is in addition to `org:member:invite`/`org:member:manage` and the 12 h step-up, never instead of them; self role change (REQ-ACCT-015) and LAST_OWNER (REQ-ORG-013) stay separate checks; AC-05 threat-model cases (Admin assigns Owner, Admin modifies an Owner, self role change) → 403/422
+- PR #8 code review R2-n2: property test — for every allowed (assigner, target) pair in ASSIGNABLE_BY, `target.permissions ⊆ assigner.permissions` on the shipped catalogue; a mutated catalogue where the Admin loses a permission the Viewer keeps fails the property
+- MEMBER LIST (D-ARCH-123; D-067): the member list holds ACTIVE and SUSPENDED memberships only (INVITED is reserved and never written); pending invitations are a separate list keyed by invitee e-mail (TASK-227), rendered only when the /me permissions include org:member:invite
+- US-062 SCENARIOS DEFERRED FROM TASK-037 (D-ORCH-COORD-03 item 3, accepted in D-ORCH-131): AT-US-062-05 (permission denied on assigning roles) and AT-US-062-06 (audit of a membership change) need mounted member routes and are proven here, with the IDs in the test titles. COMPLETES US-062 (D-PM-068); not cuttable; due before G3. TASK-037 carries the demo-critical part (AT-US-062-01 to -04 and the change record of AT-US-062-06) and TASK-049 the creation clause of AT-US-062-06 at registration; if this task is unmerged at the Wave 7 exit, product-manager applies the rung-4 fallback of D-PM-068 (AT-US-062-05 and -06 move to US-085 as appended scenarios) and the task returns to ladder rung 2
+- AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-062-01 … AT-US-062-06: US-062 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037, TASK-049 the rest, with the IDs in the test titles; the story is accepted when all 6 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+
+**DoD notes**
+- Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.

@@ -3703,3 +3703,45 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - A plan fold (senior-developer) for the D-PM-068 card and `gen.mjs` changes, `gen.mjs --write` after #62 (D-ARCH-139), and the pending sheet-fold items: TASK-036-F1, TASK-290-F, TASK-283 → TASK-060, PR60-SEC-06 → TASK-060, R2-n4.
   - TASK-291 after #65 merges (the `tests-gen-rls` lock).
 - **Reversibility:** High.
+
+### D-SD-001 · 2026-11-18 · senior-developer · Plan fold for D-PM-068 and the D-ORCH-132..135 routings: TASK-224/227/231 into Wave 7 with their IDs kept (`idAt`), a recorded wave exception for US-061/US-062, follow-ups TASK-292 (= TASK-036-F1) and TASK-293 (= TASK-290-F), pending sheet-fold lines (plan regenerated: 293 tasks, 82 batches, 0 errors, 0 warnings; IDs, branches and titles of TASK-001..291 unchanged)
+- **Numbering:** `D-SD-` starts here at the orchestrator's request (senior-developer's P4 series was D-PLAN-001..010). The next entry is D-SD-002.
+- **Decision:**
+  1. **Wave 7, not a cuttable override (the PM preference, adopted).** TASK-224 → batch 7.9, TASK-227 → 7.10, TASK-231 → 7.11: after TASK-187 (7.1) and serial on `mod-organisations`. Why: the Wave 7 exit is the G3-ready checkpoint, and D-PM-068 makes the three tasks due before G3. `cuttable`, the Wave 8 "CUTTABLE" header and PLAN.md §12 rung 2 all key off the wave, so an override would leave three non-cuttable tasks inside a wave labelled cuttable. No critical-path cost: every dependency (TASK-056, 100, 169, 187) is in an earlier batch, and the back-fill rule (PLAN.md §6 rule 3) lets TASK-224 start as soon as its dependencies are merged and `mod-organisations` is free. Wave 7 is now 37 tasks in 11 batches, Wave 8 47 in 13.
+  2. **ID stability through `idAt:[wave, batch]`.** gen.mjs numbers a planned task by the slot it was numbered in (`idAt`) and schedules it by `w`/`b`; the three cards keep their array position, so they keep their rank inside the old slot. Checked: the generated branch name of every existing ID is identical before and after (task-map.csv diff: 0 changed, TASK-292/293 new).
+  3. **Recorded wave exception.** `waveExceptions` in plan-data.mjs: US-061 `{through: 7, dcBy: ['orgs']}`, US-062 `{through: 7, dcBy: ['orgs', 'register']}`, both `decision: 'D-PM-068'`. gen.mjs accepts a late completion only through such an entry, and validates the decision ID and that every `dcBy` task holds the story as partial inside the original band (Waves 0–2). It lists the exceptions in its output. `dc` is derived through the `dcBy` tasks only, so TASK-224 and TASK-231 print "Must" and not "demo-critical", and TASK-037 stays demo-critical. For an exception story, the completing task's generated acceptance line says that it proves the scenarios its card lines assign to it and that the partial owners prove the rest.
+  4. **D-PM-068 cards as listed there:**
+     - `orgs` (TASK-037): `us: []`, `part: [US-061, US-062]`. The SCENARIO OWNERSHIP line cites D-PM-068 and adds the US-062 split (AT-US-062-01..04 and the change record of -06 here; the creation clause of -06 in TASK-049; -05/-06 through the member routes in TASK-231) and the R0 dossier note.
+     - `orgswitch` (TASK-224): completes US-061. `members` (TASK-231): completes US-062. On both, the PLANNING FLAG sentence is replaced by "completes …; not cuttable; due before G3" and the rung-4 fallback.
+     - `invite` (TASK-227): the non-cuttable-by-dependency line.
+     - `register` (TASK-049): `part: [US-062]` plus the AT-US-062-06 creation-clause line.
+     - Wave 2, 3 and 7 exit texts follow item 7 of D-PM-068. PLAN.md §3, the checkpoint paragraph, §10 (split stories, exception paragraph), §12 tier A (26 tasks, 32 stories, 61.5 days) and §14 are updated.
+  5. **Follow-up IDs (late tasks, numbered last).**
+     - TASK-036-F1 = **TASK-292** `errfu`: backend-developer, S, lock `shared-errors`, depends on TASK-036; PR63 R1-m1 and R1-m2 option (a). It sits in the new batch 1.11, because every Wave 1 batch holds 4 tasks (same reason as batch 0.11, D-ARCH-125). Due before TASK-049 merges.
+     - TASK-290-F = **TASK-293** `lexfu`: database-engineer, opus, S, batch 0.13, depends on TASK-290. Lock `prisma-core`, the lock that TASK-016/024/290 held over `tools/db` (the "tools/db lock" of D-ORCH-134). Scope: PR66-SEC-01 (a)–(c), R1-m1/n1/n2 and PR66-SEC-02's call-site rule or stated limit.
+  6. **Merge-prerequisite lines, not dependency edges, for the due points.**
+     - A "MERGE PREREQUISITE TASK-293" line goes on the Wave 1 cards that add migrations: TASK-039, 040, 043, 047, 049, 051, 052, 055, 057 and 066.
+     - A "MERGE PREREQUISITE TASK-292" line goes on TASK-049.
+     - Why: both due points are merge points. A dependency edge would gate the start of TASK-039 and TASK-049, which are on the critical path 035 → 039 → 043 → 049 → 052.
+     - Later migration PRs fall under the same rule, which the orchestrator checks while TASK-293 is open.
+  7. **Sheet-fold lines and the locks they bring:**
+     - TASK-060: dependency TASK-283 (PR60-SEC-01) and PR60-SEC-06; adds lock `tests-gen-rbac` for `tests/generated/rbac/runner.ts`.
+     - TASK-073: AT-US-091-06 viewer half (R2-n4) and the decrypt-pair re-export ban (R2-n5); adds lock `lint` for `eslint.config.mjs`.
+     - TASK-031: R2-m1 + PR61-SEC-11 as one predicate change; adds lock `pkg-audit-redaction`.
+     - TASK-041: PR61-SEC-12; adds lock `pkg-audit-redaction` for `packages/audit/src/network.ts`.
+     - TASK-043: R2-n3 (drop an invalid `tracestate` at the producer) and R2-n5/PR64-SEC-13 (api producer queue factory with a class-only listener and its own refusal test).
+     - TASK-039: PR64-SEC-04 (bounds from the ADR-0013 retention amendment, which the orchestrator confirms before dispatch), -06 (shared with TASK-047: whichever task first changes `payload-v2.ts` closes it), -07 (job-identity half), -08 (the rest), -11 and -12.
+     - TASK-047: PR64-SEC-07 (tenant-context half) and -06; adds lock `worker-queues`.
+     - TASK-287 card: 287-B carries PR62 R1-m1/m2, R1-n1..n5 and PR62-SEC-02, and the PART ORDER line no longer says "and nothing else". 287-C carries PR62-SEC-01, policy first.
+     - TASK-089: the D-ARCH-151/153 changes (OPERATOR_ORG_ID, two-transaction staff provisioning, exported service function) were already on the card; only the D-PM-070 reference is added.
+  8. **D-ARCH-139 re-run.** The regeneration after 287-A merged adds the `security-integration` DoD line where the widened trigger list now matches: TASK-015, TASK-034, TASK-211 and TASK-290 gain it as D-ORCH-121 expected, several existing lines name the new globs, and TASK-293 has it from the start.
+- **Alternatives rejected:**
+  - An explicit cuttable override in Wave 8 (inconsistent wave semantics; see item 1).
+  - Renumbering the moved tasks (hundreds of ID references in DECISIONS, traceability, PRD and the cards).
+  - Re-adding them as late tasks (new IDs TASK-29x would orphan every existing reference).
+  - Dependency edges for TASK-292/293 (they would start-gate the critical path).
+  - Dropping the `members` → `invite` dependency (D-PM-068's default kept; it remains open for a later proposal).
+- **In-flight conflicts:**
+  - **PR #65 (TASK-037):** the card now reads partial for US-061 and US-062 and lists the US-062 scenario split. Nothing new is required of the code: the `[AT-US-062-06]` unit test is already in the PR. The PR body and the merge note must say "partial" and not "completes".
+  - **287-B (in progress):** the card adds the PR #62 follow-ups and PR62-SEC-02 to the workflow PR, as D-ORCH-135 routed them. The orchestrator relays this to devops-engineer.
+- **Reversibility:** High (plan data and generator; `idAt` and `waveExceptions` are additive and removable).
