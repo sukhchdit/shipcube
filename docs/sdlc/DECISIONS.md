@@ -3248,3 +3248,33 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Item 4 (merge order) is applied by the orchestrator at merge time.
 - **Reviews:** code-reviewer and security-analyst r1 on PRs #63 and #64 start now. They do static review only while the queue runs: no test, typecheck or container runs (host rule after D-ORCH-130). PR #65 review waits for its merge-main cycle.
 - **Reversibility:** High.
+
+### D-SEC-PR63-01 · 2026-11-18 · security-analyst · PR #63 (TASK-036) security r1 = PASS_WITH_FOLLOW-UPS at `fcdb7ac` (record `docs/05-quality/security/PR-0063-TASK-036-security-review.md`, committed on main)
+- **Decision:** 0 Critical, High or Medium; 1 LOW, 3 INFO. Static review only (host rule of D-ORCH-131).
+  - **Sound:**
+    - The 5xx detail is generic by status, which covers both new 5xx codes, and the problem body is a closed key set.
+    - No internal-only code is published.
+    - No tenant-existence oracle:
+      - NOT_FOUND is indistinguishable, and a 403 is decided before any lookup.
+      - QUOTE_ALREADY_CLAIMED and INVITATION_EMAIL_MISMATCH need a token of at least 128 bits.
+      - INVALID_CREDENTIALS has one message.
+      - DR-A02 keeps counters for unknown identifiers.
+    - The client map refuses non-catalogue and prototype keys.
+    - Correlation id, logging and redaction are unchanged. Gitleaks and Semgrep are green.
+  - **Independent static parity:** the 79 catalogue codes equal the README §11 table, and equal the 78 openapi examples plus METHOD_NOT_ALLOWED. DR-A26 is 45/45.
+- **PR63-SEC-01 (LOW, CWE-204/CWE-209):** the 4xx `detail` is free text. Nothing fixes it for the indistinguishability codes (NOT_FOUND, INVALID_CREDENTIALS, TOKEN_INVALID, TRACKING_NOT_FOUND, COUPON_INVALID, ACCOUNT_DELAYED/LOCKED, AUTHZ_DENIED), and nothing keeps request or third-party data out of it. Latent: 0 of 20 production `AppError`s pass a detail.
+  - **Fix 1:** a `uniformDetail` catalogue flag that `buildProblem` and `AppError` honour, with sentinel tests. Due in this PR's fix cycle if one runs, else before TASK-052 merges.
+  - **Fix 2:** a literal-only `detail` lint selector, or a source-scan arm. Due with the next `lint` lock holder, before TASK-052 / TASK-227.
+- **PR63-SEC-02 (INFO, CWE-703):** `classifyDbError` accepts any catalogue code with a matching status, and the catalogue grows from 13 to 79 codes. Restrict it to `DB_PROBLEM_CODES` and add two forged cases → next touch of `platform/errors/classify.ts`.
+- **PR63-SEC-03 (INFO, CWE-393):** the staff MFA gate stub still answers AUTHZ_DENIED, but its stated reason (MFA_ENROLMENT_REQUIRED not catalogued) no longer holds → TASK-067. The AUTHZ_DENIED comment should also name the RLS write-rejection producer, at the next touch of `platform.ts`.
+- **PR63-SEC-04 (INFO, CWE-200):** conditions on the first task that adds problem extension members or a non-503 `Retry-After` → TASK-040/041/061/096/103:
+  - a closed per-code allow-list of extension members;
+  - the one-time `mfa_challenge_token` is never logged, audited or stored;
+  - `Retry-After` per code, in 1..3600.
+- **Record placement:** committed on main, because the PR worktree is reserved for the lane-B queue. ci-gate reads records from the merge ref, so the record counts from the next `pull_request` event (the evidence push), not from a re-run of 44104641784. Simulated: S1 and S3 pass, C0 to C5 fail as expected. The orchestrator may also add the file verbatim to the evidence commit.
+- **Merge conditions (security):**
+  - lane-B PASS on the final head;
+  - a lane-A run in which lint, format, type-check, unit and build execute;
+  - a delta round if a later commit changes `apps/api/src/platform/**`.
+- **Code review twin** (`0f3528e`, APPROVED_WITH_NITS): I support R1-m2 (the scan is blind to domain error classes, PR #65) and §4 item 3 (the shared root must not re-export `./queues`). No finding duplicates theirs.
+- **Reversibility:** High.
