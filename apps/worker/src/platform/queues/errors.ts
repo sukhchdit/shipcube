@@ -19,6 +19,8 @@ export const NON_RETRYABLE_REASONS = [
   'PERMISSION_DENIED',
   /** No processor is registered for the job's queue in this worker. */
   'NO_PROCESSOR',
+  /** A processor threw BullMQ's own UnrecoverableError (or an error named so) without one of the reasons above. */
+  'UNRECOVERABLE',
 ] as const;
 export type NonRetryableReason = (typeof NON_RETRYABLE_REASONS)[number];
 
@@ -35,4 +37,19 @@ export class NonRetryableError extends UnrecoverableError {
 
 export function isNonRetryable(error: unknown): error is NonRetryableError {
   return error instanceof NonRetryableError;
+}
+
+/**
+ * BullMQ's own predicate (`Job.shouldRetryJob`): an `UnrecoverableError`, or any error named so, is final at once. The
+ * consumer mirrors it so such a failure is dead-lettered, whichever class a processor threw (R1-m2).
+ */
+export function isUnrecoverable(error: unknown): boolean {
+  if (error instanceof UnrecoverableError) return true;
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'UnrecoverableError';
+}
+
+/** The reason of a failure that skips the remaining attempts, or undefined for a transient one. */
+export function nonRetryableReason(error: unknown): NonRetryableReason | undefined {
+  if (isNonRetryable(error)) return error.reason;
+  return isUnrecoverable(error) ? 'UNRECOVERABLE' : undefined;
 }

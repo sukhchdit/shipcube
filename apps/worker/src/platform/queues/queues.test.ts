@@ -5,8 +5,8 @@ import { REDACTED } from '@platform/shared/logging';
 import { UnrecoverableError } from 'bullmq';
 
 import { queueConnectionOptions } from './connection.js';
-import { deadLetterRecord, MAX_FAILURE_MESSAGE, RETRIES_EXHAUSTED } from './dead-letter.js';
-import { isNonRetryable, NON_RETRYABLE_REASONS, NonRetryableError } from './errors.js';
+import { deadLetterJobId, deadLetterRecord, MAX_FAILURE_MESSAGE, RETRIES_EXHAUSTED } from './dead-letter.js';
+import { isNonRetryable, isUnrecoverable, NON_RETRYABLE_REASONS, NonRetryableError, nonRetryableReason } from './errors.js';
 import { collectQueueMetrics, type CountableQueue, QUEUE_STATES, renderQueueMetrics } from './metrics.js';
 
 const job = (data: unknown) => ({ queueName: 'outbox-relay', id: 'outbox_event.x', name: 'outbox_event', data });
@@ -28,8 +28,21 @@ describe('non-retryable errors (ADR-0013 §2, DR-A25, EC-A38)', () => {
         'JOB_CONTEXT_NOT_FOUND',
         'VALIDATION_ERROR',
         'PERMISSION_DENIED',
+        'UNRECOVERABLE',
       ]),
     );
+  });
+
+  it('[R1-m2] mirror BullMQ: an UnrecoverableError, or any error named so, is final with the reason UNRECOVERABLE', () => {
+    const named = Object.assign(new Error('x'), { name: 'UnrecoverableError' });
+    for (const error of [new UnrecoverableError('x'), named]) {
+      expect([isUnrecoverable(error), nonRetryableReason(error)]).toEqual([true, 'UNRECOVERABLE']);
+    }
+    expect(nonRetryableReason(new NonRetryableError('PERMISSION_DENIED'))).toBe('PERMISSION_DENIED');
+    for (const transient of [new Error('x'), 'text', null, undefined, { name: 'Other' }]) {
+      expect([isUnrecoverable(transient), nonRetryableReason(transient)]).toEqual([false, undefined]);
+    }
+    expect(isUnrecoverable({ name: 'UnrecoverableError' })).toBe(true);
   });
 });
 
@@ -67,6 +80,28 @@ describe('dead-letter records (REQ-PLAT-013; AT-US-009-02, AT-US-009-04)', () =>
     });
     expect(deadLetterRecord(job({}), new Error('x'), 1).failed_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  it('[R1-m2] a plain UnrecoverableError is recorded with the reason UNRECOVERABLE and its own class', () => {
+    expect(deadLetterRecord(job({}), new UnrecoverableError('stop'), 2, NOW)).toMatchObject({
+      reason: 'UNRECOVERABLE',
+      error: 'UnrecoverableError',
+      attempts: 2,
+    });
+  });
+
+  it('[R1-M1] the record id is namespaced and never an integer, which BullMQ refuses as a custom id', () => {
+    expect(deadLetterJobId('outbox_event.0193a5b2-7c1e-7d4a-9f3b-000000000f01', 5)).toBe(
+      'outbox_event.0193a5b2-7c1e-7d4a-9f3b-000000000f01.dead.5',
+    );
+    // An auto-increment id ("7") would be refused as an integer; a ":" id keeps its part count (3 parts allowed).
+    expect(deadLetterJobId('7', 1)).toBe('7.dead.1');
+    expect(deadLetterJobId('a:b:c', 3)).toBe('a:b:c.dead.3');
+    expect(Number.isInteger(Number(deadLetterJobId('7', 1)))).toBe(false);
+    // Deterministic per final attempt (a re-delivered attempt is one record); a later final attempt has its own.
+    expect(deadLetterJobId('7', 5)).toBe(deadLetterJobId('7', 5));
+    expect(deadLetterJobId('7', 6)).not.toBe(deadLetterJobId('7', 5));
+    expect([deadLetterJobId(undefined, 1), deadLetterJobId('', 1)]).toEqual([undefined, undefined]);
+  });
 });
 
 describe('queue metrics (ADR-0013 §8; AT-US-009-05)', () => {
@@ -98,11 +133,31 @@ describe('queue metrics (ADR-0013 §8; AT-US-009-05)', () => {
 });
 
 describe('BullMQ connection options (ADR-0013; ADR-0010 am. 7)', () => {
-  it('are the validated Valkey options with no retry cap and no command timeout (blocking commands)', () => {
-    const options = queueConnectionOptions('redis://worker:pw@valkey.internal:6380/2', 'worker-queues') as Record<string, unknown>;
-    expect(options).toMatchObject({ host: 'valkey.internal', port: 6380, db: 2, username: 'worker', connectionName: 'worker-queues' });
+  it('[PR64-SEC-03] the worker profile (Workers only) has no retry cap and no command timeout: blocking commands', () => {
+    const options = queueConnectionOptions('redis://worker:pw@valkey.internal:6380/2', 'worker-consumers', 'worker') as Record<
+      string,
+      unknown
+    >;
+    expect(options).toMatchObject({ host: 'valkey.internal', port: 6380, db: 2, username: 'worker', connectionName: 'worker-consumers' });
     expect(options['maxRetriesPerRequest']).toBeNull();
     expect('commandTimeout' in options).toBe(false);
-    expect(() => queueConnectionOptions('http://valkey.internal', 'worker-queues')).toThrow('REDIS_URL must use redis:// or rediss://');
+    expect(() => queueConnectionOptions('http://valkey.internal', 'worker-queues', 'worker')).toThrow(
+      'REDIS_URL must use redis:// or rediss://',
+    );
+  });
+
+  it('[PR64-SEC-03, R1-m4] the queue profile (every non-blocking Queue) is fail-fast: command timeout, one retry, no offline queue', () => {
+    const options = queueConnectionOptions('redis://worker:pw@valkey.internal:6380/2', 'worker-queues', 'queue') as Record<string, unknown>;
+    expect(options).toMatchObject({
+      host: 'valkey.internal',
+      username: 'worker',
+      connectionName: 'worker-queues',
+      commandTimeout: 2_000,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+    expect(() => queueConnectionOptions('http://valkey.internal', 'worker-queues', 'queue')).toThrow(
+      'REDIS_URL must use redis:// or rediss://',
+    );
   });
 });

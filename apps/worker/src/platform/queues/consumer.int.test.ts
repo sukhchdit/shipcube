@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import type { Config } from '@platform/config';
 import { REDACTED } from '@platform/shared/logging';
 import { deadLetterQueueName, type JobPayloadV2, type QueueName } from '@platform/shared/queues';
-import { type ConnectionOptions, Queue } from 'bullmq';
+import { type ConnectionOptions, type Job, Queue, UnrecoverableError } from 'bullmq';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
 import { createProductionQueues } from '../../start-worker.js';
@@ -28,7 +28,10 @@ jest.setTimeout(120_000);
 
 let container: StartedTestContainer;
 let url: string;
+/** The `worker` profile (blocking commands): Workers only. */
 let connection: ConnectionOptions;
+/** The fail-fast `queue` profile: every Queue. */
+let queueConnection: ConnectionOptions;
 const cleanups: (() => Promise<void>)[] = [];
 
 beforeAll(async () => {
@@ -37,7 +40,8 @@ beforeAll(async () => {
     .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
     .start();
   url = `redis://${container.getHost()}:${String(container.getMappedPort(6379))}`;
-  connection = queueConnectionOptions(url, 'worker-queues-it');
+  connection = queueConnectionOptions(url, 'worker-consumers-it', 'worker');
+  queueConnection = queueConnectionOptions(url, 'worker-queues-it', 'queue');
 });
 
 afterAll(async () => {
@@ -77,7 +81,7 @@ function producerQueues(prefix: string): (name: QueueName) => Queue {
   return (name) => {
     let queue = open.get(name);
     if (queue === undefined) {
-      queue = new Queue(name, { connection, prefix });
+      queue = new Queue(name, { connection: queueConnection, prefix });
       open.set(name, queue);
     }
     return queue;
@@ -108,12 +112,13 @@ function consume(
   const prefix = `it${randomUUID().slice(0, 8)}`;
   const name = options.name ?? 'outbox-relay';
   const captured = captureLog();
-  const queue = new Queue(name, { connection, prefix });
-  const deadLetter = new Queue(deadLetterQueueName(name), { connection, prefix });
+  const queue = new Queue(name, { connection: queueConnection, prefix });
+  const deadLetter = new Queue(deadLetterQueueName(name), { connection: queueConnection, prefix });
   const consumer = createQueueConsumer({
     queue: name,
     processor,
     connection,
+    queueConnection,
     log: captured.log,
     prefix,
     retryBaseMs: options.retryBaseMs ?? 10,
@@ -142,6 +147,24 @@ async function deadLetters(deadLetter: Queue, count: number): Promise<DeadLetter
   return until(async () => {
     const jobs = await deadLetter.getJobs(['waiting', 'delayed', 'active', 'completed', 'failed']);
     return jobs.length >= count ? jobs.map((job) => job.data as DeadLetterRecord) : undefined;
+  });
+}
+
+/**
+ * Waits for the dead-letter record(s) AND for BullMQ to have moved the job to `failed`. The consumer writes the record
+ * before it rethrows, so the record appears a few ms before `moveToFailed`; reading the state once after the record
+ * races (R1-m3).
+ */
+async function settledFailure(
+  queue: Queue,
+  deadLetter: Queue,
+  jobId: string,
+  count = 1,
+): Promise<{ records: DeadLetterRecord[]; job: Job }> {
+  return until(async () => {
+    const records = await deadLetters(deadLetter, count);
+    const job = await queue.getJob(jobId);
+    return job !== undefined && (await job.getState()) === 'failed' ? { records, job } : undefined;
   });
 }
 
@@ -185,10 +208,49 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
       attempts: 5,
       backoff: { type: 'jittered-exponential', delay: 10 },
     });
-    const [record] = await deadLetters(deadLetter, 1);
+    const {
+      records: [record],
+    } = await settledFailure(queue, deadLetter, jobId);
     expect(calls).toBe(5);
     expect(record).toMatchObject({ queue: 'outbox-relay', job_id: jobId, reason: RETRIES_EXHAUSTED, error: 'Error', attempts: 5, data });
-    expect(await (await queue.getJob(jobId))?.getState()).toBe('failed');
+    // The record has its own namespaced id (R1-M1): one record for the job's final attempt.
+    expect((await deadLetter.getJob(`${jobId}.dead.5`))?.data).toEqual(record);
+  });
+
+  it('[PR64-SEC-02] a transient failure whose message carries a secret leaves no raw text in the failed job: failedReason, stacktrace and data are sanitised', async () => {
+    const secret = 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.int-sentinel-sig';
+    const { queue, deadLetter } = consume(() => Promise.reject(new Error(`carrier refused ${secret}`)));
+    const data = payload();
+    const jobId = `outbox_event.${String(data['id'])}`;
+    await queue.add('outbox_event', data, { jobId, attempts: 2, backoff: { type: 'jittered-exponential', delay: 10 }, stackTraceLimit: 0 });
+    const {
+      records: [record],
+      job,
+    } = await settledFailure(queue, deadLetter, jobId);
+    expect(job.failedReason).toBe('TRANSIENT');
+    expect(job.stacktrace).toEqual([]);
+    expect(JSON.stringify(job)).not.toContain('int-sentinel-sig');
+    expect(JSON.stringify(job)).not.toContain('carrier refused');
+    // The record keeps the original message, redacted and bounded.
+    expect(record?.message).toContain('carrier refused');
+    expect(JSON.stringify(record)).not.toContain('int-sentinel-sig');
+  });
+
+  it("[R1-m2] a processor throwing BullMQ's own UnrecoverableError is attempted once and dead-lettered as UNRECOVERABLE", async () => {
+    let calls = 0;
+    const { queue, deadLetter } = consume(() => {
+      calls += 1;
+      return Promise.reject(new UnrecoverableError('stop here'));
+    });
+    const jobId = `outbox_event.${ID()}`;
+    await queue.add('outbox_event', payload(), { jobId, attempts: 5, backoff: { type: 'jittered-exponential', delay: 10 } });
+    const {
+      records: [record],
+      job,
+    } = await settledFailure(queue, deadLetter, jobId);
+    expect(calls).toBe(1);
+    expect(record).toMatchObject({ reason: 'UNRECOVERABLE', error: 'UnrecoverableError', attempts: 1 });
+    expect(job.failedReason).toBe('UNRECOVERABLE');
   });
 
   it.each([
@@ -216,14 +278,36 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
       calls += 1;
       return Promise.resolve();
     });
-    await queue.add('outbox_event', payload({ token: 'tok_live_secret_value' }), {
-      jobId: `outbox_event.${ID()}`,
-      attempts: 5,
-    });
-    const [record] = await deadLetters(deadLetter, 1);
+    const jobId = `outbox_event.${ID()}`;
+    await queue.add('outbox_event', payload({ token: 'tok_live_secret_value' }), { jobId, attempts: 5 });
+    const {
+      records: [record],
+      job,
+    } = await settledFailure(queue, deadLetter, jobId);
     expect(calls).toBe(0);
     expect(record).toMatchObject({ reason: 'PAYLOAD_INVALID', attempts: 1, data: { token: REDACTED } });
     expect(JSON.stringify(record)).not.toContain('tok_live_secret_value');
+    // PR64-SEC-02: the failed-set original beside the record is redacted too (data, failedReason, stacktrace).
+    expect(job.data).toMatchObject({ token: REDACTED });
+    expect(job.failedReason).toBe('PAYLOAD_INVALID');
+    // The whole job as read back from its Valkey hash (data, opts, failedReason, stacktrace) carries no sentinel.
+    expect(JSON.stringify(job)).not.toContain('tok_live_secret_value');
+    expect(JSON.stringify(job.toJSON())).not.toContain('tok_live_secret_value');
+  });
+
+  it('[R1-M1] a forged job enqueued WITHOUT a custom id (auto-increment id) still gets exactly one dead-letter record and the security event', async () => {
+    const { queue, deadLetter, captured } = consume(() => Promise.resolve());
+    const job = await queue.add('outbox_event', payload({ org_id: ID(), token: 'tok_live_secret_value' }), { attempts: 5 });
+    expect(job.id).toMatch(/^\d+$/);
+    const { records, job: failed } = await settledFailure(queue, deadLetter, job.id ?? '');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ job_id: job.id, reason: 'PAYLOAD_INVALID', attempts: 1, data: { token: REDACTED } });
+    expect((await deadLetter.getJob(`${String(job.id)}.dead.1`))?.data).toEqual(records[0]);
+    expect(failed.data).toMatchObject({ token: REDACTED });
+    expect(captured.lines()).toContainEqual(
+      expect.objectContaining({ event: 'job_context_mismatch', event_type: 'security', queue: 'outbox-relay', reason: 'PAYLOAD_INVALID' }),
+    );
+    expect(captured.lines().some((line) => line['event'] === 'worker.dead_letter_write_failed')).toBe(false);
   });
 
   it('[ADR-0013 am. 1] a payload carrying org_id is refused as PAYLOAD_INVALID and emits the job_context_mismatch security event', async () => {
@@ -232,7 +316,7 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     const [record] = await deadLetters(deadLetter, 1);
     expect(record).toMatchObject({ reason: 'PAYLOAD_INVALID' });
     expect(captured.lines()).toContainEqual(
-      expect.objectContaining({ event: 'security.job_context_mismatch', queue: 'outbox-relay', reason: 'PAYLOAD_INVALID' }),
+      expect.objectContaining({ event: 'job_context_mismatch', event_type: 'security', queue: 'outbox-relay', reason: 'PAYLOAD_INVALID' }),
     );
   });
 
@@ -241,6 +325,7 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     const prefix = `it${randomUUID().slice(0, 8)}`;
     const queues = createWorkerQueues({
       connection,
+      queueConnection,
       log: captured.log,
       prefix,
       retryBaseMs: 10,
@@ -253,9 +338,13 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     await producer.enqueue('booking', { kind: 'saga', id: ID(), step: 'book' });
     await producer.enqueue('payments', { kind: 'payment', id: ID() });
     await producer.enqueue('payments', { kind: 'payment', id: ID() });
+    // The record is written a few ms before BullMQ moves the job to failed: wait for both in one snapshot (R1-m3).
     const text = await until(async () => {
       const current = await queues.metrics();
-      return current.includes('platform_queue_dead_letter_jobs{queue="booking"} 1') ? current : undefined;
+      return current.includes('platform_queue_dead_letter_jobs{queue="booking"} 1\n') &&
+        current.includes('platform_queue_jobs{queue="booking",state="failed"} 1\n')
+        ? current
+        : undefined;
     });
     expect(text).toContain('platform_queue_jobs{queue="booking",state="failed"} 1\n');
     expect(text).toContain('platform_queue_jobs{queue="payments",state="waiting"} 2\n');
@@ -302,6 +391,7 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     const crashing = createQueueConsumer({
       queue: 'outbox-relay',
       connection,
+      queueConnection,
       log: captured.log,
       prefix,
       concurrency: 1,
@@ -312,7 +402,7 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
         return new Promise<void>(() => undefined);
       },
     });
-    const queue = new Queue('outbox-relay', { connection, prefix });
+    const queue = new Queue('outbox-relay', { connection: queueConnection, prefix });
     cleanups.push(() => queue.close());
     const producer = createJobProducer({ queueFor: () => queue, contextCorrelationId: () => 'demo-booking-0001' });
     const ids = await Promise.all(Array.from({ length: 10 }, () => producer.enqueue('outbox-relay', { kind: 'outbox_event', id: ID() })));
@@ -324,6 +414,7 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     const restarted = createQueueConsumer({
       queue: 'outbox-relay',
       connection,
+      queueConnection,
       log: captured.log,
       prefix,
       tuning,

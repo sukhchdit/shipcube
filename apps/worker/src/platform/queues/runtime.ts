@@ -5,17 +5,21 @@
  * stops taking jobs and waits for the active ones (the shutdown drain, ADR-0013 §7), then closes every connection.
  */
 import { deadLetterQueueName, QUEUE_NAMES, type QueueName } from '@platform/shared/queues';
-import { type ConnectionOptions, Queue } from 'bullmq';
+import type { ConnectionOptions } from 'bullmq';
 
 import type { RuntimeLog } from '@platform/api/runtime';
 
 import { type ConsumerTuning, createQueueConsumer, type JobProcessor, type QueueConsumer } from './consumer.js';
 import { collectQueueMetrics, renderQueueMetrics } from './metrics.js';
+import { openQueue } from './open-queue.js';
 
 export type ProcessorRegistry = Readonly<Partial<Record<QueueName, JobProcessor>>>;
 
 export interface WorkerQueuesOptions {
+  /** The `worker` connection profile (blocking commands): for the consumers' BullMQ `Worker`s only. */
   readonly connection: ConnectionOptions;
+  /** The fail-fast `queue` connection profile (command timeout, bounded retries): for every non-blocking `Queue`. */
+  readonly queueConnection: ConnectionOptions;
   readonly log: RuntimeLog;
   readonly processors: ProcessorRegistry;
   readonly prefix?: string;
@@ -40,8 +44,8 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
   const prefix = options.prefix === undefined ? {} : { prefix: options.prefix };
   const queues = QUEUE_NAMES.map((name) => ({
     queue: name,
-    jobs: new Queue(name, { connection: options.connection, ...prefix }),
-    deadLetter: new Queue(deadLetterQueueName(name), { connection: options.connection, ...prefix }),
+    jobs: openQueue(name, { connection: options.queueConnection, ...prefix }, options.log),
+    deadLetter: openQueue(deadLetterQueueName(name), { connection: options.queueConnection, ...prefix }, options.log),
   }));
   const consumers: QueueConsumer[] = queues.flatMap(({ queue, deadLetter }) => {
     const processor = options.processors[queue];
@@ -51,6 +55,7 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
         queue,
         processor,
         connection: options.connection,
+        queueConnection: options.queueConnection,
         log: options.log,
         deadLetter,
         ...prefix,

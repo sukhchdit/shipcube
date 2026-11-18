@@ -51,16 +51,48 @@ export function jobIdFor(ref: JobRef): string {
   return ref.step === undefined ? `${ref.kind}.${ref.id}` : `${ref.kind}.${ref.id}.${ref.step}`;
 }
 
+/** W3C Trace Context level 1 `tracestate` list-member key (simple key, or `tenant@system`) and value alphabet. */
+const TRACESTATE_KEY = /^(?:[a-z][a-z0-9_*/-]{0,255}|[a-z0-9][a-z0-9_*/-]{0,240}@[a-z][a-z0-9_*/-]{0,13})$/;
+const TRACESTATE_VALUE = /^[\x20-\x2b\x2d-\x3c\x3e-\x7e]{0,255}[\x21-\x2b\x2d-\x3c\x3e-\x7e]$/;
+const TRACESTATE_MAX_MEMBERS = 32;
+
+/**
+ * True for a `tracestate` that follows the W3C grammar: at most 32 `key=value` members separated by commas (optional
+ * white space around a member), no control characters (PR64-SEC-05). Every pattern is anchored with bounded
+ * repetition and the white-space trim is a loop, so the check is linear in the input (PR64 probe P3: a regex trim
+ * such as `/^[ \t]+|[ \t]+$/g` is quadratic on a blank run; `String#trim` also strips U+2028 and NBSP).
+ */
+export function isTracestate(text: string): boolean {
+  const members = text.split(',');
+  if (members.length > TRACESTATE_MAX_MEMBERS) return false;
+  return members.every((raw) => {
+    let start = 0;
+    let end = raw.length;
+    while (start < end && (raw[start] === ' ' || raw[start] === '\t')) start += 1;
+    while (end > start && (raw[end - 1] === ' ' || raw[end - 1] === '\t')) end -= 1;
+    const member = raw.slice(start, end);
+    const eq = member.indexOf('=');
+    return eq > 0 && TRACESTATE_KEY.test(member.slice(0, eq)) && TRACESTATE_VALUE.test(member.slice(eq + 1));
+  });
+}
+
 const TRACE_CONTEXT = Joi.object({
   traceparent: Joi.string().pattern(TRACEPARENT).required(),
-  tracestate: Joi.string().max(512),
+  tracestate: Joi.string()
+    .max(512)
+    .custom((value: string, helpers) => (isTracestate(value) ? value : helpers.error('any.invalid'))),
 }).unknown(false);
 
-/** The closed schema of payloads on a queue with these kinds (a queue without kinds accepts no payload). */
-export function payloadSchemaFor(definition: QueueDefinition): Joi.ObjectSchema {
+/**
+ * The closed schema of payloads on a queue with these kinds. A queue without kinds accepts no payload at all: its
+ * `kind` is required and no value is valid, so a payload without `kind` is refused too (R1-m1).
+ */
+function buildPayloadSchema(definition: QueueDefinition): Joi.ObjectSchema {
   const kind =
     definition.kinds.length === 0
-      ? Joi.any().forbidden()
+      ? Joi.any()
+          .required()
+          .custom((_value: unknown, helpers) => helpers.error('any.invalid'))
       : Joi.string()
           .valid(...definition.kinds)
           .required();
@@ -72,7 +104,20 @@ export function payloadSchemaFor(definition: QueueDefinition): Joi.ObjectSchema 
     trace_context: TRACE_CONTEXT.allow(null).required(),
   })
     .unknown(false)
+    .required()
     .prefs({ convert: false, abortEarly: false, errors: { wrap: { label: false } } });
+}
+
+const SCHEMAS = new WeakMap<QueueDefinition, Joi.ObjectSchema>();
+
+/** The closed schema of payloads on this queue; built once per queue definition (R1-n1). */
+export function payloadSchemaFor(definition: QueueDefinition): Joi.ObjectSchema {
+  let schema = SCHEMAS.get(definition);
+  if (schema === undefined) {
+    schema = buildPayloadSchema(definition);
+    SCHEMAS.set(definition, schema);
+  }
+  return schema;
 }
 
 export type PayloadValidation =

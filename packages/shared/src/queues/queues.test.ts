@@ -23,6 +23,11 @@ import {
   retryDelayMs,
   validateJobPayload,
 } from './index.js';
+import { isTracestate, payloadSchemaFor } from './payload-v2.js';
+
+/** Characters String#trim would strip but the W3C tracestate grammar does not allow (built by code, not typed). */
+const LINE_SEPARATOR = String.fromCharCode(0x2028);
+const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 
 const ID = '0193a5b2-7c1e-7d4a-9f3b-000000000f01';
 const payload = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -90,6 +95,8 @@ describe('job options (ADR-0013 §2, DR-A25)', () => {
       backoff: { type: BACKOFF_TYPE, delay: BACKOFF_BASE_MS },
       removeOnComplete: { age: 86_400, count: 10_000 },
       removeOnFail: false,
+      // PR64-SEC-02: BullMQ keeps no stack frames in the job hash.
+      stackTraceLimit: 0,
     });
     expect([JOB_ATTEMPTS, BACKOFF_BASE_MS]).toEqual([5, 2_000]);
   });
@@ -150,6 +157,85 @@ describe('job payload v2 (ADR-0013 amendment 1; SEC-P3-12, SEC-TC-50)', () => {
     expect(validateJobPayload(relay, null)).toMatchObject({ ok: false, issues: ['(root): object.base'] });
     expect(isJobPayloadV2(relay, 'x')).toBe(false);
     expect(isJobPayloadV2(QUEUES.housekeeping, payload())).toBe(false);
+  });
+
+  it('[R1-m1] a queue without kinds refuses every payload, including one with no kind at all', () => {
+    const kindless = Object.fromEntries(Object.entries(payload()).filter(([key]) => key !== 'kind'));
+    for (const name of ['housekeeping', 'audit-maintenance'] as const) {
+      expect(QUEUES[name].kinds).toEqual([]);
+      expect(validateJobPayload(QUEUES[name], kindless)).toMatchObject({ ok: false, issues: ['kind: any.required'] });
+      expect(validateJobPayload(QUEUES[name], payload())).toMatchObject({ ok: false, issues: ['kind: any.invalid'] });
+      // `undefined` is "no payload", which Joi accepts for an object schema unless it is required.
+      expect(validateJobPayload(QUEUES[name], undefined)).toMatchObject({ ok: false, issues: ['(root): any.required'] });
+      expect(isJobPayloadV2(QUEUES['outbox-relay'], undefined)).toBe(false);
+      expect(isJobPayloadV2(QUEUES[name], {})).toBe(false);
+    }
+  });
+
+  it('builds the schema of a queue once', () => {
+    expect(payloadSchemaFor(relay)).toBe(payloadSchemaFor(relay));
+    expect(payloadSchemaFor(relay)).not.toBe(payloadSchemaFor(QUEUES.booking));
+  });
+
+  describe('[PR64-SEC-05] trace_context.tracestate follows the W3C grammar', () => {
+    const traced = (tracestate: string): Record<string, unknown> =>
+      payload({ trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`, tracestate } });
+
+    it('accepts well-formed lists: vendor keys, tenant@system keys, 32 members, a 256-character value', () => {
+      for (const ok of [
+        'k=v',
+        'vendor1=abc123,tenant@vendor2=x-y_z',
+        ' a=1 ,\tb=2',
+        `k=${'v'.repeat(256)}`,
+        Array.from({ length: 32 }, (_item, index) => `k${String(index)}=v`).join(','),
+      ])
+        expect([ok.slice(0, 20), isTracestate(ok)]).toEqual([ok.slice(0, 20), true]);
+      expect(isJobPayloadV2(QUEUES['outbox-relay'], traced('vendor1=abc123,tenant@vendor2=x-y_z'))).toBe(true);
+    });
+
+    it('refuses control characters, free text, a malformed member and an over-long list or value', () => {
+      for (const bad of [
+        'a=b\r\nX-Injected: 1',
+        'a=b\0',
+        `a=b${LINE_SEPARATOR}c`,
+        `a=b${NO_BREAK_SPACE}`,
+        'novalue',
+        '=v',
+        'a=',
+        'A=v',
+        'a=b,c',
+        'a=b,,c=d',
+        'a=b,',
+        `k=${'v'.repeat(257)}`,
+        Array.from({ length: 33 }, (_item, index) => `k${String(index)}=v`).join(','),
+        'k=v\u0085',
+        'a=x=y',
+      ])
+        expect([JSON.stringify(bad).slice(0, 30), isTracestate(bad)]).toEqual([JSON.stringify(bad).slice(0, 30), false]);
+      expect(validateJobPayload(QUEUES['outbox-relay'], traced('a=b\r\nHost: evil'))).toMatchObject({
+        ok: false,
+        issues: ['trace_context.tracestate: any.invalid'],
+      });
+      expect(isJobPayloadV2(QUEUES['outbox-relay'], traced('x'.repeat(513)))).toBe(false);
+    });
+
+    it('is linear in the input: near-miss blank and key runs 8 times longer take far less than 64 times as long', () => {
+      const best = (input: string): number => {
+        let fastest = Number.POSITIVE_INFINITY;
+        for (let run = 0; run < 7; run += 1) {
+          const start = performance.now();
+          for (let repeat = 0; repeat < 20; repeat += 1) isTracestate(input);
+          fastest = Math.min(fastest, performance.now() - start);
+        }
+        return Math.max(fastest, 0.001);
+      };
+      const shapes = [
+        (n: number) => `a=${' '.repeat(n)}x`,
+        (n: number) => `${' '.repeat(n)}a=b${LINE_SEPARATOR}`,
+        (n: number) => `${'a'.repeat(n)}@`,
+      ];
+      for (const shape of shapes) expect(best(shape(128_000)) / best(shape(16_000))).toBeLessThan(32);
+    });
   });
 
   it('builds deterministic job ids from the business key, without ":"', () => {

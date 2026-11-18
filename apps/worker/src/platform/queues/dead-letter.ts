@@ -7,10 +7,23 @@
  */
 import { redactString, redactValue } from '@platform/shared/logging';
 
-import { isNonRetryable } from './errors.js';
+import { isNonRetryable, nonRetryableReason } from './errors.js';
 
 /** Reason of a transient failure whose retries are exhausted. */
 export const RETRIES_EXHAUSTED = 'RETRIES_EXHAUSTED';
+
+/**
+ * The BullMQ job id of the dead-letter record of a job's final attempt (R1-M1, PR64-SEC-08). It is namespaced
+ * (`<job id>.dead.<attempts>`), so it is never an integer (BullMQ refuses an integer custom id, and a job enqueued
+ * without a custom id has an auto-increment one) and it keeps the part count of a `:` id (BullMQ allows `:` only in
+ * exactly three parts). It is deterministic: a final attempt re-delivered after a crash (same attempt number) is one
+ * record, not two. A later final failure of the same job, after an operator retry, has a higher attempt number and so
+ * its own record (unless the retry reset the attempt count: that record is then a duplicate id, BullMQ ignores the
+ * add, and the failed set still holds the job). `undefined` lets BullMQ assign the id of a job that has none.
+ */
+export function deadLetterJobId(jobId: string | undefined, attempts: number): string | undefined {
+  return jobId === undefined || jobId === '' ? undefined : `${jobId}.dead.${String(attempts)}`;
+}
 /** Upper bound on the redacted failure message kept in a record. */
 export const MAX_FAILURE_MESSAGE = 500;
 
@@ -54,7 +67,7 @@ export function deadLetterRecord(job: FailedJob, error: unknown, attempts: numbe
     queue: job.queueName,
     job_id: job.id ?? '',
     job_name: job.name,
-    reason: isNonRetryable(error) ? error.reason : RETRIES_EXHAUSTED,
+    reason: nonRetryableReason(error) ?? RETRIES_EXHAUSTED,
     error: isNonRetryable(error) ? 'NonRetryableError' : errorName(error),
     message: errorMessage(error),
     attempts,

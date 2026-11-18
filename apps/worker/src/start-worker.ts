@@ -72,9 +72,18 @@ export interface StartWorkerDependencies {
   readonly processors: ProcessorRegistry;
 }
 
-/** BullMQ queues over the worker's own connections (ACL user `worker`, key prefix `bull:`). */
+/**
+ * BullMQ queues over the worker's own connections (ACL user `worker`, key prefix `bull:`): the blocking profile for the
+ * consumers' `Worker`s, the fail-fast profile for every `Queue` (metrics, dead-letter writes; PR64-SEC-03).
+ */
 export function createProductionQueues({ config, log, processors }: WorkerQueuesInput): WorkerQueues {
-  return createWorkerQueues({ connection: queueConnectionOptions(config.REDIS_URL.reveal(), 'worker-queues'), log, processors });
+  const url = config.REDIS_URL.reveal();
+  return createWorkerQueues({
+    connection: queueConnectionOptions(url, 'worker-consumers', 'worker'),
+    queueConnection: queueConnectionOptions(url, 'worker-queues', 'queue'),
+    log,
+    processors,
+  });
 }
 
 /** The production process: what main.ts runs with. */

@@ -30,6 +30,8 @@ export interface JobOptions {
   readonly backoff: { readonly type: typeof BACKOFF_TYPE; readonly delay: number };
   readonly removeOnComplete: { readonly age: number; readonly count: number };
   readonly removeOnFail: false;
+  /** BullMQ keeps no stack frames in the job hash (PR64-SEC-02): 0 empties `stacktrace`. */
+  readonly stackTraceLimit: 0;
 }
 
 /** The BullMQ job options of a job with this deterministic ID. */
@@ -40,5 +42,6 @@ export function jobOptions(jobId: string): JobOptions {
     backoff: { type: BACKOFF_TYPE, delay: BACKOFF_BASE_MS },
     removeOnComplete: { age: 86_400, count: 10_000 },
     removeOnFail: false,
+    stackTraceLimit: 0,
   };
 }
