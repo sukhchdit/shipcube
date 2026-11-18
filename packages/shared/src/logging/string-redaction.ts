@@ -555,6 +555,29 @@ function hasSecretShapedWord(text: string): boolean {
 }
 
 /**
+ * A single-credential authorisation scheme followed by a token68-shaped credential of at least 8 characters (RFC 7235
+ * token68), for {@link hasCredentialShape}: `Basic dXNlcjpwYXNz` is a credential, `Basic plan` is prose (code review
+ * PR #61 R1-m3 (a)). Not global, so `test` keeps no state.
+ */
+const TOKEN68_CREDENTIAL = /\b(?:bearer|basic|dpop|ntlm|apikey|token|negotiate)[ \t]{1,16}[A-Za-z0-9\-._~+/]{8,}/i;
+/** PARAMETER_SCHEME without the global flag (`test` keeps no state). */
+const PARAMETER_CREDENTIAL = new RegExp(PARAMETER_SCHEME.source, 'i');
+
+/**
+ * True when `value` (its first MAX_STRING_LENGTH characters) holds a CREDENTIAL by shape: a URL with userinfo or a
+ * query (redactString's URL rule), an authorisation-scheme credential (any white space before or inside; a token68
+ * credential of 8+ characters, or a parameter-list scheme), or a secret-shaped word (JWS, gateway keys and secrets). Unlike redactString it ignores e-mail addresses and
+ * words that merely contain a keyword (`reset_password`, `session:manage`): the audit trail redacts by this predicate
+ * (PR #61 PR61-SEC-01), where a business value must not be lost to a keyword.
+ */
+export function hasCredentialShape(value: string): boolean {
+  const { text } = capped(value);
+  if (text.replace(URL_PATTERN, redactUrl) !== text) return true;
+  if (TOKEN68_CREDENTIAL.test(text) || PARAMETER_CREDENTIAL.test(text)) return true;
+  return hasSecretShapedWord(text);
+}
+
+/**
  * An object key as written to a line (keys may be data, e.g. a map): capped at MAX_KEY_LENGTH; REDACTED_KEY when it
  * holds a credential-shaped word; otherwise with e-mail addresses masked and line breakers escaped.
  */

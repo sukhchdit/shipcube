@@ -18,6 +18,7 @@ import {
   REDACTED_KEY,
   redactString,
   sanitiseKey,
+  hasCredentialShape,
 } from './string-redaction.js';
 
 // Timing helpers. Wall-clock assertions are flaky under host load, so the tests below assert growth (linearity) with
@@ -676,5 +677,38 @@ describe('string-redaction: linear time', () => {
       ),
     ).toBeLessThanOrEqual(GROWTH_LIMIT);
     expect(perCall(() => redactString(large), 1)).toBeLessThan(CATASTROPHIC_CEILING_MS);
+  });
+});
+
+describe('[PR61-SEC-01] hasCredentialShape: the credential shapes of redactString, without e-mails or keyword words', () => {
+  it.each([
+    'Authorization: Bearer abcdefghijklmnop',
+    '\tBearer abcdefgh123',
+    'Token abcdefghijklmnopqrstuv',
+    'Basic dXNlcjpwYXNz',
+    'DPoP abcdefgh1234',
+    'Digest username="u", response="v"',
+    'https://x.test/reset?token=abc',
+    'postgresql://app:pw@db.test/platform',
+    'sk_live_A1b2C3',
+    'whsec_A1b2C3',
+    'pi_123_secret_A1b2',
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig',
+  ])('%s', (value) => {
+    expect(hasCredentialShape(value)).toBe(true);
+  });
+
+  it.each([
+    'Basic plan',
+    'Bearer of bad news',
+    'jane@example.com',
+    'reset_password',
+    'session:manage',
+    'refresh_token',
+    'https://example.com/path',
+    'Bearer',
+    'Pune',
+  ])('%s is not a credential shape', (value) => {
+    expect(hasCredentialShape(value)).toBe(false);
   });
 });

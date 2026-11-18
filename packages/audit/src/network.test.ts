@@ -33,3 +33,20 @@ describe('client network fields (ADR-0007 am. 2: /24 and /48 in clear, the IP it
     expect(canonicalIp('203.0.113.77')).toBe('203.0.113.77');
   });
 });
+
+describe('[PR61-SEC-06] canonicalIp writes IPv6 in RFC 5952 form', () => {
+  it('every spelling of one address has one canonical text (so one ip_hash and one vault row)', () => {
+    const spellings = ['2001:db8::1', '2001:0db8:0000:0000:0000:0000:0000:0001', '2001:DB8:0:0:0:0:0:1', '2001:db8:0::0:1'];
+    expect(new Set(spellings.map((ip) => canonicalIp(ip)))).toEqual(new Set(['2001:db8::1']));
+  });
+
+  it('compresses the longest zero run (the first on a tie), never a single zero group', () => {
+    expect(canonicalIp('2001:db8:0:0:1:0:0:1')).toBe('2001:db8::1:0:0:1');
+    expect(canonicalIp('2001:db8:0:1:0:0:0:1')).toBe('2001:db8:0:1::1');
+    expect(canonicalIp('2001:db8:0:1:1:1:1:1')).toBe('2001:db8:0:1:1:1:1:1');
+    expect(canonicalIp('::')).toBe('::');
+    expect(canonicalIp('::1')).toBe('::1');
+    expect(canonicalIp('fe80::1%eth0')).toBe('fe80::1');
+    expect(canonicalIp('::ffff:203.0.113.7')).toBe('203.0.113.7');
+  });
+});

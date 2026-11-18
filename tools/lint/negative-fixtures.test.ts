@@ -256,6 +256,23 @@ const RULES: readonly Violation[] = [
     'platform/audit-writer-allowlist',
     'allowed only in the audit-writer allow-list',
   ],
+  // PR #61 R1-M2 / PR61-SEC-02: the vault tokeniser and the privacy composition are writer exports (the composition root
+  // excepted, exact file); the vault decrypt pair is narrower still: the audit viewer module only.
+  ...(
+    [
+      ['a module imports the vault tokeniser', `${API}/orders/service/bad-orders-vault-tokeniser.service.ts`],
+      ['a module imports the audit privacy composition', `${API}/orders/service/bad-orders-audit-privacy.service.ts`],
+      ['a module imports the vault decrypt pair', `${API}/orders/service/bad-orders-vault-decrypt.service.ts`],
+      ['a worker job imports the vault tokeniser', 'apps/worker/src/jobs/bad-vault-tokeniser.job.ts'],
+      ['a writer-allow-listed module may not decrypt the vault', `${API}/identity/service/bad-identity-vault-decrypt.service.ts`],
+      ['the audit viewer may decrypt but not write the vault', `${API}/audit/service/bad-viewer-tokeniser.service.ts`],
+    ] as const
+  ).map(([title, file]): Violation => [
+    `[PR61-SEC-02] platform/audit-writer-allowlist: ${title}`,
+    `rules/audit-writer-allowlist/${file}`,
+    'platform/audit-writer-allowlist',
+    'allowed only in the audit-writer allow-list',
+  ]),
   [
     '[PR44-SEC-01 A05] platform/audit-writer-allowlist: the audit writer through an aliased createRequire (R1-m6)',
     `rules/audit-writer-allowlist/${API}/orders/service/bad-create-require-writer.ts`,
@@ -1517,6 +1534,14 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       'rules/audit-writer-allowlist/apps/api/src/platform/audit/ok-store.ts',
     ],
     [
+      '[PR61-SEC-02] platform/audit-writer-allowlist: the API composition root builds the audit privacy dependencies',
+      'rules/audit-writer-allowlist/apps/api/src/start-api.ts',
+    ],
+    [
+      '[PR61-SEC-02] platform/audit-writer-allowlist: the audit viewer module decrypts the vault (TASK-073)',
+      `rules/audit-writer-allowlist/${API}/audit/service/ok-vault-viewer.service.ts`,
+    ],
+    [
       'platform/audit-writer-allowlist: pure audit helpers outside the allow-list (PR42-SEC-06)',
       `rules/audit-writer-allowlist/${API}/orders/service/ok-pure-helpers.ts`,
     ],
@@ -1985,8 +2010,11 @@ describe('lint wiring (ADR-0002 am. item 3, NFR-MAINT-001, PR2-SEC-02/03)', () =
   });
 
   exactOnly('the audit-writer allow-list is narrowed to platform/{audit,authz,db} and the worker processors (TASK-002 n5)', () => {
-    expect(report.effective['apps/api/src/platform/audit/a.ts']?.['platform/audit-writer-allowlist']).toBe('off');
-    expect(report.effective['apps/worker/src/processors/a.ts']?.['platform/audit-writer-allowlist']).toBe('off');
+    // PR #61 R1-M2: the allow-list keeps the rule with the vault-decrypt exports only (the writer exports pass there:
+    // ok-login, ok-store; the decrypt pair does not: bad-identity-vault-decrypt). packages/audit owns all of it.
+    expect(report.effective['apps/api/src/platform/audit/a.ts']?.['platform/audit-writer-allowlist']).toBe('error');
+    expect(report.effective['apps/worker/src/processors/a.ts']?.['platform/audit-writer-allowlist']).toBe('error');
+    expect(report.effective['packages/audit/src/store/prisma-store.ts']?.['platform/audit-writer-allowlist']).toBe('off');
   });
 
   it('tenant-database rules: repositories get raw-SQL, client and expectAffected checks; prisma/tests keeps no-relative-packages on (TASK-016)', () => {

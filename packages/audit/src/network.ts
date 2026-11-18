@@ -58,10 +58,30 @@ export function coarseNetwork(ip: string): string | null {
     .join(':')}::/48`;
 }
 
-/** The canonical text of a client IP (IPv4-mapped addresses unmapped, zone removed, IPv6 lower case), or `null`. */
+/** The canonical text of a client IP (IPv4-mapped addresses unmapped, zone removed, IPv6 in RFC 5952 form), or `null`. */
 export function canonicalIp(ip: string): string | null {
   const address = unmapped(withoutZone(ip));
   if (isIPv4(address)) return address;
-  if (isIPv6(address)) return address.toLowerCase();
-  return null;
+  return isIPv6(address) ? rfc5952(ipv6Groups(address)) : null;
+}
+
+/**
+ * The RFC 5952 text of eight IPv6 groups (PR61-SEC-06): lower-case hex without leading zeros, the longest run of two or
+ * more zero groups (the first, on a tie) compressed to `::`. Every spelling of one address hashes alike (`ip_hash`).
+ */
+function rfc5952(groups: readonly number[]): string {
+  let bestStart = -1;
+  let bestLength = 1;
+  for (let start = 0; start < groups.length; start += 1) {
+    let length = 0;
+    while (start + length < groups.length && groups[start + length] === 0) length += 1;
+    if (length > bestLength) {
+      bestStart = start;
+      bestLength = length;
+    }
+    start += length;
+  }
+  const hex = groups.map((group) => group.toString(16));
+  if (bestStart === -1) return hex.join(':');
+  return `${hex.slice(0, bestStart).join(':')}::${hex.slice(bestStart + bestLength).join(':')}`;
 }

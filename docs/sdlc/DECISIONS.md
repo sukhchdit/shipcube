@@ -3593,3 +3593,76 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - PR64-SEC-10 → product-manager.
 - **Record simulation** (main's checker, simulated merge refs): 12 of 12 as expected: S1-S5 pass (S5: the round-2 head row binds alone at `266abb6`), C1-C6 fail as expected; F1: the round-1 record alone also passes, which is why C1 was held by the orchestrator.
 - **Reversibility:** High.
+
+### D-SEC-PR61-03 · 2026-11-18 · security-analyst · PR #61 (TASK-028) security round 2 = PASS_WITH_FOLLOW-UPS at code head `d51b42b` (tip `c39a993` evidence only; record `docs/05-quality/security/PR-0061-TASK-028-security-review-r2.md`, committed on main)
+- **Decision:** the fix-cycle delta `14cdeed..d51b42b` closes the round-1 MEDIUM and every in-PR item of rounds 1 and 1b. There are no Critical, High or Medium findings. The merge `d51b42b` is a pure union (empty remerge diff). The record binds to `d51b42b`, and the evidence-only tip `c39a993` changes no owned path (34 owned paths against the merge base `538f0b0`). Host rule respected: static reads and single-process Node probes on `git archive` extracts, with the round-1 code as positive control; one read-only lint run; the evidence worktree was not touched. (D-SEC-PR61-02 was the r1b proposal carried by D-ORCH-COORD-02 and D-ORCH-129, so this entry is 03.)
+  - **PR61-SEC-01 closed.** Through the real writer, 98 of 100 key spellings are redacted (19 of 100 at round 1; the log redacts 74). Every key the log hides is now hidden by the audit too. All 19 credential value shapes are redacted (round 1: 2), and the four round-1 record shapes too. `isSecretText` is linear: 1 MiB adversarial input takes 36-116 ms.
+  - **PR61-SEC-02 closed.** 23 of 23 lint cases behave as intended: the four vault exports are allowed only in `start-api.ts` (tokeniser and privacy) and `modules/audit/**` (decrypt and keyOf), and refused everywhere else, dynamic `import()` included.
+  - **PR61-SEC-03 closed for this PR:** the monthly unattributed subject (November 2026 `01a19467-e800-…`) and actor-owned filter values are in. The rest is routed by D-ARCH-149 (EPIC-B-413, EPIC-B-303).
+  - **PR61-SEC-05 closed for credential shapes.** `prepareEntry` refuses a JWS or gateway-key `entityId`. The opaque-token residual goes to TASK-031 (a route-metadata rule).
+  - **Also closed:** PR61-SEC-06 (RFC 5952), -07 (D-ARCH-148), -08 (routed to the M5 rotation runbook) and, from r1b, -09 (nested secrets and reasons no longer reach the vault) and -10 (C10 pins the class).
+  - **Still open:** PR61-SEC-04 (CODEOWNERS) → devops with the PR48-SEC-02 activation PR. Add `packages/shared/src/logging/string-redaction.ts`, which the audit denylist now delegates to.
+- **New:**
+  - **PR61-SEC-11 (LOW, CWE-212).** The audit still keeps credentials written as `key=value` pairs inside a string, which the log hides (form bodies such as `…&client_secret=<v>`, JSON bodies as strings, cookie, `Set-Cookie` and `x-reauth-proof` header text, `password=<v>` in prose). It also keeps Node's flat `rawHeaders` lists, `{ Name, Value }` records, and the key names `kek`/`dek`. Rated LOW because only serialized text carries this class; structured values are redacted.
+    - **Fix:** a narrow pair predicate. It uses the log's `KEY_SEPARATOR` grammar with `isSecretKey`, skipping a bare `scope:action` pair. Validated: it flags 9 of 10 residual forms, keeps 11 of 12 business values (`session:manage`, `reset_password` among them) and is linear. Add flat-list pairing and case-insensitive record members.
+    - **Timing:** together with code review R2-m1 (same predicate), in-PR if another cycle happens, else TASK-031 before its diff builder records free-form values.
+  - **PR61-SEC-12 (INFO, CWE-1289):** IPv4-mapped addresses not spelled `::ffff:a.b.c.d` are neither unmapped nor coarsened as IPv4. Fix: unmap from the parsed groups. Owner: TASK-041 or the next change to `network.ts`.
+- **D-ORCH-133 local rewrite:** it meets the three conditions of D-SEC-PR64-02.
+  1. `task028-fc1-pre-gitleaks-backup` is local only.
+  2. After a fetch, `git branch -r --contains` is empty for `d54880a`, `1b0b18e`, `b0c5fe6`, `d51b42b` and `c39a993`.
+  3. The literal was a synthetic PEM header; nothing to rotate. `d54880a` and `d51b42b` differ only in the two test files.
+- **Gitleaks emulation** (v8.30.1, 221 rules, repo allowlists): 0 findings in the lane A range `538f0b0..c39a993`; the pre-rewrite range finds the `private-key` hit (positive control). Note: one JUnit test title in the evidence carries a PEM header, safe only by the rule's 64-character span. Prefer `it.each` titles that name the shape.
+- **Code review round 2 (`fa5432b`):**
+  - R2-m1: confirmed, fail-safe. The tightening is accepted provided the 19 credential shapes stay a regression table.
+  - R2-n1: reproduced, INFO-level.
+  - R2-n5: supported. A relative import of a viewer re-export is already lint-clean today (TASK-073).
+- **Merge conditions (security):**
+  1. Push `c39a993` unchanged. A full lane A run on it must be green in every step, including `security-integration`. The record counts from the next `pull_request` event (close and reopen per D-ORCH-134 if only a light run results).
+  2. Any change to the 34 owned paths after `d51b42b` needs a delta round.
+  3. Delete the backup branch after merge, never push it.
+- **Record simulation** (main's checker, plumbing merge refs at main `d76ac9e`): S1 and S2 (a docs-only commit after the tip) pass at `d51b42b`. C1 (round-1 record only), C2 (owned change after the tip), C3 (head row `14cdeed`), C4 (final verdict FAIL) and C5 (`--pr 60`) are missing, as expected.
+- **Reversibility:** High.
+
+### D-SEC-PR62-01 · 2026-11-18 · security-analyst · PR #62 (TASK-287 part 287-A, policy PR) security round 1 = PASS_WITH_FOLLOW-UPS at code head `5d86412` (tip `77ff897` evidence only; record `docs/05-quality/security/PR-0062-TASK-287A-security-review.md`, committed on main)
+- **Decision:** 0 Critical, High or Medium; 1 LOW (PR62-SEC-01) and 2 INFO (PR62-SEC-02, PR62-SEC-03). The record binds to the code commit `5d86412`. The evidence-only tip `77ff897` changes no owned path, so main's checker accepts it through the merge ref. Host rule: static review plus single-process Node probes on `git archive` extracts; nothing ran in the PR's evidence worktree.
+- **Closed or in place:**
+  - **No gate is weakened.** The merge-base and head policies ran side by side over 895 mutants of the live `ci.yml`. No mutant is refused by the base and accepted by the head, apart from the 8 designed acceptances: V2 tooling scripts, and the four `FAST_LANE_*` aggregation entries with their exact values. `lane-c.yml` and `nightly.yml` give 0 findings under both.
+  - **PR59-SEC-01 item 1 is closed** (exact `with:` maps):
+    - 136 of 136 key additions are refused (the base refused 2);
+    - 99 of 102 value edits are refused (the 3 accepted are the same value quoted);
+    - 8 of 8 dropped maps and 8 of 8 duplicate keys are refused.
+  - **PR59-SEC-01 item 2, policy half, is in place.** The policy accepts V1, or V2 exactly; 7 weakened V2 variants are refused. `lane-scope.mjs` exits 2 on a runner when `HEAD` is not `GITHUB_SHA`, in classify and `--gate` mode, from the first run after the merge. The workflow half rides 287-B, and PR59-SEC-01 stays open until then.
+  - **PR55-SEC-10 is closed, and PR55-SEC-11 item 3 ends.** The stage-1 fixture gives 0 findings under the base and 43 under the head ("must not have a scans job"). A classify call without `--tools-ref` exits 2.
+  - **PR55-SEC-05, policy half, is in place.** The aggregation step accepts each of the four entries only with its exact value (14 bad shapes refused). When an entry is present and differs, the gate gives BLOCKED.
+  - **PR57-SEC-02 is closed in tooling**, effective for the PRs after the merge. On the 41-path corpus, the list agrees with both the card and the manifest matcher. At `9874f6d`, 40 tracked files newly select and none stops selecting; every file the negations exclude under the new roots is a test or fixture file.
+- **New findings:**
+  - **PR62-SEC-01 (LOW, CWE-829/693, A08:2021).** The action steps of the three pinned jobs still accept:
+    - any step `env:` (`NODE_EXTRA_CA_CERTS`, `HTTPS_PROXY`, `GIT_DIR`, `GIT_CONFIG_GLOBAL`, `GIT_TEMPLATE_DIR`, `ACTIONS_ALLOW_UNSECURE_COMMANDS` and others; `INPUT_*` is harmless because the runner overwrites declared inputs);
+    - any 40-hex `uses:` commit, including a fork-network commit that GitHub resolves under the upstream name.
+
+    Only a PR that edits `ci.yml` can use either lever. It is the am. N item 3 residual, so it is not new exposure, but it is cheap to pin.
+
+    **Ruling** on code review R1-n2 and §6 n2:
+    - Crafted tested bases stay with the record-names-head line.
+    - The two levers are pinned policy first, in the 287-C policy PR: the action-step key set is exactly `{name, uses, with}`, and each of the three actions has an exact commit.
+    - Until then, the record of any PR that changes a `ci.yml` `uses:` line checks the new commit against the upstream tag, and checks that no action step gained `env:`.
+    - `CI-CD.md` §5 restates the residual.
+
+    Owner: devops-engineer.
+  - **PR62-SEC-02 (INFO).** The transitional acceptances (V1 or V2; the optional `FAST_LANE_*` entries) end with 287-B: the next policy change accepts V2 only and makes the four entries required, before any other `ci.yml` PR merges. This is a condition on 287-B. Owner: devops-engineer.
+  - **PR62-SEC-03 (INFO).** `rls-cross-tenant` and `catalog-c1-c14` import code outside the trigger list: `apps/api/src/app.ts`, `apps/api/src/modules/index.generated.ts`, `tools/openapi/contract.ts`, `tools/authz/generate.ts` and `@platform/shared`. Owner: principal-architect, at the next fold or suite activation: extend the activation rule to non-test imports, or add those paths (minutes go to the D-ORCH-117 re-forecast).
+- **Code review r1 (`d76ac9e`):**
+  - R1-m1 (run-full wider than documented) is confirmed by probe. It is a minutes defect, not a gate removal: rule (b) still holds a full run.
+  - R1-m2 (push-event gate test lost) concerns dormant rules while `CI_MAIN_FAST_LANE` is off, and the surviving mutant fails closed.
+  - Neither is a security finding, and the routes are as in the code review.
+- **P1:** since the merge base `d173d8f`, `main` merged #57, #60, #63, #64, #66 and #67. No changed file overlaps this PR, and `git merge-tree origin/main 77ff897` is clean at `dbd2bb7`. `tools/ci` on `main` changed only in #67's watchlist and its test, and `.github` did not change. The push `1c4dc00..77ff897` is a code push, so it runs the full lane against current `main`. `security-integration` is not selected.
+- **Merge conditions:**
+  1. Push `5d86412` and `77ff897` as they are, in one code push. The full lane A run must be green in every step, with `ci-gate` MERGE-READY. Any later `tools/ci/**` change needs a delta round.
+  2. The orchestrator watches the first lane A run of any PR after the merge, because it is the first live run of this tooling. A red result from the event-commit or `--tools-ref` checks blocks every PR, which is fail closed. Revert, never bypass.
+  3. 287-B goes next, before any other workflow PR, with its own record naming its code head (D-ORCH-116) and PR62-SEC-02.
+  4. After the merge, run `gen.mjs --write` (D-ARCH-139).
+- **Record simulation** (main's checker, plumbing merge refs at main `dbd2bb7`): 9 of 9 as expected.
+  - S1 (base = merge base), S2 (base = main with the record) and S3 (base = main tip) pass at `5d86412` with 17 owned paths.
+  - These fail as missing: C1 (no record), C2 (last Verdict FAIL), C3 (Head row names a main commit), C4 (an owned change after the reviewed commit), C5 (the currently pushed head `1c4dc00`) and C6 (the same record filed under another PR number).
+- **Gitleaks hint:** the full `generic-api-key` emulation over the 24,138 added lines and over the record gives 0 findings; its positive control fires.
+- **Reversibility:** High.

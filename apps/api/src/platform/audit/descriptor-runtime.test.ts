@@ -257,6 +257,19 @@ describe('[US-086] entry assembly (PR42-SEC-15: client-shaped values only in the
       outcome: 'SUCCESS',
     });
     expect(odd.details).toEqual({ filter: {}, result_count: null });
+    // D-ARCH-149: the filter values of an authenticated list request belong to the actor's data subject.
+    expect(details.filter['status']).toMatchObject({ subject: { kind: 'USER', refId: USER } });
+    const anonymous = entryFor({
+      compiled: list,
+      request: request(list.route, {
+        principal: ANONYMOUS,
+        input: { params: {}, query: { status: 'OPEN' }, body: undefined, headers: {} },
+      }),
+      result: { status: 200, body: { data: [] } },
+      action: 'VIEW',
+      outcome: 'SUCCESS',
+    });
+    expect((anonymous.details as { filter: Record<string, { subject: unknown }> }).filter['status']?.subject).toBeNull();
     // a denial (no result) of a list route records no list summary
     expect(
       entryFor({ compiled: list, request: request(list.route), result: undefined, action: 'VIEW', outcome: 'DENIED' }),
