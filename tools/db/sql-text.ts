@@ -181,20 +181,39 @@ interface Piece {
   readonly text: string;
 }
 
+/** One open `BEGIN ATOMIC` block: the words of its current body statement, and whether that statement has begun. */
+interface AtomicBlock {
+  words: string[];
+  started: boolean;
+}
+
 /**
  * Top-level statements, comments removed, trimmed, without the terminating `;`; empty statements dropped.
  *
  * Inside a `CREATE [OR REPLACE] FUNCTION | PROCEDURE` statement a SQL-standard body (`BEGIN ATOMIC … END`) holds `;`
- * that do not end the statement (SEC-TC-73). Exactly this is counted (PR43-SEC-03, PR #43 R1-M1), in such a statement
- * only, on unquoted words at parenthesis depth 0:
- *  - the two words `BEGIN ATOMIC` (comments and whitespace between them allowed) open a block;
- *  - inside an open block, `BEGIN ATOMIC` and `CASE` raise the depth and `END` lowers it;
- *  - a `;` splits only at depth 0.
- * A bare `BEGIN` never counts: it is an unreserved keyword, so a routine named `begin`, a parameter or a `RETURNS
- * TABLE` column `begin`, or `RETURN begin` must not open anything. A `CASE` outside a block never counts either (`RETURN
- * CASE … END` has no `;` inside). This is narrower than psql's heuristic (psqlscan.l `begin_depth` also counts a bare
- * `BEGIN`), not a parser. Text that ends inside an open block throws SqlLexError (fail closed: the caller reports it,
- * it never becomes one swallowed statement).
+ * that do not end the statement (SEC-TC-73). The block structure follows PostgreSQL's grammar (gram.y
+ * `opt_routine_body: BEGIN_P ATOMIC routine_body_stmt_list END_P`, where every body statement ends in `;`, and
+ * `routine_body_stmt: stmt | ReturnStmt` excludes `TransactionStmtLegacy`, so no body statement starts with `BEGIN` or
+ * `END`), on unquoted words only (PR43-SEC-03, PR #43 R1-M1; PR43-SEC-11 structural fix, TASK-290):
+ *  - OPEN: the two words `BEGIN ATOMIC` (comments and whitespace between them allowed), at parenthesis depth 0, in a
+ *    statement that starts with the routine head: the top-level statement, or — inside an open block — the current
+ *    body statement (a nested routine). `begin` / `atomic` anywhere else is a name or a label (`SELECT begin atomic
+ *    FROM …`, a parameter `begin` of a type `atomic`) and opens nothing.
+ *  - CLOSE: `END` as the FIRST word of a body statement (right after `ATOMIC` or after a body `;`). Every other `end`
+ *    — the end of a `CASE` expression, a label (`AS end`, `t.end`, the bare label `SELECT 1 end`) — is part of its
+ *    statement. `CASE` therefore never counts: neither a CASE expression nor a label `case` (`AS case`, `t.case`,
+ *    `SELECT 1 case`) can move a block boundary, so no over-count exists that a later top-level `END` could
+ *    resynchronise.
+ *  - a `;` splits only outside a block; inside one it ends a body statement.
+ * Fail closed (SqlLexError, reported by the linter as rule L; never one swallowed statement, never a crash): text that
+ * ends inside an open block; a body `;` inside parentheses (PostgreSQL refuses it); anything but `;` (or the end of the
+ * text, top level only) after the `END` that closes a block (PostgreSQL accepts nothing else there: `END WORK`,
+ * `END LANGUAGE sql`, `END SELECT 1` are syntax errors).
+ * A bare `BEGIN` never counts: a routine named `begin`, a parameter or a `RETURNS TABLE` column `begin`, or `RETURN
+ * begin` opens nothing. This is narrower than psql's heuristic (psqlscan.l `begin_depth` also counts a bare `BEGIN` and
+ * every `CASE`); the PostgreSQL 18 agreement is prisma/tests/migrations/split-statements.int.test.ts. Limit: it is a
+ * splitter, not a parser — PostgreSQL refuses a utility statement (GRANT, DROP, SET, CREATE FUNCTION …) inside a SQL
+ * function body at CREATE time (0A000), so text that a body swallows by the grammar never runs as a migration step.
  */
 export function splitStatements(sql: string): string[] {
   const pieces: Piece[] = tokenize(sql).flatMap((token): Piece[] =>
@@ -211,37 +230,84 @@ export function splitStatements(sql: string): string[] {
   };
   const statements: string[] = [];
   let current = '';
+  /** Words of the current top-level statement. */
   let words: string[] = [];
   let parens = 0;
-  let depth = 0;
+  /** Open blocks, innermost last. */
+  const blocks: AtomicBlock[] = [];
+  /** The `atomic` of an opening `BEGIN ATOMIC` is next: it belongs to the opener, not to the first body statement. */
+  let openerPending = false;
+  /** A block has just closed: only `;` (or the end of the text) may follow. */
+  let closed = false;
+  const opens = (head: readonly string[], word: string, index: number): boolean =>
+    word === 'begin' && parens === 0 && ROUTINE_HEAD.test(head.slice(0, 4).join(' ')) && nextWord(index) === 'atomic';
   pieces.forEach((piece, index) => {
     if (piece.kind === 'comment') {
       current += piece.text.startsWith('--') ? '' : ' ';
       return;
     }
-    if (piece.kind !== 'code') {
+    if (piece.kind === 'code' && /^\s$/.test(piece.text)) {
       current += piece.text;
       return;
     }
-    if (piece.text === ';' && depth === 0) {
-      statements.push(current);
-      current = '';
-      words = [];
-      parens = 0;
+    if (closed && !(piece.kind === 'code' && piece.text === ';')) {
+      throw new SqlLexError('unbalanced BEGIN ATOMIC block: the END of a routine body must end the routine statement');
+    }
+    closed = false;
+    const block = blocks.at(-1);
+    if (piece.kind !== 'code') {
+      current += piece.text;
+      if (block) block.started = true;
+      return;
+    }
+    if (piece.text === ';') {
+      if (!block) {
+        statements.push(current);
+        current = '';
+        words = [];
+        parens = 0;
+        return;
+      }
+      if (parens !== 0) throw new SqlLexError('unbalanced parentheses in a BEGIN ATOMIC body statement');
+      current += ';';
+      block.words = [];
+      block.started = false;
       return;
     }
     current += piece.text;
     if (piece.text === '(') parens += 1;
     else if (piece.text === ')') parens = Math.max(0, parens - 1);
-    if (!/^[A-Za-z_]/.test(piece.text)) return;
-    const word = piece.text.toLowerCase();
-    words.push(word);
-    if (parens !== 0 || !ROUTINE_HEAD.test(words.slice(0, 4).join(' '))) return;
-    const atomic = word === 'begin' && nextWord(index) === 'atomic';
-    if (atomic || (depth > 0 && word === 'case')) depth += 1;
-    else if (word === 'end' && depth > 0) depth -= 1;
+    const word = /^[A-Za-z_]/.test(piece.text) ? piece.text.toLowerCase() : undefined;
+    if (openerPending && word === 'atomic') {
+      openerPending = false;
+      return;
+    }
+    if (!block) {
+      if (word === undefined) return;
+      words.push(word);
+      if (opens(words, word, index)) {
+        blocks.push({ words: [], started: false });
+        openerPending = true;
+      }
+      return;
+    }
+    const first = !block.started;
+    block.started = true;
+    if (word === undefined) return;
+    if (word === 'end' && first) {
+      blocks.pop();
+      closed = true;
+      return;
+    }
+    block.words.push(word);
+    if (opens(block.words, word, index)) {
+      blocks.push({ words: [], started: false });
+      openerPending = true;
+    }
   });
-  if (depth > 0) throw new SqlLexError(`unbalanced BEGIN ATOMIC block: the text ends inside a routine body (${depth} open)`);
+  if (blocks.length > 0) {
+    throw new SqlLexError(`unbalanced BEGIN ATOMIC block: the text ends inside a routine body (${blocks.length} open)`);
+  }
   statements.push(current);
   return statements.map((statement) => statement.trim()).filter((statement) => statement !== '');
 }

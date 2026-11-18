@@ -18,8 +18,9 @@
  *              migrator owns the shadow database and may create trusted extensions, A16); CREATE TABLE, CREATE [UNIQUE]
  *              INDEX, CREATE [OR REPLACE] FUNCTION (not an event-trigger function), CREATE [CONSTRAINT] TRIGGER,
  *              CREATE POLICY, `ALTER TABLE <t> ENABLE [ALWAYS|REPLICA] TRIGGER <n>`, `ALTER TABLE <t> ENABLE|FORCE ROW
- *              LEVEL SECURITY`, the CHECK replacement `ALTER TABLE <t> DROP CONSTRAINT [IF EXISTS] <c>, ADD CONSTRAINT
- *              <c> CHECK (…)` (same name, one statement; 91-audit-actions-v2.sql, TASK-285), COMMENT ON, and
+ *              LEVEL SECURITY`, the CHECK replacement `ALTER TABLE <t> DROP CONSTRAINT [IF EXISTS] ck_<…>, ADD
+ *              CONSTRAINT ck_<…> CHECK (…)` (same `ck_` name, one statement, the CHECK's closing parenthesis ends the
+ *              statement: isCheckReplacement; 91-audit-actions-v2.sql, TASK-285; PR52-SEC-01, TASK-290), COMMENT ON, and
  *              `SELECT <schema>.<function>(<args>)` (the first ensure_audit_partitions
  *              call, so the shadow holds partitions as a real database does).
  *   stripped   (needs a role or privilege the migrator lacks, or is not diffed): CREATE/ALTER/DROP ROLE|USER|GROUP and a
@@ -150,15 +151,53 @@ const KEEP: readonly RegExp[] = [
   /^create policy /,
   new RegExp(`^alter table (?:only )?${QNAME} enable (?:always |replica )?trigger ${NAME}$`),
   new RegExp(`^alter table (?:only )?${QNAME} (?:enable|force) row level security$`),
-  // A CHECK replaced under the same name in one statement (91-audit-actions-v2.sql, TASK-285); no third action (no
-  // `), <action>` after the CHECK), no NOT VALID / NO INHERIT tail, so the shadow ends with the constraint a real
-  // database holds.
-  new RegExp(
-    `^alter table (?:only )?${QNAME} drop constraint (?:if exists )?(${NAME}) ?, ?add constraint \\1 check ?\\((?:(?!\\) ?, ?[a-z])[^;])*\\)$`,
-  ),
   /^comment on (?:table|column|function|index|schema|type) /,
   new RegExp(`^select ${NAME} ?\\. ?${NAME} ?\\([^()]*\\)$`),
 ];
+
+/**
+ * A CHECK constraint name by the data-model P9 rule `ck_<table>__<rule>`, unquoted only: statementCode() lowercases
+ * quoted identifiers too, so `"CK_A"` and `"ck_a"` (two constraints to PostgreSQL) would compare equal.
+ */
+const CHECK_NAME = 'ck_[a-z0-9_$]*';
+
+/**
+ * Head of the CHECK replacement (91-audit-actions-v2.sql, TASK-285), up to and including the CHECK's opening
+ * parenthesis: one DROP CONSTRAINT and one ADD CONSTRAINT of the SAME name, and that name is a CHECK name (P9 `ck_`), so
+ * a primary key, foreign key or unique constraint cannot be "replaced" by a CHECK. The word boundary after the name
+ * is the `,` (or the space before it): `ck_x, add constraint ck_xy` never matches the back-reference.
+ */
+const CHECK_REPLACEMENT_HEAD = new RegExp(
+  `^alter table (?:only )?${QNAME} drop constraint (?:if exists )?(${CHECK_NAME}) ?, ?add constraint \\1 check ?\\(`,
+);
+
+/**
+ * The KEEP form of a same-name CHECK replacement (PR52-SEC-01, D-SEC-PR52-01 (2); TASK-290): the head above, then a
+ * balanced-parenthesis scan of the CHECK expression that skips quoted identifiers (string literals and dollar bodies
+ * are already blanked by statementCode), so the CHECK's OWN closing parenthesis must be the last character of the
+ * statement. Nothing can follow it: no constraint attribute (`NOT VALID`, `NO INHERIT`, `NOT ENFORCED`), no second
+ * action (`, DISABLE TRIGGER ALL`, `, DROP CONSTRAINT …`, `, ADD COLUMN …`), so the shadow ends with exactly the
+ * constraint a real database holds. A quoted identifier that holds a parenthesis cannot fake the end of the expression.
+ */
+export function isCheckReplacement(text: string): boolean {
+  const head = CHECK_REPLACEMENT_HEAD.exec(text);
+  if (head === null) return false;
+  let depth = 1;
+  for (let i = head[0].length; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '"') {
+      const close = text.indexOf('"', i + 1);
+      if (close < 0) return false;
+      i = close;
+    } else if (c === '(') {
+      depth += 1;
+    } else if (c === ')') {
+      depth -= 1;
+      if (depth === 0) return i === text.length - 1;
+    }
+  }
+  return false;
+}
 
 const CREATE_SCHEMA = /^create schema if not exists ([a-z_][a-z0-9_]*)(?: authorization [a-z_][a-z0-9_]*)?$/;
 
@@ -206,7 +245,7 @@ export function renderShadowInit(files: readonly BootstrapFile[], { dropSchemas 
         kept.push(`CREATE SCHEMA IF NOT EXISTS ${name}`);
         continue;
       }
-      if (!KEEP.some((pattern) => pattern.test(text))) {
+      if (!KEEP.some((pattern) => pattern.test(text)) && !isCheckReplacement(text)) {
         throw new ShadowInitError(file.name, `statement form not recognised by the shadow rendering (fail closed): "${preview}"`);
       }
       kept.push(statement);
