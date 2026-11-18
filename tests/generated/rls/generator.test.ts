@@ -2,13 +2,18 @@
  * Unit tests of the RLS generator (TASK-024; US-077 AT-US-077-03): case derivation, enumeration findings, route
  * enumeration, row synthesis and expectations. Pure; the database half runs in cross-tenant.int.test.ts.
  */
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from '@jest/globals';
 
 import type { TableClassEntry } from '../../../tools/db/table-classes.js';
 import { enumCheckValues } from './database.js';
+import { CUSTOMER_VIEWER_ROLE_ID, ROLE_SCOPE_GUARDS, ROW_OVERRIDES } from './fixtures.js';
 import {
   GUEST_PROBES,
   TABLE_PROBES,
+  ROLE_SCOPE_MARKER,
   RowSynthesisError,
   caseTraits,
   enumerationFindings,
@@ -26,6 +31,8 @@ import {
   type LiveTable,
 } from './generator.js';
 import { drA14ProbesFor, PROBE_ENTRIES, probeSchemaDdl } from './probe.js';
+
+const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
 
 const entry = (name: string, tableClass: TableClassEntry['class'], extra: Partial<TableClassEntry> = {}): TableClassEntry => ({
   module: 'm',
@@ -112,12 +119,68 @@ describe('RLS generator: cases (AT-US-077-03)', () => {
   });
 
   it('derives the case traits from the manifest entry', () => {
-    expect(caseTraits(entry('q', 'GUEST_CAPABLE'))).toEqual({ guestCapable: true, stdGuardOnKey: false });
+    expect(caseTraits(entry('q', 'GUEST_CAPABLE'))).toEqual({ guestCapable: true, stdGuardOnKey: false, roleScopeGuard: false });
     expect(caseTraits(entry('organisations', 'TENANT', { policySet: 'dr-a14-organisations', stdColumns: true }))).toEqual({
       guestCapable: false,
       stdGuardOnKey: true,
+      roleScopeGuard: false,
     });
-    expect(caseTraits(entry('parcels', 'TENANT', { stdColumns: true }))).toEqual({ guestCapable: false, stdGuardOnKey: false });
+    expect(caseTraits(entry('parcels', 'TENANT', { stdColumns: true }))).toEqual({
+      guestCapable: false,
+      stdGuardOnKey: false,
+      roleScopeGuard: false,
+    });
+    expect(caseTraits(entry('membership_roles', 'TENANT', { stdColumns: true }))).toEqual({
+      guestCapable: false,
+      stdGuardOnKey: false,
+      roleScopeGuard: true,
+    });
+    expect(caseTraits(entry('parcels', 'TENANT'), { parcels: 'trg_parcels__x' }).roleScopeGuard).toBe(true);
+  });
+
+  it('[D-TASK037-14] the role-scope guard pre-empts WITH CHECK on insert and re-parent only; every other probe is unchanged', () => {
+    const all = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] as const;
+    const guarded = { roleScopeGuard: true } as const;
+    const roleScope = { sqlState: 'P0001', marker: ROLE_SCOPE_MARKER };
+    expect(expectedObservation('insert-foreign-key', all, guarded)).toEqual(roleScope);
+    expect(expectedObservation('reparent-own-row', all, guarded)).toEqual(roleScope);
+    // Without the privilege the statement never reaches a trigger.
+    expect(expectedObservation('insert-foreign-key', ['SELECT'], guarded)).toEqual({ sqlState: '42501' });
+    expect(expectedObservation('reparent-own-row', ['UPDATE'], guarded)).toEqual({ sqlState: '42501' });
+    // The positive controls and the read/foreign-id probes still assert the RLS outcome.
+    expect(expectedObservation('update-blind', all, guarded)).toEqual({ rows: 1 });
+    expect(expectedObservation('update-foreign-id', all, guarded)).toEqual({ rows: 0 });
+    expect(expectedObservation('own-row-visible', all, guarded)).toEqual({ rows: 1 });
+    expect(expectedObservation('select-foreign-id', all, guarded)).toEqual({ rows: 0 });
+  });
+
+  it('[D-TASK037-14] ROLE_SCOPE_GUARDS lists exactly the triggers of prisma/migrations that run platform.role_scope_matches_org()', () => {
+    const migrations = join(REPO_ROOT, 'prisma', 'migrations');
+    const sql = readdirSync(migrations, { withFileTypes: true })
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => join(migrations, dirent.name, 'migration.sql'))
+      .filter((file) => existsSync(file))
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+    const live = Object.fromEntries(
+      [
+        ...sql.matchAll(
+          /CREATE TRIGGER (\w+) BEFORE INSERT OR UPDATE OF role_id, org_id ON public\.(\w+)\s+FOR EACH ROW EXECUTE FUNCTION platform\.role_scope_matches_org\(\);/g,
+        ),
+      ].map((match) => [match[2] ?? '', match[1] ?? '']),
+    );
+    expect(live).toEqual(ROLE_SCOPE_GUARDS);
+    expect([...sql.matchAll(/EXECUTE FUNCTION platform\.role_scope_matches_org\(\)/g)]).toHaveLength(Object.keys(ROLE_SCOPE_GUARDS).length);
+  });
+
+  it('[D-TASK037-15] the fixture role is CUSTOMER_VIEWER (scope CUSTOMER) of the released authz seed migration', () => {
+    const seed = readFileSync(join(REPO_ROOT, 'prisma', 'migrations', '20261112010100_authz_seed_v1', 'migration.sql'), 'utf8');
+    const row = seed.split('\n').find((line) => line.includes(`'${CUSTOMER_VIEWER_ROLE_ID}'`));
+    expect(row).toMatch(/^\s*\('[0-9a-f-]{36}', 'CUSTOMER_VIEWER', '[^']+', 'CUSTOMER',/);
+    expect(ROW_OVERRIDES['membership_roles']).toEqual({ role_id: CUSTOMER_VIEWER_ROLE_ID });
+    expect(ROW_OVERRIDES['invitations']).toEqual({ role_id: CUSTOMER_VIEWER_ROLE_ID });
+    expect(ROW_OVERRIDES['memberships']).toEqual({ status: 'ACTIVE' });
+    expect(ROW_OVERRIDES['organisations']).toEqual({ type: 'BUSINESS_CUSTOMER' });
   });
 });
 
@@ -266,6 +329,20 @@ describe('RLS generator: row synthesis and deterministic ids', () => {
     expect(row.values.slice(0, 8)).toEqual(['x', 'o', 'ACTIVE', 'rls-re', 'USD', '1', false, '{}']);
     expect(Buffer.isBuffer(row.values[8])).toBe(true);
     expect(row.values.slice(9)).toEqual(['{}', '2026-01-01T00:00:00Z']);
+  });
+
+  it('[D-TASK037-13] synthetic text satisfies the normalised-email CHECKs (email = lower(email), 3..254 chars) and stays unique per tag', () => {
+    // ck_users__email_normalised and ck_invitations__email (migration 20261117000000_organisations_identity).
+    const normalised = (value: unknown): boolean =>
+      typeof value === 'string' && value === value.toLowerCase() && value.length >= 3 && value.length <= 254;
+    const tags = ['A', 'B', 'G', 'X', 'planted-0', 'planted-1'];
+    for (const table of ['users', 'invitations']) {
+      const shape = live(table, [column('id', 'uuid'), column('email', 'text'), column('display_name', 'text')]);
+      const emails = tags.map((tag) => synthesiseRow(shape, { id: 'x' }, tag).values[1]);
+      expect(emails.filter((email) => !normalised(email))).toEqual([]);
+      expect(new Set(emails).size).toBe(tags.length);
+    }
+    expect(synthesiseRow(live('t', [column('email', 'text')]), {}, 'A').values).toEqual(['rls-email-a']);
   });
 
   it('names the column it cannot synthesise and refuses an override for an unknown column', () => {

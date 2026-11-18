@@ -55,7 +55,7 @@ import {
   TENANT_A,
   TENANT_B,
 } from './database.js';
-import { API_CASES } from './fixtures.js';
+import { API_CASES, ROLE_SCOPE_GUARDS } from './fixtures.js';
 import {
   type ApiCrossTenantCase,
   enumerationFindings,
@@ -261,6 +261,13 @@ describe('AT-US-077-03 a new tenant table is picked up automatically; CI fails i
   it('AT-US-077-03 committed: no relation outside public; every public table is classified; every listed RLS table exists with ENABLE + FORCE, its key and (guest) de-claim trigger', () => {
     expect(enumerationFindings(COMMITTED_ENTRIES, layers.committed.live)).toEqual([]);
     expect([...layers.committed.plans.keys()].sort()).toEqual(rlsNames(COMMITTED_ENTRIES));
+  });
+
+  it('D-TASK037-14 committed: every ROLE_SCOPE_GUARDS entry names a live, enabled trigger of an RLS table (the roleScopeGuard expectation is not stale)', () => {
+    const stale = Object.entries(ROLE_SCOPE_GUARDS).filter(
+      ([table, trigger]) => !(layers.committed.plans.get(table)?.table.triggers.includes(trigger) ?? false),
+    );
+    expect(stale).toEqual([]);
   });
 
   it('AT-US-077-03 probe: the planted tables are classified by their probe manifest and each has its generated cases', () => {
