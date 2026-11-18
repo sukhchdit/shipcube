@@ -3593,3 +3593,32 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - PR64-SEC-10 → product-manager.
 - **Record simulation** (main's checker, simulated merge refs): 12 of 12 as expected: S1-S5 pass (S5: the round-2 head row binds alone at `266abb6`), C1-C6 fail as expected; F1: the round-1 record alone also passes, which is why C1 was held by the orchestrator.
 - **Reversibility:** High.
+
+### D-SEC-PR61-03 · 2026-11-18 · security-analyst · PR #61 (TASK-028) security round 2 = PASS_WITH_FOLLOW-UPS at code head `d51b42b` (tip `c39a993` evidence only; record `docs/05-quality/security/PR-0061-TASK-028-security-review-r2.md`, committed on main)
+- **Decision:** the fix-cycle delta `14cdeed..d51b42b` closes the round-1 MEDIUM and every in-PR item of rounds 1 and 1b. There are no Critical, High or Medium findings. The merge `d51b42b` is a pure union (empty remerge diff). The record binds to `d51b42b`, and the evidence-only tip `c39a993` changes no owned path (34 owned paths against the merge base `538f0b0`). Host rule respected: static reads and single-process Node probes on `git archive` extracts, with the round-1 code as positive control; one read-only lint run; the evidence worktree was not touched. (D-SEC-PR61-02 was the r1b proposal carried by D-ORCH-COORD-02 and D-ORCH-129, so this entry is 03.)
+  - **PR61-SEC-01 closed.** Through the real writer, 98 of 100 key spellings are redacted (19 of 100 at round 1; the log redacts 74). Every key the log hides is now hidden by the audit too. All 19 credential value shapes are redacted (round 1: 2), and the four round-1 record shapes too. `isSecretText` is linear: 1 MiB adversarial input takes 36-116 ms.
+  - **PR61-SEC-02 closed.** 23 of 23 lint cases behave as intended: the four vault exports are allowed only in `start-api.ts` (tokeniser and privacy) and `modules/audit/**` (decrypt and keyOf), and refused everywhere else, dynamic `import()` included.
+  - **PR61-SEC-03 closed for this PR:** the monthly unattributed subject (November 2026 `01a19467-e800-…`) and actor-owned filter values are in. The rest is routed by D-ARCH-149 (EPIC-B-413, EPIC-B-303).
+  - **PR61-SEC-05 closed for credential shapes.** `prepareEntry` refuses a JWS or gateway-key `entityId`. The opaque-token residual goes to TASK-031 (a route-metadata rule).
+  - **Also closed:** PR61-SEC-06 (RFC 5952), -07 (D-ARCH-148), -08 (routed to the M5 rotation runbook) and, from r1b, -09 (nested secrets and reasons no longer reach the vault) and -10 (C10 pins the class).
+  - **Still open:** PR61-SEC-04 (CODEOWNERS) → devops with the PR48-SEC-02 activation PR. Add `packages/shared/src/logging/string-redaction.ts`, which the audit denylist now delegates to.
+- **New:**
+  - **PR61-SEC-11 (LOW, CWE-212).** The audit still keeps credentials written as `key=value` pairs inside a string, which the log hides (form bodies such as `…&client_secret=<v>`, JSON bodies as strings, cookie, `Set-Cookie` and `x-reauth-proof` header text, `password=<v>` in prose). It also keeps Node's flat `rawHeaders` lists, `{ Name, Value }` records, and the key names `kek`/`dek`. Rated LOW because only serialized text carries this class; structured values are redacted.
+    - **Fix:** a narrow pair predicate. It uses the log's `KEY_SEPARATOR` grammar with `isSecretKey`, skipping a bare `scope:action` pair. Validated: it flags 9 of 10 residual forms, keeps 11 of 12 business values (`session:manage`, `reset_password` among them) and is linear. Add flat-list pairing and case-insensitive record members.
+    - **Timing:** together with code review R2-m1 (same predicate), in-PR if another cycle happens, else TASK-031 before its diff builder records free-form values.
+  - **PR61-SEC-12 (INFO, CWE-1289):** IPv4-mapped addresses not spelled `::ffff:a.b.c.d` are neither unmapped nor coarsened as IPv4. Fix: unmap from the parsed groups. Owner: TASK-041 or the next change to `network.ts`.
+- **D-ORCH-133 local rewrite:** it meets the three conditions of D-SEC-PR64-02.
+  1. `task028-fc1-pre-gitleaks-backup` is local only.
+  2. After a fetch, `git branch -r --contains` is empty for `d54880a`, `1b0b18e`, `b0c5fe6`, `d51b42b` and `c39a993`.
+  3. The literal was a synthetic PEM header; nothing to rotate. `d54880a` and `d51b42b` differ only in the two test files.
+- **Gitleaks emulation** (v8.30.1, 221 rules, repo allowlists): 0 findings in the lane A range `538f0b0..c39a993`; the pre-rewrite range finds the `private-key` hit (positive control). Note: one JUnit test title in the evidence carries a PEM header, safe only by the rule's 64-character span. Prefer `it.each` titles that name the shape.
+- **Code review round 2 (`fa5432b`):**
+  - R2-m1: confirmed, fail-safe. The tightening is accepted provided the 19 credential shapes stay a regression table.
+  - R2-n1: reproduced, INFO-level.
+  - R2-n5: supported. A relative import of a viewer re-export is already lint-clean today (TASK-073).
+- **Merge conditions (security):**
+  1. Push `c39a993` unchanged. A full lane A run on it must be green in every step, including `security-integration`. The record counts from the next `pull_request` event (close and reopen per D-ORCH-134 if only a light run results).
+  2. Any change to the 34 owned paths after `d51b42b` needs a delta round.
+  3. Delete the backup branch after merge, never push it.
+- **Record simulation** (main's checker, plumbing merge refs at main `d76ac9e`): S1 and S2 (a docs-only commit after the tip) pass at `d51b42b`. C1 (round-1 record only), C2 (owned change after the tip), C3 (head row `14cdeed`), C4 (final verdict FAIL) and C5 (`--pr 60`) are missing, as expected.
+- **Reversibility:** High.
