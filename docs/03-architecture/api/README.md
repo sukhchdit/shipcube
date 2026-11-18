@@ -295,7 +295,7 @@ Route-specific limits are declared in `x-rate-limit-route` and run in addition t
 
 ## 11. Error-code catalogue
 
-The catalogue lives in `packages/shared/src/errors/catalogue.ts` (code, status, title, source). It is the single list the error handler accepts: a thrown error without a catalogue entry fails a test (REQ-API-005). `npm run api:check-errors` asserts that the set and statuses equal the examples under `components/responses` in `openapi.yaml` and the table below. `npm run api:sync-errors` regenerates both from the catalogue.
+The catalogue lives in `packages/shared/src/errors/catalogue/` (one `<module>.ts` file per module, aggregated by `index.ts`; each entry is a code with its `status` and `title`). It is the single list the error handler accepts: a thrown error without a catalogue entry fails a test (REQ-API-005). The parity test `tests/generated/error-catalogue.test.ts` (unit lane, `npm run test:unit`) asserts that the codes, statuses and titles equal the examples under `components/responses` in `openapi.yaml`, that the code and status of every row of the table below equal the catalogue (both directions), and that every code thrown through `new AppError(...)` or carried by a domain error class is catalogued or listed under "Codes that are not HTTP problem codes". There is no script that regenerates the examples or the table: a new code is added to the catalogue, its example and its table row by hand, and the test names whichever of them is missing. The "Source" column below is the requirement or decision that introduced the code; it is documentation, not a catalogue field.
 
 Status rule (A-073): a domain code with no stated HTTP status maps to **422**.
 
@@ -623,7 +623,7 @@ New test dependency (dev only): `ajv` 8 (MIT, last release 2026-04). Rejected: `
 ## 18. Contract change process
 
 1. Change `openapi.yaml` in the same PR as the route, Joi schema and tests (contract first).
-2. Run `npm run openapi:lint` (0 errors), the drift and contract tests (`tools/openapi`, unit lane; the `npm run test:contract` alias and `api:check-errors` land with TASK-020 / TASK-036), `npm run openapi:types`.
+2. Run `npm run openapi:lint` (0 errors), the drift and contract tests (`tools/openapi`, unit lane; the `npm run test:contract` alias lands with TASK-020) and the error-catalogue parity test `tests/generated/error-catalogue.test.ts` (unit lane), `npm run openapi:types`.
 3. In CI, `oasdiff breaking` against the previous release tag must report no breaking changes on `/api/v1`. A breaking change needs a superseding ADR and the deprecation mechanism in §1.
 4. New error codes go into the `packages/shared` catalogue first. Codes are never renamed or reused.
 5. New permissions go into the `packages/authz` catalogue first (REQ-RBAC-001). The seed matrix and the RBAC matrix test update automatically.
