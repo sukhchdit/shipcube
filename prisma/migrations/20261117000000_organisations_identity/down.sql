@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS "public"."organisations";
 
 DROP FUNCTION IF EXISTS platform.role_scope_matches_org();
 DROP FUNCTION IF EXISTS platform.organisations_personal_delete_guard();
+DROP FUNCTION IF EXISTS platform.organisations_personal_owner_immutable();
 DROP FUNCTION IF EXISTS platform.organisations_type_immutable();
 DROP FUNCTION IF EXISTS platform.std_columns_guard();
 

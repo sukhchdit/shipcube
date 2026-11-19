@@ -10,7 +10,10 @@ import { type AppTransactionClient, type Prisma, serverStamped, type TenantDb } 
 import type { OrgType } from '../policies/organisation-rules.js';
 
 /** The delegates the repository uses, of the caller's tenant transaction client. */
-export type OrganisationsDb = Pick<TenantDb<AppTransactionClient>, 'organisation' | 'membership' | 'membershipRole' | 'role'>;
+export type OrganisationsDb = Pick<
+  TenantDb<AppTransactionClient>,
+  'organisation' | 'membership' | 'membershipRole' | 'role' | 'contextOrgId'
+>;
 
 export interface NewOrganisation {
   readonly type: OrgType;
@@ -20,6 +23,13 @@ export interface NewOrganisation {
 }
 
 export interface OrganisationRepository {
+  /** The transaction's context organisation (`app.org_id`, lower-case UUID), or '' when the transaction has none. */
+  contextOrgId(): string;
+  /**
+   * True when `membershipId` is a membership of the context organisation. The organisation filter is explicit:
+   * `p_memberships__own_read` also shows the actor's own memberships of other organisations (code review R1-m1 (a)).
+   */
+  membershipOfContextOrganisation(membershipId: string): Promise<boolean>;
   /** Inserts the organisation of the transaction's context; returns its id (= the context organisation). */
   insertOrganisation(organisation: NewOrganisation): Promise<string>;
   /** The type of a visible organisation, or undefined (absent or hidden by RLS: indistinguishable, REQ-RLS-007). */
@@ -33,6 +43,13 @@ export interface OrganisationRepository {
 
 export function createOrganisationRepository(db: OrganisationsDb): OrganisationRepository {
   return {
+    contextOrgId: () => db.contextOrgId(),
+    async membershipOfContextOrganisation(membershipId) {
+      const orgId = db.contextOrgId();
+      if (orgId === '') return false;
+      const found = await db.membership.findFirst({ where: { id: membershipId, orgId }, select: { id: true } });
+      return found !== null;
+    },
     async insertOrganisation(organisation) {
       const { id } = await db.organisation.create({
         data: serverStamped<Prisma.OrganisationUncheckedCreateInput>({

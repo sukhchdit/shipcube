@@ -12,6 +12,7 @@ import {
   assertCreatableOrgType,
   assertRoleAllowed,
   isOrgType,
+  organisationDisplayName,
   OrganisationRuleError,
   PERSONAL_ORG_OWNER_ROLE,
   personalOrganisationName,
@@ -20,6 +21,11 @@ import type { OrganisationRepository } from '../repository/organisation-reposito
 
 export class OrganisationNotFoundError extends Error {
   override readonly name = 'OrganisationNotFoundError';
+}
+
+/** A membership that is absent, or belongs to another organisation (indistinguishable, REQ-RLS-007): 404 NOT_FOUND. */
+export class MembershipNotFoundError extends Error {
+  override readonly name = 'MembershipNotFoundError';
 }
 
 export interface CreatedOrganisation {
@@ -71,7 +77,7 @@ export async function createOrganisation(repo: OrganisationRepository, input: Bu
   assertCreatableOrgType(input.type);
   const organisationId = await repo.insertOrganisation({
     type: input.type,
-    displayName: input.displayName.trim(),
+    displayName: organisationDisplayName(input.displayName),
     defaultLocale: input.locale,
   });
   const membershipId = await repo.insertActiveMembership(input.ownerUserId, input.now ?? new Date());
@@ -80,16 +86,24 @@ export async function createOrganisation(repo: OrganisationRepository, input: Bu
 }
 
 export interface AssignRoleInput {
-  /** The context organisation of the transaction. */
-  readonly orgId: string;
   readonly membershipId: string;
   readonly roleKey: string;
   readonly grantedBy: string;
 }
 
-/** REQ-ORG-004 (AT-US-062-02): the role's scope must match the organisation type; nothing is written otherwise. */
+/**
+ * REQ-ORG-004 (AT-US-062-02): the role's scope must match the organisation type; nothing is written otherwise.
+ *
+ * The organisation is the transaction's context organisation, never a caller-supplied id, and the membership must
+ * belong to it (code review R1-m1 (a); ADR-0005 "a crafted foreign ID is invisible, so the API answers 404"). The
+ * membership is resolved with an explicit organisation filter because `p_memberships__own_read` also shows the
+ * actor's own memberships of other organisations; a membership id of another organisation is refused as not found
+ * and nothing is written.
+ */
 export async function assignRole(repo: OrganisationRepository, input: AssignRoleInput): Promise<string> {
-  const type = await repo.organisationType(input.orgId);
+  const orgId = repo.contextOrgId();
+  const type = orgId === '' ? undefined : await repo.organisationType(orgId);
   if (type === undefined || !isOrgType(type)) throw new OrganisationNotFoundError('organisation not found');
+  if (!(await repo.membershipOfContextOrganisation(input.membershipId))) throw new MembershipNotFoundError('membership not found');
   return grant(repo, input.membershipId, assertRoleAllowed(type, input.roleKey), input.grantedBy);
 }

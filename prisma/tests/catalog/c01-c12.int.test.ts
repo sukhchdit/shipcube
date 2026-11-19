@@ -935,8 +935,21 @@ describe('catalog-c1-c14: grants and functions (C5, C11; US-074)', () => {
     );
     const helper = { owner: MIGRATOR, prosecdef: false, proconfig: null, volatile: 's', parallel: 's', execute: [APP_ROLE, MIGRATOR] };
     expect(helpers).toEqual([
-      { fn: 'platform.app_actor_id()', ...helper },
+      // TASK-037 (card C11 adaptation; code review R1-M1): the migration grants app_actor_id() to platform_definer,
+      // because app_is_operator() runs as platform_definer and reads the actor through it.
+      { fn: 'platform.app_actor_id()', ...helper, execute: [APP_ROLE, 'platform_definer', MIGRATOR] },
       { fn: 'platform.app_guest_token_hash()', ...helper },
+      // The §4.2 operator helper (template app-is-operator.sql): SECURITY DEFINER owned by platform_definer, fixed
+      // search path, EXECUTE for platform_app (and its owner) only; its definer shape is also on DEFINER_ALLOWED.
+      {
+        fn: 'platform.app_is_operator()',
+        owner: 'platform_definer',
+        prosecdef: true,
+        proconfig: ['search_path=pg_catalog, pg_temp'],
+        volatile: 's',
+        parallel: 'u',
+        execute: [APP_ROLE, 'platform_definer'],
+      },
       { fn: 'platform.app_org_id()', ...helper },
     ]);
     // No platform-owned function outside extensions leaves EXECUTE to PUBLIC (a NULL proacl is the built-in default).

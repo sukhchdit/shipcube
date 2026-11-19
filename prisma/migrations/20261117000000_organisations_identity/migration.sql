@@ -314,17 +314,35 @@ END $$;
 CREATE TRIGGER trg_organisations__type_immutable AFTER UPDATE OF type ON public.organisations
   FOR EACH ROW EXECUTE FUNCTION platform.organisations_type_immutable();
 
+-- REQ-ORG-002 / DR-A06: a personal organisation keeps its owner for life (raises PERSONAL_OWNER_IMMUTABLE). Together
+-- with the immutable type this keeps ck_organisations__personal_owner stable and closes the "re-point the owner, then
+-- delete" path (code review R1-m3).
+CREATE FUNCTION platform.organisations_personal_owner_immutable() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF NEW.personal_owner_user_id IS DISTINCT FROM OLD.personal_owner_user_id THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'PERSONAL_OWNER_IMMUTABLE: organisations.personal_owner_user_id cannot change';
+  END IF;
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER trg_organisations__personal_owner_immutable AFTER UPDATE OF personal_owner_user_id ON public.organisations
+  FOR EACH ROW EXECUTE FUNCTION platform.organisations_personal_owner_immutable();
+
 -- AT-US-062-04: a personal organisation is not soft-deleted while its owner is an active user (raises
--- PERSONAL_ORG_OWNER_ACTIVE). Hard delete is never granted at runtime (no DELETE privilege for platform_app).
+-- PERSONAL_ORG_OWNER_ACTIVE). Hard delete is never granted at runtime (no DELETE privilege for platform_app). The
+-- owner is read from OLD (the stored row), so the guard does not depend on the owner being immutable (R1-m3).
 CREATE FUNCTION platform.organisations_personal_delete_guard() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
   -- Fail closed: unless the owner row is visible AND deleted or deactivated, the owner counts as active.
-  IF NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL AND NEW.personal_owner_user_id IS NOT NULL
+  IF NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL AND OLD.personal_owner_user_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM public.users u
-                      WHERE u.id = NEW.personal_owner_user_id AND (u.deleted_at IS NOT NULL OR u.status = 'DEACTIVATED')) THEN
+                      WHERE u.id = OLD.personal_owner_user_id AND (u.deleted_at IS NOT NULL OR u.status = 'DEACTIVATED')) THEN
     RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'PERSONAL_ORG_OWNER_ACTIVE: a personal organisation of an active user cannot be deleted';
   END IF;
   RETURN NEW;
@@ -335,19 +353,21 @@ CREATE TRIGGER trg_organisations__personal_delete_guard BEFORE UPDATE OF deleted
 
 -- REQ-ORG-004 database backstop: a role's scope matches its organisation's type (OPERATOR -> OPERATOR,
 -- BUSINESS_CUSTOMER | INDIVIDUAL -> CUSTOMER, PARTNER -> PARTNER); raises ROLE_NOT_ALLOWED_FOR_ORG_TYPE. Shared by
--- membership_roles and invitations (the invited role).
+-- membership_roles and invitations (the invited role). The expected scope is computed into a variable first: a bare
+-- CASE … END inside an IF condition ends the condition at the CASE's first THEN (42601; code review R1-B1).
 CREATE FUNCTION platform.role_scope_matches_org() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-  v_type  text;
-  v_scope text;
+  v_type     text;
+  v_scope    text;
+  v_expected text;
 BEGIN
   SELECT o.type INTO v_type FROM public.organisations o WHERE o.id = NEW.org_id;
   SELECT r.scope INTO v_scope FROM public.roles r WHERE r.id = NEW.role_id;
-  IF v_type IS NULL OR v_scope IS NULL OR v_scope IS DISTINCT FROM
-       CASE v_type WHEN 'OPERATOR' THEN 'OPERATOR' WHEN 'PARTNER' THEN 'PARTNER' ELSE 'CUSTOMER' END THEN
+  v_expected := CASE v_type WHEN 'OPERATOR' THEN 'OPERATOR' WHEN 'PARTNER' THEN 'PARTNER' ELSE 'CUSTOMER' END;
+  IF v_type IS NULL OR v_scope IS NULL OR v_scope IS DISTINCT FROM v_expected THEN
     RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE: role scope does not match the organisation type';
   END IF;
   RETURN NEW;

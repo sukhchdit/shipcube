@@ -102,11 +102,22 @@ export function assertWritableMembershipStatus(status: unknown): asserts status 
   }
 }
 
-/** The display name of a personal organisation: the user's display name (REQ-ORG-002), trimmed, 1..120 chars. */
-export function personalOrganisationName(displayName: string): string {
-  const name = displayName.normalize('NFC').trim().slice(0, 120);
-  if (name.length === 0) throw new TypeError('a personal organisation needs a non-empty display name');
+/** `ck_organisations__display_name`: 1..120 characters (PostgreSQL counts code points). */
+export const ORGANISATION_NAME_MAX = 120;
+
+/**
+ * An organisation display name as stored: NFC, trimmed, at most 120 code points (never a split surrogate pair, which
+ * PostgreSQL would store as U+FFFD), trimmed again after the cut (code review R1-n2). Both create paths use it.
+ */
+export function organisationDisplayName(displayName: string): string {
+  const name = Array.from(displayName.normalize('NFC').trim()).slice(0, ORGANISATION_NAME_MAX).join('').trim();
+  if (name.length === 0) throw new TypeError('an organisation needs a non-empty display name');
   return name;
+}
+
+/** The display name of a personal organisation: the user's display name (REQ-ORG-002), normalised as above. */
+export function personalOrganisationName(displayName: string): string {
+  return organisationDisplayName(displayName);
 }
 
 export interface MembershipSnapshot {

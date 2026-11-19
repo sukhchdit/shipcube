@@ -6,8 +6,9 @@
 // `ux_memberships__org_user_live`, `ux_membership_roles__membership_role_live`, `ux_invitations__org_email_pending`),
 // the partial index `ix_membership_roles__org_role_live`, the covering index `ix_memberships__user_status` (INCLUDE
 // org_id) and the descending `ix_invitations__org_status_created`, the domain triggers
-// (`trg_organisations__type_immutable`, `trg_organisations__personal_delete_guard`,
-// `trg_membership_roles__scope_matches_org`, `trg_invitations__role_scope`), the RLS blocks and the std-columns guards.
+// (`trg_organisations__type_immutable`, `trg_organisations__personal_owner_immutable`,
+// `trg_organisations__personal_delete_guard`, `trg_membership_roles__scope_matches_org`, `trg_invitations__role_scope`),
+// the RLS blocks and the std-columns guards.
 
 /// The tenant itself (its `id` is the tenant key). `type` never changes; exactly one OPERATOR organisation exists.
 model Organisation {

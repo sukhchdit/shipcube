@@ -18,6 +18,9 @@ import {
   isOrganisationRefusalCode,
   isOrgType,
   membershipChange,
+  MembershipNotFoundError,
+  organisationDisplayName,
+  ORGANISATION_NAME_MAX,
   ORGANISATION_INTERNAL_CODES,
   ORGANISATION_REFUSAL_CODES,
   ORGANISATION_RULE_CODES,
@@ -39,11 +42,16 @@ const NOW = new Date('2026-11-17T10:00:00.000Z');
 
 type FakeRepository = OrganisationRepository & { readonly writes: string[]; roleIdByKey: OrganisationRepository['roleIdByKey'] };
 
-/** An in-memory repository recording every write; `types` answers organisationType. */
-function fakeRepository(types: Record<string, string> = {}): FakeRepository {
+/**
+ * An in-memory repository recording every write; `types` answers organisationType, the context organisation is ORG
+ * (or `context`), and `memberships` lists the membership ids of the context organisation.
+ */
+function fakeRepository(types: Record<string, string> = {}, context = ORG, memberships: readonly string[] = ['m-1']): FakeRepository {
   const writes: string[] = [];
   return {
     writes,
+    contextOrgId: () => context,
+    membershipOfContextOrganisation: (membershipId) => Promise.resolve(memberships.includes(membershipId)),
     insertOrganisation: (organisation) => {
       writes.push(`org ${organisation.type} ${organisation.displayName} owner=${organisation.personalOwnerUserId ?? '-'}`);
       return Promise.resolve(ORG);
@@ -170,6 +178,16 @@ describe('organisation rules (REQ-ORG-001..004)', () => {
     expect(() => personalOrganisationName('   ')).toThrow(TypeError);
   });
 
+  it('[R1-n2] a display name is cut at 120 code points, never inside a surrogate pair, NFC-normalised and re-trimmed on both paths', () => {
+    const emoji = '\u{1F600}'; // two UTF-16 units, one code point
+    const cut = organisationDisplayName(`${'x'.repeat(119)}${emoji}${emoji}`);
+    expect(Array.from(cut)).toHaveLength(ORGANISATION_NAME_MAX);
+    expect(cut.endsWith(emoji)).toBe(true);
+    expect(organisationDisplayName(`${'y'.repeat(119)} tail`)).toBe('y'.repeat(119));
+    expect(organisationDisplayName('Café ')).toBe('Café');
+    expect(personalOrganisationName('Café')).toBe(organisationDisplayName('Café'));
+  });
+
   it('[AT-US-062-06] a membership change records old/new status and the role-set diff', () => {
     expect(membershipChange(null, { status: 'ACTIVE', roles: ['CUSTOMER_VIEWER'] })).toEqual({
       old_status: null,
@@ -221,16 +239,31 @@ describe('organisations service (one tenant transaction per call)', () => {
 
   it('[AT-US-062-02] assigning an operator role in a BUSINESS_CUSTOMER organisation is refused; no membership role changes', async () => {
     const repo = fakeRepository({ [ORG]: 'BUSINESS_CUSTOMER' });
-    expect(await ruleCode(() => assignRole(repo, { orgId: ORG, membershipId: 'm-1', roleKey: OPERATOR_ROLE, grantedBy: USER }))).toBe(
+    expect(await ruleCode(() => assignRole(repo, { membershipId: 'm-1', roleKey: OPERATOR_ROLE, grantedBy: USER }))).toBe(
       'ROLE_NOT_ALLOWED_FOR_ORG_TYPE',
     );
     expect(repo.writes).toEqual([]);
-    expect(await assignRole(repo, { orgId: ORG, membershipId: 'm-1', roleKey: 'CUSTOMER_FINANCE', grantedBy: USER })).toBe('mr-1');
+    expect(await assignRole(repo, { membershipId: 'm-1', roleKey: 'CUSTOMER_FINANCE', grantedBy: USER })).toBe('mr-1');
     expect(repo.writes).toEqual([`role m-1 role:CUSTOMER_FINANCE by=${USER}`]);
   });
 
+  it('[R1-m1] assignRole uses the context organisation and refuses a membership of another organisation as not found; nothing is written', async () => {
+    const input = { membershipId: 'm-of-b', roleKey: 'CUSTOMER_VIEWER', grantedBy: USER };
+    // The membership id is a visible membership of another organisation (e.g. the actor's own, via own_read).
+    const repo = fakeRepository({ [ORG]: 'BUSINESS_CUSTOMER' }, ORG, ['m-1']);
+    await expect(assignRole(repo, input)).rejects.toThrow(MembershipNotFoundError);
+    expect(repo.writes).toEqual([]);
+    // The type checked is the context organisation's: a PARTNER context refuses a customer role whatever the caller says.
+    const partner = fakeRepository({ [ORG]: 'PARTNER' }, ORG, ['m-1']);
+    expect(await ruleCode(() => assignRole(partner, { ...input, membershipId: 'm-1' }))).toBe('ROLE_NOT_ALLOWED_FOR_ORG_TYPE');
+    // No context organisation: not found, and the repository is not asked about any organisation.
+    const none = fakeRepository({ '': 'BUSINESS_CUSTOMER' }, '', ['m-1']);
+    await expect(assignRole(none, { ...input, membershipId: 'm-1' })).rejects.toThrow(OrganisationNotFoundError);
+    expect([...partner.writes, ...none.writes]).toEqual([]);
+  });
+
   it('an organisation that is absent or hidden by RLS is not found; a role missing from the catalogue table is refused', async () => {
-    const input = { orgId: ORG, membershipId: 'm-1', roleKey: 'CUSTOMER_VIEWER', grantedBy: USER };
+    const input = { membershipId: 'm-1', roleKey: 'CUSTOMER_VIEWER', grantedBy: USER };
     await expect(assignRole(fakeRepository(), input)).rejects.toThrow(OrganisationNotFoundError);
     await expect(assignRole(fakeRepository({ [ORG]: 'SOMETHING' }), input)).rejects.toThrow(OrganisationNotFoundError);
     const repo = fakeRepository({ [ORG]: 'BUSINESS_CUSTOMER' });
@@ -275,6 +308,29 @@ describe('organisations repository (TenantDb delegates)', () => {
       ['organisation.findUnique', { id: USER }],
       ['membership.create', { userId: USER, status: 'ACTIVE', activatedAt: NOW }],
       ['membershipRole.create', { membershipId: 'm-1', roleId: 'r-1', grantedBy: USER }],
+    ]);
+  });
+
+  it('[R1-m1] resolves a membership with an explicit filter on the context organisation; no context finds nothing', async () => {
+    const wheres: unknown[] = [];
+    let context = ORG;
+    const db = {
+      contextOrgId: () => context,
+      membership: {
+        findFirst: (args: { where: { id: string; orgId: string } }) => {
+          wheres.push(args.where);
+          return Promise.resolve(args.where.id === 'm-1' && args.where.orgId === ORG ? { id: 'm-1' } : null);
+        },
+      },
+    };
+    const repo = createOrganisationRepository(db as unknown as OrganisationsDb);
+    expect(repo.contextOrgId()).toBe(ORG);
+    expect([await repo.membershipOfContextOrganisation('m-1'), await repo.membershipOfContextOrganisation('m-2')]).toEqual([true, false]);
+    context = '';
+    expect(await repo.membershipOfContextOrganisation('m-1')).toBe(false);
+    expect(wheres).toEqual([
+      { id: 'm-1', orgId: ORG },
+      { id: 'm-2', orgId: ORG },
     ]);
   });
 });
