@@ -323,7 +323,7 @@ describe('check-workflow-policy: repository', () => {
       ]);
       expect(messages(replaceOnce(ci, '  fast-lane:\n', "  fast-lane:\n    defaults:\n      run:\n        shell: 'true {0}'\n"))).toEqual([
         'required-gates: ci.yml job fast-lane must not set defaults.run (it would change how its gate steps run)',
-        'required-gates: ci.yml job fast-lane must not set defaults (pinned job shape)',
+        expect.stringMatching(/^required-gates: ci\.yml job fast-lane must not set defaults \(pinned job shape: only .*PR287B-SEC-02\)$/u),
       ]);
       expect(messages(replaceOnce(ci, '\njobs:\n', '\ndefaults:\n  run:\n    working-directory: apps\njobs:\n'))).toEqual([
         'required-gates: ci.yml must not set defaults.run (it would change how every gate step runs)',

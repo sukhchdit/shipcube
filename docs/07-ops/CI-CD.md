@@ -64,11 +64,13 @@ job is a `required-gates` finding. In stage 2:
   one side changed, outside that set, is left to the D-ORCH-042 post-merge gate. A base change is dated by its
   committer time: a squash merge lands with its landing time, so push `main` commits that touch these paths right
   after creating them (PR55-SEC-04 residual). Since TASK-287 a docs push of a PR with code changes runs the full lane at
-  once (`code_changed=true`, `mode=full`, `push_scope` stays `docs`) only when no bound run on its code survived
-  the tested-base check and at least one voided run would have been a proof (its fast-lane and scans steps passed):
+  once (`code_changed=true`, `mode=full`, `push_scope` stays `docs`) only when no bound run on its code that failed
+  on the code survived the tested-base check, and at least one voided run would have been a proof (none of its fast-lane
+  or scans steps failed, was cancelled or skipped; a step the current workflow added since is ignored):
   the code must run on the new base before the merge anyway, and the full run (about 8-10 billed minutes) is cheaper
   than the blocked light run plus that re-push (SPK-07 section 6.1; D-TASK286-06a option; PR #62 code review R1-m1).
-  With no candidate, a red candidate, or a newer non-voided run on the same code, the push stays light and ends
+  (TASK-287 parts 287-B/287-C1: a cancelled, superseded or light newer run does not count against it.) With no
+  candidate, a red voided run, or a newer non-voided run that failed on the code, the push stays light and ends
   `BLOCKED: no code proof`; push a code change, or close and reopen the PR with no new commits (D-ORCH-135). Commitlint, actionlint and the head-code checks run only on a code push; the
   install, registry signatures and the advisory audit run on **every** push (PR46-SEC-11, D-TASK286-03), and when the
   PR range touches a lint control the lint-fixture steps must have succeeded in this run or the proof (R1-n1).
@@ -161,16 +163,22 @@ migration immutability, lockfile, dependency age, install, licences, signatures,
 Semgrep and record steps are exact, contiguous and carry no step env; `fast-lane` and `security-integration` use only
 `actions/checkout`, `actions/setup-node` and `actions/cache`, each with exactly its pinned `with:` map (checkout:
 `fetch-depth: 0`, `persist-credentials: false`, no `ref`/`repository`; setup-node and the engine cache as in ci.yml;
-the same for `ci-gate`), so none of those inputs can move the checkout (PR59-SEC-01 item 1). On a runner
+the same for `ci-gate`), so none of those inputs can move the checkout (PR59-SEC-01 item 1). Since TASK-287 part
+287-C1 each action step has exactly the keys `name`, `uses` and `with` (fast-lane's engine cache also its exact
+`if: env.CODE == 'true'`) and each action its exact commit, verified against the upstream tag (`STAGE_2_ACTION_COMMITS`:
+checkout v7.0.1, setup-node v7.1.0, cache v6.1.0; PR62-SEC-01); each of the three jobs has an exact key set and
+`runs-on: ubuntu-24.04` (PR287B-SEC-02). An action bump is a policy change first, then the ci.yml change. On a runner
 `lane-scope.mjs` (tested-base tooling) exits 2 unless `HEAD` is the event commit `GITHUB_SHA`, and both tooling steps
 carry the same check in bash before the tested-base lines (V2, the only accepted text since TASK-287 part 287-B;
 PR59-SEC-01 item 2, PR62-SEC-02). **Residual (ADR-0023 am. N item 3):** a PR that edits `ci.yml` controls its own
-workflow in that run: the `uses:` commit of the three actions and the step keys of the action steps are not yet pinned
-(PR62-SEC-01, policy first in TASK-287 part 287-C), and `checkoutProblem` runs from the `HEAD^1` that run's checkout
-chose. So for every PR that changes `.github/workflows/**` the merge rule stays: a security record on the branch names
-the PR's code head (D-ORCH-116, PR59-SEC-01 (3)); until 287-C the record also checks every changed `uses:` commit
-against its upstream tag and that no action step gained `env:` (D-SEC-PR62-01). The workflow env has exactly the install settings and the four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
-a lexical tripwire for the head-code steps, which are not exact). In every workflow, at every level: no
+workflow in that run, and `checkoutProblem` runs from the `HEAD^1` that run's checkout chose. So for every PR that
+changes `.github/workflows/**` the merge rule stays: a security record names the PR's code head (D-ORCH-116,
+PR59-SEC-01 (3)). The record may sit on the PR branch or already on `main`: main's copy reaches the record check
+through the merge ref, so either satisfies the rule. The workflow env has exactly the install settings and the four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
+a lexical tripwire for the head-code steps, which are not exact). In every workflow, an `actions/cache` (or
+`cache/restore`, `cache/save`) step whose `path:` would restore `node_modules/.cache/shipqube-test-locks/` (the
+test locks of TASK-288) must exclude it with a `!node_modules/.cache/shipqube-test-locks` line (`cache-hygiene`;
+D-SEC-PR57-02). In every workflow, at every level: no
 `BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
 `IFS`, `BASH_FUNC_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_<n>`/`VALUE_<n>`, `GIT_EXTERNAL_DIFF`, `HOME`,
 `XDG_CONFIG_HOME` or `NPM_CONFIG_SCRIPT_SHELL`/`USERCONFIG`/`GLOBALCONFIG`/`NODE_OPTIONS` entry, in any case

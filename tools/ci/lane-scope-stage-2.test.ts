@@ -21,11 +21,13 @@ import {
 } from './check-workflow-policy.mjs';
 import {
   CLASSIFICATION_KEYS,
+  MAX_API_CALLS,
   MAX_BASE_COMMITS,
   baseChangedAt,
   FAST_LANE_OUTPUT_ENV,
   checkoutProblem,
   classify,
+  failedOnCode,
   fastLaneProblems,
   formatClassification,
   gate,
@@ -643,6 +645,10 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
       SECURITY_INTEGRATION: 'success',
       CLASSIFICATION: text,
       FAST_LANE_CLASSIFICATION: text,
+      FAST_LANE_MODE: values.mode,
+      FAST_LANE_CODE_PROOF: values.code_proof,
+      FAST_LANE_SECURITY_INTEGRATION_DUE: values.security_integration_due,
+      FAST_LANE_TOOLS_REF: values.tools_ref,
     };
     const none: Api = () => ({ ok: false, problem: 'not called' });
     expect(gate({ root, env: stage2Env, api: none })).toEqual({ ready: true, reasons: [] });
@@ -673,9 +679,14 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
       FAST_LANE_SECURITY_INTEGRATION_DUE: values.security_integration_due,
       FAST_LANE_TOOLS_REF: values.tools_ref,
     };
-    // Absent (the live ci.yml until the workflow half lands) and equal: MERGE-READY.
-    expect(gate({ root, env: base, api: none })).toEqual({ ready: true, reasons: [] });
+    // All four equal: MERGE-READY. PR287B-SEC-01: an absent entry is a reason of its own (the policy requires all four
+    // since 287-B; the tool no longer depends on that).
     expect(gate({ root, env: { ...base, ...equal }, api: none })).toEqual({ ready: true, reasons: [] });
+    expect(gate({ root, env: base, api: none }).reasons).toEqual([
+      'fast-lane outputs missing (mode, code_proof, security_integration_due, tools_ref)',
+    ]);
+    const withoutCodeProof = Object.fromEntries(Object.entries(equal).filter(([key]) => key !== 'FAST_LANE_CODE_PROOF'));
+    expect(gate({ root, env: { ...base, ...withoutCodeProof }, api: none }).reasons).toEqual(['fast-lane outputs missing (code_proof)']);
     // A differing tools_ref (security-integration would read other manifests) or any other differing output: BLOCKED.
     expect(gate({ root, env: { ...base, ...equal, FAST_LANE_TOOLS_REF: 'e'.repeat(40) }, api: none }).reasons).toEqual([
       'fast-lane outputs mismatch (tools_ref)',
@@ -684,7 +695,7 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
       gate({ root, env: { ...base, ...equal, FAST_LANE_MODE: 'full', FAST_LANE_SECURITY_INTEGRATION_DUE: 'false' }, api: none }).reasons,
     ).toEqual(['fast-lane outputs mismatch (mode, security_integration_due)']);
     // Present but empty is compared too (an expression that evaluates to nothing is not "absent").
-    expect(gate({ root, env: { ...base, FAST_LANE_CODE_PROOF: '' }, api: none }).reasons).toEqual([
+    expect(gate({ root, env: { ...base, ...equal, FAST_LANE_CODE_PROOF: '' }, api: none }).reasons).toEqual([
       'fast-lane outputs mismatch (code_proof)',
     ]);
   });
@@ -737,18 +748,22 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
     return tip;
   }
   const PROOF_RUN = 11;
-  const jobsOfProof = (red = false) => {
+  /** A run's jobs: green, red on the unit tests, cancelled while running (superseded), or light (code steps skipped). */
+  type RunKind = boolean | 'cancelled' | 'light';
+  const jobsOfProof = (red: RunKind = false) => {
     const steps = proofSteps(stage2Text) as ProofSteps;
+    const stepConclusion = (name: string, mayBeSkipped: boolean) => {
+      if (red === 'cancelled') return 'cancelled';
+      if (red === 'light' || mayBeSkipped) return 'skipped';
+      return red === true && name === 'Unit tests' ? 'failure' : 'success';
+    };
     return {
       jobs: [
         {
           name: 'fast-lane',
           status: 'completed',
-          conclusion: red ? 'failure' : 'success',
-          steps: steps.fastLane.map((s) => ({
-            name: s.name,
-            conclusion: s.mayBeSkipped ? 'skipped' : red && s.name === 'Unit tests' ? 'failure' : 'success',
-          })),
+          conclusion: red === true ? 'failure' : red === 'cancelled' ? 'cancelled' : 'success',
+          steps: steps.fastLane.map((s) => ({ name: s.name, conclusion: stepConclusion(s.name, s.mayBeSkipped) })),
         },
         {
           name: 'ci-gate',
@@ -765,7 +780,7 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
    * whose unit tests failed (`red`), plus optionally a newer run of F1 (`newer`, created 12:30, after the base change).
    */
   const apiFor =
-    (f1: string, options: { red?: boolean; newer?: { id: number; red: boolean } } = {}): Api =>
+    (f1: string, options: { red?: RunKind; newer?: { id: number; red: RunKind } } = {}): Api =>
     (path) => {
       if (path.startsWith('repos/o/r/actions/workflows/ci.yml/runs?head_sha=')) {
         const sha = /head_sha=([0-9a-f]{40})/u.exec(path)?.[1] ?? '';
@@ -791,7 +806,7 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
         return { ok: true, json: { workflow_runs: [proof, ...newer] } };
       }
       if (path === `repos/o/r/actions/runs/${String(PROOF_RUN)}/jobs?per_page=100`)
-        return { ok: true, json: jobsOfProof(options.red === true) };
+        return { ok: true, json: jobsOfProof(options.red ?? false) };
       if (options.newer !== undefined && path === `repos/o/r/actions/runs/${String(options.newer.id)}/jobs?per_page=100`)
         return { ok: true, json: jobsOfProof(options.newer.red) };
       if (path.startsWith('repos/o/r/pulls?'))
@@ -806,7 +821,7 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
     change: Record<string, string> | undefined,
     name: string,
     lint = false,
-    apiOptions: { red?: boolean; newer?: { id: number; red: boolean } } = {},
+    apiOptions: { red?: RunKind; newer?: { id: number; red: RunKind } } = {},
   ) {
     const { root, m0, f1, f2 } = repo(lint);
     const api = apiFor(f1, apiOptions);
@@ -879,6 +894,21 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
     expect(green.outputs.mode).toBe('light');
     expect(green.outputs.code_proof).toBe(`12:${green.f1}`);
   });
+
+  it.each<[string, RunKind]>([
+    ['D: the newer run was cancelled while pending (superseded by the concurrency queue)', 'cancelled'],
+    ['E: the newer run was light (its code steps were skipped)', 'light'],
+  ])(
+    '[287-B review R1-m1] %s: it says nothing about the code on the new base, so the voided green proof still runs full',
+    (_title, kind) => {
+      const result = run({ 'package.json': '{"name":"x"}\n' }, `m1-${String(kind)}`, false, { newer: { id: 12, red: kind } });
+      expect(result.status).toBe(0);
+      expect(result.outputs.mode).toBe('full');
+      expect(result.outputs.code_changed).toBe('true');
+      expect(result.outputs.code_proof).toBe('');
+      expect(result.summary).toContain('the code proof was voided by the tested base: the full lane runs for this docs push');
+    },
+  );
 
   it('[R1-n1] a PR range touching a lint control: a proof whose lint-fixture step was skipped is no proof', () => {
     const result = run(undefined, 'lint', true);
@@ -989,5 +1019,132 @@ describe('[PR59-SEC-01] [TASK-287] on a runner the checkout is the event commit 
       expect(bad.status).toBe(1);
       expect(bad.env.TOOLS_REF).toBeUndefined();
     }
+  });
+});
+
+describe('[287-B review R1-m1, R1-n1, R1-n2] the voided-run check: red on code, missing steps, newest first, the call budget, lintControls', () => {
+  const STEPS2 = proofSteps(stage2Text) as ProofSteps;
+  const SHA = 'a'.repeat(40);
+  const pullRequest = {
+    number: 53,
+    base: { ref: 'main', repo: { url: 'https://api.github.com/repos/o/r' } },
+    head: { ref: 'feat/x', repo: { url: 'https://api.github.com/repos/o/r' } },
+  };
+  const runOf = (id: number) => ({
+    id,
+    head_sha: SHA,
+    head_branch: 'feat/x',
+    head_repository: { full_name: 'o/r' },
+    event: 'pull_request',
+    status: 'completed',
+    conclusion: 'success',
+    created_at: '2026-11-14T11:00:00Z',
+    path: '.github/workflows/ci.yml',
+    pull_requests: [pullRequest],
+  });
+  type Kind = 'green' | 'red' | 'missing-build' | 'failed-build' | 'lint-skipped' | 'scans-red' | 'cancelled' | 'light';
+  const jobsFor = (kind: Kind) => {
+    const fastLane = STEPS2.fastLane
+      .filter((step) => !(kind === 'missing-build' && step.name === 'Build'))
+      .map((step) => {
+        let conclusion = step.mayBeSkipped ? 'skipped' : 'success';
+        if (kind === 'red' && step.name === 'Unit tests') conclusion = 'failure';
+        if (kind === 'failed-build' && step.name === 'Build') conclusion = 'failure';
+        if (kind === 'cancelled') conclusion = 'cancelled';
+        if (kind === 'light') conclusion = 'skipped';
+        return { name: step.name, conclusion };
+      });
+    const jobFailed = kind === 'red' || kind === 'failed-build';
+    return {
+      jobs: [
+        {
+          name: 'fast-lane',
+          status: 'completed',
+          conclusion: jobFailed ? 'failure' : kind === 'cancelled' ? 'cancelled' : 'success',
+          steps: fastLane,
+        },
+        {
+          name: 'ci-gate',
+          status: 'completed',
+          conclusion: kind === 'scans-red' ? 'failure' : 'success',
+          steps: STEPS2.scans.map((name, index) => ({ name, conclusion: kind === 'scans-red' && index === 0 ? 'failure' : 'success' })),
+        },
+      ],
+    };
+  };
+  /** All runs are created 11:00, before the 12:00 base change, so every one is voided by the tested base. */
+  const apiWith = (runs: Array<[number, Kind]>, calls: string[]): Api => {
+    const kinds = new Map(runs);
+    return (path) => {
+      calls.push(path);
+      if (path.startsWith('repos/o/r/actions/workflows/ci.yml/runs?head_sha='))
+        return { ok: true, json: { workflow_runs: runs.map(([id]) => runOf(id)) } };
+      const jobsId = /^repos\/o\/r\/actions\/runs\/(\d+)\/jobs\?per_page=100$/u.exec(path)?.[1];
+      if (jobsId !== undefined) return { ok: true, json: jobsFor(kinds.get(Number(jobsId)) ?? 'green') };
+      if (path.startsWith('repos/o/r/pulls?'))
+        return {
+          ok: true,
+          json: [{ number: 53, base: { ref: 'main', repo: { full_name: 'o/r' } }, head: { ref: 'feat/x', repo: { full_name: 'o/r' } } }],
+        };
+      if (path.startsWith('repos/o/r/issues/53/events')) return { ok: true, json: [] };
+      return { ok: false, problem: `unexpected ${path}` };
+    };
+  };
+  const lookupWith = (runs: Array<[number, Kind]>, lintControls = false) => {
+    const calls: string[] = [];
+    const found = lookupProofs({
+      api: apiWith(runs, calls),
+      repo: 'o/r',
+      identical: [SHA],
+      steps: STEPS2,
+      pr: '53',
+      headRef: 'feat/x',
+      baseChangedAt: Date.parse('2026-11-14T12:00:00Z'),
+      lintControls,
+    });
+    return { ...found, calls };
+  };
+  const jobsCalls = (calls: string[]) =>
+    calls.map((path) => /^repos\/o\/r\/actions\/runs\/(\d+)\/jobs/u.exec(path)?.[1]).filter((id): id is string => id !== undefined);
+
+  it('failedOnCode: a failed CODE step or scans step is red on code; cancelled, light, green and a missing job are not', () => {
+    expect(failedOnCode(jobsFor('red'), STEPS2)).toBe(true);
+    expect(failedOnCode(jobsFor('failed-build'), STEPS2)).toBe(true);
+    expect(failedOnCode(jobsFor('scans-red'), STEPS2)).toBe(true);
+    expect(failedOnCode(jobsFor('cancelled'), STEPS2)).toBe(false);
+    expect(failedOnCode(jobsFor('light'), STEPS2)).toBe(false);
+    expect(failedOnCode(jobsFor('green'), STEPS2)).toBe(false);
+    expect(failedOnCode({ jobs: [] }, STEPS2)).toBe(false);
+    expect(failedOnCode({}, STEPS2)).toBe(false);
+  });
+
+  it('R1-n1: a voided run without a step the current workflow requires (a gate added since) still counts; a failed step does not', () => {
+    expect(lookupWith([[11, 'missing-build']])).toMatchObject({ codeProof: '', voidedByBase: true });
+    expect(lookupWith([[11, 'failed-build']])).toMatchObject({ codeProof: '', voidedByBase: false });
+    expect(lookupWith([[11, 'cancelled']])).toMatchObject({ codeProof: '', voidedByBase: false });
+  });
+
+  it('R1-n2: voided runs are checked newest first and the check stops at the first that would have been a proof', () => {
+    const found = lookupWith([
+      [11, 'green'],
+      [13, 'red'],
+      [12, 'green'],
+    ]);
+    expect(found.voidedByBase).toBe(true);
+    expect(jobsCalls(found.calls)).toEqual(['13', '12']);
+    expect(found.notes.join('\n')).toContain('voided run 13');
+  });
+
+  it('R1-n2: the voided loop stays inside MAX_API_CALLS (every voided run red: no run-full, the budget note)', () => {
+    const runs: Array<[number, Kind]> = Array.from({ length: MAX_API_CALLS + 10 }, (_, index) => [100 + index, 'red']);
+    const found = lookupWith(runs);
+    expect(found.voidedByBase).toBe(false);
+    expect(found.calls.length).toBeLessThanOrEqual(MAX_API_CALLS);
+    expect(found.notes.join('\n')).toContain(`more than ${String(MAX_API_CALLS)} API calls`);
+  });
+
+  it('R1-n2: lintControls reaches the voided check (a skipped lint-fixture step disqualifies only when the PR touches a lint control)', () => {
+    expect(lookupWith([[11, 'green']], false)).toMatchObject({ voidedByBase: true });
+    expect(lookupWith([[11, 'green']], true)).toMatchObject({ voidedByBase: false });
   });
 });

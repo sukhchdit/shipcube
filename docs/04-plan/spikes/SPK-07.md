@@ -263,7 +263,9 @@ as in the re-forecast above, until more runs are in.
 TASK-287 takes the option only for the first case. `lookupProofs` reports `voidedByBase` only when no bound run on the
 code survived the tested-base check and at least one voided run would have been a proof (its fast-lane and scans steps
 passed; one jobs call per voided run, PR #62 code review R1-m1, TASK-287 part 287-B); only then does the classify step
-set `code_changed=true` / `mode=full`. A red voided run, or a newer non-voided run, keeps the push light and BLOCKED.
+set `code_changed=true` / `mode=full`. A red voided run, or a newer non-voided run that failed on the code, keeps the
+push light and BLOCKED; a cancelled, superseded or light newer run does not count, and a step the current workflow
+added since the voided run is ignored (287-B code review R1-m1/R1-n1, TASK-287 part 287-C1).
 `push_scope` stays `docs`, so the summary still shows a docs push.
 
 **Live forecast** (`ci:minutes --forecast`, 2026-11-17T07:31Z): 1,269 billed (63.5 %), 77.8 min/day, forecast
