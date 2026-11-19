@@ -20,7 +20,11 @@ import { etag } from '../etag/etag.js';
 import { idempotency } from '../idempotency/idempotency.js';
 import { deprecationHeaderValues } from '../openapi/deprecation.js';
 import { mfaGate } from '../mfa/mfa-gate.js';
+import { RATE_LIMIT_DEFAULTS } from '@platform/config';
+import type { RateLimitCounter } from '../rate-limit/counter.js';
+import { createDenialBudget, type DenialBudget, type DenialBudgetLog } from '../rate-limit/denial-budget.js';
 import { routeRateLimit } from '../rate-limit/limits.js';
+import type { ScriptClient } from '../rate-limit/store.js';
 import { type ExecuteOptions, executeSlot } from '../tx/execute.js';
 import { validate } from '../validate/slot.js';
 import { isDefinedRoute, type RouteDescriptor } from './define-route.js';
@@ -63,6 +67,19 @@ export interface PipelineOptions extends Omit<ExecuteOptions, 'audit'> {
    * answer 403 at mount (D-TASK029-21, the backstop).
    */
   readonly auditPrivacy?: AuditPrivacy;
+  /** The step-5 rate-limit slot over the rate-limit kit (createApp builds it); absent, the TASK-020 stub (test compositions). */
+  readonly rateLimit?: RouteSlot;
+  /**
+   * T-39 denial budget (D-SECT39-01 item 6): built here whenever this composition builds the audit capture (`auditConfig`),
+   * from the runtime's Valkey client (absent, per instance only) and `AUTHZ_DENIAL_BUDGET_PER_MIN` (default 20). A
+   * composition that passes its own `capture` gets a budget only through `denialBudget`.
+   */
+  readonly valkey?: ScriptClient | undefined;
+  readonly authzDenialBudgetPerMin?: number;
+  readonly denialBudget?: DenialBudget;
+  readonly denialLog?: DenialBudgetLog;
+  readonly denialCounter?: RateLimitCounter;
+  readonly onStoreUnavailable?: (scope: string) => void;
 }
 
 /** The capture options that carry personal values: the writer's tokeniser and IP index, and the parser. */
@@ -73,7 +90,19 @@ const privacyOptions = (privacy: AuditPrivacy | undefined) =>
 
 /** The production slots; `execute` needs the runtime's tenant-transaction runner, the capture the audit config. */
 export function defaultPipelineSlots(options: PipelineOptions): PipelineSlots {
-  const { auditConfig, auditLog, auditPrivacy, ...execute } = options;
+  const {
+    auditConfig,
+    auditLog,
+    auditPrivacy,
+    rateLimit,
+    valkey,
+    authzDenialBudgetPerMin,
+    denialBudget,
+    denialLog,
+    denialCounter,
+    onStoreUnavailable,
+    ...execute
+  } = options;
   const capture =
     options.capture ??
     (auditConfig === undefined
@@ -85,11 +114,22 @@ export function defaultPipelineSlots(options: PipelineOptions): PipelineSlots {
           ...privacyOptions(auditPrivacy),
         }));
   const withCapture = capture === undefined ? {} : { capture };
+  const budget =
+    denialBudget ??
+    (options.capture === undefined && auditConfig !== undefined
+      ? createDenialBudget({
+          threshold: authzDenialBudgetPerMin ?? RATE_LIMIT_DEFAULTS.authzDenial.value,
+          valkey,
+          counter: denialCounter,
+          log: denialLog,
+          onStoreUnavailable,
+        })
+      : undefined);
   return {
     authenticate,
     mfaGate,
-    authorise: authoriseSlot(withCapture),
-    rateLimit: routeRateLimit,
+    authorise: authoriseSlot({ ...withCapture, ...(budget === undefined ? {} : { denialBudget: budget }) }),
+    rateLimit: rateLimit ?? routeRateLimit,
     validate,
     idempotency,
     etag,

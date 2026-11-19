@@ -244,6 +244,34 @@ const dhl = carrier('DHL');
 const fedex = carrier('FEDEX');
 const ups = carrier('UPS');
 
+/**
+ * Defaults and upper bounds of the rate-limit keys (DR-A22, api/README §7, SEC-P3-29, SEC-P3-02 item 5; D-ARCH-142 for
+ * `authzDenial`, validated 1..600). One table, so the keys, the API's policy table and the tests share one source.
+ */
+export const RATE_LIMIT_DEFAULTS = Object.freeze({
+  public: { value: 120, max: 100_000 },
+  authIp: { value: 10, max: 10_000 },
+  authAccount: { value: 5, max: 10_000 },
+  authenticated: { value: 600, max: 100_000 },
+  webhook: { value: 600, max: 100_000 },
+  cspReport: { value: 20, max: 10_000 },
+  publicQuoteMin: { value: 20, max: 10_000 },
+  publicQuoteHour: { value: 100, max: 100_000 },
+  publicTrackingMin: { value: 30, max: 10_000 },
+  publicTrackingHour: { value: 300, max: 100_000 },
+  emailAddress: { value: 3, max: 1_000 },
+  emailIp: { value: 10, max: 10_000 },
+  quoteUserMin: { value: 30, max: 10_000 },
+  quoteUserHour: { value: 300, max: 100_000 },
+  quoteOrgHour: { value: 1_000, max: 1_000_000 },
+  streamsIp: { value: 2, max: 100 },
+  streamsUser: { value: 5, max: 100 },
+  authzDenial: { value: 20, max: 600 },
+} as const);
+
+const limit = (name: keyof typeof RATE_LIMIT_DEFAULTS, description: string): KeySpec<number, false> =>
+  withDefault(t.int(1, RATE_LIMIT_DEFAULTS[name].max), RATE_LIMIT_DEFAULTS[name].value, { description: `Rate limit, ${description}.` });
+
 export const CONFIG_SCHEMA = {
   // Process and application (APP_*)
   NODE_ENV: withDefault(t.oneOf(NODE_ENVS), 'development', { description: 'Node.js runtime mode.' }),
@@ -324,6 +352,32 @@ export const CONFIG_SCHEMA = {
     t.int(DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS.min, DB_AUDIT_LOCK_TIMEOUT_MS_BOUNDS.max),
     DB_AUDIT_LOCK_TIMEOUT_MS_DEFAULT,
     { description: 'Transaction-local lock_timeout (ms) of the audit insert; must be below DB_TX_LOCK_TIMEOUT_MS.' },
+  ),
+
+  // Rate limiting (RATE_LIMIT_*, RATE_QUOTE_CREATE_*, SSE_MAX_*, AUTHZ_DENIAL_*; DR-A22, api/README §7, TASK-041)
+  RATE_LIMIT_PUBLIC_PER_MIN: limit('public', 'per IP per minute (class `public`; also the unauthenticated step-0 per-IP budget)'),
+  RATE_LIMIT_AUTH_PER_IP_PER_MIN: limit('authIp', 'per IP per minute (class `auth`)'),
+  RATE_LIMIT_AUTH_PER_ACCOUNT_PER_MIN: limit('authAccount', 'per account identifier per minute (class `auth`)'),
+  RATE_LIMIT_AUTHENTICATED_PER_MIN: limit(
+    'authenticated',
+    'per user per minute (class `authenticated`; also the step-0 ceiling per IP of credentialed requests)',
+  ),
+  RATE_LIMIT_WEBHOOK_PER_MIN: limit('webhook', 'per source IP per minute (class `webhook`)'),
+  RATE_LIMIT_CSP_REPORT_PER_MIN: limit('cspReport', 'per IP per minute (class `csp-report`)'),
+  RATE_LIMIT_PUBLIC_QUOTE_PER_MIN: limit('publicQuoteMin', 'per IP per minute (class `public-quote`)'),
+  RATE_LIMIT_PUBLIC_QUOTE_PER_HOUR: limit('publicQuoteHour', 'per IP per hour (class `public-quote`)'),
+  RATE_LIMIT_PUBLIC_TRACKING_PER_MIN: limit('publicTrackingMin', 'per IP per minute (class `public-tracking`)'),
+  RATE_LIMIT_PUBLIC_TRACKING_PER_HOUR: limit('publicTrackingHour', 'per IP per hour (class `public-tracking`)'),
+  RATE_LIMIT_EMAIL_SEND_PER_ADDRESS_PER_HOUR: limit('emailAddress', 'per normalised address per hour (class `email-send`)'),
+  RATE_LIMIT_EMAIL_SEND_PER_IP_PER_HOUR: limit('emailIp', 'per IP per hour (class `email-send`)'),
+  RATE_QUOTE_CREATE_PER_USER_PER_MIN: limit('quoteUserMin', 'per verified user per minute (class `quote-create`)'),
+  RATE_QUOTE_CREATE_PER_USER_PER_HOUR: limit('quoteUserHour', 'per verified user per hour (class `quote-create`)'),
+  RATE_QUOTE_CREATE_PER_ORG_PER_HOUR: limit('quoteOrgHour', 'per organisation per hour (class `quote-create`)'),
+  SSE_MAX_STREAMS_PER_IP: limit('streamsIp', 'concurrent quote and booking event streams per client IP (/64)'),
+  SSE_MAX_STREAMS_PER_USER: limit('streamsUser', 'concurrent quote and booking event streams per user'),
+  AUTHZ_DENIAL_BUDGET_PER_MIN: limit(
+    'authzDenial',
+    'audited PERMISSION_DENIED entries per actor per 60 s window before the aggregated entry and 429 (T-39, D-ARCH-142)',
   ),
 
   // Valkey (REDIS_*)
