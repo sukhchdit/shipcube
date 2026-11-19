@@ -4030,3 +4030,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **A pure S measurement task for performance-engineer** (the orchestrator's default allowed it): the task also carries the under-load suite tables and the runner and test-lock leftovers, which are test-engineer work; a second card for five small items costs another PR and its CI minutes.
   - **Reproducing the load by running heavy lanes side by side:** against D-ORCH-125, and D-ORCH-130 shows the cost.
 - **Reversibility:** High (plan data, one operator section, one ADR amendment). Part 294-A replaces the interim rule with its outcome.
+
+### D-ORCH-138 · 2026-11-19 · sdlc-orchestrator (session A) · PR #70 merged; merge-snapshot rule; TASK-291 decisions and D-ARCH-158; outages
+- **PR #70 (287-C1) merged** as `8084977` after a MERGE-READY full run. Its earlier runs failed on:
+  - commitlint: the PR title, which is the squash subject, was over 100 characters; shortened to 79;
+  - the record step, twice: GitHub rebuilds a PR's merge ref asynchronously, so a run started right after the rename (and one right after a close/reopen) still checked out a merge built on the pre-rename main (`94301d1`).
+- **Rule added to D-ORCH-136:** after renaming a pending record, confirm the PR's merge ref contains it before marking ready or reopening. That is, `git fetch origin refs/pull/<n>/merge` and `git ls-tree` it for `PR-<NNNN>-…`; its first parent must be the rename commit or later.
+- **TASK-291 decisions:**
+  - Accepted: D-TASK291-01, 02, 03, 05, per code review r1 (`f3f9557`) and security r1 (`ccc38a5`, D-SECPR291-01).
+  - D-TASK291-04 is not accepted; it is replaced by **D-ARCH-158**: the prerender item moves to the new TASK-294 (294-A measurement, 294-B the five orphaned routings), and the interim re-run rule is in CI-CD.md section 1.
+  - The queue script's retry is narrowed to that rule: the prerender signature must be in the attempt's run log, one re-run per commit, and each use is logged with the stamp, the signature line and free memory.
+  - In progress: PR291-SEC-01 (LOW: duplicate headers in `fetchOnce`), fixed in-PR; PR291-SEC-03 (lock label); a security delta and a code-review delta (including D-ARCH-158) follow on the new head.
+- **TASK-293:** done locally at `3183525`. Lane B and both pre-push reviews are running. It merges after TASK-291, because its `required-suites.json` change would make other evidence stale.
+- **Infrastructure:** two network outages (ENOTFOUND) cut five agents and spoiled two lane-B runs. One left the 287-C1 worktree without its Prisma engine, which was rebuilt. The low-memory reaper also stopped the queue once; it was restarted on the user's go-ahead. None of these was a code finding.
+- **Reversibility:** High.
