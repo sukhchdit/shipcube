@@ -192,7 +192,9 @@ CREATE UNIQUE INDEX "ux_organisations__personal_owner" ON "public"."organisation
 CREATE UNIQUE INDEX "ux_memberships__org_user_live" ON "public"."memberships"("org_id", "user_id") WHERE "status" <> 'REMOVED';
 CREATE INDEX "ix_memberships__org_status_created" ON "public"."memberships"("org_id", "status", "created_at", "id");
 CREATE INDEX "ix_memberships__user_status" ON "public"."memberships"("user_id", "status") INCLUDE ("org_id");
-CREATE UNIQUE INDEX "ux_membership_roles__membership_role_live" ON "public"."membership_roles"("membership_id", "role_id") WHERE "revoked_at" IS NULL;
+-- Leads with org_id (REQ-RLS-001; PR65-SEC-01): a role row naming another organisation's membership fails the
+-- tenant-bound key (23503) instead of colliding with that organisation's live grant (23505, an existence oracle).
+CREATE UNIQUE INDEX "ux_membership_roles__membership_role_live" ON "public"."membership_roles"("org_id", "membership_id", "role_id") WHERE "revoked_at" IS NULL;
 CREATE INDEX "ix_membership_roles__org_role_live" ON "public"."membership_roles"("org_id", "role_id") WHERE "revoked_at" IS NULL;
 CREATE UNIQUE INDEX "ux_invitations__org_email_pending" ON "public"."invitations"("org_id", "email") WHERE "status" = 'PENDING';
 CREATE INDEX "ix_invitations__org_status_created" ON "public"."invitations"("org_id", "status", "created_at" DESC, "id" DESC);

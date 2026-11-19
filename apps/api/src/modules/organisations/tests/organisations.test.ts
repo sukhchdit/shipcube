@@ -21,6 +21,7 @@ import {
   MembershipNotFoundError,
   organisationDisplayName,
   ORGANISATION_NAME_MAX,
+  ORG_TYPES,
   ORGANISATION_INTERNAL_CODES,
   ORGANISATION_REFUSAL_CODES,
   ORGANISATION_RULE_CODES,
@@ -31,6 +32,7 @@ import {
   type OrganisationsDb,
   personalOrganisationName,
   roleScopeForOrgType,
+  WRITABLE_MEMBERSHIP_STATUSES,
 } from '../index.js';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..', '..');
@@ -148,6 +150,19 @@ describe('organisation rules (REQ-ORG-001..004)', () => {
       'MEMBERSHIP_STATUS_NOT_WRITABLE',
       'MEMBERSHIP_STATUS_NOT_WRITABLE',
     ]);
+  });
+
+  it('[C9] ORG_TYPES and the writable membership statuses (+ the reserved INVITED) equal the CHECK lists of the migration', () => {
+    const sql = readFileSync(MIGRATION, 'utf8');
+    const checkList = (name: string): string[] => {
+      const match = new RegExp(`CONSTRAINT "${name}" CHECK \\("[a-z_]+" IN \\(([^)]*)\\)\\)`).exec(sql);
+      return (match?.[1] ?? '')
+        .split(',')
+        .map((value) => value.trim().replace(/^'(.*)'$/, '$1'))
+        .sort();
+    };
+    expect(checkList('ck_organisations__type')).toEqual([...ORG_TYPES].sort());
+    expect(checkList('ck_memberships__status')).toEqual([...WRITABLE_MEMBERSHIP_STATUSES, 'INVITED'].sort());
   });
 
   it('[D-ARCH-151] the reserved operator organisation row of the migration carries OPERATOR_ORG_ID, the SYSTEM actor and type OPERATOR', () => {

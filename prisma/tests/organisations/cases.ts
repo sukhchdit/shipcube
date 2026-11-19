@@ -159,6 +159,27 @@ export async function tenantBoundRoleReference(client: Client): Promise<{ foreig
   };
 }
 
+/**
+ * PR65-SEC-01: with B's membership already holding a live grant of a role, a role row of A naming that membership and
+ * role fails the tenant-bound key (23503), not the live-grant unique index (23505), because the index leads with
+ * org_id; within A the index still refuses a duplicate live grant (23505).
+ */
+export async function liveGrantIndexScope(client: Client): Promise<{ foreignWithLiveGrant: string; ownDuplicate: string }> {
+  const viewer = await roleId(client, 'CUSTOMER_VIEWER');
+  const { orgA, orgB, userA, userB, membershipA, membershipB } = await world(client);
+  const grant = (orgId: string, membershipId: string, grantedBy: string): Statement => [
+    `INSERT INTO public.membership_roles (org_id, membership_id, role_id, granted_by, created_by, updated_by)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, $4::uuid)`,
+    [orgId, membershipId, viewer, grantedBy],
+  ];
+  await fixture(client, [grant(orgB, membershipB, userB), grant(orgA, membershipA, userA)]);
+  await asApp(client, orgA, userA);
+  return {
+    foreignWithLiveGrant: await outcome(client, ROLE_INSERT, [orgA, membershipB, viewer, userA]),
+    ownDuplicate: await outcome(client, ROLE_INSERT, [orgA, membershipA, viewer, userA]),
+  };
+}
+
 /** [D-ARCH-154] T2: a member's own membership of A naming B's invitation, A's invitation, none. */
 export async function tenantBoundInvitationReference(client: Client): Promise<{ foreign: string; own: string; none: string }> {
   const viewer = await roleId(client, 'CUSTOMER_VIEWER');

@@ -76,6 +76,9 @@ describe('the rendering rules', () => {
     ['OWNER TO', 'ALTER SCHEMA platform OWNER TO platform_schema_owner;', 'OWNER TO'],
     ['GRANT', 'GRANT SELECT, INSERT ON public.audit_entries TO platform_app;', 'GRANT/REVOKE'],
     ['GRANT', 'GRANT platform_definer TO platform_migrator WITH INHERIT FALSE, SET TRUE;', 'GRANT/REVOKE'],
+    ['GRANT', 'GRANT USAGE, CREATE ON SCHEMA platform TO platform_definer WITH GRANT OPTION;', 'GRANT/REVOKE'],
+    ['GRANT', 'GRANT ALL ON SCHEMA platform TO platform_definer;', 'GRANT/REVOKE'],
+    ['REVOKE', 'REVOKE ALL ON SCHEMA platform FROM PUBLIC;', 'GRANT/REVOKE'],
     ['REVOKE', 'REVOKE ALL ON DATABASE :"db_name" FROM PUBLIC;', 'GRANT/REVOKE'],
     [
       'ALTER DEFAULT PRIVILEGES',
@@ -119,6 +122,12 @@ describe('the rendering rules', () => {
     ['a policy', 'CREATE POLICY p ON public.audit_x FOR SELECT TO platform_app USING (true);'],
     ['a comment', "COMMENT ON TABLE public.audit_x IS 'x';"],
     ['the first ensure_audit_partitions call', 'SELECT platform.ensure_audit_partitions(3);'],
+    // PR #65 lane B: a migration under SET ROLE platform_definer needs the definer's schema privileges in the shadow.
+    [
+      'a schema-scoped USAGE, CREATE grant (the migrator owns the shadow schemas)',
+      'GRANT USAGE, CREATE ON SCHEMA platform TO platform_definer;',
+    ],
+    ['a USAGE grant on two schemas to two roles', 'GRANT USAGE ON SCHEMA public, platform TO platform_app, platform_erasure;'],
   ])('keeps %s verbatim', (_, sql) => {
     const rendering = render(sql);
     expect(splitStatements(rendering.sql).slice(1)).toEqual(splitStatements(PATH + sql));
@@ -336,12 +345,17 @@ describe('the rendering of the real bootstrap lane', () => {
     expect(statements[widening]).toContain("'MFA_RECOVERY_USED','SESSION_REVOKED'");
   });
 
-  it('[SPK-08 F-03] holds no role, SET ROLE, OWNER TO, AUTHORIZATION, GRANT/REVOKE, default privileges, ALTER DATABASE, event trigger, guard function or psql variable', () => {
-    for (const text of codes.slice(1)) {
+  it('[SPK-08 F-03] holds no role, SET ROLE, OWNER TO, AUTHORIZATION, GRANT/REVOKE (but the schema-scoped grants), default privileges, ALTER DATABASE, event trigger, guard function or psql variable', () => {
+    const schemaGrant = /^grant (?:usage|create)(?:, ?(?:usage|create))? on schema [a-z_, ]+ to [a-z_, ]+$/;
+    for (const text of codes.slice(1).filter((code) => !schemaGrant.test(code))) {
       expect(text).not.toMatch(
         /\b(?:create|alter|drop) (?:role|user|group)\b|\bset (?:session )?role\b|\breset role\b|\bowner to\b|\bauthorization\b|^grant\b|^revoke\b|default privileges|^alter database\b|event trigger|event_trigger/,
       );
     }
+    // The kept schema grants are exactly the bootstrap lane's USAGE/CREATE grants on public and platform, including
+    // the definer's on platform that a SET ROLE platform_definer migration needs (PR #65, TASK-037).
+    expect(codes.filter((code) => schemaGrant.test(code))).toContain('grant usage, create on schema platform to platform_definer');
+    expect(codes.filter((code) => /^grant\b/.test(code) && !schemaGrant.test(code))).toEqual([]);
     expect(rendering.sql).not.toMatch(/:'[a-z_]+'|:"[a-z_]+"/);
     expect(rendering.sql).not.toContain('audit_ddl_guard');
     expect([...new Set(rendering.stripped.map((entry) => entry.reason))].sort()).toEqual([

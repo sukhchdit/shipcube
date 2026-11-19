@@ -22,6 +22,7 @@ import {
   drA14,
   invitationOrgType,
   invitedMemberships,
+  liveGrantIndexScope,
   membershipLifecycle,
   membershipLookup,
   membershipMemberIsActor,
@@ -223,7 +224,13 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result.own).toBe('ok');
   });
 
-  it('[D-ARCH-154] T2: a membership of A naming B invitation fails the tenant-bound key; A invitation and none pass', async () => {
+  it('PR65-SEC-01: the live-grant index leads with org_id, so a role row of A naming a B membership with a live grant fails the tenant-bound key (23503), not the index (23505)', async () => {
+    const result = await rolledBack(liveGrantIndexScope);
+    expect(result.foreignWithLiveGrant).toMatch(/^23503 .*fk_membership_roles__membership_id/);
+    expect(result.ownDuplicate).toMatch(/^23505 .*ux_membership_roles__membership_role_live/);
+  });
+
+  it('[D-ARCH-154] T2:a membership of A naming B invitation fails the tenant-bound key; A invitation and none pass', async () => {
     const result = await rolledBack(tenantBoundInvitationReference);
     expect(result.foreign).toMatch(/^23503 .*fk_memberships__invitation_id/);
     expect([result.own, result.none]).toEqual(['ok', 'ok']);

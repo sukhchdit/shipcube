@@ -434,7 +434,10 @@ describe('DR-A14 policy sets (PR11-SEC-10, D-ARCH-123): positive status lists, o
 
   it("memberships: the actor reads its own membership in another organisation (own_read) and no one else's there", async () => {
     expect(await visibleAs([membership(TENANT_B.org, TENANT_A.actor, 'ACTIVE', 3)], ownMemberships, [TENANT_B.org])).toBe(1);
-    expect(await visibleAs([membership(TENANT_B.org, TENANT_B.actor, 'ACTIVE', 4)], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
+    // Another member of B (not TENANT_B.actor: the committed memberships table already holds the seeded live row
+    // (B, TENANT_B.actor), and ux_memberships__org_user_live refuses a second one; PR #65 lane B, fix cycle 3).
+    const otherMemberOfB = stableUuid('dr-a14:user:other-member-of-B');
+    expect(await visibleAs([membership(TENANT_B.org, otherMemberOfB, 'ACTIVE', 4)], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
   });
 
   it("[SEC-TC-06] R1-n5 positive control: a genuine operator (ACTIVE member of the OPERATOR organisation, OPERATOR scope) reads B's row and still cannot write it; the same actor in TENANT scope sees nothing", async () => {

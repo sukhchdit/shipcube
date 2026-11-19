@@ -301,6 +301,23 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ck_audit_entries__source_app: ['admin', 'api', 'web', 'worker'],
   ck_audit_pii_vault__classification: ['PERSONAL', 'SENSITIVE_PERSONAL'],
   ck_data_subjects__kind: ['CONTACT', 'USER'],
+  // Organisations and identity (TASK-037; data-model §1.7, §3.1, §3.2), pinned from the data model like the audit lists.
+  // The organisations module's ORG_TYPES and WRITABLE_MEMBERSHIP_STATUSES (+ the reserved INVITED, D-ARCH-123) are
+  // compared with the migration text by apps/api/src/modules/organisations/tests/organisations.test.ts, which may import
+  // them (prisma/tests may not). Locales: the three UI locales (REQ-I18N).
+  ck_invitations__locale: ['en', 'es', 'fr'],
+  ck_invitations__status: ['ACCEPTED', 'EXPIRED', 'PENDING', 'REVOKED'],
+  ck_memberships__status: ['ACTIVE', 'INVITED', 'REMOVED', 'SUSPENDED'],
+  ck_organisations__default_locale: ['en', 'es', 'fr'],
+  ck_organisations__type: ['BUSINESS_CUSTOMER', 'INDIVIDUAL', 'OPERATOR', 'PARTNER'],
+  // Not an enum but an IN list all the same: exactly the two reserved actors of §1.6 are system users (PR26-SEC-04).
+  ck_users__is_system: [SYSTEM_ACTOR, '00000000-0000-7000-8000-000000000002'],
+  ck_users__locale: ['en', 'es', 'fr'],
+  ck_users__status: ['ACTIVE', 'DEACTIVATED', 'PENDING_VERIFICATION', 'SUSPENDED'],
+  ck_users__status_reason_value: ['ADMIN_ACTION', 'MFA_ENROLMENT_OVERDUE', 'USER_REQUEST', 'VERIFICATION_EXPIRED'],
+  ck_users__table_density: ['COMFORTABLE', 'COMPACT'],
+  ck_users__theme: ['DARK', 'LIGHT', 'SYSTEM'],
+  ck_users__unit_system: ['IMPERIAL', 'METRIC'],
 };
 
 const names = (list: readonly { relname: string }[]): string[] => list.map((row) => row.relname);
