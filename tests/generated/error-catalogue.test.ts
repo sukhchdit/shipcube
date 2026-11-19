@@ -9,9 +9,10 @@
  *   catalogue code. The compiler already refuses an unknown literal (`ErrorCode`); this scan also catches a cast or a
  *   JavaScript caller and names the code. The scan also reads the SCREAMING_SNAKE string literals passed to
  *   `new <Name>Error(` and `super(` (inside a class that extends Error, AppError or another *Error) so a domain error
- *   class that carries its own code cannot slip past (TASK-292, PR #63 review R1-m2): such a code must be a catalogue
- *   code, a code README §11 lists under "Codes that are not HTTP problem codes", or belong to a class that types its
- *   own closed kind union (TYPED_KIND_ERROR_CLASSES).
+ *   class that carries a literal code is checked (TASK-292, PR #63 review R1-m2): such a code must be a catalogue
+ *   code, a code README §11 lists under "Codes that are not HTTP problem codes", or belong to a class in
+ *   EXEMPT_ERROR_CLASSES. It is a regex scan: only a literal first argument is seen (not a variable, a computed value
+ *   or an options object), and comments are not stripped.
  * - README §11 (TASK-292, PR #63 review R1-m1): the code and HTTP status of every row of the error-code table equal
  *   the catalogue in both directions, so the table cannot drift from the code.
  */
@@ -140,16 +141,18 @@ function readmeNonProblemCodes(readme: string): ReadonlySet<string> {
 }
 
 /**
- * Error classes whose literal codes are a closed kind union the class types itself (the compiler refuses an unknown
- * kind) and that never reach an HTTP problem body: their kinds are not catalogue or README §11 codes by design.
- * A new domain error class that carries a code is not listed here: it must use a catalogue code or add its codes to
- * README §11 "Codes that are not HTTP problem codes".
+ * Infrastructure error classes whose literal codes never reach an HTTP problem body (the error handler maps them to
+ * INTERNAL_ERROR or SERVICE_UNAVAILABLE, or they surface at start-up or in a worker only), so their codes are not
+ * catalogue or README §11 codes by design. The exemption is by class and is a review point: a new domain error class
+ * that carries a code is not listed here and must use a catalogue code or add its codes to README §11 "Codes that are
+ * not HTTP problem codes". Whether a class types its codes as a closed union is not the criterion (SecretFileError's
+ * `code` is a plain string).
  */
-const TYPED_KIND_ERROR_CLASSES: ReadonlySet<string> = new Set([
-  'AuditWriteError', // packages/audit: the write-failure kind union
-  'ObjectStorageError', // apps/api platform/storage: the object-storage kind union
-  'SecretFileError', // packages/config: the secret-file kind union
-  'NonRetryableError', // apps/worker platform/queues: NonRetryableReason
+const EXEMPT_ERROR_CLASSES: ReadonlySet<string> = new Set([
+  'AuditWriteError', // packages/audit: write-failure kinds (typed union)
+  'ObjectStorageError', // apps/api platform/storage: object-storage kinds (typed union)
+  'SecretFileError', // packages/config: start-up only, SECRET_FILE_* or errno-style codes (string)
+  'NonRetryableError', // apps/worker platform/queues: NonRetryableReason (typed union), worker only
 ]);
 
 /** `new <Name>Error('<CODE>'`: a named error class (not AppError, scanned above) and a SCREAMING_SNAKE first argument. */
@@ -177,10 +180,10 @@ function domainErrorCodes(source: string): DomainErrorCode[] {
   return [...created, ...supered];
 }
 
-/** The domain-error codes in `source` that are neither catalogued, README-listed non-problem codes nor of a typed-kind class. */
+/** The domain-error codes in `source` that are neither catalogued, README-listed non-problem codes nor of a exempt class. */
 function uncataloguedDomainCodes(source: string, nonProblemCodes: ReadonlySet<string>): string[] {
   return domainErrorCodes(source)
-    .filter(({ errorClass, code }) => !isErrorCode(code) && !nonProblemCodes.has(code) && !TYPED_KIND_ERROR_CLASSES.has(errorClass))
+    .filter(({ errorClass, code }) => !isErrorCode(code) && !nonProblemCodes.has(code) && !EXEMPT_ERROR_CLASSES.has(errorClass))
     .map(({ errorClass, code }) => `${code} (${errorClass})`);
 }
 
@@ -298,6 +301,11 @@ describe('error catalogue versus openapi.yaml and the thrown codes (US-036, api/
       for (const code of ['SSRF_BLOCKED', 'CARD_DECLINED', 'NOT_STAFF', 'CARRIER_UNKNOWN_ERROR']) expect(codes.has(code)).toBe(true);
       expect(codes.has('MY_NEW_ERROR')).toBe(false);
       expect(codes.has('NOT_FOUND')).toBe(false);
+      // The section ends at its last row: a code from a later README section (the security-event table of §13, whose
+      // trigger column names CARRIER_DAILY_QUOTA) is not allow-listed, so a lost section end turns this red.
+      expect(readme).toContain('`CARRIER_DAILY_QUOTA`');
+      expect(codes.has('CARRIER_DAILY_QUOTA')).toBe(false);
+      expect(codes.has('CARRIER_ANON_CALLS_PER_MIN')).toBe(false);
     });
   });
 
@@ -329,7 +337,7 @@ describe('error catalogue versus openapi.yaml and the thrown codes (US-036, api/
       expect(uncataloguedDomainCodes(source, nonProblem)).toEqual(['SUBCLASS_CODE (Rule)', 'DERIVED_CODE (Domain)']);
     });
 
-    it('[AT-US-036-04] a README-listed non-problem code, a typed-kind class and a catalogue code pass; free text and a bare Error are not scanned', () => {
+    it('[AT-US-036-04] a README-listed non-problem code, an exempt class and a catalogue code pass; free text and a bare Error are not scanned', () => {
       const source = [
         "throw new OrganisationRuleError('SSRF_BLOCKED');",
         "throw new OrganisationRuleError('NOT_STAFF');",
@@ -364,7 +372,7 @@ describe('error catalogue versus openapi.yaml and the thrown codes (US-036, api/
         uncataloguedDomainCodes(source, nonProblem).map((code) => `${file}: ${code}`),
       );
       expect(offenders).toEqual([]);
-      // The scan is not vacuous: it does see the literals of the typed-kind classes it exempts.
+      // The scan is not vacuous: it does see the literals of the exempt classes.
       expect(sources.some(({ source }) => domainErrorCodes(source).some(({ errorClass }) => errorClass === 'ObjectStorageError'))).toBe(
         true,
       );
