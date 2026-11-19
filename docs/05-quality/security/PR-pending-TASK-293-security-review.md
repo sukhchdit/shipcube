@@ -417,3 +417,140 @@ Simulation (`sec293/probes/sim293.mjs`). Setup:
 | Field | Value |
 |---|---|
 | Verdict | **PASS_WITH_CONDITIONS.** 0 Critical, 0 High, 0 Medium. PR66-SEC-01 (LOW) closed; PR66-SEC-02 (INFO) closed as filed; PR65-SEC-05 (a), (b) closed; PR65-SEC-01 C16 rule in place. New: PR293-SEC-01 LOW (rule 10 still misses eleven executed shapes, one a regression of the linear scan; fix preferred in this PR, otherwise before the first migration with a data-changing routine or a DO `FOR … IN` / `OPEN … FOR`, at the latest G3), PR293-SEC-02 INFO, PR293-SEC-03 INFO. Conditions: C1 lane B at `85afc70` (catalog-c1-c14 113/0/0/0 incl. C16 and P9-CK, integration, unit, migrations, rls unchanged, hosted security-integration green), C2 rename and merge-ref confirmation. PR65-SEC-05 (d) routed |
+
+## Round 2 (delta, pre-push): `85afc70..c618d8a`
+
+| Field | Value |
+|---|---|
+| Head | c618d8a19b28d535e41e172a68da086443224b14 |
+| Delta reviewed | Two commits on `85afc70`. Fix cycle 2 `06270ba` (6 files, +383 / -33): `tools/db/{lint-migrations,sql-text}.ts` and their tests, `prisma/tests/organisations/{cases.ts, organisations.int.test.ts}`. Fix cycle 3 `c618d8a` (6 files, +130 / -17): `tools/db/{lint-migrations,sql-text}.ts`, `lint-migrations.test.ts`, `prisma/tests/catalog/{scans.ts, scans-dynamic-sql.test.ts}`, `prisma/tests/organisations/cases.ts` (a JSDoc move). Owned paths now: 15 (round 1: 12, plus `prisma/tests/catalog/{scans.ts, scans-dynamic-sql.test.ts}` and `prisma/tests/organisations/cases.ts`) |
+| Reviewer / date | security-analyst, 2026-11-19, round 2, pre-push. Same host rule as round 1: static review plus single-process Node and PGlite 17.5 probes on `git archive` extracts of `c618d8a` and `06270ba`, with `85afc70`, `3183525` and `ca7e4b7` as controls. The coordinator named `c618d8a` the final head. One slip: while waiting for it, I ran a read-only `git rev-parse HEAD` in the PR worktree. It changed nothing, and every later check used `git worktree list` from the main checkout |
+| Lane B evidence | None for `c618d8a` at review time; it is queued (C1). The coordinator reports that lane B passed every suite on `85afc70` (catalog 113, integration 402, rls 157, the `consumer.int` flake did not recur) and on `06270ba`. Those run files are not on main, so I did not read them |
+
+### R2.1 PR293-SEC-01: closed
+
+The eleven round-1 rows plus the rows closed earlier, run through the `85afc70` and `c618d8a` linters (header `data-changing: no`; probes `p2h4.mjs`, `p9h4.mjs`, `p11h4.mjs`, `p12h4.mjs`). Each "rule 10" row is one that PostgreSQL executes (PGlite, round 1 table).
+
+| # | Shape | `85afc70` | `c618d8a` |
+|---|---|---|---|
+| 1 | `ALTER FUNCTION … SET SCHEMA`, then a call in the new schema | 0 | rule 10 |
+| 2 | Routine body `FOR r IN DELETE … RETURNING` | 0 | rule 10 |
+| 3 | Attribute notation `SELECT t.w FROM t` | 0 | 0, **stated limit, pinned by a test** |
+| 4 | `CREATE CAST … WITH FUNCTION w`, then a cast | 0 | 0, **stated limit, pinned** |
+| 5 | `CREATE AGGREGATE … (SFUNC = w)`, then the aggregate | 0 | 0, **stated limit, pinned** |
+| 6 | Non-ASCII routine name `public.purgé()` (`purge` control: rule 10 on both) | 0 | rule 10 |
+| 7 | DO `FOR r IN DELETE|UPDATE … RETURNING` | 0 | rule 10 |
+| 8 | DO `OPEN c [NO SCROLL] FOR DELETE … RETURNING` | 0 | rule 10 |
+| 9 | DO `WITH x AS (SELECT ';') DELETE …` | 0 | rule 10 |
+| 10 | DO `INSERT … VALUES (1, ';') ON CONFLICT … DO UPDATE` | 0 | rule 10 |
+| 11 | DO `UPDATE "fixture;items" …` (the round-1 regression) | 0 | rule 10 (as `3183525` and main) |
+| | `ALTER FUNCTION … RENAME TO`, then the new name (a stated limit in round 1) | 0 | rule 10 |
+| | RENAME / SET SCHEMA with `numeric(10,2)` in the argument list (code review R3-n2; PGlite: the call deletes) | – | rule 10 (`06270ba`: 0) |
+| | The ten claimed shapes, the forward reference, `search_path`, the quoted names, the `"f("` name | rule 10 | rule 10 |
+| | A writing trigger fired by `INSERT … VALUES` | 0 | 0, stated limit (round 1) |
+| | Controls: `FOR r IN SELECT … FOR UPDATE`, `OPEN c FOR SELECT … FOR UPDATE OF t`, `WHERE id IN (SELECT 1)`, `FOR r IN WITH … SELECT … FOR [NO KEY] UPDATE` (R3-n1), a reader routine, `other.fixture_purge()` | clean | clean |
+
+- **Rows 3 to 5.** My remediation offered two options: refuse `CREATE CAST` and `CREATE AGGREGATE` under rule 14, or state the limits. D-TASK293-10 states them and pins them with a test, so a change that starts seeing one must update the pin and the JSDoc list together. That meets the finding. A rule-14 refusal remains the architect's option.
+- **Statement starts.** `in` and `open <cursor> [no] [scroll] for` were added to the DO and routine start lists (`lint-migrations.ts:784`). The cursor name accepts non-ASCII letters.
+- **Segments end only at a code `;`.** Each string literal and dollar body is also read as a body of its own, down to `MAX_DYNAMIC_DEPTH` (4). Text that does not lex is read whole and cut at every `;` (`:754-755`).
+- **RENAME TO and SET SCHEMA** record the new name as a routine that calls the old one (`alteredRoutine`, `:841`). The argument list is skipped by parenthesis depth, and quoted names whole.
+- **Non-ASCII names.** They are parsed. A writing definition whose name cannot be parsed is reported as rule 10 (fail closed): the three-part `CREATE FUNCTION mydb.public.f()` is a finding, and a three-part reader is clean.
+- **The developer's test rows** cover every numbered shape with controls, and the limits pin covers rows 3 to 5.
+- **Unchanged lanes.** All 81 lint fixture directories give identical findings at `85afc70` and `c618d8a`. `prisma/migrations` and `prisma/bootstrap` give 0 findings on both, and the real bootstrap shadow is byte-identical (`p15lanes.mjs`).
+- **Linear.** Every adversarial shape scales with a ratio of 1.5 to 3.6 for 4n (`p10h4.mjs`). The quote-heavy dynamic SQL body, 2,000 nested `';'` strings, has a ratio of 2.0 (`p12h4.mjs`). A chain of 1,000 definitions with 1,000 calls flags every call.
+- **Nothing the `3183525` regex saw is lost**, apart from the intended row-lock rows and one contrived shape. Fuzz (`fuzz-h4.mjs`): 300,000 texts, both anchor sets, the `3183525` regex against the `c618d8a` matcher. The new matcher misses 8 texts that the old one flags, against 51,279 old DO positives:
+  - 4 are the intended R3-n1 change (`… for update x`, `… key update x` row locks inside a WITH);
+  - 4 are a quoted name holding `;` in text that does not lex (PR293-SEC-04).
+- **Dynamic depth.** At a depth of 5 or more, with a string `;` before the DML, rule 10 gives way to rule 16's depth-cap refusal. Rule 16 still fires, so the file is refused either way.
+
+### R2.2 PR293-SEC-02: closed, and code review R3-M1 confirmed and closed
+
+- **Top level** (`sql-text.ts:74`, `:162`, `p5h4.mjs`). An E-string continued after a newline throws `EscapeContinuationError`, a `SqlLexError`. In a bootstrap file with an approved marker that is rule L, where the base and `85afc70` gave 0. PGlite still creates the hidden SECURITY DEFINER routine, which is why rule L must stop the file.
+  - The scan is the linear loop from my round-1 sketch.
+  - The developer's tests cover LF, CR, a comment before and after the newline, and a 50,000-line `--` run.
+  - The corpus is unchanged: 534 of 534 files identical for LF; CRLF differs in white space only, as in round 1.
+- **The deviation in nested reads is sound.** It is stricter than my sketch: `containsEscapeString` at depth ≥ 1 treats `EscapeContinuationError` as an escape string (`:414`), so the bootstrap lane's rule 12 still needs the marker for it.
+- **R3-M1 (code review, MAJOR) was a real regression of a tenant-context control in `06270ba`, and my PR293-SEC-02 sketch was incomplete.** The sketch named only `tokenize`, but `sqlText`'s dollar-body fallback and the catalog `bodyText` both returned the raw text on any lexing error, and with it dropped `ESCAPE_STRING_MARK`. Probe `p14b.mjs` checks rule 16 and each head's own `scanFunctionBodies`:
+
+  | Shape | base, `85afc70` | `06270ba` | `c618d8a` |
+  |---|---|---|---|
+  | DO body with a continued E-string | rule 16, catalog | **0, 0** | rule 16, catalog |
+  | DO body with a continued E-string plus `EXECUTE E'SET \x61pp.org_id = ''x'''` (PGlite: the session's `app.org_id` becomes `x`) | rule 16, catalog | **0, 0** | rule 16, catalog |
+  | PL/pgSQL routine body with a continued E-string | rule 16, catalog | **0, 0** | rule 16, catalog |
+  | Control: the same EXECUTE without the continuation | rule 16, catalog | rule 16, catalog | rule 16, catalog |
+
+  - `c618d8a` keeps the mark when the nested text fails with `EscapeContinuationError`, in `sqlText` with strings kept (`:461`) and in `bodyText` (`scans.ts:129`). With strings blanked there is no mark to keep.
+  - Deeper nesting is refused too (`p16nest.mjs`): EXECUTE of a dollar string holding the continuation, EXECUTE of a string literal holding it, and a routine running a nested `DO $j$` that holds it. Each gives rule 16 and a catalog finding at `c618d8a`; `06270ba` missed the first and, in the catalog, the third. A plain (non-E) string continued the same way stays clean.
+  - Rating as it stood in `06270ba`: LOW by the matrix. It was a deploy-session tenant-context write, bounded by the migrator's privileges, while routine bodies with `EXECUTE`, `set_config` or `current_setting` stay caught by the dynamic-SQL and computed-key forms. Even so, it was a no-weakening regression, rightly blocking. It never reached a pushed head, so it gets no ID here; it is code review R3-M1.
+  - The remaining `SqlLexError` catch sites (`doBlockLockTimeouts`, `topLevelLockTimeout`, `routineCode`, `check`) carry no mark. Each reads verbatim or fails closed on its own terms.
+
+### R2.3 PR65-SEC-05 (d): closed, subject to C1
+
+`stdColumnsRemainder` (`prisma/tests/organisations/cases.ts`) is tagged `[SEC-TC-74] [PR43-SEC-07]` in `organisations.int`. It asserts exactly the outcomes of my PR #65 probes (PR-0065 §5.4):
+- version reset to 1: `P0001 … version (UPDATE)`;
+- back-dated `updated_at` on UPDATE, and back-dated stamps on INSERT: ok (RR-18);
+- wrong stamps plus a foreign organisation: `P0001 … updated_by` (the guard comes before `WITH CHECK`);
+- right stamps plus a foreign organisation: `42501`;
+- `MERGE … WHEN MATCHED` with a forged `created_by`: `P0001 … created_by (UPDATE)`;
+- `MERGE … WHEN NOT MATCHED` with `version = 7`: `P0001 … version (INSERT)`.
+
+It runs as a fresh user for each insert, as the lifecycle guard requires. Its PostgreSQL 18 pass is part of C1.
+
+### R2.4 New this round
+
+| ID | Title | Severity | CWE | OWASP 2021 | Location | Owner / due |
+|---|---|---|---|---|---|---|
+| PR293-SEC-04 | Rule-10 residuals of the new body reader: (a) in text that does not lex, the fallback has no `;` start, so `…; update "x;y" …` (a quoted name holding `;`) is missed (4 of 300,000 fuzz texts; needs a table named with `;` in an unlexable body); (b) string literals read as dynamic SQL make prose such as `RAISE NOTICE 'running in update mode'` a rule-10 hit (fail closed, the R3-n1 class) | INFO | CWE-184 | A04 | `tools/db/lint-migrations.ts:754-755` (fallback), `:750-777` (`check`) | Next holder of the `tools/db` linter. (a): add `;` to the start alternatives in the fallback reading, or read the fallback whole text with the 85afc70 regex starts. (b): accept as noise, or skip string literals of `RAISE` arguments |
+
+No Critical, High or Medium finding is open.
+
+### R2.5 Record binding and simulation
+
+The round-2 `Head` row (`c618d8a`, full SHA) binds; the round-1 row (`85afc70`) only produces a note, because owned paths changed after it.
+
+Simulation (`sec293/probes/sim293r2.mjs`), with the round-1 setup:
+- main = `060c0a5` (its tip when this round was written; docs-only since round 1) plus this record;
+- the test merge checked out;
+- the checker taken from the merge's tree, `--pr 9991`.
+
+| Scenario | Base | Head | Result | Expected |
+|---|---|---|---|---|
+| S1 record on main under `PR-9991-…`, evidence tip | merge base `ca7e4b7` | evidence tip | exit 0, pass (15 owned) | pass |
+| S2 same | main + record | evidence tip | exit 0, pass | pass |
+| S3 same | main before the record | evidence tip | exit 0, pass | pass |
+| S4 same, code head pushed alone | merge base | `c618d8a` | exit 0, pass | pass |
+| S5 same, two evidence-only commits | merge base | second evidence commit | exit 0, pass | pass |
+| C1 placeholder name only | merge base | evidence tip | exit 1, missing | fail |
+| C2 no record | merge base | evidence tip | exit 1, missing | fail |
+| C3 a later `FAIL` verdict row | merge base | evidence tip | exit 1, missing | fail |
+| C4 the last `Head` row names the merge base | merge base | evidence tip | exit 1, missing | fail |
+| C5 a `lint-migrations.ts` change after `c618d8a` | merge base | that commit | exit 1, missing | fail |
+| C6 a `sql-text.ts` change after `c618d8a` | merge base | that commit | exit 1, missing | fail |
+| C7 a `required-suites.json` change after `c618d8a` | merge base | that commit | exit 1, missing | fail |
+| C8 the record named for another PR | merge base | evidence tip | exit 1, missing | fail |
+| C9 the last `Head` row names `06270ba` (before fix cycle 3) | merge base | evidence tip | exit 1, missing | fail |
+| C10 the round-1 record alone (`Head` `85afc70`) | merge base | evidence tip | exit 1, missing | fail |
+
+15 of 15 are as expected. The record now has two `Head` rows, one per round, and two `Verdict` rows; the round-2 `Verdict` row is the last table row of the file.
+
+### R2.6 Merge conditions and routes
+
+- **C1. Lane B evidence** at `c618d8a`, or at a later head that changes no owned path after it:
+  - `catalog-c1-c14` = 113 tests with 0 failures, errors and skips, including C16 and P9-CK;
+  - `integration` 0/0/0, including the 8 `[PR66-SEC-01]` rows, SEC-TC-76..78 and the new `[SEC-TC-74] [PR43-SEC-07]` remainder case;
+  - `unit` with 0 failures, including the R3-M1 rows of `lint-migrations.test.ts` and `scans-dynamic-sql.test.ts`;
+  - `migrations` 0/0/0;
+  - `rls-cross-tenant` total unchanged (157);
+  - the hosted `security-integration` job green.
+- **C2. Rename** to `PR-<NNNN>-TASK-293-security-review.md`, then confirm that the PR's merge ref contains the renamed record (D-ORCH-136/138).
+- **Any later change to an owned path** needs a delta round.
+- **Routes:**
+  - **PR293-SEC-03 (INFO):** unchanged (R-ARCH-34 ruling, error mapper).
+  - **PR293-SEC-04 (INFO):** next `tools/db` linter holder.
+  - **data-model §8.3 and §4.6:** principal-architect, next fold.
+  - **TEST-STRATEGY G3 count (64 → 67) and SEC-TC-74's registry section:** qa-lead.
+  - **The rule-14 option for CAST and AGGREGATE (D-TASK293-10):** principal-architect, optional.
+
+| Field | Value |
+|---|---|
+| Verdict | **PASS_WITH_CONDITIONS.** Round 2 at `c618d8a`: PR293-SEC-01 (LOW) closed (8 of 11 rows seen, rows 3-5 stated limits pinned by a test, RENAME seen too); PR293-SEC-02 (INFO) closed, the nested-read deviation accepted; code review R3-M1 (a rule-16 regression in `06270ba`) confirmed independently and closed, including nested shapes; PR65-SEC-05 (d) closed subject to C1. New PR293-SEC-04 INFO. Open: PR293-SEC-03, PR293-SEC-04 (INFO). 0 Critical, 0 High, 0 Medium. Conditions: C1 lane B at `c618d8a` (catalog-c1-c14 113/0/0/0, integration incl. the remainder case, unit incl. the R3-M1 rows, migrations, rls 157, hosted security-integration green), C2 rename and merge-ref confirmation |

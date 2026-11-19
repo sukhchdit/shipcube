@@ -4120,3 +4120,45 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **data-model §8.3 and §4.6 (C16 (b), P9-CK):** principal-architect, next fold.
   - **TEST-STRATEGY G3 count 64 → 67, and SEC-TC-74's registry section:** qa-lead.
 - **Reversibility:** High.
+
+### D-SECPR293-02 · 2026-11-19 · security-analyst · TASK-293 security round 2 (delta `85afc70..c618d8a`, pre-push) = PASS_WITH_CONDITIONS at the final code head `c618d8a` (round appended to `docs/05-quality/security/PR-pending-TASK-293-security-review.md` on main; rename per D-ORCH-136/138 unchanged)
+- **Decision:** nothing Critical, High or Medium is open. This round covers fix cycle 2 (`06270ba`) and fix cycle 3 (`c618d8a`).
+  - **Method.** Static review plus single-process Node and PGlite 17.5 probes on `git archive` extracts. No npm, Jest or Docker.
+  - **Slip.** One read-only `git rev-parse` ran in the PR worktree while I waited for the head. It changed nothing; this is disclosed in the record.
+- **PR293-SEC-01 (LOW) is closed.**
+  - 8 of the 11 rows are now rule 10: `SET SCHEMA`, routine `FOR … IN` DML, non-ASCII names, DO `FOR … IN` / `OPEN … FOR` DML, a `;` inside a string, and the `UPDATE "x;y"` regression. `RENAME TO` is seen too, including with `numeric(10,2)` arguments.
+  - Rows 3 to 5 (attribute notation, cast function, aggregate support function) are stated limits, pinned by a test (D-TASK293-10), which is one of the two remediation options I offered. The rule-14 refusal stays an architect option.
+  - Controls stay clean, including the row locks of R3-n1. All 81 lint fixtures are identical, and the repository lanes give 0 findings.
+  - The real bootstrap shadow is byte-identical, and every adversarial shape scales linearly (ratio ≤ 3.6 for 4n).
+  - The fuzz shows no loss against the `3183525` regex beyond the intended row-lock rows, plus one contrived shape (PR293-SEC-04).
+- **PR293-SEC-02 (INFO) is closed.**
+  - A continued E-string is rule L at top level.
+  - In nested reads it counts as an escape string. The developer's deviation from my sketch is accepted as stricter.
+- **Code review R3-M1 (MAJOR) was in `06270ba` and is closed at `c618d8a`.**
+  - I confirmed it independently. `sqlText`'s dollar-body fallback and the catalog `bodyText` dropped `ESCAPE_STRING_MARK`, so rule 16 and the prosrc scan missed a continued E-string in a DO block or routine body.
+  - PGlite: an `EXECUTE E'SET \x61pp.org_id …'` behind such a continuation set the session's `app.org_id`, with 0 findings.
+  - At `c618d8a` the mark is kept and every shape is refused, including EXECUTE of a dollar string or a string literal holding the continuation, and a nested `DO`.
+  - My PR293-SEC-02 sketch named only `tokenize`, so it was incomplete; the record says so.
+- **PR65-SEC-05 (d) is closed, subject to C1.** The `[SEC-TC-74] [PR43-SEC-07]` remainder case asserts the outcomes of my PR-0065 §5.4 probes: the version reset, back-dated stamps, the guard-before-RLS order, and both MERGE forms.
+- **New: PR293-SEC-04 (INFO, CWE-184).**
+  - The fallback for a body that does not lex has no `;` start, so a quoted name holding `;` is missed. This is contrived: 4 of 300,000 fuzz texts.
+  - String literals read as dynamic SQL make prose such as `'… in update mode'` a rule-10 hit. That fails closed.
+  - Owner: the next holder of the `tools/db` linter.
+- **Binding.**
+  - The round-2 `Head` row is `c618d8a`, and the PR changes 15 owned paths.
+  - Merge-ref simulation against main `060c0a5`: 15 of 15 as expected. 5 pass; 10 controls fail, including a `Head` row naming `06270ba` and the round-1 record alone.
+- **Conditions:**
+  - **C1.** Lane B at `c618d8a`:
+    - `catalog-c1-c14` = 113 with 0 failures and 0 skips;
+    - `integration` 0/0/0, including the remainder case, the lexer rows and SEC-TC-76..78;
+    - `unit`, including the R3-M1 rows of `lint-migrations.test.ts` and `scans-dynamic-sql.test.ts`;
+    - `migrations` 0/0/0;
+    - `rls-cross-tenant` total 157;
+    - the hosted `security-integration` job green.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - Any later change to an owned path needs another delta round.
+- **Open:** PR293-SEC-03 (INFO; R-ARCH-34 ruling, error mapper) and PR293-SEC-04 (INFO).
+- **Routed:**
+  - data-model §8.3 and §4.6: principal-architect.
+  - TEST-STRATEGY G3 count 64 → 67: qa-lead.
+- **Reversibility:** High.
