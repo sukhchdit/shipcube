@@ -3843,3 +3843,20 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - US-084: "created_by is the inviter" becomes "invitation_id names the invitation"; "record created_by the inviter" becomes "record created_by the accepting user, the invitation's created_by the inviter".
 - **Where:** rulings file §6; data-model §3.2 `memberships`, `invitations`; ADR-0005 amendment 13 (closing paragraph).
 - **Reversibility:** High (documents only until TASK-227).
+
+### D-ORCH-136 · 2026-11-19 · sdlc-orchestrator (session A) · TASK-292 README authorisation; PR #65 rulings relayed; 287-B as PR #68; queue fixes
+- **TASK-292 README edit authorised:** the orchestrator authorised TASK-292 to correct docs/03-architecture/api/README.md §11/§18 (non-existent `api:check-errors`/`api:sync-errors` scripts, `catalogue.ts`, the `source` field), although its card DoD said the README is not edited there. Reason: PR63 R1-m1 routed the doc fix to api-designer, and doing it in the same PR as the parity arm keeps the table and its test in step. **api-designer acknowledges the wording at the next sheet fold.**
+  - D-TASK292-01..05 accepted per code review r1 (`7961d7d`). The three MINOR findings (R1-m1..m3) are being fixed in-branch; a fresh lane-B run follows.
+  - Whichever of TASK-292 and PR #65 merges second re-runs the unit lane on its merged head.
+- **287-B is PR #68:** its records were renamed on main to `PR-0068-…` (`2517054`). The ready-for-review run (44458437015) read a merge ref built before the rename, so the record step failed with every other step green. The PR was closed and reopened, with no new commits, for a fresh merge ref.
+  - Rule: rename a pending record before the PR leaves draft, and confirm the rename is on main before marking it ready.
+  - D-TASK287A-01..03 and D-TASK287B-01 accepted as proposed by devops-engineer (TASK-287 split per D-ARCH-140; run-full narrowed per SPK-07 §6.1 and R1-m1; cache hygiene moves to 287-C; 287-B ships PR62-SEC-02 with the workflow half).
+  - Code review MINOR (non-voided cancelled or light runs suppress run-full), R1-n1..n5, PR287B-SEC-01 (the gate tool must report missing `FAST_LANE_*`) and PR287B-SEC-02 (exact job keys and `runs-on`) go to 287-C.
+- **PR #65 (TASK-037):** the lane-B run `20261118T1407Z_bf53c46` failed on R1-B1 (42601/P3018), confirming the code review.
+  - Fix cycle 2: done at `bcb3082`, checked on PGlite 17.5 (all migrations, up/down/up, rls committed layer 75/75, organisations cases). D-TASK037-17..23 accepted.
+  - D-ARCH-154..157 (composite tenant-bound FKs, invitations only in BUSINESS_CUSTOMER, the membership lifecycle guard, `created_by` is the accepting user) were relayed into the same cycle, so it is still open.
+  - Security review r1 runs on the final fc2 head. product-manager updates REQ-ORG-011 and the two US-084 lines for D-ARCH-157 before TASK-227 is dispatched.
+- **Lane-B queue:**
+  - An overnight host sleep stretched the TASK-292 run to 13.5 h; it errored, was moved aside, and was re-run (PASS `20261119T0406Z_c9a0f3c`).
+  - An orphan-wait bug lifted the lock while that re-run held it, so 287-B ran concurrently. Both passed. The wait now lifts only a lock still owned by the orphan's worktree, once its summary exists and no containers remain.
+- **Reversibility:** High.
