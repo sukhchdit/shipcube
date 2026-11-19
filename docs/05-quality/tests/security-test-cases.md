@@ -1,10 +1,12 @@
-# Security test cases SEC-TC-01..64: adoption, suites and gated stories
+# Security test cases SEC-TC-01..64 and 76..78: adoption, suites and gated stories
 
 Version 1.0 · 2026-11-12 · owner qa-lead · status: **adopted** (all 64). Sources: `docs/03-architecture/threat-model.md` §10.2 (SEC-TC-01..36), `docs/05-quality/security/P3-architecture-security-review.md` §9 (updates to 03, 04, 09, 12, 17, 20, 26, 28, 31, 32, 34; new 37..60) and §14.5 (amended 37, 44, 53; new 61..64). Strategy context: [TEST-STRATEGY.md](../TEST-STRATEGY.md) §7.11; manifest: [required-suites.json](../../../tools/quality/required-suites.json).
 
 *Amendments (security-analyst text round, 2026-11-13, D-SEC-TM-01).* SEC-TC-18 wording aligned with ADR-0007 am. 4 / ADR-0018 (no behavioural change to the case). New section "Proposed cases" at the end (SEC-TC-69..75): proposals, **not adopted and not in `required-suites.json`**; the "64 cases" counts below describe the adopted set only.
 
 *Amendment (TASK-293, 2026-11-19; D-SEC-PR65-01/02, PR65-SEC-05; TASK-293 code review R1-m3).* New section "Adopted cases SEC-TC-76..78" at the end: assigned by the security analyst for the PR #65 controls, carried by passing tests and adopted directly in `required-suites.json` (`integration`; SEC-TC-76 also `catalog-c1-c14`). The adopted set is now 67 IDs (01..64 and 76..78); the "64" counts in the sections above describe the 2026-11-12 set and are unchanged.
+
+*Amendment (qa-lead, 2026-11-19, D-QA-021).* qa-lead acknowledges the TASK-293 rows and the `required-suites.json` edits of PR #65 and PR #72. The title and rule 6 now read 67 (01..64 and 76..78), as does TEST-STRATEGY.md §15 item 6 (PR #72 code review R2-n3). The "Counts" table and its 2026-11-12 check are history and are not restated. SEC-TC-74 is required but still listed under "Proposed": see adoption note 5 there.
 
 ## Rules for every case
 
@@ -13,7 +15,7 @@ Version 1.0 · 2026-11-12 · owner qa-lead · status: **adopted** (all 64). Sour
 3. **Zero skip.** No case is ever skipped, quarantined or marked `todo`. A case blocked by an unimplemented story fails the build of the wave that should deliver it, which makes the gap visible.
 4. **Conditional cases (D-QA-011).** Some cases exercise routes that belong to Should or Could stories. If the story ships, the case tests the behaviour. If the story is not delivered in this run, the same test asserts that the route is absent from the route registry and from `openapi.yaml` (or rejected with 404), and the G3 report records "route absent" with the deferral decision ID. The condition is named per case below.
 5. **Story gating.** A story listed under "Gates stories" cannot meet its DoD while the case fails. The task that implements the story (task IDs come from senior-developer's `docs/04-plan/`) includes the case in its acceptance section; the placement column follows the review's guidance (§9 "Placement").
-6. **G3.** 64/64 cases present and passing in the `gate` evidence (TEST-STRATEGY.md §15 item 6). The SEC-COND conditions of the review §14.8 close on the cases named there.
+6. **G3.** 67/67 cases (01..64 and 76..78) present and passing in the `gate` evidence (TEST-STRATEGY.md §15 item 6). The SEC-COND conditions of the review §14.8 close on the cases named there.
 
 Legend for **Lane**: A = hosted fast lane; A* = hosted `security-integration` on security-critical paths; B = local heavy lane (`pr` when the path rule selects the suite, always in `wave`/`gate`); C = hosted full lane.
 
@@ -149,8 +151,9 @@ Status: **proposed**. Source: `docs/03-architecture/threat-model.md` v1.1 §10.4
 
 1. **No manifest change here.** Do not add 69..75 to `required_cases` until a test on `main` carries the ID; until then use `required_cases_pending` with the owner shown and the checkpoint `G3`. SEC-TC-74 is a merge condition for TASK-037 (D-ARCH-091), which is earlier than any checkpoint; SEC-TC-73 and SEC-TC-75 can go active as soon as TASK-024 and TASK-147 merge. A listed case that no test carries fails the verifier.
 2. **Merging IDs is acceptable.** SEC-TC-70 can fold into 69, and SEC-TC-71 into a `config-guards` extension, if fewer IDs are preferred. Keep the clone-database family (72) separate from SEC-TC-43: it needs a different runner (template clones) and lane B only.
-3. **G3 count.** If 65..68 and 69..75 are all adopted, the G3 line "64/64" (TEST-STRATEGY §15 item 6; rule 6 above) becomes "75/75"; change both in the same activation PR.
+3. **G3 count.** If 65..68 and 69..75 are all adopted, the G3 line (TEST-STRATEGY §15 item 6; rule 6 above), 67/67 since TASK-293, becomes "78/78"; change both in the same activation PR. *(qa-lead, D-QA-021: the 2026-11-13 text read "64/64" → "75/75", before 76..78 were adopted.)*
 4. **Related text owed to qa-lead (an owned path, not edited here).** `tools/quality/required-suites.json` suite `k6-audit-ab` has the runner string "k6 scenario audit-ab (APP_ENV=benchmark baseline)". The vocabulary is the build-time `-bench` image (ADR-0007 am. 4 and am. 10 item 6), the same alignment as SEC-TC-18 above.
+5. **SEC-TC-74 placement (qa-lead, D-QA-021).** SEC-TC-74 left this proposed set in practice with PR #65: it is in `catalog-c1-c14.required_cases` (D-TASK037-22, D-SEC-PR47-01 (1)), carried by the C15 (d) catalog cases and the `organisations.int` cases (including the `[SEC-TC-74] [PR43-SEC-07]` remainder case of PR #72), and enforced by the evidence check. Its row stays here for now because `tools/quality/lib/test-ids.test.ts` pins the adopted set to exactly 01..64 and 76..78: moving the row alone would turn lane A red. The move to an adopted section, the pin (68 IDs) and the G3 line 67/67 → 68/68 (rule 6 and TEST-STRATEGY §15 item 6) go together in one qa-lead change with the next PR that touches `tools/quality/lib`, at the latest before G3. Until then `trace.mjs` still knows the ID (it reads adopted and proposed rows), so the tests that carry it are not orphans.
 
 ## Adopted cases SEC-TC-76..78 (security-analyst, 2026-11-19; adopted by TASK-293)
 
