@@ -601,6 +601,29 @@ describe('[PR46-SEC-12] the classification ci-gate recomputes and compares (rule
     expect(gateVerdictStage2(input(overrides))).toEqual({ ready: false, reasons });
   });
 
+  it('[PR #62 R1-m2] a push to main (CI_MAIN_FAST_LANE): only (a), (b), (f), (g) apply; no proof and no security-integration needed', () => {
+    const push = formatClassification({
+      ...values,
+      mode: 'full',
+      code_changed: 'true',
+      security_paths: 'true',
+      record_ok: 'false',
+      code_proof: '',
+      security_proof: '',
+      security_integration_due: 'false',
+    });
+    // (e) is pull-request only: a security path on a push needs no security-integration run or proof.
+    expect(
+      gateVerdictStage2(input({ event: 'push', classification: push, fastLaneClassification: push, securityIntegration: 'skipped' })),
+    ).toEqual({ ready: true, reasons: [] });
+    // (b) still holds on a push: a light run is red.
+    const light = formatClassification({ ...values, mode: 'light', code_changed: 'false', security_paths: 'true', code_proof: '' });
+    expect(
+      gateVerdictStage2(input({ event: 'push', classification: light, fastLaneClassification: light, securityIntegration: 'skipped' }))
+        .reasons,
+    ).toEqual(['code gates skipped on a code push']);
+  });
+
   it('(b) a code push: this run must have run every CODE-gated step', () => {
     const full = formatClassification({ ...values, mode: 'full', code_changed: 'true', code_proof: '' });
     expect(gateVerdictStage2(input({ classification: full, fastLaneClassification: full }))).toEqual({ ready: true, reasons: [] });
@@ -714,15 +737,18 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
     return tip;
   }
   const PROOF_RUN = 11;
-  const jobsOfProof = () => {
+  const jobsOfProof = (red = false) => {
     const steps = proofSteps(stage2Text) as ProofSteps;
     return {
       jobs: [
         {
           name: 'fast-lane',
           status: 'completed',
-          conclusion: 'success',
-          steps: steps.fastLane.map((s) => ({ name: s.name, conclusion: s.mayBeSkipped ? 'skipped' : 'success' })),
+          conclusion: red ? 'failure' : 'success',
+          steps: steps.fastLane.map((s) => ({
+            name: s.name,
+            conclusion: s.mayBeSkipped ? 'skipped' : red && s.name === 'Unit tests' ? 'failure' : 'success',
+          })),
         },
         {
           name: 'ci-gate',
@@ -734,9 +760,12 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
       ],
     };
   };
-  /** A runs API with one completed proof run of F1 (this PR into main, created 11:00), whose steps all passed. */
+  /**
+   * A runs API with one completed run of F1 (this PR into main, created 11:00) whose steps all passed, or (R1-m1 probes)
+   * whose unit tests failed (`red`), plus optionally a newer run of F1 (`newer`, created 12:30, after the base change).
+   */
   const apiFor =
-    (f1: string): Api =>
+    (f1: string, options: { red?: boolean; newer?: { id: number; red: boolean } } = {}): Api =>
     (path) => {
       if (path.startsWith('repos/o/r/actions/workflows/ci.yml/runs?head_sha=')) {
         const sha = /head_sha=([0-9a-f]{40})/u.exec(path)?.[1] ?? '';
@@ -758,9 +787,13 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
           path: '.github/workflows/ci.yml',
           pull_requests: [pullRequest],
         };
-        return { ok: true, json: { workflow_runs: [proof] } };
+        const newer = options.newer === undefined ? [] : [{ ...proof, id: options.newer.id, created_at: D('12:30') }];
+        return { ok: true, json: { workflow_runs: [proof, ...newer] } };
       }
-      if (path === `repos/o/r/actions/runs/${String(PROOF_RUN)}/jobs?per_page=100`) return { ok: true, json: jobsOfProof() };
+      if (path === `repos/o/r/actions/runs/${String(PROOF_RUN)}/jobs?per_page=100`)
+        return { ok: true, json: jobsOfProof(options.red === true) };
+      if (options.newer !== undefined && path === `repos/o/r/actions/runs/${String(options.newer.id)}/jobs?per_page=100`)
+        return { ok: true, json: jobsOfProof(options.newer.red) };
       if (path.startsWith('repos/o/r/pulls?'))
         return {
           ok: true,
@@ -769,9 +802,14 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
       if (path.startsWith('repos/o/r/issues/53/events')) return { ok: true, json: [] };
       return { ok: false, problem: `unexpected ${path}` };
     };
-  function run(change: Record<string, string> | undefined, name: string, lint = false) {
+  function run(
+    change: Record<string, string> | undefined,
+    name: string,
+    lint = false,
+    apiOptions: { red?: boolean; newer?: { id: number; red: boolean } } = {},
+  ) {
     const { root, m0, f1, f2 } = repo(lint);
-    const api = apiFor(f1);
+    const api = apiFor(f1, apiOptions);
     const tip = testMerge(change, name, lint);
     const dir = tempDir('lane-scope-cli-out-');
     const out = join(dir, 'out');
@@ -816,6 +854,30 @@ describe('[R1-m4] [R1-n6] the classify CLI binds a proof to the tested base end 
       expect(result.summary).toContain('tested an older base');
       expect(result.summary).toContain('the code proof was voided by the tested base: the full lane runs for this docs push');
     }
+  });
+
+  it('[PR #62 R1-m1] probe 1: the only bound run on the code was voided by the base AND red: the docs push stays light (BLOCKED)', () => {
+    const result = run({ 'package.json': '{"name":"x"}\n' }, 'm1-red', false, { red: true });
+    expect(result.status).toBe(0);
+    expect(result.outputs.mode).toBe('light');
+    expect(result.outputs.code_changed).toBe('false');
+    expect(result.outputs.code_proof).toBe('');
+    expect(result.summary).toContain('tested an older base');
+    expect(result.summary).toContain('would not have been a proof either');
+    expect(result.summary).not.toContain('the full lane runs for this docs push');
+  });
+
+  it('[PR #62 R1-m1] probe 2: a newer, non-voided run on the same code is red: the docs push stays light (BLOCKED)', () => {
+    const result = run({ 'package.json': '{"name":"x"}\n' }, 'm1-newer', false, { newer: { id: 12, red: true } });
+    expect(result.status).toBe(0);
+    expect(result.outputs.mode).toBe('light');
+    expect(result.outputs.code_proof).toBe('');
+    expect(result.summary).toContain('is not a code proof');
+    expect(result.summary).not.toContain('the full lane runs for this docs push');
+    // Control: the same newer run green is the proof (light, inherited).
+    const green = run({ 'package.json': '{"name":"x"}\n' }, 'm1-newer-green', false, { newer: { id: 12, red: false } });
+    expect(green.outputs.mode).toBe('light');
+    expect(green.outputs.code_proof).toBe(`12:${green.f1}`);
   });
 
   it('[R1-n1] a PR range touching a lint control: a proof whose lint-fixture step was skipped is no proof', () => {

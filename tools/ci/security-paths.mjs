@@ -4,9 +4,9 @@
  *
  * Decides whether a pull request needs the hosted `security-integration` job: true when any path changed in
  * `<base>...<head>` matches SECURITY_INTEGRATION_PATHS, the trigger list of ADR-0023 amendment G item 5 plus
- * `package-lock.json`. Job `scans` runs the BASE ref's copy of this file (tools/ci from the base ref), so a PR cannot
- * narrow its own selection; widening or narrowing the list is a reviewed change of tools/ci (CODEOWNERS). No npm and
- * no node_modules in job `scans`: this file imports nothing but `node:` modules.
+ * `package-lock.json`. lane-scope.mjs runs the TESTED base's copy of this file (tools/ci from TOOLS_REF, PR46-SEC-17)
+ * in fast-lane's classify step and ci-gate, so a PR cannot narrow its own selection; widening or narrowing the list is a
+ * reviewed change of tools/ci (CODEOWNERS). No npm and no node_modules: this file imports nothing but `node:` modules.
  *
  * Why not the manifest's broader `security_critical_paths` (which also lists tools/quality, tools/ci, .github and
  * .npmrc): tools/quality, tools/ci and .github have their own lane A gates (the base-ref policy, the evidence verifier,

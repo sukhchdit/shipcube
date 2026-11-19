@@ -63,12 +63,13 @@ job is a `required-gates` finding. In stage 2:
   changes** (P1 (b); PR46-SEC-16 as widened by PR55-SEC-03, D-TASK286-06). A semantic conflict between files that only
   one side changed, outside that set, is left to the D-ORCH-042 post-merge gate. A base change is dated by its
   committer time: a squash merge lands with its landing time, so push `main` commits that touch these paths right
-  after creating them (PR55-SEC-04 residual). Since TASK-287 a docs push of a PR with code changes whose proof
-  candidates were all **voided by the tested base** runs the full lane at once (`code_changed=true`, `mode=full`,
-  `push_scope` stays `docs`): the code must run on the new base before the merge anyway, and the full run (about 8-10
-  billed minutes) is cheaper than the blocked light run (3-4) plus that re-push (SPK-07 section 6.1; D-TASK286-06a
-  option). With no candidate at all (the code run is pending or red) the push stays light and ends
-  `BLOCKED: no code proof`; push a code change or close and reopen the PR. Commitlint, actionlint and the head-code checks run only on a code push; the
+  after creating them (PR55-SEC-04 residual). Since TASK-287 a docs push of a PR with code changes runs the full lane at
+  once (`code_changed=true`, `mode=full`, `push_scope` stays `docs`) only when no bound run on its code survived
+  the tested-base check and at least one voided run would have been a proof (its fast-lane and scans steps passed):
+  the code must run on the new base before the merge anyway, and the full run (about 8-10 billed minutes) is cheaper
+  than the blocked light run plus that re-push (SPK-07 section 6.1; D-TASK286-06a option; PR #62 code review R1-m1).
+  With no candidate, a red candidate, or a newer non-voided run on the same code, the push stays light and ends
+  `BLOCKED: no code proof`; push a code change, or close and reopen the PR with no new commits (D-ORCH-135). Commitlint, actionlint and the head-code checks run only on a code push; the
   install, registry signatures and the advisory audit run on **every** push (PR46-SEC-11, D-TASK286-03), and when the
   PR range touches a lint control the lint-fixture steps must have succeeded in this run or the proof (R1-n1).
 - `security-integration` needs `fast-lane` only. `ci-gate` is last and holds the former `scans` steps: it recomputes
@@ -76,8 +77,9 @@ job is a `required-gates` finding. In stage 2:
   gitleaks and the record check on every head and Semgrep/oasdiff unless a docs push has a code proof, and is red when
   its classification differs from `fast-lane`'s (PR46-SEC-12). When the aggregation step carries fast-lane's separate
   outputs (`FAST_LANE_MODE`, `FAST_LANE_CODE_PROOF`, `FAST_LANE_SECURITY_INTEGRATION_DUE`, `FAST_LANE_TOOLS_REF`; the
-  policy accepts them with exactly these values since TASK-287 part 287-A) each must equal ci-gate's own value
-  (PR55-SEC-05). Measured bill: code push 8-10 billed minutes, docs push with a proof about 3 (SPK-07 section 6.1).
+  policy requires all four with exactly these values since TASK-287 part 287-B, PR62-SEC-02) each must equal ci-gate's
+  own value (PR55-SEC-05). Measured bill: code push 8-10 billed minutes; docs push with a proof 3.5 (the first one
+  measured 4; SPK-07 section 6.1).
 
 ### security-integration (lane A, amendment G item 5 as amended by L item 2)
 
@@ -159,10 +161,15 @@ migration immutability, lockfile, dependency age, install, licences, signatures,
 Semgrep and record steps are exact, contiguous and carry no step env; `fast-lane` and `security-integration` use only
 `actions/checkout`, `actions/setup-node` and `actions/cache`, each with exactly its pinned `with:` map (checkout:
 `fetch-depth: 0`, `persist-credentials: false`, no `ref`/`repository`; setup-node and the engine cache as in ci.yml;
-the same for `ci-gate`), so no input can choose the tree, and so the tested base, that judges a PR (PR59-SEC-01). On a
-runner `lane-scope.mjs` (tested-base tooling) also exits 2 unless `HEAD` is the event commit `GITHUB_SHA`, and the
-tooling steps may carry the same check in bash (V2 of the tested-base lines; the policy accepts V1 and V2 until ci.yml
-switches, TASK-287). The workflow env has exactly the install settings and the four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
+the same for `ci-gate`), so none of those inputs can move the checkout (PR59-SEC-01 item 1). On a runner
+`lane-scope.mjs` (tested-base tooling) exits 2 unless `HEAD` is the event commit `GITHUB_SHA`, and both tooling steps
+carry the same check in bash before the tested-base lines (V2, the only accepted text since TASK-287 part 287-B;
+PR59-SEC-01 item 2, PR62-SEC-02). **Residual (ADR-0023 am. N item 3):** a PR that edits `ci.yml` controls its own
+workflow in that run: the `uses:` commit of the three actions and the step keys of the action steps are not yet pinned
+(PR62-SEC-01, policy first in TASK-287 part 287-C), and `checkoutProblem` runs from the `HEAD^1` that run's checkout
+chose. So for every PR that changes `.github/workflows/**` the merge rule stays: a security record on the branch names
+the PR's code head (D-ORCH-116, PR59-SEC-01 (3)); until 287-C the record also checks every changed `uses:` commit
+against its upstream tag and that no action step gained `env:` (D-SEC-PR62-01). The workflow env has exactly the install settings and the four image pins (PR55-SEC-01/-02). `$GITHUB_ENV` is written only by the pinned tooling and classify steps (PR46-SEC-12;
 a lexical tripwire for the head-code steps, which are not exact). In every workflow, at every level: no
 `BASH_ENV`, `ENV`, `PATH`, `NODE_PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
 `IFS`, `BASH_FUNC_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_<n>`/`VALUE_<n>`, `GIT_EXTERNAL_DIFF`, `HOME`,
