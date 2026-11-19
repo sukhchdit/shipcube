@@ -3948,3 +3948,29 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Unchanged: PR65-SEC-02 (LOW) and PR65-SEC-03..05 (INFO) as routed in D-SEC-PR65-01. The new PR65-SEC-01 case joins SEC-TC-76 in the TASK-293 tagging commit.
 - **Why:** the first PostgreSQL 18 run failed four tests. Two of the fixes touch security-owned surfaces (a C15 `[SEC-TC-74]` test and `tools/db/shadow-init.ts`), and both were probed with mutants, not only read.
 - **Reversibility:** High.
+
+### D-ORCH-137 · 2026-11-19 · sdlc-orchestrator (session A) · PRs #68, #69 and #65 merged; TASK-291 and TASK-293 dispatched; routings
+- **Merged, each MERGE-READY on a full lane-A run, with P1 re-checked at merge:**
+  - #68 287-B (`05de264`)
+  - #69 TASK-292 (`fcec9a9`); its first run was the first live run of the V2 event-commit check, and it was green
+  - #65 TASK-037 (`ca7e4b7`)
+- **TASK-037:** three fix cycles (the maximum).
+  - Cycle 3 brought in main (#68/#69, P1 overlap on the API README), the PR65-SEC-01 index, and the causes of four PostgreSQL 18 failures: C9 lists, the C15 (a) probe test shape, shadow schema grants, and the own_read plant.
+  - Lane B `20261119T1143Z_d4de55d` PASS, which meets security condition C1.
+  - Code review r3 APPROVED_WITH_NITS (`1afa706`); security r2 PASS_WITH_CONDITIONS (`fb766c1`).
+  - D-TASK037-13..32 accepted as ruled by both reviewers.
+  - Lesson: PGlite replays caught one bug but missed three; a migration PR's PostgreSQL 18 lane-B run comes as early as the queue allows.
+- **Routings:**
+  - PR65-SEC-02 (latent operator self-membership): card lines on TASK-049, TASK-224 and TASK-227 (context `app.org_id` only after an ACTIVE-membership check; acceptance only from a PENDING invitation for the verified e-mail); principal-architect rules on a database option before TASK-089.
+  - PR65-SEC-03/04: TASK-049, TASK-057 and TASK-231 as listed in D-SEC-PR65-01; architect for 04 (a)/(b).
+  - PR65-SEC-05 (SEC-TC-76/77/78 tags, required cases, min_tests ratchet) and D-ARCH-154's C16 → TASK-293, dispatched now with the `tools/db` lexer parity.
+  - Code review R2-n1/R3-n1 (data-model §3.2 lists the new triggers and the org-scoped live-grant index) → architect at the next fold. R2-n2 (member from the transaction actor) → TASK-049 or TASK-224. R2-n3/n4 → qa-lead acknowledgement of the `required-suites.json` move.
+  - product-manager updates REQ-ORG-011 and US-084 for D-ARCH-157 before TASK-227 is dispatched. The story files are lane-B tooling inputs, so they are committed when no lane-B evidence is pending.
+- **287-C1 (`ci/TASK-287C1-policy`, head `e8b9414`):**
+  - Code review APPROVED_WITH_NITS (`370a66b`); security PASS_WITH_FOLLOW-UPS (`b6274a3`, D-SECPR287C1-01). D-TASK287C-01..06 accepted, with the n3 and n2 residuals added to 04 and 05.
+  - PR287C1-SEC-01 (LOW: cache exclusions that `actions/cache` ignores) goes to the next policy PR before 287-C2, as security allowed, since no workflow caches that directory today.
+  - PR287C1-SEC-02 (lane-c/nightly action commits) → TASK-015-C. Code review n4 (a Dependabot procedure for the pinned actions) → 287-C2.
+  - Ratified with security: a security record satisfies D-ORCH-116 on the branch or on main (from the next `pull_request` event; placeholder names never count).
+  - Two lane-B runs were spoiled by the network outage; the second left the worktree's Prisma engine missing, now rebuilt. Re-queued.
+- **Dispatched:** TASK-291 (test-engineer, `tests-gen-rls`) and TASK-293 (database-engineer, `prisma-core`). Both lock holders (TASK-290, TASK-037) have merged.
+- **Reversibility:** High.
