@@ -4243,7 +4243,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - orchestrator: the 287-B R1-n5 DECISIONS entry.
 - **Reversibility:** High (plan data only).
 
-### D-SECT39-01 · 2026-11-19 · security-analyst · T-39 / PR56-SEC-03 / D-ARCH-142: the aggregated-entry shape of the TASK-041 denial budget is confirmed, with precisions (closed `details` set, TTL-anchored window and atomic carry claim, actor segment for non-user principals, fallback event, composition); threat model v1.2 (§10.4 H); card lines for D-SD-002
+### D-SECT39-01 · 2026-11-19 · security-analyst · T-39 / PR56-SEC-03 / D-ARCH-142: the aggregated-entry shape of the TASK-041 denial budget is confirmed, with precisions (closed `details` set, TTL-anchored window and atomic carry claim, actor segment for non-user principals, fallback event, composition); threat model v1.2 (§10.4 H); card lines for the next plan fold
 - **Confirmed as carded:**
   - the budget is per actor, taken in the authorise slot before `capture.denied`;
   - N individual entries a minute (default 20), one aggregated entry at the crossing, then 429 without a write;
@@ -4307,7 +4307,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - A carry not claimed within 24 h never reaches the trail (metric and request log only). D-ARCH-142 accepts this until a job can close windows.
   - During an outage the fallback is per instance.
   - The budget is per actor, so M accounts of one tenant multiply it, inside that tenant's bulkhead (T-86 growth alert).
-- **Card lines for D-SD-002 (TASK-041):**
+- **Card lines for the next senior-developer plan fold (TASK-041).** D-SD-002 (`c1efce3`) landed while this ruling was written and does not carry them; the quoted card text is unchanged at `f723fef`.
   1. **Files:** add `apps/api/src/platform/audit/capture.ts` (+ `capture.api.test.ts`), where `denied` takes the mark of item 2.
   2. **Locks:** add `api-audit-mw` and `api-platform-core`. The second is needed because the AT-US-087-04 trust-proxy setting, the RBAC-matrix `createApp` seam and the `startApi` budget composition all edit `app.ts` / `start-api.ts` (D-ARCH-147 table). It is missing today whatever this ruling says.
   3. **T-39 line (b):** "details: aggregated true, threshold, window_seconds, window_ends_at; no entity id" → "details: required_permission plus aggregated true, threshold, window_seconds, window_ends_at (closed set, D-SECT39-01 item 2; no count); no entity id".
