@@ -21,7 +21,7 @@ Tasks: **38** (S 13 / M 25; opus 10 / sonnet 28; demo-critical 0) in **11** batc
 | 7.5 | TASK-202 Versioned seed-based pricing configuration<br>TASK-203 Schedule a pickup after booking; cancel pickup when a shipment is cancelled<br>TASK-204 Carrier tracking polling with adaptive intervals and stale flag<br>TASK-205 Fail-closed download audit | pkg-pricing, prisma-seed<br>mod-pickups<br>mod-tracking-poll<br>mod-documents-download |
 | 7.6 | TASK-206 Pricing property-based tests<br>TASK-207 Batch track calls per carrier account with backoff and pending handling<br>TASK-208 Mock carrier tracking scenarios on an injected clock<br>TASK-209 Drafts list, resume, delete and 30-day expiry | pkg-pricing-tests<br>mod-tracking-poll<br>pkg-carriers-mock<br>mod-shipments-drafts, web-account-drafts |
 | 7.7 | TASK-210 Rate-limit public tracking lookups<br>TASK-211 Tenant isolation on every account route<br>TASK-212 CI gate for template and variable parity across locales<br>TASK-213 Address only booking-organisation users | mod-tracking-public<br>tests-account-iso<br>notif-parity<br>mod-notifications |
-| 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs<br>infra-tf<br>tests-load<br>tests-web-perf |
+| 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs, infra-compose, worker-queues<br>infra-tf<br>tests-load<br>tests-web-perf |
 | 7.9 | TASK-218 M1 exit-demo journeys<br>TASK-224 Switch active organisation; organisation profile and creating a business organisation<br>TASK-282 Developer README and CONTRIBUTING<br>TASK-294 TASK-W0-FLAKE-3-F | e2e-demo<br>mod-organisations<br>docs-dev<br>quality-tools, tests-harness |
 | 7.10 | TASK-227 Invite members into a business organisation; accept an invitation | mod-organisations |
 | 7.11 | TASK-231 Manage members with last-Owner and individual-organisation safeguards | mod-organisations |
@@ -817,11 +817,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-010, TASK-092, TASK-047 |
-| Batch · locks | 7.8 · api-metrics, worker-metrics, infra-obs |
+| Depends on | TASK-010, TASK-092, TASK-047, TASK-039 |
+| Batch · locks | 7.8 · api-metrics, worker-metrics, infra-obs, infra-compose, worker-queues |
 | Branch | `feat/TASK-214-observability-red-metrics-queue-breaker` |
 | Priority | Should |
 
@@ -830,9 +830,12 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Files / modules**
 - apps/{api,worker}/src/platform/telemetry/**
 - infra/local/{otel,prometheus.yml,grafana}/**
+- compose.yaml (observability profile; redis --maxmemory)
+- apps/worker/src/platform/queues/metrics.ts (Valkey memory and oldest-waiting-age gauges; ADR-0013 amendment 3 item 12)
 
 **Acceptance tests to write**
 - All US-013 scenarios
+- QUEUE AND VALKEY ALARMS (PR64-SEC-04; ADR-0013 amendment 3 items 12 to 14 and 16; D-ARCH-160; platform.md 8.2 and 8.5): (a) METRICS: the worker publishes platform_valkey_memory_used_bytes and platform_valkey_memory_max_bytes (used_memory and maxmemory of INFO memory; the worker ACL user has +info, the api user has not) and platform_queue_oldest_waiting_age_seconds{queue}, collected with the queue gauges under the same 2 s deadline and single-flight (PR64-SEC-03, PR64-SEC-12); when this task moves the worker metrics to @prometheus-io/client (ADR-0017 amendment 1) the names and label sets platform_queue_jobs{queue,state}, platform_queue_dead_letter_jobs{queue} and platform_queue_dead_lettered_total{queue} (the counter of TASK-039) do not change. (b) CEILING AND START-UP CHECK: compose.yaml adds --maxmemory ${REDIS_MAXMEMORY:-512mb} to the redis command (tools/compose/compose-stack.test.ts follows, and the amended note in platform.md 2.2 is then reduced to the command itself); at worker start maxmemory_policy of INFO memory must be noeviction or the worker refuses to start (ADR-0013 section 9), and a maxmemory of 0 logs WARN worker.valkey_maxmemory_unset when APP_ENV is not test. (c) FOUR ALERT RULES in the Prometheus rules of the compose observability profile, each with the labels severity and runbook: QueueDeadLetterNew = sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0, no for, severity page for the queues booking and payments and ticket for the others, RB-07; QueueDeadLetterDepthHigh = max by (queue) (platform_queue_dead_letter_jobs) >= 1600 (80 % of DEAD_LETTER_RETENTION.count), for 5m, page, RB-07; ValkeyMemoryHigh = max(platform_valkey_memory_used_bytes) / (max(platform_valkey_memory_max_bytes) > 0) >= 0.70, for 10m, ticket, RB-06; ValkeyMemoryCritical = the same ratio >= 0.85, for 5m, page, RB-06. TESTS: a lane A test pins the four names, expressions, for values and labels and derives 1600 from the exported DEAD_LETTER_RETENTION; a unit case for the start-up check (a policy other than noeviction refuses the start); the three new gauges appear on the worker /metrics in the integration suite
 - One trace spans API -> queue -> worker -> Mock carrier (NFR-OBS-003); no high-cardinality labels (NFR-OBS-002)
 - ADR-0023 am. J item 4, ADR-0017 am. 2 and D-ARCH-043 (PR1-SEC-07): add only the explicit OpenTelemetry instrumentations (http, undici, pg, ioredis, pino, express) and the AWS/container resource detectors, each through the cooldown, licence and age gates. Never re-add `@opentelemetry/auto-instrumentations-node` or the GCP/Azure/Alibaba detectors.
 - PR6-SEC-03 item 2 / PR6-SEC-12 c (ADR-0017 §4 allow-list; ADR-0010 am. 11 item 8; D-ARCH-068): client spans for carrier and gateway calls carry `server.address`, `http.request.method`, `http.response.status_code` and the adapter route template (`url.template`) only — `url.full`, `url.path`, `url.query` and the legacy `http.url`/`http.target` are excluded by the span-processor allow-list (or undici auto-instrumentation is disabled for the carrier dispatcher and manual spans are created); the in-memory exporter test asserts a `requestorName` sentinel and an account-number sentinel never appear in any span attribute Afterwards `npm audit --omit=dev` reports 0 and `npm ls gcp-metadata` is empty

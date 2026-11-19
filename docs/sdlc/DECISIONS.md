@@ -4357,3 +4357,126 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - SEC-TC-15 wording in `docs/05-quality/tests/security-test-cases.md` → qa-lead (per D-ARCH-142), to match threat model §10.2;
   - the README §13 runtime row → api-designer, through TASK-041's change request.
 - **Reversibility:** High (docs only).
+
+### D-QA-021 · 2026-11-19 · qa-lead · Acknowledgement of the PR #65 and PR #72 manifest and registry edits; adopted SEC-TC set 64 → 67 in TEST-STRATEGY 1.5; SEC-TC-74 placement; AT-US-061 primary suite; a malformed-ID problem in `quality:trace`
+- **Input:** D-ORCH-137 (PR #65 code review R2-n3/R2-n4 → qa-lead), D-ORCH-139 and D-SECPR293-01/02 (TEST-STRATEGY "64/64" and SEC-TC-74's registry section → qa-lead); PR-0065 code review R1-m4/R2-n4; PR-0072 code review R1-m3, R2-n3 and conditions 3/4; PR-0072 security record §4.6; rulings `wave-1-batch-1.1-rulings.md` (open item: AT-US-061-01..03 primary suite).
+- **Acknowledged (edits by others under qa-lead content ownership; each tightens a gate, none weakens one):**
+  - PR #65 (`ca7e4b7`, D-TASK037-22): SEC-TC-74 moved from `required_cases_pending.catalog-c1-c14` to `catalog-c1-c14.required_cases`.
+  - PR #72 (`f723fef`, PR65-SEC-05 (a)/(b)): `integration.required_cases` `[]` → SEC-TC-76/77/78; SEC-TC-76 also added to `catalog-c1-c14.required_cases`; `catalog-c1-c14.min_tests` 14 → 113 (106 + 7), confirmed by lane B `20261119T1550Z_c618d8a` (catalog 113, 0 skipped). `integration` keeps `min_tests` 1 (no floor), as the PR-0072 code review noted.
+  - PR #72: section "Adopted cases SEC-TC-76..78" in `docs/05-quality/tests/security-test-cases.md`, adopted directly (D-SEC-PR47-01 (1)); `parseSecurityCases` gives 67 adopted (01..64, 76..78) and 7 proposed (69..75).
+- **Decision:**
+  1. **TEST-STRATEGY 1.5** (R2-n3): every line that pinned 64 adopted cases now reads 67 (01..64 and 76..78): the companion-files row, §2 "Security cases are gates", the §6 ID table, the §6 G3 bullet (line 192), §7.11, the §9 layout listing, §14 step 5 and §15 item 6 (line 599). §15 item 6 also states that SEC-TC-74 is gated by the manifest already and that the line becomes 68/68 when its row moves.
+  2. **Registry** (`security-test-cases.md`): title and rule 6 → 67/67; a qa-lead amendment line; adoption note 3 now says 67/67 → 78/78 if 65..75 are all adopted (it said 64/64 → 75/75).
+  3. **SEC-TC-74 placement** (security §4.6 note, D-SECPR293-01 "SEC-TC-74's registry section"): the row stays under "Proposed" for now, with adoption note 5 stating that it is required, carried and enforced. Reason: `tools/quality/lib/test-ids.test.ts` pins the adopted set to exactly 01..64 and 76..78, so moving the row without the pin turns lane A red, and this change is docs only. The row move, the pin (68 IDs) and 67/67 → 68/68 (registry rule 6, TEST-STRATEGY §15 item 6) go in one qa-lead change with the next PR that touches `tools/quality/lib`, at the latest before G3. Nothing is ungated meanwhile: the evidence check reads `required_cases`, and `trace.mjs` knows proposed IDs, so its tests are not orphans.
+  4. **AT-US-061 primary suite** (rulings item): `gherkin-test-map.md` is **not edited**. The suite column is descriptive: `quality:trace` credits an ID in any suite, so the label changes no gate, and a map edit makes the lane-B evidence of every open PR stale (tooling input). Under D-PM-068, AT-US-061-02/-03 keep `api`: their response-level halves land with the routes on TASK-224, and the integration/unit tests of PR #65 are the database and service halves. AT-US-061-01 (seed only, no route) moves to `integration` through `gherkin-suite-assignments.json` (US-061 override `"01": "integration"`) at the next regeneration of the map after a story change. AT-US-062-01..04 stay `api` for the same reason (route halves on TASK-049/TASK-231).
+  5. **New problem found while confirming:** `npm run quality:trace` on `20261119T1550Z_c618d8a` reports 0 orphans but 1 problem and exits 1. The unit test title `[PR46-SEC-06] … SEC-TC-060 does not satisfy SEC-TC-06 …` (`tools/ci/security-integration.test.ts:143`) carries the decoy as a literal, and `trace.mjs` treats it as a malformed ID. This is a test defect (S4, no product impact), present since PR #46. Route: test-engineer under qa-lead, or the next holder of `tools/ci/security-integration.test.ts`. Reword the title so that the decoy is not a literal token (the decoy string in the test body stays). Due before `quality:trace` becomes a gate input (TASK-015-B attachment hook), at the latest G3.
+- **Why:** the G3 checklist is what the gatekeeper reads, so it must match the adopted set; the SEC-TC-74 move and the map relabel each need a non-docs or tooling-input change that is cheaper bundled with work that already pays that cost.
+- **Alternatives:** move SEC-TC-74 now with a `test-ids.test.ts` edit (rejected: not docs only, needs lane A on a PR); regenerate the map now (rejected: stale lane-B evidence for every open PR, no gate effect); count SEC-TC-74 in the G3 line while it is listed as proposed (rejected: the line would disagree with `parseSecurityCases`).
+- **Applied in:** `docs/05-quality/TEST-STRATEGY.md` 1.5; `docs/05-quality/tests/security-test-cases.md`. Not edited: `gherkin-test-map.md`, story files, `required-suites.json`.
+- **Reversibility:** High (docs only).
+
+### D-QA-022 · 2026-11-19 · qa-lead · SEC-TC-15 wording aligned with the per-actor denial budget (D-ARCH-142, D-SECT39-01, threat model v1.2 §10.4 H)
+- **Input:** D-SECT39-01 "Routed" (SEC-TC-15 wording in `security-test-cases.md` → qa-lead, per D-ARCH-142), relayed by the orchestrator.
+- **Decision:** the SEC-TC-15 row now states the case that TASK-041 must pass. N+2 denials by one Viewer in one 60 s window give:
+  - N individual `PERMISSION_DENIED` entries with no `aggregated` key;
+  - one aggregated entry for the crossing request, whose stored `details` deep-equal the closed set {`required_permission`, `aggregated: true`, `threshold`, `window_seconds: 60`, `window_ends_at`}, with no `count`;
+  - 429 `RATE_LIMITED` with `Retry-After` / `RateLimit-*` for denials N+1 and N+2, and no write for N+2;
+  - `suppressed_in_previous_window` = 1 on the first denial of the next window.
+
+  The budget is keyed by organisation and actor, never by IP. The old wording ("≤ N entries plus a summary entry") left the key and the entry shape open. The `details` deep-equal is the redaction tripwire that D-SECT39-01 item 2 names.
+- **Unchanged:** ID, type, suite `abuse`, lanes, gated story, placement; the adopted count (67) and the manifest.
+- **Applied in:** `docs/05-quality/tests/security-test-cases.md` (row and amendment line).
+- **Reversibility:** High (docs only).
+
+### D-ARCH-159 · 2026-11-19 · principal-architect · PR64-SEC-04: bounded queue retention under `noeviction` — failed jobs 7 days / newest 1,000 per queue, dead-letter records 14 days / newest 2,000 per dead-letter queue, trimmed by the consumer at each record write and by the hourly `queue-retention` sweep of TASK-039 (ADR-0013 amendment 3 items 8–11, 15, 16)
+- **Trigger:** PR #64 security record PR64-SEC-04 (LOW, CWE-770, T-77), routed to principal-architect by D-ORCH-132 and due before TASK-039 is dispatched (D-SD-001 item 7; STATUS dispatch plan). Under `maxmemory-policy noeviction` Valkey removes nothing by itself, and TASK-035 kept every failed job and every dead-letter record without limit on the instance that also holds the api's session and rate-limit keys.
+- **Decision (the exact bounds):**
+
+  | Set, per named queue | Age | Count (newest kept) | BullMQ form |
+  |---|---|---|---|
+  | Completed jobs (unchanged) | 24 hours | 10,000 | `removeOnComplete: { age: 86400, count: 10000 }` |
+  | Failed jobs | 7 days | 1,000 | `removeOnFail: { age: 604800, count: 1000 }` |
+  | Dead-letter records in `<queue>-dead` | 14 days | 2,000 | none: trimmed by the platform |
+
+  1. **Constants.** `COMPLETED_RETENTION`, `FAILED_RETENTION` and `DEAD_LETTER_RETENTION`, exported from `@platform/shared/queues`. They are constants, not environment configuration, because the memory budget and the alarm threshold of D-ARCH-160 are derived from them. A change is an ADR-0013 amendment.
+  2. **Failed jobs.** `removeOnFail: FAILED_RETENTION` replaces `false` in `jobOptions`. Every Job Scheduler template carries both bounds, and every consumer `Worker` sets them as its defaults, which BullMQ applies to a job that carries no option of its own. BullMQ trims the failed set in the script that marks a job failed, so the count holds at every moment.
+  3. **Dead-letter records, who trims them: TASK-039, in two places.**
+     - The consumer, at each record write: above 2,000 waiting records it removes the oldest surplus with `clean(0, surplus, 'wait')`. It never calls with a limit of 0, which BullMQ reads as "no limit".
+     - The hourly housekeeping job `queue-retention` (the first housekeeping job; a singleton through its Job Scheduler): for every named queue `clean(604_800_000, 1000, 'failed')` and `clean(86_400_000, 1000, 'completed')`, and on its dead-letter queue `clean(1_209_600_000, 1000, 'wait')` plus the count trim. A call is repeated while it removed exactly its limit, at most 10 times per queue and set in one run.
+  4. **Rule between the bounds.** The age and count of the records are never set below those of the failed jobs, so a retained failed job normally still has its record.
+  5. **Retention is the duplicate window (code review R1-n5).** While a job is retained BullMQ ignores an add with the same id: 24 hours after completion, up to 7 days after a final failure. Redrive is `job.retry()` while the failed job is retained, and a new enqueue of the same `kind` and `id` afterwards. The consequence for recurring keys is D-ARCH-161.
+- **Why these numbers:**
+  - **7 days** covers a weekend and the triage of an incident, and is no longer than the purge horizon of a published outbox event under either document that states one (see the open item in D-ARCH-161).
+  - **1,000**: a larger incident is replayed from PostgreSQL (outbox, saga sweeper, tracking planner), not job by job.
+  - **14 days**: the record is the operator's evidence and outlives the retry handle by a week. It stays below the 30-day log retention, and with the 7-day snapshot retention of the AWS design nothing in Valkey outlives the month in which an erasure request must be answered, so Valkey needs no erasure job (the concern of PR64-SEC-02).
+  - **2,000** is twice the failed bound for twice the age: at a steady rate both sets reach their count bound together (about 143 dead letters a day on one queue).
+- **Memory (estimate, not measured):** about 2 KiB per retained job or record. Failed jobs at most 9,000 (18 MiB) and records at most 18,000 (35 MiB) across the 9 queues: about 53 MiB, where there was no bound. With the unchanged completed bound (90,000, 176 MiB) the retained sets total about 229 MiB at every bound at once. TASK-039 quotes `MEMORY USAGE` of one failed job key and one record key in its PR body; a figure above 3 KiB comes back to me and is not a merge condition.
+- **Facts checked (read in `node_modules/bullmq` 6.7.0, nothing was run):**
+  - `KeepJobs` evaluates an age bound only when another job of the same queue finishes, which is why the sweep exists.
+  - `moveToFinished` adds the job to the failed set, then trims by age and by count.
+  - `getKeepJobs`: a job's own option wins over the `Worker` default.
+  - `Queue.clean`: `limit || Infinity`; for a list the script reads `LRANGE -limit -1`, and `addStandardJob` pushes new jobs with `LPUSH`, so those are the oldest entries.
+- **Not verified:** no test, container or Valkey ran (docs-only task). Whether BullMQ's scripts still run when Valkey is at its ceiling is unknown, so the design does not rely on a trim there.
+- **What it does not bound:** waiting and delayed jobs (the backlog alarm), and a party that can write `bull:*` (ACL users are the control; T-73, T-92). No committed state is lost when a failed job or record is removed: PostgreSQL stays the source of truth.
+- **Alternatives rejected:**
+  - **An age bound only on the failed set** (the sketch in the security record): a flood inside the window stays unbounded.
+  - **Count trimming of the records only in the hourly sweep:** a bad deploy that fails a relayed backlog can dead-letter 100,000 jobs within minutes.
+  - **Refusing new records at the bound (keep the oldest):** the newest failures would have no record while the failed set keeps the newest jobs, and a full dead-letter queue would hide the next incident for up to 14 days.
+  - **One age for both sets:** 7 days loses the evidence when the retry handle goes; 14 days keeps ids blocked for re-enqueue twice as long.
+  - **30 days for the records** (the log retention): backup copies would pass the month of an erasure request.
+  - **Environment configuration for the bounds:** a changed bound would silently leave the alarm threshold and the budget behind.
+  - **Lowering the completed count now:** outside PR64-SEC-04. It is the recorded lever if a node proves too small.
+  - **A PostgreSQL dead-letter table:** a table, a migration and a tenancy class for an operational view; REQ-PLAT-013 asks for a dead-letter queue. It can be reconsidered with the M4 System health screen (EPIC-B-414).
+- **Applied in:** ADR-0013 (§1 and §2 notes, amendment 3), data-model §10.5 (one row), platform.md §4.3 (note), the TASK-039 card (`plan-data.mjs`; plan regenerated: 294 tasks, 82 batches, 0 errors, 0 warnings; CSV diff = the TASK-039 and TASK-214 rows).
+- **Owed by others:** security-analyst may cite the amendment in the T-77 mitigation column at the next threat-model revision; PR64-SEC-04 closes when TASK-039 merges.
+- **Reversibility:** High (three constants, one trim, one sweep).
+
+### D-ARCH-160 · 2026-11-19 · principal-architect · Queue and Valkey alarms for TASK-214: `QueueDeadLetterNew`, `QueueDeadLetterDepthHigh` (≥ 1,600), `ValkeyMemoryHigh` (≥ 70 %), `ValkeyMemoryCritical` (≥ 85 %); the implemented gauge names are canonical, a dead-letter counter joins them, and Compose gets a 512 MiB Valkey ceiling (ADR-0013 amendment 3 items 12–14)
+- **Trigger:** PR64-SEC-04 remediation ("alarms on DLQ depth and Valkey `used_memory`"), plus the note in the same record that the implemented gauge names differ from platform.md §8.2. TASK-214 needs names and thresholds it can implement.
+- **Decision:**
+  1. **Metric names.** `platform_queue_jobs{queue,state}` and `platform_queue_dead_letter_jobs{queue}` (TASK-035) are canonical. The `bullmq_queue_*`, `bullmq_dlq_depth` and `bullmq_oldest_waiting_age_seconds` names of platform.md are withdrawn. New: the counter `platform_queue_dead_lettered_total{queue}` (TASK-039; every queue's series at 0 from worker start), and the gauges `platform_queue_oldest_waiting_age_seconds{queue}`, `platform_valkey_memory_used_bytes` and `platform_valkey_memory_max_bytes` (TASK-214). The worker reads the memory from `INFO memory`: its ACL user has `+info`, the api user has not.
+  2. **Alarms (Prometheus rules of the Compose `observability` profile; labels `severity` and `runbook`):**
+
+     | Alarm | Condition | For | Severity | Runbook |
+     |---|---|---|---|---|
+     | `QueueDeadLetterNew` | `sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0` | none | page for `booking` and `payments`, ticket for the other queues | RB-07 |
+     | `QueueDeadLetterDepthHigh` | `platform_queue_dead_letter_jobs` ≥ 1,600 on a queue (80 % of the 2,000 bound) | 5 min | page | RB-07 |
+     | `ValkeyMemoryHigh` | `used_memory` / `maxmemory` ≥ 0.70 | 10 min | ticket | RB-06 |
+     | `ValkeyMemoryCritical` | the same ratio ≥ 0.85 | 5 min | page | RB-06 |
+
+  3. **Ceiling.** Compose adds `--maxmemory ${REDIS_MAXMEMORY:-512mb}` to the `redis` command (TASK-214). 512 MiB is the memory of the smallest planned node (cache.t4g.micro, minimal staging). The alarm levels are then 358 MiB and 435 MiB locally.
+  4. **Start-up check (ADR-0013 §9, unowned until now).** At worker start `maxmemory_policy` must be `noeviction` or the worker refuses to start; a `maxmemory` of 0 logs a WARN outside `APP_ENV=test`. Owner TASK-214, with the gauges (the same `INFO memory` read).
+  5. **Renderer.** The in-house text renderer of TASK-035 stays until TASK-214 brings `@prometheus-io/client` to the worker (ADR-0017 amendment 1). Names and label sets are the contract and do not change with that move.
+  6. **Card.** TASK-214 gains the alarm line, `compose.yaml` and `metrics.ts` in its files, the locks `infra-compose` and `worker-queues`, and the dependency TASK-039 (the counter). No lock is shared in batch 7.8.
+- **Why:**
+  - **A counter for "new dead letters".** The depth is now bounded and trimmed, so one dead letter and one trimmed record in the same window cancel out on a gauge.
+  - **Two memory levels.** At 100 % Valkey refuses writes, and the queues, refresh-token rotation and rate limits stop together. 70 % is the existing platform.md threshold; 85 % pages while there is still room to act.
+  - **A ceiling.** Without one there is no percentage, and the failure is the memory of the host (D-ORCH-130 shows what that costs here).
+  - **Zero cloud budget.** Everything is local: the worker's own `/metrics`, Prometheus in the existing Compose profile, no exporter image, no new credential. At M5 the same four alarms map to CloudWatch (EMF queue metrics; ElastiCache `DatabaseMemoryUsagePercentage`), which this run does not build.
+- **Alternatives rejected:**
+  - **Renaming the implemented gauges to the platform.md names:** code and test churn for names that name the library.
+  - **A redis_exporter container:** a new image and a new ACL user for two numbers the worker can already read.
+  - **Alarming on the change of the depth gauge:** misses a dead letter whenever a trim lands in the same window.
+  - **A standing "depth > 0" alarm:** it would fire for up to 14 days and teach operators to delete evidence to clear it.
+  - **The ceiling and the start-up check on TASK-039:** it keeps the critical-path task smaller, and the alarm and its denominator land together.
+- **Applied in:** ADR-0013 amendment 3 (items 12–14; §8 and §9 notes), platform.md §2.2, §5.4, §5.5, §8.2 and §8.5, the TASK-214 and TASK-039 cards.
+- **Not verified:** the PromQL was written, not run; TASK-214 pins it with a lane A test.
+- **Reversibility:** High (names are fixed before any consumer of them exists; thresholds are rule data).
+
+### D-ARCH-161 · 2026-11-19 · principal-architect · ADR-0013 §1/§2 spellings (`<queue>-dead`, job id `<kind>.<id>[.<step>]`) and the rule for recurring job keys: `tracking_poll.<schedule_id>.<occurrence>` (ADR-0013 amendment 3 items 7 and 11)
+- **Trigger:** PR #64 code review (§3 row 01, §5 "ADR-0013 §1/§2 spelling") routed by D-ORCH-132; D-TASK035-01, -02 and -07 (accepted by D-ORCH-131 and D-ORCH-134).
+- **Decision:**
+  1. **Spellings, corrected in place in ADR-0013 §1 and §2.** The dead-letter queue of a queue is `<queue>-dead` (no named queue may end in `-dead`). A job id is `<kind>.<id>` or `<kind>.<id>.<step>`, for example `outbox_event.<event_id>` and `saga.<saga_id>.<step>`. A dead-letter record id is `<job id>.dead.<attempts>`. Reason: BullMQ 6 refuses `:` in a queue name, and in a custom id unless it has exactly three parts.
+  2. **Other documents** that still show a `:` form (ADR-0014 "Saga model", ARCHITECTURE.md §7.5, data-model §6.3, api/README §12) read as the forms above and are corrected at their next edit. api/README is a lane B tooling input and is not edited in a docs commit.
+  3. **Recurring keys carry their occurrence as `<step>`.** Retention is the duplicate window (D-ARCH-159 item 5). The tracking poll of one shipment repeats every 15 minutes to 4 hours (DR-B19), so `tracking_poll.<schedule_id>` would be ignored by BullMQ for 24 hours after each completed poll. The id is `tracking_poll.<schedule_id>.<occurrence>`, the occurrence derived from the due time of that poll; TASK-204 chooses the form. The old §2 example `tracking:<shipment_id>` is withdrawn. Jobs produced by a Job Scheduler have BullMQ's own id per occurrence and are not affected.
+- **Alternatives rejected for item 3:**
+  - **`removeOnComplete: true` on `tracking-poll`:** a failed poll would still block the key for 7 days, and the queue would leave the common retention rule.
+  - **BullMQ's `deduplication` option:** a second duplicate mechanism beside the deterministic id.
+  - **A shorter retention for that one queue:** any window longer than 15 minutes still drops polls.
+- **Card line for the next plan fold (TASK-204, not applied here):** "RECURRING JOB ID (ADR-0013 amendment 3 item 11; D-ARCH-161): the poll job id is tracking_poll.<schedule_id>.<occurrence>, the occurrence derived from the due time of that poll (1 to 40 characters of [a-z0-9_-]); an id without it is ignored by BullMQ while the previous poll of the same schedule is retained (24 hours completed, 7 days failed); test: two consecutive due polls of one shipment both run, and a second enqueue of the same occurrence is one job".
+- **Open items found while writing this, not decided here:**
+  1. **Outbox purge horizon.** ADR-0004 §6 and ADR-0013 §1 say published events are deleted after 30 days; data-model §6 and §10.5 say 7 days. No decision records the change. Mine to rule before the outbox purge is built (TASK-043 or the housekeeping task that owns it).
+  2. **Scheduler-produced jobs.** They carry BullMQ ids, and the `housekeeping` and `audit-maintenance` queues accept no payload kind until TASK-039 defines one (D-TASK035-05). The job-identity check of PR64-SEC-07 on the same card is written for `<kind>.<id>` ids, so the developer's proposal has to say how a scheduled job is identified; security-analyst reviews it.
+  3. **US-010 still describes payload v1** (PR64-SEC-10, product-manager): two of its scenarios expect `org_id` and `actor_id` in the payload, and TASK-039 is specified from them.
+  4. **The dead-letter replay command** of api/README §12 has no owning task.
+- **Reversibility:** High (documentation; the id rule binds a task that has not started).

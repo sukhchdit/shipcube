@@ -4429,6 +4429,7 @@ Retention periods are data in the compliance packs (`RETENTION` section, NFR-PRI
 | Refresh tokens | delete 7 days after expiry/revocation | same |
 | Idempotency keys | delete after 24 h | same |
 | Outbox events / processed events | delete 7 / 30 days after publish/processing | same |
+| BullMQ jobs in Valkey (not PostgreSQL; added 2026-11-19, ADR-0013 amendment 3, D-ARCH-159) | per queue: completed jobs 24 h / newest 10,000; failed jobs 7 days / newest 1,000; dead-letter records 14 days / newest 2,000 (BullMQ, the consumer and the hourly `queue-retention` sweep of TASK-039) | same |
 | Login attempt counters | delete 30 days after last failure | same |
 | Unclaimed expired guest quotes | kept (DR-B14: no deletion during the run) | delete after 90 days (OI-17) |
 | Drafts | CANCELLED after 30 days idle (REQ-ACCT-004); rows kept | anonymise after pack period |
