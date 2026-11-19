@@ -221,3 +221,105 @@ Same host rule as round 1: a `git archive` extract of `29be7be` with a `node_mod
 3. The security-analyst sign-off on the DR-A14 policies, the standard-columns guard and the D-ARCH-154..156 controls.
 4. The mutant checks of rulings 5.4 are reported in the PR body. This review supplies them: 7 of 7 killed (R2.1).
 5. Squash merge.
+
+---
+
+# Round 3: fix cycle 3 at `d4de55d` (delta from `29be7be`)
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Head | `d4de55d` (local, not pushed) = `29be7be` + `b700a79` (merge of main `1d31ea8`: #68, #69 and records) + `d4de55d` (9 files, +114 / -11) |
+| Trigger | The first PostgreSQL 18 lane-B run of `29be7be` (`failed-runs-orphan/TASK-037-29be7be.log`) failed 4 tests. The integration run was 383/386; `organisations.int.test.ts` passed in full. |
+| Main | `370a66b`, ahead of `1d31ea8` by one review record only. `git merge-tree origin/main d4de55d` is clean. |
+
+## R3 verdict
+
+**VERDICT: APPROVED_WITH_NITS** (0 BLOCKER, 0 MAJOR, 0 MINOR, 3 new NIT). This is still **conditional on lane B passing on `d4de55d`** (re-queued). The R2 merge conditions stand.
+
+**SUMMARY**
+- Each of the four lane-B failures has the root cause the developer names. I confirmed each one against the log, the code, or a negative control on PGlite.
+- Each fix is the narrowest one that keeps the test's intent. The shadow-init change restores fidelity to the real database, and F-03 is still pinned exactly.
+- The PR65-SEC-01 index change is pinned by a new case that kills the old-index mutant.
+
+## R3.1 Root causes of the four PostgreSQL 18 failures
+
+| # | Failing test (log line) | Root cause | Verified by me | Fix (decision) |
+|---|---|---|---|---|
+| 1 | C9 `enum-like CHECK equals its TypeScript list` (`c01-c12.int.test.ts:887`; log :175-266) | The C9 query reads every enum-like CHECK in the schema. The migration adds 12 IN-list CHECKs that are not in `ENUM_CHECKS`. | The 12 entries added at `c01-c12.int.test.ts:304-320` are exactly the 12 "Received +" blocks of the log, value for value. They agree with data-model §3.1/§3.2. The new unit pin's regex returns `[BUSINESS_CUSTOMER, INDIVIDUAL, OPERATOR, PARTNER]` and `[ACTIVE, INVITED, REMOVED, SUSPENDED]` from the migration text (`r3-c9.mjs`). | D-TASK037-30 |
+| 2 | C15 (a) probe (`c15-std-columns-guard.int.test.ts:233`; log :268-300) | The probe test counted every in-scope table. Since this PR, the committed schema has 5 guarded STD tables, so the probe saw `c15_probe` plus 5. | Log. The committed-state test above it already asserts those 5 tables exactly: scope equals the manifest set, there is one trigger per table with full shape, and nothing sorts after the guard. | D-TASK037-28 |
+| 3 | SPK-08 F-02 `two consecutive migrate diff runs` (`shadow-init.int.test.ts:105`; log :303-326) | `shadow-init` stripped every GRANT, including `GRANT USAGE, CREATE ON SCHEMA platform TO platform_definer` (01-schemas.sql:16). The migration's `SET ROLE platform_definer; CREATE FUNCTION platform.app_is_operator()` then fails with 42501 in the shadow. | The developer's `fc3-shadow.mts` (shadow owned by the migrator, `RESET ROLE` returns to the migrator, two rounds). **Negative control** `29be7be`: `42501 permission denied for schema platform` on `CREATE FUNCTION platform.app_is_operator()`. **Head** `d4de55d`: 59 init statements (52 before, so 7 schema grants are kept), the migration applies, and both rounds pass. | D-TASK037-29 |
+| 4 | DR-A14 own_read (`cross-tenant.int.test.ts:437`; log :631-660) | The committed layer now seeds `memberships` with `user_id = tenant.actor` (`tests/generated/rls/database.ts:179`), so `(TENANT_B.org, TENANT_B.actor)` already holds a live row. Planting the same pair hits `ux_memberships__org_user_live`, which a `replica` session still enforces. | Code read (`database.ts:179`, `cross-tenant.int.test.ts:402`). | D-TASK037-31 |
+
+## R3.2 Do the fixes keep the intent of each test?
+
+- **C9 (D-TASK037-30): accepted.**
+  - The 12 lists are pinned from the data model, as the audit lists already are.
+  - The TypeScript tie that C9 names is kept wherever a TS list exists. A new unit test compares `ORG_TYPES` and `WRITABLE_MEMBERSHIP_STATUSES` (+ INVITED) with the migration CHECK text, because prisma/tests may not import the module.
+  - The users enums have no TS list yet; the identity module arrives with TASK-049.
+  - The drift negative (`ck_roles__scope`) is unchanged.
+- **C15 (a) probe (D-TASK037-28): accepted, with no loss of coverage.**
+  - The probe still asserts the planted guard's exact shape, the named `c15_unguarded`, and the doubled trigger.
+  - Filtering `unguarded` to the planted tables is required: `guarded` is filtered too, so without it the committed guarded tables would be reported as unguarded.
+  - An unguarded committed table is still caught by the committed-state test, which compares scope with the manifest set and triggers with scope.
+- **Shadow-init (D-TASK037-29): accepted. F-03's purpose is kept, and fidelity improves.**
+  - F-03 exists so that the shadow initialisation holds only what the migrator can execute and nothing the differ would see.
+  - In the shadow, the migrator owns `platform` (re-created without AUTHORIZATION) and `public` (Prisma's reset), so it can execute these grants. Prisma does not diff privileges.
+  - The bootstrap lane's grants make the shadow *match* production. Stripping them made the shadow stricter than a real database, which is exactly what failed here.
+  - `SCHEMA_GRANT` is anchored and accepts only `USAGE`/`CREATE` on schemas. `WITH GRANT OPTION`, `GRANTED BY`, `GRANT ALL` and every `REVOKE` still fall to the strip list (new rows in `shadow-init.test.ts:79-81`).
+  - The F-03 test now requires the definer grant to be kept and **no other** GRANT (`shadow-init.test.ts:357-358`), so a widened keep list fails.
+  - Residual (R3-n2): whether the migrator owns `public` in the real PostgreSQL 18 shadow is proven only by lane B's `shadow-init.int.test.ts`.
+- **own_read (D-TASK037-31): accepted, and slightly stronger.**
+  - The planted foreign member is another user of B.
+  - The count `WHERE org_id = B` must still be 0, and it now also covers the seeded `(B, TENANT_B.actor)` row.
+  - The positive half (the actor's own membership in B gives 1) is unchanged.
+- **PR65-SEC-01 (D-TASK037-32): accepted.**
+  - `ux_membership_roles__membership_role_live` now leads with `org_id`, which also satisfies REQ-RLS-001.
+  - A role row of A that names B's membership while B holds that grant now fails the tenant-bound key (23503) instead of the live-grant index (23505). The 23505 was an existence oracle.
+  - Within A, a duplicate live grant still gives 23505.
+  - AP-ORG-09 lookups always run under RLS (`org_id = app_org_id()`), so the leading column costs nothing.
+  - The **old-index mutant** gives `foreignWithLiveGrant = 23505` and is killed by the new `liveGrantIndexScope` case.
+
+## R3.3 What I verified myself
+
+Host rule: a `git archive` extract of `d4de55d` with a `node_modules` junction to the worktree; the worktree was not modified. Scripts are in the scratchpad under `pr65/probe/`: `r3-cases.mts`, `r3-c9.mjs` and `fc3-shadow.mts`.
+
+| Check | Result |
+|---|---|
+| Merge `b700a79` | `git merge-tree --write-tree` of its parents equals the commit: no conflicts, no hand edits. `git diff 1d31ea8 d4de55d` equals `git diff 1d31ea8...d4de55d` (md5). The PR's README §11 row and main's TASK-292 rewrite of §11/§18 are disjoint hunks. |
+| TASK-292's new domain-error scan (`tests/generated/error-catalogue.test.ts`) | Every literal `new OrganisationRuleError('<CODE>')` in the module is either catalogued (ORG_TYPE_NOT_ALLOWED, ROLE_NOT_ALLOWED_FOR_ORG_TYPE) or listed under "Codes that are not HTTP problem codes" (MEMBERSHIP_STATUS_NOT_WRITABLE, README line 394). The not-found errors carry lower-case messages, which the SCREAMING_SNAKE regex does not match. |
+| Replay of all 19 `cases.ts` cases on PGlite 17.5 (the 18 from round 2 + `liveGrantIndexScope`) | Every result equals the test's assertion. |
+| Mutant: restore the old `(membership_id, role_id)` index | Killed (`foreignWithLiveGrant` becomes 23505). |
+| Shadow replay (`fc3-shadow.mts`) | `29be7be` fails 42501; `d4de55d` passes 2 rounds. |
+| `tools/db/lint-migrations.ts` | No findings. |
+| Prettier on the changed non-SQL files | Clean. |
+
+**Not re-run (host rule):** Jest. That covers the unit tests (`shadow-init.test.ts`, the C9 unit pin) and all PostgreSQL 18 suites. Lane B on `d4de55d` is the evidence.
+
+## R3.4 Rulings on D-TASK037-28..32
+
+| Decision | Ruling |
+|---|---|
+| 28 (C15 (a) probe limited to the tables it plants) | **Accepted** (R3.2). |
+| 29 (shadow-init keeps the schema-scoped USAGE/CREATE grants) | **Accepted** (R3.2). Root cause reproduced with a negative control. |
+| 30 (C9 lists pinned from the data model, plus a TS pin) | **Accepted.** |
+| 31 (own_read plant uses another member of B) | **Accepted.** |
+| 32 (PR65-SEC-01: the index leads with org_id, plus a 23503 test) | **Accepted.** Mutant killed. |
+
+## R3.5 New findings
+
+| ID | Severity | File:line | Issue | Fix or route |
+|---|---|---|---|---|
+| R3-n1 | NIT | data-model §3.2 AP-ORG-09 | The data model still gives `ux_membership_roles__membership_role_live ON (membership_id, role_id)`. The migration now has `(org_id, membership_id, role_id)` (PR65-SEC-01). | Architect, at the next fold, together with R2-n1. |
+| R3-n2 | NIT (residual) | `tools/db/shadow-init.ts:127-138` | The kept grants assume the migrator owns `public` and `platform` in the real shadow. This was proven on PGlite with the ownership set explicitly, not on PostgreSQL 18. | Lane B `shadow-init.int.test.ts` (F-02) on `d4de55d` is the proof. If it fails, the fix is in the shadow creation, not in stripping the grants again. |
+| R3-n3 | NIT (process) | `tools/db/shadow-init.ts` | This PR now edits a `tools/db` file, and TASK-293 (the TASK-290-F tokenizer work) holds the `tools/db` lock and is due before the next migration PR. | Orchestrator: sequence TASK-293 after this merge, or rebase it onto this merge. The hunks are disjoint from `sql-text.ts`. |
+
+R2-n1 to R2-n5 are carried unchanged. R2-n5 (merge main) is closed by `b700a79`.
+
+## R3.6 Merge conditions
+
+1. Lane-B PASS on `d4de55d` (or the final head): the four suites above plus everything else in the evidence run.
+2. A full lane-A run on the pushed head, with lint, format, typecheck, unit and build actually executed.
+3. Security sign-off. D-SEC-PR65-01 is PASS_WITH_CONDITIONS at `29be7be`; the security analyst confirms PR65-SEC-01 at the new head.
+4. The mutant reports in the PR body: 7/7 (round 2) plus the old-index mutant (round 3).
+5. Squash merge.
