@@ -4480,3 +4480,51 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   3. **US-010 still describes payload v1** (PR64-SEC-10, product-manager): two of its scenarios expect `org_id` and `actor_id` in the payload, and TASK-039 is specified from them.
   4. **The dead-letter replay command** of api/README §12 has no owning task.
 - **Reversibility:** High (documentation; the id rule binds a task that has not started).
+
+### D-SECPR075-01 · 2026-11-19 · security-analyst · TASK-075 (CarrierAdapter contract, capability guard, normalisation and egress contract; branch `feat/TASK-075-carrieradapter-contract-carriercontext-capability-guard`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `c2eaa47` (record `docs/05-quality/security/PR-pending-TASK-075-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-075-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** Static review plus single-process Node 24 probes on type-stripped `git archive` extracts of `c2eaa47` and `5145d52`. No npm, Jest or Docker, and nothing was run in the PR worktree.
+- **The record is a merge condition.** The PR changes one owned path, `tools/lint/carrier-wire-boundary.test.ts` (`/tools/lint/`). Main's classifier also selects the hosted `security-integration` job, through `packages/config/src/carrier-environment.test.ts`.
+- **Held:**
+  - **Egress validation.** 33 origin and 17 prefix shapes were probed. IP literals in six notations, IPv6, wildcards (also `%2A`), IDN, case, ports, credentials, TAB/LF, dot segments, `%` and `//` are refused. The derivation reads no configuration, fails closed without `EGRESS` (inherited names too), and refuses production accounts and rules outside `APP_ENV=production`.
+  - **`packages/config`** refuses `CARRIER_<X>_ENVIRONMENT=production`, and 8 other non-`sandbox` spellings, under all four APP_ENVs.
+  - **CWE-209 and CWE-117.** `CarrierError` messages are canonical and `toJSON` is the safe subset. Unknown codes are logged in a safe shape only.
+  - **Prototype safety.** Mapping lookups are `Map`s (15 of 15 inherited names unresolved).
+  - **Labels.** Bytes only: URL and base64 strings are refused, PDF formats need `%PDF-`, and nothing in `src` does I/O.
+  - **The guard** refuses unsupported operations before the context check, with zero adapter calls.
+- **New findings:**
+  - **PR075-SEC-01 (LOW, CWE-367).** The guard validates one read of the context and passes the caller's live object to the adapter. A getter, a Proxy or a mutation after the adapter's first `await` gives the adapter `production` where the guard checked `sandbox`, so `egressBase` yields the production base.
+    - **Fix.** Snapshot through `createCarrierContext`, then pass the frozen copy. Validated on a scratch copy; it also closes code review R1-n5.
+  - **PR075-SEC-02 (LOW, CWE-183).** Tier separation on a shared origin.
+    - (a) `egressIssues` accepts a sandbox list that covers production entries: DHL `/mydhlapi/` or `/`, FedEx or UPS production hosts copied into `sandbox`. Such a rule becomes a sandbox-tier rule that neither the start-up refusal nor TASK-113's tier check sees, so production endpoints are reachable before G4. A cross-tier check was validated: 6 valid tables give 0 issues, 4 misfiled tables give 1 each.
+    - (b) Code review S1: a production context can reach `/mydhlapi/test/` under ADR item 6's tier equality and item 8's prefix containment.
+    - (c) The `EGRESS` tables are not security-owned paths.
+  - **PR075-SEC-03 (LOW, CWE-20).** ZPL content is not checked: PNG, GIF, JPEG, PDF, HTML and EPL bytes pass, and `labels.test.ts` pins that. The guard passes the labels from `createShipment`/`recoverLabel` unchanged (a `PNG` format, raster bytes as PDF, a URL object).
+    - **Fix (a).** A ZPL shape check (validated on 11 shapes).
+    - **Fix (b).** The guard re-checks labels. It must never throw after `createShipment` succeeds: a `CarrierContractError` there would be classified local and non-ambiguous (D-TASK075-03) and retried into a duplicate label. Drop the bad label instead, and leave the missing format to `recoverLabel`.
+  - **PR075-SEC-04 (LOW, CWE-532).** Raw carrier text reaches logs: through `normaliseError`'s verbatim `cause` (the real platform logger writes it under `err.cause.message`, and `util.inspect` shows it too), and through non-`CarrierError` failures, which the guard passes unchanged. This is the security rating of code review R1-m5 and R1-n7.
+    - **Fix.** `safeCause` = `{ name, code? }` in this PR. TASK-132 converts unknown failures.
+  - **INFO items:**
+    - PR075-SEC-05: runtime-invalid code, carrier or operation kept by `CarrierError`.
+    - PR075-SEC-06: the `EGRESS` rule schema is open, so unknown keys reach the allow-list.
+    - PR075-SEC-07: unbounded warn lines per carrier answer.
+    - PR075-SEC-08: `registry.get` echoes the caller's code.
+    - PR075-SEC-09: before G4, "sandbox only" holds for configuration but not for `carrier_accounts` rows under `APP_ENV=production`.
+- **Rulings:**
+  1. **Tier matching (to TASK-113).** `egressAllowed` decides the tier by the most specific matching entry across all tiers of the origin (an exact path beats a prefix, a longer prefix beats a shorter one), and refuses when that tier differs from `ctx.environment`. SEC-TC-66 gains three rows: production to `…/mydhlapi/test/rates` blocked, sandbox to `…/mydhlapi/rates` blocked, and an exact path shared by both tiers allowed for both.
+  2. **Ambiguity.** A `CarrierContractError` is local and non-ambiguous only when it is thrown before the adapter is reached. Nothing thrown after a successful `createShipment` may carry that class.
+  3. **Ownership.** `/packages/carriers/src/egress.ts` and `/packages/carriers/src/adapters/*/egress.ts` should be security-owned. Orchestrator, in a CODEOWNERS-only PR with a security record, before TASK-135 merges.
+- **Binding.** The single `Head` row names `c2eaa47`. Simulation with main's real checker: 10 of 10 as expected.
+  - Pass: the record at the head; the merge ref with the record committed on main; a later commit to `packages/carriers` only.
+  - Fail: no record; `eslint.config.mjs` or the owned lint test changed after the head; the placeholder name; a later FAIL verdict; a `Head` row naming the base or a main commit.
+- **Conditions:**
+  - **C1.** Lane B and the hosted `security-integration` job at the pushed head.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A security delta round on the fix-cycle head. The code review is CHANGES_REQUESTED, and the fixes of SEC-01/03/04 and R1-M1 sit in the reviewed controls. The checker voids the binding by itself only if an owned path changes, for example `eslint.config.mjs` for R1-m2.
+- **Routed:**
+  - **This PR's fix cycle, preferred:** PR075-SEC-01, -02 (a), -03, -04 (a), -05 to -08. If not fixed there, they are due before the first real adapter merges (TASK-135/139/140).
+  - **TASK-113:** PR075-SEC-02 (b) and ruling 1.
+  - **TASK-132:** PR075-SEC-04 (b).
+  - **Orchestrator:** PR075-SEC-02 (c), ruling 3.
+  - **TASK-128 and TASK-113:** PR075-SEC-09.
+- **Reversibility:** High (a review record; the rulings bind tasks that have not started).
