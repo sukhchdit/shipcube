@@ -3891,3 +3891,38 @@ Format: ID · date · who · decision · why · alternatives · reversibility
     - PR65-SEC-05: evidence binding (above).
 - **Why:** COORD-03 made the security sign-off a merge condition. The migration becomes immutable at merge, so the ruled controls were probed on the database, not only read. PGlite is PostgreSQL 17.5, hence C1.
 - **Reversibility:** High (review record; the LOW fixes are an index and a trigger clause).
+
+### D-SECPR287C1-01 · 2026-11-19 · security-analyst · TASK-287 part 287-C1 (policy PR, branch `ci/TASK-287C1-policy`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `e8b9414` (record `docs/05-quality/security/PR-pending-TASK-287C1-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-287C1-security-review.md` once the PR exists, D-ORCH-136)
+- **Decision:** 0 Critical, High or Medium; 1 LOW (PR287C1-SEC-01) and 1 INFO (PR287C1-SEC-02).
+  - The record binds to `e8b9414` through its single `Head` row, and the evidence-only tip keeps that binding.
+  - Merge-ref simulation against main `370a66b`: 11 of 11 scenarios as expected, 4 pass and 7 controls fail. One of the failing controls is the placeholder name, so the rename is required.
+  - Host rule: static review plus single-process Node probes on `git archive` extracts; nothing ran in the PR worktree. A network outage interrupted the round; it was resumed from the uncommitted record.
+- **No gate is weakened.** The merge-base and head policies ran over 1,497 mutants: the PR #68 corpus of 1,229, plus 268 against the new rules. None is refused at the merge base and accepted at the head. The live `ci.yml`, `lane-c.yml` and `nightly.yml` give 0 findings under both policies. The code review's 1,866-mutant matrix agrees.
+- **Closed:**
+  - **PR62-SEC-01.**
+    - The action steps of the three ci.yml stage-2 jobs have exactly `{name, uses, with}`, plus fast-lane's engine-cache `if: env.CODE == 'true'` exactly: 71 of 71 key additions and 4 of 4 `if:` edits are refused.
+    - Each action is pinned to its exact commit: 16 of 16 foreign commits are refused.
+    - I resolved the upstream tags with `gh api`: checkout v7.0.1 is `3d3c42e5…`, setup-node v7.1.0 is `949feb24…` and cache v6.1.0 is `55cc8345…`. All three are lightweight tags in the upstream repositories, so none is a fork-network commit.
+  - **PR287B-SEC-02.** The jobs have exact key sets and `runs-on: ubuntu-24.04`: 38 job mutants are newly refused.
+  - **PR287B-SEC-01.** An absent `FAST_LANE_*` entry now gives `fast-lane outputs missing (<keys>)`.
+- **Run-full refinements:** `failedOnCode`, and missing steps ignored in the voided-run check. Over 22 lookup scenarios the code proofs are identical to the merge base and there are at most 40 API calls. Run-full fires in 6 more cases (a cancelled, light or unreadable newer run; a voided run lacking a now-required step); that only turns a light, BLOCKED push into a full run, never fewer gates.
+- **New findings:**
+  - **PR287C1-SEC-01 (LOW, CWE-693/CWE-1023, A08:2021). The cache-hygiene rule (D-SEC-PR57-02) accepts fixes that `actions/cache` ignores.**
+    - Why: `@actions/cache` 6.x globs `path:` with `implicitDescendants: false` and archives each matched directory recursively (`tar --files-from`). So `node_modules` or `node_modules/.cache` plus `!node_modules/.cache/shipqube-test-locks` still restores the locks. The rule passes that form, and its message and `CI-CD.md` both recommend it.
+    - Evidence: with the real `@actions/glob` 0.6.1, 13 of 29 forms restore the locks without a finding. 6 are exclusion forms. 7 are spellings, which the code review's R1-n2 mostly covers: the whole workspace, `${{ env.* }}` and absolute paths, `?` and `[...]` globs.
+    - Exposure: none today, because no live cache covers the directory.
+    - Fix: fail closed. Any include line that covers the lock directory or an ancestor is a finding, with no exclusion escape. Treat absolute, expression, `?` and `[` lines as covering. Correct the message and `CI-CD.md`.
+    - Due: in this cycle (preferred; a delta security round), or in the policy PR before 287-C2, and in any case before any workflow caches `node_modules` or `node_modules/.cache`. Owner: devops-engineer.
+  - **PR287C1-SEC-02 (INFO, CWE-829, A08:2021). Action commits in `lane-c.yml` and `nightly.yml` are pinned by format only.** Both are `workflow_dispatch` only. Fix with 015-C: one repository-wide action-commit table. Until then, the record of a PR that changes a `uses:` line there checks the commit against the upstream tag. Owner: devops-engineer.
+- **Ratified (code review R1-n7(b)):** a security record satisfies D-ORCH-116 whether it sits on the PR branch or on main. The checker reads ci-gate's checkout of the test merge and binds by the `PR-<NNNN>-` name and the `Head` row, and the simulations of #62, #68 and this round pass with the record on main. Three conditions apply to a record on main:
+  1. It counts from the next `pull_request` event after it lands; a re-run keeps the old merge commit and still fails.
+  2. A placeholder name does not count.
+  3. Forgery stays the procedural residual of PR10-SEC-04: only the orchestrator or security-analyst commits records on main.
+- **Interim checks:** after this merges, the D-SEC-PR62-01 and D-SECPR287B-01 interim record checks end for ci.yml. The `uses:` upstream-tag check stays for `lane-c.yml` and `nightly.yml`.
+- **Merge conditions:**
+  1. Push `e8b9414` and the evidence-only commit as they are.
+  2. Follow the D-ORCH-136 order: open as a draft, rename the record on main, confirm the rename, then mark the PR ready.
+  3. A full lane A run, green in every step, with ci-gate MERGE-READY.
+  4. A passing lane-B `pr` run on `e8b9414`. The outage-time failure (network and timing tests only) is not evidence.
+  5. Any `tools/ci/**` or `.github/workflows/**` change after `e8b9414`, including a PR287C1-SEC-01 fix, needs a delta security round.
+- **Reversibility:** High (record and routing; the follow-ups are policy changes).
