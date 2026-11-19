@@ -64,3 +64,69 @@ export {
   type FieldClassification,
   type SchemaColumn,
 } from './classification/registry.js';
+// Integer minor-unit money (ADR-0009 §3, REQ-PRICE-002, DR-B11; TASK-076): the only arithmetic on minor units.
+export { CURRENCY_EXPONENTS, assertCurrencyCode, currencyExponent, isCurrencyCode } from './money/currency.js';
+export { MONEY_ERROR_CODES, MoneyError, isMoneyError, type MoneyErrorCode } from './money/errors.js';
+export {
+  BPS_PER_UNIT,
+  add,
+  allocate,
+  assertSameCurrency,
+  compare,
+  convert,
+  equals,
+  fromMajor,
+  isMoney,
+  isNegative,
+  isZero,
+  minor,
+  money,
+  mulRatio,
+  negate,
+  percentage,
+  sub,
+  sum,
+  toMajorString,
+  zero,
+  type Minor,
+  type Money,
+} from './money/money.js';
+export {
+  MAX_DECIMAL_EXPONENT,
+  MAX_DECIMAL_LENGTH,
+  ceilRatio,
+  compareRatio,
+  decimalRatio,
+  divideRatio,
+  multiplyRatio,
+  parseDecimal,
+  ratio,
+  roundHalfAwayFromZero,
+  type Ratio,
+} from './money/ratio.js';
+// Units and billable weight (ADR-0009 §4, DR-B05/B06, REQ-PRICE-004; TASK-076): shared by the API and the quote widget.
+export {
+  GRAMS_PER_POUND,
+  MILLIMETRES_PER_INCH,
+  SYSTEM_UNITS,
+  UNIT_SYSTEMS,
+  displayLength,
+  displayWeight,
+  normalisePackage,
+  toGrams,
+  toMillimetres,
+  type CanonicalPackage,
+  type LengthUnit,
+  type PackageEntry,
+  type UnitSystem,
+  type WeightUnit,
+} from './units/units.js';
+export {
+  DEFAULT_BILLABLE_WEIGHT_RULES,
+  billableWeight,
+  billableWeightRule,
+  type BillableWeight,
+  type BillableWeightRule,
+  type CarrierServiceWeightTerms,
+  type PackageWeights,
+} from './units/billable-weight.js';
