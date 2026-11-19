@@ -4162,3 +4162,27 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - data-model §8.3 and §4.6: principal-architect.
   - TEST-STRATEGY G3 count 64 → 67: qa-lead.
 - **Reversibility:** High.
+
+### D-ORCH-139 · 2026-11-19 · sdlc-orchestrator (session A) · PR #71 merged; TASK-293 as PR #72 after three fix cycles; flake ruling; routings
+- **PR #71 (TASK-291) merged** as `3663c4e` after a MERGE-READY full run with security-integration green. Lane B `20261119T1457Z_12d7873`: rls-cross-tenant 157, as on main.
+  - Code review r2 APPROVED_WITH_NITS (`550544e`); security r2 PASS_WITH_CONDITIONS (D-SECPR291-02). PR291-SEC-01 (duplicate headers) is fixed in-PR and also closes the same gap in the RBAC runner.
+  - Routed: code review R2-n1 (pin the allow-list exactly, not as a ceiling) and R2-n2/R1-m1 (ii) (the name-based loopback marker) → TASK-294 part 294-B. R1-n1..n3 → 294-B. PR291-SEC-02 (shim path) → the next touch of the shim.
+- **TASK-293 → PR #72**, code head `c618d8a`, three fix cycles (the maximum):
+  - fc1: code review R1-m1..m3 and NITs.
+  - fc2: security PR293-SEC-01, including a regression the fc1 linear scan had introduced, plus PR293-SEC-02 and PR65-SEC-05 (d).
+  - fc3: code review R3-M1, a rule-16 miss introduced by the fc2 E-string refusal; security confirmed it independently on PGlite.
+  - Each fix closed its finding; no escalation was needed.
+  - Lane B `20261119T1550Z_c618d8a` PASS: catalog 113 (min_tests ratchet confirmed), integration 403 with the new PR43-SEC-07 remainder case, rls-cross-tenant 157.
+  - Code review r4 APPROVED_WITH_NITS (`060c0a5`); security r2 PASS_WITH_CONDITIONS (D-SECPR293-02).
+  - D-TASK293-01..11 accepted as ruled by both reviewers. PR65-SEC-05 (d) is closed by this PR.
+- **Flake ruling:** `consumer.int.test.ts` [AT-US-009-04] failed once (lane B `20261119T1436Z_3183525`: the dead-letter reason read as `undefined`) and passed in every run before and since. It is ruled a timing flake in a test merged with PR #64, of the same race shape as PR #64 code review R2-n1 (assert only after `settledFailure`). It goes to TASK-039 (the `worker-queues` holder), with TASK-294 part 294-B as a fallback, due before G3. Any recurrence in lane B is re-run once and logged here.
+- **Routings from TASK-293:**
+  - PR293-SEC-03 → the R-ARCH-34 ruling before TASK-051 and the future error mapper.
+  - PR293-SEC-04 and code review R2-n1 → the next `tools/db` linter holder.
+  - data-model §8.3/§4.6 wording (rule 10 call site, lone CR, C16 (b), P9-CK) → principal-architect at the next fold.
+  - TEST-STRATEGY "64/64" → "67/67" (R2-n3) and acknowledgement of the `required-suites.json` / `security-test-cases.md` edits → qa-lead, on main after PR #72 merges.
+  - Optional for the architect: refusing CREATE CAST / CREATE AGGREGATE with writer functions under rule 14 (D-TASK293-10).
+- **Process:**
+  - Draft PRs may have no merge ref until GitHub builds one. Fetch merge refs with `-f`, because they are not fast-forwards. A missing merge ref is safe to mark ready, because GitHub then builds it from the current main.
+  - The queue's orphan-wait and retry rules were tightened today (D-ORCH-136, D-ARCH-158).
+- **Reversibility:** High.
