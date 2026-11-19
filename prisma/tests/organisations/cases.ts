@@ -1,9 +1,9 @@
 /**
  * The database cases of organisations.int.test.ts (TASK-037; US-061, US-062; REQ-ORG-001..004, DR-A05, DR-A06,
- * DR-A14; data-model §3.1, §3.2, §4.3, §7.6; PR26-SEC-03/04, D-ARCH-123, D-ARCH-151; SEC-TC-74; code review PR #65
- * R1-M2, R1-m1..m3, R1-n4). Each case takes a superuser client that is already inside a transaction the caller rolls
- * back, and returns what it observed; the test file asserts. Kept apart from Jest so the same statements can be
- * replayed on another PostgreSQL engine (D-TASK037-21).
+ * DR-A14; data-model §3.1, §3.2, §4.3, §4.7, §7.6; PR26-SEC-03/04, D-ARCH-123, D-ARCH-151, D-ARCH-154..156; SEC-TC-74;
+ * code review PR #65 R1-M2, R1-m1..m3, R1-n4). Each case takes a superuser client that is already inside a
+ * transaction the caller rolls back, and returns what it observed; the test file asserts. Kept apart from Jest so the
+ * same statements can be replayed on another PostgreSQL engine (D-TASK037-21).
  *
  * Every statement is a single command (`pg` sends a parameterised query as one prepared statement) and every
  * parameter is used with one type. Synthetic fixture rows go in as the superuser with `session_replication_role =
@@ -98,19 +98,17 @@ export interface World {
   readonly membershipA: string;
   /** userA's membership of B. */
   readonly membershipAinB: string;
+  /** userB's membership of B. */
+  readonly membershipB: string;
+  /** The REMOVED membership of A (its user is a member of nothing else). */
+  readonly membershipRemoved: string;
 }
 
 /** Two BUSINESS_CUSTOMER organisations; userA ACTIVE in A and B, userB ACTIVE in B only, a REMOVED member of A. */
 export async function world(client: Client): Promise<World> {
-  const [orgA, orgB, userA, userB, removed, membershipA, membershipAinB] = Array.from({ length: 7 }, () => randomUUID()) as [
-    string,
-    string,
-    string,
-    string,
-    string,
-    string,
-    string,
-  ];
+  const [orgA, orgB, userA, userB, removed, membershipA, membershipAinB, membershipB, membershipRemoved] = Array.from({ length: 9 }, () =>
+    randomUUID(),
+  ) as [string, string, string, string, string, string, string, string, string];
   await fixture(client, [
     insertUser(userA, 'A'),
     insertUser(userB, 'B'),
@@ -118,11 +116,145 @@ export async function world(client: Client): Promise<World> {
     insertOrganisation(orgA, 'BUSINESS_CUSTOMER', 'Org A'),
     insertOrganisation(orgB, 'BUSINESS_CUSTOMER', 'Org B'),
     insertMembership(membershipA, orgA, userA, 'ACTIVE'),
-    insertMembership(randomUUID(), orgB, userB, 'ACTIVE'),
-    insertMembership(randomUUID(), orgA, removed, 'REMOVED'),
+    insertMembership(membershipB, orgB, userB, 'ACTIVE'),
+    insertMembership(membershipRemoved, orgA, removed, 'REMOVED'),
     insertMembership(membershipAinB, orgB, userA, 'ACTIVE'),
   ]);
-  return { orgA, orgB, userA, userB, membershipA, membershipAinB };
+  return { orgA, orgB, userA, userB, membershipA, membershipAinB, membershipB, membershipRemoved };
+}
+
+const insertInvitation = (id: string, orgId: string, roleId: string, email: string): Statement => [
+  `INSERT INTO public.invitations (id, org_id, email, role_id, locale, token_hash, status, expires_at, last_sent_at, created_by, updated_by)
+   VALUES ($1::uuid, $2::uuid, $3::text, $4::uuid, 'en', $5::bytea, 'PENDING', now() + interval '7 days', now(), $6::uuid, $6::uuid)`,
+  [id, orgId, email, roleId, randomBytes(32), SYSTEM],
+];
+
+/** A user with no membership yet (fixture), who will act for the own membership insert. */
+async function freshUser(client: Client, label: string): Promise<string> {
+  const id = randomUUID();
+  await fixture(client, [insertUser(id, label)]);
+  return id;
+}
+
+const MEMBERSHIP_INSERT = `INSERT INTO public.memberships (org_id, user_id, status, invitation_id, created_by, updated_by)
+                           VALUES ($1::uuid, $2::uuid, $3::text, $4::uuid, $5::uuid, $5::uuid)`;
+const ROLE_INSERT = `INSERT INTO public.membership_roles (org_id, membership_id, role_id, granted_by, created_by, updated_by)
+                     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, $4::uuid)`;
+const INVITATION_INSERT = `INSERT INTO public.invitations (org_id, email, role_id, locale, token_hash, status, expires_at, last_sent_at, created_by, updated_by)
+                           VALUES ($1::uuid, $2::text, $3::uuid, 'en', $4::bytea, 'PENDING', now() + interval '7 days', now(), $5::uuid, $5::uuid)`;
+
+/**
+ * [D-ARCH-154] T1: a role row of A naming B's membership, an unknown membership, A's own membership. The composite key
+ * (org_id, membership_id) -> memberships(org_id, id) binds the reference to the row's organisation; the role-scope
+ * trigger and WITH CHECK pass (org A, a CUSTOMER role), so the key is what refuses.
+ */
+export async function tenantBoundRoleReference(client: Client): Promise<{ foreign: string; unknown: string; own: string }> {
+  const viewer = await roleId(client, 'CUSTOMER_VIEWER');
+  const { orgA, userA, membershipA, membershipB } = await world(client);
+  await asApp(client, orgA, userA);
+  return {
+    foreign: await outcome(client, ROLE_INSERT, [orgA, membershipB, viewer, userA]),
+    unknown: await outcome(client, ROLE_INSERT, [orgA, randomUUID(), viewer, userA]),
+    own: await outcome(client, ROLE_INSERT, [orgA, membershipA, viewer, userA]),
+  };
+}
+
+/** [D-ARCH-154] T2: a member's own membership of A naming B's invitation, A's invitation, none. */
+export async function tenantBoundInvitationReference(client: Client): Promise<{ foreign: string; own: string; none: string }> {
+  const viewer = await roleId(client, 'CUSTOMER_VIEWER');
+  const { orgA, orgB } = await world(client);
+  const [invitationA, invitationB] = [randomUUID(), randomUUID()];
+  await fixture(client, [
+    insertInvitation(invitationA, orgA, viewer, 'invited-a@example.com'),
+    insertInvitation(invitationB, orgB, viewer, 'invited-b@example.com'),
+  ]);
+  const [x1, x2, x3] = [await freshUser(client, 'X1'), await freshUser(client, 'X2'), await freshUser(client, 'X3')];
+  const own = async (user: string, invitation: string | null): Promise<string> => {
+    await asApp(client, orgA, user);
+    return outcome(client, MEMBERSHIP_INSERT, [orgA, user, 'ACTIVE', invitation, user]);
+  };
+  return { foreign: await own(x1, invitationB), own: await own(x2, invitationA), none: await own(x3, null) };
+}
+
+/**
+ * [D-ARCH-155] T3: invitations exist only in BUSINESS_CUSTOMER organisations (operator organisation with an operator
+ * role, INDIVIDUAL with CUSTOMER_VIEWER, BUSINESS_CUSTOMER with CUSTOMER_VIEWER); an operator role link on an operator
+ * membership is unaffected.
+ */
+export async function invitationOrgType(
+  client: Client,
+): Promise<{ operatorOrg: string; individualOrg: string; businessOrg: string; operatorRoleLink: string }> {
+  const [support, viewer] = [await roleId(client, 'OPERATOR_SUPPORT'), await roleId(client, 'CUSTOMER_VIEWER')];
+  const { orgA, userA } = await world(client);
+  const [staff, staffMembership, person, personalOrg] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  await fixture(client, [
+    insertUser(staff, 'Staff'),
+    insertMembership(staffMembership, OPERATOR_ORG, staff, 'ACTIVE'),
+    insertUser(person, 'Person', 'ACTIVE', personalOrg),
+    insertOrganisation(personalOrg, 'INDIVIDUAL', 'Person', person),
+    insertMembership(randomUUID(), personalOrg, person, 'ACTIVE'),
+  ]);
+  const invite = async (org: string, actor: string, role: string): Promise<string> => {
+    await asApp(client, org, actor);
+    return outcome(client, INVITATION_INSERT, [org, `invitee-${randomUUID()}@example.com`, role, randomBytes(32), actor]);
+  };
+  const operatorOrg = await invite(OPERATOR_ORG, staff, support);
+  const individualOrg = await invite(personalOrg, person, viewer);
+  const businessOrg = await invite(orgA, userA, viewer);
+  await asApp(client, OPERATOR_ORG, staff);
+  const operatorRoleLink = await outcome(client, ROLE_INSERT, [OPERATOR_ORG, staffMembership, support, staff]);
+  return { operatorOrg, individualOrg, businessOrg, operatorRoleLink };
+}
+
+/**
+ * [D-ARCH-156] T4 and T5: actor A inserting an ACTIVE membership for user B is refused and B's profile stays invisible to
+ * A; a user inserting the own ACTIVE membership succeeds and a fellow member then reads that user's row.
+ */
+export async function membershipMemberIsActor(
+  client: Client,
+): Promise<{ foreignMember: string; foreignProfileRows: number; ownMember: string; fellowReadsRows: number }> {
+  const { orgA, userA, userB } = await world(client);
+  await asApp(client, orgA, userA);
+  const foreignMember = await outcome(client, MEMBERSHIP_INSERT, [orgA, userB, 'ACTIVE', null, userA]);
+  const foreignProfileRows = (await rows(client, 'SELECT id FROM public.users WHERE id = $1::uuid', [userB])).length;
+  const joiner = await freshUser(client, 'Joiner');
+  await asApp(client, orgA, joiner);
+  const ownMember = await outcome(client, MEMBERSHIP_INSERT, [orgA, joiner, 'ACTIVE', null, joiner]);
+  await asApp(client, orgA, userA);
+  const fellowReadsRows = (await rows(client, 'SELECT id FROM public.users WHERE id = $1::uuid', [joiner])).length;
+  return { foreignMember, foreignProfileRows, ownMember, fellowReadsRows };
+}
+
+/**
+ * [D-ARCH-156] T6, T7 and T8: creation only ACTIVE, user_id fixed, REMOVED terminal; the ACTIVE -> SUSPENDED -> ACTIVE
+ * -> REMOVED lifecycle passes; a re-parent is refused by WITH CHECK as platform_app and by the guard as the superuser.
+ */
+export async function membershipLifecycle(client: Client): Promise<Record<string, string>> {
+  const { orgA, orgB, userA, userB, membershipA, membershipRemoved } = await world(client);
+  const [suspendedUser, invitedUser] = [await freshUser(client, 'S'), await freshUser(client, 'I')];
+  await asApp(client, orgA, suspendedUser);
+  const createdSuspended = await outcome(client, MEMBERSHIP_INSERT, [orgA, suspendedUser, 'SUSPENDED', null, suspendedUser]);
+  await asApp(client, orgA, invitedUser);
+  const createdInvited = await outcome(client, MEMBERSHIP_INSERT, [orgA, invitedUser, 'INVITED', null, invitedUser]);
+  await asApp(client, orgA, userA);
+  const setStatus = `UPDATE public.memberships SET status = $2::text, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`;
+  const repoint = await outcome(
+    client,
+    `UPDATE public.memberships SET user_id = $2::uuid, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`,
+    [membershipA, userB, userA],
+  );
+  const removedToActive = await outcome(client, setStatus, [membershipRemoved, 'ACTIVE', userA]);
+  const lifecycle = [
+    await outcome(client, setStatus, [membershipA, 'SUSPENDED', userA]),
+    await outcome(client, setStatus, [membershipA, 'ACTIVE', userA]),
+    await outcome(client, setStatus, [membershipA, 'REMOVED', userA]),
+  ].join(',');
+  const reparent = `UPDATE public.memberships SET org_id = $2::uuid, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`;
+  const reparentAsApp = await outcome(client, reparent, [membershipRemoved, orgB, userA]);
+  // The superuser bypasses RLS; origin mode, the context actor stays userA, so the standard-columns guard passes.
+  await asSuperuser(client);
+  const reparentAsSuperuser = await outcome(client, reparent, [membershipRemoved, orgB, userA]);
+  return { createdSuspended, createdInvited, repoint, removedToActive, lifecycle, reparentAsApp, reparentAsSuperuser };
 }
 
 /** [PR26-SEC-04] the reserved actors, and a forged is_system row. */

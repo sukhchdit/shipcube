@@ -7,8 +7,9 @@
 // the partial index `ix_membership_roles__org_role_live`, the covering index `ix_memberships__user_status` (INCLUDE
 // org_id) and the descending `ix_invitations__org_status_created`, the domain triggers
 // (`trg_organisations__type_immutable`, `trg_organisations__personal_owner_immutable`,
-// `trg_organisations__personal_delete_guard`, `trg_membership_roles__scope_matches_org`, `trg_invitations__role_scope`),
-// the RLS blocks and the std-columns guards.
+// `trg_organisations__personal_delete_guard`, `trg_membership_roles__scope_matches_org`, `trg_invitations__role_scope`,
+// `trg_memberships__lifecycle_guard`), the RLS blocks and the std-columns guards. The tenant-bound composite keys
+// (`fk_membership_roles__membership_id`, `fk_memberships__invitation_id`, D-ARCH-154) are expressed below.
 
 /// The tenant itself (its `id` is the tenant key). `type` never changes; exactly one OPERATOR organisation exists.
 model Organisation {
@@ -59,9 +60,10 @@ model Membership {
 
   org        Organisation     @relation(fields: [orgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__org_id")
   user       User             @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__user_id")
-  invitation Invitation?      @relation(fields: [invitationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__invitation_id")
+  invitation Invitation?      @relation(fields: [orgId, invitationId], references: [orgId, id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__invitation_id")
   roles      MembershipRole[]
 
+  @@unique([orgId, id], map: "ux_memberships__org_id_id")
   @@index([orgId, status, createdAt, id], map: "ix_memberships__org_status_created")
   @@map("memberships")
 }
@@ -82,7 +84,7 @@ model MembershipRole {
   revokedBy    String?   @map("revoked_by") @db.Uuid
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__org_id")
-  membership Membership   @relation(fields: [membershipId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__membership_id")
+  membership Membership   @relation(fields: [orgId, membershipId], references: [orgId, id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__membership_id")
   role       Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__role_id")
 
   @@map("membership_roles")
@@ -115,6 +117,7 @@ model Invitation {
   role        Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_invitations__role_id")
   memberships Membership[]
 
+  @@unique([orgId, id], map: "ux_invitations__org_id_id")
   @@unique([tokenHash], map: "ux_invitations__token_hash")
   @@map("invitations")
 }

@@ -17,7 +17,13 @@
 -- country/region/currency columns) arrive with those tasks as nullable expand columns.
 --
 -- No BEGIN ATOMIC routine and no prisma/bootstrap file is added (TASK-290 / PR43-SEC-11, PR52-SEC-01 prerequisite).
--- No membership is written with status INVITED (D-ARCH-123): the value stays a reserved CHECK member only.
+-- No membership is written with status INVITED (D-ARCH-123): the value stays a reserved CHECK member only, and
+-- trg_memberships__lifecycle_guard makes that a property of the database (D-ARCH-156: a membership is created ACTIVE by
+-- its member, never changes user or organisation, never leaves REMOVED). References between organisation-keyed
+-- tables are tenant-bound composite keys (org_id, …) -> (org_id, id) (D-ARCH-154, data-model §4.7). Domain triggers:
+-- trg_organisations__type_immutable, trg_organisations__personal_owner_immutable,
+-- trg_organisations__personal_delete_guard, trg_membership_roles__scope_matches_org, trg_invitations__role_scope (also
+-- BUSINESS_CUSTOMER-only invitations, D-ARCH-155) and trg_memberships__lifecycle_guard.
 
 -- ---------------------------------------------------------------------------------------------------------------------
 -- Tables
@@ -135,7 +141,6 @@ CREATE TABLE "public"."membership_roles" (
     CONSTRAINT "pk_membership_roles" PRIMARY KEY ("id"),
     CONSTRAINT "ck_membership_roles__version" CHECK ("version" >= 1),
     CONSTRAINT "fk_membership_roles__org_id" FOREIGN KEY ("org_id") REFERENCES "public"."organisations"("id") ON DELETE RESTRICT ON UPDATE RESTRICT,
-    CONSTRAINT "fk_membership_roles__membership_id" FOREIGN KEY ("membership_id") REFERENCES "public"."memberships"("id") ON DELETE RESTRICT ON UPDATE RESTRICT,
     CONSTRAINT "fk_membership_roles__role_id" FOREIGN KEY ("role_id") REFERENCES "public"."roles"("id") ON DELETE RESTRICT ON UPDATE RESTRICT
 );
 
@@ -174,7 +179,6 @@ CREATE TABLE "public"."invitations" (
 -- Inserted in the same transaction as the user and its personal organisation (REQ-ORG-002): checked at COMMIT.
 ALTER TABLE "public"."users" ADD CONSTRAINT "fk_users__personal_org_id" FOREIGN KEY ("personal_org_id") REFERENCES "public"."organisations"("id") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE "public"."users" ADD CONSTRAINT "fk_users__last_active_org_id" FOREIGN KEY ("last_active_org_id") REFERENCES "public"."organisations"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
-ALTER TABLE "public"."memberships" ADD CONSTRAINT "fk_memberships__invitation_id" FOREIGN KEY ("invitation_id") REFERENCES "public"."invitations"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- ---------------------------------------------------------------------------------------------------------------------
 -- Indexes (access patterns AP-ID-01, AP-ORG-02/03/06..13; every tenant index leads with org_id, REQ-RLS-001)
@@ -193,6 +197,15 @@ CREATE INDEX "ix_membership_roles__org_role_live" ON "public"."membership_roles"
 CREATE UNIQUE INDEX "ux_invitations__org_email_pending" ON "public"."invitations"("org_id", "email") WHERE "status" = 'PENDING';
 CREATE INDEX "ix_invitations__org_status_created" ON "public"."invitations"("org_id", "status", "created_at" DESC, "id" DESC);
 CREATE UNIQUE INDEX "ux_invitations__token_hash" ON "public"."invitations"("token_hash");
+-- Targets of the tenant-bound references below (data-model §4.7; ADR-0005 amendment 13 item 27; D-ARCH-154). "id" is
+-- unique already; PostgreSQL needs a unique index on exactly the referenced column list.
+CREATE UNIQUE INDEX "ux_memberships__org_id_id" ON "public"."memberships"("org_id", "id");
+CREATE UNIQUE INDEX "ux_invitations__org_id_id" ON "public"."invitations"("org_id", "id");
+
+-- Tenant-bound references: a TENANT row points only at a parent of its own organisation. Referential-integrity checks
+-- bypass row-level security, so a single-column key would accept another tenant's id (code review PR #65 R1-m1 (b)).
+ALTER TABLE "public"."membership_roles" ADD CONSTRAINT "fk_membership_roles__membership_id" FOREIGN KEY ("org_id", "membership_id") REFERENCES "public"."memberships"("org_id", "id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "public"."memberships" ADD CONSTRAINT "fk_memberships__invitation_id" FOREIGN KEY ("org_id", "invitation_id") REFERENCES "public"."invitations"("org_id", "id") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- ---------------------------------------------------------------------------------------------------------------------
 -- Reserved actors (data-model §1.6; PR26-SEC-04; D-TASK037-03): the SYSTEM and ANONYMOUS users, no credentials.
@@ -370,6 +383,11 @@ BEGIN
   IF v_type IS NULL OR v_scope IS NULL OR v_scope IS DISTINCT FROM v_expected THEN
     RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE: role scope does not match the organisation type';
   END IF;
+  -- REQ-ORG-010 (D-ARCH-155): an invitation exists only in a BUSINESS_CUSTOMER organisation, so by the mapping above
+  -- its role is a CUSTOMER role. Staff or partner onboarding by invitation needs an ADR-0005 amendment first.
+  IF TG_TABLE_NAME = 'invitations' AND v_type IS DISTINCT FROM 'BUSINESS_CUSTOMER' THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE: invitations exist only in BUSINESS_CUSTOMER organisations';
+  END IF;
   RETURN NEW;
 END $$;
 
@@ -377,6 +395,35 @@ CREATE TRIGGER trg_membership_roles__scope_matches_org BEFORE INSERT OR UPDATE O
   FOR EACH ROW EXECUTE FUNCTION platform.role_scope_matches_org();
 CREATE TRIGGER trg_invitations__role_scope BEFORE INSERT OR UPDATE OF role_id, org_id ON public.invitations
   FOR EACH ROW EXECUTE FUNCTION platform.role_scope_matches_org();
+
+-- DR-A05 / DR-A14 database backstop (code review PR #65 S1; D-ARCH-156; ADR-0005 amendment 13 item 29). A membership
+-- row makes its user's profile row readable by the organisation (p_users__org_member_read), and every session of the
+-- organisation may write this table. So a membership is created only in a transaction whose actor is the member, as
+-- ACTIVE; it never changes its user or its organisation; and it never leaves REMOVED. AFTER ROW on purpose: RLS WITH
+-- CHECK decides first, the function only raises, and no trigger runs after the standard-columns guard (C15).
+CREATE FUNCTION platform.memberships_lifecycle_guard() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+  v_rule text;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    v_rule := CASE WHEN NEW.user_id IS DISTINCT FROM platform.app_actor_id() THEN 'the member is not the actor'
+                   WHEN NEW.status  IS DISTINCT FROM 'ACTIVE'                 THEN 'a membership is created ACTIVE' END;
+  ELSE
+    v_rule := CASE WHEN NEW.user_id IS DISTINCT FROM OLD.user_id THEN 'user_id cannot change'
+                   WHEN NEW.org_id  IS DISTINCT FROM OLD.org_id  THEN 'org_id cannot change'
+                   WHEN OLD.status = 'REMOVED' AND NEW.status IS DISTINCT FROM 'REMOVED' THEN 'REMOVED is terminal' END;
+  END IF;
+  IF v_rule IS NOT NULL THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = pg_catalog.format('MEMBERSHIP_LIFECYCLE_VIOLATION: %s', v_rule);
+  END IF;
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER trg_memberships__lifecycle_guard AFTER INSERT OR UPDATE OF user_id, org_id, status ON public.memberships
+  FOR EACH ROW EXECUTE FUNCTION platform.memberships_lifecycle_guard();
 
 -- ---------------------------------------------------------------------------------------------------------------------
 -- Row-level security, rendered by tools/db/render-rls.ts (identity, organisations), pasted verbatim. memberships

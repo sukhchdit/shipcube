@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS "public"."invitations";
 DROP TABLE IF EXISTS "public"."users" CASCADE;
 DROP TABLE IF EXISTS "public"."organisations";
 
+DROP FUNCTION IF EXISTS platform.memberships_lifecycle_guard();
 DROP FUNCTION IF EXISTS platform.role_scope_matches_org();
 DROP FUNCTION IF EXISTS platform.organisations_personal_delete_guard();
 DROP FUNCTION IF EXISTS platform.organisations_personal_owner_immutable();

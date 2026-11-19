@@ -20,8 +20,11 @@ import { PlatformPostgres } from '../harness/postgres.js';
 import {
   ANONYMOUS,
   drA14,
+  invitationOrgType,
   invitedMemberships,
+  membershipLifecycle,
   membershipLookup,
+  membershipMemberIsActor,
   OPERATOR_ORG,
   personalDelete,
   personalOwnerRepoint,
@@ -34,6 +37,8 @@ import {
   secondOperator,
   stdColumns,
   SYSTEM,
+  tenantBoundInvitationReference,
+  tenantBoundRoleReference,
   typeImmutable,
   withCheckGuardedTables,
 } from './cases.js';
@@ -209,6 +214,45 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result.forcedOperator).toEqual(result.tenantScope);
     expect(result.tenantScope.organisations).toEqual([result.world.orgB]);
     expect(result.forcedSeesA).toEqual({ organisation: false, memberships: false });
+  });
+
+  it('[D-ARCH-154] T1: a role row of A naming B membership or an unknown one fails the tenant-bound key; A own membership passes', async () => {
+    const result = await rolledBack(tenantBoundRoleReference);
+    expect(result.foreign).toMatch(/^23503 .*fk_membership_roles__membership_id/);
+    expect(result.unknown).toMatch(/^23503 .*fk_membership_roles__membership_id/);
+    expect(result.own).toBe('ok');
+  });
+
+  it('[D-ARCH-154] T2: a membership of A naming B invitation fails the tenant-bound key; A invitation and none pass', async () => {
+    const result = await rolledBack(tenantBoundInvitationReference);
+    expect(result.foreign).toMatch(/^23503 .*fk_memberships__invitation_id/);
+    expect([result.own, result.none]).toEqual(['ok', 'ok']);
+  });
+
+  it('[D-ARCH-155] T3: invitations only in BUSINESS_CUSTOMER organisations; an operator role link on an operator membership is unaffected', async () => {
+    const result = await rolledBack(invitationOrgType);
+    expect(result.operatorOrg).toMatch(/^P0001 ROLE_NOT_ALLOWED_FOR_ORG_TYPE/);
+    expect(result.individualOrg).toMatch(/^P0001 ROLE_NOT_ALLOWED_FOR_ORG_TYPE/);
+    expect([result.businessOrg, result.operatorRoleLink]).toEqual(['ok', 'ok']);
+  });
+
+  it('[D-ARCH-156] T4/T5: a membership for another user is refused and that profile stays invisible; the own ACTIVE membership passes and a fellow member reads the row', async () => {
+    const result = await rolledBack(membershipMemberIsActor);
+    expect(result.foreignMember).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: the member is not the actor$/);
+    expect(result.foreignProfileRows).toBe(0);
+    expect(result.ownMember).toBe('ok');
+    expect(result.fellowReadsRows).toBe(1);
+  });
+
+  it('[D-ARCH-156] T6/T7/T8: created ACTIVE only, user_id fixed, REMOVED terminal; the lifecycle passes; a re-parent is refused by WITH CHECK, and by the guard when RLS is bypassed', async () => {
+    const result = await rolledBack(membershipLifecycle);
+    expect(result['createdSuspended']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: a membership is created ACTIVE$/);
+    expect(result['createdInvited']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: a membership is created ACTIVE$/);
+    expect(result['repoint']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: user_id cannot change$/);
+    expect(result['removedToActive']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: REMOVED is terminal$/);
+    expect(result['lifecycle']).toBe('ok,ok,ok');
+    expect(result['reparentAsApp']).toMatch(RLS_REFUSED);
+    expect(result['reparentAsSuperuser']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: org_id cannot change$/);
   });
 
   it('[D-ARCH-123] no membership row and no seed or fixture source writes the reserved status INVITED', async () => {
