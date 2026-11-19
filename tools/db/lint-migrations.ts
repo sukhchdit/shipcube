@@ -711,17 +711,40 @@ function masked(statement: string): string {
  * CREATE FUNCTION body runs only when the routine is called, so a definition is not data-changing itself and is read
  * for the call-site half instead (writingRoutineCall, PR66-SEC-02). `FOR [NO KEY] UPDATE` and `GRANT UPDATE`
  * do not start a statement and stay clean. A key built entirely at run time (`EXECUTE v_sql`) is not visible here.
+ *
+ * The forms (each after a statement start): `UPDATE [ONLY] <name>`, `DELETE FROM`, `TRUNCATE`, `MERGE INTO`,
+ * `INSERT INTO … SELECT`, `INSERT INTO … ON CONFLICT … DO UPDATE`, and `WITH … DELETE FROM | INSERT INTO | MERGE INTO |
+ * UPDATE <name>`, where `…` never crosses a `;`. Matched per `;`-separated segment, with the earliest qualifying start
+ * of each multi-part form followed by plain searches, so the cost is linear in the text (TASK-293 code review R1-n3: the
+ * nested lazy pattern it replaces backtracked for seconds on a 60 KB routine body without `;`).
  */
-/** The data-changing statement forms of rule 10 inside a body (DO block or routine), after a statement start. */
-const BODY_DATA_CHANGING_FORM =
-  `(?:update (?:only )?${QNAME}|delete from\\b|truncate\\b|merge into\\b|` +
-  `insert into\\b[^;]*?\\b(?:select|on conflict\\b[^;]*?\\bdo update)\\b|` +
-  `with\\b[^;]*?\\b(?:delete from|insert into|merge into|update (?:only )?${QNAME}))`;
-const DO_DATA_CHANGING = new RegExp(`(?:^|[;']|\\b(?:begin|then|else|loop|execute)) ?${BODY_DATA_CHANGING_FORM}`);
+function bodyDataChanging(starts: string): (text: string) => boolean {
+  const start = `(?:^|'|\\b(?:${starts})) ?`;
+  const simple = new RegExp(`${start}(?:update (?:only )?${QNAME}|delete from\\b|truncate\\b|merge into\\b)`);
+  const insert = new RegExp(`${start}insert into\\b`);
+  const withStart = new RegExp(`${start}with\\b`);
+  const withWrite = new RegExp(`\\b(?:delete from|insert into|merge into|update (?:only )?${QNAME})`);
+  const after = (segment: string, match: RegExpExecArray | null): string | undefined =>
+    match === null ? undefined : segment.slice(match.index + match[0].length);
+  const insertWrites = (rest: string): boolean => {
+    if (/\bselect\b/.test(rest)) return true;
+    const conflict = /\bon conflict\b/.exec(rest);
+    return conflict !== null && /\bdo update\b/.test(rest.slice(conflict.index + conflict[0].length));
+  };
+  return (text) =>
+    text.split(';').some((segment) => {
+      if (simple.test(segment)) return true;
+      const insertRest = after(segment, insert.exec(segment));
+      if (insertRest !== undefined && insertWrites(insertRest)) return true;
+      const withRest = after(segment, withStart.exec(segment));
+      return withRest !== undefined && withWrite.test(withRest);
+    });
+}
+const doBodyChangesData = bodyDataChanging('begin|then|else|loop|execute');
 
 /** True when `statement` is a DO block whose body changes data (rule 10). */
 function doBlockChangesData(statement: string): boolean {
-  return /^do\b/.test(codeOnly(statement)) && DO_DATA_CHANGING.test(normalise(sqlText(statement, true)));
+  return /^do\b/.test(codeOnly(statement)) && doBodyChangesData(normalise(sqlText(statement, true)));
 }
 
 /**
@@ -730,43 +753,122 @@ function doBlockChangesData(statement: string): boolean {
  * SELECT f();` changes data as surely as a top-level DELETE. So a routine whose definition holds a rule-10 form (the DO
  * statement starts plus the routine body starts `AS` (dollar or string body), `ATOMIC` and `RETURN QUERY`; dynamic SQL
  * in its string literals included), or that calls such a routine, is a WRITING routine, and a top-level statement that
- * names a writing routine followed by `(` is data-changing. The set is carried from file to file
- * (MigrationHistory.writingRoutines) and never shrinks (a later `CREATE OR REPLACE` or DROP does not clear it: fail
- * closed). Not a call: GRANT / REVOKE, COMMENT ON, ALTER / DROP FUNCTION | PROCEDURE | ROUTINE, CREATE TRIGGER (the
- * trigger runs at a later DML statement, which rule 10 judges itself), and `FUNCTION | PROCEDURE | ROUTINE <name>(`
- * references. A name is matched unqualified or with its own schema; a same-named routine of another schema, or the name
- * in a string literal, also counts (fail closed). Not seen (stated limits): a routine created in the bootstrap lane, a
- * write reached only through `EXECUTE` of a string built at run time, and a call through a computed name.
+ * names a writing routine followed by `(` is data-changing.
+ *  - Every definition is recorded with the names it calls (RoutineRegistry), and "calls a writing routine" is resolved
+ *    when a call site is judged, over every routine known by then, so the order of the definitions does not matter: a
+ *    PL/pgSQL routine may call one created later in the file (TASK-293 code review R1-m2).
+ *  - The registry is carried from file to file and never shrinks: a later `CREATE OR REPLACE` adds to what a name
+ *    writes and calls, and a DROP does not clear it (fail closed).
+ *  - Names are compared as parsed identifiers (quoted names keep every character), never through a regular expression
+ *    built from the SQL text (R1-m1). A routine created unqualified matches a call with any schema, and an unqualified
+ *    call matches every schema; a name inside a string literal also counts (fail closed).
+ *  - Not a call: GRANT / REVOKE, COMMENT ON, ALTER / DROP FUNCTION | PROCEDURE | ROUTINE, CREATE TRIGGER (the trigger
+ *    runs at a later DML statement, which rule 10 judges itself, except a plain `INSERT … VALUES`, which is no rule-10
+ *    form: a writing trigger fired by one is not seen; R1-n2), and `FUNCTION | PROCEDURE | ROUTINE <name>(` references.
+ *  - Not seen (stated limits): a routine created in the bootstrap lane, a write reached only through `EXECUTE` of a
+ *    string built at run time, a call through a computed name, a call under another name after `ALTER … RENAME TO`,
+ *    and a call written with a three-part name.
  */
-const ROUTINE_DATA_CHANGING = new RegExp(`(?:^|[;']|\\b(?:begin|then|else|loop|execute|as|atomic|query)) ?${BODY_DATA_CHANGING_FORM}`);
+const routineBodyChangesData = bodyDataChanging('begin|then|else|loop|execute|as|atomic|query');
 const NOT_A_CALL_SITE =
   /^(?:grant|revoke|comment on|(?:alter|drop) (?:function|procedure|routine)|create (?:or replace )?(?:constraint )?trigger)\b/;
-const ROUTINE_REFERENCE = /\b(?:function|procedure|routine) (?:[a-z_][a-z0-9_$]* ?\. ?)?[a-z_][a-z0-9_$]* ?\(/g;
-const escapeRegExp = (text: string): string => text.replace(/[$.]/g, '\\$&');
+/** One identifier of normalised text: quoted (`""` is a quote inside it) or plain. Linear: the branches never overlap. */
+const CALL_IDENT = '"(?:[^"]|"")*"|[a-z_][a-z0-9_$]*';
+const ROUTINE_REFERENCE = new RegExp(`\\b(?:function|procedure|routine) (?:(?:${CALL_IDENT}) ?\\. ?)?(?:${CALL_IDENT}) ?\\(`, 'g');
+const NAMED_CALL = new RegExp(`(?<![a-z0-9_$"])(?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`, 'g');
+/** The name a CREATE FUNCTION | PROCEDURE defines, in masked text (a quoted name may hold `""`, unlike ROUTINE_NAME). */
+const DEFINED_NAME = new RegExp(`^create (?:or replace )?(?:function|procedure) (?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`);
 
-/** The writing routine (qualified name) that `text` (normalised, strings kept, quotes removed) calls, if any. */
-function calledWriter(text: string, writers: ReadonlySet<string>): string | undefined {
-  const calls = text.replace(ROUTINE_REFERENCE, ' ');
-  return [...writers].find((qualified) => {
-    const [schema, name] = qualified.split('.') as [string, string];
-    return new RegExp(`(?<![a-z0-9_$.])(?:${escapeRegExp(schema)} ?\\. ?)?${escapeRegExp(name)} ?\\(`).test(calls);
-  });
+/** A routine name: `schema` null when the definition or the call does not qualify it. */
+interface RoutineName {
+  readonly schema: string | null;
+  readonly name: string;
+}
+
+const identifierValue = (ident: string): string => (ident.startsWith('"') ? ident.slice(1, -1).replaceAll('""', '"') : ident);
+const sameRoutine = (definition: RoutineName, call: RoutineName): boolean =>
+  definition.name === call.name && (definition.schema === null || call.schema === null || definition.schema === call.schema);
+const routineLabel = (routine: RoutineName): string => (routine.schema === null ? routine.name : `${routine.schema}.${routine.name}`);
+
+/** Every `name(` and `schema.name(` in normalised text, `FUNCTION | PROCEDURE | ROUTINE <name>(` references excluded. */
+function namedCalls(text: string): RoutineName[] {
+  return [...text.replace(ROUTINE_REFERENCE, ' ').matchAll(NAMED_CALL)].map((match) => ({
+    schema: match[1] === undefined ? null : identifierValue(match[1]),
+    name: identifierValue(match[2] as string),
+  }));
+}
+
+interface RoutineFacts extends RoutineName {
+  writes: boolean;
+  readonly calls: RoutineName[];
+}
+
+/** Routines created by the migration files so far, with what each writes and calls (rule 10 call site). */
+export class RoutineRegistry {
+  private readonly routines = new Map<string, RoutineFacts>();
+  /** Routines whose recorded calls name `name`. */
+  private readonly callers = new Map<string, RoutineFacts[]>();
+  private writing: RoutineFacts[] | undefined;
+
+  define(routine: RoutineName, writes: boolean, calls: readonly RoutineName[]): void {
+    const key = JSON.stringify([routine.schema, routine.name]);
+    const facts = this.routines.get(key) ?? { ...routine, writes: false, calls: [] };
+    this.routines.set(key, facts);
+    facts.writes ||= writes;
+    for (const call of calls) {
+      facts.calls.push(call);
+      const list = this.callers.get(call.name) ?? [];
+      if (!list.includes(facts)) list.push(facts);
+      this.callers.set(call.name, list);
+    }
+    this.writing = undefined;
+  }
+
+  /** The writing routine (label) one of `calls` names, if any; transitive and independent of definition order. */
+  calledWriter(calls: readonly RoutineName[]): string | undefined {
+    const writing = this.writingRoutines();
+    for (const call of calls) {
+      const writer = writing.find((routine) => sameRoutine(routine, call));
+      if (writer !== undefined) return routineLabel(writer);
+    }
+    return undefined;
+  }
+
+  /** Writing routines: those with a rule-10 form, then (breadth first over callers) those calling one. Cached. */
+  private writingRoutines(): RoutineFacts[] {
+    if (this.writing !== undefined) return this.writing;
+    const found = new Set([...this.routines.values()].filter((routine) => routine.writes));
+    const queue = [...found];
+    for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+      const writer = next;
+      for (const caller of this.callers.get(writer.name) ?? []) {
+        if (!found.has(caller) && caller.calls.some((call) => sameRoutine(writer, call))) {
+          found.add(caller);
+          queue.push(caller);
+        }
+      }
+    }
+    this.writing = [...found];
+    return this.writing;
+  }
 }
 
 /**
- * Rule 10 call-site pass over one statement: records a writing routine `statement` defines in `writers`, or returns
- * the writing routine a top-level statement calls.
+ * Rule 10 call-site pass over one statement: records a routine `statement` defines in `registry`, or returns the
+ * writing routine a top-level statement calls.
  */
-function writingRoutineCall(statement: string, writers: Set<string>): string | undefined {
+function writingRoutineCall(statement: string, registry: RoutineRegistry): string | undefined {
   const maskedText = masked(statement);
-  const text = normalise(sqlText(statement, true)).replace(/"/g, '');
+  const text = normalise(sqlText(statement, true));
   if (ROUTINE_DEFINITION.test(maskedText)) {
-    const routine = ROUTINE_NAME.exec(maskedText);
-    if (routine && (ROUTINE_DATA_CHANGING.test(text) || calledWriter(text, writers) !== undefined))
-      writers.add(qualify(routine[1] as string));
+    const name = DEFINED_NAME.exec(maskedText);
+    if (name !== null) {
+      const routine = { schema: name[1] === undefined ? null : identifierValue(name[1]), name: identifierValue(name[2] as string) };
+      registry.define(routine, routineBodyChangesData(text), namedCalls(text));
+    }
     return undefined;
   }
-  return NOT_A_CALL_SITE.test(maskedText) ? undefined : calledWriter(text, writers);
+  return NOT_A_CALL_SITE.test(maskedText) ? undefined : registry.calledWriter(namedCalls(text));
 }
 
 const LITERAL_MARK = '';
@@ -858,8 +960,8 @@ export interface MigrationHistory {
   readonly rlsProtected: Set<string>;
   /** Partial indexes (qualified name -> canonical WHERE predicate) created by an earlier file. Rule 19 (F-11). */
   readonly partialIndexes: Map<string, string>;
-  /** Routines (qualified) whose body changes data, created by this or an earlier file. Rule 10 call site (PR66-SEC-02). */
-  readonly writingRoutines: Set<string>;
+  /** Routines created by this or an earlier file, with what each writes and calls. Rule 10 call site (PR66-SEC-02). */
+  readonly routines: RoutineRegistry;
 }
 
 export const emptyHistory = (): MigrationHistory => ({
@@ -868,7 +970,7 @@ export const emptyHistory = (): MigrationHistory => ({
   pendingNotNull: new Map(),
   rlsProtected: new Set(),
   partialIndexes: new Map(),
-  writingRoutines: new Set(),
+  routines: new RoutineRegistry(),
 });
 
 export interface MigrationLintOptions {
@@ -1355,7 +1457,7 @@ function lintMigrationSql(sql: string, statements: readonly string[], add: Add, 
     if (header.kind !== 'contract' && DESTRUCTIVE.some((pattern) => pattern.test(code))) {
       add('2', `destructive statement outside a contract migration: "${preview}"`);
     }
-    const writer = writingRoutineCall(statement, history.writingRoutines);
+    const writer = writingRoutineCall(statement, history.routines);
     if (header.dataChanging !== true && (DATA_CHANGING.some((pattern) => pattern.test(code)) || doBlockChangesData(statement))) {
       add('10', `data-changing statement without "data-changing: yes": "${preview}"`);
     } else if (header.dataChanging !== true && writer !== undefined) {

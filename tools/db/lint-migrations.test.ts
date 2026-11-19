@@ -1103,12 +1103,73 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
       `${WRITER}\nCREATE FUNCTION public.fixture_outer() RETURNS void LANGUAGE sql BEGIN ATOMIC SELECT public.fixture_purge(); END;\nSELECT public.fixture_outer();`,
     ],
     ['a call inside a CTE', `${WRITER}\nWITH x AS (SELECT public.fixture_purge()) SELECT 1 FROM x;`],
+    [
+      'an INSERT … SELECT body',
+      'CREATE FUNCTION public.fixture_copy() RETURNS void LANGUAGE sql AS $$ INSERT INTO public.fixture_items SELECT * FROM public.fixture_owners $$;\nSELECT public.fixture_copy();',
+    ],
+    [
+      'an upsert body (ON CONFLICT … DO UPDATE)',
+      "CREATE FUNCTION public.fixture_upsert() RETURNS void LANGUAGE sql AS $$ INSERT INTO public.fixture_items (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET note = 'x' $$;\nSELECT public.fixture_upsert();",
+    ],
+    [
+      'a data-modifying WITH body',
+      'CREATE FUNCTION public.fixture_cte() RETURNS bigint LANGUAGE sql AS $$ WITH d AS (DELETE FROM public.fixture_items RETURNING 1) SELECT count(*) FROM d $$;\nSELECT public.fixture_cte();',
+    ],
   ])('[PR66-SEC-02] rule 10 at the call site: %s', (_shape, migration) => {
     expect(ruleOf(lintTexts(`call-${_shape.replace(/\W+/g, '-')}`, [migration]))).toEqual([[0, 'migration.sql', '10']]);
   });
 
   it('[PR66-SEC-02] rule 10 at the call site across files: a writer created in an earlier migration and called in a later one', () => {
     expect(ruleOf(lintTexts('call-cross-file', [WRITER, 'SELECT public.fixture_purge();']))).toEqual([[1, 'migration.sql', '10']]);
+  });
+
+  it.each([['"f("'], ['"g["'], ['"h)"'], ['"a*b+?"'], ['"x\\y{1}"'], ['"p|q^$"'], ['"say ""hi"""']])(
+    '[TASK-293 R1-m1] a writing routine named %s (regular-expression metacharacters, a quote) is a finding at its call, never a crash; the next file still lints',
+    (quoted) => {
+      const writer = `CREATE FUNCTION public.${quoted}() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;`;
+      const findings = lintTexts(`call-meta-${quoted.replace(/\W+/g, '-')}`, [`${writer}\nSELECT public.${quoted}();`, 'SELECT 1;']);
+      expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
+      expect(findings[0]?.[3]).toContain(`call of public.${quoted.slice(1, -1).replaceAll('""', '"')}, a routine`);
+    },
+  );
+
+  it('[TASK-293 R1-m2] transitivity does not depend on order: a routine calling a writer created later in the file, or in a later file, is a writer at its call', () => {
+    const caller =
+      'CREATE FUNCTION public.fixture_caller() RETURNS void LANGUAGE plpgsql AS $$ BEGIN PERFORM public.fixture_purge(); END $$;';
+    expect(ruleOf(lintTexts('call-forward', [`${caller}\n${WRITER}\nSELECT public.fixture_caller();`]))).toEqual([
+      [0, 'migration.sql', '10'],
+    ]);
+    // A call judged between the two definitions (no writer yet) does not freeze the answer for the later call.
+    const between = lintTexts('call-forward-between', [
+      `${caller}\nSELECT public.fixture_caller();\n${WRITER}\nSELECT public.fixture_caller();`,
+    ]);
+    expect(ruleOf(between)).toEqual([[0, 'migration.sql', '10']]);
+    expect(between[0]?.[3]).toMatch(/^call of public\.fixture_caller, /);
+    expect(ruleOf(lintTexts('call-forward-files', [caller, `${WRITER}\nSELECT public.fixture_caller();`]))).toEqual([
+      [1, 'migration.sql', '10'],
+    ]);
+    // Control: the same caller without any writer behind it is clean.
+    expect(lintTexts('call-forward-control', [`${caller}\nSELECT public.fixture_caller();`])).toEqual([]);
+  });
+
+  it('[TASK-293 R1-n1] names: a writer created unqualified matches a call in any schema, and a quoted name keeps its spaces', () => {
+    const unqualified = 'CREATE FUNCTION fixture_unq() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+    expect(ruleOf(lintTexts('call-unqualified', [`${unqualified}\nSELECT platform.fixture_unq();`]))).toEqual([[0, 'migration.sql', '10']]);
+    const spaced = 'CREATE FUNCTION public."my purge"() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+    expect(ruleOf(lintTexts('call-spaced', [`${spaced}\nSELECT public."my purge"();`]))).toEqual([[0, 'migration.sql', '10']]);
+    expect(lintTexts('call-spaced-control', [`${spaced}\nSELECT public."my purge 2"();`])).toEqual([]);
+  });
+
+  it('[TASK-293 R1-n3] rule 10 body forms are matched in linear time: a 60 KB routine body and DO block without a semicolon lint in well under a second each', () => {
+    const body = ' insert into public.fixture_items on conflict'.repeat(2000);
+    const started = performance.now();
+    const findings = lintTexts('call-redos', [
+      `CREATE FUNCTION public.fixture_slow() RETURNS void LANGUAGE sql AS $$${body} $$;`,
+      `DO $$ BEGIN IF true THEN ${body} END IF; END $$;`,
+    ]);
+    // Generous bound against host load: the replaced pattern needed about 21 s for the routine body alone.
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(findings).toEqual([]); // no SELECT and no DO UPDATE after the INSERT: not data-changing
   });
 
   it('[PR66-SEC-02] rule 10 call-site controls: references that call nothing, a reading routine, a row lock and a same-prefix name are clean', () => {
@@ -1123,6 +1184,9 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
       'SELECT public.fixture_read();',
       "CREATE FUNCTION public.fixture_lock() RETURNS void LANGUAGE plpgsql AS $$ BEGIN PERFORM 1 FROM public.fixture_items FOR UPDATE; RAISE NOTICE 'x'; END $$;",
       'SELECT public.fixture_lock();',
+      // INSERT … VALUES, also with ON CONFLICT DO NOTHING, is no rule-10 form at top level, so not in a body either.
+      'CREATE FUNCTION public.fixture_seed() RETURNS void LANGUAGE sql AS $$ INSERT INTO public.fixture_items (id) VALUES (1) ON CONFLICT DO NOTHING $$;',
+      'SELECT public.fixture_seed();',
       'SELECT public.fixture_purge_count(), other.fixture_purge();',
       // The statement exemption alone covers the second name of a list (it has no FUNCTION keyword before it).
       'GRANT EXECUTE ON FUNCTION public.fixture_read(), public.fixture_purge() TO platform_app;',

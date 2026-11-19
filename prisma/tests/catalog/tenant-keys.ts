@@ -17,6 +17,10 @@
  * with an `org_id` column has `org_id` among its KEY columns (INCLUDE columns and expressions do not count), except the
  * primary key and the listed globally unique digests.
  *
+ * Stated limits (TASK-293 code review R1-n4), to tighten when the first GUEST_CAPABLE or EXCLUDE table arrives: the T2
+ * sibling is matched by column-set containment, not column-to-column mapping; arm (b) reads unique indexes only, so an
+ * EXCLUDE constraint without `org_id` on a TENANT table is out of scope.
+ *
  * P9-CK. The shadow rendering keeps a same-name `ck_…` replacement as "the CHECK being replaced" by its name alone
  * (tools/db/shadow-init.ts isCheckReplacement): every constraint whose name starts with `ck_` is a CHECK.
  */
