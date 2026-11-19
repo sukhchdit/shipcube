@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 
-import { sqlText } from '../../../tools/db/sql-text.js';
+import { ESCAPE_STRING_MARK, EscapeContinuationError, sqlText } from '../../../tools/db/sql-text.js';
 import { CONTEXT_DISCARD, contextReads, contextWrites } from '../../../tools/db/tenant-key-forms.js';
 
 /** A row of the C3 policy query (`pg_get_expr` output under search_path pg_catalog, pg_temp). */
@@ -122,8 +122,11 @@ export const CONTEXT_HELPERS: ReadonlySet<string> = new Set([
 export function bodyText(source: string): string {
   try {
     return sqlText(source, true);
-  } catch {
-    return source;
+  } catch (error) {
+    // A body holding a continued E-string (PR293-SEC-02) does not lex but IS an escape string: keep the mark, so the
+    // prosrc scan names the "E-prefixed escape string" form (TASK-293 code review R3-M1). Marked rather than rethrown:
+    // a rethrow would end the whole scan with an error instead of a finding that names the function and the form.
+    return error instanceof EscapeContinuationError ? `${ESCAPE_STRING_MARK}${source}` : source;
   }
 }
 

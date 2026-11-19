@@ -725,7 +725,8 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
   const simple = new RegExp(`${start}(?:update (?:only )?${QNAME}|delete from\\b|truncate\\b|merge into\\b)`);
   const insert = new RegExp(`${start}insert into\\b`);
   const withStart = new RegExp(`${start}with\\b`);
-  const withWrite = new RegExp(`\\b(?:delete from|insert into|merge into|update (?:only )?${QNAME})`);
+  // A row lock (`FOR [NO KEY] UPDATE`) inside the WITH query is no write (code review R3-n1), as at top level (DATA_CHANGING).
+  const withWrite = new RegExp(`\\b(?:delete from|insert into|merge into|(?<!\\bfor |\\bkey )update (?:only )?${QNAME})`);
   const after = (segment: string, match: RegExpExecArray | null): string | undefined =>
     match === null ? undefined : segment.slice(match.index + match[0].length);
   const insertWrites = (rest: string): boolean => {
@@ -828,10 +829,42 @@ const ROUTINE_REFERENCE = new RegExp(`\\b(?:function|procedure|routine) (?:(?:${
 const NAMED_CALL = new RegExp(`(?<![a-z0-9_$"\\u0080-\\uFFFF])(?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`, 'g');
 /** The name a CREATE FUNCTION | PROCEDURE defines, in masked text (a quoted name may hold `""`, unlike ROUTINE_NAME). */
 const DEFINED_NAME = new RegExp(`^create (?:or replace )?(?:function|procedure) (?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`);
-/** `ALTER FUNCTION | PROCEDURE | ROUTINE <name>[(args)] RENAME TO <new> | SET SCHEMA <schema>`, in masked text. */
-const ALTERED_NAME = new RegExp(
-  `^alter (?:function|procedure|routine) (?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT})(?: ?\\([^)]*\\))? (rename to|set schema) (${CALL_IDENT})$`,
-);
+/** `ALTER FUNCTION | PROCEDURE | ROUTINE <name>`, in masked text; the argument list and the action follow. */
+const ALTERED_HEAD = new RegExp(`^alter (?:function|procedure|routine) (?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT})`);
+const ALTERED_ACTION = new RegExp(`^ ?(rename to|set schema) (${CALL_IDENT})$`);
+
+/**
+ * `ALTER FUNCTION | PROCEDURE | ROUTINE <name>[(args)] RENAME TO <new> | SET SCHEMA <schema>` in masked text: the
+ * argument list is skipped by parenthesis depth (quoted names skipped whole), so typed arguments such as `numeric(10,2)`
+ * are no obstacle (code review R3-n2; strings and bodies are already masked). Undefined for any other statement.
+ */
+function alteredRoutine(maskedText: string): { old: RoutineName; action: string; target: string } | undefined {
+  const head = ALTERED_HEAD.exec(maskedText);
+  if (head === null) return undefined;
+  let at = head[0].length;
+  if (maskedText[at] === ' ' && maskedText[at + 1] === '(') at += 1;
+  if (maskedText[at] === '(') {
+    let depth = 0;
+    for (; at < maskedText.length; at += 1) {
+      if (maskedText[at] === '"') {
+        const close = maskedText.indexOf('"', at + 1); // a quoted name (a doubled quote is a close and a reopen)
+        if (close < 0) return undefined;
+        at = close;
+      } else if (maskedText[at] === '(') depth += 1;
+      else if (maskedText[at] === ')') depth -= 1;
+      if (depth === 0) break;
+    }
+    if (depth !== 0) return undefined;
+    at += 1;
+  }
+  const action = ALTERED_ACTION.exec(maskedText.slice(at));
+  if (action === null) return undefined;
+  return {
+    old: { schema: head[1] === undefined ? null : identifierValue(head[1]), name: identifierValue(head[2] as string) },
+    action: action[1] as string,
+    target: identifierValue(action[2] as string),
+  };
+}
 
 /** A routine name: `schema` null when the definition or the call does not qualify it. */
 interface RoutineName {
@@ -927,11 +960,10 @@ function writingRoutineCall(statement: string, registry: RoutineRegistry): strin
     registry.define(routine, writes, namedCalls(text));
     return undefined;
   }
-  const moved = ALTERED_NAME.exec(maskedText);
-  if (moved !== null) {
-    const old = { schema: moved[1] === undefined ? null : identifierValue(moved[1]), name: identifierValue(moved[2] as string) };
-    const target = identifierValue(moved[4] as string);
-    registry.define(moved[3] === 'rename to' ? { schema: old.schema, name: target } : { schema: target, name: old.name }, false, [old]);
+  const moved = alteredRoutine(maskedText);
+  if (moved !== undefined) {
+    const { old, action, target } = moved;
+    registry.define(action === 'rename to' ? { schema: old.schema, name: target } : { schema: target, name: old.name }, false, [old]);
     return undefined;
   }
   if (NOT_A_CALL_SITE.test(maskedText)) return undefined;

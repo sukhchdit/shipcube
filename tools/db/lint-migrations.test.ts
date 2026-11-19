@@ -1185,6 +1185,25 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
     expect(findings[0]?.message).toMatch(/an E-string continued on a new line is refused \(PR293-SEC-02\)/);
   });
 
+  /** An EXECUTE of a hex-obfuscated set_config('app.org_id', …) as an E-string continued on a new line (R3-M1 probe). */
+  const CONTINUED_EXECUTE = "EXECUTE E'SELECT s\\x65t_config(\\x27\\x61pp.org_id\\x27, \\x27x\\x27, true)'\n'';";
+
+  it('[TASK-293 R3-M1] rule 16: a DO block whose body holds a continued E-string is refused as an E-string, as the uncontinued control is', () => {
+    const findings = lintTexts('r3m1-do', [`DO $$ BEGIN ${CONTINUED_EXECUTE} END $$;`]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '16']]);
+    expect(findings[0]?.[3]).toMatch(/E-prefixed escape string/);
+    const control = lintTexts('r3m1-do-control', [`DO $$ BEGIN ${CONTINUED_EXECUTE.replace("'\n'';", "';")} END $$;`]);
+    expect(ruleOf(control)).toEqual([[0, 'migration.sql', '16']]);
+  });
+
+  it('[TASK-293 R3-M1] rule 16: a PL/pgSQL routine body holding a continued E-string is refused as an E-string (rule 16 reports one finding per statement, the context write first; without the mark only the dynamic-SQL finding would remain)', () => {
+    const findings = lintTexts('r3m1-fn', [
+      `CREATE FUNCTION public.fixture_cont() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${CONTINUED_EXECUTE} END $$;`,
+    ]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '16']]);
+    expect(findings[0]?.[3]).toMatch(/^writes the tenant request context in SQL \(E-prefixed escape string\)/);
+  });
+
   it('[PR293-SEC-01] rule 10 body forms scale linearly: time(4n) / time(n) < 8 on an adversarial body with every statement start', () => {
     const body = (n: number) => `as${' in insert into t on conflict open c for'.repeat(n)}`;
     const fastest = (text: string) =>
@@ -1277,6 +1296,45 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
     const findings = lintTexts(`sec01-${shape.replace(/\W+/g, '-').slice(0, 60)}`, [migration]);
     expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
     expect(findings[0]?.[3]).toMatch(message);
+  });
+
+  it('[TASK-293 R3-n1] a row lock inside a WITH query of a FOR … IN loop is clean; a data-modifying CTE there, and an UPDATE CTE, stay data-changing', () => {
+    expect(
+      lintTexts('r3n1-lock', [DO('FOR r IN WITH x AS (SELECT 1) SELECT id FROM public.fixture_items FOR UPDATE LOOP NULL; END LOOP;')]),
+    ).toEqual([]);
+    expect(
+      lintTexts('r3n1-no-key', [
+        DO('FOR r IN WITH x AS (SELECT 1) SELECT id FROM public.fixture_items FOR NO KEY UPDATE LOOP NULL; END LOOP;'),
+      ]),
+    ).toEqual([]);
+    expect(
+      ruleOf(
+        lintTexts('r3n1-delete', [
+          DO('FOR r IN WITH d AS (DELETE FROM public.fixture_items RETURNING id) SELECT id FROM d LOOP NULL; END LOOP;'),
+        ]),
+      ),
+    ).toEqual([[0, 'migration.sql', '10']]);
+    expect(
+      ruleOf(
+        lintTexts('r3n1-update', [
+          DO("FOR r IN WITH u AS (UPDATE public.fixture_items SET note = 'x' RETURNING id) SELECT id FROM u LOOP NULL; END LOOP;"),
+        ]),
+      ),
+    ).toEqual([[0, 'migration.sql', '10']]);
+  });
+
+  it('[TASK-293 R3-n2] RENAME TO is tracked when the argument list holds parenthesised types (numeric(10,2), varchar(20)) and a quoted type name', () => {
+    const writer =
+      'CREATE FUNCTION public.fixture_typed(a numeric(10,2), b varchar(20)) RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+    const findings = lintTexts('r3n2', [
+      `${writer}\nALTER FUNCTION public.fixture_typed(numeric(10,2), varchar(20)) RENAME TO fixture_typed2;\nSELECT public.fixture_typed2(1, 'x');`,
+    ]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
+    expect(findings[0]?.[3]).toMatch(/^call of public\.fixture_typed2, /);
+    const quoted = lintTexts('r3n2-quoted', [
+      `${writer}\nALTER FUNCTION public.fixture_typed(numeric(10,2), "my(type") SET SCHEMA platform;\nSELECT platform.fixture_typed(1, 'x');`,
+    ]);
+    expect(ruleOf(quoted)).toEqual([[0, 'migration.sql', '10']]);
   });
 
   it('[PR293-SEC-01] controls: row locks, IN (SELECT …), a cursor over a SELECT … FOR UPDATE, a string holding ; without DML and a reading routine whose name cannot be read are clean', () => {

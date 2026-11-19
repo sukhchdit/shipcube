@@ -585,7 +585,6 @@ export async function invitedMemberships(client: Client): Promise<Row[]> {
   return rows(client, `SELECT count(*)::int AS n FROM public.memberships WHERE status = 'INVITED'`);
 }
 
-/** [SEC-TC-74] [PR26-SEC-03] the standard-columns guard on the real tables, and a re-parenting UPDATE. */
 /**
  * [SEC-TC-74] PR43-SEC-07 remainder on the real tables (PR65-SEC-05 (d), D-SEC-PR47-01 (3); security record PR-0065
  * §5.4; TASK-293): a version reset to 1 after a correct bump; back-dated timestamps (unconstrained, RR-18) on UPDATE and
@@ -659,6 +658,7 @@ export async function stdColumnsRemainder(client: Client): Promise<Record<string
   };
 }
 
+/** [SEC-TC-74] [PR26-SEC-03] the standard-columns guard on the real tables, and a re-parenting UPDATE. */
 export async function stdColumns(client: Client): Promise<Record<string, string>> {
   const { orgA, orgB, userA, membershipA } = await world(client);
   await asApp(client, orgA, userA);

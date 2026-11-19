@@ -455,8 +455,10 @@ export function sqlText(sql: string, keepStrings: boolean): string {
       const body = literalBody(token);
       try {
         return ` ${sqlText(body, keepStrings)} `;
-      } catch {
-        return ` ${body} `;
+      } catch (error) {
+        // A body holding a continued E-string (PR293-SEC-02) does not lex, but it IS an escape string: keep the mark, so
+        // rule 16 and the C-series scan still refuse it (TASK-293 code review R3-M1). Strings blanked: no mark exists.
+        return keepStrings && error instanceof EscapeContinuationError ? ` ${ESCAPE_STRING_MARK}${body} ` : ` ${body} `;
       }
     })
     .join('');
