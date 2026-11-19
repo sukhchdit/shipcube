@@ -3860,3 +3860,34 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - An overnight host sleep stretched the TASK-292 run to 13.5 h; it errored, was moved aside, and was re-run (PASS `20261119T0406Z_c9a0f3c`).
   - An orphan-wait bug lifted the lock while that re-run held it, so 287-B ran concurrently. Both passed. The wait now lifts only a lock still owned by the orphan's worktree, once its summary exists and no containers remain.
 - **Reversibility:** High.
+
+### D-SEC-PR65-01 · 2026-11-19 · security-analyst · PR #65 (TASK-037) security r1 at 29be7be: PASS_WITH_CONDITIONS; DR-A14 policies and the standard-columns guard signed off (D-ORCH-COORD-03); SEC-TC-76..78 assigned
+- **Decision:** PR #65 r1 at code head `29be7be` = **PASS_WITH_CONDITIONS** (0 Critical, 0 High, 0 Medium; 2 LOW, 3 INFO). Record: `docs/05-quality/security/PR-0065-TASK-037-security-review.md` (Head row `29be7be`; the pushed tip `29be7be` + an evidence-only commit keeps the binding, as does a later merge of `main` that brings no path the PR changes; record simulation S1–S5 pass, C1–C6 fail as expected).
+  - **Sign-off (D-ORCH-COORD-03; PR11-SEC-10 and PR26-SEC-03 closed, subject to C1):**
+    - The ten RLS and guard blocks equal the renderer's output, and both function templates are verbatim.
+    - ENABLE + FORCE on all five tables. `platform_app` has SELECT/INSERT/UPDATE (no DELETE), `platform_definer` SELECT on the four definerRead tables only, no column or PUBLIC grants.
+    - `app_is_operator()` is definer-owned with a fixed path, EXECUTE app + definer only; its early placement (D-TASK037-06) exposes nothing.
+    - D-ARCH-151's reserved row plus AT-US-061-02 close "create a first OPERATOR organisation".
+    - D-ARCH-154..156 work as ruled, each with a killed mutant. `p_users__org_member_read` is signed off citing the membership lifecycle guard.
+  - **C1 (orchestrator, at merge; no new security round unless an observation differs):** the credited lane-B run on the `29be7be` tree (PostgreSQL 18) shows:
+    - migrations up/down/up;
+    - catalog-c1-c14 incl. C3, the C11 helper rows and the 16 `[SEC-TC-74]` C15 cases;
+    - all 19 `organisations.int.test.ts` blocks passing, none skipped;
+    - rls-cross-tenant committed layer with unchanged observations (rulings §2.5).
+  - **Rulings:**
+    - D-TASK037-14: sufficient. The R1-m2 two-organisation cases prove WITH CHECK, C3 pins the deparsed `with_check`, and the generated expectation matches the marker. A `WITH CHECK (true)` mutant is invisible to the generated suite and caught by R1-m2.
+    - D-TASK037-16 `timezone`: accepted (probed head vs main).
+    - D-TASK037-08: accepted (500, rule code to the log only).
+    - D-TASK037-27: accepted as routed (R2-n2), with PR65-SEC-04 (d).
+    - C10 classes: accepted (`token_hash` SECRET, e-mails and names PERSONAL).
+    - **T1 (with T2 and R1-m2), T3 and T4 (with T5–T8) carry SEC-TC-76, -77 and -78.** They are tagged by TASK-293, added to `integration.required_cases` by qa-lead in the same commit (with the catalog `min_tests` ratchet of D-SEC-PR47-01 (2) and the PR43-SEC-07 remainder cases), and the rows are added to the threat-model SEC-TC table. Due before TASK-049 merges.
+  - **PR65-SEC-01 (LOW, CWE-203):** `ux_membership_roles__membership_role_live` lacks `org_id`. A unique check runs before the composite FK, so A learns whether B's membership holds a role (`23505` vs `23503`) and briefly blocks B's grant. This corrects D-ARCH-154 §2.1/§2.2. Fix: `(org_id, membership_id, role_id) WHERE revoked_at IS NULL` (validated) plus a C16 rule that unique TENANT indexes contain `org_id`. In this PR if it gets another code cycle, else TASK-293 expand migration, before TASK-231 merges.
+  - **PR65-SEC-02 (LOW, latent, CWE-269):** from a context naming `OPERATOR_ORG_ID`, any actor can self-insert an ACTIVE operator membership and an `OPERATOR_SUPER_ADMIN` link, then read every tenant. The database cannot tell this from provisioning. Bound: context integrity.
+    - Card lines: TASK-049/224 set `app.org_id` only after an ACTIVE-membership check (never from a client value, a claim or `last_active_org_id`; abuse case with `OPERATOR_ORG_ID`). TASK-227 creates a membership only from a PENDING invitation of the context organisation for the verified e-mail and grants exactly its role.
+    - principal-architect decides a database rule for OPERATOR-organisation membership inserts before TASK-089.
+  - **INFO:**
+    - PR65-SEC-03: existence-oracle inventory. TASK-049: uniform answer on `ux_users__email`; no credentials or auth flows for `is_system` users.
+    - PR65-SEC-04: INVITED reachable by UPDATE (comment overstates; guard clause at the next function replacement); PARTNER organisation + PARTNER role creatable below the service (M3); the subject can write its own `users` security columns (TASK-049/057 keep them server-controlled; architect on a users transition guard); caller-supplied `granted_by` (TASK-231 derives it from the actor).
+    - PR65-SEC-05: evidence binding (above).
+- **Why:** COORD-03 made the security sign-off a merge condition. The migration becomes immutable at merge, so the ruled controls were probed on the database, not only read. PGlite is PostgreSQL 17.5, hence C1.
+- **Reversibility:** High (review record; the LOW fixes are an index and a trigger clause).
