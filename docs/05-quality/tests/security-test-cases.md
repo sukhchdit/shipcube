@@ -8,6 +8,8 @@ Version 1.0 · 2026-11-12 · owner qa-lead · status: **adopted** (all 64). Sour
 
 *Amendment (qa-lead, 2026-11-19, D-QA-021).* qa-lead acknowledges the TASK-293 rows and the `required-suites.json` edits of PR #65 and PR #72. The title and rule 6 now read 67 (01..64 and 76..78), as does TEST-STRATEGY.md §15 item 6 (PR #72 code review R2-n3). The "Counts" table and its 2026-11-12 check are history and are not restated. SEC-TC-74 is required but still listed under "Proposed": see adoption note 5 there.
 
+*Amendment (qa-lead, 2026-11-19, D-QA-022).* SEC-TC-15 wording aligned with D-ARCH-142 / D-SECT39-01 and threat model v1.2 §10.4 H (per-actor budget, aggregated crossing entry with the closed `details` set and no count, 429 without a write, carry into the next window). Same ID, suite, lanes and gated story; no count changed.
+
 ## Rules for every case
 
 1. **Tagging.** Every test implementing a case carries `@security` and the case ID in its title, e.g. `it('[SEC-TC-38] @security refresh at 30 d + 1 s returns SESSION_EXPIRED', …)`. A case may need several tests (API + DB + log scan); all of them carry the ID and all must pass.
@@ -37,7 +39,7 @@ Legend for **Lane**: A = hosted fast lane; A* = hosted `security-integration` on
 | SEC-TC-12 | 50 rps of wrong recovery codes: p95 of other routes stays within NFR-PERF-001; recovery codes are a single HMAC lookup (no bcrypt fan-out) | K6 + UNIT | `k6-abuse` (`recovery-flood`) (+ `unit`) | B wave/gate | US-023, US-024 | Wave with US-023 (k6 at wave end) | T-24 |
 | SEC-TC-13 | Password re-auth is refused for the TOTP-disable scope (needs TOTP proof) | API | `identity-session` | B, C | US-291 (US-026 Should for the UI) | Wave with US-291 | T-25 |
 | SEC-TC-14 | Two 100-byte passwords sharing their first 72 bytes are distinct | UNIT | `unit` | A, C | US-015 | Wave 0/1 identity | T-29 |
-| SEC-TC-15 | A Viewer's denied-request flood is throttled; the audit holds ≤ N entries plus a summary entry | API | `abuse` | B, C | US-069 | Wave 0/1 | T-39 |
+| SEC-TC-15 | Per-actor denial budget (D-ARCH-142; threat model §10.4 H): N+2 denied requests by one Viewer in one 60 s window give N individual `PERMISSION_DENIED` entries (no `aggregated` key), then one aggregated entry for the crossing request N+1 whose stored `details` deep-equal the closed set {`required_permission`, `aggregated: true`, `threshold`, `window_seconds: 60`, `window_ends_at`}, with no `count`; denials N+1 and N+2 answer 429 `RATE_LIMITED` with `Retry-After` and the `RateLimit-*` headers, and denial N+2 writes nothing; the first denial of the next window carries `suppressed_in_previous_window` = 1. The budget is keyed by organisation and actor, never by IP: a changed client IP does not reset it | API | `abuse` | B, C | US-069 | Wave 0/1 | T-39; D-ARCH-142, D-SECT39-01 |
 | SEC-TC-16 | Mixed anonymous load keeps login-failure p95 within budget; afterwards every SYSTEM shard's chain verifies | K6 + DB | `k6-abuse` (`anon-mix`) + `audit-chain` | B wave/gate | US-017, US-092 | Wave end after US-092 | T-85 |
 | SEC-TC-17 | Superuser rewrites an entry and recomputes the chain → signed checkpoint mismatch detected (extended by SEC-TC-44) | RLS-INT | `audit-chain` | B, C | US-092, US-093 | Wave 0/1 audit package | T-84; **SEC-COND-03** |
 | SEC-TC-18 | The audit-off `-bench` image (build-time profile, ADR-0007 am. 4) refuses to start unless `APP_ENV` is `local` or `test`; `APP_ENV` has no `benchmark` value (ADR-0018; wording aligned 2026-11-13, PR27-SEC-05) | CFG | `config-guards` | A, C | US-086, US-002 | Wave 0 | T-88 |

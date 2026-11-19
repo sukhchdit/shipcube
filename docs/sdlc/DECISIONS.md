@@ -4374,3 +4374,16 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Alternatives:** move SEC-TC-74 now with a `test-ids.test.ts` edit (rejected: not docs only, needs lane A on a PR); regenerate the map now (rejected: stale lane-B evidence for every open PR, no gate effect); count SEC-TC-74 in the G3 line while it is listed as proposed (rejected: the line would disagree with `parseSecurityCases`).
 - **Applied in:** `docs/05-quality/TEST-STRATEGY.md` 1.5; `docs/05-quality/tests/security-test-cases.md`. Not edited: `gherkin-test-map.md`, story files, `required-suites.json`.
 - **Reversibility:** High (docs only).
+
+### D-QA-022 · 2026-11-19 · qa-lead · SEC-TC-15 wording aligned with the per-actor denial budget (D-ARCH-142, D-SECT39-01, threat model v1.2 §10.4 H)
+- **Input:** D-SECT39-01 "Routed" (SEC-TC-15 wording in `security-test-cases.md` → qa-lead, per D-ARCH-142), relayed by the orchestrator.
+- **Decision:** the SEC-TC-15 row now states the case that TASK-041 must pass. N+2 denials by one Viewer in one 60 s window give:
+  - N individual `PERMISSION_DENIED` entries with no `aggregated` key;
+  - one aggregated entry for the crossing request, whose stored `details` deep-equal the closed set {`required_permission`, `aggregated: true`, `threshold`, `window_seconds: 60`, `window_ends_at`}, with no `count`;
+  - 429 `RATE_LIMITED` with `Retry-After` / `RateLimit-*` for denials N+1 and N+2, and no write for N+2;
+  - `suppressed_in_previous_window` = 1 on the first denial of the next window.
+
+  The budget is keyed by organisation and actor, never by IP. The old wording ("≤ N entries plus a summary entry") left the key and the entry shape open. The `details` deep-equal is the redaction tripwire that D-SECT39-01 item 2 names.
+- **Unchanged:** ID, type, suite `abuse`, lanes, gated story, placement; the adopted count (67) and the manifest.
+- **Applied in:** `docs/05-quality/tests/security-test-cases.md` (row and amendment line).
+- **Reversibility:** High (docs only).
