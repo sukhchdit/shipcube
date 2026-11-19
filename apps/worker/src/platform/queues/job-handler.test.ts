@@ -11,7 +11,14 @@ import { UnrecoverableError } from 'bullmq';
 import { jobLogContext } from '../logging/job-context.js';
 import type { DeadLetterRecord } from './dead-letter.js';
 import { NonRetryableError } from './errors.js';
-import { createJobHandler, type DeadLetterSink, type HandledJob, type JobProcessor, persistedFailure } from './job-handler.js';
+import {
+  createJobHandler,
+  createStalledFailureRecorder,
+  type DeadLetterSink,
+  type HandledJob,
+  type JobProcessor,
+  persistedFailure,
+} from './job-handler.js';
 
 const SENTINEL = 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.sentinelsig';
 const TOKEN = 'tok_live_secret_value';
@@ -27,11 +34,19 @@ interface Harness {
   readonly updates: unknown[];
   readonly lines: Record<string, unknown>[];
   readonly processed: string[];
+  /** Queues passed to onDeadLettered (the counter). */
+  readonly counted: string[];
   handle(job: Partial<HandledJob> & { data: unknown }, processor?: JobProcessor): Promise<void>;
   failWith(sink: 'add' | 'update', error: Error): void;
 }
 
-function harness(queue: 'outbox-relay' | 'housekeeping' = 'outbox-relay'): Harness {
+interface HarnessOptions {
+  readonly deadLetterCount?: number;
+  readonly deadlineMs?: number;
+}
+
+function harness(queue: 'outbox-relay' | 'housekeeping' = 'outbox-relay', options: HarnessOptions = {}): Harness {
+  const counted: string[] = [];
   const added: Added[] = [];
   const updates: unknown[] = [];
   const processed: string[] = [];
@@ -41,14 +56,23 @@ function harness(queue: 'outbox-relay' | 'housekeeping' = 'outbox-relay'): Harne
   const deadLetter: DeadLetterSink = {
     add: (name, record, options) => {
       if (failing.add !== undefined) return Promise.reject(failing.add);
+      // BullMQ ignores an add whose id exists (the stored record stays).
+      if (options.jobId !== undefined && added.some((entry) => entry.options['jobId'] === options.jobId)) return Promise.resolve();
       added.push({ name, record, options });
       return Promise.resolve();
     },
+    getJob: (id) =>
+      Promise.resolve(added.find((entry) => entry.options['jobId'] === id)?.record).then((data) =>
+        data === undefined ? undefined : { data },
+      ),
+    getWaitingCount: () => Promise.resolve(added.length),
+    clean: (_grace, limit) => Promise.resolve(added.splice(0, limit).map((entry) => String(entry.options['jobId']))),
   };
   return {
     added,
     updates,
     processed,
+    counted,
     get lines() {
       return raw.flatMap((chunk) =>
         chunk
@@ -65,15 +89,17 @@ function harness(queue: 'outbox-relay' | 'housekeeping' = 'outbox-relay'): Harne
         queue,
         log,
         deadLetter,
+        onDeadLettered: (name) => counted.push(name),
+        ...options,
         processor:
           processor ??
           ((payload) => {
-            processed.push(payload.id);
+            processed.push('id' in payload ? payload.id : payload.schedule);
             return Promise.resolve();
           }),
       });
       return handler({
-        id: 'outbox_event.x',
+        id: keyOf(job.data),
         name: 'outbox_event',
         attemptsMade: 0,
         opts: { attempts: 5 },
@@ -86,6 +112,12 @@ function harness(queue: 'outbox-relay' | 'housekeeping' = 'outbox-relay'): Harne
       });
     },
   };
+}
+
+/** The job id the dequeue check expects for an aggregate payload: <kind>.<id>. */
+function keyOf(data: unknown): string {
+  const { kind, id } = (data ?? {}) as { kind?: unknown; id?: unknown };
+  return typeof kind === 'string' && typeof id === 'string' ? `${kind}.${id}` : 'outbox_event.x';
 }
 
 const payload = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -155,8 +187,8 @@ describe('job handler', () => {
     expect(h.added).toHaveLength(1);
     expect(h.added[0]).toMatchObject({
       name: 'outbox_event',
-      record: { queue: 'outbox-relay', job_id: 'outbox_event.x', reason: 'RETRIES_EXHAUSTED', error: 'Error', attempts: 5, data },
-      options: { jobId: 'outbox_event.x.dead.5', removeOnComplete: false, removeOnFail: false },
+      record: { queue: 'outbox-relay', job_id: keyOf(data), reason: 'RETRIES_EXHAUSTED', error: 'Error', attempts: 5, data },
+      options: { jobId: `${keyOf(data)}.dead.5`, removeOnComplete: false, removeOnFail: false },
     });
     expect(JSON.stringify(h.added)).not.toContain('sentinelsig');
     expect(h.lines).toContainEqual(
@@ -186,9 +218,10 @@ describe('job handler', () => {
     }
   });
 
-  it('[R1-M1] a job with an auto-increment id ("7") gets a record id BullMQ accepts; a job without an id gets none', async () => {
+  it('[R1-M1][PR64-SEC-07] a job with an auto-increment id ("7") is refused at dequeue with a record id BullMQ accepts; a job without an id gets none', async () => {
     const auto = harness();
-    await caught(auto.handle({ id: '7', data: payload() }, () => Promise.reject(new NonRetryableError('VALIDATION_ERROR'))));
+    expect((await caught(auto.handle({ id: '7', data: payload() }))).message).toBe('PAYLOAD_INVALID');
+    expect(auto.processed).toEqual([]);
     expect(auto.added[0]?.options).toEqual({ jobId: '7.dead.1', removeOnComplete: false, removeOnFail: false });
     const none = harness();
     await caught(none.handle({ id: undefined, data: payload() }, () => Promise.reject(new NonRetryableError('VALIDATION_ERROR'))));
@@ -249,5 +282,158 @@ describe('job handler', () => {
     expect(error.message).toBe('PERMISSION_DENIED');
     expect(h.lines).toContainEqual(expect.objectContaining({ event: 'worker.dead_letter_write_failed', error: 'Error' }));
     expect(JSON.stringify(h.lines)).not.toContain('sentinelsig');
+    // The failed write still counts: the counter is +1 per final failure, written or not (D-ARCH-160).
+    expect(h.counted).toEqual(['outbox-relay']);
+  });
+});
+
+describe('US-010 dequeue refusals (D-PM-072 wording; ADR-0013 am. 1 items 2-3)', () => {
+  it.each([
+    ['without kind', (data: Record<string, unknown>) => Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'kind')), false],
+    ['without id', (data: Record<string, unknown>) => Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'id')), false],
+    ['carrying org_id', (data: Record<string, unknown>) => ({ ...data, org_id: randomUUID() }), true],
+    ['carrying actor_id', (data: Record<string, unknown>) => ({ ...data, actor_id: randomUUID() }), true],
+  ] as const)(
+    '[AT-US-010-04] a delivered job %s is PAYLOAD_INVALID after one attempt and dead-lettered',
+    async (_label, edit, mismatch) => {
+      const h = harness();
+      const data = edit(payload());
+      const error = await caught(h.handle({ id: `outbox_event.${randomUUID()}`, data }));
+      expect(error).toBeInstanceOf(UnrecoverableError);
+      expect(error.message).toBe('PAYLOAD_INVALID');
+      expect(h.processed).toEqual([]);
+      expect(h.added).toHaveLength(1);
+      expect(h.added[0]?.record).toMatchObject({ reason: 'PAYLOAD_INVALID', attempts: 1 });
+      expect(h.lines.some((line) => line['event'] === 'job_context_mismatch' && line['event_type'] === 'security')).toBe(mismatch);
+    },
+  );
+});
+
+describe('[PR64-SEC-07] job identity and per-job deadline', () => {
+  it('refuses a job whose id names another aggregate than its payload, or whose name is not the kind', async () => {
+    for (const job of [{ id: `outbox_event.${randomUUID()}` }, { name: 'saga' }]) {
+      const h = harness();
+      const data = payload();
+      const error = await caught(h.handle({ ...job, data }));
+      expect(error.message).toBe('PAYLOAD_INVALID');
+      expect(h.processed).toEqual([]);
+      expect(h.lines.some((line) => line['event'] === 'job_context_mismatch')).toBe(false);
+    }
+  });
+
+  it('gives the processor the correlation id and a live signal; a processor past its deadline is aborted and the attempt is transient', async () => {
+    const h = harness('outbox-relay', { deadlineMs: 20 });
+    const seen: { signal?: AbortSignal; correlationId?: string } = {};
+    const error = await caught(
+      h.handle({ data: payload() }, (_payload, job) => {
+        seen.signal = job.signal;
+        seen.correlationId = job.correlationId;
+        expect(job.signal.aborted).toBe(false);
+        return new Promise<void>(() => undefined);
+      }),
+    );
+    expect(seen.correlationId).toBe('demo-booking-0001');
+    expect(seen.signal?.aborted).toBe(true);
+    expect(error.message).toBe('TRANSIENT');
+    expect(h.lines).toContainEqual(expect.objectContaining({ event: 'worker.job_failed', reason: 'TRANSIENT', error: 'JobDeadlineError' }));
+  });
+
+  it('a processor that rejects after its deadline is no unhandled rejection', async () => {
+    const h = harness('outbox-relay', { deadlineMs: 5 });
+    const late = new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('late')), 30));
+    await caught(h.handle({ data: payload() }, () => late));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+});
+
+describe('scheduled jobs at dequeue (D-TASK039-01)', () => {
+  it('runs a scheduled occurrence with the occurrence as its correlation id, and refuses a forged one', async () => {
+    const h = harness('housekeeping');
+    let correlation = '';
+    await h.handle(
+      { id: 'repeat:queue-retention:1763550000000', name: 'queue-retention', data: { v: 2, schedule: 'queue-retention' } },
+      (payload, job) => {
+        correlation = job.correlationId;
+        h.processed.push('schedule' in payload ? payload.schedule : 'aggregate');
+        return Promise.resolve();
+      },
+    );
+    expect(h.processed).toEqual(['queue-retention']);
+    expect(correlation).toBe('queue-retention-1763550000000');
+    const forged = harness('housekeeping');
+    const error = await caught(
+      forged.handle({ id: 'queue-retention.1', name: 'queue-retention', data: { v: 2, schedule: 'queue-retention' } }),
+    );
+    expect(error.message).toBe('PAYLOAD_INVALID');
+  });
+});
+
+describe('[PR64-SEC-04][PR64-SEC-08] dead-letter write: counter, duplicate record, count trim', () => {
+  const fail = (): Promise<void> => Promise.reject(new NonRetryableError('VALIDATION_ERROR'));
+
+  it('counts +1 per final failure and +0 for an attempt that is retried', async () => {
+    const h = harness();
+    await caught(h.handle({ data: payload(), attemptsMade: 0 }, () => Promise.reject(new Error('x'))));
+    expect(h.counted).toEqual([]);
+    await caught(h.handle({ data: payload(), attemptsMade: 4 }, () => Promise.reject(new Error('x'))));
+    expect(h.counted).toEqual(['outbox-relay']);
+  });
+
+  it('logs worker.job_dead_lettered only when the add created the record; a reused record id logs worker.dead_letter_duplicate', async () => {
+    const h = harness();
+    const data = payload();
+    await caught(h.handle({ data }, fail));
+    // An operator retry with resetAttemptsMade fails again on attempt 1: same record id, BullMQ ignores the add.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await caught(h.handle({ data }, fail));
+    expect(h.added).toHaveLength(1);
+    const events = h.lines.map((line) => line['event']);
+    expect(events.filter((event) => event === 'worker.job_dead_lettered')).toHaveLength(1);
+    expect(events.filter((event) => event === 'worker.dead_letter_duplicate')).toHaveLength(1);
+    expect(h.counted).toEqual(['outbox-relay', 'outbox-relay']);
+  });
+
+  it('trims the oldest records above the count bound after a write, and makes no clean call at or below it', async () => {
+    const h = harness('outbox-relay', { deadLetterCount: 2 });
+    for (let index = 0; index < 2; index += 1) await caught(h.handle({ data: payload() }, fail));
+    expect(h.lines.some((line) => line['event'] === 'worker.dead_letter_trimmed')).toBe(false);
+    const third = payload();
+    await caught(h.handle({ data: third }, fail));
+    expect(h.added).toHaveLength(2);
+    expect(h.added[1]?.record.job_id).toBe(keyOf(third));
+    expect(h.lines).toContainEqual(expect.objectContaining({ event: 'worker.dead_letter_trimmed', queue: 'outbox-relay', count: 1 }));
+  });
+});
+
+describe('[PR64-SEC-08] a job BullMQ failed itself after too many stalls', () => {
+  it('gets a worker.job_failed line (reason STALLED), a dead-letter record and a count', async () => {
+    const added: DeadLetterRecord[] = [];
+    const raw: string[] = [];
+    const counted: string[] = [];
+    const log = createRuntimeLog('worker', { write: (line: string) => raw.push(line) }, { level: 'debug' });
+    const record = createStalledFailureRecorder({
+      queue: 'outbox-relay',
+      log,
+      onDeadLettered: (name) => counted.push(name),
+      deadLetter: {
+        add: (_name, entry) => {
+          added.push(entry);
+          return Promise.resolve();
+        },
+        getJob: () => Promise.resolve(undefined),
+        getWaitingCount: () => Promise.reject(new Error('trim read failed')),
+        clean: () => Promise.resolve([]),
+      },
+    });
+    await record({ id: 'outbox_event.x', name: 'outbox_event', data: payload(), attemptsMade: 1 });
+    expect(added).toEqual([expect.objectContaining({ reason: 'STALLED', error: 'NonRetryableError', attempts: 1 })]);
+    expect(counted).toEqual(['outbox-relay']);
+    const lines = raw
+      .join('')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ event: 'worker.job_failed', reason: 'STALLED', final: true }));
+    expect(lines).toContainEqual(expect.objectContaining({ event: 'worker.dead_letter_trim_failed', error: 'Error' }));
   });
 });

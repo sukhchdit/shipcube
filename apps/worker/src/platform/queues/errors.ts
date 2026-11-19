@@ -21,6 +21,11 @@ export const NON_RETRYABLE_REASONS = [
   'NO_PROCESSOR',
   /** A processor threw BullMQ's own UnrecoverableError (or an error named so) without one of the reasons above. */
   'UNRECOVERABLE',
+  /**
+   * BullMQ failed the job itself before any processor ran: it stalled more often than `maxStalledCount` allows (a worker
+   * died with it, again and again), recorded by the consumer's `failed` listener (PR64-SEC-08, TASK-039).
+   */
+  'STALLED',
 ] as const;
 export type NonRetryableReason = (typeof NON_RETRYABLE_REASONS)[number];
 

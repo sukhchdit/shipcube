@@ -2,7 +2,7 @@
 // `{ v: 2, kind, id, correlation_id, trace_context }`. No org_id, no actor_id, no business data: the worker resolves
 // the tenant context from PostgreSQL (`platform.job_context(kind, id)`, TASK-047), so a forged or edited job cannot act
 // inside another tenant. Validated at dequeue against the queue's schema (closed object, no conversion); anything
-// else is a non-retryable PAYLOAD_INVALID.
+// else is a non-retryable PAYLOAD_INVALID. The forgery signal and the bounds of the check are PR64-SEC-06 (TASK-039).
 import Joi from 'joi';
 
 import { CORRELATION_ID_PATTERN } from '../correlation/correlation-id.js';
@@ -124,21 +124,89 @@ export type PayloadValidation =
   | { readonly ok: true; readonly payload: JobPayloadV2 }
   | {
       readonly ok: false;
-      /** `<path>: <joi type>` per issue: key paths and rule names only, never a value. */
+      /** `<path>: <joi type>` per issue: key paths and rule names only, never a value; at most MAX_ISSUES + 1 entries. */
       readonly issues: readonly string[];
-      /** True when the payload carries tenant context (org_id / actor_id): a forgery signal (ADR-0013 am. 1 item 2). */
+      /** True when the payload carries tenant context (any spelling, any depth) or an own `__proto__`: a forgery signal. */
       readonly carriesTenantContext: boolean;
     };
 
-const TENANT_KEYS = ['org_id', 'actor_id', 'orgId', 'actorId'];
+/** Issues listed per refusal; the rest are summarised in one `(+N more)` entry (PR64-SEC-06). */
+export const MAX_ISSUES = 20;
+/** Own keys a payload may have before the check refuses it without running the schema (5 are allowed). */
+export const MAX_PAYLOAD_KEYS = 32;
+/** Bounds of the forgery-signal walk: nesting depth and keys examined. */
+const SIGNAL_MAX_DEPTH = 4;
+const SIGNAL_MAX_KEYS = 256;
+
+/**
+ * Tenant-context key spellings, compared after key folding (`normaliseKey`: NFKC, lower case, no
+ * separators), so `ORG_ID`, `OrgId`, `orgID`, `org-id`, `tenant_id`, `organisation_id`, `actorID` and `actor_type` all
+ * match (PR64-SEC-06).
+ */
+const TENANT_KEY = /^(?:org|organisation|organization|tenant|actor)(?:id|type)?$/;
+
+/**
+ * Key folding for the tenant-key comparison, as the logger folds keys (NFKC, lower case, only [a-z0-9]); the first 256
+ * characters only, so a long key stays cheap. Local: the queues subpath may not import the logging module.
+ */
+function normaliseKey(key: string): string {
+  return key
+    .slice(0, 256)
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The forgery signal (ADR-0013 am. 1 item 2; PR64-SEC-06): a tenant-context key at any depth (a bounded walk), or an
+ * own `__proto__` key (which `JSON.parse` of the job data creates, and Joi's clone would silently drop).
+ */
+export function carriesTenantContext(value: unknown): boolean {
+  let examined = 0;
+  const walk = (node: unknown, depth: number): boolean => {
+    if (depth > SIGNAL_MAX_DEPTH || typeof node !== 'object' || node === null) return false;
+    for (const key of Object.keys(node)) {
+      examined += 1;
+      if (examined > SIGNAL_MAX_KEYS) return false;
+      if (key === '__proto__' || TENANT_KEY.test(normaliseKey(key))) return true;
+      if (walk((node as Record<string, unknown>)[key], depth + 1)) return true;
+    }
+    return false;
+  };
+  return walk(value, 0);
+}
+
+/** Caps an issue list at MAX_ISSUES entries plus one summary entry. */
+export function capIssues(issues: readonly string[]): string[] {
+  if (issues.length <= MAX_ISSUES) return [...issues];
+  return [...issues.slice(0, MAX_ISSUES), `(+${String(issues.length - MAX_ISSUES)} more)`];
+}
+
+/**
+ * Checks done before any schema: an own `__proto__` key is refused (a schema clone would drop it and accept the rest),
+ * and a payload with more than MAX_PAYLOAD_KEYS own keys is refused without walking them (P1: 100k keys cost 489 ms
+ * and a 2.4 MB message).
+ */
+export function structuralIssues(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const keys = Object.keys(value);
+  if (keys.length > MAX_PAYLOAD_KEYS) return ['(root): object.max'];
+  return keys.includes('__proto__') ? ['__proto__: object.unknown'] : [];
+}
 
 /** Validates a dequeued payload against its queue's schema. Never throws. */
 export function validateJobPayload(definition: QueueDefinition, value: unknown): PayloadValidation {
-  const carriesTenantContext = typeof value === 'object' && value !== null && TENANT_KEYS.some((key) => Object.hasOwn(value, key));
+  const signal = carriesTenantContext(value);
+  const structural = structuralIssues(value);
+  if (structural.length > 0) return { ok: false, issues: structural, carriesTenantContext: signal };
   const result = payloadSchemaFor(definition).validate(value);
-  if (result.error === undefined && !carriesTenantContext) return { ok: true, payload: result.value as JobPayloadV2 };
+  if (result.error === undefined && !signal) return { ok: true, payload: result.value as JobPayloadV2 };
   const issues = (result.error?.details ?? []).map((detail) => `${detail.path.join('.') || '(root)'}: ${detail.type}`);
-  return { ok: false, issues, carriesTenantContext };
+  return { ok: false, issues: capIssues(issues), carriesTenantContext: signal };
 }
 
 /** True for a value that is a valid payload for a queue with these kinds. */

@@ -14,8 +14,10 @@ import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit, type Config, type Secret } f
 import { createWorkerHealthServer, type MetricsSource } from './platform/health/server.js';
 import type { WorkerQueues } from './platform/queues/runtime.js';
 import { PROCESSORS } from './processors.js';
+import { COMPLETED_RETENTION, DEAD_LETTER_RETENTION, FAILED_RETENTION } from '@platform/shared/queues';
 import {
   createProductionQueues,
+  productionQueuesOptions,
   raiseStartupError,
   SHUTDOWN_SIGNALS,
   startWorker,
@@ -111,6 +113,8 @@ function harness(): Harness {
   const queues: WorkerQueues = {
     consuming: [],
     start: () => calls.push('queues.start'),
+    registerSchedules: () => Promise.resolve([]),
+    sweepRetention: () => Promise.resolve({ failed: 0, completed: 0, deadLetterAged: 0, deadLetterTrimmed: 0, failedQueues: [] }),
     metrics: () => {
       calls.push('queues.metrics');
       return Promise.resolve('platform_queue_jobs 0\n');
@@ -355,6 +359,28 @@ describe('[D-ORCH-073] WORKER_PROCESS: main.ts runs with the real process', () =
     expect(WORKER_PROCESS.createQueues).toBe(createProductionQueues);
     expect(WORKER_PROCESS.createHealthServer).toBe(createWorkerHealthServer);
     expect(WORKER_PROCESS.processors).toBe(PROCESSORS);
+  });
+
+  it('[PR64-SEC-04][R2-n2] the production queues get the three retention constants, the scheduled jobs and the right connection profile per client', () => {
+    const log = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    } as unknown as WorkerQueuesInput['log'];
+    const config = { REDIS_URL: { reveal: () => 'redis://worker:x@valkey:6379/0' } } as unknown as Config;
+    const options = productionQueuesOptions({ config, log, processors: PROCESSORS });
+    expect(options.retention).toEqual({ completed: COMPLETED_RETENTION, failed: FAILED_RETENTION, deadLetter: DEAD_LETTER_RETENTION });
+    expect(options.schedules).toEqual({});
+    expect(options.processors).toBe(PROCESSORS);
+    const workerProfile = options.connection as Record<string, unknown>;
+    const queueProfile = options.queueConnection as Record<string, unknown>;
+    expect([workerProfile['connectionName'], workerProfile['maxRetriesPerRequest'], workerProfile['commandTimeout']]).toEqual([
+      'worker-consumers',
+      null,
+      undefined,
+    ]);
+    expect([queueProfile['connectionName'], queueProfile['enableOfflineQueue']]).toEqual(['worker-queues', false]);
   });
 
   it('exitProcess is process.exit', () => {

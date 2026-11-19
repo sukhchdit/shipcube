@@ -161,12 +161,21 @@ async function settledFailure(
   jobId: string,
   count = 1,
 ): Promise<{ records: DeadLetterRecord[]; job: Job }> {
+  // D-ORCH-139: the job's failed state first, then the records, read fresh and only once each has its reason, so no
+  // assertion can see a record read before the failure settled.
+  await until(async () => {
+    const job = await queue.getJob(jobId);
+    return job !== undefined && (await job.getState()) === 'failed' ? true : undefined;
+  });
   return until(async () => {
     const records = await deadLetters(deadLetter, count);
     const job = await queue.getJob(jobId);
-    return job !== undefined && (await job.getState()) === 'failed' ? { records, job } : undefined;
+    return job !== undefined && records.every((record) => typeof record.reason === 'string') ? { records, job } : undefined;
   });
 }
+
+/** The job id the dequeue check expects for an aggregate payload (PR64-SEC-07): `<kind>.<id>`. */
+const keyOf = (data: Record<string, unknown>): string => `${String(data['kind'])}.${String(data['id'])}`;
 
 const transient = (): Error => Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
 
@@ -180,8 +189,9 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
       },
       { retryBaseMs: 2_000, random: () => 0.5 },
     );
-    const job = await queue.add('outbox_event', payload(), {
-      jobId: `outbox_event.${ID()}`,
+    const data = payload();
+    const job = await queue.add('outbox_event', data, {
+      jobId: keyOf(data),
       attempts: 5,
       backoff: { type: 'jittered-exponential', delay: 2_000 },
     });
@@ -242,8 +252,9 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
       calls += 1;
       return Promise.reject(new UnrecoverableError('stop here'));
     });
-    const jobId = `outbox_event.${ID()}`;
-    await queue.add('outbox_event', payload(), { jobId, attempts: 5, backoff: { type: 'jittered-exponential', delay: 10 } });
+    const data = payload();
+    const jobId = keyOf(data);
+    await queue.add('outbox_event', data, { jobId, attempts: 5, backoff: { type: 'jittered-exponential', delay: 10 } });
     const {
       records: [record],
       job,
@@ -262,12 +273,16 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
       calls += 1;
       return Promise.reject(new NonRetryableError(reason));
     });
-    await queue.add('outbox_event', payload(), {
-      jobId: `outbox_event.${ID()}`,
+    const data = payload();
+    await queue.add('outbox_event', data, {
+      jobId: keyOf(data),
       attempts: 5,
       backoff: { type: 'jittered-exponential', delay: 10 },
     });
-    const [record] = await deadLetters(deadLetter, 1);
+    // R2-n1: the failed state is reached only when the failure was final, so calls === 1 is conclusive.
+    const {
+      records: [record],
+    } = await settledFailure(queue, deadLetter, keyOf(data));
     expect(calls).toBe(1);
     expect(record).toMatchObject({ reason, error: 'NonRetryableError', attempts: 1 });
   });
@@ -278,8 +293,9 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
       calls += 1;
       return Promise.resolve();
     });
-    const jobId = `outbox_event.${ID()}`;
-    await queue.add('outbox_event', payload({ token: 'tok_live_secret_value' }), { jobId, attempts: 5 });
+    const data = payload({ token: 'tok_live_secret_value' });
+    const jobId = keyOf(data);
+    await queue.add('outbox_event', data, { jobId, attempts: 5 });
     const {
       records: [record],
       job,
@@ -310,9 +326,10 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     expect(captured.lines().some((line) => line['event'] === 'worker.dead_letter_write_failed')).toBe(false);
   });
 
-  it('[ADR-0013 am. 1] a payload carrying org_id is refused as PAYLOAD_INVALID and emits the job_context_mismatch security event', async () => {
+  it('[AT-US-010-04][ADR-0013 am. 1] a payload carrying org_id is refused as PAYLOAD_INVALID and emits the job_context_mismatch security event', async () => {
     const { queue, deadLetter, captured } = consume(() => Promise.resolve());
-    await queue.add('outbox_event', payload({ org_id: ID() }), { jobId: `outbox_event.${ID()}`, attempts: 5 });
+    const forged = payload({ org_id: ID() });
+    await queue.add('outbox_event', forged, { jobId: keyOf(forged), attempts: 5 });
     const [record] = await deadLetters(deadLetter, 1);
     expect(record).toMatchObject({ reason: 'PAYLOAD_INVALID' });
     expect(captured.lines()).toContainEqual(
@@ -352,7 +369,7 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     expect(text.match(/^platform_queue_dead_letter_jobs\{/gmu)).toHaveLength(9);
   });
 
-  it('[DR-A25] a duplicate enqueue of the same business key is one job, processed once (deterministic job id)', async () => {
+  it('[AT-US-010-02][DR-A25] a duplicate enqueue of the same business key is one job, processed once (deterministic job id)', async () => {
     const processed: string[] = [];
     const { prefix } = consume((_payload, job) => {
       processed.push(job.id);
@@ -431,17 +448,19 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
     expect(await queue.getJobCounts('failed', 'waiting', 'active', 'delayed')).toEqual({ failed: 0, waiting: 0, active: 0, delayed: 0 });
   });
 
-  it('createProductionQueues builds every named queue on the worker connection from REDIS_URL; no processor, no consumer', async () => {
+  it('createProductionQueues builds every named queue on the worker connection from REDIS_URL; without registered processors only the scheduled jobs are consumed', async () => {
     const captured = captureLog();
     const config = { REDIS_URL: { reveal: () => url } } as unknown as Config;
     const queues = createProductionQueues({ config, log: captured.log, processors: {} });
     try {
-      expect(queues.consuming).toEqual([]);
+      // The scheduled jobs run in production: the housekeeping consumer and the queue-retention Job Scheduler.
+      expect(queues.consuming).toEqual(['housekeeping']);
       queues.start();
+      expect(await queues.registerSchedules()).toEqual(['queue-retention']);
       expect(await queues.metrics()).toContain('platform_queue_jobs{queue="tracking-poll",state="waiting"} 0\n');
     } finally {
       await queues.close();
     }
-    expect(captured.lines()).toContainEqual(expect.objectContaining({ event: 'worker.queues_started', queues: '' }));
+    expect(captured.lines()).toContainEqual(expect.objectContaining({ event: 'worker.queues_started', queues: 'housekeeping' }));
   });
 });

@@ -3,7 +3,8 @@
  * last time (attempts exhausted, or a non-retryable failure) the consumer writes one record to the queue's
  * dead-letter queue BEFORE BullMQ marks the job failed: the job data deep-redacted (sensitive and personal keys become
  * `[REDACTED]`, strings pass the string redactor), the failure reason, the error class and the attempt count. The job
- * itself stays in the failed set (`removeOnFail: false`), the backstop when the record cannot be written.
+ * itself stays in the failed set (bounded by FAILED_RETENTION, 7 days / 1,000), the backstop when the record cannot be
+ * written; the records are bounded by DEAD_LETTER_RETENTION (14 days / 2,000; ADR-0013 am. 3 items 8-10, TASK-039).
  */
 import { redactString, redactValue } from '@platform/shared/logging';
 
