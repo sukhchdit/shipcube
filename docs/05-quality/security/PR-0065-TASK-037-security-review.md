@@ -268,3 +268,107 @@ If any listed observation differs (for example a generated `roleScopeGuard` expe
 | Field | Value |
 |---|---|
 | Verdict | **PASS_WITH_CONDITIONS.** No Critical, High or Medium finding is open for the change. The DR-A14 policies, the standard-columns guard and the D-ARCH-154..156 controls are signed off at `29be7be`, subject to C1 (lane-B evidence on PostgreSQL 18, checked by the orchestrator). PR65-SEC-01 and -02 (LOW) and PR65-SEC-03..05 (INFO) are routed in §8 |
+
+---
+
+# Round 2: fix cycle 3 at `d4de55d` (delta)
+
+| Field | Value |
+|---|---|
+| Head | d4de55dd2f3a583c245e44abd39f486f350a243f |
+| Range | `29be7be` → `b700a79` (merge of `main` `1d31ea8`: PRs #68 and #69 plus this record's round 1) → `d4de55d` (fix cycle 3). Local, not pushed; it goes out as `d4de55d` plus one evidence-only commit. Merge base with `main` is now `1d31ea8`; `main` was at `370a66b` (docs only since) when this round was written |
+| Trigger | Condition C1 failed on the first PostgreSQL 18 lane-B run of `29be7be` (`20261119T0458Z`, verdict FAIL). Four tests failed: C15 (a) probe `[SEC-TC-74]`, C9 (enum-like CHECK lists), `[SPK-08 F-02]` shadow `migrate diff` (exit 1), and the DR-A14 own-read plant (23505 on `ux_memberships__org_user_live`). Every other listed C1 observation passed, including the committed C15 (a) test, the organisations cases and the rest of the rls-cross-tenant suite |
+| Reviewer / date | security-analyst, 2026-11-19, round 2 (delta). Same host rule and method as round 1: static review plus single-process Node/PGlite probes on `git archive` extracts of `d4de55d` and `b700a79`. Nothing ran in or was written to the PR worktree |
+
+## R2.1 Summary
+
+- **`b700a79` is a pure merge.** Its tree equals `git merge-tree --write-tree 29be7be 1d31ea8`. The fix commit `d4de55d` changes 9 files: the migration, six test files, `tools/db/shadow-init.ts` and its unit test.
+- **PR65-SEC-01 is closed.** The live-grant index is now `(org_id, membership_id, role_id) WHERE revoked_at IS NULL`, exactly the validated form. Re-running probe P1 on `d4de55d`, the three foreign shapes all give `23503` on `fk_membership_roles__membership_id`; on `29be7be` the held role gave `23505`. The own control stays ok. The PR adds a case for this (a foreign live grant gives `23503`, an own duplicate `23505`), so a revert of the index fails it.
+- **D-TASK037-28 (C15 (a) probe narrowed to its planted tables) is a genuine test-shape defect. Accepted.**
+  - The probe test is the mechanism test: it shows the scope and shape queries see a planted guard, an unguarded table and a doubled trigger.
+  - It was written at TASK-024 when the committed scope was empty. That is why its scope expectation was the literal `['c15_probe']`.
+  - Replay P10 on the migrated schema reproduces the lane-B failure (scope = `c15_probe` plus the five committed tables). With the filter, scope, guarded and unguarded are exactly the planted tables, so the expectations hold unchanged.
+  - Mutant (`trg_users__std_columns` dropped): the old probe would list `users` as unguarded and the narrowed one does not. The committed test does catch it (scope minus guarded = `users`). That test asserts scope = the manifest `stdColumns` set, exactly one full-shape guard per in-scope table and no BEFORE trigger after a guard, and it passed on PostgreSQL 18.
+  - So the narrowing moves no assertion out of the suite. Each test now tests one thing.
+- **D-TASK037-29 (the shadow rendering keeps schema-scoped `GRANT USAGE[, CREATE] ON SCHEMA … TO …`) weakens no control. Accepted.** Details in R2.3.
+- **D-TASK037-30, -31, -32: accepted** (R2.4).
+- **Round-1 probes P2 to P9 give identical results on `d4de55d`.** The ten rendered RLS and guard blocks and both function templates are still contained verbatim, with the controls detected.
+
+**Findings this round:** PR65-SEC-01 closed. No new finding. PR65-SEC-02 (LOW) and PR65-SEC-03..05 (INFO) stay as routed in §8. For PR65-SEC-05 (a), the new PR65-SEC-01 case joins SEC-TC-76.
+
+## R2.2 Lane-B failures and their fixes
+
+| Failure on `29be7be` (PostgreSQL 18) | Root cause | Fix in `d4de55d` | Security reading |
+|---|---|---|---|
+| C15 (a) probe `[SEC-TC-74]`: scope had 5 extra tables | the probe assumed an empty committed scope | filter to the planted tables (D-TASK037-28) | test-shape defect; coverage held by the committed C15 (a) test (P10 mutant) |
+| C9: 62 unexpected list lines | the new enum-like CHECKs were not in `ENUM_CHECKS` | pinned from the data model, plus a unit test tying `ORG_TYPES` and the membership statuses (with INVITED) to the migration (D-TASK037-30) | positive: `ck_memberships__status` (with the reserved INVITED) and `ck_users__is_system` (the two reserved ids, PR26-SEC-04) are now catalog-pinned |
+| `[SPK-08 F-02]` shadow `migrate diff` exit 1 | the rendering stripped every GRANT, so `platform_definer` had no USAGE/CREATE on the shadow's `platform` and the migration's `SET ROLE platform_definer; CREATE FUNCTION platform.app_is_operator()` failed with 42501 | keep schema-scoped USAGE/CREATE grants (D-TASK037-29) | R2.3 |
+| DR-A14 own-read: 23505 | the "no one else's" plant `(B, TENANT_B.actor)` duplicated the seeded committed live row | plant a membership of another member of B (D-TASK037-31) | same assertion: the actor's own-read in B's context shows no membership but its own |
+
+## R2.3 D-TASK037-29: the shadow rendering
+
+- **Where the rendering runs.**
+  - `shadowInitSql()` feeds only `migrations.initShadowDb` in `prisma.config.ts`, which Prisma runs on the shadow database of `migrate dev` / `migrate diff --from-migrations`.
+  - Its first statement is the PR12-SEC-07 ownership guard. It raises 42501 unless the database is owned by `current_user` and `public` is empty. So none of the kept statements can run against a bootstrapped or developer database (the `[PR12-SEC-07]` integration cases are unchanged).
+  - In the shadow, the migrator owns the schemas, so a kept GRANT confers nothing the migrator does not already control. No catalog, RLS or privilege test runs on the shadow: the catalog suites use the real bootstrapped template. Prisma's differ does not compare privileges.
+- **What changed on the real lane (probe `r2-shadow.mts`, head against `b700a79`).**
+  - Exactly 7 statements move from stripped to kept, and nothing else changes (62 kept against 55):
+
+    ```text
+    grant usage on schema public to platform_app
+    grant usage, create on schema public to platform_migrator
+    grant usage, create on schema platform to platform_migrator
+    grant usage on schema platform to platform_app, platform_erasure
+    grant usage, create on schema platform to platform_definer
+    grant usage, create on schema public, platform to platform_audit_owner
+    grant usage on schema public to platform_definer, platform_erasure
+    ```
+
+  - They are the bootstrap lane's own schema grants (`01-schemas.sql`), so the shadow moves closer to a real database, not away from it.
+  - Every other GRANT and REVOKE stays stripped: the role membership grant, the database grants, the REVOKEs on `public` and `platform`, and the default privileges. The REVOKEs being stripped while the GRANTs are kept is harmless for the same reason: nothing reads privileges in the shadow.
+- **Boundary of the keep rule (`SCHEMA_GRANT`, anchored on `statementCode`).** Stripped as before: `WITH GRANT OPTION`, `GRANTED BY`, `ALL`, `ON ALL TABLES|FUNCTIONS IN SCHEMA`, role membership, table and database grants, any REVOKE. A schema grant followed by a second statement is refused (fail closed). A grant `TO PUBLIC`, or `CREATE ON SCHEMA public` to a runtime role, would be kept in the shadow. That is harmless there, and in a real database it is the bootstrap lane's own review and catalog surface (the lane is CODEOWNED; schema privileges are checked on the real template).
+- **Test pin.** The F-03 unit test asserts that the kept grants on the real lane include the definer's `platform` grant and that no other GRANT is kept. Its own regex is narrower than `SCHEMA_GRANT` (unquoted names), so a quoted-name grant added to the lane would fail that test: it fails closed.
+- **Ruling.** Accepted. No control is weakened, and the shadow is more faithful. C1 now includes the `[SPK-08 F-02]` and `[PR12-SEC-07]` shadow integration cases.
+
+## R2.4 D-TASK037-30, -31, -32
+
+| Decision | Ruling |
+|---|---|
+| 30, C9 pins | **Accepted.** Every pinned list equals the migration's CHECK text: invitations locale/status, memberships status with INVITED, organisations default_locale/type, and users is_system, locale, status, status_reason_value, table_density, theme, unit_system. The TypeScript half compares `ORG_TYPES` and `WRITABLE_MEMBERSHIP_STATUSES` + INVITED with the migration text. `prisma/tests` may not import the module, so the data-model pin plus the unit-test pin is the right split |
+| 31, DR-A14 own-read plant | **Accepted.** The planted row is still a membership in B of someone other than the actor, so the case proves the same thing. The planted user id needs no `users` row because seeding runs under `replica` |
+| 32, PR65-SEC-01 index + case | **Accepted; PR65-SEC-01 closed.** The new case has no SEC-TC tag yet: it joins SEC-TC-76 in the TASK-293 tagging commit (PR65-SEC-05 (a)). Nit for the code reviewer: the title of the next case lost a space (`T2:a membership`) |
+
+## R2.5 C1, restated for `d4de55d`
+
+The orchestrator checks the credited lane-B run of the `d4de55d` tree (PostgreSQL 18). No security round is needed if all of the following hold and no owned path changes after `d4de55d`:
+- migrations up, down, up passes;
+- catalog-c1-c14 passes, including C3, C9 and the C11 helper rows, plus the 16 `[SEC-TC-74]` C15 cases;
+- integration passes: all 20 `organisations.int.test.ts` blocks (the round-1 list plus the PR65-SEC-01 case), none skipped, and the `prisma/tests/shadow/shadow-init.int.test.ts` cases `[SPK-08 F-01]`, `[SPK-08 F-02]` (both) and `[PR12-SEC-07]` (both);
+- rls-cross-tenant passes, including the DR-A14 own-read case, with the committed layer's observations unchanged.
+
+As before, a differing observation returns the PR for a delta round, and no expectation is adapted without a ruling.
+
+## R2.6 Record validation
+
+Main's `tools/ci/check-security-owned-paths.mjs`, plumbing merge refs, the record (both rounds) committed on `main`:
+
+The record now has two `Head` rows (`29be7be` from round 1, `d4de55d` here), and this round ends with its own `Verdict` row. The new head has 28 owned paths: the 26 of round 1 plus `tools/db/shadow-init.ts` and its unit test. `main` was `1afa706` in the simulation, and the merge base is `1d31ea8`.
+
+| Scenario | Expected | Observed |
+|---|---|---|
+| S1 PR tip = `d4de55d` + an evidence-only commit, base = merge base, record (both rounds) on `main` | pass | exit 0, bound to `d4de55d`. The checker notes that the round-1 row `29be7be` is void (owned paths changed after it) |
+| S2 the same, base = `main` tip | pass | exit 0, `d4de55d` |
+| S3 `d4de55d` itself as the tip | pass | exit 0 |
+| S4 `main` moves (docs) after the record | pass | exit 0 |
+| S5 the branch merges that later `main` after the evidence commit | pass | exit 0, `d4de55d` |
+| C1 the round-1 record only (`main` as it was) | fail | exit 1: `29be7be` is void |
+| C2 a later `Verdict` row FAIL | fail | exit 1 |
+| C3 `tools/db/shadow-init.ts` changed after `d4de55d` | fail | exit 1 |
+| C4 the round-2 `Head` row names a `main` commit | fail | exit 1 |
+| C5 both `Head` rows name `29be7be` | fail | exit 1 |
+
+Gitleaks emulation and host-fragment scan of the round-2 text: see D-SEC-PR65-02 (both 0, with positive controls).
+
+| Field | Value |
+|---|---|
+| Verdict | **PASS_WITH_CONDITIONS.** Round 2 at `d4de55d`: PR65-SEC-01 is closed. D-TASK037-28 and -29 are sound: a test-shape defect, and a shadow-only rendering change that weakens no control. D-TASK037-30, -31 and -32 are accepted. No Critical, High or Medium finding is open for the change. The sign-off of round 1 carries over to `d4de55d`, subject to C1 as restated in R2.5 |

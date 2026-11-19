@@ -3926,3 +3926,25 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   4. A passing lane-B `pr` run on `e8b9414`. The outage-time failure (network and timing tests only) is not evidence.
   5. Any `tools/ci/**` or `.github/workflows/**` change after `e8b9414`, including a PR287C1-SEC-01 fix, needs a delta security round.
 - **Reversibility:** High (record and routing; the follow-ups are policy changes).
+
+### D-SEC-PR65-02 · 2026-11-19 · security-analyst · PR #65 (TASK-037) security r2 (delta) at d4de55d: PASS_WITH_CONDITIONS; PR65-SEC-01 closed; D-TASK037-28..32 accepted; C1 moves to the d4de55d lane-B run
+- **Decision:** PR #65 round 2 at `d4de55d` = **PASS_WITH_CONDITIONS** (0 Critical, 0 High, 0 Medium open). Round 2 is appended to `docs/05-quality/security/PR-0065-TASK-037-security-review.md` with its own Head row (`d4de55d`) and final Verdict row. Owned paths: 28. Record simulation: S1–S5 pass bound to `d4de55d` (including the evidence-only tip and a later merge of `main`); C1–C5 fail as expected, and the round-1 row `29be7be` is void. Gitleaks emulation over the record and decision: 0 findings (control 4). Host fragments: 0.
+  - **`b700a79`** is a pure merge of `main` `1d31ea8`.
+  - **PR65-SEC-01 is closed.** `ux_membership_roles__membership_role_live` is now `(org_id, membership_id, role_id)`. Probe P1 on `d4de55d`: every foreign shape gives `23503`; on `29be7be` the held role gave `23505`. The new `liveGrantIndexScope` case kills the old-index mutant.
+  - **D-TASK037-28 is a genuine test-shape defect (accepted).** The C15 (a) probe test assumed an empty committed scope. A PGlite replay reproduces the lane-B failure. Mutant: a committed table without a guard is caught by the committed C15 (a) test (scope = manifest set, one full-shape guard each), not by the narrowed probe. So no assertion leaves the suite.
+  - **D-TASK037-29 weakens no control (accepted).**
+    - The rendering feeds only `migrations.initShadowDb`. The PR12-SEC-07 ownership guard runs first, so it never executes on a real or developer database.
+    - The migrator owns the shadow schemas; no catalog or privilege test reads the shadow; Prisma does not diff privileges.
+    - On the real lane exactly the 7 bootstrap schema grants move from stripped to kept.
+    - `WITH GRANT OPTION`, `GRANTED BY`, `ALL`, `ON ALL … IN SCHEMA`, role, table and database grants, and every REVOKE stay stripped. A two-statement shape is refused. F-03 pins "no other GRANT".
+  - **D-TASK037-30** (C9 pins, with INVITED and `ck_users__is_system` now catalog-pinned), **-31** (own-read plant) and **-32** (index and case): accepted.
+  - **C1 now applies to the credited lane-B run of `d4de55d` (PostgreSQL 18).** All of the following must pass:
+    - migrations up/down/up;
+    - catalog-c1-c14 incl. C3, C9, C11 and the 16 `[SEC-TC-74]` C15 cases;
+    - integration: all 20 `organisations.int` blocks and the `shadow-init.int` cases (`[SPK-08 F-01]`, both `[SPK-08 F-02]`, both `[PR12-SEC-07]`);
+    - rls-cross-tenant incl. the DR-A14 own-read case, with committed-layer observations unchanged.
+
+    No security round is needed if these hold and no owned path changes after `d4de55d`.
+  - Unchanged: PR65-SEC-02 (LOW) and PR65-SEC-03..05 (INFO) as routed in D-SEC-PR65-01. The new PR65-SEC-01 case joins SEC-TC-76 in the TASK-293 tagging commit.
+- **Why:** the first PostgreSQL 18 run failed four tests. Two of the fixes touch security-owned surfaces (a C15 `[SEC-TC-74]` test and `tools/db/shadow-init.ts`), and both were probed with mutants, not only read.
+- **Reversibility:** High.
