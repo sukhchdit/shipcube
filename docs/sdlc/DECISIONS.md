@@ -4062,3 +4062,61 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **C2.** Rename the record, then confirm the merge ref contains the renamed file (D-ORCH-138).
   - Any later owned-path change needs another delta round.
 - **Reversibility:** High.
+
+### D-SECPR293-01 · 2026-11-19 · security-analyst · TASK-293 (`lexfu`, TASK-290-F; branch `feat/TASK-293-task-290-f-tools-db`, not yet pushed) security round 1 = PASS_WITH_CONDITIONS at code head `85afc70` (record `docs/05-quality/security/PR-pending-TASK-293-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-293-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open. The round started on `3183525`; the head moved to `85afc70` (code review round-1 fixes) mid-round, and every changed path was re-probed there.
+  - **Method.** Static review plus single-process Node and PGlite 17.5 probes on `git archive` extracts. No npm, Jest or Docker, and nothing was run in the PR worktree.
+- **Closed:**
+  - **PR66-SEC-01 (LOW).** All three shapes now show through the real linter at `85afc70`; at the base each gave 0 findings (18 of 18 rows):
+    - (a) a CR-ended comment hiding a GRANT: rule L plus rule 8;
+    - (b) a non-ASCII character before `$q$` hiding a GRANT: rule 8;
+    - (c) a non-ASCII tag faking `RESET ROLE` (rule 15) or ENABLE + FORCE (rule 9).
+
+    The shadow-rendering route of the PR #66 record is refused. The corpus is unchanged: 534 of 534 files identical for LF; for CRLF, white-space differences only.
+  - **PR66-SEC-02 (INFO)** as filed.
+  - **PR65-SEC-05 (a) and (b).** The SEC-TC-76/77/78 tags match my assignment, and so do the new "Adopted cases" rows of `security-test-cases.md` and the threat-model rows. `min_tests` goes 14 → 113 (106 + 7).
+  - **The C16 part of PR65-SEC-01.** Arm (b) requires `org_id` among the key columns of every unique TENANT index.
+    - The one exception, `ux_invitations__token_hash` (SHA-256 of a random token), is justified and held live.
+    - The primary-key exemption rests on the standard-columns check that PK = `(id)` alone.
+  - **`required-suites.json`** only adds cases and raises one minimum, so it weakens no gate.
+- **New findings:**
+  - **PR293-SEC-01 (LOW, CWE-693/CWE-184): rule 10 is the backup guardrail, and it still misses eleven PostgreSQL-executed shapes (PGlite ran the DML in each).**
+    - `85afc70` closed five shapes: forward references, `search_path`, quoted names with a space or `[x]`, and the `"f("` crash.
+    - It states two more as limits: `RENAME TO`, and a trigger fired by `INSERT … VALUES`.
+    - Still silent and unstated in the call-site half: `SET SCHEMA`; a routine body with `FOR … IN <DML> RETURNING`; attribute notation; `CREATE CAST`; `CREATE AGGREGATE`; a non-ASCII routine name (code review R2-n1).
+    - Still silent in DO bodies:
+      - `FOR … IN` and `OPEN … FOR` with DML RETURNING (pre-existing);
+      - a string holding `;` before the DML, two forms (pre-existing);
+      - an unqualified `UPDATE "<name holding ;>"`. Main sees this one; the new linear `;` split loses it.
+    - **Fix.** A candidate (two more statement starts, plus RENAME/SET SCHEMA recorded as an alias that calls the old name) closes 7 of the 11. It keeps all 81 lint fixtures identical and stays linear. The rest of the fix: split on code `;` only; non-ASCII identifiers in `CALL_IDENT`; refuse CAST/AGGREGATE under rule 14, or state them.
+    - **Due:** preferred in this PR before the push. Otherwise a `tools/db` follow-up, before the first migration that defines a routine whose body changes data or holds a DO block with `FOR … IN` / `OPEN … FOR`, and at the latest G3. Until then, the code review and the security record check `data-changing` by hand on such migrations.
+  - **PR293-SEC-02 (INFO, CWE-436):** an E-string continued across a newline keeps its escapes in PostgreSQL but not in `tokenize`.
+    - In a bootstrap file that carries an approved audit-DDL marker, this hides a SECURITY DEFINER routine from rule 13; PGlite creates it. The migrations lane refuses every E-string.
+    - Fix: a linear refusal in `tokenize`. The corpus has 0 continued E-strings.
+    - Owner: the next holder of `sql-text.ts`.
+  - **PR293-SEC-03 (INFO, CWE-203): C16 scope for the tables that come next.**
+    - GUEST_CAPABLE unique keys belong in the R-ARCH-34 ruling, before TASK-051.
+    - A T2 pair answers "foreign" and "unknown" with different constraint names, so the error mapper must give both one answer.
+    - EXCLUDE is now a stated limit.
+- **Linear body scan.** It is equivalent to the replaced regex on 300,000 fuzzed texts, except for quoted names holding `;`. Every adversarial shape scales linearly.
+- **Binding.**
+  - The single `Head` row is `85afc70`, and the PR changes 12 owned paths.
+  - Merge-ref simulation against main `8b0ac3d`: 14 of 14 as expected (5 pass, 9 controls fail, including the placeholder name, a later `lint-migrations.ts`/`sql-text.ts`/manifest change, and a Head row naming `3183525`).
+  - I did not add the registry rows on main: the PR carries them, and a main edit would conflict.
+- **Conditions:**
+  - **C1.** Lane B at `85afc70` (queued):
+    - `catalog-c1-c14` = 113, with 0 failures, 0 errors and 0 skipped, C16 and P9-CK included;
+    - `integration` 0/0/0, including the 8 `[PR66-SEC-01]` rows and SEC-TC-76..78;
+    - `unit`, including the `lint-migrations`, `sql-text` and `test-ids` tests;
+    - `migrations` 0/0/0;
+    - the `rls-cross-tenant` total unchanged;
+    - the hosted `security-integration` job green.
+
+    The coordinator reports that lane B on `3183525` passed every TASK-293 check, and that its only failure was the unrelated `consumer.int` race. Those run files are not on main, so I did not read them.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - Any later owned-path change needs a delta round, and so does the PR293-SEC-01 fix.
+- **Routed:**
+  - **PR65-SEC-05 (d), the PR43-SEC-07 remainder cases:** this PR's fix cycle if one runs, otherwise test-engineer under qa-lead. Due before TASK-049 merges.
+  - **data-model §8.3 and §4.6 (C16 (b), P9-CK):** principal-architect, next fold.
+  - **TEST-STRATEGY G3 count 64 → 67, and SEC-TC-74's registry section:** qa-lead.
+- **Reversibility:** High.
