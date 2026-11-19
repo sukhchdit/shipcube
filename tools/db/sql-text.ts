@@ -4,6 +4,19 @@
  * dollar-quoted bodies, top-level `;`, and psql-style variables `:'name'` (literal) and `:"name"` (identifier).
  * It is not a parser: the linter is a text-level early warning, and the database (ownership, catalog tests) is the
  * boundary (§8.3 "Limits").
+ *
+ * Token boundaries follow PostgreSQL 18's scanner (src/backend/parser/scan.l), because PostgreSQL reads every byte of a
+ * deployed file and the linter must see the statements PostgreSQL runs (PR66-SEC-01, PR #66 code review R1-m1/R1-n1;
+ * TASK-293):
+ *  - `comment ("--"{non_newline}*)` with `non_newline [^\n\r]`: a line comment ends at LF **or** CR;
+ *  - `ident_cont [A-Za-z\200-\377_0-9\$]`: a `$` right after an identifier character (ASCII letter, digit, `_`, `$`, or
+ *    any non-ASCII character) belongs to the identifier and opens no dollar quote (`é$a$` is one identifier);
+ *  - `dolq_start [A-Za-z\200-\377_]`, `dolq_cont [A-Za-z\200-\377_0-9]`: a dollar tag may hold non-ASCII letters
+ *    (`$é$ … $é$` is one string);
+ *  - `space [ \t\n\r\f\v]`: white space is ASCII only (SQL_WHITESPACE); U+00A0, U+FEFF, U+3000 and every other
+ *    non-ASCII character are identifier characters to PostgreSQL.
+ * The scanner works on bytes and every byte of a multi-byte UTF-8 character is in `\200-\377`; this lexer works on
+ * UTF-16 code units, where every code unit from 0x80 up (surrogates included) stands for such bytes.
  */
 
 export type TokenKind = 'code' | 'comment' | 'string' | 'identifier' | 'dollar' | 'variable';
@@ -22,11 +35,15 @@ const IDENT_CHAR = /[A-Za-z0-9_$]/;
 /**
  * An identifier character as PostgreSQL's scanner reads it (scan.l `ident_cont`): ASCII letters, digits, `_`, `$` and
  * every non-ASCII character (code unit 0x80 and above, as CODE_PIECE). Used for the E-prefix check (PR #43 R1-n2):
- * `éE'…'` is the identifier `éE` followed by a plain string, not an escape string.
+ * `éE'…'` is the identifier `éE` followed by a plain string, not an escape string; and for the dollar-quote opener
+ * (PR66-SEC-01 b): `é$a$` is one identifier, not `é` followed by a dollar quote.
  */
 const isIdentifierChar = (ch: string | undefined): boolean => ch !== undefined && (IDENT_CHAR.test(ch) || (ch.codePointAt(0) ?? 0) >= 0x80);
 const VARIABLE = /^:(['"])([A-Za-z_][A-Za-z0-9_]*)\1/;
-const DOLLAR_TAG = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
+/** scan.l `dolqdelim \$({dolq_start}{dolq_cont}*)?\$`: the tag alphabet includes every non-ASCII character (PR66-SEC-01 c). */
+const DOLLAR_TAG = /^\$([A-Za-z_\u0080-\uFFFF][A-Za-z0-9_\u0080-\uFFFF]*)?\$/;
+/** scan.l `space [ \t\n\r\f\v]`: PostgreSQL's white space, ASCII only (PR #66 code review R1-n1). */
+const SQL_WHITESPACE = /^[ \t\n\r\f\v]$/;
 
 export class SqlLexError extends Error {
   constructor(message: string) {
@@ -53,8 +70,9 @@ export function tokenize(sql: string): Token[] {
     const next = sql[i + 1];
     const rest = sql.slice(i);
     if (ch === '-' && next === '-') {
-      const end = sql.indexOf('\n', i);
-      const stop = end === -1 ? sql.length : end;
+      // scan.l `comment ("--"{non_newline}*)`, `non_newline [^\n\r]`: a lone CR ends the comment too (PR66-SEC-01 a).
+      let stop = i + 2;
+      while (stop < sql.length && sql[stop] !== '\n' && sql[stop] !== '\r') stop += 1;
       push({ kind: 'comment', text: sql.slice(i, stop) });
       i = stop;
     } else if (ch === '/' && next === '*') {
@@ -116,7 +134,9 @@ export function tokenize(sql: string): Token[] {
       }
       push({ kind: 'identifier', text: sql.slice(i, j) });
       i = j;
-    } else if (ch === '$' && !IDENT_CHAR.test(code.at(-1) ?? ' ') && DOLLAR_TAG.test(rest)) {
+    } else if (ch === '$' && !isIdentifierChar(code.at(-1)) && DOLLAR_TAG.test(rest)) {
+      // scan.l `ident_cont` holds `$` and every non-ASCII character: a `$` after an identifier character continues the
+      // identifier (PR66-SEC-01 b). After a string, quoted identifier or comment token `code` is empty: a new token.
       const tag = (DOLLAR_TAG.exec(rest) as RegExpExecArray)[0];
       const close = sql.indexOf(tag, i + tag.length);
       if (close === -1) throw new SqlLexError(`unterminated dollar-quoted string ${tag}`);
@@ -212,8 +232,13 @@ interface AtomicBlock {
  * A bare `BEGIN` never counts: a routine named `begin`, a parameter or a `RETURNS TABLE` column `begin`, or `RETURN
  * begin` opens nothing. This is narrower than psql's heuristic (psqlscan.l `begin_depth` also counts a bare `BEGIN` and
  * every `CASE`); the PostgreSQL 18 agreement is prisma/tests/migrations/split-statements.int.test.ts. Limit: it is a
- * splitter, not a parser — PostgreSQL refuses a utility statement (GRANT, DROP, SET, CREATE FUNCTION …) inside a SQL
- * function body at CREATE time (0A000), so text that a body swallows by the grammar never runs as a migration step.
+ * splitter, not a parser. A utility statement (GRANT, DROP, SET, CREATE FUNCTION …) that a body holds by the grammar is
+ * refused at CREATE time (0A000), so it never runs as a migration step; DML that a body holds runs whenever the routine
+ * is called (PR66-SEC-02), which migration-linter rule 10 sees only at a top-level call of a routine created in the same
+ * or an earlier migration file (tools/db/lint-migrations.ts, TASK-293).
+ * White space is PostgreSQL's ASCII class (SQL_WHITESPACE). The lexer stays approximate in one place without effect: a
+ * `$` right after a number or a parameter (`1$a$`, `$1$a$`) is code here and opens a dollar quote in PostgreSQL, but a
+ * constant followed by a string constant is a syntax error there, so no such file runs.
  */
 export function splitStatements(sql: string): string[] {
   const pieces: Piece[] = tokenize(sql).flatMap((token): Piece[] =>
@@ -223,7 +248,7 @@ export function splitStatements(sql: string): string[] {
   const nextWord = (at: number): string | undefined => {
     for (let k = at + 1; k < pieces.length; k += 1) {
       const piece = pieces[k] as Piece;
-      if (piece.kind === 'comment' || (piece.kind === 'code' && /^\s$/.test(piece.text))) continue;
+      if (piece.kind === 'comment' || (piece.kind === 'code' && SQL_WHITESPACE.test(piece.text))) continue;
       return piece.kind === 'code' ? piece.text.toLowerCase() : undefined;
     }
     return undefined;
@@ -246,7 +271,9 @@ export function splitStatements(sql: string): string[] {
       current += piece.text.startsWith('--') ? '' : ' ';
       return;
     }
-    if (piece.kind === 'code' && /^\s$/.test(piece.text)) {
+    // PostgreSQL's white space only (R1-n1): a lone U+00A0, U+FEFF or U+3000 piece is an identifier to PostgreSQL, so
+    // it starts a body statement, and an END after it closes nothing.
+    if (piece.kind === 'code' && SQL_WHITESPACE.test(piece.text)) {
       current += piece.text;
       return;
     }

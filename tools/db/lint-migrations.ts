@@ -28,8 +28,10 @@
  *       ENABLE and FORCE ROW LEVEL SECURITY in the same file; a GRANT to platform_app on an RLS-class table before
  *       that table's ENABLE + FORCE (in this file, or an earlier one)
  *   10  UPDATE/DELETE/TRUNCATE/INSERT ... SELECT/MERGE, also inside a `WITH ...` statement or a DO block (dynamic SQL
- *       in string literals included; CREATE FUNCTION bodies are not executed at migration time and are not scanned),
- *       without `data-changing: yes` (backup guardrail, §8.6)
+ *       in string literals included), without `data-changing: yes` (backup guardrail, §8.6). A CREATE FUNCTION |
+ *       PROCEDURE body is not executed at CREATE time, but its DML runs when the routine is called: a top-level call
+ *       of a routine of this or an earlier migration file whose body holds one of those forms (or calls such a
+ *       routine) is data-changing too (call site, PR66-SEC-02, TASK-293; see writingRoutineCall)
  *   11  ALTER TABLE, non-concurrent CREATE INDEX, CREATE TRIGGER or CREATE/ALTER/DROP POLICY on an existing table
  *       without `SET [SESSION] lock_timeout` as the first statement (`SET LOCAL` has no effect: files are not atomic);
  *       a file that leaves the session `lock_timeout` above the migrator role default (3s; 0 and unparsed values
@@ -76,7 +78,9 @@
  *   L   a file (migration.sql, down.sql, a bootstrap file) that does not split into statements is reported and not
  *       linted further (fail closed; PR43-SEC-03, PR43-SEC-11): it does not lex, ends inside a `BEGIN ATOMIC` block,
  *       has anything but `;` after the END of a routine body, or a body `;` inside parentheses (sql-text.ts
- *       splitStatements: the block boundaries follow PostgreSQL's grammar, so labels never move them)
+ *       splitStatements: the block boundaries follow PostgreSQL's grammar, so labels never move them; its token
+ *       boundaries follow PostgreSQL's scanner, PR66-SEC-01); also, without stopping the lint, a lone CR anywhere in
+ *       the file (PR66-SEC-01: it ends a `--` comment, invisibly in review)
  *   S   bootstrap lane: only the variables db_name, migrator_password and app_password, and every PASSWORD keyword in
  *       code is followed by :'migrator_password', :'app_password' or NULL (PR5-SEC-12)
  * Rules 2-11 and 14-19 apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
@@ -94,7 +98,10 @@
  * Seen since TASK-024 (setter-key half): `SET "lock_timeout"` / `RESET "lock_timeout"` (quoted name) and a top-level
  * `SELECT set_config('lock_timeout', …)`. Still not seen: a function created in the file whose body sets
  * `lock_timeout` and that is then called (`SELECT f()`; PR #24 R1-n7), and a top-level set_config whose key is
- * computed. The outcome controls are the catalog suite (C5 grants incl. PUBLIC, C1
+ * computed. Rule 10 sees that call shape since TASK-293 (PR66-SEC-02: a top-level call of a writing routine of this or
+ * an earlier migration file); it still does not see a writing routine of the bootstrap lane, a write reached only
+ * through `EXECUTE` of a string built at run time, or a call through a computed name. The outcome controls are the
+ * catalog suite (C5 grants incl. PUBLIC, C1
  * ENABLE/FORCE, the C11 converse on definer-owned objects), the withTenantTx session-leak check and, for rule 11, the
  * next file's own leading `SET lock_timeout`.
  *
@@ -701,18 +708,65 @@ function masked(statement: string): string {
  * Rule 10 inside a DO block (PR #5 R2-m2, PR #11 review m6): a data-changing statement at a PL/pgSQL statement start
  * (file start, `;`, BEGIN, THEN, ELSE, LOOP, EXECUTE) or at the start of a string literal (dynamic SQL, `EXECUTE '…'`,
  * `format('…')`). Matched on the body-expanded text with string literals kept. A DO block runs at migration time; a
- * CREATE FUNCTION body does not, so function definitions are not scanned. `FOR [NO KEY] UPDATE` and `GRANT UPDATE`
+ * CREATE FUNCTION body runs only when the routine is called, so a definition is not data-changing itself and is read
+ * for the call-site half instead (writingRoutineCall, PR66-SEC-02). `FOR [NO KEY] UPDATE` and `GRANT UPDATE`
  * do not start a statement and stay clean. A key built entirely at run time (`EXECUTE v_sql`) is not visible here.
  */
-const DO_DATA_CHANGING = new RegExp(
-  `(?:^|[;']|\\b(?:begin|then|else|loop|execute)) ?(?:update (?:only )?${QNAME}|delete from\\b|truncate\\b|merge into\\b|` +
-    `insert into\\b[^;]*?\\b(?:select|on conflict\\b[^;]*?\\bdo update)\\b|` +
-    `with\\b[^;]*?\\b(?:delete from|insert into|merge into|update (?:only )?${QNAME}))`,
-);
+/** The data-changing statement forms of rule 10 inside a body (DO block or routine), after a statement start. */
+const BODY_DATA_CHANGING_FORM =
+  `(?:update (?:only )?${QNAME}|delete from\\b|truncate\\b|merge into\\b|` +
+  `insert into\\b[^;]*?\\b(?:select|on conflict\\b[^;]*?\\bdo update)\\b|` +
+  `with\\b[^;]*?\\b(?:delete from|insert into|merge into|update (?:only )?${QNAME}))`;
+const DO_DATA_CHANGING = new RegExp(`(?:^|[;']|\\b(?:begin|then|else|loop|execute)) ?${BODY_DATA_CHANGING_FORM}`);
 
 /** True when `statement` is a DO block whose body changes data (rule 10). */
 function doBlockChangesData(statement: string): boolean {
   return /^do\b/.test(codeOnly(statement)) && DO_DATA_CHANGING.test(normalise(sqlText(statement, true)));
+}
+
+/**
+ * Rule 10, call site (PR66-SEC-02, TASK-293). A routine body is not executed at CREATE time, but DML in it runs
+ * whenever the routine is called, and a migration may call it: `CREATE FUNCTION f() … BEGIN ATOMIC DELETE …; END;
+ * SELECT f();` changes data as surely as a top-level DELETE. So a routine whose definition holds a rule-10 form (the DO
+ * statement starts plus the routine body starts `AS` (dollar or string body), `ATOMIC` and `RETURN QUERY`; dynamic SQL
+ * in its string literals included), or that calls such a routine, is a WRITING routine, and a top-level statement that
+ * names a writing routine followed by `(` is data-changing. The set is carried from file to file
+ * (MigrationHistory.writingRoutines) and never shrinks (a later `CREATE OR REPLACE` or DROP does not clear it: fail
+ * closed). Not a call: GRANT / REVOKE, COMMENT ON, ALTER / DROP FUNCTION | PROCEDURE | ROUTINE, CREATE TRIGGER (the
+ * trigger runs at a later DML statement, which rule 10 judges itself), and `FUNCTION | PROCEDURE | ROUTINE <name>(`
+ * references. A name is matched unqualified or with its own schema; a same-named routine of another schema, or the name
+ * in a string literal, also counts (fail closed). Not seen (stated limits): a routine created in the bootstrap lane, a
+ * write reached only through `EXECUTE` of a string built at run time, and a call through a computed name.
+ */
+const ROUTINE_DATA_CHANGING = new RegExp(`(?:^|[;']|\\b(?:begin|then|else|loop|execute|as|atomic|query)) ?${BODY_DATA_CHANGING_FORM}`);
+const NOT_A_CALL_SITE =
+  /^(?:grant|revoke|comment on|(?:alter|drop) (?:function|procedure|routine)|create (?:or replace )?(?:constraint )?trigger)\b/;
+const ROUTINE_REFERENCE = /\b(?:function|procedure|routine) (?:[a-z_][a-z0-9_$]* ?\. ?)?[a-z_][a-z0-9_$]* ?\(/g;
+const escapeRegExp = (text: string): string => text.replace(/[$.]/g, '\\$&');
+
+/** The writing routine (qualified name) that `text` (normalised, strings kept, quotes removed) calls, if any. */
+function calledWriter(text: string, writers: ReadonlySet<string>): string | undefined {
+  const calls = text.replace(ROUTINE_REFERENCE, ' ');
+  return [...writers].find((qualified) => {
+    const [schema, name] = qualified.split('.') as [string, string];
+    return new RegExp(`(?<![a-z0-9_$.])(?:${escapeRegExp(schema)} ?\\. ?)?${escapeRegExp(name)} ?\\(`).test(calls);
+  });
+}
+
+/**
+ * Rule 10 call-site pass over one statement: records a writing routine `statement` defines in `writers`, or returns
+ * the writing routine a top-level statement calls.
+ */
+function writingRoutineCall(statement: string, writers: Set<string>): string | undefined {
+  const maskedText = masked(statement);
+  const text = normalise(sqlText(statement, true)).replace(/"/g, '');
+  if (ROUTINE_DEFINITION.test(maskedText)) {
+    const routine = ROUTINE_NAME.exec(maskedText);
+    if (routine && (ROUTINE_DATA_CHANGING.test(text) || calledWriter(text, writers) !== undefined))
+      writers.add(qualify(routine[1] as string));
+    return undefined;
+  }
+  return NOT_A_CALL_SITE.test(maskedText) ? undefined : calledWriter(text, writers);
 }
 
 const LITERAL_MARK = '';
@@ -804,6 +858,8 @@ export interface MigrationHistory {
   readonly rlsProtected: Set<string>;
   /** Partial indexes (qualified name -> canonical WHERE predicate) created by an earlier file. Rule 19 (F-11). */
   readonly partialIndexes: Map<string, string>;
+  /** Routines (qualified) whose body changes data, created by this or an earlier file. Rule 10 call site (PR66-SEC-02). */
+  readonly writingRoutines: Set<string>;
 }
 
 export const emptyHistory = (): MigrationHistory => ({
@@ -812,6 +868,7 @@ export const emptyHistory = (): MigrationHistory => ({
   pendingNotNull: new Map(),
   rlsProtected: new Set(),
   partialIndexes: new Map(),
+  writingRoutines: new Set(),
 });
 
 export interface MigrationLintOptions {
@@ -1252,8 +1309,17 @@ const escapeSettingMessage = (where: string): string =>
  * lex (an unterminated string, comment, identifier or dollar body), ends inside a `BEGIN ATOMIC` block, has anything
  * but `;` after the END of a routine body, or holds a body `;` inside parentheses. Fail closed: such a file is
  * reported, never linted as one swallowed statement and never a crash.
+ * Also rule L, without stopping the lint (PR66-SEC-01 optional item, TASK-293): a lone CR (one not followed by LF). It
+ * ends a `--` comment in PostgreSQL (and in tokenize), but no diff view shows it, so a statement after it reads as
+ * comment text in review. `.gitattributes` keeps LF line ends; CRLF is not refused.
  */
 function lexedStatements(sql: string, report: (message: string) => void): string[] | undefined {
+  const loneCr = loneCarriageReturnLines(sql);
+  if (loneCr.length > 0) {
+    report(
+      `a lone CR (not followed by LF) on line(s) ${loneCr.slice(0, 5).join(', ')}${loneCr.length > 5 ? ', …' : ''}: it ends a -- comment in PostgreSQL but is invisible in review; use LF line ends (PR66-SEC-01)`,
+    );
+  }
   try {
     return splitStatements(sql);
   } catch (error) {
@@ -1263,6 +1329,17 @@ function lexedStatements(sql: string, report: (message: string) => void): string
   }
 }
 
+/** 1-based line numbers (counted by LF) of every CR that is not followed by LF. */
+export function loneCarriageReturnLines(sql: string): number[] {
+  const lines: number[] = [];
+  let line = 1;
+  for (let i = 0; i < sql.length; i += 1) {
+    if (sql[i] === '\n') line += 1;
+    else if (sql[i] === '\r' && sql[i + 1] !== '\n') lines.push(line);
+  }
+  return lines;
+}
+
 /** The migration.sql pass of lintMigrationDir over the split `statements`. */
 function lintMigrationSql(sql: string, statements: readonly string[], add: Add, options: MigrationLintOptions): void {
   const header = parseHeader(sql);
@@ -1270,6 +1347,7 @@ function lintMigrationSql(sql: string, statements: readonly string[], add: Add, 
   if (header.kind === 'contract' && header.reversible === true) {
     add('C', 'a contract migration is restore-based only and must declare "reversible: no" (§8.2)');
   }
+  const history = options.history ?? emptyHistory();
   for (const statement of statements) {
     const text = normalise(statement);
     const code = codeOnly(statement);
@@ -1277,8 +1355,14 @@ function lintMigrationSql(sql: string, statements: readonly string[], add: Add, 
     if (header.kind !== 'contract' && DESTRUCTIVE.some((pattern) => pattern.test(code))) {
       add('2', `destructive statement outside a contract migration: "${preview}"`);
     }
+    const writer = writingRoutineCall(statement, history.writingRoutines);
     if (header.dataChanging !== true && (DATA_CHANGING.some((pattern) => pattern.test(code)) || doBlockChangesData(statement))) {
       add('10', `data-changing statement without "data-changing: yes": "${preview}"`);
+    } else if (header.dataChanging !== true && writer !== undefined) {
+      add(
+        '10',
+        `call of ${writer}, a routine of this or an earlier migration whose body changes data, without "data-changing: yes" (PR66-SEC-02): "${preview}"`,
+      );
     }
     if (isAuditDdl(statement, 'migrations')) {
       add('12', `audit object in a Prisma migration (audit DDL belongs to the bootstrap lane only): "${preview}"`);
@@ -1290,7 +1374,7 @@ function lintMigrationSql(sql: string, statements: readonly string[], add: Add, 
     if (control !== undefined) add('11', control);
     if (namesEscapeSetting(statement)) add('20', escapeSettingMessage(`"${preview}"`));
   }
-  lintTask016Rules(statements, add, options.tableClasses ?? loadTableClasses(), options.history ?? emptyHistory());
+  lintTask016Rules(statements, add, options.tableClasses ?? loadTableClasses(), history);
 }
 
 /**
